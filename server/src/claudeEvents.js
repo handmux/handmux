@@ -1,6 +1,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { getAgent } from './agents/index.js';
+import { claude } from './agents/claude.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 // The hook-maintained state file: ONE JSON object keyed by tmux pane id, each value the pane's latest
@@ -8,59 +10,10 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 // Default lives under server/data (gitignored runtime data); override with CLAUDE_STATE_FILE.
 export const DEFAULT_STATE_FILE = process.env.CLAUDE_STATE_FILE || path.resolve(here, '../data/claude-state.json');
 
-// Build the 需要你 one-liner for a PermissionRequest, from the tool it's gating on (PermissionRequest
-// carries tool_name + tool_input, unlike the later permission_prompt Notification which only has an
-// English message).
-function permMsg(body) {
-  const t = body.tool_name;
-  if (t === 'AskUserQuestion') {
-    const q = body.tool_input && body.tool_input.questions && body.tool_input.questions[0];
-    const text = (q && (q.question || q.header)) || '';
-    return text ? `需要你回答：${text}` : '需要你回答';
-  }
-  if (t === 'ExitPlanMode') return '需要你批准计划';
-  return t ? `需要你授权：${t}` : '需要你';
-}
-
-// Build the 进行中 one-liner for a resume (PostToolUse after the user answered/approved), surfacing the
-// choice they just made — AskUserQuestion stores it in tool_input.answers, keyed by question.
-function resumeMsg(body) {
-  const a = (body.tool_input && body.tool_input.answers) || (body.tool_response && body.tool_response.answers);
-  if (a && typeof a === 'object') {
-    const picks = Object.values(a).flat().filter(Boolean).join('、');
-    if (picks) return `已答：${picks}`;
-  }
-  if (body.tool_name === 'ExitPlanMode') return '已批准计划';
-  return '';
-}
-
-// Map a hook event (src + raw Claude payload) to a notification "kind". Pure — no I/O, easy to test.
-//   stop                       → done       (turn finished; carries last message)
-//   prompt                     → working    (UserPromptSubmit; carries the prompt)
-//   end                        → end        (SessionEnd; the pane's claude is gone)
-//   notify + idle_prompt       → idle       (waited ~60s; carries the notification message)
-//   notify + permission_prompt → permission (blocked on a permission/选择 gate; carries the message)
-//   resume                     → working    (PostToolUse on AskUserQuestion/ExitPlanMode: the user just
-//                                             answered/approved → Claude is working again; un-sticks the
-//                                             pane from the `permission` state its prompt left behind, and
-//                                             carries the choice the user made, e.g. 已答：Red)
-//   permreq                    → permission (PermissionRequest: a real prompt just appeared — fires ~6s
-//                                             before the permission_prompt Notification and names the tool,
-//                                             so 需要你 shows faster and says what's being asked. Verified
-//                                             NOT to fire for auto-approved tools → no false 需要你 in auto)
-//   anything else              → null       (ignored: auth_success, elicitation_*, etc.)
-export function classifyEvent(src, body = {}) {
-  if (src === 'stop') return { kind: 'done', msg: body.last_assistant_message || '' };
-  if (src === 'prompt') return { kind: 'working', msg: body.prompt || '' };
-  if (src === 'resume') return { kind: 'working', msg: resumeMsg(body) };
-  if (src === 'permreq') return { kind: 'permission', msg: permMsg(body) };
-  if (src === 'end') return { kind: 'end' };
-  if (src === 'notify') {
-    if (body.notification_type === 'idle_prompt') return { kind: 'idle', msg: body.message || '' };
-    if (body.notification_type === 'permission_prompt') return { kind: 'permission', msg: body.message || '' };
-  }
-  return null;
-}
+// Classify a Claude hook event → inbox kind. The logic now lives in the Claude driver (agents/claude.js);
+// re-exported here because tests and callers import it by this path. Per-pane classification in getStates
+// dispatches through getAgent(entry.agent) so Codex (and future agents) classify with their own driver.
+export const classifyEvent = claude.classify;
 
 // Which display VIEW a kind pushes as — and so what the device notification fires for. permission→需要你,
 // done→已完成. 已完成 fires at the COMPLETION MOMENT (done) only. The trailing idle reminder (~60s "still
@@ -110,7 +63,7 @@ export function createClaudeEvents({ commands, push, file = DEFAULT_STATE_FILE, 
   function prime() {
     const recorded = readStateFile(file);
     for (const [pane, r] of Object.entries(recorded)) {
-      const c = r && typeof r.src === 'string' ? classifyEvent(r.src, r.payload || {}) : null;
+      const c = r && typeof r.src === 'string' ? getAgent(r.agent).classify(r.src, r.payload || {}) : null;
       const view = c ? PUSH_VIEW[c.kind] : undefined;
       if (view) lastPushed[pane] = view; // resting 需要你/已完成 → treat as seen, don't replay
     }
@@ -146,9 +99,12 @@ export function createClaudeEvents({ commands, push, file = DEFAULT_STATE_FILE, 
 
     const out = {};
     for (const [pane, rec] of Object.entries(recorded)) {
-      const c = rec && typeof rec.src === 'string' ? classifyEvent(rec.src, rec.payload || {}) : null;
+      const agent = getAgent(rec && rec.agent);
+      const c = rec && typeof rec.src === 'string' ? agent.classify(rec.src, rec.payload || {}) : null;
       const lp = live ? live.get(pane) : null;
-      const gone = live ? (!lp || lp.cmd !== 'claude') : false;
+      // Dropped when tmux says the pane is gone or no longer running THIS agent (hard kill / crash /
+      // Ctrl-C-out with no clean-exit event). A pane keyed by a legacy entry (no agent field) → Claude.
+      const gone = live ? (!lp || lp.cmd !== agent.procName) : false;
 
       // (1) push side-effect — runs for every pane regardless of the output filter. Push fires on entry
       // into a 需要你 (permission) / 已完成 (done) view, deduped so a stay-put doesn't re-push. The idle

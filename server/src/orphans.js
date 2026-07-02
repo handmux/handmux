@@ -1,221 +1,51 @@
-// Detect "orphan" Claude Code sessions: a `claude` process running on this host that is NOT inside a
-// tmux pane, so handmux can't see or steer it. We can't migrate a live process into tmux (reptyr needs
-// Linux ptrace+/proc — out on macOS — and breaks on multithreaded Node + child processes), so instead
-// we surface these in the Inbox and offer a "takeover": spawn `claude --resume <sessionId>` in a fresh
-// tmux pane (Claude's own persistence continues the conversation), then optionally kill the original.
+// Detect "orphan" coding-agent sessions: a `claude`/`codex`/… process running on this host that is NOT
+// inside a tmux pane, so handmux can't see or steer it. We can't migrate a live process into tmux (reptyr
+// needs Linux ptrace+/proc — out on macOS — and breaks on multithreaded Node + child processes), so instead
+// we surface these in the Inbox and offer a "takeover": spawn the agent's `resume` command in a fresh tmux
+// pane (the agent's own persistence continues the conversation), then optionally kill the original.
 //
-// Detection is process-based, NOT a scan of ~/.claude/projects (which is unbounded history and can't
-// tell a live session from a dead one). Cost scales with the number of LIVE claude processes only.
+// Detection is process-based, NOT a scan of the agents' session history (which is unbounded and can't tell
+// a live session from a dead one). Cost scales with the number of LIVE agent processes only.
 //
 // tmux membership is decided by TTY/PPID match against `tmux list-panes`, NOT by reading the process
 // environment: on macOS `ps eww` can't read another process's env (SIP), so `$TMUX` is a false signal.
-// A claude whose controlling tty is one of tmux's pane ttys (or whose parent is a pane's shell) is in
-// tmux; anything else with a real tty is an orphan.
-import { execFile } from 'node:child_process';
-import { promises as fsp } from 'node:fs';
-import path from 'node:path';
+// A proc whose controlling tty is one of tmux's pane ttys (or whose parent is a pane's shell) is in tmux;
+// anything else with a real tty is an orphan.
+//
+// This module is now the agent-AGNOSTIC engine: which processes count, where a cwd's session lives, and how
+// to resume it all come from the driver descriptors in ./agents (parseAgentProcs tags each proc with its
+// agent; scan/takeover dispatch through getAgent). The pure parse/file helpers live in ./agents/scanUtils.
 import os from 'node:os';
+import path from 'node:path';
+import { AGENTS, getAgent } from './agents/index.js';
 import { isSessionId } from './tmux/commands.js';
+import {
+  defaultRun, parseAgentProcs, parsePaneMembership, findOrphans,
+  takeoverSessionName, isShell, lsofCwd, isSessionUuid,
+} from './agents/scanUtils.js';
 
-// Tolerant promisified execFile: resolves '' on any error (no server, missing binary, non-zero exit).
-// Detection is best-effort and must never throw the whole request.
-function defaultRun(cmd, args) {
-  return new Promise((resolve) => {
-    execFile(cmd, args, { maxBuffer: 8 * 1024 * 1024 }, (err, stdout) => {
-      resolve(err ? '' : String(stdout));
-    });
-  });
-}
+// Back-compat re-exports: these were originally defined here and are imported by tests and callers by this
+// path. They're all agent-agnostic (or Claude's, kept as the default) and now live in scanUtils / claude.
+export {
+  parsePaneMembership, findOrphans, encodeProjectDir, isSessionUuid,
+  lastUserSnippet, etimeToMs, takeoverSessionName,
+  resolveEncodedDirSession as resolveSession,
+} from './agents/scanUtils.js';
+export { projectsDir as defaultProjectsDir } from './agents/claude.js';
 
-export const defaultProjectsDir = (home = os.homedir()) => path.join(home, '.claude', 'projects');
-
-// A Claude session id is the jsonl filename (a UUID). Validate strictly: takeover types
-// `claude --resume <id>` into a shell via send-keys, so a non-UUID id would be a shell-injection vector.
-export const isSessionUuid = (s) =>
-  typeof s === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s);
-
-// Strip /dev/ and fold "no controlling terminal" markers (macOS '??', Linux '?') to '' so ps ttys and
-// tmux pane_ttys compare equal: ps 'ttys010' / tmux '/dev/ttys010' → 'ttys010'; ps 'pts/3' / tmux
-// '/dev/pts/3' → 'pts/3'.
-function normTty(t) {
-  const s = String(t || '').trim();
-  if (!s || s === '??' || s === '?' || s === '-') return '';
-  return s.replace(/^\/dev\//, '');
-}
-
-// The `claude` CLI sets its process title to "claude" (verified via ps), so match the program token at
-// the start of argv: bare "claude", "claude --continue", or an absolute path ending in /claude. Anchored
-// so "vim claude.js" / "node build/claude.js" don't match.
-const CLAUDE_ARGS = /^(\S*\/)?claude(\s|$)/;
-
-// ps `etime` (elapsed since start) → milliseconds. Formats (macOS + Linux, no spaces): "MM:SS",
-// "HH:MM:SS", "DD-HH:MM:SS". Used only to derive a startedAt for display/recognition (the "A加成"),
-// NOT for session attribution — a resumed session's process starts long after its jsonl's first event.
-export function etimeToMs(etime) {
-  const s = String(etime).trim();
-  if (!s) return 0;
-  let days = 0;
-  let rest = s;
-  const dash = s.indexOf('-');
-  if (dash >= 0) { days = Number(s.slice(0, dash)) || 0; rest = s.slice(dash + 1); }
-  let sec = 0;
-  for (const p of rest.split(':')) sec = sec * 60 + (Number(p) || 0);
-  return (days * 86400 + sec) * 1000;
-}
-
-// Parse `ps -Ao pid=,ppid=,stat=,etime=,tty=,args=` → LIVE claude processes only. args (last column)
-// may contain spaces; etime has none. STOPPED (STAT 'T', a Ctrl-Z-suspended job-control stack — verified
-// real: one terminal can hold 8 suspended `claude`s) and ZOMBIE ('Z') processes are dropped: they aren't
-// active sessions to steer, and a suspended original can't write its jsonl so there's nothing to race.
+// Parse `ps …` to LIVE Claude CLI procs only — the original Claude-specific helper, kept for the tests.
+// The general engine uses parseAgentProcs(psOut, AGENTS) directly.
 export function parseClaudeProcs(psOut) {
-  const out = [];
-  for (const line of String(psOut).split('\n')) {
-    const m = line.match(/^\s*(\d+)\s+(\d+)\s+(\S+)\s+(\S+)\s+(\S+)\s+(.*)$/);
-    if (!m) continue;
-    const stat = m[3];
-    if (stat[0] === 'T' || stat[0] === 'Z') continue;
-    const args = m[6].trim();
-    if (!CLAUDE_ARGS.test(args)) continue;
-    out.push({ pid: Number(m[1]), ppid: Number(m[2]), etimeMs: etimeToMs(m[4]), tty: normTty(m[5]), args });
-  }
-  return out;
+  return parseAgentProcs(psOut, [getAgent('claude')]);
 }
 
-// Parse `tmux list-panes -a -F '#{pane_tty}\t#{pane_pid}'` → the set of pane ttys and pane (shell) pids.
-export function parsePaneMembership(tmuxOut) {
-  const ttys = new Set();
-  const pids = new Set();
-  for (const line of String(tmuxOut).split('\n')) {
-    if (!line) continue;
-    const [tty, pid] = line.split('\t');
-    const nt = normTty(tty);
-    if (nt) ttys.add(nt);
-    const n = Number(pid);
-    if (n) pids.add(n);
-  }
-  return { ttys, pids };
-}
-
-// Orphan = a claude WITH a real controlling tty that is neither one of tmux's pane ttys nor a child of a
-// pane's shell. The tty requirement drops background/headless claudes (SDK/`-p` piped, tty '') — those
-// aren't interactive sessions a user would "take over".
-export function findOrphans(procs, membership) {
-  return procs.filter(
-    (p) => p.tty && !membership.ttys.has(p.tty) && !membership.pids.has(p.ppid),
-  );
-}
-
-// A real cwd → its ~/.claude/projects directory name. Claude replaces every non-alphanumeric char with
-// '-' (verified: '/home/user/handmux' → '-home-user-handmux'; both '/'
-// and '_' fold to '-'). The mapping is LOSSY (not reversible), so we only ever encode forward, then
-// confirm each candidate jsonl's recorded `cwd` matches before trusting it.
-export function encodeProjectDir(cwd) {
-  return String(cwd).replace(/[^A-Za-z0-9]/g, '-');
-}
-
-// Read the last `bytes` of a file (for the trailing conversation). The first line of the chunk may be
-// truncated mid-JSON — callers skip lines that don't parse.
-async function readTail(file, bytes = 65536) {
-  const fh = await fsp.open(file, 'r');
-  try {
-    const { size } = await fh.stat();
-    const start = Math.max(0, size - bytes);
-    const len = size - start;
-    if (len <= 0) return '';
-    const buf = Buffer.alloc(len);
-    await fh.read(buf, 0, len, start);
-    return buf.toString('utf8');
-  } finally {
-    await fh.close();
-  }
-}
-
-// Read the first `bytes` of a file (the session header carries `cwd` early).
-async function readHead(file, bytes = 65536) {
-  const fh = await fsp.open(file, 'r');
-  try {
-    const buf = Buffer.alloc(bytes);
-    const { bytesRead } = await fh.read(buf, 0, bytes, 0);
-    return buf.slice(0, bytesRead).toString('utf8');
-  } finally {
-    await fh.close();
-  }
-}
-
-// Pull the last user-typed message text out of a jsonl tail, for a recognizable one-line label. Entries
-// are line-delimited JSON; conversational turns are type 'user' with message.role 'user', whose content
-// is either a string or an array of blocks ({type:'text',text}). Meta rows (last-prompt/ai-title/mode/
-// attachment/summary) are ignored. Scans newest-first.
-export function lastUserSnippet(tailText, max = 80) {
-  const rows = String(tailText).split('\n');
-  for (let i = rows.length - 1; i >= 0; i--) {
-    const line = rows[i].trim();
-    if (!line || line[0] !== '{') continue;
-    let d;
-    try { d = JSON.parse(line); } catch { continue; }
-    if (d.type !== 'user' || !d.message || d.message.role !== 'user') continue;
-    const c = d.message.content;
-    let text = '';
-    if (typeof c === 'string') text = c;
-    else if (Array.isArray(c)) text = c.filter((b) => b && b.type === 'text').map((b) => b.text).join(' ');
-    text = text.replace(/\s+/g, ' ').trim();
-    if (text) return text.length > max ? `${text.slice(0, max)}…` : text;
-  }
-  return '';
-}
-
-const firstCwd = (headText) => {
-  const m = String(headText).match(/"cwd"\s*:\s*"((?:[^"\\]|\\.)*)"/);
-  if (!m) return '';
-  try { return JSON.parse(`"${m[1]}"`); } catch { return m[1]; }
-};
-
-// Resolve a live orphan's cwd to its Claude session: the newest jsonl in the encoded project dir whose
-// recorded cwd matches (guards against the lossy encoding colliding two real paths). Returns sessionId,
-// a busy/idle guess (from mtime recency — refined for the takeover gate in step 2), the last user
-// snippet, and the last-activity timestamp.
-export async function resolveSession(projectsDir, cwd, { busyMs = 8000, now = Date.now } = {}) {
-  const dir = path.join(projectsDir, encodeProjectDir(cwd));
-  let names;
-  try { names = (await fsp.readdir(dir)).filter((n) => n.endsWith('.jsonl')); } catch { return {}; }
-  const stats = [];
-  for (const n of names) {
-    try { stats.push({ n, mtime: (await fsp.stat(path.join(dir, n))).mtimeMs }); } catch { /* gone */ }
-  }
-  stats.sort((a, b) => b.mtime - a.mtime);
-  for (const { n, mtime } of stats) {
-    const file = path.join(dir, n);
-    let head;
-    try { head = await readHead(file); } catch { continue; }
-    if (firstCwd(head) !== cwd) continue; // different real path collided onto the same dir → skip
-    let snippet = '';
-    try { snippet = lastUserSnippet(await readTail(file)); } catch { /* best effort */ }
-    return {
-      sessionId: n.replace(/\.jsonl$/, ''),
-      state: now() - mtime < busyMs ? 'busy' : 'idle',
-      snippet,
-      lastActivity: Math.round(mtime),
-    };
-  }
-  return {};
-}
-
-// A tmux session name derived from a cwd basename, kept within isValidSessionName ([A-Za-z0-9-], ≤16):
-// `cc-<alnum label, ≤8>-<n>`. n disambiguates against existing sessions.
-export function takeoverSessionName(cwdLabel, n) {
-  const base = String(cwdLabel || '').replace(/[^A-Za-z0-9]/g, '').slice(0, 8) || 'cc';
-  return `cc-${base}-${n}`.slice(0, 16);
-}
-
-const isShell = (c) => /^-?(zsh|bash|sh|fish|dash|tcsh|csh|ksh)$/.test(String(c || ''));
-
-// Take over an orphan: spawn `claude --resume <sessionId>` in a fresh tmux session (target.mode 'new')
+// Take over an orphan: spawn the agent's `resume <sessionId>` in a fresh tmux session (target.mode 'new')
 // or a new window of an existing session ('window'), so handmux can steer the continued conversation.
 // Everything is re-verified server-side — the client's pid/sessionId are inputs to a fresh scan, never
-// trusted directly. The original process is SIGTERM'd only AFTER the resumed claude is confirmed up
+// trusted directly. The original process is SIGTERM'd only AFTER the resumed agent is confirmed up
 // (foreground command is no longer the shell) AND re-confirmed still the same orphan (guards pid reuse):
-// `claude --resume` appends to the SAME jsonl with no OS lock (verified), so two live writers corrupt
-// history — killing guarantees a single writer. Injectable deps make it unit-testable without real tmux.
+// `<agent> resume` appends to the SAME session file with no OS lock (verified for Claude), so two live
+// writers corrupt history — killing guarantees a single writer. Injectable deps make it unit-testable.
 export async function takeoverOrphan(
   {
     commands, scanFn = scanOrphans, scanOpts = {},
@@ -226,13 +56,15 @@ export async function takeoverOrphan(
   { pid, sessionId, target = { mode: 'new' }, kill = true } = {},
 ) {
   if (!Number.isInteger(pid) || pid <= 0) return { error: 'bad pid', status: 400 };
+  // Both agents use UUID session ids; validate up front (takeover types the id into a shell via send-keys).
   if (!isSessionUuid(sessionId)) return { error: 'bad session id', status: 400 };
 
   const o = (await scanFn(scanOpts)).find((x) => x.pid === pid);
   if (!o) return { error: 'gone', status: 409 };            // no longer a live orphan
   if (o.sessionId !== sessionId) return { error: 'session changed', status: 409 };
   if (!o.cwd) return { error: 'no cwd', status: 409 };
-  const cmd = `claude --resume ${sessionId}`;
+  const agent = getAgent(o.agent);
+  const cmd = agent.sessions.resumeCmd(sessionId);
 
   let sid;
   let wid;
@@ -241,11 +73,11 @@ export async function takeoverOrphan(
     if (!isSessionId(target.session)) return { error: 'bad target session', status: 400 };
     sid = target.session;
     name = (await commands.listSessions()).find((s) => s.id === sid)?.name || null;
-    wid = await commands.newWindow(sid, o.cwd, 'claude', cmd);
+    wid = await commands.newWindow(sid, o.cwd, agent.procName, cmd);
   } else {
     const existing = new Set((await commands.listSessions()).map((s) => s.name));
     for (let i = 1; i < 1000 && !name; i++) {
-      const cand = takeoverSessionName(o.cwdLabel, i);
+      const cand = takeoverSessionName(o.cwdLabel, i, agent.takeoverPrefix);
       if (!existing.has(cand)) name = cand;
     }
     sid = await commands.newSession(name, o.cwd, cmd);
@@ -267,31 +99,32 @@ export async function takeoverOrphan(
     const still = (await scanFn(scanOpts)).find((x) => x.pid === pid && x.sessionId === sessionId);
     if (still) { try { killProc(pid, 'SIGTERM'); killed = true; } catch { /* already exited */ } }
   }
-  return { session: sid, name, window: wid, pane, claudeUp: up, killed };
+  // claudeUp kept in the response for back-compat with the existing web client; agentUp is the neutral name.
+  return { session: sid, name, window: wid, pane, agentUp: up, claudeUp: up, killed, agent: agent.id };
 }
 
-async function lsofCwd(run, pid) {
-  const out = await run('lsof', ['-a', '-p', String(pid), '-d', 'cwd', '-Fn']);
-  for (const line of out.split('\n')) if (line[0] === 'n') return line.slice(1).trim();
-  return '';
-}
-
-// Scan the host for orphan claude sessions. Best-effort: any failing sub-command degrades to fewer/no
-// results rather than throwing.
+// Scan the host for orphan agent sessions across every registered driver. Best-effort: any failing
+// sub-command degrades to fewer/no results rather than throwing. `projectsDir`/`sessionsDir` override a
+// specific agent's session dir (each driver declares which option key it reads — used by tests and the
+// server, which pin the dir off the resolved $HOME).
 export async function scanOrphans({
-  run = defaultRun, projectsDir = defaultProjectsDir(), busyMs = 8000, now = Date.now,
+  run = defaultRun, home = os.homedir(), busyMs = 8000, now = Date.now, agents = AGENTS, ...dirOverrides
 } = {}) {
   const [psOut, tmuxOut] = await Promise.all([
     run('ps', ['-Ao', 'pid=,ppid=,stat=,etime=,tty=,args=']),
     run('tmux', ['list-panes', '-a', '-F', '#{pane_tty}\t#{pane_pid}']),
   ]);
-  const orphans = findOrphans(parseClaudeProcs(psOut), parsePaneMembership(tmuxOut));
+  const orphans = findOrphans(parseAgentProcs(psOut, agents), parsePaneMembership(tmuxOut));
   const results = [];
   for (const o of orphans) {
+    const agent = getAgent(o.agent);
     const cwd = await lsofCwd(run, o.pid);
-    const meta = cwd ? await resolveSession(projectsDir, cwd, { busyMs, now }) : {};
+    const dir = dirOverrides[agent.sessions.dirOptKey] || agent.sessions.dir(home);
+    const meta = cwd ? await agent.sessions.resolve(dir, cwd, { busyMs, now }) : {};
     results.push({
       pid: o.pid,
+      agent: agent.id,
+      agentLabel: agent.label,
       cwd: cwd || '',
       cwdLabel: cwd ? path.basename(cwd) : '',
       sessionId: meta.sessionId || null,
