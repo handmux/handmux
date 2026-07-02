@@ -26,21 +26,7 @@ export default function Settings({ open, onClose, termRef, onColAdjust, onColRes
   const [startErr, setStartErr] = useState('');             // dynamic-start failure shown inline (e.g. 端口未监听)
   const [starting, setStarting] = useState(false);          // disable 启动 while the request is in flight
   const remainMs = useRemaining(activePreview?.expiresAt, !!activePreview && open); // live TTL countdown
-  const [clearing, setClearing] = useState(false); // true while clearing caches (then a reload happens)
   useEffect(() => { setConfirmStop(false); setStartErr(''); }, [activePreview?.name, open]); // reset guards per preview/open
-
-  // Escape hatch when something looks stale: drop the SW caches (offline shell) + unregister the service
-  // worker, then reload. App code/index.html are never HTTP-cached and hashed assets bust themselves, so a
-  // fresh load always pulls the latest — this button is for clearing a wedged SW / offline shell.
-  async function clearCache() {
-    setClearing(true);
-    try { const ks = await caches.keys(); await Promise.all(ks.map((k) => caches.delete(k))); } catch { /* ignore */ }
-    try {
-      const regs = (await navigator.serviceWorker?.getRegistrations?.()) || [];
-      await Promise.all(regs.map((r) => r.unregister()));
-    } catch { /* ignore */ }
-    location.reload();
-  }
   // Friendly text for the server's dynamic-start errors.
   const startMsg = (m) => ({
     'port not listening': t('settings.err_port_not_listening'),
@@ -149,15 +135,6 @@ export default function Settings({ open, onClose, termRef, onColAdjust, onColRes
           </div>
         </div>
 
-        <div className="settings-section">
-          <div className="settings-label">{t('settings.cache')}</div>
-          <div className="settings-btns">
-            <button className="fontbtn" onClick={clearCache} disabled={clearing}>
-              {clearing ? t('settings.clearing_cache') : t('settings.clear_cache')}
-            </button>
-          </div>
-          <div className="settings-hint">{t('settings.cache_hint')}</div>
-        </div>
 
         <div className="settings-section">
           <div className="settings-label">{t('settings.push_notifications')}</div>
