@@ -17,6 +17,13 @@ All notable changes to handmux. Format follows [Keep a Changelog](https://keepac
   full command still shows in the pane menu.
 
 ### Added
+- **Command mode (type straight into the shell)** — the dock now has two input modes. **Command**: a
+  single-line field whose Return runs the line immediately (the shell rhythm) with the keyboard on the
+  shell-symbol context; **Agent (chat)**: the existing multi-line composer for prose prompts (voice,
+  upload, phrases) with the menu/slash keyboard. The mode defaults from whether a coding agent is live
+  in the pane (`states.agent`) and sticks per-pane once you tap the pill to override; the whole bar
+  recolours so the active mode is unmissable. (Optimistic at-cursor echo is a later stage — command
+  mode currently submits the whole line on Return.)
 - **Usage bars: time-progress marker** — each quota bar now draws a thin vertical line at the fraction
   of its reset window that has elapsed. Usage fill left of the line = burning slower than the clock;
   past it = faster. Derived from `resetsAt` + the window length (Claude 5h/weekly; Codex `windowMinutes`).

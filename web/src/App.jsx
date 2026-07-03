@@ -1007,6 +1007,7 @@ export default function App() {
             onKey={sendKey}
             onText={sendChar}
             cwd={currentPaneCwd}
+            agent={states[current.paneId]?.agent}
             recent={recent}
             favorites={favorites}
             onSent={onCommandSent}

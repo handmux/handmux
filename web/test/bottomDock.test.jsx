@@ -270,4 +270,54 @@ describe('BottomDock', () => {
     expect(sendText).toHaveBeenCalledWith('%1', 'git status', true);
     expect(onSent).toHaveBeenCalledWith('git status');
   });
+
+  describe('input mode (command ⇄ agent)', () => {
+    const keydown = (node, key, opts = {}) =>
+      act(() => node.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, ...opts })));
+
+    it('defaults to command mode for a plain shell pane (no agent)', () => {
+      render({ pane: '%1', onAuthFail: vi.fn(), onKey: vi.fn(), onText: vi.fn() });
+      expect(container.querySelector('.input-mode').dataset.mode).toBe('command');
+      expect(container.querySelector('.input-wrap').classList.contains('command')).toBe(true);
+    });
+
+    it('defaults to agent (compose) mode when a coding agent is live in the pane', () => {
+      render({ pane: '%1', agent: 'claude', onAuthFail: vi.fn(), onKey: vi.fn(), onText: vi.fn() });
+      expect(container.querySelector('.input-mode').dataset.mode).toBe('agent');
+    });
+
+    it('the pill toggles the mode, and the keyboard context tracks it', () => {
+      render({ pane: '%1', onAuthFail: vi.fn(), onKey: vi.fn(), onText: vi.fn() }); // command by default
+      // Command mode surfaces the shell symbols; agent menu keys are absent.
+      expect(container.querySelector('[data-key="pipe"]')).not.toBeNull();
+      expect(container.querySelector('[data-key="n1"]')).toBeNull();
+      fire(container.querySelector('.input-mode'), 'click'); // → agent
+      expect(container.querySelector('.input-mode').dataset.mode).toBe('agent');
+      expect(container.querySelector('[data-key="n1"]')).not.toBeNull();
+      expect(container.querySelector('[data-key="pipe"]')).toBeNull();
+    });
+
+    it('command mode: Return in the field runs the whole line (type + Enter)', () => {
+      render({ pane: '%1', onAuthFail: vi.fn(), onKey: vi.fn(), onText: vi.fn() }); // command by default
+      typeInto(container.querySelector('.input-text'), 'ls -la');
+      keydown(container.querySelector('.input-text'), 'Enter');
+      expect(sendText).toHaveBeenCalledWith('%1', 'ls -la', true);
+    });
+
+    it('command mode: Shift+Enter and IME-composing Return do NOT submit', () => {
+      render({ pane: '%1', onAuthFail: vi.fn(), onKey: vi.fn(), onText: vi.fn() });
+      const ta = container.querySelector('.input-text');
+      typeInto(ta, 'echo hi');
+      keydown(ta, 'Enter', { shiftKey: true });      // newline escape hatch
+      keydown(ta, 'Enter', { isComposing: true });   // committing an IME word
+      expect(sendText).not.toHaveBeenCalled();
+    });
+
+    it('agent mode: Return does NOT submit (native newline; send button submits instead)', () => {
+      render({ pane: '%1', agent: 'claude', onAuthFail: vi.fn(), onKey: vi.fn(), onText: vi.fn() });
+      typeInto(container.querySelector('.input-text'), 'write me a poem');
+      keydown(container.querySelector('.input-text'), 'Enter');
+      expect(sendText).not.toHaveBeenCalled();
+    });
+  });
 });

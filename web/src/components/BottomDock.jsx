@@ -18,11 +18,19 @@ import { t } from '../i18n';
 // Enter, long-press = 填入). ▤ shows only on an empty box; the send ↑ is always present but DISABLED
 // when the box is empty.
 function BottomDock({
-  pane, onAuthFail, onKey, onText, cwd = null,
+  pane, onAuthFail, onKey, onText, cwd = null, agent = null,
   recent = [], favorites = [], onSent, onToggleFav, onRemoveRecent,
 }, fwdRef) {
   const [value, setValue] = useState('');
   const [panelOpen, setPanelOpen] = useState(false);
+  // Input mode. 'command' = a single-line field whose Return runs the line in the shell (that rhythm);
+  // 'agent' = the multi-line composer for prose prompts (voice/upload/phrases). The default follows
+  // whether a coding agent is live in this pane (states.agent, passed in), and sticks per-pane once the
+  // user flips the toggle. The keyboard's context (shell symbols vs agent menu/slash keys) tracks it.
+  const [modeOverride, setModeOverride] = useState({}); // pane → 'command' | 'agent'
+  const mode = modeOverride[pane] || (agent ? 'agent' : 'command');
+  const toggleMode = () =>
+    setModeOverride((m) => ({ ...m, [pane]: mode === 'command' ? 'agent' : 'command' }));
   // Hardware Back closes the command panel instead of exiting the app.
   useBackButton(panelOpen, () => setPanelOpen(false));
   const [upload, setUpload] = useState(null); // { label, pct, error } during/after an upload, else null
@@ -124,6 +132,17 @@ function BottomDock({
       requestAnimationFrame(() => autoGrow(ref.current)); // shrink back to one line once cleared
     } catch (err) {
       if (err instanceof UnauthorizedError) onAuthFail?.();
+    }
+  };
+
+  // Command mode: the soft-keyboard Return runs the line immediately (type + Enter), the shell rhythm.
+  // Skipped while an IME is composing (isComposing — else committing a pinyin/kana word would submit)
+  // and with Shift held (an escape hatch for a literal newline). Agent mode keeps the native newline.
+  const onInputKeyDown = (e) => {
+    if (mode !== 'command') return;
+    if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent?.isComposing) {
+      e.preventDefault();
+      send();
     }
   };
 
@@ -237,7 +256,7 @@ function BottomDock({
         {/* 按键区:键条横滚占满,右端竖着叠两行 ⌫(上)/ Enter(下),与键条同高。
             Enter 发 /keys Enter——应答 y/n、菜单确认、推进 Claude,不发组合文本。 */}
         <div className="keyrow">
-          <KeyBar onKey={onKey} onText={onText} />
+          <KeyBar onKey={onKey} onText={onText} context={mode === 'command' ? 'shell' : 'agent'} />
           <div className="keyrow-stack">
             <button type="button" className="keyrow-del" aria-label={t('common.delete')}
               onPointerDown={delStart} onPointerUp={delStop} onPointerCancel={delStop} onPointerLeave={delStop}>⌫</button>
@@ -259,7 +278,13 @@ function BottomDock({
         <div className="dock-input-row">
           {/* flex 行:＋(左)· textarea(中,占满)· ▤/麦克风/发送(右),全是 flex 兄弟、不重叠文字框,
               所以选词/移光标碰不到按键。录音时整条变绿 + 呼吸;▤常用语仅空框时出现在麦克风左边(打字即隐)。 */}
-          <div className={`input-wrap${recording ? ' recording' : ''}`}>
+          <div className={`input-wrap ${mode}${recording ? ' recording' : ''}`}>
+            {/* Mode toggle (command ⇄ agent): the pill shows the CURRENT mode and its accent colours the
+                whole bar, so you always know which way a keystroke goes. Persistent left slot = stable. */}
+            <button type="button" className="input-mode" data-mode={mode} aria-pressed={mode === 'command'}
+              aria-label={t('dock.mode.toggle')} title={t('dock.mode.toggle')} onClick={toggleMode}>
+              {t(mode === 'command' ? 'dock.mode.command' : 'dock.mode.agent')}
+            </button>
             <button type="button" className="input-upload" aria-label={t('dock.upload.aria')} title={t('dock.upload.title')}
               disabled={!!upload && !upload.error} onClick={() => uploadRef.current?.click()}>
               <PlusIcon />
@@ -282,7 +307,9 @@ function BottomDock({
                 e.currentTarget.focus(); // 同步夺焦,确保这一下就弹出键盘
               }}
               onChange={(e) => { setValue(e.target.value); autoGrow(e.target); }}
-              placeholder={t('dock.input.placeholder')}
+              onKeyDown={onInputKeyDown}
+              enterKeyHint={mode === 'command' ? 'go' : 'enter'}
+              placeholder={t(mode === 'command' ? 'dock.command.placeholder' : 'dock.input.placeholder')}
               autoCapitalize="off"
               autoCorrect="off"
               spellCheck={false}
