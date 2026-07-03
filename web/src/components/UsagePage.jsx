@@ -8,8 +8,6 @@ import { t } from '../i18n';
 // (opt-in) — when it isn't wired, or hasn't seen an API response yet, we show a short how-to instead of a
 // fake gauge. Poll-free: fetched on open (the numbers move on the hour scale, so a manual refresh is enough).
 
-const fmtK = (n) => (n == null ? '' : n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n));
-
 // A rate-limit window's human label. Codex reports window_minutes; Claude's are named (5h / weekly).
 function winLabel(minutes) {
   if (minutes === 300) return t('usage.win5h');
@@ -26,6 +24,18 @@ function fmtReset(resetsAt, nowMs) {
   const d = Math.floor(s / 86400), h = Math.floor((s % 86400) / 3600), m = Math.floor((s % 3600) / 60);
   const span = d > 0 ? `${d}d ${h}h` : h > 0 ? `${h}h ${m}m` : `${m}m`;
   return t('usage.resetIn', { t: span });
+}
+
+// The snapshot is only as fresh as the last time the agent was active (Claude's statusLine fires on each
+// API response; Codex's token_count on each turn). Surface that so a stale number isn't mistaken for live.
+function Updated({ at, now }) {
+  if (!at) return null;
+  const s = Math.max(0, Math.floor((now - at) / 1000));
+  const line = s < 60 ? t('usage.updatedNow')
+    : s < 3600 ? t('usage.updatedMin', { n: Math.floor(s / 60) })
+    : s < 86400 ? t('usage.updatedHr', { n: Math.floor(s / 3600) })
+    : t('usage.updatedDay', { n: Math.floor(s / 86400) });
+  return <div className="usage-updated">{line}</div>;
 }
 
 function Bar({ pct }) {
@@ -74,6 +84,7 @@ function ClaudeCard({ claude, now }) {
           {claude.rateLimits.sevenDaySonnet && (
             <LimitRow label={t('usage.winWeekly')} sub="Sonnet" pct={claude.rateLimits.sevenDaySonnet.usedPercent} />
           )}
+          <Updated at={claude.updatedAt} now={now} />
         </>
       )}
     </section>
@@ -98,9 +109,7 @@ function CodexCard({ codex, now }) {
               pct={rl.secondary.usedPercent} reset={fmtReset(rl.secondary.resetsAt, now)} />
           )}
           {!rl?.primary && !rl?.secondary && <div className="usage-empty">{t('usage.codexNoQuota')}</div>}
-          {codex.tokens?.total != null && (
-            <div className="usage-tokens">{t('usage.sessionTokens', { n: fmtK(codex.tokens.total) })}</div>
-          )}
+          <Updated at={codex.updatedAt} now={now} />
         </>
       )}
     </section>
@@ -149,7 +158,7 @@ export default function UsagePage({ open, onClose, onAuthFail }) {
               <ClaudeCard claude={data.claude} now={now} />
             </>
           ) : null}
-          <div className="usage-note">{t('usage.diskNote')}</div>
+          {data && (data.claude || data.codex) && <div className="usage-note">{t('usage.activityNote')}</div>}
         </div>
       </div>
     </>

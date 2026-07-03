@@ -23,17 +23,18 @@ const render = (props) => act(() => root.render(<UsagePage open onClose={() => {
 const settle = async () => { await act(async () => {}); await act(async () => {}); };
 
 describe('UsagePage', () => {
-  it('renders a Codex quota bar with percent', async () => {
+  it('renders a Codex quota bar with percent + a freshness stamp', async () => {
     getUsage.mockResolvedValue({
       claude: null,
-      codex: { rateLimits: { primary: { usedPercent: 16, windowMinutes: 43200, resetsAt: 9999999999 }, secondary: null }, tokens: { total: 22080 } },
+      codex: { updatedAt: Date.now() - 5 * 60 * 1000, rateLimits: { primary: { usedPercent: 16, windowMinutes: 43200, resetsAt: 9999999999 }, secondary: null } },
     });
     await render();
     await settle();
     expect(container.textContent).toContain('Codex CLI');
     expect(container.textContent).toContain('16%');
     expect(container.querySelector('.usage-bar-fill').style.width).toBe('16%');
-    expect(container.textContent).toContain('22.1k'); // session tokens
+    expect(container.querySelector('.usage-updated').textContent).toMatch(/5m ago|5 分钟/); // freshness
+    expect(container.textContent).not.toMatch(/token/i); // no misleading session-token line
   });
 
   it('shows the enable hint when the Claude capturer is not wired', async () => {
