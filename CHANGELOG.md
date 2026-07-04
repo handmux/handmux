@@ -27,6 +27,11 @@ All notable changes to handmux. Format follows [Keep a Changelog](https://keepac
   any other. Chat has no per-window list and no 带回车 toggle (a chat tap always sends).
 
 ### Changed
+- **App-wide colour unification to iOS system accents.** Consolidated the scattered accent palette (7 blues,
+  6 greens, 6 error reds) down to one system blue (`#0a84ff`), one green (`#34c759`) and one red (`#ff453a`),
+  exposed as `:root` tokens (`--blue`/`--green`/`--red` + `-rgb` variants) and referenced throughout
+  `styles.css`. Semantic colour sets (git badges, inbox states, chat-chip categories, usage gauge) are left
+  intact. Pure restyle — no behaviour change.
 - **Upload picker now filters to allowed types and rejects an unsupported pick up front.** Both upload
   entries (chat composer ＋附件 and the file-browser upload button) carry an `accept` hint (images +
   text/code + documents) so the native picker guides you toward valid files, and pre-check the picked

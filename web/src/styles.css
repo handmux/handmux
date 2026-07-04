@@ -1,4 +1,13 @@
 * { box-sizing: border-box; }
+:root {
+  /* iOS system accent tokens — one blue / green / red across the whole app */
+  --blue: #0a84ff;
+  --blue-press: #0a6fd8;
+  --blue-rgb: 10,132,255;
+  --green: #34c759;
+  --green-rgb: 52,199,89;
+  --red: #ff453a;
+}
 /* Bundled terminal font: JetBrainsMono Nerd Font carries the Powerline/Nerd icons and the
    Dingbat sparkles Claude Code animates with — glyphs the system monospace fonts are missing.
    Self-hosted so it works offline; the terminal lists it first (see Terminal.jsx). */
@@ -35,7 +44,7 @@ body { font-family: -apple-system, system-ui, sans-serif; background: #1a1b1e; c
 /* Topbar file + settings icons: frameless monochrome line icons in the chrome's grey, sized to sit
    level with the ☰ glyph. stroke=currentColor picks up this color. */
 .topbar-icon { display: inline-flex; align-items: center; padding: 4px; border: none; background: none; color: #e6e6e6; touch-action: manipulation; }
-.topbar-icon:active { color: #4aa3ff; }
+.topbar-icon:active { color: var(--blue); }
 .topbar-icon svg { width: 21px; height: 21px; display: block; }
 /* Settings modal: centered card over a dim backdrop (mirrors the drawer's palette). */
 .settings-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,.5); z-index: 19; }
@@ -91,7 +100,7 @@ body { font-family: -apple-system, system-ui, sans-serif; background: #1a1b1e; c
 .field:active { border-color: #555; }
 .cwd-field { justify-content: space-between; }
 .cwd-path { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; opacity: .9; }
-.cwd-action { flex: none; color: #4aa3ff; font-size: 13px; }
+.cwd-action { flex: none; color: var(--blue); font-size: 13px; }
 .cwd-reset { margin-top: 6px; background: none; border: none; color: #888; font-size: 12px; padding: 2px 0; touch-action: manipulation; }
 
 /* Themed dropdown (replaces the native <select>). Trigger reuses .field; the menu floats below it. */
@@ -108,19 +117,19 @@ body { font-family: -apple-system, system-ui, sans-serif; background: #1a1b1e; c
   padding: 10px; border: none; border-radius: 6px; background: none; color: #e6e6e6; font-size: 14px;
   text-align: left; touch-action: manipulation; }
 .dd-option:active { background: #33353a; }
-.dd-option.is-selected { color: #07c160; }
-.dd-check { flex: none; color: #07c160; font-size: 13px; }
-.bind-error { margin-top: 8px; color: #ff8585; font-size: 13px; }
+.dd-option.is-selected { color: var(--green); }
+.dd-check { flex: none; color: var(--green); font-size: 13px; }
+.bind-error { margin-top: 8px; color: var(--red); font-size: 13px; }
 .bind-hint { margin-top: 8px; color: #888; font-size: 13px; }
 .bind-actions { margin-top: 12px; justify-content: flex-end; }
-.bind-confirm { background: #4a7cff; color: #fff; }
+.bind-confirm { background: var(--blue); color: #fff; }
 .bind-confirm:disabled { opacity: .6; }
 /* Nav strip: windows scroll horizontally; the active multi-pane window's tab carries an inline pane menu. */
 .windowbar { display: flex; gap: 8px; align-items: center; padding: 6px 8px; background: #222; }
 .windowbar-scroll { flex: 1; min-width: 0; display: flex; gap: 4px; overflow-x: auto; overflow-y: hidden; -webkit-overflow-scrolling: touch; touch-action: pan-x; scrollbar-width: none; }
 .windowbar-scroll::-webkit-scrollbar { display: none; }
 .win-tab { white-space: nowrap; padding: 4px 10px; border: none; border-radius: 6px; background: #33353a; color: #bbb; font-size: 13px; touch-action: manipulation; }
-.win-tab.active { background: #4a7cff; color: #fff; }
+.win-tab.active { background: var(--blue); color: #fff; }
 .win-new { border: 1px dashed #555; color: #8aa; font-weight: 700; background: transparent; }
 .win-panes { margin-left: 5px; font-size: 11px; color: #889; }
 .win-tab.active .win-panes { color: #d6e4ff; }
@@ -174,7 +183,7 @@ body { font-family: -apple-system, system-ui, sans-serif; background: #1a1b1e; c
 /* Read-only view: don't let taps focus xterm's hidden input textarea (which would pop the
    mobile soft keyboard and steal taps near the cursor, e.g. the back-to-bottom button). */
 .terminal .xterm-helper-textarea { pointer-events: none; opacity: 0; }
-.new-output { position: absolute; right: 12px; bottom: 12px; z-index: 5; touch-action: manipulation; padding: 8px 14px; border: none; border-radius: 16px; background: #4a7cff; color: #fff; box-shadow: 0 2px 8px rgba(0,0,0,.4); }
+.new-output { position: absolute; right: 12px; bottom: 12px; z-index: 5; touch-action: manipulation; padding: 8px 14px; border: none; border-radius: 16px; background: var(--blue); color: #fff; box-shadow: 0 2px 8px rgba(0,0,0,.4); }
 .dbg { position: absolute; left: 6px; top: 6px; z-index: 6; font: 12px/1.4 monospace; color: #9fe; background: rgba(0,0,0,.6); padding: 2px 6px; border-radius: 4px; pointer-events: none; }
 /* Status banners: a full-width strip across the head of the terminal area. Yellow = browsing history
    (live refresh paused — shows 历史模式 · 行 x/x); red = disconnected/reconnecting. They're mutually
@@ -191,7 +200,7 @@ body { font-family: -apple-system, system-ui, sans-serif; background: #1a1b1e; c
    with no selectable DOM, so there's no OS menu — this is our copy affordance). */
 .copy-bubble {
   position: absolute; z-index: 7; padding: 7px 16px;
-  border: none; border-radius: 16px; background: #4a7cff; color: #fff;
+  border: none; border-radius: 16px; background: var(--blue); color: #fff;
   font-size: 14px; font-weight: 600; box-shadow: 0 2px 10px rgba(0,0,0,.5);
   touch-action: manipulation;
 }
@@ -201,7 +210,7 @@ body { font-family: -apple-system, system-ui, sans-serif; background: #1a1b1e; c
 .sel-hint {
   position: absolute; left: 50%; top: 12px; transform: translateX(-50%); z-index: 8;
   max-width: 92%; padding: 7px 14px; border-radius: 16px;
-  background: rgba(74,124,255,0.96); color: #fff; font-size: 13px; font-weight: 600;
+  background: rgba(var(--blue-rgb),0.96); color: #fff; font-size: 13px; font-weight: 600;
   white-space: nowrap; box-shadow: 0 2px 10px rgba(0,0,0,.5); pointer-events: none;
 }
 /* Auto-growing command field: one line by default (a touch taller for an easier tap target), grows
@@ -213,18 +222,18 @@ body { font-family: -apple-system, system-ui, sans-serif; background: #1a1b1e; c
 .input-text { flex: 1; min-width: 0; padding: 7px 6px 7px 11px; border: none; background: transparent; color: #fff; font-family: inherit; font-size: 16px; line-height: 22px; max-height: 156px; resize: none; overflow-y: auto; display: block; }
 .input-text:focus { outline: none; }
 .input-text::placeholder { color: #6b7280; }
-.token-prompt button { padding: 8px 14px; border: none; border-radius: 6px; background: #4a7cff; color: #fff; }
+.token-prompt button { padding: 8px 14px; border: none; border-radius: 6px; background: var(--blue); color: #fff; }
 .drawer { position: fixed; top: 0; left: 0; width: 78%; max-width: 320px; height: 100%; background: #232427; transform: translateX(-100%); transition: transform .2s; z-index: 10; padding: 12px; display: flex; flex-direction: column; overflow: hidden; }
 .drawer.open { transform: translateX(0); }
 .drawer-list { flex: 1; min-height: 0; overflow-y: auto; }
 /* Logout pinned at the drawer's bottom — a low-traffic action kept out of the way. */
-.drawer-logout { flex: none; margin-top: 8px; padding: 10px; border: none; border-radius: 6px; background: #2e2a2c; color: #ffb4b4; font-size: 14px; touch-action: manipulation; }
+.drawer-logout { flex: none; margin-top: 8px; padding: 10px; border: none; border-radius: 6px; background: #2e2a2c; color: var(--red); font-size: 14px; touch-action: manipulation; }
 .drawer-logout:active { background: #4a2f33; }
 .drawer-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,.4); z-index: 9; }
 .drawer-title { font-size: 12px; color: #888; letter-spacing: 1px; margin-bottom: 8px; }
 .drawer-row { display: flex; align-items: center; gap: 6px; border-radius: 6px; }
 .drawer-name { flex: 1; min-width: 0; padding: 8px 4px; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.drawer-session.active { background: #4a7cff; color: #fff; }
+.drawer-session.active { background: var(--blue); color: #fff; }
 .drawer-unbind { flex: none; background: none; border: none; color: #888; font-size: 14px; padding: 6px 8px; touch-action: manipulation; }
 .drawer-session.active .drawer-unbind { color: #d6e4ff; }
 .drawer-empty { padding: 12px 4px; color: #888; font-size: 13px; }
@@ -236,7 +245,7 @@ body { font-family: -apple-system, system-ui, sans-serif; background: #1a1b1e; c
 .loading { padding: 40px; text-align: center; color: #888; }
 /* First-run empty state: a tap target that opens the bind modal (there's nothing pinned yet). */
 .empty-cta { margin: auto; display: flex; flex-direction: column; gap: 6px; align-items: center; padding: 28px 32px; background: none; border: 1px dashed #44464c; border-radius: 12px; color: #aab; font-size: 15px; touch-action: manipulation; }
-.empty-cta span { font-size: 13px; color: #6f7bff; }
+.empty-cta span { font-size: 13px; color: var(--blue); }
 .empty-cta:active { background: #232427; }
 
 /* Bottom dock, pinned at the bottom of the flex column. Two columns: a left stack (scrolling key
@@ -254,7 +263,7 @@ body { font-family: -apple-system, system-ui, sans-serif; background: #1a1b1e; c
 .dock-dots:active .dock-dot { background: #5a5e66; }
 .dock-dots:active .dock-dot.on { background: #6a93ff; }
 .dock-dot { width: 6px; height: 6px; border-radius: 50%; background: #4a4d54; }
-.dock-dot.on { background: #4a7cff; }
+.dock-dot.on { background: var(--blue); }
 /* Mode label at the top-left. Absolute so it takes no vertical space — the row stays the dots' height. */
 .dock-mode-label { position: absolute; left: 2px; top: 50%; transform: translateY(-50%);
   font-size: 10px; line-height: 1; color: #8a93a0; white-space: nowrap; pointer-events: none; }
@@ -288,11 +297,11 @@ body { font-family: -apple-system, system-ui, sans-serif; background: #1a1b1e; c
   background: #33353a; color: #e6e6e6; font: 14px/1 ui-monospace, 'SF Mono', Menlo, monospace;
   touch-action: manipulation; -webkit-user-select: none; user-select: none;
 }
-.keybar-key:active { background: #4a7cff; color: #fff; }
+.keybar-key:active { background: var(--blue); color: #fff; }
 .keybar-key svg { width: 20px; height: 20px; display: block; }
 /* Live modifier keys light up while armed (one-shot) or locked (sticky). */
-.keybar-mod.armed { background: #4a7cff; color: #fff; }
-.keybar-mod.locked { background: #3a6bff; color: #fff; box-shadow: inset 0 -3px 0 0 #ffd24a; }
+.keybar-mod.armed { background: var(--blue); color: #fff; }
+.keybar-mod.locked { background: var(--blue); color: #fff; box-shadow: inset 0 -3px 0 0 #ffd24a; }
 /* Input row: ▤ (command panel) + the auto-growing command field. stretch makes ▤ grow to match the
    textarea's height as it gets taller. (填入 is a long-press on 发送 — see BottomDock.)
    ▤ width matches the Esc/◀ keybar column above it so the input row's left edge lines up. */
@@ -305,7 +314,7 @@ body { font-family: -apple-system, system-ui, sans-serif; background: #1a1b1e; c
 .input-wrap { position: relative; flex: 1; min-width: 0; display: flex; align-items: flex-end; gap: 4px;
   padding: 5px 6px 5px 5px; border: 1px solid #3a3d44; border-radius: 20px; background: #202227;
   box-shadow: 0 1px 6px rgba(0,0,0,.35); transition: border-color .15s, box-shadow .15s; }
-.input-wrap:focus-within { border-color: #07c160; box-shadow: 0 0 0 1px rgba(7,193,96,.4), 0 2px 12px rgba(0,0,0,.4); }
+.input-wrap:focus-within { border-color: var(--green); box-shadow: 0 0 0 1px rgba(var(--green-rgb),.4), 0 2px 12px rgba(0,0,0,.4); }
 /* The 34px buttons flex-end (pin to bottom for multi-line), but a single-line textarea is ~4px taller
    than a button, so pinned-to-bottom reads ~2px low. Lift them 2px → centred on one line, still hugging
    the bottom when the box grows. */
@@ -336,7 +345,7 @@ body { font-family: -apple-system, system-ui, sans-serif; background: #1a1b1e; c
 .quick-cmd { flex: none; display: inline-flex; align-items: center; white-space: nowrap;
   border: 1px solid; border-radius: 12px;
   color: rgb(var(--rgb)); border-color: rgba(var(--rgb), .5); background: rgba(var(--rgb), .13);
-  font: inherit; font-size: 13.5px; padding: 7px 12px; line-height: 1;
+  font: inherit; font-size: 12.5px; padding: 7px 12px; line-height: 1;
   touch-action: manipulation; -webkit-user-select: none; user-select: none; }
 .quick-cmd:active { background: rgba(var(--rgb), .26); border-color: rgb(var(--rgb)); }
 /* Trailing ＋ on the command strip: opens the command-list editor. Neutral (dashed) so it reads as
@@ -356,16 +365,16 @@ body { font-family: -apple-system, system-ui, sans-serif; background: #1a1b1e; c
 /* 上传进度条:浮在输入行上方一条(失败时变红、文案自带原因),沿用 browse-progress 配色。 */
 .dock-upload { padding: 6px 4px 2px; }
 .dock-upload-label { display: block; color: #9fb6d0; font-size: 12px; margin-bottom: 4px; font-variant-numeric: tabular-nums; }
-.dock-upload.error .dock-upload-label { color: #ff8a8a; }
+.dock-upload.error .dock-upload-label { color: var(--red); }
 .dock-upload-track { display: block; height: 4px; border-radius: 2px; background: #1c2b3a; overflow: hidden; }
 .dock-upload-fill { display: block; height: 100%; background: #3a5a7e; transition: width .1s linear; }
 /* 发送 ↑:常驻输入框最右、贴最后一行(多行时跟到底部);点=发送、长按=填入。 */
 .input-send { flex: none; width: 34px; height: 34px;
   display: inline-flex; align-items: center; justify-content: center;
-  border: none; border-radius: 50%; background: #4a7cff; color: #fff; padding: 0;
-  box-shadow: 0 1px 4px rgba(74,124,255,.45);
+  border: none; border-radius: 50%; background: var(--blue); color: #fff; padding: 0;
+  box-shadow: 0 1px 4px rgba(var(--blue-rgb),.45);
   touch-action: manipulation; -webkit-user-select: none; user-select: none; }
-.input-send:active { background: #3a66e0; }
+.input-send:active { background: var(--blue-press); }
 /* 空框:仍不可发送,但别用扎眼的禁用灰——沿用麦克风的待命外观(暗底+柔和图标),不给人"点不了/坏了"的感觉。 */
 .input-send:disabled { background: rgba(0,0,0,.25); color: #b6c0cc; box-shadow: none; }
 .input-send svg { width: 20px; height: 20px; display: block; }
@@ -375,20 +384,20 @@ body { font-family: -apple-system, system-ui, sans-serif; background: #1a1b1e; c
   border: none; border-radius: 8px; background: transparent; color: #8a93a0; padding: 0;
   touch-action: manipulation; -webkit-user-select: none; user-select: none; }
 .input-history svg { width: 20px; height: 20px; display: block; }
-.input-history:active { color: #4a7cff; }
+.input-history:active { color: var(--blue); }
 /* 录音态:整条输入框变绿 + 明显的呼吸发光(替代单独的"聆听中"提示)。粗绿边 + 一明一暗的绿光晕。 */
-.input-wrap.recording { background: rgba(7,193,96,.14); border: 2px solid #07c160; animation: rec-breathe 1.3s ease-in-out infinite; }
+.input-wrap.recording { background: rgba(var(--green-rgb),.14); border: 2px solid var(--green); animation: rec-breathe 1.3s ease-in-out infinite; }
 .input-wrap.recording .input-text { color: #eafff3; }
 @keyframes rec-breathe {
-  0%,100% { box-shadow: 0 0 5px 0 rgba(7,193,96,.30); border-color: #2fd07e; }
-  50%     { box-shadow: 0 0 16px 4px rgba(7,193,96,.80); border-color: #07c160; }
+  0%,100% { box-shadow: 0 0 5px 0 rgba(var(--green-rgb),.30); border-color: #2fd07e; }
+  50%     { box-shadow: 0 0 16px 4px rgba(var(--green-rgb),.80); border-color: var(--green); }
 }
 /* 内嵌点按麦克风:灰待命,绿(.on)正在听。常驻在发送 ↑ 左边、贴最后一行(多行时跟到底部)。 */
 .input-mic { flex: none; width: 34px; height: 34px;
   display: inline-flex; align-items: center; justify-content: center;
   border: none; border-radius: 50%; background: rgba(0,0,0,.25); color: #b6c0cc; padding: 0;
   touch-action: manipulation; -webkit-user-select: none; user-select: none; }
-.input-mic.on { color: #fff; background: #07c160; }
+.input-mic.on { color: #fff; background: var(--green); }
 .input-mic:disabled { opacity: .5; }
 .input-mic svg { width: 21px; height: 21px; display: block; }
 /* Command panel: a bottom sheet over a dim backdrop. position:fixed bottom:0 — when the keyboard is
@@ -409,9 +418,9 @@ body { font-family: -apple-system, system-ui, sans-serif; background: #1a1b1e; c
 .cmd-close svg { width: 16px; height: 16px; display: block; }
 /* + in the editor header — opens the add card. A filled brand-blue pill so "add" reads as the primary action. */
 .cmd-add-open { display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px;
-  border: none; border-radius: 9px; background: #3a6bff; color: #fff; padding: 0; touch-action: manipulation;
-  box-shadow: 0 1px 4px rgba(58,107,255,.4); }
-.cmd-add-open:active { background: #2f59db; }
+  border: none; border-radius: 9px; background: var(--blue); color: #fff; padding: 0; touch-action: manipulation;
+  box-shadow: 0 1px 4px rgba(var(--blue-rgb),.4); }
+.cmd-add-open:active { background: var(--blue-press); }
 .cmd-add-open svg { width: 18px; height: 18px; display: block; }
 .cmd-list { overflow-y: auto; -webkit-overflow-scrolling: touch; padding: 6px 0 10px; }
 /* In the saved-command EDITOR the two sections (global / window) split the sheet evenly — each takes half
@@ -462,7 +471,7 @@ button.cmd-text { background: none; border: none; text-align: left; }
 .fav-chip { background: #2a3a2e; border: 1px solid #3d5a44; color: #9fe0af; border-radius: 16px; padding: 8px 14px; font-size: 14px; }
 .fav-add { display: flex; gap: 8px; margin-top: 8px; }
 .fav-add-input { flex: 1; min-width: 0; background: #16171c; border: 1px solid #444; border-radius: 6px; color: #fff; padding: 8px; font-size: 16px; }
-.fav-add-btn { border: none; border-radius: 6px; background: #3a6bff; color: #fff; padding: 0 14px; }
+.fav-add-btn { border: none; border-radius: 6px; background: var(--blue); color: #fff; padding: 0 14px; }
 
 /* Command-mode saved-command editor: a taller sheet (never a sliver) with two sections. */
 .cmd-panel.cmd-editor { min-height: 58vh; }
@@ -497,7 +506,7 @@ button.cmd-text { background: none; border: none; text-align: left; }
   font-size: 17px; font-weight: 600; color: rgba(235,235,245,.5); touch-action: manipulation; transition: color .15s; }
 .cmd-modetab.on { color: #fff; }
 .cmd-modetab.on::after { content: ''; position: absolute; left: 0; right: 0; bottom: -1px; height: 2.5px;
-  border-radius: 2px; background: #0a84ff; }
+  border-radius: 2px; background: var(--blue); }
 /* iOS-style segmented control — the 全局/窗口 scope switch. Faint track, a raised pill for the selection. */
 .cmd-seg { display: flex; gap: 2px; background: rgba(118,118,128,.22); border-radius: 9px; padding: 2px; }
 .cmd-seg-btn { flex: 1; border: none; background: transparent; color: rgba(235,235,245,.62); font: inherit;
@@ -514,7 +523,7 @@ button.cmd-text { background: none; border: none; text-align: left; }
   color: #f2f2f7; padding: 12px 13px; font: 16px/1.2 ui-monospace, 'SF Mono', Menlo, monospace;
   box-shadow: 0 0 0 1px transparent; transition: box-shadow .15s; }
 .cmd-add-input::placeholder { color: rgba(235,235,245,.3); }
-.cmd-add-input:focus { outline: none; box-shadow: 0 0 0 2px #0a84ff; }
+.cmd-add-input:focus { outline: none; box-shadow: 0 0 0 2px var(--blue); }
 .cmd-chord-preview { align-self: flex-start; color: #64d2ff; font-size: 13px; font-weight: 700; letter-spacing: .3px; }
 /* 带回车 — a filled cell with an iOS toggle switch on the right. */
 .cmd-toggle-row { display: flex; align-items: center; justify-content: space-between; gap: 8px;
@@ -523,21 +532,21 @@ button.cmd-text { background: none; border: none; text-align: left; }
 .cmd-switch { position: relative; flex: none; width: 51px; height: 31px; }
 .cmd-switch input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; z-index: 1; }
 .cmd-switch-track { position: absolute; inset: 0; background: #39393d; border-radius: 16px; transition: background .22s ease; }
-.cmd-switch input:checked ~ .cmd-switch-track { background: #34c759; }
+.cmd-switch input:checked ~ .cmd-switch-track { background: var(--green); }
 .cmd-switch-knob { position: absolute; top: 2px; left: 2px; width: 27px; height: 27px; border-radius: 50%;
   background: #fff; box-shadow: 0 2px 5px rgba(0,0,0,.35); transition: transform .22s ease; }
 .cmd-switch input:checked ~ .cmd-switch-knob { transform: translateX(20px); }
 /* Primary submit — full-width iOS blue, dims when there's nothing valid to save. */
-.cmd-submit { border: none; border-radius: 13px; background: #0a84ff; color: #fff; font: inherit;
+.cmd-submit { border: none; border-radius: 13px; background: var(--blue); color: #fff; font: inherit;
   font-size: 17px; font-weight: 600; padding: 13px 0; margin-top: 2px; touch-action: manipulation; transition: background .12s; }
-.cmd-submit:active { background: #0a6fd8; }
+.cmd-submit:active { background: var(--blue-press); }
 .cmd-submit:disabled { background: #2c2c2e; color: rgba(235,235,245,.3); }
 /* Custom dropdown (no native <select>): a filled cell + a floating option list dismissed by a transparent scrim. */
 .cmd-dd { position: relative; }
 .cmd-dd-btn { display: flex; align-items: center; justify-content: space-between; width: 100%; box-sizing: border-box;
   background: #2c2c2e; border: none; border-radius: 10px; color: #f2f2f7; font: inherit; font-size: 16px;
   padding: 12px 13px; box-shadow: 0 0 0 2px transparent; transition: box-shadow .15s; touch-action: manipulation; }
-.cmd-dd-btn.open { box-shadow: 0 0 0 2px #0a84ff; }
+.cmd-dd-btn.open { box-shadow: 0 0 0 2px var(--blue); }
 .cmd-dd-btn svg { width: 17px; height: 17px; color: rgba(235,235,245,.5); transition: transform .18s; }
 .cmd-dd-btn.open svg { transform: rotate(180deg); }
 .cmd-dd-ph { color: rgba(235,235,245,.3); }
@@ -548,7 +557,7 @@ button.cmd-text { background: none; border: none; text-align: left; }
 .cmd-dd-opt { display: flex; align-items: center; justify-content: space-between; width: 100%; border: none;
   background: transparent; color: #f2f2f7; font: inherit; font-size: 16px; text-align: left; padding: 11px 12px;
   border-radius: 8px; touch-action: manipulation; }
-.cmd-dd-opt.on { color: #0a84ff; font-weight: 600; }
+.cmd-dd-opt.on { color: var(--blue); font-weight: 600; }
 .cmd-dd-opt:active { background: #3a3a3c; }
 .cmd-dd-opt svg { width: 16px; height: 16px; }
 
@@ -566,12 +575,12 @@ button.cmd-text { background: none; border: none; text-align: left; }
   border: 1px solid #3a3c42; border-radius: 8px; background: #1b1c1f; color: #e6e6e6;
   font: 14px/1.4 -apple-system, system-ui, sans-serif;
 }
-.idea-input:focus { outline: none; border-color: #5b78d6; }
+.idea-input:focus { outline: none; border-color: var(--blue); }
 /* Mic + add form one round-button cluster at the box's bottom-right. The shared MicButton is
    absolute-anchored for the dock; here it's a normal flex item, same 34px circle as the add ＋. */
 .idea-compose .input-mic { position: static; right: auto; bottom: auto; flex: none; }
 .idea-act { flex: none; width: 34px; height: 34px; display: inline-flex; align-items: center; justify-content: center;
-  border: none; border-radius: 50%; background: #3a6df0; color: #fff; padding: 0; touch-action: manipulation; }
+  border: none; border-radius: 50%; background: var(--blue); color: #fff; padding: 0; touch-action: manipulation; }
 .idea-act:disabled { background: rgba(0,0,0,.25); color: #b6c0cc; opacity: .55; }
 .idea-act svg { width: 20px; height: 20px; display: block; }
 .idea-cancel { flex: none; background: none; border: none; color: #aaa; font-size: 13px; padding: 9px 4px; touch-action: manipulation; }
@@ -605,14 +614,14 @@ button.cmd-text { background: none; border: none; text-align: left; }
 /* Unread dot — on the settings gear (topbar) and the changelog row label. */
 .topbar-icon { position: relative; }
 .topbar-dot { position: absolute; top: 4px; right: 4px; width: 7px; height: 7px; border-radius: 50%;
-  background: #ff5a52; box-shadow: 0 0 0 2px #1b1c1f; }
+  background: var(--red); box-shadow: 0 0 0 2px #1b1c1f; }
 /* Idea count badge on the bulb icon — muted, not alarming. */
 .idea-badge { position: absolute; top: 2px; right: 1px; min-width: 14px; height: 14px;
   border-radius: 7px; padding: 0 3px; box-sizing: border-box;
   background: #3d5068; color: #a8c4e0; font-size: 9px; font-weight: 700;
   line-height: 14px; text-align: center; pointer-events: none; }
 .settings-dot { display: inline-block; width: 7px; height: 7px; margin-left: 6px; border-radius: 50%;
-  background: #ff5a52; vertical-align: middle; }
+  background: var(--red); vertical-align: middle; }
 
 .sheet-actions { display: flex; flex-direction: column; gap: 8px; }
 .sheet-action {
@@ -620,8 +629,8 @@ button.cmd-text { background: none; border: none; text-align: left; }
   background: #2a2c31; color: #ddd; font-size: 15px; text-align: center;
   touch-action: manipulation;
 }
-.sheet-action.danger { color: #ff8585; }
-.sheet-action.armed { background: #ff8585; color: #fff; border-color: #ff8585; }
+.sheet-action.danger { color: var(--red); }
+.sheet-action.armed { background: var(--red); color: #fff; border-color: var(--red); }
 .sheet-action:disabled { opacity: 0.4; }
 .sheet-row { display: flex; gap: 8px; }
 .sheet-row .sheet-action { flex: 1; }
@@ -651,7 +660,7 @@ button.cmd-text { background: none; border: none; text-align: left; }
 .file-tabs-scroll { display: flex; overflow-x: auto; flex: 1; -webkit-overflow-scrolling: touch; }
 /* .file-tab is a flex container (div); .file-tab-label is the activation button, .file-tab-x the close button */
 .file-tab { display: inline-flex; align-items: center; white-space: nowrap; border-right: 1px solid #1d2630; }
-.file-tab.active { background: #0b0f14; box-shadow: inset 0 -2px 0 #4aa3ff; }
+.file-tab.active { background: #0b0f14; box-shadow: inset 0 -2px 0 var(--blue); }
 .file-tab-label { display: inline-flex; align-items: center; gap: 5px; padding: 10px 8px 10px 12px; background: transparent; border: none; color: #9fb0c0; font-size: 13px; }
 .file-tab-label svg { width: 15px; height: 15px; }
 .file-tab.active .file-tab-label { color: #e6edf3; }
@@ -690,7 +699,7 @@ button.cmd-text { background: none; border: none; text-align: left; }
 .preview-head { position: relative; align-items: center; gap: 4px; min-height: 44px; padding-left: 10px; }
 .preview-status { display: inline-flex; align-items: center; gap: 5px; min-width: 0; color: #e6edf3; font-size: 12px; }
 .preview-status svg { width: 15px; height: 15px; flex: 0 0 auto; }
-.preview-state { color: #3fb950; font-weight: 600; flex: 0 0 auto; }
+.preview-state { color: var(--green); font-weight: 600; flex: 0 0 auto; }
 .preview-name { color: #9fb0c0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .preview-detail { color: #6e7d8c; margin-left: 6px; }
 /* TTL chip — minutes only; tap to open the 续期/关闭 popover. */
@@ -699,7 +708,7 @@ button.cmd-text { background: none; border: none; text-align: left; }
   color: #9fb0c0; font-size: 12px; padding: 4px 8px;
   background: transparent; border: 1px solid #33353a; border-radius: 6px; touch-action: manipulation;
 }
-.preview-remain:active { color: #4aa3ff; border-color: #4aa3ff; }
+.preview-remain:active { color: var(--blue); border-color: var(--blue); }
 .preview-pop-backdrop { position: fixed; inset: 0; z-index: 5; }
 .preview-pop {
   position: absolute; top: 46px; right: 8px; z-index: 6; min-width: 168px;
@@ -708,11 +717,11 @@ button.cmd-text { background: none; border: none; text-align: left; }
 }
 .preview-pop-item { background: transparent; border: none; color: #e6edf3; text-align: left; padding: 10px 12px; border-radius: 6px; font-size: 14px; }
 .preview-pop-item:active { background: #2f3338; }
-.preview-pop-danger { color: #ffb4b4; }
+.preview-pop-danger { color: var(--red); }
 /* Compact icon actions so the status + name + countdown stay visible on a narrow phone. */
 .preview-iconbtn { flex: 0 0 auto; width: 32px; display: inline-flex; align-items: center; justify-content: center; background: transparent; border: none; color: #9fb0c0; touch-action: manipulation; }
 .preview-iconbtn svg { width: 17px; height: 17px; }
-.preview-iconbtn:active { color: #4aa3ff; }
+.preview-iconbtn:active { color: var(--blue); }
 .preview-head .file-min { width: 34px; }
 .preview-head .file-min svg { width: 18px; height: 18px; }
 /* 停止 confirm — overlaid INSIDE the sheet (which is its own z50 stacking context) so it sits above
@@ -722,7 +731,7 @@ button.cmd-text { background: none; border: none; text-align: left; }
 .preview-confirm-title { font-size: 16px; font-weight: 600; color: #e6edf3; margin-bottom: 8px; }
 .preview-confirm-text { font-size: 13px; color: #9aa3ad; line-height: 1.5; margin-bottom: 14px; }
 .preview-confirm-btns { display: flex; justify-content: flex-end; gap: 8px; }
-.preview-confirm-danger { background: #5a1f1f; color: #ffb4b4; }
+.preview-confirm-danger { background: #5a1f1f; color: var(--red); }
 
 /* Settings group heading (全局设置 / 当前会话设置) — a full-bleed banded separator (breaks out of the
    card's 16px padding) so the two scopes read as clearly distinct sections, iOS grouped-list style. */
@@ -735,8 +744,8 @@ button.cmd-text { background: none; border: none; text-align: left; }
 .settings-head + .settings-group { margin-top: 0; } /* first band hugs the title */
 .settings-group + .settings-section { border-top: none; } /* band's own border is the separator */
 /* "运行中" inline status in the settings preview row. */
-.preview-running { display: inline-flex; align-items: center; gap: 6px; color: #3fb950; font-weight: 600; font-size: 13px; }
-.live-dot { width: 8px; height: 8px; border-radius: 50%; background: #3fb950; }
+.preview-running { display: inline-flex; align-items: center; gap: 6px; color: var(--green); font-weight: 600; font-size: 13px; }
+.live-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); }
 .preview-port {
   width: 9em;
   padding: 6px 10px;
@@ -756,7 +765,7 @@ button.cmd-text { background: none; border: none; text-align: left; }
   padding: 7px 18px; min-width: 60px; font-size: 14px; touch-action: manipulation;
 }
 .preview-seg button + button { border-left: 1px solid #3a3c42; }
-.preview-seg button.on { background: #2f6df6; color: #fff; }
+.preview-seg button.on { background: var(--blue); color: #fff; }
 
 /* Start block (no active preview): the 不开启/静态/动态 segmented control + its controls, spaced. */
 .preview-start { display: flex; flex-direction: column; gap: 12px; }
@@ -764,10 +773,10 @@ button.cmd-text { background: none; border: none; text-align: left; }
 .preview-active { display: flex; flex-direction: column; gap: 10px; }
 .preview-active-head { display: flex; align-items: center; gap: 10px; }
 .preview-remain-s { margin-left: auto; font-variant-numeric: tabular-nums; color: #9aa3ad; font-size: 13px; }
-.settings-err { color: #ff9d9d; }
+.settings-err { color: var(--red); }
 
 /* Live preview → the topbar icon goes steady green (a calm "server running" tell, no blink). */
-.preview-live { color: #3fb950; }
+.preview-live { color: var(--green); }
 
 /* Home tab — 最近 / 新增 segmented switch + the active pane */
 .home-pane { flex: 1; display: flex; flex-direction: column; min-width: 0; }
@@ -796,7 +805,7 @@ button.cmd-text { background: none; border: none; text-align: left; }
 .git-tab-add { flex: 0 0 auto; width: 40px; display: inline-flex; align-items: center; justify-content: center;
   background: transparent; border: none; border-right: 1px solid #1d2630; color: #8fb2dc; font-size: 20px; line-height: 1; }
 .git-tab { flex: 0 0 auto; display: inline-flex; align-items: center; white-space: nowrap; border-right: 1px solid #1d2630; }
-.git-tab.active { background: #0b0f14; box-shadow: inset 0 -2px 0 #4aa3ff; }
+.git-tab.active { background: #0b0f14; box-shadow: inset 0 -2px 0 var(--blue); }
 .git-tab-label { display: inline-flex; align-items: center; padding: 10px 4px 10px 12px; background: transparent; border: none; color: #9fb0c0; font-size: 13px; }
 .git-tab.active .git-tab-label { color: #e6edf3; }
 .git-tab-x { background: transparent; border: none; color: #6b7a89; font-size: 11px; padding: 0 10px 0 4px; align-self: stretch; }
@@ -808,8 +817,8 @@ button.cmd-text { background: none; border: none; text-align: left; }
 .git-branch-bar-name { flex: 1; min-width: 0; color: #cfe0f2; font-weight: 600; display: flex; align-items: center;
   gap: 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .git-branch-glyph { color: #8fb2dc; }
-.git-branch-cur-tag { flex: 0 0 auto; font-size: 11px; font-weight: 600; color: #3fb950;
-  background: rgba(63,185,80,.12); border: 1px solid rgba(63,185,80,.4); border-radius: 999px; padding: 1px 7px; }
+.git-branch-cur-tag { flex: 0 0 auto; font-size: 11px; font-weight: 600; color: var(--green);
+  background: rgba(var(--green-rgb),.12); border: 1px solid rgba(var(--green-rgb),.4); border-radius: 999px; padding: 1px 7px; }
 .git-branch-bar-track { flex: 0 0 auto; font-size: 12px; font-variant-numeric: tabular-nums; display: flex; gap: 5px; }
 .git-branch-dd { position: relative; flex: 0 0 auto; }
 .git-branch-trigger { max-width: 46vw; display: flex; align-items: center; gap: 5px;
@@ -854,7 +863,7 @@ button.cmd-text { background: none; border: none; text-align: left; }
 .git-body { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden;
   padding-bottom: var(--kb-inset, 0px); }
 .git-scroll { flex: 1; min-height: 0; overflow: auto; -webkit-overflow-scrolling: touch; }
-.git-error { color: #ff9d9d; font-size: 13px; padding: 14px 16px; }
+.git-error { color: var(--red); font-size: 13px; padding: 14px 16px; }
 .git-loading, .git-empty { color: #6b7a89; font-size: 13px; padding: 16px; }
 
 .git-list { display: flex; flex-direction: column; }
@@ -865,7 +874,7 @@ button.cmd-text { background: none; border: none; text-align: left; }
 .git-badge { flex: 0 0 auto; width: 20px; text-align: center; font-size: 12px; font-weight: 600;
   font-variant-numeric: tabular-nums; color: #9aa3ad; }
 .git-badge-m { color: #d8a13a; }       /* modified — amber */
-.git-badge-a { color: #3fb950; }       /* added — green */
+.git-badge-a { color: var(--green); }       /* added — green */
 .git-badge-d { color: #f06b6b; }       /* deleted — red */
 .git-badge-r { color: #8fb2dc; }       /* renamed — blue */
 .git-badge-q { color: #6b7a89; }       /* untracked (?) — muted */
@@ -879,9 +888,9 @@ button.cmd-text { background: none; border: none; text-align: left; }
 .git-branch { gap: 8px; }
 .git-branch.current .git-row-path { color: #cfe0f2; font-weight: 600; }
 .git-branch.viewing { background: #11161d; box-shadow: inset 3px 0 0 #2f6fc0; }
-.git-branch-dot { flex: 0 0 auto; width: 12px; text-align: center; color: #3fb950; font-size: 11px; }
+.git-branch-dot { flex: 0 0 auto; width: 12px; text-align: center; color: var(--green); font-size: 11px; }
 .git-branch-up { flex: 0 0 auto; color: #6b7a89; font-size: 11px; font-variant-numeric: tabular-nums; }
-.git-ahead { color: #3fb950; }
+.git-ahead { color: var(--green); }
 .git-behind { color: #f06b6b; }
 
 .git-commit-detail { display: flex; flex-direction: column; }
@@ -1001,7 +1010,7 @@ button.cmd-text { background: none; border: none; text-align: left; }
 .browse-copy:active { color: #9db8ff; }
 /* pickMode: sticky confirm bar at the bottom of the directory list. */
 .browse-pick-bar { padding: 8px; border-top: 1px solid #1d2630; }
-.browse-pick-confirm { width: 100%; padding: 10px; border: none; border-radius: 8px; background: #4a7cff; color: #fff; font-size: 14px; }
+.browse-pick-confirm { width: 100%; padding: 10px; border: none; border-radius: 8px; background: var(--blue); color: #fff; font-size: 14px; }
 
 /* DirPicker overlay: wider + taller than a standard settings-card to fit the browser list. The
    --kb-inset (soft-keyboard height, set inline by DirPicker) shrinks the card so its bottom (the
@@ -1032,13 +1041,13 @@ button.cmd-text { background: none; border: none; text-align: left; }
 .doc-zoom-icon svg { width: 17px; height: 17px; display: block; }
 /* Currently-spoken sentence: a soft highlight that follows the read-aloud. box-decoration-break so a
    sentence wrapping across lines tints every line, not just the first. */
-.tts-active { background: rgba(74,124,255,0.30); border-radius: 3px;
+.tts-active { background: rgba(var(--blue-rgb),0.30); border-radius: 3px;
   box-decoration-break: clone; -webkit-box-decoration-break: clone; }
 .doc-md { padding: 16px; color: #e6edf3; line-height: 1.6; word-wrap: break-word; }
 .doc-md h1, .doc-md h2, .doc-md h3 { border-bottom: 1px solid #1d2630; padding-bottom: 4px; }
 .doc-md pre { background: #11161d; padding: 12px; border-radius: 8px; overflow: auto; }
 .doc-md code { background: #11161d; padding: 1px 4px; border-radius: 4px; }
-.doc-md a { color: #4aa3ff; }
+.doc-md a { color: var(--blue); }
 .doc-md img { max-width: 100%; }
 /* wide tables scroll inside themselves instead of widening the doc (overflow-x is hidden there) */
 .doc-md table { display: block; max-width: 100%; overflow-x: auto; border-collapse: collapse; }
@@ -1115,8 +1124,8 @@ button.cmd-text { background: none; border: none; text-align: left; }
   border: 1.5px solid #2a2b2e; /* ring in the topbar colour so it reads as a separate badge */
 }
 .inbox-dot.needs { background: #e0a020; }
-.inbox-dot.done { background: #2e7d46; }
-.inbox-dot.working { background: #2f6fed; animation: tw-blink 1s ease-in-out infinite; }
+.inbox-dot.done { background: var(--green); }
+.inbox-dot.working { background: var(--blue); animation: tw-blink 1s ease-in-out infinite; }
 @media (prefers-reduced-motion: reduce) { .inbox-dot.working { animation: none; } }
 .inbox-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,.5); z-index: 19; }
 .inbox-panel {
@@ -1138,8 +1147,8 @@ button.cmd-text { background: none; border: none; text-align: left; }
 .win-tab .agent-mark { vertical-align: -2px; margin-right: 4px; }
 .inbox-chip { font-size: 11px; padding: 1px 6px; border-radius: 4px; flex: none; }
 .inbox-chip.needs { background: #e0a020; color: #111; }
-.inbox-chip.done { background: #2e7d46; color: #fff; }
-.inbox-chip.working { background: #2f6fed; color: #fff; animation: tw-blink 1s ease-in-out infinite; }
+.inbox-chip.done { background: var(--green); color: #fff; }
+.inbox-chip.working { background: var(--blue); color: #fff; animation: tw-blink 1s ease-in-out infinite; }
 @keyframes tw-blink { 50% { opacity: .4; } }
 @media (prefers-reduced-motion: reduce) { .inbox-chip.working { animation: none; } }
 .inbox-head { display: flex; align-items: center; gap: 8px; padding: 2px 8px 8px; font-size: 13px; color: #9aa0a6; }
@@ -1147,7 +1156,7 @@ button.cmd-text { background: none; border: none; text-align: left; }
    right cluster; 清除已完成 follows it). Chips reuse the inbox-chip colours but static + a touch smaller. */
 .inbox-summary { display: flex; gap: 4px; margin-left: auto; }
 .inbox-summary .inbox-chip { animation: none; font-size: 10px; padding: 1px 5px; }
-.inbox-readall { background: none; border: none; color: #4aa3ff; font-size: 13px; padding: 4px 6px; touch-action: manipulation; }
+.inbox-readall { background: none; border: none; color: var(--blue); font-size: 13px; padding: 4px 6px; touch-action: manipulation; }
 .inbox-loc { font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .inbox-time { margin-left: auto; font-size: 11px; color: #888; flex: none; }
 .inbox-msg { font-size: 12px; color: #9aa0a6; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -1156,9 +1165,9 @@ button.cmd-text { background: none; border: none; text-align: left; }
 .inbox-enable { display: flex; flex-direction: column; gap: 8px; align-items: stretch; text-align: left; }
 .inbox-enable-title { font-weight: 600; color: #e8eaed; font-size: 14px; }
 .inbox-enable-hint { color: #9aa0a6; font-size: 12px; line-height: 1.4; }
-.inbox-enable-btn { margin-top: 2px; padding: 8px 12px; border: none; border-radius: 8px; background: #2f6fed; color: #fff; font-size: 13px; touch-action: manipulation; }
+.inbox-enable-btn { margin-top: 2px; padding: 8px 12px; border: none; border-radius: 8px; background: var(--blue); color: #fff; font-size: 13px; touch-action: manipulation; }
 .inbox-enable-btn:disabled { opacity: 0.6; }
-.inbox-enable-err { color: #e06b5e; font-size: 12px; }
+.inbox-enable-err { color: var(--red); font-size: 12px; }
 
 /* 未接管会话: collapsible section at the bottom of the drawer session list. */
 .drawer-orphans { border-top: 1px solid #34353a; margin-top: 10px; padding-top: 6px; }
@@ -1181,13 +1190,13 @@ button.cmd-text { background: none; border: none; text-align: left; }
 .drawer-orphan-meta { display: flex; align-items: center; gap: 6px; margin-top: 2px; min-width: 0; }
 .drawer-orphan-agent { flex: none; font-size: 10px; padding: 0 5px; border-radius: 3px; background: #333a45; color: #c7ccd1; }
 .drawer-orphan-state { flex: none; font-size: 10px; padding: 0 5px; border-radius: 3px; }
-.drawer-orphan-state.idle { background: #2e7d46; color: #fff; }
-.drawer-orphan-state.busy { background: #2f6fed; color: #fff; }
+.drawer-orphan-state.idle { background: var(--green); color: #fff; }
+.drawer-orphan-state.busy { background: var(--blue); color: #fff; }
 .drawer-orphan-time { flex: none; font-size: 11px; color: #888; }
 .drawer-orphan-msg { flex: 1; min-width: 0; font-size: 11px; color: #9aa0a6; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* Takeover sheet: target picker (fontbtn group, aria-pressed = selected) + kill toggle. */
 .orphan-targets { display: flex; flex-wrap: wrap; gap: 6px; }
-.orphan-targets .fontbtn[aria-pressed="true"] { background: #2f6fed; color: #fff; border-color: #2f6fed; }
+.orphan-targets .fontbtn[aria-pressed="true"] { background: var(--blue); color: #fff; border-color: var(--blue); }
 .orphan-reco { margin-left: 6px; font-size: 10px; color: #7ee0a0; }
 .orphan-targets .fontbtn[aria-pressed="true"] .orphan-reco { color: #d6f5e3; }
 .orphan-help { font-size: 11px; color: #9aa0a6; line-height: 1.5; margin-top: 6px; }
