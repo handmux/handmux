@@ -48,21 +48,32 @@ function BottomDock({
   const setModeRef = useRef(setMode); // latest setMode (closes over the current pane)
   setModeRef.current = setMode;
   const firstSnapRef = useRef(true);
-  const applyX = (dx, animate) => {
-    const track = trackRef.current, pager = pagerRef.current;
-    if (!track || !pager) return;
-    const w = pager.clientWidth;
-    track.style.transition = animate ? 'transform .28s cubic-bezier(.22,.61,.36,1)' : 'none';
-    track.style.transform = `translate3d(${-pageIndexRef.current * w + dx}px, 0, 0)`;
+  // The track's horizontal position is driven imperatively — a 60fps finger drag can't go through React
+  // state without fighting re-renders. setX writes an absolute translate; settleTo snaps to a PAGE-ALIGNED
+  // rest. Everything that ends a gesture calls settleTo, so the track can never come to rest between pages.
+  const TRACK_EASE = 'transform .3s cubic-bezier(.22,.61,.36,1)';
+  const trackW = () => pagerRef.current?.clientWidth || 0;
+  const setX = (px, animate) => {
+    const track = trackRef.current;
+    if (!track) return;
+    track.style.transition = animate ? TRACK_EASE : 'none';
+    track.style.transform = `translate3d(${px}px, 0, 0)`;
   };
+  const settleTo = (index, animate) => setX(-index * trackW(), animate);
   // Snap to the current page whenever it changes (animated after the first render).
-  useEffect(() => { applyX(0, !firstSnapRef.current); firstSnapRef.current = false; }, [pageIndex]);
-  // Collapse the pager to the ACTIVE page's natural height so the chat page doesn't inherit the taller
-  // command keyboard's height; the CSS height transition animates the change on a page switch. Runs every
-  // render so it re-measures as the composer grows.
+  useEffect(() => { settleTo(pageIndex, !firstSnapRef.current); firstSnapRef.current = false; }, [pageIndex]);
+  // Size the pager to the ACTIVE page's natural height. This is genuinely variable: the chat composer
+  // grows with its text and can be taller OR shorter than the keyboard. Set it INSTANTLY — the CSS height
+  // transition is gone (styles.css): the terminal above is a poll-and-repaint surface, so animating the
+  // dock height would resize+repaint it every frame for 280ms → the flicker and the transient blank gap.
+  // One instant resize per change = one clean repaint. autoGrow first so multi-line text is fully measured
+  // (never clipped at the top). No React renders fire during a finger drag, so the height holds steady
+  // through the whole swipe — the terminal doesn't move until the page actually commits.
   useLayoutEffect(() => {
     const pager = pagerRef.current;
-    const active = pager?.querySelector(mode === 'command' ? '.dock-page.command' : '.dock-page.chat');
+    if (!pager) return;
+    if (mode === 'agent') autoGrow(ref.current);
+    const active = pager.querySelector(mode === 'command' ? '.dock-page.command' : '.dock-page.chat');
     if (active) pager.style.height = `${active.offsetHeight}px`;
   });
   // Native (non-passive) touch handlers so a horizontal drag can preventDefault the page's own scroll.
@@ -84,19 +95,24 @@ function BottomDock({
       if (!d.horiz) return; // a vertical drag → leave it to native scroll/selection
       e.preventDefault();
       d.dx = dx;
-      const w = pager.clientWidth || 1;
+      const w = trackW() || 1;
       let vx = dx; // follow the finger, but resist dragging past the ends (only two pages)
       if (pageIndexRef.current === 0) vx = Math.min(0, Math.max(-w, vx));
       else vx = Math.max(0, Math.min(w, vx));
-      applyX(vx, false);
+      setX(-pageIndexRef.current * w + vx, false);
     };
     const onEnd = () => {
       if (!d || !d.horiz) { d = null; return; }
       const cur = pageIndexRef.current, dx = d.dx;
       d = null;
-      if (cur === 0 && dx < -50) setModeRef.current('agent');        // dragged left off command → chat
-      else if (cur === 1 && dx > 50) setModeRef.current('command');  // dragged right off chat → command
-      else applyX(0, true);                                          // not far enough → snap back
+      let target = cur;
+      if (cur === 0 && dx < -50) target = 1;      // dragged far left off command → chat
+      else if (cur === 1 && dx > 50) target = 0;  // dragged far right off chat → command
+      // Settle to a page-aligned rest RIGHT NOW, imperatively — never wait on a React re-render (that
+      // timing gap is exactly what left the track stuck at half). Then sync React state if the page
+      // changed; its pageIndex effect re-runs settleTo to the same target, which is idempotent.
+      settleTo(target, true);
+      if (target !== cur) setModeRef.current(target === 1 ? 'agent' : 'command');
     };
     pager.addEventListener('touchstart', onStart, { passive: true });
     pager.addEventListener('touchmove', onMove, { passive: false });

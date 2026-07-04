@@ -321,6 +321,20 @@ const Terminal = forwardRef(function Terminal({ pane, onAuthFail, onDocLinkTap }
     const onResize = () => scheduleFit();
     window.addEventListener('resize', onResize);
     window.addEventListener('orientationchange', onResize);
+    // The bottom dock's height changes (swiping between the keyboard and the composer, the composer
+    // growing to multi-line) resize THIS container without firing a window resize — a plain resize
+    // listener misses them, leaving the grid short and a blank strip until the next poll. A
+    // ResizeObserver re-fits on any container height change. fit() only resizes xterm's internal grid,
+    // not the container box, so it can't drive the observer into a loop; the clientHeight guard skips
+    // no-op passes.
+    let lastFitH = elRef.current?.clientHeight || 0;
+    const ro = typeof ResizeObserver !== 'undefined'
+      ? new ResizeObserver(() => {
+          const h = elRef.current?.clientHeight || 0;
+          if (h && h !== lastFitH) { lastFitH = h; scheduleFit(); }
+        })
+      : null;
+    if (ro && elRef.current) ro.observe(elRef.current);
 
     // Map a viewport point to a buffer cell {col,row}, clamped to the visible grid. cellW/cellH
     // come from the live .xterm-screen box so they track the current font and horizontal scroll.
@@ -721,6 +735,7 @@ const Terminal = forwardRef(function Terminal({ pane, onAuthFail, onDocLinkTap }
       document.removeEventListener('visibilitychange', onVisibility);
       window.removeEventListener('resize', onResize);
       window.removeEventListener('orientationchange', onResize);
+      ro?.disconnect();
       host.removeEventListener('touchstart', onTouchStart, { capture: true });
       host.removeEventListener('touchmove', onTouchMove, { capture: true });
       host.removeEventListener('touchend', onTouchEnd, { capture: true });

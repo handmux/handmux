@@ -210,8 +210,9 @@ body { font-family: -apple-system, system-ui, sans-serif; background: #1a1b1e; c
    NOTE: font-size below 16px makes iOS Safari zoom the page when the field is focused. */
 /* 文字框本身透明无边框——圆角药丸框由 .input-wrap 画(见下方);这样 textarea 只占中间一段,
    左右按钮是它的 flex 兄弟、不再盖在它上面,选词/移光标碰不到按键。font-size 16 防 iOS 聚焦缩放。 */
-.input-text { flex: 1; min-width: 0; padding: 5px 4px; border: none; background: transparent; color: #fff; font-family: inherit; font-size: 16px; line-height: 22px; max-height: 156px; resize: none; overflow-y: auto; display: block; }
+.input-text { flex: 1; min-width: 0; padding: 7px 6px; border: none; background: transparent; color: #fff; font-family: inherit; font-size: 16px; line-height: 22px; max-height: 156px; resize: none; overflow-y: auto; display: block; }
 .input-text:focus { outline: none; }
+.input-text::placeholder { color: #6b7280; }
 .token-prompt button { padding: 8px 14px; border: none; border-radius: 6px; background: #4a7cff; color: #fff; }
 .drawer { position: fixed; top: 0; left: 0; width: 78%; max-width: 320px; height: 100%; background: #232427; transform: translateX(-100%); transition: transform .2s; z-index: 10; padding: 12px; display: flex; flex-direction: column; overflow: hidden; }
 .drawer.open { transform: translateX(0); }
@@ -250,8 +251,11 @@ body { font-family: -apple-system, system-ui, sans-serif; background: #1a1b1e; c
 .dock-dot { width: 6px; height: 6px; border-radius: 50%; background: #4a4d54; }
 .dock-dot.on { background: #4a7cff; }
 /* Swipe carousel: a two-page track (command | chat) that follows the finger and snaps with an ease
-   animation (transform set imperatively in BottomDock). Both pages stay mounted so they slide into view. */
-.dock-pager { overflow: hidden; min-width: 0; transition: height .28s cubic-bezier(.22,.61,.36,1); }
+   animation (transform set imperatively in BottomDock). Both pages stay mounted so they slide into view.
+   The pager's HEIGHT is deliberately NOT transitioned: the terminal above is poll-and-repaint, so easing
+   the dock height would resize+repaint it every frame → flicker + transient blank gap. Height is set
+   instantly in BottomDock (one clean resize per change). */
+.dock-pager { overflow: hidden; min-width: 0; }
 .dock-track { display: flex; align-items: flex-start; width: 200%; will-change: transform; }
 .dock-track > .dock-page { flex: 0 0 50%; width: 50%; min-width: 0; }
 .dock-page.command { position: relative; } /* anchors the hidden .cmd-capture */
@@ -281,9 +285,12 @@ body { font-family: -apple-system, system-ui, sans-serif; background: #1a1b1e; c
 /* 圆角药丸框即此 flex 行:＋(左)· textarea(中,flex:1 占满)· ▤/麦克风/发送(右),全是 flex 兄弟、
    互不重叠——按钮不再绝对定位盖在文字框上,所以在框里选词/移光标碰不到按键,键盘不会被误收。
    align-items: flex-end 让按钮在多行时跟到底部(同 .idea-compose 的做法)。position:relative 仅为锚定离屏 file 输入。 */
-.input-wrap { position: relative; flex: 1; min-width: 0; display: flex; align-items: flex-end; gap: 2px;
-  padding: 4px; border: 1px solid #444; border-radius: 6px; background: #1a1b1e; }
-.input-wrap:focus-within { border-color: #07c160; box-shadow: 0 0 0 1px rgba(7,193,96,.45); }
+/* 悬浮药丸:大圆角(单行是药丸、多行圆润长框)、细边、微阴影浮起、聚焦时品牌绿描边。按钮是它的
+   flex 兄弟贴底(flex-end),多行时跟到底部。 */
+.input-wrap { position: relative; flex: 1; min-width: 0; display: flex; align-items: flex-end; gap: 4px;
+  padding: 5px 6px 5px 5px; border: 1px solid #3a3d44; border-radius: 20px; background: #202227;
+  box-shadow: 0 1px 6px rgba(0,0,0,.35); transition: border-color .15s, box-shadow .15s; }
+.input-wrap:focus-within { border-color: #07c160; box-shadow: 0 0 0 1px rgba(7,193,96,.4), 0 2px 12px rgba(0,0,0,.4); }
 /* Command page shows NO box — the terminal is the display. The capture <input> is hidden but focusable
    (the ⌨ key focuses it to pop the system keyboard); each keystroke then streams into the pane. */
 .cmd-capture { position: absolute; left: 0; bottom: 0; width: 2px; height: 2px; padding: 0; margin: 0;
@@ -306,6 +313,7 @@ body { font-family: -apple-system, system-ui, sans-serif; background: #1a1b1e; c
 .input-send { flex: none; width: 34px; height: 34px;
   display: inline-flex; align-items: center; justify-content: center;
   border: none; border-radius: 50%; background: #4a7cff; color: #fff; padding: 0;
+  box-shadow: 0 1px 4px rgba(74,124,255,.45);
   touch-action: manipulation; -webkit-user-select: none; user-select: none; }
 .input-send:active { background: #3a66e0; }
 .input-send:disabled { background: #3a3c42; color: #6b7280; } /* 空框:禁用态(灰) */

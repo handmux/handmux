@@ -76,15 +76,39 @@ describe('KeyBar command grid', () => {
     expect(btn('ctrl').classList.contains('locked')).toBe(true);
   });
 
-  it('holding an arrow repeats, releasing stops', () => {
+  it('holding an arrow repeats after the swipe-guard, releasing stops', () => {
     vi.useFakeTimers();
     const onKey = vi.fn();
     render({ onKey });
     fire(btn('up'), 'pointerdown');
-    act(() => vi.advanceTimersByTime(400 + 120 + 120));
+    // 140ms guard → first press; then 400ms repeat delay + two 120ms intervals → two more.
+    act(() => vi.advanceTimersByTime(140 + 400 + 120 + 120));
     fire(btn('up'), 'pointerup');
     act(() => vi.advanceTimersByTime(1000));
     expect(onKey).toHaveBeenCalledTimes(3);
     expect(onKey).toHaveBeenCalledWith('Up');
+  });
+
+  it('a quick tap (release before the guard) fires exactly one press', () => {
+    vi.useFakeTimers();
+    const onKey = vi.fn();
+    render({ onKey });
+    fire(btn('up'), 'pointerdown');
+    act(() => vi.advanceTimersByTime(60)); // still inside the 140ms guard
+    fire(btn('up'), 'pointerup');
+    act(() => vi.advanceTimersByTime(1000));
+    expect(onKey).toHaveBeenCalledTimes(1);
+    expect(onKey).toHaveBeenCalledWith('Up');
+  });
+
+  it('a swipe (finger moves past the threshold) never fires — no stray key while paging', () => {
+    vi.useFakeTimers();
+    const onKey = vi.fn();
+    render({ onKey });
+    fire(btn('up'), 'pointerdown');
+    act(() => btn('up').dispatchEvent(new MouseEvent('pointermove', { bubbles: true, clientX: 40, clientY: 0 })));
+    act(() => vi.advanceTimersByTime(1000)); // guard would have elapsed, but the move cancelled it
+    fire(btn('up'), 'pointerup');
+    expect(onKey).not.toHaveBeenCalled();
   });
 });

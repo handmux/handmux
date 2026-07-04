@@ -65,19 +65,45 @@ function Key({ id, dispatch }) {
   const repRef = useRef(null);
   const dispatchRef = useRef(dispatch);
   dispatchRef.current = dispatch; // repeater must always call the latest dispatch (pane id changes)
+  const gRef = useRef(null);      // in-flight gesture: { x, y, guard, held, moved }
   const label = KEY_LABELS[id];
   if (!REPEAT_KEYS.has(id)) {
+    // Fires on CLICK (release), never on touch-down — a left/right page swipe that starts on the key
+    // moves off and cancels the click, so dragging across never triggers it.
     return <button type="button" className="keybar-key" data-key={id} onClick={() => dispatch(id)}>{label}</button>;
   }
-  // Held arrow / ⌫ repeats. Pointer events only (a tap = one pointerdown, no touch+mouse double-fire).
-  const start = (e) => {
+  // Held arrow / ⌫ auto-repeats — but a page swipe can start on a key too, so we must NOT fire on
+  // touch-down. A short guard disambiguates: hold still past it → the repeater kicks in (first press +
+  // repeat); release before it → one press (a tap); move the finger (a swipe) → cancel, no press.
+  const clearGuard = () => { const g = gRef.current; if (g?.guard) { clearTimeout(g.guard); g.guard = null; } };
+  const down = (e) => {
     if (e.cancelable) e.preventDefault();
     if (!repRef.current) repRef.current = createRepeater(() => dispatchRef.current(id));
-    repRef.current.start();
+    const g = { x: e.clientX, y: e.clientY, held: false, moved: false, guard: null };
+    g.guard = setTimeout(() => { g.held = true; g.guard = null; repRef.current.start(); }, 140);
+    gRef.current = g;
   };
-  const stop = () => repRef.current?.stop();
+  const move = (e) => {
+    const g = gRef.current;
+    if (!g || g.held) return; // once repeating we've committed to a press; a later drift doesn't matter
+    if (Math.abs(e.clientX - g.x) > 8 || Math.abs(e.clientY - g.y) > 8) { g.moved = true; clearGuard(); }
+  };
+  const up = () => {
+    const g = gRef.current;
+    if (!g) return;
+    clearGuard();
+    if (g.held) repRef.current.stop();          // was repeating → stop
+    else if (!g.moved) dispatchRef.current(id); // quick tap, never moved → one press
+    gRef.current = null;
+  };
+  const cancel = () => {
+    clearGuard();
+    if (gRef.current?.held) repRef.current.stop();
+    gRef.current = null; // swipe / leave / cancel → no press
+  };
   return (
     <button type="button" className="keybar-key" data-key={id}
-      onPointerDown={start} onPointerUp={stop} onPointerCancel={stop} onPointerLeave={stop}>{label}</button>
+      onPointerDown={down} onPointerMove={move} onPointerUp={up}
+      onPointerCancel={cancel} onPointerLeave={cancel}>{label}</button>
   );
 }
