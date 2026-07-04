@@ -337,13 +337,18 @@ body { font-family: -apple-system, system-ui, sans-serif; background: #1a1b1e; c
 .quick-cmd:active { background: rgba(var(--rgb), .26); border-color: rgb(var(--rgb)); }
 /* Trailing ＋ on the command strip: opens the command-list editor. Neutral (dashed) so it reads as
    "add", not a runnable command. */
-.quick-cmd-add { --rgb: 150,157,167; border-style: dashed; font-size: 15px; padding: 5px 12px; }
+.quick-cmd-add { --rgb: 150,157,167; border-style: dashed; padding: 5px 10px; }
+.quick-cmd-add svg { width: 15px; height: 15px; display: block; }
+/* Trailing ⏎ on a with-Enter command chip: a tap RUNS it (types + Enter), not just types it. */
+.qc-enter { margin-left: 5px; opacity: .7; font-size: 11px; }
 .qc-esc { --rgb: 150,157,167; }   /* 灰:按键(ESC/Tab)——和命令区分,不刺眼 */
 .qc-reply { --rgb: 95,208,138; }  /* 绿:ok/go on/1/2/3 */
 .qc-cmd { --rgb: 110,168,255; }   /* 蓝:斜杠命令 */
 /* Command-mode chips are all uniform grey (no per-category colour) — the command page is the plain shell,
    distinct from the chat page's colourful vibe commands. */
 .quick-cmd-plain { --rgb: 150,157,167; }
+/* Per-window saved commands — green, to set them apart from the grey global ones (shown after them). */
+.quick-cmd-win { --rgb: 95,208,138; }
 /* 上传进度条:浮在输入行上方一条(失败时变红、文案自带原因),沿用 browse-progress 配色。 */
 .dock-upload { padding: 6px 4px 2px; }
 .dock-upload-label { display: block; color: #9fb6d0; font-size: 12px; margin-bottom: 4px; font-variant-numeric: tabular-nums; }
@@ -427,6 +432,27 @@ body { font-family: -apple-system, system-ui, sans-serif; background: #1a1b1e; c
 .fav-add { display: flex; gap: 8px; margin-top: 8px; }
 .fav-add-input { flex: 1; min-width: 0; background: #16171c; border: 1px solid #444; border-radius: 6px; color: #fff; padding: 8px; font-size: 16px; }
 .fav-add-btn { border: none; border-radius: 6px; background: #3a6bff; color: #fff; padding: 0 14px; }
+
+/* Command-mode saved-command editor: a taller sheet (never a sliver) with two sections. */
+.cmd-panel.cmd-editor { min-height: 58vh; }
+.cmd-esection { padding-bottom: 6px; }
+.cmd-esection.win { margin-top: 4px; border-top: 1px solid #2c2e33; }
+.cmd-section.global .cmd-section-name { color: #aab0ba; }
+.cmd-section.win .cmd-section-name { color: #5fd08a; }
+/* A saved command's trailing ⏎ (runs on tap) in the editor rows. */
+.cmd-fav-text { flex: 1; }
+.cmd-enter { margin-left: 7px; opacity: .65; font-size: 12px; }
+/* ▲▼ reorder buttons — the up one is the same chevron flipped. Disabled at the list ends. */
+.cmd-move { flex: none; background: none; border: none; color: #8a93a0; padding: 6px 5px; touch-action: manipulation; display: inline-flex; align-items: center; }
+.cmd-move svg { width: 16px; height: 16px; display: block; }
+.cmd-move.up svg { transform: rotate(180deg); }
+.cmd-move:active { color: #9db8ff; }
+.cmd-move:disabled { opacity: .28; }
+/* Adder row: input, a 「带回车」checkbox, then Add. Wraps on narrow phones so nothing gets squeezed. */
+.cmd-add { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 14px 4px; }
+.cmd-add .fav-add-input { flex: 1 1 100%; }
+.cmd-enter-opt { display: inline-flex; align-items: center; gap: 6px; color: #c2c8d2; font-size: 13px; margin-right: auto; touch-action: manipulation; }
+.cmd-enter-opt input { width: 17px; height: 17px; accent-color: #5fd08a; }
 
 /* Idea panel: same bottom-sheet chrome as the command panel (reuses .cmd-backdrop / .cmd-head /
    .cmd-title / .cmd-close / .cmd-empty). One compose row (add+edit, with the push-to-talk mic) over a

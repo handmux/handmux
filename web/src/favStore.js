@@ -6,6 +6,13 @@
 // below over any older default (one-time; a customised list is rebuilt from it).
 const KEY = (mode) => `hm_favs6_${mode}`;
 
+// Command-mode saved commands split into two lists: the GLOBAL one (scope 'command' — the original list,
+// so existing commands stay put) shown first, and a PER-WINDOW one keyed by the tmux window id (following
+// the preview-dir precedent of keying persistent per-window data by window.id). Each item may carry an
+// `enter` flag: tapping it types the command AND presses Enter (runs it) rather than just typing it.
+export const CMD_GLOBAL = 'command';
+export const cmdScope = (windowId) => (windowId ? `command@${windowId}` : CMD_GLOBAL);
+
 export const DEFAULT_FAVS = {
   command: [],
   agent: [
@@ -39,9 +46,20 @@ export function saveFavs(mode, items) {
 export function addFav(mode, item) {
   const items = loadFavs(mode);
   if (items.some((f) => f.text === item.text)) return items; // dedupe by text
-  return saveFavs(mode, [...items, { kind: item.kind, text: item.text }]);
+  return saveFavs(mode, [...items, { kind: item.kind, text: item.text, enter: !!item.enter }]);
 }
 
 export function removeFav(mode, text) {
   return saveFavs(mode, loadFavs(mode).filter((f) => f.text !== text));
+}
+
+// Reorder one item by swapping it with its neighbour. dir < 0 = up, dir > 0 = down. No-op at the ends.
+export function moveFav(mode, text, dir) {
+  const items = loadFavs(mode);
+  const i = items.findIndex((f) => f.text === text);
+  const j = i + (dir < 0 ? -1 : 1);
+  if (i < 0 || j < 0 || j >= items.length) return items;
+  const next = items.slice();
+  [next[i], next[j]] = [next[j], next[i]];
+  return saveFavs(mode, next);
 }

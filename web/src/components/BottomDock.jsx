@@ -2,9 +2,10 @@ import { forwardRef, useEffect, useImperativeHandle, useLayoutEffect, useRef, us
 import { sendText, uploadFile, UnauthorizedError } from '../api.js';
 import KeyBar from './KeyBar.jsx';
 import FavDrawer from './FavDrawer.jsx';
+import CmdFavEditor from './CmdFavEditor.jsx';
 import MicButton from './MicButton.jsx';
-import { loadFavs } from '../favStore.js';
-import { ArrowUpIcon, UploadIcon, ClockIcon, KeyboardIcon } from './icons.jsx';
+import { loadFavs, cmdScope } from '../favStore.js';
+import { ArrowUpIcon, UploadIcon, ClockIcon, KeyboardIcon, GearIcon } from './icons.jsx';
 import { usePushToTalk } from '../voice/usePushToTalk.js';
 import { useAsrAvailable } from '../voice/useAsrAvailable.js';
 import { useScreenWakeLock } from '../hooks/useScreenWakeLock.js';
@@ -53,7 +54,7 @@ const chipTint = (text) => {
 };
 
 function BottomDock({
-  pane, onAuthFail, onKey, onText, cwd = null, agent = null,
+  pane, onAuthFail, onKey, onText, cwd = null, agent = null, windowId = null,
   recent = [], onSent, onRemoveRecent,
 }, fwdRef) {
   const [value, setValue] = useState('');
@@ -62,12 +63,18 @@ function BottomDock({
   // FavDrawer closes so add/delete there flow straight into the bar (single source of truth: favStore).
   const [favs, setFavs] = useState(() => loadFavs('agent'));
   useEffect(() => { if (!panelOpen) setFavs(loadFavs('agent')); }, [panelOpen]);
-  // Command mode has its OWN saved-command list (separate from the agent one) — shown in the command
-  // page's quick-bar. `cmdEditOpen` is the little editor drawer opened by the strip's ＋; reload the
-  // list whenever it closes so add/delete flow straight into the bar.
+  // Command mode has its OWN saved commands (separate from the agent list), split into a GLOBAL list
+  // (shown first, grey) and a PER-WINDOW list (shown after, green) — both in the command page's quick-bar.
+  // `cmdEditOpen` is the ⚙ editor sheet; reload BOTH lists whenever it closes (or the window changes) so
+  // add/delete/reorder flow straight into the bar.
   const [cmdFavs, setCmdFavs] = useState(() => loadFavs('command'));
+  const [winFavs, setWinFavs] = useState(() => (windowId ? loadFavs(cmdScope(windowId)) : []));
   const [cmdEditOpen, setCmdEditOpen] = useState(false);
-  useEffect(() => { if (!cmdEditOpen) setCmdFavs(loadFavs('command')); }, [cmdEditOpen]);
+  useEffect(() => {
+    if (cmdEditOpen) return;
+    setCmdFavs(loadFavs('command'));
+    setWinFavs(windowId ? loadFavs(cmdScope(windowId)) : []);
+  }, [cmdEditOpen, windowId]);
   const [modeOverride, setModeOverride] = useState({}); // pane → 'command' | 'agent'
   const mode = modeOverride[pane] || (agent ? 'agent' : 'command');
   const setMode = (next) => setModeOverride((m) => ({ ...m, [pane]: next }));
@@ -141,6 +148,17 @@ function BottomDock({
     const raf = requestAnimationFrame(() => { autoGrow(ref.current); syncPagerHeight(); });
     return () => cancelAnimationFrame(raf);
   }, [mode]);
+  // Leaving CHAT for command: the composer's textarea may still hold DOM focus (you were just typing in it).
+  // Once the track slides it off-screen (the right half), the browser will scroll-reveal that still-focused
+  // field by setting pager.scrollLeft — which drags the chat page back into view and parks the dock "half
+  // way" the instant you press ANY command key. Blur it so nothing off-screen keeps focus, and reset any
+  // scroll the browser already applied. (The pager is a transform carousel — see the scroll-pin below.)
+  useEffect(() => {
+    if (mode === 'agent') return;
+    if (document.activeElement === ref.current) ref.current?.blur();
+    const pager = pagerRef.current;
+    if (pager) { pager.scrollLeft = 0; pager.scrollTop = 0; }
+  }, [mode]);
   // Native (non-passive) touch handlers so a horizontal drag can preventDefault the page's own scroll.
   useEffect(() => {
     const pager = pagerRef.current;
@@ -211,11 +229,18 @@ function BottomDock({
       releaseTrack();
       if (target !== cur) setModeRef.current(target === 1 ? 'agent' : 'command');
     };
+    // The pager is a transform carousel: it must NEVER scroll. But an overflow:hidden box will still be
+    // scrolled by the browser to reveal a focused off-screen child (the chat composer, once command mode
+    // slides it into the right half). Snap any such scroll straight back to 0 — the hard guarantee that a
+    // keypress can't drag the other page into view / park the dock half-way.
+    const onScroll = () => { if (pager.scrollLeft || pager.scrollTop) { pager.scrollLeft = 0; pager.scrollTop = 0; } };
+    pager.addEventListener('scroll', onScroll, { passive: true });
     pager.addEventListener('touchstart', onStart, { passive: true });
     pager.addEventListener('touchmove', onMove, { passive: false });
     pager.addEventListener('touchend', onEnd, { passive: true });
     pager.addEventListener('touchcancel', onEnd, { passive: true });
     return () => {
+      pager.removeEventListener('scroll', onScroll);
       pager.removeEventListener('touchstart', onStart);
       pager.removeEventListener('touchmove', onMove);
       pager.removeEventListener('touchend', onEnd);
@@ -382,11 +407,13 @@ function BottomDock({
     if (KEY_FAVS[text]) { onKey(KEY_FAVS[text]); return; }
     sendFav(text);
   };
-  // COMMAND quick-bar tap: just TYPE the text into the terminal — no Enter (the shell is the display, like
-  // every other command-mode keystroke). A KEY_FAVS label (ESC/Tab) still fires the key.
-  const runCmdFav = (text) => {
-    if (KEY_FAVS[text]) { onKey(KEY_FAVS[text]); return; }
-    onText(text);
+  // COMMAND quick-bar tap. A KEY_FAVS label (ESC/Tab) fires the key. Otherwise: a with-Enter fav TYPES +
+  // runs it (sendFav = type + Enter, server-paced); a plain fav just types into the shell (the shell is
+  // the display, like every other command-mode keystroke — you press Enter yourself).
+  const runCmdFav = (f) => {
+    if (KEY_FAVS[f.text]) { onKey(KEY_FAVS[f.text]); return; }
+    if (f.enter) { sendFav(f.text); return; }
+    onText(f.text);
   };
 
   // Let the topbar idea panel drop a picked idea into the box (fill, never send) — same path as pick.
@@ -532,12 +559,20 @@ function BottomDock({
                     <KeyboardIcon down={keyboardUp} /><span>{keyboardUp ? t('dock.kbdHide') : t('dock.kbdShow')}</span></button>
                 </div>
                 <div className="quick-scroll">
+                  {/* Global commands first (grey), then this window's (green). A with-Enter fav shows a
+                      trailing ⏎ so you know a tap will RUN it, not just type it. */}
                   {cmdFavs.map((f) => (
-                    <button key={f.text} type="button" className="quick-cmd quick-cmd-plain"
-                      onPointerDown={keepFocus} onClick={() => runCmdFav(f.text)}>{f.text}</button>
+                    <button key={`g:${f.text}`} type="button" className="quick-cmd quick-cmd-plain"
+                      onPointerDown={keepFocus} onClick={() => runCmdFav(f)}>
+                      {f.text}{f.enter && <span className="qc-enter" aria-hidden="true">⏎</span>}</button>
                   ))}
-                  <button type="button" className="quick-cmd quick-cmd-add" aria-label={t('fav.add')}
-                    onClick={() => setCmdEditOpen(true)}>＋</button>
+                  {winFavs.map((f) => (
+                    <button key={`w:${f.text}`} type="button" className="quick-cmd quick-cmd-win"
+                      onPointerDown={keepFocus} onClick={() => runCmdFav(f)}>
+                      {f.text}{f.enter && <span className="qc-enter" aria-hidden="true">⏎</span>}</button>
+                  ))}
+                  <button type="button" className="quick-cmd quick-cmd-add" aria-label={t('cmd.editTitle')}
+                    onPointerDown={keepFocus} onClick={() => setCmdEditOpen(true)}><GearIcon /></button>
                 </div>
               </div>
               <KeyBar onKey={onKey} onText={onText} mods={mods} setMods={setMods} keyHeldRef={keyHeldRef} />
@@ -617,13 +652,10 @@ function BottomDock({
         onSend={(text) => { setPanelOpen(false); runFav(text); }}
         onFill={(text) => { setPanelOpen(false); fillFav(text); }}
         onClose={() => setPanelOpen(false)} />
-      {/* Command-mode command editor (add/delete the saved-command list behind the quick-bar ＋). Its own
-          drawer, always mode="command", so it never touches the agent list. Tap a row = run it (type +
-          Enter); double-tap = type it into the shell WITHOUT Enter (edit before running). */}
-      <FavDrawer open={cmdEditOpen} mode="command"
-        onSend={(text) => { setCmdEditOpen(false); runFav(text); }}
-        onFill={(text) => { setCmdEditOpen(false); onText(text); }}
-        onClose={() => setCmdEditOpen(false)} />
+      {/* Command-mode saved-command editor (opened by the ⚙ in the command quick-bar): two sections —
+          global + this window — each reorderable, each add with a 「带回车」toggle. Its own sheet, never
+          touches the agent list. */}
+      <CmdFavEditor open={cmdEditOpen} windowId={windowId} onClose={() => setCmdEditOpen(false)} />
     </div>
   );
 }

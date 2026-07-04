@@ -4,6 +4,14 @@ All notable changes to handmux. Format follows [Keep a Changelog](https://keepac
 
 ## [Unreleased]
 
+### Added
+- **Command mode: saved commands split into GLOBAL + THIS-WINDOW lists.** The command page's quick-bar
+  now shows your global commands (grey, first) followed by the current tmux window's own commands (green),
+  keyed by the stable window id. The trailing ＋ became a ⚙ that opens a taller editor with two sections;
+  each reorders with ▲▼, and adding a command offers a 「带回车」toggle — a with-Enter command types AND
+  runs on tap (shown with a trailing ⏎), a plain one just types into the shell. The old flat command list
+  carries over unchanged as the global one.
+
 ### Fixed
 - **History (send log) kept vanishing moments after a send** — the window-level history was keyed by the
   tmux window NAME, which tmux auto-renames to the running command; the moment the name changed the read

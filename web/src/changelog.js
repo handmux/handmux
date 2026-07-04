@@ -9,9 +9,11 @@ export const CHANGELOG = [
     items: {
       zh: [
         '用量进度条新增「时间竖线」:标出当前重置窗口已过去的时间比例。已用量在竖线左边=烧得比时间慢(稳),越过竖线=烧得偏快,一眼看出自己的节奏。',
+        '命令模式的常用命令分成「全局」和「当前窗口」两组:快捷栏里全局的(灰)排前、当前窗口的(绿)排后。尾部改成 ⚙ 齿轮,点开更高的编辑器分两区,各自 ▲▼ 排序;添加时可勾「带回车」——带回车的点一下直接执行(末尾带 ⏎),不带的只把命令打进 shell。',
       ],
       en: [
         'Usage bars now show a "time marker": a thin vertical line at how far the current reset window has elapsed. Usage left of the line = you\'re burning slower than the clock; past it = faster — pacing at a glance.',
+        'Command mode\'s saved commands now split into "Global" and "This window": the quick-bar shows global ones (grey) first, then this window\'s (green). The trailing ＋ is now a ⚙ opening a taller two-section editor, each reorderable with ▲▼; when adding you can tick "Send Enter" — a with-Enter command runs on one tap (marked with a trailing ⏎), a plain one just types into the shell.',
       ],
     },
   },

@@ -478,6 +478,28 @@ describe('BottomDock', () => {
       expect(track.classList.contains('at-chat')).toBe(true); // page-aligned to chat via the class
     });
 
+    // Root fix for "typed in chat, switched to command, pressed a key → chat content peeks + dock stuck at
+    // half": the browser scrolls the overflow:hidden pager sideways to reveal the still-focused off-screen
+    // composer. The pager must never scroll — a scroll snaps straight back to 0.
+    it('pins the pager scroll to 0 (the browser must not scroll a page into view)', () => {
+      render({ pane: '%1', onAuthFail: vi.fn(), onKey: vi.fn(), onText: vi.fn() }); // command
+      const pager = container.querySelector('.dock-pager');
+      pager.scrollLeft = 137; // pretend the browser scroll-revealed a focused off-screen field
+      act(() => pager.dispatchEvent(new Event('scroll', { bubbles: false })));
+      expect(pager.scrollLeft).toBe(0);
+    });
+
+    // Switching chat → command blurs the composer so its off-screen textarea can't keep focus (and pull the
+    // pager sideways). Focus the composer, flip to command, and it must no longer be the active element.
+    it('blurs the chat composer when leaving chat for command', () => {
+      render({ pane: '%1', agent: 'claude', onAuthFail: vi.fn(), onKey: vi.fn(), onText: vi.fn() }); // chat
+      const composer = container.querySelector('.input-text');
+      act(() => composer.focus());
+      expect(document.activeElement).toBe(composer);
+      fire(container.querySelector('.dock-dots'), 'click'); // → command
+      expect(document.activeElement).not.toBe(composer);
+    });
+
     it('the 展开/收起键盘 toggle (command quick-bar) pops / dismisses the keyboard', () => {
       render({ pane: '%1', onAuthFail: vi.fn(), onKey: vi.fn(), onText: vi.fn() });
       const kbd = container.querySelector('.dock-page.command .quick-fix'); // the keyboard toggle
