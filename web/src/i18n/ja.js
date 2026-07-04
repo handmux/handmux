@@ -140,6 +140,8 @@ export default {
   'dock.mode.command': '実行',
   'dock.mode.agent': '会話',
   'dock.mode.toggle': '入力モードを切替',
+  'dock.mode.command': 'コマンド',
+  'dock.mode.chat': 'チャット',
   'fav.title': 'よく使う',
   'fav.add': '追加',
   'fav.addPlaceholder': 'よく使う項目を追加…',

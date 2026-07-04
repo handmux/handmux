@@ -140,6 +140,8 @@ export default {
   'dock.mode.command': '指令',
   'dock.mode.agent': '對話',
   'dock.mode.toggle': '切換輸入模式',
+  'dock.mode.command': '命令模式',
+  'dock.mode.chat': '聊天模式',
   'fav.title': '常用',
   'fav.add': '新增',
   'fav.addPlaceholder': '新增常用…',

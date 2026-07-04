@@ -247,9 +247,12 @@ body { font-family: -apple-system, system-ui, sans-serif; background: #1a1b1e; c
 .bottom-dock { display: flex; gap: 8px; padding: 8px; background: #2a2b2e; align-items: stretch; }
 .dock-left { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
 /* Two-dot page indicator above the pager (command · chat); the filled dot marks the current page. */
-.dock-dots { display: flex; justify-content: center; gap: 8px; padding: 1px 0 2px; }
+.dock-dots { position: relative; display: flex; justify-content: center; align-items: center; gap: 8px; padding: 1px 0 2px; }
 .dock-dot { width: 6px; height: 6px; border-radius: 50%; background: #4a4d54; }
 .dock-dot.on { background: #4a7cff; }
+/* Mode label at the top-left. Absolute so it takes no vertical space — the row stays the dots' height. */
+.dock-mode-label { position: absolute; left: 2px; top: 50%; transform: translateY(-50%);
+  font-size: 10px; line-height: 1; color: #8a93a0; white-space: nowrap; pointer-events: none; }
 /* Swipe carousel: a two-page track (command | chat) that follows the finger and snaps with an ease
    animation (transform set imperatively in BottomDock). Both pages stay mounted so they slide into view.
    The pager's HEIGHT is deliberately NOT transitioned: the terminal above is poll-and-repaint, so easing

@@ -156,6 +156,8 @@ export default {
   'dock.mode.command': '命令',
   'dock.mode.agent': '对话',
   'dock.mode.toggle': '切换输入模式',
+  'dock.mode.command': '命令模式',
+  'dock.mode.chat': '聊天模式',
   'fav.title': '常用',
   'fav.add': '添加',
   'fav.addPlaceholder': '加一条常用…',

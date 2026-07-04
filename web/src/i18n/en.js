@@ -157,6 +157,8 @@ export default {
   'dock.mode.command': 'Cmd',
   'dock.mode.agent': 'Chat',
   'dock.mode.toggle': 'Switch input mode',
+  'dock.mode.command': 'Command',
+  'dock.mode.chat': 'Chat',
   'fav.title': 'Favorites',
   'fav.add': 'Add',
   'fav.addPlaceholder': 'Add a favorite…',

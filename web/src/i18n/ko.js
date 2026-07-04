@@ -140,6 +140,8 @@ export default {
   'dock.mode.command': '명령',
   'dock.mode.agent': '대화',
   'dock.mode.toggle': '입력 모드 전환',
+  'dock.mode.command': '명령 모드',
+  'dock.mode.chat': '채팅 모드',
   'fav.title': '자주 쓰기',
   'fav.add': '추가',
   'fav.addPlaceholder': '자주 쓰는 항목 추가…',

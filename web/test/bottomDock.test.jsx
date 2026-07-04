@@ -17,6 +17,7 @@ vi.mock('../src/voice/usePushToTalk.js', () => ({
 
 import BottomDock from '../src/components/BottomDock.jsx';
 import { sendText } from '../src/api.js';
+import { t } from '../src/i18n';
 
 let container;
 let root;
@@ -335,6 +336,13 @@ describe('BottomDock', () => {
       pager.dispatchEvent(ev('touchstart', 200, 'touches'));
       pager.dispatchEvent(ev('touchmove', 200 + dx, 'touches'));
       pager.dispatchEvent(ev('touchend', 200 + dx, 'changedTouches'));
+    });
+
+    it('shows a top-left mode label that tracks the active page', () => {
+      render({ pane: '%1', onAuthFail: vi.fn(), onKey: vi.fn(), onText: vi.fn() }); // command
+      expect(container.querySelector('.dock-mode-label').textContent).toBe(t('dock.mode.command'));
+      swipe(-100); // → chat
+      expect(container.querySelector('.dock-mode-label').textContent).toBe(t('dock.mode.chat'));
     });
 
     it('defaults to the command page for a plain shell pane (no agent)', () => {

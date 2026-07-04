@@ -437,10 +437,12 @@ function BottomDock({
   return (
     <div className="bottom-dock">
       <div className="dock-left">
-        {/* Two-dot page indicator (command · chat); the filled dot marks the current page. */}
-        <div className="dock-dots" aria-hidden="true">
-          <i className={`dock-dot${mode === 'command' ? ' on' : ''}`} data-page="command" />
-          <i className={`dock-dot${mode === 'agent' ? ' on' : ''}`} data-page="agent" />
+        {/* Two-dot page indicator (command · chat); the filled dot marks the current page. A tiny label
+            sits at the top-left, absolutely positioned so it adds no height (stays in the dots' row). */}
+        <div className="dock-dots">
+          <span className="dock-mode-label">{mode === 'command' ? t('dock.mode.command') : t('dock.mode.chat')}</span>
+          <i className={`dock-dot${mode === 'command' ? ' on' : ''}`} data-page="command" aria-hidden="true" />
+          <i className={`dock-dot${mode === 'agent' ? ' on' : ''}`} data-page="agent" aria-hidden="true" />
         </div>
         <div className="dock-pager" ref={pagerRef}>
           <div className={`dock-track${pageIndex === 1 ? ' at-chat' : ''}`} ref={trackRef}>
