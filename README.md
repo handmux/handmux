@@ -17,11 +17,11 @@ goes deepest with **Claude Code**: it pushes you the moment a pane needs a decis
 with your thumb.
 
 <p align="center">
-  <img src="assets/handmux-approve.gif" alt="handmux: a Claude Code permission lands on your phone and you approve it with a tap" width="280">
+  <img src="assets/handmux-run.gif" alt="handmux: say what you need, Claude Code writes it, then tap the filename to preview the result" width="280">
   &nbsp;&nbsp;
-  <img src="assets/handmux-git.gif" alt="handmux: open a doc as rendered Markdown, then read a git diff full-screen" width="280">
+  <img src="assets/handmux-doc.gif" alt="handmux: a push pings you when a pane needs you, and you review the git repo and each agent's usage" width="280">
   <br>
-  <em>Real phone browser, real panes — a push pings you to approve a Claude Code prompt (left); read a doc as Markdown (even aloud) &amp; review a git diff (right).</em>
+  <em>Real phone browser, real panes — say what you need and Claude Code writes it, then tap a filename to preview (left); a push pings you when needed, and you review the git repo &amp; each agent's usage (right).</em>
 </p>
 
 ## Why handmux
