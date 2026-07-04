@@ -38,3 +38,8 @@ server/LICENSE
 
 # superpowers brainstorm artifacts
 .superpowers/
+
+# stray uploads / temp artifacts (real site assets are svg/png/gif — an mp4 in site/ is a test upload;
+# .uploading-<hex> is an interrupted-upload temp file that should never be committed)
+site/*.mp4
+*.uploading-*
