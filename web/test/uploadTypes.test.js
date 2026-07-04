@@ -24,9 +24,10 @@ describe('uploadTypes', () => {
     expect(rejected).toEqual([]);
   });
 
-  it('accept string carries dot-extensions plus image/*', () => {
+  it('accept string carries dot-extensions but NO media wildcard (so the OS opens the file picker, not camera/gallery)', () => {
     expect(UPLOAD_ACCEPT).toContain('.txt');
     expect(UPLOAD_ACCEPT).toContain('.png');
-    expect(UPLOAD_ACCEPT).toContain('image/*');
+    expect(UPLOAD_ACCEPT).not.toContain('image/*');
+    expect(UPLOAD_ACCEPT).not.toContain('video/*');
   });
 });

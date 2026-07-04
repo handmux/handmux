@@ -14,9 +14,12 @@ export const UPLOAD_EXTS = [
   'pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'odt', 'ods', 'odp', 'rtf',
 ];
 
-// The `accept` attribute: the dot-extensions plus image/* so iOS still offers a tidy Photo Library
-// pick alongside the Files (document) picker.
-export const UPLOAD_ACCEPT = [...UPLOAD_EXTS.map((e) => `.${e}`), 'image/*'].join(',');
+// The `accept` attribute: dot-extensions ONLY, deliberately no `image/*` (or `video/*`) wildcard.
+// A media wildcard makes the OS open its camera/gallery capture chooser first (Android: 拍照/录像/
+// 图片/视频; iOS: the Photo Library sheet) and buries "choose file". Specific extensions — including
+// image ones like .jpg/.png — go straight to the file/document browser instead, where a screenshot
+// (a file in DCIM/Screenshots) is still selectable, so we keep image support without the media sheet.
+export const UPLOAD_ACCEPT = UPLOAD_EXTS.map((e) => `.${e}`).join(',');
 
 const EXT_SET = new Set(UPLOAD_EXTS);
 
