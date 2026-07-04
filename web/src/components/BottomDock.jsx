@@ -23,6 +23,10 @@ import { MODIFIERS, modActive, consumeMods, withMods } from '../keybarKeys.js';
 // instead of typing the letters + Enter. Keyed by the item's label so a user can add/remove them freely.
 const KEY_FAVS = { ESC: 'Escape', Esc: 'Escape', Tab: 'Tab' };
 
+// How far (px) a horizontal drag must travel before releasing commits a page switch. Higher = harder to
+// trigger a swap by accident (was 50).
+const SWIPE_COMMIT_PX = 90;
+
 // Quick-command chips are tinted by CATEGORY (three styles, not a per-label rainbow): a KEY (ESC/Tab) =
 // grey, a slash-command (/compact …) = blue, everything else (ok/go on/1/2/3 …) = green.
 // → .qc-esc / .qc-cmd / .qc-reply.
@@ -155,8 +159,8 @@ function BottomDock({
       const cur = pageIndexRef.current, dx = d.dx;
       d = null;
       let target = cur;
-      if (cur === 0 && dx < -50) target = 1;      // dragged far left off command → chat
-      else if (cur === 1 && dx > 50) target = 0;  // dragged far right off chat → command
+      if (cur === 0 && dx < -SWIPE_COMMIT_PX) target = 1;      // dragged far left off command → chat
+      else if (cur === 1 && dx > SWIPE_COMMIT_PX) target = 0;  // dragged far right off chat → command
       // Settle to a page-aligned rest RIGHT NOW, imperatively — never wait on a React re-render (that
       // timing gap is exactly what left the track stuck at half). Guard the animation window so the
       // self-heal doesn't snap it flat. Then sync React state if the page changed (idempotent settle).

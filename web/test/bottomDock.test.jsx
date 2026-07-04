@@ -354,11 +354,17 @@ describe('BottomDock', () => {
 
     it('swiping the pager past the threshold snaps to the other page', () => {
       render({ pane: '%1', onAuthFail: vi.fn(), onKey: vi.fn(), onText: vi.fn() }); // command by default
-      swipe(-80); // drag left past the threshold → chat
+      swipe(-100); // drag left past the threshold → chat
       expect(dot('agent').classList.contains('on')).toBe(true);
       expect(activePage('chat')).toBe(true);
-      swipe(80); // drag right → command
+      swipe(100); // drag right → command
       expect(dot('command').classList.contains('on')).toBe(true);
+      expect(activePage('command')).toBe(true);
+    });
+
+    it('a drag shorter than the commit threshold snaps back (harder to trigger)', () => {
+      render({ pane: '%1', onAuthFail: vi.fn(), onKey: vi.fn(), onText: vi.fn() }); // command by default
+      swipe(-80); // 80px < 90px threshold → does NOT switch, stays on command
       expect(activePage('command')).toBe(true);
     });
 
@@ -376,7 +382,7 @@ describe('BottomDock', () => {
     it('at the strip left edge, a right-drag on it carries over to the command page', () => {
       render({ pane: '%1', agent: 'claude', onAuthFail: vi.fn(), onKey: vi.fn(), onText: vi.fn() }); // chat
       expect(activePage('chat')).toBe(true);
-      stripDrag(80, 0); // right-drag, strip at left edge → page swipe to command
+      stripDrag(100, 0); // right-drag past the threshold, strip at left edge → page swipe to command
       expect(activePage('command')).toBe(true);
     });
 
