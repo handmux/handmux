@@ -4,6 +4,8 @@ All notable changes to handmux. Format follows [Keep a Changelog](https://keepac
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-07-05
+
 ### Added
 - **Update notice on the phone: know when the installed CLI is behind npm.** A new token-gated
   `GET /api/version` returns `{ current, latest, updateAvailable }` — `current` is this server's installed
