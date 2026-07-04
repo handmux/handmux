@@ -39,7 +39,7 @@ body { font-family: -apple-system, system-ui, sans-serif; background: #1a1b1e; c
 .topbar { display: flex; align-items: center; gap: 12px; padding: 8px 12px; background: #2a2b2e; }
 .hamburger { font-size: 20px; background: none; border: none; color: #e6e6e6; }
 .session-name { font-weight: 600; margin-right: auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.fontbtn { min-width: 36px; padding: 4px 10px; border: none; border-radius: 6px; background: #33353a; color: #e6e6e6; font-size: 14px; touch-action: manipulation; }
+.fontbtn { min-width: 36px; padding: 4px 10px; border: none; border-radius: 8px; background: #33353a; color: #e6e6e6; font-size: 14px; touch-action: manipulation; }
 .fontbtn[aria-pressed="true"] { background: #2a4060; color: #7ab4f5; }
 /* Topbar file + settings icons: frameless monochrome line icons in the chrome's grey, sized to sit
    level with the ☰ glyph. stroke=currentColor picks up this color. */
@@ -63,7 +63,7 @@ body { font-family: -apple-system, system-ui, sans-serif; background: #1a1b1e; c
 /* Custom language dropdown — no native <select>. */
 .lang-drop { position: relative; display: inline-block; }
 .lang-drop-backdrop { position: fixed; inset: 0; z-index: 1; }
-.lang-trigger { display: flex; align-items: center; gap: 8px; padding: 5px 10px; background: #33353a; border: none; border-radius: 6px; color: #e6e6e6; font-size: 14px; touch-action: manipulation; cursor: pointer; }
+.lang-trigger { display: flex; align-items: center; gap: 8px; padding: 5px 10px; background: #33353a; border: none; border-radius: 8px; color: #e6e6e6; font-size: 14px; touch-action: manipulation; cursor: pointer; }
 .lang-chevron { font-size: 11px; color: #888; }
 .lang-menu { position: absolute; top: calc(100% + 4px); left: 0; min-width: 100%; background: #2a2c30; border-radius: 8px; box-shadow: 0 4px 20px rgba(0,0,0,.5); z-index: 2; overflow: hidden; }
 .lang-option { display: block; width: 100%; padding: 9px 14px; border: none; background: none; color: #e6e6e6; font-size: 14px; text-align: left; touch-action: manipulation; white-space: nowrap; }
@@ -88,14 +88,14 @@ body { font-family: -apple-system, system-ui, sans-serif; background: #1a1b1e; c
   animation: tw-spin 0.7s linear infinite;
 }
 /* Bind modal reuses the settings card/backdrop; these style its name input + actions. */
-.bind-input { width: 100%; padding: 10px; border-radius: 6px; border: 1px solid #444; background: #1a1b1e; color: #fff; font-size: 14px; }
+.bind-input { width: 100%; padding: 10px; border-radius: 8px; border: 1px solid #444; background: #1a1b1e; color: #fff; font-size: 14px; }
 .startup-custom { margin-top: 6px; }
 
 /* New window/session options — one consistent "field" look across the name input, the start-dir
    picker and the startup-command dropdown, with even spacing between them. */
 .opt + .opt { margin-top: 14px; }
 .field { width: 100%; box-sizing: border-box; display: flex; align-items: center; gap: 8px;
-  padding: 10px; border-radius: 6px; border: 1px solid #444; background: #1a1b1e; color: #fff;
+  padding: 10px; border-radius: 8px; border: 1px solid #444; background: #1a1b1e; color: #fff;
   font-size: 14px; text-align: left; touch-action: manipulation; }
 .field:active { border-color: #555; }
 .cwd-field { justify-content: space-between; }
@@ -114,7 +114,7 @@ body { font-family: -apple-system, system-ui, sans-serif; background: #1a1b1e; c
   box-shadow: 0 10px 30px rgba(0,0,0,.55); transform-origin: top; animation: dd-pop .12s ease; }
 @keyframes dd-pop { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
 .dd-option { display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%;
-  padding: 10px; border: none; border-radius: 6px; background: none; color: #e6e6e6; font-size: 14px;
+  padding: 10px; border: none; border-radius: 8px; background: none; color: #e6e6e6; font-size: 14px;
   text-align: left; touch-action: manipulation; }
 .dd-option:active { background: #33353a; }
 .dd-option.is-selected { color: var(--green); }
@@ -128,7 +128,7 @@ body { font-family: -apple-system, system-ui, sans-serif; background: #1a1b1e; c
 .windowbar { display: flex; gap: 8px; align-items: center; padding: 6px 8px; background: #222; }
 .windowbar-scroll { flex: 1; min-width: 0; display: flex; gap: 4px; overflow-x: auto; overflow-y: hidden; -webkit-overflow-scrolling: touch; touch-action: pan-x; scrollbar-width: none; }
 .windowbar-scroll::-webkit-scrollbar { display: none; }
-.win-tab { white-space: nowrap; padding: 4px 10px; border: none; border-radius: 6px; background: #33353a; color: #bbb; font-size: 13px; touch-action: manipulation; }
+.win-tab { white-space: nowrap; padding: 4px 10px; border: none; border-radius: 8px; background: #33353a; color: #bbb; font-size: 13px; touch-action: manipulation; }
 .win-tab.active { background: var(--blue); color: #fff; }
 .win-new { border: 1px dashed #555; color: #8aa; font-weight: 700; background: transparent; }
 .win-panes { margin-left: 5px; font-size: 11px; color: #889; }
@@ -222,26 +222,26 @@ body { font-family: -apple-system, system-ui, sans-serif; background: #1a1b1e; c
 .input-text { flex: 1; min-width: 0; padding: 7px 6px 7px 11px; border: none; background: transparent; color: #fff; font-family: inherit; font-size: 16px; line-height: 22px; max-height: 156px; resize: none; overflow-y: auto; display: block; }
 .input-text:focus { outline: none; }
 .input-text::placeholder { color: #6b7280; }
-.token-prompt button { padding: 8px 14px; border: none; border-radius: 6px; background: var(--blue); color: #fff; }
+.token-prompt button { padding: 8px 14px; border: none; border-radius: 8px; background: var(--blue); color: #fff; }
 .drawer { position: fixed; top: 0; left: 0; width: 78%; max-width: 320px; height: 100%; background: #232427; transform: translateX(-100%); transition: transform .2s; z-index: 10; padding: 12px; display: flex; flex-direction: column; overflow: hidden; }
 .drawer.open { transform: translateX(0); }
 .drawer-list { flex: 1; min-height: 0; overflow-y: auto; }
 /* Logout pinned at the drawer's bottom — a low-traffic action kept out of the way. */
-.drawer-logout { flex: none; margin-top: 8px; padding: 10px; border: none; border-radius: 6px; background: #2e2a2c; color: var(--red); font-size: 14px; touch-action: manipulation; }
+.drawer-logout { flex: none; margin-top: 8px; padding: 10px; border: none; border-radius: 8px; background: #2e2a2c; color: var(--red); font-size: 14px; touch-action: manipulation; }
 .drawer-logout:active { background: #4a2f33; }
 .drawer-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,.4); z-index: 9; }
 .drawer-title { font-size: 12px; color: #888; letter-spacing: 1px; margin-bottom: 8px; }
-.drawer-row { display: flex; align-items: center; gap: 6px; border-radius: 6px; }
+.drawer-row { display: flex; align-items: center; gap: 6px; border-radius: 8px; }
 .drawer-name { flex: 1; min-width: 0; padding: 8px 4px; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .drawer-session.active { background: var(--blue); color: #fff; }
 .drawer-unbind { flex: none; background: none; border: none; color: #888; font-size: 14px; padding: 6px 8px; touch-action: manipulation; }
 .drawer-session.active .drawer-unbind { color: #d6e4ff; }
 .drawer-empty { padding: 12px 4px; color: #888; font-size: 13px; }
 /* Open the bind modal — the only way to add a session, since the list is user-curated. */
-.drawer-bind { width: 100%; margin-top: 8px; padding: 10px; border: none; border-radius: 6px; background: #2b3550; color: #cdddff; font-size: 14px; touch-action: manipulation; }
+.drawer-bind { width: 100%; margin-top: 8px; padding: 10px; border: none; border-radius: 8px; background: #2b3550; color: #cdddff; font-size: 14px; touch-action: manipulation; }
 .drawer-bind:active { background: #344168; }
 .token-prompt { max-width: 360px; margin: 80px auto; display: flex; flex-direction: column; gap: 12px; padding: 0 16px; }
-.token-prompt input { padding: 10px; border-radius: 6px; border: 1px solid #444; background: #1a1b1e; color: #fff; }
+.token-prompt input { padding: 10px; border-radius: 8px; border: 1px solid #444; background: #1a1b1e; color: #fff; }
 .loading { padding: 40px; text-align: center; color: #888; }
 /* First-run empty state: a tap target that opens the bind modal (there's nothing pinned yet). */
 .empty-cta { margin: auto; display: flex; flex-direction: column; gap: 6px; align-items: center; padding: 28px 32px; background: none; border: 1px dashed #44464c; border-radius: 12px; color: #aab; font-size: 15px; touch-action: manipulation; }
@@ -293,7 +293,7 @@ body { font-family: -apple-system, system-ui, sans-serif; background: #1a1b1e; c
 .keybar-key {
   min-width: 0; min-height: 40px; padding: 0 2px;
   display: inline-flex; align-items: center; justify-content: center;
-  border: none; border-radius: 6px; white-space: nowrap;
+  border: none; border-radius: 8px; white-space: nowrap;
   background: #33353a; color: #e6e6e6; font: 14px/1 ui-monospace, 'SF Mono', Menlo, monospace;
   touch-action: manipulation; -webkit-user-select: none; user-select: none;
 }
@@ -345,7 +345,7 @@ body { font-family: -apple-system, system-ui, sans-serif; background: #1a1b1e; c
 .quick-cmd { flex: none; display: inline-flex; align-items: center; white-space: nowrap;
   border: 1px solid; border-radius: 12px;
   color: rgb(var(--rgb)); border-color: rgba(var(--rgb), .5); background: rgba(var(--rgb), .13);
-  font: inherit; font-size: 12.5px; padding: 7px 12px; line-height: 1;
+  font: inherit; font-size: 13.5px; padding: 7px 12px; line-height: 1;
   touch-action: manipulation; -webkit-user-select: none; user-select: none; }
 .quick-cmd:active { background: rgba(var(--rgb), .26); border-color: rgb(var(--rgb)); }
 /* Trailing ＋ on the command strip: opens the command-list editor. Neutral (dashed) so it reads as
@@ -407,13 +407,13 @@ body { font-family: -apple-system, system-ui, sans-serif; background: #1a1b1e; c
 .cmd-panel {
   position: fixed; left: 0; right: 0; bottom: 0; z-index: 22; max-height: 72vh;
   display: flex; flex-direction: column;
-  background: #232427; border-radius: 12px 12px 0 0; box-shadow: 0 -8px 30px rgba(0,0,0,.5);
+  background: #232427; border-radius: 16px 16px 0 0; box-shadow: 0 -8px 30px rgba(0,0,0,.5);
 }
 /* History drawer keeps a floor so a short/empty send-log still opens as a real panel, not a sliver. */
 .cmd-panel.history { min-height: 40vh; }
 .cmd-head { display: flex; align-items: center; gap: 8px; padding: 12px 14px; border-bottom: 1px solid #33353a; }
 .cmd-title { font-size: 15px; font-weight: 600; margin-right: auto; display: flex; align-items: center; gap: 7px; }
-.idea-head-count { font-size: 11px; font-weight: 600; color: #a8c4e0; background: #3d5068; border-radius: 6px; padding: 1px 6px; }
+.idea-head-count { font-size: 11px; font-weight: 600; color: #a8c4e0; background: #3d5068; border-radius: 8px; padding: 1px 6px; }
 .cmd-close { background: none; border: none; color: #aaa; padding: 4px 8px; touch-action: manipulation; display: inline-flex; align-items: center; }
 .cmd-close svg { width: 16px; height: 16px; display: block; }
 /* + in the editor header — opens the add card. A filled brand-blue pill so "add" reads as the primary action. */
@@ -438,7 +438,7 @@ body { font-family: -apple-system, system-ui, sans-serif; background: #1a1b1e; c
 .cmd-editor .cmd-section-name { font-size: 13px; letter-spacing: .4px; }
 .cmd-editor .cmd-row { padding: 0 10px 0 16px; }
 .cmd-editor .cmd-row:not(:last-child) { box-shadow: inset 0 -0.5px 0 rgba(84,84,88,.34); }
-.cmd-editor .cmd-text { font-size: 16px; padding: 13px 0; color: #f2f2f7; }
+.cmd-editor .cmd-text { font-size: 14px; padding: 12px 0; color: #f2f2f7; }
 .cmd-editor .cmd-enter { font-size: 14px; }
 .cmd-editor .cmd-move svg { width: 18px; height: 18px; }
 .cmd-editor .cmd-del svg { width: 16px; height: 16px; }
@@ -470,8 +470,8 @@ button.cmd-text { background: none; border: none; text-align: left; }
 .fav-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
 .fav-chip { background: #2a3a2e; border: 1px solid #3d5a44; color: #9fe0af; border-radius: 16px; padding: 8px 14px; font-size: 14px; }
 .fav-add { display: flex; gap: 8px; margin-top: 8px; }
-.fav-add-input { flex: 1; min-width: 0; background: #16171c; border: 1px solid #444; border-radius: 6px; color: #fff; padding: 8px; font-size: 16px; }
-.fav-add-btn { border: none; border-radius: 6px; background: var(--blue); color: #fff; padding: 0 14px; }
+.fav-add-input { flex: 1; min-width: 0; background: #16171c; border: 1px solid #444; border-radius: 8px; color: #fff; padding: 8px; font-size: 16px; }
+.fav-add-btn { border: none; border-radius: 8px; background: var(--blue); color: #fff; padding: 0 14px; }
 
 /* Command-mode saved-command editor: a taller sheet (never a sliver) with two sections. */
 .cmd-panel.cmd-editor { min-height: 58vh; }
@@ -567,7 +567,7 @@ button.cmd-text { background: none; border: none; text-align: left; }
 .idea-panel {
   position: fixed; left: 0; right: 0; bottom: 0; z-index: 22; min-height: 50vh; max-height: 80vh;
   display: flex; flex-direction: column;
-  background: #232427; border-radius: 12px 12px 0 0; box-shadow: 0 -8px 30px rgba(0,0,0,.5);
+  background: #232427; border-radius: 16px 16px 0 0; box-shadow: 0 -8px 30px rgba(0,0,0,.5);
 }
 .idea-compose { display: flex; align-items: flex-end; gap: 8px; padding: 10px 14px; border-bottom: 1px solid #33353a; }
 .idea-input {
@@ -595,7 +595,7 @@ button.cmd-text { background: none; border: none; text-align: left; }
 .idea-text { flex: 1; min-width: 0; padding: 11px 0; font-size: 14px; line-height: 1.35; color: #e6e6e6;
   white-space: pre-wrap; overflow-wrap: anywhere; touch-action: manipulation; }
 .idea-text:active { color: #9db8ff; }
-.idea-send { flex: none; background: #2c2e33; color: #9db8ff; border: none; border-radius: 6px;
+.idea-send { flex: none; background: #2c2e33; color: #9db8ff; border: none; border-radius: 8px;
   padding: 6px 10px; font-size: 13px; touch-action: manipulation; }
 .idea-del { flex: none; background: none; border: none; color: #888; font-size: 14px; padding: 6px 8px; touch-action: manipulation; }
 
@@ -603,7 +603,7 @@ button.cmd-text { background: none; border: none; text-align: left; }
 .changelog-panel {
   position: fixed; left: 0; right: 0; bottom: 0; z-index: 22; max-height: 80vh;
   display: flex; flex-direction: column;
-  background: #232427; border-radius: 12px 12px 0 0; box-shadow: 0 -8px 30px rgba(0,0,0,.5);
+  background: #232427; border-radius: 16px 16px 0 0; box-shadow: 0 -8px 30px rgba(0,0,0,.5);
 }
 .changelog-list { overflow-y: auto; -webkit-overflow-scrolling: touch; padding: 6px 16px 16px; }
 .rel { padding: 12px 0; border-bottom: 1px solid #2c2e33; }
@@ -625,7 +625,7 @@ button.cmd-text { background: none; border: none; text-align: left; }
 
 .sheet-actions { display: flex; flex-direction: column; gap: 8px; }
 .sheet-action {
-  width: 100%; padding: 12px; border: 1px solid #33353a; border-radius: 6px;
+  width: 100%; padding: 12px; border: 1px solid #33353a; border-radius: 8px;
   background: #2a2c31; color: #ddd; font-size: 15px; text-align: center;
   touch-action: manipulation;
 }
@@ -706,7 +706,7 @@ button.cmd-text { background: none; border: none; text-align: left; }
 .preview-remain {
   margin-left: auto; flex: 0 0 auto; font-variant-numeric: tabular-nums;
   color: #9fb0c0; font-size: 12px; padding: 4px 8px;
-  background: transparent; border: 1px solid #33353a; border-radius: 6px; touch-action: manipulation;
+  background: transparent; border: 1px solid #33353a; border-radius: 8px; touch-action: manipulation;
 }
 .preview-remain:active { color: var(--blue); border-color: var(--blue); }
 .preview-pop-backdrop { position: fixed; inset: 0; z-index: 5; }
@@ -715,7 +715,7 @@ button.cmd-text { background: none; border: none; text-align: left; }
   display: flex; flex-direction: column; gap: 2px; padding: 6px;
   background: #232427; border: 1px solid #33353a; border-radius: 10px; box-shadow: 0 10px 30px rgba(0,0,0,.5);
 }
-.preview-pop-item { background: transparent; border: none; color: #e6edf3; text-align: left; padding: 10px 12px; border-radius: 6px; font-size: 14px; }
+.preview-pop-item { background: transparent; border: none; color: #e6edf3; text-align: left; padding: 10px 12px; border-radius: 8px; font-size: 14px; }
 .preview-pop-item:active { background: #2f3338; }
 .preview-pop-danger { color: var(--red); }
 /* Compact icon actions so the status + name + countdown stay visible on a narrow phone. */
@@ -1182,7 +1182,7 @@ button.cmd-text { background: none; border: none; text-align: left; }
 .drawer-orphan-head { display: flex; align-items: center; gap: 6px; }
 .drawer-orphan-cwd { flex: 1; min-width: 0; color: #cdddff; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .drawer-orphan-btn {
-  flex: none; padding: 4px 10px; border: none; border-radius: 6px;
+  flex: none; padding: 4px 10px; border: none; border-radius: 8px;
   background: #2b3550; color: #cdddff; font-size: 13px; touch-action: manipulation;
 }
 .drawer-orphan-btn:active { background: #344168; }
@@ -1221,7 +1221,7 @@ button.cmd-text { background: none; border: none; text-align: left; }
 .usage-bar-fill.lvl-hi { background: #ff6b6b; }
 .usage-row-reset { margin-top: 4px; font-size: 11px; color: #888; }
 .usage-empty { font-size: 13px; color: #9aa0a6; padding: 6px 0; line-height: 1.5; }
-.usage-code { display: inline-block; margin-top: 6px; font-family: ui-monospace, SFMono-Regular, monospace; font-size: 12px; background: #1a1b1e; color: #b7f0cd; padding: 3px 8px; border-radius: 6px; }
+.usage-code { display: inline-block; margin-top: 6px; font-family: ui-monospace, SFMono-Regular, monospace; font-size: 12px; background: #1a1b1e; color: #b7f0cd; padding: 3px 8px; border-radius: 8px; }
 /* per-agent freshness stamp, pushed to the far right of the agent header row */
 .usage-updated { margin-left: auto; font-size: 11px; color: #777; }
 /* freshness note sits right beside the Usage title (left-aligned); its auto margin sends close to the right */
