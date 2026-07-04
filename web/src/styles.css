@@ -757,15 +757,16 @@ button.cmd-text { background: none; border: none; text-align: left; }
 }
 /* 静态/动态 segmented control (settings preview row). */
 .preview-seg {
-  display: inline-flex; align-self: flex-start;
-  border: 1px solid #3a3c42; border-radius: 8px; overflow: hidden;
+  display: inline-flex; align-self: flex-start; gap: 2px;
+  background: rgba(118,118,128,.22); border-radius: 9px; padding: 2px;
 }
 .preview-seg button {
-  background: transparent; border: none; color: #9aa3ad;
-  padding: 7px 18px; min-width: 60px; font-size: 14px; touch-action: manipulation;
+  background: transparent; border: none; color: rgba(235,235,245,.6);
+  padding: 7px 18px; min-width: 60px; font-size: 14px; font-weight: 600; border-radius: 7px;
+  touch-action: manipulation; transition: color .15s;
 }
-.preview-seg button + button { border-left: 1px solid #3a3c42; }
-.preview-seg button.on { background: var(--blue); color: #fff; }
+.preview-seg button.on { background: #48484a; color: #fff; box-shadow: 0 1px 3px rgba(0,0,0,.35), 0 0 0 .5px rgba(0,0,0,.2); }
+.preview-seg button:active:not(.on) { color: #fff; }
 
 /* Start block (no active preview): the 不开启/静态/动态 segmented control + its controls, spaced. */
 .preview-start { display: flex; flex-direction: column; gap: 12px; }
@@ -780,10 +781,12 @@ button.cmd-text { background: none; border: none; text-align: left; }
 
 /* Home tab — 最近 / 新增 segmented switch + the active pane */
 .home-pane { flex: 1; display: flex; flex-direction: column; min-width: 0; }
-.file-seg { display: flex; gap: 8px; padding: 10px 12px; border-bottom: 1px solid #1d2630; background: #0e131a; }
+.file-seg { display: flex; gap: 2px; margin: 10px 12px; padding: 2px; background: rgba(118,118,128,.20); border-radius: 9px; }
 .file-seg-btn { flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 6px;
-  padding: 9px; border-radius: 8px; background: #11161d; border: 1px solid #1d2630; color: #9fb0c0; font-size: 14px; }
-.file-seg-btn.on { background: #15212f; border-color: #2f6fc0; color: #cfe0f2; }
+  padding: 7px; border: none; border-radius: 7px; background: transparent; color: rgba(235,235,245,.6);
+  font-size: 14px; font-weight: 600; touch-action: manipulation; transition: color .15s; }
+.file-seg-btn.on { background: #48484a; color: #fff; box-shadow: 0 1px 3px rgba(0,0,0,.35), 0 0 0 .5px rgba(0,0,0,.2); }
+.file-seg-btn:active:not(.on) { color: #cfe0f2; }
 .file-seg-btn svg { width: 16px; height: 16px; }
 
 /* ── Git viewer (read-only, full-screen) ──────────────────────────────────── */

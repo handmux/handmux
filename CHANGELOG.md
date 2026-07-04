@@ -27,6 +27,10 @@ All notable changes to handmux. Format follows [Keep a Changelog](https://keepac
   any other. Chat has no per-window list and no 带回车 toggle (a chat tap always sends).
 
 ### Changed
+- **Segmented controls unified to one iOS style.** The settings preview-type switch (`.preview-seg`) and the
+  file home-tab switch (`.file-seg`, 最近/新增) now use the same faint-track + raised-pill look as the saved-
+  command editor's `.cmd-seg`, instead of three different bordered/boxed treatments. CSS-only, markup
+  unchanged. Also bumped legacy 6px radii to 8px and softened bottom-sheet corners to 16px.
 - **App-wide colour unification to iOS system accents.** Consolidated the scattered accent palette (7 blues,
   6 greens, 6 error reds) down to one system blue (`#0a84ff`), one green (`#34c759`) and one red (`#ff453a`),
   exposed as `:root` tokens (`--blue`/`--green`/`--red` + `-rgb` variants) and referenced throughout
