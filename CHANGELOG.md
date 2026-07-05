@@ -6,10 +6,10 @@ All notable changes to handmux. Format follows [Keep a Changelog](https://keepac
 
 ### Changed
 - Chat composer: once the text grows past one line, the textarea takes the full pill width and the
-  mic/send buttons move up to the quick-bar's right end (they return inline the moment the text fits
-  one line again); the box always hugs the text exactly. Buttons are never overlaid on the text —
-  overlaying them collapsed the keyboard when a caret drag touched them. The pill also gained a
-  little vertical breathing room above and below.
+  mic/send buttons wrap onto their own right-aligned bottom row inside the pill (returning inline
+  the moment the text fits one line again). Buttons are never overlaid on the text — overlaying
+  them collapsed the keyboard when a caret drag touched them. The pill also gained a little
+  vertical breathing room above and below.
 - The landing site moved to its own repo, `handmux/handmux.github.io` (still served at handmux.com);
   the code repo's `gh-pages` branch is retired once the domain cutover completes.
 - The public repository moved to its own organization: `github.com/handmux/handmux`. Old

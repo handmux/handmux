@@ -372,15 +372,15 @@ function BottomDock({
   // Grow to fit content; CSS max-height caps it at 3 lines, after which it scrolls. +2 accounts
   // for the border under box-sizing: border-box.
   // Also drives the `multi` layout: past one line the textarea takes the full width and the mic/send
-  // relocate to the quick-bar's right end, ABOVE the pill (styles.css .quick-actions).
+  // wrap onto their own right-aligned bottom row INSIDE the pill (styles.css .input-wrap.multi).
   //
-  // Why relocate instead of overlaying them in the box's corner: buttons painted over the textarea
-  // re-created the pre-0ffa95d bug — Android's caret-handle touches land on the button instead of the
-  // text and the keyboard collapses. That bug was HUD-diagnosed on a real device, and the only fix
-  // that worked was STRUCTURAL (nothing interactive overlapping the text); event-level guards
-  // (preventDefault, movement gates) demonstrably didn't. So in multi, no control ever sits over —
-  // or under — a text line: the box is exactly the text's height, and every wrap grows it by exactly
-  // one line. (This also deleted the whole "reserved button strip" height choreography.)
+  // Why a real (in-flow) row instead of overlaying the buttons in the box's corner: buttons painted
+  // over the textarea re-created the pre-0ffa95d bug — Android's caret/selection touches land on the
+  // button instead of the text and the keyboard collapses. That bug was HUD-diagnosed on a real
+  // device, and the only fix that worked was STRUCTURAL (nothing interactive overlapping the text);
+  // event-level guards (preventDefault, movement gates) demonstrably didn't. "In the pill + never
+  // over the text + row only when the last line is crowded" can't all hold at once — the on-demand
+  // variants all overlay — so multi always carries the button row, like other chat apps.
   //
   // A textarea can't report its own soft-wrap points, so `multi` is measured on a hidden mirror <div>
   // that replicates the textarea's font/padding/wrapping at any width we ask (the standard
@@ -750,19 +750,6 @@ function BottomDock({
                   <button type="button" className="quick-cmd quick-cmd-add" aria-label={t('chat.editTitle')}
                     onClick={() => setChatEditOpen(true)}><GearIcon /></button>
                 </div>
-                {/* 多行时麦克风/发送上移到这里(快捷栏右端)——绝不悬浮在文字上方:真机 HUD 证实过
-                    (0ffa95d)盖在文字上的按钮会截走选词/拖光标的触摸、键盘应声收起,事件层拦不住,
-                    只有结构性不重叠才治本。单行时它们仍在药丸右内侧(flex 兄弟,同样不重叠)。 */}
-                {multi && (
-                  <div className="quick-fixed quick-actions">
-                    {micAvailable && <MicButton active={recording} disabled={voice.state === 'requesting'} onToggle={toggleMic} />}
-                    <button type="button" className="input-send" aria-label={t('dock.send')} title={t('dock.send.hint')}
-                      disabled={!value}
-                      onPointerDown={sendDown} onPointerMove={sendMove} onPointerUp={sendUp} onPointerCancel={sendCancel} onPointerLeave={sendCancel}>
-                      <ArrowUpIcon />
-                    </button>
-                  </div>
-                )}
               </div>
               {/* 离屏(非 display:none)以便程序化 .click() 在 iOS Safari 可靠唤起原生选择器,见 .browse-file-input。 */}
               <input ref={uploadRef} className="browse-file-input" type="file" multiple
@@ -798,17 +785,15 @@ function BottomDock({
                   <button type="button" className="input-history" aria-label={t('dock.history')} title={t('dock.history')}
                     onClick={() => setPanelOpen((o) => !o)}><ClockIcon /></button>
                 )}
-                {/* 单行态:麦克风/发送在药丸右内侧(flex 兄弟);多行态它们上移到快捷栏(见上),
-                    药丸里只剩 textarea——没有任何控件与文字重叠。 */}
-                {!multi && micAvailable && <MicButton active={recording} disabled={voice.state === 'requesting'} onToggle={toggleMic} />}
+                {/* 单行态:麦克风/发送在文字右侧;多行态(.multi 置 flex-wrap)它们折到药丸内的底部
+                    一行、右对齐——始终是流式 flex 兄弟,任何状态都不与文字重叠(重叠=收键盘,见上)。 */}
+                {micAvailable && <MicButton active={recording} disabled={voice.state === 'requesting'} onToggle={toggleMic} />}
                 {/* 发送 ↑ 常驻,空框禁用:点 = 发送组合文本,长按 = 填入。 */}
-                {!multi && (
-                  <button type="button" className="input-send" aria-label={t('dock.send')} title={t('dock.send.hint')}
-                    disabled={!value}
-                    onPointerDown={sendDown} onPointerMove={sendMove} onPointerUp={sendUp} onPointerCancel={sendCancel} onPointerLeave={sendCancel}>
-                    <ArrowUpIcon />
-                  </button>
-                )}
+                <button type="button" className="input-send" aria-label={t('dock.send')} title={t('dock.send.hint')}
+                  disabled={!value}
+                  onPointerDown={sendDown} onPointerMove={sendMove} onPointerUp={sendUp} onPointerCancel={sendCancel} onPointerLeave={sendCancel}>
+                  <ArrowUpIcon />
+                </button>
               </div>
             </div>
           </div>

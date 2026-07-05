@@ -333,9 +333,11 @@ body { font-family: -apple-system, system-ui, sans-serif; background: #1a1b1e; c
    offsetHeight 就漏掉它)。与 .bottom-dock 自身 8px 叠加。 */
 .dock-page.chat { padding-bottom: 6px; }
 .input-wrap:focus-within { border-color: var(--green); box-shadow: 0 0 0 1px rgba(var(--green-rgb),.4), 0 2px 12px rgba(0,0,0,.4); }
-/* 多行(BottomDock 置 .multi):麦克风/发送整体上移到快捷栏右端(.quick-actions),药丸里只剩
-   textarea 独占整行——绝不把按钮悬浮在文字上方:真机 HUD 证实(0ffa95d)盖在文字上的按钮会截走
-   选词/拖光标的触摸、键盘应声收起,只有结构性不重叠才治本。盒子高度因此永远紧贴文字。 */
+/* 多行(BottomDock 置 .multi):textarea 独占整行(flex-basis:100% 强制换行),麦克风/发送折到
+   药丸内的底部一行、右对齐——始终在文档流里,绝不悬浮在文字上方:真机 HUD 证实(0ffa95d)盖在
+   文字上的按钮会截走选词/拖光标的触摸、键盘应声收起,只有结构性不重叠才治本。 */
+.input-wrap.multi { flex-wrap: wrap; justify-content: flex-end; }
+.input-wrap.multi > .input-text { flex: 1 0 100%; }
 /* 换行测量镜像:必须与 .input-text 的宽/字体/内边距/换行规则完全一致,否则量出的换行点不对。 */
 .input-mirror { position: absolute; left: -9999px; top: 0; visibility: hidden; pointer-events: none;
   box-sizing: border-box; padding: 7px 6px 7px 11px; border: none;
@@ -354,9 +356,6 @@ body { font-family: -apple-system, system-ui, sans-serif; background: #1a1b1e; c
 .quick-bar { display: flex; align-items: stretch; gap: 6px; padding: 0 2px 6px; }
 .quick-fixed { flex: none; display: flex; gap: 6px; padding-right: 7px;
   border-right: 1px solid #33363d; } /* 竖分隔线,进一步分开固定区与命令区 */
-/* 多行态的麦克风/发送组:快捷栏右端,左侧竖分隔线与命令区隔开(镜像左侧固定区的分隔样式)。 */
-.quick-actions { border-right: none; padding-right: 0;
-  border-left: 1px solid #33363d; padding-left: 7px; align-items: center; gap: 4px; }
 /* 固定项 = 功能键(上传/历史):图标+文字,填充的浅灰实心底 + 细边,比彩色命令区更"实"、更显眼,一眼是按钮。 */
 .quick-fix { flex: none; display: inline-flex; align-items: center; gap: 5px;
   border: 1px solid #4a4f59; border-radius: 9px; background: #383c44; color: #eaedf2;
