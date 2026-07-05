@@ -373,52 +373,50 @@ function BottomDock({
   // Grow to fit content; CSS max-height caps it at 3 lines, after which it scrolls. +2 accounts
   // for the border under box-sizing: border-box.
   // Also drives the `multi` layout: past one line the textarea takes the full width and the mic/send
-  // become an overlay in the box's bottom-right corner (styles.css .input-wrap.multi). Deliberately a
-  // RATCHET — enter on wrap, exit only when the box is emptied (send/clear). Any "does it fit back on
-  // one line" width probe re-measures at a different width than the one it will render at, and the two
-  // layouts can disagree forever → infinite render loop (the black-screen crash). Empty is width-independent.
+  // become an overlay in the box's bottom-right corner (styles.css .input-wrap.multi).
   //
-  // `crowd`: whether the LAST text line would run under the overlaid buttons. A textarea can't report
-  // its own soft-wrap points, so this is measured on a hidden mirror <div> that replicates the
-  // textarea's width/font/padding/wrapping (the standard caret-position technique): the mirror gets the
-  // value plus a marker <span>, and the marker's offsetLeft is where the text ends. Only then does the
-  // textarea reserve a bottom strip (padding-bottom) — so the box hugs the text, and the extra row
-  // appears when the text actually reaches the buttons, not one row early. Mis-measurement degrades
-  // SAFELY: the 24px slack in the button zone means an error wraps a touch early (reserves the strip), never
-  // lets text sit under the buttons. No loop: crowd depends only on (width, text) — the padding it
-  // toggles changes height, never width.
-  //
-  // The strip is EXACTLY one line tall: crowd padding-bottom (29px) = line (22) + normal bottom
-  // padding (7), so "n lines + strip" and "n+1 lines" are the same box height. Reaching the buttons
-  // therefore jumps straight to the height the coming wrap will need, and the wrap itself doesn't move
-  // the box at all — the strip can be released the moment the (now short) last line clears the zone
-  // with zero visual blip. This equality is what lets crowd stay live (not a ratchet); the overlay
-  // buttons shrink to 30px in multi so they fit inside that one-line strip without touching the text
-  // above (styles.css).
+  // A textarea can't report its own soft-wrap points, so both decisions are measured on a hidden
+  // mirror <div> that replicates the textarea's font/padding/wrapping at any width we ask (the
+  // standard caret-position technique; verified pixel-identical against a real textarea in Chrome):
+  //   • `multi`  — would the text fit ONE line at the SINGLE-LINE width (pill minus the inline
+  //     buttons)? Enter and exit are the same predicate measured at the same fixed width — the pill's,
+  //     which no layout choice feeds back into — so the buttons return inline the moment the text fits
+  //     beside them again, and the two layouts can never disagree into a render loop (measuring at the
+  //     textarea's CURRENT width is what caused the black-screen crash).
+  //   • `crowd` — does the LAST line (marker <span>'s offsetLeft at full width) run into the button
+  //     corner? Then the textarea reserves a bottom strip via padding. The strip is EXACTLY one line:
+  //     29px = line 22 + normal bottom padding 7, so "n lines + strip" ≡ "n+1 lines" in height —
+  //     reaching the buttons jumps straight to the post-wrap height, the wrap itself doesn't move the
+  //     box, and the strip releases blip-free once the short new line clears the zone. The overlay
+  //     buttons shrink to 30px in multi so they fit inside that one-line strip (styles.css).
+  // Mis-measurement degrades safely: the 24px slack in the zone reserves the strip a touch early,
+  // never lets text sit under the buttons.
   const ONE_LINE = 40; // px: 22px line + 14px padding, with slack
   const mirrorRef = useRef(null);
-  const lastLineEndX = (el) => {
+  // Text metrics at an arbitrary rendered width (the mirror's padding matches the textarea's, so
+  // `width` means "textarea offsetWidth"): total height + where the last line ends.
+  const measureAt = (text, width) => {
     const m = mirrorRef.current;
-    if (!m) return Infinity; // no mirror → treat as crowded (falls back to the reserved-strip layout)
-    m.style.width = `${el.offsetWidth}px`;
-    m.textContent = el.value;
+    if (!m) return null;
+    m.style.width = `${width}px`;
+    m.textContent = text;
     const marker = document.createElement('span');
     m.appendChild(marker);
-    return marker.offsetLeft;
+    return { h: m.offsetHeight, endX: marker.offsetLeft };
   };
   const autoGrow = (el) => {
     if (!el) return;
     el.style.height = 'auto';
-    // Empty check FIRST: with the crowd padding on, even an empty box measures taller than ONE_LINE,
-    // so an "is it multi-line"-first ordering would re-assert multi forever and never release.
-    if (!el.value) { setMulti(false); setCrowd(false); }
-    else {
-      if (el.scrollHeight > ONE_LINE) setMulti(true);
-      // The zone is what's ACTUALLY rendered: send 30 + inset 6 + 24 slack, plus mic 30 + gap 4 only
-      // on devices that show it (micAvailable) — a keyless install wraps at the send button, not a
-      // phantom mic earlier.
-      setCrowd(el.offsetWidth - lastLineEndX(el) < (micAvailable ? 94 : 60));
-    }
+    // Inline the zone/button widths that are ACTUALLY rendered: a keyless install has no mic, so its
+    // text runs up to the send button, not a phantom mic earlier.
+    const inline = micAvailable ? 76 : 38; // single-line row: gap 4 + mic 34 (+ gap 4 + send 34)
+    const zone = micAvailable ? 94 : 60;   // overlay corner: mic 30 + gap 4 + send 30 + inset 6 + 24 slack
+    const inner = el.parentElement.clientWidth - 11; // pill content width (clientWidth minus 5+6 padding)
+    const narrow = el.value ? measureAt(el.value, inner - inline) : null;
+    const isMulti = narrow ? narrow.h > ONE_LINE : false; // no mirror/empty → single-line layout
+    setMulti(isMulti);
+    const full = isMulti ? measureAt(el.value, inner) : null;
+    setCrowd(!!full && inner - full.endX < zone);
     el.style.height = `${el.scrollHeight + 2}px`;
   };
 
