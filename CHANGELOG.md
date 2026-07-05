@@ -4,6 +4,8 @@ All notable changes to handmux. Format follows [Keep a Changelog](https://keepac
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-07-05
+
 ### Changed
 - Chat composer: once the text grows past one line, the textarea takes the full pill width and the
   mic/send buttons float in the pill's bottom-right corner instead of reserving a right-hand column
