@@ -37,6 +37,7 @@ import Settings from './components/Settings.jsx';
 import UsagePage from './components/UsagePage.jsx';
 import Inbox from './components/Inbox.jsx';
 import OrphanTakeoverSheet from './components/OrphanTakeoverSheet.jsx';
+import AddToHome from './components/AddToHome.jsx';
 import { useClaudeHooks } from './useClaudeHooks.js';
 import BindSession from './components/BindSession.jsx';
 import NewWindowModal from './components/NewWindowModal.jsx';
@@ -965,6 +966,8 @@ export default function App() {
       {/* App-wide upload lock (portal on <body>) — driven by the shared uploadJob store from either the
           chat ＋ or the file browser; blocks interaction during a transfer, Cancel is the only control. */}
       <UploadOverlay />
+      {/* One-time "Add to Home Screen" coach — self-gates (standalone / dismissed / desktop → nothing). */}
+      <AddToHome />
       {/* Auto-closes when there's no active preview (stopped/expired); 收起 just slides it down. */}
       <PreviewSheet
         open={previewSheetOpen && !!activePreview}

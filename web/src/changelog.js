@@ -4,6 +4,18 @@
 // is what's shown. `items` is now { zh, en } — parallel arrays (same order/count) for each locale.
 export const CHANGELOG = [
   {
+    v: '2026-07-06-add-to-home',
+    date: '2026-07-06',
+    items: {
+      zh: [
+        '新增「添加到主屏」引导:第一次在浏览器里打开时,提示你把 handmux 装到主屏,像 App 一样全屏打开。安卓可一键安装;iPhone 给出 Safari 的「分享 → 更多 → 添加到主屏幕」三步——iOS 上收推送也需要它。装好后不再打扰。',
+      ],
+      en: [
+        'New "Add to Home Screen" coach: the first time you open handmux in a browser, it shows how to install it to your home screen and run it full-screen like an app. Android installs in one tap; iPhone gets the Safari steps (Share → More → Add to Home Screen) — which is also what iOS push needs. It won\'t nag once you\'ve added it.',
+      ],
+    },
+  },
+  {
     v: '2026-07-05-upload',
     date: '2026-07-05',
     items: {
