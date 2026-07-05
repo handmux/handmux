@@ -43,3 +43,6 @@ server/LICENSE
 # .uploading-<hex> is an interrupted-upload temp file that should never be committed)
 site/*.mp4
 *.uploading-*
+
+# per-release bilingual GitHub-release notes draft (consumed by release.sh, never committed)
+.release-notes.md
