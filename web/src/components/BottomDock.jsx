@@ -665,6 +665,55 @@ function BottomDock({
     sendLongRef.current = false;
   };
 
+  // —— multi 态按钮的「幽灵命中」(pointer-events:none + 容器手动命中) ——
+  // 真机 #hud 实测:多行拖光标收键盘时,页面从头到尾收不到任何 pointer 事件、也没有 focusout——
+  // 那是 Chrome 原生选择手柄拖拽(浏览器内部),结束时 Chrome 对落点做【原生命中测试】,命中
+  // 非可编辑元素(悬浮的麦克风/发送)就直接藏输入法(vv 429→810,textarea 仍聚焦)。事件层
+  // (preventDefault/位移门槛/keepDockFocus)对一个不产生页面事件的手势无从拦截。
+  // 唯一能改变原生命中测试结果的开关是 pointer-events:none:多行态按钮退出命中测试
+  // (styles.css .multi),任何落点都穿透到 textarea(可编辑)→ 键盘不藏。按钮点按改由药丸容
+  // 器在 capture 阶段手动命中按钮矩形,复用原手势逻辑(发送 tap/长按、位移门槛全保留)。
+  const ghostRef = useRef(null);                 // 'send' | 'mic' —— 当前被幽灵按下的按钮
+  const micPtRef = useRef({ x: 0, y: 0, moved: false });
+  const ghostHit = (e) => {
+    if (!multi) return null;
+    for (const [name, sel] of [['send', '.input-send'], ['mic', '.input-mic']]) {
+      const b = e.currentTarget.querySelector(sel);
+      if (!b) continue;
+      const r = b.getBoundingClientRect();
+      if (e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom) return name;
+    }
+    return null;
+  };
+  const ghostDown = (e) => {
+    const hit = ghostHit(e);
+    if (!hit) return;
+    e.stopPropagation();                  // 这一下属于按钮:别让 textarea 的录音接管/聚焦逻辑吃到
+    if (e.cancelable) e.preventDefault(); // 也不移光标、不改焦点(textarea 聚焦态原样保留)
+    ghostRef.current = hit;
+    if (hit === 'send') sendDown(e);
+    else micPtRef.current = { x: e.clientX, y: e.clientY, moved: false };
+  };
+  const ghostMove = (e) => {
+    const g = ghostRef.current;
+    if (!g) return;
+    if (g === 'send') { sendMove(e); return; }
+    const p = micPtRef.current;
+    if (!p.moved && Math.hypot(e.clientX - p.x, e.clientY - p.y) > 10) p.moved = true;
+  };
+  const ghostUp = () => {
+    const g = ghostRef.current;
+    ghostRef.current = null;
+    if (!g) return;
+    if (g === 'send') { if (value) sendUp(); else sendCancel(); return; } // 原按钮空框时 disabled,对齐
+    if (!micPtRef.current.moved && voice.state !== 'requesting') toggleMic();
+  };
+  const ghostCancel = () => {
+    const g = ghostRef.current;
+    ghostRef.current = null;
+    if (g === 'send') sendCancel();
+  };
+
   return (
     <div className="bottom-dock">
       <div className="dock-left" onPointerDown={keepDockFocus}>
@@ -766,7 +815,9 @@ function BottomDock({
                 onChange={(e) => { uploadFiles(e.target.files); e.target.value = ''; }} />
               {/* flex 行:textarea(占满)· 麦克风 · 发送,全是 flex 兄弟、不重叠文字框,所以选词/移光标碰不到
                   按键。录音时整条变绿 + 呼吸。＋上传与▤常用已上移到快捷栏。 */}
-              <div className={`input-wrap${recording ? ' recording' : ''}${multi ? ' multi' : ''}${crowd ? ' crowd' : ''}`}>
+              <div className={`input-wrap${recording ? ' recording' : ''}${multi ? ' multi' : ''}${crowd ? ' crowd' : ''}`}
+                onPointerDownCapture={ghostDown} onPointerMoveCapture={ghostMove}
+                onPointerUpCapture={ghostUp} onPointerCancelCapture={ghostCancel}>
                 <textarea
                   ref={ref}
                   className="input-text"

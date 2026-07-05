@@ -339,7 +339,12 @@ body { font-family: -apple-system, system-ui, sans-serif; background: #1a1b1e; c
    按钮带 = 恰好一行:29px = 行高 22 + 常规底 padding 7,「n 行+带」与「n+1 行」等高——挤到按钮
    直接长到换行后的最终高度,真换行时盒子纹丝不动、带无缝释放。按钮保持 34px 原大(不随布局缩放),
    代价是上沿压过上一行下缘约 4px——只碰字的下伸区,可接受(用户拍板)。 */
-.input-wrap.multi > .input-mic, .input-wrap.multi > .input-send { position: absolute; bottom: 4px; margin: 0; }
+/* pointer-events:none 是治「拖光标收键盘」的关键(#hud 真机实测):Chrome 原生手柄拖拽不产生
+   页面事件、也不 blur,结束时按【原生命中测试】判断落点可否编辑——命中悬浮按钮(非可编辑)就
+   直接藏输入法。按钮退出命中测试后,落点永远穿透到 textarea → 键盘不藏。点按由 .input-wrap 的
+   capture 手柄手动命中矩形代发(BottomDock ghostDown/Up,手势语义原样保留)。 */
+.input-wrap.multi > .input-mic, .input-wrap.multi > .input-send { position: absolute; bottom: 4px; margin: 0;
+  pointer-events: none; }
 .input-wrap.multi > .input-send { right: 6px; }
 .input-wrap.multi > .input-mic { right: 44px; }
 .input-wrap.multi.crowd > .input-text { padding-bottom: 29px; }
