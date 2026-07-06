@@ -69,6 +69,7 @@ export default {
   'bind.alreadyBound': '已绑定该会话',
   'bind.createFailed': '新建失败,请重试',
   'bind.invalidName': '只能用字母、数字、横线(≤16)',
+  'bind.desktopHint': '这里的会话(包括手机新建的),电脑上一条命令即可接管:handmux open <会话名>',
   'bind.checkFailed': '校验失败,请重试',
   'bind.startDir': '起始目录',
   'bind.homeDirDefault': '主目录（默认）',

@@ -69,6 +69,7 @@ export default {
   'bind.alreadyBound': '已綁定此工作階段',
   'bind.createFailed': '建立失敗，請重試',
   'bind.invalidName': '只能使用字母、數字、連字號（≤16）',
+  'bind.desktopHint': '這裡的工作階段(包括手機新建的),電腦上一條命令即可接管:handmux open <名稱>',
   'bind.checkFailed': '驗證失敗，請重試',
   'bind.startDir': '起始目錄',
   'bind.homeDirDefault': '主目錄（預設）',

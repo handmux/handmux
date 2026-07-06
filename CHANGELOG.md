@@ -8,7 +8,9 @@ All notable changes to handmux. Format follows [Keep a Changelog](https://keepac
 - **`handmux open <session>` — one-command attach on the computer.** Attaches the named tmux session,
   creating it if missing; inside tmux it switches the current client instead of nesting. Deliberately
   decoupled from the server lifecycle (never starts/stops anything) — its main job is taking back a
-  session you created from the phone, without needing to know `tmux new -A -s`.
+  session you created from the phone, without needing to know `tmux new -A -s`. The phone's bind/create
+  dialog now carries a quiet hint teaching exactly that (all 5 languages), and the docs gained a
+  `handmux open` section.
 
 ### Fixed
 - **A document always shows the latest content now — no stale cached copy.** A doc tab cached the bytes

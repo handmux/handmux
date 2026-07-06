@@ -127,6 +127,9 @@ export default function BindSession({ open, onClose, onBound, bound, onAuthFail,
             </>
           )}
           {error && <div className="bind-error">{error}</div>}
+          {/* Teach the reverse direction right where sessions are born: any session here (incl. ones
+              created from the phone) is one command away on the computer. */}
+          <div className="settings-hint">{t('bind.desktopHint')}</div>
           <div className="settings-btns bind-actions">
             <button className="fontbtn" onClick={onClose}>{t('common.cancel')}</button>
             <button className="fontbtn bind-confirm" onClick={submit} disabled={busy || !target}>

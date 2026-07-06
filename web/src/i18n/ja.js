@@ -69,6 +69,7 @@ export default {
   'bind.alreadyBound': 'このセッションはすでに紐付けられています',
   'bind.createFailed': '作成に失敗しました。再試行してください',
   'bind.invalidName': '英数字とハイフンのみ（≤16文字）',
+  'bind.desktopHint': 'ここのセッション(スマホで作成したものも)は、PC で 1 コマンドで引き継げます:handmux open <名前>',
   'bind.checkFailed': '確認に失敗しました。再試行してください',
   'bind.startDir': '開始ディレクトリ',
   'bind.homeDirDefault': 'ホームディレクトリ（デフォルト）',

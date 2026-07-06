@@ -70,6 +70,7 @@ export default {
   'bind.alreadyBound': 'Session already bound',
   'bind.createFailed': 'Create failed, please retry',
   'bind.invalidName': 'Only letters, digits, hyphens (≤16)',
+  'bind.desktopHint': 'On the computer, one command takes any session here back over: handmux open <name>',
   'bind.checkFailed': 'Check failed, please retry',
   'bind.startDir': 'Start directory',
   'bind.homeDirDefault': 'Home directory (default)',
