@@ -48,11 +48,12 @@ handmux start --tunnel cloudflare   # instant public URL (cloudflared auto-insta
 ## Features
 
 - **Claude Code / Codex, deeply** — an inbox status ledger, thumb-approve permissions & plans, per-agent usage bars.
+- **Command & chat modes** — one bottom bar, two modes: type straight into the terminal, or talk to the agent in natural language. Preset ESC/Tab/Ctrl+C, custom ⌃⇧⌥ key-combos, and saved/recent commands split global or per-window (slash-commands included).
 - **Git viewer** — changes / commit history / any branch / full-screen colored diff, multi-repo tabs, read-only, never touches your tree.
 - **Site preview** — a static folder, or a running service by port (routing / APIs / live-reload intact), in a phone or desktop viewport.
 - **Docs** — tap a path in the terminal to open it; Markdown rendered, font zoom, sentence-by-sentence read-aloud.
 - **Files both ways** — multi-select upload from the chat box, download, share in, copy any absolute path.
-- **Ideas & command panel** — a per-window to-do list plus saved/recent commands and slash-commands.
+- **Ideas** — a per-window idea/to-do list; jot one (by voice too) and drop it straight into the prompt.
 - **Built for flaky networks** — backoff reconnect, connection-lost banner, offline page, polling that pauses in the background; a reflow-safe cursor and drag-to-select copy.
 - **Zero-install PWA** — runs in the browser; add to home screen for full-screen. Multilingual — English, 简体 / 繁體中文, 日本語, 한국어.
 
