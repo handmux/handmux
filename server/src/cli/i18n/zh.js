@@ -56,6 +56,12 @@ export default {
   // cloudflared 自动下载
   'cf.downloading': '  ↓ 正在下载 cloudflared({file})…',
 
+  // natapp / cpolar 客户端二进制
+  'client.downloading': '  ↓ 正在下载 {name}({file})…',
+  'client.cpolarManual': '✗ cpolar 不可用 —— 到 https://www.cpolar.com/download 下载,解压出二进制放进 ~/.handmux/bin/ 后重试。',
+  'client.cpolarAuthFail': '✗ cpolar 拒绝了该 authtoken —— 到 https://dashboard.cpolar.com 核对一下。',
+  'client.natappManual': '✗ 未找到 natapp —— 到 https://natapp.cn 下载(需先登录,非公开下载),把 `natapp` 二进制放到 {dir}(或 PATH 上任意位置)后重试。',
+
   // 访问信息块(printAccess)
   'access.noState': '  (无状态)',
   'access.error': '  ✗ {msg}',
@@ -109,7 +115,9 @@ export default {
   'setup.tunnel2': '  2) cloudflare        —— 即时、随机的临时 https 地址',
   'setup.tunnel3': '  3) cloudflare-named  —— 用你自己的域名,稳定 HTTPS(最省心)',
   'setup.tunnel4': '  4) ssh (tunlite)     —— 你自己的服务器 / 边缘',
-  'setup.choose': '选择 1-4',
+  'setup.tunnel5': '  5) natapp            —— 国内可用的隧道(需要 natapp authtoken)',
+  'setup.tunnel6': '  6) cpolar            —— 国内可用的隧道(自动安装;需要 cpolar authtoken)',
+  'setup.choose': '选择 1-6',
   'setup.invalid': '无效选择',
   'setup.askPort': '服务端口',
   'setup.askHostname': '公网域名(例如 handmux.example.com)',
@@ -117,6 +125,15 @@ export default {
   'setup.askSshHost': 'ssh 主机(user@host[:port])',
   'setup.askRemotePort': 'ssh 主机上的远程端口',
   'setup.askPublicUrl': '公网地址(留空 = http://host:remotePort)',
+  'setup.natappGuide': '获取 authtoken:登录 https://natapp.cn → 购买/选择一条隧道 → 复制它的 authtoken(一个 token 对应一条隧道)。',
+  'setup.cpolarGuide': '获取 authtoken:登录 https://dashboard.cpolar.com → 验证/Verify → 复制你的 authtoken。',
+  'setup.askAuthtoken': 'authtoken',
+  'setup.askFixed': '用固定域名吗?(否 = 免费临时域名,每次重启都会变)',
+  'setup.askNatappDomain': '你在 natapp 后台为该 authtoken 绑定的固定域名(例如 myapp.natapp1.cc)',
+  'setup.askCpolarDomain': '你保留的二级域名或绑定的自有域名(例如 myapp.cpolar.top)',
+  'setup.askCpolarRegion': 'cpolar 区域(cn = 中国大陆,国内更快;留空 = cpolar 默认)',
+  'setup.natappReady': '✓ natapp 客户端就绪',
+  'setup.cpolarReady': '✓ cpolar 客户端就绪',
   'setup.wrote': '✓ 已写入 {path}',
   'setup.pushKeep': '保留已配置的推送通知吗?',
   'setup.pushSetup': '现在配置推送通知吗?(会生成 VAPID 密钥)',
@@ -169,14 +186,17 @@ flag 仅本次覆盖某一项、绝不持久化(优先级 flag > file > default)
   --version, -v            打印 handmux 版本
 
 start flag(仅本次覆盖 —— 要持久化请用 'handmux setup'):
-  --tunnel none|cloudflare|cloudflare-named|ssh   暴露方式(默认:none)
+  --tunnel none|cloudflare|cloudflare-named|ssh|natapp|cpolar   暴露方式(默认:none)
   --ssh-host user@host[:port]   ssh 隧道目标(tunlite)
   --remote-port N               绑定在 ssh 主机上的端口(默认:--port)
   --public-url URL              对外公布的公网地址(任意隧道均可,包括自建的 none;
-                                ssh 默认 http://host:remotePort)
+                                ssh 默认 http://host:remotePort;natapp/cpolar 填你的固定/保留域名 ——
+                                留空则用免费临时域名)
   --ssh-jump u@h[,…]            ssh 的可选跳板机
   --cf-hostname H               cloudflare-named 的公网域名
   --cf-tunnel-name N            cloudflare-named 的隧道名(默认:handmux)
+  --authtoken T                 natapp / cpolar 的 authtoken(或 HANDMUX_AUTHTOKEN)
+  --cpolar-region R             cpolar 边缘区域,如 cn(或 HANDMUX_CPOLAR_REGION)
   --port N                  服务端口(默认:19999)
   --host H                  绑定地址(默认:0.0.0.0)
   --token S                 鉴权令牌(默认:自动生成)

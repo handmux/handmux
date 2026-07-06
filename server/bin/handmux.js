@@ -26,6 +26,7 @@ import { renderCompactQr } from '../src/cli/qr.js';
 import { supervise, bareUrl, publicUrlWithToken } from '../src/cli/supervisor.js';
 import { resolveCloudflared } from '../src/cli/cloudflared.js';
 import { resolveTunlite, checkSshAuth } from '../src/cli/tunlite.js';
+import { resolveNatapp, resolveCpolar } from '../src/cli/tunnelClients.js';
 import { installService, uninstallService } from '../src/cli/service.js';
 import { checkTmux, MIN_TMUX, tmuxInstallHint } from '../src/cli/tmuxVersion.js';
 import { readState, clearState, isAlive, pocketHome, logPath, configPath, claudeStatePath } from '../src/cli/state.js';
@@ -113,6 +114,20 @@ async function preflightSsh(cfg) {
     if (checkSshAuth(cfg.sshHost, { bin: cfg.tunliteBin }) === 0) return;
   }
   throw new Error(t('ssh.notSetup', { bin: cfg.tunliteBin, host: cfg.sshHost }));
+}
+
+// natapp/cpolar preflight: resolve the client binary (cpolar auto-downloads; natapp must be pre-installed),
+// and for cpolar seed the authtoken into its own config so the detached `cpolar http` authenticates. Throws
+// a friendly message the caller prints.
+async function preflightNgrok(cfg) {
+  if (cfg.tunnel === 'natapp') {
+    cfg.natappBin = resolveNatapp(HOME);
+  } else {
+    cfg.cpolarBin = await resolveCpolar(HOME);
+    if (spawnSync(cfg.cpolarBin, ['authtoken', cfg.authtoken], { stdio: 'ignore' }).status !== 0) {
+      throw new Error(t('client.cpolarAuthFail'));
+    }
+  }
 }
 
 async function main() {
@@ -228,6 +243,10 @@ async function start() {
     try { await preflightSsh(cfg); }
     catch (e) { console.error(t('err.generic', { msg: e.message })); process.exit(1); }
   }
+  if (cfg.tunnel === 'natapp' || cfg.tunnel === 'cpolar') {
+    try { await preflightNgrok(cfg); }
+    catch (e) { console.error(t('err.generic', { msg: e.message })); process.exit(1); }
+  }
 
   if (cfg.foreground) {
     supervise(cfg, { home: HOME });
@@ -304,6 +323,10 @@ async function serviceInstall() {
     if (checkSshAuth(cfg.sshHost, { bin: cfg.tunliteBin }) !== 0) {
       console.error(t('err.generic', { msg: t('ssh.notSetup', { bin: cfg.tunliteBin, host: cfg.sshHost }) })); process.exit(1);
     }
+  }
+  if (cfg.tunnel === 'natapp' || cfg.tunnel === 'cpolar') {
+    try { await preflightNgrok(cfg); }
+    catch (e) { console.error(t('err.generic', { msg: e.message })); process.exit(1); }
   }
   const payload = Buffer.from(JSON.stringify(cfg)).toString('base64');
   const args = [process.execPath, SELF, '__supervise', '--payload', payload];

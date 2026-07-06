@@ -57,6 +57,12 @@ export default {
   // cloudflared auto-download
   'cf.downloading': '  ↓ downloading cloudflared ({file}) …',
 
+  // natapp / cpolar client binaries
+  'client.downloading': '  ↓ downloading {name} ({file}) …',
+  'client.cpolarManual': '✗ cpolar not available — install it from https://www.cpolar.com/download (unzip the binary into ~/.handmux/bin/), then re-run.',
+  'client.cpolarAuthFail': '✗ cpolar rejected the authtoken — double-check it at https://dashboard.cpolar.com',
+  'client.natappManual': '✗ natapp not found — download it from https://natapp.cn (login first, it is not a public download), then put the `natapp` binary in {dir} (or anywhere on your PATH) and re-run.',
+
   // access block (printAccess)
   'access.noState': '  (no state)',
   'access.error': '  ✗ {msg}',
@@ -110,7 +116,9 @@ export default {
   'setup.tunnel2': '  2) cloudflare        — instant, random temporary https URL',
   'setup.tunnel3': '  3) cloudflare-named  — your domain, stable HTTPS (most hands-off)',
   'setup.tunnel4': '  4) ssh (tunlite)     — your own server / edge',
-  'setup.choose': 'choose 1-4',
+  'setup.tunnel5': '  5) natapp            — China-usable tunnel (needs a natapp authtoken)',
+  'setup.tunnel6': '  6) cpolar            — China-usable tunnel (auto-installs; needs a cpolar authtoken)',
+  'setup.choose': 'choose 1-6',
   'setup.invalid': 'invalid choice',
   'setup.askPort': 'server port',
   'setup.askHostname': 'public hostname (e.g. handmux.example.com)',
@@ -118,6 +126,15 @@ export default {
   'setup.askSshHost': 'ssh host (user@host[:port])',
   'setup.askRemotePort': 'remote port on the ssh host',
   'setup.askPublicUrl': 'public url (blank = http://host:remotePort)',
+  'setup.natappGuide': "Get your authtoken: sign in at https://natapp.cn → buy/select a tunnel → copy its authtoken (one token = one tunnel).",
+  'setup.cpolarGuide': 'Get your authtoken: sign in at https://dashboard.cpolar.com → Verify → copy your authtoken.',
+  'setup.askAuthtoken': 'authtoken',
+  'setup.askFixed': 'use a fixed domain? (No = a free temporary domain, changes each restart)',
+  'setup.askNatappDomain': 'your reserved domain bound to this authtoken (e.g. myapp.natapp1.cc)',
+  'setup.askCpolarDomain': 'your reserved second-level subdomain or bound domain (e.g. myapp.cpolar.top)',
+  'setup.askCpolarRegion': 'cpolar region (cn = mainland China, faster domestically; blank = cpolar default)',
+  'setup.natappReady': '✓ natapp client ready',
+  'setup.cpolarReady': '✓ cpolar client ready',
   'setup.wrote': '✓ wrote {path}',
   'setup.pushKeep': 'keep push notifications configured?',
   'setup.pushSetup': 'set up push notifications now? (generates VAPID keys)',
@@ -170,14 +187,17 @@ advanced (scripting / multiple configs):
   --version, -v            print the handmux version
 
 start flags (one-run overrides — for persistence use 'handmux setup'):
-  --tunnel none|cloudflare|cloudflare-named|ssh   expose method (default: none)
+  --tunnel none|cloudflare|cloudflare-named|ssh|natapp|cpolar   expose method (default: none)
   --ssh-host user@host[:port]   ssh tunnel target (tunlite)
   --remote-port N               port bound on the ssh host (default: --port)
   --public-url URL              public url to advertise (any tunnel, incl. none if you run your own;
-                                ssh defaults to http://host:remotePort)
+                                ssh defaults to http://host:remotePort; for natapp/cpolar this is your
+                                fixed/reserved domain — omit it for a free temporary one)
   --ssh-jump u@h[,…]            optional bastion for ssh
   --cf-hostname H               public hostname for cloudflare-named
   --cf-tunnel-name N            tunnel name for cloudflare-named (default: handmux)
+  --authtoken T                 authtoken for natapp / cpolar (or HANDMUX_AUTHTOKEN)
+  --cpolar-region R             cpolar edge region, e.g. cn (or HANDMUX_CPOLAR_REGION)
   --port N                  server port (default: 19999)
   --host H                  bind host (default: 0.0.0.0)
   --token S                 auth token (default: generated)

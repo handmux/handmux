@@ -4,6 +4,18 @@ All notable changes to handmux. Format follows [Keep a Changelog](https://keepac
 
 ## [Unreleased]
 
+### Added
+- **Two China-usable tunnels: `--tunnel natapp` and `--tunnel cpolar`.** When Cloudflare's edge is
+  unreliable from mainland China, these ngrok-derived domestic tunnels get the phone to your machine.
+  Unified, minimal parameter model: one shared `--authtoken` (or `HANDMUX_AUTHTOKEN`) is the only new
+  required flag; a **fixed/reserved domain is just `--public-url`** (bare host accepted — normalised to
+  `https://`), and omitting it uses the provider's free temporary domain (scraped from the client's
+  output, like the Cloudflare quick tunnel). cpolar also takes an optional `--cpolar-region` (e.g. `cn`).
+  cpolar's client **auto-downloads** (PATH → `~/.handmux/bin` → fetch+unzip, with a friendly manual
+  fallback); natapp's is login-gated so it resolves an installed binary and otherwise tells you exactly
+  where to drop it. `handmux setup` gained both as menu options 5/6, each with in-context guidance on
+  where to get the authtoken and a temporary-vs-fixed-domain prompt.
+
 ## [0.10.0] - 2026-07-06
 
 ### Added

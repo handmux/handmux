@@ -36,7 +36,7 @@ export async function drain(res, onProgress) {
 // Default progress renderer: a single \r-updated line on a TTY (throttled to ~10/s), e.g.
 // `  cloudflared  45%  (9.2/20.4 MB)`. Non-TTY (piped/logged) gets nothing — the start line already
 // announced the download and a spammy animation would just fill the log with control chars.
-function defaultProgress(out = process.stdout) {
+export function defaultProgress(out = process.stdout, name = 'cloudflared') {
   if (!out.isTTY) return () => {};
   let last = 0;
   return (received, total) => {
@@ -47,7 +47,7 @@ function defaultProgress(out = process.stdout) {
     const body = total
       ? `${Math.floor((received / total) * 100)}%  (${fmtMB(received)}/${fmtMB(total)} MB)`
       : `${fmtMB(received)} MB`;
-    out.write(`\r  cloudflared  ${body}   `);
+    out.write(`\r  ${name}  ${body}   `);
     if (done) out.write('\n');
   };
 }

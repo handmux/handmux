@@ -6,6 +6,9 @@
 import { extractCloudflareUrl } from './cloudflareUrl.js';
 import { isTunnelConnected } from './sshTunnel.js';
 import { cfNamedReady } from './cfNamed.js';
+import { extractNatappUrl } from './natappUrl.js';
+import { extractCpolarUrl, cpolarNamedArgs } from './cpolarUrl.js';
+import { hostIn } from './urlHost.js';
 
 export const DRIVERS = {
   none: {
@@ -49,6 +52,41 @@ export const DRIVERS = {
         '--name', 'handmux', '--json', ...(cfg.sshJump ? ['--jump', cfg.sshJump] : [])],
     }),
     matchUrl: (chunk, cfg) => (isTunnelConnected(chunk) ? cfg.publicUrl : null),
+  },
+  // natapp / cpolar — ngrok-derived domestic tunnels (China-usable when cloudflare's edge isn't). Both take a
+  // stable `authtoken`; both default to a full-screen TUI, so we force `-log=stdout` to get scrapeable text.
+  // FREE tier = random domain we scrape; a fixed/reserved domain arrives via publicUrl (see cfg.publicUrl).
+  natapp: {
+    name: 'natapp',
+    needsProcess: true,
+    notFoundHint: 'natapp not found — download it from https://natapp.cn (login required) into ~/.handmux/bin/',
+    proc: (cfg) => ({
+      cmd: cfg.natappBin || 'natapp',
+      args: [`-authtoken=${cfg.authtoken}`, '-log=stdout'],
+    }),
+    // The reserved/paid zone is arbitrary (natapp1.cc / your own) so we can't scrape it — gate on the known
+    // host echoing in the log. Free tier has no publicUrl → scrape the natappfree.cc URL.
+    matchUrl: (chunk, cfg) => (cfg.publicUrl
+      ? (hostIn(chunk, cfg.publicUrl) ? cfg.publicUrl : null)
+      : extractNatappUrl(chunk)),
+  },
+  cpolar: {
+    name: 'cpolar',
+    needsProcess: true,
+    notFoundHint: 'cpolar not found — install it (or run `handmux setup`, which auto-downloads it)',
+    proc: (cfg) => ({
+      cmd: cfg.cpolarBin || 'cpolar',
+      // authtoken is seeded into cpolar's own config beforehand (handmux.js / setup); a reserved subdomain or
+      // bound domain becomes -subdomain/-hostname; -region selects the edge (cn = mainland China).
+      args: ['http', '-log=stdout',
+        ...cpolarNamedArgs(cfg.publicUrl),
+        ...(cfg.cpolarRegion ? [`-region=${cfg.cpolarRegion}`] : []),
+        String(cfg.port)],
+    }),
+    // A reserved subdomain is still on the cpolar zone, so scrape it (learns the region-qualified host cpolar
+    // serves); a bound custom domain is off-zone → gate on its known host from publicUrl.
+    matchUrl: (chunk, cfg) => extractCpolarUrl(chunk)
+      || (cfg.publicUrl && hostIn(chunk, cfg.publicUrl) ? cfg.publicUrl : null),
   },
 };
 

@@ -3,7 +3,7 @@
 // (generated when unset) so a public tunnel can never come up token-less.
 import crypto from 'node:crypto';
 
-export const TUNNELS = ['none', 'cloudflare', 'cloudflare-named', 'ssh'];
+export const TUNNELS = ['none', 'cloudflare', 'cloudflare-named', 'ssh', 'natapp', 'cpolar'];
 
 const camel = (s) => s.replace(/-([a-z])/g, (_, c) => c.toUpperCase());
 
@@ -69,6 +69,7 @@ export function resolveConfig(flags = {}, fileCfg = {}, env = process.env, gen =
     // tunnel-specific (null unless the relevant tunnel is selected)
     sshHost: null, remotePort: null, sshJump: null,
     cfHostname: null, cfTunnelName: null,
+    authtoken: null, cpolarRegion: null,
   };
 
   if (tunnel === 'ssh') {
@@ -86,6 +87,19 @@ export function resolveConfig(flags = {}, fileCfg = {}, env = process.env, gen =
     if (!cfg.cfHostname) throw new Error('cloudflare-named needs --cf-hostname handmux.example.com (or HANDMUX_CF_HOSTNAME)');
     cfg.cfTunnelName = pick('cfTunnelName', env.HANDMUX_CF_TUNNEL_NAME) || 'handmux';
     cfg.publicUrl = cfg.publicUrl || `https://${cfg.cfHostname}`;
+  }
+
+  // natapp / cpolar: one shared credential (--authtoken), and named/fixed mode is just --public-url (the
+  // reserved domain) — no separate concept. A bare host is normalised to https:// so the user can paste the
+  // domain the provider gave them. cpolar also takes an optional edge --cpolar-region (cn = mainland China).
+  if (tunnel === 'natapp' || tunnel === 'cpolar') {
+    cfg.authtoken = pick('authtoken', env.HANDMUX_AUTHTOKEN) || null;
+    if (!cfg.authtoken) {
+      const where = tunnel === 'natapp' ? 'natapp.cn' : 'cpolar.com';
+      throw new Error(`${tunnel} needs --authtoken <token> (or HANDMUX_AUTHTOKEN) — get it from ${where} after logging in`);
+    }
+    if (cfg.publicUrl && !/^https?:\/\//i.test(cfg.publicUrl)) cfg.publicUrl = `https://${cfg.publicUrl}`;
+    if (tunnel === 'cpolar') cfg.cpolarRegion = pick('cpolarRegion', env.HANDMUX_CPOLAR_REGION) || null;
   }
 
   return cfg;
@@ -163,6 +177,14 @@ export function explainConfig(flags = {}, fileCfg = {}, cfgPath = null, env = pr
   if (t === 'cloudflare-named') {
     add('cfHostname', trace(flags, fileCfg, env, cfgPath, 'cfHostname', 'HANDMUX_CF_HOSTNAME', null));
     add('cfTunnelName', trace(flags, fileCfg, env, cfgPath, 'cfTunnelName', 'HANDMUX_CF_TUNNEL_NAME', 'handmux'));
+  }
+  if (t === 'natapp' || t === 'cpolar') {
+    const at = trace(flags, fileCfg, env, cfgPath, 'authtoken', 'HANDMUX_AUTHTOKEN', null);
+    add('authtoken', at, at.value == null ? '(required — from the provider dashboard)' : mask(at.value));
+  }
+  if (t === 'cpolar') {
+    const rg = trace(flags, fileCfg, env, cfgPath, 'cpolarRegion', 'HANDMUX_CPOLAR_REGION', null);
+    add('cpolarRegion', rg, rg.value == null ? '(cpolar default)' : String(rg.value));
   }
 
   // Integrations live only in the file (secrets); show presence, never the keys.

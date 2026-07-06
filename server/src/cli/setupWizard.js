@@ -11,6 +11,7 @@ import webpush from 'web-push';
 import { configPath, pocketHome } from './state.js';
 import { resolveCloudflared } from './cloudflared.js';
 import { resolveTunlite, checkSshAuth } from './tunlite.js';
+import { resolveNatapp, resolveCpolar } from './tunnelClients.js';
 import { t, setLocale, getLocale } from './i18n/index.js';
 
 // ~/.cloudflared/config.yml for a named tunnel: route the hostname to the local handmux port.
@@ -53,6 +54,7 @@ export function findTunnelId(listJsonOut, name) {
 const WIZARD_KEYS = [
   'lang', 'name', 'port', 'tunnel',
   'sshHost', 'remotePort', 'sshJump', 'cfHostname', 'cfTunnelName', 'publicUrl',
+  'authtoken', 'cpolarRegion',
   'vapid', 'xfyun',
 ];
 
@@ -70,6 +72,11 @@ export function configFromAnswers(a) {
   if (a.tunnel === 'cloudflare-named') {
     cfg.cfHostname = a.cfHostname;
     cfg.cfTunnelName = a.cfTunnelName;
+  }
+  if (a.tunnel === 'natapp' || a.tunnel === 'cpolar') {
+    if (a.authtoken) cfg.authtoken = a.authtoken;
+    if (a.publicUrl) cfg.publicUrl = a.publicUrl;      // fixed/reserved domain (blank = temporary random)
+    if (a.cpolarRegion) cfg.cpolarRegion = a.cpolarRegion;
   }
   if (a.vapid) cfg.vapid = a.vapid;
   if (a.xfyun) cfg.xfyun = a.xfyun;
@@ -113,7 +120,7 @@ export async function runSetup({ home = homedir(), target = configPath(home), lo
     log.log(t('setup.langQ'));
     log.log(t('setup.lang1'));
     log.log(t('setup.lang2'));
-    const langPick = await ask(rl, t('setup.choose').replace('1-4', '1-2'), getLocale() === 'zh' ? '2' : '1');
+    const langPick = await ask(rl, t('setup.choose').replace('1-6', '1-2'), getLocale() === 'zh' ? '2' : '1');
     const lang = { 1: 'en', 2: 'zh' }[langPick] || getLocale();
     setLocale(lang);
 
@@ -124,12 +131,14 @@ export async function runSetup({ home = homedir(), target = configPath(home), lo
     log.log(t('setup.tunnel2'));
     log.log(t('setup.tunnel3'));
     log.log(t('setup.tunnel4'));
+    log.log(t('setup.tunnel5'));
+    log.log(t('setup.tunnel6'));
     // Default to the CURRENT tunnel when re-running; for a brand-new user (no config) default to '2'
     // (cloudflare quick tunnel — zero-config, instant public URL) rather than '3' (cloudflare-named),
     // which a bare-Enter newcomer can't complete without a Cloudflare login + their own domain.
-    const curPick = { none: '1', cloudflare: '2', 'cloudflare-named': '3', ssh: '4' }[cur.tunnel] || '2';
+    const curPick = { none: '1', cloudflare: '2', 'cloudflare-named': '3', ssh: '4', natapp: '5', cpolar: '6' }[cur.tunnel] || '2';
     const pick = await ask(rl, t('setup.choose'), curPick);
-    const tunnel = { 1: 'none', 2: 'cloudflare', 3: 'cloudflare-named', 4: 'ssh' }[pick];
+    const tunnel = { 1: 'none', 2: 'cloudflare', 3: 'cloudflare-named', 4: 'ssh', 5: 'natapp', 6: 'cpolar' }[pick];
     if (!tunnel) { log.error(t('setup.invalid')); return null; }
     const port = Number(await ask(rl, t('setup.askPort'), String(cur.port || 19999)));
 
@@ -143,6 +152,15 @@ export async function runSetup({ home = homedir(), target = configPath(home), lo
       answers.remotePort = Number(await ask(rl, t('setup.askRemotePort'), String(cur.remotePort || port)));
       answers.publicUrl = await ask(rl, t('setup.askPublicUrl'), cur.publicUrl || '');
       await provisionSsh({ sshHost: answers.sshHost, log });
+    } else if (tunnel === 'natapp' || tunnel === 'cpolar') {
+      // Guide the user to their authtoken, then let them choose a temporary (random) or fixed domain.
+      log.log(t(tunnel === 'natapp' ? 'setup.natappGuide' : 'setup.cpolarGuide'));
+      answers.authtoken = await ask(rl, t('setup.askAuthtoken'), cur.authtoken || '');
+      if (await askYesNo(rl, t('setup.askFixed'), false)) {
+        answers.publicUrl = await ask(rl, t(tunnel === 'natapp' ? 'setup.askNatappDomain' : 'setup.askCpolarDomain'), cur.publicUrl || '');
+      }
+      if (tunnel === 'cpolar') answers.cpolarRegion = await ask(rl, t('setup.askCpolarRegion'), cur.cpolarRegion || '');
+      await provisionNgrokClient({ tunnel, home, authtoken: answers.authtoken, log });
     }
 
     answers.vapid = await askPush(rl, cur.vapid, log);
@@ -236,6 +254,22 @@ async function provisionSsh({ sshHost, log }) {
   if (checkSshAuth(sshHost, { bin }) === 0) { log.log(t('setup.sshReady')); return; }
   log.log(t('setup.sshSetup', { host: sshHost }));
   spawnSync(bin, ['setup-key', sshHost], { stdio: 'inherit' });
+}
+
+// Get the client binary ready (cpolar auto-downloads; natapp must be pre-installed) and, for cpolar, seed the
+// authtoken into its config. NON-FATAL: if the binary isn't there yet we print the hint and still write the
+// config, so the user can install it later and just `handmux start` — the wizard never dead-ends on this.
+async function provisionNgrokClient({ tunnel, home, authtoken, log }) {
+  try {
+    if (tunnel === 'cpolar') {
+      const bin = await resolveCpolar(home);
+      if (authtoken) spawnSync(bin, ['authtoken', authtoken], { stdio: 'ignore' });
+      log.log(t('setup.cpolarReady'));
+    } else {
+      resolveNatapp(home);
+      log.log(t('setup.natappReady'));
+    }
+  } catch (e) { log.log(t('err.generic', { msg: e.message })); }
 }
 
 function printSshServerHelp(a, log) {

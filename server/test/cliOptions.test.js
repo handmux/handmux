@@ -108,6 +108,26 @@ describe('resolveConfig', () => {
       { tunnel: 'ssh', publicUrl: 'https://file.dev' }, {}, gen);
     expect(c.publicUrl).toBe('https://flag.dev');
   });
+  it('natapp/cpolar require an authtoken', () => {
+    expect(() => resolveConfig({ tunnel: 'natapp' }, {}, {}, gen)).toThrow(/authtoken/);
+    expect(() => resolveConfig({ tunnel: 'cpolar' }, {}, {}, gen)).toThrow(/authtoken/);
+  });
+  it('natapp resolves the authtoken (flag > env) and stays temporary without a public url', () => {
+    expect(resolveConfig({ tunnel: 'natapp', authtoken: 'tok1' }, {}, {}, gen))
+      .toMatchObject({ tunnel: 'natapp', authtoken: 'tok1', publicUrl: null });
+    expect(resolveConfig({ tunnel: 'natapp' }, {}, { HANDMUX_AUTHTOKEN: 'envtok' }, gen).authtoken).toBe('envtok');
+  });
+  it('a fixed domain is just --public-url, and a bare host is normalised to https://', () => {
+    const c = resolveConfig({ tunnel: 'natapp', authtoken: 't', publicUrl: 'myapp.natapp1.cc' }, {}, {}, gen);
+    expect(c.publicUrl).toBe('https://myapp.natapp1.cc');
+    const c2 = resolveConfig({ tunnel: 'cpolar', authtoken: 't', publicUrl: 'https://x.cpolar.top' }, {}, {}, gen);
+    expect(c2.publicUrl).toBe('https://x.cpolar.top'); // already a url — untouched
+  });
+  it('cpolar takes an optional region (flag > env)', () => {
+    expect(resolveConfig({ tunnel: 'cpolar', authtoken: 't', cpolarRegion: 'cn' }, {}, {}, gen).cpolarRegion).toBe('cn');
+    expect(resolveConfig({ tunnel: 'cpolar', authtoken: 't' }, {}, { HANDMUX_CPOLAR_REGION: 'us' }, gen).cpolarRegion).toBe('us');
+    expect(resolveConfig({ tunnel: 'cpolar', authtoken: 't' }, {}, {}, gen).cpolarRegion).toBeNull();
+  });
   it('ingests the unified config fields (vapid/xfyun/staticDir) from the config file', () => {
     const fileCfg = {
       staticDir: '/srv/dist',
@@ -149,5 +169,13 @@ describe('explainConfig', () => {
     expect(by.cfHostname).toMatchObject({ display: 'h.x.com', origin: 'flag' });
     expect(by.sshHost).toBeUndefined();
     expect(by.publicUrl.display).toMatch(/derived from tunnel/); // stale ssh url dropped
+  });
+  it('masks the natapp/cpolar authtoken and shows cpolar region only for cpolar', () => {
+    const nat = Object.fromEntries(explainConfig({ tunnel: 'natapp', authtoken: 'supersecrettoken1234' }, {}, '/c.json').map((r) => [r.key, r]));
+    expect(nat.authtoken.display).toBe('••••1234');
+    expect(nat.cpolarRegion).toBeUndefined();
+    const cp = Object.fromEntries(explainConfig({ tunnel: 'cpolar', cpolarRegion: 'cn' }, {}, '/c.json').map((r) => [r.key, r]));
+    expect(cp.authtoken.display).toMatch(/required/);
+    expect(cp.cpolarRegion).toMatchObject({ display: 'cn', origin: 'flag' });
   });
 });
