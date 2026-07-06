@@ -6,10 +6,11 @@ All notable changes to handmux. Format follows [Keep a Changelog](https://keepac
 
 ### Added
 - **"Add to Home Screen" coach.** On first open in a browser tab (never once installed, and
-  remembered as dismissed), a sheet explains how to install handmux as a full-screen PWA. Android
-  gets a one-tap install via `beforeinstallprompt`; iOS Safari gets the Share → More → Add to Home
-  Screen steps, and other iOS browsers are pointed at Safari — the only iOS browser that can install
-  a PWA, and the path iOS push requires.
+  remembered as dismissed), a light, dismissible strip at the top of the screen nudges you to install
+  handmux as a full-screen PWA — a non-modal `role="status"` banner you flick away with the ✕, not a
+  blocking dialog. Android gets a one-tap install via `beforeinstallprompt`; iOS Safari gets the
+  compact Share → More → Add to Home Screen hint, and other iOS browsers are pointed at Safari — the
+  only iOS browser that can install a PWA, and the path iOS push requires.
 
 ## [0.9.0] - 2026-07-05
 
