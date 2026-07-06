@@ -2,10 +2,12 @@ import { useEffect, useState } from 'react';
 import { t } from '../i18n';
 import { isStandalone } from '../push.js';
 
-// One-time "Add to Home Screen" coach. Pops on first entry in a browser tab (never once installed),
-// and is remembered as dismissed so it doesn't nag. Android/Chrome gets a real one-tap install via
-// the captured `beforeinstallprompt`; iOS has no programmatic install, so Safari users get the manual
-// steps and non-Safari iOS users are pointed at Safari (the only iOS browser that can install a PWA).
+// One-time "Add to Home Screen" coach — a light, dismissible strip at the top of the screen (NOT a
+// modal: it never blocks the app, just offers a nudge you can flick away). Shows on first entry in a
+// browser tab (never once installed) and is remembered as dismissed so it doesn't nag. Android/Chrome
+// gets a real one-tap install via the captured `beforeinstallprompt`; iOS has no programmatic install,
+// so Safari users get the short share-sheet hint and non-Safari iOS users are pointed at Safari (the
+// only iOS browser that can install a PWA).
 const DISMISS_KEY = 'tw_a2hs_dismissed';
 
 const ua = () => (typeof navigator !== 'undefined' ? navigator.userAgent || '' : '');
@@ -45,37 +47,28 @@ export default function AddToHome() {
     dismiss();
   };
 
-  let body;
+  // Pick the mode → the sub-line (why/how) and, on Android, a real one-tap install button.
+  let mode, sub, cta = null;
   if (deferred) {
-    body = <button className="a2hs-install" onClick={install}>{t('a2hs.install')}</button>;
+    mode = 'install'; sub = t('a2hs.lead');
+    cta = <button className="a2hs-banner-cta" onClick={install}>{t('a2hs.install')}</button>;
   } else if (isIOS() && !isIOSSafari()) {
-    body = <p className="a2hs-note">{t('a2hs.iosOpenSafari')}</p>;
+    mode = 'ios-other'; sub = t('a2hs.iosOpenSafari');
   } else if (isIOS()) {
-    body = (
-      <ol className="a2hs-steps">
-        <li>{t('a2hs.ios1')}</li>
-        <li>{t('a2hs.ios2')}</li>
-        <li>{t('a2hs.ios3')}</li>
-      </ol>
-    );
+    mode = 'ios'; sub = t('a2hs.iosHint');
   } else {
-    body = <p className="a2hs-note">{t('a2hs.androidManual')}</p>;
+    mode = 'android'; sub = t('a2hs.androidManual');
   }
 
   return (
-    <>
-      <div className="settings-backdrop" onClick={dismiss} />
-      <div className="settings-card" role="dialog" aria-modal="true" aria-label={t('a2hs.title')}>
-        <div className="settings-head">
-          <span className="settings-title">{t('a2hs.title')}</span>
-          <button className="settings-close" onClick={dismiss} aria-label={t('common.close')}>✕</button>
-        </div>
-        <div className="settings-section">
-          <p className="a2hs-lead">{t('a2hs.lead')}</p>
-          {body}
-          <button className="fontbtn sheet-cancel a2hs-later" onClick={dismiss}>{t('a2hs.later')}</button>
-        </div>
+    <div className="a2hs-banner" role="status" aria-label={t('a2hs.title')} data-mode={mode}>
+      <span className="a2hs-banner-icon" aria-hidden="true">⊕</span>
+      <div className="a2hs-banner-txt">
+        <span className="a2hs-banner-title">{t('a2hs.title')}</span>
+        <span className="a2hs-banner-sub">{sub}</span>
       </div>
-    </>
+      {cta}
+      <button className="a2hs-banner-x" onClick={dismiss} aria-label={t('common.close')}>✕</button>
+    </div>
   );
 }

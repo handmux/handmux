@@ -397,6 +397,7 @@ export default {
   'a2hs.ios1': 'Tap the Share button (the ⬆︎ box) in Safari.',
   'a2hs.ios2': 'Tap “More”, or scroll down the list.',
   'a2hs.ios3': 'Choose “Add to Home Screen”, then “Add”.',
+  'a2hs.iosHint': 'In Safari: Share → More → Add to Home Screen.',
   'a2hs.iosOpenSafari': 'You’re not in Safari. Open this page in Safari, then add it to your Home Screen — other iOS browsers can’t install it.',
   'a2hs.androidManual': 'Open your browser menu (⋮) and choose “Add to Home screen” or “Install app”.',
   'a2hs.later': 'Maybe later',

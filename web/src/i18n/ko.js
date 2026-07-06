@@ -333,6 +333,7 @@ export default {
   'a2hs.ios1': 'Safari의 공유 버튼(⬆︎ 상자)을 탭하세요.',
   'a2hs.ios2': '「더 보기」를 탭하거나 목록을 아래로 스크롤하세요.',
   'a2hs.ios3': '「홈 화면에 추가」를 선택한 뒤 「추가」를 탭하세요.',
+  'a2hs.iosHint': 'Safari에서: 공유 → 더 보기 → 홈 화면에 추가.',
   'a2hs.iosOpenSafari': '현재 Safari가 아닙니다. Safari에서 이 페이지를 연 뒤 홈 화면에 추가하세요 — 다른 iOS 브라우저는 설치할 수 없습니다.',
   'a2hs.androidManual': '브라우저 메뉴(⋮)에서 「홈 화면에 추가」 또는 「앱 설치」를 선택하세요.',
   'a2hs.later': '나중에',

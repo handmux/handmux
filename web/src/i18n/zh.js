@@ -396,6 +396,7 @@ export default {
   'a2hs.ios1': '点 Safari 里的分享按钮（⬆︎ 方框）。',
   'a2hs.ios2': '点「更多」，或向下滑动列表。',
   'a2hs.ios3': '选「添加到主屏幕」，再点「添加」。',
+  'a2hs.iosHint': 'Safari 里:分享 → 更多 → 添加到主屏幕。',
   'a2hs.iosOpenSafari': '当前不是 Safari。请在 Safari 里打开本页再添加到主屏——其他 iOS 浏览器无法安装。',
   'a2hs.androidManual': '打开浏览器菜单（⋮），选「添加到主屏幕」或「安装应用」。',
   'a2hs.later': '以后再说',

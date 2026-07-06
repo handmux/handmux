@@ -333,6 +333,7 @@ export default {
   'a2hs.ios1': '點 Safari 的分享按鈕（⬆︎ 方框）。',
   'a2hs.ios2': '點「更多」，或向下滑動清單。',
   'a2hs.ios3': '選「加入主畫面」，再點「加入」。',
+  'a2hs.iosHint': 'Safari 裡:分享 → 更多 → 加入主畫面。',
   'a2hs.iosOpenSafari': '目前不是 Safari。請在 Safari 開啟本頁再加入主畫面——其他 iOS 瀏覽器無法安裝。',
   'a2hs.androidManual': '開啟瀏覽器選單（⋮），選「加入主畫面」或「安裝應用程式」。',
   'a2hs.later': '稍後再說',
