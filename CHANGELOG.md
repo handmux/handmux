@@ -4,6 +4,14 @@ All notable changes to handmux. Format follows [Keep a Changelog](https://keepac
 
 ## [Unreleased]
 
+### Fixed
+- **`handmux setup` on a running instance now actually applies your changes.** The run-action used to read
+  "Save & start" even when handmux was already up — and picking it just re-ran `start`, which sees the
+  running instance and does nothing (only tunnel/port changes were ever detected), so an edited name / push
+  / voice / ssh setting was written to disk but silently never took effect. Now that action reads **"Save &
+  restart (apply now)"** when an instance is running and performs a real stop→start into the new config;
+  choosing plain **Save** while running prints "run `handmux restart` to apply" instead of "run start".
+
 ### Changed
 - **`handmux setup` push section now explains itself.** Turning notifications on shows a one-line note that
   handmux generates a private signing key locally (`~/.handmux/config.json`, never leaves the machine) and

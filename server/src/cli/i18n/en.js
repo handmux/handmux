@@ -106,6 +106,7 @@ export default {
   // setup wizard
   'setup.confirmStart': 'Start handmux now?',
   'setup.later': "run 'handmux start' when you're ready.",
+  'setup.laterRestart': "already running — run 'handmux restart' to apply the changes.",
   'setup.needTty': 'handmux setup needs an interactive terminal',
   'setup.langQ': 'Language / 语言',
   'setup.lang1': '  1) English',
@@ -151,6 +152,7 @@ export default {
   'setup.no': 'No',
   'setup.escBack': '(Esc to go back)',
   'setup.actStart': 'Save & start',
+  'setup.actRestart': 'Save & restart (apply now)',
   'setup.actSave': 'Save',
   'setup.actExit': 'Exit — discard changes',
   'setup.exited': 'setup cancelled — no changes saved',

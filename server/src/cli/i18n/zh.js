@@ -105,6 +105,7 @@ export default {
   // setup 向导
   'setup.confirmStart': '现在启动 handmux 吗?',
   'setup.later': "准备好后运行 'handmux start' 即可。",
+  'setup.laterRestart': "已在运行 —— 运行 'handmux restart' 让改动生效。",
   'setup.needTty': 'handmux setup 需要一个交互式终端',
   'setup.langQ': 'Language / 语言',
   'setup.lang1': '  1) English',
@@ -150,6 +151,7 @@ export default {
   'setup.no': '否',
   'setup.escBack': '(Esc 返回)',
   'setup.actStart': '保存并启动',
+  'setup.actRestart': '保存并重启(立即生效)',
   'setup.actSave': '保存',
   'setup.actExit': '退出(丢弃改动)',
   'setup.exited': '已取消 —— 未保存任何改动',

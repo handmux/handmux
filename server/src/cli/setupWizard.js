@@ -151,9 +151,10 @@ function readExisting(file) {
 
 // The hub. Pre-fills from the existing config so a re-run edits/switches rather than starts over; a brand-
 // new config first walks Connection, then everyone lands on the hub (edit any section, then Save/Start/Exit).
-// Returns { cfg, start } (start = the user chose "save & start"), or null on cancel/exit. `home` and the
-// write `target` are injectable for tests / `--config`.
-export async function runSetup({ home = homedir(), target = configPath(home), log = console } = {}) {
+// Returns { cfg, start } (start = the user chose the save-and-run action), or null on cancel/exit. When an
+// instance is already `running`, that action reads "Save & restart" (the caller stop+starts to apply the new
+// config). `home` and the write `target` are injectable for tests / `--config`.
+export async function runSetup({ home = homedir(), target = configPath(home), log = console, running = false } = {}) {
   if (!process.stdin.isTTY) { log.error(t('setup.needTty')); return null; }
   const existing = readExisting(target);
   const isNew = !existing || Object.keys(existing).length === 0;
@@ -187,7 +188,7 @@ export async function runSetup({ home = homedir(), target = configPath(home), lo
           { value: 'language', label: t('setup.secLanguage'), hint: a.lang === 'zh' ? '中文' : 'English' },
           { value: 'push', label: t('setup.secPush'), hint: a.vapid ? (a.vapid.subject || t('setup.on')) : t('setup.off') },
           { value: 'voice', label: t('setup.secVoice'), hint: a.xfyun ? (a.xfyun.appId || t('setup.on')) : t('setup.off') },
-          { value: 'start', label: t('setup.actStart') },
+          { value: 'start', label: running ? t('setup.actRestart') : t('setup.actStart') },
           { value: 'save', label: t('setup.actSave') },
           { value: 'exit', label: t('setup.actExit') },
         ],

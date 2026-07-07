@@ -337,9 +337,14 @@ async function serviceInstall() {
 
 async function setupCmd() {
   const target = flags.config ? path.resolve(flags.config) : configPath(HOME);
-  const res = await runSetup({ home: HOME, target });
+  // Is an instance already up? Then the run-action reads "Save & restart" and applying means a real restart
+  // (a running supervisor won't pick up the new config on its own). Captured before the interactive setup so
+  // the label and the action agree; stop() below is a safe no-op if it died meanwhile.
+  const st = readState(HOME);
+  const running = !!(st && isAlive(st.supervisorPid));
+  const res = await runSetup({ home: HOME, target, running });
   if (!res) { process.exit(2); }
-  const { cfg, start: doStart } = res;   // hub's "save & start" carries the intent — no separate confirm
+  const { cfg, start: doStart } = res;   // hub's "save & start/restart" carries the intent — no separate confirm
   // Offer to enable the inbox hooks when an agent is present but not yet wired (Claude 'absent', or Codex
   // 'absent'). installAgentHooks() then wires every present agent (idempotent for any already installed).
   const offerHooks = hooksStatus(HOME) === 'absent' || codexHooksStatus(HOME) === 'absent';
@@ -347,8 +352,12 @@ async function setupCmd() {
     installAgentHooks();
   }
   await maybeOfferStatusLine();
-  if (doStart) { Object.assign(flags, cfg); return start(); }
-  console.log(t('setup.later'));
+  if (doStart) {
+    Object.assign(flags, cfg);
+    if (running) { stop(); await sleep(600); }   // restart into the new config
+    return start();
+  }
+  console.log(t(running ? 'setup.laterRestart' : 'setup.later'));
 }
 
 // Offer to enable the Claude statusLine usage capturer — it feeds the phone Usage page's 5h/weekly bars
