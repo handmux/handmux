@@ -232,36 +232,45 @@ export default {
   handmux logs [--follow] [--lines N]
   handmux update           升级到最新发布版本(npm i -g handmux@latest)
 
+第一次用?跑 'handmux setup' —— 它会带你配好外网访问 + 手机通知。
 模型:'start' 运行 · 'setup' 配置(写入 ~/.handmux/config.json)· 重跑 setup 即可修改。
-flag 仅本次覆盖某一项、绝不持久化(优先级 flag > file > default)。
 
-进阶(脚本 / 多套配置):
-  handmux config                        显示生效的配置 + 每一项来自哪里
-  handmux hooks install|uninstall         启用/停用 Claude Code 通知(收件箱)
-  handmux service install [start-flags]   开机自启(launchd/systemd)
-  handmux service uninstall               移除自启项
-  --config PATH             使用指定配置文件,替代 ~/.handmux/config.json(开发 / 多套配置)
-  --lang en|zh              CLI 语言(默认:根据你的 shell locale 自动检测)
-  --version, -v            打印 handmux 版本
+更多:
+  handmux config                          显示生效的配置 + 每一项来自哪里
+  handmux hooks install|uninstall         启用/停用 agent 通知(收件箱)
+  handmux service install|uninstall       开机自启(launchd/systemd)
+  handmux help flags                      一次性 flag + 环境变量(脚本 / 无头 / Docker)
+  --config PATH · --lang en|zh · --version, -v
+`,
+  'help.flags': `handmux flag —— 一次性覆盖 & 无头配置
 
-start flag(仅本次覆盖 —— 要持久化请用 'handmux setup'):
+优先级:flag > 文件(~/.handmux/config.json)> 环境变量(HANDMUX_*)> 默认值。
+flag 仅本次覆盖某一项、绝不持久化 —— 要持久化请用 'handmux setup'。
+环境变量是无头场景(Docker / systemd / CI)的配置面,会跨多次运行生效。
+
+start flag(括号内为对应环境变量):
   --tunnel none|cloudflare|cloudflare-named|ssh|natapp|cpolar   暴露方式(默认:none)
-  --ssh-host user@host[:port]   ssh 隧道目标(tunlite)
-  --remote-port N               绑定在 ssh 主机上的端口(默认:--port)
-  --public-url URL              对外公布的公网地址(任意隧道均可,包括自建的 none;
+  --port N                      服务端口(HANDMUX_PORT,默认:19999)
+  --host H                      绑定地址(HANDMUX_HOST,默认:0.0.0.0)
+  --token S                     鉴权令牌(HANDMUX_TOKEN,默认:每次启动自动生成)
+  --name "My Box"               浏览器标签 + 主屏图标里的应用名(HANDMUX_APP_NAME)
+  --public-url URL              对外公布的公网地址(HANDMUX_PUBLIC_URL;任意隧道均可,包括自建的 none;
                                 ssh 默认 http://host:remotePort;natapp/cpolar 填你的固定/保留域名 ——
-                                留空则用免费临时域名)
-  --ssh-jump u@h[,…]            ssh 的可选跳板机
-  --cf-hostname H               cloudflare-named 的公网域名
-  --cf-tunnel-name N            cloudflare-named 的隧道名(默认:handmux)
-  --authtoken T                 natapp / cpolar 的 authtoken(或 HANDMUX_AUTHTOKEN)
-  --cpolar-region R             cpolar 边缘区域,如 cn(或 HANDMUX_CPOLAR_REGION)
-  --port N                  服务端口(默认:19999)
-  --host H                  绑定地址(默认:0.0.0.0)
-  --token S                 鉴权令牌(默认:自动生成)
-  --name "My Box"           浏览器标签 + 主屏图标里的应用名
-  --preview-domain D        启用动态预览(需要通配子域名)
-  --foreground, -f          前台运行(不后台化)
-  --no-qr                   不渲染二维码
+                                留空则用临时域名)
+  --ssh-host user@host[:port]   ssh 隧道目标(HANDMUX_SSH_HOST)
+  --remote-port N               绑定在 ssh 主机上的端口(HANDMUX_REMOTE_PORT,默认:--port)
+  --ssh-jump u@h[,…]            ssh 的可选跳板机(HANDMUX_SSH_JUMP)
+  --cf-hostname H               cloudflare-named 的公网域名(HANDMUX_CF_HOSTNAME)
+  --cf-tunnel-name N            cloudflare-named 的隧道名(HANDMUX_CF_TUNNEL_NAME,默认:handmux)
+  --authtoken T                 natapp / cpolar 的 authtoken(HANDMUX_AUTHTOKEN)
+  --cpolar-region R             cpolar 边缘区域,如 cn(HANDMUX_CPOLAR_REGION)
+  --preview-domain D            启用动态预览,需要通配子域名(HANDMUX_PREVIEW_DOMAIN)
+  --foreground, -f              前台运行(不后台化)
+  --no-qr                       不渲染二维码
+
+很少用到(环境变量或 flag):--static-dir / --upload-exts / --preview-ttl
+  (HANDMUX_STATIC_DIR / HANDMUX_UPLOAD_EXTS / HANDMUX_PREVIEW_TTL)
+
+'handmux service install' 也接受上面这些 start flag —— 它们会被烘进自启项。
 `,
 };

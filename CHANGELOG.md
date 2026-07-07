@@ -5,6 +5,14 @@ All notable changes to handmux. Format follows [Keep a Changelog](https://keepac
 ## [Unreleased]
 
 ### Changed
+- **Tiered `handmux` help.** The bare `handmux` / `handmux help` screen is now short — the six verbs, the
+  mental model, and a "New here? run `handmux setup`" nudge — with the full flag wall moved behind
+  `handmux help flags`. That flag reference now doubles as the **headless config guide**: every flag lists
+  its matching `HANDMUX_*` env var, and the precedence line is corrected to **flag > file > env > default**
+  (env sits between file and default — it was previously mis-documented as "flag > file > default", which
+  hid that env vars work at all). The rarely-needed `--static-dir` / `--upload-exts` / `--preview-ttl` are
+  documented there too. Flags stay the scriptable/headless interface; `setup` remains the interactive
+  path — neither replaces the other.
 - **`handmux setup` is now a menu hub, not a linear questionnaire.** Every setting is a row showing its
   current value; arrow to a section to edit just that (Connection / Name / Port / Language / Push / Voice),
   then return to the hub and pick Save / Save & start / Exit. Re-configuring one thing no longer means

@@ -7,8 +7,8 @@
 //                     let you try variations for one run (e.g. --tunnel cloudflare).
 //   handmux setup   — the one place to configure persistently. Interactive; writes ~/.handmux/config.json
 //                     (name, tunnel, push, voice). Re-run it to change anything.
-// `start` reads that file; with no file it uses defaults. Precedence: flag > file > default — a flag
-// overrides one value for one run and never persists. Advanced: `--config PATH` (a different file, for
+// `start` reads that file; with no file it uses defaults. Precedence: flag > file > env (HANDMUX_*) >
+// default — a flag overrides one value for one run and never persists. Advanced: `--config PATH` (a different file, for
 // dev / multiple configs), `handmux config` (show what's in effect and where each value came from).
 //
 // Tunnels: `none` (LAN only, nothing exposed) · `cloudflare` (instant random https URL) ·
@@ -512,6 +512,7 @@ function openCmd() {
 }
 
 function help() {
+  if (process.argv[3] === 'flags') { console.log(t('help.flags')); return; }
   console.log(t('help.body'));
 }
 

@@ -233,36 +233,45 @@ export default {
   handmux logs [--follow] [--lines N]
   handmux update           upgrade to the latest published version (npm i -g handmux@latest)
 
+New here? run 'handmux setup' — it walks you through remote access + phone notifications.
 The model: 'start' runs · 'setup' configures (writes ~/.handmux/config.json) · re-run setup to change.
-A flag overrides one value for one run and never persists (flag > file > default).
 
-advanced (scripting / multiple configs):
-  handmux config                        show the effective config + where each value came from
-  handmux hooks install|uninstall         enable/disable Claude Code notifications (inbox)
-  handmux service install [start-flags]   start at login (launchd/systemd)
-  handmux service uninstall               remove the autostart entry
-  --config PATH             use this config file instead of ~/.handmux/config.json (dev / multi-config)
-  --lang en|zh              CLI language (default: auto-detect from your shell locale)
-  --version, -v            print the handmux version
+more:
+  handmux config                          show the effective config + where each value came from
+  handmux hooks install|uninstall         enable/disable agent notifications (inbox)
+  handmux service install|uninstall       start at login (launchd/systemd)
+  handmux help flags                      one-run flags + env vars (scripting / headless / Docker)
+  --config PATH · --lang en|zh · --version, -v
+`,
+  'help.flags': `handmux flags — one-run overrides & headless config
 
-start flags (one-run overrides — for persistence use 'handmux setup'):
+Precedence: flag > file (~/.handmux/config.json) > env (HANDMUX_*) > default.
+A flag overrides one value for THIS run only and never persists — for persistence use 'handmux setup'.
+env vars are the headless interface (Docker / systemd / CI) and DO carry across runs.
+
+start flags (matching env var in parens):
   --tunnel none|cloudflare|cloudflare-named|ssh|natapp|cpolar   expose method (default: none)
-  --ssh-host user@host[:port]   ssh tunnel target (tunlite)
-  --remote-port N               port bound on the ssh host (default: --port)
-  --public-url URL              public url to advertise (any tunnel, incl. none if you run your own;
-                                ssh defaults to http://host:remotePort; for natapp/cpolar this is your
-                                fixed/reserved domain — omit it for a free temporary one)
-  --ssh-jump u@h[,…]            optional bastion for ssh
-  --cf-hostname H               public hostname for cloudflare-named
-  --cf-tunnel-name N            tunnel name for cloudflare-named (default: handmux)
-  --authtoken T                 authtoken for natapp / cpolar (or HANDMUX_AUTHTOKEN)
-  --cpolar-region R             cpolar edge region, e.g. cn (or HANDMUX_CPOLAR_REGION)
-  --port N                  server port (default: 19999)
-  --host H                  bind host (default: 0.0.0.0)
-  --token S                 auth token (default: generated)
-  --name "My Box"           app name in the browser tab + home-screen icon label
-  --preview-domain D        enable dynamic previews (needs wildcard subdomain)
-  --foreground, -f          run in the foreground (don't daemonize)
-  --no-qr                   don't render the QR code
+  --port N                      server port (HANDMUX_PORT, default: 19999)
+  --host H                      bind host (HANDMUX_HOST, default: 0.0.0.0)
+  --token S                     auth token (HANDMUX_TOKEN, default: generated each start)
+  --name "My Box"               app name in the browser tab + home-screen icon (HANDMUX_APP_NAME)
+  --public-url URL              public url to advertise (HANDMUX_PUBLIC_URL; any tunnel, incl. none if
+                                you run your own; ssh defaults to http://host:remotePort; for
+                                natapp/cpolar this is your fixed/reserved domain — omit for a temporary one)
+  --ssh-host user@host[:port]   ssh tunnel target (HANDMUX_SSH_HOST)
+  --remote-port N               port bound on the ssh host (HANDMUX_REMOTE_PORT, default: --port)
+  --ssh-jump u@h[,…]            optional bastion for ssh (HANDMUX_SSH_JUMP)
+  --cf-hostname H               public hostname for cloudflare-named (HANDMUX_CF_HOSTNAME)
+  --cf-tunnel-name N            tunnel name for cloudflare-named (HANDMUX_CF_TUNNEL_NAME, default: handmux)
+  --authtoken T                 authtoken for natapp / cpolar (HANDMUX_AUTHTOKEN)
+  --cpolar-region R             cpolar edge region, e.g. cn (HANDMUX_CPOLAR_REGION)
+  --preview-domain D            enable dynamic previews, needs wildcard subdomain (HANDMUX_PREVIEW_DOMAIN)
+  --foreground, -f              run in the foreground (don't daemonize)
+  --no-qr                       don't render the QR code
+
+rarely needed (env or flag): --static-dir / --upload-exts / --preview-ttl
+  (HANDMUX_STATIC_DIR / HANDMUX_UPLOAD_EXTS / HANDMUX_PREVIEW_TTL)
+
+'handmux service install' accepts these same start flags — they're baked into the autostart entry.
 `,
 };
