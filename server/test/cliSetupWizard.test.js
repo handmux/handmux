@@ -1,5 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { cfConfigYaml, parseTunnelCreate, findTunnelId, configFromAnswers, mergeConfig } from '../src/cli/setupWizard.js';
+import {
+  cfConfigYaml, parseTunnelCreate, findTunnelId, configFromAnswers, mergeConfig,
+  answersFromConfig, summarizeConnection, validatePort, validateHost, validateNonEmpty,
+} from '../src/cli/setupWizard.js';
 
 describe('cfConfigYaml', () => {
   it('renders an ingress config pointing at the local port', () => {
@@ -85,5 +88,47 @@ describe('mergeConfig', () => {
     const existing = { tunnel: 'none', port: 19999, name: 'Old', vapid: { public: 'p' }, xfyun: { appId: 'A' }, token: 't' };
     const merged = mergeConfig(existing, { tunnel: 'none', port: 19999 }); // no name, no vapid, no xfyun
     expect(merged).toEqual({ tunnel: 'none', port: 19999, token: 't' });
+  });
+});
+
+describe('answersFromConfig', () => {
+  it('safe defaults for a brand-new (empty) config', () => {
+    expect(answersFromConfig({})).toMatchObject({ tunnel: 'none', port: 19999, name: '' });
+  });
+  it('carries current values + tunnel-specific keys so the hub shows them and edits start from them', () => {
+    const a = answersFromConfig({ tunnel: 'natapp', port: 8080, name: 'Box', authtoken: 'tok', publicUrl: 'https://x.natapp1.cc', vapid: { public: 'p' } });
+    expect(a).toMatchObject({ tunnel: 'natapp', port: 8080, name: 'Box', authtoken: 'tok', publicUrl: 'https://x.natapp1.cc', vapid: { public: 'p' } });
+  });
+});
+
+describe('summarizeConnection', () => {
+  it('describes each tunnel + mode for the hub hint', () => {
+    expect(summarizeConnection({ tunnel: 'none' })).toMatch(/none/);
+    expect(summarizeConnection({ tunnel: 'cloudflare' })).toMatch(/cloudflare/);
+    expect(summarizeConnection({ tunnel: 'cloudflare-named', cfHostname: 'h.x.com' })).toContain('h.x.com');
+    expect(summarizeConnection({ tunnel: 'ssh', sshHost: 'me@box' })).toContain('me@box');
+    expect(summarizeConnection({ tunnel: 'natapp' })).toMatch(/natapp/);           // temporary
+    expect(summarizeConnection({ tunnel: 'cpolar', publicUrl: 'https://a.cpolar.top' })).toContain('a.cpolar.top');
+  });
+});
+
+describe('validators', () => {
+  it('validatePort accepts 1–65535, rejects the rest', () => {
+    expect(validatePort('19999')).toBeUndefined();
+    expect(validatePort('0')).toBeTruthy();
+    expect(validatePort('70000')).toBeTruthy();
+    expect(validatePort('abc')).toBeTruthy();
+  });
+  it('validateHost accepts a dotted host (scheme stripped), rejects junk', () => {
+    expect(validateHost('myapp.natapp1.cc')).toBeUndefined();
+    expect(validateHost('https://x.cpolar.top')).toBeUndefined();
+    expect(validateHost('nodot')).toBeTruthy();
+    expect(validateHost('')).toBeTruthy();
+  });
+  it('validateNonEmpty rejects blank, accepts content', () => {
+    const v = validateNonEmpty('authtoken');
+    expect(v('')).toBeTruthy();
+    expect(v('  ')).toBeTruthy();
+    expect(v('tok')).toBeUndefined();
   });
 });

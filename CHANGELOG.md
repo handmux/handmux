@@ -4,6 +4,15 @@ All notable changes to handmux. Format follows [Keep a Changelog](https://keepac
 
 ## [Unreleased]
 
+### Changed
+- **`handmux setup` is now a menu hub, not a linear questionnaire.** Every setting is a row showing its
+  current value; arrow to a section to edit just that (Connection / Name / Port / Language / Push / Voice),
+  then return to the hub and pick Save / Save & start / Exit. Re-configuring one thing no longer means
+  Entering through every prompt. A first run (no config) auto-walks the Connection step once, then lands
+  on the hub. Enumerated choices are now arrow-key selectable with inline descriptions; **secrets
+  (authtoken, xfyun keys) are masked**; inputs validate inline (port range, domain shape); Esc/Ctrl-C
+  cancels cleanly with nothing written. Built on `@clack/prompts`, isolated behind `src/cli/prompt.js`.
+
 ### Added
 - **Two China-usable tunnels: `--tunnel natapp` and `--tunnel cpolar`.** When Cloudflare's edge is
   unreliable from mainland China, these ngrok-derived domestic tunnels get the phone to your machine.

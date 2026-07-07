@@ -1,18 +1,20 @@
-// `handmux setup` wizard. Pure mappers (config shape, cloudflared config.yml, parsing tunnel create
-// output) are split out and unit-tested; the readline/spawn shell (runSetup, added in the next task) is
-// thin glue on top.
+// `handmux setup` — a menu HUB (not a linear wizard): every setting is a row showing its current value;
+// you arrow to a section to edit just that, then return to the hub; a Save/Start/Exit action row ends it.
+// First run auto-dives into Connection once (the one choice a newcomer must make), then lands on the hub.
+// The interactive shell is thin glue over @clack/prompts (via ./prompt.js); the pure mappers below
+// (configFromAnswers / mergeConfig / validators / summarizeConnection / answersFromConfig) are unit-tested.
 
 import fs from 'node:fs';
 import path from 'node:path';
 import { homedir } from 'node:os';
 import { spawnSync } from 'node:child_process';
-import { createInterface } from 'node:readline';
 import webpush from 'web-push';
 import { configPath, pocketHome } from './state.js';
 import { resolveCloudflared } from './cloudflared.js';
 import { resolveTunlite, checkSshAuth } from './tunlite.js';
 import { resolveNatapp, resolveCpolar } from './tunnelClients.js';
 import { t, setLocale, getLocale } from './i18n/index.js';
+import { intro, outro, note, cancel, select, text, password, confirm, ask, CANCELLED } from './prompt.js';
 
 // ~/.cloudflared/config.yml for a named tunnel: route the hostname to the local handmux port.
 export function cfConfigYaml({ tunnelName, credentialsFile, hostname, port }) {
@@ -43,12 +45,12 @@ export function findTunnelId(listJsonOut, name) {
   let arr;
   try { arr = JSON.parse(String(listJsonOut || '')); } catch { return null; }
   if (!Array.isArray(arr)) return null;
-  const hit = arr.find((t) => t && t.name === name);
+  const hit = arr.find((tn) => tn && tn.name === name);
   return hit?.id || null;
 }
 
-// The config keys the wizard owns: everything it asks about. mergeConfig wipes these from the existing
-// config before re-applying the answers, so a blank answer (or an unselected tunnel) cleanly clears the
+// The config keys the wizard owns: everything it can set. mergeConfig wipes these from the existing config
+// before re-applying the answers, so switching a tunnel (or clearing an optional field) cleanly drops the
 // old value instead of leaving a stale field behind. Anything NOT here (token, staticDir, previewDomain…)
 // is preserved untouched.
 const WIZARD_KEYS = [
@@ -57,6 +59,9 @@ const WIZARD_KEYS = [
   'authtoken', 'cpolarRegion',
   'vapid', 'xfyun',
 ];
+
+// The tunnel-specific keys, cleared whenever the tunnel changes so a switch never carries a stale field.
+const TUNNEL_KEYS = ['sshHost', 'remotePort', 'sshJump', 'cfHostname', 'cfTunnelName', 'publicUrl', 'authtoken', 'cpolarRegion'];
 
 // Wizard answers → the config fragment the user actually set (omit empty optional fields).
 export function configFromAnswers(a) {
@@ -92,116 +97,200 @@ export function mergeConfig(existing = {}, answers) {
   return { ...out, ...configFromAnswers(answers) };
 }
 
-const ask = (rl, q, dflt) => new Promise((res) =>
-  rl.question(dflt ? `${q} [${dflt}] ` : `${q} `, (a) => res((a.trim() || dflt || ''))));
+// Seed the working answers from an existing config so the hub shows current values and each edit starts
+// from what's already there. A brand-new config yields safe defaults (none/LAN, port 19999).
+export function answersFromConfig(cfg = {}) {
+  const a = {
+    lang: cfg.lang || getLocale(),
+    name: cfg.name || '',
+    tunnel: cfg.tunnel || 'none',
+    port: Number(cfg.port) || 19999,
+  };
+  for (const k of [...TUNNEL_KEYS, 'vapid', 'xfyun']) if (cfg[k] != null) a[k] = cfg[k];
+  return a;
+}
 
-// [y/N] / [Y/n] prompt. `dfltYes` sets which way a bare Enter goes.
-const askYesNo = async (rl, q, dfltYes) => {
-  const a = (await ask(rl, `${q} ${dfltYes ? '[Y/n]' : '[y/N]'}`, '')).trim().toLowerCase();
-  if (a === '') return dfltYes;
-  return a === 'y' || a === 'yes';
-};
+// The dim one-line summary shown next to the Connection row (and reused nowhere else). Pure.
+export function summarizeConnection(a) {
+  const bare = (u) => String(u || '').replace(/^https?:\/\//, '');
+  switch (a.tunnel) {
+    case 'cloudflare': return `cloudflare · ${t('setup.sumTemp')}`;
+    case 'cloudflare-named': return `cloudflare-named · ${a.cfHostname || '?'}`;
+    case 'ssh': return `ssh · ${a.sshHost || '?'}`;
+    case 'natapp':
+    case 'cpolar': return `${a.tunnel} · ${a.publicUrl ? `${t('setup.sumFixed')} ${bare(a.publicUrl)}` : t('setup.sumTemp')}`;
+    default: return `none · ${t('setup.sumLan')}`;
+  }
+}
+
+// ---- validators (clack: return a string to reject + show inline, undefined to accept). Pure. ----
+export function validatePort(v) {
+  const n = Number(v);
+  if (!Number.isInteger(n) || n < 1 || n > 65535) return t('setup.valPort');
+  return undefined;
+}
+export const validateNonEmpty = (label) => (v) => (String(v || '').trim() ? undefined : t('setup.valRequired', { label }));
+export function validateHost(v) {
+  const s = String(v || '').trim().replace(/^https?:\/\//, '').replace(/\/.*$/, '');
+  return /^[a-z0-9-]+(\.[a-z0-9-]+)+$/i.test(s) ? undefined : t('setup.valHost');
+}
 
 function readExisting(file) {
   try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return {}; }
 }
 
-// Interactive wizard — the one place to configure handmux. Pre-fills from the existing config so a re-run
-// edits/switches rather than starts over, asks name → tunnel → push → voice, and merges the answers back
-// (preserving fields it didn't ask about). Returns the resolved config (or null on abort). `home` and the
+// The hub. Pre-fills from the existing config so a re-run edits/switches rather than starts over; a brand-
+// new config first walks Connection, then everyone lands on the hub (edit any section, then Save/Start/Exit).
+// Returns { cfg, start } (start = the user chose "save & start"), or null on cancel/exit. `home` and the
 // write `target` are injectable for tests / `--config`.
 export async function runSetup({ home = homedir(), target = configPath(home), log = console } = {}) {
   if (!process.stdin.isTTY) { log.error(t('setup.needTty')); return null; }
-  const cur = readExisting(target);
-  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  const existing = readExisting(target);
+  const isNew = !existing || Object.keys(existing).length === 0;
+  let a = answersFromConfig(existing);
+  setLocale(a.lang);
+
+  intro('handmux setup');
   try {
-    // Language first — pick it, apply it immediately, so the rest of the wizard speaks the chosen language.
-    // Default reflects the locale already resolved (from config/shell); Enter keeps it.
-    log.log(t('setup.langQ'));
-    log.log(t('setup.lang1'));
-    log.log(t('setup.lang2'));
-    const langPick = await ask(rl, t('setup.choose').replace('1-6', '1-2'), getLocale() === 'zh' ? '2' : '1');
-    const lang = { 1: 'en', 2: 'zh' }[langPick] || getLocale();
-    setLocale(lang);
-
-    const name = await ask(rl, t('setup.askName'), cur.name || '');
-
-    log.log(t('setup.tunnelQ'));
-    log.log(t('setup.tunnel1'));
-    log.log(t('setup.tunnel2'));
-    log.log(t('setup.tunnel3'));
-    log.log(t('setup.tunnel4'));
-    log.log(t('setup.tunnel5'));
-    log.log(t('setup.tunnel6'));
-    // Default to the CURRENT tunnel when re-running; for a brand-new user (no config) default to '2'
-    // (cloudflare quick tunnel — zero-config, instant public URL) rather than '3' (cloudflare-named),
-    // which a bare-Enter newcomer can't complete without a Cloudflare login + their own domain.
-    const curPick = { none: '1', cloudflare: '2', 'cloudflare-named': '3', ssh: '4', natapp: '5', cpolar: '6' }[cur.tunnel] || '2';
-    const pick = await ask(rl, t('setup.choose'), curPick);
-    const tunnel = { 1: 'none', 2: 'cloudflare', 3: 'cloudflare-named', 4: 'ssh', 5: 'natapp', 6: 'cpolar' }[pick];
-    if (!tunnel) { log.error(t('setup.invalid')); return null; }
-    const port = Number(await ask(rl, t('setup.askPort'), String(cur.port || 19999)));
-
-    const answers = { lang, name, tunnel, port };
-    if (tunnel === 'cloudflare-named') {
-      answers.cfHostname = await ask(rl, t('setup.askHostname'), cur.cfHostname || '');
-      answers.cfTunnelName = await ask(rl, t('setup.askTunnelName'), cur.cfTunnelName || 'handmux');
-      await provisionCloudflareNamed({ home, hostname: answers.cfHostname, tunnelName: answers.cfTunnelName, port, log });
-    } else if (tunnel === 'ssh') {
-      answers.sshHost = await ask(rl, t('setup.askSshHost'), cur.sshHost || '');
-      answers.remotePort = Number(await ask(rl, t('setup.askRemotePort'), String(cur.remotePort || port)));
-      answers.publicUrl = await ask(rl, t('setup.askPublicUrl'), cur.publicUrl || '');
-      await provisionSsh({ sshHost: answers.sshHost, log });
-    } else if (tunnel === 'natapp' || tunnel === 'cpolar') {
-      // Guide the user to their authtoken, then let them choose a temporary (random) or fixed domain.
-      log.log(t(tunnel === 'natapp' ? 'setup.natappGuide' : 'setup.cpolarGuide'));
-      answers.authtoken = await ask(rl, t('setup.askAuthtoken'), cur.authtoken || '');
-      if (await askYesNo(rl, t('setup.askFixed'), false)) {
-        answers.publicUrl = await ask(rl, t(tunnel === 'natapp' ? 'setup.askNatappDomain' : 'setup.askCpolarDomain'), cur.publicUrl || '');
-      }
-      if (tunnel === 'cpolar') answers.cpolarRegion = await ask(rl, t('setup.askCpolarRegion'), cur.cpolarRegion || '');
-      await provisionNgrokClient({ tunnel, home, authtoken: answers.authtoken, log });
+    if (isNew) {
+      a.lang = await editLanguage(a);
+      a = await editConnection(a, { home, log });
     }
+    for (;;) {
+      const choice = await ask(select({
+        message: t('setup.hubTitle'),
+        options: [
+          { value: 'connection', label: t('setup.secConnection'), hint: summarizeConnection(a) },
+          { value: 'name', label: t('setup.secName'), hint: a.name || t('setup.default') },
+          { value: 'port', label: t('setup.secPort'), hint: String(a.port) },
+          { value: 'language', label: t('setup.secLanguage'), hint: a.lang === 'zh' ? '中文' : 'English' },
+          { value: 'push', label: t('setup.secPush'), hint: a.vapid ? t('setup.on') : t('setup.off') },
+          { value: 'voice', label: t('setup.secVoice'), hint: a.xfyun ? t('setup.on') : t('setup.off') },
+          { value: 'start', label: t('setup.actStart') },
+          { value: 'save', label: t('setup.actSave') },
+          { value: 'exit', label: t('setup.actExit') },
+        ],
+        initialValue: 'start',
+      }));
+      if (choice === 'exit') { cancel(t('setup.exited')); return null; }
+      if (choice === 'save' || choice === 'start') {
+        const cfg = mergeConfig(existing, a);
+        fs.mkdirSync(path.dirname(target), { recursive: true });
+        fs.writeFileSync(target, JSON.stringify(cfg, null, 2) + '\n', { mode: 0o600 });
+        outro(t('setup.wrote', { path: target }));
+        if (a.tunnel === 'ssh') printSshServerHelp(a, log);
+        if (a.tunnel === 'cloudflare-named' || a.tunnel === 'ssh') printPreviewHelp(a.tunnel, log);
+        return { cfg, start: choice === 'start' };
+      }
+      if (choice === 'connection') a = await editConnection(a, { home, log });
+      else if (choice === 'name') a.name = await editName(a);
+      else if (choice === 'port') a.port = await editPort(a);
+      else if (choice === 'language') a.lang = await editLanguage(a);
+      else if (choice === 'push') a.vapid = await editPush(a);
+      else if (choice === 'voice') a.xfyun = await editVoice(a);
+    }
+  } catch (e) {
+    if (e === CANCELLED) { cancel(t('setup.exited')); return null; }
+    throw e;
+  }
+}
 
-    answers.vapid = await askPush(rl, cur.vapid, log);
-    answers.xfyun = await askVoice(rl, cur.xfyun, log);
+async function editLanguage(a) {
+  const lang = await ask(select({
+    message: t('setup.langQ'),
+    options: [{ value: 'en', label: 'English' }, { value: 'zh', label: '中文' }],
+    initialValue: a.lang === 'zh' ? 'zh' : 'en',
+  }));
+  setLocale(lang);   // apply immediately so the rest of the hub speaks the chosen language
+  return lang;
+}
 
-    const cfg = mergeConfig(cur, answers);
-    fs.mkdirSync(path.dirname(target), { recursive: true });
-    fs.writeFileSync(target, JSON.stringify(cfg, null, 2) + '\n', { mode: 0o600 });
-    log.log(t('setup.wrote', { path: target }));
-    if (tunnel === 'ssh') printSshServerHelp(answers, log);
-    if (tunnel === 'cloudflare-named' || tunnel === 'ssh') printPreviewHelp(tunnel, log);
-    return cfg;
-  } finally { rl.close(); }
+async function editName(a) {
+  const v = await ask(text({ message: t('setup.askName'), placeholder: a.name || t('setup.default'), defaultValue: a.name || '' }));
+  return (v || '').trim();
+}
+
+async function editPort(a) {
+  const v = await ask(text({ message: t('setup.askPort'), placeholder: String(a.port), defaultValue: String(a.port), validate: validatePort }));
+  return Number(v);
+}
+
+// Pick the tunnel, ask ONLY its fields, and run its provisioning in place. Clears the previous tunnel's
+// keys first so a switch never advertises a stale hostname/token.
+async function editConnection(a, { home, log }) {
+  const tunnel = await ask(select({
+    message: t('setup.tunnelQ'),
+    options: [
+      { value: 'none', label: 'none', hint: t('setup.hintNone') },
+      { value: 'cloudflare', label: 'cloudflare', hint: t('setup.hintCf') },
+      { value: 'cloudflare-named', label: 'cloudflare-named', hint: t('setup.hintCfNamed') },
+      { value: 'ssh', label: 'ssh (tunlite)', hint: t('setup.hintSsh') },
+      { value: 'natapp', label: 'natapp', hint: t('setup.hintNatapp') },
+      { value: 'cpolar', label: 'cpolar', hint: t('setup.hintCpolar') },
+    ],
+    initialValue: a.tunnel || 'cloudflare',
+  }));
+  const next = { ...a, tunnel };
+  for (const k of TUNNEL_KEYS) delete next[k];
+
+  if (tunnel === 'cloudflare-named') {
+    next.cfHostname = await ask(text({ message: t('setup.askHostname'), defaultValue: a.cfHostname || '', validate: validateHost }));
+    next.cfTunnelName = (await ask(text({ message: t('setup.askTunnelName'), defaultValue: a.cfTunnelName || 'handmux' }))) || 'handmux';
+    await provisionCloudflareNamed({ home, hostname: next.cfHostname, tunnelName: next.cfTunnelName, port: next.port, log });
+  } else if (tunnel === 'ssh') {
+    next.sshHost = await ask(text({ message: t('setup.askSshHost'), defaultValue: a.sshHost || '', validate: validateNonEmpty('ssh host') }));
+    next.remotePort = Number(await ask(text({ message: t('setup.askRemotePort'), defaultValue: String(a.remotePort || next.port), validate: validatePort })));
+    const pub = await ask(text({ message: t('setup.askPublicUrl'), defaultValue: a.publicUrl || '' }));
+    if (pub) next.publicUrl = pub;
+    await provisionSsh({ sshHost: next.sshHost, log });
+  } else if (tunnel === 'natapp' || tunnel === 'cpolar') {
+    note(t(tunnel === 'natapp' ? 'setup.natappGuide' : 'setup.cpolarGuide'));
+    next.authtoken = await ask(password({ message: t('setup.askAuthtoken'), validate: validateNonEmpty('authtoken') }));
+    const fixed = await ask(select({
+      message: t('setup.domainQ'),
+      options: [
+        { value: false, label: t('setup.domainTemp'), hint: t('setup.domainTempHint') },
+        { value: true, label: t('setup.domainFixed') },
+      ],
+      initialValue: !!a.publicUrl,
+    }));
+    if (fixed) {
+      next.publicUrl = await ask(text({
+        message: t(tunnel === 'natapp' ? 'setup.askNatappDomain' : 'setup.askCpolarDomain'),
+        defaultValue: a.publicUrl || '', validate: validateHost,
+      }));
+    }
+    if (tunnel === 'cpolar') {
+      const rg = await ask(text({ message: t('setup.askCpolarRegion'), defaultValue: a.cpolarRegion || '' }));
+      if (rg) next.cpolarRegion = rg;
+    }
+    await provisionNgrokClient({ tunnel, home, authtoken: next.authtoken, log });
+  }
+  return next;
 }
 
 // Push notifications need a VAPID keypair. If one already exists we offer to keep it (regenerating would
-// invalidate every existing phone subscription); otherwise we generate one on the spot — the only painful
-// part of push setup, done for the user. Returns the vapid object, or undefined to leave push off.
-async function askPush(rl, existing, log) {
-  if (existing) {
-    if (await askYesNo(rl, t('setup.pushKeep'), true)) return existing;
-    return undefined;
-  }
-  if (!await askYesNo(rl, t('setup.pushSetup'), false)) return undefined;
+// invalidate every existing phone subscription); otherwise we generate one on the spot. Returns the vapid
+// object, or undefined to leave push off.
+// Localise clack's Yes/No toggle for every confirm().
+const yesno = () => ({ active: t('setup.yes'), inactive: t('setup.no') });
+
+async function editPush(a) {
+  if (a.vapid) return (await ask(confirm({ message: t('setup.pushKeep'), initialValue: true, ...yesno() }))) ? a.vapid : undefined;
+  if (!await ask(confirm({ message: t('setup.pushSetup'), initialValue: false, ...yesno() }))) return undefined;
+  const subject = await ask(text({ message: t('setup.pushContact'), defaultValue: 'mailto:admin@example.com' }));
   const { publicKey, privateKey } = webpush.generateVAPIDKeys();
-  const subject = await ask(rl, t('setup.pushContact'), 'mailto:admin@example.com');
-  log.log(t('setup.pushGenerated'));
+  note(t('setup.pushGenerated'));
   return { public: publicKey, private: privateKey, subject };
 }
 
-// Voice input (iFlytek/xfyun) — three credentials from their console; no generation possible, just paste.
-async function askVoice(rl, existing, log) {
-  if (existing) {
-    if (await askYesNo(rl, t('setup.voiceKeep'), true)) return existing;
-    return undefined;
-  }
-  if (!await askYesNo(rl, t('setup.voiceSetup'), false)) return undefined;
-  const appId = await ask(rl, t('setup.voiceAppId'));
-  const apiKey = await ask(rl, t('setup.voiceApiKey'));
-  const apiSecret = await ask(rl, t('setup.voiceApiSecret'));
-  if (!appId || !apiKey || !apiSecret) { log.log(t('setup.voiceSkipped')); return undefined; }
+// Voice input (iFlytek/xfyun) — three credentials from their console; the two secrets are masked.
+async function editVoice(a) {
+  if (a.xfyun) return (await ask(confirm({ message: t('setup.voiceKeep'), initialValue: true, ...yesno() }))) ? a.xfyun : undefined;
+  if (!await ask(confirm({ message: t('setup.voiceSetup'), initialValue: false, ...yesno() }))) return undefined;
+  const appId = await ask(text({ message: t('setup.voiceAppId'), validate: validateNonEmpty('appId') }));
+  const apiKey = await ask(password({ message: t('setup.voiceApiKey'), validate: validateNonEmpty('apiKey') }));
+  const apiSecret = await ask(password({ message: t('setup.voiceApiSecret'), validate: validateNonEmpty('apiSecret') }));
   return { appId, apiKey, apiSecret };
 }
 
@@ -256,9 +345,9 @@ async function provisionSsh({ sshHost, log }) {
   spawnSync(bin, ['setup-key', sshHost], { stdio: 'inherit' });
 }
 
-// Get the client binary ready (cpolar auto-downloads; natapp must be pre-installed) and, for cpolar, seed the
-// authtoken into its config. NON-FATAL: if the binary isn't there yet we print the hint and still write the
-// config, so the user can install it later and just `handmux start` — the wizard never dead-ends on this.
+// Get the client binary ready (cpolar auto-downloads; natapp must be pre-installed) and, for cpolar, seed
+// the authtoken into its config. NON-FATAL: if the binary isn't there yet we print the hint and still write
+// the config, so the user can install it later and just `handmux start` — the wizard never dead-ends here.
 async function provisionNgrokClient({ tunnel, home, authtoken, log }) {
   try {
     if (tunnel === 'cpolar') {

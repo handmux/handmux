@@ -337,8 +337,9 @@ async function serviceInstall() {
 
 async function setupCmd() {
   const target = flags.config ? path.resolve(flags.config) : configPath(HOME);
-  const cfg = await runSetup({ home: HOME, target });
-  if (!cfg) { process.exit(2); }
+  const res = await runSetup({ home: HOME, target });
+  if (!res) { process.exit(2); }
+  const { cfg, start: doStart } = res;   // hub's "save & start" carries the intent — no separate confirm
   // Offer to enable the inbox hooks when an agent is present but not yet wired (Claude 'absent', or Codex
   // 'absent'). installAgentHooks() then wires every present agent (idempotent for any already installed).
   const offerHooks = hooksStatus(HOME) === 'absent' || codexHooksStatus(HOME) === 'absent';
@@ -346,7 +347,7 @@ async function setupCmd() {
     installAgentHooks();
   }
   await maybeOfferStatusLine();
-  if (await confirm(t('setup.confirmStart'))) { Object.assign(flags, cfg); return start(); }
+  if (doStart) { Object.assign(flags, cfg); return start(); }
   console.log(t('setup.later'));
 }
 
