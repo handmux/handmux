@@ -11,6 +11,19 @@
 // `entryId`/`LATEST_RELEASE` use `version` when present, else `date`, as the stable unread-dot id.
 export const CHANGELOG = [
   {
+    version: '0.11.1',
+    date: '2026-07-09',
+    highlight: { zh: '修复 Node 18 下无法启动的问题', en: 'Fixes startup crash on Node 18' },
+    items: {
+      zh: [
+        '修复了电脑用 Node 18 时 handmux 任何命令都启动不了的问题(0.11.0 配置向导引入的依赖要求过新的 Node)。',
+      ],
+      en: [
+        'Fixed handmux failing to start any command on Node 18 (a dependency introduced by the 0.11.0 setup wizard required a newer Node).',
+      ],
+    },
+  },
+  {
     version: '0.11.0',
     date: '2026-07-08',
     highlight: { zh: '国内可用隧道 natapp/cpolar · 配置向导重做', en: 'China-usable tunnels · setup redesigned' },

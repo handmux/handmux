@@ -57,13 +57,13 @@
     "vitest": "^2.0.0"
   },
   "whatsNew": [
+    {"version":"0.11.1","date":"2026-07-09","zh":"修复 Node 18 下无法启动的问题","en":"Fixes startup crash on Node 18"},
     {"version":"0.11.0","date":"2026-07-08","zh":"国内可用隧道 natapp/cpolar · 配置向导重做","en":"China-usable tunnels · setup redesigned"},
     {"version":"0.10.0","date":"2026-07-06","zh":"升级前预览新功能 · 电脑 handmux open 接管","en":"Preview an update before installing · handmux open"},
     {"version":"0.9.1","date":"2026-07-06","zh":"「添加到主屏」引导","en":"\"Add to Home Screen\" coach"},
     {"version":"0.9.0","date":"2026-07-05","zh":"聊天输入框多行重做","en":"Multi-line chat composer redone"},
     {"version":"0.8.0","date":"2026-07-05","zh":"快捷栏可自定义 · 上传体验重做","en":"Customizable quick-bars · upload redone"},
     {"version":"0.7.0","date":"2026-07-03","zh":"新增「用量」页","en":"New \"Usage\" page"},
-    {"version":"0.6.0","date":"2026-07-02","zh":"新增 Codex 支持","en":"Codex support added"},
-    {"version":"0.5.0","date":"2026-06-28","zh":"首个公开版 · 多语言界面","en":"First public release · multi-language UI"}
+    {"version":"0.6.0","date":"2026-07-02","zh":"新增 Codex 支持","en":"Codex support added"}
   ]
 }
