@@ -4,6 +4,12 @@ All notable changes to handmux. Format follows [Keep a Changelog](https://keepac
 
 ## [Unreleased]
 
+### Changed
+- **New app icon / brand logo.** Swapped in a higher-fidelity glowing-phone render and regenerated
+  every raster icon from it — PWA/home-screen `icon-192`/`icon-512`, the 180px `apple-touch-icon`,
+  and the landing-page header mark (`site/logo-mark.png`, shown as a rounded app chip). The push
+  badge and the SVG favicon are unchanged.
+
 ## [0.12.0] - 2026-07-11
 
 ### Fixed
