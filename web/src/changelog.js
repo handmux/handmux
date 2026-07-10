@@ -11,6 +11,28 @@
 // `entryId`/`LATEST_RELEASE` use `version` when present, else `date`, as the stable unread-dot id.
 export const CHANGELOG = [
   {
+    version: '0.12.0',
+    date: '2026-07-11',
+    highlight: {
+      zh: '全屏程序也能滑动滚动 · 反馈入口 · 聊天草稿不丢',
+      en: 'Swipe-scroll full-screen apps · feedback channels · chat drafts kept',
+    },
+    items: {
+      zh: [
+        '全屏程序(vim / htop / less 等)现在能直接滑动滚动了:开了鼠标的程序像电脑滚轮一样滑着滚,没开鼠标的分页器(less / man / git log)靠滑动逐行滚;每个全屏画面右侧还多了一枚翻页按钮做整页跳。',
+        '设置里新增「反馈与交流」:直达 GitHub Issues,中文用户还能扫码进微信交流群;README、官网、文档里也都能找到入口。',
+        '聊天框里没发出去的内容现在会自动保存,下次打开自动填回——误划走、切后台被杀、崩溃都不会再丢半截提示词。',
+        '修复:从终端链接或「最近」直接打开的文档,点返回会一次收起面板,不再被硬塞进「目录」层、再返一次直接退出 App。',
+      ],
+      en: [
+        'Full-screen apps (vim / htop / less …) now scroll by swipe: mouse-mode apps scroll like a desktop wheel, and pagers (less / man / git log) scroll line-by-line on a swipe; every full-screen view also gets a page up/down button on the right for whole-page jumps.',
+        'New "Feedback" section in Settings: a direct link to GitHub Issues, plus a WeChat user group for Chinese users — also surfaced in the README, the site, and the docs.',
+        'Whatever you\'ve typed in the chat box is now saved automatically and restored next time you open it — an accidental swipe-away, a background kill, or a crash no longer eats a half-written prompt.',
+        'Fixed: a doc opened straight from a terminal link or 最近 now closes the sheet in one Back press, instead of being forced into its folder view and then dropping you out of the app on the next Back.',
+      ],
+    },
+  },
+  {
     version: '0.11.1',
     date: '2026-07-09',
     highlight: { zh: '修复 Node 18 下无法启动的问题', en: 'Fixes startup crash on Node 18' },
