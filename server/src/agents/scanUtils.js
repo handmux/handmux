@@ -200,6 +200,23 @@ export function takeoverSessionName(cwdLabel, n, prefix = 'cc') {
   return `${prefix}-${base}-${n}`.slice(0, 16);
 }
 
+// Coerce a user-typed takeover name into a valid tmux session name (isValidSessionName: [A-Za-z0-9-], ≤16):
+// non-alnum runs → a single '-', trimmed of edge hyphens, capped at 16. Returns '' if nothing usable is
+// left (caller then falls back to the generated name).
+export function sanitizeSessionName(s) {
+  return String(s || '').replace(/[^A-Za-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 16).replace(/-+$/, '');
+}
+
+// First name in `<base>, base-2, base-3, …` (each capped at 16) that isn't already taken. null if none free.
+export function freeSessionName(base, taken) {
+  if (!taken.has(base)) return base;
+  for (let i = 2; i < 1000; i++) {
+    const cand = `${base}-${i}`.slice(0, 16);
+    if (!taken.has(cand)) return cand;
+  }
+  return null;
+}
+
 export const isShell = (c) => /^-?(zsh|bash|sh|fish|dash|tcsh|csh|ksh)$/.test(String(c || ''));
 
 export async function lsofCwd(run, pid) {

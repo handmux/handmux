@@ -12,24 +12,30 @@ import { getOrphanKill, setOrphanKill } from '../storage.js';
 export default function OrphanTakeoverSheet({ open, orphan, onConfirm, onClose, inset = 0 }) {
   const [sessions, setSessions] = useState([]);
   const [target, setTarget] = useState('new'); // 'new' | sessionId ($n)
+  const [name, setName] = useState('');        // new-session name (editable; prefilled with the server default)
   const [kill, setKill] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
 
   useEffect(() => {
     if (!open) return;
-    setTarget('new'); setKill(getOrphanKill()); setBusy(false); setError('');
+    setTarget('new'); setName(orphan?.suggestedName || ''); setKill(getOrphanKill()); setBusy(false); setError('');
     getSessions().then((s) => setSessions(Array.isArray(s) ? s : [])).catch(() => setSessions([]));
-  }, [open]);
+  }, [open, orphan]);
 
   if (!open || !orphan) return null;
+
+  // The name the computer command shows — the editable field for a new session, else the picked session's name.
+  const displayName = target === 'new'
+    ? (name.trim() || orphan.suggestedName || '')
+    : (sessions.find((s) => s.id === target)?.name || '');
 
   const submit = async () => {
     if (busy) return;
     setBusy(true); setError('');
     setOrphanKill(kill); // remember the choice for next time
     const tgt = target === 'new' ? { mode: 'new' } : { mode: 'window', session: target };
-    try { await onConfirm({ target: tgt, kill }); } // success → App closes this sheet
+    try { await onConfirm({ target: tgt, kill, name: target === 'new' ? name.trim() : undefined }); } // success → App closes this sheet
     catch { setBusy(false); setError(t('inbox.orphans.failed')); }
   };
 
@@ -63,6 +69,17 @@ export default function OrphanTakeoverSheet({ open, orphan, onConfirm, onClose, 
               ))}
             </div>
           </div>
+          {target === 'new' && (
+            <div className="opt">
+              <div className="settings-label">{t('inbox.orphans.nameLabel')}</div>
+              <input
+                className="bind-input"
+                value={name}
+                placeholder={t('inbox.orphans.namePlaceholder')}
+                onChange={(e) => { setName(e.target.value); setError(''); }}
+              />
+            </div>
+          )}
           <div className="opt">
             <div className="settings-label">{t('inbox.orphans.killTitle')}</div>
             <div className="orphan-targets orphan-kill">
@@ -74,7 +91,10 @@ export default function OrphanTakeoverSheet({ open, orphan, onConfirm, onClose, 
               </button>
             </div>
             <div className="orphan-help">{t('inbox.orphans.killWhy')}</div>
-            <div className="orphan-help">{t('inbox.orphans.reopen')}</div>
+            <div className="orphan-help">
+              {t('inbox.orphans.reopenPre')}{' '}
+              <code className="orphan-cmd">handmux open {displayName || t('inbox.orphans.namePlaceholder')}</code>
+            </div>
           </div>
           {error && <div className="bind-error">{error}</div>}
           <div className="settings-btns bind-actions">

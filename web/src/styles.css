@@ -1327,6 +1327,15 @@ button.cmd-text { background: none; border: none; text-align: left; }
 .orphan-reco { margin-left: 6px; font-size: 10px; color: #7ee0a0; }
 .orphan-targets .fontbtn[aria-pressed="true"] .orphan-reco { color: #d6f5e3; }
 .orphan-help { font-size: 11px; color: #9aa0a6; line-height: 1.5; margin-top: 6px; }
+.orphan-cmd {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  color: #d7dbe0;
+  background: rgba(255, 255, 255, 0.07);
+  padding: 1px 6px;
+  border-radius: 6px;
+  white-space: nowrap;
+}
 
 
 /* Usage page — per-agent quota/limit windows (see UsagePage.jsx). */

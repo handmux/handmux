@@ -21,7 +21,7 @@ import { AGENTS, getAgent } from './agents/index.js';
 import { isSessionId } from './tmux/commands.js';
 import {
   defaultRun, parseAgentProcs, parsePaneMembership, findOrphans,
-  takeoverSessionName, isShell, lsofCwd, isSessionUuid,
+  takeoverSessionName, sanitizeSessionName, freeSessionName, isShell, lsofCwd, isSessionUuid,
 } from './agents/scanUtils.js';
 
 // Back-compat re-exports: these were originally defined here and are imported by tests and callers by this
@@ -53,7 +53,7 @@ export async function takeoverOrphan(
     delay = (ms) => new Promise((r) => setTimeout(r, ms)),
     pollTries = 16, pollMs = 400,
   },
-  { pid, sessionId, target = { mode: 'new' }, kill = true } = {},
+  { pid, sessionId, target = { mode: 'new' }, kill = true, name: wantName } = {},
 ) {
   if (!Number.isInteger(pid) || pid <= 0) return { error: 'bad pid', status: 400 };
   // Both agents use UUID session ids; validate up front (takeover types the id into a shell via send-keys).
@@ -76,10 +76,18 @@ export async function takeoverOrphan(
     wid = await commands.newWindow(sid, o.cwd, agent.procName, cmd);
   } else {
     const existing = new Set((await commands.listSessions()).map((s) => s.name));
-    for (let i = 1; i < 1000 && !name; i++) {
-      const cand = takeoverSessionName(o.cwdLabel, i, agent.takeoverPrefix);
-      if (!existing.has(cand)) name = cand;
+    // Honour a user-typed name (sanitized to tmux rules, deduped with a numeric suffix); fall back to the
+    // generated `<prefix>-<dir>-<n>` when the client sent nothing.
+    const wanted = sanitizeSessionName(wantName);
+    if (wanted) {
+      name = freeSessionName(wanted, existing);
+    } else {
+      for (let i = 1; i < 1000 && !name; i++) {
+        const cand = takeoverSessionName(o.cwdLabel, i, agent.takeoverPrefix);
+        if (!existing.has(cand)) name = cand;
+      }
     }
+    if (!name) return { error: 'no free session name', status: 409 };
     sid = await commands.newSession(name, o.cwd, cmd);
     wid = (await commands.listWindows(sid))[0]?.id;
   }
@@ -121,12 +129,15 @@ export async function scanOrphans({
     const cwd = await lsofCwd(run, o.pid);
     const dir = dirOverrides[agent.sessions.dirOptKey] || agent.sessions.dir(home);
     const meta = cwd ? await agent.sessions.resolve(dir, cwd, { busyMs, now }) : {};
+    const cwdLabel = cwd ? path.basename(cwd) : '';
     results.push({
       pid: o.pid,
       agent: agent.id,
       agentLabel: agent.label,
       cwd: cwd || '',
-      cwdLabel: cwd ? path.basename(cwd) : '',
+      cwdLabel,
+      // Default name the takeover sheet prefills (the same `<prefix>-<dir>-1` the server would auto-pick).
+      suggestedName: takeoverSessionName(cwdLabel, 1, agent.takeoverPrefix),
       sessionId: meta.sessionId || null,
       state: meta.state || 'unknown',
       snippet: meta.snippet || '',

@@ -10,7 +10,7 @@ let container; let root;
 beforeEach(() => { localStorage.clear(); container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container); });
 afterEach(() => { act(() => root.unmount()); container.remove(); });
 
-const orphan = { pid: 100, cwd: '/u/proj', cwdLabel: 'proj', sessionId: 's-1', snippet: 'resume me', state: 'idle' };
+const orphan = { pid: 100, cwd: '/u/proj', cwdLabel: 'proj', sessionId: 's-1', snippet: 'resume me', state: 'idle', suggestedName: 'cc-proj-1' };
 const render = async (props) => { await act(async () => { root.render(<OrphanTakeoverSheet open orphan={orphan} onConfirm={vi.fn()} onClose={vi.fn()} {...props} />); }); };
 const click = async (el) => { await act(async () => { el.dispatchEvent(new MouseEvent('click', { bubbles: true })); }); };
 
@@ -26,11 +26,26 @@ describe('OrphanTakeoverSheet', () => {
     expect(container.querySelector('.orphan-kill .orphan-reco').textContent).toBe('推荐');
   });
 
-  it('confirms with new-session target + kill by default', async () => {
+  it('prefills the name field + computer command with the server default, and edits flow through', async () => {
+    const onConfirm = vi.fn(() => Promise.resolve());
+    await render({ onConfirm });
+    const input = container.querySelector('.bind-input');
+    expect(input.value).toBe('cc-proj-1'); // prefilled from orphan.suggestedName
+    expect(container.querySelector('.orphan-cmd').textContent).toBe('handmux open cc-proj-1');
+    // Bypass React's patched value setter so its tracker stays stale and onChange actually fires.
+    const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+    await act(async () => {
+      setValue.call(input, 'my-work');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    expect(container.querySelector('.orphan-cmd').textContent).toBe('handmux open my-work');
+  });
+
+  it('confirms with new-session target + kill + the typed name by default', async () => {
     const onConfirm = vi.fn(() => Promise.resolve());
     await render({ onConfirm });
     await click(container.querySelector('.bind-confirm'));
-    expect(onConfirm).toHaveBeenCalledWith({ target: { mode: 'new' }, kill: true });
+    expect(onConfirm).toHaveBeenCalledWith({ target: { mode: 'new' }, kill: true, name: 'cc-proj-1' });
   });
 
   it('confirms into an existing session with kill toggled off', async () => {
@@ -40,7 +55,7 @@ describe('OrphanTakeoverSheet', () => {
     await click(targets[1]); // 'jly' → $1
     await click([...container.querySelectorAll('.orphan-kill .fontbtn')][1]); // 保留 → kill off
     await click(container.querySelector('.bind-confirm'));
-    expect(onConfirm).toHaveBeenCalledWith({ target: { mode: 'window', session: '$1' }, kill: false });
+    expect(onConfirm).toHaveBeenCalledWith({ target: { mode: 'window', session: '$1' }, kill: false, name: undefined });
     expect(localStorage.getItem('tw_orphan_kill')).toBe('0'); // choice remembered
   });
 

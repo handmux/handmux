@@ -145,7 +145,7 @@ describe('scanOrphans (injected run)', () => {
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({
       pid: 4717, cwd, cwdLabel: 'zxy', state: 'idle',
-      sessionId: UUID, snippet: 'refactor parser',
+      sessionId: UUID, snippet: 'refactor parser', suggestedName: 'cc-zxy-1',
     });
     // startedAt = now - etime (4717's etime '02:03:04' = 7384s)
     expect(rows[0].startedAt).toBe(NOW - 7384 * 1000);
@@ -174,11 +174,11 @@ describe('takeoverOrphan', () => {
   const orphan = { pid: 4717, sessionId: UUID, cwd: '/home/user/zxy', cwdLabel: 'zxy' };
   const nap = () => Promise.resolve();
 
-  function fakeCommands({ paneCmds }) {
+  function fakeCommands({ paneCmds, existing = [{ id: '$1', name: 'jly' }], created }) {
     let poll = 0;
     return {
-      listSessions: async () => [{ id: '$1', name: 'jly' }],
-      newSession: async () => '$9',
+      listSessions: async () => existing,
+      newSession: async (name) => { if (created) created.push(name); return '$9'; },
       listWindows: async () => [{ id: '@9' }],
       newWindow: async () => '@9',
       listPanes: async () => [{ id: '%9', command: paneCmds[Math.min(poll++, paneCmds.length - 1)] }],
@@ -221,6 +221,35 @@ describe('takeoverOrphan', () => {
     expect(out.claudeUp).toBe(true);
     expect(out.killed).toBe(false);
     expect(killed).toEqual([]);
+  });
+
+  it('honours a user-typed session name (sanitized to tmux rules)', async () => {
+    const created = [];
+    const out = await takeoverOrphan({
+      commands: fakeCommands({ paneCmds: ['node'], created }),
+      scanFn: async () => [orphan], delay: nap,
+    }, { pid: 4717, sessionId: UUID, kill: false, name: 'My Work!!' });
+    expect(created).toEqual(['My-Work']); // spaces/punct → single hyphen, trimmed
+    expect(out).toMatchObject({ name: 'My-Work' });
+  });
+
+  it('dedupes a user-typed name that collides with an existing session', async () => {
+    const created = [];
+    const out = await takeoverOrphan({
+      commands: fakeCommands({ paneCmds: ['node'], existing: [{ id: '$1', name: 'jly' }], created }),
+      scanFn: async () => [orphan], delay: nap,
+    }, { pid: 4717, sessionId: UUID, kill: false, name: 'jly' });
+    expect(created).toEqual(['jly-2']); // 'jly' taken → numeric suffix
+    expect(out).toMatchObject({ name: 'jly-2' });
+  });
+
+  it('falls back to the generated name when no name is sent', async () => {
+    const created = [];
+    await takeoverOrphan({
+      commands: fakeCommands({ paneCmds: ['node'], created }),
+      scanFn: async () => [orphan], delay: nap,
+    }, { pid: 4717, sessionId: UUID, kill: false });
+    expect(created).toEqual(['cc-zxy-1']);
   });
 
   it('rejects a non-UUID sessionId (shell-injection guard)', async () => {

@@ -5,6 +5,11 @@ All notable changes to handmux. Format follows [Keep a Changelog](https://keepac
 ## [Unreleased]
 
 ### Added
+- **Name a session when taking over an orphan.** The takeover sheet now has an editable name field for a
+  new session (prefilled with the same `<agent>-<dir>-1` default the server would auto-pick), and the
+  "continue on the computer" hint shows the exact command with the real name filled in — `handmux open
+  <name>` instead of the old `tmux attach -t <session>` placeholder. A user-typed name is sanitized to
+  tmux rules and gets a numeric suffix if it collides with an existing session.
 - **Homebrew install for machines without Node.** `brew install handmux/tap/handmux` installs handmux
   plus Node and tmux in one command — the zero-prerequisite path for people without a Node toolchain
   (published via the new `handmux/homebrew-tap`). If you already have Node, `npm i -g handmux` stays the

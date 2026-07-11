@@ -478,9 +478,9 @@ export default function App() {
   // target (new session, or a new window of an existing session) and — if kill — SIGTERMs the original,
   // returning the new {session,window,pane}; we navigate into it. Throws on failure (409 gone / session
   // changed / spawn failed) so the takeover sheet can surface it; success closes the sheet + inbox.
-  const doTakeover = useCallback(async ({ target, kill }) => {
+  const doTakeover = useCallback(async ({ target, kill, name }) => {
     const o = takeoverTarget;
-    const out = await takeoverOrphan({ pid: o.pid, sessionId: o.sessionId, target, kill });
+    const out = await takeoverOrphan({ pid: o.pid, sessionId: o.sessionId, target, kill, name });
     // Pin the target session into this device's list so the taken-over session is reachable later —
     // without this a brand-new `cc-…` session would vanish from the drawer the moment you navigate away.
     if (out.name) { setBound(addBoundSession(out.name)); reportBound(); }
