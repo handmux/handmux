@@ -461,6 +461,7 @@ const Terminal = forwardRef(function Terminal({ pane, onAuthFail, onDocLinkTap }
         v = s.v;
         const before = el[prop];
         el[prop] = before + s.delta; // scrollTop → fires xterm's scroll listener → repaint
+        if (prop === 'scrollTop') refreshDecosOnScroll(); // …but onScroll is unreliable mid-fling on mobile — refresh directly
         const hitEdge = Math.abs(s.delta) >= 1 && el[prop] === before; // clamped at an edge
         if (s.done || hitEdge) { flingRAF = null; return; }
         flingRAF = requestAnimationFrame(frame);
@@ -551,7 +552,7 @@ const Terminal = forwardRef(function Terminal({ pane, onAuthFail, onDocLinkTap }
       // One finger dragging: surface the live position even when the buffer can't scroll (the
       // readout staying pinned at "行 N/N" is the tell that there's nothing more to load). Also the
       // dependable place to trigger a deeper pull — onScroll can miss the very top on mobile.
-      if (e.touches.length === 1) { showScrollPos(); maybePullMore(); }
+      if (e.touches.length === 1) { showScrollPos(); maybePullMore(); refreshDecosOnScroll(); }
       if (e.touches.length !== 1) return; // multi-finger: pinch handled above, otherwise ignore
       const dx = e.touches[0].clientX - sx;
       const dy = e.touches[0].clientY - sy;
