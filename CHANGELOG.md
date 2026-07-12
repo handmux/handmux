@@ -7,6 +7,12 @@ All notable changes to handmux. Format follows [Keep a Changelog](https://keepac
 ### Added
 - 脚本推送：CLI `handmux push <title> <body>`（全部/`--session`/`--device` 三种范围）+ 内部端点 `/api/push/send-local` + 设备 key + 应用内「脚本推送」说明浮窗（含可靠性边界提示）。
 
+### Changed
+- **The command-mode keyboard no longer vanishes the moment you touch the terminal.** Tapping or scrolling
+  the output used to blur the input and drop the on-screen keyboard — so you couldn't read while it stayed
+  up. It now persists like a real terminal app's: touching the terminal keeps it up, and you show/hide it
+  explicitly — the ⌨ button, or a vertical drag on the dock (swipe up to reveal, down to dismiss).
+
 ### Fixed
 - **A full-screen app (vim/less/htop) no longer leaks unrelated terminal history above it.** An alt-screen
   pane has no scrollback, but the server was still asking tmux for history — which returns the *main*

@@ -6,6 +6,7 @@ import FavDrawer from './FavDrawer.jsx';
 import CmdFavEditor from './CmdFavEditor.jsx';
 import MicButton from './MicButton.jsx';
 import { loadFavs, cmdScope } from '../favStore.js';
+import { keyboardSwipeAction } from '../dockKeyboard.js';
 import { getChatDraft, setChatDraft } from '../storage.js';
 import { UPLOAD_ACCEPT, splitUploadable } from '../uploadTypes.js';
 import { ArrowUpIcon, UploadIcon, ClockIcon, KeyboardIcon, GearIcon } from './icons.jsx';
@@ -235,8 +236,11 @@ function BottomDock({
       // carry over into a page swipe (decided in onMove once we know the direction). Both pages have a
       // strip: chat's carries LEFT-edge→right-drag to command; command's carries RIGHT-edge→left-drag to chat.
       const strip = e.target?.closest?.('.quick-scroll') || null;
+      // A drag that starts on a key/button is never the keyboard show/hide swipe (a vertical flick over an
+      // arrow key must not toggle the keyboard as well as press the key). onKey gates the vert gesture below.
+      const onKey = !!e.target?.closest?.('button');
       d = e.touches.length === 1
-        ? { x: e.touches[0].clientX, y: e.touches[0].clientY, dx: 0, decided: false, horiz: false, strip }
+        ? { x: e.touches[0].clientX, y: e.touches[0].clientY, dx: 0, dy: 0, decided: false, horiz: false, vert: false, strip, onKey }
         : null;
     };
     const onMove = (e) => {
@@ -268,7 +272,12 @@ function BottomDock({
           const toChat = dx < 0 && atRight && pg === 0;
           if (!(toCommand || toChat)) d.horiz = false;
         }
+        // A clearly-VERTICAL drag on the command dock (not on a key, not the chat page) is the keyboard
+        // show/hide swipe: up pops the system keyboard, down collapses it (committed in onEnd). It owns the
+        // gesture from here so a vertical flick can't leak into a page swipe or the strip's native scroll.
+        if (!d.horiz && !d.onKey && pageIndexRef.current === 0 && Math.abs(dy) > Math.abs(dx) * 1.4) d.vert = true;
       }
+      if (d.vert) { d.dx = dx; d.dy = dy; if (e.cancelable) e.preventDefault(); return; }
       if (!d.horiz) return; // a vertical drag (or a strip-scroll we handed off) → leave it to native
       e.preventDefault();
       draggingRef.current = true; // the finger owns the transform now
@@ -281,6 +290,17 @@ function BottomDock({
     };
     const onEnd = () => {
       draggingRef.current = false; // finger's gone
+      // A vertical dock swipe: pop or collapse the system keyboard by direction (focus/blur the capture —
+      // onFocus/onBlur keep keyboardUp in sync). Idempotent: a 'show' while already up (or 'hide' while
+      // down) is a harmless no-op.
+      if (d && d.vert) {
+        const action = keyboardSwipeAction(d.dx, d.dy);
+        d = null;
+        releaseTrack();
+        if (action === 'show') cmdRef.current?.focus();
+        else if (action === 'hide') cmdRef.current?.blur();
+        return;
+      }
       if (!d || !d.horiz) { d = null; releaseTrack(); return; }
       const cur = pageIndexRef.current, dx = d.dx;
       d = null;

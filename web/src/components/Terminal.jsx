@@ -4,6 +4,7 @@ import { WebglAddon } from '@xterm/addon-webgl';
 import '@xterm/xterm/css/xterm.css';
 import { getHistory, scrollPane, sendKeys, UnauthorizedError } from '../api.js';
 import { drainWheel, notchDir } from '../wheelScroll.js';
+import { shouldKeepKeyboard } from '../dockKeyboard.js';
 import { prepareSeed, cursorSeq } from '../terminalSeed.js';
 import { getFont, setFont, clearFont, getDocHighlight } from '../storage.js';
 import { backoffDelay } from '../backoff.js';
@@ -659,6 +660,14 @@ const Terminal = forwardRef(function Terminal({ pane, onAuthFail, onDocLinkTap }
       showScrollPos();
       maybePullMore();
     };
+    // Keep the on-screen keyboard up when a touch lands on the terminal. By default the browser blurs the
+    // focused command capture / composer the moment you touch a non-input element, collapsing the keyboard —
+    // so scrolling the output would dismiss it (the very thing good terminals avoid). If a real handmux field
+    // holds focus, preventDefault the pointerdown to keep it (the same keepFocus trick the dock buttons use):
+    // onClick/taps and the custom touch gestures still fire, the keyboard just no longer drops on every touch.
+    // Only pins a genuine input — never xterm's own hidden helper textarea.
+    const onKeepKbdDown = (e) => { if (shouldKeepKeyboard(document.activeElement) && e.cancelable) e.preventDefault(); };
+    host.addEventListener('pointerdown', onKeepKbdDown, { capture: true });
     host.addEventListener('wheel', onWheel, { capture: true, passive: false });
     host.addEventListener('touchstart', onTouchStart, { capture: true, passive: true });
     host.addEventListener('touchmove', onTouchMove, { capture: true, passive: false });
@@ -840,6 +849,7 @@ const Terminal = forwardRef(function Terminal({ pane, onAuthFail, onDocLinkTap }
       window.removeEventListener('resize', onResize);
       window.removeEventListener('orientationchange', onResize);
       ro?.disconnect();
+      host.removeEventListener('pointerdown', onKeepKbdDown, { capture: true });
       host.removeEventListener('wheel', onWheel, { capture: true });
       host.removeEventListener('touchstart', onTouchStart, { capture: true });
       host.removeEventListener('touchmove', onTouchMove, { capture: true });
