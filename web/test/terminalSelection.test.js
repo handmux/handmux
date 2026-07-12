@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { trimCopy } from '../src/terminalSelection.js';
+import { trimCopy, cellToPx } from '../src/terminalSelection.js';
 import { expandToLines, expandToParagraph } from '../src/terminalSelection.js';
 
 describe('trimCopy', () => {
@@ -38,5 +38,14 @@ describe('expandToParagraph', () => {
     const r = { start: { col: 0, row: 11 }, end: { col: 0, row: 11 } };
     expect(expandToParagraph(r, 80, lineText, 11, 12))
       .toEqual({ start: { col: 0, row: 11 }, end: { col: 79, row: 12 } });
+  });
+});
+
+describe('cellToPx', () => {
+  it('col*cellW，行减去视口顶行再*cellH', () => {
+    expect(cellToPx(4, 12, 10, 8, 18)).toEqual({ x: 32, y: 36 }); // (12-10)*18=36
+  });
+  it('视口内第一行 y=0', () => {
+    expect(cellToPx(0, 10, 10, 8, 18)).toEqual({ x: 0, y: 0 });
   });
 });

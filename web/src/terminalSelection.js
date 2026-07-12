@@ -29,3 +29,9 @@ export function expandToParagraph(range, cols, lineText, minRow, maxRow) {
   while (bot < maxRow && lineText(bot + 1).trim() !== '') bot++;
   return { start: { col: 0, row: top }, end: { col: cols - 1, row: bot } };
 }
+
+// Absolute buffer cell → px relative to the .xterm-screen box. The component adds the screen→wrap
+// offset. cellW/cellH come from the live screen box so they track font size + horizontal scroll.
+export function cellToPx(col, absRow, viewportY, cellW, cellH) {
+  return { x: col * cellW, y: (absRow - viewportY) * cellH };
+}
