@@ -6,6 +6,7 @@ All notable changes to handmux. Format follows [Keep a Changelog](https://keepac
 
 ### Added
 - 脚本推送：CLI `handmux push <title> <body>`（全部/`--session`/`--device` 三种范围）+ 内部端点 `/api/push/send-local` + 设备 key + 应用内「脚本推送」说明浮窗（含可靠性边界提示）。
+- 终端选中改为 iOS 式持久选区：可拖首尾手柄精调、跨屏选择，callout 浮条（拷贝/整行/整段），复制自动去空格。
 
 ### Changed
 - **A stray Back press on the main page no longer drops you out of the app.** The first Back now just shows

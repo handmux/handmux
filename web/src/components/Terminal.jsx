@@ -1036,7 +1036,7 @@ const Terminal = forwardRef(function Terminal({ pane, onAuthFail, onDocLinkTap, 
       {dbgVisible && <div className="dbg">{dbg}</div>}
       {connected && scrollInfo && <div className="term-banner term-banner--hist">{scrollInfo}</div>}
       {scrollInfo && <button className="new-output" onClick={resume}>↓ 回到底部</button>}
-      {selHint && <div className="sel-hint">按住拖动选择文字，松手后点「复制」</div>}
+      {selHint && <div className="sel-hint">拖动两端手柄调整选区，点「拷贝」复制</div>}
       {altScreen && (
         <div className="term-pager" role="group" aria-label="翻页">
           <button type="button" className="term-pager-btn" aria-label="上翻页" onClick={() => pageScroll('up')}>
