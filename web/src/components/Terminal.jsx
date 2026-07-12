@@ -15,6 +15,7 @@ import { scanDocLinks, docLinksOnLine } from '../docDecorations.js';
 import { ensureBundledFonts } from '../bundledFonts.js';
 import { trimCopy, expandToLines, expandToParagraph, cellToPx } from '../terminalSelection.js';
 
+const CALLOUT_W = 176; // estimated callout width (px) used for right-edge clamping; real-device-tuned
 const LIVE_MARGIN = 20; // capture this many rows beyond the viewport so a small scroll-up has slack
                         // before triggering a deeper history pull (replaces the old fixed 100-line tail)
 const CHUNK = 100; // how much more history to pull each time the top is reached (one page)
@@ -222,9 +223,15 @@ const Terminal = forwardRef(function Terminal({ pane, onAuthFail, onDocLinkTap, 
     let seeded = false;
     // Fresh slate per pane: don't carry the previous pane's alt/mouse state (else switching from a
     // full-screen pane to a normal one flashes the pager buttons until the first poll corrects it).
+    // Also reset selection state: selActiveRef survives the effect re-run and its poll gate
+    // (if (selActiveRef.current) return) would freeze the new pane's screen if a selection
+    // was active when the user switched panes.
     altScreenRef.current = false;
     mouseAwareRef.current = false;
     setAltScreen(false);
+    selActiveRef.current = false;
+    setSelUI(null);
+    setSelHint(false);
     // Live capture depth tracks the viewport (+margin) instead of a fixed 100, so we transmit and hash
     // only what's shown plus a little scroll-up slack. Floor 24 covers a not-yet-fit grid; cap at MAX_LINES.
     const liveDepth = () => Math.min(MAX_LINES, Math.max(24, term.rows + LIVE_MARGIN));
@@ -403,6 +410,7 @@ const Terminal = forwardRef(function Terminal({ pane, onAuthFail, onDocLinkTap, 
       setSelUI({
         start: { x: s.x + off.x, y: s.y + off.y, ch },
         end: { x: e.x + off.x, y: e.y + off.y, ch },
+        wrapW: wr.width,
       });
     };
     // Helpers for the callout expand buttons (整行 / 整段). currentRange() reads xterm's live
@@ -723,6 +731,10 @@ const Terminal = forwardRef(function Terminal({ pane, onAuthFail, onDocLinkTap, 
     let dragEnd = null; // 'start' | 'end' — which handle is being dragged
     let autoScrollRAF = null;
     let lastHandlePt = null;
+    // autoDir is hoisted so the rAF tick always reads the CURRENT edge direction, not the one
+    // captured when the loop started. Without this, dragging from the bottom edge to the top
+    // kept scrolling downward (the tick captured dir=1 from the start branch and couldn't update).
+    let autoDir = 0;
     const onHandleDown = (ev) => {
       const h = ev.target.closest?.('.sel-handle');
       if (!h) return;
@@ -743,25 +755,27 @@ const Terminal = forwardRef(function Terminal({ pane, onAuthFail, onDocLinkTap, 
       refreshSelUI();
       // Auto-scroll when the dragged handle nears the viewport top/bottom edge, extending the selection
       // into scrollback / newer rows. rAF loop; keeps the last finger point to re-extend each frame.
+      // autoDir is written every move so the single persistent tick always scrolls toward the current edge.
       const EDGE = 28;   // px band at each edge that triggers auto-scroll
       const STEP = 24;   // px scrolled per frame
       lastHandlePt = { x: ev.clientX, y: ev.clientY };
       const vpRect = vp.getBoundingClientRect();
-      let dir = 0;
-      if (ev.clientY < vpRect.top + EDGE) dir = -1;
-      else if (ev.clientY > vpRect.bottom - EDGE) dir = 1;
-      if (dir !== 0 && autoScrollRAF == null) {
+      if (ev.clientY < vpRect.top + EDGE) autoDir = -1;
+      else if (ev.clientY > vpRect.bottom - EDGE) autoDir = 1;
+      else autoDir = 0;
+      if (autoDir !== 0 && autoScrollRAF == null) {
+        // Start one persistent tick; it reads autoDir each frame so direction changes propagate naturally.
         const tick = () => {
-          if (!dragEnd || dir === 0) { autoScrollRAF = null; return; }
+          if (!dragEnd || autoDir === 0) { autoScrollRAF = null; return; }
           const before = vp.scrollTop;
-          vp.scrollTop = before + dir * STEP; // fires xterm scroll → repaint + onVpScroll
+          vp.scrollTop = before + autoDir * STEP; // fires xterm scroll → repaint + onVpScroll
           extendSelection(lastHandlePt.x, lastHandlePt.y);
           refreshSelUI();
-          if (vp.scrollTop === before) { autoScrollRAF = null; return; } // hit an edge
+          if (vp.scrollTop === before) { autoScrollRAF = null; return; } // hit an edge — stop
           autoScrollRAF = requestAnimationFrame(tick);
         };
         autoScrollRAF = requestAnimationFrame(tick);
-      } else if (dir === 0 && autoScrollRAF != null) {
+      } else if (autoDir === 0 && autoScrollRAF != null) {
         cancelAnimationFrame(autoScrollRAF); autoScrollRAF = null;
       }
       ev.preventDefault();
@@ -769,6 +783,7 @@ const Terminal = forwardRef(function Terminal({ pane, onAuthFail, onDocLinkTap, 
     const onHandleUp = (ev) => {
       if (!dragEnd) return;
       dragEnd = null;
+      autoDir = 0;
       if (autoScrollRAF != null) { cancelAnimationFrame(autoScrollRAF); autoScrollRAF = null; }
       wrap.releasePointerCapture?.(ev.pointerId);
     };
@@ -1052,7 +1067,17 @@ const Terminal = forwardRef(function Terminal({ pane, onAuthFail, onDocLinkTap, 
           </button>
         </div>
       )}
-      {selUI && (
+      {selUI && (() => {
+        const minX = Math.min(selUI.start.x, selUI.end.x);
+        const minY = Math.min(selUI.start.y, selUI.end.y);
+        const maxY = Math.max(selUI.start.y, selUI.end.y);
+        // Clamp left within wrap bounds, also guard right edge (CALLOUT_W is an estimate for clamping).
+        const calloutLeft = Math.max(8, Math.min(minX, (selUI.wrapW ?? 0) - CALLOUT_W - 8));
+        // Flip below the selection when the above-position would clip the top of the wrap.
+        const aboveY = minY - 44;
+        const belowY = maxY + (selUI.start.ch || 0) + 8;
+        const calloutTop = aboveY < 4 ? belowY : aboveY;
+        return (
         <>
           <div className="sel-handle sel-handle--start"
                style={{ left: selUI.start.x, top: selUI.start.y, '--h': `${selUI.start.ch}px` }}
@@ -1061,8 +1086,7 @@ const Terminal = forwardRef(function Terminal({ pane, onAuthFail, onDocLinkTap, 
                style={{ left: selUI.end.x, top: selUI.end.y, '--h': `${selUI.end.ch}px` }}
                data-end="end" />
           <div className="sel-callout"
-               style={{ left: Math.max(8, Math.min(selUI.start.x, selUI.end.x)),
-                        top: Math.max(4, Math.min(selUI.start.y, selUI.end.y) - 44) }}>
+               style={{ left: calloutLeft, top: calloutTop }}>
             <button type="button" onClick={doCopy}>拷贝</button>
             <button type="button" onClick={() => {
               const a = selActionsRef.current;
@@ -1076,7 +1100,8 @@ const Terminal = forwardRef(function Terminal({ pane, onAuthFail, onDocLinkTap, 
             }}>整段</button>
           </div>
         </>
-      )}
+        );
+      })()}
     </div>
   );
 });
