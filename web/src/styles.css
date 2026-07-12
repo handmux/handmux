@@ -1391,16 +1391,20 @@ button.cmd-text { background: none; border: none; text-align: left; }
 .usage-card .settings-title { margin-right: 8px; }
 .usage-head-note { margin-right: auto; font-size: 11px; color: #777; }
 
-/* push-script-sheet */
-.push-script-sheet .push-script-intro { margin: 0 16px 12px; color: var(--muted, #8a8a8e); font-size: 13px; }
-.push-script-block { margin: 0 16px 14px; display: flex; flex-direction: column; gap: 6px; }
+/* push-script-sheet — reuses the settings-card shell (centered dialog opened from Settings), lifted
+   above the settings modal like DirPicker so it renders on top and stays interactive; the card scrolls
+   so it never clips on a short viewport. Horizontal insets come from the card's own 16px padding. */
+.push-script-backdrop { z-index: 30; background: rgba(0,0,0,.62); }
+.push-script-sheet { z-index: 31; overflow-y: auto; }
+.push-script-sheet .push-script-intro { margin: 0 0 12px; color: var(--muted, #8a8a8e); font-size: 13px; line-height: 1.5; }
+.push-script-block { margin: 0 0 14px; display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
 .push-script-label { font-size: 12px; color: var(--muted, #8a8a8e); }
 .push-script-cmd { margin: 0; padding: 10px; background: rgba(120,120,128,0.12); border-radius: 8px;
-  overflow-x: auto; font-size: 13px; line-height: 1.5; }
+  overflow-x: auto; font-size: 13px; line-height: 1.5; align-self: stretch; }
 .push-script-key { font-variant-numeric: tabular-nums; word-break: break-all; padding: 8px 10px;
-  background: rgba(120,120,128,0.12); border-radius: 8px; font-size: 13px; }
-.push-script-fields { margin: 0 16px 14px; padding-left: 18px; color: var(--muted, #8a8a8e);
+  background: rgba(120,120,128,0.12); border-radius: 8px; font-size: 13px; align-self: stretch; }
+.push-script-fields { margin: 0 0 14px; padding-left: 18px; color: var(--muted, #8a8a8e);
   font-size: 12px; line-height: 1.7; }
-.push-script-hint { margin: 0 16px 14px; color: var(--muted, #8a8a8e); font-size: 13px; }
-.push-script-note { margin: 4px 16px 16px; padding: 10px 12px; border-radius: 8px;
+.push-script-hint { margin: 6px 0 0; color: var(--muted, #8a8a8e); font-size: 13px; line-height: 1.4; }
+.push-script-note { margin: 4px 0 0; padding: 10px 12px; border-radius: 8px;
   background: rgba(120,120,128,0.12); color: var(--muted, #8a8a8e); font-size: 12px; line-height: 1.55; }

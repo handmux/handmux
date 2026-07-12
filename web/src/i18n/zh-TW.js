@@ -367,7 +367,7 @@ export default {
   'settings.script_push_open': '怎麼用',
   'settings.script_push_hint': '讓電腦上的腳本把一條通知推到手機。',
   'scriptPush.title': '腳本推送',
-  'scriptPush.intro': '在執行 handmux 的電腦上，一條命令就能把通知推到手機——建置或長任務結束時很方便。',
+  'scriptPush.intro': '讓電腦上的腳本複用 handmux 的推送通道：在執行 handmux 的電腦上，一條 handmux push 命令就能把通知推到手機——建置、CI 或長任務結束時提醒你，不用另接推送服務。',
   'scriptPush.cmd_label': '命令',
   'scriptPush.copied': '已複製',
   'scriptPush.key_label': '這台裝置的 key',

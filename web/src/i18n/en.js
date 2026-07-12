@@ -433,7 +433,7 @@ export default {
   'settings.script_push_open': 'How it works',
   'settings.script_push_hint': 'Let a script on your computer push a notification to your phone.',
   'scriptPush.title': 'Script push',
-  'scriptPush.intro': 'On the computer running handmux, one command pushes a notification to your phone — handy at the end of a build or long task.',
+  'scriptPush.intro': 'Let scripts on your computer reuse handmux’s push channel: on the machine running handmux, one `handmux push` command sends a notification to your phone — handy when a build, CI run, or long task finishes, with no separate push service to wire up.',
   'scriptPush.cmd_label': 'Command',
   'scriptPush.copied': 'Copied',
   'scriptPush.key_label': 'This device’s key',

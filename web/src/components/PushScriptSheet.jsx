@@ -15,11 +15,11 @@ export default function PushScriptSheet({ open, pushKey, notifyOn, onClose }) {
 
   return (
     <>
-      <div className="file-sheet-backdrop" onClick={onClose} />
-      <div className="file-sheet push-script-sheet" role="dialog" aria-label={t('scriptPush.title')} aria-modal="true">
-        <div className="file-sheet-head">
-          <span className="file-sheet-title">{t('scriptPush.title')}</span>
-          <button className="file-sheet-close" onClick={onClose} aria-label={t('common.close')}>✕</button>
+      <div className="settings-backdrop push-script-backdrop" onClick={onClose} />
+      <div className="settings-card push-script-sheet" role="dialog" aria-label={t('scriptPush.title')} aria-modal="true">
+        <div className="settings-head">
+          <span className="settings-title">{t('scriptPush.title')}</span>
+          <button className="settings-close" onClick={onClose} aria-label={t('common.close')}>✕</button>
         </div>
 
         <p className="push-script-intro">{t('scriptPush.intro')}</p>
