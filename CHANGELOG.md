@@ -19,6 +19,12 @@ All notable changes to handmux. Format follows [Keep a Changelog](https://keepac
   (arbitrary) logo. The active window's tab now shows only the current pane's agent (exit it → the logo
   clears), and the pane menu shows each pane its own logo — Claude and Codex side by side render
   distinctly, and a pane that has dropped to a shell shows none.
+- **Tappable file paths in the terminal survive surrounding punctuation and line wraps.** A path clung to
+  by a decorator no longer swallows it into the name: a trailing `…` (Claude Code's truncation ellipsis),
+  markdown `*`/`**` around the name, a `label:path` colon with no space, and a leading `@` (a `@file`
+  mention — kept when it's internal, e.g. `@types/`) are all trimmed, so the real file is found. And a
+  path that Claude Code folds across two rows by width (a hard newline, not xterm's own soft wrap) is now
+  stitched back into one tappable link instead of only its tail fragment; box-drawn panels stay unfused.
 
 ## [0.12.3] - 2026-07-11
 

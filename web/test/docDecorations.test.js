@@ -47,6 +47,35 @@ describe('scanDocLinks', () => {
     expect(scanDocLinks(t)).toEqual([]);
     t.dispose();
   });
+
+  // A program (Ink / Claude Code) that width-folds its OWN output emits a real '\n', so the second row
+  // is NOT flagged isWrapped. We still stitch it when the first row is filled to the edge and the next
+  // starts flush at col 0 — otherwise only the tail fragment ('plans/push-api.md') would be tappable.
+  it('stitches a HARD-newline fold (filled row + flush next row) into the full path', async () => {
+    const t = new Terminal({ cols: 24, rows: 5, allowProposedApi: true, scrollback: 100 });
+    await write(t, 'Write(/root/aa/bb/cc/dd/\r\nplans/push-api.md)'); // 24 chars fills row 0 exactly
+    expect(scanDocLinks(t).map((s) => s.path)).toEqual([
+      '/root/aa/bb/cc/dd/plans/push-api.md',
+      '/root/aa/bb/cc/dd/plans/push-api.md',
+    ]);
+    t.dispose();
+  });
+
+  it('does NOT stitch when the first row ends early (a real line break, not a width fold)', async () => {
+    // Row 0 has trailing space → it wasn't folded by width, so the two rows are independent lines.
+    const t = new Terminal({ cols: 40, rows: 4, allowProposedApi: true, scrollback: 100 });
+    await write(t, 'edited /root/aa/bb/\r\nplans/push-api.md done');
+    // The prefix has no extension → no link; only the second line's own path is found (unfused).
+    expect(scanDocLinks(t).map((s) => s.path)).toEqual(['plans/push-api.md']);
+    t.dispose();
+  });
+
+  it('does not fuse a boxed path across the frame padding (only the leaf is found)', async () => {
+    const t = new Terminal({ cols: 28, rows: 4, allowProposedApi: true, scrollback: 100 });
+    await write(t, '│ /home/u/very/long/path/ │\r\n│ report.md               │');
+    expect(scanDocLinks(t).map((s) => s.path)).toEqual(['report.md']);
+    t.dispose();
+  });
 });
 
 describe('docLinksOnLine', () => {

@@ -1,20 +1,48 @@
 import { findDocLinks } from './docPath.js';
 
+// Is row `r` filled right up to its last column? A cell holding a real glyph at the right edge means
+// the row was folded by width (not ended early with a space). A wide glyph sits at cols-2 with a
+// width-0 placeholder at cols-1, so step left past that placeholder before reading the tail glyph.
+function reachesEdge(line, cols) {
+  let c = cols - 1;
+  let cell = line.getCell(c);
+  if (cell && cell.getWidth() === 0) { c -= 1; cell = c >= 0 ? line.getCell(c) : null; }
+  const ch = cell && cell.getChars();
+  return !!ch && ch !== ' ';
+}
+
+// Does row `r+1` continue row `r`'s logical line? True for a soft wrap (xterm sets isWrapped when it
+// auto-folds at the column boundary) OR a HARD fold: a program that width-folds its OWN output (Ink /
+// Claude Code) emits a real `\n`, so the continuation is NOT flagged isWrapped. We infer that fold when
+// row `r` is filled to its last column AND row `r+1` starts flush at column 0 (no leading space/indent).
+// Box-drawn panels (`│ … │`) have trailing/leading padding, so they fail the flush test and stay
+// un-stitched — and `│` is a delimiter anyway, so even a padding-free frame can't fuse a false path.
+function isContinuation(buf, r, cols) {
+  const next = buf.getLine(r + 1);
+  if (!next) return false;
+  if (next.isWrapped) return true;
+  const cur = buf.getLine(r);
+  if (!cur || !reachesEdge(cur, cols)) return false;
+  const first = next.getCell(0)?.getChars();
+  return !!first && first !== ' ';
+}
+
 // Read the logical line that contains absolute buffer row `idx` by walking CELLS (not the string),
 // so wide CJK glyphs map to the right columns: a full-width char occupies 2 cells (its char in the
-// first, a width-0 placeholder in the second). Walking up from a wrapped continuation to its start
-// and down through every isWrapped continuation also stitches a path folded across rows.
+// first, a width-0 placeholder in the second). Walking up from a continuation row to its start and
+// down through every continuation (soft- OR hard-wrapped, see isContinuation) stitches a path folded
+// across rows.
 //
 // Returns { text, cells } where text[i] is the i-th visible char and cells[i] = { row, col, w } is
 // its absolute buffer row, starting column, and cell width (1 or 2). Blank cells become a single
 // space so word boundaries survive for the matcher.
 function readLogicalLine(buf, idx, cols) {
   let start = idx;
-  while (start > 0 && buf.getLine(start)?.isWrapped) start--;
+  while (start > 0 && isContinuation(buf, start - 1, cols)) start--;
   let text = '';
   const cells = [];
   let r = start;
-  do {
+  for (;;) {
     const line = buf.getLine(r);
     if (!line) break;
     for (let col = 0; col < cols; col++) {
@@ -25,8 +53,9 @@ function readLogicalLine(buf, idx, cols) {
       text += cell.getChars() || ' ';
       cells.push({ row: r, col, w });
     }
-    r++;
-  } while (r < buf.length && buf.getLine(r)?.isWrapped);
+    if (r + 1 < buf.length && isContinuation(buf, r, cols)) { r++; continue; }
+    break;
+  }
   return { text, cells };
 }
 
@@ -42,7 +71,7 @@ export function scanDocLinks(term) {
   const out = [];
 
   let y = top;
-  while (y > 0 && buf.getLine(y)?.isWrapped) y--; // back up if the top row is a continuation
+  while (y > 0 && isContinuation(buf, y - 1, cols)) y--; // back up if the top row is a continuation
   while (y < bottom) {
     if (!buf.getLine(y)) { y++; continue; }
     const { text, cells } = readLogicalLine(buf, y, cols);
