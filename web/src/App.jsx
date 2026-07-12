@@ -54,6 +54,7 @@ import { FolderIcon, GearIcon, BulbIcon, MonitorIcon, GitIcon, GaugeIcon } from 
 import { useKeyboardInset } from './hooks/useKeyboardInset.js';
 import { useLongPress } from './hooks/useLongPress.js';
 import { useBackButton } from './hooks/useBackButton.js';
+import { useExitConfirm } from './hooks/useExitConfirm.js';
 import { readRoute, writeSessionHash } from './hashRoute.js';
 import { hasShareFlag, takeSharedFile, clearShareFlag } from './shareIntake.js';
 
@@ -78,6 +79,7 @@ export default function App() {
   const [pendingShare, setPendingShare] = useState(null); // a File shared in via Web Share Target, awaiting a destination
   const [basePrompt, setBasePrompt] = useState(null); // { rawPath } while asking for a relative path's base dir
   const [docToast, setDocToast] = useState(null); // transient error toast for absolute-path doc failures
+  const [exitHint, setExitHint] = useState(false); // "press Back again to exit" hint (double-back guard)
   const [docLinkPrompt, setDocLinkPrompt] = useState(null); // { path, x, y } confirm popover for a tapped terminal path
   const docTabs = useDocTabs(); // file-viewer tab state, kept across sheet open/close
   const [bound, setBound] = useState(getBoundSessions); // session names pinned on this device
@@ -221,6 +223,9 @@ export default function App() {
   useBackButton(!!manageWindow || !!renameTarget, () => {
     if (renameTarget) setRenameTarget(null); else setManageWindow(null);
   });
+  // Root double-back-to-exit: on the main page (a pane is showing, all the overlays above push their own
+  // entries first), the first Back only surfaces a hint — a second within the window actually exits.
+  useExitConfirm(!!current, () => setExitHint(true));
 
   const sendKey = useCallback(async (name) => {
     const paneId = current?.paneId;
@@ -744,6 +749,13 @@ export default function App() {
     return () => clearTimeout(id);
   }, [docToast]);
 
+  // The exit hint auto-clears in step with useExitConfirm's window (~2s) so it isn't left lingering.
+  useEffect(() => {
+    if (!exitHint) return;
+    const id = setTimeout(() => setExitHint(false), 2000);
+    return () => clearTimeout(id);
+  }, [exitHint]);
+
   // Initial open: resolve the target session by precedence hash > last > first, then open it.
   // The URL hash (#session-name) deep-links to a session; otherwise the last-opened session;
   // otherwise the first. openSession itself restores that session's remembered window/pane.
@@ -1027,6 +1039,9 @@ export default function App() {
       />
       {docToast && (
         <div className="doc-toast" role="alert" onClick={() => setDocToast(null)}>{docToast}</div>
+      )}
+      {exitHint && (
+        <div className="exit-toast" role="status">{t('app.backToExit')}</div>
       )}
       {docLinkPrompt && (
         <DocLinkPopover

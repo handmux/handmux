@@ -177,6 +177,7 @@ export default {
   'app.noBoundSession': 'セッションが紐付けられていません',
   'app.tapToBind': 'タップして紐付け',
   'app.selectSessionHint': '左上の ☰ をタップしてセッションを選択',
+  'app.backToExit': 'もう一度戻るで終了します',
 
   // settings
   'settings.title': '設定',

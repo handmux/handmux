@@ -241,6 +241,7 @@ export default {
   'app.noBoundSession': '还没有绑定会话',
   'app.tapToBind': '点此绑定一个',
   'app.selectSessionHint': '点击左上角 ☰ 选择会话',
+  'app.backToExit': '再按一次返回键退出',
 
   // settings
   'settings.title': '设置',

@@ -8,6 +8,9 @@ All notable changes to handmux. Format follows [Keep a Changelog](https://keepac
 - 脚本推送：CLI `handmux push <title> <body>`（全部/`--session`/`--device` 三种范围）+ 内部端点 `/api/push/send-local` + 设备 key + 应用内「脚本推送」说明浮窗（含可靠性边界提示）。
 
 ### Changed
+- **A stray Back press on the main page no longer drops you out of the app.** The first Back now just shows
+  a "press Back again to exit" hint; only a second press within ~2s actually leaves. Back still closes any
+  open sheet/panel first, exactly as before — the guard only kicks in at the root.
 - **The on-screen keyboard no longer vanishes the moment you touch the terminal.** Tapping or scrolling
   the output used to blur the input and drop the keyboard — so you couldn't read while it stayed up. It now
   persists like a real terminal app's: touching the terminal keeps it up, and you show/hide it explicitly —

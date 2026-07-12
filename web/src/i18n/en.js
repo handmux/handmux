@@ -242,6 +242,7 @@ export default {
   'app.noBoundSession': 'No bound session yet',
   'app.tapToBind': 'Tap here to bind one',
   'app.selectSessionHint': 'Tap ☰ at the top-left to pick a session',
+  'app.backToExit': 'Press Back again to exit',
 
   // settings
   'settings.title': 'Settings',

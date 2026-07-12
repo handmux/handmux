@@ -1282,6 +1282,18 @@ button.cmd-text { background: none; border: none; text-align: left; }
   padding: 10px 14px; border-radius: 10px; font-size: 13px;
   box-shadow: 0 6px 20px rgba(0,0,0,.4);
 }
+/* Neutral hint toast (double-back-to-exit): same shape as .doc-toast but grey, not the error red — this is
+   an expected prompt, not a failure. Sits above the dock, clear of the safe-area inset. */
+.exit-toast {
+  position: fixed; left: 50%; bottom: calc(90px + env(safe-area-inset-bottom)); transform: translateX(-50%);
+  z-index: 60; max-width: 86vw; white-space: nowrap;
+  background: rgba(30,32,36,.94); color: #e6e9ee; border: 1px solid #3a3d44;
+  padding: 9px 16px; border-radius: 999px; font-size: 13px;
+  box-shadow: 0 6px 20px rgba(0,0,0,.4); pointer-events: none;
+  animation: exit-toast-in .18s ease;
+}
+@keyframes exit-toast-in { from { opacity: 0; transform: translate(-50%, 6px); } to { opacity: 1; transform: translate(-50%, 0); } }
+@media (prefers-reduced-motion: reduce) { .exit-toast { animation: none; } }
 
 /* Inbox: a topbar tray icon with an unread count badge, opening a dropdown roster of watched panes. */
 .inbox-btn { position: relative; }

@@ -177,6 +177,7 @@ export default {
   'app.noBoundSession': '연결된 세션이 없습니다',
   'app.tapToBind': '탭하여 연결',
   'app.selectSessionHint': '왼쪽 상단의 ☰ 를 탭하여 세션 선택',
+  'app.backToExit': '한 번 더 뒤로가기를 누르면 종료됩니다',
 
   // settings
   'settings.title': '설정',

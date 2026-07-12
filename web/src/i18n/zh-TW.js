@@ -177,6 +177,7 @@ export default {
   'app.noBoundSession': '尚未綁定工作階段',
   'app.tapToBind': '點此綁定一個',
   'app.selectSessionHint': '點擊左上角 ☰ 選擇工作階段',
+  'app.backToExit': '再按一次返回鍵結束',
 
   // settings
   'settings.title': '設定',
