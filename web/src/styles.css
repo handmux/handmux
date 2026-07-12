@@ -286,25 +286,19 @@ a.settings-linkbtn { display: inline-flex; align-items: center; justify-content:
   transform: translate(-50%, -50%);
 }
 .sel-callout {
-  position: absolute; z-index: 9; display: flex; align-items: stretch;
+  position: absolute; z-index: 9; display: flex; align-items: stretch; width: max-content;
   border-radius: 12px; overflow: hidden; background: rgba(28,30,34,0.92);
   -webkit-backdrop-filter: blur(20px); backdrop-filter: blur(20px);
   box-shadow: 0 3px 14px rgba(0,0,0,.5); border: 0.5px solid rgba(255,255,255,0.12);
 }
+/* width:max-content + nowrap keep the row intact near the right edge: an absolutely-positioned box with
+   only `left` set is shrink-to-fit and gets squeezed by the container, which used to wrap each 2-char
+   label onto two lines. The calloutLeft clamp (CALLOUT_W) keeps the full-width row on-screen. */
 .sel-callout button {
   border: none; background: none; color: #fff; font-size: 15px; font-weight: 500;
-  padding: 9px 16px; touch-action: manipulation;
+  padding: 9px 16px; touch-action: manipulation; white-space: nowrap; flex: none;
 }
 .sel-callout button + button { border-left: 0.5px solid rgba(255,255,255,0.14); }
-/* Guidance shown WHILE a finger is dragging out a selection — the long-press selects one word, but
-   most users never discover they must keep dragging to grab more. pointer-events:none so it never
-   eats the drag; bottom-centered to stay clear of the finger. */
-.sel-hint {
-  position: absolute; left: 50%; top: 12px; transform: translateX(-50%); z-index: 8;
-  max-width: 92%; padding: 7px 14px; border-radius: 16px;
-  background: rgba(var(--blue-rgb),0.96); color: #fff; font-size: 13px; font-weight: 600;
-  white-space: nowrap; box-shadow: 0 2px 10px rgba(0,0,0,.5); pointer-events: none;
-}
 /* Full-screen (alt-screen) pager: page up/down on the right edge, shown only for full-screen apps
    (vim/htop/less/…) where there's no scrollback to swipe. The wheel gesture handles mouse-reporting
    apps; these buttons are the always-available manual scroll for the rest, and precise paging for all.

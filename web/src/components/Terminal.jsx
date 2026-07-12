@@ -15,7 +15,7 @@ import { scanDocLinks, docLinksOnLine } from '../docDecorations.js';
 import { ensureBundledFonts } from '../bundledFonts.js';
 import { trimCopy, expandToLines, expandToParagraph, cellToPx } from '../terminalSelection.js';
 
-const CALLOUT_W = 176; // estimated callout width (px) used for right-edge clamping; real-device-tuned
+const CALLOUT_W = 200; // estimated callout width (px) used for right-edge clamp (3 buttons, nowrap)ing; real-device-tuned
 const LIVE_MARGIN = 20; // capture this many rows beyond the viewport so a small scroll-up has slack
                         // before triggering a deeper history pull (replaces the old fixed 100-line tail)
 const CHUNK = 100; // how much more history to pull each time the top is reached (one page)
@@ -63,10 +63,8 @@ const Terminal = forwardRef(function Terminal({ pane, onAuthFail, onDocLinkTap, 
   // is a ref so liveTick (effect scope) and the bubble (render scope) share the "don't repaint /
   // a selection is showing" flag without a re-render race.
   const selActiveRef = useRef(false);
-  const [selInfo, setSelInfo] = useState(''); // blue selection status strip text ("已选 N 行 · M 字"), '' = hidden
-const [selUI, setSelUI] = useState(null); // {start:{x,y}, end:{x,y}} in .terminal-wrap px, or null
-  const [selHint, setSelHint] = useState(false); // drag-to-select guidance; lingers a few sec after lift
-  const selHintTimerRef = useRef(null);
+  const [selInfo, setSelInfo] = useState(''); // blue "复制模式 · N 行 · M 字" status strip; '' = hidden
+  const [selUI, setSelUI] = useState(null); // {start:{x,y}, end:{x,y}} in .terminal-wrap px, or null
   // Alt-screen (a full-screen app: vim/htop/less/a mouse-mode TUI) has no scrollback of its own, so a
   // vertical swipe can't scroll it the ordinary way. altScreenRef tracks the pane's state (set each poll
   // from the server's `alt` flag); a swipe over such a pane is forwarded to the app as scroll input it
@@ -233,7 +231,6 @@ const [selUI, setSelUI] = useState(null); // {start:{x,y}, end:{x,y}} in .termin
     selActiveRef.current = false;
     setSelUI(null);
     setSelInfo('');
-    setSelHint(false);
     // Live capture depth tracks the viewport (+margin) instead of a fixed 100, so we transmit and hash
     // only what's shown plus a little scroll-up slack. Floor 24 covers a not-yet-fit grid; cap at MAX_LINES.
     const liveDepth = () => Math.min(MAX_LINES, Math.max(24, term.rows + LIVE_MARGIN));
@@ -431,12 +428,14 @@ const [selUI, setSelUI] = useState(null); // {start:{x,y}, end:{x,y}} in .termin
         end: { x: e.x + off.x, y: e.y + off.y, ch },
         wrapW: wr.width,
       });
-      // Blue status strip: how much is selected (rows the selection spans · visible chars).
+      // Blue status strip: signals copy mode + how much is selected. The char count uses the SAME trim
+      // as the copy (each line's leading/trailing whitespace dropped), so it matches what actually lands
+      // on the clipboard rather than counting the row-padding spaces.
       const text = term.getSelection();
       if (text) {
-        const lines = text.split('\n').length;
-        const chars = text.replace(/\n/g, '').length;
-        setSelInfo(`已选 ${lines} 行 · ${chars} 字`);
+        const lines = text.split('\n').length;                  // rows the selection spans
+        const chars = trimCopy(text).replace(/\n/g, '').length; // chars after the copy-trim
+        setSelInfo(`复制模式 · ${lines} 行 · ${chars} 字`);
       } else setSelInfo('');
     };
     // Helpers for the callout expand buttons (整行 / 整段). currentRange() reads xterm's live
@@ -466,10 +465,6 @@ const [selUI, setSelUI] = useState(null); // {start:{x,y}, end:{x,y}} in .termin
       selAnchor = { col: a, row: cell.row };
       selActiveRef.current = true;
       setSelUI(null);
-      // tell the user to KEEP dragging — the missing step most users never discover. Stays up while
-      // the finger is down (no timer yet); the linger timer starts on lift (onTouchEnd).
-      clearTimeout(selHintTimerRef.current);
-      setSelHint(true);
       term.select(a, cell.row, b - a + 1);
       refreshSelUI();
       navigator.vibrate?.(12);
@@ -492,8 +487,6 @@ const [selUI, setSelUI] = useState(null); // {start:{x,y}, end:{x,y}} in .termin
       selActiveRef.current = false;
       setSelUI(null);
       setSelInfo('');
-      clearTimeout(selHintTimerRef.current);
-      setSelHint(false);
       term.clearSelection();
     };
     // Touch handling (capture phase):
@@ -683,8 +676,6 @@ const [selUI, setSelUI] = useState(null); // {start:{x,y}, end:{x,y}} in .termin
       cancelLongPress();
       if (selecting && e.touches.length === 0) {
         selecting = false;
-        clearTimeout(selHintTimerRef.current);
-        selHintTimerRef.current = setTimeout(() => setSelHint(false), 3500);
         const text = term.getSelection();
         if (text && text.trim()) refreshSelUI();  // persist handles + callout
         else clearSelection();
@@ -994,7 +985,6 @@ const [selUI, setSelUI] = useState(null); // {start:{x,y}, end:{x,y}} in .termin
       cancelLongPress();
       stopFling();
       if (timer) clearTimeout(timer);
-      clearTimeout(selHintTimerRef.current);
       document.removeEventListener('visibilitychange', onVisibility);
       window.removeEventListener('resize', onResize);
       window.removeEventListener('orientationchange', onResize);
@@ -1064,8 +1054,6 @@ const [selUI, setSelUI] = useState(null); // {start:{x,y}, end:{x,y}} in .termin
     selActiveRef.current = false;
     setSelUI(null);
     setSelInfo('');
-    clearTimeout(selHintTimerRef.current);
-    setSelHint(false);
   };
 
   return (
@@ -1076,7 +1064,6 @@ const [selUI, setSelUI] = useState(null); // {start:{x,y}, end:{x,y}} in .termin
       {connected && scrollInfo && !selInfo && <div className="term-banner term-banner--hist">{scrollInfo}</div>}
       {selInfo && <div className="term-banner term-banner--sel">{selInfo}</div>}
       {scrollInfo && <button className="new-output" onClick={resume}>↓ 回到底部</button>}
-      {selHint && <div className="sel-hint">拖动两端手柄调整选区，点「拷贝」复制</div>}
       {altScreen && (
         <div className="term-pager" role="group" aria-label="翻页">
           <button type="button" className="term-pager-btn" aria-label="上翻页" onClick={() => pageScroll('up')}>
