@@ -25,18 +25,20 @@ All notable changes to handmux. Format follows [Keep a Changelog](https://keepac
   mention — kept when it's internal, e.g. `@types/`) are all trimmed, so the real file is found. And a
   path that Claude Code folds across two rows by width (a hard newline, not xterm's own soft wrap) is now
   stitched back into one tappable link instead of only its tail fragment; box-drawn panels stay unfused.
-  A wide-character (CJK) path that soft-wraps on a full-width glyph is also no longer severed — the empty
-  spacer xterm leaves in the last column (a wide glyph can't straddle the wrap) used to inject a space
-  mid-name and drop the head, so `…/超长目录…/报告.md` kept only its tail.
+  A wide-character (CJK) path folded across two rows is also no longer severed — a wide glyph can't
+  straddle the last column, so the fold leaves a spacer there (empty on xterm's own wrap, a padding space
+  in tmux's captured rows). That spacer used to break the path mid-name and drop the head, so
+  `…/超长目录…/报告.md` kept — and opened — only its tail. Both spacer kinds are now healed.
 - **Tappable terminal paths now actually show their blue highlight.** The underline/chip that marks a path
   as tappable never rendered — `registerDecoration` is a *proposed* xterm API and the terminal was created
   without `allowProposedApi`, so every call threw and a broad catch swallowed it. Paths were tappable but
   looked like plain text (what colour they had was the program's own, e.g. Claude Code's). They now carry
-  a thin blue underline, in every pane.
-- **Scrolled-up paths keep their underline.** The highlight was computed only for the bottom page (xterm's
-  `baseY`) and rebuilt only when new output arrived — so a path scrolled up into the scrollback lost its
-  underline, and a long path that had wrapped its way up there never got one. The scan now follows the
-  visible viewport and re-runs on scroll, so any path you can see is underlined wherever it sits.
+  a soft blue wash behind the path, in every pane.
+- **The highlight stays put while you scroll the history.** It was computed only for the bottom page
+  (xterm's `baseY`) and rebuilt only when new output arrived — so a path scrolled up into the scrollback
+  lost its wash. The whole buffer is scanned now, so every path is lit up front and simply rides the
+  content as you scroll — no per-scroll rebuild, so it no longer flickers off mid-drag and reappears when
+  you stop.
 
 ## [0.12.3] - 2026-07-11
 

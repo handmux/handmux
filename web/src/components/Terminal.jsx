@@ -461,7 +461,6 @@ const Terminal = forwardRef(function Terminal({ pane, onAuthFail, onDocLinkTap }
         v = s.v;
         const before = el[prop];
         el[prop] = before + s.delta; // scrollTop → fires xterm's scroll listener → repaint
-        if (prop === 'scrollTop') refreshDecosOnScroll(); // …but onScroll is unreliable mid-fling on mobile — refresh directly
         const hitEdge = Math.abs(s.delta) >= 1 && el[prop] === before; // clamped at an edge
         if (s.done || hitEdge) { flingRAF = null; return; }
         flingRAF = requestAnimationFrame(frame);
@@ -552,7 +551,7 @@ const Terminal = forwardRef(function Terminal({ pane, onAuthFail, onDocLinkTap }
       // One finger dragging: surface the live position even when the buffer can't scroll (the
       // readout staying pinned at "行 N/N" is the tell that there's nothing more to load). Also the
       // dependable place to trigger a deeper pull — onScroll can miss the very top on mobile.
-      if (e.touches.length === 1) { showScrollPos(); maybePullMore(); refreshDecosOnScroll(); }
+      if (e.touches.length === 1) { showScrollPos(); maybePullMore(); }
       if (e.touches.length !== 1) return; // multi-finger: pinch handled above, otherwise ignore
       const dx = e.touches[0].clientX - sx;
       const dy = e.touches[0].clientY - sy;
@@ -651,18 +650,6 @@ const Terminal = forwardRef(function Terminal({ pane, onAuthFail, onDocLinkTap }
         deco.onRender((el) => { el.classList.add('doc-deco'); });
         decosRef.current.push({ deco, marker });
       }
-    };
-
-    // Scrolling doesn't repaint (no new content), and refreshDocDecorations rebuilds only for the
-    // currently-visible viewport — so without this, a path scrolled up into the scrollback loses its
-    // underline. Re-scan on scroll, rAF-coalesced so a fling doesn't rebuild every frame.
-    let decoRaf = 0;
-    const refreshDecosOnScroll = () => {
-      if (decoRaf) return;
-      decoRaf = requestAnimationFrame(() => {
-        decoRaf = 0;
-        if (!disposed && seeded) { try { refreshDocDecorations(term); } catch { /* decorations are cosmetic */ } }
-      });
     };
 
     const repaint = async (lines, keepPosition) => {
@@ -798,7 +785,6 @@ const Terminal = forwardRef(function Terminal({ pane, onAuthFail, onDocLinkTap }
 
     const sub = term.onScroll(() => {
       if (disposed) return;
-      refreshDecosOnScroll(); // re-underline whatever the scroll brought into view
       if (atBottom()) { setPaused(false); setScrollInfo(''); return; }
       setPaused(true);
       showScrollPos();
@@ -812,7 +798,6 @@ const Terminal = forwardRef(function Terminal({ pane, onAuthFail, onDocLinkTap }
       stopFlingRef.current = null;
       cancelLongPress();
       stopFling();
-      if (decoRaf) cancelAnimationFrame(decoRaf);
       if (timer) clearTimeout(timer);
       clearTimeout(selHintTimerRef.current);
       document.removeEventListener('visibilitychange', onVisibility);

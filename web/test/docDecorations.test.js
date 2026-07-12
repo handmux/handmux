@@ -41,22 +41,21 @@ describe('scanDocLinks', () => {
     t.dispose();
   });
 
-  it('scans the visible viewport (viewportY), so scrolling into scrollback still finds its paths', async () => {
-    // Many path lines + a short viewport → most scroll into the scrollback. scanDocLinks must follow the
-    // viewport as it scrolls, not stay pinned to the bottom page (baseY) — otherwise a path scrolled up
-    // out of the bottom page loses its underline.
+  it('scans the WHOLE buffer, so every path (incl. scrollback) is decorated regardless of scroll', async () => {
+    // Decorations ride the content on markers, so scanning the whole buffer once means a path stays lit
+    // wherever you scroll — no per-scroll rebuild (which flickered on a fling). Many path lines + a short
+    // viewport → most sit in the scrollback, yet all are found at any scroll position.
     const t = new Terminal({ cols: 40, rows: 6, allowProposedApi: true, scrollback: 200 });
     let s = '';
     for (let i = 1; i <= 20; i++) s += `line${i} dir/f${i}.md x\r\n`;
     await write(t, `${s}prompt$ `);
     const paths = () => [...new Set(scanDocLinks(t).map((x) => x.path))];
     const atBottom = paths();
-    expect(atBottom).toContain('dir/f20.md'); // bottom page
-    expect(atBottom).not.toContain('dir/f1.md'); // scrolled off the top
+    expect(atBottom).toContain('dir/f1.md'); // top-of-scrollback path found even while at the bottom
+    expect(atBottom).toContain('dir/f20.md'); // …and the bottom one
+    expect(atBottom).toHaveLength(20); // every path, in one scan
     t.scrollToTop();
-    const atTop = paths();
-    expect(atTop).toContain('dir/f1.md'); // now visible after scrolling up
-    expect(atTop).not.toContain('dir/f20.md'); // and the bottom page is no longer in view
+    expect(paths()).toEqual(atBottom); // scroll position doesn't change what's decorated
     t.dispose();
   });
 
@@ -96,6 +95,18 @@ describe('scanDocLinks', () => {
     const p = '~/zxy/query-rule-validation/超长中文目录名称占位占位占位占位占位占位占位占位/最终验证报告-完整版.md';
     await write(t, `看 ${p} 完`);
     expect([...new Set(scanDocLinks(t).map((s) => s.path))]).toEqual([p]);
+    t.dispose();
+  });
+
+  it('stitches a CJK path HARD-folded by tmux (wide glyph one short of the edge, space-padded spacer)', async () => {
+    // The real gotcha: panes come from tmux's padded capture, so a soft-wrapped CJK path arrives as two
+    // HARD lines (no isWrapped). row1 ends with a wide glyph at cols-2 and a real SPACE padding the final
+    // column (the wide glyph that couldn't fit was bumped down). That must still count as "reaches edge"
+    // and stitch — else row1 has no extension, so only the tail (…/报告.md) would be found/tappable.
+    const t = new Terminal({ cols: 16, rows: 6, allowProposedApi: true, scrollback: 100 });
+    await write(t, 'xx ~/目录占位占 \r\n位/报告.md end');
+    expect(t.buffer.active.getLine(1).isWrapped).toBe(false); // genuinely a hard line, like tmux delivers
+    expect([...new Set(scanDocLinks(t).map((s) => s.path))]).toEqual(['~/目录占位占位/报告.md']);
     t.dispose();
   });
 

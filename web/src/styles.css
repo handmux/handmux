@@ -1235,10 +1235,11 @@ button.cmd-text { background: none; border: none; text-align: left; }
 .doclink-actions button { border: 1px solid #2c3a4e; background: #11161d; color: #c9d6e2; border-radius: 8px; padding: 7px 18px; font-size: 14px; }
 .doclink-open { background: #2563b0; border-color: #2f6fc0; color: #fff; }
 
-/* Clickable doc-path highlight: just a thin blue underline, so it reads as tappable without shouting.
-   Border-only on the decoration's OWN overlay element (over the text), NOT a cell background — so it
-   can't trigger the scroll/BCE shading trap and the text stays fully legible. */
-.doc-deco { border-bottom: 1px solid #6cb4ff; box-sizing: border-box; }
+/* Clickable doc-path highlight: a soft blue wash behind the path, so it reads as tappable and rides the
+   content smoothly while scrolling. It's a CSS background on the decoration's OWN overlay element (over
+   the text), NOT a cell background — so it can't trigger the scroll/BCE shading trap; the low alpha keeps
+   the text fully legible through the tint. */
+.doc-deco { background: rgba(108,180,255,0.20); border-radius: 2px; box-sizing: border-box; }
 
 .doc-toast {
   position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%);

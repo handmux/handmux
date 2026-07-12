@@ -1,14 +1,20 @@
 import { findDocLinks } from './docPath.js';
 
-// Is row `r` filled right up to its last column? A cell holding a real glyph at the right edge means
-// the row was folded by width (not ended early with a space). A wide glyph sits at cols-2 with a
-// width-0 placeholder at cols-1, so step left past that placeholder before reading the tail glyph.
+// Is row `r` filled right up to its last column (i.e. it was folded by width, not ended early)?
+//   - a glyph in the final column → filled;
+//   - a width-0 cell in the final column → the tail of a wide glyph that fills the edge → filled;
+//   - the final column blank BUT the penultimate is a width-0 wide-glyph tail → filled: a wide (CJK)
+//     glyph that couldn't fit the last column was bumped to the next row, leaving the last column a
+//     spacer that tmux pads with a real space. Without this case, every CJK path that soft-folds one
+//     glyph short of the edge looks "short" and never stitches to its continuation.
 function reachesEdge(line, cols) {
-  let c = cols - 1;
-  let cell = line.getCell(c);
-  if (cell && cell.getWidth() === 0) { c -= 1; cell = c >= 0 ? line.getCell(c) : null; }
-  const ch = cell && cell.getChars();
-  return !!ch && ch !== ' ';
+  const last = line.getCell(cols - 1);
+  if (!last) return false;
+  if (last.getWidth() === 0) return true;
+  const ch = last.getChars();
+  if (ch && ch !== ' ') return true;
+  const prev = line.getCell(cols - 2);
+  return !!prev && prev.getWidth() === 0;
 }
 
 // Does row `r+1` continue row `r`'s logical line? True for a soft wrap (xterm sets isWrapped when it
@@ -57,12 +63,13 @@ function readLogicalLine(buf, idx, cols) {
       chars.push(cell.getChars());
       rowCells.push({ row: r, col, w });
     }
-    // A soft wrap that lands on a wide (CJK) glyph can't split it: the last column is left EMPTY and the
-    // glyph moves to the continuation row. Appending that spacer as a space would inject a break INTO a
-    // wrapped path (`…超长中文 目录…`) and sever it. So when this row continues into the next, drop its
-    // trailing empty cells — the content then flows straight through. A blank in the MIDDLE stays a space.
+    // A wrap that lands on a wide (CJK) glyph can't split it: the last column is left a spacer and the
+    // glyph moves to the continuation row. That spacer is EMPTY on a soft wrap but a real SPACE when the
+    // rows came from tmux's padded capture (a hard fold) — either way, appending it would inject a break
+    // INTO a wrapped path (`…超长中文 目录…`) and sever it. So when this row continues into the next, drop
+    // its trailing blanks — the content then flows straight through. A blank in the MIDDLE stays a space.
     let n = chars.length;
-    if (cont) while (n > 0 && chars[n - 1] === '') n--;
+    if (cont) while (n > 0 && (chars[n - 1] === '' || chars[n - 1] === ' ')) n--;
     for (let k = 0; k < n; k++) {
       text += chars[k] || ' ';
       cells.push(rowCells[k]);
@@ -80,11 +87,14 @@ function readLogicalLine(buf, idx, cols) {
 export function scanDocLinks(term) {
   const buf = term.buffer.active;
   const cols = term.cols;
-  // Scan the ACTUALLY-visible viewport (viewportY), not the bottom page (baseY) — otherwise a path
-  // scrolled up into the scrollback loses its underline, since baseY stays pinned to the bottom while
-  // viewportY follows the scroll. The caller re-runs this on every scroll (see Terminal's onScroll).
-  const top = buf.viewportY;
-  const bottom = top + term.rows; // exclusive
+  // Scan the WHOLE buffer (every seeded row incl. the pulled-in scrollback), not just the visible
+  // viewport. Decorations are anchored to buffer LINES by markers, so once a path is decorated it rides
+  // the content as you scroll — no rebuild, no flicker, and it's already lit wherever you scroll to.
+  // (Scanning only the viewport meant re-decorating on every scroll frame, which on a fling disposed the
+  // marks before they could paint — so they only reappeared once the scroll stopped.) The buffer is
+  // bounded by the current capture depth, and this runs on repaint (not per scroll frame).
+  const top = 0;
+  const bottom = buf.length; // exclusive
   const out = [];
 
   let y = top;
