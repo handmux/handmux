@@ -186,8 +186,6 @@ export default {
   'settings.font_increase': '글꼴 확대',
   'settings.font_auto': '자동 조정',
   'settings.font_auto_title': '높이에 맞게 자동 조정',
-  'settings.path_highlight': '파일 경로 강조',
-  'settings.path_highlight_hint': '터미널에서 탭 가능한 파일 경로에 색을 입힙니다. 꺼져 있어도 경로는 탭할 수 있습니다.',
   'settings.whats_new': '새 기능',
   'settings.view_changelog': '변경 내역 보기',
   'settings.has_update': '업데이트 있음',

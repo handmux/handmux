@@ -186,8 +186,6 @@ export default {
   'settings.font_increase': '放大字型',
   'settings.font_auto': '自適應',
   'settings.font_auto_title': '依高度自動調整',
-  'settings.path_highlight': '高亮檔案路徑',
-  'settings.path_highlight_hint': '為終端機裡可點開的檔案路徑加底色。無論開關與否，路徑都可點開。',
   'settings.whats_new': '新功能',
   'settings.view_changelog': '查看更新日誌',
   'settings.has_update': '有更新',

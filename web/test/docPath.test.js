@@ -38,34 +38,6 @@ describe('findDocLinks', () => {
     expect(findDocLinks('type: .md')).toEqual([]);
     expect(findDocLinks('foo(.html)')).toEqual([]);
   });
-
-  // Real CC output clings decorators to a path that the ASCII/CJK delimiter set used to swallow into
-  // the name, so the file couldn't be found.
-  it("strips Claude Code's trailing truncation ellipsis (…)", () => {
-    expect(findDocLinks('git add docs/adp-integration/overview.md…)').map((l) => l.path))
-      .toEqual(['docs/adp-integration/overview.md']);
-  });
-  it('drops leading/surrounding markdown asterisks', () => {
-    expect(findDocLinks('*note.md and more').map((l) => l.path)).toEqual(['note.md']);
-    expect(findDocLinks('**foo.md** bold').map((l) => l.path)).toEqual(['foo.md']);
-  });
-  it('splits a label:path joined by a colon with no space, keeping only the path', () => {
-    expect(findDocLinks('参考:docs/plan.md 下一步').map((l) => l.path)).toEqual(['docs/plan.md']);
-    expect(findDocLinks('Referenced:CHANGELOG.md').map((l) => l.path)).toEqual(['CHANGELOG.md']);
-  });
-  it('keeps a file:line[:col] suffix out of the path (colon is a boundary)', () => {
-    expect(findDocLinks('/home/u/file.md:12:5 error').map((l) => l.path)).toEqual(['/home/u/file.md']);
-  });
-  it("strips a leading @ (Claude Code's @file mention) but keeps an internal @", () => {
-    const link = findDocLinks('see @src/notes.md mention');
-    expect(link.map((l) => l.path)).toEqual(['src/notes.md']);
-    expect(link[0].start).toBe(5); // offset advances past the '@' so the underline lands on the path
-    expect(findDocLinks('open node_modules/@types/x.md here').map((l) => l.path))
-      .toEqual(['node_modules/@types/x.md']);
-  });
-  it('does not fuse a path with a box-drawing border', () => {
-    expect(findDocLinks('│ report.md │').map((l) => l.path)).toEqual(['report.md']);
-  });
 });
 
 describe('isAbsolute', () => {

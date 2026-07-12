@@ -186,8 +186,6 @@ export default {
   'settings.font_increase': 'フォントを拡大',
   'settings.font_auto': '自動調整',
   'settings.font_auto_title': '高さに合わせて自動調整',
-  'settings.path_highlight': 'ファイルパスをハイライト',
-  'settings.path_highlight_hint': 'ターミナル内のタップ可能なファイルパスに色を付けます。オフでもパスはタップできます。',
   'settings.whats_new': '新機能',
   'settings.view_changelog': '変更履歴を表示',
   'settings.has_update': '更新あり',

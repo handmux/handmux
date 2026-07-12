@@ -2,7 +2,6 @@ import { describe, it, expect } from 'vitest';
 import {
   cfConfigYaml, parseTunnelCreate, findTunnelId, configFromAnswers, mergeConfig,
   answersFromConfig, summarizeConnection, validatePort, validateHost, validateNonEmpty, validateContact,
-  validateToken,
 } from '../src/cli/setupWizard.js';
 
 describe('cfConfigYaml', () => {
@@ -70,43 +69,35 @@ describe('configFromAnswers', () => {
     expect(configFromAnswers({ tunnel: 'none', port: 19999, name: '' }))
       .toEqual({ tunnel: 'none', port: 19999 });
   });
-  it('pins the token when set, omits it when blank (blank = auto each start)', () => {
-    expect(configFromAnswers({ tunnel: 'none', port: 19999, token: 'pinned1' }))
-      .toEqual({ tunnel: 'none', port: 19999, token: 'pinned1' });
-    expect(configFromAnswers({ tunnel: 'none', port: 19999, token: '' }))
-      .toEqual({ tunnel: 'none', port: 19999 });
-  });
 });
 
 describe('mergeConfig', () => {
-  it('preserves genuinely non-wizard fields (staticDir) and round-trips the token via answers', () => {
-    // token is wizard-owned now, so it survives a re-run by being seeded into the answers (answersFromConfig);
-    // staticDir isn't touched by the wizard at all, so it survives without appearing in the answers.
+  it('preserves non-wizard fields (token, staticDir) across a re-run', () => {
     const existing = { tunnel: 'none', port: 19999, token: 'keepme', staticDir: '/srv', name: 'Old' };
-    const merged = mergeConfig(existing, { tunnel: 'cloudflare', port: 19999, name: 'New', token: 'keepme' });
+    const merged = mergeConfig(existing, { tunnel: 'cloudflare', port: 19999, name: 'New' });
     expect(merged).toEqual({ tunnel: 'cloudflare', port: 19999, token: 'keepme', staticDir: '/srv', name: 'New' });
   });
   it('drops the previous tunnel’s stale keys when switching tunnels', () => {
     const existing = { tunnel: 'ssh', port: 19999, sshHost: 'me@box', remotePort: 22, publicUrl: 'https://old.ssh', token: 't' };
-    const merged = mergeConfig(existing, { tunnel: 'cloudflare-named', port: 19999, cfHostname: 'h.x.com', cfTunnelName: 'handmux', token: 't' });
+    const merged = mergeConfig(existing, { tunnel: 'cloudflare-named', port: 19999, cfHostname: 'h.x.com', cfTunnelName: 'handmux' });
     expect(merged).toEqual({ tunnel: 'cloudflare-named', port: 19999, cfHostname: 'h.x.com', cfTunnelName: 'handmux', token: 't' });
     expect(merged.sshHost).toBeUndefined();
     expect(merged.publicUrl).toBeUndefined();
   });
-  it('clears name / push / voice AND resets the token to auto when the answers omit them', () => {
+  it('clears name and turns off push/voice when the answers omit them', () => {
     const existing = { tunnel: 'none', port: 19999, name: 'Old', vapid: { public: 'p' }, xfyun: { appId: 'A' }, token: 't' };
-    const merged = mergeConfig(existing, { tunnel: 'none', port: 19999 }); // no name, push, voice, or token
-    expect(merged).toEqual({ tunnel: 'none', port: 19999 });               // token gone → server mints one each start
+    const merged = mergeConfig(existing, { tunnel: 'none', port: 19999 }); // no name, no vapid, no xfyun
+    expect(merged).toEqual({ tunnel: 'none', port: 19999, token: 't' });
   });
 });
 
 describe('answersFromConfig', () => {
   it('safe defaults for a brand-new (empty) config', () => {
-    expect(answersFromConfig({})).toMatchObject({ tunnel: 'none', port: 19999, name: '', token: '' });
+    expect(answersFromConfig({})).toMatchObject({ tunnel: 'none', port: 19999, name: '' });
   });
   it('carries current values + tunnel-specific keys so the hub shows them and edits start from them', () => {
-    const a = answersFromConfig({ tunnel: 'natapp', port: 8080, name: 'Box', token: 'pinned1', authtoken: 'tok', publicUrl: 'https://x.natapp1.cc', vapid: { public: 'p' } });
-    expect(a).toMatchObject({ tunnel: 'natapp', port: 8080, name: 'Box', token: 'pinned1', authtoken: 'tok', publicUrl: 'https://x.natapp1.cc', vapid: { public: 'p' } });
+    const a = answersFromConfig({ tunnel: 'natapp', port: 8080, name: 'Box', authtoken: 'tok', publicUrl: 'https://x.natapp1.cc', vapid: { public: 'p' } });
+    expect(a).toMatchObject({ tunnel: 'natapp', port: 8080, name: 'Box', authtoken: 'tok', publicUrl: 'https://x.natapp1.cc', vapid: { public: 'p' } });
   });
 });
 
@@ -148,11 +139,5 @@ describe('validators', () => {
     expect(validateContact('admin@example.com')).toBeTruthy();        // missing mailto:
     expect(validateContact('http://insecure.example.com')).toBeTruthy(); // https only
     expect(validateContact('')).toBeTruthy();
-  });
-  it('validateToken accepts a non-empty token, rejects blank / whitespace (it rides in a URL)', () => {
-    expect(validateToken('abc123')).toBeUndefined();
-    expect(validateToken('')).toBeTruthy();
-    expect(validateToken('   ')).toBeTruthy();
-    expect(validateToken('has space')).toBeTruthy();
   });
 });

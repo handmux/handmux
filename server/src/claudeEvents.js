@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { getAgent, agentForProc } from './agents/index.js';
+import { getAgent } from './agents/index.js';
 import { claude } from './agents/claude.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -140,24 +140,6 @@ export function createClaudeEvents({ commands, push, file = DEFAULT_STATE_FILE, 
       const loc = lp ? { session: lp.session, window: lp.window, windowName: lp.windowName } : {};
       if (allow && !allow.has(loc.session)) continue;
       out[pane] = { ...loc, kind: c.kind, msg: c.msg || '', ts: rec.ts || 0, agent: agent.id };
-    }
-
-    // (3) process presence — a pane whose FOREGROUND program IS a coding agent reads as "agent here" even
-    // with no active turn on record: a fresh session that hasn't prompted yet, or one right after `/clear`
-    // (whose SessionEnd dropped its roster entry above though the agent is still running). This is what the
-    // phone's per-window agent icon and the dock's default mode key off — process liveness, not the volatile
-    // activity roster. Emitted with kind:null so the inbox (inboxRows keys off VIEW[kind]) skips it and no
-    // push fires, and with NO ts so it stays inert to the done/read high-water marks (maxTs, the seen-mark
-    // effect). An active roster entry from (2) always wins (out[id] set → skip). agentForProc matches the
-    // canonical procName (never the ambiguous 'node'), so a plain node process is not mistaken for an agent.
-    if (live) {
-      for (const lp of live.values()) {
-        if (out[lp.id]) continue;
-        const a = agentForProc(lp.cmd);
-        if (!a) continue;
-        if (allow && !allow.has(lp.session)) continue;
-        out[lp.id] = { session: lp.session, window: lp.window, windowName: lp.windowName, kind: null, msg: '', agent: a.id };
-      }
     }
     return out;
   }

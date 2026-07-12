@@ -119,7 +119,7 @@ function resolvePublicUrl(flags, fileCfg, env, tunnel) {
 // so it's quick to thumb in on a phone. A user-supplied token (flag/config/env) is used verbatim — any
 // length, never regenerated. 8 chars over a 32-char alphabet ≈ 40 bits, fine for a single secret URL.
 const TOKEN_ALPHABET = '23456789abcdefghijkmnpqrstuvwxyz';
-export function defaultGen() {
+function defaultGen() {
   let s = '';
   for (let i = 0; i < 8; i++) s += TOKEN_ALPHABET[crypto.randomInt(TOKEN_ALPHABET.length)];
   return s;

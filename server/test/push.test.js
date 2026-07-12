@@ -82,3 +82,42 @@ describe('push Topic header sanitization (RFC 8030 — URL-safe base64 only)', (
     expect(optsSeen[1].topic).toBeUndefined();
   });
 });
+
+describe('push device key + scoped sends', () => {
+  it('addSubscription assigns a pushKey; getPushKey returns it', () => {
+    push.addSubscription({ endpoint: 'A', keys: {} }, ['proj-a']);
+    const key = push.getPushKey('A');
+    expect(typeof key).toBe('string');
+    expect(key.length).toBeGreaterThan(16);
+  });
+
+  it('re-subscribing the same endpoint keeps the same pushKey', () => {
+    push.addSubscription({ endpoint: 'A', keys: {} }, ['proj-a']);
+    const first = push.getPushKey('A');
+    push.addSubscription({ endpoint: 'A', keys: {} }, ['proj-b']);
+    expect(push.getPushKey('A')).toBe(first);
+  });
+
+  it('getPushKey lazy-generates for a legacy record with no key', () => {
+    push.addSubscription({ endpoint: 'A', keys: {} }, []);
+    const key = push.getPushKey('A');
+    expect(typeof key).toBe('string');
+  });
+
+  it('sendToDevices delivers only to subscriptions whose pushKey matches', async () => {
+    push.addSubscription({ endpoint: 'A', keys: {} }, []);
+    push.addSubscription({ endpoint: 'B', keys: {} }, []);
+    const keyA = push.getPushKey('A');
+    const r = await push.sendToDevices([keyA], { title: 't', body: 'b' }, {});
+    expect(r.sent).toBe(1);
+    expect(sent).toEqual(['A']);
+  });
+
+  it('sendToSessions delivers to devices bound to ANY of the sessions, deduped', async () => {
+    push.addSubscription({ endpoint: 'A', keys: {} }, ['proj-a', 'proj-b']); // bound to both
+    push.addSubscription({ endpoint: 'B', keys: {} }, ['proj-b']);
+    const r = await push.sendToSessions(['proj-a', 'proj-b'], { title: 't', body: 'b' }, {});
+    expect(r.sent).toBe(2);              // A once (not twice), B once
+    expect(sent.sort()).toEqual(['A', 'B']);
+  });
+});

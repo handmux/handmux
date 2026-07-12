@@ -251,8 +251,6 @@ export default {
   'settings.font_increase': 'Increase font size',
   'settings.font_auto': 'Auto',
   'settings.font_auto_title': 'Auto-fit to height',
-  'settings.path_highlight': 'Highlight file paths',
-  'settings.path_highlight_hint': 'Tint tappable file paths in the terminal. Paths stay tappable either way.',
   'settings.whats_new': "What's new",
   'settings.view_changelog': 'View changelog',
   'settings.has_update': 'Has update',

@@ -4,64 +4,6 @@ All notable changes to handmux. Format follows [Keep a Changelog](https://keepac
 
 ## [Unreleased]
 
-## [0.13.0] - 2026-07-12
-
-### Added
-- **A “Token” row in `handmux setup` — set the access token by hand.** Previously the token was only ever
-  auto-generated (a fresh one each start, so the phone URL changed on every restart). The setup hub now has
-  its own top-level Token row (after Port): type a custom one, generate + pin a strong random one, or reset
-  back to auto. A pinned token keeps the URL stable across restarts; the hub masks it and the edit field
-  pre-fills it so you can read it off.
-- **A “Highlight file paths” switch in Settings (off by default).** The soft blue wash behind tappable
-  terminal paths is now opt-in — off, the terminal stays plain, but the paths remain tappable either way.
-  Flipping it takes effect immediately, no reload.
-
-### Fixed
-- **The Settings sheet scrolls when it's taller than the screen.** The centered card had no height cap, so
-  on a short viewport (or with many sections) the top and bottom clipped off with no way to reach them. It's
-  now capped to the viewport and its body scrolls, with the title + close button pinned so they're always
-  reachable.
-- **Desktop mouse-wheel scrolling now loads deeper history instead of stalling at the first chunk.** On a
-  desktop browser the wheel drove only xterm's native scroll, and once its scrollbar hit the top it stopped
-  firing the events that pull more scrollback — so every pane got stuck about one screen + 100 lines up. The
-  wheel now triggers the deeper-history pull directly (as the touch path already did), and on a full-screen
-  app (alt-screen) it's forwarded to the app as scroll instead of exposing the stale main-screen buffer
-  underneath. A thin, unobtrusive scrollbar is now shown on both desktop and mobile.
-- **The agent icon (and the dock's default mode) now track whether the agent is actually running, not
-  whether it just spoke.** Both keyed off the inbox roster, which only lists panes with a recent hook
-  event — so a freshly-opened session that hadn't been prompted yet, or one right after `/clear` (whose
-  `SessionEnd` drops the roster entry though Claude is still running), showed no agent icon and slid the
-  bottom input from the chat composer back to the command keyboard under you. The server now also reports
-  a pane whose foreground program *is* a coding agent as present (matched by process name, so a plain
-  shell or bare `node` is never mistaken for one), independent of activity — the icon stays and the mode
-  holds while the agent lives, and both correctly clear the moment it exits to a shell.
-- **The agent logo in a split (multi-pane) window is now per-pane, not per-window.** The window bar
-  squashed every pane in a window down to one agent, so exiting the agent in the pane you were on left the
-  tab's logo lit by a sibling pane, and two *different* agents in one window collapsed to a single
-  (arbitrary) logo. The active window's tab now shows only the current pane's agent (exit it → the logo
-  clears), and the pane menu shows each pane its own logo — Claude and Codex side by side render
-  distinctly, and a pane that has dropped to a shell shows none.
-- **Tappable file paths in the terminal survive surrounding punctuation and line wraps.** A path clung to
-  by a decorator no longer swallows it into the name: a trailing `…` (Claude Code's truncation ellipsis),
-  markdown `*`/`**` around the name, a `label:path` colon with no space, and a leading `@` (a `@file`
-  mention — kept when it's internal, e.g. `@types/`) are all trimmed, so the real file is found. And a
-  path that Claude Code folds across two rows by width (a hard newline, not xterm's own soft wrap) is now
-  stitched back into one tappable link instead of only its tail fragment; box-drawn panels stay unfused.
-  A wide-character (CJK) path folded across two rows is also no longer severed — a wide glyph can't
-  straddle the last column, so the fold leaves a spacer there (empty on xterm's own wrap, a padding space
-  in tmux's captured rows). That spacer used to break the path mid-name and drop the head, so
-  `…/超长目录…/报告.md` kept — and opened — only its tail. Both spacer kinds are now healed.
-- **Tappable terminal paths now actually show their blue highlight.** The underline/chip that marks a path
-  as tappable never rendered — `registerDecoration` is a *proposed* xterm API and the terminal was created
-  without `allowProposedApi`, so every call threw and a broad catch swallowed it. Paths were tappable but
-  looked like plain text (what colour they had was the program's own, e.g. Claude Code's). They now carry
-  a soft blue wash behind the path, in every pane.
-- **The highlight stays put while you scroll the history.** It was computed only for the bottom page
-  (xterm's `baseY`) and rebuilt only when new output arrived — so a path scrolled up into the scrollback
-  lost its wash. The whole buffer is scanned now, so every path is lit up front and simply rides the
-  content as you scroll — no per-scroll rebuild, so it no longer flickers off mid-drag and reappears when
-  you stop.
-
 ## [0.12.3] - 2026-07-11
 
 ### Added

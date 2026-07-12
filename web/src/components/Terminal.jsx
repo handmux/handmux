@@ -5,7 +5,7 @@ import '@xterm/xterm/css/xterm.css';
 import { getHistory, scrollPane, sendKeys, UnauthorizedError } from '../api.js';
 import { drainWheel, notchDir } from '../wheelScroll.js';
 import { prepareSeed, cursorSeq } from '../terminalSeed.js';
-import { getFont, setFont, clearFont, getDocHighlight } from '../storage.js';
+import { getFont, setFont, clearFont } from '../storage.js';
 import { backoffDelay } from '../backoff.js';
 import { idleDelay } from '../cadence.js';
 import { flingStep, shouldFling } from '../momentum.js';
@@ -41,11 +41,6 @@ const Terminal = forwardRef(function Terminal({ pane, onAuthFail, onDocLinkTap }
   const decosRef = useRef([]);
   const onDocLinkTapRef = useRef(onDocLinkTap);
   onDocLinkTapRef.current = onDocLinkTap;
-  // The doc-path wash is an opt-in visual cue (Settings toggle, default off) — paths stay tappable
-  // regardless. Held in a ref the poll-loop closure reads; setDocHighlight() (imperative handle) flips it
-  // and pokes refreshDecosRef to re-scan at once, without waiting for the next repaint.
-  const docHighlightRef = useRef(getDocHighlight());
-  const refreshDecosRef = useRef(null);
   // Terminal font is set by two-finger pinch and persisted. null = auto-fit (height).
   const fontRef = useRef(getFont());
   // Kills an in-flight inertial coast. Held in a ref (like fitRef/wakeRef) so resume() — defined in
@@ -137,8 +132,6 @@ const Terminal = forwardRef(function Terminal({ pane, onAuthFail, onDocLinkTap }
       fitRef.current?.();
     },
     wake: () => wakeRef.current?.(),
-    // Settings' doc-path-highlight switch: flip the flag and re-scan now (default off, so no wash until on).
-    setDocHighlight: (on) => { docHighlightRef.current = !!on; refreshDecosRef.current?.(); },
   }), []);
 
   useEffect(() => () => {
@@ -149,11 +142,6 @@ const Terminal = forwardRef(function Terminal({ pane, onAuthFail, onDocLinkTap }
   useEffect(() => {
     const term = new XTerm({
       disableStdin: true,
-      // registerDecoration() — the doc-path highlight below — is a PROPOSED xterm API; without this it
-      // throws "You must set the allowProposedApi option", which refreshDocDecorations' catch swallowed,
-      // so the tappable paths never got their blue underline (only the link provider, which needs no
-      // proposed API, kept working — hence "tappable but invisible").
-      allowProposedApi: true,
       scrollback: MAX_LINES + 100,
       convertEol: false,
       fontSize: fontRef.current ?? 14,
@@ -633,33 +621,6 @@ const Terminal = forwardRef(function Terminal({ pane, onAuthFail, onDocLinkTap }
         else if (axis === -1) startFling(host.querySelector('.xterm-viewport'), 'scrollTop', scrollVelY);
       }
     };
-    // Desktop mouse wheel has no equivalent of the touch handler's smart scroll — wire the SAME two
-    // behaviours here (the touch path branches on altScreenRef the same way, see onTouchMove).
-    //  • Alt-screen: forward the wheel to the app as notches (it owns the scrollback), and swallow the
-    //    event so xterm doesn't scroll its stale main-screen buffer underneath — the exact "scrolling up
-    //    shows history that isn't this full-screen app's" bug. Sign: wheel DOWN (deltaY>0) reveals LATER
-    //    content, which drainWheel expects as NEGATIVE finger travel, so feed it -deltaY.
-    //  • Normal screen: let xterm own the native scroll, but ALSO trigger the deeper-history pull
-    //    directly — onScroll alone can miss the very top after a reseed (its native scrollbar doesn't
-    //    resync), which is what left desktop stuck at the first loaded chunk. onTouchMove does this
-    //    same redundant call on every move; the wheel had no such safety net.
-    const onWheel = (e) => {
-      if (!e.deltaY) return;
-      if (altScreenRef.current) {
-        e.preventDefault();
-        e.stopPropagation();
-        const px = e.deltaMode === 1 ? e.deltaY * WHEEL_PX          // lines → px (Firefox)
-                 : e.deltaMode === 2 ? e.deltaY * term.rows * WHEEL_PX // pages → px
-                 : e.deltaY;                                        // already px
-        const { notches, rem } = drainWheel(wheelAccum - px, WHEEL_PX);
-        wheelAccum = rem;
-        if (notches) { wheelPending += notches; flushWheel(); }
-        return;
-      }
-      showScrollPos();
-      maybePullMore();
-    };
-    host.addEventListener('wheel', onWheel, { capture: true, passive: false });
     host.addEventListener('touchstart', onTouchStart, { capture: true, passive: true });
     host.addEventListener('touchmove', onTouchMove, { capture: true, passive: false });
     host.addEventListener('touchend', onTouchEnd, { capture: true, passive: true });
@@ -673,7 +634,7 @@ const Terminal = forwardRef(function Terminal({ pane, onAuthFail, onDocLinkTap }
     const refreshDocDecorations = (t) => {
       for (const { deco, marker } of decosRef.current) { deco.dispose(); marker.dispose(); }
       decosRef.current = [];
-      if (!onDocLinkTapRef.current || !docHighlightRef.current) return; // off → clear + draw nothing
+      if (!onDocLinkTapRef.current) return;
       const b = t.buffer.active;
       const cursorAbsY = b.baseY + b.cursorY;
       for (const { y, x, width } of scanDocLinks(t)) {
@@ -685,7 +646,6 @@ const Terminal = forwardRef(function Terminal({ pane, onAuthFail, onDocLinkTap }
         decosRef.current.push({ deco, marker });
       }
     };
-    refreshDecosRef.current = () => { if (!disposed && seeded) refreshDocDecorations(term); };
 
     const repaint = async (lines, keepPosition) => {
       if (busy || disposed) return;
@@ -831,7 +791,6 @@ const Terminal = forwardRef(function Terminal({ pane, onAuthFail, onDocLinkTap }
       fitRef.current = null;
       wakeRef.current = null;
       stopFlingRef.current = null;
-      refreshDecosRef.current = null;
       cancelLongPress();
       stopFling();
       if (timer) clearTimeout(timer);
@@ -840,7 +799,6 @@ const Terminal = forwardRef(function Terminal({ pane, onAuthFail, onDocLinkTap }
       window.removeEventListener('resize', onResize);
       window.removeEventListener('orientationchange', onResize);
       ro?.disconnect();
-      host.removeEventListener('wheel', onWheel, { capture: true });
       host.removeEventListener('touchstart', onTouchStart, { capture: true });
       host.removeEventListener('touchmove', onTouchMove, { capture: true });
       host.removeEventListener('touchend', onTouchEnd, { capture: true });

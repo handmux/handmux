@@ -250,8 +250,6 @@ export default {
   'settings.font_increase': '增大字体',
   'settings.font_auto': '自适应',
   'settings.font_auto_title': '按高度自动适配',
-  'settings.path_highlight': '高亮文件路径',
-  'settings.path_highlight_hint': '给终端里可点开的文件路径加底色。无论开关与否，路径都可点开。',
   'settings.whats_new': '新功能',
   'settings.view_changelog': '查看更新日志',
   'settings.has_update': '有更新',

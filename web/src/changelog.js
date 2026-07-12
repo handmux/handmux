@@ -11,30 +11,6 @@
 // `entryId`/`LATEST_RELEASE` use `version` when present, else `date`, as the stable unread-dot id.
 export const CHANGELOG = [
   {
-    version: '0.13.0',
-    date: '2026-07-12',
-    highlight: {
-      zh: '终端文件路径高亮可点',
-      en: 'Tappable, highlighted file paths',
-    },
-    items: {
-      zh: [
-        '终端里的文件路径现在会高亮显示、可以直接点开;这个高亮可以在设置里开关(默认关闭)。',
-        '桌面浏览器用鼠标滚轮往上翻,现在能拉出更深的历史了(不再卡在第一屏);桌面和手机都加了一条纤细的滚动条。',
-        '设置面板太高时可以整体滚动了,标题和关闭按钮始终可见、够得到。',
-        '修复了 agent 图标和底部输入模式偶尔乱跳的问题——现在按 agent 是否真的在运行来判断,分屏里每个窗格也各显各的图标。',
-        'handmux setup 新增「令牌」一项:可以手动固定访问令牌,这样每次重启后手机网址不再变化(留空则仍每次自动生成一个)。',
-      ],
-      en: [
-        'File paths in the terminal are now highlighted and tappable — tap one to open it. You can toggle the highlight in Settings (off by default).',
-        'On a desktop browser the mouse wheel now pulls deeper history instead of stalling at the first screen, and a thin scrollbar was added on both desktop and mobile.',
-        'The Settings sheet scrolls as a whole when it is taller than the screen, with the title and close button always reachable.',
-        'Fixed the agent icon and the bottom input mode occasionally jumping around — both now track whether the agent is actually running, and each pane in a split shows its own icon.',
-        'handmux setup has a new “Token” item: you can pin the access token by hand so the phone URL stops changing on every restart (leave it blank to keep auto-generating one each start).',
-      ],
-    },
-  },
-  {
     version: '0.12.3',
     date: '2026-07-11',
     highlight: {

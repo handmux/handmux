@@ -82,18 +82,9 @@ describe('createClaudeEvents getStates (reads the hook state file)', () => {
     expect((await ev.getStates())['%7']).toMatchObject({ session: 'proj', kind: 'working', msg: '已答：Red' });
   });
 
-  it('an ended pane leaves the ACTIVITY roster (kind:null so the inbox skips it) but stays present while its agent process runs — the /clear case: SessionEnd drops the entry though claude is still alive', async () => {
-    const file = stateFile({ '%1': rec('end', { reason: 'clear' }) });
-    const commands = { listLivePanes: async () => liveAll(['%1']) }; // claude still the pane's program
-    const ev = createClaudeEvents({ commands, push, file });
-    // present for the phone's agent icon + the dock's default mode…
-    expect((await ev.getStates())['%1']).toMatchObject({ session: 'proj', agent: 'claude', kind: null });
-    // …but kind:null → not a done/needs/working view → the inbox (web inboxRows) skips it.
-  });
-
-  it('an ended pane that also exited to the shell is fully gone (real quit, not /clear)', async () => {
-    const file = stateFile({ '%1': rec('end', { reason: 'other' }) });
-    const commands = { listLivePanes: async () => liveAll(['%1'], { '%1': { cmd: 'zsh' } }) };
+  it('drops a pane whose latest event is end', async () => {
+    const file = stateFile({ '%1': rec('end', { reason: 'x' }) });
+    const commands = { listLivePanes: async () => liveAll(['%1']) };
     const ev = createClaudeEvents({ commands, push, file });
     expect(await ev.getStates()).toEqual({});
   });
@@ -139,19 +130,7 @@ describe('createClaudeEvents getStates (reads the hook state file)', () => {
   });
 
   it('a missing state file yields an empty roster (no crash)', async () => {
-    const commands = { listLivePanes: async () => liveAll(['%1'], { '%1': { cmd: 'zsh' } }) };
-    const ev = createClaudeEvents({ commands, push, file: '/no/such/file.json' });
-    expect(await ev.getStates()).toEqual({});
-  });
-
-  it('surfaces a live agent pane with NO recorded state (a fresh session that has not prompted yet) as process-present', async () => {
-    const commands = { listLivePanes: async () => liveAll(['%1']) }; // claude running, hooks have written nothing
-    const ev = createClaudeEvents({ commands, push, file: '/no/such/file.json' });
-    expect((await ev.getStates())['%1']).toMatchObject({ session: 'proj', window: '@5', agent: 'claude', kind: null });
-  });
-
-  it('does NOT surface a non-agent process — a plain shell or bare node is not an agent (procName match, never the ambiguous "node")', async () => {
-    const commands = { listLivePanes: async () => liveAll(['%1', '%2'], { '%1': { cmd: 'zsh' }, '%2': { cmd: 'node' } }) };
+    const commands = { listLivePanes: async () => liveAll(['%1']) };
     const ev = createClaudeEvents({ commands, push, file: '/no/such/file.json' });
     expect(await ev.getStates()).toEqual({});
   });
@@ -163,13 +142,11 @@ describe('createClaudeEvents getStates (reads the hook state file)', () => {
     expect((await ev.getStates())['%1']).toMatchObject({ kind: 'done', msg: 'a' });
   });
 
-  it('expires a 进行中 latched past the TTL (ESC-interrupt has no closing hook) → drops from the ACTIVITY roster, but stays process-present while claude runs', async () => {
+  it('expires a 进行中 latched past the TTL (ESC-interrupt has no closing hook) → drops from roster', async () => {
     const file = stateFile({ '%9': rec('prompt', { prompt: 'interrupted, walked away' }, 1000) });
     const commands = { listLivePanes: async () => liveAll(['%9']) };
     const ev = createClaudeEvents({ commands, push, file, now: () => 1000 + 3 * 60 * 60 * 1000 }); // 3h later
-    // No longer an active working row (the stuck 进行中 is gone from the inbox), but claude is still the
-    // pane's program → present as process-only so the icon/mode hold.
-    expect((await ev.getStates())['%9']).toMatchObject({ agent: 'claude', kind: null });
+    expect(await ev.getStates()).toEqual({});                                              // dropped from roster
   });
 
   it('keeps a 进行中 still within the TTL (a long-running task stays in the roster)', async () => {

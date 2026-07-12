@@ -825,16 +825,10 @@ export default function App() {
 
   const inboxList = inboxRows(states, seen, readTs == null ? Infinity : readTs);
   const inboxTop = topView(inboxList);
-  // windowId → agent id, for the per-window agent logo on a collapsed WindowTab (a single-pane window, or an
-  // inactive multi-pane one where we only have this aggregate). The active multi-pane window renders per-pane
-  // instead (paneAgents below), so it doesn't rely on this squash. A state entry exists only for a pane
-  // actually running an agent, so this is its agent.
+  // windowId → agent id, for the per-window agent logo. Only meaningful for single-pane windows (WindowBar
+  // gates on that); a state entry exists only for a pane actually running an agent, so this is its agent.
   const windowAgents = {};
   for (const st of Object.values(states)) if (st.window && st.agent) windowAgents[st.window] = st.agent;
-  // paneId → agent id, for the per-pane agent logo inside the active window's pane menu (states is keyed by
-  // pane, so this is the live truth for each one; a pane not running an agent simply has no entry → no logo).
-  const paneAgents = {};
-  for (const [pane, st] of Object.entries(states)) if (st.agent) paneAgents[pane] = st.agent;
   const changelogUnread = !!LATEST_RELEASE && clSeen !== LATEST_RELEASE;
   // The gear's dot fuses two phases of "there's something new": an available npm update (before you upgrade)
   // and, after upgrading+reloading, the unread changelog it brought. `updateDot` stays off once the user has
@@ -1059,7 +1053,6 @@ export default function App() {
           <WindowBar
             windows={current.windows}
             windowAgents={windowAgents}
-            paneAgents={paneAgents}
             currentAgent={states[current.paneId]?.agent}
             currentWindowId={current.window.id}
             panes={current.panes}

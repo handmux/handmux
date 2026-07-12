@@ -10,7 +10,6 @@ import { homedir } from 'node:os';
 import { spawnSync } from 'node:child_process';
 import webpush from 'web-push';
 import { configPath, pocketHome } from './state.js';
-import { defaultGen as genToken } from './options.js';
 import { resolveCloudflared } from './cloudflared.js';
 import { resolveTunlite, checkSshAuth } from './tunlite.js';
 import { resolveNatapp, resolveCpolar } from './tunnelClients.js';
@@ -52,11 +51,10 @@ export function findTunnelId(listJsonOut, name) {
 
 // The config keys the wizard owns: everything it can set. mergeConfig wipes these from the existing config
 // before re-applying the answers, so switching a tunnel (or clearing an optional field) cleanly drops the
-// old value instead of leaving a stale field behind. Anything NOT here (staticDir, previewDomain…) is
-// preserved untouched. `token` IS owned so the Token row can pin one AND clear it back to auto — but it
-// round-trips through answersFromConfig, so a re-run that never touches the row still writes it back.
+// old value instead of leaving a stale field behind. Anything NOT here (token, staticDir, previewDomain…)
+// is preserved untouched.
 const WIZARD_KEYS = [
-  'lang', 'name', 'port', 'tunnel', 'token',
+  'lang', 'name', 'port', 'tunnel',
   'sshHost', 'remotePort', 'sshJump', 'cfHostname', 'cfTunnelName', 'publicUrl',
   'authtoken', 'cpolarRegion',
   'vapid', 'xfyun',
@@ -70,7 +68,6 @@ export function configFromAnswers(a) {
   const cfg = { tunnel: a.tunnel, port: a.port };
   if (a.lang) cfg.lang = a.lang;
   if (a.name) cfg.name = a.name;
-  if (a.token) cfg.token = a.token;   // blank = don't pin one → the server mints a fresh token each start
   if (a.tunnel === 'ssh') {
     cfg.sshHost = a.sshHost;
     cfg.remotePort = a.remotePort;
@@ -106,7 +103,6 @@ export function answersFromConfig(cfg = {}) {
   const a = {
     lang: cfg.lang || getLocale(),
     name: cfg.name || '',
-    token: cfg.token || '',   // '' = not pinned (auto each start); seeded so an untouched re-run rewrites it
     tunnel: cfg.tunnel || 'none',
     port: Number(cfg.port) || 19999,
   };
@@ -146,14 +142,6 @@ export function validateContact(v) {
   const wellFormed = /^mailto:[^@\s]+@[a-z0-9-]+(\.[a-z0-9-]+)+$/i.test(s)
     || /^https:\/\/[a-z0-9-]+(\.[a-z0-9-]+)+/i.test(s);
   if (!wellFormed || /\.local(?:[:/]|$)/i.test(s)) return t('setup.valContact');
-  return undefined;
-}
-// Access token: it rides in the phone's URL as ?token=…, so require something and reject whitespace (a space
-// would break the link). Length/charset are otherwise up to the user — a pinned token is used verbatim.
-export function validateToken(v) {
-  const s = String(v || '').trim();
-  if (!s) return t('setup.valToken');
-  if (/\s/.test(s)) return t('setup.valTokenSpace');
   return undefined;
 }
 
@@ -197,7 +185,6 @@ export async function runSetup({ home = homedir(), target = configPath(home), lo
           { value: 'connection', label: t('setup.secConnection'), hint: summarizeConnection(a) },
           { value: 'name', label: t('setup.secName'), hint: a.name || t('setup.default') },
           { value: 'port', label: t('setup.secPort'), hint: String(a.port) },
-          { value: 'token', label: t('setup.secToken'), hint: a.token ? maskSecret(a.token) : t('setup.tokenAuto') },
           { value: 'push', label: t('setup.secPush'), hint: a.vapid ? (a.vapid.subject || t('setup.on')) : t('setup.off') },
           { value: 'voice', label: t('setup.secVoice'), hint: a.xfyun ? (a.xfyun.appId || t('setup.on')) : t('setup.off') },
           // A CLI-tool preference (language of handmux's own terminal output), not an app setting — so it
@@ -225,7 +212,6 @@ export async function runSetup({ home = homedir(), target = configPath(home), lo
         if (choice === 'connection') a = await editConnection(a, { home, log });
         else if (choice === 'name') a.name = await editName(a);
         else if (choice === 'port') a.port = await editPort(a);
-        else if (choice === 'token') a.token = await editToken(a);
         else if (choice === 'language') a.lang = await editLanguage(a);
         else if (choice === 'push') a.vapid = await editPush(a);
         else if (choice === 'voice') a.xfyun = await editVoice(a);
@@ -262,34 +248,6 @@ async function editName(a) {
 async function editPort(a) {
   const v = await ask(text({ message: withBack(t('setup.askPort')), initialValue: String(a.port), validate: validatePort }));
   return Number(v);
-}
-
-// The access token — the one secret in the phone's URL. Unset = the server mints a fresh one each start
-// (printed + QR'd), so the link changes every restart; pinning one keeps the same URL. A mini-hub (like
-// push/voice): type your own, generate + pin a strong random one, or reset back to auto. Editing custom
-// pre-fills the current value (so you can read it off); the hub hint masks it. Esc returns to the main hub,
-// keeping the choice. Returns the token string ('' = auto).
-async function editToken(a) {
-  let token = a.token || '';
-  for (;;) {
-    let pick;
-    try {
-      pick = await ask(select({
-        message: withBack(t('setup.secToken')),
-        options: [
-          { value: 'custom', label: t('setup.tokenCustom'), hint: token ? maskSecret(token) : t('setup.tokenAuto') },
-          { value: 'random', label: t('setup.tokenRandom') },
-          { value: 'auto', label: t('setup.tokenReset'), hint: t('setup.tokenAuto') },
-        ],
-        initialValue: 'custom',
-      }));
-    } catch (e) { if (e === CANCELLED) return token; throw e; }   // back to the main hub, keeping the choice
-    try {
-      if (pick === 'custom') token = (await ask(text({ message: t('setup.askToken'), initialValue: token, validate: validateToken }))).trim();
-      else if (pick === 'random') { token = genToken(); note(t('setup.tokenGenerated', { token })); }
-      else if (pick === 'auto') token = '';
-    } catch (e) { if (e !== CANCELLED) throw e; }                 // Esc in a sub-edit → back to the mini-hub
-  }
 }
 
 const bareHost = (u) => String(u || '').replace(/^https?:\/\//, '');

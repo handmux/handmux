@@ -165,12 +165,6 @@ const ORPHAN_KILL_KEY = 'tw_orphan_kill';
 export const getOrphanKill = () => localStorage.getItem(ORPHAN_KILL_KEY) !== '0';
 export const setOrphanKill = (on) => localStorage.setItem(ORPHAN_KILL_KEY, on ? '1' : '0');
 
-// Terminal doc-path highlight (the soft blue wash behind tappable file paths). OFF by default — the
-// paths stay tappable either way; this is purely the visual cue. Only an explicit '1' turns it on.
-const DOC_HIGHLIGHT_KEY = 'tw_doc_highlight';
-export const getDocHighlight = () => localStorage.getItem(DOC_HIGHLIGHT_KEY) === '1';
-export const setDocHighlight = (on) => localStorage.setItem(DOC_HIGHLIGHT_KEY, on ? '1' : '0');
-
 // Recent (sent) commands scoped per session NAME + WINDOW — the composer history is window-level, so each
 // tmux window keeps its own send log. Stored nested { [session]: { [window]: [...] } } like ideas.
 // pushRecent dedupes to the front and caps the list.

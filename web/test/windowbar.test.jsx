@@ -80,35 +80,6 @@ describe('WindowBar', () => {
     expect(container.querySelector('.wt-menu')).toBeNull(); // closed after a pick
   });
 
-  it('each pane in the menu carries its OWN agent logo — two different agents render distinctly, a shell shows none', () => {
-    render({ ...base, paneAgents: { '%1': 'claude', '%2': 'codex' } });
-    fire(container.querySelector('.wt-trigger'), 'click');
-    const opts = container.querySelectorAll('.wt-menu [role="option"]');
-    expect(opts[0].querySelector('.agent-mark')?.getAttribute('aria-label')).toBe('claude');
-    expect(opts[1].querySelector('.agent-mark')?.getAttribute('aria-label')).toBe('codex');
-  });
-
-  it('a menu pane with no agent (a shell) shows no logo', () => {
-    render({ ...base, paneAgents: { '%1': 'claude' } }); // %2 has no agent
-    fire(container.querySelector('.wt-trigger'), 'click');
-    const opts = container.querySelectorAll('.wt-menu [role="option"]');
-    expect(opts[0].querySelector('.agent-mark')).not.toBeNull(); // %1 = claude
-    expect(opts[1].querySelector('.agent-mark')).toBeNull();     // %2 = shell → no logo
-  });
-
-  it("the active multi-pane tab's logo follows the CURRENT pane, not the window aggregate", () => {
-    // Current pane (%1) has no agent, but the window aggregate says claude (from the other pane). The tab
-    // must stay logo-less — so exiting the agent in the pane you're on clears it, instead of a sibling
-    // pane's agent keeping it lit.
-    render({ ...base, currentAgent: undefined, windowAgents: { '@1': 'claude' } });
-    expect(container.querySelector('.wt-trigger .agent-mark')).toBeNull();
-  });
-
-  it("the active multi-pane tab shows the current pane's own agent logo when it has one", () => {
-    render({ ...base, currentAgent: 'claude' });
-    expect(container.querySelector('.wt-trigger .agent-mark')?.getAttribute('aria-label')).toBe('claude');
-  });
-
   it('a single-pane active window shows no pane control — just the plain window tab', () => {
     render({
       ...base,

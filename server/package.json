@@ -1,6 +1,6 @@
 {
   "name": "handmux",
-  "version": "0.13.0",
+  "version": "0.12.3",
   "description": "A mobile vibe-coding cockpit — built on tmux: drive your live session, Claude Code / Codex — anything a terminal can run — from your phone.",
   "type": "module",
   "license": "AGPL-3.0-only",
@@ -57,13 +57,13 @@
     "vitest": "^2.0.0"
   },
   "whatsNew": [
-    {"version":"0.13.0","date":"2026-07-12","zh":"终端文件路径高亮可点","en":"Tappable, highlighted file paths"},
     {"version":"0.12.3","date":"2026-07-11","zh":"接管会话可自定义名称 + Homebrew 一键安装","en":"Name a takeover session · Homebrew install"},
     {"version":"0.12.2","date":"2026-07-11","zh":"修复主屏图标偏大 / 换图标后不刷新","en":"Home-screen icon: right size & always fresh"},
     {"version":"0.12.1","date":"2026-07-11","zh":"全新品牌图标与双色字标","en":"New brand icon & two-tone wordmark"},
     {"version":"0.12.0","date":"2026-07-11","zh":"全屏程序也能滑动滚动 · 反馈入口 · 聊天草稿不丢","en":"Swipe-scroll full-screen apps · feedback channels · chat drafts kept"},
     {"version":"0.11.1","date":"2026-07-09","zh":"修复 Node 18 下无法启动的问题","en":"Fixes startup crash on Node 18"},
     {"version":"0.11.0","date":"2026-07-08","zh":"国内可用隧道 natapp/cpolar · 配置向导重做","en":"China-usable tunnels · setup redesigned"},
-    {"version":"0.10.0","date":"2026-07-06","zh":"升级前预览新功能 · 电脑 handmux open 接管","en":"Preview an update before installing · handmux open"}
+    {"version":"0.10.0","date":"2026-07-06","zh":"升级前预览新功能 · 电脑 handmux open 接管","en":"Preview an update before installing · handmux open"},
+    {"version":"0.9.1","date":"2026-07-06","zh":"「添加到主屏」引导","en":"\"Add to Home Screen\" coach"}
   ]
 }
