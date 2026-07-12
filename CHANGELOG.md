@@ -28,6 +28,11 @@ All notable changes to handmux. Format follows [Keep a Changelog](https://keepac
   A wide-character (CJK) path that soft-wraps on a full-width glyph is also no longer severed — the empty
   spacer xterm leaves in the last column (a wide glyph can't straddle the wrap) used to inject a space
   mid-name and drop the head, so `…/超长目录…/报告.md` kept only its tail.
+- **Tappable terminal paths now actually show their blue highlight.** The underline/chip that marks a path
+  as tappable never rendered — `registerDecoration` is a *proposed* xterm API and the terminal was created
+  without `allowProposedApi`, so every call threw and a broad catch swallowed it. Paths were tappable but
+  looked like plain text (what colour they had was the program's own, e.g. Claude Code's). They now carry
+  the intended blue underline, in every pane.
 
 ## [0.12.3] - 2026-07-11
 

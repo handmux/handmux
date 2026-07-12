@@ -142,6 +142,11 @@ const Terminal = forwardRef(function Terminal({ pane, onAuthFail, onDocLinkTap }
   useEffect(() => {
     const term = new XTerm({
       disableStdin: true,
+      // registerDecoration() — the doc-path highlight below — is a PROPOSED xterm API; without this it
+      // throws "You must set the allowProposedApi option", which refreshDocDecorations' catch swallowed,
+      // so the tappable paths never got their blue underline (only the link provider, which needs no
+      // proposed API, kept working — hence "tappable but invisible").
+      allowProposedApi: true,
       scrollback: MAX_LINES + 100,
       convertEol: false,
       fontSize: fontRef.current ?? 14,
