@@ -47,6 +47,11 @@ All notable changes to handmux. Format follows [Keep a Changelog](https://keepac
   The hint and the exit window were two independent 2s timers that could drift apart, leaving a gap where the
   hint had vanished but a Back still exited. They're now a single timer: the hint is visible for exactly the
   exit window, so the moment it's gone the guard has re-armed.
+- **Opening a session from a system notification no longer pops the "press again to exit" hint on arrival.**
+  A notification tap navigates the app to the target deep link, and that navigation fired a history event the
+  exit guard mistook for a root Back — so the hint appeared the instant you arrived, without touching Back.
+  The guard now marks its own root entry and only arms when a Back genuinely lands back on it, ignoring
+  forward navigations.
 
 ## [0.13.0] - 2026-07-12
 
