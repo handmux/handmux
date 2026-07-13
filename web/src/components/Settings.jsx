@@ -43,7 +43,14 @@ export default function Settings({ open, onClose, termRef, onColAdjust, onColRes
     const p = Number(port);
     if (!p) return;
     setStartErr(''); setStarting(true);
-    try { await onStartDynamicPreview?.(p); onClose?.(); } // close only on success
+    // On success, onStartDynamicPreview opens the preview sheet, and openPreviewSheet ALREADY closes
+    // Settings (its settings-open branch: setSettingsOpen(false) + rAF→open the sheet). Calling onClose()
+    // here too closed Settings a SECOND time, and that redundant close's Back-button balance popped the
+    // sheet's just-pushed history entry — so the sheet flashed open then shut and the dynamic preview never
+    // auto-opened (the static path dodges this because its caller closes Settings synchronously, one tick
+    // before openPreviewSheet runs, so it takes the simple no-swap branch). Let the success path own the
+    // close; on failure we stay open to show the inline error below.
+    try { await onStartDynamicPreview?.(p); }
     catch (e) { setStartErr(startMsg(e?.message)); }
     finally { setStarting(false); }
   };

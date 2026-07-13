@@ -5,6 +5,7 @@ All notable changes to handmux. Format follows [Keep a Changelog](https://keepac
 ## [Unreleased]
 
 ### Fixed
+- 启动**动态端口预览**后现在会像静态预览一样自动弹出预览面板：此前从设置里启动动态预览，面板会一闪而过又收回（要手动点顶栏预览图标才打开）——根因是设置面板被关闭了两次，多余那次的返回键平衡把预览面板刚压入的历史项弹掉了。
 - `handmux stop`（及 `restart`）在 supervisor 已崩溃/被强杀时不再遗留孤儿的 server/tunnel 子进程：停止时
   若发现 supervisor 已死但状态文件仍在，会先回收记录在案的子进程再清理状态（此前正是「stop 后 cloudflared
   仍在跑」的成因）。`state.json` 改为原子写（临时文件 + rename），并发读不再读到写了一半的内容而误判为「未运行」。
