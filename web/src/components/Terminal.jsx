@@ -171,8 +171,11 @@ const Terminal = forwardRef(function Terminal({ pane, onAuthFail, onDocLinkTap, 
       // Claude Code's ⏵ (U+23F5) and braille spinner, which Android has no system font for.
       // iOS/desktop have these in their system fonts, so the bundled ones rarely get used there.
       fontFamily: "ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Monaco, 'Cascadia Mono', 'Roboto Mono', 'Noto Sans Mono', 'DejaVu Sans Mono', 'Courier New', 'JetBrainsMono Nerd Font', 'TW Unifont', monospace",
-      // A clearly visible touch-selection highlight (the default is a faint grey).
-      theme: { selectionBackground: 'rgba(74,124,255,0.45)' },
+      // A clearly visible touch-selection highlight. A near-opaque blue (not the old 0.45 translucent
+      // one, which washed out over cells that already carry a background — highlighted rows, Claude's
+      // shaded message boxes) plus a forced white foreground so the selected text stays legible whatever
+      // colour sat underneath, the macOS/iOS text-selection convention.
+      theme: { selectionBackground: 'rgba(10,132,255,0.9)', selectionForeground: '#ffffff' },
       // The grid is read-only and never focused, so xterm draws the INACTIVE cursor — 'block'
       // (solid, inverts its cell) reads as a real cursor on Claude's input. It's only ever shown
       // where placeCursor()/cursorSeq puts it (and DECTCEM-hidden when Claude's cursor is hidden).
