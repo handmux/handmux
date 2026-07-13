@@ -1087,6 +1087,7 @@ export default function App() {
               ref={termRef}
               key={current.paneId}
               pane={current.paneId}
+              inset={inset}
               onAuthFail={onAuthFail}
               onDocLinkTap={onDocLinkTap}
               onTap={() => dockRef.current?.hideKeyboard()}

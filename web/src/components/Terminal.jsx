@@ -12,6 +12,7 @@ import { idleDelay } from '../cadence.js';
 import { flingStep, shouldFling } from '../momentum.js';
 import { initialConnection, nextConnection } from '../connection.js';
 import { scanDocLinks, docLinksOnLine } from '../docDecorations.js';
+import { fitRows } from '../terminalViewport.js';
 import { ensureBundledFonts } from '../bundledFonts.js';
 import { trimCopy, expandToLines, expandToParagraph, cellToPx } from '../terminalSelection.js';
 
@@ -34,9 +35,10 @@ const LIVE_SCROLL_SLACK = 15; // scrolled up within this many lines of the botto
 // a smaller font shows more rows (filled from scrollback), a larger font fewer. In AUTO mode
 // (no manual pinch) the font also shrinks so the whole pane fits — full-screen TUIs stay whole.
 // All of this lives in fit() below.
-const Terminal = forwardRef(function Terminal({ pane, onAuthFail, onDocLinkTap, onTap }, ref) {
+const Terminal = forwardRef(function Terminal({ pane, inset = 0, onAuthFail, onDocLinkTap, onTap }, ref) {
   const elRef = useRef(null);
   const termRef = useRef(null);
+  const insetRef = useRef(0); // keyboard overlap (px) — fit() subtracts it so the grid == visible height
   const onTapRef = useRef(onTap); // a clean single tap → dismiss the dock keyboard (called synchronously)
   onTapRef.current = onTap;
   // Clickable doc-path underlines (xterm decorations), rebuilt after every full repaint. The tap
@@ -152,6 +154,15 @@ const Terminal = forwardRef(function Terminal({ pane, onAuthFail, onDocLinkTap, 
     clearTimeout(flashHideRef.current);
     clearInterval(flashPollRef.current);
   }, []);
+
+  // Keyboard open/close changes the visible height above the keyboard. App only translateY(-inset)s the
+  // page, so our clientHeight is unchanged and the container ResizeObserver never fires — re-fit here on
+  // the inset change. This is the ONLY inset-driven refit; the ResizeObserver stays grow-only (no typing
+  // flash), and fit() keeps the font while shrinking rows (see the insetRef.current checks in fit()).
+  useEffect(() => {
+    insetRef.current = inset;
+    fitRef.current?.();
+  }, [inset]);
 
   useEffect(() => {
     const term = new XTerm({
@@ -337,13 +348,17 @@ const Terminal = forwardRef(function Terminal({ pane, onAuthFail, onDocLinkTap, 
 
     const fit = (pass = 0) => {
       if (disposed || !elRef.current || !term.rows) return;
-      const avail = elRef.current.clientHeight;
+      // Subtract the keyboard overlap so the grid fits the height ABOVE the keyboard (App translateY(-inset)
+      // leaves clientHeight unchanged, so we account for it here). Keyboard up → shorter grid + scrollback.
+      const avail = elRef.current.clientHeight - (insetRef.current || 0);
       const screen = elRef.current.querySelector('.xterm-screen');
       const curH = screen ? screen.getBoundingClientRect().height : 0;
       if (!avail || !curH) return;
       const cellH = curH / term.rows;
 
-      if (fontRef.current == null && paneRows && pass < 4) {
+      // Auto font-shrink only when the keyboard is down. Keyboard up keeps the font and just drops rows
+      // (→ scrollback), so text stays readable and the app becomes a scrollable window instead of tinier.
+      if (insetRef.current === 0 && fontRef.current == null && paneRows && pass < 4) {
         const needed = paneRows * cellH;
         if (needed > avail + 4) {
           const cur = term.options.fontSize || 14;
@@ -356,7 +371,7 @@ const Terminal = forwardRef(function Terminal({ pane, onAuthFail, onDocLinkTap, 
         }
       }
 
-      const want = Math.max(1, Math.floor(avail / cellH));
+      const want = fitRows(avail, cellH);
       if (want !== term.rows) {
         // Hide + park the cursor at the bottom, WAIT for that write to apply (callback), THEN resize.
         // term.write is async (parsed on a later tick) but term.resize is SYNCHRONOUS — parking without
