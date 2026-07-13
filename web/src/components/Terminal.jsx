@@ -238,6 +238,12 @@ const Terminal = forwardRef(function Terminal({ pane, onAuthFail, onDocLinkTap, 
     // only what's shown plus a little scroll-up slack. Floor 24 covers a not-yet-fit grid; cap at MAX_LINES.
     const liveDepth = () => Math.min(MAX_LINES, Math.max(24, term.rows + LIVE_MARGIN));
     let depth = liveDepth();
+    // One deeper-history pull per touch/wheel gesture. A hard flick's momentum — the custom fling AND iOS's
+    // OWN native momentum, which stopFling can't reach — keeps re-hitting the top after each pull's anchor
+    // shoves the view down, stacking 3-4 pulls off a single flick (400→700). Disarm on pull; a fresh
+    // touchstart / new wheel gesture re-arms, so momentum on its own can never pull again.
+    let pullArmed = true;
+    let lastWheelT = 0;
     let lastAnsi = null;
     let lastCur = ''; // last frame's cursor key (row,col,vis) — a cursor-only move must still repaint
     let curInfo = null; // last frame's cursor {row,col,vis}, placed by placeCursor() after sizing settles
@@ -276,8 +282,13 @@ const Terminal = forwardRef(function Terminal({ pane, onAuthFail, onDocLinkTap, 
     // there's nothing to show. Non-empty scrollInfo ⇔ history mode. `tag` marks a deeper-history pull.
     const showScrollPos = (tag = '') => {
       const b = buf();
+      // Real buffer state, no display-layer rounding — what you see IS what's loaded. b.baseY = the
+      // scrollable history rows, and it EQUALS the pull depth: capture returns `depth` history lines + the
+      // visible screen, so baseY = length − rows = depth. maybePullMore snaps depth to whole CHUNK pages, so
+      // baseY is already a clean 100/200/300 with no faking. Numerator = how far up from the live bottom
+      // you've scrolled (0 at the bottom, baseY at the very top → N/N).
       setScrollInfo(seeded && !nearBottom()
-        ? `历史模式 · 行 ${b.viewportY}/${b.baseY}${busy ? ' · 拉取中' : ''}${tag}`
+        ? `历史模式 · 距底 ${b.baseY - b.viewportY}/${b.baseY} 行${busy ? ' · 拉取中' : ''}${tag}`
         : '');
     };
     const atBottom = () => buf().viewportY >= buf().baseY;
@@ -289,13 +300,23 @@ const Terminal = forwardRef(function Terminal({ pane, onAuthFail, onDocLinkTap, 
     // the very top and never fire another scroll event landing exactly on 0, so pulling
     // more history would never trigger. Treat "within 3 lines of the top" as the top.
     const atTop = () => buf().viewportY <= 3;
-    // Pull a deeper history slice when sitting at the top. Driven from BOTH term.onScroll and the
-    // touch handler: on some Androids onScroll doesn't fire reliably at the very top during native
-    // momentum scroll, so the touch path is the dependable trigger. Idempotent while one is in
-    // flight (!busy) and once the deepest slice is loaded (depth >= MAX_LINES).
+    // Pull a deeper history slice when sitting at the top. Driven from term.onScroll, the touch handler AND
+    // the fling coast: xterm owns the 1:1 drag and its onScroll can miss the very top on mobile during a fast
+    // glide, so the touch/fling paths are the dependable triggers. Idempotent while a pull is in flight
+    // (!busy), until a fresh gesture re-arms (pullArmed), and once the deepest slice is loaded.
     const maybePullMore = () => {
-      if (!seeded || busy || depth >= MAX_LINES || !atTop()) return;
-      depth = Math.min(depth + CHUNK, MAX_LINES);
+      if (!seeded || busy || !pullArmed || depth >= MAX_LINES || !atTop()) return;
+      pullArmed = false; // one pull per gesture — a coast re-hitting the top after the anchor won't stack
+
+      // Freeze OUR coast before pulling: repaint() snapshots the scroll anchor at its START, so a coasting
+      // fling that keeps driving scrollTop mid-fetch would invalidate it (re-hitting the top → stacking
+      // pulls). stopFling holds the view still for the fetch → one clean page per top-reach, re-flick for more.
+      stopFling();
+      // Snap the pull target to the NEXT whole CHUNK boundary (100, 200, 300 …) rather than liveDepth+k·CHUNK.
+      // The first pull leaves from the small liveDepth (e.g. 47), so plain +CHUNK would load 147/247/… — the
+      // loaded depth (and the count the readout shows) is then a genuine multiple of 100, not a mid-number
+      // faked round at the display layer. floor()·CHUNK+CHUNK is always strictly > depth, so it never stalls.
+      depth = Math.min(Math.floor(depth / CHUNK) * CHUNK + CHUNK, MAX_LINES);
       showScrollPos(' · 拉取↑');
       repaint(depth, true);
     };
@@ -550,7 +571,12 @@ const Terminal = forwardRef(function Terminal({ pane, onAuthFail, onDocLinkTap, 
         const before = el[prop];
         el[prop] = before + s.delta; // scrollTop → fires xterm's scroll listener → repaint
         const hitEdge = Math.abs(s.delta) >= 1 && el[prop] === before; // clamped at an edge
-        if (s.done || hitEdge) { flingRAF = null; return; }
+        // Drive the readout + deeper-history pull from the coast itself — xterm's onScroll is unreliable
+        // during a fast momentum glide, so relying on it alone freezes the "距底" number mid-coast and it
+        // only jumps once the glide settles. maybePullMore may stopFling() (flingRAF→null) on reaching the
+        // top — respect that and don't reschedule, so one clean page loads per coast.
+        if (prop === 'scrollTop') { showScrollPos(); maybePullMore(); }
+        if (s.done || hitEdge || flingRAF == null) { flingRAF = null; return; }
         flingRAF = requestAnimationFrame(frame);
       };
       flingRAF = requestAnimationFrame(frame);
@@ -587,6 +613,7 @@ const Terminal = forwardRef(function Terminal({ pane, onAuthFail, onDocLinkTap, 
       idleSince = Date.now(); // touching the pane is activity → keep the cadence live
       cancelLongPress();
       stopFling(); // any new touch interrupts an in-flight coast (tap-to-stop)
+      pullArmed = true; // a fresh finger arms one deeper-history pull for this gesture
       // A showing selection is now dismissed by a clean TAP (decided in onTouchEnd), NOT on touchdown —
       // so a swipe/scroll can pan the viewport with the handles still up. Just remember it was showing.
       selOnDown = selActiveRef.current;
@@ -637,9 +664,9 @@ const Terminal = forwardRef(function Terminal({ pane, onAuthFail, onDocLinkTap, 
         e.stopPropagation();
         return;
       }
-      // One finger dragging: surface the live position even when the buffer can't scroll (the
-      // readout staying pinned at "行 N/N" is the tell that there's nothing more to load). Also the
-      // dependable place to trigger a deeper pull — onScroll can miss the very top on mobile.
+      // One finger dragging: surface the live position even when the buffer can't scroll (the readout
+      // pinned at "距底 N/N 行" is the tell there's nothing more to load), and trigger a deeper pull — xterm
+      // owns the drag so onScroll can miss the very top on mobile; this is the dependable trigger.
       if (e.touches.length === 1) { showScrollPos(); maybePullMore(); }
       if (e.touches.length !== 1) return; // multi-finger: pinch handled above, otherwise ignore
       const dx = e.touches[0].clientX - sx;
@@ -735,6 +762,10 @@ const Terminal = forwardRef(function Terminal({ pane, onAuthFail, onDocLinkTap, 
         if (notches) { wheelPending += notches; flushWheel(); }
         return;
       }
+      // No touchstart to arm on desktop: treat a fresh wheel gesture (a gap since the last notch) as arming,
+      // so a continuous spin still pulls only once per top-reach but a new deliberate scroll can pull again.
+      if (e.timeStamp - lastWheelT > 200) pullArmed = true;
+      lastWheelT = e.timeStamp;
       showScrollPos();
       maybePullMore();
     };
@@ -869,7 +900,19 @@ const Terminal = forwardRef(function Terminal({ pane, onAuthFail, onDocLinkTap, 
     const repaint = async (lines, keepPosition) => {
       if (busy || disposed) return;
       busy = true;
-      const anchorFromBottom = keepPosition ? buf().length - buf().viewportY : 0;
+      // Anchor the pull: remember how far the top-visible row sits from the buffer's END, so after the reseed
+      // prepends history above we restore the same content (scrollToLine below). Verified line-exact against
+      // real captures in headless xterm.
+      // Anchor to the row that's actually RENDERED at the top, not buf().viewportY. xterm derives viewportY
+      // as Math.round(scrollTop / rowHeight), but the content is drawn at the FLOORED row — so a coast that
+      // stops mid-row (fractional ≥ .5) leaves viewportY one row ABOVE what's on screen. Anchoring off that
+      // rounded value drops the reseeded view one row too low ("拉取后高一行"; usually, but 0 when frac < .5).
+      // Use floor(scrollTop / rowHeight) so the anchor matches the pixels. Fall back to viewportY with no live
+      // viewport (headless tests). rowHeight = the viewport's own metric (scrollHeight / lines).
+      const anchorVp = keepPosition ? elRef.current?.querySelector('.xterm-viewport') : null;
+      const anchorRowH = anchorVp && buf().length ? anchorVp.scrollHeight / buf().length : 0;
+      const anchorTop = anchorRowH ? Math.floor(anchorVp.scrollTop / anchorRowH) : buf().viewportY;
+      const anchorFromBottom = keepPosition ? buf().length - anchorTop : 0;
       try {
         const hist = await getHistory(pane, lines, lastHash);
         if (disposed) return;
@@ -933,6 +976,9 @@ const Terminal = forwardRef(function Terminal({ pane, onAuthFail, onDocLinkTap, 
         else if (!disposed) setConn(nextConnection(connState, 'fail')); // network/500/timeout → maybe disconnect
       } finally {
         busy = false;
+        // Refresh the history readout now that busy cleared (drop the "· 拉取中" tag; the coast is stopped so
+        // no later frame would). scrollToLine set viewportY synchronously, so a plain read is already fresh.
+        if (!disposed && seeded) showScrollPos();
         // Input landed while this poll was in flight — its output isn't in the frame just drawn,
         // so go straight back for it (startLoop bumps the epoch; the stale pending tick is dropped).
         if (wakeAgain && !disposed) { wakeAgain = false; startLoop(); }

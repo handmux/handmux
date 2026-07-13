@@ -64,6 +64,12 @@ All notable changes to handmux. Format follows [Keep a Changelog](https://keepac
   above the app — so the first Back just silently consumed it and you needed one more to exit. It now hands
   the deep link to the running app to open in place (no history push); a genuinely closed/discarded tab still
   opens fresh at the deep link as before.
+- **Scrolling up through terminal history no longer stacks multiple pulls or jumps a page.** A hard flick's
+  inertia used to keep re-hitting the top while a deeper slice was still loading and fire the pull again,
+  stacking several pages off one flick and yanking the view around. The inertial coast is now frozen the
+  instant a pull starts, so reaching the top loads exactly one clean page and holds your place; flick again to
+  go further. History is pulled in whole 100-line pages, and the readout shows the real buffer state —
+  `距底 N/M 行` (how far up you've scrolled / total history loaded), updated live during the coast.
 
 ## [0.13.0] - 2026-07-12
 
