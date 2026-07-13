@@ -12,7 +12,7 @@ import { idleDelay } from '../cadence.js';
 import { flingStep, shouldFling } from '../momentum.js';
 import { initialConnection, nextConnection } from '../connection.js';
 import { scanDocLinks, docLinksOnLine } from '../docDecorations.js';
-import { fitRows } from '../terminalViewport.js';
+import { fitRows, bottomPadRows } from '../terminalViewport.js';
 import { ensureBundledFonts } from '../bundledFonts.js';
 import { trimCopy, expandToLines, expandToParagraph, cellToPx } from '../terminalSelection.js';
 
@@ -967,8 +967,16 @@ const Terminal = forwardRef(function Terminal({ pane, inset = 0, onAuthFail, onD
         // rewrite stops that one-frame flash at the wrong spot. placeCursor below re-shows it (or keeps
         // it hidden) at Claude's real cell.
         const seed = prepareSeed(hist.ansi);
-        seedRows = seed ? seed.split('\n').length : 0; // content height — placeCursor counts cur.row up from it
-        await new Promise((res) => term.write('\x1b[?25l\x1b[0m\x1b[2J\x1b[3J\x1b[H' + seed, res));
+        const contentRows = seed ? seed.split('\n').length : 0;
+        // Normal screen with content shorter than the grid: bottom-align it so the last row (the live
+        // prompt) sits at the grid bottom (just above the keyboard/dock), not stranded at the top with
+        // blank below. Alt-screen keeps its own layout (cursor-centering handles it), so skip there.
+        const pad = (!hist.alt && contentRows < term.rows) ? bottomPadRows(contentRows, term.rows) : 0;
+        const framed = pad ? ('\n'.repeat(pad) + seed) : seed;
+        // seedRows = rows ACTUALLY written (incl. bottom-align padding). cursorSeq/cursorBufferLine count
+        // cur.row up from the bottom of this, so padding shifts the cursor to the grid bottom correctly.
+        seedRows = framed ? framed.split('\n').length : 0;
+        await new Promise((res) => term.write('\x1b[?25l\x1b[0m\x1b[2J\x1b[3J\x1b[H' + framed, res));
         if (disposed) return;
         lastAnsi = hist.ansi;
         lastCur = curKey;
