@@ -12,7 +12,7 @@ import { idleDelay } from '../cadence.js';
 import { flingStep, shouldFling } from '../momentum.js';
 import { initialConnection, nextConnection } from '../connection.js';
 import { scanDocLinks, docLinksOnLine } from '../docDecorations.js';
-import { fitRows, bottomPadRows, scrollDecision } from '../terminalViewport.js';
+import { fitRows, bottomPadRows, scrollDecision, cursorBufferLine, centerTarget, followTarget } from '../terminalViewport.js';
 import { ensureBundledFonts } from '../bundledFonts.js';
 import { trimCopy, expandToLines, expandToParagraph, cellToPx } from '../terminalSelection.js';
 
@@ -40,6 +40,9 @@ const Terminal = forwardRef(function Terminal({ pane, inset = 0, onAuthFail, onD
   const termRef = useRef(null);
   const insetRef = useRef(0); // keyboard overlap (px) — fit() subtracts it so the grid == visible height
   const userScrolledRef = useRef(false); // manual vertical scroll → disarms alt-screen cursor-follow
+  const followArmedRef = useRef(false);  // alt-screen cursor-follow armed? (keyboard-focus)
+  const lastCurForFollowRef = useRef(''); // last cursor key seen by follow → a change re-arms it
+  const centerOnCursorRef = useRef(null); // effect-scope: scroll the cursor to center (after a refit)
   const onTapRef = useRef(onTap); // a clean single tap → dismiss the dock keyboard (called synchronously)
   onTapRef.current = onTap;
   // Clickable doc-path underlines (xterm decorations), rebuilt after every full repaint. The tap
@@ -161,8 +164,16 @@ const Terminal = forwardRef(function Terminal({ pane, inset = 0, onAuthFail, onD
   // the inset change. This is the ONLY inset-driven refit; the ResizeObserver stays grow-only (no typing
   // flash), and fit() keeps the font while shrinking rows (see the insetRef.current checks in fit()).
   useEffect(() => {
+    const prev = insetRef.current;
     insetRef.current = inset;
     fitRef.current?.();
+    // Keyboard just opened on a full-screen app → center on the cursor and arm follow.
+    if (inset > 0 && prev === 0 && altScreenRef.current) {
+      followArmedRef.current = true;
+      userScrolledRef.current = false;
+      centerOnCursorRef.current?.();
+    }
+    if (inset === 0) followArmedRef.current = false; // keyboard closed → stop following
   }, [inset]);
 
   useEffect(() => {
@@ -346,6 +357,16 @@ const Terminal = forwardRef(function Terminal({ pane, inset = 0, onAuthFail, onD
     // Put xterm's own cursor on Claude's input cell (or hide it), AFTER the grid is sized + scrolled —
     // never inside the seed. Absolute from the viewport bottom, so it's correct at any row count.
     const placeCursor = () => { if (!disposed) term.write(cursorSeq(curInfo, term.rows, seedRows)); };
+    // Scroll the alt-screen window so the cursor sits centred. Bridged via a ref so the inset effect
+    // (render scope) can trigger it after a keyboard-open refit. rAF so it runs after the resize settles.
+    centerOnCursorRef.current = () => {
+      const line = cursorBufferLine(curInfo, seedRows);
+      if (line == null) return;
+      requestAnimationFrame(() => {
+        if (disposed) return;
+        term.scrollToLine(centerTarget(line, term.rows, buf().baseY));
+      });
+    };
 
     const fit = (pass = 0) => {
       if (disposed || !elRef.current || !term.rows) return;
@@ -992,6 +1013,23 @@ const Terminal = forwardRef(function Terminal({ pane, inset = 0, onAuthFail, onD
         curInfo = hist.cur; // placed by placeCursor() below (and again by fit, after any resize)
         if (keepPosition) term.scrollToLine(Math.max(0, buf().length - anchorFromBottom));
         else term.scrollToBottom();
+        // Alt-screen cursor-follow (keyboard up): a cursor MOVE re-arms follow; then recenter only if the
+        // cursor left the visible window — so manual scrolling that keeps it visible stays put, typing
+        // brings it back. Overrides the keepPosition/bottom scroll above when it fires.
+        if (altScreenRef.current && insetRef.current > 0) {
+          if (curKey !== lastCurForFollowRef.current) {
+            followArmedRef.current = true;
+            lastCurForFollowRef.current = curKey;
+          }
+          const line = cursorBufferLine(hist.cur, seedRows);
+          if (line != null) {
+            const t = followTarget({
+              cursorLine: line, viewportY: buf().viewportY, visibleRows: term.rows,
+              baseY: buf().baseY, armed: followArmedRef.current,
+            });
+            if (t != null) term.scrollToLine(t);
+          }
+        }
         seeded = true;
         // success path only — a failed/unchanged poll keeps the last decorations.
         try { refreshDocDecorations(term); } catch { /* decorations are cosmetic; never fail the poll */ }
@@ -1099,6 +1137,7 @@ const Terminal = forwardRef(function Terminal({ pane, inset = 0, onAuthFail, onD
       stopFlingRef.current = null;
       refreshDecosRef.current = null;
       selActionsRef.current = null;
+      centerOnCursorRef.current = null;
       cancelLongPress();
       stopFling();
       if (timer) clearTimeout(timer);
