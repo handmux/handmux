@@ -11,6 +11,32 @@
 // `entryId`/`LATEST_RELEASE` use `version` when present, else `date`, as the stable unread-dot id.
 export const CHANGELOG = [
   {
+    version: '0.14.0',
+    date: '2026-07-13',
+    highlight: {
+      zh: '终端文字选中拷贝 · 脚本复用推送通道',
+      en: 'Terminal select & copy · scripts reuse the push channel',
+    },
+    items: {
+      zh: [
+        '终端可以长按选中文字了:iOS 式首尾手柄精调、跨屏选择,浮条一键拷贝/整行/整段,复制自动去掉行尾空格;选中期间顶部显示「复制模式 · N 行 · M 字」。',
+        '你自己的脚本也能复用 handmux 的推送通道:命令行用 handmux push <标题> <正文> 直接给手机发通知(可选 --session/--device 限定范围),脚本跑完主动提醒你。',
+        '滚动终端不再收起键盘:滑动时键盘保持、单击才收起;还能用 ⌨ 按钮或底部手柄拖拽显隐键盘,命令/聊天切换也保持键盘不掉。',
+        '往上滑看历史更顺了:一次滑到顶只加载一页、不再叠加拉取来回跳,位置稳停在你看的那行,顶部显示「距底 N/M 行」。',
+        '全屏程序(vim/less/htop 等)上方不再串出无关的终端历史。',
+        '修复了主页误触返回直接退出、以及从通知进入要多按一次返回才能退出的问题。',
+      ],
+      en: [
+        'You can now long-press to select text in the terminal: iOS-style start/end handles, selection across screens, a callout to copy / whole line / whole paragraph, with trailing spaces trimmed on copy. A “copy mode · N lines · M chars” bar shows while selecting.',
+        'Your own scripts can reuse handmux’s push channel: run handmux push <title> <body> to send a notification straight to your phone (optionally scoped with --session/--device) — handy for a script pinging you when it finishes.',
+        'Scrolling the terminal no longer dismisses the keyboard: a swipe keeps it up, a single tap puts it away; you can also show/hide it with the ⌨ button or the dock’s grip handle, and it stays up when you switch between command and chat.',
+        'Scrolling up through history is smoother: reaching the top loads exactly one page instead of stacking pulls and jumping around, and your place holds steady on the line you were reading, with a “N/M lines from bottom” readout.',
+        'A full-screen program (vim/less/htop, etc.) no longer leaks unrelated terminal history above it.',
+        'Fixed a stray Back on the home page dropping you straight out, and needing an extra Back to leave after opening the app from a notification.',
+      ],
+    },
+  },
+  {
     version: '0.13.0',
     date: '2026-07-12',
     highlight: {
