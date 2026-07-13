@@ -175,10 +175,29 @@ export default function App() {
   // Throws on failure (e.g. the port isn't listening) so Settings can show why instead of silently closing.
   const startDynamicPreview = useCallback(async (port) => {
     if (!curPreviewName) return;
-    await createPreview(curPreviewName, { port });
+    await createPreview(curPreviewName, { port }); // throws on failure → Settings keeps its inline error, stays open
     await refreshPreviews();
-    openPreviewSheet();
-  }, [curPreviewName, refreshPreviews, openPreviewSheet]);
+    // Auto-open the sheet — but NOT in the same frame we close Settings. Settings' useBackButton pops its
+    // history entry on close (history.back() → an async popstate); if the sheet opened immediately its
+    // freshly-mounted popstate listener would catch THAT back and close itself — the preview flashed open
+    // then shut (the exact dynamic-preview symptom). The static path dodges this only by luck: its caller
+    // closes Settings seconds earlier (before the network), so the back-popstate has long dissipated by the
+    // time the sheet opens. Here we make the gap explicit — open the sheet only AFTER Settings' back-popstate,
+    // so the sheet's listener mounts on a clean history stack. Fallback timer covers the (rare) case where
+    // Settings wasn't back-tracked and no popstate fires.
+    let opened = false;
+    const openSheet = () => {
+      if (opened) return;
+      opened = true;
+      window.removeEventListener('popstate', onPop);
+      clearTimeout(fallback);
+      setPreviewSheetOpen(true);
+    };
+    const onPop = () => openSheet();
+    window.addEventListener('popstate', onPop);
+    const fallback = setTimeout(openSheet, 300);
+    setSettingsOpen(false); // → Settings' useBackButton cleanup → history.back() → popstate → openSheet()
+  }, [curPreviewName, refreshPreviews]);
 
   const stopPreview = useCallback(async () => {
     if (!curPreviewName) return;
