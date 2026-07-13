@@ -99,8 +99,9 @@ const Terminal = forwardRef(function Terminal({ pane, inset = 0, onAuthFail, onD
   // poll immediately. Bridged through a ref like fitRef so the imperative handle can reach effect scope.
   const wakeRef = useRef(null);
   // When true, placeCursor lights the block at the cursor's real position even if the app has hidden it
-  // (cur.vis === false). Set for a short window after any key/command send (see wake) so operating the
-  // terminal always reveals WHERE the cursor is — you can't drive a terminal you can't see the cursor on.
+  // (cur.vis === false). Set by every key/command send (see wake); cleared by the repaint loop once the app
+  // shows its own cursor again (cur.vis=1). So operating the terminal always reveals WHERE the cursor is —
+  // through Claude's whole working spell — without a stray block lingering after the app deliberately hides.
   const forceCursorRef = useRef(false);
   // Callout 整行/整段 buttons live in render scope but need effect-scope helpers (term, buf, refreshSelUI).
   // Bridged via a ref, same pattern as fitRef/wakeRef. Populated once inside the effect.
@@ -274,7 +275,6 @@ const Terminal = forwardRef(function Terminal({ pane, inset = 0, onAuthFail, onD
     let lastAnsi = null;
     let lastCur = ''; // last frame's cursor key (row,col,vis) — a cursor-only move must still repaint
     let curInfo = null; // last frame's cursor {row,col,vis}, placed by placeCursor() after sizing settles
-    let forceCursorTimer = null; // reveal-on-activity window (see wake/forceCursorRef)
     let seedRows = 0; // rows in the last seed (trimmed capture) — cur.row counts up from its bottom
     let lastHash = null; // last frame's server hash, echoed as ?since= so an unchanged screen returns 204
     let idleSince = Date.now(); // timestamp of the last change/activity → drives the adaptive cadence
@@ -1029,6 +1029,10 @@ const Terminal = forwardRef(function Terminal({ pane, inset = 0, onAuthFail, onD
         lastAnsi = hist.ansi;
         lastCur = curKey;
         curInfo = hist.cur; // placed by placeCursor() below (and again by fit, after any resize)
+        // Reveal-on-activity handoff: a send set forceCursorRef so the block stays lit while the app hides
+        // the cursor (Claude working). The moment the app shows its OWN cursor again (cur.vis=1 → back to
+        // idle/accepting input), drop the force so a LATER app-driven hide can hide it normally.
+        if (hist.cur && hist.cur.vis) forceCursorRef.current = false;
         if (keepPosition) term.scrollToLine(Math.max(0, buf().length - anchorFromBottom));
         else term.scrollToBottom();
         // Alt-screen cursor-follow (keyboard up): a cursor MOVE re-arms follow; then recenter only if the
@@ -1113,13 +1117,11 @@ const Terminal = forwardRef(function Terminal({ pane, inset = 0, onAuthFail, onD
     // back-to-back polls instead of stacking timer chains.
     const wake = () => {
       idleSince = Date.now();
-      // A send/keypress is the user operating the terminal → reveal the cursor NOW (even if the app has it
-      // hidden) and hold it lit for a short window, refreshed by each key. placeCursor here shows it this
-      // frame at the last known position; the immediate poll below re-places it at the fresh position.
+      // A send/keypress is the user operating the terminal → reveal the cursor even if the app has hidden it
+      // (Claude working). Hold it lit until the app shows its own cursor again — the repaint loop clears the
+      // force on the first cur.vis=1 frame. placeCursor shows it this frame; the immediate poll re-places it.
       forceCursorRef.current = true;
       placeCursor();
-      clearTimeout(forceCursorTimer);
-      forceCursorTimer = setTimeout(() => { forceCursorRef.current = false; placeCursor(); }, 1500);
       if (busy) { wakeAgain = true; return; }
       startLoop();
     };
@@ -1156,7 +1158,6 @@ const Terminal = forwardRef(function Terminal({ pane, inset = 0, onAuthFail, onD
 
     return () => {
       disposed = true;
-      clearTimeout(forceCursorTimer);
       if (autoScrollRAF != null) cancelAnimationFrame(autoScrollRAF);
       fitRef.current = null;
       wakeRef.current = null;
