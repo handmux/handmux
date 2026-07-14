@@ -20,7 +20,7 @@ export const CHANGELOG = [
     items: {
       zh: [
         '键盘弹起时终端不再被顶飞:内容自动重排到键盘上方,主屏短内容贴着键盘上沿显示;全屏程序(vim/less/htop 等)可以在里面上下滚动、到顶/底才翻页,展开键盘会把光标带到屏幕中间并跟随。',
-        '收件箱不再卡「需要你」:授权、或拒绝并反馈后会自动变回「进行中」,按 ESC 中断则直接消掉状态(以前回应完还一直显示需要你,ESC 后更是永久卡住)。',
+        '收件箱在一种特定场景下抓不到状态变更:你回应了权限弹窗、但那次回应没产生任何收尾信号时(普通授权、拒绝并反馈、或按 ESC 中断),它会停留在「需要你」。这一版补上识别——授权或拒绝反馈后回到「进行中」,ESC 中断则消掉状态。',
         '光标不用点屏幕也能看到了:一进会话就能看到光标位置,发键/发指令后即使 Claude 正在忙也会亮着。',
         '新开窗口、内容较短时直接贴底对齐,不再停在屏幕中间、要打个字才归位。',
         '从设置里启动动态端口预览,现在会像静态预览一样自动弹出预览面板。',
@@ -28,7 +28,7 @@ export const CHANGELOG = [
       ],
       en: [
         'The terminal no longer gets shoved off-screen when the keyboard opens: content reflows to sit just above the keyboard, with short main-screen output resting on its top edge. Full-screen programs (vim/less/htop, etc.) now scroll up/down inside themselves and only page at the edges, and opening the keyboard brings the cursor to the middle of the view and keeps following it.',
-        'The inbox no longer gets stuck on “needs you”: after you approve, or deny with feedback, it returns to “working”; pressing ESC to interrupt clears it outright (it used to keep showing “needs you” after you’d already responded, and stayed stuck forever after an ESC).',
+        'In one specific case the inbox couldn’t pick up a state change: when you responded to a permission prompt but that response produced no closing signal (a normal approval, a deny-with-feedback, or an ESC interrupt), it would linger on “needs you”. This release adds that detection — approving or denying returns it to “working”, and an ESC interrupt clears it.',
         'The cursor now shows without tapping the screen: you can see where it is the moment you open a session, and it stays lit after you send a key/command even while Claude is busy.',
         'A new window with short content now sits flush at the bottom instead of hanging mid-screen until you type.',
         'Starting a dynamic-port preview from Settings now auto-opens the preview sheet, just like a static one.',
