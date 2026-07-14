@@ -196,6 +196,44 @@ describe('WindowBar', () => {
     }
   });
 
+  const geomPanes = [
+    { id: '%1', active: true,  command: 'zsh',  left: 0,  top: 0, width: 40, height: 24 },
+    { id: '%2', active: false, command: 'node', left: 40, top: 0, width: 40, height: 24 },
+  ];
+
+  const openPaneMenu = () => {
+    fire(container.querySelector('.wt-trigger'), 'click');
+  };
+
+  it('opens a proportional pane map: one cell per pane with seq + command', () => {
+    render({ ...base, panes: geomPanes });
+    openPaneMenu();
+    const cells = container.querySelectorAll('.pane-map-cell');
+    expect(cells.length).toBe(2);
+    // right-hand pane sits at 50% left, half width (from paneRects)
+    expect(cells[1].style.left).toBe('50%');
+    expect(cells[1].style.width).toBe('50%');
+    expect(cells[0].textContent).toContain('zsh');
+    expect(cells[1].textContent).toContain('node');
+  });
+
+  it('map cell tap selects that pane and closes the map', () => {
+    const onSelectPane = vi.fn();
+    render({ ...base, panes: geomPanes, onSelectPane });
+    openPaneMenu();
+    const cells = container.querySelectorAll('.pane-map-cell');
+    fire(cells[1], 'click');
+    expect(onSelectPane).toHaveBeenCalledWith('%2');
+    expect(container.querySelector('.pane-map')).toBe(null); // closed
+  });
+
+  it('falls back to the flat list when panes lack geometry', () => {
+    render({ ...base, panes }); // fixture panes have no left/top
+    openPaneMenu();
+    expect(container.querySelector('.pane-map')).toBe(null);
+    expect(container.querySelectorAll('.dd-option').length).toBe(2);
+  });
+
   it('a short tap on a tab still selects (no long-press)', () => {
     vi.useFakeTimers();
     const onManageWindow = vi.fn();

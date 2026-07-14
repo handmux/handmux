@@ -8,6 +8,7 @@
 import { useRef, useLayoutEffect, useState, useEffect } from 'react';
 import { useLongPress } from '../hooks/useLongPress.js';
 import { AgentMark } from './icons.jsx';
+import { paneRects, hasGeometry } from '../paneLayout.js';
 import { t } from '../i18n';
 
 const CIRCLED = '①②③④⑤⑥⑦⑧⑨';
@@ -78,25 +79,45 @@ function PaneTab({ window: win, panes, paneAgents = {}, currentPaneId, agent, on
         <span className={`wt-caret${open ? ' open' : ''}`} aria-hidden="true">▾</span>
       </button>
       {open && pos && (
-        <div className="dd-menu wt-menu" role="listbox" style={{ top: pos.top, left: pos.left }}>
-          {panes.map((p, i) => (
-            <button
-              type="button"
-              key={p.id}
-              role="option"
-              aria-selected={p.id === currentPaneId}
-              className={`dd-option${p.id === currentPaneId ? ' is-selected' : ''}`}
-              onClick={() => { onSelectPane(p.id); setOpen(false); }}
-            >
-              <span className="dd-option-label">
-                <span className="dd-pane-seq" aria-hidden="true">{seq(i)}</span>
-                {paneAgents[p.id] && <AgentMark agent={paneAgents[p.id]} />}
-                <span className="dd-pane-cmd">{p.command || p.id}</span>
-              </span>
-              {p.id === currentPaneId && <span className="dd-check" aria-hidden="true">✓</span>}
-            </button>
-          ))}
-        </div>
+        hasGeometry(panes) ? (
+          <div className="pane-map wt-menu" role="listbox" style={{ top: pos.top, left: pos.left }}>
+            {paneRects(panes).map((c) => (
+              <button
+                type="button"
+                key={c.id}
+                role="option"
+                aria-selected={c.id === currentPaneId}
+                className={`pane-map-cell${c.id === currentPaneId ? ' is-current' : ''}`}
+                style={{ left: `${c.left}%`, top: `${c.top}%`, width: `${c.width}%`, height: `${c.height}%` }}
+                onClick={() => { onSelectPane(c.id); setOpen(false); }}
+              >
+                <span className="pmc-seq" aria-hidden="true">{seq(c.seq)}</span>
+                {paneAgents[c.id] && <AgentMark agent={paneAgents[c.id]} />}
+                <span className="pmc-cmd">{c.command || c.id}</span>
+              </button>
+            ))}
+          </div>
+        ) : (
+          <div className="dd-menu wt-menu" role="listbox" style={{ top: pos.top, left: pos.left }}>
+            {panes.map((p, i) => (
+              <button
+                type="button"
+                key={p.id}
+                role="option"
+                aria-selected={p.id === currentPaneId}
+                className={`dd-option${p.id === currentPaneId ? ' is-selected' : ''}`}
+                onClick={() => { onSelectPane(p.id); setOpen(false); }}
+              >
+                <span className="dd-option-label">
+                  <span className="dd-pane-seq" aria-hidden="true">{seq(i)}</span>
+                  {paneAgents[p.id] && <AgentMark agent={paneAgents[p.id]} />}
+                  <span className="dd-pane-cmd">{p.command || p.id}</span>
+                </span>
+                {p.id === currentPaneId && <span className="dd-check" aria-hidden="true">✓</span>}
+              </button>
+            ))}
+          </div>
+        )
       )}
     </div>
   );

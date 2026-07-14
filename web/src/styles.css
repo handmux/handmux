@@ -218,6 +218,20 @@ a.settings-linkbtn { display: inline-flex; align-items: center; justify-content:
 .wt-menu .dd-option-label { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
 .wt-menu .dd-pane-seq { flex: none; opacity: .55; font-variant-numeric: tabular-nums; }
 .wt-menu .dd-pane-cmd { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Proportional layout map: reproduces the real tmux split. .pane-map reuses .wt-menu's fixed
+   positioning/frosted shell (background/blur/border/radius/shadow); cells are absolutely placed
+   inside it by percentage (from paneLayout.js paneRects), one per pane. */
+.pane-map { width: 220px; aspect-ratio: 16 / 10; padding: 0; }
+.pane-map-cell { position: absolute; display: flex; flex-direction: column; gap: 2px;
+  align-items: flex-start; justify-content: flex-start; overflow: hidden; padding: 4px 5px;
+  border: 1px solid var(--hairline, rgba(128, 128, 128, 0.35)); background: rgba(128, 128, 128, 0.10);
+  color: inherit; font: inherit; text-align: left; box-sizing: border-box; }
+.pane-map-cell.is-current { background: rgba(122, 180, 245, 0.22); border-color: rgba(122, 180, 245, 0.85); }
+.pane-map-cell .pmc-seq { font-variant-numeric: tabular-nums; opacity: 0.75; }
+.pane-map-cell .pmc-cmd { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+@media (prefers-reduced-motion: reduce) {
+  .pane-map, .pane-map-cell { transition: none; }
+}
 .terminal-wrap { position: relative; flex: 1; min-height: 0; overflow: hidden; }
 /* Width follows the real pane: the terminal renders at its natural cols width and the
    container scrolls horizontally when that exceeds the screen. overscroll-behavior: contain
