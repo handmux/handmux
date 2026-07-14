@@ -247,18 +247,22 @@ describe('WindowBar', () => {
   });
 
   it('degrades a very narrow tile to seq-only so its command is not squished in unreadably', () => {
-    // wide main + thin sidebar: the sidebar cell is too narrow to show its command legibly.
-    const narrowLayout = [
-      { id: '%1', active: true,  command: 'vim',  left: 0,  top: 0, width: 66, height: 24 },
-      { id: '%2', active: false, command: 'htop', left: 66, top: 0, width: 14, height: 24 },
+    // Equal division never makes a tile thin from real ratios — only MANY columns do. Five side-by-side
+    // panes → each ~46px wide → narrow, so the command is dropped and only the seq badge remains.
+    const fiveCols = [
+      { id: '%1', active: true,  command: 'vim',  left: 0,  top: 0, width: 15, height: 24 },
+      { id: '%2', active: false, command: 'htop', left: 16, top: 0, width: 15, height: 24 },
+      { id: '%3', active: false, command: 'node', left: 32, top: 0, width: 15, height: 24 },
+      { id: '%4', active: false, command: 'less', left: 48, top: 0, width: 15, height: 24 },
+      { id: '%5', active: false, command: 'tail', left: 64, top: 0, width: 16, height: 24 },
     ];
-    render({ ...base, panes: narrowLayout, currentPaneId: '%1' });
+    render({ ...base, panes: fiveCols, currentPaneId: '%1' });
     openPaneMenu();
     const cells = container.querySelectorAll('.pane-map-cell');
+    expect(cells.length).toBe(5);
     expect(cells[1].className).toContain('is-narrow');
     expect(cells[1].textContent).not.toContain('htop'); // command dropped in the cramped cell
     expect(cells[1].textContent).toContain('②');        // but the seq badge keeps it identifiable
-    expect(cells[0].textContent).toContain('vim');       // the roomy cell still shows its command
   });
 
   it('clamps the map inside the viewport when the tab sits near the right edge', () => {
