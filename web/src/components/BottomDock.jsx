@@ -133,7 +133,7 @@ function BottomDock({
     // field off-screen could let the OS blur it and drop the keyboard. If a dock field currently holds it
     // up, hand focus to the new page's field synchronously — input→input keeps the keyboard on iOS and
     // re-activates the right box. Only ever when it was already up; never pops it unbidden.
-    const kbUp = softKeyboardUp() || document.activeElement === cmdRef.current || document.activeElement === ref.current;
+    const kbUp = document.activeElement === cmdRef.current || document.activeElement === ref.current;
     setModeOverride((m) => ({ ...m, [pane]: next }));
     // preventScroll: the field is already lifted above the keyboard by translateY(-inset), so DON'T let
     // iOS scroll the page to reveal it — that programmatic scroll-to-focus is the transient "jumps taller
@@ -288,15 +288,12 @@ function BottomDock({
       // Did the drag begin inside the chat composer's textarea? A vertical drag there scrolls the draft
       // first and only "falls off" into a keyboard toggle at the textarea's top/bottom edge (see onMove).
       const cmp = e.target?.closest?.('.input-text') || null;
-      // Was the keyboard genuinely up as the gesture BEGAN? Captured here, before the drag can graze the
-      // composer. Trust the ACTUAL keyboard height first (softKeyboardUp, offsetTop-immune) — iOS can leave
-      // the keyboard up while focus has drifted OFF the dock field (an aborted app-switch, a stray blur), and
-      // the pure activeElement check then reads "down", so a horizontal page-swipe would blur/collapse a
-      // keyboard that's really up (you had to nudge vertically first to re-focus a field and dodge it). The
-      // activeElement fallback still catches the keyboard mid-open, before its height has grown. Conversely a
-      // swipe that merely brushes the textarea focuses it (green) WITHOUT popping the keyboard — softKeyboardUp
-      // is false there, so kbUp stays false and we undo that stray focus on release (below).
-      const kbUp = softKeyboardUp() || document.activeElement === cmdRef.current || document.activeElement === ref.current;
+      // Was the keyboard genuinely up as the gesture BEGAN (a dock field already focused)? Captured here,
+      // before the drag can graze the composer. A horizontal swipe that merely brushes the textarea focuses
+      // it (turns it green) WITHOUT popping the keyboard — and the mode-switch focus-carry would then treat
+      // that stray focus as "keyboard up" and pop it in the other page. If it wasn't up at the start, we undo
+      // any such stray focus on release (below) so a swipe never conjures the keyboard.
+      const kbUp = document.activeElement === cmdRef.current || document.activeElement === ref.current;
       d = e.touches.length === 1
         ? { x: e.touches[0].clientX, y: e.touches[0].clientY, dx: 0, dy: 0, decided: false, horiz: false, vert: false, strip, cmp, kbUp }
         : null;
