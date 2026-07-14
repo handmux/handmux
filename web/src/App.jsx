@@ -26,6 +26,7 @@ import { isAbsolute, joinPath } from './docPath.js';
 import { isImageName } from './mime.js';
 import { useDocTabs } from './hooks/useDocTabs.js';
 import { usePreviews } from './hooks/usePreviews.js';
+import { usePollingLoop } from './hooks/usePollingLoop.js';
 
 import Drawer from './components/Drawer.jsx';
 import WindowBar from './components/WindowBar.jsx';
@@ -719,21 +720,15 @@ export default function App() {
   }, [needToken, openSession]);
 
   // Poll pane states for the inbox. Light cadence; paused while the tab is hidden. This is
-  // separate from the terminal's own poll — it only feeds the inbox roster / unread count.
-  useEffect(() => {
-    if (needToken) return;
-    let cancelled = false;
-    let timer = null;
-    const tick = async () => {
-      if (document.hidden) return;
-      try { const s = await getStates(bound); if (!cancelled) setStates(s || {}); } catch { /* ignore */ }
-    };
-    const loop = () => { tick(); timer = setTimeout(loop, 5000); };
-    loop();
-    const onVis = () => { if (!document.hidden) { clearTimeout(timer); loop(); } };
-    document.addEventListener('visibilitychange', onVis);
-    return () => { cancelled = true; clearTimeout(timer); document.removeEventListener('visibilitychange', onVis); };
-  }, [needToken, bound]);
+  // separate from the terminal's own poll — it only feeds the inbox roster / unread count. Re-polls
+  // immediately when `bound` changes (the deps) so a bind/unbind updates the filtered roster at once.
+  usePollingLoop({
+    fetch: () => getStates(bound),
+    apply: (s) => setStates(s || {}),
+    intervalMs: 5000,
+    enabled: !needToken,
+    deps: [bound],
+  });
 
   // First non-empty /states with no stored read-ts: treat everything already there as history (seed the
   // high-water mark to the current max ts) so a cold start doesn't flood the inbox with old completions.
@@ -745,20 +740,12 @@ export default function App() {
 
   // Poll orphan claude sessions for the inbox footer. Slower cadence than /states (a ps+lsof scan is
   // heavier and orphans change rarely), paused while the tab is hidden.
-  useEffect(() => {
-    if (needToken) return;
-    let cancelled = false;
-    let timer = null;
-    const tick = async () => {
-      if (document.hidden) return;
-      try { const o = await getOrphans(); if (!cancelled) setOrphans(Array.isArray(o) ? o : []); } catch { /* ignore */ }
-    };
-    const loop = () => { tick(); timer = setTimeout(loop, 15000); };
-    loop();
-    const onVis = () => { if (!document.hidden) { clearTimeout(timer); loop(); } };
-    document.addEventListener('visibilitychange', onVis);
-    return () => { cancelled = true; clearTimeout(timer); document.removeEventListener('visibilitychange', onVis); };
-  }, [needToken]);
+  usePollingLoop({
+    fetch: getOrphans,
+    apply: (o) => setOrphans(Array.isArray(o) ? o : []),
+    intervalMs: 15000,
+    enabled: !needToken,
+  });
 
   if (needToken) {
     return <TokenPrompt onSaved={() => { setNeedToken(false); setBooting(true); }} />;
