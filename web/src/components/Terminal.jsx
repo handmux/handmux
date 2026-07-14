@@ -12,7 +12,7 @@ import { idleDelay } from '../cadence.js';
 import { flingStep, shouldFling } from '../momentum.js';
 import { initialConnection, nextConnection } from '../connection.js';
 import { scanDocLinks, docLinksOnLine } from '../docDecorations.js';
-import { fitRows, bottomPadRows, scrollDecision, cursorBufferLine, centerTarget, followTarget } from '../terminalViewport.js';
+import { fitRows, bottomPadRows, scrollDecision, cursorBufferLine, followTarget } from '../terminalViewport.js';
 import { ensureBundledFonts } from '../bundledFonts.js';
 import { trimCopy, expandToLines, expandToParagraph, cellToPx, selectionCounts } from '../terminalSelection.js';
 import { useFlash } from '../hooks/useFlash.js';
@@ -43,7 +43,6 @@ const Terminal = forwardRef(function Terminal({ pane, inset = 0, onAuthFail, onD
   const userScrolledRef = useRef(false); // manual vertical scroll → disarms alt-screen cursor-follow
   const followArmedRef = useRef(false);  // alt-screen cursor-follow armed? (keyboard-focus)
   const lastCurForFollowRef = useRef(''); // last cursor key seen by follow → a change re-arms it
-  const centerOnCursorRef = useRef(null); // effect-scope: scroll the cursor to center (after a refit)
   const onTapRef = useRef(onTap); // a clean single tap → dismiss the dock keyboard (called synchronously)
   onTapRef.current = onTap;
   // Clickable doc-path underlines (xterm decorations), rebuilt after every full repaint. The tap
@@ -149,15 +148,10 @@ const Terminal = forwardRef(function Terminal({ pane, inset = 0, onAuthFail, onD
   // the inset change. This is the ONLY inset-driven refit; the ResizeObserver stays grow-only (no typing
   // flash), and fit() keeps the font while shrinking rows (see the insetRef.current checks in fit()).
   useEffect(() => {
-    const prev = insetRef.current;
     insetRef.current = inset;
+    // Refit for the new viewport. A full-screen app defaults to its FIRST line (fit scrolls alt-screen to
+    // top, not bottom), so opening the keyboard reveals the top of the app rather than snapping to its end.
     fitRef.current?.();
-    // Keyboard just opened on a full-screen app → center on the cursor and arm follow.
-    if (inset > 0 && prev === 0 && altScreenRef.current) {
-      followArmedRef.current = true;
-      userScrolledRef.current = false;
-      centerOnCursorRef.current?.();
-    }
     if (inset === 0) followArmedRef.current = false; // keyboard closed → stop following
   }, [inset]);
 
@@ -361,16 +355,6 @@ const Terminal = forwardRef(function Terminal({ pane, inset = 0, onAuthFail, onD
     // Put xterm's own cursor on Claude's input cell (or hide it), AFTER the grid is sized + scrolled —
     // never inside the seed. Absolute from the viewport bottom, so it's correct at any row count.
     const placeCursor = () => { if (!disposed) term.write(cursorSeq(curInfo, term.rows, seedRows, forceCursorRef.current)); };
-    // Scroll the alt-screen window so the cursor sits centred. Bridged via a ref so the inset effect
-    // (render scope) can trigger it after a keyboard-open refit. rAF so it runs after the resize settles.
-    centerOnCursorRef.current = () => {
-      const line = cursorBufferLine(curInfo, seedRows);
-      if (line == null) return;
-      requestAnimationFrame(() => {
-        if (disposed) return;
-        term.scrollToLine(centerTarget(line, term.rows, buf().baseY));
-      });
-    };
 
     // Re-pad the current normal-screen seed for the CURRENT term.rows and re-write it, so short content
     // stays bottom-aligned after fit() changes the grid height. The seed's pad was computed against the
@@ -440,7 +424,8 @@ const Terminal = forwardRef(function Terminal({ pane, inset = 0, onAuthFail, onD
         term.write(`\x1b[?25l\x1b[${term.rows};1H`, () => {
           if (disposed) return;
           term.resize(term.cols, want);
-          term.scrollToBottom();
+          // Full-screen app (shrunk under the keyboard) → show its FIRST line; normal screen → bottom-align.
+          if (altScreenRef.current) term.scrollToTop(); else term.scrollToBottom();
           if (pass < 4) requestAnimationFrame(() => fit(pass + 1));
           // last pass → grid settled: re-pad short content for the FINAL row count, THEN cursor + reveal
           else reframeForRows().then(() => { if (!disposed) { placeCursor(); reveal(); } });
@@ -1063,13 +1048,14 @@ const Terminal = forwardRef(function Terminal({ pane, inset = 0, onAuthFail, onD
         // idle/accepting input), drop the force so a LATER app-driven hide can hide it normally.
         if (hist.cur && hist.cur.vis) forceCursorRef.current = false;
         if (keepPosition) term.scrollToLine(Math.max(0, buf().length - anchorFromBottom));
+        else if (altScreenRef.current) term.scrollToTop(); // full-screen app → default to its first line
         else term.scrollToBottom();
         // Alt-screen cursor-follow (keyboard up): a cursor MOVE re-arms follow; then recenter only if the
         // cursor left the visible window — so manual scrolling that keeps it visible stays put, typing
         // brings it back. Overrides the keepPosition/bottom scroll above when it fires.
         if (altScreenRef.current && insetRef.current > 0) {
           if (curKey !== lastCurForFollowRef.current) {
-            followArmedRef.current = true;
+            if (!firstSeed) followArmedRef.current = true; // a real cursor MOVE arms follow; the first frame keeps the top
             lastCurForFollowRef.current = curKey;
           }
           const line = cursorBufferLine(hist.cur, seedRows);
@@ -1193,7 +1179,6 @@ const Terminal = forwardRef(function Terminal({ pane, inset = 0, onAuthFail, onD
       stopFlingRef.current = null;
       refreshDecosRef.current = null;
       selActionsRef.current = null;
-      centerOnCursorRef.current = null;
       cancelLongPress();
       stopFling();
       if (timer) clearTimeout(timer);
