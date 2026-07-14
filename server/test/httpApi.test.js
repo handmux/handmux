@@ -39,6 +39,9 @@ const baseCommands = {
   sessionWindowCount: vi.fn(async () => 2),
   killWindow: vi.fn(async () => {}),
   swapWindows: vi.fn(async () => {}),
+  splitPane: vi.fn(async () => '%91'),
+  windowPaneCount: vi.fn(async () => 2),
+  killPane: vi.fn(async () => {}),
 };
 
 describe('REST API', () => {
@@ -414,6 +417,43 @@ describe('REST API', () => {
 
   it('GET /pane-cwd rejects a bad pane id', async () => {
     await auth(request(appWith(baseCommands)).get('/api/pane-cwd?pane=1')).expect(400);
+  });
+
+  describe('pane split / close routes', () => {
+    it('POST /panes/split splits with the pane cwd and returns the new id', async () => {
+      const cmds = { ...baseCommands, paneCurrentPath: vi.fn(async () => '/home/u/proj'), splitPane: vi.fn(async () => '%91') };
+      const res = await auth(request(appWith(cmds)).post('/api/panes/split')).send({ pane: '%1', dir: 'h' }).expect(201);
+      expect(res.body).toEqual({ id: '%91' });
+      expect(cmds.splitPane).toHaveBeenCalledWith('%1', 'h', '/home/u/proj');
+    });
+
+    it('POST /panes/split rejects a bad pane id', async () => {
+      const cmds = { ...baseCommands };
+      await auth(request(appWith(cmds)).post('/api/panes/split')).send({ pane: 'nope', dir: 'h' }).expect(400);
+      expect(cmds.splitPane).not.toHaveBeenCalled();
+    });
+
+    it('POST /panes/split rejects a bad direction', async () => {
+      const cmds = { ...baseCommands };
+      await auth(request(appWith(cmds)).post('/api/panes/split')).send({ pane: '%1', dir: 'diag' }).expect(400);
+      expect(cmds.splitPane).not.toHaveBeenCalled();
+    });
+
+    it('DELETE /panes kills a non-last pane', async () => {
+      const cmds = { ...baseCommands, windowPaneCount: vi.fn(async () => 2), killPane: vi.fn(async () => {}) };
+      await auth(request(appWith(cmds)).delete('/api/panes?pane=%2')).expect(204);
+      expect(cmds.killPane).toHaveBeenCalledWith('%2');
+    });
+
+    it('DELETE /panes refuses the last pane (409) and does not kill', async () => {
+      const cmds = { ...baseCommands, windowPaneCount: vi.fn(async () => 1), killPane: vi.fn(async () => {}) };
+      await auth(request(appWith(cmds)).delete('/api/panes?pane=%2')).expect(409);
+      expect(cmds.killPane).not.toHaveBeenCalled();
+    });
+
+    it('DELETE /panes rejects a bad pane id', async () => {
+      await auth(request(appWith(baseCommands)).delete('/api/panes?pane=nope')).expect(400);
+    });
   });
 });
 

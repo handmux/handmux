@@ -122,5 +122,30 @@ export function sessionRoutes({ commands, docs }) {
     try { res.json({ cwd: await commands.paneCurrentPath(req.query.pane) }); } catch (e) { next(e); }
   });
 
+  r.post('/panes/split', async (req, res, next) => {
+    const { pane } = req.body || {};
+    const dir = req.body?.dir;
+    if (!isPaneId(pane)) return res.status(400).json({ error: 'bad pane id' });
+    if (dir !== 'h' && dir !== 'v') return res.status(400).json({ error: 'bad direction' });
+    try {
+      const cwd = await commands.paneCurrentPath(pane); // new pane inherits the pane's dir
+      const id = await commands.splitPane(pane, dir, cwd);
+      res.status(201).json({ id });
+    } catch (e) { next(e); }
+  });
+
+  r.delete('/panes', async (req, res, next) => {
+    if (!isPaneId(req.query.pane)) return res.status(400).json({ error: 'bad pane id' });
+    try {
+      // Never let the phone collapse a window/session: refuse to kill the last pane. The map UI only
+      // offers close at ≥2 panes, so this is a defensive boundary, not a normal path.
+      if (await commands.windowPaneCount(req.query.pane) <= 1) {
+        return res.status(409).json({ error: 'last pane' });
+      }
+      await commands.killPane(req.query.pane);
+      res.status(204).end();
+    } catch (e) { next(e); }
+  });
+
   return r;
 }
