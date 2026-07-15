@@ -130,3 +130,21 @@ export async function clearPaneNotification(pane) {
     notes.forEach((n) => n.close());
   } catch { /* best effort */ }
 }
+
+// Manual-push inbox: list stored notifications (newest first), or delete one. Best-effort — a failed
+// fetch returns an empty list / false so the sheet just shows the empty state.
+export async function getNotifications() {
+  try {
+    const r = await fetch('/api/notifications', { headers: authHeaders(), cache: 'no-store' });
+    if (!r.ok) return [];
+    return (await r.json()).items || [];
+  } catch { return []; }
+}
+
+export async function deleteNotification(id) {
+  try {
+    const r = await fetch(`/api/notifications/${encodeURIComponent(id)}`, { method: 'DELETE', headers: authHeaders() });
+    if (!r.ok) return false;
+    return (await r.json()).ok === true;
+  } catch { return false; }
+}
