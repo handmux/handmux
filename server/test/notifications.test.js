@@ -53,6 +53,15 @@ describe('notifications store', () => {
     expect(b.tag).toBe('build');
   });
 
+  it('url is stored only when present', async () => {
+    const mod = await freshModule();
+    mod.record({ title: 'a', body: '1' });
+    mod.record({ title: 'b', body: '2', url: '/x' });
+    const [b, a] = mod.list();
+    expect(a.url).toBeUndefined();
+    expect(b.url).toBe('/x');
+  });
+
   it('corrupt store file degrades to empty at load', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'notif-corrupt-'));
     const file = path.join(dir, 'notifications.json');

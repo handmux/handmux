@@ -62,7 +62,7 @@ describe('POST /api/push/send-local', () => {
     await post({ title: 't', body: 'b', tag: 'build', url: '/x' }).expect(200);
     const payload = JSON.parse(dataSeen[0]);
     expect(payload.tag).toBe('build');
-    expect(payload.data.url).toBe('/x');
+    expect(payload.data.inboxId).toBeTruthy();
   });
 });
 

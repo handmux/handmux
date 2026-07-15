@@ -17,9 +17,10 @@ let items = readJsonArray(STORE).filter((n) => n && typeof n.title === 'string')
 const persist = () => writeJsonAtomic(STORE, items);
 const genId = () => crypto.randomBytes(9).toString('base64url');
 
-export function record({ title, body, tag } = {}) {
+export function record({ title, body, tag, url } = {}) {
   const rec = { id: genId(), ts: Date.now(), title: String(title ?? ''), body: String(body ?? '') };
   if (tag) rec.tag = String(tag);
+  if (url) rec.url = String(url);
   items.push(rec);
   if (items.length > CAP) items = items.slice(items.length - CAP);
   persist();

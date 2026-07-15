@@ -60,10 +60,14 @@ export function pushRoutes({ push, notifications }) {
     if (hasSessions && hasDevices) return res.status(400).json({ error: 'use --session or --device, not both' });
     const payload = { title, body };
     if (typeof tag === 'string' && tag) payload.tag = tag;
-    if (typeof url === 'string' && url) payload.data = { url };
     const opts = { urgency: 'normal', ttl: 1800 };
     if (payload.tag) opts.topic = payload.tag;
-    if (notifications) notifications.record({ title, body, tag: payload.tag });
+    // Record FIRST so the notification tap can deep-link to this exact message's detail page. `--url`
+    // is stored on the record (surfaced in the detail), NOT used as the tap target.
+    if (notifications) {
+      const rec = notifications.record({ title, body, tag: payload.tag, url });
+      payload.data = { inboxId: rec.id };
+    }
     try {
       const out = hasDevices ? await push.sendToDevices(devices, payload, opts)
         : hasSessions ? await push.sendToSessions(sessions, payload, opts)
