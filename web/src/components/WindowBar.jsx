@@ -72,7 +72,7 @@ function PaneMapCell({ cell, cur, releasing, picking, agent, onChoose, onManage 
   );
 }
 
-function PaneTab({ window: win, panes, paneAgents = {}, currentPaneId, agent, onManage, onManagePane, onSelectPane, paneSheetOpen = false }) {
+function PaneTab({ window: win, panes, paneAgents = {}, currentPaneId, agent, onManage, onManagePane, onSelectPane, paneSheetOpen = false, openMapFor = null, onMapOpened }) {
   const [open, setOpen] = useState(false);
   // Id of the tile mid-selection (drives the .is-picking flash) until the switch commits.
   const [picking, setPicking] = useState(null);
@@ -127,6 +127,17 @@ function PaneTab({ window: win, panes, paneAgents = {}, currentPaneId, agent, on
   const lp = useLongPress(() => onManage(win), {
     onClick: () => { if (!open) place(); setOpen((o) => !o); },
   });
+
+  // "管理分屏" in the window sheet asks (by our window id) to open the map: anchor + show it, then clear
+  // the request so it fires once. Only the active window mounts a PaneTab, so App switches to us first.
+  useEffect(() => {
+    if (openMapFor && openMapFor === win.id) {
+      place();
+      setOpen(true);
+      onMapOpened?.();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [openMapFor, win.id]);
 
   // Close on an outside tap (capture phase, beats other handlers); reposition while open — same as Dropdown.
   // EXCEPT while a pane-manage sheet is open (split/close): that sheet renders on <body>, so tapping its
@@ -215,7 +226,7 @@ function PaneTab({ window: win, panes, paneAgents = {}, currentPaneId, agent, on
 
 export default function WindowBar({
   windows, windowAgents = {}, paneAgents = {}, currentAgent, currentWindowId, panes, currentPaneId, onSelectWindow, onSelectPane, onNewWindow, onManageWindow,
-  onManagePane, paneSheetOpen = false, trackWindowId,
+  onManagePane, paneSheetOpen = false, openMapFor = null, onMapOpened, trackWindowId,
 }) {
   const scrollRef = useRef(null);
   // While a window is being managed (its long-press menu open), keep its tab in view as the order
@@ -245,6 +256,8 @@ export default function WindowBar({
                 onManagePane={onManagePane}
                 onSelectPane={onSelectPane}
                 paneSheetOpen={paneSheetOpen}
+                openMapFor={openMapFor}
+                onMapOpened={onMapOpened}
               />
             );
           }

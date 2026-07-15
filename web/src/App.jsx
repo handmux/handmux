@@ -53,7 +53,7 @@ import DirPicker from './components/DirPicker.jsx';
 import DocLinkPopover from './components/DocLinkPopover.jsx';
 import IdeaPanel from './components/IdeaPanel.jsx';
 import Changelog from './components/Changelog.jsx';
-import { FolderIcon, GearIcon, BulbIcon, MonitorIcon, GitIcon, GaugeIcon } from './components/icons.jsx';
+import { FolderIcon, GearIcon, BulbIcon, MonitorIcon, GitIcon, GaugeIcon, SplitHIcon, SplitVIcon, PaneMapIcon, XIcon } from './components/icons.jsx';
 import { useKeyboardInset } from './hooks/useKeyboardInset.js';
 import { usePageScrollLock } from './hooks/usePageScrollLock.js';
 import { useLongPress } from './hooks/useLongPress.js';
@@ -80,6 +80,7 @@ export default function App() {
   const [renameTarget, setRenameTarget] = useState(null); // { kind:'session'|'window', id, name } | null
   const [manageWindow, setManageWindow] = useState(null); // the window long-pressed for its action menu
   const [managePane, setManagePane] = useState(null); // pane id long-pressed in the map
+  const [openMapFor, setOpenMapFor] = useState(null); // window id whose split map "管理分屏" asked to open
   const [fileManagerOpen, setFileManagerOpen] = useState(false); // file-viewer bottom-sheet visibility
   const [gitOpen, setGitOpen] = useState(false);
   const [pendingShare, setPendingShare] = useState(null); // a File shared in via Web Share Target, awaiting a destination
@@ -519,6 +520,39 @@ export default function App() {
     }
   }, [managePane, current, refreshPanes, selectPane, onAuthFail]);
 
+  // Split a SINGLE-pane window straight from its manage sheet — works whether or not it's the open
+  // window (a background window has no map to long-press). We split its active pane, then switch the
+  // view to that window and land on the new pane, so you actually see the split you just made.
+  const splitWindowAction = useCallback(async (win, dir) => {
+    const sessionId = current?.session?.id;
+    if (!win || !sessionId) return;
+    setManageWindow(null);
+    try {
+      const src = await getPanes(win.id);
+      const base = src.find((p) => p.active) || src[0];
+      if (!base) return;
+      const { panes, selectPaneId } = await runSplitPane({
+        paneId: base.id, dir, windowId: win.id, api: { splitPane: apiSplitPane }, getPanes,
+      });
+      setCurrent((c) => (c ? { ...c, window: win, panes, paneId: selectPaneId } : c));
+      remember({ sessionId, windowId: win.id, paneId: selectPaneId });
+      tmuxColsRef.current = panes.find((p) => p.id === selectPaneId)?.width ?? null;
+      savedLayoutRef.current = null;
+    } catch (e) {
+      if (handledAuth(e)) return;
+      window.alert(t('pane.splitFailed'));
+    }
+  }, [current, onAuthFail]);
+
+  // "管理分屏" on a multi-pane window's manage sheet → jump to the split map. If that window isn't the
+  // open one, switch to it first (only the active window renders a map), then ask its PaneTab to open.
+  const manageSplit = useCallback(async (win) => {
+    if (!win) return;
+    setManageWindow(null);
+    if (win.id !== current?.window?.id) await selectWindow(win);
+    setOpenMapFor(win.id);
+  }, [current, selectWindow]);
+
   // Reload the recent (send) history whenever the open session OR window changes — history is
   // window-level, keyed by session NAME + window ID. Use the tmux window ID (@N), which is stable for the
   // window's life — NOT window.name, which tmux auto-renames to the running command, so keying by name
@@ -947,11 +981,15 @@ export default function App() {
         onClose={() => setManageWindow(null)}
         actions={manageWindow ? [
           // A single-pane window has nothing to reorder-within, but IS splittable — offer it here so a
-          // lone pane can still be split from the window-level menu (the per-pane menu only appears once
-          // there's a map to long-press).
-          ...(current && manageWindow.id === current.window.id && current.panes.length === 1 ? [
-            { key: 'split-h', label: t('pane.splitH'), onClick: () => splitPaneAction(current.paneId, 'h') },
-            { key: 'split-v', label: t('pane.splitV'), onClick: () => splitPaneAction(current.paneId, 'v') },
+          // lone pane can be split from the window-level menu (the per-pane menu only appears once there's
+          // a map to long-press). Shown for ANY single-pane window, current or not (split switches to it).
+          ...(manageWindow.panes === 1 ? [
+            { key: 'split-h', icon: <SplitHIcon />, label: t('pane.splitH'), onClick: () => splitWindowAction(manageWindow, 'h') },
+            { key: 'split-v', icon: <SplitVIcon />, label: t('pane.splitV'), onClick: () => splitWindowAction(manageWindow, 'v') },
+          ] : []),
+          // A window that ALREADY has a split → jump straight to its split map to manage the panes.
+          ...(manageWindow.panes > 1 ? [
+            { key: 'manage-split', icon: <PaneMapIcon />, label: t('pane.manage'), onClick: () => manageSplit(manageWindow) },
           ] : []),
           // Reorder: shown only with >1 window (nothing to reorder otherwise, mirrors delete). Each
           // direction disables at its edge so positions stay put during repeated taps. onClick does
@@ -995,10 +1033,10 @@ export default function App() {
         })()}
         onClose={() => setManagePane(null)}
         actions={managePane ? [
-          { key: 'split-h', label: t('pane.splitH'), onClick: () => splitPaneAction(managePane, 'h') },
-          { key: 'split-v', label: t('pane.splitV'), onClick: () => splitPaneAction(managePane, 'v') },
+          { key: 'split-h', icon: <SplitHIcon />, label: t('pane.splitH'), onClick: () => splitPaneAction(managePane, 'h') },
+          { key: 'split-v', icon: <SplitVIcon />, label: t('pane.splitV'), onClick: () => splitPaneAction(managePane, 'v') },
           {
-            key: 'close', label: t('pane.close'), danger: true, confirm: true,
+            key: 'close', icon: <XIcon />, label: t('pane.close'), danger: true, confirm: true,
             confirmLabel: t('pane.closeConfirm'), onClick: closeManagedPane,
           },
         ] : []}
@@ -1083,6 +1121,8 @@ export default function App() {
             onManageWindow={(w) => setManageWindow(w)}
             onManagePane={(paneId) => setManagePane(paneId)}
             paneSheetOpen={!!managePane}
+            openMapFor={openMapFor}
+            onMapOpened={() => setOpenMapFor(null)}
             trackWindowId={manageWindow?.id}
           />
           {current.paneId && (

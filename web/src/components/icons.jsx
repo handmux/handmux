@@ -330,6 +330,36 @@ export function KeyboardIcon({ down = false }) {
   );
 }
 
+// 左右分屏(Lucide columns-2:圆角框 + 一条竖分隔)——把窗格分成左右两块。
+export function SplitHIcon() {
+  return (
+    <svg {...base}>
+      <rect x="3" y="4" width="18" height="16" rx="2" />
+      <path d="M12 4v16" />
+    </svg>
+  );
+}
+
+// 上下分屏(Lucide rows-2:圆角框 + 一条横分隔)——把窗格分成上下两块。
+export function SplitVIcon() {
+  return (
+    <svg {...base}>
+      <rect x="3" y="4" width="18" height="16" rx="2" />
+      <path d="M3 12h18" />
+    </svg>
+  );
+}
+
+// 管理分屏(四宫格 layout)——跳到分屏地图,总览/管理当前窗口的所有窗格。
+export function PaneMapIcon() {
+  return (
+    <svg {...base}>
+      <rect x="3" y="3" width="18" height="18" rx="2" />
+      <path d="M12 3v18M3 12h18" />
+    </svg>
+  );
+}
+
 // Agent logo — the OFFICIAL brand mark, kept as a swappable asset (src/assets/agent-<id>.svg; replace the
 // file to change the logo). Imported as raw SVG source (?raw) and inlined as a REAL DOM <svg>, not an
 // <img src="data:…svg…">: iOS standalone-PWA WKWebView doesn't reliably render percent-encoded svg+xml

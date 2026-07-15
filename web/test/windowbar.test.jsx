@@ -295,6 +295,13 @@ describe('WindowBar', () => {
     expect(onManagePane).not.toHaveBeenCalled();
   });
 
+  it('opens the map (no tap) when the window sheet requests it via openMapFor, then clears the request', () => {
+    const onMapOpened = vi.fn();
+    render({ ...base, panes: geomPanes, openMapFor: '@1', onMapOpened }); // @1 is the active window
+    expect(container.querySelector('.pane-map')).not.toBeNull();
+    expect(onMapOpened).toHaveBeenCalled();
+  });
+
   it('an outside tap closes the pane map', () => {
     render({ ...base, panes: geomPanes });
     openPaneMenu();

@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react';
 import { t } from '../i18n';
 
 // A small action menu over the settings-card chrome. Each action is
-// { key, label, danger?, confirm?, confirmLabel?, onClick }. A `confirm` action needs two taps:
+// { key, label, icon?, danger?, confirm?, confirmLabel?, onClick }. `icon` (an inline <svg> node)
+// renders left of the label for pane/split actions, matching the app's line-icon set. A `confirm` action needs two taps:
 // the first arms it (its label switches to confirmLabel), a second fires onClick. Tapping a
 // different action or 取消 disarms. (Two-tap confirm mirrors BindSession — no separate dialog.)
 export default function ActionSheet({ open, title, actions = [], onClose }) {
@@ -26,6 +27,7 @@ export default function ActionSheet({ open, title, actions = [], onClose }) {
       disabled={a.disabled}
       onClick={() => pick(a)}
     >
+      {a.icon && armed !== a.key && <span className="sheet-action-icon" aria-hidden="true">{a.icon}</span>}
       {a.confirm && armed === a.key ? (a.confirmLabel || t('actionsheet.confirmAgain')) : a.label}
     </button>
   );

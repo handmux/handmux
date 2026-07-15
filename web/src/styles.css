@@ -895,8 +895,11 @@ button.cmd-text { background: none; border: none; text-align: left; }
 .sheet-action {
   width: 100%; padding: 12px; border: 1px solid #33353a; border-radius: 8px;
   background: #2a2c31; color: #ddd; font-size: 15px; text-align: center;
+  display: flex; align-items: center; justify-content: center; gap: 8px;
   touch-action: manipulation;
 }
+.sheet-action-icon { display: inline-flex; }
+.sheet-action-icon svg { width: 18px; height: 18px; }
 .sheet-action.danger { color: var(--red); }
 .sheet-action.armed { background: var(--red); color: #fff; border-color: var(--red); }
 .sheet-action:disabled { opacity: 0.4; }
