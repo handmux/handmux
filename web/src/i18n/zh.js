@@ -36,7 +36,7 @@ export default {
   'rename.saving': '保存中…',
   'newwindow.title': '新建窗口',
   'newwindow.window_name': '窗口名称(可选)',
-  'newwindow.name_placeholder': '留空自动命名',
+  'newwindow.name_placeholder': '留空自动命名 · 字母/数字/横线 ≤16',
   'newwindow.name_rule': '只能用字母、数字、横线(≤16)',
   'newwindow.start_dir': '起始目录',
   'newwindow.session_dir_named': '{dir}（会话目录）',

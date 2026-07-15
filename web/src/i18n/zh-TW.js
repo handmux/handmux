@@ -36,7 +36,7 @@ export default {
   'rename.saving': '儲存中…',
   'newwindow.title': '新增視窗',
   'newwindow.window_name': '視窗名稱（選填）',
-  'newwindow.name_placeholder': '留空自動命名',
+  'newwindow.name_placeholder': '留空自動命名 · 字母/數字/連字號 ≤16',
   'newwindow.name_rule': '只能使用字母、數字、連字號（≤16）',
   'newwindow.start_dir': '起始目錄',
   'newwindow.session_dir_named': '{dir}（工作階段目錄）',

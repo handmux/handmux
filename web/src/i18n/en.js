@@ -37,7 +37,7 @@ export default {
   'rename.saving': 'Saving…',
   'newwindow.title': 'New window',
   'newwindow.window_name': 'Window name (optional)',
-  'newwindow.name_placeholder': 'Leave blank to auto-name',
+  'newwindow.name_placeholder': 'Leave blank to auto-name · letters/digits/hyphens ≤16',
   'newwindow.name_rule': 'Letters, digits, hyphens only (≤16)',
   'newwindow.start_dir': 'Start directory',
   'newwindow.session_dir_named': '{dir} (session dir)',

@@ -36,7 +36,7 @@ export default {
   'rename.saving': '저장 중…',
   'newwindow.title': '새 창',
   'newwindow.window_name': '창 이름（선택 사항）',
-  'newwindow.name_placeholder': '비워두면 자동 이름 지정',
+  'newwindow.name_placeholder': '비워두면 자동 이름 지정 · 영문/숫자/하이픈 ≤16',
   'newwindow.name_rule': '영문자, 숫자, 하이픈만 사용 가능（≤16자）',
   'newwindow.start_dir': '시작 디렉토리',
   'newwindow.session_dir_named': '{dir}（세션 디렉토리）',

@@ -75,7 +75,7 @@ export default function OrphanTakeoverSheet({ open, orphan, onConfirm, onClose, 
               <input
                 className="bind-input"
                 value={name}
-                placeholder={t('inbox.orphans.namePlaceholder')}
+                placeholder={t('bind.invalidName')}
                 onChange={(e) => { setName(e.target.value); setError(''); }}
               />
             </div>

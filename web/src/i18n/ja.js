@@ -36,7 +36,7 @@ export default {
   'rename.saving': '保存中…',
   'newwindow.title': '新規ウィンドウ',
   'newwindow.window_name': 'ウィンドウ名（任意）',
-  'newwindow.name_placeholder': '空白で自動命名',
+  'newwindow.name_placeholder': '空白で自動命名 · 英数字/ハイフン ≤16',
   'newwindow.name_rule': '英数字とハイフンのみ（≤16文字）',
   'newwindow.start_dir': '開始ディレクトリ',
   'newwindow.session_dir_named': '{dir}（セッションディレクトリ）',
