@@ -8,6 +8,7 @@ import * as defaultCommands from './tmux/commands.js';
 import { defaultDocs, MAX_TRANSFER_BYTES } from './docs.js';
 import { defaultGit } from './git.js';
 import * as push from './push.js';
+import * as notifications from './notifications.js';
 import { createClaudeEvents } from './claudeEvents.js';
 import { homedir } from 'node:os';
 import { DEFAULT_UPLOAD_EXTS } from './uploadTypes.js';
@@ -19,6 +20,7 @@ import { fileRoutes } from './routes/files.js';
 import { pushRoutes } from './routes/push.js';
 import { systemRoutes } from './routes/system.js';
 import { previewRoutes } from './routes/previews.js';
+import { notificationRoutes } from './routes/notifications.js';
 
 // Re-exported for tests (test/keys.test.js) and any caller that imported it by this path historically.
 export { isAllowedKey } from './routes/terminal.js';
@@ -35,7 +37,7 @@ export function createApiRouter({
   const claudeEvents = events || createClaudeEvents({ commands, push });
 
   const deps = {
-    token, commands, docs, git, push, claudeEvents,
+    token, commands, docs, git, push, notifications, claudeEvents,
     uploadExts, maxUploadBytes, asrEnv, previews, previewDomain, home, stateFile,
   };
 
@@ -44,6 +46,7 @@ export function createApiRouter({
   r.use(gitRoutes(deps));
   r.use(fileRoutes(deps));
   r.use(pushRoutes(deps));
+  r.use(notificationRoutes(deps));
   r.use(systemRoutes(deps));
   r.use(previewRoutes(deps));
 

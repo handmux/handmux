@@ -2,7 +2,7 @@
 // the local script-push send entry. The push module owns the delivery contract (TTL/topic/prune).
 import express from 'express';
 
-export function pushRoutes({ push }) {
+export function pushRoutes({ push, notifications }) {
   const r = express.Router();
 
   // The client needs the VAPID public key to subscribe; 503 if the server has no keys configured.
@@ -63,6 +63,7 @@ export function pushRoutes({ push }) {
     if (typeof url === 'string' && url) payload.data = { url };
     const opts = { urgency: 'normal', ttl: 1800 };
     if (payload.tag) opts.topic = payload.tag;
+    if (notifications) notifications.record({ title, body, tag: payload.tag });
     try {
       const out = hasDevices ? await push.sendToDevices(devices, payload, opts)
         : hasSessions ? await push.sendToSessions(sessions, payload, opts)

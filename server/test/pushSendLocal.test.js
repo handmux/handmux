@@ -14,6 +14,7 @@ vi.mock('web-push', () => ({
 process.env.VAPID_PUBLIC = 'pub';
 process.env.VAPID_PRIVATE = 'priv';
 process.env.PUSH_STORE = '/tmp/tmw-push-sendlocal-test.json';
+process.env.NOTIF_STORE = '/tmp/tmw-notif-sendlocal-test.json';
 import fs from 'node:fs';
 
 let app, push, keyA;
