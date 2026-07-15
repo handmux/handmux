@@ -49,19 +49,21 @@ export default function PushInboxSheet({ open, onClose, onAllRead }) {
           : items.length === 0 ? (
             <p className="push-script-intro push-inbox-empty">{t('pushInbox.empty')}</p>
           ) : (
-            <ul className="push-inbox-list">
-              {items.map((n) => (
-                <li key={n.id} className="push-inbox-row">
-                  <div className="push-inbox-main">
-                    <div className="push-inbox-row-title">{n.title}</div>
-                    <div className="push-inbox-row-body">{n.body}</div>
-                    <div className="push-inbox-row-time">{ago(n.ts)}</div>
-                  </div>
-                  <button className="push-inbox-del" onClick={() => del(n.id)} aria-label={t('pushInbox.delete')}>✕</button>
-                </li>
-              ))}
+            <>
+              <ul className="push-inbox-list">
+                {items.map((n) => (
+                  <li key={n.id} className="push-inbox-row">
+                    <div className="push-inbox-main">
+                      <div className="push-inbox-row-title">{n.title}</div>
+                      <div className="push-inbox-row-body">{n.body}</div>
+                      <div className="push-inbox-row-time">{ago(n.ts)}</div>
+                    </div>
+                    <button className="push-inbox-del" onClick={() => del(n.id)} aria-label={t('pushInbox.delete')}>✕</button>
+                  </li>
+                ))}
+              </ul>
               <button className="fontbtn push-inbox-markread" onClick={markRead}>{t('pushInbox.markRead')}</button>
-            </ul>
+            </>
           )}
       </div>
     </>
