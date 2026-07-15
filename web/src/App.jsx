@@ -61,7 +61,7 @@ import { usePageScrollLock } from './hooks/usePageScrollLock.js';
 import { useLongPress } from './hooks/useLongPress.js';
 import { useBackButton } from './hooks/useBackButton.js';
 import { useExitConfirm } from './hooks/useExitConfirm.js';
-import { readRoute, writeSessionHash, buildInboxLink } from './hashRoute.js';
+import { readRoute, writeSessionHash } from './hashRoute.js';
 import { hasShareFlag, takeSharedFile, clearShareFlag } from './shareIntake.js';
 
 const COL_STEP = 10; // columns added/removed per ⊟/⊞ tap
@@ -189,8 +189,15 @@ export default function App() {
     if (renameTarget) setRenameTarget(null); else setManageWindow(null);
   });
   useBackButton(!!managePane, () => setManagePane(null));
-  useBackButton(notifInboxOpen, closeNotifInbox);
-  useBackButton(!!notifDetailId, closeNotifDetail);
+  // ONE back-guard for the whole inbox (list + detail are one overlay level in history). A detail opens
+  // WITHOUT its own history entry; Back from a detail closes it and synchronously re-pushes an entry so the
+  // list stays backed (Back again then closes the page). Two separate useBackButton calls would both fire on
+  // one popstate and eject the whole inbox — this mirrors the codebase's combined-guard convention
+  // (settingsOpen||changelogOpen). pushState (not history.back) inside the handler avoids any async-pop race.
+  useBackButton(notifInboxOpen, () => {
+    if (notifDetailId) { setNotifDetailId(null); window.history.pushState({ overlay: true }, ''); }
+    else setNotifInboxOpen(false);
+  });
   // Root double-back-to-exit: on the main page (a pane is showing, all the overlays above push their own
   // entries first), the first Back only surfaces a hint — a second within the window actually exits. The
   // hook toggles the hint (show on arm, hide when the window lapses), so its visibility IS the arm window —
