@@ -560,11 +560,27 @@ export default function App() {
   // "管理分屏" on a multi-pane window's manage sheet → open the split map AND its pane-manage sheet on the
   // current pane, so you land straight in "manage the split" (tap another tile to re-target). If that
   // window isn't the open one, switch to it first (only the active window renders a map).
+  //
+  // History-stack ordering matters: closing the manage-window sheet unwinds its back-button entry via a
+  // DEFERRED history.back(). If we push the pane sheet's OWN back-button entry before that fires, the
+  // deferred back() pops the pane sheet's fresh entry and its popstate slams the sheet shut — you'd see
+  // only the map. So the manage-window entry must unwind BEFORE the pane sheet opens: the non-current
+  // branch gets that gap for free from selectWindow's network await; the current-window branch explicitly
+  // waits for the unwinding popstate.
   const manageSplit = useCallback(async (win) => {
     if (!win) return;
-    setManageWindow(null);
     let paneId = current?.paneId;
-    if (win.id !== current?.window?.id) paneId = await selectWindow(win);
+    if (win.id !== current?.window?.id) {
+      setManageWindow(null);
+      paneId = await selectWindow(win);
+    } else {
+      await new Promise((resolve) => {
+        const fin = () => { clearTimeout(timer); window.removeEventListener('popstate', fin); resolve(); };
+        const timer = setTimeout(fin, 80); // fallback: no overlay entry to unwind → no popstate
+        window.addEventListener('popstate', fin);
+        setManageWindow(null);
+      });
+    }
     if (!paneId) return; // switch failed (no panes / auth) — don't strand an openMapFor for a window that never mounts
     setOpenMapFor(win.id);
     setManagePane(paneId);
