@@ -476,9 +476,16 @@ export default function App() {
     });
   }, []);
 
-  // Refetch the open window's panes after a structural change (split/close) and splice them into `current`.
+  // Splice a window's post-split/close panes into `current`: the pane list (when it's the open window)
+  // AND that window's cached pane COUNT in the windows strip, so the long-press menu immediately offers
+  // the right actions (分屏 for a lone pane vs 管理分屏 once split) instead of a stale count until the
+  // next getWindows.
   const refreshPanes = useCallback((windowId, panes) => {
-    setCurrent((c) => (c && c.window.id === windowId ? { ...c, panes } : c));
+    setCurrent((c) => {
+      if (!c) return c;
+      const windows = c.windows.map((w) => (w.id === windowId ? { ...w, panes: panes.length } : w));
+      return c.window.id === windowId ? { ...c, windows, panes } : { ...c, windows };
+    });
   }, []);
 
   // Split `paneId` into two (dir 'h' left|right, 'v' top/bottom); jump the phone to the new pane. The
@@ -536,7 +543,11 @@ export default function App() {
       const { panes, selectPaneId } = await runSplitPane({
         paneId: base.id, dir, windowId: win.id, api: { splitPane: apiSplitPane }, getPanes,
       });
-      setCurrent((c) => (c ? { ...c, window: win, panes, paneId: selectPaneId } : c));
+      setCurrent((c) => {
+        if (!c) return c;
+        const windows = c.windows.map((w) => (w.id === win.id ? { ...w, panes: panes.length } : w));
+        return { ...c, windows, window: win, panes, paneId: selectPaneId };
+      });
       remember({ sessionId, windowId: win.id, paneId: selectPaneId });
       tmuxColsRef.current = panes.find((p) => p.id === selectPaneId)?.width ?? null;
       savedLayoutRef.current = null;
@@ -554,8 +565,9 @@ export default function App() {
     setManageWindow(null);
     let paneId = current?.paneId;
     if (win.id !== current?.window?.id) paneId = await selectWindow(win);
+    if (!paneId) return; // switch failed (no panes / auth) — don't strand an openMapFor for a window that never mounts
     setOpenMapFor(win.id);
-    if (paneId) setManagePane(paneId);
+    setManagePane(paneId);
   }, [current, selectWindow]);
 
   // Reload the recent (send) history whenever the open session OR window changes — history is
