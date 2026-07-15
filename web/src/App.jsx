@@ -116,7 +116,26 @@ export default function App() {
   // Manual-push inbox open/close/detail/delete — declared this early (ahead of the SW-message and
   // boot deep-link effects further down, and the useBackButton group right below) so nothing references
   // them before their const initializer runs (TDZ).
-  const openNotifInbox = () => { setSettingsOpen(false); setNotifInboxOpen(true); };
+  // Open the inbox AFTER Settings' back-popstate, not in the same frame. Settings' useBackButton pops its
+  // history entry on close (history.back() → an async popstate); opening the inbox immediately, its freshly
+  // mounted useBackButton listener would catch THAT back and close itself — the page flashed open then shut
+  // (Settings vanished, nothing showed). Same trap and same fix as usePreviews' startDynamicPreview. Changelog
+  // dodges it by sharing Settings' guard; the inbox has its own, so it must sequence. Fallback timer covers
+  // the rare case where Settings wasn't back-tracked and no popstate fires.
+  const openNotifInbox = () => {
+    let opened = false;
+    const open = () => {
+      if (opened) return;
+      opened = true;
+      window.removeEventListener('popstate', onPop);
+      clearTimeout(fallback);
+      setNotifInboxOpen(true);
+    };
+    const onPop = () => open();
+    window.addEventListener('popstate', onPop);
+    const fallback = setTimeout(open, 300);
+    setSettingsOpen(false); // → Settings' useBackButton cleanup → history.back() → popstate → open()
+  };
   const openNotifDetail = (id) => {
     setNotifDetailId(id);
     addReadInboxId(id);
