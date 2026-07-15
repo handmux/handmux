@@ -390,7 +390,6 @@ export default {
   'scriptPush.reliability': '注意：Web 推送經手機系統（FCM/APNs）中轉，屬盡力而為——省電模式、離線或廠商策略都可能延遲或丟棄它，並不保證即時送達。對送達強依賴的場景，請改用專門的 IM（WeChat / Telegram bot 等）。',
   'pushInbox.title': '通知記錄',
   'pushInbox.empty': '還沒有腳本通知',
-  'pushInbox.markRead': '標記已讀',
   'pushInbox.delete': '刪除',
   'pushInbox.justNow': '剛剛',
   'pushInbox.minutesAgo': '{n}分鐘前',

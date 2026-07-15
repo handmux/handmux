@@ -456,7 +456,6 @@ export default {
   'scriptPush.reliability': 'Heads-up: Web Push goes through the phone OS (FCM/APNs) and is best-effort — battery-saver, offline, or vendor policy can delay or drop it. It is not a guaranteed real-time channel. For delivery-critical alerts use a dedicated IM (WeChat / Telegram bot, etc.).',
   'pushInbox.title': 'Notifications',
   'pushInbox.empty': 'No notifications yet',
-  'pushInbox.markRead': 'Mark all read',
   'pushInbox.delete': 'Delete',
   'pushInbox.justNow': 'just now',
   'pushInbox.minutesAgo': '{n} min ago',
