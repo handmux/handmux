@@ -95,15 +95,20 @@ export default function ChatView({ pane, kind }) {
     const newestK = newest ? (newest.k ?? newest.i) : null;
     const isNewTrailingUser = newest && newest.role === 'user'
       && lastMaxKRef.current != null && newestK != null && newestK > lastMaxKRef.current;
-    if (newestK != null) lastMaxKRef.current = lastMaxKRef.current == null ? newestK : Math.max(lastMaxKRef.current, newestK);
 
     if (!el) return;
     if (pendingPrependRef.current) {
+      // Do NOT advance lastMaxKRef here: this run is preempted by the in-flight prepend restore, so it
+      // never evaluates isNewTrailingUser for real. Leaving lastMaxKRef stale means the very next
+      // (non-prepend) run still sees a trailing new user message as new and force-scrolls to bottom —
+      // otherwise a message sent while scrolled up (mid-prepend) would be silently marked "already seen"
+      // and permanently strand the user off-screen after their own send.
       el.scrollTop += el.scrollHeight - prevScrollHeightRef.current;
       prevScrollHeightRef.current = null;
       pendingPrependRef.current = false;
       return;
     }
+    if (newestK != null) lastMaxKRef.current = lastMaxKRef.current == null ? newestK : Math.max(lastMaxKRef.current, newestK);
     if (isNewTrailingUser) {
       el.scrollTop = el.scrollHeight;
       stickBottomRef.current = true;

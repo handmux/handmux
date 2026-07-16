@@ -132,4 +132,60 @@ describe('ChatView', () => {
       vi.useRealTimers();
     }
   });
+
+  // Regression for the priority-ordering bug: a loadOlder() prepend in flight must NOT consume the
+  // "new trailing user message" signal — lastMaxKRef must stay stale through the pendingPrepend-branch
+  // run so the run that eventually applies the prepend still recognizes the user message as new and
+  // force-scrolls to bottom. Pre-fix, lastMaxKRef advanced on every run (including the prepend branch),
+  // so a user message that arrived mid-prepend was marked "already seen" and the user's own send never
+  // got scrolled to.
+  it('a new user message that arrives mid-prepend still forces bottom once the prepend resolves', async () => {
+    vi.useFakeTimers();
+    try {
+      const spy = vi.spyOn(api, 'fetchTranscript');
+      spy.mockResolvedValueOnce({
+        messages: [{ k: 5, i: 5, role: 'assistant', type: 'text', text: 'first' }],
+        hash: 'h1', hasMore: true, firstSeq: 5,
+      });
+      const { container } = render(<ChatView pane="%0" kind="working" />);
+      await act(async () => { await Promise.resolve(); });
+      await act(async () => { await Promise.resolve(); });
+
+      const el = container.querySelector('.chat-scroll');
+      // Scrolled near the top → triggers loadOlder() on the next scroll event.
+      setGeometry(el, { scrollTop: 10, scrollHeight: 500, clientHeight: 300 });
+
+      let resolveOlder;
+      spy.mockImplementationOnce(() => new Promise((res) => { resolveOlder = res; }));
+      fireEvent.scroll(el); // scrollTop(10) < NEAR_TOP_PX(80) && hasMoreOlder → loadOlder() fires, stays pending
+
+      // While the prepend is in flight, a recent-window poll (1500ms cadence) lands with a genuinely new
+      // trailing USER message (k=6 > last-seen max k=5) — e.g. the user sent something while scrolled up.
+      spy.mockResolvedValueOnce({
+        messages: [
+          { k: 5, i: 5, role: 'assistant', type: 'text', text: 'first' },
+          { k: 6, i: 6, role: 'user', type: 'text', text: 'sent while scrolled up' },
+        ],
+        hash: 'h2', hasMore: true, firstSeq: 5,
+      });
+      await act(async () => { await vi.advanceTimersByTimeAsync(1500); });
+
+      // This run took the pendingPrepend branch (scroll delta restore, early return) — it must NOT have
+      // force-scrolled to bottom, and must NOT have consumed the new-user-message signal.
+      expect(el.scrollTop).toBe(10);
+
+      // Now the loadOlder() fetch resolves, prepending older history — this drives another messages update.
+      Object.defineProperty(el, 'scrollHeight', { value: 900, configurable: true });
+      await act(async () => {
+        resolveOlder({ messages: [{ k: 3, i: 3, role: 'assistant', type: 'text', text: 'older' }], hasMore: false, firstSeq: 3 });
+        await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+      });
+
+      // With the fix, lastMaxKRef was never advanced past 5 during the pendingPrepend run, so this run
+      // still sees k=6 as newly-arrived and force-scrolls to bottom.
+      expect(el.scrollTop).toBe(900);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
