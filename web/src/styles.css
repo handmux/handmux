@@ -188,11 +188,13 @@ a.settings-linkbtn { display: inline-flex; align-items: center; justify-content:
 .windowbar { display: flex; gap: 8px; align-items: center; padding: 6px 8px; background: #222; }
 .windowbar-scroll { flex: 1; min-width: 0; display: flex; gap: 4px; overflow-x: auto; overflow-y: hidden; -webkit-overflow-scrolling: touch; touch-action: pan-x; scrollbar-width: none; }
 .windowbar-scroll::-webkit-scrollbar { display: none; }
-/* [终端|对话] lens switch — right-aligned in the windowbar row, only rendered for agent panes (its slot
-   claims no space when absent, so the row never reflows). Segmented control matching .fontbtn's palette. */
-.lens-switch { flex: none; display: flex; background: #33353a; border-radius: 8px; padding: 2px; gap: 2px; }
-.lens-seg { min-width: 44px; min-height: 30px; padding: 4px 10px; border: none; border-radius: 6px; background: transparent; color: #9a9ca3; font-size: 13px; touch-action: manipulation; }
-.lens-seg[aria-pressed="true"] { background: #2a4060; color: #7ab4f5; }
+/* [终端模式|对话模式] lens switch — right-aligned in the windowbar row, only rendered for agent panes (its
+   slot claims no space when absent, so the row never reflows). Reuses the shared Dropdown (.dd-*); .lens-dd
+   just trims it down a touch and gives it a faint accent border so it reads as "this dropdown is a view
+   toggle" rather than blending into other dropdowns — subtle, not a different control. */
+.lens-dd { flex: none; }
+.lens-dd .dd-trigger { padding: 6px 10px; border-color: #3a4a63; background: #1e2228; font-size: 12.5px; gap: 6px; }
+.lens-dd .dd-menu { min-width: 108px; left: auto; right: 0; }
 .win-tab { white-space: nowrap; padding: 4px 10px; border: none; border-radius: 8px; background: #33353a; color: #bbb; font-size: 13px; touch-action: manipulation; }
 .win-tab.active { background: var(--blue); color: #fff; }
 .win-new { border: 1px dashed #555; color: #8aa; font-weight: 700; background: transparent; }
@@ -1636,17 +1638,10 @@ button.cmd-text { background: none; border: none; text-align: left; }
    This app is dark-themed throughout (no light-mode media query anywhere in this file), so these follow
    the same palette as the rest of the sheet chrome rather than inventing a light variant. */
 .chat-view { position: relative; display: flex; flex-direction: column; min-height: 0; flex: 1; background: #1a1b1e; }
-/* Jump-to-bottom (Task 11): only shown once scrolled away from the newest message. Floats bottom-right of
-   the bubble stream, above the composer, safe-area aware. Subtle system-style round button, ≥44pt target. */
-.chat-jump-bottom {
-  position: absolute; right: 14px; bottom: calc(14px + env(safe-area-inset-bottom, 0px));
-  width: 44px; height: 44px; border-radius: 50%; border: none;
-  background: rgba(44,46,50,.92); color: #e6e9ee;
-  font-size: 18px; line-height: 1; display: flex; align-items: center; justify-content: center;
-  box-shadow: 0 4px 14px rgba(0,0,0,.4); backdrop-filter: blur(8px);
-  touch-action: manipulation; z-index: 5;
-}
-.chat-jump-bottom:active { background: rgba(60,62,68,.95); }
+/* Jump-to-bottom (Task 12): reuses the terminal's own .new-output pill (same class/caption) rather than a
+   bespoke button — one control, one look, across both lenses. Only shown once scrolled away from the
+   newest message; .new-output's own right/bottom:12px lands it above the composer since .chat-view is a
+   positioning context. */
 .chat-scroll {
   flex: 1; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch;
   display: flex; flex-direction: column; gap: 8px;
@@ -1691,10 +1686,10 @@ button.cmd-text { background: none; border: none; text-align: left; }
    chip open. Expanded (tapped): un-truncate so the full command/input reads, and the result <pre> shows
    below (see .chat-tool-body). */
 .chat-tool-head {
-  display: block; width: 100%; max-width: 100%; min-height: 44px; box-sizing: border-box;
-  padding: 10px 13px; border: none; border-radius: 14px;
+  display: block; width: 100%; max-width: 100%; min-height: 30px; box-sizing: border-box;
+  padding: 6px 11px; border: none; border-radius: 10px;
   background: rgba(120,120,128,.16); color: #9fb0c0;
-  font-size: 13px; line-height: 1.4; text-align: left;
+  font-size: 12px; line-height: 1.25; text-align: left;
   font-variant-numeric: tabular-nums; touch-action: manipulation;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }

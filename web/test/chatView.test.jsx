@@ -95,11 +95,12 @@ describe('ChatView', () => {
     // Scrolled well away from the bottom → button appears.
     setGeometry(el, { scrollTop: 0, scrollHeight: 1000, clientHeight: 300 }); // 1000-0-300 = 700 > 40
     fireEvent.scroll(el);
-    const btn = await screen.findByRole('button', { name: '回到最新' });
+    const btn = container.querySelector('.new-output');
+    expect(btn).toBeTruthy();
 
     fireEvent.click(btn);
     expect(el.scrollTop).toBe(el.scrollHeight);
-    expect(screen.queryByRole('button', { name: '回到最新' })).toBeNull();
+    expect(container.querySelector('.new-output')).toBeNull();
   });
 
   it('a newly-arrived trailing user message forces the view back to the bottom, even if scrolled up', async () => {

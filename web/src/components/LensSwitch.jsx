@@ -1,8 +1,17 @@
-// A two-segment lens switch — 终端 (left) / 对话 (right). Button group + aria-pressed (project rule: no
-// native <select>). Rendered by App ONLY for agent panes; a non-agent pane shows no switch at all.
+import Dropdown from './Dropdown.jsx';
+
+// Lens switch — 终端 / 对话. Uses the shared themed Dropdown (project rule: no native <select>), not a
+// segmented button group (that read as two competing buttons rather than one view-mode setting).
+// Rendered by App ONLY for agent panes; a non-agent pane shows no switch at all.
+const OPTIONS = [
+  { value: 'terminal', label: '终端模式' },
+  { value: 'chat', label: '对话模式' },
+];
+
 export default function LensSwitch({ value, onChange }) {
-  const seg = (key, label) => (
-    <button type="button" key={key} className="lens-seg" aria-pressed={value === key} onClick={() => onChange(key)}>{label}</button>
+  return (
+    <div className="lens-dd">
+      <Dropdown value={value} options={OPTIONS} onChange={onChange} ariaLabel="视图切换" />
+    </div>
   );
-  return <div className="lens-switch" role="group" aria-label="视图切换">{seg('terminal', '终端')}{seg('chat', '对话')}</div>;
 }

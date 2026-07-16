@@ -7,18 +7,23 @@ import LensSwitch from '../src/components/LensSwitch.jsx';
 afterEach(cleanup);
 
 describe('LensSwitch', () => {
-  it('renders 终端 left / 对话 right, reports the chosen lens', () => {
+  it('trigger shows the current lens label', () => {
+    render(<LensSwitch value="terminal" onChange={() => {}} />);
+    expect(screen.getByRole('button', { name: '视图切换' }).textContent).toContain('终端模式');
+  });
+
+  it('opening the trigger reveals both options; picking one reports the chosen lens', () => {
     const onChange = vi.fn();
     render(<LensSwitch value="terminal" onChange={onChange} />);
-    const btns = screen.getAllByRole('button');
-    expect(btns.map((b) => b.textContent)).toEqual(['终端', '对话']); // 终端在左
-    fireEvent.click(screen.getByRole('button', { name: '对话' }));
+    fireEvent.click(screen.getByRole('button', { name: '视图切换' }));
+    expect(screen.getByRole('option', { name: '终端模式' })).toBeTruthy();
+    expect(screen.getByRole('option', { name: '对话模式' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('option', { name: '对话模式' }));
     expect(onChange).toHaveBeenCalledWith('chat');
   });
 
-  it('marks the active segment with aria-pressed', () => {
+  it('shows 对话模式 as current when value is chat', () => {
     render(<LensSwitch value="chat" onChange={() => {}} />);
-    expect(screen.getByRole('button', { name: '对话' }).getAttribute('aria-pressed')).toBe('true');
-    expect(screen.getByRole('button', { name: '终端' }).getAttribute('aria-pressed')).toBe('false');
+    expect(screen.getByRole('button', { name: '视图切换' }).textContent).toContain('对话模式');
   });
 });

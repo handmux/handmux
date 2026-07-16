@@ -73,7 +73,7 @@ export default function ChatView({ pane, kind }) {
     }
   };
 
-  const jumpToBottom = () => {
+  const scrollToBottom = () => {
     const el = scrollRef.current;
     if (!el) return;
     el.scrollTop = el.scrollHeight;
@@ -135,8 +135,8 @@ export default function ChatView({ pane, kind }) {
       </div>
 
       {!atBottom && (
-        <button type="button" className="chat-jump-bottom" aria-label="回到最新" onClick={jumpToBottom}>
-          ↓
+        <button type="button" className="new-output" aria-label="回到最新" onClick={scrollToBottom}>
+          ↓ 回到底部
         </button>
       )}
 
