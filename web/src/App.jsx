@@ -176,8 +176,8 @@ export default function App() {
   // extracted verbatim into a hook — it coordinates with Settings' history entry via settingsOpen.
   const {
     previewDomain, dynamicEnabled, previewSheetOpen, setPreviewSheetOpen,
-    activePreview, shownPreview, shownPath, openPreviewSheet,
-    startPreview, startDynamicPreview, startUrlPreview, stopPreview, renewPreview,
+    activePreview, shownPreview, tabs: previewTabs, activeName: previewActiveName, openPreviewSheet,
+    startPreview, startDynamicPreview, startUrlPreview, switchTab, closeTab, stopPreview, renewPreview,
   } = usePreviews(current, { settingsOpen, setSettingsOpen });
 
   // Update check: once per app launch (not polled), ask the server whether the installed CLI is behind the
@@ -1258,13 +1258,11 @@ export default function App() {
       {/* Auto-closes when there's no active preview (stopped/expired); 收起 just slides it down. */}
       <PreviewSheet
         open={previewSheetOpen && !!shownPreview}
-        name={shownPreview?.name}
-        kind={shownPreview?.kind}
+        tabs={previewTabs}
+        activeName={previewActiveName}
         domain={previewDomain}
-        port={shownPreview?.port}
-        dir={shownPreview?.dir}
-        expiresAt={shownPreview?.expiresAt}
-        initialPath={shownPath}
+        onSwitchTab={switchTab}
+        onCloseTab={closeTab}
         onRenew={renewPreview}
         onStop={stopPreview}
         onMinimize={() => setPreviewSheetOpen(false)}

@@ -127,6 +127,7 @@ export default {
   // preview / imageviewer / mic
   'preview.dynamic': 'Dynamic preview',
   'preview.static': 'Static preview',
+'preview.tabs': 'Open previews',
   'preview.remainTitle': 'Time left — tap to renew / stop',
   'preview.toPcView': 'Switch to desktop view',
   'preview.toMobileView': 'Switch to mobile view',

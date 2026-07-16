@@ -126,6 +126,7 @@ export default {
   // preview / imageviewer / mic
   'preview.dynamic': '动态预览',
   'preview.static': '静态预览',
+'preview.tabs': '打开的预览',
   'preview.remainTitle': '剩余有效期 — 点击续期 / 停止',
   'preview.toPcView': '切换到电脑视图',
   'preview.toMobileView': '切换到手机视图',

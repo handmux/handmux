@@ -3,21 +3,25 @@ import { getPreviews, createPreview, deletePreview } from '../api.js';
 import { previewName } from '../previewName.js';
 import { setPreviewDir } from '../storage.js';
 
-// The in-app preview subsystem, lifted out of App verbatim: the registry state (previews/domain/dynamic
-// flag), the visible-sheet flag, the current window's active preview, and every start/stop/renew/open
-// handler. `current` is App's { session, window, … } (for the per-window preview name); `settingsOpen` +
+// The in-app preview subsystem: the registry state (previews/domain/dynamic flag), the visible-sheet flag,
+// the current window's previews as switchable TABS, and every start/stop/renew/switch/open handler.
+// `current` is App's { session, window, … } (for the per-window preview name); `settingsOpen` +
 // `setSettingsOpen` let the open/start handlers coordinate with the Settings sheet's history entry (see
-// the back-popstate sequencing in startDynamicPreview). Behaviour is identical to when this lived in App.
+// the back-popstate sequencing in startDynamicPreview).
+//
+// Tabs: a window can have several live previews at once — its window-default (static dir or a dynamic
+// port started from Settings, named `<window>`) plus any number of loopback-URL previews tapped from the
+// terminal (named `<window>-<port>`). They're all registered in parallel server-side; the sheet shows one
+// at a time and a tab strip switches between them (their iframes stay mounted, so switching keeps state).
+// `activeTabName` picks which; `pathByName` remembers each tab's deep-link path (URL previews land on the
+// tapped path, others on '/').
 export function usePreviews(current, { settingsOpen, setSettingsOpen }) {
   const [previews, setPreviews] = useState([]);
   const [previewDomain, setPreviewDomain] = useState(null);
   const [dynamicEnabled, setDynamicEnabled] = useState(false);
   const [previewSheetOpen, setPreviewSheetOpen] = useState(false); // in-app preview sheet visible
-  // The preview the sheet is CURRENTLY showing. null → the window default (activePreview); non-null → an
-  // ad-hoc dynamic preview opened from a tapped terminal URL (its own port + deep-link path), which is NOT
-  // the window default (URL previews are named `<window>-<port>` so several can coexist). Decouples the
-  // sheet's target from the per-window activePreview so a tapped URL can display without clobbering it.
-  const [openTarget, setOpenTarget] = useState(null); // { name, kind:'dynamic', port, path, expiresAt } | null
+  const [activeTabName, setActiveTabName] = useState(null);        // which tab the sheet shows
+  const [pathByName, setPathByName] = useState({});               // name → deep-link path for that preview
 
   const refreshPreviews = useCallback(async () => {
     try {
@@ -29,27 +33,37 @@ export function usePreviews(current, { settingsOpen, setSettingsOpen }) {
   }, []);
   useEffect(() => { refreshPreviews(); }, [refreshPreviews]);
 
-  // The preview name for the open session-window, and its active entry (if any, not expired).
+  // The preview name for the open session-window, and its window-default entry (if any, not expired).
   const curPreviewName = current
     ? previewName({ session: current.session?.name, windowName: current.window?.name, windowId: current.window?.id })
     : null;
   const activePreview = previews.find((p) => p.name === curPreviewName && p.expiresAt > Date.now()) || null;
   const activeExpiresAt = activePreview?.expiresAt ?? null;
 
-  // What the sheet renders: the ad-hoc URL preview if one is open, else the window default.
-  const shownPreview = openTarget || activePreview;
-  const shownPath = openTarget?.path || '/';
+  // Every live preview belonging to THIS window → the tab strip. The window default (`<window>`) sorts
+  // first, then URL previews (`<window>-<port>`) by port. Each tab carries its remembered deep-link path.
+  const isWindowPreview = (name) => !!curPreviewName && (name === curPreviewName || name.startsWith(`${curPreviewName}-`));
+  const now = Date.now();
+  const tabs = previews
+    .filter((p) => p && p.expiresAt > now && isWindowPreview(p.name))
+    .map((p) => ({ name: p.name, kind: p.kind, port: p.port, dir: p.dir, expiresAt: p.expiresAt, path: pathByName[p.name] || '/' }))
+    .sort((a, b) => (a.name === curPreviewName ? -1 : b.name === curPreviewName ? 1 : (a.port || 0) - (b.port || 0)));
 
-  // A URL preview belongs to the window it was tapped in; drop it when the active window changes so it
-  // can't linger over an unrelated window (activePreview is already window-scoped by name).
-  useEffect(() => { setOpenTarget(null); }, [curPreviewName]);
+  // Effective active tab: the picked one if it's still live, else the first tab. shownPreview drives the
+  // topbar icon and the sheet header; shownPath its initial iframe path.
+  const activeName = tabs.find((tb) => tb.name === activeTabName)?.name ?? tabs[0]?.name ?? null;
+  const shownPreview = tabs.find((tb) => tb.name === activeName) ?? null;
+  const shownPath = shownPreview?.path || '/';
 
-  // Reset the sheet's open flag once there's nothing to show, so a later fresh preview doesn't pop the
+  // Tabs are window-scoped; on window change, forget the active pick so it can't linger over another window.
+  useEffect(() => { setActiveTabName(null); }, [curPreviewName]);
+
+  // Reset the sheet's open flag once this window has no previews, so a later fresh preview doesn't pop the
   // sheet open on its own (the flag would otherwise stay true from a previous session).
-  const hasShown = !!shownPreview;
-  useEffect(() => { if (!hasShown) setPreviewSheetOpen(false); }, [hasShown]);
+  const hasTabs = tabs.length > 0;
+  useEffect(() => { if (!hasTabs) setPreviewSheetOpen(false); }, [hasTabs]);
 
-  // Auto-clear the topbar icon when this preview's TTL elapses (refetch drops the expired entry).
+  // Auto-clear the topbar icon when the window-default preview's TTL elapses (refetch drops the expired entry).
   useEffect(() => {
     if (activeExpiresAt == null) return undefined;
     const id = setTimeout(refreshPreviews, Math.max(0, activeExpiresAt - Date.now()) + 500);
@@ -62,20 +76,21 @@ export function usePreviews(current, { settingsOpen, setSettingsOpen }) {
   // closing Settings' cleanup `history.back()` pop the sheet's just-pushed entry, whose fresh popstate
   // listener then fires → the sheet flashes open and immediately closes back to the main page.
   const openPreviewSheet = useCallback(() => {
-    setOpenTarget(null); // opening the window default → clear any ad-hoc URL target
+    setActiveTabName(curPreviewName); // opening the window default → focus its tab
     if (settingsOpen) {
       setSettingsOpen(false);
       requestAnimationFrame(() => setPreviewSheetOpen(true));
     } else {
       setPreviewSheetOpen(true);
     }
-  }, [settingsOpen, setSettingsOpen]);
+  }, [settingsOpen, setSettingsOpen, curPreviewName]);
 
   const startPreview = useCallback(async (dir) => {
     if (!curPreviewName) return;
     try {
       await createPreview(curPreviewName, { dir });
       setPreviewDir(current?.window?.id, dir); // remember → next open seeds here
+      setPathByName((m) => ({ ...m, [curPreviewName]: '/' }));
       await refreshPreviews();
       openPreviewSheet();
     } catch { /* ignore */ }
@@ -85,7 +100,8 @@ export function usePreviews(current, { settingsOpen, setSettingsOpen }) {
   const startDynamicPreview = useCallback(async (port) => {
     if (!curPreviewName) return;
     await createPreview(curPreviewName, { port }); // throws on failure → Settings keeps its inline error, stays open
-    setOpenTarget(null); // window default → not an ad-hoc URL target
+    setPathByName((m) => ({ ...m, [curPreviewName]: '/' }));
+    setActiveTabName(curPreviewName);
     await refreshPreviews();
     // Auto-open the sheet — but NOT in the same frame we close Settings. Settings' useBackButton pops its
     // history entry on close (history.back() → an async popstate); if the sheet opened immediately its
@@ -110,56 +126,73 @@ export function usePreviews(current, { settingsOpen, setSettingsOpen }) {
   }, [curPreviewName, refreshPreviews, setSettingsOpen]);
 
   // Open a tapped loopback URL through a dynamic-preview reverse-proxy: register `<window>-<port>` (so
-  // several ports coexist), then show it in the sheet at the URL's deep-link `path`. Throws on failure
-  // (e.g. the port isn't listening) so the caller can surface why — mirrors startDynamicPreview.
+  // several ports coexist as tabs), remember its deep-link path, focus its tab. Throws on failure (e.g.
+  // the port isn't listening) so the caller can surface why — mirrors startDynamicPreview.
   const startUrlPreview = useCallback(async ({ port, path }) => {
     if (!curPreviewName) return;
     const name = `${curPreviewName}-${port}`;
-    const res = await createPreview(name, { port }); // throws on failure
+    await createPreview(name, { port }); // throws on failure
+    setPathByName((m) => ({ ...m, [name]: path || '/' }));
+    setActiveTabName(name);
     await refreshPreviews();
-    setOpenTarget({ name, kind: 'dynamic', port, path: path || '/', expiresAt: res?.expiresAt });
     setPreviewSheetOpen(true);
   }, [curPreviewName, refreshPreviews]);
 
-  // stop/renew act on whatever the sheet is showing — the ad-hoc URL preview if open, else the window default.
-  const stopPreview = useCallback(async () => {
-    const target = openTarget || activePreview;
-    if (!target) return;
+  const switchTab = useCallback((name) => setActiveTabName(name), []);
+
+  // Close (stop) a tab: delete its registration + reap now. If it was active, the next render's activeName
+  // falls back to the first remaining tab; if it was the last, the hasTabs effect closes the sheet.
+  const closeTab = useCallback(async (name) => {
+    if (!name) return;
     try {
-      await deletePreview(target.name);
-      if (openTarget && openTarget.name === target.name) setOpenTarget(null);
+      await deletePreview(name);
+      setPathByName((m) => { const n = { ...m }; delete n[name]; return n; });
+      if (activeTabName === name) setActiveTabName(null);
       await refreshPreviews();
     } catch { /* ignore */ }
-  }, [openTarget, activePreview?.name, refreshPreviews]);
+  }, [activeTabName, refreshPreviews]);
+
+  // The sheet's 停止 / 续期 popover acts on the ACTIVE tab.
+  const stopPreview = useCallback(() => closeTab(activeName), [closeTab, activeName]);
   const renewPreview = useCallback(async () => {
-    const target = openTarget || activePreview;
+    const target = tabs.find((tb) => tb.name === activeName);
     if (!target) return;
     const opts = target.kind === 'dynamic' ? { port: target.port } : { dir: target.dir };
-    try {
-      const res = await createPreview(target.name, opts);
-      if (openTarget && openTarget.name === target.name) setOpenTarget((t) => (t ? { ...t, expiresAt: res?.expiresAt } : t));
-      await refreshPreviews();
-    } catch { /* ignore */ }
-  }, [openTarget, activePreview?.name, activePreview?.kind, activePreview?.dir, activePreview?.port, refreshPreviews]);
+    try { await createPreview(target.name, opts); await refreshPreviews(); } catch { /* ignore */ }
+  }, [tabs, activeName, refreshPreviews]);
 
-  // Keep-alive: while the sheet is OPEN and showing a preview, renew it ~1 min before its TTL expires so
-  // it never dies mid-use. renewPreview bumps expiresAt → shownExpiresAt changes → this effect reschedules,
-  // a self-perpetuating heartbeat. Tied to previewSheetOpen (not just having a preview) on purpose: a
-  // minimized/closed preview stops renewing and expires on its own, so forgotten proxies still get reaped.
-  const shownExpiresAt = shownPreview?.expiresAt ?? null;
+  // Keep-alive: while the sheet is OPEN, renew EVERY tab ~1 min before the soonest one expires so no
+  // actively-viewed preview dies mid-use (all their iframes are live in parallel). Renewing bumps the
+  // expiries → soonestExpiry changes → this effect reschedules, a self-perpetuating heartbeat. Tied to
+  // previewSheetOpen (not merely having previews): a minimized/closed sheet stops renewing, so forgotten
+  // proxies still expire and get reaped.
+  const tabNamesKey = tabs.map((tb) => tb.name).join('|');
+  const soonestExpiry = tabs.length ? Math.min(...tabs.map((tb) => tb.expiresAt)) : null;
   useEffect(() => {
-    if (!previewSheetOpen || shownExpiresAt == null) return undefined;
-    const delay = Math.max(0, shownExpiresAt - Date.now() - 60_000);
-    const id = setTimeout(() => { renewPreview(); }, delay);
+    if (!previewSheetOpen || soonestExpiry == null || !tabNamesKey) return undefined;
+    const names = tabNamesKey.split('|');
+    const delay = Math.max(0, soonestExpiry - Date.now() - 60_000);
+    const id = setTimeout(async () => {
+      try {
+        // Re-derive each name's registration args from the freshest registry, not the (possibly stale) closure.
+        await Promise.all(names.map((name) => {
+          const p = previews.find((e) => e && e.name === name);
+          if (!p) return null;
+          return createPreview(name, p.kind === 'dynamic' ? { port: p.port } : { dir: p.dir });
+        }));
+        await refreshPreviews();
+      } catch { /* ignore */ }
+    }, delay);
     return () => clearTimeout(id);
-  }, [previewSheetOpen, shownExpiresAt, renewPreview]);
+  }, [previewSheetOpen, soonestExpiry, tabNamesKey, previews, refreshPreviews]);
 
   return {
     previews, previewDomain, dynamicEnabled,
     previewSheetOpen, setPreviewSheetOpen,
     activePreview, curPreviewName,
-    shownPreview, shownPath,
+    tabs, activeName, shownPreview, shownPath,
     refreshPreviews, openPreviewSheet,
-    startPreview, startDynamicPreview, startUrlPreview, stopPreview, renewPreview,
+    startPreview, startDynamicPreview, startUrlPreview,
+    switchTab, closeTab, stopPreview, renewPreview,
   };
 }

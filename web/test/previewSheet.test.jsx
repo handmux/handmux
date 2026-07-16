@@ -4,8 +4,11 @@ import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 
 vi.mock('../src/api.js', () => ({
-  previewUrl: (entry, domain) => {
-    if (entry?.kind === 'dynamic') return `https://${entry.name}.${domain}/?token=t`;
+  previewUrl: (entry, domain, path = '/') => {
+    if (entry?.kind === 'dynamic') {
+      const sep = path.includes('?') ? '&' : '?';
+      return `https://${entry.name}.${domain}${path}${sep}token=t`;
+    }
     return `/preview/${entry?.name}/?token=t`;
   },
 }));
@@ -79,5 +82,47 @@ describe('PreviewSheet', () => {
     expect(document.querySelector('.preview-state').textContent).toBe('动态预览');
     expect(document.querySelector('.preview-detail').textContent).toBe(':4705');
     expect(document.querySelector('iframe.preview-frame').getAttribute('src')).toBe('https://app.preview.example.com/?token=t');
+  });
+
+  it('renders a tab strip with an iframe per tab (parallel), only the active one visible', async () => {
+    const exp = Date.now() + 3_600_000;
+    const tabs = [
+      { name: 'w', kind: 'dynamic', port: 3000, expiresAt: exp, path: '/' },
+      { name: 'w-5173', kind: 'dynamic', port: 5173, expiresAt: exp, path: '/admin' },
+    ];
+    await render({ open: true, tabs, activeName: 'w-5173', domain: 'preview.example.com' });
+    // one chip per tab, active one marked
+    const chips = [...document.querySelectorAll('.preview-tab-btn')];
+    expect(chips.map((c) => c.textContent)).toEqual([':3000', ':5173']);
+    expect(document.querySelector('.preview-tab.active .preview-tab-btn').textContent).toBe(':5173');
+    // all tabs' iframes are mounted; the active tab's deep-link path is carried into its src
+    const frames = [...document.querySelectorAll('iframe.preview-frame')];
+    expect(frames).toHaveLength(2);
+    expect(frames.some((f) => f.getAttribute('src') === 'https://w-5173.preview.example.com/admin?token=t')).toBe(true);
+    // only the active pane is visible
+    const panes = [...document.querySelectorAll('.preview-pane')];
+    const active = panes.find((p) => p.querySelector('iframe').getAttribute('src').includes('w-5173'));
+    const inactive = panes.find((p) => p !== active);
+    expect(inactive.style.display).toBe('none');
+    expect(active.style.display).not.toBe('none');
+  });
+
+  it('tab strip switches and closes via callbacks; a single preview shows no strip', async () => {
+    const onSwitchTab = vi.fn(); const onCloseTab = vi.fn();
+    const exp = Date.now() + 3_600_000;
+    const tabs = [
+      { name: 'w', kind: 'dynamic', port: 3000, expiresAt: exp, path: '/' },
+      { name: 'w-5173', kind: 'dynamic', port: 5173, expiresAt: exp, path: '/' },
+    ];
+    await render({ open: true, tabs, activeName: 'w', domain: 'preview.example.com', onSwitchTab, onCloseTab });
+    const chips = [...document.querySelectorAll('.preview-tab-btn')];
+    click(chips[1]);
+    expect(onSwitchTab).toHaveBeenCalledWith('w-5173');
+    click(document.querySelectorAll('.preview-tab-close')[0]);
+    expect(onCloseTab).toHaveBeenCalledWith('w');
+
+    // single preview → no strip
+    await render({ open: true, tabs: [tabs[0]], activeName: 'w', domain: 'preview.example.com' });
+    expect(document.querySelector('.preview-tabs')).toBeNull();
   });
 });

@@ -946,6 +946,10 @@ button.cmd-text { background: none; border: none; text-align: left; }
 /* Preview sheet iframe — fills the body (which is display:flex), white bg so a transparent site
    renders on white like a real browser tab. */
 .preview-frame { flex: 1; width: 100%; border: 0; background: #fff; }
+/* One pane per open preview; all mounted in parallel, inactive ones display:none (kept alive). The
+   visible pane fills the flex body; in PC mode it's a plain block so the scaler sizes itself. */
+.preview-pane { flex: 1; min-width: 0; display: flex; }
+.preview-body.pc .preview-pane { display: block; }
 /* PC view: the body scrolls both axes; .preview-scaler is a box sized to the SCALED desktop page (so
    zooming past fit gives real scroll area), and the iframe is a 1280px-wide desktop viewport
    transform-scaled into it. The iframe stays interactive — it scrolls its own content and takes input. */
@@ -973,6 +977,30 @@ button.cmd-text { background: none; border: none; text-align: left; }
 .preview-state { color: var(--green); font-weight: 600; flex: 0 0 auto; }
 .preview-name { color: #9fb0c0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .preview-detail { color: #6e7d8c; margin-left: 6px; }
+/* Tab strip — one chip per open preview for this window; horizontal-scrollable (Safari-tab feel).
+   Active chip lit iOS-blue. Each chip = a label button + a × to stop that preview. */
+.preview-tabs {
+  display: flex; gap: 6px; align-items: center; flex: 0 0 auto;
+  padding: 6px 10px; overflow-x: auto; -webkit-overflow-scrolling: touch;
+  border-top: 1px solid #24262b; background: #1a1c20; scrollbar-width: none;
+}
+.preview-tabs::-webkit-scrollbar { display: none; }
+.preview-tab {
+  display: inline-flex; align-items: center; flex: 0 0 auto;
+  background: #26282e; border: 1px solid #34363c; border-radius: 999px; overflow: hidden;
+}
+.preview-tab.active { background: var(--blue); border-color: var(--blue); }
+.preview-tab-btn {
+  background: transparent; border: none; color: #c8d2dc; font-size: 12px;
+  padding: 5px 4px 5px 11px; font-variant-numeric: tabular-nums; touch-action: manipulation; max-width: 40vw;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.preview-tab.active .preview-tab-btn { color: #fff; font-weight: 600; }
+.preview-tab-close {
+  background: transparent; border: none; color: #8a97a6; font-size: 16px; line-height: 1;
+  padding: 4px 9px 4px 5px; touch-action: manipulation;
+}
+.preview-tab.active .preview-tab-close { color: rgba(255,255,255,.85); }
 /* TTL chip — minutes only; tap to open the 续期/关闭 popover. */
 .preview-remain {
   margin-left: auto; flex: 0 0 auto; font-variant-numeric: tabular-nums;
