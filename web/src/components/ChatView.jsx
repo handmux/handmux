@@ -54,6 +54,8 @@ export default function ChatView({ pane, kind }) {
   const scrollRef = useRef(null);
   const stickBottomRef = useRef(true); // was the user near the bottom just before this render's messages changed?
   const prevScrollHeightRef = useRef(null); // captured just before a loadOlder() prepend, to preserve scroll position
+  const pendingPrependRef = useRef(false); // true only while a loadOlder() round-trip is in flight, so a
+  // recent-window poll landing mid-flight doesn't consume the stale prevScrollHeight and jump the view.
 
   const onScroll = () => {
     const el = scrollRef.current;
@@ -61,19 +63,22 @@ export default function ChatView({ pane, kind }) {
     stickBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < NEAR_BOTTOM_PX;
     if (el.scrollTop < NEAR_TOP_PX && hasMoreOlder && !loadingOlder) {
       prevScrollHeightRef.current = el.scrollHeight;
+      pendingPrependRef.current = true;
       loadOlder();
     }
   };
 
-  // Default view is pinned to the bottom (newest), like a normal chat. After messages change: if the user
-  // was near the bottom, stick to it; if a loadOlder() prepend just landed (prevScrollHeightRef set),
-  // restore the visual position instead so the view doesn't jump.
+  // Default view is pinned to the bottom (newest), like a normal chat. After messages change: if a
+  // loadOlder() prepend just landed (pendingPrependRef set), restore the visual position so the view
+  // doesn't jump. Otherwise (including a recent-window poll update that races the prepend round-trip) just
+  // apply bottom-stick — never consume prevScrollHeight against the wrong scrollHeight.
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
-    if (prevScrollHeightRef.current != null) {
+    if (pendingPrependRef.current) {
       el.scrollTop += el.scrollHeight - prevScrollHeightRef.current;
       prevScrollHeightRef.current = null;
+      pendingPrependRef.current = false;
       return;
     }
     if (stickBottomRef.current) el.scrollTop = el.scrollHeight;
