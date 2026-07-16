@@ -1704,9 +1704,16 @@ button.cmd-text { background: none; border: none; text-align: left; }
   max-height: 240px; overflow-y: auto; overflow-x: auto; -webkit-overflow-scrolling: touch;
 }
 
-/* Running tool head — small pulse prefix, muted running-state tint (still reads as machinery). */
-.chat-tool-running .chat-tool-head { background: rgba(120,120,128,.22); color: #b7c6d4; }
-.chat-tool-running .chat-typing-dots { margin-right: 6px; }
+/* Running tool head — muted running-state tint (still reads as machinery). The head becomes a flex row so
+   the command text truncates while the pulse + "运行中" label stay pinned, unclipped, at the line's end. */
+.chat-tool-running .chat-tool-head { background: rgba(120,120,128,.22); color: #b7c6d4; display: flex; align-items: center; gap: 6px; }
+.chat-tool-head-text { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.chat-tool-head-running {
+  flex: none; display: inline-flex; align-items: center; gap: 4px;
+  font-size: 11px; color: #9fb0c0;
+}
+.chat-tool-running .chat-tool-head-open { display: flex; }
+.chat-tool-running .chat-tool-head-open .chat-tool-head-text { white-space: pre-wrap; word-break: break-word; overflow: visible; text-overflow: clip; }
 
 /* Typing indicator (Task 13) — a small assistant-side wave of three dots at the end of the message list,
    standing in for "Claude is generating" since we poll state rather than stream tokens. Also reused

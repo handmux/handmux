@@ -19,7 +19,7 @@ function toolSummary(tool) {
   return `🔧 ${n}`;
 }
 
-// Three-dot pulse, reused by both the typing bubble and the running-tool head prefix.
+// Three-dot pulse, reused by both the typing bubble and the running-tool head's trailing indicator.
 function TypingDots() {
   return (
     <span className="chat-typing-dots">
@@ -36,8 +36,13 @@ function ToolChip({ tool, running }) {
   return (
     <div className={'chat-tool' + (tool.isError ? ' chat-tool-err' : '') + (running ? ' chat-tool-running' : '')}>
       <button type="button" className={headClass} onClick={() => setOpen((v) => !v)} aria-expanded={open}>
-        {running && <TypingDots />}
-        {toolSummary(tool)}{running ? ' · 运行中' : ''}
+        <span className="chat-tool-head-text">{toolSummary(tool)}</span>
+        {running && (
+          <span className="chat-tool-head-running">
+            <TypingDots />
+            运行中
+          </span>
+        )}
       </button>
       {open && tool.result != null && <pre className="chat-tool-body">{tool.result}</pre>}
     </div>
