@@ -11,13 +11,23 @@ import { fallbackGate } from '../chatGate.js';
 import PromptGate from './PromptGate.jsx';
 import { sendKeys } from '../api.js';
 
-// One-line summary for a collapsed tool chip. Cover the high-frequency tools; generic fallback otherwise.
+// One-line summary for a collapsed tool chip. We show what Claude actually DID — run a command, call a
+// tool, activate a skill, dispatch an Agent — honestly (no laundering into vague phrases); the raw command/
+// path/args stays and the full result opens on tap. Cover the high-frequency tools; generic fallback else.
 function toolSummary(tool) {
   const n = tool.name || '工具';
   const inp = tool.input || {};
   if (n === 'Bash') return `▶ 运行命令: ${inp.command || ''}`.trim();
-  if (n === 'Edit' || n === 'Write') return `✎ ${n === 'Write' ? '写入' : '编辑'} ${inp.file_path || ''}`.trim();
-  if (n === 'Read') return `📄 读取 ${inp.file_path || ''}`.trim();
+  if (n === 'Edit' || n === 'MultiEdit' || n === 'Write') return `✎ ${n === 'Write' ? '写入' : '编辑'} ${inp.file_path || ''}`.trim();
+  if (n === 'Read') return `📄 读取 ${inp.file_path || inp.notebook_path || ''}`.trim();
+  if (n === 'NotebookEdit') return `✎ 编辑 ${inp.notebook_path || ''}`.trim();
+  if (n === 'Grep') return `🔍 搜索 ${inp.pattern || ''}`.trim();
+  if (n === 'Glob') return `🔍 查找文件 ${inp.pattern || ''}`.trim();
+  if (n === 'WebSearch') return `🌐 联网搜索 ${inp.query || ''}`.trim();
+  if (n === 'WebFetch') return `🌐 读取网页 ${inp.url || ''}`.trim();
+  if (n === 'TodoWrite') return '📝 更新待办';
+  if (n === 'Skill') return `🧩 激活技能 ${inp.command || inp.skill || ''}`.trim();
+  if (n === 'Task' || n === 'Agent') return `🤖 调用 Agent${inp.subagent_type ? `(${inp.subagent_type})` : ''}: ${inp.description || ''}`.trim();
   return `🔧 ${n}`;
 }
 

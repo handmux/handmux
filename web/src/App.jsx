@@ -9,7 +9,7 @@ import {
   renameWindowIdeas, getChangelogSeen, setChangelogSeen,
   getVersionSeen, setVersionSeen,
   getReadInboxIds, addReadInboxId, pruneReadInboxIds, getNotifSeenTs, setNotifSeenTs,
-  getPreviewDir, getIdeas,
+  getPreviewDir, getIdeas, getChatTone, setChatTone,
 } from './storage.js';
 import { LATEST_RELEASE } from './changelog.js';
 import {
@@ -79,6 +79,8 @@ export default function App() {
   const [needToken, setNeedToken] = useState(!getToken());
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [chatTone, setChatToneState] = useState(getChatTone); // 对话-lens colour tone (persisted); default 深墨
+  const pickChatTone = (tone) => { setChatTone(tone); setChatToneState(tone); };
   const [usageOpen, setUsageOpen] = useState(false);
   const [bindOpen, setBindOpen] = useState(false);
   const [newWinOpen, setNewWinOpen] = useState(false);
@@ -1064,7 +1066,7 @@ export default function App() {
     // as one unit: the keys + input land just above the keyboard and the terminal's bottom sits
     // right above the keys (the topbar scrolls off the top, which is fine while typing). Uses a
     // transform — the same lift that worked on the dock — so iOS can't undo it by re-scrolling.
-    <div className="app" style={inset ? { transform: `translateY(-${inset}px)` } : undefined}>
+    <div className="app" data-chat-tone={chatTone} style={inset ? { transform: `translateY(-${inset}px)` } : undefined}>
       <header className="topbar">
         <button className="hamburger" onClick={() => setDrawerOpen(true)}>☰</button>
         <span className="session-name" {...sessionNameLongPress}>{current?.session?.name ?? '—'}</span>
@@ -1107,6 +1109,8 @@ export default function App() {
       <Settings
         open={settingsOpen}
         onClose={() => setSettingsOpen(false)}
+        chatTone={chatTone}
+        onChatTone={pickChatTone}
         termRef={termRef}
         getColCount={() => tmuxColsRef.current ?? termRef.current?.getSize()?.cols}
         onColAdjust={(d) => tmuxResizeCols(d)}

@@ -1641,7 +1641,43 @@ button.cmd-text { background: none; border: none; text-align: left; }
    above the (always-mounted, separate) BottomDock composer. No input here — see ChatView.jsx header.
    This app is dark-themed throughout (no light-mode media query anywhere in this file), so these follow
    the same palette as the rest of the sheet chrome rather than inventing a light variant. */
-.chat-view { position: relative; display: flex; flex-direction: column; min-height: 0; flex: 1; background: #1a1b1e; }
+/* ============================================================================
+   对话-lens colour tones. The chat lens is skinned entirely through these --ct-* tokens so the whole
+   surface (bubbles, activity chips, gate, composer) recolours from one place and the user can pick a
+   tone in Settings. Default = 深墨 (ink) on `.app`; `data-chat-tone` on `.app` overrides it. Terminal
+   lens + rest of app are untouched (they use --blue etc., not --ct-*). Only `.chat-*`/`.cc-*` consume these.
+   ---- 深墨 ink (default, cool premium dark) ---- */
+.app {
+  --ct-bg:#14161b; --ct-ink:#e9edf3; --ct-muted:#8790a0;
+  --ct-me-bg:linear-gradient(180deg,#2f80ff,#1f6cf0); --ct-me-ink:#fff;
+  --ct-chip:rgba(255,255,255,.055); --ct-chip-2:rgba(255,255,255,.11); --ct-chip-line:rgba(255,255,255,.08);
+  --ct-chip-ink:#aab3c2; --ct-body:rgba(255,255,255,.06);
+  --ct-accent:#4d8bff; --ct-bar:#1c1f26; --ct-field:#0f1115; --ct-field-line:#2b3040;
+  --ct-code-bg:rgba(255,255,255,.05); --ct-line:rgba(255,255,255,.12);
+  --ct-err-bg:rgba(255,69,58,.14); --ct-err-ink:#ff8a80;
+}
+/* ---- 暖白 light (iMessage/微信-familiar) ---- */
+.app[data-chat-tone="light"] {
+  --ct-bg:#f2f3f5; --ct-ink:#10141b; --ct-muted:#7a828f;
+  --ct-me-bg:linear-gradient(180deg,#2f95ff,#0a84ff); --ct-me-ink:#fff;
+  --ct-chip:#ffffff; --ct-chip-2:#e6e9ef; --ct-chip-line:rgba(0,0,0,.08);
+  --ct-chip-ink:#5a6472; --ct-body:#eef0f3;
+  --ct-accent:#0a84ff; --ct-bar:#e7e9ee; --ct-field:#ffffff; --ct-field-line:#d3d7de;
+  --ct-code-bg:#eceef2; --ct-line:rgba(0,0,0,.1);
+  --ct-err-bg:rgba(255,59,48,.1); --ct-err-ink:#c0362f;
+}
+/* ---- 暖夜 dusk (warm dark, amber accent) ---- */
+.app[data-chat-tone="dusk"] {
+  --ct-bg:#191410; --ct-ink:#f0e9e2; --ct-muted:#a2938a;
+  --ct-me-bg:linear-gradient(180deg,#8b6bff,#7457f0); --ct-me-ink:#fff;
+  --ct-chip:rgba(255,255,255,.05); --ct-chip-2:rgba(255,255,255,.1); --ct-chip-line:rgba(255,220,190,.1);
+  --ct-chip-ink:#c7b6a8; --ct-body:rgba(255,225,190,.05);
+  --ct-accent:#f0a24b; --ct-bar:#241c15; --ct-field:#14100c; --ct-field-line:#3a2f24;
+  --ct-code-bg:rgba(255,225,190,.06); --ct-line:rgba(255,220,190,.12);
+  --ct-err-bg:rgba(255,120,90,.16); --ct-err-ink:#ff9a80;
+}
+
+.chat-view { position: relative; display: flex; flex-direction: column; min-height: 0; flex: 1; background: var(--ct-bg); }
 /* Jump-to-bottom (Task 12): reuses the terminal's own .new-output pill (same class/caption) rather than a
    bespoke button — one control, one look, across both lenses. Only shown once scrolled away from the
    newest message; .new-output's own right/bottom:12px lands it above the composer since .chat-view is a
@@ -1651,22 +1687,21 @@ button.cmd-text { background: none; border: none; text-align: left; }
   display: flex; flex-direction: column; gap: 8px;
   padding: 12px 12px calc(12px + env(safe-area-inset-bottom, 0px));
 }
-.chat-empty { margin: auto; color: #777; font-size: 13px; text-align: center; padding: 24px 0; }
+.chat-empty { margin: auto; color: var(--ct-muted); font-size: 13px; text-align: center; padding: 24px 0; }
 
 .chat-bubble {
   padding: 9px 13px; border-radius: 18px; font-size: 15px; line-height: 1.4;
   white-space: pre-wrap; word-break: break-word;
 }
-/* Your messages: a right-aligned pill. Toned DOWN from the loud iOS system blue (#0a84ff) to a calmer,
-   less-luminous blue so it doesn't glare in the dark chat lane. */
-.chat-me { align-self: flex-end; max-width: 82%; background: #1d63b3; color: #fff; border-bottom-right-radius: 5px; }
+/* Your messages: a right-aligned pill in the tone's send colour (a gradient per tone). */
+.chat-me { align-self: flex-end; max-width: 82%; background: var(--ct-me-bg); color: var(--ct-me-ink); border-bottom-right-radius: 5px; box-shadow: 0 1px 2px rgba(0,0,0,.12); }
 /* Assistant replies: NO bubble at all — Claude's prose renders as a clean, high-contrast full-width block
    (like a document/article), not a tinted pill. This (a) lifts the text contrast that the old muddy grey
    box washed out, and (b) makes replies unmistakably distinct from tool chips (which ARE boxed). Markdown
    tables/code inside still get their own boxed, horizontally-scrolling surfaces (see .chat-md). */
 .chat-them {
   align-self: stretch; width: 100%; max-width: 100%; box-sizing: border-box;
-  background: transparent; color: #f2f3f5; border-radius: 0; padding: 3px 2px;
+  background: transparent; color: var(--ct-ink); border-radius: 0; padding: 3px 2px;
 }
 
 /* Markdown assistant bubbles (Task 10) — same marked→DOMPurify pipeline + palette family as .doc-md, but
@@ -1677,15 +1712,15 @@ button.cmd-text { background: none; border: none; text-align: left; }
 .chat-md > *:first-child { margin-top: 0; }
 .chat-md > *:last-child { margin-bottom: 0; }
 .chat-md p { margin: 0 0 8px; }
-.chat-md h1, .chat-md h2, .chat-md h3 { font-size: 1em; margin: 10px 0 6px; border-bottom: 1px solid rgba(255,255,255,.12); padding-bottom: 3px; }
+.chat-md h1, .chat-md h2, .chat-md h3 { font-size: 1em; margin: 10px 0 6px; border-bottom: 1px solid var(--ct-line); padding-bottom: 3px; }
 .chat-md ul, .chat-md ol { margin: 0 0 8px; padding-left: 1.3em; }
-.chat-md a { color: var(--blue); }
+.chat-md a { color: var(--ct-accent); }
 .chat-md img { max-width: 100%; border-radius: 6px; }
-.chat-md code { background: rgba(0,0,0,.28); padding: 1px 4px; border-radius: 4px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: .92em; }
-.chat-md pre { background: rgba(0,0,0,.28); padding: 10px; border-radius: 8px; margin: 0 0 8px; overflow-x: auto; -webkit-overflow-scrolling: touch; max-width: 100%; }
+.chat-md code { background: var(--ct-code-bg); padding: 1px 4px; border-radius: 4px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: .92em; }
+.chat-md pre { background: var(--ct-code-bg); padding: 10px; border-radius: 8px; margin: 0 0 8px; overflow-x: auto; -webkit-overflow-scrolling: touch; max-width: 100%; }
 .chat-md pre code { background: none; padding: 0; }
 .chat-md table { display: block; max-width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; border-collapse: collapse; margin: 0 0 8px; }
-.chat-md th, .chat-md td { border: 1px solid rgba(255,255,255,.16); padding: 4px 8px; text-align: left; white-space: nowrap; }
+.chat-md th, .chat-md td { border: 1px solid var(--ct-line); padding: 4px 8px; text-align: left; white-space: nowrap; }
 
 /* Tool chip — collapsed by default; tap expands the raw result inline. Muted so it reads as machinery,
    not conversation, same register as .chat-thinking but stays tappable (≥44pt target on the head). */
@@ -1695,18 +1730,18 @@ button.cmd-text { background: none; border: none; text-align: left; }
    below (see .chat-tool-body). */
 .chat-tool-head {
   display: block; width: 100%; max-width: 100%; min-height: 30px; box-sizing: border-box;
-  padding: 6px 11px; border: 1px solid rgba(255,255,255,.07); border-radius: 10px;
-  background: rgba(120,120,128,.16); color: #9fb0c0;
+  padding: 6px 11px; border: 1px solid var(--ct-chip-line); border-radius: 10px;
+  background: var(--ct-chip); color: var(--ct-chip-ink);
   font-size: 12px; line-height: 1.25; text-align: left;
   font-variant-numeric: tabular-nums; touch-action: manipulation;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .chat-tool-head-open { white-space: pre-wrap; word-break: break-word; overflow: visible; text-overflow: clip; }
-.chat-tool-head:active { background: rgba(120,120,128,.28); }
-.chat-tool-err .chat-tool-head { background: rgba(255,69,58,.14); color: #ff8a80; }
+.chat-tool-head:active { background: var(--ct-chip-2); }
+.chat-tool-err .chat-tool-head { background: var(--ct-err-bg); color: var(--ct-err-ink); border-color: transparent; }
 .chat-tool-body {
   margin: 4px 0 0; padding: 10px 12px; border-radius: 10px;
-  background: rgba(120,120,128,.10); color: #c9d5e1;
+  background: var(--ct-body); color: var(--ct-ink);
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 12px; line-height: 1.5; white-space: pre-wrap; word-break: break-word;
   max-height: 240px; overflow-y: auto; overflow-x: auto; -webkit-overflow-scrolling: touch;
@@ -1714,11 +1749,11 @@ button.cmd-text { background: none; border: none; text-align: left; }
 
 /* Running tool head — muted running-state tint (still reads as machinery). The head becomes a flex row so
    the command text truncates while the pulse + "运行中" label stay pinned, unclipped, at the line's end. */
-.chat-tool-running .chat-tool-head { background: rgba(120,120,128,.22); color: #b7c6d4; display: flex; align-items: center; gap: 6px; }
+.chat-tool-running .chat-tool-head { background: var(--ct-chip-2); color: var(--ct-ink); display: flex; align-items: center; gap: 6px; }
 .chat-tool-head-text { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .chat-tool-head-running {
   flex: none; display: inline-flex; align-items: center; gap: 4px;
-  font-size: 11px; color: #9fb0c0;
+  font-size: 11px; color: var(--ct-chip-ink);
 }
 .chat-tool-running .chat-tool-head-open { display: flex; }
 /* Expanded head (running OR not): the summary text WRAPS to multiple lines instead of staying one very long
@@ -1730,11 +1765,11 @@ button.cmd-text { background: none; border: none; text-align: left; }
    (inline, smaller) as the running-tool prefix above. */
 .chat-typing {
   align-self: flex-start; padding: 8px 12px; border-radius: 14px;
-  background: rgba(120,120,128,.10);
+  background: var(--ct-body);
 }
 .chat-typing-dots { display: inline-flex; align-items: center; gap: 3px; }
 .chat-typing-dot {
-  width: 6px; height: 6px; border-radius: 50%; background: #8a95a1;
+  width: 6px; height: 6px; border-radius: 50%; background: var(--ct-muted);
   animation: chat-typing-wave 1.1s ease-in-out infinite;
 }
 .chat-typing-dot:nth-child(2) { animation-delay: .15s; }
@@ -1750,7 +1785,7 @@ button.cmd-text { background: none; border: none; text-align: left; }
 
 /* Thinking — muted, smaller, readable but visually de-emphasized vs. real bubbles. */
 .chat-thinking {
-  align-self: flex-start; max-width: 88%; padding: 6px 12px; color: #7c8794;
+  align-self: flex-start; max-width: 88%; padding: 6px 12px; color: var(--ct-muted);
   font-size: 12.5px; font-style: italic; line-height: 1.45; white-space: pre-wrap; word-break: break-word;
 }
 
@@ -1759,35 +1794,35 @@ button.cmd-text { background: none; border: none; text-align: left; }
 .chat-gate {
   flex: none; margin: 0 12px calc(10px + env(safe-area-inset-bottom, 0px));
   padding: 12px 14px; border-radius: 14px;
-  background: #232427; box-shadow: 0 4px 18px rgba(0,0,0,.35);
+  background: var(--ct-bar); box-shadow: 0 4px 18px rgba(0,0,0,.35);
 }
 /* "第 i/N 题" progress for a multi-question AskUserQuestion, above the question. */
-.chat-gate-step { font-size: 11px; font-weight: 600; color: #8a94a4; margin-bottom: 6px; letter-spacing: .02em; }
-.chat-gate-prompt { font-size: 14px; color: #e6ebf1; line-height: 1.4; margin-bottom: 10px; }
+.chat-gate-step { font-size: 11px; font-weight: 600; color: var(--ct-muted); margin-bottom: 6px; letter-spacing: .02em; }
+.chat-gate-prompt { font-size: 14px; color: var(--ct-ink); line-height: 1.4; margin-bottom: 10px; }
 /* Single-select option list — each row is a radio (label + optional grey description). Selected = tinted
-   with a blue ring; the whole row is a ≥44pt tap target. */
+   with an accent ring; the whole row is a ≥44pt tap target. */
 .chat-gate-options { display: flex; flex-direction: column; gap: 6px; margin-bottom: 10px; }
 .chat-gate-opt {
   display: flex; flex-direction: column; gap: 2px; text-align: left;
-  min-height: 44px; padding: 8px 12px; border: 1px solid rgba(255,255,255,.08); border-radius: 10px;
-  background: rgba(120,120,128,.1); color: #e6ebf1; touch-action: manipulation; transition: background .12s, border-color .12s;
+  min-height: 44px; padding: 8px 12px; border: 1px solid var(--ct-chip-line); border-radius: 10px;
+  background: var(--ct-chip); color: var(--ct-ink); touch-action: manipulation; transition: background .12s, border-color .12s;
 }
-.chat-gate-opt.on { background: rgba(10,132,255,.16); border-color: var(--blue); }
+.chat-gate-opt.on { background: color-mix(in srgb, var(--ct-accent) 16%, transparent); border-color: var(--ct-accent); }
 .chat-gate-opt-label { font-size: 15px; font-weight: 600; }
-.chat-gate-opt-desc { font-size: 12px; color: #97a2b0; line-height: 1.35; }
+.chat-gate-opt-desc { font-size: 12px; color: var(--ct-muted); line-height: 1.35; }
 .chat-gate-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 .chat-gate-btn {
   flex: 1; min-width: 44px; min-height: 44px; padding: 0 14px;
-  border: none; border-radius: 10px; background: rgba(120,120,128,.16); color: var(--blue);
+  border: none; border-radius: 10px; background: var(--ct-chip-2); color: var(--ct-accent);
   font-size: 15px; font-weight: 600; touch-action: manipulation;
 }
-.chat-gate-btn.primary { background: var(--blue); color: #fff; }
-.chat-gate-btn.primary:disabled { background: #3a3d44; color: #6b7280; }
-.chat-gate-btn:active { background: rgba(120,120,128,.3); }
+.chat-gate-btn.primary { background: var(--ct-accent); color: #fff; }
+.chat-gate-btn.primary:disabled { background: var(--ct-chip-2); color: var(--ct-muted); }
+.chat-gate-btn:active { filter: brightness(1.08); }
 .chat-gate-btn.primary:not(:disabled):active { filter: brightness(1.1); }
 .chat-gate-hint {
-  display: flex; align-items: center; color: #9fb0c0; font-size: 13px; line-height: 1.45;
-  background: rgba(120,120,128,.12); box-shadow: none;
+  display: flex; align-items: center; color: var(--ct-chip-ink); font-size: 13px; line-height: 1.45;
+  background: var(--ct-body); box-shadow: none;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -1799,26 +1834,26 @@ button.cmd-text { background: none; border: none; text-align: left; }
    above the keyboard with the whole .app (translateY(-inset)); the safe-area pad keeps it off the home bar. */
 .chat-composer {
   display: flex; flex-direction: column; gap: 6px;
-  padding: 6px 8px calc(8px + env(safe-area-inset-bottom, 0px)); background: #2a2b2e;
+  padding: 6px 8px calc(8px + env(safe-area-inset-bottom, 0px)); background: var(--ct-bar);
 }
 .cc-quick { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; }
 .cc-quick::-webkit-scrollbar { display: none; }
 /* The card: textarea on top, action row beneath. Buttons never overlay the text (own row) → none of the
-   dock's multi/crowd/ghost-hit machinery is needed. Subtle border, faint blue on focus, green while dictating. */
+   dock's multi/crowd/ghost-hit machinery is needed. Subtle border, faint accent on focus, green while dictating. */
 .cc-card {
   display: flex; flex-direction: column; gap: 4px;
-  background: #1e2024; border: 1px solid #34363c; border-radius: 20px;
+  background: var(--ct-field); border: 1px solid var(--ct-field-line); border-radius: 20px;
   padding: 8px 10px 8px 14px; transition: border-color .15s;
 }
-.cc-card:focus-within { border-color: #3a4a63; }
+.cc-card:focus-within { border-color: var(--ct-accent); }
 .cc-card.recording { border-color: #34c759; }
 /* 16px font is deliberate — under it iOS zooms the page on focus. max-height caps growth (~6 lines) → scroll. */
 .cc-text {
   width: 100%; background: transparent; border: none; outline: none; resize: none;
-  color: #f2f3f5; font-size: 16px; line-height: 22px; max-height: 132px; padding: 2px 0;
+  color: var(--ct-ink); font-size: 16px; line-height: 22px; max-height: 132px; padding: 2px 0;
   font-family: inherit;
 }
-.cc-text::placeholder { color: #6b7280; }
+.cc-text::placeholder { color: var(--ct-muted); }
 .cc-actions { display: flex; align-items: center; justify-content: space-between; }
 .cc-actions-right { display: flex; align-items: center; gap: 6px; }
 .cc-attach, .cc-send {
@@ -1826,11 +1861,18 @@ button.cmd-text { background: none; border: none; text-align: left; }
   width: 34px; height: 34px; border: none; border-radius: 999px;
   touch-action: manipulation; -webkit-tap-highlight-color: transparent;
 }
-.cc-attach { background: transparent; color: #9aa4b2; }
-.cc-attach:active { background: #2f3238; }
-.cc-send { background: var(--blue); color: #fff; }
-.cc-send:disabled { background: #3a3d44; color: #6b7280; }
+.cc-attach { background: transparent; color: var(--ct-chip-ink); }
+.cc-attach:active { background: var(--ct-chip-2); }
+.cc-send { background: var(--ct-accent); color: #fff; }
+.cc-send:disabled { background: var(--ct-chip-2); color: var(--ct-muted); }
 .cc-send:not(:disabled):active { filter: brightness(1.1); }
 .cc-stop { background: #e5484d; }
+/* The quick-reply chips reuse the terminal dock's .quick-cmd tints, which are tuned for a dark ground
+   (full-luminance green/blue/grey text). On the 暖白 tone that text washes out on white, so darken each
+   tint toward ink while keeping its hue. (Dark tones keep the original bright-on-dark chips.) */
+.app[data-chat-tone="light"] .cc-quick .quick-cmd {
+  color: color-mix(in srgb, rgb(var(--rgb)) 60%, #10141b);
+  border-color: rgba(var(--rgb), .55); background: rgba(var(--rgb), .15);
+}
 
 .push-inbox-detail-del { display: block; margin-top: 24px; }

@@ -11,6 +11,7 @@ import { t, getLangCode, setLang, AVAILABLE } from '../i18n';
 // font-size control. Font reads/writes the live terminal through termRef — the same persisted
 // size the two-finger pinch drives — so the modal and the gesture stay in sync.
 export default function Settings({ open, onClose, termRef, onColAdjust, onColRestore, onOpenChangelog, changelogUnread,
+  chatTone = 'ink', onChatTone = () => {},
   notifUnread = false, onOpenInbox,
   updateInfo = null,
   activePreview = null, pane = null, lastPreviewDir = null, dynamicEnabled = false,
@@ -142,6 +143,23 @@ export default function Settings({ open, onClose, termRef, onColAdjust, onColRes
             <button className="fontbtn" onClick={() => stepFont(1)} aria-label={t('settings.font_increase')}>A+</button>
             <button className="fontbtn" onClick={auto} title={t('settings.font_auto_title')}>{t('settings.font_auto')}</button>
           </div>
+        </div>
+
+        <div className="settings-section">
+          <div className="settings-label">{t('settings.chat_tone')}</div>
+          <div className="settings-btns">
+            {['ink', 'light', 'dusk'].map((tn) => (
+              <button
+                key={tn}
+                className="fontbtn"
+                aria-pressed={chatTone === tn}
+                onClick={() => onChatTone(tn)}
+              >
+                {t(`settings.chat_tone_${tn}`)}
+              </button>
+            ))}
+          </div>
+          <div className="settings-hint">{t('settings.chat_tone_hint')}</div>
         </div>
 
         <div className="settings-section">
