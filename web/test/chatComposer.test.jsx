@@ -43,6 +43,28 @@ describe('ChatComposer', () => {
     expect(onSent).toHaveBeenCalledWith('继续实现');
   });
 
+  // The tap-to-focus target-exclusion is unit-tested here; the MOVEMENT guard (swipe/scroll must not focus)
+  // rides on pointer coords, which jsdom delivers as null for pointer events — it's a device gesture, gated
+  // on a real-device pass (see CLAUDE.md: touch surfaces are untestable headless).
+  it('a stationary tap on the action row blank space focuses the textarea', () => {
+    const { container } = render(<ChatComposer pane="%1" kind="idle" />);
+    const ta = screen.getByPlaceholderText('和 Claude 对话…');
+    const actions = container.querySelector('.cc-actions');
+    expect(document.activeElement).not.toBe(ta);
+    fireEvent.pointerDown(actions, { clientX: 50, clientY: 100 });
+    fireEvent.pointerUp(actions, { clientX: 50, clientY: 100 });
+    expect(document.activeElement).toBe(ta);
+  });
+
+  it('tapping a control in the row does not trigger tap-to-focus (only blank space does)', () => {
+    const { container } = render(<ChatComposer pane="%1" kind="idle" />);
+    const ta = screen.getByPlaceholderText('和 Claude 对话…');
+    const attach = container.querySelector('.cc-attach'); // the ＋ button
+    fireEvent.pointerDown(attach, { clientX: 20, clientY: 100 });
+    fireEvent.pointerUp(attach, { clientX: 20, clientY: 100 });
+    expect(document.activeElement).not.toBe(ta); // excluded — the button's own handler owns the tap
+  });
+
   it('while the agent is working the send button becomes a Stop that sends Escape', () => {
     const onKey = vi.fn();
     render(<ChatComposer pane="%1" kind="working" onKey={onKey} />);

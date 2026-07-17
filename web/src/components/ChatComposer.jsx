@@ -40,6 +40,7 @@ export default function ChatComposer({ pane, kind, cwd = null, onKey = () => {},
   useEffect(() => { setChatDraft(value); }, [value]);
   const ref = useRef(null);          // the textarea
   const uploadRef = useRef(null);    // hidden <input type=file>
+  const tapPt = useRef({ x: 0, y: 0, moved: false }); // for tap-to-focus on the card's blank areas
 
   // The agent quick-reply list (global) drives the chip strip; reload it whenever the ⚙ editor closes so
   // add/edit/delete/reorder flow straight into the strip (single source of truth: favStore). KEY favs
@@ -109,6 +110,24 @@ export default function ChatComposer({ pane, kind, cwd = null, onKey = () => {},
   // Interrupt the working agent — Escape is Claude Code's stop key (same path the terminal ESC uses).
   const stop = () => onKey('Escape');
 
+  // Tap the card's blank areas (chiefly the action row's empty middle) to focus the textarea — a bigger,
+  // forgiving target than the thin textarea itself. A movement threshold (like MicButton) rejects a
+  // scroll/lens-swipe that merely starts here, so it never mis-fires: only a stationary tap focuses. Taps
+  // that land on a control or the textarea are left alone (their own handlers / native focus apply).
+  const cardDown = (e) => { tapPt.current = { x: e.clientX, y: e.clientY, moved: false }; };
+  const cardMove = (e) => {
+    const p = tapPt.current;
+    if (!p.moved && Math.hypot(e.clientX - p.x, e.clientY - p.y) > 10) p.moved = true;
+  };
+  const cardTapFocus = (e) => {
+    const p = tapPt.current;
+    // Reject if it moved during the press (a scroll/lens-swipe), OR if the up landed far from the down —
+    // a second signal in case fast-swipe move events were throttled/missed. Only a stationary tap focuses.
+    if (p.moved || Math.hypot(e.clientX - p.x, e.clientY - p.y) > 10) return;
+    if (e.target.closest?.('button, a, input, textarea, [contenteditable]')) return; // a control / the field
+    ref.current?.focus();
+  };
+
   // A quick-reply chip (reply or slash-command) is sent as text + Enter. Key favs never reach here — they
   // are filtered out of the strip above.
   const runFav = async (text) => {
@@ -150,7 +169,8 @@ export default function ChatComposer({ pane, kind, cwd = null, onKey = () => {},
       {/* Offscreen (not display:none) so a programmatic .click() reliably opens the picker on iOS Safari. */}
       <input ref={uploadRef} className="browse-file-input" type="file" multiple accept={UPLOAD_ACCEPT}
         onChange={(e) => { uploadFiles(e.target.files); e.target.value = ''; }} />
-      <div className={`cc-card${recording ? ' recording' : ''}`}>
+      <div className={`cc-card${recording ? ' recording' : ''}`}
+        onPointerDown={cardDown} onPointerMove={cardMove} onPointerUp={cardTapFocus}>
         <textarea
           ref={ref}
           className="cc-text"
