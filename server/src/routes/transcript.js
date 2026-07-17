@@ -17,9 +17,22 @@ import { isPaneId } from '../tmux/commands.js';
 import { projectsDir } from '../agents/claude.js';
 import { resolveEncodedDirSession, encodeProjectDir } from '../agents/scanUtils.js';
 import { parseTranscript } from '../transcriptParse.js';
+import { parsePendingPrompt } from '../pendingPrompt.js';
 
 export function transcriptRoutes({ commands, claudeEvents }) {
   const r = express.Router();
+
+  // The pending interactive PROMPT on the pane's screen — an AskUserQuestion menu or a tool-permission
+  // menu — scraped from `capture-pane` (its options are NOT in the .jsonl while pending; see pendingPrompt.js).
+  // Returns { prompt: {kind,title,options,cursor} | null }. Polled by the 对话 lens only while a gate is up.
+  r.get('/pending-prompt', async (req, res, next) => {
+    if (!isPaneId(req.query.pane)) return res.status(400).json({ error: 'bad pane id' });
+    try {
+      const text = await commands.capturePlain(req.query.pane);
+      return res.json({ prompt: parsePendingPrompt(text) });
+    } catch (e) { next(e); }
+  });
+
   r.get('/transcript', async (req, res, next) => {
     if (!isPaneId(req.query.pane)) return res.status(400).json({ error: 'bad pane id' });
     const limit = Math.min(Math.max(Number(req.query.limit) || 10, 1), 100);

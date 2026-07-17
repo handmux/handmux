@@ -158,3 +158,37 @@ describe('GET /api/transcript', () => {
     } finally { fs.rmSync(file, { force: true }); }
   });
 });
+
+describe('GET /api/pending-prompt', () => {
+  const menu = [' ☐ 颜色', '', '你喜欢哪个?', '', '❯ 1. 红色', '  2. 蓝色',
+    '  3. Chat about this', 'Enter to select · Esc to cancel'].join('\n');
+  const mount = (capturePlain) =>
+    transcriptRoutes({ commands: { capturePlain }, claudeEvents: noHook });
+
+  it('scrapes the on-screen menu into structured options', async () => {
+    const app = express();
+    app.use(mount(async () => menu));
+    const { status, body } = await call(app, '/pending-prompt?pane=%251');
+    expect(status).toBe(200);
+    expect(body.prompt.kind).toBe('question');
+    expect(body.prompt.options).toEqual([
+      { n: 1, label: '红色', description: '' },
+      { n: 2, label: '蓝色', description: '' },
+    ]); // "Chat about this" meta-option dropped
+  });
+
+  it('returns prompt:null when no menu is on screen', async () => {
+    const app = express();
+    app.use(mount(async () => 'just a shell\n$ '));
+    const { status, body } = await call(app, '/pending-prompt?pane=%251');
+    expect(status).toBe(200);
+    expect(body.prompt).toBeNull();
+  });
+
+  it('400 on bad pane id', async () => {
+    const app = express();
+    app.use(mount(async () => menu));
+    const { status } = await call(app, '/pending-prompt?pane=nope');
+    expect(status).toBe(400);
+  });
+});

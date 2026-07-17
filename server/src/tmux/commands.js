@@ -94,6 +94,12 @@ export async function capturePane(paneId, linesBack) {
   return runTmux(['capture-pane', '-p', '-e', '-N', '-S', String(-Math.abs(linesBack)), '-t', paneId]);
 }
 
+// Plain visible-screen capture — NO SGR escapes (unlike capturePane's `-e`), so the text parses cleanly.
+// Used to scrape a pending prompt/menu off the screen (see pendingPrompt.js).
+export async function capturePlain(paneId) {
+  return runTmux(['capture-pane', '-p', '-t', paneId]);
+}
+
 // Size AND cursor in one display-message (capture-pane carries neither the cursor position nor its
 // visibility — it snapshots cells only — so we read them here for the client to re-place xterm's own
 // cursor onto Claude's input cell). cursor_x/cursor_y are 0-based, relative to the visible screen;
