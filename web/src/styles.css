@@ -1653,12 +1653,16 @@ button.cmd-text { background: none; border: none; text-align: left; }
   padding: 9px 13px; border-radius: 18px; font-size: 15px; line-height: 1.4;
   white-space: pre-wrap; word-break: break-word;
 }
-.chat-me { align-self: flex-end; max-width: 82%; background: var(--blue); color: #fff; border-bottom-right-radius: 5px; }
-/* Assistant replies (Task 11): full-width block, not a narrow bubble — long answers read like a document,
-   not a chat pill. Minimal chrome (no tail, near-flat background) since it now spans the whole lane. */
+/* Your messages: a right-aligned pill. Toned DOWN from the loud iOS system blue (#0a84ff) to a calmer,
+   less-luminous blue so it doesn't glare in the dark chat lane. */
+.chat-me { align-self: flex-end; max-width: 82%; background: #1d63b3; color: #fff; border-bottom-right-radius: 5px; }
+/* Assistant replies: NO bubble at all — Claude's prose renders as a clean, high-contrast full-width block
+   (like a document/article), not a tinted pill. This (a) lifts the text contrast that the old muddy grey
+   box washed out, and (b) makes replies unmistakably distinct from tool chips (which ARE boxed). Markdown
+   tables/code inside still get their own boxed, horizontally-scrolling surfaces (see .chat-md). */
 .chat-them {
   align-self: stretch; width: 100%; max-width: 100%; box-sizing: border-box;
-  background: rgba(120,120,128,.10); color: #e6e6e6; border-radius: 12px;
+  background: transparent; color: #f2f3f5; border-radius: 0; padding: 3px 2px;
 }
 
 /* Markdown assistant bubbles (Task 10) — same marked→DOMPurify pipeline + palette family as .doc-md, but
@@ -1687,7 +1691,7 @@ button.cmd-text { background: none; border: none; text-align: left; }
    below (see .chat-tool-body). */
 .chat-tool-head {
   display: block; width: 100%; max-width: 100%; min-height: 30px; box-sizing: border-box;
-  padding: 6px 11px; border: none; border-radius: 10px;
+  padding: 6px 11px; border: 1px solid rgba(255,255,255,.07); border-radius: 10px;
   background: rgba(120,120,128,.16); color: #9fb0c0;
   font-size: 12px; line-height: 1.25; text-align: left;
   font-variant-numeric: tabular-nums; touch-action: manipulation;
