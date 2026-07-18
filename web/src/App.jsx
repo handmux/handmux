@@ -1132,6 +1132,8 @@ export default function App() {
         onChatTone={pickChatTone}
         chatLensEnabled={chatLensOn}
         onChatLensEnabled={toggleChatLens}
+        hooksStatus={hooksStatus}
+        onEnableHooks={enableHooks}
         termRef={termRef}
         getColCount={() => tmuxColsRef.current ?? termRef.current?.getSize()?.cols}
         onColAdjust={(d) => tmuxResizeCols(d)}

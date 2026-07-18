@@ -43,4 +43,39 @@ describe('Settings 对话镜头 experimental gate', () => {
     click(box);
     expect(onChatLensEnabled).toHaveBeenCalledWith(true);
   });
+
+  const lensBox = () => [...container.querySelectorAll('.settings-toggle')]
+    .find((l) => l.textContent.includes('启用对话镜头'))?.querySelector('input[type="checkbox"]');
+
+  it('hooks absent → toggle locked with the need-hooks hint and a one-tap install button', async () => {
+    const onEnableHooks = vi.fn(async () => ({ status: 'installed' }));
+    await render({ chatLensEnabled: false, hooksStatus: 'absent', onEnableHooks });
+    expect(lensBox().disabled).toBe(true);
+    expect(container.textContent).toContain('需先安装 Claude hooks');
+    const btn = [...container.querySelectorAll('button')].find((b) => b.textContent === '一键安装 hooks');
+    expect(btn).toBeTruthy();
+    click(btn);
+    await act(async () => { await Promise.resolve(); });
+    expect(onEnableHooks).toHaveBeenCalled();
+  });
+
+  it('hooks absent but lens already enabled → still allows turning it OFF (no dead-end)', async () => {
+    await render({ chatLensEnabled: true, hooksStatus: 'absent' });
+    expect(lensBox().disabled).toBe(false);
+    expect(lensBox().checked).toBe(true);
+  });
+
+  it('no Claude Code at all → locked with the no-claude hint and NO install button', async () => {
+    await render({ chatLensEnabled: false, hooksStatus: 'no-claude' });
+    expect(lensBox().disabled).toBe(true);
+    expect(container.textContent).toContain('未检测到 Claude Code');
+    expect([...container.querySelectorAll('button')].some((b) => b.textContent === '一键安装 hooks')).toBe(false);
+  });
+
+  it('hooks installed (or still unknown) → toggle stays usable', async () => {
+    await render({ chatLensEnabled: false, hooksStatus: 'installed' });
+    expect(lensBox().disabled).toBe(false);
+    await render({ chatLensEnabled: false, hooksStatus: null });
+    expect(lensBox().disabled).toBe(false);
+  });
 });

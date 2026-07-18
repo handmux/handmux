@@ -12,6 +12,7 @@ import { t, getLangCode, setLang, AVAILABLE } from '../i18n';
 // size the two-finger pinch drives — so the modal and the gesture stay in sync.
 export default function Settings({ open, onClose, termRef, onColAdjust, onColRestore, onOpenChangelog, changelogUnread,
   chatTone = 'ink', onChatTone = () => {}, chatLensEnabled = false, onChatLensEnabled = () => {},
+  hooksStatus = null, onEnableHooks = null,
   notifUnread = false, onOpenInbox,
   updateInfo = null,
   activePreview = null, pane = null, lastPreviewDir = null, dynamicEnabled = false,
@@ -24,6 +25,18 @@ export default function Settings({ open, onClose, termRef, onColAdjust, onColRes
   const [notify, setNotify] = useState(notifyEnabled()); // device-notification toggle state
   const [notifyBusy, setNotifyBusy] = useState(false); // true while (un)subscribing — shows a spinner, disables the button
   const [notifyMsg, setNotifyMsg] = useState(''); // inline status/error shown to the right of the toggle
+  // 对话 lens hook-gate: only 'absent' / 'no-claude' lock the toggle — null (still fetching) and 'installed'
+  // (incl. old servers that omit the field) stay open, so a transient config-fetch failure can't lock out
+  // someone whose hooks are fine.
+  const lensLocked = hooksStatus === 'absent' || hooksStatus === 'no-claude';
+  const [lensHooksBusy, setLensHooksBusy] = useState(false);
+  const [lensHooksErr, setLensHooksErr] = useState(false);
+  const enableLensHooks = async () => {
+    setLensHooksBusy(true); setLensHooksErr(false);
+    try { const r = await onEnableHooks?.(); if (!r || r.status !== 'installed') setLensHooksErr(true); }
+    catch { setLensHooksErr(true); }
+    finally { setLensHooksBusy(false); }
+  };
   const [scriptPushOpen, setScriptPushOpen] = useState(false);
   const [scriptPushKey, setScriptPushKey] = useState(null);
   const [dirOpen, setDirOpen] = useState(false);
@@ -146,15 +159,34 @@ export default function Settings({ open, onClose, termRef, onColAdjust, onColRes
         </div>
 
         <div className="settings-section">
+          {/* Soft gate: without Claude hooks the lens DECEIVES — a question/permission turn never lands in
+             the transcript until answered, so the lens just looks idle while Claude waits (and the user's
+             next message types into the unseen menu). Lock the toggle until hooks are in, with a one-tap
+             install right here. An already-enabled user keeps an OFF path even when locked. */}
           <label className="settings-toggle">
             <span className="settings-label">{t('settings.chat_lens')}</span>
             <span className="cmd-switch">
-              <input type="checkbox" checked={chatLensEnabled} onChange={(e) => onChatLensEnabled(e.target.checked)} />
+              <input type="checkbox" checked={chatLensEnabled}
+                disabled={lensLocked && !chatLensEnabled}
+                onChange={(e) => onChatLensEnabled(e.target.checked)} />
               <span className="cmd-switch-track" aria-hidden="true" />
               <span className="cmd-switch-knob" aria-hidden="true" />
             </span>
           </label>
-          <div className="settings-hint">{t('settings.chat_lens_hint')}</div>
+          {lensLocked ? (
+            <div className="settings-hint">
+              {t(hooksStatus === 'no-claude' ? 'settings.chat_lens_no_claude' : 'settings.chat_lens_need_hooks')}
+              {hooksStatus === 'absent' && (
+                <button type="button" className="fontbtn settings-hint-btn" disabled={lensHooksBusy}
+                  onClick={enableLensHooks}>
+                  {lensHooksBusy ? t('settings.chat_lens_installing') : t('settings.chat_lens_install_hooks')}
+                </button>
+              )}
+              {lensHooksErr && <div className="settings-hint settings-hint-err">{t('settings.chat_lens_hooks_err')}</div>}
+            </div>
+          ) : (
+            <div className="settings-hint">{t('settings.chat_lens_hint')}</div>
+          )}
         </div>
 
         {/* The tone picker only makes sense once the 对话 lens itself is enabled (experimental opt-in). */}

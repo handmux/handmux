@@ -813,6 +813,9 @@ button.cmd-text { background: none; border: none; text-align: left; }
 .cmd-switch-knob { position: absolute; top: 2px; left: 2px; width: 27px; height: 27px; border-radius: 50%;
   background: #fff; box-shadow: 0 2px 5px rgba(0,0,0,.35); transition: transform .22s ease; }
 .cmd-switch input:checked ~ .cmd-switch-knob { transform: translateX(20px); }
+.cmd-switch input:disabled ~ .cmd-switch-track, .cmd-switch input:disabled ~ .cmd-switch-knob { opacity: .45; }
+.settings-hint-btn { margin-top: 8px; }
+.settings-hint-err { color: #ff9086; }
 /* Primary submit — full-width iOS blue, dims when there's nothing valid to save. */
 .cmd-submit { border: none; border-radius: 13px; background: var(--blue); color: #fff; font: inherit;
   font-size: 17px; font-weight: 600; padding: 13px 0; margin-top: 2px; touch-action: manipulation; transition: background .12s; }
