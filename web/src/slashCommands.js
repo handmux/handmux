@@ -20,3 +20,17 @@ export function shouldHandOffSlash(text) {
   if (m[2].trim()) return false;             // has args → applies directly, stays in chat
   return !ONESHOT_SLASH.has(m[1].toLowerCase()); // bare + not a known one-shot → hand off to the terminal
 }
+
+// The optimistic echo for a chat-staying slash command, or null. Claude Code logs a slash command's
+// canonical `<command-name>` scaffold only when the command COMPLETES (verified live — /compact's takes
+// the whole 1-2min compaction), so the jsonl-driven 对话 lens shows NOTHING the moment you send it. Echo
+// the command pill client-side at send time; the real marker replaces it when the transcript catches up
+// (ChatView dedups by name). Handed-off commands return null — the lens switch is their feedback.
+export function slashEchoFor(text) {
+  const m = /^\s*\/([a-z][\w-]*)\s*(.*)$/i.exec(typeof text === 'string' ? text : '');
+  if (!m || shouldHandOffSlash(text)) return null;
+  const echo = { name: '/' + m[1] };
+  const args = m[2].trim();
+  if (args) echo.args = args;
+  return echo;
+}

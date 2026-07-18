@@ -25,10 +25,12 @@ export function useTranscript(pane, enabled) {
   const [messages, setMessages] = useState([]);
   const [hasMoreOlder, setHasMoreOlder] = useState(false);
   const [loadingOlder, setLoadingOlder] = useState(false);
+  const [session, setSession] = useState(null); // the session id `messages` belong to (ChatView's echo dedup)
   const hashRef = useRef('');
   const oldestKRef = useRef(null);
   const seededRef = useRef(false); // has the older-page cursor been seeded from the first recent response?
   const loadingOlderRef = useRef(false);
+  const sessionRef = useRef(null); // the session id the current `messages` belong to
 
   // Reset the省流 cursor + view whenever the pane changes, so switching panes doesn't briefly show the
   // previous session's messages nor skip re-fetching because a stale hash looks "unchanged".
@@ -37,9 +39,11 @@ export function useTranscript(pane, enabled) {
     oldestKRef.current = null;
     seededRef.current = false;
     loadingOlderRef.current = false;
+    sessionRef.current = null;
     setMessages([]);
     setHasMoreOlder(false);
     setLoadingOlder(false);
+    setSession(null);
   }, [pane]);
 
   // Initial + polling window: 20 (was 10) so a short first screen still fills — small transcripts / fresh
@@ -49,15 +53,27 @@ export function useTranscript(pane, enabled) {
     if (!r) return; // 204 / null → keep last
     hashRef.current = r.hash || '';
     const incoming = Array.isArray(r.messages) ? r.messages : [];
-    setMessages((prev) => mergeByK(prev, incoming));
-    // Seed the older-page cursor from the FIRST successful recent response only — once loadOlder has
-    // started walking it back, later recent polls (a new hasMore/firstSeq for the tail window) must not
-    // clobber it.
-    if (!seededRef.current && !loadingOlderRef.current) {
-      seededRef.current = true;
+    // SESSION SWITCH (e.g. /clear started a new jsonl): REPLACE, never merge. k is a per-file ordinal that
+    // restarts at 0 in the new session — merging by k would overwrite the head with the new messages but
+    // strand the old session's higher-k tail on screen (the "/clear 没清屏" bug). The server's `session`
+    // field is the switch signal; only act on a non-null id different from the one we're showing.
+    if (r.session && sessionRef.current && r.session !== sessionRef.current) {
+      setMessages(incoming);
       oldestKRef.current = r.firstSeq ?? null;
       setHasMoreOlder(!!r.hasMore);
+      seededRef.current = true; // the older-page cursor restarts from the new session's window
+    } else {
+      setMessages((prev) => mergeByK(prev, incoming));
+      // Seed the older-page cursor from the FIRST successful recent response only — once loadOlder has
+      // started walking it back, later recent polls (a new hasMore/firstSeq for the tail window) must not
+      // clobber it.
+      if (!seededRef.current && !loadingOlderRef.current) {
+        seededRef.current = true;
+        oldestKRef.current = r.firstSeq ?? null;
+        setHasMoreOlder(!!r.hasMore);
+      }
     }
+    if (r.session) { sessionRef.current = r.session; setSession(r.session); }
   }, []);
 
   usePollingLoop({ fetch, apply, intervalMs: 1500, enabled: enabled && !!pane, deps: [pane] });
@@ -79,5 +95,5 @@ export function useTranscript(pane, enabled) {
     }
   }, [pane, hasMoreOlder]);
 
-  return { messages, hasMoreOlder, loadOlder, loadingOlder };
+  return { messages, hasMoreOlder, loadOlder, loadingOlder, session };
 }

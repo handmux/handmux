@@ -40,6 +40,7 @@ import BottomDock from './components/BottomDock.jsx';
 import ChatComposer from './components/ChatComposer.jsx';
 import LensSwitch from './components/LensSwitch.jsx';
 import ChatView from './components/ChatView.jsx';
+import { slashEchoFor } from './slashCommands.js';
 import TokenPrompt from './components/TokenPrompt.jsx';
 import Settings from './components/Settings.jsx';
 import UsagePage from './components/UsagePage.jsx';
@@ -93,6 +94,7 @@ export default function App() {
   const [pendingShare, setPendingShare] = useState(null); // a File shared in via Web Share Target, awaiting a destination
   const [basePrompt, setBasePrompt] = useState(null); // { rawPath } while asking for a relative path's base dir
   const [handoffToast, setHandoffToast] = useState(null); // "switched to terminal to run /x" hint after a slash hand-off
+  const [slashEcho, setSlashEcho] = useState(null); // optimistic command pill for a chat-staying slash command {name,args,paneId}
   const [docToast, setDocToast] = useState(null); // transient error toast for absolute-path doc failures
   const [exitHint, setExitHint] = useState(false); // "press Back again to exit" hint (double-back guard)
   const [docLinkPrompt, setDocLinkPrompt] = useState(null); // { path, x, y } confirm popover for a tapped terminal path
@@ -796,6 +798,11 @@ export default function App() {
     const name = current?.session?.name;
     const win = current?.window?.id; // stable window ID, not the auto-renamed window.name
     if (name && win) setRecent(pushRecent(name, win, cmd));
+    // A chat-staying slash command (/compact, /model sonnet) logs its scaffold to the jsonl only when it
+    // COMPLETES — minutes for /compact — so echo the command pill now; ChatView drops it when the real
+    // marker lands. null for handed-off commands (the lens switch is their feedback) and plain text.
+    const echo = slashEchoFor(cmd);
+    setSlashEcho(echo && current?.paneId ? { ...echo, paneId: current.paneId } : null);
   }, [current]);
 
   // ★/☆ on a panel row: toggle membership of the global favorites list.
@@ -1364,7 +1371,9 @@ export default function App() {
           />
           {current.paneId && (
             chatLens ? (
-              <ChatView pane={current.paneId} kind={states[current.paneId]?.kind} msg={states[current.paneId]?.msg} onAuthFail={onAuthFail} />
+              <ChatView pane={current.paneId} kind={states[current.paneId]?.kind} msg={states[current.paneId]?.msg} onAuthFail={onAuthFail}
+                slashEcho={slashEcho && slashEcho.paneId === current.paneId ? slashEcho : null}
+                onSlashEchoDone={() => setSlashEcho(null)} />
             ) : (
               <Terminal
                 ref={termRef}

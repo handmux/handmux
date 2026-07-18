@@ -208,6 +208,39 @@ describe('ChatView', () => {
     expect(document.querySelector('.chat-gate-backdrop')).toBeNull(); // backdrop leaves with the gate
   });
 
+  it('the optimistic slash echo renders a command pill at send time', async () => {
+    mockTranscript([{ k: 0, i: 0, role: 'user', type: 'text', text: 'hi' }]);
+    const { container } = render(<ChatView pane="%0" kind="working" slashEcho={{ name: '/compact' }} />);
+    await screen.findByText('hi');
+    await waitFor(() => expect(container.querySelector('.chat-slash-cmd')?.textContent).toBe('/compact'));
+  });
+
+  it('drops the echo (and calls onSlashEchoDone) once the real marker lands in the transcript', async () => {
+    mockTranscript([
+      { k: 0, i: 0, role: 'user', type: 'text', text: 'hi' },
+      { k: 1, i: 1, type: 'slash', name: '/compact', result: 'Compacted' },
+    ]);
+    const onDone = vi.fn();
+    const { container } = render(<ChatView pane="%0" kind="working" slashEcho={{ name: '/compact' }} onSlashEchoDone={onDone} />);
+    await waitFor(() => expect(onDone).toHaveBeenCalled());
+    await waitFor(() => expect(container.querySelectorAll('.chat-slash-cmd')).toHaveLength(1)); // only the real marker
+    expect(container.querySelector('.chat-slash-result')?.textContent).toBe('Compacted');
+  });
+
+  it('a same-named marker from an EARLIER run (already on screen at send time) does NOT kill a fresh echo', async () => {
+    mockTranscript([
+      { k: 0, i: 0, type: 'slash', name: '/compact', result: 'Compacted' },
+      { k: 1, i: 1, role: 'assistant', type: 'text', text: '接着干活' },
+    ]);
+    const onDone = vi.fn();
+    const { container, rerender } = render(<ChatView pane="%0" kind="working" />);
+    await screen.findByText('接着干活'); // messages loaded BEFORE the echo appears
+    rerender(<ChatView pane="%0" kind="working" slashEcho={{ name: '/compact' }} onSlashEchoDone={onDone} />);
+    await new Promise((r) => setTimeout(r, 50));
+    expect(onDone).not.toHaveBeenCalled();
+    expect(container.querySelectorAll('.chat-slash-cmd').length).toBe(2); // old marker + the fresh echo
+  });
+
   it('renders markdown in an assistant text bubble — a table becomes a real <table>', async () => {
     const md = '| a | b |\n| - | - |\n| 1 | 2 |\n';
     mockTranscript([{ k: 0, i: 0, role: 'assistant', type: 'text', text: md }]);

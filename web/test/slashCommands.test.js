@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { shouldHandOffSlash } from '../src/slashCommands.js';
+import { shouldHandOffSlash, slashEchoFor } from '../src/slashCommands.js';
 
 describe('shouldHandOffSlash', () => {
   it('hands off for a bare interactive builtin', () => {
@@ -32,5 +32,27 @@ describe('shouldHandOffSlash', () => {
     expect(shouldHandOffSlash('/Users/demo/foo.js')).toBe(false); // a path (segment has a trailing part)
     expect(shouldHandOffSlash('')).toBe(false);
     expect(shouldHandOffSlash(null)).toBe(false);
+  });
+});
+
+describe('slashEchoFor (the optimistic send-time pill)', () => {
+  it('echoes a chat-staying one-shot command', () => {
+    expect(slashEchoFor('/compact')).toEqual({ name: '/compact' });
+    expect(slashEchoFor('/clear')).toEqual({ name: '/clear' });
+  });
+
+  it('echoes a command with args, keeping the args for the pill', () => {
+    expect(slashEchoFor('/model sonnet')).toEqual({ name: '/model', args: 'sonnet' });
+  });
+
+  it('no echo for handed-off commands — the lens switch is their feedback', () => {
+    expect(slashEchoFor('/effort')).toBeNull();
+    expect(slashEchoFor('/some-unknown-cmd')).toBeNull();
+  });
+
+  it('no echo for non-slash messages', () => {
+    expect(slashEchoFor('帮我跑个测试')).toBeNull();
+    expect(slashEchoFor('')).toBeNull();
+    expect(slashEchoFor(null)).toBeNull();
   });
 });

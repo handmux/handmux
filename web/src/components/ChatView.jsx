@@ -376,8 +376,8 @@ function resolveCopyBlock(target) {
 
 const COPY_CALLOUT_W = 72; // estimated callout width (px) for the right-edge clamp (single 拷贝 button)
 
-export default function ChatView({ pane, kind, msg, onAuthFail }) {
-  const { messages, hasMoreOlder, loadOlder, loadingOlder } = useTranscript(pane, true);
+export default function ChatView({ pane, kind, msg, onAuthFail, slashEcho, onSlashEchoDone }) {
+  const { messages, hasMoreOlder, loadOlder, loadingOlder, session } = useTranscript(pane, true);
   const tsIdx = useMemo(() => timeStampedIndices(messages), [messages]);
   // The gate's options are scraped from the pane's on-screen menu (they're not in the transcript). Poll only
   // while Claude is blocked (kind==='permission'). If a menu is up → the rich PromptGate; if permission but
@@ -402,6 +402,22 @@ export default function ChatView({ pane, kind, msg, onAuthFail }) {
   // instead. Both suppress the plain typing wave — neither is "Claude generating a reply".
   const showCompacting = kind === 'compacting';
   const showError = kind === 'error';
+  // The optimistic slash-command echo (App sets it at send time — the jsonl scaffold only lands when the
+  // command COMPLETES, minutes for /compact). It's dropped once the REAL marker takes over: a marker with
+  // the same name and a k beyond what was on screen when the echo appeared (so a same-named marker from an
+  // EARLIER run in the window can't kill a fresh echo), or a session switch (e.g. /clear — the new
+  // session's own /clear marker owns the screen now; only when both ids are known, so the very first
+  // transcript load can't spuriously clear it).
+  const echoMarkRef = useRef(null); // { k, session } captured when the echo first renders
+  if (slashEcho && !echoMarkRef.current) {
+    echoMarkRef.current = { k: messages.reduce((mx, m) => Math.max(mx, m.k ?? -1), -1), session };
+  }
+  if (!slashEcho && echoMarkRef.current) echoMarkRef.current = null;
+  const echoCovered = !!(slashEcho && echoMarkRef.current && (
+    (echoMarkRef.current.session && session && echoMarkRef.current.session !== session)
+    || messages.some((m) => m.type === 'slash' && m.name === slashEcho.name && (m.k ?? -1) > echoMarkRef.current.k)
+  ));
+  useEffect(() => { if (echoCovered) onSlashEchoDone?.(); }, [echoCovered, onSlashEchoDone]);
   // kind is a slow (5s) poll while messages is fast (1.5s) — right after a send, kind can still read stale
   // 'done'. A trailing USER message means "reply is coming" regardless of that staleness (bridges the gap);
   // a trailing assistant/tool message only shows typing while actively 'working'. A running tool wins either way.
@@ -572,6 +588,9 @@ export default function ChatView({ pane, kind, msg, onAuthFail }) {
             </Fragment>
           );
         })}
+        {slashEcho && !echoCovered && (
+          <div className="chat-slash-cmd">{slashEcho.name}{slashEcho.args ? ' ' + slashEcho.args : ''}</div>
+        )}
         {showCompacting && (
           <div className="chat-compacting" aria-live="polite">
             <TypingDots />
