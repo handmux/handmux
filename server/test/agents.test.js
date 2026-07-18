@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { AGENTS, getAgent, agentForProc } from '../src/agents/index.js';
+import { resolveVersionedComms } from '../src/agents/claude.js';
 import { resolveCodexSession, rolloutSessionId, codexUserSnippet } from '../src/agents/codex.js';
 import { parseAgentProcs } from '../src/agents/scanUtils.js';
 import { scanOrphans, takeoverOrphan } from '../src/orphans.js';
@@ -18,6 +19,7 @@ describe('registry', () => {
     expect(agentForProc('claude').id).toBe('claude');
     expect(agentForProc('codex').id).toBe('codex');
     expect(agentForProc('node')).toBe(null);
+    expect(agentForProc('2.1.196')).toBe(null); // bare semver alone proves nothing — needs ps corroboration
   });
   it('every driver satisfies the contract shape', () => {
     for (const a of AGENTS) {
@@ -89,6 +91,50 @@ describe('resolveCodexSession', () => {
 
   it('returns {} when nothing records that cwd', async () => {
     expect(await resolveCodexSession(sessionsDir, '/nope', {})).toEqual({});
+  });
+});
+
+describe('resolveVersionedComms (native-install Claude: comm = bare version string)', () => {
+  const PS = (lines) => async () => lines.join('\n');
+  it('normalizes cmd → claude only when the exe path is in Claude\'s versions dir', async () => {
+    const panes = [
+      { id: '%1', cmd: '2.1.196', tty: '/dev/ttys010' },  // real native-install claude
+      { id: '%2', cmd: '2.1.196', tty: '/dev/ttys011' },  // some OTHER binary that happens to be version-named
+      { id: '%3', cmd: 'zsh', tty: '/dev/ttys012' },
+    ];
+    const run = PS([
+      'ttys010 4242 /Users/x/.local/share/claude/versions/2.1.196',
+      'ttys011 4343 /opt/sometool/2.1.196',
+    ]);
+    await resolveVersionedComms(panes, run);
+    expect(panes[0].cmd).toBe('claude');
+    expect(panes[1].cmd).toBe('2.1.196'); // NOT in claude's versions dir → untouched
+    expect(panes[2].cmd).toBe('zsh');
+  });
+  it('accepts the underscore-sanitized comm variant against the dotted filename', async () => {
+    const panes = [{ id: '%1', cmd: '2_1_196', tty: 'ttys010' }];
+    await resolveVersionedComms(panes, PS(['ttys010 4242 /Users/x/.local/share/claude/versions/2.1.196']));
+    expect(panes[0].cmd).toBe('claude');
+  });
+  it('does not call ps at all when no semver-shaped comm is present', async () => {
+    const panes = [{ id: '%1', cmd: 'claude', tty: 'ttys010' }, { id: '%2', cmd: 'zsh', tty: 'ttys011' }];
+    let called = false;
+    await resolveVersionedComms(panes, async () => { called = true; return ''; });
+    expect(called).toBe(false);
+    expect(panes[0].cmd).toBe('claude');
+  });
+  it('a semver comm without a tty is ignored (and ps never runs)', async () => {
+    const panes = [{ id: '%1', cmd: '2.1.196' }];
+    let called = false;
+    await resolveVersionedComms(panes, async () => { called = true; return ''; });
+    expect(called).toBe(false);
+    expect(panes[0].cmd).toBe('2.1.196');
+  });
+  it('Linux: comm is the basename — falls back to /proc/<pid>/exe only when it exists (skips silently on macOS-style layout)', async () => {
+    // On macOS there is no /proc, so a basename-only comm can never be corroborated → stays as-is.
+    const panes = [{ id: '%1', cmd: '2.1.196', tty: 'pts/3' }];
+    await resolveVersionedComms(panes, PS(['pts/3 4242 2.1.196']));
+    expect(['2.1.196', 'claude']).toContain(panes[0].cmd); // platform-dependent; never throws
   });
 });
 

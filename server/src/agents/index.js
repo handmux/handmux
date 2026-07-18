@@ -16,5 +16,7 @@ const BY_ID = new Map(AGENTS.map((a) => [a.id, a]));
 export function getAgent(id) { return BY_ID.get(id) || claude; }
 
 // The driver whose foreground process this tmux #{pane_current_command} is, or null. Used by the inbox to
-// decide a recorded pane is still running its agent (vs. the agent having exited to a shell).
+// decide a recorded pane is still running its agent (vs. the agent having exited to a shell). Matches the
+// canonical procName only — never the ambiguous extras in procNames (e.g. Codex's 'node'); native-install
+// Claude binaries (comm = version string) are normalized to 'claude' at ingest (resolveVersionedComms).
 export function agentForProc(cmd) { return AGENTS.find((a) => a.procName === cmd) || null; }

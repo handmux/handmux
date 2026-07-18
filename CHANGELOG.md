@@ -4,6 +4,9 @@ All notable changes to handmux. Format follows [Keep a Changelog](https://keepac
 
 ## [Unreleased]
 
+### Fixed
+- 修复了在用官方 native installer 安装 Claude Code 的机器上认不出 Claude 会话的问题（该安装方式的进程名是版本号而非 `claude`，导致没有 agent 图标、对话视图切换钮不出现）。识别改为 ps 路径佐证：进程名疑似版本号时，只有其真实路径位于官方 `~/.local/share/claude/versions/` 目录才认作 Claude——不会把其他恰好以版本号命名的软件误认成 Claude。
+
 ## [0.17.0] - 2026-07-18
 
 ### Added

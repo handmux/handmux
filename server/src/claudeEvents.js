@@ -2,6 +2,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { getAgent, agentForProc } from './agents/index.js';
+import { resolveVersionedComms } from './agents/claude.js';
+import { defaultRun } from './agents/scanUtils.js';
 import { claude } from './agents/claude.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -134,12 +136,13 @@ function readStateFile(file) {
 }
 
 // Per-process event reader. Deps injected for testability:
-//   commands.listLivePanes() → [{ id, cmd, session, window, windowName }]  (one tmux call: liveness+location)
+//   commands.listLivePanes() → [{ id, cmd, tty, session, window, windowName }]  (one tmux call)
+//   run(cmd, args) → stdout   (only used by the version-named-comm corroboration; default defaultRun)
 //   push.sendToSession(session, payload, {ttl, urgency, topic})
 //   file: the hook-maintained JSON state file (DEFAULT_STATE_FILE).
 // The hook is the sole writer; the server reads the file fresh on every getStates and on every file
 // change (the watcher, for push). No persisted state of our own — the file IS the persistence.
-export function createClaudeEvents({ commands, push, file = DEFAULT_STATE_FILE, now = () => Date.now(), statMtime = defaultStatMtime, readTail = defaultReadTail } = {}) {
+export function createClaudeEvents({ commands, push, file = DEFAULT_STATE_FILE, now = () => Date.now(), statMtime = defaultStatMtime, readTail = defaultReadTail, run = defaultRun } = {}) {
   const lastPushed = {}; // pane → 'needs' | 'done' | null  (in-process push-transition dedup, by display view)
   // The dedup above is in-process ONLY: a restart (e.g. ./deploy.sh) wipes it while the hook's state
   // file on disk keeps every pane's latest 需要你/已完成. Without priming, the first read after boot
@@ -181,7 +184,13 @@ export function createClaudeEvents({ commands, push, file = DEFAULT_STATE_FILE, 
     const allow = allowedSessions == null ? null : new Set(allowedSessions);
     const recorded = readStateFile(file);
     let live = null;
-    try { live = new Map((await commands.listLivePanes()).map((p) => [p.id, p])); } catch { /* tmux down */ }
+    try {
+      const panes = await commands.listLivePanes();
+      // Native-install Claude binaries report a version string as pane_current_command — corroborate via
+      // ps and normalize to 'claude' BEFORE any identity/liveness match (see agents/claude.js).
+      await resolveVersionedComms(panes, run);
+      live = new Map(panes.map((p) => [p.id, p]));
+    } catch { /* tmux down */ }
 
     const out = {};
     for (const [pane, rec] of Object.entries(recorded)) {

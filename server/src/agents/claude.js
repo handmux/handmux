@@ -10,7 +10,51 @@
 //   sessions       cwd → session resolution + the `resume` command, for orphan takeover
 import path from 'node:path';
 import os from 'node:os';
-import { resolveEncodedDirSession, isSessionUuid } from './scanUtils.js';
+import { promises as fsp } from 'node:fs';
+import { resolveEncodedDirSession, isSessionUuid, normTty } from './scanUtils.js';
+
+// The NATIVE installer names the real binary by version (~/.local/share/claude/versions/2.1.196 —
+// ~/.local/bin/claude is only a symlink to it), and tmux #{pane_current_command} follows the kernel comm:
+// the binary's BASENAME. On those machines a claude pane reports a bare version string ("2.1.196")
+// instead of "claude". Matching any semver-shaped NAME would misidentify any version-named binary as
+// Claude, so we corroborate with ps: a process on the pane's tty whose FULL executable path is a file in
+// Claude's versions dir, its basename tied to the comm tmux reported (macOS ps `comm` carries the full
+// path — verified live; on Linux comm is the basename and the real path comes from /proc/<pid>/exe).
+// Only then is the pane's cmd normalized to 'claude', so every downstream match (identity + liveness)
+// stays exact-name. Costs one ps (plus a readlink or two on Linux) and only when a semver-shaped comm
+// shows up at all.
+const VERSION_COMM_RE = /^\d+[._]\d+[._]\d+$/;
+const VERSIONED_DIR_RE = /\/\.local\/share\/claude\/versions\/[^/]+$/;
+export async function resolveVersionedComms(panes, run) {
+  const candidates = panes.filter((p) => p && p.tty && VERSION_COMM_RE.test(p.cmd || ''));
+  if (!candidates.length) return panes;
+  const out = await run('ps', ['-Ao', 'tty=,pid=,comm=']);
+  const byTty = new Map(); // tty → [{ pid, exe }]
+  for (const line of String(out).split('\n')) {
+    const m = line.match(/^\s*(\S+)\s+(\d+)\s+(.*)$/);
+    if (!m) continue;
+    const tty = normTty(m[1]);
+    if (!tty) continue;
+    if (!byTty.has(tty)) byTty.set(tty, []);
+    byTty.get(tty).push({ pid: m[2], exe: m[3].trim() });
+  }
+  for (const p of candidates) {
+    for (const proc of byTty.get(normTty(p.tty)) || []) {
+      let exe = proc.exe;
+      if (!exe.startsWith('/')) {
+        try { exe = await fsp.readlink(`/proc/${proc.pid}/exe`); } catch { continue; } // Linux-only fallback
+      }
+      // The file's basename must equal the comm tmux reported (dots or the sanitized-underscore variant),
+      // AND the file must live in Claude's versions dir — a random semver-named binary elsewhere is NOT Claude.
+      const base = exe.split('/').pop();
+      if ((base === p.cmd || base === p.cmd.replace(/_/g, '.')) && VERSIONED_DIR_RE.test(exe)) {
+        p.cmd = 'claude';
+        break;
+      }
+    }
+  }
+  return panes;
+}
 
 // Build the 需要你 one-liner for a PermissionRequest, from the tool it's gating on (PermissionRequest
 // carries tool_name + tool_input, unlike the later permission_prompt Notification which only has an
@@ -103,7 +147,9 @@ export const claude = {
   label: 'Claude Code',
   procName: 'claude',
   // Which tmux #{pane_current_command} values mean "this agent is still the pane's foreground app" (inbox
-  // liveness). Claude sets its process title to "claude", so an exact single-name match is right.
+  // liveness). Claude sets its process title to "claude", so an exact single-name match is right — for
+  // native-install machines (whose comm is the VERSION string) resolveVersionedComms below normalizes the
+  // cmd back to 'claude' at ingest, keeping every match here exact-name.
   procNames: ['claude'],
   // The `claude` CLI sets its process title to "claude" (verified via ps): match the program token at the
   // start of argv — bare "claude", "claude --continue", or an absolute path ending in /claude. Anchored so

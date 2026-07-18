@@ -78,10 +78,10 @@ export async function listPaneIds(target) {
 // per-pane display-message. The hook only records the pane id; location comes from here, always fresh.
 export async function listLivePanes() {
   return lines(await runTmux(['list-panes', '-a', '-F',
-    '#{pane_id}\t#{pane_current_command}\t#{session_name}\t#{window_id}\t#{window_name}']))
+    '#{pane_id}\t#{pane_current_command}\t#{pane_tty}\t#{session_name}\t#{window_id}\t#{window_name}']))
     .map((l) => {
-      const [id, cmd, session, window, windowName] = l.split('\t');
-      return { id, cmd, session, window, windowName };
+      const [id, cmd, tty, session, window, windowName] = l.split('\t');
+      return { id, cmd, tty, session, window, windowName };
     });
 }
 
