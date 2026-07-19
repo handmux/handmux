@@ -1,6 +1,6 @@
 {
   "name": "handmux",
-  "version": "0.17.3",
+  "version": "0.17.4",
   "description": "A mobile vibe-coding cockpit — built on tmux: drive your live session, Claude Code / Codex — anything a terminal can run — from your phone.",
   "type": "module",
   "license": "AGPL-3.0-only",
@@ -57,13 +57,13 @@
     "vitest": "^2.0.0"
   },
   "whatsNew": [
+    {"version":"0.17.4","date":"2026-07-19","zh":"HTTPS 本机预览修复 · 通知链接安全加固","en":"HTTPS localhost previews fixed · safer notification links"},
     {"version":"0.17.3","date":"2026-07-19","zh":"三修官方一键安装的 Claude 识别,真机已验证","en":"Third fix for native-install Claude detection, device-verified"},
     {"version":"0.17.0","date":"2026-07-18","zh":"对话视图(实验性)· 通知记录 · 本机地址一键预览","en":"Chat view (experimental) · notification inbox · one-tap localhost preview"},
     {"version":"0.16.0","date":"2026-07-15","zh":"分屏布局地图 · 手机也能建/删窗格","en":"Split-layout map · create & close panes from the phone"},
     {"version":"0.15.0","date":"2026-07-14","zh":"键盘弹起终端自适应 · 全屏程序可上下滚动","en":"Keyboard-aware terminal · scroll inside full-screen apps"},
     {"version":"0.14.0","date":"2026-07-13","zh":"终端文字选中拷贝 · 脚本复用推送通道","en":"Terminal select & copy · scripts reuse the push channel"},
     {"version":"0.13.0","date":"2026-07-12","zh":"终端文件路径高亮可点","en":"Tappable, highlighted file paths"},
-    {"version":"0.12.3","date":"2026-07-11","zh":"接管会话可自定义名称 + Homebrew 一键安装","en":"Name a takeover session · Homebrew install"},
-    {"version":"0.12.2","date":"2026-07-11","zh":"修复主屏图标偏大 / 换图标后不刷新","en":"Home-screen icon: right size & always fresh"}
+    {"version":"0.12.3","date":"2026-07-11","zh":"接管会话可自定义名称 + Homebrew 一键安装","en":"Name a takeover session · Homebrew install"}
   ]
 }
