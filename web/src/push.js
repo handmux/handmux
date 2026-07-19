@@ -150,7 +150,18 @@ export async function enableNotifications() {
     },
     'push.reportTimeout',
   );
-  if (!r.ok) throw new Error(t('push.subscribeFailed'));
+  if (!r.ok) {
+    if (r.status === 410) {
+      // The push service rejected this browser-held subscription as expired. Remove it locally as well;
+      // the next tap then creates a genuinely fresh FCM/APNs subscription instead of reporting the same
+      // dead endpoint forever.
+      try { await sub.unsubscribe(); } catch { /* the server has already pruned it */ }
+      setNotifyFlag(false);
+      throw setupError('push.subscriptionExpired');
+    }
+    if (r.status === 502) throw setupError('push.deliveryRejected');
+    throw new Error(t('push.subscribeFailed'));
+  }
   setNotifyFlag(true);
   return true;
 }

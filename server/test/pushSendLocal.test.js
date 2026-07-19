@@ -4,10 +4,20 @@ import express from 'express';
 
 const sent = [];
 const dataSeen = [];
+const failureStatuses = new Map();
 vi.mock('web-push', () => ({
   default: {
     setVapidDetails: vi.fn(),
-    sendNotification: vi.fn(async (sub, data) => { dataSeen.push(data); sent.push(sub.endpoint); return { statusCode: 201 }; }),
+    sendNotification: vi.fn(async (sub, data) => {
+      dataSeen.push(data);
+      if (failureStatuses.has(sub.endpoint)) {
+        const e = new Error('rejected');
+        e.statusCode = failureStatuses.get(sub.endpoint);
+        throw e;
+      }
+      sent.push(sub.endpoint);
+      return { statusCode: 201 };
+    }),
   },
 }));
 
@@ -20,6 +30,7 @@ import fs from 'node:fs';
 let app, push, keyA;
 beforeEach(async () => {
   sent.length = 0; dataSeen.length = 0;
+  failureStatuses.clear();
   try { fs.unlinkSync('/tmp/tmw-push-sendlocal-test.json'); } catch {}
   vi.resetModules();
   push = await import('../src/push.js');
@@ -77,5 +88,21 @@ describe('key retrieval', () => {
     const r2 = await request(app).post('/api/push/subscribe').set('Authorization', 'Bearer good')
       .send({ subscription: { endpoint: 'C', keys: {} }, boundSessions: [] }).expect(200);
     expect(typeof r2.body.pushKey).toBe('string');
+  });
+
+  it('/push/subscribe rejects and prunes an expired welcome subscription', async () => {
+    failureStatuses.set('C', 410);
+    const r = await request(app).post('/api/push/subscribe').set('Authorization', 'Bearer good')
+      .send({ subscription: { endpoint: 'C', keys: {} }, boundSessions: [] }).expect(410);
+    expect(r.body.error).toMatch(/expired/);
+    expect(push.count()).toBe(2);
+  });
+
+  it('/push/subscribe does not claim success for a non-expiry delivery rejection', async () => {
+    failureStatuses.set('C', 503);
+    const r = await request(app).post('/api/push/subscribe').set('Authorization', 'Bearer good')
+      .send({ subscription: { endpoint: 'C', keys: {} }, boundSessions: [] }).expect(502);
+    expect(r.body.error).toMatch(/rejected/);
+    expect(push.count()).toBe(3);
   });
 });

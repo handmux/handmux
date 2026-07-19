@@ -370,6 +370,8 @@ export default {
   'push.browserTimeout': 'ブラウザのプッシュサービスが応答しません。Android Chrome では Google Play 開発者サービスが利用可能か確認して再試行してください。',
   'push.noVapid': 'サーバーにプッシュ通知（VAPID）が設定されていません',
   'push.reportTimeout': '購読は作成されましたが、サーバーへの登録がタイムアウトしました。接続を確認して再試行してください。',
+  'push.subscriptionExpired': 'Chrome が期限切れのプッシュ購読を返しました。リセットしたので、もう一度「通知を有効にする」をタップしてください。',
+  'push.deliveryRejected': 'プッシュサービスが新しい購読を拒否しました。サーバーログを確認して再試行してください。',
   'push.subscribeFailed': 'サブスクリプションの登録に失敗しました',
   'push.sendFailed': '送信に失敗しました',
   'pushInbox.loadFailed': '通知を読み込めませんでした。接続を確認して再試行してください。',

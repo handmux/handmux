@@ -105,16 +105,24 @@ function options(opts = {}) {
 
 async function deliver(records, payload, opts = {}) {
   ensureInit();
-  if (!configured) return { sent: 0, configured: false };
+  if (!configured) return { sent: 0, failed: 0, gone: 0, configured: false };
   const data = JSON.stringify(payload);
   const dead = [];
   let sent = 0;
+  let failed = 0;
   await Promise.all(records.map(async (rec) => {
     try { await webpush.sendNotification(rec.subscription, data, options(opts)); sent += 1; }
-    catch (e) { if (e?.statusCode === 404 || e?.statusCode === 410) dead.push(rec.subscription.endpoint); }
+    catch (e) {
+      failed += 1;
+      if (e?.statusCode === 404 || e?.statusCode === 410) dead.push(rec.subscription.endpoint);
+      let host = 'unknown push service';
+      try { host = new URL(rec.subscription.endpoint).host; } catch { /* malformed endpoints fail below */ }
+      const detail = String(e?.body || e?.message || 'unknown error').replace(/\s+/g, ' ').slice(0, 200);
+      console.warn(`[handmux] push delivery failed (${host}, HTTP ${e?.statusCode || 'unknown'}): ${detail}`);
+    }
   }));
   if (dead.length) { subs = subs.filter((s) => !dead.includes(s.subscription.endpoint)); persist(); }
-  return { sent, configured: true };
+  return { sent, failed, gone: dead.length, configured: true };
 }
 
 export const sendToAll = (payload, opts = {}) => deliver(subs, payload, opts);

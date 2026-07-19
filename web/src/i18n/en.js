@@ -456,6 +456,8 @@ export default {
   'push.browserTimeout': 'The browser push service did not respond. On Android Chrome, make sure Google Play services are available, then try again.',
   'push.noVapid': 'Push is not configured on the server (VAPID)',
   'push.reportTimeout': 'The subscription was created, but reporting it to the server timed out. Check the connection and try again.',
+  'push.subscriptionExpired': 'Chrome returned an expired push subscription. It has been reset; tap Enable notifications again.',
+  'push.deliveryRejected': 'The push service rejected the new subscription. Check the server log and try again.',
   'push.subscribeFailed': 'Failed to report subscription',
   'push.sendFailed': 'Send failed',
   'api.loadFailed': 'Load failed',

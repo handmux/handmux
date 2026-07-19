@@ -2,13 +2,18 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 const sent = [];
 const optsSeen = []; // the options (incl. topic header) web-push was actually handed, per send
-const failEndpoints = new Set();
+const failEndpoints = new Map();
 vi.mock('web-push', () => ({
   default: {
     setVapidDetails: vi.fn(),
     sendNotification: vi.fn(async (sub, _data, opts) => {
       optsSeen.push(opts);
-      if (failEndpoints.has(sub.endpoint)) { const e = new Error('gone'); e.statusCode = 410; throw e; }
+      if (failEndpoints.has(sub.endpoint)) {
+        const status = failEndpoints.get(sub.endpoint);
+        const e = new Error(status === 410 ? 'gone' : 'push service error');
+        e.statusCode = status;
+        throw e;
+      }
       sent.push(sub.endpoint); return { statusCode: 201 };
     }),
   },
@@ -43,9 +48,18 @@ describe('push sendToAll and dead-endpoint pruning', () => {
   it('a 410 prunes the dead subscription from the store', async () => {
     push.addSubscription({ endpoint: 'A', keys: {} }, ['proj-a']);
     push.addSubscription({ endpoint: 'B', keys: {} }, ['proj-b']);
-    failEndpoints.add('B');
-    await push.sendToAll({ title: 't' }, {});
+    failEndpoints.set('B', 410);
+    const r = await push.sendToAll({ title: 't' }, {});
     expect(push.count()).toBe(1); // B was pruned on the failed send
+    expect(r).toMatchObject({ sent: 1, failed: 1, gone: 1 });
+  });
+
+  it('reports a non-expiry rejection without pruning the subscription', async () => {
+    push.addSubscription({ endpoint: 'A', keys: {} }, ['proj-a']);
+    failEndpoints.set('A', 503);
+    const r = await push.sendToAll({ title: 't' }, {});
+    expect(r).toMatchObject({ sent: 0, failed: 1, gone: 0 });
+    expect(push.count()).toBe(1);
   });
 });
 

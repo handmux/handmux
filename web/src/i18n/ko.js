@@ -370,6 +370,8 @@ export default {
   'push.browserTimeout': '브라우저 푸시 서비스가 응답하지 않습니다. Android Chrome에서는 Google Play 서비스를 사용할 수 있는지 확인한 후 다시 시도하세요.',
   'push.noVapid': '서버에 푸시 알림（VAPID）이 설정되지 않았습니다',
   'push.reportTimeout': '구독은 생성되었지만 서버 등록 시간이 초과되었습니다. 연결을 확인한 후 다시 시도하세요.',
+  'push.subscriptionExpired': 'Chrome이 만료된 푸시 구독을 반환했습니다. 구독을 초기화했으니 알림 켜기를 다시 누르세요.',
+  'push.deliveryRejected': '푸시 서비스가 새 구독을 거부했습니다. 서버 로그를 확인한 후 다시 시도하세요.',
   'push.subscribeFailed': '구독 등록에 실패했습니다',
   'push.sendFailed': '전송에 실패했습니다',
   'pushInbox.loadFailed': '알림을 불러오지 못했습니다. 연결을 확인한 후 다시 시도하세요.',

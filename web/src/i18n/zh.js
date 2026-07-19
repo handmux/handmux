@@ -455,6 +455,8 @@ export default {
   'push.browserTimeout': '浏览器推送服务没有响应；Android Chrome 请确认 Google Play 服务可用后重试',
   'push.noVapid': '服务端未配置推送（VAPID）',
   'push.reportTimeout': '订阅已创建，但上报服务器超时，请检查连接后重试',
+  'push.subscriptionExpired': 'Chrome 返回的推送订阅已经失效，已为你重置；请再次点击开启通知',
+  'push.deliveryRejected': '推送服务拒绝了新订阅，请检查服务器日志后重试',
   'push.subscribeFailed': '订阅上报失败',
   'push.sendFailed': '发送失败',
   'api.loadFailed': '加载失败',

@@ -157,6 +157,44 @@ describe('enableNotifications', () => {
     });
     expect(global.fetch).not.toHaveBeenCalled();
   });
+
+  it('unsubscribes a server-rejected expired subscription so the next tap starts fresh', async () => {
+    allowNotifications();
+    const subscription = { endpoint: 'STALE', unsubscribe: vi.fn(async () => true) };
+    global.navigator.serviceWorker = {
+      register: vi.fn(async () => {}),
+      ready: Promise.resolve({
+        pushManager: { getSubscription: vi.fn(async () => subscription) },
+      }),
+    };
+    global.fetch = vi.fn()
+      .mockResolvedValueOnce(response({ key: 'AQ' }))
+      .mockResolvedValueOnce({ ok: false, status: 410, json: async () => ({ error: 'push subscription expired' }) });
+
+    const { enableNotifications } = await import('../src/push.js');
+    await expect(enableNotifications()).rejects.toMatchObject({ code: 'push.subscriptionExpired' });
+    expect(subscription.unsubscribe).toHaveBeenCalledOnce();
+    expect(localStorage.getItem('tw_notify')).toBe('0');
+  });
+
+  it('does not report enabled when the push service rejects welcome delivery', async () => {
+    allowNotifications();
+    const subscription = { endpoint: 'REJECTED', unsubscribe: vi.fn() };
+    global.navigator.serviceWorker = {
+      register: vi.fn(async () => {}),
+      ready: Promise.resolve({
+        pushManager: { getSubscription: vi.fn(async () => subscription) },
+      }),
+    };
+    global.fetch = vi.fn()
+      .mockResolvedValueOnce(response({ key: 'AQ' }))
+      .mockResolvedValueOnce({ ok: false, status: 502, json: async () => ({ error: 'push delivery rejected' }) });
+
+    const { enableNotifications } = await import('../src/push.js');
+    await expect(enableNotifications()).rejects.toMatchObject({ code: 'push.deliveryRejected' });
+    expect(subscription.unsubscribe).not.toHaveBeenCalled();
+    expect(localStorage.getItem('tw_notify')).toBe('0');
+  });
 });
 
 describe('reportBound', () => {

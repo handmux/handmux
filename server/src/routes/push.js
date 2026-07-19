@@ -20,7 +20,16 @@ export function pushRoutes({ push, notifications }) {
     if (!sub || typeof sub.endpoint !== 'string') return res.status(400).json({ error: 'bad subscription' });
     try {
       push.addSubscription(sub, boundSessions);
-      await push.sendToOne(sub, { title: '通知已开启 ✅', body: '会话「需要你」或「已完成」时提醒你', tag: 'handmux-welcome' }, { topic: 'handmux', urgency: 'high' });
+      const delivery = await push.sendToOne(sub, { title: '通知已开启 ✅', body: '会话「需要你」或「已完成」时提醒你', tag: 'handmux-welcome' }, { topic: 'handmux', urgency: 'high' });
+      // `deliver` deliberately contains failures so an automatic pane push can never break the polling
+      // loop. Enabling notifications is different: its welcome push is the end-to-end health check, so a
+      // rejected/dead subscription must not be reported to the phone as "enabled".
+      if (delivery.sent !== 1) {
+        const expired = delivery.gone > 0;
+        return res.status(expired ? 410 : 502).json({
+          error: expired ? 'push subscription expired' : 'push delivery rejected',
+        });
+      }
       res.json({ ok: true, count: push.count(), pushKey: push.getPushKey(sub.endpoint) });
     } catch (e) { next(e); }
   });
