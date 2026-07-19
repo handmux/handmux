@@ -54,13 +54,11 @@ export const CHANGELOG = [
         '新增「对话视图」(实验性功能,默认关):到设置里打开「启用对话视图(实验性功能)」后,窗口栏就能把 Claude 会话在终端/对话两个视图间一键切换(需已装 Claude hooks,没装可一键安装)。对话视图把会话读成聊天记录——气泡 + Markdown、工具卡(编辑文件带 +A/−B 和彩色 diff)、Claude 提问时点按即答的问题卡、上下文压缩动画、三套暖色配色;终端视图照旧,完全不受影响。',
         '新增「通知记录」:脚本推送(handmux push)的通知按设备留存(各 100 条),全屏翻看、点开看详情、逐条删除;点手机上的通知直接跳到那条消息的详情。',
         '终端里打印的本机地址(localhost:3000 等)自动变成可点的:点一下就能起代理在手机上预览(带路径),多个端口还能并行切换、自动续期。',
-        '修复了对话视图 /clear 后残留旧会话内容、问题卡确认后偶发闪现多余卡片、长输出在工具卡里滑不到、消息不足一屏时无法加载更早消息的问题。',
       ],
       en: [
         'New chat view (experimental, off by default): enable it in Settings → Enable chat view, then flip a Claude pane between terminal and chat from the window bar (requires Claude hooks — one-tap install offered). The chat view reads the session as a conversation — bubbles with Markdown, tool cards (+A/−B and colored diffs for file edits), question cards you answer with a tap, a visible compaction animation, and three warm colour tones. The terminal view is untouched.',
         'New notification inbox: pushes from handmux push are kept per device (latest 100) — browse full-screen, open details, delete one by one; tapping a push lands on that message’s detail.',
         'Localhost URLs printed in the terminal (localhost:3000, …) are now tappable: one tap proxies and previews them on your phone (path preserved), with several ports open in parallel and auto-renewed.',
-        'Fixed chat-view issues: stale content after /clear, a stray fallback card flashing after answering a question, long tool output unreachable in the sheet, and older messages unloadable when the window was shorter than a screen.',
       ],
     },
   },
