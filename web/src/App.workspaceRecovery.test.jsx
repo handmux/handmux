@@ -193,6 +193,29 @@ describe('App workspace recovery', () => {
     expect(document.activeElement).toBe(menu);
   });
 
+  it('closes an already-open Drawer when a slow new checkpoint auto-opens the dialog', async () => {
+    const nextPlan = deferred();
+    api.getWorkspaceRestorePlan.mockResolvedValueOnce(null).mockReturnValueOnce(nextPlan.promise);
+    const { container } = await renderApp();
+    const menu = container.querySelector('.hamburger');
+
+    await flush(15_000);
+    fireEvent.click(menu);
+    await flush();
+    expect(container.querySelector('.drawer').classList.contains('open')).toBe(true);
+    const hiddenFocusTarget = container.querySelector('.drawer-logout');
+    hiddenFocusTarget.focus();
+
+    nextPlan.resolve(activePlan({ checkpointId: 'checkpoint-b' }));
+    await flush();
+    expect(container.querySelector('.drawer').classList.contains('open')).toBe(false);
+    expect(screen.getByRole('dialog', { name: '恢复上次工作区' })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: '关闭' }));
+    await flush();
+    expect(document.activeElement).toBe(menu);
+  });
+
   it('auto-opens once for an empty tmux; close only marks autoShown and explicit ignore hides the card', async () => {
     api.getWorkspaceRestorePlan.mockResolvedValue(activePlan());
     const { container } = await renderApp();
@@ -388,6 +411,48 @@ describe('App workspace recovery', () => {
     expect(api.getWorkspaceRestoreOperation.mock.calls.every(([id]) => id === 'operation-a')).toBe(true);
     expect(screen.getByTestId('terminal-pane').textContent).toBe('%40');
     expect(container.querySelector('.workspace-recovery-card')).toBeNull();
+  });
+
+  it('keeps warned navigation retry alive after the dialog is closed', async () => {
+    const mapping = {
+      id: 'mapping-warning-retry', names: { project: 'project-restored' },
+      runtime: { sessions: {}, windows: {}, panes: {} },
+      logical: { sessions: { [ACTIVE_SESSION]: '$45' }, windows: {}, panes: {} },
+    };
+    const terminal = {
+      id: 'operation-a', status: 'succeeded', progress: { completed: 1, total: 1 }, mapping,
+      warningCodes: ['live-reconcile-failed'],
+      results: [{
+        logicalId: ACTIVE_SESSION, sourceName: 'project', targetName: 'project-restored', status: 'restored',
+        warningCodes: ['agent-warning'],
+      }],
+    };
+    api.getWorkspaceRestorePlan.mockResolvedValue(activePlan());
+    api.getSessions
+      .mockResolvedValueOnce([])
+      .mockRejectedValueOnce(new Error('/private/first navigation failed'))
+      .mockResolvedValueOnce([{ id: '$45', name: 'project-restored' }]);
+    api.getWindows.mockResolvedValue([{ id: '@45', name: 'main' }]);
+    api.getPanes.mockResolvedValue([{ id: '%45', width: 80 }]);
+    api.getWorkspaceRestoreOperation.mockResolvedValue(terminal);
+
+    const { container } = await renderApp();
+    fireEvent.click(screen.getByRole('button', { name: '恢复' }));
+    await flush();
+    await flush();
+    expect(screen.getByText(/无法打开已恢复的会话；正在重试/)).toBeTruthy();
+    expect(screen.getByText(/实时工作区状态核对失败/)).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: '关闭' }));
+    await flush();
+    expect(screen.queryByRole('dialog', { name: '恢复上次工作区' })).toBeNull();
+    expect(container.querySelector('.workspace-recovery-card')).toBeTruthy();
+
+    await flush(1_000);
+    await flush();
+    expect(api.getWorkspaceRestoreOperation).toHaveBeenCalledTimes(2);
+    expect(api.getWorkspaceRestoreOperation.mock.calls.every(([id]) => id === 'operation-a')).toBe(true);
+    expect(screen.getByTestId('terminal-pane').textContent).toBe('%45');
   });
 
   it('stops operation polling immediately after an auth failure', async () => {

@@ -246,7 +246,8 @@ export default function App() {
   const closeRecovery = useCallback(() => {
     const checkpointId = recoveryPlanRef.current?.checkpointId;
     if (checkpointId) markWorkspaceAutoShown(checkpointId);
-    if (recoveryOperationRef.current?.status === 'succeeded'
+    if (!restoreInFlightRef.current
+      && recoveryOperationRef.current?.status === 'succeeded'
       && hasRecoveryWarnings(recoveryOperationRef.current)) {
       clearRecoveryOperation();
       setRecoveryPlan(null);
@@ -486,6 +487,7 @@ export default function App() {
     setRecoveryPlan(plan);
     if (mode === 'auto-dialog') {
       markWorkspaceAutoShown(plan.checkpointId);
+      setDrawerOpen(false);
       setRecoveryDialogOpen(true);
     } else if (changedCheckpoint) {
       setRecoveryDialogOpen(false);
