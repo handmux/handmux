@@ -165,12 +165,37 @@ describe('workspace restore CLI modes and exit codes', () => {
     const result = await run({ flags: { dryRun: true } });
 
     expect(result.code).toBe(0);
-    expect(result.runtime.getRestorePlan).toHaveBeenCalledTimes(1);
+    expect(result.runtime.getRestorePlan).toHaveBeenCalledWith({
+      checkpointId: 'newest', sessions: [], historical: true,
+    });
     expect(result.runtime.restoreNow).not.toHaveBeenCalled();
     expect(result.stdout).toMatch(/\+ api/);
     expect(result.stdout).toMatch(/= docs.*already restored/i);
     expect(result.stdout).toMatch(/No existing session or process will be stopped or modified/i);
-    expect(result.stdout).toMatch(/Run `handmux restore` to continue/i);
+    expect(result.stdout).toContain("Run `handmux restore --checkpoint 'newest'` to continue.");
+    expect(result.stdout).not.toContain('--dry-run');
+  });
+
+  it('dry-run continuation uses the explicit or resolved latest checkpoint id', async () => {
+    const rows = [checkpoint('newest'), checkpoint('older', '2026-07-19T02:00:00.000Z')];
+    const explicit = await run({ flags: { dryRun: true, checkpoint: 'older' }, runtime: fakeRuntime({ rows }) });
+    expect(explicit.stdout).toContain("handmux restore --checkpoint 'older'");
+
+    const latest = await run({ flags: { dryRun: true, checkpoint: 'latest' }, runtime: fakeRuntime({ rows }) });
+    expect(latest.stdout).toContain("handmux restore --checkpoint 'newest'");
+    expect(latest.stdout).not.toContain("--checkpoint 'latest'");
+  });
+
+  it('dry-run continuation preserves single and repeated sessions with POSIX-safe quoting', async () => {
+    const single = await run({ flags: { dryRun: true, session: 'api' } });
+    expect(single.stdout).toContain("handmux restore --checkpoint 'newest' --session 'api'");
+
+    const unsafe = "odd name';$(touch /tmp/pwn)";
+    const quotedUnsafe = `'odd name'"'"';$(touch /tmp/pwn)'`;
+    const multiple = await run({ flags: { dryRun: true, session: ['api', unsafe] } });
+    expect(multiple.stdout).toContain(
+      `handmux restore --checkpoint 'newest' --session 'api' --session ${quotedUnsafe}`,
+    );
   });
 
   it('localizes unsupported dry-run topology and offers manual recovery instead of a doomed restore retry', async () => {
@@ -186,6 +211,7 @@ describe('workspace restore CLI modes and exit codes', () => {
     expect(result.stdout).not.toContain('linked-windows-unsupported');
     expect(result.stdout).toMatch(/tmux new-session -s/);
     expect(result.stdout).not.toMatch(/Run `handmux restore` to continue/i);
+    expect(result.stdout).not.toMatch(/handmux restore --checkpoint/i);
   });
 
   it('does not tell a normal restore to retry an unsupported plan unchanged', async () => {

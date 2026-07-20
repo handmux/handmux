@@ -48,9 +48,12 @@ function posixQuote(value) {
   return `'${String(value).replaceAll("'", `'"'"'`)}'`;
 }
 
-function restoreCommand(checkpoint, session) {
-  const command = `handmux restore --checkpoint ${posixQuote(checkpoint)}`;
-  return session === undefined ? command : `${command} --session ${posixQuote(session)}`;
+function restoreCommand(checkpoint, sessions = []) {
+  const selectedSessions = Array.isArray(sessions) ? sessions : [sessions];
+  return selectedSessions.reduce(
+    (command, session) => `${command} --session ${posixQuote(session)}`,
+    `handmux restore --checkpoint ${posixQuote(checkpoint)}`,
+  );
 }
 
 function manualSessionCommand(session) {
@@ -118,7 +121,7 @@ async function defaultSelectCheckpoint(rows) {
   }));
 }
 
-function writePlan(stdout, plan, dryRun) {
+function writePlan(stdout, plan, dryRun, continuationCommand) {
   line(stdout, t('restore.planCheckpoint', {
     id: plan.checkpointId,
     time: plan.capturedAt || plan.archivedAt || '?',
@@ -142,7 +145,7 @@ function writePlan(stdout, plan, dryRun) {
   line(stdout);
   line(stdout, t('restore.nonDestructive'));
   if (dryRun && !(plan.sessions || []).some((item) => item.action === 'unsupported')) {
-    line(stdout, t('restore.dryRunHint', { command: 'handmux restore' }));
+    line(stdout, t('restore.dryRunHint', { command: continuationCommand }));
   }
 }
 
@@ -275,10 +278,10 @@ export async function runWorkspaceCommand({
       return 1;
     }
     resolvedCheckpoint = checkpointId;
-    const request = { checkpointId, sessions: parsed.sessions, historical };
+    const request = { checkpointId, sessions: parsed.sessions, historical: historical || parsed.dryRun };
     if (parsed.dryRun) {
       const restorePlan = await workspace.getRestorePlan(request);
-      writePlan(stdout, restorePlan, true);
+      writePlan(stdout, restorePlan, true, restoreCommand(checkpointId, parsed.sessions));
       return restorePlan.planSummary?.unsupported > 0 ? 1 : 0;
     }
 
