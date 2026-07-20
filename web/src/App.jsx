@@ -316,17 +316,22 @@ export default function App() {
     catch (e) { handledAuth(e); }
   }, [current, onAuthFail]);
 
-  // ⊟/⊞ : purely resize the tmux window's columns by COL_STEP (resize-window). Font is NOT
-  // touched here — that's the two-finger pinch on the terminal. We step a tracked target
-  // (not the live term.cols, which only catches up on the next ~1s refresh) so repeated
-  // taps add up instead of all stepping from the same stale value. Mutates the shared
-  // window (the PC follows); "恢复默认" hands sizing back.
-  const tmuxResizeCols = useCallback(async (delta) => {
+  const getTrackedColCount = useCallback(
+    () => tmuxColsRef.current ?? termRef.current?.getSize()?.cols,
+    [],
+  );
+
+  // ⊟/⊞ : resize the selected pane in a split, or the whole window when it has only one pane.
+  // Font is NOT touched here — that's the two-finger pinch on the terminal. Settings passes the
+  // current pane width it just read from tmux; after that first tap we track the requested target
+  // (term.cols only catches up on the next ~1s refresh) so repeated taps still accumulate.
+  const tmuxResizeCols = useCallback(async (delta, displayedCols = null) => {
     const windowId = current?.window?.id;
-    // tmuxColsRef is seeded to the pane's real width when the window opens (see openSession /
-    // selectWindow), so the first tap steps from the true width — not the 80-col xterm
-    // default that term.cols shows until the first ~1s refresh. Falls back to the live grid.
-    const base = tmuxColsRef.current ?? termRef.current?.getSize()?.cols;
+    // The displayed value is pane-scoped and wins. Other entry points seed tmuxColsRef when a
+    // window opens; the live grid is the final fallback.
+    const base = Number.isFinite(displayedCols)
+      ? displayedCols
+      : (tmuxColsRef.current ?? termRef.current?.getSize()?.cols);
     if (!windowId || !base) return;
     const cols = Math.max(20, Math.min(500, base + delta));
     tmuxColsRef.current = cols;
@@ -1172,8 +1177,9 @@ export default function App() {
         hooksStatus={hooksStatus}
         onEnableHooks={enableHooks}
         termRef={termRef}
-        getColCount={() => tmuxColsRef.current ?? termRef.current?.getSize()?.cols}
-        onColAdjust={(d) => tmuxResizeCols(d)}
+        windowId={current?.window?.id}
+        getColCount={getTrackedColCount}
+        onColAdjust={tmuxResizeCols}
         onColRestore={tmuxRestore}
         onOpenChangelog={openChangelog}
         changelogUnread={changelogUnread}

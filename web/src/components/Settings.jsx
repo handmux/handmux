@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { notifyEnabled, enableNotifications, disableNotifications, pushSupported, getScriptPushKey } from '../push.js';
 import DirPicker from './DirPicker.jsx';
 import PushScriptSheet from './PushScriptSheet.jsx';
-import { fetchPaneCwd } from '../api.js';
+import { fetchPaneCwd, getPanes } from '../api.js';
 import { fmtRemainMin, useRemaining } from '../previewCountdown.js';
 import { getDocHighlight, setDocHighlight } from '../storage.js';
 import { t, getLangCode, setLang, AVAILABLE } from '../i18n';
@@ -15,13 +15,13 @@ export default function Settings({ open, onClose, termRef, onColAdjust, onColRes
   chatTone = 'ink', onChatTone = () => {}, chatLensEnabled = false, onChatLensEnabled = () => {},
   hooksStatus = null, onEnableHooks = null,
   notifUnread = false, onOpenInbox,
-  updateInfo = null,
+  updateInfo = null, windowId = null,
   activePreview = null, pane = null, lastPreviewDir = null, dynamicEnabled = false,
   getColCount = null,
   onStartPreview, onStartDynamicPreview, onOpenPreview, onRenew, onStop }) {
   const [font, setFont] = useState(null); // { size, auto } snapshot for display
   const [docHl, setDocHl] = useState(getDocHighlight()); // doc-path highlight toggle (default off)
-  const [cols, setCols] = useState(null); // current col count for display (null = unknown/restored)
+  const [cols, setCols] = useState(null); // current pane's live col count (null = loading/unknown/restored)
   const [langOpen, setLangOpen] = useState(false);
   const [notify, setNotify] = useState(notifyEnabled()); // device-notification toggle state
   const [notifyBusy, setNotifyBusy] = useState(false); // true while (un)subscribing — shows a spinner, disables the button
@@ -77,11 +77,24 @@ export default function Settings({ open, onClose, termRef, onColAdjust, onColRes
   };
 
   useEffect(() => {
+    let active = true;
     if (open) {
       setFont(termRef.current?.getFontSize?.() ?? null);
-      setCols(getColCount?.() ?? null);
+      const fallback = getColCount?.() ?? null;
+      if (windowId && pane) {
+        setCols(null);
+        getPanes(windowId)
+          .then((panes) => {
+            const actual = panes.find((item) => item.id === pane)?.width;
+            if (active) setCols(actual ?? fallback);
+          })
+          .catch(() => { if (active) setCols(fallback); });
+      } else {
+        setCols(fallback);
+      }
     }
-  }, [open, termRef, getColCount]);
+    return () => { active = false; };
+  }, [open, termRef, getColCount, windowId, pane]);
 
   const toggleNotify = async () => {
     setNotifyBusy(true); setNotifyMsg('');
@@ -109,7 +122,11 @@ export default function Settings({ open, onClose, termRef, onColAdjust, onColRes
 
   const fontLabel = font?.auto ? t('settings.font_auto') : font?.size ? `${font.size}px` : '—';
   const colsLabel = cols != null ? `${cols} 列` : '—';
-  const adjustCol = (d) => { onColAdjust?.(d); setCols(getColCount?.() ?? null); };
+  const adjustCol = (d) => {
+    if (cols == null) return;
+    onColAdjust?.(d, cols);
+    setCols(getColCount?.() ?? null);
+  };
   const restoreCol = () => { onColRestore?.(); setCols(null); };
 
   return (
@@ -309,11 +326,11 @@ export default function Settings({ open, onClose, termRef, onColAdjust, onColRes
         <div className="settings-section">
           <div className="settings-label">{t('settings.screen_cols')}</div>
           <div className="settings-btns cols-btns">
-            <button className="fontbtn col-step" onClick={() => adjustCol(-10)}>−10</button>
-            <button className="fontbtn col-step col-fine" onClick={() => adjustCol(-1)}>−1</button>
+            <button className="fontbtn col-step" disabled={cols == null} onClick={() => adjustCol(-10)}>−10</button>
+            <button className="fontbtn col-step col-fine" disabled={cols == null} onClick={() => adjustCol(-1)}>−1</button>
             <span className="settings-value">{colsLabel}</span>
-            <button className="fontbtn col-step col-fine" onClick={() => adjustCol(1)}>+1</button>
-            <button className="fontbtn col-step" onClick={() => adjustCol(10)}>+10</button>
+            <button className="fontbtn col-step col-fine" disabled={cols == null} onClick={() => adjustCol(1)}>+1</button>
+            <button className="fontbtn col-step" disabled={cols == null} onClick={() => adjustCol(10)}>+10</button>
             <button className="fontbtn" onClick={restoreCol}>↺ {t('settings.cols_restore')}</button>
           </div>
         </div>

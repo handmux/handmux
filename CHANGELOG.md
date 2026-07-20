@@ -7,6 +7,7 @@ All notable changes to handmux. Format follows [Keep a Changelog](https://keepac
 ### Fixed
 - iPhone 上的分屏地图浮层不再被窗口栏的横向滚动容器裁掉而无法显示。
 - iPhone 上长按分屏地图里的窗格时，不再同时触发系统文字选中与复制浮层。
+- 设置分屏窗格列宽时会先读取当前窗格的实际宽度，不再沿用同一窗口里上一格的调整值。
 
 ## [0.17.7] - 2026-07-20
 
