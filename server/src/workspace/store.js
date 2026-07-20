@@ -17,6 +17,42 @@ function errorMessage(error) {
   return error instanceof Error ? error.message : String(error);
 }
 
+function projectObject(value, fields) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
+  return Object.fromEntries(fields.map((field) => [field, value[field]]));
+}
+
+function projectSnapshot(input) {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return input;
+  const environment = projectObject(input.environment, ['id', 'bootIdentity', 'tmuxServerId']);
+  const active = input.active === null ? null : projectObject(input.active, ['sessionId', 'windowId', 'paneId']);
+  const sessions = Array.isArray(input.sessions)
+    ? input.sessions.map((session) => projectObject(session, ['id', 'runtimeId', 'name', 'windowIds', 'activeWindowId']))
+    : input.sessions;
+  const windows = Array.isArray(input.windows) ? input.windows.map((window) => {
+    const projected = projectObject(window, ['id', 'runtimeId', 'name', 'index', 'layout', 'activePaneId', 'panes']);
+    if (!projected || typeof projected !== 'object' || Array.isArray(projected) || !Array.isArray(projected.panes)) return projected;
+    projected.panes = projected.panes.map((pane) => {
+      const projectedPane = projectObject(pane, ['id', 'runtimeId', 'index', 'cwd', 'agent']);
+      if (!projectedPane || typeof projectedPane !== 'object' || Array.isArray(projectedPane)) return projectedPane;
+      if (projectedPane.agent !== null && projectedPane.agent !== undefined) {
+        projectedPane.agent = projectObject(projectedPane.agent, ['id', 'sessionId', 'transcriptPath']);
+      }
+      return projectedPane;
+    });
+    return projected;
+  }) : input.windows;
+  return {
+    schemaVersion: input.schemaVersion,
+    capturedAt: input.capturedAt,
+    environment,
+    tmuxVersion: input.tmuxVersion,
+    active,
+    sessions,
+    windows,
+  };
+}
+
 function validateLive(value) {
   try {
     if (!Number.isInteger(value?.revision) || value.revision < 1) throw new Error('invalid live revision');
@@ -61,6 +97,7 @@ function validateRecovery(value, checkpointId) {
   const initial = new Set(value.initialSessionIds);
   if (value.pendingSessionIds.some((id) => !initial.has(id))) throw new Error('recovery pending ids must be initial ids');
   if (value.resolvedAt !== null && (typeof value.resolvedAt !== 'string' || Number.isNaN(Date.parse(value.resolvedAt)))) throw new Error('invalid recovery resolvedAt');
+  if (value.resolvedAt !== null && value.pendingSessionIds.length > 0) throw new Error('resolved recovery cannot contain pending session ids');
   if (value.mapping !== null && (!value.mapping || typeof value.mapping !== 'object' || Array.isArray(value.mapping))) throw new Error('invalid recovery mapping');
   return value;
 }
@@ -127,7 +164,7 @@ export function createWorkspaceStore({ home, now = Date.now, fs = fsp }) {
   }
 
   async function writeLive(snapshot) {
-    const { revision: ignoredRevision, payloadHash: ignoredHash, ...payload } = snapshot ?? {};
+    const payload = projectSnapshot(snapshot);
     canonicalizeSnapshot(payload);
     await ensureDirectories();
     const copies = await Promise.all([paths.liveCurrent, paths.liveMirror].map(readLiveCopy));
@@ -145,6 +182,7 @@ export function createWorkspaceStore({ home, now = Date.now, fs = fsp }) {
     const validation = validateCheckpoint(result.value);
     if (!validation.ok) return { status: 'corrupt', error: validation.error };
     if (validation.value.id !== id) return { status: 'corrupt', error: 'checkpoint id does not match filename' };
+    if (validation.value.environment.id !== id) return { status: 'corrupt', error: 'checkpoint environment id does not match filename' };
     return { status: 'ok', value: validation.value };
   }
 
@@ -274,7 +312,7 @@ export function createWorkspaceStore({ home, now = Date.now, fs = fsp }) {
     await ensureDirectories();
     let checkpoint = await readCheckpoint(id);
     if (checkpoint.status !== 'ok') {
-      const { payloadHash: ignoredHash, ...unsealed } = live.value;
+      const { payloadHash: ignoredHash, revision: ignoredRevision, ...unsealed } = live.value;
       const value = sealPayload({
         ...unsealed,
         id,

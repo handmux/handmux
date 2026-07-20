@@ -82,6 +82,59 @@ describe('atomic workspace json', () => {
 });
 
 describe('workspace live store', () => {
+  it('projects snapshots to the persistence allowlist at every level', async () => {
+    const home = await makeHome();
+    const store = createWorkspaceStore({ home, now: () => NOW });
+    const base = snapshot('env-a');
+    const dirty = {
+      ...base,
+      paneOutput: 'secret output',
+      token: 'top-secret',
+      environment: { ...base.environment, token: 'environment-secret' },
+      active: { ...base.active, command: 'active-secret' },
+      sessions: [{ ...base.sessions[0], token: 'session-secret' }],
+      windows: [{
+        ...base.windows[0],
+        command: 'window-secret',
+        panes: [{
+          ...base.windows[0].panes[0],
+          output: 'pane-secret',
+          agent: {
+            id: 'agent-a',
+            sessionId: 'agent-session-a',
+            transcriptPath: '/private/transcript.jsonl',
+            command: 'agent --unsafe',
+            argv: ['--token', 'secret'],
+            transcript: 'full transcript body',
+          },
+        }],
+      }],
+    };
+
+    await store.writeLive(dirty);
+    const live = JSON.parse(await fs.readFile(store.paths.liveCurrent, 'utf8'));
+
+    expect(live).not.toHaveProperty('paneOutput');
+    expect(live).not.toHaveProperty('token');
+    expect(live.environment).toEqual(base.environment);
+    expect(live.active).toEqual(base.active);
+    expect(live.sessions[0]).toEqual(base.sessions[0]);
+    expect(live.windows[0]).not.toHaveProperty('command');
+    expect(live.windows[0].panes[0]).not.toHaveProperty('output');
+    expect(live.windows[0].panes[0].agent).toEqual({
+      id: 'agent-a',
+      sessionId: 'agent-session-a',
+      transcriptPath: '/private/transcript.jsonl',
+    });
+
+    await store.archiveEnvironment({ endedReason: 'boot-changed', detectedAt: new Date(NOW).toISOString() });
+    const checkpoint = JSON.parse(await fs.readFile(path.join(store.paths.checkpointsDir, 'env-a.json'), 'utf8'));
+    expect(checkpoint).not.toHaveProperty('paneOutput');
+    expect(checkpoint).not.toHaveProperty('revision');
+    expect(checkpoint.environment).toEqual({ ...base.environment, endedReason: 'boot-changed' });
+    expect(checkpoint.windows[0].panes[0].agent).toEqual(live.windows[0].panes[0].agent);
+  });
+
   it('writes current and mirror at the same revision/hash and repairs one corrupt copy', async () => {
     const home = await makeHome();
     const store = createWorkspaceStore({ home, now: () => NOW });
@@ -180,6 +233,25 @@ describe('workspace checkpoints', () => {
     await expect(store.archiveEnvironment({ endedReason: 'boot-changed', detectedAt: new Date(NOW).toISOString() })).rejects.toThrow(/safe|id/i);
     await expect(store.writeOperation({ id: '../escape', status: 'pending' })).rejects.toThrow(/safe|id/i);
   });
+
+  it('rejects a self-consistent checkpoint whose environment does not match its id and replaces it on archive', async () => {
+    const home = await makeHome();
+    const store = createWorkspaceStore({ home, now: () => NOW });
+    await ensurePrivateDir(store.paths.checkpointsDir);
+    const mismatched = sealPayload({
+      ...snapshot('env-other'),
+      id: 'env-a',
+      archivedAt: new Date(NOW).toISOString(),
+      environment: { ...snapshot('env-other').environment, endedReason: 'boot-changed' },
+    });
+    await writeJsonAtomic(path.join(store.paths.checkpointsDir, 'env-a.json'), mismatched);
+
+    expect(await store.readCheckpoint('env-a')).toMatchObject({ status: 'corrupt', error: expect.stringMatching(/environment/i) });
+    await store.writeLive(snapshot('env-a'));
+    const archived = await store.archiveEnvironment({ endedReason: 'server-changed', detectedAt: new Date(NOW).toISOString() });
+    expect(archived).toMatchObject({ status: 'ok', value: { id: 'env-a', environment: { id: 'env-a' } } });
+    expect(await store.readCheckpoint('env-a')).toMatchObject({ status: 'ok', value: { environment: { id: 'env-a' } } });
+  });
 });
 
 describe('workspace recovery and operations', () => {
@@ -223,6 +295,17 @@ describe('workspace recovery and operations', () => {
     expect(await store.readOperation(operation.id)).toEqual({ status: 'ok', value: operation });
     const file = path.join(store.paths.operationsDir, `${operation.id}.json`);
     expect((await fs.stat(file)).mode & 0o777).toBe(0o600);
+  });
+
+  it('treats a resolved recovery with pending sessions as corrupt', async () => {
+    const store = createWorkspaceStore({ home: await makeHome(), now: () => NOW });
+    await store.writeLive(snapshot('env-a'));
+    await store.archiveEnvironment({ endedReason: 'boot-changed', detectedAt: new Date(NOW).toISOString() });
+    const recoveryFile = path.join(store.paths.recoveryDir, 'env-a.json');
+    const recovery = JSON.parse(await fs.readFile(recoveryFile, 'utf8'));
+    await writeJsonAtomic(recoveryFile, { ...recovery, resolvedAt: new Date(NOW).toISOString() });
+
+    expect(await store.readRecovery('env-a')).toMatchObject({ status: 'corrupt', error: expect.stringMatching(/resolved|pending/i) });
   });
 });
 
