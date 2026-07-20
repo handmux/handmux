@@ -32,7 +32,7 @@ import { checkTmux, MIN_TMUX, tmuxInstallHint } from '../src/cli/tmuxVersion.js'
 import { readState, clearState, isAlive, acquireLifecycleLock, pocketHome, logPath, configPath, claudeStatePath } from '../src/cli/state.js';
 import { scanSupervisorPids, terminateSupervisorPids } from '../src/cli/supervisorProcesses.js';
 import { runSetup } from '../src/cli/setupWizard.js';
-import { runShortcutEditor } from '../src/cli/shortcutEditor.js';
+import { commitShortcuts, reportShortcutCommit, runShortcutEditor } from '../src/cli/shortcutEditor.js';
 import { hooksStatus, installHooks, uninstallHooks } from '../src/cli/claudeHooks.js';
 import { codexHooksStatus, installCodexHooks, uninstallCodexHooks } from '../src/cli/codexHooks.js';
 import { statusLineStatus, installStatusLine, uninstallStatusLine, composeHint, refreshStatusLineScript } from '../src/cli/statusLine.js';
@@ -497,20 +497,22 @@ async function setupCmd() {
 
 async function shortcutsCmd() {
   const target = flags.config ? path.resolve(flags.config) : configPath(HOME);
-  const st = readState(HOME);
-  const running = !!(st && isAlive(st.supervisorPid));
   let res;
-  try { res = await runShortcutEditor({ target, running }); }
-  catch (error) { console.error(t('err.badConfig', { path: target, msg: error.message })); process.exitCode = 2; return; }
+  try {
+    res = await runShortcutEditor({
+      target,
+      commit: (file, shortcuts) => commitShortcuts({ home: HOME, target: file, shortcuts }),
+    });
+  } catch (error) {
+    console.error(error.ownerPid
+      ? t('lifecycle.busy', { pid: error.ownerPid })
+      : t('err.badConfig', { path: target, msg: error.message }));
+    process.exitCode = 2;
+    return;
+  }
   if (!res) return;
   if (res.error) { process.exitCode = 2; return; }
-  if (res.restart) {
-    return withLifecycleLock(async () => {
-      if (running && !await stopAndWait()) return;
-      return start();
-    });
-  }
-  if (running) console.log(t('shortcuts.laterRestart'));
+  process.exitCode = reportShortcutCommit(res) || process.exitCode;
 }
 
 // Offer to enable the Claude statusLine usage capturer — it feeds the phone Usage page's 5h/weekly bars

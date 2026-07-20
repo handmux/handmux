@@ -3,6 +3,7 @@ import path from 'node:path';
 import { normalizeShortcuts, shortcutIdentity } from '../shortcutConfig.js';
 import { t } from './i18n/index.js';
 import * as prompts from './prompt.js';
+import { acquireLifecycleLock, isAlive, readState } from './state.js';
 
 const MODIFIERS = {
   none: { prefixes: [], labels: [] },
@@ -180,7 +181,8 @@ async function editMode(mode, initial, ui) {
 }
 
 export async function runShortcutEditor({
-  target, running = false, log = console, isTTY = process.stdin.isTTY, ui = defaultUi,
+  target, log = console, isTTY = process.stdin.isTTY, ui = defaultUi,
+  commit = async (file, shortcuts) => ({ cfg: saveShortcutConfig(file, shortcuts) }),
 } = {}) {
   if (!isTTY) { log.error(t('shortcuts.needTty')); return { error: 'non-tty' }; }
   const existing = readExisting(target);
@@ -202,17 +204,76 @@ export async function runShortcutEditor({
         shortcuts = { ...shortcuts, [choice]: await editMode(choice, shortcuts[choice], ui) };
         continue;
       }
-      let restart = false;
-      if (running) {
-        try { restart = await ui.ask(ui.confirm({ message: t('shortcuts.restart'), initialValue: true })); }
-        catch (error) { if (error !== prompts.CANCELLED) throw error; }
-      }
-      const cfg = saveShortcutConfig(target, shortcuts);
+      const result = await commit(target, shortcuts);
       ui.outro(t('shortcuts.wrote', { path: target }));
-      return { cfg, restart };
+      return result;
     }
   } catch (error) {
     if (error === prompts.CANCELLED) { ui.cancel(t('shortcuts.exited')); return null; }
     throw error;
   }
+}
+
+export async function applyShortcutsLive({
+  state, shortcuts, fetchImpl = globalThis.fetch, timeoutMs = 8000,
+}) {
+  if (!state?.localUrl || !state?.token) throw new Error('running server state is incomplete');
+  const base = state.localUrl.replace(/\/$/, '');
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetchImpl(`${base}/api/config/shortcuts`, {
+      method: 'PUT',
+      redirect: 'manual',
+      signal: controller.signal,
+      headers: { Authorization: `Bearer ${state.token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ shortcuts }),
+    });
+    if (!response.ok) throw new Error(`server returned HTTP ${response.status}`);
+    let acknowledgment;
+    try { acknowledgment = await response.json(); } catch { /* validated below */ }
+    if (acknowledgment?.ok !== true) throw new Error('invalid server response');
+  } catch (error) {
+    if (controller.signal.aborted) throw new Error(`server request timed out after ${timeoutMs}ms`);
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// Keep the durable write and the runtime replacement in one short cross-process critical section.
+// Otherwise two editors can interleave their save/PUT calls and leave disk and memory disagreeing.
+export async function commitShortcuts({
+  home, target, shortcuts,
+  acquireLock = acquireLifecycleLock,
+  readStateImpl = readState,
+  isAliveImpl = isAlive,
+  saveImpl = saveShortcutConfig,
+  fetchImpl = globalThis.fetch,
+  timeoutMs = 8000,
+}) {
+  const release = acquireLock(home);
+  try {
+    const cfg = saveImpl(target, shortcuts);
+    const state = readStateImpl(home);
+    if (!state || !isAliveImpl(state.supervisorPid)) return { cfg, running: false, applied: false };
+    try {
+      await applyShortcutsLive({ state, shortcuts: cfg.shortcuts, fetchImpl, timeoutMs });
+      return { cfg, running: true, applied: true };
+    } catch (error) {
+      return { cfg, running: true, applied: false, error };
+    }
+  } finally {
+    release();
+  }
+}
+
+export function reportShortcutCommit(result, output = console) {
+  if (!result.running) return 0;
+  if (result.applied) {
+    output.log(t('shortcuts.applied'));
+    return 0;
+  }
+  output.error(t('shortcuts.applyFailed', { msg: result.error?.message || 'unknown error' }));
+  return 1;
 }

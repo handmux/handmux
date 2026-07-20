@@ -41,10 +41,10 @@ export default {
   'shortcuts.noModifier': '无',
   'shortcuts.base': '基础键',
   'shortcuts.needTty': 'handmux shortcuts 需要交互式终端。',
-  'shortcuts.restart': '现在重启 handmux 应用这些快捷项吗？',
   'shortcuts.wrote': '已保存 {path}',
   'shortcuts.exited': '未保存修改',
-  'shortcuts.laterRestart': '已保存。运行 `handmux restart` 后应用新的快捷项。',
+  'shortcuts.applied': '已立即应用到正在运行的 handmux。',
+  'shortcuts.applyFailed': '配置已保存，但无法立即应用：{msg}。请运行 `handmux restart`。',
 
   // ssh 预检
   'ssh.confirmSetup': '到 {host} 的免密 SSH 还没配置。现在配置吗?',

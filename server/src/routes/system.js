@@ -13,6 +13,7 @@ import { codexHooksStatus, installCodexHooks } from '../cli/codexHooks.js';
 import { scanOrphans, takeoverOrphan, defaultProjectsDir } from '../orphans.js';
 import { getUsageCached } from '../usage.js';
 import { readCache, isNewer, shouldRefresh, refreshLatestAsync } from '../cli/updateCheck.js';
+import { normalizeShortcuts } from '../shortcutConfig.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const HOOKS_SRC = resolvePath(here, '../../hooks'); // server/hooks (bundled scripts)
@@ -37,6 +38,7 @@ export function combinedHooksStatus(home) {
 
 export function systemRoutes({ commands, claudeEvents, asrEnv, shortcuts, home, stateFile }) {
   const r = express.Router();
+  let activeShortcuts = normalizeShortcuts(shortcuts);
 
   // --- Capabilities probe ---------------------------------------------------------------------
   // Optional integrations are configured per-install (open-source installs ship without keys), so the
@@ -45,7 +47,16 @@ export function systemRoutes({ commands, claudeEvents, asrEnv, shortcuts, home, 
   // `claudeHooks` (name kept for web back-compat) now summarizes EVERY coding agent: 'installed' if any is
   // wired, 'absent' if an agent is present but none wired (→ offer enable), 'no-claude' if no agent at all.
   r.get('/config', (req, res) => {
-    res.json({ asr: isAsrConfigured(asrEnv), claudeHooks: combinedHooksStatus(home), shortcuts });
+    res.json({ asr: isAsrConfigured(asrEnv), claudeHooks: combinedHooksStatus(home), shortcuts: activeShortcuts });
+  });
+
+  r.put('/config/shortcuts', (req, res) => {
+    if (!req.body || !Object.hasOwn(req.body, 'shortcuts')) {
+      return res.status(400).json({ error: 'shortcuts required' });
+    }
+    try { activeShortcuts = normalizeShortcuts(req.body.shortcuts); }
+    catch (error) { return res.status(400).json({ error: error.message }); }
+    res.json({ ok: true });
   });
 
   // Update hint for the phone: is the globally-installed CLI behind the latest npm release? `current` is

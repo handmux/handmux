@@ -42,10 +42,10 @@ export default {
   'shortcuts.noModifier': 'None',
   'shortcuts.base': 'Base key',
   'shortcuts.needTty': 'handmux shortcuts needs an interactive terminal.',
-  'shortcuts.restart': 'Restart handmux now to apply these shortcuts?',
   'shortcuts.wrote': 'Saved {path}',
   'shortcuts.exited': 'No changes saved',
-  'shortcuts.laterRestart': 'Saved. Run `handmux restart` to apply the new shortcuts.',
+  'shortcuts.applied': 'Applied immediately to the running handmux server.',
+  'shortcuts.applyFailed': 'Config was saved but could not be applied immediately: {msg}. Run `handmux restart`.',
 
   // ssh preflight
   'ssh.confirmSetup': 'passwordless SSH to {host} is not set up. Configure it now?',

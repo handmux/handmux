@@ -9,7 +9,7 @@ All notable changes to handmux. Format follows [Keep a Changelog](https://keepac
 
 ### Changed
 - 窗口管理与分屏管理弹窗现在使用明确标题，并在标题下以小字显示当前终端的列×行尺寸。
-- 手机端快捷项配置改为 App 启动及每次回到前台时读取，不再每 15 秒轮询；电脑端修改后切回手机 App、刷新或重新打开即可更新。
+- `handmux shortcuts` 保存后会立即更新正在运行的 server，无需重启；手机端在 App 启动及每次回到前台时读取配置，不再每 15 秒轮询。
 
 ## [0.17.8] - 2026-07-20
 

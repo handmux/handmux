@@ -788,6 +788,35 @@ describe('GET /api/config (capabilities)', () => {
     const res = await request(app).get('/api/config').set('Authorization', 'Bearer good').expect(200);
     expect(res.body.shortcuts).toEqual(shortcuts);
   });
+  it('updates the in-memory shortcuts without restarting the server', async () => {
+    const initial = { command: [], chat: [{ type: 'text', text: 'old', enter: true }] };
+    const updated = {
+      command: [{ type: 'key', key: 'Escape', label: 'Esc' }],
+      chat: [{ type: 'text', text: 'new', enter: false }],
+    };
+    const app = express();
+    app.use('/api', createApiRouter({ token: 'good', commands: baseCommands, shortcuts: initial }));
+
+    await request(app).put('/api/config/shortcuts').set('Authorization', 'Bearer good')
+      .send({ shortcuts: updated }).expect(200, { ok: true });
+    const res = await request(app).get('/api/config').set('Authorization', 'Bearer good').expect(200);
+    expect(res.body.shortcuts).toEqual(updated);
+  });
+  it('rejects invalid live shortcuts without replacing the last good value', async () => {
+    const initial = { command: [], chat: [{ type: 'text', text: 'old', enter: true }] };
+    const app = express();
+    app.use('/api', createApiRouter({ token: 'good', commands: baseCommands, shortcuts: initial }));
+
+    await request(app).put('/api/config/shortcuts').set('Authorization', 'Bearer good')
+      .send({ shortcuts: { command: 'bad', chat: [] } }).expect(400);
+    const res = await request(app).get('/api/config').set('Authorization', 'Bearer good').expect(200);
+    expect(res.body.shortcuts).toEqual(initial);
+  });
+
+  it('requires auth to replace live shortcuts', async () => {
+    await request(appWith(baseCommands)).put('/api/config/shortcuts')
+      .send({ shortcuts: { command: [], chat: [] } }).expect(401);
+  });
 });
 
 describe('claude hooks API', () => {
