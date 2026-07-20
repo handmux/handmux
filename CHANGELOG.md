@@ -4,6 +4,9 @@ All notable changes to handmux. Format follows [Keep a Changelog](https://keepac
 
 ## [Unreleased]
 
+### Fixed
+- iPhone 上的分屏地图浮层不再被窗口栏的横向滚动容器裁掉而无法显示。
+
 ## [0.17.7] - 2026-07-20
 
 ### Changed

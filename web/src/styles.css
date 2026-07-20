@@ -239,9 +239,9 @@ a.settings-linkbtn { display: inline-flex; align-items: center; justify-content:
 .wt-menu .dd-pane-seq { flex: none; opacity: .55; font-variant-numeric: tabular-nums; }
 .wt-menu .dd-pane-cmd { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* Proportional layout map: a frosted popover that reproduces the real tmux split as tappable window
-   tiles. .pane-map declares its OWN frosted-glass shell and reuses .wt-menu only for fixed
-   positioning; MAP_W/MAP_H (paneLayout.js) mirror this box's px size (used for viewport clamping and
-   cell-fit classification). Each .pane-map-cell is absolutely placed by percentage (paneRects); its
+   tiles. It is portalled to <body> so iOS WebKit cannot clip it to .windowbar-scroll; MAP_W/MAP_H
+   (paneLayout.js) mirror this box's px size (used for viewport clamping and cell-fit classification).
+   Each .pane-map-cell is absolutely placed by percentage (paneRects); its
    inner .pmc-surf insets to leave a gutter between tiles (real-window-thumbnail look), and cramped
    cells get .is-flat/.is-narrow/.is-tiny to degrade content without changing proportions. */
 .pane-map { position: fixed; overflow: hidden; z-index: 30; /* NOT .wt-menu: that caps max-width:240 and

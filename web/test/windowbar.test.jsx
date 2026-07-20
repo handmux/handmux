@@ -216,11 +216,13 @@ describe('WindowBar', () => {
   const openPaneMenu = () => {
     fire(container.querySelector('.wt-trigger'), 'click');
   };
+  const paneMap = () => document.querySelector('.pane-map');
+  const paneMapCells = () => document.querySelectorAll('.pane-map-cell');
 
   it('opens a proportional pane map: one cell per pane with seq + command', () => {
     render({ ...base, panes: geomPanes });
     openPaneMenu();
-    const cells = container.querySelectorAll('.pane-map-cell');
+    const cells = paneMapCells();
     expect(cells.length).toBe(2);
     // two equal side-by-side panes → each 118px wide ((248-12)/2); cells are offset by the 6px gutter,
     // so the left one sits at 6px and the right one at 6+118=124px (no blank at the edges).
@@ -232,23 +234,31 @@ describe('WindowBar', () => {
     expect(cells[1].textContent).toContain('node');
   });
 
+  it('portals the pane map outside the horizontally scrolling window strip', () => {
+    render({ ...base, panes: geomPanes });
+    openPaneMenu();
+    const map = paneMap();
+    expect(map).not.toBeNull();
+    expect(map.parentElement).toBe(document.body);
+  });
+
   it('map cell tap flashes the chosen tile, then commits the switch and keeps the map open', () => {
     vi.useFakeTimers();
     const onSelectPane = vi.fn();
     render({ ...base, panes: geomPanes, onSelectPane });
     openPaneMenu();
-    const cells = container.querySelectorAll('.pane-map-cell');
+    const cells = paneMapCells();
     fire(cells[1], 'click');
     // brief selection feedback first: the tile flashes and the switch is NOT yet committed
-    const flashing = container.querySelectorAll('.pane-map-cell');
+    const flashing = paneMapCells();
     expect(flashing[1].className).toContain('is-picking');      // B lights up
     expect(flashing[0].className).toContain('is-releasing');    // A (the outgoing current) hands off its blue
     expect(onSelectPane).not.toHaveBeenCalled();
-    expect(container.querySelector('.pane-map')).not.toBeNull(); // still open during the flash
+    expect(paneMap()).not.toBeNull(); // still open during the flash
     // after the flash the switch lands, but the map dwells open (only an outside tap closes it)
     act(() => vi.advanceTimersByTime(250));
     expect(onSelectPane).toHaveBeenCalledWith('%2');
-    expect(container.querySelector('.pane-map')).not.toBeNull();
+    expect(paneMap()).not.toBeNull();
   });
 
   it('long-pressing a map tile calls onManagePane and does NOT switch', () => {
@@ -257,7 +267,7 @@ describe('WindowBar', () => {
     const onManagePane = vi.fn();
     render({ ...base, panes: geomPanes, onSelectPane, onManagePane });
     openPaneMenu();
-    const cells = container.querySelectorAll('.pane-map-cell');
+    const cells = paneMapCells();
     fire(cells[1], 'pointerdown');
     act(() => vi.advanceTimersByTime(600));
     fire(cells[1], 'pointerup');
@@ -271,13 +281,13 @@ describe('WindowBar', () => {
     const onSelectPane = vi.fn();
     render({ ...base, panes: geomPanes, onSelectPane });
     openPaneMenu();
-    const cells = container.querySelectorAll('.pane-map-cell');
+    const cells = paneMapCells();
     fire(cells[1], 'pointerdown');
     fire(cells[1], 'pointerup');
     fire(cells[1], 'click');
     act(() => vi.advanceTimersByTime(250));
     expect(onSelectPane).toHaveBeenCalledWith('%2');
-    expect(container.querySelector('.pane-map')).not.toBeNull(); // map still open after the switch
+    expect(paneMap()).not.toBeNull(); // map still open after the switch
   });
 
   it('with the pane-manage sheet open, tapping another tile re-points the sheet at it (and still switches)', () => {
@@ -287,7 +297,7 @@ describe('WindowBar', () => {
     // sheet is open (paneSheetOpen) targeting the current pane; tap the OTHER tile
     render({ ...base, panes: geomPanes, paneSheetOpen: true, onSelectPane, onManagePane });
     openPaneMenu();
-    const cells = container.querySelectorAll('.pane-map-cell');
+    const cells = paneMapCells();
     fire(cells[1], 'click');
     // the sheet re-targets to the tapped pane IMMEDIATELY (no flash delay)
     expect(onManagePane).toHaveBeenCalledWith('%2');
@@ -301,7 +311,7 @@ describe('WindowBar', () => {
     const onManagePane = vi.fn();
     render({ ...base, panes: geomPanes, onManagePane });
     openPaneMenu();
-    const cells = container.querySelectorAll('.pane-map-cell');
+    const cells = paneMapCells();
     fire(cells[1], 'click');
     act(() => vi.advanceTimersByTime(250));
     expect(onManagePane).not.toHaveBeenCalled();
@@ -310,16 +320,16 @@ describe('WindowBar', () => {
   it('opens the map (no tap) when the window sheet requests it via openMapFor, then clears the request', () => {
     const onMapOpened = vi.fn();
     render({ ...base, panes: geomPanes, openMapFor: '@1', onMapOpened }); // @1 is the active window
-    expect(container.querySelector('.pane-map')).not.toBeNull();
+    expect(paneMap()).not.toBeNull();
     expect(onMapOpened).toHaveBeenCalled();
   });
 
   it('an outside tap closes the pane map', () => {
     render({ ...base, panes: geomPanes });
     openPaneMenu();
-    expect(container.querySelector('.pane-map')).not.toBeNull();
+    expect(paneMap()).not.toBeNull();
     fire(document.body, 'pointerdown');
-    expect(container.querySelector('.pane-map')).toBeNull();
+    expect(paneMap()).toBeNull();
   });
 
   it('keeps the map open on an outside tap while a pane-manage sheet is open (so split/close can live-refresh it)', () => {
@@ -327,9 +337,9 @@ describe('WindowBar', () => {
     // flagged open the map must NOT self-close, so after the operation it re-renders to the new layout.
     render({ ...base, panes: geomPanes, paneSheetOpen: true });
     openPaneMenu();
-    expect(container.querySelector('.pane-map')).not.toBeNull();
+    expect(paneMap()).not.toBeNull();
     fire(document.body, 'pointerdown'); // e.g. tapping 左右分屏 / 关闭此格 on the body-rendered sheet
-    expect(container.querySelector('.pane-map')).not.toBeNull();
+    expect(paneMap()).not.toBeNull();
   });
 
   it('falls back to the flat list when panes lack geometry', () => {
@@ -351,7 +361,7 @@ describe('WindowBar', () => {
     ];
     render({ ...base, panes: fiveCols, currentPaneId: '%1' });
     openPaneMenu();
-    const cells = container.querySelectorAll('.pane-map-cell');
+    const cells = paneMapCells();
     expect(cells.length).toBe(5);
     expect(cells[1].className).toContain('is-narrow');
     expect(cells[1].textContent).not.toContain('htop'); // command dropped in the cramped cell
@@ -364,7 +374,7 @@ describe('WindowBar', () => {
     const rootEl = container.querySelector('.wt-dd');
     rootEl.getBoundingClientRect = () => ({ left: 1000, right: 1080, top: 40, bottom: 64, width: 80, height: 24 });
     openPaneMenu();
-    const map = container.querySelector('.pane-map');
+    const map = paneMap();
     // left is pulled back so the whole 248px box stays on-screen (not left: 1000px → off the right).
     expect(parseFloat(map.style.left)).toBe(window.innerWidth - 248 - 8);
     expect(parseFloat(map.style.left) + 248).toBeLessThanOrEqual(window.innerWidth - 8);

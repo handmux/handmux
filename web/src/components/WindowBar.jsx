@@ -6,6 +6,7 @@
 // long-press still works on the expanded pane tab (its tap opens the menu instead of switching, since
 // the window is already active). Selecting a window picks its remembered pane.
 import { useRef, useLayoutEffect, useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { useLongPress } from '../hooks/useLongPress.js';
 import { AgentMark } from './icons.jsx';
 import { paneLayout, hasGeometry, cellFit, MAP_W, MAP_H, MAP_PAD } from '../paneLayout.js';
@@ -96,12 +97,13 @@ function PaneTab({ window: win, panes, paneAgents = {}, currentPaneId, agent, on
       onSelectPane(id); // no setOpen(false): dwell in the map to split/close next
     }, PICK_MS);
   };
-  // The menu is position:fixed (anchored by measured rect), not absolute: its anchor sits inside the
-  // horizontally-scrolling .windowbar-scroll, whose overflow would otherwise CLIP a normal dropdown
-  // and make it invisible (you'd see only the caret flip). Fixed escapes that clip; we keep it pinned
-  // under the tab by recomputing on scroll/resize.
+  // The popup is position:fixed (anchored by measured rect), not absolute: its anchor sits inside the
+  // horizontally-scrolling .windowbar-scroll, whose overflow would otherwise CLIP a normal dropdown.
+  // The geometry-backed map is also portalled to <body>, because iOS WebKit can still clip a fixed
+  // descendant of an overflow scroller. Recompute its viewport coordinates on scroll/resize.
   const [pos, setPos] = useState(null);
   const rootRef = useRef(null);
+  const popupRef = useRef(null);
   // The pixel-accurate mosaic (null → no geometry → flat-list fallback). Its own size can grow a little
   // past the base box when a tiny pane is padded to a minimum, so the viewport clamp below uses the
   // real dims, not the base constants.
@@ -150,7 +152,7 @@ function PaneTab({ window: win, panes, paneAgents = {}, currentPaneId, agent, on
     if (!open) return undefined;
     const onDocDown = (e) => {
       if (paneSheetOpen) return;
-      if (!rootRef.current?.contains(e.target)) setOpen(false);
+      if (!rootRef.current?.contains(e.target) && !popupRef.current?.contains(e.target)) setOpen(false);
     };
     const reflow = () => place();
     document.addEventListener('pointerdown', onDocDown, true);
@@ -182,23 +184,26 @@ function PaneTab({ window: win, panes, paneAgents = {}, currentPaneId, agent, on
       </button>
       {open && pos && (
         hasGeometry(panes) ? (
-          <div className="pane-map" role="listbox" style={{ top: pos.top, left: pos.left, width: mapW, height: mapH }}>
-            {layout.cells.map((c) => {
-              const isCur = c.id === currentPaneId;
-              return (
-                <PaneMapCell
-                  key={c.id}
-                  cell={c}
-                  cur={isCur}
-                  releasing={isCur && !!picking && picking !== currentPaneId}
-                  picking={picking === c.id}
-                  agent={paneAgents[c.id]}
-                  onChoose={choose}
-                  onManage={onManagePane}
-                />
-              );
-            })}
-          </div>
+          createPortal(
+            <div ref={popupRef} className="pane-map" role="listbox" style={{ top: pos.top, left: pos.left, width: mapW, height: mapH }}>
+              {layout.cells.map((c) => {
+                const isCur = c.id === currentPaneId;
+                return (
+                  <PaneMapCell
+                    key={c.id}
+                    cell={c}
+                    cur={isCur}
+                    releasing={isCur && !!picking && picking !== currentPaneId}
+                    picking={picking === c.id}
+                    agent={paneAgents[c.id]}
+                    onChoose={choose}
+                    onManage={onManagePane}
+                  />
+                );
+              })}
+            </div>,
+            document.body,
+          )
         ) : (
           <div className="dd-menu wt-menu" role="listbox" style={{ top: pos.top, left: pos.left }}>
             {panes.map((p, i) => (
