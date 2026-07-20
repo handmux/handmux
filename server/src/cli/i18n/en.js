@@ -13,6 +13,36 @@ export default {
   'config.loaded': 'config: {path}',
   'config.none': '(none — flags + defaults)',
 
+  // shortcut editor
+  'shortcuts.title': 'Required quick shortcuts',
+  'shortcuts.command': 'Command mode',
+  'shortcuts.chat': 'Chat mode',
+  'shortcuts.count': '{n} items',
+  'shortcuts.save': 'Save and exit',
+  'shortcuts.exit': 'Exit without saving',
+  'shortcuts.add': 'Add shortcut',
+  'shortcuts.back': 'Back',
+  'shortcuts.edit': 'Edit',
+  'shortcuts.up': 'Move up',
+  'shortcuts.down': 'Move down',
+  'shortcuts.delete': 'Delete',
+  'shortcuts.type': 'Shortcut type',
+  'shortcuts.key': 'Key',
+  'shortcuts.text': 'Text',
+  'shortcuts.textEnter': 'Text · sends with Enter',
+  'shortcuts.textOnly': 'Text · type only',
+  'shortcuts.textPrompt': 'Text to type',
+  'shortcuts.badText': 'Enter one non-empty line',
+  'shortcuts.enter': 'Press Enter after the text?',
+  'shortcuts.modifier': 'Modifier',
+  'shortcuts.noModifier': 'None',
+  'shortcuts.base': 'Base key',
+  'shortcuts.needTty': 'handmux shortcuts needs an interactive terminal.',
+  'shortcuts.restart': 'Restart handmux now to apply these shortcuts?',
+  'shortcuts.wrote': 'Saved {path}',
+  'shortcuts.exited': 'No changes saved',
+  'shortcuts.laterRestart': 'Saved. Run `handmux restart` to apply the new shortcuts.',
+
   // ssh preflight
   'ssh.confirmSetup': 'passwordless SSH to {host} is not set up. Configure it now?',
   'ssh.notSetup': 'passwordless SSH not set up — run: {bin} setup-key {host}',
@@ -259,6 +289,7 @@ export default {
   handmux start            run it (defaults to LAN-only; no config needed)
   handmux open <session>   attach a tmux session, creating it if missing — incl. ones made on the phone
   handmux setup            configure tunnel / name / notifications (writes config; re-run to change)
+  handmux shortcuts        configure required command/chat quick shortcuts
   handmux stop | restart | status
   handmux logs [--follow] [--lines N]
   handmux push <title> <body>   notify your phone from a script (--session X · --device K · --tag T · --url U)

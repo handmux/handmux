@@ -202,6 +202,37 @@ describe('BottomDock', () => {
     expect(sendText).not.toHaveBeenCalledWith('%1', 'Tab', true);
   });
 
+  it('server text presets use the configured Enter behavior in both modes', async () => {
+    const onText = vi.fn();
+    const shortcuts = {
+      command: [{ type: 'text', text: 'pwd', enter: false }],
+      chat: [
+        { type: 'text', text: 'draft only', enter: false },
+        { type: 'text', text: 'send now', enter: true },
+      ],
+    };
+    render({ pane: '%1', agent: 'claude', shortcuts, onAuthFail: vi.fn(), onKey: vi.fn(), onText });
+    const chip = (txt) => [...container.querySelectorAll('.quick-cmd')].find((node) => node.textContent === txt);
+    tap(chip('draft only'));
+    expect(onText).toHaveBeenCalledWith('draft only');
+    expect(sendText).not.toHaveBeenCalledWith('%1', 'draft only', true);
+    tap(chip('send now'));
+    await act(async () => {});
+    expect(sendText).toHaveBeenCalledWith('%1', 'send now', true);
+  });
+
+  it('config presets render before local additions and hide exact local duplicates', () => {
+    localStorage.setItem('hm_favs7_agent', JSON.stringify([
+      { kind: 'reply', text: 'required', enter: true },
+      { kind: 'reply', text: 'mine', enter: true },
+    ]));
+    const shortcuts = { command: [], chat: [{ type: 'text', text: 'required', enter: true }] };
+    render({ pane: '%1', agent: 'claude', shortcuts, onAuthFail: vi.fn(), onKey: vi.fn(), onText: vi.fn() });
+    const labels = [...container.querySelectorAll('.dock-page.chat .quick-cmd')].map((node) => node.textContent);
+    expect(labels.filter((label) => label === 'required')).toHaveLength(1);
+    expect(labels.indexOf('required')).toBeLessThan(labels.indexOf('mine'));
+  });
+
   it('长按聊天 chip → 打进终端输入行(不回车、不填聊天框);按键 chip 无长按', async () => {
     vi.useFakeTimers();
     const onText = vi.fn();

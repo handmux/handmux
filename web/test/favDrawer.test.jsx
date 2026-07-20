@@ -10,10 +10,14 @@ const render = (props) => act(() => root.render(<FavDrawer open mode="agent" onS
 const fire = (node, type) => act(() => node.dispatchEvent(new MouseEvent(type, { bubbles: true })));
 
 describe('FavDrawer', () => {
-  it('agent mode shows reply chips and Claude commands from the defaults', () => {
+  it('agent mode shows phone-local reply chips and Claude commands', () => {
+    localStorage.setItem('hm_favs7_agent', JSON.stringify([
+      { kind: 'reply', text: 'mine', enter: true },
+      { kind: 'cmd', text: '/review', enter: true },
+    ]));
     render({ mode: 'agent' });
-    expect([...container.querySelectorAll('.fav-chip')].map((n) => n.textContent)).toContain('ok');
-    expect(container.textContent).toContain('/compact');
+    expect([...container.querySelectorAll('.fav-chip')].map((n) => n.textContent)).toContain('mine');
+    expect(container.textContent).toContain('/review');
   });
   it('command mode shows the (empty) commands list, no reply chips', () => {
     render({ mode: 'command' });
@@ -21,9 +25,10 @@ describe('FavDrawer', () => {
   });
   it('tapping a reply chip sends it directly', () => {
     const onSend = vi.fn();
+    localStorage.setItem('hm_favs7_agent', JSON.stringify([{ kind: 'reply', text: 'mine', enter: true }]));
     render({ mode: 'agent', onSend });
-    fire([...container.querySelectorAll('.fav-chip')].find((n) => n.textContent === 'ok'), 'click');
-    expect(onSend).toHaveBeenCalledWith('ok');
+    fire([...container.querySelectorAll('.fav-chip')].find((n) => n.textContent === 'mine'), 'click');
+    expect(onSend).toHaveBeenCalledWith('mine');
   });
   it('adding a custom entry persists and shows it', () => {
     render({ mode: 'command' });

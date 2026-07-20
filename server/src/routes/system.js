@@ -35,7 +35,7 @@ export function combinedHooksStatus(home) {
   return 'no-claude';
 }
 
-export function systemRoutes({ commands, claudeEvents, asrEnv, home, stateFile }) {
+export function systemRoutes({ commands, claudeEvents, asrEnv, shortcuts, home, stateFile }) {
   const r = express.Router();
 
   // --- Capabilities probe ---------------------------------------------------------------------
@@ -45,7 +45,7 @@ export function systemRoutes({ commands, claudeEvents, asrEnv, home, stateFile }
   // `claudeHooks` (name kept for web back-compat) now summarizes EVERY coding agent: 'installed' if any is
   // wired, 'absent' if an agent is present but none wired (→ offer enable), 'no-claude' if no agent at all.
   r.get('/config', (req, res) => {
-    res.json({ asr: isAsrConfigured(asrEnv), claudeHooks: combinedHooksStatus(home) });
+    res.json({ asr: isAsrConfigured(asrEnv), claudeHooks: combinedHooksStatus(home), shortcuts });
   });
 
   // Update hint for the phone: is the globally-installed CLI behind the latest npm release? `current` is

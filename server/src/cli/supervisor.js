@@ -95,6 +95,7 @@ export function supervise(cfg, { home, log = console } = {}) {
     if (cfg.staticDir) env.HANDMUX_STATIC_DIR = cfg.staticDir;
     if (cfg.uploadExts) env.HANDMUX_UPLOAD_EXTS = cfg.uploadExts;
     if (cfg.previewTtl) env.HANDMUX_PREVIEW_TTL = String(cfg.previewTtl);
+    env.HANDMUX_SHORTCUTS = JSON.stringify(cfg.shortcuts);
     if (cfg.vapid) {
       if (cfg.vapid.public) env.VAPID_PUBLIC = cfg.vapid.public;
       if (cfg.vapid.private) env.VAPID_PRIVATE = cfg.vapid.private;

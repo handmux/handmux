@@ -4,16 +4,28 @@ import { loadFavs, saveFavs, addFav, removeFav, moveFav, cmdScope, CMD_GLOBAL, D
 beforeEach(() => localStorage.clear());
 
 describe('favStore', () => {
-  it('seeds agent mode with reply chips + Claude commands, command mode with none by default', () => {
-    expect(DEFAULT_FAVS.agent.some((f) => f.kind === 'reply' && f.text === 'ok')).toBe(true);
-    expect(DEFAULT_FAVS.agent.some((f) => f.kind === 'cmd' && f.text === '/compact')).toBe(true);
+  it('keeps local additions empty by default because built-ins now come from server presets', () => {
+    expect(DEFAULT_FAVS.agent).toEqual([]);
     expect(DEFAULT_FAVS.command).toEqual([]);
   });
-  it('loadFavs returns the defaults on first run, then persists edits', () => {
+  it('loadFavs returns an empty local list on first run, then persists edits', () => {
     expect(loadFavs('agent')).toEqual(DEFAULT_FAVS.agent);
     const next = addFav('command', { kind: 'cmd', text: 'npm test' });
     expect(next.at(-1)).toEqual({ kind: 'cmd', text: 'npm test', enter: false });
     expect(loadFavs('command')).toEqual(next); // persisted
+  });
+  it('migrates v6 chat items to v7 with their historical tap behavior preserved', () => {
+    localStorage.setItem('hm_favs6_agent', JSON.stringify([
+      { kind: 'reply', text: 'ok', enter: false },
+      { kind: 'cmd', text: '/compact' },
+      { kind: 'reply', text: 'ESC' },
+    ]));
+    expect(loadFavs('agent')).toEqual([
+      { kind: 'reply', text: 'ok', enter: true },
+      { kind: 'cmd', text: '/compact', enter: true },
+      { kind: 'key', text: 'Escape', label: 'Esc' },
+    ]);
+    expect(JSON.parse(localStorage.getItem('hm_favs7_agent'))).toEqual(loadFavs('agent'));
   });
   it('addFav carries the enter flag (a with-Enter command runs on tap)', () => {
     const next = addFav('command', { kind: 'cmd', text: 'make', enter: true });

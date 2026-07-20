@@ -6,6 +6,22 @@
   "token": "",
   "previewDomain": "",
   "staticDir": "",
+  "shortcuts": {
+    "command": [],
+    "chat": [
+      { "type": "key", "key": "Escape", "label": "Esc" },
+      { "type": "key", "key": "Tab", "label": "Tab" },
+      { "type": "key", "key": "BSpace", "label": "⌫" },
+      { "type": "text", "text": "ok", "enter": true },
+      { "type": "text", "text": "go on", "enter": true },
+      { "type": "text", "text": "1", "enter": true },
+      { "type": "text", "text": "2", "enter": true },
+      { "type": "text", "text": "3", "enter": true },
+      { "type": "text", "text": "/compact", "enter": true },
+      { "type": "text", "text": "/clear", "enter": true },
+      { "type": "text", "text": "/model", "enter": true }
+    ]
+  },
   "vapid": { "public": "", "private": "", "subject": "mailto:you@example.com" },
   "xfyun": { "appId": "", "apiKey": "", "apiSecret": "" }
 }

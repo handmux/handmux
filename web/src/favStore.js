@@ -1,10 +1,7 @@
-// Per-mode "常用" lists — the source both for the FavDrawer and the chat page's horizontal quick-command
-// bar. Each item is { kind: 'reply' | 'cmd', text }. 'reply' = a one-tap agent reply (ok/继续/…);
-// 'cmd' = a command/slash-command; a few labels (ESC) are interpreted as terminal KEYS at dispatch time
-// (see KEY_FAVS in BottomDock) rather than typed. Persisted to localStorage, keyed by mode, so command
-// mode and agent mode keep separate customizable lists. The version in the key re-seeds the vibe preset
-// below over any older default (one-time; a customised list is rebuilt from it).
-const KEY = (mode) => `hm_favs6_${mode}`;
+// Only phone-local additions live here. Required presets come from config.json and are merged at render
+// time, so local edits can never remove or reorder them. v7 makes text Enter behavior explicit.
+const KEY = (mode) => `hm_favs7_${mode}`;
+const OLD_KEY = (mode) => `hm_favs6_${mode}`;
 
 // Command-mode saved commands split into two lists: the GLOBAL one (scope 'command' — the original list,
 // so existing commands stay put) shown first, and a PER-WINDOW one keyed by the tmux window id (following
@@ -15,25 +12,34 @@ export const cmdScope = (windowId) => (windowId ? `command@${windowId}` : CMD_GL
 
 export const DEFAULT_FAVS = {
   command: [],
-  agent: [
-    { kind: 'key', text: 'Escape', label: 'Esc' },  // interrupt — fired as the Escape key, not typed
-    { kind: 'key', text: 'Tab', label: 'Tab' },      // fired as the Tab key (grey — it's a key)
-    { kind: 'key', text: 'BSpace', label: '⌫' },     // backspace — fired as the BSpace key, not text
-    { kind: 'reply', text: 'ok' },
-    { kind: 'reply', text: 'go on' },
-    { kind: 'reply', text: '1' },
-    { kind: 'reply', text: '2' },
-    { kind: 'reply', text: '3' },
-    { kind: 'cmd', text: '/compact' },
-    { kind: 'cmd', text: '/clear' },
-    { kind: 'cmd', text: '/model' },
-  ],
+  agent: [],
 };
+
+const LEGACY_KEYS = {
+  ESC: { kind: 'key', text: 'Escape', label: 'Esc' },
+  Esc: { kind: 'key', text: 'Escape', label: 'Esc' },
+  Tab: { kind: 'key', text: 'Tab', label: 'Tab' },
+  '⌫': { kind: 'key', text: 'BSpace', label: '⌫' },
+};
+
+function migrateV6(mode, items) {
+  return items.map((item) => {
+    if (item.kind !== 'key' && LEGACY_KEYS[item.text]) return { ...LEGACY_KEYS[item.text] };
+    if (item.kind === 'key') return { kind: 'key', text: item.text, label: item.label || item.text };
+    return { kind: item.kind, text: item.text, enter: mode === 'agent' ? true : !!item.enter };
+  });
+}
 
 export function loadFavs(mode) {
   try {
     const raw = localStorage.getItem(KEY(mode));
     if (raw) return JSON.parse(raw);
+    const oldRaw = localStorage.getItem(OLD_KEY(mode));
+    if (oldRaw) {
+      const migrated = migrateV6(mode, JSON.parse(oldRaw));
+      saveFavs(mode, migrated);
+      return migrated;
+    }
   } catch { /* fall through to defaults */ }
   return (DEFAULT_FAVS[mode] || []).map((f) => ({ ...f }));
 }

@@ -134,14 +134,41 @@ describe('ChatComposer', () => {
     expect(sendText).toHaveBeenCalledWith('%1', '继续', true);
   });
 
-  it('hides key-type favs (terminal keys) from the chip strip; reply/cmd favs still show', () => {
+  it('renders required chat presets and honors key / text Enter behavior', async () => {
+    const onKey = vi.fn();
+    const shortcuts = {
+      command: [],
+      chat: [
+        { type: 'key', key: 'Escape', label: 'Esc' },
+        { type: 'text', text: 'draft only', enter: false },
+        { type: 'text', text: 'send now', enter: true },
+      ],
+    };
+    render(<ChatComposer pane="%1" kind="idle" onKey={onKey} shortcuts={shortcuts} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Esc' }));
+    expect(onKey).toHaveBeenCalledWith('Escape');
+    fireEvent.click(screen.getByRole('button', { name: 'draft only' }));
+    await waitFor(() => expect(sendText).toHaveBeenCalledWith('%1', 'draft only', false));
+    fireEvent.click(screen.getByRole('button', { name: 'send now' }));
+    await waitFor(() => expect(sendText).toHaveBeenCalledWith('%1', 'send now', true));
+  });
+
+  it('passes required presets into the locked editor section', () => {
+    const shortcuts = { command: [], chat: [{ type: 'text', text: 'required', enter: true }] };
+    const { container } = render(<ChatComposer pane="%1" kind="idle" shortcuts={shortcuts} />);
+    fireEvent.click(screen.getByRole('button', { name: '常用消息' }));
+    expect(container.querySelector('.cmd-config-section').textContent).toContain('required');
+    expect(container.querySelector('.cmd-config-section button')).toBeNull();
+  });
+
+  it('shows explicit phone-local key/reply/cmd items in the chip strip', () => {
     localStorage.setItem('hm_favs6_agent', JSON.stringify([
       { kind: 'key', text: 'Escape', label: 'ESC' },
       { kind: 'reply', text: '好的' },
       { kind: 'cmd', text: '/compact' },
     ]));
-    render(<ChatComposer pane="%1" kind="idle" />);
-    expect(screen.queryByRole('button', { name: 'ESC' })).toBeNull();
+    render(<ChatComposer pane="%1" kind="idle" shortcuts={{ command: [], chat: [] }} />);
+    expect(screen.getByRole('button', { name: 'ESC' })).toBeTruthy();
     expect(screen.getByRole('button', { name: '好的' })).toBeTruthy();
     expect(screen.getByRole('button', { name: '/compact' })).toBeTruthy();
   });

@@ -56,7 +56,7 @@ const app = express();
 // Host-based dispatch FIRST: a request to <name>.<domain> is reverse-proxied to its dynamic preview;
 // every other Host falls straight through (next()) to the app below, unaffected.
 app.use(preview.dynamicProxy);
-app.use('/api', createApiRouter({ token, events, uploadExts, previews, previewDomain }));
+app.use('/api', createApiRouter({ token, events, uploadExts, previews, previewDomain, shortcuts: cfg.shortcuts }));
 app.use('/preview', preview.router);
 app.use(preview.refererFallback);
 

@@ -177,6 +177,7 @@ export default {
   'cmd.global': '全局',
   'cmd.window': '当前窗口',
   'cmd.withEnter': '直接发送',
+  'cmd.configPresets': '配置预置',
   'cmd.addPlaceholder': '加一条命令…',
   'cmd.tabCmd': '命令',
   'cmd.tabKey': '按键',

@@ -145,6 +145,15 @@ describe('resolveConfig', () => {
     expect(c.vapid).toBeNull();
     expect(c.xfyun).toBeNull();
   });
+  it('normalizes shortcuts from the config file and keeps explicit empty lists', () => {
+    const c = resolveConfig({}, {
+      shortcuts: { command: [{ type: 'text', text: 'pwd', enter: true }], chat: [] },
+    }, {}, gen);
+    expect(c.shortcuts).toEqual({
+      command: [{ type: 'text', text: 'pwd', enter: true }],
+      chat: [],
+    });
+  });
 });
 
 describe('explainConfig', () => {

@@ -778,6 +778,16 @@ describe('GET /api/config (capabilities)', () => {
     const res = await request(app).get('/api/config').set('Authorization', 'Bearer good').expect(200);
     expect(res.body.asr).toBe(true);
   });
+  it('returns the server-owned mandatory shortcuts', async () => {
+    const shortcuts = {
+      command: [{ type: 'text', text: 'pwd', enter: true }],
+      chat: [{ type: 'key', key: 'Escape', label: 'Esc' }],
+    };
+    const app = express();
+    app.use('/api', createApiRouter({ token: 'good', commands: baseCommands, asrEnv: {}, shortcuts }));
+    const res = await request(app).get('/api/config').set('Authorization', 'Bearer good').expect(200);
+    expect(res.body.shortcuts).toEqual(shortcuts);
+  });
 });
 
 describe('claude hooks API', () => {

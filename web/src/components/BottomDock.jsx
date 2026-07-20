@@ -17,6 +17,8 @@ import { useBackButton } from '../hooks/useBackButton.js';
 import { softKeyboardUp } from '../hooks/useKeyboardInset.js';
 import { t } from '../i18n';
 import { MODIFIERS, modActive, consumeMods, withMods } from '../keybarKeys.js';
+import { mergeShortcuts, shortcutIdentity } from '../shortcutMerge.js';
+import { useServerShortcuts } from '../hooks/useServerShortcuts.js';
 
 // The bottom dock is a two-page pager (swipe the non-key chrome to switch, or TAP the page-dots above;
 // two dots show which page is current):
@@ -27,10 +29,6 @@ import { MODIFIERS, modActive, consumeMods, withMods } from '../keybarKeys.js';
 //     never page (so hold-repeating ▲/◀ can't get mistaken for a swipe).
 //   • CHAT page — the composer (＋ upload, textarea, ▤/常用, mic, send ↑ — tap = type+Enter, long-press =
 //     填入). The mode defaults from whether a coding agent is live in the pane, and sticks per-pane.
-// Quick-bar labels that are terminal KEYS, not text: tapping them fires onKey (e.g. ESC → interrupt)
-// instead of typing the letters + Enter. Keyed by the item's label so a user can add/remove them freely.
-const KEY_FAVS = { ESC: 'Escape', Esc: 'Escape', Tab: 'Tab', '⌫': 'BSpace' };
-
 // Command mode keeps the system keyboard open via the hidden capture. A quick-bar <button> tap would
 // steal focus → the capture blurs → the keyboard collapses. preventDefault on pointer-down keeps focus
 // on the capture; onClick still fires. (Same trick the KeyBar keys use.)
@@ -50,11 +48,8 @@ const keepDockFocus = (e) => {
 const SWIPE_COMMIT_PX = 80;
 
 // Chat chips are tinted by CATEGORY (three styles, not a per-label rainbow): a slash-command (/compact …)
-// = blue, everything else (ok/go on/1/2/3 …) = green. Key favs (kind 'key') are tinted grey directly at
-// the call site (they bypass this); the KEY_FAVS branch here only still catches a LEGACY text fav named
-// ESC/Tab/⌫ from an older saved list. → .qc-esc / .qc-cmd / .qc-reply.
+// = blue, everything else (ok/go on/1/2/3 …) = green. Explicit key items are grey at the call site.
 const chipTint = (text) => {
-  if (KEY_FAVS[text]) return 'esc';
   if (text.startsWith('/')) return 'cmd';
   return 'reply';
 };
@@ -95,7 +90,7 @@ function HoldButton({ className, onTap, onHold, children, ...rest }) {
 
 function BottomDock({
   pane, onAuthFail, onKey, onText, cwd = null, agent = null, windowId = null,
-  recent = [], onSent, onRemoveRecent, inset = 0,
+  recent = [], onSent, onRemoveRecent, inset = 0, shortcuts = null,
 }, fwdRef) {
   // The composer restores its unsent draft across an app exit/kill: seeded from storage, mirrored on
   // every change (send/fill set '' → the stored draft clears with it). The mount-time autoGrow +
@@ -105,6 +100,7 @@ function BottomDock({
   const [multi, setMulti] = useState(false); // composer grew past one line → full-width text, mic/send overlay bottom-right
   const [crowd, setCrowd] = useState(false); // last text line would run under the overlaid buttons → reserve a bottom strip
   const [panelOpen, setPanelOpen] = useState(false);
+  const serverShortcuts = useServerShortcuts(shortcuts);
   // The chat page's horizontal quick-command bar reads the agent 常用 list; re-load it whenever the
   // FavDrawer closes so add/delete there flow straight into the bar (single source of truth: favStore).
   const [favs, setFavs] = useState(() => loadFavs('agent'));
@@ -124,6 +120,11 @@ function BottomDock({
     setCmdFavs(loadFavs('command'));
     setWinFavs(windowId ? loadFavs(cmdScope(windowId)) : []);
   }, [cmdEditOpen, windowId]);
+  const chatShortcuts = mergeShortcuts(serverShortcuts.chat, favs, 'chat');
+  const commandShortcuts = mergeShortcuts(serverShortcuts.command, cmdFavs, 'command');
+  const presetCommandIds = new Set((serverShortcuts.command || []).map(shortcutIdentity));
+  const windowShortcuts = mergeShortcuts([], winFavs, 'command')
+    .filter((item) => !presetCommandIds.has(shortcutIdentity(item)));
   const [modeOverride, setModeOverride] = useState({}); // pane → 'command' | 'agent'
   const mode = modeOverride[pane] || (agent ? 'agent' : 'command');
   const setMode = (next) => {
@@ -641,24 +642,10 @@ function BottomDock({
   };
   const fillFav = (text) => pick(text);
 
-  // Chat quick-bar / drawer tap = send immediately. A KEY_FAVS label fires the terminal key (ESC →
-  // interrupt); everything else is typed + Enter via sendFav.
-  const runFav = (text) => {
-    if (KEY_FAVS[text]) { onKey(KEY_FAVS[text]); return; }
-    sendFav(text);
-  };
-  // Chat chip tap by FAV OBJECT — a key fav (kind 'key', e.g. Escape/BSpace/C-c) fires the terminal key;
-  // a legacy KEY_FAVS label (ESC/Tab/⌫ stored as text) still fires its key; anything else is sent as text.
-  const runChatFav = (f) => {
+  // Explicit key/text items share one dispatcher in both modes. Text items decide whether a tap also
+  // presses Enter; old implicit ESC/Tab favorites were converted to key items by the v6→v7 migration.
+  const runShortcut = (f) => {
     if (f.kind === 'key') { onKey(f.text); return; }
-    runFav(f.text);
-  };
-  // COMMAND quick-bar tap. A key fav (kind 'key', e.g. C-c) or a legacy KEY_FAVS label (ESC/Tab) fires
-  // the terminal key. Otherwise: a with-Enter fav TYPES + runs it (sendFav = type + Enter, server-paced);
-  // a plain fav just types into the shell (the shell is the display — you press Enter yourself).
-  const runCmdFav = (f) => {
-    if (f.kind === 'key') { onKey(f.text); return; }
-    if (KEY_FAVS[f.text]) { onKey(KEY_FAVS[f.text]); return; }
     if (f.enter) { sendFav(f.text); return; }
     onText(f.text);
   };
@@ -668,7 +655,7 @@ function BottomDock({
   // the Enter, so you can edit/append in the shell before running it yourself. Keys and plain (type-only)
   // commands already do exactly that on a tap, so they have no distinct hold (returns undefined = tap only).
   const holdTypeOnly = (f) =>
-    (f.kind === 'key' || KEY_FAVS[f.text] || !f.enter ? undefined : () => onText(f.text));
+    (f.kind === 'key' || !f.enter ? undefined : () => onText(f.text));
 
   // Imperative surface: the topbar idea panel drops a picked idea into the box (fill, never send); a clean
   // single tap on the terminal dismisses the keyboard (blur whichever field — command capture or composer —
@@ -861,14 +848,14 @@ function BottomDock({
                   {/* Global commands first (grey), then this window's (green). A with-Enter fav shows a
                       trailing ⏎ so you know a tap will RUN it; HOLD a ⏎ command to type it WITHOUT Enter
                       (drop it in the shell and edit/append before you run it yourself). */}
-                  {cmdFavs.map((f) => (
-                    <HoldButton key={`g:${f.text}`} className="quick-cmd quick-cmd-plain"
-                      onTap={() => runCmdFav(f)} onHold={holdTypeOnly(f)}>
+                  {commandShortcuts.map((f, i) => (
+                    <HoldButton key={`g:${shortcutIdentity(f)}:${i}`} className="quick-cmd quick-cmd-plain"
+                      onTap={() => runShortcut(f)} onHold={holdTypeOnly(f)}>
                       {favLabel(f)}{f.kind !== 'key' && f.enter && <span className="qc-enter" aria-hidden="true">⏎</span>}</HoldButton>
                   ))}
-                  {winFavs.map((f) => (
-                    <HoldButton key={`w:${f.text}`} className="quick-cmd quick-cmd-win"
-                      onTap={() => runCmdFav(f)} onHold={holdTypeOnly(f)}>
+                  {windowShortcuts.map((f, i) => (
+                    <HoldButton key={`w:${shortcutIdentity(f)}:${i}`} className="quick-cmd quick-cmd-win"
+                      onTap={() => runShortcut(f)} onHold={holdTypeOnly(f)}>
                       {favLabel(f)}{f.kind !== 'key' && f.enter && <span className="qc-enter" aria-hidden="true">⏎</span>}</HoldButton>
                   ))}
                   <button type="button" className="quick-cmd quick-cmd-add" aria-label={t('cmd.editTitle')}
@@ -898,10 +885,10 @@ function BottomDock({
                       shell's input line, no Enter) so you can edit before running — matching command mode's
                       hold. It goes to the pane, NOT the chat composer (these are terminal commands, not chat
                       text). A key fav has nothing to edit, so it has no hold. */}
-                  {favs.map((f) => (
-                    <HoldButton key={f.text}
+                  {chatShortcuts.map((f, i) => (
+                    <HoldButton key={`${shortcutIdentity(f)}:${i}`}
                       className={`quick-cmd qc-${f.kind === 'key' ? 'esc' : chipTint(f.text)}`}
-                      onTap={() => runChatFav(f)} onHold={f.kind === 'key' ? undefined : () => onText(f.text)}>
+                      onTap={() => runShortcut(f)} onHold={holdTypeOnly(f)}>
                       {favLabel(f)}</HoldButton>
                   ))}
                   <button type="button" className="quick-cmd quick-cmd-add" aria-label={t('chat.editTitle')}
@@ -959,16 +946,18 @@ function BottomDock({
         </div>
       </div>
       <FavDrawer open={panelOpen} mode={mode} recent={recent} historyOnly onDelete={onRemoveRecent}
-        onSend={(text) => { setPanelOpen(false); runFav(text); }}
+        onSend={(text) => { setPanelOpen(false); sendFav(text); }}
         onFill={(text) => { setPanelOpen(false); fillFav(text); }}
         onClose={() => setPanelOpen(false)} />
       {/* Command-mode saved-command editor (opened by the ⚙ in the command quick-bar): two list sections
           (global + this window) over one add row whose 命令/按键 tab picks what you add. Mounted only while
           open so it seeds fresh each time. Never touches the agent list. */}
-      {cmdEditOpen && <CmdFavEditor windowId={windowId} inset={inset} onClose={() => setCmdEditOpen(false)} />}
+      {cmdEditOpen && <CmdFavEditor windowId={windowId} inset={inset} presets={serverShortcuts.command}
+        onClose={() => setCmdEditOpen(false)} />}
       {/* Chat-mode saved-message editor (opened by the ⚙ in the chat quick-bar): one global list whose
           消息/按键 tab picks what you add. Same card as command mode, chat variant. */}
-      {chatEditOpen && <CmdFavEditor variant="chat" inset={inset} onClose={() => setChatEditOpen(false)} />}
+      {chatEditOpen && <CmdFavEditor variant="chat" inset={inset} presets={serverShortcuts.chat}
+        onClose={() => setChatEditOpen(false)} />}
     </div>
   );
 }

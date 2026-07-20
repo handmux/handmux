@@ -4,6 +4,12 @@ All notable changes to handmux. Format follows [Keep a Changelog](https://keepac
 
 ## [Unreleased]
 
+### Added
+- 新增 `handmux shortcuts` 交互式向导，可分别配置命令 / 聊天模式的必备常用项；按键与文字明确分型，文字可设置是否附带 Enter。配置项在手机端只读并固定排在本机自定义项之前。
+
+### Changed
+- 窗口管理与分屏管理弹窗现在使用明确标题，并在标题下以小字显示当前终端的列×行尺寸。
+
 ## [0.17.8] - 2026-07-20
 
 ### Changed

@@ -12,6 +12,36 @@ export default {
   'config.loaded': '配置:{path}',
   'config.none': '(无 —— 使用 flag + 默认值)',
 
+  // 快捷项编辑器
+  'shortcuts.title': '必备常用快捷项',
+  'shortcuts.command': '命令模式',
+  'shortcuts.chat': '聊天模式',
+  'shortcuts.count': '{n} 项',
+  'shortcuts.save': '保存并退出',
+  'shortcuts.exit': '放弃修改',
+  'shortcuts.add': '添加快捷项',
+  'shortcuts.back': '返回',
+  'shortcuts.edit': '编辑',
+  'shortcuts.up': '上移',
+  'shortcuts.down': '下移',
+  'shortcuts.delete': '删除',
+  'shortcuts.type': '快捷项类型',
+  'shortcuts.key': '按键',
+  'shortcuts.text': '文字',
+  'shortcuts.textEnter': '文字 · 发送后回车',
+  'shortcuts.textOnly': '文字 · 只输入',
+  'shortcuts.textPrompt': '输入文字内容',
+  'shortcuts.badText': '请输入一行非空文字',
+  'shortcuts.enter': '文字后敲 Enter？',
+  'shortcuts.modifier': '修饰键',
+  'shortcuts.noModifier': '无',
+  'shortcuts.base': '基础键',
+  'shortcuts.needTty': 'handmux shortcuts 需要交互式终端。',
+  'shortcuts.restart': '现在重启 handmux 应用这些快捷项吗？',
+  'shortcuts.wrote': '已保存 {path}',
+  'shortcuts.exited': '未保存修改',
+  'shortcuts.laterRestart': '已保存。运行 `handmux restart` 后应用新的快捷项。',
+
   // ssh 预检
   'ssh.confirmSetup': '到 {host} 的免密 SSH 还没配置。现在配置吗?',
   'ssh.notSetup': '免密 SSH 未配置 —— 请运行:{bin} setup-key {host}',
@@ -258,6 +288,7 @@ export default {
   handmux start            直接运行(默认仅局域网;无需配置)
   handmux open <会话名>     接入 tmux 会话,不存在则新建——手机上建的也能一键接管
   handmux setup            配置隧道 / 名称 / 通知(写入配置;重跑即可修改)
+  handmux shortcuts        配置命令/聊天模式的必备常用快捷项
   handmux stop | restart | status
   handmux logs [--follow] [--lines N]
   handmux push <标题> <正文>    从脚本推一条通知到手机（--session 会话 · --device 设备key · --tag · --url）

@@ -178,6 +178,7 @@ export default {
   'cmd.global': 'GLOBAL',
   'cmd.window': 'THIS WINDOW',
   'cmd.withEnter': 'Send directly',
+  'cmd.configPresets': 'Config presets',
   'cmd.addPlaceholder': 'Add a command…',
   'cmd.tabCmd': 'Command',
   'cmd.tabKey': 'Key',

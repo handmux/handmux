@@ -104,6 +104,23 @@ function List({ title, accent, items, showTitle = true, onMove, onDel, onEdit })
   );
 }
 
+function ConfigList({ items }) {
+  if (!items.length) return null;
+  return (
+    <div className="cmd-esection global cmd-config-section">
+      <div className="cmd-section global"><span className="cmd-section-name">{t('cmd.configPresets')}</span></div>
+      {items.map((item, i) => (
+        <div key={`${item.type}:${item.key || item.text}:${i}`} className="cmd-row cmd-config-row">
+          <span className="cmd-text">
+            {item.type === 'key' ? (item.label || item.key) : item.text}
+            {item.type === 'text' && item.enter && <span className="cmd-enter" aria-hidden="true">⏎</span>}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 // The add / edit card — its own overlay, mounted only while open. `edit` (a { fav, scope } or null) seeds
 // the fields; absent → a blank add form. `scopes` is the list of target lists (1 = no scope picker shown);
 // `cfg` carries the per-variant bits (message-tab label/placeholder + whether the 直接发送 toggle applies).
@@ -114,7 +131,7 @@ function AddCard({ scopes, cfg, edit, inset, onAdd, onUpdate, onClose }) {
   const [tab, setTab] = useState(edit ? (edit.fav.kind === 'key' ? 'key' : 'msg') : 'msg');
   const [scopeKey, setScopeKey] = useState(edit ? edit.scope : scopes[0].key);
   const [text, setText] = useState(edit ? (seedKey ? seedKey.base : edit.fav.text) : '');
-  const [enter, setEnter] = useState(edit && edit.fav.kind !== 'key' ? !!edit.fav.enter : false);
+  const [enter, setEnter] = useState(edit && edit.fav.kind !== 'key' ? !!edit.fav.enter : !!cfg.defaultEnter);
   const [sticky, setSticky] = useState(seedKey ? seedKey.sticky : 'none');
   // NOT auto-focused on open: focusing pops the soft keyboard, which shoves the card up before you've even
   // chosen 消息/命令 vs 按键. The user taps the field when they're ready. (After an add we do refocus, below,
@@ -219,8 +236,8 @@ function AddCard({ scopes, cfg, edit, inset, onAdd, onUpdate, onClose }) {
 //  • 'command' (default) — command mode: GLOBAL + per-window lists; the message tab saves shell COMMANDs
 //    (kind 'cmd') and carries the 直接发送 toggle; the scope picker chooses which list.
 //  • 'chat' — agent mode: a single global list; the message tab saves a MESSAGE to the agent (kind derived
-//    from the '/' prefix, like the old FavDrawer — a slash-command is 'cmd', anything else a 'reply'); no
-//    enter toggle (chat always sends) and no scope picker.
+//    from the '/' prefix, like the old FavDrawer — a slash-command is 'cmd', anything else a 'reply'); it
+//    has an explicit Enter toggle (default on to preserve the old tap-to-send behavior) and no scope picker.
 function editorConfig(variant, windowId) {
   if (variant === 'chat') {
     return {
@@ -229,7 +246,8 @@ function editorConfig(variant, windowId) {
       card: {
         msgLabel: t('chat.tabMsg'),
         placeholder: t('chat.addPlaceholder'),
-        hasEnter: false,
+        hasEnter: true,
+        defaultEnter: true,
         msgKind: (txt) => (txt.startsWith('/') ? 'cmd' : 'reply'),
       },
     };
@@ -245,12 +263,13 @@ function editorConfig(variant, windowId) {
       msgLabel: t('cmd.tabCmd'),
       placeholder: t('cmd.addPlaceholder'),
       hasEnter: true,
+      defaultEnter: false,
       msgKind: () => 'cmd',
     },
   };
 }
 
-export default function CmdFavEditor({ windowId, inset = 0, variant = 'command', onClose }) {
+export default function CmdFavEditor({ windowId, inset = 0, variant = 'command', presets = [], onClose }) {
   const { title, scopes, card: cardCfg } = editorConfig(variant, windowId);
   const [items, setItems] = useState(() => Object.fromEntries(scopes.map((s) => [s.key, loadFavs(s.key)])));
   const [card, setCard] = useState(null); // null | { edit: null } (add) | { edit: { fav, scope } }
@@ -276,9 +295,10 @@ export default function CmdFavEditor({ windowId, inset = 0, variant = 'command',
           <button className="cmd-close" onClick={onClose} aria-label={t('common.close')}><XIcon /></button>
         </div>
         <div className="cmd-list">
+          <ConfigList items={presets} />
           {scopes.map((s) => (
             <List key={s.key} title={s.title} accent={s.accent} items={items[s.key] || []}
-              showTitle={scopes.length > 1}
+              showTitle={scopes.length > 1 || presets.length > 0}
               onMove={(txt, d) => doMove(s.key, txt, d)} onDel={(txt) => doDel(s.key, txt)}
               onEdit={(f) => setCard({ edit: { fav: f, scope: s.key } })} />
           ))}

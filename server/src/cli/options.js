@@ -2,6 +2,7 @@
 // Resolution order is flags > config file > env > built-in default. The token is ALWAYS materialised
 // (generated when unset) so a public tunnel can never come up token-less.
 import crypto from 'node:crypto';
+import { normalizeShortcuts } from '../shortcutConfig.js';
 
 export const TUNNELS = ['none', 'cloudflare', 'cloudflare-named', 'ssh', 'natapp', 'cpolar'];
 
@@ -58,6 +59,7 @@ export function resolveConfig(flags = {}, fileCfg = {}, env = process.env, gen =
     previewTtl: pick('previewTtl', env.HANDMUX_PREVIEW_TTL) || null,
     vapid: fileCfg.vapid || null,   // { public, private, subject } — push notifications
     xfyun: fileCfg.xfyun || null,   // { appId, apiKey, apiSecret } — voice input
+    shortcuts: normalizeShortcuts(fileCfg.shortcuts),
     // An explicit public URL is honoured for ANY tunnel mode — including 'none', so someone who runs their
     // own tunnel/reverse-proxy can still have handmux advertise (print + QR) their real domain. The
     // tunnel-specific blocks below only fill a *fallback* when it wasn't given.

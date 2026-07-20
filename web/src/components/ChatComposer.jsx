@@ -12,6 +12,8 @@ import { useUpload } from '../hooks/useUpload.js';
 import { usePushToTalk } from '../voice/usePushToTalk.js';
 import { useAsrAvailable } from '../voice/useAsrAvailable.js';
 import { useScreenWakeLock } from '../hooks/useScreenWakeLock.js';
+import { useServerShortcuts } from '../hooks/useServerShortcuts.js';
+import { mergeShortcuts, shortcutIdentity } from '../shortcutMerge.js';
 import { t } from '../i18n';
 
 // The 对话-lens composer — a single modern AI-agent input CARD (textarea on top, an action row beneath),
@@ -32,10 +34,12 @@ const keepFocus = (e) => {
 };
 
 // Quick-reply chip tint: a slash-command (/compact …) = blue, everything else (好的 / 继续 / 1 / 2 …) =
-// green. Key favs never reach here — they're filtered out of the chat strip.
+// green. Explicit terminal-key shortcuts use the grey key tint.
 const chipTint = (text) => (text.startsWith('/') ? 'cmd' : 'reply');
 
-export default function ChatComposer({ pane, kind, cwd = null, onKey = () => {}, onAuthFail, onSent, onInteractiveSlash }) {
+export default function ChatComposer({
+  pane, kind, cwd = null, onKey = () => {}, onAuthFail, onSent, onInteractiveSlash, shortcuts = null,
+}) {
   // Draft persists across an app exit / lens switch (shared store with the dock's chat page — switching
   // lenses carries your half-typed message either way). send/clear set '' → the stored draft clears too.
   const [value, setValue] = useState(() => getChatDraft());
@@ -44,14 +48,13 @@ export default function ChatComposer({ pane, kind, cwd = null, onKey = () => {},
   const uploadRef = useRef(null);    // hidden <input type=file>
   const tapPt = useRef({ x: 0, y: 0, moved: false }); // for tap-to-focus on the card's blank areas
 
-  // The agent quick-reply list (global) drives the chip strip; reload it whenever the ⚙ editor closes so
-  // add/edit/delete/reorder flow straight into the strip (single source of truth: favStore). KEY favs
-  // (Esc/Tab/⌫) are hidden here — they're terminal keys with no meaning in a chat reply; only reply/cmd
-  // favs show. The stored list is untouched (the terminal dock still shows the keys and the ⚙ edits them).
+  // Config presets stay first and locked; phone-local additions follow. Reload the local half whenever the
+  // ⚙ editor closes, while the shared server hook refreshes presets after a service restart.
+  const serverShortcuts = useServerShortcuts(shortcuts);
   const [favs, setFavs] = useState(() => loadFavs('agent'));
   const [editOpen, setEditOpen] = useState(false);
   useEffect(() => { if (!editOpen) setFavs(loadFavs('agent')); }, [editOpen]);
-  const replyFavs = favs.filter((f) => f.kind !== 'key');
+  const quickFavs = mergeShortcuts(serverShortcuts.chat, favs, 'chat');
 
   // While the agent is working, the send button becomes a STOP that interrupts it (Escape). Any other
   // state (idle / needs-you / done) shows the normal send.
@@ -142,14 +145,16 @@ export default function ChatComposer({ pane, kind, cwd = null, onKey = () => {},
     ref.current?.focus();
   };
 
-  // A quick-reply chip (reply or slash-command) is sent as text + Enter. Key favs never reach here — they
-  // are filtered out of the strip above.
-  const runFav = async (text) => {
+  // A quick item has the same explicit behavior here as in the terminal chat dock: key → send the terminal
+  // key; text → type only or type + Enter according to its configured boolean.
+  const runFav = async (fav) => {
+    if (fav.kind === 'key') { onKey(fav.text); return; }
     if (!pane) return;
     try {
-      await sendText(pane, text, true);
-      onSent?.(text);
-      if (shouldHandOffSlash(text)) onInteractiveSlash?.(text.trim());
+      await sendText(pane, fav.text, !!fav.enter);
+      if (!fav.enter) return;
+      onSent?.(fav.text);
+      if (shouldHandOffSlash(fav.text)) onInteractiveSlash?.(fav.text.trim());
     } catch (err) { if (err instanceof UnauthorizedError) onAuthFail?.(); }
   };
 
@@ -175,10 +180,11 @@ export default function ChatComposer({ pane, kind, cwd = null, onKey = () => {},
     <div className="chat-composer" onPointerDown={keepFocus}>
       {/* Quick-reply chips — tap to send. Reuses the dock's chip styling (.quick-cmd/.qc-*). */}
       <div className="cc-quick quick-scroll">
-        {replyFavs.map((f) => (
-          <button key={f.text} type="button" className={`quick-cmd qc-${chipTint(f.text)}`}
-            onClick={() => runFav(f.text)}>
-            {f.text}</button>
+        {quickFavs.map((f, i) => (
+          <button key={`${shortcutIdentity(f)}:${i}`} type="button"
+            className={`quick-cmd qc-${f.kind === 'key' ? 'esc' : chipTint(f.text)}`}
+            onClick={() => runFav(f)}>
+            {f.kind === 'key' ? (f.label || f.text) : f.text}</button>
         ))}
         <button type="button" className="quick-cmd quick-cmd-add" aria-label={t('chat.editTitle')}
           onClick={() => setEditOpen(true)}><GearIcon /></button>
@@ -223,7 +229,7 @@ export default function ChatComposer({ pane, kind, cwd = null, onKey = () => {},
           </div>
         </div>
       </div>
-      {editOpen && <CmdFavEditor variant="chat" onClose={() => setEditOpen(false)} />}
+      {editOpen && <CmdFavEditor variant="chat" presets={serverShortcuts.chat} onClose={() => setEditOpen(false)} />}
     </div>
   );
 }

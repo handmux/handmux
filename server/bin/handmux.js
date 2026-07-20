@@ -32,6 +32,7 @@ import { checkTmux, MIN_TMUX, tmuxInstallHint } from '../src/cli/tmuxVersion.js'
 import { readState, clearState, isAlive, acquireLifecycleLock, pocketHome, logPath, configPath, claudeStatePath } from '../src/cli/state.js';
 import { scanSupervisorPids, terminateSupervisorPids } from '../src/cli/supervisorProcesses.js';
 import { runSetup } from '../src/cli/setupWizard.js';
+import { runShortcutEditor } from '../src/cli/shortcutEditor.js';
 import { hooksStatus, installHooks, uninstallHooks } from '../src/cli/claudeHooks.js';
 import { codexHooksStatus, installCodexHooks, uninstallCodexHooks } from '../src/cli/codexHooks.js';
 import { statusLineStatus, installStatusLine, uninstallStatusLine, composeHint, refreshStatusLineScript } from '../src/cli/statusLine.js';
@@ -146,6 +147,7 @@ async function main() {
     case 'push': process.exitCode = await pushCmd(); return;
     case 'config': return configCmd();
     case 'setup': return setupCmd();
+    case 'shortcuts': return shortcutsCmd();
     case 'hooks': return hooksCmd();
     case 'service': return withLifecycleLock(serviceCmd);
     case 'update': case 'upgrade': return updateCmd();
@@ -491,6 +493,24 @@ async function setupCmd() {
     });
   }
   console.log(t(running ? 'setup.laterRestart' : 'setup.later'));
+}
+
+async function shortcutsCmd() {
+  const target = flags.config ? path.resolve(flags.config) : configPath(HOME);
+  const st = readState(HOME);
+  const running = !!(st && isAlive(st.supervisorPid));
+  let res;
+  try { res = await runShortcutEditor({ target, running }); }
+  catch (error) { console.error(t('err.badConfig', { path: target, msg: error.message })); process.exitCode = 2; return; }
+  if (!res) return;
+  if (res.error) { process.exitCode = 2; return; }
+  if (res.restart) {
+    return withLifecycleLock(async () => {
+      if (running && !await stopAndWait()) return;
+      return start();
+    });
+  }
+  if (running) console.log(t('shortcuts.laterRestart'));
 }
 
 // Offer to enable the Claude statusLine usage capturer — it feeds the phone Usage page's 5h/weekly bars

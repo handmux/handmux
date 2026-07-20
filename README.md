@@ -69,7 +69,7 @@ handmux start --tunnel cloudflare   # instant public URL (cloudflared auto-insta
 
 - **Claude Code / Codex, deeply** — an inbox status ledger, thumb-approve permissions & plans, per-agent usage bars.
 - **Chat view (experimental)** — read and drive a Claude session as a chat instead of a terminal: bubbles with Markdown, tool cards with colored diffs, question cards you answer with a tap, warm colour tones. Experimental — may be unstable: enable it in Settings → 启用对话视图 / Enable chat view, then switch views from the window bar.
-- **Command & chat modes** — one bottom bar, two modes: type straight into the terminal, or talk to the agent in natural language. Preset ESC/Tab/Ctrl+C, custom ⌃⇧⌥ key-combos, and saved/recent commands split global or per-window (slash-commands included).
+- **Command & chat modes** — one bottom bar, two modes: type straight into the terminal, or talk to the agent in natural language. Required quick items are configurable with `handmux shortcuts` (key or text, with explicit Enter behavior); phone-local additions stay editable in the ⚙ panel.
 - **Script push** — notify your phone from any script or CI step with `handmux push`; target all devices, a named session, or a specific device.
 - **Git viewer** — changes / commit history / any branch / full-screen colored diff, multi-repo tabs, read-only, never touches your tree.
 - **Site preview** — a static folder, or a running HTTP/HTTPS service by port (routing / APIs / live-reload intact), in a phone or desktop viewport.

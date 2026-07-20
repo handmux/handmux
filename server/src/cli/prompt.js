@@ -1,4 +1,4 @@
-// The ONLY module that touches @clack/prompts — the interactive shell for `handmux setup`. Everything else
+// The ONLY module that touches @clack/prompts — shared by the interactive setup and shortcut editors. Everything else
 // imports from here, so the prompt library stays swappable behind one seam and the wizard's pure logic
 // (configFromAnswers / validators / …) never depends on it.
 import { select, text, password, confirm, note, intro, outro, cancel, isCancel } from '@clack/prompts';

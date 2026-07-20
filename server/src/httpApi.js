@@ -22,6 +22,7 @@ import { systemRoutes } from './routes/system.js';
 import { previewRoutes } from './routes/previews.js';
 import { notificationRoutes } from './routes/notifications.js';
 import { transcriptRoutes } from './routes/transcript.js';
+import { DEFAULT_SHORTCUTS } from './shortcutConfig.js';
 
 // Re-exported for tests (test/keys.test.js) and any caller that imported it by this path historically.
 export { isAllowedKey } from './routes/terminal.js';
@@ -30,6 +31,7 @@ export function createApiRouter({
   token, commands = defaultCommands, docs = defaultDocs, git = defaultGit, events,
   uploadExts = DEFAULT_UPLOAD_EXTS, maxUploadBytes = MAX_TRANSFER_BYTES,
   asrEnv = process.env, previews, previewDomain = null,
+  shortcuts = DEFAULT_SHORTCUTS,
   home = homedir(), stateFile = process.env.CLAUDE_STATE_FILE || claudeStatePath(homedir()),
 } = {}) {
   const r = express.Router();
@@ -39,7 +41,7 @@ export function createApiRouter({
 
   const deps = {
     token, commands, docs, git, push, notifications, claudeEvents,
-    uploadExts, maxUploadBytes, asrEnv, previews, previewDomain, home, stateFile,
+    uploadExts, maxUploadBytes, asrEnv, previews, previewDomain, shortcuts, home, stateFile,
   };
 
   r.use(sessionRoutes(deps));

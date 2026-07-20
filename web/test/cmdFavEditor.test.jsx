@@ -107,10 +107,25 @@ describe('CmdFavEditor', () => {
     expect(container.querySelectorAll('.cmd-esection')).toHaveLength(1); // single list, no per-window
     openAdd();
     expect(card().querySelector('.cmd-seg')).toBeNull();                 // no 全局/窗口 segmented
-    expect(card().querySelector('.cmd-toggle-row')).toBeNull();          // no 直接发送 toggle (chat always sends)
+    expect(card().querySelector('.cmd-toggle-row')).not.toBeNull();      // chat also configures Enter explicitly
+    expect(card().querySelector('.cmd-switch input').checked).toBe(true); // default keeps historical tap-to-send
     setInput(addInput(), '用中文回答');
     click(saveBtn());
-    expect(loadFavs('agent')).toEqual([{ kind: 'reply', text: '用中文回答', enter: false }]);
+    expect(loadFavs('agent')).toEqual([{ kind: 'reply', text: '用中文回答', enter: true }]);
+  });
+
+  it('shows config presets in a locked section without edit/delete/reorder controls', () => {
+    const presets = [
+      { type: 'key', key: 'Escape', label: 'Esc' },
+      { type: 'text', text: 'ok', enter: true },
+    ];
+    render({ presets });
+    const locked = container.querySelector('.cmd-config-section');
+    expect(locked.textContent).toContain('配置预置');
+    expect(locked.textContent).toContain('Esc');
+    expect(locked.textContent).toContain('ok');
+    expect(locked.querySelectorAll('.cmd-del, .cmd-move')).toHaveLength(0);
+    expect(locked.querySelectorAll('button')).toHaveLength(0);
   });
 
   it('chat variant: a slash message is stored as a cmd, and 按键 tab saves a bare key fav (Esc)', () => {
@@ -124,7 +139,7 @@ describe('CmdFavEditor', () => {
     pickFromDD(1, '⎋ Esc'); // no modifier — a named key is sendable on its own
     click(saveBtn());
     expect(loadFavs('agent')).toEqual([
-      { kind: 'cmd', text: '/compact', enter: false },
+      { kind: 'cmd', text: '/compact', enter: true },
       { kind: 'key', text: 'Escape', label: 'Esc' },
     ]);
   });
