@@ -173,6 +173,26 @@ describe('App workspace recovery', () => {
     expect(getWorkspacePromptState('checkpoint-a')).toEqual({});
   });
 
+  it('swaps the Drawer for the recovery dialog and restores focus to the visible menu button', async () => {
+    api.getSessions.mockResolvedValue([{ id: '$7', name: 'current' }]);
+    api.getWorkspaceRestorePlan.mockResolvedValue(activePlan());
+    const { container } = await renderApp();
+    const menu = container.querySelector('.hamburger');
+    fireEvent.click(menu);
+    await flush();
+    const card = container.querySelector('.workspace-recovery-card');
+    card.focus();
+    fireEvent.click(card);
+    await flush();
+
+    expect(container.querySelector('.drawer').classList.contains('open')).toBe(false);
+    expect(screen.getByRole('dialog', { name: '恢复上次工作区' })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: '关闭' }));
+    await flush();
+    expect(document.activeElement).toBe(menu);
+  });
+
   it('auto-opens once for an empty tmux; close only marks autoShown and explicit ignore hides the card', async () => {
     api.getWorkspaceRestorePlan.mockResolvedValue(activePlan());
     const { container } = await renderApp();
@@ -298,6 +318,33 @@ describe('App workspace recovery', () => {
     expect(api.getWorkspaceRestoreOperation).toHaveBeenCalledTimes(1);
   });
 
+  it('keeps a warned success through a resolved poll until the user dismisses it', async () => {
+    api.getWorkspaceRestorePlan
+      .mockResolvedValueOnce(activePlan())
+      .mockResolvedValue(resolvedPlan());
+    api.getWorkspaceRestoreOperation.mockResolvedValueOnce({
+      id: 'operation-a', status: 'succeeded', progress: { completed: 1, total: 1 }, mapping: null,
+      warningCodes: ['live-reconcile-failed'],
+      results: [{ logicalId: ACTIVE_SESSION, sourceName: 'project', status: 'already-present' }],
+    });
+
+    const { container } = await renderApp();
+    fireEvent.click(screen.getByRole('button', { name: '恢复' }));
+    await flush();
+    expect(screen.getByText(/实时工作区状态核对失败/)).toBeTruthy();
+
+    await flush(15_000);
+    expect(screen.getByRole('dialog', { name: '恢复上次工作区' })).toBeTruthy();
+    expect(container.querySelector('.workspace-recovery-card')).toBeTruthy();
+    expect(screen.getByText(/实时工作区状态核对失败/)).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: '关闭' }));
+    await flush();
+    await flush(15_000);
+    expect(screen.queryByRole('dialog', { name: '恢复上次工作区' })).toBeNull();
+    expect(container.querySelector('.workspace-recovery-card')).toBeNull();
+  });
+
   it('retains the same terminal operation and retries navigation after a transient open failure', async () => {
     const mapping = {
       id: 'mapping-retry', names: { project: 'project-restored' },
@@ -354,6 +401,47 @@ describe('App workspace recovery', () => {
 
     await flush(5_000);
     expect(api.getWorkspaceRestoreOperation).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not let a late start response revive an operation after logout', async () => {
+    const start = deferred();
+    api.getWorkspaceRestorePlan.mockResolvedValue(activePlan());
+    api.startWorkspaceRestore.mockReturnValueOnce(start.promise);
+    await renderApp();
+    fireEvent.click(screen.getByRole('button', { name: '恢复' }));
+    await flush();
+
+    fireEvent.click(document.querySelector('.drawer-logout'));
+    await flush();
+    start.resolve({ operationId: 'operation-stale', status: 'pending' });
+    await flush();
+    fireEvent.change(screen.getByPlaceholderText('粘贴 HANDMUX_TOKEN'), { target: { value: 'new-token' } });
+    fireEvent.click(screen.getByRole('button', { name: '保存' }));
+    await flush();
+
+    expect(api.getWorkspaceRestoreOperation).not.toHaveBeenCalled();
+  });
+
+  it('keeps monitoring the active operation when a newer checkpoint plan poll arrives', async () => {
+    const operation = deferred();
+    const nextPlan = activePlan({ checkpointId: 'checkpoint-b', capturedAt: '2026-07-20T02:42:00.000Z' });
+    api.getWorkspaceRestorePlan.mockResolvedValueOnce(activePlan()).mockResolvedValue(nextPlan);
+    api.getWorkspaceRestoreOperation
+      .mockReturnValueOnce(operation.promise)
+      .mockResolvedValue({ id: 'operation-a', status: 'pending', progress: { completed: 0, total: 1 }, results: [] });
+    await renderApp();
+    fireEvent.click(screen.getByRole('button', { name: '恢复' }));
+    await flush();
+    expect(api.getWorkspaceRestoreOperation).toHaveBeenCalledTimes(1);
+
+    await flush(15_000);
+    expect(screen.getByRole('button', { name: /正在恢复/ }).disabled).toBe(true);
+    operation.resolve({ id: 'operation-a', status: 'pending', progress: { completed: 0, total: 1 }, results: [] });
+    await flush();
+    await flush(1_000);
+
+    expect(api.getWorkspaceRestoreOperation).toHaveBeenCalledTimes(2);
+    expect(api.getWorkspaceRestoreOperation.mock.calls.every(([id]) => id === 'operation-a')).toBe(true);
   });
 
   it('stops on operation 404 and renders only the safe operation-not-found copy', async () => {
@@ -480,7 +568,7 @@ describe('App workspace recovery', () => {
     expect(storage.applyWorkspaceRestoreMapping).not.toHaveBeenCalled();
   });
 
-  it('keeps the card on partial, enters the first restored session when the active one failed, and shows safe per-session errors', async () => {
+  it('shows partial session and navigation errors together while retrying the restored session', async () => {
     const successId = '10000000-0000-4000-8000-000000000002';
     const failedId = ACTIVE_SESSION;
     const partialPlan = activePlan({
@@ -499,10 +587,13 @@ describe('App workspace recovery', () => {
       logical: { sessions: { [successId]: '$20' }, windows: {}, panes: {} },
     };
     api.getWorkspaceRestorePlan.mockResolvedValueOnce(partialPlan).mockResolvedValueOnce(partialPlan);
-    api.getSessions.mockResolvedValueOnce([]).mockResolvedValueOnce([{ id: '$20', name: 'docs' }]);
+    api.getSessions
+      .mockResolvedValueOnce([])
+      .mockRejectedValueOnce(new Error('/private/navigation-secret'))
+      .mockResolvedValueOnce([{ id: '$20', name: 'docs' }]);
     api.getWindows.mockResolvedValue([{ id: '@20', name: 'docs' }]);
     api.getPanes.mockResolvedValue([{ id: '%20', width: 80 }]);
-    api.getWorkspaceRestoreOperation.mockResolvedValueOnce({
+    api.getWorkspaceRestoreOperation.mockResolvedValue({
       id: 'operation-a', status: 'partial', progress: { completed: 2, total: 2 }, mapping,
       results: [
         { logicalId: successId, sourceName: 'docs', targetName: 'docs', status: 'restored' },
@@ -515,10 +606,15 @@ describe('App workspace recovery', () => {
     await flush();
     await flush();
 
-    expect(screen.getByTestId('terminal-pane').textContent).toBe('%20');
     expect(container.querySelector('.workspace-recovery-card')).toBeTruthy();
+    expect(screen.getByText(/无法打开已恢复的会话；正在重试/)).toBeTruthy();
     expect(screen.getByText(/web：tmux 不可用；请确认 tmux 已运行后重试/)).toBeTruthy();
-    expect(screen.queryByText(/private\/secret/)).toBeNull();
+    expect(screen.queryByText(/private\/(secret|navigation-secret)/)).toBeNull();
+
+    await flush(1_000);
+    await flush();
+    expect(api.getWorkspaceRestoreOperation).toHaveBeenCalledTimes(2);
+    expect(screen.getByTestId('terminal-pane').textContent).toBe('%20');
   });
 
   it('hides an idempotent all-already-present success without navigating', async () => {

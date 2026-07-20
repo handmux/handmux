@@ -23,7 +23,8 @@ function warningCopy(code) {
 }
 
 export default function WorkspaceRestoreDialog({
-  open, plan, operation = null, submitting = false, onRestore, onIgnore, onClose,
+  open, plan, operation = null, submitting = false, returnFocusRef = null,
+  onRestore, onIgnore, onClose,
 }) {
   const submitted = useRef(false);
   const dialogRef = useRef(null);
@@ -36,13 +37,14 @@ export default function WorkspaceRestoreDialog({
   }, [busy, terminal, plan?.checkpointId]);
   useEffect(() => {
     if (!open) return undefined;
-    triggerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    triggerRef.current = returnFocusRef?.current
+      || (document.activeElement instanceof HTMLElement ? document.activeElement : null);
     closeRef.current?.focus();
     return () => {
       if (triggerRef.current?.isConnected) triggerRef.current.focus();
       triggerRef.current = null;
     };
-  }, [open]);
+  }, [open, returnFocusRef]);
   if (!open || !plan) return null;
 
   const restoreCount = (plan.planSummary?.create || 0) + (plan.planSummary?.renamed || 0);
@@ -119,7 +121,8 @@ export default function WorkspaceRestoreDialog({
             </div>
           )}
           {operation?.status === 'succeeded' && <div className="workspace-restore-success">{t('workspace.complete')}</div>}
-          {operation?.errorCode && failures.length === 0 && (
+          {operation?.errorCode
+            && (operation.errorCode === 'navigation-failed' || failures.length === 0) && (
             <div className="workspace-restore-errors" role="alert">{errorCopy(operation.errorCode)}</div>
           )}
           {failures.length > 0 && (

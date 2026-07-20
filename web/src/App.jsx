@@ -86,6 +86,9 @@ const COL_STEP = 10; // columns added/removed per ⊟/⊞ tap
 const pickId = (items, prefer) =>
   (prefer && items.some((x) => x.id === prefer) ? prefer : items[0].id);
 
+const hasRecoveryWarnings = (operation) => (operation?.warningCodes || []).length > 0
+  || (operation?.results || []).some((row) => (row.warningCodes || []).length > 0);
+
 export default function App() {
   const [needToken, setNeedToken] = useState(!getToken());
   const serverConfig = useServerConfig({ enabled: !needToken });
@@ -221,15 +224,21 @@ export default function App() {
   const tmuxColsRef = useRef(null); // target col count, so taps accumulate (term.cols lags ~1s)
   const savedLayoutRef = useRef(null); // window_layout captured before our first resize, for ↺
   const recoveryPlanRef = useRef(null); recoveryPlanRef.current = recoveryPlan;
+  const recoveryOperationRef = useRef(null); recoveryOperationRef.current = recoveryOperation;
   const restoreInFlightRef = useRef(false);
   const liveSessionCountRef = useRef(null);
   const lastRecoveryCheckpointRef = useRef(null);
+  const recoveryGenerationRef = useRef(0);
+  const recoveryContextRef = useRef(null);
+  const drawerMenuRef = useRef(null);
 
   const onAuthFail = useCallback(() => setNeedToken(true), []);
   // Shared catch prelude: bounce to the token prompt on an auth failure, and report whether it WAS one so
   // each handler keeps its own non-auth control flow (swallow / return / rethrow). See authGuard.js.
   const handledAuth = useCallback((e) => authHandled(e, onAuthFail), [onAuthFail]);
   const clearRecoveryOperation = useCallback(() => {
+    recoveryGenerationRef.current += 1;
+    recoveryContextRef.current = null;
     restoreInFlightRef.current = false;
     setRecoverySubmitting(false);
     setRecoveryOperation(null);
@@ -237,7 +246,16 @@ export default function App() {
   const closeRecovery = useCallback(() => {
     const checkpointId = recoveryPlanRef.current?.checkpointId;
     if (checkpointId) markWorkspaceAutoShown(checkpointId);
+    if (recoveryOperationRef.current?.status === 'succeeded'
+      && hasRecoveryWarnings(recoveryOperationRef.current)) {
+      clearRecoveryOperation();
+      setRecoveryPlan(null);
+    }
     setRecoveryDialogOpen(false);
+  }, [clearRecoveryOperation]);
+  const openRecoveryFromDrawer = useCallback(() => {
+    setDrawerOpen(false);
+    setRecoveryDialogOpen(true);
   }, []);
   const ignoreRecovery = useCallback(() => {
     const checkpointId = recoveryPlanRef.current?.checkpointId;
@@ -272,13 +290,14 @@ export default function App() {
   // Drop the saved token and bounce back to the token prompt — handy for testing the login flow.
   const logout = useCallback(() => {
     clearToken();
+    clearRecoveryOperation();
     setSettingsOpen(false);
     setBindOpen(false);
     setDrawerOpen(false);
     setCurrent(null);
     setBooting(true);
     setNeedToken(true);
-  }, []);
+  }, [clearRecoveryOperation]);
 
   usePageScrollLock(); // keyboard-up: stop the browser panning the whole page (see hook) — also keeps inset honest
   const inset = useKeyboardInset();
@@ -288,8 +307,9 @@ export default function App() {
   // preview→dir→close for files, drill→home→close for git — so Back never blows the whole sheet away
   // mid-navigation).
   useBackButton(previewSheetOpen, () => setPreviewSheetOpen(false));
-  useBackButton(drawerOpen, () => setDrawerOpen(false));
-  useBackButton(recoveryDialogOpen, closeRecovery);
+  useBackButton(drawerOpen || recoveryDialogOpen, () => {
+    if (recoveryDialogOpen) closeRecovery(); else setDrawerOpen(false);
+  });
   useBackButton(inboxOpen, () => setInboxOpen(false));
   useBackButton(usageOpen, () => setUsageOpen(false));
   useBackButton(bindOpen, () => setBindOpen(false));
@@ -440,16 +460,21 @@ export default function App() {
   }, []);
 
   const consumeRecoveryPlan = useCallback((plan, liveSessionCount) => {
+    // The operation monitor owns plan/checkpoint transitions until it reaches a terminal state.
+    // In particular, a newer periodic plan must not invalidate a still-live persisted operation.
+    if (restoreInFlightRef.current) return;
     if (plan?.mapping) applyRecoveryMapping(plan.mapping);
     const checkpointId = plan?.checkpointId || null;
+    const retainsWarnedSuccess = checkpointId
+      && checkpointId === lastRecoveryCheckpointRef.current
+      && recoveryOperationRef.current?.status === 'succeeded'
+      && hasRecoveryWarnings(recoveryOperationRef.current);
+    if (retainsWarnedSuccess) return;
     const changedCheckpoint = Boolean(checkpointId
       && lastRecoveryCheckpointRef.current
       && lastRecoveryCheckpointRef.current !== checkpointId);
     if (changedCheckpoint) clearRecoveryOperation();
     if (checkpointId) lastRecoveryCheckpointRef.current = checkpointId;
-    // Never let a concurrent 15s plan poll dismiss an operation that is still running. Its terminal
-    // operation response owns the final card/dialog transition.
-    if (restoreInFlightRef.current) return;
     const prompt = getWorkspacePromptState(plan?.checkpointId);
     const mode = recoveryPromptMode(plan, { ...prompt, liveSessionCount });
     if (mode === 'none') {
@@ -496,11 +521,23 @@ export default function App() {
   const startRecovery = useCallback(async () => {
     const plan = recoveryPlanRef.current;
     if (!plan || restoreInFlightRef.current) return;
+    const context = {
+      generation: recoveryGenerationRef.current + 1,
+      checkpointId: plan.checkpointId,
+      operationId: null,
+    };
+    recoveryGenerationRef.current = context.generation;
+    recoveryContextRef.current = context;
     restoreInFlightRef.current = true;
     setRecoverySubmitting(true);
+    const isCurrent = () => recoveryContextRef.current === context
+      && recoveryGenerationRef.current === context.generation
+      && recoveryPlanRef.current?.checkpointId === context.checkpointId;
     try {
       const started = await startWorkspaceRestore({ checkpointId: plan.checkpointId });
+      if (!isCurrent()) return;
       if (!started?.operationId) throw new Error('restore operation id missing');
+      context.operationId = started.operationId;
       setRecoveryOperation({
         id: started.operationId,
         status: started.status || 'pending',
@@ -508,6 +545,7 @@ export default function App() {
         results: [],
       });
     } catch (error) {
+      if (!isCurrent()) return;
       restoreInFlightRef.current = false;
       setRecoverySubmitting(false);
       if (!handledAuth(error)) {
@@ -519,13 +557,19 @@ export default function App() {
   const recoveryOperationId = recoveryOperation?.id;
   useEffect(() => {
     if (!recoveryOperationId || needToken) return undefined;
+    const context = recoveryContextRef.current;
+    if (!context || context.operationId !== recoveryOperationId) return undefined;
     let cancelled = false;
     let timer = null;
+    const isCurrent = () => !cancelled
+      && recoveryContextRef.current === context
+      && recoveryGenerationRef.current === context.generation
+      && context.operationId === recoveryOperationId;
     const schedule = () => {
-      if (!cancelled) timer = setTimeout(poll, 1000);
+      if (isCurrent()) timer = setTimeout(poll, 1000);
     };
     const finish = async (result) => {
-      if (cancelled) return true;
+      if (!isCurrent()) return true;
       const finishedPlan = recoveryPlanRef.current;
       const finishedCheckpointId = finishedPlan?.checkpointId;
       setRecoveryOperation(result);
@@ -537,21 +581,21 @@ export default function App() {
       if (restoredCount > 0) {
         try {
           sessions = await getSessions();
-          if (cancelled) return true;
+          if (!isCurrent()) return true;
           liveSessionCountRef.current = Array.isArray(sessions) ? sessions.length : 0;
-          navigated = await navigateToRestoredSession(result, finishedPlan, sessions, () => cancelled);
-          if (cancelled) return true;
+          navigated = await navigateToRestoredSession(result, finishedPlan, sessions, () => !isCurrent());
+          if (!isCurrent()) return true;
         } catch (error) {
-          if (cancelled || handledAuth(error)) return true;
+          if (!isCurrent() || handledAuth(error)) return true;
         }
         if (!navigated) {
+          if (!isCurrent()) return true;
           setRecoveryOperation({ ...result, errorCode: 'navigation-failed' });
           return false;
         }
       }
 
-      const hasWarnings = (result.warningCodes || []).length > 0
-        || (result.results || []).some((row) => (row.warningCodes || []).length > 0);
+      const hasWarnings = hasRecoveryWarnings(result);
       const autoClear = result.status === 'succeeded' && !hasWarnings && navigated;
       restoreInFlightRef.current = false;
       setRecoverySubmitting(false);
@@ -563,12 +607,12 @@ export default function App() {
         setRecoveryDialogOpen(false);
       }
 
-      if (cancelled) return true;
+      if (!isCurrent()) return true;
       const [planResult, protectionResult] = await Promise.allSettled([
         getWorkspaceRestorePlan(),
         getWorkspaceProtectionStatus(),
       ]);
-      if (cancelled) return;
+      if (!isCurrent()) return true;
       if (protectionResult.status === 'fulfilled') setWorkspaceProtection(protectionResult.value);
       else handledAuth(protectionResult.reason);
       if (planResult.status === 'fulfilled' && liveSessionCountRef.current !== null) {
@@ -586,20 +630,21 @@ export default function App() {
       return true;
     };
     const poll = async () => {
+      if (!isCurrent()) return;
       try {
         const result = await getWorkspaceRestoreOperation(recoveryOperationId);
-        if (cancelled) return;
+        if (!isCurrent()) return;
         setRecoveryOperation(result);
         if (['succeeded', 'partial', 'failed', 'interrupted'].includes(result.status)) {
           const complete = await finish(result);
-          if (cancelled) return;
+          if (!isCurrent()) return;
           if (!complete) schedule();
           return;
         }
       } catch (error) {
         // A transport failure does not discard the persisted operation id. Keep polling that exact id;
         // a 401 still returns to the token prompt through the normal auth path.
-        if (cancelled || handledAuth(error)) return;
+        if (!isCurrent() || handledAuth(error)) return;
         if (
           error instanceof ApiError &&
           error.status >= 400 &&
@@ -1394,7 +1439,7 @@ export default function App() {
     // transform — the same lift that worked on the dock — so iOS can't undo it by re-scrolling.
     <div className="app" data-chat-tone={chatTone} style={inset ? { transform: `translateY(-${inset}px)` } : undefined}>
       <header className="topbar">
-        <button className="hamburger" onClick={() => setDrawerOpen(true)}>☰</button>
+        <button ref={drawerMenuRef} className="hamburger" onClick={() => setDrawerOpen(true)}>☰</button>
         <span className="session-name" {...sessionNameLongPress}>{current?.session?.name ?? '—'}</span>
         {/* Leftmost of the right-hand icon group; steady green signals a live preview (window default OR a
             tapped-URL proxy preview). Reopens whatever the sheet last showed — setPreviewSheetOpen keeps openTarget. */}
@@ -1491,13 +1536,14 @@ export default function App() {
         onTakeoverRequest={setTakeoverTarget}
         recoveryPlan={recoveryPlan}
         recoveryOperation={recoveryOperation}
-        onOpenRecovery={() => setRecoveryDialogOpen(true)}
+        onOpenRecovery={openRecoveryFromDrawer}
       />
       <WorkspaceRestoreDialog
         open={recoveryDialogOpen}
         plan={recoveryPlan}
         operation={recoveryOperation}
         submitting={recoverySubmitting}
+        returnFocusRef={drawerMenuRef}
         onRestore={startRecovery}
         onIgnore={ignoreRecovery}
         onClose={closeRecovery}
