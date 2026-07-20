@@ -72,7 +72,7 @@ a.settings-linkbtn { display: inline-flex; align-items: center; justify-content:
 .settings-heading .settings-title { margin-right: 0; }
 .settings-subtitle { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   color: rgba(235,235,245,.52); font-family: ui-monospace, "SF Mono", Menlo, monospace;
-  font-size: 11px; line-height: 1.2; font-variant-numeric: tabular-nums; }
+  font-size: 13px; line-height: 1.2; font-variant-numeric: tabular-nums; }
 .settings-close { flex: none; display: inline-flex; align-items: center; justify-content: center;
   width: 30px; height: 30px; padding: 0; border: none; border-radius: 50%;
   background: rgba(120,120,128,.16); color: rgba(235,235,245,.55);

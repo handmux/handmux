@@ -1,7 +1,11 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import ActionSheet from '../src/components/ActionSheet.jsx';
+
+const styles = readFileSync(path.resolve(process.cwd(), 'src/styles.css'), 'utf8');
 
 let container;
 let root;
@@ -34,6 +38,10 @@ describe('ActionSheet', () => {
     expect(container.querySelector('.settings-title').textContent).toBe('窗口管理');
     expect(container.querySelector('.settings-subtitle').textContent).toBe('work · 160×48');
     expect(container.querySelector('[role="dialog"]').getAttribute('aria-label')).toBe('窗口管理，work · 160×48');
+  });
+
+  it('keeps the management subtitle readable at the larger caption size', () => {
+    expect(styles).toMatch(/\.settings-subtitle\s*\{[^}]*font-size:\s*13px;/s);
   });
 
   it('a plain action fires its onClick immediately', () => {
