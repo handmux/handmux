@@ -68,9 +68,9 @@ import { useBackButton } from './hooks/useBackButton.js';
 import { useExitConfirm } from './hooks/useExitConfirm.js';
 import { readRoute, writeSessionHash } from './hashRoute.js';
 import { hasShareFlag, takeSharedFile, clearShareFlag } from './shareIntake.js';
+import { windowManageSubtitle, paneManageSubtitle } from './manageLabels.js';
 
 const COL_STEP = 10; // columns added/removed per ⊟/⊞ tap
-const CIRCLED = '①②③④⑤⑥⑦⑧⑨'; // pane-sheet title numbering, mirrors WindowBar's seq()
 
 // Pick the remembered id if it still exists, else the first. We deliberately don't fall back
 // to tmux's "active" — the local last-opened choice wins, first is the fallback.
@@ -1256,7 +1256,8 @@ export default function App() {
       />
       <ActionSheet
         open={!!manageWindow}
-        title={manageWindow ? (manageWindow.name || manageWindow.id) : ''}
+        title={t('app.manageWindow')}
+        subtitle={windowManageSubtitle(manageWindow)}
         onClose={() => setManageWindow(null)}
         actions={manageWindow ? [
           // A single-pane window has nothing to reorder-within, but IS splittable — offer it here so a
@@ -1302,14 +1303,8 @@ export default function App() {
       />
       <ActionSheet
         open={!!managePane}
-        title={(() => {
-          if (!managePane || !current) return '';
-          const idx = current.panes.findIndex((p) => p.id === managePane);
-          const p = current.panes[idx];
-          if (!p) return '';
-          const seq = idx < CIRCLED.length ? CIRCLED[idx] : String(idx + 1);
-          return `${seq} ${p.command || p.id}`;
-        })()}
+        title={t('pane.manageTitle')}
+        subtitle={paneManageSubtitle(current?.panes, managePane)}
         onClose={() => setManagePane(null)}
         actions={managePane ? [
           { key: 'split-h', icon: <SplitHIcon />, label: t('pane.splitH'), onClick: () => splitPaneAction(managePane, 'h') },

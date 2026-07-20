@@ -42,6 +42,8 @@ describe('tmux commands (integration)', () => {
     const windows = await listWindows(s.id);
     expect(windows.length).toBeGreaterThan(0);
     expect(isWindowId(windows[0].id)).toBe(true);
+    expect(windows[0].width).toBe(80);
+    expect(windows[0].height).toBe(24);
 
     const panes = await listPanes(windows[0].id);
     expect(panes.length).toBeGreaterThan(0);

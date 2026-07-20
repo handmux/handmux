@@ -67,7 +67,12 @@ a.settings-linkbtn { display: inline-flex; align-items: center; justify-content:
    edge (and its scrollbar) out to the card edge while keeping the content inset by the card padding. */
 .settings-body { flex: 1; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch;
   margin: 0 -16px; padding: 0 16px; }
+.settings-heading { min-width: 0; margin-right: auto; display: flex; flex-direction: column; align-items: flex-start; gap: 3px; }
 .settings-title { font-size: 16px; font-weight: 600; margin-right: auto; }
+.settings-heading .settings-title { margin-right: 0; }
+.settings-subtitle { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: rgba(235,235,245,.52); font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 11px; line-height: 1.2; font-variant-numeric: tabular-nums; }
 .settings-close { flex: none; display: inline-flex; align-items: center; justify-content: center;
   width: 30px; height: 30px; padding: 0; border: none; border-radius: 50%;
   background: rgba(120,120,128,.16); color: rgba(235,235,245,.55);

@@ -29,6 +29,13 @@ describe('ActionSheet', () => {
     expect(container.querySelector('.sheet-cancel')).not.toBeNull();
   });
 
+  it('renders a quiet subtitle under the fixed management title', () => {
+    render({ open: true, title: '窗口管理', subtitle: 'work · 160×48', onClose: vi.fn(), actions: [] });
+    expect(container.querySelector('.settings-title').textContent).toBe('窗口管理');
+    expect(container.querySelector('.settings-subtitle').textContent).toBe('work · 160×48');
+    expect(container.querySelector('[role="dialog"]').getAttribute('aria-label')).toBe('窗口管理，work · 160×48');
+  });
+
   it('a plain action fires its onClick immediately', () => {
     const onClick = vi.fn();
     render({ open: true, title: 'w', onClose: vi.fn(), actions: [{ key: 'rename', label: '重命名', onClick }] });

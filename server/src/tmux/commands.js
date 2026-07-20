@@ -43,10 +43,10 @@ export async function listSessions() {
 }
 
 export async function listWindows(sessionId) {
-  const out = await runTmux(['list-windows', '-t', sessionId, '-F', '#{window_id}\t#{window_name}\t#{window_active}\t#{window_panes}']);
+  const out = await runTmux(['list-windows', '-t', sessionId, '-F', '#{window_id}\t#{window_name}\t#{window_active}\t#{window_panes}\t#{window_width}\t#{window_height}']);
   return lines(out).map((l) => {
-    const [id, name, active, panes] = l.split('\t');
-    return { id, name, active: active === '1', panes: Number(panes) };
+    const [id, name, active, panes, width, height] = l.split('\t');
+    return { id, name, active: active === '1', panes: Number(panes), width: Number(width), height: Number(height) };
   });
 }
 
