@@ -7,11 +7,17 @@ import { createWorkspaceBackground } from '../workspace/checkpointer.js';
 import { createEnvironmentProvider } from '../workspace/environment.js';
 import { createWorkspaceRuntime } from '../workspace/runtime.js';
 import { claudeStatePath } from './state.js';
-import { ask, select } from './prompt.js';
+import { ask, select, CANCELLED } from './prompt.js';
 import { t } from './i18n/index.js';
 
 const RESTORE_FLAGS = new Set(['list', 'dryRun', 'checkpoint', 'session', 'lang', 'config']);
 const SAFE_CHECKPOINT_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+const INVALID_TOPOLOGY_REASONS = new Set([
+  'invalid-session', 'invalid-session-id', 'invalid-session-name', 'invalid-active-window-id',
+  'invalid-window-links', 'missing-window-links', 'invalid-window-link', 'invalid-window-link-index',
+  'duplicate-window-link', 'duplicate-window-link-index', 'dangling-window-link', 'dangling-active-window',
+  'missing-window-panes', 'invalid-pane', 'duplicate-pane', 'dangling-active-pane',
+]);
 
 function line(stream, value = '') {
   if (typeof stream === 'function') stream(value);
@@ -30,6 +36,29 @@ function checkpointCounts(checkpoint) {
     panes: windows.reduce((sum, window) => sum + (window?.panes || []).length, 0),
     agents: countAgents(checkpoint),
   };
+}
+
+function unsupportedReason(reason) {
+  if (reason === 'linked-windows-unsupported') return t('restore.reason.linkedWindows');
+  if (INVALID_TOPOLOGY_REASONS.has(reason)) return t('restore.reason.invalidTopology');
+  return t('restore.reason.unknown', { reason: reason || 'unknown' });
+}
+
+function posixQuote(value) {
+  return `'${String(value).replaceAll("'", `'"'"'`)}'`;
+}
+
+function restoreCommand(checkpoint, session) {
+  const command = `handmux restore --checkpoint ${posixQuote(checkpoint)}`;
+  return session === undefined ? command : `${command} --session ${posixQuote(session)}`;
+}
+
+function manualSessionCommand(session) {
+  return `tmux new-session -s ${posixQuote(session)}`;
+}
+
+function writeManualRecovery(stream, session) {
+  line(stream, t('restore.manualRecovery', { command: manualSessionCommand(session) }));
 }
 
 function normalizeFlags(flags) {
@@ -103,12 +132,18 @@ function writePlan(stdout, plan, dryRun) {
     if (item.action === 'create') line(stdout, t('restore.planCreate', { session: item.sourceName }));
     else if (item.action === 'create-renamed') line(stdout, t('restore.planRenamed', { session: item.sourceName, target: item.targetName }));
     else if (item.action === 'already-present') line(stdout, t('restore.planAlready', { session: item.sourceName }));
-    else line(stdout, t('restore.planUnavailable', { session: item.sourceName || item.logicalId || '?', reason: item.reason || 'unsupported' }));
+    else {
+      const session = item.sourceName || item.logicalId || '?';
+      line(stdout, t('restore.planUnavailable', { session, reason: unsupportedReason(item.reason) }));
+      writeManualRecovery(stdout, session);
+    }
   }
   for (const warning of plan.warnings || []) line(stdout, t('restore.warning', { warning }));
   line(stdout);
   line(stdout, t('restore.nonDestructive'));
-  if (dryRun) line(stdout, t('restore.dryRunHint'));
+  if (dryRun && !(plan.sessions || []).some((item) => item.action === 'unsupported')) {
+    line(stdout, t('restore.dryRunHint', { command: 'handmux restore' }));
+  }
 }
 
 function writeResult(stdout, stderr, checkpointId, result) {
@@ -124,14 +159,18 @@ function writeResult(stdout, stderr, checkpointId, result) {
     } else {
       const stage = item.stage || 'restore';
       line(stderr, t('restore.sessionFailed', {
-        checkpoint: checkpointId, session, stage, error: item.error || 'unknown error',
+        checkpoint: checkpointId,
+        session,
+        stage,
+        error: stage === 'plan' ? unsupportedReason(item.error) : (item.error || 'unknown error'),
       }));
-      line(stderr, t('restore.retrySession', { checkpoint: checkpointId, session }));
+      if (stage === 'plan') writeManualRecovery(stderr, session);
+      else line(stderr, t('restore.retrySession', { command: restoreCommand(checkpointId, session) }));
     }
   }
   if (result.status !== 'succeeded' && result.error && !(result.results || []).some((item) => item.status === 'failed')) {
     line(stderr, t('restore.operationFailed', { checkpoint: checkpointId, stage: 'restore', error: result.error }));
-    line(stderr, t('restore.retry', { checkpoint: checkpointId }));
+    line(stderr, t('restore.retry', { command: restoreCommand(checkpointId) }));
   }
   for (const warning of result.warnings || []) line(stdout, t('restore.warning', { warning }));
   line(stdout);
@@ -153,9 +192,10 @@ export function createStandaloneWorkspaceRuntime({
   createCheckpointer = createWorkspaceBackground,
   createRuntime = createWorkspaceRuntime,
   observeEnvironment,
+  readOnly = false,
 } = {}) {
   const store = createStore({ home });
-  const tmux = createTmux({ run: runTmux });
+  const tmux = createTmux({ run: runTmux, readOnly });
   const lock = createLock({ dir: store.paths.lockDir });
   const observe = observeEnvironment || createEnvironmentProvider({
     tmuxServerIdProvider: async () => {
@@ -170,6 +210,8 @@ export function createStandaloneWorkspaceRuntime({
 
 export async function runWorkspaceCommand({
   flags = {},
+  positionals = [],
+  unknownShortFlags = [],
   home = homedir(),
   runtime,
   inputIsTTY = Boolean(process.stdin.isTTY),
@@ -179,13 +221,21 @@ export async function runWorkspaceCommand({
   stderr = process.stderr,
   createRuntime = createStandaloneWorkspaceRuntime,
 } = {}) {
+  if (positionals.length > 0 || unknownShortFlags.length > 0) {
+    const error = positionals.length > 0
+      ? t('restore.unexpectedArgument', { value: positionals[0] })
+      : t('restore.unknownShortFlag', { flag: unknownShortFlags[0] });
+    line(stderr, error);
+    line(stderr, t('restore.usage'));
+    return 2;
+  }
   const parsed = normalizeFlags(flags);
   if (parsed.error) {
     line(stderr, parsed.error);
     line(stderr, t('restore.usage'));
     return 2;
   }
-  const workspace = runtime || createRuntime({ home });
+  const workspace = runtime || createRuntime({ home, readOnly: parsed.dryRun });
   let resolvedCheckpoint = parsed.checkpoint || 'latest';
 
   try {
@@ -221,7 +271,7 @@ export async function runWorkspaceCommand({
     }
 
     if (typeof checkpointId !== 'string' || !checkpointId) {
-      line(stderr, t('restore.selectionCancelled'));
+      line(stderr, t('restore.selectionCancelled', { command: 'handmux restore' }));
       return 1;
     }
     resolvedCheckpoint = checkpointId;
@@ -236,8 +286,12 @@ export async function runWorkspaceCommand({
     writeResult(stdout, stderr, checkpointId, result);
     return result.status === 'succeeded' ? 0 : 1;
   } catch (error) {
+    if (error === CANCELLED) {
+      line(stderr, t('restore.selectionCancelled', { command: 'handmux restore' }));
+      return 1;
+    }
     line(stderr, t('restore.error', { checkpoint: resolvedCheckpoint, error: error?.message || String(error) }));
-    line(stderr, t('restore.retry', { checkpoint: resolvedCheckpoint }));
+    line(stderr, t('restore.retry', { command: restoreCommand(resolvedCheckpoint) }));
     return 1;
   }
 }

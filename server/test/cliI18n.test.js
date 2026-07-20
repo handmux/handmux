@@ -60,7 +60,14 @@ describe('catalog parity', () => {
       expect(dict['restore.error']).toMatch(/\{checkpoint\}/);
       expect(dict['restore.sessionFailed']).toMatch(/\{session\}/);
       expect(dict['restore.sessionFailed']).toMatch(/\{stage\}/);
-      expect(dict['restore.retrySession']).toMatch(/handmux restore/);
+      expect(dict['restore.retrySession']).toMatch(/\{command\}/);
+      expect(dict['restore.retrySession']).not.toMatch(/\{checkpoint\}|\{session\}/);
+      expect(dict['restore.retry']).toMatch(/\{command\}/);
+      expect(dict['restore.retry']).not.toMatch(/\{checkpoint\}/);
+      expect(dict['restore.dryRunHint']).toMatch(/\{command\}/);
+      expect(dict['restore.selectionCancelled']).toMatch(/\{command\}/);
+      expect(dict['restore.reason.linkedWindows']).toBeTruthy();
+      expect(dict['restore.manualRecovery']).toMatch(/\{command\}/);
     }
   });
 });

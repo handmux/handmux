@@ -21,6 +21,12 @@ describe('parseArgs', () => {
       .toEqual(['api', 'web', 'docs']);
     expect(parseArgs(['start', '--port', '3000', '--port', '4000']).flags.port).toBe('4000');
   });
+  it('preserves extra positional arguments and unknown short flags for command-specific validation', () => {
+    expect(parseArgs(['restore', 'extra', '-x', '--dry-run'])).toEqual({
+      command: 'restore', flags: { dryRun: true }, positionals: ['extra'], unknownShortFlags: ['-x'],
+    });
+    expect(parseArgs(['open', 'main'])).toMatchObject({ command: 'open', positionals: ['main'] });
+  });
 });
 
 describe('resolveConfig', () => {

@@ -51,7 +51,7 @@ const SELF_REAL = (() => { try { return fs.realpathSync(SELF); } catch { return 
 const HOOKS_SRC = path.resolve(path.dirname(SELF), '../hooks'); // server/hooks (bundled scripts)
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-const { command, flags } = parseArgs(process.argv.slice(2));
+const { command, flags, positionals = [], unknownShortFlags = [] } = parseArgs(process.argv.slice(2));
 
 // Resolve the CLI language ONCE, up front, so every command (help, errors, access block) prints in it.
 // Priority: --lang > config `lang` > shell locale (LANG/LC_*) > English. The config peek is lenient — a
@@ -146,7 +146,7 @@ async function main() {
     case 'status': await status(); process.exit(process.exitCode || 0);
     case 'logs': return logs();
     case 'push': process.exitCode = await pushCmd(); return;
-    case 'restore': process.exitCode = await runWorkspaceCommand({ flags, home: HOME }); return;
+    case 'restore': process.exitCode = await runWorkspaceCommand({ flags, positionals, unknownShortFlags, home: HOME }); return;
     case 'config': return configCmd();
     case 'setup': return setupCmd();
     case 'shortcuts': return shortcutsCmd();

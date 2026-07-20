@@ -13,6 +13,8 @@ const camel = (s) => s.replace(/-([a-z])/g, (_, c) => c.toUpperCase());
 export function parseArgs(argv) {
   const [command = 'help', ...rest] = argv;
   const flags = {};
+  const positionals = [];
+  const unknownShortFlags = [];
   const multiFlags = new Set(['session']);
   const assign = (key, value) => {
     if (!multiFlags.has(key) || flags[key] === undefined) { flags[key] = value; return; }
@@ -21,14 +23,23 @@ export function parseArgs(argv) {
   for (let i = 0; i < rest.length; i++) {
     const a = rest[i];
     if (a === '-f') { flags.foreground = true; continue; }
-    if (!a.startsWith('--')) continue;
+    if (!a.startsWith('--')) {
+      if (a.startsWith('-')) unknownShortFlags.push(a);
+      else positionals.push(a);
+      continue;
+    }
     const key = a.slice(2);
     if (key.startsWith('no-')) { assign(camel(key.slice(3)), false); continue; }
     const next = rest[i + 1];
     if (next === undefined || next.startsWith('--')) { assign(camel(key), true); }
     else { assign(camel(key), next); i++; }
   }
-  return { command, flags };
+  return {
+    command,
+    flags,
+    ...(positionals.length ? { positionals } : {}),
+    ...(unknownShortFlags.length ? { unknownShortFlags } : {}),
+  };
 }
 
 // ssh 回退公网地址:SSH 不生成 URL,无 --public-url 时用 host:remotePort(去掉 user@ 与 :sshPort)。
