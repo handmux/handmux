@@ -301,4 +301,29 @@ describe('workspace restore planner', () => {
     expect(plan.preExistingRuntimeIds.sessions).toEqual(['$8']);
     expect(() => plan.sessions.push({})).toThrow();
   });
+
+  it.each(['session', 'window', 'pane'])('fails closed on a malformed live %s runtime id without freezing it', (kind) => {
+    const runtimeId = { value: kind };
+    const currentSession = liveSession('live-s', '$8', 'current');
+    const currentWindow = { id: 'live-w', runtimeId: '@8', panes: [pane('live-p', '%8')] };
+    if (kind === 'session') currentSession.runtimeId = runtimeId;
+    if (kind === 'window') currentWindow.runtimeId = runtimeId;
+    if (kind === 'pane') currentWindow.panes[0].runtimeId = runtimeId;
+
+    expect(() => buildRestorePlan(checkpoint(), live([currentSession], [currentWindow]), { historical: true }))
+      .toThrow(new RegExp(`invalid live ${kind} runtime id`, 'i'));
+    expect(Object.isFrozen(runtimeId)).toBe(false);
+    runtimeId.mutated = true;
+  });
+
+  it.each(['session', 'window', 'pane'])('fails closed on an empty live %s runtime id', (kind) => {
+    const currentSession = liveSession('live-s', '$8', 'current');
+    const currentWindow = { id: 'live-w', runtimeId: '@8', panes: [pane('live-p', '%8')] };
+    if (kind === 'session') currentSession.runtimeId = '';
+    if (kind === 'window') currentWindow.runtimeId = '';
+    if (kind === 'pane') currentWindow.panes[0].runtimeId = '';
+
+    expect(() => buildRestorePlan(checkpoint(), live([currentSession], [currentWindow]), { historical: true }))
+      .toThrow(new RegExp(`invalid live ${kind} runtime id`, 'i'));
+  });
 });

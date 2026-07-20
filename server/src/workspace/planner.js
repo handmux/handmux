@@ -31,12 +31,22 @@ function restoredName(sourceName, names) {
   }
 }
 
+function runtimeIdList(items, kind) {
+  return items.map((item) => {
+    const runtimeId = nonEmptyStringOrNull(item?.runtimeId);
+    if (runtimeId === null) throw new Error(`invalid live ${kind} runtime id`);
+    return runtimeId;
+  });
+}
+
 function runtimeIds(live) {
+  const sessions = Array.isArray(live?.sessions) ? live.sessions : [];
   const windows = Array.isArray(live?.windows) ? live.windows : [];
+  const panes = windows.flatMap((window) => Array.isArray(window?.panes) ? window.panes : []);
   return {
-    sessions: uniqueStrings((Array.isArray(live?.sessions) ? live.sessions : []).map((session) => session.runtimeId)),
-    windows: uniqueStrings(windows.map((window) => window.runtimeId)),
-    panes: uniqueStrings(windows.flatMap((window) => Array.isArray(window.panes) ? window.panes.map((pane) => pane.runtimeId) : [])),
+    sessions: runtimeIdList(sessions, 'session'),
+    windows: runtimeIdList(windows, 'window'),
+    panes: runtimeIdList(panes, 'pane'),
   };
 }
 
