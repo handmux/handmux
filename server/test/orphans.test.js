@@ -171,6 +171,16 @@ describe('takeoverSessionName', () => {
 });
 
 describe('takeoverOrphan', () => {
+  it('joins only the fixed driver resume arguments for the legacy startup string path', async () => {
+    const commands = fakeCommands({ paneCmds: ['claude'] });
+    let startup;
+    commands.newSession = async (...args) => { startup = args; return '$9'; };
+    await takeoverOrphan({ commands, scanFn: async () => [orphan], delay: async () => {}, pollTries: 1 }, {
+      pid: orphan.pid, sessionId: orphan.sessionId, kill: false,
+    });
+    expect(startup).toEqual([expect.any(String), orphan.cwd, `claude --resume ${orphan.sessionId}`]);
+  });
+
   const orphan = { pid: 4717, sessionId: UUID, cwd: '/home/user/zxy', cwdLabel: 'zxy' };
   const nap = () => Promise.resolve();
 

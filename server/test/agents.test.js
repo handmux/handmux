@@ -31,7 +31,14 @@ describe('registry', () => {
       expect(typeof a.classify).toBe('function');
       expect(typeof a.sessions.resolve).toBe('function');
       expect(typeof a.sessions.resumeCmd).toBe('function');
+      expect(typeof a.sessions.resumeArgs).toBe('function');
     }
+  });
+
+  it('builds resume commands as fixed argument arrays', () => {
+    const id = 'aaaaaaaa-0000-4000-8000-000000000001';
+    expect(getAgent('claude').sessions.resumeArgs(id)).toEqual(['claude', '--resume', id]);
+    expect(getAgent('codex').sessions.resumeArgs(id)).toEqual(['codex', 'resume', id]);
   });
 });
 

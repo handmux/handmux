@@ -297,6 +297,23 @@ describe('workspace recovery and operations', () => {
     expect((await fs.stat(file)).mode & 0o777).toBe(0o600);
   });
 
+  it('lists persisted operations and stores cumulative checkpoint-scoped runtime mapping', async () => {
+    const store = createWorkspaceStore({ home: await makeHome(), now: () => NOW });
+    await store.writeLive(snapshot('env-a'));
+    await store.archiveEnvironment({ endedReason: 'boot-changed', detectedAt: new Date(NOW).toISOString() });
+    const operation = { id: crypto.randomUUID(), status: 'running', results: [] };
+    await store.writeOperation(operation);
+
+    expect(await store.listOperations()).toEqual([{ status: 'ok', id: operation.id, value: operation }]);
+    const mapping = {
+      id: 'map-a', checkpointId: 'env-a', restoredAt: new Date(NOW).toISOString(), names: { jly: 'jly-restored' },
+      runtime: { sessions: { '$1': '$9' }, windows: { '@1': '@9' }, panes: { '%1': '%9' } },
+      logical: { sessions: { 's-enva': '$9' }, windows: { 'w-enva': '@9' }, panes: { 'p-enva': '%9' } },
+    };
+    await store.mergeRecoveryMapping('env-a', mapping);
+    expect(await store.readRecovery('env-a')).toMatchObject({ status: 'ok', value: { checkpointId: 'env-a', mapping } });
+  });
+
   it('treats a resolved recovery with pending sessions as corrupt', async () => {
     const store = createWorkspaceStore({ home: await makeHome(), now: () => NOW });
     await store.writeLive(snapshot('env-a'));
@@ -306,6 +323,17 @@ describe('workspace recovery and operations', () => {
     await writeJsonAtomic(recoveryFile, { ...recovery, resolvedAt: new Date(NOW).toISOString() });
 
     expect(await store.readRecovery('env-a')).toMatchObject({ status: 'corrupt', error: expect.stringMatching(/resolved|pending/i) });
+  });
+
+  it('rejects recovery mapping scoped to another checkpoint', async () => {
+    const store = createWorkspaceStore({ home: await makeHome(), now: () => NOW });
+    await store.writeLive(snapshot('env-a'));
+    await store.archiveEnvironment({ endedReason: 'boot-changed', detectedAt: new Date(NOW).toISOString() });
+    const recoveryFile = path.join(store.paths.recoveryDir, 'env-a.json');
+    const recovery = JSON.parse(await fs.readFile(recoveryFile, 'utf8'));
+    await writeJsonAtomic(recoveryFile, { ...recovery, mapping: { checkpointId: 'env-other' } });
+
+    expect(await store.readRecovery('env-a')).toMatchObject({ status: 'corrupt', error: expect.stringMatching(/mapping.*checkpoint/i) });
   });
 });
 

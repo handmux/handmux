@@ -151,6 +151,7 @@ export const claude = {
     resolve: (dir, cwd, opts = {}) => resolveEncodedDirSession(dir, cwd, opts),
     // `claude --resume <uuid>` appends to the SAME jsonl with no OS lock, so the takeover kills the original
     // to guarantee a single writer (see orphans.js).
+    resumeArgs: (id) => ['claude', '--resume', id],
     resumeCmd: (id) => `claude --resume ${id}`,
   },
 };

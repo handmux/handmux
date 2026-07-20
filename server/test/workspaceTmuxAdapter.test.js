@@ -189,4 +189,32 @@ describe('workspace restore command safety', () => {
     await expect(tmux.startAgent('%1', 'codex', ['resume', ` ${anyCanonicalUuid}`])).rejects.toThrow(/unsafe agent command token/);
     expect(calls).toHaveLength(before);
   });
+
+  it('supports a disposable seed when every checkpoint window is reused and only links it into the new session', async () => {
+    const calls = [];
+    const tmux = createWorkspaceTmux({
+      run: async (args) => {
+        calls.push(args);
+        if (args[0] === 'new-session') return '$10\t@20\t%30\t0\n';
+        return '';
+      },
+      randomUUID: () => 'abcdef12-0000-4000-8000-000000000000',
+    });
+    const temp = await tmux.createTemporarySession({ cwd: '/work', sessionLogicalId: IDS.sessionA });
+    await tmux.linkWindow('@90', temp.sessionId, 2, { existing: true });
+    await tmux.selectWindowInSession(temp.sessionId, 2);
+    await tmux.killCreatedWindow(temp.windowId);
+
+    expect(calls).toContainEqual(['set-option', '-t', '$10', '@handmux_session_id', IDS.sessionA]);
+    expect(calls).not.toContainEqual(['set-option', '-w', '-t', '@20', '@handmux_window_id', expect.anything()]);
+    expect(calls).not.toContainEqual(['set-option', '-p', '-t', '%30', '@handmux_pane_id', expect.anything()]);
+    expect(calls).toContainEqual(['link-window', '-s', '@90', '-t', '$10:2']);
+    expect(calls).toContainEqual(['select-window', '-t', '$10:2']);
+    expect(calls).toContainEqual(['kill-window', '-t', '@20']);
+
+    const before = calls.length;
+    await expect(tmux.linkWindow('@90', '$91', 0, { existing: true })).rejects.toThrow(/was not created/);
+    await expect(tmux.linkWindow('@91', '$10', 0)).rejects.toThrow(/was not created/);
+    expect(calls).toHaveLength(before);
+  });
 });

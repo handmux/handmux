@@ -101,7 +101,10 @@ function validateRecovery(value, checkpointId) {
   if (value.pendingSessionIds.some((id) => !initial.has(id))) throw new Error('recovery pending ids must be initial ids');
   if (value.resolvedAt !== null && (typeof value.resolvedAt !== 'string' || Number.isNaN(Date.parse(value.resolvedAt)))) throw new Error('invalid recovery resolvedAt');
   if (value.resolvedAt !== null && value.pendingSessionIds.length > 0) throw new Error('resolved recovery cannot contain pending session ids');
-  if (value.mapping !== null && (!value.mapping || typeof value.mapping !== 'object' || Array.isArray(value.mapping))) throw new Error('invalid recovery mapping');
+  if (value.mapping !== null) {
+    if (!value.mapping || typeof value.mapping !== 'object' || Array.isArray(value.mapping)) throw new Error('invalid recovery mapping');
+    if (value.mapping.checkpointId !== checkpointId) throw new Error('recovery mapping checkpoint id mismatch');
+  }
   return value;
 }
 
@@ -280,6 +283,17 @@ export function createWorkspaceStore({ home, now = Date.now, fs = fsp }) {
     return { status: 'ok', value };
   }
 
+  async function mergeRecoveryMapping(checkpointId, mapping) {
+    const recovery = await readRecovery(checkpointId);
+    if (recovery.status !== 'ok') return recovery;
+    if (!mapping || typeof mapping !== 'object' || Array.isArray(mapping)) throw new Error('recovery mapping must be an object');
+    if (mapping.checkpointId !== checkpointId) throw new Error('recovery mapping checkpoint id mismatch');
+    const value = { ...recovery.value, mapping };
+    validateRecovery(value, checkpointId);
+    await writeJsonAtomic(path.join(paths.recoveryDir, `${checkpointId}.json`), value, { fs });
+    return { status: 'ok', value };
+  }
+
   async function writeOperation(operation) {
     requireSafeId(operation?.id);
     await ensureDirectories();
@@ -290,6 +304,24 @@ export function createWorkspaceStore({ home, now = Date.now, fs = fsp }) {
   async function readOperation(id) {
     requireSafeId(id);
     return readJson(path.join(paths.operationsDir, `${id}.json`), fs);
+  }
+
+  async function listOperations() {
+    let names;
+    try {
+      names = await fs.readdir(paths.operationsDir);
+    } catch (error) {
+      if (error?.code === 'ENOENT') return [];
+      throw error;
+    }
+    return Promise.all(names.filter((name) => name.endsWith('.json')).sort().map(async (name) => {
+      const id = name.slice(0, -'.json'.length);
+      if (!SAFE_ID.test(id) || id === '.' || id === '..') return { status: 'corrupt', id, error: 'operation filename is not a safe id' };
+      const result = await readOperation(id);
+      if (result.status !== 'ok') return { ...result, id };
+      if (result.value?.id !== id) return { status: 'corrupt', id, error: 'operation id does not match filename' };
+      return { status: 'ok', id, value: result.value };
+    }));
   }
 
   async function prune() {
@@ -342,8 +374,10 @@ export function createWorkspaceStore({ home, now = Date.now, fs = fsp }) {
     readRecovery,
     createRecovery,
     resolveSessions,
+    mergeRecoveryMapping,
     writeOperation,
     readOperation,
+    listOperations,
     prune,
   };
 }

@@ -219,13 +219,19 @@ export function createWorkspaceTmux({ run, randomUUID = crypto.randomUUID } = {}
 
   async function createTemporarySession({ cwd, sessionLogicalId, windowLogicalId, paneLogicalId, windowName, windowIndex }) {
     requireLogicalId(sessionLogicalId, 'sessionLogicalId');
-    requireLogicalId(windowLogicalId, 'windowLogicalId');
-    requireLogicalId(paneLogicalId, 'paneLogicalId');
-    if (typeof windowName !== 'string' || !windowName) throw new Error('windowName must be a non-empty string');
-    if (!Number.isInteger(windowIndex) || windowIndex < 0) throw new Error('windowIndex must be a non-negative integer');
+    const hasSeed = [windowLogicalId, paneLogicalId, windowName, windowIndex].some((value) => value !== undefined);
+    if (hasSeed) {
+      requireLogicalId(windowLogicalId, 'windowLogicalId');
+      requireLogicalId(paneLogicalId, 'paneLogicalId');
+      if (typeof windowName !== 'string' || !windowName) throw new Error('windowName must be a non-empty string');
+      if (!Number.isInteger(windowIndex) || windowIndex < 0) throw new Error('windowIndex must be a non-negative integer');
+    }
     const name = `hm-r-${randomUUID().replaceAll('-', '').slice(0, 8)}`;
     if (!/^hm-r-[0-9a-f]{8}$/i.test(name)) throw new Error('could not allocate temporary session name');
-    const parsed = rows(await run(['new-session', '-d', '-P', '-F', '#{session_id}\t#{window_id}\t#{pane_id}\t#{window_index}', '-s', name, '-n', windowName, '-c', cwd]), 4, 'created session')[0];
+    const args = ['new-session', '-d', '-P', '-F', '#{session_id}\t#{window_id}\t#{pane_id}\t#{window_index}', '-s', name];
+    if (hasSeed) args.push('-n', windowName);
+    args.push('-c', cwd);
+    const parsed = rows(await run(args), 4, 'created session')[0];
     if (!parsed) throw new Error('tmux did not return created session ids');
     const [sessionId, windowId, paneId, seedIndexValue] = parsed;
     requireCreatedRuntime(sessionId, '$', 'created session id');
@@ -233,10 +239,12 @@ export function createWorkspaceTmux({ run, randomUUID = crypto.randomUUID } = {}
     requireCreatedRuntime(paneId, '%', 'created pane id');
     const seedIndex = index(seedIndexValue, 'created window index');
     created.add(sessionId); created.add(windowId); created.add(paneId);
-    if (seedIndex !== windowIndex) await run(['move-window', '-s', guard(windowId), '-t', `${guard(sessionId)}:${windowIndex}`]);
+    if (hasSeed && seedIndex !== windowIndex) await run(['move-window', '-s', guard(windowId), '-t', `${guard(sessionId)}:${windowIndex}`]);
     await run(['set-option', '-t', guard(sessionId), '@handmux_session_id', sessionLogicalId]);
-    await run(['set-option', '-w', '-t', guard(windowId), '@handmux_window_id', windowLogicalId]);
-    await run(['set-option', '-p', '-t', guard(paneId), '@handmux_pane_id', paneLogicalId]);
+    if (hasSeed) {
+      await run(['set-option', '-w', '-t', guard(windowId), '@handmux_window_id', windowLogicalId]);
+      await run(['set-option', '-p', '-t', guard(paneId), '@handmux_pane_id', paneLogicalId]);
+    }
     return { sessionId, windowId, paneId, name };
   }
 
@@ -266,16 +274,24 @@ export function createWorkspaceTmux({ run, randomUUID = crypto.randomUUID } = {}
     return paneId;
   }
 
-  async function linkWindow(windowId, sessionId, windowIndex) {
-    guard(windowId); guard(sessionId);
+  async function linkWindow(windowId, sessionId, windowIndex, { existing = false } = {}) {
+    if (existing) runtime(windowId, '@', 'existing window id');
+    else guard(windowId);
+    guard(sessionId);
     if (!Number.isInteger(windowIndex) || windowIndex < 0) throw new Error('window index must be a non-negative integer');
     await run(['link-window', '-s', windowId, '-t', `${sessionId}:${windowIndex}`]);
   }
   async function applyLayout(windowId, layout) { await run(['select-layout', '-t', guard(windowId), layout]); }
   async function selectPane(paneId) { await run(['select-pane', '-t', guard(paneId)]); }
   async function selectWindow(windowId) { await run(['select-window', '-t', guard(windowId)]); }
+  async function selectWindowInSession(sessionId, windowIndex) {
+    guard(sessionId);
+    if (!Number.isInteger(windowIndex) || windowIndex < 0) throw new Error('window index must be a non-negative integer');
+    await run(['select-window', '-t', `${sessionId}:${windowIndex}`]);
+  }
   async function renameCreatedSession(sessionId, name) { await run(['rename-session', '-t', guard(sessionId), name]); }
   async function killCreatedSession(sessionId) { await run(['kill-session', '-t', guard(sessionId)]); }
+  async function killCreatedWindow(windowId) { await run(['kill-window', '-t', guard(windowId)]); }
 
   async function startAgent(paneId, cmd, args = []) {
     guard(paneId);
@@ -303,8 +319,10 @@ export function createWorkspaceTmux({ run, randomUUID = crypto.randomUUID } = {}
     applyLayout,
     selectPane,
     selectWindow,
+    selectWindowInSession,
     renameCreatedSession,
     killCreatedSession,
+    killCreatedWindow,
     startAgent,
     topologyFingerprint,
   };

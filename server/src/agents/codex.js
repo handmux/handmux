@@ -115,6 +115,7 @@ export const codex = {
     dir: sessionsDir,
     resolve: (dir, cwd, opts = {}) => resolveCodexSession(dir, cwd, opts),
     // `codex resume <uuid>` continues the session from its rollout file.
+    resumeArgs: (id) => ['codex', 'resume', id],
     resumeCmd: (id) => `codex resume ${id}`,
   },
 };
