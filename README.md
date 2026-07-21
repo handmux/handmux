@@ -73,7 +73,7 @@ handmux start --tunnel cloudflare   # instant public URL (cloudflared auto-insta
 - **Script push** — notify your phone from any script or CI step with `handmux push`; target all devices, a named session, or a specific device.
 - **Workspace recovery** — handmux silently keeps the metadata needed to rebuild your latest tmux workspace. After a computer or tmux-server restart, restore it beside any new sessions from the phone or with `handmux restore`; existing sessions are never replaced.
 - **Git viewer** — changes / commit history / any branch / full-screen colored diff, multi-repo tabs, read-only, never touches your tree.
-- **Site preview** — a static folder, or a running HTTP/HTTPS service by port (routing / APIs / live-reload intact), in a phone or desktop viewport.
+- **Site preview** — a static folder, or a running HTTP/HTTPS service by port (routing / APIs / live-reload intact), in a phone or desktop viewport. Set its bare preview domain once in `handmux setup`.
 - **Docs** — tap a path in the terminal to open it; Markdown rendered, font zoom, sentence-by-sentence read-aloud.
 - **Select & copy text** — long-press to select in the terminal, drag iOS-style handles to fine-tune, copy the selection / a whole line / a whole paragraph.
 - **Files both ways** — multi-select upload from the chat box, download, share in, copy any absolute path.

@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   cfConfigYaml, parseTunnelCreate, findTunnelId, configFromAnswers, mergeConfig,
   answersFromConfig, summarizeConnection, validatePort, validateHost, validateNonEmpty, validateContact,
-  validateToken,
+  validateToken, validatePreviewDomain,
 } from '../src/cli/setupWizard.js';
 
 describe('cfConfigYaml', () => {
@@ -64,9 +64,9 @@ describe('configFromAnswers', () => {
     expect(configFromAnswers({ tunnel: 'cloudflare-named', port: 19999, cfHostname: 'h.x.com', cfTunnelName: 'handmux' }))
       .toEqual({ tunnel: 'cloudflare-named', port: 19999, cfHostname: 'h.x.com', cfTunnelName: 'handmux' });
   });
-  it('includes name / vapid / xfyun when present, omits when blank', () => {
-    expect(configFromAnswers({ tunnel: 'none', port: 19999, name: 'Box', vapid: { public: 'p' } }))
-      .toEqual({ tunnel: 'none', port: 19999, name: 'Box', vapid: { public: 'p' } });
+  it('includes name / preview domain / vapid / xfyun when present, omits when blank', () => {
+    expect(configFromAnswers({ tunnel: 'none', port: 19999, name: 'Box', previewDomain: 'preview.example.com', vapid: { public: 'p' } }))
+      .toEqual({ tunnel: 'none', port: 19999, name: 'Box', previewDomain: 'preview.example.com', vapid: { public: 'p' } });
     expect(configFromAnswers({ tunnel: 'none', port: 19999, name: '' }))
       .toEqual({ tunnel: 'none', port: 19999 });
   });
@@ -128,11 +128,15 @@ describe('validators', () => {
     expect(validatePort('70000')).toBeTruthy();
     expect(validatePort('abc')).toBeTruthy();
   });
-  it('validateHost accepts a dotted host (scheme stripped), rejects junk', () => {
+  it('validates a hostname and the stricter bare preview domain', () => {
     expect(validateHost('myapp.natapp1.cc')).toBeUndefined();
     expect(validateHost('https://x.cpolar.top')).toBeUndefined();
     expect(validateHost('nodot')).toBeTruthy();
     expect(validateHost('')).toBeTruthy();
+    expect(validatePreviewDomain('preview.example.com')).toBeUndefined();
+    expect(validatePreviewDomain('')).toBeUndefined();
+    expect(validatePreviewDomain('https://preview.example.com')).toBeTruthy();
+    expect(validatePreviewDomain('*.preview.example.com')).toBeTruthy();
   });
   it('validateNonEmpty rejects blank, accepts content', () => {
     const v = validateNonEmpty('authtoken');

@@ -23,13 +23,13 @@ import { intro, outro, note, cancel, select, text, password, confirm, ask, CANCE
 import {
   cfConfigYaml, parseTunnelCreate, findTunnelId,
   mergeConfig, answersFromConfig, summarizeConnection,
-  validatePort, validateHost, validateNonEmpty, validateContact, validateToken,
+  validatePort, validateHost, validatePreviewDomain, validateNonEmpty, validateContact, validateToken,
   TUNNEL_KEYS,
 } from './setupModel.js';
 export {
   cfConfigYaml, parseTunnelCreate, findTunnelId,
   configFromAnswers, mergeConfig, answersFromConfig, summarizeConnection,
-  validatePort, validateHost, validateNonEmpty, validateContact, validateToken,
+  validatePort, validateHost, validatePreviewDomain, validateNonEmpty, validateContact, validateToken,
 } from './setupModel.js';
 
 function readExisting(file) {
@@ -73,6 +73,7 @@ export async function runSetup({ home = homedir(), target = configPath(home), lo
           { value: 'name', label: t('setup.secName'), hint: a.name || t('setup.default') },
           { value: 'port', label: t('setup.secPort'), hint: String(a.port) },
           { value: 'token', label: t('setup.secToken'), hint: a.token ? maskSecret(a.token) : t('setup.tokenAuto') },
+          { value: 'preview', label: t('setup.secPreview'), hint: a.previewDomain || t('setup.previewOff') },
           { value: 'push', label: t('setup.secPush'), hint: a.vapid ? (a.vapid.subject || t('setup.on')) : t('setup.off') },
           { value: 'voice', label: t('setup.secVoice'), hint: a.xfyun ? (a.xfyun.appId || t('setup.on')) : t('setup.off') },
           // A CLI-tool preference (language of handmux's own terminal output), not an app setting — so it
@@ -91,7 +92,6 @@ export async function runSetup({ home = homedir(), target = configPath(home), lo
         fs.writeFileSync(target, JSON.stringify(cfg, null, 2) + '\n', { mode: 0o600 });
         outro(t('setup.wrote', { path: target }));
         if (a.tunnel === 'ssh') printSshServerHelp(a, log);
-        if (a.tunnel === 'cloudflare-named' || a.tunnel === 'ssh') printPreviewHelp(a.tunnel, log);
         return { cfg, start: choice === 'start' };
       }
       cursor = choice;   // remember the row so returning from an edit re-highlights it
@@ -101,6 +101,7 @@ export async function runSetup({ home = homedir(), target = configPath(home), lo
         else if (choice === 'name') a.name = await editName(a);
         else if (choice === 'port') a.port = await editPort(a);
         else if (choice === 'token') a.token = await editToken(a);
+        else if (choice === 'preview') a.previewDomain = await editPreviewDomain(a);
         else if (choice === 'language') a.lang = await editLanguage(a);
         else if (choice === 'push') a.vapid = await editPush(a);
         else if (choice === 'voice') a.xfyun = await editVoice(a);
@@ -137,6 +138,21 @@ async function editName(a) {
 async function editPort(a) {
   const v = await ask(text({ message: withBack(t('setup.askPort')), initialValue: String(a.port), validate: validatePort }));
   return Number(v);
+}
+
+async function editPreviewDomain(a) {
+  note(t('setup.previewAbout'));
+  note(t('setup.previewRoute'));
+  note(t('setup.previewHttps'));
+  if (a.tunnel === 'cloudflare-named') note(t('setup.previewTlsCf'));
+  else if (a.tunnel === 'ssh') note(t('setup.previewTlsEdge'));
+  const value = await ask(text({
+    message: withBack(t('setup.askPreviewDomain')),
+    placeholder: 'preview.example.com',
+    initialValue: a.previewDomain || '',
+    validate: validatePreviewDomain,
+  }));
+  return String(value || '').trim().toLowerCase();
 }
 
 // The access token — the one secret in the phone's URL. Unset = the server mints a fresh one each start
@@ -490,20 +506,5 @@ function printSshServerHelp(a, log) {
   log.log(t('setup.sshHelp1'));
   log.log(t('setup.sshHelpNginx', { port: a.remotePort }));
   log.log(t('setup.sshHelpCaddy', { url: a.publicUrl || '<your-domain>', port: a.remotePort }));
-  log.log('');
-}
-
-// FYI on dynamic port preview: it's optional and NOT wired by this wizard (separate wildcard domain). Print
-// the requirement + a TLS note that fits the chosen tunnel — Cloudflare's free cert only covers one level
-// (so deeper needs ACM), whereas on the ssh/own-edge path the user serves their own wildcard cert. Shown
-// only for wildcard-capable tunnels (a quick tunnel can't do wildcards at all).
-function printPreviewHelp(tunnel, log) {
-  log.log(t('setup.previewHelp1'));
-  log.log(t('setup.previewHelp2'));
-  if (tunnel === 'cloudflare-named') {
-    log.log(t('setup.previewTlsCf'));
-  } else {
-    log.log(t('setup.previewTlsEdge'));
-  }
   log.log('');
 }
