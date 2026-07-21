@@ -5,7 +5,7 @@ All notable changes to handmux. Format follows [Keep a Changelog](https://keepac
 ## [Unreleased]
 
 ### Added
-- 新增 `handmux shortcuts` 交互式向导，可分别配置命令 / 聊天模式的必备常用项；添加按键或文字后可直接选择位置，文字可设置是否附带 Enter，排序时可一次移动到任意位置。配置项在手机端只读并固定排在本机自定义项之前。
+- 新增 `handmux shortcuts` 交互式向导，可分别配置命令 / 聊天模式的共享常用项；两种模式默认都有 `Ctrl+C`。手机 ⚙ 面板按快捷栏实际顺序统一显示共享与本机项，可在本机混排或移除共享项，并提供即时撤销，不影响其他设备。
 - `handmux setup` 新增“动态预览”入口：可直接配置预览裸域，并说明通配路由、外部 HTTPS 与本机 HTTP/HTTPS 服务的关系。
 - 自动维护最新 tmux 工作区的双份元数据，并在电脑或 tmux 环境换代时归档可恢复 checkpoint；手机可在重启后一小时内非破坏性恢复，CLI 可随时列出、预览或按 checkpoint / session 恢复历史。
 - 恢复会安全重建 session、linked window、pane、工作目录与布局，并只对经过验证的 Claude Code / Codex 会话执行 resume；同名会话自动使用 `-restored` 后缀，当前会话与普通 pane 命令不会被修改或重放。
