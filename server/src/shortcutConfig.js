@@ -1,8 +1,11 @@
 import { isAllowedKey } from './keyNames.js';
 
+const CTRL_C = Object.freeze({ type: 'key', key: 'C-c', label: 'Ctrl+C' });
+
 export const DEFAULT_SHORTCUTS = Object.freeze({
-  command: Object.freeze([]),
+  command: Object.freeze([CTRL_C]),
   chat: Object.freeze([
+    CTRL_C,
     Object.freeze({ type: 'key', key: 'Escape', label: 'Esc' }),
     Object.freeze({ type: 'key', key: 'Tab', label: 'Tab' }),
     Object.freeze({ type: 'key', key: 'BSpace', label: '⌫' }),

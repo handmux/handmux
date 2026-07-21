@@ -1,6 +1,9 @@
+const CTRL_C = { type: 'key', key: 'C-c', label: 'Ctrl+C' };
+
 export const DEFAULT_SERVER_SHORTCUTS = {
-  command: [],
+  command: [{ ...CTRL_C }],
   chat: [
+    { ...CTRL_C },
     { type: 'key', key: 'Escape', label: 'Esc' },
     { type: 'key', key: 'Tab', label: 'Tab' },
     { type: 'key', key: 'BSpace', label: '⌫' },

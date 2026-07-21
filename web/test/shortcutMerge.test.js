@@ -1,11 +1,14 @@
 import { describe, it, expect } from 'vitest';
+import { applyShortcutLayout } from '../src/shortcutLayout.js';
 import { DEFAULT_SERVER_SHORTCUTS, mergeShortcuts, shortcutIdentity } from '../src/shortcutMerge.js';
 
 describe('server shortcut merge', () => {
-  it('keeps the current chat defaults as the offline/server fallback', () => {
-    expect(DEFAULT_SERVER_SHORTCUTS.command).toEqual([]);
-    expect(DEFAULT_SERVER_SHORTCUTS.chat.slice(0, 3).map((item) => item.key))
-      .toEqual(['Escape', 'Tab', 'BSpace']);
+  it('keeps the server Ctrl+C defaults in the offline fallback', () => {
+    expect(DEFAULT_SERVER_SHORTCUTS.command).toEqual([
+      { type: 'key', key: 'C-c', label: 'Ctrl+C' },
+    ]);
+    expect(DEFAULT_SERVER_SHORTCUTS.chat.slice(0, 4).map((item) => item.key))
+      .toEqual(['C-c', 'Escape', 'Tab', 'BSpace']);
     expect(DEFAULT_SERVER_SHORTCUTS.chat.find((item) => item.text === 'ok').enter).toBe(true);
   });
 
@@ -34,5 +37,12 @@ describe('server shortcut merge', () => {
   it('treats the same text with different Enter behavior as different actions', () => {
     expect(shortcutIdentity({ type: 'text', text: 'ok', enter: true }))
       .not.toBe(shortcutIdentity({ kind: 'reply', text: 'ok', enter: false }));
+  });
+
+  it('keeps an explicitly hidden identity gone even when a phone-local duplicate exists', () => {
+    const presets = [{ type: 'key', key: 'C-c', label: 'Ctrl+C' }];
+    const locals = [{ kind: 'key', text: 'C-c', label: 'My Ctrl+C' }];
+    const merged = mergeShortcuts(presets, locals, 'command');
+    expect(applyShortcutLayout(merged, { hidden: ['key:C-c'], order: [] })).toEqual([]);
   });
 });

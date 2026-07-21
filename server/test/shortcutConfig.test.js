@@ -2,16 +2,21 @@ import { describe, it, expect } from 'vitest';
 import { DEFAULT_SHORTCUTS, normalizeShortcuts, shortcutIdentity } from '../src/shortcutConfig.js';
 
 describe('shortcut config', () => {
-  it('uses the current chat quick-bar as the mandatory default when shortcuts are absent', () => {
+  it('uses Ctrl+C in both default quick bars when shortcuts are absent', () => {
     const out = normalizeShortcuts(undefined);
     expect(out).toEqual(DEFAULT_SHORTCUTS);
-    expect(out.command).toEqual([]);
-    expect(out.chat.slice(0, 3)).toEqual([
+    expect(out.command[0]).toEqual({ type: 'key', key: 'C-c', label: 'Ctrl+C' });
+    expect(out.chat.slice(0, 4)).toEqual([
+      { type: 'key', key: 'C-c', label: 'Ctrl+C' },
       { type: 'key', key: 'Escape', label: 'Esc' },
       { type: 'key', key: 'Tab', label: 'Tab' },
       { type: 'key', key: 'BSpace', label: '⌫' },
     ]);
     expect(out.chat.find((item) => item.text === 'ok')).toMatchObject({ type: 'text', enter: true });
+  });
+
+  it('does not inject defaults into explicitly configured mode arrays', () => {
+    expect(normalizeShortcuts({ command: [], chat: [] })).toEqual({ command: [], chat: [] });
   });
 
   it('accepts ordered typed items and preserves explicit empty mode lists', () => {

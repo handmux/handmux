@@ -115,6 +115,8 @@ describe('runShortcutEditor', () => {
   it('guides a text shortcut from mode selection through Enter behavior and save', async () => {
     const home = tmpHome('tw-shortcuts-ui-');
     const target = path.join(home, '.handmux', 'config.json');
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    fs.writeFileSync(target, JSON.stringify({ shortcuts: { command: [], chat: [] } }));
     const answers = ['command', 'add-text', 'git status', true, 0, 'back', 'save'];
     const selectCalls = [];
     const ui = {
@@ -261,6 +263,8 @@ describe('runShortcutEditor', () => {
   it('adds a key directly without asking for its shortcut type first', async () => {
     const home = tmpHome('tw-shortcuts-key-ui-');
     const target = path.join(home, '.handmux', 'config.json');
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    fs.writeFileSync(target, JSON.stringify({ shortcuts: { command: [], chat: [] } }));
     const answers = ['command', 'add-key', 'none', 'Escape', 0, 'back', 'save'];
     const ui = {
       intro: vi.fn(), outro: vi.fn(), cancel: vi.fn(),

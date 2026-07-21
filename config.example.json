@@ -7,8 +7,11 @@
   "previewDomain": "",
   "staticDir": "",
   "shortcuts": {
-    "command": [],
+    "command": [
+      { "type": "key", "key": "C-c", "label": "Ctrl+C" }
+    ],
     "chat": [
+      { "type": "key", "key": "C-c", "label": "Ctrl+C" },
       { "type": "key", "key": "Escape", "label": "Esc" },
       { "type": "key", "key": "Tab", "label": "Tab" },
       { "type": "key", "key": "BSpace", "label": "⌫" },
