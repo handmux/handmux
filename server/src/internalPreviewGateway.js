@@ -116,6 +116,19 @@ export function rewriteCss(css, stylesheetUrl) {
     .replace(/@import\s+(["'])(.*?)\1/gi, (all, quote, value) => `@import ${quote}${rewrittenUrl(value, base)}${quote}`);
 }
 
+function rewriteLoginUrlJson(json, target) {
+  const source = String(json);
+  if (!/\/auth\/login-url\/?$/i.test(target.pathname)) return source;
+  try {
+    const body = JSON.parse(source);
+    if (!body || typeof body !== 'object' || typeof body.data !== 'string' || !/^https?:\/\//i.test(body.data)) return source;
+    body.data = proxyPathFor(new URL(body.data));
+    return JSON.stringify(body);
+  } catch {
+    return source;
+  }
+}
+
 function defaultPath(url) {
   const i = url.pathname.lastIndexOf('/');
   return i <= 0 ? '/' : url.pathname.slice(0, i + 1);
@@ -233,6 +246,11 @@ const HOP_BY_HOP = new Set([
   'te', 'trailer', 'transfer-encoding', 'upgrade',
 ]);
 
+const REWRITTEN_REPRESENTATION_HEADERS = new Set([
+  'accept-ranges', 'content-md5', 'content-range', 'content-digest', 'digest', 'etag',
+  'repr-digest', 'signature', 'signature-input',
+]);
+
 function targetFromRequest(req) {
   const direct = decodeProxyPath(req.url);
   if (direct) return direct;
@@ -292,6 +310,10 @@ function responseHeaders(headers, target, jar) {
 
 function isHtml(contentType) { return /(?:text\/html|application\/xhtml\+xml)/i.test(contentType || ''); }
 function isCss(contentType) { return /text\/css/i.test(contentType || ''); }
+function isJson(contentType) { return /^(?:application|text)\/(?:[\w.-]+\+)?json(?:\s*;|$)/i.test(contentType || ''); }
+function isLoginUrlJson(contentType, target) {
+  return isJson(contentType) && /\/auth\/login-url\/?$/i.test(target.pathname);
+}
 
 export function createInternalPreviewGateway({
   entryUrl,
@@ -341,8 +363,14 @@ export function createInternalPreviewGateway({
       lookup,
     }, (upRes) => {
       const contentType = upRes.headers['content-type'] || '';
-      const rewrite = !upRes.headers['content-encoding'] && (isHtml(contentType) || isCss(contentType));
+      const rewrite = !upRes.headers['content-encoding']
+        && (isHtml(contentType) || isCss(contentType) || isLoginUrlJson(contentType, target));
       const headersOut = responseHeaders(upRes.headers, target, jar);
+      if (rewrite) {
+        for (const name of Object.keys(headersOut)) {
+          if (REWRITTEN_REPRESENTATION_HEADERS.has(name.toLowerCase())) delete headersOut[name];
+        }
+      }
       if (!rewrite) {
         if (upRes.headers['content-encoding']) headersOut['content-encoding'] = upRes.headers['content-encoding'];
         if (upRes.headers['content-length']) headersOut['content-length'] = upRes.headers['content-length'];
@@ -359,7 +387,9 @@ export function createInternalPreviewGateway({
       });
       upRes.on('end', () => {
         const source = Buffer.concat(chunks).toString('utf8');
-        const body = isHtml(contentType) ? rewriteHtml(source, target) : rewriteCss(source, target);
+        const body = isHtml(contentType)
+          ? rewriteHtml(source, target)
+          : isCss(contentType) ? rewriteCss(source, target) : rewriteLoginUrlJson(source, target);
         res.writeHead(upRes.statusCode || 502, headersOut);
         res.end(body);
       });

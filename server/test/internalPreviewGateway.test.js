@@ -183,6 +183,23 @@ describe('internal preview gateway HTTP flow', () => {
     secondUrl = `http://127.0.0.1:${second.address().port}`;
 
     first = http.createServer((req, res) => {
+      if (req.url === '/auth/login-url') {
+        res.setHeader('content-type', 'application/json; charset=utf-8');
+        res.setHeader('etag', '"upstream-json"');
+        res.setHeader('digest', 'sha-256=upstream');
+        res.setHeader('signature', 'sig1=:upstream:');
+        return res.end(JSON.stringify({
+          code: 0,
+          data: 'https://sso.corp.internal/login?service=https%3A%2F%2Fapi.corp.internal%2Fcallback',
+        }));
+      }
+      if (req.url === '/.well-known/openid-configuration') {
+        res.setHeader('content-type', 'application/json');
+        return res.end(JSON.stringify({
+          issuer: 'https://identity.corp.internal',
+          authorization_endpoint: 'https://identity.corp.internal/authorize',
+        }));
+      }
       if (req.url === '/redirect') {
         res.writeHead(302, { location: `${secondUrl}/landing?from=first` });
         return res.end();
@@ -230,6 +247,29 @@ describe('internal preview gateway HTTP flow', () => {
     expect(redirected.headers.location).toBe(proxyPathFor(new URL('/landing?from=first', secondUrl)));
     const landed = await request(gateway.handler).get(redirected.headers.location).expect(200);
     expect(landed.text).toBe('second /landing?from=first cookie=');
+  });
+
+  it('keeps a login URL returned in JSON inside the preview gateway', async () => {
+    const gateway = createInternalPreviewGateway({ entryUrl: firstUrl, allowLoopback: true });
+    const response = await request(gateway.handler)
+      .get(proxyPathFor(new URL('/auth/login-url', firstUrl)))
+      .expect(200);
+    const loginUrl = 'https://sso.corp.internal/login?service=https%3A%2F%2Fapi.corp.internal%2Fcallback';
+    expect(response.body).toEqual({ code: 0, data: proxyPathFor(new URL(loginUrl)) });
+    expect(response.headers.etag).toBeUndefined();
+    expect(response.headers.digest).toBeUndefined();
+    expect(response.headers.signature).toBeUndefined();
+  });
+
+  it('does not rewrite identity URLs in general JSON responses', async () => {
+    const gateway = createInternalPreviewGateway({ entryUrl: firstUrl, allowLoopback: true });
+    const response = await request(gateway.handler)
+      .get(proxyPathFor(new URL('/.well-known/openid-configuration', firstUrl)))
+      .expect(200);
+    expect(response.body).toEqual({
+      issuer: 'https://identity.corp.internal',
+      authorization_endpoint: 'https://identity.corp.internal/authorize',
+    });
   });
 
   it('keeps upstream cookies in memory instead of exposing them to the phone', async () => {
