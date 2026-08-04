@@ -42,6 +42,13 @@ describe('useTranscript', () => {
     expect(spy).not.toHaveBeenCalled();
   });
 
+  it('passes the selected agent to recent transcript polling', async () => {
+    const spy = vi.spyOn(api, 'fetchTranscript').mockResolvedValue({ messages: [], hash: 'h', session: 'cx', hasMore: false, firstSeq: null });
+    renderHook(() => useTranscript('%0', true, 'codex'));
+    await waitFor(() => expect(spy).toHaveBeenCalled());
+    expect(spy).toHaveBeenCalledWith('%0', expect.objectContaining({ agent: 'codex' }));
+  });
+
   it('loadOlder() prepends an older page, deduped/sorted by k', async () => {
     const recent = makeMsgs(10, 10); // k=10..19
     const older = makeMsgs(5, 5); // k=5..9

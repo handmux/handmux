@@ -1,4 +1,4 @@
-// The 对话 lens's read-projection: poll /api/transcript for the pane's Claude session, hash-gated省流.
+// The 对话 lens's read-projection: poll /api/transcript for the pane's agent session, hash-gated省流.
 // A null poll (204 unchanged) keeps the last messages — same discipline as the terminal loop.
 //
 // Paginated (Task 10): the client NEVER holds/requests the whole transcript. Two independent cursors:
@@ -26,7 +26,7 @@ export function mergeByK(existing, incoming) {
   return merged.length > MAX_TRANSCRIPT_MESSAGES ? merged.slice(-MAX_TRANSCRIPT_MESSAGES) : merged;
 }
 
-export function useTranscript(pane, enabled) {
+export function useTranscript(pane, enabled, agent = 'claude') {
   const [messages, setMessages] = useState([]);
   const [hasMoreOlder, setHasMoreOlder] = useState(false);
   const [loadingOlder, setLoadingOlder] = useState(false);
@@ -53,11 +53,11 @@ export function useTranscript(pane, enabled) {
     setLoadingOlder(false);
     setSession(null);
     setLoaded(false);
-  }, [pane]);
+  }, [pane, agent]);
 
   // Recent polling and scroll-up history use the same 20-message page size. Auto-fill in ChatView pulls
   // additional history pages when even 20 compact messages do not fill the phone viewport.
-  const fetch = useCallback(() => fetchTranscript(pane, { since: hashRef.current, limit: TRANSCRIPT_PAGE_SIZE }), [pane]);
+  const fetch = useCallback(() => fetchTranscript(pane, { since: hashRef.current, limit: TRANSCRIPT_PAGE_SIZE, agent }), [pane, agent]);
   const apply = useCallback((r) => {
     if (!r) return; // 204 / null → keep last
     setLoaded(true); // first real response: from now on an empty list means an empty SESSION, not loading
@@ -89,7 +89,7 @@ export function useTranscript(pane, enabled) {
     if (r.session) { sessionRef.current = r.session; setSession(r.session); }
   }, []);
 
-  usePollingLoop({ fetch, apply, intervalMs: 1500, enabled: enabled && !!pane, deps: [pane] });
+  usePollingLoop({ fetch, apply, intervalMs: 1500, enabled: enabled && !!pane, deps: [pane, agent] });
 
   const loadOlder = useCallback(async () => {
     if (loadingOlderRef.current || !hasMoreOlder || oldestKRef.current == null) return;
@@ -98,7 +98,7 @@ export function useTranscript(pane, enabled) {
     setLoadingOlder(true);
     try {
       const limit = Math.min(TRANSCRIPT_PAGE_SIZE, MAX_TRANSCRIPT_MESSAGES - messagesRef.current.length);
-      const r = await fetchTranscript(pane, { before: oldestKRef.current, limit });
+      const r = await fetchTranscript(pane, { before: oldestKRef.current, limit, agent });
       if (!r) return;
       const incoming = Array.isArray(r.messages) ? r.messages : [];
       messagesRef.current = mergeByK(messagesRef.current, incoming);
@@ -109,7 +109,7 @@ export function useTranscript(pane, enabled) {
       loadingOlderRef.current = false;
       setLoadingOlder(false);
     }
-  }, [pane, hasMoreOlder]);
+  }, [pane, agent, hasMoreOlder]);
 
   return { messages, hasMoreOlder, loadOlder, loadingOlder, session, loaded };
 }

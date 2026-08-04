@@ -66,20 +66,20 @@ export const getHistory = (pane, lines = 1500, since) =>
 // conditional poll), a HISTORY page is `{before, limit}` (page back from the given global ordinal `k`,
 // no hash — always returns whatever's there). limit defaults to 10 so the client never asks for more than
 // one page at a time (it never holds/requests the whole transcript).
-export const fetchTranscript = (pane, { since, before, limit = 10 } = {}) => {
-  let url = `/api/transcript?pane=${encodeURIComponent(pane)}&agent=claude&limit=${encodeURIComponent(limit)}`;
+export const fetchTranscript = (pane, { since, before, limit = 10, agent = 'claude' } = {}) => {
+  let url = `/api/transcript?pane=${encodeURIComponent(pane)}&agent=${encodeURIComponent(agent)}&limit=${encodeURIComponent(limit)}`;
   if (since) url += `&since=${encodeURIComponent(since)}`;
   if (before != null) url += `&before=${encodeURIComponent(before)}`;
   return req(url, { timeoutMs: 8000 }).then((r) => (r.unchanged ? null : r));
 };
 // The pane's current context-window state: { model, usedPercent } — either may be null when the statusLine
 // capturer isn't opted in / the session hasn't rendered. Polled by the 对话 composer to show a small chip.
-export const getPaneContext = (pane) =>
-  req(`/api/context?pane=${encodeURIComponent(pane)}&agent=claude`, { timeoutMs: 8000 });
+export const getPaneContext = (pane, agent = 'claude') =>
+  req(`/api/context?pane=${encodeURIComponent(pane)}&agent=${encodeURIComponent(agent)}`, { timeoutMs: 8000 });
 // The pending interactive prompt (AskUserQuestion / permission menu) scraped off the pane, or null when no
 // gate is up. Polled by the 对话 lens only while a gate is up (kind==='permission').
-export const getPendingPrompt = (pane) =>
-  req(`/api/pending-prompt?pane=${encodeURIComponent(pane)}&agent=claude`, { timeoutMs: 8000 }).then((r) => r.prompt || null);
+export const getPendingPrompt = (pane, agent = 'claude') =>
+  req(`/api/pending-prompt?pane=${encodeURIComponent(pane)}&agent=${encodeURIComponent(agent)}`, { timeoutMs: 8000 }).then((r) => r.prompt || null);
 export const sendText = (pane, text, enter = true) =>
   req('/api/send', { method: 'POST', body: JSON.stringify({ pane, text, enter }) });
 export const sendKeys = (pane, keys) =>

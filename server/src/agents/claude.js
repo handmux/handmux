@@ -12,6 +12,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { resolveEncodedDirSession, isSessionUuid } from './scanUtils.js';
 import { resolveByExecutable, executableBasename } from './processIdentity.js';
+import { createTranscriptParser, parseTranscript } from '../transcriptParse.js';
 
 // The NATIVE installer names the real binary by version (~/.local/share/claude/versions/2.1.196 —
 // ~/.local/bin/claude is only a symlink to it), and tmux #{pane_current_command} follows that basename
@@ -142,6 +143,7 @@ export const claude = {
   procMatch: /^(\S*\/)?claude(\s|$)/,
   takeoverPrefix: 'cc', // tmux session name prefix for a takeover (cc-<label>-<n>)
   classify: classifyClaude,
+  transcript: { createParser: createTranscriptParser, parse: parseTranscript },
   sessions: {
     isId: isSessionUuid,
     dirOptKey: 'projectsDir', // scanOrphans option that overrides `dir` (back-compat + tests)

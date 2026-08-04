@@ -1309,6 +1309,8 @@ export default function App() {
     return () => { alive = false; document.removeEventListener('visibilitychange', onVis); };
   }, [needToken, notifInboxOpen, notifRetrySeq, handledAuth]);
 
+  const currentAgent = states[current?.paneId]?.agent;
+
   // Record a just-sent command into this WINDOW's recent history (deduped + capped in storage).
   const onCommandSent = useCallback((cmd) => {
     termRef.current?.wake?.(); // a dock send/fill landed → wake the poll loop (covers BottomDock too)
@@ -1318,9 +1320,11 @@ export default function App() {
     // A chat-staying slash command (/compact, /model sonnet) logs its scaffold to the jsonl only when it
     // COMPLETES — minutes for /compact — so echo the command pill now; ChatView drops it when the real
     // marker lands. null for handed-off commands (the lens switch is their feedback) and plain text.
-    const echo = slashEchoFor(cmd);
+    // Codex does not reliably log slash commands as transcript messages, so its composer hands every slash
+    // command to the terminal and never leaves an optimistic pill waiting for a marker that cannot arrive.
+    const echo = currentAgent === 'codex' ? null : slashEchoFor(cmd);
     setSlashEcho(echo && current?.paneId ? { ...echo, paneId: current.paneId } : null);
-  }, [current]);
+  }, [current, currentAgent]);
 
   // ★/☆ on a panel row: toggle membership of the global favorites list.
   const toggleFavorite = useCallback((cmd) => {
@@ -1336,9 +1340,7 @@ export default function App() {
   // The current pane's cwd (from /panes), used as the default base when resolving a relative doc path.
   const currentPaneCwd = current?.panes?.find((p) => p.id === current.paneId)?.cwd || null;
 
-  // The current implementation parses Claude transcripts only. Keep availability and activation on the
-  // same predicate so Codex can never enter a view that would read an unrelated Claude session by cwd.
-  const chatLensAvailable = chatLensOn && states[current?.paneId]?.agent === 'claude';
+  const chatLensAvailable = chatLensOn && (currentAgent === 'claude' || currentAgent === 'codex');
   // Chat lens is active only for a supported pane whose lens is set to 'chat'. Drives BOTH swaps: the main
   // view (ChatView vs Terminal) and the bottom bar (ChatComposer vs the terminal BottomDock).
   const chatLens = chatLensAvailable && lens === 'chat';
@@ -1988,9 +1990,10 @@ export default function App() {
           />
           {current.paneId && (
             chatLens ? (
-              <ChatView pane={current.paneId} kind={states[current.paneId]?.kind} msg={states[current.paneId]?.msg} onAuthFail={onAuthFail}
+              <ChatView pane={current.paneId} agent={currentAgent} kind={states[current.paneId]?.kind} msg={states[current.paneId]?.msg} onAuthFail={onAuthFail}
                 slashEcho={slashEcho && slashEcho.paneId === current.paneId ? slashEcho : null}
-                onSlashEchoDone={() => setSlashEcho(null)} />
+                onSlashEchoDone={() => setSlashEcho(null)}
+                onTerminalHandoff={() => { setLens('terminal'); localStorage.setItem('tw_lens_' + current.paneId, 'terminal'); }} />
             ) : (
               <Terminal
                 ref={termRef}
@@ -2018,6 +2021,7 @@ export default function App() {
           {chatLens ? (
             <ChatComposer
               pane={current.paneId}
+              agent={currentAgent}
               desktop={desktopInput}
               kind={states[current.paneId]?.kind}
               cwd={currentPaneCwd}

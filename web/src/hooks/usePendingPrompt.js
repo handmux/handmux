@@ -9,17 +9,17 @@ import { getPendingPrompt } from '../api.js';
 const POLL_MS = 1200;
 const AFTER_ACT_MS = 450; // the screen takes ~½s to redraw after a keystroke; re-read once it has
 
-export function usePendingPrompt(pane, active) {
+export function usePendingPrompt(pane, active, agent = 'claude') {
   const [prompt, setPrompt] = useState(null);
   const aliveRef = useRef(true);
 
   const read = useCallback(async () => {
     if (!pane || !active) { setPrompt(null); return; }
     try {
-      const p = await getPendingPrompt(pane);
+      const p = await getPendingPrompt(pane, agent);
       if (aliveRef.current) setPrompt(p);
     } catch { /* transient — keep the last prompt on screen */ }
-  }, [pane, active]);
+  }, [pane, active, agent]);
 
   // Force a read shortly after an answer, so the advance (next question / review / gate-gone) shows promptly
   // without waiting for the next poll tick.
@@ -31,7 +31,7 @@ export function usePendingPrompt(pane, active) {
     read();
     const id = setInterval(read, POLL_MS);
     return () => { aliveRef.current = false; clearInterval(id); };
-  }, [pane, active, read]);
+  }, [pane, active, agent, read]);
 
   return { prompt, refetch };
 }

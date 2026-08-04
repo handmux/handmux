@@ -7,25 +7,25 @@ import { getPaneContext } from '../api.js';
 // the composer simply renders nothing then.
 const POLL_MS = 15000;
 
-export function usePaneContext(pane) {
+export function usePaneContext(pane, agent = 'claude') {
   const [ctx, setCtx] = useState({ model: null, usedPercent: null });
   const paneRef = useRef(pane);
   paneRef.current = pane;
 
   useEffect(() => {
-    if (!pane) { setCtx({ model: null, usedPercent: null }); return; }
+    if (!pane || agent !== 'claude') { setCtx({ model: null, usedPercent: null }); return; }
     let alive = true;
     let timer = null;
     const tick = async () => {
       try {
-        const r = await getPaneContext(pane);
+        const r = await getPaneContext(pane, agent);
         if (alive && paneRef.current === pane && r) setCtx({ model: r.model ?? null, usedPercent: typeof r.usedPercent === 'number' ? r.usedPercent : null });
       } catch { /* keep last good value */ }
       if (alive) timer = setTimeout(tick, POLL_MS);
     };
     tick();
     return () => { alive = false; if (timer) clearTimeout(timer); };
-  }, [pane]);
+  }, [pane, agent]);
 
   return ctx;
 }

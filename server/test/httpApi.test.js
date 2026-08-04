@@ -4,6 +4,7 @@ import request from 'supertest';
 import express from 'express';
 import { expressAuth } from '../src/auth.js';
 import { createApiRouter } from '../src/httpApi.js';
+import { combineHookStatuses } from '../src/routes/system.js';
 import { writeCache } from '../src/cli/updateCheck.js';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -957,6 +958,13 @@ describe('GET /api/config (capabilities)', () => {
 });
 
 describe('claude hooks API', () => {
+  it('reports a partial multi-agent hook install as absent so setup can finish it', () => {
+    expect(combineHookStatuses('installed', 'absent')).toBe('absent');
+    expect(combineHookStatuses('absent', 'installed')).toBe('absent');
+    expect(combineHookStatuses('installed', 'no-codex')).toBe('installed');
+    expect(combineHookStatuses('no-claude', 'installed')).toBe('installed');
+    expect(combineHookStatuses('no-claude', 'no-codex')).toBe('no-claude');
+  });
   // A fresh temp $HOME WITH a .claude dir (but no hooks) — installHooks refuses to create ~/.claude,
   // so the dir must already exist for status to move from 'no-claude' → 'absent' → 'installed'.
   function homeWithClaude() {

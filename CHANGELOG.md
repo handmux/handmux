@@ -4,6 +4,9 @@ All notable changes to handmux. Format follows [Keep a Changelog](https://keepac
 
 ## [Unreleased]
 
+### Added
+- 对话视图新增 Codex 支持：可直接查看 Markdown 对话与工具活动；遇到 Codex 确认时会明确引导到终端处理，避免显示无法正确操作的确认按钮。
+
 ## [0.22.1] - 2026-08-04
 
 ### Changed

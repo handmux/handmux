@@ -53,7 +53,7 @@ describe('Settings 对话镜头 experimental gate', () => {
     const onEnableHooks = vi.fn(async () => ({ status: 'installed' }));
     await render({ chatLensEnabled: false, hooksStatus: 'absent', onEnableHooks });
     expect(lensBox().disabled).toBe(true);
-    expect(container.textContent).toContain('需先安装 Claude hooks');
+    expect(container.textContent).toContain('需先安装 Agent hooks');
     const btn = [...container.querySelectorAll('button')].find((b) => b.textContent === '一键安装 hooks');
     expect(btn).toBeTruthy();
     click(btn);
@@ -70,7 +70,7 @@ describe('Settings 对话镜头 experimental gate', () => {
   it('no Claude Code at all → locked with the no-claude hint and NO install button', async () => {
     await render({ chatLensEnabled: false, hooksStatus: 'no-claude' });
     expect(lensBox().disabled).toBe(true);
-    expect(container.textContent).toContain('未检测到 Claude Code');
+    expect(container.textContent).toContain('未检测到 Claude Code 或 Codex CLI');
     expect([...container.querySelectorAll('button')].some((b) => b.textContent === '一键安装 hooks')).toBe(false);
   });
 

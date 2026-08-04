@@ -95,6 +95,7 @@ describe('resolveCodexSession', () => {
     expect(out.sessionId).toBe('bbbbbbbb-0000-0000-0000-000000000002');
     expect(out.snippet).toBe('newest ask');
     expect(out.state).toBe('idle');
+    expect(out.file).toMatch(/bbbbbbbb-0000-0000-0000-000000000002\.jsonl$/);
   });
 
   it('returns {} when nothing records that cwd', async () => {

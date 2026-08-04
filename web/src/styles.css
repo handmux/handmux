@@ -2620,6 +2620,7 @@ button.cmd-text { background: none; border: none; text-align: left; }
   display: flex; align-items: center; color: var(--ct-chip-ink); font-size: 13px; line-height: 1.45;
   background: var(--ct-body); box-shadow: none;
 }
+.chat-terminal-gate .chat-gate-hint { margin: -2px 0 12px; padding: 9px 10px; border-radius: 9px; }
 
 @media (prefers-reduced-motion: reduce) {
   .chat-tool-head, .chat-gate-btn, .chat-gate-opt { transition: none; }

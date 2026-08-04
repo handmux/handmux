@@ -3,6 +3,7 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createTranscriptReader } from '../src/transcriptReader.js';
+import { createCodexTranscriptParser } from '../src/codexTranscriptParse.js';
 
 const line = (o) => JSON.stringify(o) + '\n';
 const user = (text) => line({ type: 'user', message: { role: 'user', content: text } });
@@ -53,6 +54,16 @@ describe('transcriptReader', () => {
         await reader.read(file);
       }
       expect(reader.size()).toBe(2);
+    } finally { await fs.rm(dir, { recursive: true, force: true }); }
+  });
+
+  it('uses the parser selected for the transcript agent', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'handmux-transcript-'));
+    const file = path.join(dir, 'rollout.jsonl');
+    const reader = createTranscriptReader();
+    try {
+      await fs.writeFile(file, line({ type: 'response_item', payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'codex' }] } }));
+      expect((await reader.read(file, createCodexTranscriptParser)).map((m) => m.text)).toEqual(['codex']);
     } finally { await fs.rm(dir, { recursive: true, force: true }); }
   });
 });

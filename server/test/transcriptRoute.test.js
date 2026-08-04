@@ -1,5 +1,5 @@
 // NOTE: this project's server suite runs on VITEST (describe/it/expect), not node:test.
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import express from 'express';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -81,17 +81,28 @@ describe('pageTranscript', () => {
 });
 
 describe('GET /api/transcript', () => {
-  it('409s for an explicitly requested Codex lens before cwd fallback can read a Claude session', async () => {
-    let cwdRead = false;
+  it('resolves and parses a Codex rollout by cwd when hook metadata is unavailable', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-route-'));
+    const cwd = '/tmp/codex-route-cwd';
+    const day = path.join(root, '2026', '08', '04');
+    fs.mkdirSync(day, { recursive: true });
+    const file = path.join(day, 'rollout-2026-08-04T00-00-00-aaaaaaaa-0000-0000-0000-000000000001.jsonl');
+    fs.writeFileSync(file, [
+      JSON.stringify({ type: 'session_meta', payload: { id: 'aaaaaaaa-0000-0000-0000-000000000001', cwd } }),
+      JSON.stringify({ type: 'response_item', payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'from-codex' }] } }),
+    ].join('\n') + '\n');
     const app = express();
     app.use(transcriptRoutes({
-      commands: { paneCurrentPath: async () => { cwdRead = true; return '/shared'; } },
+      commands: { paneCurrentPath: async () => cwd },
       claudeEvents: noHook,
+      codexDir: root,
     }));
-    const { status, body } = await call(app, '/transcript?pane=%251&agent=codex');
-    expect(status).toBe(409);
-    expect(body.error).toMatch(/agent/i);
-    expect(cwdRead).toBe(false);
+    try {
+      const { status, body } = await call(app, '/transcript?pane=%251&agent=codex');
+      expect(status).toBe(200);
+      expect(body.messages.map((m) => m.text)).toEqual(['from-codex']);
+      expect(body.session).toBe('aaaaaaaa-0000-0000-0000-000000000001');
+    } finally { fs.rmSync(root, { recursive: true, force: true }); }
   });
 
   it('409s when hook state binds the pane to Codex even if the caller claims Claude', async () => {
@@ -102,6 +113,25 @@ describe('GET /api/transcript', () => {
     }));
     const { status } = await call(app, '/transcript?pane=%251&agent=claude');
     expect(status).toBe(409);
+  });
+
+  it('uses the Codex parser for the hook-bound rollout path', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-route-hook-'));
+    const file = path.join(dir, 'rollout-aaaaaaaa-0000-0000-0000-000000000002.jsonl');
+    fs.writeFileSync(file, JSON.stringify({ type: 'response_item', payload: { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'hooked-codex' }] } }) + '\n');
+    const app = express();
+    app.use(transcriptRoutes({
+      commands: {},
+      claudeEvents: {
+        paneAgent: () => 'codex',
+        paneSession: () => ({ agent: 'codex', sessionId: 'aaaaaaaa-0000-0000-0000-000000000002', transcriptPath: file }),
+      },
+    }));
+    try {
+      const { status, body } = await call(app, '/transcript?pane=%251&agent=codex');
+      expect(status).toBe(200);
+      expect(body.messages.map((m) => m.text)).toEqual(['hooked-codex']);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   });
 
   it('returns normalized messages for a pane', async () => {
@@ -255,6 +285,15 @@ describe('GET /api/pending-prompt', () => {
     app.use(mount(async () => menu));
     const { status } = await call(app, '/pending-prompt?pane=nope');
     expect(status).toBe(400);
+  });
+
+  it('rejects Codex before capture-pane because its approval keys are not Claude-compatible', async () => {
+    const capturePlain = vi.fn();
+    const app = express();
+    app.use(transcriptRoutes({ commands: { capturePlain }, claudeEvents: noHook }));
+    const { status } = await call(app, '/pending-prompt?pane=%251&agent=codex');
+    expect(status).toBe(409);
+    expect(capturePlain).not.toHaveBeenCalled();
   });
 });
 

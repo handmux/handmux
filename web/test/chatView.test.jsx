@@ -217,6 +217,19 @@ describe('ChatView', () => {
     await waitFor(() => expect(keys).toHaveBeenCalledWith('%0', expect.arrayContaining(['Enter'])));
   });
 
+  it('Codex approval never scrapes or drives the Claude menu; it hands off to the terminal', async () => {
+    mockTranscript([{ k: 0, i: 0, role: 'assistant', type: 'text', text: '准备执行' }]);
+    const pending = vi.spyOn(api, 'getPendingPrompt');
+    const handoff = vi.fn();
+    render(<ChatView pane="%0" agent="codex" kind="permission" onTerminalHandoff={handoff} />);
+    const button = await screen.findByRole('button', { name: '去终端处理' });
+    expect(screen.getByText('Codex 正在等待你的确认')).toBeTruthy();
+    expect(pending).not.toHaveBeenCalled();
+    expect(screen.queryByRole('button', { name: '允许' })).toBeNull();
+    fireEvent.click(button);
+    expect(handoff).toHaveBeenCalledOnce();
+  });
+
   it('a scraped AskUserQuestion renders its real options as a radio list (not 允许/拒绝)', async () => {
     mockTranscript([{ k: 0, i: 0, role: 'user', type: 'text', text: 'hi' }]);
     vi.spyOn(api, 'getPendingPrompt').mockResolvedValue({

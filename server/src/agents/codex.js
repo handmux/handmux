@@ -10,6 +10,7 @@ import { promises as fsp } from 'node:fs';
 import { readHead, readTail, firstCwd, isSessionUuid } from './scanUtils.js';
 import { classifyClaude } from './claude.js';
 import { resolveByExecutable, executableBasename } from './processIdentity.js';
+import { createCodexTranscriptParser, parseCodexTranscript } from '../codexTranscriptParse.js';
 
 export const sessionsDir = (home = os.homedir()) => path.join(home, '.codex', 'sessions');
 
@@ -94,7 +95,7 @@ export async function resolveCodexSession(dir, cwd, { busyMs = 8000, now = Date.
     if (!sessionId) continue;
     let snippet = '';
     try { snippet = codexUserSnippet(await readTail(file)); } catch { /* best effort */ }
-    return { sessionId, state: now() - mtime < busyMs ? 'busy' : 'idle', snippet, lastActivity: Math.round(mtime) };
+    return { sessionId, state: now() - mtime < busyMs ? 'busy' : 'idle', snippet, lastActivity: Math.round(mtime), file };
   }
   return {};
 }
@@ -108,6 +109,7 @@ export const codex = {
   procMatch: /^(\S*\/)?codex(\s|$)/,
   takeoverPrefix: 'cx', // tmux session name prefix for a takeover (cx-<label>-<n>)
   classify: classifyClaude, // Codex hook payloads match Claude's field-for-field — same classifier
+  transcript: { createParser: createCodexTranscriptParser, parse: parseCodexTranscript },
 
   sessions: {
     isId: isSessionUuid,

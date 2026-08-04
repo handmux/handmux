@@ -47,13 +47,13 @@ export function createTranscriptReader({ maxEntries = 8, yieldEvery = 500 } = {}
     }
   }
 
-  async function load(file) {
+  async function load(file, createParser) {
     let st;
     try { st = await fsp.stat(file); } catch { cache.delete(file); return []; }
     if (!st.isFile()) { cache.delete(file); return []; }
 
     let entry = cache.get(file);
-    const sameFile = entry && entry.dev === st.dev && entry.ino === st.ino;
+    const sameFile = entry && entry.createParser === createParser && entry.dev === st.dev && entry.ino === st.ino;
     if (sameFile && entry.size === st.size && entry.mtimeMs === st.mtimeMs) {
       entry.usedAt = Date.now();
       return entry.parser.messages;
@@ -64,7 +64,7 @@ export function createTranscriptReader({ maxEntries = 8, yieldEvery = 500 } = {}
     // leak across /clear or log rotation.
     const append = sameFile && st.size > entry.size;
     if (!append) {
-      entry = { parser: createTranscriptParser(), offset: 0, dev: st.dev, ino: st.ino, size: 0, mtimeMs: 0, usedAt: 0 };
+      entry = { parser: createParser(), createParser, offset: 0, dev: st.dev, ino: st.ino, size: 0, mtimeMs: 0, usedAt: 0 };
     }
 
     const { lines, offset, size } = await readCompleteLines(file, entry.offset);
@@ -88,9 +88,9 @@ export function createTranscriptReader({ maxEntries = 8, yieldEvery = 500 } = {}
     return entry.parser.messages;
   }
 
-  async function read(file) {
+  async function read(file, createParser = createTranscriptParser) {
     if (inflight.has(file)) return inflight.get(file);
-    const run = load(file).finally(() => inflight.delete(file));
+    const run = load(file, createParser).finally(() => inflight.delete(file));
     inflight.set(file, run);
     return run;
   }

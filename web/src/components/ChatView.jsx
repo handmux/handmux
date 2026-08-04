@@ -1,5 +1,5 @@
 // web/src/components/ChatView.jsx
-// The 对话 lens: a read-projection of the pane's Claude session as IM bubbles + two-type gate cards
+// The 对话 lens: a read-projection of the pane's agent session as IM bubbles + gate cards
 // (permission / AskUserQuestion). NO input of its own — text is typed in the existing BottomDock composer
 // (which stays mounted below in chat lens). Gate buttons write via the SAME send-keys the terminal uses.
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
@@ -26,6 +26,12 @@ function toolSummary(tool) {
   const n = tool.name || '工具';
   const inp = tool.input || {};
   if (n === 'Bash') return `运行 ${inp.command || ''}`.trim();
+  if (n === 'exec_command') return `运行 ${inp.cmd || ''}`.trim();
+  if (n === 'apply_patch') return '应用代码改动';
+  if (n === 'web__run') return '联网查询';
+  if (n === 'view_image') return `查看图片 ${inp.path || ''}`.trim();
+  if (n === 'wait') return '等待任务完成';
+  if (n === 'write_stdin') return '继续运行任务';
   if (n === 'Edit' || n === 'MultiEdit' || n === 'Write') return `${n === 'Write' ? '写入' : '编辑'} ${inp.file_path || ''}`.trim();
   if (n === 'Read') return `读取 ${inp.file_path || inp.notebook_path || ''}`.trim();
   if (n === 'NotebookEdit') return `编辑 ${inp.notebook_path || ''}`.trim();
@@ -44,11 +50,12 @@ function toolSummary(tool) {
 
 // The app-consistent icon (Lucide, currentColor) for a tool family — mirrors toolSummary's branches.
 function toolIcon(name) {
-  if (name === 'Bash') return <CommandIcon />;
-  if (name === 'Edit' || name === 'MultiEdit' || name === 'Write' || name === 'NotebookEdit') return <FilePenIcon />;
+  if (name === 'Bash' || name === 'exec_command' || name === 'write_stdin') return <CommandIcon />;
+  if (name === 'Edit' || name === 'MultiEdit' || name === 'Write' || name === 'NotebookEdit' || name === 'apply_patch') return <FilePenIcon />;
   if (name === 'Read') return <FileIcon />;
   if (name === 'Grep' || name === 'Glob') return <SearchIcon />;
-  if (name === 'WebSearch' || name === 'WebFetch') return <GlobeIcon />;
+  if (name === 'WebSearch' || name === 'WebFetch' || name === 'web__run') return <GlobeIcon />;
+  if (name === 'view_image') return <FileIcon />;
   if (name === 'TodoWrite') return <ListChecksIcon />;
   if (name === 'Skill') return <PuzzleIcon />;
   if (name === 'Task' || name === 'Agent') return <BotIcon />;
@@ -130,6 +137,8 @@ function ToolChip({ tool, running, onOpen }) {
 function toolMode(name) {
   const map = {
     Bash: '运行命令', Edit: '编辑文件', MultiEdit: '编辑文件', Write: '写入文件', Read: '读取文件',
+    exec_command: '运行命令', apply_patch: '修改代码', web__run: '联网查询', view_image: '查看图片',
+    wait: '等待任务', write_stdin: '继续任务',
     NotebookEdit: '编辑笔记本', Grep: '搜索', Glob: '查找文件', WebSearch: '联网搜索', WebFetch: '读取网页',
     TodoWrite: '更新待办', Skill: '激活技能', Task: '调用 Agent', Agent: '调用 Agent',
   };
@@ -142,6 +151,9 @@ function toolCommandText(tool) {
   const n = tool.name;
   const inp = tool.input || {};
   if (n === 'Bash') return inp.command || '';
+  if (n === 'exec_command') return inp.cmd || inp.script || '';
+  if (n === 'apply_patch') return inp.patch || inp.script || '';
+  if (n === 'view_image') return inp.path || JSON.stringify(inp, null, 2);
   if (n === 'Read' || n === 'Edit' || n === 'MultiEdit' || n === 'Write') return inp.file_path || '';
   if (n === 'NotebookEdit') return inp.notebook_path || '';
   if (n === 'Grep' || n === 'Glob') return inp.pattern || '';
@@ -373,14 +385,16 @@ function resolveCopyBlock(target) {
 
 const COPY_CALLOUT_W = 72; // estimated callout width (px) for the right-edge clamp (single 拷贝 button)
 
-export default function ChatView({ pane, kind, msg, onAuthFail, slashEcho, onSlashEchoDone }) {
-  const { messages, hasMoreOlder, loadOlder, loadingOlder, session, loaded } = useTranscript(pane, true);
+export default function ChatView({ pane, agent = 'claude', kind, msg, onAuthFail, slashEcho, onSlashEchoDone, onTerminalHandoff }) {
+  const { messages, hasMoreOlder, loadOlder, loadingOlder, session, loaded } = useTranscript(pane, true, agent);
   const tsIdx = useMemo(() => timeStampedIndices(messages), [messages]);
   // The gate's options are scraped from the pane's on-screen menu (they're not in the transcript). Poll only
   // while Claude is blocked (kind==='permission'). If a menu is up → the rich PromptGate; if permission but
   // the menu couldn't be parsed → the generic 允许/拒绝 fallback so there's always a way to act.
   const busy = kind === 'permission';
-  const { prompt, refetch } = usePendingPrompt(pane, busy);
+  const claudeGate = busy && agent === 'claude';
+  const terminalGate = busy && agent !== 'claude';
+  const { prompt, refetch } = usePendingPrompt(pane, claudeGate, agent);
   // After the user answers, the menu vanishes from the screen instantly but `kind` stays 'permission'
   // until the slower /states poll catches up — so !prompt && busy would flash the 允许/拒绝 fallback
   // for ~1s after every 确认 (and between multi-question steps). Latch "a scraped menu WAS up this
@@ -388,8 +402,8 @@ export default function ChatView({ pane, kind, msg, onAuthFail, slashEcho, onSla
   // show the generic gate". The latch resets when the episode ends (busy → false).
   const hadPromptRef = useRef(false);
   useEffect(() => { if (prompt) hadPromptRef.current = true; }, [prompt]);
-  useEffect(() => { if (!busy) hadPromptRef.current = false; }, [busy]);
-  const fb = !prompt && busy && !hadPromptRef.current ? fallbackGate() : null;
+  useEffect(() => { if (!claudeGate) hadPromptRef.current = false; }, [claudeGate]);
+  const fb = !prompt && claudeGate && !hadPromptRef.current ? fallbackGate() : null;
 
   // "Working" indicators (Task 13): state cues, not token streaming — data is polled every 1.5s.
   const last = messages.length ? messages[messages.length - 1] : null;
@@ -522,7 +536,7 @@ export default function ChatView({ pane, kind, msg, onAuthFail, slashEcho, onSla
   // translateY-lifted by the Android keyboard, which also re-anchors position:fixed to .app). Re-measure on
   // viewport churn (keyboard, rotate). Falls back to full-screen (CSS inset:0) when unmeasurable (jsdom).
   const [gateMask, setGateMask] = useState(null); // { top, height } px relative to .app, or null
-  const gateUp = !!(prompt || fb);
+  const gateUp = !!(prompt || fb || terminalGate);
   useEffect(() => {
     if (!gateUp) { setGateMask(null); return; }
     const measure = () => {
@@ -713,6 +727,15 @@ export default function ChatView({ pane, kind, msg, onAuthFail, slashEcho, onSla
             {fb.options.map((o, i) => (
               <button key={i} type="button" className="chat-gate-btn" onClick={() => sendKeys(pane, o.keys)}>{o.label}</button>
             ))}
+          </div>
+        </div>
+      )}
+      {terminalGate && (
+        <div className="chat-gate chat-terminal-gate">
+          <div className="chat-gate-prompt">{t('chat.permission.terminalTitle')}</div>
+          <div className="chat-gate-hint">{t('chat.permission.terminalHint')}</div>
+          <div className="chat-gate-actions">
+            <button type="button" className="chat-gate-btn primary" onClick={onTerminalHandoff}>{t('chat.permission.openTerminal')}</button>
           </div>
         </div>
       )}

@@ -38,7 +38,7 @@ const keepFocus = (e) => {
 const chipTint = (text) => (text.startsWith('/') ? 'cmd' : 'reply');
 
 export default function ChatComposer({
-  pane, kind, cwd = null, onKey = () => {}, onAuthFail, onSent, onInteractiveSlash,
+  pane, agent = 'claude', kind, cwd = null, onKey = () => {}, onAuthFail, onSent, onInteractiveSlash,
   shortcuts = null, micAvailable = false, desktop = false,
 }) {
   // Draft persists across an app exit / lens switch (shared store with the dock's chat page — switching
@@ -76,7 +76,7 @@ export default function ChatComposer({
 
   // Current context-window occupancy for this pane's session (model + used %), shown as a small chip in the
   // action row. Absent (null %) when the statusLine capturer isn't opted in → the chip simply doesn't render.
-  const ctx = usePaneContext(pane);
+  const ctx = usePaneContext(pane, agent);
   const ctxModel = ctx.model ? ctx.model.replace(/\s*\(.*\)\s*$/, '').trim() : null; // drop "(1M context)" suffix
   const ctxPct = ctx.usedPercent;
   const showCtx = typeof ctxPct === 'number';
@@ -132,7 +132,7 @@ export default function ChatComposer({
       // A bare, non-one-shot slash command may have opened a TUI picker that lives only in the terminal (and
       // the transcript stays silent until the user picks). Hand off to the terminal lens so they can see and
       // drive it — including unrecognized commands, since a missed picker leaves the phone stuck.
-      if (shouldHandOffSlash(text)) onInteractiveSlash?.(text.trim());
+      if ((agent === 'codex' && /^\s*\//.test(text)) || shouldHandOffSlash(text)) onInteractiveSlash?.(text.trim());
       setValue('');
       requestAnimationFrame(() => autoGrow(ref.current));
     } catch (err) {

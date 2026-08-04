@@ -310,7 +310,7 @@ export default function WindowBar({
         <button className="win-tab win-new" onClick={onNewWindow} aria-label={t('windowbar.newWindow')} title={t('windowbar.newWindow')}>＋</button>
       </div>
       {/* The 对话 lens is experimental (Settings opt-in): no switch until it's enabled. */}
-      {currentAgent === 'claude' && chatLensEnabled && <LensSwitch value={lens} onChange={onLensChange} />}
+      {chatLensEnabled && <LensSwitch value={lens} onChange={onLensChange} />}
     </div>
   );
 }

@@ -25,15 +25,19 @@ const PKG_VERSION = (() => {
   catch { return null; }
 })();
 
-// Summarize inbox-hook state across every coding agent for the phone: 'installed' if any agent is wired,
-// 'absent' if an agent is present but none wired (→ offer the one-tap enable), 'no-claude' if there's no
-// agent at all (→ hide the prompt).
+// Summarize hook state across every installed coding agent. A partial install is still 'absent' so the
+// phone offers the one-tap action that completes the missing agent; otherwise a Claude-only hook install
+// could make Codex chat look enabled while providing no approval/status events.
+export function combineHookStatuses(claude, codex) {
+  const present = [claude, codex].filter((status) => status !== 'no-claude' && status !== 'no-codex');
+  if (!present.length) return 'no-claude'; // back-compatible public token: no supported agent installed
+  return present.every((status) => status === 'installed') ? 'installed' : 'absent';
+}
+
 export function combinedHooksStatus(home) {
   const c = hooksStatus(home);      // 'no-claude' | 'installed' | 'absent'
   const x = codexHooksStatus(home); // 'no-codex' | 'installed' | 'absent'
-  if (c === 'installed' || x === 'installed') return 'installed';
-  if (c !== 'no-claude' || x !== 'no-codex') return 'absent';
-  return 'no-claude';
+  return combineHookStatuses(c, x);
 }
 
 export function systemRoutes({ commands, claudeEvents, asrEnv, shortcuts, home, stateFile, previewDomain }) {
@@ -44,8 +48,8 @@ export function systemRoutes({ commands, claudeEvents, asrEnv, shortcuts, home, 
   // Optional integrations are configured per-install (open-source installs ship without keys), so the
   // client asks what's actually available and hides controls that can't work — e.g. the mic when no
   // ASR engine is configured. Add more flags here as optional integrations land.
-  // `claudeHooks` (name kept for web back-compat) now summarizes EVERY coding agent: 'installed' if any is
-  // wired, 'absent' if an agent is present but none wired (→ offer enable), 'no-claude' if no agent at all.
+  // `claudeHooks` (name kept for web back-compat) summarizes EVERY coding agent: installed only when all
+  // present agents are wired, absent when any needs setup, and no-claude when no supported agent exists.
   r.get('/config', (req, res) => {
     res.json({
       asr: isAsrConfigured(asrEnv),

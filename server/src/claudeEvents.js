@@ -340,12 +340,11 @@ export function createClaudeEvents({
     const sessionId = typeof p.session_id === 'string' ? p.session_id : null;
     const cwd = typeof p.cwd === 'string' ? p.cwd : null;
     if (!transcriptPath && !sessionId) return null;
-    return { sessionId, transcriptPath, cwd };
+    return { sessionId, transcriptPath, cwd, agent: typeof rec.agent === 'string' ? rec.agent : undefined };
   }
 
-  // Agent identity is needed independently of session metadata: a Codex pane may not have a Claude-style
-  // transcript path, but the current Claude-only chat lens must still fail closed instead of cwd-falling
-  // back to an unrelated Claude jsonl. Untagged legacy hook rows are Claude.
+  // Agent identity is needed independently of session metadata so the chat lens always chooses the matching
+  // transcript parser and never cwd-falls back to another agent's jsonl. Untagged legacy hook rows are Claude.
   function paneAgent(pane) {
     const rec = readStateFile(file)[pane];
     if (!rec || typeof rec !== 'object') return null;

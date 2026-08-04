@@ -152,9 +152,9 @@ describe('WindowBar', () => {
     expect(container.querySelector('.lens-toggle')).toBeTruthy();
   });
 
-  it('does not offer the Claude-only chat lens on a Codex pane', () => {
+  it('offers the enabled chat lens on a Codex pane', () => {
     render({ ...base, currentAgent: 'codex', chatLensEnabled: true });
-    expect(container.querySelector('.lens-toggle')).toBeNull();
+    expect(container.querySelector('.lens-toggle')).toBeTruthy();
   });
 
   it('a single-pane active window shows no pane control — just the plain window tab', () => {

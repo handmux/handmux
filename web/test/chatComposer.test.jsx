@@ -51,16 +51,16 @@ describe('ChatComposer', () => {
     render(<ChatComposer pane="%1" kind="idle" />);
     const send = screen.getByRole('button', { name: '发送' });
     expect(send.disabled).toBe(true);
-    typeInto(screen.getByPlaceholderText('和 Claude 对话…'), '  ');
+    typeInto(screen.getByPlaceholderText('和 Agent 对话…'), '  ');
     expect(screen.getByRole('button', { name: '发送' }).disabled).toBe(true); // blank stays disabled
-    typeInto(screen.getByPlaceholderText('和 Claude 对话…'), '你好');
+    typeInto(screen.getByPlaceholderText('和 Agent 对话…'), '你好');
     expect(screen.getByRole('button', { name: '发送' }).disabled).toBe(false);
   });
 
   it('tapping send types the text + Enter and clears the box', async () => {
     const onSent = vi.fn();
     render(<ChatComposer pane="%1" kind="idle" onSent={onSent} />);
-    const ta = screen.getByPlaceholderText('和 Claude 对话…');
+    const ta = screen.getByPlaceholderText('和 Agent 对话…');
     typeInto(ta, '继续实现');
     fireEvent.click(screen.getByRole('button', { name: '发送' }));
     await waitFor(() => expect(ta.value).toBe(''));
@@ -72,7 +72,7 @@ describe('ChatComposer', () => {
     const request = deferred();
     sendText.mockReturnValueOnce(request.promise);
     render(<ChatComposer pane="%1" kind="idle" desktop />);
-    const input = screen.getByPlaceholderText('和 Claude 对话…');
+    const input = screen.getByPlaceholderText('和 Agent 对话…');
     typeInto(input, '只发一次');
 
     fireEvent.keyDown(input, { key: 'Enter' });
@@ -92,7 +92,7 @@ describe('ChatComposer', () => {
   it('sending a bare non-one-shot slash command hands off to the terminal lens — incl. unrecognized ones', async () => {
     const onInteractiveSlash = vi.fn();
     render(<ChatComposer pane="%1" kind="idle" onInteractiveSlash={onInteractiveSlash} />);
-    const ta = screen.getByPlaceholderText('和 Claude 对话…');
+    const ta = screen.getByPlaceholderText('和 Agent 对话…');
     typeInto(ta, '/model');
     fireEvent.click(screen.getByRole('button', { name: '发送' }));
     await waitFor(() => expect(sendText).toHaveBeenCalledWith('%1', '/model', true));
@@ -106,7 +106,7 @@ describe('ChatComposer', () => {
   it('does NOT hand off for a slash command with args or a known one-shot (they finish in chat)', async () => {
     const onInteractiveSlash = vi.fn();
     render(<ChatComposer pane="%1" kind="idle" onInteractiveSlash={onInteractiveSlash} />);
-    const ta = screen.getByPlaceholderText('和 Claude 对话…');
+    const ta = screen.getByPlaceholderText('和 Agent 对话…');
     typeInto(ta, '/model sonnet');
     fireEvent.click(screen.getByRole('button', { name: '发送' }));
     await waitFor(() => expect(sendText).toHaveBeenCalledWith('%1', '/model sonnet', true));
@@ -114,6 +114,15 @@ describe('ChatComposer', () => {
     fireEvent.click(screen.getByRole('button', { name: '发送' }));
     await waitFor(() => expect(sendText).toHaveBeenCalledWith('%1', '/clear', true));
     expect(onInteractiveSlash).not.toHaveBeenCalled();
+  });
+
+  it('hands every Codex slash command to the terminal because rollout does not reliably log them', async () => {
+    const onInteractiveSlash = vi.fn();
+    render(<ChatComposer pane="%1" agent="codex" kind="idle" onInteractiveSlash={onInteractiveSlash} />);
+    const input = screen.getByPlaceholderText('和 Agent 对话…');
+    typeInto(input, '/compact');
+    fireEvent.click(screen.getByRole('button', { name: '发送' }));
+    await waitFor(() => expect(onInteractiveSlash).toHaveBeenCalledWith('/compact'));
   });
 
   it('a saved chip that is a bare interactive command also hands off to the terminal lens', async () => {
@@ -130,7 +139,7 @@ describe('ChatComposer', () => {
   // on a real-device pass (see CLAUDE.md: touch surfaces are untestable headless).
   it('a stationary tap on the action row blank space focuses the textarea', () => {
     const { container } = render(<ChatComposer pane="%1" kind="idle" />);
-    const ta = screen.getByPlaceholderText('和 Claude 对话…');
+    const ta = screen.getByPlaceholderText('和 Agent 对话…');
     const actions = container.querySelector('.cc-actions');
     expect(document.activeElement).not.toBe(ta);
     fireEvent.pointerDown(actions, { clientX: 50, clientY: 100 });
@@ -140,7 +149,7 @@ describe('ChatComposer', () => {
 
   it('tapping a control in the row does not trigger tap-to-focus (only blank space does)', () => {
     const { container } = render(<ChatComposer pane="%1" kind="idle" />);
-    const ta = screen.getByPlaceholderText('和 Claude 对话…');
+    const ta = screen.getByPlaceholderText('和 Agent 对话…');
     const attach = container.querySelector('.cc-attach'); // the ＋ button
     fireEvent.pointerDown(attach, { clientX: 20, clientY: 100 });
     fireEvent.pointerUp(attach, { clientX: 20, clientY: 100 });
@@ -159,6 +168,12 @@ describe('ChatComposer', () => {
     expect(c2.querySelector('.cc-ctx')).toBeNull();
   });
 
+  it('does not request Claude context metadata for a Codex composer', async () => {
+    render(<ChatComposer pane="%1" agent="codex" kind="idle" />);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(getPaneContext).not.toHaveBeenCalled();
+  });
+
   it('while the agent is working the send button becomes a Stop that sends Escape', () => {
     const onKey = vi.fn();
     render(<ChatComposer pane="%1" kind="working" onKey={onKey} />);
@@ -170,7 +185,7 @@ describe('ChatComposer', () => {
 
   it('desktop focuses the existing textarea and Enter sends while Shift+Enter and IME Enter stay local', async () => {
     render(<ChatComposer pane="%1" kind="idle" desktop />);
-    const input = screen.getByPlaceholderText('和 Claude 对话…');
+    const input = screen.getByPlaceholderText('和 Agent 对话…');
     expect(document.activeElement).toBe(input);
 
     typeInto(input, '继续');
@@ -187,7 +202,7 @@ describe('ChatComposer', () => {
   it('desktop working Enter never stops, while Escape keeps the explicit interrupt shortcut', () => {
     const onKey = vi.fn();
     render(<ChatComposer pane="%1" kind="working" desktop onKey={onKey} />);
-    const input = screen.getByPlaceholderText('和 Claude 对话…');
+    const input = screen.getByPlaceholderText('和 Agent 对话…');
     typeInto(input, '下一条');
     fireEvent.keyDown(input, { key: 'Enter' });
     expect(onKey).not.toHaveBeenCalled();

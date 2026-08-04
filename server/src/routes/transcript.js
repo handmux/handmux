@@ -1,5 +1,5 @@
-// Read a pane's Claude Code jsonl session and return it as normalized chat messages (the "对话" lens's
-// read-projection). Pane → cwd (tmux) → the session file under ~/.claude/projects/<encoded-cwd>/.
+// Read a pane's agent session jsonl and return it as normalized chat messages (the "对话" lens's
+// read-projection). Pane → bound hook path, or cwd (tmux) → the selected agent's session directory.
 // Server-side paginated — the phone must never receive the whole transcript:
 //   - Recent window (default + polling): ?pane=&limit=10&since=<hash> — the last `limit` messages, with
 //     the same content-hash `since`省流 as /history (unchanged window → 204). `hasMore`/`firstSeq` tell the
@@ -16,6 +16,8 @@ import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { isPaneId } from '../tmux/commands.js';
 import { projectsDir } from '../agents/claude.js';
+import { sessionsDir as codexSessionsDir, resolveCodexSession } from '../agents/codex.js';
+import { AGENTS } from '../agents/index.js';
 import { resolveEncodedDirSession, encodeProjectDir } from '../agents/scanUtils.js';
 import { transcriptReader } from '../transcriptReader.js';
 import { parsePendingPrompt } from '../pendingPrompt.js';
@@ -36,20 +38,30 @@ export function pageTranscript(parsed, before, limit) {
   };
 }
 
-export function transcriptRoutes({ commands, claudeEvents, reader = transcriptReader }) {
+export function transcriptRoutes({ commands, claudeEvents, reader = transcriptReader, codexDir = codexSessionsDir() }) {
   const r = express.Router();
 
-  // These three endpoints are one Claude-specific lens surface. Gate them together so a future endpoint
-  // cannot accidentally skip the invariant: explicit non-Claude requests and panes already bound to a
-  // non-Claude hook record are rejected before any cwd→newest-Claude-session fallback or screen scraping.
+  // Bind every request to the pane's actual agent before touching a session file. A caller cannot claim
+  // Claude for a Codex pane (or vice versa) and make cwd fallback expose a different agent's conversation.
   r.use(['/pending-prompt', '/context', '/transcript'], (req, res, next) => {
     const pane = req.query.pane;
     if (!isPaneId(pane)) return res.status(400).json({ error: 'bad pane id' });
-    const requested = req.query.agent;
-    const bound = claudeEvents && claudeEvents.paneAgent ? claudeEvents.paneAgent(pane) : null;
-    if ((requested != null && requested !== '' && requested !== 'claude') || (bound && bound !== 'claude')) {
-      return res.status(409).json({ error: 'chat lens unsupported for this agent' });
-    }
+    const requested = typeof req.query.agent === 'string' && req.query.agent ? req.query.agent : null;
+    const hooked = claudeEvents?.paneSession ? claudeEvents.paneSession(pane) : null;
+    const bound = (claudeEvents?.paneAgent ? claudeEvents.paneAgent(pane) : null) || hooked?.agent || null;
+    if (requested && bound && requested !== bound) return res.status(409).json({ error: 'pane agent mismatch' });
+    const id = bound || requested || 'claude';
+    const agent = AGENTS.find((candidate) => candidate.id === id && candidate.transcript?.createParser);
+    if (!agent) return res.status(409).json({ error: 'chat lens unsupported for this agent' });
+    req.chatAgent = agent;
+    req.chatSession = hooked;
+    next();
+  });
+
+  // Claude's pending menus are screen-scraped and driven by digit hotkeys. Codex uses different approval
+  // keys, so its chat lens never calls these endpoints; it hands the user to the terminal instead.
+  r.use(['/pending-prompt', '/context'], (req, res, next) => {
+    if (req.chatAgent.id !== 'claude') return res.status(409).json({ error: 'interactive chat controls unsupported for this agent' });
     next();
   });
 
@@ -69,7 +81,7 @@ export function transcriptRoutes({ commands, claudeEvents, reader = transcriptRe
   // The 对话 composer polls this to show a small "模型 · 24%" chip. Best-effort: never 500 on a missing file.
   r.get('/context', (req, res, next) => {
     try {
-      const hooked = claudeEvents && claudeEvents.paneSession ? claudeEvents.paneSession(req.query.pane) : null;
+      const hooked = req.chatSession;
       const sid = hooked && (hooked.sessionId || (hooked.transcriptPath ? path.basename(hooked.transcriptPath).replace(/\.jsonl$/, '') : null));
       const ctx = sid ? readClaudeContext(sid) : null;
       return res.json({ model: (ctx && ctx.model) || null, usedPercent: (ctx && typeof ctx.usedPercent === 'number') ? ctx.usedPercent : null });
@@ -80,9 +92,8 @@ export function transcriptRoutes({ commands, claudeEvents, reader = transcriptRe
     const limit = Math.min(Math.max(Number(req.query.limit) || 10, 1), 100);
     const before = req.query.before != null && req.query.before !== '' ? Number(req.query.before) : null;
     try {
-      // Bind pane→session via the hook state's per-pane transcript_path (authoritative — see claudeEvents
-      // .paneSession) when available; only a pane with no hook state (hooks off / not a Claude pane) falls
-      // back to cwd→newest-jsonl, which can't tell apart two sessions that share a cwd.
+      // Bind pane→session via the hook state's per-pane transcript_path (authoritative). Only a pane with
+      // no hook session metadata falls back to this selected agent's cwd resolver.
       let file = null;
       let sessionId = null;
       const hooked = claudeEvents && claudeEvents.paneSession ? claudeEvents.paneSession(req.query.pane) : null;
@@ -92,16 +103,24 @@ export function transcriptRoutes({ commands, claudeEvents, reader = transcriptRe
       }
       if (!file) {
         const cwd = await commands.paneCurrentPath(req.query.pane);
-        const dir = projectsDir();
-        const resolved = await resolveEncodedDirSession(dir, cwd);
-        if (resolved.sessionId) {
-          file = path.join(dir, encodeProjectDir(cwd), resolved.sessionId + '.jsonl');
-          sessionId = resolved.sessionId;
+        if (req.chatAgent.id === 'codex') {
+          const resolved = await resolveCodexSession(codexDir, cwd);
+          if (resolved.sessionId && resolved.file) {
+            file = resolved.file;
+            sessionId = resolved.sessionId;
+          }
+        } else {
+          const dir = projectsDir();
+          const resolved = await resolveEncodedDirSession(dir, cwd);
+          if (resolved.sessionId) {
+            file = path.join(dir, encodeProjectDir(cwd), resolved.sessionId + '.jsonl');
+            sessionId = resolved.sessionId;
+          }
         }
       }
       const empty = { messages: [], hash: '', session: sessionId || null, hasMore: false, firstSeq: null };
       if (!file) return res.json(empty);
-      const parsed = await reader.read(file);
+      const parsed = await reader.read(file, req.chatAgent.transcript.createParser);
       const { messages, firstSeq, hasMore } = pageTranscript(parsed, before, limit);
       if (before == null) {
         const hash = createHash('sha1').update(JSON.stringify(messages)).digest('hex').slice(0, 16);
