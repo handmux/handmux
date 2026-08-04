@@ -32,6 +32,7 @@ export function useTranscript(pane, enabled, agent = 'claude') {
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [session, setSession] = useState(null); // the session id `messages` belong to (ChatView's echo dedup)
   const [loaded, setLoaded] = useState(false); // has the FIRST response landed? (loading vs genuinely empty)
+  const [unavailable, setUnavailable] = useState(null); // safe refusal, e.g. a Codex pane without exact hook binding
   const hashRef = useRef('');
   const oldestKRef = useRef(null);
   const seededRef = useRef(false); // has the older-page cursor been seeded from the first recent response?
@@ -53,6 +54,7 @@ export function useTranscript(pane, enabled, agent = 'claude') {
     setLoadingOlder(false);
     setSession(null);
     setLoaded(false);
+    setUnavailable(null);
   }, [pane, agent]);
 
   // Recent polling and scroll-up history use the same 20-message page size. Auto-fill in ChatView pulls
@@ -62,6 +64,20 @@ export function useTranscript(pane, enabled, agent = 'claude') {
     if (!r) return; // 204 / null → keep last
     setLoaded(true); // first real response: from now on an empty list means an empty SESSION, not loading
     hashRef.current = r.hash || '';
+    if (r.unavailable) {
+      // Never leave a previously loaded pane/session behind a new refusal response: stale content would
+      // look like it belongs to the current pane, defeating the server's safety boundary.
+      messagesRef.current = [];
+      sessionRef.current = null;
+      oldestKRef.current = null;
+      seededRef.current = false;
+      setMessages([]);
+      setSession(null);
+      setHasMoreOlder(false);
+      setUnavailable(r.unavailable);
+      return;
+    }
+    setUnavailable(null);
     const incoming = Array.isArray(r.messages) ? r.messages : [];
     // SESSION SWITCH (e.g. /clear started a new jsonl): REPLACE, never merge. k is a per-file ordinal that
     // restarts at 0 in the new session — merging by k would overwrite the head with the new messages but
@@ -111,5 +127,5 @@ export function useTranscript(pane, enabled, agent = 'claude') {
     }
   }, [pane, agent, hasMoreOlder]);
 
-  return { messages, hasMoreOlder, loadOlder, loadingOlder, session, loaded };
+  return { messages, hasMoreOlder, loadOlder, loadingOlder, session, loaded, unavailable };
 }

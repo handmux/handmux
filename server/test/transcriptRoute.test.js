@@ -81,28 +81,20 @@ describe('pageTranscript', () => {
 });
 
 describe('GET /api/transcript', () => {
-  it('resolves and parses a Codex rollout by cwd when hook metadata is unavailable', async () => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-route-'));
-    const cwd = '/tmp/codex-route-cwd';
-    const day = path.join(root, '2026', '08', '04');
-    fs.mkdirSync(day, { recursive: true });
-    const file = path.join(day, 'rollout-2026-08-04T00-00-00-aaaaaaaa-0000-0000-0000-000000000001.jsonl');
-    fs.writeFileSync(file, [
-      JSON.stringify({ type: 'session_meta', payload: { id: 'aaaaaaaa-0000-0000-0000-000000000001', cwd } }),
-      JSON.stringify({ type: 'response_item', payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'from-codex' }] } }),
-    ].join('\n') + '\n');
+  it('never guesses a Codex rollout by cwd when hook metadata is unavailable', async () => {
+    const paneCurrentPath = vi.fn(async () => '/shared-codex-project');
+    const reader = { read: vi.fn() };
     const app = express();
     app.use(transcriptRoutes({
-      commands: { paneCurrentPath: async () => cwd },
+      commands: { paneCurrentPath },
       claudeEvents: noHook,
-      codexDir: root,
+      reader,
     }));
-    try {
-      const { status, body } = await call(app, '/transcript?pane=%251&agent=codex');
-      expect(status).toBe(200);
-      expect(body.messages.map((m) => m.text)).toEqual(['from-codex']);
-      expect(body.session).toBe('aaaaaaaa-0000-0000-0000-000000000001');
-    } finally { fs.rmSync(root, { recursive: true, force: true }); }
+    const { status, body } = await call(app, '/transcript?pane=%251&agent=codex');
+    expect(status).toBe(200);
+    expect(body).toMatchObject({ messages: [], session: null, unavailable: 'session-unbound' });
+    expect(paneCurrentPath).not.toHaveBeenCalled();
+    expect(reader.read).not.toHaveBeenCalled();
   });
 
   it('409s when hook state binds the pane to Codex even if the caller claims Claude', async () => {

@@ -49,6 +49,28 @@ describe('useTranscript', () => {
     expect(spy).toHaveBeenCalledWith('%0', expect.objectContaining({ agent: 'codex' }));
   });
 
+  it('clears previously loaded content when the server refuses an unbound Codex session', async () => {
+    vi.useFakeTimers();
+    try {
+      vi.spyOn(api, 'fetchTranscript')
+        .mockResolvedValueOnce({ messages: makeMsgs(0, 2), hash: 'h1', session: 'old', hasMore: false, firstSeq: 0 })
+        .mockResolvedValueOnce({ messages: [], hash: '', session: null, hasMore: false, firstSeq: null, unavailable: 'session-unbound' })
+        .mockResolvedValue(null);
+      const { result } = renderHook(() => useTranscript('%0', true, 'codex'));
+      await act(async () => { await Promise.resolve(); });
+      await act(async () => { await Promise.resolve(); });
+      expect(result.current.messages).toHaveLength(2);
+
+      await act(async () => { await vi.advanceTimersByTimeAsync(1500); });
+
+      expect(result.current.messages).toEqual([]);
+      expect(result.current.session).toBeNull();
+      expect(result.current.unavailable).toBe('session-unbound');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('loadOlder() prepends an older page, deduped/sorted by k', async () => {
     const recent = makeMsgs(10, 10); // k=10..19
     const older = makeMsgs(5, 5); // k=5..9

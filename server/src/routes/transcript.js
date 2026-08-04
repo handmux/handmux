@@ -1,5 +1,7 @@
 // Read a pane's agent session jsonl and return it as normalized chat messages (the "对话" lens's
-// read-projection). Pane → bound hook path, or cwd (tmux) → the selected agent's session directory.
+// read-projection). Pane → bound hook path; Claude keeps its legacy cwd fallback when hook metadata
+// is unavailable. Codex never falls back by cwd because multiple panes and non-tmux sessions commonly
+// share one project directory, so doing so can expose an unrelated conversation.
 // Server-side paginated — the phone must never receive the whole transcript:
 //   - Recent window (default + polling): ?pane=&limit=10&since=<hash> — the last `limit` messages, with
 //     the same content-hash `since`省流 as /history (unchanged window → 204). `hasMore`/`firstSeq` tell the
@@ -16,7 +18,6 @@ import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { isPaneId } from '../tmux/commands.js';
 import { projectsDir } from '../agents/claude.js';
-import { sessionsDir as codexSessionsDir, resolveCodexSession } from '../agents/codex.js';
 import { AGENTS } from '../agents/index.js';
 import { resolveEncodedDirSession, encodeProjectDir } from '../agents/scanUtils.js';
 import { transcriptReader } from '../transcriptReader.js';
@@ -38,7 +39,7 @@ export function pageTranscript(parsed, before, limit) {
   };
 }
 
-export function transcriptRoutes({ commands, claudeEvents, reader = transcriptReader, codexDir = codexSessionsDir() }) {
+export function transcriptRoutes({ commands, claudeEvents, reader = transcriptReader }) {
   const r = express.Router();
 
   // Bind every request to the pane's actual agent before touching a session file. A caller cannot claim
@@ -92,8 +93,9 @@ export function transcriptRoutes({ commands, claudeEvents, reader = transcriptRe
     const limit = Math.min(Math.max(Number(req.query.limit) || 10, 1), 100);
     const before = req.query.before != null && req.query.before !== '' ? Number(req.query.before) : null;
     try {
-      // Bind pane→session via the hook state's per-pane transcript_path (authoritative). Only a pane with
-      // no hook session metadata falls back to this selected agent's cwd resolver.
+      // Bind pane→session via the hook state's per-pane transcript_path (authoritative). Codex session
+      // files cannot be safely matched by cwd alone: refuse to guess instead of showing another pane's
+      // (or this server process's) conversation. Claude retains its established cwd fallback.
       let file = null;
       let sessionId = null;
       const hooked = claudeEvents && claudeEvents.paneSession ? claudeEvents.paneSession(req.query.pane) : null;
@@ -101,24 +103,19 @@ export function transcriptRoutes({ commands, claudeEvents, reader = transcriptRe
         file = hooked.transcriptPath;
         sessionId = hooked.sessionId || path.basename(file).replace(/\.jsonl$/, '');
       }
+      const empty = { messages: [], hash: '', session: sessionId || null, hasMore: false, firstSeq: null };
+      if (!file && req.chatAgent.id === 'codex') {
+        return res.json({ ...empty, unavailable: 'session-unbound' });
+      }
       if (!file) {
         const cwd = await commands.paneCurrentPath(req.query.pane);
-        if (req.chatAgent.id === 'codex') {
-          const resolved = await resolveCodexSession(codexDir, cwd);
-          if (resolved.sessionId && resolved.file) {
-            file = resolved.file;
-            sessionId = resolved.sessionId;
-          }
-        } else {
-          const dir = projectsDir();
-          const resolved = await resolveEncodedDirSession(dir, cwd);
-          if (resolved.sessionId) {
-            file = path.join(dir, encodeProjectDir(cwd), resolved.sessionId + '.jsonl');
-            sessionId = resolved.sessionId;
-          }
+        const dir = projectsDir();
+        const resolved = await resolveEncodedDirSession(dir, cwd);
+        if (resolved.sessionId) {
+          file = path.join(dir, encodeProjectDir(cwd), resolved.sessionId + '.jsonl');
+          sessionId = resolved.sessionId;
         }
       }
-      const empty = { messages: [], hash: '', session: sessionId || null, hasMore: false, firstSeq: null };
       if (!file) return res.json(empty);
       const parsed = await reader.read(file, req.chatAgent.transcript.createParser);
       const { messages, firstSeq, hasMore } = pageTranscript(parsed, before, limit);

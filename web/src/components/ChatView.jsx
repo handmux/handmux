@@ -386,14 +386,15 @@ function resolveCopyBlock(target) {
 const COPY_CALLOUT_W = 72; // estimated callout width (px) for the right-edge clamp (single 拷贝 button)
 
 export default function ChatView({ pane, agent = 'claude', kind, msg, onAuthFail, slashEcho, onSlashEchoDone, onTerminalHandoff }) {
-  const { messages, hasMoreOlder, loadOlder, loadingOlder, session, loaded } = useTranscript(pane, true, agent);
+  const { messages, hasMoreOlder, loadOlder, loadingOlder, session, loaded, unavailable } = useTranscript(pane, true, agent);
   const tsIdx = useMemo(() => timeStampedIndices(messages), [messages]);
   // The gate's options are scraped from the pane's on-screen menu (they're not in the transcript). Poll only
   // while Claude is blocked (kind==='permission'). If a menu is up → the rich PromptGate; if permission but
   // the menu couldn't be parsed → the generic 允许/拒绝 fallback so there's always a way to act.
   const busy = kind === 'permission';
   const claudeGate = busy && agent === 'claude';
-  const terminalGate = busy && agent !== 'claude';
+  const sessionGate = unavailable === 'session-unbound';
+  const terminalGate = busy && agent !== 'claude' && !sessionGate;
   const { prompt, refetch } = usePendingPrompt(pane, claudeGate, agent);
   // After the user answers, the menu vanishes from the screen instantly but `kind` stays 'permission'
   // until the slower /states poll catches up — so !prompt && busy would flash the 允许/拒绝 fallback
@@ -536,7 +537,7 @@ export default function ChatView({ pane, agent = 'claude', kind, msg, onAuthFail
   // translateY-lifted by the Android keyboard, which also re-anchors position:fixed to .app). Re-measure on
   // viewport churn (keyboard, rotate). Falls back to full-screen (CSS inset:0) when unmeasurable (jsdom).
   const [gateMask, setGateMask] = useState(null); // { top, height } px relative to .app, or null
-  const gateUp = !!(prompt || fb || terminalGate);
+  const gateUp = !!(prompt || fb || terminalGate || sessionGate);
   useEffect(() => {
     if (!gateUp) { setGateMask(null); return; }
     const measure = () => {
@@ -657,7 +658,7 @@ export default function ChatView({ pane, agent = 'claude', kind, msg, onAuthFail
         onClickCapture={onCopyClickCapture}>
         {/* Loading (first poll in flight) → wave + 正在加载; loaded-but-empty (a fresh session) → a
             friendly static nudge to send the first message. Never a bare "no content". */}
-        {messages.length === 0 && (loaded
+        {messages.length === 0 && !sessionGate && (loaded
           ? <div className="chat-new">{t('boot.chat_empty')}</div>
           : <LensBoot hint={t('boot.loading')} />)}
         {messages.map((m, idx) => {
@@ -736,6 +737,15 @@ export default function ChatView({ pane, agent = 'claude', kind, msg, onAuthFail
           <div className="chat-gate-hint">{t('chat.permission.terminalHint')}</div>
           <div className="chat-gate-actions">
             <button type="button" className="chat-gate-btn primary" onClick={onTerminalHandoff}>{t('chat.permission.openTerminal')}</button>
+          </div>
+        </div>
+      )}
+      {sessionGate && (
+        <div className="chat-gate chat-terminal-gate">
+          <div className="chat-gate-prompt">{t('chat.session.unboundTitle')}</div>
+          <div className="chat-gate-hint">{t('chat.session.unboundHint')}</div>
+          <div className="chat-gate-actions">
+            <button type="button" className="chat-gate-btn primary" onClick={onTerminalHandoff}>{t('chat.session.openTerminal')}</button>
           </div>
         </div>
       )}

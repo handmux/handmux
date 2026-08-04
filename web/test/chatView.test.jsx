@@ -34,6 +34,22 @@ describe('ChatView', () => {
     expect(container.textContent).not.toContain('还没有对话内容');
   });
 
+  it('blocks an unbound Codex chat instead of presenting guessed content', async () => {
+    vi.spyOn(api, 'fetchTranscript').mockResolvedValue({
+      messages: [], hash: '', session: null, hasMore: false, firstSeq: null, unavailable: 'session-unbound',
+    });
+    const onTerminalHandoff = vi.fn();
+    const { container } = render(<ChatView pane="%0" agent="codex" kind="done" onTerminalHandoff={onTerminalHandoff} />);
+
+    await screen.findByText('无法确认这个 Codex 对话');
+    expect(container.textContent).toContain('不会显示猜测结果');
+    expect(container.textContent).not.toContain('发送你的第一条消息');
+    expect(container.querySelector('.chat-gate-backdrop')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: '返回终端' }));
+    expect(onTerminalHandoff).toHaveBeenCalledTimes(1);
+  });
+
   it('renders user text right and assistant text left', async () => {
     mockTranscript([
       { k: 0, i: 0, role: 'user', type: 'text', text: '帮我跑测试' },
