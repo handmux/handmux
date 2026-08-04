@@ -308,7 +308,7 @@ export default {
 'chat.permission.terminalHint': '确认选项需要在终端中操作，处理后可以再切回对话。',
 'chat.permission.openTerminal': '去终端处理',
 'chat.session.unboundTitle': '无法确认这个 Codex 对话',
-'chat.session.unboundHint': '为避免串到同目录的其他会话，这里不会显示猜测结果。请返回终端；重新启动这个 Codex 会话后再试。',
+'chat.session.unboundHint': '为避免串到其他会话，这里不会显示猜测结果。请返回终端发送一条消息，对话会自动同步。',
 'chat.session.openTerminal': '返回终端',
   'chat.favs': '常用',
   'chat.tabMsg': '消息',

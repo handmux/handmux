@@ -26,7 +26,7 @@ export function mergeByK(existing, incoming) {
   return merged.length > MAX_TRANSCRIPT_MESSAGES ? merged.slice(-MAX_TRANSCRIPT_MESSAGES) : merged;
 }
 
-export function useTranscript(pane, enabled, agent = 'claude') {
+export function useTranscript(pane, enabled, agent = 'claude', refreshToken = null) {
   const [messages, setMessages] = useState([]);
   const [hasMoreOlder, setHasMoreOlder] = useState(false);
   const [loadingOlder, setLoadingOlder] = useState(false);
@@ -105,7 +105,18 @@ export function useTranscript(pane, enabled, agent = 'claude') {
     if (r.session) { sessionRef.current = r.session; setSession(r.session); }
   }, []);
 
-  usePollingLoop({ fetch, apply, intervalMs: 1500, enabled: enabled && !!pane, deps: [pane, agent] });
+  usePollingLoop({
+    fetch,
+    apply,
+    // A successful composer send starts a bounded retry burst because UserPromptSubmit may land just after
+    // the send request returns. The steady cadence stays low-cost even if an unbound gate is left open.
+    intervalMs: 1500,
+    burstKey: refreshToken,
+    burstIntervalMs: 500,
+    burstCount: 3,
+    enabled: enabled && !!pane,
+    deps: [pane, agent],
+  });
 
   const loadOlder = useCallback(async () => {
     if (loadingOlderRef.current || !hasMoreOlder || oldestKRef.current == null) return;

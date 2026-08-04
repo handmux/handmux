@@ -49,6 +49,22 @@ describe('useTranscript', () => {
     expect(spy).toHaveBeenCalledWith('%0', expect.objectContaining({ agent: 'codex' }));
   });
 
+  it('refreshes immediately when a successful send changes the refresh token', async () => {
+    const spy = vi.spyOn(api, 'fetchTranscript')
+      .mockResolvedValueOnce({ messages: makeMsgs(0, 1), hash: 'h1', session: 's', hasMore: false, firstSeq: 0 })
+      .mockResolvedValueOnce({ messages: makeMsgs(0, 2), hash: 'h2', session: 's', hasMore: false, firstSeq: 0 })
+      .mockResolvedValue(null);
+    const { result, rerender } = renderHook(
+      ({ refreshToken }) => useTranscript('%0', true, 'codex', refreshToken),
+      { initialProps: { refreshToken: null } },
+    );
+    await waitFor(() => expect(result.current.messages).toHaveLength(1));
+
+    rerender({ refreshToken: 1 });
+    await waitFor(() => expect(result.current.messages).toHaveLength(2));
+    expect(spy).toHaveBeenCalledTimes(2);
+  });
+
   it('clears previously loaded content when the server refuses an unbound Codex session', async () => {
     vi.useFakeTimers();
     try {

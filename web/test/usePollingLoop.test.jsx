@@ -23,6 +23,28 @@ describe('usePollingLoop', () => {
     expect(apply).toHaveBeenLastCalledWith(3);
   });
 
+  it('restarts immediately and briefly uses the burst cadence when burstKey changes', async () => {
+    vi.useFakeTimers();
+    setHidden(false);
+    const fetch = vi.fn(async () => fetch.mock.calls.length);
+    const apply = vi.fn();
+    const { rerender } = render(
+      <Harness fetch={fetch} apply={apply} intervalMs={1500} burstKey={null} burstIntervalMs={500} burstCount={2} enabled />,
+    );
+    await act(async () => {});
+    expect(fetch).toHaveBeenCalledTimes(1);
+
+    rerender(<Harness fetch={fetch} apply={apply} intervalMs={1500} burstKey={1} burstIntervalMs={500} burstCount={2} enabled />);
+    await act(async () => {});
+    expect(fetch).toHaveBeenCalledTimes(2); // wake -> immediate
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+    expect(fetch).toHaveBeenCalledTimes(4); // two 500ms follow-ups
+    await act(async () => { await vi.advanceTimersByTimeAsync(1499); });
+    expect(fetch).toHaveBeenCalledTimes(4);
+    await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+    expect(fetch).toHaveBeenCalledTimes(5); // normal cadence restored
+  });
+
   it('does not fetch while the tab is hidden', async () => {
     vi.useFakeTimers();
     setHidden(true);

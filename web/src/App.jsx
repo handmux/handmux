@@ -142,6 +142,7 @@ export default function App() {
   const [basePrompt, setBasePrompt] = useState(null); // { rawPath } while asking for a relative path's base dir
   const [handoffToast, setHandoffToast] = useState(null); // "switched to terminal to run /x" hint after a slash hand-off
   const [slashEcho, setSlashEcho] = useState(null); // optimistic command pill for a chat-staying slash command {name,args,paneId}
+  const [transcriptWake, setTranscriptWake] = useState({ paneId: null, seq: 0 }); // successful send -> immediate transcript refresh
   const [docToast, setDocToast] = useState(null); // transient error toast for absolute-path doc failures
   const [exitHint, setExitHint] = useState(false); // "press Back again to exit" hint (double-back guard)
   const [docLinkPrompt, setDocLinkPrompt] = useState(null); // { path, x, y } confirm popover for a tapped terminal path
@@ -1314,6 +1315,10 @@ export default function App() {
   // Record a just-sent command into this WINDOW's recent history (deduped + capped in storage).
   const onCommandSent = useCallback((cmd) => {
     termRef.current?.wake?.(); // a dock send/fill landed → wake the poll loop (covers BottomDock too)
+    const paneId = current?.paneId;
+    if (paneId && (currentAgent === 'claude' || currentAgent === 'codex')) {
+      setTranscriptWake((prev) => ({ paneId, seq: prev.seq + 1 }));
+    }
     const name = current?.session?.name;
     const win = current?.window?.id; // stable window ID, not the auto-renamed window.name
     if (name && win) setRecent(pushRecent(name, win, cmd));
@@ -1992,6 +1997,7 @@ export default function App() {
             chatLens ? (
               <ChatView pane={current.paneId} agent={currentAgent} kind={states[current.paneId]?.kind} msg={states[current.paneId]?.msg} onAuthFail={onAuthFail}
                 slashEcho={slashEcho && slashEcho.paneId === current.paneId ? slashEcho : null}
+                refreshToken={transcriptWake.paneId === current.paneId ? transcriptWake.seq : null}
                 onSlashEchoDone={() => setSlashEcho(null)}
                 onTerminalHandoff={() => { setLens('terminal'); localStorage.setItem('tw_lens_' + current.paneId, 'terminal'); }} />
             ) : (

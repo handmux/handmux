@@ -385,8 +385,8 @@ function resolveCopyBlock(target) {
 
 const COPY_CALLOUT_W = 72; // estimated callout width (px) for the right-edge clamp (single 拷贝 button)
 
-export default function ChatView({ pane, agent = 'claude', kind, msg, onAuthFail, slashEcho, onSlashEchoDone, onTerminalHandoff }) {
-  const { messages, hasMoreOlder, loadOlder, loadingOlder, session, loaded, unavailable } = useTranscript(pane, true, agent);
+export default function ChatView({ pane, agent = 'claude', kind, msg, onAuthFail, slashEcho, onSlashEchoDone, onTerminalHandoff, refreshToken = null }) {
+  const { messages, hasMoreOlder, loadOlder, loadingOlder, session, loaded, unavailable } = useTranscript(pane, true, agent, refreshToken);
   const tsIdx = useMemo(() => timeStampedIndices(messages), [messages]);
   // The gate's options are scraped from the pane's on-screen menu (they're not in the transcript). Poll only
   // while Claude is blocked (kind==='permission'). If a menu is up → the rich PromptGate; if permission but

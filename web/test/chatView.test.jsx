@@ -43,6 +43,7 @@ describe('ChatView', () => {
 
     await screen.findByText('无法确认这个 Codex 对话');
     expect(container.textContent).toContain('不会显示猜测结果');
+    expect(container.textContent).toContain('发送一条消息，对话会自动同步');
     expect(container.textContent).not.toContain('发送你的第一条消息');
     expect(container.querySelector('.chat-gate-backdrop')).toBeTruthy();
 

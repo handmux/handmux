@@ -309,7 +309,7 @@ export default {
 'chat.permission.terminalHint': 'Approval choices must be handled in the terminal. You can switch back to chat afterward.',
 'chat.permission.openTerminal': 'Open terminal',
 'chat.session.unboundTitle': 'This Codex chat could not be identified',
-'chat.session.unboundHint': 'To avoid showing another chat from the same folder, no guessed transcript is displayed. Return to the terminal and restart this Codex session before trying again.',
+'chat.session.unboundHint': 'To avoid showing a different chat, no guessed transcript is displayed. Send a message in the terminal and the chat will sync automatically.',
 'chat.session.openTerminal': 'Return to terminal',
   'chat.favs': 'Saved',
   'chat.tabMsg': 'Message',
