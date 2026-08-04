@@ -99,7 +99,9 @@ export function transcriptRoutes({ commands, claudeEvents, reader = transcriptRe
       let file = null;
       let sessionId = null;
       const hooked = claudeEvents && claudeEvents.paneSession ? claudeEvents.paneSession(req.query.pane) : null;
-      if (hooked && hooked.transcriptPath) {
+      const requiredBindingVersion = req.chatAgent.sessions?.bindingVersion;
+      const bindingCurrent = !requiredBindingVersion || hooked?.bindingVersion === requiredBindingVersion;
+      if (hooked && hooked.transcriptPath && bindingCurrent) {
         file = hooked.transcriptPath;
         sessionId = hooked.sessionId || path.basename(file).replace(/\.jsonl$/, '');
       }

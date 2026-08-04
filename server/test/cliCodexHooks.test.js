@@ -17,12 +17,16 @@ function fakeCodexOnPath() {
 function tmpHome() { return fs.mkdtempSync(path.join(os.tmpdir(), 'cxh-')); }
 const srcDir = path.resolve(new URL('../hooks', import.meta.url).pathname);
 const BLOCK = codexHooksBlock('/home/u');
+const LEGACY_BLOCK = BLOCK.replace(/\[\[hooks\.SessionStart\]\][\s\S]*?(?=\[\[hooks\.UserPromptSubmit\]\])/, '');
 
 describe('mergeCodexHooks / stripCodexHooks (pure)', () => {
   it('appends the marked region to an empty / hookless config', () => {
     const out = mergeCodexHooks('', BLOCK);
     expect(out).toContain('# >>> handmux codex-hooks >>>');
     expect(out).toContain('[[hooks.Stop]]');
+    expect(out).toContain('[[hooks.SessionStart]]');
+    expect(out).toContain('matcher = "^(startup|resume|clear)$"');
+    expect(out).toContain('[[hooks.SessionEnd]]');
     expect(out).toContain('[[hooks.UserPromptSubmit]]');
     expect(out).toContain('[[hooks.PermissionRequest]]');
     expect(out).toContain('[[hooks.PostToolUse]]'); // un-stick 需要你→进行中 after an approval
@@ -51,6 +55,8 @@ describe('mergeCodexHooks / stripCodexHooks (pure)', () => {
   it('builds a command that runs the shared notify script with agent=codex', () => {
     expect(BLOCK).toContain("handmux-notify.sh' stop codex");
     expect(BLOCK).toContain("handmux-notify.sh' prompt codex");
+    expect(BLOCK).toContain("handmux-notify.sh' start codex");
+    expect(BLOCK).toContain("handmux-notify.sh' end codex");
     expect(BLOCK).toContain('type = "command"');
   });
 });
@@ -119,17 +125,20 @@ describe('installCodexHooks / status / uninstall (IO)', () => {
     const home = tmpHome();
     const stateFile = path.join(home, '.handmux', 'claude-state.json');
     fs.mkdirSync(path.join(home, '.codex'), { recursive: true });
-    fs.writeFileSync(path.join(home, '.codex', 'config.toml'), mergeCodexHooks('model = "gpt-5"\n', BLOCK));
+    fs.writeFileSync(path.join(home, '.codex', 'config.toml'), mergeCodexHooks('model = "gpt-5"\n', LEGACY_BLOCK));
     fs.mkdirSync(path.join(home, '.codex', 'hooks'), { recursive: true });
     const usageScript = path.join(home, '.codex', 'hooks', 'handmux-codex-usage.cjs');
     fs.writeFileSync(usageScript, '// stale');
     process.env.PATH = '';
 
-    expect(syncCodexHooks(home, { srcDir, stateFile })).toEqual({ status: 'installed', changed: false });
+    expect(syncCodexHooks(home, { srcDir, stateFile })).toEqual({ status: 'installed', changed: true });
     expect(fs.readFileSync(usageScript, 'utf8')).not.toBe('// stale');
+    const refreshed = fs.readFileSync(path.join(home, '.codex', 'config.toml'), 'utf8');
+    expect(refreshed).toContain('[[hooks.SessionStart]]');
+    expect(refreshed).toContain("handmux-notify.sh' start codex");
   });
 
-  it('sync refreshes scripts for an existing opt-in without changing user TOML', () => {
+  it('sync is idempotent after refreshing scripts and the marked hook region', () => {
     process.env.PATH = fakeCodexOnPath();
     const home = tmpHome();
     const stateFile = path.join(home, '.handmux', 'claude-state.json');

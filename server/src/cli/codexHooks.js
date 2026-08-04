@@ -18,10 +18,12 @@ import { homedir } from 'node:os';
 import { writeFileAtomic, deployHookScripts, removeHookScripts } from './hookScaffold.js';
 
 // The events we register → the verb passed to handmux-notify.sh (classified by the shared Claude classifier,
-// since Codex's payloads match): UserPromptSubmit→working, Stop→done, PermissionRequest→需要你. PostToolUse
-// fires on every tool call, but its handmux-write.cjs handler for agent=codex is un-stick-ONLY (it flips a
-// pane out of 需要你 back to 进行中 after you approve, and is a no-op otherwise), so it doesn't churn.
+// since Codex's payloads match). SessionStart is the authoritative pane→transcript binding, including after
+// `/clear`; exclude `compact` because compaction stays in the same chat and must not neutralize a working turn.
+// PostToolUse fires on every tool call, but its handmux-write.cjs handler for agent=codex is un-stick-ONLY.
 const CODEX_HOOK_EVENTS = [
+  { event: 'SessionStart', src: 'start', matcher: '^(startup|resume|clear)$' },
+  { event: 'SessionEnd', src: 'end' },
   { event: 'UserPromptSubmit', src: 'prompt' },
   { event: 'Stop', src: 'stop' },
   { event: 'PermissionRequest', src: 'permreq' },
@@ -55,7 +57,9 @@ export function codexHooksBlock(home = homedir()) {
   const lines = [BEGIN, '# handmux inbox hooks for Codex — delete this whole region to disable.'];
   for (const e of CODEX_HOOK_EVENTS) {
     const cmd = `'${notify}' ${e.src} codex`;
-    lines.push(`[[hooks.${e.event}]]`, `[[hooks.${e.event}.hooks]]`, 'type = "command"', `command = ${JSON.stringify(cmd)}`, '');
+    lines.push(`[[hooks.${e.event}]]`);
+    if (e.matcher) lines.push(`matcher = ${JSON.stringify(e.matcher)}`);
+    lines.push(`[[hooks.${e.event}.hooks]]`, 'type = "command"', `command = ${JSON.stringify(cmd)}`, '');
   }
   lines.push(END, '');
   return lines.join('\n');
@@ -105,14 +109,19 @@ export function installCodexHooks(home = homedir(), { srcDir, stateFile } = {}) 
   return { status: 'installed' };
 }
 
-// Refresh scripts for an already opted-in install on server restart. Never enables hooks or rewrites
-// config.toml; it only replaces our deployed script bytes with this handmux version.
+// Refresh an already opted-in install on server restart. Rebuild ONLY our marked region so newly-added
+// lifecycle events (notably SessionStart for `/clear`) reach existing users without uninstall/reinstall;
+// all user TOML outside the marker remains byte-for-byte untouched. Never enables hooks for an absent user.
 export function syncCodexHooks(home = homedir(), { srcDir, stateFile } = {}) {
   // The marked config is the durable opt-in signal. Refresh it even when a service manager's PATH cannot
   // resolve the user's Codex binary; never turn a hook off merely because Node installations switched.
-  if (!readConf(home).includes(BEGIN)) return { status: codexHooksStatus(home), changed: false };
+  const before = readConf(home);
+  if (!before.includes(BEGIN)) return { status: codexHooksStatus(home), changed: false };
   deployHookScripts(hooksDir(home), srcDir, stateFile);
-  return { status: 'installed', changed: false };
+  const after = mergeCodexHooks(before, codexHooksBlock(home));
+  const changed = after !== before;
+  if (changed) writeFileAtomic(configPath(home), after);
+  return { status: 'installed', changed };
 }
 
 // Uninstall: strip our config.toml region and remove the copied scripts/env. Best-effort.

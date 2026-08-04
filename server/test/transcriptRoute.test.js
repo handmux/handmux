@@ -116,7 +116,7 @@ describe('GET /api/transcript', () => {
       commands: {},
       claudeEvents: {
         paneAgent: () => 'codex',
-        paneSession: () => ({ agent: 'codex', sessionId: 'aaaaaaaa-0000-0000-0000-000000000002', transcriptPath: file }),
+        paneSession: () => ({ agent: 'codex', sessionId: 'aaaaaaaa-0000-0000-0000-000000000002', transcriptPath: file, bindingVersion: 2 }),
       },
     }));
     try {
@@ -124,6 +124,23 @@ describe('GET /api/transcript', () => {
       expect(status).toBe(200);
       expect(body.messages.map((m) => m.text)).toEqual(['hooked-codex']);
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  });
+
+  it('refuses a legacy Codex binding that may predate a /clear session switch', async () => {
+    const reader = { read: vi.fn() };
+    const app = express();
+    app.use(transcriptRoutes({
+      commands: {}, reader,
+      claudeEvents: {
+        paneAgent: () => 'codex',
+        paneSession: () => ({ agent: 'codex', sessionId: 'old', transcriptPath: '/old-rollout.jsonl' }),
+      },
+    }));
+
+    const { status, body } = await call(app, '/transcript?pane=%251&agent=codex');
+    expect(status).toBe(200);
+    expect(body).toMatchObject({ messages: [], unavailable: 'session-unbound' });
+    expect(reader.read).not.toHaveBeenCalled();
   });
 
   it('returns normalized messages for a pane', async () => {

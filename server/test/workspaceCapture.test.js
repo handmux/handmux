@@ -26,15 +26,15 @@ const topology = {
 
 const agents = [
   { id: 'claude', sessions: { isId: (id) => id === UUID.claude } },
-  { id: 'codex', sessions: { isId: (id) => id === UUID.codex } },
+  { id: 'codex', sessions: { bindingVersion: 2, isId: (id) => id === UUID.codex } },
 ];
 
 describe('canonical workspace capture', () => {
   it('attaches only known, valid agent sessions with readable transcripts', async () => {
     const state = {
       '%1': { payload: { session_id: UUID.claude, transcript_path: '/transcripts/a.jsonl' } },
-      '%2': { agent: 'codex', payload: { session_id: UUID.codex, transcript_path: '/transcripts/b.jsonl' } },
-      '%3': { agent: 'codex', payload: { session_id: 'bad', transcript_path: '/transcripts/c.jsonl' } },
+      '%2': { agent: 'codex', bindingVersion: 2, payload: { session_id: UUID.codex, transcript_path: '/transcripts/b.jsonl' } },
+      '%3': { agent: 'codex', payload: { session_id: UUID.codex, transcript_path: '/transcripts/c.jsonl' } },
       '%4': { agent: 'unknown', payload: { session_id: UUID.claude, transcript_path: '/transcripts/d.jsonl' } },
       '%5': { agent: 'claude', payload: { session_id: UUID.claude, transcript_path: '/transcripts/directory' } },
       '%6': { agent: 'claude', payload: { session_id: UUID.claude, transcript_path: '/transcripts/unreadable.jsonl' } },

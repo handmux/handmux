@@ -155,7 +155,7 @@ describe('handmux-notify.sh → handmux-write.js', () => {
 
     const payload = JSON.stringify({ session_id: 'codex-1', transcript_path: transcript });
     const obj = run('stop', { TMUX_PANE: '%50' }, payload, file, 'codex');
-    expect(obj['%50']).toMatchObject({ src: 'stop', agent: 'codex' });
+    expect(obj['%50']).toMatchObject({ src: 'stop', agent: 'codex', bindingVersion: 2 });
     const before = JSON.parse(fs.readFileSync(usageFile, 'utf8'));
     expect(before.usage.rateLimits.primary.usedPercent).toBe(42);
 

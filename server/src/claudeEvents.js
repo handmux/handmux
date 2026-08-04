@@ -340,7 +340,11 @@ export function createClaudeEvents({
     const sessionId = typeof p.session_id === 'string' ? p.session_id : null;
     const cwd = typeof p.cwd === 'string' ? p.cwd : null;
     if (!transcriptPath && !sessionId) return null;
-    return { sessionId, transcriptPath, cwd, agent: typeof rec.agent === 'string' ? rec.agent : undefined };
+    return {
+      sessionId, transcriptPath, cwd,
+      agent: typeof rec.agent === 'string' ? rec.agent : undefined,
+      ...(Number.isInteger(rec.bindingVersion) ? { bindingVersion: rec.bindingVersion } : {}),
+    };
   }
 
   // Agent identity is needed independently of session metadata so the chat lens always chooses the matching

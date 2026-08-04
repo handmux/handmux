@@ -106,11 +106,11 @@ const rec = (src, payload = {}, ts = 1000) => ({ ts, src, host: 'h', payload });
 describe('createClaudeEvents paneSession', () => {
   it('returns the bound transcript metadata together with the agent id', () => {
     const file = stateFile({
-      '%1': { ...rec('stop', { session_id: 'cx', transcript_path: '/tmp/codex.jsonl', cwd: '/x' }), agent: 'codex' },
+      '%1': { ...rec('stop', { session_id: 'cx', transcript_path: '/tmp/codex.jsonl', cwd: '/x' }), agent: 'codex', bindingVersion: 2 },
       '%2': rec('stop', { session_id: 'cc', transcript_path: '/tmp/claude.jsonl', cwd: '/y' }),
     });
     const events = createClaudeEvents({ commands: {}, push: null, file });
-    expect(events.paneSession('%1')).toEqual({ sessionId: 'cx', transcriptPath: '/tmp/codex.jsonl', cwd: '/x', agent: 'codex' });
+    expect(events.paneSession('%1')).toEqual({ sessionId: 'cx', transcriptPath: '/tmp/codex.jsonl', cwd: '/x', agent: 'codex', bindingVersion: 2 });
     expect(events.paneSession('%2')).toEqual({ sessionId: 'cc', transcriptPath: '/tmp/claude.jsonl', cwd: '/y', agent: undefined });
   });
 });

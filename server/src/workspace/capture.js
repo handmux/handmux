@@ -27,6 +27,7 @@ export async function readAgentBindings(stateFile, agents = AGENTS, readFile = f
     const sessionId = payload.session_id;
     const transcriptPath = payload.transcript_path;
     const driver = known.get(id);
+    if (driver.sessions?.bindingVersion && record.bindingVersion !== driver.sessions.bindingVersion) continue;
     if (!driver.sessions?.isId(sessionId) || typeof transcriptPath !== 'string' || !transcriptPath) continue;
     try {
       await access(transcriptPath, constants.R_OK);

@@ -18,6 +18,9 @@ const path = require('node:path');
 
 const [, , file, pane, src, ts, host = '', agent = ''] = process.argv;
 if (!file || !pane || !src) process.exit(0);
+// Increment whenever the pane→Codex transcript contract changes. Server readers reject older Codex rows
+// instead of trusting a potentially stale pre-/clear binding; the next hook event rewrites it at this version.
+const CODEX_BINDING_VERSION = 2;
 
 let payload = {};
 try { payload = JSON.parse(fs.readFileSync(0, 'utf8') || '{}'); } catch { /* unreadable stdin → {} */ }
@@ -67,11 +70,14 @@ function update() {
     const prevPerm = prev && (prev.src === 'permreq'
       || (prev.src === 'notify' && (prev.payload || {}).notification_type === 'permission_prompt'));
     if (!prevPerm) { return; }
-    obj[pane] = { ts: Number(ts) || 0, src, host, payload, agent };
+    obj[pane] = { ts: Number(ts) || 0, src, host, payload, agent, bindingVersion: CODEX_BINDING_VERSION };
   } else {
     // agent tag lets the server dispatch classify + liveness per agent (Codex passes 'codex'); omitted for
     // Claude so legacy entries stay byte-identical and default to claude server-side.
-    obj[pane] = { ts: Number(ts) || 0, src, host, payload, ...(agent ? { agent } : {}) };
+    obj[pane] = {
+      ts: Number(ts) || 0, src, host, payload,
+      ...(agent ? { agent, ...(agent === 'codex' ? { bindingVersion: CODEX_BINDING_VERSION } : {}) } : {}),
+    };
   }
   const tmp = `${file}.${process.pid}.tmp`;
   fs.writeFileSync(tmp, JSON.stringify(obj));

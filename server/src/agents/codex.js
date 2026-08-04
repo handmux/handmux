@@ -112,6 +112,9 @@ export const codex = {
   transcript: { createParser: createCodexTranscriptParser, parse: parseCodexTranscript },
 
   sessions: {
+    // Rows written before SessionStart(`/clear`) support can point at a previous rollout. Consumers reject
+    // those legacy rows until a refreshed hook writes the current binding at this version.
+    bindingVersion: 2,
     isId: isSessionUuid,
     dirOptKey: 'sessionsDir', // scanOrphans option that overrides `dir`
     dir: sessionsDir,
