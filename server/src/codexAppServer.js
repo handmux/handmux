@@ -45,6 +45,22 @@ function diffInfo(change) {
   };
 }
 
+function jsonText(value) {
+  if (value == null) return '';
+  if (typeof value === 'string') return value;
+  return JSON.stringify(value, null, 2);
+}
+
+function collabToolName(tool) {
+  return ({
+    spawnAgent: 'spawn_agent',
+    sendInput: 'send_message',
+    resumeAgent: 'followup_task',
+    wait: 'wait_agent',
+    closeAgent: 'interrupt_agent',
+  })[tool] || `collaboration:${tool || 'agent'}`;
+}
+
 function toolFromItem(item, fileChange = item.changes?.[0] || {}) {
   if (item.type === 'commandExecution') {
     return {
@@ -77,6 +93,41 @@ function toolFromItem(item, fileChange = item.changes?.[0] || {}) {
       input: item.arguments && typeof item.arguments === 'object' ? item.arguments : { value: item.arguments },
       result: item.status === 'inProgress' ? null : (item.contentItems || []).map((part) => part?.text || part?.imageUrl || '').filter(Boolean).join('\n'),
       isError: item.status === 'failed' || item.success === false,
+    };
+  }
+  if (item.type === 'collabAgentToolCall') {
+    return {
+      name: collabToolName(item.tool),
+      input: {
+        target: item.receiverThreadIds?.join(', ') || undefined,
+        prompt: item.prompt || undefined,
+        model: item.model || undefined,
+        reasoning_effort: item.reasoningEffort || undefined,
+      },
+      result: item.status === 'inProgress' ? null : jsonText(item.agentsStates),
+      isError: item.status === 'failed',
+    };
+  }
+  if (item.type === 'webSearch') {
+    return {
+      name: 'web__run',
+      input: { query: item.query, action: item.action || undefined },
+      result: item.results == null ? null : jsonText(item.results),
+      isError: false,
+    };
+  }
+  if (item.type === 'imageView') {
+    return { name: 'view_image', input: { path: item.path }, result: '', isError: false };
+  }
+  if (item.type === 'sleep') {
+    return { name: 'wait', input: { duration_ms: item.durationMs }, result: '', isError: false };
+  }
+  if (item.type === 'imageGeneration') {
+    return {
+      name: 'image_gen__imagegen',
+      input: { prompt: item.revisedPrompt || undefined },
+      result: item.status === 'inProgress' ? null : (item.savedPath || item.result || ''),
+      isError: item.status === 'failed',
     };
   }
   return null;

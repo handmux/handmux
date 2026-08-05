@@ -15,6 +15,13 @@ function fixtureThread(status = { type: 'idle' }) {
           { path: '/work/a.js', kind: { type: 'update' }, diff: '@@\n-old\n+new' },
           { path: '/work/b.js', kind: { type: 'add' }, diff: '@@\n+created' },
         ] },
+        { id: 'web-1', type: 'webSearch', query: 'Codex docs', action: { type: 'search', query: 'Codex docs', queries: null }, results: [{ url: 'https://example.com' }] },
+        { id: 'mcp-1', type: 'mcpToolCall', server: 'docs', tool: 'search', status: 'completed', arguments: { query: 'Codex' }, result: { content: [] }, error: null },
+        { id: 'dynamic-1', type: 'dynamicToolCall', namespace: null, tool: 'custom', arguments: { value: 1 }, status: 'completed', contentItems: [{ type: 'inputText', text: 'done' }], success: true },
+        { id: 'image-1', type: 'imageView', path: '/work/screenshot.png' },
+        { id: 'sleep-1', type: 'sleep', durationMs: 1000 },
+        { id: 'collab-1', type: 'collabAgentToolCall', tool: 'spawnAgent', status: 'completed', senderThreadId: 'thread-1', receiverThreadIds: ['thread-2'], prompt: 'review', model: null, reasoningEffort: null, agentsStates: { 'thread-2': { status: 'completed' } } },
+        { id: 'generated-1', type: 'imageGeneration', status: 'completed', revisedPrompt: 'a diagram', result: 'done', savedPath: '/work/generated.png' },
         { id: 'compact-1', type: 'contextCompaction' },
       ],
     }],
@@ -61,10 +68,17 @@ function fakeProxy({ empty = false, loaded = ['thread-1'], updatedAt = {}, statu
 describe('Codex App Server projection', () => {
   it('projects authoritative items into the existing chat contract', () => {
     const messages = projectCodexThread(fixtureThread());
-    expect(messages.map((message) => message.type)).toEqual(['text', 'text', 'tool', 'tool', 'tool', 'compact']);
+    expect(messages.map((message) => message.type)).toEqual([
+      'text', 'text', 'tool', 'tool', 'tool', 'tool', 'tool', 'tool', 'tool', 'tool', 'tool', 'tool', 'compact',
+    ]);
     expect(messages[0]).toMatchObject({ k: 0, role: 'user', text: 'hello' });
     expect(messages[2].tool).toMatchObject({ name: 'exec_command', result: '/work\n', isError: false });
     expect(messages.slice(3, 5).map((message) => message.tool.input.file_path)).toEqual(['/work/a.js', '/work/b.js']);
+    expect(messages.slice(5, 12).map((message) => message.tool.name)).toEqual([
+      'web__run', 'docs:search', 'custom', 'view_image', 'wait', 'spawn_agent', 'image_gen__imagegen',
+    ]);
+    expect(messages[5].tool.result).toContain('https://example.com');
+    expect(messages[10].tool.input).toMatchObject({ target: 'thread-2', prompt: 'review' });
   });
 
   it('keeps interrupted turns as a visible structural marker', () => {
