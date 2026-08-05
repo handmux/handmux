@@ -217,17 +217,52 @@ function activeKind(status) {
   return flags.includes('waitingOnApproval') || flags.includes('waitingOnUserInput') ? 'permission' : 'working';
 }
 
-// App Server's item notifications are the authoritative live stream. A concurrent thread/read can briefly
-// omit items that were just started or completed, so retain the event copies and overlay them on every
-// snapshot. This is connection-local live state, not a second transcript store.
+function liveMessageSignature(item) {
+  if (item?.type === 'userMessage') {
+    const text = inputText(item.content);
+    return text ? `userMessage\0${text}` : null;
+  }
+  if (item?.type === 'agentMessage') {
+    return item.text ? `agentMessage\0${item.text}` : null;
+  }
+  return null;
+}
+
+// App Server snapshots are the durable source of truth. Item notifications are only a temporary overlay
+// because a concurrent thread/read can briefly omit an item that just started or completed. As soon as a
+// snapshot contains that item (by id, or by matching user/agent content), retire the overlay and use the
+// snapshot copy; the two channels must never become parallel transcript stores.
 function mergeTurnWithLive(previous, fresh, liveIds) {
   if (!previous || !liveIds?.size) return fresh;
   const freshItems = Array.isArray(fresh?.items) ? fresh.items : [];
   const freshById = new Map(freshItems.filter((item) => item?.id).map((item) => [item.id, item]));
+  const freshMessages = new Map();
+  for (const item of freshItems) {
+    const signature = liveMessageSignature(item);
+    if (!signature || !item?.id) continue;
+    if (!freshMessages.has(signature)) freshMessages.set(signature, []);
+    freshMessages.get(signature).push(item);
+  }
   const merged = [];
   const seen = new Set();
   for (const item of previous.items || []) {
-    const next = liveIds.has(item?.id) ? item : freshById.get(item?.id);
+    let next = freshById.get(item?.id);
+    if (liveIds.has(item?.id)) {
+      if (next) {
+        liveIds.delete(item.id);
+      } else {
+        const signature = liveMessageSignature(item);
+        const canonical = signature
+          ? freshMessages.get(signature)?.find((candidate) => !seen.has(candidate.id))
+          : null;
+        if (canonical) {
+          next = canonical;
+          liveIds.delete(item.id);
+        } else {
+          next = item;
+        }
+      }
+    }
     if (!next?.id || seen.has(next.id)) continue;
     merged.push(next);
     seen.add(next.id);

@@ -211,6 +211,48 @@ describe('Codex App Server client', () => {
     app.close();
   });
 
+  it('does not duplicate live messages when the completed turn assigns different item ids', async () => {
+    const proxy = fakeProxy();
+    const app = createCodexAppServer({
+      home: '/home/test', exists: () => true, connect: () => proxy.ws,
+    });
+    await app.discover('%1');
+    proxy.push({
+      jsonrpc: '2.0', method: 'turn/started', params: {
+        threadId: 'thread-1', turn: { id: 'turn-2', status: 'inProgress', items: [] },
+      },
+    });
+    proxy.push({
+      jsonrpc: '2.0', method: 'item/started', params: {
+        threadId: 'thread-1', turnId: 'turn-2',
+        item: { id: 'live-user', type: 'userMessage', content: [{ type: 'text', text: 'only once' }] },
+      },
+    });
+    proxy.push({
+      jsonrpc: '2.0', method: 'item/completed', params: {
+        threadId: 'thread-1', turnId: 'turn-2',
+        item: { id: 'live-agent', type: 'agentMessage', text: 'one reply' },
+      },
+    });
+    proxy.push({
+      jsonrpc: '2.0', method: 'turn/completed', params: {
+        threadId: 'thread-1', turn: { id: 'turn-2', status: 'completed', items: [
+          { id: 'snapshot-user', type: 'userMessage', content: [{ type: 'text', text: 'only once' }] },
+          { id: 'snapshot-agent', type: 'agentMessage', text: 'one reply' },
+        ] },
+      },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const opened = await app.read('%1', 'thread-1');
+    const texts = projectCodexThread(opened.thread)
+      .filter((message) => message.type === 'text')
+      .map((message) => [message.role, message.text]);
+    expect(texts.filter((message) => message[1] === 'only once')).toEqual([['user', 'only once']]);
+    expect(texts.filter((message) => message[1] === 'one reply')).toEqual([['assistant', 'one reply']]);
+    app.close();
+  });
+
   it('lists official models and updates model and effort on the current thread', async () => {
     const proxy = fakeProxy();
     const app = createCodexAppServer({ home: '/home/test', exists: () => true, connect: () => proxy.ws });
