@@ -11,6 +11,7 @@ import { useEffect, useRef } from 'react';
 export function usePollingLoop({
   fetch,
   apply,
+  onError,
   intervalMs,
   enabled = true,
   deps = [],
@@ -20,8 +21,10 @@ export function usePollingLoop({
 }) {
   const fetchRef = useRef(fetch);
   const applyRef = useRef(apply);
+  const errorRef = useRef(onError);
   fetchRef.current = fetch;
   applyRef.current = apply;
+  errorRef.current = onError;
   useEffect(() => {
     if (!enabled) return undefined;
     let cancelled = false;
@@ -32,7 +35,11 @@ export function usePollingLoop({
       try {
         const r = await fetchRef.current();
         if (!cancelled) applyRef.current(r);
-      } catch { /* ignore — a failed poll just keeps the last good state */ }
+      } catch (error) {
+        // Most polling surfaces intentionally keep the last good state. Callers that need to explain a
+        // missing capability (for example the managed Codex connection) may additionally expose the error.
+        if (!cancelled) errorRef.current?.(error);
+      }
     };
     const loop = () => {
       tick();

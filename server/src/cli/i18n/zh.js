@@ -340,6 +340,7 @@ export default {
   handmux stop | restart | status
   handmux logs [--follow] [--lines N]
   handmux push <标题> <正文>    从脚本推一条通知到手机（--session 会话 · --device 设备key · --tag · --url）
+  handmux codex [参数...]      启动与对话视图同步的 Codex TUI
   handmux restore [--dry-run] [--checkpoint <id>] [--session <name>]
   handmux restore --list
   handmux update           升级到最新发布版本(npm i -g handmux@latest)

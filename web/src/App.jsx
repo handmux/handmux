@@ -89,6 +89,7 @@ import {
   setKeyboardMode,
 } from './desktopInput.js';
 import { useDesktopTerminalInput } from './hooks/useDesktopTerminalInput.js';
+import { useCodexSession, codexKind } from './hooks/useCodexSession.js';
 import { isDraftShortcut, shouldRouteTerminalPageKey } from './terminalPageKeyboard.js';
 import {
   getSnapshotInterval,
@@ -1311,6 +1312,10 @@ export default function App() {
   }, [needToken, notifInboxOpen, notifRetrySeq, handledAuth]);
 
   const currentAgent = states[current?.paneId]?.agent;
+  const codexSession = useCodexSession(current?.paneId, chatLensOn && currentAgent === 'codex');
+  const currentKind = currentAgent === 'codex'
+    ? codexKind(codexSession, states[current?.paneId]?.kind)
+    : states[current?.paneId]?.kind;
 
   // Record a just-sent command into this WINDOW's recent history (deduped + capped in storage).
   const onCommandSent = useCallback((cmd) => {
@@ -1995,7 +2000,8 @@ export default function App() {
           />
           {current.paneId && (
             chatLens ? (
-              <ChatView pane={current.paneId} agent={currentAgent} kind={states[current.paneId]?.kind} msg={states[current.paneId]?.msg} onAuthFail={onAuthFail}
+              <ChatView pane={current.paneId} agent={currentAgent} kind={currentKind} msg={states[current.paneId]?.msg} onAuthFail={onAuthFail}
+                codexSession={codexSession}
                 slashEcho={slashEcho && slashEcho.paneId === current.paneId ? slashEcho : null}
                 refreshToken={transcriptWake.paneId === current.paneId ? transcriptWake.seq : null}
                 onSlashEchoDone={() => setSlashEcho(null)}
@@ -2028,8 +2034,9 @@ export default function App() {
             <ChatComposer
               pane={current.paneId}
               agent={currentAgent}
+              codexSession={codexSession}
               desktop={desktopInput}
-              kind={states[current.paneId]?.kind}
+              kind={currentKind}
               cwd={currentPaneCwd}
               onKey={sendKey}
               onAuthFail={onAuthFail}

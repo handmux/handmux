@@ -8,7 +8,7 @@ const PRESETS = [
   { value: '', label: t('startup.preset_shell') },
   { value: 'claude', label: t('startup.preset_claude') },
   { value: 'claude --continue', label: t('startup.preset_claude_continue') },
-  { value: 'codex', label: t('startup.preset_codex') },
+  { value: 'handmux codex', label: t('startup.preset_codex') },
 ];
 const CUSTOM = '__custom__';
 const OPTIONS = [...PRESETS, { value: CUSTOM, label: t('startup.custom') }];

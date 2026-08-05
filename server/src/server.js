@@ -26,6 +26,7 @@ import { createGracefulShutdown, createWorkspaceBackground } from './workspace/c
 import { createWorkspaceRuntime } from './workspace/runtime.js';
 import { createBrowserWorkerClient } from './browser/workerClient.js';
 import { createTerminalStream } from './terminalStream.js';
+import { createCodexAppServer } from './codexAppServer.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
@@ -104,6 +105,7 @@ const handmuxOrigin = (() => {
   }
 })();
 const browserWorker = createBrowserWorkerClient({ appToken: token, previewDomain, handmuxOrigin });
+const codexApp = createCodexAppServer({ home });
 
 const app = express();
 // Browser proxy leases stay behind normal Handmux auth. Client-owned direct tabs never enter
@@ -111,7 +113,7 @@ const app = express();
 app.use(browserWorker.publicHandler);
 app.use('/api/browser-proxy', expressAuth(token), express.json(), browserWorker.apiHandler);
 app.use('/api', createApiRouter({
-  token, events, uploadExts, previews, shortcuts: cfg.shortcuts, workspace, previewDomain,
+  token, events, uploadExts, previews, shortcuts: cfg.shortcuts, workspace, previewDomain, codexApp,
 }));
 app.use('/preview', preview.router);
 app.use(preview.refererFallback);
@@ -172,6 +174,7 @@ server.on('upgrade', (req, socket, head) => {
 const shutdown = createGracefulShutdown({ events, workspace, browser: browserWorker, server });
 const handleSignal = () => {
   terminalStream.close();
+  codexApp.close();
   shutdown().catch(() => {});
 };
 process.on('SIGINT', handleSignal);

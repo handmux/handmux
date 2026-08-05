@@ -3,6 +3,9 @@ import { render, screen, fireEvent, cleanup, waitFor } from '@testing-library/re
 
 vi.mock('../src/api.js', () => ({
   sendText: vi.fn(async () => ({ ok: true })),
+  sendCodexMessage: vi.fn(async () => ({ ok: true })),
+  compactCodexSession: vi.fn(async () => ({ ok: true })),
+  interruptCodexSession: vi.fn(async () => ({ interrupted: true })),
   getPaneContext: vi.fn(() => new Promise(() => {})), // no context chip by default
   UnauthorizedError: class UnauthorizedError extends Error {},
 }));
@@ -13,7 +16,7 @@ vi.mock('../src/voice/usePushToTalk.js', () => ({
 }));
 
 import ChatComposer from '../src/components/ChatComposer.jsx';
-import { sendText, getPaneContext } from '../src/api.js';
+import { sendText, sendCodexMessage, compactCodexSession, interruptCodexSession, getPaneContext } from '../src/api.js';
 
 // No globals:true → register cleanup manually so DOM doesn't leak between tests.
 afterEach(cleanup);
@@ -123,6 +126,41 @@ describe('ChatComposer', () => {
     typeInto(input, '/compact');
     fireEvent.click(screen.getByRole('button', { name: '发送' }));
     await waitFor(() => expect(onInteractiveSlash).toHaveBeenCalledWith('/compact'));
+  });
+
+  it('sends managed Codex messages and compaction through App Server without terminal handoff', async () => {
+    const onInteractiveSlash = vi.fn();
+    const props = { pane: '%1', agent: 'codex', kind: 'idle', codexSession: { managed: true }, onInteractiveSlash };
+    const { rerender } = render(<ChatComposer {...props} />);
+    const input = screen.getByPlaceholderText('和 Agent 对话…');
+    typeInto(input, '继续实现');
+    fireEvent.click(screen.getByRole('button', { name: '发送' }));
+    await waitFor(() => expect(sendCodexMessage).toHaveBeenCalledWith('%1', '继续实现'));
+    rerender(<ChatComposer {...props} />);
+    typeInto(input, '/compact');
+    fireEvent.click(screen.getByRole('button', { name: '发送' }));
+    await waitFor(() => expect(compactCodexSession).toHaveBeenCalledWith('%1'));
+    expect(onInteractiveSlash).not.toHaveBeenCalled();
+  });
+
+  it('shows App Server model and effort only after they are confirmed', () => {
+    const { container } = render(<ChatComposer pane="%1" agent="codex" kind="idle" codexSession={{
+      managed: true, settings: { model: 'gpt-5.6-terra', effort: 'medium' },
+    }} />);
+    expect(container.querySelector('.cc-ctx-model').textContent).toBe('gpt-5.6-terra');
+    expect(container.querySelector('.cc-ctx-pct').textContent).toBe('medium');
+  });
+
+  it('sends one structured interrupt and disables repeated stop taps', async () => {
+    const request = deferred();
+    interruptCodexSession.mockReturnValueOnce(request.promise);
+    render(<ChatComposer pane="%1" agent="codex" kind="working" codexSession={{ managed: true }} />);
+    const stop = screen.getByRole('button', { name: '停止' });
+    fireEvent.click(stop);
+    fireEvent.click(stop);
+    expect(interruptCodexSession).toHaveBeenCalledTimes(1);
+    expect(stop.disabled).toBe(true);
+    request.resolve({ interrupted: true });
   });
 
   it('a saved chip that is a bare interactive command also hands off to the terminal lens', async () => {

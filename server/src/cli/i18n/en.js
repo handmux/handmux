@@ -341,6 +341,7 @@ export default {
   handmux stop | restart | status
   handmux logs [--follow] [--lines N]
   handmux push <title> <body>   notify your phone from a script (--session X · --device K · --tag T · --url U)
+  handmux codex [args...]       launch a Codex TUI synchronized with chat view
   handmux restore [--dry-run] [--checkpoint <id>] [--session <name>]
   handmux restore --list
   handmux update           upgrade to the latest published version (npm i -g handmux@latest)

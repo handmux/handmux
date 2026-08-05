@@ -42,6 +42,7 @@ import { notifyUpdate, runUpdateCheck, isBrewInstall, PKG_NAME } from '../src/cl
 import { t, initLocale, setLocale } from '../src/cli/i18n/index.js';
 import { runPush } from '../src/cli/pushCmd.js';
 import { runWorkspaceCommand } from '../src/cli/workspaceCmd.js';
+import { runManagedCodex } from '../src/cli/codexManaged.js';
 
 const HOME = homedir();
 const SELF = fileURLToPath(import.meta.url);
@@ -146,6 +147,7 @@ async function main() {
     case 'status': await status(); process.exit(process.exitCode || 0);
     case 'logs': return logs();
     case 'push': process.exitCode = await pushCmd(); return;
+    case 'codex': return codexCmd();
     case 'restore': process.exitCode = await runWorkspaceCommand({ flags, positionals, unknownShortFlags, home: HOME }); return;
     case 'config': return configCmd();
     case 'setup': return setupCmd();
@@ -178,6 +180,14 @@ async function withLifecycleLock(fn) {
 // stays in lockstep with what npm installed; no hardcoded string to forget to bump).
 function version() {
   console.log(currentVersion());
+}
+
+async function codexCmd() {
+  try { process.exitCode = await runManagedCodex(process.argv.slice(3), { home: HOME }); }
+  catch (error) {
+    console.error(`[handmux] ${error?.message || error}`);
+    process.exitCode = 1;
+  }
 }
 
 function currentVersion() { return requireOpt('../package.json').version; }

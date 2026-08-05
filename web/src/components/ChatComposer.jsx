@@ -1,5 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { sendText, UnauthorizedError } from '../api.js';
+import {
+  sendText, sendCodexMessage, compactCodexSession, interruptCodexSession, UnauthorizedError,
+} from '../api.js';
 import { shouldHandOffSlash } from '../slashCommands.js';
 import MicButton from './MicButton.jsx';
 import CmdFavEditor from './CmdFavEditor.jsx';
@@ -39,12 +41,14 @@ const chipTint = (text) => (text.startsWith('/') ? 'cmd' : 'reply');
 
 export default function ChatComposer({
   pane, agent = 'claude', kind, cwd = null, onKey = () => {}, onAuthFail, onSent, onInteractiveSlash,
-  shortcuts = null, micAvailable = false, desktop = false,
+  shortcuts = null, micAvailable = false, desktop = false, codexSession = null,
 }) {
   // Draft persists across an app exit / lens switch (shared store with the dock's chat page — switching
   // lenses carries your half-typed message either way). send/clear set '' → the stored draft clears too.
   const [value, setValue] = useState(() => getChatDraft());
   const [submitting, setSubmitting] = useState(false);
+  const [stopping, setStopping] = useState(false);
+  const [submitError, setSubmitError] = useState('');
   const submitInFlightRef = useRef(false);
   useEffect(() => { setChatDraft(value); }, [value]);
   const ref = useRef(null);          // the textarea
@@ -73,13 +77,18 @@ export default function ChatComposer({
   // While the agent is working, the send button becomes a STOP that interrupts it (Escape). Any other
   // state (idle / needs-you / done) shows the normal send.
   const busy = kind === 'working';
+  const managedCodex = agent === 'codex' && codexSession?.managed;
+  useEffect(() => { if (!busy) setStopping(false); }, [busy, pane]);
 
   // Current context-window occupancy for this pane's session (model + used %), shown as a small chip in the
   // action row. Absent (null %) when the statusLine capturer isn't opted in → the chip simply doesn't render.
   const ctx = usePaneContext(pane, agent);
-  const ctxModel = ctx.model ? ctx.model.replace(/\s*\(.*\)\s*$/, '').trim() : null; // drop "(1M context)" suffix
+  const managedSettings = managedCodex ? codexSession?.settings : null;
+  const rawModel = managedSettings?.model || ctx.model;
+  const ctxModel = rawModel ? rawModel.replace(/\s*\(.*\)\s*$/, '').trim() : null; // drop "(1M context)" suffix
   const ctxPct = ctx.usedPercent;
-  const showCtx = typeof ctxPct === 'number';
+  const ctxEffort = managedSettings?.effort || null;
+  const showCtx = !!ctxModel || typeof ctxPct === 'number';
   const ctxWarn = showCtx && ctxPct >= 80; // near auto-compact → amber
 
   // Grow to fit content; CSS max-height caps it (~6 lines) then it scrolls. +2 for the border under
@@ -125,18 +134,24 @@ export default function ChatComposer({
     const text = value;
     submitInFlightRef.current = true;
     setSubmitting(true);
+    setSubmitError('');
     stopVoiceIfRecording();
     try {
-      await sendText(pane, text, true);
+      const trimmed = text.trim();
+      if (managedCodex && trimmed === '/compact') await compactCodexSession(pane);
+      else if (managedCodex && !trimmed.startsWith('/')) await sendCodexMessage(pane, text);
+      else await sendText(pane, text, true);
       onSent?.(text);
       // A bare, non-one-shot slash command may have opened a TUI picker that lives only in the terminal (and
       // the transcript stays silent until the user picks). Hand off to the terminal lens so they can see and
       // drive it — including unrecognized commands, since a missed picker leaves the phone stuck.
-      if ((agent === 'codex' && /^\s*\//.test(text)) || shouldHandOffSlash(text)) onInteractiveSlash?.(text.trim());
+      if ((agent === 'codex' && /^\s*\//.test(text) && !(managedCodex && ['/clear', '/compact'].includes(trimmed)))
+        || (agent !== 'codex' && shouldHandOffSlash(text))) onInteractiveSlash?.(trimmed);
       setValue('');
       requestAnimationFrame(() => autoGrow(ref.current));
     } catch (err) {
       if (err instanceof UnauthorizedError) onAuthFail?.();
+      else setSubmitError(err?.serverError || err?.message || t('chat.sendFailed'));
     } finally {
       submitInFlightRef.current = false;
       setSubmitting(false);
@@ -144,12 +159,24 @@ export default function ChatComposer({
   };
 
   // Interrupt the working agent — Escape is Claude Code's stop key (same path the terminal ESC uses).
-  const stop = () => onKey('Escape');
+  const stop = async () => {
+    if (stopping) return;
+    setStopping(true);
+    setSubmitError('');
+    try {
+      if (managedCodex) await interruptCodexSession(pane);
+      else await onKey('Escape');
+    } catch (err) {
+      setStopping(false);
+      if (err instanceof UnauthorizedError) onAuthFail?.();
+      else setSubmitError(err?.serverError || err?.message || t('chat.stopFailed'));
+    }
+  };
   const onComposerKeyDown = (event) => {
     if (!desktop || event.nativeEvent?.isComposing) return;
     if (event.key === 'Escape' && busy) {
       event.preventDefault();
-      stop();
+      void stop();
       return;
     }
     if (event.key === 'Enter' && !event.shiftKey) {
@@ -182,10 +209,14 @@ export default function ChatComposer({
     if (fav.kind === 'key') { onKey(fav.text); return; }
     if (!pane) return;
     try {
-      await sendText(pane, fav.text, !!fav.enter);
+      const trimmed = fav.text.trim();
+      if (managedCodex && fav.enter && trimmed === '/compact') await compactCodexSession(pane);
+      else if (managedCodex && fav.enter && !trimmed.startsWith('/')) await sendCodexMessage(pane, fav.text);
+      else await sendText(pane, fav.text, !!fav.enter);
       if (!fav.enter) return;
       onSent?.(fav.text);
-      if (shouldHandOffSlash(fav.text)) onInteractiveSlash?.(fav.text.trim());
+      if ((agent === 'codex' && trimmed.startsWith('/') && !(managedCodex && ['/clear', '/compact'].includes(trimmed)))
+        || (agent !== 'codex' && shouldHandOffSlash(fav.text))) onInteractiveSlash?.(trimmed);
     } catch (err) { if (err instanceof UnauthorizedError) onAuthFail?.(); }
   };
 
@@ -262,12 +293,14 @@ export default function ChatComposer({
             {showCtx && (
               <div className={`cc-ctx${ctxWarn ? ' warn' : ''}`} aria-hidden="true">
                 {ctxModel && <span className="cc-ctx-model">{ctxModel}</span>}
-                <span className="cc-ctx-pct">{Math.round(ctxPct)}%</span>
+                {ctxEffort && <span className="cc-ctx-pct">{ctxEffort}</span>}
+                {!ctxEffort && typeof ctxPct === 'number' && <span className="cc-ctx-pct">{Math.round(ctxPct)}%</span>}
               </div>
             )}
             {micAvailable && <MicButton active={recording} disabled={voice.state === 'requesting'} onToggle={toggleMic} />}
             {busy ? (
-              <button type="button" className="cc-send cc-stop" aria-label={t('chat.stop')} onClick={stop}>
+              <button type="button" className="cc-send cc-stop" aria-label={t('chat.stop')}
+                disabled={stopping} onClick={() => void stop()}>
                 <StopIcon /></button>
             ) : (
               <button type="button" className="cc-send" aria-label={t('dock.send')}
@@ -277,6 +310,7 @@ export default function ChatComposer({
           </div>
         </div>
       </div>
+      {submitError && <div className="cc-error" role="status">{submitError}</div>}
       {editOpen && <CmdFavEditor variant="chat" presets={serverShortcuts.chat}
         onChange={refreshShortcuts} onClose={() => setEditOpen(false)} />}
     </div>

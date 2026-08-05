@@ -23,6 +23,7 @@ import { resolveEncodedDirSession, encodeProjectDir } from '../agents/scanUtils.
 import { transcriptReader } from '../transcriptReader.js';
 import { parsePendingPrompt } from '../pendingPrompt.js';
 import { readClaudeContext } from '../usage.js';
+import { projectCodexThread } from '../codexAppServer.js';
 
 // Pure index-based projection: O(page size), not O(transcript size). `before` stays exclusive, including
 // for unusual fractional cursors (the old `k < before` filter included indices through ceil(before) - 1).
@@ -39,7 +40,7 @@ export function pageTranscript(parsed, before, limit) {
   };
 }
 
-export function transcriptRoutes({ commands, claudeEvents, reader = transcriptReader }) {
+export function transcriptRoutes({ commands, claudeEvents, reader = transcriptReader, codexApp }) {
   const r = express.Router();
 
   // Bind every request to the pane's actual agent before touching a session file. A caller cannot claim
@@ -106,8 +107,31 @@ export function transcriptRoutes({ commands, claudeEvents, reader = transcriptRe
         sessionId = hooked.sessionId || path.basename(file).replace(/\.jsonl$/, '');
       }
       const empty = { messages: [], hash: '', session: sessionId || null, hasMore: false, firstSeq: null };
-      if (!file && req.chatAgent.id === 'codex') {
-        return res.json({ ...empty, unavailable: 'session-unbound' });
+      if (req.chatAgent.id === 'codex') {
+        if (!sessionId) {
+          try {
+            const discovered = await codexApp?.discover?.(req.query.pane);
+            if (discovered && !discovered.managed) return res.json({ ...empty, unavailable: 'session-unmanaged' });
+            sessionId = discovered?.threadId || null;
+          } catch (error) {
+            return res.json({ ...empty, unavailable: 'app-server-unavailable', detail: error?.message || String(error) });
+          }
+        }
+        if (!sessionId) return res.json({ ...empty, unavailable: 'session-unbound' });
+        let opened = null;
+        try { opened = codexApp ? await codexApp.read(req.query.pane, sessionId) : null; }
+        catch (error) {
+          return res.json({ ...empty, unavailable: 'app-server-unavailable', detail: error?.message || String(error) });
+        }
+        if (!opened) return res.json({ ...empty, unavailable: 'session-unmanaged' });
+        const parsed = projectCodexThread(opened.thread);
+        const { messages, firstSeq, hasMore } = pageTranscript(parsed, before, limit);
+        if (before == null) {
+          const hash = createHash('sha1').update(JSON.stringify(messages)).digest('hex').slice(0, 16);
+          if (req.query.since === hash) return res.status(204).end();
+          return res.json({ messages, hash, session: sessionId, hasMore, firstSeq });
+        }
+        return res.json({ messages, session: sessionId, hasMore, firstSeq });
       }
       if (!file) {
         const cwd = await commands.paneCurrentPath(req.query.pane);

@@ -80,6 +80,16 @@ export const getPaneContext = (pane, agent = 'claude') =>
 // gate is up. Polled by the 对话 lens only while a gate is up (kind==='permission').
 export const getPendingPrompt = (pane, agent = 'claude') =>
   req(`/api/pending-prompt?pane=${encodeURIComponent(pane)}&agent=${encodeURIComponent(agent)}`, { timeoutMs: 8000 }).then((r) => r.prompt || null);
+export const getCodexSession = (pane) =>
+  req(`/api/codex/session?pane=${encodeURIComponent(pane)}`, { timeoutMs: 8000 });
+export const sendCodexMessage = (pane, text) =>
+  req('/api/codex/send', { method: 'POST', body: JSON.stringify({ pane, text }), timeoutMs: 8000 });
+export const compactCodexSession = (pane) =>
+  req('/api/codex/compact', { method: 'POST', body: JSON.stringify({ pane }), timeoutMs: 8000 });
+export const interruptCodexSession = (pane) =>
+  req('/api/codex/interrupt', { method: 'POST', body: JSON.stringify({ pane }), timeoutMs: 8000 });
+export const answerCodexApproval = (pane, requestId, decision) =>
+  req('/api/codex/approval', { method: 'POST', body: JSON.stringify({ pane, requestId, decision }), timeoutMs: 8000 });
 export const sendText = (pane, text, enter = true) =>
   req('/api/send', { method: 'POST', body: JSON.stringify({ pane, text, enter }) });
 export const sendKeys = (pane, keys) =>

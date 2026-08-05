@@ -10,7 +10,7 @@ import { usePendingPrompt } from '../hooks/usePendingPrompt.js';
 import { fallbackGate } from '../chatGate.js';
 import PromptGate from './PromptGate.jsx';
 import LensBoot from './LensBoot.jsx';
-import { sendKeys } from '../api.js';
+import { answerCodexApproval, sendKeys, UnauthorizedError } from '../api.js';
 import { t } from '../i18n';
 import { useBackButton, useHistoryLayer, unwindHistory } from '../hooks/useBackButton.js';
 import {
@@ -385,16 +385,58 @@ function resolveCopyBlock(target) {
 
 const COPY_CALLOUT_W = 72; // estimated callout width (px) for the right-edge clamp (single 拷贝 button)
 
-export default function ChatView({ pane, agent = 'claude', kind, msg, onAuthFail, slashEcho, onSlashEchoDone, onTerminalHandoff, refreshToken = null }) {
-  const { messages, hasMoreOlder, loadOlder, loadingOlder, session, loaded, unavailable } = useTranscript(pane, true, agent, refreshToken);
+function CodexApprovalGate({ pane, approval, onAuthFail }) {
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState('');
+  const labels = {
+    accept: t('chat.approval.accept'),
+    acceptForSession: t('chat.approval.acceptSession'),
+    decline: t('chat.approval.decline'),
+    cancel: t('chat.approval.cancel'),
+  };
+  const decide = async (decision) => {
+    if (submitting) return;
+    setSubmitting(true);
+    setError('');
+    try { await answerCodexApproval(pane, approval.id, decision); }
+    catch (err) {
+      if (err instanceof UnauthorizedError) onAuthFail?.();
+      else setError(err?.serverError || err?.message || t('chat.approval.failed'));
+      setSubmitting(false);
+    }
+  };
+  return (
+    <div className="chat-gate codex-approval-gate" role="dialog" aria-modal="true">
+      <div className="chat-gate-step">{t('chat.approval.request')}</div>
+      <div className="chat-gate-prompt">{approval.type === 'file' ? t('chat.approval.file') : t('chat.approval.command')}</div>
+      {approval.reason && <div className="chat-gate-hint">{approval.reason}</div>}
+      {approval.command && <pre className="codex-approval-command">{approval.command}</pre>}
+      {approval.cwd && <div className="codex-approval-cwd">{approval.cwd}</div>}
+      {error && <div className="chat-turn-error">{error}</div>}
+      <div className="chat-gate-actions">
+        {approval.decisions.map((decision) => (
+          <button key={decision} type="button"
+            className={`chat-gate-btn${decision === 'accept' ? ' primary' : ''}`}
+            disabled={submitting} onClick={() => void decide(decision)}>
+            {labels[decision] || decision}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+export default function ChatView({ pane, agent = 'claude', kind, msg, onAuthFail, slashEcho, onSlashEchoDone, onTerminalHandoff, refreshToken = null, codexSession = null }) {
+  const { messages, hasMoreOlder, loadOlder, loadingOlder, session, loaded, unavailable, unavailableDetail } = useTranscript(pane, true, agent, refreshToken);
   const tsIdx = useMemo(() => timeStampedIndices(messages), [messages]);
   // The gate's options are scraped from the pane's on-screen menu (they're not in the transcript). Poll only
   // while Claude is blocked (kind==='permission'). If a menu is up → the rich PromptGate; if permission but
   // the menu couldn't be parsed → the generic 允许/拒绝 fallback so there's always a way to act.
   const busy = kind === 'permission';
   const claudeGate = busy && agent === 'claude';
-  const sessionGate = unavailable === 'session-unbound';
-  const terminalGate = busy && agent !== 'claude' && !sessionGate;
+  const sessionGate = ['session-unbound', 'session-unmanaged', 'app-server-unavailable'].includes(unavailable);
+  const codexApproval = agent === 'codex' && codexSession?.managed ? codexSession.approvals?.[0] : null;
+  const terminalGate = busy && agent !== 'claude' && !sessionGate && !codexApproval;
   const { prompt, refetch } = usePendingPrompt(pane, claudeGate, agent);
   // After the user answers, the menu vanishes from the screen instantly but `kind` stays 'permission'
   // until the slower /states poll catches up — so !prompt && busy would flash the 允许/拒绝 fallback
@@ -537,7 +579,7 @@ export default function ChatView({ pane, agent = 'claude', kind, msg, onAuthFail
   // translateY-lifted by the Android keyboard, which also re-anchors position:fixed to .app). Re-measure on
   // viewport churn (keyboard, rotate). Falls back to full-screen (CSS inset:0) when unmeasurable (jsdom).
   const [gateMask, setGateMask] = useState(null); // { top, height } px relative to .app, or null
-  const gateUp = !!(prompt || fb || terminalGate || sessionGate);
+  const gateUp = !!(prompt || fb || codexApproval || terminalGate || sessionGate);
   useEffect(() => {
     if (!gateUp) { setGateMask(null); return; }
     const measure = () => {
@@ -731,6 +773,7 @@ export default function ChatView({ pane, agent = 'claude', kind, msg, onAuthFail
           </div>
         </div>
       )}
+      {codexApproval && <CodexApprovalGate key={codexApproval.id} pane={pane} approval={codexApproval} onAuthFail={onAuthFail} />}
       {terminalGate && (
         <div className="chat-gate chat-terminal-gate">
           <div className="chat-gate-prompt">{t('chat.permission.terminalTitle')}</div>
@@ -742,8 +785,14 @@ export default function ChatView({ pane, agent = 'claude', kind, msg, onAuthFail
       )}
       {sessionGate && (
         <div className="chat-gate chat-terminal-gate">
-          <div className="chat-gate-prompt">{t('chat.session.unboundTitle')}</div>
-          <div className="chat-gate-hint">{t('chat.session.unboundHint')}</div>
+          <div className="chat-gate-prompt">{unavailable === 'session-unmanaged'
+            ? t('chat.session.unmanagedTitle')
+            : unavailable === 'app-server-unavailable' ? t('chat.session.connectionTitle') : t('chat.session.unboundTitle')}</div>
+          <div className="chat-gate-hint">{unavailable === 'session-unmanaged'
+            ? t('chat.session.unmanagedHint')
+            : unavailable === 'app-server-unavailable'
+              ? `${t('chat.session.connectionHint')}${unavailableDetail ? ` (${unavailableDetail})` : ''}`
+              : t('chat.session.unboundHint')}</div>
           <div className="chat-gate-actions">
             <button type="button" className="chat-gate-btn primary" onClick={onTerminalHandoff}>{t('chat.session.openTerminal')}</button>
           </div>

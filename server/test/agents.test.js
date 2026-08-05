@@ -251,7 +251,7 @@ describe('parseAgentProcs (multi-agent tagging)', () => {
 });
 
 describe('scanOrphans + takeover across agents', () => {
-  it('surfaces a codex orphan and takes it over with `codex resume`', async () => {
+  it('surfaces a codex orphan and takes it over through the managed App Server launcher', async () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), 'codexhome-'));
     const sessionsDir = path.join(home, '.codex', 'sessions');
     const cwd = '/home/user/proj';
@@ -282,7 +282,7 @@ describe('scanOrphans + takeover across agents', () => {
       { commands, scanFn: async () => rows, delay: () => Promise.resolve(), killProc: () => {} },
       { pid: 777, sessionId: id, kill: false },
     );
-    expect(spawnedCmd).toBe(`codex resume ${id}`);
+    expect(spawnedCmd).toBe(`handmux codex resume ${id}`);
     expect(out).toMatchObject({ agent: 'codex', name: 'cx-proj-1', agentUp: true });
   });
 });

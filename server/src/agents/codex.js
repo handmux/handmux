@@ -122,5 +122,6 @@ export const codex = {
     // `codex resume <uuid>` continues the session from its rollout file.
     resumeArgs: (id) => ['codex', 'resume', id],
     resumeCmd: (id) => `codex resume ${id}`,
+    managedResumeCmd: (id) => `handmux codex resume ${id}`,
   },
 };

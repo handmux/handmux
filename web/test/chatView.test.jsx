@@ -51,6 +51,20 @@ describe('ChatView', () => {
     expect(onTerminalHandoff).toHaveBeenCalledTimes(1);
   });
 
+  it('handles a managed Codex command approval in the chat view', async () => {
+    mockTranscript([]);
+    vi.spyOn(api, 'answerCodexApproval').mockResolvedValue({ ok: true });
+    render(<ChatView pane="%7" agent="codex" kind="permission" codexSession={{
+      managed: true,
+      approvals: [{ id: '91', type: 'command', command: 'npm test', cwd: '/work', decisions: ['accept', 'cancel'] }],
+    }} />);
+    await screen.findByText('npm test');
+    expect(screen.getByText('/work')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: '允许一次' }));
+    await waitFor(() => expect(api.answerCodexApproval).toHaveBeenCalledWith('%7', '91', 'accept'));
+    expect(screen.queryByRole('button', { name: '本次会话始终允许' })).toBeNull();
+  });
+
   it('renders user text right and assistant text left', async () => {
     mockTranscript([
       { k: 0, i: 0, role: 'user', type: 'text', text: '帮我跑测试' },

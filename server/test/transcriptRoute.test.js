@@ -107,13 +107,19 @@ describe('GET /api/transcript', () => {
     expect(status).toBe(409);
   });
 
-  it('uses the Codex parser for the hook-bound rollout path', async () => {
+  it('uses App Server as the authoritative transcript for a managed Codex pane', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-route-hook-'));
     const file = path.join(dir, 'rollout-aaaaaaaa-0000-0000-0000-000000000002.jsonl');
     fs.writeFileSync(file, JSON.stringify({ type: 'response_item', payload: { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'hooked-codex' }] } }) + '\n');
     const app = express();
     app.use(transcriptRoutes({
       commands: {},
+      codexApp: {
+        read: vi.fn(async () => ({ thread: { turns: [{
+          id: 'turn-1', status: 'completed', startedAt: 1,
+          items: [{ id: 'message-1', type: 'agentMessage', text: 'hooked-codex' }],
+        }] } })),
+      },
       claudeEvents: {
         paneAgent: () => 'codex',
         paneSession: () => ({ agent: 'codex', sessionId: 'aaaaaaaa-0000-0000-0000-000000000002', transcriptPath: file, bindingVersion: 2 }),
@@ -124,6 +130,37 @@ describe('GET /api/transcript', () => {
       expect(status).toBe(200);
       expect(body.messages.map((m) => m.text)).toEqual(['hooked-codex']);
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  });
+
+  it('shows a managed empty Codex thread before its first hook-bound turn', async () => {
+    const app = express();
+    app.use(transcriptRoutes({
+      commands: {},
+      codexApp: {
+        discover: vi.fn(async () => ({ managed: true, threadId: 'thread-new' })),
+        read: vi.fn(async () => ({ thread: { id: 'thread-new', turns: [], status: { type: 'idle' } } })),
+      },
+      claudeEvents: { paneAgent: () => 'codex', paneSession: () => null },
+    }));
+    const { status, body } = await call(app, '/transcript?pane=%251&agent=codex');
+    expect(status).toBe(200);
+    expect(body).toMatchObject({ messages: [], session: 'thread-new', hasMore: false });
+    expect(body.unavailable).toBeUndefined();
+  });
+
+  it('does not present a plain Codex TUI as a synchronized conversation', async () => {
+    const app = express();
+    app.use(transcriptRoutes({
+      commands: {},
+      codexApp: { read: vi.fn(async () => null) },
+      claudeEvents: {
+        paneAgent: () => 'codex',
+        paneSession: () => ({ agent: 'codex', sessionId: 'aaaaaaaa-0000-0000-0000-000000000003', transcriptPath: '/rollout.jsonl', bindingVersion: 2 }),
+      },
+    }));
+    const { status, body } = await call(app, '/transcript?pane=%251&agent=codex');
+    expect(status).toBe(200);
+    expect(body).toMatchObject({ messages: [], unavailable: 'session-unmanaged' });
   });
 
   it('refuses a legacy Codex binding that may predate a /clear session switch', async () => {

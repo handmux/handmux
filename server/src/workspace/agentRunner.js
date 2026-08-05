@@ -8,6 +8,7 @@ import { ensurePrivateDir, writeJsonAtomic } from './atomicJson.js';
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const PANE_RE = /^%\d+$/;
 const RUNNER_FILE = fileURLToPath(import.meta.url);
+const HANDMUX_BIN = fileURLToPath(new URL('../../bin/handmux.js', import.meta.url));
 
 function errorText(error) {
   return error instanceof Error ? error.message : String(error);
@@ -55,7 +56,9 @@ export function launchAgentRequest(requestInput, {
     settleReady({ status: 'failed', error: earlyFailure(request, error, code) });
   };
   try {
-    child = spawn(request.cmd, request.args, { stdio: 'inherit', shell: false });
+    const command = request.cmd === 'codex' ? process.execPath : request.cmd;
+    const args = request.cmd === 'codex' ? [HANDMUX_BIN, 'codex', ...request.args] : request.args;
+    child = spawn(command, args, { stdio: 'inherit', shell: false });
   } catch (error) {
     failReady(error);
     finishCompletion({ code: null, signal: null, error: errorText(error) });

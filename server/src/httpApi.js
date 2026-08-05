@@ -25,6 +25,7 @@ import { transcriptRoutes } from './routes/transcript.js';
 import { DEFAULT_SHORTCUTS } from './shortcutConfig.js';
 import { workspaceRoutes } from './routes/workspace.js';
 import { browserRoutes } from './browser/routes.js';
+import { codexRoutes } from './routes/codex.js';
 
 // Re-exported for tests (test/keys.test.js) and any caller that imported it by this path historically.
 export { isAllowedKey } from './routes/terminal.js';
@@ -38,6 +39,7 @@ export function createApiRouter({
   browserBootstrap,
   previewDomain,
   workspace,
+  codexApp,
   home = homedir(), stateFile = process.env.CLAUDE_STATE_FILE || claudeStatePath(homedir()),
 } = {}) {
   const r = express.Router();
@@ -47,7 +49,7 @@ export function createApiRouter({
 
   const deps = {
     token, commands, docs, git, push, notifications, claudeEvents,
-    uploadExts, maxUploadBytes, asrEnv, previews, shortcuts, home, stateFile, workspace, browser, browserBootstrap, previewDomain,
+    uploadExts, maxUploadBytes, asrEnv, previews, shortcuts, home, stateFile, workspace, browser, browserBootstrap, previewDomain, codexApp,
   };
 
   r.use(sessionRoutes(deps));
@@ -63,6 +65,7 @@ export function createApiRouter({
   // the worker-owned bootstrap ticket store.
   r.use('/browser-proxy', browserRoutes(browser ? deps : { ...deps, previewDomain: null }));
   r.use(transcriptRoutes(deps));
+  r.use(codexRoutes(deps));
   if (workspace) r.use(workspaceRoutes(deps));
 
   return r;

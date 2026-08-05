@@ -65,7 +65,9 @@ export async function takeoverOrphan(
   if (o.sessionId !== sessionId) return { error: 'session changed', status: 409 };
   if (!o.cwd) return { error: 'no cwd', status: 409 };
   const agent = getAgent(o.agent);
-  const cmd = agent.sessions.resumeArgs(sessionId).join(' ');
+  const cmd = agent.sessions.managedResumeCmd
+    ? agent.sessions.managedResumeCmd(sessionId)
+    : agent.sessions.resumeArgs(sessionId).join(' ');
 
   let sid;
   let wid;

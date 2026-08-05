@@ -33,6 +33,7 @@ export function useTranscript(pane, enabled, agent = 'claude', refreshToken = nu
   const [session, setSession] = useState(null); // the session id `messages` belong to (ChatView's echo dedup)
   const [loaded, setLoaded] = useState(false); // has the FIRST response landed? (loading vs genuinely empty)
   const [unavailable, setUnavailable] = useState(null); // safe refusal, e.g. a Codex pane without exact hook binding
+  const [unavailableDetail, setUnavailableDetail] = useState(null);
   const hashRef = useRef('');
   const oldestKRef = useRef(null);
   const seededRef = useRef(false); // has the older-page cursor been seeded from the first recent response?
@@ -55,6 +56,7 @@ export function useTranscript(pane, enabled, agent = 'claude', refreshToken = nu
     setSession(null);
     setLoaded(false);
     setUnavailable(null);
+    setUnavailableDetail(null);
   }, [pane, agent]);
 
   // Recent polling and scroll-up history use the same 20-message page size. Auto-fill in ChatView pulls
@@ -75,9 +77,11 @@ export function useTranscript(pane, enabled, agent = 'claude', refreshToken = nu
       setSession(null);
       setHasMoreOlder(false);
       setUnavailable(r.unavailable);
+      setUnavailableDetail(r.detail || null);
       return;
     }
     setUnavailable(null);
+    setUnavailableDetail(null);
     const incoming = Array.isArray(r.messages) ? r.messages : [];
     // SESSION SWITCH (e.g. /clear started a new jsonl): REPLACE, never merge. k is a per-file ordinal that
     // restarts at 0 in the new session — merging by k would overwrite the head with the new messages but
@@ -138,5 +142,5 @@ export function useTranscript(pane, enabled, agent = 'claude', refreshToken = nu
     }
   }, [pane, agent, hasMoreOlder]);
 
-  return { messages, hasMoreOlder, loadOlder, loadingOlder, session, loaded, unavailable };
+  return { messages, hasMoreOlder, loadOlder, loadingOlder, session, loaded, unavailable, unavailableDetail };
 }
