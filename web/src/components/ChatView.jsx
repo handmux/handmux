@@ -27,7 +27,7 @@ function toolSummary(tool) {
   const inp = tool.input || {};
   if (n === 'Bash') return `运行 ${inp.command || ''}`.trim();
   if (n === 'exec_command') return `运行 ${inp.cmd || ''}`.trim();
-  if (n === 'apply_patch') return '应用代码改动';
+  if (n === 'apply_patch') return String(inp.file_path || '').split(/[\\/]/).filter(Boolean).pop() || '修改文件';
   if (n === 'web__run') return '联网查询';
   if (n === 'view_image') return `查看图片 ${inp.path || ''}`.trim();
   if (n === 'wait') return '等待任务完成';

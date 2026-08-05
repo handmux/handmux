@@ -137,6 +137,16 @@ describe('ChatView', () => {
     expect(screen.queryByText('a')).toBeNull(); // 结果默认折叠
   });
 
+  it('labels a code change with its filename instead of a generic action', async () => {
+    mockTranscript([{
+      k: 0, role: 'assistant', type: 'tool',
+      tool: { name: 'apply_patch', input: { file_path: '/work/web/src/ChatView.jsx' }, result: '', isError: false },
+    }]);
+    render(<ChatView pane="%0" kind="done" />);
+    await screen.findByText('ChatView.jsx');
+    expect(screen.queryByText('应用代码改动')).toBeNull();
+  });
+
   it('an uncatalogued tool gets a generic 调用工具 verb (never a bare tool name); a skill says 激活技能', async () => {
     mockTranscript([
       { k: 0, i: 0, role: 'assistant', type: 'tool', tool: { name: 'AskUserQuestion', input: { questions: [] }, result: null, isError: false } },
