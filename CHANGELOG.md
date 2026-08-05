@@ -7,6 +7,7 @@ All notable changes to handmux. Format follows [Keep a Changelog](https://keepac
 ### Added
 - 对话视图新增 Codex 托管模式：终端与手机共享同一 App Server 会话，可直接收发消息、处理命令与文件审批、停止任务，并同步压缩、模型、收件箱状态与推送，无需 Codex Hooks。
 - 托管 Codex 对话可在输入区直接查看和切换模型、思考强度，`/model` 与 `/effort` 无需再跳转终端。
+- 普通 Codex pane 也会显示对话入口，可在原 pane 中一键接管当前会话并续接为托管模式。
 
 ### Fixed
 - 修复 Codex 对话与终端可能关联到不同会话、`/clear` 后仍显示旧会话，以及连续点击停止会重复发送 Esc 的问题。

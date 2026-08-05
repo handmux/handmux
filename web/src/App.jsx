@@ -48,6 +48,8 @@ import BottomDock from './components/BottomDock.jsx';
 import ChatComposer from './components/ChatComposer.jsx';
 import LensSwitch from './components/LensSwitch.jsx';
 import ChatView from './components/ChatView.jsx';
+import CodexTakeover from './components/CodexTakeover.jsx';
+import LensBoot from './components/LensBoot.jsx';
 import { slashEchoFor } from './slashCommands.js';
 import TokenPrompt from './components/TokenPrompt.jsx';
 import Settings from './components/Settings.jsx';
@@ -145,6 +147,7 @@ export default function App() {
   const [handoffToast, setHandoffToast] = useState(null); // "switched to terminal to run /x" hint after a slash hand-off
   const [slashEcho, setSlashEcho] = useState(null); // optimistic command pill for a chat-staying slash command {name,args,paneId}
   const [transcriptWake, setTranscriptWake] = useState({ paneId: null, seq: 0 }); // successful send -> immediate transcript refresh
+  const [codexTakeoverSeq, setCodexTakeoverSeq] = useState(0);
   const [docToast, setDocToast] = useState(null); // transient error toast for absolute-path doc failures
   const [exitHint, setExitHint] = useState(false); // "press Back again to exit" hint (double-back guard)
   const [docLinkPrompt, setDocLinkPrompt] = useState(null); // { path, x, y } confirm popover for a tapped terminal path
@@ -1313,7 +1316,7 @@ export default function App() {
   }, [needToken, notifInboxOpen, notifRetrySeq, handledAuth]);
 
   const currentAgent = states[current?.paneId]?.agent;
-  const codexSession = useCodexSession(current?.paneId, chatLensOn && currentAgent === 'codex');
+  const codexSession = useCodexSession(current?.paneId, chatLensOn && currentAgent === 'codex', codexTakeoverSeq);
   const currentKind = currentAgent === 'codex'
     ? codexKind(codexSession, states[current?.paneId]?.kind)
     : states[current?.paneId]?.kind;
@@ -1355,6 +1358,12 @@ export default function App() {
   // Chat lens is active only for a supported pane whose lens is set to 'chat'. Drives BOTH swaps: the main
   // view (ChatView vs Terminal) and the bottom bar (ChatComposer vs the terminal BottomDock).
   const chatLens = chatLensAvailable && lens === 'chat';
+  const codexChatLoading = chatLens && currentAgent === 'codex' && !codexSession.loaded;
+  const codexNeedsTakeover = chatLens && currentAgent === 'codex'
+    && !codexSession.managed
+    && codexSession.errorStatus === 409
+    && codexSession.errorCode === 'Codex session is not managed by Handmux';
+  const codexChatReady = currentAgent !== 'codex' || codexSession.managed;
 
   // Fetch + open a doc by ABSOLUTE path: dedupe into a tab, record the recent, reveal the sheet.
   // Throws on fetch failure so callers can decide (prompt for a base dir, or surface inline).
@@ -2002,12 +2011,23 @@ export default function App() {
           />
           {current.paneId && (
             chatLens ? (
-              <ChatView pane={current.paneId} agent={currentAgent} kind={currentKind} msg={states[current.paneId]?.msg} onAuthFail={onAuthFail}
-                codexSession={codexSession}
-                slashEcho={slashEcho && slashEcho.paneId === current.paneId ? slashEcho : null}
-                refreshToken={transcriptWake.paneId === current.paneId ? transcriptWake.seq : null}
-                onSlashEchoDone={() => setSlashEcho(null)}
-                onTerminalHandoff={() => { setLens('terminal'); localStorage.setItem('tw_lens_' + current.paneId, 'terminal'); }} />
+              codexChatLoading ? (
+                <div className="chat-view"><LensBoot hint={t('boot.loading')} /></div>
+              ) : codexNeedsTakeover ? (
+                <CodexTakeover pane={current.paneId} onAuthFail={onAuthFail}
+                  onTakenOver={() => {
+                    setStates((prev) => ({ ...prev, [current.paneId]: { ...prev[current.paneId], agent: 'codex' } }));
+                    setCodexTakeoverSeq((seq) => seq + 1);
+                  }}
+                  onTerminal={() => { setLens('terminal'); localStorage.setItem('tw_lens_' + current.paneId, 'terminal'); }} />
+              ) : (
+                <ChatView pane={current.paneId} agent={currentAgent} kind={currentKind} msg={states[current.paneId]?.msg} onAuthFail={onAuthFail}
+                  codexSession={codexSession}
+                  slashEcho={slashEcho && slashEcho.paneId === current.paneId ? slashEcho : null}
+                  refreshToken={transcriptWake.paneId === current.paneId ? transcriptWake.seq : null}
+                  onSlashEchoDone={() => setSlashEcho(null)}
+                  onTerminalHandoff={() => { setLens('terminal'); localStorage.setItem('tw_lens_' + current.paneId, 'terminal'); }} />
+              )
             ) : (
               <Terminal
                 ref={termRef}
@@ -2033,20 +2053,22 @@ export default function App() {
           )}
           {/* Chat lens gets its own modern composer card; the terminal keeps the two-page dock. */}
           {chatLens ? (
-            <ChatComposer
-              pane={current.paneId}
-              agent={currentAgent}
-              codexSession={codexSession}
-              desktop={desktopInput}
-              kind={currentKind}
-              cwd={currentPaneCwd}
-              onKey={sendKey}
-              onAuthFail={onAuthFail}
-              onSent={onCommandSent}
-              shortcuts={serverShortcuts}
-              micAvailable={micAvailable}
-              onInteractiveSlash={(cmd) => { setLens('terminal'); localStorage.setItem('tw_lens_' + current.paneId, 'terminal'); setHandoffToast(cmd); }}
-            />
+            codexChatReady ? (
+              <ChatComposer
+                pane={current.paneId}
+                agent={currentAgent}
+                codexSession={codexSession}
+                desktop={desktopInput}
+                kind={currentKind}
+                cwd={currentPaneCwd}
+                onKey={sendKey}
+                onAuthFail={onAuthFail}
+                onSent={onCommandSent}
+                shortcuts={serverShortcuts}
+                micAvailable={micAvailable}
+                onInteractiveSlash={(cmd) => { setLens('terminal'); localStorage.setItem('tw_lens_' + current.paneId, 'terminal'); setHandoffToast(cmd); }}
+              />
+            ) : null
           ) : (
             <BottomDock
               ref={dockRef}

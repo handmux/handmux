@@ -3,18 +3,29 @@ import express from 'express';
 import request from 'supertest';
 import { codexRoutes } from '../src/routes/codex.js';
 
-function appFor({ sessionId = 'thread-1', bindingVersion = 2, agent = 'codex', codexApp = {} } = {}) {
+function appFor({
+  sessionId = 'thread-1', bindingVersion = 2, agent = 'codex', codexApp = {},
+  commands = {}, claudeEvents = {}, routeOptions = {},
+} = {}) {
   const app = express();
   app.use(express.json());
   app.use(codexRoutes({
     claudeEvents: {
       paneAgent: () => agent,
       paneSession: () => ({ agent, sessionId, bindingVersion }),
+      getStates: async () => ({ '%1': { agent } }),
+      ...claudeEvents,
+    },
+    commands: {
+      paneCurrentPath: async () => '/work',
+      respawnPane: async () => {},
+      ...commands,
     },
     codexApp: {
       discover: async () => ({ managed: true, threadId: sessionId }),
       ...codexApp,
     },
+    ...routeOptions,
   }));
   return app;
 }
@@ -71,5 +82,77 @@ describe('Codex App Server routes', () => {
     const app = appFor({ codexApp: { updateSettings: vi.fn() } });
     await request(app).post('/codex/settings').send({ pane: '%1' }).expect(400, { error: 'no settings supplied' });
     await request(app).post('/codex/settings').send({ pane: '%1', effort: '' }).expect(400, { error: 'bad effort' });
+  });
+
+  it('takes over the exact Hook-bound Codex session in the same pane', async () => {
+    const sessionId = '019fbaf3-ff76-7923-a61a-c89a3acb8ca9';
+    const respawnPane = vi.fn(async () => {});
+    const status = vi.fn(async () => ({ managed: true, threadId: sessionId }));
+    const discover = vi.fn()
+      .mockResolvedValueOnce({ managed: false, threadId: null })
+      .mockResolvedValue({ managed: true, threadId: sessionId });
+    await request(appFor({
+      sessionId,
+      commands: { respawnPane },
+      codexApp: { discover, status },
+      routeOptions: { takeoverWait: async () => {} },
+    })).post('/codex/takeover').send({ pane: '%1' }).expect(200, { managed: true, threadId: sessionId });
+
+    expect(respawnPane).toHaveBeenCalledWith('%1', '/work', `handmux codex resume ${sessionId}`);
+    expect(status).toHaveBeenCalledWith('%1', sessionId);
+  });
+
+  it('refuses takeover without a current exact binding', async () => {
+    const respawnPane = vi.fn(async () => {});
+    await request(appFor({
+      sessionId: '019fbaf3-ff76-7923-a61a-c89a3acb8ca9',
+      bindingVersion: 1,
+      commands: { respawnPane },
+      codexApp: { discover: async () => ({ managed: false, threadId: null }) },
+    })).post('/codex/takeover').send({ pane: '%1' })
+      .expect(409, { error: 'codex-session-unbound' });
+    expect(respawnPane).not.toHaveBeenCalled();
+  });
+
+  it('rechecks that the pane is still Codex before replacing it', async () => {
+    const respawnPane = vi.fn(async () => {});
+    await request(appFor({
+      sessionId: '019fbaf3-ff76-7923-a61a-c89a3acb8ca9',
+      claudeEvents: { getStates: async () => ({ '%1': { agent: 'claude' } }) },
+      commands: { respawnPane },
+      codexApp: { discover: async () => ({ managed: false, threadId: null }) },
+    })).post('/codex/takeover').send({ pane: '%1' })
+      .expect(409, { error: 'codex-pane-unavailable' });
+    expect(respawnPane).not.toHaveBeenCalled();
+  });
+
+  it('allows only one takeover mutation per pane at a time', async () => {
+    const sessionId = '019fbaf3-ff76-7923-a61a-c89a3acb8ca9';
+    let releaseRespawn;
+    let markStarted;
+    const started = new Promise((resolve) => { markStarted = resolve; });
+    const respawnPane = vi.fn(() => {
+      markStarted();
+      return new Promise((resolve) => { releaseRespawn = resolve; });
+    });
+    const discover = vi.fn()
+      .mockResolvedValueOnce({ managed: false, threadId: null })
+      .mockResolvedValue({ managed: true, threadId: sessionId });
+    const app = appFor({
+      sessionId,
+      commands: { respawnPane },
+      codexApp: { discover, status: async () => ({ managed: true, threadId: sessionId }) },
+      routeOptions: { takeoverWait: async () => {} },
+    });
+
+    const first = request(app).post('/codex/takeover').send({ pane: '%1' })
+      .expect(200, { managed: true, threadId: sessionId });
+    const firstDone = first.then(() => {});
+    await started;
+    await request(app).post('/codex/takeover').send({ pane: '%1' })
+      .expect(409, { error: 'codex-takeover-in-progress' });
+    releaseRespawn();
+    await firstDone;
+    expect(respawnPane).toHaveBeenCalledTimes(1);
   });
 });

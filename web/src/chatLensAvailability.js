@@ -4,6 +4,8 @@ export function canEnableChatLens(hooksStatus, managedCodexAvailable) {
 
 export function canUseChatLens(agent, hooksStatus, codexSession) {
   if (agent === 'claude') return hooksStatus === 'installed';
-  if (agent === 'codex') return !!(codexSession?.loaded && codexSession?.managed);
+  // A plain Codex pane still gets the switch: its chat surface offers one-click takeover instead of
+  // making the control disappear. Management gates chat operations, not discoverability.
+  if (agent === 'codex') return true;
   return false;
 }

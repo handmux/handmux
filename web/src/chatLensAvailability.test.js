@@ -11,12 +11,12 @@ describe('chat lens availability', () => {
     expect(canEnableChatLens(null, false)).toBe(true);
   });
 
-  it('only exposes the switch on a pane with a reliable conversation source', () => {
+  it('exposes every Codex pane so unmanaged sessions can offer takeover', () => {
     expect(canUseChatLens('claude', 'installed', null)).toBe(true);
     expect(canUseChatLens('claude', 'absent', null)).toBe(false);
     expect(canUseChatLens('codex', 'absent', { loaded: true, managed: true })).toBe(true);
-    expect(canUseChatLens('codex', 'installed', { loaded: true, managed: false })).toBe(false);
-    expect(canUseChatLens('codex', 'installed', { loaded: false, managed: true })).toBe(false);
+    expect(canUseChatLens('codex', 'installed', { loaded: true, managed: false })).toBe(true);
+    expect(canUseChatLens('codex', 'installed', { loaded: false, managed: true })).toBe(true);
   });
 
   it('keeps managed compaction distinct from a normal active turn', () => {

@@ -250,6 +250,18 @@ async function runStartupCmd(target, cmd) {
   await sendEnter(target);
 }
 
+// Replace the program running in an existing pane while preserving the pane id, window layout and cwd.
+// The command is typed into a fresh shell (rather than passed as tmux's shell-command) so the pane remains
+// usable if it exits. Used by Codex takeover to turn a plain TUI into `handmux codex resume <exact-id>`.
+export async function respawnPane(paneId, cwd, cmd) {
+  if (!isPaneId(paneId)) throw new Error(`invalid pane id: ${JSON.stringify(paneId)}`);
+  if (!isValidStartupCmd(cmd)) throw new Error('invalid startup command');
+  const args = ['respawn-pane', '-k', '-t', paneId];
+  if (cwd) args.push('-c', cwd);
+  await runTmux(args);
+  await runStartupCmd(paneId, cmd);
+}
+
 // Read a pane's working directory, so a new window can open in the dir you're working in.
 export async function paneCurrentPath(paneId) {
   const out = await runTmux(['display-message', '-p', '-t', paneId, '#{pane_current_path}']);

@@ -82,6 +82,8 @@ export const getPendingPrompt = (pane, agent = 'claude') =>
   req(`/api/pending-prompt?pane=${encodeURIComponent(pane)}&agent=${encodeURIComponent(agent)}`, { timeoutMs: 8000 }).then((r) => r.prompt || null);
 export const getCodexSession = (pane) =>
   req(`/api/codex/session?pane=${encodeURIComponent(pane)}`, { timeoutMs: 8000 });
+export const takeoverCodexSession = (pane) =>
+  req('/api/codex/takeover', { method: 'POST', body: JSON.stringify({ pane }), timeoutMs: 15000 });
 export const sendCodexMessage = (pane, text) =>
   req('/api/codex/send', { method: 'POST', body: JSON.stringify({ pane, text }), timeoutMs: 8000 });
 export const compactCodexSession = (pane) =>
