@@ -42,12 +42,20 @@ describe('Codex App Server routes', () => {
     expect(send).toHaveBeenCalledWith('%1', 'thread-1', 'continue');
   });
 
-  it('refuses unbound panes and malformed approval responses', async () => {
+  it('reports expected unmanaged and starting states without turning them into API failures', async () => {
+    await request(appFor({ codexApp: { discover: async () => ({ managed: false, threadId: null }) } }))
+      .get('/codex/session?pane=%251').expect(200, { managed: false, threadId: null });
     await request(appFor({ sessionId: null, codexApp: { discover: async () => ({ managed: true, threadId: null }) } }))
-      .get('/codex/session?pane=%251').expect(409, { error: 'Codex session is not bound yet' });
+      .get('/codex/session?pane=%251').expect(200, { managed: true, threadId: null });
+  });
+
+  it('rejects malformed structured responses before calling App Server', async () => {
     await request(appFor({ codexApp: {} }))
       .post('/codex/approval').send({ pane: '%1', requestId: null, decision: 'accept' })
       .expect(400, { error: 'bad approval response' });
+    await request(appFor({ codexApp: {} }))
+      .post('/codex/input').send({ pane: '%1', requestId: '92', answers: [] })
+      .expect(400, { error: 'bad user input response' });
   });
 
   it('uses the only thread loaded by this managed pane before hooks bind its first turn', async () => {
@@ -76,6 +84,19 @@ describe('Codex App Server routes', () => {
       .expect(200, { settings: { model: 'gpt-new', effort: 'high' } });
     expect(models).toHaveBeenCalledWith('%1', 'thread-1');
     expect(updateSettings).toHaveBeenCalledWith('%1', 'thread-1', { model: 'gpt-new', effort: 'high' });
+  });
+
+  it('clears and answers questions through the exact bound App Server thread', async () => {
+    const clear = vi.fn(async () => ({ threadId: 'thread-new' }));
+    const answerInput = vi.fn(async () => ({ ok: true }));
+    const app = appFor({ codexApp: { clear, answerInput } });
+    await request(app).post('/codex/clear').send({ pane: '%1' })
+      .expect(200, { threadId: 'thread-new' });
+    await request(app).post('/codex/input').send({
+      pane: '%1', requestId: '92', answers: { color: ['蓝色'] },
+    }).expect(200, { ok: true });
+    expect(clear).toHaveBeenCalledWith('%1', 'thread-1');
+    expect(answerInput).toHaveBeenCalledWith('%1', 'thread-1', '92', { color: ['蓝色'] });
   });
 
   it('rejects empty or malformed settings updates', async () => {

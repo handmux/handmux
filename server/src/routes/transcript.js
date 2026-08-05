@@ -1,7 +1,5 @@
-// Read a pane's agent session jsonl and return it as normalized chat messages (the "对话" lens's
-// read-projection). Pane → bound hook path; Claude keeps its legacy cwd fallback when hook metadata
-// is unavailable. Codex never falls back by cwd because multiple panes and non-tmux sessions commonly
-// share one project directory, so doing so can expose an unrelated conversation.
+// Read a pane's agent session as normalized chat messages. Claude reads its Hook-bound jsonl and keeps its
+// established cwd fallback. Managed Codex reads only the pane-owned App Server thread.
 // Server-side paginated — the phone must never receive the whole transcript:
 //   - Recent window (default + polling): ?pane=&limit=10&since=<hash> — the last `limit` messages, with
 //     the same content-hash `since`省流 as /history (unchanged window → 204). `hasMore`/`firstSeq` tell the
@@ -53,15 +51,17 @@ export function transcriptRoutes({ commands, claudeEvents, reader = transcriptRe
     const bound = (claudeEvents?.paneAgent ? claudeEvents.paneAgent(pane) : null) || hooked?.agent || null;
     if (requested && bound && requested !== bound) return res.status(409).json({ error: 'pane agent mismatch' });
     const id = bound || requested || 'claude';
-    const agent = AGENTS.find((candidate) => candidate.id === id && candidate.transcript?.createParser);
-    if (!agent) return res.status(409).json({ error: 'chat lens unsupported for this agent' });
+    const agent = AGENTS.find((candidate) => candidate.id === id);
+    if (!agent || (agent.id !== 'codex' && !agent.transcript?.createParser)) {
+      return res.status(409).json({ error: 'chat lens unsupported for this agent' });
+    }
     req.chatAgent = agent;
     req.chatSession = hooked;
     next();
   });
 
-  // Claude's pending menus are screen-scraped and driven by digit hotkeys. Codex uses different approval
-  // keys, so its chat lens never calls these endpoints; it hands the user to the terminal instead.
+  // Claude's pending menus and context meter come from its TUI. Codex exposes both through App Server and
+  // therefore never calls these terminal-specific endpoints.
   r.use(['/pending-prompt', '/context'], (req, res, next) => {
     if (req.chatAgent.id !== 'claude') return res.status(409).json({ error: 'interactive chat controls unsupported for this agent' });
     next();
@@ -94,45 +94,41 @@ export function transcriptRoutes({ commands, claudeEvents, reader = transcriptRe
     const limit = Math.min(Math.max(Number(req.query.limit) || 10, 1), 100);
     const before = req.query.before != null && req.query.before !== '' ? Number(req.query.before) : null;
     try {
-      // Bind pane→session via the hook state's per-pane transcript_path (authoritative). Codex session
-      // files cannot be safely matched by cwd alone: refuse to guess instead of showing another pane's
-      // (or this server process's) conversation. Claude retains its established cwd fallback.
+      if (req.chatAgent.id === 'codex') {
+        const empty = { messages: [], hash: '', session: null, hasMore: false, firstSeq: null };
+        try {
+          const discovered = await codexApp?.discover?.(req.query.pane);
+          if (!discovered?.managed) return res.json({ ...empty, unavailable: 'session-unmanaged' });
+          const sessionId = discovered?.threadId || null;
+          if (!sessionId) return res.json({ ...empty, unavailable: 'session-unbound' });
+          let opened = null;
+          try { opened = codexApp ? await codexApp.read(req.query.pane, sessionId) : null; }
+          catch (error) {
+            return res.json({ ...empty, unavailable: 'app-server-unavailable', detail: error?.message || String(error) });
+          }
+          if (!opened) return res.json({ ...empty, unavailable: 'session-unmanaged' });
+          const parsed = projectCodexThread(opened.thread);
+          const { messages, firstSeq, hasMore } = pageTranscript(parsed, before, limit);
+          if (before == null) {
+            const hash = createHash('sha1').update(JSON.stringify(messages)).digest('hex').slice(0, 16);
+            if (req.query.since === hash) return res.status(204).end();
+            return res.json({ messages, hash, session: sessionId, hasMore, firstSeq });
+          }
+          return res.json({ messages, session: sessionId, hasMore, firstSeq });
+        } catch (error) {
+          return res.json({ ...empty, unavailable: 'app-server-unavailable', detail: error?.message || String(error) });
+        }
+      }
+
+      // Claude binds pane→session via Hook transcript_path, with its established cwd fallback.
       let file = null;
       let sessionId = null;
       const hooked = claudeEvents && claudeEvents.paneSession ? claudeEvents.paneSession(req.query.pane) : null;
-      const requiredBindingVersion = req.chatAgent.sessions?.bindingVersion;
-      const bindingCurrent = !requiredBindingVersion || hooked?.bindingVersion === requiredBindingVersion;
-      if (hooked && hooked.transcriptPath && bindingCurrent) {
+      if (hooked?.transcriptPath) {
         file = hooked.transcriptPath;
         sessionId = hooked.sessionId || path.basename(file).replace(/\.jsonl$/, '');
       }
       const empty = { messages: [], hash: '', session: sessionId || null, hasMore: false, firstSeq: null };
-      if (req.chatAgent.id === 'codex') {
-        // Managed Codex binds pane→thread through the pane's App Server socket. Never prefer a stale Hook
-        // row here: /clear can replace the active thread without writing any Hook metadata.
-        try {
-          const discovered = await codexApp?.discover?.(req.query.pane);
-          if (!discovered?.managed) return res.json({ ...empty, unavailable: 'session-unmanaged' });
-          sessionId = discovered?.threadId || null;
-        } catch (error) {
-          return res.json({ ...empty, unavailable: 'app-server-unavailable', detail: error?.message || String(error) });
-        }
-        if (!sessionId) return res.json({ ...empty, unavailable: 'session-unbound' });
-        let opened = null;
-        try { opened = codexApp ? await codexApp.read(req.query.pane, sessionId) : null; }
-        catch (error) {
-          return res.json({ ...empty, unavailable: 'app-server-unavailable', detail: error?.message || String(error) });
-        }
-        if (!opened) return res.json({ ...empty, unavailable: 'session-unmanaged' });
-        const parsed = projectCodexThread(opened.thread);
-        const { messages, firstSeq, hasMore } = pageTranscript(parsed, before, limit);
-        if (before == null) {
-          const hash = createHash('sha1').update(JSON.stringify(messages)).digest('hex').slice(0, 16);
-          if (req.query.since === hash) return res.status(204).end();
-          return res.json({ messages, hash, session: sessionId, hasMore, firstSeq });
-        }
-        return res.json({ messages, session: sessionId, hasMore, firstSeq });
-      }
       if (!file) {
         const cwd = await commands.paneCurrentPath(req.query.pane);
         const dir = projectsDir();

@@ -5,12 +5,12 @@ All notable changes to handmux. Format follows [Keep a Changelog](https://keepac
 ## [Unreleased]
 
 ### Added
-- 对话视图新增 Codex 托管模式：终端与手机共享同一 App Server 会话，可直接收发消息、处理命令与文件审批、停止任务，并同步压缩、模型、收件箱状态与推送，无需 Codex Hooks。
+- 对话视图新增 Codex 托管模式：终端与手机共享同一 App Server 会话，可直接收发消息、处理提问与审批、停止任务，并同步清空、压缩、模型、收件箱状态与推送，无需 Codex Hooks。
 - 托管 Codex 对话可在输入区直接查看和切换模型、思考强度，`/model` 与 `/effort` 无需再跳转终端。
 - 普通 Codex pane 也会显示对话入口，可在原 pane 中一键接管当前会话并续接为托管模式。
 
 ### Fixed
-- 修复 Codex 对话与终端可能关联到不同会话、`/clear` 后仍显示旧会话，以及连续点击停止会重复发送 Esc 的问题。
+- 修复 Codex 对话与终端可能关联到不同会话、`/clear` 后仍显示旧会话，以及连续点击停止会重复发送 Esc 的问题；托管模式不再把斜杠命令或交互请求回退到终端。
 - 修复 Codex 托管对话中部分工具调用不显示的问题。
 - Codex 文件编辑工具会明确显示“编辑”和文件名，命令工具不再展示终端中不可见的 shell 启动参数。
 - 修复手机终端聚焦输入框时可能被软键盘重复顶到屏幕顶部，以及 iPhone 收起键盘后终端可显示区域可能无法恢复整屏的问题。

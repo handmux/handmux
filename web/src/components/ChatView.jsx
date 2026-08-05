@@ -1,7 +1,6 @@
 // web/src/components/ChatView.jsx
-// The 对话 lens: a read-projection of the pane's agent session as IM bubbles + gate cards
-// (permission / AskUserQuestion). NO input of its own — text is typed in the existing BottomDock composer
-// (which stays mounted below in chat lens). Gate buttons write via the SAME send-keys the terminal uses.
+// The 对话 lens: a read-projection of the pane's agent session as IM bubbles + gate cards. Claude gates
+// still drive its TUI; managed Codex gates use App Server requests and never touch the terminal.
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { marked } from 'marked';
 import DOMPurify from 'dompurify';
@@ -10,7 +9,7 @@ import { usePendingPrompt } from '../hooks/usePendingPrompt.js';
 import { fallbackGate } from '../chatGate.js';
 import PromptGate from './PromptGate.jsx';
 import LensBoot from './LensBoot.jsx';
-import { answerCodexApproval, sendKeys, UnauthorizedError } from '../api.js';
+import { answerCodexApproval, answerCodexInput, sendKeys, UnauthorizedError } from '../api.js';
 import { t } from '../i18n';
 import { useBackButton, useHistoryLayer, unwindHistory } from '../hooks/useBackButton.js';
 import {
@@ -381,7 +380,7 @@ function timeStampedIndices(messages) {
   return set;
 }
 
-// Format a message's jsonl ISO timestamp as a label: today → "14:32"; an earlier day →
+// Format a message's ISO timestamp as a label: today → "14:32"; an earlier day →
 // "7月16日 14:32". Returns null for a missing/unparseable stamp so the caller shows nothing (never a fake time).
 function fmtTime(iso) {
   if (!iso) return null;
@@ -450,7 +449,74 @@ function CodexApprovalGate({ pane, approval, onAuthFail }) {
   );
 }
 
-export default function ChatView({ pane, agent = 'claude', kind, msg, onAuthFail, slashEcho, onSlashEchoDone, onTerminalHandoff, refreshToken = null, codexSession = null }) {
+function CodexInputGate({ pane, input, onAuthFail }) {
+  const [answers, setAnswers] = useState({});
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState('');
+  const questions = input.questions || [];
+  const answer = (id, value) => setAnswers((current) => ({ ...current, [id]: value }));
+  const complete = questions.length > 0 && questions.every((question) => answers[question.id]?.trim());
+  const submit = async () => {
+    if (!complete || submitting) return;
+    setSubmitting(true);
+    setError('');
+    try {
+      await answerCodexInput(pane, input.id, Object.fromEntries(
+        questions.map((question) => [question.id, [answers[question.id].trim()]]),
+      ));
+    } catch (err) {
+      if (err instanceof UnauthorizedError) onAuthFail?.();
+      else setError(err?.serverError || err?.message || t('chat.input.failed'));
+      setSubmitting(false);
+    }
+  };
+  return (
+    <div className="chat-gate codex-input-gate" role="dialog" aria-modal="true">
+      <div className="chat-gate-step">{t('chat.input.request')}</div>
+      {questions.map((question, index) => {
+        const options = question.options || [];
+        const selected = answers[question.id] || '';
+        const isPreset = options.some((option) => option.label === selected);
+        return (
+          <section className="codex-input-question" key={question.id}>
+            {(questions.length > 1 || question.header) && (
+              <div className="chat-gate-step">
+                {question.header || t('chat.input.step', { current: index + 1, total: questions.length })}
+              </div>
+            )}
+            <div className="chat-gate-prompt">{question.question}</div>
+            {options.length > 0 && (
+              <div className="chat-gate-options" role="radiogroup">
+                {options.map((option) => (
+                  <button key={option.label} type="button" role="radio"
+                    aria-checked={selected === option.label}
+                    className={`chat-gate-opt${selected === option.label ? ' on' : ''}`}
+                    onClick={() => answer(question.id, option.label)}>
+                    <span className="chat-gate-opt-label">{option.label}</span>
+                    {option.description && <span className="chat-gate-opt-desc">{option.description}</span>}
+                  </button>
+                ))}
+              </div>
+            )}
+            {(question.isOther || options.length === 0) && (
+              <input className="codex-input-text" type={question.isSecret ? 'password' : 'text'}
+                value={isPreset ? '' : selected}
+                placeholder={options.length ? t('chat.input.other') : t('chat.input.placeholder')}
+                onChange={(event) => answer(question.id, event.target.value)} />
+            )}
+          </section>
+        );
+      })}
+      {error && <div className="chat-turn-error">{error}</div>}
+      <div className="chat-gate-actions">
+        <button type="button" className="chat-gate-btn primary" disabled={!complete || submitting}
+          onClick={() => void submit()}>{t('chat.input.submit')}</button>
+      </div>
+    </div>
+  );
+}
+
+export default function ChatView({ pane, agent = 'claude', kind, msg, onAuthFail, slashEcho, onSlashEchoDone, refreshToken = null, codexSession = null }) {
   const { messages, hasMoreOlder, loadOlder, loadingOlder, session, loaded, unavailable, unavailableDetail } = useTranscript(pane, true, agent, refreshToken);
   const tsIdx = useMemo(() => timeStampedIndices(messages), [messages]);
   // The gate's options are scraped from the pane's on-screen menu (they're not in the transcript). Poll only
@@ -458,9 +524,11 @@ export default function ChatView({ pane, agent = 'claude', kind, msg, onAuthFail
   // the menu couldn't be parsed → the generic 允许/拒绝 fallback so there's always a way to act.
   const busy = kind === 'permission';
   const claudeGate = busy && agent === 'claude';
-  const sessionGate = ['session-unbound', 'session-unmanaged', 'app-server-unavailable'].includes(unavailable);
+  const sessionIssue = unavailable || (agent === 'codex' && codexSession?.error ? 'app-server-unavailable' : null);
+  const sessionIssueDetail = unavailableDetail || codexSession?.error || null;
+  const sessionGate = ['session-unbound', 'session-unmanaged', 'app-server-unavailable'].includes(sessionIssue);
   const codexApproval = agent === 'codex' && codexSession?.managed ? codexSession.approvals?.[0] : null;
-  const terminalGate = busy && agent !== 'claude' && !sessionGate && !codexApproval;
+  const codexInput = agent === 'codex' && codexSession?.managed ? codexSession.userInputs?.[0] : null;
   const { prompt, refetch } = usePendingPrompt(pane, claudeGate, agent);
   // After the user answers, the menu vanishes from the screen instantly but `kind` stays 'permission'
   // until the slower /states poll catches up — so !prompt && busy would flash the 允许/拒绝 fallback
@@ -480,7 +548,7 @@ export default function ChatView({ pane, agent = 'claude', kind, msg, onAuthFail
   // instead. Both suppress the plain typing wave — neither is "Claude generating a reply".
   const showCompacting = kind === 'compacting';
   const showError = kind === 'error';
-  // The optimistic slash-command echo (App sets it at send time — the jsonl scaffold only lands when the
+  // Claude's optimistic slash-command echo (App sets it at send time — the jsonl scaffold only lands when the
   // command COMPLETES, minutes for /compact). It's dropped once the REAL marker takes over: a marker with
   // the same name and a k beyond what was on screen when the echo appeared (so a same-named marker from an
   // EARLIER run in the window can't kill a fresh echo), or a session switch (e.g. /clear — the new
@@ -603,7 +671,7 @@ export default function ChatView({ pane, agent = 'claude', kind, msg, onAuthFail
   // translateY-lifted by the Android keyboard, which also re-anchors position:fixed to .app). Re-measure on
   // viewport churn (keyboard, rotate). Falls back to full-screen (CSS inset:0) when unmeasurable (jsdom).
   const [gateMask, setGateMask] = useState(null); // { top, height } px relative to .app, or null
-  const gateUp = !!(prompt || fb || codexApproval || terminalGate || sessionGate);
+  const gateUp = !!(prompt || fb || codexApproval || codexInput || sessionGate);
   useEffect(() => {
     if (!gateUp) { setGateMask(null); return; }
     const measure = () => {
@@ -798,31 +866,19 @@ export default function ChatView({ pane, agent = 'claude', kind, msg, onAuthFail
         </div>
       )}
       {codexApproval && <CodexApprovalGate key={codexApproval.id} pane={pane} approval={codexApproval} onAuthFail={onAuthFail} />}
-      {terminalGate && (
-        <div className="chat-gate chat-terminal-gate">
-          <div className="chat-gate-prompt">{t('chat.permission.terminalTitle')}</div>
-          <div className="chat-gate-hint">{t('chat.permission.terminalHint')}</div>
-          <div className="chat-gate-actions">
-            <button type="button" className="chat-gate-btn primary" onClick={onTerminalHandoff}>{t('chat.permission.openTerminal')}</button>
-          </div>
-        </div>
-      )}
+      {codexInput && <CodexInputGate key={codexInput.id} pane={pane} input={codexInput} onAuthFail={onAuthFail} />}
       {sessionGate && (
         <div className="chat-gate chat-terminal-gate">
-          <div className="chat-gate-prompt">{unavailable === 'session-unmanaged'
+          <div className="chat-gate-prompt">{sessionIssue === 'session-unmanaged'
             ? t('chat.session.unmanagedTitle')
-            : unavailable === 'app-server-unavailable' ? t('chat.session.connectionTitle') : t('chat.session.unboundTitle')}</div>
-          <div className="chat-gate-hint">{unavailable === 'session-unmanaged'
+            : sessionIssue === 'app-server-unavailable' ? t('chat.session.connectionTitle') : t('chat.session.unboundTitle')}</div>
+          <div className="chat-gate-hint">{sessionIssue === 'session-unmanaged'
             ? t('chat.session.unmanagedHint')
-            : unavailable === 'app-server-unavailable'
-              ? `${t('chat.session.connectionHint')}${unavailableDetail ? ` (${unavailableDetail})` : ''}`
+            : sessionIssue === 'app-server-unavailable'
+              ? `${t('chat.session.connectionHint')}${sessionIssueDetail ? ` (${sessionIssueDetail})` : ''}`
               : t('chat.session.unboundHint')}</div>
-          <div className="chat-gate-actions">
-            <button type="button" className="chat-gate-btn primary" onClick={onTerminalHandoff}>{t('chat.session.openTerminal')}</button>
-          </div>
         </div>
       )}
     </div>
   );
 }
-// 输入不在此处：chat 镜头下底部照常是 BottomDock composer（Task 7 保证其常驻），门卡片悬在气泡流末尾、composer 之上。

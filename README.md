@@ -68,7 +68,7 @@ handmux start --tunnel cloudflare   # instant public URL (cloudflared auto-insta
 ## Features
 
 - **Claude Code / Codex, deeply** — an inbox status ledger, thumb-approve permissions & plans, and stable host-wide usage bars shared by every connected device.
-- **Chat view (experimental)** — read and drive Claude Code / Codex with Markdown bubbles and tool cards; take over a plain Codex pane in one tap, then keep chat, approvals, stopping, model and reasoning controls synchronized through App Server.
+- **Chat view (experimental)** — read and drive Claude Code / Codex with Markdown bubbles and tool cards; take over a plain Codex pane in one tap, then keep messages, questions, approvals, stopping and conversation controls synchronized through App Server.
 - **Real-time terminal + desktop keyboard** — stream the same tmux pane on phone and desktop with scrollback, weak-network fallback, direct physical-keyboard input, and native copy/paste.
 - **Command & chat modes** — switch between direct terminal input and natural-language agent chat, with a customizable quick bar that stays in sync across devices.
 - **Client reload after updates** — once the server update has finished, use Settings → Reload app to load the new client without quitting and reopening the home-screen app.

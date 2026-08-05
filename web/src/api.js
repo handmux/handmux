@@ -88,6 +88,8 @@ export const sendCodexMessage = (pane, text) =>
   req('/api/codex/send', { method: 'POST', body: JSON.stringify({ pane, text }), timeoutMs: 8000 });
 export const compactCodexSession = (pane) =>
   req('/api/codex/compact', { method: 'POST', body: JSON.stringify({ pane }), timeoutMs: 8000 });
+export const clearCodexSession = (pane) =>
+  req('/api/codex/clear', { method: 'POST', body: JSON.stringify({ pane }), timeoutMs: 8000 });
 export const getCodexModels = (pane) =>
   req(`/api/codex/models?pane=${encodeURIComponent(pane)}`, { timeoutMs: 8000 });
 export const updateCodexSettings = (pane, settings) =>
@@ -96,6 +98,8 @@ export const interruptCodexSession = (pane) =>
   req('/api/codex/interrupt', { method: 'POST', body: JSON.stringify({ pane }), timeoutMs: 8000 });
 export const answerCodexApproval = (pane, requestId, decision) =>
   req('/api/codex/approval', { method: 'POST', body: JSON.stringify({ pane, requestId, decision }), timeoutMs: 8000 });
+export const answerCodexInput = (pane, requestId, answers) =>
+  req('/api/codex/input', { method: 'POST', body: JSON.stringify({ pane, requestId, answers }), timeoutMs: 8000 });
 export const sendText = (pane, text, enter = true) =>
   req('/api/send', { method: 'POST', body: JSON.stringify({ pane, text, enter }) });
 export const sendKeys = (pane, keys) =>

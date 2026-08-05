@@ -372,8 +372,8 @@ export function createClaudeEvents({
     };
   }
 
-  // Agent identity is needed independently of session metadata so the chat lens always chooses the matching
-  // transcript parser and never cwd-falls back to another agent's jsonl. Untagged legacy hook rows are Claude.
+  // Agent identity is needed independently of session metadata so the chat lens chooses the matching
+  // backend (Claude transcript or Codex App Server). Untagged legacy hook rows are Claude.
   function paneAgent(pane) {
     const rec = readStateFile(file)[pane];
     if (!rec || typeof rec !== 'object') return null;

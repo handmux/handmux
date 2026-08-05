@@ -9,6 +9,7 @@ const APPROVAL_METHODS = new Set([
   'item/commandExecution/requestApproval',
   'item/fileChange/requestApproval',
 ]);
+const USER_INPUT_METHOD = 'item/tool/requestUserInput';
 const SIMPLE_DECISIONS = new Set(['accept', 'acceptForSession', 'decline', 'cancel']);
 
 function asError(error) {
@@ -182,6 +183,28 @@ function normalizeApproval(message) {
   };
 }
 
+function normalizeUserInput(message) {
+  const { params = {} } = message;
+  return {
+    id: String(message.id),
+    threadId: params.threadId,
+    turnId: params.turnId,
+    itemId: params.itemId,
+    autoResolutionMs: params.autoResolutionMs ?? null,
+    questions: Array.isArray(params.questions) ? params.questions.map((question) => ({
+      id: String(question.id || ''),
+      header: String(question.header || ''),
+      question: String(question.question || ''),
+      isOther: !!question.isOther,
+      isSecret: !!question.isSecret,
+      options: Array.isArray(question.options) ? question.options.map((option) => ({
+        label: String(option.label || ''),
+        description: String(option.description || ''),
+      })) : null,
+    })).filter((question) => question.id && question.question) : [],
+  };
+}
+
 function turnSummary(turn) {
   const items = Array.isArray(turn?.items) ? turn.items : [];
   const message = [...items].reverse().find((item) => item?.type === 'agentMessage' && item.text?.trim());
@@ -237,6 +260,7 @@ function settingsFromResume(result) {
     modelProvider: result?.modelProvider || null,
     serviceTier: result?.serviceTier ?? null,
     cwd: result?.cwd || null,
+    runtimeWorkspaceRoots: Array.isArray(result?.runtimeWorkspaceRoots) ? result.runtimeWorkspaceRoots : null,
     approvalPolicy: result?.approvalPolicy || null,
     approvalsReviewer: result?.approvalsReviewer || null,
     sandboxPolicy: result?.sandbox || null,
@@ -244,6 +268,28 @@ function settingsFromResume(result) {
     effort: result?.reasoningEffort ?? null,
     multiAgentMode: result?.multiAgentMode || null,
   };
+}
+
+function sandboxMode(policy) {
+  if (policy?.type === 'readOnly') return 'read-only';
+  if (policy?.type === 'workspaceWrite') return 'workspace-write';
+  if (policy?.type === 'dangerFullAccess') return 'danger-full-access';
+  return null;
+}
+
+function clearThreadParams(settings = {}) {
+  const params = { sessionStartSource: 'clear' };
+  for (const key of ['model', 'modelProvider', 'serviceTier', 'cwd', 'approvalPolicy', 'approvalsReviewer']) {
+    if (settings[key] != null) params[key] = settings[key];
+  }
+  if (Array.isArray(settings.runtimeWorkspaceRoots)) params.runtimeWorkspaceRoots = settings.runtimeWorkspaceRoots;
+  const profile = settings.activePermissionProfile?.id;
+  if (profile) params.permissions = profile;
+  else {
+    const sandbox = sandboxMode(settings.sandboxPolicy);
+    if (sandbox) params.sandbox = sandbox;
+  }
+  return params;
 }
 
 function connectUnixWebSocket(socketPath) {
@@ -266,6 +312,7 @@ class CodexAppConnection {
     this.nextId = 1;
     this.pending = new Map();
     this.approvals = new Map();
+    this.userInputs = new Map();
     this.threadState = new Map();
     this.subscribed = new Set();
     this.lastStartedThreadId = null;
@@ -319,7 +366,17 @@ class CodexAppConnection {
       this.approvals.set(String(message.id), message);
       const approval = normalizeApproval(message);
       this.currentThreadId = approval.threadId || this.currentThreadId;
+      this.markWaiting(approval.threadId, 'waitingOnApproval');
       this.setInbox('permission', approval.reason || approval.command || '', `approval:${message.id}`);
+      this.bump(message.params?.threadId);
+      return;
+    }
+    if (message.id != null && message.method === USER_INPUT_METHOD) {
+      this.userInputs.set(String(message.id), message);
+      const input = normalizeUserInput(message);
+      this.currentThreadId = input.threadId || this.currentThreadId;
+      this.markWaiting(input.threadId, 'waitingOnUserInput');
+      this.setInbox('permission', input.questions[0]?.question || '', `input:${message.id}`);
       this.bump(message.params?.threadId);
       return;
     }
@@ -329,6 +386,8 @@ class CodexAppConnection {
       this.upsertLiveItem(params.threadId, params.turnId, params.item);
     } else if (message.method === 'serverRequest/resolved') {
       this.approvals.delete(String(params.requestId));
+      this.userInputs.delete(String(params.requestId));
+      this.markWorking(params.threadId);
       this.setInbox('working', '', `resolved:${params.requestId}`);
     } else if (message.method === 'thread/status/changed') {
       this.state(params.threadId).status = params.status;
@@ -435,6 +494,17 @@ class CodexAppConnection {
     if (threadId) this.state(threadId).revision++;
   }
 
+  markWaiting(threadId, flag) {
+    if (!threadId) return;
+    this.state(threadId).status = { type: 'active', activeFlags: [flag] };
+  }
+
+  markWorking(threadId) {
+    if (!threadId) return;
+    const state = this.state(threadId);
+    if (state.status?.type === 'active') state.status = { ...state.status, activeFlags: [] };
+  }
+
   write(message) {
     if (this.closed || this.ws?.readyState !== WebSocket.OPEN) throw new Error('Codex App Server is unavailable');
     this.ws.send(JSON.stringify(message));
@@ -538,6 +608,12 @@ class CodexAppConnection {
       .map(normalizeApproval);
   }
 
+  userInputsFor(threadId) {
+    return [...this.userInputs.values()]
+      .filter((request) => request.params?.threadId === threadId)
+      .map(normalizeUserInput);
+  }
+
   decide(threadId, requestId, decision) {
     if (!SIMPLE_DECISIONS.has(decision)) throw new Error('unsupported approval decision');
     const key = String(requestId);
@@ -547,7 +623,31 @@ class CodexAppConnection {
     if (!approval.decisions.includes(decision)) throw new Error('approval decision is unavailable');
     this.respond(request.id, { decision });
     this.approvals.delete(key);
+    this.markWorking(threadId);
     this.setInbox('working', '', `approval:${key}:resolved`);
+    this.bump(threadId);
+  }
+
+  answerInput(threadId, requestId, answers) {
+    const key = String(requestId);
+    const request = this.userInputs.get(key);
+    if (!request || request.params?.threadId !== threadId) throw new Error('user input request is no longer pending');
+    const input = normalizeUserInput(request);
+    const expected = new Set(input.questions.map((question) => question.id));
+    const normalized = {};
+    for (const [questionId, value] of Object.entries(answers || {})) {
+      if (!expected.has(questionId) || !Array.isArray(value) || value.some((answer) => typeof answer !== 'string')) {
+        throw new Error('bad user input response');
+      }
+      normalized[questionId] = { answers: value };
+    }
+    if ([...expected].some((questionId) => !normalized[questionId]?.answers.length)) {
+      throw new Error('bad user input response');
+    }
+    this.respond(request.id, { answers: normalized });
+    this.userInputs.delete(key);
+    this.markWorking(threadId);
+    this.setInbox('working', '', `input:${key}:resolved`);
     this.bump(threadId);
   }
 
@@ -666,6 +766,7 @@ export function createCodexAppServer({
         activityKind: client.inbox.kind,
         lastTurn: state.lastTurn,
         approvals: client.approvalsFor(threadId),
+        userInputs: client.userInputsFor(threadId),
         revision: state.revision,
       };
     },
@@ -695,6 +796,26 @@ export function createCodexAppServer({
       client.setInbox('compacting', '', `thread:${threadId}:compacting`);
       client.bump(threadId);
       return result;
+    },
+    async clear(pane, threadId) {
+      const client = await connection(pane);
+      if (!client) throw new Error('Codex session is not managed by Handmux');
+      const current = await client.ensureThread(threadId);
+      const result = await client.rpc('thread/start', clearThreadParams(current.settings));
+      const nextThreadId = result.thread?.id;
+      if (!nextThreadId) throw new Error('Codex App Server did not start a new thread');
+      const next = client.state(nextThreadId);
+      next.thread = result.thread;
+      next.status = result.thread?.status || { type: 'idle' };
+      next.settings = settingsFromResume(result);
+      next.loadedOnly = false;
+      next.revision++;
+      next.readRevision = next.revision;
+      client.subscribed.add(nextThreadId);
+      client.lastStartedThreadId = nextThreadId;
+      client.currentThreadId = nextThreadId;
+      client.setInbox(null, '', `thread:${nextThreadId}:started`);
+      return { threadId: nextThreadId };
     },
     async models(pane, threadId) {
       const client = await connection(pane);
@@ -734,6 +855,13 @@ export function createCodexAppServer({
       if (!client) throw new Error('Codex session is not managed by Handmux');
       await client.ensureThread(threadId);
       client.decide(threadId, requestId, decision);
+      return { ok: true };
+    },
+    async answerInput(pane, threadId, requestId, answers) {
+      const client = await connection(pane);
+      if (!client) throw new Error('Codex session is not managed by Handmux');
+      await client.ensureThread(threadId);
+      client.answerInput(threadId, requestId, answers);
       return { ok: true };
     },
     start() {

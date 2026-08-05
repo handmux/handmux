@@ -83,7 +83,7 @@ export function useTranscript(pane, enabled, agent = 'claude', refreshToken = nu
     setUnavailable(null);
     setUnavailableDetail(null);
     const incoming = Array.isArray(r.messages) ? r.messages : [];
-    // SESSION SWITCH (e.g. /clear started a new jsonl): REPLACE, never merge. k is a per-file ordinal that
+    // SESSION SWITCH (e.g. /clear started a new thread/file): REPLACE, never merge. k is a per-session ordinal that
     // restarts at 0 in the new session — merging by k would overwrite the head with the new messages but
     // strand the old session's higher-k tail on screen (the "/clear 没清屏" bug). The server's `session`
     // field is the switch signal; only act on a non-null id different from the one we're showing.

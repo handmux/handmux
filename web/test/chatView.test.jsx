@@ -38,17 +38,13 @@ describe('ChatView', () => {
     vi.spyOn(api, 'fetchTranscript').mockResolvedValue({
       messages: [], hash: '', session: null, hasMore: false, firstSeq: null, unavailable: 'session-unbound',
     });
-    const onTerminalHandoff = vi.fn();
-    const { container } = render(<ChatView pane="%0" agent="codex" kind="done" onTerminalHandoff={onTerminalHandoff} />);
+    const { container } = render(<ChatView pane="%0" agent="codex" kind="done" />);
 
     await screen.findByText('无法确认这个 Codex 对话');
-    expect(container.textContent).toContain('不会显示猜测结果');
-    expect(container.textContent).toContain('发送一条消息，对话会自动同步');
+    expect(container.textContent).toContain('仍在启动');
     expect(container.textContent).not.toContain('发送你的第一条消息');
     expect(container.querySelector('.chat-gate-backdrop')).toBeTruthy();
-
-    fireEvent.click(screen.getByRole('button', { name: '返回终端' }));
-    expect(onTerminalHandoff).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole('button', { name: '返回终端' })).toBeNull();
   });
 
   it('handles a managed Codex command approval in the chat view', async () => {
@@ -275,17 +271,26 @@ describe('ChatView', () => {
     await waitFor(() => expect(keys).toHaveBeenCalledWith('%0', expect.arrayContaining(['Enter'])));
   });
 
-  it('Codex approval never scrapes or drives the Claude menu; it hands off to the terminal', async () => {
+  it('handles Codex request_user_input without scraping or driving the terminal', async () => {
     mockTranscript([{ k: 0, i: 0, role: 'assistant', type: 'text', text: '准备执行' }]);
     const pending = vi.spyOn(api, 'getPendingPrompt');
-    const handoff = vi.fn();
-    render(<ChatView pane="%0" agent="codex" kind="permission" onTerminalHandoff={handoff} />);
-    const button = await screen.findByRole('button', { name: '去终端处理' });
-    expect(screen.getByText('Codex 正在等待你的确认')).toBeTruthy();
+    vi.spyOn(api, 'answerCodexInput').mockResolvedValue({ ok: true });
+    render(<ChatView pane="%0" agent="codex" kind="permission" codexSession={{
+      managed: true,
+      userInputs: [{
+        id: '92', questions: [{
+          id: 'color', header: '颜色', question: '选择颜色', isOther: true, isSecret: false,
+          options: [{ label: '蓝色', description: '沉稳' }, { label: '红色', description: '醒目' }],
+        }],
+      }],
+    }} />);
+    const option = await screen.findByRole('radio', { name: /蓝色/ });
+    expect(screen.getByText('Codex 需要你的回答')).toBeTruthy();
     expect(pending).not.toHaveBeenCalled();
     expect(screen.queryByRole('button', { name: '允许' })).toBeNull();
-    fireEvent.click(button);
-    expect(handoff).toHaveBeenCalledOnce();
+    fireEvent.click(option);
+    fireEvent.click(screen.getByRole('button', { name: '提交回答' }));
+    await waitFor(() => expect(api.answerCodexInput).toHaveBeenCalledWith('%0', '92', { color: ['蓝色'] }));
   });
 
   it('a scraped AskUserQuestion renders its real options as a radio list (not 允许/拒绝)', async () => {

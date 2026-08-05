@@ -3,8 +3,8 @@ import { getCodexSession } from '../api.js';
 import { usePollingLoop } from './usePollingLoop.js';
 
 const EMPTY = {
-  loaded: false, managed: false, status: null, activeTurnId: null, settings: null, approvals: [],
-  error: null, errorStatus: null, errorCode: null,
+  loaded: false, managed: false, threadId: null, status: null, activeTurnId: null, settings: null,
+  approvals: [], userInputs: [], error: null,
 };
 
 export function useCodexSession(pane, enabled, refreshToken = null) {
@@ -13,15 +13,16 @@ export function useCodexSession(pane, enabled, refreshToken = null) {
   const fetch = useCallback(() => getCodexSession(pane), [pane]);
   const apply = useCallback((result) => {
     if (!result) return;
-    setSession({ ...EMPTY, ...result, loaded: true, error: null, approvals: result.approvals || [] });
+    setSession({
+      ...EMPTY, ...result, loaded: true, error: null,
+      approvals: result.approvals || [], userInputs: result.userInputs || [],
+    });
   }, []);
   const fail = useCallback((error) => {
     setSession((current) => ({
       ...current,
       loaded: true,
       error: error?.message || 'Codex connection unavailable',
-      errorStatus: error?.status || null,
-      errorCode: error?.serverError || null,
     }));
   }, []);
   usePollingLoop({
@@ -35,8 +36,8 @@ export function useCodexSession(pane, enabled, refreshToken = null) {
   return session;
 }
 
-export function codexKind(session, fallback = null) {
-  if (!session?.managed) return fallback;
+export function codexKind(session) {
+  if (!session?.managed) return null;
   if (session.activityKind === 'compacting') return 'compacting';
   if (session.status?.type === 'active') {
     const waiting = session.status.activeFlags?.some((flag) => flag === 'waitingOnApproval' || flag === 'waitingOnUserInput');

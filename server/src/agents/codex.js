@@ -1,16 +1,11 @@
-// The OpenAI Codex CLI agent driver — the second agent, added to prove the driver contract generalizes (see
-// claude.js for the shape). Codex 0.142+ ships a Claude-parity hook system (verified against the real CLI):
-// the SAME lifecycle events (UserPromptSubmit / PermissionRequest / Stop …) delivering the SAME stdin JSON
-// fields (prompt / tool_input / last_assistant_message / stop_hook_active …). So handmux wires Codex through
-// its config.toml hooks (see cli/codexHooks.js) reusing the shared Claude hook scripts, and Codex CLASSIFIES
-// with the very same function as Claude — full working / 需要你 / done parity, not just turn-done.
+// Codex process/session discovery. Hooks identify plain Codex sessions for inbox state and exact one-click
+// takeover; once managed, App Server owns chat, approvals, stopping, and live state.
 import path from 'node:path';
 import os from 'node:os';
 import { promises as fsp } from 'node:fs';
 import { readHead, readTail, firstCwd, isSessionUuid } from './scanUtils.js';
 import { classifyClaude } from './claude.js';
 import { resolveByExecutable, executableBasename } from './processIdentity.js';
-import { createCodexTranscriptParser, parseCodexTranscript } from '../codexTranscriptParse.js';
 
 export const sessionsDir = (home = os.homedir()) => path.join(home, '.codex', 'sessions');
 
@@ -109,8 +104,6 @@ export const codex = {
   procMatch: /^(\S*\/)?codex(\s|$)/,
   takeoverPrefix: 'cx', // tmux session name prefix for a takeover (cx-<label>-<n>)
   classify: classifyClaude, // Codex hook payloads match Claude's field-for-field — same classifier
-  transcript: { createParser: createCodexTranscriptParser, parse: parseCodexTranscript },
-
   sessions: {
     // Rows written before SessionStart(`/clear`) support can point at a previous rollout. Consumers reject
     // those legacy rows until a refreshed hook writes the current binding at this version.

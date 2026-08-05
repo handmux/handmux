@@ -5,6 +5,7 @@ vi.mock('../src/api.js', () => ({
   sendText: vi.fn(async () => ({ ok: true })),
   sendCodexMessage: vi.fn(async () => ({ ok: true })),
   compactCodexSession: vi.fn(async () => ({ ok: true })),
+  clearCodexSession: vi.fn(async () => ({ threadId: 'thread-new' })),
   interruptCodexSession: vi.fn(async () => ({ interrupted: true })),
   getCodexModels: vi.fn(async () => ({ models: [] })),
   updateCodexSettings: vi.fn(async (_pane, settings) => ({ settings })),
@@ -19,7 +20,7 @@ vi.mock('../src/voice/usePushToTalk.js', () => ({
 
 import ChatComposer from '../src/components/ChatComposer.jsx';
 import {
-  sendText, sendCodexMessage, compactCodexSession, interruptCodexSession,
+  sendText, sendCodexMessage, compactCodexSession, clearCodexSession, interruptCodexSession,
   getCodexModels, updateCodexSettings, getPaneContext,
 } from '../src/api.js';
 
@@ -126,16 +127,18 @@ describe('ChatComposer', () => {
     expect(onInteractiveSlash).not.toHaveBeenCalled();
   });
 
-  it('hands every Codex slash command to the terminal because rollout does not reliably log them', async () => {
+  it('never falls back to terminal input for an unmanaged Codex composer', async () => {
     const onInteractiveSlash = vi.fn();
     render(<ChatComposer pane="%1" agent="codex" kind="idle" onInteractiveSlash={onInteractiveSlash} />);
     const input = screen.getByPlaceholderText('和 Agent 对话…');
     typeInto(input, '/compact');
     fireEvent.click(screen.getByRole('button', { name: '发送' }));
-    await waitFor(() => expect(onInteractiveSlash).toHaveBeenCalledWith('/compact'));
+    await screen.findByText('请先接管这个 Codex 会话');
+    expect(sendText).not.toHaveBeenCalled();
+    expect(onInteractiveSlash).not.toHaveBeenCalled();
   });
 
-  it('sends managed Codex messages and compaction through App Server without terminal handoff', async () => {
+  it('sends managed Codex messages, compaction, and clear through App Server only', async () => {
     const onInteractiveSlash = vi.fn();
     const props = { pane: '%1', agent: 'codex', kind: 'idle', codexSession: { managed: true }, onInteractiveSlash };
     const { rerender } = render(<ChatComposer {...props} />);
@@ -147,6 +150,24 @@ describe('ChatComposer', () => {
     typeInto(input, '/compact');
     fireEvent.click(screen.getByRole('button', { name: '发送' }));
     await waitFor(() => expect(compactCodexSession).toHaveBeenCalledWith('%1'));
+    rerender(<ChatComposer {...props} />);
+    typeInto(input, '/clear');
+    fireEvent.click(screen.getByRole('button', { name: '发送' }));
+    await waitFor(() => expect(clearCodexSession).toHaveBeenCalledWith('%1'));
+    expect(sendText).not.toHaveBeenCalled();
+    expect(onInteractiveSlash).not.toHaveBeenCalled();
+  });
+
+  it('rejects unsupported managed Codex slash commands without writing to the terminal', async () => {
+    const onInteractiveSlash = vi.fn();
+    render(<ChatComposer pane="%1" agent="codex" kind="idle"
+      codexSession={{ managed: true }} onInteractiveSlash={onInteractiveSlash} />);
+    const input = screen.getByPlaceholderText('和 Agent 对话…');
+    typeInto(input, '/plugin');
+    fireEvent.click(screen.getByRole('button', { name: '发送' }));
+    await screen.findByText('这个命令暂不支持在对话视图中使用');
+    expect(input.value).toBe('/plugin');
+    expect(sendText).not.toHaveBeenCalled();
     expect(onInteractiveSlash).not.toHaveBeenCalled();
   });
 
@@ -214,6 +235,13 @@ describe('ChatComposer', () => {
     fireEvent.click(screen.getByRole('button', { name: '/plugin' }));
     await waitFor(() => expect(sendText).toHaveBeenCalledWith('%1', '/plugin', true));
     expect(onInteractiveSlash).toHaveBeenCalledTimes(1);
+  });
+
+  it('hides terminal-key shortcuts from managed Codex chat', () => {
+    render(<ChatComposer pane="%1" agent="codex" kind="idle" codexSession={{ managed: true }} />);
+    expect(screen.queryByRole('button', { name: 'Ctrl+C' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Esc' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'ok' })).toBeTruthy();
   });
 
   // The tap-to-focus target-exclusion is unit-tested here; the MOVEMENT guard (swipe/scroll must not focus)

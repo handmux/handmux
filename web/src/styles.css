@@ -2646,6 +2646,16 @@ button.cmd-text { background: none; border: none; text-align: left; }
   background: var(--ct-body); box-shadow: none;
 }
 .chat-terminal-gate .chat-gate-hint { margin: -2px 0 12px; padding: 9px 10px; border-radius: 9px; }
+.codex-input-gate { max-height: min(78dvh, 680px); overflow-y: auto; overscroll-behavior: contain; }
+.codex-input-question + .codex-input-question {
+  margin-top: 12px; padding-top: 12px; border-top: .5px solid var(--ct-chip-line);
+}
+.codex-input-text {
+  display: block; width: 100%; min-height: 44px; margin: 0 0 10px; padding: 9px 11px;
+  border: 1px solid var(--ct-chip-line); border-radius: 10px; outline: none;
+  background: var(--ct-chip); color: var(--ct-ink); font: inherit;
+}
+.codex-input-text:focus { border-color: var(--ct-accent); }
 .codex-approval-command {
   max-height: 132px; margin: 0 0 6px; padding: 10px; overflow: auto; border-radius: 9px;
   background: color-mix(in srgb, var(--ct-ink) 7%, transparent); color: var(--ct-ink);

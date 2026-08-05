@@ -8,7 +8,7 @@ describe('codexKind', () => {
     expect(codexKind({ managed: true, status: { type: 'active', activeFlags: ['waitingOnUserInput'] } })).toBe('permission');
   });
 
-  it('preserves terminal state for unmanaged sessions', () => {
-    expect(codexKind({ managed: false }, 'working')).toBe('working');
+  it('does not inherit terminal-derived state for unmanaged sessions', () => {
+    expect(codexKind({ managed: false })).toBeNull();
   });
 });

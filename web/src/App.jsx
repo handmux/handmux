@@ -1318,7 +1318,7 @@ export default function App() {
   const currentAgent = states[current?.paneId]?.agent;
   const codexSession = useCodexSession(current?.paneId, chatLensOn && currentAgent === 'codex', codexTakeoverSeq);
   const currentKind = currentAgent === 'codex'
-    ? codexKind(codexSession, states[current?.paneId]?.kind)
+    ? codexKind(codexSession)
     : states[current?.paneId]?.kind;
 
   // Record a just-sent command into this WINDOW's recent history (deduped + capped in storage).
@@ -1334,8 +1334,7 @@ export default function App() {
     // A chat-staying slash command (/compact, /model sonnet) logs its scaffold to the jsonl only when it
     // COMPLETES — minutes for /compact — so echo the command pill now; ChatView drops it when the real
     // marker lands. null for handed-off commands (the lens switch is their feedback) and plain text.
-    // Codex does not reliably log slash commands as transcript messages, so its composer hands every slash
-    // command to the terminal and never leaves an optimistic pill waiting for a marker that cannot arrive.
+    // Codex App Server operations have their own live state, so they do not need a transcript echo.
     const echo = currentAgent === 'codex' ? null : slashEchoFor(cmd);
     setSlashEcho(echo && current?.paneId ? { ...echo, paneId: current.paneId } : null);
   }, [current, currentAgent]);
@@ -1354,16 +1353,14 @@ export default function App() {
   // The current pane's cwd (from /panes), used as the default base when resolving a relative doc path.
   const currentPaneCwd = current?.panes?.find((p) => p.id === current.paneId)?.cwd || null;
 
-  const chatLensAvailable = chatLensOn && canUseChatLens(currentAgent, hooksStatus, codexSession);
+  const chatLensAvailable = chatLensOn && canUseChatLens(currentAgent, hooksStatus);
   // Chat lens is active only for a supported pane whose lens is set to 'chat'. Drives BOTH swaps: the main
   // view (ChatView vs Terminal) and the bottom bar (ChatComposer vs the terminal BottomDock).
   const chatLens = chatLensAvailable && lens === 'chat';
   const codexChatLoading = chatLens && currentAgent === 'codex' && !codexSession.loaded;
   const codexNeedsTakeover = chatLens && currentAgent === 'codex'
-    && !codexSession.managed
-    && codexSession.errorStatus === 409
-    && codexSession.errorCode === 'Codex session is not managed by Handmux';
-  const codexChatReady = currentAgent !== 'codex' || codexSession.managed;
+    && codexSession.loaded && !codexSession.error && !codexSession.managed;
+  const codexChatReady = currentAgent !== 'codex' || (codexSession.managed && !!codexSession.threadId);
 
   // Fetch + open a doc by ABSOLUTE path: dedupe into a tab, record the recent, reveal the sheet.
   // Throws on fetch failure so callers can decide (prompt for a base dir, or surface inline).
@@ -2025,8 +2022,7 @@ export default function App() {
                   codexSession={codexSession}
                   slashEcho={slashEcho && slashEcho.paneId === current.paneId ? slashEcho : null}
                   refreshToken={transcriptWake.paneId === current.paneId ? transcriptWake.seq : null}
-                  onSlashEchoDone={() => setSlashEcho(null)}
-                  onTerminalHandoff={() => { setLens('terminal'); localStorage.setItem('tw_lens_' + current.paneId, 'terminal'); }} />
+                  onSlashEchoDone={() => setSlashEcho(null)} />
               )
             ) : (
               <Terminal
@@ -2066,7 +2062,9 @@ export default function App() {
                 onSent={onCommandSent}
                 shortcuts={serverShortcuts}
                 micAvailable={micAvailable}
-                onInteractiveSlash={(cmd) => { setLens('terminal'); localStorage.setItem('tw_lens_' + current.paneId, 'terminal'); setHandoffToast(cmd); }}
+                onInteractiveSlash={currentAgent === 'claude'
+                  ? (cmd) => { setLens('terminal'); localStorage.setItem('tw_lens_' + current.paneId, 'terminal'); setHandoffToast(cmd); }
+                  : undefined}
               />
             ) : null
           ) : (

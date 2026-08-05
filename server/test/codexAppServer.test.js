@@ -46,6 +46,7 @@ function fakeProxy({ empty = false, loaded = ['thread-1'], updatedAt = {}, statu
       else reply({ jsonrpc: '2.0', id: message.id, result: {
         thread: { ...fixtureThread(status), id: message.params.threadId, updatedAt: updatedAt[message.params.threadId] },
         model: 'gpt-test', modelProvider: 'openai', serviceTier: null, cwd: '/work', approvalPolicy: 'on-request',
+        runtimeWorkspaceRoots: ['/work', '/shared'],
         approvalsReviewer: 'user', sandbox: { type: 'workspaceWrite' }, activePermissionProfile: null,
         reasoningEffort: 'high', multiAgentMode: 'explicitRequestOnly',
       } });
@@ -56,6 +57,17 @@ function fakeProxy({ empty = false, loaded = ['thread-1'], updatedAt = {}, statu
       reply({ jsonrpc: '2.0', id: message.id, result: { turn: { id: 'turn-2', status: 'inProgress', items: [] } } });
     } else if (message.method === 'thread/compact/start') {
       reply({ jsonrpc: '2.0', id: message.id, result: {} });
+    } else if (message.method === 'thread/start') {
+      reply({ jsonrpc: '2.0', id: message.id, result: {
+        thread: { id: 'thread-clear', status: { type: 'idle' }, turns: [] },
+        model: message.params.model || 'gpt-test', modelProvider: message.params.modelProvider || 'openai',
+        serviceTier: message.params.serviceTier ?? null, cwd: message.params.cwd || '/work',
+        runtimeWorkspaceRoots: message.params.runtimeWorkspaceRoots || [],
+        approvalPolicy: message.params.approvalPolicy || 'on-request',
+        approvalsReviewer: message.params.approvalsReviewer || 'user',
+        sandbox: { type: 'workspaceWrite' }, activePermissionProfile: null,
+        reasoningEffort: 'high', multiAgentMode: 'explicitRequestOnly',
+      } });
     } else if (message.method === 'model/list') {
       reply({ jsonrpc: '2.0', id: message.id, result: { data: [{ id: 'model-1', model: 'gpt-test', displayName: 'GPT Test', supportedReasoningEfforts: [{ reasoningEffort: 'medium', description: '' }], defaultReasoningEffort: 'medium' }], nextCursor: null } });
     } else if (message.method === 'thread/settings/update') {
@@ -124,6 +136,48 @@ describe('Codex App Server client', () => {
     await app.decide('%1', 'thread-1', '91', 'accept');
     expect(proxy.sent).toContainEqual({ jsonrpc: '2.0', id: 91, result: { decision: 'accept' } });
     expect((await app.status('%1', 'thread-1')).approvals).toEqual([]);
+    app.close();
+  });
+
+  it('answers structured user input through the pending App Server request', async () => {
+    const proxy = fakeProxy();
+    const app = createCodexAppServer({ home: '/home/test', exists: () => true, connect: () => proxy.ws });
+    await app.status('%1', 'thread-1');
+    proxy.push({
+      jsonrpc: '2.0', id: 92, method: 'item/tool/requestUserInput',
+      params: {
+        threadId: 'thread-1', turnId: 'turn-2', itemId: 'input-1', autoResolutionMs: null,
+        questions: [{
+          id: 'color', header: '颜色', question: '选择颜色', isOther: true, isSecret: false,
+          options: [{ label: '蓝色', description: '沉稳' }],
+        }],
+      },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(await app.status('%1', 'thread-1')).toMatchObject({
+      userInputs: [{ id: '92', questions: [{ id: 'color', question: '选择颜色' }] }],
+    });
+    await app.answerInput('%1', 'thread-1', '92', { color: ['蓝色'] });
+    expect(proxy.sent).toContainEqual({
+      jsonrpc: '2.0', id: 92, result: { answers: { color: { answers: ['蓝色'] } } },
+    });
+    expect((await app.status('%1', 'thread-1')).userInputs).toEqual([]);
+    app.close();
+  });
+
+  it('starts /clear as a native App Server thread with the current settings', async () => {
+    const proxy = fakeProxy();
+    const app = createCodexAppServer({ home: '/home/test', exists: () => true, connect: () => proxy.ws });
+    expect(await app.clear('%1', 'thread-1')).toEqual({ threadId: 'thread-clear' });
+    expect(proxy.sent).toContainEqual(expect.objectContaining({
+      method: 'thread/start',
+      params: expect.objectContaining({
+        sessionStartSource: 'clear', model: 'gpt-test', modelProvider: 'openai', cwd: '/work',
+        approvalPolicy: 'on-request', approvalsReviewer: 'user', sandbox: 'workspace-write',
+        runtimeWorkspaceRoots: ['/work', '/shared'],
+      }),
+    }));
+    expect((await app.discover('%1')).threadId).toBe('thread-clear');
     app.close();
   });
 

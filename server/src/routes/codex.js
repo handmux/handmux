@@ -40,7 +40,7 @@ function routeError(res, result) {
 
 function codexError(res, error) {
   const message = error?.message || String(error);
-  const conflict = /not managed|no longer pending|decision is unavailable/i.test(message);
+  const conflict = /not managed|no longer pending|decision is unavailable|bad user input response/i.test(message);
   return res.status(conflict ? 409 : 503).json({ error: message });
 }
 
@@ -57,10 +57,15 @@ export function codexRoutes({
   const takingOver = new Set();
 
   r.get('/codex/session', async (req, res) => {
-    const target = await binding(codexApp, req.query.pane);
-    if (routeError(res, target)) return;
-    try { res.json(await codexApp.status(target.pane, target.threadId)); }
-    catch (error) { codexError(res, error); }
+    const pane = req.query.pane;
+    if (!isPaneId(pane)) return res.status(400).json({ error: 'bad pane id' });
+    try {
+      const discovered = await codexApp.discover(pane);
+      if (!discovered?.managed || !discovered.threadId) {
+        return res.json({ managed: !!discovered?.managed, threadId: discovered?.threadId || null });
+      }
+      return res.json(await codexApp.status(pane, discovered.threadId));
+    } catch (error) { return codexError(res, error); }
   });
 
   r.post('/codex/takeover', async (req, res) => {
@@ -122,6 +127,13 @@ export function codexRoutes({
     catch (error) { codexError(res, error); }
   });
 
+  r.post('/codex/clear', async (req, res) => {
+    const target = await binding(codexApp, req.body?.pane);
+    if (routeError(res, target)) return;
+    try { res.json(await codexApp.clear(target.pane, target.threadId)); }
+    catch (error) { codexError(res, error); }
+  });
+
   r.get('/codex/models', async (req, res) => {
     const target = await binding(codexApp, req.query.pane);
     if (routeError(res, target)) return;
@@ -162,6 +174,22 @@ export function codexRoutes({
       return res.status(400).json({ error: 'bad approval response' });
     }
     try { res.json(await codexApp.decide(target.pane, target.threadId, requestId, decision)); }
+    catch (error) { codexError(res, error); }
+  });
+
+  r.post('/codex/input', async (req, res) => {
+    const target = await binding(codexApp, req.body?.pane);
+    if (routeError(res, target)) return;
+    const requestId = req.body?.requestId;
+    const answers = req.body?.answers;
+    const entries = answers && typeof answers === 'object' && !Array.isArray(answers)
+      ? Object.entries(answers) : [];
+    if ((typeof requestId !== 'string' && typeof requestId !== 'number') || !entries.length
+      || entries.some(([questionId, value]) => !questionId || !Array.isArray(value) || !value.length
+        || value.some((answer) => typeof answer !== 'string' || !answer.trim()))) {
+      return res.status(400).json({ error: 'bad user input response' });
+    }
+    try { res.json(await codexApp.answerInput(target.pane, target.threadId, requestId, answers)); }
     catch (error) { codexError(res, error); }
   });
 

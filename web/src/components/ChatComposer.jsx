@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import {
-  sendText, sendCodexMessage, compactCodexSession, interruptCodexSession,
+  sendText, sendCodexMessage, compactCodexSession, clearCodexSession, interruptCodexSession,
   getCodexModels, updateCodexSettings, UnauthorizedError,
 } from '../api.js';
 import { shouldHandOffSlash } from '../slashCommands.js';
@@ -175,7 +175,7 @@ export default function ChatComposer({
   };
   useEffect(() => { if (!editOpen) refreshShortcuts(); }, [editOpen]);
   useBackButton(editOpen, () => setEditOpen(false));
-  const quickFavs = applyShortcutLayout(
+  const allQuickFavs = applyShortcutLayout(
     mergeShortcuts(serverShortcuts.chat, favs, 'chat'), layout,
   );
 
@@ -183,6 +183,7 @@ export default function ChatComposer({
   // state (idle / needs-you / done) shows the normal send.
   const busy = kind === 'working';
   const managedCodex = agent === 'codex' && codexSession?.managed;
+  const quickFavs = managedCodex ? allQuickFavs.filter((fav) => fav.kind !== 'key') : allQuickFavs;
   useEffect(() => { if (!busy) setStopping(false); }, [busy, pane]);
   useEffect(() => { setLocalSettings(codexSession?.settings || null); }, [pane, codexSession?.settings]);
   useEffect(() => { if (!managedCodex) setConfigOpen(false); }, [managedCodex]);
@@ -223,6 +224,15 @@ export default function ChatComposer({
     return true;
   };
 
+  const dispatchManagedCodex = async (text) => {
+    const trimmed = text.trim();
+    if (await applyConfigSlash(trimmed)) return;
+    if (/^\/compact$/i.test(trimmed)) { await compactCodexSession(pane); return; }
+    if (/^\/clear$/i.test(trimmed)) { await clearCodexSession(pane); return; }
+    if (trimmed.startsWith('/')) throw new Error(t('chat.slash.unsupported'));
+    await sendCodexMessage(pane, text);
+  };
+
   // ── Voice dictation (single-column, simpler than the dock: no caret-restore, so it dodges the iOS
   // setSelectionRange-on-unfocused trap entirely). Recognised text is inserted at the caret anchor taken
   // when recording started; the live partial rewrites in place; a send mid-recording suppresses the commit.
@@ -251,7 +261,7 @@ export default function ChatComposer({
   };
   const stopVoiceIfRecording = () => { if (recording) { suppressVoiceRef.current = true; voice.stop(); } };
 
-  // Type the text then Enter (the server paces the two so a TUI reads Enter as "submit", not a newline).
+  // Claude still submits through its terminal. Managed Codex sends structured App Server requests only.
   const send = async () => {
     if (!pane || !value.trim() || submitInFlightRef.current) return;
     const text = value;
@@ -260,20 +270,13 @@ export default function ChatComposer({
     setSubmitError('');
     stopVoiceIfRecording();
     try {
-      const trimmed = text.trim();
-      const isConfigSlash = managedCodex && /^\/(?:model|effort)(?:\s|$)/i.test(trimmed);
-      const configured = isConfigSlash ? await applyConfigSlash(trimmed) : false;
-      if (configured) { /* handled by App Server without sending text to the TUI */ }
-      else if (managedCodex && trimmed === '/compact') await compactCodexSession(pane);
-      else if (managedCodex && !trimmed.startsWith('/')) await sendCodexMessage(pane, text);
+      if (managedCodex) await dispatchManagedCodex(text);
+      else if (agent === 'codex') throw new Error(t('chat.session.notManaged'));
       else await sendText(pane, text, true);
       onSent?.(text);
-      // A bare, non-one-shot slash command may have opened a TUI picker that lives only in the terminal (and
-      // the transcript stays silent until the user picks). Hand off to the terminal lens so they can see and
-      // drive it — including unrecognized commands, since a missed picker leaves the phone stuck.
-      if ((agent === 'codex' && /^\s*\//.test(text)
-          && !(managedCodex && /^\/(?:clear|compact|model|effort)(?:\s|$)/i.test(trimmed)))
-        || (agent !== 'codex' && shouldHandOffSlash(text))) onInteractiveSlash?.(trimmed);
+      if (!managedCodex && agent !== 'codex' && shouldHandOffSlash(text)) {
+        onInteractiveSlash?.(text.trim());
+      }
       setValue('');
       requestAnimationFrame(() => autoGrow(ref.current));
     } catch (err) {
@@ -330,25 +333,29 @@ export default function ChatComposer({
     ref.current?.focus();
   };
 
-  // A quick item has the same explicit behavior here as in the terminal chat dock: key → send the terminal
-  // key; text → type only or type + Enter according to its configured boolean.
+  // Terminal keys remain Claude-only. Managed Codex text shortcuts either fill the draft or use the same
+  // structured dispatch as the send button, so a shortcut can never write into the hidden TUI.
   const runFav = async (fav) => {
     if (fav.kind === 'key') { onKey(fav.text); return; }
     if (!pane) return;
     try {
-      const trimmed = fav.text.trim();
-      const isConfigSlash = managedCodex && fav.enter && /^\/(?:model|effort)(?:\s|$)/i.test(trimmed);
-      const configured = isConfigSlash ? await applyConfigSlash(trimmed) : false;
-      if (configured) { /* handled by App Server */ }
-      else if (managedCodex && fav.enter && trimmed === '/compact') await compactCodexSession(pane);
-      else if (managedCodex && fav.enter && !trimmed.startsWith('/')) await sendCodexMessage(pane, fav.text);
+      if (managedCodex && !fav.enter) {
+        setValue(fav.text);
+        requestAnimationFrame(() => ref.current?.focus());
+        return;
+      }
+      if (managedCodex) await dispatchManagedCodex(fav.text);
+      else if (agent === 'codex') throw new Error(t('chat.session.notManaged'));
       else await sendText(pane, fav.text, !!fav.enter);
-      if (!fav.enter) return;
+      if (!fav.enter && !managedCodex) return;
       onSent?.(fav.text);
-      if ((agent === 'codex' && trimmed.startsWith('/')
-          && !(managedCodex && /^\/(?:clear|compact|model|effort)(?:\s|$)/i.test(trimmed)))
-        || (agent !== 'codex' && shouldHandOffSlash(fav.text))) onInteractiveSlash?.(trimmed);
-    } catch (err) { if (err instanceof UnauthorizedError) onAuthFail?.(); }
+      if (!managedCodex && agent !== 'codex' && shouldHandOffSlash(fav.text)) {
+        onInteractiveSlash?.(fav.text.trim());
+      }
+    } catch (err) {
+      if (err instanceof UnauthorizedError) onAuthFail?.();
+      else setSubmitError(err?.serverError || err?.message || t('chat.sendFailed'));
+    }
   };
 
   // After an upload, append the files' absolute paths to the draft (one → the path; many → the shared dir

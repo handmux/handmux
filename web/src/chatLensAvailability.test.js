@@ -12,14 +12,17 @@ describe('chat lens availability', () => {
   });
 
   it('exposes every Codex pane so unmanaged sessions can offer takeover', () => {
-    expect(canUseChatLens('claude', 'installed', null)).toBe(true);
-    expect(canUseChatLens('claude', 'absent', null)).toBe(false);
-    expect(canUseChatLens('codex', 'absent', { loaded: true, managed: true })).toBe(true);
-    expect(canUseChatLens('codex', 'installed', { loaded: true, managed: false })).toBe(true);
-    expect(canUseChatLens('codex', 'installed', { loaded: false, managed: true })).toBe(true);
+    expect(canUseChatLens('claude', 'installed')).toBe(true);
+    expect(canUseChatLens('claude', 'absent')).toBe(false);
+    expect(canUseChatLens('codex', 'absent')).toBe(true);
+    expect(canUseChatLens('codex', 'installed')).toBe(true);
   });
 
   it('keeps managed compaction distinct from a normal active turn', () => {
     expect(codexKind({ managed: true, activityKind: 'compacting', status: { type: 'active', activeFlags: [] } })).toBe('compacting');
+  });
+
+  it('never inherits terminal-derived state for an unmanaged Codex session', () => {
+    expect(codexKind({ managed: false, status: { type: 'active', activeFlags: [] } })).toBeNull();
   });
 });
