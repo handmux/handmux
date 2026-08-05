@@ -194,6 +194,43 @@ function activeKind(status) {
   return flags.includes('waitingOnApproval') || flags.includes('waitingOnUserInput') ? 'permission' : 'working';
 }
 
+// App Server's item notifications are the authoritative live stream. A concurrent thread/read can briefly
+// omit items that were just started or completed, so retain the event copies and overlay them on every
+// snapshot. This is connection-local live state, not a second transcript store.
+function mergeTurnWithLive(previous, fresh, liveIds) {
+  if (!previous || !liveIds?.size) return fresh;
+  const freshItems = Array.isArray(fresh?.items) ? fresh.items : [];
+  const freshById = new Map(freshItems.filter((item) => item?.id).map((item) => [item.id, item]));
+  const merged = [];
+  const seen = new Set();
+  for (const item of previous.items || []) {
+    const next = liveIds.has(item?.id) ? item : freshById.get(item?.id);
+    if (!next?.id || seen.has(next.id)) continue;
+    merged.push(next);
+    seen.add(next.id);
+  }
+  for (const item of freshItems) {
+    if (!item?.id || seen.has(item.id)) continue;
+    merged.push(item);
+    seen.add(item.id);
+  }
+  return { ...previous, ...fresh, items: merged };
+}
+
+function mergeThreadWithLive(previous, fresh, liveItemIds) {
+  if (!previous || !fresh || !liveItemIds.size) return fresh;
+  const previousTurns = new Map((previous.turns || []).map((turn) => [turn.id, turn]));
+  const seen = new Set();
+  const turns = (fresh.turns || []).map((turn) => {
+    seen.add(turn.id);
+    return mergeTurnWithLive(previousTurns.get(turn.id), turn, liveItemIds.get(turn.id));
+  });
+  for (const turn of previous.turns || []) {
+    if (!seen.has(turn.id) && liveItemIds.has(turn.id)) turns.push(turn);
+  }
+  return { ...previous, ...fresh, turns };
+}
+
 function settingsFromResume(result) {
   return {
     model: result?.model || null,
@@ -288,7 +325,9 @@ class CodexAppConnection {
     }
     if (!message.method) return;
     const params = message.params || {};
-    if (message.method === 'serverRequest/resolved') {
+    if ((message.method === 'item/started' || message.method === 'item/completed') && params.item) {
+      this.upsertLiveItem(params.threadId, params.turnId, params.item);
+    } else if (message.method === 'serverRequest/resolved') {
       this.approvals.delete(String(params.requestId));
       this.setInbox('working', '', `resolved:${params.requestId}`);
     } else if (message.method === 'thread/status/changed') {
@@ -303,18 +342,21 @@ class CodexAppConnection {
         this.setInbox(null, '', `thread:${params.threadId}:compacted`);
       }
     } else if (message.method === 'turn/started') {
-      this.state(params.threadId).activeTurnId = params.turn?.id || params.turnId || null;
+      const state = this.state(params.threadId);
+      state.activeTurnId = params.turn?.id || params.turnId || null;
+      this.upsertTurn(params.threadId, params.turn);
       this.currentThreadId = params.threadId || this.currentThreadId;
       this.setInbox('working', '', `turn:${params.turn?.id || params.turnId}:started`);
     } else if (message.method === 'turn/completed') {
       const state = this.state(params.threadId);
       state.activeTurnId = null;
-      state.lastTurn = params.turn || null;
+      const turn = this.upsertTurn(params.threadId, params.turn) || params.turn || null;
+      state.lastTurn = turn;
       this.currentThreadId = params.threadId || this.currentThreadId;
-      const status = params.turn?.status;
+      const status = turn?.status;
       if (status === 'completed' || status === 'failed') {
-        const completedAt = typeof params.turn?.completedAt === 'number' ? params.turn.completedAt * 1000 : undefined;
-        this.setInbox('done', turnSummary(params.turn), `turn:${params.turn?.id || params.turnId}:${status}`, completedAt);
+        const completedAt = typeof turn?.completedAt === 'number' ? turn.completedAt * 1000 : undefined;
+        this.setInbox('done', turnSummary(turn), `turn:${turn?.id || params.turnId}:${status}`, completedAt);
       } else {
         this.setInbox(null, '', `turn:${params.turn?.id || params.turnId}:${status || 'ended'}`);
       }
@@ -347,9 +389,46 @@ class CodexAppConnection {
 
   state(threadId) {
     if (!this.threadState.has(threadId)) this.threadState.set(threadId, {
-      revision: 0, readRevision: -1, thread: null, status: null, activeTurnId: null, settings: null, lastTurn: null, loadedOnly: false,
+      revision: 0, readRevision: -1, thread: null, status: null, activeTurnId: null, settings: null,
+      lastTurn: null, loadedOnly: false, liveItemIds: new Map(),
     });
     return this.threadState.get(threadId);
+  }
+
+  upsertTurn(threadId, incoming) {
+    if (!threadId || !incoming?.id) return null;
+    const state = this.state(threadId);
+    state.thread ||= { id: threadId, turns: [], status: { type: 'active', activeFlags: [] } };
+    state.thread.turns ||= [];
+    const index = state.thread.turns.findIndex((turn) => turn.id === incoming.id);
+    const previous = index >= 0 ? state.thread.turns[index] : null;
+    const turn = mergeTurnWithLive(previous, incoming, state.liveItemIds.get(incoming.id));
+    if (index >= 0) state.thread.turns[index] = turn;
+    else state.thread.turns.push(turn);
+    return turn;
+  }
+
+  upsertLiveItem(threadId, turnId, item) {
+    if (!threadId || !turnId || !item?.id) return;
+    const state = this.state(threadId);
+    let ids = state.liveItemIds.get(turnId);
+    if (!ids) {
+      ids = new Set();
+      state.liveItemIds.set(turnId, ids);
+      if (state.liveItemIds.size > 20) state.liveItemIds.delete(state.liveItemIds.keys().next().value);
+    }
+    ids.add(item.id);
+    state.thread ||= { id: threadId, turns: [], status: { type: 'active', activeFlags: [] } };
+    state.thread.turns ||= [];
+    let turn = state.thread.turns.find((candidate) => candidate.id === turnId);
+    if (!turn) {
+      turn = { id: turnId, status: 'inProgress', items: [] };
+      state.thread.turns.push(turn);
+    }
+    turn.items ||= [];
+    const index = turn.items.findIndex((candidate) => candidate.id === item.id);
+    if (index >= 0) turn.items[index] = item;
+    else turn.items.push(item);
   }
 
   bump(threadId) {
@@ -423,12 +502,12 @@ class CodexAppConnection {
     if (state.thread && state.readRevision === state.revision) return state.thread;
     const requestedRevision = state.revision;
     const result = await this.rpc('thread/read', { threadId, includeTurns: true });
-    state.thread = result.thread;
+    state.thread = mergeThreadWithLive(state.thread, result.thread, state.liveItemIds);
     state.readRevision = requestedRevision;
     state.status = result.thread?.status || state.status;
-    const active = [...(result.thread?.turns || [])].reverse().find((turn) => turn.status === 'inProgress');
+    const active = [...(state.thread?.turns || [])].reverse().find((turn) => turn.status === 'inProgress');
     if (active) state.activeTurnId = active.id;
-    return result.thread;
+    return state.thread;
   }
 
   async loadedThreads() {

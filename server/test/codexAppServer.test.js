@@ -127,6 +127,36 @@ describe('Codex App Server client', () => {
     app.close();
   });
 
+  it('keeps live tool items when a later thread snapshot temporarily omits them', async () => {
+    const proxy = fakeProxy();
+    const app = createCodexAppServer({
+      home: '/home/test', exists: () => true, connect: () => proxy.ws,
+    });
+    await app.discover('%1');
+    proxy.push({
+      jsonrpc: '2.0', method: 'item/started', params: {
+        threadId: 'thread-1', turnId: 'turn-1',
+        item: { id: 'cmd-live', type: 'commandExecution', command: 'npm test', cwd: '/work', status: 'inProgress' },
+      },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    let opened = await app.read('%1', 'thread-1');
+    expect(projectCodexThread(opened.thread).find((message) => message.tool?.input?.cmd === 'npm test')?.tool.result)
+      .toBeNull();
+
+    proxy.push({
+      jsonrpc: '2.0', method: 'item/completed', params: {
+        threadId: 'thread-1', turnId: 'turn-1',
+        item: { id: 'cmd-live', type: 'commandExecution', command: 'npm test', cwd: '/work', status: 'completed', aggregatedOutput: 'passed\n' },
+      },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    opened = await app.read('%1', 'thread-1');
+    expect(projectCodexThread(opened.thread).find((message) => message.tool?.input?.cmd === 'npm test')?.tool.result)
+      .toBe('passed\n');
+    app.close();
+  });
+
   it('lists official models and updates model and effort on the current thread', async () => {
     const proxy = fakeProxy();
     const app = createCodexAppServer({ home: '/home/test', exists: () => true, connect: () => proxy.ws });
