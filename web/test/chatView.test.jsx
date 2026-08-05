@@ -137,14 +137,31 @@ describe('ChatView', () => {
     expect(screen.queryByText('a')).toBeNull(); // 结果默认折叠
   });
 
-  it('labels a code change with its filename instead of a generic action', async () => {
+  it('labels a code change as editing its filename instead of a generic action', async () => {
     mockTranscript([{
       k: 0, role: 'assistant', type: 'tool',
       tool: { name: 'apply_patch', input: { file_path: '/work/web/src/ChatView.jsx' }, result: '', isError: false },
     }]);
     render(<ChatView pane="%0" kind="done" />);
-    await screen.findByText('ChatView.jsx');
+    await screen.findByText('编辑 ChatView.jsx');
     expect(screen.queryByText('应用代码改动')).toBeNull();
+  });
+
+  it('hides the Codex zsh launch wrapper in command chips and details', async () => {
+    mockTranscript([{
+      k: 0, role: 'assistant', type: 'tool',
+      tool: { name: 'exec_command', input: { cmd: ["/bin/zsh -lc 'npm test'"] }, result: 'passed', isError: false },
+    }]);
+    const { container } = render(<ChatView pane="%0" kind="done" />);
+    const chip = (await screen.findByText('运行 npm test')).closest('button');
+    expect(chip.textContent).not.toContain('/bin/zsh');
+    fireEvent.click(chip);
+    const command = await waitFor(() => {
+      const node = container.querySelector('.tool-sheet-cmd');
+      expect(node).toBeTruthy();
+      return node;
+    });
+    expect(command.textContent).toBe('npm test');
   });
 
   it('an uncatalogued tool gets a generic 调用工具 verb (never a bare tool name); a skill says 激活技能', async () => {

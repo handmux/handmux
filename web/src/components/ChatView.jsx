@@ -18,16 +18,39 @@ import {
   CheckIcon, XIcon,
 } from './icons.jsx';
 
+// Codex App Server exposes the process-launch wrapper, while its terminal UI shows only the command passed
+// to that shell. Keep the raw value in the transcript and remove only this known wrapper at render time.
+function displayCommand(command) {
+  if (Array.isArray(command)) {
+    if (command.length === 3 && command[0] === '/bin/zsh' && command[1] === '-lc') return String(command[2] || '');
+    return command.map((part) => displayCommand(part)).filter(Boolean).join('\n');
+  }
+  const raw = String(command || '');
+  const match = raw.match(/^\/bin\/zsh\s+-lc\s+([\s\S]+)$/);
+  if (!match) return raw;
+  const shellArg = match[1].trim();
+  if (shellArg.length >= 2 && shellArg[0] === "'" && shellArg[shellArg.length - 1] === "'") {
+    return shellArg.slice(1, -1).replace(/'\\''/g, "'");
+  }
+  if (shellArg.length >= 2 && shellArg[0] === '"' && shellArg[shellArg.length - 1] === '"') {
+    try { return JSON.parse(shellArg); } catch { return shellArg.slice(1, -1); }
+  }
+  return shellArg;
+}
+
 // One-line summary for a collapsed tool chip. We show what Claude actually DID — run a command, call a
-// tool, activate a skill, dispatch an Agent — honestly (no laundering into vague phrases); the raw command/
+// tool, activate a skill, dispatch an Agent — honestly (no laundering into vague phrases); meaningful command/
 // path/args stays and the full result opens on tap. The leading glyph is a real app icon (toolIcon), NOT an
 // emoji, so a tool call reads in the app's own icon language. Cover the high-frequency tools; generic else.
 function toolSummary(tool) {
   const n = tool.name || '工具';
   const inp = tool.input || {};
-  if (n === 'Bash') return `运行 ${inp.command || ''}`.trim();
-  if (n === 'exec_command') return `运行 ${inp.cmd || ''}`.trim();
-  if (n === 'apply_patch') return String(inp.file_path || '').split(/[\\/]/).filter(Boolean).pop() || '修改文件';
+  if (n === 'Bash') return `运行 ${displayCommand(inp.command)}`.trim();
+  if (n === 'exec_command') return `运行 ${displayCommand(inp.cmd)}`.trim();
+  if (n === 'apply_patch') {
+    const filename = String(inp.file_path || '').split(/[\\/]/).filter(Boolean).pop();
+    return filename ? `编辑 ${filename}` : '编辑文件';
+  }
   if (n === 'web__run') return '联网查询';
   if (n === 'view_image') return `查看图片 ${inp.path || ''}`.trim();
   if (n === 'wait') return '等待任务完成';
@@ -137,7 +160,7 @@ function ToolChip({ tool, running, onOpen }) {
 function toolMode(name) {
   const map = {
     Bash: '运行命令', Edit: '编辑文件', MultiEdit: '编辑文件', Write: '写入文件', Read: '读取文件',
-    exec_command: '运行命令', apply_patch: '修改代码', web__run: '联网查询', view_image: '查看图片',
+    exec_command: '运行命令', apply_patch: '编辑文件', web__run: '联网查询', view_image: '查看图片',
     wait: '等待任务', write_stdin: '继续任务',
     NotebookEdit: '编辑笔记本', Grep: '搜索', Glob: '查找文件', WebSearch: '联网搜索', WebFetch: '读取网页',
     TodoWrite: '更新待办', Skill: '激活技能', Task: '调用 Agent', Agent: '调用 Agent',
@@ -146,12 +169,13 @@ function toolMode(name) {
 }
 
 // The "执行的命令" text — the tool's most meaningful input field, else its whole input pretty-printed. Kept
-// raw (no laundering) so the sheet shows exactly what ran. Empty string → the command section is omitted.
+// raw except for Codex's shell-launch wrapper, matching what its terminal UI shows. Empty string → the
+// command section is omitted.
 function toolCommandText(tool) {
   const n = tool.name;
   const inp = tool.input || {};
-  if (n === 'Bash') return inp.command || '';
-  if (n === 'exec_command') return inp.cmd || inp.script || '';
+  if (n === 'Bash') return displayCommand(inp.command);
+  if (n === 'exec_command') return displayCommand(inp.cmd || inp.script);
   if (n === 'apply_patch') return inp.patch || inp.script || '';
   if (n === 'view_image') return inp.path || JSON.stringify(inp, null, 2);
   if (n === 'Read' || n === 'Edit' || n === 'MultiEdit' || n === 'Write') return inp.file_path || '';
