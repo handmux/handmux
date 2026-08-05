@@ -52,6 +52,30 @@ export function codexRoutes({ codexApp }) {
     catch (error) { codexError(res, error); }
   });
 
+  r.get('/codex/models', async (req, res) => {
+    const target = await binding(codexApp, req.query.pane);
+    if (routeError(res, target)) return;
+    try { res.json({ models: await codexApp.models(target.pane, target.threadId) }); }
+    catch (error) { codexError(res, error); }
+  });
+
+  r.post('/codex/settings', async (req, res) => {
+    const target = await binding(codexApp, req.body?.pane);
+    if (routeError(res, target)) return;
+    const updates = {};
+    for (const key of ['model', 'effort']) {
+      const value = req.body?.[key];
+      if (value == null) continue;
+      if (typeof value !== 'string' || !value.trim() || value.length > 128) {
+        return res.status(400).json({ error: `bad ${key}` });
+      }
+      updates[key] = value.trim();
+    }
+    if (!Object.keys(updates).length) return res.status(400).json({ error: 'no settings supplied' });
+    try { res.json({ settings: await codexApp.updateSettings(target.pane, target.threadId, updates) }); }
+    catch (error) { codexError(res, error); }
+  });
+
   r.post('/codex/interrupt', async (req, res) => {
     const target = await binding(codexApp, req.body?.pane);
     if (routeError(res, target)) return;

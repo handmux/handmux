@@ -56,6 +56,10 @@ function fakeProxy({ empty = false, loaded = ['thread-1'], updatedAt = {}, statu
       reply({ jsonrpc: '2.0', id: message.id, result: { turn: { id: 'turn-2', status: 'inProgress', items: [] } } });
     } else if (message.method === 'thread/compact/start') {
       reply({ jsonrpc: '2.0', id: message.id, result: {} });
+    } else if (message.method === 'model/list') {
+      reply({ jsonrpc: '2.0', id: message.id, result: { data: [{ id: 'model-1', model: 'gpt-test', displayName: 'GPT Test', supportedReasoningEfforts: [{ reasoningEffort: 'medium', description: '' }], defaultReasoningEffort: 'medium' }], nextCursor: null } });
+    } else if (message.method === 'thread/settings/update') {
+      reply({ jsonrpc: '2.0', id: message.id, result: {} });
     } else if (message.method === 'turn/interrupt') {
       reply({ jsonrpc: '2.0', id: message.id, result: {} });
     }
@@ -120,6 +124,20 @@ describe('Codex App Server client', () => {
     await app.decide('%1', 'thread-1', '91', 'accept');
     expect(proxy.sent).toContainEqual({ jsonrpc: '2.0', id: 91, result: { decision: 'accept' } });
     expect((await app.status('%1', 'thread-1')).approvals).toEqual([]);
+    app.close();
+  });
+
+  it('lists official models and updates model and effort on the current thread', async () => {
+    const proxy = fakeProxy();
+    const app = createCodexAppServer({ home: '/home/test', exists: () => true, connect: () => proxy.ws });
+    expect(await app.models('%1', 'thread-1')).toEqual([
+      expect.objectContaining({ model: 'gpt-test', defaultReasoningEffort: 'medium' }),
+    ]);
+    expect(await app.updateSettings('%1', 'thread-1', { model: 'gpt-new', effort: 'high' }))
+      .toMatchObject({ model: 'gpt-new', effort: 'high' });
+    expect(proxy.sent).toContainEqual(expect.objectContaining({
+      method: 'thread/settings/update', params: { threadId: 'thread-1', model: 'gpt-new', effort: 'high' },
+    }));
     app.close();
   });
 

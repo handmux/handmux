@@ -53,4 +53,23 @@ describe('Codex App Server routes', () => {
       .post('/codex/send').send({ pane: '%1', text: 'hello' })
       .expect(409, { error: 'Codex session is not managed by Handmux' });
   });
+
+  it('lists models and updates model and effort for the bound thread', async () => {
+    const models = vi.fn(async () => [{ id: 'model-1', model: 'gpt-test' }]);
+    const updateSettings = vi.fn(async (_pane, _thread, updates) => updates);
+    const app = appFor({ codexApp: { models, updateSettings } });
+    await request(app).get('/codex/models?pane=%251').expect(200, {
+      models: [{ id: 'model-1', model: 'gpt-test' }],
+    });
+    await request(app).post('/codex/settings').send({ pane: '%1', model: 'gpt-new', effort: 'high' })
+      .expect(200, { settings: { model: 'gpt-new', effort: 'high' } });
+    expect(models).toHaveBeenCalledWith('%1', 'thread-1');
+    expect(updateSettings).toHaveBeenCalledWith('%1', 'thread-1', { model: 'gpt-new', effort: 'high' });
+  });
+
+  it('rejects empty or malformed settings updates', async () => {
+    const app = appFor({ codexApp: { updateSettings: vi.fn() } });
+    await request(app).post('/codex/settings').send({ pane: '%1' }).expect(400, { error: 'no settings supplied' });
+    await request(app).post('/codex/settings').send({ pane: '%1', effort: '' }).expect(400, { error: 'bad effort' });
+  });
 });

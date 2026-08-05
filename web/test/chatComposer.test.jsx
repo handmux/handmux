@@ -6,6 +6,8 @@ vi.mock('../src/api.js', () => ({
   sendCodexMessage: vi.fn(async () => ({ ok: true })),
   compactCodexSession: vi.fn(async () => ({ ok: true })),
   interruptCodexSession: vi.fn(async () => ({ interrupted: true })),
+  getCodexModels: vi.fn(async () => ({ models: [] })),
+  updateCodexSettings: vi.fn(async (_pane, settings) => ({ settings })),
   getPaneContext: vi.fn(() => new Promise(() => {})), // no context chip by default
   UnauthorizedError: class UnauthorizedError extends Error {},
 }));
@@ -16,13 +18,18 @@ vi.mock('../src/voice/usePushToTalk.js', () => ({
 }));
 
 import ChatComposer from '../src/components/ChatComposer.jsx';
-import { sendText, sendCodexMessage, compactCodexSession, interruptCodexSession, getPaneContext } from '../src/api.js';
+import {
+  sendText, sendCodexMessage, compactCodexSession, interruptCodexSession,
+  getCodexModels, updateCodexSettings, getPaneContext,
+} from '../src/api.js';
 
 // No globals:true → register cleanup manually so DOM doesn't leak between tests.
 afterEach(cleanup);
 beforeEach(() => {
   vi.clearAllMocks();
   getPaneContext.mockImplementation(() => new Promise(() => {}));
+  getCodexModels.mockResolvedValue({ models: [] });
+  updateCodexSettings.mockImplementation(async (_pane, settings) => ({ settings }));
   localStorage.clear();
   voice.state = 'idle';
 });
@@ -143,12 +150,49 @@ describe('ChatComposer', () => {
     expect(onInteractiveSlash).not.toHaveBeenCalled();
   });
 
-  it('shows App Server model and effort only after they are confirmed', () => {
+  it('keeps App Server model and effort in the footer and edits them in one sheet', async () => {
+    getCodexModels.mockResolvedValueOnce({ models: [
+      {
+        id: 'gpt-5.6-terra', model: 'gpt-5.6-terra', displayName: 'GPT-5.6 Terra',
+        supportedReasoningEfforts: [{ reasoningEffort: 'medium' }, { reasoningEffort: 'high' }],
+        defaultReasoningEffort: 'medium',
+      },
+      {
+        id: 'gpt-new', model: 'gpt-new', displayName: 'GPT New',
+        supportedReasoningEfforts: [{ reasoningEffort: 'high' }], defaultReasoningEffort: 'high',
+      },
+    ] });
     const { container } = render(<ChatComposer pane="%1" agent="codex" kind="idle" codexSession={{
       managed: true, settings: { model: 'gpt-5.6-terra', effort: 'medium' },
     }} />);
     expect(container.querySelector('.cc-ctx-model').textContent).toBe('gpt-5.6-terra');
     expect(container.querySelector('.cc-ctx-pct').textContent).toBe('medium');
+    fireEvent.click(screen.getByRole('button', { name: '设置模型和思考强度' }));
+    expect(await screen.findByRole('dialog', { name: '模型与思考强度' })).toBeTruthy();
+    fireEvent.click(await screen.findByRole('button', { name: 'GPT New' }));
+    await waitFor(() => expect(updateCodexSettings).toHaveBeenCalledWith('%1', {
+      model: 'gpt-new', effort: 'high',
+    }));
+    await waitFor(() => expect(container.querySelector('.cc-ctx-model').textContent).toBe('gpt-new'));
+  });
+
+  it('handles managed /model and /effort in chat without terminal handoff', async () => {
+    const onInteractiveSlash = vi.fn();
+    render(<ChatComposer pane="%1" agent="codex" kind="idle" codexSession={{
+      managed: true, settings: { model: 'gpt-5.6-terra', effort: 'medium' },
+    }} onInteractiveSlash={onInteractiveSlash} />);
+    const input = screen.getByPlaceholderText('和 Agent 对话…');
+    typeInto(input, '/model');
+    fireEvent.click(screen.getByRole('button', { name: '发送' }));
+    expect(await screen.findByRole('dialog', { name: '模型与思考强度' })).toBeTruthy();
+    expect(sendText).not.toHaveBeenCalled();
+    expect(onInteractiveSlash).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: '关闭' }));
+
+    typeInto(input, '/effort high');
+    fireEvent.click(screen.getByRole('button', { name: '发送' }));
+    await waitFor(() => expect(updateCodexSettings).toHaveBeenCalledWith('%1', { effort: 'high' }));
+    expect(onInteractiveSlash).not.toHaveBeenCalled();
   });
 
   it('sends one structured interrupt and disables repeated stop taps', async () => {

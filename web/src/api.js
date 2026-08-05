@@ -86,6 +86,10 @@ export const sendCodexMessage = (pane, text) =>
   req('/api/codex/send', { method: 'POST', body: JSON.stringify({ pane, text }), timeoutMs: 8000 });
 export const compactCodexSession = (pane) =>
   req('/api/codex/compact', { method: 'POST', body: JSON.stringify({ pane }), timeoutMs: 8000 });
+export const getCodexModels = (pane) =>
+  req(`/api/codex/models?pane=${encodeURIComponent(pane)}`, { timeoutMs: 8000 });
+export const updateCodexSettings = (pane, settings) =>
+  req('/api/codex/settings', { method: 'POST', body: JSON.stringify({ pane, ...settings }), timeoutMs: 8000 });
 export const interruptCodexSession = (pane) =>
   req('/api/codex/interrupt', { method: 'POST', body: JSON.stringify({ pane }), timeoutMs: 8000 });
 export const answerCodexApproval = (pane, requestId, decision) =>

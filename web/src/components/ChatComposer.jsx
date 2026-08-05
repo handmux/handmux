@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import {
-  sendText, sendCodexMessage, compactCodexSession, interruptCodexSession, UnauthorizedError,
+  sendText, sendCodexMessage, compactCodexSession, interruptCodexSession,
+  getCodexModels, updateCodexSettings, UnauthorizedError,
 } from '../api.js';
 import { shouldHandOffSlash } from '../slashCommands.js';
 import MicButton from './MicButton.jsx';
@@ -39,6 +40,108 @@ const keepFocus = (e) => {
 // green. Explicit terminal-key shortcuts use the grey key tint.
 const chipTint = (text) => (text.startsWith('/') ? 'cmd' : 'reply');
 
+function CodexConfigSheet({ open, pane, settings, busy, onChange, onClose, onAuthFail }) {
+  const [models, setModels] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  useBackButton(open, onClose);
+
+  useEffect(() => {
+    if (!open || !pane) return undefined;
+    let cancelled = false;
+    setLoading(true);
+    setError('');
+    getCodexModels(pane).then((result) => {
+      if (!cancelled) setModels(Array.isArray(result?.models) ? result.models : []);
+    }).catch((err) => {
+      if (cancelled) return;
+      if (err instanceof UnauthorizedError) onAuthFail?.();
+      else setError(err?.serverError || err?.message || t('chat.config.loadFailed'));
+    }).finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [open, pane]);
+
+  if (!open) return null;
+  const selectedModel = models.find((model) => model.model === settings?.model || model.id === settings?.model);
+  const efforts = selectedModel?.supportedReasoningEfforts || [];
+  const disabled = busy || saving;
+  const save = async (updates) => {
+    if (disabled) return;
+    setSaving(true);
+    setError('');
+    try {
+      const result = await updateCodexSettings(pane, updates);
+      onChange(result?.settings || { ...settings, ...updates });
+    } catch (err) {
+      if (err instanceof UnauthorizedError) onAuthFail?.();
+      else setError(err?.serverError || err?.message || t('chat.config.saveFailed'));
+    } finally { setSaving(false); }
+  };
+  const pickModel = (model) => {
+    const supported = (model.supportedReasoningEfforts || []).map((item) => item.reasoningEffort);
+    const updates = { model: model.model || model.id };
+    if (supported.length && !supported.includes(settings?.effort)) {
+      updates.effort = model.defaultReasoningEffort || supported[0];
+    }
+    void save(updates);
+  };
+
+  return (
+    <>
+      <div className="codex-config-backdrop" onClick={onClose} />
+      <section className="codex-config-sheet" role="dialog" aria-modal="true"
+        aria-label={t('chat.config.title')}>
+        <div className="codex-config-grip" />
+        <header className="codex-config-head">
+          <strong>{t('chat.config.title')}</strong>
+          <button type="button" aria-label={t('common.close')} onClick={onClose}>×</button>
+        </header>
+        <div className="codex-config-body">
+          <div className="codex-config-section">
+            <div className="codex-config-label">{t('chat.config.model')}</div>
+            {loading && <div className="codex-config-state">{t('chat.config.loading')}</div>}
+            {!loading && models.length === 0 && !error
+              && <div className="codex-config-state">{t('chat.config.empty')}</div>}
+            <div className="codex-model-list">
+              {models.map((model) => {
+                const value = model.model || model.id;
+                const selected = value === settings?.model || model.id === settings?.model;
+                return (
+                  <button type="button" key={model.id || value} disabled={disabled}
+                    className={selected ? 'selected' : ''} aria-pressed={selected}
+                    onClick={() => pickModel(model)}>
+                    <span><strong>{model.displayName || value}</strong>
+                      {model.description && <small>{model.description}</small>}</span>
+                    {selected && <b aria-hidden="true">✓</b>}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+          <div className="codex-config-section">
+            <div className="codex-config-label">{t('chat.config.effort')}</div>
+            <div className="codex-effort-list">
+              {efforts.map((item) => (
+                <button type="button" key={item.reasoningEffort} disabled={disabled}
+                  className={item.reasoningEffort === settings?.effort ? 'selected' : ''}
+                  aria-pressed={item.reasoningEffort === settings?.effort}
+                  title={item.description || ''}
+                  onClick={() => void save({ effort: item.reasoningEffort })}>
+                  {item.reasoningEffort}
+                </button>
+              ))}
+              {!loading && efforts.length === 0
+                && <div className="codex-config-state">{t('chat.config.chooseModel')}</div>}
+            </div>
+          </div>
+          {error && <div className="codex-config-error" role="status">{error}</div>}
+        </div>
+      </section>
+    </>
+  );
+}
+
 export default function ChatComposer({
   pane, agent = 'claude', kind, cwd = null, onKey = () => {}, onAuthFail, onSent, onInteractiveSlash,
   shortcuts = null, micAvailable = false, desktop = false, codexSession = null,
@@ -64,6 +167,8 @@ export default function ChatComposer({
   const [favs, setFavs] = useState(() => loadFavs('agent'));
   const [layout, setLayout] = useState(() => loadShortcutLayout('chat'));
   const [editOpen, setEditOpen] = useState(false);
+  const [configOpen, setConfigOpen] = useState(false);
+  const [localSettings, setLocalSettings] = useState(null);
   const refreshShortcuts = () => {
     setFavs(loadFavs('agent'));
     setLayout(loadShortcutLayout('chat'));
@@ -79,16 +184,18 @@ export default function ChatComposer({
   const busy = kind === 'working';
   const managedCodex = agent === 'codex' && codexSession?.managed;
   useEffect(() => { if (!busy) setStopping(false); }, [busy, pane]);
+  useEffect(() => { setLocalSettings(codexSession?.settings || null); }, [pane, codexSession?.settings]);
+  useEffect(() => { if (!managedCodex) setConfigOpen(false); }, [managedCodex]);
 
   // Current context-window occupancy for this pane's session (model + used %), shown as a small chip in the
   // action row. Absent (null %) when the statusLine capturer isn't opted in → the chip simply doesn't render.
   const ctx = usePaneContext(pane, agent);
-  const managedSettings = managedCodex ? codexSession?.settings : null;
+  const managedSettings = managedCodex ? localSettings : null;
   const rawModel = managedSettings?.model || ctx.model;
   const ctxModel = rawModel ? rawModel.replace(/\s*\(.*\)\s*$/, '').trim() : null; // drop "(1M context)" suffix
   const ctxPct = ctx.usedPercent;
   const ctxEffort = managedSettings?.effort || null;
-  const showCtx = !!ctxModel || typeof ctxPct === 'number';
+  const showCtx = !managedCodex && (!!ctxModel || typeof ctxPct === 'number');
   const ctxWarn = showCtx && ctxPct >= 80; // near auto-compact → amber
 
   // Grow to fit content; CSS max-height caps it (~6 lines) then it scrolls. +2 for the border under
@@ -99,6 +206,22 @@ export default function ChatComposer({
     el.style.height = `${el.scrollHeight + 2}px`;
   };
   useLayoutEffect(() => { autoGrow(ref.current); }, [value]);
+
+  const openConfig = () => {
+    ref.current?.blur();
+    setConfigOpen(true);
+  };
+  const applyConfigSlash = async (trimmed) => {
+    if (!managedCodex) return false;
+    const match = trimmed.match(/^\/(model|effort)(?:\s+(.+))?$/i);
+    if (!match) return false;
+    if (!match[2]) openConfig();
+    else {
+      const result = await updateCodexSettings(pane, { [match[1].toLowerCase()]: match[2].trim() });
+      setLocalSettings(result?.settings || { ...managedSettings, [match[1].toLowerCase()]: match[2].trim() });
+    }
+    return true;
+  };
 
   // ── Voice dictation (single-column, simpler than the dock: no caret-restore, so it dodges the iOS
   // setSelectionRange-on-unfocused trap entirely). Recognised text is inserted at the caret anchor taken
@@ -138,14 +261,18 @@ export default function ChatComposer({
     stopVoiceIfRecording();
     try {
       const trimmed = text.trim();
-      if (managedCodex && trimmed === '/compact') await compactCodexSession(pane);
+      const isConfigSlash = managedCodex && /^\/(?:model|effort)(?:\s|$)/i.test(trimmed);
+      const configured = isConfigSlash ? await applyConfigSlash(trimmed) : false;
+      if (configured) { /* handled by App Server without sending text to the TUI */ }
+      else if (managedCodex && trimmed === '/compact') await compactCodexSession(pane);
       else if (managedCodex && !trimmed.startsWith('/')) await sendCodexMessage(pane, text);
       else await sendText(pane, text, true);
       onSent?.(text);
       // A bare, non-one-shot slash command may have opened a TUI picker that lives only in the terminal (and
       // the transcript stays silent until the user picks). Hand off to the terminal lens so they can see and
       // drive it — including unrecognized commands, since a missed picker leaves the phone stuck.
-      if ((agent === 'codex' && /^\s*\//.test(text) && !(managedCodex && ['/clear', '/compact'].includes(trimmed)))
+      if ((agent === 'codex' && /^\s*\//.test(text)
+          && !(managedCodex && /^\/(?:clear|compact|model|effort)(?:\s|$)/i.test(trimmed)))
         || (agent !== 'codex' && shouldHandOffSlash(text))) onInteractiveSlash?.(trimmed);
       setValue('');
       requestAnimationFrame(() => autoGrow(ref.current));
@@ -210,12 +337,16 @@ export default function ChatComposer({
     if (!pane) return;
     try {
       const trimmed = fav.text.trim();
-      if (managedCodex && fav.enter && trimmed === '/compact') await compactCodexSession(pane);
+      const isConfigSlash = managedCodex && fav.enter && /^\/(?:model|effort)(?:\s|$)/i.test(trimmed);
+      const configured = isConfigSlash ? await applyConfigSlash(trimmed) : false;
+      if (configured) { /* handled by App Server */ }
+      else if (managedCodex && fav.enter && trimmed === '/compact') await compactCodexSession(pane);
       else if (managedCodex && fav.enter && !trimmed.startsWith('/')) await sendCodexMessage(pane, fav.text);
       else await sendText(pane, fav.text, !!fav.enter);
       if (!fav.enter) return;
       onSent?.(fav.text);
-      if ((agent === 'codex' && trimmed.startsWith('/') && !(managedCodex && ['/clear', '/compact'].includes(trimmed)))
+      if ((agent === 'codex' && trimmed.startsWith('/')
+          && !(managedCodex && /^\/(?:clear|compact|model|effort)(?:\s|$)/i.test(trimmed)))
         || (agent !== 'codex' && shouldHandOffSlash(fav.text))) onInteractiveSlash?.(trimmed);
     } catch (err) { if (err instanceof UnauthorizedError) onAuthFail?.(); }
   };
@@ -297,6 +428,13 @@ export default function ChatComposer({
                 {!ctxEffort && typeof ctxPct === 'number' && <span className="cc-ctx-pct">{Math.round(ctxPct)}%</span>}
               </div>
             )}
+            {managedCodex && (
+              <button type="button" className="cc-ctx cc-config-trigger" disabled={busy || submitting}
+                aria-label={t('chat.config.open')} onClick={openConfig}>
+                <span className="cc-ctx-model">{ctxModel || t('chat.config.model')}</span>
+                <span className="cc-ctx-pct">{ctxEffort || t('chat.config.effort')}</span>
+              </button>
+            )}
             {micAvailable && <MicButton active={recording} disabled={voice.state === 'requesting'} onToggle={toggleMic} />}
             {busy ? (
               <button type="button" className="cc-send cc-stop" aria-label={t('chat.stop')}
@@ -313,6 +451,8 @@ export default function ChatComposer({
       {submitError && <div className="cc-error" role="status">{submitError}</div>}
       {editOpen && <CmdFavEditor variant="chat" presets={serverShortcuts.chat}
         onChange={refreshShortcuts} onClose={() => setEditOpen(false)} />}
+      <CodexConfigSheet open={configOpen} pane={pane} settings={managedSettings} busy={busy}
+        onChange={setLocalSettings} onClose={() => setConfigOpen(false)} onAuthFail={onAuthFail} />
     </div>
   );
 }
