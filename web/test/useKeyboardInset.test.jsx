@@ -46,7 +46,7 @@ describe('useKeyboardInset', () => {
     expect(softKeyboardUp(768)).toBe(true); // stable keyboard-down baseline
   });
 
-  it('recovers across repeated iOS keyboard cycles without trusting offsetTop', () => {
+  it('subtracts iOS focus scrolling from the app lift across keyboard cycles', () => {
     Object.defineProperty(window, 'innerHeight', { value: 768, configurable: true });
     const listeners = new Set();
     const vv = {
@@ -70,12 +70,39 @@ describe('useKeyboardInset', () => {
     update(400, 0);
     expect(container.textContent).toBe('inset:368');
     update(400, 368);
-    expect(container.textContent).toBe('inset:368');
+    expect(container.textContent).toBe('inset:0');
     update(768, 120);
     expect(container.textContent).toBe('inset:0');
     update(400, 240);
-    expect(container.textContent).toBe('inset:368');
+    expect(container.textContent).toBe('inset:128');
     update(768, 0);
+    expect(container.textContent).toBe('inset:0');
+  });
+
+  it('does not double-lift Android when both layout and visual viewports resize', () => {
+    Object.defineProperty(window, 'innerHeight', { value: 768, writable: true, configurable: true });
+    const listeners = new Set();
+    const vv = {
+      width: 390,
+      height: 768,
+      offsetTop: 0,
+      addEventListener: (_type, fn) => listeners.add(fn),
+      removeEventListener: (_type, fn) => listeners.delete(fn),
+    };
+    Object.defineProperty(window, 'visualViewport', { value: vv, configurable: true });
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    act(() => root.render(<Probe />));
+    const resize = (height) => act(() => {
+      window.innerHeight = height;
+      vv.height = height;
+      listeners.forEach((fn) => fn());
+    });
+
+    resize(400);
+    expect(container.textContent).toBe('inset:0');
+    resize(330); // a taller keyboard panel still resizes the layout; it must not add another app lift
     expect(container.textContent).toBe('inset:0');
   });
 });

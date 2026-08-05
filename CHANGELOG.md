@@ -11,6 +11,7 @@ All notable changes to handmux. Format follows [Keep a Changelog](https://keepac
 ### Fixed
 - 修复 Codex 对话与终端可能关联到不同会话、`/clear` 后仍显示旧会话，以及连续点击停止会重复发送 Esc 的问题。
 - 修复 Codex 托管对话中部分工具调用不显示的问题。
+- 修复手机终端切到聊天模式并聚焦输入框后，输入区可能被软键盘重复顶到屏幕顶部的问题。
 
 ## [0.22.1] - 2026-08-04
 
