@@ -108,14 +108,14 @@ export function transcriptRoutes({ commands, claudeEvents, reader = transcriptRe
       }
       const empty = { messages: [], hash: '', session: sessionId || null, hasMore: false, firstSeq: null };
       if (req.chatAgent.id === 'codex') {
-        if (!sessionId) {
-          try {
-            const discovered = await codexApp?.discover?.(req.query.pane);
-            if (discovered && !discovered.managed) return res.json({ ...empty, unavailable: 'session-unmanaged' });
-            sessionId = discovered?.threadId || null;
-          } catch (error) {
-            return res.json({ ...empty, unavailable: 'app-server-unavailable', detail: error?.message || String(error) });
-          }
+        // Managed Codex binds pane→thread through the pane's App Server socket. Never prefer a stale Hook
+        // row here: /clear can replace the active thread without writing any Hook metadata.
+        try {
+          const discovered = await codexApp?.discover?.(req.query.pane);
+          if (!discovered?.managed) return res.json({ ...empty, unavailable: 'session-unmanaged' });
+          sessionId = discovered?.threadId || null;
+        } catch (error) {
+          return res.json({ ...empty, unavailable: 'app-server-unavailable', detail: error?.message || String(error) });
         }
         if (!sessionId) return res.json({ ...empty, unavailable: 'session-unbound' });
         let opened = null;

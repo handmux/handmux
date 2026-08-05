@@ -4,6 +4,7 @@ import WebSocket from 'ws';
 import { codexAppSocketPath } from './cli/codexManaged.js';
 
 const RPC_TIMEOUT_MS = 8_000;
+const SOCKET_SCAN_MS = 2_000;
 const APPROVAL_METHODS = new Set([
   'item/commandExecution/requestApproval',
   'item/fileChange/requestApproval',
@@ -130,6 +131,33 @@ function normalizeApproval(message) {
   };
 }
 
+function turnSummary(turn) {
+  const items = Array.isArray(turn?.items) ? turn.items : [];
+  const message = [...items].reverse().find((item) => item?.type === 'agentMessage' && item.text?.trim());
+  return message?.text || turn?.error?.message || '';
+}
+
+function activeKind(status) {
+  if (status?.type !== 'active') return null;
+  const flags = Array.isArray(status.activeFlags) ? status.activeFlags : [];
+  return flags.includes('waitingOnApproval') || flags.includes('waitingOnUserInput') ? 'permission' : 'working';
+}
+
+function settingsFromResume(result) {
+  return {
+    model: result?.model || null,
+    modelProvider: result?.modelProvider || null,
+    serviceTier: result?.serviceTier ?? null,
+    cwd: result?.cwd || null,
+    approvalPolicy: result?.approvalPolicy || null,
+    approvalsReviewer: result?.approvalsReviewer || null,
+    sandboxPolicy: result?.sandbox || null,
+    activePermissionProfile: result?.activePermissionProfile ?? null,
+    effort: result?.reasoningEffort ?? null,
+    multiAgentMode: result?.multiAgentMode || null,
+  };
+}
+
 function connectUnixWebSocket(socketPath) {
   return new WebSocket('ws://localhost/rpc', {
     createConnection: () => net.createConnection(socketPath),
@@ -138,18 +166,23 @@ function connectUnixWebSocket(socketPath) {
 }
 
 class CodexAppConnection {
-  constructor({ pane, socketPath, connect = connectUnixWebSocket, timeoutMs = RPC_TIMEOUT_MS, onClose = () => {} }) {
+  constructor({ pane, socketPath, connect = connectUnixWebSocket, timeoutMs = RPC_TIMEOUT_MS, now = () => Date.now(), baseline = false, onStateChange = () => {}, onClose = () => {} }) {
     this.pane = pane;
     this.socketPath = socketPath;
     this.connect = connect;
     this.timeoutMs = timeoutMs;
     this.onClose = onClose;
+    this.now = now;
+    this.baseline = baseline;
+    this.onStateChange = onStateChange;
     this.nextId = 1;
     this.pending = new Map();
     this.approvals = new Map();
     this.threadState = new Map();
     this.subscribed = new Set();
     this.lastStartedThreadId = null;
+    this.currentThreadId = null;
+    this.inbox = { kind: null, msg: '', ts: 0, key: 'idle', suppressPush: false };
     this.opening = null;
     this.closed = false;
   }
@@ -196,6 +229,9 @@ class CodexAppConnection {
     }
     if (message.id != null && APPROVAL_METHODS.has(message.method)) {
       this.approvals.set(String(message.id), message);
+      const approval = normalizeApproval(message);
+      this.currentThreadId = approval.threadId || this.currentThreadId;
+      this.setInbox('permission', approval.reason || approval.command || '', `approval:${message.id}`);
       this.bump(message.params?.threadId);
       return;
     }
@@ -203,20 +239,59 @@ class CodexAppConnection {
     const params = message.params || {};
     if (message.method === 'serverRequest/resolved') {
       this.approvals.delete(String(params.requestId));
+      this.setInbox('working', '', `resolved:${params.requestId}`);
     } else if (message.method === 'thread/status/changed') {
       this.state(params.threadId).status = params.status;
+      this.currentThreadId = params.threadId || this.currentThreadId;
+      const kind = activeKind(params.status);
+      if (kind === 'working' && this.inbox.kind === 'compacting') {
+        /* keep the more specific state until thread/compacted or idle */
+      } else if (kind) {
+        this.setInbox(kind, kind === 'permission' && this.inbox.kind === kind ? this.inbox.msg : '', `status:${params.threadId}:${kind}`);
+      } else if (params.status?.type === 'idle' && this.inbox.kind === 'compacting') {
+        this.setInbox(null, '', `thread:${params.threadId}:compacted`);
+      }
     } else if (message.method === 'turn/started') {
       this.state(params.threadId).activeTurnId = params.turn?.id || params.turnId || null;
+      this.currentThreadId = params.threadId || this.currentThreadId;
+      this.setInbox('working', '', `turn:${params.turn?.id || params.turnId}:started`);
     } else if (message.method === 'turn/completed') {
       const state = this.state(params.threadId);
       state.activeTurnId = null;
       state.lastTurn = params.turn || null;
+      this.currentThreadId = params.threadId || this.currentThreadId;
+      const status = params.turn?.status;
+      if (status === 'completed' || status === 'failed') {
+        const completedAt = typeof params.turn?.completedAt === 'number' ? params.turn.completedAt * 1000 : undefined;
+        this.setInbox('done', turnSummary(params.turn), `turn:${params.turn?.id || params.turnId}:${status}`, completedAt);
+      } else {
+        this.setInbox(null, '', `turn:${params.turn?.id || params.turnId}:${status || 'ended'}`);
+      }
     } else if (message.method === 'thread/settings/updated') {
       this.state(params.threadId).settings = params.threadSettings || null;
+    } else if (message.method === 'thread/compacted') {
+      this.setInbox(null, '', `thread:${params.threadId}:compacted`);
     } else if (message.method === 'thread/started') {
+      const previous = this.currentThreadId;
       this.lastStartedThreadId = params.thread?.id || params.threadId || null;
+      this.currentThreadId = this.lastStartedThreadId;
+      if (previous && previous !== this.lastStartedThreadId) {
+        this.setInbox(null, '', `thread:${this.lastStartedThreadId || 'unknown'}:started`);
+      }
     }
     this.bump(params.threadId);
+  }
+
+  setInbox(kind, msg = '', key = `${kind || 'idle'}`, ts = undefined) {
+    if (this.inbox.key === key && this.inbox.kind === kind && this.inbox.msg === msg) return;
+    this.inbox = { kind, msg, ts: ts ?? this.now(), key, suppressPush: this.baseline };
+    queueMicrotask(() => Promise.resolve(this.onStateChange(this.pane)).catch(() => {}));
+  }
+
+  takeInbox() {
+    const snapshot = { ...this.inbox };
+    this.inbox.suppressPush = false;
+    return snapshot;
   }
 
   state(threadId) {
@@ -262,7 +337,19 @@ class CodexAppConnection {
       state.thread = result.thread || null;
       state.readRevision = state.revision;
       state.status = result.thread?.status || state.status;
+      state.settings = settingsFromResume(result);
       state.loadedOnly = false;
+      this.currentThreadId = threadId;
+      const kind = activeKind(state.status);
+      if (kind) {
+        this.setInbox(kind, '', `status:${threadId}:${kind}`);
+      } else {
+        const last = [...(result.thread?.turns || [])].reverse().find((turn) => turn.status !== 'inProgress');
+        if (last?.status === 'completed' || last?.status === 'failed') {
+          const completedAt = typeof last.completedAt === 'number' ? last.completedAt * 1000 : undefined;
+          this.setInbox('done', turnSummary(last), `turn:${last.id}:${last.status}`, completedAt);
+        }
+      }
     } catch (error) {
       // A newly opened TUI thread is authoritative but has no rollout until its first turn. It cannot yet
       // be resumed by a second client, so verify it against this pane's loaded-thread set and keep an empty
@@ -300,9 +387,19 @@ class CodexAppConnection {
   }
 
   async discoverThread() {
+    if (this.currentThreadId) return this.currentThreadId;
     const loaded = await this.loadedThreads();
     if (this.lastStartedThreadId && loaded.includes(this.lastStartedThreadId)) return this.lastStartedThreadId;
-    return loaded.length === 1 ? loaded[0] : null;
+    if (loaded.length <= 1) return loaded[0] || null;
+    const threads = await Promise.all(loaded.map(async (threadId, index) => {
+      try {
+        const result = await this.rpc('thread/read', { threadId, includeTurns: false });
+        const thread = result?.thread || {};
+        return { threadId, order: Number(thread.updatedAt ?? thread.createdAt ?? index) };
+      } catch { return { threadId, order: index }; }
+    }));
+    threads.sort((a, b) => b.order - a.order);
+    return threads[0]?.threadId || null;
   }
 
   approvalsFor(threadId) {
@@ -320,6 +417,7 @@ class CodexAppConnection {
     if (!approval.decisions.includes(decision)) throw new Error('approval decision is unavailable');
     this.respond(request.id, { decision });
     this.approvals.delete(key);
+    this.setInbox('working', '', `approval:${key}:resolved`);
     this.bump(threadId);
   }
 
@@ -347,22 +445,54 @@ class CodexAppConnection {
   }
 }
 
-export function createCodexAppServer({ home, connect = connectUnixWebSocket, exists = fs.existsSync } = {}) {
+export function createCodexAppServer({
+  home,
+  connect = connectUnixWebSocket,
+  exists = fs.existsSync,
+  readdir = fs.readdirSync,
+  now = () => Date.now(),
+  onStateChange = () => {},
+  scanIntervalMs = SOCKET_SCAN_MS,
+  setTimer = setInterval,
+  clearTimer = clearInterval,
+} = {}) {
   const connections = new Map();
+  let scanTimer = null;
+  let started = false;
+  let priming = false;
 
-  async function connection(pane) {
+  async function connection(pane, { baseline = false } = {}) {
     const socketPath = codexAppSocketPath(pane, home);
     if (!exists(socketPath)) return null;
     let current = connections.get(pane);
     if (!current || current.closed) {
       current = new CodexAppConnection({
-        pane, socketPath, connect,
+        pane, socketPath, connect, now, baseline: baseline || priming, onStateChange,
         onClose: (closed) => { if (connections.get(pane) === closed) connections.delete(pane); },
       });
       connections.set(pane, current);
     }
     await current.open();
     return current;
+  }
+
+  async function observe(pane, { baseline = false } = {}) {
+    const client = await connection(pane, { baseline });
+    if (!client) return null;
+    const threadId = await client.discoverThread();
+    if (threadId) await client.ensureThread(threadId);
+    client.baseline = false;
+    return { client, threadId };
+  }
+
+  async function scan({ baseline = false } = {}) {
+    const dir = codexAppSocketPath('%0', home).replace(/\/0\.sock$/, '');
+    let names = [];
+    try { names = readdir(dir); } catch { return; }
+    await Promise.all(names.filter((name) => /^\d+\.sock$/.test(name)).map((name) => {
+      const pane = `%${name.slice(0, -5)}`;
+      return observe(pane, { baseline }).catch(() => {});
+    }));
   }
 
   return {
@@ -372,9 +502,26 @@ export function createCodexAppServer({ home, connect = connectUnixWebSocket, exi
       return { client, thread: await client.readThread(threadId) };
     },
     async discover(pane) {
-      const client = await connection(pane);
-      if (!client) return { managed: false, threadId: null };
-      return { managed: true, threadId: await client.discoverThread() };
+      const observed = await observe(pane);
+      if (!observed) return { managed: false, threadId: null };
+      return { managed: true, threadId: observed.threadId };
+    },
+    async inboxStates(livePanes = []) {
+      const out = {};
+      await Promise.all(livePanes.map(async (pane) => {
+        if (!exists(codexAppSocketPath(pane.id, home))) return;
+        try {
+          const observed = await observe(pane.id);
+          out[pane.id] = observed
+            ? { ...observed.client.takeInbox(), threadId: observed.threadId }
+            : { kind: null, msg: '', ts: 0, suppressPush: false, threadId: null, unavailable: true };
+        } catch {
+          // The pane-owned socket still proves managed ownership. Do not revive a stale Hook row merely
+          // because App Server is reconnecting; chat status exposes the connection error separately.
+          out[pane.id] = { kind: null, msg: '', ts: 0, suppressPush: false, threadId: null, unavailable: true };
+        }
+      }));
+      return out;
     },
     async status(pane, threadId) {
       const client = await connection(pane);
@@ -386,6 +533,7 @@ export function createCodexAppServer({ home, connect = connectUnixWebSocket, exi
         status: state.status || state.thread?.status,
         activeTurnId: state.activeTurnId,
         settings: state.settings,
+        activityKind: client.inbox.kind,
         lastTurn: state.lastTurn,
         approvals: client.approvalsFor(threadId),
         revision: state.revision,
@@ -398,6 +546,8 @@ export function createCodexAppServer({ home, connect = connectUnixWebSocket, exi
       const result = await client.rpc('turn/start', { threadId, input: [{ type: 'text', text }] });
       state.activeTurnId = result.turn?.id || null;
       state.status = { type: 'active', activeFlags: [] };
+      client.currentThreadId = threadId;
+      client.setInbox('working', '', `turn:${result.turn?.id || 'starting'}:started`);
       client.bump(threadId);
       if (state.loadedOnly) {
         // turn/start normally writes the first rollout synchronously. Try to attach this observer now;
@@ -409,8 +559,12 @@ export function createCodexAppServer({ home, connect = connectUnixWebSocket, exi
     async compact(pane, threadId) {
       const client = await connection(pane);
       if (!client) throw new Error('Codex session is not managed by Handmux');
-      await client.ensureThread(threadId);
-      return client.rpc('thread/compact/start', { threadId });
+      const state = await client.ensureThread(threadId);
+      const result = await client.rpc('thread/compact/start', { threadId });
+      state.status = { type: 'active', activeFlags: [] };
+      client.setInbox('compacting', '', `thread:${threadId}:compacting`);
+      client.bump(threadId);
+      return result;
     },
     async interrupt(pane, threadId) {
       const client = await connection(pane);
@@ -420,6 +574,7 @@ export function createCodexAppServer({ home, connect = connectUnixWebSocket, exi
       const turnId = state.activeTurnId || [...(thread.turns || [])].reverse().find((turn) => turn.status === 'inProgress')?.id;
       if (!turnId) return { interrupted: false };
       await client.rpc('turn/interrupt', { threadId, turnId });
+      client.setInbox(null, '', `turn:${turnId}:interrupted`);
       return { interrupted: true, turnId };
     },
     async decide(pane, threadId, requestId, decision) {
@@ -429,7 +584,18 @@ export function createCodexAppServer({ home, connect = connectUnixWebSocket, exi
       client.decide(threadId, requestId, decision);
       return { ok: true };
     },
+    start() {
+      if (started) return;
+      started = true;
+      priming = true;
+      scan({ baseline: true }).catch(() => {}).finally(() => { priming = false; });
+      scanTimer = setTimer(() => scan().catch(() => {}), scanIntervalMs);
+      scanTimer?.unref?.();
+    },
     close() {
+      started = false;
+      if (scanTimer) clearTimer(scanTimer);
+      scanTimer = null;
       for (const client of connections.values()) client.close();
       connections.clear();
     },

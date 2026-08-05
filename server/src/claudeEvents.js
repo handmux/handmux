@@ -146,6 +146,7 @@ function readStateFile(file) {
 export function createClaudeEvents({
   commands,
   push,
+  codexApp = null,
   file = DEFAULT_STATE_FILE,
   now = () => Date.now(),
   statMtime = defaultStatMtime,
@@ -190,6 +191,21 @@ export function createClaudeEvents({
     try { await push.sendToSession(lp.session, payload, opts); } catch { /* best effort */ }
   }
 
+  async function updatePush(pane, c, ts, lp, { gone = false, suppressPush = false } = {}) {
+    const kind = c ? c.kind : null;
+    const view = PUSH_VIEW[kind];
+    const key = view ? pushKey(view, ts) : undefined;
+    if (kind === 'idle') return;
+    if (gone || !view) {
+      lastPushed[pane] = null;
+    } else if (suppressPush) {
+      lastPushed[pane] = key;
+    } else if (lastPushed[pane] !== key && lp?.session) {
+      lastPushed[pane] = key;
+      await sendPush(pane, view, c, lp);
+    }
+  }
+
   // Read the state file, reconcile every recorded pane against live tmux, and in ONE pass: (1) fire push
   // for 需要你/已完成 transitions (deduped, global — independent of any caller's session filter), and
   // (2) build the pane→state roster the inbox shows. A pane is dropped from the roster when its latest
@@ -201,17 +217,20 @@ export function createClaudeEvents({
     const allow = allowedSessions == null ? null : new Set(allowedSessions);
     const recorded = readStateFile(file);
     let live = null;
+    let managedCodex = {};
     try {
       const panes = await commands.listLivePanes();
+      live = new Map(panes.map((p) => [p.id, p]));
+      managedCodex = codexApp?.inboxStates ? await codexApp.inboxStates(panes) : {};
       // Normalize ambiguous commands BEFORE identity/liveness matching: native Claude may report a bare
       // version and npm-installed Codex reports node. Both require foreground-TTY + real-executable proof.
-      await resolveVersionedComms(panes, run, commVerdicts);
-      await resolveCodexComms(panes, run, commVerdicts);
-      live = new Map(panes.map((p) => [p.id, p]));
+      try { await resolveVersionedComms(panes, run, commVerdicts); } catch { /* keep raw tmux liveness */ }
+      try { await resolveCodexComms(panes, run, commVerdicts); } catch { /* managed sockets remain authoritative */ }
     } catch { /* tmux down */ }
 
     const out = {};
     for (const [pane, rec] of Object.entries(recorded)) {
+      if (rec?.agent === 'codex' && Object.hasOwn(managedCodex, pane)) continue;
       const agent = getAgent(rec && rec.agent);
       let c = rec && typeof rec.src === 'string' ? agent.classify(rec.src, rec.payload || {}) : null;
       // A 需要你 the user already resolved leaves no closing hook (see PERM_RESOLVED_GUARD_MS). statMtime
@@ -247,17 +266,7 @@ export function createClaudeEvents({
       // 60s "still waiting" idle neither pushes nor disturbs the dedup (the pane is still in the same
       // resting state). working / end / gone / unclassifiable re-arm the dedup for the next entry.
       if (live) {
-        const kind = c ? c.kind : null;
-        const view = PUSH_VIEW[kind]; // 'needs' | 'done' | undefined
-        const key = view ? pushKey(view, rec.ts) : undefined;
-        if (kind === 'idle') {
-          /* trailing idle reminder — no push, keep the dedup as the preceding done left it */
-        } else if (gone || !view) {
-          lastPushed[pane] = null; // 进行中 / 结束 / gone → re-arm for the next 需要你 / 已完成
-        } else if (lastPushed[pane] !== key && lp.session) {
-          lastPushed[pane] = key;
-          await sendPush(pane, view, c, lp);
-        }
+        await updatePush(pane, c, rec.ts, lp, { gone });
       }
 
       // (2) roster — drop ended / dead / claude-exited panes; resolve location from the live tmux row.
@@ -269,6 +278,22 @@ export function createClaudeEvents({
       const loc = lp ? { session: lp.session, window: lp.window, windowName: lp.windowName } : {};
       if (allow && !allow.has(loc.session)) continue;
       out[pane] = { ...loc, kind: c.kind, msg: c.msg || '', ts: rec.ts || 0, agent: agent.id };
+    }
+
+    // Managed Codex is authoritative for its own pane. App Server events replace stale/missing Hook rows,
+    // while a neutral state still leaves process presence below to identify the pane as Codex.
+    if (live) {
+      for (const [pane, state] of Object.entries(managedCodex)) {
+        const lp = live.get(pane);
+        if (!lp) continue;
+        const c = state.kind ? { kind: state.kind, msg: state.msg || '' } : null;
+        await updatePush(pane, c, state.ts || 0, lp, { suppressPush: state.suppressPush });
+        if (allow && !allow.has(lp.session)) continue;
+        out[pane] = {
+          session: lp.session, window: lp.window, windowName: lp.windowName,
+          kind: c?.kind || null, msg: c?.msg || '', ...(c ? { ts: state.ts || 0 } : {}), agent: 'codex',
+        };
+      }
     }
 
     // (3) process presence — a pane whose FOREGROUND program IS a coding agent reads as "agent here" even

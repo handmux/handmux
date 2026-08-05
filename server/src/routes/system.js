@@ -25,13 +25,11 @@ const PKG_VERSION = (() => {
   catch { return null; }
 })();
 
-// Summarize hook state across every installed coding agent. A partial install is still 'absent' so the
-// phone offers the one-tap action that completes the missing agent; otherwise a Claude-only hook install
-// could make Codex chat look enabled while providing no approval/status events.
+// Managed Codex no longer needs Hooks for chat, approvals, inbox state, or push. Keep recognising an
+// existing Codex Hook install for compatibility, but never prompt solely because Codex Hooks are absent.
 export function combineHookStatuses(claude, codex) {
-  const present = [claude, codex].filter((status) => status !== 'no-claude' && status !== 'no-codex');
-  if (!present.length) return 'no-claude'; // back-compatible public token: no supported agent installed
-  return present.every((status) => status === 'installed') ? 'installed' : 'absent';
+  if (claude === 'installed' || claude === 'absent') return claude;
+  return codex === 'installed' ? 'installed' : 'no-claude';
 }
 
 export function combinedHooksStatus(home) {
@@ -48,12 +46,14 @@ export function systemRoutes({ commands, claudeEvents, asrEnv, shortcuts, home, 
   // Optional integrations are configured per-install (open-source installs ship without keys), so the
   // client asks what's actually available and hides controls that can't work — e.g. the mic when no
   // ASR engine is configured. Add more flags here as optional integrations land.
-  // `claudeHooks` (name kept for web back-compat) summarizes EVERY coding agent: installed only when all
-  // present agents are wired, absent when any needs setup, and no-claude when no supported agent exists.
+  // `claudeHooks` (name kept for web back-compat) now represents optional Hook-backed integrations;
+  // managed Codex works through App Server without affecting this setup prompt.
   r.get('/config', (req, res) => {
+    const codexStatus = codexHooksStatus(home);
     res.json({
       asr: isAsrConfigured(asrEnv),
-      claudeHooks: combinedHooksStatus(home),
+      claudeHooks: combineHookStatuses(hooksStatus(home), codexStatus),
+      managedCodex: true,
       shortcuts: activeShortcuts,
       browserProxy: !!previewDomain,
     });

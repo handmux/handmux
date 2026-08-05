@@ -1,12 +1,8 @@
 import express from 'express';
 import { isPaneId } from '../tmux/commands.js';
 
-async function binding(claudeEvents, codexApp, pane) {
+async function binding(codexApp, pane) {
   if (!isPaneId(pane)) return { error: 'bad pane id', status: 400 };
-  const agent = claudeEvents?.paneAgent?.(pane);
-  const session = claudeEvents?.paneSession?.(pane);
-  if (agent !== 'codex' && session?.agent !== 'codex') return { error: 'pane is not running Codex', status: 409 };
-  if (session?.sessionId && session.bindingVersion === 2) return { pane, threadId: session.sessionId };
   try {
     const discovered = await codexApp?.discover?.(pane);
     if (!discovered?.managed) return { error: 'Codex session is not managed by Handmux', status: 409 };
@@ -29,19 +25,19 @@ function codexError(res, error) {
   return res.status(conflict ? 409 : 503).json({ error: message });
 }
 
-export function codexRoutes({ claudeEvents, codexApp }) {
+export function codexRoutes({ codexApp }) {
   const r = express.Router();
   if (!codexApp) return r;
 
   r.get('/codex/session', async (req, res) => {
-    const target = await binding(claudeEvents, codexApp, req.query.pane);
+    const target = await binding(codexApp, req.query.pane);
     if (routeError(res, target)) return;
     try { res.json(await codexApp.status(target.pane, target.threadId)); }
     catch (error) { codexError(res, error); }
   });
 
   r.post('/codex/send', async (req, res) => {
-    const target = await binding(claudeEvents, codexApp, req.body?.pane);
+    const target = await binding(codexApp, req.body?.pane);
     if (routeError(res, target)) return;
     const text = typeof req.body?.text === 'string' ? req.body.text.trim() : '';
     if (!text) return res.status(400).json({ error: 'message is empty' });
@@ -50,21 +46,21 @@ export function codexRoutes({ claudeEvents, codexApp }) {
   });
 
   r.post('/codex/compact', async (req, res) => {
-    const target = await binding(claudeEvents, codexApp, req.body?.pane);
+    const target = await binding(codexApp, req.body?.pane);
     if (routeError(res, target)) return;
     try { res.json(await codexApp.compact(target.pane, target.threadId)); }
     catch (error) { codexError(res, error); }
   });
 
   r.post('/codex/interrupt', async (req, res) => {
-    const target = await binding(claudeEvents, codexApp, req.body?.pane);
+    const target = await binding(codexApp, req.body?.pane);
     if (routeError(res, target)) return;
     try { res.json(await codexApp.interrupt(target.pane, target.threadId)); }
     catch (error) { codexError(res, error); }
   });
 
   r.post('/codex/approval', async (req, res) => {
-    const target = await binding(claudeEvents, codexApp, req.body?.pane);
+    const target = await binding(codexApp, req.body?.pane);
     if (routeError(res, target)) return;
     const requestId = req.body?.requestId;
     const decision = req.body?.decision;

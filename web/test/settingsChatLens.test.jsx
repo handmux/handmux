@@ -67,6 +67,12 @@ describe('Settings 对话镜头 experimental gate', () => {
     expect(lensBox().checked).toBe(true);
   });
 
+  it('managed Codex support unlocks the toggle without hooks and explains the boundary', async () => {
+    await render({ chatLensEnabled: false, hooksStatus: 'no-claude', managedCodexAvailable: true });
+    expect(lensBox().disabled).toBe(false);
+    expect(container.textContent).toContain('托管 Codex 无需 hooks');
+  });
+
   it('no Claude Code at all → locked with the no-claude hint and NO install button', async () => {
     await render({ chatLensEnabled: false, hooksStatus: 'no-claude' });
     expect(lensBox().disabled).toBe(true);

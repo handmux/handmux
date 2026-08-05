@@ -39,6 +39,7 @@ import { browserEntryStatus } from './browserState.js';
 import { usePollingLoop } from './hooks/usePollingLoop.js';
 import { useServerConfig } from './hooks/useServerConfig.js';
 import { authHandled } from './authGuard.js';
+import { canUseChatLens } from './chatLensAvailability.js';
 
 import Drawer from './components/Drawer.jsx';
 import WindowBar from './components/WindowBar.jsx';
@@ -1350,7 +1351,7 @@ export default function App() {
   // The current pane's cwd (from /panes), used as the default base when resolving a relative doc path.
   const currentPaneCwd = current?.panes?.find((p) => p.id === current.paneId)?.cwd || null;
 
-  const chatLensAvailable = chatLensOn && (currentAgent === 'claude' || currentAgent === 'codex');
+  const chatLensAvailable = chatLensOn && canUseChatLens(currentAgent, hooksStatus, codexSession);
   // Chat lens is active only for a supported pane whose lens is set to 'chat'. Drives BOTH swaps: the main
   // view (ChatView vs Terminal) and the bottom bar (ChatComposer vs the terminal BottomDock).
   const chatLens = chatLensAvailable && lens === 'chat';
@@ -1735,6 +1736,7 @@ export default function App() {
         onSnapshotInterval={chooseSnapshotInterval}
         hooksStatus={hooksStatus}
         onEnableHooks={enableHooks}
+        managedCodexAvailable={!!serverConfig?.managedCodex}
         termRef={termRef}
         onOpenChangelog={openChangelog}
         changelogUnread={changelogUnread}

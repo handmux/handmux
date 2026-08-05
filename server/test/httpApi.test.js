@@ -895,6 +895,7 @@ describe('GET /api/config (capabilities)', () => {
     withoutProxy.use('/api', createApiRouter({ token: 'good', commands: baseCommands }));
     const unavailable = await request(withoutProxy).get('/api/config').set('Authorization', 'Bearer good').expect(200);
     expect(unavailable.body.browserProxy).toBe(false);
+    expect(unavailable.body.managedCodex).toBe(true);
 
     const withProxy = express();
     withProxy.use('/api', createApiRouter({
@@ -958,11 +959,12 @@ describe('GET /api/config (capabilities)', () => {
 });
 
 describe('claude hooks API', () => {
-  it('reports a partial multi-agent hook install as absent so setup can finish it', () => {
-    expect(combineHookStatuses('installed', 'absent')).toBe('absent');
+  it('does not require Codex Hooks now that managed Codex uses App Server', () => {
+    expect(combineHookStatuses('installed', 'absent')).toBe('installed');
     expect(combineHookStatuses('absent', 'installed')).toBe('absent');
     expect(combineHookStatuses('installed', 'no-codex')).toBe('installed');
     expect(combineHookStatuses('no-claude', 'installed')).toBe('installed');
+    expect(combineHookStatuses('no-claude', 'absent')).toBe('no-claude');
     expect(combineHookStatuses('no-claude', 'no-codex')).toBe('no-claude');
   });
   // A fresh temp $HOME WITH a .claude dir (but no hooks) — installHooks refuses to create ~/.claude,

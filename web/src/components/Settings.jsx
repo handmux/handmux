@@ -6,6 +6,7 @@ import { t, getLangCode, setLang, AVAILABLE } from '../i18n';
 import { SNAPSHOT_INTERVALS } from '../terminalTransport.js';
 import { useBackButton } from '../hooks/useBackButton.js';
 import { CheckIcon } from './icons.jsx';
+import { canEnableChatLens } from '../chatLensAvailability.js';
 
 const DETAIL_TITLE = {
   language: 'settings.language',
@@ -146,7 +147,7 @@ export default function Settings({ open, onClose, termRef, onOpenChangelog, chan
   keyboardMode = 'auto', onKeyboardMode = () => {},
   terminalTransport = 'live', onTerminalTransport = () => {},
   snapshotInterval = 1000, onSnapshotInterval = () => {},
-  hooksStatus = null, onEnableHooks = null,
+  hooksStatus = null, onEnableHooks = null, managedCodexAvailable = false,
   notifUnread = false, onOpenInbox,
   updateInfo = null,
   workspaceProtection = null }) {
@@ -163,7 +164,7 @@ export default function Settings({ open, onClose, termRef, onOpenChangelog, chan
   const bodyRef = useRef(null);
   const rootScrollRef = useRef(0);
 
-  const lensLocked = hooksStatus === 'absent' || hooksStatus === 'no-claude';
+  const lensLocked = !canEnableChatLens(hooksStatus, managedCodexAvailable);
   const notificationsSupported = pushSupported();
 
   useEffect(() => {
@@ -268,7 +269,18 @@ export default function Settings({ open, onClose, termRef, onOpenChangelog, chan
   const protectionReason = ['live-corrupt', 'live-unavailable'].includes(workspaceProtection?.errorCode)
     ? workspaceProtection.errorCode : 'unknown';
 
-  const lensFooter = lensLocked ? (
+  const lensFooter = managedCodexAvailable && hooksStatus !== 'installed' ? (
+    <>
+      <div>{t('settings.chat_lens_codex_ready')}</div>
+      {hooksStatus === 'absent' && (
+        <button type="button" className="settings-page-inline-action" disabled={lensHooksBusy}
+          onClick={enableLensHooks}>
+          {lensHooksBusy ? t('settings.chat_lens_installing') : t('settings.chat_lens_install_hooks')}
+        </button>
+      )}
+      {lensHooksErr && <div className="settings-hint-err">{t('settings.chat_lens_hooks_err')}</div>}
+    </>
+  ) : lensLocked ? (
     <>
       <div>{t(hooksStatus === 'no-claude' ? 'settings.chat_lens_no_claude' : 'settings.chat_lens_need_hooks')}</div>
       {hooksStatus === 'absent' && (

@@ -68,11 +68,19 @@ const workspace = createWorkspaceRuntime({
   home,
 });
 
-// The inbox is driven by a JSON state file the Claude hooks maintain (server/hooks/handmux-notify.sh →
-// handmux-write.js). We only READ it. start() watches it so idle/permission push fires even when no
-// client is polling; getStates reads it fresh on each /states.
-const events = createClaudeEvents({ commands, push, file: stateFile, onStateChange: workspace.requestReconcile });
+// Claude/legacy Codex states come from Hooks; managed Codex states come directly from App Server. Both
+// feed the same inbox and push pass so the phone sees one authoritative state per pane.
+let events = null;
+const codexApp = createCodexAppServer({
+  home,
+  onStateChange: () => {
+    if (!events) return;
+    events.getStates().then(() => workspace.requestReconcile()).catch(() => {});
+  },
+});
+events = createClaudeEvents({ commands, push, codexApp, file: stateFile, onStateChange: workspace.requestReconcile });
 events.start();
+codexApp.start();
 workspace.start().catch(() => {});
 
 // Keep an already-opted-in user's Claude hooks in step with this handmux version on restart: newly-added
@@ -105,8 +113,6 @@ const handmuxOrigin = (() => {
   }
 })();
 const browserWorker = createBrowserWorkerClient({ appToken: token, previewDomain, handmuxOrigin });
-const codexApp = createCodexAppServer({ home });
-
 const app = express();
 // Browser proxy leases stay behind normal Handmux auth. Client-owned direct tabs never enter
 // server state; proxy operations and all claimed Hammerhead paths use the isolated worker.

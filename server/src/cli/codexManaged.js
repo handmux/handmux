@@ -40,9 +40,8 @@ function finish(child) {
   });
 }
 
-// One App Server belongs to one tmux pane. That ownership is intentional: the server inherits TMUX_PANE,
-// so Codex hooks keep their exact pane→thread binding, while the TUI and Handmux connect to the same Unix
-// socket and therefore observe one authoritative runtime (messages, approvals, settings, and interrupts).
+// One App Server belongs to one tmux pane. The TUI and Handmux connect to that pane-owned Unix socket,
+// so thread identity, messages, approvals, settings, interrupts and inbox state share one runtime.
 export async function runManagedCodex(args = [], {
   home = os.homedir(),
   env = process.env,

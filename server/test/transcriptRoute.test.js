@@ -92,7 +92,7 @@ describe('GET /api/transcript', () => {
     }));
     const { status, body } = await call(app, '/transcript?pane=%251&agent=codex');
     expect(status).toBe(200);
-    expect(body).toMatchObject({ messages: [], session: null, unavailable: 'session-unbound' });
+    expect(body).toMatchObject({ messages: [], session: null, unavailable: 'session-unmanaged' });
     expect(paneCurrentPath).not.toHaveBeenCalled();
     expect(reader.read).not.toHaveBeenCalled();
   });
@@ -115,6 +115,7 @@ describe('GET /api/transcript', () => {
     app.use(transcriptRoutes({
       commands: {},
       codexApp: {
+        discover: vi.fn(async () => ({ managed: true, threadId: 'app-thread' })),
         read: vi.fn(async () => ({ thread: { turns: [{
           id: 'turn-1', status: 'completed', startedAt: 1,
           items: [{ id: 'message-1', type: 'agentMessage', text: 'hooked-codex' }],
@@ -152,7 +153,7 @@ describe('GET /api/transcript', () => {
     const app = express();
     app.use(transcriptRoutes({
       commands: {},
-      codexApp: { read: vi.fn(async () => null) },
+      codexApp: { discover: vi.fn(async () => ({ managed: false, threadId: null })), read: vi.fn(async () => null) },
       claudeEvents: {
         paneAgent: () => 'codex',
         paneSession: () => ({ agent: 'codex', sessionId: 'aaaaaaaa-0000-0000-0000-000000000003', transcriptPath: '/rollout.jsonl', bindingVersion: 2 }),
@@ -163,7 +164,7 @@ describe('GET /api/transcript', () => {
     expect(body).toMatchObject({ messages: [], unavailable: 'session-unmanaged' });
   });
 
-  it('refuses a legacy Codex binding that may predate a /clear session switch', async () => {
+  it('ignores a legacy Codex Hook binding that may predate a /clear session switch', async () => {
     const reader = { read: vi.fn() };
     const app = express();
     app.use(transcriptRoutes({
@@ -176,7 +177,7 @@ describe('GET /api/transcript', () => {
 
     const { status, body } = await call(app, '/transcript?pane=%251&agent=codex');
     expect(status).toBe(200);
-    expect(body).toMatchObject({ messages: [], unavailable: 'session-unbound' });
+    expect(body).toMatchObject({ messages: [], unavailable: 'session-unmanaged' });
     expect(reader.read).not.toHaveBeenCalled();
   });
 

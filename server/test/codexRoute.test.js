@@ -11,16 +11,19 @@ function appFor({ sessionId = 'thread-1', bindingVersion = 2, agent = 'codex', c
       paneAgent: () => agent,
       paneSession: () => ({ agent, sessionId, bindingVersion }),
     },
-    codexApp,
+    codexApp: {
+      discover: async () => ({ managed: true, threadId: sessionId }),
+      ...codexApp,
+    },
   }));
   return app;
 }
 
 describe('Codex App Server routes', () => {
-  it('binds every operation to the exact hook-confirmed pane thread', async () => {
+  it('binds every operation to the exact App Server thread without Hook metadata', async () => {
     const status = vi.fn(async () => ({ managed: true, threadId: 'thread-1' }));
     const send = vi.fn(async () => ({ turn: { id: 'turn-1' } }));
-    const app = appFor({ codexApp: { status, send } });
+    const app = appFor({ agent: 'claude', codexApp: { status, send } });
 
     await request(app).get('/codex/session?pane=%251').expect(200, { managed: true, threadId: 'thread-1' });
     await request(app).post('/codex/send').send({ pane: '%1', text: ' continue ' }).expect(200);

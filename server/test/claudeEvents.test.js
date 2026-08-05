@@ -547,4 +547,43 @@ describe('createClaudeEvents with a Codex-tagged pane (agent dispatch, Claude-pa
     await ev.getStates();                                                       // done#2 → push again
     expect(pushed).toEqual(['turn one', 'turn two']);
   });
+
+  it('uses managed App Server state instead of a stale Codex Hook row', async () => {
+    const file = stateFile({ '%1': cdone('stale', 1000) });
+    const codexApp = { inboxStates: async () => ({ '%1': { kind: 'working', msg: '', ts: 2000, suppressPush: false } }) };
+    const states = await createClaudeEvents({
+      commands: { listLivePanes: async () => liveCodex(['%1'], 'codex') }, push: { sendToSession: async () => ({}) }, file, codexApp,
+    }).getStates();
+    expect(states['%1']).toMatchObject({ kind: 'working', agent: 'codex', ts: 2000 });
+  });
+
+  it('does not revive stale Hook state while a managed App Server socket reconnects', async () => {
+    const file = stateFile({ '%1': cdone('stale', 1000) });
+    const codexApp = { inboxStates: async () => ({ '%1': { kind: null, msg: '', ts: 0, unavailable: true } }) };
+    const states = await createClaudeEvents({
+      commands: { listLivePanes: async () => liveCodex(['%1'], 'node') }, push: { sendToSession: async () => ({}) }, file, codexApp,
+      run: async () => { throw new Error('process inspection unavailable'); },
+    }).getStates();
+    expect(states['%1']).toMatchObject({ kind: null, agent: 'codex' });
+  });
+
+  it('suppresses a restart baseline, then pushes only fresh managed Codex transitions', async () => {
+    const pushed = [];
+    const snapshots = [
+      { kind: 'done', msg: 'old', ts: 1000, suppressPush: true },
+      { kind: 'done', msg: 'old', ts: 1000, suppressPush: false },
+      { kind: 'working', msg: '', ts: 2000, suppressPush: false },
+      { kind: 'done', msg: 'fresh', ts: 3000, suppressPush: false },
+    ];
+    const codexApp = { inboxStates: async () => ({ '%1': snapshots.shift() }) };
+    const ev = createClaudeEvents({
+      commands: { listLivePanes: async () => liveCodex(['%1'], 'codex') }, file: stateFile({}), codexApp,
+      push: { sendToSession: async (_session, payload) => { pushed.push(payload.body); } },
+    });
+    await ev.getStates();
+    await ev.getStates();
+    await ev.getStates();
+    await ev.getStates();
+    expect(pushed).toEqual(['fresh']);
+  });
 });

@@ -28,6 +28,7 @@ export function useCodexSession(pane, enabled) {
 
 export function codexKind(session, fallback = null) {
   if (!session?.managed) return fallback;
+  if (session.activityKind === 'compacting') return 'compacting';
   if (session.status?.type === 'active') {
     const waiting = session.status.activeFlags?.some((flag) => flag === 'waitingOnApproval' || flag === 'waitingOnUserInput');
     return waiting ? 'permission' : 'working';
