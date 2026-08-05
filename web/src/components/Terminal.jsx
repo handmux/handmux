@@ -796,8 +796,13 @@ const Terminal = forwardRef(function Terminal({
       if (streamMode) scheduleSettledFit();
       else scheduleFit();
     };
+    // iOS opens/closes the soft keyboard by resizing visualViewport without reliably resizing window.
+    // The derived inset can stay 0 on BOTH sides of close when offsetTop had already cancelled the app
+    // lift, so the inset effect cannot be the only refit trigger: the terminal would keep its short grid.
+    const visualViewport = window.visualViewport;
     window.addEventListener('resize', onResize);
     window.addEventListener('orientationchange', onResize);
+    visualViewport?.addEventListener('resize', onResize);
     // The bottom dock's height changes (swiping to the composer, the composer growing to multi-line)
     // resize THIS container without firing a window resize, so a plain resize listener misses them.
     // Re-fit ONLY when the container GREW: the grid is bottom-aligned, so a container that grew leaves a
@@ -1466,6 +1471,7 @@ const Terminal = forwardRef(function Terminal({
       document.removeEventListener('visibilitychange', onVisibility);
       window.removeEventListener('resize', onResize);
       window.removeEventListener('orientationchange', onResize);
+      visualViewport?.removeEventListener('resize', onResize);
       ro?.disconnect();
       sub.dispose();
       liveViewport?.removeEventListener('scroll', handleBufferScroll);
