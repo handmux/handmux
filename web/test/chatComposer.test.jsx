@@ -18,7 +18,7 @@ vi.mock('../src/voice/usePushToTalk.js', () => ({
   usePushToTalk: ({ onText }) => { voice.onText = onText; return voice; },
 }));
 
-import ChatComposer from '../src/components/ChatComposer.jsx';
+import ChatComposer, { clearCodexModelsCache } from '../src/components/ChatComposer.jsx';
 import {
   sendText, sendCodexMessage, compactCodexSession, clearCodexSession, interruptCodexSession,
   getCodexModels, updateCodexSettings, getPaneContext,
@@ -27,6 +27,7 @@ import {
 // No globals:true → register cleanup manually so DOM doesn't leak between tests.
 afterEach(cleanup);
 beforeEach(() => {
+  clearCodexModelsCache();
   vi.clearAllMocks();
   getPaneContext.mockImplementation(() => new Promise(() => {}));
   getCodexModels.mockResolvedValue({ models: [] });
@@ -197,6 +198,29 @@ describe('ChatComposer', () => {
     await waitFor(() => expect(container.querySelector('.cc-ctx-model').textContent).toBe('gpt-new'));
   });
 
+  it('loads models once per app run and refreshes only from the menu action', async () => {
+    getCodexModels.mockResolvedValue({ models: [{
+      id: 'gpt-test', model: 'gpt-test', displayName: 'GPT Test',
+      supportedReasoningEfforts: [{ reasoningEffort: 'medium' }], defaultReasoningEffort: 'medium',
+    }] });
+    const props = { pane: '%1', agent: 'codex', kind: 'idle', codexSession: {
+      managed: true, settings: { model: 'gpt-test', effort: 'medium' },
+    } };
+    const { container } = render(<ChatComposer {...props} />);
+    await waitFor(() => expect(getCodexModels).toHaveBeenCalledTimes(1));
+
+    fireEvent.click(screen.getByRole('button', { name: '设置模型和思考强度' }));
+    expect(await screen.findByRole('dialog', { name: '模型与思考强度' })).toBeTruthy();
+    expect(getCodexModels).toHaveBeenCalledTimes(1);
+    fireEvent.click(container.querySelector('.codex-config-backdrop'));
+    fireEvent.click(screen.getByRole('button', { name: '设置模型和思考强度' }));
+    await screen.findByRole('dialog', { name: '模型与思考强度' });
+    expect(getCodexModels).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByRole('button', { name: '刷新模型列表' }));
+    await waitFor(() => expect(getCodexModels).toHaveBeenCalledTimes(2));
+  });
+
   it('handles managed /model and /effort in chat without terminal handoff', async () => {
     const onInteractiveSlash = vi.fn();
     render(<ChatComposer pane="%1" agent="codex" kind="idle" codexSession={{
@@ -208,7 +232,7 @@ describe('ChatComposer', () => {
     expect(await screen.findByRole('dialog', { name: '模型与思考强度' })).toBeTruthy();
     expect(sendText).not.toHaveBeenCalled();
     expect(onInteractiveSlash).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole('button', { name: '关闭' }));
+    fireEvent.click(document.querySelector('.codex-config-backdrop'));
 
     typeInto(input, '/effort high');
     fireEvent.click(screen.getByRole('button', { name: '发送' }));

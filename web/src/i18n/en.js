@@ -310,6 +310,7 @@ export default {
 'chat.config.empty': 'No models are available',
 'chat.config.chooseModel': 'Choose an available model first',
 'chat.config.loadFailed': 'Could not load the model list',
+'chat.config.refresh': 'Refresh model list',
 'chat.config.saveFailed': 'The setting could not be saved',
 'chat.interrupted': 'You stopped the response',
 'chat.compacted': 'Context compacted',

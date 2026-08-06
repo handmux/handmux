@@ -2696,7 +2696,8 @@ button.cmd-text { background: none; border: none; text-align: left; }
 /* Negative top margin pulls the toolbar up into the button's own internal whitespace (a 32px round button
    centres a ~18px icon → ~7px of air on top); the row still clears the text and the buttons stay ≥32px. */
 .cc-actions { display: flex; align-items: center; justify-content: space-between; margin-top: -3px; }
-.cc-actions-right { display: flex; align-items: center; gap: 6px; }
+.cc-actions-left, .cc-actions-right { display: flex; align-items: center; gap: 6px; }
+.cc-actions-left { position: relative; min-width: 0; }
 /* Context-window chip — model + used %, centered in the action row's free space. pointer-events:none so it
    never eats the tap-to-focus target; tabular-nums so the % doesn't jitter; the model name truncates first. */
 .cc-ctx {
@@ -2708,9 +2709,10 @@ button.cmd-text { background: none; border: none; text-align: left; }
 .cc-ctx-pct { flex: none; font-weight: 600; color: var(--ct-chip-ink); }
 .cc-ctx.warn .cc-ctx-pct { color: var(--ct-accent); }
 .cc-config-trigger {
-  min-height: 32px; max-width: 50vw; border: 0; border-radius: 10px; background: transparent;
+  min-height: 32px; max-width: 52vw; border: 0; border-radius: 10px; background: transparent;
   pointer-events: auto; touch-action: manipulation; cursor: pointer;
 }
+.cc-config-trigger svg { flex: none; width: 14px; height: 14px; margin-left: -1px; color: var(--ct-muted); }
 .cc-config-trigger:active { background: var(--ct-chip-2); }
 .cc-config-trigger:disabled { opacity: .48; }
 .cc-attach, .cc-send {
@@ -2739,49 +2741,51 @@ button.cmd-text { background: none; border: none; text-align: left; }
 .chat-composer .input-mic:active { background: var(--ct-chip-2); }
 .chat-composer .input-mic.on { color: #fff; background: var(--green); }
 
-/* Managed Codex model / reasoning controls. The current pair stays in the composer; configuration opens
-   upward so it remains reachable with the keyboard hidden and never sends the user into the terminal. */
-.codex-config-backdrop { position: fixed; inset: 0; z-index: 43; background: rgba(0,0,0,.5); }
-.codex-config-sheet {
-  position: fixed; left: 0; right: 0; bottom: 0; z-index: 44;
-  max-height: min(72dvh, 640px); display: flex; flex-direction: column;
-  background: var(--ct-body); color: var(--ct-ink); border-radius: 18px 18px 0 0;
-  box-shadow: 0 -8px 30px rgba(0,0,0,.5); animation: tool-sheet-up .28s cubic-bezier(.22,.61,.36,1);
+/* Managed Codex model / reasoning controls. Like ChatGPT's model picker, the compact value lives on the
+   composer's left and opens a lightweight menu above itself; the transparent backdrop only dismisses it. */
+.codex-config-backdrop { position: fixed; inset: 0; z-index: 43; background: transparent; }
+.codex-config-menu {
+  position: absolute; left: 0; bottom: calc(100% + 9px); z-index: 44;
+  width: min(370px, calc(100vw - 28px)); max-height: min(62dvh, 540px);
+  display: flex; flex-direction: column; overflow: hidden;
+  border: 1px solid var(--ct-chip-line); border-radius: 16px;
+  background: var(--ct-body); color: var(--ct-ink);
+  box-shadow: 0 12px 38px rgba(0,0,0,.42), 0 2px 8px rgba(0,0,0,.22);
+  transform-origin: bottom left; animation: codex-menu-in .16s ease-out;
 }
-.codex-config-grip {
-  flex: none; width: 36px; height: 5px; margin: 8px auto 2px; border-radius: 3px;
-  background: var(--ct-chip-line);
-}
+@keyframes codex-menu-in { from { opacity: 0; transform: translateY(5px) scale(.98); } }
 .codex-config-head {
   flex: none; display: flex; align-items: center; justify-content: space-between;
-  padding: 5px 12px 11px 16px; border-bottom: 1px solid var(--ct-line); font-size: 16px;
+  padding: 10px 10px 9px 13px; border-bottom: 1px solid var(--ct-line); font-size: 14px;
 }
 .codex-config-head button {
-  width: 34px; height: 34px; border: 0; border-radius: 999px; background: transparent;
-  color: var(--ct-muted); font-size: 24px; line-height: 1;
+  width: 32px; height: 32px; display: grid; place-items: center;
+  border: 0; border-radius: 9px; background: transparent; color: var(--ct-muted);
 }
+.codex-config-head button svg { width: 16px; height: 16px; }
+.codex-config-head button.loading svg { animation: codex-refresh-spin .8s linear infinite; }
+@keyframes codex-refresh-spin { to { transform: rotate(360deg); } }
 .codex-config-head button:active { background: var(--ct-chip-2); }
 .codex-config-body {
   flex: 1; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch;
-  display: flex; flex-direction: column; gap: 22px;
-  padding: 16px 14px calc(18px + env(safe-area-inset-bottom, 0px));
+  display: flex; flex-direction: column; gap: 16px; padding: 11px;
 }
 .codex-config-section { flex: none; display: flex; flex-direction: column; gap: 8px; }
 .codex-config-label {
   color: var(--ct-muted); font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
 }
 .codex-config-state { padding: 10px 2px; color: var(--ct-muted); font-size: 13px; }
-.codex-model-list { display: flex; flex-direction: column; gap: 7px; }
+.codex-model-list { display: flex; flex-direction: column; gap: 5px; }
 .codex-model-list > button {
-  min-height: 48px; display: flex; align-items: center; gap: 12px; padding: 9px 12px;
-  border: 1px solid var(--ct-chip-line); border-radius: 12px; background: var(--ct-chip);
+  min-height: 44px; display: flex; align-items: center; gap: 10px; padding: 8px 10px;
+  border: 1px solid transparent; border-radius: 11px; background: transparent;
   color: var(--ct-ink); text-align: left;
 }
 .codex-model-list > button > span { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
 .codex-model-list strong { font-size: 14px; }
 .codex-model-list small { color: var(--ct-muted); font-size: 11.5px; line-height: 1.35; }
 .codex-model-list b { flex: none; color: var(--ct-accent); font-size: 16px; }
-.codex-model-list > button.selected { border-color: var(--ct-accent); background: var(--ct-chip-2); }
+.codex-model-list > button.selected { border-color: var(--ct-chip-line); background: var(--ct-chip-2); }
 .codex-model-list > button:disabled, .codex-effort-list > button:disabled { opacity: .55; }
 .codex-effort-list { display: flex; flex-wrap: wrap; gap: 8px; }
 .codex-effort-list > button {
@@ -2790,7 +2794,9 @@ button.cmd-text { background: none; border: none; text-align: left; }
 }
 .codex-effort-list > button.selected { border-color: var(--ct-accent); background: var(--ct-chip-2); color: var(--ct-accent); }
 .codex-config-error { color: var(--danger, #d34b45); font-size: 12px; line-height: 1.4; }
-@media (prefers-reduced-motion: reduce) { .codex-config-sheet { animation: none; } }
+@media (prefers-reduced-motion: reduce) {
+  .codex-config-menu, .codex-config-head button.loading svg { animation: none; }
+}
 
 .push-inbox-detail-del { display: block; margin-top: 24px; }
 

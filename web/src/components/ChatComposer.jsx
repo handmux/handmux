@@ -10,7 +10,7 @@ import { loadFavs } from '../favStore.js';
 import { getChatDraft, setChatDraft } from '../storage.js';
 import { usePaneContext } from '../hooks/usePaneContext.js';
 import { UPLOAD_ACCEPT } from '../uploadTypes.js';
-import { ArrowUpIcon, StopIcon, PlusIcon, GearIcon } from './icons.jsx';
+import { ArrowUpIcon, StopIcon, PlusIcon, GearIcon, ChevronDownIcon, RefreshIcon } from './icons.jsx';
 import { useUpload } from '../hooks/useUpload.js';
 import { usePushToTalk } from '../voice/usePushToTalk.js';
 import { useScreenWakeLock } from '../hooks/useScreenWakeLock.js';
@@ -40,26 +40,58 @@ const keepFocus = (e) => {
 // green. Explicit terminal-key shortcuts use the grey key tint.
 const chipTint = (text) => (text.startsWith('/') ? 'cmd' : 'reply');
 
-function CodexConfigSheet({ open, pane, settings, busy, onChange, onClose, onAuthFail }) {
+// model/list is account-wide and effectively static for one app run. Share one successful request across
+// composer remounts and pane switches; the dropdown's refresh action is the only automatic cache bypass.
+let codexModelsCache = null;
+let codexModelsRequest = null;
+
+export function clearCodexModelsCache() {
+  codexModelsCache = null;
+  codexModelsRequest = null;
+}
+
+function loadCodexModels(pane, refresh = false) {
+  if (refresh) clearCodexModelsCache();
+  if (codexModelsCache) return Promise.resolve(codexModelsCache);
+  if (!codexModelsRequest) {
+    codexModelsRequest = getCodexModels(pane).then((result) => {
+      codexModelsCache = Array.isArray(result?.models) ? result.models : [];
+      return codexModelsCache;
+    });
+  }
+  return codexModelsRequest;
+}
+
+function CodexConfigMenu({ open, pane, settings, busy, onChange, onClose, onAuthFail }) {
   const [models, setModels] = useState([]);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const requestSeqRef = useRef(0);
   useBackButton(open, onClose);
+
+  const load = async (refresh = false) => {
+    const requestSeq = ++requestSeqRef.current;
+    setLoading(true);
+    setError('');
+    try {
+      const next = await loadCodexModels(pane, refresh);
+      if (requestSeq === requestSeqRef.current) setModels(next);
+    } catch (err) {
+      if (requestSeq !== requestSeqRef.current) return;
+      if (err instanceof UnauthorizedError) onAuthFail?.();
+      else setError(err?.serverError || err?.message || t('chat.config.loadFailed'));
+    } finally {
+      if (requestSeq === requestSeqRef.current) setLoading(false);
+    }
+  };
 
   useEffect(() => {
     if (!open || !pane) return undefined;
-    let cancelled = false;
-    setLoading(true);
-    setError('');
-    getCodexModels(pane).then((result) => {
-      if (!cancelled) setModels(Array.isArray(result?.models) ? result.models : []);
-    }).catch((err) => {
-      if (cancelled) return;
-      if (err instanceof UnauthorizedError) onAuthFail?.();
-      else setError(err?.serverError || err?.message || t('chat.config.loadFailed'));
-    }).finally(() => { if (!cancelled) setLoading(false); });
-    return () => { cancelled = true; };
+    void load(false);
+    return () => { requestSeqRef.current++; };
+    // load reads the shared app-run cache; opening or switching the active pane is the only trigger.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, pane]);
 
   if (!open) return null;
@@ -90,12 +122,13 @@ function CodexConfigSheet({ open, pane, settings, busy, onChange, onClose, onAut
   return (
     <>
       <div className="codex-config-backdrop" onClick={onClose} />
-      <section className="codex-config-sheet" role="dialog" aria-modal="true"
+      <section className="codex-config-menu" role="dialog" aria-modal="true"
         aria-label={t('chat.config.title')}>
-        <div className="codex-config-grip" />
         <header className="codex-config-head">
           <strong>{t('chat.config.title')}</strong>
-          <button type="button" aria-label={t('common.close')} onClick={onClose}>×</button>
+          <button type="button" className={loading ? 'loading' : ''}
+            aria-label={t('chat.config.refresh')} disabled={loading || saving}
+            onClick={() => void load(true)}><RefreshIcon /></button>
         </header>
         <div className="codex-config-body">
           <div className="codex-config-section">
@@ -187,6 +220,9 @@ export default function ChatComposer({
   useEffect(() => { if (!busy) setStopping(false); }, [busy, pane]);
   useEffect(() => { setLocalSettings(codexSession?.settings || null); }, [pane, codexSession?.settings]);
   useEffect(() => { if (!managedCodex) setConfigOpen(false); }, [managedCodex]);
+  useEffect(() => {
+    if (managedCodex && pane) void loadCodexModels(pane).catch(() => {});
+  }, [managedCodex, pane]);
 
   // Current context-window occupancy for this pane's session (model + used %), shown as a small chip in the
   // action row. Absent (null %) when the statusLine capturer isn't opted in → the chip simply doesn't render.
@@ -422,8 +458,20 @@ export default function ChatComposer({
           spellCheck={false}
         />
         <div className="cc-actions">
-          <button type="button" className="cc-attach" aria-label={t('dock.attach')}
-            onClick={() => uploadRef.current?.click()}><PlusIcon /></button>
+          <div className="cc-actions-left">
+            <button type="button" className="cc-attach" aria-label={t('dock.attach')}
+              onClick={() => uploadRef.current?.click()}><PlusIcon /></button>
+            {managedCodex && (
+              <button type="button" className="cc-ctx cc-config-trigger" disabled={busy || submitting}
+                aria-label={t('chat.config.open')} onClick={openConfig}>
+                <span className="cc-ctx-model">{ctxModel || t('chat.config.model')}</span>
+                <span className="cc-ctx-pct">{ctxEffort || t('chat.config.effort')}</span>
+                <ChevronDownIcon />
+              </button>
+            )}
+            <CodexConfigMenu open={configOpen} pane={pane} settings={managedSettings} busy={busy}
+              onChange={setLocalSettings} onClose={() => setConfigOpen(false)} onAuthFail={onAuthFail} />
+          </div>
           <div className="cc-actions-right">
             {/* Context-window chip — model + used %, right-aligned just left of mic/send. pointer-events:none
                 so a tap here still focuses the field (tap-to-focus). Rendered only when the capturer supplied
@@ -434,13 +482,6 @@ export default function ChatComposer({
                 {ctxEffort && <span className="cc-ctx-pct">{ctxEffort}</span>}
                 {!ctxEffort && typeof ctxPct === 'number' && <span className="cc-ctx-pct">{Math.round(ctxPct)}%</span>}
               </div>
-            )}
-            {managedCodex && (
-              <button type="button" className="cc-ctx cc-config-trigger" disabled={busy || submitting}
-                aria-label={t('chat.config.open')} onClick={openConfig}>
-                <span className="cc-ctx-model">{ctxModel || t('chat.config.model')}</span>
-                <span className="cc-ctx-pct">{ctxEffort || t('chat.config.effort')}</span>
-              </button>
             )}
             {micAvailable && <MicButton active={recording} disabled={voice.state === 'requesting'} onToggle={toggleMic} />}
             {busy ? (
@@ -458,8 +499,6 @@ export default function ChatComposer({
       {submitError && <div className="cc-error" role="status">{submitError}</div>}
       {editOpen && <CmdFavEditor variant="chat" presets={serverShortcuts.chat}
         onChange={refreshShortcuts} onClose={() => setEditOpen(false)} />}
-      <CodexConfigSheet open={configOpen} pane={pane} settings={managedSettings} busy={busy}
-        onChange={setLocalSettings} onClose={() => setConfigOpen(false)} onAuthFail={onAuthFail} />
     </div>
   );
 }

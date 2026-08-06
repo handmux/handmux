@@ -309,6 +309,7 @@ export default {
 'chat.config.empty': '没有可用模型',
 'chat.config.chooseModel': '先选择一个可用模型',
 'chat.config.loadFailed': '无法获取模型列表',
+'chat.config.refresh': '刷新模型列表',
 'chat.config.saveFailed': '设置没有保存成功',
 'chat.interrupted': '你终止了这次回复',
 'chat.compacted': '上下文已压缩',
