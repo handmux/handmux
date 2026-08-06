@@ -470,11 +470,18 @@ describe('ChatView', () => {
     }
   });
 
-  it('a trailing user message with stale kind="done" still shows typing (bridges the post-send gap before the slow states poll catches up)', async () => {
+  it('keeps Claude\'s trailing-user bridge while its Hook state catches up', async () => {
     mockTranscript([{ k: 0, i: 0, role: 'user', type: 'text', text: 'hi' }]);
     const { container } = render(<ChatView pane="%0" kind="done" />);
     await screen.findByText('hi');
     expect(container.querySelector('.chat-typing')).toBeTruthy();
+  });
+
+  it('does not infer Codex activity from a trailing user message when App Server reports idle', async () => {
+    mockTranscript([{ k: 0, i: 0, role: 'user', type: 'text', text: 'hi' }]);
+    const { container } = render(<ChatView pane="%0" agent="codex" kind="done" />);
+    await screen.findByText('hi');
+    expect(container.querySelector('.chat-typing')).toBeNull();
   });
 
   it('renders a compaction marker as a centered divider, not a bubble', async () => {

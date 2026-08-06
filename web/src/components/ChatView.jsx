@@ -563,13 +563,12 @@ export default function ChatView({ pane, agent = 'claude', kind, msg, onAuthFail
     || messages.some((m) => m.type === 'slash' && m.name === slashEcho.name && (m.k ?? -1) > echoMarkRef.current.k)
   ));
   useEffect(() => { if (echoCovered) onSlashEchoDone?.(); }, [echoCovered, onSlashEchoDone]);
-  // kind is a slow (5s) poll while messages is fast (1.5s) — right after a send, kind can still read stale
-  // 'done'. A trailing USER message means "reply is coming" regardless of that staleness (bridges the gap);
-  // a trailing assistant/tool message only shows typing while actively 'working'. A running tool wins either way.
-  const showTyping = !lastIsRunningTool && !showCompacting && !showError && (
-    last?.role === 'user' ? kind !== 'permission'
-      : kind === 'working'
-  );
+  // Managed Codex has an authoritative App Server thread status, so never infer work from a trailing user
+  // bubble: only `active` (mapped to kind==='working') may show typing. Claude keeps its established bridge
+  // because its Hook/state update can lag behind the transcript and has no equivalent live thread status.
+  const inferredClaudeReply = agent !== 'codex' && last?.role === 'user' && kind !== 'permission';
+  const showTyping = !lastIsRunningTool && !showCompacting && !showError
+    && (kind === 'working' || inferredClaudeReply);
 
   const scrollRef = useRef(null);
   const viewRef = useRef(null); // .chat-view — positioning context for the copy callout
