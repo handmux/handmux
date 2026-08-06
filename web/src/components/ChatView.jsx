@@ -8,7 +8,6 @@ import { useTranscript } from '../hooks/useTranscript.js';
 import { usePendingPrompt } from '../hooks/usePendingPrompt.js';
 import { fallbackGate } from '../chatGate.js';
 import PromptGate from './PromptGate.jsx';
-import LensBoot from './LensBoot.jsx';
 import { answerCodexApproval, answerCodexInput, sendKeys, UnauthorizedError } from '../api.js';
 import { t } from '../i18n';
 import { useBackButton, useHistoryLayer, unwindHistory } from '../hooks/useBackButton.js';
@@ -790,11 +789,10 @@ export default function ChatView({ pane, agent = 'claude', kind, msg, onAuthFail
         onPointerDown={onCopyDown} onPointerMove={onCopyMove}
         onPointerUp={cancelLongPress} onPointerCancel={cancelLongPress}
         onClickCapture={onCopyClickCapture}>
-        {/* Loading (first poll in flight) → wave + 正在加载; loaded-but-empty (a fresh session) → a
-            friendly static nudge to send the first message. Never a bare "no content". */}
-        {messages.length === 0 && !sessionGate && (loaded
-          ? <div className="chat-new">{t('boot.chat_empty')}</div>
-          : <LensBoot hint={t('boot.loading')} />)}
+        {/* Keep the first poll visually quiet. Only show a nudge after the response confirms the session
+            is genuinely empty; opening the chat lens should never flash a fake waiting message. */}
+        {messages.length === 0 && !sessionGate && loaded
+          && <div className="chat-new">{t('boot.chat_empty')}</div>}
         {messages.map((m, idx) => {
           if (m.type === 'thinking') return null; // dropped (see Bubble) — no bubble, no time
           const label = tsIdx.has(idx) ? fmtTime(m.ts) : null;

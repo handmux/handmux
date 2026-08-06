@@ -22,13 +22,13 @@ function setGeometry(el, { scrollTop, scrollHeight, clientHeight }) {
 }
 
 describe('ChatView', () => {
-  it('loading shows the wave + 正在加载; a loaded-but-empty session shows the friendly first-message nudge', async () => {
+  it('keeps initial loading quiet; a loaded-but-empty session shows the friendly first-message nudge', async () => {
     mockTranscript([]);
     const { container } = render(<ChatView pane="%0" kind="done" />);
-    // before the first poll lands: the wave is up, with no assumption that the session is empty
-    expect(container.querySelector('.lens-boot')).toBeTruthy();
-    expect(container.textContent).toContain('正在加载');
-    // first response landed with zero messages → genuinely empty session → static nudge, no wave
+    // Before the first poll lands, make no visual claim about whether the session is empty or waiting.
+    expect(container.querySelector('.lens-boot')).toBeNull();
+    expect(container.textContent).not.toContain('正在加载');
+    // First response landed with zero messages → genuinely empty session → static nudge.
     await waitFor(() => expect(container.textContent).toContain('发送你的第一条消息'));
     expect(container.querySelector('.lens-boot')).toBeNull();
     expect(container.textContent).not.toContain('还没有对话内容');

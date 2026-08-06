@@ -49,7 +49,6 @@ import ChatComposer from './components/ChatComposer.jsx';
 import LensSwitch from './components/LensSwitch.jsx';
 import ChatView from './components/ChatView.jsx';
 import CodexTakeover from './components/CodexTakeover.jsx';
-import LensBoot from './components/LensBoot.jsx';
 import { slashEchoFor } from './slashCommands.js';
 import TokenPrompt from './components/TokenPrompt.jsx';
 import Settings from './components/Settings.jsx';
@@ -2009,7 +2008,7 @@ export default function App() {
           {current.paneId && (
             chatLens ? (
               codexChatLoading ? (
-                <div className="chat-view"><LensBoot hint={t('boot.loading')} /></div>
+                <div className="chat-view" />
               ) : codexNeedsTakeover ? (
                 <CodexTakeover pane={current.paneId} onAuthFail={onAuthFail}
                   onTakenOver={() => {
