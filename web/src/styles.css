@@ -2678,9 +2678,18 @@ button.cmd-text { background: none; border: none; text-align: left; }
    is active. Column: a horizontal quick-reply chip strip, then the card (textarea over an action row). Rides
    above the keyboard with the whole .app (translateY(-inset)); the safe-area pad keeps it off the home bar. */
 .chat-composer {
-  display: flex; flex-direction: column; gap: 6px;
+  position: relative; display: flex; flex-direction: column; gap: 6px;
   padding: 6px 8px calc(8px + env(safe-area-inset-bottom, 0px)); background: var(--ct-bar);
 }
+.cc-notice {
+  position: absolute; left: 50%; bottom: calc(100% + 8px); z-index: 30;
+  max-width: 88vw; width: max-content; transform: translateX(-50%);
+  padding: 9px 14px; border: 1px solid #3a3d44; border-radius: 999px;
+  background: rgba(30,32,36,.94); color: #e6e9ee; box-shadow: 0 6px 20px rgba(0,0,0,.4);
+  font-size: 13px; line-height: 1.35; text-align: center; pointer-events: none;
+  animation: exit-toast-in .18s ease;
+}
+@media (prefers-reduced-motion: reduce) { .cc-notice { animation: none; } }
 .cc-quick { display: flex; gap: 6px; overflow-x: auto; }
 /* The card: textarea on top, action row beneath. Buttons never overlay the text (own row) → none of the
    dock's multi/crowd/ghost-hit machinery is needed. Subtle border, faint accent on focus, green while dictating. */

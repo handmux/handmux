@@ -318,7 +318,6 @@ export default {
 'chat.context.used': '当前 Token',
 'chat.context.total': '模型总 Token',
 'chat.context.usedTotal': '已用 / 总量',
-'chat.context.remaining': '剩余 Token',
 'chat.status.aria': '会话状态，上下文占用 {percent}%',
 'chat.status.title': '会话状态',
 'chat.status.idle': '空闲',

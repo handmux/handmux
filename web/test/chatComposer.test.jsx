@@ -193,7 +193,9 @@ describe('ChatComposer', () => {
     const input = screen.getByPlaceholderText('和 Agent 对话…');
     typeInto(input, '/plugin');
     fireEvent.click(screen.getByRole('button', { name: '发送' }));
-    await screen.findByText('这个命令暂不支持在对话视图中使用');
+    const notice = await screen.findByText('这个命令暂不支持在对话视图中使用');
+    expect(notice.classList.contains('cc-notice')).toBe(true);
+    expect(document.querySelector('.cc-error')).toBeNull();
     expect(input.value).toBe('/plugin');
     expect(sendText).not.toHaveBeenCalled();
     expect(onInteractiveSlash).not.toHaveBeenCalled();
@@ -245,10 +247,8 @@ describe('ChatComposer', () => {
     fireEvent.click(trigger);
     const detail = screen.getByRole('dialog', { name: '会话状态' });
     expect(detail.textContent).toContain('等待审批');
-    expect(detail.textContent).toContain('gpt-5.6-terra · medium');
     expect(detail.textContent).toContain('61.8%');
     expect(detail.textContent).toContain('159,719 / 258,400');
-    expect(detail.textContent).toContain('98,681');
     expect(detail.textContent).toContain('/work/project');
     expect(detail.textContent).toContain('main');
     expect(detail.textContent).toContain('可修改工作区');

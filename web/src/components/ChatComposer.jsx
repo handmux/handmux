@@ -46,6 +46,7 @@ const chipTint = (text) => (text.startsWith('/') ? 'cmd' : 'reply');
 
 const tokenFormatter = new Intl.NumberFormat('en-US');
 const contextRingLevel = (percent) => (percent >= 75 ? 'high' : percent >= 40 ? 'medium' : 'low');
+const UNSUPPORTED_SLASH = Symbol('unsupported slash command');
 
 function codexActivity(session, fallbackKind) {
   const flags = Array.isArray(session?.status?.activeFlags) ? session.status.activeFlags : [];
@@ -231,8 +232,11 @@ export default function ChatComposer({
   const [queueAction, setQueueAction] = useState('');
   const [handledQueueIds, setHandledQueueIds] = useState([]);
   const [submitError, setSubmitError] = useState('');
+  const [notice, setNotice] = useState('');
   const submitInFlightRef = useRef(false);
+  const noticeTimerRef = useRef(null);
   useEffect(() => { setChatDraft(value); }, [value]);
+  useEffect(() => () => clearTimeout(noticeTimerRef.current), []);
   const ref = useRef(null);          // the textarea
   const uploadRef = useRef(null);    // hidden <input type=file>
   const tapPt = useRef({ x: 0, y: 0, moved: false }); // for tap-to-focus on the card's blank areas
@@ -268,7 +272,11 @@ export default function ChatComposer({
   const serverQueue = managedCodex ? (codexSession?.queue || []) : [];
   const pendingQueue = serverQueue.filter((item) => !handledQueueIds.includes(item.id));
   const serverQueueKey = serverQueue.map((item) => item.id).join('\0');
-  useEffect(() => { setHandledQueueIds([]); }, [pane]);
+  useEffect(() => {
+    setHandledQueueIds([]);
+    setNotice('');
+    clearTimeout(noticeTimerRef.current);
+  }, [pane]);
   useEffect(() => {
     const currentIds = new Set(serverQueue.map((item) => item.id));
     setHandledQueueIds((ids) => ids.filter((id) => currentIds.has(id)));
@@ -300,8 +308,6 @@ export default function ChatComposer({
   const contextPercent = showContextRing ? (contextUsedTokens / contextTotalTokens) * 100 : null;
   const boundedContextPercent = Math.min(100, Math.max(0, contextPercent || 0));
   const contextLevel = showContextRing ? contextRingLevel(contextPercent) : null;
-  const contextRemainingTokens = showContextRing
-    ? Math.max(0, contextTotalTokens - contextUsedTokens) : null;
   const activity = codexActivity(codexSession, kind);
   const sessionId = codexSession?.threadId || null;
   const workingDirectory = managedSettings?.cwd || null;
@@ -318,6 +324,16 @@ export default function ChatComposer({
       setSessionCopied(true);
       navigator.vibrate?.(8);
     } catch { /* clipboard can be unavailable outside a secure context */ }
+  };
+
+  const showNotice = (message) => {
+    setNotice(message);
+    clearTimeout(noticeTimerRef.current);
+    noticeTimerRef.current = setTimeout(() => setNotice(''), 2500);
+  };
+  const clearNotice = () => {
+    setNotice('');
+    clearTimeout(noticeTimerRef.current);
   };
 
   // Grow to fit content; CSS max-height caps it (~6 lines) then it scrolls. +2 for the border under
@@ -352,7 +368,10 @@ export default function ChatComposer({
     if (await applyConfigSlash(trimmed)) return null;
     if (/^\/compact$/i.test(trimmed)) return compactCodexSession(pane);
     if (/^\/clear$/i.test(trimmed)) return clearCodexSession(pane);
-    if (trimmed.startsWith('/')) throw new Error(t('chat.slash.unsupported'));
+    if (trimmed.startsWith('/')) {
+      showNotice(t('chat.slash.unsupported'));
+      return UNSUPPORTED_SLASH;
+    }
     return sendCodexMessage(pane, text);
   };
 
@@ -390,6 +409,7 @@ export default function ChatComposer({
     const text = value;
     const optimistic = managedCodex && !text.trim().startsWith('/');
     const optimisticId = optimistic ? onCodexSendStart?.(pane, text, 'send') : null;
+    clearNotice();
     submitInFlightRef.current = true;
     setSubmitting(true);
     setSubmitError('');
@@ -405,6 +425,7 @@ export default function ChatComposer({
       if (managedCodex) result = await dispatchManagedCodex(text);
       else if (agent === 'codex') throw new Error(t('chat.session.notManaged'));
       else await sendText(pane, text, true);
+      if (result === UNSUPPORTED_SLASH) return;
       if (optimisticId) onCodexSendResult?.(optimisticId, { result });
       onSent?.(text);
       if (!managedCodex && agent !== 'codex' && shouldHandOffSlash(text)) {
@@ -495,6 +516,7 @@ export default function ChatComposer({
   // Terminal keys remain Claude-only. Managed Codex text shortcuts either fill the draft or use the same
   // structured dispatch as the send button, so a shortcut can never write into the hidden TUI.
   const runFav = async (fav) => {
+    clearNotice();
     if (fav.kind === 'key') { onKey(fav.text); return; }
     if (!pane) return;
     const optimistic = managedCodex && !!fav.enter && !fav.text.trim().startsWith('/');
@@ -509,6 +531,7 @@ export default function ChatComposer({
       if (managedCodex) result = await dispatchManagedCodex(fav.text);
       else if (agent === 'codex') throw new Error(t('chat.session.notManaged'));
       else await sendText(pane, fav.text, !!fav.enter);
+      if (result === UNSUPPORTED_SLASH) return;
       if (optimisticId) onCodexSendResult?.(optimisticId, { result });
       if (!fav.enter && !managedCodex) return;
       onSent?.(fav.text);
@@ -662,22 +685,12 @@ export default function ChatComposer({
                       <i aria-hidden="true" />{activity.label}
                     </span>
                   </div>
-                  {(ctxModel || ctxEffort) && (
-                    <div className="cc-context-row">
-                      <span>{t('chat.config.model')}</span>
-                      <strong>{[ctxModel, ctxEffort].filter(Boolean).join(' · ')}</strong>
-                    </div>
-                  )}
                   <div className="cc-context-row">
                     <span>{t('chat.context.percent')}</span><strong>{contextPercent.toFixed(1)}%</strong>
                   </div>
                   <div className="cc-context-row">
                     <span>{t('chat.context.usedTotal')}</span>
                     <strong>{tokenFormatter.format(contextUsedTokens)} / {tokenFormatter.format(contextTotalTokens)}</strong>
-                  </div>
-                  <div className="cc-context-row">
-                    <span>{t('chat.context.remaining')}</span>
-                    <strong>{tokenFormatter.format(contextRemainingTokens)}</strong>
                   </div>
                   {workingDirectory && (
                     <div className="cc-context-row cc-context-path">
@@ -716,6 +729,7 @@ export default function ChatComposer({
         </div>
       </div>
       {submitError && <div className="cc-error" role="status">{submitError}</div>}
+      {notice && <div className="cc-notice" role="status">{notice}</div>}
       {editOpen && <CmdFavEditor variant="chat" presets={serverShortcuts.chat}
         onChange={refreshShortcuts} onClose={() => setEditOpen(false)} />}
     </div>

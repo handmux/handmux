@@ -319,7 +319,6 @@ export default {
 'chat.context.used': 'Current tokens',
 'chat.context.total': 'Model total tokens',
 'chat.context.usedTotal': 'Used / total',
-'chat.context.remaining': 'Tokens left',
 'chat.status.aria': 'Session status, context usage {percent}%',
 'chat.status.title': 'Session status',
 'chat.status.idle': 'Idle',
