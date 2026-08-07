@@ -363,6 +363,10 @@ export default function ChatComposer({
   };
   const cardTapFocus = (e) => {
     const p = tapPt.current;
+    // The model picker is rendered inside the card. Its backdrop therefore bubbles pointer events through
+    // this handler; while the picker is open, those taps belong to the picker and must preserve the
+    // keyboard state that existed before it opened.
+    if (configOpen) return;
     // Reject if it moved during the press (a scroll/lens-swipe), OR if the up landed far from the down —
     // a second signal in case fast-swipe move events were throttled/missed. Only a stationary tap focuses.
     if (p.moved || Math.hypot(e.clientX - p.x, e.clientY - p.y) > 10) return;

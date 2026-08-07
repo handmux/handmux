@@ -242,6 +242,12 @@ describe('ChatComposer', () => {
     fireEvent.click(trigger);
     await screen.findByRole('dialog', { name: '模型与思考强度' });
     expect(document.activeElement).not.toBe(input);
+
+    const backdrop = container.querySelector('.codex-config-backdrop');
+    fireEvent.pointerDown(backdrop, { clientX: 20, clientY: 20 });
+    fireEvent.pointerUp(backdrop, { clientX: 20, clientY: 20 });
+    fireEvent.click(backdrop);
+    expect(document.activeElement).not.toBe(input);
   });
 
   it('handles managed /model and /effort in chat without terminal handoff', async () => {
