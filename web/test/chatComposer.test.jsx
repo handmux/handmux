@@ -290,7 +290,8 @@ describe('ChatComposer', () => {
     const effort = await screen.findByRole('slider', { name: '思考强度' });
     expect(effort.getAttribute('aria-valuetext')).toBe('medium');
     effort.getBoundingClientRect = () => ({ left: 0, width: 300 });
-    fireEvent(effort, new MouseEvent('pointerdown', { bubbles: true, clientX: 150 }));
+    const pointerDown = new MouseEvent('pointerdown', { bubbles: true, cancelable: true, clientX: 150 });
+    expect(fireEvent(effort, pointerDown)).toBe(false); // custom slider must not steal textarea focus on iOS
     fireEvent(effort, new MouseEvent('pointermove', { bubbles: true, clientX: 275 }));
     expect(effort.getAttribute('aria-valuetext')).toBe('high');
     expect(updateCodexSettings).not.toHaveBeenCalled();

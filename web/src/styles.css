@@ -2862,40 +2862,41 @@ button.cmd-text { background: none; border: none; text-align: left; }
 .codex-model-list > button.selected strong { color: var(--ct-accent); }
 .codex-model-list > button:disabled { opacity: .55; }
 .codex-effort-list { min-width: 0; }
-.codex-effort-slider {
-  position: relative; height: 44px; min-width: 0; padding: 0 2px;
+.discrete-slider {
+  position: relative; height: 46px; min-width: 0; padding: 0 2px;
   touch-action: none; user-select: none; -webkit-user-select: none; cursor: pointer;
 }
-.codex-effort-slider.disabled { opacity: .55; cursor: default; }
-.codex-effort-slider:focus-visible { outline: 2px solid var(--ct-accent); outline-offset: 2px; border-radius: 8px; }
-.codex-effort-track {
+.discrete-slider.disabled { opacity: .55; cursor: default; }
+.discrete-slider:focus-visible { outline: 2px solid var(--ct-accent); outline-offset: 2px; border-radius: 8px; }
+.discrete-slider-track {
   position: absolute; top: 12px;
-  left: calc(50% / var(--effort-count)); right: calc(50% / var(--effort-count));
-  height: 3px; overflow: hidden; border-radius: 999px; background: var(--ct-chip-line);
+  left: calc(50% / var(--slider-count)); right: calc(50% / var(--slider-count));
+  height: 4px; overflow: hidden; border-radius: 999px; background: var(--ct-chip-line);
 }
-.codex-effort-track > i {
-  display: block; width: var(--effort-progress); height: 100%; border-radius: inherit;
+.discrete-slider-track > i {
+  display: block; width: var(--slider-progress); height: 100%; border-radius: inherit;
   background: var(--ct-accent);
 }
-.codex-effort-steps {
+.discrete-slider-steps {
   position: absolute; inset: 0; display: grid;
-  grid-template-columns: repeat(var(--effort-count), minmax(0, 1fr));
+  grid-template-columns: repeat(var(--slider-count), minmax(0, 1fr));
 }
-.codex-effort-steps > span {
+.discrete-slider-steps > span {
   min-width: 0; display: flex; flex-direction: column; align-items: center;
   color: var(--ct-muted); font-variant-numeric: tabular-nums;
 }
-.codex-effort-steps i {
-  width: 9px; height: 9px; margin-top: 9px; border: 2px solid var(--ct-body); border-radius: 50%;
-  background: var(--ct-chip-line); box-shadow: 0 0 0 1px var(--ct-chip-line);
+.discrete-slider-steps i {
+  width: 6px; height: 6px; margin-top: 11px; border-radius: 50%;
+  background: var(--ct-chip-line);
 }
-.codex-effort-steps small {
+.discrete-slider-steps small {
   width: 100%; margin-top: 5px; overflow: hidden; font-size: 10.5px; line-height: 13px;
   font-weight: 600; text-align: center; text-overflow: ellipsis; white-space: nowrap;
 }
-.codex-effort-steps > span.selected { color: var(--ct-accent); }
-.codex-effort-steps > span.selected i {
-  width: 13px; height: 13px; margin-top: 7px; background: var(--ct-accent); box-shadow: none;
+.discrete-slider-steps > span.selected { color: var(--ct-accent); }
+.discrete-slider-steps > span.selected i {
+  width: 20px; height: 20px; margin-top: 4px; border: 2px solid var(--ct-accent);
+  background: #fff; box-shadow: 0 1px 4px rgba(0,0,0,.28);
 }
 .codex-config-error { color: var(--danger, #d34b45); font-size: 12px; line-height: 1.4; }
 @media (prefers-reduced-motion: reduce) {

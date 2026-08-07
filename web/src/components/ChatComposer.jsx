@@ -19,6 +19,7 @@ import { DEFAULT_SERVER_SHORTCUTS, mergeShortcuts, shortcutIdentity } from '../s
 import { applyShortcutLayout, loadShortcutLayout } from '../shortcutLayout.js';
 import { t } from '../i18n';
 import { useBackButton } from '../hooks/useBackButton.js';
+import DiscreteSlider from './DiscreteSlider.jsx';
 
 // The 对话-lens composer — a single modern AI-agent input CARD (textarea on top, an action row beneath),
 // shown INSTEAD of the terminal BottomDock while the chat lens is active. It rides above the soft keyboard
@@ -71,10 +72,7 @@ function CodexConfigMenu({ open, pane, settings, busy, onChange, onClose, onAuth
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
-  const [draftEffortIndex, setDraftEffortIndex] = useState(null);
   const requestSeqRef = useRef(0);
-  const effortDragRef = useRef(false);
-  const effortIndexRef = useRef(0);
   useBackButton(open, onClose);
 
   const load = async (refresh = false) => {
@@ -103,12 +101,6 @@ function CodexConfigMenu({ open, pane, settings, busy, onChange, onClose, onAuth
 
   const selectedModel = models.find((model) => model.model === settings?.model || model.id === settings?.model);
   const efforts = selectedModel?.supportedReasoningEfforts || [];
-  const effortValues = efforts.map((item) => item.reasoningEffort);
-  const currentEffortIndex = Math.max(0, effortValues.indexOf(settings?.effort));
-  const shownEffortIndex = draftEffortIndex == null ? currentEffortIndex : draftEffortIndex;
-  effortIndexRef.current = shownEffortIndex;
-  const effortKey = effortValues.join('\0');
-  useEffect(() => { setDraftEffortIndex(null); }, [open, settings?.model, settings?.effort, effortKey]);
 
   if (!open) return null;
   const disabled = saving;
@@ -131,40 +123,6 @@ function CodexConfigMenu({ open, pane, settings, busy, onChange, onClose, onAuth
       updates.effort = model.defaultReasoningEffort || supported[0];
     }
     void save(updates);
-  };
-  const effortIndexAt = (element, clientX) => {
-    if (efforts.length <= 1) return 0;
-    const rect = element.getBoundingClientRect();
-    const edge = rect.width / (efforts.length * 2);
-    const usableWidth = Math.max(1, rect.width - edge * 2);
-    const ratio = Math.min(1, Math.max(0, (clientX - rect.left - edge) / usableWidth));
-    return Math.round(ratio * (efforts.length - 1));
-  };
-  const previewEffort = (index) => {
-    const bounded = Math.min(efforts.length - 1, Math.max(0, index));
-    effortIndexRef.current = bounded;
-    setDraftEffortIndex(bounded);
-  };
-  const commitEffort = (index) => {
-    const next = efforts[index]?.reasoningEffort;
-    if (!next || next === settings?.effort) return;
-    void save({ effort: next });
-  };
-  const effortPointer = (event, commit = false) => {
-    const index = effortIndexAt(event.currentTarget, event.clientX);
-    previewEffort(index);
-    if (commit) commitEffort(index);
-  };
-  const effortKeyDown = (event) => {
-    if (disabled || efforts.length === 0) return;
-    let next = effortIndexRef.current;
-    if (event.key === 'ArrowLeft' || event.key === 'ArrowDown') next -= 1;
-    else if (event.key === 'ArrowRight' || event.key === 'ArrowUp') next += 1;
-    else if (event.key === 'Home') next = 0;
-    else if (event.key === 'End') next = efforts.length - 1;
-    else return;
-    event.preventDefault();
-    previewEffort(next);
   };
 
   return (
@@ -205,54 +163,17 @@ function CodexConfigMenu({ open, pane, settings, busy, onChange, onClose, onAuth
           <div className="codex-config-section">
             <div className="codex-config-label">{t('chat.config.effort')}</div>
             <div className="codex-effort-list">
-              {efforts.length > 0 && (
-                <div className={`codex-effort-slider${disabled ? ' disabled' : ''}`}
-                  role="slider" tabIndex={disabled ? -1 : 0}
-                  aria-label={t('chat.config.effort')}
-                  aria-valuemin={0} aria-valuemax={efforts.length - 1}
-                  aria-valuenow={shownEffortIndex}
-                  aria-valuetext={efforts[shownEffortIndex]?.reasoningEffort || ''}
-                  style={{
-                    '--effort-count': efforts.length,
-                    '--effort-progress': efforts.length > 1
-                      ? `${(shownEffortIndex / (efforts.length - 1)) * 100}%` : '0%',
-                  }}
-                  onPointerDown={(event) => {
-                    if (disabled) return;
-                    effortDragRef.current = true;
-                    event.currentTarget.setPointerCapture?.(event.pointerId);
-                    effortPointer(event);
-                  }}
-                  onPointerMove={(event) => {
-                    if (effortDragRef.current) effortPointer(event);
-                  }}
-                  onPointerUp={(event) => {
-                    if (!effortDragRef.current) return;
-                    effortDragRef.current = false;
-                    effortPointer(event, true);
-                  }}
-                  onPointerCancel={() => {
-                    effortDragRef.current = false;
-                    setDraftEffortIndex(null);
-                  }}
-                  onKeyDown={effortKeyDown}
-                  onKeyUp={(event) => {
-                    if (['ArrowLeft', 'ArrowDown', 'ArrowRight', 'ArrowUp', 'Home', 'End'].includes(event.key)) {
-                      commitEffort(effortIndexRef.current);
-                    }
-                  }}>
-                  <span className="codex-effort-track" aria-hidden="true"><i /></span>
-                  <span className="codex-effort-steps" aria-hidden="true">
-                    {efforts.map((item, index) => (
-                      <span className={index === shownEffortIndex ? 'selected' : ''}
-                        key={item.reasoningEffort} title={item.description || ''}>
-                        <i />
-                        <small>{item.reasoningEffort}</small>
-                      </span>
-                    ))}
-                  </span>
-                </div>
-              )}
+              <DiscreteSlider
+                options={efforts.map((item) => ({
+                  value: item.reasoningEffort,
+                  label: item.reasoningEffort,
+                  description: item.description,
+                }))}
+                value={settings?.effort}
+                disabled={disabled}
+                ariaLabel={t('chat.config.effort')}
+                onCommit={(effort) => void save({ effort })}
+              />
               {!loading && efforts.length === 0
                 && <div className="codex-config-state">{t('chat.config.chooseModel')}</div>}
             </div>
