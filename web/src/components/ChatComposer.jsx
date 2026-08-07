@@ -126,7 +126,7 @@ function CodexConfigMenu({ open, pane, settings, busy, onChange, onClose, onAuth
         aria-label={t('chat.config.title')}>
         <header className="codex-config-head">
           <strong>{t('chat.config.title')}</strong>
-          <button type="button" className={loading ? 'loading' : ''}
+          <button type="button" className={loading ? 'is-refreshing' : ''}
             aria-label={t('chat.config.refresh')} disabled={loading || saving}
             onClick={() => void load(true)}><RefreshIcon /></button>
         </header>
@@ -146,7 +146,6 @@ function CodexConfigMenu({ open, pane, settings, busy, onChange, onClose, onAuth
                     onClick={() => pickModel(model)}>
                     <span><strong>{model.displayName || value}</strong>
                       {model.description && <small>{model.description}</small>}</span>
-                    {selected && <b aria-hidden="true">✓</b>}
                   </button>
                 );
               })}

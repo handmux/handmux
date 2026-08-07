@@ -2709,10 +2709,12 @@ button.cmd-text { background: none; border: none; text-align: left; }
 .cc-ctx-pct { flex: none; font-weight: 600; color: var(--ct-chip-ink); }
 .cc-ctx.warn .cc-ctx-pct { color: var(--ct-accent); }
 .cc-config-trigger {
-  min-height: 32px; max-width: 52vw; border: 0; border-radius: 10px; background: transparent;
+  min-height: 32px; max-width: 52vw; align-items: center; padding-top: 0; padding-bottom: 0;
+  border: 0; border-radius: 10px; background: transparent; line-height: 16px;
   pointer-events: auto; touch-action: manipulation; cursor: pointer;
 }
-.cc-config-trigger svg { flex: none; width: 14px; height: 14px; margin-left: -1px; color: var(--ct-muted); }
+.cc-config-trigger .cc-ctx-model, .cc-config-trigger .cc-ctx-pct { line-height: 16px; }
+.cc-config-trigger svg { flex: none; width: 14px; height: 14px; margin: 0 0 0 -1px; color: var(--ct-muted); }
 .cc-config-trigger:active { background: var(--ct-chip-2); }
 .cc-config-trigger:disabled { opacity: .48; }
 .cc-attach, .cc-send {
@@ -2763,7 +2765,7 @@ button.cmd-text { background: none; border: none; text-align: left; }
   border: 0; border-radius: 9px; background: transparent; color: var(--ct-muted);
 }
 .codex-config-head button svg { width: 16px; height: 16px; }
-.codex-config-head button.loading svg { animation: codex-refresh-spin .8s linear infinite; }
+.codex-config-head button.is-refreshing svg { animation: codex-refresh-spin .8s linear infinite; }
 @keyframes codex-refresh-spin { to { transform: rotate(360deg); } }
 .codex-config-head button:active { background: var(--ct-chip-2); }
 .codex-config-body {
@@ -2784,8 +2786,8 @@ button.cmd-text { background: none; border: none; text-align: left; }
 .codex-model-list > button > span { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
 .codex-model-list strong { font-size: 14px; }
 .codex-model-list small { color: var(--ct-muted); font-size: 11.5px; line-height: 1.35; }
-.codex-model-list b { flex: none; color: var(--ct-accent); font-size: 16px; }
-.codex-model-list > button.selected { border-color: var(--ct-chip-line); background: var(--ct-chip-2); }
+.codex-model-list > button.selected { border-color: transparent; background: transparent; }
+.codex-model-list > button.selected strong { color: var(--ct-accent); }
 .codex-model-list > button:disabled, .codex-effort-list > button:disabled { opacity: .55; }
 .codex-effort-list { display: flex; flex-wrap: wrap; gap: 8px; }
 .codex-effort-list > button {
@@ -2795,7 +2797,7 @@ button.cmd-text { background: none; border: none; text-align: left; }
 .codex-effort-list > button.selected { border-color: var(--ct-accent); background: var(--ct-chip-2); color: var(--ct-accent); }
 .codex-config-error { color: var(--danger, #d34b45); font-size: 12px; line-height: 1.4; }
 @media (prefers-reduced-motion: reduce) {
-  .codex-config-menu, .codex-config-head button.loading svg { animation: none; }
+  .codex-config-menu, .codex-config-head button.is-refreshing svg { animation: none; }
 }
 
 .push-inbox-detail-del { display: block; margin-top: 24px; }
