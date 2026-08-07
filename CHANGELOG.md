@@ -14,6 +14,7 @@ All notable changes to handmux. Format follows [Keep a Changelog](https://keepac
 - Codex 模型菜单的思考强度固定在底部；Agent 回复期间仍可查看和调整模型与思考强度，修改从下一条消息生效。
 
 ### Fixed
+- 修复 Codex 对话中发送成功后，临时用户消息仍一直留在底部的问题。
 - 修复 Codex 运行中的命令工具因 JavaScript 对象参数未被识别而只显示“运行”的问题。
 - 修复 Codex 对话与终端可能关联到不同会话、`/clear` 后仍显示旧会话，以及连续点击停止会重复发送 Esc 的问题；托管模式不再把斜杠命令或交互请求回退到终端。
 - 修复 Codex 托管对话中部分工具调用不显示或重启后消失的问题；消息与全部工具调用会按 Codex 原始会话记录的真实顺序恢复。

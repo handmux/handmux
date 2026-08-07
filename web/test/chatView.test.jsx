@@ -85,10 +85,10 @@ describe('ChatView', () => {
     expect(container.textContent).not.toContain('发送你的第一条消息');
   });
 
-  it('lets a new authoritative App Server message replace its temporary bubble without duplication', async () => {
+  it('lets a new durable rollout message replace its temporary bubble without duplication', async () => {
     mockTranscript([]);
     const optimistic = [{
-      id: 'optimistic-1', text: '不要显示两次', status: 'accepted', turnId: 'turn-2',
+      id: 'optimistic-1', text: '不要显示两次', status: 'accepted',
     }];
     const onOptimisticCovered = vi.fn();
     const { rerender } = render(<ChatView pane="%0" agent="codex" kind="working"
@@ -97,7 +97,7 @@ describe('ChatView', () => {
 
     api.fetchTranscript.mockResolvedValue({
       messages: [{
-        id: 'codex:turn-2:user-2', k: 0, role: 'user', type: 'text', text: '不要显示两次',
+        k: 0, i: 4, role: 'user', type: 'text', text: '不要显示两次',
       }],
       hash: 'h2', session: 's', hasMore: false, firstSeq: 0,
     });
@@ -111,8 +111,8 @@ describe('ChatView', () => {
   it('uses one authoritative message to cover only one identical temporary bubble', async () => {
     mockTranscript([]);
     const optimistic = [
-      { id: 'optimistic-1', text: '相同内容', status: 'steered', turnId: 'turn-2' },
-      { id: 'optimistic-2', text: '相同内容', status: 'steered', turnId: 'turn-2' },
+      { id: 'optimistic-1', text: '相同内容', status: 'steered' },
+      { id: 'optimistic-2', text: '相同内容', status: 'steered' },
     ];
     const onOptimisticCovered = vi.fn();
     const { rerender } = render(<ChatView pane="%0" agent="codex" kind="working"
@@ -121,7 +121,7 @@ describe('ChatView', () => {
 
     api.fetchTranscript.mockResolvedValue({
       messages: [{
-        id: 'codex:turn-2:user-2', k: 0, role: 'user', type: 'text', text: '相同内容',
+        k: 0, i: 4, role: 'user', type: 'text', text: '相同内容',
       }],
       hash: 'h2', session: 's', hasMore: false, firstSeq: 0,
     });
@@ -130,6 +130,21 @@ describe('ChatView', () => {
 
     await waitFor(() => expect(onOptimisticCovered).toHaveBeenCalledWith(['optimistic-1']));
     expect(screen.getAllByText('相同内容')).toHaveLength(2);
+  });
+
+  it('does not let an already loaded identical history item cover a fresh temporary bubble', async () => {
+    mockTranscript([{ k: 2, i: 2, role: 'user', type: 'text', text: '重复问题' }]);
+    const optimistic = [{ id: 'optimistic-1', text: '重复问题', status: 'accepted' }];
+    const onOptimisticCovered = vi.fn();
+    const { rerender } = render(<ChatView pane="%0" agent="codex" kind="working"
+      optimisticMessages={[]} onOptimisticCovered={onOptimisticCovered} refreshToken={0} />);
+    await screen.findByText('重复问题');
+
+    rerender(<ChatView pane="%0" agent="codex" kind="working"
+      optimisticMessages={optimistic} onOptimisticCovered={onOptimisticCovered} refreshToken={0} />);
+
+    await waitFor(() => expect(screen.getAllByText('重复问题')).toHaveLength(2));
+    expect(onOptimisticCovered).not.toHaveBeenCalled();
   });
 
   it('does not surface thinking (reasoning) text — the live animation stands in for it', async () => {

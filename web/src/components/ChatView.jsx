@@ -363,9 +363,7 @@ function Bubble({ m, running, onOpenTool }) {
 }
 
 function optimisticMatches(message, optimistic) {
-  if (message?.type !== 'text' || message.role !== 'user' || message.text !== optimistic.text) return false;
-  if (!optimistic.turnId) return true;
-  return String(message.id || messageIdentity(message)).startsWith(`codex:${optimistic.turnId}:`);
+  return message?.type === 'text' && message.role === 'user' && message.text === optimistic.text;
 }
 
 const NEAR_BOTTOM_PX = 40;
@@ -537,9 +535,9 @@ export default function ChatView({
 }) {
   const { messages, hasMoreOlder, loadOlder, loadingOlder, session, loaded, unavailable, unavailableDetail } = useTranscript(pane, true, agent, refreshToken);
   const tsIdx = useMemo(() => timeStampedIndices(messages), [messages]);
-  // Temporary outgoing bubbles are render-only. Capture matching canonical ids that already existed when
-  // each bubble first appeared, then let only a NEW App Server item cover it. This prevents an older
-  // identical user message from swallowing a fresh send while keeping the transcript the sole history.
+  // Temporary outgoing bubbles are render-only. Capture matching durable transcript ids that already exist
+  // when each bubble first appears, then let only a new rollout message cover it. This prevents an already
+  // visible identical user message from swallowing a fresh send while keeping the transcript the sole history.
   const optimisticMarksRef = useRef(new Map());
   const optimisticPaneRef = useRef(pane);
   if (optimisticPaneRef.current !== pane) {

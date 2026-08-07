@@ -1348,10 +1348,9 @@ export default function App() {
         // onCommandSent will render its normal queue row.
         return items.filter((candidate) => candidate.id !== id);
       }
-      const turnId = result?.turn?.id || result?.turnId || result?.result?.turnId || null;
       const status = item.source === 'steer' ? 'steered' : 'accepted';
       return items.map((candidate) => candidate.id === id
-        ? { ...candidate, status, turnId } : candidate);
+        ? { ...candidate, status } : candidate);
     });
   }, []);
   const coverCodexOptimistic = useCallback((ids) => {
