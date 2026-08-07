@@ -221,6 +221,29 @@ describe('ChatComposer', () => {
     await waitFor(() => expect(getCodexModels).toHaveBeenCalledTimes(2));
   });
 
+  it('opening the model menu preserves whether the composer was focused', async () => {
+    getCodexModels.mockResolvedValue({ models: [] });
+    const { container } = render(<ChatComposer pane="%1" agent="codex" kind="idle" desktop codexSession={{
+      managed: true, settings: { model: 'gpt-test', effort: 'medium' },
+    }} />);
+    const input = screen.getByPlaceholderText('和 Agent 对话…');
+    const trigger = screen.getByRole('button', { name: '设置模型和思考强度' });
+    expect(document.activeElement).toBe(input);
+
+    fireEvent.pointerDown(trigger);
+    fireEvent.click(trigger);
+    await screen.findByRole('dialog', { name: '模型与思考强度' });
+    expect(document.activeElement).toBe(input);
+
+    fireEvent.click(container.querySelector('.codex-config-backdrop'));
+    input.blur();
+    expect(document.activeElement).not.toBe(input);
+    fireEvent.pointerDown(trigger);
+    fireEvent.click(trigger);
+    await screen.findByRole('dialog', { name: '模型与思考强度' });
+    expect(document.activeElement).not.toBe(input);
+  });
+
   it('handles managed /model and /effort in chat without terminal handoff', async () => {
     const onInteractiveSlash = vi.fn();
     render(<ChatComposer pane="%1" agent="codex" kind="idle" codexSession={{

@@ -244,7 +244,9 @@ export default function ChatComposer({
   useLayoutEffect(() => { autoGrow(ref.current); }, [value]);
 
   const openConfig = () => {
-    ref.current?.blur();
+    // Opening this picker must preserve the user's keyboard state. The composer's pointerdown guard keeps
+    // an already-focused textarea focused, while a closed keyboard stays closed because the trigger never
+    // focuses the textarea itself.
     setConfigOpen(true);
   };
   const applyConfigSlash = async (trimmed) => {

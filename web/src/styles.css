@@ -2748,7 +2748,7 @@ button.cmd-text { background: none; border: none; text-align: left; }
 .codex-config-backdrop { position: fixed; inset: 0; z-index: 43; background: transparent; }
 .codex-config-menu {
   position: absolute; left: 0; bottom: calc(100% + 9px); z-index: 44;
-  width: min(370px, calc(100vw - 28px)); max-height: min(62dvh, 540px);
+  width: min(370px, calc(100vw - 28px)); max-height: min(50dvh, 420px);
   display: flex; flex-direction: column; overflow: hidden;
   border: 1px solid var(--ct-chip-line); border-radius: 16px;
   background: var(--ct-body); color: var(--ct-ink);
@@ -2758,7 +2758,7 @@ button.cmd-text { background: none; border: none; text-align: left; }
 @keyframes codex-menu-in { from { opacity: 0; transform: translateY(5px) scale(.98); } }
 .codex-config-head {
   flex: none; display: flex; align-items: center; justify-content: space-between;
-  padding: 10px 10px 9px 13px; border-bottom: 1px solid var(--ct-line); font-size: 14px;
+  padding: 5px 7px 4px 11px; border-bottom: 1px solid var(--ct-line); font-size: 13px;
 }
 .codex-config-head button {
   width: 32px; height: 32px; display: grid; place-items: center;
@@ -2769,29 +2769,33 @@ button.cmd-text { background: none; border: none; text-align: left; }
 @keyframes codex-refresh-spin { to { transform: rotate(360deg); } }
 .codex-config-head button:active { background: var(--ct-chip-2); }
 .codex-config-body {
-  flex: 1; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch;
-  display: flex; flex-direction: column; gap: 16px; padding: 11px;
+  flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch;
+  display: flex; flex-direction: column; gap: 10px; padding: 7px;
 }
-.codex-config-section { flex: none; display: flex; flex-direction: column; gap: 8px; }
+.codex-config-section { flex: none; display: flex; flex-direction: column; gap: 4px; }
 .codex-config-label {
-  color: var(--ct-muted); font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
+  padding: 0 3px; color: var(--ct-muted); font-size: 10px; font-weight: 700;
+  letter-spacing: .05em; text-transform: uppercase;
 }
-.codex-config-state { padding: 10px 2px; color: var(--ct-muted); font-size: 13px; }
-.codex-model-list { display: flex; flex-direction: column; gap: 5px; }
+.codex-config-state { padding: 6px 3px; color: var(--ct-muted); font-size: 12px; }
+.codex-model-list { display: flex; flex-direction: column; gap: 1px; }
 .codex-model-list > button {
-  min-height: 44px; display: flex; align-items: center; gap: 10px; padding: 8px 10px;
-  border: 1px solid transparent; border-radius: 11px; background: transparent;
+  min-height: 44px; display: flex; align-items: center; gap: 8px; padding: 4px 8px;
+  border: 1px solid transparent; border-radius: 9px; background: transparent;
   color: var(--ct-ink); text-align: left;
 }
-.codex-model-list > button > span { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
-.codex-model-list strong { font-size: 14px; }
-.codex-model-list small { color: var(--ct-muted); font-size: 11.5px; line-height: 1.35; }
+.codex-model-list > button > span { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.codex-model-list strong { font-size: 13px; line-height: 16px; }
+.codex-model-list small {
+  overflow: hidden; color: var(--ct-muted); font-size: 10.5px; line-height: 13px;
+  text-overflow: ellipsis; white-space: nowrap;
+}
 .codex-model-list > button.selected { border-color: transparent; background: transparent; }
 .codex-model-list > button.selected strong { color: var(--ct-accent); }
 .codex-model-list > button:disabled, .codex-effort-list > button:disabled { opacity: .55; }
-.codex-effort-list { display: flex; flex-wrap: wrap; gap: 8px; }
+.codex-effort-list { display: flex; flex-wrap: wrap; gap: 5px; }
 .codex-effort-list > button {
-  min-width: 66px; min-height: 38px; padding: 0 13px; border: 1px solid var(--ct-chip-line);
+  min-width: 62px; min-height: 38px; padding: 0 10px; border: 1px solid var(--ct-chip-line);
   border-radius: 999px; background: var(--ct-chip); color: var(--ct-chip-ink); font-weight: 600;
 }
 .codex-effort-list > button.selected { border-color: var(--ct-accent); background: var(--ct-chip-2); color: var(--ct-accent); }
