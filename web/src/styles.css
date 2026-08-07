@@ -2225,31 +2225,31 @@ button.cmd-text { background: none; border: none; text-align: left; }
 }
 
 .chat-view { position: relative; display: flex; flex-direction: column; min-height: 0; flex: 1; background: var(--ct-bg); }
-.codex-takeover {
-  flex: 1; min-height: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
+.codex-managed-guide {
+  flex: 1; min-height: 0; display: flex; flex-direction: column; align-items: center; overflow-y: auto;
   padding: 28px 28px calc(28px + env(safe-area-inset-bottom, 0px)); text-align: center;
   color: var(--ct-ink); background: var(--ct-bg);
 }
-.codex-takeover-icon {
-  width: 58px; height: 58px; display: grid; place-items: center; margin-bottom: 18px;
+.codex-managed-guide-icon {
+  flex: 0 0 auto; width: 58px; height: 58px; display: grid; place-items: center; margin: auto 0 18px;
   border-radius: 18px; color: var(--ct-accent); background: var(--ct-chip-2);
 }
-.codex-takeover-icon svg { width: 30px; height: 30px; }
-.codex-takeover h2 { margin: 0 0 8px; font-size: 20px; line-height: 1.25; }
-.codex-takeover p { max-width: 330px; margin: 0 0 22px; color: var(--ct-muted); font-size: 14px; line-height: 1.55; }
-.codex-takeover-primary {
+.codex-managed-guide-icon svg { width: 30px; height: 30px; }
+.codex-managed-guide h2 { margin: 0 0 8px; font-size: 20px; line-height: 1.25; }
+.codex-managed-guide p { max-width: 330px; margin: 0 0 18px; color: var(--ct-muted); font-size: 14px; line-height: 1.55; }
+.codex-managed-guide ol {
+  width: min(100%, 330px); margin: 0 0 14px; padding: 14px 16px 14px 38px; border-radius: 13px;
+  text-align: left; color: var(--ct-ink); background: var(--ct-chip); font-size: 14px; line-height: 1.55;
+}
+.codex-managed-guide li + li { margin-top: 7px; }
+.codex-managed-guide code { color: var(--ct-accent); font-size: 13px; word-break: break-all; }
+.codex-managed-guide p.codex-managed-guide-note { margin-bottom: 14px; font-size: 12.5px; }
+.codex-managed-guide-terminal {
   width: min(100%, 330px); min-height: 48px; border: 0; border-radius: 13px;
   background: var(--ct-accent); color: #fff; font-size: 16px; font-weight: 650;
-  touch-action: manipulation;
+  margin-bottom: auto; flex: 0 0 auto; touch-action: manipulation;
 }
-.codex-takeover-primary:active { filter: brightness(1.08); }
-.codex-takeover-primary:disabled { opacity: .58; }
-.codex-takeover-error { max-width: 330px; margin-top: 12px; color: var(--ct-err-ink); font-size: 12.5px; line-height: 1.45; }
-.codex-takeover-terminal {
-  min-height: 44px; margin-top: 8px; padding: 0 14px; border: 0; background: transparent;
-  color: var(--ct-accent); font-size: 14px; font-weight: 600; touch-action: manipulation;
-}
-.codex-takeover-terminal:disabled { opacity: .5; }
+.codex-managed-guide-terminal:active { filter: brightness(1.08); }
 /* Jump-to-bottom (Task 12): reuses the terminal's own .new-output pill (same class/caption) rather than a
    bespoke button — one control, one look, across both lenses. Only shown once scrolled away from the
    newest message; .new-output's own right/bottom:12px lands it above the composer since .chat-view is a

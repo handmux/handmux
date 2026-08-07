@@ -137,7 +137,7 @@ describe('ChatComposer', () => {
     const input = screen.getByPlaceholderText('和 Agent 对话…');
     typeInto(input, '/compact');
     fireEvent.click(screen.getByRole('button', { name: '发送' }));
-    await screen.findByText('请先接管这个 Codex 会话');
+    await screen.findByText('请先在终端以托管模式重新启动 Codex');
     expect(sendText).not.toHaveBeenCalled();
     expect(onInteractiveSlash).not.toHaveBeenCalled();
   });

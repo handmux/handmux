@@ -48,7 +48,7 @@ import BottomDock from './components/BottomDock.jsx';
 import ChatComposer from './components/ChatComposer.jsx';
 import LensSwitch from './components/LensSwitch.jsx';
 import ChatView from './components/ChatView.jsx';
-import CodexTakeover from './components/CodexTakeover.jsx';
+import CodexManagedGuide from './components/CodexManagedGuide.jsx';
 import { slashEchoFor } from './slashCommands.js';
 import TokenPrompt from './components/TokenPrompt.jsx';
 import Settings from './components/Settings.jsx';
@@ -149,7 +149,6 @@ export default function App() {
   const codexOptimisticSeqRef = useRef(0);
   const codexThreadByPaneRef = useRef(new Map());
   const [transcriptWake, setTranscriptWake] = useState({ paneId: null, seq: 0 }); // successful send -> immediate transcript refresh
-  const [codexTakeoverSeq, setCodexTakeoverSeq] = useState(0);
   const [docToast, setDocToast] = useState(null); // transient error toast for absolute-path doc failures
   const [exitHint, setExitHint] = useState(false); // "press Back again to exit" hint (double-back guard)
   const [docLinkPrompt, setDocLinkPrompt] = useState(null); // { path, x, y } confirm popover for a tapped terminal path
@@ -1320,7 +1319,7 @@ export default function App() {
   const currentAgent = states[current?.paneId]?.agent;
   const codexSessionWake = transcriptWake.paneId === current?.paneId ? transcriptWake.seq : 0;
   const codexSession = useCodexSession(
-    current?.paneId, chatLensOn && currentAgent === 'codex', codexTakeoverSeq, codexSessionWake,
+    current?.paneId, chatLensOn && currentAgent === 'codex', codexSessionWake,
   );
   const currentKind = currentAgent === 'codex'
     ? codexKind(codexSession)
@@ -1407,7 +1406,7 @@ export default function App() {
   // view (ChatView vs Terminal) and the bottom bar (ChatComposer vs the terminal BottomDock).
   const chatLens = chatLensAvailable && lens === 'chat';
   const codexChatLoading = chatLens && currentAgent === 'codex' && !codexSession.loaded;
-  const codexNeedsTakeover = chatLens && currentAgent === 'codex'
+  const codexNeedsManagedSetup = chatLens && currentAgent === 'codex'
     && codexSession.loaded && !codexSession.error && !codexSession.managed;
   const codexChatReady = currentAgent !== 'codex' || (codexSession.managed && !!codexSession.threadId);
 
@@ -2059,12 +2058,8 @@ export default function App() {
             chatLens ? (
               codexChatLoading ? (
                 <div className="chat-view" />
-              ) : codexNeedsTakeover ? (
-                <CodexTakeover pane={current.paneId} onAuthFail={onAuthFail}
-                  onTakenOver={() => {
-                    setStates((prev) => ({ ...prev, [current.paneId]: { ...prev[current.paneId], agent: 'codex' } }));
-                    setCodexTakeoverSeq((seq) => seq + 1);
-                  }}
+              ) : codexNeedsManagedSetup ? (
+                <CodexManagedGuide
                   onTerminal={() => { setLens('terminal'); localStorage.setItem('tw_lens_' + current.paneId, 'terminal'); }} />
               ) : (
                 <ChatView pane={current.paneId} agent={currentAgent} kind={currentKind} msg={states[current.paneId]?.msg} onAuthFail={onAuthFail}

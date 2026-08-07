@@ -7,9 +7,9 @@ const EMPTY = {
   approvals: [], userInputs: [], queue: [], error: null,
 };
 
-export function useCodexSession(pane, enabled, refreshToken = null, softRefreshToken = null) {
+export function useCodexSession(pane, enabled, refreshToken = null) {
   const [session, setSession] = useState(EMPTY);
-  useEffect(() => { setSession(EMPTY); }, [pane, enabled, refreshToken]);
+  useEffect(() => { setSession(EMPTY); }, [pane, enabled]);
   const fetch = useCallback(() => getCodexSession(pane), [pane]);
   const apply = useCallback((result) => {
     if (!result) return;
@@ -31,7 +31,7 @@ export function useCodexSession(pane, enabled, refreshToken = null, softRefreshT
     onError: fail,
     intervalMs: 750,
     enabled: enabled && !!pane,
-    deps: [pane, refreshToken, softRefreshToken],
+    deps: [pane, refreshToken],
   });
   return session;
 }

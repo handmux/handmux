@@ -11,7 +11,7 @@ describe('chat lens availability', () => {
     expect(canEnableChatLens(null, false)).toBe(true);
   });
 
-  it('exposes every Codex pane so unmanaged sessions can offer takeover', () => {
+  it('exposes every Codex pane so unmanaged sessions can show safe setup guidance', () => {
     expect(canUseChatLens('claude', 'installed')).toBe(true);
     expect(canUseChatLens('claude', 'absent')).toBe(false);
     expect(canUseChatLens('codex', 'absent')).toBe(true);

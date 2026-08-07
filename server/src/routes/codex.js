@@ -1,24 +1,5 @@
 import express from 'express';
 import { isPaneId } from '../tmux/commands.js';
-import { isSessionUuid } from '../agents/scanUtils.js';
-
-const TAKEOVER_TIMEOUT_MS = 8_000;
-
-async function waitForTakeover(codexApp, pane, threadId, {
-  now = Date.now,
-  wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
-  timeoutMs = TAKEOVER_TIMEOUT_MS,
-} = {}) {
-  const deadline = now() + timeoutMs;
-  do {
-    try {
-      const discovered = await codexApp.discover(pane);
-      if (discovered?.managed && discovered.threadId === threadId) return discovered;
-    } catch { /* the replacement process is still starting */ }
-    await wait(100);
-  } while (now() < deadline);
-  throw new Error('Codex takeover timed out');
-}
 
 async function binding(codexApp, pane) {
   if (!isPaneId(pane)) return { error: 'bad pane id', status: 400 };
@@ -44,17 +25,9 @@ function codexError(res, error) {
   return res.status(conflict ? 409 : 503).json({ error: message });
 }
 
-export function codexRoutes({
-  codexApp,
-  claudeEvents,
-  commands,
-  takeoverWait,
-  takeoverNow,
-  takeoverTimeoutMs = TAKEOVER_TIMEOUT_MS,
-}) {
+export function codexRoutes({ codexApp }) {
   const r = express.Router();
   if (!codexApp) return r;
-  const takingOver = new Set();
 
   r.get('/codex/session', async (req, res) => {
     const pane = req.query.pane;
@@ -66,49 +39,6 @@ export function codexRoutes({
       }
       return res.json(await codexApp.status(pane, discovered.threadId));
     } catch (error) { return codexError(res, error); }
-  });
-
-  r.post('/codex/takeover', async (req, res) => {
-    const pane = req.body?.pane;
-    if (!isPaneId(pane)) return res.status(400).json({ error: 'bad pane id' });
-    if (!claudeEvents?.getStates || !claudeEvents?.paneSession || !commands?.respawnPane) {
-      return res.status(503).json({ error: 'Codex takeover is unavailable' });
-    }
-    if (takingOver.has(pane)) return res.status(409).json({ error: 'codex-takeover-in-progress' });
-    takingOver.add(pane);
-
-    try {
-      const existing = await codexApp.discover(pane);
-      if (existing?.managed && existing.threadId) return res.json(await codexApp.status(pane, existing.threadId));
-
-      // Re-confirm process identity at the mutation boundary. The client can be stale, and a pane id may
-      // have been reused since it rendered the button; never kill whatever happens to occupy it now.
-      const states = await claudeEvents.getStates();
-      if (states?.[pane]?.agent !== 'codex') {
-        return res.status(409).json({ error: 'codex-pane-unavailable' });
-      }
-
-      // Only a current Hook binding is safe. cwd→newest rollout guesses can select a different Codex when
-      // two sessions share a project, while bindingVersion 2 is refreshed by SessionStart after /clear.
-      const bound = claudeEvents.paneSession(pane);
-      const threadId = bound?.sessionId;
-      if (bound?.agent !== 'codex' || bound?.bindingVersion !== 2 || !isSessionUuid(threadId)) {
-        return res.status(409).json({ error: 'codex-session-unbound' });
-      }
-
-      const cwd = bound.cwd || await commands.paneCurrentPath(pane);
-      await commands.respawnPane(pane, cwd, `handmux codex resume ${threadId}`);
-      await waitForTakeover(codexApp, pane, threadId, {
-        wait: takeoverWait,
-        now: takeoverNow,
-        timeoutMs: takeoverTimeoutMs,
-      });
-      return res.json(await codexApp.status(pane, threadId));
-    } catch (error) {
-      return codexError(res, error);
-    } finally {
-      takingOver.delete(pane);
-    }
   });
 
   r.post('/codex/send', async (req, res) => {
