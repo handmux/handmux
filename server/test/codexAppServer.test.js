@@ -247,6 +247,51 @@ describe('Codex App Server client', () => {
     app.close();
   });
 
+  it('keeps rereading while a live tool is only an overlay so canonical order can converge', async () => {
+    let canonicalReady = false;
+    const proxy = fakeProxy({
+      readThread: () => {
+        const thread = fixtureThread();
+        const items = [
+          { id: 'user-2', type: 'userMessage', content: [{ type: 'text', text: 'fix it' }] },
+          ...(canonicalReady ? [{
+            id: 'tool-2', type: 'commandExecution', command: 'npm test', cwd: '/work',
+            status: 'completed', aggregatedOutput: 'ok\n',
+          }] : []),
+          { id: 'agent-2', type: 'agentMessage', text: 'done' },
+        ];
+        thread.turns.push({ id: 'turn-2', status: 'completed', items });
+        return thread;
+      },
+    });
+    const app = createCodexAppServer({
+      home: '/home/test', exists: () => true, connect: () => proxy.ws,
+    });
+    await app.discover('%1');
+    proxy.push({
+      jsonrpc: '2.0', method: 'item/completed', params: {
+        threadId: 'thread-1', turnId: 'turn-2',
+        item: {
+          id: 'tool-2', type: 'commandExecution', command: 'npm test', cwd: '/work',
+          status: 'completed', aggregatedOutput: 'ok\n',
+        },
+      },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const provisional = projectCodexThread((await app.read('%1', 'thread-1')).thread).slice(-3);
+    expect(provisional.map((message) => message.text || message.tool?.input?.cmd))
+      .toEqual(['fix it', 'done', 'npm test']);
+
+    // App Server persistence catches up without another notification. The next phone poll must therefore
+    // read again while an overlay remains instead of freezing the provisional tail forever.
+    canonicalReady = true;
+    const converged = projectCodexThread((await app.read('%1', 'thread-1')).thread).slice(-3);
+    expect(converged.map((message) => message.text || message.tool?.input?.cmd))
+      .toEqual(['fix it', 'npm test', 'done']);
+    app.close();
+  });
+
   it('does not duplicate live messages or tools when the completed turn assigns different item ids', async () => {
     const completedItems = [
       { id: 'snapshot-user', type: 'userMessage', content: [{ type: 'text', text: 'only once' }] },

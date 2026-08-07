@@ -676,7 +676,11 @@ class CodexAppConnection {
     await this.ensureThread(threadId);
     const state = this.state(threadId);
     if (state.loadedOnly) return state.thread;
-    if (state.thread && state.readRevision === state.revision) return state.thread;
+    // A live item that is still absent from the durable snapshot is only a provisional overlay. App Server
+    // persistence can catch up without emitting another notification, so the phone's next poll must keep
+    // reading until every overlay has been replaced by canonical snapshot order.
+    const hasLiveOverlays = [...state.liveItemIds.values()].some((ids) => ids.size > 0);
+    if (state.thread && state.readRevision === state.revision && !hasLiveOverlays) return state.thread;
     const requestedRevision = state.revision;
     const result = await this.rpc('thread/read', { threadId, includeTurns: true });
     state.thread = mergeThreadWithLive(state.thread, result.thread, state.liveItemIds);
