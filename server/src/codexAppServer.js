@@ -8,6 +8,7 @@ const SOCKET_SCAN_MS = 2_000;
 const APPROVAL_METHODS = new Set([
   'item/commandExecution/requestApproval',
   'item/fileChange/requestApproval',
+  'item/permissions/requestApproval',
 ]);
 const USER_INPUT_METHOD = 'item/tool/requestUserInput';
 const SIMPLE_DECISIONS = new Set(['accept', 'acceptForSession', 'decline', 'cancel']);
@@ -134,53 +135,87 @@ function toolFromItem(item, fileChange = item.changes?.[0] || {}) {
   return null;
 }
 
-// App Server already returns one stable ordered item list. Project that authoritative state into the same
-// small message contract ChatView uses; k is the stable flattened ordinal and therefore keeps pagination,
-// deduplication, and /clear replacement behavior unchanged on the phone.
+function projectedMessageId(turn, turnIndex, item, itemIndex) {
+  const turnId = turn?.id || `turn-${turnIndex}`;
+  // When a completed snapshot canonicalizes a live notification under a different item id, retain the
+  // connection-local first id. It is identity metadata only; all content/order still comes from snapshot.
+  const itemId = item?._handmuxId || item?.id || `item-${itemIndex}`;
+  return `codex:${turnId}:${itemId}`;
+}
+
+// App Server returns one authoritative ordered item list. Keep the flattened ordinal (`k`) only as the
+// current snapshot's pagination/order coordinate; item notifications and later snapshots may insert hidden
+// reasoning/tool rows, so position is not identity. `id` survives those insertions and is the only client
+// dedup/render identity.
 export function projectCodexThread(thread) {
   const messages = [];
-  for (const turn of thread?.turns || []) {
+  for (const [turnIndex, turn] of (thread?.turns || []).entries()) {
     const ts = typeof turn.startedAt === 'number' ? new Date(turn.startedAt * 1000).toISOString() : undefined;
-    for (const item of turn.items || []) {
+    for (const [itemIndex, item] of (turn.items || []).entries()) {
+      const id = projectedMessageId(turn, turnIndex, item, itemIndex);
       if (item.type === 'userMessage') {
         const text = inputText(item.content);
-        if (text.trim()) messages.push({ type: 'text', role: 'user', text, ts });
+        if (text.trim()) messages.push({ id, type: 'text', role: 'user', text, ts });
       } else if (item.type === 'agentMessage') {
-        if (item.text?.trim()) messages.push({ type: 'text', role: 'assistant', text: item.text, ts });
+        if (item.text?.trim()) messages.push({ id, type: 'text', role: 'assistant', text: item.text, ts });
       } else if (item.type === 'reasoning') {
         const text = [...(item.summary || []), ...(item.content || [])].join('\n');
-        if (text.trim()) messages.push({ type: 'thinking', role: 'assistant', text, ts });
+        if (text.trim()) messages.push({ id, type: 'thinking', role: 'assistant', text, ts });
       } else if (item.type === 'contextCompaction') {
-        messages.push({ type: 'compact', ts });
+        messages.push({ id, type: 'compact', ts });
       } else if (item.type === 'fileChange') {
         const changes = item.changes?.length ? item.changes : [{}];
-        for (const change of changes) messages.push({ type: 'tool', role: 'assistant', tool: toolFromItem(item, change), ts });
+        const pathCounts = new Map();
+        for (const [changeIndex, change] of changes.entries()) {
+          const path = change?.path || '';
+          const occurrence = pathCounts.get(path) || 0;
+          pathCounts.set(path, occurrence + 1);
+          const changeId = path
+            ? `${id}:change-${encodeURIComponent(path)}-${occurrence}`
+            : `${id}:change-${changeIndex}`;
+          messages.push({ id: changeId, type: 'tool', role: 'assistant', tool: toolFromItem(item, change), ts });
+        }
       } else {
         const tool = toolFromItem(item);
-        if (tool) messages.push({ type: 'tool', role: 'assistant', tool, ts });
+        if (tool) messages.push({ id, type: 'tool', role: 'assistant', tool, ts });
       }
     }
-    if (turn.status === 'interrupted') messages.push({ type: 'interrupt', ts });
+    if (turn.status === 'interrupted') {
+      messages.push({ id: `codex:${turn?.id || `turn-${turnIndex}`}:interrupt`, type: 'interrupt', ts });
+    }
   }
   return messages.map((message, k) => ({ ...message, k }));
 }
 
 function normalizeApproval(message) {
   const { params = {} } = message;
+  const permissions = message.method === 'item/permissions/requestApproval';
   const supplied = Array.isArray(params.availableDecisions)
     ? params.availableDecisions.filter((value) => SIMPLE_DECISIONS.has(value))
     : null;
   return {
     id: String(message.id),
-    type: message.method === 'item/fileChange/requestApproval' ? 'file' : 'command',
+    type: permissions ? 'permissions' : message.method === 'item/fileChange/requestApproval' ? 'file' : 'command',
     threadId: params.threadId,
     turnId: params.turnId,
     itemId: params.itemId,
     command: params.command || null,
     cwd: params.cwd || null,
     reason: params.reason || null,
-    decisions: supplied?.length ? supplied : ['accept', 'acceptForSession', 'decline', 'cancel'],
+    decisions: permissions
+      ? ['accept', 'acceptForSession', 'decline']
+      : supplied?.length ? supplied : ['accept', 'acceptForSession', 'decline', 'cancel'],
   };
+}
+
+function permissionResponse(request, decision) {
+  const requested = request.params?.permissions || {};
+  const permissions = {};
+  if (decision !== 'decline') {
+    if (requested.network != null) permissions.network = requested.network;
+    if (requested.fileSystem != null) permissions.fileSystem = requested.fileSystem;
+  }
+  return { permissions, scope: decision === 'acceptForSession' ? 'session' : 'turn' };
 }
 
 function normalizeUserInput(message) {
@@ -217,7 +252,7 @@ function activeKind(status) {
   return flags.includes('waitingOnApproval') || flags.includes('waitingOnUserInput') ? 'permission' : 'working';
 }
 
-function liveMessageSignature(item) {
+function liveItemSignature(item) {
   if (item?.type === 'userMessage') {
     const text = inputText(item.content);
     return text ? `userMessage\0${text}` : null;
@@ -225,6 +260,19 @@ function liveMessageSignature(item) {
   if (item?.type === 'agentMessage') {
     return item.text ? `agentMessage\0${item.text}` : null;
   }
+  if (item?.type === 'commandExecution') return `commandExecution\0${jsonText(item.command)}\0${item.cwd || ''}`;
+  if (item?.type === 'fileChange') {
+    return `fileChange\0${(item.changes || []).map((change) => change?.path || '').join('\0')}`;
+  }
+  if (item?.type === 'mcpToolCall') return `mcpToolCall\0${item.server || ''}\0${item.tool || ''}\0${jsonText(item.arguments)}`;
+  if (item?.type === 'dynamicToolCall') return `dynamicToolCall\0${item.tool || ''}\0${jsonText(item.arguments)}`;
+  if (item?.type === 'collabAgentToolCall') {
+    return `collabAgentToolCall\0${item.tool || ''}\0${item.prompt || ''}\0${jsonText(item.receiverThreadIds)}`;
+  }
+  if (item?.type === 'webSearch') return `webSearch\0${item.query || ''}\0${jsonText(item.action)}`;
+  if (item?.type === 'imageView') return `imageView\0${item.path || ''}`;
+  if (item?.type === 'sleep') return `sleep\0${item.durationMs ?? ''}`;
+  if (item?.type === 'imageGeneration') return `imageGeneration\0${item.revisedPrompt || ''}`;
   return null;
 }
 
@@ -233,55 +281,62 @@ function liveMessageSignature(item) {
 // snapshot contains that item (by id, or by matching user/agent content), retire the overlay and use the
 // snapshot copy; the two channels must never become parallel transcript stores.
 function mergeTurnWithLive(previous, fresh, liveIds) {
-  if (!previous || !liveIds?.size) return fresh;
-  const freshItems = Array.isArray(fresh?.items) ? fresh.items : [];
+  if (!previous) return fresh;
+  const previousById = new Map((previous.items || []).filter((item) => item?.id).map((item) => [item.id, item]));
+  const freshItems = (Array.isArray(fresh?.items) ? fresh.items : []).map((item) => {
+    const stableId = previousById.get(item?.id)?._handmuxId;
+    return stableId && !item._handmuxId ? { ...item, _handmuxId: stableId } : item;
+  });
+  if (!liveIds?.size) return { ...previous, ...fresh, items: freshItems };
   const freshById = new Map(freshItems.filter((item) => item?.id).map((item) => [item.id, item]));
-  const freshMessages = new Map();
+  const freshMatches = new Map();
   for (const item of freshItems) {
-    const signature = liveMessageSignature(item);
+    const signature = liveItemSignature(item);
     if (!signature || !item?.id) continue;
-    if (!freshMessages.has(signature)) freshMessages.set(signature, []);
-    freshMessages.get(signature).push(item);
+    if (!freshMatches.has(signature)) freshMatches.set(signature, []);
+    freshMatches.get(signature).push(item);
   }
-  const merged = [];
-  const seen = new Set();
+  const matchedFreshIds = new Set((previous.items || [])
+    .filter((item) => item?.id && !liveIds.has(item.id) && freshById.has(item.id))
+    .map((item) => item.id));
+  const overlays = [];
   for (const item of previous.items || []) {
-    let next = freshById.get(item?.id);
-    if (liveIds.has(item?.id)) {
-      if (next) {
-        liveIds.delete(item.id);
-      } else {
-        const signature = liveMessageSignature(item);
-        const canonical = signature
-          ? freshMessages.get(signature)?.find((candidate) => !seen.has(candidate.id))
-          : null;
-        if (canonical) {
-          next = canonical;
-          liveIds.delete(item.id);
-        } else {
-          next = item;
-        }
+    if (!item?.id || !liveIds.has(item.id)) continue;
+    const sameId = freshById.get(item.id);
+    const signature = sameId ? null : liveItemSignature(item);
+    const canonical = sameId || (signature
+      ? freshMatches.get(signature)?.find((candidate) => !matchedFreshIds.has(candidate.id))
+      : null);
+    if (canonical) {
+      if (canonical.id !== item.id && !canonical._handmuxId) {
+        const index = freshItems.findIndex((candidate) => candidate?.id === canonical.id);
+        if (index >= 0) freshItems[index] = { ...canonical, _handmuxId: item._handmuxId || item.id };
       }
+      matchedFreshIds.add(canonical.id);
+      liveIds.delete(item.id);
+    } else {
+      overlays.push(item);
     }
-    if (!next?.id || seen.has(next.id)) continue;
-    merged.push(next);
-    seen.add(next.id);
   }
-  for (const item of freshItems) {
-    if (!item?.id || seen.has(item.id)) continue;
-    merged.push(item);
-    seen.add(item.id);
-  }
-  return { ...previous, ...fresh, items: merged };
+  // Fresh snapshot order is authoritative. Event copies survive only while thread/read temporarily omits
+  // them, and are appended as the live tail; they never get to reorder canonical snapshot items.
+  const seen = new Set(freshItems.map((item) => item?.id).filter(Boolean));
+  return {
+    ...previous,
+    ...fresh,
+    items: [...freshItems, ...overlays.filter((item) => item?.id && !seen.has(item.id))],
+  };
 }
 
 function mergeThreadWithLive(previous, fresh, liveItemIds) {
-  if (!previous || !fresh || !liveItemIds.size) return fresh;
+  if (!previous || !fresh) return fresh;
   const previousTurns = new Map((previous.turns || []).map((turn) => [turn.id, turn]));
   const seen = new Set();
   const turns = (fresh.turns || []).map((turn) => {
     seen.add(turn.id);
-    return mergeTurnWithLive(previousTurns.get(turn.id), turn, liveItemIds.get(turn.id));
+    const merged = mergeTurnWithLive(previousTurns.get(turn.id), turn, liveItemIds.get(turn.id));
+    if (liveItemIds.get(turn.id)?.size === 0) liveItemIds.delete(turn.id);
+    return merged;
   });
   for (const turn of previous.turns || []) {
     if (!seen.has(turn.id) && liveItemIds.has(turn.id)) turns.push(turn);
@@ -400,18 +455,20 @@ class CodexAppConnection {
     if (message.id != null && APPROVAL_METHODS.has(message.method)) {
       this.approvals.set(String(message.id), message);
       const approval = normalizeApproval(message);
-      this.currentThreadId = approval.threadId || this.currentThreadId;
       this.markWaiting(approval.threadId, 'waitingOnApproval');
-      this.setInbox('permission', approval.reason || approval.command || '', `approval:${message.id}`);
+      if (this.isCurrentThread(approval.threadId)) {
+        this.setInbox('permission', approval.reason || approval.command || '', `approval:${message.id}`);
+      }
       this.bump(message.params?.threadId);
       return;
     }
     if (message.id != null && message.method === USER_INPUT_METHOD) {
       this.userInputs.set(String(message.id), message);
       const input = normalizeUserInput(message);
-      this.currentThreadId = input.threadId || this.currentThreadId;
       this.markWaiting(input.threadId, 'waitingOnUserInput');
-      this.setInbox('permission', input.questions[0]?.question || '', `input:${message.id}`);
+      if (this.isCurrentThread(input.threadId)) {
+        this.setInbox('permission', input.questions[0]?.question || '', `input:${message.id}`);
+      }
       this.bump(message.params?.threadId);
       return;
     }
@@ -423,12 +480,13 @@ class CodexAppConnection {
       this.approvals.delete(String(params.requestId));
       this.userInputs.delete(String(params.requestId));
       this.markWorking(params.threadId);
-      this.setInbox('working', '', `resolved:${params.requestId}`);
+      if (this.isCurrentThread(params.threadId)) this.setInbox('working', '', `resolved:${params.requestId}`);
     } else if (message.method === 'thread/status/changed') {
       this.state(params.threadId).status = params.status;
-      this.currentThreadId = params.threadId || this.currentThreadId;
       const kind = activeKind(params.status);
-      if (kind === 'working' && this.inbox.kind === 'compacting') {
+      if (!this.isCurrentThread(params.threadId)) {
+        /* retain the state for that thread, but never let a late background event rebind this pane */
+      } else if (kind === 'working' && this.inbox.kind === 'compacting') {
         /* keep the more specific state until thread/compacted or idle */
       } else if (kind) {
         this.setInbox(kind, kind === 'permission' && this.inbox.kind === kind ? this.inbox.msg : '', `status:${params.threadId}:${kind}`);
@@ -439,16 +497,18 @@ class CodexAppConnection {
       const state = this.state(params.threadId);
       state.activeTurnId = params.turn?.id || params.turnId || null;
       this.upsertTurn(params.threadId, params.turn);
-      this.currentThreadId = params.threadId || this.currentThreadId;
-      this.setInbox('working', '', `turn:${params.turn?.id || params.turnId}:started`);
+      if (this.isCurrentThread(params.threadId)) {
+        this.setInbox('working', '', `turn:${params.turn?.id || params.turnId}:started`);
+      }
     } else if (message.method === 'turn/completed') {
       const state = this.state(params.threadId);
       state.activeTurnId = null;
       const turn = this.upsertTurn(params.threadId, params.turn) || params.turn || null;
       state.lastTurn = turn;
-      this.currentThreadId = params.threadId || this.currentThreadId;
       const status = turn?.status;
-      if (status === 'completed' || status === 'failed') {
+      if (!this.isCurrentThread(params.threadId)) {
+        /* stale/background completion: update only its own thread state */
+      } else if (status === 'completed' || status === 'failed') {
         const completedAt = typeof turn?.completedAt === 'number' ? turn.completedAt * 1000 : undefined;
         this.setInbox('done', turnSummary(turn), `turn:${turn?.id || params.turnId}:${status}`, completedAt);
       } else {
@@ -457,7 +517,7 @@ class CodexAppConnection {
     } else if (message.method === 'thread/settings/updated') {
       this.state(params.threadId).settings = params.threadSettings || null;
     } else if (message.method === 'thread/compacted') {
-      this.setInbox(null, '', `thread:${params.threadId}:compacted`);
+      if (this.isCurrentThread(params.threadId)) this.setInbox(null, '', `thread:${params.threadId}:compacted`);
     } else if (message.method === 'thread/started') {
       const previous = this.currentThreadId;
       this.lastStartedThreadId = params.thread?.id || params.threadId || null;
@@ -487,6 +547,16 @@ class CodexAppConnection {
       lastTurn: null, loadedOnly: false, liveItemIds: new Map(),
     });
     return this.threadState.get(threadId);
+  }
+
+  isCurrentThread(threadId) {
+    if (!threadId) return false;
+    if (!this.currentThreadId) this.currentThreadId = threadId;
+    return this.currentThreadId === threadId;
+  }
+
+  assertCurrentThread(threadId) {
+    if (!this.isCurrentThread(threadId)) throw new Error('Codex session changed');
   }
 
   upsertTurn(threadId, incoming) {
@@ -574,15 +644,17 @@ class CodexAppConnection {
       state.status = result.thread?.status || state.status;
       state.settings = settingsFromResume(result);
       state.loadedOnly = false;
-      this.currentThreadId = threadId;
-      const kind = activeKind(state.status);
-      if (kind) {
-        this.setInbox(kind, '', `status:${threadId}:${kind}`);
-      } else {
-        const last = [...(result.thread?.turns || [])].reverse().find((turn) => turn.status !== 'inProgress');
-        if (last?.status === 'completed' || last?.status === 'failed') {
-          const completedAt = typeof last.completedAt === 'number' ? last.completedAt * 1000 : undefined;
-          this.setInbox('done', turnSummary(last), `turn:${last.id}:${last.status}`, completedAt);
+      this.currentThreadId ||= threadId;
+      if (this.isCurrentThread(threadId)) {
+        const kind = activeKind(state.status);
+        if (kind) {
+          this.setInbox(kind, '', `status:${threadId}:${kind}`);
+        } else {
+          const last = [...(result.thread?.turns || [])].reverse().find((turn) => turn.status !== 'inProgress');
+          if (last?.status === 'completed' || last?.status === 'failed') {
+            const completedAt = typeof last.completedAt === 'number' ? last.completedAt * 1000 : undefined;
+            this.setInbox('done', turnSummary(last), `turn:${last.id}:${last.status}`, completedAt);
+          }
         }
       }
     } catch (error) {
@@ -656,7 +728,9 @@ class CodexAppConnection {
     if (!request || request.params?.threadId !== threadId) throw new Error('approval request is no longer pending');
     const approval = normalizeApproval(request);
     if (!approval.decisions.includes(decision)) throw new Error('approval decision is unavailable');
-    this.respond(request.id, { decision });
+    this.respond(request.id, request.method === 'item/permissions/requestApproval'
+      ? permissionResponse(request, decision)
+      : { decision });
     this.approvals.delete(key);
     this.markWorking(threadId);
     this.setInbox('working', '', `approval:${key}:resolved`);
@@ -808,11 +882,12 @@ export function createCodexAppServer({
     async send(pane, threadId, text) {
       const client = await connection(pane);
       if (!client) throw new Error('Codex session is not managed by Handmux');
+      client.assertCurrentThread(threadId);
       const state = await client.ensureThread(threadId);
       const result = await client.rpc('turn/start', { threadId, input: [{ type: 'text', text }] });
       state.activeTurnId = result.turn?.id || null;
       state.status = { type: 'active', activeFlags: [] };
-      client.currentThreadId = threadId;
+      client.currentThreadId ||= threadId;
       client.setInbox('working', '', `turn:${result.turn?.id || 'starting'}:started`);
       client.bump(threadId);
       if (state.loadedOnly) {
@@ -825,6 +900,7 @@ export function createCodexAppServer({
     async compact(pane, threadId) {
       const client = await connection(pane);
       if (!client) throw new Error('Codex session is not managed by Handmux');
+      client.assertCurrentThread(threadId);
       const state = await client.ensureThread(threadId);
       const result = await client.rpc('thread/compact/start', { threadId });
       state.status = { type: 'active', activeFlags: [] };
@@ -835,6 +911,7 @@ export function createCodexAppServer({
     async clear(pane, threadId) {
       const client = await connection(pane);
       if (!client) throw new Error('Codex session is not managed by Handmux');
+      client.assertCurrentThread(threadId);
       const current = await client.ensureThread(threadId);
       const result = await client.rpc('thread/start', clearThreadParams(current.settings));
       const nextThreadId = result.thread?.id;
@@ -855,6 +932,7 @@ export function createCodexAppServer({
     async models(pane, threadId) {
       const client = await connection(pane);
       if (!client) throw new Error('Codex session is not managed by Handmux');
+      client.assertCurrentThread(threadId);
       await client.ensureThread(threadId);
       const data = [];
       let cursor = null;
@@ -868,6 +946,7 @@ export function createCodexAppServer({
     async updateSettings(pane, threadId, updates) {
       const client = await connection(pane);
       if (!client) throw new Error('Codex session is not managed by Handmux');
+      client.assertCurrentThread(threadId);
       const state = await client.ensureThread(threadId);
       await client.rpc('thread/settings/update', { threadId, ...updates });
       state.settings = { ...(state.settings || {}), ...updates };
@@ -877,6 +956,7 @@ export function createCodexAppServer({
     async interrupt(pane, threadId) {
       const client = await connection(pane);
       if (!client) throw new Error('Codex session is not managed by Handmux');
+      client.assertCurrentThread(threadId);
       const thread = await client.readThread(threadId);
       const state = client.state(threadId);
       const turnId = state.activeTurnId || [...(thread.turns || [])].reverse().find((turn) => turn.status === 'inProgress')?.id;
@@ -888,6 +968,7 @@ export function createCodexAppServer({
     async decide(pane, threadId, requestId, decision) {
       const client = await connection(pane);
       if (!client) throw new Error('Codex session is not managed by Handmux');
+      client.assertCurrentThread(threadId);
       await client.ensureThread(threadId);
       client.decide(threadId, requestId, decision);
       return { ok: true };
@@ -895,6 +976,7 @@ export function createCodexAppServer({
     async answerInput(pane, threadId, requestId, answers) {
       const client = await connection(pane);
       if (!client) throw new Error('Codex session is not managed by Handmux');
+      client.assertCurrentThread(threadId);
       await client.ensureThread(threadId);
       client.answerInput(threadId, requestId, answers);
       return { ok: true };

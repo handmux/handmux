@@ -583,9 +583,9 @@ describe('ChatView', () => {
   });
 
   // Regression for the priority-ordering bug: a loadOlder() prepend in flight must NOT consume the
-  // "new trailing user message" signal — lastMaxKRef must stay stale through the pendingPrepend-branch
+  // "new trailing user message" signal — the last trailing identity must stay stale through the pendingPrepend branch
   // run so the run that eventually applies the prepend still recognizes the user message as new and
-  // force-scrolls to bottom. Pre-fix, lastMaxKRef advanced on every run (including the prepend branch),
+  // force-scrolls to bottom. Pre-fix, the trailing marker advanced on every run (including the prepend branch),
   // so a user message that arrived mid-prepend was marked "already seen" and the user's own send never
   // got scrolled to.
   it('a new user message that arrives mid-prepend still forces bottom once the prepend resolves', async () => {
@@ -630,8 +630,8 @@ describe('ChatView', () => {
         await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
       });
 
-      // With the fix, lastMaxKRef was never advanced past 5 during the pendingPrepend run, so this run
-      // still sees k=6 as newly-arrived and force-scrolls to bottom.
+      // The trailing identity was not advanced during the pending prepend, so this run still sees the user
+      // message as newly arrived and force-scrolls to bottom.
       expect(el.scrollTop).toBe(900);
     } finally {
       vi.useRealTimers();

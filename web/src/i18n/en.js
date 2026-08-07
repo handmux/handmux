@@ -334,6 +334,7 @@ export default {
 'chat.approval.request': 'Codex needs confirmation',
 'chat.approval.file': 'Allow these file changes?',
 'chat.approval.command': 'Allow this command to run?',
+'chat.approval.permissions': 'Allow Codex to use additional permissions?',
 'chat.approval.accept': 'Allow once',
 'chat.approval.acceptSession': 'Always allow this session',
 'chat.approval.decline': 'Deny',

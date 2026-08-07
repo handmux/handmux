@@ -1,6 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { renderHook, waitFor, act, cleanup } from '@testing-library/react';
-import { useTranscript, mergeByK, MAX_TRANSCRIPT_MESSAGES } from '../src/hooks/useTranscript.js';
+import {
+  useTranscript, mergeTranscriptMessages, reconcileRecentSnapshot, MAX_TRANSCRIPT_MESSAGES,
+} from '../src/hooks/useTranscript.js';
 import * as api from '../src/api.js';
 
 beforeEach(() => { vi.restoreAllMocks(); });
@@ -18,10 +20,38 @@ function makeMsgs(startK, count) {
 describe('useTranscript', () => {
   it('bounds the resident message window while keeping the newest messages', () => {
     const existing = makeMsgs(0, MAX_TRANSCRIPT_MESSAGES);
-    const merged = mergeByK(existing, makeMsgs(MAX_TRANSCRIPT_MESSAGES, 10));
+    const merged = mergeTranscriptMessages(existing, makeMsgs(MAX_TRANSCRIPT_MESSAGES, 10));
     expect(merged).toHaveLength(MAX_TRANSCRIPT_MESSAGES);
     expect(merged[0].k).toBe(10);
     expect(merged.at(-1).k).toBe(MAX_TRANSCRIPT_MESSAGES + 9);
+  });
+
+  it('reconciles a mutable Codex snapshot by stable id when ordinals shift', () => {
+    const existing = [
+      { id: 'a', k: 9, type: 'text', text: '需求' },
+      { id: 'b', k: 10, type: 'thinking', text: '思考' },
+      { id: 'c', k: 11, type: 'text', text: '回复' },
+    ];
+    const incoming = [
+      { id: 'inserted', k: 10, type: 'tool' },
+      { id: 'a', k: 11, type: 'text', text: '需求' },
+      { id: 'b', k: 12, type: 'thinking', text: '思考已更新' },
+      { id: 'c', k: 13, type: 'text', text: '回复' },
+    ];
+
+    const reconciled = reconcileRecentSnapshot(existing, incoming, 10);
+    expect(reconciled.map((message) => message.id)).toEqual(['inserted', 'a', 'b', 'c']);
+    expect(reconciled.filter((message) => message.id === 'a')).toHaveLength(1);
+    expect(reconciled.find((message) => message.id === 'b')?.text).toBe('思考已更新');
+  });
+
+  it('removes rows deleted from the authoritative Codex recent range', () => {
+    const existing = [
+      { id: 'older', k: 8 }, { id: 'keep', k: 9 }, { id: 'deleted', k: 10 }, { id: 'tail', k: 11 },
+    ];
+    const incoming = [{ id: 'tail', k: 10 }];
+    expect(reconcileRecentSnapshot(existing, incoming, 10).map((message) => message.id))
+      .toEqual(['older', 'keep', 'tail']);
   });
   it('polls the recent window and returns messages; keeps last on a null (204) poll', async () => {
     const recent = makeMsgs(10, 10); // k=10..19
@@ -87,7 +117,7 @@ describe('useTranscript', () => {
     }
   });
 
-  it('loadOlder() prepends an older page, deduped/sorted by k', async () => {
+  it('loadOlder() prepends an older page, deduped by identity and sorted by k', async () => {
     const recent = makeMsgs(10, 10); // k=10..19
     const older = makeMsgs(5, 5); // k=5..9
     const spy = vi.spyOn(api, 'fetchTranscript')
@@ -122,7 +152,36 @@ describe('useTranscript', () => {
     expect(result.current.hasMoreOlder).toBe(false); // older-page cursor restarted from the new session
   });
 
-  it('same-session polls keep merging by k (no spurious replace)', async () => {
+  it('drops an older-page response that finishes after the session has switched', async () => {
+    vi.useFakeTimers();
+    try {
+      let resolveOlder;
+      const spy = vi.spyOn(api, 'fetchTranscript')
+        .mockResolvedValueOnce({ messages: makeMsgs(20, 2), hash: 'old', session: 'sess-old', hasMore: true, firstSeq: 20 })
+        .mockImplementationOnce(() => new Promise((resolve) => { resolveOlder = resolve; }))
+        .mockResolvedValueOnce({ messages: makeMsgs(0, 1), hash: 'new', session: 'sess-new', hasMore: false, firstSeq: 0 })
+        .mockResolvedValue(null);
+      const { result } = renderHook(() => useTranscript('%0', true, 'codex'));
+      await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+      expect(result.current.session).toBe('sess-old');
+
+      let olderPromise;
+      act(() => { olderPromise = result.current.loadOlder(); });
+      await act(async () => { await vi.advanceTimersByTimeAsync(1500); });
+      expect(result.current.session).toBe('sess-new');
+
+      await act(async () => {
+        resolveOlder({ messages: makeMsgs(10, 10), session: 'sess-old', hasMore: false, firstSeq: 10 });
+        await olderPromise;
+      });
+      expect(result.current.messages.map((message) => message.text)).toEqual(['m0']);
+      expect(result.current.loadingOlder).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('same-session Claude polls keep merging their append-only windows', async () => {
     const w1 = makeMsgs(10, 10);
     const w2 = makeMsgs(12, 10); // window slid forward, overlapping k
     vi.spyOn(api, 'fetchTranscript')

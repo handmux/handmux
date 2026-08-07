@@ -29,6 +29,8 @@ export function usePollingLoop({
     if (!enabled) return undefined;
     let cancelled = false;
     let timer = null;
+    let inFlight = false;
+    let repollAfterFlight = false;
     let burstRemaining = burstKey == null ? 0 : burstCount;
     const tick = async () => {
       if (document.hidden) return;
@@ -41,14 +43,29 @@ export function usePollingLoop({
         if (!cancelled) errorRef.current?.(error);
       }
     };
-    const loop = () => {
-      tick();
+    const nextDelay = () => {
       const delay = burstRemaining > 0 ? burstIntervalMs : intervalMs;
       if (burstRemaining > 0) burstRemaining -= 1;
+      return delay;
+    };
+    const loop = async () => {
+      if (cancelled || document.hidden) return;
+      if (inFlight) { repollAfterFlight = true; return; }
+      inFlight = true;
+      await tick();
+      inFlight = false;
+      if (cancelled || document.hidden) return;
+      const delay = repollAfterFlight ? 0 : nextDelay();
+      repollAfterFlight = false;
       timer = setTimeout(loop, delay);
     };
-    loop();
-    const onVis = () => { if (!document.hidden) { clearTimeout(timer); loop(); } };
+    void loop();
+    const onVis = () => {
+      if (document.hidden) { clearTimeout(timer); return; }
+      clearTimeout(timer);
+      if (inFlight) repollAfterFlight = true;
+      else void loop();
+    };
     document.addEventListener('visibilitychange', onVis);
     return () => { cancelled = true; clearTimeout(timer); document.removeEventListener('visibilitychange', onVis); };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- fetch/apply via refs; restart only on these

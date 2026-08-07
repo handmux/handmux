@@ -6,9 +6,10 @@
 //     client whether/where an older page starts.
 //   - History page (scroll-up, not polled): ?pane=&before=<k>&limit=10 — the last `limit` messages with
 //     `k < before`, no hash.
-// `k` = each message's global ordinal in the parsed transcript — stable because the jsonl is append-only,
-// so it doubles as the client's dedup key. Only the requested page is copied and decorated with `k`; the
-// full parsed transcript is never mapped/filtered on every poll. The underlying reader asynchronously scans once,
+// `k` = each message's current global ordinal and the pagination cursor. It is stable for Claude's append-only
+// jsonl, while mutable Codex snapshots additionally carry an App Server-derived stable `id` for dedup/render.
+// Only the requested page is copied and decorated with `k`; the full parsed transcript is never mapped/filtered
+// on every poll. The underlying reader asynchronously scans once,
 // then parses only appended complete lines; replacement/truncation resets it. `limit` clamps to [1,100],
 // default 10. Mounted under /api.
 import express from 'express';

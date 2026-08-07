@@ -75,4 +75,28 @@ describe('usePollingLoop', () => {
     await act(async () => { resolve(42); }); // the in-flight fetch resolves AFTER cleanup
     expect(apply).not.toHaveBeenCalled();   // stale result dropped
   });
+
+  it('never overlaps polls when a request is slower than the cadence or visibility wakes it', async () => {
+    vi.useFakeTimers();
+    setHidden(false);
+    let resolveFirst;
+    const fetch = vi.fn()
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveFirst = resolve; }))
+      .mockResolvedValue(2);
+    const apply = vi.fn();
+    render(<Harness fetch={fetch} apply={apply} intervalMs={100} enabled />);
+    expect(fetch).toHaveBeenCalledTimes(1);
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+    document.dispatchEvent(new Event('visibilitychange'));
+    document.dispatchEvent(new Event('visibilitychange'));
+    expect(fetch).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      resolveFirst(1);
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(apply).toHaveBeenCalledWith(1);
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
 });

@@ -63,7 +63,7 @@ export const getHistory = (pane, lines = 1500, since) =>
 // The 对话 lens's transcript: same req()-based conditional-poll convention as getHistory (8s timeout),
 // but translates the 204 { unchanged: true } into a plain null — a simpler "keep last" contract for
 // useTranscript's polling consumer. Paginated (Task 10): the RECENT window is `{since, limit}` (hash-gated
-// conditional poll), a HISTORY page is `{before, limit}` (page back from the given global ordinal `k`,
+// conditional poll), a HISTORY page is `{before, limit}` (page back from the current ordinal cursor `k`,
 // no hash — always returns whatever's there). limit defaults to 10 so the client never asks for more than
 // one page at a time (it never holds/requests the whole transcript).
 export const fetchTranscript = (pane, { since, before, limit = 10, agent = 'claude' } = {}) => {

@@ -4,7 +4,7 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { marked } from 'marked';
 import DOMPurify from 'dompurify';
-import { useTranscript } from '../hooks/useTranscript.js';
+import { messageIdentity, useTranscript } from '../hooks/useTranscript.js';
 import { usePendingPrompt } from '../hooks/usePendingPrompt.js';
 import { fallbackGate } from '../chatGate.js';
 import PromptGate from './PromptGate.jsx';
@@ -430,7 +430,11 @@ function CodexApprovalGate({ pane, approval, onAuthFail }) {
   return (
     <div className="chat-gate codex-approval-gate" role="dialog" aria-modal="true">
       <div className="chat-gate-step">{t('chat.approval.request')}</div>
-      <div className="chat-gate-prompt">{approval.type === 'file' ? t('chat.approval.file') : t('chat.approval.command')}</div>
+      <div className="chat-gate-prompt">{
+        approval.type === 'file' ? t('chat.approval.file')
+          : approval.type === 'permissions' ? t('chat.approval.permissions')
+            : t('chat.approval.command')
+      }</div>
       {approval.reason && <div className="chat-gate-hint">{approval.reason}</div>}
       {approval.command && <pre className="codex-approval-command">{approval.command}</pre>}
       {approval.cwd && <div className="codex-approval-cwd">{approval.cwd}</div>}
@@ -548,19 +552,23 @@ export default function ChatView({ pane, agent = 'claude', kind, msg, onAuthFail
   const showCompacting = kind === 'compacting';
   const showError = kind === 'error';
   // Claude's optimistic slash-command echo (App sets it at send time — the jsonl scaffold only lands when the
-  // command COMPLETES, minutes for /compact). It's dropped once the REAL marker takes over: a marker with
-  // the same name and a k beyond what was on screen when the echo appeared (so a same-named marker from an
-  // EARLIER run in the window can't kill a fresh echo), or a session switch (e.g. /clear — the new
+  // command COMPLETES, minutes for /compact). It's dropped once the REAL marker takes over: a new stable
+  // marker id not present when the echo appeared (so an earlier same-named marker can't kill a fresh echo),
+  // or a session switch (e.g. /clear — the new
   // session's own /clear marker owns the screen now; only when both ids are known, so the very first
   // transcript load can't spuriously clear it).
-  const echoMarkRef = useRef(null); // { k, session } captured when the echo first renders
+  const echoMarkRef = useRef(null); // { ids, session } captured when the echo first renders
   if (slashEcho && !echoMarkRef.current) {
-    echoMarkRef.current = { k: messages.reduce((mx, m) => Math.max(mx, m.k ?? -1), -1), session };
+    echoMarkRef.current = {
+      ids: new Set(messages.filter((m) => m.type === 'slash' && m.name === slashEcho.name).map(messageIdentity)),
+      session,
+    };
   }
   if (!slashEcho && echoMarkRef.current) echoMarkRef.current = null;
   const echoCovered = !!(slashEcho && echoMarkRef.current && (
     (echoMarkRef.current.session && session && echoMarkRef.current.session !== session)
-    || messages.some((m) => m.type === 'slash' && m.name === slashEcho.name && (m.k ?? -1) > echoMarkRef.current.k)
+    || messages.some((m) => m.type === 'slash' && m.name === slashEcho.name
+      && !echoMarkRef.current.ids.has(messageIdentity(m)))
   ));
   useEffect(() => { if (echoCovered) onSlashEchoDone?.(); }, [echoCovered, onSlashEchoDone]);
   // Managed Codex has an authoritative App Server thread status, so never infer work from a trailing user
@@ -576,7 +584,7 @@ export default function ChatView({ pane, agent = 'claude', kind, msg, onAuthFail
   const prevScrollHeightRef = useRef(null); // captured just before a loadOlder() prepend, to preserve scroll position
   const pendingPrependRef = useRef(false); // true only while a loadOlder() round-trip is in flight, so a
   // recent-window poll landing mid-flight doesn't consume the stale prevScrollHeight and jump the view.
-  const lastMaxKRef = useRef(null); // largest message.k seen as of the previous messages-effect run
+  const lastNewestIdRef = useRef(null); // stable identity of the previous trailing message
   const [atBottom, setAtBottom] = useState(true);
 
   // ── Long-press copy. Native selection is disabled on .chat-scroll (CSS) so the browser's ugly system copy
@@ -592,7 +600,7 @@ export default function ChatView({ pane, agent = 'claude', kind, msg, onAuthFail
   // the tool (a running tool gains its result). Resolve the current message each render; if it scrolls out of
   // the loaded window it's gone → the sheet self-closes.
   const [sheetKey, setSheetKey] = useState(null);
-  const sheetMsg = sheetKey != null ? messages.find((m) => m.type === 'tool' && (m.k ?? m.i) === sheetKey) : null;
+  const sheetMsg = sheetKey != null ? messages.find((m) => m.type === 'tool' && messageIdentity(m) === sheetKey) : null;
   useEffect(() => { if (sheetKey != null && !sheetMsg) setSheetKey(null); }, [sheetKey, sheetMsg]);
 
   // Android/browser Back must close the sheet and land back on the chat lens — not navigate the app away
@@ -716,7 +724,7 @@ export default function ChatView({ pane, agent = 'claude', kind, msg, onAuthFail
   // Default view is pinned to the bottom (newest), like a normal chat. Priority on each messages change:
   //   1. a loadOlder() prepend just landed (pendingPrependRef set) → restore the visual position (scroll
   //      delta) so the view doesn't jump — this must win over everything else, it's mid-flight state.
-  //   2. the newest message is a NEWLY-ARRIVED user message (bigger k than last seen, role==='user') — the
+  //   2. the newest message is a NEWLY-ARRIVED user message (new stable id, role==='user') — the
   //      user just sent it via the composer below (ChatView can't see the send itself) → force bottom
   //      regardless of where the view was scrolled.
   //   3. otherwise, if the view was already near the bottom → keep it stuck there.
@@ -724,14 +732,14 @@ export default function ChatView({ pane, agent = 'claude', kind, msg, onAuthFail
   useEffect(() => {
     const el = scrollRef.current;
     const newest = messages.length ? messages[messages.length - 1] : null;
-    const newestK = newest ? (newest.k ?? newest.i) : null;
+    const newestId = newest ? messageIdentity(newest) : null;
     const isNewTrailingUser = newest && newest.role === 'user'
-      && lastMaxKRef.current != null && newestK != null && newestK > lastMaxKRef.current;
+      && lastNewestIdRef.current != null && newestId != null && newestId !== lastNewestIdRef.current;
 
     if (!el) return;
     if (pendingPrependRef.current) {
-      // Do NOT advance lastMaxKRef here: this run is preempted by the in-flight prepend restore, so it
-      // never evaluates isNewTrailingUser for real. Leaving lastMaxKRef stale means the very next
+      // Do NOT advance lastNewestIdRef here: this run is preempted by the in-flight prepend restore, so it
+      // never evaluates isNewTrailingUser for real. Leaving lastNewestIdRef stale means the very next
       // (non-prepend) run still sees a trailing new user message as new and force-scrolls to bottom —
       // otherwise a message sent while scrolled up (mid-prepend) would be silently marked "already seen"
       // and permanently strand the user off-screen after their own send.
@@ -740,7 +748,7 @@ export default function ChatView({ pane, agent = 'claude', kind, msg, onAuthFail
       pendingPrependRef.current = false;
       return;
     }
-    if (newestK != null) lastMaxKRef.current = lastMaxKRef.current == null ? newestK : Math.max(lastMaxKRef.current, newestK);
+    if (newestId != null) lastNewestIdRef.current = newestId;
     if (isNewTrailingUser) {
       el.scrollTop = el.scrollHeight;
       stickBottomRef.current = true;
@@ -779,7 +787,7 @@ export default function ChatView({ pane, agent = 'claude', kind, msg, onAuthFail
     if (el) el.scrollTop = el.scrollHeight;
     stickBottomRef.current = true;
     setAtBottom(true);
-    lastMaxKRef.current = null;
+    lastNewestIdRef.current = null;
   }, [pane]);
 
   return (
@@ -796,9 +804,9 @@ export default function ChatView({ pane, agent = 'claude', kind, msg, onAuthFail
           if (m.type === 'thinking') return null; // dropped (see Bubble) — no bubble, no time
           const label = tsIdx.has(idx) ? fmtTime(m.ts) : null;
           return (
-            <Fragment key={(m.k ?? m.i) + ':' + idx}>
+            <Fragment key={messageIdentity(m)}>
               <Bubble m={m} running={toolRunning && idx === messages.length - 1}
-                onOpenTool={(msg) => setSheetKey(msg.k ?? msg.i)} />
+                onOpenTool={(msg) => setSheetKey(messageIdentity(msg))} />
               {label && <div className={'chat-ts ' + (m.role === 'user' ? 'ts-me' : 'ts-them')}>{label}</div>}
             </Fragment>
           );

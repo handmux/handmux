@@ -333,6 +333,7 @@ export default {
 'chat.approval.request': 'Codex 请求确认',
 'chat.approval.file': '允许修改文件？',
 'chat.approval.command': '允许运行这条命令？',
+'chat.approval.permissions': '允许 Codex 获取额外权限？',
 'chat.approval.accept': '允许一次',
 'chat.approval.acceptSession': '本次会话始终允许',
 'chat.approval.decline': '拒绝',

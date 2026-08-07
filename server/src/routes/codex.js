@@ -40,7 +40,7 @@ function routeError(res, result) {
 
 function codexError(res, error) {
   const message = error?.message || String(error);
-  const conflict = /not managed|no longer pending|decision is unavailable|bad user input response/i.test(message);
+  const conflict = /not managed|session changed|no longer pending|decision is unavailable|bad user input response/i.test(message);
   return res.status(conflict ? 409 : 503).json({ error: message });
 }
 

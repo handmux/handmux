@@ -3,10 +3,10 @@
 //
 // Paginated (Task 10): the client NEVER holds/requests the whole transcript. Two independent cursors:
 //   - RECENT window (polled, 1500ms): `{since: recentHash, limit: 20}` — hash-gated conditional poll, a
-//     204/null keeps the last state. New messages MERGE into `messages` keyed by `k` (the server's stable
-//     global ordinal, also the dedup key), kept sorted ascending.
+//     204/null keeps the last state. Claude's append-only log can use its ordinal identity; Codex snapshots
+//     carry stable message ids because live items may be inserted/reordered while a turn is active.
 //   - HISTORY page (`loadOlder()`, scroll-up only, never polled): `{before: oldestK, limit: 20}` — fetched
-//     on demand, prepended (merged by `k`) ahead of the recent window. Resident messages are capped at
+//     on demand, prepended and deduped by message identity. Resident messages are capped at
 //     MAX_TRANSCRIPT_MESSAGES so leaving the lens open cannot grow phone memory without bound.
 // `oldestK`/`hasMoreOlder` seed from the FIRST successful recent response (its `firstSeq`/`hasMore`) and
 // are only ever pushed further back by `loadOlder()` — a later recent poll must not reset them (that would
@@ -15,15 +15,34 @@ import { useState, useCallback, useEffect, useRef } from 'react';
 import { usePollingLoop } from './usePollingLoop.js';
 import { fetchTranscript } from '../api.js';
 
-// Merge `incoming` into the current k-keyed message map and return a new ascending-by-k array.
 export const MAX_TRANSCRIPT_MESSAGES = 500;
 export const TRANSCRIPT_PAGE_SIZE = 20;
 
-export function mergeByK(existing, incoming) {
-  const byK = new Map(existing.map((m) => [m.k, m]));
-  for (const m of incoming) byK.set(m.k, m);
-  const merged = Array.from(byK.values()).sort((a, b) => a.k - b.k);
+// `k` is a snapshot-local order/cursor. Managed Codex supplies a durable id; append-only Claude messages
+// fall back to their stable ordinal. No render, dedup, or detail-sheet identity should use position directly.
+export function messageIdentity(message) {
+  if (message?.id != null) return String(message.id);
+  if (message?.k != null) return `k:${message.k}`;
+  return `i:${message?.i ?? ''}`;
+}
+
+export function mergeTranscriptMessages(existing, incoming) {
+  const byId = new Map(existing.map((message) => [messageIdentity(message), message]));
+  for (const message of incoming) byId.set(messageIdentity(message), message);
+  const merged = Array.from(byId.values()).sort((a, b) => (a.k ?? a.i ?? 0) - (b.k ?? b.i ?? 0));
   return merged.length > MAX_TRANSCRIPT_MESSAGES ? merged.slice(-MAX_TRANSCRIPT_MESSAGES) : merged;
+}
+
+// The current Codex page is an authoritative snapshot, not an append-only delta. Drop cached rows in the
+// replaced range, and also drop a boundary row when the same stable id moved into the new page after an
+// insertion. Older pages remain resident for scrollback and are reconciled by the same stable id later.
+export function reconcileRecentSnapshot(existing, incoming, firstSeq) {
+  if (firstSeq == null) return incoming.slice(-MAX_TRANSCRIPT_MESSAGES);
+  const incomingIds = new Set(incoming.map(messageIdentity));
+  const retained = existing.filter((message) => (
+    (message.k ?? message.i ?? -1) < firstSeq && !incomingIds.has(messageIdentity(message))
+  ));
+  return mergeTranscriptMessages(retained, incoming);
 }
 
 export function useTranscript(pane, enabled, agent = 'claude', refreshToken = null) {
@@ -40,10 +59,12 @@ export function useTranscript(pane, enabled, agent = 'claude', refreshToken = nu
   const loadingOlderRef = useRef(false);
   const sessionRef = useRef(null); // the session id the current `messages` belong to
   const messagesRef = useRef([]); // synchronous count/bound checks across poll + loadOlder callbacks
+  const epochRef = useRef(0); // invalidates an older-page request across pane/agent/session replacement
 
   // Reset the省流 cursor + view whenever the pane changes, so switching panes doesn't briefly show the
   // previous session's messages nor skip re-fetching because a stale hash looks "unchanged".
   useEffect(() => {
+    epochRef.current += 1;
     hashRef.current = '';
     oldestKRef.current = null;
     seededRef.current = false;
@@ -70,10 +91,13 @@ export function useTranscript(pane, enabled, agent = 'claude', refreshToken = nu
       // Never leave a previously loaded pane/session behind a new refusal response: stale content would
       // look like it belongs to the current pane, defeating the server's safety boundary.
       messagesRef.current = [];
+      epochRef.current += 1;
+      loadingOlderRef.current = false;
       sessionRef.current = null;
       oldestKRef.current = null;
       seededRef.current = false;
       setMessages([]);
+      setLoadingOlder(false);
       setSession(null);
       setHasMoreOlder(false);
       setUnavailable(r.unavailable);
@@ -83,18 +107,21 @@ export function useTranscript(pane, enabled, agent = 'claude', refreshToken = nu
     setUnavailable(null);
     setUnavailableDetail(null);
     const incoming = Array.isArray(r.messages) ? r.messages : [];
-    // SESSION SWITCH (e.g. /clear started a new thread/file): REPLACE, never merge. k is a per-session ordinal that
-    // restarts at 0 in the new session — merging by k would overwrite the head with the new messages but
-    // strand the old session's higher-k tail on screen (the "/clear 没清屏" bug). The server's `session`
+    // SESSION SWITCH (e.g. /clear started a new thread/file): REPLACE, never reconcile. The server's `session`
     // field is the switch signal; only act on a non-null id different from the one we're showing.
     if (r.session && sessionRef.current && r.session !== sessionRef.current) {
+      epochRef.current += 1;
+      loadingOlderRef.current = false;
       messagesRef.current = incoming.slice(-MAX_TRANSCRIPT_MESSAGES);
       setMessages(messagesRef.current);
+      setLoadingOlder(false);
       oldestKRef.current = r.firstSeq ?? null;
       setHasMoreOlder(!!r.hasMore);
       seededRef.current = true; // the older-page cursor restarts from the new session's window
     } else {
-      messagesRef.current = mergeByK(messagesRef.current, incoming);
+      messagesRef.current = agent === 'codex'
+        ? reconcileRecentSnapshot(messagesRef.current, incoming, r.firstSeq)
+        : mergeTranscriptMessages(messagesRef.current, incoming);
       setMessages(messagesRef.current);
       // Seed the older-page cursor from the FIRST successful recent response only — once loadOlder has
       // started walking it back, later recent polls (a new hasMore/firstSeq for the tail window) must not
@@ -107,7 +134,7 @@ export function useTranscript(pane, enabled, agent = 'claude', refreshToken = nu
       if (messagesRef.current.length >= MAX_TRANSCRIPT_MESSAGES) setHasMoreOlder(false);
     }
     if (r.session) { sessionRef.current = r.session; setSession(r.session); }
-  }, []);
+  }, [agent]);
 
   usePollingLoop({
     fetch,
@@ -127,18 +154,24 @@ export function useTranscript(pane, enabled, agent = 'claude', refreshToken = nu
     if (messagesRef.current.length >= MAX_TRANSCRIPT_MESSAGES) { setHasMoreOlder(false); return; }
     loadingOlderRef.current = true;
     setLoadingOlder(true);
+    const epoch = epochRef.current;
+    const requestedSession = sessionRef.current;
     try {
       const limit = Math.min(TRANSCRIPT_PAGE_SIZE, MAX_TRANSCRIPT_MESSAGES - messagesRef.current.length);
       const r = await fetchTranscript(pane, { before: oldestKRef.current, limit, agent });
       if (!r) return;
+      if (epoch !== epochRef.current || requestedSession !== sessionRef.current
+        || (r.session && requestedSession && r.session !== requestedSession)) return;
       const incoming = Array.isArray(r.messages) ? r.messages : [];
-      messagesRef.current = mergeByK(messagesRef.current, incoming);
+      messagesRef.current = mergeTranscriptMessages(messagesRef.current, incoming);
       setMessages(messagesRef.current);
       oldestKRef.current = r.firstSeq ?? oldestKRef.current;
       setHasMoreOlder(!!r.hasMore && messagesRef.current.length < MAX_TRANSCRIPT_MESSAGES);
     } finally {
-      loadingOlderRef.current = false;
-      setLoadingOlder(false);
+      if (epoch === epochRef.current) {
+        loadingOlderRef.current = false;
+        setLoadingOlder(false);
+      }
     }
   }, [pane, agent, hasMoreOlder]);
 
