@@ -5,6 +5,7 @@ import { codexAppSocketPath } from './cli/codexManaged.js';
 
 const RPC_TIMEOUT_MS = 8_000;
 const SOCKET_SCAN_MS = 2_000;
+const MAX_QUEUED_MESSAGES = 20;
 const APPROVAL_METHODS = new Set([
   'item/commandExecution/requestApproval',
   'item/fileChange/requestApproval',
@@ -386,7 +387,11 @@ function connectUnixWebSocket(socketPath) {
 }
 
 class CodexAppConnection {
-  constructor({ pane, socketPath, connect = connectUnixWebSocket, timeoutMs = RPC_TIMEOUT_MS, now = () => Date.now(), baseline = false, onStateChange = () => {}, onClose = () => {} }) {
+  constructor({
+    pane, socketPath, connect = connectUnixWebSocket, timeoutMs = RPC_TIMEOUT_MS,
+    now = () => Date.now(), baseline = false, onStateChange = () => {}, onClose = () => {},
+    queueStore = new Map(), nextQueueId = () => `${Date.now()}`,
+  }) {
     this.pane = pane;
     this.socketPath = socketPath;
     this.connect = connect;
@@ -395,6 +400,8 @@ class CodexAppConnection {
     this.now = now;
     this.baseline = baseline;
     this.onStateChange = onStateChange;
+    this.queueStore = queueStore;
+    this.nextQueueId = nextQueueId;
     this.nextId = 1;
     this.pending = new Map();
     this.approvals = new Map();
@@ -492,6 +499,7 @@ class CodexAppConnection {
     } else if (message.method === 'turn/started') {
       const state = this.state(params.threadId);
       state.activeTurnId = params.turn?.id || params.turnId || null;
+      state.status = { type: 'active', activeFlags: [] };
       this.upsertTurn(params.threadId, params.turn);
       if (this.isCurrentThread(params.threadId)) {
         this.setInbox('working', '', `turn:${params.turn?.id || params.turnId}:started`);
@@ -499,6 +507,7 @@ class CodexAppConnection {
     } else if (message.method === 'turn/completed') {
       const state = this.state(params.threadId);
       state.activeTurnId = null;
+      state.status = { type: 'idle' };
       const turn = this.upsertTurn(params.threadId, params.turn) || params.turn || null;
       state.lastTurn = turn;
       const status = turn?.status;
@@ -510,10 +519,15 @@ class CodexAppConnection {
       } else {
         this.setInbox(null, '', `turn:${params.turn?.id || params.turnId}:${status || 'ended'}`);
       }
+      if (status === 'completed') {
+        void this.drainQueue(params.threadId).catch(() => {});
+      }
     } else if (message.method === 'thread/settings/updated') {
       this.state(params.threadId).settings = params.threadSettings || null;
     } else if (message.method === 'thread/compacted') {
+      this.state(params.threadId).status = { type: 'idle' };
       if (this.isCurrentThread(params.threadId)) this.setInbox(null, '', `thread:${params.threadId}:compacted`);
+      void this.drainQueue(params.threadId).catch(() => {});
     } else if (message.method === 'thread/started') {
       const previous = this.currentThreadId;
       this.lastStartedThreadId = params.thread?.id || params.threadId || null;
@@ -543,6 +557,142 @@ class CodexAppConnection {
       lastTurn: null, loadedOnly: false, liveItemIds: new Map(),
     });
     return this.threadState.get(threadId);
+  }
+
+  queueKey(threadId) { return `${this.pane}\0${threadId}`; }
+
+  queueState(threadId, create = true) {
+    const key = this.queueKey(threadId);
+    let state = this.queueStore.get(key);
+    if (!state && create) {
+      state = { items: [], starting: false, draining: false, steering: new Set() };
+      this.queueStore.set(key, state);
+    }
+    return state || null;
+  }
+
+  queuedFor(threadId) {
+    return (this.queueState(threadId, false)?.items || []).map((item) => ({ ...item }));
+  }
+
+  cleanupQueue(threadId) {
+    const state = this.queueState(threadId, false);
+    if (state && !state.items.length && !state.starting && !state.draining && !state.steering.size) {
+      this.queueStore.delete(this.queueKey(threadId));
+    }
+  }
+
+  discardQueue(threadId) {
+    this.queueStore.delete(this.queueKey(threadId));
+    this.bump(threadId);
+  }
+
+  activeTurn(threadId) {
+    const state = this.state(threadId);
+    return state.activeTurnId
+      || [...(state.thread?.turns || [])].reverse().find((turn) => turn.status === 'inProgress')?.id
+      || null;
+  }
+
+  enqueue(threadId, text) {
+    const queue = this.queueState(threadId);
+    if (queue.items.length >= MAX_QUEUED_MESSAGES) throw new Error('pending message queue is full');
+    const item = { id: this.nextQueueId(), text, createdAt: this.now() };
+    queue.items.push(item);
+    this.bump(threadId);
+    return { ...item };
+  }
+
+  async startTurn(threadId, text) {
+    const queue = this.queueState(threadId);
+    queue.starting = true;
+    try {
+      const state = this.state(threadId);
+      const result = await this.rpc('turn/start', { threadId, input: [{ type: 'text', text }] });
+      state.activeTurnId = result.turn?.id || null;
+      state.status = { type: 'active', activeFlags: [] };
+      this.currentThreadId ||= threadId;
+      this.setInbox('working', '', `turn:${result.turn?.id || 'starting'}:started`);
+      this.bump(threadId);
+      if (state.loadedOnly) {
+        // turn/start normally persists the first rollout synchronously; attach this observer immediately.
+        await this.ensureThread(threadId);
+      }
+      return result;
+    } finally {
+      queue.starting = false;
+      this.cleanupQueue(threadId);
+    }
+  }
+
+  async submit(threadId, text) {
+    const state = await this.ensureThread(threadId);
+    const queue = this.queueState(threadId);
+    if (this.activeTurn(threadId) || state.status?.type === 'active'
+      || queue.items.length || queue.starting || queue.draining) {
+      return { queued: true, item: this.enqueue(threadId, text) };
+    }
+    return this.startTurn(threadId, text);
+  }
+
+  async drainQueue(threadId) {
+    this.assertCurrentThread(threadId);
+    const queue = this.queueState(threadId, false);
+    if (!queue?.items.length || queue.draining || queue.starting || this.activeTurn(threadId)
+      || this.state(threadId).status?.type === 'active') return;
+    queue.draining = true;
+    const item = queue.items[0];
+    try {
+      await this.startTurn(threadId, item.text);
+      if (queue.items[0]?.id === item.id) queue.items.shift();
+      else queue.items = queue.items.filter((candidate) => candidate.id !== item.id);
+      this.bump(threadId);
+    } finally {
+      queue.draining = false;
+      this.cleanupQueue(threadId);
+    }
+  }
+
+  async steerQueued(threadId, itemId) {
+    await this.ensureThread(threadId);
+    const queue = this.queueState(threadId, false);
+    const item = queue?.items.find((candidate) => candidate.id === itemId);
+    if (!item) throw new Error('queued message is no longer pending');
+    if (queue.draining && queue.items[0]?.id === itemId) {
+      throw new Error('queued message is already being sent');
+    }
+    if (queue.steering.has(itemId)) throw new Error('queued message is already being sent');
+    queue.steering.add(itemId);
+    try {
+      const turnId = this.activeTurn(threadId);
+      let result;
+      if (turnId) {
+        result = await this.rpc('turn/steer', {
+          threadId, expectedTurnId: turnId, input: [{ type: 'text', text: item.text }],
+        });
+      } else {
+        if (queue.starting || queue.draining) throw new Error('queued message is already being sent');
+        result = await this.startTurn(threadId, item.text);
+      }
+      queue.items = queue.items.filter((candidate) => candidate.id !== itemId);
+      this.bump(threadId);
+      return { steered: true, item: { ...item }, result };
+    } finally {
+      queue.steering.delete(itemId);
+      this.cleanupQueue(threadId);
+    }
+  }
+
+  removeQueued(threadId, itemId) {
+    const queue = this.queueState(threadId, false);
+    const index = queue?.items.findIndex((candidate) => candidate.id === itemId) ?? -1;
+    if (index < 0) throw new Error('queued message is no longer pending');
+    if (queue.draining && index === 0) throw new Error('queued message is already being sent');
+    if (queue.steering.has(itemId)) throw new Error('queued message is already being sent');
+    queue.items.splice(index, 1);
+    this.bump(threadId);
+    this.cleanupQueue(threadId);
+    return { removed: true };
   }
 
   isCurrentThread(threadId) {
@@ -640,6 +790,8 @@ class CodexAppConnection {
       state.status = result.thread?.status || state.status;
       state.settings = settingsFromResume(result);
       state.loadedOnly = false;
+      state.activeTurnId = [...(result.thread?.turns || [])].reverse()
+        .find((turn) => turn.status === 'inProgress')?.id || null;
       this.currentThreadId ||= threadId;
       if (this.isCurrentThread(threadId)) {
         const kind = activeKind(state.status);
@@ -794,6 +946,8 @@ export function createCodexAppServer({
   clearTimer = clearInterval,
 } = {}) {
   const connections = new Map();
+  const queues = new Map();
+  let queueSequence = 0;
   let scanTimer = null;
   let started = false;
   let priming = false;
@@ -805,6 +959,7 @@ export function createCodexAppServer({
     if (!current || current.closed) {
       current = new CodexAppConnection({
         pane, socketPath, connect, now, baseline: baseline || priming, onStateChange,
+        queueStore: queues, nextQueueId: () => `${now().toString(36)}-${(++queueSequence).toString(36)}`,
         onClose: (closed) => { if (connections.get(pane) === closed) connections.delete(pane); },
       });
       connections.set(pane, current);
@@ -874,6 +1029,7 @@ export function createCodexAppServer({
         lastTurn: state.lastTurn,
         approvals: client.approvalsFor(threadId),
         userInputs: client.userInputsFor(threadId),
+        queue: client.queuedFor(threadId),
         revision: state.revision,
       };
     },
@@ -881,19 +1037,19 @@ export function createCodexAppServer({
       const client = await connection(pane);
       if (!client) throw new Error('Codex session is not managed by Handmux');
       client.assertCurrentThread(threadId);
-      const state = await client.ensureThread(threadId);
-      const result = await client.rpc('turn/start', { threadId, input: [{ type: 'text', text }] });
-      state.activeTurnId = result.turn?.id || null;
-      state.status = { type: 'active', activeFlags: [] };
-      client.currentThreadId ||= threadId;
-      client.setInbox('working', '', `turn:${result.turn?.id || 'starting'}:started`);
-      client.bump(threadId);
-      if (state.loadedOnly) {
-        // turn/start normally writes the first rollout synchronously. Try to attach this observer now;
-        // if persistence is still settling, the 750 ms status poll retries the same verified resume.
-        await client.ensureThread(threadId);
-      }
-      return result;
+      return client.submit(threadId, text);
+    },
+    async steerQueued(pane, threadId, itemId) {
+      const client = await connection(pane);
+      if (!client) throw new Error('Codex session is not managed by Handmux');
+      client.assertCurrentThread(threadId);
+      return client.steerQueued(threadId, itemId);
+    },
+    async removeQueued(pane, threadId, itemId) {
+      const client = await connection(pane);
+      if (!client) throw new Error('Codex session is not managed by Handmux');
+      client.assertCurrentThread(threadId);
+      return client.removeQueued(threadId, itemId);
     },
     async compact(pane, threadId) {
       const client = await connection(pane);
@@ -924,6 +1080,7 @@ export function createCodexAppServer({
       client.subscribed.add(nextThreadId);
       client.lastStartedThreadId = nextThreadId;
       client.currentThreadId = nextThreadId;
+      client.discardQueue(threadId);
       client.setInbox(null, '', `thread:${nextThreadId}:started`);
       return { threadId: nextThreadId };
     },
@@ -993,6 +1150,7 @@ export function createCodexAppServer({
       scanTimer = null;
       for (const client of connections.values()) client.close();
       connections.clear();
+      queues.clear();
     },
   };
 }

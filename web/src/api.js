@@ -86,6 +86,10 @@ export const takeoverCodexSession = (pane) =>
   req('/api/codex/takeover', { method: 'POST', body: JSON.stringify({ pane }), timeoutMs: 15000 });
 export const sendCodexMessage = (pane, text) =>
   req('/api/codex/send', { method: 'POST', body: JSON.stringify({ pane, text }), timeoutMs: 8000 });
+export const steerCodexQueuedMessage = (pane, id) =>
+  req('/api/codex/queue/steer', { method: 'POST', body: JSON.stringify({ pane, id }), timeoutMs: 8000 });
+export const removeCodexQueuedMessage = (pane, id) =>
+  req('/api/codex/queue/remove', { method: 'POST', body: JSON.stringify({ pane, id }), timeoutMs: 8000 });
 export const compactCodexSession = (pane) =>
   req('/api/codex/compact', { method: 'POST', body: JSON.stringify({ pane }), timeoutMs: 8000 });
 export const clearCodexSession = (pane) =>

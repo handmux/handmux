@@ -99,6 +99,19 @@ describe('Codex App Server routes', () => {
     expect(answerInput).toHaveBeenCalledWith('%1', 'thread-1', '92', { color: ['蓝色'] });
   });
 
+  it('steers and removes queued messages through the exact bound thread', async () => {
+    const steerQueued = vi.fn(async () => ({ steered: true }));
+    const removeQueued = vi.fn(async () => ({ removed: true }));
+    const app = appFor({ codexApp: { steerQueued, removeQueued } });
+
+    await request(app).post('/codex/queue/steer').send({ pane: '%1', id: 'queued-1' })
+      .expect(200, { steered: true });
+    await request(app).post('/codex/queue/remove').send({ pane: '%1', id: 'queued-2' })
+      .expect(200, { removed: true });
+    expect(steerQueued).toHaveBeenCalledWith('%1', 'thread-1', 'queued-1');
+    expect(removeQueued).toHaveBeenCalledWith('%1', 'thread-1', 'queued-2');
+  });
+
   it('rejects empty or malformed settings updates', async () => {
     const app = appFor({ codexApp: { updateSettings: vi.fn() } });
     await request(app).post('/codex/settings').send({ pane: '%1' }).expect(400, { error: 'no settings supplied' });

@@ -4,6 +4,8 @@ import { render, screen, fireEvent, cleanup, waitFor } from '@testing-library/re
 vi.mock('../src/api.js', () => ({
   sendText: vi.fn(async () => ({ ok: true })),
   sendCodexMessage: vi.fn(async () => ({ ok: true })),
+  steerCodexQueuedMessage: vi.fn(async () => ({ steered: true })),
+  removeCodexQueuedMessage: vi.fn(async () => ({ removed: true })),
   compactCodexSession: vi.fn(async () => ({ ok: true })),
   clearCodexSession: vi.fn(async () => ({ threadId: 'thread-new' })),
   interruptCodexSession: vi.fn(async () => ({ interrupted: true })),
@@ -21,6 +23,7 @@ vi.mock('../src/voice/usePushToTalk.js', () => ({
 import ChatComposer, { clearCodexModelsCache } from '../src/components/ChatComposer.jsx';
 import {
   sendText, sendCodexMessage, compactCodexSession, clearCodexSession, interruptCodexSession,
+  steerCodexQueuedMessage, removeCodexQueuedMessage,
   getCodexModels, updateCodexSettings, getPaneContext,
 } from '../src/api.js';
 
@@ -305,6 +308,30 @@ describe('ChatComposer', () => {
     expect(interruptCodexSession).toHaveBeenCalledTimes(1);
     expect(stop.disabled).toBe(true);
     request.resolve({ interrupted: true });
+  });
+
+  it('keeps sending available while Codex works and manages its pending queue inside the composer', async () => {
+    const { container } = render(<ChatComposer pane="%1" agent="codex" kind="working" codexSession={{
+      managed: true,
+      queue: [
+        { id: 'queued-1', text: '先检查测试' },
+        { id: 'queued-2', text: '再整理结果' },
+      ],
+    }} />);
+    expect(container.querySelector('.cc-card .cc-queue')).toBeTruthy();
+    expect(screen.getByText('先检查测试')).toBeTruthy();
+    expect(screen.getByText('再整理结果')).toBeTruthy();
+    expect(screen.getByRole('button', { name: '停止' })).toBeTruthy();
+
+    const input = screen.getByPlaceholderText('和 Agent 对话…');
+    typeInto(input, '排到最后');
+    fireEvent.click(screen.getByRole('button', { name: '发送' }));
+    await waitFor(() => expect(sendCodexMessage).toHaveBeenCalledWith('%1', '排到最后'));
+
+    fireEvent.click(screen.getAllByRole('button', { name: '立刻引导' })[0]);
+    await waitFor(() => expect(steerCodexQueuedMessage).toHaveBeenCalledWith('%1', 'queued-1'));
+    fireEvent.click(screen.getAllByRole('button', { name: '删除待发送消息' })[0]);
+    await waitFor(() => expect(removeCodexQueuedMessage).toHaveBeenCalledWith('%1', 'queued-2'));
   });
 
   it('a saved chip that is a bare interactive command also hands off to the terminal lens', async () => {

@@ -1315,7 +1315,10 @@ export default function App() {
   }, [needToken, notifInboxOpen, notifRetrySeq, handledAuth]);
 
   const currentAgent = states[current?.paneId]?.agent;
-  const codexSession = useCodexSession(current?.paneId, chatLensOn && currentAgent === 'codex', codexTakeoverSeq);
+  const codexSessionWake = transcriptWake.paneId === current?.paneId ? transcriptWake.seq : 0;
+  const codexSession = useCodexSession(
+    current?.paneId, chatLensOn && currentAgent === 'codex', codexTakeoverSeq, codexSessionWake,
+  );
   const currentKind = currentAgent === 'codex'
     ? codexKind(codexSession)
     : states[current?.paneId]?.kind;

@@ -28,7 +28,10 @@ function fixtureThread(status = { type: 'idle' }) {
   };
 }
 
-function fakeProxy({ empty = false, loaded = ['thread-1'], updatedAt = {}, status = { type: 'idle' }, readThread = null } = {}) {
+function fakeProxy({
+  empty = false, loaded = ['thread-1'], updatedAt = {}, status = { type: 'idle' }, readThread = null,
+  turnStartWait = null,
+} = {}) {
   const ws = new EventEmitter();
   ws.readyState = 0;
   const sent = [];
@@ -55,7 +58,11 @@ function fakeProxy({ empty = false, loaded = ['thread-1'], updatedAt = {}, statu
       reply({ jsonrpc: '2.0', id: message.id, result: { thread: { ...thread, id: message.params.threadId, updatedAt: updatedAt[message.params.threadId] } } });
     } else if (message.method === 'turn/start') {
       persisted = true;
-      reply({ jsonrpc: '2.0', id: message.id, result: { turn: { id: 'turn-2', status: 'inProgress', items: [] } } });
+      const finish = () => reply({ jsonrpc: '2.0', id: message.id, result: { turn: { id: 'turn-2', status: 'inProgress', items: [] } } });
+      if (turnStartWait) void Promise.resolve(turnStartWait).then(finish);
+      else finish();
+    } else if (message.method === 'turn/steer') {
+      reply({ jsonrpc: '2.0', id: message.id, result: { turnId: message.params.expectedTurnId } });
     } else if (message.method === 'thread/compact/start') {
       reply({ jsonrpc: '2.0', id: message.id, result: {} });
     } else if (message.method === 'thread/start') {
@@ -149,6 +156,124 @@ describe('Codex App Server client', () => {
     await app.decide('%1', 'thread-1', '91', 'accept');
     expect(proxy.sent).toContainEqual({ jsonrpc: '2.0', id: 91, result: { decision: 'accept' } });
     expect((await app.status('%1', 'thread-1')).approvals).toEqual([]);
+    app.close();
+  });
+
+  it('queues messages in order while a turn is active instead of starting overlapping turns', async () => {
+    const proxy = fakeProxy();
+    const app = createCodexAppServer({ home: '/home/test', exists: () => true, connect: () => proxy.ws });
+    await app.status('%1', 'thread-1');
+    proxy.push({
+      jsonrpc: '2.0', method: 'turn/started',
+      params: { threadId: 'thread-1', turn: { id: 'turn-live', status: 'inProgress', items: [] } },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const first = await app.send('%1', 'thread-1', 'first queued');
+    const second = await app.send('%1', 'thread-1', 'second queued');
+
+    expect(first).toMatchObject({ queued: true, item: { text: 'first queued' } });
+    expect(second).toMatchObject({ queued: true, item: { text: 'second queued' } });
+    expect(proxy.sent.filter((message) => message.method === 'turn/start')).toEqual([]);
+    expect((await app.status('%1', 'thread-1')).queue.map((item) => item.text))
+      .toEqual(['first queued', 'second queued']);
+    app.close();
+  });
+
+  it('serializes simultaneous idle submissions so only the first starts immediately', async () => {
+    let releaseStart;
+    const turnStartWait = new Promise((resolve) => { releaseStart = resolve; });
+    const proxy = fakeProxy({ turnStartWait });
+    const app = createCodexAppServer({ home: '/home/test', exists: () => true, connect: () => proxy.ws });
+    await app.status('%1', 'thread-1');
+
+    const first = app.send('%1', 'thread-1', 'start now');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const second = await app.send('%1', 'thread-1', 'wait next');
+
+    expect(second).toMatchObject({ queued: true, item: { text: 'wait next' } });
+    expect(proxy.sent.filter((message) => message.method === 'turn/start')).toHaveLength(1);
+    releaseStart();
+    await first;
+    expect((await app.status('%1', 'thread-1')).queue.map((item) => item.text)).toEqual(['wait next']);
+    app.close();
+  });
+
+  it('steers one queued message into the active turn and can remove another', async () => {
+    const proxy = fakeProxy();
+    const app = createCodexAppServer({ home: '/home/test', exists: () => true, connect: () => proxy.ws });
+    await app.status('%1', 'thread-1');
+    proxy.push({
+      jsonrpc: '2.0', method: 'turn/started',
+      params: { threadId: 'thread-1', turn: { id: 'turn-live', status: 'inProgress', items: [] } },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const first = (await app.send('%1', 'thread-1', 'guide now')).item;
+    const second = (await app.send('%1', 'thread-1', 'discard me')).item;
+
+    await app.steerQueued('%1', 'thread-1', first.id);
+    expect(proxy.sent).toContainEqual(expect.objectContaining({
+      method: 'turn/steer',
+      params: {
+        threadId: 'thread-1', expectedTurnId: 'turn-live',
+        input: [{ type: 'text', text: 'guide now' }],
+      },
+    }));
+    expect((await app.status('%1', 'thread-1')).queue.map((item) => item.id)).toEqual([second.id]);
+
+    expect(await app.removeQueued('%1', 'thread-1', second.id)).toEqual({ removed: true });
+    expect((await app.status('%1', 'thread-1')).queue).toEqual([]);
+    app.close();
+  });
+
+  it('starts the next queued message only after a turn completes successfully', async () => {
+    const proxy = fakeProxy();
+    const app = createCodexAppServer({ home: '/home/test', exists: () => true, connect: () => proxy.ws });
+    await app.status('%1', 'thread-1');
+    proxy.push({
+      jsonrpc: '2.0', method: 'turn/started',
+      params: { threadId: 'thread-1', turn: { id: 'turn-live', status: 'inProgress', items: [] } },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await app.send('%1', 'thread-1', 'next turn');
+
+    proxy.push({
+      jsonrpc: '2.0', method: 'turn/completed',
+      params: { threadId: 'thread-1', turn: { id: 'turn-live', status: 'completed', items: [] } },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(proxy.sent.filter((message) => message.method === 'turn/start')).toContainEqual(expect.objectContaining({
+      params: { threadId: 'thread-1', input: [{ type: 'text', text: 'next turn' }] },
+    }));
+    expect((await app.status('%1', 'thread-1')).queue).toEqual([]);
+    app.close();
+  });
+
+  it.each(['failed', 'interrupted'])('retains the queue when the current turn is %s', async (turnStatus) => {
+    const proxy = fakeProxy();
+    const app = createCodexAppServer({ home: '/home/test', exists: () => true, connect: () => proxy.ws });
+    await app.status('%1', 'thread-1');
+    proxy.push({
+      jsonrpc: '2.0', method: 'turn/started',
+      params: { threadId: 'thread-1', turn: { id: 'turn-live', status: 'inProgress', items: [] } },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await app.send('%1', 'thread-1', 'keep me');
+
+    proxy.push({
+      jsonrpc: '2.0', method: 'turn/completed',
+      params: { threadId: 'thread-1', turn: { id: 'turn-live', status: turnStatus, items: [] } },
+    });
+    proxy.push({
+      jsonrpc: '2.0', method: 'thread/status/changed',
+      params: { threadId: 'thread-1', status: { type: 'idle' } },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(proxy.sent.filter((message) => message.method === 'turn/start')).toEqual([]);
+    expect((await app.status('%1', 'thread-1')).queue.map((item) => item.text)).toEqual(['keep me']);
     app.close();
   });
 

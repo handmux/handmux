@@ -4,10 +4,10 @@ import { usePollingLoop } from './usePollingLoop.js';
 
 const EMPTY = {
   loaded: false, managed: false, threadId: null, status: null, activeTurnId: null, settings: null,
-  approvals: [], userInputs: [], error: null,
+  approvals: [], userInputs: [], queue: [], error: null,
 };
 
-export function useCodexSession(pane, enabled, refreshToken = null) {
+export function useCodexSession(pane, enabled, refreshToken = null, softRefreshToken = null) {
   const [session, setSession] = useState(EMPTY);
   useEffect(() => { setSession(EMPTY); }, [pane, enabled, refreshToken]);
   const fetch = useCallback(() => getCodexSession(pane), [pane]);
@@ -15,7 +15,7 @@ export function useCodexSession(pane, enabled, refreshToken = null) {
     if (!result) return;
     setSession({
       ...EMPTY, ...result, loaded: true, error: null,
-      approvals: result.approvals || [], userInputs: result.userInputs || [],
+      approvals: result.approvals || [], userInputs: result.userInputs || [], queue: result.queue || [],
     });
   }, []);
   const fail = useCallback((error) => {
@@ -31,7 +31,7 @@ export function useCodexSession(pane, enabled, refreshToken = null) {
     onError: fail,
     intervalMs: 750,
     enabled: enabled && !!pane,
-    deps: [pane, refreshToken],
+    deps: [pane, refreshToken, softRefreshToken],
   });
   return session;
 }

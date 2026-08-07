@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import {
   sendText, sendCodexMessage, compactCodexSession, clearCodexSession, interruptCodexSession,
+  steerCodexQueuedMessage, removeCodexQueuedMessage,
   getCodexModels, updateCodexSettings, UnauthorizedError,
 } from '../api.js';
 import { shouldHandOffSlash } from '../slashCommands.js';
@@ -10,7 +11,7 @@ import { loadFavs } from '../favStore.js';
 import { getChatDraft, setChatDraft } from '../storage.js';
 import { usePaneContext } from '../hooks/usePaneContext.js';
 import { UPLOAD_ACCEPT } from '../uploadTypes.js';
-import { ArrowUpIcon, StopIcon, PlusIcon, GearIcon, ChevronDownIcon, RefreshIcon } from './icons.jsx';
+import { ArrowUpIcon, StopIcon, PlusIcon, GearIcon, ChevronDownIcon, RefreshIcon, XIcon } from './icons.jsx';
 import { useUpload } from '../hooks/useUpload.js';
 import { usePushToTalk } from '../voice/usePushToTalk.js';
 import { useScreenWakeLock } from '../hooks/useScreenWakeLock.js';
@@ -186,6 +187,8 @@ export default function ChatComposer({
   const [value, setValue] = useState(() => getChatDraft());
   const [submitting, setSubmitting] = useState(false);
   const [stopping, setStopping] = useState(false);
+  const [queueAction, setQueueAction] = useState('');
+  const [handledQueueIds, setHandledQueueIds] = useState([]);
   const [submitError, setSubmitError] = useState('');
   const submitInFlightRef = useRef(false);
   useEffect(() => { setChatDraft(value); }, [value]);
@@ -214,10 +217,20 @@ export default function ChatComposer({
     mergeShortcuts(serverShortcuts.chat, favs, 'chat'), layout,
   );
 
-  // While the agent is working, the send button becomes a STOP that interrupts it (Escape). Any other
-  // state (idle / needs-you / done) shows the normal send.
+  // Claude replaces send with Stop while working. Managed Codex keeps both: new messages enter the
+  // server-owned pending queue while Stop still interrupts the current turn.
   const busy = kind === 'working';
   const managedCodex = agent === 'codex' && codexSession?.managed;
+  const serverQueue = managedCodex ? (codexSession?.queue || []) : [];
+  const pendingQueue = serverQueue.filter((item) => !handledQueueIds.includes(item.id));
+  const serverQueueKey = serverQueue.map((item) => item.id).join('\0');
+  useEffect(() => { setHandledQueueIds([]); }, [pane]);
+  useEffect(() => {
+    const currentIds = new Set(serverQueue.map((item) => item.id));
+    setHandledQueueIds((ids) => ids.filter((id) => currentIds.has(id)));
+    // Queue ids, rather than the array identity, change only when the authoritative server queue changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [serverQueueKey]);
   const quickFavs = managedCodex ? allQuickFavs.filter((fav) => fav.kind !== 'key') : allQuickFavs;
   useEffect(() => { if (!busy) setStopping(false); }, [busy, pane]);
   useEffect(() => { setLocalSettings(codexSession?.settings || null); }, [pane, codexSession?.settings]);
@@ -342,6 +355,19 @@ export default function ChatComposer({
       else setSubmitError(err?.serverError || err?.message || t('chat.stopFailed'));
     }
   };
+  const actOnQueued = async (action, item) => {
+    if (!item?.id || queueAction) return;
+    setQueueAction(`${action}:${item.id}`);
+    setSubmitError('');
+    try {
+      if (action === 'steer') await steerCodexQueuedMessage(pane, item.id);
+      else await removeCodexQueuedMessage(pane, item.id);
+      setHandledQueueIds((ids) => [...ids, item.id]);
+    } catch (err) {
+      if (err instanceof UnauthorizedError) onAuthFail?.();
+      else setSubmitError(err?.serverError || err?.message || t('chat.queue.actionFailed'));
+    } finally { setQueueAction(''); }
+  };
   const onComposerKeyDown = (event) => {
     if (!desktop || event.nativeEvent?.isComposing) return;
     if (event.key === 'Escape' && busy) {
@@ -351,7 +377,7 @@ export default function ChatComposer({
     }
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault();
-      if (!busy && value.trim()) void send();
+      if ((!busy || managedCodex) && value.trim()) void send();
     }
   };
 
@@ -442,6 +468,24 @@ export default function ChatComposer({
         }} />
       <div className={`cc-card${recording ? ' recording' : ''}`}
         onPointerDown={cardDown} onPointerMove={cardMove} onPointerUp={cardTapFocus}>
+        {pendingQueue.length > 0 && (
+          <div className="cc-queue" aria-label={t('chat.queue.title')}>
+            <div className="cc-queue-head">
+              <span>{t('chat.queue.title')}</span><span>{pendingQueue.length}</span>
+            </div>
+            {pendingQueue.map((item) => (
+              <div className="cc-queue-item" key={item.id}>
+                <span className="cc-queue-text">{item.text}</span>
+                <button type="button" className="cc-queue-steer"
+                  disabled={!!queueAction} onClick={() => void actOnQueued('steer', item)}>
+                  {t('chat.queue.steer')}
+                </button>
+                <button type="button" className="cc-queue-remove" aria-label={t('chat.queue.remove')}
+                  disabled={!!queueAction} onClick={() => void actOnQueued('remove', item)}><XIcon /></button>
+              </div>
+            ))}
+          </div>
+        )}
         <textarea
           ref={ref}
           className="cc-text"
@@ -492,11 +536,12 @@ export default function ChatComposer({
               </div>
             )}
             {micAvailable && <MicButton active={recording} disabled={voice.state === 'requesting'} onToggle={toggleMic} />}
-            {busy ? (
+            {busy && (
               <button type="button" className="cc-send cc-stop" aria-label={t('chat.stop')}
                 disabled={stopping} onClick={() => void stop()}>
                 <StopIcon /></button>
-            ) : (
+            )}
+            {(!busy || managedCodex) && (
               <button type="button" className="cc-send" aria-label={t('dock.send')}
                 disabled={submitting || !value.trim()} onClick={send}>
                 <ArrowUpIcon /></button>

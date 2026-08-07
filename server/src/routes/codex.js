@@ -40,7 +40,7 @@ function routeError(res, result) {
 
 function codexError(res, error) {
   const message = error?.message || String(error);
-  const conflict = /not managed|session changed|no longer pending|decision is unavailable|bad user input response/i.test(message);
+  const conflict = /not managed|session changed|no longer pending|already being sent|queue is full|decision is unavailable|bad user input response/i.test(message);
   return res.status(conflict ? 409 : 503).json({ error: message });
 }
 
@@ -119,6 +119,17 @@ export function codexRoutes({
     try { res.json(await codexApp.send(target.pane, target.threadId, text)); }
     catch (error) { codexError(res, error); }
   });
+
+  for (const [path, method] of [['/codex/queue/steer', 'steerQueued'], ['/codex/queue/remove', 'removeQueued']]) {
+    r.post(path, async (req, res) => {
+      const target = await binding(codexApp, req.body?.pane);
+      if (routeError(res, target)) return;
+      const id = typeof req.body?.id === 'string' ? req.body.id.trim() : '';
+      if (!id || id.length > 128) return res.status(400).json({ error: 'bad queued message id' });
+      try { res.json(await codexApp[method](target.pane, target.threadId, id)); }
+      catch (error) { codexError(res, error); }
+    });
+  }
 
   r.post('/codex/compact', async (req, res) => {
     const target = await binding(codexApp, req.body?.pane);

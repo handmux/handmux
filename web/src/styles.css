@@ -2685,6 +2685,31 @@ button.cmd-text { background: none; border: none; text-align: left; }
 }
 .cc-card:focus-within { border-color: var(--ct-accent); }
 .cc-card.recording { border-color: #34c759; }
+.cc-queue {
+  display: flex; flex-direction: column; gap: 4px; max-height: 118px; overflow-y: auto;
+  margin: -2px 0 7px -6px; padding: 0 0 7px; border-bottom: 1px solid var(--ct-field-line);
+}
+.cc-queue-head {
+  display: flex; align-items: center; gap: 5px; padding: 0 5px;
+  color: var(--ct-muted); font-size: 11px; line-height: 18px;
+}
+.cc-queue-head span:last-child { font-variant-numeric: tabular-nums; }
+.cc-queue-item {
+  display: flex; align-items: center; gap: 5px; min-height: 30px; padding: 2px 3px 2px 8px;
+  border-radius: 10px; background: var(--ct-chip-2);
+}
+.cc-queue-text {
+  flex: 1; min-width: 0; overflow: hidden; color: var(--ct-ink); font-size: 13px;
+  line-height: 18px; white-space: nowrap; text-overflow: ellipsis;
+}
+.cc-queue-steer, .cc-queue-remove {
+  flex: none; min-height: 32px; border: 0; background: transparent; color: var(--ct-accent);
+  touch-action: manipulation;
+}
+.cc-queue-steer { padding: 0 5px; font-size: 12px; font-weight: 600; }
+.cc-queue-remove { display: inline-flex; align-items: center; justify-content: center; width: 32px; padding: 0; color: var(--ct-muted); }
+.cc-queue-remove svg { width: 14px; height: 14px; }
+.cc-queue-steer:disabled, .cc-queue-remove:disabled { opacity: .45; }
 /* 16px font is deliberate — under it iOS zooms the page on focus. max-height caps growth (~6 lines) → scroll.
    No bottom padding: the action row sits right under the text (a big gap here read as unfinished). */
 .cc-text {
