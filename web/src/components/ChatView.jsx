@@ -362,6 +362,12 @@ function Bubble({ m, running, onOpenTool }) {
   return <div className="chat-bubble chat-me">{m.text}</div>;
 }
 
+function optimisticMatches(message, optimistic) {
+  if (message?.type !== 'text' || message.role !== 'user' || message.text !== optimistic.text) return false;
+  if (!optimistic.turnId) return true;
+  return String(message.id || messageIdentity(message)).startsWith(`codex:${optimistic.turnId}:`);
+}
+
 const NEAR_BOTTOM_PX = 40;
 const NEAR_TOP_PX = 80;
 
@@ -525,9 +531,55 @@ function CodexInputGate({ pane, input, onAuthFail }) {
   );
 }
 
-export default function ChatView({ pane, agent = 'claude', kind, msg, onAuthFail, slashEcho, onSlashEchoDone, refreshToken = null, codexSession = null }) {
+export default function ChatView({
+  pane, agent = 'claude', kind, msg, onAuthFail, slashEcho, onSlashEchoDone,
+  refreshToken = null, codexSession = null, optimisticMessages = [], onOptimisticCovered,
+}) {
   const { messages, hasMoreOlder, loadOlder, loadingOlder, session, loaded, unavailable, unavailableDetail } = useTranscript(pane, true, agent, refreshToken);
   const tsIdx = useMemo(() => timeStampedIndices(messages), [messages]);
+  // Temporary outgoing bubbles are render-only. Capture matching canonical ids that already existed when
+  // each bubble first appeared, then let only a NEW App Server item cover it. This prevents an older
+  // identical user message from swallowing a fresh send while keeping the transcript the sole history.
+  const optimisticMarksRef = useRef(new Map());
+  const optimisticPaneRef = useRef(pane);
+  if (optimisticPaneRef.current !== pane) {
+    optimisticPaneRef.current = pane;
+    optimisticMarksRef.current.clear();
+  }
+  const optimisticIds = new Set(optimisticMessages.map((item) => item.id));
+  for (const item of optimisticMessages) {
+    if (!optimisticMarksRef.current.has(item.id)) {
+      optimisticMarksRef.current.set(item.id, new Set(
+        messages.filter((message) => optimisticMatches(message, item)).map(messageIdentity),
+      ));
+    }
+  }
+  for (const id of optimisticMarksRef.current.keys()) {
+    if (!optimisticIds.has(id)) optimisticMarksRef.current.delete(id);
+  }
+  // One canonical item may cover only one temporary bubble. Without this claim set, two identical sends
+  // could both disappear when the first App Server message arrives.
+  const claimedCanonicalIds = new Set();
+  const coveredOptimisticIds = [];
+  for (const item of optimisticMessages) {
+    const baseline = optimisticMarksRef.current.get(item.id);
+    const match = messages.find((message) => {
+      const identity = messageIdentity(message);
+      return optimisticMatches(message, item) && !baseline?.has(identity)
+        && !claimedCanonicalIds.has(identity);
+    });
+    if (!match) continue;
+    claimedCanonicalIds.add(messageIdentity(match));
+    coveredOptimisticIds.push(item.id);
+  }
+  const coveredOptimisticKey = coveredOptimisticIds.join('\0');
+  const coveredOptimisticSet = new Set(coveredOptimisticIds);
+  const visibleOptimistic = optimisticMessages.filter((item) => !coveredOptimisticSet.has(item.id));
+  useEffect(() => {
+    if (coveredOptimisticIds.length) onOptimisticCovered?.(coveredOptimisticIds);
+    // ids are the stable handoff contract; message array identity changes on every poll.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [coveredOptimisticKey, onOptimisticCovered]);
   // The gate's options are scraped from the pane's on-screen menu (they're not in the transcript). Poll only
   // while Claude is blocked (kind==='permission'). If a menu is up → the rich PromptGate; if permission but
   // the menu couldn't be parsed → the generic 允许/拒绝 fallback so there's always a way to act.
@@ -591,6 +643,7 @@ export default function ChatView({ pane, agent = 'claude', kind, msg, onAuthFail
   const pendingPrependRef = useRef(false); // true only while a loadOlder() round-trip is in flight, so a
   // recent-window poll landing mid-flight doesn't consume the stale prevScrollHeight and jump the view.
   const lastNewestIdRef = useRef(null); // stable identity of the previous trailing message
+  const lastOptimisticIdRef = useRef(null);
   const [atBottom, setAtBottom] = useState(true);
 
   // ── Long-press copy. Native selection is disabled on .chat-scroll (CSS) so the browser's ugly system copy
@@ -764,6 +817,17 @@ export default function ChatView({ pane, agent = 'claude', kind, msg, onAuthFail
     if (stickBottomRef.current) el.scrollTop = el.scrollHeight;
   }, [messages, showTyping]);
 
+  const newestOptimisticId = visibleOptimistic.at(-1)?.id || null;
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (el && newestOptimisticId && newestOptimisticId !== lastOptimisticIdRef.current) {
+      el.scrollTop = el.scrollHeight;
+      stickBottomRef.current = true;
+      setAtBottom(true);
+    }
+    lastOptimisticIdRef.current = newestOptimisticId;
+  }, [newestOptimisticId]);
+
   // Auto-fill: when every loaded message is small the whole window is shorter than the viewport, so the
   // user CAN'T scroll up to trigger loadOlder — the page just sits half-empty with older history
   // unreachable. Pull the previous page ourselves until the viewport fills or history runs out. A first
@@ -804,7 +868,7 @@ export default function ChatView({ pane, agent = 'claude', kind, msg, onAuthFail
         onClickCapture={onCopyClickCapture}>
         {/* Keep the first poll visually quiet. Only show a nudge after the response confirms the session
             is genuinely empty; opening the chat lens should never flash a fake waiting message. */}
-        {messages.length === 0 && !sessionGate && loaded
+        {messages.length === 0 && visibleOptimistic.length === 0 && !sessionGate && loaded
           && <div className="chat-new">{t('boot.chat_empty')}</div>}
         {messages.map((m, idx) => {
           if (m.type === 'thinking') return null; // dropped (see Bubble) — no bubble, no time
@@ -814,6 +878,18 @@ export default function ChatView({ pane, agent = 'claude', kind, msg, onAuthFail
               <Bubble m={m} running={toolRunning && idx === messages.length - 1}
                 onOpenTool={(msg) => setSheetKey(messageIdentity(msg))} />
               {label && <div className={'chat-ts ' + (m.role === 'user' ? 'ts-me' : 'ts-them')}>{label}</div>}
+            </Fragment>
+          );
+        })}
+        {visibleOptimistic.map((item) => {
+          const label = item.status === 'sending' ? t('chat.outgoing.sending')
+            : item.status === 'accepted' ? t('chat.outgoing.sent')
+              : item.status === 'steered' ? t('chat.outgoing.steered')
+                : item.status === 'failed' ? t('chat.outgoing.failed') : '';
+          return (
+            <Fragment key={item.id}>
+              <div className={`chat-bubble chat-me chat-optimistic is-${item.status}`}>{item.text}</div>
+              {label && <div className={`chat-optimistic-state is-${item.status}`} role="status">{label}</div>}
             </Fragment>
           );
         })}

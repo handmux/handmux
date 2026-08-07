@@ -75,6 +75,63 @@ describe('ChatView', () => {
     expect(them.textContent).toContain('好的');
   });
 
+  it('renders a page-local Codex message immediately with its sending state', async () => {
+    mockTranscript([]);
+    const { container } = render(<ChatView pane="%0" agent="codex" kind="working"
+      optimisticMessages={[{ id: 'optimistic-1', text: '马上显示', status: 'sending' }]} />);
+    await screen.findByText('马上显示');
+    expect(screen.getByText('正在发送')).toBeTruthy();
+    expect(container.querySelector('.chat-optimistic')).toBeTruthy();
+    expect(container.textContent).not.toContain('发送你的第一条消息');
+  });
+
+  it('lets a new authoritative App Server message replace its temporary bubble without duplication', async () => {
+    mockTranscript([]);
+    const optimistic = [{
+      id: 'optimistic-1', text: '不要显示两次', status: 'accepted', turnId: 'turn-2',
+    }];
+    const onOptimisticCovered = vi.fn();
+    const { rerender } = render(<ChatView pane="%0" agent="codex" kind="working"
+      optimisticMessages={optimistic} onOptimisticCovered={onOptimisticCovered} refreshToken={0} />);
+    await screen.findByText('不要显示两次');
+
+    api.fetchTranscript.mockResolvedValue({
+      messages: [{
+        id: 'codex:turn-2:user-2', k: 0, role: 'user', type: 'text', text: '不要显示两次',
+      }],
+      hash: 'h2', session: 's', hasMore: false, firstSeq: 0,
+    });
+    rerender(<ChatView pane="%0" agent="codex" kind="working"
+      optimisticMessages={optimistic} onOptimisticCovered={onOptimisticCovered} refreshToken={1} />);
+
+    await waitFor(() => expect(onOptimisticCovered).toHaveBeenCalledWith(['optimistic-1']));
+    expect(screen.getAllByText('不要显示两次')).toHaveLength(1);
+  });
+
+  it('uses one authoritative message to cover only one identical temporary bubble', async () => {
+    mockTranscript([]);
+    const optimistic = [
+      { id: 'optimistic-1', text: '相同内容', status: 'steered', turnId: 'turn-2' },
+      { id: 'optimistic-2', text: '相同内容', status: 'steered', turnId: 'turn-2' },
+    ];
+    const onOptimisticCovered = vi.fn();
+    const { rerender } = render(<ChatView pane="%0" agent="codex" kind="working"
+      optimisticMessages={optimistic} onOptimisticCovered={onOptimisticCovered} refreshToken={0} />);
+    await waitFor(() => expect(screen.getAllByText('相同内容')).toHaveLength(2));
+
+    api.fetchTranscript.mockResolvedValue({
+      messages: [{
+        id: 'codex:turn-2:user-2', k: 0, role: 'user', type: 'text', text: '相同内容',
+      }],
+      hash: 'h2', session: 's', hasMore: false, firstSeq: 0,
+    });
+    rerender(<ChatView pane="%0" agent="codex" kind="working"
+      optimisticMessages={optimistic} onOptimisticCovered={onOptimisticCovered} refreshToken={1} />);
+
+    await waitFor(() => expect(onOptimisticCovered).toHaveBeenCalledWith(['optimistic-1']));
+    expect(screen.getAllByText('相同内容')).toHaveLength(2);
+  });
+
   it('does not surface thinking (reasoning) text — the live animation stands in for it', async () => {
     mockTranscript([
       { k: 0, i: 0, role: 'assistant', type: 'thinking', text: '让我想想这个边界情况' },

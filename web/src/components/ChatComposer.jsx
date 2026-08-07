@@ -181,6 +181,7 @@ function CodexConfigMenu({ open, pane, settings, busy, onChange, onClose, onAuth
 export default function ChatComposer({
   pane, agent = 'claude', kind, cwd = null, onKey = () => {}, onAuthFail, onSent, onInteractiveSlash,
   shortcuts = null, micAvailable = false, desktop = false, codexSession = null,
+  onCodexSendStart, onCodexSendResult,
 }) {
   // Draft persists across an app exit / lens switch (shared store with the dock's chat page — switching
   // lenses carries your half-typed message either way). send/clear set '' → the stored draft clears too.
@@ -279,11 +280,11 @@ export default function ChatComposer({
 
   const dispatchManagedCodex = async (text) => {
     const trimmed = text.trim();
-    if (await applyConfigSlash(trimmed)) return;
-    if (/^\/compact$/i.test(trimmed)) { await compactCodexSession(pane); return; }
-    if (/^\/clear$/i.test(trimmed)) { await clearCodexSession(pane); return; }
+    if (await applyConfigSlash(trimmed)) return null;
+    if (/^\/compact$/i.test(trimmed)) return compactCodexSession(pane);
+    if (/^\/clear$/i.test(trimmed)) return clearCodexSession(pane);
     if (trimmed.startsWith('/')) throw new Error(t('chat.slash.unsupported'));
-    await sendCodexMessage(pane, text);
+    return sendCodexMessage(pane, text);
   };
 
   // ── Voice dictation (single-column, simpler than the dock: no caret-restore, so it dodges the iOS
@@ -318,21 +319,34 @@ export default function ChatComposer({
   const send = async () => {
     if (!pane || !value.trim() || submitInFlightRef.current) return;
     const text = value;
+    const optimistic = managedCodex && !text.trim().startsWith('/');
+    const optimisticId = optimistic ? onCodexSendStart?.(pane, text, 'send') : null;
     submitInFlightRef.current = true;
     setSubmitting(true);
     setSubmitError('');
     stopVoiceIfRecording();
+    if (optimistic) {
+      // The App Server transcript remains authoritative. This only clears the page-local draft and lets
+      // ChatView render a temporary sending bubble during the request round-trip.
+      setValue('');
+      requestAnimationFrame(() => autoGrow(ref.current));
+    }
     try {
-      if (managedCodex) await dispatchManagedCodex(text);
+      let result;
+      if (managedCodex) result = await dispatchManagedCodex(text);
       else if (agent === 'codex') throw new Error(t('chat.session.notManaged'));
       else await sendText(pane, text, true);
+      if (optimisticId) onCodexSendResult?.(optimisticId, { result });
       onSent?.(text);
       if (!managedCodex && agent !== 'codex' && shouldHandOffSlash(text)) {
         onInteractiveSlash?.(text.trim());
       }
-      setValue('');
-      requestAnimationFrame(() => autoGrow(ref.current));
+      if (!optimistic) {
+        setValue('');
+        requestAnimationFrame(() => autoGrow(ref.current));
+      }
     } catch (err) {
+      if (optimisticId) onCodexSendResult?.(optimisticId, { error: err });
       if (err instanceof UnauthorizedError) onAuthFail?.();
       else setSubmitError(err?.serverError || err?.message || t('chat.sendFailed'));
     } finally {
@@ -357,13 +371,19 @@ export default function ChatComposer({
   };
   const actOnQueued = async (action, item) => {
     if (!item?.id || queueAction) return;
+    const optimisticId = action === 'steer' ? onCodexSendStart?.(pane, item.text, 'steer') : null;
+    if (action === 'steer') setHandledQueueIds((ids) => [...ids, item.id]);
     setQueueAction(`${action}:${item.id}`);
     setSubmitError('');
     try {
-      if (action === 'steer') await steerCodexQueuedMessage(pane, item.id);
-      else await removeCodexQueuedMessage(pane, item.id);
-      setHandledQueueIds((ids) => [...ids, item.id]);
+      const result = action === 'steer'
+        ? await steerCodexQueuedMessage(pane, item.id)
+        : await removeCodexQueuedMessage(pane, item.id);
+      if (optimisticId) onCodexSendResult?.(optimisticId, { result });
+      if (action !== 'steer') setHandledQueueIds((ids) => [...ids, item.id]);
     } catch (err) {
+      if (action === 'steer') setHandledQueueIds((ids) => ids.filter((id) => id !== item.id));
+      if (optimisticId) onCodexSendResult?.(optimisticId, { error: err });
       if (err instanceof UnauthorizedError) onAuthFail?.();
       else setSubmitError(err?.serverError || err?.message || t('chat.queue.actionFailed'));
     } finally { setQueueAction(''); }
@@ -408,21 +428,26 @@ export default function ChatComposer({
   const runFav = async (fav) => {
     if (fav.kind === 'key') { onKey(fav.text); return; }
     if (!pane) return;
+    const optimistic = managedCodex && !!fav.enter && !fav.text.trim().startsWith('/');
+    const optimisticId = optimistic ? onCodexSendStart?.(pane, fav.text, 'send') : null;
     try {
       if (managedCodex && !fav.enter) {
         setValue(fav.text);
         requestAnimationFrame(() => ref.current?.focus());
         return;
       }
-      if (managedCodex) await dispatchManagedCodex(fav.text);
+      let result;
+      if (managedCodex) result = await dispatchManagedCodex(fav.text);
       else if (agent === 'codex') throw new Error(t('chat.session.notManaged'));
       else await sendText(pane, fav.text, !!fav.enter);
+      if (optimisticId) onCodexSendResult?.(optimisticId, { result });
       if (!fav.enter && !managedCodex) return;
       onSent?.(fav.text);
       if (!managedCodex && agent !== 'codex' && shouldHandOffSlash(fav.text)) {
         onInteractiveSlash?.(fav.text.trim());
       }
     } catch (err) {
+      if (optimisticId) onCodexSendResult?.(optimisticId, { error: err });
       if (err instanceof UnauthorizedError) onAuthFail?.();
       else setSubmitError(err?.serverError || err?.message || t('chat.sendFailed'));
     }

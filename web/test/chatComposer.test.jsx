@@ -162,6 +162,26 @@ describe('ChatComposer', () => {
     expect(onInteractiveSlash).not.toHaveBeenCalled();
   });
 
+  it('clears a managed Codex draft and exposes a sending bubble before App Server replies', async () => {
+    const request = deferred();
+    sendCodexMessage.mockReturnValueOnce(request.promise);
+    const onCodexSendStart = vi.fn(() => 'optimistic-1');
+    const onCodexSendResult = vi.fn();
+    render(<ChatComposer pane="%1" agent="codex" kind="working" codexSession={{ managed: true }}
+      onCodexSendStart={onCodexSendStart} onCodexSendResult={onCodexSendResult} />);
+    const input = screen.getByPlaceholderText('和 Agent 对话…');
+    typeInto(input, '马上显示这条消息');
+    fireEvent.click(screen.getByRole('button', { name: '发送' }));
+
+    expect(input.value).toBe('');
+    expect(onCodexSendStart).toHaveBeenCalledWith('%1', '马上显示这条消息', 'send');
+    expect(onCodexSendResult).not.toHaveBeenCalled();
+
+    const result = { queued: true, item: { id: 'queued-1', text: '马上显示这条消息' } };
+    request.resolve(result);
+    await waitFor(() => expect(onCodexSendResult).toHaveBeenCalledWith('optimistic-1', { result }));
+  });
+
   it('rejects unsupported managed Codex slash commands without writing to the terminal', async () => {
     const onInteractiveSlash = vi.fn();
     render(<ChatComposer pane="%1" agent="codex" kind="idle"
@@ -311,13 +331,15 @@ describe('ChatComposer', () => {
   });
 
   it('keeps sending available while Codex works and manages its pending queue inside the composer', async () => {
+    const onCodexSendStart = vi.fn(() => 'optimistic-steer');
+    const onCodexSendResult = vi.fn();
     const { container } = render(<ChatComposer pane="%1" agent="codex" kind="working" codexSession={{
       managed: true,
       queue: [
         { id: 'queued-1', text: '先检查测试' },
         { id: 'queued-2', text: '再整理结果' },
       ],
-    }} />);
+    }} onCodexSendStart={onCodexSendStart} onCodexSendResult={onCodexSendResult} />);
     expect(container.querySelector('.cc-card .cc-queue')).toBeTruthy();
     expect(screen.getByText('先检查测试')).toBeTruthy();
     expect(screen.getByText('再整理结果')).toBeTruthy();
@@ -329,7 +351,11 @@ describe('ChatComposer', () => {
     await waitFor(() => expect(sendCodexMessage).toHaveBeenCalledWith('%1', '排到最后'));
 
     fireEvent.click(screen.getAllByRole('button', { name: '立刻引导' })[0]);
+    expect(onCodexSendStart).toHaveBeenCalledWith('%1', '先检查测试', 'steer');
     await waitFor(() => expect(steerCodexQueuedMessage).toHaveBeenCalledWith('%1', 'queued-1'));
+    await waitFor(() => expect(onCodexSendResult).toHaveBeenCalledWith('optimistic-steer', {
+      result: { steered: true },
+    }));
     fireEvent.click(screen.getAllByRole('button', { name: '删除待发送消息' })[0]);
     await waitFor(() => expect(removeCodexQueuedMessage).toHaveBeenCalledWith('%1', 'queued-2'));
   });
@@ -434,6 +460,25 @@ describe('ChatComposer', () => {
     fireEvent.click(screen.getByRole('button', { name: '继续' }));
     await Promise.resolve();
     expect(sendText).toHaveBeenCalledWith('%1', '继续', true);
+  });
+
+  it('shows an optimistic message for a managed Codex quick reply', async () => {
+    const request = deferred();
+    sendCodexMessage.mockReturnValueOnce(request.promise);
+    const onCodexSendStart = vi.fn(() => 'optimistic-quick-reply');
+    const onCodexSendResult = vi.fn();
+    localStorage.setItem('hm_favs6_agent', JSON.stringify([{ text: '继续' }]));
+    render(<ChatComposer pane="%1" agent="codex" kind="working" codexSession={{ managed: true }}
+      onCodexSendStart={onCodexSendStart} onCodexSendResult={onCodexSendResult} />);
+
+    fireEvent.click(screen.getByRole('button', { name: '继续' }));
+    expect(onCodexSendStart).toHaveBeenCalledWith('%1', '继续', 'send');
+    expect(onCodexSendResult).not.toHaveBeenCalled();
+
+    const result = { turn: { id: 'turn-quick-reply' } };
+    request.resolve(result);
+    await waitFor(() => expect(onCodexSendResult)
+      .toHaveBeenCalledWith('optimistic-quick-reply', { result }));
   });
 
   it('renders required chat presets and honors key / text Enter behavior', async () => {

@@ -145,6 +145,9 @@ export default function App() {
   const [basePrompt, setBasePrompt] = useState(null); // { rawPath } while asking for a relative path's base dir
   const [handoffToast, setHandoffToast] = useState(null); // "switched to terminal to run /x" hint after a slash hand-off
   const [slashEcho, setSlashEcho] = useState(null); // optimistic command pill for a chat-staying slash command {name,args,paneId}
+  const [codexOptimisticMessages, setCodexOptimisticMessages] = useState([]);
+  const codexOptimisticSeqRef = useRef(0);
+  const codexThreadByPaneRef = useRef(new Map());
   const [transcriptWake, setTranscriptWake] = useState({ paneId: null, seq: 0 }); // successful send -> immediate transcript refresh
   const [codexTakeoverSeq, setCodexTakeoverSeq] = useState(0);
   const [docToast, setDocToast] = useState(null); // transient error toast for absolute-path doc failures
@@ -1323,6 +1326,50 @@ export default function App() {
     ? codexKind(codexSession)
     : states[current?.paneId]?.kind;
 
+  const beginCodexSend = useCallback((paneId, text, source) => {
+    const id = `codex-outgoing-${Date.now().toString(36)}-${(++codexOptimisticSeqRef.current).toString(36)}`;
+    setCodexOptimisticMessages((items) => [
+      ...items.slice(-49), { id, paneId, text, source, status: 'sending' },
+    ]);
+    return id;
+  }, []);
+  const finishCodexSend = useCallback((id, { result, error } = {}) => {
+    setCodexOptimisticMessages((items) => {
+      const item = items.find((candidate) => candidate.id === id);
+      if (!item) return items;
+      if (error) {
+        // A failed steer remains authoritative in the server queue, so reveal that queue item again and
+        // drop only its temporary moving bubble. A failed fresh send stays visible as page-local feedback.
+        return item.source === 'steer'
+          ? items.filter((candidate) => candidate.id !== id)
+          : items.map((candidate) => candidate.id === id ? { ...candidate, status: 'failed' } : candidate);
+      }
+      if (result?.queued) {
+        // The server-owned queue is now the authoritative visible state; the immediate poll triggered by
+        // onCommandSent will render its normal queue row.
+        return items.filter((candidate) => candidate.id !== id);
+      }
+      const turnId = result?.turn?.id || result?.turnId || result?.result?.turnId || null;
+      const status = item.source === 'steer' ? 'steered' : 'accepted';
+      return items.map((candidate) => candidate.id === id
+        ? { ...candidate, status, turnId } : candidate);
+    });
+  }, []);
+  const coverCodexOptimistic = useCallback((ids) => {
+    const covered = new Set(ids);
+    setCodexOptimisticMessages((items) => items.filter((item) => !covered.has(item.id)));
+  }, []);
+  useEffect(() => {
+    const paneId = current?.paneId;
+    const threadId = codexSession?.threadId;
+    if (!paneId || !threadId) return;
+    const previous = codexThreadByPaneRef.current.get(paneId);
+    codexThreadByPaneRef.current.set(paneId, threadId);
+    if (previous && previous !== threadId) {
+      setCodexOptimisticMessages((items) => items.filter((item) => item.paneId !== paneId));
+    }
+  }, [current?.paneId, codexSession?.threadId]);
+
   // Record a just-sent command into this WINDOW's recent history (deduped + capped in storage).
   const onCommandSent = useCallback((cmd) => {
     termRef.current?.wake?.(); // a dock send/fill landed → wake the poll loop (covers BottomDock too)
@@ -2022,6 +2069,8 @@ export default function App() {
               ) : (
                 <ChatView pane={current.paneId} agent={currentAgent} kind={currentKind} msg={states[current.paneId]?.msg} onAuthFail={onAuthFail}
                   codexSession={codexSession}
+                  optimisticMessages={codexOptimisticMessages.filter((item) => item.paneId === current.paneId)}
+                  onOptimisticCovered={coverCodexOptimistic}
                   slashEcho={slashEcho && slashEcho.paneId === current.paneId ? slashEcho : null}
                   refreshToken={transcriptWake.paneId === current.paneId ? transcriptWake.seq : null}
                   onSlashEchoDone={() => setSlashEcho(null)} />
@@ -2062,6 +2111,8 @@ export default function App() {
                 onKey={sendKey}
                 onAuthFail={onAuthFail}
                 onSent={onCommandSent}
+                onCodexSendStart={beginCodexSend}
+                onCodexSendResult={finishCodexSend}
                 shortcuts={serverShortcuts}
                 micAvailable={micAvailable}
                 onInteractiveSlash={currentAgent === 'claude'

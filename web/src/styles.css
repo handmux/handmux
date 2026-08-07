@@ -2346,6 +2346,12 @@ button.cmd-text { background: none; border: none; text-align: left; }
   padding: 9px 13px; border-radius: 18px; font-size: 15px; line-height: 1.4;
   white-space: pre-wrap; word-break: break-word;
 }
+.chat-optimistic.is-sending { opacity: .82; }
+.chat-optimistic-state {
+  align-self: flex-end; margin: -5px 3px 1px 0; color: var(--ct-muted);
+  font-size: 10px; line-height: 14px;
+}
+.chat-optimistic-state.is-failed { color: var(--danger, #d34b45); }
 /* Your messages: a right-aligned pill in the tone's send colour (a gradient per tone). */
 .chat-me { align-self: flex-end; max-width: 82%; background: var(--ct-me-bg); color: var(--ct-me-ink); border-bottom-right-radius: 5px; box-shadow: 0 1px 2px rgba(0,0,0,.12); }
 /* Assistant replies: NO bubble at all — Claude's prose renders as a clean, high-contrast full-width block
