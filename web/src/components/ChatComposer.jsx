@@ -41,6 +41,9 @@ const keepFocus = (e) => {
 // green. Explicit terminal-key shortcuts use the grey key tint.
 const chipTint = (text) => (text.startsWith('/') ? 'cmd' : 'reply');
 
+const tokenFormatter = new Intl.NumberFormat('en-US');
+const contextRingLevel = (percent) => (percent >= 80 ? 'high' : percent >= 60 ? 'medium' : 'low');
+
 // model/list is account-wide and effectively static for one app run. Share one successful request across
 // composer remounts and pane switches; the dropdown's refresh action is the only automatic cache bypass.
 let codexModelsCache = null;
@@ -207,6 +210,7 @@ export default function ChatComposer({
   const [layout, setLayout] = useState(() => loadShortcutLayout('chat'));
   const [editOpen, setEditOpen] = useState(false);
   const [configOpen, setConfigOpen] = useState(false);
+  const [contextOpen, setContextOpen] = useState(false);
   const [localSettings, setLocalSettings] = useState(null);
   const refreshShortcuts = () => {
     setFavs(loadFavs('agent'));
@@ -214,6 +218,7 @@ export default function ChatComposer({
   };
   useEffect(() => { if (!editOpen) refreshShortcuts(); }, [editOpen]);
   useBackButton(editOpen, () => setEditOpen(false));
+  useBackButton(contextOpen, () => setContextOpen(false));
   const allQuickFavs = applyShortcutLayout(
     mergeShortcuts(serverShortcuts.chat, favs, 'chat'), layout,
   );
@@ -250,6 +255,14 @@ export default function ChatComposer({
   const ctxEffort = managedSettings?.effort || null;
   const showCtx = !managedCodex && (!!ctxModel || typeof ctxPct === 'number');
   const ctxWarn = showCtx && ctxPct >= 80; // near auto-compact → amber
+  const contextUsedTokens = codexSession?.contextUsage?.usedTokens;
+  const contextTotalTokens = codexSession?.contextUsage?.totalTokens;
+  const showContextRing = managedCodex && Number.isFinite(contextUsedTokens) && contextUsedTokens >= 0
+    && Number.isFinite(contextTotalTokens) && contextTotalTokens > 0;
+  const contextPercent = showContextRing ? (contextUsedTokens / contextTotalTokens) * 100 : null;
+  const boundedContextPercent = Math.min(100, Math.max(0, contextPercent || 0));
+  const contextLevel = showContextRing ? contextRingLevel(contextPercent) : null;
+  useEffect(() => { if (!showContextRing) setContextOpen(false); }, [showContextRing]);
 
   // Grow to fit content; CSS max-height caps it (~6 lines) then it scrolls. +2 for the border under
   // box-sizing: border-box. No multi/crowd measuring — the buttons are in a row below, never inline.
@@ -415,7 +428,7 @@ export default function ChatComposer({
     // The model picker is rendered inside the card. Its backdrop therefore bubbles pointer events through
     // this handler; while the picker is open, those taps belong to the picker and must preserve the
     // keyboard state that existed before it opened.
-    if (configOpen) return;
+    if (configOpen || contextOpen) return;
     // Reject if it moved during the press (a scroll/lens-swipe), OR if the up landed far from the down —
     // a second signal in case fast-swipe move events were throttled/missed. Only a stationary tap focuses.
     if (p.moved || Math.hypot(e.clientX - p.x, e.clientY - p.y) > 10) return;
@@ -560,6 +573,17 @@ export default function ChatComposer({
                 {!ctxEffort && typeof ctxPct === 'number' && <span className="cc-ctx-pct">{Math.round(ctxPct)}%</span>}
               </div>
             )}
+            {showContextRing && (
+              <button type="button" className={`cc-context-trigger ${contextLevel}`}
+                aria-label={t('chat.context.aria', { percent: Math.round(contextPercent) })}
+                aria-expanded={contextOpen} onClick={() => setContextOpen((open) => !open)}>
+                <svg className="cc-context-ring" viewBox="0 0 24 24" aria-hidden="true">
+                  <circle className="cc-context-track" cx="12" cy="12" r="9" pathLength="100" />
+                  <circle className="cc-context-value" cx="12" cy="12" r="9" pathLength="100"
+                    strokeDasharray={`${boundedContextPercent} 100`} />
+                </svg>
+              </button>
+            )}
             {micAvailable && <MicButton active={recording} disabled={voice.state === 'requesting'} onToggle={toggleMic} />}
             {busy && (
               <button type="button" className="cc-send cc-stop" aria-label={t('chat.stop')}
@@ -570,6 +594,24 @@ export default function ChatComposer({
               <button type="button" className="cc-send" aria-label={t('dock.send')}
                 disabled={submitting || !value.trim()} onClick={send}>
                 <ArrowUpIcon /></button>
+            )}
+            {contextOpen && showContextRing && (
+              <>
+                <div className="cc-context-backdrop" onClick={() => setContextOpen(false)} />
+                <section className="cc-context-popover" role="dialog" aria-modal="true"
+                  aria-label={t('chat.context.title')}>
+                  <div className="cc-context-popover-title">{t('chat.context.title')}</div>
+                  <div className="cc-context-row">
+                    <span>{t('chat.context.percent')}</span><strong>{contextPercent.toFixed(1)}%</strong>
+                  </div>
+                  <div className="cc-context-row">
+                    <span>{t('chat.context.used')}</span><strong>{tokenFormatter.format(contextUsedTokens)}</strong>
+                  </div>
+                  <div className="cc-context-row">
+                    <span>{t('chat.context.total')}</span><strong>{tokenFormatter.format(contextTotalTokens)}</strong>
+                  </div>
+                </section>
+              </>
             )}
           </div>
         </div>

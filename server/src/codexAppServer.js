@@ -357,6 +357,14 @@ function settingsFromResume(result) {
   };
 }
 
+function contextUsageFromNotification(tokenUsage) {
+  const usedTokens = tokenUsage?.last?.totalTokens;
+  const totalTokens = tokenUsage?.modelContextWindow;
+  if (!Number.isFinite(usedTokens) || usedTokens < 0
+    || !Number.isFinite(totalTokens) || totalTokens <= 0) return null;
+  return { usedTokens, totalTokens };
+}
+
 function sandboxMode(policy) {
   if (policy?.type === 'readOnly') return 'read-only';
   if (policy?.type === 'workspaceWrite') return 'workspace-write';
@@ -524,6 +532,8 @@ class CodexAppConnection {
       }
     } else if (message.method === 'thread/settings/updated') {
       this.state(params.threadId).settings = params.threadSettings || null;
+    } else if (message.method === 'thread/tokenUsage/updated') {
+      this.state(params.threadId).contextUsage = contextUsageFromNotification(params.tokenUsage);
     } else if (message.method === 'thread/compacted') {
       this.state(params.threadId).status = { type: 'idle' };
       if (this.isCurrentThread(params.threadId)) this.setInbox(null, '', `thread:${params.threadId}:compacted`);
@@ -554,7 +564,7 @@ class CodexAppConnection {
   state(threadId) {
     if (!this.threadState.has(threadId)) this.threadState.set(threadId, {
       revision: 0, readRevision: -1, thread: null, status: null, activeTurnId: null, settings: null,
-      lastTurn: null, loadedOnly: false, liveItemIds: new Map(),
+      contextUsage: null, lastTurn: null, loadedOnly: false, liveItemIds: new Map(),
     });
     return this.threadState.get(threadId);
   }
@@ -1025,6 +1035,7 @@ export function createCodexAppServer({
         status: state.status || state.thread?.status,
         activeTurnId: state.activeTurnId,
         settings: state.settings,
+        contextUsage: state.contextUsage,
         activityKind: client.inbox.kind,
         lastTurn: state.lastTurn,
         approvals: client.approvalsFor(threadId),

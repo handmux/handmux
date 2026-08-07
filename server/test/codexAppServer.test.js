@@ -612,4 +612,25 @@ describe('Codex App Server client', () => {
     expect(await app.status('%1', 'thread-1')).toMatchObject({ activityKind: null });
     app.close();
   });
+
+  it('exposes the current context token counts from App Server usage updates', async () => {
+    const proxy = fakeProxy();
+    const app = createCodexAppServer({ home: '/home/test', exists: () => true, connect: () => proxy.ws });
+    await app.status('%1', 'thread-1');
+    proxy.push({
+      jsonrpc: '2.0', method: 'thread/tokenUsage/updated', params: {
+        threadId: 'thread-1', turnId: 'turn-1',
+        tokenUsage: {
+          total: { totalTokens: 999999 },
+          last: { totalTokens: 159719 },
+          modelContextWindow: 258400,
+        },
+      },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(await app.status('%1', 'thread-1')).toMatchObject({
+      contextUsage: { usedTokens: 159719, totalTokens: 258400 },
+    });
+    app.close();
+  });
 });

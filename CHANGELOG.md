@@ -5,6 +5,7 @@ All notable changes to handmux. Format follows [Keep a Changelog](https://keepac
 ## [Unreleased]
 
 ### Added
+- Codex 托管对话输入栏新增上下文占用环，使用 App Server 的当前 Token 与模型上下文上限实时计算，并可点按查看明细。
 - 对话视图新增 Codex 托管模式：终端与手机共享同一 App Server 会话，可直接收发消息、处理提问与审批、停止任务，并同步清空、压缩、模型、收件箱状态与推送，无需 Codex Hooks。
 - 托管 Codex 对话可在输入区直接查看和切换模型、思考强度，`/model` 与 `/effort` 无需再跳转终端。
 - 普通 Codex pane 也会显示对话入口，并引导用户在终端使用 `handmux codex resume` 选择原会话、完成 Hook 信任等 Codex 交互后进入托管模式。

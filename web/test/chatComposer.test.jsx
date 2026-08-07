@@ -221,6 +221,51 @@ describe('ChatComposer', () => {
     await waitFor(() => expect(container.querySelector('.cc-ctx-model').textContent).toBe('gpt-new'));
   });
 
+  it('shows App Server context usage as a three-level ring before the microphone with tap details', () => {
+    const { container } = render(<ChatComposer pane="%1" agent="codex" kind="idle" micAvailable codexSession={{
+      managed: true,
+      settings: { model: 'gpt-5.6-terra', effort: 'medium' },
+      contextUsage: { usedTokens: 159719, totalTokens: 258400 },
+    }} />);
+    const trigger = screen.getByRole('button', { name: '上下文占用 62%' });
+    expect(trigger.classList.contains('medium')).toBe(true);
+    expect(trigger.nextElementSibling).toBe(screen.getByRole('button', { name: '语音输入' }));
+
+    fireEvent.click(trigger);
+    const detail = screen.getByRole('dialog', { name: '上下文用量' });
+    expect(detail.textContent).toContain('61.8%');
+    expect(detail.textContent).toContain('159,719');
+    expect(detail.textContent).toContain('258,400');
+
+    const input = screen.getByPlaceholderText('和 Agent 对话…');
+    const backdrop = container.querySelector('.cc-context-backdrop');
+    fireEvent.pointerDown(backdrop, { clientX: 2, clientY: 2 });
+    fireEvent.pointerUp(backdrop, { clientX: 2, clientY: 2 });
+    fireEvent.click(backdrop);
+    expect(screen.queryByRole('dialog', { name: '上下文用量' })).toBeNull();
+    expect(document.activeElement).not.toBe(input);
+  });
+
+  it.each([
+    [40_000, 'low'],
+    [180_000, 'medium'],
+    [230_000, 'high'],
+  ])('uses the expected context ring level for %s tokens', (usedTokens, level) => {
+    const { container } = render(<ChatComposer pane="%1" agent="codex" kind="idle" codexSession={{
+      managed: true, settings: { model: 'gpt-test', effort: 'medium' },
+      contextUsage: { usedTokens, totalTokens: 258400 },
+    }} />);
+    expect(container.querySelector('.cc-context-trigger').classList.contains(level)).toBe(true);
+  });
+
+  it('does not invent a context ring when App Server usage is incomplete', () => {
+    const { container } = render(<ChatComposer pane="%1" agent="codex" kind="idle" codexSession={{
+      managed: true, settings: { model: 'gpt-test', effort: 'medium' },
+      contextUsage: { usedTokens: 159719, totalTokens: null },
+    }} />);
+    expect(container.querySelector('.cc-context-trigger')).toBeNull();
+  });
+
   it('keeps reasoning effort pinned in the menu footer and configurable for the next turn while working', async () => {
     getCodexModels.mockResolvedValueOnce({ models: [{
       id: 'gpt-test', model: 'gpt-test', displayName: 'GPT Test',

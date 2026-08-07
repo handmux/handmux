@@ -4,7 +4,7 @@ import { usePollingLoop } from './usePollingLoop.js';
 
 const EMPTY = {
   loaded: false, managed: false, threadId: null, status: null, activeTurnId: null, settings: null,
-  approvals: [], userInputs: [], queue: [], error: null,
+  contextUsage: null, approvals: [], userInputs: [], queue: [], error: null,
 };
 
 export function useCodexSession(pane, enabled, refreshToken = null) {

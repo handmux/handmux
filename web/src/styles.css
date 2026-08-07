@@ -2729,6 +2729,7 @@ button.cmd-text { background: none; border: none; text-align: left; }
 .cc-actions { display: flex; align-items: center; justify-content: space-between; margin-top: -3px; }
 .cc-actions-left, .cc-actions-right { display: flex; align-items: center; gap: 6px; }
 .cc-actions-left { position: relative; min-width: 0; }
+.cc-actions-right { position: relative; }
 /* Context-window chip — model + used %, centered in the action row's free space. pointer-events:none so it
    never eats the tap-to-focus target; tabular-nums so the % doesn't jitter; the model name truncates first. */
 .cc-ctx {
@@ -2759,6 +2760,35 @@ button.cmd-text { background: none; border: none; text-align: left; }
 .cc-send:disabled { background: var(--ct-chip-2); color: var(--ct-muted); }
 .cc-send:not(:disabled):active { filter: brightness(1.1); }
 .cc-stop { background: #e5484d; }
+/* Managed Codex context usage. App Server provides exact current/maximum token counts; the 20px ring
+   visualizes their ratio while the surrounding 32px button keeps a comfortable touch target. */
+.cc-context-trigger {
+  width: 32px; height: 32px; flex: none; display: grid; place-items: center; padding: 0;
+  border: 0; border-radius: 999px; background: transparent; color: #34c759;
+  touch-action: manipulation; -webkit-tap-highlight-color: transparent;
+}
+.cc-context-trigger.medium { color: #ff9f0a; }
+.cc-context-trigger.high { color: #ff453a; }
+.cc-context-trigger:active { background: var(--ct-chip-2); }
+.cc-context-ring { width: 21px; height: 21px; display: block; transform: rotate(-90deg); overflow: visible; }
+.cc-context-ring circle { fill: none; stroke-width: 3.2; }
+.cc-context-track { stroke: var(--ct-chip-line); }
+.cc-context-value { stroke: currentColor; stroke-linecap: round; }
+.cc-context-backdrop { position: fixed; inset: 0; z-index: 43; background: transparent; }
+.cc-context-popover {
+  position: absolute; right: 0; bottom: calc(100% + 9px); z-index: 44;
+  width: 220px; padding: 10px 12px; border: 1px solid var(--ct-chip-line); border-radius: 14px;
+  background: var(--ct-body); color: var(--ct-ink);
+  box-shadow: 0 12px 38px rgba(0,0,0,.38), 0 2px 8px rgba(0,0,0,.2);
+  font-variant-numeric: tabular-nums; animation: codex-menu-in .16s ease-out;
+}
+.cc-context-popover-title {
+  margin-bottom: 5px; color: var(--ct-muted); font-size: 11px; font-weight: 700;
+  letter-spacing: .04em;
+}
+.cc-context-row { min-height: 28px; display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.cc-context-row span { color: var(--ct-muted); font-size: 12px; }
+.cc-context-row strong { color: var(--ct-ink); font-size: 13px; font-weight: 650; }
 /* The quick-reply chips reuse the terminal dock's .quick-cmd tints, which are tuned for a dark ground
    (full-luminance green/blue/grey text). On the 暖白 tone that text washes out on white, so darken each
    tint toward ink while keeping its hue. (Dark tones keep the original bright-on-dark chips.) */
