@@ -287,9 +287,33 @@ describe('ChatComposer', () => {
     const footer = container.querySelector('.codex-config-footer');
     expect(footer).toBeTruthy();
     expect(body.contains(footer)).toBe(false);
-    const high = await screen.findByRole('button', { name: 'high' });
-    expect(high.disabled).toBe(false);
-    fireEvent.click(high);
+    const effort = await screen.findByRole('slider', { name: '思考强度' });
+    expect(effort.getAttribute('aria-valuetext')).toBe('medium');
+    effort.getBoundingClientRect = () => ({ left: 0, width: 300 });
+    fireEvent(effort, new MouseEvent('pointerdown', { bubbles: true, clientX: 150 }));
+    fireEvent(effort, new MouseEvent('pointermove', { bubbles: true, clientX: 275 }));
+    expect(effort.getAttribute('aria-valuetext')).toBe('high');
+    expect(updateCodexSettings).not.toHaveBeenCalled();
+    fireEvent(effort, new MouseEvent('pointerup', { bubbles: true, clientX: 275 }));
+    await waitFor(() => expect(updateCodexSettings).toHaveBeenCalledWith('%1', { effort: 'high' }));
+  });
+
+  it('supports keyboard changes on the reasoning-effort step slider', async () => {
+    getCodexModels.mockResolvedValueOnce({ models: [{
+      id: 'gpt-test', model: 'gpt-test', displayName: 'GPT Test',
+      supportedReasoningEfforts: [
+        { reasoningEffort: 'low' }, { reasoningEffort: 'medium' }, { reasoningEffort: 'high' },
+      ],
+      defaultReasoningEffort: 'medium',
+    }] });
+    render(<ChatComposer pane="%1" agent="codex" kind="idle" codexSession={{
+      managed: true, settings: { model: 'gpt-test', effort: 'medium' },
+    }} />);
+    fireEvent.click(screen.getByRole('button', { name: '设置模型和思考强度' }));
+    const effort = await screen.findByRole('slider', { name: '思考强度' });
+    fireEvent.keyDown(effort, { key: 'ArrowRight' });
+    expect(effort.getAttribute('aria-valuetext')).toBe('high');
+    fireEvent.keyUp(effort, { key: 'ArrowRight' });
     await waitFor(() => expect(updateCodexSettings).toHaveBeenCalledWith('%1', { effort: 'high' }));
   });
 

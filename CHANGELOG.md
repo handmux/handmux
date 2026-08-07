@@ -12,7 +12,7 @@ All notable changes to handmux. Format follows [Keep a Changelog](https://keepac
 - Codex 回复期间可以继续发送消息：消息默认进入临时队列并在当前回复完成后依次处理，也可选择立刻引导当前回复。
 
 ### Changed
-- Codex 模型菜单的思考强度固定在底部；Agent 回复期间仍可查看和调整模型与思考强度，修改从下一条消息生效。
+- Codex 模型菜单的思考强度改为底部单行步骤条，可直接拖动选择；Agent 回复期间仍可调整，修改从下一条消息生效。
 
 ### Fixed
 - 修复 Codex 短时间内连续压缩上下文时，对话中重复显示压缩提示的问题。

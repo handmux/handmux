@@ -2860,13 +2860,43 @@ button.cmd-text { background: none; border: none; text-align: left; }
 }
 .codex-model-list > button.selected { border-color: transparent; background: transparent; }
 .codex-model-list > button.selected strong { color: var(--ct-accent); }
-.codex-model-list > button:disabled, .codex-effort-list > button:disabled { opacity: .55; }
-.codex-effort-list { display: flex; flex-wrap: wrap; gap: 5px; }
-.codex-effort-list > button {
-  min-width: 62px; min-height: 38px; padding: 0 10px; border: 1px solid var(--ct-chip-line);
-  border-radius: 999px; background: var(--ct-chip); color: var(--ct-chip-ink); font-weight: 600;
+.codex-model-list > button:disabled { opacity: .55; }
+.codex-effort-list { min-width: 0; }
+.codex-effort-slider {
+  position: relative; height: 44px; min-width: 0; padding: 0 2px;
+  touch-action: none; user-select: none; -webkit-user-select: none; cursor: pointer;
 }
-.codex-effort-list > button.selected { border-color: var(--ct-accent); background: var(--ct-chip-2); color: var(--ct-accent); }
+.codex-effort-slider.disabled { opacity: .55; cursor: default; }
+.codex-effort-slider:focus-visible { outline: 2px solid var(--ct-accent); outline-offset: 2px; border-radius: 8px; }
+.codex-effort-track {
+  position: absolute; top: 12px;
+  left: calc(50% / var(--effort-count)); right: calc(50% / var(--effort-count));
+  height: 3px; overflow: hidden; border-radius: 999px; background: var(--ct-chip-line);
+}
+.codex-effort-track > i {
+  display: block; width: var(--effort-progress); height: 100%; border-radius: inherit;
+  background: var(--ct-accent);
+}
+.codex-effort-steps {
+  position: absolute; inset: 0; display: grid;
+  grid-template-columns: repeat(var(--effort-count), minmax(0, 1fr));
+}
+.codex-effort-steps > span {
+  min-width: 0; display: flex; flex-direction: column; align-items: center;
+  color: var(--ct-muted); font-variant-numeric: tabular-nums;
+}
+.codex-effort-steps i {
+  width: 9px; height: 9px; margin-top: 9px; border: 2px solid var(--ct-body); border-radius: 50%;
+  background: var(--ct-chip-line); box-shadow: 0 0 0 1px var(--ct-chip-line);
+}
+.codex-effort-steps small {
+  width: 100%; margin-top: 5px; overflow: hidden; font-size: 10.5px; line-height: 13px;
+  font-weight: 600; text-align: center; text-overflow: ellipsis; white-space: nowrap;
+}
+.codex-effort-steps > span.selected { color: var(--ct-accent); }
+.codex-effort-steps > span.selected i {
+  width: 13px; height: 13px; margin-top: 7px; background: var(--ct-accent); box-shadow: none;
+}
 .codex-config-error { color: var(--danger, #d34b45); font-size: 12px; line-height: 1.4; }
 @media (prefers-reduced-motion: reduce) {
   .codex-config-menu, .codex-config-head button.is-refreshing svg { animation: none; }
