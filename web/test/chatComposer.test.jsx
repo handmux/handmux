@@ -37,6 +37,10 @@ beforeEach(() => {
   updateCodexSettings.mockImplementation(async (_pane, settings) => ({ settings }));
   localStorage.clear();
   voice.state = 'idle';
+  Object.defineProperty(navigator, 'clipboard', {
+    configurable: true,
+    value: { writeText: vi.fn(async () => {}) },
+  });
 });
 
 const typeInto = (el, text) => fireEvent.change(el, { target: { value: text } });
@@ -221,28 +225,44 @@ describe('ChatComposer', () => {
     await waitFor(() => expect(container.querySelector('.cc-ctx-model').textContent).toBe('gpt-new'));
   });
 
-  it('shows App Server context usage as a three-level ring before the microphone with tap details', () => {
+  it('opens structured App Server session status from the context ring', async () => {
     const { container } = render(<ChatComposer pane="%1" agent="codex" kind="idle" micAvailable codexSession={{
       managed: true,
-      settings: { model: 'gpt-5.6-terra', effort: 'medium' },
+      threadId: 'thread-123',
+      gitBranch: 'main',
+      status: { type: 'active', activeFlags: ['waitingOnApproval'] },
+      approvals: [{ id: 'approval-1' }],
+      settings: {
+        model: 'gpt-5.6-terra', effort: 'medium', cwd: '/work/project',
+        sandboxPolicy: { type: 'workspaceWrite' }, approvalPolicy: 'on-request',
+      },
       contextUsage: { usedTokens: 159719, totalTokens: 258400 },
     }} />);
-    const trigger = screen.getByRole('button', { name: '上下文占用 62%' });
+    const trigger = screen.getByRole('button', { name: '会话状态，上下文占用 62%' });
     expect(trigger.classList.contains('medium')).toBe(true);
     expect(trigger.nextElementSibling).toBe(screen.getByRole('button', { name: '语音输入' }));
 
     fireEvent.click(trigger);
-    const detail = screen.getByRole('dialog', { name: '上下文用量' });
+    const detail = screen.getByRole('dialog', { name: '会话状态' });
+    expect(detail.textContent).toContain('等待审批');
+    expect(detail.textContent).toContain('gpt-5.6-terra · medium');
     expect(detail.textContent).toContain('61.8%');
-    expect(detail.textContent).toContain('159,719');
-    expect(detail.textContent).toContain('258,400');
+    expect(detail.textContent).toContain('159,719 / 258,400');
+    expect(detail.textContent).toContain('98,681');
+    expect(detail.textContent).toContain('/work/project');
+    expect(detail.textContent).toContain('main');
+    expect(detail.textContent).toContain('可修改工作区');
+    expect(detail.textContent).toContain('按需确认');
+    fireEvent.click(screen.getByRole('button', { name: '复制会话 ID' }));
+    await waitFor(() => expect(navigator.clipboard.writeText).toHaveBeenCalledWith('thread-123'));
+    expect(detail.textContent).toContain('已复制');
 
     const input = screen.getByPlaceholderText('和 Agent 对话…');
     const backdrop = container.querySelector('.cc-context-backdrop');
     fireEvent.pointerDown(backdrop, { clientX: 2, clientY: 2 });
     fireEvent.pointerUp(backdrop, { clientX: 2, clientY: 2 });
     fireEvent.click(backdrop);
-    expect(screen.queryByRole('dialog', { name: '上下文用量' })).toBeNull();
+    expect(screen.queryByRole('dialog', { name: '会话状态' })).toBeNull();
     expect(document.activeElement).not.toBe(input);
   });
 

@@ -5,6 +5,7 @@ import { createCodexAppServer, projectCodexThread } from '../src/codexAppServer.
 function fixtureThread(status = { type: 'idle' }) {
   return {
     id: 'thread-1', status,
+    gitInfo: { branch: 'main', sha: 'abc123', originUrl: null },
     turns: [{
       id: 'turn-1', status: 'completed', startedAt: 1, completedAt: 2,
       items: [
@@ -143,6 +144,7 @@ describe('Codex App Server client', () => {
     });
     expect(await app.status('%1', 'thread-1')).toMatchObject({ managed: true, threadId: 'thread-1' });
     expect(await app.status('%1', 'thread-1')).toMatchObject({ settings: { model: 'gpt-test', effort: 'high' } });
+    expect(await app.status('%1', 'thread-1')).toMatchObject({ gitBranch: 'main' });
     await app.send('%1', 'thread-1', 'continue');
     expect(proxy.sent).toContainEqual(expect.objectContaining({ method: 'turn/start', params: { threadId: 'thread-1', input: [{ type: 'text', text: 'continue' }] } }));
 

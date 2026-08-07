@@ -11,7 +11,9 @@ import { loadFavs } from '../favStore.js';
 import { getChatDraft, setChatDraft } from '../storage.js';
 import { usePaneContext } from '../hooks/usePaneContext.js';
 import { UPLOAD_ACCEPT } from '../uploadTypes.js';
-import { ArrowUpIcon, StopIcon, PlusIcon, GearIcon, ChevronDownIcon, RefreshIcon, XIcon } from './icons.jsx';
+import {
+  ArrowUpIcon, StopIcon, PlusIcon, GearIcon, ChevronDownIcon, RefreshIcon, XIcon, CopyIcon,
+} from './icons.jsx';
 import { useUpload } from '../hooks/useUpload.js';
 import { usePushToTalk } from '../voice/usePushToTalk.js';
 import { useScreenWakeLock } from '../hooks/useScreenWakeLock.js';
@@ -44,6 +46,37 @@ const chipTint = (text) => (text.startsWith('/') ? 'cmd' : 'reply');
 
 const tokenFormatter = new Intl.NumberFormat('en-US');
 const contextRingLevel = (percent) => (percent >= 75 ? 'high' : percent >= 40 ? 'medium' : 'low');
+
+function codexActivity(session, fallbackKind) {
+  const flags = Array.isArray(session?.status?.activeFlags) ? session.status.activeFlags : [];
+  if (session?.activityKind === 'compacting') return { key: 'compacting', label: t('chat.status.compacting') };
+  if (flags.includes('waitingOnApproval') || session?.approvals?.length) {
+    return { key: 'waiting', label: t('chat.status.waitingApproval') };
+  }
+  if (flags.includes('waitingOnUserInput') || session?.userInputs?.length) {
+    return { key: 'waiting', label: t('chat.status.waitingInput') };
+  }
+  if (session?.status?.type === 'active' || fallbackKind === 'working') {
+    return { key: 'working', label: t('chat.status.working') };
+  }
+  return { key: 'idle', label: t('chat.status.idle') };
+}
+
+function sandboxLabel(settings) {
+  const type = settings?.sandboxPolicy?.type;
+  if (type === 'readOnly' || type === 'read-only') return t('chat.status.sandboxReadOnly');
+  if (type === 'workspaceWrite' || type === 'workspace-write') return t('chat.status.sandboxWorkspace');
+  if (type === 'dangerFullAccess' || type === 'danger-full-access') return t('chat.status.sandboxFull');
+  return null;
+}
+
+function approvalLabel(policy) {
+  if (policy === 'never') return t('chat.status.approvalNever');
+  if (policy === 'on-request') return t('chat.status.approvalOnRequest');
+  if (policy === 'on-failure') return t('chat.status.approvalOnFailure');
+  if (policy === 'untrusted') return t('chat.status.approvalUntrusted');
+  return policy || null;
+}
 
 // model/list is account-wide and effectively static for one app run. Share one successful request across
 // composer remounts and pane switches; the dropdown's refresh action is the only automatic cache bypass.
@@ -215,6 +248,7 @@ export default function ChatComposer({
   const [editOpen, setEditOpen] = useState(false);
   const [configOpen, setConfigOpen] = useState(false);
   const [contextOpen, setContextOpen] = useState(false);
+  const [sessionCopied, setSessionCopied] = useState(false);
   const [localSettings, setLocalSettings] = useState(null);
   const refreshShortcuts = () => {
     setFavs(loadFavs('agent'));
@@ -266,7 +300,25 @@ export default function ChatComposer({
   const contextPercent = showContextRing ? (contextUsedTokens / contextTotalTokens) * 100 : null;
   const boundedContextPercent = Math.min(100, Math.max(0, contextPercent || 0));
   const contextLevel = showContextRing ? contextRingLevel(contextPercent) : null;
+  const contextRemainingTokens = showContextRing
+    ? Math.max(0, contextTotalTokens - contextUsedTokens) : null;
+  const activity = codexActivity(codexSession, kind);
+  const sessionId = codexSession?.threadId || null;
+  const workingDirectory = managedSettings?.cwd || null;
+  const gitBranch = codexSession?.gitBranch || null;
+  const access = sandboxLabel(managedSettings);
+  const approval = approvalLabel(managedSettings?.approvalPolicy);
   useEffect(() => { if (!showContextRing) setContextOpen(false); }, [showContextRing]);
+  useEffect(() => { if (!contextOpen) setSessionCopied(false); }, [contextOpen]);
+
+  const copySessionId = async () => {
+    if (!sessionId || !navigator.clipboard?.writeText) return;
+    try {
+      await navigator.clipboard.writeText(sessionId);
+      setSessionCopied(true);
+      navigator.vibrate?.(8);
+    } catch { /* clipboard can be unavailable outside a secure context */ }
+  };
 
   // Grow to fit content; CSS max-height caps it (~6 lines) then it scrolls. +2 for the border under
   // box-sizing: border-box. No multi/crowd measuring — the buttons are in a row below, never inline.
@@ -579,7 +631,7 @@ export default function ChatComposer({
             )}
             {showContextRing && (
               <button type="button" className={`cc-context-trigger ${contextLevel}`}
-                aria-label={t('chat.context.aria', { percent: Math.round(contextPercent) })}
+                aria-label={t('chat.status.aria', { percent: Math.round(contextPercent) })}
                 aria-expanded={contextOpen} onClick={() => setContextOpen((open) => !open)}>
                 <svg className="cc-context-ring" viewBox="0 0 24 24" aria-hidden="true">
                   <circle className="cc-context-track" cx="12" cy="12" r="9" pathLength="100" />
@@ -603,17 +655,60 @@ export default function ChatComposer({
               <>
                 <div className="cc-context-backdrop" onClick={() => setContextOpen(false)} />
                 <section className="cc-context-popover" role="dialog" aria-modal="true"
-                  aria-label={t('chat.context.title')}>
-                  <div className="cc-context-popover-title">{t('chat.context.title')}</div>
+                  aria-label={t('chat.status.title')}>
+                  <div className="cc-context-popover-title">
+                    <span>{t('chat.status.title')}</span>
+                    <span className={`cc-status-activity ${activity.key}`}>
+                      <i aria-hidden="true" />{activity.label}
+                    </span>
+                  </div>
+                  {(ctxModel || ctxEffort) && (
+                    <div className="cc-context-row">
+                      <span>{t('chat.config.model')}</span>
+                      <strong>{[ctxModel, ctxEffort].filter(Boolean).join(' · ')}</strong>
+                    </div>
+                  )}
                   <div className="cc-context-row">
                     <span>{t('chat.context.percent')}</span><strong>{contextPercent.toFixed(1)}%</strong>
                   </div>
                   <div className="cc-context-row">
-                    <span>{t('chat.context.used')}</span><strong>{tokenFormatter.format(contextUsedTokens)}</strong>
+                    <span>{t('chat.context.usedTotal')}</span>
+                    <strong>{tokenFormatter.format(contextUsedTokens)} / {tokenFormatter.format(contextTotalTokens)}</strong>
                   </div>
                   <div className="cc-context-row">
-                    <span>{t('chat.context.total')}</span><strong>{tokenFormatter.format(contextTotalTokens)}</strong>
+                    <span>{t('chat.context.remaining')}</span>
+                    <strong>{tokenFormatter.format(contextRemainingTokens)}</strong>
                   </div>
+                  {workingDirectory && (
+                    <div className="cc-context-row cc-context-path">
+                      <span>{t('chat.status.directory')}</span><strong>{workingDirectory}</strong>
+                    </div>
+                  )}
+                  {gitBranch && (
+                    <div className="cc-context-row">
+                      <span>{t('chat.status.branch')}</span><strong>{gitBranch}</strong>
+                    </div>
+                  )}
+                  {access && (
+                    <div className="cc-context-row">
+                      <span>{t('chat.status.access')}</span><strong>{access}</strong>
+                    </div>
+                  )}
+                  {approval && (
+                    <div className="cc-context-row">
+                      <span>{t('chat.status.approval')}</span><strong>{approval}</strong>
+                    </div>
+                  )}
+                  {sessionId && (
+                    <div className="cc-context-row cc-context-session">
+                      <span>{t('chat.status.sessionId')}</span>
+                      <button type="button" aria-label={t('chat.status.copySession')}
+                        onClick={() => void copySessionId()}>
+                        <code>{sessionId}</code>
+                        {sessionCopied ? <small>{t('chat.status.copied')}</small> : <CopyIcon />}
+                      </button>
+                    </div>
+                  )}
                 </section>
               </>
             )}

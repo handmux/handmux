@@ -1032,6 +1032,7 @@ export function createCodexAppServer({
       return {
         managed: true,
         threadId,
+        gitBranch: state.thread?.gitInfo?.branch || null,
         status: state.status || state.thread?.status,
         activeTurnId: state.activeTurnId,
         settings: state.settings,
