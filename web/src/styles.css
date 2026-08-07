@@ -2403,12 +2403,13 @@ button.cmd-text { background: none; border: none; text-align: left; }
 .chat-tool-stat .cts-add { color: #3fb950; }
 .chat-tool-stat .cts-del { color: #f85149; }
 .chat-tool-head:active { background: var(--ct-chip-2); }
-/* Outcome mark (✓ success / ✗ failure), pinned right; never shrinks. Fixed green/red read on every tone.
-   The chip itself stays neutral on error — the cross carries the failure, not a whole red box. */
+/* Persisted outcome, pinned right: green ✓ success, red ✗ failure, muted text for declined/unknown completion.
+   The chip itself stays neutral — the trailing state carries the outcome without overpowering the content. */
 .chat-tool-status { flex: none; display: inline-flex; align-items: center; }
 .chat-tool-status svg { width: 15px; height: 15px; display: block; }
 .chat-tool-status.ok { color: #3fb950; }
 .chat-tool-status.err { color: #f85149; }
+.chat-tool-status.neutral { color: var(--ct-muted); font-size: 10.5px; font-weight: 600; }
 .chat-tool-body {
   margin: 4px 0 0; padding: 10px 12px; border-radius: 10px;
   background: var(--ct-body); color: var(--ct-ink);

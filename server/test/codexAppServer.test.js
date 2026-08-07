@@ -97,14 +97,29 @@ describe('Codex App Server projection', () => {
       'text', 'text', 'tool', 'tool', 'tool', 'tool', 'tool', 'tool', 'tool', 'tool', 'tool', 'tool', 'compact',
     ]);
     expect(messages[0]).toMatchObject({ id: 'codex:turn-1:user-1', k: 0, role: 'user', text: 'hello' });
-    expect(messages[2].tool).toMatchObject({ name: 'exec_command', result: '/work\n', isError: false });
+    expect(messages[2].tool).toMatchObject({ name: 'exec_command', result: '/work\n', isError: false, outcome: 'success' });
     expect(messages.slice(3, 5).map((message) => message.tool.input.file_path)).toEqual(['/work/a.js', '/work/b.js']);
     expect(messages.slice(5, 12).map((message) => message.tool.name)).toEqual([
       'web__run', 'docs:search', 'custom', 'view_image', 'wait', 'spawn_agent', 'image_gen__imagegen',
     ]);
     expect(messages[5].tool.result).toContain('https://example.com');
     expect(messages[10].tool.input).toMatchObject({ target: 'thread-2', prompt: 'review' });
+    expect(messages[7].tool).toMatchObject({ name: 'custom', outcome: 'success' });
     expect(new Set(messages.map((message) => message.id)).size).toBe(messages.length);
+  });
+
+  it('keeps persisted declines distinct and treats dynamic completion without success as neutral', () => {
+    const thread = fixtureThread();
+    thread.turns[0].items = [
+      { id: 'cmd-declined', type: 'commandExecution', command: 'sw_vers', cwd: '/work', status: 'declined' },
+      {
+        id: 'dynamic-unknown', type: 'dynamicToolCall', tool: 'functions.exec', arguments: {},
+        status: 'completed', contentItems: [{ type: 'inputText', text: 'aborted by user' }], success: null,
+      },
+    ];
+    const messages = projectCodexThread(thread);
+    expect(messages[0].tool).toMatchObject({ outcome: 'declined', isError: false });
+    expect(messages[1].tool).toMatchObject({ outcome: 'completed', isError: false, result: 'aborted by user' });
   });
 
   it('keeps message identity stable when a snapshot inserts an earlier item', () => {

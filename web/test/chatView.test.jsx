@@ -278,6 +278,24 @@ describe('ChatView', () => {
     expect(container.querySelector('.chat-tool-status.err')).toBeTruthy();
   });
 
+  it('shows persisted declines and unknown dynamic completions neutrally instead of claiming success', async () => {
+    mockTranscript([
+      {
+        k: 0, i: 0, role: 'assistant', type: 'tool',
+        tool: { name: 'exec_command', input: { cmd: 'sw_vers' }, result: 'declined', isError: false, outcome: 'declined' },
+      },
+      {
+        k: 1, i: 1, role: 'assistant', type: 'tool',
+        tool: { name: 'functions.exec', input: {}, result: 'aborted by user', isError: false, outcome: 'completed' },
+      },
+    ]);
+    const { container } = render(<ChatView pane="%0" kind="done" />);
+    await screen.findByText('已拒绝');
+    await screen.findByText('已结束');
+    expect(container.querySelector('.chat-tool-status.ok')).toBeNull();
+    expect(container.querySelectorAll('.chat-tool-status.neutral')).toHaveLength(2);
+  });
+
   it('tool chip stays one line (no in-page expand); tapping it opens the detail sheet with mode/command/result', async () => {
     const longCmd = 'echo ' + 'x'.repeat(200);
     mockTranscript([{ k: 0, i: 0, role: 'assistant', type: 'tool', tool: { name: 'Bash', input: { command: longCmd }, result: 'the output', isError: false } }]);

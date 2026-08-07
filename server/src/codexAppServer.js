@@ -88,7 +88,9 @@ function toolFromItem(item, fileChange = item.changes?.[0] || {}) {
       name: 'exec_command',
       input: { cmd: item.command, cwd: item.cwd },
       result: item.status === 'inProgress' ? null : (item.aggregatedOutput || ''),
-      isError: item.status === 'failed' || item.status === 'declined',
+      isError: item.status === 'failed',
+      outcome: item.status === 'declined' ? 'declined' : item.status === 'failed' ? 'failed'
+        : item.status === 'completed' ? 'success' : 'running',
     };
   }
   if (item.type === 'fileChange') {
@@ -96,7 +98,9 @@ function toolFromItem(item, fileChange = item.changes?.[0] || {}) {
       name: 'apply_patch',
       input: { file_path: fileChange.path || '', patch: fileChange.diff || '' },
       result: item.status === 'inProgress' ? null : (item.status === 'completed' ? '' : item.status),
-      isError: item.status === 'failed' || item.status === 'declined',
+      isError: item.status === 'failed',
+      outcome: item.status === 'declined' ? 'declined' : item.status === 'failed' ? 'failed'
+        : item.status === 'completed' ? 'success' : 'running',
       diff: diffInfo(fileChange),
     };
   }
@@ -114,6 +118,9 @@ function toolFromItem(item, fileChange = item.changes?.[0] || {}) {
       input: item.arguments && typeof item.arguments === 'object' ? item.arguments : { value: item.arguments },
       result: item.status === 'inProgress' ? null : (item.contentItems || []).map((part) => part?.text || part?.imageUrl || '').filter(Boolean).join('\n'),
       isError: item.status === 'failed' || item.success === false,
+      outcome: item.status === 'inProgress' ? 'running'
+        : item.status === 'failed' || item.success === false ? 'failed'
+          : item.success === true ? 'success' : 'completed',
     };
   }
   if (item.type === 'collabAgentToolCall') {

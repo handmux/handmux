@@ -133,13 +133,16 @@ function ToolBody({ tool }) {
   return null;
 }
 
-// Outcome marker at the end of a finished chip: a red cross on failure. A green check on success — EXCEPT
-// when a +A/−B diff stat is already shown (a file edit), where the stat itself says it succeeded, so a check
-// would be redundant. Nothing while running (the wave shows that) or when there's no result yet.
+// Final outcome comes only from fields persisted by App Server. In particular, a completed dynamic tool with
+// no explicit success bit is neutral: its inner action may have been declined even though the wrapper itself
+// returned normally. This keeps the live projection identical to a thread restored after restart.
 function ToolStatus({ tool }) {
+  if (tool.outcome === 'declined') return <span className="chat-tool-status neutral" aria-label="已拒绝">已拒绝</span>;
+  if (tool.outcome === 'completed') return <span className="chat-tool-status neutral" aria-label="已结束">已结束</span>;
   if (tool.isError) return <span className="chat-tool-status err" aria-label="失败"><XIcon /></span>;
   const hasDiffStat = tool.diff && (tool.diff.added || tool.diff.removed);
-  if (tool.result != null && !hasDiffStat) return <span className="chat-tool-status ok" aria-label="成功"><CheckIcon /></span>;
+  const succeeded = tool.outcome === 'success' || (tool.outcome == null && tool.result != null);
+  if (succeeded && !hasDiffStat) return <span className="chat-tool-status ok" aria-label="成功"><CheckIcon /></span>;
   return null;
 }
 
@@ -240,8 +243,10 @@ function DiffView({ hunks }) {
 // The execution state pill shared by both sheet layouts.
 function toolState(tool, running) {
   if (running) return { txt: '执行中', cls: 'run' };
+  if (tool.outcome === 'declined') return { txt: '已拒绝', cls: 'idle' };
+  if (tool.outcome === 'completed') return { txt: '已结束', cls: 'idle' };
   if (tool.isError) return { txt: '失败', cls: 'err' };
-  if (tool.result != null) return { txt: '成功', cls: 'ok' };
+  if (tool.outcome === 'success' || (tool.outcome == null && tool.result != null)) return { txt: '成功', cls: 'ok' };
   return { txt: '未返回', cls: 'idle' };
 }
 
