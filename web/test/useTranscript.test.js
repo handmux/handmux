@@ -1,8 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { renderHook, waitFor, act, cleanup } from '@testing-library/react';
-import {
-  useTranscript, mergeTranscriptMessages, reconcileRecentSnapshot, MAX_TRANSCRIPT_MESSAGES,
-} from '../src/hooks/useTranscript.js';
+import { useTranscript, mergeTranscriptMessages, MAX_TRANSCRIPT_MESSAGES } from '../src/hooks/useTranscript.js';
 import * as api from '../src/api.js';
 
 beforeEach(() => { vi.restoreAllMocks(); });
@@ -26,32 +24,17 @@ describe('useTranscript', () => {
     expect(merged.at(-1).k).toBe(MAX_TRANSCRIPT_MESSAGES + 9);
   });
 
-  it('reconciles a mutable Codex snapshot by stable id when ordinals shift', () => {
+  it('updates a completed tool in place when its rollout result arrives', () => {
     const existing = [
-      { id: 'a', k: 9, type: 'text', text: '需求' },
-      { id: 'b', k: 10, type: 'thinking', text: '思考' },
-      { id: 'c', k: 11, type: 'text', text: '回复' },
+      { k: 9, type: 'text', text: '需求' },
+      { k: 10, type: 'tool', tool: { name: 'exec_command', result: null } },
     ];
     const incoming = [
-      { id: 'inserted', k: 10, type: 'tool' },
-      { id: 'a', k: 11, type: 'text', text: '需求' },
-      { id: 'b', k: 12, type: 'thinking', text: '思考已更新' },
-      { id: 'c', k: 13, type: 'text', text: '回复' },
+      { k: 10, type: 'tool', tool: { name: 'exec_command', result: 'done' } },
     ];
-
-    const reconciled = reconcileRecentSnapshot(existing, incoming, 10);
-    expect(reconciled.map((message) => message.id)).toEqual(['inserted', 'a', 'b', 'c']);
-    expect(reconciled.filter((message) => message.id === 'a')).toHaveLength(1);
-    expect(reconciled.find((message) => message.id === 'b')?.text).toBe('思考已更新');
-  });
-
-  it('removes rows deleted from the authoritative Codex recent range', () => {
-    const existing = [
-      { id: 'older', k: 8 }, { id: 'keep', k: 9 }, { id: 'deleted', k: 10 }, { id: 'tail', k: 11 },
-    ];
-    const incoming = [{ id: 'tail', k: 10 }];
-    expect(reconcileRecentSnapshot(existing, incoming, 10).map((message) => message.id))
-      .toEqual(['older', 'keep', 'tail']);
+    const merged = mergeTranscriptMessages(existing, incoming);
+    expect(merged).toHaveLength(2);
+    expect(merged[1].tool.result).toBe('done');
   });
   it('polls the recent window and returns messages; keeps last on a null (204) poll', async () => {
     const recent = makeMsgs(10, 10); // k=10..19

@@ -6,6 +6,7 @@ import { promises as fsp } from 'node:fs';
 import { readHead, readTail, firstCwd, isSessionUuid } from './scanUtils.js';
 import { classifyClaude } from './claude.js';
 import { resolveByExecutable, executableBasename } from './processIdentity.js';
+import { createCodexTranscriptParser, parseCodexTranscript } from '../codexTranscriptParse.js';
 
 export const sessionsDir = (home = os.homedir()) => path.join(home, '.codex', 'sessions');
 
@@ -78,6 +79,39 @@ async function recentRollouts(dir, limit = 80) {
   return out.slice(0, limit);
 }
 
+// Resolve one known App Server thread id to its exact rollout. This never falls back by cwd: several
+// Codex panes can share a project, while the UUID suffix is the durable one-to-one session identity.
+const rolloutPathCache = new Map();
+export async function resolveCodexRollout(dir, sessionId) {
+  if (!isSessionUuid(sessionId)) return null;
+  const key = `${dir}\0${sessionId}`;
+  const cached = rolloutPathCache.get(key);
+  if (cached) {
+    try { await fsp.access(cached); return cached; } catch { rolloutPathCache.delete(key); }
+  }
+  const suffix = `-${sessionId}.jsonl`;
+  let found = null;
+  async function descend(current, depth) {
+    if (found) return;
+    let entries;
+    try { entries = await fsp.readdir(current, { withFileTypes: true }); } catch { return; }
+    if (depth < 3) {
+      for (const entry of entries) {
+        if (!entry.isDirectory()) continue;
+        await descend(path.join(current, entry.name), depth + 1);
+        if (found) return;
+      }
+      return;
+    }
+    const match = entries.find((entry) => entry.isFile()
+      && entry.name.startsWith('rollout-') && entry.name.endsWith(suffix));
+    if (match) found = path.join(current, match.name);
+  }
+  await descend(dir, 0);
+  if (found) rolloutPathCache.set(key, found);
+  return found;
+}
+
 // Resolve a live orphan's cwd to its Codex session: the newest rollout whose recorded cwd matches. Same
 // shape as Claude's resolver ({ sessionId, state, snippet, lastActivity }) so the orphan engine is agnostic.
 export async function resolveCodexSession(dir, cwd, { busyMs = 8000, now = Date.now } = {}) {
@@ -104,6 +138,7 @@ export const codex = {
   procMatch: /^(\S*\/)?codex(\s|$)/,
   takeoverPrefix: 'cx', // tmux session name prefix for a takeover (cx-<label>-<n>)
   classify: classifyClaude, // Codex hook payloads match Claude's field-for-field — same classifier
+  transcript: { createParser: createCodexTranscriptParser, parse: parseCodexTranscript },
   sessions: {
     // Rows written before SessionStart(`/clear`) support can point at a previous rollout. Consumers reject
     // those legacy rows until a refreshed hook writes the current binding at this version.

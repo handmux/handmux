@@ -5,7 +5,7 @@ import path from 'node:path';
 import { AGENTS, getAgent, agentForProc } from '../src/agents/index.js';
 import { resolveVersionedComms } from '../src/agents/claude.js';
 import { resolveCodexComms } from '../src/agents/codex.js';
-import { resolveCodexSession, rolloutSessionId, codexUserSnippet } from '../src/agents/codex.js';
+import { resolveCodexRollout, resolveCodexSession, rolloutSessionId, codexUserSnippet } from '../src/agents/codex.js';
 import { parseAgentProcs } from '../src/agents/scanUtils.js';
 import { scanOrphans, takeoverOrphan } from '../src/orphans.js';
 
@@ -100,6 +100,22 @@ describe('resolveCodexSession', () => {
 
   it('returns {} when nothing records that cwd', async () => {
     expect(await resolveCodexSession(sessionsDir, '/nope', {})).toEqual({});
+  });
+});
+
+describe('resolveCodexRollout', () => {
+  it('finds only the rollout with the exact managed thread id', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-rollout-'));
+    const day = path.join(root, '2026', '08', '07');
+    const id = 'aaaaaaaa-0000-4000-8000-000000000001';
+    fs.mkdirSync(day, { recursive: true });
+    const file = path.join(day, `rollout-2026-08-07T10-00-00-${id}.jsonl`);
+    fs.writeFileSync(file, '');
+    try {
+      expect(await resolveCodexRollout(root, id)).toBe(file);
+      expect(await resolveCodexRollout(root, 'bbbbbbbb-0000-4000-8000-000000000002')).toBeNull();
+      expect(await resolveCodexRollout(root, '../unsafe')).toBeNull();
+    } finally { fs.rmSync(root, { recursive: true, force: true }); }
   });
 });
 

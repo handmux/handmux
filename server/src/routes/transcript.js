@@ -1,13 +1,14 @@
 // Read a pane's agent session as normalized chat messages. Claude reads its Hook-bound jsonl and keeps its
-// established cwd fallback. Managed Codex reads only the pane-owned App Server thread.
+// established cwd fallback. Managed Codex gets its exact thread id from App Server, then reads that
+// thread's durable rollout; App Server's history snapshot does not contain every completed tool.
 // Server-side paginated — the phone must never receive the whole transcript:
 //   - Recent window (default + polling): ?pane=&limit=10&since=<hash> — the last `limit` messages, with
 //     the same content-hash `since`省流 as /history (unchanged window → 204). `hasMore`/`firstSeq` tell the
 //     client whether/where an older page starts.
 //   - History page (scroll-up, not polled): ?pane=&before=<k>&limit=10 — the last `limit` messages with
 //     `k < before`, no hash.
-// `k` = each message's current global ordinal and the pagination cursor. It is stable for Claude's append-only
-// jsonl, while mutable Codex snapshots additionally carry an App Server-derived stable `id` for dedup/render.
+// `k` = each message's current global ordinal and pagination cursor. It is stable because both Claude and
+// Codex transcripts come from their append-only durable logs.
 // Only the requested page is copied and decorated with `k`; the full parsed transcript is never mapped/filtered
 // on every poll. The underlying reader asynchronously scans once,
 // then parses only appended complete lines; replacement/truncation resets it. `limit` clamps to [1,100],
@@ -22,7 +23,7 @@ import { resolveEncodedDirSession, encodeProjectDir } from '../agents/scanUtils.
 import { transcriptReader } from '../transcriptReader.js';
 import { parsePendingPrompt } from '../pendingPrompt.js';
 import { readClaudeContext } from '../usage.js';
-import { projectCodexThread } from '../codexAppServer.js';
+import { resolveCodexRollout, sessionsDir as codexSessionsDir } from '../agents/codex.js';
 
 // Pure index-based projection: O(page size), not O(transcript size). `before` stays exclusive, including
 // for unusual fractional cursors (the old `k < before` filter included indices through ceil(before) - 1).
@@ -39,7 +40,10 @@ export function pageTranscript(parsed, before, limit) {
   };
 }
 
-export function transcriptRoutes({ commands, claudeEvents, reader = transcriptReader, codexApp }) {
+export function transcriptRoutes({
+  commands, claudeEvents, reader = transcriptReader, codexApp,
+  findCodexRollout = resolveCodexRollout, codexSessions = codexSessionsDir(),
+}) {
   const r = express.Router();
 
   // Bind every request to the pane's actual agent before touching a session file. A caller cannot claim
@@ -102,13 +106,16 @@ export function transcriptRoutes({ commands, claudeEvents, reader = transcriptRe
           if (!discovered?.managed) return res.json({ ...empty, unavailable: 'session-unmanaged' });
           const sessionId = discovered?.threadId || null;
           if (!sessionId) return res.json({ ...empty, unavailable: 'session-unbound' });
-          let opened = null;
-          try { opened = codexApp ? await codexApp.read(req.query.pane, sessionId) : null; }
-          catch (error) {
-            return res.json({ ...empty, unavailable: 'app-server-unavailable', detail: error?.message || String(error) });
-          }
-          if (!opened) return res.json({ ...empty, unavailable: 'session-unmanaged' });
-          const parsed = projectCodexThread(opened.thread);
+          const hooked = req.chatSession;
+          const bindingCurrent = hooked?.bindingVersion === req.chatAgent.sessions?.bindingVersion
+            && hooked?.sessionId === sessionId;
+          const file = bindingCurrent && hooked?.transcriptPath
+            ? hooked.transcriptPath
+            : await findCodexRollout(codexSessions, sessionId);
+          // A newly started thread has no rollout until its first turn. Keep the exact session binding and
+          // show an empty conversation; the next poll will discover the file once Codex creates it.
+          if (!file) return res.json({ ...empty, session: sessionId });
+          const parsed = await reader.read(file, req.chatAgent.transcript.createParser);
           const { messages, firstSeq, hasMore } = pageTranscript(parsed, before, limit);
           if (before == null) {
             const hash = createHash('sha1').update(JSON.stringify(messages)).digest('hex').slice(0, 16);

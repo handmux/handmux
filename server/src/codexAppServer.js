@@ -143,10 +143,9 @@ function projectedMessageId(turn, turnIndex, item, itemIndex) {
   return `codex:${turnId}:${itemId}`;
 }
 
-// App Server returns one authoritative ordered item list. Keep the flattened ordinal (`k`) only as the
-// current snapshot's pagination/order coordinate; item notifications and later snapshots may insert hidden
-// reasoning/tool rows, so position is not identity. `id` survives those insertions and is the only client
-// dedup/render identity.
+// Project App Server's partial item snapshot for connection-level tests/debugging. This is deliberately not
+// the conversation transcript source: current App Server snapshots can omit completed tools. The durable
+// transcript route reads Codex's exact rollout instead.
 export function projectCodexThread(thread) {
   const messages = [];
   for (const [turnIndex, turn] of (thread?.turns || []).entries()) {
@@ -276,10 +275,8 @@ function liveItemSignature(item) {
   return null;
 }
 
-// App Server snapshots are the durable source of truth. Item notifications are only a temporary overlay
-// because a concurrent thread/read can briefly omit an item that just started or completed. As soon as a
-// snapshot contains that item (by id, or by matching user/agent content), retire the overlay and use the
-// snapshot copy; the two channels must never become parallel transcript stores.
+// Keep a best-effort connection snapshot for status/debugging only. Item notifications temporarily overlay
+// thread/read so this internal view remains useful; neither channel feeds the conversation transcript.
 function mergeTurnWithLive(previous, fresh, liveIds) {
   if (!previous) return fresh;
   const previousById = new Map((previous.items || []).filter((item) => item?.id).map((item) => [item.id, item]));
@@ -318,8 +315,7 @@ function mergeTurnWithLive(previous, fresh, liveIds) {
       overlays.push(item);
     }
   }
-  // Fresh snapshot order is authoritative. Event copies survive only while thread/read temporarily omits
-  // them, and are appended as the live tail; they never get to reorder canonical snapshot items.
+  // For this partial internal view, prefer fresh snapshot order and retain event-only tail items.
   const seen = new Set(freshItems.map((item) => item?.id).filter(Boolean));
   return {
     ...previous,
@@ -676,9 +672,7 @@ class CodexAppConnection {
     await this.ensureThread(threadId);
     const state = this.state(threadId);
     if (state.loadedOnly) return state.thread;
-    // A live item that is still absent from the durable snapshot is only a provisional overlay. App Server
-    // persistence can catch up without emitting another notification, so the phone's next poll must keep
-    // reading until every overlay has been replaced by canonical snapshot order.
+    // Keep refreshing this internal partial view while it still contains event-only overlays.
     const hasLiveOverlays = [...state.liveItemIds.values()].some((ids) => ids.size > 0);
     if (state.thread && state.readRevision === state.revision && !hasLiveOverlays) return state.thread;
     const requestedRevision = state.revision;

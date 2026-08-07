@@ -3,8 +3,8 @@
 //
 // Paginated (Task 10): the client NEVER holds/requests the whole transcript. Two independent cursors:
 //   - RECENT window (polled, 1500ms): `{since: recentHash, limit: 20}` — hash-gated conditional poll, a
-//     204/null keeps the last state. Claude's append-only log can use its ordinal identity; Codex snapshots
-//     carry stable message ids because live items may be inserted/reordered while a turn is active.
+//     204/null keeps the last state. Both Claude and Codex use their append-only durable logs, so each
+//     normalized message keeps a stable ordinal identity.
 //   - HISTORY page (`loadOlder()`, scroll-up only, never polled): `{before: oldestK, limit: 20}` — fetched
 //     on demand, prepended and deduped by message identity. Resident messages are capped at
 //     MAX_TRANSCRIPT_MESSAGES so leaving the lens open cannot grow phone memory without bound.
@@ -18,8 +18,8 @@ import { fetchTranscript } from '../api.js';
 export const MAX_TRANSCRIPT_MESSAGES = 500;
 export const TRANSCRIPT_PAGE_SIZE = 20;
 
-// `k` is a snapshot-local order/cursor. Managed Codex supplies a durable id; append-only Claude messages
-// fall back to their stable ordinal. No render, dedup, or detail-sheet identity should use position directly.
+// `k` is the stable normalized-log order/cursor. A source-provided id wins when present; otherwise the
+// append-only ordinal is the render, dedup, and detail-sheet identity.
 export function messageIdentity(message) {
   if (message?.id != null) return String(message.id);
   if (message?.k != null) return `k:${message.k}`;
@@ -31,18 +31,6 @@ export function mergeTranscriptMessages(existing, incoming) {
   for (const message of incoming) byId.set(messageIdentity(message), message);
   const merged = Array.from(byId.values()).sort((a, b) => (a.k ?? a.i ?? 0) - (b.k ?? b.i ?? 0));
   return merged.length > MAX_TRANSCRIPT_MESSAGES ? merged.slice(-MAX_TRANSCRIPT_MESSAGES) : merged;
-}
-
-// The current Codex page is an authoritative snapshot, not an append-only delta. Drop cached rows in the
-// replaced range, and also drop a boundary row when the same stable id moved into the new page after an
-// insertion. Older pages remain resident for scrollback and are reconciled by the same stable id later.
-export function reconcileRecentSnapshot(existing, incoming, firstSeq) {
-  if (firstSeq == null) return incoming.slice(-MAX_TRANSCRIPT_MESSAGES);
-  const incomingIds = new Set(incoming.map(messageIdentity));
-  const retained = existing.filter((message) => (
-    (message.k ?? message.i ?? -1) < firstSeq && !incomingIds.has(messageIdentity(message))
-  ));
-  return mergeTranscriptMessages(retained, incoming);
 }
 
 export function useTranscript(pane, enabled, agent = 'claude', refreshToken = null) {
@@ -119,9 +107,7 @@ export function useTranscript(pane, enabled, agent = 'claude', refreshToken = nu
       setHasMoreOlder(!!r.hasMore);
       seededRef.current = true; // the older-page cursor restarts from the new session's window
     } else {
-      messagesRef.current = agent === 'codex'
-        ? reconcileRecentSnapshot(messagesRef.current, incoming, r.firstSeq)
-        : mergeTranscriptMessages(messagesRef.current, incoming);
+      messagesRef.current = mergeTranscriptMessages(messagesRef.current, incoming);
       setMessages(messagesRef.current);
       // Seed the older-page cursor from the FIRST successful recent response only — once loadOlder has
       // started walking it back, later recent polls (a new hasMore/firstSeq for the tail window) must not
