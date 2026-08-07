@@ -53,10 +53,23 @@ function classicOutput(value) {
   const raw = outputText(value);
   const exit = raw.match(/Process exited with code\s+(-?\d+)/i);
   const marker = raw.match(/(?:^|\n)Output:\n?/i);
+  const result = marker ? raw.slice(marker.index + marker[0].length) : raw;
+  const declined = /^aborted by user(?:\s+after\s+[\d.]+s)?\s*$/i.test(result.trim());
+  const isError = !!(exit && Number(exit[1]) !== 0);
   return {
-    result: marker ? raw.slice(marker.index + marker[0].length) : raw,
-    isError: !!(exit && Number(exit[1]) !== 0),
+    result,
+    isError,
+    outcome: declined ? 'declined' : isError ? 'failed' : 'success',
   };
+}
+
+function resultOutcome(value, result) {
+  if (/^aborted by user(?:\s+after\s+[\d.]+s)?\s*$/i.test(String(result).trim())) return 'declined';
+  if (value && typeof value === 'object') {
+    if (value.success === false) return 'failed';
+    if (typeof value.exit_code === 'number') return value.exit_code === 0 ? 'success' : 'failed';
+  }
+  return 'success';
 }
 
 // Bounded extraction only: find known tools.* calls without evaluating generated JavaScript.
@@ -260,13 +273,20 @@ function applyCustomOutput(messages, value) {
     messages.forEach((message, index) => {
       const result = values[index];
       message.tool.result = outputText(result);
-      const code = result && typeof result === 'object' ? result.exit_code : null;
-      message.tool.isError = typeof code === 'number' && code !== 0;
+      message.tool.outcome = resultOutcome(result, message.tool.result);
+      message.tool.isError = message.tool.outcome === 'failed';
     });
     return;
   }
   const raw = outputText(value).replace(/^Script completed[^\n]*\n(?:Wall time[^\n]*\n)?(?:Output:\n?)?/i, '');
-  messages.forEach((message, index) => { message.tool.result = index === messages.length - 1 ? raw : ''; });
+  const declined = /^aborted by user(?:\s+after\s+[\d.]+s)?\s*$/i.test(raw.trim());
+  messages.forEach((message, index) => {
+    message.tool.result = index === messages.length - 1 ? raw : '';
+    // A single extracted call has an exact persisted outcome. With several calls and one unstructured
+    // wrapper result, the rollout cannot identify which nested call produced it, so keep every card neutral.
+    message.tool.outcome = declined && messages.length === 1 ? 'declined'
+      : messages.length === 1 ? 'success' : 'completed';
+  });
 }
 
 export function createCodexTranscriptParser() {
@@ -330,6 +350,7 @@ export function createCodexTranscriptParser() {
           const output = classicOutput(item.output);
           targets[0].tool.result = output.result;
           targets[0].tool.isError = output.isError;
+          targets[0].tool.outcome = output.outcome;
           pending.delete(item.call_id);
         }
         continue;

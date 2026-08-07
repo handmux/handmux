@@ -116,6 +116,17 @@ describe('GET /api/transcript', () => {
       JSON.stringify({ type: 'response_item', payload: { type: 'function_call_output', call_id: 'one', output: '/work' } }),
       JSON.stringify({ type: 'response_item', payload: { type: 'function_call', name: 'wait', call_id: 'two', arguments: '{"timeout_ms":1000}' } }),
       JSON.stringify({ type: 'response_item', payload: { type: 'function_call_output', call_id: 'two', output: 'done' } }),
+      JSON.stringify({
+        type: 'response_item', payload: {
+          type: 'custom_tool_call', name: 'exec', call_id: 'three',
+          input: 'await tools.exec_command({"cmd":"whoami"})',
+        },
+      }),
+      JSON.stringify({
+        type: 'response_item', payload: {
+          type: 'custom_tool_call_output', call_id: 'three', output: 'aborted by user after 3.6s',
+        },
+      }),
       JSON.stringify({ type: 'response_item', payload: { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'hooked-codex' }] } }),
     ].join('\n') + '\n');
     const read = vi.fn(async () => ({ thread: { turns: [{
@@ -137,9 +148,11 @@ describe('GET /api/transcript', () => {
     try {
       const { status, body } = await call(app, '/transcript?pane=%251&agent=codex');
       expect(status).toBe(200);
-      expect(body.messages.map((message) => message.type)).toEqual(['text', 'tool', 'tool', 'text']);
+      expect(body.messages.map((message) => message.type)).toEqual(['text', 'tool', 'tool', 'tool', 'text']);
       expect(body.messages.filter((message) => message.type === 'tool').map((message) => message.tool.name))
-        .toEqual(['exec_command', 'wait']);
+        .toEqual(['exec_command', 'wait', 'exec_command']);
+      expect(body.messages.filter((message) => message.type === 'tool').at(-1).tool)
+        .toMatchObject({ result: 'aborted by user after 3.6s', outcome: 'declined' });
       expect(read).not.toHaveBeenCalled();
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   });

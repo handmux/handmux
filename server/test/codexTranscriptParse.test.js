@@ -39,7 +39,7 @@ describe('Codex rollout transcript', () => {
     expect(parsed.map((message) => message.type)).toEqual(['text', 'tool', 'tool', 'tool', 'text']);
     expect(parsed.filter((message) => message.type === 'tool').map((message) => message.tool.name))
       .toEqual(['exec_command', 'web__run', 'wait']);
-    expect(parsed[1].tool).toMatchObject({ input: { cmd: 'pwd' }, result: '/work', isError: false });
+    expect(parsed[1].tool).toMatchObject({ input: { cmd: 'pwd' }, result: '/work', isError: false, outcome: 'success' });
     expect(parsed.at(-1)).toMatchObject({ role: 'assistant', text: '完成' });
   });
 
@@ -79,6 +79,30 @@ describe('Codex rollout transcript', () => {
       row({ type: 'function_call_output', call_id: 'later', output: 'done' }),
     ])).toBe(messages);
     expect(messages[0].tool.result).toBe('done');
+    expect(messages[0].tool.outcome).toBe('success');
+  });
+
+  it('restores a single persisted user-aborted tool as declined', () => {
+    const parsed = parseCodexTranscript([
+      row({ type: 'custom_tool_call', name: 'exec', call_id: 'aborted', input: 'await tools.exec_command({"cmd":"whoami"})' }),
+      row({ type: 'custom_tool_call_output', call_id: 'aborted', output: 'aborted by user after 3.6s' }),
+    ]);
+    expect(parsed).toHaveLength(1);
+    expect(parsed[0].tool).toMatchObject({
+      name: 'exec_command', result: 'aborted by user after 3.6s', isError: false, outcome: 'declined',
+    });
+  });
+
+  it('keeps an unstructured multi-tool abort neutral when the rejected call is not identified', () => {
+    const parsed = parseCodexTranscript([
+      row({
+        type: 'custom_tool_call', name: 'exec', call_id: 'multi-abort',
+        input: 'await tools.exec_command({"cmd":"first"}); await tools.exec_command({"cmd":"second"});',
+      }),
+      row({ type: 'custom_tool_call_output', call_id: 'multi-abort', output: 'aborted by user after 3.6s' }),
+    ]);
+    expect(parsed).toHaveLength(2);
+    expect(parsed.map((message) => message.tool.outcome)).toEqual(['completed', 'completed']);
   });
 
   it('keeps edited filenames and diff stats from apply_patch scripts', () => {
