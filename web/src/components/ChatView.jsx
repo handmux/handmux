@@ -535,6 +535,15 @@ export default function ChatView({
 }) {
   const { messages, hasMoreOlder, loadOlder, loadingOlder, session, loaded, unavailable, unavailableDetail } = useTranscript(pane, true, agent, refreshToken);
   const tsIdx = useMemo(() => timeStampedIndices(messages), [messages]);
+  // Each later compaction supersedes the previous context boundary. Keep the rollout untouched as the
+  // authoritative history, but render only the newest boundary in the loaded conversation so two nearby
+  // automatic compactions do not look like one duplicated UI event.
+  const latestCompactIndex = useMemo(() => {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      if (messages[i].type === 'compact') return i;
+    }
+    return -1;
+  }, [messages]);
   // Temporary outgoing bubbles are render-only. Capture matching durable transcript ids that already exist
   // when each bubble first appears, then let only a new rollout message cover it. This prevents an already
   // visible identical user message from swallowing a fresh send while keeping the transcript the sole history.
@@ -870,6 +879,7 @@ export default function ChatView({
           && <div className="chat-new">{t('boot.chat_empty')}</div>}
         {messages.map((m, idx) => {
           if (m.type === 'thinking') return null; // dropped (see Bubble) — no bubble, no time
+          if (m.type === 'compact' && idx !== latestCompactIndex) return null;
           const label = tsIdx.has(idx) ? fmtTime(m.ts) : null;
           return (
             <Fragment key={messageIdentity(m)}>

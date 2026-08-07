@@ -580,6 +580,19 @@ describe('ChatView', () => {
     expect(container.querySelectorAll('.chat-me').length).toBe(1); // only 压缩前 is a user bubble
   });
 
+  it('renders only the newest compaction marker when Codex compacts twice nearby', async () => {
+    mockTranscript([
+      { k: 0, i: 0, role: 'user', type: 'text', text: '第一次提问' },
+      { k: 1, i: 1, type: 'compact' },
+      { k: 2, i: 2, role: 'assistant', type: 'text', text: '第一次回答' },
+      { k: 3, i: 3, type: 'compact' },
+      { k: 4, i: 4, role: 'user', type: 'text', text: '继续' },
+    ]);
+    const { container } = render(<ChatView pane="%0" agent="codex" kind="done" />);
+    await screen.findByText('继续');
+    expect(container.querySelectorAll('.chat-compact-divider')).toHaveLength(1);
+  });
+
   it('a slash command splits into a right-aligned command pill and a separate left-aligned result line', async () => {
     mockTranscript([
       { k: 0, i: 0, type: 'slash', name: '/model', result: 'Set model to Opus 4.8' },
