@@ -426,6 +426,24 @@ function CodexApprovalGate({ pane, approval, onAuthFail }) {
     decline: t('chat.approval.decline'),
     cancel: t('chat.approval.cancel'),
   };
+  const option = (decision) => {
+    if (typeof decision === 'string') return { id: decision, label: labels[decision] || decision, primary: decision === 'accept' };
+    if (decision?.type === 'execpolicy') {
+      return {
+        id: decision.id,
+        label: t('chat.approval.acceptRule', { rule: decision.rule?.join(' ') || '' }),
+        primary: true,
+      };
+    }
+    if (decision?.type === 'networkPolicy') {
+      return {
+        id: decision.id,
+        label: t(decision.action === 'allow' ? 'chat.approval.allowHost' : 'chat.approval.denyHost', { host: decision.host }),
+        primary: decision.action === 'allow',
+      };
+    }
+    return null;
+  };
   const decide = async (decision) => {
     if (submitting) return;
     setSubmitting(true);
@@ -450,11 +468,11 @@ function CodexApprovalGate({ pane, approval, onAuthFail }) {
       {approval.cwd && <div className="codex-approval-cwd">{approval.cwd}</div>}
       {error && <div className="chat-turn-error">{error}</div>}
       <div className="chat-gate-actions">
-        {approval.decisions.map((decision) => (
-          <button key={decision} type="button"
-            className={`chat-gate-btn${decision === 'accept' ? ' primary' : ''}`}
-            disabled={submitting} onClick={() => void decide(decision)}>
-            {labels[decision] || decision}
+        {approval.decisions.map(option).filter(Boolean).map((decision) => (
+          <button key={decision.id} type="button"
+            className={`chat-gate-btn${decision.primary ? ' primary' : ''}`}
+            disabled={submitting} onClick={() => void decide(decision.id)}>
+            {decision.label}
           </button>
         ))}
       </div>

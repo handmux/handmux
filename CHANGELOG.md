@@ -16,6 +16,7 @@ All notable changes to handmux. Format follows [Keep a Changelog](https://keepac
 - 托管 Codex 不支持的斜杠命令改为短暂的底部提示，不再在输入区显示为错误。
 
 ### Fixed
+- 修复 Codex 命令审批漏掉“允许并记住这类命令”选项、与终端审批不一致的问题。
 - 修复 Codex 短时间内连续压缩上下文时，对话中重复显示压缩提示的问题。
 - 修复 Codex 对话中发送成功后，临时用户消息仍一直留在底部的问题。
 - 修复 Codex 运行中的命令工具因 JavaScript 对象参数未被识别而只显示“运行”的问题。

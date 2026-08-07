@@ -14,6 +14,24 @@ const APPROVAL_METHODS = new Set([
 const USER_INPUT_METHOD = 'item/tool/requestUserInput';
 const SIMPLE_DECISIONS = new Set(['accept', 'acceptForSession', 'decline', 'cancel']);
 
+function structuredDecision(value, index) {
+  const execpolicy = value?.acceptWithExecpolicyAmendment?.execpolicy_amendment;
+  if (Array.isArray(execpolicy) && execpolicy.length && execpolicy.every((part) => typeof part === 'string')) {
+    return { id: `structured:${index}`, type: 'execpolicy', rule: execpolicy };
+  }
+  const network = value?.applyNetworkPolicyAmendment?.network_policy_amendment;
+  if (network && typeof network.host === 'string' && ['allow', 'deny'].includes(network.action)) {
+    return { id: `structured:${index}`, type: 'networkPolicy', host: network.host, action: network.action };
+  }
+  return null;
+}
+
+function approvalDecision(value, index) {
+  return typeof value === 'string' && SIMPLE_DECISIONS.has(value)
+    ? value
+    : structuredDecision(value, index);
+}
+
 function asError(error) {
   if (error instanceof Error) return error;
   if (error?.message) return new Error(error.message);
@@ -191,7 +209,7 @@ function normalizeApproval(message) {
   const { params = {} } = message;
   const permissions = message.method === 'item/permissions/requestApproval';
   const supplied = Array.isArray(params.availableDecisions)
-    ? params.availableDecisions.filter((value) => SIMPLE_DECISIONS.has(value))
+    ? params.availableDecisions.map(approvalDecision).filter(Boolean)
     : null;
   return {
     id: String(message.id),
@@ -204,8 +222,21 @@ function normalizeApproval(message) {
     reason: params.reason || null,
     decisions: permissions
       ? ['accept', 'acceptForSession', 'decline']
-      : supplied?.length ? supplied : ['accept', 'acceptForSession', 'decline', 'cancel'],
+      : supplied || ['accept', 'acceptForSession', 'decline', 'cancel'],
   };
+}
+
+function resolveApprovalDecision(request, selected) {
+  const available = request.params?.availableDecisions;
+  if (!Array.isArray(available)) return SIMPLE_DECISIONS.has(selected) ? selected : null;
+  if (SIMPLE_DECISIONS.has(selected)) {
+    return available.includes(selected) ? selected : null;
+  }
+  const match = /^structured:(\d+)$/.exec(selected);
+  if (!match) return null;
+  const index = Number(match[1]);
+  const value = available[index];
+  return structuredDecision(value, index)?.id === selected ? value : null;
 }
 
 function permissionResponse(request, decision) {
@@ -882,15 +913,18 @@ class CodexAppConnection {
   }
 
   decide(threadId, requestId, decision) {
-    if (!SIMPLE_DECISIONS.has(decision)) throw new Error('unsupported approval decision');
+    if (typeof decision !== 'string') throw new Error('unsupported approval decision');
     const key = String(requestId);
     const request = this.approvals.get(key);
     if (!request || request.params?.threadId !== threadId) throw new Error('approval request is no longer pending');
     const approval = normalizeApproval(request);
-    if (!approval.decisions.includes(decision)) throw new Error('approval decision is unavailable');
+    const resolved = request.method === 'item/permissions/requestApproval'
+      ? (approval.decisions.includes(decision) ? decision : null)
+      : resolveApprovalDecision(request, decision);
+    if (resolved == null) throw new Error('approval decision is unavailable');
     this.respond(request.id, request.method === 'item/permissions/requestApproval'
       ? permissionResponse(request, decision)
-      : { decision });
+      : { decision: resolved });
     this.approvals.delete(key);
     this.markWorking(threadId);
     this.setInbox('working', '', `approval:${key}:resolved`);

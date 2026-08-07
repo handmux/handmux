@@ -161,6 +161,30 @@ describe('Codex App Server client', () => {
     app.close();
   });
 
+  it('preserves App Server structured approval choices and returns the selected decision verbatim', async () => {
+    const proxy = fakeProxy();
+    const app = createCodexAppServer({ home: '/home/test', exists: () => true, connect: () => proxy.ws });
+    await app.status('%1', 'thread-1');
+    const remembered = { acceptWithExecpolicyAmendment: { execpolicy_amendment: ['uname', '-s'] } };
+    proxy.push({
+      jsonrpc: '2.0', id: 94, method: 'item/commandExecution/requestApproval',
+      params: {
+        threadId: 'thread-1', turnId: 'turn-2', itemId: 'cmd-3', command: 'uname -s', cwd: '/work',
+        availableDecisions: ['accept', remembered, 'decline'],
+      },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(await app.status('%1', 'thread-1')).toMatchObject({
+      approvals: [{
+        id: '94',
+        decisions: ['accept', { id: 'structured:1', type: 'execpolicy', rule: ['uname', '-s'] }, 'decline'],
+      }],
+    });
+    await app.decide('%1', 'thread-1', '94', 'structured:1');
+    expect(proxy.sent).toContainEqual({ jsonrpc: '2.0', id: 94, result: { decision: remembered } });
+    app.close();
+  });
+
   it('queues messages in order while a turn is active instead of starting overlapping turns', async () => {
     const proxy = fakeProxy();
     const app = createCodexAppServer({ home: '/home/test', exists: () => true, connect: () => proxy.ws });

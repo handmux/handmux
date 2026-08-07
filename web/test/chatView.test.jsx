@@ -61,6 +61,21 @@ describe('ChatView', () => {
     expect(screen.queryByRole('button', { name: '本次会话始终允许' })).toBeNull();
   });
 
+  it('shows and returns App Server structured remember-command decisions', async () => {
+    mockTranscript([]);
+    vi.spyOn(api, 'answerCodexApproval').mockResolvedValue({ ok: true });
+    render(<ChatView pane="%7" agent="codex" kind="permission" codexSession={{
+      managed: true,
+      approvals: [{
+        id: '94', type: 'command', command: 'uname -s', cwd: '/work',
+        decisions: ['accept', { id: 'structured:1', type: 'execpolicy', rule: ['uname', '-s'] }, 'decline'],
+      }],
+    }} />);
+    const remember = await screen.findByRole('button', { name: '允许并记住“uname -s”' });
+    fireEvent.click(remember);
+    await waitFor(() => expect(api.answerCodexApproval).toHaveBeenCalledWith('%7', '94', 'structured:1'));
+  });
+
   it('renders user text right and assistant text left', async () => {
     mockTranscript([
       { k: 0, i: 0, role: 'user', type: 'text', text: '帮我跑测试' },
