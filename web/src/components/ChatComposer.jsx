@@ -42,7 +42,7 @@ const keepFocus = (e) => {
 const chipTint = (text) => (text.startsWith('/') ? 'cmd' : 'reply');
 
 const tokenFormatter = new Intl.NumberFormat('en-US');
-const contextRingLevel = (percent) => (percent >= 80 ? 'high' : percent >= 60 ? 'medium' : 'low');
+const contextRingLevel = (percent) => (percent >= 75 ? 'high' : percent >= 40 ? 'medium' : 'low');
 
 // model/list is account-wide and effectively static for one app run. Share one successful request across
 // composer remounts and pane switches; the dropdown's refresh action is the only automatic cache bypass.

@@ -247,9 +247,10 @@ describe('ChatComposer', () => {
   });
 
   it.each([
-    [40_000, 'low'],
-    [180_000, 'medium'],
-    [230_000, 'high'],
+    [103_359, 'low'],
+    [103_360, 'medium'],
+    [193_799, 'medium'],
+    [193_800, 'high'],
   ])('uses the expected context ring level for %s tokens', (usedTokens, level) => {
     const { container } = render(<ChatComposer pane="%1" agent="codex" kind="idle" codexSession={{
       managed: true, settings: { model: 'gpt-test', effort: 'medium' },
