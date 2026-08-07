@@ -43,6 +43,32 @@ describe('Codex rollout transcript', () => {
     expect(parsed.at(-1)).toMatchObject({ role: 'assistant', text: '完成' });
   });
 
+  it('reads command details from JavaScript object arguments emitted by orchestrated tool calls', () => {
+    const script = [
+      'const result = await tools.exec_command({',
+      '  cmd: "npm test -- --run",',
+      '  workdir: "/work",',
+      '  yield_time_ms: 30000,',
+      '  prefix_rule: ["npm", "test"],',
+      '});',
+      'text(result.output);',
+    ].join('\n');
+    const parsed = parseCodexTranscript([
+      row({ type: 'custom_tool_call', name: 'exec', call_id: 'js-object', input: script }),
+    ]);
+
+    expect(parsed).toHaveLength(1);
+    expect(parsed[0].tool).toMatchObject({
+      name: 'exec_command',
+      input: {
+        cmd: 'npm test -- --run',
+        workdir: '/work',
+        yield_time_ms: 30000,
+        prefix_rule: ['npm', 'test'],
+      },
+    });
+  });
+
   it('updates a pending tool when its result is appended in a later reader batch', () => {
     const parser = createCodexTranscriptParser();
     const messages = parser.push([

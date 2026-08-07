@@ -160,6 +160,16 @@ describe('ChatView', () => {
     expect(command.textContent).toBe('npm test');
   });
 
+  it('uses a complete command label when a running command has no parsed arguments', async () => {
+    mockTranscript([{ k: 0, i: 0, role: 'assistant', type: 'tool', tool: {
+      name: 'exec_command', input: {}, result: null, isError: false,
+    } }]);
+    render(<ChatView pane="%0" agent="codex" kind="working" />);
+
+    expect(await screen.findByText('运行命令')).toBeTruthy();
+    expect(screen.queryByText('运行')).toBeNull();
+  });
+
   it('an uncatalogued tool gets a generic 调用工具 verb (never a bare tool name); a skill says 激活技能', async () => {
     mockTranscript([
       { k: 0, i: 0, role: 'assistant', type: 'tool', tool: { name: 'AskUserQuestion', input: { questions: [] }, result: null, isError: false } },

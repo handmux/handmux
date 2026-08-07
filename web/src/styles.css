@@ -2772,6 +2772,13 @@ button.cmd-text { background: none; border: none; text-align: left; }
   flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch;
   display: flex; flex-direction: column; gap: 10px; padding: 7px;
 }
+.codex-config-footer {
+  flex: none; display: flex; flex-direction: column; gap: 5px; padding: 7px;
+  border-top: 1px solid var(--ct-line); background: var(--ct-body);
+}
+.codex-config-next-turn {
+  padding: 0 3px 1px; color: var(--ct-muted); font-size: 10.5px; line-height: 14px;
+}
 .codex-config-section { flex: none; display: flex; flex-direction: column; gap: 4px; }
 .codex-config-label {
   padding: 0 3px; color: var(--ct-muted); font-size: 10px; font-weight: 700;

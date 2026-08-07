@@ -312,6 +312,7 @@ export default {
 'chat.config.loadFailed': 'Could not load the model list',
 'chat.config.refresh': 'Refresh model list',
 'chat.config.saveFailed': 'The setting could not be saved',
+'chat.config.nextTurn': 'The current response stays unchanged; this applies to your next message.',
 'chat.interrupted': 'You stopped the response',
 'chat.compacted': 'Context compacted',
 'chat.slash.handedOff': 'Switched to terminal — run {cmd} there',

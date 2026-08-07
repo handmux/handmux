@@ -198,6 +198,32 @@ describe('ChatComposer', () => {
     await waitFor(() => expect(container.querySelector('.cc-ctx-model').textContent).toBe('gpt-new'));
   });
 
+  it('keeps reasoning effort pinned in the menu footer and configurable for the next turn while working', async () => {
+    getCodexModels.mockResolvedValueOnce({ models: [{
+      id: 'gpt-test', model: 'gpt-test', displayName: 'GPT Test',
+      supportedReasoningEfforts: [
+        { reasoningEffort: 'medium' }, { reasoningEffort: 'high' },
+      ],
+      defaultReasoningEffort: 'medium',
+    }] });
+    const { container } = render(<ChatComposer pane="%1" agent="codex" kind="working" codexSession={{
+      managed: true, settings: { model: 'gpt-test', effort: 'medium' },
+    }} />);
+    const trigger = screen.getByRole('button', { name: '设置模型和思考强度' });
+    expect(trigger.disabled).toBe(false);
+    fireEvent.click(trigger);
+
+    expect(await screen.findByText('当前回复不变，下条消息生效')).toBeTruthy();
+    const body = container.querySelector('.codex-config-body');
+    const footer = container.querySelector('.codex-config-footer');
+    expect(footer).toBeTruthy();
+    expect(body.contains(footer)).toBe(false);
+    const high = await screen.findByRole('button', { name: 'high' });
+    expect(high.disabled).toBe(false);
+    fireEvent.click(high);
+    await waitFor(() => expect(updateCodexSettings).toHaveBeenCalledWith('%1', { effort: 'high' }));
+  });
+
   it('loads models once per app run and refreshes only from the menu action', async () => {
     getCodexModels.mockResolvedValue({ models: [{
       id: 'gpt-test', model: 'gpt-test', displayName: 'GPT Test',

@@ -97,7 +97,7 @@ function CodexConfigMenu({ open, pane, settings, busy, onChange, onClose, onAuth
   if (!open) return null;
   const selectedModel = models.find((model) => model.model === settings?.model || model.id === settings?.model);
   const efforts = selectedModel?.supportedReasoningEfforts || [];
-  const disabled = busy || saving;
+  const disabled = saving;
   const save = async (updates) => {
     if (disabled) return;
     setSaving(true);
@@ -151,6 +151,9 @@ function CodexConfigMenu({ open, pane, settings, busy, onChange, onClose, onAuth
               })}
             </div>
           </div>
+          {error && <div className="codex-config-error" role="status">{error}</div>}
+        </div>
+        <footer className="codex-config-footer">
           <div className="codex-config-section">
             <div className="codex-config-label">{t('chat.config.effort')}</div>
             <div className="codex-effort-list">
@@ -167,8 +170,8 @@ function CodexConfigMenu({ open, pane, settings, busy, onChange, onClose, onAuth
                 && <div className="codex-config-state">{t('chat.config.chooseModel')}</div>}
             </div>
           </div>
-          {error && <div className="codex-config-error" role="status">{error}</div>}
-        </div>
+          {busy && <div className="codex-config-next-turn">{t('chat.config.nextTurn')}</div>}
+        </footer>
       </section>
     </>
   );
@@ -467,7 +470,7 @@ export default function ChatComposer({
             <button type="button" className="cc-attach" aria-label={t('dock.attach')}
               onClick={() => uploadRef.current?.click()}><PlusIcon /></button>
             {managedCodex && (
-              <button type="button" className="cc-ctx cc-config-trigger" disabled={busy || submitting}
+              <button type="button" className="cc-ctx cc-config-trigger"
                 aria-label={t('chat.config.open')} onClick={openConfig}>
                 <span className="cc-ctx-model">{ctxModel || t('chat.config.model')}</span>
                 <span className="cc-ctx-pct">{ctxEffort || t('chat.config.effort')}</span>

@@ -118,6 +118,65 @@ function resolveStringArgument(script, raw, before) {
   return token ? decodeJsString(token) : null;
 }
 
+function splitTopLevel(value, separator) {
+  const parts = [];
+  let start = 0;
+  let depth = 0;
+  let quote = null;
+  let escaped = false;
+  for (let i = 0; i < value.length; i++) {
+    const ch = value[i];
+    if (quote) {
+      if (escaped) escaped = false;
+      else if (ch === '\\') escaped = true;
+      else if (ch === quote) quote = null;
+      continue;
+    }
+    if (ch === '"' || ch === "'" || ch === '`') { quote = ch; continue; }
+    if (ch === '(' || ch === '{' || ch === '[') depth++;
+    else if (ch === ')' || ch === '}' || ch === ']') depth--;
+    else if (ch === separator && depth === 0) {
+      parts.push(value.slice(start, i));
+      start = i + 1;
+    }
+  }
+  parts.push(value.slice(start));
+  return parts;
+}
+
+function parseJsLiteral(script, raw, before) {
+  const value = raw.trim();
+  const decoded = decodeJsString(value);
+  if (decoded != null) return decoded;
+  try { return JSON.parse(value); } catch { /* JavaScript object syntax is not strict JSON. */ }
+  const resolved = resolveStringArgument(script, value, before);
+  return resolved == null ? value : resolved;
+}
+
+// Orchestrated tool calls are stored as JavaScript source, and their arguments commonly use object-literal
+// keys (`{ cmd: "pwd" }`) rather than strict JSON (`{"cmd":"pwd"}`). Parse only top-level literal fields;
+// never evaluate generated code. Unknown expressions stay as source text so the detail view loses nothing.
+function parseJsObjectInput(script, raw, before) {
+  const value = raw.trim();
+  if (!value.startsWith('{') || !value.endsWith('}')) return null;
+  const input = {};
+  for (const field of splitTopLevel(value.slice(1, -1), ',')) {
+    const colon = splitTopLevel(field, ':');
+    if (colon.length < 2) continue;
+    const rawKey = colon.shift().trim();
+    const key = decodeJsString(rawKey) ?? (/^[A-Za-z_$][\w$]*$/.test(rawKey) ? rawKey : null);
+    if (!key) continue;
+    input[key] = parseJsLiteral(script, colon.join(':').trim(), before);
+  }
+  return Object.keys(input).length ? input : null;
+}
+
+function parseToolInput(script, raw, before) {
+  const parsed = parseInput(raw);
+  if (parsed.value !== raw) return parsed;
+  return parseJsObjectInput(script, raw, before) || { script: raw };
+}
+
 function applyPatchCalls(patch) {
   const header = /^\*\*\* (Add|Update|Delete) File: (.+)$/gm;
   const sections = [];
@@ -169,8 +228,7 @@ function extractCustomCalls(script) {
         ? [{ name: 'apply_patch', input: { script: arg.text } }]
         : applyPatchCalls(decoded)));
     } else {
-      const input = parseInput(arg.text);
-      calls.push({ name: match[1], input: input.value === arg.text ? { script: arg.text } : input });
+      calls.push({ name: match[1], input: parseToolInput(script, arg.text, match.index) });
     }
     re.lastIndex = arg.end;
   }

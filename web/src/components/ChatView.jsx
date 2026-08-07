@@ -43,8 +43,14 @@ function displayCommand(command) {
 function toolSummary(tool) {
   const n = tool.name || '工具';
   const inp = tool.input || {};
-  if (n === 'Bash') return `运行 ${displayCommand(inp.command)}`.trim();
-  if (n === 'exec_command') return `运行 ${displayCommand(inp.cmd)}`.trim();
+  if (n === 'Bash') {
+    const command = displayCommand(inp.command);
+    return command ? `运行 ${command}` : '运行命令';
+  }
+  if (n === 'exec_command') {
+    const command = displayCommand(inp.cmd);
+    return command ? `运行 ${command}` : '运行命令';
+  }
   if (n === 'apply_patch') {
     const filename = String(inp.file_path || '').split(/[\\/]/).filter(Boolean).pop();
     return filename ? `编辑 ${filename}` : '编辑文件';
