@@ -19,14 +19,16 @@ const render = (props) => act(() => root.render(
     {...props} />));
 const click = (n) => act(() => n.dispatchEvent(new MouseEvent('click', { bubbles: true })));
 
-describe('Settings 对话镜头 experimental gate', () => {
-  it('always shows the 启用对话视图（实验性功能）toggle; the tone picker only appears when enabled', async () => {
-    await render({ chatLensEnabled: false });
-    expect(container.textContent).toContain('启用对话视图（实验性功能）');
+describe('Settings agent chat-view switches', () => {
+  it('shows separate Claude experimental and Codex stable switches; tone appears when either is enabled', async () => {
+    await render({ claudeChatLensEnabled: false, codexChatLensEnabled: false });
+    expect(container.textContent).toContain('Claude Code 对话视图（实验性）');
+    expect(container.textContent).toContain('Codex CLI 对话视图');
+    expect(container.textContent).not.toContain('Codex CLI 对话视图（实验性）');
     expect([...container.querySelectorAll('.settings-page-row-label')]
       .some((label) => label.textContent === '对话配色')).toBe(false);
 
-    await render({ chatLensEnabled: true });
+    await render({ claudeChatLensEnabled: false, codexChatLensEnabled: true });
     const toneRow = [...container.querySelectorAll('.settings-page-row')]
       .find((row) => row.querySelector('.settings-page-row-label')?.textContent === '对话配色');
     expect(toneRow).toBeTruthy();
@@ -34,26 +36,34 @@ describe('Settings 对话镜头 experimental gate', () => {
     expect([...container.querySelectorAll('.settings-choice-row')].some((b) => b.textContent === '暖夜')).toBe(true);
   });
 
-  it('the toggle is an iOS-style switch whose checkbox mirrors chatLensEnabled and reports changes', async () => {
-    const onChatLensEnabled = vi.fn();
-    await render({ chatLensEnabled: false, onChatLensEnabled });
-    const label = [...container.querySelectorAll('.settings-page-switch')]
-      .find((l) => l.textContent.includes('启用对话视图'));
-    expect(label).toBeTruthy();
-    const box = label.querySelector('input[type="checkbox"]');
-    expect(box.checked).toBe(false);
-    click(box);
-    expect(onChatLensEnabled).toHaveBeenCalledWith(true);
+  it('reports each iOS switch independently', async () => {
+    const onClaudeChatLensEnabled = vi.fn();
+    const onCodexChatLensEnabled = vi.fn();
+    await render({
+      claudeChatLensEnabled: false, codexChatLensEnabled: true,
+      onClaudeChatLensEnabled, onCodexChatLensEnabled,
+    });
+    expect(lensBox('Claude Code').checked).toBe(false);
+    expect(lensBox('Codex CLI').checked).toBe(true);
+    click(lensBox('Claude Code'));
+    expect(onClaudeChatLensEnabled).toHaveBeenCalledWith(true);
+    expect(onCodexChatLensEnabled).not.toHaveBeenCalled();
+    click(lensBox('Codex CLI'));
+    expect(onCodexChatLensEnabled).toHaveBeenCalledWith(false);
   });
 
-  const lensBox = () => [...container.querySelectorAll('.settings-page-switch')]
-    .find((l) => l.textContent.includes('启用对话视图'))?.querySelector('input[type="checkbox"]');
+  const lensBox = (name) => [...container.querySelectorAll('.settings-page-switch')]
+    .find((label) => label.textContent.includes(name))?.querySelector('input[type="checkbox"]');
 
-  it('hooks absent → toggle locked with the need-hooks hint and a one-tap install button', async () => {
+  it('hooks absent locks only Claude and offers hook installation', async () => {
     const onEnableHooks = vi.fn(async () => ({ status: 'installed' }));
-    await render({ chatLensEnabled: false, hooksStatus: 'absent', onEnableHooks });
-    expect(lensBox().disabled).toBe(true);
+    await render({
+      claudeChatLensEnabled: false, codexChatLensEnabled: false, hooksStatus: 'absent', onEnableHooks,
+    });
+    expect(lensBox('Claude Code').disabled).toBe(true);
+    expect(lensBox('Codex CLI').disabled).toBe(false);
     expect(container.textContent).toContain('需先安装 Agent hooks');
+    expect(container.textContent).toContain('Codex CLI 对话由 App Server 同步，无需 hooks');
     const btn = [...container.querySelectorAll('button')].find((b) => b.textContent === '一键安装 hooks');
     expect(btn).toBeTruthy();
     click(btn);
@@ -61,29 +71,25 @@ describe('Settings 对话镜头 experimental gate', () => {
     expect(onEnableHooks).toHaveBeenCalled();
   });
 
-  it('hooks absent but lens already enabled → still allows turning it OFF (no dead-end)', async () => {
-    await render({ chatLensEnabled: true, hooksStatus: 'absent' });
-    expect(lensBox().disabled).toBe(false);
-    expect(lensBox().checked).toBe(true);
+  it('hooks absent but Claude is already enabled still allows turning Claude off', async () => {
+    await render({ claudeChatLensEnabled: true, hooksStatus: 'absent' });
+    expect(lensBox('Claude Code').disabled).toBe(false);
+    expect(lensBox('Claude Code').checked).toBe(true);
   });
 
-  it('managed Codex support unlocks the toggle without hooks and explains the boundary', async () => {
-    await render({ chatLensEnabled: false, hooksStatus: 'no-claude', managedCodexAvailable: true });
-    expect(lensBox().disabled).toBe(false);
-    expect(container.textContent).toContain('托管 Codex 无需 hooks');
-  });
-
-  it('no Claude Code at all → locked with the no-claude hint and NO install button', async () => {
-    await render({ chatLensEnabled: false, hooksStatus: 'no-claude' });
-    expect(lensBox().disabled).toBe(true);
-    expect(container.textContent).toContain('未检测到 Claude Code 或 Codex CLI');
+  it('no Claude Code locks only Claude and does not imply Codex is missing', async () => {
+    await render({ claudeChatLensEnabled: false, codexChatLensEnabled: false, hooksStatus: 'no-claude' });
+    expect(lensBox('Claude Code').disabled).toBe(true);
+    expect(lensBox('Codex CLI').disabled).toBe(false);
+    expect(container.textContent).toContain('未检测到 Claude Code');
+    expect(container.textContent).not.toContain('未检测到 Claude Code 或 Codex CLI');
     expect([...container.querySelectorAll('button')].some((b) => b.textContent === '一键安装 hooks')).toBe(false);
   });
 
-  it('hooks installed (or still unknown) → toggle stays usable', async () => {
-    await render({ chatLensEnabled: false, hooksStatus: 'installed' });
-    expect(lensBox().disabled).toBe(false);
-    await render({ chatLensEnabled: false, hooksStatus: null });
-    expect(lensBox().disabled).toBe(false);
+  it('hooks installed or still unknown keeps the Claude switch usable', async () => {
+    await render({ claudeChatLensEnabled: false, hooksStatus: 'installed' });
+    expect(lensBox('Claude Code').disabled).toBe(false);
+    await render({ claudeChatLensEnabled: false, hooksStatus: null });
+    expect(lensBox('Claude Code').disabled).toBe(false);
   });
 });

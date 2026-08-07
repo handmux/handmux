@@ -1,5 +1,5 @@
-export function canEnableChatLens(hooksStatus, managedCodexAvailable) {
-  return hooksStatus == null || hooksStatus === 'installed' || !!managedCodexAvailable;
+export function canEnableClaudeChatLens(hooksStatus) {
+  return hooksStatus == null || hooksStatus === 'installed';
 }
 
 export function canUseChatLens(agent, hooksStatus) {

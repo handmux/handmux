@@ -3,15 +3,43 @@ import {
   applyWorkspaceRestoreMapping,
   getBoundSessions,
   getWorkspacePromptState,
+  getClaudeChatLensEnabled,
+  getCodexChatLensEnabled,
   ignoreWorkspaceCheckpoint,
   markWorkspaceAutoShown,
   removeRestoredSessionBindings,
+  setClaudeChatLensEnabled,
+  setCodexChatLensEnabled,
 } from './storage.js';
 
 const read = (key) => JSON.parse(localStorage.getItem(key));
 
 beforeEach(() => localStorage.clear());
 afterEach(() => vi.restoreAllMocks());
+
+describe('agent chat-view preferences', () => {
+  it('migrates the legacy shared opt-in until each agent gets an explicit value', () => {
+    localStorage.setItem('tw_chat_lens', '1');
+    expect(getClaudeChatLensEnabled()).toBe(true);
+    expect(getCodexChatLensEnabled()).toBe(true);
+
+    setClaudeChatLensEnabled(false);
+    expect(getClaudeChatLensEnabled()).toBe(false);
+    expect(getCodexChatLensEnabled()).toBe(true);
+
+    setCodexChatLensEnabled(false);
+    expect(getClaudeChatLensEnabled()).toBe(false);
+    expect(getCodexChatLensEnabled()).toBe(false);
+  });
+
+  it('keeps new installs off and stores the two switches independently', () => {
+    expect(getClaudeChatLensEnabled()).toBe(false);
+    expect(getCodexChatLensEnabled()).toBe(false);
+    setCodexChatLensEnabled(true);
+    expect(getClaudeChatLensEnabled()).toBe(false);
+    expect(getCodexChatLensEnabled()).toBe(true);
+  });
+});
 
 describe('workspace prompt state', () => {
   it('keeps auto-shown and ignored state scoped to one checkpoint', () => {

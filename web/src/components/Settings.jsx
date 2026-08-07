@@ -6,7 +6,7 @@ import { t, getLangCode, setLang, AVAILABLE } from '../i18n';
 import { SNAPSHOT_INTERVALS } from '../terminalTransport.js';
 import { useBackButton } from '../hooks/useBackButton.js';
 import { CheckIcon } from './icons.jsx';
-import { canEnableChatLens } from '../chatLensAvailability.js';
+import { canEnableClaudeChatLens } from '../chatLensAvailability.js';
 
 const DETAIL_TITLE = {
   language: 'settings.language',
@@ -143,11 +143,13 @@ function UpdateNotice({ updateInfo }) {
 // target, while web-preview settings remain in that tool's own menu.
 export default function Settings({ open, onClose, termRef, onOpenChangelog, changelogUnread,
   onReloadApp = () => window.location.reload(),
-  chatTone = 'ink', onChatTone = () => {}, chatLensEnabled = false, onChatLensEnabled = () => {},
+  chatTone = 'ink', onChatTone = () => {},
+  claudeChatLensEnabled = false, onClaudeChatLensEnabled = () => {},
+  codexChatLensEnabled = false, onCodexChatLensEnabled = () => {},
   keyboardMode = 'auto', onKeyboardMode = () => {},
   terminalTransport = 'live', onTerminalTransport = () => {},
   snapshotInterval = 1000, onSnapshotInterval = () => {},
-  hooksStatus = null, onEnableHooks = null, managedCodexAvailable = false,
+  hooksStatus = null, onEnableHooks = null,
   notifUnread = false, onOpenInbox,
   updateInfo = null,
   workspaceProtection = null }) {
@@ -164,7 +166,7 @@ export default function Settings({ open, onClose, termRef, onOpenChangelog, chan
   const bodyRef = useRef(null);
   const rootScrollRef = useRef(0);
 
-  const lensLocked = !canEnableChatLens(hooksStatus, managedCodexAvailable);
+  const claudeLensLocked = !canEnableClaudeChatLens(hooksStatus);
   const notificationsSupported = pushSupported();
 
   useEffect(() => {
@@ -269,18 +271,7 @@ export default function Settings({ open, onClose, termRef, onOpenChangelog, chan
   const protectionReason = ['live-corrupt', 'live-unavailable'].includes(workspaceProtection?.errorCode)
     ? workspaceProtection.errorCode : 'unknown';
 
-  const lensFooter = managedCodexAvailable && hooksStatus !== 'installed' ? (
-    <>
-      <div>{t('settings.chat_lens_codex_ready')}</div>
-      {hooksStatus === 'absent' && (
-        <button type="button" className="settings-page-inline-action" disabled={lensHooksBusy}
-          onClick={enableLensHooks}>
-          {lensHooksBusy ? t('settings.chat_lens_installing') : t('settings.chat_lens_install_hooks')}
-        </button>
-      )}
-      {lensHooksErr && <div className="settings-hint-err">{t('settings.chat_lens_hooks_err')}</div>}
-    </>
-  ) : lensLocked ? (
+  const claudeLensFooter = claudeLensLocked ? (
     <>
       <div>{t(hooksStatus === 'no-claude' ? 'settings.chat_lens_no_claude' : 'settings.chat_lens_need_hooks')}</div>
       {hooksStatus === 'absent' && (
@@ -291,7 +282,13 @@ export default function Settings({ open, onClose, termRef, onOpenChangelog, chan
       )}
       {lensHooksErr && <div className="settings-hint-err">{t('settings.chat_lens_hooks_err')}</div>}
     </>
-  ) : t('settings.chat_lens_hint');
+  ) : <div>{t('settings.chat_lens_claude_hint')}</div>;
+  const lensFooter = (
+    <>
+      {claudeLensFooter}
+      <div>{t('settings.chat_lens_codex_hint')}</div>
+    </>
+  );
 
   const rootContent = (
     <>
@@ -317,10 +314,12 @@ export default function Settings({ open, onClose, termRef, onOpenChangelog, chan
       </SettingsGroup>
 
       <SettingsGroup title={t('settings.group_chat')} footer={lensFooter}>
-        <SettingsSwitchRow label={t('settings.chat_lens')} checked={chatLensEnabled}
-          disabled={lensLocked && !chatLensEnabled}
-          onChange={(event) => onChatLensEnabled(event.target.checked)} />
-        {chatLensEnabled && (
+        <SettingsSwitchRow label={t('settings.chat_lens_claude')} checked={claudeChatLensEnabled}
+          disabled={claudeLensLocked && !claudeChatLensEnabled}
+          onChange={(event) => onClaudeChatLensEnabled(event.target.checked)} />
+        <SettingsSwitchRow label={t('settings.chat_lens_codex')} checked={codexChatLensEnabled}
+          onChange={(event) => onCodexChatLensEnabled(event.target.checked)} />
+        {(claudeChatLensEnabled || codexChatLensEnabled) && (
           <SettingsNavRow label={t('settings.chat_tone')} value={t(`settings.chat_tone_${chatTone}`)}
             onClick={() => openPage('tone')} />
         )}

@@ -1,14 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { canEnableChatLens, canUseChatLens } from './chatLensAvailability.js';
+import { canEnableClaudeChatLens, canUseChatLens } from './chatLensAvailability.js';
 import { codexKind } from './hooks/useCodexSession.js';
 
 describe('chat lens availability', () => {
-  it('can be enabled for either Hook-backed Claude or managed Codex', () => {
-    expect(canEnableChatLens('installed', false)).toBe(true);
-    expect(canEnableChatLens('absent', true)).toBe(true);
-    expect(canEnableChatLens('no-claude', true)).toBe(true);
-    expect(canEnableChatLens('absent', false)).toBe(false);
-    expect(canEnableChatLens(null, false)).toBe(true);
+  it('gates only Claude enablement on Claude hooks', () => {
+    expect(canEnableClaudeChatLens('installed')).toBe(true);
+    expect(canEnableClaudeChatLens('absent')).toBe(false);
+    expect(canEnableClaudeChatLens('no-claude')).toBe(false);
+    expect(canEnableClaudeChatLens(null)).toBe(true);
   });
 
   it('exposes every Codex pane so unmanaged sessions can show safe setup guidance', () => {

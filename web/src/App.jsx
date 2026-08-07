@@ -9,7 +9,8 @@ import {
   renameWindowIdeas, getChangelogSeen, setChangelogSeen,
   getVersionSeen, setVersionSeen,
   getReadInboxIds, addReadInboxId, pruneReadInboxIds, getNotifSeenTs, setNotifSeenTs,
-  getIdeas, getChatTone, setChatTone, getChatLensEnabled, setChatLensEnabled,
+  getIdeas, getChatTone, setChatTone,
+  getClaudeChatLensEnabled, setClaudeChatLensEnabled, getCodexChatLensEnabled, setCodexChatLensEnabled,
   getWorkspacePromptState, markWorkspaceAutoShown, ignoreWorkspaceCheckpoint,
   applyWorkspaceRestoreMapping, removeRestoredSessionBindings,
 } from './storage.js';
@@ -124,9 +125,10 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [chatTone, setChatToneState] = useState(getChatTone); // 对话-lens colour tone (persisted); default 深墨
   const pickChatTone = (tone) => { setChatTone(tone); setChatToneState(tone); };
-  // 对话 lens is experimental: hidden everywhere (lens switch + tone picker) until opted in via Settings.
-  const [chatLensOn, setChatLensOn] = useState(getChatLensEnabled);
-  const toggleChatLens = (on) => { setChatLensEnabled(on); setChatLensOn(on); };
+  const [claudeChatLensOn, setClaudeChatLensOn] = useState(getClaudeChatLensEnabled);
+  const toggleClaudeChatLens = (on) => { setClaudeChatLensEnabled(on); setClaudeChatLensOn(on); };
+  const [codexChatLensOn, setCodexChatLensOn] = useState(getCodexChatLensEnabled);
+  const toggleCodexChatLens = (on) => { setCodexChatLensEnabled(on); setCodexChatLensOn(on); };
   const [usageOpen, setUsageOpen] = useState(false);
   const [bindOpen, setBindOpen] = useState(false);
   const [newWinOpen, setNewWinOpen] = useState(false);
@@ -1319,7 +1321,7 @@ export default function App() {
   const currentAgent = states[current?.paneId]?.agent;
   const codexSessionWake = transcriptWake.paneId === current?.paneId ? transcriptWake.seq : 0;
   const codexSession = useCodexSession(
-    current?.paneId, chatLensOn && currentAgent === 'codex', codexSessionWake,
+    current?.paneId, codexChatLensOn && currentAgent === 'codex', codexSessionWake,
   );
   const currentKind = currentAgent === 'codex'
     ? codexKind(codexSession)
@@ -1400,7 +1402,9 @@ export default function App() {
   // The current pane's cwd (from /panes), used as the default base when resolving a relative doc path.
   const currentPaneCwd = current?.panes?.find((p) => p.id === current.paneId)?.cwd || null;
 
-  const chatLensAvailable = chatLensOn && canUseChatLens(currentAgent, hooksStatus);
+  const agentChatLensOn = currentAgent === 'claude' ? claudeChatLensOn
+    : currentAgent === 'codex' ? codexChatLensOn : false;
+  const chatLensAvailable = agentChatLensOn && canUseChatLens(currentAgent, hooksStatus);
   // Chat lens is active only for a supported pane whose lens is set to 'chat'. Drives BOTH swaps: the main
   // view (ChatView vs Terminal) and the bottom bar (ChatComposer vs the terminal BottomDock).
   const chatLens = chatLensAvailable && lens === 'chat';
@@ -1779,8 +1783,10 @@ export default function App() {
         workspaceProtection={workspaceProtection}
         chatTone={chatTone}
         onChatTone={pickChatTone}
-        chatLensEnabled={chatLensOn}
-        onChatLensEnabled={toggleChatLens}
+        claudeChatLensEnabled={claudeChatLensOn}
+        onClaudeChatLensEnabled={toggleClaudeChatLens}
+        codexChatLensEnabled={codexChatLensOn}
+        onCodexChatLensEnabled={toggleCodexChatLens}
         keyboardMode={keyboardMode}
         onKeyboardMode={chooseKeyboardMode}
         terminalTransport={terminalTransport}
@@ -1789,7 +1795,6 @@ export default function App() {
         onSnapshotInterval={chooseSnapshotInterval}
         hooksStatus={hooksStatus}
         onEnableHooks={enableHooks}
-        managedCodexAvailable={!!serverConfig?.managedCodex}
         termRef={termRef}
         onOpenChangelog={openChangelog}
         changelogUnread={changelogUnread}
