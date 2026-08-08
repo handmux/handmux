@@ -16,6 +16,21 @@ describe('Codex rollout transcript', () => {
     ]);
   });
 
+  it('omits Codex-injected AGENTS instructions without hiding normal user text', () => {
+    const parsed = parseCodexTranscript([
+      row({
+        type: 'message', role: 'user', content: [
+          { type: 'input_text', text: '# AGENTS.md instructions for /work\n\n<INSTRUCTIONS>\ninternal rules\n</INSTRUCTIONS>' },
+          { type: 'input_text', text: '<environment_context><cwd>/work</cwd></environment_context>' },
+        ],
+      }),
+      row({ type: 'message', role: 'user', content: [{ type: 'input_text', text: '用户问：instructions 是什么？' }] }),
+    ]);
+
+    expect(parsed).toHaveLength(1);
+    expect(parsed[0]).toMatchObject({ role: 'user', text: '用户问：instructions 是什么？' });
+  });
+
   it('keeps every tool in durable rollout order instead of the incomplete App Server snapshot', () => {
     const script = [
       'const first = await tools.exec_command({"cmd":"pwd"});',

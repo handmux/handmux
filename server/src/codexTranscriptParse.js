@@ -10,6 +10,15 @@ const cap = (value, limit) => {
   return text.length > limit ? `${text.slice(0, limit)}…` : text;
 };
 
+// Codex persists its injected context as role=user response items. Most begin with an XML wrapper, but
+// repository instructions begin with this Markdown header before their <INSTRUCTIONS> body. Match the full
+// generated envelope so an ordinary user message that merely mentions "instructions" remains visible.
+export function isCodexSyntheticUserText(value) {
+  const text = String(value ?? '');
+  return /^\s*</.test(text)
+    || /^\s*# AGENTS\.md instructions for [^\r\n]+\r?\n\s*<INSTRUCTIONS>(?:\r?\n|$)/.test(text);
+}
+
 function messageText(content) {
   if (typeof content === 'string') return content;
   if (!Array.isArray(content)) return '';
@@ -318,7 +327,7 @@ export function createCodexTranscriptParser() {
         if (item.role === 'developer') continue;
         if (!['user', 'assistant'].includes(item.role) || !text.trim()) continue;
         if (item.role === 'user') {
-          if (/^\s*</.test(text)) continue;
+          if (isCodexSyntheticUserText(text)) continue;
           const slash = SLASH_CMD_RE.exec(text.trim());
           if (slash) {
             const marker = { i, type: 'slash', name: `/${slash[1]}`, ts };

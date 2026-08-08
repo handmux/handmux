@@ -6,7 +6,9 @@ import { promises as fsp } from 'node:fs';
 import { readHead, readTail, firstCwd, isSessionUuid } from './scanUtils.js';
 import { classifyClaude } from './claude.js';
 import { resolveByExecutable, executableBasename } from './processIdentity.js';
-import { createCodexTranscriptParser, parseCodexTranscript } from '../codexTranscriptParse.js';
+import {
+  createCodexTranscriptParser, isCodexSyntheticUserText, parseCodexTranscript,
+} from '../codexTranscriptParse.js';
 
 export const sessionsDir = (home = os.homedir()) => path.join(home, '.codex', 'sessions');
 
@@ -34,8 +36,8 @@ export function codexExitSessionId(text) {
 
 // Last user turn out of a Codex rollout tail, for a recognizable one-line label. Codex records turns as
 // response_item messages: {payload:{type:'message',role:'user',content:[{type:'input_text',text}]}} (and a
-// flatter {type:'message',role:'user',...} in some versions). Skips the synthetic first turn Codex injects
-// (environment_context / user_instructions, which are XML-ish and start with '<'). Best-effort → '' on miss.
+// flatter {type:'message',role:'user',...} in some versions). Skips the synthetic context turns Codex
+// injects (including repository instructions after a resume). Best-effort → '' on miss.
 export function codexUserSnippet(tailText, max = 80) {
   const rows = String(tailText).split('\n');
   for (let i = rows.length - 1; i >= 0; i--) {
@@ -50,8 +52,9 @@ export function codexUserSnippet(tailText, max = 80) {
     let text = '';
     if (typeof c === 'string') text = c;
     else if (Array.isArray(c)) text = c.filter((b) => b && (b.type === 'input_text' || b.type === 'text')).map((b) => b.text).join(' ');
+    if (!text || isCodexSyntheticUserText(text)) continue;
     text = text.replace(/\s+/g, ' ').trim();
-    if (!text || text[0] === '<') continue; // synthetic environment/instructions turn → keep scanning
+    if (!text) continue;
     return text.length > max ? `${text.slice(0, max)}…` : text;
   }
   return '';

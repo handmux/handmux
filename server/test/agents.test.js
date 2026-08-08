@@ -74,6 +74,7 @@ describe('codex rollout parsing', () => {
       JSON.stringify({ type: 'response_item', payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: '<environment_context>cwd=/x</environment_context>' }] } }),
       JSON.stringify({ type: 'response_item', payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'refactor the parser' }] } }),
       JSON.stringify({ type: 'response_item', payload: { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'ok' }] } }),
+      JSON.stringify({ type: 'response_item', payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: '# AGENTS.md instructions for /x\n\n<INSTRUCTIONS>\ninternal rules\n</INSTRUCTIONS>' }] } }),
     ].join('\n');
     expect(codexUserSnippet(tail)).toBe('refactor the parser');
   });
