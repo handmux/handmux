@@ -55,6 +55,7 @@ All notable changes to handmux. Format follows [Keep a Changelog](https://keepac
 - 电脑代理新增按设备隔离的 Cookie Profile：相关企业系统可复用符合真实域规则的 SSO Cookie，并可选择加密持久化到电脑、按网站清理或全部清理；不同设备与手机直连始终隔离。
 
 ### Changed
+- 运行 handmux 的最低 Node.js 版本由 18 提升至 20；网页电脑代理使用的底层依赖要求 Node.js 20。
 - 原动态端口预览升级为网页预览器；网址和静态目录使用统一的设备本地标签与最近访问，支持按创建顺序排列、后台自动关闭，并在切换标签时保留页面、滚动和表单状态。
 - 手机直连、电脑代理和静态目录共用手机 / 电脑视图、75%–200% 网页缩放、刷新与停止；缩放只作用于网页内容，放大后保持原布局并显示滚动区域，标题栏和工具栏保持固定。
 - 静态目录由手动 TTL 改为访问自动续期，关闭标签立即释放，异常遗留两小时后回收；不再提供 `--preview-ttl` / `HANDMUX_PREVIEW_TTL`。静态预览使用独立运行 token 与 opaque iframe，不再在预览 URL 中携带主 Handmux token。
