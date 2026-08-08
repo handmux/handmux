@@ -314,6 +314,7 @@ export default {
 'chat.config.loadFailed': 'Could not load the model list',
 'chat.config.refresh': 'Refresh model list',
 'chat.config.saveFailed': 'The setting could not be saved',
+'chat.config.appliesNext': 'Model, reasoning effort, and Fast apply from your next message.',
 'chat.config.nextTurn': 'The current response stays unchanged; this applies to your next message.',
 'chat.goal.title': 'Task goal',
 'chat.goal.objective': 'Goal objective',

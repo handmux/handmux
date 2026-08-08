@@ -306,7 +306,7 @@ describe('ChatComposer', () => {
     updateCodexSettings.mockImplementation(async (_pane, updates) => ({ settings: {
       model: 'gpt-fast', effort: 'medium', serviceTier: null, ...updates,
     } }));
-    render(<ChatComposer pane="%1" agent="codex" kind="working" codexSession={{
+    const { rerender } = render(<ChatComposer pane="%1" agent="codex" kind="working" codexSession={{
       managed: true, settings: { model: 'gpt-fast', effort: 'medium', serviceTier: null },
     }} />);
     fireEvent.click(screen.getByRole('button', { name: '设置模型、Fast 和思考强度' }));
@@ -314,6 +314,11 @@ describe('ChatComposer', () => {
     expect(document.querySelector('.codex-fast-title svg')).toBeTruthy();
     expect(document.querySelector('.codex-config-next-turn').previousElementSibling)
       .toBe(document.querySelector('.codex-fast-row'));
+    expect(screen.getByText('当前回复不变，下条消息生效')).toBeTruthy();
+    rerender(<ChatComposer pane="%1" agent="codex" kind="idle" codexSession={{
+      managed: true, settings: { model: 'gpt-fast', effort: 'medium', serviceTier: null },
+    }} />);
+    expect(screen.getByText('模型、思考强度和 Fast 均从下一条消息生效')).toBeTruthy();
     expect(document.querySelector('.cc-fast-indicator')).toBeNull();
     expect(fast.checked).toBe(false);
     fireEvent.click(fast);

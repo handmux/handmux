@@ -301,7 +301,9 @@ function CodexConfigMenu({ open, pane, settings, busy, onChange, onClose, onAuth
               </span>
             </label>
           )}
-          {busy && <div className="codex-config-next-turn">{t('chat.config.nextTurn')}</div>}
+          <div className="codex-config-next-turn">
+            {t(busy ? 'chat.config.nextTurn' : 'chat.config.appliesNext')}
+          </div>
         </footer>
       </section>
     </>
