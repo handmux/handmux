@@ -1,6 +1,9 @@
-export function currentPaneAgent(current, states = {}) {
+export function currentPaneAgent(current, states = {}, pinnedCodexPanes = null) {
   const paneId = current?.paneId;
   if (!paneId) return null;
+  // Controlled takeover owns this pane's product identity until the exact managed thread appears or the
+  // user explicitly returns to terminal. Transient shell/stale process scans must never hide chat midway.
+  if (pinnedCodexPanes?.has(paneId)) return 'codex';
   return current.panes?.find((pane) => pane.id === paneId)?.agent
     || states[paneId]?.agent
     || null;

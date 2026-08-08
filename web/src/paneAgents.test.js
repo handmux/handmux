@@ -21,4 +21,10 @@ describe('pane agent identity', () => {
   it('keeps stable pane references when live identity has not changed', () => {
     expect(reconcilePaneAgents(current.panes, { '%1': { agent: 'codex' } })).toBe(current.panes);
   });
+
+  it('pins Codex identity throughout a controlled takeover, even over stale detection', () => {
+    const pinned = new Set(['%1']);
+    expect(currentPaneAgent({ ...current, panes: [{ id: '%1', agent: null }] }, {}, pinned)).toBe('codex');
+    expect(currentPaneAgent({ ...current, panes: [{ id: '%1', agent: 'claude' }] }, {}, pinned)).toBe('codex');
+  });
 });

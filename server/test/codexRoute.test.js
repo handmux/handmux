@@ -175,6 +175,32 @@ describe('Codex App Server routes', () => {
     expect(status).toHaveBeenCalledWith('%1', THREAD_ID);
   });
 
+  it('caps takeover waiting at 30 seconds without claiming another App Server thread', async () => {
+    const base = Date.now();
+    const now = vi.spyOn(Date, 'now').mockReturnValue(base);
+    try {
+      const harness = takeoverHarness();
+      const app = appFor({
+        codexApp: {
+          discover: vi.fn()
+            .mockResolvedValueOnce({ managed: false, threadId: null })
+            .mockResolvedValue({ managed: true, threadId: 'wrong-thread' }),
+        },
+        commands: harness.commands,
+        claudeEvents: harness.claudeEvents,
+      });
+
+      await request(app).post('/codex/takeover').send({ pane: '%1' }).expect(200);
+      now.mockReturnValue(base + 30_000);
+      await request(app).get('/codex/session?pane=%251').expect(200, {
+        managed: false, threadId: null,
+        takeover: { state: 'timed-out', needsTerminal: true },
+      });
+    } finally {
+      now.mockRestore();
+    }
+  });
+
   it('rejects malformed structured responses before calling App Server', async () => {
     await request(appFor({ codexApp: {} }))
       .post('/codex/approval').send({ pane: '%1', requestId: null, decision: 'accept' })

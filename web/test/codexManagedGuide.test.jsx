@@ -38,7 +38,7 @@ describe('CodexManagedGuide', () => {
     expect(screen.getByText('正在启动托管')).toBeTruthy();
   });
 
-  it('does not claim takeover when Codex does not return a verifiable current session', async () => {
+  it('keeps the chat page pinned when Codex does not return a verifiable current session', async () => {
     const onTakeoverChange = vi.fn();
     takeoverCodexSession.mockRejectedValue({ serverError: 'codex-session-unconfirmed' });
     render(<CodexManagedGuide pane="%1" session={{ managed: false }} onTerminal={() => {}}
@@ -49,7 +49,7 @@ describe('CodexManagedGuide', () => {
     });
     expect(screen.getByText('需要从终端继续')).toBeTruthy();
     expect(screen.getByText(/没有正常退出或返回可确认的恢复信息/)).toBeTruthy();
-    expect(onTakeoverChange).toHaveBeenLastCalledWith('%1', false);
+    expect(onTakeoverChange.mock.calls).toEqual([['%1', true]]);
   });
 
   it('stays on the page and reveals a terminal action only after startup is delayed', () => {
@@ -64,6 +64,20 @@ describe('CodexManagedGuide', () => {
     expect(screen.queryByRole('button', { name: '前往终端' })).toBeNull();
     act(() => { vi.advanceTimersByTime(1); });
     expect(screen.getByText(/可能正在终端等待信任或其他确认/)).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: '前往终端' }));
+    expect(onTerminal).toHaveBeenCalledOnce();
+  });
+
+  it('stays in chat after the 30-second cap and waits for an explicit terminal choice', () => {
+    const onTerminal = vi.fn();
+    const onTakeoverChange = vi.fn();
+    render(<CodexManagedGuide pane="%1" session={{
+      managed: false, takeover: { state: 'timed-out', needsTerminal: true },
+    }} onTerminal={onTerminal} onTakeoverChange={onTakeoverChange} />);
+    expect(screen.getByText('托管仍未就绪')).toBeTruthy();
+    expect(screen.getByText(/当前页面不会自动切换/)).toBeTruthy();
+    expect(onTerminal).not.toHaveBeenCalled();
+    expect(onTakeoverChange).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('button', { name: '前往终端' }));
     expect(onTerminal).toHaveBeenCalledOnce();
   });

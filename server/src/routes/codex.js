@@ -4,6 +4,7 @@ import { getAgent } from '../agents/index.js';
 import { codexExitSessionId } from '../agents/codex.js';
 
 const TAKEOVER_TERMINAL_HINT_MS = 10_000;
+const TAKEOVER_TIMEOUT_MS = 30_000;
 const INPUT_SETTLE_MS = 100;
 const EXIT_POLL_MS = 500;
 const EXIT_ATTEMPTS = 10;
@@ -78,9 +79,13 @@ export function codexRoutes({ codexApp, commands, claudeEvents }) {
   // idempotent, this gates discovery while the replacement process starts: App Server may briefly list
   // another historical thread, but the UI must not enter chat until the exact pre-takeover thread appears.
   const takeovers = new Map(); // pane -> { threadId, startedAt }
-  const takeoverView = (takeover) => ({
-    state: 'starting', needsTerminal: Date.now() - takeover.startedAt >= TAKEOVER_TERMINAL_HINT_MS,
-  });
+  const takeoverView = (takeover) => {
+    const elapsed = Date.now() - takeover.startedAt;
+    return {
+      state: elapsed >= TAKEOVER_TIMEOUT_MS ? 'timed-out' : 'starting',
+      needsTerminal: elapsed >= TAKEOVER_TERMINAL_HINT_MS,
+    };
+  };
 
   r.get('/codex/session', async (req, res) => {
     const pane = req.query.pane;

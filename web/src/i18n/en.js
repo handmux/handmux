@@ -362,6 +362,8 @@ export default {
 'chat.managedGuide.startingTitle': 'Starting managed mode',
 'chat.managedGuide.startingHint': 'Resuming the original session. Chat opens automatically when it is ready.',
 'chat.managedGuide.terminalHint': 'Startup has not finished. Codex may be waiting for trust or another confirmation in the terminal.',
+'chat.managedGuide.timeoutTitle': 'Managed mode is not ready',
+'chat.managedGuide.timeoutHint': 'Handmux has waited 30 seconds. Codex may need a manual confirmation in the terminal. This page will not switch automatically.',
 'chat.managedGuide.manualTitle': 'Continue in the terminal',
 'chat.managedGuide.manualHint': 'Codex did not exit normally or return verifiable recovery information. Open the terminal to inspect its current state.',
 'chat.managedGuide.goneTitle': 'This Codex has changed',

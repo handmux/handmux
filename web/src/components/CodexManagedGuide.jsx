@@ -13,7 +13,8 @@ export default function CodexManagedGuide({ pane, session, onTerminal, onAuthFai
   const [errorCode, setErrorCode] = useState(null);
   const submittingRef = useRef(false);
   const requestSeqRef = useRef(0);
-  const starting = !!session?.takeover || localStarting;
+  const timedOut = session?.takeover?.state === 'timed-out';
+  const starting = (!!session?.takeover || localStarting) && !timedOut;
 
   useEffect(() => {
     requestSeqRef.current += 1; // invalidate a response started for the previously displayed pane
@@ -47,7 +48,6 @@ export default function CodexManagedGuide({ pane, session, onTerminal, onAuthFai
       setLocalStarting(true);
       if (result?.takeover?.needsTerminal) setShowTerminalHint(true);
     } catch (error) {
-      onTakeoverChange?.(pane, false);
       if (error instanceof UnauthorizedError) onAuthFail?.();
       else if (requestSeqRef.current === requestSeq) {
         setErrorCode(error?.serverError || 'codex-takeover-failed');
@@ -61,14 +61,17 @@ export default function CodexManagedGuide({ pane, session, onTerminal, onAuthFai
   };
 
   const unbound = ['codex-session-unbound', 'codex-session-unconfirmed', 'codex-exit-blocked'].includes(errorCode);
+  const manual = unbound || timedOut;
   const paneGone = errorCode === 'codex-pane-gone' || errorCode === 'codex-pane-changed';
   const title = starting ? t('chat.managedGuide.startingTitle')
-    : unbound ? t('chat.managedGuide.manualTitle')
+    : timedOut ? t('chat.managedGuide.timeoutTitle')
+      : unbound ? t('chat.managedGuide.manualTitle')
       : paneGone ? t('chat.managedGuide.goneTitle')
         : t('chat.managedGuide.title');
   const hint = starting
     ? (showTerminalHint ? t('chat.managedGuide.terminalHint') : t('chat.managedGuide.startingHint'))
-    : unbound ? t('chat.managedGuide.manualHint')
+    : timedOut ? t('chat.managedGuide.timeoutHint')
+      : unbound ? t('chat.managedGuide.manualHint')
       : paneGone ? t('chat.managedGuide.goneHint')
         : errorCode ? t('chat.managedGuide.failedHint')
           : t('chat.managedGuide.hint');
@@ -78,7 +81,7 @@ export default function CodexManagedGuide({ pane, session, onTerminal, onAuthFai
       <div className={`codex-managed-guide-icon ${starting ? 'starting' : ''}`} aria-hidden="true"><BotIcon /></div>
       <h2>{title}</h2>
       <p>{hint}</p>
-      {!starting && !unbound && !paneGone && (
+      {!starting && !manual && !paneGone && (
         <button type="button" className="codex-managed-guide-primary"
           disabled={submitting} onClick={() => setConfirming(true)}>
           {submitting ? t('chat.managedGuide.submitting') : t('chat.managedGuide.start')}

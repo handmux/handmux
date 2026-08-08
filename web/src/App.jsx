@@ -1323,9 +1323,7 @@ export default function App() {
   // A controlled takeover briefly replaces the old Codex with a shell before the managed Codex child is
   // visible. Pin that pane's identity through the gap so the chat page and its App Server poll do not
   // disappear halfway through startup.
-  const detectedCurrentAgent = currentPaneAgent(current, states);
-  const currentAgent = detectedCurrentAgent
-    || (codexTakeoverPanes.has(current?.paneId) ? 'codex' : null);
+  const currentAgent = currentPaneAgent(current, states, codexTakeoverPanes);
   const codexSessionWake = transcriptWake.paneId === current?.paneId ? transcriptWake.seq : 0;
   const codexSession = useCodexSession(
     current?.paneId, codexChatLensOn && currentAgent === 'codex', codexSessionWake,
@@ -2100,7 +2098,11 @@ export default function App() {
                   session={codexSession}
                   onAuthFail={onAuthFail}
                   onTakeoverChange={setCodexTakeoverPending}
-                  onTerminal={() => { setLens('terminal'); localStorage.setItem('tw_lens_' + current.paneId, 'terminal'); }} />
+                  onTerminal={() => {
+                    setCodexTakeoverPending(current.paneId, false);
+                    setLens('terminal');
+                    localStorage.setItem('tw_lens_' + current.paneId, 'terminal');
+                  }} />
               ) : (
                 <ChatView pane={current.paneId} agent={currentAgent} kind={currentKind} msg={states[current.paneId]?.msg} onAuthFail={onAuthFail}
                   onDocLinkTap={onDocLinkTap}

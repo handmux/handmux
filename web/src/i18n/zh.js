@@ -361,6 +361,8 @@ export default {
 'chat.managedGuide.startingTitle': '正在启动托管',
 'chat.managedGuide.startingHint': '正在恢复原会话，成功后会自动进入对话。',
 'chat.managedGuide.terminalHint': '启动尚未完成，Codex 可能正在终端等待信任或其他确认。',
+'chat.managedGuide.timeoutTitle': '托管仍未就绪',
+'chat.managedGuide.timeoutHint': '已经等待 30 秒，Codex 可能需要你前往终端人工确认。当前页面不会自动切换。',
 'chat.managedGuide.manualTitle': '需要从终端继续',
 'chat.managedGuide.manualHint': 'Codex 没有正常退出或返回可确认的恢复信息。请前往终端查看当前状态。',
 'chat.managedGuide.goneTitle': '这个 Codex 已经变化',
