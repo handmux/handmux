@@ -565,11 +565,16 @@ describe('Codex App Server client', () => {
       expect.objectContaining({ model: 'gpt-test', defaultReasoningEffort: 'medium' }),
     ]);
     expect(await app.updateSettings('%1', 'thread-1', {
-      model: 'gpt-new', effort: 'high', approvalPolicy: 'never',
-    })).toMatchObject({ model: 'gpt-new', effort: 'high', approvalPolicy: 'never' });
+      model: 'gpt-new', effort: 'high', approvalPolicy: 'on-request',
+      approvalsReviewer: 'auto_review', sandboxPolicy: { type: 'workspaceWrite' },
+    })).toMatchObject({
+      model: 'gpt-new', effort: 'high', approvalPolicy: 'on-request',
+      approvalsReviewer: 'auto_review', sandboxPolicy: { type: 'workspaceWrite' },
+    });
     expect(proxy.sent).toContainEqual(expect.objectContaining({
       method: 'thread/settings/update', params: {
-        threadId: 'thread-1', model: 'gpt-new', effort: 'high', approvalPolicy: 'never',
+        threadId: 'thread-1', model: 'gpt-new', effort: 'high', approvalPolicy: 'on-request',
+        approvalsReviewer: 'auto_review', sandboxPolicy: { type: 'workspaceWrite' },
       },
     }));
     app.close();

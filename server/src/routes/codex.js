@@ -9,6 +9,20 @@ const INPUT_SETTLE_MS = 100;
 const EXIT_POLL_MS = 500;
 const EXIT_ATTEMPTS = 10;
 const RECOVERY_OUTPUT_ATTEMPTS = 20;
+const PERMISSION_MODES = {
+  default: {
+    approvalPolicy: 'on-request', approvalsReviewer: 'user',
+    sandboxPolicy: { type: 'workspaceWrite' },
+  },
+  'auto-review': {
+    approvalPolicy: 'on-request', approvalsReviewer: 'auto_review',
+    sandboxPolicy: { type: 'workspaceWrite' },
+  },
+  'full-access': {
+    approvalPolicy: 'never', approvalsReviewer: 'user',
+    sandboxPolicy: { type: 'dangerFullAccess' },
+  },
+};
 
 const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -211,6 +225,13 @@ export function codexRoutes({ codexApp, commands, claudeEvents }) {
         return res.status(400).json({ error: 'bad approvalPolicy' });
       }
       updates.approvalPolicy = approvalPolicy;
+    }
+    const permissionMode = req.body?.permissionMode;
+    if (permissionMode != null) {
+      if (typeof permissionMode !== 'string' || !PERMISSION_MODES[permissionMode]) {
+        return res.status(400).json({ error: 'bad permissionMode' });
+      }
+      Object.assign(updates, PERMISSION_MODES[permissionMode]);
     }
     if (!Object.keys(updates).length) return res.status(400).json({ error: 'no settings supplied' });
     try { res.json({ settings: await codexApp.updateSettings(target.pane, target.threadId, updates) }); }

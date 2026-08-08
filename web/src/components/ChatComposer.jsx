@@ -97,13 +97,40 @@ function sandboxLabel(settings) {
   return null;
 }
 
-function approvalLabel(policy) {
-  if (policy === 'never') return t('chat.status.approvalNever');
-  if (policy === 'on-request') return t('chat.status.approvalOnRequest');
-  if (policy === 'on-failure') return t('chat.status.approvalOnFailure');
-  if (policy === 'untrusted') return t('chat.status.approvalUntrusted');
-  if (policy && typeof policy === 'object') return t('chat.status.approvalCustom');
-  return typeof policy === 'string' ? policy : null;
+const PERMISSION_MODE_SETTINGS = {
+  default: {
+    approvalPolicy: 'on-request', approvalsReviewer: 'user',
+    sandboxPolicy: { type: 'workspaceWrite' },
+  },
+  'auto-review': {
+    approvalPolicy: 'on-request', approvalsReviewer: 'auto_review',
+    sandboxPolicy: { type: 'workspaceWrite' },
+  },
+  'full-access': {
+    approvalPolicy: 'never', approvalsReviewer: 'user',
+    sandboxPolicy: { type: 'dangerFullAccess' },
+  },
+};
+
+function permissionModeValue(settings) {
+  const sandbox = settings?.sandboxPolicy?.type;
+  const approval = settings?.approvalPolicy;
+  const reviewer = settings?.approvalsReviewer;
+  if ((sandbox === 'dangerFullAccess' || sandbox === 'danger-full-access') && approval === 'never') {
+    return 'full-access';
+  }
+  if ((sandbox === 'workspaceWrite' || sandbox === 'workspace-write') && approval === 'on-request') {
+    if (reviewer === 'auto_review' || reviewer === 'guardian_subagent') return 'auto-review';
+    if (!reviewer || reviewer === 'user') return 'default';
+  }
+  return 'custom';
+}
+
+function permissionModeLabel(mode) {
+  if (mode === 'default') return t('chat.permissionMode.default');
+  if (mode === 'auto-review') return t('chat.permissionMode.autoReview');
+  if (mode === 'full-access') return t('chat.permissionMode.fullAccess');
+  return t('chat.permissionMode.custom');
 }
 
 // model/list is account-wide and effectively static for one app run. Share one successful request across
@@ -279,9 +306,9 @@ export default function ChatComposer({
   const [editOpen, setEditOpen] = useState(false);
   const [configOpen, setConfigOpen] = useState(false);
   const [contextOpen, setContextOpen] = useState(false);
-  const [approvalExpanded, setApprovalExpanded] = useState(false);
-  const [approvalSaving, setApprovalSaving] = useState(false);
-  const [approvalError, setApprovalError] = useState('');
+  const [permissionExpanded, setPermissionExpanded] = useState(false);
+  const [permissionSaving, setPermissionSaving] = useState(false);
+  const [permissionError, setPermissionError] = useState('');
   const [copiedStatusField, setCopiedStatusField] = useState(null);
   const [localSettings, setLocalSettings] = useState(null);
   const refreshShortcuts = () => {
@@ -319,13 +346,13 @@ export default function ChatComposer({
   useEffect(() => {
     if (!managedCodex) {
       setConfigOpen(false);
-      setApprovalExpanded(false);
-      setApprovalError('');
+      setPermissionExpanded(false);
+      setPermissionError('');
     }
   }, [managedCodex]);
   useEffect(() => {
-    setApprovalExpanded(false);
-    setApprovalError('');
+    setPermissionExpanded(false);
+    setPermissionError('');
   }, [pane]);
   useEffect(() => {
     if (managedCodex && pane) void loadCodexModels(pane).catch(() => {});
@@ -352,30 +379,31 @@ export default function ChatComposer({
   const workingDirectory = managedSettings?.cwd || null;
   const gitBranch = codexSession?.gitBranch || null;
   const access = sandboxLabel(managedSettings);
-  const approval = approvalLabel(managedSettings?.approvalPolicy);
-  const approvalOptions = [
+  const permissionMode = permissionModeValue(managedSettings);
+  const permissionModeName = permissionModeLabel(permissionMode);
+  const permissionOptions = [
     {
-      value: 'untrusted',
-      label: t('chat.status.approvalUntrusted'),
-      description: t('chat.approvalMode.untrustedHint'),
+      value: 'default',
+      label: t('chat.permissionMode.default'),
+      description: t('chat.permissionMode.defaultHint'),
     },
     {
-      value: 'on-request',
-      label: t('chat.status.approvalOnRequest'),
-      description: t('chat.approvalMode.onRequestHint'),
+      value: 'auto-review',
+      label: t('chat.permissionMode.autoReview'),
+      description: t('chat.permissionMode.autoReviewHint'),
     },
     {
-      value: 'never',
-      label: t('chat.status.approvalNever'),
-      description: t('chat.approvalMode.neverHint'),
+      value: 'full-access',
+      label: t('chat.permissionMode.fullAccess'),
+      description: t('chat.permissionMode.fullAccessHint'),
     },
   ];
   useEffect(() => { if (!showContextRing) setContextOpen(false); }, [showContextRing]);
   useEffect(() => {
     if (!contextOpen) {
       setCopiedStatusField(null);
-      setApprovalExpanded(false);
-      setApprovalError('');
+      setPermissionExpanded(false);
+      setPermissionError('');
     }
   }, [contextOpen]);
 
@@ -397,23 +425,23 @@ export default function ChatComposer({
     setNotice('');
     clearTimeout(noticeTimerRef.current);
   };
-  const saveApprovalPolicy = async (approvalPolicy) => {
-    if (approvalSaving) return;
-    if (approvalPolicy === managedSettings?.approvalPolicy) {
-      setApprovalExpanded(false);
+  const savePermissionMode = async (nextMode) => {
+    if (permissionSaving) return;
+    if (nextMode === permissionMode) {
+      setPermissionExpanded(false);
       return;
     }
-    setApprovalSaving(true);
-    setApprovalError('');
+    setPermissionSaving(true);
+    setPermissionError('');
     try {
-      const result = await updateCodexSettings(pane, { approvalPolicy });
-      setLocalSettings(result?.settings || { ...managedSettings, approvalPolicy });
-      setApprovalExpanded(false);
-      showNotice(t('chat.approvalMode.saved'));
+      const result = await updateCodexSettings(pane, { permissionMode: nextMode });
+      setLocalSettings(result?.settings || { ...managedSettings, ...PERMISSION_MODE_SETTINGS[nextMode] });
+      setPermissionExpanded(false);
+      showNotice(t('chat.permissionMode.saved'));
     } catch (err) {
       if (err instanceof UnauthorizedError) onAuthFail?.();
-      else setApprovalError(err?.serverError || err?.message || t('chat.approvalMode.saveFailed'));
-    } finally { setApprovalSaving(false); }
+      else setPermissionError(err?.serverError || err?.message || t('chat.permissionMode.saveFailed'));
+    } finally { setPermissionSaving(false); }
   };
 
   // Grow to fit content; CSS max-height caps it (~6 lines) then it scrolls. +2 for the border under
@@ -789,28 +817,28 @@ export default function ChatComposer({
                         <span>{t('chat.status.access')}</span><strong>{access}</strong>
                       </div>
                     )}
-                    {approval && (
+                    {permissionModeName && (
                       <>
-                        <button type="button" className="cc-context-row cc-context-approval-row"
-                          aria-label={t('chat.approvalMode.open', { value: approval })}
-                          aria-expanded={approvalExpanded} disabled={approvalSaving}
+                        <button type="button" className="cc-context-row cc-context-permission-row"
+                          aria-label={t('chat.permissionMode.open', { value: permissionModeName })}
+                          aria-expanded={permissionExpanded} disabled={permissionSaving}
                           onClick={() => {
-                            setApprovalError('');
-                            setApprovalExpanded((expanded) => !expanded);
+                            setPermissionError('');
+                            setPermissionExpanded((expanded) => !expanded);
                           }}>
-                          <span>{t('chat.status.approval')}</span>
-                          <strong>{approval}<ChevronDownIcon /></strong>
+                          <span>{t('chat.status.permissionMode')}</span>
+                          <strong>{permissionModeName}<ChevronDownIcon /></strong>
                         </button>
-                        {approvalExpanded && (
-                          <div className="cc-context-approval-options" role="radiogroup"
-                            aria-label={t('chat.approvalMode.title')}>
-                            {approvalOptions.map((option) => {
-                              const selected = option.value === managedSettings?.approvalPolicy;
+                        {permissionExpanded && (
+                          <div className="cc-context-permission-options" role="radiogroup"
+                            aria-label={t('chat.permissionMode.title')}>
+                            {permissionOptions.map((option) => {
+                              const selected = option.value === permissionMode;
                               return (
                                 <button type="button" role="radio" aria-checked={selected}
-                                  key={option.value} disabled={approvalSaving}
+                                  key={option.value} disabled={permissionSaving}
                                   className={selected ? 'selected' : ''}
-                                  onClick={() => void saveApprovalPolicy(option.value)}>
+                                  onClick={() => void savePermissionMode(option.value)}>
                                   <span>
                                     <strong>{option.label}</strong>
                                     <small>{option.description}</small>
@@ -819,10 +847,10 @@ export default function ChatComposer({
                                 </button>
                               );
                             })}
-                            {approvalError && (
-                              <div className="cc-context-approval-error" role="status">{approvalError}</div>
+                            {permissionError && (
+                              <div className="cc-context-permission-error" role="status">{permissionError}</div>
                             )}
-                            <div className="cc-context-approval-next">{t('chat.approvalMode.nextTurn')}</div>
+                            <div className="cc-context-permission-next">{t('chat.permissionMode.nextTurn')}</div>
                           </div>
                         )}
                       </>

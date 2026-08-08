@@ -236,7 +236,7 @@ describe('ChatComposer', () => {
       approvals: [{ id: 'approval-1' }],
       settings: {
         model: 'gpt-5.6-terra', effort: 'medium', cwd: '/work/project',
-        sandboxPolicy: { type: 'workspaceWrite' }, approvalPolicy: 'on-request',
+        sandboxPolicy: { type: 'workspaceWrite' }, approvalPolicy: 'on-request', approvalsReviewer: 'user',
       },
       contextUsage: { usedTokens: 159719, totalTokens: 258400 },
     }} />);
@@ -261,7 +261,7 @@ describe('ChatComposer', () => {
     expect(fireEvent(directory, new MouseEvent('pointerdown', { bubbles: true, cancelable: true }))).toBe(true);
     expect(detail.textContent).toContain('main');
     expect(detail.textContent).toContain('可修改工作区');
-    expect(detail.textContent).toContain('按需确认');
+    expect(detail.textContent).toContain('默认');
     fireEvent.click(directoryCopy);
     await waitFor(() => expect(navigator.clipboard.writeText).toHaveBeenCalledWith('/work/project'));
     const sessionCopy = screen.getByRole('button', { name: '复制会话 ID' });
@@ -279,13 +279,13 @@ describe('ChatComposer', () => {
     expect(document.activeElement).not.toBe(input);
   });
 
-  it('changes the approval policy inline without closing session status', async () => {
+  it('changes the TUI-compatible permission mode inline without closing session status', async () => {
     const settings = {
       model: 'gpt-test', effort: 'medium', cwd: '/work/project',
-      sandboxPolicy: { type: 'workspaceWrite' }, approvalPolicy: 'on-request',
+      sandboxPolicy: { type: 'workspaceWrite' }, approvalPolicy: 'on-request', approvalsReviewer: 'user',
     };
     updateCodexSettings.mockResolvedValueOnce({
-      settings: { ...settings, approvalPolicy: 'never' },
+      settings: { ...settings, approvalsReviewer: 'auto_review' },
     });
     render(<ChatComposer pane="%1" agent="codex" kind="working" codexSession={{
       managed: true,
@@ -294,24 +294,27 @@ describe('ChatComposer', () => {
     }} />);
 
     fireEvent.click(screen.getByRole('button', { name: '会话状态，上下文占用 46%' }));
-    fireEvent.click(screen.getByRole('button', { name: '设置审批方式，当前为按需确认' }));
+    fireEvent.click(screen.getByRole('button', { name: '设置权限模式，当前为默认' }));
     const status = screen.getByRole('dialog', { name: '会话状态' });
-    const choices = screen.getByRole('radiogroup', { name: '审批方式' });
+    const choices = screen.getByRole('radiogroup', { name: '权限模式' });
     expect(status.contains(choices)).toBe(true);
-    expect(screen.getByRole('radio', { name: /按需确认/ }).getAttribute('aria-checked')).toBe('true');
+    expect(choices.querySelector('[role="radio"][aria-checked="true"]')?.textContent).toContain('默认');
+    expect(choices.textContent).toContain('联网或访问其他位置时会询问你');
+    expect(choices.textContent).toContain('Codex 自动判断批准或拒绝');
+    expect(choices.textContent).toContain('仅在完全信任当前任务时使用');
     expect(choices.textContent).toContain('修改从下一条消息生效');
 
-    fireEvent.click(screen.getByRole('radio', { name: /不请求确认/ }));
+    fireEvent.click(screen.getByRole('radio', { name: /自动审批/ }));
     await waitFor(() => expect(updateCodexSettings).toHaveBeenCalledWith('%1', {
-      approvalPolicy: 'never',
+      permissionMode: 'auto-review',
     }));
-    await waitFor(() => expect(screen.queryByRole('radiogroup', { name: '审批方式' })).toBeNull());
+    await waitFor(() => expect(screen.queryByRole('radiogroup', { name: '权限模式' })).toBeNull());
     expect(screen.getByRole('dialog', { name: '会话状态' })).toBe(status);
-    expect(screen.getByRole('status').textContent).toContain('审批方式已更新，下条消息生效');
-    expect(screen.getByRole('button', { name: '设置审批方式，当前为不请求确认' })).toBeTruthy();
+    expect(screen.getByRole('status').textContent).toContain('权限模式已更新，下条消息生效');
+    expect(screen.getByRole('button', { name: '设置权限模式，当前为自动审批' })).toBeTruthy();
   });
 
-  it('labels granular App Server approval settings without rendering the raw object', () => {
+  it('labels non-preset App Server permission settings without rendering the raw object', () => {
     render(<ChatComposer pane="%1" agent="codex" kind="idle" codexSession={{
       managed: true,
       settings: {
@@ -321,7 +324,7 @@ describe('ChatComposer', () => {
       contextUsage: { usedTokens: 10_000, totalTokens: 100_000 },
     }} />);
     fireEvent.click(screen.getByRole('button', { name: '会话状态，上下文占用 10%' }));
-    expect(screen.getByRole('button', { name: '设置审批方式，当前为自定义' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: '设置权限模式，当前为自定义' })).toBeTruthy();
   });
 
   it.each([
