@@ -269,20 +269,6 @@ function CodexConfigMenu({ open, pane, settings, busy, onChange, onClose, onAuth
           {error && <div className="codex-config-error" role="status">{error}</div>}
         </div>
         <footer className="codex-config-footer">
-          {fastTier && (
-            <label className="codex-fast-row">
-              <span>
-                <strong className="codex-fast-title">{fastTier.name || t('chat.config.fast')}<BoltIcon /></strong>
-                <small>{fastTier.description || t('chat.config.fastHint')}</small>
-              </span>
-              <span className="cmd-switch">
-                <input type="checkbox" checked={fastEnabled} disabled={disabled}
-                  onChange={(event) => void save({ serviceTier: event.target.checked ? fastTier.id : null })} />
-                <span className="cmd-switch-track" aria-hidden="true" />
-                <span className="cmd-switch-knob" aria-hidden="true" />
-              </span>
-            </label>
-          )}
           <div className="codex-config-section">
             <div className="codex-config-label">{t('chat.config.effort')}</div>
             <div className="codex-effort-list">
@@ -302,6 +288,20 @@ function CodexConfigMenu({ open, pane, settings, busy, onChange, onClose, onAuth
             </div>
           </div>
           {busy && <div className="codex-config-next-turn">{t('chat.config.nextTurn')}</div>}
+          {fastTier && (
+            <label className="codex-fast-row">
+              <span>
+                <strong className="codex-fast-title">{fastTier.name || t('chat.config.fast')}<BoltIcon /></strong>
+                <small>{fastTier.description || t('chat.config.fastHint')}</small>
+              </span>
+              <span className="cmd-switch">
+                <input type="checkbox" checked={fastEnabled} disabled={disabled}
+                  onChange={(event) => void save({ serviceTier: event.target.checked ? fastTier.id : null })} />
+                <span className="cmd-switch-track" aria-hidden="true" />
+                <span className="cmd-switch-knob" aria-hidden="true" />
+              </span>
+            </label>
+          )}
         </footer>
       </section>
     </>

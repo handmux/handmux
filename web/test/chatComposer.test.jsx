@@ -312,6 +312,8 @@ describe('ChatComposer', () => {
     fireEvent.click(screen.getByRole('button', { name: '设置模型、Fast 和思考强度' }));
     const fast = await screen.findByRole('checkbox', { name: /Fast/ });
     expect(document.querySelector('.codex-fast-title svg')).toBeTruthy();
+    expect(document.querySelector('.codex-config-footer').lastElementChild)
+      .toBe(document.querySelector('.codex-fast-row'));
     expect(document.querySelector('.cc-fast-indicator')).toBeNull();
     expect(fast.checked).toBe(false);
     fireEvent.click(fast);

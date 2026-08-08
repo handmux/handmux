@@ -2951,7 +2951,7 @@ button.cmd-text { background: none; border: none; text-align: left; }
 }
 .codex-fast-row {
   min-height: 42px; display: flex; align-items: center; justify-content: space-between; gap: 12px;
-  padding: 1px 3px 5px; border-bottom: 1px solid var(--ct-line);
+  padding: 5px 3px 1px; border-top: 1px solid var(--ct-line);
 }
 .codex-fast-row > span:first-child {
   flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px;
