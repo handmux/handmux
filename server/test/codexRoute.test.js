@@ -34,7 +34,6 @@ function takeoverHarness({ exitId = THREAD_ID } = {}) {
     commands: {
       listLivePanes: async () => [{ id: '%1', cmd: 'codex' }],
       sendKey: vi.fn(async () => {}),
-      paneInfo: vi.fn(async () => ({ cursorVisible: true })),
       capturePlain,
       runPaneCommand,
     },
@@ -97,30 +96,15 @@ describe('Codex App Server routes', () => {
     expect(harness.runPaneCommand).not.toHaveBeenCalled();
   });
 
-  it('uses a second Ctrl+C after the first one only interrupts the active turn', async () => {
+  it('waits for a slow Codex exit without ever sending a second Ctrl+C', async () => {
     const harness = takeoverHarness();
     harness.claudeEvents.identifyPaneAgents
       .mockReset()
       .mockResolvedValueOnce({ '%1': 'codex' }) // preflight
       .mockResolvedValueOnce({ '%1': 'codex' })
-      .mockResolvedValueOnce({ '%1': 'codex' }) // still Codex after the settle/re-check
+      .mockResolvedValueOnce({ '%1': 'codex' })
+      .mockResolvedValueOnce({ '%1': 'codex' })
       .mockResolvedValue({});
-    const app = appFor({
-      codexApp: { discover: async () => ({ managed: false, threadId: null }) },
-      commands: harness.commands,
-      claudeEvents: harness.claudeEvents,
-    });
-    await request(app).post('/codex/takeover').send({ pane: '%1' }).expect(200);
-    expect(harness.commands.sendKey.mock.calls).toEqual([['%1', 'C-c'], ['%1', 'C-c']]);
-  });
-
-  it('does not send the second Ctrl+C when Codex exits during the settle window', async () => {
-    const harness = takeoverHarness();
-    harness.claudeEvents.identifyPaneAgents
-      .mockReset()
-      .mockResolvedValueOnce({ '%1': 'codex' }) // preflight
-      .mockResolvedValueOnce({ '%1': 'codex' }) // cursor becomes visible after interrupt
-      .mockResolvedValue({}); // process finishes before the second press
     const app = appFor({
       codexApp: { discover: async () => ({ managed: false, threadId: null }) },
       commands: harness.commands,
@@ -130,6 +114,22 @@ describe('Codex App Server routes', () => {
     expect(harness.commands.sendKey.mock.calls).toEqual([['%1', 'C-c']]);
     expect(harness.runPaneCommand).toHaveBeenCalledWith('%1', `handmux codex resume ${THREAD_ID}`);
   });
+
+  it('sends a second Ctrl+C only after the full first exit window expires', async () => {
+    const harness = takeoverHarness();
+    const identify = harness.claudeEvents.identifyPaneAgents;
+    identify.mockReset().mockImplementation(async () => (
+      identify.mock.calls.length <= 21 ? { '%1': 'codex' } : {}
+    )); // preflight + all 20 half-second polls remain Codex; the next poll observes the shell
+    const app = appFor({
+      codexApp: { discover: async () => ({ managed: false, threadId: null }) },
+      commands: harness.commands,
+      claudeEvents: harness.claudeEvents,
+    });
+    await request(app).post('/codex/takeover').send({ pane: '%1' }).expect(200);
+    expect(harness.commands.sendKey.mock.calls).toEqual([['%1', 'C-c'], ['%1', 'C-c']]);
+    expect(harness.runPaneCommand).toHaveBeenCalledWith('%1', `handmux codex resume ${THREAD_ID}`);
+  }, 15_000);
 
   it('leaves a pane untouched when its live process is no longer Codex', async () => {
     const app = appFor({

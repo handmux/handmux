@@ -83,7 +83,7 @@ export const getPendingPrompt = (pane, agent = 'claude') =>
 export const getCodexSession = (pane) =>
   req(`/api/codex/session?pane=${encodeURIComponent(pane)}`, { timeoutMs: 8000 });
 export const takeoverCodexSession = (pane) =>
-  req('/api/codex/takeover', { method: 'POST', body: JSON.stringify({ pane }), timeoutMs: 12000 });
+  req('/api/codex/takeover', { method: 'POST', body: JSON.stringify({ pane }), timeoutMs: 30000 });
 export const sendCodexMessage = (pane, text) =>
   req('/api/codex/send', { method: 'POST', body: JSON.stringify({ pane, text }), timeoutMs: 8000 });
 export const steerCodexQueuedMessage = (pane, id) =>

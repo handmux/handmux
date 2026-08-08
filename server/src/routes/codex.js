@@ -5,9 +5,8 @@ import { codexExitSessionId } from '../agents/codex.js';
 
 const TAKEOVER_TERMINAL_HINT_MS = 10_000;
 const INPUT_SETTLE_MS = 100;
-const FIRST_INTERRUPT_ATTEMPTS = 15;
-const FINAL_EXIT_ATTEMPTS = 15;
-const SECOND_INTERRUPT_SETTLE_MS = 250;
+const EXIT_POLL_MS = 500;
+const EXIT_ATTEMPTS = 20;
 const RECOVERY_OUTPUT_ATTEMPTS = 20;
 
 const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -21,32 +20,15 @@ async function paneAgent(commands, claudeEvents, pane) {
 }
 
 async function exitCurrentCodex(commands, claudeEvents, pane) {
-  // At an idle prompt Ctrl+C exits immediately. During a turn the first press interrupts and the second
-  // exits, so use at most two presses with a short settle window between them. Unlike `/quit`, this does
-  // not depend on the slash-command editor being available. Some startup dialogs can still consume it;
-  // in that case we stop without guessing or force-killing an unidentified session.
+  // During an active turn Codex can spend several seconds writing interruption details, token usage and
+  // its recovery command. Give each Ctrl+C a full ten-second window; only send a second one if the pane
+  // still proves Codex is the foreground process after that wait.
   for (let press = 0; press < 2; press += 1) {
-    if (press > 0) {
-      // The first Ctrl+C can make the input cursor visible just before Codex actually exits. Give that
-      // transition time to finish and re-check the foreground process, otherwise the second press lands
-      // in the restored shell as a stray `^C`.
-      await pause(SECOND_INTERRUPT_SETTLE_MS);
-      const current = await paneAgent(commands, claudeEvents, pane);
-      if (!current.live || current.agent !== 'codex') return current.live;
-    }
     await commands.sendKey(pane, 'C-c');
-    const attempts = press === 0 ? FIRST_INTERRUPT_ATTEMPTS : FINAL_EXIT_ATTEMPTS;
-    for (let attempt = 0; attempt < attempts; attempt += 1) {
-      await pause(INPUT_SETTLE_MS);
+    for (let attempt = 0; attempt < EXIT_ATTEMPTS; attempt += 1) {
+      await pause(EXIT_POLL_MS);
       const current = await paneAgent(commands, claudeEvents, pane);
       if (!current.live || current.agent !== 'codex') return current.live;
-      // After interrupting an active turn, wait until Codex exposes its input cursor before sending the
-      // exit press. This avoids turning two rapid Ctrl+C events into two copies of the same interrupt.
-      if (press === 0 && commands.paneInfo) {
-        try {
-          if ((await commands.paneInfo(pane))?.cursorVisible) break;
-        } catch { /* process identity polling remains the fallback */ }
-      }
     }
   }
   return null;
