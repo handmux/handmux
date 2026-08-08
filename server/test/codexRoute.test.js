@@ -4,7 +4,7 @@ import request from 'supertest';
 import { codexRoutes } from '../src/routes/codex.js';
 
 function appFor({
-  sessionId = 'thread-1', codexApp = {},
+  sessionId = 'thread-1', codexApp = {}, commands = {}, claudeEvents = {},
 } = {}) {
   const app = express();
   app.use(express.json());
@@ -13,9 +13,13 @@ function appFor({
       discover: async () => ({ managed: true, threadId: sessionId }),
       ...codexApp,
     },
+    commands,
+    claudeEvents,
   }));
   return app;
 }
+
+const THREAD_ID = 'aaaaaaaa-0000-4000-8000-000000000001';
 
 describe('Codex App Server routes', () => {
   it('binds every operation to the exact App Server thread without Hook metadata', async () => {
@@ -36,8 +40,106 @@ describe('Codex App Server routes', () => {
       .get('/codex/session?pane=%251').expect(200, { managed: true, threadId: null });
   });
 
-  it('does not expose a destructive takeover endpoint for plain Codex panes', async () => {
-    await request(appFor()).post('/codex/takeover').send({ pane: '%1' }).expect(404);
+  it('revalidates the pane and resumes only the exact current Codex binding', async () => {
+    const respawnPane = vi.fn(async () => {});
+    const app = appFor({
+      codexApp: { discover: async () => ({ managed: false, threadId: null }) },
+      commands: {
+        listLivePanes: async () => [{ id: '%1', cmd: 'codex' }],
+        paneCurrentPath: async () => '/work/project',
+        respawnPane,
+      },
+      claudeEvents: {
+        identifyPaneAgents: async () => ({ '%1': 'codex' }),
+        paneSession: () => ({ agent: 'codex', bindingVersion: 2, sessionId: THREAD_ID }),
+      },
+    });
+
+    const response = await request(app).post('/codex/takeover').send({ pane: '%1' }).expect(200);
+    expect(response.body).toEqual({
+      started: true, takeover: { state: 'starting', needsTerminal: false },
+    });
+    expect(respawnPane).toHaveBeenCalledWith(
+      '%1', '/work/project', `handmux codex resume ${THREAD_ID}`,
+    );
+
+    // A retry while startup is pending is idempotent and cannot kill the replacement twice.
+    await request(app).post('/codex/takeover').send({ pane: '%1' }).expect(200);
+    expect(respawnPane).toHaveBeenCalledTimes(1);
+  });
+
+  it('leaves the process untouched when the exact session binding is unavailable', async () => {
+    const respawnPane = vi.fn(async () => {});
+    const app = appFor({
+      codexApp: { discover: async () => ({ managed: false, threadId: null }) },
+      commands: {
+        listLivePanes: async () => [{ id: '%1', cmd: 'codex' }],
+        paneCurrentPath: async () => '/work/project',
+        respawnPane,
+      },
+      claudeEvents: {
+        identifyPaneAgents: async () => ({ '%1': 'codex' }),
+        paneSession: () => null,
+      },
+    });
+
+    await request(app).post('/codex/takeover').send({ pane: '%1' })
+      .expect(409, { error: 'codex-session-unbound' });
+    expect(respawnPane).not.toHaveBeenCalled();
+  });
+
+  it('leaves a pane untouched when its live process is no longer Codex', async () => {
+    const respawnPane = vi.fn(async () => {});
+    const app = appFor({
+      codexApp: { discover: async () => ({ managed: false, threadId: null }) },
+      commands: { listLivePanes: async () => [{ id: '%1', cmd: 'zsh' }], respawnPane },
+      claudeEvents: { identifyPaneAgents: async () => ({}) },
+    });
+    await request(app).post('/codex/takeover').send({ pane: '%1' })
+      .expect(409, { error: 'codex-pane-changed' });
+    expect(respawnPane).not.toHaveBeenCalled();
+  });
+
+  it('does not restart a managed App Server that is still binding its first thread', async () => {
+    const respawnPane = vi.fn(async () => {});
+    const app = appFor({
+      codexApp: { discover: async () => ({ managed: true, threadId: null }) },
+      commands: { respawnPane },
+    });
+    await request(app).post('/codex/takeover').send({ pane: '%1' })
+      .expect(409, { error: 'codex-session-starting' });
+    expect(respawnPane).not.toHaveBeenCalled();
+  });
+
+  it('does not expose a different App Server thread while takeover is starting', async () => {
+    const discover = vi.fn()
+      .mockResolvedValueOnce({ managed: false, threadId: null })
+      .mockResolvedValueOnce({ managed: true, threadId: 'wrong-thread' })
+      .mockResolvedValueOnce({ managed: true, threadId: THREAD_ID });
+    const status = vi.fn(async () => ({ managed: true, threadId: THREAD_ID, status: { type: 'idle' } }));
+    const app = appFor({
+      codexApp: { discover, status },
+      commands: {
+        listLivePanes: async () => [{ id: '%1', cmd: 'codex' }],
+        paneCurrentPath: async () => '/work/project',
+        respawnPane: async () => {},
+      },
+      claudeEvents: {
+        identifyPaneAgents: async () => ({ '%1': 'codex' }),
+        paneSession: () => ({ agent: 'codex', bindingVersion: 2, sessionId: THREAD_ID }),
+      },
+    });
+
+    await request(app).post('/codex/takeover').send({ pane: '%1' }).expect(200);
+    const waiting = await request(app).get('/codex/session?pane=%251').expect(200);
+    expect(waiting.body).toEqual({
+      managed: false, threadId: null,
+      takeover: { state: 'starting', needsTerminal: false },
+    });
+    await request(app).get('/codex/session?pane=%251').expect(200, {
+      managed: true, threadId: THREAD_ID, status: { type: 'idle' },
+    });
+    expect(status).toHaveBeenCalledWith('%1', THREAD_ID);
   });
 
   it('rejects malformed structured responses before calling App Server', async () => {

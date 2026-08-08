@@ -2235,21 +2235,21 @@ button.cmd-text { background: none; border: none; text-align: left; }
   border-radius: 18px; color: var(--ct-accent); background: var(--ct-chip-2);
 }
 .codex-managed-guide-icon svg { width: 30px; height: 30px; }
+.codex-managed-guide-icon.starting { animation: codex-managed-pulse 1.5s ease-in-out infinite; }
+@keyframes codex-managed-pulse { 50% { opacity: .48; transform: scale(.94); } }
 .codex-managed-guide h2 { margin: 0 0 8px; font-size: 20px; line-height: 1.25; }
 .codex-managed-guide p { max-width: 330px; margin: 0 0 18px; color: var(--ct-muted); font-size: 14px; line-height: 1.55; }
-.codex-managed-guide ol {
-  width: min(100%, 330px); margin: 0 0 14px; padding: 14px 16px 14px 38px; border-radius: 13px;
-  text-align: left; color: var(--ct-ink); background: var(--ct-chip); font-size: 14px; line-height: 1.55;
-}
-.codex-managed-guide li + li { margin-top: 7px; }
-.codex-managed-guide code { color: var(--ct-accent); font-size: 13px; word-break: break-all; }
-.codex-managed-guide p.codex-managed-guide-note { margin-bottom: 14px; font-size: 12.5px; }
-.codex-managed-guide-terminal {
+.codex-managed-guide-primary, .codex-managed-guide-secondary {
   width: min(100%, 330px); min-height: 48px; border: 0; border-radius: 13px;
-  background: var(--ct-accent); color: #fff; font-size: 16px; font-weight: 650;
-  margin-bottom: auto; flex: 0 0 auto; touch-action: manipulation;
+  font-size: 16px; font-weight: 650; flex: 0 0 auto; touch-action: manipulation;
 }
-.codex-managed-guide-terminal:active { filter: brightness(1.08); }
+.codex-managed-guide-primary { background: var(--ct-accent); color: #fff; }
+.codex-managed-guide-primary:disabled { opacity: .55; }
+.codex-managed-guide-secondary { margin-top: 10px; background: var(--ct-chip); color: var(--ct-ink); }
+.codex-managed-guide-primary:active, .codex-managed-guide-secondary:active { filter: brightness(1.08); }
+.codex-managed-guide-space { flex: 1 0 48px; }
+.codex-managed-guide > .codex-managed-guide-primary:last-of-type,
+.codex-managed-guide > .codex-managed-guide-secondary:last-of-type { margin-bottom: auto; }
 /* Jump-to-bottom (Task 12): reuses the terminal's own .new-output pill (same class/caption) rather than a
    bespoke button — one control, one look, across both lenses. Only shown once scrolled away from the
    newest message; .new-output's own right/bottom:12px lands it above the composer since .chat-view is a

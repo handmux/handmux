@@ -149,6 +149,7 @@ export default function App() {
   const [handoffToast, setHandoffToast] = useState(null); // "switched to terminal to run /x" hint after a slash hand-off
   const [slashEcho, setSlashEcho] = useState(null); // optimistic command pill for a chat-staying slash command {name,args,paneId}
   const [codexOptimisticMessages, setCodexOptimisticMessages] = useState([]);
+  const [codexTakeoverPanes, setCodexTakeoverPanes] = useState(() => new Set());
   const codexOptimisticSeqRef = useRef(0);
   const codexThreadByPaneRef = useRef(new Map());
   const [transcriptWake, setTranscriptWake] = useState({ paneId: null, seq: 0 }); // successful send -> immediate transcript refresh
@@ -1319,7 +1320,12 @@ export default function App() {
     return () => { alive = false; document.removeEventListener('visibilitychange', onVis); };
   }, [needToken, notifInboxOpen, notifRetrySeq, handledAuth]);
 
-  const currentAgent = currentPaneAgent(current, states);
+  // A controlled takeover briefly replaces the old Codex with a shell before the managed Codex child is
+  // visible. Pin that pane's identity through the gap so the chat page and its App Server poll do not
+  // disappear halfway through startup.
+  const detectedCurrentAgent = currentPaneAgent(current, states);
+  const currentAgent = detectedCurrentAgent
+    || (codexTakeoverPanes.has(current?.paneId) ? 'codex' : null);
   const codexSessionWake = transcriptWake.paneId === current?.paneId ? transcriptWake.seq : 0;
   const codexSession = useCodexSession(
     current?.paneId, codexChatLensOn && currentAgent === 'codex', codexSessionWake,
@@ -1327,6 +1333,21 @@ export default function App() {
   const currentKind = currentAgent === 'codex'
     ? codexKind(codexSession)
     : states[current?.paneId]?.kind;
+  const setCodexTakeoverPending = useCallback((paneId, pending) => {
+    if (!paneId) return;
+    setCodexTakeoverPanes((currentPanes) => {
+      const has = currentPanes.has(paneId);
+      if (has === pending) return currentPanes;
+      const next = new Set(currentPanes);
+      if (pending) next.add(paneId); else next.delete(paneId);
+      return next;
+    });
+  }, []);
+  useEffect(() => {
+    if (current?.paneId && codexSession.managed && codexSession.threadId) {
+      setCodexTakeoverPending(current.paneId, false);
+    }
+  }, [current?.paneId, codexSession.managed, codexSession.threadId, setCodexTakeoverPending]);
 
   const beginCodexSend = useCallback((paneId, text, source) => {
     const id = `codex-outgoing-${Date.now().toString(36)}-${(++codexOptimisticSeqRef.current).toString(36)}`;
@@ -2075,6 +2096,10 @@ export default function App() {
                 <div className="chat-view" />
               ) : codexNeedsManagedSetup ? (
                 <CodexManagedGuide
+                  pane={current.paneId}
+                  session={codexSession}
+                  onAuthFail={onAuthFail}
+                  onTakeoverChange={setCodexTakeoverPending}
                   onTerminal={() => { setLens('terminal'); localStorage.setItem('tw_lens_' + current.paneId, 'terminal'); }} />
               ) : (
                 <ChatView pane={current.paneId} agent={currentAgent} kind={currentKind} msg={states[current.paneId]?.msg} onAuthFail={onAuthFail}

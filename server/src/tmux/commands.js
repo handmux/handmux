@@ -250,6 +250,25 @@ async function runStartupCmd(target, cmd) {
   await sendEnter(target);
 }
 
+// Replace the foreground process in an existing pane with a fresh login shell, then type the startup
+// command into that shell. Keeping the shell as the pane command means the pane survives when the started
+// program exits. Callers must resolve and validate the exact pane/session before using this destructive
+// primitive; this boundary only validates the tmux target and the single-line command.
+export async function respawnPane(paneId, cwd, cmd) {
+  if (!isPaneId(paneId)) throw new Error(`invalid pane id: ${JSON.stringify(paneId)}`);
+  if (!isValidStartupCmd(cmd)) throw new Error('invalid startup command');
+  // With no shell-command tmux repeats the pane's original command. That may itself be `codex` for panes
+  // created outside Handmux, in which case our startup text would be typed into Codex instead of a shell.
+  // Pass tmux's configured default shell explicitly so every pane follows the same restart path.
+  const shell = (await runTmux(['show-options', '-gv', 'default-shell'])).trim();
+  if (shell[0] !== '/' || /[\x00-\x1f\x7f]/.test(shell)) throw new Error('invalid tmux default shell');
+  const args = ['respawn-pane', '-k', '-t', paneId];
+  if (cwd) args.push('-c', cwd);
+  args.push(shell, '-l');
+  await runTmux(args);
+  await runStartupCmd(paneId, cmd);
+}
+
 // Read a pane's working directory, so a new window can open in the dir you're working in.
 export async function paneCurrentPath(paneId) {
   const out = await runTmux(['display-message', '-p', '-t', paneId, '#{pane_current_path}']);
