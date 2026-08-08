@@ -2774,6 +2774,10 @@ button.cmd-text { background: none; border: none; text-align: left; }
 }
 .cc-config-trigger .cc-ctx-model, .cc-config-trigger .cc-ctx-pct { line-height: 16px; }
 .cc-config-trigger svg { flex: none; width: 14px; height: 14px; margin: 0 0 0 -1px; color: var(--ct-muted); }
+.cc-config-trigger .cc-fast-indicator {
+  flex: none; width: 12px; height: 16px; display: inline-flex; align-items: center; color: #f5a623;
+}
+.cc-config-trigger .cc-fast-indicator svg { width: 12px; height: 12px; margin: 0; color: currentColor; stroke-width: 2; }
 .cc-config-trigger:active { background: var(--ct-chip-2); }
 .cc-config-trigger:disabled { opacity: .48; }
 .cc-attach, .cc-send {
@@ -2953,6 +2957,8 @@ button.cmd-text { background: none; border: none; text-align: left; }
   flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px;
 }
 .codex-fast-row strong { color: var(--ct-ink); font-size: 12px; line-height: 15px; }
+.codex-fast-title { display: flex; align-items: center; gap: 4px; }
+.codex-fast-title svg { width: 12px; height: 12px; color: #f5a623; stroke-width: 2; }
 .codex-fast-row small {
   overflow: hidden; color: var(--ct-muted); font-size: 10px; line-height: 13px;
   text-overflow: ellipsis; white-space: nowrap;

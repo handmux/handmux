@@ -13,6 +13,7 @@ import { usePaneContext } from '../hooks/usePaneContext.js';
 import { UPLOAD_ACCEPT } from '../uploadTypes.js';
 import {
   ArrowUpIcon, StopIcon, PlusIcon, GearIcon, ChevronDownIcon, RefreshIcon, XIcon, CopyIcon, CheckIcon,
+  BoltIcon,
 } from './icons.jsx';
 import { useUpload } from '../hooks/useUpload.js';
 import { usePushToTalk } from '../voice/usePushToTalk.js';
@@ -271,7 +272,7 @@ function CodexConfigMenu({ open, pane, settings, busy, onChange, onClose, onAuth
           {fastTier && (
             <label className="codex-fast-row">
               <span>
-                <strong>{fastTier.name || t('chat.config.fast')}</strong>
+                <strong className="codex-fast-title"><BoltIcon />{fastTier.name || t('chat.config.fast')}</strong>
                 <small>{fastTier.description || t('chat.config.fastHint')}</small>
               </span>
               <span className="cmd-switch">
@@ -403,6 +404,8 @@ export default function ChatComposer({
   const ctxModel = rawModel ? rawModel.replace(/\s*\(.*\)\s*$/, '').trim() : null; // drop "(1M context)" suffix
   const ctxPct = ctx.usedPercent;
   const ctxEffort = managedSettings?.effort || null;
+  const fastSelected = managedSettings?.serviceTier === 'priority'
+    || managedSettings?.serviceTier === 'fast';
   const showCtx = !managedCodex && (!!ctxModel || typeof ctxPct === 'number');
   const ctxWarn = showCtx && ctxPct >= 80; // near auto-compact → amber
   const contextUsedTokens = codexSession?.contextUsage?.usedTokens;
@@ -810,6 +813,7 @@ export default function ChatComposer({
               <button type="button" className="cc-ctx cc-config-trigger"
                 aria-label={t('chat.config.open')} onClick={openConfig}>
                 <span className="cc-ctx-model">{ctxModel || t('chat.config.model')}</span>
+                {fastSelected && <span className="cc-fast-indicator" aria-hidden="true"><BoltIcon /></span>}
                 <span className="cc-ctx-pct">{ctxEffort || t('chat.config.effort')}</span>
                 <ChevronDownIcon />
               </button>

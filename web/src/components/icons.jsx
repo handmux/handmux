@@ -89,6 +89,15 @@ export function ChevronDownIcon() {
   );
 }
 
+// A lightning bolt — indicates that Codex Fast service is active.
+export function BoltIcon() {
+  return (
+    <svg {...base}>
+      <path d="m13 2-9 12h8l-1 8 9-12h-8z" />
+    </svg>
+  );
+}
+
 // ＋ add / open a new file → reveal the path browser.
 export function PlusIcon() {
   return (

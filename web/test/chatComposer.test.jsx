@@ -311,16 +311,20 @@ describe('ChatComposer', () => {
     }} />);
     fireEvent.click(screen.getByRole('button', { name: '设置模型、Fast 和思考强度' }));
     const fast = await screen.findByRole('checkbox', { name: /Fast/ });
+    expect(document.querySelector('.codex-fast-title svg')).toBeTruthy();
+    expect(document.querySelector('.cc-fast-indicator')).toBeNull();
     expect(fast.checked).toBe(false);
     fireEvent.click(fast);
     await waitFor(() => expect(updateCodexSettings).toHaveBeenCalledWith('%1', { serviceTier: 'priority' }));
     await waitFor(() => expect(screen.getByRole('checkbox', { name: /Fast/ }).checked).toBe(true));
+    expect(document.querySelector('.cc-fast-indicator svg')).toBeTruthy();
 
     fireEvent.click(screen.getByRole('button', { name: 'GPT Plain' }));
     await waitFor(() => expect(updateCodexSettings).toHaveBeenCalledWith('%1', {
       model: 'gpt-plain', serviceTier: null,
     }));
     await waitFor(() => expect(screen.queryByRole('checkbox', { name: /Fast/ })).toBeNull());
+    expect(document.querySelector('.cc-fast-indicator')).toBeNull();
   });
 
   it('opens structured App Server session status from the context ring', async () => {
