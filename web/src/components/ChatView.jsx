@@ -718,7 +718,7 @@ export default function ChatView({
   // bubble: only `active` (mapped to kind==='working') may show typing. Claude keeps its established bridge
   // because its Hook/state update can lag behind the transcript and has no equivalent live thread status.
   const inferredClaudeReply = agent !== 'codex' && last?.role === 'user' && kind !== 'permission';
-  const showTyping = !lastIsRunningTool && !showCompacting && !showError
+  const showTyping = loaded && !lastIsRunningTool && !showCompacting && !showError
     && (kind === 'working' || inferredClaudeReply);
 
   const scrollRef = useRef(null);

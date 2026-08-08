@@ -34,6 +34,23 @@ describe('ChatView', () => {
     expect(container.textContent).not.toContain('还没有对话内容');
   });
 
+  it.each(['claude', 'codex'])('keeps %s message loading quiet until the first transcript arrives', async (agent) => {
+    let resolveTranscript;
+    vi.spyOn(api, 'fetchTranscript').mockReturnValue(new Promise((resolve) => { resolveTranscript = resolve; }));
+    const { container } = render(<ChatView pane="%0" agent={agent} kind="working" />);
+
+    expect(container.querySelector('.chat-typing')).toBeNull();
+    expect(container.querySelector('.chat-typing-dots')).toBeNull();
+
+    await act(async () => {
+      resolveTranscript({
+        messages: [{ k: 0, i: 0, role: 'user', type: 'text', text: '继续' }],
+        hash: 'h', session: 's', hasMore: false, firstSeq: 0,
+      });
+    });
+    await waitFor(() => expect(container.querySelector('.chat-typing')).toBeTruthy());
+  });
+
   it('blocks an unbound Codex chat instead of presenting guessed content', async () => {
     vi.spyOn(api, 'fetchTranscript').mockResolvedValue({
       messages: [], hash: '', session: null, hasMore: false, firstSeq: null, unavailable: 'session-unbound',
