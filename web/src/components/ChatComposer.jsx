@@ -12,7 +12,7 @@ import { getChatDraft, setChatDraft } from '../storage.js';
 import { usePaneContext } from '../hooks/usePaneContext.js';
 import { UPLOAD_ACCEPT } from '../uploadTypes.js';
 import {
-  ArrowUpIcon, StopIcon, PlusIcon, GearIcon, ChevronDownIcon, RefreshIcon, XIcon, CopyIcon,
+  ArrowUpIcon, StopIcon, PlusIcon, GearIcon, ChevronDownIcon, RefreshIcon, XIcon, CopyIcon, CheckIcon,
 } from './icons.jsx';
 import { useUpload } from '../hooks/useUpload.js';
 import { usePushToTalk } from '../voice/usePushToTalk.js';
@@ -56,6 +56,21 @@ function ContextRing({ percent }) {
       <circle className="cc-context-value" cx="12" cy="12" r="9" pathLength="100"
         strokeDasharray={`${bounded} 100`} />
     </svg>
+  );
+}
+
+function ContextCopyRow({ label, value, copyLabel, copied, onCopy }) {
+  return (
+    <button type="button" className="cc-context-row cc-context-copy-row"
+      aria-label={copied ? `${copyLabel} · ${t('chat.status.copied')}` : copyLabel}
+      onClick={() => void onCopy(value)}>
+      <span>{label}</span>
+      <code className="cc-context-copy-value"
+        onPointerDown={(event) => event.stopPropagation()}>{value}</code>
+      <i className={`cc-context-copy-icon${copied ? ' copied' : ''}`} aria-hidden="true">
+        {copied ? <CheckIcon /> : <CopyIcon />}
+      </i>
+    </button>
   );
 }
 
@@ -691,57 +706,44 @@ export default function ChatComposer({
                       <i aria-hidden="true" />{activity.label}
                     </span>
                   </div>
-                  <div className={`cc-context-usage ${contextLevel}`}>
-                    <ContextRing percent={contextPercent} />
-                    <div>
+                  <div className="cc-context-list">
+                    <div className={`cc-context-row cc-context-usage ${contextLevel}`}>
                       <span>{t('chat.context.percent')}</span>
-                      <strong>{contextPercent.toFixed(1)}%</strong>
+                      <strong className="cc-context-usage-value">
+                        <ContextRing percent={contextPercent} />
+                        <b>{contextPercent.toFixed(1)}%</b>
+                      </strong>
                     </div>
-                  </div>
-                  <div className="cc-context-row">
-                    <span>{t('chat.context.usedTotal')}</span>
-                    <strong>{tokenFormatter.format(contextUsedTokens)} / {tokenFormatter.format(contextTotalTokens)}</strong>
-                  </div>
-                  {workingDirectory && (
-                    <div className="cc-context-row cc-context-path">
-                      <span>{t('chat.status.directory')}</span>
-                      <div className="cc-context-path-value">
-                        <code className="cc-context-path-scroll"
-                          onPointerDown={(event) => event.stopPropagation()}>{workingDirectory}</code>
-                        <button type="button" aria-label={t('chat.status.copyDirectory')}
-                          onClick={() => void copyStatusValue(workingDirectory, 'directory')}>
-                          {copiedStatusField === 'directory'
-                            ? <small>{t('chat.status.copied')}</small> : <CopyIcon />}
-                        </button>
+                    <div className="cc-context-row">
+                      <span>{t('chat.context.usedTotal')}</span>
+                      <strong>{tokenFormatter.format(contextUsedTokens)} / {tokenFormatter.format(contextTotalTokens)}</strong>
+                    </div>
+                    {workingDirectory && (
+                      <ContextCopyRow label={t('chat.status.directory')} value={workingDirectory}
+                        copyLabel={t('chat.status.copyDirectory')} copied={copiedStatusField === 'directory'}
+                        onCopy={(valueToCopy) => copyStatusValue(valueToCopy, 'directory')} />
+                    )}
+                    {gitBranch && (
+                      <div className="cc-context-row">
+                        <span>{t('chat.status.branch')}</span><strong>{gitBranch}</strong>
                       </div>
-                    </div>
-                  )}
-                  {gitBranch && (
-                    <div className="cc-context-row">
-                      <span>{t('chat.status.branch')}</span><strong>{gitBranch}</strong>
-                    </div>
-                  )}
-                  {access && (
-                    <div className="cc-context-row">
-                      <span>{t('chat.status.access')}</span><strong>{access}</strong>
-                    </div>
-                  )}
-                  {approval && (
-                    <div className="cc-context-row">
-                      <span>{t('chat.status.approval')}</span><strong>{approval}</strong>
-                    </div>
-                  )}
-                  {sessionId && (
-                    <div className="cc-context-row cc-context-session">
-                      <span>{t('chat.status.sessionId')}</span>
-                      <button type="button" aria-label={t('chat.status.copySession')}
-                        onClick={() => void copyStatusValue(sessionId, 'session')}>
-                        <code>{sessionId}</code>
-                        {copiedStatusField === 'session'
-                          ? <small>{t('chat.status.copied')}</small> : <CopyIcon />}
-                      </button>
-                    </div>
-                  )}
+                    )}
+                    {access && (
+                      <div className="cc-context-row">
+                        <span>{t('chat.status.access')}</span><strong>{access}</strong>
+                      </div>
+                    )}
+                    {approval && (
+                      <div className="cc-context-row">
+                        <span>{t('chat.status.approval')}</span><strong>{approval}</strong>
+                      </div>
+                    )}
+                    {sessionId && (
+                      <ContextCopyRow label={t('chat.status.sessionId')} value={sessionId}
+                        copyLabel={t('chat.status.copySession')} copied={copiedStatusField === 'session'}
+                        onCopy={(valueToCopy) => copyStatusValue(valueToCopy, 'session')} />
+                    )}
+                  </div>
                 </section>
               </>
             )}

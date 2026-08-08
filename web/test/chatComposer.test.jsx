@@ -251,17 +251,24 @@ describe('ChatComposer', () => {
     expect(detail.textContent).toContain('61.8%');
     expect(container.querySelectorAll('.cc-context-ring')).toHaveLength(2);
     expect(detail.textContent).toContain('159,719 / 258,400');
-    const directory = detail.querySelector('.cc-context-path-scroll');
+    const usageValue = detail.querySelector('.cc-context-usage-value');
+    expect(usageValue.firstElementChild.classList.contains('cc-context-ring')).toBe(true);
+    expect(usageValue.textContent).toBe('61.8%');
+    const directoryCopy = screen.getByRole('button', { name: '复制目录' });
+    const directory = directoryCopy.querySelector('.cc-context-copy-value');
     expect(directory.textContent).toBe('/work/project');
+    expect(directory.closest('button')).toBe(directoryCopy);
     expect(fireEvent(directory, new MouseEvent('pointerdown', { bubbles: true, cancelable: true }))).toBe(true);
     expect(detail.textContent).toContain('main');
     expect(detail.textContent).toContain('可修改工作区');
     expect(detail.textContent).toContain('按需确认');
-    fireEvent.click(screen.getByRole('button', { name: '复制目录' }));
+    fireEvent.click(directoryCopy);
     await waitFor(() => expect(navigator.clipboard.writeText).toHaveBeenCalledWith('/work/project'));
-    fireEvent.click(screen.getByRole('button', { name: '复制会话 ID' }));
+    const sessionCopy = screen.getByRole('button', { name: '复制会话 ID' });
+    expect(sessionCopy.classList.contains('cc-context-copy-row')).toBe(true);
+    fireEvent.click(sessionCopy);
     await waitFor(() => expect(navigator.clipboard.writeText).toHaveBeenCalledWith('thread-123'));
-    expect(detail.textContent).toContain('已复制');
+    expect(sessionCopy.getAttribute('aria-label')).toContain('已复制');
 
     const input = screen.getByPlaceholderText('和 Agent 对话…');
     const backdrop = container.querySelector('.cc-context-backdrop');

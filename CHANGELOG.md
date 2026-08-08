@@ -21,7 +21,7 @@ All notable changes to handmux. Format follows [Keep a Changelog](https://keepac
 - Codex 回复期间可以继续发送消息：消息默认进入临时队列并在当前回复完成后依次处理，也可选择立刻引导当前回复。
 
 ### Changed
-- Codex 会话状态弹层明确展示上下文长度用量和对应圆环；目录改为单行横向滚动并支持复制。
+- Codex 会话状态弹层改为紧凑分组布局；占用圆环紧邻百分比，目录和会话 ID 均可点按整行复制，长内容可横向滚动。
 - 文件编辑工具卡不再显示无意义的“已结束”状态，保留改动统计及失败、拒绝等有效结果。
 - 对话视图中的文件路径与 HTTP(S) 网址改为复用终端的确认和打开流程，可直接进入文件预览或网页预览器。
 - Claude Code 与 Codex CLI 的对话视图改为独立开关；仅 Claude Code 保留实验性标识。

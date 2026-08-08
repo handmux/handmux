@@ -2797,60 +2797,52 @@ button.cmd-text { background: none; border: none; text-align: left; }
 }
 .cc-context-popover-title {
   min-height: 28px; margin-bottom: 5px; display: flex; align-items: center; justify-content: space-between;
-  gap: 12px; color: var(--ct-muted); font-size: 11px; font-weight: 700;
-  letter-spacing: .04em;
+  gap: 12px; color: var(--ct-ink); font-size: 13px; font-weight: 700;
 }
-.cc-context-usage {
-  min-height: 46px; display: flex; align-items: center; gap: 10px; color: #34c759;
-}
-.cc-context-usage.medium { color: #ff9f0a; }
-.cc-context-usage.high { color: #ff453a; }
-.cc-context-usage .cc-context-ring { width: 34px; height: 34px; flex: none; }
-.cc-context-usage > div {
-  min-width: 0; flex: 1; display: flex; align-items: baseline; justify-content: space-between; gap: 12px;
-}
-.cc-context-usage span { color: var(--ct-muted); font-size: 12px; }
-.cc-context-usage strong { color: var(--ct-ink); font-size: 15px; font-weight: 700; }
 .cc-context-row { min-height: 28px; display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .cc-context-row > span { flex: none; color: var(--ct-muted); font-size: 12px; }
 .cc-context-row > strong {
   min-width: 0; overflow: hidden; color: var(--ct-ink); font-size: 13px; font-weight: 650;
   text-align: right; text-overflow: ellipsis; white-space: nowrap;
 }
-.cc-status-activity { display: inline-flex; align-items: center; gap: 5px; color: var(--ct-ink); letter-spacing: 0; }
+.cc-status-activity {
+  display: inline-flex; align-items: center; gap: 5px; padding: 3px 7px; border-radius: 999px;
+  background: var(--ct-chip); color: var(--ct-ink); font-size: 11px; font-weight: 650;
+}
 .cc-status-activity i { width: 7px; height: 7px; border-radius: 50%; background: #8e8e93; }
 .cc-status-activity.working i { background: #0a84ff; }
 .cc-status-activity.waiting i { background: #ff9f0a; }
 .cc-status-activity.compacting i { background: #bf5af2; }
 .cc-status-activity.idle i { background: #34c759; }
-.cc-context-path { min-height: 40px; }
-.cc-context-path-value { min-width: 0; flex: 1; display: flex; align-items: center; gap: 4px; }
-.cc-context-path-scroll {
-  min-width: 0; flex: 1; overflow-x: auto; color: var(--ct-ink); font: 11px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
-  white-space: nowrap; scrollbar-width: none; overscroll-behavior-inline: contain; touch-action: pan-x;
+.cc-context-list {
+  overflow: hidden; border: 1px solid var(--ct-chip-line); border-radius: 11px;
+  background: var(--ct-chip);
+}
+.cc-context-list .cc-context-row { padding: 0 10px; }
+.cc-context-list .cc-context-row + .cc-context-row { border-top: 1px solid var(--ct-chip-line); }
+.cc-context-usage { min-height: 46px; }
+.cc-context-usage-value { display: inline-flex; align-items: center; justify-content: flex-end; gap: 6px; }
+.cc-context-usage-value .cc-context-ring { width: 21px; height: 21px; flex: none; color: #34c759; }
+.cc-context-usage.medium .cc-context-ring { color: #ff9f0a; }
+.cc-context-usage.high .cc-context-ring { color: #ff453a; }
+.cc-context-usage-value b { color: var(--ct-ink); font-size: 15px; font-weight: 700; }
+.cc-context-copy-row {
+  width: 100%; min-height: 40px; border: 0; background: transparent; color: var(--ct-ink);
+  gap: 7px; font: inherit; text-align: left; touch-action: manipulation; -webkit-tap-highlight-color: transparent;
+}
+.cc-context-copy-row:active { background: var(--ct-chip-2); }
+.cc-context-copy-value {
+  min-width: 0; flex: 1; overflow-x: auto; color: var(--ct-ink);
+  font: 11px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: nowrap;
+  scrollbar-width: none; overscroll-behavior-inline: contain; touch-action: pan-x;
   -webkit-overflow-scrolling: touch;
 }
-.cc-context-path-scroll::-webkit-scrollbar { display: none; }
-.cc-context-path-value > button {
-  width: 40px; height: 40px; flex: none; display: grid; place-items: center; padding: 0;
-  border: 0; border-radius: 8px; background: transparent; color: var(--ct-accent);
+.cc-context-copy-value::-webkit-scrollbar { display: none; }
+.cc-context-copy-icon {
+  width: 15px; height: 15px; flex: none; display: grid; place-items: center; color: var(--ct-accent);
 }
-.cc-context-path-value > button:active { background: var(--ct-chip-2); }
-.cc-context-path-value svg { width: 15px; height: 15px; }
-.cc-context-path-value small { font-size: 11px; font-weight: 650; }
-.cc-context-session { min-height: 44px; }
-.cc-context-session > button {
-  min-width: 0; min-height: 44px; margin: -8px -6px -8px 0; padding: 6px;
-  display: flex; align-items: center; justify-content: flex-end; gap: 6px;
-  border: 0; border-radius: 8px; background: transparent; color: var(--ct-accent);
-}
-.cc-context-session > button:active { background: var(--ct-chip-2); }
-.cc-context-session code {
-  min-width: 0; max-width: 150px; overflow: hidden; color: var(--ct-ink); font-size: 11px;
-  text-overflow: ellipsis; white-space: nowrap;
-}
-.cc-context-session svg { width: 15px; height: 15px; flex: none; }
-.cc-context-session small { flex: none; font-size: 11px; font-weight: 650; }
+.cc-context-copy-icon.copied { color: #34c759; }
+.cc-context-copy-icon svg { width: 15px; height: 15px; display: block; }
 /* The quick-reply chips reuse the terminal dock's .quick-cmd tints, which are tuned for a dark ground
    (full-luminance green/blue/grey text). On the 暖白 tone that text washes out on white, so darken each
    tint toward ink while keeping its hue. (Dark tones keep the original bright-on-dark chips.) */
