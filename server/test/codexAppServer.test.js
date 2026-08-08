@@ -292,6 +292,35 @@ describe('Codex App Server client', () => {
     app.close();
   });
 
+  it('keeps an interrupted turn active until App Server confirms turn completion', async () => {
+    const proxy = fakeProxy();
+    const app = createCodexAppServer({ home: '/home/test', exists: () => true, connect: () => proxy.ws });
+    await app.status('%1', 'thread-1');
+    proxy.push({
+      jsonrpc: '2.0', method: 'turn/started',
+      params: { threadId: 'thread-1', turn: { id: 'turn-live', status: 'inProgress', items: [] } },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(await app.interrupt('%1', 'thread-1')).toEqual({ interrupted: true, turnId: 'turn-live' });
+    expect(proxy.sent).toContainEqual(expect.objectContaining({
+      method: 'turn/interrupt', params: { threadId: 'thread-1', turnId: 'turn-live' },
+    }));
+    expect(await app.status('%1', 'thread-1')).toMatchObject({
+      status: { type: 'active' }, activeTurnId: 'turn-live', activityKind: 'working',
+    });
+
+    proxy.push({
+      jsonrpc: '2.0', method: 'turn/completed',
+      params: { threadId: 'thread-1', turn: { id: 'turn-live', status: 'interrupted', items: [] } },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(await app.status('%1', 'thread-1')).toMatchObject({
+      status: { type: 'idle' }, activeTurnId: null, activityKind: null,
+    });
+    app.close();
+  });
+
   it.each(['failed', 'interrupted'])('retains the queue when the current turn is %s', async (turnStatus) => {
     const proxy = fakeProxy();
     const app = createCodexAppServer({ home: '/home/test', exists: () => true, connect: () => proxy.ws });

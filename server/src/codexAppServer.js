@@ -1165,12 +1165,14 @@ export function createCodexAppServer({
       const client = await connection(pane);
       if (!client) throw new Error('Codex session is not managed by Handmux');
       client.assertCurrentThread(threadId);
-      const thread = await client.readThread(threadId);
-      const state = client.state(threadId);
-      const turnId = state.activeTurnId || [...(thread.turns || [])].reverse().find((turn) => turn.status === 'inProgress')?.id;
+      const state = await client.ensureThread(threadId);
+      let turnId = state.activeTurnId;
+      if (!turnId) {
+        const thread = await client.readThread(threadId);
+        turnId = [...(thread.turns || [])].reverse().find((turn) => turn.status === 'inProgress')?.id;
+      }
       if (!turnId) return { interrupted: false };
       await client.rpc('turn/interrupt', { threadId, turnId });
-      client.setInbox(null, '', `turn:${turnId}:interrupted`);
       return { interrupted: true, turnId };
     },
     async decide(pane, threadId, requestId, decision) {

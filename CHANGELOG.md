@@ -4,6 +4,10 @@ All notable changes to handmux. Format follows [Keep a Changelog](https://keepac
 
 ## [Unreleased]
 
+### Fixed
+
+- Keep Codex turns visibly stopping until App Server confirms the interruption has completed.
+
 ### Added
 - Codex 托管对话输入栏新增上下文占用环，点按可查看运行状态、Token、项目、分支、权限与会话 ID。
 - 对话视图新增 Codex 托管模式：终端与手机共享同一 App Server 会话，可直接收发消息、处理提问与审批、停止任务，并同步清空、压缩、模型、收件箱状态与推送，无需 Codex Hooks。
