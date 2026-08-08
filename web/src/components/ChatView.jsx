@@ -8,6 +8,7 @@ import { messageIdentity, useTranscript } from '../hooks/useTranscript.js';
 import { usePendingPrompt } from '../hooks/usePendingPrompt.js';
 import { fallbackGate } from '../chatGate.js';
 import PromptGate from './PromptGate.jsx';
+import LensBoot from './LensBoot.jsx';
 import { answerCodexApproval, answerCodexInput, sendKeys, UnauthorizedError } from '../api.js';
 import { t } from '../i18n';
 import { useBackButton, useHistoryLayer, unwindHistory } from '../hooks/useBackButton.js';
@@ -961,8 +962,9 @@ export default function ChatView({
         onPointerDown={onCopyDown} onPointerMove={onCopyMove}
         onPointerUp={cancelLongPress} onPointerCancel={cancelLongPress}
         onClickCapture={onCopyClickCapture}>
-        {/* Keep the first poll visually quiet. Only show a nudge after the response confirms the session
-            is genuinely empty; opening the chat lens should never flash a fake waiting message. */}
+        {!loaded && <LensBoot hint={t('boot.loading')} />}
+        {/* The first poll uses the same neutral loading view as the terminal. Only show a nudge after the
+            response confirms the session is genuinely empty; never flash a fake assistant reply. */}
         {messages.length === 0 && visibleOptimistic.length === 0 && !sessionGate && loaded
           && <div className="chat-new">{t('boot.chat_empty')}</div>}
         {messages.map((m, idx) => {

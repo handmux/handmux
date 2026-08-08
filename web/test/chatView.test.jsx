@@ -22,12 +22,11 @@ function setGeometry(el, { scrollTop, scrollHeight, clientHeight }) {
 }
 
 describe('ChatView', () => {
-  it('keeps initial loading quiet; a loaded-but-empty session shows the friendly first-message nudge', async () => {
+  it('uses the shared loading view; a loaded-but-empty session shows the friendly first-message nudge', async () => {
     mockTranscript([]);
     const { container } = render(<ChatView pane="%0" kind="done" />);
-    // Before the first poll lands, make no visual claim about whether the session is empty or waiting.
-    expect(container.querySelector('.lens-boot')).toBeNull();
-    expect(container.textContent).not.toContain('正在加载');
+    expect(container.querySelector('.lens-boot')).toBeTruthy();
+    expect(container.textContent).toContain('正在加载');
     // First response landed with zero messages → genuinely empty session → static nudge.
     await waitFor(() => expect(container.textContent).toContain('发送你的第一条消息'));
     expect(container.querySelector('.lens-boot')).toBeNull();
@@ -41,6 +40,8 @@ describe('ChatView', () => {
 
     expect(container.querySelector('.chat-typing')).toBeNull();
     expect(container.querySelector('.chat-typing-dots')).toBeNull();
+    expect(container.querySelector('.lens-boot')).toBeTruthy();
+    expect(container.querySelector('.lens-boot-hint')?.textContent).toBe('正在加载');
 
     await act(async () => {
       resolveTranscript({
@@ -49,6 +50,7 @@ describe('ChatView', () => {
       });
     });
     await waitFor(() => expect(container.querySelector('.chat-typing')).toBeTruthy());
+    expect(container.querySelector('.lens-boot')).toBeNull();
   });
 
   it('blocks an unbound Codex chat instead of presenting guessed content', async () => {

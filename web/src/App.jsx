@@ -49,6 +49,7 @@ import Terminal from './components/Terminal.jsx';
 import BottomDock from './components/BottomDock.jsx';
 import ChatComposer from './components/ChatComposer.jsx';
 import LensSwitch from './components/LensSwitch.jsx';
+import LensBoot from './components/LensBoot.jsx';
 import ChatView from './components/ChatView.jsx';
 import CodexManagedGuide from './components/CodexManagedGuide.jsx';
 import { slashEchoFor } from './slashCommands.js';
@@ -2091,7 +2092,9 @@ export default function App() {
           {current.paneId && (
             chatLens ? (
               codexChatLoading ? (
-                <div className="chat-view" />
+                <div className="chat-view">
+                  <div className="chat-scroll"><LensBoot hint={t('boot.loading')} /></div>
+                </div>
               ) : codexNeedsManagedSetup ? (
                 <CodexManagedGuide
                   pane={current.paneId}
