@@ -2723,23 +2723,38 @@ button.cmd-text { background: none; border: none; text-align: left; }
 .cc-card:focus-within { border-color: var(--ct-accent); }
 .cc-card.recording { border-color: #34c759; }
 .cc-queue {
-  display: flex; flex-direction: column; gap: 4px; max-height: 118px; overflow-y: auto;
+  display: flex; flex-direction: column; gap: 4px;
   margin: -2px 0 7px -6px; padding: 0 0 7px; border-bottom: 1px solid var(--ct-field-line);
 }
 .cc-queue-head {
   display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 0 5px;
   color: var(--ct-muted); font-size: 11px; line-height: 18px;
 }
-.cc-queue-head span:first-child { flex: none; font-weight: 600; }
-.cc-queue-head span:last-child { min-width: 0; overflow: hidden; text-align: right; text-overflow: ellipsis; white-space: nowrap; }
+.cc-queue-title { flex: none; display: inline-flex; align-items: center; gap: 4px; font-weight: 600; }
+.cc-queue-count {
+  display: inline-flex; align-items: center; justify-content: center; min-width: 16px; height: 16px; padding: 0 4px;
+  border-radius: 8px; background: var(--ct-chip-line); color: var(--ct-ink); font-size: 10px; line-height: 16px;
+  font-variant-numeric: tabular-nums;
+}
+.cc-queue-head > span:last-child { min-width: 0; overflow: hidden; text-align: right; text-overflow: ellipsis; white-space: nowrap; }
+.cc-queue-list {
+  display: flex; flex-direction: column; gap: 4px; max-height: 102px; overflow-y: auto;
+  overscroll-behavior: contain; scrollbar-width: thin;
+}
 .cc-queue-item {
   display: flex; align-items: center; gap: 4px; min-height: 30px; padding: 0 2px 0 8px;
-  border-radius: 10px; background: var(--ct-chip-2);
+  border-radius: 10px; background: var(--ct-chip-2); cursor: pointer;
+}
+.cc-queue-index {
+  flex: none; display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px;
+  border: 1px solid var(--ct-chip-line); border-radius: 50%; color: var(--ct-accent); font-size: 9px;
+  line-height: 1; font-variant-numeric: tabular-nums;
 }
 .cc-queue-text {
   flex: 1; min-width: 0; display: -webkit-box; overflow: hidden; color: var(--ct-ink); font-size: 13px;
   line-height: 18px; overflow-wrap: anywhere; -webkit-box-orient: vertical; -webkit-line-clamp: 2;
 }
+.cc-queue-text:focus-visible { outline: 2px solid var(--ct-accent); outline-offset: 1px; border-radius: 5px; }
 .cc-queue-actions { flex: none; display: flex; align-items: center; gap: 0; }
 .cc-queue-action {
   flex: none; display: inline-flex; align-items: center; justify-content: center;

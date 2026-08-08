@@ -631,12 +631,19 @@ describe('ChatComposer', () => {
     expect(container.querySelector('.cc-card .cc-queue')).toBeTruthy();
     expect(screen.getByText('排队消息')).toBeTruthy();
     expect(screen.getByText('当前回合结束后自动逐条发送')).toBeTruthy();
+    expect(container.querySelector('.cc-queue-count')?.textContent).toBe('2');
+    expect([...container.querySelectorAll('.cc-queue-index')].map((node) => node.textContent)).toEqual(['1', '2']);
     expect(screen.getByText('先检查测试')).toBeTruthy();
     expect(screen.getByText('再整理结果')).toBeTruthy();
     expect(screen.getByRole('button', { name: '停止' })).toBeTruthy();
+    expect(container.querySelector('.cc-queue-head')?.parentElement)
+      .toBe(container.querySelector('.cc-queue'));
+    expect(container.querySelector('.cc-queue-list')?.parentElement)
+      .toBe(container.querySelector('.cc-queue'));
+    expect(container.querySelector('.cc-queue-list')?.contains(container.querySelector('.cc-queue-head')))
+      .toBe(false);
     expect([...container.querySelectorAll('.cc-queue-item')[0].querySelectorAll('button')]
       .map((button) => button.className)).toEqual([
-      'cc-queue-action cc-queue-edit',
       'cc-queue-action cc-queue-send',
       'cc-queue-action cc-queue-delete',
     ]);
@@ -648,13 +655,14 @@ describe('ChatComposer', () => {
     await waitFor(() => expect(sendCodexMessage).toHaveBeenCalledWith('%1', '排到最后'));
 
     fireEvent.click(screen.getAllByRole('button', { name: '立刻引导' })[0]);
+    expect(beginCodexQueuedEdit).not.toHaveBeenCalled();
     expect(onCodexSendStart).toHaveBeenCalledWith('%1', '先检查测试', 'steer');
     await waitFor(() => expect(steerCodexQueuedMessage).toHaveBeenCalledWith('%1', 'queued-1'));
     await waitFor(() => expect(onCodexSendResult).toHaveBeenCalledWith('optimistic-steer', {
       result: { steered: true },
     }));
 
-    fireEvent.click(screen.getByRole('button', { name: '编辑排队消息' }));
+    fireEvent.click(screen.getByText('再整理结果').closest('.cc-queue-item'));
     await waitFor(() => expect(beginCodexQueuedEdit).toHaveBeenCalledWith('%1', 'queued-2'));
     const editor = await screen.findByRole('dialog', { name: '编辑排队消息' });
     expect(editor.parentElement?.parentElement).toBe(document.body);
@@ -676,7 +684,7 @@ describe('ChatComposer', () => {
     await waitFor(() => expect(removeCodexQueuedMessage).toHaveBeenCalledWith('%1', 'queued-2'));
   });
 
-  it('keeps queued-message taps from focusing the composer and clamps message text to two lines', () => {
+  it('opens queued-message editing from the row without focusing the composer and clamps text to two lines', async () => {
     const { container } = render(<ChatComposer pane="%1" agent="codex" kind="working" codexSession={{
       managed: true,
       queue: [{ id: 'queued-1', text: '一段足够长的排队消息，用来验证它不会把整个输入区域一直撑高' }],
@@ -685,17 +693,21 @@ describe('ChatComposer', () => {
     const queuedText = container.querySelector('.cc-queue-text');
     fireEvent.pointerDown(queuedText, { clientX: 50, clientY: 50 });
     fireEvent.pointerUp(queuedText, { clientX: 50, clientY: 50 });
+    fireEvent.click(queuedText);
+    await waitFor(() => expect(beginCodexQueuedEdit).toHaveBeenCalledWith('%1', 'queued-1'));
     expect(document.activeElement).not.toBe(input);
     expect(styles).toMatch(/\.cc-queue-text\s*\{[^}]*-webkit-line-clamp:\s*2/);
     expect(styles).toMatch(/\.cc-queue-actions\s*\{[^}]*gap:\s*0/);
     expect(styles).toMatch(/\.cc-queue-action\s*\{[^}]*width:\s*30px[^}]*height:\s*30px/);
+    expect(styles).toMatch(/\.cc-queue-list\s*\{[^}]*max-height:\s*102px[^}]*overflow-y:\s*auto/);
+    expect(styles).toMatch(/\.cc-queue-index\s*\{[^}]*width:\s*16px[^}]*height:\s*16px[^}]*border-radius:\s*50%/);
   });
 
   it('releases the server edit hold when queued-message editing is cancelled', async () => {
     render(<ChatComposer pane="%1" agent="codex" kind="working" codexSession={{
       managed: true, queue: [{ id: 'queued-1', text: '保留原文' }],
     }} />);
-    fireEvent.click(screen.getByRole('button', { name: '编辑排队消息' }));
+    fireEvent.keyDown(screen.getByText('保留原文'), { key: 'Enter' });
     await waitFor(() => expect(beginCodexQueuedEdit).toHaveBeenCalledWith('%1', 'queued-1'));
     await screen.findByRole('dialog', { name: '编辑排队消息' });
     fireEvent.click(screen.getByRole('button', { name: '取消' }));

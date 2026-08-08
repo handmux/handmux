@@ -15,7 +15,7 @@ import { usePaneContext } from '../hooks/usePaneContext.js';
 import { UPLOAD_ACCEPT } from '../uploadTypes.js';
 import {
   ArrowUpIcon, StopIcon, PlusIcon, GearIcon, ChevronDownIcon, RefreshIcon, CopyIcon, CheckIcon,
-  BoltIcon, PencilIcon, XIcon,
+  BoltIcon, XIcon,
 } from './icons.jsx';
 import { useUpload } from '../hooks/useUpload.js';
 import { usePushToTalk } from '../voice/usePushToTalk.js';
@@ -888,24 +888,37 @@ export default function ChatComposer({
         {pendingQueue.length > 0 && (
           <div className="cc-queue" aria-label={t('chat.queue.title')}>
             <div className="cc-queue-head">
-              <span>{t('chat.queue.title')}</span><span>{t('chat.queue.hint')}</span>
+              <span className="cc-queue-title">{t('chat.queue.title')}
+                <span className="cc-queue-count">{pendingQueue.length}</span>
+              </span>
+              <span>{t('chat.queue.hint')}</span>
             </div>
-            {pendingQueue.map((item) => (
-              <div className="cc-queue-item" key={item.id}>
-                <span className="cc-queue-text">{item.text}</span>
-                <span className="cc-queue-actions">
-                  <button type="button" className="cc-queue-action cc-queue-edit"
-                    aria-label={t('chat.queue.edit')} disabled={!!queueAction}
-                    onClick={() => void openQueueEditor(item)}><PencilIcon /></button>
-                  <button type="button" className="cc-queue-action cc-queue-send"
-                    aria-label={t('chat.queue.steer')} disabled={!!queueAction}
-                    onClick={() => void actOnQueued('steer', item)}><ArrowUpIcon /></button>
-                  <button type="button" className="cc-queue-action cc-queue-delete"
-                    aria-label={t('chat.queue.remove')} disabled={!!queueAction}
-                    onClick={() => setQueueDelete(item)}><XIcon /></button>
-                </span>
-              </div>
-            ))}
+            <div className="cc-queue-list">
+              {pendingQueue.map((item, index) => (
+                <div className="cc-queue-item" key={item.id}
+                  onClick={(event) => {
+                    if (event.target.closest('.cc-queue-action')) return;
+                    void openQueueEditor(item);
+                  }}>
+                  <span className="cc-queue-index" aria-hidden="true">{index + 1}</span>
+                  <span className="cc-queue-text" role="button" tabIndex={queueAction ? -1 : 0}
+                    aria-label={t('chat.queue.edit')} aria-disabled={!!queueAction}
+                    onKeyDown={(event) => {
+                      if (event.key !== 'Enter' && event.key !== ' ') return;
+                      event.preventDefault();
+                      void openQueueEditor(item);
+                    }}>{item.text}</span>
+                  <span className="cc-queue-actions">
+                    <button type="button" className="cc-queue-action cc-queue-send"
+                      aria-label={t('chat.queue.steer')} disabled={!!queueAction}
+                      onClick={() => void actOnQueued('steer', item)}><ArrowUpIcon /></button>
+                    <button type="button" className="cc-queue-action cc-queue-delete"
+                      aria-label={t('chat.queue.remove')} disabled={!!queueAction}
+                      onClick={() => setQueueDelete(item)}><XIcon /></button>
+                  </span>
+                </div>
+              ))}
+            </div>
           </div>
         )}
         <textarea
