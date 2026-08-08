@@ -2708,7 +2708,12 @@ button.cmd-text { background: none; border: none; text-align: left; }
   animation: exit-toast-in .18s ease;
 }
 @media (prefers-reduced-motion: reduce) { .cc-notice { animation: none; } }
-.cc-quick { display: flex; gap: 6px; overflow-x: auto; }
+.cc-quick {
+  display: flex; gap: 6px; overflow-x: auto; overflow-y: hidden;
+  /* This strip owns horizontal swipes only. Without the axis contract, a slightly diagonal swipe on a
+     chip can be claimed as native page-pan and drag the keyboard-lifted app on Android/iOS. */
+  overscroll-behavior: contain; touch-action: pan-x;
+}
 /* The card: textarea on top, action row beneath. Buttons never overlay the text (own row) → none of the
    dock's multi/crowd/ghost-hit machinery is needed. Subtle border, faint accent on focus, green while dictating. */
 .cc-card {

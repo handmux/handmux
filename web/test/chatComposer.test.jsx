@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, cleanup, waitFor } from '@testing-library/react';
+import { readFileSync } from 'node:fs';
 
 vi.mock('../src/api.js', () => ({
   sendText: vi.fn(async () => ({ ok: true })),
@@ -33,6 +34,8 @@ import {
   updateCodexSettings, getPaneContext,
 } from '../src/api.js';
 
+const styles = readFileSync(`${process.cwd()}/src/styles.css`, 'utf8');
+
 // No globals:true → register cleanup manually so DOM doesn't leak between tests.
 afterEach(cleanup);
 beforeEach(() => {
@@ -63,6 +66,10 @@ const deferred = () => {
 };
 
 describe('ChatComposer', () => {
+  it('keeps vertical swipes on the horizontal shortcut strip from panning the page', () => {
+    expect(styles).toMatch(/\.cc-quick\s*\{[^}]*overflow-y:\s*hidden[^}]*overscroll-behavior:\s*contain[^}]*touch-action:\s*pan-x/);
+  });
+
   it('renders the same device-local merged order as the editor', () => {
     localStorage.setItem('hm_favs7_agent', JSON.stringify([
       { kind: 'reply', text: 'local', enter: true },
