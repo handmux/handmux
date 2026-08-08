@@ -6,6 +6,7 @@ All notable changes to handmux. Format follows [Keep a Changelog](https://keepac
 
 ### Fixed
 
+- 多窗格窗口的窗格面板改为立即打开并在后台刷新，不再因网络较慢而阻塞点击。
 - 修复打开或切换 Codex 对话时偶尔闪过“开始托管”页面的问题。
 - 修复 Codex App Server 短暂波动时过早显示“无法连接”并遮住对话的问题。
 - 统一 Codex 与 Claude Code 对话的首屏加载表现，使用终端同款加载提示且不再误显示工作波浪点。

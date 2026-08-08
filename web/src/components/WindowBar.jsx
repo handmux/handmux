@@ -146,12 +146,23 @@ function PaneTab({ window: win, panes, paneAgents = {}, currentPaneId, agent, on
     }
     setPos({ top, left });
   };
+  // Pane metadata may refresh after the map is already visible. Re-anchor only when its outer
+  // dimensions change so a freshly discovered layout cannot push the popup off-screen.
+  useLayoutEffect(() => {
+    if (open) place();
+    // `place` intentionally reads the current render's map dimensions and anchor ref.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, mapW, mapH]);
   const lp = useLongPress(() => onManage(win), {
     onClick: () => {
       if (open) { setOpen(false); return; }
       const show = () => { place(); setOpen(true); };
-      if (onBeforePaneMapOpen) Promise.resolve(onBeforePaneMapOpen(win.id)).then(show, show);
-      else show();
+      // Cached panes are already enough to draw a useful map. Open now and refresh in the background;
+      // a slow request must neither delay this tap nor reopen a map the user has since closed.
+      show();
+      if (onBeforePaneMapOpen) {
+        try { void Promise.resolve(onBeforePaneMapOpen(win.id)).catch(() => {}); } catch { /* optional refresh */ }
+      }
     },
   });
 
