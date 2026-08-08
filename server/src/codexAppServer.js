@@ -662,19 +662,24 @@ class CodexAppConnection {
     const key = this.queueKey(threadId);
     let state = this.queueStore.get(key);
     if (!state && create) {
-      state = { items: [], starting: false, draining: false, steering: new Set() };
+      state = { items: [], starting: false, draining: false, steering: new Set(), editing: null };
       this.queueStore.set(key, state);
     }
     return state || null;
   }
 
   queuedFor(threadId) {
-    return (this.queueState(threadId, false)?.items || []).map((item) => ({ ...item }));
+    const queue = this.queueState(threadId, false);
+    return (queue?.items || []).map((item) => ({
+      ...item,
+      ...(queue.editing?.itemId === item.id ? { editing: true } : {}),
+    }));
   }
 
   cleanupQueue(threadId) {
     const state = this.queueState(threadId, false);
-    if (state && !state.items.length && !state.starting && !state.draining && !state.steering.size) {
+    if (state && !state.items.length && !state.starting && !state.draining
+      && !state.steering.size && !state.editing) {
       this.queueStore.delete(this.queueKey(threadId));
     }
   }
@@ -740,7 +745,7 @@ class CodexAppConnection {
   async drainQueue(threadId) {
     await this.assertCurrentThread(threadId);
     const queue = this.queueState(threadId, false);
-    if (!queue?.items.length || queue.draining || queue.starting || this.activeTurn(threadId)
+    if (!queue?.items.length || queue.draining || queue.starting || queue.editing || this.activeTurn(threadId)
       || this.state(threadId).status?.type === 'active') return;
     queue.draining = true;
     const item = queue.items[0];
@@ -763,6 +768,7 @@ class CodexAppConnection {
     if (queue.draining && queue.items[0]?.id === itemId) {
       throw new Error('queued message is already being sent');
     }
+    if (queue.editing?.itemId === itemId) throw new Error('queued message is being edited');
     if (queue.steering.has(itemId)) throw new Error('queued message is already being sent');
     queue.steering.add(itemId);
     try {
@@ -790,11 +796,58 @@ class CodexAppConnection {
     const index = queue?.items.findIndex((candidate) => candidate.id === itemId) ?? -1;
     if (index < 0) throw new Error('queued message is no longer pending');
     if (queue.draining && index === 0) throw new Error('queued message is already being sent');
+    if (queue.editing?.itemId === itemId) throw new Error('queued message is being edited');
     if (queue.steering.has(itemId)) throw new Error('queued message is already being sent');
     queue.items.splice(index, 1);
     this.bump(threadId);
     this.cleanupQueue(threadId);
     return { removed: true };
+  }
+
+  async beginQueuedEdit(threadId, itemId) {
+    await this.ensureThread(threadId);
+    const queue = this.queueState(threadId, false);
+    const item = queue?.items.find((candidate) => candidate.id === itemId);
+    if (!item) throw new Error('queued message is no longer pending');
+    if ((queue.draining && queue.items[0]?.id === itemId) || queue.steering.has(itemId)) {
+      throw new Error('queued message is already being sent');
+    }
+    if (queue.editing && queue.editing.itemId !== itemId) {
+      throw new Error('another queued message is being edited');
+    }
+    // Reopening the same editor replaces its token. This lets a reloaded client recover an in-memory edit
+    // hold while ensuring an older dialog can no longer overwrite the newer draft.
+    const token = this.nextQueueId();
+    queue.editing = { itemId, token };
+    this.bump(threadId);
+    return { editing: true, token, item: { ...item, editing: true } };
+  }
+
+  commitQueuedEdit(threadId, itemId, token, text) {
+    const queue = this.queueState(threadId, false);
+    if (!queue?.editing || queue.editing.itemId !== itemId || queue.editing.token !== token) {
+      throw new Error('queued message edit is no longer active');
+    }
+    const item = queue.items.find((candidate) => candidate.id === itemId);
+    if (!item) throw new Error('queued message is no longer pending');
+    item.text = text;
+    queue.editing = null;
+    this.bump(threadId);
+    this.cleanupQueue(threadId);
+    queueMicrotask(() => { void this.drainQueue(threadId).catch(() => {}); });
+    return { edited: true, item: { ...item } };
+  }
+
+  cancelQueuedEdit(threadId, itemId, token) {
+    const queue = this.queueState(threadId, false);
+    if (!queue?.editing || queue.editing.itemId !== itemId || queue.editing.token !== token) {
+      throw new Error('queued message edit is no longer active');
+    }
+    queue.editing = null;
+    this.bump(threadId);
+    this.cleanupQueue(threadId);
+    queueMicrotask(() => { void this.drainQueue(threadId).catch(() => {}); });
+    return { editing: false };
   }
 
   isCurrentThread(threadId) {
@@ -1183,6 +1236,24 @@ export function createCodexAppServer({
       if (!client) throw new Error('Codex session is not managed by Handmux');
       await client.assertCurrentThread(threadId);
       return client.removeQueued(threadId, itemId);
+    },
+    async beginQueuedEdit(pane, threadId, itemId) {
+      const client = await connection(pane);
+      if (!client) throw new Error('Codex session is not managed by Handmux');
+      await client.assertCurrentThread(threadId);
+      return client.beginQueuedEdit(threadId, itemId);
+    },
+    async commitQueuedEdit(pane, threadId, itemId, token, text) {
+      const client = await connection(pane);
+      if (!client) throw new Error('Codex session is not managed by Handmux');
+      await client.assertCurrentThread(threadId);
+      return client.commitQueuedEdit(threadId, itemId, token, text);
+    },
+    async cancelQueuedEdit(pane, threadId, itemId, token) {
+      const client = await connection(pane);
+      if (!client) throw new Error('Codex session is not managed by Handmux');
+      await client.assertCurrentThread(threadId);
+      return client.cancelQueuedEdit(threadId, itemId, token);
     },
     async compact(pane, threadId) {
       const client = await connection(pane);

@@ -112,7 +112,7 @@ function routeError(res, result) {
 
 function codexError(res, error) {
   const message = error?.message || String(error);
-  const conflict = /not managed|session changed|no longer pending|already being sent|queue is full|decision is unavailable|bad user input response/i.test(message);
+  const conflict = /not managed|session changed|no longer pending|already being sent|being edited|edit is no longer active|queue is full|decision is unavailable|bad user input response/i.test(message);
   return res.status(conflict ? 409 : 503).json({ error: message });
 }
 
@@ -213,6 +213,34 @@ export function codexRoutes({ codexApp, commands, claudeEvents, wait = pause }) 
       if (!id || id.length > 128) return res.status(400).json({ error: 'bad queued message id' });
       try { res.json(await codexApp[method](target.pane, target.threadId, id)); }
       catch (error) { codexError(res, error); }
+    });
+  }
+
+  r.post('/codex/queue/edit/begin', async (req, res) => {
+    const target = await binding(codexApp, req.body?.pane);
+    if (routeError(res, target)) return;
+    const id = typeof req.body?.id === 'string' ? req.body.id.trim() : '';
+    if (!id || id.length > 128) return res.status(400).json({ error: 'bad queued message id' });
+    try { res.json(await codexApp.beginQueuedEdit(target.pane, target.threadId, id)); }
+    catch (error) { codexError(res, error); }
+  });
+
+  for (const [action, method] of [['commit', 'commitQueuedEdit'], ['cancel', 'cancelQueuedEdit']]) {
+    r.post(`/codex/queue/edit/${action}`, async (req, res) => {
+      const target = await binding(codexApp, req.body?.pane);
+      if (routeError(res, target)) return;
+      const id = typeof req.body?.id === 'string' ? req.body.id.trim() : '';
+      const token = typeof req.body?.token === 'string' ? req.body.token.trim() : '';
+      if (!id || id.length > 128) return res.status(400).json({ error: 'bad queued message id' });
+      if (!token || token.length > 128) return res.status(400).json({ error: 'bad queued message edit token' });
+      if (action === 'commit') {
+        const text = typeof req.body?.text === 'string' ? req.body.text.trim() : '';
+        if (!text) return res.status(400).json({ error: 'message is empty' });
+        try { return res.json(await codexApp[method](target.pane, target.threadId, id, token, text)); }
+        catch (error) { return codexError(res, error); }
+      }
+      try { return res.json(await codexApp[method](target.pane, target.threadId, id, token)); }
+      catch (error) { return codexError(res, error); }
     });
   }
 

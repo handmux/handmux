@@ -7,6 +7,13 @@ vi.mock('../src/api.js', () => ({
   sendCodexMessage: vi.fn(async () => ({ ok: true })),
   steerCodexQueuedMessage: vi.fn(async () => ({ steered: true })),
   removeCodexQueuedMessage: vi.fn(async () => ({ removed: true })),
+  beginCodexQueuedEdit: vi.fn(async (_pane, id) => ({
+    editing: true, token: 'edit-token', item: { id, text: '再整理结果', editing: true },
+  })),
+  commitCodexQueuedEdit: vi.fn(async (_pane, id, _token, text) => ({
+    edited: true, item: { id, text },
+  })),
+  cancelCodexQueuedEdit: vi.fn(async () => ({ editing: false })),
   compactCodexSession: vi.fn(async () => ({ ok: true })),
   clearCodexSession: vi.fn(async () => ({ threadId: 'thread-new' })),
   interruptCodexSession: vi.fn(async () => ({ interrupted: true })),
@@ -30,6 +37,7 @@ import ChatComposer, { clearCodexModelsCache } from '../src/components/ChatCompo
 import {
   sendText, sendCodexMessage, compactCodexSession, clearCodexSession, interruptCodexSession,
   steerCodexQueuedMessage, removeCodexQueuedMessage,
+  beginCodexQueuedEdit, commitCodexQueuedEdit, cancelCodexQueuedEdit,
   getCodexModels, getCodexGoal, updateCodexGoal, clearCodexGoal,
   updateCodexSettings, getPaneContext,
 } from '../src/api.js';
@@ -610,7 +618,7 @@ describe('ChatComposer', () => {
     request.resolve({ interrupted: true });
   });
 
-  it('keeps sending available while Codex works and manages its pending queue inside the composer', async () => {
+  it('shows queued messages with compact icon actions, confirmation and in-place editing', async () => {
     const onCodexSendStart = vi.fn(() => 'optimistic-steer');
     const onCodexSendResult = vi.fn();
     const { container } = render(<ChatComposer pane="%1" agent="codex" kind="working" codexSession={{
@@ -621,9 +629,17 @@ describe('ChatComposer', () => {
       ],
     }} onCodexSendStart={onCodexSendStart} onCodexSendResult={onCodexSendResult} />);
     expect(container.querySelector('.cc-card .cc-queue')).toBeTruthy();
+    expect(screen.getByText('排队消息')).toBeTruthy();
+    expect(screen.getByText('当前回合结束后自动逐条发送')).toBeTruthy();
     expect(screen.getByText('先检查测试')).toBeTruthy();
     expect(screen.getByText('再整理结果')).toBeTruthy();
     expect(screen.getByRole('button', { name: '停止' })).toBeTruthy();
+    expect([...container.querySelectorAll('.cc-queue-item')[0].querySelectorAll('button')]
+      .map((button) => button.className)).toEqual([
+      'cc-queue-action cc-queue-edit',
+      'cc-queue-action cc-queue-send',
+      'cc-queue-action cc-queue-delete',
+    ]);
 
     const input = screen.getByPlaceholderText('和 Agent 对话…');
     typeInto(input, '排到最后');
@@ -636,8 +652,49 @@ describe('ChatComposer', () => {
     await waitFor(() => expect(onCodexSendResult).toHaveBeenCalledWith('optimistic-steer', {
       result: { steered: true },
     }));
-    fireEvent.click(screen.getAllByRole('button', { name: '删除待发送消息' })[0]);
+
+    fireEvent.click(screen.getByRole('button', { name: '编辑排队消息' }));
+    await waitFor(() => expect(beginCodexQueuedEdit).toHaveBeenCalledWith('%1', 'queued-2'));
+    const editor = await screen.findByRole('dialog', { name: '编辑排队消息' });
+    const draft = editor.querySelector('textarea');
+    expect(draft.value).toBe('再整理结果');
+    typeInto(draft, '重新整理结果');
+    fireEvent.click(screen.getByRole('button', { name: '保存' }));
+    await waitFor(() => expect(commitCodexQueuedEdit)
+      .toHaveBeenCalledWith('%1', 'queued-2', 'edit-token', '重新整理结果'));
+    expect(cancelCodexQueuedEdit).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: '删除排队消息' }));
+    expect(screen.getByRole('alertdialog', { name: '删除这条排队消息？' })).toBeTruthy();
+    expect(removeCodexQueuedMessage).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: '删除' }));
     await waitFor(() => expect(removeCodexQueuedMessage).toHaveBeenCalledWith('%1', 'queued-2'));
+  });
+
+  it('keeps queued-message taps from focusing the composer and clamps message text to two lines', () => {
+    const { container } = render(<ChatComposer pane="%1" agent="codex" kind="working" codexSession={{
+      managed: true,
+      queue: [{ id: 'queued-1', text: '一段足够长的排队消息，用来验证它不会把整个输入区域一直撑高' }],
+    }} />);
+    const input = screen.getByPlaceholderText('和 Agent 对话…');
+    const queuedText = container.querySelector('.cc-queue-text');
+    fireEvent.pointerDown(queuedText, { clientX: 50, clientY: 50 });
+    fireEvent.pointerUp(queuedText, { clientX: 50, clientY: 50 });
+    expect(document.activeElement).not.toBe(input);
+    expect(styles).toMatch(/\.cc-queue-text\s*\{[^}]*-webkit-line-clamp:\s*2/);
+  });
+
+  it('releases the server edit hold when queued-message editing is cancelled', async () => {
+    render(<ChatComposer pane="%1" agent="codex" kind="working" codexSession={{
+      managed: true, queue: [{ id: 'queued-1', text: '保留原文' }],
+    }} />);
+    fireEvent.click(screen.getByRole('button', { name: '编辑排队消息' }));
+    await waitFor(() => expect(beginCodexQueuedEdit).toHaveBeenCalledWith('%1', 'queued-1'));
+    await screen.findByRole('dialog', { name: '编辑排队消息' });
+    fireEvent.click(screen.getByRole('button', { name: '取消' }));
+    await waitFor(() => expect(cancelCodexQueuedEdit)
+      .toHaveBeenCalledWith('%1', 'queued-1', 'edit-token'));
+    expect(commitCodexQueuedEdit).not.toHaveBeenCalled();
   });
 
   it('a saved chip that is a bare interactive command also hands off to the terminal lens', async () => {

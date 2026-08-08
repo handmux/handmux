@@ -90,6 +90,16 @@ export const steerCodexQueuedMessage = (pane, id) =>
   req('/api/codex/queue/steer', { method: 'POST', body: JSON.stringify({ pane, id }), timeoutMs: 8000 });
 export const removeCodexQueuedMessage = (pane, id) =>
   req('/api/codex/queue/remove', { method: 'POST', body: JSON.stringify({ pane, id }), timeoutMs: 8000 });
+export const beginCodexQueuedEdit = (pane, id) =>
+  req('/api/codex/queue/edit/begin', { method: 'POST', body: JSON.stringify({ pane, id }), timeoutMs: 8000 });
+export const commitCodexQueuedEdit = (pane, id, token, text) =>
+  req('/api/codex/queue/edit/commit', {
+    method: 'POST', body: JSON.stringify({ pane, id, token, text }), timeoutMs: 8000,
+  });
+export const cancelCodexQueuedEdit = (pane, id, token) =>
+  req('/api/codex/queue/edit/cancel', {
+    method: 'POST', body: JSON.stringify({ pane, id, token }), timeoutMs: 8000,
+  });
 export const compactCodexSession = (pane) =>
   req('/api/codex/compact', { method: 'POST', body: JSON.stringify({ pane }), timeoutMs: 8000 });
 export const clearCodexSession = (pane) =>

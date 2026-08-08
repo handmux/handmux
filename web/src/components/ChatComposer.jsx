@@ -1,7 +1,8 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import {
   sendText, sendCodexMessage, compactCodexSession, clearCodexSession, interruptCodexSession,
-  steerCodexQueuedMessage, removeCodexQueuedMessage,
+  steerCodexQueuedMessage, removeCodexQueuedMessage, beginCodexQueuedEdit,
+  commitCodexQueuedEdit, cancelCodexQueuedEdit,
   getCodexModels, updateCodexGoal, clearCodexGoal, updateCodexSettings, UnauthorizedError,
 } from '../api.js';
 import { shouldHandOffSlash } from '../slashCommands.js';
@@ -12,8 +13,8 @@ import { getChatDraft, setChatDraft } from '../storage.js';
 import { usePaneContext } from '../hooks/usePaneContext.js';
 import { UPLOAD_ACCEPT } from '../uploadTypes.js';
 import {
-  ArrowUpIcon, StopIcon, PlusIcon, GearIcon, ChevronDownIcon, RefreshIcon, XIcon, CopyIcon, CheckIcon,
-  BoltIcon,
+  ArrowUpIcon, StopIcon, PlusIcon, GearIcon, ChevronDownIcon, RefreshIcon, CopyIcon, CheckIcon,
+  BoltIcon, PencilIcon, TrashIcon,
 } from './icons.jsx';
 import { useUpload } from '../hooks/useUpload.js';
 import { usePushToTalk } from '../voice/usePushToTalk.js';
@@ -319,12 +320,22 @@ export default function ChatComposer({
   const [submitting, setSubmitting] = useState(false);
   const [stopping, setStopping] = useState(false);
   const [queueAction, setQueueAction] = useState('');
+  const [queueDelete, setQueueDelete] = useState(null);
+  const [queueEditor, setQueueEditor] = useState(null);
   const [handledQueueIds, setHandledQueueIds] = useState([]);
   const [notice, setNotice] = useState('');
   const submitInFlightRef = useRef(false);
   const noticeTimerRef = useRef(null);
+  const queueEditorRef = useRef(null);
   useEffect(() => { setChatDraft(value); }, [value]);
   useEffect(() => () => clearTimeout(noticeTimerRef.current), []);
+  useEffect(() => () => {
+    const current = queueEditorRef.current;
+    queueEditorRef.current = null;
+    if (current?.token) {
+      void cancelCodexQueuedEdit(current.pane, current.id, current.token).catch(() => {});
+    }
+  }, []);
   const clearActionError = () => onActionError?.(null);
   const reportActionError = (kind, error) => onActionError?.({
     kind,
@@ -371,6 +382,13 @@ export default function ChatComposer({
   const pendingQueue = serverQueue.filter((item) => !handledQueueIds.includes(item.id));
   const serverQueueKey = serverQueue.map((item) => item.id).join('\0');
   useEffect(() => {
+    const currentEdit = queueEditorRef.current;
+    queueEditorRef.current = null;
+    setQueueEditor(null);
+    setQueueDelete(null);
+    if (currentEdit?.token && currentEdit.pane !== pane) {
+      void cancelCodexQueuedEdit(currentEdit.pane, currentEdit.id, currentEdit.token).catch(() => {});
+    }
     setHandledQueueIds([]);
     setNotice('');
     clearTimeout(noticeTimerRef.current);
@@ -378,6 +396,11 @@ export default function ChatComposer({
   useEffect(() => {
     const currentIds = new Set(serverQueue.map((item) => item.id));
     setHandledQueueIds((ids) => ids.filter((id) => currentIds.has(id)));
+    if (queueEditorRef.current && !currentIds.has(queueEditorRef.current.id)) {
+      queueEditorRef.current = null;
+      setQueueEditor(null);
+    }
+    setQueueDelete((item) => (item && !currentIds.has(item.id) ? null : item));
     // Queue ids, rather than the array identity, change only when the authoritative server queue changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [serverQueueKey]);
@@ -643,7 +666,7 @@ export default function ChatComposer({
     }
   };
   const actOnQueued = async (action, item) => {
-    if (!item?.id || queueAction) return;
+    if (!item?.id || queueAction || queueEditorRef.current) return false;
     const optimisticId = action === 'steer' ? onCodexSendStart?.(pane, item.text, 'steer') : null;
     if (action === 'steer') setHandledQueueIds((ids) => [...ids, item.id]);
     setQueueAction(`${action}:${item.id}`);
@@ -654,13 +677,98 @@ export default function ChatComposer({
         : await removeCodexQueuedMessage(pane, item.id);
       if (optimisticId) onCodexSendResult?.(optimisticId, { result });
       if (action !== 'steer') setHandledQueueIds((ids) => [...ids, item.id]);
+      return true;
     } catch (err) {
       if (action === 'steer') setHandledQueueIds((ids) => ids.filter((id) => id !== item.id));
       if (optimisticId) onCodexSendResult?.(optimisticId, { error: err });
       if (err instanceof UnauthorizedError) onAuthFail?.();
       else reportActionError('queue', err);
+      return false;
     } finally { setQueueAction(''); }
   };
+  const replaceQueueEditor = (next) => {
+    queueEditorRef.current = next;
+    setQueueEditor(next);
+  };
+  const updateQueueEditor = (updates) => {
+    const current = queueEditorRef.current;
+    if (!current) return;
+    replaceQueueEditor({ ...current, ...updates });
+  };
+  const openQueueEditor = async (item) => {
+    if (!item?.id || queueAction || queueEditorRef.current) return;
+    const key = `${pane}\0${item.id}\0${Date.now()}`;
+    const pending = {
+      key, pane, id: item.id, original: item.text, draft: item.text,
+      token: null, busy: false, error: '',
+    };
+    replaceQueueEditor(pending);
+    setQueueAction(`edit:${item.id}`);
+    clearActionError();
+    try {
+      const result = await beginCodexQueuedEdit(pane, item.id);
+      if (queueEditorRef.current?.key !== key) {
+        if (result?.token) {
+          void cancelCodexQueuedEdit(pane, item.id, result.token).catch(() => {});
+        }
+        return;
+      }
+      const active = queueEditorRef.current;
+      const serverText = result?.item?.text ?? item.text;
+      replaceQueueEditor({
+        ...active,
+        draft: active.draft === active.original ? serverText : active.draft,
+        original: serverText,
+        token: result?.token || null,
+      });
+    } catch (err) {
+      if (queueEditorRef.current?.key === key) replaceQueueEditor(null);
+      if (err instanceof UnauthorizedError) onAuthFail?.();
+      else reportActionError('queue', err);
+    } finally {
+      setQueueAction((current) => (current === `edit:${item.id}` ? '' : current));
+    }
+  };
+  const dismissQueueEditor = () => {
+    const current = queueEditorRef.current;
+    if (!current) return;
+    replaceQueueEditor(null);
+    if (!current.token) return;
+    setQueueAction(`edit-cancel:${current.id}`);
+    void cancelCodexQueuedEdit(current.pane, current.id, current.token).catch((err) => {
+      if (err instanceof UnauthorizedError) onAuthFail?.();
+      else reportActionError('queue', err);
+    }).finally(() => {
+      setQueueAction((action) => (action === `edit-cancel:${current.id}` ? '' : action));
+    });
+  };
+  const saveQueueEditor = async () => {
+    const current = queueEditorRef.current;
+    const text = current?.draft.trim() || '';
+    if (!current?.token || current.busy || !text) return;
+    updateQueueEditor({ busy: true, error: '' });
+    clearActionError();
+    try {
+      await commitCodexQueuedEdit(current.pane, current.id, current.token, text);
+      if (queueEditorRef.current?.key === current.key) replaceQueueEditor(null);
+    } catch (err) {
+      if (err instanceof UnauthorizedError) onAuthFail?.();
+      else if (queueEditorRef.current?.key === current.key) {
+        reportActionError('queue', err);
+        updateQueueEditor({
+          busy: false,
+          error: err?.serverError || err?.message || t('chat.queue.actionFailed'),
+        });
+      }
+    }
+  };
+  const confirmQueueDelete = async () => {
+    const item = queueDelete;
+    if (!item) return;
+    if (await actOnQueued('remove', item)) setQueueDelete(null);
+  };
+  useBackButton(!!queueEditor, dismissQueueEditor);
+  useBackButton(!!queueDelete, () => setQueueDelete(null));
   const onComposerKeyDown = (event) => {
     if (!desktop || event.nativeEvent?.isComposing) return;
     if (event.key === 'Escape' && busy) {
@@ -692,7 +800,7 @@ export default function ChatComposer({
     // Reject if it moved during the press (a scroll/lens-swipe), OR if the up landed far from the down —
     // a second signal in case fast-swipe move events were throttled/missed. Only a stationary tap focuses.
     if (p.moved || Math.hypot(e.clientX - p.x, e.clientY - p.y) > 10) return;
-    if (e.target.closest?.('button, a, input, textarea, [contenteditable]')) return; // a control / the field
+    if (e.target.closest?.('.cc-queue, button, a, input, textarea, [contenteditable]')) return;
     ref.current?.focus();
   };
 
@@ -772,17 +880,20 @@ export default function ChatComposer({
         {pendingQueue.length > 0 && (
           <div className="cc-queue" aria-label={t('chat.queue.title')}>
             <div className="cc-queue-head">
-              <span>{t('chat.queue.title')}</span><span>{pendingQueue.length}</span>
+              <span>{t('chat.queue.title')}</span><span>{t('chat.queue.hint')}</span>
             </div>
             {pendingQueue.map((item) => (
               <div className="cc-queue-item" key={item.id}>
                 <span className="cc-queue-text">{item.text}</span>
-                <button type="button" className="cc-queue-steer"
-                  disabled={!!queueAction} onClick={() => void actOnQueued('steer', item)}>
-                  {t('chat.queue.steer')}
-                </button>
-                <button type="button" className="cc-queue-remove" aria-label={t('chat.queue.remove')}
-                  disabled={!!queueAction} onClick={() => void actOnQueued('remove', item)}><XIcon /></button>
+                <button type="button" className="cc-queue-action cc-queue-edit"
+                  aria-label={t('chat.queue.edit')} disabled={!!queueAction}
+                  onClick={() => void openQueueEditor(item)}><PencilIcon /></button>
+                <button type="button" className="cc-queue-action cc-queue-send"
+                  aria-label={t('chat.queue.steer')} disabled={!!queueAction}
+                  onClick={() => void actOnQueued('steer', item)}><ArrowUpIcon /></button>
+                <button type="button" className="cc-queue-action cc-queue-delete"
+                  aria-label={t('chat.queue.remove')} disabled={!!queueAction}
+                  onClick={() => setQueueDelete(item)}><TrashIcon /></button>
               </div>
             ))}
           </div>
@@ -945,6 +1056,41 @@ export default function ChatComposer({
           </div>
         </div>
       </div>
+      {queueEditor && (
+        <div className="settings-confirm-backdrop cc-queue-dialog-backdrop"
+          onClick={dismissQueueEditor}>
+          <div className="settings-confirm cc-queue-edit-dialog" role="dialog" aria-modal="true"
+            aria-label={t('chat.queue.editTitle')} onClick={(event) => event.stopPropagation()}>
+            <h2>{t('chat.queue.editTitle')}</h2>
+            <textarea autoFocus value={queueEditor.draft} disabled={queueEditor.busy}
+              aria-label={t('chat.queue.editTitle')} placeholder={t('chat.queue.editPlaceholder')}
+              onChange={(event) => updateQueueEditor({ draft: event.target.value, error: '' })} />
+            {queueEditor.error && <p className="cc-queue-dialog-error" role="status">{queueEditor.error}</p>}
+            <div className="settings-confirm-actions">
+              <button type="button" disabled={queueEditor.busy}
+                onClick={dismissQueueEditor}>{t('common.cancel')}</button>
+              <button type="button" disabled={queueEditor.busy || !queueEditor.token || !queueEditor.draft.trim()}
+                onClick={() => void saveQueueEditor()}>{t('common.save')}</button>
+            </div>
+          </div>
+        </div>
+      )}
+      {queueDelete && (
+        <div className="settings-confirm-backdrop cc-queue-dialog-backdrop"
+          onClick={() => setQueueDelete(null)}>
+          <div className="settings-confirm" role="alertdialog" aria-modal="true"
+            aria-label={t('chat.queue.removeTitle')} onClick={(event) => event.stopPropagation()}>
+            <h2>{t('chat.queue.removeTitle')}</h2>
+            <p>{t('chat.queue.removeBody')}</p>
+            <div className="settings-confirm-actions">
+              <button type="button" autoFocus disabled={!!queueAction}
+                onClick={() => setQueueDelete(null)}>{t('common.cancel')}</button>
+              <button type="button" className="danger" disabled={!!queueAction}
+                onClick={() => void confirmQueueDelete()}>{t('common.delete')}</button>
+            </div>
+          </div>
+        </div>
+      )}
       {notice && <div className="cc-notice" role="status">{notice}</div>}
       {editOpen && <CmdFavEditor variant="chat" presets={serverShortcuts.chat}
         onChange={refreshShortcuts} onClose={() => setEditOpen(false)} />}

@@ -326,6 +326,79 @@ describe('Codex App Server client', () => {
     app.close();
   });
 
+  it('pauses automatic queue delivery while a message is edited, then sends the committed text', async () => {
+    const proxy = fakeProxy();
+    const app = createCodexAppServer({ home: '/home/test', exists: () => true, connect: () => proxy.ws });
+    await app.status('%1', 'thread-1');
+    proxy.push({
+      jsonrpc: '2.0', method: 'turn/started',
+      params: { threadId: 'thread-1', turn: { id: 'turn-live', status: 'inProgress', items: [] } },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await app.send('%1', 'thread-1', 'send first');
+    const queued = (await app.send('%1', 'thread-1', 'original text')).item;
+    const edit = await app.beginQueuedEdit('%1', 'thread-1', queued.id);
+
+    proxy.push({
+      jsonrpc: '2.0', method: 'turn/completed',
+      params: { threadId: 'thread-1', turn: { id: 'turn-live', status: 'completed', items: [] } },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(proxy.sent.filter((message) => message.method === 'turn/start')).toEqual([]);
+    expect((await app.status('%1', 'thread-1')).queue.find((item) => item.id === queued.id)).toMatchObject({
+      id: queued.id, text: 'original text', editing: true,
+    });
+
+    await app.commitQueuedEdit('%1', 'thread-1', queued.id, edit.token, 'revised text');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(proxy.sent.filter((message) => message.method === 'turn/start')).toContainEqual(
+      expect.objectContaining({
+        params: { threadId: 'thread-1', input: [{ type: 'text', text: 'send first' }] },
+      }),
+    );
+    proxy.push({
+      jsonrpc: '2.0', method: 'turn/completed',
+      params: { threadId: 'thread-1', turn: { id: 'turn-2', status: 'completed', items: [] } },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(proxy.sent.filter((message) => message.method === 'turn/start')).toContainEqual(
+      expect.objectContaining({
+        params: { threadId: 'thread-1', input: [{ type: 'text', text: 'revised text' }] },
+      }),
+    );
+    app.close();
+  });
+
+  it('resumes automatic queue delivery with the original text when editing is cancelled', async () => {
+    const proxy = fakeProxy();
+    const app = createCodexAppServer({ home: '/home/test', exists: () => true, connect: () => proxy.ws });
+    await app.status('%1', 'thread-1');
+    proxy.push({
+      jsonrpc: '2.0', method: 'turn/started',
+      params: { threadId: 'thread-1', turn: { id: 'turn-live', status: 'inProgress', items: [] } },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const queued = (await app.send('%1', 'thread-1', 'keep original')).item;
+    const edit = await app.beginQueuedEdit('%1', 'thread-1', queued.id);
+    proxy.push({
+      jsonrpc: '2.0', method: 'turn/completed',
+      params: { threadId: 'thread-1', turn: { id: 'turn-live', status: 'completed', items: [] } },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    await app.cancelQueuedEdit('%1', 'thread-1', queued.id, edit.token);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(proxy.sent.filter((message) => message.method === 'turn/start')).toContainEqual(
+      expect.objectContaining({
+        params: { threadId: 'thread-1', input: [{ type: 'text', text: 'keep original' }] },
+      }),
+    );
+    app.close();
+  });
+
   it('keeps an interrupted turn active until App Server confirms turn completion', async () => {
     const proxy = fakeProxy();
     const app = createCodexAppServer({ home: '/home/test', exists: () => true, connect: () => proxy.ws });

@@ -2726,26 +2726,42 @@ button.cmd-text { background: none; border: none; text-align: left; }
   margin: -2px 0 7px -6px; padding: 0 0 7px; border-bottom: 1px solid var(--ct-field-line);
 }
 .cc-queue-head {
-  display: flex; align-items: center; gap: 5px; padding: 0 5px;
+  display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 0 5px;
   color: var(--ct-muted); font-size: 11px; line-height: 18px;
 }
-.cc-queue-head span:last-child { font-variant-numeric: tabular-nums; }
+.cc-queue-head span:first-child { flex: none; font-weight: 600; }
+.cc-queue-head span:last-child { min-width: 0; overflow: hidden; text-align: right; text-overflow: ellipsis; white-space: nowrap; }
 .cc-queue-item {
   display: flex; align-items: center; gap: 5px; min-height: 30px; padding: 2px 3px 2px 8px;
   border-radius: 10px; background: var(--ct-chip-2);
 }
 .cc-queue-text {
-  flex: 1; min-width: 0; overflow: hidden; color: var(--ct-ink); font-size: 13px;
-  line-height: 18px; white-space: nowrap; text-overflow: ellipsis;
+  flex: 1; min-width: 0; display: -webkit-box; overflow: hidden; color: var(--ct-ink); font-size: 13px;
+  line-height: 18px; overflow-wrap: anywhere; -webkit-box-orient: vertical; -webkit-line-clamp: 2;
 }
-.cc-queue-steer, .cc-queue-remove {
-  flex: none; min-height: 32px; border: 0; background: transparent; color: var(--ct-accent);
-  touch-action: manipulation;
+.cc-queue-action {
+  flex: none; display: inline-flex; align-items: center; justify-content: center;
+  width: 40px; min-height: 40px; padding: 0; border: 0; background: transparent;
+  color: var(--ct-muted); touch-action: manipulation;
 }
-.cc-queue-steer { padding: 0 5px; font-size: 12px; font-weight: 600; }
-.cc-queue-remove { display: inline-flex; align-items: center; justify-content: center; width: 32px; padding: 0; color: var(--ct-muted); }
-.cc-queue-remove svg { width: 14px; height: 14px; }
-.cc-queue-steer:disabled, .cc-queue-remove:disabled { opacity: .45; }
+.cc-queue-action svg { width: 15px; height: 15px; }
+.cc-queue-send { color: var(--ct-accent); }
+.cc-queue-delete { color: var(--danger, #d34b45); }
+.cc-queue-action:disabled { opacity: .45; }
+.cc-queue-dialog-backdrop { z-index: 52; }
+.chat-composer .cc-queue-dialog-backdrop .settings-confirm {
+  background: var(--ct-overlay); color: var(--ct-ink);
+}
+.chat-composer .cc-queue-dialog-backdrop .settings-confirm h2 { color: var(--ct-ink); }
+.chat-composer .cc-queue-dialog-backdrop .settings-confirm p { color: var(--ct-muted); }
+.cc-queue-edit-dialog { width: min(330px, 100%); }
+.cc-queue-edit-dialog textarea {
+  width: 100%; min-height: 96px; max-height: min(32dvh, 220px); margin-top: 12px; padding: 9px 10px;
+  resize: vertical; border: 1px solid var(--ct-chip-line); border-radius: 10px; outline: none;
+  background: var(--ct-field); color: var(--ct-ink); font: 16px/21px -apple-system, system-ui, sans-serif;
+}
+.cc-queue-edit-dialog textarea:focus { border-color: var(--ct-accent); }
+.cc-queue-dialog-error { margin-top: 7px !important; color: var(--danger, #d34b45) !important; text-align: left; }
 /* 16px font is deliberate — under it iOS zooms the page on focus. max-height caps growth (~6 lines) → scroll.
    No bottom padding: the action row sits right under the text (a big gap here read as unfinished). */
 .cc-text {

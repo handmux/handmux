@@ -359,6 +359,28 @@ describe('Codex App Server routes', () => {
     expect(removeQueued).toHaveBeenCalledWith('%1', 'thread-1', 'queued-2');
   });
 
+  it('begins, commits and cancels queued-message editing through the exact bound thread', async () => {
+    const beginQueuedEdit = vi.fn(async () => ({ editing: true, token: 'edit-token' }));
+    const commitQueuedEdit = vi.fn(async () => ({ edited: true }));
+    const cancelQueuedEdit = vi.fn(async () => ({ editing: false }));
+    const app = appFor({ codexApp: { beginQueuedEdit, commitQueuedEdit, cancelQueuedEdit } });
+
+    await request(app).post('/codex/queue/edit/begin').send({ pane: '%1', id: 'queued-1' })
+      .expect(200, { editing: true, token: 'edit-token' });
+    await request(app).post('/codex/queue/edit/commit').send({
+      pane: '%1', id: 'queued-1', token: 'edit-token', text: ' revised text ',
+    }).expect(200, { edited: true });
+    await request(app).post('/codex/queue/edit/cancel').send({
+      pane: '%1', id: 'queued-2', token: 'edit-token-2',
+    }).expect(200, { editing: false });
+
+    expect(beginQueuedEdit).toHaveBeenCalledWith('%1', 'thread-1', 'queued-1');
+    expect(commitQueuedEdit).toHaveBeenCalledWith(
+      '%1', 'thread-1', 'queued-1', 'edit-token', 'revised text',
+    );
+    expect(cancelQueuedEdit).toHaveBeenCalledWith('%1', 'thread-1', 'queued-2', 'edit-token-2');
+  });
+
   it('rejects empty or malformed settings updates', async () => {
     const app = appFor({ codexApp: { updateSettings: vi.fn() } });
     await request(app).post('/codex/settings').send({ pane: '%1' }).expect(400, { error: 'no settings supplied' });
