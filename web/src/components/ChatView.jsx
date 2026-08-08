@@ -11,6 +11,7 @@ import PromptGate from './PromptGate.jsx';
 import { answerCodexApproval, answerCodexInput, sendKeys, UnauthorizedError } from '../api.js';
 import { t } from '../i18n';
 import { useBackButton, useHistoryLayer, unwindHistory } from '../hooks/useBackButton.js';
+import { findOutputLinks } from '../docDecorations.js';
 import {
   CommandIcon, FileIcon, FilePenIcon, SearchIcon, GlobeIcon, ListChecksIcon, PuzzleIcon, BotIcon, WrenchIcon,
   CheckIcon, XIcon,
@@ -336,6 +337,55 @@ function ToolSheet({ tool, running, onClose }) {
   );
 }
 
+function linkedAssistantHtml(text) {
+  const root = document.createElement('div');
+  root.innerHTML = DOMPurify.sanitize(marked.parse(text || ''));
+  const walker = document.createTreeWalker(root, 4); // NodeFilter.SHOW_TEXT
+  const nodes = [];
+  while (walker.nextNode()) nodes.push(walker.currentNode);
+  for (const node of nodes) {
+    if (node.parentElement?.closest('a')) continue; // Markdown links are handled by the same delegated click.
+    const links = findOutputLinks(node.data);
+    if (!links.length) continue;
+    const fragment = document.createDocumentFragment();
+    let offset = 0;
+    for (const link of links) {
+      fragment.append(node.data.slice(offset, link.start));
+      const anchor = document.createElement('a');
+      const value = link.kind === 'url' ? link.raw : link.path;
+      anchor.href = value;
+      anchor.dataset.handmuxOutputLink = link.kind;
+      anchor.dataset.handmuxOutputValue = value;
+      anchor.textContent = node.data.slice(link.start, link.end);
+      fragment.append(anchor);
+      offset = link.end;
+    }
+    fragment.append(node.data.slice(offset));
+    node.replaceWith(fragment);
+  }
+  return root.innerHTML;
+}
+
+function AssistantMarkdown({ text }) {
+  const html = useMemo(() => linkedAssistantHtml(text), [text]);
+  return <div className="chat-bubble chat-them chat-md" dangerouslySetInnerHTML={{ __html: html }} />;
+}
+
+function outputLinkFromAnchor(anchor) {
+  const explicitKind = anchor.dataset.handmuxOutputLink;
+  const raw = anchor.dataset.handmuxOutputValue || anchor.getAttribute('href') || '';
+  const links = findOutputLinks(raw);
+  const match = explicitKind ? links.find((link) => link.kind === explicitKind) : links[0];
+  if (!match) return null;
+  if (match.kind === 'url') {
+    return {
+      kind: 'url', protocol: match.protocol, port: match.port,
+      urlPath: match.urlPath, raw: match.raw,
+    };
+  }
+  return { kind: 'doc', path: match.path || raw.slice(match.start, match.end) };
+}
+
 function Bubble({ m, running, onOpenTool }) {
   if (m.type === 'tool') return <ToolChip tool={m.tool} running={running} onOpen={() => onOpenTool(m)} />;
   // ESC-interrupt marker — a quiet, centered grey hint that the user stopped the turn, NOT a user bubble
@@ -361,8 +411,7 @@ function Bubble({ m, running, onOpenTool }) {
   // Assistant text gets markdown (tables/code/etc render properly); user text stays plain — it's what the
   // user typed, not content to be re-interpreted. Same marked→DOMPurify pipeline as DocView.jsx.
   if (m.role !== 'user') {
-    const html = DOMPurify.sanitize(marked.parse(m.text || ''));
-    return <div className="chat-bubble chat-them chat-md" dangerouslySetInnerHTML={{ __html: html }} />;
+    return <AssistantMarkdown text={m.text} />;
   }
   return <div className="chat-bubble chat-me">{m.text}</div>;
 }
@@ -555,6 +604,7 @@ function CodexInputGate({ pane, input, onAuthFail }) {
 export default function ChatView({
   pane, agent = 'claude', kind, msg, onAuthFail, slashEcho, onSlashEchoDone,
   refreshToken = null, codexSession = null, optimisticMessages = [], onOptimisticCovered,
+  onDocLinkTap,
 }) {
   const { messages, hasMoreOlder, loadOlder, loadingOlder, session, loaded, unavailable, unavailableDetail } = useTranscript(pane, true, agent, refreshToken);
   const tsIdx = useMemo(() => timeStampedIndices(messages), [messages]);
@@ -810,6 +860,16 @@ export default function ChatView({
     setAtBottom(true);
   };
 
+  const onOutputLinkClick = (event) => {
+    const anchor = event.target.closest?.('.chat-md a');
+    if (!anchor || !event.currentTarget.contains(anchor)) return;
+    const link = outputLinkFromAnchor(anchor);
+    if (!link || !onDocLinkTap) return;
+    event.preventDefault();
+    event.stopPropagation();
+    onDocLinkTap(link, event.clientX ?? 0, event.clientY ?? 0);
+  };
+
   // Default view is pinned to the bottom (newest), like a normal chat. Priority on each messages change:
   //   1. a loadOlder() prepend just landed (pendingPrependRef set) → restore the visual position (scroll
   //      delta) so the view doesn't jump — this must win over everything else, it's mid-flight state.
@@ -891,7 +951,7 @@ export default function ChatView({
   }, [pane]);
 
   return (
-    <div className="chat-view" ref={viewRef}>
+    <div className="chat-view" ref={viewRef} onClick={onOutputLinkClick}>
       <div className="chat-scroll" ref={scrollRef} onScroll={onScroll}
         onPointerDown={onCopyDown} onPointerMove={onCopyMove}
         onPointerUp={cancelLongPress} onPointerCancel={cancelLongPress}

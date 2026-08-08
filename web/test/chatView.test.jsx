@@ -90,6 +90,38 @@ describe('ChatView', () => {
     expect(them.textContent).toContain('好的');
   });
 
+  it('routes assistant file paths and URLs through the terminal link handler', async () => {
+    mockTranscript([{
+      k: 0, i: 0, role: 'assistant', type: 'text',
+      text: '查看 docs/spec.md 和 http://localhost:3000/preview',
+    }]);
+    const onDocLinkTap = vi.fn();
+    render(<ChatView pane="%0" kind="done" onDocLinkTap={onDocLinkTap} />);
+
+    fireEvent.click(await screen.findByText('docs/spec.md'), { clientX: 21, clientY: 34 });
+    expect(onDocLinkTap).toHaveBeenLastCalledWith(
+      { kind: 'doc', path: 'docs/spec.md' }, 21, 34,
+    );
+
+    fireEvent.click(screen.getByText('http://localhost:3000/preview'), { clientX: 55, clientY: 89 });
+    expect(onDocLinkTap).toHaveBeenLastCalledWith({
+      kind: 'url', protocol: 'http', port: 3000,
+      urlPath: '/preview', raw: 'http://localhost:3000/preview',
+    }, 55, 89);
+  });
+
+  it('routes explicit Markdown file links through the same handler and strips line suffixes', async () => {
+    mockTranscript([{
+      k: 0, i: 0, role: 'assistant', type: 'text',
+      text: '[打开规格](/work/docs/spec.md:12)',
+    }]);
+    const onDocLinkTap = vi.fn();
+    render(<ChatView pane="%0" kind="done" onDocLinkTap={onDocLinkTap} />);
+
+    fireEvent.click(await screen.findByRole('link', { name: '打开规格' }));
+    expect(onDocLinkTap).toHaveBeenCalledWith({ kind: 'doc', path: '/work/docs/spec.md' }, 0, 0);
+  });
+
   it('renders a page-local Codex message immediately with its sending state', async () => {
     mockTranscript([]);
     const { container } = render(<ChatView pane="%0" agent="codex" kind="working"

@@ -2067,6 +2067,7 @@ export default function App() {
                   onTerminal={() => { setLens('terminal'); localStorage.setItem('tw_lens_' + current.paneId, 'terminal'); }} />
               ) : (
                 <ChatView pane={current.paneId} agent={currentAgent} kind={currentKind} msg={states[current.paneId]?.msg} onAuthFail={onAuthFail}
+                  onDocLinkTap={onDocLinkTap}
                   codexSession={codexSession}
                   optimisticMessages={codexOptimisticMessages.filter((item) => item.paneId === current.paneId)}
                   onOptimisticCovered={coverCodexOptimistic}

@@ -12,6 +12,7 @@ All notable changes to handmux. Format follows [Keep a Changelog](https://keepac
 - Codex 回复期间可以继续发送消息：消息默认进入临时队列并在当前回复完成后依次处理，也可选择立刻引导当前回复。
 
 ### Changed
+- 对话视图中的文件路径与 HTTP(S) 网址改为复用终端的确认和打开流程，可直接进入文件预览或网页预览器。
 - Claude Code 与 Codex CLI 的对话视图改为独立开关；仅 Claude Code 保留实验性标识。
 - Codex 模型菜单的思考强度改为底部单行步骤条，可直接拖动选择；Agent 回复期间仍可调整，修改从下一条消息生效。
 - 托管 Codex 不支持的斜杠命令改为短暂的底部提示，不再在输入区显示为错误。
