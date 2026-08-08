@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, cleanup, act } from '@testing-library/react';
+import { readFileSync } from 'node:fs';
 
 vi.mock('../src/api.js', () => ({
   sendText: vi.fn(async () => ({ ok: true })),
@@ -9,6 +10,8 @@ vi.mock('../src/api.js', () => ({
 
 import PromptGate from '../src/components/PromptGate.jsx';
 import { sendText, sendKeys } from '../src/api.js';
+
+const styles = readFileSync(`${process.cwd()}/src/styles.css`, 'utf8');
 
 afterEach(cleanup);
 beforeEach(() => vi.clearAllMocks());
@@ -30,6 +33,21 @@ describe('PromptGate', () => {
     expect(screen.getByText('热情')).toBeTruthy();
     expect(screen.getByRole('radio', { name: /红色/ }).getAttribute('aria-checked')).toBe('true');
     expect(screen.getByRole('radio', { name: /蓝色/ }).getAttribute('aria-checked')).toBe('false');
+  });
+
+  it('limits long option copy to at most two label lines and one description line', () => {
+    const { container } = render(<PromptGate pane="%1" prompt={{
+      ...askPrompt,
+      options: [{ n: 1, label: '很长的选项标题'.repeat(20), description: '很长的选项说明'.repeat(20) }],
+    }} />);
+    expect(container.querySelector('.chat-gate-opt-label')).toBeTruthy();
+    expect(container.querySelector('.chat-gate-opt-desc')).toBeTruthy();
+    expect(styles).toMatch(/\.chat-gate-opt-label\s*\{[^}]*-webkit-line-clamp:\s*2/s);
+    expect(styles).toMatch(/\.chat-gate-opt-desc\s*\{[^}]*white-space:\s*nowrap/s);
+  });
+
+  it('limits stacked decision button labels to three lines', () => {
+    expect(styles).toMatch(/\.chat-gate-btn-label\s*\{[^}]*-webkit-line-clamp:\s*3/s);
   });
 
   it('确认 sends the SELECTED option digit (no Enter) — the menu hotkey', async () => {

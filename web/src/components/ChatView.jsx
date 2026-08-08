@@ -532,7 +532,7 @@ function CodexApprovalGate({ pane, approval, onAuthFail }) {
           <button key={decision.id} type="button"
             className={`chat-gate-btn${decision.primary ? ' primary' : ''}`}
             disabled={submitting} onClick={() => void decide(decision.id)}>
-            {decision.label}
+            <span className="chat-gate-btn-label">{decision.label}</span>
           </button>
         ))}
       </div>
@@ -1045,7 +1045,9 @@ export default function ChatView({
           <div className="chat-gate-prompt">{fb.prompt}</div>
           <div className="chat-gate-actions chat-gate-decisions">
             {fb.options.map((o, i) => (
-              <button key={i} type="button" className="chat-gate-btn" onClick={() => sendKeys(pane, o.keys)}>{o.label}</button>
+              <button key={i} type="button" className="chat-gate-btn" onClick={() => sendKeys(pane, o.keys)}>
+                <span className="chat-gate-btn-label">{o.label}</span>
+              </button>
             ))}
           </div>
         </div>

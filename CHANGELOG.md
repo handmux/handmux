@@ -11,7 +11,7 @@ All notable changes to handmux. Format follows [Keep a Changelog](https://keepac
 - 修复 Codex 对话偶尔把内部 `AGENTS.md` instructions 当成用户消息展示的问题。
 - Keep Codex turns visibly stopping until App Server confirms the interruption has completed.
 - 重新进入应用时直接恢复 Agent 的对话视图，不再先显示终端并延迟出现切换按钮。
-- 对话中的审批和决策选项统一改为每项独占一行，减少误触。
+- 对话中的审批和决策选项统一改为每项独占一行，并限制长选项高度，避免遮满屏幕。
 
 ### Added
 - Codex 托管对话输入栏新增上下文占用环，点按可查看运行状态、Token、项目、分支、权限与会话 ID。

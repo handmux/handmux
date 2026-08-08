@@ -2636,11 +2636,23 @@ button.cmd-text { background: none; border: none; text-align: left; }
   background: var(--ct-chip); color: var(--ct-ink); touch-action: manipulation; transition: background .12s, border-color .12s;
 }
 .chat-gate-opt.on { background: color-mix(in srgb, var(--ct-accent) 16%, transparent); border-color: var(--ct-accent); }
-.chat-gate-opt-label { font-size: 15px; font-weight: 600; }
-.chat-gate-opt-desc { font-size: 12px; color: var(--ct-muted); line-height: 1.35; }
+.chat-gate-opt-label {
+  overflow: hidden; font-size: 15px; font-weight: 600; line-height: 1.35; overflow-wrap: anywhere;
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2;
+}
+.chat-gate-opt-desc {
+  overflow: hidden; color: var(--ct-muted); font-size: 12px; line-height: 1.35;
+  text-overflow: ellipsis; white-space: nowrap;
+}
 .chat-gate-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 .chat-gate-decisions { flex-direction: column; flex-wrap: nowrap; }
-.chat-gate-decisions .chat-gate-btn { flex: none; width: 100%; }
+.chat-gate-decisions .chat-gate-btn {
+  flex: none; width: 100%; display: flex; align-items: center; justify-content: center; padding: 6px 14px;
+}
+.chat-gate-btn-label {
+  overflow: hidden; line-height: 1.3; overflow-wrap: anywhere;
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3;
+}
 .chat-gate-btn {
   flex: 1; min-width: 44px; min-height: 44px; padding: 0 14px;
   border: none; border-radius: 10px; background: var(--ct-chip-2); color: var(--ct-accent);

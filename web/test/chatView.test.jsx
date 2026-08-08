@@ -96,6 +96,19 @@ describe('ChatView', () => {
     await waitFor(() => expect(api.answerCodexApproval).toHaveBeenCalledWith('%7', '94', 'structured:1'));
   });
 
+  it('wraps long Codex approval decisions in a bounded label', async () => {
+    mockTranscript([{ k: 0, i: 0, role: 'assistant', type: 'text', text: '准备执行' }]);
+    render(<ChatView pane="%0" agent="codex" kind="permission" codexSession={{
+      managed: true,
+      approvals: [{
+        id: 'long-rule', type: 'command', command: 'tool run', cwd: '/work',
+        decisions: [{ id: 'structured:long', type: 'execpolicy', rule: ['tool', 'argument'.repeat(80)] }],
+      }],
+    }} />);
+    expect((await screen.findByRole('button', { name: /允许并记住/ }))
+      .querySelector('.chat-gate-btn-label')).toBeTruthy();
+  });
+
   it('renders user text right and assistant text left', async () => {
     mockTranscript([
       { k: 0, i: 0, role: 'user', type: 'text', text: '帮我跑测试' },
