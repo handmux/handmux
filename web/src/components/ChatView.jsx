@@ -674,7 +674,12 @@ export default function ChatView({
   // could both disappear when the first App Server message arrives.
   const claimedCanonicalIds = new Set();
   const coveredOptimisticIds = [];
+  const serverQueueIds = new Set((codexSession?.queue || []).map((item) => item.id));
   for (const item of optimisticMessages) {
+    if (item.status === 'queued' && item.queueId && serverQueueIds.has(item.queueId)) {
+      coveredOptimisticIds.push(item.id);
+      continue;
+    }
     const baseline = optimisticMarksRef.current.get(item.id);
     const match = messages.find((message) => {
       const identity = messageIdentity(message);
@@ -970,7 +975,7 @@ export default function ChatView({
     if (isNewTrailingUser) {
       el.scrollTop = el.scrollHeight;
       lastScrollTopRef.current = el.scrollTop;
-      followModeRef.current = 'revealing';
+      followModeRef.current = 'following';
       stickBottomRef.current = true;
       setAtBottom(true);
       return;
@@ -996,7 +1001,7 @@ export default function ChatView({
     if (el && newestOptimisticId && newestOptimisticId !== lastOptimisticIdRef.current) {
       el.scrollTop = el.scrollHeight;
       lastScrollTopRef.current = el.scrollTop;
-      followModeRef.current = 'revealing';
+      followModeRef.current = 'following';
       stickBottomRef.current = true;
       setAtBottom(true);
     }
@@ -1069,6 +1074,7 @@ export default function ChatView({
           const label = item.status === 'sending' ? t('chat.outgoing.sending')
             : item.status === 'accepted' ? t('chat.outgoing.sent')
               : item.status === 'steered' ? t('chat.outgoing.steered')
+                : item.status === 'queued' ? t('chat.outgoing.queued')
                 : item.status === 'failed' ? (item.error
                   ? `${t('chat.outgoing.failed')}：${item.error}` : t('chat.outgoing.failed')) : '';
           return (

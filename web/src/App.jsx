@@ -1371,9 +1371,11 @@ export default function App() {
             : candidate);
       }
       if (result?.queued) {
-        // The server-owned queue is now the authoritative visible state; the immediate poll triggered by
-        // onCommandSent will render its normal queue row.
-        return items.filter((candidate) => candidate.id !== id);
+        // Keep the temporary bubble until the authoritative queue snapshot contains this exact item. ChatView
+        // then swaps the bubble for the queue row in one render, avoiding an empty flash between both states.
+        return items.map((candidate) => candidate.id === id
+          ? { ...candidate, status: 'queued', queueId: result.item?.id || null }
+          : candidate);
       }
       const status = item.source === 'steer' ? 'steered' : 'accepted';
       return items.map((candidate) => candidate.id === id

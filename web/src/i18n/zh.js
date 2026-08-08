@@ -438,6 +438,7 @@ export default {
 'chat.queue.removeBody': '删除后无法恢复。',
 'chat.queue.actionFailed': '没有处理成功，请稍后重试',
 'chat.outgoing.sending': '正在发送',
+'chat.outgoing.queued': '已加入队列',
 'chat.outgoing.sent': '已发送',
 'chat.outgoing.steered': '已引导',
 'chat.outgoing.failed': '发送失败',

@@ -172,6 +172,29 @@ describe('ChatView', () => {
     expect(container.textContent).not.toContain('发送你的第一条消息');
   });
 
+  it('keeps an acknowledged queued message visible until the server queue replaces it', async () => {
+    mockTranscript([]);
+    const optimistic = [{
+      id: 'optimistic-1', queueId: 'queued-1', text: '下一轮继续处理', status: 'queued',
+    }];
+    const onOptimisticCovered = vi.fn();
+    const { container, rerender } = render(<ChatView pane="%0" agent="codex" kind="working"
+      codexSession={{ managed: true, threadId: 'thread-1', queue: [] }}
+      optimisticMessages={optimistic} onOptimisticCovered={onOptimisticCovered} />);
+
+    await screen.findByText('下一轮继续处理');
+    expect(screen.getByText('已加入队列')).toBeTruthy();
+    expect(container.querySelector('.chat-optimistic')).toBeTruthy();
+
+    rerender(<ChatView pane="%0" agent="codex" kind="working"
+      codexSession={{
+        managed: true, threadId: 'thread-1', queue: [{ id: 'queued-1', text: '下一轮继续处理' }],
+      }} optimisticMessages={optimistic} onOptimisticCovered={onOptimisticCovered} />);
+
+    await waitFor(() => expect(onOptimisticCovered).toHaveBeenCalledWith(['optimistic-1']));
+    expect(container.querySelector('.chat-optimistic')).toBeNull();
+  });
+
   it('renders a composer failure inside the conversation with its actionable reason', async () => {
     mockTranscript([]);
     const { container } = render(<ChatView pane="%0" kind="done"
@@ -637,7 +660,7 @@ describe('ChatView', () => {
       if (this.dataset?.codexStream === 'active') return { top: 8, bottom: 328, height: 320, left: 0, right: 320, width: 320 };
       return { top: 0, bottom: 0, height: 0, left: 0, right: 0, width: 0 };
     });
-    const { container } = render(<ChatView pane="%1" agent="codex" kind="working"
+    const { container, rerender } = render(<ChatView pane="%1" agent="codex" kind="working"
       codexSession={{ managed: true, threadId: 'thread-1' }} />);
     await screen.findByText('写一份长说明');
     await waitFor(() => expect(emit).toBeTypeOf('function'));
@@ -666,6 +689,18 @@ describe('ChatView', () => {
     }));
     await screen.findByText('第一段正在生成，后续内容继续增长，现在跟随最新');
     expect(el.scrollTop).toBe(1600);
+
+    rerender(<ChatView pane="%1" agent="codex" kind="working"
+      codexSession={{ managed: true, threadId: 'thread-1' }}
+      optimisticMessages={[{ id: 'queued-1', text: '排队处理下一项', status: 'sending' }]} />);
+    await screen.findByText('排队处理下一项');
+    Object.defineProperty(el, 'scrollHeight', { value: 1800, configurable: true });
+    act(() => emit({
+      type: 'delta', threadId: 'thread-1', turnId: 'turn-1', itemId: 'agent-1', delta: '，当前回答仍在继续',
+    }));
+    await screen.findByText('第一段正在生成，后续内容继续增长，现在跟随最新，当前回答仍在继续');
+    expect(el.scrollTop).toBe(1800);
+    expect(container.querySelector('.new-output')).toBeNull();
   });
 
   it('a newly-arrived trailing user message forces the view back to the bottom, even if scrolled up', async () => {

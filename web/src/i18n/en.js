@@ -439,6 +439,7 @@ export default {
 'chat.queue.removeBody': 'This cannot be undone.',
 'chat.queue.actionFailed': 'The queued message could not be updated. Try again.',
 'chat.outgoing.sending': 'Sending',
+'chat.outgoing.queued': 'Queued',
 'chat.outgoing.sent': 'Sent',
 'chat.outgoing.steered': 'Guided',
 'chat.outgoing.failed': 'Failed to send',
