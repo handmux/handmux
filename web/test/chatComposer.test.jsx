@@ -10,6 +10,11 @@ vi.mock('../src/api.js', () => ({
   clearCodexSession: vi.fn(async () => ({ threadId: 'thread-new' })),
   interruptCodexSession: vi.fn(async () => ({ interrupted: true })),
   getCodexModels: vi.fn(async () => ({ models: [] })),
+  getCodexGoal: vi.fn(async () => ({ goal: null })),
+  updateCodexGoal: vi.fn(async (_pane, updates) => ({ goal: {
+    objective: updates.objective || 'Current goal', status: updates.status || 'active',
+  } })),
+  clearCodexGoal: vi.fn(async () => ({ cleared: true })),
   updateCodexSettings: vi.fn(async (_pane, settings) => ({ settings })),
   getPaneContext: vi.fn(() => new Promise(() => {})), // no context chip by default
   UnauthorizedError: class UnauthorizedError extends Error {},
@@ -24,7 +29,8 @@ import ChatComposer, { clearCodexModelsCache } from '../src/components/ChatCompo
 import {
   sendText, sendCodexMessage, compactCodexSession, clearCodexSession, interruptCodexSession,
   steerCodexQueuedMessage, removeCodexQueuedMessage,
-  getCodexModels, updateCodexSettings, getPaneContext,
+  getCodexModels, getCodexGoal, updateCodexGoal, clearCodexGoal,
+  updateCodexSettings, getPaneContext,
 } from '../src/api.js';
 
 // No globals:true → register cleanup manually so DOM doesn't leak between tests.
@@ -34,6 +40,11 @@ beforeEach(() => {
   vi.clearAllMocks();
   getPaneContext.mockImplementation(() => new Promise(() => {}));
   getCodexModels.mockResolvedValue({ models: [] });
+  getCodexGoal.mockResolvedValue({ goal: null });
+  updateCodexGoal.mockImplementation(async (_pane, updates) => ({ goal: {
+    objective: updates.objective || 'Current goal', status: updates.status || 'active',
+  } }));
+  clearCodexGoal.mockResolvedValue({ cleared: true });
   updateCodexSettings.mockImplementation(async (_pane, settings) => ({ settings }));
   localStorage.clear();
   voice.state = 'idle';
@@ -201,6 +212,59 @@ describe('ChatComposer', () => {
     expect(onInteractiveSlash).not.toHaveBeenCalled();
   });
 
+  it('runs native /goal actions without sending command text to the terminal or model', async () => {
+    render(<ChatComposer pane="%1" agent="codex" kind="idle" codexSession={{ managed: true }} />);
+    const input = screen.getByPlaceholderText('和 Agent 对话…');
+
+    typeInto(input, '/goal Finish the release');
+    fireEvent.click(screen.getByRole('button', { name: '发送' }));
+    await waitFor(() => expect(updateCodexGoal).toHaveBeenCalledWith('%1', {
+      objective: 'Finish the release',
+    }));
+    expect(await screen.findByText('任务目标已设置')).toBeTruthy();
+
+    typeInto(input, '/goal pause');
+    fireEvent.click(screen.getByRole('button', { name: '发送' }));
+    await waitFor(() => expect(updateCodexGoal).toHaveBeenCalledWith('%1', { status: 'paused' }));
+
+    typeInto(input, '/goal resume');
+    fireEvent.click(screen.getByRole('button', { name: '发送' }));
+    await waitFor(() => expect(updateCodexGoal).toHaveBeenCalledWith('%1', { status: 'active' }));
+
+    typeInto(input, '/goal clear');
+    fireEvent.click(screen.getByRole('button', { name: '发送' }));
+    await waitFor(() => expect(clearCodexGoal).toHaveBeenCalledWith('%1'));
+    expect(sendCodexMessage).not.toHaveBeenCalled();
+    expect(sendText).not.toHaveBeenCalled();
+  });
+
+  it('views and edits the authoritative native goal in an in-chat panel', async () => {
+    getCodexGoal.mockResolvedValueOnce({ goal: {
+      objective: 'Keep tests green', status: 'active', tokensUsed: 120, timeUsedSeconds: 3,
+    } });
+    render(<ChatComposer pane="%1" agent="codex" kind="idle" codexSession={{ managed: true }} />);
+    const input = screen.getByPlaceholderText('和 Agent 对话…');
+    typeInto(input, '/goal');
+    fireEvent.click(screen.getByRole('button', { name: '发送' }));
+
+    const panel = await screen.findByRole('dialog', { name: '任务目标' });
+    await waitFor(() => expect(panel.textContent).toContain('Keep tests green'));
+    expect(panel.textContent).toContain('进行中');
+    fireEvent.click(screen.getByRole('button', { name: '编辑' }));
+    const objective = screen.getByRole('textbox', { name: '目标内容' });
+    typeInto(objective, 'Ship after review');
+    fireEvent.click(screen.getByRole('button', { name: '保存' }));
+    await waitFor(() => expect(updateCodexGoal).toHaveBeenCalledWith('%1', {
+      objective: 'Ship after review',
+    }));
+    await waitFor(() => expect(panel.textContent).toContain('Ship after review'));
+
+    fireEvent.click(screen.getByRole('button', { name: '清除' }));
+    expect(screen.getByRole('alertdialog', { name: '清除任务目标？' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('alertdialog').querySelector('button.danger'));
+    await waitFor(() => expect(clearCodexGoal).toHaveBeenCalledWith('%1'));
+  });
+
   it('keeps App Server model and effort in the footer and edits them in one sheet', async () => {
     getCodexModels.mockResolvedValueOnce({ models: [
       {
@@ -218,13 +282,45 @@ describe('ChatComposer', () => {
     }} />);
     expect(container.querySelector('.cc-ctx-model').textContent).toBe('gpt-5.6-terra');
     expect(container.querySelector('.cc-ctx-pct').textContent).toBe('medium');
-    fireEvent.click(screen.getByRole('button', { name: '设置模型和思考强度' }));
-    expect(await screen.findByRole('dialog', { name: '模型与思考强度' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: '设置模型、Fast 和思考强度' }));
+    expect(await screen.findByRole('dialog', { name: '模型设置' })).toBeTruthy();
     fireEvent.click(await screen.findByRole('button', { name: 'GPT New' }));
     await waitFor(() => expect(updateCodexSettings).toHaveBeenCalledWith('%1', {
       model: 'gpt-new', effort: 'high',
     }));
     await waitFor(() => expect(container.querySelector('.cc-ctx-model').textContent).toBe('gpt-new'));
+  });
+
+  it('shows Fast only when the selected model advertises it and saves the catalog tier', async () => {
+    getCodexModels.mockResolvedValueOnce({ models: [
+      {
+        id: 'gpt-fast', model: 'gpt-fast', displayName: 'GPT Fast',
+        serviceTiers: [{ id: 'priority', name: 'Fast', description: 'Faster responses' }],
+        supportedReasoningEfforts: [{ reasoningEffort: 'medium' }], defaultReasoningEffort: 'medium',
+      },
+      {
+        id: 'gpt-plain', model: 'gpt-plain', displayName: 'GPT Plain', serviceTiers: [],
+        supportedReasoningEfforts: [{ reasoningEffort: 'medium' }], defaultReasoningEffort: 'medium',
+      },
+    ] });
+    updateCodexSettings.mockImplementation(async (_pane, updates) => ({ settings: {
+      model: 'gpt-fast', effort: 'medium', serviceTier: null, ...updates,
+    } }));
+    render(<ChatComposer pane="%1" agent="codex" kind="idle" codexSession={{
+      managed: true, settings: { model: 'gpt-fast', effort: 'medium', serviceTier: null },
+    }} />);
+    fireEvent.click(screen.getByRole('button', { name: '设置模型、Fast 和思考强度' }));
+    const fast = await screen.findByRole('checkbox', { name: /Fast/ });
+    expect(fast.checked).toBe(false);
+    fireEvent.click(fast);
+    await waitFor(() => expect(updateCodexSettings).toHaveBeenCalledWith('%1', { serviceTier: 'priority' }));
+    await waitFor(() => expect(screen.getByRole('checkbox', { name: /Fast/ }).checked).toBe(true));
+
+    fireEvent.click(screen.getByRole('button', { name: 'GPT Plain' }));
+    await waitFor(() => expect(updateCodexSettings).toHaveBeenCalledWith('%1', {
+      model: 'gpt-plain', serviceTier: null,
+    }));
+    await waitFor(() => expect(screen.queryByRole('checkbox', { name: /Fast/ })).toBeNull());
   });
 
   it('opens structured App Server session status from the context ring', async () => {
@@ -359,7 +455,7 @@ describe('ChatComposer', () => {
     const { container } = render(<ChatComposer pane="%1" agent="codex" kind="working" codexSession={{
       managed: true, settings: { model: 'gpt-test', effort: 'medium' },
     }} />);
-    const trigger = screen.getByRole('button', { name: '设置模型和思考强度' });
+    const trigger = screen.getByRole('button', { name: '设置模型、Fast 和思考强度' });
     expect(trigger.disabled).toBe(false);
     fireEvent.click(trigger);
 
@@ -391,7 +487,7 @@ describe('ChatComposer', () => {
     render(<ChatComposer pane="%1" agent="codex" kind="idle" codexSession={{
       managed: true, settings: { model: 'gpt-test', effort: 'medium' },
     }} />);
-    fireEvent.click(screen.getByRole('button', { name: '设置模型和思考强度' }));
+    fireEvent.click(screen.getByRole('button', { name: '设置模型、Fast 和思考强度' }));
     const effort = await screen.findByRole('slider', { name: '思考强度' });
     fireEvent.keyDown(effort, { key: 'ArrowRight' });
     expect(effort.getAttribute('aria-valuetext')).toBe('high');
@@ -410,12 +506,12 @@ describe('ChatComposer', () => {
     const { container } = render(<ChatComposer {...props} />);
     await waitFor(() => expect(getCodexModels).toHaveBeenCalledTimes(1));
 
-    fireEvent.click(screen.getByRole('button', { name: '设置模型和思考强度' }));
-    expect(await screen.findByRole('dialog', { name: '模型与思考强度' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: '设置模型、Fast 和思考强度' }));
+    expect(await screen.findByRole('dialog', { name: '模型设置' })).toBeTruthy();
     expect(getCodexModels).toHaveBeenCalledTimes(1);
     fireEvent.click(container.querySelector('.codex-config-backdrop'));
-    fireEvent.click(screen.getByRole('button', { name: '设置模型和思考强度' }));
-    await screen.findByRole('dialog', { name: '模型与思考强度' });
+    fireEvent.click(screen.getByRole('button', { name: '设置模型、Fast 和思考强度' }));
+    await screen.findByRole('dialog', { name: '模型设置' });
     expect(getCodexModels).toHaveBeenCalledTimes(1);
 
     fireEvent.click(screen.getByRole('button', { name: '刷新模型列表' }));
@@ -428,12 +524,12 @@ describe('ChatComposer', () => {
       managed: true, settings: { model: 'gpt-test', effort: 'medium' },
     }} />);
     const input = screen.getByPlaceholderText('和 Agent 对话…');
-    const trigger = screen.getByRole('button', { name: '设置模型和思考强度' });
+    const trigger = screen.getByRole('button', { name: '设置模型、Fast 和思考强度' });
     expect(document.activeElement).toBe(input);
 
     fireEvent.pointerDown(trigger);
     fireEvent.click(trigger);
-    await screen.findByRole('dialog', { name: '模型与思考强度' });
+    await screen.findByRole('dialog', { name: '模型设置' });
     expect(document.activeElement).toBe(input);
 
     fireEvent.click(container.querySelector('.codex-config-backdrop'));
@@ -441,7 +537,7 @@ describe('ChatComposer', () => {
     expect(document.activeElement).not.toBe(input);
     fireEvent.pointerDown(trigger);
     fireEvent.click(trigger);
-    await screen.findByRole('dialog', { name: '模型与思考强度' });
+    await screen.findByRole('dialog', { name: '模型设置' });
     expect(document.activeElement).not.toBe(input);
 
     const backdrop = container.querySelector('.codex-config-backdrop');
@@ -459,7 +555,7 @@ describe('ChatComposer', () => {
     const input = screen.getByPlaceholderText('和 Agent 对话…');
     typeInto(input, '/model');
     fireEvent.click(screen.getByRole('button', { name: '发送' }));
-    expect(await screen.findByRole('dialog', { name: '模型与思考强度' })).toBeTruthy();
+    expect(await screen.findByRole('dialog', { name: '模型设置' })).toBeTruthy();
     expect(sendText).not.toHaveBeenCalled();
     expect(onInteractiveSlash).not.toHaveBeenCalled();
     fireEvent.click(document.querySelector('.codex-config-backdrop'));

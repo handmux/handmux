@@ -2945,6 +2945,22 @@ button.cmd-text { background: none; border: none; text-align: left; }
 .codex-config-next-turn {
   padding: 0 3px 1px; color: var(--ct-muted); font-size: 10.5px; line-height: 14px;
 }
+.codex-fast-row {
+  min-height: 42px; display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 1px 3px 5px; border-bottom: 1px solid var(--ct-line);
+}
+.codex-fast-row > span:first-child {
+  flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px;
+}
+.codex-fast-row strong { color: var(--ct-ink); font-size: 12px; line-height: 15px; }
+.codex-fast-row small {
+  overflow: hidden; color: var(--ct-muted); font-size: 10px; line-height: 13px;
+  text-overflow: ellipsis; white-space: nowrap;
+}
+.codex-fast-row .cmd-switch { width: 43px; height: 26px; }
+.codex-fast-row .cmd-switch-track { border-radius: 13px; }
+.codex-fast-row .cmd-switch-knob { width: 22px; height: 22px; }
+.codex-fast-row .cmd-switch input:checked ~ .cmd-switch-knob { transform: translateX(17px); }
 .codex-config-section { flex: none; display: flex; flex-direction: column; gap: 4px; }
 .codex-config-label {
   padding: 0 3px; color: var(--ct-muted); font-size: 10px; font-weight: 700;
@@ -3004,8 +3020,55 @@ button.cmd-text { background: none; border: none; text-align: left; }
   background: #fff; box-shadow: 0 1px 4px rgba(0,0,0,.28);
 }
 .codex-config-error { color: var(--danger, #d34b45); font-size: 12px; line-height: 1.4; }
+.codex-goal-backdrop { position: fixed; inset: 0; z-index: 43; background: transparent; }
+.codex-goal-menu {
+  position: absolute; left: 0; bottom: calc(100% + 9px); z-index: 44;
+  width: min(370px, calc(100vw - 28px)); max-height: min(52dvh, 430px);
+  display: flex; flex-direction: column; overflow: hidden;
+  border: 1px solid var(--ct-chip-line); border-radius: 16px;
+  background: var(--ct-overlay); color: var(--ct-ink);
+  box-shadow: 0 12px 38px rgba(0,0,0,.42), 0 2px 8px rgba(0,0,0,.22);
+  transform-origin: bottom left; animation: codex-menu-in .16s ease-out;
+}
+.codex-goal-head {
+  min-height: 42px; flex: none; display: flex; align-items: center; justify-content: space-between;
+  gap: 10px; padding: 5px 11px; border-bottom: 1px solid var(--ct-line); font-size: 13px;
+}
+.codex-goal-status {
+  flex: none; padding: 3px 7px; border-radius: 999px; background: var(--ct-chip-2);
+  color: var(--ct-muted); font-size: 10.5px; line-height: 14px;
+}
+.codex-goal-status.active { color: #34c759; }
+.codex-goal-status.blocked, .codex-goal-status.usageLimited,
+.codex-goal-status.budgetLimited { color: #ff9f0a; }
+.codex-goal-body {
+  flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain;
+  display: flex; flex-direction: column; gap: 5px; padding: 10px 11px;
+}
+.codex-goal-body textarea {
+  width: 100%; min-height: 92px; max-height: 190px; resize: vertical; padding: 9px 10px;
+  border: 1px solid var(--ct-chip-line); border-radius: 10px; outline: none;
+  background: var(--ct-field); color: var(--ct-ink); font: inherit; font-size: 16px; line-height: 21px;
+}
+.codex-goal-body textarea:focus { border-color: var(--ct-accent); }
+.codex-goal-count { color: var(--ct-muted); font-size: 10.5px; text-align: right; font-variant-numeric: tabular-nums; }
+.codex-goal-objective { margin: 0; color: var(--ct-ink); font-size: 14px; line-height: 20px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.codex-goal-state { padding: 8px 1px; color: var(--ct-muted); font-size: 12px; }
+.codex-goal-error { color: var(--danger, #d34b45); font-size: 12px; line-height: 1.4; }
+.codex-goal-actions {
+  min-height: 48px; flex: none; display: flex; align-items: center; justify-content: flex-end; gap: 7px;
+  padding: 6px 7px; border-top: 1px solid var(--ct-line); background: var(--ct-overlay);
+}
+.codex-goal-actions button {
+  min-width: 58px; min-height: 34px; padding: 0 10px; border: 0; border-radius: 9px;
+  background: var(--ct-chip-2); color: var(--ct-ink); font-size: 12px; font-weight: 600;
+}
+.codex-goal-actions button.primary { background: var(--ct-accent); color: #fff; }
+.codex-goal-actions button.destructive { color: var(--danger, #d34b45); }
+.codex-goal-actions button:disabled { opacity: .48; }
+.chat-composer .settings-confirm-backdrop { z-index: 50; }
 @media (prefers-reduced-motion: reduce) {
-  .codex-config-menu, .codex-config-head button.is-refreshing svg { animation: none; }
+  .codex-config-menu, .codex-goal-menu, .codex-config-head button.is-refreshing svg { animation: none; }
   .cc-context-permission-row svg { transition: none; }
 }
 

@@ -17,7 +17,7 @@ describe('chat tone overlay surfaces', () => {
     expect(tone.match(/--ct-overlay:\s*([^;]+)/)?.[1]).not.toMatch(/rgba|transparent|color-mix/i);
   });
 
-  it.each(['.tool-sheet', '.cc-context-popover', '.codex-config-menu'])(
+  it.each(['.tool-sheet', '.cc-context-popover', '.codex-config-menu', '.codex-goal-menu'])(
     'keeps %s isolated from the conversation behind it',
     (selector) => {
       expect(cssRule(selector)).toMatch(/background:\s*var\(--ct-overlay\)/);
@@ -26,5 +26,6 @@ describe('chat tone overlay surfaces', () => {
 
   it('keeps the model menu footer on the same opaque surface', () => {
     expect(cssRule('.codex-config-footer')).toMatch(/background:\s*var\(--ct-overlay\)/);
+    expect(cssRule('.codex-goal-actions')).toMatch(/background:\s*var\(--ct-overlay\)/);
   });
 });

@@ -243,6 +243,40 @@ describe('Codex App Server routes', () => {
     });
   });
 
+  it('reads and manages the native goal for the bound thread', async () => {
+    const getGoal = vi.fn(async () => ({ objective: 'Ship it', status: 'active' }));
+    const updateGoal = vi.fn(async (_pane, _thread, updates) => ({
+      objective: updates.objective || 'Ship it', status: updates.status || 'active',
+    }));
+    const clearGoal = vi.fn(async () => ({ cleared: true }));
+    const app = appFor({ codexApp: { getGoal, updateGoal, clearGoal } });
+
+    await request(app).get('/codex/goal?pane=%251').expect(200, {
+      goal: { objective: 'Ship it', status: 'active' },
+    });
+    await request(app).post('/codex/goal').send({ pane: '%1', objective: ' Finish tests ' })
+      .expect(200, { goal: { objective: 'Finish tests', status: 'active' } });
+    await request(app).post('/codex/goal').send({ pane: '%1', status: 'paused' })
+      .expect(200, { goal: { objective: 'Ship it', status: 'paused' } });
+    await request(app).post('/codex/goal/clear').send({ pane: '%1' }).expect(200, { cleared: true });
+
+    expect(getGoal).toHaveBeenCalledWith('%1', 'thread-1');
+    expect(updateGoal).toHaveBeenNthCalledWith(1, '%1', 'thread-1', { objective: 'Finish tests' });
+    expect(updateGoal).toHaveBeenNthCalledWith(2, '%1', 'thread-1', { status: 'paused' });
+    expect(clearGoal).toHaveBeenCalledWith('%1', 'thread-1');
+  });
+
+  it('accepts catalog service tiers, including returning to the default tier', async () => {
+    const updateSettings = vi.fn(async (_pane, _thread, updates) => updates);
+    const app = appFor({ codexApp: { updateSettings } });
+    await request(app).post('/codex/settings').send({ pane: '%1', serviceTier: 'priority' })
+      .expect(200, { settings: { serviceTier: 'priority' } });
+    await request(app).post('/codex/settings').send({ pane: '%1', serviceTier: null })
+      .expect(200, { settings: { serviceTier: null } });
+    expect(updateSettings).toHaveBeenNthCalledWith(1, '%1', 'thread-1', { serviceTier: 'priority' });
+    expect(updateSettings).toHaveBeenNthCalledWith(2, '%1', 'thread-1', { serviceTier: null });
+  });
+
   it.each([
     ['default', {
       approvalPolicy: 'on-request', approvalsReviewer: 'user', sandboxPolicy: { type: 'workspaceWrite' },
@@ -292,10 +326,16 @@ describe('Codex App Server routes', () => {
     const app = appFor({ codexApp: { updateSettings: vi.fn() } });
     await request(app).post('/codex/settings').send({ pane: '%1' }).expect(400, { error: 'no settings supplied' });
     await request(app).post('/codex/settings').send({ pane: '%1', effort: '' }).expect(400, { error: 'bad effort' });
+    await request(app).post('/codex/settings').send({ pane: '%1', serviceTier: '' })
+      .expect(400, { error: 'bad serviceTier' });
     await request(app).post('/codex/settings').send({ pane: '%1', approvalPolicy: 'always' })
       .expect(400, { error: 'bad approvalPolicy' });
     await request(app).post('/codex/settings').send({ pane: '%1', permissionMode: 'automatic' })
       .expect(400, { error: 'bad permissionMode' });
+    await request(app).post('/codex/goal').send({ pane: '%1', objective: '' })
+      .expect(400, { error: 'bad goal objective' });
+    await request(app).post('/codex/goal').send({ pane: '%1', status: 'complete' })
+      .expect(400, { error: 'bad goal status' });
   });
 
 });

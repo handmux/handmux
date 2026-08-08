@@ -96,6 +96,12 @@ export const clearCodexSession = (pane) =>
   req('/api/codex/clear', { method: 'POST', body: JSON.stringify({ pane }), timeoutMs: 8000 });
 export const getCodexModels = (pane) =>
   req(`/api/codex/models?pane=${encodeURIComponent(pane)}`, { timeoutMs: 8000 });
+export const getCodexGoal = (pane) =>
+  req(`/api/codex/goal?pane=${encodeURIComponent(pane)}`, { timeoutMs: 8000 });
+export const updateCodexGoal = (pane, updates) =>
+  req('/api/codex/goal', { method: 'POST', body: JSON.stringify({ pane, ...updates }), timeoutMs: 8000 });
+export const clearCodexGoal = (pane) =>
+  req('/api/codex/goal/clear', { method: 'POST', body: JSON.stringify({ pane }), timeoutMs: 8000 });
 export const updateCodexSettings = (pane, settings) =>
   req('/api/codex/settings', { method: 'POST', body: JSON.stringify({ pane, ...settings }), timeoutMs: 8000 });
 export const interruptCodexSession = (pane) =>

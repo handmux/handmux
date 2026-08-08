@@ -11,6 +11,7 @@ All notable changes to handmux. Format follows [Keep a Changelog](https://keepac
 - 托管 Codex 对话可在输入区直接查看和切换模型、思考强度，`/model` 与 `/effort` 无需再跳转终端。
 - 普通 Codex 窗格也会显示对话入口；一键托管会结束当前进程、识别原会话并自动恢复，遇到终端交互时提示用户切换处理。
 - Codex 回复期间可以继续发送消息：消息默认进入临时队列并在当前回复完成后依次处理，也可选择立刻引导当前回复。
+- 托管 Codex 对话支持原生 `/goal`：可查看、设置、编辑、暂停、继续或清除当前会话的持久任务目标。
 
 ### Changed
 
@@ -20,6 +21,7 @@ All notable changes to handmux. Format follows [Keep a Changelog](https://keepac
 - Claude Code 与 Codex CLI 的对话视图改为独立开关；仅 Claude Code 保留实验性标识。
 - Codex 模型菜单的思考强度改为底部单行步骤条，可直接拖动选择；Agent 回复期间仍可调整，修改从下一条消息生效。
 - 托管 Codex 不支持的斜杠命令改为短暂的底部提示，不再在输入区显示为错误。
+- Codex 模型弹窗会在当前模型支持时显示 Fast 开关，并通过 App Server 保存对应服务档位。
 
 ### Fixed
 

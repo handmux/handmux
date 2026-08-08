@@ -31,12 +31,13 @@ function fixtureThread(status = { type: 'idle' }) {
 
 function fakeProxy({
   empty = false, loaded = ['thread-1'], updatedAt = {}, status = { type: 'idle' }, readThread = null,
-  resumeThread = null, turnStartWait = null, parentThreadIds = {},
+  resumeThread = null, turnStartWait = null, parentThreadIds = {}, initialGoal = null,
 } = {}) {
   const ws = new EventEmitter();
   ws.readyState = 0;
   const sent = [];
   let persisted = !empty;
+  let goal = initialGoal;
   const reply = (message) => queueMicrotask(() => ws.emit('message', Buffer.from(JSON.stringify(message))));
   ws.send = (data) => {
     const message = JSON.parse(data);
@@ -85,6 +86,23 @@ function fakeProxy({
       } });
     } else if (message.method === 'model/list') {
       reply({ jsonrpc: '2.0', id: message.id, result: { data: [{ id: 'model-1', model: 'gpt-test', displayName: 'GPT Test', supportedReasoningEfforts: [{ reasoningEffort: 'medium', description: '' }], defaultReasoningEffort: 'medium' }], nextCursor: null } });
+    } else if (message.method === 'thread/goal/get') {
+      reply({ jsonrpc: '2.0', id: message.id, result: { goal } });
+    } else if (message.method === 'thread/goal/set') {
+      goal = {
+        threadId: message.params.threadId,
+        objective: message.params.objective ?? goal?.objective,
+        status: message.params.status ?? goal?.status ?? 'active',
+        createdAt: goal?.createdAt ?? 1,
+        updatedAt: 2,
+        tokensUsed: goal?.tokensUsed ?? 0,
+        timeUsedSeconds: goal?.timeUsedSeconds ?? 0,
+        tokenBudget: goal?.tokenBudget ?? null,
+      };
+      reply({ jsonrpc: '2.0', id: message.id, result: { goal } });
+    } else if (message.method === 'thread/goal/clear') {
+      goal = null;
+      reply({ jsonrpc: '2.0', id: message.id, result: {} });
     } else if (message.method === 'thread/settings/update') {
       reply({ jsonrpc: '2.0', id: message.id, result: {} });
     } else if (message.method === 'turn/interrupt') {
@@ -642,6 +660,30 @@ describe('Codex App Server client', () => {
         threadId: 'thread-1', model: 'gpt-new', effort: 'high', approvalPolicy: 'on-request',
         approvalsReviewer: 'auto_review', sandboxPolicy: { type: 'workspaceWrite' },
       },
+    }));
+    app.close();
+  });
+
+  it('reads, updates, pauses, and clears the native thread goal', async () => {
+    const proxy = fakeProxy({ initialGoal: {
+      threadId: 'thread-1', objective: 'Finish the migration', status: 'active',
+      createdAt: 1, updatedAt: 1, tokensUsed: 12, timeUsedSeconds: 3, tokenBudget: null,
+    } });
+    const app = createCodexAppServer({ home: '/home/test', exists: () => true, connect: () => proxy.ws });
+
+    expect(await app.getGoal('%1', 'thread-1')).toMatchObject({
+      objective: 'Finish the migration', status: 'active',
+    });
+    expect(await app.updateGoal('%1', 'thread-1', { objective: 'Ship it' })).toMatchObject({
+      objective: 'Ship it', status: 'active',
+    });
+    expect(await app.updateGoal('%1', 'thread-1', { status: 'paused' })).toMatchObject({
+      objective: 'Ship it', status: 'paused',
+    });
+    expect(await app.clearGoal('%1', 'thread-1')).toEqual({ cleared: true });
+    expect(await app.getGoal('%1', 'thread-1')).toBeNull();
+    expect(proxy.sent).toContainEqual(expect.objectContaining({
+      method: 'thread/goal/set', params: { threadId: 'thread-1', objective: 'Ship it' },
     }));
     app.close();
   });

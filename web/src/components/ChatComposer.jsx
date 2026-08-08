@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import {
   sendText, sendCodexMessage, compactCodexSession, clearCodexSession, interruptCodexSession,
   steerCodexQueuedMessage, removeCodexQueuedMessage,
-  getCodexModels, updateCodexSettings, UnauthorizedError,
+  getCodexModels, updateCodexGoal, clearCodexGoal, updateCodexSettings, UnauthorizedError,
 } from '../api.js';
 import { shouldHandOffSlash } from '../slashCommands.js';
 import MicButton from './MicButton.jsx';
@@ -22,6 +22,7 @@ import { applyShortcutLayout, loadShortcutLayout } from '../shortcutLayout.js';
 import { t } from '../i18n';
 import { useBackButton } from '../hooks/useBackButton.js';
 import DiscreteSlider from './DiscreteSlider.jsx';
+import CodexGoalMenu from './CodexGoalMenu.jsx';
 
 // The 对话-lens composer — a single modern AI-agent input CARD (textarea on top, an action row beneath),
 // shown INSTEAD of the terminal BottomDock while the chat lens is active. It rides above the soft keyboard
@@ -155,6 +156,17 @@ function loadCodexModels(pane, refresh = false) {
   return codexModelsRequest;
 }
 
+function modelServiceTiers(model) {
+  if (Array.isArray(model?.serviceTiers) && model.serviceTiers.length) return model.serviceTiers;
+  return (model?.additionalSpeedTiers || []).map((id) => ({ id, name: id, description: '' }));
+}
+
+function fastTierFor(model) {
+  return modelServiceTiers(model).find((tier) => (
+    tier?.id?.toLowerCase() === 'fast' || tier?.name?.toLowerCase() === 'fast'
+  )) || null;
+}
+
 function CodexConfigMenu({ open, pane, settings, busy, onChange, onClose, onAuthFail }) {
   const [models, setModels] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -189,6 +201,9 @@ function CodexConfigMenu({ open, pane, settings, busy, onChange, onClose, onAuth
 
   const selectedModel = models.find((model) => model.model === settings?.model || model.id === settings?.model);
   const efforts = selectedModel?.supportedReasoningEfforts || [];
+  const fastTier = fastTierFor(selectedModel);
+  const fastEnabled = !!fastTier
+    && (settings?.serviceTier === fastTier.id || settings?.serviceTier === 'fast');
 
   if (!open) return null;
   const disabled = saving;
@@ -206,9 +221,14 @@ function CodexConfigMenu({ open, pane, settings, busy, onChange, onClose, onAuth
   };
   const pickModel = (model) => {
     const supported = (model.supportedReasoningEfforts || []).map((item) => item.reasoningEffort);
+    const supportedTiers = modelServiceTiers(model).map((tier) => tier.id);
+    const nextFastTier = fastTierFor(model);
     const updates = { model: model.model || model.id };
     if (supported.length && !supported.includes(settings?.effort)) {
       updates.effort = model.defaultReasoningEffort || supported[0];
+    }
+    if (settings?.serviceTier && !supportedTiers.includes(settings.serviceTier)) {
+      updates.serviceTier = settings.serviceTier === 'fast' && nextFastTier ? nextFastTier.id : null;
     }
     void save(updates);
   };
@@ -248,6 +268,20 @@ function CodexConfigMenu({ open, pane, settings, busy, onChange, onClose, onAuth
           {error && <div className="codex-config-error" role="status">{error}</div>}
         </div>
         <footer className="codex-config-footer">
+          {fastTier && (
+            <label className="codex-fast-row">
+              <span>
+                <strong>{fastTier.name || t('chat.config.fast')}</strong>
+                <small>{fastTier.description || t('chat.config.fastHint')}</small>
+              </span>
+              <span className="cmd-switch">
+                <input type="checkbox" checked={fastEnabled} disabled={disabled}
+                  onChange={(event) => void save({ serviceTier: event.target.checked ? fastTier.id : null })} />
+                <span className="cmd-switch-track" aria-hidden="true" />
+                <span className="cmd-switch-knob" aria-hidden="true" />
+              </span>
+            </label>
+          )}
           <div className="codex-config-section">
             <div className="codex-config-label">{t('chat.config.effort')}</div>
             <div className="codex-effort-list">
@@ -305,6 +339,8 @@ export default function ChatComposer({
   const [layout, setLayout] = useState(() => loadShortcutLayout('chat'));
   const [editOpen, setEditOpen] = useState(false);
   const [configOpen, setConfigOpen] = useState(false);
+  const [goalOpen, setGoalOpen] = useState(false);
+  const [goalEditOnOpen, setGoalEditOnOpen] = useState(false);
   const [contextOpen, setContextOpen] = useState(false);
   const [permissionExpanded, setPermissionExpanded] = useState(false);
   const [permissionSaving, setPermissionSaving] = useState(false);
@@ -346,6 +382,7 @@ export default function ChatComposer({
   useEffect(() => {
     if (!managedCodex) {
       setConfigOpen(false);
+      setGoalOpen(false);
       setPermissionExpanded(false);
       setPermissionError('');
     }
@@ -458,7 +495,14 @@ export default function ChatComposer({
     // an already-focused textarea focused, while a closed keyboard stays closed because the trigger never
     // focuses the textarea itself.
     setContextOpen(false);
+    setGoalOpen(false);
     setConfigOpen(true);
+  };
+  const openGoal = (edit = false) => {
+    setConfigOpen(false);
+    setContextOpen(false);
+    setGoalEditOnOpen(edit);
+    setGoalOpen(true);
   };
   const applyConfigSlash = async (trimmed) => {
     if (!managedCodex) return false;
@@ -475,6 +519,29 @@ export default function ChatComposer({
   const dispatchManagedCodex = async (text) => {
     const trimmed = text.trim();
     if (await applyConfigSlash(trimmed)) return null;
+    const goalMatch = trimmed.match(/^\/goal(?:\s+([\s\S]+))?$/i);
+    if (goalMatch) {
+      const argument = goalMatch[1]?.trim() || '';
+      const action = argument.toLowerCase();
+      if (!argument || action === 'edit') {
+        openGoal(action === 'edit');
+        return null;
+      }
+      if (action === 'clear') {
+        await clearCodexGoal(pane);
+        showNotice(t('chat.goal.cleared'));
+        return null;
+      }
+      if (action === 'pause' || action === 'resume') {
+        await updateCodexGoal(pane, { status: action === 'pause' ? 'paused' : 'active' });
+        showNotice(t(action === 'pause' ? 'chat.goal.paused' : 'chat.goal.resumed'));
+        return null;
+      }
+      if (argument.length > 4_000) throw new Error(t('chat.goal.tooLong'));
+      await updateCodexGoal(pane, { objective: argument });
+      showNotice(t('chat.goal.created'));
+      return null;
+    }
     if (/^\/compact$/i.test(trimmed)) return compactCodexSession(pane);
     if (/^\/clear$/i.test(trimmed)) return clearCodexSession(pane);
     if (trimmed.startsWith('/')) {
@@ -614,7 +681,7 @@ export default function ChatComposer({
     // The model picker is rendered inside the card. Its backdrop therefore bubbles pointer events through
     // this handler; while the picker is open, those taps belong to the picker and must preserve the
     // keyboard state that existed before it opened.
-    if (configOpen || contextOpen) return;
+    if (configOpen || goalOpen || contextOpen) return;
     // Reject if it moved during the press (a scroll/lens-swipe), OR if the up landed far from the down —
     // a second signal in case fast-swipe move events were throttled/missed. Only a stationary tap focuses.
     if (p.moved || Math.hypot(e.clientX - p.x, e.clientY - p.y) > 10) return;
@@ -749,6 +816,8 @@ export default function ChatComposer({
             )}
             <CodexConfigMenu open={configOpen} pane={pane} settings={managedSettings} busy={busy}
               onChange={setLocalSettings} onClose={() => setConfigOpen(false)} onAuthFail={onAuthFail} />
+            <CodexGoalMenu open={goalOpen} pane={pane} editOnOpen={goalEditOnOpen}
+              onClose={() => setGoalOpen(false)} onAuthFail={onAuthFail} onNotice={showNotice} />
           </div>
           <div className="cc-actions-right">
             {/* Context-window chip — model + used %, right-aligned just left of mic/send. pointer-events:none

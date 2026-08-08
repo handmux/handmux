@@ -207,6 +207,42 @@ export function codexRoutes({ codexApp, commands, claudeEvents }) {
     catch (error) { codexError(res, error); }
   });
 
+  r.get('/codex/goal', async (req, res) => {
+    const target = await binding(codexApp, req.query.pane);
+    if (routeError(res, target)) return;
+    try { res.json({ goal: await codexApp.getGoal(target.pane, target.threadId) }); }
+    catch (error) { codexError(res, error); }
+  });
+
+  r.post('/codex/goal', async (req, res) => {
+    const target = await binding(codexApp, req.body?.pane);
+    if (routeError(res, target)) return;
+    const updates = {};
+    if (Object.hasOwn(req.body || {}, 'objective')) {
+      const objective = req.body.objective;
+      const trimmed = typeof objective === 'string' ? objective.trim() : '';
+      if (!trimmed || trimmed.length > 4_000) {
+        return res.status(400).json({ error: 'bad goal objective' });
+      }
+      updates.objective = trimmed;
+    }
+    if (Object.hasOwn(req.body || {}, 'status')) {
+      const status = req.body.status;
+      if (!['active', 'paused'].includes(status)) return res.status(400).json({ error: 'bad goal status' });
+      updates.status = status;
+    }
+    if (!Object.keys(updates).length) return res.status(400).json({ error: 'no goal update supplied' });
+    try { res.json({ goal: await codexApp.updateGoal(target.pane, target.threadId, updates) }); }
+    catch (error) { codexError(res, error); }
+  });
+
+  r.post('/codex/goal/clear', async (req, res) => {
+    const target = await binding(codexApp, req.body?.pane);
+    if (routeError(res, target)) return;
+    try { res.json(await codexApp.clearGoal(target.pane, target.threadId)); }
+    catch (error) { codexError(res, error); }
+  });
+
   r.post('/codex/settings', async (req, res) => {
     const target = await binding(codexApp, req.body?.pane);
     if (routeError(res, target)) return;
@@ -218,6 +254,13 @@ export function codexRoutes({ codexApp, commands, claudeEvents }) {
         return res.status(400).json({ error: `bad ${key}` });
       }
       updates[key] = value.trim();
+    }
+    if (Object.hasOwn(req.body || {}, 'serviceTier')) {
+      const value = req.body.serviceTier;
+      if (value !== null && (typeof value !== 'string' || !value.trim() || value.length > 128)) {
+        return res.status(400).json({ error: 'bad serviceTier' });
+      }
+      updates.serviceTier = value === null ? null : value.trim();
     }
     const approvalPolicy = req.body?.approvalPolicy;
     if (approvalPolicy != null) {

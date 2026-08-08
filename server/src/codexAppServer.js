@@ -1259,6 +1259,30 @@ export function createCodexAppServer({
       } while (cursor && data.length < 1_000);
       return data;
     },
+    async getGoal(pane, threadId) {
+      const client = await connection(pane);
+      if (!client) throw new Error('Codex session is not managed by Handmux');
+      await client.assertCurrentThread(threadId);
+      await client.ensureThread(threadId);
+      const result = await client.rpc('thread/goal/get', { threadId });
+      return result?.goal || null;
+    },
+    async updateGoal(pane, threadId, updates) {
+      const client = await connection(pane);
+      if (!client) throw new Error('Codex session is not managed by Handmux');
+      await client.assertCurrentThread(threadId);
+      await client.ensureThread(threadId);
+      const result = await client.rpc('thread/goal/set', { threadId, ...updates });
+      return result?.goal || null;
+    },
+    async clearGoal(pane, threadId) {
+      const client = await connection(pane);
+      if (!client) throw new Error('Codex session is not managed by Handmux');
+      await client.assertCurrentThread(threadId);
+      await client.ensureThread(threadId);
+      await client.rpc('thread/goal/clear', { threadId });
+      return { cleared: true };
+    },
     async updateSettings(pane, threadId, updates) {
       const client = await connection(pane);
       if (!client) throw new Error('Codex session is not managed by Handmux');
