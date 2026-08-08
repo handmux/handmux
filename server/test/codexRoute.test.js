@@ -119,8 +119,8 @@ describe('Codex App Server routes', () => {
     const harness = takeoverHarness();
     const identify = harness.claudeEvents.identifyPaneAgents;
     identify.mockReset().mockImplementation(async () => (
-      identify.mock.calls.length <= 21 ? { '%1': 'codex' } : {}
-    )); // preflight + all 20 half-second polls remain Codex; the next poll observes the shell
+      identify.mock.calls.length <= 11 ? { '%1': 'codex' } : {}
+    )); // preflight + all 10 half-second polls remain Codex; the next poll observes the shell
     const app = appFor({
       codexApp: { discover: async () => ({ managed: false, threadId: null }) },
       commands: harness.commands,
@@ -129,7 +129,7 @@ describe('Codex App Server routes', () => {
     await request(app).post('/codex/takeover').send({ pane: '%1' }).expect(200);
     expect(harness.commands.sendKey.mock.calls).toEqual([['%1', 'C-c'], ['%1', 'C-c']]);
     expect(harness.runPaneCommand).toHaveBeenCalledWith('%1', `handmux codex resume ${THREAD_ID}`);
-  }, 15_000);
+  }, 10_000);
 
   it('leaves a pane untouched when its live process is no longer Codex', async () => {
     const app = appFor({

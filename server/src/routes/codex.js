@@ -6,7 +6,7 @@ import { codexExitSessionId } from '../agents/codex.js';
 const TAKEOVER_TERMINAL_HINT_MS = 10_000;
 const INPUT_SETTLE_MS = 100;
 const EXIT_POLL_MS = 500;
-const EXIT_ATTEMPTS = 20;
+const EXIT_ATTEMPTS = 10;
 const RECOVERY_OUTPUT_ATTEMPTS = 20;
 
 const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -21,7 +21,7 @@ async function paneAgent(commands, claudeEvents, pane) {
 
 async function exitCurrentCodex(commands, claudeEvents, pane) {
   // During an active turn Codex can spend several seconds writing interruption details, token usage and
-  // its recovery command. Give each Ctrl+C a full ten-second window; only send a second one if the pane
+  // its recovery command. Give each Ctrl+C a full five-second window; only send a second one if the pane
   // still proves Codex is the foreground process after that wait.
   for (let press = 0; press < 2; press += 1) {
     await commands.sendKey(pane, 'C-c');
