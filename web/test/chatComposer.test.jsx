@@ -306,13 +306,13 @@ describe('ChatComposer', () => {
     updateCodexSettings.mockImplementation(async (_pane, updates) => ({ settings: {
       model: 'gpt-fast', effort: 'medium', serviceTier: null, ...updates,
     } }));
-    render(<ChatComposer pane="%1" agent="codex" kind="idle" codexSession={{
+    render(<ChatComposer pane="%1" agent="codex" kind="working" codexSession={{
       managed: true, settings: { model: 'gpt-fast', effort: 'medium', serviceTier: null },
     }} />);
     fireEvent.click(screen.getByRole('button', { name: '设置模型、Fast 和思考强度' }));
     const fast = await screen.findByRole('checkbox', { name: /Fast/ });
     expect(document.querySelector('.codex-fast-title svg')).toBeTruthy();
-    expect(document.querySelector('.codex-config-footer').lastElementChild)
+    expect(document.querySelector('.codex-config-next-turn').previousElementSibling)
       .toBe(document.querySelector('.codex-fast-row'));
     expect(document.querySelector('.cc-fast-indicator')).toBeNull();
     expect(fast.checked).toBe(false);

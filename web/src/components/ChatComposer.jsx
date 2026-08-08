@@ -287,7 +287,6 @@ function CodexConfigMenu({ open, pane, settings, busy, onChange, onClose, onAuth
                 && <div className="codex-config-state">{t('chat.config.chooseModel')}</div>}
             </div>
           </div>
-          {busy && <div className="codex-config-next-turn">{t('chat.config.nextTurn')}</div>}
           {fastTier && (
             <label className="codex-fast-row">
               <span>
@@ -302,6 +301,7 @@ function CodexConfigMenu({ open, pane, settings, busy, onChange, onClose, onAuth
               </span>
             </label>
           )}
+          {busy && <div className="codex-config-next-turn">{t('chat.config.nextTurn')}</div>}
         </footer>
       </section>
     </>
