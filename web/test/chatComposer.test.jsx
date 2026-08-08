@@ -94,6 +94,7 @@ describe('ChatComposer', () => {
 
   it('send is disabled until there is non-blank text', () => {
     render(<ChatComposer pane="%1" kind="idle" />);
+    expect(screen.getByPlaceholderText('和 Agent 对话…').rows).toBe(2);
     const send = screen.getByRole('button', { name: '发送' });
     expect(send.disabled).toBe(true);
     typeInto(screen.getByPlaceholderText('和 Agent 对话…'), '  ');

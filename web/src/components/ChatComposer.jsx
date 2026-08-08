@@ -924,7 +924,7 @@ export default function ChatComposer({
         <textarea
           ref={ref}
           className="cc-text"
-          rows={1}
+          rows={2}
           value={value}
           aria-readonly={submitting}
           onBeforeInput={(e) => {
