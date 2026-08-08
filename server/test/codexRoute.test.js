@@ -4,7 +4,7 @@ import request from 'supertest';
 import { codexRoutes } from '../src/routes/codex.js';
 
 function appFor({
-  sessionId = 'thread-1', codexApp = {}, commands = {}, claudeEvents = {},
+  sessionId = 'thread-1', codexApp = {}, commands = {}, claudeEvents = {}, wait,
 } = {}) {
   const app = express();
   app.use(express.json());
@@ -15,6 +15,7 @@ function appFor({
     },
     commands,
     claudeEvents,
+    wait,
   }));
   return app;
 }
@@ -51,6 +52,46 @@ describe('Codex App Server routes', () => {
     await request(app).post('/codex/send').send({ pane: '%1', text: ' continue ' }).expect(200);
     expect(status).toHaveBeenCalledWith('%1', 'thread-1');
     expect(send).toHaveBeenCalledWith('%1', 'thread-1', 'continue');
+  });
+
+  it('runs /clear through the remote TUI and returns only after App Server confirms its new thread', async () => {
+    let threadId = 'thread-1';
+    const discover = vi.fn(async () => ({ managed: true, threadId }));
+    const commands = {
+      exitCopyModeIfActive: vi.fn(async () => {}),
+      sendKey: vi.fn(async () => {}),
+      sendText: vi.fn(async () => {}),
+      sendEnter: vi.fn(async () => { threadId = 'thread-2'; }),
+    };
+    const directClear = vi.fn(async () => ({ threadId: 'wrong-thread' }));
+    const app = appFor({
+      codexApp: { discover, clear: directClear }, commands, wait: async () => {},
+    });
+
+    await request(app).post('/codex/clear').send({ pane: '%1' })
+      .expect(200, { threadId: 'thread-2' });
+    expect(commands.exitCopyModeIfActive).toHaveBeenCalledWith('%1');
+    expect(commands.sendKey).toHaveBeenCalledWith('%1', 'C-u');
+    expect(commands.sendText).toHaveBeenCalledWith('%1', '/clear');
+    expect(commands.sendEnter).toHaveBeenCalledWith('%1');
+    expect(directClear).not.toHaveBeenCalled();
+  });
+
+  it('fails /clear instead of splitting chat from a terminal that did not switch sessions', async () => {
+    const discover = vi.fn(async () => ({ managed: true, threadId: 'thread-1' }));
+    const commands = {
+      exitCopyModeIfActive: vi.fn(async () => {}),
+      sendKey: vi.fn(async () => {}),
+      sendText: vi.fn(async () => {}),
+      sendEnter: vi.fn(async () => {}),
+    };
+    const app = appFor({ codexApp: { discover }, commands, wait: async () => {} });
+
+    await request(app).post('/codex/clear').send({ pane: '%1' }).expect(503, {
+      error: 'Codex terminal did not accept /clear; switch to the terminal, close any open panel, and try again',
+    });
+    expect(commands.sendText).toHaveBeenCalledWith('%1', '/clear');
+    expect(discover).toHaveBeenCalledTimes(61);
   });
 
   it('reports expected unmanaged and starting states without turning them into API failures', async () => {
@@ -296,16 +337,12 @@ describe('Codex App Server routes', () => {
     expect(updateSettings).toHaveBeenCalledWith('%1', 'thread-1', expected);
   });
 
-  it('clears and answers questions through the exact bound App Server thread', async () => {
-    const clear = vi.fn(async () => ({ threadId: 'thread-new' }));
+  it('answers questions through the exact bound App Server thread', async () => {
     const answerInput = vi.fn(async () => ({ ok: true }));
-    const app = appFor({ codexApp: { clear, answerInput } });
-    await request(app).post('/codex/clear').send({ pane: '%1' })
-      .expect(200, { threadId: 'thread-new' });
+    const app = appFor({ codexApp: { answerInput } });
     await request(app).post('/codex/input').send({
       pane: '%1', requestId: '92', answers: { color: ['蓝色'] },
     }).expect(200, { ok: true });
-    expect(clear).toHaveBeenCalledWith('%1', 'thread-1');
     expect(answerInput).toHaveBeenCalledWith('%1', 'thread-1', '92', { color: ['蓝色'] });
   });
 

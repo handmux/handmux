@@ -477,25 +477,6 @@ describe('Codex App Server client', () => {
     app.close();
   });
 
-  it('starts /clear as a native App Server thread with the current settings', async () => {
-    const proxy = fakeProxy();
-    const app = createCodexAppServer({ home: '/home/test', exists: () => true, connect: () => proxy.ws });
-    expect(await app.clear('%1', 'thread-1')).toEqual({ threadId: 'thread-clear' });
-    expect(proxy.sent).toContainEqual(expect.objectContaining({
-      method: 'thread/start',
-      params: expect.objectContaining({
-        sessionStartSource: 'clear', model: 'gpt-test', modelProvider: 'openai', cwd: '/work',
-        approvalPolicy: 'on-request', approvalsReviewer: 'user', sandbox: 'workspace-write',
-        runtimeWorkspaceRoots: ['/work', '/shared'],
-      }),
-    }));
-    expect(proxy.sent).toContainEqual(expect.objectContaining({
-      method: 'thread/settings/update', params: { threadId: 'thread-clear', effort: 'high' },
-    }));
-    expect((await app.discover('%1')).threadId).toBe('thread-clear');
-    app.close();
-  });
-
   it('keeps live tool items when a later thread snapshot temporarily omits them', async () => {
     const proxy = fakeProxy();
     const app = createCodexAppServer({
@@ -836,10 +817,21 @@ describe('Codex App Server client', () => {
   it('does not let late events or reads from the old thread undo a /clear switch', async () => {
     const proxy = fakeProxy({
       loaded: ['thread-1', 'thread-clear'], updatedAt: { 'thread-1': 20, 'thread-clear': 10 },
+      resumeThread: (threadId) => (threadId === 'thread-clear'
+        ? { ...fixtureThread(), turns: [] }
+        : fixtureThread()),
     });
     const app = createCodexAppServer({ home: '/home/test', exists: () => true, connect: () => proxy.ws });
     expect((await app.discover('%1')).threadId).toBe('thread-1');
-    expect(await app.clear('%1', 'thread-1')).toEqual({ threadId: 'thread-clear' });
+    proxy.push({
+      jsonrpc: '2.0', method: 'turn/started',
+      params: { threadId: 'thread-1', turn: { id: 'old-active-turn', status: 'inProgress', items: [] } },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(await app.send('%1', 'thread-1', 'do not send after clear'))
+      .toMatchObject({ queued: true });
+    proxy.push({ jsonrpc: '2.0', method: 'thread/started', params: { thread: { id: 'thread-clear' } } });
+    await new Promise((resolve) => setTimeout(resolve, 0));
 
     proxy.push({
       jsonrpc: '2.0', method: 'turn/completed', params: {

@@ -428,28 +428,6 @@ function contextUsageFromNotification(tokenUsage) {
   return { usedTokens, totalTokens };
 }
 
-function sandboxMode(policy) {
-  if (policy?.type === 'readOnly') return 'read-only';
-  if (policy?.type === 'workspaceWrite') return 'workspace-write';
-  if (policy?.type === 'dangerFullAccess') return 'danger-full-access';
-  return null;
-}
-
-function clearThreadParams(settings = {}) {
-  const params = { sessionStartSource: 'clear' };
-  for (const key of ['model', 'modelProvider', 'serviceTier', 'cwd', 'approvalPolicy', 'approvalsReviewer']) {
-    if (settings[key] != null) params[key] = settings[key];
-  }
-  if (Array.isArray(settings.runtimeWorkspaceRoots)) params.runtimeWorkspaceRoots = settings.runtimeWorkspaceRoots;
-  const profile = settings.activePermissionProfile?.id;
-  if (profile) params.permissions = profile;
-  else {
-    const sandbox = sandboxMode(settings.sandboxPolicy);
-    if (sandbox) params.sandbox = sandbox;
-  }
-  return params;
-}
-
 function connectUnixWebSocket(socketPath) {
   return new WebSocket('ws://localhost/rpc', {
     createConnection: () => net.createConnection(socketPath),
@@ -648,6 +626,9 @@ class CodexAppConnection {
         this.lastStartedThreadId = startedThreadId;
         this.currentThreadId = startedThreadId;
         if (previous && previous !== startedThreadId) {
+          // A TUI-originated /clear switches this pane without going through Handmux's request path. Any
+          // pending messages still belong to the old conversation and must never drain after the switch.
+          this.discardQueue(previous);
           this.setInbox(null, '', `thread:${startedThreadId}:started`);
         }
       }
@@ -1213,37 +1194,6 @@ export function createCodexAppServer({
       client.setInbox('compacting', '', `thread:${threadId}:compacting`);
       client.bump(threadId);
       return result;
-    },
-    async clear(pane, threadId) {
-      const client = await connection(pane);
-      if (!client) throw new Error('Codex session is not managed by Handmux');
-      await client.assertCurrentThread(threadId);
-      const current = await client.ensureThread(threadId);
-      const result = await client.rpc('thread/start', clearThreadParams(current.settings));
-      const nextThreadId = result.thread?.id;
-      if (!nextThreadId) throw new Error('Codex App Server did not start a new thread');
-      const next = client.state(nextThreadId);
-      next.thread = result.thread;
-      next.status = result.thread?.status || { type: 'idle' };
-      next.settings = settingsFromResume(result);
-      next.loadedOnly = false;
-      next.revision++;
-      next.readRevision = next.revision;
-      client.subscribed.add(nextThreadId);
-      client.lastStartedThreadId = nextThreadId;
-      client.currentThreadId = nextThreadId;
-      if (current.settings?.effort != null) {
-        try {
-          await client.rpc('thread/settings/update', { threadId: nextThreadId, effort: current.settings.effort });
-          next.settings = { ...next.settings, effort: current.settings.effort };
-        } catch {
-          // Older App Server builds may not support per-thread effort updates. The new thread remains valid
-          // with the effort reported by thread/start, so do not turn a successful /clear into a retry loop.
-        }
-      }
-      client.discardQueue(threadId);
-      client.setInbox(null, '', `thread:${nextThreadId}:started`);
-      return { threadId: nextThreadId };
     },
     async models(pane, threadId) {
       const client = await connection(pane);

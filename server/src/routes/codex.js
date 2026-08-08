@@ -9,6 +9,7 @@ const INPUT_SETTLE_MS = 100;
 const EXIT_POLL_MS = 500;
 const EXIT_ATTEMPTS = 10;
 const RECOVERY_OUTPUT_ATTEMPTS = 20;
+const CLEAR_SWITCH_ATTEMPTS = 60;
 const PERMISSION_MODES = {
   default: {
     approvalPolicy: 'on-request', approvalsReviewer: 'user',
@@ -62,6 +63,35 @@ async function waitForRecoverySession(commands, pane, isId) {
   return null;
 }
 
+async function clearCurrentCodexThroughTui(codexApp, commands, pane, previousThreadId, wait) {
+  if (typeof commands?.exitCopyModeIfActive !== 'function'
+    || typeof commands?.sendKey !== 'function'
+    || typeof commands?.sendText !== 'function'
+    || typeof commands?.sendEnter !== 'function') {
+    throw new Error('Codex terminal control is unavailable');
+  }
+  // /clear is not just thread/start: the remote TUI also replaces its active ChatWidget and redraws the
+  // terminal. Drive that native action so terminal and chat remain one session. C-u makes the command exact
+  // even if the hidden terminal composer retained a draft; if a modal owns input, confirmation below times
+  // out instead of letting Handmux split onto a different thread.
+  await commands.exitCopyModeIfActive(pane);
+  await commands.sendKey(pane, 'C-u');
+  await wait(INPUT_SETTLE_MS);
+  await commands.sendText(pane, '/clear');
+  await wait(INPUT_SETTLE_MS);
+  await commands.sendEnter(pane);
+
+  for (let attempt = 0; attempt < CLEAR_SWITCH_ATTEMPTS; attempt += 1) {
+    const discovered = await codexApp.discover(pane);
+    if (!discovered?.managed) throw new Error('Codex session is no longer managed by Handmux');
+    if (discovered.threadId && discovered.threadId !== previousThreadId) {
+      return { threadId: discovered.threadId };
+    }
+    await wait(INPUT_SETTLE_MS);
+  }
+  throw new Error('Codex terminal did not accept /clear; switch to the terminal, close any open panel, and try again');
+}
+
 async function binding(codexApp, pane) {
   if (!isPaneId(pane)) return { error: 'bad pane id', status: 400 };
   try {
@@ -86,7 +116,7 @@ function codexError(res, error) {
   return res.status(conflict ? 409 : 503).json({ error: message });
 }
 
-export function codexRoutes({ codexApp, commands, claudeEvents }) {
+export function codexRoutes({ codexApp, commands, claudeEvents, wait = pause }) {
   const r = express.Router();
   if (!codexApp) return r;
   // A takeover is pane-scoped and deliberately kept in server memory. Besides making repeated taps
@@ -196,7 +226,11 @@ export function codexRoutes({ codexApp, commands, claudeEvents }) {
   r.post('/codex/clear', async (req, res) => {
     const target = await binding(codexApp, req.body?.pane);
     if (routeError(res, target)) return;
-    try { res.json(await codexApp.clear(target.pane, target.threadId)); }
+    try {
+      res.json(await clearCurrentCodexThroughTui(
+        codexApp, commands, target.pane, target.threadId, wait,
+      ));
+    }
     catch (error) { codexError(res, error); }
   });
 
