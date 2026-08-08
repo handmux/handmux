@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import net from 'node:net';
 import WebSocket from 'ws';
 import { codexAppSocketPath } from './cli/codexManaged.js';
+import { isCodexSyntheticUserText } from './codexTranscriptParse.js';
 
 const RPC_TIMEOUT_MS = 8_000;
 const SOCKET_SCAN_MS = 2_000;
@@ -47,6 +48,12 @@ function inputText(content) {
     if (item.type === 'image') return item.url || '';
     return '';
   }).filter(Boolean).join('\n');
+}
+
+function userPromptFromItem(item) {
+  if (item?.type !== 'userMessage') return '';
+  const text = inputText(item.content).trim();
+  return text && !isCodexSyntheticUserText(text) ? text : '';
 }
 
 function diffInfo(change) {
@@ -284,6 +291,24 @@ function turnSummary(turn) {
   return message?.text || turn?.error?.message || '';
 }
 
+function turnPrompt(turn) {
+  const items = Array.isArray(turn?.items) ? turn.items : [];
+  for (let index = items.length - 1; index >= 0; index--) {
+    const prompt = userPromptFromItem(items[index]);
+    if (prompt) return prompt;
+  }
+  return '';
+}
+
+function activeTurnPrompt(state) {
+  if (state?.activePrompt) return state.activePrompt;
+  const turns = Array.isArray(state?.thread?.turns) ? state.thread.turns : [];
+  const active = state?.activeTurnId
+    ? turns.find((turn) => turn.id === state.activeTurnId)
+    : [...turns].reverse().find((turn) => turn.status === 'inProgress');
+  return turnPrompt(active);
+}
+
 function activeKind(status) {
   if (status?.type !== 'active') return null;
   const flags = Array.isArray(status.activeFlags) ? status.activeFlags : [];
@@ -506,7 +531,11 @@ class CodexAppConnection {
       const approval = normalizeApproval(message);
       this.markWaiting(approval.threadId, 'waitingOnApproval');
       if (this.isCurrentThread(approval.threadId)) {
-        this.setInbox('permission', approval.reason || approval.command || '', `approval:${message.id}`);
+        this.setInbox(
+          'permission',
+          approval.reason || approval.command || activeTurnPrompt(this.state(approval.threadId)),
+          `approval:${message.id}`,
+        );
       }
       this.bump(message.params?.threadId);
       return;
@@ -516,7 +545,11 @@ class CodexAppConnection {
       const input = normalizeUserInput(message);
       this.markWaiting(input.threadId, 'waitingOnUserInput');
       if (this.isCurrentThread(input.threadId)) {
-        this.setInbox('permission', input.questions[0]?.question || '', `input:${message.id}`);
+        this.setInbox(
+          'permission',
+          input.questions[0]?.question || activeTurnPrompt(this.state(input.threadId)),
+          `input:${message.id}`,
+        );
       }
       this.bump(message.params?.threadId);
       return;
@@ -525,43 +558,70 @@ class CodexAppConnection {
     const params = message.params || {};
     if ((message.method === 'item/started' || message.method === 'item/completed') && params.item) {
       this.upsertLiveItem(params.threadId, params.turnId, params.item);
+      const state = this.state(params.threadId);
+      const prompt = userPromptFromItem(params.item);
+      if (prompt && state.activeTurnId === params.turnId) {
+        state.activePrompt = prompt;
+        if (this.isCurrentThread(params.threadId)
+          && this.inbox.kind !== 'permission' && this.inbox.kind !== 'compacting') {
+          this.setInbox('working', prompt, `turn:${params.turnId}:started`);
+        }
+      }
     } else if (message.method === 'serverRequest/resolved') {
       this.approvals.delete(String(params.requestId));
       this.userInputs.delete(String(params.requestId));
       this.markWorking(params.threadId);
-      if (this.isCurrentThread(params.threadId)) this.setInbox('working', '', `resolved:${params.requestId}`);
+      if (this.isCurrentThread(params.threadId)) {
+        this.setInbox(
+          'working', activeTurnPrompt(this.state(params.threadId)) || this.inbox.msg,
+          `resolved:${params.requestId}`,
+        );
+      }
     } else if (message.method === 'thread/status/changed') {
-      this.state(params.threadId).status = params.status;
+      const state = this.state(params.threadId);
+      state.status = params.status;
       const kind = activeKind(params.status);
       if (!this.isCurrentThread(params.threadId)) {
         /* retain the state for that thread, but never let a late background event rebind this pane */
       } else if (kind === 'working' && this.inbox.kind === 'compacting') {
         /* keep the more specific state until thread/compacted or idle */
       } else if (kind) {
-        this.setInbox(kind, kind === 'permission' && this.inbox.kind === kind ? this.inbox.msg : '', `status:${params.threadId}:${kind}`);
+        const pendingMessage = kind === 'permission' && this.inbox.kind === kind ? this.inbox.msg : '';
+        const activeMessage = activeTurnPrompt(state)
+          || (['working', 'permission'].includes(this.inbox.kind) ? this.inbox.msg : '');
+        this.setInbox(kind, pendingMessage || activeMessage, `status:${params.threadId}:${kind}`);
       } else if (params.status?.type === 'idle' && this.inbox.kind === 'compacting') {
         this.setInbox(null, '', `thread:${params.threadId}:compacted`);
       }
     } else if (message.method === 'turn/started') {
       const state = this.state(params.threadId);
+      const previousTurnId = state.activeTurnId;
       state.activeTurnId = params.turn?.id || params.turnId || null;
       state.status = { type: 'active', activeFlags: [] };
-      this.upsertTurn(params.threadId, params.turn);
+      const turn = this.upsertTurn(params.threadId, params.turn);
+      const prompt = turnPrompt(turn);
+      if (prompt) state.activePrompt = prompt;
+      else if (previousTurnId && previousTurnId !== state.activeTurnId) state.activePrompt = '';
       if (this.isCurrentThread(params.threadId)) {
-        this.setInbox('working', '', `turn:${params.turn?.id || params.turnId}:started`);
+        this.setInbox(
+          'working', activeTurnPrompt(state),
+          `turn:${params.turn?.id || params.turnId}:started`,
+        );
       }
     } else if (message.method === 'turn/completed') {
       const state = this.state(params.threadId);
-      state.activeTurnId = null;
-      state.status = { type: 'idle' };
       const turn = this.upsertTurn(params.threadId, params.turn) || params.turn || null;
+      const prompt = activeTurnPrompt(state) || turnPrompt(turn);
+      state.activeTurnId = null;
+      state.activePrompt = '';
+      state.status = { type: 'idle' };
       state.lastTurn = turn;
       const status = turn?.status;
       if (!this.isCurrentThread(params.threadId)) {
         /* stale/background completion: update only its own thread state */
       } else if (status === 'completed' || status === 'failed') {
         const completedAt = typeof turn?.completedAt === 'number' ? turn.completedAt * 1000 : undefined;
-        this.setInbox('done', turnSummary(turn), `turn:${turn?.id || params.turnId}:${status}`, completedAt);
+        this.setInbox('done', turnSummary(turn) || prompt, `turn:${turn?.id || params.turnId}:${status}`, completedAt);
       } else {
         this.setInbox(null, '', `turn:${params.turn?.id || params.turnId}:${status || 'ended'}`);
       }
@@ -602,7 +662,7 @@ class CodexAppConnection {
   state(threadId) {
     if (!this.threadState.has(threadId)) this.threadState.set(threadId, {
       revision: 0, readRevision: -1, thread: null, status: null, activeTurnId: null, settings: null,
-      contextUsage: null, lastTurn: null, loadedOnly: false, liveItemIds: new Map(),
+      activePrompt: '', contextUsage: null, lastTurn: null, loadedOnly: false, liveItemIds: new Map(),
     });
     return this.threadState.get(threadId);
   }
@@ -654,19 +714,24 @@ class CodexAppConnection {
   async startTurn(threadId, text) {
     const queue = this.queueState(threadId);
     queue.starting = true;
+    const state = this.state(threadId);
+    const previousPrompt = state.activePrompt;
+    state.activePrompt = text.trim();
     try {
-      const state = this.state(threadId);
       const result = await this.rpc('turn/start', { threadId, input: [{ type: 'text', text }] });
       state.activeTurnId = result.turn?.id || null;
       state.status = { type: 'active', activeFlags: [] };
       this.currentThreadId ||= threadId;
-      this.setInbox('working', '', `turn:${result.turn?.id || 'starting'}:started`);
+      this.setInbox('working', state.activePrompt, `turn:${result.turn?.id || 'starting'}:started`);
       this.bump(threadId);
       if (state.loadedOnly) {
         // turn/start normally persists the first rollout synchronously; attach this observer immediately.
         await this.ensureThread(threadId);
       }
       return result;
+    } catch (error) {
+      state.activePrompt = previousPrompt;
+      throw error;
     } finally {
       queue.starting = false;
       this.cleanupQueue(threadId);
@@ -838,18 +903,26 @@ class CodexAppConnection {
       state.status = result.thread?.status || state.status;
       state.settings = settingsFromResume(result);
       state.loadedOnly = false;
+      const previousActiveTurnId = state.activeTurnId;
+      const previousActivePrompt = state.activePrompt;
       state.activeTurnId = [...(result.thread?.turns || [])].reverse()
         .find((turn) => turn.status === 'inProgress')?.id || null;
+      const resumedPrompt = state.activeTurnId
+        ? turnPrompt((result.thread?.turns || []).find((turn) => turn.id === state.activeTurnId))
+        : '';
+      const samePendingTurn = state.activeTurnId
+        && (!previousActiveTurnId || previousActiveTurnId === state.activeTurnId);
+      state.activePrompt = resumedPrompt || (samePendingTurn ? previousActivePrompt : '');
       this.currentThreadId ||= threadId;
       if (this.isCurrentThread(threadId)) {
         const kind = activeKind(state.status);
         if (kind) {
-          this.setInbox(kind, '', `status:${threadId}:${kind}`);
+          this.setInbox(kind, activeTurnPrompt(state), `status:${threadId}:${kind}`);
         } else {
           const last = [...(result.thread?.turns || [])].reverse().find((turn) => turn.status !== 'inProgress');
           if (last?.status === 'completed' || last?.status === 'failed') {
             const completedAt = typeof last.completedAt === 'number' ? last.completedAt * 1000 : undefined;
-            this.setInbox('done', turnSummary(last), `turn:${last.id}:${last.status}`, completedAt);
+            this.setInbox('done', turnSummary(last) || turnPrompt(last), `turn:${last.id}:${last.status}`, completedAt);
           }
         }
       }
@@ -934,7 +1007,7 @@ class CodexAppConnection {
       : { decision: resolved });
     this.approvals.delete(key);
     this.markWorking(threadId);
-    this.setInbox('working', '', `approval:${key}:resolved`);
+    this.setInbox('working', activeTurnPrompt(this.state(threadId)) || this.inbox.msg, `approval:${key}:resolved`);
     this.bump(threadId);
   }
 
@@ -957,7 +1030,7 @@ class CodexAppConnection {
     this.respond(request.id, { answers: normalized });
     this.userInputs.delete(key);
     this.markWorking(threadId);
-    this.setInbox('working', '', `input:${key}:resolved`);
+    this.setInbox('working', activeTurnPrompt(this.state(threadId)) || this.inbox.msg, `input:${key}:resolved`);
     this.bump(threadId);
   }
 

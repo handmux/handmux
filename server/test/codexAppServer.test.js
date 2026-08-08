@@ -31,7 +31,7 @@ function fixtureThread(status = { type: 'idle' }) {
 
 function fakeProxy({
   empty = false, loaded = ['thread-1'], updatedAt = {}, status = { type: 'idle' }, readThread = null,
-  turnStartWait = null,
+  resumeThread = null, turnStartWait = null,
 } = {}) {
   const ws = new EventEmitter();
   ws.readyState = 0;
@@ -48,7 +48,10 @@ function fakeProxy({
     } else if (message.method === 'thread/resume') {
       if (!persisted) reply({ jsonrpc: '2.0', id: message.id, error: { code: -32600, message: 'no rollout found for thread id thread-1' } });
       else reply({ jsonrpc: '2.0', id: message.id, result: {
-        thread: { ...fixtureThread(status), id: message.params.threadId, updatedAt: updatedAt[message.params.threadId] },
+        thread: {
+          ...(resumeThread ? resumeThread(message.params.threadId) : fixtureThread(status)),
+          id: message.params.threadId, updatedAt: updatedAt[message.params.threadId],
+        },
         model: 'gpt-test', modelProvider: 'openai', serviceTier: null, cwd: '/work', approvalPolicy: 'on-request',
         runtimeWorkspaceRoots: ['/work', '/shared'],
         approvalsReviewer: 'user', sandbox: { type: 'workspaceWrite' }, activePermissionProfile: null,
@@ -142,13 +145,22 @@ describe('Codex App Server projection', () => {
 
 describe('Codex App Server client', () => {
   it('discovers and sends the first message to a loaded thread before its rollout exists', async () => {
-    const proxy = fakeProxy({ empty: true });
+    const proxy = fakeProxy({
+      empty: true,
+      // Immediately after turn/start, thread/resume may know the active turn before its user item arrives.
+      resumeThread: () => ({
+        id: 'thread-1', status: { type: 'active', activeFlags: [] },
+        turns: [{ id: 'turn-2', status: 'inProgress', items: [] }],
+      }),
+    });
     const app = createCodexAppServer({ home: '/home/test', exists: () => true, connect: () => proxy.ws });
     expect(await app.discover('%1')).toEqual({ managed: true, threadId: 'thread-1' });
     expect(await app.status('%1', 'thread-1')).toMatchObject({ managed: true, status: { type: 'idle' } });
     await app.send('%1', 'thread-1', 'first message');
     expect(proxy.sent.filter((message) => message.method === 'thread/resume').length).toBeGreaterThanOrEqual(2);
     expect(proxy.sent).toContainEqual(expect.objectContaining({ method: 'turn/start' }));
+    expect((await app.inboxStates([{ id: '%1' }]))['%1'])
+      .toMatchObject({ kind: 'working', msg: 'first message' });
     app.close();
   });
 
@@ -162,6 +174,7 @@ describe('Codex App Server client', () => {
     expect(await app.status('%1', 'thread-1')).toMatchObject({ gitBranch: 'main' });
     await app.send('%1', 'thread-1', 'continue');
     expect(proxy.sent).toContainEqual(expect.objectContaining({ method: 'turn/start', params: { threadId: 'thread-1', input: [{ type: 'text', text: 'continue' }] } }));
+    expect((await app.inboxStates([{ id: '%1' }]))['%1']).toMatchObject({ kind: 'working', msg: 'continue' });
 
     proxy.push({
       jsonrpc: '2.0', id: 91, method: 'item/commandExecution/requestApproval',
@@ -599,17 +612,72 @@ describe('Codex App Server client', () => {
     await app.discover('%1');
     changed.length = 0;
     proxy.push({ jsonrpc: '2.0', method: 'turn/started', params: { threadId: 'thread-1', turn: { id: 'turn-2' } } });
+    proxy.push({
+      jsonrpc: '2.0', method: 'item/completed', params: {
+        threadId: 'thread-1', turnId: 'turn-2',
+        item: { id: 'user-2', type: 'userMessage', content: [{ type: 'text', text: 'fix the inbox' }] },
+      },
+    });
+    proxy.push({
+      jsonrpc: '2.0', method: 'thread/status/changed',
+      params: { threadId: 'thread-1', status: { type: 'active', activeFlags: [] } },
+    });
     await new Promise((resolve) => setTimeout(resolve, 0));
-    expect((await app.inboxStates([{ id: '%1' }]))['%1']).toMatchObject({ kind: 'working' });
+    expect((await app.inboxStates([{ id: '%1' }]))['%1']).toMatchObject({ kind: 'working', msg: 'fix the inbox' });
 
     proxy.push({ jsonrpc: '2.0', id: 91, method: 'item/commandExecution/requestApproval', params: { threadId: 'thread-1', command: 'npm test' } });
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect((await app.inboxStates([{ id: '%1' }]))['%1']).toMatchObject({ kind: 'permission', msg: 'npm test' });
 
+    proxy.push({ jsonrpc: '2.0', method: 'serverRequest/resolved', params: { threadId: 'thread-1', requestId: 91 } });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect((await app.inboxStates([{ id: '%1' }]))['%1']).toMatchObject({ kind: 'working', msg: 'fix the inbox' });
+
     proxy.push({ jsonrpc: '2.0', method: 'turn/completed', params: { threadId: 'thread-1', turn: { id: 'turn-2', status: 'completed', items: [{ type: 'agentMessage', text: 'all green' }] } } });
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect((await app.inboxStates([{ id: '%1' }]))['%1']).toMatchObject({ kind: 'done', msg: 'all green' });
-    expect(changed).toEqual(['%1', '%1', '%1']);
+    expect(changed).toEqual(['%1', '%1', '%1', '%1', '%1', '%1']);
+    app.close();
+  });
+
+  it('falls back to the real user prompt when completion has no final message and ignores injected context', async () => {
+    const proxy = fakeProxy();
+    const app = createCodexAppServer({ home: '/home/test', exists: () => true, connect: () => proxy.ws });
+    await app.discover('%1');
+    proxy.push({
+      jsonrpc: '2.0', method: 'turn/started',
+      params: { threadId: 'thread-1', turn: { id: 'turn-2', status: 'inProgress', items: [] } },
+    });
+    proxy.push({
+      jsonrpc: '2.0', method: 'item/completed', params: {
+        threadId: 'thread-1', turnId: 'turn-2',
+        item: { id: 'user-2', type: 'userMessage', content: [{ type: 'text', text: 'ship the release' }] },
+      },
+    });
+    proxy.push({
+      jsonrpc: '2.0', method: 'item/completed', params: {
+        threadId: 'thread-1', turnId: 'turn-2',
+        item: {
+          id: 'context-2', type: 'userMessage',
+          content: [{ type: 'text', text: '<permissions instructions>internal policy</permissions instructions>' }],
+        },
+      },
+    });
+    proxy.push({
+      jsonrpc: '2.0', id: 92, method: 'item/fileChange/requestApproval',
+      params: { threadId: 'thread-1', turnId: 'turn-2', itemId: 'files-2' },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect((await app.inboxStates([{ id: '%1' }]))['%1'])
+      .toMatchObject({ kind: 'permission', msg: 'ship the release' });
+
+    proxy.push({
+      jsonrpc: '2.0', method: 'turn/completed',
+      params: { threadId: 'thread-1', turn: { id: 'turn-2', status: 'completed', items: [] } },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect((await app.inboxStates([{ id: '%1' }]))['%1'])
+      .toMatchObject({ kind: 'done', msg: 'ship the release' });
     app.close();
   });
 
@@ -665,15 +733,36 @@ describe('Codex App Server client', () => {
     app.close();
   });
 
+  it('restores the active user prompt from the App Server thread after reconnecting', async () => {
+    const active = fixtureThread({ type: 'active', activeFlags: [] });
+    active.turns.push({
+      id: 'turn-live', status: 'inProgress', items: [
+        { id: 'user-live', type: 'userMessage', content: [{ type: 'text', text: 'resume this task' }] },
+      ],
+    });
+    const proxy = fakeProxy({ resumeThread: () => active });
+    const app = createCodexAppServer({ home: '/home/test', exists: () => true, connect: () => proxy.ws });
+
+    await app.discover('%1');
+    expect((await app.inboxStates([{ id: '%1' }]))['%1'])
+      .toMatchObject({ kind: 'working', msg: 'resume this task' });
+    app.close();
+  });
+
   it('restores the last completion with its stable timestamp without replaying its push', async () => {
-    const proxy = fakeProxy();
+    const completed = fixtureThread();
+    completed.turns[0].items = [
+      { id: 'user-1', type: 'userMessage', content: [{ type: 'text', text: 'hello' }] },
+    ];
+    const proxy = fakeProxy({ resumeThread: () => completed });
     const app = createCodexAppServer({
       home: '/home/test', exists: () => true, readdir: () => ['1.sock'], connect: () => proxy.ws,
       setTimer: () => ({ unref() {} }), clearTimer: () => {},
     });
     app.start();
     await new Promise((resolve) => setTimeout(resolve, 0));
-    expect((await app.inboxStates([{ id: '%1' }]))['%1']).toMatchObject({ kind: 'done', ts: 2000, suppressPush: true });
+    expect((await app.inboxStates([{ id: '%1' }]))['%1'])
+      .toMatchObject({ kind: 'done', msg: 'hello', ts: 2000, suppressPush: true });
     app.close();
   });
 

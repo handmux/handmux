@@ -6,6 +6,7 @@ All notable changes to handmux. Format follows [Keep a Changelog](https://keepac
 
 ### Fixed
 
+- 修复 Codex 收件箱在任务开始、审批完成和重连后经常只显示状态、丢失任务内容的问题。
 - 多窗格窗口的窗格面板改为立即打开并在后台刷新，不再因网络较慢而阻塞点击。
 - 修复打开或切换 Codex 对话时偶尔闪过“开始托管”页面的问题。
 - 修复 Codex App Server 短暂波动时过早显示“无法连接”并遮住对话的问题。

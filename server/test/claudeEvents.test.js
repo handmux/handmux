@@ -561,11 +561,11 @@ describe('createClaudeEvents with a Codex-tagged pane (agent dispatch, Claude-pa
 
   it('uses managed App Server state instead of a stale Codex Hook row', async () => {
     const file = stateFile({ '%1': cdone('stale', 1000) });
-    const codexApp = { inboxStates: async () => ({ '%1': { kind: 'working', msg: '', ts: 2000, suppressPush: false } }) };
+    const codexApp = { inboxStates: async () => ({ '%1': { kind: 'working', msg: 'fix the inbox', ts: 2000, suppressPush: false } }) };
     const states = await createClaudeEvents({
       commands: { listLivePanes: async () => liveCodex(['%1'], 'codex') }, push: { sendToSession: async () => ({}) }, file, codexApp,
     }).getStates();
-    expect(states['%1']).toMatchObject({ kind: 'working', agent: 'codex', ts: 2000 });
+    expect(states['%1']).toMatchObject({ kind: 'working', msg: 'fix the inbox', agent: 'codex', ts: 2000 });
   });
 
   it('does not revive stale Hook state while a managed App Server socket reconnects', async () => {
