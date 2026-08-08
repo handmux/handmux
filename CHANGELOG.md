@@ -23,6 +23,7 @@ All notable changes to handmux. Format follows [Keep a Changelog](https://keepac
 
 ### Fixed
 
+- Codex 状态、通知和对话统一只使用 App Server；安装与设置不再提示或写入 Codex Hooks，升级后会安全清理旧版 Handmux 自己安装的 Codex Hook 配置。
 - 修复暖金配色下对话工具详情、上下文和模型菜单背景透明，导致面板内容与后方消息混在一起的问题。
 - 修复 Codex 收件箱在任务开始、审批完成和重连后经常只显示状态、丢失任务内容的问题。
 - 多窗格窗口的窗格面板改为立即打开并在后台刷新，不再因网络较慢而阻塞点击。

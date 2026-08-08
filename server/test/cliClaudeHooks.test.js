@@ -193,13 +193,16 @@ describe('installHooks / uninstallHooks (IO)', () => {
     const home = tmpHome('twhk-');
     fs.mkdirSync(path.join(home, '.claude'), { recursive: true });   // simulate a Claude Code user
     const stateFile = path.join(home, '.handmux/claude-state.json');
+    const hooksDir = path.join(home, '.claude/hooks');
+    fs.mkdirSync(hooksDir, { recursive: true });
+    fs.writeFileSync(path.join(hooksDir, 'handmux-codex-usage.cjs'), 'legacy');
 
     const res = installHooks(home, { srcDir: SRC_DIR, stateFile });
     expect(res.status).toBe('installed');
 
-    const hooksDir = path.join(home, '.claude/hooks');
     expect(fs.existsSync(path.join(hooksDir, 'handmux-notify.sh'))).toBe(true);
     expect(fs.existsSync(path.join(hooksDir, 'handmux-write.cjs'))).toBe(true);
+    expect(fs.existsSync(path.join(hooksDir, 'handmux-codex-usage.cjs'))).toBe(false);
     expect(fs.readFileSync(path.join(hooksDir, 'handmux-notify.env'), 'utf8')).toContain(`HANDMUX_STATE=${stateFile}`);
     expect(hooksStatus(home)).toBe('installed');
 

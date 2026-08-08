@@ -1,10 +1,9 @@
-// Codex process/session discovery. Hooks identify plain Codex sessions for inbox state and exact one-click
-// takeover; once managed, App Server owns chat, approvals, stopping, and live state.
+// Codex process/session discovery. App Server owns chat, approvals, stopping, inbox state and exact thread
+// identity; plain Codex is identified only as a live process until the user opts into managed mode.
 import path from 'node:path';
 import os from 'node:os';
 import { promises as fsp } from 'node:fs';
 import { readHead, readTail, firstCwd, isSessionUuid } from './scanUtils.js';
-import { classifyClaude } from './claude.js';
 import { resolveByExecutable, executableBasename } from './processIdentity.js';
 import {
   createCodexTranscriptParser, isCodexSyntheticUserText, parseCodexTranscript,
@@ -155,12 +154,8 @@ export const codex = {
   procNames: ['codex'],
   procMatch: /^(\S*\/)?codex(\s|$)/,
   takeoverPrefix: 'cx', // tmux session name prefix for a takeover (cx-<label>-<n>)
-  classify: classifyClaude, // Codex hook payloads match Claude's field-for-field — same classifier
   transcript: { createParser: createCodexTranscriptParser, parse: parseCodexTranscript },
   sessions: {
-    // Rows written before SessionStart(`/clear`) support can point at a previous rollout. Consumers reject
-    // those legacy rows until a refreshed hook writes the current binding at this version.
-    bindingVersion: 2,
     isId: isSessionUuid,
     dirOptKey: 'sessionsDir', // scanOrphans option that overrides `dir`
     dir: sessionsDir,

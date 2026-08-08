@@ -14,7 +14,7 @@ import { pocketHome } from './cli/state.js';
 const require = createRequire(import.meta.url);
 const {
   readLatestUsage, readSnapshot, writeSnapshot,
-} = require('../hooks/handmux-codex-usage.cjs');
+} = require('./codexUsageSnapshot.cjs');
 
 export function claudeUsagePath(home = homedir()) { return path.join(pocketHome(home), 'claude-usage.json'); }
 export function claudeContextDir(home = homedir()) { return path.join(pocketHome(home), 'context'); }
@@ -63,8 +63,7 @@ function rolloutFilesByMtime(dir) {
   return files.sort((a, b) => b.mtimeMs - a.mtimeMs);
 }
 
-// Full reconciliation fallback. It remains zero-config, but now runs at most once per calibration interval;
-// the normal path reads the persistent snapshot written by Codex hooks.
+// Zero-config reconciliation runs at most once per calibration interval and updates a persistent cache.
 function scanCodexUsage(home) {
   let latest = null;
   for (const { file, mtimeMs } of rolloutFilesByMtime(codexSessionsDir(home))) {
@@ -75,8 +74,8 @@ function scanCodexUsage(home) {
   return latest;
 }
 
-// Prefer the machine-wide snapshot. A full rollout scan seeds it and calibrates it once per minute for
-// users without hooks; hook updates between calibrations are never rolled back by an older scan result.
+// Prefer the machine-wide cache. A bounded rollout scan refreshes it at most once per minute; App Server
+// supplies live account rate limits separately below.
 export function readCodexUsage(
   home = homedir(),
   { now = Date.now(), calibrationMs = 60_000 } = {},

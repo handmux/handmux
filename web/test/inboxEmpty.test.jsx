@@ -38,7 +38,7 @@ describe('Inbox empty state', () => {
   it('shows the enable prompt + button when hooks are absent, and calls onEnableHooks', async () => {
     const onEnableHooks = vi.fn().mockResolvedValue({ status: 'installed' });
     render(<Inbox {...base} hooksStatus="absent" onEnableHooks={onEnableHooks} />);
-    expect(screen.getByText('Turn on AI session notifications')).toBeTruthy();
+    expect(screen.getByText('Turn on Claude Code states and notifications')).toBeTruthy();
     fireEvent.click(screen.getByText('Enable'));
     await waitFor(() => expect(onEnableHooks).toHaveBeenCalled());
   });
@@ -46,6 +46,6 @@ describe('Inbox empty state', () => {
   it('does not show the enable prompt when there are rows', () => {
     const rows = [{ pane: '%1', session: 's', window: '0', view: 'working', ts: 1, msg: '' }];
     render(<Inbox {...base} rows={rows} hooksStatus="absent" onEnableHooks={() => {}} />);
-    expect(screen.queryByText('Turn on AI session notifications')).toBeNull();
+    expect(screen.queryByText('Turn on Claude Code states and notifications')).toBeNull();
   });
 });

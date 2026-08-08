@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { captureWorkspace } from '../src/workspace/capture.js';
 
 const UUID = {
@@ -26,7 +26,7 @@ const topology = {
 
 const agents = [
   { id: 'claude', sessions: { isId: (id) => id === UUID.claude } },
-  { id: 'codex', sessions: { bindingVersion: 2, isId: (id) => id === UUID.codex } },
+  { id: 'codex', sessions: { isId: (id) => id === UUID.codex } },
 ];
 
 describe('canonical workspace capture', () => {
@@ -69,7 +69,49 @@ describe('canonical workspace capture', () => {
     });
     expect(result.snapshot.windows[0].panes.map(({ id, agent }) => [id, agent])).toEqual([
       ['p-a', { id: 'claude', sessionId: UUID.claude, transcriptPath: '/transcripts/a.jsonl' }],
-      ['p-b', { id: 'codex', sessionId: UUID.codex, transcriptPath: '/transcripts/b.jsonl' }],
+      ['p-b', null],
+      ['p-c', null],
+      ['p-d', null],
+      ['p-e', null],
+      ['p-f', null],
+    ]);
+  });
+
+  it('captures managed Codex identity from App Server instead of legacy Hook rows', async () => {
+    const discover = vi.fn(async (pane) => pane === '%2'
+      ? { managed: true, threadId: UUID.codex }
+      : { managed: false, threadId: null });
+    const findCodexRollout = vi.fn(async (dir, threadId) => {
+      expect(dir).toBe('/codex/sessions');
+      expect(threadId).toBe(UUID.codex);
+      return '/codex/sessions/rollout.jsonl';
+    });
+    const result = await captureWorkspace({
+      tmux: {
+        topologyFingerprint: async () => 'same',
+        captureTopology: async () => topology,
+      },
+      stateFile: '/state.json',
+      environment,
+      agents,
+      readFile: async () => JSON.stringify({
+        '%1': { agent: 'claude', payload: { session_id: UUID.claude, transcript_path: '/claude/a.jsonl' } },
+        '%2': { agent: 'codex', payload: { session_id: UUID.codex, transcript_path: '/legacy/codex.jsonl' } },
+      }),
+      codexApp: { discover },
+      codexSessions: '/codex/sessions',
+      findCodexRollout,
+      access: async () => {},
+      stat: async () => ({ isFile: () => true }),
+      now: () => Date.parse('2026-07-20T02:00:00.000Z'),
+    });
+
+    expect(result.status).toBe('ok');
+    expect(discover.mock.calls.map(([pane]) => pane)).toEqual(['%2', '%1', '%3', '%4', '%5', '%6']);
+    expect(findCodexRollout).toHaveBeenCalledOnce();
+    expect(result.snapshot.windows[0].panes.map(({ id, agent }) => [id, agent])).toEqual([
+      ['p-a', { id: 'claude', sessionId: UUID.claude, transcriptPath: '/claude/a.jsonl' }],
+      ['p-b', { id: 'codex', sessionId: UUID.codex, transcriptPath: '/codex/sessions/rollout.jsonl' }],
       ['p-c', null],
       ['p-d', null],
       ['p-e', null],

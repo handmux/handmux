@@ -152,13 +152,17 @@ export function createCheckpointer({
   };
 }
 
-export function createWorkspaceBackground({ store, tmux, observeEnvironment, lock, stateFile, now = Date.now } = {}) {
+export function createWorkspaceBackground({
+  store, tmux, observeEnvironment, lock, stateFile, getCodexApp = () => null, codexSessions, now = Date.now,
+} = {}) {
   return createCheckpointer({
     store,
     observeEnvironment,
     lock,
     now,
-    capture: (environment) => captureWorkspace({ tmux, stateFile, environment, now }),
+    capture: (environment) => captureWorkspace({
+      tmux, stateFile, environment, codexApp: getCodexApp(), codexSessions, now,
+    }),
   });
 }
 

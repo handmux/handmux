@@ -63,7 +63,7 @@ describe('Settings agent chat-view switches', () => {
     expect(lensBox('Claude Code').disabled).toBe(true);
     expect(lensBox('Codex CLI').disabled).toBe(false);
     expect(container.textContent).toContain('需先安装 Agent hooks');
-    expect(container.textContent).toContain('Codex CLI 对话由 App Server 同步，无需 hooks');
+    expect(container.textContent).toContain('普通 Codex 仍可使用终端，但不会同步状态和通知');
     const btn = [...container.querySelectorAll('button')].find((b) => b.textContent === '一键安装 hooks');
     expect(btn).toBeTruthy();
     click(btn);

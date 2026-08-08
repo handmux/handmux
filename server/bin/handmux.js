@@ -34,7 +34,7 @@ import { scanSupervisorPids, terminateSupervisorPids } from '../src/cli/supervis
 import { runSetup } from '../src/cli/setupWizard.js';
 import { commitShortcuts, reportShortcutCommit, runShortcutEditor } from '../src/cli/shortcutEditor.js';
 import { hooksStatus, installHooks, uninstallHooks } from '../src/cli/claudeHooks.js';
-import { codexHooksStatus, installCodexHooks, uninstallCodexHooks } from '../src/cli/codexHooks.js';
+import { removeLegacyCodexHooks } from '../src/cli/legacyCodexHooks.js';
 import { statusLineStatus, installStatusLine, uninstallStatusLine, composeHint, refreshStatusLineScript } from '../src/cli/statusLine.js';
 import { claudeUsagePath } from '../src/usage.js';
 import { probe } from '../src/cli/probe.js';
@@ -183,6 +183,7 @@ function version() {
 }
 
 async function codexCmd() {
+  removeLegacyCodexHooks(HOME);
   try { process.exitCode = await runManagedCodex(process.argv.slice(3), { home: HOME }); }
   catch (error) {
     console.error(`[handmux] ${error?.message || error}`);
@@ -481,6 +482,7 @@ function supervisorArgs(cfg) {
 }
 
 async function setupCmd() {
+  removeLegacyCodexHooks(HOME);
   const target = flags.config ? path.resolve(flags.config) : configPath(HOME);
   // Is an instance already up? Then the run-action reads "Save & restart" and applying means a real restart
   // (a running supervisor won't pick up the new config on its own). Captured before the interactive setup so
@@ -490,11 +492,10 @@ async function setupCmd() {
   const res = await runSetup({ home: HOME, target, running });
   if (!res) { process.exit(2); }
   const { cfg, start: doStart } = res;   // hub's "save & start/restart" carries the intent — no separate confirm
-  // Offer to enable the inbox hooks when an agent is present but not yet wired (Claude 'absent', or Codex
-  // 'absent'). installAgentHooks() then wires every present agent (idempotent for any already installed).
-  const offerHooks = hooksStatus(HOME) === 'absent' || codexHooksStatus(HOME) === 'absent';
+  // Codex uses App Server and needs no hooks. Offer this only when Claude Code is present but not wired.
+  const offerHooks = hooksStatus(HOME) === 'absent';
   if (offerHooks && await confirm(t('hooks.confirmEnable'))) {
-    installAgentHooks();
+    installClaudeHooks();
   }
   await maybeOfferStatusLine();
   if (doStart) {
@@ -553,41 +554,31 @@ async function maybeOfferStatusLine() {
   }
 }
 
-// Install the inbox hooks for every coding agent present on this host (Claude Code, Codex — the state file
-// is shared, entries are agent-tagged). Each is opt-in by the mere presence of its config dir. Prints a
-// per-agent line and returns how many were wired, so callers can gate the "reload" hint. Codex's single
-// `notify` slot may already hold the user's OWN program — we never clobber it, we warn.
-function installAgentHooks() {
-  let installed = 0;
-  if (hooksStatus(HOME) !== 'no-claude') {
-    installHooks(HOME, { srcDir: HOOKS_SRC, stateFile: claudeStatePath(HOME) });
-    console.log(t('hooks.installedClaude'));
-    installed++;
-  }
-  if (codexHooksStatus(HOME) !== 'no-codex') {
-    installCodexHooks(HOME, { srcDir: HOOKS_SRC, stateFile: claudeStatePath(HOME) });
-    console.log(t('hooks.installedCodex'));
-    installed++;
-  }
-  return installed;
+// Install Claude Code lifecycle hooks for inbox state and push. Codex never enters this path.
+function installClaudeHooks() {
+  if (hooksStatus(HOME) === 'no-claude') return false;
+  installHooks(HOME, { srcDir: HOOKS_SRC, stateFile: claudeStatePath(HOME) });
+  console.log(t('hooks.installedClaude'));
+  return true;
 }
 
-// `handmux hooks install|uninstall` — opt-in wiring of the coding-agent lifecycle hooks that drive the
-// inbox/push. Never creates ~/.claude or ~/.codex; if neither agent is present we say so and exit 0.
+// `handmux hooks install|uninstall` controls Claude Code lifecycle hooks. Codex is App Server-only;
+// uninstall also removes the exact Handmux Codex hook block left by older releases.
 async function hooksCmd() {
   const sub = process.argv[3];
   if (sub === 'install') {
-    if (hooksStatus(HOME) === 'no-claude' && codexHooksStatus(HOME) === 'no-codex') {
-      console.log(t('hooks.noAgents'));
+    removeLegacyCodexHooks(HOME);
+    if (hooksStatus(HOME) === 'no-claude') {
+      console.log(t('hooks.noClaude'));
       return;
     }
-    if (installAgentHooks() > 0) console.log(t('hooks.installedHint'));
+    if (installClaudeHooks()) console.log(t('hooks.installedHint'));
     await maybeOfferStatusLine();
     return;
   }
   if (sub === 'uninstall') {
     uninstallHooks(HOME);
-    uninstallCodexHooks(HOME);
+    removeLegacyCodexHooks(HOME);
     uninstallStatusLine(HOME);
     console.log(t('hooks.removed'));
     return;

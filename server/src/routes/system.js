@@ -9,7 +9,6 @@ import { isSessionId } from '../tmux/commands.js';
 import { buildIatSignedUrl } from '../asr/iflySign.js';
 import { asrConfig, isAsrConfigured } from '../asr/iflyConfig.js';
 import { hooksStatus, installHooks } from '../cli/claudeHooks.js';
-import { codexHooksStatus, installCodexHooks } from '../cli/codexHooks.js';
 import { scanOrphans, takeoverOrphan, defaultProjectsDir } from '../orphans.js';
 import { getUsageCached } from '../usage.js';
 import { readCache, isNewer, shouldRefresh, refreshLatestAsync } from '../cli/updateCheck.js';
@@ -25,19 +24,6 @@ const PKG_VERSION = (() => {
   catch { return null; }
 })();
 
-// Managed Codex no longer needs Hooks for chat, approvals, inbox state, or push. Keep recognising an
-// existing Codex Hook install for compatibility, but never prompt solely because Codex Hooks are absent.
-export function combineHookStatuses(claude, codex) {
-  if (claude === 'installed' || claude === 'absent') return claude;
-  return codex === 'installed' ? 'installed' : 'no-claude';
-}
-
-export function combinedHooksStatus(home) {
-  const c = hooksStatus(home);      // 'no-claude' | 'installed' | 'absent'
-  const x = codexHooksStatus(home); // 'no-codex' | 'installed' | 'absent'
-  return combineHookStatuses(c, x);
-}
-
 export function systemRoutes({ commands, claudeEvents, asrEnv, shortcuts, home, stateFile, previewDomain }) {
   const r = express.Router();
   let activeShortcuts = normalizeShortcuts(shortcuts);
@@ -46,13 +32,12 @@ export function systemRoutes({ commands, claudeEvents, asrEnv, shortcuts, home, 
   // Optional integrations are configured per-install (open-source installs ship without keys), so the
   // client asks what's actually available and hides controls that can't work — e.g. the mic when no
   // ASR engine is configured. Add more flags here as optional integrations land.
-  // `claudeHooks` (name kept for web back-compat) now represents optional Hook-backed integrations;
-  // managed Codex works through App Server without affecting this setup prompt.
+  // `claudeHooks` is intentionally Claude-only. Codex is always App Server-backed and never affects
+  // this setup prompt or endpoint.
   r.get('/config', (req, res) => {
-    const codexStatus = codexHooksStatus(home);
     res.json({
       asr: isAsrConfigured(asrEnv),
-      claudeHooks: combineHookStatuses(hooksStatus(home), codexStatus),
+      claudeHooks: hooksStatus(home),
       managedCodex: true,
       shortcuts: activeShortcuts,
       browserProxy: !!previewDomain,
@@ -86,15 +71,13 @@ export function systemRoutes({ commands, claudeEvents, asrEnv, shortcuts, home, 
     res.json({ current: PKG_VERSION, latest, updateAvailable, whatsNew });
   });
 
-  // One-tap enable from the phone: install the hooks for every present agent (Claude Code, Codex) on the
-  // host (token-gated, like every API here). Opt-in — the inbox only offers this when status is 'absent'.
-  // Never creates ~/.claude or ~/.codex; a user's own Codex `notify` is left untouched (see codexHooks.js).
+  // One-tap enable from the phone installs Claude Code hooks only. Codex uses App Server and must never
+  // write to ~/.codex as part of this endpoint.
   r.post('/hooks/install', (req, res) => {
     try {
-      let installed = 0;
-      if (hooksStatus(home) !== 'no-claude') { installHooks(home, { srcDir: HOOKS_SRC, stateFile }); installed++; }
-      if (codexHooksStatus(home) !== 'no-codex') { installCodexHooks(home, { srcDir: HOOKS_SRC, stateFile }); installed++; }
-      res.json({ ok: installed > 0, status: combinedHooksStatus(home) });
+      if (hooksStatus(home) === 'no-claude') return res.json({ ok: false, status: 'no-claude' });
+      installHooks(home, { srcDir: HOOKS_SRC, stateFile });
+      res.json({ ok: true, status: hooksStatus(home) });
     } catch (e) { res.status(500).json({ ok: false, error: String(e) }); }
   });
 

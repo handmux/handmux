@@ -31,29 +31,21 @@ describe('registry', () => {
       expect(typeof a.procName).toBe('string');
       expect(Array.isArray(a.procNames) && a.procNames.includes(a.procName)).toBe(true);
       expect(a.procMatch).toBeInstanceOf(RegExp);
-      expect(typeof a.classify).toBe('function');
       expect(typeof a.sessions.resolve).toBe('function');
       expect(typeof a.sessions.resumeCmd).toBe('function');
       expect(typeof a.sessions.resumeArgs).toBe('function');
     }
   });
 
+  it('keeps Hook classification on Claude only; Codex state belongs to App Server', () => {
+    expect(typeof getAgent('claude').classify).toBe('function');
+    expect(getAgent('codex').classify).toBeUndefined();
+  });
+
   it('builds resume commands as fixed argument arrays', () => {
     const id = 'aaaaaaaa-0000-4000-8000-000000000001';
     expect(getAgent('claude').sessions.resumeArgs(id)).toEqual(['claude', '--resume', id]);
     expect(getAgent('codex').sessions.resumeArgs(id)).toEqual(['codex', 'resume', id]);
-  });
-});
-
-describe('codex classify (Claude-parity hooks — same classifier)', () => {
-  const codex = getAgent('codex');
-  it('classifies the Claude-shaped hook verbs Codex now emits', () => {
-    expect(codex.classify('prompt', { prompt: 'build it' })).toEqual({ kind: 'working', msg: 'build it' });
-    expect(codex.classify('stop', { last_assistant_message: 'done' })).toEqual({ kind: 'done', msg: 'done' });
-    expect(codex.classify('permreq', { tool_name: 'Bash' })).toEqual({ kind: 'permission', msg: '需要你授权：Bash' });
-  });
-  it('shares the exact classifier with Claude', () => {
-    expect(codex.classify).toBe(getAgent('claude').classify);
   });
 });
 

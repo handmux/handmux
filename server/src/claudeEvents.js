@@ -13,9 +13,7 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 // Default lives under server/data (gitignored runtime data); override with CLAUDE_STATE_FILE.
 export const DEFAULT_STATE_FILE = process.env.CLAUDE_STATE_FILE || path.resolve(here, '../data/claude-state.json');
 
-// Classify a Claude hook event → inbox kind. The logic now lives in the Claude driver (agents/claude.js);
-// re-exported here because tests and callers import it by this path. Per-pane classification in getStates
-// dispatches through getAgent(entry.agent) so Codex (and future agents) classify with their own driver.
+// Classify a Claude hook event → inbox kind. Re-exported because tests and callers import this path.
 export const classifyEvent = claude.classify;
 
 // Which display VIEW a kind pushes as — and so what the device notification fires for. permission→需要你,
@@ -28,10 +26,8 @@ const VIEW_LABEL = { needs: '需要你', done: '已完成' };
 
 // The dedup key for a pane's current push view. `needs` is view-only: Claude signals one permission gate via
 // TWO hooks (permreq then permission_prompt) at different ts, and both must collapse to a SINGLE 需要你. But
-// `done` is ts-sensitive: each finished turn is a fresh "已完成 / 该你了". For Claude, two dones are always
-// separated by a 进行中 that re-arms the dedup anyway, so keying done by ts is equivalent; for Codex — whose
-// ONLY event is turn-complete, with no working/prompt event in between — it's what makes turn 2, 3, … push
-// instead of latching on turn 1's done forever.
+// `done` is ts-sensitive: each finished turn is a fresh "已完成 / 该你了". For Claude, two dones are normally
+// separated by a 进行中 that re-arms the dedup; the timestamp also protects unusual missing-start sequences.
 function pushKey(view, ts) { return view === 'done' ? `done:${ts}` : view; }
 
 // A 进行中 (working) is a LATCHED state: set by UserPromptSubmit, normally closed by Stop. But an ESC
@@ -170,6 +166,7 @@ export function createClaudeEvents({
   function prime() {
     const recorded = readStateFile(file);
     for (const [pane, r] of Object.entries(recorded)) {
+      if (r?.agent === 'codex') continue; // legacy rows are never a Codex state source
       const c = r && typeof r.src === 'string' ? getAgent(r.agent).classify(r.src, r.payload || {}) : null;
       const view = c ? PUSH_VIEW[c.kind] : undefined;
       if (view) lastPushed[pane] = pushKey(view, r.ts); // resting 需要你/已完成 → treat as seen, don't replay
@@ -244,7 +241,10 @@ export function createClaudeEvents({
 
     const out = {};
     for (const [pane, rec] of Object.entries(recorded)) {
-      if (rec?.agent === 'codex' && Object.hasOwn(managedCodex, pane)) continue;
+      // Older Handmux versions wrote Codex events into this Claude Hook state file. Codex is now strictly
+      // App Server-backed, so even an unmanaged pane must ignore those stale rows instead of reviving an
+      // approximate status or notification.
+      if (rec?.agent === 'codex') continue;
       const agent = getAgent(rec && rec.agent);
       let c = rec && typeof rec.src === 'string' ? agent.classify(rec.src, rec.payload || {}) : null;
       // A 需要你 the user already resolved leaves no closing hook (see PERM_RESOLVED_GUARD_MS). statMtime
@@ -294,8 +294,8 @@ export function createClaudeEvents({
       out[pane] = { ...loc, kind: c.kind, msg: c.msg || '', ts: rec.ts || 0, agent: agent.id };
     }
 
-    // Managed Codex is authoritative for its own pane. App Server events replace stale/missing Hook rows,
-    // while a neutral state still leaves process presence below to identify the pane as Codex.
+    // App Server is the sole Codex state source. A neutral state still leaves process presence below to
+    // identify the pane as Codex without guessing its activity.
     if (live) {
       for (const [pane, state] of Object.entries(managedCodex)) {
         const lp = live.get(pane);
@@ -373,6 +373,7 @@ export function createClaudeEvents({
   // isn't a Claude pane / the recorded payload carries no session info, so callers can fall back cleanly.
   function paneSession(pane) {
     const rec = readStateFile(file)[pane];
+    if (rec?.agent === 'codex') return null;
     const p = rec && rec.payload;
     if (!p || typeof p !== 'object') return null;
     const transcriptPath = typeof p.transcript_path === 'string' ? p.transcript_path : null;
@@ -382,7 +383,6 @@ export function createClaudeEvents({
     return {
       sessionId, transcriptPath, cwd,
       agent: typeof rec.agent === 'string' ? rec.agent : undefined,
-      ...(Number.isInteger(rec.bindingVersion) ? { bindingVersion: rec.bindingVersion } : {}),
     };
   }
 
@@ -391,6 +391,7 @@ export function createClaudeEvents({
   function paneAgent(pane) {
     const rec = readStateFile(file)[pane];
     if (!rec || typeof rec !== 'object') return null;
+    if (rec.agent === 'codex') return null;
     return typeof rec.agent === 'string' && rec.agent ? rec.agent : 'claude';
   }
 

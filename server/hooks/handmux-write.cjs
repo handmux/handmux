@@ -14,13 +14,9 @@
 // or corrupt the file. Best-effort throughout and silent — the hook is fire-and-forget and must never
 // fail Claude (the shell wrapper swallows errors and always exits 0).
 const fs = require('node:fs');
-const path = require('node:path');
 
-const [, , file, pane, src, ts, host = '', agent = ''] = process.argv;
+const [, , file, pane, src, ts, host = ''] = process.argv;
 if (!file || !pane || !src) process.exit(0);
-// Increment whenever the pane→Codex transcript contract changes. Server readers reject older Codex rows
-// instead of trusting a potentially stale pre-/clear binding; the next hook event rewrites it at this version.
-const CODEX_BINDING_VERSION = 2;
 
 let payload = {};
 try { payload = JSON.parse(fs.readFileSync(0, 'utf8') || '{}'); } catch { /* unreadable stdin → {} */ }
@@ -61,23 +57,8 @@ function update() {
     const curSid = obj[pane] && obj[pane].payload && obj[pane].payload.session_id;
     const endSid = payload && payload.session_id;
     if (!curSid || !endSid || curSid === endSid) delete obj[pane];
-  } else if (src === 'resume' && agent === 'codex') {
-    // Codex fires PostToolUse on EVERY tool call, so its resume exists purely to un-stick a pane from 需要你
-    // back to 进行中 after the user approved a PermissionRequest. Apply it ONLY as that transition — a mid-
-    // turn tool call (pane already 进行中 / 已完成) is a no-op, so we don't rewrite the entry on every
-    // command (the load Claude's matcher avoids). Claude's resume — no agent arg — is unaffected.
-    const prev = obj[pane];
-    const prevPerm = prev && (prev.src === 'permreq'
-      || (prev.src === 'notify' && (prev.payload || {}).notification_type === 'permission_prompt'));
-    if (!prevPerm) { return; }
-    obj[pane] = { ts: Number(ts) || 0, src, host, payload, agent, bindingVersion: CODEX_BINDING_VERSION };
   } else {
-    // agent tag lets the server dispatch classify + liveness per agent (Codex passes 'codex'); omitted for
-    // Claude so legacy entries stay byte-identical and default to claude server-side.
-    obj[pane] = {
-      ts: Number(ts) || 0, src, host, payload,
-      ...(agent ? { agent, ...(agent === 'codex' ? { bindingVersion: CODEX_BINDING_VERSION } : {}) } : {}),
-    };
+    obj[pane] = { ts: Number(ts) || 0, src, host, payload };
   }
   const tmp = `${file}.${process.pid}.tmp`;
   fs.writeFileSync(tmp, JSON.stringify(obj));
@@ -95,12 +76,3 @@ for (let i = 0; i < 60 && !held; i++) {                       // ~0.9s budget, t
 }
 try { update(); } catch { /* best effort */ }
 if (held) { try { fs.unlinkSync(lock); } catch { /* ignore */ } }
-
-// Codex hook payloads include the exact rollout transcript_path. Capture its latest token_count into a
-// machine-wide snapshot after the inbox update; failures are isolated so usage can never break the hook.
-if (agent === 'codex' && typeof payload.transcript_path === 'string') {
-  try {
-    const { captureTranscript } = require('./handmux-codex-usage.cjs');
-    captureTranscript(payload.transcript_path, path.join(path.dirname(file), 'codex-usage.json'));
-  } catch { /* best effort */ }
-}

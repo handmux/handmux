@@ -1,7 +1,6 @@
 // The agent registry: the one place that lists which coding agents handmux drives. Adding a third agent is a
-// new driver module (see claude.js / codex.js) plus one line here — the inbox pipeline (claudeEvents.js),
-// the orphan/takeover engine (orphans.js), and the hook installers all consume drivers through this list,
-// so none of them hard-codes an agent name.
+// new driver module (see claude.js / codex.js) plus one line here — the inbox pipeline and orphan/takeover
+// engine consume drivers through this list, so process and session behavior stays centralized.
 import { claude } from './claude.js';
 import { codex } from './codex.js';
 

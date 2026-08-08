@@ -6,8 +6,8 @@ import { tmpHome } from './tmphome.js';
 
 const require = createRequire(import.meta.url);
 const {
-  readLatestUsage, readSnapshot, writeSnapshot, captureTranscript,
-} = require('../hooks/handmux-codex-usage.cjs');
+  readLatestUsage, readSnapshot, writeSnapshot,
+} = require('../src/codexUsageSnapshot.cjs');
 
 function tokenCount(timestamp, usedPercent, total = 10, extra = {}) {
   return {
@@ -40,7 +40,7 @@ function rollout(home, name, rows) {
   return file;
 }
 
-describe('handmux-codex-usage snapshot', () => {
+describe('Codex usage snapshot', () => {
   it('reads the last token_count and normalizes the existing API shape', () => {
     const home = tmpHome('codex-snap-');
     const file = rollout(home, 'rollout.jsonl', [
@@ -88,8 +88,8 @@ describe('handmux-codex-usage snapshot', () => {
     const newer = rollout(home, 'newer.jsonl', [tokenCount('2026-07-23T05:00:00.000Z', 55)]);
     const older = rollout(home, 'older.jsonl', [tokenCount('2026-07-23T04:00:00.000Z', 44)]);
 
-    captureTranscript(newer, snapshotPath);
-    captureTranscript(older, snapshotPath);
+    writeSnapshot(snapshotPath, readLatestUsage(newer));
+    writeSnapshot(snapshotPath, readLatestUsage(older));
     expect(readSnapshot(snapshotPath)).toMatchObject({
       checkedAt: 0,
       usage: {

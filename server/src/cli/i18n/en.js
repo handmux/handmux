@@ -126,15 +126,11 @@ export default {
   'access.hint': '  handmux status | stop',
 
   // hooks
-  'hooks.confirmEnable': 'Enable coding-agent notifications (inbox)?',
-  'hooks.installedShort': '✓ Agent hooks installed.',
+  'hooks.confirmEnable': 'Enable Claude Code states and notifications (inbox)?',
   'hooks.noClaude': 'Claude Code not detected (~/.claude missing) — nothing to install.',
-  'hooks.noAgents': 'No coding agent detected (no ~/.claude, and codex not on PATH) — nothing to install.',
-  'hooks.installed': '✓ Claude hooks installed → ~/.claude/settings.json',
   'hooks.installedClaude': '✓ Claude Code hooks installed → ~/.claude/settings.json',
-  'hooks.installedCodex': '✓ Codex hooks installed → ~/.codex/config.toml',
-  'hooks.installedHint': '  Restart or open a new agent session to load them; the inbox lights up as panes report.',
-  'hooks.removed': '✓ Agent hooks removed.',
+  'hooks.installedHint': '  Restart or open a new Claude Code session to load them; the inbox lights up as panes report.',
+  'hooks.removed': '✓ Claude Code hooks removed.',
   'hooks.usage': 'usage: handmux hooks install|uninstall',
 
   // Claude statusLine usage capturer (powers the phone Usage page's 5h/weekly bars)
@@ -351,7 +347,7 @@ The model: 'start' runs · 'setup' configures (writes ~/.handmux/config.json) ·
 
 more:
   handmux config                          show the effective config + where each value came from
-  handmux hooks install|uninstall         enable/disable agent notifications (inbox)
+  handmux hooks install|uninstall         enable/disable Claude Code notifications (inbox)
   handmux service install|uninstall       start at login (launchd/systemd)
   handmux help flags                      one-run flags + env vars (scripting / headless / Docker)
   --config PATH · --lang en|zh · --version, -v

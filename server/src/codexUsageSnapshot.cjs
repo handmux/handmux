@@ -1,6 +1,5 @@
-#!/usr/bin/env node
-// Persistent machine-wide Codex usage snapshot. This file is standalone CommonJS because hook installers
-// copy it into ~/.codex/hooks/, while the ESM server also requires the bundled copy directly.
+// Persistent machine-wide Codex usage snapshot utilities. Kept as CommonJS so the ESM usage service can
+// load the same bounded rollout reader without adding a second package boundary.
 const fs = require('node:fs');
 const path = require('node:path');
 
@@ -127,15 +126,4 @@ function writeSnapshot(snapshotPath, usage, { checkedAt } = {}) {
   }
 }
 
-function captureTranscript(transcriptPath, snapshotPath) {
-  const usage = readLatestUsage(transcriptPath);
-  if (!usage) return readSnapshot(snapshotPath)?.usage || null;
-  return writeSnapshot(snapshotPath, usage);
-}
-
-module.exports = {
-  readLatestUsage,
-  readSnapshot,
-  writeSnapshot,
-  captureTranscript,
-};
+module.exports = { readLatestUsage, readSnapshot, writeSnapshot };

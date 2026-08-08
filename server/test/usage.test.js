@@ -5,7 +5,7 @@ import { createRequire } from 'node:module';
 import { tmpHome } from './tmphome.js';
 
 const require = createRequire(import.meta.url);
-const { writeSnapshot } = require('../hooks/handmux-codex-usage.cjs');
+const { writeSnapshot } = require('../src/codexUsageSnapshot.cjs');
 import {
   readClaudeUsage, readCodexUsage, getUsage, getUsageCached, claudeUsagePath,
   readClaudeContext, claudeContextDir,
@@ -154,7 +154,7 @@ describe('Codex persistent calibration snapshot', () => {
     expect(readCodexUsage(home, { now: 30_000, calibrationMs: 60_000 })).toEqual(first);
   });
 
-  it('performs a full calibration after 60 seconds and sees no-hook updates', () => {
+  it('performs a rollout calibration after 60 seconds and sees new events', () => {
     const home = tmpHome('usg-snap-');
     const file = writeRollout(home, '2026', '07', '23', 'rollout-2026-07-23T02-00-00-a.jsonl', [
       tokenCount('2026-07-23T02:00:00.000Z', 20, { total_tokens: 10 }),
@@ -166,21 +166,21 @@ describe('Codex persistent calibration snapshot', () => {
     expect(readCodexUsage(home, { now: 61_001, calibrationMs: 60_000 }).rateLimits.primary.usedPercent).toBe(37);
   });
 
-  it('never lets a full scan roll a newer hook snapshot back', () => {
+  it('never lets a full scan roll a newer cached snapshot back', () => {
     const home = tmpHome('usg-snap-');
     writeRollout(home, '2026', '07', '23', 'rollout-2026-07-23T03-00-00-a.jsonl', [
       tokenCount('2026-07-23T03:00:00.000Z', 30, { total_tokens: 10 }),
     ]);
     const snapshotPath = path.join(home, '.handmux', 'codex-usage.json');
-    const hookUsage = {
+    const cachedUsage = {
       updatedAt: Date.parse('2026-07-23T04:00:00.000Z'),
       rateLimits: { primary: { usedPercent: 45, windowMinutes: 300, resetsAt: 1785600000 }, secondary: null },
       tokens: { total: 20, input: null, cachedInput: null, output: null, reasoning: null },
       contextWindow: 258400,
     };
-    writeSnapshot(snapshotPath, hookUsage);
+    writeSnapshot(snapshotPath, cachedUsage);
 
-    expect(readCodexUsage(home, { now: 61_001, calibrationMs: 60_000 })).toEqual(hookUsage);
+    expect(readCodexUsage(home, { now: 61_001, calibrationMs: 60_000 })).toEqual(cachedUsage);
   });
 
   it('records an empty calibration so a newly-created rollout waits for the next interval', () => {

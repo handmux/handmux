@@ -97,18 +97,8 @@ describe('GET /api/transcript', () => {
     expect(reader.read).not.toHaveBeenCalled();
   });
 
-  it('409s when hook state binds the pane to Codex even if the caller claims Claude', async () => {
-    const app = express();
-    app.use(transcriptRoutes({
-      commands: { paneCurrentPath: async () => '/shared' },
-      claudeEvents: { paneSession: () => null, paneAgent: () => 'codex' },
-    }));
-    const { status } = await call(app, '/transcript?pane=%251&agent=claude');
-    expect(status).toBe(409);
-  });
-
   it('uses the exact managed rollout as the durable Codex transcript', async () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-route-hook-'));
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-route-managed-'));
     const file = path.join(dir, 'rollout-aaaaaaaa-0000-0000-0000-000000000002.jsonl');
     fs.writeFileSync(file, [
       JSON.stringify({ type: 'response_item', payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: '检查' }] } }),
@@ -127,7 +117,7 @@ describe('GET /api/transcript', () => {
           type: 'custom_tool_call_output', call_id: 'three', output: 'aborted by user after 3.6s',
         },
       }),
-      JSON.stringify({ type: 'response_item', payload: { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'hooked-codex' }] } }),
+      JSON.stringify({ type: 'response_item', payload: { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'managed-codex' }] } }),
     ].join('\n') + '\n');
     const read = vi.fn(async () => ({ thread: { turns: [{
       id: 'turn-1', status: 'completed', startedAt: 1,
@@ -140,10 +130,8 @@ describe('GET /api/transcript', () => {
         discover: vi.fn(async () => ({ managed: true, threadId: 'aaaaaaaa-0000-0000-0000-000000000002' })),
         read,
       },
-      claudeEvents: {
-        paneAgent: () => 'codex',
-        paneSession: () => ({ agent: 'codex', sessionId: 'aaaaaaaa-0000-0000-0000-000000000002', transcriptPath: file, bindingVersion: 2 }),
-      },
+      claudeEvents: noHook,
+      findCodexRollout: vi.fn(async () => file),
     }));
     try {
       const { status, body } = await call(app, '/transcript?pane=%251&agent=codex');
@@ -157,7 +145,7 @@ describe('GET /api/transcript', () => {
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   });
 
-  it('shows a managed empty Codex thread before its first hook-bound turn', async () => {
+  it('shows a managed empty Codex thread before its first persisted turn', async () => {
     const app = express();
     app.use(transcriptRoutes({
       commands: {},
@@ -165,7 +153,7 @@ describe('GET /api/transcript', () => {
         discover: vi.fn(async () => ({ managed: true, threadId: 'thread-new' })),
         read: vi.fn(async () => ({ thread: { id: 'thread-new', turns: [], status: { type: 'idle' } } })),
       },
-      claudeEvents: { paneAgent: () => 'codex', paneSession: () => null },
+      claudeEvents: noHook,
     }));
     const { status, body } = await call(app, '/transcript?pane=%251&agent=codex');
     expect(status).toBe(200);
@@ -223,10 +211,7 @@ describe('GET /api/transcript', () => {
     app.use(transcriptRoutes({
       commands: {},
       codexApp: { discover: vi.fn(async () => ({ managed: false, threadId: null })), read: vi.fn(async () => null) },
-      claudeEvents: {
-        paneAgent: () => 'codex',
-        paneSession: () => ({ agent: 'codex', sessionId: 'aaaaaaaa-0000-0000-0000-000000000003', transcriptPath: '/rollout.jsonl', bindingVersion: 2 }),
-      },
+      claudeEvents: noHook,
     }));
     const { status, body } = await call(app, '/transcript?pane=%251&agent=codex');
     expect(status).toBe(200);

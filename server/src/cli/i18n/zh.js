@@ -125,15 +125,11 @@ export default {
   'access.hint': '  handmux status | stop',
 
   // hooks
-  'hooks.confirmEnable': '启用编程 agent 通知(收件箱)?',
-  'hooks.installedShort': '✓ agent hooks 已安装。',
+  'hooks.confirmEnable': '启用 Claude Code 状态与通知(收件箱)?',
   'hooks.noClaude': '未检测到 Claude Code(缺少 ~/.claude)—— 无需安装。',
-  'hooks.noAgents': '未检测到编程 agent(无 ~/.claude,且 PATH 上没有 codex)—— 无需安装。',
-  'hooks.installed': '✓ Claude hooks 已安装 → ~/.claude/settings.json',
   'hooks.installedClaude': '✓ Claude Code hooks 已安装 → ~/.claude/settings.json',
-  'hooks.installedCodex': '✓ Codex hooks 已安装 → ~/.codex/config.toml',
-  'hooks.installedHint': '  重启或新开一个 agent 会话以加载;窗格上报后收件箱就会亮起。',
-  'hooks.removed': '✓ agent hooks 已移除。',
+  'hooks.installedHint': '  重启或新开一个 Claude Code 会话以加载;窗格上报后收件箱就会亮起。',
+  'hooks.removed': '✓ Claude Code hooks 已移除。',
   'hooks.usage': '用法:handmux hooks install|uninstall',
 
   // Claude statusLine 用量捕获(点亮手机用量页的 5h/周额度条)
@@ -350,7 +346,7 @@ export default {
 
 更多:
   handmux config                          显示生效的配置 + 每一项来自哪里
-  handmux hooks install|uninstall         启用/停用 agent 通知(收件箱)
+  handmux hooks install|uninstall         启用/停用 Claude Code 通知(收件箱)
   handmux service install|uninstall       开机自启(launchd/systemd)
   handmux help flags                      一次性 flag + 环境变量(脚本 / 无头 / Docker)
   --config PATH · --lang en|zh · --version, -v

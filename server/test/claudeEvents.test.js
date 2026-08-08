@@ -104,13 +104,14 @@ function liveAll(ids, over = {}) {
 const rec = (src, payload = {}, ts = 1000) => ({ ts, src, host: 'h', payload });
 
 describe('createClaudeEvents paneSession', () => {
-  it('returns the bound transcript metadata together with the agent id', () => {
+  it('returns Claude binding metadata and rejects legacy Codex Hook rows', () => {
     const file = stateFile({
       '%1': { ...rec('stop', { session_id: 'cx', transcript_path: '/tmp/codex.jsonl', cwd: '/x' }), agent: 'codex', bindingVersion: 2 },
       '%2': rec('stop', { session_id: 'cc', transcript_path: '/tmp/claude.jsonl', cwd: '/y' }),
     });
     const events = createClaudeEvents({ commands: {}, push: null, file });
-    expect(events.paneSession('%1')).toEqual({ sessionId: 'cx', transcriptPath: '/tmp/codex.jsonl', cwd: '/x', agent: 'codex', bindingVersion: 2 });
+    expect(events.paneSession('%1')).toBeNull();
+    expect(events.paneAgent('%1')).toBeNull();
     expect(events.paneSession('%2')).toEqual({ sessionId: 'cc', transcriptPath: '/tmp/claude.jsonl', cwd: '/y', agent: undefined });
   });
 });
@@ -514,10 +515,9 @@ describe('createClaudeEvents push (需要你 / 已完成 transitions, mirroring 
   });
 });
 
-describe('createClaudeEvents with a Codex-tagged pane (agent dispatch, Claude-parity hooks)', () => {
+describe('createClaudeEvents with Codex App Server state', () => {
   const cdone = (msg, ts) => ({ ts, src: 'stop', host: 'h', payload: { last_assistant_message: msg }, agent: 'codex' });
-  const cwork = (prompt, ts) => ({ ts, src: 'prompt', host: 'h', payload: { prompt }, agent: 'codex' });
-  // Real codex pane_current_command is "node" (the launcher stays foreground) — must NOT be pruned.
+  // Some Codex launchers leave pane_current_command as node; process inspection identifies presence only.
   const liveCodex = (ids, cmd = 'node') => ids.map((id) => ({ id, cmd, tty: '/dev/ttys030', session: 'proj', window: '@5', windowName: 'dev' }));
   const codexRun = async (cmd, args) => {
     if (cmd === 'ps') return 'ttys030 501 S+\nttys030 502 R+';
@@ -529,34 +529,15 @@ describe('createClaudeEvents with a Codex-tagged pane (agent dispatch, Claude-pa
     return '';
   };
 
-  it("keeps a codex pane whose command is the node launcher (not pruned as non-codex)", async () => {
-    const file = stateFile({ '%1': cdone('ok', 1000) });
-    const states = await createClaudeEvents({ commands: { listLivePanes: async () => liveCodex(['%1'], 'node') }, push: { sendToSession: async () => ({}) }, file, run: codexRun }).getStates();
-    expect(states['%1']).toMatchObject({ kind: 'done', msg: 'ok' });
-  });
-
-  it("classifies codex hook verbs (prompt→working, stop→done) and prunes when the pane isn't running codex", async () => {
-    expect((await createClaudeEvents({ commands: { listLivePanes: async () => liveCodex(['%1']) }, push: { sendToSession: async () => ({}) }, file: stateFile({ '%1': cwork('do it', Date.now()) }), run: codexRun }).getStates())['%1'])
-      .toMatchObject({ kind: 'working', msg: 'do it', session: 'proj' });
-    const file = stateFile({ '%1': cdone('built it', 1000) });
-    expect((await createClaudeEvents({ commands: { listLivePanes: async () => liveCodex(['%1']) }, push: { sendToSession: async () => ({}) }, file, run: codexRun }).getStates())['%1'])
-      .toMatchObject({ kind: 'done', msg: 'built it', session: 'proj', agent: 'codex' }); // agent surfaced for the UI logo
-    // pane flipped back to the shell → codex no longer foreground → pruned (procName mismatch, not 'claude')
-    const shellPane = { listLivePanes: async () => [{ id: '%1', cmd: 'zsh', session: 'proj', window: '@5', windowName: 'dev' }] };
-    expect(await createClaudeEvents({ commands: shellPane, push: { sendToSession: async () => ({}) }, file }).getStates()).toEqual({});
-  });
-
-  it('re-pushes 已完成 on each new codex turn (new ts re-arms the done dedup)', async () => {
+  it('ignores legacy Codex Hook activity and exposes only neutral process presence', async () => {
     const pushed = [];
-    const push = { sendToSession: async (session, payload) => { pushed.push(payload.body); return { sent: 1 }; } };
-    const file = stateFile({ '%1': cdone('turn one', 1000) });
-    const commands = { listLivePanes: async () => liveCodex(['%1']) };
-    const ev = createClaudeEvents({ commands, push, file, run: codexRun });
-    await ev.getStates();                                                       // done#1 → push
-    await ev.getStates();                                                       // same ts → deduped
-    fs.writeFileSync(file, JSON.stringify({ '%1': cdone('turn two', 2000) }));  // new Stop, new ts
-    await ev.getStates();                                                       // done#2 → push again
-    expect(pushed).toEqual(['turn one', 'turn two']);
+    const file = stateFile({ '%1': cdone('ok', 1000) });
+    const states = await createClaudeEvents({
+      commands: { listLivePanes: async () => liveCodex(['%1'], 'node') },
+      push: { sendToSession: async (_session, payload) => { pushed.push(payload); } }, file, run: codexRun,
+    }).getStates();
+    expect(states['%1']).toMatchObject({ kind: null, msg: '', agent: 'codex' });
+    expect(pushed).toEqual([]);
   });
 
   it('uses managed App Server state instead of a stale Codex Hook row', async () => {

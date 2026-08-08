@@ -54,9 +54,8 @@ export function transcriptRoutes({
     const requested = typeof req.query.agent === 'string' && req.query.agent ? req.query.agent : null;
     const hooked = claudeEvents?.paneSession ? claudeEvents.paneSession(pane) : null;
     const bound = (claudeEvents?.paneAgent ? claudeEvents.paneAgent(pane) : null) || hooked?.agent || null;
-    // Managed Codex is verified again through its pane-owned App Server and exact thread id below. A stale
-    // Claude Hook row can legitimately remain after that pane is reused, so it must not block this safer
-    // binding path. Claude still fails closed against any conflicting Hook identity before cwd fallback.
+    // Managed Codex is verified again through its pane-owned App Server and exact thread id below. Claude
+    // still fails closed against any conflicting Hook identity before cwd fallback.
     if (requested && bound && requested !== bound && requested !== 'codex') {
       return res.status(409).json({ error: 'pane agent mismatch' });
     }
@@ -111,12 +110,7 @@ export function transcriptRoutes({
           if (!discovered?.managed) return res.json({ ...empty, unavailable: 'session-unmanaged' });
           const sessionId = discovered?.threadId || null;
           if (!sessionId) return res.json({ ...empty, unavailable: 'session-unbound' });
-          const hooked = req.chatSession;
-          const bindingCurrent = hooked?.bindingVersion === req.chatAgent.sessions?.bindingVersion
-            && hooked?.sessionId === sessionId;
-          const file = bindingCurrent && hooked?.transcriptPath
-            ? hooked.transcriptPath
-            : await findCodexRollout(codexSessions, sessionId);
+          const file = await findCodexRollout(codexSessions, sessionId);
           // A newly started thread has no rollout until its first turn. Keep the exact session binding and
           // show an empty conversation; the next poll will discover the file once Codex creates it.
           if (!file) return res.json({ ...empty, session: sessionId });

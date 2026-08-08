@@ -1,6 +1,7 @@
 import fsp from 'node:fs/promises';
 import { constants } from 'node:fs';
 import { AGENTS } from '../agents/index.js';
+import { resolveCodexRollout, sessionsDir as codexSessionsDir } from '../agents/codex.js';
 import { canonicalizeSnapshot, WORKSPACE_SCHEMA_VERSION } from './schema.js';
 
 function agentMap(agents) {
@@ -20,20 +21,63 @@ export async function readAgentBindings(stateFile, agents = AGENTS, readFile = f
   const bindings = new Map();
   for (const [paneRuntimeId, record] of Object.entries(state)) {
     if (!record || typeof record !== 'object' || Array.isArray(record)) continue;
-    const id = record.agent === undefined ? 'claude' : record.agent;
-    if (typeof id !== 'string' || !known.has(id)) continue;
+    // This is the Claude Hook state file. Legacy Codex-tagged rows are deliberately ignored; managed
+    // Codex identity belongs to App Server and must not be reconstructed from the removed Hook path.
+    if (record.agent !== undefined && record.agent !== 'claude') continue;
+    const id = 'claude';
+    if (!known.has(id)) continue;
     const payload = record.payload;
     if (!payload || typeof payload !== 'object' || Array.isArray(payload)) continue;
     const sessionId = payload.session_id;
     const transcriptPath = payload.transcript_path;
     const driver = known.get(id);
-    if (driver.sessions?.bindingVersion && record.bindingVersion !== driver.sessions.bindingVersion) continue;
     if (!driver.sessions?.isId(sessionId) || typeof transcriptPath !== 'string' || !transcriptPath) continue;
     try {
       await access(transcriptPath, constants.R_OK);
       if (!(await stat(transcriptPath)).isFile()) continue;
     } catch { continue; }
     bindings.set(paneRuntimeId, { id, sessionId, transcriptPath });
+  }
+  return bindings;
+}
+
+function topologyPanes(topology) {
+  return topology.windows.flatMap((window) => window.panes);
+}
+
+export async function readManagedCodexBindings(topology, {
+  codexApp,
+  codexSessions = codexSessionsDir(),
+  agents = AGENTS,
+  findRollout = resolveCodexRollout,
+  access = fsp.access,
+  stat = fsp.stat,
+} = {}) {
+  if (typeof codexApp?.discover !== 'function') return new Map();
+  const panes = topologyPanes(topology);
+  const discovered = new Map(await Promise.all(panes.map(async (pane) => {
+    try {
+      const state = await codexApp.discover(pane.runtimeId);
+      return [pane.runtimeId, state?.managed ? state.threadId : null];
+    } catch {
+      return [pane.runtimeId, null];
+    }
+  })));
+
+  const driver = agents.find((agent) => agent.id === 'codex');
+  if (!driver) return new Map();
+  const bindings = new Map();
+  for (const pane of panes) {
+    const sessionId = discovered.get(pane.runtimeId);
+    if (!driver.sessions?.isId(sessionId)) continue;
+    let transcriptPath;
+    try {
+      transcriptPath = await findRollout(codexSessions, sessionId);
+      if (typeof transcriptPath !== 'string' || !transcriptPath) continue;
+      await access(transcriptPath, constants.R_OK);
+      if (!(await stat(transcriptPath)).isFile()) continue;
+    } catch { continue; }
+    bindings.set(pane.runtimeId, { id: 'codex', sessionId, transcriptPath });
   }
   return bindings;
 }
@@ -60,6 +104,9 @@ export async function captureWorkspace({
   readFile = fsp.readFile,
   access = fsp.access,
   stat = fsp.stat,
+  codexApp,
+  codexSessions = codexSessionsDir(),
+  findCodexRollout = resolveCodexRollout,
   now = Date.now,
 }) {
   try {
@@ -68,6 +115,10 @@ export async function captureWorkspace({
     const topology = await tmux.captureTopology();
     if (!topology || topology.status === 'unknown') return { status: 'unknown' };
     const bindings = await readAgentBindings(stateFile, agents, readFile, access, stat);
+    const managedCodex = await readManagedCodexBindings(topology, {
+      codexApp, codexSessions, agents, findRollout: findCodexRollout, access, stat,
+    });
+    for (const [pane, binding] of managedCodex) bindings.set(pane, binding);
     const after = await tmux.topologyFingerprint();
     if (isUnknownFingerprint(after)) return { status: 'unknown' };
     if (before !== after) return { status: 'changed-during-capture' };

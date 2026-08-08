@@ -8,7 +8,7 @@ import { createApiRouter } from './httpApi.js';
 import { loadUploadExts } from './uploadTypes.js';
 import { createClaudeEvents } from './claudeEvents.js';
 import { syncHooks } from './cli/claudeHooks.js';
-import { syncCodexHooks } from './cli/codexHooks.js';
+import { removeLegacyCodexHooks } from './cli/legacyCodexHooks.js';
 import { claudeStatePath } from './cli/state.js';
 import * as commands from './tmux/commands.js';
 import * as push from './push.js';
@@ -53,12 +53,14 @@ const observeEnvironment = createEnvironmentProvider({
   },
 });
 const stateFile = process.env.CLAUDE_STATE_FILE || claudeStatePath(home);
+let codexApp = null;
 const workspaceBackground = createWorkspaceBackground({
   store: workspaceStore,
   tmux: workspaceTmux,
   observeEnvironment,
   lock: workspaceLock,
   stateFile,
+  getCodexApp: () => codexApp,
 });
 const workspace = createWorkspaceRuntime({
   store: workspaceStore,
@@ -68,10 +70,10 @@ const workspace = createWorkspaceRuntime({
   home,
 });
 
-// Claude/legacy Codex states come from Hooks; managed Codex states come directly from App Server. Both
-// feed the same inbox and push pass so the phone sees one authoritative state per pane.
+// Claude states come from Hooks; Codex states come only from App Server. Both feed the same inbox and
+// workspace checkpointer, but no Codex Hook state is accepted as a fallback.
 let events = null;
-const codexApp = createCodexAppServer({
+codexApp = createCodexAppServer({
   home,
   onStateChange: () => {
     if (!events) return;
@@ -93,12 +95,9 @@ try {
     stateFile,
   });
 } catch { /* best effort — hook sync never fails startup */ }
-try {
-  syncCodexHooks(home, {
-    srcDir: path.resolve(here, '../hooks'),
-    stateFile,
-  });
-} catch { /* best effort — hook sync never fails startup */ }
+// Versions before App Server support installed a marked Handmux block under ~/.codex. Remove only that
+// exact legacy block and Handmux-owned files; all user Codex configuration and third-party hooks remain.
+try { removeLegacyCodexHooks(home); } catch { /* best effort — migration never fails startup */ }
 
 // Static directory preview remains for folders without a web server. Arbitrary sites and local ports
 // use the built-in browser below; previewDomain may provide its dedicated public origin.

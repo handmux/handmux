@@ -41,7 +41,7 @@ export function useTranscript(pane, enabled, agent = 'claude', refreshToken = nu
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [session, setSession] = useState(null); // the session id `messages` belong to (ChatView's echo dedup)
   const [loaded, setLoaded] = useState(false); // has the FIRST response landed? (loading vs genuinely empty)
-  const [unavailable, setUnavailable] = useState(null); // safe refusal, e.g. a Codex pane without exact hook binding
+  const [unavailable, setUnavailable] = useState(null); // safe refusal, e.g. an unmanaged Codex pane
   const [unavailableDetail, setUnavailableDetail] = useState(null);
   const hashRef = useRef('');
   const oldestKRef = useRef(null);

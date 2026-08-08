@@ -1,9 +1,7 @@
 #!/bin/sh
 # handmux 上报 hook. $1 = stop | notify | prompt | end | resume | permreq | compacting | compact | stopfail.
 # (compacting/compact/stopfail 是版本门控事件:PreCompact/PostCompact/StopFailure，只在够新的 Claude 上注册。)
-# $2 = agent id(留空=claude;
-# Codex 传 'codex')—— Claude 与 Codex 的 hook payload 字段一致(stdin JSON),所以共用这一个脚本。
-# stdin = agent 原始 payload(JSON).
+# stdin = Claude Code 原始 payload(JSON).
 # (resume  = PostToolUse on AskUserQuestion/ExitPlanMode:答完选项/批准计划 → 状态翻回进行中、带所选项。)
 # (permreq = PermissionRequest:真实弹框一出现就发、带 tool_name → 比 permission_prompt 早亮「需要你」。)
 # 只做一件事:把本次事件写进一个本地 JSON 状态文件(键=tmux pane,值=该 pane 最新事件)。不联网、
@@ -20,5 +18,5 @@ TS=$(perl -MTime::HiRes -e 'printf "%.0f", Time::HiRes::time()*1000' 2>/dev/null
 HOST=$(hostname 2>/dev/null || printf '')
 # payload 经 stdin 原样流给 node(不在 shell 里转义,避免坏数据);pane 含 '%' 直接进 JSON 字段,
 # 不再进 URL → 彻底告别旧的 "%110 被 url-decode 丢弃" 那类坑。
-node "$(dirname "$0")/handmux-write.cjs" "$FILE" "$PANE" "$1" "$TS" "$HOST" "$2" 2>/dev/null || true
+node "$(dirname "$0")/handmux-write.cjs" "$FILE" "$PANE" "$1" "$TS" "$HOST" 2>/dev/null || true
 exit 0
