@@ -50,12 +50,13 @@ describe('ChatView', () => {
   it('handles a managed Codex command approval in the chat view', async () => {
     mockTranscript([]);
     vi.spyOn(api, 'answerCodexApproval').mockResolvedValue({ ok: true });
-    render(<ChatView pane="%7" agent="codex" kind="permission" codexSession={{
+    const { container } = render(<ChatView pane="%7" agent="codex" kind="permission" codexSession={{
       managed: true,
       approvals: [{ id: '91', type: 'command', command: 'npm test', cwd: '/work', decisions: ['accept', 'cancel'] }],
     }} />);
     await screen.findByText('npm test');
     expect(screen.getByText('/work')).toBeTruthy();
+    expect(container.querySelector('.codex-approval-gate .chat-gate-decisions')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: '允许一次' }));
     await waitFor(() => expect(api.answerCodexApproval).toHaveBeenCalledWith('%7', '91', 'accept'));
     expect(screen.queryByRole('button', { name: '本次会话始终允许' })).toBeNull();
