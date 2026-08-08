@@ -262,6 +262,25 @@ describe('ChatView', () => {
     expect(screen.queryByText('应用代码改动')).toBeNull();
   });
 
+  it('does not label a completed file edit as 已结束 in either the chip or detail sheet', async () => {
+    mockTranscript([{
+      k: 0, role: 'assistant', type: 'tool',
+      tool: {
+        name: 'apply_patch', input: { file_path: '/work/src/app.js' }, result: '',
+        isError: false, outcome: 'completed',
+        diff: { added: 1, removed: 0, hunks: [{ oldStart: 1, newStart: 1, lines: ['+const ready = true;'] }] },
+      },
+    }]);
+    render(<ChatView pane="%0" kind="done" />);
+    const chip = (await screen.findByText('编辑 app.js')).closest('button');
+    expect(screen.queryByText('已结束')).toBeNull();
+    fireEvent.click(chip);
+    await screen.findByText('const ready = true;');
+    expect(screen.queryByText('已结束')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: '关闭' }));
+    await waitFor(() => expect(window.history.state?.chatToolSheet).toBeFalsy());
+  });
+
   it('hides the Codex zsh launch wrapper in command chips and details', async () => {
     mockTranscript([{
       k: 0, role: 'assistant', type: 'tool',

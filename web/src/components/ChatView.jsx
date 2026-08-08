@@ -90,6 +90,9 @@ function toolIcon(name) {
   return <WrenchIcon />;
 }
 
+const FILE_EDIT_TOOLS = new Set(['Edit', 'MultiEdit', 'Write', 'NotebookEdit', 'apply_patch']);
+const isFileEditTool = (tool) => FILE_EDIT_TOOLS.has(tool?.name);
+
 // Three-dot pulse, reused by both the typing bubble and the running-tool head's trailing indicator.
 function TypingDots() {
   return (
@@ -139,6 +142,7 @@ function ToolBody({ tool }) {
 // returned normally. This keeps the live projection identical to a thread restored after restart.
 function ToolStatus({ tool }) {
   if (tool.outcome === 'declined') return <span className="chat-tool-status neutral" aria-label="已拒绝">已拒绝</span>;
+  if (tool.outcome === 'completed' && isFileEditTool(tool)) return null;
   if (tool.outcome === 'completed') return <span className="chat-tool-status neutral" aria-label="已结束">已结束</span>;
   if (tool.isError) return <span className="chat-tool-status err" aria-label="失败"><XIcon /></span>;
   const hasDiffStat = tool.diff && (tool.diff.added || tool.diff.removed);
@@ -245,6 +249,7 @@ function DiffView({ hunks }) {
 function toolState(tool, running) {
   if (running) return { txt: '执行中', cls: 'run' };
   if (tool.outcome === 'declined') return { txt: '已拒绝', cls: 'idle' };
+  if (tool.outcome === 'completed' && isFileEditTool(tool)) return null;
   if (tool.outcome === 'completed') return { txt: '已结束', cls: 'idle' };
   if (tool.isError) return { txt: '失败', cls: 'err' };
   if (tool.outcome === 'success' || (tool.outcome == null && tool.result != null)) return { txt: '成功', cls: 'ok' };
@@ -271,7 +276,7 @@ function EditSheetBody({ tool, running }) {
       <div className="tool-sheet-body es-body">
         <div className="es-meta">
           <span className="tool-sheet-mode-val">{toolMode(tool.name)}</span>
-          <span className={'tool-sheet-state ' + st.cls}>{st.txt}</span>
+          {st && <span className={'tool-sheet-state ' + st.cls}>{st.txt}</span>}
           <DiffStat diff={tool.diff} />
         </div>
         {hunks && hunks.length
@@ -314,7 +319,7 @@ function ToolSheet({ tool, running, onClose }) {
                 <div className="tool-sheet-label">执行模式</div>
                 <div className="tool-sheet-mode-row">
                   <span className="tool-sheet-mode-val">{toolMode(tool.name)}</span>
-                  <span className={'tool-sheet-state ' + st.cls}>{st.txt}</span>
+                  {st && <span className={'tool-sheet-state ' + st.cls}>{st.txt}</span>}
                 </div>
               </section>
               {cmd && (
