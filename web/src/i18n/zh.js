@@ -313,7 +313,6 @@ export default {
 'chat.config.loadFailed': '无法获取模型列表',
 'chat.config.refresh': '刷新模型列表',
 'chat.config.saveFailed': '设置没有保存成功',
-'chat.config.appliesNext': '模型、思考强度和 Fast 均从下一条消息生效',
 'chat.config.nextTurn': '当前回复不变，下条消息生效',
 'chat.goal.title': '任务目标',
 'chat.goal.objective': '目标内容',
