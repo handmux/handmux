@@ -10,12 +10,11 @@ const cap = (value, limit) => {
   return text.length > limit ? `${text.slice(0, limit)}…` : text;
 };
 
-// Codex persists its injected context as role=user response items. Most begin with an XML wrapper, but
-// repository instructions begin with this Markdown header before their <INSTRUCTIONS> body. Match the full
-// generated envelope so an ordinary user message that merely mentions "instructions" remains visible.
+// Codex persists its injected context as role=user response items. Match only its reserved envelope roots:
+// user prompts may legitimately begin with ordinary HTML/XML and must remain part of the conversation.
 export function isCodexSyntheticUserText(value) {
   const text = String(value ?? '');
-  return /^\s*</.test(text)
+  return /^\s*<(?:environment_context|permissions(?:\s+instructions)?|collaboration_mode|apps_instructions|plugins_instructions|skills_instructions|recommended_plugins|user_action|user_shell_command|image|turn_aborted)(?:\s|>|\/)/.test(text)
     || /^\s*# AGENTS\.md instructions for [^\r\n]+\r?\n\s*<INSTRUCTIONS>(?:\r?\n|$)/.test(text);
 }
 
@@ -360,6 +359,28 @@ export function createCodexTranscriptParser() {
           targets[0].tool.result = output.result;
           targets[0].tool.isError = output.isError;
           targets[0].tool.outcome = output.outcome;
+          pending.delete(item.call_id);
+        }
+        continue;
+      }
+
+      if (item.type === 'tool_search_call') {
+        const message = toolMessage(i, ts, 'tool_search', parseInput(item.arguments));
+        if (item.status && item.status !== 'in_progress') {
+          message.tool.result = '';
+          message.tool.isError = item.status === 'failed';
+          message.tool.outcome = item.status === 'failed' ? 'failed' : 'success';
+        }
+        messages.push(message);
+        if (item.call_id) pending.set(item.call_id, [message]);
+        continue;
+      }
+      if (item.type === 'tool_search_output') {
+        const targets = item.call_id && pending.get(item.call_id);
+        if (targets?.length === 1) {
+          targets[0].tool.result = outputText(item.tools);
+          targets[0].tool.isError = item.status === 'failed';
+          targets[0].tool.outcome = item.status === 'failed' ? 'failed' : 'success';
           pending.delete(item.call_id);
         }
         continue;

@@ -54,8 +54,13 @@ export function transcriptRoutes({
     const requested = typeof req.query.agent === 'string' && req.query.agent ? req.query.agent : null;
     const hooked = claudeEvents?.paneSession ? claudeEvents.paneSession(pane) : null;
     const bound = (claudeEvents?.paneAgent ? claudeEvents.paneAgent(pane) : null) || hooked?.agent || null;
-    if (requested && bound && requested !== bound) return res.status(409).json({ error: 'pane agent mismatch' });
-    const id = bound || requested || 'claude';
+    // Managed Codex is verified again through its pane-owned App Server and exact thread id below. A stale
+    // Claude Hook row can legitimately remain after that pane is reused, so it must not block this safer
+    // binding path. Claude still fails closed against any conflicting Hook identity before cwd fallback.
+    if (requested && bound && requested !== bound && requested !== 'codex') {
+      return res.status(409).json({ error: 'pane agent mismatch' });
+    }
+    const id = requested === 'codex' ? 'codex' : (bound || requested || 'claude');
     const agent = AGENTS.find((candidate) => candidate.id === id);
     if (!agent || (agent.id !== 'codex' && !agent.transcript?.createParser)) {
       return res.status(409).json({ error: 'chat lens unsupported for this agent' });

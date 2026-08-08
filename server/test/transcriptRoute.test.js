@@ -173,6 +173,22 @@ describe('GET /api/transcript', () => {
     expect(body.unavailable).toBeUndefined();
   });
 
+  it('uses the exact managed Codex binding despite a stale Claude Hook row on the reused pane', async () => {
+    const app = express();
+    app.use(transcriptRoutes({
+      commands: {},
+      codexApp: { discover: vi.fn(async () => ({ managed: true, threadId: 'thread-new' })) },
+      claudeEvents: {
+        paneAgent: () => 'claude',
+        paneSession: () => ({ agent: 'claude', sessionId: 'stale-claude', transcriptPath: '/stale.jsonl' }),
+      },
+    }));
+
+    const { status, body } = await call(app, '/transcript?pane=%251&agent=codex');
+    expect(status).toBe(200);
+    expect(body).toMatchObject({ messages: [], session: 'thread-new', hasMore: false });
+  });
+
   it('resolves the new exact rollout after /clear instead of reading a stale Hook path', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-route-clear-'));
     const sessionId = 'aaaaaaaa-0000-4000-8000-000000000004';

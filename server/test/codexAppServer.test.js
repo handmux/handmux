@@ -31,7 +31,7 @@ function fixtureThread(status = { type: 'idle' }) {
 
 function fakeProxy({
   empty = false, loaded = ['thread-1'], updatedAt = {}, status = { type: 'idle' }, readThread = null,
-  resumeThread = null, turnStartWait = null,
+  resumeThread = null, turnStartWait = null, parentThreadIds = {},
 } = {}) {
   const ws = new EventEmitter();
   ws.readyState = 0;
@@ -59,7 +59,10 @@ function fakeProxy({
       } });
     } else if (message.method === 'thread/read') {
       const thread = message.params.includeTurns !== false && readThread ? readThread(message.params.threadId) : fixtureThread();
-      reply({ jsonrpc: '2.0', id: message.id, result: { thread: { ...thread, id: message.params.threadId, updatedAt: updatedAt[message.params.threadId] } } });
+      reply({ jsonrpc: '2.0', id: message.id, result: { thread: {
+        ...thread, id: message.params.threadId, updatedAt: updatedAt[message.params.threadId],
+        parentThreadId: parentThreadIds[message.params.threadId] ?? null,
+      } } });
     } else if (message.method === 'turn/start') {
       persisted = true;
       const finish = () => reply({ jsonrpc: '2.0', id: message.id, result: { turn: { id: 'turn-2', status: 'inProgress', items: [] } } });
@@ -360,6 +363,53 @@ describe('Codex App Server client', () => {
     app.close();
   });
 
+  it('resumes a retained queue when a successful completion happened during reconnect', async () => {
+    const first = fakeProxy();
+    const completed = fixtureThread({ type: 'idle' });
+    completed.turns[0].status = 'completed';
+    let second;
+    let connectCount = 0;
+    const app = createCodexAppServer({
+      home: '/home/test', exists: () => true,
+      connect: () => {
+        if (connectCount++ === 0) return first.ws;
+        second = fakeProxy({ resumeThread: () => completed });
+        return second.ws;
+      },
+    });
+    await app.status('%1', 'thread-1');
+    first.push({
+      jsonrpc: '2.0', method: 'turn/started',
+      params: { threadId: 'thread-1', turn: { id: 'turn-live', status: 'inProgress', items: [] } },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await app.send('%1', 'thread-1', 'continue after reconnect');
+    expect((await app.status('%1', 'thread-1')).queue).toHaveLength(1);
+
+    first.ws.close();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(await app.status('%1', 'thread-1')).toMatchObject({ lastTurn: { status: 'completed' } });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(second.sent).toContainEqual(expect.objectContaining({
+      method: 'turn/start',
+      params: { threadId: 'thread-1', input: [{ type: 'text', text: 'continue after reconnect' }] },
+    }));
+    expect((await app.status('%1', 'thread-1')).queue).toEqual([]);
+    app.close();
+  });
+
+  it('restores a failed last-turn status from the App Server snapshot', async () => {
+    const failed = fixtureThread({ type: 'idle' });
+    failed.turns[0].status = 'failed';
+    const proxy = fakeProxy({ resumeThread: () => failed });
+    const app = createCodexAppServer({ home: '/home/test', exists: () => true, connect: () => proxy.ws });
+
+    expect(await app.status('%1', 'thread-1')).toMatchObject({ lastTurn: { status: 'failed' } });
+    expect(proxy.sent.filter((message) => message.method === 'turn/start')).toEqual([]);
+    app.close();
+  });
+
   it('answers additional-permission approvals with the requested profile and selected scope', async () => {
     const proxy = fakeProxy();
     const app = createCodexAppServer({ home: '/home/test', exists: () => true, connect: () => proxy.ws });
@@ -420,6 +470,9 @@ describe('Codex App Server client', () => {
         approvalPolicy: 'on-request', approvalsReviewer: 'user', sandbox: 'workspace-write',
         runtimeWorkspaceRoots: ['/work', '/shared'],
       }),
+    }));
+    expect(proxy.sent).toContainEqual(expect.objectContaining({
+      method: 'thread/settings/update', params: { threadId: 'thread-clear', effort: 'high' },
     }));
     expect((await app.discover('%1')).threadId).toBe('thread-clear');
     app.close();
@@ -593,11 +646,58 @@ describe('Codex App Server client', () => {
     app.close();
   });
 
+  it('keeps resume-only settings when App Server publishes its settings snapshot', async () => {
+    const proxy = fakeProxy();
+    const app = createCodexAppServer({ home: '/home/test', exists: () => true, connect: () => proxy.ws });
+    await app.status('%1', 'thread-1');
+    proxy.push({
+      jsonrpc: '2.0', method: 'thread/settings/updated',
+      params: {
+        threadId: 'thread-1',
+        threadSettings: {
+          model: 'gpt-new', effort: 'medium', cwd: '/work', approvalPolicy: 'on-request',
+          approvalsReviewer: 'user', sandboxPolicy: { type: 'workspaceWrite' },
+        },
+      },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(await app.status('%1', 'thread-1')).toMatchObject({
+      settings: { model: 'gpt-new', effort: 'medium', runtimeWorkspaceRoots: ['/work', '/shared'] },
+    });
+    app.close();
+  });
+
   it('chooses the newest loaded thread after a server restart', async () => {
     const proxy = fakeProxy({ loaded: ['thread-old', 'thread-new'], updatedAt: { 'thread-old': 10, 'thread-new': 20 } });
     const app = createCodexAppServer({ home: '/home/test', exists: () => true, connect: () => proxy.ws });
     expect(await app.discover('%1')).toEqual({ managed: true, threadId: 'thread-new' });
     expect(proxy.sent).toContainEqual(expect.objectContaining({ method: 'thread/read', params: { threadId: 'thread-new', includeTurns: false } }));
+    app.close();
+  });
+
+  it('keeps the root conversation when a newer collaboration child is also loaded', async () => {
+    const proxy = fakeProxy({
+      loaded: ['thread-root', 'thread-child'],
+      updatedAt: { 'thread-root': 10, 'thread-child': 20 },
+      parentThreadIds: { 'thread-child': 'thread-root' },
+    });
+    const app = createCodexAppServer({ home: '/home/test', exists: () => true, connect: () => proxy.ws });
+    expect(await app.discover('%1')).toEqual({ managed: true, threadId: 'thread-root' });
+    app.close();
+  });
+
+  it('does not let a collaboration child thread replace the pane conversation', async () => {
+    const proxy = fakeProxy();
+    const app = createCodexAppServer({ home: '/home/test', exists: () => true, connect: () => proxy.ws });
+    expect((await app.discover('%1')).threadId).toBe('thread-1');
+
+    proxy.push({
+      jsonrpc: '2.0', method: 'thread/started',
+      params: { thread: { id: 'thread-child', parentThreadId: 'thread-1' } },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect((await app.discover('%1')).threadId).toBe('thread-1');
     app.close();
   });
 

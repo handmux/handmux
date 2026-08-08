@@ -629,7 +629,10 @@ class CodexAppConnection {
         void this.drainQueue(params.threadId).catch(() => {});
       }
     } else if (message.method === 'thread/settings/updated') {
-      this.state(params.threadId).settings = params.threadSettings || null;
+      const state = this.state(params.threadId);
+      state.settings = params.threadSettings
+        ? { ...(state.settings || {}), ...params.threadSettings }
+        : state.settings;
     } else if (message.method === 'thread/tokenUsage/updated') {
       this.state(params.threadId).contextUsage = contextUsageFromNotification(params.tokenUsage);
     } else if (message.method === 'thread/compacted') {
@@ -637,11 +640,16 @@ class CodexAppConnection {
       if (this.isCurrentThread(params.threadId)) this.setInbox(null, '', `thread:${params.threadId}:compacted`);
       void this.drainQueue(params.threadId).catch(() => {});
     } else if (message.method === 'thread/started') {
-      const previous = this.currentThreadId;
-      this.lastStartedThreadId = params.thread?.id || params.threadId || null;
-      this.currentThreadId = this.lastStartedThreadId;
-      if (previous && previous !== this.lastStartedThreadId) {
-        this.setInbox(null, '', `thread:${this.lastStartedThreadId || 'unknown'}:started`);
+      const startedThreadId = params.thread?.id || params.threadId || null;
+      // Collaboration child threads share this App Server connection. They are independent work, not a
+      // replacement for the root TUI conversation represented by this pane.
+      if (startedThreadId && params.thread?.parentThreadId == null) {
+        const previous = this.currentThreadId;
+        this.lastStartedThreadId = startedThreadId;
+        this.currentThreadId = startedThreadId;
+        if (previous && previous !== startedThreadId) {
+          this.setInbox(null, '', `thread:${startedThreadId}:started`);
+        }
       }
     }
     this.bump(params.threadId);
@@ -749,7 +757,7 @@ class CodexAppConnection {
   }
 
   async drainQueue(threadId) {
-    this.assertCurrentThread(threadId);
+    await this.assertCurrentThread(threadId);
     const queue = this.queueState(threadId, false);
     if (!queue?.items.length || queue.draining || queue.starting || this.activeTurn(threadId)
       || this.state(threadId).status?.type === 'active') return;
@@ -809,12 +817,11 @@ class CodexAppConnection {
   }
 
   isCurrentThread(threadId) {
-    if (!threadId) return false;
-    if (!this.currentThreadId) this.currentThreadId = threadId;
-    return this.currentThreadId === threadId;
+    return !!threadId && this.currentThreadId === threadId;
   }
 
-  assertCurrentThread(threadId) {
+  async assertCurrentThread(threadId) {
+    if (!this.currentThreadId) await this.discoverThread();
     if (!this.isCurrentThread(threadId)) throw new Error('Codex session changed');
   }
 
@@ -910,6 +917,8 @@ class CodexAppConnection {
       const resumedPrompt = state.activeTurnId
         ? turnPrompt((result.thread?.turns || []).find((turn) => turn.id === state.activeTurnId))
         : '';
+      const last = [...(result.thread?.turns || [])].reverse().find((turn) => turn.status !== 'inProgress') || null;
+      state.lastTurn = last;
       const samePendingTurn = state.activeTurnId
         && (!previousActiveTurnId || previousActiveTurnId === state.activeTurnId);
       state.activePrompt = resumedPrompt || (samePendingTurn ? previousActivePrompt : '');
@@ -919,12 +928,17 @@ class CodexAppConnection {
         if (kind) {
           this.setInbox(kind, activeTurnPrompt(state), `status:${threadId}:${kind}`);
         } else {
-          const last = [...(result.thread?.turns || [])].reverse().find((turn) => turn.status !== 'inProgress');
           if (last?.status === 'completed' || last?.status === 'failed') {
             const completedAt = typeof last.completedAt === 'number' ? last.completedAt * 1000 : undefined;
             this.setInbox('done', turnSummary(last) || turnPrompt(last), `turn:${last.id}:${last.status}`, completedAt);
           }
         }
+      }
+      // The completion event may have happened while this WebSocket was disconnected. Resume a retained
+      // next-turn queue only when the durable snapshot proves the previous turn completed successfully.
+      if (state.status?.type === 'idle' && last?.status === 'completed'
+        && this.queueState(threadId, false)?.items.length) {
+        queueMicrotask(() => { void this.drainQueue(threadId).catch(() => {}); });
       }
     } catch (error) {
       // A newly opened TUI thread is authoritative but has no rollout until its first turn. It cannot yet
@@ -967,17 +981,28 @@ class CodexAppConnection {
   async discoverThread() {
     if (this.currentThreadId) return this.currentThreadId;
     const loaded = await this.loadedThreads();
-    if (this.lastStartedThreadId && loaded.includes(this.lastStartedThreadId)) return this.lastStartedThreadId;
-    if (loaded.length <= 1) return loaded[0] || null;
+    if (this.lastStartedThreadId && loaded.includes(this.lastStartedThreadId)) {
+      this.currentThreadId = this.lastStartedThreadId;
+      return this.currentThreadId;
+    }
+    if (!loaded.length) return null;
     const threads = await Promise.all(loaded.map(async (threadId, index) => {
       try {
         const result = await this.rpc('thread/read', { threadId, includeTurns: false });
         const thread = result?.thread || {};
-        return { threadId, order: Number(thread.updatedAt ?? thread.createdAt ?? index) };
-      } catch { return { threadId, order: index }; }
+        return {
+          threadId,
+          order: Number(thread.updatedAt ?? thread.createdAt ?? index),
+          root: thread.parentThreadId == null,
+          known: true,
+        };
+      } catch { return { threadId, order: index, root: false, known: false }; }
     }));
-    threads.sort((a, b) => b.order - a.order);
-    return threads[0]?.threadId || null;
+    const roots = threads.filter((thread) => thread.root);
+    const candidates = roots.length ? roots : threads.filter((thread) => !thread.known);
+    candidates.sort((a, b) => b.order - a.order);
+    this.currentThreadId = candidates[0]?.threadId || null;
+    return this.currentThreadId;
   }
 
   approvalsFor(threadId) {
@@ -1142,6 +1167,7 @@ export function createCodexAppServer({
     async status(pane, threadId) {
       const client = await connection(pane);
       if (!client) return { managed: false };
+      await client.assertCurrentThread(threadId);
       const state = await client.ensureThread(threadId);
       return {
         managed: true,
@@ -1162,25 +1188,25 @@ export function createCodexAppServer({
     async send(pane, threadId, text) {
       const client = await connection(pane);
       if (!client) throw new Error('Codex session is not managed by Handmux');
-      client.assertCurrentThread(threadId);
+      await client.assertCurrentThread(threadId);
       return client.submit(threadId, text);
     },
     async steerQueued(pane, threadId, itemId) {
       const client = await connection(pane);
       if (!client) throw new Error('Codex session is not managed by Handmux');
-      client.assertCurrentThread(threadId);
+      await client.assertCurrentThread(threadId);
       return client.steerQueued(threadId, itemId);
     },
     async removeQueued(pane, threadId, itemId) {
       const client = await connection(pane);
       if (!client) throw new Error('Codex session is not managed by Handmux');
-      client.assertCurrentThread(threadId);
+      await client.assertCurrentThread(threadId);
       return client.removeQueued(threadId, itemId);
     },
     async compact(pane, threadId) {
       const client = await connection(pane);
       if (!client) throw new Error('Codex session is not managed by Handmux');
-      client.assertCurrentThread(threadId);
+      await client.assertCurrentThread(threadId);
       const state = await client.ensureThread(threadId);
       const result = await client.rpc('thread/compact/start', { threadId });
       state.status = { type: 'active', activeFlags: [] };
@@ -1191,7 +1217,7 @@ export function createCodexAppServer({
     async clear(pane, threadId) {
       const client = await connection(pane);
       if (!client) throw new Error('Codex session is not managed by Handmux');
-      client.assertCurrentThread(threadId);
+      await client.assertCurrentThread(threadId);
       const current = await client.ensureThread(threadId);
       const result = await client.rpc('thread/start', clearThreadParams(current.settings));
       const nextThreadId = result.thread?.id;
@@ -1206,6 +1232,15 @@ export function createCodexAppServer({
       client.subscribed.add(nextThreadId);
       client.lastStartedThreadId = nextThreadId;
       client.currentThreadId = nextThreadId;
+      if (current.settings?.effort != null) {
+        try {
+          await client.rpc('thread/settings/update', { threadId: nextThreadId, effort: current.settings.effort });
+          next.settings = { ...next.settings, effort: current.settings.effort };
+        } catch {
+          // Older App Server builds may not support per-thread effort updates. The new thread remains valid
+          // with the effort reported by thread/start, so do not turn a successful /clear into a retry loop.
+        }
+      }
       client.discardQueue(threadId);
       client.setInbox(null, '', `thread:${nextThreadId}:started`);
       return { threadId: nextThreadId };
@@ -1213,7 +1248,7 @@ export function createCodexAppServer({
     async models(pane, threadId) {
       const client = await connection(pane);
       if (!client) throw new Error('Codex session is not managed by Handmux');
-      client.assertCurrentThread(threadId);
+      await client.assertCurrentThread(threadId);
       await client.ensureThread(threadId);
       const data = [];
       let cursor = null;
@@ -1227,7 +1262,7 @@ export function createCodexAppServer({
     async updateSettings(pane, threadId, updates) {
       const client = await connection(pane);
       if (!client) throw new Error('Codex session is not managed by Handmux');
-      client.assertCurrentThread(threadId);
+      await client.assertCurrentThread(threadId);
       const state = await client.ensureThread(threadId);
       await client.rpc('thread/settings/update', { threadId, ...updates });
       state.settings = { ...(state.settings || {}), ...updates };
@@ -1237,7 +1272,7 @@ export function createCodexAppServer({
     async interrupt(pane, threadId) {
       const client = await connection(pane);
       if (!client) throw new Error('Codex session is not managed by Handmux');
-      client.assertCurrentThread(threadId);
+      await client.assertCurrentThread(threadId);
       const state = await client.ensureThread(threadId);
       let turnId = state.activeTurnId;
       if (!turnId) {
@@ -1251,7 +1286,7 @@ export function createCodexAppServer({
     async decide(pane, threadId, requestId, decision) {
       const client = await connection(pane);
       if (!client) throw new Error('Codex session is not managed by Handmux');
-      client.assertCurrentThread(threadId);
+      await client.assertCurrentThread(threadId);
       await client.ensureThread(threadId);
       client.decide(threadId, requestId, decision);
       return { ok: true };
@@ -1259,7 +1294,7 @@ export function createCodexAppServer({
     async answerInput(pane, threadId, requestId, answers) {
       const client = await connection(pane);
       if (!client) throw new Error('Codex session is not managed by Handmux');
-      client.assertCurrentThread(threadId);
+      await client.assertCurrentThread(threadId);
       await client.ensureThread(threadId);
       client.answerInput(threadId, requestId, answers);
       return { ok: true };

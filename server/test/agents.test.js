@@ -78,6 +78,13 @@ describe('codex rollout parsing', () => {
     ].join('\n');
     expect(codexUserSnippet(tail)).toBe('refactor the parser');
   });
+  it('keeps an HTML prompt as the real user snippet', () => {
+    const tail = JSON.stringify({
+      type: 'response_item',
+      payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: '<main>fix this page</main>' }] },
+    });
+    expect(codexUserSnippet(tail)).toBe('<main>fix this page</main>');
+  });
 });
 
 // Seed a Codex rollout under the date-nested layout ~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl.

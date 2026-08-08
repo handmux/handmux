@@ -31,6 +31,18 @@ describe('Codex rollout transcript', () => {
     expect(parsed[0]).toMatchObject({ role: 'user', text: '用户问：instructions 是什么？' });
   });
 
+  it('keeps ordinary user-authored HTML and XML messages', () => {
+    const parsed = parseCodexTranscript([
+      row({ type: 'message', role: 'user', content: [{ type: 'input_text', text: '<div>修复这个布局</div>' }] }),
+      row({ type: 'message', role: 'user', content: [{ type: 'input_text', text: '<request>保留这个 XML</request>' }] }),
+    ]);
+
+    expect(parsed.map((message) => message.text)).toEqual([
+      '<div>修复这个布局</div>',
+      '<request>保留这个 XML</request>',
+    ]);
+  });
+
   it('keeps every tool in durable rollout order instead of the incomplete App Server snapshot', () => {
     const script = [
       'const first = await tools.exec_command({"cmd":"pwd"});',
@@ -56,6 +68,25 @@ describe('Codex rollout transcript', () => {
       .toEqual(['exec_command', 'web__run', 'wait']);
     expect(parsed[1].tool).toMatchObject({ input: { cmd: 'pwd' }, result: '/work', isError: false, outcome: 'success' });
     expect(parsed.at(-1)).toMatchObject({ role: 'assistant', text: '完成' });
+  });
+
+  it('renders persisted tool discovery calls and their results', () => {
+    const parsed = parseCodexTranscript([
+      row({
+        type: 'tool_search_call', call_id: 'search-1', execution: 'client', status: 'completed',
+        arguments: { query: 'calendar tools' },
+      }),
+      row({
+        type: 'tool_search_output', call_id: 'search-1', execution: 'client', status: 'completed',
+        tools: [{ type: 'tool', name: 'calendar.search', description: 'Search events' }],
+      }),
+    ]);
+
+    expect(parsed).toHaveLength(1);
+    expect(parsed[0].tool).toMatchObject({
+      name: 'tool_search', input: { query: 'calendar tools' }, isError: false, outcome: 'success',
+    });
+    expect(parsed[0].tool.result).toContain('calendar.search');
   });
 
   it('reads command details from JavaScript object arguments emitted by orchestrated tool calls', () => {
