@@ -322,6 +322,17 @@ describe('createClaudeEvents getStates (reads the hook state file)', () => {
     expect((await ev.getStates())['%1']).toMatchObject({ session: 'proj', window: '@5', agent: 'claude', kind: null });
   });
 
+  it('identifies pane agents independently of inbox state for initial navigation', async () => {
+    const panes = [
+      { id: '%1', command: 'claude', tty: '/dev/ttys001' },
+      { id: '%2', command: 'codex', tty: '/dev/ttys002' },
+      { id: '%3', command: 'zsh', tty: '/dev/ttys003' },
+    ];
+    const ev = createClaudeEvents({ commands: {}, push, file: '/no/such/file.json' });
+    expect(await ev.identifyPaneAgents(panes)).toEqual({ '%1': 'claude', '%2': 'codex' });
+    expect(panes.map((pane) => pane.command)).toEqual(['claude', 'codex', 'zsh']);
+  });
+
   it('treats a native-install version-named binary (pane_current_command = bare semver) as Claude — but ONLY with exe-path corroboration', async () => {
     const panes = liveAll(['%1'], { '%1': { cmd: '2_1_196', tty: '/dev/ttys077' } });
     const mkRun = (exe) => async (cmd) => cmd === 'lsof'

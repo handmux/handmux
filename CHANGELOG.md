@@ -7,6 +7,7 @@ All notable changes to handmux. Format follows [Keep a Changelog](https://keepac
 ### Fixed
 
 - Keep Codex turns visibly stopping until App Server confirms the interruption has completed.
+- 重新进入应用时直接恢复 Agent 的对话视图，不再先显示终端并延迟出现切换按钮。
 
 ### Added
 - Codex 托管对话输入栏新增上下文占用环，点按可查看运行状态、Token、项目、分支、权限与会话 ID。

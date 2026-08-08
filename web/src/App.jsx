@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
+import { useEffect, useLayoutEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { t } from './i18n';
 import {
   getToken, getLastSession, getLastWindow, getLastPane, remember, clearToken,
@@ -41,6 +41,7 @@ import { usePollingLoop } from './hooks/usePollingLoop.js';
 import { useServerConfig } from './hooks/useServerConfig.js';
 import { authHandled } from './authGuard.js';
 import { canUseChatLens } from './chatLensAvailability.js';
+import { currentPaneAgent, reconcilePaneAgents } from './paneAgents.js';
 
 import Drawer from './components/Drawer.jsx';
 import WindowBar from './components/WindowBar.jsx';
@@ -170,7 +171,7 @@ export default function App() {
   const [workspaceProtection, setWorkspaceProtection] = useState(null);
   const [states, setStates] = useState({}); // pane → {session,window,kind,…} from /api/states
   const [lens, setLens] = useState('terminal'); // 'terminal' | 'chat' — per-pane, remembered in localStorage
-  useEffect(() => {
+  useLayoutEffect(() => {
     setLens(localStorage.getItem('tw_lens_' + current?.paneId) || 'terminal');
   }, [current?.paneId]);
   const [orphans, setOrphans] = useState([]); // claude sessions running outside tmux (/api/orphans)
@@ -1318,7 +1319,7 @@ export default function App() {
     return () => { alive = false; document.removeEventListener('visibilitychange', onVis); };
   }, [needToken, notifInboxOpen, notifRetrySeq, handledAuth]);
 
-  const currentAgent = states[current?.paneId]?.agent;
+  const currentAgent = currentPaneAgent(current, states);
   const codexSessionWake = transcriptWake.paneId === current?.paneId ? transcriptWake.seq : 0;
   const codexSession = useCodexSession(
     current?.paneId, codexChatLensOn && currentAgent === 'codex', codexSessionWake,
@@ -1660,7 +1661,15 @@ export default function App() {
   // immediately when `bound` changes (the deps) so a bind/unbind updates the filtered roster at once.
   usePollingLoop({
     fetch: () => getStates(bound),
-    apply: (s) => setStates(s || {}),
+    apply: (s) => {
+      const next = s || {};
+      setStates(next);
+      setCurrent((value) => {
+        if (!value) return value;
+        const panes = reconcilePaneAgents(value.panes, next);
+        return panes === value.panes ? value : { ...value, panes };
+      });
+    },
     intervalMs: 5000,
     enabled: !needToken,
     deps: [bound],
@@ -1695,10 +1704,12 @@ export default function App() {
   // actually running an agent, so this is its agent.
   const windowAgents = {};
   for (const st of Object.values(states)) if (st.window && st.agent) windowAgents[st.window] = st.agent;
+  for (const pane of current?.panes || []) if (pane.agent) windowAgents[current.window.id] = pane.agent;
   // paneId → agent id, for the per-pane agent logo inside the active window's pane menu (states is keyed by
   // pane, so this is the live truth for each one; a pane not running an agent simply has no entry → no logo).
   const paneAgents = {};
   for (const [pane, st] of Object.entries(states)) if (st.agent) paneAgents[pane] = st.agent;
+  for (const pane of current?.panes || []) if (pane.agent) paneAgents[pane.id] = pane.agent;
   const changelogUnread = !!LATEST_RELEASE && clSeen !== LATEST_RELEASE;
   // The gear's dot fuses two phases of "there's something new": an available npm update (before you upgrade)
   // and, after upgrading+reloading, the unread changelog it brought. `updateDot` stays off once the user has
@@ -2039,7 +2050,7 @@ export default function App() {
             windows={current.windows}
             windowAgents={windowAgents}
             paneAgents={paneAgents}
-            currentAgent={states[current.paneId]?.agent}
+            currentAgent={currentAgent}
             currentWindowId={current.window.id}
             panes={current.panes}
             currentPaneId={current.paneId}
@@ -2128,7 +2139,7 @@ export default function App() {
               onKey={sendKey}
               onText={sendChar}
               cwd={currentPaneCwd}
-              agent={states[current.paneId]?.agent}
+              agent={currentAgent}
               windowId={current.window?.id}
               recent={recent}
               favorites={favorites}

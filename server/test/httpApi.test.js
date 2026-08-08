@@ -524,6 +524,21 @@ describe('REST API', () => {
   it('GET /panes passes through cwd', async () => {
     const res = await auth(request(appWith(baseCommands)).get('/api/panes?window=@1')).expect(200);
     expect(res.body[0].cwd).toBe('/home/u/proj');
+    expect(res.body[0]).toMatchObject({ agent: null });
+    expect(res.body[0]).not.toHaveProperty('tty');
+  });
+
+  it('GET /panes includes agent identity in the initial pane response', async () => {
+    const commands = {
+      ...baseCommands,
+      listPanes: vi.fn(async () => [{
+        id: '%1', active: true, width: 80, height: 24,
+        command: 'codex', cwd: '/home/u/proj', tty: '/dev/ttys001',
+      }]),
+    };
+    const res = await auth(request(appWith(commands)).get('/api/panes?window=@1')).expect(200);
+    expect(res.body[0]).toMatchObject({ id: '%1', command: 'codex', agent: 'codex' });
+    expect(res.body[0]).not.toHaveProperty('tty');
   });
 
   it('GET /pane-cwd returns the pane cwd', async () => {

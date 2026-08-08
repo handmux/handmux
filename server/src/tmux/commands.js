@@ -53,9 +53,9 @@ export async function listWindows(sessionId) {
 }
 
 export async function listPanes(windowId) {
-  const out = await runTmux(['list-panes', '-t', windowId, '-F', tmuxFormat(['pane_id', 'pane_active', 'pane_width', 'pane_height', 'pane_current_command', 'pane_current_path', 'pane_left', 'pane_top'])]);
-  return parseTmuxRows(out, 8, 'pane').map(([id, active, width, height, command, cwd, left, top]) => {
-    return { id, active: active === '1', width: Number(width), height: Number(height), command, cwd, left: Number(left), top: Number(top) };
+  const out = await runTmux(['list-panes', '-t', windowId, '-F', tmuxFormat(['pane_id', 'pane_active', 'pane_width', 'pane_height', 'pane_current_command', 'pane_current_path', 'pane_left', 'pane_top', 'pane_tty'])]);
+  return parseTmuxRows(out, 9, 'pane').map(([id, active, width, height, command, cwd, left, top, tty]) => {
+    return { id, active: active === '1', width: Number(width), height: Number(height), command, cwd, left: Number(left), top: Number(top), tty };
   });
 }
 

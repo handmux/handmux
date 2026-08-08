@@ -206,6 +206,22 @@ export function createClaudeEvents({
     }
   }
 
+  // Agent identity is part of pane navigation, not inbox state. Resolve it from the pane's live foreground
+  // process so the phone can choose terminal/chat during the initial /panes load instead of waiting for the
+  // slower /states reconciliation pass. Work on copies because executable corroboration normalizes `cmd`.
+  async function identifyPaneAgents(panes = []) {
+    const livePanes = panes.map((pane) => ({
+      ...pane,
+      cmd: typeof pane?.cmd === 'string' ? pane.cmd : (pane?.command || ''),
+    }));
+    try { await resolveVersionedComms(livePanes, run, commVerdicts); } catch { /* exact names still work */ }
+    try { await resolveCodexComms(livePanes, run, commVerdicts); } catch { /* exact names still work */ }
+    return Object.fromEntries(livePanes.flatMap((pane) => {
+      const agent = agentForProc(pane.cmd);
+      return agent ? [[pane.id, agent.id]] : [];
+    }));
+  }
+
   // Read the state file, reconcile every recorded pane against live tmux, and in ONE pass: (1) fire push
   // for 需要你/已完成 transitions (deduped, global — independent of any caller's session filter), and
   // (2) build the pane→state roster the inbox shows. A pane is dropped from the roster when its latest
@@ -220,12 +236,10 @@ export function createClaudeEvents({
     let managedCodex = {};
     try {
       const panes = await commands.listLivePanes();
+      const agents = await identifyPaneAgents(panes);
+      for (const pane of panes) if (agents[pane.id]) pane.cmd = agents[pane.id];
       live = new Map(panes.map((p) => [p.id, p]));
       managedCodex = codexApp?.inboxStates ? await codexApp.inboxStates(panes) : {};
-      // Normalize ambiguous commands BEFORE identity/liveness matching: native Claude may report a bare
-      // version and npm-installed Codex reports node. Both require foreground-TTY + real-executable proof.
-      try { await resolveVersionedComms(panes, run, commVerdicts); } catch { /* keep raw tmux liveness */ }
-      try { await resolveCodexComms(panes, run, commVerdicts); } catch { /* managed sockets remain authoritative */ }
     } catch { /* tmux down */ }
 
     const out = {};
@@ -380,5 +394,5 @@ export function createClaudeEvents({
     return typeof rec.agent === 'string' && rec.agent ? rec.agent : 'claude';
   }
 
-  return { getStates, start, stop, paneSession, paneAgent };
+  return { getStates, identifyPaneAgents, start, stop, paneSession, paneAgent };
 }

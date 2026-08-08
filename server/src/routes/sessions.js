@@ -3,7 +3,7 @@
 import express from 'express';
 import { isPaneId, isWindowId, isSessionId, isValidSessionName, isValidStartupCmd } from '../tmux/commands.js';
 
-export function sessionRoutes({ commands, docs, workspace }) {
+export function sessionRoutes({ commands, docs, workspace, claudeEvents }) {
   const r = express.Router();
 
   function notify(method) {
@@ -121,7 +121,12 @@ export function sessionRoutes({ commands, docs, workspace }) {
 
   r.get('/panes', async (req, res, next) => {
     if (!isWindowId(req.query.window)) return res.status(400).json({ error: 'bad window id' });
-    try { res.json(await commands.listPanes(req.query.window)); } catch (e) { next(e); }
+    try {
+      const panes = await commands.listPanes(req.query.window);
+      let agents = {};
+      try { agents = await claudeEvents?.identifyPaneAgents?.(panes) || {}; } catch { /* identity is additive */ }
+      res.json(panes.map(({ tty: _tty, ...pane }) => ({ ...pane, agent: agents[pane.id] || null })));
+    } catch (e) { next(e); }
   });
 
   // A pane's current working directory — the file browser uses it to land on (and "jump to") the
