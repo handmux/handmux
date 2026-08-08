@@ -48,6 +48,17 @@ const tokenFormatter = new Intl.NumberFormat('en-US');
 const contextRingLevel = (percent) => (percent >= 75 ? 'high' : percent >= 40 ? 'medium' : 'low');
 const UNSUPPORTED_SLASH = Symbol('unsupported slash command');
 
+function ContextRing({ percent }) {
+  const bounded = Math.min(100, Math.max(0, percent || 0));
+  return (
+    <svg className="cc-context-ring" viewBox="0 0 24 24" aria-hidden="true">
+      <circle className="cc-context-track" cx="12" cy="12" r="9" pathLength="100" />
+      <circle className="cc-context-value" cx="12" cy="12" r="9" pathLength="100"
+        strokeDasharray={`${bounded} 100`} />
+    </svg>
+  );
+}
+
 function codexActivity(session, fallbackKind) {
   const flags = Array.isArray(session?.status?.activeFlags) ? session.status.activeFlags : [];
   if (session?.activityKind === 'compacting') return { key: 'compacting', label: t('chat.status.compacting') };
@@ -252,7 +263,7 @@ export default function ChatComposer({
   const [editOpen, setEditOpen] = useState(false);
   const [configOpen, setConfigOpen] = useState(false);
   const [contextOpen, setContextOpen] = useState(false);
-  const [sessionCopied, setSessionCopied] = useState(false);
+  const [copiedStatusField, setCopiedStatusField] = useState(null);
   const [localSettings, setLocalSettings] = useState(null);
   const refreshShortcuts = () => {
     setFavs(loadFavs('agent'));
@@ -306,7 +317,6 @@ export default function ChatComposer({
   const showContextRing = managedCodex && Number.isFinite(contextUsedTokens) && contextUsedTokens >= 0
     && Number.isFinite(contextTotalTokens) && contextTotalTokens > 0;
   const contextPercent = showContextRing ? (contextUsedTokens / contextTotalTokens) * 100 : null;
-  const boundedContextPercent = Math.min(100, Math.max(0, contextPercent || 0));
   const contextLevel = showContextRing ? contextRingLevel(contextPercent) : null;
   const activity = codexActivity(codexSession, kind);
   const sessionId = codexSession?.threadId || null;
@@ -315,13 +325,13 @@ export default function ChatComposer({
   const access = sandboxLabel(managedSettings);
   const approval = approvalLabel(managedSettings?.approvalPolicy);
   useEffect(() => { if (!showContextRing) setContextOpen(false); }, [showContextRing]);
-  useEffect(() => { if (!contextOpen) setSessionCopied(false); }, [contextOpen]);
+  useEffect(() => { if (!contextOpen) setCopiedStatusField(null); }, [contextOpen]);
 
-  const copySessionId = async () => {
-    if (!sessionId || !navigator.clipboard?.writeText) return;
+  const copyStatusValue = async (valueToCopy, field) => {
+    if (!valueToCopy || !navigator.clipboard?.writeText) return;
     try {
-      await navigator.clipboard.writeText(sessionId);
-      setSessionCopied(true);
+      await navigator.clipboard.writeText(valueToCopy);
+      setCopiedStatusField(field);
       navigator.vibrate?.(8);
     } catch { /* clipboard can be unavailable outside a secure context */ }
   };
@@ -656,11 +666,7 @@ export default function ChatComposer({
               <button type="button" className={`cc-context-trigger ${contextLevel}`}
                 aria-label={t('chat.status.aria', { percent: Math.round(contextPercent) })}
                 aria-expanded={contextOpen} onClick={() => setContextOpen((open) => !open)}>
-                <svg className="cc-context-ring" viewBox="0 0 24 24" aria-hidden="true">
-                  <circle className="cc-context-track" cx="12" cy="12" r="9" pathLength="100" />
-                  <circle className="cc-context-value" cx="12" cy="12" r="9" pathLength="100"
-                    strokeDasharray={`${boundedContextPercent} 100`} />
-                </svg>
+                <ContextRing percent={contextPercent} />
               </button>
             )}
             {micAvailable && <MicButton active={recording} disabled={voice.state === 'requesting'} onToggle={toggleMic} />}
@@ -685,8 +691,12 @@ export default function ChatComposer({
                       <i aria-hidden="true" />{activity.label}
                     </span>
                   </div>
-                  <div className="cc-context-row">
-                    <span>{t('chat.context.percent')}</span><strong>{contextPercent.toFixed(1)}%</strong>
+                  <div className={`cc-context-usage ${contextLevel}`}>
+                    <ContextRing percent={contextPercent} />
+                    <div>
+                      <span>{t('chat.context.percent')}</span>
+                      <strong>{contextPercent.toFixed(1)}%</strong>
+                    </div>
                   </div>
                   <div className="cc-context-row">
                     <span>{t('chat.context.usedTotal')}</span>
@@ -694,7 +704,16 @@ export default function ChatComposer({
                   </div>
                   {workingDirectory && (
                     <div className="cc-context-row cc-context-path">
-                      <span>{t('chat.status.directory')}</span><strong>{workingDirectory}</strong>
+                      <span>{t('chat.status.directory')}</span>
+                      <div className="cc-context-path-value">
+                        <code className="cc-context-path-scroll"
+                          onPointerDown={(event) => event.stopPropagation()}>{workingDirectory}</code>
+                        <button type="button" aria-label={t('chat.status.copyDirectory')}
+                          onClick={() => void copyStatusValue(workingDirectory, 'directory')}>
+                          {copiedStatusField === 'directory'
+                            ? <small>{t('chat.status.copied')}</small> : <CopyIcon />}
+                        </button>
+                      </div>
                     </div>
                   )}
                   {gitBranch && (
@@ -716,9 +735,10 @@ export default function ChatComposer({
                     <div className="cc-context-row cc-context-session">
                       <span>{t('chat.status.sessionId')}</span>
                       <button type="button" aria-label={t('chat.status.copySession')}
-                        onClick={() => void copySessionId()}>
+                        onClick={() => void copyStatusValue(sessionId, 'session')}>
                         <code>{sessionId}</code>
-                        {sessionCopied ? <small>{t('chat.status.copied')}</small> : <CopyIcon />}
+                        {copiedStatusField === 'session'
+                          ? <small>{t('chat.status.copied')}</small> : <CopyIcon />}
                       </button>
                     </div>
                   )}
