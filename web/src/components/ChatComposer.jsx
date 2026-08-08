@@ -320,6 +320,7 @@ export default function ChatComposer({
   const [value, setValue] = useState(() => getChatDraft());
   const [submitting, setSubmitting] = useState(false);
   const [stopping, setStopping] = useState(false);
+  const [stopConfirm, setStopConfirm] = useState(false);
   const [queueAction, setQueueAction] = useState('');
   const [queueDelete, setQueueDelete] = useState(null);
   const [queueEditor, setQueueEditor] = useState(null);
@@ -413,7 +414,16 @@ export default function ChatComposer({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [serverQueueKey]);
   const quickFavs = managedCodex ? allQuickFavs.filter((fav) => fav.kind !== 'key') : allQuickFavs;
-  useEffect(() => { if (!busy) setStopping(false); }, [busy, pane]);
+  useEffect(() => {
+    setStopping(false);
+    setStopConfirm(false);
+  }, [pane]);
+  useEffect(() => {
+    if (!busy) {
+      setStopping(false);
+      setStopConfirm(false);
+    }
+  }, [busy]);
   useEffect(() => { setLocalSettings(codexSession?.settings || null); }, [pane, codexSession?.settings]);
   useEffect(() => {
     if (!managedCodex) {
@@ -775,8 +785,13 @@ export default function ChatComposer({
     if (!item) return;
     if (await actOnQueued('remove', item)) setQueueDelete(null);
   };
+  const confirmStop = () => {
+    setStopConfirm(false);
+    void stop();
+  };
   useBackButton(!!queueEditor, dismissQueueEditor);
   useBackButton(!!queueDelete, () => setQueueDelete(null));
+  useBackButton(stopConfirm, () => setStopConfirm(false));
   const onComposerKeyDown = (event) => {
     if (!desktop || event.nativeEvent?.isComposing) return;
     if (event.key === 'Escape' && busy) {
@@ -983,7 +998,7 @@ export default function ChatComposer({
             {micAvailable && <MicButton active={recording} disabled={voice.state === 'requesting'} onToggle={toggleMic} />}
             {busy && (
               <button type="button" className="cc-send cc-stop" aria-label={t('chat.stop')}
-                disabled={stopping} onClick={() => void stop()}>
+                disabled={stopping} onClick={() => setStopConfirm(true)}>
                 <StopIcon /></button>
             )}
             {(!busy || managedCodex) && (
@@ -1113,6 +1128,24 @@ export default function ChatComposer({
                 onClick={() => setQueueDelete(null)}>{t('common.cancel')}</button>
               <button type="button" className="danger" disabled={!!queueAction}
                 onClick={() => void confirmQueueDelete()}>{t('common.delete')}</button>
+            </div>
+          </div>
+        </div>,
+        document.body,
+      )}
+      {stopConfirm && createPortal(
+        <div className="settings-confirm-backdrop cc-queue-dialog-backdrop chat-tone-surface"
+          data-chat-tone={chatTone} style={{ bottom: `${Math.max(0, Number(keyboardInset) || 0)}px` }}
+          onClick={() => setStopConfirm(false)}>
+          <div className="settings-confirm" role="alertdialog" aria-modal="true"
+            aria-label={t('chat.stopTitle')} onClick={(event) => event.stopPropagation()}>
+            <h2>{t('chat.stopTitle')}</h2>
+            <p>{t('chat.stopBody')}</p>
+            <div className="settings-confirm-actions">
+              <button type="button" autoFocus disabled={stopping}
+                onClick={() => setStopConfirm(false)}>{t('common.cancel')}</button>
+              <button type="button" className="danger" disabled={stopping}
+                onClick={confirmStop}>{t('chat.stop')}</button>
             </div>
           </div>
         </div>,

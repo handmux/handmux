@@ -613,9 +613,19 @@ describe('ChatComposer', () => {
     render(<ChatComposer pane="%1" agent="codex" kind="working" codexSession={{ managed: true }} />);
     const stop = screen.getByRole('button', { name: '停止' });
     fireEvent.click(stop);
+    let dialog = screen.getByRole('alertdialog', { name: '停止当前任务？' });
+    expect(dialog.textContent).toContain('当前正在执行的回合会被中断。');
+    expect(interruptCodexSession).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: '取消' }));
+    expect(interruptCodexSession).not.toHaveBeenCalled();
+
     fireEvent.click(stop);
+    dialog = screen.getByRole('alertdialog', { name: '停止当前任务？' });
+    fireEvent.click([...dialog.querySelectorAll('button')].find((button) => button.textContent === '停止'));
     expect(interruptCodexSession).toHaveBeenCalledTimes(1);
     expect(stop.disabled).toBe(true);
+    fireEvent.click(stop);
+    expect(interruptCodexSession).toHaveBeenCalledTimes(1);
     request.resolve({ interrupted: true });
   });
 
@@ -778,6 +788,9 @@ describe('ChatComposer', () => {
     render(<ChatComposer pane="%1" kind="working" onKey={onKey} />);
     expect(screen.queryByRole('button', { name: '发送' })).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: '停止' }));
+    expect(onKey).not.toHaveBeenCalled();
+    const dialog = screen.getByRole('alertdialog', { name: '停止当前任务？' });
+    fireEvent.click([...dialog.querySelectorAll('button')].find((button) => button.textContent === '停止'));
     expect(onKey).toHaveBeenCalledWith('Escape');
     expect(sendText).not.toHaveBeenCalled();
   });

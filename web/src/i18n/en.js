@@ -302,6 +302,8 @@ export default {
   'chat.editTitle': 'Saved messages',
   'chat.composer.placeholder': 'Message the agent…',
   'chat.stop': 'Stop',
+  'chat.stopTitle': 'Stop the current task?',
+  'chat.stopBody': 'The turn currently in progress will be interrupted.',
 'chat.config.open': 'Configure model, Fast, and reasoning effort',
 'chat.config.title': 'Model settings',
 'chat.config.model': 'Model',

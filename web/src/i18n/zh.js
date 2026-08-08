@@ -301,6 +301,8 @@ export default {
   'chat.editTitle': '常用消息',
   'chat.composer.placeholder': '和 Agent 对话…',
   'chat.stop': '停止',
+  'chat.stopTitle': '停止当前任务？',
+  'chat.stopBody': '当前正在执行的回合会被中断。',
 'chat.config.open': '设置模型、Fast 和思考强度',
 'chat.config.title': '模型设置',
 'chat.config.model': '模型',
