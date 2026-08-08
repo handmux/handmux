@@ -455,6 +455,7 @@ class CodexAppConnection {
     this.pending = new Map();
     this.approvals = new Map();
     this.userInputs = new Map();
+    this.streamListeners = new Set();
     this.threadState = new Map();
     this.subscribed = new Set();
     this.lastStartedThreadId = null;
@@ -536,6 +537,19 @@ class CodexAppConnection {
     const params = message.params || {};
     if ((message.method === 'item/started' || message.method === 'item/completed') && params.item) {
       this.upsertLiveItem(params.threadId, params.turnId, params.item);
+      if (params.item.type === 'agentMessage') {
+        const state = this.state(params.threadId);
+        const itemKey = `${params.turnId}\0${params.item.id}`;
+        if (message.method === 'item/completed') state.completedAgentItemIds.add(itemKey);
+        else state.completedAgentItemIds.delete(itemKey);
+        this.emitStream({
+          type: message.method === 'item/started' ? 'started' : 'completed',
+          threadId: params.threadId,
+          turnId: params.turnId,
+          itemId: params.item.id,
+          text: params.item.text || '',
+        });
+      }
       const state = this.state(params.threadId);
       const prompt = userPromptFromItem(params.item);
       if (prompt && state.activeTurnId === params.turnId) {
@@ -544,6 +558,15 @@ class CodexAppConnection {
           && this.inbox.kind !== 'permission' && this.inbox.kind !== 'compacting') {
           this.setInbox('working', prompt, `turn:${params.turnId}:started`);
         }
+      }
+    } else if (message.method === 'item/agentMessage/delta') {
+      const delta = typeof params.delta === 'string' ? params.delta : '';
+      if (params.threadId && params.turnId && params.itemId && delta) {
+        this.appendAgentDelta(params.threadId, params.turnId, params.itemId, delta);
+        this.emitStream({
+          type: 'delta', threadId: params.threadId, turnId: params.turnId,
+          itemId: params.itemId, delta,
+        });
       }
     } else if (message.method === 'serverRequest/resolved') {
       this.approvals.delete(String(params.requestId));
@@ -606,6 +629,10 @@ class CodexAppConnection {
       if (status === 'completed') {
         void this.drainQueue(params.threadId).catch(() => {});
       }
+      this.emitStream({
+        type: 'turnCompleted', threadId: params.threadId,
+        turnId: turn?.id || params.turnId || null, status: status || null,
+      });
     } else if (message.method === 'thread/settings/updated') {
       const state = this.state(params.threadId);
       state.settings = params.threadSettings
@@ -652,6 +679,7 @@ class CodexAppConnection {
     if (!this.threadState.has(threadId)) this.threadState.set(threadId, {
       revision: 0, readRevision: -1, thread: null, status: null, activeTurnId: null, settings: null,
       activePrompt: '', contextUsage: null, lastTurn: null, loadedOnly: false, liveItemIds: new Map(),
+      completedAgentItemIds: new Set(),
     });
     return this.threadState.get(threadId);
   }
@@ -879,7 +907,13 @@ class CodexAppConnection {
     if (!ids) {
       ids = new Set();
       state.liveItemIds.set(turnId, ids);
-      if (state.liveItemIds.size > 20) state.liveItemIds.delete(state.liveItemIds.keys().next().value);
+      if (state.liveItemIds.size > 20) {
+        const oldestTurnId = state.liveItemIds.keys().next().value;
+        state.liveItemIds.delete(oldestTurnId);
+        for (const key of state.completedAgentItemIds) {
+          if (key.startsWith(`${oldestTurnId}\0`)) state.completedAgentItemIds.delete(key);
+        }
+      }
     }
     ids.add(item.id);
     state.thread ||= { id: threadId, turns: [], status: { type: 'active', activeFlags: [] } };
@@ -893,6 +927,52 @@ class CodexAppConnection {
     const index = turn.items.findIndex((candidate) => candidate.id === item.id);
     if (index >= 0) turn.items[index] = item;
     else turn.items.push(item);
+  }
+
+  appendAgentDelta(threadId, turnId, itemId, delta) {
+    const state = this.state(threadId);
+    const turn = state.thread?.turns?.find((candidate) => candidate.id === turnId);
+    const item = turn?.items?.find((candidate) => candidate.id === itemId);
+    this.upsertLiveItem(threadId, turnId, {
+      ...(item || {}), id: itemId, type: 'agentMessage', text: `${item?.text || ''}${delta}`,
+    });
+  }
+
+  subscribeStream(threadId, listener) {
+    const subscription = { threadId, listener };
+    this.streamListeners.add(subscription);
+    const state = this.threadState.get(threadId);
+    for (const turn of state?.thread?.turns || []) {
+      const liveIds = state.liveItemIds.get(turn.id);
+      if (!liveIds?.size) continue;
+      for (const item of turn.items || []) {
+        if (item?.type !== 'agentMessage' || !liveIds.has(item.id) || !item.text) continue;
+        try {
+          listener({
+            type: 'snapshot', threadId, turnId: turn.id, itemId: item.id,
+            text: item.text,
+            completed: turn.status !== 'inProgress'
+              || state.completedAgentItemIds.has(`${turn.id}\0${item.id}`),
+          });
+        } catch { /* initial projection is best effort */ }
+      }
+    }
+    return () => this.streamListeners.delete(subscription);
+  }
+
+  emitStream(event) {
+    if (!event?.threadId) return;
+    for (const subscription of this.streamListeners) {
+      if (subscription.threadId !== event.threadId) continue;
+      try { subscription.listener(event); } catch { /* one browser must not break the App Server observer */ }
+    }
+  }
+
+  closeStreamListeners() {
+    for (const subscription of this.streamListeners) {
+      try { subscription.listener({ type: 'disconnected', threadId: subscription.threadId }); } catch { /* closing */ }
+    }
+    this.streamListeners.clear();
   }
 
   bump(threadId) {
@@ -1102,6 +1182,7 @@ class CodexAppConnection {
       waiter.reject(asError(error));
     }
     this.pending.clear();
+    this.closeStreamListeners();
     this.onClose(this);
   }
 
@@ -1114,6 +1195,7 @@ class CodexAppConnection {
       waiter.reject(new Error('Codex App Server connection closed'));
     }
     this.pending.clear();
+    this.closeStreamListeners();
   }
 }
 
@@ -1218,6 +1300,13 @@ export function createCodexAppServer({
         queue: client.queuedFor(threadId),
         revision: state.revision,
       };
+    },
+    async subscribe(pane, threadId, listener) {
+      const client = await connection(pane);
+      if (!client) throw new Error('Codex session is not managed by Handmux');
+      await client.assertCurrentThread(threadId);
+      await client.ensureThread(threadId);
+      return client.subscribeStream(threadId, listener);
     },
     async send(pane, threadId, text) {
       const client = await connection(pane);

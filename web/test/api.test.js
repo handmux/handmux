@@ -1,10 +1,48 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { getHistory, getPanes, createSession, createWindow, renameSession, renameWindow, deleteWindow, swapWindows, createDir, UnauthorizedError, ApiError, fetchDoc, fetchDir, signAsr, sendInput } from '../src/api.js';
+import { getHistory, getPanes, createSession, createWindow, renameSession, renameWindow, deleteWindow, swapWindows, createDir, UnauthorizedError, ApiError, fetchDoc, fetchDir, signAsr, sendInput, parseSseFrames, streamCodexMessages } from '../src/api.js';
 import { createPreview, getPreviews, deletePreview, previewUrl, fetchImageUrl } from '../src/api.js';
 
 afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); vi.useRealTimers(); });
 
 const jsonRes = (status, body) => ({ status, ok: status >= 200 && status < 300, json: async () => body });
+
+describe('Codex message stream', () => {
+  it('parses complete SSE frames and retains a split trailing frame', () => {
+    expect(parseSseFrames('data: {"type":"ready"}\n\ndata: {"type":"events"'))
+      .toEqual({ frames: ['{"type":"ready"}'], rest: 'data: {"type":"events"' });
+  });
+
+  it('keeps bearer auth and expands batched SSE payloads in order', async () => {
+    vi.stubGlobal('localStorage', { getItem: () => 'stream-token' });
+    const encoder = new TextEncoder();
+    const chunks = [
+      'data: {"type":"ready","threadId":"thread-1"}\n\n',
+      'data: {"type":"events","events":[{"type":"delta","delta":"你"},',
+      '{"type":"completed","text":"你好"}]}\n\n',
+    ].map((value) => encoder.encode(value));
+    const reader = {
+      read: vi.fn(async () => (chunks.length ? { done: false, value: chunks.shift() } : { done: true })),
+      releaseLock: vi.fn(),
+    };
+    const fetchMock = vi.fn(async () => ({
+      status: 200, ok: true, body: { getReader: () => reader },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+    const events = [];
+
+    await streamCodexMessages('%7', { onEvent: (event) => events.push(event) });
+
+    expect(fetchMock).toHaveBeenCalledWith('/api/codex/stream?pane=%257', expect.objectContaining({
+      headers: expect.objectContaining({ Authorization: 'Bearer stream-token' }),
+    }));
+    expect(events).toEqual([
+      { type: 'ready', threadId: 'thread-1' },
+      { type: 'delta', delta: '你' },
+      { type: 'completed', text: '你好' },
+    ]);
+    expect(reader.releaseLock).toHaveBeenCalledOnce();
+  });
+});
 
 describe('api request timeout', () => {
   it('aborts getHistory after its timeout and rejects with a non-auth error', async () => {

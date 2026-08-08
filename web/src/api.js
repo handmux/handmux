@@ -82,6 +82,64 @@ export const getPendingPrompt = (pane, agent = 'claude') =>
   req(`/api/pending-prompt?pane=${encodeURIComponent(pane)}&agent=${encodeURIComponent(agent)}`, { timeoutMs: 8000 }).then((r) => r.prompt || null);
 export const getCodexSession = (pane) =>
   req(`/api/codex/session?pane=${encodeURIComponent(pane)}`, { timeoutMs: 8000 });
+export function parseSseFrames(buffer) {
+  const frames = [];
+  let rest = String(buffer || '');
+  while (true) {
+    const boundary = /\r?\n\r?\n/.exec(rest);
+    if (!boundary) break;
+    const frame = rest.slice(0, boundary.index);
+    rest = rest.slice(boundary.index + boundary[0].length);
+    const data = frame.split(/\r?\n/)
+      .filter((line) => line.startsWith('data:'))
+      .map((line) => line.slice(5).trimStart())
+      .join('\n');
+    if (data) frames.push(data);
+  }
+  return { frames, rest };
+}
+
+// Fetch-based SSE keeps the normal Authorization header (native EventSource cannot set it) while still
+// giving the conversation a one-way, reconnectable stream. Durable transcript polling remains authoritative.
+export async function streamCodexMessages(pane, { signal, onEvent } = {}) {
+  const path = `/api/codex/stream?pane=${encodeURIComponent(pane)}`;
+  const res = await fetch(path, {
+    cache: 'no-store', signal,
+    headers: { Authorization: `Bearer ${getToken() ?? ''}`, Accept: 'text/event-stream' },
+  });
+  if (res.status === 401) throw new UnauthorizedError();
+  if (!res.ok) {
+    let serverError = null;
+    try { const body = await res.json(); if (body?.error) serverError = body.error; } catch { /* not json */ }
+    throw new ApiError(serverError || `${path} -> ${res.status}`, res.status, serverError);
+  }
+  if (!res.body?.getReader) throw new Error('Codex message stream is unavailable');
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      buffer += decoder.decode(value || new Uint8Array(), { stream: !done });
+      const parsed = parseSseFrames(buffer);
+      buffer = parsed.rest;
+      for (const frame of parsed.frames) {
+        let payload;
+        try { payload = JSON.parse(frame); } catch { continue; }
+        const events = payload?.type === 'events' && Array.isArray(payload.events)
+          ? payload.events : [payload];
+        for (const event of events) {
+          if (event?.type === 'error') throw new Error(event.message || 'Codex message stream failed');
+          onEvent?.(event);
+        }
+      }
+      if (done) break;
+    }
+  } finally {
+    reader.releaseLock?.();
+  }
+}
 export const takeoverCodexSession = (pane) =>
   req('/api/codex/takeover', { method: 'POST', body: JSON.stringify({ pane }), timeoutMs: 30000 });
 export const sendCodexMessage = (pane, text) =>

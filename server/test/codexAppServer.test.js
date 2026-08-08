@@ -165,6 +165,66 @@ describe('Codex App Server projection', () => {
 });
 
 describe('Codex App Server client', () => {
+  it('streams agent message deltas only to the matching thread and closes subscribers with the connection', async () => {
+    const proxy = fakeProxy();
+    const app = createCodexAppServer({ home: '/home/test', exists: () => true, connect: () => proxy.ws });
+    const events = [];
+    const unsubscribe = await app.subscribe('%1', 'thread-1', (event) => events.push(event));
+
+    proxy.push({
+      jsonrpc: '2.0', method: 'item/started', params: {
+        threadId: 'thread-1', turnId: 'turn-live',
+        item: { id: 'agent-live', type: 'agentMessage', text: '' },
+      },
+    });
+    proxy.push({
+      jsonrpc: '2.0', method: 'item/agentMessage/delta', params: {
+        threadId: 'thread-1', turnId: 'turn-live', itemId: 'agent-live', delta: '你好',
+      },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    unsubscribe();
+    const replayed = [];
+    const unsubscribeReplay = await app.subscribe('%1', 'thread-1', (event) => replayed.push(event));
+    expect(replayed).toEqual([expect.objectContaining({
+      type: 'snapshot', turnId: 'turn-live', itemId: 'agent-live', text: '你好',
+    })]);
+    proxy.push({
+      jsonrpc: '2.0', method: 'item/agentMessage/delta', params: {
+        threadId: 'thread-other', turnId: 'turn-live', itemId: 'agent-live', delta: '不应出现',
+      },
+    });
+    proxy.push({
+      jsonrpc: '2.0', method: 'item/completed', params: {
+        threadId: 'thread-1', turnId: 'turn-live',
+        item: { id: 'agent-live', type: 'agentMessage', text: '你好，完成' },
+      },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(events).toEqual([
+      expect.objectContaining({ type: 'started', threadId: 'thread-1', itemId: 'agent-live' }),
+      expect.objectContaining({ type: 'delta', delta: '你好' }),
+    ]);
+    expect(replayed).toEqual([
+      expect.objectContaining({ type: 'snapshot', text: '你好' }),
+      expect.objectContaining({ type: 'completed', text: '你好，完成' }),
+    ]);
+    const completedReplay = [];
+    const unsubscribeCompleted = await app.subscribe('%1', 'thread-1', (event) => completedReplay.push(event));
+    expect(completedReplay).toEqual([expect.objectContaining({
+      type: 'snapshot', text: '你好，完成', completed: true,
+    })]);
+    expect(projectCodexThread((await app.read('%1', 'thread-1')).thread)
+      .find((message) => message.id === 'codex:turn-live:agent-live')?.text).toBe('你好，完成');
+
+    app.close();
+    expect(replayed.at(-1)).toMatchObject({ type: 'disconnected', threadId: 'thread-1' });
+    unsubscribe();
+    unsubscribeReplay();
+    unsubscribeCompleted();
+  });
+
   it('discovers and sends the first message to a loaded thread before its rollout exists', async () => {
     const proxy = fakeProxy({
       empty: true,

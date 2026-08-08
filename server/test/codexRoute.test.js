@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import express from 'express';
 import request from 'supertest';
-import { codexRoutes } from '../src/routes/codex.js';
+import { appendCodexStreamEvent, codexRoutes } from '../src/routes/codex.js';
 
 function appFor({
   sessionId = 'thread-1', codexApp = {}, commands = {}, claudeEvents = {}, wait,
@@ -43,6 +43,39 @@ function takeoverHarness({ exitId = THREAD_ID } = {}) {
 }
 
 describe('Codex App Server routes', () => {
+  it('coalesces adjacent text deltas without reordering lifecycle events', () => {
+    const queue = [];
+    appendCodexStreamEvent(queue, { type: 'delta', threadId: 'one', turnId: 't', itemId: 'i', delta: '你' });
+    appendCodexStreamEvent(queue, { type: 'delta', threadId: 'one', turnId: 't', itemId: 'i', delta: '好' });
+    appendCodexStreamEvent(queue, { type: 'completed', threadId: 'one', turnId: 't', itemId: 'i', text: '你好' });
+    expect(queue).toEqual([
+      expect.objectContaining({ type: 'delta', delta: '你好' }),
+      expect.objectContaining({ type: 'completed', text: '你好' }),
+    ]);
+  });
+
+  it('streams batched App Server deltas for the exact pane thread', async () => {
+    const unsubscribe = vi.fn();
+    const subscribe = vi.fn(async (pane, threadId, listener) => {
+      setTimeout(() => {
+        listener({ type: 'delta', threadId, turnId: 'turn-1', itemId: 'agent-1', delta: '你' });
+        listener({ type: 'delta', threadId, turnId: 'turn-1', itemId: 'agent-1', delta: '好' });
+        listener({ type: 'completed', threadId, turnId: 'turn-1', itemId: 'agent-1', text: '你好' });
+        listener({ type: 'disconnected', threadId });
+      }, 0);
+      return unsubscribe;
+    });
+    const app = appFor({ codexApp: { subscribe } });
+
+    const response = await request(app).get('/codex/stream?pane=%251').expect(200);
+    expect(response.headers['content-type']).toMatch(/^text\/event-stream/);
+    expect(response.text).toContain('"type":"ready"');
+    expect(response.text).toContain('"delta":"你好"');
+    expect(response.text).toContain('"type":"completed"');
+    expect(subscribe).toHaveBeenCalledWith('%1', 'thread-1', expect.any(Function));
+    expect(unsubscribe).toHaveBeenCalledOnce();
+  });
+
   it('binds every operation to the exact App Server thread without Hook metadata', async () => {
     const status = vi.fn(async () => ({ managed: true, threadId: 'thread-1' }));
     const send = vi.fn(async () => ({ turn: { id: 'turn-1' } }));

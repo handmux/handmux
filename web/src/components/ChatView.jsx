@@ -5,6 +5,7 @@ import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { marked } from 'marked';
 import DOMPurify from 'dompurify';
 import { messageIdentity, useTranscript } from '../hooks/useTranscript.js';
+import { durableCoversLiveMessage, useCodexMessageStream } from '../hooks/useCodexMessageStream.js';
 import { usePendingPrompt } from '../hooks/usePendingPrompt.js';
 import { fallbackGate } from '../chatGate.js';
 import PromptGate from './PromptGate.jsx';
@@ -372,9 +373,13 @@ function linkedAssistantHtml(text) {
   return root.innerHTML;
 }
 
-function AssistantMarkdown({ text }) {
+function AssistantMarkdown({ text, streaming = false }) {
   const html = useMemo(() => linkedAssistantHtml(text), [text]);
-  return <div className="chat-bubble chat-them chat-md" dangerouslySetInnerHTML={{ __html: html }} />;
+  return (
+    <div className="chat-bubble chat-them chat-md"
+      data-codex-stream={streaming ? 'active' : undefined}
+      dangerouslySetInnerHTML={{ __html: html }} />
+  );
 }
 
 function outputLinkFromAnchor(anchor) {
@@ -417,7 +422,7 @@ function Bubble({ m, running, onOpenTool }) {
   // Assistant text gets markdown (tables/code/etc render properly); user text stays plain — it's what the
   // user typed, not content to be re-interpreted. Same marked→DOMPurify pipeline as DocView.jsx.
   if (m.role !== 'user') {
-    return <AssistantMarkdown text={m.text} />;
+    return <AssistantMarkdown text={m.text} streaming={!!m.streaming} />;
   }
   return <div className="chat-bubble chat-me">{m.text}</div>;
 }
@@ -612,7 +617,29 @@ export default function ChatView({
   refreshToken = null, codexSession = null, optimisticMessages = [], actionError = null, onOptimisticCovered,
   onDocLinkTap,
 }) {
-  const { messages, hasMoreOlder, loadOlder, loadingOlder, session, loaded, unavailable, unavailableDetail } = useTranscript(pane, true, agent, refreshToken);
+  const [streamRefresh, setStreamRefresh] = useState(0);
+  const transcriptRefresh = streamRefresh
+    ? `${refreshToken ?? ''}:stream:${streamRefresh}`
+    : refreshToken;
+  const {
+    messages: durableMessages, hasMoreOlder, loadOlder, loadingOlder,
+    session, loaded, unavailable, unavailableDetail,
+  } = useTranscript(pane, true, agent, transcriptRefresh);
+  const liveMessages = useCodexMessageStream({
+    pane,
+    threadId: codexSession?.threadId,
+    enabled: agent === 'codex' && !!codexSession?.managed,
+    durableMessages,
+    onSettled: () => setStreamRefresh((value) => value + 1),
+    onAuthFail,
+  });
+  const messages = useMemo(() => [
+    ...durableMessages,
+    ...liveMessages.filter((message) => message.text
+      && !durableCoversLiveMessage(durableMessages, message)),
+  ], [durableMessages, liveMessages]);
+  const activeStreamMessage = [...liveMessages].reverse()
+    .find((message) => message.streaming && message.text) || null;
   const tsIdx = useMemo(() => timeStampedIndices(messages), [messages]);
   // Each later compaction supersedes the previous context boundary. Keep the rollout untouched as the
   // authoritative history, but render only the newest boundary in the loaded conversation so two nearby
@@ -720,11 +747,15 @@ export default function ChatView({
   // because its Hook/state update can lag behind the transcript and has no equivalent live thread status.
   const inferredClaudeReply = agent !== 'codex' && last?.role === 'user' && kind !== 'permission';
   const showTyping = loaded && !lastIsRunningTool && !showCompacting && !showError
-    && (kind === 'working' || inferredClaudeReply);
+    && !activeStreamMessage && (kind === 'working' || inferredClaudeReply);
 
   const scrollRef = useRef(null);
   const viewRef = useRef(null); // .chat-view — positioning context for the copy callout
   const stickBottomRef = useRef(true); // was the user near the bottom just before this render's messages changed?
+  const followModeRef = useRef('following'); // revealing (anchor the answer start) | reading | following latest
+  const lastStreamTurnRef = useRef(null);
+  const lastScrollTopRef = useRef(0);
+  const lastScrollGestureAtRef = useRef(0);
   const prevScrollHeightRef = useRef(null); // captured just before a loadOlder() prepend, to preserve scroll position
   const pendingPrependRef = useRef(false); // true only while a loadOlder() round-trip is in flight, so a
   // recent-window poll landing mid-flight doesn't consume the stale prevScrollHeight and jump the view.
@@ -793,6 +824,7 @@ export default function ChatView({
     if (e.pointerType === 'mouse') return; // desktop keeps native selection/right-click
     const lp = lpRef.current;
     lp.x = e.clientX; lp.y = e.clientY;
+    lastScrollGestureAtRef.current = Date.now();
     const { target } = e;
     cancelLongPress();
     lp.timer = setTimeout(() => fireLongPress(lp.x, lp.y, target), 480);
@@ -804,6 +836,7 @@ export default function ChatView({
   };
   const onCopyMove = (e) => {
     const lp = lpRef.current;
+    if (e.pointerType !== 'mouse') lastScrollGestureAtRef.current = Date.now();
     if (lp.timer && Math.hypot(e.clientX - lp.x, e.clientY - lp.y) > 10) cancelLongPress(); // moved → scroll, not a hold
   };
 
@@ -848,9 +881,21 @@ export default function ChatView({
     if (!el) return;
     cancelLongPress();
     if (copyUI) dismissCopy(); // scrolling dismisses the callout (its anchor is moving)
+    const previousTop = lastScrollTopRef.current;
+    const movingUp = el.scrollTop < previousTop - 1;
+    const movingDown = el.scrollTop > previousTop + 1;
+    lastScrollTopRef.current = el.scrollTop;
     const near = el.scrollHeight - el.scrollTop - el.clientHeight < NEAR_BOTTOM_PX;
-    stickBottomRef.current = near;
-    setAtBottom(near);
+    if (movingUp) {
+      followModeRef.current = 'reading';
+      stickBottomRef.current = false;
+    } else if (near && movingDown && Date.now() - lastScrollGestureAtRef.current < 1_500) {
+      followModeRef.current = 'following';
+      stickBottomRef.current = true;
+    } else if (followModeRef.current !== 'reading') {
+      stickBottomRef.current = near;
+    }
+    setAtBottom(near && followModeRef.current !== 'reading');
     if (el.scrollTop < NEAR_TOP_PX && hasMoreOlder && !loadingOlder) {
       prevScrollHeightRef.current = el.scrollHeight;
       pendingPrependRef.current = true;
@@ -862,6 +907,8 @@ export default function ChatView({
     const el = scrollRef.current;
     if (!el) return;
     el.scrollTop = el.scrollHeight;
+    lastScrollTopRef.current = el.scrollTop;
+    followModeRef.current = 'following';
     stickBottomRef.current = true;
     setAtBottom(true);
   };
@@ -881,6 +928,16 @@ export default function ChatView({
     event.stopPropagation();
     onDocLinkTap(link, event.clientX ?? 0, event.clientY ?? 0);
   };
+
+  // A new answer first reveals its opening. Once that bubble fills the viewport and reaches the safe top,
+  // freeze there so a long stream cannot drag a reader to its ending. The existing jump button explicitly
+  // opts back into following; an upward gesture always returns to reading mode.
+  useEffect(() => {
+    const turnId = activeStreamMessage?.turnId || null;
+    if (!turnId || lastStreamTurnRef.current === turnId) return;
+    lastStreamTurnRef.current = turnId;
+    if (stickBottomRef.current) followModeRef.current = 'revealing';
+  }, [activeStreamMessage?.turnId]);
 
   // Default view is pinned to the bottom (newest), like a normal chat. Priority on each messages change:
   //   1. a loadOlder() prepend just landed (pendingPrependRef set) → restore the visual position (scroll
@@ -912,18 +969,34 @@ export default function ChatView({
     if (newestId != null) lastNewestIdRef.current = newestId;
     if (isNewTrailingUser) {
       el.scrollTop = el.scrollHeight;
+      lastScrollTopRef.current = el.scrollTop;
+      followModeRef.current = 'revealing';
       stickBottomRef.current = true;
       setAtBottom(true);
       return;
     }
-    if (stickBottomRef.current) el.scrollTop = el.scrollHeight;
-  }, [messages, showTyping]);
+    if (!stickBottomRef.current || followModeRef.current === 'reading') return;
+    el.scrollTop = el.scrollHeight;
+    lastScrollTopRef.current = el.scrollTop;
+
+    if (followModeRef.current !== 'revealing' || !activeStreamMessage) return;
+    const bubble = Array.from(el.querySelectorAll('[data-codex-stream="active"]')).at(-1);
+    const viewport = el.getBoundingClientRect();
+    const rect = bubble?.getBoundingClientRect();
+    // jsdom has no layout (all zeroes); real geometry is required before changing this user-visible state.
+    if (!rect || rect.height <= 0 || viewport.height <= 0 || rect.top > viewport.top + 12) return;
+    followModeRef.current = 'reading';
+    stickBottomRef.current = false;
+    setAtBottom(false);
+  }, [messages, showTyping, activeStreamMessage]);
 
   const newestOptimisticId = visibleOptimistic.at(-1)?.id || null;
   useEffect(() => {
     const el = scrollRef.current;
     if (el && newestOptimisticId && newestOptimisticId !== lastOptimisticIdRef.current) {
       el.scrollTop = el.scrollHeight;
+      lastScrollTopRef.current = el.scrollTop;
+      followModeRef.current = 'revealing';
       stickBottomRef.current = true;
       setAtBottom(true);
     }
@@ -956,8 +1029,14 @@ export default function ChatView({
   // First mount / pane switch: land at the bottom immediately (no animation to fight).
   useEffect(() => {
     const el = scrollRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
+    if (el) {
+      el.scrollTop = el.scrollHeight;
+      lastScrollTopRef.current = el.scrollTop;
+    }
+    followModeRef.current = 'following';
     stickBottomRef.current = true;
+    lastStreamTurnRef.current = null;
+    lastScrollGestureAtRef.current = 0;
     setAtBottom(true);
     lastNewestIdRef.current = null;
   }, [pane]);
@@ -967,6 +1046,7 @@ export default function ChatView({
       <div className="chat-scroll" ref={scrollRef} onScroll={onScroll}
         onPointerDown={onCopyDown} onPointerMove={onCopyMove}
         onPointerUp={cancelLongPress} onPointerCancel={cancelLongPress}
+        onWheel={() => { lastScrollGestureAtRef.current = Date.now(); }}
         onClickCapture={onCopyClickCapture}>
         {!loaded && <LensBoot hint={t('boot.loading')} />}
         {/* The first poll uses the same neutral loading view as the terminal. Only show a nudge after the
@@ -1034,8 +1114,8 @@ export default function ChatView({
       )}
 
       {!atBottom && (
-        <button type="button" className="new-output" aria-label="回到最新" onClick={scrollToBottom}>
-          ↓ 回到底部
+        <button type="button" className="new-output" aria-label={t('chat.scroll.latest')} onClick={scrollToBottom}>
+          {t(activeStreamMessage ? 'chat.scroll.answer' : 'chat.scroll.bottom')}
         </button>
       )}
 

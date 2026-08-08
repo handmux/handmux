@@ -7,7 +7,14 @@ import * as api from '../src/api.js';
 // a global afterEach) never registers — without this, DOM from one test leaks into the next.
 afterEach(cleanup);
 
-beforeEach(() => { vi.restoreAllMocks(); });
+beforeEach(() => {
+  vi.restoreAllMocks();
+  // Managed-Codex component cases are about rendering/gates unless a test explicitly drives the stream.
+  // Keep the long-lived fetch open until unmount so it cannot retry against jsdom's missing network.
+  vi.spyOn(api, 'streamCodexMessages').mockImplementation((_pane, { signal }) => (
+    new Promise((resolve) => signal.addEventListener('abort', resolve, { once: true }))
+  ));
+});
 
 function mockTranscript(messages) {
   vi.spyOn(api, 'fetchTranscript').mockResolvedValue({ messages, hash: 'h', session: 's', hasMore: false, firstSeq: messages[0]?.k ?? 0 });
@@ -616,6 +623,49 @@ describe('ChatView', () => {
     fireEvent.click(btn);
     expect(el.scrollTop).toBe(el.scrollHeight);
     expect(container.querySelector('.new-output')).toBeNull();
+  });
+
+  it('anchors a long streamed Codex answer at its beginning, then follows only after the user asks for latest', async () => {
+    mockTranscript([{ k: 0, i: 0, role: 'user', type: 'text', text: '写一份长说明' }]);
+    let emit;
+    api.streamCodexMessages.mockImplementation((_pane, { signal, onEvent }) => {
+      emit = onEvent;
+      return new Promise((resolve) => signal.addEventListener('abort', resolve, { once: true }));
+    });
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function rect() {
+      if (this.classList?.contains('chat-scroll')) return { top: 0, bottom: 300, height: 300, left: 0, right: 320, width: 320 };
+      if (this.dataset?.codexStream === 'active') return { top: 8, bottom: 328, height: 320, left: 0, right: 320, width: 320 };
+      return { top: 0, bottom: 0, height: 0, left: 0, right: 0, width: 0 };
+    });
+    const { container } = render(<ChatView pane="%1" agent="codex" kind="working"
+      codexSession={{ managed: true, threadId: 'thread-1' }} />);
+    await screen.findByText('写一份长说明');
+    await waitFor(() => expect(emit).toBeTypeOf('function'));
+    const el = container.querySelector('.chat-scroll');
+    setGeometry(el, { scrollTop: 700, scrollHeight: 1000, clientHeight: 300 });
+
+    act(() => {
+      emit({ type: 'started', threadId: 'thread-1', turnId: 'turn-1', itemId: 'agent-1', text: '' });
+      emit({ type: 'delta', threadId: 'thread-1', turnId: 'turn-1', itemId: 'agent-1', delta: '第一段正在生成' });
+    });
+    await screen.findByText('第一段正在生成');
+    await waitFor(() => expect(container.querySelector('.new-output')?.textContent).toContain('查看最新回答'));
+    const anchoredTop = el.scrollTop;
+
+    Object.defineProperty(el, 'scrollHeight', { value: 1400, configurable: true });
+    act(() => emit({
+      type: 'delta', threadId: 'thread-1', turnId: 'turn-1', itemId: 'agent-1', delta: '，后续内容继续增长',
+    }));
+    await screen.findByText('第一段正在生成，后续内容继续增长');
+    expect(el.scrollTop).toBe(anchoredTop);
+
+    fireEvent.click(container.querySelector('.new-output'));
+    Object.defineProperty(el, 'scrollHeight', { value: 1600, configurable: true });
+    act(() => emit({
+      type: 'delta', threadId: 'thread-1', turnId: 'turn-1', itemId: 'agent-1', delta: '，现在跟随最新',
+    }));
+    await screen.findByText('第一段正在生成，后续内容继续增长，现在跟随最新');
+    expect(el.scrollTop).toBe(1600);
   });
 
   it('a newly-arrived trailing user message forces the view back to the bottom, even if scrolled up', async () => {

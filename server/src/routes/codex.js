@@ -10,6 +10,8 @@ const EXIT_POLL_MS = 500;
 const EXIT_ATTEMPTS = 10;
 const RECOVERY_OUTPUT_ATTEMPTS = 20;
 const CLEAR_SWITCH_ATTEMPTS = 60;
+const STREAM_BATCH_MS = 60;
+const STREAM_HEARTBEAT_MS = 15_000;
 const PERMISSION_MODES = {
   default: {
     approvalPolicy: 'on-request', approvalsReviewer: 'user',
@@ -116,6 +118,17 @@ function codexError(res, error) {
   return res.status(conflict ? 409 : 503).json({ error: message });
 }
 
+// App Server can emit many tiny token deltas. Keep their order, but fold adjacent chunks for the same
+// message before crossing the tunnel to a phone; lifecycle events always flush immediately.
+export function appendCodexStreamEvent(queue, event) {
+  const last = queue.at(-1);
+  if (event?.type === 'delta' && last?.type === 'delta'
+    && last.threadId === event.threadId && last.turnId === event.turnId && last.itemId === event.itemId) {
+    last.delta += event.delta || '';
+  } else if (event) queue.push({ ...event });
+  return queue;
+}
+
 export function codexRoutes({ codexApp, commands, claudeEvents, wait = pause }) {
   const r = express.Router();
   if (!codexApp) return r;
@@ -150,6 +163,78 @@ export function codexRoutes({ codexApp, commands, claudeEvents, wait = pause }) 
       // the takeover page stable through it instead of flashing a generic connection failure.
       if (takeover) return res.json({ managed: false, threadId: null, takeover: takeoverView(takeover) });
       return codexError(res, error);
+    }
+  });
+
+  r.get('/codex/stream', async (req, res) => {
+    const target = await binding(codexApp, req.query.pane);
+    if (routeError(res, target)) return;
+
+    res.status(200);
+    res.set({
+      'Content-Type': 'text/event-stream; charset=utf-8',
+      'Cache-Control': 'no-cache, no-transform',
+      Connection: 'keep-alive',
+      'X-Accel-Buffering': 'no',
+    });
+    res.flushHeaders?.();
+    res.write(`data: ${JSON.stringify({ type: 'ready', threadId: target.threadId })}\n\n`);
+
+    let closed = false;
+    let unsubscribe = null;
+    let flushTimer = null;
+    let heartbeat = null;
+    const pending = [];
+    const flush = () => {
+      if (flushTimer) clearTimeout(flushTimer);
+      flushTimer = null;
+      if (closed || !pending.length) return;
+      const events = pending.splice(0);
+      res.write(`data: ${JSON.stringify({ type: 'events', events })}\n\n`);
+      res.flush?.();
+    };
+    const cleanup = () => {
+      if (closed) return;
+      closed = true;
+      if (flushTimer) clearTimeout(flushTimer);
+      if (heartbeat) clearInterval(heartbeat);
+      flushTimer = null;
+      heartbeat = null;
+      unsubscribe?.();
+      unsubscribe = null;
+    };
+    const enqueue = (event) => {
+      if (closed) return;
+      if (event?.type === 'disconnected') {
+        appendCodexStreamEvent(pending, event);
+        flush();
+        cleanup();
+        res.end();
+        return;
+      }
+      appendCodexStreamEvent(pending, event);
+      if (event?.type === 'completed' || event?.type === 'turnCompleted') flush();
+      else if (!flushTimer) {
+        flushTimer = setTimeout(flush, STREAM_BATCH_MS);
+        flushTimer.unref?.();
+      }
+    };
+
+    req.once('aborted', cleanup);
+    res.once('close', cleanup);
+    try {
+      unsubscribe = await codexApp.subscribe(target.pane, target.threadId, enqueue);
+      if (closed) { unsubscribe(); unsubscribe = null; return; }
+      heartbeat = setInterval(() => {
+        if (!closed) res.write(`: keepalive ${Date.now()}\n\n`);
+      }, STREAM_HEARTBEAT_MS);
+      heartbeat.unref?.();
+    } catch (error) {
+      if (!closed) {
+        res.write(`data: ${JSON.stringify({ type: 'error', message: error?.message || String(error) })}\n\n`);
+        res.end();
+      }
+      cleanup();
     }
   });
 
