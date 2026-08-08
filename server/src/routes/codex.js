@@ -7,6 +7,8 @@ const TAKEOVER_TERMINAL_HINT_MS = 10_000;
 const INPUT_SETTLE_MS = 100;
 const FIRST_INTERRUPT_ATTEMPTS = 15;
 const FINAL_EXIT_ATTEMPTS = 15;
+const SECOND_INTERRUPT_SETTLE_MS = 250;
+const RECOVERY_OUTPUT_ATTEMPTS = 20;
 
 const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -24,6 +26,14 @@ async function exitCurrentCodex(commands, claudeEvents, pane) {
   // not depend on the slash-command editor being available. Some startup dialogs can still consume it;
   // in that case we stop without guessing or force-killing an unidentified session.
   for (let press = 0; press < 2; press += 1) {
+    if (press > 0) {
+      // The first Ctrl+C can make the input cursor visible just before Codex actually exits. Give that
+      // transition time to finish and re-check the foreground process, otherwise the second press lands
+      // in the restored shell as a stray `^C`.
+      await pause(SECOND_INTERRUPT_SETTLE_MS);
+      const current = await paneAgent(commands, claudeEvents, pane);
+      if (!current.live || current.agent !== 'codex') return current.live;
+    }
     await commands.sendKey(pane, 'C-c');
     const attempts = press === 0 ? FIRST_INTERRUPT_ATTEMPTS : FINAL_EXIT_ATTEMPTS;
     for (let attempt = 0; attempt < attempts; attempt += 1) {
@@ -38,6 +48,19 @@ async function exitCurrentCodex(commands, claudeEvents, pane) {
         } catch { /* process identity polling remains the fallback */ }
       }
     }
+  }
+  return null;
+}
+
+async function waitForRecoverySession(commands, pane, isId) {
+  // tmux can report pane_current_command=the shell before the last buffered Codex output has been painted.
+  // Poll the visible pane briefly instead of treating the first incomplete frame as a permanent failure.
+  for (let attempt = 0; attempt < RECOVERY_OUTPUT_ATTEMPTS; attempt += 1) {
+    try {
+      const sessionId = codexExitSessionId(await commands.capturePlain(pane));
+      if (isId(sessionId)) return sessionId;
+    } catch { return null; } // a direct-command pane may have closed with Codex
+    await pause(INPUT_SETTLE_MS);
   }
   return null;
 }
@@ -126,8 +149,8 @@ export function codexRoutes({ codexApp, commands, claudeEvents }) {
           takeovers.delete(pane);
           return res.status(409).json({ error: 'codex-exit-blocked' });
         }
-        const sessionId = codexExitSessionId(await commands.capturePlain(pane));
-        if (!driver.sessions.isId(sessionId)) {
+        const sessionId = await waitForRecoverySession(commands, pane, driver.sessions.isId);
+        if (!sessionId) {
           takeovers.delete(pane);
           return res.status(409).json({ error: 'codex-session-unconfirmed' });
         }

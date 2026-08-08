@@ -27,6 +27,7 @@ function takeoverHarness({ exitId = THREAD_ID } = {}) {
     .mockResolvedValueOnce({ '%1': 'codex' })
     .mockResolvedValue({});
   const capturePlain = vi.fn()
+    .mockResolvedValueOnce('■ Conversation interrupted\nuser@host %')
     .mockResolvedValue(`To continue this session, run codex resume ${exitId}\nuser@host %`);
   return {
     runPaneCommand,
@@ -74,6 +75,7 @@ describe('Codex App Server routes', () => {
     });
     expect(harness.commands.sendKey).toHaveBeenCalledWith('%1', 'C-c');
     expect(harness.commands.sendKey).toHaveBeenCalledTimes(1);
+    expect(harness.commands.capturePlain).toHaveBeenCalledTimes(2);
     expect(harness.runPaneCommand).toHaveBeenCalledWith('%1', `handmux codex resume ${THREAD_ID}`);
 
     // A retry while startup is pending is idempotent and cannot interrupt the replacement.
@@ -101,6 +103,7 @@ describe('Codex App Server routes', () => {
       .mockReset()
       .mockResolvedValueOnce({ '%1': 'codex' }) // preflight
       .mockResolvedValueOnce({ '%1': 'codex' })
+      .mockResolvedValueOnce({ '%1': 'codex' }) // still Codex after the settle/re-check
       .mockResolvedValue({});
     const app = appFor({
       codexApp: { discover: async () => ({ managed: false, threadId: null }) },
@@ -109,6 +112,23 @@ describe('Codex App Server routes', () => {
     });
     await request(app).post('/codex/takeover').send({ pane: '%1' }).expect(200);
     expect(harness.commands.sendKey.mock.calls).toEqual([['%1', 'C-c'], ['%1', 'C-c']]);
+  });
+
+  it('does not send the second Ctrl+C when Codex exits during the settle window', async () => {
+    const harness = takeoverHarness();
+    harness.claudeEvents.identifyPaneAgents
+      .mockReset()
+      .mockResolvedValueOnce({ '%1': 'codex' }) // preflight
+      .mockResolvedValueOnce({ '%1': 'codex' }) // cursor becomes visible after interrupt
+      .mockResolvedValue({}); // process finishes before the second press
+    const app = appFor({
+      codexApp: { discover: async () => ({ managed: false, threadId: null }) },
+      commands: harness.commands,
+      claudeEvents: harness.claudeEvents,
+    });
+    await request(app).post('/codex/takeover').send({ pane: '%1' }).expect(200);
+    expect(harness.commands.sendKey.mock.calls).toEqual([['%1', 'C-c']]);
+    expect(harness.runPaneCommand).toHaveBeenCalledWith('%1', `handmux codex resume ${THREAD_ID}`);
   });
 
   it('leaves a pane untouched when its live process is no longer Codex', async () => {
