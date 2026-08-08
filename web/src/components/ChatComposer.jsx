@@ -272,7 +272,7 @@ function CodexConfigMenu({ open, pane, settings, busy, onChange, onClose, onAuth
           {fastTier && (
             <label className="codex-fast-row">
               <span>
-                <strong className="codex-fast-title"><BoltIcon />{fastTier.name || t('chat.config.fast')}</strong>
+                <strong className="codex-fast-title">{fastTier.name || t('chat.config.fast')}<BoltIcon /></strong>
                 <small>{fastTier.description || t('chat.config.fastHint')}</small>
               </span>
               <span className="cmd-switch">
@@ -813,8 +813,8 @@ export default function ChatComposer({
               <button type="button" className="cc-ctx cc-config-trigger"
                 aria-label={t('chat.config.open')} onClick={openConfig}>
                 <span className="cc-ctx-model">{ctxModel || t('chat.config.model')}</span>
-                {fastSelected && <span className="cc-fast-indicator" aria-hidden="true"><BoltIcon /></span>}
                 <span className="cc-ctx-pct">{ctxEffort || t('chat.config.effort')}</span>
+                {fastSelected && <span className="cc-fast-indicator" aria-hidden="true"><BoltIcon /></span>}
                 <ChevronDownIcon />
               </button>
             )}
