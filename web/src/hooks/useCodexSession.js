@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { getCodexSession } from '../api.js';
 import { usePollingLoop } from './usePollingLoop.js';
 
@@ -6,16 +6,22 @@ const EMPTY = {
   loaded: false, managed: false, threadId: null, status: null, activeTurnId: null, settings: null,
   contextUsage: null, approvals: [], userInputs: [], queue: [], error: null,
 };
+// One missed 750ms status poll is routine during App Server reconnects. Only a sustained outage should
+// replace the loading/current conversation with a blocking connection explanation.
+const CONNECTION_FAILURE_GRACE_MS = 5_000;
 
 export function useCodexSession(pane, enabled, refreshToken = null) {
   const scope = enabled && pane ? pane : null;
   const [snapshot, setSnapshot] = useState(() => ({ scope, session: EMPTY }));
+  const connectionFailureSinceRef = useRef(null);
   useEffect(() => {
+    connectionFailureSinceRef.current = null;
     setSnapshot((current) => (current.scope === scope ? current : { scope, session: EMPTY }));
   }, [scope]);
   const fetch = useCallback(() => getCodexSession(pane), [pane]);
   const apply = useCallback((result) => {
     if (!result) return;
+    connectionFailureSinceRef.current = null;
     setSnapshot({
       scope,
       session: {
@@ -25,6 +31,9 @@ export function useCodexSession(pane, enabled, refreshToken = null) {
     });
   }, [scope]);
   const fail = useCallback((error) => {
+    const now = Date.now();
+    if (connectionFailureSinceRef.current == null) connectionFailureSinceRef.current = now;
+    if (now - connectionFailureSinceRef.current < CONNECTION_FAILURE_GRACE_MS) return;
     setSnapshot((current) => ({
       scope,
       session: {

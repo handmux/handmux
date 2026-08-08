@@ -100,6 +100,40 @@ describe('useTranscript', () => {
     }
   });
 
+  it('keeps the last transcript through a five-second App Server grace period', async () => {
+    vi.useFakeTimers();
+    try {
+      const unavailable = {
+        messages: [], hash: '', session: null, hasMore: false, firstSeq: null,
+        unavailable: 'app-server-unavailable', detail: 'temporary disconnect',
+      };
+      vi.spyOn(api, 'fetchTranscript')
+        .mockResolvedValueOnce({ messages: makeMsgs(0, 2), hash: 'h1', session: 'thread-1', hasMore: false, firstSeq: 0 })
+        .mockResolvedValue(unavailable);
+      const { result } = renderHook(() => useTranscript('%0', true, 'codex'));
+      await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+      expect(result.current.messages).toHaveLength(2);
+
+      await act(async () => { await vi.advanceTimersByTimeAsync(1500); });
+      expect(result.current.unavailable).toBeNull();
+      await act(async () => { await vi.advanceTimersByTimeAsync(4500); });
+      expect(result.current.unavailable).toBeNull();
+      await act(async () => { await vi.advanceTimersByTimeAsync(1500); });
+      expect(result.current).toMatchObject({
+        unavailable: 'app-server-unavailable', unavailableDetail: 'temporary disconnect',
+        session: 'thread-1',
+      });
+      expect(result.current.messages).toHaveLength(2);
+
+      api.fetchTranscript.mockResolvedValue(null);
+      await act(async () => { await vi.advanceTimersByTimeAsync(1500); });
+      expect(result.current.unavailable).toBeNull();
+      expect(result.current.messages).toHaveLength(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('loadOlder() prepends an older page, deduped by identity and sorted by k', async () => {
     const recent = makeMsgs(10, 10); // k=10..19
     const older = makeMsgs(5, 5); // k=5..9

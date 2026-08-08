@@ -17,6 +17,8 @@ import { fetchTranscript } from '../api.js';
 
 export const MAX_TRANSCRIPT_MESSAGES = 500;
 export const TRANSCRIPT_PAGE_SIZE = 20;
+// Match the session-status policy: transient App Server refusals stay behind the current/loading view.
+const APP_SERVER_FAILURE_GRACE_MS = 5_000;
 
 // `k` is the stable normalized-log order/cursor. A source-provided id wins when present; otherwise the
 // append-only ordinal is the render, dedup, and detail-sheet identity.
@@ -47,6 +49,7 @@ export function useTranscript(pane, enabled, agent = 'claude', refreshToken = nu
   const loadingOlderRef = useRef(false);
   const sessionRef = useRef(null); // the session id the current `messages` belong to
   const messagesRef = useRef([]); // synchronous count/bound checks across poll + loadOlder callbacks
+  const appServerFailureSinceRef = useRef(null);
   const epochRef = useRef(0); // invalidates an older-page request across pane/agent/session replacement
 
   // Reset the省流 cursor + view whenever the pane changes, so switching panes doesn't briefly show the
@@ -59,6 +62,7 @@ export function useTranscript(pane, enabled, agent = 'claude', refreshToken = nu
     loadingOlderRef.current = false;
     sessionRef.current = null;
     messagesRef.current = [];
+    appServerFailureSinceRef.current = null;
     setMessages([]);
     setHasMoreOlder(false);
     setLoadingOlder(false);
@@ -72,7 +76,26 @@ export function useTranscript(pane, enabled, agent = 'claude', refreshToken = nu
   // additional history pages when even 20 compact messages do not fill the phone viewport.
   const fetch = useCallback(() => fetchTranscript(pane, { since: hashRef.current, limit: TRANSCRIPT_PAGE_SIZE, agent }), [pane, agent]);
   const apply = useCallback((r) => {
-    if (!r) return; // 204 / null → keep last
+    if (!r) {
+      // A 204 is still a successful App Server check. It proves a previous connection refusal recovered
+      // even though the transcript hash itself did not change.
+      appServerFailureSinceRef.current = null;
+      setUnavailable(null);
+      setUnavailableDetail(null);
+      return; // 204 / null → keep last
+    }
+    if (r.unavailable === 'app-server-unavailable') {
+      const now = Date.now();
+      if (appServerFailureSinceRef.current == null) appServerFailureSinceRef.current = now;
+      if (now - appServerFailureSinceRef.current < APP_SERVER_FAILURE_GRACE_MS) return;
+      // This is a capability outage, not a session identity change. Keep the last verified transcript
+      // behind the connection gate so a short reconnect never destroys and rebuilds the visible chat.
+      setLoaded(true);
+      setUnavailable(r.unavailable);
+      setUnavailableDetail(r.detail || null);
+      return;
+    }
+    appServerFailureSinceRef.current = null;
     setLoaded(true); // first real response: from now on an empty list means an empty SESSION, not loading
     hashRef.current = r.hash || '';
     if (r.unavailable) {

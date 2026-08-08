@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, renderHook, waitFor } from '@testing-library/react';
+import { act, cleanup, renderHook, waitFor } from '@testing-library/react';
 import { getCodexSession } from '../src/api.js';
 import { codexKind, useCodexSession } from '../src/hooks/useCodexSession.js';
 
@@ -41,5 +41,48 @@ describe('useCodexSession', () => {
     rerender({ pane: '%managed' });
 
     expect(renders[nextRender]).toEqual({ pane: '%managed', loaded: false, managed: false });
+  });
+
+  it('keeps the last good session through a five-second connection grace period', async () => {
+    vi.useFakeTimers();
+    try {
+      const good = { managed: true, threadId: 'thread-1', status: { type: 'idle' } };
+      getCodexSession
+        .mockResolvedValueOnce(good)
+        .mockRejectedValue(new Error('temporary drop'));
+      const { result } = renderHook(() => useCodexSession('%1', true));
+      await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+      expect(result.current).toMatchObject({ loaded: true, managed: true, threadId: 'thread-1', error: null });
+
+      await act(async () => { await vi.advanceTimersByTimeAsync(750); });
+      expect(result.current.error).toBeNull();
+      await act(async () => { await vi.advanceTimersByTimeAsync(4500); });
+      expect(result.current.error).toBeNull();
+      await act(async () => { await vi.advanceTimersByTimeAsync(750); });
+      expect(result.current).toMatchObject({ managed: true, threadId: 'thread-1', error: 'temporary drop' });
+
+      getCodexSession.mockResolvedValue(good);
+      await act(async () => { await vi.advanceTimersByTimeAsync(750); });
+      expect(result.current.error).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('keeps the neutral loading state while an initial connection is still retrying', async () => {
+    vi.useFakeTimers();
+    try {
+      getCodexSession.mockRejectedValue(new Error('temporary drop'));
+      const { result } = renderHook(() => useCodexSession('%1', true));
+      await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+      expect(result.current).toMatchObject({ loaded: false, error: null });
+
+      await act(async () => { await vi.advanceTimersByTimeAsync(4500); });
+      expect(result.current).toMatchObject({ loaded: false, error: null });
+      await act(async () => { await vi.advanceTimersByTimeAsync(750); });
+      expect(result.current).toMatchObject({ loaded: true, error: 'temporary drop' });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
