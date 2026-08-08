@@ -661,6 +661,8 @@ describe('ChatComposer', () => {
     expect(editor.parentElement?.style.bottom).toBe('280px');
     const draft = editor.querySelector('textarea');
     expect(draft.value).toBe('再整理结果');
+    expect(draft.selectionStart).toBe(draft.value.length);
+    expect(draft.selectionEnd).toBe(draft.value.length);
     typeInto(draft, '重新整理结果');
     fireEvent.click(screen.getByRole('button', { name: '保存' }));
     await waitFor(() => expect(commitCodexQueuedEdit)

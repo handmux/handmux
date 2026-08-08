@@ -328,6 +328,13 @@ export default function ChatComposer({
   const submitInFlightRef = useRef(false);
   const noticeTimerRef = useRef(null);
   const queueEditorRef = useRef(null);
+  const queueEditorInputRef = useRef(null);
+  useLayoutEffect(() => {
+    const input = queueEditorInputRef.current;
+    if (!queueEditor?.key || !input) return;
+    const end = input.value.length;
+    input.setSelectionRange(end, end);
+  }, [queueEditor?.key]);
   useEffect(() => { setChatDraft(value); }, [value]);
   useEffect(() => () => clearTimeout(noticeTimerRef.current), []);
   useEffect(() => () => {
@@ -1066,7 +1073,7 @@ export default function ChatComposer({
           <div className="settings-confirm cc-queue-edit-dialog" role="dialog" aria-modal="true"
             aria-label={t('chat.queue.editTitle')} onClick={(event) => event.stopPropagation()}>
             <h2>{t('chat.queue.editTitle')}</h2>
-            <textarea autoFocus value={queueEditor.draft} disabled={queueEditor.busy}
+            <textarea ref={queueEditorInputRef} autoFocus value={queueEditor.draft} disabled={queueEditor.busy}
               aria-label={t('chat.queue.editTitle')} placeholder={t('chat.queue.editPlaceholder')}
               onChange={(event) => updateQueueEditor({ draft: event.target.value, error: '' })} />
             {queueEditor.error && <p className="cc-queue-dialog-error" role="status">{queueEditor.error}</p>}
