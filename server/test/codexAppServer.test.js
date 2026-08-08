@@ -558,16 +558,19 @@ describe('Codex App Server client', () => {
     app.close();
   });
 
-  it('lists official models and updates model and effort on the current thread', async () => {
+  it('lists official models and updates thread settings on the current thread', async () => {
     const proxy = fakeProxy();
     const app = createCodexAppServer({ home: '/home/test', exists: () => true, connect: () => proxy.ws });
     expect(await app.models('%1', 'thread-1')).toEqual([
       expect.objectContaining({ model: 'gpt-test', defaultReasoningEffort: 'medium' }),
     ]);
-    expect(await app.updateSettings('%1', 'thread-1', { model: 'gpt-new', effort: 'high' }))
-      .toMatchObject({ model: 'gpt-new', effort: 'high' });
+    expect(await app.updateSettings('%1', 'thread-1', {
+      model: 'gpt-new', effort: 'high', approvalPolicy: 'never',
+    })).toMatchObject({ model: 'gpt-new', effort: 'high', approvalPolicy: 'never' });
     expect(proxy.sent).toContainEqual(expect.objectContaining({
-      method: 'thread/settings/update', params: { threadId: 'thread-1', model: 'gpt-new', effort: 'high' },
+      method: 'thread/settings/update', params: {
+        threadId: 'thread-1', model: 'gpt-new', effort: 'high', approvalPolicy: 'never',
+      },
     }));
     app.close();
   });

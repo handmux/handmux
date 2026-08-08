@@ -205,6 +205,13 @@ export function codexRoutes({ codexApp, commands, claudeEvents }) {
       }
       updates[key] = value.trim();
     }
+    const approvalPolicy = req.body?.approvalPolicy;
+    if (approvalPolicy != null) {
+      if (!['untrusted', 'on-request', 'never'].includes(approvalPolicy)) {
+        return res.status(400).json({ error: 'bad approvalPolicy' });
+      }
+      updates.approvalPolicy = approvalPolicy;
+    }
     if (!Object.keys(updates).length) return res.status(400).json({ error: 'no settings supplied' });
     try { res.json({ settings: await codexApp.updateSettings(target.pane, target.threadId, updates) }); }
     catch (error) { codexError(res, error); }

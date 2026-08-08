@@ -279,6 +279,51 @@ describe('ChatComposer', () => {
     expect(document.activeElement).not.toBe(input);
   });
 
+  it('changes the approval policy from session status for subsequent turns', async () => {
+    const settings = {
+      model: 'gpt-test', effort: 'medium', cwd: '/work/project',
+      sandboxPolicy: { type: 'workspaceWrite' }, approvalPolicy: 'on-request',
+    };
+    updateCodexSettings.mockResolvedValueOnce({
+      settings: { ...settings, approvalPolicy: 'never' },
+    });
+    render(<ChatComposer pane="%1" agent="codex" kind="working" codexSession={{
+      managed: true,
+      settings,
+      contextUsage: { usedTokens: 120_000, totalTokens: 258_400 },
+    }} />);
+
+    fireEvent.click(screen.getByRole('button', { name: '会话状态，上下文占用 46%' }));
+    fireEvent.click(screen.getByRole('button', { name: '设置审批方式，当前为按需确认' }));
+    expect(screen.queryByRole('dialog', { name: '会话状态' })).toBeNull();
+    const menu = screen.getByRole('dialog', { name: '审批方式' });
+    expect(screen.getByRole('button', { name: /按需确认/ }).getAttribute('aria-pressed')).toBe('true');
+    expect(menu.textContent).toContain('修改从下一条消息生效');
+
+    fireEvent.click(screen.getByRole('button', { name: /不请求确认/ }));
+    await waitFor(() => expect(updateCodexSettings).toHaveBeenCalledWith('%1', {
+      approvalPolicy: 'never',
+    }));
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '审批方式' })).toBeNull());
+    expect(screen.getByRole('status').textContent).toContain('审批方式已更新，下条消息生效');
+
+    fireEvent.click(screen.getByRole('button', { name: '会话状态，上下文占用 46%' }));
+    expect(screen.getByRole('button', { name: '设置审批方式，当前为不请求确认' })).toBeTruthy();
+  });
+
+  it('labels granular App Server approval settings without rendering the raw object', () => {
+    render(<ChatComposer pane="%1" agent="codex" kind="idle" codexSession={{
+      managed: true,
+      settings: {
+        model: 'gpt-test', effort: 'medium',
+        approvalPolicy: { granular: { rules: true, sandbox_approval: true, mcp_elicitations: false } },
+      },
+      contextUsage: { usedTokens: 10_000, totalTokens: 100_000 },
+    }} />);
+    fireEvent.click(screen.getByRole('button', { name: '会话状态，上下文占用 10%' }));
+    expect(screen.getByRole('button', { name: '设置审批方式，当前为自定义' })).toBeTruthy();
+  });
+
   it.each([
     [103_359, 'low'],
     [103_360, 'medium'],
