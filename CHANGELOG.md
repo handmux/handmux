@@ -6,6 +6,7 @@ All notable changes to handmux. Format follows [Keep a Changelog](https://keepac
 
 ### Fixed
 
+- 修复打开或切换 Codex 对话时偶尔闪过“开始托管”页面的问题。
 - 统一 Codex 与 Claude Code 对话的首屏加载表现，消息尚未加载时不再显示工作波浪点。
 - 修复 Codex 对话偶尔把内部 `AGENTS.md` instructions 当成用户消息展示的问题。
 - Keep Codex turns visibly stopping until App Server confirms the interruption has completed.

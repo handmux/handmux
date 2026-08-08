@@ -8,23 +8,32 @@ const EMPTY = {
 };
 
 export function useCodexSession(pane, enabled, refreshToken = null) {
-  const [session, setSession] = useState(EMPTY);
-  useEffect(() => { setSession(EMPTY); }, [pane, enabled]);
+  const scope = enabled && pane ? pane : null;
+  const [snapshot, setSnapshot] = useState(() => ({ scope, session: EMPTY }));
+  useEffect(() => {
+    setSnapshot((current) => (current.scope === scope ? current : { scope, session: EMPTY }));
+  }, [scope]);
   const fetch = useCallback(() => getCodexSession(pane), [pane]);
   const apply = useCallback((result) => {
     if (!result) return;
-    setSession({
-      ...EMPTY, ...result, loaded: true, error: null,
-      approvals: result.approvals || [], userInputs: result.userInputs || [], queue: result.queue || [],
+    setSnapshot({
+      scope,
+      session: {
+        ...EMPTY, ...result, loaded: true, error: null,
+        approvals: result.approvals || [], userInputs: result.userInputs || [], queue: result.queue || [],
+      },
     });
-  }, []);
+  }, [scope]);
   const fail = useCallback((error) => {
-    setSession((current) => ({
-      ...current,
-      loaded: true,
-      error: error?.message || 'Codex connection unavailable',
+    setSnapshot((current) => ({
+      scope,
+      session: {
+        ...(current.scope === scope ? current.session : EMPTY),
+        loaded: true,
+        error: error?.message || 'Codex connection unavailable',
+      },
     }));
-  }, []);
+  }, [scope]);
   usePollingLoop({
     fetch,
     apply,
@@ -33,7 +42,7 @@ export function useCodexSession(pane, enabled, refreshToken = null) {
     enabled: enabled && !!pane,
     deps: [pane, refreshToken],
   });
-  return session;
+  return snapshot.scope === scope ? snapshot.session : EMPTY;
 }
 
 export function codexKind(session) {
