@@ -24,6 +24,7 @@ import { transcriptReader } from '../transcriptReader.js';
 import { parsePendingPrompt } from '../pendingPrompt.js';
 import { readClaudeContext } from '../usage.js';
 import { resolveCodexRollout, sessionsDir as codexSessionsDir } from '../agents/codex.js';
+import { enrichCodexFileDiffs } from '../codexDiff.js';
 
 // Pure index-based projection: O(page size), not O(transcript size). `before` stays exclusive, including
 // for unusual fractional cursors (the old `k < before` filter included indices through ceil(before) - 1).
@@ -115,7 +116,17 @@ export function transcriptRoutes({
           // show an empty conversation; the next poll will discover the file once Codex creates it.
           if (!file) return res.json({ ...empty, session: sessionId });
           const parsed = await reader.read(file, req.chatAgent.transcript.createParser);
-          const { messages, firstSeq, hasMore } = pageTranscript(parsed, before, limit);
+          const page = pageTranscript(parsed, before, limit);
+          let { messages } = page;
+          const { firstSeq, hasMore } = page;
+          const needsFileLines = messages.some((message) => message.tool?.name === 'apply_patch'
+            && message.tool.diff && !message.tool.diff.hunks?.length);
+          if (needsFileLines && codexApp?.read) {
+            try {
+              const opened = await codexApp.read(req.query.pane, sessionId);
+              messages = enrichCodexFileDiffs(messages, opened?.thread);
+            } catch { /* The rollout remains readable; an unavailable App Server must not fabricate lines. */ }
+          }
           if (before == null) {
             const hash = createHash('sha1').update(JSON.stringify(messages)).digest('hex').slice(0, 16);
             if (req.query.since === hash) return res.status(204).end();

@@ -170,7 +170,7 @@ describe('Codex rollout transcript', () => {
     expect(parsed[0].tool).toMatchObject({
       name: 'apply_patch',
       input: { file_path: 'web/src/App.jsx', patch },
-      diff: { added: 1, removed: 1 },
+      diff: { added: 1, removed: 1, hunks: null },
     });
   });
 });

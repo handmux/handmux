@@ -145,6 +145,68 @@ describe('GET /api/transcript', () => {
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   });
 
+  it('adds real file line numbers from the matching App Server diff without replacing rollout order', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-route-diff-lines-'));
+    const file = path.join(dir, 'rollout-aaaaaaaa-0000-0000-0000-000000000005.jsonl');
+    const patch = [
+      '*** Begin Patch',
+      '*** Update File: /work/a.js',
+      '@@',
+      ' keep',
+      '-old',
+      '+new',
+      '+extra',
+      '*** End Patch',
+    ].join('\n');
+    fs.writeFileSync(file, [
+      JSON.stringify({
+        type: 'response_item',
+        payload: {
+          type: 'custom_tool_call', name: 'exec', call_id: 'patch-one',
+          input: `const patch = ${JSON.stringify(patch)}; text(await tools.apply_patch(patch));`,
+          internal_chat_message_metadata_passthrough: { turn_id: 'turn-1' },
+        },
+      }),
+      JSON.stringify({
+        type: 'response_item',
+        payload: { type: 'custom_tool_call_output', call_id: 'patch-one', output: '{}' },
+      }),
+    ].join('\n') + '\n');
+    const read = vi.fn(async () => ({ thread: { turns: [{
+      id: 'turn-1', status: 'completed', items: [{
+        id: 'files-1', type: 'fileChange', status: 'completed', changes: [{
+          path: '/work/a.js', kind: { type: 'update' },
+          diff: '@@ -40,2 +40,3 @@\n keep\n-old\n+new\n+extra',
+        }],
+      }],
+    }] } }));
+    const app = express();
+    app.use(transcriptRoutes({
+      commands: {}, claudeEvents: noHook,
+      codexApp: {
+        discover: vi.fn(async () => ({ managed: true, threadId: 'aaaaaaaa-0000-0000-0000-000000000005' })),
+        read,
+      },
+      findCodexRollout: vi.fn(async () => file),
+    }));
+    try {
+      const { status, body } = await call(app, '/transcript?pane=%251&agent=codex');
+      expect(status).toBe(200);
+      expect(body.messages).toHaveLength(1);
+      expect(body.messages[0]).toMatchObject({
+        type: 'tool', turnId: 'turn-1',
+        tool: {
+          name: 'apply_patch', input: { file_path: '/work/a.js' },
+          diff: {
+            added: 2, removed: 1,
+            hunks: [{ oldStart: 40, newStart: 40, lines: [' keep', '-old', '+new', '+extra'] }],
+          },
+        },
+      });
+      expect(read).toHaveBeenCalledWith('%1', 'aaaaaaaa-0000-0000-0000-000000000005');
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  });
+
   it('shows a managed empty Codex thread before its first persisted turn', async () => {
     const app = express();
     app.use(transcriptRoutes({

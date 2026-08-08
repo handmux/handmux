@@ -211,25 +211,19 @@ function applyPatchCalls(patch) {
     const body = patch.slice(section.start, end < 0 ? patch.length : end);
     let added = 0;
     let removed = 0;
-    const hunks = [];
-    let lines = [];
-    const flush = () => {
-      if (lines.length) hunks.push({ oldStart: 0, newStart: 0, lines });
-      lines = [];
-    };
     for (const line of body.split('\n').slice(1)) {
-      if (line.startsWith('@@')) { flush(); continue; }
+      if (line.startsWith('@@')) continue;
       if (!/^[+\- ]/.test(line)) continue;
       if (line.startsWith('+')) added++;
       else if (line.startsWith('-')) removed++;
-      lines.push(line);
     }
-    flush();
     return {
       name: 'apply_patch',
       input: { file_path: section.path, patch },
       diff: {
-        added, removed, hunks: hunks.length ? hunks : null,
+        // apply_patch's persisted input normally uses bare `@@` markers with no file positions. Keep the
+        // stat, but never invent line zero; the transcript route enriches this from App Server's unified diff.
+        added, removed, hunks: null,
         ...(section.kind === 'Add' ? { created: true } : {}),
       },
     };
@@ -302,8 +296,11 @@ export function createCodexTranscriptParser() {
   const pending = new Map();
   let lineIndex = 0;
 
-  const toolMessage = (i, ts, name, input, diff) => ({
+  const toolMessage = (i, ts, name, input, diff, item) => ({
     i, role: 'assistant', type: 'tool', ts,
+    ...(item?.internal_chat_message_metadata_passthrough?.turn_id
+      ? { turnId: item.internal_chat_message_metadata_passthrough.turn_id }
+      : {}),
     tool: { name, input, result: null, isError: false, ...(diff ? { diff } : {}) },
   });
 
@@ -347,7 +344,7 @@ export function createCodexTranscriptParser() {
       }
 
       if (item.type === 'function_call') {
-        const message = toolMessage(i, ts, item.name || '', parseInput(item.arguments));
+        const message = toolMessage(i, ts, item.name || '', parseInput(item.arguments), null, item);
         messages.push(message);
         if (item.call_id) pending.set(item.call_id, [message]);
         continue;
@@ -365,7 +362,7 @@ export function createCodexTranscriptParser() {
       }
 
       if (item.type === 'tool_search_call') {
-        const message = toolMessage(i, ts, 'tool_search', parseInput(item.arguments));
+        const message = toolMessage(i, ts, 'tool_search', parseInput(item.arguments), null, item);
         if (item.status && item.status !== 'in_progress') {
           message.tool.result = '';
           message.tool.isError = item.status === 'failed';
@@ -390,8 +387,8 @@ export function createCodexTranscriptParser() {
         const script = typeof item.input === 'string' ? item.input : '';
         const calls = extractCustomCalls(script);
         const targets = calls
-          ? calls.map((call) => toolMessage(i, ts, call.name, call.input, call.diff))
-          : [toolMessage(i, ts, item.name || 'exec', { script: cap(script, SCRIPT_CAP) })];
+          ? calls.map((call) => toolMessage(i, ts, call.name, call.input, call.diff, item))
+          : [toolMessage(i, ts, item.name || 'exec', { script: cap(script, SCRIPT_CAP) }, null, item)];
         messages.push(...targets);
         if (item.call_id) pending.set(item.call_id, targets);
         continue;
