@@ -2258,7 +2258,7 @@ button.cmd-text { background: none; border: none; text-align: left; }
    newest message; .new-output's own right/bottom:12px lands it above the composer since .chat-view is a
    positioning context. */
 .chat-scroll {
-  flex: 1; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch;
+  flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior-y: contain; -webkit-overflow-scrolling: touch;
   display: flex; flex-direction: column; gap: 8px;
   padding: 12px 12px calc(12px + env(safe-area-inset-bottom, 0px));
   /* Kill the browser's native long-press selection + its ugly system copy menu (Chrome's bottom bar,

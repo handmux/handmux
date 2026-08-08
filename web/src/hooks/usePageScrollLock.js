@@ -12,38 +12,58 @@ import { useEffect } from 'react';
 //     works again.
 //
 // Per touch we look at where the finger landed:
-//   canScrollY (terminal viewport, sheet bodies) → leave it fully to native.
+//   canScrollY (terminal viewport, sheet bodies) → leave it to native only while the gesture's direction
+//     still has scroll room. At a top/bottom edge we must block the remainder or it chains into page-pan.
 //   canScrollX only (the horizontal key strip) → allow horizontal moves, block vertical (the page-pan leak
 //     from key buttons, whose touch-action:manipulation would otherwise let a vertical drag pan the page).
 //   neither (dock handle, composer, gaps) → block every direction.
 function scrollableAxes(el) {
-  let x = false, y = false;
+  const x = [], y = [];
   for (let n = el; n && n !== document.body && n !== document.documentElement; n = n.parentElement) {
     const s = getComputedStyle(n);
-    if (!y && (s.overflowY === 'auto' || s.overflowY === 'scroll') && n.scrollHeight > n.clientHeight) y = true;
-    if (!x && (s.overflowX === 'auto' || s.overflowX === 'scroll') && n.scrollWidth > n.clientWidth) x = true;
-    if (x && y) break;
+    if ((s.overflowY === 'auto' || s.overflowY === 'scroll') && n.scrollHeight > n.clientHeight) y.push(n);
+    if ((s.overflowX === 'auto' || s.overflowX === 'scroll') && n.scrollWidth > n.clientWidth) x.push(n);
   }
   return { x, y };
 }
 
+function canConsumeVertical(owners, fingerDy) {
+  if (fingerDy === 0) return true;
+  return owners.some((owner) => (
+    fingerDy < 0
+      ? owner.scrollTop + owner.clientHeight < owner.scrollHeight - 1
+      : owner.scrollTop > 1
+  ));
+}
+
 export function usePageScrollLock() {
   useEffect(() => {
-    let mode = 'block'; // 'free' (owner scrolls both) | 'xonly' (horizontal scroller) | 'block'
-    let sx = 0, sy = 0;
+    let mode = 'block'; // 'yscroll' (boundary-aware) | 'xonly' (horizontal scroller) | 'block'
+    let owners = { x: [], y: [] };
+    let sx = 0, sy = 0, lastY = 0;
     const onStart = (e) => {
       const t = e.touches[0];
       sx = t ? t.clientX : 0;
       sy = t ? t.clientY : 0;
-      if (!(e.target instanceof Element)) { mode = 'block'; return; }
-      const { x, y } = scrollableAxes(e.target);
-      mode = y ? 'free' : x ? 'xonly' : 'block';
+      lastY = sy;
+      if (!(e.target instanceof Element)) { mode = 'block'; owners = { x: [], y: [] }; return; }
+      owners = scrollableAxes(e.target);
+      mode = owners.y.length ? 'yscroll' : owners.x.length ? 'xonly' : 'block';
     };
     const onMove = (e) => {
-      if (mode === 'free' || !e.cancelable) return;
+      if (!e.cancelable) return;
+      const t = e.touches[0];
+      const dx = t ? t.clientX - sx : 0;
+      const dy = t ? t.clientY - sy : 0;
+      const stepDy = t ? t.clientY - lastY : 0;
+      if (t) lastY = t.clientY;
+      if (mode === 'yscroll') {
+        if (Math.abs(dx) > Math.abs(dy) || canConsumeVertical(owners.y, stepDy)) return;
+        e.preventDefault(); // the vertical owner hit its edge — do not hand the rest to the page
+        return;
+      }
       if (mode === 'xonly') {
-        const t = e.touches[0];
-        if (t && Math.abs(t.clientX - sx) >= Math.abs(t.clientY - sy)) return; // horizontal → its own axis
+        if (t && Math.abs(dx) >= Math.abs(dy)) return; // horizontal → its own axis
       }
       e.preventDefault(); // block the page pan (vertical on the strip, everything on a non-scroller)
     };

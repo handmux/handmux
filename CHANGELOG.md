@@ -25,6 +25,7 @@ All notable changes to handmux. Format follows [Keep a Changelog](https://keepac
 
 ### Fixed
 
+- 修复软键盘刚展开时，在已经滚动到底的对话区域继续上滑会带动整个页面移动的问题。
 - 修复在对话输入区的快捷键条上上下滑动时，整个底部区域偶尔跟随手势移动的问题。
 - 修复应用长时间停留在后台后，返回时对话和页面状态可能一直停在旧画面的问题。
 - Codex 状态、通知和对话统一只使用 App Server；安装与设置不再提示或写入 Codex Hooks，升级后会安全清理旧版 Handmux 自己安装的 Codex Hook 配置。
