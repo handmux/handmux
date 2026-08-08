@@ -356,7 +356,7 @@ export default {
 'chat.managedGuide.start': '开始托管',
 'chat.managedGuide.submitting': '正在启动…',
 'chat.managedGuide.confirmTitle': '开始托管？',
-'chat.managedGuide.confirmHint': '当前 Codex 进程会结束，正在执行的任务也会停止。Handmux 会读取 Codex 返回的恢复信息并原地继续，不会替你处理信任提示。',
+'chat.managedGuide.confirmHint': '当前 Codex 进程会结束，正在执行的任务也会停止。恢复过程中可能需要你前往终端，人工处理信任或其他确认。',
 'chat.managedGuide.confirmAction': '结束并开始托管',
 'chat.managedGuide.startingTitle': '正在启动托管',
 'chat.managedGuide.startingHint': '正在恢复原会话，成功后会自动进入对话。',

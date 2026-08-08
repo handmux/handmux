@@ -25,7 +25,10 @@ describe('CodexManagedGuide', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '开始托管' }));
     expect(takeoverCodexSession).not.toHaveBeenCalled();
-    expect(screen.getByRole('dialog')).toBeTruthy();
+    const dialog = screen.getByRole('alertdialog');
+    expect(dialog.classList.contains('settings-confirm')).toBe(true);
+    expect(dialog.parentElement.classList.contains('settings-confirm-backdrop')).toBe(true);
+    expect(screen.getByText(/可能需要你前往终端/)).toBeTruthy();
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: '结束并开始托管' }));
     });
@@ -57,7 +60,9 @@ describe('CodexManagedGuide', () => {
     }} onTerminal={onTerminal} />);
     expect(screen.queryByRole('button', { name: '前往终端' })).toBeNull();
 
-    act(() => { vi.advanceTimersByTime(5_000); });
+    act(() => { vi.advanceTimersByTime(9_999); });
+    expect(screen.queryByRole('button', { name: '前往终端' })).toBeNull();
+    act(() => { vi.advanceTimersByTime(1); });
     expect(screen.getByText(/可能正在终端等待信任或其他确认/)).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: '前往终端' }));
     expect(onTerminal).toHaveBeenCalledOnce();

@@ -357,7 +357,7 @@ export default {
 'chat.managedGuide.start': 'Start managed mode',
 'chat.managedGuide.submitting': 'Starting…',
 'chat.managedGuide.confirmTitle': 'Start managed mode?',
-'chat.managedGuide.confirmHint': 'The current Codex process will end, including any task in progress. Handmux reads Codex’s own recovery information and resumes it in place, and never accepts trust prompts for you.',
+'chat.managedGuide.confirmHint': 'The current Codex process will end, including any task in progress. Resuming may require you to open the terminal and handle trust or another confirmation manually.',
 'chat.managedGuide.confirmAction': 'End and start managed mode',
 'chat.managedGuide.startingTitle': 'Starting managed mode',
 'chat.managedGuide.startingHint': 'Resuming the original session. Chat opens automatically when it is ready.',

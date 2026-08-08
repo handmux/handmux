@@ -1,10 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import { takeoverCodexSession, UnauthorizedError } from '../api.js';
 import { t } from '../i18n';
-import ActionSheet from './ActionSheet.jsx';
 import { BotIcon } from './icons.jsx';
 
-const TERMINAL_HINT_MS = 5_000;
+const TERMINAL_HINT_MS = 10_000;
 
 export default function CodexManagedGuide({ pane, session, onTerminal, onAuthFail, onTakeoverChange }) {
   const [confirming, setConfirming] = useState(false);
@@ -91,15 +90,22 @@ export default function CodexManagedGuide({ pane, session, onTerminal, onAuthFai
         </button>
       )}
       {starting && !showTerminalHint && <div className="codex-managed-guide-space" />}
-      <ActionSheet
-        open={confirming}
-        title={t('chat.managedGuide.confirmTitle')}
-        subtitle={t('chat.managedGuide.confirmHint')}
-        actions={[{
-          key: 'takeover', danger: true, label: t('chat.managedGuide.confirmAction'), onClick: start,
-        }]}
-        onClose={() => setConfirming(false)}
-      />
+      {confirming && (
+        <div className="settings-confirm-backdrop" onClick={() => setConfirming(false)}>
+          <div className="settings-confirm" role="alertdialog" aria-modal="true"
+            aria-labelledby="codex-takeover-title" aria-describedby="codex-takeover-hint"
+            onClick={(event) => event.stopPropagation()}>
+            <h2 id="codex-takeover-title">{t('chat.managedGuide.confirmTitle')}</h2>
+            <p id="codex-takeover-hint">{t('chat.managedGuide.confirmHint')}</p>
+            <div className="settings-confirm-actions">
+              <button type="button" autoFocus onClick={() => setConfirming(false)}>{t('common.cancel')}</button>
+              <button type="button" className="danger" onClick={start}>
+                {t('chat.managedGuide.confirmAction')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -3,7 +3,7 @@ import { isPaneId } from '../tmux/commands.js';
 import { getAgent } from '../agents/index.js';
 import { codexExitSessionId } from '../agents/codex.js';
 
-const TAKEOVER_TERMINAL_HINT_MS = 5_000;
+const TAKEOVER_TERMINAL_HINT_MS = 10_000;
 const INPUT_SETTLE_MS = 100;
 const FIRST_INTERRUPT_ATTEMPTS = 15;
 const FINAL_EXIT_ATTEMPTS = 15;
