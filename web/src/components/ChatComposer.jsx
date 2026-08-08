@@ -311,7 +311,7 @@ function CodexConfigMenu({ open, pane, settings, busy, onChange, onClose, onAuth
 export default function ChatComposer({
   pane, agent = 'claude', kind, cwd = null, onKey = () => {}, onAuthFail, onSent, onInteractiveSlash,
   shortcuts = null, micAvailable = false, desktop = false, codexSession = null,
-  onCodexSendStart, onCodexSendResult,
+  onCodexSendStart, onCodexSendResult, onActionError,
 }) {
   // Draft persists across an app exit / lens switch (shared store with the dock's chat page — switching
   // lenses carries your half-typed message either way). send/clear set '' → the stored draft clears too.
@@ -320,12 +320,16 @@ export default function ChatComposer({
   const [stopping, setStopping] = useState(false);
   const [queueAction, setQueueAction] = useState('');
   const [handledQueueIds, setHandledQueueIds] = useState([]);
-  const [submitError, setSubmitError] = useState('');
   const [notice, setNotice] = useState('');
   const submitInFlightRef = useRef(false);
   const noticeTimerRef = useRef(null);
   useEffect(() => { setChatDraft(value); }, [value]);
   useEffect(() => () => clearTimeout(noticeTimerRef.current), []);
+  const clearActionError = () => onActionError?.(null);
+  const reportActionError = (kind, error) => onActionError?.({
+    kind,
+    detail: error?.serverError || error?.message || null,
+  });
   const ref = useRef(null);          // the textarea
   const uploadRef = useRef(null);    // hidden <input type=file>
   const tapPt = useRef({ x: 0, y: 0, moved: false }); // for tap-to-focus on the card's blank areas
@@ -591,7 +595,7 @@ export default function ChatComposer({
     clearNotice();
     submitInFlightRef.current = true;
     setSubmitting(true);
-    setSubmitError('');
+    clearActionError();
     stopVoiceIfRecording();
     if (optimistic) {
       // The App Server transcript remains authoritative. This only clears the page-local draft and lets
@@ -617,7 +621,7 @@ export default function ChatComposer({
     } catch (err) {
       if (optimisticId) onCodexSendResult?.(optimisticId, { error: err });
       if (err instanceof UnauthorizedError) onAuthFail?.();
-      else setSubmitError(err?.serverError || err?.message || t('chat.sendFailed'));
+      else if (!optimisticId) reportActionError('send', err);
     } finally {
       submitInFlightRef.current = false;
       setSubmitting(false);
@@ -628,14 +632,14 @@ export default function ChatComposer({
   const stop = async () => {
     if (stopping) return;
     setStopping(true);
-    setSubmitError('');
+    clearActionError();
     try {
       if (managedCodex) await interruptCodexSession(pane);
       else await onKey('Escape');
     } catch (err) {
       setStopping(false);
       if (err instanceof UnauthorizedError) onAuthFail?.();
-      else setSubmitError(err?.serverError || err?.message || t('chat.stopFailed'));
+      else reportActionError('stop', err);
     }
   };
   const actOnQueued = async (action, item) => {
@@ -643,7 +647,7 @@ export default function ChatComposer({
     const optimisticId = action === 'steer' ? onCodexSendStart?.(pane, item.text, 'steer') : null;
     if (action === 'steer') setHandledQueueIds((ids) => [...ids, item.id]);
     setQueueAction(`${action}:${item.id}`);
-    setSubmitError('');
+    clearActionError();
     try {
       const result = action === 'steer'
         ? await steerCodexQueuedMessage(pane, item.id)
@@ -654,7 +658,7 @@ export default function ChatComposer({
       if (action === 'steer') setHandledQueueIds((ids) => ids.filter((id) => id !== item.id));
       if (optimisticId) onCodexSendResult?.(optimisticId, { error: err });
       if (err instanceof UnauthorizedError) onAuthFail?.();
-      else setSubmitError(err?.serverError || err?.message || t('chat.queue.actionFailed'));
+      else reportActionError('queue', err);
     } finally { setQueueAction(''); }
   };
   const onComposerKeyDown = (event) => {
@@ -696,6 +700,7 @@ export default function ChatComposer({
   // structured dispatch as the send button, so a shortcut can never write into the hidden TUI.
   const runFav = async (fav) => {
     clearNotice();
+    clearActionError();
     if (fav.kind === 'key') { onKey(fav.text); return; }
     if (!pane) return;
     const optimistic = managedCodex && !!fav.enter && !fav.text.trim().startsWith('/');
@@ -720,7 +725,7 @@ export default function ChatComposer({
     } catch (err) {
       if (optimisticId) onCodexSendResult?.(optimisticId, { error: err });
       if (err instanceof UnauthorizedError) onAuthFail?.();
-      else setSubmitError(err?.serverError || err?.message || t('chat.sendFailed'));
+      else if (!optimisticId) reportActionError('send', err);
     }
   };
 
@@ -940,7 +945,6 @@ export default function ChatComposer({
           </div>
         </div>
       </div>
-      {submitError && <div className="cc-error" role="status">{submitError}</div>}
       {notice && <div className="cc-notice" role="status">{notice}</div>}
       {editOpen && <CmdFavEditor variant="chat" presets={serverShortcuts.chat}
         onChange={refreshShortcuts} onClose={() => setEditOpen(false)} />}

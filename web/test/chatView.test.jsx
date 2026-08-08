@@ -165,6 +165,16 @@ describe('ChatView', () => {
     expect(container.textContent).not.toContain('发送你的第一条消息');
   });
 
+  it('renders a composer failure inside the conversation with its actionable reason', async () => {
+    mockTranscript([]);
+    const { container } = render(<ChatView pane="%0" kind="done"
+      actionError={{ id: 'error-1', kind: 'send', detail: '连接已断开，请检查网络' }} />);
+
+    await screen.findByText('消息没有发送成功：连接已断开，请检查网络');
+    expect(container.querySelector('.chat-scroll .chat-action-error')).toBeTruthy();
+    expect(container.textContent).not.toContain('发送你的第一条消息');
+  });
+
   it('lets a new durable rollout message replace its temporary bubble without duplication', async () => {
     mockTranscript([]);
     const optimistic = [{

@@ -105,6 +105,21 @@ describe('ChatComposer', () => {
     expect(onSent).toHaveBeenCalledWith('继续实现');
   });
 
+  it('reports a terminal-backed send failure to the conversation instead of rendering red text under the composer', async () => {
+    const onActionError = vi.fn();
+    sendText.mockRejectedValueOnce(Object.assign(new Error('socket closed'), { serverError: '连接已断开' }));
+    render(<ChatComposer pane="%1" kind="idle" onActionError={onActionError} />);
+    const input = screen.getByPlaceholderText('和 Agent 对话…');
+    typeInto(input, '重试这条消息');
+    fireEvent.click(screen.getByRole('button', { name: '发送' }));
+
+    await waitFor(() => expect(onActionError).toHaveBeenLastCalledWith({
+      kind: 'send', detail: '连接已断开',
+    }));
+    expect(document.querySelector('.cc-error')).toBeNull();
+    expect(input.value).toBe('重试这条消息');
+  });
+
   it('locks editing and ignores repeated Enter while a send is in flight', async () => {
     const request = deferred();
     sendText.mockReturnValueOnce(request.promise);
@@ -155,11 +170,15 @@ describe('ChatComposer', () => {
 
   it('never falls back to terminal input for an unmanaged Codex composer', async () => {
     const onInteractiveSlash = vi.fn();
-    render(<ChatComposer pane="%1" agent="codex" kind="idle" onInteractiveSlash={onInteractiveSlash} />);
+    const onActionError = vi.fn();
+    render(<ChatComposer pane="%1" agent="codex" kind="idle" onInteractiveSlash={onInteractiveSlash}
+      onActionError={onActionError} />);
     const input = screen.getByPlaceholderText('和 Agent 对话…');
     typeInto(input, '/compact');
     fireEvent.click(screen.getByRole('button', { name: '发送' }));
-    await screen.findByText('请先在终端以托管模式重新启动 Codex');
+    await waitFor(() => expect(onActionError).toHaveBeenLastCalledWith({
+      kind: 'send', detail: '请先在终端以托管模式重新启动 Codex',
+    }));
     expect(sendText).not.toHaveBeenCalled();
     expect(onInteractiveSlash).not.toHaveBeenCalled();
   });

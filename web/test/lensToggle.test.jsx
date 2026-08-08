@@ -7,10 +7,10 @@ import LensSwitch from '../src/components/LensSwitch.jsx';
 afterEach(cleanup);
 
 describe('LensSwitch (one-tap toggle)', () => {
-  it('shows the current lens label; aria-label names the target action', () => {
+  it('shows the target lens label, matching the target action', () => {
     render(<LensSwitch value="terminal" onChange={() => {}} />);
     const btn = screen.getByRole('button', { name: '切换到对话视图' });
-    expect(btn.textContent).toContain('终端');
+    expect(btn.textContent).toContain('对话');
   });
 
   it('tapping while on terminal switches to chat', () => {
@@ -24,7 +24,7 @@ describe('LensSwitch (one-tap toggle)', () => {
     const onChange = vi.fn();
     render(<LensSwitch value="chat" onChange={onChange} />);
     const btn = screen.getByRole('button', { name: '切换到终端视图' });
-    expect(btn.textContent).toContain('对话');
+    expect(btn.textContent).toContain('终端');
     fireEvent.click(btn);
     expect(onChange).toHaveBeenCalledWith('terminal');
   });

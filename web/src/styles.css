@@ -2686,8 +2686,6 @@ button.cmd-text { background: none; border: none; text-align: left; }
   font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; overflow-wrap: anywhere;
 }
 .codex-approval-cwd { margin: 0 2px 10px; color: var(--ct-muted); font: 11px/1.35 ui-monospace, SFMono-Regular, Menlo, monospace; overflow-wrap: anywhere; }
-.cc-error { margin: 5px 12px 0; color: var(--danger, #d34b45); font-size: 12px; line-height: 1.35; }
-
 @media (prefers-reduced-motion: reduce) {
   .chat-tool-head, .chat-gate-btn, .chat-gate-opt { transition: none; }
 }

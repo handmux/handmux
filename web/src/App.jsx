@@ -150,8 +150,10 @@ export default function App() {
   const [handoffToast, setHandoffToast] = useState(null); // "switched to terminal to run /x" hint after a slash hand-off
   const [slashEcho, setSlashEcho] = useState(null); // optimistic command pill for a chat-staying slash command {name,args,paneId}
   const [codexOptimisticMessages, setCodexOptimisticMessages] = useState([]);
+  const [chatActionErrors, setChatActionErrors] = useState({}); // paneId -> latest composer action error shown in ChatView
   const [codexTakeoverPanes, setCodexTakeoverPanes] = useState(() => new Set());
   const codexOptimisticSeqRef = useRef(0);
+  const chatActionErrorSeqRef = useRef(0);
   const codexThreadByPaneRef = useRef(new Map());
   const [transcriptWake, setTranscriptWake] = useState({ paneId: null, seq: 0 }); // successful send -> immediate transcript refresh
   const [docToast, setDocToast] = useState(null); // transient error toast for absolute-path doc failures
@@ -1364,7 +1366,9 @@ export default function App() {
         // drop only its temporary moving bubble. A failed fresh send stays visible as page-local feedback.
         return item.source === 'steer'
           ? items.filter((candidate) => candidate.id !== id)
-          : items.map((candidate) => candidate.id === id ? { ...candidate, status: 'failed' } : candidate);
+          : items.map((candidate) => candidate.id === id
+            ? { ...candidate, status: 'failed', error: error?.serverError || error?.message || null }
+            : candidate);
       }
       if (result?.queued) {
         // The server-owned queue is now the authoritative visible state; the immediate poll triggered by
@@ -1374,6 +1378,21 @@ export default function App() {
       const status = item.source === 'steer' ? 'steered' : 'accepted';
       return items.map((candidate) => candidate.id === id
         ? { ...candidate, status } : candidate);
+    });
+  }, []);
+  const reportChatActionError = useCallback((paneId, error) => {
+    if (!paneId) return;
+    setChatActionErrors((currentErrors) => {
+      if (!error) {
+        if (!(paneId in currentErrors)) return currentErrors;
+        const next = { ...currentErrors };
+        delete next[paneId];
+        return next;
+      }
+      return {
+        ...currentErrors,
+        [paneId]: { ...error, id: `chat-action-error-${++chatActionErrorSeqRef.current}` },
+      };
     });
   }, []);
   const coverCodexOptimistic = useCallback((ids) => {
@@ -2111,6 +2130,7 @@ export default function App() {
                   onDocLinkTap={onDocLinkTap}
                   codexSession={codexSession}
                   optimisticMessages={codexOptimisticMessages.filter((item) => item.paneId === current.paneId)}
+                  actionError={chatActionErrors[current.paneId] || null}
                   onOptimisticCovered={coverCodexOptimistic}
                   slashEcho={slashEcho && slashEcho.paneId === current.paneId ? slashEcho : null}
                   refreshToken={transcriptWake.paneId === current.paneId ? transcriptWake.seq : null}
@@ -2154,6 +2174,7 @@ export default function App() {
                 onSent={onCommandSent}
                 onCodexSendStart={beginCodexSend}
                 onCodexSendResult={finishCodexSend}
+                onActionError={(error) => reportChatActionError(current.paneId, error)}
                 shortcuts={serverShortcuts}
                 micAvailable={micAvailable}
                 onInteractiveSlash={currentAgent === 'claude'

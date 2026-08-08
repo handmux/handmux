@@ -609,7 +609,7 @@ function CodexInputGate({ pane, input, onAuthFail }) {
 
 export default function ChatView({
   pane, agent = 'claude', kind, msg, onAuthFail, slashEcho, onSlashEchoDone,
-  refreshToken = null, codexSession = null, optimisticMessages = [], onOptimisticCovered,
+  refreshToken = null, codexSession = null, optimisticMessages = [], actionError = null, onOptimisticCovered,
   onDocLinkTap,
 }) {
   const { messages, hasMoreOlder, loadOlder, loadingOlder, session, loaded, unavailable, unavailableDetail } = useTranscript(pane, true, agent, refreshToken);
@@ -866,6 +866,12 @@ export default function ChatView({
     setAtBottom(true);
   };
 
+  useEffect(() => {
+    if (actionError?.id) scrollToBottom();
+    // A new composer failure belongs at the live tail, just like the message the user attempted to send.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [actionError?.id]);
+
   const onOutputLinkClick = (event) => {
     const anchor = event.target.closest?.('.chat-md a');
     if (!anchor || !event.currentTarget.contains(anchor)) return;
@@ -965,7 +971,7 @@ export default function ChatView({
         {!loaded && <LensBoot hint={t('boot.loading')} />}
         {/* The first poll uses the same neutral loading view as the terminal. Only show a nudge after the
             response confirms the session is genuinely empty; never flash a fake assistant reply. */}
-        {messages.length === 0 && visibleOptimistic.length === 0 && !sessionGate && loaded
+        {messages.length === 0 && visibleOptimistic.length === 0 && !actionError && !sessionGate && loaded
           && <div className="chat-new">{t('boot.chat_empty')}</div>}
         {messages.map((m, idx) => {
           if (m.type === 'thinking') return null; // dropped (see Bubble) — no bubble, no time
@@ -983,7 +989,8 @@ export default function ChatView({
           const label = item.status === 'sending' ? t('chat.outgoing.sending')
             : item.status === 'accepted' ? t('chat.outgoing.sent')
               : item.status === 'steered' ? t('chat.outgoing.steered')
-                : item.status === 'failed' ? t('chat.outgoing.failed') : '';
+                : item.status === 'failed' ? (item.error
+                  ? `${t('chat.outgoing.failed')}：${item.error}` : t('chat.outgoing.failed')) : '';
           return (
             <Fragment key={item.id}>
               <div className={`chat-bubble chat-me chat-optimistic is-${item.status}`}>{item.text}</div>
@@ -991,6 +998,13 @@ export default function ChatView({
             </Fragment>
           );
         })}
+        {actionError && (() => {
+          const fallback = actionError.kind === 'stop' ? t('chat.stopFailed')
+            : actionError.kind === 'queue' ? t('chat.queue.actionFailed') : t('chat.sendFailed');
+          const text = actionError.detail && actionError.detail !== fallback
+            ? `${fallback}：${actionError.detail}` : fallback;
+          return <div className="chat-turn-error chat-action-error" role="status">{text}</div>;
+        })()}
         {slashEcho && !echoCovered && (
           <div className="chat-slash-cmd">{slashEcho.name}{slashEcho.args ? ' ' + slashEcho.args : ''}</div>
         )}
