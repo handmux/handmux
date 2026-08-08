@@ -31,16 +31,17 @@ export function usePollingLoop({
     let timer = null;
     let inFlight = false;
     let repollAfterFlight = false;
+    let requestEpoch = 0;
     let burstRemaining = burstKey == null ? 0 : burstCount;
-    const tick = async () => {
+    const tick = async (myRequestEpoch) => {
       if (document.hidden) return;
       try {
         const r = await fetchRef.current();
-        if (!cancelled) applyRef.current(r);
+        if (!cancelled && myRequestEpoch === requestEpoch) applyRef.current(r);
       } catch (error) {
         // Most polling surfaces intentionally keep the last good state. Callers that need to explain a
         // missing capability (for example the managed Codex connection) may additionally expose the error.
-        if (!cancelled) errorRef.current?.(error);
+        if (!cancelled && myRequestEpoch === requestEpoch) errorRef.current?.(error);
       }
     };
     const nextDelay = () => {
@@ -52,7 +53,11 @@ export function usePollingLoop({
       if (cancelled || document.hidden) return;
       if (inFlight) { repollAfterFlight = true; return; }
       inFlight = true;
-      await tick();
+      const myRequestEpoch = ++requestEpoch;
+      await tick(myRequestEpoch);
+      // Returning from a long mobile background invalidates the request that was suspended there and
+      // starts a fresh one. Its eventual result must neither apply stale state nor disturb the new loop.
+      if (myRequestEpoch !== requestEpoch) return;
       inFlight = false;
       if (cancelled || document.hidden) return;
       const delay = repollAfterFlight ? 0 : nextDelay();
@@ -61,7 +66,17 @@ export function usePollingLoop({
     };
     void loop();
     const onVis = () => {
-      if (document.hidden) { clearTimeout(timer); return; }
+      if (document.hidden) {
+        clearTimeout(timer);
+        // A fetch suspended by the OS may never settle after a long app switch. Logically abandon it now;
+        // the epoch guard above drops its result if it eventually returns, preserving authoritative order.
+        if (inFlight) {
+          requestEpoch += 1;
+          inFlight = false;
+          repollAfterFlight = false;
+        }
+        return;
+      }
       clearTimeout(timer);
       if (inFlight) repollAfterFlight = true;
       else void loop();

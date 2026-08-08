@@ -99,4 +99,29 @@ describe('usePollingLoop', () => {
     expect(apply).toHaveBeenCalledWith(1);
     expect(fetch).toHaveBeenCalledTimes(2);
   });
+
+  it('abandons a request frozen by backgrounding and refreshes immediately on return', async () => {
+    vi.useFakeTimers();
+    setHidden(false);
+    let resolveFrozen;
+    const fetch = vi.fn()
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveFrozen = resolve; }))
+      .mockResolvedValue(2);
+    const apply = vi.fn();
+    render(<Harness fetch={fetch} apply={apply} intervalMs={1500} enabled />);
+    expect(fetch).toHaveBeenCalledTimes(1);
+
+    setHidden(true);
+    document.dispatchEvent(new Event('visibilitychange'));
+    await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
+    setHidden(false);
+    document.dispatchEvent(new Event('visibilitychange'));
+
+    await act(async () => {});
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(apply).toHaveBeenCalledWith(2);
+
+    await act(async () => { resolveFrozen(1); });
+    expect(apply).not.toHaveBeenCalledWith(1);
+  });
 });
