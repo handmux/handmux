@@ -61,7 +61,7 @@ export default function CodexManagedGuide({ pane, session, onTerminal, onAuthFai
     }
   };
 
-  const unbound = errorCode === 'codex-session-unbound';
+  const unbound = ['codex-session-unbound', 'codex-session-unconfirmed', 'codex-exit-blocked'].includes(errorCode);
   const paneGone = errorCode === 'codex-pane-gone' || errorCode === 'codex-pane-changed';
   const title = starting ? t('chat.managedGuide.startingTitle')
     : unbound ? t('chat.managedGuide.manualTitle')

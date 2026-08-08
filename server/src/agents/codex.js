@@ -17,6 +17,21 @@ export function rolloutSessionId(name) {
   return m ? m[1] : null;
 }
 
+const UUID_PARTS = '([0-9a-f]{8})\\s*-\\s*([0-9a-f]{4})\\s*-\\s*([0-9a-f]{4})\\s*-\\s*([0-9a-f]{4})\\s*-\\s*([0-9a-f]{12})';
+
+function lastUuidAfter(text, prefix) {
+  const matches = [...String(text || '').matchAll(new RegExp(`${prefix}\\s*${UUID_PARTS}`, 'gi'))];
+  const match = matches.at(-1);
+  return match ? match.slice(1).join('-').toLowerCase() : null;
+}
+
+// A normal Codex exit prints the exact command for the session that just exited. Keep this deliberately
+// stricter than a generic `codex resume` search so conversation text or shell history is not mistaken for
+// the current exit notice.
+export function codexExitSessionId(text) {
+  return lastUuidAfter(text, 'To continue this session, run\\s+codex\\s+resume');
+}
+
 // Last user turn out of a Codex rollout tail, for a recognizable one-line label. Codex records turns as
 // response_item messages: {payload:{type:'message',role:'user',content:[{type:'input_text',text}]}} (and a
 // flatter {type:'message',role:'user',...} in some versions). Skips the synthetic first turn Codex injects

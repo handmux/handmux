@@ -5,7 +5,10 @@ import path from 'node:path';
 import { AGENTS, getAgent, agentForProc } from '../src/agents/index.js';
 import { resolveVersionedComms } from '../src/agents/claude.js';
 import { resolveCodexComms } from '../src/agents/codex.js';
-import { resolveCodexRollout, resolveCodexSession, rolloutSessionId, codexUserSnippet } from '../src/agents/codex.js';
+import {
+  resolveCodexRollout, resolveCodexSession, rolloutSessionId, codexUserSnippet,
+  codexExitSessionId,
+} from '../src/agents/codex.js';
 import { parseAgentProcs } from '../src/agents/scanUtils.js';
 import { scanOrphans, takeoverOrphan } from '../src/orphans.js';
 
@@ -59,6 +62,12 @@ describe('codex rollout parsing', () => {
     expect(rolloutSessionId('rollout-2026-01-22T10-30-00-abcdef01-2345-6789-abcd-ef0123456789.jsonl'))
       .toBe('abcdef01-2345-6789-abcd-ef0123456789');
     expect(rolloutSessionId('notarollout.jsonl')).toBe(null);
+  });
+  it('reads the exact current UUID only from Codex exit output', () => {
+    const id = 'abcdef01-2345-6789-abcd-ef0123456789';
+    expect(codexExitSessionId(`old codex resume deadbeef\nTo continue this session, run codex resume ${id}\n$`)).toBe(id);
+    expect(codexExitSessionId('To continue this session, run codex resume abcdef01-2345-6789-\nabcd-ef0123456789')).toBe(id);
+    expect(codexExitSessionId(`user said codex resume ${id}`)).toBeNull();
   });
   it('picks the last real user turn, skipping synthetic environment/instructions', () => {
     const tail = [

@@ -35,9 +35,9 @@ describe('CodexManagedGuide', () => {
     expect(screen.getByText('正在启动托管')).toBeTruthy();
   });
 
-  it('does not claim takeover when the server cannot identify the original session', async () => {
+  it('does not claim takeover when Codex does not return a verifiable current session', async () => {
     const onTakeoverChange = vi.fn();
-    takeoverCodexSession.mockRejectedValue({ serverError: 'codex-session-unbound' });
+    takeoverCodexSession.mockRejectedValue({ serverError: 'codex-session-unconfirmed' });
     render(<CodexManagedGuide pane="%1" session={{ managed: false }} onTerminal={() => {}}
       onTakeoverChange={onTakeoverChange} />);
     fireEvent.click(screen.getByRole('button', { name: '开始托管' }));
@@ -45,7 +45,7 @@ describe('CodexManagedGuide', () => {
       fireEvent.click(screen.getByRole('button', { name: '结束并开始托管' }));
     });
     expect(screen.getByText('需要从终端继续')).toBeTruthy();
-    expect(screen.getByText(/因此没有结束当前进程/)).toBeTruthy();
+    expect(screen.getByText(/没有正常退出或返回可确认的恢复信息/)).toBeTruthy();
     expect(onTakeoverChange).toHaveBeenLastCalledWith('%1', false);
   });
 

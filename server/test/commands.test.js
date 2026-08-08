@@ -6,7 +6,7 @@ import {
   listSessions, listWindows, listPanes, listPaneIds, capturePane, paneInfo, paneLocation, sendText, sendHexInput, sendEnter,
   resizeWindow, restoreWindowSize, newSession, paneCurrentPath, newWindow,
   renameSession, renameWindow, sessionWindowCount, killWindow, swapWindows, wheelSeq,
-  splitPane, windowPaneCount, killPane, respawnPane,
+  splitPane, windowPaneCount, killPane, runPaneCommand,
 } from '../src/tmux/commands.js';
 
 const execFile = promisify(_execFile);
@@ -277,20 +277,17 @@ describe('newWindow / paneCurrentPath (integration)', () => {
     }
   });
 
-  it('respawns a direct-command pane into the default shell before typing the startup command', async () => {
+  it('types a validated command into an existing shell pane', async () => {
     if (!hasTmux) return;
     const s = (await listSessions()).find((x) => x.name === SES);
     let wid;
     try {
-      const { stdout } = await execFile('tmux', [
-        'new-window', '-d', '-t', s.id, '-P', '-F', '#{window_id}\t#{pane_id}', 'sleep', '30',
-      ]);
-      [wid] = stdout.trim().split('\t');
-      const pane = stdout.trim().split('\t')[1];
-      await respawnPane(pane, await paneCurrentPath(pane), 'printf HANDMUX_RESPAWN_READY');
+      const created = await newWindow(s.id);
+      wid = created;
+      const pane = (await listPanes(wid))[0].id;
+      await runPaneCommand(pane, 'printf HANDMUX_RUN_READY');
       await new Promise((resolve) => setTimeout(resolve, 80));
-      expect((await listPanes(wid))[0].command).not.toBe('sleep');
-      expect(await capturePane(pane, 20)).toContain('HANDMUX_RESPAWN_READY');
+      expect(await capturePane(pane, 20)).toContain('HANDMUX_RUN_READY');
     } finally {
       if (wid) { try { await execFile('tmux', ['kill-window', '-t', wid]); } catch {} }
     }

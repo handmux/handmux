@@ -1,8 +1,46 @@
 import express from 'express';
 import { isPaneId } from '../tmux/commands.js';
 import { getAgent } from '../agents/index.js';
+import { codexExitSessionId } from '../agents/codex.js';
 
 const TAKEOVER_TERMINAL_HINT_MS = 5_000;
+const INPUT_SETTLE_MS = 100;
+const FIRST_INTERRUPT_ATTEMPTS = 15;
+const FINAL_EXIT_ATTEMPTS = 15;
+
+const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+async function paneAgent(commands, claudeEvents, pane) {
+  const panes = await commands?.listLivePanes?.();
+  const live = Array.isArray(panes) ? panes.find((candidate) => candidate.id === pane) : null;
+  if (!live) return { live: null, agent: null };
+  const agents = await claudeEvents?.identifyPaneAgents?.(panes) || {};
+  return { live, agent: agents[pane] || null };
+}
+
+async function exitCurrentCodex(commands, claudeEvents, pane) {
+  // At an idle prompt Ctrl+C exits immediately. During a turn the first press interrupts and the second
+  // exits, so use at most two presses with a short settle window between them. Unlike `/quit`, this does
+  // not depend on the slash-command editor being available. Some startup dialogs can still consume it;
+  // in that case we stop without guessing or force-killing an unidentified session.
+  for (let press = 0; press < 2; press += 1) {
+    await commands.sendKey(pane, 'C-c');
+    const attempts = press === 0 ? FIRST_INTERRUPT_ATTEMPTS : FINAL_EXIT_ATTEMPTS;
+    for (let attempt = 0; attempt < attempts; attempt += 1) {
+      await pause(INPUT_SETTLE_MS);
+      const current = await paneAgent(commands, claudeEvents, pane);
+      if (!current.live || current.agent !== 'codex') return current.live;
+      // After interrupting an active turn, wait until Codex exposes its input cursor before sending the
+      // exit press. This avoids turning two rapid Ctrl+C events into two copies of the same interrupt.
+      if (press === 0 && commands.paneInfo) {
+        try {
+          if ((await commands.paneInfo(pane))?.cursorVisible) break;
+        } catch { /* process identity polling remains the fallback */ }
+      }
+    }
+  }
+  return null;
+}
 
 async function binding(codexApp, pane) {
   if (!isPaneId(pane)) return { error: 'bad pane id', status: 400 };
@@ -45,7 +83,7 @@ export function codexRoutes({ codexApp, commands, claudeEvents }) {
     const takeover = takeovers.get(pane);
     try {
       const discovered = await codexApp.discover(pane);
-      if (takeover && discovered?.threadId !== takeover.threadId) {
+      if (takeover && (!takeover.threadId || discovered?.threadId !== takeover.threadId)) {
         return res.json({ managed: false, threadId: null, takeover: takeoverView(takeover) });
       }
       if (takeover) takeovers.delete(pane);
@@ -73,29 +111,29 @@ export function codexRoutes({ codexApp, commands, claudeEvents }) {
       }
       if (discovered?.managed) return res.status(409).json({ error: 'codex-session-starting' });
 
-      // Re-check live process identity immediately before killing anything. A stale client must never
-      // respawn a pane whose Codex has already exited or been replaced by another command.
-      const panes = await commands?.listLivePanes?.();
-      const live = Array.isArray(panes) ? panes.find((candidate) => candidate.id === pane) : null;
-      if (!live) return res.status(404).json({ error: 'codex-pane-gone' });
-      const agents = await claudeEvents?.identifyPaneAgents?.(panes) || {};
-      if (agents[pane] !== 'codex') return res.status(409).json({ error: 'codex-pane-changed' });
+      // Re-check live process identity immediately before interacting with the pane. A stale client must
+      // never send slash commands to a pane whose Codex has already exited or changed.
+      const current = await paneAgent(commands, claudeEvents, pane);
+      if (!current.live) return res.status(404).json({ error: 'codex-pane-gone' });
+      if (current.agent !== 'codex') return res.status(409).json({ error: 'codex-pane-changed' });
 
-      // Hooks are not the managed chat source, but a current v2 binding is the only safe way to know which
-      // plain Codex session to resume. Never fall back to cwd/newest-rollout heuristics here.
-      const hooked = claudeEvents?.paneSession?.(pane);
       const driver = getAgent('codex');
-      if (hooked?.agent !== 'codex'
-        || hooked.bindingVersion !== driver.sessions.bindingVersion
-        || !driver.sessions.isId(hooked.sessionId)) {
-        return res.status(409).json({ error: 'codex-session-unbound' });
-      }
-
-      const cwd = await commands.paneCurrentPath(pane);
-      const takeover = { threadId: hooked.sessionId, startedAt: Date.now() };
+      const takeover = { threadId: null, startedAt: Date.now() };
       takeovers.set(pane, takeover);
       try {
-        await commands.respawnPane(pane, cwd, driver.sessions.managedResumeCmd(hooked.sessionId));
+        const exited = await exitCurrentCodex(commands, claudeEvents, pane);
+        if (!exited) {
+          takeovers.delete(pane);
+          return res.status(409).json({ error: 'codex-exit-blocked' });
+        }
+        const sessionId = codexExitSessionId(await commands.capturePlain(pane));
+        if (!driver.sessions.isId(sessionId)) {
+          takeovers.delete(pane);
+          return res.status(409).json({ error: 'codex-session-unconfirmed' });
+        }
+        takeover.threadId = sessionId;
+        await pause(INPUT_SETTLE_MS); // let the restored shell finish drawing its prompt
+        await commands.runPaneCommand(pane, driver.sessions.managedResumeCmd(sessionId));
       } catch (error) {
         takeovers.delete(pane);
         throw error;
