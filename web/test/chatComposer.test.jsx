@@ -279,7 +279,7 @@ describe('ChatComposer', () => {
     expect(document.activeElement).not.toBe(input);
   });
 
-  it('changes the approval policy from session status for subsequent turns', async () => {
+  it('changes the approval policy inline without closing session status', async () => {
     const settings = {
       model: 'gpt-test', effort: 'medium', cwd: '/work/project',
       sandboxPolicy: { type: 'workspaceWrite' }, approvalPolicy: 'on-request',
@@ -295,19 +295,19 @@ describe('ChatComposer', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '会话状态，上下文占用 46%' }));
     fireEvent.click(screen.getByRole('button', { name: '设置审批方式，当前为按需确认' }));
-    expect(screen.queryByRole('dialog', { name: '会话状态' })).toBeNull();
-    const menu = screen.getByRole('dialog', { name: '审批方式' });
-    expect(screen.getByRole('button', { name: /按需确认/ }).getAttribute('aria-pressed')).toBe('true');
-    expect(menu.textContent).toContain('修改从下一条消息生效');
+    const status = screen.getByRole('dialog', { name: '会话状态' });
+    const choices = screen.getByRole('radiogroup', { name: '审批方式' });
+    expect(status.contains(choices)).toBe(true);
+    expect(screen.getByRole('radio', { name: /按需确认/ }).getAttribute('aria-checked')).toBe('true');
+    expect(choices.textContent).toContain('修改从下一条消息生效');
 
-    fireEvent.click(screen.getByRole('button', { name: /不请求确认/ }));
+    fireEvent.click(screen.getByRole('radio', { name: /不请求确认/ }));
     await waitFor(() => expect(updateCodexSettings).toHaveBeenCalledWith('%1', {
       approvalPolicy: 'never',
     }));
-    await waitFor(() => expect(screen.queryByRole('dialog', { name: '审批方式' })).toBeNull());
+    await waitFor(() => expect(screen.queryByRole('radiogroup', { name: '审批方式' })).toBeNull());
+    expect(screen.getByRole('dialog', { name: '会话状态' })).toBe(status);
     expect(screen.getByRole('status').textContent).toContain('审批方式已更新，下条消息生效');
-
-    fireEvent.click(screen.getByRole('button', { name: '会话状态，上下文占用 46%' }));
     expect(screen.getByRole('button', { name: '设置审批方式，当前为不请求确认' })).toBeTruthy();
   });
 

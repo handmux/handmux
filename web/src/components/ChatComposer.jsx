@@ -246,74 +246,6 @@ function CodexConfigMenu({ open, pane, settings, busy, onChange, onClose, onAuth
   );
 }
 
-function CodexApprovalMenu({ open, pane, settings, onChange, onClose, onAuthFail, onSaved }) {
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState('');
-  useBackButton(open, onClose);
-  useEffect(() => { if (open) setError(''); }, [open, pane]);
-
-  if (!open) return null;
-  const options = [
-    {
-      value: 'untrusted',
-      label: t('chat.status.approvalUntrusted'),
-      description: t('chat.approvalMode.untrustedHint'),
-    },
-    {
-      value: 'on-request',
-      label: t('chat.status.approvalOnRequest'),
-      description: t('chat.approvalMode.onRequestHint'),
-    },
-    {
-      value: 'never',
-      label: t('chat.status.approvalNever'),
-      description: t('chat.approvalMode.neverHint'),
-    },
-  ];
-  const save = async (approvalPolicy) => {
-    if (saving) return;
-    if (approvalPolicy === settings?.approvalPolicy) {
-      onClose();
-      return;
-    }
-    setSaving(true);
-    setError('');
-    try {
-      const result = await updateCodexSettings(pane, { approvalPolicy });
-      onChange(result?.settings || { ...settings, approvalPolicy });
-      onClose();
-      onSaved?.();
-    } catch (err) {
-      if (err instanceof UnauthorizedError) onAuthFail?.();
-      else setError(err?.serverError || err?.message || t('chat.approvalMode.saveFailed'));
-    } finally { setSaving(false); }
-  };
-
-  return (
-    <>
-      <div className="codex-approval-backdrop" onClick={onClose} />
-      <section className="codex-approval-menu" role="dialog" aria-modal="true"
-        aria-label={t('chat.approvalMode.title')}>
-        <header className="codex-approval-head">{t('chat.approvalMode.title')}</header>
-        <div className="codex-approval-options">
-          {options.map((option) => {
-            const selected = option.value === settings?.approvalPolicy;
-            return (
-              <button type="button" key={option.value} disabled={saving} aria-pressed={selected}
-                className={selected ? 'selected' : ''} onClick={() => void save(option.value)}>
-                <span><strong>{option.label}</strong><small>{option.description}</small></span>
-                {selected && <CheckIcon />}
-              </button>
-            );
-          })}
-        </div>
-        {error && <div className="codex-approval-error" role="status">{error}</div>}
-        <footer className="codex-approval-footer">{t('chat.approvalMode.nextTurn')}</footer>
-      </section>
-    </>
-  );
-}
-
 export default function ChatComposer({
   pane, agent = 'claude', kind, cwd = null, onKey = () => {}, onAuthFail, onSent, onInteractiveSlash,
   shortcuts = null, micAvailable = false, desktop = false, codexSession = null,
@@ -347,7 +279,9 @@ export default function ChatComposer({
   const [editOpen, setEditOpen] = useState(false);
   const [configOpen, setConfigOpen] = useState(false);
   const [contextOpen, setContextOpen] = useState(false);
-  const [approvalOpen, setApprovalOpen] = useState(false);
+  const [approvalExpanded, setApprovalExpanded] = useState(false);
+  const [approvalSaving, setApprovalSaving] = useState(false);
+  const [approvalError, setApprovalError] = useState('');
   const [copiedStatusField, setCopiedStatusField] = useState(null);
   const [localSettings, setLocalSettings] = useState(null);
   const refreshShortcuts = () => {
@@ -385,10 +319,14 @@ export default function ChatComposer({
   useEffect(() => {
     if (!managedCodex) {
       setConfigOpen(false);
-      setApprovalOpen(false);
+      setApprovalExpanded(false);
+      setApprovalError('');
     }
   }, [managedCodex]);
-  useEffect(() => { setApprovalOpen(false); }, [pane]);
+  useEffect(() => {
+    setApprovalExpanded(false);
+    setApprovalError('');
+  }, [pane]);
   useEffect(() => {
     if (managedCodex && pane) void loadCodexModels(pane).catch(() => {});
   }, [managedCodex, pane]);
@@ -415,8 +353,31 @@ export default function ChatComposer({
   const gitBranch = codexSession?.gitBranch || null;
   const access = sandboxLabel(managedSettings);
   const approval = approvalLabel(managedSettings?.approvalPolicy);
+  const approvalOptions = [
+    {
+      value: 'untrusted',
+      label: t('chat.status.approvalUntrusted'),
+      description: t('chat.approvalMode.untrustedHint'),
+    },
+    {
+      value: 'on-request',
+      label: t('chat.status.approvalOnRequest'),
+      description: t('chat.approvalMode.onRequestHint'),
+    },
+    {
+      value: 'never',
+      label: t('chat.status.approvalNever'),
+      description: t('chat.approvalMode.neverHint'),
+    },
+  ];
   useEffect(() => { if (!showContextRing) setContextOpen(false); }, [showContextRing]);
-  useEffect(() => { if (!contextOpen) setCopiedStatusField(null); }, [contextOpen]);
+  useEffect(() => {
+    if (!contextOpen) {
+      setCopiedStatusField(null);
+      setApprovalExpanded(false);
+      setApprovalError('');
+    }
+  }, [contextOpen]);
 
   const copyStatusValue = async (valueToCopy, field) => {
     if (!valueToCopy || !navigator.clipboard?.writeText) return;
@@ -436,6 +397,24 @@ export default function ChatComposer({
     setNotice('');
     clearTimeout(noticeTimerRef.current);
   };
+  const saveApprovalPolicy = async (approvalPolicy) => {
+    if (approvalSaving) return;
+    if (approvalPolicy === managedSettings?.approvalPolicy) {
+      setApprovalExpanded(false);
+      return;
+    }
+    setApprovalSaving(true);
+    setApprovalError('');
+    try {
+      const result = await updateCodexSettings(pane, { approvalPolicy });
+      setLocalSettings(result?.settings || { ...managedSettings, approvalPolicy });
+      setApprovalExpanded(false);
+      showNotice(t('chat.approvalMode.saved'));
+    } catch (err) {
+      if (err instanceof UnauthorizedError) onAuthFail?.();
+      else setApprovalError(err?.serverError || err?.message || t('chat.approvalMode.saveFailed'));
+    } finally { setApprovalSaving(false); }
+  };
 
   // Grow to fit content; CSS max-height caps it (~6 lines) then it scrolls. +2 for the border under
   // box-sizing: border-box. No multi/crowd measuring — the buttons are in a row below, never inline.
@@ -451,7 +430,6 @@ export default function ChatComposer({
     // an already-focused textarea focused, while a closed keyboard stays closed because the trigger never
     // focuses the textarea itself.
     setContextOpen(false);
-    setApprovalOpen(false);
     setConfigOpen(true);
   };
   const applyConfigSlash = async (trimmed) => {
@@ -608,7 +586,7 @@ export default function ChatComposer({
     // The model picker is rendered inside the card. Its backdrop therefore bubbles pointer events through
     // this handler; while the picker is open, those taps belong to the picker and must preserve the
     // keyboard state that existed before it opened.
-    if (configOpen || contextOpen || approvalOpen) return;
+    if (configOpen || contextOpen) return;
     // Reject if it moved during the press (a scroll/lens-swipe), OR if the up landed far from the down —
     // a second signal in case fast-swipe move events were throttled/missed. Only a stationary tap focuses.
     if (p.moved || Math.hypot(e.clientX - p.x, e.clientY - p.y) > 10) return;
@@ -773,9 +751,6 @@ export default function ChatComposer({
                 disabled={submitting || !value.trim()} onClick={send}>
                 <ArrowUpIcon /></button>
             )}
-            <CodexApprovalMenu open={approvalOpen} pane={pane} settings={managedSettings}
-              onChange={setLocalSettings} onClose={() => setApprovalOpen(false)} onAuthFail={onAuthFail}
-              onSaved={() => showNotice(t('chat.approvalMode.saved'))} />
             {contextOpen && showContextRing && (
               <>
                 <div className="cc-context-backdrop" onClick={() => setContextOpen(false)} />
@@ -815,12 +790,42 @@ export default function ChatComposer({
                       </div>
                     )}
                     {approval && (
-                      <button type="button" className="cc-context-row cc-context-approval-row"
-                        aria-label={t('chat.approvalMode.open', { value: approval })}
-                        onClick={() => { setContextOpen(false); setApprovalOpen(true); }}>
-                        <span>{t('chat.status.approval')}</span>
-                        <strong>{approval}<ChevronDownIcon /></strong>
-                      </button>
+                      <>
+                        <button type="button" className="cc-context-row cc-context-approval-row"
+                          aria-label={t('chat.approvalMode.open', { value: approval })}
+                          aria-expanded={approvalExpanded} disabled={approvalSaving}
+                          onClick={() => {
+                            setApprovalError('');
+                            setApprovalExpanded((expanded) => !expanded);
+                          }}>
+                          <span>{t('chat.status.approval')}</span>
+                          <strong>{approval}<ChevronDownIcon /></strong>
+                        </button>
+                        {approvalExpanded && (
+                          <div className="cc-context-approval-options" role="radiogroup"
+                            aria-label={t('chat.approvalMode.title')}>
+                            {approvalOptions.map((option) => {
+                              const selected = option.value === managedSettings?.approvalPolicy;
+                              return (
+                                <button type="button" role="radio" aria-checked={selected}
+                                  key={option.value} disabled={approvalSaving}
+                                  className={selected ? 'selected' : ''}
+                                  onClick={() => void saveApprovalPolicy(option.value)}>
+                                  <span>
+                                    <strong>{option.label}</strong>
+                                    <small>{option.description}</small>
+                                  </span>
+                                  {selected && <CheckIcon />}
+                                </button>
+                              );
+                            })}
+                            {approvalError && (
+                              <div className="cc-context-approval-error" role="status">{approvalError}</div>
+                            )}
+                            <div className="cc-context-approval-next">{t('chat.approvalMode.nextTurn')}</div>
+                          </div>
+                        )}
+                      </>
                     )}
                     {sessionId && (
                       <ContextCopyRow label={t('chat.status.sessionId')} value={sessionId}

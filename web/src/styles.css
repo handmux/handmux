@@ -2837,8 +2837,37 @@ button.cmd-text { background: none; border: none; text-align: left; }
   font: inherit; text-align: left; touch-action: manipulation; -webkit-tap-highlight-color: transparent;
 }
 .cc-context-approval-row:active { background: var(--ct-chip-2); }
+.cc-context-approval-row:disabled { opacity: .55; }
 .cc-context-approval-row > strong { display: flex; align-items: center; justify-content: flex-end; gap: 4px; }
-.cc-context-approval-row svg { width: 12px; height: 12px; flex: none; color: var(--ct-muted); }
+.cc-context-approval-row svg {
+  width: 12px; height: 12px; flex: none; color: var(--ct-muted); transition: transform .16s ease;
+}
+.cc-context-approval-row[aria-expanded="true"] svg { transform: rotate(180deg); }
+.cc-context-approval-options {
+  padding: 4px; border-top: 1px solid var(--ct-chip-line); background: var(--ct-body);
+}
+.cc-context-approval-options + .cc-context-row { border-top: 1px solid var(--ct-chip-line); }
+.cc-context-approval-options > button {
+  width: 100%; min-height: 44px; display: flex; align-items: center; gap: 8px; padding: 5px 7px;
+  border: 0; border-radius: 8px; background: transparent; color: var(--ct-ink); text-align: left;
+}
+.cc-context-approval-options > button:active { background: var(--ct-chip-2); }
+.cc-context-approval-options > button:disabled { opacity: .55; }
+.cc-context-approval-options > button > span {
+  min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 1px;
+}
+.cc-context-approval-options strong { font-size: 12px; line-height: 15px; }
+.cc-context-approval-options small { color: var(--ct-muted); font-size: 10.5px; line-height: 13px; }
+.cc-context-approval-options > button.selected strong,
+.cc-context-approval-options > button.selected > svg { color: var(--ct-accent); }
+.cc-context-approval-options > button > svg { width: 15px; height: 15px; flex: none; }
+.cc-context-approval-error {
+  padding: 3px 7px 5px; color: var(--danger, #d34b45); font-size: 10.5px; line-height: 14px;
+}
+.cc-context-approval-next {
+  padding: 5px 7px 3px; border-top: 1px solid var(--ct-chip-line);
+  color: var(--ct-muted); font-size: 10.5px; line-height: 14px;
+}
 .cc-context-usage { min-height: 46px; }
 .cc-context-usage-value { display: inline-flex; align-items: center; justify-content: flex-end; gap: 6px; }
 .cc-context-usage-value .cc-context-ring { width: 21px; height: 21px; flex: none; color: #34c759; }
@@ -2972,41 +3001,9 @@ button.cmd-text { background: none; border: none; text-align: left; }
   background: #fff; box-shadow: 0 1px 4px rgba(0,0,0,.28);
 }
 .codex-config-error { color: var(--danger, #d34b45); font-size: 12px; line-height: 1.4; }
-.codex-approval-backdrop { position: fixed; inset: 0; z-index: 43; background: transparent; }
-.codex-approval-menu {
-  position: absolute; right: 0; bottom: calc(100% + 9px); z-index: 44;
-  width: min(300px, calc(100vw - 24px)); overflow: hidden;
-  border: 1px solid var(--ct-chip-line); border-radius: 14px;
-  background: var(--ct-body); color: var(--ct-ink);
-  box-shadow: 0 12px 38px rgba(0,0,0,.38), 0 2px 8px rgba(0,0,0,.2);
-  transform-origin: bottom right; animation: codex-menu-in .16s ease-out;
-}
-.codex-approval-head {
-  min-height: 34px; display: flex; align-items: center; padding: 0 11px;
-  border-bottom: 1px solid var(--ct-line); font-size: 13px; font-weight: 700;
-}
-.codex-approval-options { padding: 5px; }
-.codex-approval-options > button {
-  width: 100%; min-height: 48px; display: flex; align-items: center; gap: 10px; padding: 5px 7px;
-  border: 0; border-radius: 9px; background: transparent; color: var(--ct-ink); text-align: left;
-}
-.codex-approval-options > button:active { background: var(--ct-chip-2); }
-.codex-approval-options > button:disabled { opacity: .55; }
-.codex-approval-options > button > span {
-  min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 1px;
-}
-.codex-approval-options strong { font-size: 13px; line-height: 16px; }
-.codex-approval-options small { color: var(--ct-muted); font-size: 10.5px; line-height: 14px; }
-.codex-approval-options > button.selected strong,
-.codex-approval-options > button.selected > svg { color: var(--ct-accent); }
-.codex-approval-options > button > svg { width: 16px; height: 16px; flex: none; }
-.codex-approval-error { padding: 0 12px 6px; color: var(--danger, #d34b45); font-size: 11px; }
-.codex-approval-footer {
-  padding: 7px 11px 8px; border-top: 1px solid var(--ct-line);
-  color: var(--ct-muted); font-size: 10.5px; line-height: 14px;
-}
 @media (prefers-reduced-motion: reduce) {
-  .codex-config-menu, .codex-approval-menu, .codex-config-head button.is-refreshing svg { animation: none; }
+  .codex-config-menu, .codex-config-head button.is-refreshing svg { animation: none; }
+  .cc-context-approval-row svg { transition: none; }
 }
 
 .push-inbox-detail-del { display: block; margin-top: 24px; }
