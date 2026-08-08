@@ -621,7 +621,7 @@ describe('ChatComposer', () => {
   it('shows queued messages with compact icon actions, confirmation and in-place editing', async () => {
     const onCodexSendStart = vi.fn(() => 'optimistic-steer');
     const onCodexSendResult = vi.fn();
-    const { container } = render(<ChatComposer pane="%1" agent="codex" kind="working" codexSession={{
+    const { container } = render(<ChatComposer pane="%1" agent="codex" kind="working" keyboardInset={280} codexSession={{
       managed: true,
       queue: [
         { id: 'queued-1', text: '先检查测试' },
@@ -640,6 +640,7 @@ describe('ChatComposer', () => {
       'cc-queue-action cc-queue-send',
       'cc-queue-action cc-queue-delete',
     ]);
+    expect(container.querySelectorAll('.cc-queue-actions')).toHaveLength(2);
 
     const input = screen.getByPlaceholderText('和 Agent 对话…');
     typeInto(input, '排到最后');
@@ -656,6 +657,8 @@ describe('ChatComposer', () => {
     fireEvent.click(screen.getByRole('button', { name: '编辑排队消息' }));
     await waitFor(() => expect(beginCodexQueuedEdit).toHaveBeenCalledWith('%1', 'queued-2'));
     const editor = await screen.findByRole('dialog', { name: '编辑排队消息' });
+    expect(editor.parentElement?.parentElement).toBe(document.body);
+    expect(editor.parentElement?.style.bottom).toBe('280px');
     const draft = editor.querySelector('textarea');
     expect(draft.value).toBe('再整理结果');
     typeInto(draft, '重新整理结果');
@@ -682,6 +685,8 @@ describe('ChatComposer', () => {
     fireEvent.pointerUp(queuedText, { clientX: 50, clientY: 50 });
     expect(document.activeElement).not.toBe(input);
     expect(styles).toMatch(/\.cc-queue-text\s*\{[^}]*-webkit-line-clamp:\s*2/);
+    expect(styles).toMatch(/\.cc-queue-actions\s*\{[^}]*gap:\s*0/);
+    expect(styles).toMatch(/\.cc-queue-action\s*\{[^}]*width:\s*30px[^}]*height:\s*30px/);
   });
 
   it('releases the server edit hold when queued-message editing is cancelled', async () => {

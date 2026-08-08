@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import {
   sendText, sendCodexMessage, compactCodexSession, clearCodexSession, interruptCodexSession,
   steerCodexQueuedMessage, removeCodexQueuedMessage, beginCodexQueuedEdit,
@@ -14,7 +15,7 @@ import { usePaneContext } from '../hooks/usePaneContext.js';
 import { UPLOAD_ACCEPT } from '../uploadTypes.js';
 import {
   ArrowUpIcon, StopIcon, PlusIcon, GearIcon, ChevronDownIcon, RefreshIcon, CopyIcon, CheckIcon,
-  BoltIcon, PencilIcon, TrashIcon,
+  BoltIcon, PencilIcon, XIcon,
 } from './icons.jsx';
 import { useUpload } from '../hooks/useUpload.js';
 import { usePushToTalk } from '../voice/usePushToTalk.js';
@@ -312,7 +313,7 @@ function CodexConfigMenu({ open, pane, settings, busy, onChange, onClose, onAuth
 export default function ChatComposer({
   pane, agent = 'claude', kind, cwd = null, onKey = () => {}, onAuthFail, onSent, onInteractiveSlash,
   shortcuts = null, micAvailable = false, desktop = false, codexSession = null,
-  onCodexSendStart, onCodexSendResult, onActionError,
+  onCodexSendStart, onCodexSendResult, onActionError, chatTone = 'dusk', keyboardInset = 0,
 }) {
   // Draft persists across an app exit / lens switch (shared store with the dock's chat page — switching
   // lenses carries your half-typed message either way). send/clear set '' → the stored draft clears too.
@@ -885,15 +886,17 @@ export default function ChatComposer({
             {pendingQueue.map((item) => (
               <div className="cc-queue-item" key={item.id}>
                 <span className="cc-queue-text">{item.text}</span>
-                <button type="button" className="cc-queue-action cc-queue-edit"
-                  aria-label={t('chat.queue.edit')} disabled={!!queueAction}
-                  onClick={() => void openQueueEditor(item)}><PencilIcon /></button>
-                <button type="button" className="cc-queue-action cc-queue-send"
-                  aria-label={t('chat.queue.steer')} disabled={!!queueAction}
-                  onClick={() => void actOnQueued('steer', item)}><ArrowUpIcon /></button>
-                <button type="button" className="cc-queue-action cc-queue-delete"
-                  aria-label={t('chat.queue.remove')} disabled={!!queueAction}
-                  onClick={() => setQueueDelete(item)}><TrashIcon /></button>
+                <span className="cc-queue-actions">
+                  <button type="button" className="cc-queue-action cc-queue-edit"
+                    aria-label={t('chat.queue.edit')} disabled={!!queueAction}
+                    onClick={() => void openQueueEditor(item)}><PencilIcon /></button>
+                  <button type="button" className="cc-queue-action cc-queue-send"
+                    aria-label={t('chat.queue.steer')} disabled={!!queueAction}
+                    onClick={() => void actOnQueued('steer', item)}><ArrowUpIcon /></button>
+                  <button type="button" className="cc-queue-action cc-queue-delete"
+                    aria-label={t('chat.queue.remove')} disabled={!!queueAction}
+                    onClick={() => setQueueDelete(item)}><XIcon /></button>
+                </span>
               </div>
             ))}
           </div>
@@ -1056,8 +1059,9 @@ export default function ChatComposer({
           </div>
         </div>
       </div>
-      {queueEditor && (
-        <div className="settings-confirm-backdrop cc-queue-dialog-backdrop"
+      {queueEditor && createPortal(
+        <div className="settings-confirm-backdrop cc-queue-dialog-backdrop chat-tone-surface"
+          data-chat-tone={chatTone} style={{ bottom: `${Math.max(0, Number(keyboardInset) || 0)}px` }}
           onClick={dismissQueueEditor}>
           <div className="settings-confirm cc-queue-edit-dialog" role="dialog" aria-modal="true"
             aria-label={t('chat.queue.editTitle')} onClick={(event) => event.stopPropagation()}>
@@ -1073,10 +1077,12 @@ export default function ChatComposer({
                 onClick={() => void saveQueueEditor()}>{t('common.save')}</button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
-      {queueDelete && (
-        <div className="settings-confirm-backdrop cc-queue-dialog-backdrop"
+      {queueDelete && createPortal(
+        <div className="settings-confirm-backdrop cc-queue-dialog-backdrop chat-tone-surface"
+          data-chat-tone={chatTone}
           onClick={() => setQueueDelete(null)}>
           <div className="settings-confirm" role="alertdialog" aria-modal="true"
             aria-label={t('chat.queue.removeTitle')} onClick={(event) => event.stopPropagation()}>
@@ -1089,7 +1095,8 @@ export default function ChatComposer({
                 onClick={() => void confirmQueueDelete()}>{t('common.delete')}</button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
       {notice && <div className="cc-notice" role="status">{notice}</div>}
       {editOpen && <CmdFavEditor variant="chat" presets={serverShortcuts.chat}

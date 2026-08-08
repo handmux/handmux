@@ -2177,6 +2177,8 @@ export default function App() {
                 onActionError={(error) => reportChatActionError(current.paneId, error)}
                 shortcuts={serverShortcuts}
                 micAvailable={micAvailable}
+                chatTone={chatTone}
+                keyboardInset={inset}
                 onInteractiveSlash={currentAgent === 'claude'
                   ? (cmd) => { setLens('terminal'); localStorage.setItem('tw_lens_' + current.paneId, 'terminal'); setHandoffToast(cmd); }
                   : undefined}

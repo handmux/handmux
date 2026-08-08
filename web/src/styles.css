@@ -2194,7 +2194,8 @@ button.cmd-text { background: none; border: none; text-align: left; }
    red, NOT a muddy brown; ink is a warm white; surfaces are SOLID warm greys that layer by lightness
    (bg < bar < chip < chip-2) rather than translucent whites (which read cool over a warm ground); a single
    golden amber is the only accent. */
-.app, .app[data-chat-tone="dusk"] {
+.app, .app[data-chat-tone="dusk"],
+.chat-tone-surface, .chat-tone-surface[data-chat-tone="dusk"] {
   --ct-bg:#151109; --ct-ink:#f6f1e7; --ct-muted:#9f9081;
   --ct-me-bg:linear-gradient(180deg,#4a3a26,#3b2e20); --ct-me-ink:#f6efe2;
   --ct-chip:#201a10; --ct-chip-2:#2b2216; --ct-chip-line:#362b1b;
@@ -2205,7 +2206,7 @@ button.cmd-text { background: none; border: none; text-align: left; }
   --ct-err-bg:rgba(255,120,90,.16); --ct-err-ink:#ff9a80;
 }
 /* ---- 暖金 ink (the LANDING brand: warm olive-black + cream + golden bubble) ---- */
-.app[data-chat-tone="ink"] {
+.app[data-chat-tone="ink"], .chat-tone-surface[data-chat-tone="ink"] {
   --ct-bg:#0e0f0b; --ct-ink:#ece6d4; --ct-muted:#8f8b76;
   --ct-me-bg:linear-gradient(180deg,#423f2e,#383527); --ct-me-ink:#ece6d4;
   --ct-chip:rgba(255,240,200,.05); --ct-chip-2:rgba(255,240,200,.1); --ct-chip-line:rgba(255,230,180,.1);
@@ -2216,7 +2217,7 @@ button.cmd-text { background: none; border: none; text-align: left; }
   --ct-err-bg:rgba(255,120,90,.16); --ct-err-ink:#ff9a80;
 }
 /* ---- 暖黄 light (warm cream paper + golden accent — the only light tone) ---- */
-.app[data-chat-tone="light"] {
+.app[data-chat-tone="light"], .chat-tone-surface[data-chat-tone="light"] {
   --ct-bg:#f4efe1; --ct-ink:#2c2a20; --ct-muted:#8a8266;
   --ct-me-bg:linear-gradient(180deg,#eeddba,#e6d3ae); --ct-me-ink:#3a3320;
   --ct-chip:#fffdf6; --ct-chip-2:#efe6d2; --ct-chip-line:rgba(90,70,20,.14);
@@ -2732,32 +2733,39 @@ button.cmd-text { background: none; border: none; text-align: left; }
 .cc-queue-head span:first-child { flex: none; font-weight: 600; }
 .cc-queue-head span:last-child { min-width: 0; overflow: hidden; text-align: right; text-overflow: ellipsis; white-space: nowrap; }
 .cc-queue-item {
-  display: flex; align-items: center; gap: 5px; min-height: 30px; padding: 2px 3px 2px 8px;
+  display: flex; align-items: center; gap: 4px; min-height: 30px; padding: 0 2px 0 8px;
   border-radius: 10px; background: var(--ct-chip-2);
 }
 .cc-queue-text {
   flex: 1; min-width: 0; display: -webkit-box; overflow: hidden; color: var(--ct-ink); font-size: 13px;
   line-height: 18px; overflow-wrap: anywhere; -webkit-box-orient: vertical; -webkit-line-clamp: 2;
 }
+.cc-queue-actions { flex: none; display: flex; align-items: center; gap: 0; }
 .cc-queue-action {
   flex: none; display: inline-flex; align-items: center; justify-content: center;
-  width: 40px; min-height: 40px; padding: 0; border: 0; background: transparent;
-  color: var(--ct-muted); touch-action: manipulation;
+  width: 30px; height: 30px; padding: 0; border: 0; border-radius: 8px; background: transparent;
+  color: var(--ct-chip-ink); touch-action: manipulation; -webkit-tap-highlight-color: transparent;
 }
-.cc-queue-action svg { width: 15px; height: 15px; }
-.cc-queue-send { color: var(--ct-accent); }
-.cc-queue-delete { color: var(--danger, #d34b45); }
+.cc-queue-action svg { width: 14px; height: 14px; display: block; }
+.cc-queue-action:active:not(:disabled) { background: var(--ct-chip-line); color: var(--ct-ink); }
 .cc-queue-action:disabled { opacity: .45; }
-.cc-queue-dialog-backdrop { z-index: 52; }
-.chat-composer .cc-queue-dialog-backdrop .settings-confirm {
+.cc-queue-dialog-backdrop {
+  z-index: 52; overflow-y: auto; overscroll-behavior: contain;
+  padding: max(12px, env(safe-area-inset-top, 0px)) 12px max(12px, env(safe-area-inset-bottom, 0px));
+}
+.cc-queue-dialog-backdrop .settings-confirm {
   background: var(--ct-overlay); color: var(--ct-ink);
 }
-.chat-composer .cc-queue-dialog-backdrop .settings-confirm h2 { color: var(--ct-ink); }
-.chat-composer .cc-queue-dialog-backdrop .settings-confirm p { color: var(--ct-muted); }
-.cc-queue-edit-dialog { width: min(330px, 100%); }
+.cc-queue-dialog-backdrop .settings-confirm h2 { color: var(--ct-ink); }
+.cc-queue-dialog-backdrop .settings-confirm p { color: var(--ct-muted); }
+.cc-queue-dialog-backdrop .settings-confirm-actions { border-color: var(--ct-line); }
+.cc-queue-dialog-backdrop .settings-confirm-actions button { color: var(--ct-ink); }
+.cc-queue-dialog-backdrop .settings-confirm-actions button + button { border-color: var(--ct-line); }
+.cc-queue-dialog-backdrop .settings-confirm-actions button.danger { color: var(--danger, #d34b45); }
+.cc-queue-edit-dialog { width: min(330px, 100%); max-height: 100%; display: flex; flex-direction: column; }
 .cc-queue-edit-dialog textarea {
-  width: 100%; min-height: 96px; max-height: min(32dvh, 220px); margin-top: 12px; padding: 9px 10px;
-  resize: vertical; border: 1px solid var(--ct-chip-line); border-radius: 10px; outline: none;
+  width: 100%; min-height: 84px; max-height: min(32dvh, 220px); margin-top: 12px; padding: 9px 10px;
+  resize: none; border: 1px solid var(--ct-chip-line); border-radius: 10px; outline: none;
   background: var(--ct-field); color: var(--ct-ink); font: 16px/21px -apple-system, system-ui, sans-serif;
 }
 .cc-queue-edit-dialog textarea:focus { border-color: var(--ct-accent); }

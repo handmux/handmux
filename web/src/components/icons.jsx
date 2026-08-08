@@ -305,18 +305,6 @@ export function PencilIcon() {
   );
 }
 
-// Trash — destructive removal.
-export function TrashIcon() {
-  return (
-    <svg {...base}>
-      <path d="M3 6h18" />
-      <path d="M8 6V4h8v2" />
-      <path d="m19 6-1 14H6L5 6" />
-      <path d="M10 11v5M14 11v5" />
-    </svg>
-  );
-}
-
 // ☆/★ 收藏星(Lucide star);填充由 CSS 控制(.cmd-star.on svg { fill: currentColor })。
 export function StarIcon() {
   return (
