@@ -113,6 +113,10 @@ export function parseSseFrames(buffer) {
 
 // Fetch-based SSE keeps the normal Authorization header (native EventSource cannot set it) while still
 // giving the conversation a one-way, reconnectable stream. Durable transcript polling remains authoritative.
+/**
+ * @param {string} pane
+ * @param {{signal?: AbortSignal, onEvent?: (event: import('../../server/src/codexStreamProtocol.js').CodexStreamEvent) => void, after?: number | null}} [options]
+ */
 export async function streamCodexMessages(pane, { signal, onEvent, after = null } = {}) {
   const cursor = Number.isSafeInteger(after) && after >= 0 ? `&after=${after}` : '';
   const path = `/api/codex/stream?pane=${encodeURIComponent(pane)}${cursor}`;

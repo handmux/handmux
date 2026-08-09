@@ -43,6 +43,16 @@ describe('Codex message stream projection', () => {
     expect(durableCoversLiveMessage([
       { k: 10, turnId: 'turn-old', role: 'assistant', type: 'text', text: '完成' },
     ], { ...live, turnId: 'turn-new', afterK: 4 })).toBe(false);
+    expect(durableCoversLiveMessage([
+      { k: 3, turnId: 'turn-1', itemId: 'agent-1', role: 'assistant', type: 'text', text: '最终回答' },
+    ], {
+      ...live, turnId: 'turn-1', itemId: 'agent-1', text: '流式片段', afterK: 99,
+    })).toBe(true);
+    expect(durableCoversLiveMessage([
+      { k: 3, turnId: 'turn-1', itemId: 'agent-other', role: 'assistant', type: 'text', text: '流式片段' },
+    ], {
+      ...live, turnId: 'turn-1', itemId: 'agent-1', text: '流式片段', afterK: 1,
+    })).toBe(false);
   });
 
   it('discards finalized temporary replies before projecting a newer live reply', () => {

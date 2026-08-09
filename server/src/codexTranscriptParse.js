@@ -45,6 +45,16 @@ function messageText(content) {
     .join('');
 }
 
+function sourceIdentity(item) {
+  const turnId = typeof item?.internal_chat_message_metadata_passthrough?.turn_id === 'string'
+    ? item.internal_chat_message_metadata_passthrough.turn_id : null;
+  const itemId = typeof item?.id === 'string' && item.id ? item.id : null;
+  return {
+    ...(turnId ? { turnId } : {}),
+    ...(itemId ? { itemId } : {}),
+  };
+}
+
 function parseInput(value) {
   if (value && typeof value === 'object') return value;
   if (typeof value !== 'string' || !value.trim()) return {};
@@ -377,14 +387,13 @@ export function createCodexTranscriptParser() {
 
   const toolMessage = (i, ts, name, input, diff, item) => ({
     i, role: 'assistant', type: 'tool', ts,
-    ...(item?.internal_chat_message_metadata_passthrough?.turn_id
-      ? { turnId: item.internal_chat_message_metadata_passthrough.turn_id }
-      : {}),
+    ...sourceIdentity(item),
     tool: { name, input, result: null, isError: false, ...(diff ? { diff } : {}) },
   });
 
   const callMessage = (i, ts, name, input, diff, item) => {
-    const turnId = item?.internal_chat_message_metadata_passthrough?.turn_id;
+    const identity = sourceIdentity(item);
+    const { turnId } = identity;
     if (name === 'create_goal' && typeof input?.objective === 'string') {
       activeGoalObjective = input.objective.trim() || null;
       return {
@@ -395,7 +404,7 @@ export function createCodexTranscriptParser() {
           ...(input.token_budget != null && Number.isFinite(Number(input.token_budget))
             ? { tokenBudget: Number(input.token_budget) } : {}),
         },
-        ...(turnId ? { turnId } : {}),
+        ...identity,
       };
     }
     if (name === 'update_goal' && ['complete', 'blocked'].includes(input?.status)) {
@@ -403,7 +412,7 @@ export function createCodexTranscriptParser() {
       return {
         i, role: 'assistant', type: 'goal', event: input.status, ts,
         goal: { status: input.status },
-        ...(turnId ? { turnId } : {}),
+        ...identity,
       };
     }
     const plan = name === 'update_plan'
@@ -411,7 +420,7 @@ export function createCodexTranscriptParser() {
       : null;
     if (plan) {
       const { steps, ...snapshot } = plan;
-      return { i, role: 'assistant', type: 'plan', ts, ...snapshot, plan: steps };
+      return { i, role: 'assistant', type: 'plan', ts, ...identity, ...snapshot, plan: steps };
     }
     return toolMessage(i, ts, name, input, diff, item);
   };
@@ -438,7 +447,10 @@ export function createCodexTranscriptParser() {
           const goal = goalFromInternalContext(text);
           if (goal) {
             if (goal.objective !== activeGoalObjective) {
-              messages.push({ i, role: 'assistant', type: 'goal', event: 'set', goal, ts });
+              messages.push({
+                i, role: 'assistant', type: 'goal', event: 'set', goal, ts,
+                ...sourceIdentity(item),
+              });
               activeGoalObjective = goal.objective;
             }
             continue;
@@ -452,15 +464,18 @@ export function createCodexTranscriptParser() {
             continue;
           }
         }
-        const turnId = item.internal_chat_message_metadata_passthrough?.turn_id;
-        messages.push({ i, role: item.role, type: 'text', text, ts, ...(turnId ? { turnId } : {}) });
+        messages.push({
+          i, role: item.role, type: 'text', text, ts, ...sourceIdentity(item),
+        });
         continue;
       }
 
       if (item.type === 'reasoning') {
         const text = (Array.isArray(item.summary) ? item.summary : [])
           .map((part) => part?.text || '').filter(Boolean).join('\n');
-        if (text.trim()) messages.push({ i, role: 'assistant', type: 'thinking', text, ts });
+        if (text.trim()) messages.push({
+          i, role: 'assistant', type: 'thinking', text, ts, ...sourceIdentity(item),
+        });
         continue;
       }
 

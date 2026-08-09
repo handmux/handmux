@@ -1,16 +1,64 @@
 import { useEffect, useRef, useState } from 'react';
 import { streamCodexMessages, UnauthorizedError } from '../api.js';
+import type { CodexGoal } from '../../../server/src/codexStreamProtocol.js';
 
 const MAX_LIVE_MESSAGES = 20;
 const RETRY_MIN_MS = 500;
 const RETRY_MAX_MS = 4_000;
 
-function eventKey(event) {
+interface CodexStreamEventLike {
+  type?: string;
+  threadId?: string;
+  turnId?: string | null;
+  itemId?: string | null;
+  text?: string;
+  delta?: string;
+  completed?: boolean;
+  event?: string;
+  goal?: Partial<CodexGoal>;
+  cursor?: number;
+  sequence?: number;
+}
+
+export interface CodexLiveMessage {
+  id: string;
+  streamKey: string;
+  turnId: string | null;
+  itemId?: string | null;
+  role: 'assistant';
+  type: 'text' | 'goal';
+  text?: string;
+  event?: string;
+  goal?: Partial<CodexGoal>;
+  live: true;
+  completed: boolean;
+  streaming?: boolean;
+  afterK: number;
+}
+
+export interface CodexDurableMessage {
+  id?: string;
+  k?: number | string;
+  i?: number | string;
+  role?: string;
+  type?: string;
+  text?: string;
+  turnId?: string | null;
+  itemId?: string | null;
+  event?: string;
+  goal?: Partial<CodexGoal>;
+}
+
+function eventKey(event: CodexStreamEventLike): string | null {
   return event?.turnId && event?.itemId ? `${event.turnId}:${event.itemId}` : null;
 }
 
-export function applyCodexStreamEvent(messages, event, afterK = -1) {
-  if (!event || !['ready', 'cursorReset', 'started', 'snapshot', 'delta', 'completed', 'turnCompleted', 'goal', 'goalCleared'].includes(event.type)) {
+export function applyCodexStreamEvent(
+  messages: CodexLiveMessage[],
+  event: CodexStreamEventLike,
+  afterK = -1,
+): CodexLiveMessage[] {
+  if (!['ready', 'cursorReset', 'started', 'snapshot', 'delta', 'completed', 'turnCompleted', 'goal', 'goalCleared'].includes(event.type ?? '')) {
     return messages;
   }
   // A new SSE connection replays only unfinished App Server items. Finalized temporary bubbles must not
@@ -18,7 +66,7 @@ export function applyCodexStreamEvent(messages, event, afterK = -1) {
   if (event.type === 'ready' || event.type === 'cursorReset') {
     const next = messages.filter((message) => {
       if (message.type !== 'goal') return !message.completed;
-      return !['complete', 'blocked'].includes(message.goal?.status) || !!message.turnId;
+      return !['complete', 'blocked'].includes(message.goal?.status ?? '') || !!message.turnId;
     });
     return next.length === messages.length ? messages : next;
   }
@@ -27,10 +75,10 @@ export function applyCodexStreamEvent(messages, event, afterK = -1) {
     // Terminal Goal cards are historical events, not current-tail status. Older App Server builds may
     // replay one without a turnId after reconnecting; omit that unplaceable overlay and let the ordered
     // durable rollout render it where update_goal actually ran.
-    if (['complete', 'blocked'].includes(event.goal.status) && !event.turnId) return messages;
+    if (['complete', 'blocked'].includes(event.goal.status ?? '') && !event.turnId) return messages;
     const marker = event.goal.createdAt ?? event.goal.updatedAt ?? event.goal.objective;
     const key = `goal:${marker}:${event.event || event.goal.status || 'set'}`;
-    const nextMessage = {
+    const nextMessage: CodexLiveMessage = {
       id: `codex-stream:${key}`,
       streamKey: key,
       turnId: event.turnId || null,
@@ -72,11 +120,11 @@ export function applyCodexStreamEvent(messages, event, afterK = -1) {
     ? messages.filter((message) => message.type === 'goal' || !message.completed)
     : messages;
   const baseIndex = baseMessages.findIndex((message) => message.streamKey === key);
-  const nextMessage = {
+  const nextMessage: CodexLiveMessage = {
     ...(previous || {}),
     id: `codex-stream:${key}`,
     streamKey: key,
-    turnId: event.turnId,
+    turnId: event.turnId ?? null,
     itemId: event.itemId,
     role: 'assistant',
     type: 'text',
@@ -92,7 +140,10 @@ export function applyCodexStreamEvent(messages, event, afterK = -1) {
   return next.slice(-MAX_LIVE_MESSAGES);
 }
 
-export function durableCoversLiveMessage(durableMessages, liveMessage) {
+export function durableCoversLiveMessage(
+  durableMessages: CodexDurableMessage[],
+  liveMessage: CodexLiveMessage,
+): boolean {
   if (liveMessage?.type === 'goal') {
     return durableMessages.some((message) => (
       message?.type === 'goal'
@@ -103,6 +154,13 @@ export function durableCoversLiveMessage(durableMessages, liveMessage) {
         || Number(message.k) > Number(liveMessage.afterK ?? -1))
     ));
   }
+  if (liveMessage?.itemId) {
+    const identified = durableMessages.filter((message) => message?.itemId);
+    if (identified.length) {
+      return identified.some((message) => message.itemId === liveMessage.itemId
+        && (!message.turnId || !liveMessage.turnId || message.turnId === liveMessage.turnId));
+    }
+  }
   if (!liveMessage?.text) return false;
   return durableMessages.some((message) => {
     if (message?.role !== 'assistant' || message.type !== 'text' || message.text !== liveMessage.text) return false;
@@ -111,8 +169,8 @@ export function durableCoversLiveMessage(durableMessages, liveMessage) {
   });
 }
 
-function abortableDelay(ms, signal) {
-  return new Promise((resolve) => {
+function abortableDelay(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise<void>((resolve) => {
     if (signal.aborted) { resolve(); return; }
     const timer = setTimeout(done, ms);
     function done() {
@@ -128,15 +186,25 @@ function abortableDelay(ms, signal) {
 // bubbles, and a broken/backgrounded mobile connection silently retries while transcript polling continues.
 export function useCodexMessageStream({
   pane, threadId, enabled, durableMessages, onSettled, onAuthFail,
-}) {
+}: {
+  pane?: string | null;
+  threadId?: string | null;
+  enabled: boolean;
+  durableMessages: CodexDurableMessage[];
+  onSettled?: () => void;
+  onAuthFail?: () => void;
+}): CodexLiveMessage[] {
   const scope = enabled && pane && threadId ? `${pane}\0${threadId}` : null;
-  const [snapshot, setSnapshot] = useState({ scope, messages: [] });
+  const [snapshot, setSnapshot] = useState<{
+    scope: string | null;
+    messages: CodexLiveMessage[];
+  }>({ scope, messages: [] });
   const [connectionEpoch, setConnectionEpoch] = useState(0);
   const latestKRef = useRef(-1);
   const lastSequenceRef = useRef(-1);
-  const onSettledRef = useRef(onSettled);
-  const onAuthFailRef = useRef(onAuthFail);
-  const streamControllerRef = useRef(null);
+  const onSettledRef = useRef<(() => void) | undefined>(onSettled);
+  const onAuthFailRef = useRef<(() => void) | undefined>(onAuthFail);
+  const streamControllerRef = useRef<AbortController | null>(null);
   const lastForegroundWakeRef = useRef(0);
   latestKRef.current = durableMessages.reduce((latest, message) => (
     Number.isFinite(Number(message?.k)) ? Math.max(latest, Number(message.k)) : latest
@@ -163,7 +231,7 @@ export function useCodexMessageStream({
   }, [scope, durableMessages]);
 
   useEffect(() => {
-    if (!scope) return undefined;
+    if (!scope || !pane || !threadId) return undefined;
     const wake = () => {
       if (document.hidden) return;
       const now = Date.now();
@@ -179,7 +247,7 @@ export function useCodexMessageStream({
       }
       else wake();
     };
-    const onPageShow = (event) => { if (event.persisted) wake(); };
+    const onPageShow = (event: PageTransitionEvent) => { if (event.persisted) wake(); };
     document.addEventListener('visibilitychange', onVisibility);
     window.addEventListener('pageshow', onPageShow);
     window.addEventListener('focus', wake);
@@ -193,23 +261,25 @@ export function useCodexMessageStream({
   }, [scope]);
 
   useEffect(() => {
-    if (!scope) return undefined;
+    if (!scope || !pane || !threadId) return undefined;
     const controller = new AbortController();
     streamControllerRef.current = controller;
     let retryMs = RETRY_MIN_MS;
-    const onEvent = (event) => {
+    const onEvent = (event: CodexStreamEventLike) => {
       if (event?.threadId && event.threadId !== threadId) return;
       if (event?.type === 'cursorReset') {
-        lastSequenceRef.current = Number.isSafeInteger(event.cursor) ? event.cursor : -1;
+        lastSequenceRef.current = typeof event.cursor === 'number' && Number.isSafeInteger(event.cursor)
+          ? event.cursor : -1;
         onSettledRef.current?.();
-      } else if (Number.isSafeInteger(event?.sequence)) {
-        if (event.sequence <= lastSequenceRef.current) return;
-        if (lastSequenceRef.current >= 0 && event.sequence > lastSequenceRef.current + 1) {
+      } else if (typeof event.sequence === 'number' && Number.isSafeInteger(event.sequence)) {
+        const { sequence } = event;
+        if (sequence <= lastSequenceRef.current) return;
+        if (lastSequenceRef.current >= 0 && sequence > lastSequenceRef.current + 1) {
           onSettledRef.current?.();
         }
-        lastSequenceRef.current = event.sequence;
+        lastSequenceRef.current = sequence;
       }
-      if (['completed', 'turnCompleted', 'goal'].includes(event?.type)) onSettledRef.current?.();
+      if (['completed', 'turnCompleted', 'goal'].includes(event.type ?? '')) onSettledRef.current?.();
       setSnapshot((current) => {
         if (current.scope !== scope) return current;
         const messages = applyCodexStreamEvent(current.messages, event, latestKRef.current);
