@@ -1,10 +1,12 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
+import type { IDecoration, IMarker, Terminal as XTerm } from '@xterm/xterm';
 import { getHistory, scrollPane, sendKeys, UnauthorizedError } from '../api.js';
 import { prepareSeed, cursorSeq } from '../terminalSeed.js';
 import { getFont, setFont, clearFont, getDocHighlight } from '../storage.js';
 import { backoffDelay } from '../backoff.js';
 import { idleDelay } from '../cadence.js';
 import { initialConnection, nextConnection } from '../connection.js';
+import type { TerminalConnectionState } from '../connection.js';
 import { scanDocLinks } from '../docDecorations.js';
 import {
   fitRows, bottomPadRows, scrollDecision, cursorBufferLine, followTarget, viewportAtTop,
@@ -12,14 +14,74 @@ import {
 import { trimCopy } from '../terminalSelection.js';
 import { useFlash } from '../hooks/useFlash.js';
 import { openTerminalStream } from '../terminalStreamClient.js';
+import type { TerminalStreamController, TerminalStreamStatus } from '../terminalStreamClient.js';
 import { createTerminalStreamMirror } from '../terminalStreamMirror.js';
+import type {
+  TerminalStreamMirror,
+  TerminalStreamSnapshot,
+} from '../terminalStreamMirror.js';
+import type { TerminalReadyMessage, TerminalSeedMessage } from '../terminalStreamProtocol.js';
 import TerminalOverlays from './TerminalOverlays.jsx';
 import { openXterm } from '../terminalXterm.js';
+import type { TerminalDocLinkHandler } from '../terminalXterm.js';
 import { createTerminalSelectionController } from '../terminalSelectionController.js';
+import type {
+  TerminalSelectionActions,
+  TerminalSelectionUI,
+} from '../terminalSelectionController.js';
 import { createTerminalTouchController } from '../terminalTouchController.js';
 import { createConnectionTelemetry } from '../connectionTelemetry.js';
+import type { ConnectionTelemetryState } from '../connectionTelemetry.js';
 import { streamPaintDelay } from '../streamPaintCadence.js';
 import { useBackButton } from '../hooks/useBackButton.js';
+import type { TerminalCursor } from '../terminalViewport.js';
+
+type TerminalTransportFallback = 'network' | 'unavailable';
+type TerminalInputFailure = 'pane-missing' | 'disconnected';
+type TerminalDecoration = { deco: IDecoration; marker: IMarker };
+type TerminalVerticalScrollbar = { top: number; height: number };
+
+interface TerminalSeedState {
+  seed: string;
+  contentRows: number;
+  alt: boolean;
+}
+
+export interface TerminalProps {
+  pane: string;
+  stream?: boolean;
+  snapshotIntervalMs?: number;
+  inset?: number;
+  desktop?: boolean;
+  autoFocusInput?: boolean;
+  onAuthFail?: () => void;
+  onDocLinkTap?: TerminalDocLinkHandler;
+  onTap?: () => void;
+  onKeepKeyboard?: () => boolean;
+  onRequestDraft?: () => void;
+  onInputFocusChange?: (focused: boolean) => void;
+  onInputData?: (pane: string, data: string | Uint8Array) => void;
+}
+
+export interface TerminalHandle {
+  getSize(): { cols: number; rows: number } | null;
+  flash(): void;
+  getFontSize(): { size: number; auto: boolean } | null;
+  setFontSize(size: number): number | null;
+  autoFont(): void;
+  wake(): void;
+  inputFailed(error: unknown): void;
+  focusInput(): void;
+  blurInput(): void;
+  forwardPageKey(event: KeyboardEvent): boolean;
+  setDocHighlight(on: boolean): void;
+}
+
+function serverErrorOf(error: unknown): unknown {
+  return typeof error === 'object' && error !== null && 'serverError' in error
+    ? (error as { serverError?: unknown }).serverError
+    : undefined;
+}
 
 const LIVE_MARGIN = 20; // capture this many rows beyond the viewport so a small scroll-up has slack
                         // before triggering a deeper history pull (replaces the old fixed 100-line tail)
@@ -41,7 +103,7 @@ const STREAM_HISTORY_SUSPEND_MS = 10000;
 // a smaller font shows more rows (filled from scrollback), a larger font fewer. In AUTO mode
 // (no manual pinch) the font also shrinks so the whole pane fits — full-screen TUIs stay whole.
 // All of this lives in fit() below.
-const Terminal = forwardRef(function Terminal({
+const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Terminal({
   pane,
   stream = false,
   snapshotIntervalMs = 1000,
@@ -56,9 +118,9 @@ const Terminal = forwardRef(function Terminal({
   onInputFocusChange,
   onInputData,
 }, ref) {
-  const elRef = useRef(null);
-  const termRef = useRef(null);
-  const forwardPageKeyRef = useRef(null);
+  const elRef = useRef<HTMLDivElement | null>(null);
+  const termRef = useRef<XTerm | null>(null);
+  const forwardPageKeyRef = useRef<((event: KeyboardEvent) => boolean) | null>(null);
   const insetRef = useRef(0); // keyboard overlap (px) — fit() subtracts it so the grid == visible height
   const userScrolledRef = useRef(false); // manual vertical scroll → disarms alt-screen cursor-follow
   const followArmedRef = useRef(false);  // alt-screen cursor-follow armed? (keyboard-focus)
@@ -81,44 +143,46 @@ const Terminal = forwardRef(function Terminal({
   // handler is held in a ref so the poll loop's stable closure always calls the latest prop (mirrors
   // how the loop reaches outside state via fitRef/wakeRef). Tapping a path does NOT open it directly
   // — it hands the path + tap coords to App, which shows a confirm popover (anti-误触).
-  const decosRef = useRef([]);
-  const cursorDecoRef = useRef(null); // decoration-drawn cursor for a full-screen app whose cursor is in scrollback (CUP can't reach it)
-  const locateDecoRef = useRef(null); // full-row background highlight on the cursor's line (the 定位 toggle)
+  const decosRef = useRef<TerminalDecoration[]>([]);
+  const cursorDecoRef = useRef<TerminalDecoration | null>(null); // decoration-drawn cursor for a full-screen app whose cursor is in scrollback (CUP can't reach it)
+  const locateDecoRef = useRef<TerminalDecoration | null>(null); // full-row background highlight on the cursor's line (the 定位 toggle)
   const locateOnRef = useRef(false);  // is the 定位 line-highlight toggle on? (read inside effect scope)
-  const locateRef = useRef(null);     // effect-scope redraw of the locate highlight, so the toggle button can apply it now
+  const locateRef = useRef<(() => void) | null>(null);     // effect-scope redraw of the locate highlight, so the toggle button can apply it now
   const onDocLinkTapRef = useRef(onDocLinkTap);
   onDocLinkTapRef.current = onDocLinkTap;
   // The doc-path wash is an opt-in visual cue (Settings toggle, default off) — paths stay tappable
   // regardless. Held in a ref the poll-loop closure reads; setDocHighlight() (imperative handle) flips it
   // and pokes refreshDecosRef to re-scan at once, without waiting for the next repaint.
   const docHighlightRef = useRef(getDocHighlight());
-  const refreshDecosRef = useRef(null);
+  const refreshDecosRef = useRef<(() => void) | null>(null);
   // Terminal font is set by two-finger pinch and persisted. null = auto-fit (height).
-  const fontRef = useRef(getFont());
+  const fontRef = useRef<number | null>(getFont());
   // Kills an in-flight inertial coast. Held in a ref (like fitRef/wakeRef) so resume() — defined in
   // component scope — can cancel the fling that lives in the touch-handling effect closure.
-  const stopFlingRef = useRef(null);
+  const stopFlingRef = useRef<(() => void) | null>(null);
   const [paused, setPaused] = useState(false);
   const [connected, setConnected] = useState(true); // false → show the disconnect banner
-  const [streamStatus, setStreamStatus] = useState(stream ? 'connecting' : 'off');
-  const [connectionInfo, setConnectionInfo] = useState({
+  const [streamStatus, setStreamStatus] = useState<TerminalStreamStatus | 'off'>(
+    stream ? 'connecting' : 'off',
+  );
+  const [connectionInfo, setConnectionInfo] = useState<ConnectionTelemetryState>({
     mode: stream ? 'live' : 'snapshot',
     quality: 'connecting',
     stableQuality: 'connecting',
     rttMs: null,
     recoveryAt: null,
   });
-  const [transportFallback, setTransportFallback] = useState(null);
+  const [transportFallback, setTransportFallback] = useState<TerminalTransportFallback | null>(null);
   const [transportOpen, setTransportOpen] = useState(false);
   const [transportNow, setTransportNow] = useState(() => Date.now());
-  const [inputFailure, setInputFailure] = useState(null);
+  const [inputFailure, setInputFailure] = useState<TerminalInputFailure | null>(null);
   // Touch selection: long-press starts a selection on the real grid (xterm draws the highlight
   // on its own layer, WebGL included), drag extends it, then a "复制" bubble copies it. selActive
   // is a ref so liveTick (effect scope) and the bubble (render scope) share the "don't repaint /
   // a selection is showing" flag without a re-render race.
   const selActiveRef = useRef(false);
   const [selInfo, setSelInfo] = useState(''); // blue "复制模式 · N 行 · M 字" status strip; '' = hidden
-  const [selUI, setSelUI] = useState(null); // {start:{x,y}, end:{x,y}} in .terminal-wrap px, or null
+  const [selUI, setSelUI] = useState<TerminalSelectionUI | null>(null); // {start:{x,y}, end:{x,y}} in .terminal-wrap px, or null
   // Alt-screen (a full-screen app: vim/htop/less/a mouse-mode TUI) has no scrollback of its own, so a
   // vertical swipe can't scroll it the ordinary way. altScreenRef tracks the pane's state (set each poll
   // from the server's `alt` flag); a swipe over such a pane is forwarded to the app as scroll input it
@@ -144,12 +208,12 @@ const Terminal = forwardRef(function Terminal({
   const [xOverflow, setXOverflow] = useState(false);
   // iOS auto-hides the native vertical indicator and overlays it on the final text column. Keep the
   // geometry for a small, persistent mobile-only thumb; null means there is no vertical scrollback.
-  const [yScrollbar, setYScrollbar] = useState(null); // { top, height } in px
+  const [yScrollbar, setYScrollbar] = useState<TerminalVerticalScrollbar | null>(null); // { top, height } in px
   const yOverflow = yScrollbar != null;
   // The effect's scheduleFit, surfaced so the font controls (below) can re-fit the row count
   // after changing the size from outside the effect scope.
-  const fitRef = useRef(null);
-  const settleLayoutFitRef = useRef(null);
+  const fitRef = useRef<(() => void) | null>(null);
+  const settleLayoutFitRef = useRef<(() => void) | null>(null);
   // One-shot flag for the pager's "适配高度" button: the next fit() sizes the font so the whole pane fills
   // the screen (see the fit-to-fill block in fit()). Set here, consumed in effect scope.
   const fitScreenPendingRef = useRef(false);
@@ -165,8 +229,8 @@ const Terminal = forwardRef(function Terminal({
   const fullAvailRef = useRef(0);
   // wake() lets outside input (sends/keys, via App) snap the poll loop back to the live cadence and
   // poll immediately. Bridged through a ref like fitRef so the imperative handle can reach effect scope.
-  const wakeRef = useRef(null);
-  const resyncRef = useRef(null);
+  const wakeRef = useRef<(() => void) | null>(null);
+  const resyncRef = useRef<(() => void) | null>(null);
   // When true, placeCursor lights the block at the cursor's real position even if the app has hidden it
   // (cur.vis === false). Set by every key/command send (see wake); cleared by the repaint loop once the app
   // shows its own cursor again (cur.vis=1). So operating the terminal always reveals WHERE the cursor is —
@@ -174,7 +238,7 @@ const Terminal = forwardRef(function Terminal({
   const forceCursorRef = useRef(false);
   // Callout 整行/整段 buttons live in render scope but need effect-scope helpers (term, buf, refreshSelUI).
   // Bridged via a ref, same pattern as fitRef/wakeRef. Populated once inside the effect.
-  const selActionsRef = useRef(null);
+  const selActionsRef = useRef<TerminalSelectionActions | null>(null);
 
   // App's ⊟/⊞ buttons call getSize to step the grid, and flash to surface the resulting
   // cols×rows·font for ~3s (polling briefly because term.cols only catches up on the next
@@ -189,7 +253,7 @@ const Terminal = forwardRef(function Terminal({
     // these are just an explicit way to drive the same persisted size.
     getFontSize: () => {
       const term = termRef.current;
-      return term ? { size: term.options.fontSize, auto: fontRef.current == null } : null;
+      return term ? { size: term.options.fontSize ?? 14, auto: fontRef.current == null } : null;
     },
     setFontSize: (n) => {
       const term = termRef.current;
@@ -211,7 +275,7 @@ const Terminal = forwardRef(function Terminal({
     },
     wake: () => wakeRef.current?.(),
     inputFailed: (error) => {
-      setInputFailure(error?.serverError === 'pane not found' ? 'pane-missing' : 'disconnected');
+      setInputFailure(serverErrorOf(error) === 'pane not found' ? 'pane-missing' : 'disconnected');
       setConnected(false);
     },
     focusInput: () => termRef.current?.focus(),
@@ -252,9 +316,11 @@ const Terminal = forwardRef(function Terminal({
   useEffect(() => {
     let disposed = false;
     let hadDesktopSelection = false;
+    const terminalHost = elRef.current;
+    if (!terminalHost) return undefined;
     const liveHost = document.createElement('div');
     liveHost.className = 'terminal__live';
-    elRef.current.replaceChildren(liveHost);
+    terminalHost.replaceChildren(liveHost);
     const { term, forwardPageKey, dispose: disposeXterm } = openXterm({
       host: liveHost,
       desktop,
@@ -284,35 +350,35 @@ const Terminal = forwardRef(function Terminal({
     });
     termRef.current = term;
     forwardPageKeyRef.current = forwardPageKey;
-    let timer = null;
+    let timer: ReturnType<typeof setTimeout> | null = null;
     let busy = false;
     let wakeAgain = false; // a wake() landed mid-poll — re-poll right after the in-flight one finishes
-    let streamClient = null;
+    let streamClient: TerminalStreamController | null = null;
     let streamMode = stream;
-    let streamFallbackTimer = null;
-    let streamBackgroundTimer = null;
-    let streamHistoryTimer = null;
+    let streamFallbackTimer: ReturnType<typeof setTimeout> | null = null;
+    let streamBackgroundTimer: ReturnType<typeof setTimeout> | null = null;
+    let streamHistoryTimer: ReturnType<typeof setTimeout> | null = null;
     let streamBackgroundSuspended = false;
-    let hiddenAt = null;
-    let streamMirror = null;
+    let hiddenAt: number | null = null;
+    let streamMirror: TerminalStreamMirror | null = null;
     let streamMirrorReady = false;
-    let streamPaintRaf = null;
-    let streamPaintTimer = null;
-    let lastStreamPaintAt = null;
+    let streamPaintRaf: number | null = null;
+    let streamPaintTimer: ReturnType<typeof setTimeout> | null = null;
+    let lastStreamPaintAt: number | null = null;
     let streamPaintBusy = false;
     let streamPaintQueued = false;
     let streamLayoutSettled = !streamMode;
     let streamSeedNeedsFit = true;
     let fitGeneration = 0;
-    let fitRaf = null;
+    let fitRaf: number | null = null;
     let layoutSettleGeneration = 0;
-    let layoutSettleRaf = null;
-    let scheduleStreamRender = () => {};
+    let layoutSettleRaf: number | null = null;
+    let scheduleStreamRender: (options?: { immediate?: boolean }) => void = () => {};
     let historyMode = false;
     let seeded = false;
     let streamRecoveryInProgress = false;
     let streamHasBeenLive = false;
-    let maybeRecoverStream = () => {};
+    let maybeRecoverStream: () => void = () => {};
     const telemetry = createConnectionTelemetry({
       mode: stream ? 'live' : 'snapshot',
       onChange: (info) => {
@@ -341,21 +407,21 @@ const Terminal = forwardRef(function Terminal({
     let depth = liveDepth();
     let historyPullRetryAfter = 0;
     let freezeTouchForHistoryPull = () => {};
-    let settleHistoryAnchor = (target) => term.scrollToLine(target);
-    let lastAnsi = null;
+    let settleHistoryAnchor = (target: number): void => term.scrollToLine(target);
+    let lastAnsi: string | null = null;
     let lastCur = ''; // last frame's cursor key (row,col,vis) — a cursor-only move must still repaint
-    let curInfo = null; // last frame's cursor {row,col,vis}, placed by placeCursor() after sizing settles
+    let curInfo: TerminalCursor | null = null; // last frame's cursor {row,col,vis}, placed by placeCursor() after sizing settles
     let seedRows = 0; // rows in the last seed (trimmed capture) — cur.row counts up from its bottom
     let streamCursorOwned = false; // after a serialized revision lands, visible xterm owns its cursor
     let streamCursorVisible = false;
-    let historyBoundary = null;
-    let liveBoundaryLine = null;
+    let historyBoundary: TerminalDecoration | null = null;
+    let liveBoundaryLine: number | null = null;
     // The last seed's RAW (un-padded) content, so fit() can re-pad it for the FINAL row count. The seed's
     // bottom-pad is computed against term.rows AT SEED TIME (the pre-fit default); fit then grows the grid
     // to fill the container, and without re-padding the short content would sit stranded mid-grid while the
     // cursor is placed at the grown bottom (the "new window, short content, cursor at bottom" bug).
-    let lastSeed = null; // { seed, contentRows, alt }
-    let lastHash = null; // last frame's server hash, echoed as ?since= so an unchanged screen returns 204
+    let lastSeed: TerminalSeedState | null = null; // { seed, contentRows, alt }
+    let lastHash: string | null = null; // last frame's server hash, echoed as ?since= so an unchanged screen returns 204
     let idleSince = Date.now(); // timestamp of the last change/activity → drives the adaptive cadence
     setPaused(false);
     setStreamStatus(stream ? 'connecting' : 'off');
@@ -370,7 +436,7 @@ const Terminal = forwardRef(function Terminal({
       requestAnimationFrame(() => { if (!disposed) setReady(true); });
     };
     let connState = initialConnection;
-    const setConn = (s) => {
+    const setConn = (s: TerminalConnectionState): void => {
       connState = s;
       if (s.connected) setInputFailure(null);
       setConnected(s.connected);
@@ -385,11 +451,12 @@ const Terminal = forwardRef(function Terminal({
     };
     const drawHistoryBoundary = () => {
       disposeHistoryBoundary();
-      if (altScreenRef.current || !Number.isFinite(liveBoundaryLine)
-        || liveBoundaryLine < 1) return;
+      const boundaryLine = liveBoundaryLine;
+      if (altScreenRef.current || boundaryLine == null || !Number.isFinite(boundaryLine)
+        || boundaryLine < 1) return;
       const b = buf();
       const cursorLine = b.baseY + b.cursorY;
-      const marker = term.registerMarker(liveBoundaryLine - cursorLine);
+      const marker = term.registerMarker(boundaryLine - cursorLine);
       if (!marker) return;
       const deco = term.registerDecoration({ marker, x: 0, width: term.cols });
       if (!deco) {
@@ -532,7 +599,7 @@ const Terminal = forwardRef(function Terminal({
       const { cur, line, liveOwned } = cursorDisplayState();
       const b = term.buffer.active;
       const useDeco = cur && (cur.vis || forceCursorRef.current) && altScreenRef.current && b.viewportY < b.baseY;
-      if (!useDeco) {
+      if (!useDeco || !cur || line == null) {
         disposeCursorDeco();
         // Once the live stream is ready, xterm's parser is the cursor authority. Replaying an older
         // snapshot cursor here would make the real position flash and then jump backwards.
@@ -544,7 +611,7 @@ const Terminal = forwardRef(function Terminal({
       disposeCursorDeco();
       const marker = term.registerMarker(line - (b.baseY + b.cursorY));
       if (!marker) { drawLocate(); return; }
-      const deco = term.registerDecoration({ marker, x: Math.max(0, cur.col | 0), width: 1 });
+      const deco = term.registerDecoration({ marker, x: Math.max(0, (cur.col ?? 0) | 0), width: 1 });
       if (!deco) { marker.dispose(); drawLocate(); return; }
       deco.onRender((el) => { el.classList.add('cursor-deco'); });
       cursorDecoRef.current = { deco, marker };
@@ -562,7 +629,7 @@ const Terminal = forwardRef(function Terminal({
       const { cur, line } = cursorDisplayState();
       // Only on a full-screen app (where the 定位 toggle lives). On the main screen the highlight is cleared
       // and stays cleared — switching back to Claude mustn't leave the caret-row band behind.
-      if (disposed || !locateOnRef.current || !altScreenRef.current || !cur) return;
+      if (disposed || !locateOnRef.current || !altScreenRef.current || !cur || line == null) return;
       const b = term.buffer.active;
       const marker = term.registerMarker(line - (b.baseY + b.cursorY));
       if (!marker) return;
@@ -587,12 +654,12 @@ const Terminal = forwardRef(function Terminal({
       if (contentRows + pad === seedRows) return Promise.resolve(); // pad already fits the grid → nothing to do
       const framed = pad ? ('\n'.repeat(pad) + seed) : seed;
       seedRows = framed.split('\n').length;
-      return new Promise((res) => term.write('\x1b[?25l\x1b[0m\x1b[2J\x1b[3J\x1b[H' + framed, () => {
+      return new Promise<void>((resolve) => term.write('\x1b[?25l\x1b[0m\x1b[2J\x1b[3J\x1b[H' + framed, () => {
         if (!disposed) {
           term.scrollToBottom();
           try { refreshDocDecorations(term); } catch { /* cosmetic */ } // content shifted → rescan underlines
         }
-        res();
+        resolve();
       }));
     };
     const settleFrame = (generation = fitGeneration) => {
@@ -825,7 +892,7 @@ const Terminal = forwardRef(function Terminal({
 
     const selection = createTerminalSelectionController({
       term,
-      host: elRef.current,
+      host: terminalHost,
       screenHost: liveHost,
       desktop,
       activeRef: selActiveRef,
@@ -835,7 +902,7 @@ const Terminal = forwardRef(function Terminal({
     });
     const touch = createTerminalTouchController({
       term,
-      host: elRef.current,
+      host: terminalHost,
       desktop,
       pane,
       fontRef,
@@ -863,7 +930,7 @@ const Terminal = forwardRef(function Terminal({
     // the poll-and-repaint model. decoration.dispose() does NOT dispose its marker in @xterm/xterm
     // 5.5, so we track and dispose both each refresh (markers near baseY aren't trimmed, so they'd
     // otherwise accumulate over a long session).
-    const refreshDocDecorations = (t) => {
+    const refreshDocDecorations = (t: XTerm): void => {
       for (const { deco, marker } of decosRef.current) { deco.dispose(); marker.dispose(); }
       decosRef.current = [];
       if (!onDocLinkTapRef.current || !docHighlightRef.current) return; // off → clear + draw nothing
@@ -880,7 +947,9 @@ const Terminal = forwardRef(function Terminal({
     };
     refreshDecosRef.current = () => { if (!disposed && seeded) refreshDocDecorations(term); };
 
-    const applyStreamModes = (frame) => {
+    const applyStreamModes = (
+      frame: Pick<TerminalStreamSnapshot, 'alt' | 'mouseAware'>,
+    ): boolean => {
       const wasAlt = altScreenRef.current;
       const isAlt = !!frame.alt;
       altScreenRef.current = isAlt;
@@ -912,7 +981,8 @@ const Terminal = forwardRef(function Terminal({
         streamPaintQueued = true;
         return;
       }
-      const frame = streamMirror.snapshot();
+      const mirror = streamMirror;
+      const frame = mirror.snapshot();
       if (!frame) return;
       const layoutGeneration = fitGeneration;
       streamPaintBusy = true;
@@ -947,7 +1017,8 @@ const Terminal = forwardRef(function Terminal({
           curInfo = null;
           streamCursorVisible = frame.cursorVisible;
           streamCursorOwned = true;
-          liveBoundaryLine = Number.isFinite(frame.boundaryLine) && frame.boundaryLine > 0
+          liveBoundaryLine = frame.boundaryLine != null
+            && Number.isFinite(frame.boundaryLine) && frame.boundaryLine > 0
             ? frame.boundaryLine + pad
             : null;
           if (frame.cursorVisible) forceCursorRef.current = false;
@@ -968,7 +1039,7 @@ const Terminal = forwardRef(function Terminal({
           reveal();
           streamPaintBusy = false;
           if (leftAltScreen) streamClient?.resync();
-          if (streamPaintQueued || streamMirror.revision > frame.revision) scheduleStreamRender();
+          if (streamPaintQueued || mirror.revision > frame.revision) scheduleStreamRender();
         },
       );
     };
@@ -994,8 +1065,9 @@ const Terminal = forwardRef(function Terminal({
       streamPaintRaf = requestAnimationFrame(paintStreamFrame);
     };
 
-    const applyStreamSeed = async (frame) => {
-      if (disposed || !streamMirror) return;
+    const applyStreamSeed = async (frame: TerminalSeedMessage): Promise<void> => {
+      const mirror = streamMirror;
+      if (disposed || !mirror) return;
       const recoveringInBackground = streamRecoveryInProgress && !streamMode;
       if (streamFallbackTimer) {
         clearTimeout(streamFallbackTimer);
@@ -1017,7 +1089,7 @@ const Terminal = forwardRef(function Terminal({
         mouseAwareRef.current = !!frame.mouseAware;
         setAltScreen((value) => (value === !!frame.alt ? value : !!frame.alt));
       }
-      await streamMirror.seed(frame);
+      await mirror.seed(frame);
       if (disposed) return;
       if (!recoveringInBackground) {
         lastAnsi = frame.ansi;
@@ -1027,20 +1099,22 @@ const Terminal = forwardRef(function Terminal({
       }
     };
 
-    const applyStreamData = async (data) => {
-      if (disposed || !streamMirror) return;
-      await streamMirror.data(data);
+    const applyStreamData = async (data: Uint8Array): Promise<void> => {
+      const mirror = streamMirror;
+      if (disposed || !mirror) return;
+      await mirror.data(data);
       if (!disposed && streamMirrorReady && !historyMode) scheduleStreamRender();
     };
 
-    const finishStreamSeed = async ({ cur }) => {
-      if (disposed || !streamMirror) return;
+    const finishStreamSeed = async ({ cur }: TerminalReadyMessage): Promise<void> => {
+      const mirror = streamMirror;
+      if (disposed || !mirror) return;
       const recoveringInBackground = streamRecoveryInProgress && !streamMode;
       if (!recoveringInBackground) {
         streamCursorVisible = !!cur?.vis;
         lastCur = cur ? `${cur.row},${cur.col},${cur.vis ? 1 : 0}` : '';
       }
-      await streamMirror.ready(cur);
+      await mirror.ready(cur);
       if (disposed) return;
       streamMirrorReady = true;
       if (!recoveringInBackground) {
@@ -1057,7 +1131,11 @@ const Terminal = forwardRef(function Terminal({
       }
     };
 
-    const repaint = async (lines, keepPosition, preserveLatestPosition = false) => {
+    const repaint = async (
+      lines: number,
+      keepPosition: boolean,
+      preserveLatestPosition = false,
+    ): Promise<boolean> => {
       if (busy || disposed) return false;
       busy = true;
       const startedInStreamMode = streamMode;
@@ -1128,7 +1206,9 @@ const Terminal = forwardRef(function Terminal({
         // seedRows = rows ACTUALLY written (incl. bottom-align padding). cursorSeq/cursorBufferLine count
         // cur.row up from the bottom of this, so padding shifts the cursor to the grid bottom correctly.
         seedRows = framed ? framed.split('\n').length : 0;
-        await new Promise((res) => term.write('\x1b[?25l\x1b[0m\x1b[2J\x1b[3J\x1b[H' + framed, res));
+        await new Promise<void>((resolve) => {
+          term.write('\x1b[?25l\x1b[0m\x1b[2J\x1b[3J\x1b[H' + framed, resolve);
+        });
         if (disposed) return false;
         if (historyMode && Number.isFinite(hist.historyLines)) {
           liveBoundaryLine = hist.historyLines;
@@ -1215,7 +1295,7 @@ const Terminal = forwardRef(function Terminal({
     // and bails instead of scheduling a second chain — without this, hide/show during a poll leaks
     // timers (two chains, only one tracked by `timer`).
     let epoch = 0;
-    async function tick(myEpoch) {
+    async function tick(myEpoch: number): Promise<void> {
       if (!disposed && myEpoch === epoch) await pollOnce();
       if (disposed || document.hidden || myEpoch !== epoch) return;
       const delay = connState.failCount > 0
@@ -1228,7 +1308,9 @@ const Terminal = forwardRef(function Terminal({
       if (timer) { clearTimeout(timer); timer = null; }
       tick(epoch);
     };
-    const fallbackToPolling = async (reason = 'network') => {
+    const fallbackToPolling = async (
+      reason: TerminalTransportFallback = 'network',
+    ): Promise<void> => {
       if (disposed || !streamMode) return;
       streamMode = false;
       streamRecoveryInProgress = false;
@@ -1257,7 +1339,7 @@ const Terminal = forwardRef(function Terminal({
       scheduleFit();
       startLoop();
     };
-    const handleStreamStatus = (status) => {
+    const handleStreamStatus = (status: TerminalStreamStatus): void => {
       if (disposed) return;
       setStreamStatus(status);
       telemetry.status(status);
@@ -1506,7 +1588,7 @@ const Terminal = forwardRef(function Terminal({
   // Page a full-screen (alt-screen) pane up/down. PageUp/PageDown is the one manual scroll that works in
   // any pager/editor regardless of mouse mode (arrows would move the cursor instead) — so it covers the
   // apps the wheel gesture can't (no mouse reporting) and gives precise paging in the ones it can.
-  const pageScroll = async (dir) => {
+  const pageScroll = async (dir: 'up' | 'down'): Promise<void> => {
     // Mirror the drag's nested-scroll fall-off: when the keyboard-shrunk grid leaves an internal window
     // (baseY > 0), page OUR window over the captured app screen first; only forward PageUp/PageDown to the
     // app once we're at the internal top/bottom. Keyboard down (baseY 0) → forward straight to the app.
