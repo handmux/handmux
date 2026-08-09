@@ -1,5 +1,10 @@
 import { describe, it, expect, vi } from 'vitest';
-import { parseSupervisorPids, scanSupervisorPids, terminateSupervisorPids } from '../src/cli/supervisorProcesses.js';
+import {
+  parseSupervisorPids,
+  scanSupervisorPids,
+  terminateSupervisorPids,
+  type SupervisorScanResult,
+} from '../src/cli/supervisorProcesses.js';
 
 describe('supervisor process detection', () => {
   it('finds packaged/manual/service supervisors across install paths and ignores lookalikes/zombies', () => {
@@ -32,14 +37,14 @@ describe('supervisor process detection', () => {
   });
 
   it('terminates every initial and newly-observed duplicate before succeeding', async () => {
-    const scans = [
+    const scans: SupervisorScanResult[] = [
       { ok: true, pids: [20, 30] },
       { ok: true, pids: [30] },
       { ok: true, pids: [] },
     ];
     const kill = vi.fn();
     const result = await terminateSupervisorPids([10, 20], {
-      scan: () => scans.shift(), kill, waitFn: async () => {}, now: () => 0,
+      scan: () => scans.shift() ?? { ok: true, pids: [] }, kill, waitFn: async () => {}, now: () => 0,
     });
     expect(result).toEqual({ ok: true, pids: [10, 20, 30], remaining: [] });
     expect(kill.mock.calls.map(([pid]) => pid)).toEqual([10, 20, 20, 30, 30]);
