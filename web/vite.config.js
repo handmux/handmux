@@ -9,11 +9,15 @@ function resolveMigratedTypeScript() {
     enforce: 'pre',
     resolveId(source, importer) {
       if (!importer || !/^\.\.?\/.*\.jsx?$/.test(source)) return null;
-      const candidate = path.resolve(
-        path.dirname(importer.split('?')[0]),
-        source.replace(/\.jsx?$/, (extension) => (extension === '.jsx' ? '.tsx' : '.ts')),
-      );
-      return existsSync(candidate) ? candidate : null;
+      const extensions = source.endsWith('.jsx') ? ['.tsx'] : ['.ts', '.tsx'];
+      for (const extension of extensions) {
+        const candidate = path.resolve(
+          path.dirname(importer.split('?')[0]),
+          source.replace(/\.jsx?$/, extension),
+        );
+        if (existsSync(candidate)) return candidate;
+      }
+      return null;
     },
   };
 }

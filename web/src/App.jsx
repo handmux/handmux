@@ -42,6 +42,7 @@ import { useServerConfig } from './hooks/useServerConfig.js';
 import { authHandled } from './authGuard.js';
 import { canUseChatLens } from './chatLensAvailability.js';
 import { currentPaneAgent, reconcilePaneAgents } from './paneAgents.js';
+import { OverlayProvider } from './overlays/OverlayHost.js';
 
 import Drawer from './components/Drawer.jsx';
 import WindowBar from './components/WindowBar.jsx';
@@ -1772,8 +1773,9 @@ export default function App() {
     // as one unit: the keys + input land just above the keyboard and the terminal's bottom sits
     // right above the keys (the topbar scrolls off the top, which is fine while typing). Uses a
     // transform — the same lift that worked on the dock — so iOS can't undo it by re-scrolling.
-    <div className="app" data-chat-tone={chatTone} onPointerDownCapture={captureTerminalOwner}
-      style={inset ? { transform: `translateY(-${inset}px)` } : undefined}>
+    <OverlayProvider keyboardInset={inset} chatTone={chatTone}>
+      <div className="app" data-chat-tone={chatTone} onPointerDownCapture={captureTerminalOwner}
+        style={inset ? { transform: `translateY(-${inset}px)` } : undefined}>
       <header className="topbar">
         <button ref={drawerMenuRef} className="hamburger" onClick={() => setDrawerOpen(true)}>☰</button>
         <span className="session-name" {...sessionNameLongPress}>{current?.session?.name ?? '—'}</span>
@@ -2203,6 +2205,7 @@ export default function App() {
       ) : (
         <div className="loading">{t('app.selectSessionHint')}</div>
       )}
-    </div>
+      </div>
+    </OverlayProvider>
   );
 }

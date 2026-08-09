@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
 import { clearCodexGoal, getCodexGoal, UnauthorizedError, updateCodexGoal } from '../api.js';
 import { t } from '../i18n';
 import { useBackButton } from '../hooks/useBackButton.js';
+import { OverlayPortal } from '../overlays/OverlayHost.js';
 import { TargetIcon, XIcon } from './icons.jsx';
 
 const TERMINAL_GOAL_STATUSES = new Set(['blocked', 'usageLimited', 'budgetLimited', 'complete']);
@@ -200,11 +200,10 @@ export default function CodexGoalMenu({
   };
 
   const terminal = isCodexGoalTerminal(goal);
-  const bottom = `${Math.max(0, Number(keyboardInset) || 0)}px`;
   const content = (
     <>
-      <div className="codex-goal-backdrop" style={{ bottom }} onClick={onClose} />
-      <section className="codex-goal-menu" style={{ bottom }} role="dialog" aria-modal="true"
+      <div className="codex-goal-backdrop" onClick={onClose} />
+      <section className="codex-goal-menu" role="dialog" aria-modal="true"
         aria-label={t('chat.goal.title')}>
         <div className="tool-sheet-grip" />
         <header className="codex-goal-head">
@@ -292,8 +291,5 @@ export default function CodexGoalMenu({
     </>
   );
   if (!portal) return content;
-  return createPortal(
-    <div className="chat-tone-surface" data-chat-tone={chatTone}>{content}</div>,
-    document.body,
-  );
+  return <OverlayPortal chatTone={chatTone} keyboardInset={keyboardInset}>{content}</OverlayPortal>;
 }

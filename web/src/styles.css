@@ -37,6 +37,8 @@
 /* overscroll-behavior: none stops the browser's pull-to-refresh / bounce from firing
    when you swipe inside the terminal. */
 html, body, #root { height: 100%; margin: 0; overscroll-behavior: none; }
+#overlay-root { position: relative; }
+.overlay-layer { --overlay-keyboard-inset: 0px; }
 body { font-family: -apple-system, system-ui, sans-serif; background: #1a1b1e; color: #e6e6e6; }
 .app { display: flex; flex-direction: column; height: 100%; overflow: hidden; }
 .topbar { display: flex; align-items: center; gap: 6px; padding: 4px 8px; background: #2a2b2e; }
@@ -2807,9 +2809,9 @@ button.cmd-text { background: none; border: none; text-align: left; }
 .chat-plan-summary .codex-plan-chevron { margin-left: -2px; font-size: 18px; }
 
 /* Read-only task Bottom Sheet. Rows are status projections, deliberately not checkboxes or editable controls. */
-.codex-plan-backdrop { position: fixed; inset: 0; z-index: 45; background: rgba(0,0,0,.5); }
+.codex-plan-backdrop { position: fixed; inset: 0; bottom: var(--overlay-keyboard-inset, 0px); z-index: 45; background: rgba(0,0,0,.5); }
 .codex-plan-sheet {
-  position: fixed; left: 0; right: 0; bottom: 0; z-index: 46;
+  position: fixed; left: 0; right: 0; bottom: var(--overlay-keyboard-inset, 0px); z-index: 46;
   max-height: min(62dvh, 620px); min-height: min(36dvh, 320px);
   display: flex; flex-direction: column; overflow: hidden;
   border-radius: 18px 18px 0 0; background: var(--ct-overlay); color: var(--ct-ink);
@@ -3219,9 +3221,9 @@ button.cmd-text { background: none; border: none; text-align: left; }
   background: #fff; box-shadow: 0 1px 4px rgba(0,0,0,.28);
 }
 .codex-config-error { color: var(--danger, #d34b45); font-size: 12px; line-height: 1.4; }
-.codex-goal-backdrop { position: fixed; inset: 0; z-index: 45; background: rgba(0,0,0,.5); }
+.codex-goal-backdrop { position: fixed; inset: 0; bottom: var(--overlay-keyboard-inset, 0px); z-index: 45; background: rgba(0,0,0,.5); }
 .codex-goal-menu {
-  position: fixed; left: 0; right: 0; bottom: 0; z-index: 46;
+  position: fixed; left: 0; right: 0; bottom: var(--overlay-keyboard-inset, 0px); z-index: 46;
   max-height: min(62dvh, 620px); min-height: min(36dvh, 320px);
   display: flex; flex-direction: column; overflow: hidden;
   border-radius: 18px 18px 0 0;

@@ -99,8 +99,8 @@ describe('ChatComposer', () => {
     fireEvent.click(bar);
     const sheet = screen.getByRole('dialog', { name: '当前任务' });
     expect(sheet.classList.contains('codex-plan-sheet')).toBe(true);
-    expect(sheet.style.bottom).toBe('280px');
-    expect(document.body.querySelector('.codex-plan-backdrop').style.bottom).toBe('280px');
+    expect(sheet.parentElement.style.getPropertyValue('--overlay-keyboard-inset')).toBe('280px');
+    expect(document.body.querySelector('.codex-plan-backdrop')).toBeTruthy();
     expect(sheet.textContent).toContain('确认协议');
     expect(sheet.textContent).toContain('实现任务条');
     expect(sheet.textContent).toContain('跑测试');
@@ -390,7 +390,7 @@ describe('ChatComposer', () => {
     const panel = await screen.findByRole('dialog', { name: '任务目标' });
     await waitFor(() => expect(panel.textContent).toContain('Keep tests green'));
     expect(panel.textContent).toContain('进行中');
-    expect(panel.style.bottom).toBe('280px');
+    expect(panel.parentElement.style.getPropertyValue('--overlay-keyboard-inset')).toBe('280px');
     expect(panel.parentElement.getAttribute('data-chat-tone')).toBe('dusk');
     fireEvent.click(screen.getByRole('button', { name: '编辑' }));
     const objective = screen.getByRole('textbox', { name: '目标内容' });

@@ -1,6 +1,6 @@
-import { createPortal } from 'react-dom';
 import { t } from '../i18n';
 import { useBackButton } from '../hooks/useBackButton.js';
+import { OverlayPortal } from '../overlays/OverlayHost.js';
 import { ListChecksIcon, XIcon } from './icons.jsx';
 
 export function codexPlanSteps(plan) {
@@ -62,13 +62,12 @@ export function CodexPlanSummary({ plan, onOpen }) {
   );
 }
 
-function PlanSheetContent({ title, plan, onClose, keyboardInset = 0, animateInProgress = false }) {
+function PlanSheetContent({ title, plan, onClose, animateInProgress = false }) {
   const { steps, completed } = planMeta(plan);
-  const bottom = `${Math.max(0, Number(keyboardInset) || 0)}px`;
   return (
     <>
-      <div className="codex-plan-backdrop" style={{ bottom }} onClick={onClose} />
-      <section className="codex-plan-sheet" style={{ bottom }}
+      <div className="codex-plan-backdrop" onClick={onClose} />
+      <section className="codex-plan-sheet"
         role="dialog" aria-modal="true" aria-label={title}>
         <div className="tool-sheet-grip" />
         <header className="codex-plan-sheet-head">
@@ -105,10 +104,7 @@ export function CodexPlanSheet({
   useBackButton(open, onClose);
   if (!open || !codexPlanSteps(plan).length) return null;
   const content = <PlanSheetContent title={title} plan={plan} onClose={onClose}
-    keyboardInset={keyboardInset} animateInProgress={animateInProgress} />;
+    animateInProgress={animateInProgress} />;
   if (!portal) return content;
-  return createPortal(
-    <div className="chat-tone-surface" data-chat-tone={chatTone}>{content}</div>,
-    document.body,
-  );
+  return <OverlayPortal chatTone={chatTone} keyboardInset={keyboardInset}>{content}</OverlayPortal>;
 }
