@@ -892,7 +892,7 @@ export default function ChatView({
     const movingDown = el.scrollTop > previousTop + 1;
     lastScrollTopRef.current = el.scrollTop;
     const near = el.scrollHeight - el.scrollTop - el.clientHeight < NEAR_BOTTOM_PX;
-    if (movingUp) {
+    if (movingUp && !near) {
       followModeRef.current = 'reading';
       stickBottomRef.current = false;
     } else if (near && movingDown && Date.now() - lastScrollGestureAtRef.current < 1_500) {

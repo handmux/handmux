@@ -658,13 +658,16 @@ describe('ChatView', () => {
     await screen.findByText('hi');
     const el = container.querySelector('.chat-scroll');
 
-    // Near the bottom (within NEAR_BOTTOM_PX) → no jump button.
-    setGeometry(el, { scrollTop: 960, scrollHeight: 1000, clientHeight: 300 }); // 1000-960-300 = -260 < 40
+    setGeometry(el, { scrollTop: 700, scrollHeight: 1000, clientHeight: 300 });
+    fireEvent.scroll(el);
+
+    // A small upward pull that remains within NEAR_BOTTOM_PX keeps following and must not flash the button.
+    setGeometry(el, { scrollTop: 680, scrollHeight: 1000, clientHeight: 300 }); // 20px from bottom
     fireEvent.scroll(el);
     expect(screen.queryByRole('button', { name: '回到最新' })).toBeNull();
 
-    // Scrolled well away from the bottom → button appears.
-    setGeometry(el, { scrollTop: 0, scrollHeight: 1000, clientHeight: 300 }); // 1000-0-300 = 700 > 40
+    // Once the pull leaves the bottom buffer, the button appears.
+    setGeometry(el, { scrollTop: 640, scrollHeight: 1000, clientHeight: 300 }); // 60px from bottom
     fireEvent.scroll(el);
     const btn = container.querySelector('.new-output');
     expect(btn).toBeTruthy();
