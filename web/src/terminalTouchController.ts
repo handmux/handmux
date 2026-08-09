@@ -1,12 +1,51 @@
+import type { MutableRefObject } from 'react';
 import { scrollPane, sendKeys } from './api.js';
 import { shouldKeepKeyboard } from './dockKeyboard.js';
 import { drainWheel, notchDir } from './wheelScroll.js';
 import { flingStep, shouldFling } from './momentum.js';
 import { scrollDecision } from './terminalViewport.js';
 import { setFont } from './storage.js';
+import type { TerminalSelectionController } from './terminalSelectionController.js';
 
 const WHEEL_PX = 22;
 const FORWARDED_WHEEL_PX = 12;
+
+interface TouchTerminal {
+  options: { fontSize?: number };
+  readonly rows: number;
+  readonly buffer: { readonly active: { readonly viewportY: number; readonly baseY: number } };
+  getSelection(): string;
+  scrollToLine(target: number): void;
+}
+
+export interface TerminalTouchController {
+  freezeHistoryGesture(): void;
+  settleHistoryAnchor(target: number): void;
+  dispose(): void;
+}
+
+export interface TerminalTouchControllerOptions {
+  term: TouchTerminal;
+  host: HTMLElement;
+  desktop: boolean;
+  pane: string;
+  fontRef: MutableRefObject<number | null>;
+  selection: Pick<TerminalSelectionController, 'start' | 'extend' | 'refresh' | 'clear'>;
+  selectionActiveRef: MutableRefObject<boolean>;
+  stopFlingRef: MutableRefObject<(() => void) | null>;
+  getStreamExact: () => boolean;
+  getAltScreen: () => boolean;
+  getMouseAware: () => boolean;
+  onActivity: () => void;
+  onUserScroll: () => void;
+  showScrollPosition: () => void;
+  maybePullMore: () => void;
+  enterStreamHistory?: (distance: number) => boolean | void;
+  scheduleFit: () => void;
+  wake: () => void;
+  onTap: () => void;
+  onKeepKeyboard?: () => boolean;
+}
 
 export function createTerminalTouchController({
   term,
@@ -29,18 +68,18 @@ export function createTerminalTouchController({
   wake,
   onTap,
   onKeepKeyboard,
-}) {
+}: TerminalTouchControllerOptions): TerminalTouchController {
   const buffer = () => term.buffer.active;
   let startX = 0;
   let startY = 0;
   let startLeft = 0;
-  let axis = 0;
+  let axis: -1 | 0 | 1 = 0;
   let pinching = false;
   let initialPinchDistance = 0;
   let initialPinchFont = 0;
   let selecting = false;
   let selectionOnDown = false;
-  let longPressTimer = null;
+  let longPressTimer: ReturnType<typeof setTimeout> | null = null;
   let lastMoveX = 0;
   let lastMoveY = 0;
   let lastMoveTime = 0;
@@ -48,40 +87,44 @@ export function createTerminalTouchController({
   let scrollVelocityY = 0;
   let touchActive = false;
   let historyPullFrozen = false;
-  let flingRAF = null;
+  let flingRAF: number | null = null;
   let wheelAccum = 0;
   let wheelPreviousY = 0;
   let wheelPending = 0;
   let wheelBusy = false;
   let historyAnchorSettling = false;
-  let historyAnchorRAF = null;
+  let historyAnchorRAF: number | null = null;
   const liveViewport = () => (
-    host.querySelector('.terminal__live .xterm-viewport')
-      || host.querySelector('.xterm-viewport')
+    host.querySelector<HTMLElement>('.terminal__live .xterm-viewport')
+      || host.querySelector<HTMLElement>('.xterm-viewport')
   );
 
-  const cancelLongPress = () => {
+  const cancelLongPress = (): void => {
     if (longPressTimer) {
       clearTimeout(longPressTimer);
       longPressTimer = null;
     }
   };
-  const touchDistance = (touches) => Math.hypot(
+  const touchDistance = (touches: TouchList): number => Math.hypot(
     touches[0].clientX - touches[1].clientX,
     touches[0].clientY - touches[1].clientY,
   );
-  const stopFling = () => {
+  const stopFling = (): void => {
     if (flingRAF != null) {
       cancelAnimationFrame(flingRAF);
       flingRAF = null;
     }
   };
   stopFlingRef.current = stopFling;
-  const startFling = (element, property, initialVelocity) => {
+  const startFling = (
+    element: HTMLElement | null,
+    property: 'scrollLeft' | 'scrollTop',
+    initialVelocity: number,
+  ): void => {
     if (!element) return;
     let velocity = initialVelocity;
-    let previousTime = null;
-    const frame = (time) => {
+    let previousTime: number | null = null;
+    const frame = (time: number): void => {
       if (previousTime == null) {
         previousTime = time;
         flingRAF = requestAnimationFrame(frame);
@@ -106,7 +149,7 @@ export function createTerminalTouchController({
     flingRAF = requestAnimationFrame(frame);
   };
 
-  const flushWheel = async () => {
+  const flushWheel = async (): Promise<void> => {
     if (wheelBusy || wheelPending === 0) return;
     wheelBusy = true;
     const direction = notchDir(wheelPending);
@@ -120,11 +163,11 @@ export function createTerminalTouchController({
       // A later gesture can retry after a transient network failure.
     } finally {
       wheelBusy = false;
-      if (wheelPending !== 0) flushWheel();
+      if (wheelPending !== 0) void flushWheel();
     }
   };
 
-  const onTouchStart = (event) => {
+  const onTouchStart = (event: TouchEvent): void => {
     onActivity();
     cancelLongPress();
     stopFling();
@@ -144,7 +187,7 @@ export function createTerminalTouchController({
       axis = -1;
       return;
     }
-    const liveSurface = host.querySelector('.terminal__live');
+    const liveSurface = host.querySelector<HTMLElement>('.terminal__live');
     if (getStreamExact() && !getAltScreen() && liveSurface
       && event.touches[0].clientY < liveSurface.getBoundingClientRect().top) {
       enterStreamHistory?.(0);
@@ -168,7 +211,7 @@ export function createTerminalTouchController({
     }, 500);
   };
 
-  const onTouchMove = (event) => {
+  const onTouchMove = (event: TouchEvent): void => {
     if (pinching && event.touches.length === 2) {
       if (initialPinchDistance > 0) {
         const fontSize = Math.max(8, Math.min(
@@ -265,7 +308,7 @@ export function createTerminalTouchController({
       wheelAccum = drained.rem;
       if (drained.notches) {
         wheelPending += drained.notches;
-        flushWheel();
+        void flushWheel();
       }
       return;
     }
@@ -275,7 +318,7 @@ export function createTerminalTouchController({
     lastMoveTime = event.timeStamp;
   };
 
-  const onTouchEnd = (event) => {
+  const onTouchEnd = (event: TouchEvent): void => {
     cancelLongPress();
     const ended = event.touches.length === 0;
     if (ended) touchActive = false;
@@ -310,7 +353,7 @@ export function createTerminalTouchController({
     if (ended) historyPullFrozen = false;
   };
 
-  const onWheel = (event) => {
+  const onWheel = (event: WheelEvent): void => {
     // A horizontal trackpad swipe usually contains a little deltaY noise. Claim horizontal-dominant
     // gestures before xterm treats that noise as vertical scroll and cancels ancestor panning.
     if (Math.abs(event.deltaX) > Math.abs(event.deltaY) && host.scrollWidth > host.clientWidth) {
@@ -357,7 +400,7 @@ export function createTerminalTouchController({
       wheelAccum = drained.rem;
       if (drained.notches) {
         wheelPending += drained.notches;
-        flushWheel();
+        void flushWheel();
       }
       return;
     }
@@ -372,9 +415,9 @@ export function createTerminalTouchController({
     maybePullMore();
   };
 
-  const onPointerDown = (event) => {
+  const onPointerDown = (event: PointerEvent): void => {
     if (desktop) {
-      const liveSurface = host.querySelector('.terminal__live');
+      const liveSurface = host.querySelector<HTMLElement>('.terminal__live');
       if (getStreamExact() && !getAltScreen() && liveSurface
         && event.clientY < liveSurface.getBoundingClientRect().top) {
         enterStreamHistory?.(0);

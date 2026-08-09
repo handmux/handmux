@@ -8,7 +8,14 @@
 //   finger DOWN  (travel > 0) reveals EARLIER content → wheel 'up'   → +1 notch
 //   finger UP    (travel < 0) reveals LATER   content → wheel 'down' → −1 notch
 // Returns { notches, rem }: `notches` is the SIGNED count to emit now (+ = up), `rem` the leftover px.
-export function drainWheel(travelPx, unitPx) {
+export interface DrainedWheel {
+  notches: number;
+  rem: number;
+}
+
+export type WheelDirection = 'up' | 'down';
+
+export function drainWheel(travelPx: number, unitPx: number): DrainedWheel {
   let notches = 0;
   let rem = travelPx;
   while (Math.abs(rem) >= unitPx) {
@@ -19,4 +26,6 @@ export function drainWheel(travelPx, unitPx) {
 }
 
 // Map a signed notch count to the wheel direction the /scroll API expects.
-export const notchDir = (signedNotches) => (signedNotches > 0 ? 'up' : 'down');
+export const notchDir = (signedNotches: number): WheelDirection => (
+  signedNotches > 0 ? 'up' : 'down'
+);

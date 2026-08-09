@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { flingStep, shouldFling, FLING_FRICTION, FLING_MIN_V, FLING_START_V } from '../src/momentum.js';
 
 describe('flingStep', () => {

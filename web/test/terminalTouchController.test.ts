@@ -1,7 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createTerminalTouchController } from '../src/terminalTouchController.js';
+import {
+  createTerminalTouchController,
+  type TerminalTouchController,
+} from '../src/terminalTouchController.js';
 
-const touchEvent = (type, y, touches = 1) => {
+const touchEvent = (type: string, y: number, touches = 1): Event => {
   const event = new Event(type, { bubbles: true, cancelable: true });
   Object.defineProperty(event, 'touches', {
     value: touches ? [{ clientX: 100, clientY: y }] : [],
@@ -23,18 +26,19 @@ function setup() {
 
   const term = {
     options: { fontSize: 14 },
+    rows: 24,
     buffer: { active: { viewportY: 0, baseY: 300 } },
     getSelection: () => '',
     scrollToLine: vi.fn(),
   };
-  let controller;
+  let controller!: TerminalTouchController;
   const maybePullMore = vi.fn(() => controller.freezeHistoryGesture());
   controller = createTerminalTouchController({
     term,
     host,
     desktop: false,
     pane: '%1',
-    fontRef: { current: null },
+    fontRef: { current: null as number | null },
     selection: {
       start: vi.fn(),
       extend: vi.fn(),
@@ -115,8 +119,8 @@ describe('terminal touch history pull', () => {
   });
 
   it('blocks only the two-frame DOM sync boundary after restoring a history anchor', () => {
-    const frames = [];
-    vi.spyOn(window, 'requestAnimationFrame').mockImplementation((callback) => {
+    const frames: FrameRequestCallback[] = [];
+    vi.spyOn(window, 'requestAnimationFrame').mockImplementation((callback: FrameRequestCallback) => {
       frames.push(callback);
       return frames.length;
     });
@@ -136,10 +140,10 @@ describe('terminal touch history pull', () => {
 
     expect(dispatchWheel().defaultPrevented).toBe(true);
     expect(reachedXterm).not.toHaveBeenCalled();
-    frames.shift()(0);
+    frames.shift()!(0);
     expect(dispatchWheel().defaultPrevented).toBe(true);
     expect(reachedXterm).not.toHaveBeenCalled();
-    frames.shift()(16);
+    frames.shift()!(16);
     expect(dispatchWheel().defaultPrevented).toBe(false);
     expect(reachedXterm).toHaveBeenCalledOnce();
     controller.dispose();

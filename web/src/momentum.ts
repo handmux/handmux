@@ -13,7 +13,18 @@ export const FLING_IDLE_MS = 50;    // finger held still longer than this before
 
 // One coast frame. v = current velocity (px/ms, +down), dt = ms since the last frame. Returns the
 // scrollTop delta to apply, the decayed velocity, and whether the coast has slowed below FLING_MIN_V.
-export function flingStep(v, dt, friction = FLING_FRICTION, minV = FLING_MIN_V) {
+export interface FlingStep {
+  delta: number;
+  v: number;
+  done: boolean;
+}
+
+export function flingStep(
+  v: number,
+  dt: number,
+  friction = FLING_FRICTION,
+  minV = FLING_MIN_V,
+): FlingStep {
   const delta = v * dt;
   const nextV = v * friction ** (dt / 16);
   return { delta, v: nextV, done: Math.abs(nextV) < minV };
@@ -21,6 +32,11 @@ export function flingStep(v, dt, friction = FLING_FRICTION, minV = FLING_MIN_V) 
 
 // Decide whether a release should coast: only a genuine flick (fast enough, AND the finger was still
 // moving right up to the lift — not paused-then-released, which should stop dead).
-export function shouldFling(v, idleMs, startV = FLING_START_V, idleLimit = FLING_IDLE_MS) {
+export function shouldFling(
+  v: number,
+  idleMs: number,
+  startV = FLING_START_V,
+  idleLimit = FLING_IDLE_MS,
+): boolean {
   return idleMs <= idleLimit && Math.abs(v) >= startV;
 }
