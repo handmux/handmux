@@ -1,15 +1,34 @@
 import { getBrowserDeviceId, getToken } from './storage.js';
 import { mimeFromName } from './mime.js';
 import { t } from './i18n';
-import { ApiError, UnauthorizedError, parseApiErrorBody } from './apiErrors.js';
-import {
-  parseCodexProjectedStreamEvent, parseCodexStreamEvent,
-} from '../../server/src/codexStreamProtocol.js';
+import { UnauthorizedError } from './apiErrors.js';
 import { parseCodexToolProjection } from '../../server/src/codexToolProtocol.js';
-import { parseCodexQueueItem, parseCodexSendResult } from '../../server/src/codexQueueProtocol.js';
 import { requestJson as req } from './apiRequest.js';
 
 export { ApiError, UnauthorizedError } from './apiErrors.js';
+export {
+  answerCodexApproval,
+  answerCodexInput,
+  beginCodexQueuedEdit,
+  cancelCodexQueuedEdit,
+  clearCodexGoal,
+  clearCodexSession,
+  commitCodexQueuedEdit,
+  compactCodexSession,
+  getCodexGoal,
+  getCodexModels,
+  getCodexSession,
+  interruptCodexSession,
+  parseSseFrames,
+  removeCodexQueuedMessage,
+  renewCodexQueuedEdit,
+  sendCodexMessage,
+  steerCodexQueuedMessage,
+  streamCodexMessages,
+  takeoverCodexSession,
+  updateCodexGoal,
+  updateCodexSettings,
+} from './codexApi.js';
 
 export const getSessions = () => req('/api/sessions');
 export const getUsage = () => req('/api/usage');
@@ -47,136 +66,6 @@ export const getPaneContext = (pane, agent = 'claude') =>
 // gate is up. Polled by the 对话 lens only while a gate is up (kind==='permission').
 export const getPendingPrompt = (pane, agent = 'claude') =>
   req(`/api/pending-prompt?pane=${encodeURIComponent(pane)}&agent=${encodeURIComponent(agent)}`, { timeoutMs: 8000 }).then((r) => r.prompt || null);
-export const getCodexSession = (pane) =>
-  req(`/api/codex/session?pane=${encodeURIComponent(pane)}`, { timeoutMs: 8000 }).then((session) => {
-    if (!Array.isArray(session?.queue)) return session;
-    return { ...session, queue: session.queue.map(parseCodexQueueItem).filter(Boolean) };
-  });
-export function parseSseFrames(buffer) {
-  const frames = [];
-  let rest = String(buffer || '');
-  while (true) {
-    const boundary = /\r?\n\r?\n/.exec(rest);
-    if (!boundary) break;
-    const frame = rest.slice(0, boundary.index);
-    rest = rest.slice(boundary.index + boundary[0].length);
-    const data = frame.split(/\r?\n/)
-      .filter((line) => line.startsWith('data:'))
-      .map((line) => line.slice(5).trimStart())
-      .join('\n');
-    if (data) frames.push(data);
-  }
-  return { frames, rest };
-}
-
-// Fetch-based SSE keeps the normal Authorization header (native EventSource cannot set it) while still
-// giving the conversation a one-way, reconnectable stream. Durable transcript polling remains authoritative.
-/**
- * @param {string} pane
- * @param {{signal?: AbortSignal, onEvent?: (event: import('../../server/src/codexStreamProtocol.js').CodexStreamEvent) => void, after?: number | null}} [options]
- */
-export async function streamCodexMessages(pane, { signal, onEvent, after = null } = {}) {
-  const cursor = Number.isSafeInteger(after) && after >= 0 ? `&after=${after}` : '';
-  const path = `/api/codex/stream?pane=${encodeURIComponent(pane)}${cursor}`;
-  const res = await fetch(path, {
-    cache: 'no-store', signal,
-    headers: { Authorization: `Bearer ${getToken() ?? ''}`, Accept: 'text/event-stream' },
-  });
-  if (res.status === 401) throw new UnauthorizedError();
-  if (!res.ok) {
-    let errorBody = null;
-    try { errorBody = parseApiErrorBody(await res.json()); } catch { /* not json */ }
-    throw new ApiError(
-      errorBody?.error || `${path} -> ${res.status}`,
-      res.status,
-      errorBody?.error,
-      errorBody?.code,
-      errorBody?.requestId,
-    );
-  }
-  if (!res.body?.getReader) throw new Error('Codex message stream is unavailable');
-
-  const reader = res.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = '';
-  try {
-    while (true) {
-      const { done, value } = await reader.read();
-      buffer += decoder.decode(value || new Uint8Array(), { stream: !done });
-      const parsed = parseSseFrames(buffer);
-      buffer = parsed.rest;
-      for (const frame of parsed.frames) {
-        let payload;
-        try { payload = JSON.parse(frame); } catch { continue; }
-        const events = payload?.type === 'events' && Array.isArray(payload.events)
-          ? payload.events : [payload];
-        for (const candidate of events) {
-          const control = parseCodexStreamEvent(candidate);
-          const event = parseCodexProjectedStreamEvent(candidate)
-            || (['ready', 'cursorReset', 'conversationSnapshot', 'disconnected', 'error'].includes(control?.type) ? control : null);
-          if (!event) continue;
-          if (event?.type === 'error') throw new Error(event.message || 'Codex message stream failed');
-          onEvent?.(event);
-        }
-      }
-      if (done) break;
-    }
-  } finally {
-    reader.releaseLock?.();
-  }
-}
-export const takeoverCodexSession = (pane) =>
-  req('/api/codex/takeover', { method: 'POST', body: JSON.stringify({ pane }), timeoutMs: 30000 });
-export const sendCodexMessage = (pane, text, requestId = null) =>
-  req('/api/codex/send', {
-    method: 'POST', body: JSON.stringify({ pane, text, ...(requestId ? { requestId } : {}) }), timeoutMs: 8000,
-  }).then((result) => {
-    const parsed = parseCodexSendResult(result);
-    if (!parsed) throw new Error('Codex send returned an invalid response');
-    return parsed;
-  });
-/** @returns {Promise<import('./apiRequest.js').JsonObjectResponse>} */
-export const steerCodexQueuedMessage = (pane, id) =>
-  req('/api/codex/queue/steer', { method: 'POST', body: JSON.stringify({ pane, id }), timeoutMs: 8000 });
-/** @returns {Promise<import('./apiRequest.js').JsonObjectResponse>} */
-export const removeCodexQueuedMessage = (pane, id) =>
-  req('/api/codex/queue/remove', { method: 'POST', body: JSON.stringify({ pane, id }), timeoutMs: 8000 });
-export const beginCodexQueuedEdit = (pane, id) =>
-  req('/api/codex/queue/edit/begin', { method: 'POST', body: JSON.stringify({ pane, id }), timeoutMs: 8000 });
-export const renewCodexQueuedEdit = (pane, id, token) =>
-  req('/api/codex/queue/edit/renew', {
-    method: 'POST', body: JSON.stringify({ pane, id, token }), timeoutMs: 8000,
-  });
-export const commitCodexQueuedEdit = (pane, id, token, text) =>
-  req('/api/codex/queue/edit/commit', {
-    method: 'POST', body: JSON.stringify({ pane, id, token, text }), timeoutMs: 8000,
-  });
-export const cancelCodexQueuedEdit = (pane, id, token) =>
-  req('/api/codex/queue/edit/cancel', {
-    method: 'POST', body: JSON.stringify({ pane, id, token }), timeoutMs: 8000,
-  });
-export const compactCodexSession = (pane) =>
-  req('/api/codex/compact', { method: 'POST', body: JSON.stringify({ pane }), timeoutMs: 8000 });
-export const clearCodexSession = (pane) =>
-  req('/api/codex/clear', { method: 'POST', body: JSON.stringify({ pane }), timeoutMs: 8000 });
-export const getCodexModels = (pane) =>
-  req(`/api/codex/models?pane=${encodeURIComponent(pane)}`, { timeoutMs: 8000 });
-/** @returns {Promise<import('./apiRequest.js').GoalResponse>} */
-export const getCodexGoal = (pane) =>
-  req(`/api/codex/goal?pane=${encodeURIComponent(pane)}`, { timeoutMs: 8000 });
-/** @returns {Promise<import('./apiRequest.js').GoalResponse>} */
-export const updateCodexGoal = (pane, updates) =>
-  req('/api/codex/goal', { method: 'POST', body: JSON.stringify({ pane, ...updates }), timeoutMs: 8000 });
-export const clearCodexGoal = (pane) =>
-  req('/api/codex/goal/clear', { method: 'POST', body: JSON.stringify({ pane }), timeoutMs: 8000 });
-export const updateCodexSettings = (pane, settings) =>
-  req('/api/codex/settings', { method: 'POST', body: JSON.stringify({ pane, ...settings }), timeoutMs: 8000 });
-export const interruptCodexSession = (pane) =>
-  req('/api/codex/interrupt', { method: 'POST', body: JSON.stringify({ pane }), timeoutMs: 8000 });
-export const answerCodexApproval = (pane, requestId, decision) =>
-  req('/api/codex/approval', { method: 'POST', body: JSON.stringify({ pane, requestId, decision }), timeoutMs: 8000 });
-export const answerCodexInput = (pane, requestId, answers) =>
-  req('/api/codex/input', { method: 'POST', body: JSON.stringify({ pane, requestId, answers }), timeoutMs: 8000 });
 export const sendText = (pane, text, enter = true) =>
   req('/api/send', { method: 'POST', body: JSON.stringify({ pane, text, enter }) });
 export const sendKeys = (pane, keys) =>

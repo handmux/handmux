@@ -27,12 +27,6 @@ export interface AsrSignResponse {
   appId: string;
 }
 
-export interface GoalResponse {
-  goal?: import('../../server/src/codexStreamProtocol.js').CodexGoal | null;
-}
-
-export type JsonObjectResponse = Record<string, unknown>;
-
 export async function requestJson<T = unknown>(
   path: string,
   opts: JsonRequestOptions = {},

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { getHistory, getPanes, createSession, createWindow, renameSession, renameWindow, deleteWindow, swapWindows, createDir, UnauthorizedError, ApiError, fetchDoc, fetchDir, fetchTranscript, signAsr, sendInput, parseSseFrames, streamCodexMessages, getCodexSession, sendCodexMessage } from '../src/api.js';
+import { getHistory, getPanes, createSession, createWindow, renameSession, renameWindow, deleteWindow, swapWindows, createDir, UnauthorizedError, ApiError, fetchDoc, fetchDir, fetchTranscript, signAsr, sendInput, parseSseFrames, streamCodexMessages, getCodexSession, sendCodexMessage, getCodexGoal } from '../src/api.js';
 import { createPreview, getPreviews, deletePreview, previewUrl, fetchImageUrl } from '../src/api.js';
 import { projectCodexStreamEvent } from '../../server/src/codexStreamProtocol.js';
 
@@ -137,6 +137,15 @@ describe('api request timeout', () => {
     })));
 
     await expect(getCodexSession('%1')).resolves.toMatchObject({ queue: [item] });
+  });
+
+  it('rejects a malformed Codex goal at the API boundary', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => jsonRes(200, {
+      goal: { objective: 'migrate', status: 'finished' },
+    })));
+
+    await expect(getCodexGoal('%1'))
+      .rejects.toThrow('Codex goal returned an invalid response');
   });
 
   it('still maps 401 to UnauthorizedError', async () => {
