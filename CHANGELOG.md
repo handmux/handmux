@@ -19,6 +19,7 @@ All notable changes to handmux. Format follows [Keep a Changelog](https://keepac
 ### Fixed
 
 - 对话中的 Markdown 目标现在与终端使用同一套识别规则，未识别的文件或协议不再保留可点击链接。
+- `~/.handmux/state.json` 及其目录现在使用私有权限和原子写入，并会在读取历史文件时自动修复过宽权限。
 
 ## [0.23.0] - 2026-08-09
 

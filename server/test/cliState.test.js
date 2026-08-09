@@ -16,6 +16,8 @@ describe('state', () => {
     writeState({ supervisorPid: 123, publicUrl: 'x' }, home);
     expect(readState(home)).toEqual({ supervisorPid: 123, publicUrl: 'x' });
     expect(fs.existsSync(statePath(home))).toBe(true);
+    expect(fs.statSync(path.dirname(statePath(home))).mode & 0o777).toBe(0o700);
+    expect(fs.statSync(statePath(home)).mode & 0o777).toBe(0o600);
   });
   it('readState returns null when missing or corrupt', () => {
     expect(readState(home)).toBeNull();

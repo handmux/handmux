@@ -3,6 +3,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { homedir } from 'node:os';
+import { PrivateStateStore, ensurePrivateDirectorySync } from '../privateStateStore.js';
 
 export function pocketHome(home = homedir()) { return path.join(home, '.handmux'); }
 export function statePath(home) { return path.join(pocketHome(home), 'state.json'); }
@@ -24,22 +25,18 @@ export function previewStorePath(home) { return path.join(pocketHome(home), 'pre
 export function notificationsDirPath(home) { return path.join(pocketHome(home), 'notifications'); }
 
 export function readState(home) {
-  try { return JSON.parse(fs.readFileSync(statePath(home), 'utf8')); } catch { return null; }
+  return new PrivateStateStore(statePath(home)).read();
 }
 
 // Atomic write (tmp + rename): the supervisor persist()s frequently while the CLI concurrently readState()s
 // (waitAndPrint/status), so a plain writeFileSync could be caught mid-write and JSON.parse-fail — silently
 // degrading to "not running". rename is atomic on the same filesystem, so a reader sees old or new, never torn.
 export function writeState(state, home) {
-  fs.mkdirSync(pocketHome(home), { recursive: true });
-  const file = statePath(home);
-  const tmp = `${file}.tmp`;
-  fs.writeFileSync(tmp, JSON.stringify(state, null, 2));
-  fs.renameSync(tmp, file);
+  new PrivateStateStore(statePath(home)).write(state);
 }
 
 export function clearState(home) {
-  try { fs.unlinkSync(statePath(home)); } catch { /* already gone */ }
+  new PrivateStateStore(statePath(home)).remove();
 }
 
 // pid liveness without sending a real signal: kill(pid, 0) throws ESRCH if dead, EPERM if alive but
@@ -55,12 +52,12 @@ const LIFECYCLE_LOCK_STALE_MS = 10 * 60 * 1000;
 // start at exactly the same time. A killed CLI leaves a tiny stale file; its dead owner is detected and
 // reclaimed on the next operation. The release closure only removes a lock still owned by this process.
 export function acquireLifecycleLock(home, pid = process.pid) {
-  fs.mkdirSync(pocketHome(home), { recursive: true });
+  ensurePrivateDirectorySync(pocketHome(home));
   const file = lifecycleLockPath(home);
   const stamp = JSON.stringify({ pid, createdAt: Date.now() });
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
-      fs.writeFileSync(file, stamp, { flag: 'wx' });
+      fs.writeFileSync(file, stamp, { flag: 'wx', mode: 0o600 });
       return () => {
         try {
           if (fs.readFileSync(file, 'utf8') === stamp) fs.unlinkSync(file);
