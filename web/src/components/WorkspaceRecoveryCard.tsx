@@ -1,7 +1,15 @@
 import { getLangCode, t } from '../i18n';
 import { recoveryReasonKey } from '../workspaceRecovery.js';
+import type { WorkspaceRecoveryPlan, WorkspaceRestoreOperation } from '../workspaceRecovery.js';
 
-export function formatCheckpointTime(value) {
+export interface WorkspaceRecoveryCardProps {
+  plan?: WorkspaceRecoveryPlan | null;
+  operation?: WorkspaceRestoreOperation | null;
+  onOpen: () => void;
+}
+
+export function formatCheckpointTime(value: unknown): string {
+  if (typeof value !== 'string') return t('workspace.unknownTime');
   const time = Date.parse(value);
   if (!Number.isFinite(time)) return t('workspace.unknownTime');
   try {
@@ -13,7 +21,11 @@ export function formatCheckpointTime(value) {
   }
 }
 
-export default function WorkspaceRecoveryCard({ plan, operation = null, onOpen }) {
+export default function WorkspaceRecoveryCard({
+  plan,
+  operation = null,
+  onOpen,
+}: WorkspaceRecoveryCardProps) {
   if (!plan) return null;
   const failures = operation?.status === 'partial'
     ? (operation.results || []).filter((row) => row.status === 'failed').length

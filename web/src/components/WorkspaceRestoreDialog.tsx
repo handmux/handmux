@@ -1,7 +1,9 @@
 import { useEffect, useRef } from 'react';
+import type { KeyboardEvent as ReactKeyboardEvent, RefObject } from 'react';
 import { t } from '../i18n';
 import { recoveryReasonKey } from '../workspaceRecovery.js';
 import { formatCheckpointTime } from './WorkspaceRecoveryCard.jsx';
+import type { WorkspaceRecoveryPlan, WorkspaceRestoreOperation } from '../workspaceRecovery.js';
 
 const TERMINAL = new Set(['succeeded', 'partial', 'failed', 'interrupted']);
 const SAFE_ERROR_CODES = new Set([
@@ -14,25 +16,37 @@ const SAFE_WARNING_CODES = new Set([
   'workspace-unavailable', 'restore-warning',
 ]);
 
-function errorCopy(code) {
-  return t(`workspace.error.${SAFE_ERROR_CODES.has(code) ? code : 'restore-failed'}`);
+function errorCopy(code: string | null | undefined): string {
+  return t(`workspace.error.${code && SAFE_ERROR_CODES.has(code) ? code : 'restore-failed'}`);
 }
 
-function warningCopy(code) {
-  return t(`workspace.warning.${SAFE_WARNING_CODES.has(code) ? code : 'restore-warning'}`);
+function warningCopy(code: string | null | undefined): string {
+  return t(`workspace.warning.${code && SAFE_WARNING_CODES.has(code) ? code : 'restore-warning'}`);
+}
+
+export interface WorkspaceRestoreDialogProps {
+  open: boolean;
+  plan?: WorkspaceRecoveryPlan | null;
+  operation?: WorkspaceRestoreOperation | null;
+  submitting?: boolean;
+  returnFocusRef?: RefObject<HTMLElement> | null;
+  onRestore?: () => void | Promise<void>;
+  onIgnore: () => void;
+  onClose: () => void;
+  onRebind?: () => void;
 }
 
 export default function WorkspaceRestoreDialog({
   open, plan, operation = null, submitting = false, returnFocusRef = null,
   onRestore, onIgnore, onClose, onRebind,
-}) {
+}: WorkspaceRestoreDialogProps) {
   const submitted = useRef(false);
-  const dialogRef = useRef(null);
-  const closeRef = useRef(null);
-  const triggerRef = useRef(null);
+  const dialogRef = useRef<HTMLDivElement | null>(null);
+  const closeRef = useRef<HTMLButtonElement | null>(null);
+  const triggerRef = useRef<HTMLElement | null>(null);
   const busy = submitting || operation?.status === 'pending' || operation?.status === 'running';
-  const terminal = operation && TERMINAL.has(operation.status);
-  const completed = operation && ['succeeded', 'partial'].includes(operation.status);
+  const terminal = Boolean(operation?.status && TERMINAL.has(operation.status));
+  const completed = operation?.status === 'succeeded' || operation?.status === 'partial';
   useEffect(() => {
     if (!busy || terminal) submitted.current = false;
   }, [busy, terminal, plan?.checkpointId]);
@@ -53,23 +67,23 @@ export default function WorkspaceRestoreDialog({
   const renamed = (plan.sessions || []).filter((row) => row.action === 'create-renamed');
   const progress = operation?.progress || { completed: 0, total: restoreCount };
   const restoredCount = (operation?.results || []).filter((row) => row.status === 'restored').length;
-  const restoredSummary = operation?.summary || {
-    sessions: restoredCount,
-    windows: 0,
-    panes: 0,
+  const restoredSummary = {
+    sessions: operation?.summary?.sessions ?? restoredCount,
+    windows: operation?.summary?.windows ?? 0,
+    panes: operation?.summary?.panes ?? 0,
   };
   const failures = (operation?.results || []).filter((row) => row.status === 'failed');
   const topWarnings = (operation?.warningCodes || []).filter((code) => SAFE_WARNING_CODES.has(code));
   const sessionWarnings = (operation?.results || []).flatMap((row) =>
     (row.warningCodes || []).filter((code) => SAFE_WARNING_CODES.has(code)).map((code) => ({ row, code })));
-  const restore = () => {
+  const restore = (): void => {
     if (busy || submitted.current) return;
     submitted.current = true;
-    onRestore?.();
+    void onRestore?.();
   };
-  const trapFocus = (event) => {
+  const trapFocus = (event: ReactKeyboardEvent<HTMLDivElement>): void => {
     if (event.key !== 'Tab') return;
-    const focusable = [...(dialogRef.current?.querySelectorAll(
+    const focusable = [...(dialogRef.current?.querySelectorAll<HTMLElement>(
       'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
     ) || [])];
     if (focusable.length === 0) {
