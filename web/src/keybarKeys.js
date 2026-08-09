@@ -22,7 +22,7 @@ export const MODIFIERS = ['ctrl', 'shift', 'alt'];
 
 export const KEY_LABELS = {
   kbd: '⌨', esc: 'Esc', up: '▲', tab: 'Tab', ctrl: 'Ctrl', shift: 'Shift', del: '⌫',
-  left: '◀', down: '▼', right: '▶', alt: 'Alt', space: 'Space', slash: '/', at: '@', enter: 'Enter',
+  left: '◀', down: '▼', right: '▶', alt: 'Alt', space: '␣', slash: '/', at: '@', enter: 'Enter',
 };
 
 // Arrows and ⌫ auto-repeat while held.

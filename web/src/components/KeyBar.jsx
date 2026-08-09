@@ -8,7 +8,7 @@ import { createRepeater } from '../repeat.js';
 // Friendly screen-reader names for the symbol / arrow keys (their visible label is just a glyph like ▲ /).
 const KEY_ARIA = {
   up: 'Up', down: 'Down', left: 'Left', right: 'Right',
-  slash: 'Slash', at: 'At', del: 'Backspace',
+  space: 'Space', slash: 'Slash', at: 'At', del: 'Backspace',
 };
 
 // In command mode the hidden capture <input> holds the system keyboard open. A <button> tap would move

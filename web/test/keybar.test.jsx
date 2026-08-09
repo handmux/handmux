@@ -36,6 +36,8 @@ describe('KeyBar command grid', () => {
     const ids = [...container.querySelectorAll('.keybar-key')].map((node) => node.dataset.key);
     expect(ids.slice(0, 3)).toEqual(['esc', 'tab', 'alt']);
     expect(ids.slice(7, 10)).toEqual(['ctrl', 'shift', 'space']);
+    expect(btn('space').textContent).toBe('␣');
+    expect(btn('space').getAttribute('aria-label')).toBe('Space');
     // The ⌨ toggle, 常用 opener, and the buried shell symbols are gone from the grid.
     for (const id of ['kbd', 'fav', 'pipe', 'dash', 'under', 'bslash', 'gt', 'lt']) expect(btn(id)).toBeNull();
   });
