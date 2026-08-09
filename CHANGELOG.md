@@ -28,6 +28,7 @@ All notable changes to handmux. Format follows [Keep a Changelog](https://keepac
 
 ### Fixed
 
+- 修复切换 Tab 后实时回复与对话加载提示同时显示的问题。
 - 修复 Codex 运行中发送的消息先闪进对话区，以及响应超时时误报失败但实际已加入队列的问题。
 - 修复软键盘刚展开时，在已经滚动到底的对话区域继续上滑会带动整个页面移动的问题。
 - 修复在对话输入区的快捷键条上上下滑动时，整个底部区域偶尔跟随手势移动的问题。

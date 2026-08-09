@@ -60,6 +60,26 @@ describe('ChatView', () => {
     expect(container.querySelector('.lens-boot')).toBeNull();
   });
 
+  it('removes the loading view as soon as a streamed reply arrives after switching tabs', async () => {
+    vi.spyOn(api, 'fetchTranscript').mockReturnValue(new Promise(() => {}));
+    let emit;
+    api.streamCodexMessages.mockImplementation((_pane, { signal, onEvent }) => {
+      emit = onEvent;
+      return new Promise((resolve) => signal.addEventListener('abort', resolve, { once: true }));
+    });
+    const { container } = render(<ChatView pane="%1" agent="codex" kind="working"
+      codexSession={{ managed: true, threadId: 'thread-1' }} />);
+
+    expect(container.querySelector('.lens-boot')).toBeTruthy();
+    await waitFor(() => expect(emit).toBeTypeOf('function'));
+    act(() => emit({
+      type: 'delta', threadId: 'thread-1', turnId: 'turn-1', itemId: 'agent-1', delta: '实时回复已到达',
+    }));
+
+    expect(await screen.findByText('实时回复已到达')).toBeTruthy();
+    expect(container.querySelector('.lens-boot')).toBeNull();
+  });
+
   it('blocks an unbound Codex chat instead of presenting guessed content', async () => {
     vi.spyOn(api, 'fetchTranscript').mockResolvedValue({
       messages: [], hash: '', session: null, hasMore: false, firstSeq: null, unavailable: 'session-unbound',
