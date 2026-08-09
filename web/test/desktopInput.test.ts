@@ -4,6 +4,7 @@ import {
   isDesktopInputEnvironment,
   keyboardModeUsesDesktop,
   setKeyboardMode,
+  type DesktopInputEnvironmentOptions,
 } from '../src/desktopInput.js';
 import {
   isBrowserFunctionKey,
@@ -11,7 +12,7 @@ import {
   shouldRouteTerminalPageKey,
 } from '../src/terminalPageKeyboard.js';
 
-const base = {
+const base: DesktopInputEnvironmentOptions = {
   ua: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)',
   platform: 'MacIntel',
   maxTouchPoints: 0,
@@ -41,10 +42,10 @@ describe('isDesktopInputEnvironment', () => {
 
 describe('keyboard mode preference', () => {
   const storage = () => {
-    const values = new Map();
+    const values = new Map<string, string>();
     return {
-      getItem: (key) => values.get(key) ?? null,
-      setItem: (key, value) => values.set(key, value),
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => values.set(key, value),
     };
   };
 

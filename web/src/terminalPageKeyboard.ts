@@ -6,16 +6,27 @@ const EDITABLE_TARGET = [
   '[contenteditable]:not([contenteditable="false"])',
 ].join(',');
 
-export function isBrowserFunctionKey(event) {
+export interface TerminalPageKeyboardEvent {
+  key?: string;
+  shiftKey?: boolean;
+  ctrlKey?: boolean;
+  altKey?: boolean;
+  metaKey?: boolean;
+  isComposing?: boolean;
+  defaultPrevented?: boolean;
+  target?: EventTarget | null;
+}
+
+export function isBrowserFunctionKey(event: TerminalPageKeyboardEvent): boolean {
   return event.key === 'F5' || event.key === 'F12';
 }
 
-export function isDraftShortcut(event) {
-  return event.key === 'Enter' && event.shiftKey
+export function isDraftShortcut(event: TerminalPageKeyboardEvent): boolean {
+  return event.key === 'Enter' && event.shiftKey === true
     && !event.ctrlKey && !event.altKey && !event.metaKey && !event.isComposing;
 }
 
-export function shouldRouteTerminalPageKey(event) {
+export function shouldRouteTerminalPageKey(event: TerminalPageKeyboardEvent): boolean {
   if (event.defaultPrevented || event.isComposing || isBrowserFunctionKey(event)) return false;
   const target = event.target;
   if (!(target instanceof Element)) return true;
