@@ -182,8 +182,13 @@ describe('Codex App Server client', () => {
     await app.getGoal('%1', 'thread-1');
 
     proxy.push({
+      jsonrpc: '2.0', method: 'turn/started', params: {
+        threadId: 'thread-1', turn: { id: 'turn-goal', status: 'inProgress', items: [] },
+      },
+    });
+    proxy.push({
       jsonrpc: '2.0', method: 'thread/goal/updated', params: {
-        threadId: 'thread-1', turnId: 'turn-goal',
+        threadId: 'thread-1',
         goal: { ...initialGoal, status: 'complete', updatedAt: 2, tokensUsed: 500, timeUsedSeconds: 12 },
       },
     });
@@ -234,6 +239,27 @@ describe('Codex App Server client', () => {
     expect(events.at(-1)).toMatchObject({
       type: 'goal', event: 'set', goal: { objective: 'Ship the release', status: 'active' },
     });
+    unsubscribe();
+    app.close();
+  });
+
+  it('does not replay a terminal Goal at the chat tail when its originating turn is unknown', async () => {
+    const initialGoal = {
+      threadId: 'thread-1', objective: 'Finish the release', status: 'complete',
+      createdAt: 1, updatedAt: 2, tokensUsed: 500, timeUsedSeconds: 12, tokenBudget: null,
+    };
+    const proxy = fakeProxy({ initialGoal });
+    const app = createCodexAppServer({ home: '/home/test', exists: () => true, connect: () => proxy.ws });
+    const events = [];
+    const unsubscribe = await app.subscribe('%1', 'thread-1', (event) => events.push(event));
+    await app.getGoal('%1', 'thread-1');
+    const unsubscribeReplay = await app.subscribe('%1', 'thread-1', (event) => events.push(event));
+
+    expect(events).toEqual([]);
+    expect(await app.status('%1', 'thread-1')).toMatchObject({
+      goal: { objective: 'Finish the release', status: 'complete' },
+    });
+    unsubscribeReplay();
     unsubscribe();
     app.close();
   });

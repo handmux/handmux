@@ -16,11 +16,18 @@ export function applyCodexStreamEvent(messages, event, afterK = -1) {
   // A new SSE connection replays only unfinished App Server items. Finalized temporary bubbles must not
   // survive beside the rollout history, otherwise an old reply can remain below the current one forever.
   if (event.type === 'ready') {
-    const next = messages.filter((message) => message.type === 'goal' || !message.completed);
+    const next = messages.filter((message) => {
+      if (message.type !== 'goal') return !message.completed;
+      return !['complete', 'blocked'].includes(message.goal?.status) || !!message.turnId;
+    });
     return next.length === messages.length ? messages : next;
   }
   if (event.type === 'goalCleared') return messages;
   if (event.type === 'goal' && event.goal?.objective) {
+    // Terminal Goal cards are historical events, not current-tail status. Older App Server builds may
+    // replay one without a turnId after reconnecting; omit that unplaceable overlay and let the ordered
+    // durable rollout render it where update_goal actually ran.
+    if (['complete', 'blocked'].includes(event.goal.status) && !event.turnId) return messages;
     const marker = event.goal.createdAt ?? event.goal.updatedAt ?? event.goal.objective;
     const key = `goal:${marker}:${event.event || event.goal.status || 'set'}`;
     const nextMessage = {

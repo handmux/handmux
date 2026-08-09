@@ -68,6 +68,7 @@ describe('Codex message stream projection', () => {
     const messages = [
       { itemId: 'old', text: '旧回复', completed: true },
       { itemId: 'current', text: '当前回复', completed: false },
+      { type: 'goal', goal: { status: 'complete' }, turnId: null, completed: true },
     ];
     expect(applyCodexStreamEvent(messages, { type: 'ready' })).toEqual([
       expect.objectContaining({ itemId: 'current' }),
@@ -101,6 +102,9 @@ describe('Codex message stream projection', () => {
     expect(durableCoversLiveMessage([
       { k: 3, type: 'goal', event: 'complete', goal: { ...goal, createdAt: 9 } },
     ], messages[0])).toBe(false);
+    expect(applyCodexStreamEvent([], {
+      type: 'goal', threadId: 'thread-1', turnId: null, event: 'complete', goal,
+    }, 4)).toEqual([]);
   });
 
   it('renders incoming deltas, requests a durable refresh on completion, and reconciles the final message', async () => {

@@ -645,7 +645,13 @@ class CodexAppConnection {
         turnId: turn?.id || params.turnId || null, status: status || null,
       });
     } else if (message.method === 'thread/goal/updated') {
-      this.applyGoalSnapshot(params.threadId, params.goal, params.turnId);
+      // Native Goal notifications do not consistently carry turnId. A terminal transition is agent-side
+      // work, so bind it to the turn that is currently producing it instead of emitting an unanchored card
+      // that the chat can only append at the live tail.
+      const state = this.state(params.threadId);
+      const turnId = params.turnId || (TERMINAL_GOAL_STATUSES.has(params.goal?.status)
+        ? state.activeTurnId : null);
+      this.applyGoalSnapshot(params.threadId, params.goal, turnId);
     } else if (message.method === 'thread/goal/cleared') {
       if (this.applyGoalSnapshot(params.threadId, null, params.turnId)) {
         this.emitStream({ type: 'goalCleared', threadId: params.threadId, turnId: params.turnId || null });
@@ -716,6 +722,9 @@ class CodexAppConnection {
       && previous?.status !== goal.status;
     const restarted = TERMINAL_GOAL_STATUSES.has(previous?.status) && goal.status === 'active';
     if (!replaced && !enteredTerminal && !restarted) return false;
+    // A terminal Goal without an originating turn can be read as state, but cannot be placed truthfully in
+    // the conversation. Its durable rollout entry will render at the exact historical position instead.
+    if (TERMINAL_GOAL_STATUSES.has(goal.status) && !turnId) return true;
     this.emitStream({
       type: 'goal', threadId, turnId: turnId || null,
       event: restarted ? 'restarted'
@@ -1144,10 +1153,10 @@ class CodexAppConnection {
         } catch { /* initial projection is best effort */ }
       }
     }
-    if (state?.goal && TERMINAL_GOAL_STATUSES.has(state.goal.status)) {
+    if (state?.goal && TERMINAL_GOAL_STATUSES.has(state.goal.status) && state.goalTurnId) {
       try {
         listener({
-          type: 'goal', threadId, turnId: state.goalTurnId || null,
+          type: 'goal', threadId, turnId: state.goalTurnId,
           event: state.goal.status, goal: state.goal,
         });
       } catch { /* initial Goal projection is best effort */ }
