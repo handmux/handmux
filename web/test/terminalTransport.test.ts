@@ -8,10 +8,10 @@ import {
 } from '../src/terminalTransport.js';
 
 function storage() {
-  const values = new Map();
+  const values = new Map<string, string>();
   return {
-    getItem: (key) => values.get(key) ?? null,
-    setItem: (key, value) => values.set(key, value),
+    getItem: (key: string) => values.get(key) ?? null,
+    setItem: (key: string, value: string) => values.set(key, value),
   };
 }
 

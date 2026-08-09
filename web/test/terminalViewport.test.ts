@@ -34,8 +34,8 @@ describe('viewportAtTop', () => {
 describe('topTarget', () => {
   it('puts the cursor on the first visible row, clamped to [0, baseY]', () => {
     expect(topTarget(50, 100)).toBe(50);
-    expect(topTarget(-3, 100)).toBe(0);   // clamp low
-    expect(topTarget(200, 100)).toBe(100); // clamp high
+    expect(topTarget(-3, 100)).toBe(0);
+    expect(topTarget(200, 100)).toBe(100);
   });
 });
 
@@ -65,7 +65,7 @@ describe('followTarget (scroll into view, nearest edge)', () => {
     expect(followTarget({ cursorLine: 70, viewportY: 60, armed: true, ...base })).toBe(null);
   });
   it('below the window → bottom-align (last visible row = cursor)', () => {
-    expect(followTarget({ cursorLine: 90, viewportY: 0, armed: true, ...base })).toBe(71); // 90 - 20 + 1
+    expect(followTarget({ cursorLine: 90, viewportY: 0, armed: true, ...base })).toBe(71);
   });
   it('above the window → top-align (first visible row = cursor)', () => {
     expect(followTarget({ cursorLine: 5, viewportY: 60, armed: true, ...base })).toBe(5);
@@ -74,8 +74,8 @@ describe('followTarget (scroll into view, nearest edge)', () => {
 
 describe('bottomTarget', () => {
   it('puts the cursor on the bottom visible row, clamped to [0, baseY]', () => {
-    expect(bottomTarget(90, 20, 100)).toBe(71); // 90 - 20 + 1
-    expect(bottomTarget(5, 20, 100)).toBe(0);   // clamp low
-    expect(bottomTarget(200, 20, 100)).toBe(100); // clamp high
+    expect(bottomTarget(90, 20, 100)).toBe(71);
+    expect(bottomTarget(5, 20, 100)).toBe(0);
+    expect(bottomTarget(200, 20, 100)).toBe(100);
   });
 });
