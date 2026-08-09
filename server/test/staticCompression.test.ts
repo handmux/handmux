@@ -5,7 +5,7 @@ import { compressStaticAssets } from '../src/staticCompression.js';
 
 const largeJavascript = `console.log("${'x'.repeat(8_000)}");`;
 
-function createApp() {
+function createApp(): express.Express {
   const app = express();
   app.use(compressStaticAssets);
   app.get('/assets/app.js', (_req, res) => res.type('js').send(largeJavascript));
