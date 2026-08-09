@@ -3,7 +3,7 @@ const CIRCLED = '①②③④⑤⑥⑦⑧⑨';
 interface SizedItem {
   id?: string;
   name?: string;
-  command?: string;
+  command?: string | null;
   width?: number;
   height?: number;
 }

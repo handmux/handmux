@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react';
-import type { CSSProperties } from 'react';
+import type { CSSProperties, ReactNode } from 'react';
 import FileBrowser from './FileBrowser.jsx';
 import { fetchPaneCwd } from '../api.js';
 import { t } from '../i18n';
@@ -7,7 +7,7 @@ import { t } from '../i18n';
 export interface DirPickerProps {
   open: boolean;
   seedCwd?: string | null;
-  hint?: string | null;
+  hint?: ReactNode;
   pane?: string | null;
   allowMkdir?: boolean;
   onPick: (dir: string) => void | Promise<void>;

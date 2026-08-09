@@ -14,6 +14,7 @@ import {
   getWorkspacePromptState, markWorkspaceAutoShown, ignoreWorkspaceCheckpoint,
   applyWorkspaceRestoreMapping, removeRestoredSessionBindings,
 } from './storage.js';
+import type { ChatTone } from './storage.js';
 import { LATEST_RELEASE } from './changelog.js';
 import {
   getSessions, getWindows, getPanes, resizeWindow, resizePane, getWindowLayout,
@@ -28,8 +29,10 @@ import {
 import { runSplitPane, runClosePane } from './paneActions.js';
 import BrowserSheet from './components/BrowserSheet.jsx';
 import { inboxRows, topView, maxTs } from './inbox.js';
+import type { PaneInboxState } from './inbox.js';
 import { moveTarget } from './windowOrder.js';
 import { reportBound, clearPaneNotification, getNotifications, deleteNotification } from './push.js';
+import type { PushInboxItem } from './push.js';
 import InboxPage from './components/InboxPage.jsx';
 import { isAbsolute, joinPath } from './docPath.js';
 import { isImageName } from './mime.js';
@@ -46,11 +49,17 @@ import { OverlayProvider } from './overlays/OverlayHost.js';
 import { useOverlayActivity } from './hooks/useOverlayActivity.js';
 
 import Drawer from './components/Drawer.jsx';
+import type { DrawerOrphan } from './components/Drawer.jsx';
 import WindowBar from './components/WindowBar.jsx';
+import type { WorkspacePane, WorkspaceWindow } from './components/WindowBar.jsx';
 import Terminal from './components/Terminal.jsx';
+import type { TerminalHandle } from './components/Terminal.jsx';
+import type { TerminalOutputLink } from './terminalXterm.js';
 import BottomDock from './components/BottomDock.jsx';
+import type { BottomDockHandle } from './components/BottomDock.jsx';
 import ChatComposer from './components/ChatComposer.jsx';
 import LensSwitch from './components/LensSwitch.jsx';
+import type { WorkspaceLens } from './components/LensSwitch.jsx';
 import LensBoot from './components/LensBoot.jsx';
 import ChatView from './components/ChatView.jsx';
 import CodexManagedGuide from './components/CodexManagedGuide.jsx';
@@ -61,6 +70,7 @@ import WorkspaceRestoreDialog from './components/WorkspaceRestoreDialog.jsx';
 import UsagePage from './components/UsagePage.jsx';
 import Inbox from './components/Inbox.jsx';
 import OrphanTakeoverSheet from './components/OrphanTakeoverSheet.jsx';
+import type { OrphanSession, OrphanTakeoverRequest } from './components/OrphanTakeoverSheet.jsx';
 import AddToHome from './components/AddToHome.jsx';
 import { useClaudeHooks } from './useClaudeHooks.js';
 import BindSession from './components/BindSession.jsx';
@@ -88,6 +98,11 @@ import { hasShareFlag, takeSharedFile, clearShareFlag } from './shareIntake.js';
 import { windowManageSubtitle, paneManageSubtitle } from './manageLabels.js';
 import { DEFAULT_SERVER_SHORTCUTS } from './shortcutMerge.js';
 import { recoveryPromptMode } from './workspaceRecovery.js';
+import type {
+  WorkspaceRecoveryPlan,
+  WorkspaceRestoreOperation,
+  WorkspaceRestoreResult,
+} from './workspaceRecovery.js';
 import { canResizePaneWidth } from './paneLayout.js';
 import {
   desktopInputEnvironment,
@@ -98,6 +113,10 @@ import {
 import { useDesktopTerminalInput } from './hooks/useDesktopTerminalInput.js';
 import { useCodexSession, codexKind } from './hooks/useCodexSession.js';
 import { settleCodexOutgoing } from './codexOutgoing.js';
+import type { CodexOutgoingItem, CodexOutgoingSettlement, CodexOutgoingSource } from './codexOutgoing.js';
+import type { SlashEcho } from './slashCommands.js';
+import type { ShortcutItem } from './shortcutMerge.js';
+import type { BrowserMode } from './browserState.js';
 import { isDraftShortcut, shouldRouteTerminalPageKey } from './terminalPageKeyboard.js';
 import {
   getSnapshotInterval,
@@ -107,11 +126,101 @@ import {
   terminalStreamEnabled,
 } from './terminalTransport.js';
 
-const clampCols = (cols) => Math.max(20, Math.min(500, cols));
+interface HostSession {
+  id: string;
+  name: string;
+}
+
+interface HostWindow extends WorkspaceWindow {
+  name: string;
+  width?: number;
+  activePaneId?: string;
+}
+
+interface HostPane extends WorkspacePane {
+  id: string;
+  cwd?: string | null;
+}
+
+interface CurrentWorkspace {
+  session: HostSession;
+  windows: HostWindow[];
+  window: HostWindow;
+  panes: HostPane[];
+  paneId: string;
+}
+
+interface RenameTarget {
+  kind: 'session' | 'window';
+  id: string;
+  name: string;
+}
+
+interface ChatActionError {
+  id: string;
+  kind: 'send' | 'stop' | 'queue';
+  detail: string | null;
+}
+
+interface UpdateInfo {
+  current?: string | null;
+  latest?: string | null;
+  updateAvailable?: boolean;
+  whatsNew?: { version: string; zh?: string; en?: string }[];
+}
+
+interface WorkspaceProtection {
+  status?: string;
+  errorCode?: string | null;
+}
+
+interface RecoveryOperationState extends WorkspaceRestoreOperation {
+  id?: string;
+}
+
+interface RecoveryContext {
+  generation: number;
+  checkpointId: string;
+  operationId: string | null;
+}
+
+interface WorkspaceTarget {
+  window?: string | null;
+  pane?: string | null;
+}
+
+interface OpenSessionOptions {
+  isCancelled?: () => boolean;
+}
+
+interface DocLinkPrompt { path: string; x: number; y: number }
+interface LocalUrlPrompt { raw: string; x: number; y: number }
+interface OutputLink {
+  kind: 'url' | 'doc';
+  path?: string;
+  raw?: string;
+  protocol?: string;
+  port?: string | number;
+  urlPath?: string;
+}
+interface BasePrompt { rawPath: string }
+type FocusOwner = 'terminal' | 'composer';
+
+const recordOf = (value: unknown): Record<string, unknown> | null => (
+  value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown> : null
+);
+
+const hostWindow = (window: WorkspaceWindow): HostWindow => ({
+  ...window,
+  name: window.name || window.id,
+});
+
+const clampCols = (cols: number): number => Math.max(20, Math.min(500, cols));
 
 // Pick the remembered id if it still exists, else the first. We deliberately don't fall back
 // to tmux's "active" — the local last-opened choice wins, first is the fallback.
-const pickId = (items, prefer) =>
+const pickId = <T extends { id: string }>(items: readonly T[], prefer?: string | null): string =>
   (prefer && items.some((x) => x.id === prefer) ? prefer : items[0].id);
 
 export default function App() {
@@ -129,80 +238,80 @@ export default function App() {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [chatTone, setChatToneState] = useState(getChatTone); // 对话-lens colour tone (persisted); default 深墨
-  const pickChatTone = (tone) => { setChatTone(tone); setChatToneState(tone); };
+  const pickChatTone = (tone: ChatTone) => { setChatTone(tone); setChatToneState(tone); };
   const [claudeChatLensOn, setClaudeChatLensOn] = useState(getClaudeChatLensEnabled);
-  const toggleClaudeChatLens = (on) => { setClaudeChatLensEnabled(on); setClaudeChatLensOn(on); };
+  const toggleClaudeChatLens = (on: boolean) => { setClaudeChatLensEnabled(on); setClaudeChatLensOn(on); };
   const [codexChatLensOn, setCodexChatLensOn] = useState(getCodexChatLensEnabled);
-  const toggleCodexChatLens = (on) => { setCodexChatLensEnabled(on); setCodexChatLensOn(on); };
+  const toggleCodexChatLens = (on: boolean) => { setCodexChatLensEnabled(on); setCodexChatLensOn(on); };
   const [usageOpen, setUsageOpen] = useState(false);
   const [bindOpen, setBindOpen] = useState(false);
   const [newWinOpen, setNewWinOpen] = useState(false);
-  const [renameTarget, setRenameTarget] = useState(null); // { kind:'session'|'window', id, name } | null
-  const [manageWindow, setManageWindow] = useState(null); // the window long-pressed for its action menu
-  const [managePane, setManagePane] = useState(null); // pane id long-pressed in the map
-  const [managedPaneWidth, setManagedPaneWidth] = useState(null);
+  const [renameTarget, setRenameTarget] = useState<RenameTarget | null>(null); // { kind:'session'|'window', id, name } | null
+  const [manageWindow, setManageWindow] = useState<HostWindow | null>(null); // the window long-pressed for its action menu
+  const [managePane, setManagePane] = useState<string | null>(null); // pane id long-pressed in the map
+  const [managedPaneWidth, setManagedPaneWidth] = useState<number | null>(null);
   const [paneLayoutRestoreReady, setPaneLayoutRestoreReady] = useState(false);
   const [windowResizePending, setWindowResizePending] = useState(0);
   const [paneResizePending, setPaneResizePending] = useState(0);
-  const [openMapFor, setOpenMapFor] = useState(null); // window id whose split map "管理分屏" asked to open
+  const [openMapFor, setOpenMapFor] = useState<string | null>(null); // window id whose split map "管理分屏" asked to open
   const [paneMapOpen, setPaneMapOpen] = useState(false);
   const [fileManagerOpen, setFileManagerOpen] = useState(false); // file-viewer bottom-sheet visibility
   const [gitOpen, setGitOpen] = useState(false);
-  const [pendingShare, setPendingShare] = useState(null); // a File shared in via Web Share Target, awaiting a destination
-  const [basePrompt, setBasePrompt] = useState(null); // { rawPath } while asking for a relative path's base dir
-  const [handoffToast, setHandoffToast] = useState(null); // "switched to terminal to run /x" hint after a slash hand-off
-  const [slashEcho, setSlashEcho] = useState(null); // optimistic command pill for a chat-staying slash command {name,args,paneId}
-  const [codexOptimisticMessages, setCodexOptimisticMessages] = useState([]);
-  const [chatActionErrors, setChatActionErrors] = useState({}); // paneId -> latest composer action error shown in ChatView
-  const [codexTakeoverPanes, setCodexTakeoverPanes] = useState(() => new Set());
+  const [pendingShare, setPendingShare] = useState<File | null>(null); // a File shared in via Web Share Target, awaiting a destination
+  const [basePrompt, setBasePrompt] = useState<BasePrompt | null>(null); // { rawPath } while asking for a relative path's base dir
+  const [handoffToast, setHandoffToast] = useState<string | null>(null); // "switched to terminal to run /x" hint after a slash hand-off
+  const [slashEcho, setSlashEcho] = useState<(SlashEcho & { paneId: string }) | null>(null); // optimistic command pill for a chat-staying slash command {name,args,paneId}
+  const [codexOptimisticMessages, setCodexOptimisticMessages] = useState<CodexOutgoingItem[]>([]);
+  const [chatActionErrors, setChatActionErrors] = useState<Record<string, ChatActionError>>({}); // paneId -> latest composer action error shown in ChatView
+  const [codexTakeoverPanes, setCodexTakeoverPanes] = useState<Set<string>>(() => new Set());
   const codexOptimisticSeqRef = useRef(0);
   const chatActionErrorSeqRef = useRef(0);
-  const codexThreadByPaneRef = useRef(new Map());
-  const [transcriptWake, setTranscriptWake] = useState({ paneId: null, seq: 0 }); // successful send -> immediate transcript refresh
-  const [docToast, setDocToast] = useState(null); // transient error toast for absolute-path doc failures
+  const codexThreadByPaneRef = useRef<Map<string, string | null>>(new Map());
+  const [transcriptWake, setTranscriptWake] = useState<{ paneId: string | null; seq: number }>({ paneId: null, seq: 0 }); // successful send -> immediate transcript refresh
+  const [docToast, setDocToast] = useState<string | null>(null); // transient error toast for absolute-path doc failures
   const [exitHint, setExitHint] = useState(false); // "press Back again to exit" hint (double-back guard)
-  const [docLinkPrompt, setDocLinkPrompt] = useState(null); // { path, x, y } confirm popover for a tapped terminal path
-  const [localUrlPrompt, setLocalUrlPrompt] = useState(null); // { raw, x, y } for a tapped web URL
+  const [docLinkPrompt, setDocLinkPrompt] = useState<DocLinkPrompt | null>(null); // { path, x, y } confirm popover for a tapped terminal path
+  const [localUrlPrompt, setLocalUrlPrompt] = useState<LocalUrlPrompt | null>(null); // { raw, x, y } for a tapped web URL
   const docTabs = useDocTabs(); // file-viewer tab state, kept across sheet open/close
   const browser = useBrowser({ enabled: !needToken, browserProxy: !!serverConfig?.browserProxy });
   const [bound, setBound] = useState(getBoundSessions); // session names pinned on this device
   const [favorites, setFavorites] = useState(getFavorites); // global favorite commands
-  const [recent, setRecent] = useState([]); // current session's recent commands (keyed by session name)
-  const [current, setCurrent] = useState(null); // { session, windows, window, panes, paneId }
+  const [recent, setRecent] = useState<string[]>([]); // current session's recent commands (keyed by session name)
+  const [current, setCurrent] = useState<CurrentWorkspace | null>(null); // { session, windows, window, panes, paneId }
   const windowSwitchRef = useRef(0); // only the newest async pane lookup may finish a window switch
   const [booting, setBooting] = useState(true);
-  const [recoveryPlan, setRecoveryPlan] = useState(null);
+  const [recoveryPlan, setRecoveryPlan] = useState<WorkspaceRecoveryPlan | null>(null);
   const [recoveryDialogOpen, setRecoveryDialogOpen] = useState(false);
-  const [recoveryOperation, setRecoveryOperation] = useState(null);
+  const [recoveryOperation, setRecoveryOperation] = useState<RecoveryOperationState | null>(null);
   const [recoverySubmitting, setRecoverySubmitting] = useState(false);
-  const [workspaceProtection, setWorkspaceProtection] = useState(null);
-  const [states, setStates] = useState({}); // pane → {session,window,kind,…} from /api/states
-  const [lens, setLens] = useState('terminal'); // 'terminal' | 'chat' — per-pane, remembered in localStorage
+  const [workspaceProtection, setWorkspaceProtection] = useState<WorkspaceProtection | null>(null);
+  const [states, setStates] = useState<Record<string, PaneInboxState>>({}); // pane → {session,window,kind,…} from /api/states
+  const [lens, setLens] = useState<WorkspaceLens>('terminal'); // 'terminal' | 'chat' — per-pane, remembered in localStorage
   useLayoutEffect(() => {
-    setLens(localStorage.getItem('tw_lens_' + current?.paneId) || 'terminal');
+    setLens(localStorage.getItem('tw_lens_' + current?.paneId) === 'chat' ? 'chat' : 'terminal');
   }, [current?.paneId]);
-  const [orphans, setOrphans] = useState([]); // claude sessions running outside tmux (/api/orphans)
-  const [takeoverTarget, setTakeoverTarget] = useState(null); // orphan being taken over (opens the sheet)
+  const [orphans, setOrphans] = useState<DrawerOrphan[]>([]); // claude sessions running outside tmux (/api/orphans)
+  const [takeoverTarget, setTakeoverTarget] = useState<OrphanSession | null>(null); // orphan being taken over (opens the sheet)
   const [inboxOpen, setInboxOpen] = useState(false); // inbox dropdown open
   const { status: hooksStatus, enable: enableHooks } = useClaudeHooks(serverConfig);
   const [ideaOpen, setIdeaOpen] = useState(false); // per-window idea sheet open
   const [ideaCount, setIdeaCount] = useState(0);   // idea count for the current window (badge)
   const [changelogOpen, setChangelogOpen] = useState(false); // "what's new" sheet open
   const [clSeen, setClSeen] = useState(getChangelogSeen); // latest changelog id the user has opened
-  const [updateInfo, setUpdateInfo] = useState(null); // { current, latest, updateAvailable } — npm update hint (checked once per launch)
+  const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null); // { current, latest, updateAvailable } — npm update hint (checked once per launch)
   const [verSeen, setVerSeen] = useState(getVersionSeen); // npm "latest" already acknowledged by opening Settings
   const [seen, setSeen] = useState(getInboxSeen); // pane → last-viewed ts (inbox read state)
   const [readTs, setReadTs] = useState(getInboxReadTs); // server-ts high-water mark for done history (null=unset)
-  const [notifItems, setNotifItems] = useState([]);            // manual-push inbox records (newest-first)
+  const [notifItems, setNotifItems] = useState<PushInboxItem[]>([]);            // manual-push inbox records (newest-first)
   const [notifError, setNotifError] = useState('');            // load/delete failure; last good items stay visible
   const [notifRetrySeq, setNotifRetrySeq] = useState(0);       // explicit retry trigger for the non-polling inbox
-  const [notifDeletingId, setNotifDeletingId] = useState(null);// server-confirmed delete in flight
+  const [notifDeletingId, setNotifDeletingId] = useState<string | null>(null);// server-confirmed delete in flight
   const notifDeleteRef = useRef(false);                        // synchronous double-tap guard (state updates lag)
   const notifMutationRef = useRef(0);                          // stale loads cannot undo a confirmed delete
   const [readIds, setReadIds] = useState(getReadInboxIds);      // ids already opened (per-device)
   const [notifInboxOpen, setNotifInboxOpen] = useState(false);  // full-screen inbox list page
-  const [notifDetailId, setNotifDetailId] = useState(null);     // open message detail (null = list only)
-  const [pendingNotifDetail, setPendingNotifDetail] = useState(null); // deep-link: drill here once the list is open
+  const [notifDetailId, setNotifDetailId] = useState<string | null>(null);     // open message detail (null = list only)
+  const [pendingNotifDetail, setPendingNotifDetail] = useState<string | null>(null); // deep-link: drill here once the list is open
   const [notifSeenTs, setNotifSeenTsState] = useState(getNotifSeenTs); // newest ts seen by opening the inbox (top-dot high-water)
   // Manual-push inbox open/close/detail/delete — declared this early (ahead of the SW-message and
   // boot deep-link effects further down) so nothing references them before their const initializer runs.
@@ -216,9 +325,9 @@ export default function App() {
   // unbalancing history so the next Back exits the app (the exact bug the naive re-push approach hit). Every
   // level change (row tap drills, on-screen ‹, hardware Back) flows through history push/back → the one handler.
   const notifDepthRef = useRef(0);
-  const notifDetailRef = useRef(null); notifDetailRef.current = notifDetailId;
+  const notifDetailRef = useRef<string | null>(null); notifDetailRef.current = notifDetailId;
   const pushNotifHist = () => { window.history.pushState({ overlay: true }, ''); notifDepthRef.current += 1; };
-  const openNotifDetail = (id) => {
+  const openNotifDetail = (id: string) => {
     pushNotifHist();                 // drill entry (a click handler — safe to pushState here)
     setNotifDetailId(id);
     addReadInboxId(id);
@@ -227,7 +336,7 @@ export default function App() {
   const closeNotifDetail = () => window.history.back(); // route the ‹ through Back → the popstate handler
   const closeNotifInbox = () => { setNotifDetailId(null); setNotifInboxOpen(false); }; // ⌄ collapse → cleanup unwinds
   const markAllNotifRead = () => { notifItems.forEach((n) => addReadInboxId(n.id)); setReadIds(getReadInboxIds()); };
-  const deleteNotifItem = async (id) => {
+  const deleteNotifItem = async (id: string): Promise<boolean> => {
     if (notifDeleteRef.current) return false;
     notifDeleteRef.current = true;
     notifMutationRef.current += 1;
@@ -247,8 +356,8 @@ export default function App() {
       setNotifDeletingId(null);
     }
   };
-  const termRef = useRef(null);
-  const dockRef = useRef(null); // imperative handle into BottomDock — idea panel fills its input box
+  const termRef = useRef<TerminalHandle | null>(null);
+  const dockRef = useRef<BottomDockHandle | null>(null); // imperative handle into BottomDock — idea panel fills its input box
   const [terminalFocused, setTerminalFocused] = useState(false);
   const terminalFocusedRef = useRef(false);
   terminalFocusedRef.current = terminalFocused;
@@ -257,7 +366,7 @@ export default function App() {
     termRef.current?.blurInput?.();
     dockRef.current?.focusComposer?.();
   }, []);
-  const focusOwnerAtPointerRef = useRef({ owner: null, at: 0 });
+  const focusOwnerAtPointerRef = useRef<{ owner: FocusOwner | null; at: number }>({ owner: null, at: 0 });
   const captureTerminalOwner = useCallback(() => {
     if (!desktopInput) return;
     focusOwnerAtPointerRef.current = {
@@ -269,16 +378,16 @@ export default function App() {
   }, [desktopInput]);
   // Pane-width undo is scoped to one open management flow. Map values may briefly be the in-flight
   // layout request so rapid taps share one pre-resize snapshot instead of racing to capture later ratios.
-  const savedLayoutsRef = useRef(new Map());
-  const managePaneWindowRef = useRef(null);
-  const recoveryPlanRef = useRef(null); recoveryPlanRef.current = recoveryPlan;
-  const recoveryOperationRef = useRef(null); recoveryOperationRef.current = recoveryOperation;
+  const savedLayoutsRef = useRef<Map<string, unknown | Promise<unknown>>>(new Map());
+  const managePaneWindowRef = useRef<string | null>(null);
+  const recoveryPlanRef = useRef<WorkspaceRecoveryPlan | null>(null); recoveryPlanRef.current = recoveryPlan;
+  const recoveryOperationRef = useRef<RecoveryOperationState | null>(null); recoveryOperationRef.current = recoveryOperation;
   const restoreInFlightRef = useRef(false);
-  const liveSessionCountRef = useRef(null);
-  const lastRecoveryCheckpointRef = useRef(null);
+  const liveSessionCountRef = useRef<number | null>(null);
+  const lastRecoveryCheckpointRef = useRef<string | null>(null);
   const recoveryGenerationRef = useRef(0);
-  const recoveryContextRef = useRef(null);
-  const drawerMenuRef = useRef(null);
+  const recoveryContextRef = useRef<RecoveryContext | null>(null);
+  const drawerMenuRef = useRef<HTMLButtonElement | null>(null);
 
   const onAuthFail = useCallback(() => setNeedToken(true), []);
   const enqueueDesktopInput = useDesktopTerminalInput({
@@ -289,7 +398,7 @@ export default function App() {
   });
   // Shared catch prelude: bounce to the token prompt on an auth failure, and report whether it WAS one so
   // each handler keeps its own non-auth control flow (swallow / return / rethrow). See authGuard.js.
-  const handledAuth = useCallback((e) => authHandled(e, onAuthFail), [onAuthFail]);
+  const handledAuth = useCallback((error: unknown) => authHandled(error, onAuthFail), [onAuthFail]);
   const clearRecoveryOperation = useCallback(() => {
     recoveryGenerationRef.current += 1;
     recoveryContextRef.current = null;
@@ -301,7 +410,7 @@ export default function App() {
     const checkpointId = recoveryPlanRef.current?.checkpointId;
     if (checkpointId) markWorkspaceAutoShown(checkpointId);
     if (!restoreInFlightRef.current
-      && ['succeeded', 'partial'].includes(recoveryOperationRef.current?.status)) {
+      && ['succeeded', 'partial'].includes(recoveryOperationRef.current?.status || '')) {
       clearRecoveryOperation();
       setRecoveryPlan(null);
     }
@@ -345,16 +454,16 @@ export default function App() {
   // ownership signal, so a component-internal Overlay cannot be forgotten in a hand-maintained App list.
   const terminalOverlayOpen = useOverlayActivity();
   const terminalOverlayWasOpenRef = useRef(false);
-  const restoreFocusAfterOverlayRef = useRef(null);
-  const chooseKeyboardMode = useCallback((mode) => {
+  const restoreFocusAfterOverlayRef = useRef<FocusOwner | null>(null);
+  const chooseKeyboardMode = useCallback((mode: ReturnType<typeof getKeyboardMode>) => {
     setKeyboardMode(mode);
     if (mode === 'desktop' && terminalOverlayOpen) restoreFocusAfterOverlayRef.current = 'terminal';
     setKeyboardModeState(mode);
   }, [terminalOverlayOpen]);
-  const chooseTerminalTransport = useCallback((mode) => {
+  const chooseTerminalTransport = useCallback((mode: ReturnType<typeof getTerminalTransport>) => {
     setTerminalTransportState(setTerminalTransport(mode));
   }, []);
-  const chooseSnapshotInterval = useCallback((intervalMs) => {
+  const chooseSnapshotInterval = useCallback((intervalMs: ReturnType<typeof getSnapshotInterval>) => {
     setSnapshotIntervalState(setSnapshotInterval(intervalMs));
   }, []);
   useEffect(() => {
@@ -387,7 +496,7 @@ export default function App() {
   }, [desktopInput, terminalOverlayOpen, current?.paneId, lens, focusTerminal]);
   useEffect(() => {
     if (!desktopInput || terminalOverlayOpen || lens !== 'terminal' || !current?.paneId) return undefined;
-    const onPageKeyDown = (event) => {
+    const onPageKeyDown = (event: KeyboardEvent) => {
       if (!shouldRouteTerminalPageKey(event)) return;
       if (isDraftShortcut(event)) {
         event.preventDefault();
@@ -502,14 +611,14 @@ export default function App() {
   // the moment it hides, the guard is re-armed and the next Back re-prompts (no separate display timer).
   useExitConfirm(!!current, setExitHint);
 
-  const sendKey = useCallback(async (name) => {
+  const sendKey = useCallback(async (name: string) => {
     const paneId = current?.paneId;
     if (!paneId) return;
     try { await sendKeys(paneId, [name]); termRef.current?.wake?.(); } // input landed → poll for output now
     catch (e) { handledAuth(e); }
   }, [current, onAuthFail]);
 
-  const sendChar = useCallback(async (ch) => {
+  const sendChar = useCallback(async (ch: string) => {
     const paneId = current?.paneId;
     if (!paneId) return;
     try { await sendText(paneId, ch, false); termRef.current?.wake?.(); }
@@ -519,27 +628,32 @@ export default function App() {
   // Open a session: load its windows (prefer remembered → active → first), then that window's
   // panes (prefer remembered → active → first). Writes the session name into the URL hash so
   // the location deep-links back here. Returns false if the session has no windows/panes.
-  const openSession = useCallback(async (session, target = null, { isCancelled = () => false } = {}) => {
+  const openSession = useCallback(async (
+    session: HostSession,
+    target: WorkspaceTarget | null = null,
+    { isCancelled = () => false }: OpenSessionOptions = {},
+  ): Promise<boolean> => {
     const switchEpoch = ++windowSwitchRef.current;
     if (isCancelled()) return false;
     const windows = await getWindows(session.id);
     if (isCancelled() || switchEpoch !== windowSwitchRef.current) return false;
     if (!windows.length) return false;
-    const window = (target?.window && windows.find((w) => w.id === target.window))
-      || windows.find((w) => w.id === pickId(windows, getLastWindow(session.id)));
-    const panes = await getPanes(window.id);
+    const selectedWindow = (target?.window && windows.find((w) => w.id === target.window))
+      || windows.find((w) => w.id === pickId(windows, getLastWindow(session.id)))
+      || windows[0];
+    const panes = await getPanes(selectedWindow.id);
     if (isCancelled() || switchEpoch !== windowSwitchRef.current) return false;
     if (!panes.length) return false;
     const paneId = (target?.pane && panes.some((p) => p.id === target.pane))
       ? target.pane
-      : pickId(panes, getLastPane(window.id));
-    setCurrent({ session, windows, window, panes, paneId });
-    remember({ sessionId: session.id, windowId: window.id, paneId });
+      : pickId(panes, getLastPane(selectedWindow.id));
+    setCurrent({ session, windows, window: selectedWindow, panes, paneId });
+    remember({ sessionId: session.id, windowId: selectedWindow.id, paneId });
     writeSessionHash(session.name);
     return true;
   }, []);
 
-  const applyRecoveryMapping = useCallback((mapping) => {
+  const applyRecoveryMapping = useCallback((mapping: unknown) => {
     if (!mapping) return;
     applyWorkspaceRestoreMapping(mapping);
     // A restored `-restored` name may have been added to the persisted bindings by the mapping.
@@ -547,7 +661,7 @@ export default function App() {
     setBound(getBoundSessions());
   }, []);
 
-  const consumeRecoveryPlan = useCallback((plan, liveSessionCount) => {
+  const consumeRecoveryPlan = useCallback((plan: WorkspaceRecoveryPlan | null, liveSessionCount: number) => {
     // The operation monitor owns plan/checkpoint transitions until it reaches a terminal state.
     // In particular, a newer periodic plan must not invalidate a still-live persisted operation.
     if (restoreInFlightRef.current) return;
@@ -555,7 +669,7 @@ export default function App() {
     const checkpointId = plan?.checkpointId || null;
     const retainsCompletedResult = checkpointId
       && checkpointId === lastRecoveryCheckpointRef.current
-      && ['succeeded', 'partial'].includes(recoveryOperationRef.current?.status);
+      && ['succeeded', 'partial'].includes(recoveryOperationRef.current?.status || '');
     if (retainsCompletedResult) return;
     const changedCheckpoint = Boolean(checkpointId
       && lastRecoveryCheckpointRef.current
@@ -571,8 +685,8 @@ export default function App() {
       return;
     }
     setRecoveryPlan(plan);
-    if (mode === 'auto-dialog') {
-      markWorkspaceAutoShown(plan.checkpointId);
+    if (mode === 'auto-dialog' && plan) {
+      if (plan.checkpointId) markWorkspaceAutoShown(plan.checkpointId);
       setDrawerOpen(false);
       setRecoveryDialogOpen(true);
     } else if (changedCheckpoint) {
@@ -582,11 +696,11 @@ export default function App() {
 
   const startRecovery = useCallback(async () => {
     const plan = recoveryPlanRef.current;
-    if (!plan || restoreInFlightRef.current) return;
+    if (!plan?.checkpointId || restoreInFlightRef.current) return;
     const context = {
       generation: recoveryGenerationRef.current + 1,
       checkpointId: plan.checkpointId,
-      operationId: null,
+      operationId: null as string | null,
     };
     recoveryGenerationRef.current = context.generation;
     recoveryContextRef.current = context;
@@ -622,7 +736,7 @@ export default function App() {
     const context = recoveryContextRef.current;
     if (!context || context.operationId !== recoveryOperationId) return undefined;
     let cancelled = false;
-    let timer = null;
+    let timer: ReturnType<typeof setTimeout> | null = null;
     const isCurrent = () => !cancelled
       && recoveryContextRef.current === context
       && recoveryGenerationRef.current === context.generation
@@ -630,14 +744,14 @@ export default function App() {
     const schedule = () => {
       if (isCurrent()) timer = setTimeout(poll, 1000);
     };
-    const finish = async (result) => {
+    const finish = async (result: RecoveryOperationState): Promise<boolean> => {
       if (!isCurrent()) return true;
       const finishedPlan = recoveryPlanRef.current;
       const finishedCheckpointId = finishedPlan?.checkpointId;
       setRecoveryOperation(result);
       applyRecoveryMapping(result.mapping);
 
-      const restoredCount = (result.results || []).filter((row) => row.status === 'restored').length;
+      const restoredCount = (result.results || []).filter((row: WorkspaceRestoreResult) => row.status === 'restored').length;
       if (restoredCount > 0) {
         setBound(removeRestoredSessionBindings(result.results));
         reportBound();
@@ -659,7 +773,7 @@ export default function App() {
         // Plan resolution and operation completion are separate server writes. If this refresh
         // briefly sees the just-completed checkpoint as eligible, do not resurrect its prompt.
         if (result.status === 'succeeded' && refreshedPlan?.checkpointId === finishedCheckpointId) {
-          applyRecoveryMapping(refreshedPlan.mapping);
+          applyRecoveryMapping(refreshedPlan?.mapping);
         } else {
           consumeRecoveryPlan(refreshedPlan, liveSessionCountRef.current);
         }
@@ -673,8 +787,9 @@ export default function App() {
       try {
         const result = await getWorkspaceRestoreOperation(recoveryOperationId);
         if (!isCurrent()) return;
+        if (!result) throw new Error('restore operation missing');
         setRecoveryOperation(result);
-        if (['succeeded', 'partial', 'failed', 'interrupted'].includes(result.status)) {
+        if (['succeeded', 'partial', 'failed', 'interrupted'].includes(result.status || '')) {
           const complete = await finish(result);
           if (!isCurrent()) return;
           if (!complete) schedule();
@@ -705,16 +820,18 @@ export default function App() {
       schedule();
     };
     poll();
-    return () => { cancelled = true; clearTimeout(timer); };
+    return () => { cancelled = true; if (timer !== null) clearTimeout(timer); };
   }, [recoveryOperationId, needToken, applyRecoveryMapping, consumeRecoveryPlan, handledAuth]);
 
   // Switch to another window within the current session (its active pane). Session/hash unchanged.
-  const selectWindow = useCallback(async (window) => {
+  const selectWindow = useCallback(async (sourceWindow: WorkspaceWindow): Promise<string | null | undefined> => {
+    const window = hostWindow(sourceWindow);
     const switchEpoch = ++windowSwitchRef.current;
     const rememberedPaneId = getLastPane(window.id);
     const immediatePaneId = rememberedPaneId || window.activePaneId || null;
     // Commit the user's choice before touching the network. With activePaneId supplied by the existing
     // window listing, Terminal mounts now and shows its own loading surface while pane metadata catches up.
+    if (!immediatePaneId || !current) return null;
     setCurrent((c) => (c ? { ...c, window, panes: [], paneId: immediatePaneId } : c));
     remember({ sessionId: current.session.id, windowId: window.id, paneId: immediatePaneId });
     try {
@@ -734,7 +851,7 @@ export default function App() {
   // Create a new window in the current session (in the current pane's dir, see POST /windows), with
   // an optional name, then switch to it. Mirrors selectWindow's post-switch bookkeeping. Lets
   // generic errors propagate so the modal re-enables its button; auth errors are handled here.
-  const createNewWindow = useCallback(async (name, cwd, cmd) => {
+  const createNewWindow = useCallback(async (name: string, cwd?: string, cmd?: string): Promise<void> => {
     const sessionId = current?.session?.id;
     const paneId = current?.paneId;
     if (!sessionId || !paneId) return;
@@ -742,6 +859,7 @@ export default function App() {
       const { id } = await createWindow(sessionId, paneId, name || undefined, cwd, cmd);
       const windows = await getWindows(sessionId);
       const window = windows.find((w) => w.id === id) || windows[windows.length - 1];
+      if (!window) return;
       const panes = await getPanes(window.id);
       if (!panes.length) return;
       const newPaneId = pickId(panes, getLastPane(window.id));
@@ -759,32 +877,33 @@ export default function App() {
   // (same family as the opt-in 适配宽度 resize). For a session we also migrate the local name pin +
   // recent history (the session id is unchanged, so tw_win survives) and update the URL hash.
   // onSubmit throws a user-facing message so RenameModal can show it inline and re-enable.
-  const submitRename = useCallback(async (newName) => {
-    const t = renameTarget;
-    if (!t) return;
+  const submitRename = useCallback(async (newName: string): Promise<void> => {
+    const target = renameTarget;
+    if (!target) return;
     const sessionId = current?.session?.id;
-    if (t.kind === 'session') {
+    if (target.kind === 'session') {
       try {
-        await renameSession(t.id, newName);
+        await renameSession(target.id, newName);
       } catch (e) {
         if (handledAuth(e)) throw e;
-        if (e.status === 409) throw new Error(t('app.nameExists')); // ApiError carries the status precisely
+        if (e instanceof ApiError && e.status === 409) throw new Error(t('app.nameExists')); // ApiError carries the status precisely
         throw new Error(t('app.renameFailed'));
       }
-      setBound(renameBoundSession(t.name, newName));
+      setBound(renameBoundSession(target.name, newName));
       reportBound();
       writeSessionHash(newName);
-      setCurrent((c) => (c && c.session.id === t.id
+      setCurrent((c) => (c && c.session.id === target.id
         ? { ...c, session: { ...c.session, name: newName } } : c)); // the recent effect reloads off the new name
     } else {
       try {
-        await renameWindow(t.id, newName);
+        await renameWindow(target.id, newName);
       } catch (e) {
         if (handledAuth(e)) throw e;
         throw new Error(t('app.renameFailed'));
       }
       // Ideas are keyed by window NAME (id falls back when unnamed) — carry them to the new name.
-      renameWindowIdeas(current?.session?.name, t.name || t.id, newName);
+      if (!current?.session?.name || !sessionId) return;
+      renameWindowIdeas(current.session.name, target.name || target.id, newName);
       const windows = await getWindows(sessionId);
       setCurrent((c) => (c
         ? { ...c, windows, window: windows.find((w) => w.id === c.window.id) || c.window } : c));
@@ -836,7 +955,7 @@ export default function App() {
   // manageWindow re-points at the refreshed window so positions can be nudged repeatedly; it closes
   // only if the window vanished (e.g. killed on the PC). The open pane/window is unchanged: swap only
   // reorders, and the active highlight follows the window id.
-  const moveManagedWindow = useCallback(async (dir) => {
+  const moveManagedWindow = useCallback(async (dir: 'left' | 'right') => {
     const w = manageWindow;
     const sessionId = current?.session?.id;
     if (!w || !sessionId) return;
@@ -862,7 +981,7 @@ export default function App() {
 
   // Drawer rows carry a bound NAME — resolve it to the live session before opening, since the
   // tmux id can have changed (or the session may be gone) since it was pinned.
-  const selectSession = useCallback(async (name) => {
+  const selectSession = useCallback(async (name: string) => {
     try {
       const session = (await getSessions()).find((s) => s.name === name);
       if (!session) { window.alert(t('app.sessionGone', { name })); return; }
@@ -874,7 +993,7 @@ export default function App() {
 
   // Tap an inbox row → mark it seen and deep-link to that pane (cross-session safe). Mirrors the
   // notification-tap resolver: resolve the live session by name, then openSession with the target.
-  const openInboxRow = useCallback(async (row) => {
+  const openInboxRow = useCallback(async (row: ReturnType<typeof inboxRows>[number]) => {
     setInboxOpen(false);
     setSeen(markInboxSeen(row.pane, row.ts));
     try {
@@ -889,8 +1008,9 @@ export default function App() {
   // target (new session, or a new window of an existing session) and — if kill — SIGTERMs the original,
   // returning the new {session,window,pane}; we navigate into it. Throws on failure (409 gone / session
   // changed / spawn failed) so the takeover sheet can surface it; success closes the sheet + inbox.
-  const doTakeover = useCallback(async ({ target, kill, name }) => {
+  const doTakeover = useCallback(async ({ target, kill, name }: OrphanTakeoverRequest) => {
     const o = takeoverTarget;
+    if (!o) return;
     const out = await takeoverOrphan({ pid: o.pid, sessionId: o.sessionId, target, kill, name });
     // Pin the target session into this device's list so the taken-over session is reachable later —
     // without this a brand-new `cc-…` session would vanish from the drawer the moment you navigate away.
@@ -898,7 +1018,10 @@ export default function App() {
     setTakeoverTarget(null);
     setInboxOpen(false);
     try {
-      if (out.name) { setDrawerOpen(false); await openSession({ id: out.session, name: out.name }, { window: out.window, pane: out.pane }); }
+      if (out.name && out.session) {
+        setDrawerOpen(false);
+        await openSession({ id: out.session, name: out.name }, { window: out.window, pane: out.pane });
+      }
     } catch (e) { handledAuth(e); }
     try { setOrphans(await getOrphans()); } catch { /* refresh best-effort */ }
   }, [takeoverTarget, openSession, onAuthFail]);
@@ -911,21 +1034,21 @@ export default function App() {
   }, [states]);
 
   // Save a validated name locally, then open it immediately so "绑定上" is usable right away.
-  const bindSession = useCallback((name) => {
+  const bindSession = useCallback((name: string) => {
     setBound(addBoundSession(name));
     reportBound();
     setBindOpen(false);
     selectSession(name);
   }, [selectSession]);
 
-  const unbindSession = useCallback((name) => {
+  const unbindSession = useCallback((name: string) => {
     setBound(removeBoundSession(name));
     reportBound();
     // If the open session was the one removed, fall back to the empty state.
     setCurrent((c) => (c && c.session.name === name ? null : c));
   }, []);
 
-  const selectPane = useCallback((paneId) => {
+  const selectPane = useCallback((paneId: string) => {
     setCurrent((c) => {
       if (!c) return c;
       remember({ windowId: c.window.id, paneId });
@@ -937,7 +1060,7 @@ export default function App() {
   // AND that window's cached pane COUNT in the windows strip, so the long-press menu immediately offers
   // the right actions (分屏 for a lone pane vs 管理分屏 once split) instead of a stale count until the
   // next getWindows.
-  const refreshPanes = useCallback((windowId, panes) => {
+  const refreshPanes = useCallback((windowId: string, panes: HostPane[]) => {
     setCurrent((c) => {
       if (!c) return c;
       const windows = c.windows.map((w) => (w.id === windowId ? { ...w, panes: panes.length } : w));
@@ -949,7 +1072,8 @@ export default function App() {
   // must therefore resolve their target from tmux when they open instead of reusing the dimensions
   // captured when the session/window was first selected. If the refresh itself fails, keep the existing
   // management action available with the last known snapshot; auth failures still return to login.
-  const openWindowManagement = useCallback(async (win) => {
+  const openWindowManagement = useCallback(async (sourceWindow: WorkspaceWindow) => {
+    const win = hostWindow(sourceWindow);
     if (!win) return;
     const sessionId = current?.session?.id;
     if (!sessionId) { setManageWindow(win); return; }
@@ -967,7 +1091,7 @@ export default function App() {
     }
   }, [current?.session?.id, handledAuth]);
 
-  const openPaneManagement = useCallback(async (paneId, targetWindowId = current?.window?.id) => {
+  const openPaneManagement = useCallback(async (paneId: string, targetWindowId = current?.window?.id) => {
     if (!paneId) return;
     if (!targetWindowId) { setManagePane(paneId); return; }
     try {
@@ -1000,7 +1124,7 @@ export default function App() {
     }
   }, [current?.window?.id, refreshPanes, handledAuth]);
 
-  const setManagedWindowWidth = useCallback((windowId, width) => {
+  const setManagedWindowWidth = useCallback((windowId: string, width: number) => {
     setManageWindow((win) => (win?.id === windowId ? { ...win, width } : win));
     setCurrent((state) => {
       if (!state) return state;
@@ -1015,7 +1139,7 @@ export default function App() {
 
   // Window width exists only for a lone-pane window in this UI. A multi-pane window exposes the
   // independently adjustable target in Pane Management instead, so this action has one clear scope.
-  const resizeManagedWindowCols = useCallback(async (delta, displayedCols) => {
+  const resizeManagedWindowCols = useCallback(async (delta: number, displayedCols: number) => {
     const win = manageWindow;
     if (!win || win.panes !== 1 || !Number.isFinite(displayedCols)) return;
     const cols = clampCols(displayedCols + delta);
@@ -1027,9 +1151,11 @@ export default function App() {
     } catch (e) {
       if (handledAuth(e)) return;
       try {
-        const windows = await getWindows(current?.session?.id);
+        const sessionId = current?.session?.id;
+        if (!sessionId) return;
+        const windows = await getWindows(sessionId);
         const fresh = windows.find((item) => item.id === win.id);
-        if (fresh) setManagedWindowWidth(win.id, fresh.width);
+        if (fresh?.width !== undefined) setManagedWindowWidth(win.id, fresh.width);
       } catch (refreshError) { handledAuth(refreshError); }
     } finally { setWindowResizePending((count) => Math.max(0, count - 1)); }
   }, [manageWindow, current?.window?.id, current?.session?.id, handledAuth, setManagedWindowWidth]);
@@ -1050,7 +1176,7 @@ export default function App() {
     } catch (e) { handledAuth(e); }
   }, [manageWindow, current?.session?.id, handledAuth]);
 
-  const resizeManagedPaneCols = useCallback(async (delta, displayedCols) => {
+  const resizeManagedPaneCols = useCallback(async (delta: number, displayedCols: number) => {
     const windowId = current?.window?.id;
     const pane = current?.panes?.find((item) => item.id === managePane);
     if (!windowId || !pane || !canResizePaneWidth(current.panes, pane.id) || !Number.isFinite(displayedCols)) return;
@@ -1062,7 +1188,10 @@ export default function App() {
       let saved = savedLayoutsRef.current.get(windowId);
       if (saved == null) {
         saved = getWindowLayout(windowId)
-          .then((result) => result.layout || '')
+          .then((result) => {
+            const layout = recordOf(result)?.layout;
+            return typeof layout === 'string' ? layout : '';
+          })
           .catch(() => '');
         savedLayoutsRef.current.set(windowId, saved);
       }
@@ -1103,7 +1232,7 @@ export default function App() {
 
   // Split `paneId` into two (dir 'h' left|right, 'v' top/bottom); jump the phone to the new pane. The
   // decision logic (call the api, refetch, pick the new pane) lives in paneActions.js — unit-tested there.
-  const splitPaneAction = useCallback(async (paneId, dir) => {
+  const splitPaneAction = useCallback(async (paneId: string, dir: string) => {
     const windowId = current?.window?.id;
     if (!windowId) return;
     setManagePane(null);
@@ -1128,7 +1257,7 @@ export default function App() {
   const closeManagedPane = useCallback(async () => {
     const paneId = managePane;
     const windowId = current?.window?.id;
-    const viewedPaneId = current?.paneId;
+      const viewedPaneId = current?.paneId ?? null;
     if (!paneId || !windowId) return;
     savedLayoutsRef.current.delete(windowId);
     managePaneWindowRef.current = null;
@@ -1151,7 +1280,7 @@ export default function App() {
   // Split a SINGLE-pane window straight from its manage sheet — works whether or not it's the open
   // window (a background window has no map to long-press). We split its active pane, then switch the
   // view to that window and land on the new pane, so you actually see the split you just made.
-  const splitWindowAction = useCallback(async (win, dir) => {
+  const splitWindowAction = useCallback(async (win: HostWindow, dir: string) => {
     const sessionId = current?.session?.id;
     if (!win || !sessionId) return;
     setManageWindow(null);
@@ -1184,14 +1313,15 @@ export default function App() {
   // only the map. So the manage-window entry must unwind BEFORE the pane sheet opens: the non-current
   // branch gets that gap for free from selectWindow's network await; the current-window branch explicitly
   // waits for the unwinding popstate.
-  const manageSplit = useCallback(async (win) => {
+  const manageSplit = useCallback(async (sourceWindow: WorkspaceWindow) => {
+    const win = hostWindow(sourceWindow);
     if (!win) return;
     let paneId = current?.paneId;
     if (win.id !== current?.window?.id) {
       setManageWindow(null);
-      paneId = await selectWindow(win);
+      paneId = (await selectWindow(win)) ?? undefined;
     } else {
-      await new Promise((resolve) => {
+      await new Promise<void>((resolve) => {
         const fin = () => { clearTimeout(timer); window.removeEventListener('popstate', fin); resolve(); };
         const timer = setTimeout(fin, 80); // fallback: no overlay entry to unwind → no popstate
         window.addEventListener('popstate', fin);
@@ -1258,7 +1388,7 @@ export default function App() {
   // openSession's own writeSessionHash uses replaceState (no hashchange), so this can't self-loop.
   useEffect(() => {
     if (needToken || typeof navigator === 'undefined' || !('serviceWorker' in navigator)) return;
-    const go = async ({ session, window, pane }) => {
+    const go = async ({ session, window, pane }: { session?: string | null; window?: string | null; pane?: string | null }) => {
       if (!session) return;
       try {
         const sessions = await getSessions();
@@ -1266,11 +1396,17 @@ export default function App() {
         if (s) { setDrawerOpen(false); await openSession(s, { window, pane }); }
       } catch (e) { handledAuth(e); }
     };
-    const onMsg = (e) => {
-      const d = e.data;
-      if (!d) return;
-      if (d.type === 'navigate') go(d);
-      else if (d.type === 'navigate-inbox' && d.id) { setNotifInboxOpen(true); setPendingNotifDetail(d.id); }
+    const onMsg = (event: MessageEvent<unknown>) => {
+      const data = recordOf(event.data);
+      if (!data) return;
+      if (data.type === 'navigate') void go({
+        session: typeof data.session === 'string' ? data.session : null,
+        window: typeof data.window === 'string' ? data.window : null,
+        pane: typeof data.pane === 'string' ? data.pane : null,
+      });
+      else if (data.type === 'navigate-inbox' && typeof data.id === 'string') {
+        setNotifInboxOpen(true); setPendingNotifDetail(data.id);
+      }
     };
     const onHash = () => { const r = readRoute(); if (r.session && (r.window || r.pane)) go(r); };
     navigator.serviceWorker.addEventListener('message', onMsg);
@@ -1311,8 +1447,10 @@ export default function App() {
         if (alive && !handledAuth(e)) {
           // Preserve known client stages (SW/config timeouts) and HTTP status instead of collapsing
           // every real failure into the same generic text. Unknown network errors stay user-friendly.
-          const detail = e?.code?.startsWith('push.') ? e.message
-            : (e?.status ? `HTTP ${e.status}` : '');
+          const error = recordOf(e);
+          const detail = typeof error?.code === 'string' && error.code.startsWith('push.')
+            ? (typeof error.message === 'string' ? error.message : '')
+            : (typeof error?.status === 'number' ? `HTTP ${error.status}` : '');
           setNotifError(detail ? `${t('pushInbox.loadFailed')} (${detail})` : t('pushInbox.loadFailed'));
         }
       }
@@ -1329,12 +1467,14 @@ export default function App() {
   const currentAgent = currentPaneAgent(current, states, codexTakeoverPanes);
   const codexSessionWake = transcriptWake.paneId === current?.paneId ? transcriptWake.seq : 0;
   const codexSession = useCodexSession(
-    current?.paneId, codexChatLensOn && currentAgent === 'codex', codexSessionWake,
+    current?.paneId || '', codexChatLensOn && currentAgent === 'codex', codexSessionWake,
   );
-  const currentKind = currentAgent === 'codex'
+  const rawCurrentKind = currentAgent === 'codex'
     ? codexKind(codexSession)
-    : states[current?.paneId]?.kind;
-  const setCodexTakeoverPending = useCallback((paneId, pending) => {
+    : (current?.paneId ? states[current.paneId]?.kind : null);
+  const currentKind = rawCurrentKind === 'working' || rawCurrentKind === 'permission'
+    || rawCurrentKind === 'compacting' || rawCurrentKind === 'error' ? rawCurrentKind : null;
+  const setCodexTakeoverPending = useCallback((paneId: string, pending: boolean) => {
     if (!paneId) return;
     setCodexTakeoverPanes((currentPanes) => {
       const has = currentPanes.has(paneId);
@@ -1350,7 +1490,12 @@ export default function App() {
     }
   }, [current?.paneId, codexSession.managed, codexSession.threadId, setCodexTakeoverPending]);
 
-  const beginCodexSend = useCallback((paneId, text, source, requestId = null) => {
+  const beginCodexSend = useCallback((
+    paneId: string,
+    text: string,
+    source: CodexOutgoingSource,
+    requestId: string | null = null,
+  ): string => {
     const id = requestId
       || `codex-outgoing-${Date.now().toString(36)}-${(++codexOptimisticSeqRef.current).toString(36)}`;
     setCodexOptimisticMessages((items) => [
@@ -1358,12 +1503,15 @@ export default function App() {
     ]);
     return id;
   }, []);
-  const finishCodexSend = useCallback((id, { result, error, uncertain = false } = {}) => {
+  const finishCodexSend = useCallback((
+    id: string,
+    { result, error, uncertain = false }: CodexOutgoingSettlement = {},
+  ) => {
     // Transport failure means "response unknown", not "server rejected". Keep the temporary state until
     // the authoritative transcript/queue snapshot claims its stable request id.
     setCodexOptimisticMessages((items) => settleCodexOutgoing(items, id, { result, error, uncertain }));
   }, []);
-  const reportChatActionError = useCallback((paneId, error) => {
+  const reportChatActionError = useCallback((paneId: string, error: Omit<ChatActionError, 'id'> | null) => {
     if (!paneId) return;
     setChatActionErrors((currentErrors) => {
       if (!error) {
@@ -1378,7 +1526,7 @@ export default function App() {
       };
     });
   }, []);
-  const coverCodexOptimistic = useCallback((ids) => {
+  const coverCodexOptimistic = useCallback((ids: string[]) => {
     const covered = new Set(ids);
     setCodexOptimisticMessages((items) => items.filter((item) => !covered.has(item.id)));
   }, []);
@@ -1394,7 +1542,7 @@ export default function App() {
   }, [current?.paneId, codexSession?.threadId]);
 
   // Record a just-sent command into this WINDOW's recent history (deduped + capped in storage).
-  const onCommandSent = useCallback((cmd) => {
+  const onCommandSent = useCallback((cmd: string) => {
     termRef.current?.wake?.(); // a dock send/fill landed → wake the poll loop (covers BottomDock too)
     const paneId = current?.paneId;
     if (paneId && (currentAgent === 'claude' || currentAgent === 'codex')) {
@@ -1412,11 +1560,11 @@ export default function App() {
   }, [current, currentAgent]);
 
   // ★/☆ on a panel row: toggle membership of the global favorites list.
-  const toggleFavorite = useCallback((cmd) => {
+  const toggleFavorite = useCallback((cmd: string) => {
     setFavorites(getFavorites().includes(cmd) ? removeFavorite(cmd) : addFavorite(cmd));
   }, []);
   // ✕ on a history row: drop that one entry from THIS window's recent history.
-  const removeRecentCmd = useCallback((cmd) => {
+  const removeRecentCmd = useCallback((cmd: string) => {
     const name = current?.session?.name;
     const win = current?.window?.id; // stable window ID, not the auto-renamed window.name
     if (name && win) setRecent(removeRecent(name, win, cmd));
@@ -1438,7 +1586,7 @@ export default function App() {
 
   // Fetch + open a doc by ABSOLUTE path: dedupe into a tab, record the recent, reveal the sheet.
   // Throws on fetch failure so callers can decide (prompt for a base dir, or surface inline).
-  const openAbsDoc = async (abs) => {
+  const openAbsDoc = async (abs: string): Promise<void> => {
     // Images open in the inline viewer. Fetch the bytes HERE (not in DocView) so a bad path THROWS
     // just like fetchDoc does — that way a relative/ambiguous tap falls into the same "pick the base
     // dir" recovery below, instead of opening a dead tab. The object URL rides on the tab as content;
@@ -1448,13 +1596,15 @@ export default function App() {
       // Re-tapping an already-open image re-activates it and refreshes (conditional — re-downloads only
       // if the file changed on disk); a first open fetches the bytes and records the mtime for later.
       if (docTabs.tabs.some((t) => t.key === abs)) { docTabs.activate(abs); refreshDocTab(abs); setFileManagerOpen(true); return; }
-      const { url, mtimeMs } = await fetchImageUrl(abs); // throws on 404/401 → caller's recovery (toast / base prompt)
-      docTabs.openDoc(abs, { type: 'image', name, content: url, mtime: mtimeMs });
+      const image = await fetchImageUrl(abs); // throws on 404/401 → caller's recovery (toast / base prompt)
+      if ('notModified' in image) return;
+      docTabs.openDoc(abs, { type: 'image', name, content: image.url, mtime: image.mtimeMs });
       pushRecentDoc({ path: abs, name, type: 'image', ts: Date.now() });
       setFileManagerOpen(true);
       return;
     }
     const res = await fetchDoc(abs); // throws on non-2xx (404/400/…)
+    if ('notModified' in res) return;
     docTabs.openDoc(abs, { type: res.type, name: res.name, content: res.content, mtime: res.mtimeMs });
     pushRecentDoc({ path: abs, name: res.name, type: res.type, ts: Date.now() });
     setFileManagerOpen(true);
@@ -1462,9 +1612,9 @@ export default function App() {
 
   // Closing an image tab frees its object URL (created in openAbsDoc). The URL must outlive tab
   // SWITCHES — DocView unmounts on every switch — so we revoke here, on actual close, not on unmount.
-  const closeDocTab = (key) => {
+  const closeDocTab = (key: string) => {
     const tab = docTabs.tabs.find((t) => t.key === key);
-    if (tab?.type === 'image' && tab.content) URL.revokeObjectURL(tab.content);
+    if (tab?.type === 'image' && typeof tab.content === 'string') URL.revokeObjectURL(tab.content);
     docTabs.closeTab(key);
   };
 
@@ -1476,37 +1626,38 @@ export default function App() {
   // unchanged); a changed image swaps in a fresh object URL and revokes the old blob. Uses refreshDoc,
   // not openDoc, so an async result landing after the user has switched away doesn't steal focus back.
   // Best-effort: a since-deleted/moved/unreadable file keeps its last-good content.
-  const refreshDocTab = (key) => {
+  const refreshDocTab = (key: string) => {
     const tab = docTabs.tabs.find((t) => t.key === key);
     if (!tab || tab.type === 'home') return;
     if (tab.type === 'image') {
       fetchImageUrl(key, tab.mtime ?? null)
         .then((res) => {
-          if (res.notModified) return; // unchanged → keep the same object URL (no re-download, no flash)
+          if ('notModified' in res) return; // unchanged → keep the same object URL (no re-download, no flash)
           const old = tab.content;
           docTabs.refreshDoc(key, { content: res.url, mtime: res.mtimeMs });
-          if (old) URL.revokeObjectURL(old); // free the superseded blob (the <img> is already re-pointed)
+          if (typeof old === 'string') URL.revokeObjectURL(old); // free the superseded blob (the <img> is already re-pointed)
         })
         .catch(() => { /* keep the last-good image */ });
       return;
     }
     fetchDoc(key, tab.mtime ?? null)
       .then((res) => {
-        if (res.notModified) return; // unchanged on disk → leave the tab (and its scroll/TTS) alone
+        if ('notModified' in res) return; // unchanged on disk → leave the tab (and its scroll/TTS) alone
         docTabs.refreshDoc(key, { type: res.type, name: res.name, content: res.content, mtime: res.mtimeMs });
       })
       .catch(() => { /* keep the last-good content */ });
   };
 
   // Switching to a doc tab is instant (activate), then its content refreshes in the background.
-  const activateDocTab = (key) => { docTabs.activate(key); refreshDocTab(key); };
+  const activateDocTab = (key: string) => { docTabs.activate(key); refreshDocTab(key); };
 
   // Topbar file button: reveal the sheet and refresh whatever doc it lands on ("switch away & back").
   const reopenFiles = () => { setFileManagerOpen(true); refreshDocTab(docTabs.active); };
 
   // req() throws Error("/api/... -> 404"); map the trailing status to a readable reason.
-  const friendlyDocError = (err) => {
-    const m = /-> (\d+)/.exec(err?.message || '');
+  const friendlyDocError = (error: unknown): string => {
+    const message = error instanceof Error ? error.message : '';
+    const m = /-> (\d+)/.exec(message);
     const status = m ? Number(m[1]) : 0;
     if (status === 404) return t('app.docNotFound');
     if (status === 413) return t('app.docTooLarge');
@@ -1516,13 +1667,13 @@ export default function App() {
 
   // Entry from a terminal tap or the home path box. Absolute → open directly. Relative → resolve
   // against the pane's stored base (or its cwd); if that doesn't open, prompt for the base dir.
-  const onOpenDoc = async (rawPath) => {
+  const onOpenDoc = async (rawPath: string): Promise<void> => {
     if (isAbsolute(rawPath)) {
       // No base to fill for an absolute path → surface the reason as a transient toast.
       try { await openAbsDoc(rawPath); } catch (e) { setDocToast(friendlyDocError(e)); }
       return;
     }
-    const base = getPaneBase(current?.paneId) ?? currentPaneCwd;
+    const base = current?.paneId ? getPaneBase(current.paneId) ?? currentPaneCwd : currentPaneCwd;
     if (base) {
       try { await openAbsDoc(joinPath(base, rawPath)); return; }
       catch { /* fall through to prompt */ }
@@ -1533,7 +1684,8 @@ export default function App() {
   // DirPicker pick: resolve+open the unresolved relative path against the chosen base dir, then
   // remember it for this pane. On failure (still not found there), keep the picker open and surface
   // the reason as a toast so the user can pick another directory.
-  const pickBaseDir = async (baseDir) => {
+  const pickBaseDir = async (baseDir: string): Promise<void> => {
+    if (!basePrompt) return;
     try {
       await openAbsDoc(joinPath(baseDir, basePrompt.rawPath));
     } catch (e) {
@@ -1554,19 +1706,21 @@ export default function App() {
   // A tapped terminal link doesn't act straight away (anti-误触): pop a confirm card near the tap. The
   // link carries its kind — a doc path opens the reader/image viewer; a web URL asks to open Browser.
   // Pass the raw tap point — DocLinkPopover clamps its own measured box inside the viewport.
-  const onDocLinkTap = (link, cx, cy) => {
-    if (link?.kind === 'url') setLocalUrlPrompt({ protocol: link.protocol, port: link.port, path: link.urlPath, raw: link.raw, x: cx, y: cy });
-    else setDocLinkPrompt({ path: link?.path ?? link, x: cx, y: cy });
+  const onDocLinkTap = (link: TerminalOutputLink | OutputLink, cx: number, cy: number): void => {
+    if (link.kind === 'url') {
+      const raw = link.raw || link.path;
+      if (raw) setLocalUrlPrompt({ raw, x: cx, y: cy });
+    } else if (link.path) setDocLinkPrompt({ path: link.path, x: cx, y: cy });
   };
-  const confirmDocLink = (path) => { setDocLinkPrompt(null); onOpenDoc(path); };
+  const confirmDocLink = (path: string) => { setDocLinkPrompt(null); void onOpenDoc(path); };
 
   // Confirm a terminal web link → open it as a new built-in browser tab.
-  const [localUrlError, setLocalUrlError] = useState(null);
+  const [localUrlError, setLocalUrlError] = useState<string | null>(null);
   const [localUrlOpening, setLocalUrlOpening] = useState(false);
-  const [localUrlBusyMode, setLocalUrlBusyMode] = useState(null);
-  const localUrlAbortRef = useRef(null);
+  const [localUrlBusyMode, setLocalUrlBusyMode] = useState<BrowserMode | null>(null);
+  const localUrlAbortRef = useRef<AbortController | null>(null);
   const localUrlRequestRef = useRef(0);
-  const confirmLocalUrl = async (_path, mode = 'direct') => {
+  const confirmLocalUrl = async (_path: string, mode: BrowserMode = 'direct'): Promise<void> => {
     const p = localUrlPrompt;
     if (!p) return;
     localUrlAbortRef.current?.abort();
@@ -1584,7 +1738,7 @@ export default function App() {
     } catch (e) {
       if (requestId !== localUrlRequestRef.current) return;
       if (handledAuth(e)) return;
-      setLocalUrlError(e.message || t('localurl.failed'));
+      setLocalUrlError(e instanceof Error && e.message ? e.message : t('localurl.failed'));
     } finally {
       if (requestId === localUrlRequestRef.current) {
         localUrlAbortRef.current = null;
@@ -1724,12 +1878,12 @@ export default function App() {
   // inactive multi-pane one where we only have this aggregate). The active multi-pane window renders per-pane
   // instead (paneAgents below), so it doesn't rely on this squash. A state entry exists only for a pane
   // actually running an agent, so this is its agent.
-  const windowAgents = {};
+  const windowAgents: Record<string, string> = {};
   for (const st of Object.values(states)) if (st.window && st.agent) windowAgents[st.window] = st.agent;
-  for (const pane of current?.panes || []) if (pane.agent) windowAgents[current.window.id] = pane.agent;
+  if (current) for (const pane of current.panes) if (pane.agent) windowAgents[current.window.id] = pane.agent;
   // paneId → agent id, for the per-pane agent logo inside the active window's pane menu (states is keyed by
   // pane, so this is the live truth for each one; a pane not running an agent simply has no entry → no logo).
-  const paneAgents = {};
+  const paneAgents: Record<string, string> = {};
   for (const [pane, st] of Object.entries(states)) if (st.agent) paneAgents[pane] = st.agent;
   for (const pane of current?.panes || []) if (pane.agent) paneAgents[pane.id] = pane.agent;
   const changelogUnread = !!LATEST_RELEASE && clSeen !== LATEST_RELEASE;
@@ -1750,11 +1904,11 @@ export default function App() {
   };
   const openChangelog = () => {
     setChangelogOpen(true);
-    setChangelogSeen(LATEST_RELEASE); setClSeen(LATEST_RELEASE); // opening clears the unread dot
+    if (LATEST_RELEASE) { setChangelogSeen(LATEST_RELEASE); setClSeen(LATEST_RELEASE); } // opening clears the unread dot
   };
   const managedPane = current?.panes?.find((pane) => pane.id === managePane);
   const showManagedPaneWidth = Number.isFinite(managedPaneWidth)
-    && !!managedPane && canResizePaneWidth(current?.panes, managePane);
+    && !!managedPane && !!managePane && canResizePaneWidth(current?.panes, managePane);
   const managedPaneSubtitlePanes = managedPaneWidth == null ? current?.panes : current?.panes?.map((pane) => (
     pane.id === managePane ? { ...pane, width: managedPaneWidth } : pane
   ));
@@ -1862,7 +2016,9 @@ export default function App() {
         onClose={() => setDrawerOpen(false)}
         onLogout={logout}
         orphans={orphans}
-        onTakeoverRequest={setTakeoverTarget}
+        onTakeoverRequest={(orphan) => {
+          if (orphan.sessionId) setTakeoverTarget({ ...orphan, sessionId: orphan.sessionId });
+        }}
         recoveryPlan={recoveryPlan}
         recoveryOperation={recoveryOperation}
         onOpenRecovery={openRecoveryFromDrawer}
@@ -1957,7 +2113,7 @@ export default function App() {
           },
         ] : []}
       >
-        {manageWindow?.panes === 1 && Number.isFinite(manageWindow.width) && (
+        {manageWindow?.panes === 1 && typeof manageWindow.width === 'number' && Number.isFinite(manageWindow.width) && (
           <ColumnStepper
             label={t('resize.windowWidth')}
             cols={manageWindow.width}
@@ -1971,7 +2127,11 @@ export default function App() {
       <ActionSheet
         open={!!managePane}
         title={t('pane.manageTitle')}
-        subtitle={paneManageSubtitle(managedPaneSubtitlePanes, managePane)}
+        subtitle={paneManageSubtitle(managedPaneSubtitlePanes?.map((pane) => ({
+          ...pane,
+          width: pane.width ?? undefined,
+          height: pane.height ?? undefined,
+        })), managePane)}
         onClose={closePaneManagement}
         actions={managePane ? [
           { key: 'split-h', icon: <SplitHIcon />, label: t('pane.splitH'), onClick: () => splitPaneAction(managePane, 'h') },
@@ -1985,7 +2145,7 @@ export default function App() {
         {showManagedPaneWidth && (
           <ColumnStepper
             label={t('resize.paneWidth')}
-            cols={managedPaneWidth}
+            cols={managedPaneWidth ?? 0}
             onAdjust={resizeManagedPaneCols}
             onRestore={restoreManagedPaneLayout}
             restoreLabel={t('resize.restoreRatio')}
@@ -2037,7 +2197,7 @@ export default function App() {
           name={t('localurl.title')}
           path={localUrlPrompt.raw}
           openLabel={t('localurl.open')}
-          note={localUrlError}
+          note={localUrlError || undefined}
           x={localUrlPrompt.x}
           y={localUrlPrompt.y}
           busy={localUrlOpening}
@@ -2051,16 +2211,16 @@ export default function App() {
       )}
       <IdeaPanel
         open={ideaOpen}
-        session={current?.session?.name}
-        window={current?.window?.name || current?.window?.id}
-        micAvailable={micAvailable}
+        session={current?.session?.name || ''}
+        window={current?.window?.name || current?.window?.id || ''}
+        micAvailable={!!micAvailable}
         onClose={() => setIdeaOpen(false)}
         onSend={(text) => { dockRef.current?.fill(text); setIdeaOpen(false); }}
         onCountChange={setIdeaCount}
       />
       <DirPicker
         open={!!basePrompt}
-        seedCwd={getPaneBase(current?.paneId) ?? currentPaneCwd ?? null}
+        seedCwd={current?.paneId ? getPaneBase(current.paneId) ?? currentPaneCwd ?? null : currentPaneCwd ?? null}
         pane={current?.paneId ?? null}
         hint={basePrompt ? <>{t('app.cannotLocate')} <code>{basePrompt.rawPath}</code>{t('app.pickItsDir')}</> : null}
         onPick={pickBaseDir}
@@ -2110,7 +2270,7 @@ export default function App() {
                     localStorage.setItem('tw_lens_' + current.paneId, 'terminal');
                   }} />
               ) : (
-                <ChatView pane={current.paneId} agent={currentAgent} kind={currentKind} msg={states[current.paneId]?.msg} onAuthFail={onAuthFail}
+                <ChatView pane={current.paneId} agent={currentAgent || undefined} kind={currentKind} msg={states[current.paneId]?.msg} onAuthFail={onAuthFail}
                   onDocLinkTap={onDocLinkTap}
                   codexSession={codexSession}
                   optimisticMessages={codexOptimisticMessages.filter((item) => item.paneId === current.paneId)}
@@ -2148,7 +2308,7 @@ export default function App() {
             codexChatReady ? (
               <ChatComposer
                 pane={current.paneId}
-                agent={currentAgent}
+                agent={currentAgent || undefined}
                 codexSession={codexSession}
                 desktop={desktopInput}
                 kind={currentKind}
@@ -2161,7 +2321,7 @@ export default function App() {
                 onCodexSendResult={finishCodexSend}
                 onActionError={(error) => reportChatActionError(current.paneId, error)}
                 shortcuts={serverShortcuts}
-                micAvailable={micAvailable}
+                micAvailable={!!micAvailable}
                 chatTone={chatTone}
                 keyboardInset={inset}
                 onInteractiveSlash={currentAgent === 'claude'
@@ -2177,16 +2337,16 @@ export default function App() {
               onKey={sendKey}
               onText={sendChar}
               cwd={currentPaneCwd}
-              agent={currentAgent}
+              agent={currentAgent || undefined}
               windowId={current.window?.id}
               recent={recent}
-              favorites={favorites}
+              favorites={favorites.map((text): ShortcutItem => ({ kind: 'cmd', text, source: 'local' }))}
               onSent={onCommandSent}
-              onToggleFav={toggleFavorite}
+              onToggleFav={(item) => toggleFavorite(item.text)}
               onRemoveRecent={removeRecentCmd}
               inset={inset}
               shortcuts={serverShortcuts}
-              micAvailable={micAvailable}
+              micAvailable={!!micAvailable}
               desktopUnified={desktopInput}
               terminalFocused={terminalFocused}
               onLeaveTerminal={() => termRef.current?.blurInput?.()}

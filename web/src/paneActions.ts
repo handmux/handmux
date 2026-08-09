@@ -9,7 +9,6 @@
 // split into the freshly-created pane, mirroring tmux's own behavior).
 interface PaneItem {
   id: string;
-  [key: string]: unknown;
 }
 
 interface PaneApi {

@@ -1,7 +1,6 @@
 export interface PaneAgentItem {
   id: string;
   agent?: string | null;
-  [key: string]: unknown;
 }
 
 type PaneStates = Record<string, { agent?: string | null } | undefined>;

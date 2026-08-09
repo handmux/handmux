@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
-const source = readFileSync(path.resolve(process.cwd(), 'src/App.jsx'), 'utf8');
+const source = readFileSync(path.resolve(process.cwd(), 'src/App.tsx'), 'utf8');
 const styles = readFileSync(path.resolve(process.cwd(), 'src/styles.css'), 'utf8');
 
 describe('built-in browser App composition', () => {
@@ -42,7 +42,7 @@ describe('built-in browser App composition', () => {
     expect(source).toContain('await browser.openUrl(p.raw, { mode, signal: controller.signal })');
     expect(source).toContain('modeChoices={true}');
     expect(source).toContain('proxyAvailable={browser.proxyAvailable}');
-    expect(source).toContain('const [localUrlBusyMode, setLocalUrlBusyMode] = useState(null)');
+    expect(source).toContain('const [localUrlBusyMode, setLocalUrlBusyMode] = useState');
     expect(source).toContain('busyMode={localUrlBusyMode}');
     expect(source).not.toContain('if (!p || localUrlOpeningRef.current) return');
     expect(source).toMatch(/const p = localUrlPrompt;[\s\S]*?localUrlAbortRef\.current\?\.abort\(\);[\s\S]*?const controller = new AbortController\(\)/);

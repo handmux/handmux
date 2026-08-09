@@ -9,6 +9,11 @@ import type {
   JsonRequestOptions,
   TerminalHistoryResponse,
 } from './apiRequest.js';
+import {
+  parseWorkspaceRecoveryPlan,
+  parseWorkspaceRestoreOperation,
+} from './workspaceRecovery.js';
+import type { WorkspaceRecoveryPlan, WorkspaceRestoreOperation } from './workspaceRecovery.js';
 
 export { ApiError, UnauthorizedError } from './apiErrors.js';
 export {
@@ -41,13 +46,85 @@ function recordOf(value: unknown): Record<string, unknown> | null {
     : null;
 }
 
-export const getSessions = (): Promise<unknown> => req('/api/sessions');
-export const getUsage = (): Promise<unknown> => req('/api/usage');
-export const getWindows = (session: string): Promise<unknown> => (
-  req(`/api/windows?session=${encodeURIComponent(session)}`)
+export interface TmuxSession {
+  id: string;
+  name: string;
+}
+
+export interface TmuxWindow {
+  id: string;
+  name: string;
+  panes: number;
+  active?: boolean;
+  width?: number;
+  activePaneId?: string;
+}
+
+export interface TmuxPane {
+  id: string;
+  active?: boolean;
+  command?: string | null;
+  agent?: string | null;
+  left?: number | null;
+  top?: number | null;
+  width?: number | null;
+  height?: number | null;
+}
+
+const finiteOrUndefined = (value: unknown): number | undefined => (
+  typeof value === 'number' && Number.isFinite(value) ? value : undefined
 );
-export const getPanes = (window: string): Promise<unknown> => (
-  req(`/api/panes?window=${encodeURIComponent(window)}`, { timeoutMs: 8_000 })
+
+function parseSessions(value: unknown): TmuxSession[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((candidate): TmuxSession[] => {
+    const session = recordOf(candidate);
+    return typeof session?.id === 'string' && typeof session.name === 'string'
+      ? [{ id: session.id, name: session.name }] : [];
+  });
+}
+
+function parseWindows(value: unknown): TmuxWindow[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((candidate): TmuxWindow[] => {
+    const win = recordOf(candidate);
+    if (!win || typeof win.id !== 'string') return [];
+    return [{
+      id: win.id,
+      name: typeof win.name === 'string' ? win.name : win.id,
+      panes: finiteOrUndefined(win.panes) ?? 0,
+      ...(typeof win.active === 'boolean' ? { active: win.active } : {}),
+      ...(finiteOrUndefined(win.width) !== undefined ? { width: finiteOrUndefined(win.width) } : {}),
+      ...(typeof win.activePaneId === 'string' ? { activePaneId: win.activePaneId } : {}),
+    }];
+  });
+}
+
+function parsePanes(value: unknown): TmuxPane[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((candidate): TmuxPane[] => {
+    const pane = recordOf(candidate);
+    if (!pane || typeof pane.id !== 'string') return [];
+    return [{
+      id: pane.id,
+      ...(typeof pane.active === 'boolean' ? { active: pane.active } : {}),
+      ...(typeof pane.command === 'string' || pane.command === null ? { command: pane.command } : {}),
+      ...(typeof pane.agent === 'string' || pane.agent === null ? { agent: pane.agent } : {}),
+      ...(finiteOrUndefined(pane.left) !== undefined ? { left: finiteOrUndefined(pane.left) } : {}),
+      ...(finiteOrUndefined(pane.top) !== undefined ? { top: finiteOrUndefined(pane.top) } : {}),
+      ...(finiteOrUndefined(pane.width) !== undefined ? { width: finiteOrUndefined(pane.width) } : {}),
+      ...(finiteOrUndefined(pane.height) !== undefined ? { height: finiteOrUndefined(pane.height) } : {}),
+    }];
+  });
+}
+
+export const getSessions = async (): Promise<TmuxSession[]> => parseSessions(await req('/api/sessions'));
+export const getUsage = (): Promise<unknown> => req('/api/usage');
+export const getWindows = async (session: string): Promise<TmuxWindow[]> => (
+  parseWindows(await req(`/api/windows?session=${encodeURIComponent(session)}`))
+);
+export const getPanes = async (window: string): Promise<TmuxPane[]> => (
+  parsePanes(await req(`/api/panes?window=${encodeURIComponent(window)}`, { timeoutMs: 8_000 }))
 );
 export const getHistory = (
   pane: string,
@@ -117,7 +194,7 @@ export const sendInput = (pane: string, hex: string): Promise<unknown> =>
 // mouse-wheel events the app scrolls on (no-op reply when the app isn't mouse-reporting — see /scroll).
 export const scrollPane = (pane: string, dir: string, lines = 1): Promise<unknown> =>
   req('/api/scroll', { method: 'POST', body: JSON.stringify({ pane, dir, lines }) });
-export const resizeWindow = (window: string, cols: number, rows: number): Promise<unknown> =>
+export const resizeWindow = (window: string, cols: number, rows?: number): Promise<unknown> =>
   req('/api/resize', { method: 'POST', body: JSON.stringify({ window, cols, rows }) });
 export const resizePane = (pane: string, cols: number): Promise<unknown> =>
   req('/api/resize', { method: 'POST', body: JSON.stringify({ pane, cols }) });
@@ -125,18 +202,38 @@ export const getWindowLayout = (window: string): Promise<unknown> =>
   req(`/api/layout?window=${encodeURIComponent(window)}`);
 export const applyWindowLayout = (window: string, layout: unknown): Promise<unknown> =>
   req('/api/layout', { method: 'POST', body: JSON.stringify({ window, layout }) });
-export const restoreWindowSize = (window: string, layout: unknown): Promise<unknown> =>
+export const restoreWindowSize = (window: string, layout?: unknown): Promise<unknown> =>
   req('/api/resize', { method: 'POST', body: JSON.stringify({ window, auto: true, layout }) });
 export const createSession = (name: string, cwd?: string, cmd?: string): Promise<unknown> =>
   req('/api/sessions', { method: 'POST', body: JSON.stringify({ name, cwd, cmd }) });
-export const createWindow = (
+export interface TmuxLocationResult {
+  id?: string;
+  session?: string;
+  name?: string;
+  window?: string;
+  pane?: string;
+}
+
+const parseTmuxLocation = (value: unknown): TmuxLocationResult => {
+  const result = recordOf(value);
+  return result ? {
+    ...(typeof result.id === 'string' ? { id: result.id } : {}),
+    ...(typeof result.session === 'string' ? { session: result.session } : {}),
+    ...(typeof result.name === 'string' ? { name: result.name } : {}),
+    ...(typeof result.window === 'string' ? { window: result.window } : {}),
+    ...(typeof result.pane === 'string' ? { pane: result.pane } : {}),
+  } : {};
+};
+
+export const createWindow = async (
   session: string,
   pane: string,
   name?: string,
   cwd?: string,
   cmd?: string,
-): Promise<unknown> =>
-  req('/api/windows', { method: 'POST', body: JSON.stringify({ session, pane, name, cwd, cmd }) });
+): Promise<TmuxLocationResult> => parseTmuxLocation(await req(
+  '/api/windows', { method: 'POST', body: JSON.stringify({ session, pane, name, cwd, cmd }) },
+));
 export const renameSession = (id: string, name: string): Promise<unknown> =>
   req('/api/sessions', { method: 'PATCH', body: JSON.stringify({ id, name }) });
 export const renameWindow = (id: string, name: string): Promise<unknown> =>
@@ -154,8 +251,29 @@ export const createDir = (dir: string, name: string): Promise<unknown> =>
 
 // `sinceMtime` (ms) makes it a conditional GET: an unchanged file comes back as { notModified: true }
 // (no content) so revisiting a doc doesn't refetch/re-render when nothing changed. Omit for a full read.
-export const fetchDoc = (path: string, sinceMtime: number | null = null): Promise<unknown> =>
-  req(`/api/file?path=${encodeURIComponent(path)}${sinceMtime != null ? `&mtime=${encodeURIComponent(sinceMtime)}` : ''}`, { timeoutMs: 8_000 });
+export type DocumentResponse = { notModified: true } | {
+  type: string;
+  name: string;
+  content: unknown;
+  mtimeMs?: number | null;
+};
+export const fetchDoc = async (path: string, sinceMtime: number | null = null): Promise<DocumentResponse> => {
+  const value = recordOf(await req(
+    `/api/file?path=${encodeURIComponent(path)}${sinceMtime != null ? `&mtime=${encodeURIComponent(sinceMtime)}` : ''}`,
+    { timeoutMs: 8_000 },
+  ));
+  if (value?.notModified === true) return { notModified: true };
+  if (!value || typeof value.type !== 'string' || typeof value.name !== 'string') {
+    throw new Error('file response is invalid');
+  }
+  return {
+    type: value.type,
+    name: value.name,
+    content: value.content,
+    ...(value.mtimeMs === null ? { mtimeMs: null }
+      : typeof value.mtimeMs === 'number' && Number.isFinite(value.mtimeMs) ? { mtimeMs: value.mtimeMs } : {}),
+  };
+};
 export const fetchDir = (path?: string): Promise<unknown> =>
   req(`/api/dir${path ? `?path=${encodeURIComponent(path)}` : ''}`, { timeoutMs: 8_000 });
 // A pane's current working directory (absolute) — used to land the file browser on the session's dir.
@@ -176,29 +294,101 @@ export async function signAsr(): Promise<AsrSignResponse> {
 export const getConfig = (): Promise<unknown> => req('/api/config', { timeoutMs: 8_000 });
 // { current, latest, updateAvailable } — is the installed CLI behind the latest npm release? Checked once
 // per app launch; when true the phone hints the user to run `handmux update` on their computer.
-export const getServerVersion = (): Promise<unknown> => req('/api/version', { timeoutMs: 8_000 });
-export const getWorkspaceProtectionStatus = (): Promise<unknown> => (
-  req('/api/workspace/status', { timeoutMs: 8_000 })
+export interface ServerVersionInfo {
+  current?: string | null;
+  latest?: string | null;
+  updateAvailable?: boolean;
+  whatsNew?: { version: string; zh?: string; en?: string }[];
+}
+
+export const getServerVersion = async (): Promise<ServerVersionInfo> => {
+  const value = recordOf(await req('/api/version', { timeoutMs: 8_000 }));
+  const whatsNew = Array.isArray(value?.whatsNew) ? value.whatsNew.flatMap((candidate) => {
+    const release = recordOf(candidate);
+    return typeof release?.version === 'string' ? [{
+      version: release.version,
+      ...(typeof release.zh === 'string' ? { zh: release.zh } : {}),
+      ...(typeof release.en === 'string' ? { en: release.en } : {}),
+    }] : [];
+  }) : undefined;
+  return value ? {
+    ...(typeof value.current === 'string' || value.current === null ? { current: value.current } : {}),
+    ...(typeof value.latest === 'string' || value.latest === null ? { latest: value.latest } : {}),
+    ...(typeof value.updateAvailable === 'boolean' ? { updateAvailable: value.updateAvailable } : {}),
+    ...(whatsNew ? { whatsNew } : {}),
+  } : {};
+};
+export const getWorkspaceProtectionStatus = async (): Promise<{ status?: string; errorCode?: string | null }> => {
+  const value = recordOf(await req('/api/workspace/status', { timeoutMs: 8_000 }));
+  return value ? {
+    ...(typeof value.status === 'string' ? { status: value.status } : {}),
+    ...(typeof value.errorCode === 'string' || value.errorCode === null ? { errorCode: value.errorCode } : {}),
+  } : {};
+};
+export const getWorkspaceRestorePlan = async (checkpointId = 'latest'): Promise<WorkspaceRecoveryPlan | null> => (
+  parseWorkspaceRecoveryPlan(await req(
+    `/api/workspace/restore-plan?checkpoint=${encodeURIComponent(checkpointId)}`,
+    { timeoutMs: 8_000 },
+  ))
 );
-export const getWorkspaceRestorePlan = (checkpointId = 'latest'): Promise<unknown> => (
-  req(`/api/workspace/restore-plan?checkpoint=${encodeURIComponent(checkpointId)}`, { timeoutMs: 8_000 })
-);
-export const startWorkspaceRestore = (
+export interface WorkspaceRestoreStart {
+  operationId?: string;
+  status?: string;
+}
+export const startWorkspaceRestore = async (
   body: Record<string, unknown> = { checkpointId: 'latest' },
-): Promise<unknown> => (
-  req('/api/workspace/restore', { method: 'POST', body: JSON.stringify(body), timeoutMs: 8_000 })
-);
-export const getWorkspaceRestoreOperation = (operationId: string): Promise<unknown> => (
-  req(`/api/workspace/restore/${encodeURIComponent(operationId)}`, { timeoutMs: 8_000 })
-);
+): Promise<WorkspaceRestoreStart> => {
+  const value = recordOf(await req(
+    '/api/workspace/restore', { method: 'POST', body: JSON.stringify(body), timeoutMs: 8_000 },
+  ));
+  return value ? {
+    ...(typeof value.operationId === 'string' ? { operationId: value.operationId } : {}),
+    ...(typeof value.status === 'string' ? { status: value.status } : {}),
+  } : {};
+};
+export const getWorkspaceRestoreOperation = async (
+  operationId: string,
+): Promise<(WorkspaceRestoreOperation & { id?: string }) | null> => parseWorkspaceRestoreOperation(await req(
+  `/api/workspace/restore/${encodeURIComponent(operationId)}`,
+  { timeoutMs: 8_000 },
+));
 // Enable the Claude Code lifecycle hooks on the host (one-tap from the inbox). Token-gated like every API;
 // 15s timeout covers the file copy + settings merge. Returns { ok, status }.
 export const installClaudeHooks = (): Promise<unknown> => (
   req('/api/hooks/install', { method: 'POST', timeoutMs: 15_000 })
 );
 // Scope the inbox roster to the sessions this device has bound — the server returns only those panes.
-export const getStates = (sessions: string[] = []): Promise<unknown> =>
-  req(`/api/states?sessions=${encodeURIComponent(sessions.join(','))}`, { timeoutMs: 4_000 });
+export interface PaneStateResponse {
+  kind?: string | null;
+  session?: string | null;
+  window?: string | null;
+  windowName?: string | null;
+  msg?: string | null;
+  ts?: number | null;
+  agent?: string | null;
+}
+
+export const getStates = async (sessions: string[] = []): Promise<Record<string, PaneStateResponse>> => {
+  const response = recordOf(await req(
+    `/api/states?sessions=${encodeURIComponent(sessions.join(','))}`,
+    { timeoutMs: 4_000 },
+  ));
+  const result: Record<string, PaneStateResponse> = {};
+  for (const [pane, candidate] of Object.entries(response || {})) {
+    const state = recordOf(candidate);
+    if (!state) continue;
+    result[pane] = {
+      ...(typeof state.kind === 'string' || state.kind === null ? { kind: state.kind } : {}),
+      ...(typeof state.session === 'string' || state.session === null ? { session: state.session } : {}),
+      ...(typeof state.window === 'string' || state.window === null ? { window: state.window } : {}),
+      ...(typeof state.windowName === 'string' || state.windowName === null ? { windowName: state.windowName } : {}),
+      ...(typeof state.msg === 'string' || state.msg === null ? { msg: state.msg } : {}),
+      ...(typeof state.ts === 'number' && Number.isFinite(state.ts) ? { ts: state.ts } : {}),
+      ...(typeof state.agent === 'string' || state.agent === null ? { agent: state.agent } : {}),
+    };
+  }
+  return result;
+};
 
 const browserReq = (path: string, options: JsonRequestOptions = {}): Promise<unknown> => req(path, {
   timeoutMs: 15_000,
@@ -237,9 +427,43 @@ export const clearBrowserProxyProfile = (origin: string | null = null): Promise<
 // Orphan Claude sessions running outside tmux (see server/src/orphans.js). getOrphans returns the roster;
 // takeoverOrphan spawns `claude --resume` in tmux and (default) SIGTERMs the original. Takeover involves a
 // process scan + tmux spawn + up-poll, so it gets a longer timeout.
-export const getOrphans = (): Promise<unknown> => req('/api/orphans', { timeoutMs: 8_000 });
-export const takeoverOrphan = (body: unknown): Promise<unknown> =>
-  req('/api/orphans/takeover', { method: 'POST', body: JSON.stringify(body), timeoutMs: 15_000 });
+export interface OrphanProcess {
+  pid: number;
+  cwd: string;
+  cwdLabel?: string;
+  sessionId?: string | null;
+  state?: string;
+  snippet?: string;
+  agentLabel?: string;
+  suggestedName?: string;
+  startedAt?: number | null;
+  lastActivity?: number | null;
+}
+
+export const getOrphans = async (): Promise<OrphanProcess[]> => {
+  const value = await req<unknown>('/api/orphans', { timeoutMs: 8_000 });
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((candidate): OrphanProcess[] => {
+    const orphan = recordOf(candidate);
+    if (!orphan || typeof orphan.pid !== 'number' || !Number.isFinite(orphan.pid)
+      || typeof orphan.cwd !== 'string') return [];
+    return [{
+      pid: orphan.pid,
+      cwd: orphan.cwd,
+      ...(typeof orphan.cwdLabel === 'string' ? { cwdLabel: orphan.cwdLabel } : {}),
+      ...(typeof orphan.sessionId === 'string' || orphan.sessionId === null ? { sessionId: orphan.sessionId } : {}),
+      ...(typeof orphan.state === 'string' ? { state: orphan.state } : {}),
+      ...(typeof orphan.snippet === 'string' ? { snippet: orphan.snippet } : {}),
+      ...(typeof orphan.agentLabel === 'string' ? { agentLabel: orphan.agentLabel } : {}),
+      ...(typeof orphan.suggestedName === 'string' ? { suggestedName: orphan.suggestedName } : {}),
+      ...(finiteOrUndefined(orphan.startedAt) !== undefined ? { startedAt: finiteOrUndefined(orphan.startedAt) } : {}),
+      ...(finiteOrUndefined(orphan.lastActivity) !== undefined ? { lastActivity: finiteOrUndefined(orphan.lastActivity) } : {}),
+    }];
+  });
+};
+export const takeoverOrphan = async (body: unknown): Promise<TmuxLocationResult> => parseTmuxLocation(await req(
+  '/api/orphans/takeover', { method: 'POST', body: JSON.stringify(body), timeoutMs: 15_000 },
+));
 
 // --- git viewer (read-only) ---
 export const gitRepos = (dir: string): Promise<unknown> => (
