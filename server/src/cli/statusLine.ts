@@ -14,30 +14,46 @@ import { writeJsonAtomic } from './hookScaffold.js';
 const STATUS_MARK = 'handmux-statusline.cjs'; // identifies our statusLine command among the user's own
 const SCRIPT = 'handmux-statusline.cjs';
 
-function claudeDir(home = homedir()) { return path.join(home, '.claude'); }
-function settingsPath(home = homedir()) { return path.join(claudeDir(home), 'settings.json'); }
+type JsonRecord = Record<string, unknown>;
+export type StatusLineState = 'no-claude' | 'ours' | 'foreign' | 'absent';
 
-function readSettings(home) {
-  try { return JSON.parse(fs.readFileSync(settingsPath(home), 'utf8')); } catch { return {}; }
+interface InstallStatusLineOptions {
+  srcDir?: string;
+  usageFile?: string;
 }
 
-function isOurs(sl) {
-  return !!(sl && typeof sl.command === 'string' && sl.command.includes(STATUS_MARK));
+const isRecord = (value: unknown): value is JsonRecord =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+function claudeDir(home: string = homedir()): string { return path.join(home, '.claude'); }
+function settingsPath(home: string = homedir()): string { return path.join(claudeDir(home), 'settings.json'); }
+
+function readSettings(home: string): JsonRecord {
+  try {
+    const value: unknown = JSON.parse(fs.readFileSync(settingsPath(home), 'utf8'));
+    return isRecord(value) ? value : {};
+  } catch { return {}; }
+}
+
+function isOurs(statusLine: unknown): boolean {
+  return isRecord(statusLine)
+    && typeof statusLine.command === 'string'
+    && statusLine.command.includes(STATUS_MARK);
 }
 
 // 'no-claude' → ~/.claude absent. 'ours' → our statusLine is installed. 'foreign' → the user has their own
 // statusLine (we must not touch it). 'absent' → Claude Code is here but no statusLine configured.
-export function statusLineStatus(home = homedir()) {
+export function statusLineStatus(home: string = homedir()): StatusLineState {
   if (!fs.existsSync(claudeDir(home))) return 'no-claude';
   const sl = readSettings(home).statusLine;
   if (isOurs(sl)) return 'ours';
-  if (sl && (sl.command || sl.type)) return 'foreign';
+  if (isRecord(sl) && (sl.command || sl.type)) return 'foreign';
   return 'absent';
 }
 
 // The exact command a user with an EXISTING statusline appends to capture without changing their display:
 // pipe their statusline's stdin through our capturer in TEE mode first. Returned so the CLI can print it.
-export function composeHint(home = homedir(), { usageFile } = {}) {
+export function composeHint(home: string = homedir(), { usageFile }: { usageFile?: string } = {}): string {
   const dest = path.join(claudeDir(home), 'hooks', SCRIPT);
   return `HANDMUX_STATUS_TEE=1 node ${dest} ${usageFile} | <your existing statusline>`;
 }
@@ -46,9 +62,13 @@ export function composeHint(home = homedir(), { usageFile } = {}) {
 // when it's safe (absent or already ours). A 'foreign' statusLine is left untouched. Returns { status }.
 //   srcDir    = bundled hooks dir (server/hooks)
 //   usageFile = ~/.handmux/claude-usage.json (the snapshot the server reads)
-export function installStatusLine(home = homedir(), { srcDir, usageFile } = {}) {
+export function installStatusLine(
+  home: string = homedir(),
+  { srcDir, usageFile }: InstallStatusLineOptions = {},
+): { status: 'no-claude' | 'foreign' | 'installed'; script?: string } {
   if (!fs.existsSync(claudeDir(home))) return { status: 'no-claude' };
   const status = statusLineStatus(home);
+  if (!srcDir || !usageFile) throw new Error('statusLine srcDir and usageFile are required');
   // Always deploy the capturer script (it's ours, inert until invoked) so the compose one-liner works even
   // in the foreign case. Only the settings.statusLine write is gated on not clobbering the user's own.
   const hooksDir = path.join(claudeDir(home), 'hooks');
@@ -67,8 +87,12 @@ export function installStatusLine(home = homedir(), { srcDir, usageFile } = {}) 
 // into their OWN statusline (the TEE form) still reads as 'ours' (the command contains our mark), and we must
 // NOT rewrite their command to the bare form (that would drop their downstream renderer). So this only ever
 // copies the script. No-op (returns false) when we're not installed. Idempotent; safe to call every start.
-export function refreshStatusLineScript(home = homedir(), { srcDir } = {}) {
+export function refreshStatusLineScript(
+  home: string = homedir(),
+  { srcDir }: Pick<InstallStatusLineOptions, 'srcDir'> = {},
+): boolean {
   if (statusLineStatus(home) !== 'ours') return false;
+  if (!srcDir) return false;
   try {
     const dest = path.join(claudeDir(home), 'hooks', SCRIPT);
     fs.mkdirSync(path.dirname(dest), { recursive: true });
@@ -79,7 +103,7 @@ export function refreshStatusLineScript(home = homedir(), { srcDir } = {}) {
 
 // Uninstall: drop settings.statusLine only if it's ours, and remove the copied script. Leaves a foreign
 // statusLine and everything else intact.
-export function uninstallStatusLine(home = homedir()) {
+export function uninstallStatusLine(home: string = homedir()): { status: 'absent' } {
   const settings = readSettings(home);
   if (isOurs(settings.statusLine)) {
     delete settings.statusLine;

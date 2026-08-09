@@ -8,18 +8,29 @@ import {
 
 const SRC = path.resolve(__dirname, '../hooks'); // bundled scripts (has handmux-statusline.cjs)
 
-function withClaude(prefix) {
+interface TestSettings {
+  model?: unknown;
+  hooks?: unknown;
+  statusLine?: { type?: unknown; command?: unknown };
+}
+
+function withClaude(prefix: string): string {
   const home = tmpHome(prefix);
   fs.mkdirSync(path.join(home, '.claude'), { recursive: true });
   return home;
 }
-function settings(home) {
-  return JSON.parse(fs.readFileSync(path.join(home, '.claude', 'settings.json'), 'utf8'));
+function settings(home: string): TestSettings {
+  return JSON.parse(fs.readFileSync(path.join(home, '.claude', 'settings.json'), 'utf8')) as TestSettings;
 }
-function writeSettings(home, obj) {
+function statusLine(home: string): { type?: unknown; command: string } {
+  const value = settings(home).statusLine;
+  if (!value || typeof value.command !== 'string') throw new Error('expected installed statusLine');
+  return { ...value, command: value.command };
+}
+function writeSettings(home: string, obj: TestSettings): void {
   fs.writeFileSync(path.join(home, '.claude', 'settings.json'), JSON.stringify(obj));
 }
-const usageFile = (home) => path.join(home, '.handmux', 'claude-usage.json');
+const usageFile = (home: string): string => path.join(home, '.handmux', 'claude-usage.json');
 
 describe('statusLineStatus', () => {
   it("'no-claude' when ~/.claude is absent", () => {
@@ -46,7 +57,7 @@ describe('installStatusLine', () => {
     const r = installStatusLine(home, { srcDir: SRC, usageFile: usageFile(home) });
     expect(r.status).toBe('installed');
     expect(fs.existsSync(path.join(home, '.claude', 'hooks', 'handmux-statusline.cjs'))).toBe(true);
-    const sl = settings(home).statusLine;
+    const sl = statusLine(home);
     expect(sl.type).toBe('command');
     expect(sl.command).toContain('handmux-statusline.cjs');
     expect(sl.command).toContain(usageFile(home));
@@ -57,7 +68,7 @@ describe('installStatusLine', () => {
     writeSettings(home, { statusLine: { type: 'command', command: 'bash ~/.claude/mystatus.sh' } });
     const r = installStatusLine(home, { srcDir: SRC, usageFile: usageFile(home) });
     expect(r.status).toBe('foreign');
-    expect(settings(home).statusLine.command).toBe('bash ~/.claude/mystatus.sh'); // untouched
+    expect(statusLine(home).command).toBe('bash ~/.claude/mystatus.sh'); // untouched
     // the script IS copied so the TEE compose one-liner is runnable — settings just isn't rewired
     expect(fs.existsSync(path.join(home, '.claude', 'hooks', 'handmux-statusline.cjs'))).toBe(true);
   });
@@ -92,21 +103,21 @@ describe('uninstallStatusLine', () => {
     const home = withClaude('sl-');
     writeSettings(home, { statusLine: { type: 'command', command: 'bash ~/.claude/mystatus.sh' } });
     uninstallStatusLine(home);
-    expect(settings(home).statusLine.command).toBe('bash ~/.claude/mystatus.sh');
+    expect(statusLine(home).command).toBe('bash ~/.claude/mystatus.sh');
   });
 });
 
 describe('refreshStatusLineScript (upgrade path — refresh the on-disk capturer without touching settings)', () => {
-  const scriptPath = (home) => path.join(home, '.claude', 'hooks', 'handmux-statusline.cjs');
+  const scriptPath = (home: string): string => path.join(home, '.claude', 'hooks', 'handmux-statusline.cjs');
 
   it('refreshes the script in place when ours (plain form)', () => {
     const home = withClaude('sl-');
     installStatusLine(home, { srcDir: SRC, usageFile: usageFile(home) });
     fs.writeFileSync(scriptPath(home), '// stale old capturer'); // simulate a pre-upgrade copy
-    const before = settings(home).statusLine.command;
+    const before = statusLine(home).command;
     expect(refreshStatusLineScript(home, { srcDir: SRC })).toBe(true);
     expect(fs.readFileSync(scriptPath(home), 'utf8')).toContain('handmux statusLine capturer'); // bundled again
-    expect(settings(home).statusLine.command).toBe(before); // settings untouched
+    expect(statusLine(home).command).toBe(before); // settings untouched
   });
 
   it('refreshes the script but KEEPS a composed (TEE) statusline command intact', () => {
@@ -119,7 +130,7 @@ describe('refreshStatusLineScript (upgrade path — refresh the on-disk capturer
     expect(statusLineStatus(home)).toBe('ours');
     expect(refreshStatusLineScript(home, { srcDir: SRC })).toBe(true);
     expect(fs.readFileSync(scriptPath(home), 'utf8')).toContain('handmux statusLine capturer');
-    expect(settings(home).statusLine.command).toBe(composed); // downstream renderer preserved
+    expect(statusLine(home).command).toBe(composed); // downstream renderer preserved
   });
 
   it('no-op (false) when not ours (foreign / absent)', () => {
