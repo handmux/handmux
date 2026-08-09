@@ -12,7 +12,7 @@ function cssRule(selector) {
 
 describe('chat tone overlay surfaces', () => {
   it('gives the warm-gold tone an opaque overlay surface', () => {
-    const tone = cssRule('.app[data-chat-tone="ink"]');
+    const tone = cssRule('.chat-tone-surface[data-chat-tone="ink"]');
     expect(tone).toMatch(/--ct-overlay:\s*#[0-9a-f]{6}\s*;/i);
     expect(tone.match(/--ct-overlay:\s*([^;]+)/)?.[1]).not.toMatch(/rgba|transparent|color-mix/i);
   });

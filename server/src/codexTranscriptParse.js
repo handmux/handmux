@@ -332,7 +332,8 @@ export function createCodexTranscriptParser() {
             continue;
           }
         }
-        messages.push({ i, role: item.role, type: 'text', text, ts });
+        const turnId = item.internal_chat_message_metadata_passthrough?.turn_id;
+        messages.push({ i, role: item.role, type: 'text', text, ts, ...(turnId ? { turnId } : {}) });
         continue;
       }
 

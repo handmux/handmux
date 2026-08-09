@@ -2777,6 +2777,15 @@ button.cmd-text { background: none; border: none; text-align: left; }
 .cc-queue-dialog-backdrop .settings-confirm-actions button { color: var(--ct-ink); }
 .cc-queue-dialog-backdrop .settings-confirm-actions button + button { border-color: var(--ct-line); }
 .cc-queue-dialog-backdrop .settings-confirm-actions button.danger { color: var(--danger, #d34b45); }
+.cc-stop-dialog { padding-bottom: 14px; }
+.cc-stop-dialog .cc-stop-dialog-actions { margin: 17px 0 0; gap: 8px; border: 0; }
+.cc-stop-dialog .cc-stop-dialog-actions button {
+  min-height: 44px; border: 0; border-radius: 10px; background: var(--ct-chip-2, #2b2216);
+}
+.cc-stop-dialog .cc-stop-dialog-actions button + button { border-left: 0; }
+.cc-stop-dialog .cc-stop-dialog-actions button.danger {
+  background: var(--ct-err-bg, rgba(255,120,90,.16)); color: var(--ct-err-ink, #ff9a80);
+}
 .cc-queue-edit-dialog { width: min(330px, 100%); max-height: 100%; display: flex; flex-direction: column; }
 .cc-queue-edit-dialog textarea {
   width: 100%; min-height: 84px; max-height: min(32dvh, 220px); margin-top: 12px; padding: 9px 10px;

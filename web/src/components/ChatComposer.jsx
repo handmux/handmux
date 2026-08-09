@@ -1137,11 +1137,11 @@ export default function ChatComposer({
         <div className="settings-confirm-backdrop cc-queue-dialog-backdrop chat-tone-surface"
           data-chat-tone={chatTone} style={{ bottom: `${Math.max(0, Number(keyboardInset) || 0)}px` }}
           onClick={() => setStopConfirm(false)}>
-          <div className="settings-confirm" role="alertdialog" aria-modal="true"
+          <div className="settings-confirm cc-stop-dialog" role="alertdialog" aria-modal="true"
             aria-label={t('chat.stopTitle')} onClick={(event) => event.stopPropagation()}>
             <h2>{t('chat.stopTitle')}</h2>
             <p>{t('chat.stopBody')}</p>
-            <div className="settings-confirm-actions">
+            <div className="settings-confirm-actions cc-stop-dialog-actions">
               <button type="button" autoFocus disabled={stopping}
                 onClick={() => setStopConfirm(false)}>{t('common.cancel')}</button>
               <button type="button" className="danger" disabled={stopping}

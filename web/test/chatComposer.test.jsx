@@ -615,6 +615,9 @@ describe('ChatComposer', () => {
     fireEvent.click(stop);
     let dialog = screen.getByRole('alertdialog', { name: '停止当前任务？' });
     expect(dialog.textContent).toContain('当前正在执行的回合会被中断。');
+    expect(dialog.classList.contains('cc-stop-dialog')).toBe(true);
+    expect(styles).toMatch(/\.cc-stop-dialog \.cc-stop-dialog-actions\s*\{[^}]*border:\s*0/);
+    expect(styles).toMatch(/\.cc-stop-dialog \.cc-stop-dialog-actions button \+ button\s*\{[^}]*border-left:\s*0/);
     expect(interruptCodexSession).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('button', { name: '取消' }));
     expect(interruptCodexSession).not.toHaveBeenCalled();

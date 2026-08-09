@@ -7,13 +7,20 @@ describe('Codex rollout transcript', () => {
   it('renders response_item once and ignores its duplicated event stream', () => {
     const parsed = parseCodexTranscript([
       JSON.stringify({ type: 'event_msg', payload: { type: 'user_message', message: '重复问题' } }),
-      row({ type: 'message', role: 'user', content: [{ type: 'input_text', text: '问题' }] }),
+      row({
+        type: 'message', role: 'user', content: [{ type: 'input_text', text: '问题' }],
+        internal_chat_message_metadata_passthrough: { turn_id: 'turn-1' },
+      }),
       JSON.stringify({ type: 'event_msg', payload: { type: 'agent_message', message: '重复回答' } }),
-      row({ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: '回答' }] }),
+      row({
+        type: 'message', role: 'assistant', content: [{ type: 'output_text', text: '回答' }],
+        internal_chat_message_metadata_passthrough: { turn_id: 'turn-1' },
+      }),
     ]);
     expect(parsed.map((message) => [message.role, message.text])).toEqual([
       ['user', '问题'], ['assistant', '回答'],
     ]);
+    expect(parsed.map((message) => message.turnId)).toEqual(['turn-1', 'turn-1']);
   });
 
   it('omits Codex-injected AGENTS instructions without hiding normal user text', () => {

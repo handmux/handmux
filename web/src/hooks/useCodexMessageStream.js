@@ -52,9 +52,12 @@ export function applyCodexStreamEvent(messages, event, afterK = -1) {
 }
 
 export function durableCoversLiveMessage(durableMessages, liveMessage) {
-  if (!liveMessage?.completed || !liveMessage.text) return false;
-  return durableMessages.some((message) => message?.role === 'assistant' && message.type === 'text'
-    && Number(message.k) > Number(liveMessage.afterK ?? -1) && message.text === liveMessage.text);
+  if (!liveMessage?.text) return false;
+  return durableMessages.some((message) => {
+    if (message?.role !== 'assistant' || message.type !== 'text' || message.text !== liveMessage.text) return false;
+    if (message.turnId && liveMessage.turnId) return message.turnId === liveMessage.turnId;
+    return Number(message.k) > Number(liveMessage.afterK ?? -1);
+  });
 }
 
 function abortableDelay(ms, signal) {
@@ -94,7 +97,11 @@ export function useCodexMessageStream({
     if (!scope) return;
     setSnapshot((current) => {
       if (current.scope !== scope) return current;
-      const messages = current.messages.filter((message) => !durableCoversLiveMessage(durableMessages, message));
+      // A matching durable partial hides the duplicate in ChatView, but keep its live accumulator until
+      // completion: a later delta still needs the full prefix. Finalized items can be discarded outright.
+      const messages = current.messages.filter((message) => (
+        !message.completed || !durableCoversLiveMessage(durableMessages, message)
+      ));
       return messages.length === current.messages.length ? current : { scope, messages };
     });
   }, [scope, durableMessages]);

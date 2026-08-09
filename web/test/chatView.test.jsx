@@ -172,6 +172,32 @@ describe('ChatView', () => {
     expect(container.textContent).not.toContain('发送你的第一条消息');
   });
 
+  it('does not append an exact live copy after its durable assistant message', async () => {
+    mockTranscript([
+      { k: 0, i: 0, role: 'user', type: 'text', text: '检查结果' },
+      { k: 1, i: 1, turnId: 'turn-1', role: 'assistant', type: 'text', text: '已经完成检查' },
+      { k: 2, i: 2, role: 'assistant', type: 'tool', tool: {
+        name: 'exec_command', input: { cmd: 'npm test' }, result: 'ok', isError: false,
+      } },
+    ]);
+    let emit;
+    api.streamCodexMessages.mockImplementation((_pane, { signal, onEvent }) => {
+      emit = onEvent;
+      return new Promise((resolve) => signal.addEventListener('abort', resolve, { once: true }));
+    });
+    render(<ChatView pane="%1" agent="codex" kind="working"
+      codexSession={{ managed: true, threadId: 'thread-1' }} />);
+    await screen.findByText('已经完成检查');
+    await waitFor(() => expect(emit).toBeTypeOf('function'));
+
+    act(() => emit({
+      type: 'snapshot', threadId: 'thread-1', turnId: 'turn-1', itemId: 'agent-1',
+      text: '已经完成检查', completed: false,
+    }));
+
+    expect(screen.getAllByText('已经完成检查')).toHaveLength(1);
+  });
+
   it('keeps an acknowledged queued message visible until the server queue replaces it', async () => {
     mockTranscript([]);
     const optimistic = [{

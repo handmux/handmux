@@ -633,12 +633,13 @@ export default function ChatView({
     onSettled: () => setStreamRefresh((value) => value + 1),
     onAuthFail,
   });
+  const visibleLiveMessages = useMemo(() => liveMessages.filter((message) => message.text
+    && !durableCoversLiveMessage(durableMessages, message)), [durableMessages, liveMessages]);
   const messages = useMemo(() => [
     ...durableMessages,
-    ...liveMessages.filter((message) => message.text
-      && !durableCoversLiveMessage(durableMessages, message)),
-  ], [durableMessages, liveMessages]);
-  const activeStreamMessage = [...liveMessages].reverse()
+    ...visibleLiveMessages,
+  ], [durableMessages, visibleLiveMessages]);
+  const activeStreamMessage = [...visibleLiveMessages].reverse()
     .find((message) => message.streaming && message.text) || null;
   const tsIdx = useMemo(() => timeStampedIndices(messages), [messages]);
   // Each later compaction supersedes the previous context boundary. Keep the rollout untouched as the
