@@ -2747,6 +2747,25 @@ button.cmd-text { background: none; border: none; text-align: left; }
 .codex-plan-chevron { flex: none; color: var(--ct-muted); font-size: 22px; line-height: 1; }
 .cc-plan-bar:active, .chat-plan-summary:active { background: var(--ct-chip-2); }
 
+/* A thread-scoped Goal stays visible directly below the live turn plan. No goal means no row at all. */
+.cc-goal-bar {
+  width: 100%; min-height: 48px; display: flex; align-items: center; gap: 10px;
+  padding: 6px 10px; border: 1px solid var(--ct-chip-line); border-radius: 13px;
+  background: var(--ct-chip); color: var(--ct-ink); text-align: left; touch-action: manipulation;
+}
+.codex-goal-icon { flex: none; display: inline-flex; color: var(--ct-accent); }
+.codex-goal-icon svg { width: 19px; height: 19px; display: block; }
+.cc-goal-copy { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.cc-goal-top { display: flex; align-items: center; gap: 7px; font-size: 12px; line-height: 16px; }
+.cc-goal-top strong { font-size: 13px; }
+.cc-goal-top .codex-goal-status { padding-block: 1px; }
+.cc-goal-objective {
+  overflow: hidden; color: var(--ct-muted); font-size: 11.5px; line-height: 16px;
+  text-overflow: ellipsis; white-space: nowrap;
+}
+.codex-goal-chevron { flex: none; color: var(--ct-muted); font-size: 22px; line-height: 1; }
+.cc-goal-bar:active { background: var(--ct-chip-2); }
+
 /* Completed-turn projection: one quiet summary after the final assistant reply, never one row per update. */
 .chat-plan-summary {
   align-self: flex-start; max-width: 92%; min-height: 38px; display: flex; align-items: center; gap: 7px;

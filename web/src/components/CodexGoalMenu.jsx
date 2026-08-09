@@ -2,8 +2,9 @@ import { useEffect, useRef, useState } from 'react';
 import { clearCodexGoal, getCodexGoal, UnauthorizedError, updateCodexGoal } from '../api.js';
 import { t } from '../i18n';
 import { useBackButton } from '../hooks/useBackButton.js';
+import { TargetIcon } from './icons.jsx';
 
-function statusLabel(status) {
+export function codexGoalStatusLabel(status) {
   if (status === 'active') return t('chat.goal.statusActive');
   if (status === 'paused') return t('chat.goal.statusPaused');
   if (status === 'blocked') return t('chat.goal.statusBlocked');
@@ -13,7 +14,29 @@ function statusLabel(status) {
   return status || '';
 }
 
-export default function CodexGoalMenu({ open, pane, editOnOpen, onClose, onAuthFail, onNotice }) {
+export function CodexGoalBar({ goal, onOpen }) {
+  if (!goal?.objective) return null;
+  const title = t('chat.goal.title');
+  const status = codexGoalStatusLabel(goal.status);
+  return (
+    <button type="button" className="cc-goal-bar"
+      aria-label={`${title} ${status} ${goal.objective}`} onClick={onOpen}>
+      <span className="codex-goal-icon" aria-hidden="true"><TargetIcon /></span>
+      <span className="cc-goal-copy">
+        <span className="cc-goal-top">
+          <strong>{title}</strong>
+          {status && <span className={`codex-goal-status ${goal.status || ''}`}>{status}</span>}
+        </span>
+        <span className="cc-goal-objective">{goal.objective}</span>
+      </span>
+      <span className="codex-goal-chevron" aria-hidden="true">›</span>
+    </button>
+  );
+}
+
+export default function CodexGoalMenu({
+  open, pane, editOnOpen, onClose, onAuthFail, onNotice, onGoalChange,
+}) {
   const [goal, setGoal] = useState(null);
   const [draft, setDraft] = useState('');
   const [editing, setEditing] = useState(false);
@@ -35,6 +58,7 @@ export default function CodexGoalMenu({ open, pane, editOnOpen, onClose, onAuthF
       if (requestSeq !== requestSeqRef.current) return;
       const next = result?.goal || null;
       setGoal(next);
+      onGoalChange?.(next);
       setDraft(next?.objective || '');
       setEditing(editOnOpen || !next);
     }).catch((err) => {
@@ -45,7 +69,7 @@ export default function CodexGoalMenu({ open, pane, editOnOpen, onClose, onAuthF
       if (requestSeq === requestSeqRef.current) setLoading(false);
     });
     return () => { requestSeqRef.current++; };
-    // onAuthFail is an event callback, not goal identity; changing its function identity must not refetch.
+    // Event callbacks are not goal identity; changing their function identity must not refetch.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, pane, editOnOpen]);
 
@@ -59,6 +83,7 @@ export default function CodexGoalMenu({ open, pane, editOnOpen, onClose, onAuthF
     try {
       const result = await updateCodexGoal(pane, { objective });
       setGoal(result?.goal || null);
+      onGoalChange?.(result?.goal || null);
       setDraft(result?.goal?.objective || objective);
       setEditing(false);
       onNotice(t(goal ? 'chat.goal.updated' : 'chat.goal.created'));
@@ -75,6 +100,7 @@ export default function CodexGoalMenu({ open, pane, editOnOpen, onClose, onAuthF
     try {
       const result = await updateCodexGoal(pane, { status });
       setGoal(result?.goal || null);
+      onGoalChange?.(result?.goal || null);
       onNotice(t(status === 'paused' ? 'chat.goal.paused' : 'chat.goal.resumed'));
     } catch (err) {
       if (err instanceof UnauthorizedError) onAuthFail?.();
@@ -89,6 +115,7 @@ export default function CodexGoalMenu({ open, pane, editOnOpen, onClose, onAuthF
     try {
       await clearCodexGoal(pane);
       setGoal(null);
+      onGoalChange?.(null);
       setDraft('');
       setEditing(true);
       setConfirmClear(false);
@@ -107,7 +134,7 @@ export default function CodexGoalMenu({ open, pane, editOnOpen, onClose, onAuthF
         <header className="codex-goal-head">
           <strong>{t('chat.goal.title')}</strong>
           {goal && !editing && <span className={`codex-goal-status ${goal.status || ''}`}>
-            {statusLabel(goal.status)}
+            {codexGoalStatusLabel(goal.status)}
           </span>}
         </header>
         <div className="codex-goal-body">

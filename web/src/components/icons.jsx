@@ -80,6 +80,17 @@ export function LocateIcon() {
   );
 }
 
+// A target — the persistent Codex goal shown beneath the active turn plan.
+export function TargetIcon() {
+  return (
+    <svg {...base}>
+      <circle cx="12" cy="12" r="9" />
+      <circle cx="12" cy="12" r="5" />
+      <circle cx="12" cy="12" r="1" />
+    </svg>
+  );
+}
+
 // ▾ minimize the sheet (slide it back down).
 export function ChevronDownIcon() {
   return (

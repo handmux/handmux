@@ -4,7 +4,7 @@ import {
   sendText, sendCodexMessage, compactCodexSession, clearCodexSession, interruptCodexSession,
   steerCodexQueuedMessage, removeCodexQueuedMessage, beginCodexQueuedEdit,
   renewCodexQueuedEdit, commitCodexQueuedEdit, cancelCodexQueuedEdit,
-  getCodexModels, updateCodexGoal, clearCodexGoal, updateCodexSettings, UnauthorizedError,
+  getCodexModels, getCodexGoal, updateCodexGoal, clearCodexGoal, updateCodexSettings, UnauthorizedError,
 } from '../api.js';
 import { shouldHandOffSlash } from '../slashCommands.js';
 import MicButton from './MicButton.jsx';
@@ -25,7 +25,7 @@ import { applyShortcutLayout, loadShortcutLayout } from '../shortcutLayout.js';
 import { t } from '../i18n';
 import { useBackButton } from '../hooks/useBackButton.js';
 import DiscreteSlider from './DiscreteSlider.jsx';
-import CodexGoalMenu from './CodexGoalMenu.jsx';
+import CodexGoalMenu, { CodexGoalBar } from './CodexGoalMenu.jsx';
 import { CodexPlanBar, CodexPlanSheet, codexPlanSteps } from './CodexPlan.jsx';
 
 // The 对话-lens composer — a single modern AI-agent input CARD (textarea on top, an action row beneath),
@@ -331,6 +331,7 @@ export default function ChatComposer({
   const submitInFlightRef = useRef(false);
   const codexSendSeqRef = useRef(0);
   const noticeTimerRef = useRef(null);
+  const goalRequestSeqRef = useRef(0);
   const queueEditorRef = useRef(null);
   const queueEditorInputRef = useRef(null);
   useLayoutEffect(() => {
@@ -379,6 +380,7 @@ export default function ChatComposer({
   const [permissionError, setPermissionError] = useState('');
   const [copiedStatusField, setCopiedStatusField] = useState(null);
   const [localSettings, setLocalSettings] = useState(null);
+  const [currentGoal, setCurrentGoal] = useState(null);
   const refreshShortcuts = () => {
     setFavs(loadFavs('agent'));
     setLayout(loadShortcutLayout('chat'));
@@ -386,12 +388,35 @@ export default function ChatComposer({
   useEffect(() => { if (!editOpen) refreshShortcuts(); }, [editOpen]);
   useBackButton(editOpen, () => setEditOpen(false));
   useBackButton(contextOpen, () => setContextOpen(false));
-  const activePlan = agent === 'codex' && codexSession?.managed && codexPlanSteps(codexSession.plan).length
+  const managedCodex = agent === 'codex' && codexSession?.managed;
+  const activePlan = managedCodex && codexPlanSteps(codexSession.plan).length
     ? codexSession.plan : null;
   const planWaiting = kind === 'permission' || !!codexSession?.approvals?.length
     || !!codexSession?.userInputs?.length;
   useEffect(() => { if (!activePlan) setPlanOpen(false); }, [activePlan]);
   useEffect(() => { setPlanOpen(false); }, [pane]);
+  const applyCurrentGoal = (goal) => {
+    goalRequestSeqRef.current += 1;
+    setCurrentGoal(goal || null);
+  };
+  useEffect(() => { setCurrentGoal(null); }, [managedCodex, pane]);
+  useEffect(() => {
+    const requestSeq = ++goalRequestSeqRef.current;
+    if (!managedCodex || !pane) {
+      setCurrentGoal(null);
+      return undefined;
+    }
+    void getCodexGoal(pane).then((result) => {
+      if (requestSeq === goalRequestSeqRef.current) setCurrentGoal(result?.goal || null);
+    }).catch((err) => {
+      if (requestSeq !== goalRequestSeqRef.current) return;
+      if (err instanceof UnauthorizedError) onAuthFail?.();
+    });
+    return () => { goalRequestSeqRef.current += 1; };
+    // Refresh on turn-state changes so a goal completed or blocked by Codex is reflected in the row.
+    // onAuthFail is an event callback, not goal identity; changing it must not refetch.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [managedCodex, pane, kind]);
   const allQuickFavs = applyShortcutLayout(
     mergeShortcuts(serverShortcuts.chat, favs, 'chat'), layout,
   );
@@ -399,7 +424,6 @@ export default function ChatComposer({
   // Claude replaces send with Stop while working. Managed Codex keeps both: new messages enter the
   // server-owned pending queue while Stop still interrupts the current turn.
   const busy = kind === 'working';
-  const managedCodex = agent === 'codex' && codexSession?.managed;
   const serverQueue = managedCodex ? (codexSession?.queue || []) : [];
   const pendingQueue = serverQueue.filter((item) => !handledQueueIds.includes(item.id));
   const turnExpectsQueue = managedCodex
@@ -600,16 +624,19 @@ export default function ChatComposer({
       }
       if (action === 'clear') {
         await clearCodexGoal(pane);
+        applyCurrentGoal(null);
         showNotice(t('chat.goal.cleared'));
         return null;
       }
       if (action === 'pause' || action === 'resume') {
-        await updateCodexGoal(pane, { status: action === 'pause' ? 'paused' : 'active' });
+        const result = await updateCodexGoal(pane, { status: action === 'pause' ? 'paused' : 'active' });
+        applyCurrentGoal(result?.goal || null);
         showNotice(t(action === 'pause' ? 'chat.goal.paused' : 'chat.goal.resumed'));
         return null;
       }
       if (argument.length > 4_000) throw new Error(t('chat.goal.tooLong'));
-      await updateCodexGoal(pane, { objective: argument });
+      const result = await updateCodexGoal(pane, { objective: argument });
+      applyCurrentGoal(result?.goal || null);
       showNotice(t('chat.goal.created'));
       return null;
     }
@@ -942,6 +969,7 @@ export default function ChatComposer({
         <CodexPlanBar plan={activePlan} waiting={planWaiting}
           onOpen={() => setPlanOpen(true)} />
       )}
+      {currentGoal && <CodexGoalBar goal={currentGoal} onOpen={() => openGoal(false)} />}
       {/* Quick-reply chips — tap to send. Reuses the dock's chip styling (.quick-cmd/.qc-*). */}
       <div className="cc-quick quick-scroll">
         {quickFavs.map((f, i) => (
@@ -1047,7 +1075,8 @@ export default function ChatComposer({
             <CodexConfigMenu open={configOpen} pane={pane} settings={managedSettings} busy={busy}
               onChange={setLocalSettings} onClose={() => setConfigOpen(false)} onAuthFail={onAuthFail} />
             <CodexGoalMenu open={goalOpen} pane={pane} editOnOpen={goalEditOnOpen}
-              onClose={() => setGoalOpen(false)} onAuthFail={onAuthFail} onNotice={showNotice} />
+              onClose={() => setGoalOpen(false)} onAuthFail={onAuthFail} onNotice={showNotice}
+              onGoalChange={applyCurrentGoal} />
           </div>
           <div className="cc-actions-right">
             {/* Context-window chip — model + used %, right-aligned just left of mic/send. pointer-events:none

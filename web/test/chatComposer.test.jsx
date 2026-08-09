@@ -54,7 +54,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   getPaneContext.mockImplementation(() => new Promise(() => {}));
   getCodexModels.mockResolvedValue({ models: [] });
-  getCodexGoal.mockResolvedValue({ goal: null });
+  getCodexGoal.mockImplementation(() => new Promise(() => {}));
   updateCodexGoal.mockImplementation(async (_pane, updates) => ({ goal: {
     objective: updates.objective || 'Current goal', status: updates.status || 'active',
   } }));
@@ -355,6 +355,7 @@ describe('ChatComposer', () => {
       objective: 'Finish the release',
     }));
     expect(await screen.findByText('任务目标已设置')).toBeTruthy();
+    expect(screen.getByRole('button', { name: /任务目标.*Finish the release/ })).toBeTruthy();
 
     typeInto(input, '/goal pause');
     fireEvent.click(screen.getByRole('button', { name: '发送' }));
@@ -371,14 +372,19 @@ describe('ChatComposer', () => {
     expect(sendText).not.toHaveBeenCalled();
   });
 
-  it('views and edits the authoritative native goal in an in-chat panel', async () => {
-    getCodexGoal.mockResolvedValueOnce({ goal: {
+  it('shows an existing goal below the live plan, then views and edits it in the panel', async () => {
+    getCodexGoal.mockResolvedValue({ goal: {
       objective: 'Keep tests green', status: 'active', tokensUsed: 120, timeUsedSeconds: 3,
     } });
-    render(<ChatComposer pane="%1" agent="codex" kind="idle" codexSession={{ managed: true }} />);
-    const input = screen.getByPlaceholderText('和 Agent 对话…');
-    typeInto(input, '/goal');
-    fireEvent.click(screen.getByRole('button', { name: '发送' }));
+    const { container } = render(<ChatComposer pane="%1" agent="codex" kind="working" codexSession={{
+      managed: true,
+      plan: { steps: [{ step: '实现常驻目标', status: 'inProgress' }] },
+    }} />);
+    const goalBar = await screen.findByRole('button', { name: /任务目标.*Keep tests green/ });
+    expect(goalBar.textContent).toContain('进行中');
+    expect(container.querySelector('.cc-plan-bar').nextElementSibling).toBe(goalBar);
+    expect(goalBar.nextElementSibling).toBe(container.querySelector('.cc-quick'));
+    fireEvent.click(goalBar);
 
     const panel = await screen.findByRole('dialog', { name: '任务目标' });
     await waitFor(() => expect(panel.textContent).toContain('Keep tests green'));
@@ -391,11 +397,34 @@ describe('ChatComposer', () => {
       objective: 'Ship after review',
     }));
     await waitFor(() => expect(panel.textContent).toContain('Ship after review'));
+    expect(screen.getByRole('button', { name: /任务目标.*Ship after review/ })).toBeTruthy();
 
     fireEvent.click(screen.getByRole('button', { name: '清除' }));
     expect(screen.getByRole('alertdialog', { name: '清除任务目标？' })).toBeTruthy();
     fireEvent.click(screen.getByRole('alertdialog').querySelector('button.danger'));
     await waitFor(() => expect(clearCodexGoal).toHaveBeenCalledWith('%1'));
+    await waitFor(() => expect(container.querySelector('.cc-goal-bar')).toBeNull());
+  });
+
+  it('does not reserve a Goal row when the current thread has no goal', async () => {
+    getCodexGoal.mockResolvedValue({ goal: null });
+    const { container } = render(<ChatComposer pane="%1" agent="codex" kind="idle"
+      codexSession={{ managed: true }} />);
+    await waitFor(() => expect(getCodexGoal).toHaveBeenCalledWith('%1'));
+    expect(container.querySelector('.cc-goal-bar')).toBeNull();
+    expect(container.querySelector('.chat-composer').firstElementChild)
+      .toBe(container.querySelector('.cc-quick'));
+  });
+
+  it('removes the previous thread Goal row immediately when switching panes', async () => {
+    getCodexGoal.mockResolvedValueOnce({
+      goal: { objective: 'Only pane one', status: 'active' },
+    }).mockImplementation(() => new Promise(() => {}));
+    const props = { agent: 'codex', kind: 'idle', codexSession: { managed: true } };
+    const { container, rerender } = render(<ChatComposer pane="%1" {...props} />);
+    await screen.findByRole('button', { name: /任务目标.*Only pane one/ });
+    rerender(<ChatComposer pane="%2" {...props} />);
+    await waitFor(() => expect(container.querySelector('.cc-goal-bar')).toBeNull());
   });
 
   it('keeps App Server model and effort in the footer and edits them in one sheet', async () => {

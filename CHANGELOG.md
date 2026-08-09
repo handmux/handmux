@@ -12,6 +12,7 @@ All notable changes to handmux. Format follows [Keep a Changelog](https://keepac
 ### Changed
 
 - 手机命令模式键盘将 Alt 移到原波浪号位置，并在原 Alt 位置提供直接空格键。
+- Codex 对话在已设置 Goal 时，会在实时任务列表下方常驻显示目标内容与状态；未设置时不占用输入区空间。
 
 ### Fixed
 
