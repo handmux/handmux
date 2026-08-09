@@ -10,46 +10,85 @@ const PANE_RE = /^%\d+$/;
 const RUNNER_FILE = fileURLToPath(import.meta.url);
 const HANDMUX_BIN = fileURLToPath(new URL('../../bin/handmux.js', import.meta.url));
 
-function errorText(error) {
+export interface AgentRequest {
+  cmd: 'claude' | 'codex';
+  args: [string, string];
+}
+export type AgentReadiness = { status: 'ready' } | { status: 'failed'; error: string };
+export interface AgentCompletion {
+  code: number | null;
+  signal: NodeJS.Signals | null;
+  error?: string;
+}
+export interface LaunchedAgent {
+  child: ReturnType<typeof spawnChild> | null;
+  ready: Promise<AgentReadiness>;
+  completion: Promise<AgentCompletion>;
+  terminate(): Promise<AgentCompletion>;
+}
+interface ErrorCode { code?: unknown }
+type TimerHandle = unknown;
+type SetTimer = (callback: () => void, delay: number) => TimerHandle;
+type ClearTimer = (handle: TimerHandle) => void;
+
+function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-export function validateAgentRequest(request) {
-  const valid = request?.cmd === 'claude'
-    ? Array.isArray(request.args) && request.args.length === 2 && request.args[0] === '--resume' && UUID_RE.test(request.args[1])
-    : request?.cmd === 'codex'
-      && Array.isArray(request.args) && request.args.length === 2 && request.args[0] === 'resume' && UUID_RE.test(request.args[1]);
-  if (!valid) throw new Error('unsafe agent request');
-  return { cmd: request.cmd, args: [...request.args] };
+const recordOf = (value: unknown): Record<string, unknown> | null => (
+  value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown> : null
+);
+
+function errorCode(error: unknown): unknown {
+  return error && typeof error === 'object' ? (error as ErrorCode).code : undefined;
 }
 
-function earlyFailure(request, error, code) {
-  if (error?.code === 'ENOENT') return `${request.cmd} binary not found`;
+export function validateAgentRequest(input: unknown): AgentRequest {
+  const request = recordOf(input);
+  const args = request?.args;
+  const cmd = request?.cmd;
+  const valid = cmd === 'claude'
+    ? Array.isArray(args) && args.length === 2 && args[0] === '--resume' && typeof args[1] === 'string' && UUID_RE.test(args[1])
+    : cmd === 'codex'
+      && Array.isArray(args) && args.length === 2 && args[0] === 'resume' && typeof args[1] === 'string' && UUID_RE.test(args[1]);
+  if (!valid) throw new Error('unsafe agent request');
+  const validArgs = args as [string, string];
+  return { cmd: cmd as AgentRequest['cmd'], args: [validArgs[0], validArgs[1]] };
+}
+
+function earlyFailure(request: AgentRequest, error: unknown, code?: number | null): string {
+  if (errorCode(error) === 'ENOENT') return `${request.cmd} binary not found`;
   if (error) return `${request.cmd} failed to start: ${errorText(error)}`;
   return `${request.cmd} exited ${code ?? 'unknown'} before ready`;
 }
 
-export function launchAgentRequest(requestInput, {
+export function launchAgentRequest(requestInput: unknown, {
   spawn = spawnChild,
   readinessMs = 500,
-  setTimeout = globalThis.setTimeout,
-  clearTimeout = globalThis.clearTimeout,
-} = {}) {
+  setTimeout = globalThis.setTimeout as SetTimer,
+  clearTimeout = globalThis.clearTimeout as ClearTimer,
+}: {
+  spawn?: typeof spawnChild;
+  readinessMs?: number;
+  setTimeout?: SetTimer;
+  clearTimeout?: ClearTimer;
+} = {}): LaunchedAgent {
   const request = validateAgentRequest(requestInput);
-  let child;
+  let child: ReturnType<typeof spawnChild>;
   let readyDone = false;
-  let timer = null;
+  let timer: TimerHandle | null = null;
   let completionDone = false;
-  let settleReady;
-  let settleCompletion;
-  const ready = new Promise((resolve) => { settleReady = resolve; });
-  const completion = new Promise((resolve) => { settleCompletion = resolve; });
-  const finishCompletion = (value) => {
+  let settleReady!: (value: AgentReadiness) => void;
+  let settleCompletion!: (value: AgentCompletion) => void;
+  const ready = new Promise<AgentReadiness>((resolve) => { settleReady = resolve; });
+  const completion = new Promise<AgentCompletion>((resolve) => { settleCompletion = resolve; });
+  const finishCompletion = (value: AgentCompletion): void => {
     if (completionDone) return;
     completionDone = true;
     settleCompletion(value);
   };
-  const failReady = (error, code) => {
+  const failReady = (error: unknown, code?: number | null): void => {
     if (readyDone) return;
     readyDone = true;
     if (timer) clearTimeout(timer);
@@ -90,7 +129,10 @@ export function launchAgentRequest(requestInput, {
   };
 }
 
-export async function publishAgentReadiness(launched, writeStatus) {
+export async function publishAgentReadiness(
+  launched: LaunchedAgent,
+  writeStatus: (status: AgentReadiness) => unknown | Promise<unknown>,
+): Promise<AgentReadiness> {
   const ready = await launched.ready;
   try {
     await writeStatus(ready);
@@ -103,15 +145,15 @@ export async function publishAgentReadiness(launched, writeStatus) {
   return ready;
 }
 
-function shellQuote(value) {
+function shellQuote(value: unknown): string {
   return `'${String(value).replaceAll("'", `'"'"'`)}'`;
 }
 
-const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
-async function unlinkIfPresent(fs, file) {
+async function unlinkIfPresent(fs: typeof fsp, file: string): Promise<void> {
   try { await fs.unlink(file); } catch (error) {
-    if (error?.code !== 'ENOENT') throw error;
+    if (errorCode(error) !== 'ENOENT') throw error;
   }
 }
 
@@ -122,54 +164,62 @@ export function createAgentRunner({
   wait = delay,
   timeoutMs = 3_000,
   pollMs = 25,
+}: {
+  home?: string;
+  fs?: typeof fsp;
+  now?: () => number;
+  wait?: (ms: number) => Promise<unknown>;
+  timeoutMs?: number;
+  pollMs?: number;
 } = {}) {
   const dir = path.join(home, '.handmux', 'workspaces', 'agent-runs');
   const command = `${shellQuote(process.execPath)} ${shellQuote(RUNNER_FILE)}`;
-  const files = (paneId) => {
+  const files = (paneId: string): { request: string; status: string } => {
     if (!PANE_RE.test(paneId)) throw new Error('invalid agent runner pane id');
     const base = paneId.slice(1);
     return { request: path.join(dir, `${base}.request.json`), status: path.join(dir, `${base}.status.json`) };
   };
   return {
     command,
-    async prepare({ paneId, cmd, args }) {
+    async prepare({ paneId, cmd, args }: { paneId: string; cmd: unknown; args: unknown }) {
       const request = validateAgentRequest({ cmd, args });
       const target = files(paneId);
       await ensurePrivateDir(dir, { fs });
       await unlinkIfPresent(fs, target.status);
       await writeJsonAtomic(target.request, { paneId, ...request }, { fs });
     },
-    async waitReady(paneId) {
+    async waitReady(paneId: string): Promise<AgentReadiness> {
       const target = files(paneId);
       const started = now();
       while (now() - started <= timeoutMs) {
         try {
-          const status = JSON.parse(await fs.readFile(target.status, 'utf8'));
-          if (status?.status === 'ready' || status?.status === 'failed') return status;
+          const status = recordOf(JSON.parse(await fs.readFile(target.status, 'utf8')) as unknown);
+          if (status?.status === 'ready') return { status: 'ready' };
+          if (status?.status === 'failed' && typeof status.error === 'string') return { status: 'failed', error: status.error };
         } catch (error) {
-          if (error?.code !== 'ENOENT' && !(error instanceof SyntaxError)) throw error;
+          if (errorCode(error) !== 'ENOENT' && !(error instanceof SyntaxError)) throw error;
         }
         await wait(pollMs);
       }
       return { status: 'failed', error: 'agent readiness timed out' };
     },
-    async cancel(paneId) {
+    async cancel(paneId: string): Promise<void> {
       const target = files(paneId);
       await Promise.all([target.request, target.status].map((file) => unlinkIfPresent(fs, file)));
     },
   };
 }
 
-async function runPreparedAgent() {
+async function runPreparedAgent(): Promise<void> {
   const paneId = process.env.TMUX_PANE;
   const target = (() => {
-    if (!PANE_RE.test(paneId || '')) throw new Error('agent runner requires TMUX_PANE');
+    if (typeof paneId !== 'string' || !PANE_RE.test(paneId)) throw new Error('agent runner requires TMUX_PANE');
     const dir = path.join(os.homedir(), '.handmux', 'workspaces', 'agent-runs');
     const base = paneId.slice(1);
     return { request: path.join(dir, `${base}.request.json`), status: path.join(dir, `${base}.status.json`) };
   })();
-  const input = JSON.parse(await fsp.readFile(target.request, 'utf8'));
-  if (input.paneId !== paneId) throw new Error('agent runner pane mismatch');
+  const input = JSON.parse(await fsp.readFile(target.request, 'utf8')) as unknown;
+  if (recordOf(input)?.paneId !== paneId) throw new Error('agent runner pane mismatch');
   const launched = launchAgentRequest(input);
   try {
     const ready = await publishAgentReadiness(launched, (status) => writeJsonAtomic(target.status, status));
