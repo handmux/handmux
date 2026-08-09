@@ -10,6 +10,32 @@
   --scroll-thumb: rgba(151,162,178,.34);
   --scroll-thumb-hover: rgba(174,190,211,.58);
   --scroll-thumb-active: rgba(80,145,230,.82);
+  /* Global Overlay order. Component-internal stacking (sticky headers, terminal cursors, etc.) stays
+     local; anything that can compete across app surfaces must use one of these semantic levels. */
+  --z-overlay-drawer-backdrop: 9;
+  --z-overlay-drawer: 10;
+  --z-overlay-base-backdrop: 19;
+  --z-overlay-base: 20;
+  --z-overlay-sheet-backdrop: 21;
+  --z-overlay-sheet: 22;
+  --z-overlay-nested-backdrop: 23;
+  --z-overlay-nested: 24;
+  --z-overlay-nested-content: 25;
+  --z-overlay-dialog-backdrop: 30;
+  --z-overlay-dialog: 31;
+  --z-overlay-tool-backdrop: 41;
+  --z-overlay-tool: 42;
+  --z-overlay-popover-backdrop: 43;
+  --z-overlay-popover: 44;
+  --z-overlay-detail-backdrop: 45;
+  --z-overlay-detail: 46;
+  --z-overlay-workspace: 50;
+  --z-overlay-confirm: 52;
+  --z-overlay-link-backdrop: 58;
+  --z-overlay-link: 59;
+  --z-overlay-toast: 60;
+  --z-overlay-browser-confirm: 90;
+  --z-overlay-blocking: 200;
 }
 /* Bundled terminal font: JetBrainsMono Nerd Font carries the Powerline/Nerd icons and the
    Dingbat sparkles Claude Code animates with — glyphs the system monospace fonts are missing.
@@ -55,9 +81,9 @@ a.settings-linkbtn { display: inline-flex; align-items: center; justify-content:
 .topbar-icon:active { color: var(--blue); }
 .topbar-icon svg { width: 21px; height: 21px; display: block; }
 /* Shared compact-dialog shell used by bind/rename/action sheets and other focused overlays. */
-.settings-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,.5); z-index: 19; }
+.settings-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,.5); z-index: var(--z-overlay-base-backdrop); }
 .settings-card {
-  position: fixed; z-index: 20; left: 50%; top: 50%; transform: translate(-50%, -50%);
+  position: fixed; z-index: var(--z-overlay-base); left: 50%; top: 50%; transform: translate(-50%, -50%);
   width: calc(100% - 48px); max-width: 360px;
   /* Cap to the viewport (dvh tracks the mobile URL bar) and let the body scroll, so a tall list of
      sections is fully reachable instead of clipping off the top/bottom of the centered card. */
@@ -96,7 +122,7 @@ a.settings-linkbtn { display: inline-flex; align-items: center; justify-content:
    available for small, focused dialogs (bind/rename/action sheets), but Settings itself no longer
    reads as a modal floating over the terminal. */
 .settings-page {
-  position: fixed; inset: 0; z-index: 20;
+  position: fixed; inset: 0; z-index: var(--z-overlay-base);
   display: flex; flex-direction: column; min-width: 0;
   background: #1a1b1e; color: #f2f2f7;
 }
@@ -204,7 +230,7 @@ button.settings-page-row:disabled, .settings-page-row.disabled { color: rgba(235
   margin: 0 0 12px; color: var(--muted, #8a8a8e); font-size: 13px; line-height: 1.5;
 }
 .settings-confirm-backdrop {
-  position: fixed; inset: 0; z-index: 30; display: grid; place-items: center; padding: 20px;
+  position: fixed; inset: 0; z-index: var(--z-overlay-dialog-backdrop); display: grid; place-items: center; padding: 20px;
   background: rgba(0,0,0,.58); -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
 }
 .settings-confirm {
@@ -237,7 +263,7 @@ button.settings-page-row:disabled, .settings-page-row.disabled { color: rgba(235
 
 /* "Add to Home Screen" coach — a light, dismissible top strip (not a modal); flick the ✕ to close. */
 .a2hs-banner {
-  position: fixed; z-index: 60;
+  position: fixed; z-index: var(--z-overlay-toast);
   left: 8px; right: 8px;
   top: calc(env(safe-area-inset-top, 0px) + 8px);
   display: flex; align-items: center; gap: 10px;
@@ -331,7 +357,7 @@ button.settings-page-row:disabled, .settings-page-row.disabled { color: rgba(235
 .dd-value { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dd-caret { flex: none; color: #8a8f98; font-size: 12px; transition: transform .15s ease; }
 .dd-caret.open { transform: rotate(180deg); }
-.dd-menu { position: absolute; top: calc(100% + 6px); left: 0; right: 0; z-index: 30;
+.dd-menu { position: absolute; top: calc(100% + 6px); left: 0; right: 0; z-index: var(--z-overlay-dialog-backdrop);
   background: #26282c; border: 1px solid #3a3c42; border-radius: 8px; padding: 4px;
   box-shadow: 0 10px 30px rgba(0,0,0,.55); transform-origin: top; animation: dd-pop .12s ease; }
 @keyframes dd-pop { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
@@ -398,7 +424,7 @@ button.settings-page-row:disabled, .settings-page-row.disabled { color: rgba(235
    Each .pane-map-cell is absolutely placed by percentage (paneRects); its
    inner .pmc-surf insets to leave a gutter between tiles (real-window-thumbnail look), and cramped
    cells get .is-flat/.is-narrow/.is-tiny to degrade content without changing proportions. */
-.pane-map { position: fixed; overflow: hidden; z-index: 30; /* NOT .wt-menu: that caps max-width:240 and
+.pane-map { position: fixed; overflow: hidden; z-index: var(--z-overlay-dialog-backdrop); /* NOT .wt-menu: that caps max-width:240 and
   clipped our (wider) map's right edge. width/height set inline; the gutter is baked into cell coords. */
   background: rgba(24, 26, 30, 0.78);
   -webkit-backdrop-filter: blur(20px) saturate(1.4); backdrop-filter: blur(20px) saturate(1.4);
@@ -675,13 +701,13 @@ button.settings-page-row:disabled, .settings-page-row.disabled { color: rgba(235
 .input-text:focus { outline: none; }
 .input-text::placeholder { color: #6b7280; }
 .token-prompt button { padding: 8px 14px; border: none; border-radius: 8px; background: var(--blue); color: #fff; }
-.drawer { position: fixed; top: 0; left: 0; width: 78%; max-width: 320px; height: 100%; background: #232427; transform: translateX(-100%); transition: transform .2s; z-index: 10; padding: 12px 12px calc(12px + env(safe-area-inset-bottom, 0px)); display: flex; flex-direction: column; overflow: hidden; }
+.drawer { position: fixed; top: 0; left: 0; width: 78%; max-width: 320px; height: 100%; background: #232427; transform: translateX(-100%); transition: transform .2s; z-index: var(--z-overlay-drawer); padding: 12px 12px calc(12px + env(safe-area-inset-bottom, 0px)); display: flex; flex-direction: column; overflow: hidden; }
 .drawer.open { transform: translateX(0); }
 .drawer-list { flex: 1; min-height: 0; overflow-y: auto; }
 /* Logout pinned at the drawer's bottom — a low-traffic action kept out of the way. */
 .drawer-logout { flex: none; margin-top: 8px; padding: 10px; border: none; border-radius: 8px; background: #2e2a2c; color: var(--red); font-size: 14px; touch-action: manipulation; }
 .drawer-logout:active { background: #4a2f33; }
-.drawer-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,.4); z-index: 9; }
+.drawer-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,.4); z-index: var(--z-overlay-drawer-backdrop); }
 .drawer-title { font-size: 12px; color: #888; letter-spacing: 1px; margin-bottom: 8px; }
 .drawer-row { display: flex; align-items: center; gap: 6px; border-radius: 8px; }
 .drawer-name { flex: 1; min-width: 0; padding: 8px 4px; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -709,9 +735,9 @@ button.settings-page-row:disabled, .settings-page-row.disabled { color: rgba(235
 .workspace-recovery-card .workspace-recovery-action { color: var(--blue); font-size: 13px; font-weight: 600; margin-top: 3px; }
 .workspace-recovery-card .workspace-recovery-partial { color: #d7a29e; }
 
-.workspace-restore-backdrop { z-index: 30; background: rgba(0,0,0,.62); }
+.workspace-restore-backdrop { z-index: var(--z-overlay-dialog-backdrop); background: rgba(0,0,0,.62); }
 .workspace-restore-dialog {
-  z-index: 31; max-width: 380px;
+  z-index: var(--z-overlay-dialog); max-width: 380px;
   top: calc(env(safe-area-inset-top, 0px) + 12px);
   bottom: calc(env(safe-area-inset-bottom, 0px) + 12px);
   margin-block: auto; height: max-content; transform: translateX(-50%);
@@ -965,7 +991,7 @@ div.workspace-restore-errors { padding-left: 10px; }
 
 /* App-wide upload lock — a full-screen backdrop above every sheet (file/git are z-index 50) that eats
    all taps during a transfer; only the Cancel button inside the card is interactive. */
-.upload-overlay { position: fixed; inset: 0; z-index: 200; display: grid; place-items: center;
+.upload-overlay { position: fixed; inset: 0; z-index: var(--z-overlay-blocking); display: grid; place-items: center;
   background: rgba(0,0,0,.62); backdrop-filter: blur(2px); padding: 24px;
   padding-bottom: calc(24px + env(safe-area-inset-bottom)); }
 .upload-card { width: min(340px, 86vw); background: #141b24; border: 1px solid #24303d; border-radius: 14px;
@@ -1017,9 +1043,9 @@ div.workspace-restore-errors { padding-left: 10px; }
 /* Command panel: a bottom sheet over a dim backdrop. position:fixed bottom:0 — when the keyboard is
    open the whole .app is lifted by its inset transform, which carries this fixed sheet above the
    keyboard too (no separate inset handling needed). */
-.cmd-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,.5); z-index: 21; }
+.cmd-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,.5); z-index: var(--z-overlay-sheet-backdrop); }
 .cmd-panel {
-  position: fixed; left: 0; right: 0; bottom: 0; z-index: 22; max-height: 72vh;
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: var(--z-overlay-sheet); max-height: 72vh;
   display: flex; flex-direction: column;
   background: #232427; border-radius: 16px 16px 0 0; box-shadow: 0 -8px 30px rgba(0,0,0,.5);
 }
@@ -1124,8 +1150,8 @@ button.cmd-text { background: none; border: none; text-align: left; }
    dark form — a grouped card (#1c1c1e) of filled cells (#2c2c2e), roomy labelled fields stacked vertically.
    The inline transform is set in JS: it lives inside the .app container that slides up by the keyboard inset,
    so it adds inset/2 back to re-centre in the visible area above the keyboard. */
-.cmd-add-backdrop { z-index: 23; background: rgba(0,0,0,.6); }
-.cmd-addcard { position: fixed; left: 50%; top: 50%; z-index: 24;
+.cmd-add-backdrop { z-index: var(--z-overlay-nested-backdrop); background: rgba(0,0,0,.6); }
+.cmd-addcard { position: fixed; left: 50%; top: 50%; z-index: var(--z-overlay-nested);
   width: min(360px, calc(100vw - 32px)); display: flex; flex-direction: column; gap: 16px;
   background: #1c1c1e; border-radius: 20px; padding: 18px 18px 20px;
   box-shadow: 0 24px 60px rgba(0,0,0,.66); -webkit-font-smoothing: antialiased; }
@@ -1187,8 +1213,8 @@ button.cmd-text { background: none; border: none; text-align: left; }
 .cmd-dd-btn svg { width: 17px; height: 17px; color: rgba(235,235,245,.5); transition: transform .18s; }
 .cmd-dd-btn.open svg { transform: rotate(180deg); }
 .cmd-dd-ph { color: rgba(235,235,245,.3); }
-.cmd-dd-scrim { position: fixed; inset: 0; z-index: 24; }
-.cmd-dd-menu { position: absolute; left: 0; right: 0; top: calc(100% + 6px); z-index: 25;
+.cmd-dd-scrim { position: fixed; inset: 0; z-index: var(--z-overlay-nested); }
+.cmd-dd-menu { position: absolute; left: 0; right: 0; top: calc(100% + 6px); z-index: var(--z-overlay-nested-content);
   background: #2c2c2e; border-radius: 12px; padding: 5px; max-height: 216px; overflow-y: auto;
   -webkit-overflow-scrolling: touch; box-shadow: 0 14px 36px rgba(0,0,0,.6), 0 0 0 .5px rgba(0,0,0,.4); }
 .cmd-dd-opt { display: flex; align-items: center; justify-content: space-between; width: 100%; border: none;
@@ -1202,7 +1228,7 @@ button.cmd-text { background: none; border: none; text-align: left; }
    .cmd-title / .cmd-close / .cmd-empty). One compose row (add+edit, with the push-to-talk mic) over a
    draggable list. Rides above the keyboard via the .app inset transform, like .cmd-panel. */
 .idea-panel {
-  position: fixed; left: 0; right: 0; bottom: 0; z-index: 22; min-height: 50vh; max-height: 80vh;
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: var(--z-overlay-sheet); min-height: 50vh; max-height: 80vh;
   display: flex; flex-direction: column;
   background: #232427; border-radius: 16px 16px 0 0; box-shadow: 0 -8px 30px rgba(0,0,0,.5);
 }
@@ -1237,7 +1263,7 @@ button.cmd-text { background: none; border: none; text-align: left; }
 .idea-del { flex: none; background: none; border: none; color: #888; font-size: 14px; padding: 6px 8px; touch-action: manipulation; display: inline-flex; align-items: center; justify-content: center; min-width: 40px; min-height: 44px; }
 
 /* Changelog is a full-screen child of Settings, using the same navigation bar and centred content. */
-.changelog-page { z-index: 22; }
+.changelog-page { z-index: var(--z-overlay-sheet); }
 .changelog-page-content { padding-top: 14px; }
 .changelog-list { padding: 4px 16px; }
 .rel { padding: 12px 0; border-bottom: 1px solid #2c2e33; }
@@ -1288,7 +1314,7 @@ button.cmd-text { background: none; border: none; text-align: left; }
 .file-sheet {
   position: fixed;
   inset: 0;
-  z-index: 50;
+  z-index: var(--z-overlay-workspace);
   display: flex;
   flex-direction: column;
   background: #0b0f14;
@@ -1562,7 +1588,7 @@ button.cmd-text { background: none; border: none; text-align: left; }
 .browser-history-list .browser-history-mode-option.proxy { color: #f2a450; }
 .browser-history-list .browser-history-mode-option:disabled { color: #666f79; }
 .browser-history-list .browser-history-mode-option.danger { color: #ff6961; }
-.browser-profile-confirm-backdrop { position: fixed; inset: 0; z-index: 90; display: grid; place-items: center; padding: 20px; background: rgba(0,0,0,.58); backdrop-filter: blur(8px); }
+.browser-profile-confirm-backdrop { position: fixed; inset: 0; z-index: var(--z-overlay-browser-confirm); display: grid; place-items: center; padding: 20px; background: rgba(0,0,0,.58); backdrop-filter: blur(8px); }
 .browser-profile-confirm { width: min(320px, 100%); padding: 18px; border-radius: 16px; background: #25262a; box-shadow: 0 16px 50px rgba(0,0,0,.55); }
 .browser-profile-confirm h2 { margin: 0 0 8px; color: #f2f2f7; font-size: 19px; }
 .browser-profile-confirm p { margin: 0 0 16px; color: #f2f2f7; font-size: 14px; line-height: 1.45; }
@@ -1852,8 +1878,8 @@ button.cmd-text { background: none; border: none; text-align: left; }
 /* DirPicker can open ON TOP of the settings modal (预览→选择目录启动). Lift its backdrop above the
    settings card (z20) so it actually dims it, and the picker card above that — otherwise the two
    modals stack with no separation and read as one cluttered overlay. */
-.dirpick-backdrop { z-index: 30; background: rgba(0,0,0,.62); }
-.dirpick-card { width: min(92vw, 520px); max-width: none; z-index: 31;
+.dirpick-backdrop { z-index: var(--z-overlay-dialog-backdrop); background: rgba(0,0,0,.62); }
+.dirpick-card { width: min(92vw, 520px); max-width: none; z-index: var(--z-overlay-dialog);
   max-height: min(80vh, calc(100vh - var(--kb-inset, 0px) - 32px)); display: flex; flex-direction: column; }
 .dirpick-card .browse-view { flex: 1; min-height: 0; }
 .dirpick-hint { font-size: 12px; color: #9a9a9a; line-height: 1.5; margin-bottom: 10px; word-break: break-all; }
@@ -1926,8 +1952,8 @@ button.cmd-text { background: none; border: none; text-align: left; }
 
 /* Clickable doc-path underline in the terminal (xterm decoration element) */
 /* Tapped-path confirm popover (anti-误触): a small card near the tap, centered on x, just below it. */
-.doclink-backdrop { position: fixed; inset: 0; z-index: 58; }
-.doclink-pop { position: fixed; z-index: 59; width: max-content; max-width: calc(100vw - 16px);
+.doclink-backdrop { position: fixed; inset: 0; z-index: var(--z-overlay-link-backdrop); }
+.doclink-pop { position: fixed; z-index: var(--z-overlay-link); width: max-content; max-width: calc(100vw - 16px);
   background: #1b2330; border: 1px solid #2c3a4e; border-radius: 12px; padding: 12px 14px;
   box-shadow: 0 12px 32px rgba(0,0,0,.55); color: #e6edf3; }
 .doclink-name { display: flex; align-items: center; gap: 7px; font-weight: 600; font-size: 14px; }
@@ -1953,7 +1979,7 @@ button.cmd-text { background: none; border: none; text-align: left; }
 
 .doc-toast {
   position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%);
-  z-index: 60; max-width: 86vw;
+  z-index: var(--z-overlay-toast); max-width: 86vw;
   background: #2a1518; color: #ffd7d7; border: 1px solid #5a2a2a;
   padding: 10px 14px; border-radius: 10px; font-size: 13px;
   box-shadow: 0 6px 20px rgba(0,0,0,.4);
@@ -1962,7 +1988,7 @@ button.cmd-text { background: none; border: none; text-align: left; }
    an expected prompt, not a failure. Sits above the dock, clear of the safe-area inset. */
 .exit-toast {
   position: fixed; left: 50%; bottom: calc(90px + env(safe-area-inset-bottom)); transform: translateX(-50%);
-  z-index: 60; max-width: 86vw; white-space: nowrap;
+  z-index: var(--z-overlay-toast); max-width: 86vw; white-space: nowrap;
   background: rgba(30,32,36,.94); color: #e6e9ee; border: 1px solid #3a3d44;
   padding: 9px 16px; border-radius: 999px; font-size: 13px;
   box-shadow: 0 6px 20px rgba(0,0,0,.4); pointer-events: none;
@@ -1976,7 +2002,7 @@ button.cmd-text { background: none; border: none; text-align: left; }
    sits a little higher (clear of the terminal's own controls) and never blocks touches on the pane. */
 .handoff-toast {
   position: fixed; left: 50%; bottom: calc(96px + env(safe-area-inset-bottom)); transform: translateX(-50%);
-  z-index: 60; max-width: 88vw; text-align: center;
+  z-index: var(--z-overlay-toast); max-width: 88vw; text-align: center;
   background: rgba(30,32,36,.94); color: #e6e9ee; border: 1px solid #3a3d44;
   padding: 9px 16px; border-radius: 999px; font-size: 13px;
   box-shadow: 0 6px 20px rgba(0,0,0,.4); pointer-events: none;
@@ -1995,9 +2021,9 @@ button.cmd-text { background: none; border: none; text-align: left; }
 .inbox-dot.done { background: var(--green); }
 .inbox-dot.working { background: var(--blue); animation: tw-blink 1s ease-in-out infinite; }
 @media (prefers-reduced-motion: reduce) { .inbox-dot.working { animation: none; } }
-.inbox-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,.5); z-index: 19; }
+.inbox-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,.5); z-index: var(--z-overlay-base-backdrop); }
 .inbox-panel {
-  position: fixed; z-index: 20; top: 48px; right: 8px;
+  position: fixed; z-index: var(--z-overlay-base); top: 48px; right: 8px;
   width: calc(100% - 32px); max-width: 360px; max-height: 70vh; overflow-y: auto;
   background: #232427; border-radius: 12px; padding: 8px; box-shadow: 0 10px 40px rgba(0,0,0,.5);
 }
@@ -2115,8 +2141,8 @@ button.cmd-text { background: none; border: none; text-align: left; }
 /* push-script-sheet — reuses the settings-card shell (centered dialog opened from Settings), lifted
    above the settings modal like DirPicker so it renders on top and stays interactive; the card scrolls
    so it never clips on a short viewport. Horizontal insets come from the card's own 16px padding. */
-.push-script-backdrop { z-index: 30; background: rgba(0,0,0,.62); }
-.push-script-sheet { z-index: 31; overflow-y: auto; }
+.push-script-backdrop { z-index: var(--z-overlay-dialog-backdrop); background: rgba(0,0,0,.62); }
+.push-script-sheet { z-index: var(--z-overlay-dialog); overflow-y: auto; }
 .push-script-sheet .push-script-intro { margin: 0 0 12px; color: var(--muted, #8a8a8e); font-size: 13px; line-height: 1.5; }
 .push-script-block { margin: 0 0 14px; display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
 .push-script-label { font-size: 12px; color: var(--muted, #8a8a8e); }
@@ -2444,9 +2470,9 @@ button.cmd-text { background: none; border: none; text-align: left; }
 /* ── Tool detail sheet — a ~half-screen bottom sheet (mirrors .cmd-panel's shell), styled in the chat's
    warm-dusk tokens. Tapping a tool chip opens it (no in-page expand); shows 执行模式 / 执行的命令 /
    输出结果 as labelled sections. A file-edit's output renders as the coloured diff, visually distinct. */
-.tool-sheet-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,.5); z-index: 41; }
+.tool-sheet-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,.5); z-index: var(--z-overlay-tool-backdrop); }
 .tool-sheet {
-  position: fixed; left: 0; right: 0; bottom: 0; z-index: 42;
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: var(--z-overlay-tool);
   max-height: 62vh; min-height: 42vh;
   display: flex; flex-direction: column;
   background: var(--ct-overlay); color: var(--ct-ink);
@@ -2615,7 +2641,7 @@ button.cmd-text { background: none; border: none; text-align: left; }
    to edge and the question + its lead-in is always in view — no scrolling. Top corners rounded like an
    iOS sheet; safe-area padding on the bottom. Buttons are ≥44pt. */
 .chat-gate {
-  position: fixed; left: 0; right: 0; bottom: 0; z-index: 25;
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: var(--z-overlay-nested-content);
   padding: 12px 14px calc(12px + env(safe-area-inset-bottom, 0px));
   border-radius: 14px 14px 0 0;
   background: var(--ct-bar); box-shadow: 0 -4px 18px rgba(0,0,0,.35);
@@ -2632,7 +2658,7 @@ button.cmd-text { background: none; border: none; text-align: left; }
    the lens by an inline top/height measured from .chat-view (see ChatView) — the topbar and window/lens
    tabs above stay visible and tappable. inset:0 is the pre-measurement fallback. Tap-through is blocked
    (the sheet demands an explicit choice — 取消 is the only way out). */
-.chat-gate-backdrop { position: fixed; inset: 0; z-index: 24; background: rgba(0,0,0,.28); }
+.chat-gate-backdrop { position: fixed; inset: 0; z-index: var(--z-overlay-nested); background: rgba(0,0,0,.28); }
 /* "第 i/N 题" progress for a multi-question AskUserQuestion, above the question. */
 .chat-gate-step { font-size: 11px; font-weight: 600; color: var(--ct-muted); margin-bottom: 6px; letter-spacing: .02em; }
 .chat-gate-prompt { font-size: 14px; color: var(--ct-ink); line-height: 1.4; margin-bottom: 10px; }
@@ -2809,9 +2835,9 @@ button.cmd-text { background: none; border: none; text-align: left; }
 .chat-plan-summary .codex-plan-chevron { margin-left: -2px; font-size: 18px; }
 
 /* Read-only task Bottom Sheet. Rows are status projections, deliberately not checkboxes or editable controls. */
-.codex-plan-backdrop { position: fixed; inset: 0; bottom: var(--overlay-keyboard-inset, 0px); z-index: 45; background: rgba(0,0,0,.5); }
+.codex-plan-backdrop { position: fixed; inset: 0; bottom: var(--overlay-keyboard-inset, 0px); z-index: var(--z-overlay-detail-backdrop); background: rgba(0,0,0,.5); }
 .codex-plan-sheet {
-  position: fixed; left: 0; right: 0; bottom: var(--overlay-keyboard-inset, 0px); z-index: 46;
+  position: fixed; left: 0; right: 0; bottom: var(--overlay-keyboard-inset, 0px); z-index: var(--z-overlay-detail);
   max-height: min(62dvh, 620px); min-height: min(36dvh, 320px);
   display: flex; flex-direction: column; overflow: hidden;
   border-radius: 18px 18px 0 0; background: var(--ct-overlay); color: var(--ct-ink);
@@ -2911,7 +2937,7 @@ button.cmd-text { background: none; border: none; text-align: left; }
 @keyframes cc-queue-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .cc-queue-pending > span { animation: none; } }
 .cc-queue-dialog-backdrop {
-  bottom: var(--overlay-keyboard-inset, 0px); z-index: 52; overflow-y: auto; overscroll-behavior: contain;
+  bottom: var(--overlay-keyboard-inset, 0px); z-index: var(--z-overlay-confirm); overflow-y: auto; overscroll-behavior: contain;
   padding: max(12px, env(safe-area-inset-top, 0px)) 12px max(12px, env(safe-area-inset-bottom, 0px));
 }
 .cc-queue-dialog-backdrop .settings-confirm {
@@ -3000,9 +3026,9 @@ button.cmd-text { background: none; border: none; text-align: left; }
 .cc-context-ring circle { fill: none; stroke-width: 3.2; }
 .cc-context-track { stroke: var(--ct-chip-line); }
 .cc-context-value { stroke: currentColor; stroke-linecap: round; }
-.cc-context-backdrop { position: fixed; inset: 0; z-index: 43; background: transparent; }
+.cc-context-backdrop { position: fixed; inset: 0; z-index: var(--z-overlay-popover-backdrop); background: transparent; }
 .cc-context-popover {
-  position: absolute; right: 0; bottom: calc(100% + 9px); z-index: 44;
+  position: absolute; right: 0; bottom: calc(100% + 9px); z-index: var(--z-overlay-popover);
   width: min(300px, calc(100vw - 24px)); max-height: min(420px, calc(100dvh - 120px));
   overflow-y: auto; padding: 10px 12px; border: 1px solid var(--ct-chip-line); border-radius: 14px;
   background: var(--ct-overlay); color: var(--ct-ink);
@@ -3110,9 +3136,9 @@ button.cmd-text { background: none; border: none; text-align: left; }
 
 /* Managed Codex model / reasoning controls. Like ChatGPT's model picker, the compact value lives on the
    composer's left and opens a lightweight menu above itself; the transparent backdrop only dismisses it. */
-.codex-config-backdrop { position: fixed; inset: 0; z-index: 43; background: transparent; }
+.codex-config-backdrop { position: fixed; inset: 0; z-index: var(--z-overlay-popover-backdrop); background: transparent; }
 .codex-config-menu {
-  position: absolute; left: 0; bottom: calc(100% + 9px); z-index: 44;
+  position: absolute; left: 0; bottom: calc(100% + 9px); z-index: var(--z-overlay-popover);
   width: min(370px, calc(100vw - 28px)); max-height: min(50dvh, 420px);
   display: flex; flex-direction: column; overflow: hidden;
   border: 1px solid var(--ct-chip-line); border-radius: 16px;
@@ -3221,9 +3247,9 @@ button.cmd-text { background: none; border: none; text-align: left; }
   background: #fff; box-shadow: 0 1px 4px rgba(0,0,0,.28);
 }
 .codex-config-error { color: var(--danger, #d34b45); font-size: 12px; line-height: 1.4; }
-.codex-goal-backdrop { position: fixed; inset: 0; bottom: var(--overlay-keyboard-inset, 0px); z-index: 45; background: rgba(0,0,0,.5); }
+.codex-goal-backdrop { position: fixed; inset: 0; bottom: var(--overlay-keyboard-inset, 0px); z-index: var(--z-overlay-detail-backdrop); background: rgba(0,0,0,.5); }
 .codex-goal-menu {
-  position: fixed; left: 0; right: 0; bottom: var(--overlay-keyboard-inset, 0px); z-index: 46;
+  position: fixed; left: 0; right: 0; bottom: var(--overlay-keyboard-inset, 0px); z-index: var(--z-overlay-detail);
   max-height: min(62dvh, 620px); min-height: min(36dvh, 320px);
   display: flex; flex-direction: column; overflow: hidden;
   border-radius: 18px 18px 0 0;
@@ -3275,7 +3301,7 @@ button.cmd-text { background: none; border: none; text-align: left; }
 .codex-goal-actions button.primary { background: var(--ct-accent); color: #fff; }
 .codex-goal-actions button.destructive { color: var(--danger, #d34b45); }
 .codex-goal-actions button:disabled { opacity: .48; }
-.chat-composer .settings-confirm-backdrop { z-index: 50; }
+.chat-composer .settings-confirm-backdrop { z-index: var(--z-overlay-workspace); }
 @media (prefers-reduced-motion: reduce) {
   .codex-config-menu, .codex-goal-menu, .codex-config-head button.is-refreshing svg { animation: none; }
   .cc-context-permission-row svg { transition: none; }
