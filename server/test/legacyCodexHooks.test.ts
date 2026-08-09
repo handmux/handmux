@@ -4,7 +4,7 @@ import path from 'node:path';
 import { tmpHome } from './tmphome.js';
 import { removeLegacyCodexHooks, stripLegacyCodexHooks } from '../src/cli/legacyCodexHooks.js';
 
-const block = `# >>> handmux codex-hooks >>>
+const block: string = `# >>> handmux codex-hooks >>>
 [[hooks.Stop]]
 [[hooks.Stop.hooks]]
 type = "command"

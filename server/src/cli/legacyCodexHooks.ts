@@ -13,10 +13,10 @@ const LEGACY_FILES = [
   'handmux-write.cjs',
   'handmux-codex-usage.cjs',
   'handmux-notify.env',
-];
+] as const;
 
-export function stripLegacyCodexHooks(toml) {
-  const text = toml || '';
+export function stripLegacyCodexHooks(toml: unknown): string {
+  const text = typeof toml === 'string' ? toml : '';
   const start = text.indexOf(BEGIN);
   if (start < 0) return text;
   const end = text.indexOf(END, start);
@@ -24,7 +24,7 @@ export function stripLegacyCodexHooks(toml) {
   return (text.slice(0, start) + text.slice(end + END.length)).replace(/\n{3,}/g, '\n\n');
 }
 
-export function removeLegacyCodexHooks(home = homedir()) {
+export function removeLegacyCodexHooks(home: string = homedir()): { changed: boolean } {
   const codexDir = path.join(home, '.codex');
   const configuredPath = path.join(codexDir, 'config.toml');
   let changed = false;
