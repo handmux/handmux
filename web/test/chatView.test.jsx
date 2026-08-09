@@ -60,8 +60,11 @@ describe('ChatView', () => {
     expect(container.querySelector('.lens-boot')).toBeNull();
   });
 
-  it('removes the loading view as soon as a streamed reply arrives after switching tabs', async () => {
-    vi.spyOn(api, 'fetchTranscript').mockReturnValue(new Promise(() => {}));
+  it('buffers a streamed reply until tab history loads, then reveals both together', async () => {
+    let resolveTranscript;
+    vi.spyOn(api, 'fetchTranscript').mockReturnValue(new Promise((resolve) => {
+      resolveTranscript = resolve;
+    }));
     let emit;
     api.streamCodexMessages.mockImplementation((_pane, { signal, onEvent }) => {
       emit = onEvent;
@@ -76,6 +79,14 @@ describe('ChatView', () => {
       type: 'delta', threadId: 'thread-1', turnId: 'turn-1', itemId: 'agent-1', delta: '实时回复已到达',
     }));
 
+    expect(screen.queryByText('实时回复已到达')).toBeNull();
+    expect(container.querySelector('.lens-boot')).toBeTruthy();
+    await act(async () => resolveTranscript({
+      messages: [{ k: 0, i: 0, role: 'user', type: 'text', text: '历史消息先显示' }],
+      hash: 'h', session: 's', hasMore: false, firstSeq: 0,
+    }));
+
+    expect(await screen.findByText('历史消息先显示')).toBeTruthy();
     expect(await screen.findByText('实时回复已到达')).toBeTruthy();
     expect(container.querySelector('.lens-boot')).toBeNull();
   });

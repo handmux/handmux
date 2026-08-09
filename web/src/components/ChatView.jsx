@@ -633,8 +633,10 @@ export default function ChatView({
     onSettled: () => setStreamRefresh((value) => value + 1),
     onAuthFail,
   });
-  const visibleLiveMessages = useMemo(() => liveMessages.filter((message) => message.text
-    && !durableCoversLiveMessage(durableMessages, message)), [durableMessages, liveMessages]);
+  // A tab switch reconnects the live stream faster than the durable transcript can load. Keep accumulating
+  // those deltas in useCodexMessageStream, but do not render them ahead of their historical predecessors.
+  const visibleLiveMessages = useMemo(() => (loaded ? liveMessages.filter((message) => message.text
+    && !durableCoversLiveMessage(durableMessages, message)) : []), [loaded, durableMessages, liveMessages]);
   const messages = useMemo(() => [
     ...durableMessages,
     ...visibleLiveMessages,
@@ -651,8 +653,6 @@ export default function ChatView({
     }
     return -1;
   }, [messages]);
-  const hasVisibleMessages = messages.some((message, index) => message.type !== 'thinking'
-    && (message.type !== 'compact' || index === latestCompactIndex));
   // Temporary outgoing bubbles are render-only. Capture matching durable transcript ids that already exist
   // when each bubble first appears, then let only a new rollout message cover it. This prevents an already
   // visible identical user message from swallowing a fresh send while keeping the transcript the sole history.
@@ -1058,8 +1058,7 @@ export default function ChatView({
         onPointerUp={cancelLongPress} onPointerCancel={cancelLongPress}
         onWheel={() => { lastScrollGestureAtRef.current = Date.now(); }}
         onClickCapture={onCopyClickCapture}>
-        {!loaded && !hasVisibleMessages && visibleOptimistic.length === 0
-          && <LensBoot hint={t('boot.loading')} />}
+        {!loaded && <LensBoot hint={t('boot.loading')} />}
         {/* The first poll uses the same neutral loading view as the terminal. Only show a nudge after the
             response confirms the session is genuinely empty; never flash a fake assistant reply. */}
         {messages.length === 0 && visibleOptimistic.length === 0 && !actionError && !sessionGate && loaded
