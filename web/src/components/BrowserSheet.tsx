@@ -19,7 +19,7 @@ import { OverlayPortal } from '../overlays/OverlayHost.js';
 import type { BrowserCloseAfter, BrowserHistoryEntry, BrowserMode } from '../browserState.js';
 import type { RuntimeBrowserTab, useBrowser } from '../hooks/useBrowser.js';
 import type { StaticPreviewTab, usePreviews } from '../hooks/usePreviews.js';
-import type { ComponentType, CSSProperties, FormEvent } from 'react';
+import type { CSSProperties, FormEvent } from 'react';
 
 type BrowserController = ReturnType<typeof useBrowser>;
 type StaticPreviewController = ReturnType<typeof usePreviews>;
@@ -29,17 +29,6 @@ interface BrowserSheetProps {
   browser: BrowserController;
   staticPreview: StaticPreviewController;
 }
-
-interface DirPickerProps {
-  open: boolean;
-  seedCwd?: string | null;
-  pane?: string | null;
-  hint?: string;
-  onPick: (dir: string) => void | Promise<void>;
-  onClose: () => void;
-}
-
-const TypedDirPicker = DirPicker as unknown as ComponentType<DirPickerProps>;
 
 interface StaticOpenTab {
   name: string;
@@ -981,7 +970,7 @@ export default function BrowserSheet({ browser, staticPreview }: BrowserSheetPro
           </div>
         )}
       </div>
-      <TypedDirPicker
+      <DirPicker
         open={dirOpen}
         seedCwd={seedCwd}
         pane={staticPreview?.pane}
