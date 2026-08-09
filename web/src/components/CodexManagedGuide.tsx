@@ -2,15 +2,31 @@ import { useEffect, useRef, useState } from 'react';
 import { takeoverCodexSession, UnauthorizedError } from '../api.js';
 import { t } from '../i18n';
 import { BotIcon } from './icons.jsx';
+import type { CodexSessionSnapshot } from '../hooks/useCodexSession.js';
 
 const TERMINAL_HINT_MS = 10_000;
 
-export default function CodexManagedGuide({ pane, session, onTerminal, onAuthFail, onTakeoverChange }) {
+interface CodexManagedGuideProps {
+  pane: string;
+  session?: Partial<CodexSessionSnapshot> | null;
+  onTerminal: () => void;
+  onAuthFail?: () => void;
+  onTakeoverChange?: (pane: string, takingOver: boolean) => void;
+}
+
+const recordOf = (value: unknown): Record<string, unknown> | null => (
+  value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown> : null
+);
+
+export default function CodexManagedGuide({
+  pane, session, onTerminal, onAuthFail, onTakeoverChange,
+}: CodexManagedGuideProps) {
   const [confirming, setConfirming] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [localStarting, setLocalStarting] = useState(false);
   const [showTerminalHint, setShowTerminalHint] = useState(false);
-  const [errorCode, setErrorCode] = useState(null);
+  const [errorCode, setErrorCode] = useState<string | null>(null);
   const submittingRef = useRef(false);
   const requestSeqRef = useRef(0);
   const timedOut = session?.takeover?.state === 'timed-out';
@@ -34,7 +50,7 @@ export default function CodexManagedGuide({ pane, session, onTerminal, onAuthFai
     return () => clearTimeout(timer);
   }, [starting, session?.takeover?.needsTerminal]);
 
-  const start = async () => {
+  const start = async (): Promise<void> => {
     if (!pane || submittingRef.current || starting) return;
     const requestSeq = ++requestSeqRef.current;
     submittingRef.current = true;
@@ -43,14 +59,15 @@ export default function CodexManagedGuide({ pane, session, onTerminal, onAuthFai
     setSubmitting(true);
     setErrorCode(null);
     try {
-      const result = await takeoverCodexSession(pane);
+      const result = recordOf(await takeoverCodexSession(pane));
       if (requestSeqRef.current !== requestSeq) return;
       setLocalStarting(true);
-      if (result?.takeover?.needsTerminal) setShowTerminalHint(true);
+      if (recordOf(result?.takeover)?.needsTerminal === true) setShowTerminalHint(true);
     } catch (error) {
       if (error instanceof UnauthorizedError) onAuthFail?.();
       else if (requestSeqRef.current === requestSeq) {
-        setErrorCode(error?.serverError || 'codex-takeover-failed');
+        const code = recordOf(error)?.serverError;
+        setErrorCode(typeof code === 'string' && code ? code : 'codex-takeover-failed');
       }
     } finally {
       if (requestSeqRef.current === requestSeq) {
@@ -60,7 +77,8 @@ export default function CodexManagedGuide({ pane, session, onTerminal, onAuthFai
     }
   };
 
-  const unbound = ['codex-session-unbound', 'codex-session-unconfirmed', 'codex-exit-blocked'].includes(errorCode);
+  const unbound = errorCode != null
+    && ['codex-session-unbound', 'codex-session-unconfirmed', 'codex-exit-blocked'].includes(errorCode);
   const manual = unbound || timedOut;
   const paneGone = errorCode === 'codex-pane-gone' || errorCode === 'codex-pane-changed';
   const title = starting ? t('chat.managedGuide.startingTitle')
@@ -102,7 +120,7 @@ export default function CodexManagedGuide({ pane, session, onTerminal, onAuthFai
             <p id="codex-takeover-hint">{t('chat.managedGuide.confirmHint')}</p>
             <div className="settings-confirm-actions">
               <button type="button" autoFocus onClick={() => setConfirming(false)}>{t('common.cancel')}</button>
-              <button type="button" className="danger" onClick={start}>
+              <button type="button" className="danger" onClick={() => void start()}>
                 {t('chat.managedGuide.confirmAction')}
               </button>
             </div>

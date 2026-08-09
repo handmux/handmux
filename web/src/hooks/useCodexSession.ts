@@ -94,6 +94,7 @@ export interface CodexSessionSnapshot {
   gitBranch?: string | null;
   plan?: CodexSessionPlan | null;
   goal?: CodexGoal | null;
+  takeover?: { state: 'starting' | 'timed-out'; needsTerminal: boolean } | null;
 }
 
 const recordOf = (value: unknown): Record<string, unknown> | null => (
@@ -240,6 +241,9 @@ export function parseCodexSessionSnapshot(value: unknown): Omit<CodexSessionSnap
     ? session.queue.map(parseCodexQueueItem).filter((item): item is CodexQueueItem => item !== null)
     : [];
   const lastTurn = recordOf(session.lastTurn);
+  const takeover = recordOf(session.takeover);
+  const takeoverState = takeover?.state === 'starting' || takeover?.state === 'timed-out'
+    ? takeover.state : null;
   const hasGoal = Object.hasOwn(session, 'goal');
   return {
     managed: session.managed === true,
@@ -262,6 +266,7 @@ export function parseCodexSessionSnapshot(value: unknown): Omit<CodexSessionSnap
     lastTurn: lastTurn ? { status: optionalString(lastTurn.status) } : null,
     gitBranch: optionalString(session.gitBranch),
     plan,
+    ...(takeoverState ? { takeover: { state: takeoverState, needsTerminal: takeover?.needsTerminal === true } } : {}),
     ...(hasGoal ? { goal: parseCodexGoal(session.goal) } : {}),
   };
 }

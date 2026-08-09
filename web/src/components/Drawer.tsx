@@ -7,12 +7,42 @@ import { useState } from 'react';
 import { t } from '../i18n';
 import { relTime } from '../inbox.js';
 import WorkspaceRecoveryCard from './WorkspaceRecoveryCard.jsx';
+import type { MouseEvent } from 'react';
+import type { WorkspaceRecoveryPlan, WorkspaceRestoreOperation } from '../workspaceRecovery.js';
+
+export interface DrawerOrphan {
+  pid: number;
+  cwd: string;
+  cwdLabel?: string;
+  sessionId?: string | null;
+  state?: string;
+  snippet?: string;
+  agentLabel?: string;
+  startedAt?: number | null;
+  lastActivity?: number | null;
+}
+
+interface DrawerProps {
+  open: boolean;
+  currentSessionName?: string | null;
+  bound: string[];
+  onSelectSession: (name: string) => void;
+  onUnbind: (name: string) => void;
+  onBind: () => void;
+  onClose: () => void;
+  onLogout: () => void;
+  orphans?: DrawerOrphan[];
+  onTakeoverRequest?: (orphan: DrawerOrphan) => void;
+  recoveryPlan?: WorkspaceRecoveryPlan | null;
+  recoveryOperation?: WorkspaceRestoreOperation | null;
+  onOpenRecovery?: () => void;
+}
 
 export default function Drawer({
   open, currentSessionName, bound, onSelectSession, onUnbind, onBind, onClose, onLogout,
   orphans = [], onTakeoverRequest,
-  recoveryPlan = null, recoveryOperation = null, onOpenRecovery,
-}) {
+  recoveryPlan = null, recoveryOperation = null, onOpenRecovery = () => {},
+}: DrawerProps) {
   const [orphOpen, setOrphOpen] = useState(false);
   return (
     <>
@@ -28,7 +58,9 @@ export default function Drawer({
               <span className="drawer-name" onClick={() => onSelectSession(name)}>{name}</span>
               <button
                 className="drawer-unbind"
-                onClick={(e) => { e.stopPropagation(); onUnbind(name); }}
+                onClick={(event: MouseEvent<HTMLButtonElement>) => {
+                  event.stopPropagation(); onUnbind(name);
+                }}
                 aria-label={t('drawer.unbind')}
                 title={t('drawer.unbind')}
               >✕</button>
@@ -66,7 +98,7 @@ export default function Drawer({
                           <span className={`drawer-orphan-state ${o.state === 'busy' ? 'busy' : 'idle'}`}>
                             {o.state === 'busy' ? t('inbox.orphans.busy') : t('inbox.orphans.idle')}
                           </span>
-                          <span className="drawer-orphan-time">{relTime(o.startedAt || o.lastActivity, Date.now())}</span>
+                          <span className="drawer-orphan-time">{relTime(o.startedAt || o.lastActivity || 0, Date.now())}</span>
                           {o.snippet && <span className="drawer-orphan-msg">{o.snippet}</span>}
                         </div>
                       </div>

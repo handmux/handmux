@@ -1,6 +1,7 @@
 import { useLayoutEffect, useRef, useState } from 'react';
 import { FolderIcon } from './icons.jsx';
 import { t } from '../i18n';
+import type { ReactNode } from 'react';
 
 const MARGIN = 8;   // keep this far from every viewport edge
 const GAP = 12;     // vertical gap between the tap point and the card
@@ -13,11 +14,32 @@ const GAP = 12;     // vertical gap between the tap point and the card
 //
 // Also serves the terminal URL confirm via optional display overrides. Most async actions disable while
 // pending; Browser opts into `allowRepeat` so a newer confirmation can cancel and replace the old request.
+type LinkOpenMode = 'direct' | 'proxy';
+
+interface DocLinkPopoverProps {
+  path: string;
+  x: number;
+  y: number;
+  onOpen: (path: string, mode?: LinkOpenMode) => void;
+  onClose: () => void;
+  icon?: ReactNode;
+  name?: string;
+  openLabel?: string;
+  note?: string;
+  disabled?: boolean;
+  busy?: boolean;
+  busyMode?: LinkOpenMode | null;
+  allowRepeat?: boolean;
+  modeChoices?: boolean;
+  proxyAvailable?: boolean;
+}
+
 export default function DocLinkPopover({ path, x, y, onOpen, onClose, icon, name: nameProp, openLabel, note,
-  disabled = false, busy = false, busyMode = null, allowRepeat = false, modeChoices = false, proxyAvailable = false }) {
+  disabled = false, busy = false, busyMode = null, allowRepeat = false, modeChoices = false,
+  proxyAvailable = false }: DocLinkPopoverProps) {
   const name = nameProp ?? (path.split('/').filter(Boolean).pop() || path);
-  const ref = useRef(null);
-  const [pos, setPos] = useState(null);
+  const ref = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
 
   useLayoutEffect(() => {
     const el = ref.current;

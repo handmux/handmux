@@ -112,6 +112,17 @@ describe('useCodexSession', () => {
     });
   });
 
+  it('keeps the App Server takeover state needed by the managed-session guide', () => {
+    expect(parseCodexSessionSnapshot({
+      managed: false,
+      takeover: { state: 'starting', needsTerminal: true },
+    })?.takeover).toEqual({ state: 'starting', needsTerminal: true });
+    expect(parseCodexSessionSnapshot({
+      managed: false,
+      takeover: { state: 'unknown', needsTerminal: true },
+    })?.takeover).toBeUndefined();
+  });
+
   it('does not expose the previous pane session while the next pane loads', async () => {
     getCodexSessionMock.mockImplementation((pane: string) => {
       if (pane === '%plain') return Promise.resolve({ managed: false });
