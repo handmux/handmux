@@ -1,4 +1,38 @@
+import type { Terminal } from '@xterm/xterm';
+import type { MutableRefObject } from 'react';
 import { cellToPx, selectionCounts } from './terminalSelection.js';
+import type { TerminalCell, TerminalCellRange } from './terminalSelection.js';
+
+export interface TerminalSelectionUI {
+  start: { x: number; y: number; ch: number };
+  end: { x: number; y: number; ch: number };
+  wrapW: number;
+}
+
+export interface TerminalSelectionActions {
+  currentRange(): TerminalCellRange | null;
+  paraLineText(row: number): string;
+  selectRange(range: TerminalCellRange | null | undefined): void;
+}
+
+export interface TerminalSelectionController {
+  start(x: number, y: number): void;
+  extend(x: number, y: number): void;
+  clear(): void;
+  refresh(): void;
+  dispose(): void;
+}
+
+export interface TerminalSelectionControllerOptions {
+  term: Terminal;
+  host: HTMLElement;
+  screenHost?: HTMLElement;
+  desktop: boolean;
+  activeRef: MutableRefObject<boolean>;
+  actionsRef: MutableRefObject<TerminalSelectionActions | null>;
+  setUI: (ui: TerminalSelectionUI | null) => void;
+  setInfo: (info: string) => void;
+}
 
 export function createTerminalSelectionController({
   term,
@@ -9,20 +43,21 @@ export function createTerminalSelectionController({
   actionsRef,
   setUI,
   setInfo,
-}) {
+}: TerminalSelectionControllerOptions): TerminalSelectionController {
   const buffer = () => term.buffer.active;
   const wrap = host.parentElement;
-  const viewport = screenHost.querySelector('.xterm-viewport');
-  let anchor = null;
-  let dragEnd = null;
-  let dragAnchorEdge = null;
-  let autoScrollRAF = null;
-  let lastHandlePoint = null;
+  if (!wrap) throw new Error('terminal selection host must have a parent');
+  const viewport = screenHost.querySelector<HTMLElement>('.xterm-viewport');
+  let anchor: TerminalCell | null = null;
+  let dragEnd: 'start' | 'end' | null = null;
+  let dragAnchorEdge: number | null = null;
+  let autoScrollRAF: number | null = null;
+  let lastHandlePoint: { x: number; y: number } | null = null;
   let autoDirection = 0;
   let autoStep = 0;
 
-  const cellFromPoint = (x, y) => {
-    const screen = screenHost.querySelector('.xterm-screen');
+  const cellFromPoint = (x: number, y: number): TerminalCell | null => {
+    const screen = screenHost.querySelector<HTMLElement>('.xterm-screen');
     if (!screen || !term.cols || !term.rows) return null;
     const rect = screen.getBoundingClientRect();
     const cellWidth = rect.width / term.cols;
@@ -36,7 +71,7 @@ export function createTerminalSelectionController({
   };
 
   // xterm reports a half-open end. Keep the rest of handmux selection math inclusive.
-  const cells = () => {
+  const cells = (): TerminalCellRange | null => {
     const position = term.getSelectionPosition?.();
     if (!position) return null;
     let endCol = position.end.x - 1;
@@ -51,9 +86,9 @@ export function createTerminalSelectionController({
     };
   };
 
-  const refresh = () => {
+  const refresh = (): void => {
     const selection = cells();
-    const screen = screenHost.querySelector('.xterm-screen');
+    const screen = screenHost.querySelector<HTMLElement>('.xterm-screen');
     if (!selection || !screen) {
       setUI(null);
       setInfo('');
@@ -93,8 +128,8 @@ export function createTerminalSelectionController({
     setInfo(`复制模式 · ${lines} 行 · ${chars} 字`);
   };
 
-  const lineText = (row) => buffer().getLine(row)?.translateToString(true) ?? '';
-  const selectRange = (range) => {
+  const lineText = (row: number): string => buffer().getLine(row)?.translateToString(true) ?? '';
+  const selectRange = (range: TerminalCellRange | null | undefined): void => {
     if (!range) return;
     const length = (range.end.row * term.cols + range.end.col)
       - (range.start.row * term.cols + range.start.col) + 1;
@@ -103,7 +138,7 @@ export function createTerminalSelectionController({
   };
   actionsRef.current = { currentRange: cells, paraLineText: lineText, selectRange };
 
-  const start = (x, y) => {
+  const start = (x: number, y: number): void => {
     const cell = cellFromPoint(x, y);
     if (!cell) return;
     const text = buffer().getLine(cell.row)?.translateToString(false) ?? '';
@@ -121,15 +156,17 @@ export function createTerminalSelectionController({
     navigator.vibrate?.(12);
   };
 
-  const widthAt = (offset, cols) => (
+  const widthAt = (offset: number, cols: number): number => (
     buffer().getLine(Math.floor(offset / cols))?.getCell(offset % cols)?.getWidth() ?? 1
   );
-  const snapLow = (offset, cols) => (
+  const snapLow = (offset: number, cols: number): number => (
     offset > 0 && widthAt(offset, cols) === 0 ? offset - 1 : offset
   );
-  const snapHigh = (offset, cols) => (widthAt(offset, cols) === 2 ? offset + 1 : offset);
+  const snapHigh = (offset: number, cols: number): number => (
+    widthAt(offset, cols) === 2 ? offset + 1 : offset
+  );
 
-  const extend = (x, y) => {
+  const extend = (x: number, y: number): void => {
     const current = cellFromPoint(x, y);
     if (!current || !anchor) return;
     const anchorOffset = anchor.row * term.cols + anchor.col;
@@ -140,7 +177,7 @@ export function createTerminalSelectionController({
     refresh();
   };
 
-  const clear = () => {
+  const clear = (): void => {
     anchor = null;
     activeRef.current = false;
     setUI(null);
@@ -148,7 +185,7 @@ export function createTerminalSelectionController({
     term.clearSelection();
   };
 
-  const dragSelect = (x, y) => {
+  const dragSelect = (x: number, y: number): void => {
     const current = cellFromPoint(x, y);
     if (!current || dragAnchorEdge == null) return;
     const offset = current.row * term.cols + current.col;
@@ -162,10 +199,13 @@ export function createTerminalSelectionController({
     refresh();
   };
 
-  const onHandleDown = (event) => {
-    const handle = event.target.closest?.('.sel-handle');
-    if (!handle) return;
-    dragEnd = handle.dataset.end;
+  const onHandleDown = (event: PointerEvent): void => {
+    const handle = event.target instanceof Element
+      ? event.target.closest<HTMLElement>('.sel-handle')
+      : null;
+    const end = handle?.dataset.end;
+    if (end !== 'start' && end !== 'end') return;
+    dragEnd = end;
     const selection = cells();
     if (selection) {
       const startOffset = selection.start.row * term.cols + selection.start.col;
@@ -179,7 +219,7 @@ export function createTerminalSelectionController({
     wrap.setPointerCapture?.(event.pointerId);
   };
 
-  const onHandleMove = (event) => {
+  const onHandleMove = (event: PointerEvent): void => {
     if (!dragEnd || dragAnchorEdge == null || !viewport) return;
     dragSelect(event.clientX, event.clientY);
     const edge = 28;
@@ -197,8 +237,8 @@ export function createTerminalSelectionController({
     }
     autoStep = Math.min(14, 2 + over * 0.28);
     if (autoDirection !== 0 && autoScrollRAF == null) {
-      const tick = () => {
-        if (!dragEnd || autoDirection === 0) {
+      const tick = (): void => {
+        if (!dragEnd || autoDirection === 0 || !lastHandlePoint) {
           autoScrollRAF = null;
           return;
         }
@@ -219,7 +259,7 @@ export function createTerminalSelectionController({
     event.preventDefault();
   };
 
-  const onHandleUp = (event) => {
+  const onHandleUp = (event: PointerEvent): void => {
     if (!dragEnd) return;
     dragEnd = null;
     dragAnchorEdge = null;
@@ -230,7 +270,7 @@ export function createTerminalSelectionController({
     }
     wrap.releasePointerCapture?.(event.pointerId);
   };
-  const onViewportScroll = () => {
+  const onViewportScroll = (): void => {
     if (!desktop && activeRef.current) refresh();
   };
 

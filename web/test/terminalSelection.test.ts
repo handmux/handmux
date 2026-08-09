@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { trimCopy, cellToPx, selectionCounts } from '../src/terminalSelection.js';
 import { expandToLines, expandToParagraph } from '../src/terminalSelection.js';
 
@@ -41,8 +41,8 @@ describe('expandToLines', () => {
 
 describe('expandToParagraph', () => {
   // rows: 10 空, 11 "foo", 12 "bar", 13 "  ", 14 "baz"
-  const text = { 10: '', 11: 'foo', 12: 'bar', 13: '  ', 14: 'baz' };
-  const lineText = (r) => text[r] ?? '';
+  const text: Record<number, string> = { 10: '', 11: 'foo', 12: 'bar', 13: '  ', 14: 'baz' };
+  const lineText = (row: number) => text[row] ?? '';
   it('扩到空白行界定的段（13 是空白行，11-12 成段）', () => {
     const r = { start: { col: 1, row: 12 }, end: { col: 1, row: 12 } };
     expect(expandToParagraph(r, 80, lineText, 0, 20))
