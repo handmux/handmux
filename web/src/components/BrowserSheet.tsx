@@ -18,35 +18,12 @@ import DirPicker from './DirPicker.jsx';
 import { OverlayPortal } from '../overlays/OverlayHost.js';
 import type { BrowserCloseAfter, BrowserHistoryEntry, BrowserMode } from '../browserState.js';
 import type { RuntimeBrowserTab, useBrowser } from '../hooks/useBrowser.js';
+import type { StaticPreviewTab, usePreviews } from '../hooks/usePreviews.js';
 import type { ComponentType, CSSProperties, FormEvent } from 'react';
 
 type BrowserController = ReturnType<typeof useBrowser>;
+type StaticPreviewController = ReturnType<typeof usePreviews>;
 type BrowserSiteVersion = 'mobile' | 'desktop';
-type StaticPreviewStatus = 'ensuring' | 'ready' | 'error';
-
-interface StaticPreviewTab {
-  kind?: 'static';
-  name: string;
-  dir: string;
-  createdAt?: number;
-  status: StaticPreviewStatus;
-  url: string | null;
-  error: Error | null;
-}
-
-interface StaticPreviewController {
-  selected: boolean;
-  shownPreview: StaticPreviewTab | null;
-  tabs: StaticPreviewTab[];
-  error: Error | null;
-  pane: string | null;
-  lastPreviewDir: string | null;
-  deactivate: () => void;
-  switchTab: (name: string) => void;
-  closeTab: (name: string) => Promise<unknown> | unknown;
-  startPreview: (dir: string) => Promise<unknown> | unknown;
-  retryPreview: (name: string) => Promise<unknown> | unknown;
-}
 
 interface BrowserSheetProps {
   browser: BrowserController;

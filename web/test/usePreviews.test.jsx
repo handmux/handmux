@@ -174,4 +174,15 @@ describe('usePreviews static tabs', () => {
     await act(async () => { await model.retryPreview('dev-site-3'); });
     expect(model.tabs[0].status).toBe('ready');
   });
+
+  it('rejects a malformed preview lease before adding a static tab', async () => {
+    api.createPreview.mockResolvedValueOnce({ name: 'dev-site-3', dir: '/home/u/site' });
+    let created;
+
+    await act(async () => { created = await model.startPreview('/home/u/site'); });
+
+    expect(created).toBeNull();
+    expect(model.tabs).toEqual([]);
+    expect(model.error?.message).toBe('preview URL unavailable');
+  });
 });

@@ -1,28 +1,83 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
+import type { SetStateAction } from 'react';
 import { createPreview, deletePreview } from '../api.js';
 import { previewName } from '../previewName.js';
 import { getPreviewDir, setPreviewDir } from '../storage.js';
 
+export interface PreviewCurrent {
+  session?: { name?: string | null } | null;
+  window?: { id?: string | null; name?: string | null } | null;
+  paneId?: string | null;
+}
+
+export interface SavedPreviewTab {
+  name: string;
+  dir: string;
+  createdAt?: number;
+}
+
+export type PreviewStatus = 'ensuring' | 'ready' | 'error';
+
+interface PreviewRuntime {
+  status: PreviewStatus;
+  url?: string;
+  error: Error | null;
+}
+
+export interface StaticPreviewTab extends SavedPreviewTab {
+  kind: 'static';
+  status: PreviewStatus;
+  url: string | null;
+  error: Error | null;
+}
+
+interface RestoredPreviewState {
+  tabs: SavedPreviewTab[];
+  duplicateNames: string[];
+}
+
+interface EnsurePreviewOptions {
+  quiet?: boolean;
+  allowDetached?: boolean;
+}
+
+interface PreviewLease extends Record<string, unknown> {
+  url: string;
+}
+
+function recordOf(value: unknown): Record<string, unknown> | null {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+}
+
+function previewLeaseOf(value: unknown): PreviewLease | null {
+  const response = recordOf(value);
+  return response && typeof response.url === 'string' && response.url
+    ? { ...response, url: response.url }
+    : null;
+}
+
 const STATIC_TABS_KEY = 'hm_static_preview_tabs1';
 
-function readOpenTabState() {
+function readOpenTabState(): RestoredPreviewState {
   try {
-    const value = JSON.parse(localStorage.getItem(STATIC_TABS_KEY) || '[]');
+    const value: unknown = JSON.parse(localStorage.getItem(STATIC_TABS_KEY) || '[]');
     if (!Array.isArray(value)) return { tabs: [], duplicateNames: [] };
-    const valid = value.filter((item) => (
-      item && /^[A-Za-z0-9._-]+$/.test(String(item.name || ''))
-      && typeof item.dir === 'string' && item.dir.startsWith('/')
-    )).map((item) => {
+    const valid = value.flatMap((candidate): SavedPreviewTab[] => {
+      const item = recordOf(candidate);
+      if (!item || !/^[A-Za-z0-9._-]+$/.test(String(item.name || ''))
+        || typeof item.dir !== 'string' || !item.dir.startsWith('/')) return [];
       const createdAt = Number(item.createdAt);
-      return {
+      return [{
         name: String(item.name),
         dir: item.dir,
         ...(Number.isFinite(createdAt) && createdAt > 0 ? { createdAt } : {}),
-      };
+      }];
     });
-    const seenDirs = new Set();
-    const tabs = [];
-    const duplicateNames = [];
+    const seenDirs = new Set<string>();
+    const tabs: SavedPreviewTab[] = [];
+    const duplicateNames: string[] = [];
     for (const tab of valid) {
       if (seenDirs.has(tab.dir)) duplicateNames.push(tab.name);
       else {
@@ -36,12 +91,14 @@ function readOpenTabState() {
   }
 }
 
-function writeOpenTabs(tabs) {
+function writeOpenTabs(tabs: readonly SavedPreviewTab[]): void {
   try {
     localStorage.setItem(STATIC_TABS_KEY, JSON.stringify(tabs.map(({ name, dir, createdAt }) => ({
       name,
       dir,
-      ...(Number.isFinite(createdAt) && createdAt > 0 ? { createdAt } : {}),
+      ...(typeof createdAt === 'number' && Number.isFinite(createdAt) && createdAt > 0
+        ? { createdAt }
+        : {}),
     }))));
   } catch {
     // Keep the current in-memory tabs usable when device storage is unavailable.
@@ -50,21 +107,24 @@ function writeOpenTabs(tabs) {
 
 // Device-local static tabs backed by server leases. Opening/foregrounding ensures the lease exists;
 // actual preview traffic renews it server-side, so there is no client heartbeat or expiry UI.
-export function usePreviews(current) {
-  const restored = useRef(null);
+export function usePreviews(current?: PreviewCurrent | null) {
+  const restored = useRef<RestoredPreviewState | null>(null);
   if (!restored.current) restored.current = readOpenTabState();
-  const [openTabs, setOpenTabs] = useState(restored.current.tabs);
-  const [runtime, setRuntime] = useState({});
-  const [activeTabName, setActiveTabName] = useState(null);
+  const restoredState = restored.current;
+  const [openTabs, setOpenTabs] = useState<SavedPreviewTab[]>(restoredState.tabs);
+  const [runtime, setRuntime] = useState<Record<string, PreviewRuntime>>({});
+  const [activeTabName, setActiveTabName] = useState<string | null>(null);
   const [selected, setSelected] = useState(false);
-  const [error, setError] = useState(null);
+  const [error, setError] = useState<Error | null>(null);
   const openTabsRef = useRef(openTabs);
   const runtimeRef = useRef(runtime);
-  const previewOperations = useRef(new Map());
+  const previewOperations = useRef(new Map<string, Promise<unknown>>());
   openTabsRef.current = openTabs;
   runtimeRef.current = runtime;
 
-  const commitOpenTabs = useCallback((update) => {
+  const commitOpenTabs = useCallback((
+    update: SetStateAction<SavedPreviewTab[]>,
+  ): SavedPreviewTab[] => {
     const next = typeof update === 'function' ? update(openTabsRef.current) : update;
     openTabsRef.current = next;
     setOpenTabs(next);
@@ -72,7 +132,7 @@ export function usePreviews(current) {
     return next;
   }, []);
 
-  const setTabRuntime = useCallback((name, value) => {
+  const setTabRuntime = useCallback((name: string, value: PreviewRuntime): void => {
     setRuntime((currentRuntime) => {
       const next = { ...currentRuntime, [name]: value };
       runtimeRef.current = next;
@@ -80,7 +140,7 @@ export function usePreviews(current) {
     });
   }, []);
 
-  const clearTabRuntime = useCallback((name) => {
+  const clearTabRuntime = useCallback((name: string): void => {
     setRuntime((currentRuntime) => {
       if (!(name in currentRuntime)) return currentRuntime;
       const next = { ...currentRuntime };
@@ -90,7 +150,10 @@ export function usePreviews(current) {
     });
   }, []);
 
-  const enqueuePreviewOperation = useCallback((name, operation) => {
+  const enqueuePreviewOperation = useCallback(<T,>(
+    name: string,
+    operation: () => Promise<T> | T,
+  ): Promise<T> => {
     const previous = previewOperations.current.get(name) || Promise.resolve();
     const pending = previous.catch(() => {}).then(operation);
     const tail = pending.catch(() => {});
@@ -100,15 +163,20 @@ export function usePreviews(current) {
     });
   }, []);
 
-  const ensurePreview = useCallback((tab, { quiet = false, allowDetached = false } = {}) => (
+  const ensurePreview = useCallback((
+    tab: SavedPreviewTab,
+    { quiet = false, allowDetached = false }: EnsurePreviewOptions = {},
+  ): Promise<PreviewLease | null> => (
     enqueuePreviewOperation(tab.name, async () => {
       const prior = runtimeRef.current[tab.name];
       if (!quiet || prior?.status !== 'ready') {
         setTabRuntime(tab.name, { ...prior, status: 'ensuring', error: null });
       }
       try {
-        const created = await createPreview(tab.name, { dir: tab.dir });
-        if (typeof created?.url !== 'string' || !created.url) throw new Error('preview URL unavailable');
+        const created = previewLeaseOf(await createPreview(tab.name, { dir: tab.dir }));
+        if (!created) {
+          throw new Error('preview URL unavailable');
+        }
         // A user can close a restoring tab while registration is in flight. Release a late result instead
         // of leaving an invisible server lease behind. A newly chosen directory is intentionally detached
         // until registration succeeds and the tab is added below.
@@ -142,7 +210,7 @@ export function usePreviews(current) {
     // Older builds could persist the same directory under different tmux-window-derived names. Keep
     // the original tab, repair local state, and release the duplicate leases instead of restoring both.
     writeOpenTabs(openTabsRef.current);
-    const duplicateNames = restored.current.duplicateNames.splice(0);
+    const duplicateNames = restoredState.duplicateNames.splice(0);
     void Promise.all(duplicateNames.map((name) => deletePreview(name).catch(() => {})));
     void Promise.all(openTabsRef.current.map((tab) => ensurePreview(tab)));
     const onVisibility = () => {
@@ -157,9 +225,9 @@ export function usePreviews(current) {
   const curPreviewName = current
     ? previewName({ session: current.session?.name, windowName: current.window?.name, windowId: current.window?.id })
     : null;
-  const tabs = openTabs.map((saved) => ({
+  const tabs: StaticPreviewTab[] = openTabs.map((saved) => ({
     ...saved,
-    kind: 'static',
+    kind: 'static' as const,
     status: runtime[saved.name]?.status || 'ensuring',
     url: runtime[saved.name]?.url || null,
     error: runtime[saved.name]?.error || null,
@@ -167,43 +235,47 @@ export function usePreviews(current) {
   const activeName = tabs.find((tab) => tab.name === activeTabName)?.name ?? tabs[0]?.name ?? null;
   const shownPreview = selected ? (tabs.find((tab) => tab.name === activeName) || null) : null;
 
-  const startPreview = useCallback(async (dir) => {
+  const startPreview = useCallback(async (dir: string): Promise<(SavedPreviewTab & PreviewLease) | null> => {
     if (!curPreviewName) return null;
     const sameDirectory = openTabsRef.current.find((item) => item.dir === dir);
     if (sameDirectory) {
-      setPreviewDir(current?.window?.id, dir);
+      setPreviewDir(current?.window?.id ?? undefined, dir);
       setActiveTabName(sameDirectory.name);
       setSelected(true);
       const prior = runtimeRef.current[sameDirectory.name];
-      if (prior?.status === 'ready') return { ...sameDirectory, ...prior };
+      if (prior?.status === 'ready' && prior.url) {
+        return { ...sameDirectory, ...prior, url: prior.url };
+      }
       const pending = previewOperations.current.get(sameDirectory.name);
-      const created = pending ? await pending : await ensurePreview(sameDirectory);
+      const created = pending
+        ? previewLeaseOf(await pending)
+        : await ensurePreview(sameDirectory);
       return created ? { ...sameDirectory, ...created } : null;
     }
     const existing = openTabsRef.current.find((item) => item.name === curPreviewName);
     const tab = { name: curPreviewName, dir, createdAt: existing?.createdAt || Date.now() };
     const created = await ensurePreview(tab, { allowDetached: true });
     if (!created) return null;
-    setPreviewDir(current?.window?.id, dir);
+    setPreviewDir(current?.window?.id ?? undefined, dir);
     commitOpenTabs((currentTabs) => [...currentTabs.filter((item) => item.name !== tab.name), tab]);
     setActiveTabName(tab.name);
     setSelected(true);
     return { ...tab, ...created };
   }, [commitOpenTabs, curPreviewName, current?.window?.id, ensurePreview]);
 
-  const retryPreview = useCallback((name = activeName) => {
+  const retryPreview = useCallback((name: string | null = activeName): Promise<PreviewLease | null> => {
     const target = openTabsRef.current.find((tab) => tab.name === name);
     return target ? ensurePreview(target) : Promise.resolve(null);
   }, [activeName, ensurePreview]);
 
-  const switchTab = useCallback((name) => {
+  const switchTab = useCallback((name: string): void => {
     if (!openTabsRef.current.some((tab) => tab.name === name)) return;
     setActiveTabName(name);
     setSelected(true);
   }, []);
-  const deactivate = useCallback(() => setSelected(false), []);
+  const deactivate = useCallback((): void => setSelected(false), []);
 
-  const closeTab = useCallback(async (name) => {
+  const closeTab = useCallback(async (name: string | null): Promise<void> => {
     if (!name) return;
     setError(null);
     const remaining = commitOpenTabs((currentTabs) => currentTabs.filter((tab) => tab.name !== name));
@@ -227,6 +299,6 @@ export function usePreviews(current) {
     startPreview, retryPreview,
     switchTab, closeTab,
     pane: current?.paneId || null,
-    lastPreviewDir: getPreviewDir(current?.window?.id),
+    lastPreviewDir: getPreviewDir(current?.window?.id ?? undefined),
   };
 }
