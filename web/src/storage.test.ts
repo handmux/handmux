@@ -12,7 +12,13 @@ import {
   setCodexChatLensEnabled,
 } from './storage.js';
 
-const read = (key) => JSON.parse(localStorage.getItem(key));
+const read = (key: string): unknown => JSON.parse(localStorage.getItem(key) ?? 'null');
+
+const snapshotStorage = (): Record<string, string | null> => Object.fromEntries(
+  Array.from({ length: localStorage.length }, (_, index) => localStorage.key(index))
+    .filter((key): key is string => key !== null)
+    .map((key) => [key, localStorage.getItem(key)]),
+);
 
 beforeEach(() => localStorage.clear());
 afterEach(() => vi.restoreAllMocks());
@@ -145,15 +151,9 @@ describe('workspace runtime mapping', () => {
     expect(getBoundSessions()).toEqual(['project', 'current', 'project-restored']);
     expect(localStorage.getItem('tw_chat_draft')).toBe('do not replace $1, @1, or %1 here');
 
-    const snapshot = Object.fromEntries(
-      Array.from({ length: localStorage.length }, (_, index) => localStorage.key(index))
-        .map((key) => [key, localStorage.getItem(key)]),
-    );
+    const snapshot = snapshotStorage();
     expect(applyWorkspaceRestoreMapping(mapping)).toBe(false);
-    expect(Object.fromEntries(
-      Array.from({ length: localStorage.length }, (_, index) => localStorage.key(index))
-        .map((key) => [key, localStorage.getItem(key)]),
-    )).toEqual(snapshot);
+    expect(snapshotStorage()).toEqual(snapshot);
   });
 
   it('accepts a later cumulative partial mapping without replay damage', () => {

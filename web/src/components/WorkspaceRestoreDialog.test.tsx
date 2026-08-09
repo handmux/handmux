@@ -3,6 +3,7 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { readFileSync } from 'node:fs';
 
 import WorkspaceRestoreDialog from './WorkspaceRestoreDialog.jsx';
+import type { WorkspaceRecoveryPlan } from '../workspaceRecovery.js';
 import en from '../i18n/en.js';
 import zh from '../i18n/zh.js';
 import zhTW from '../i18n/zh-TW.js';
@@ -10,7 +11,7 @@ import ja from '../i18n/ja.js';
 import ko from '../i18n/ko.js';
 const styles = readFileSync('src/styles.css', 'utf8');
 
-const plan = (overrides = {}) => ({
+const plan = (overrides: Partial<WorkspaceRecoveryPlan> = {}): WorkspaceRecoveryPlan => ({
   checkpointId: 'checkpoint-a',
   capturedAt: '2026-07-20T01:42:00.000Z',
   changeReason: 'boot-changed',
@@ -46,33 +47,35 @@ describe('WorkspaceRestoreDialog', () => {
   });
 
   it('counts only restored results in partial progress and shows localized per-session failures', () => {
+    const operation = {
+      status: 'partial',
+      progress: { completed: 2, total: 3 },
+      results: [
+        { sourceName: 'api', status: 'restored' },
+        { sourceName: 'web', status: 'failed', errorCode: 'tmux-unavailable', errorMessage: '/Users/secret must not render' },
+      ],
+    };
     render(<WorkspaceRestoreDialog open plan={plan()} onClose={() => {}} onIgnore={() => {}} onRestore={() => {}}
-      operation={{
-        status: 'partial',
-        progress: { completed: 2, total: 3 },
-        results: [
-          { sourceName: 'api', status: 'restored' },
-          { sourceName: 'web', status: 'failed', errorCode: 'tmux-unavailable', errorMessage: '/Users/secret must not render' },
-        ],
-      }} />);
+      operation={operation} />);
     expect(screen.getByText('已恢复 1 / 3')).toBeTruthy();
     expect(screen.getByText(/web：tmux 不可用；请确认 tmux 已运行后重试/)).toBeTruthy();
     expect(screen.queryByText(/Users\/secret/)).toBeNull();
   });
 
   it('renders top-level and per-session safe warning codes without raw server text', () => {
+    const operation = {
+      status: 'succeeded',
+      progress: { completed: 2, total: 2 },
+      warningCodes: ['live-reconcile-failed', 'workspace-unavailable'],
+      warningMessage: '/Users/secret/top-level warning',
+      results: [{
+        sourceName: 'api', status: 'restored',
+        warningCodes: ['cwd-fallback', 'layout-fallback', 'agent-warning', 'restore-warning'],
+        warningMessage: '/Users/secret/per-result warning',
+      }],
+    };
     render(<WorkspaceRestoreDialog open plan={plan()} onClose={() => {}} onIgnore={() => {}} onRestore={() => {}}
-      operation={{
-        status: 'succeeded',
-        progress: { completed: 2, total: 2 },
-        warningCodes: ['live-reconcile-failed', 'workspace-unavailable'],
-        warningMessage: '/Users/secret/top-level warning',
-        results: [{
-          sourceName: 'api', status: 'restored',
-          warningCodes: ['cwd-fallback', 'layout-fallback', 'agent-warning', 'restore-warning'],
-          warningMessage: '/Users/secret/per-result warning',
-        }],
-      }} />);
+      operation={operation} />);
 
     expect(screen.getByText(/实时工作区状态核对失败/)).toBeTruthy();
     expect(screen.getByText(/工作区存储暂时不可用/)).toBeTruthy();
@@ -84,7 +87,7 @@ describe('WorkspaceRestoreDialog', () => {
   });
 
   it('guards a double tap synchronously before React can commit disabled state', () => {
-    const onRestore = vi.fn(() => new Promise(() => {}));
+    const onRestore = vi.fn(() => new Promise<void>(() => {}));
     render(<WorkspaceRestoreDialog open plan={plan()} onClose={() => {}} onIgnore={() => {}} onRestore={onRestore} />);
     const restore = screen.getByRole('button', { name: '恢复' });
     fireEvent.click(restore);
