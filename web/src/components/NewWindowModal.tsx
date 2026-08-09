@@ -8,31 +8,55 @@ import { useBackButton } from '../hooks/useBackButton.js';
 
 const NAME_RE = /^[A-Za-z0-9-]{1,16}$/; // mirrors the server (optional — blank = auto-name)
 
+export interface NewWindowModalProps {
+  open: boolean;
+  onClose: () => void;
+  onCreate: (name: string, cwd?: string, command?: string) => void | Promise<void>;
+  paneId?: string | null;
+  inset?: number;
+}
+
+const cwdOf = (value: unknown): string | null => {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return null;
+  const cwd = (value as Record<string, unknown>).cwd;
+  return typeof cwd === 'string' && cwd ? cwd : null;
+};
+
+const startupCommand = (): string => {
+  const value: unknown = getLastStartupCmd();
+  return typeof value === 'string' ? value : '';
+};
+
 // Create a new window. The name is optional: blank → the server lets tmux auto-name the window;
 // a non-blank name must match the same rule as session names. onCreate(name, cwd) does the actual
 // create+switch (in App) and may throw — we re-enable the button so the user can retry.
 // cwd=undefined means "inherit the pane's current dir" (same as today's behavior when not picked).
-export default function NewWindowModal({ open, onClose, onCreate, paneId, inset = 0 }) {
+export default function NewWindowModal({ open, onClose, onCreate, paneId, inset = 0 }: NewWindowModalProps) {
   const [name, setName] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
-  const [cwd, setCwd] = useState(null);            // null → don't send; server inherits the pane's dir
+  const [cwd, setCwd] = useState<string | null>(null); // null → server inherits the pane's dir
   const [defaultCwd, setDefaultCwd] = useState(''); // pane cwd, shown as the default label
-  const [cmd, setCmd] = useState(getLastStartupCmd()); // startup command; sticky to your last choice
+  const [cmd, setCmd] = useState<string>(startupCommand); // startup command; sticky to your last choice
   const [pickerOpen, setPickerOpen] = useState(false);
-  const inputRef = useRef(null);
+  const inputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
-    if (!open) return;
+    if (!open) return undefined;
+    let cancelled = false;
     setName(''); setError(''); setBusy(false); setCwd(null); setDefaultCwd(''); setPickerOpen(false);
-    setTimeout(() => inputRef.current?.focus(), 0);
-    if (paneId) fetchPaneCwd(paneId).then(({ cwd: c }) => setDefaultCwd(c || '')).catch(() => {});
+    const focusTimer = setTimeout(() => inputRef.current?.focus(), 0);
+    if (paneId) fetchPaneCwd(paneId).then((response) => {
+      const paneCwd = cwdOf(response);
+      if (!cancelled) setDefaultCwd(paneCwd || '');
+    }).catch(() => {});
+    return () => { cancelled = true; clearTimeout(focusTimer); };
   }, [open, paneId]);
   useBackButton(open && pickerOpen, () => setPickerOpen(false));
 
   if (!open) return null;
 
-  const submit = async () => {
+  const submit = async (): Promise<void> => {
     if (busy) return;
     const n = name.trim();
     if (n && !NAME_RE.test(n)) { setError(t('newwindow.name_rule')); return; }

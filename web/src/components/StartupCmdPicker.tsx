@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import type { ChangeEvent } from 'react';
 import { t } from '../i18n';
 import Dropdown from './Dropdown.jsx';
 
@@ -13,16 +14,28 @@ const PRESETS = [
 const CUSTOM = '__custom__';
 const OPTIONS = [...PRESETS, { value: CUSTOM, label: t('startup.custom') }];
 
+export interface StartupCmdPickerProps {
+  value?: string;
+  onChange?: (command: string) => void;
+}
+
 // Pick a startup command via the themed Dropdown, with a free-text "自定义" fallback. Reports the
 // final command string out via onChange ('' = none). `value` seeds the initial selection (e.g. the
 // last-used command), read once at mount — the parent owns the value, this just edits it.
-export default function StartupCmdPicker({ value = '', onChange }) {
+export default function StartupCmdPicker({ value = '', onChange }: StartupCmdPickerProps) {
   const isPreset = PRESETS.some((p) => p.value === value);
   const [mode, setMode] = useState(isPreset ? value : CUSTOM);
   const [custom, setCustom] = useState(isPreset ? '' : value);
 
-  const onPick = (m) => { setMode(m); onChange?.(m === CUSTOM ? custom : m); };
-  const onCustomInput = (e) => { const c = e.target.value; setCustom(c); onChange?.(c); };
+  const onPick = (modeValue: string): void => {
+    setMode(modeValue);
+    onChange?.(modeValue === CUSTOM ? custom : modeValue);
+  };
+  const onCustomInput = (event: ChangeEvent<HTMLInputElement>): void => {
+    const command = event.target.value;
+    setCustom(command);
+    onChange?.(command);
+  };
 
   return (
     <>

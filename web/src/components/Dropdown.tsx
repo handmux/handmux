@@ -1,19 +1,34 @@
 import { useState, useRef, useEffect } from 'react';
+import type { ReactNode } from 'react';
 import { useBackButton } from '../hooks/useBackButton.js';
 
 // Our own themed dropdown — a native <select> can't be styled consistently across iOS/Android, and
 // its wheel picker clashes with the app's dark modal. A field-styled trigger opens a themed menu;
 // it closes on picking an option or on a pointerdown anywhere outside. Pointer-friendly (tap targets,
 // no hover dependency). options: [{ value, label }]. value selects the shown/checked option.
-export default function Dropdown({ value, options, onChange, ariaLabel }) {
+export interface DropdownOption {
+  value: string;
+  label: ReactNode;
+}
+
+export interface DropdownProps {
+  value: string;
+  options: readonly DropdownOption[];
+  onChange?: (value: string) => void;
+  ariaLabel: string;
+}
+
+export default function Dropdown({ value, options, onChange, ariaLabel }: DropdownProps) {
   const [open, setOpen] = useState(false);
-  const rootRef = useRef(null);
+  const rootRef = useRef<HTMLDivElement | null>(null);
   const selected = options.find((o) => o.value === value) || options[0];
 
   // Close when a tap/click lands outside the dropdown (capture phase so it beats other handlers).
   useEffect(() => {
     if (!open) return undefined;
-    const onDocDown = (e) => { if (!rootRef.current?.contains(e.target)) setOpen(false); };
+    const onDocDown = (event: PointerEvent): void => {
+      if (!(event.target instanceof Node) || !rootRef.current?.contains(event.target)) setOpen(false);
+    };
     document.addEventListener('pointerdown', onDocDown, true);
     return () => document.removeEventListener('pointerdown', onDocDown, true);
   }, [open]);

@@ -89,6 +89,14 @@ describe('BindSession', () => {
     expect(target('other')).toBeDefined();
   });
 
+  it('rejects malformed session data at the API boundary', async () => {
+    getSessions.mockResolvedValue([{ id: '$0', name: 7 }]);
+    await render({});
+    await settle();
+    expect(container.querySelector('.bind-error')?.textContent).toContain('校验失败');
+    expect(container.querySelector('.orphan-targets')).toBeNull();
+  });
+
   it('confirm is disabled until something is picked', async () => {
     getSessions.mockResolvedValue([{ id: '$0', name: 'main' }]);
     await render({});

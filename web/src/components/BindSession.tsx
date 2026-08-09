@@ -11,49 +11,94 @@ import { useBackButton } from '../hooks/useBackButton.js';
 // regex is needed on that path.
 const NEW_NAME_RE = /^[A-Za-z0-9-]{1,16}$/;
 
+type BindMode = 'new' | 'existing';
+
+interface HostSession {
+  id?: string;
+  name: string;
+}
+
+export interface BindSessionProps {
+  open: boolean;
+  onClose: () => void;
+  onBound: (name: string) => void | Promise<void>;
+  bound: readonly string[];
+  onAuthFail?: () => void;
+  inset?: number;
+}
+
+const parseSessions = (value: unknown): HostSession[] => {
+  if (!Array.isArray(value)) throw new Error('Sessions API returned an invalid response');
+  return value.map((entry): HostSession => {
+    if (entry === null || typeof entry !== 'object' || Array.isArray(entry)) {
+      throw new Error('Sessions API returned an invalid entry');
+    }
+    const session = entry as Record<string, unknown>;
+    if (typeof session.name !== 'string' || !(session.id === undefined || typeof session.id === 'string')) {
+      throw new Error('Sessions API returned an invalid entry');
+    }
+    return { name: session.name, id: session.id as string | undefined };
+  });
+};
+
+const startupCommand = (): string => {
+  const value: unknown = getLastStartupCmd();
+  return typeof value === 'string' ? value : '';
+};
+
 // Bind a session by PICKING it. Instead of typing a name, we list the sessions that exist on the host
 // and aren't already bound on this device (a fontbtn group, per project convention — no native <select>).
 // A "＋ new" entry flips the card into create mode: name + start dir + startup command, then create+open.
-export default function BindSession({ open, onClose, onBound, bound, onAuthFail, inset = 0 }) {
-  const [sessions, setSessions] = useState([]);
-  const [mode, setMode] = useState('new'); // 'new' (create) | 'existing' (bind a running one) — the top segmented control
-  const [target, setTarget] = useState(null); // null = nothing picked · 'new' · existing session name
+export default function BindSession({ open, onClose, onBound, bound, onAuthFail, inset = 0 }: BindSessionProps) {
+  const [sessions, setSessions] = useState<HostSession[]>([]);
+  const [mode, setMode] = useState<BindMode>('new');
+  const [target, setTarget] = useState<string | null>(null); // null · 'new' · existing name
   const [name, setName] = useState('');        // new-session name (create mode)
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
-  const [cwd, setCwd] = useState(null);
-  const [cmd, setCmd] = useState(getLastStartupCmd()); // startup command for a newly-created session
+  const [cwd, setCwd] = useState<string | null>(null);
+  const [cmd, setCmd] = useState<string>(startupCommand); // command for a newly-created session
   const [pickerOpen, setPickerOpen] = useState(false);
-  const inputRef = useRef(null);
+  const inputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
-    if (!open) return;
+    if (!open) return undefined;
+    let cancelled = false;
     setName(''); setError(''); setBusy(false); setCwd(null); setPickerOpen(false);
     setMode('new'); setTarget('new'); // provisional; flips to "existing" below if there are bindable sessions
     getSessions()
-      .then((s) => {
-        const list = Array.isArray(s) ? s : [];
+      .then((response) => {
+        const list = parseSessions(response);
+        if (cancelled) return;
         setSessions(list);
         // Default to picking an existing session when there is one to bind (that's the common case);
         // fall back to create mode only when nothing is bindable.
         if (list.some((x) => !bound.includes(x.name))) { setMode('existing'); setTarget(null); }
       })
-      .catch((e) => { if (e instanceof UnauthorizedError) onAuthFail?.(); else setError(t('bind.checkFailed')); });
+      .catch((caught) => {
+        if (cancelled) return;
+        if (caught instanceof UnauthorizedError) onAuthFail?.(); else setError(t('bind.checkFailed'));
+      });
+    return () => { cancelled = true; };
   }, [open]);
 
   // Focus the name field the moment we enter create mode so the soft keyboard pops right up.
-  useEffect(() => { if (target === 'new') setTimeout(() => inputRef.current?.focus(), 0); }, [target]);
+  useEffect(() => {
+    if (target !== 'new') return undefined;
+    const timer = setTimeout(() => inputRef.current?.focus(), 0);
+    return () => clearTimeout(timer);
+  }, [target]);
   useBackButton(open && pickerOpen, () => setPickerOpen(false));
 
   if (!open) return null;
 
   const avail = sessions.filter((s) => !bound.includes(s.name)); // 已绑定的不再展示
 
-  const submit = async () => {
+  const submit = async (): Promise<void> => {
     if (busy || !target) return;
 
     // Existing session picked → it already exists, just open it (spaced names welcome).
-    if (target !== 'new') { onBound(target); return; }
+    if (target !== 'new') { void onBound(target); return; }
 
     // Create mode: validate, create, then open.
     const n = name.trim();
@@ -64,9 +109,9 @@ export default function BindSession({ open, onClose, onBound, bound, onAuthFail,
     setLastStartupCmd(cmd); // remember the launcher for next time
     try {
       await createSession(n, cwd || undefined, cmd || undefined);
-      onBound(n); // session is now live → bindSession/selectSession opens it
-    } catch (e) {
-      if (e instanceof UnauthorizedError) onAuthFail?.();
+      void onBound(n); // session is now live → bindSession/selectSession opens it
+    } catch (caught) {
+      if (caught instanceof UnauthorizedError) onAuthFail?.();
       else setError(t('bind.createFailed'));
       setBusy(false);
     }
