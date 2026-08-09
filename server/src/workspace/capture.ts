@@ -34,11 +34,11 @@ export interface CapturedTopology {
   sessions: WorkspaceSession[];
   windows: WorkspaceWindow[];
 }
-interface TmuxCaptureAdapter {
+export interface TmuxCaptureAdapter {
   topologyFingerprint(): Promise<unknown>;
   captureTopology(): Promise<CapturedTopology | { status: 'unknown'; error?: unknown }>;
 }
-interface CodexDiscovery {
+export interface CodexDiscovery {
   discover(paneId: string): Promise<{ managed?: boolean; threadId?: unknown } | null | undefined>;
 }
 

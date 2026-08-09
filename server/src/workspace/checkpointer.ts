@@ -1,12 +1,47 @@
 import { captureWorkspace } from './capture.js';
 import { detectEnvironmentChange } from './environment.js';
 import { fingerprintSnapshot } from './schema.js';
+import type { CodexDiscovery, TmuxCaptureAdapter, WorkspaceCaptureResult } from './capture.js';
+import type { EnvironmentIdentity, ObservedEnvironment } from './environment.js';
+import type { WorkspaceSnapshot } from './schema.js';
 
-function sameSnapshot(left, right) {
+type ReconcileCause = 'timer' | 'start' | 'event' | 'confirmed-empty' | 'shutdown' | string;
+type ReconcileResult = { status: string; snapshot?: WorkspaceSnapshot; [key: string]: unknown };
+interface LockHandle { release(): Promise<void> }
+interface WriterLock { tryAcquire(options: { operationId: string }): Promise<LockHandle | null> }
+type LiveReadResult =
+  | { status: 'ok'; value: WorkspaceSnapshot }
+  | { status: 'empty' }
+  | { status: 'corrupt'; error?: string };
+interface CheckpointerStore {
+  readLive(): Promise<LiveReadResult>;
+  writeLive(snapshot: WorkspaceSnapshot): Promise<unknown>;
+  archiveEnvironment(options: {
+    endedReason: 'boot-changed' | 'tmux-changed';
+    detectedAt: string;
+  }): Promise<{ status: string; [key: string]: unknown }>;
+}
+type TimerHandle = unknown;
+type SetTimer = (callback: () => void, delay: number) => TimerHandle;
+type ClearTimer = (handle: TimerHandle) => void;
+
+export interface CheckpointerOptions {
+  store: CheckpointerStore;
+  observeEnvironment(): Promise<ObservedEnvironment | null | undefined>;
+  lock: WriterLock;
+  capture(environment: EnvironmentIdentity): Promise<WorkspaceCaptureResult>;
+  setInterval?: SetTimer;
+  clearInterval?: ClearTimer;
+  setTimeout?: SetTimer;
+  clearTimeout?: ClearTimer;
+  now?: () => number;
+}
+
+function sameSnapshot(left: WorkspaceSnapshot, right: WorkspaceSnapshot): boolean {
   return fingerprintSnapshot(left) === fingerprintSnapshot(right);
 }
 
-function snapshotEnvironment(observed) {
+function snapshotEnvironment(observed: Exclude<ObservedEnvironment, { status: 'unknown' }>): EnvironmentIdentity {
   return {
     id: observed.id,
     bootIdentity: observed.bootIdentity,
@@ -14,7 +49,10 @@ function snapshotEnvironment(observed) {
   };
 }
 
-async function reconcileOnce(deps, cause) {
+async function reconcileOnce(
+  deps: Required<CheckpointerOptions> & { scheduleRetry?: () => void },
+  cause: ReconcileCause,
+): Promise<ReconcileResult> {
   const handle = await deps.lock.tryAcquire({ operationId: `checkpointer:${cause}` });
   if (!handle) return { status: 'locked' };
   try {
@@ -36,7 +74,8 @@ async function reconcileOnce(deps, cause) {
       return { status: 'unknown' };
     }
 
-    const captured = await deps.capture(snapshotEnvironment(change.current ?? observed));
+    const current = 'current' in change ? change.current : observed;
+    const captured = await deps.capture(snapshotEnvironment(current));
     if (captured.status === 'changed-during-capture') {
       deps.scheduleRetry?.();
       return captured;
@@ -61,25 +100,31 @@ async function reconcileOnce(deps, cause) {
 }
 
 export function createCheckpointer({
-  setInterval = globalThis.setInterval,
-  clearInterval = globalThis.clearInterval,
-  setTimeout = globalThis.setTimeout,
-  clearTimeout = globalThis.clearTimeout,
+  setInterval = globalThis.setInterval as SetTimer,
+  clearInterval = globalThis.clearInterval as ClearTimer,
+  setTimeout = globalThis.setTimeout as SetTimer,
+  clearTimeout = globalThis.clearTimeout as ClearTimer,
   now = Date.now,
   ...rest
-} = {}) {
-  const deps = { ...rest, now, setInterval, clearInterval, setTimeout, clearTimeout };
-  let interval = null;
-  let debounce = null;
-  let running = null;
-  let pendingConfirmation = null;
+}: CheckpointerOptions) {
+  const deps: Required<CheckpointerOptions> & { scheduleRetry?: () => void } = {
+    ...rest, now, setInterval, clearInterval, setTimeout, clearTimeout,
+  };
+  let interval: TimerHandle | null = null;
+  let debounce: TimerHandle | null = null;
+  let running: Promise<ReconcileResult> | null = null;
+  let pendingConfirmation: {
+    promise: Promise<ReconcileResult>;
+    resolve: (result: ReconcileResult | PromiseLike<ReconcileResult>) => void;
+    reject: (reason?: unknown) => void;
+  } | null = null;
   let stopping = false;
   let stopped = false;
-  let stopPromise = null;
-  let lastResult = null;
-  let lastError = null;
+  let stopPromise: Promise<void> | null = null;
+  let lastResult: ReconcileResult | null = null;
+  let lastError: string | null = null;
 
-  function launch(cause) {
+  function launch(cause: ReconcileCause): Promise<ReconcileResult> {
     const current = reconcileOnce(deps, cause);
     running = current;
     const settled = () => {
@@ -102,25 +147,25 @@ export function createCheckpointer({
     return current;
   }
 
-  function confirmEmpty() {
+  function confirmEmpty(): Promise<ReconcileResult> {
     if (stopping || stopped) return Promise.resolve({ status: 'stopped' });
     if (!running) return launch('confirmed-empty');
     if (!pendingConfirmation) {
-      let resolve;
-      let reject;
-      const promise = new Promise((onResolve, onReject) => { resolve = onResolve; reject = onReject; });
+      let resolve!: (result: ReconcileResult | PromiseLike<ReconcileResult>) => void;
+      let reject!: (reason?: unknown) => void;
+      const promise = new Promise<ReconcileResult>((onResolve, onReject) => { resolve = onResolve; reject = onReject; });
       pendingConfirmation = { promise, resolve, reject };
     }
     return pendingConfirmation.promise;
   }
 
-  function reconcile(cause = 'timer') {
+  function reconcile(cause: ReconcileCause = 'timer'): Promise<ReconcileResult> {
     if (cause === 'confirmed-empty') return confirmEmpty();
     if (stopping || stopped) return Promise.resolve({ status: 'stopped' });
     return running || launch(cause);
   }
 
-  function requestReconcile() {
+  function requestReconcile(): void {
     if (stopping || stopped) return;
     clearTimeout(debounce);
     debounce = setTimeout(() => {
@@ -129,6 +174,9 @@ export function createCheckpointer({
     }, 2_000);
   }
   deps.scheduleRetry = requestReconcile;
+  const outstanding = (): Promise<ReconcileResult> | null => (
+    running ?? pendingConfirmation?.promise ?? null
+  );
 
   return {
     reconcile,
@@ -159,12 +207,16 @@ export function createCheckpointer({
         if (debounce) clearTimeout(debounce);
         interval = null;
         debounce = null;
-        while (running || pendingConfirmation) {
-          await (running || pendingConfirmation.promise).catch(() => {});
+        let pending = outstanding();
+        while (pending) {
+          await pending.catch(() => {});
+          pending = outstanding();
         }
         await launch('shutdown').catch(() => {});
-        while (running || pendingConfirmation) {
-          await (running || pendingConfirmation.promise).catch(() => {});
+        pending = outstanding();
+        while (pending) {
+          await pending.catch(() => {});
+          pending = outstanding();
         }
         stopped = true;
       })();
@@ -175,21 +227,35 @@ export function createCheckpointer({
 
 export function createWorkspaceBackground({
   store, tmux, observeEnvironment, lock, stateFile, getCodexApp = () => null, codexSessions, now = Date.now,
-} = {}) {
+}: {
+  store: CheckpointerStore;
+  tmux: TmuxCaptureAdapter;
+  observeEnvironment: () => Promise<ObservedEnvironment | null | undefined>;
+  lock: WriterLock;
+  stateFile: string;
+  getCodexApp?: () => CodexDiscovery | null | undefined;
+  codexSessions?: string;
+  now?: () => number;
+}) {
   return createCheckpointer({
     store,
     observeEnvironment,
     lock,
     now,
     capture: (environment) => captureWorkspace({
-      tmux, stateFile, environment, codexApp: getCodexApp(), codexSessions, now,
+      tmux, stateFile, environment, codexApp: getCodexApp() ?? undefined, codexSessions, now,
     }),
   });
 }
 
-export function createGracefulShutdown({ events, workspace, browser, server }) {
-  let closing = null;
-  return function shutdown() {
+export function createGracefulShutdown({ events, workspace, browser, server }: {
+  events: { stop(): Promise<unknown> };
+  workspace: { stop(): Promise<unknown> };
+  browser?: { close(): Promise<unknown> } | null;
+  server: { close(): void };
+}): () => Promise<void> {
+  let closing: Promise<void> | null = null;
+  return function shutdown(): Promise<void> {
     if (!closing) {
       closing = (async () => {
         try {
