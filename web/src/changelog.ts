@@ -1,3 +1,11 @@
+export interface ChangelogEntry {
+  version?: string;
+  date: string;
+  label?: Record<string, string>;
+  highlight: Record<string, string>;
+  items: Record<string, string[]>;
+}
+
 // User-facing changelog — newest first, keyed by RELEASE VERSION (not date). Hand-curated (concise
 // "what changed" lines, user-felt highlights, not git noise); add an entry when shipping a release.
 // Shape per entry:
@@ -9,7 +17,7 @@
 //              terse). release.sh mirrors the top few versions' highlights into package.json.
 //   items:     { zh, en } — parallel arrays (same order/count per locale), the full per-release list.
 // `entryId`/`LATEST_RELEASE` use `version` when present, else `date`, as the stable unread-dot id.
-export const CHANGELOG = [
+export const CHANGELOG: ChangelogEntry[] = [
   {
     version: '0.23.0',
     date: '2026-08-09',
@@ -687,5 +695,5 @@ export const CHANGELOG = [
 ];
 
 // Stable id for the unread-dot: the version when public, else the date. LATEST_RELEASE is the top entry's id.
-export const entryId = (e) => e.version || e.date;
+export const entryId = (entry: ChangelogEntry): string => entry.version || entry.date;
 export const LATEST_RELEASE = CHANGELOG[0] ? entryId(CHANGELOG[0]) : null;

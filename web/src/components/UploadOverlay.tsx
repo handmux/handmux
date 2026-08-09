@@ -2,13 +2,14 @@ import { useUploadJob, cancelUpload } from '../uploadJob.js';
 import { t } from '../i18n';
 import { useEscapeLayer } from '../hooks/useEscapeLayer.js';
 import { OverlayPortal } from '../overlays/OverlayHost.js';
+import type { ReactNode } from 'react';
 
 // App-wide upload lock: while a file is uploading, a full-screen backdrop swallows every tap so the
 // user can't stumble into other actions mid-transfer — the ONLY control is Cancel. Two phases:
 // 'sending' shows a real % bar (bytes leaving the browser); once the body is flushed it flips to
 // 'processing' — an indeterminate spinner labelled "receiving on server", because past 100%-sent the
 // remaining wait (server write + response, often behind nginx/a tunnel) has nothing left to measure.
-export default function UploadOverlay() {
+export default function UploadOverlay(): ReactNode {
   const job = useUploadJob();
   useEscapeLayer(job.active, cancelUpload);
   if (!job.active) return null;

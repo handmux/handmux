@@ -7,7 +7,7 @@ vi.mock('../src/api.js', () => ({
   UnauthorizedError: class UnauthorizedError extends Error {},
 }));
 
-import UsagePage from '../src/components/UsagePage.jsx';
+import UsagePage, { parseUsageSnapshot } from '../src/components/UsagePage.jsx';
 import { getUsage, UnauthorizedError } from '../src/api.js';
 
 let container, root;
@@ -23,6 +23,22 @@ const render = (props) => act(async () => root.render(<UsagePage open onClose={(
 const settle = async () => { await act(async () => {}); await act(async () => {}); };
 
 describe('UsagePage', () => {
+  it('validates and clamps usage snapshots at the API boundary', () => {
+    expect(parseUsageSnapshot({
+      claude: { updatedAt: 'now', rateLimits: { fiveHour: { usedPercent: 140 } } },
+      codex: { rateLimits: { primary: { usedPercent: -5, windowMinutes: '300' } } },
+    })).toEqual({
+      claude: {
+        rateLimits: {
+          fiveHour: { usedPercent: 100 }, sevenDay: null,
+          sevenDayOpus: null, sevenDaySonnet: null,
+        },
+      },
+      codex: { rateLimits: { primary: { usedPercent: 0 }, secondary: null } },
+    });
+    expect(parseUsageSnapshot([])).toBeNull();
+  });
+
   it('renders a Codex quota bar with percent + a freshness stamp', async () => {
     getUsage.mockResolvedValue({
       claude: null,

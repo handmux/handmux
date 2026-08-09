@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import type { ReactNode } from 'react';
 import { t } from '../i18n';
 import { isStandalone } from '../push.js';
 
@@ -10,7 +11,12 @@ import { isStandalone } from '../push.js';
 // only iOS browser that can install a PWA).
 const DISMISS_KEY = 'tw_a2hs_dismissed';
 
-const ua = () => (typeof navigator !== 'undefined' ? navigator.userAgent || '' : '');
+interface BeforeInstallPromptEvent extends Event {
+  prompt: () => Promise<void> | void;
+  userChoice: Promise<unknown>;
+}
+
+const ua = (): string => (typeof navigator !== 'undefined' ? navigator.userAgent || '' : '');
 // iPadOS Safari masquerades as desktop Macintosh, so treat a touch-capable Mac as iOS too.
 const isIOS = () => /iP(hone|ad|od)/.test(ua())
   || (/Macintosh/.test(ua()) && typeof navigator !== 'undefined' && navigator.maxTouchPoints > 1);
@@ -21,14 +27,17 @@ const isIOSSafari = () => isIOS() && /Safari/.test(ua()) && !/(CriOS|FxiOS|EdgiO
 
 export default function AddToHome() {
   const [show, setShow] = useState(false);
-  const [deferred, setDeferred] = useState(null); // captured beforeinstallprompt (Android/Chrome)
+  const [deferred, setDeferred] = useState<BeforeInstallPromptEvent | null>(null);
 
   useEffect(() => {
     if (isStandalone()) return undefined;                 // already installed
     if (!isIOS() && !isAndroid()) return undefined;        // a phone-only pitch
     try { if (localStorage.getItem(DISMISS_KEY) === '1') return undefined; } catch { /* private mode */ }
 
-    const onBip = (e) => { e.preventDefault(); setDeferred(e); };
+    const onBip: EventListener = (event) => {
+      event.preventDefault();
+      setDeferred(event as BeforeInstallPromptEvent);
+    };
     window.addEventListener('beforeinstallprompt', onBip);
     setShow(true);                                         // pop on entry
     return () => window.removeEventListener('beforeinstallprompt', onBip);
@@ -36,11 +45,11 @@ export default function AddToHome() {
 
   if (!show) return null;
 
-  const dismiss = () => {
+  const dismiss = (): void => {
     try { localStorage.setItem(DISMISS_KEY, '1'); } catch { /* private mode: hide for this load only */ }
     setShow(false);
   };
-  const install = async () => {
+  const install = async (): Promise<void> => {
     if (!deferred) return;
     deferred.prompt();
     try { await deferred.userChoice; } catch { /* ignore */ }
@@ -48,10 +57,12 @@ export default function AddToHome() {
   };
 
   // Pick the mode → the sub-line (why/how) and, on Android, a real one-tap install button.
-  let mode, sub, cta = null;
+  let mode: 'install' | 'ios-other' | 'ios' | 'android';
+  let sub: string;
+  let cta: ReactNode = null;
   if (deferred) {
     mode = 'install'; sub = t('a2hs.lead');
-    cta = <button className="a2hs-banner-cta" onClick={install}>{t('a2hs.install')}</button>;
+    cta = <button className="a2hs-banner-cta" onClick={() => void install()}>{t('a2hs.install')}</button>;
   } else if (isIOS() && !isIOSSafari()) {
     mode = 'ios-other'; sub = t('a2hs.iosOpenSafari');
   } else if (isIOS()) {

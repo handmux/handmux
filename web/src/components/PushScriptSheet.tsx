@@ -1,11 +1,21 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import type { ReactNode } from 'react';
 import { t } from '../i18n';
+
+interface PushScriptContentProps {
+  pushKey?: string | null;
+  notifyOn: boolean;
+}
 
 // Self-contained "script push" doc module: three standalone command examples (all devices / a session /
 // this device), the two optional flags as a footnote, and — deliberately prominent — the reliability
 // boundary. The device example inlines THIS device's real key so it's copy-and-run.
-export function PushScriptContent({ pushKey, notifyOn }) {
+export function PushScriptContent({ pushKey, notifyOn }: PushScriptContentProps) {
   const [copied, setCopied] = useState('');
+  const clearTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => {
+    if (clearTimerRef.current) clearTimeout(clearTimerRef.current);
+  }, []);
 
   const base = 'handmux push "构建完成" "耗时 3m12s"';
   const hasKey = !!(notifyOn && pushKey);
@@ -13,18 +23,25 @@ export function PushScriptContent({ pushKey, notifyOn }) {
   const cmdSession = `${base} --session ${t('scriptPush.session_placeholder')}`;
   const cmdDevice = `${base} --device ${hasKey ? pushKey : t('scriptPush.device_placeholder')}`;
 
-  const copy = async (text, which) => {
-    try { await navigator.clipboard.writeText(text); setCopied(which); setTimeout(() => setCopied(''), 1500); }
+  const copy = async (text: string, which: string): Promise<void> => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(which);
+      if (clearTimerRef.current) clearTimeout(clearTimerRef.current);
+      clearTimerRef.current = setTimeout(() => setCopied(''), 1500);
+    }
     catch { /* clipboard blocked — user can select manually */ }
   };
-  const copyLabel = (which) => (copied === which ? t('scriptPush.copied') : t('common.copy'));
+  const copyLabel = (which: string): string => (
+    copied === which ? t('scriptPush.copied') : t('common.copy')
+  );
 
-  const example = (which, label, cmd, note) => (
+  const example = (which: string, label: string, cmd: string, note?: string): ReactNode => (
     <div className="push-script-block">
       <div className="push-script-label">{label}</div>
       <pre className="push-script-cmd"><code>{cmd}</code></pre>
       {note && <div className="push-script-hint">{note}</div>}
-      <button className="fontbtn" onClick={() => copy(cmd, which)}>{copyLabel(which)}</button>
+      <button className="fontbtn" onClick={() => void copy(cmd, which)}>{copyLabel(which)}</button>
     </div>
   );
 
@@ -50,7 +67,9 @@ export function PushScriptContent({ pushKey, notifyOn }) {
   );
 }
 
-export default function PushScriptSheet({ open, pushKey, notifyOn, onClose }) {
+export default function PushScriptSheet({
+  open, pushKey, notifyOn, onClose,
+}: PushScriptContentProps & { open: boolean; onClose: () => void }) {
   if (!open) return null;
   return (
     <>

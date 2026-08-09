@@ -4,7 +4,7 @@ import { t, getLangCode } from '../i18n';
 // Full-screen "What's new" page — a read-only list of every release (newest first). Opened from Settings;
 // App marks the latest entry seen on open (clearing the unread dot). The separate pre-upgrade notice in
 // Settings is intentionally compact; this page remains the complete historical record.
-export default function Changelog({ open, onClose }) {
+export default function Changelog({ open, onClose }: { open: boolean; onClose: () => void }) {
   if (!open) return null;
   return (
     <div className="settings-page changelog-page" role="dialog" aria-label={t('changelog.title')} aria-modal="true">
