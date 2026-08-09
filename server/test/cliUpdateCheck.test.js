@@ -69,6 +69,10 @@ describe('parseView', () => {
     expect(parseView(viewJson({ version: 'nope', whatsNew: WN }))).toEqual({ latest: null, whatsNew: WN });
     expect(parseView('not json')).toEqual({ latest: null, whatsNew: null });
   });
+  it('filters malformed whatsNew entries from npm JSON', () => {
+    expect(parseView(viewJson({ version: '1.4.2', whatsNew: [{ version: 7 }, ...WN] })))
+      .toEqual({ latest: '1.4.2', whatsNew: WN });
+  });
 });
 
 describe('fetchLatest', () => {
@@ -98,6 +102,8 @@ describe('cache round-trip', () => {
     expect(fs.statSync(path.join(home, '.handmux')).mode & 0o777).toBe(0o700);
     expect(fs.statSync(updateCachePath(home)).mode & 0o777).toBe(0o600);
     fs.writeFileSync(updateCachePath(home), 'not json');
+    expect(readCache(home)).toBeNull();
+    fs.writeFileSync(updateCachePath(home), '[]');
     expect(readCache(home)).toBeNull();
   });
 });
