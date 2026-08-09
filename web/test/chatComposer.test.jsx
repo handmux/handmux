@@ -824,8 +824,8 @@ describe('ChatComposer', () => {
     fireEvent.click(screen.getByText('再整理结果').closest('.cc-queue-item'));
     await waitFor(() => expect(beginCodexQueuedEdit).toHaveBeenCalledWith('%1', 'queued-2'));
     const editor = await screen.findByRole('dialog', { name: '编辑排队消息' });
-    expect(editor.parentElement?.parentElement).toBe(document.body);
-    expect(editor.parentElement?.style.bottom).toBe('280px');
+    expect(editor.closest('.overlay-layer')?.parentElement).toBe(document.body);
+    expect(editor.closest('.overlay-layer')?.style.getPropertyValue('--overlay-keyboard-inset')).toBe('280px');
     const draft = editor.querySelector('textarea');
     expect(draft.value).toBe('再整理结果');
     expect(draft.selectionStart).toBe(draft.value.length);
@@ -839,6 +839,7 @@ describe('ChatComposer', () => {
     fireEvent.click(screen.getByRole('button', { name: '删除排队消息' }));
     const deleteDialog = screen.getByRole('alertdialog', { name: '删除这条排队消息？' });
     expect(deleteDialog.classList.contains('cc-confirm-dialog')).toBe(true);
+    expect(deleteDialog.closest('.overlay-layer')?.style.getPropertyValue('--overlay-keyboard-inset')).toBe('280px');
     expect(removeCodexQueuedMessage).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('button', { name: '删除' }));
     await waitFor(() => expect(removeCodexQueuedMessage).toHaveBeenCalledWith('%1', 'queued-2'));

@@ -1,5 +1,4 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
 import {
   sendText, sendCodexMessage, compactCodexSession, clearCodexSession, interruptCodexSession,
   steerCodexQueuedMessage, removeCodexQueuedMessage, beginCodexQueuedEdit,
@@ -24,6 +23,7 @@ import { DEFAULT_SERVER_SHORTCUTS, mergeShortcuts, shortcutIdentity } from '../s
 import { applyShortcutLayout, loadShortcutLayout } from '../shortcutLayout.js';
 import { t } from '../i18n';
 import { useBackButton } from '../hooks/useBackButton.js';
+import { OverlayPortal } from '../overlays/OverlayHost.js';
 import DiscreteSlider from './DiscreteSlider.jsx';
 import CodexGoalMenu, { CodexGoalBar } from './CodexGoalMenu.jsx';
 import { CodexPlanBar, CodexPlanSheet, codexPlanSteps } from './CodexPlan.jsx';
@@ -1197,62 +1197,62 @@ export default function ChatComposer({
           </div>
         </div>
       </div>
-      {queueEditor && createPortal(
-        <div className="settings-confirm-backdrop cc-queue-dialog-backdrop chat-tone-surface"
-          data-chat-tone={chatTone} style={{ bottom: `${Math.max(0, Number(keyboardInset) || 0)}px` }}
+      {queueEditor && (
+        <OverlayPortal chatTone={chatTone} keyboardInset={keyboardInset}>
+          <div className="settings-confirm-backdrop cc-queue-dialog-backdrop"
           onClick={dismissQueueEditor}>
-          <div className="settings-confirm cc-queue-edit-dialog" role="dialog" aria-modal="true"
-            aria-label={t('chat.queue.editTitle')} onClick={(event) => event.stopPropagation()}>
-            <h2>{t('chat.queue.editTitle')}</h2>
-            <textarea ref={queueEditorInputRef} autoFocus value={queueEditor.draft} disabled={queueEditor.busy}
-              aria-label={t('chat.queue.editTitle')} placeholder={t('chat.queue.editPlaceholder')}
-              onChange={(event) => updateQueueEditor({ draft: event.target.value, error: '' })} />
-            {queueEditor.error && <p className="cc-queue-dialog-error" role="status">{queueEditor.error}</p>}
-            <div className="settings-confirm-actions">
-              <button type="button" disabled={queueEditor.busy}
-                onClick={dismissQueueEditor}>{t('common.cancel')}</button>
-              <button type="button" disabled={queueEditor.busy || !queueEditor.token || !queueEditor.draft.trim()}
-                onClick={() => void saveQueueEditor()}>{t('common.save')}</button>
+            <div className="settings-confirm cc-queue-edit-dialog" role="dialog" aria-modal="true"
+              aria-label={t('chat.queue.editTitle')} onClick={(event) => event.stopPropagation()}>
+              <h2>{t('chat.queue.editTitle')}</h2>
+              <textarea ref={queueEditorInputRef} autoFocus value={queueEditor.draft} disabled={queueEditor.busy}
+                aria-label={t('chat.queue.editTitle')} placeholder={t('chat.queue.editPlaceholder')}
+                onChange={(event) => updateQueueEditor({ draft: event.target.value, error: '' })} />
+              {queueEditor.error && <p className="cc-queue-dialog-error" role="status">{queueEditor.error}</p>}
+              <div className="settings-confirm-actions">
+                <button type="button" disabled={queueEditor.busy}
+                  onClick={dismissQueueEditor}>{t('common.cancel')}</button>
+                <button type="button" disabled={queueEditor.busy || !queueEditor.token || !queueEditor.draft.trim()}
+                  onClick={() => void saveQueueEditor()}>{t('common.save')}</button>
+              </div>
             </div>
           </div>
-        </div>,
-        document.body,
+        </OverlayPortal>
       )}
-      {queueDelete && createPortal(
-        <div className="settings-confirm-backdrop cc-queue-dialog-backdrop chat-tone-surface"
-          data-chat-tone={chatTone}
-          onClick={() => setQueueDelete(null)}>
-          <div className="settings-confirm cc-confirm-dialog" role="alertdialog" aria-modal="true"
-            aria-label={t('chat.queue.removeTitle')} onClick={(event) => event.stopPropagation()}>
-            <h2>{t('chat.queue.removeTitle')}</h2>
-            <p>{t('chat.queue.removeBody')}</p>
-            <div className="settings-confirm-actions">
-              <button type="button" autoFocus disabled={!!queueAction}
-                onClick={() => setQueueDelete(null)}>{t('common.cancel')}</button>
-              <button type="button" className="danger" disabled={!!queueAction}
-                onClick={() => void confirmQueueDelete()}>{t('common.delete')}</button>
+      {queueDelete && (
+        <OverlayPortal chatTone={chatTone} keyboardInset={keyboardInset}>
+          <div className="settings-confirm-backdrop cc-queue-dialog-backdrop"
+            onClick={() => setQueueDelete(null)}>
+            <div className="settings-confirm cc-confirm-dialog" role="alertdialog" aria-modal="true"
+              aria-label={t('chat.queue.removeTitle')} onClick={(event) => event.stopPropagation()}>
+              <h2>{t('chat.queue.removeTitle')}</h2>
+              <p>{t('chat.queue.removeBody')}</p>
+              <div className="settings-confirm-actions">
+                <button type="button" autoFocus disabled={!!queueAction}
+                  onClick={() => setQueueDelete(null)}>{t('common.cancel')}</button>
+                <button type="button" className="danger" disabled={!!queueAction}
+                  onClick={() => void confirmQueueDelete()}>{t('common.delete')}</button>
+              </div>
             </div>
           </div>
-        </div>,
-        document.body,
+        </OverlayPortal>
       )}
-      {stopConfirm && createPortal(
-        <div className="settings-confirm-backdrop cc-queue-dialog-backdrop chat-tone-surface"
-          data-chat-tone={chatTone} style={{ bottom: `${Math.max(0, Number(keyboardInset) || 0)}px` }}
-          onClick={() => setStopConfirm(false)}>
-          <div className="settings-confirm cc-confirm-dialog" role="alertdialog" aria-modal="true"
-            aria-label={t('chat.stopTitle')} onClick={(event) => event.stopPropagation()}>
-            <h2>{t('chat.stopTitle')}</h2>
-            <p>{t('chat.stopBody')}</p>
-            <div className="settings-confirm-actions">
-              <button type="button" autoFocus disabled={stopping}
-                onClick={() => setStopConfirm(false)}>{t('common.cancel')}</button>
-              <button type="button" className="danger" disabled={stopping}
-                onClick={confirmStop}>{t('chat.stop')}</button>
+      {stopConfirm && (
+        <OverlayPortal chatTone={chatTone} keyboardInset={keyboardInset}>
+          <div className="settings-confirm-backdrop cc-queue-dialog-backdrop"
+            onClick={() => setStopConfirm(false)}>
+            <div className="settings-confirm cc-confirm-dialog" role="alertdialog" aria-modal="true"
+              aria-label={t('chat.stopTitle')} onClick={(event) => event.stopPropagation()}>
+              <h2>{t('chat.stopTitle')}</h2>
+              <p>{t('chat.stopBody')}</p>
+              <div className="settings-confirm-actions">
+                <button type="button" autoFocus disabled={stopping}
+                  onClick={() => setStopConfirm(false)}>{t('common.cancel')}</button>
+                <button type="button" className="danger" disabled={stopping}
+                  onClick={confirmStop}>{t('chat.stop')}</button>
+              </div>
             </div>
           </div>
-        </div>,
-        document.body,
+        </OverlayPortal>
       )}
       {notice && <div className="cc-notice" role="status">{notice}</div>}
       <CodexPlanSheet open={planOpen} title={t('chat.plan.currentTitle')} plan={activePlan}
