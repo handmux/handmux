@@ -1,7 +1,9 @@
 // Lens switch — a ONE-TAP toggle between 终端 / 对话 (not a dropdown or a segmented pair). Tapping flips
 // the view. The visible label names the TARGET mode, matching the aria-label/title action, while the swap
 // glyph (two opposed arrows) reinforces that it changes views. Rendered by App ONLY for agent panes.
-const LABEL = { terminal: '终端', chat: '对话' };
+export type WorkspaceLens = 'terminal' | 'chat';
+
+const LABEL: Record<WorkspaceLens, string> = { terminal: '终端', chat: '对话' };
 
 // Two stacked horizontal arrows pointing opposite ways — the standard iOS swap icon. currentColor so it
 // inherits the button's text colour in either theme.
@@ -15,7 +17,12 @@ function SwapIcon() {
   );
 }
 
-export default function LensSwitch({ value, onChange }) {
+export interface LensSwitchProps {
+  value: WorkspaceLens;
+  onChange: (lens: WorkspaceLens) => void;
+}
+
+export default function LensSwitch({ value, onChange }: LensSwitchProps) {
   const next = value === 'chat' ? 'terminal' : 'chat';
   return (
     <button

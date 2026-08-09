@@ -19,20 +19,63 @@ const SEAM = 2;
 const NARROW_PX = 52;
 const FLAT_PX = 34;
 
-const fin = (n) => typeof n === 'number' && Number.isFinite(n);
+export interface PaneLayoutSource {
+  id: string;
+  active?: boolean;
+  command?: string | null;
+  left?: number | null;
+  top?: number | null;
+  width?: number | null;
+  height?: number | null;
+}
+
+export interface PaneGeometry extends PaneLayoutSource {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+}
+
+export interface PaneLayoutCell {
+  id: string;
+  active: boolean;
+  command?: string | null;
+  seq: number;
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+  cols: number;
+  rows: number;
+}
+
+export interface PaneMapLayout {
+  w: number;
+  h: number;
+  cells: PaneLayoutCell[];
+}
+
+export type PaneCellFit = '' | 'flat' | 'narrow' | 'tiny';
+
+const fin = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value);
 
 // True when panes is non-empty and every pane carries finite left/top/width/height, so a map can be
 // drawn. When false, callers fall back to the flat pane list.
-export function hasGeometry(panes) {
+export function hasGeometry(panes: unknown): panes is PaneGeometry[] {
   return Array.isArray(panes) && panes.length > 0 &&
-    panes.every((p) => fin(p.left) && fin(p.top) && fin(p.width) && fin(p.height));
+    panes.every((pane) => pane !== null && typeof pane === 'object' && !Array.isArray(pane)
+      && typeof pane.id === 'string'
+      && fin(pane.left) && fin(pane.top) && fin(pane.width) && fin(pane.height));
 }
 
 // A pane has an independently movable WIDTH only when one of its vertical edges meets another pane
 // over a non-empty row range. Pure top/bottom stacks share the window width, so showing an x-stepper
 // there would be a control that tmux cannot meaningfully apply. Accept a 0/1-cell gap because fixtures
 // may omit tmux's one-cell border while live pane coordinates include it.
-export function canResizePaneWidth(panes, paneId) {
+export function canResizePaneWidth(
+  panes: readonly PaneLayoutSource[] | null | undefined,
+  paneId: string,
+): boolean {
   if (!hasGeometry(panes) || panes.length < 2) return false;
   const target = panes.find((pane) => pane.id === paneId);
   if (!target) return false;
@@ -47,7 +90,7 @@ export function canResizePaneWidth(panes, paneId) {
   });
 }
 
-const uniqSorted = (nums) => [...new Set(nums)].sort((a, b) => a - b);
+const uniqSorted = (numbers: readonly number[]): number[] => [...new Set(numbers)].sort((a, b) => a - b);
 
 // Split lines along one axis → equal pixel tracks. A track is a BORDER SEAM when it's ≤1 cell and no
 // pane exactly fills it (tmux's 1-cell pane border); a seam gets a fixed hairline. Every other track
@@ -55,8 +98,8 @@ const uniqSorted = (nums) => [...new Set(nums)].sort((a, b) => a - b);
 // sizes are ignored, only the split structure is kept. `spans` are the panes' [start,end] extents on
 // this axis. Returns [{ at }] prefix offsets: a pane spanning edges[i]..edges[j] gets left=out[i].at,
 // width=out[j].at-out[i].at.
-function trackOffsets(edges, spans, inner) {
-  const seams = [];
+function trackOffsets(edges: readonly number[], spans: readonly (readonly [number, number])[], inner: number): { at: number }[] {
+  const seams: boolean[] = [];
   for (let i = 0; i < edges.length - 1; i += 1) {
     const a = edges[i];
     const b = edges[i + 1];
@@ -77,7 +120,7 @@ function trackOffsets(edges, spans, inner) {
 // The map mosaic: pixel rects on the fixed base box, one per pane, laid out by equal division of each
 // split. Cell width/height are rendered pixels; cols/rows preserve the real tmux terminal dimensions
 // for quiet metadata in roomy tiles. Returns null when geometry is missing.
-export function paneLayout(panes) {
+export function paneLayout(panes: readonly PaneLayoutSource[] | null | undefined): PaneMapLayout | null {
   if (!hasGeometry(panes)) return null;
   const totalCols = Math.max(...panes.map((p) => p.left + p.width));
   const totalRows = Math.max(...panes.map((p) => p.top + p.height));
@@ -85,8 +128,8 @@ export function paneLayout(panes) {
 
   const xs = uniqSorted(panes.flatMap((p) => [p.left, p.left + p.width]));
   const ys = uniqSorted(panes.flatMap((p) => [p.top, p.top + p.height]));
-  const xSpans = panes.map((p) => [p.left, p.left + p.width]);
-  const ySpans = panes.map((p) => [p.top, p.top + p.height]);
+  const xSpans = panes.map((pane): [number, number] => [pane.left, pane.left + pane.width]);
+  const ySpans = panes.map((pane): [number, number] => [pane.top, pane.top + pane.height]);
   const xOff = trackOffsets(xs, xSpans, MAP_W - MAP_PAD * 2);
   const yOff = trackOffsets(ys, ySpans, MAP_H - MAP_PAD * 2);
 
@@ -107,7 +150,7 @@ export function paneLayout(panes) {
 // Classify one pixel-sized cell (a paneLayout cell) so the component can degrade content for cramped
 // cells (only happens with many panes now): '' (full), 'flat' (short → seq + command on one row),
 // 'narrow' (thin → seq only), 'tiny'.
-export function cellFit(cell) {
+export function cellFit(cell: Pick<PaneLayoutCell, 'width' | 'height'>): PaneCellFit {
   const narrow = cell.width < NARROW_PX;
   const flat = cell.height < FLAT_PX;
   if (narrow && flat) return 'tiny';
