@@ -5,6 +5,7 @@ import { createRoot } from 'react-dom/client';
 vi.mock('../src/api.js', () => ({ getSessions: vi.fn(async () => [{ id: '$1', name: 'jly' }, { id: '$2', name: 'work' }]) }));
 
 import OrphanTakeoverSheet from '../src/components/OrphanTakeoverSheet.jsx';
+import { getSessions } from '../src/api.js';
 
 let container; let root;
 beforeEach(() => { localStorage.clear(); container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container); });
@@ -24,6 +25,17 @@ describe('OrphanTakeoverSheet', () => {
     expect(kill[0].getAttribute('aria-pressed')).toBe('true');  // 结束 (recommended) selected
     expect(kill[1].getAttribute('aria-pressed')).toBe('false'); // 保留
     expect(container.querySelector('.orphan-kill .orphan-reco').textContent).toBe('推荐');
+  });
+
+  it('drops malformed takeover targets returned by the sessions API', async () => {
+    getSessions.mockResolvedValueOnce([
+      { id: '$1', name: 7 },
+      { id: '$2', name: 'work' },
+      null,
+    ]);
+    await render({});
+    const targets = [...container.querySelectorAll('.orphan-targets:not(.orphan-kill) .fontbtn')];
+    expect(targets.map((button) => button.textContent)).toEqual(['新建会话', 'work']);
   });
 
   it('prefills the name field + computer command with the server default, and edits flow through', async () => {

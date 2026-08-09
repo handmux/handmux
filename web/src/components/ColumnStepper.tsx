@@ -2,7 +2,18 @@ import { t } from '../i18n';
 
 // Compact iOS-style stepper used inside the window/pane management sheets. The caller owns the
 // target and the optimistic value so this control can never accidentally resize "whatever is current".
-export default function ColumnStepper({ label, cols, onAdjust, onRestore, restoreLabel, restoreDisabled = false }) {
+interface ColumnStepperProps {
+  label: string;
+  cols: number;
+  onAdjust: (step: number, cols: number) => void;
+  onRestore: () => void;
+  restoreLabel: string;
+  restoreDisabled?: boolean;
+}
+
+export default function ColumnStepper({
+  label, cols, onAdjust, onRestore, restoreLabel, restoreDisabled = false,
+}: ColumnStepperProps) {
   const steps = [-10, -1, 1, 10];
   return (
     <div className="sheet-size-control">

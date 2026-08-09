@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import type { ChangeEvent } from 'react';
 import { t } from '../i18n';
 import { getSessions } from '../api.js';
 import { getOrphanKill, setOrphanKill } from '../storage.js';
@@ -9,8 +10,52 @@ import { getOrphanKill, setOrphanKill } from '../storage.js';
 // no lock, so two live writers corrupt history — see server/src/orphans.js). onConfirm performs the
 // takeover (App navigates into the new pane + closes on success) and throws on failure so we can show it.
 // Native <select> is avoided per project convention — targets are a fontbtn group with aria-pressed.
-export default function OrphanTakeoverSheet({ open, orphan, onConfirm, onClose, inset = 0 }) {
-  const [sessions, setSessions] = useState([]);
+interface HostSession {
+  id: string;
+  name: string;
+}
+
+export interface OrphanSession {
+  pid: number;
+  sessionId: string;
+  cwd: string;
+  cwdLabel?: string;
+  snippet?: string;
+  suggestedName?: string;
+  state?: string;
+}
+
+export type OrphanTakeoverTarget = { mode: 'new' } | { mode: 'window'; session: string };
+
+export interface OrphanTakeoverRequest {
+  target: OrphanTakeoverTarget;
+  kill: boolean;
+  name?: string;
+}
+
+interface OrphanTakeoverSheetProps {
+  open: boolean;
+  orphan: OrphanSession | null;
+  onConfirm: (request: OrphanTakeoverRequest) => Promise<void> | void;
+  onClose: () => void;
+  inset?: number;
+}
+
+const sessionsOf = (value: unknown): HostSession[] => (
+  Array.isArray(value)
+    ? value.flatMap((candidate): HostSession[] => {
+      const session = candidate && typeof candidate === 'object'
+        ? candidate as Record<string, unknown> : null;
+      return typeof session?.id === 'string' && typeof session.name === 'string'
+        ? [{ id: session.id, name: session.name }] : [];
+    })
+    : []
+);
+
+export default function OrphanTakeoverSheet({
+  open, orphan, onConfirm, onClose, inset = 0,
+}: OrphanTakeoverSheetProps) {
+  const [sessions, setSessions] = useState<HostSession[]>([]);
   const [target, setTarget] = useState('new'); // 'new' | sessionId ($n)
   const [name, setName] = useState('');        // new-session name (editable; prefilled with the server default)
   const [kill, setKill] = useState(true);
@@ -18,9 +63,15 @@ export default function OrphanTakeoverSheet({ open, orphan, onConfirm, onClose, 
   const [error, setError] = useState('');
 
   useEffect(() => {
-    if (!open) return;
+    if (!open) return undefined;
+    let cancelled = false;
     setTarget('new'); setName(orphan?.suggestedName || ''); setKill(getOrphanKill()); setBusy(false); setError('');
-    getSessions().then((s) => setSessions(Array.isArray(s) ? s : [])).catch(() => setSessions([]));
+    void getSessions().then((value: unknown) => {
+      if (!cancelled) setSessions(sessionsOf(value));
+    }).catch(() => {
+      if (!cancelled) setSessions([]);
+    });
+    return () => { cancelled = true; };
   }, [open, orphan]);
 
   if (!open || !orphan) return null;
@@ -30,11 +81,12 @@ export default function OrphanTakeoverSheet({ open, orphan, onConfirm, onClose, 
     ? (name.trim() || orphan.suggestedName || '')
     : (sessions.find((s) => s.id === target)?.name || '');
 
-  const submit = async () => {
+  const submit = async (): Promise<void> => {
     if (busy) return;
     setBusy(true); setError('');
     setOrphanKill(kill); // remember the choice for next time
-    const tgt = target === 'new' ? { mode: 'new' } : { mode: 'window', session: target };
+    const tgt: OrphanTakeoverTarget = target === 'new'
+      ? { mode: 'new' } : { mode: 'window', session: target };
     try { await onConfirm({ target: tgt, kill, name: target === 'new' ? name.trim() : undefined }); } // success → App closes this sheet
     catch { setBusy(false); setError(t('inbox.orphans.failed')); }
   };
@@ -76,7 +128,9 @@ export default function OrphanTakeoverSheet({ open, orphan, onConfirm, onClose, 
                 className="bind-input"
                 value={name}
                 placeholder={t('bind.invalidName')}
-                onChange={(e) => { setName(e.target.value); setError(''); }}
+                onChange={(event: ChangeEvent<HTMLInputElement>) => {
+                  setName(event.target.value); setError('');
+                }}
               />
             </div>
           )}
@@ -99,7 +153,7 @@ export default function OrphanTakeoverSheet({ open, orphan, onConfirm, onClose, 
           {error && <div className="bind-error">{error}</div>}
           <div className="settings-btns bind-actions">
             <button className="fontbtn" onClick={onClose}>{t('common.cancel')}</button>
-            <button className="fontbtn bind-confirm" onClick={submit} disabled={busy}>
+            <button className="fontbtn bind-confirm" onClick={() => void submit()} disabled={busy}>
               {busy ? t('inbox.orphans.working') : t('inbox.orphans.takeover')}
             </button>
           </div>
