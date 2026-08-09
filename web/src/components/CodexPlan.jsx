@@ -20,6 +20,7 @@ function planMeta(plan) {
 export function CodexPlanBar({ plan, waiting = false, onOpen }) {
   const { steps, completed, current } = planMeta(plan);
   if (!steps.length) return null;
+  const showActivity = current?.status === 'inProgress';
   const detail = waiting && current
     ? t('chat.plan.waiting', { step: current.step })
     : current ? t('chat.plan.working', { step: current.step })
@@ -31,7 +32,11 @@ export function CodexPlanBar({ plan, waiting = false, onOpen }) {
       <span className="codex-plan-icon" aria-hidden="true"><ListChecksIcon /></span>
       <span className="cc-plan-copy">
         <span className="cc-plan-top"><strong>{title}</strong><span>{completed}/{steps.length}</span></span>
-        <span className="cc-plan-current">{detail}</span>
+        <span className="cc-plan-current">
+          {showActivity && <span className={`codex-plan-spinner${waiting ? ' is-static' : ''}`}
+            aria-hidden="true" />}
+          {detail}
+        </span>
       </span>
       <span className="codex-plan-chevron" aria-hidden="true">›</span>
     </button>
@@ -56,7 +61,7 @@ export function CodexPlanSummary({ plan, onOpen }) {
   );
 }
 
-function PlanSheetContent({ title, plan, onClose, keyboardInset = 0 }) {
+function PlanSheetContent({ title, plan, onClose, keyboardInset = 0, animateInProgress = false }) {
   const { steps, completed } = planMeta(plan);
   const bottom = `${Math.max(0, Number(keyboardInset) || 0)}px`;
   return (
@@ -77,7 +82,10 @@ function PlanSheetContent({ title, plan, onClose, keyboardInset = 0 }) {
           {steps.map((item, index) => (
             <li className={`is-${item.status}`} key={`${item.step}:${index}`}>
               <span className="codex-plan-status" aria-hidden="true">
-                {item.status === 'completed' ? <span>✓</span> : index + 1}
+                {item.status === 'completed' ? <span>✓</span>
+                  : item.status === 'inProgress'
+                    ? <span className={`codex-plan-spinner${animateInProgress ? '' : ' is-static'}`} />
+                    : index + 1}
               </span>
               <span>{item.step}</span>
               <small>{t(`chat.plan.status.${item.status}`)}</small>
@@ -91,11 +99,12 @@ function PlanSheetContent({ title, plan, onClose, keyboardInset = 0 }) {
 
 export function CodexPlanSheet({
   open, title, plan, onClose, portal = false, chatTone = 'dusk', keyboardInset = 0,
+  animateInProgress = false,
 }) {
   useBackButton(open, onClose);
   if (!open || !codexPlanSteps(plan).length) return null;
   const content = <PlanSheetContent title={title} plan={plan} onClose={onClose}
-    keyboardInset={keyboardInset} />;
+    keyboardInset={keyboardInset} animateInProgress={animateInProgress} />;
   if (!portal) return content;
   return createPortal(
     <div className="chat-tone-surface" data-chat-tone={chatTone}>{content}</div>,

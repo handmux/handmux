@@ -92,6 +92,7 @@ describe('ChatComposer', () => {
     const bar = screen.getByRole('button', { name: /当前任务/ });
     expect(bar.textContent).toContain('1/3');
     expect(bar.textContent).toContain('正在：实现任务条');
+    expect(bar.querySelector('.codex-plan-spinner:not(.is-static)')).toBeTruthy();
     expect(bar.nextElementSibling).toBe(container.querySelector('.cc-quick'));
 
     fireEvent.click(bar);
@@ -102,7 +103,21 @@ describe('ChatComposer', () => {
     expect(sheet.textContent).toContain('确认协议');
     expect(sheet.textContent).toContain('实现任务条');
     expect(sheet.textContent).toContain('跑测试');
+    expect(sheet.querySelector('.is-inProgress .codex-plan-spinner:not(.is-static)')).toBeTruthy();
     expect(sheet.querySelector('input, textarea, [role="checkbox"]')).toBeNull();
+  });
+
+  it('stops the current task spinner while Codex is waiting for the user', () => {
+    render(<ChatComposer pane="%1" agent="codex" kind="permission" codexSession={{
+      managed: true,
+      plan: { steps: [{ step: '等待授权', status: 'inProgress' }] },
+    }} />);
+    const bar = screen.getByRole('button', { name: /当前任务/ });
+    expect(bar.querySelector('.codex-plan-spinner.is-static')).toBeTruthy();
+    fireEvent.click(bar);
+    expect(screen.getByRole('dialog', { name: '当前任务' })
+      .querySelector('.codex-plan-spinner.is-static')).toBeTruthy();
+    expect(styles).toMatch(/prefers-reduced-motion:\s*reduce[\s\S]*\.codex-plan-spinner\s*\{\s*animation:\s*none/);
   });
 
   it('keeps vertical swipes on the horizontal shortcut strip from panning the page', () => {

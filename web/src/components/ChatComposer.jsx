@@ -388,6 +388,8 @@ export default function ChatComposer({
   useBackButton(contextOpen, () => setContextOpen(false));
   const activePlan = agent === 'codex' && codexSession?.managed && codexPlanSteps(codexSession.plan).length
     ? codexSession.plan : null;
+  const planWaiting = kind === 'permission' || !!codexSession?.approvals?.length
+    || !!codexSession?.userInputs?.length;
   useEffect(() => { if (!activePlan) setPlanOpen(false); }, [activePlan]);
   useEffect(() => { setPlanOpen(false); }, [pane]);
   const allQuickFavs = applyShortcutLayout(
@@ -937,8 +939,7 @@ export default function ChatComposer({
   return (
     <div className="chat-composer" onPointerDown={keepFocus}>
       {activePlan && (
-        <CodexPlanBar plan={activePlan}
-          waiting={kind === 'permission' || !!codexSession?.approvals?.length || !!codexSession?.userInputs?.length}
+        <CodexPlanBar plan={activePlan} waiting={planWaiting}
           onOpen={() => setPlanOpen(true)} />
       )}
       {/* Quick-reply chips — tap to send. Reuses the dock's chip styling (.quick-cmd/.qc-*). */}
@@ -1224,7 +1225,8 @@ export default function ChatComposer({
       )}
       {notice && <div className="cc-notice" role="status">{notice}</div>}
       <CodexPlanSheet open={planOpen} title={t('chat.plan.currentTitle')} plan={activePlan}
-        onClose={() => setPlanOpen(false)} portal chatTone={chatTone} keyboardInset={keyboardInset} />
+        onClose={() => setPlanOpen(false)} portal chatTone={chatTone} keyboardInset={keyboardInset}
+        animateInProgress={!planWaiting} />
       {editOpen && <CmdFavEditor variant="chat" presets={serverShortcuts.chat}
         onChange={refreshShortcuts} onClose={() => setEditOpen(false)} />}
     </div>

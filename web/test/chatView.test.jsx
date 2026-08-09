@@ -668,6 +668,20 @@ describe('ChatView', () => {
     expect(sheet.querySelector('input, textarea, [role="checkbox"]')).toBeNull();
   });
 
+  it('keeps an unfinished historical task indicator static', async () => {
+    mockTranscript([
+      { k: 0, i: 0, role: 'assistant', type: 'plan', turnId: 'turn-plan',
+        plan: [{ step: '等待复测', status: 'inProgress' }] },
+      { k: 1, i: 1, role: 'assistant', type: 'text', text: '请复测。', turnId: 'turn-plan' },
+    ]);
+    render(<ChatView pane="%0" agent="codex" kind="done"
+      codexSession={{ managed: true, threadId: 'thread-1', activeTurnId: null }} />);
+    fireEvent.click(await screen.findByRole('button', { name: /本轮任务/ }));
+    const spinner = screen.getByRole('dialog', { name: '本轮任务' })
+      .querySelector('.codex-plan-spinner');
+    expect(spinner.classList.contains('is-static')).toBe(true);
+  });
+
   it('permission with no parseable menu → 允许/拒绝 fallback, taps send Enter', async () => {
     mockTranscript([{ k: 0, i: 0, role: 'assistant', type: 'tool', tool: { name: 'Bash', input: { command: 'ls' }, result: null, isError: false } }]);
     vi.spyOn(api, 'getPendingPrompt').mockResolvedValue(null); // menu not scraped → fallback
