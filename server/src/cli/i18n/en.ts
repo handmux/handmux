@@ -382,4 +382,4 @@ rarely needed (env or flag): --static-dir / --upload-exts
 
 'handmux service install' accepts these same start flags — they're baked into the autostart entry.
 `,
-};
+} satisfies Record<string, string>;

@@ -4,8 +4,8 @@ import en from '../src/cli/i18n/en.js';
 import zh from '../src/cli/i18n/zh.js';
 
 describe('translate', () => {
-  const dict = { a: 'zh-A', c: 'zh {x}' };
-  const fb = { a: 'en-A', b: 'en-B', c: 'en {x}' };
+  const dict: Record<string, string> = { a: 'zh-A', c: 'zh {x}' };
+  const fb: Record<string, string> = { a: 'en-A', b: 'en-B', c: 'en {x}' };
 
   it('prefers the active dict, falls back to English, then the key itself', () => {
     expect(translate(dict, fb, 'a')).toBe('zh-A');      // dict hit

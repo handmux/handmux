@@ -6,27 +6,40 @@
 import en from './en.js';
 import zh from './zh.js';
 
-const LOCALES = { en, zh };
+export type CliLocale = 'en' | 'zh';
+export type CliDictionary = Record<string, string>;
+
+const LOCALES: Record<CliLocale, CliDictionary> = { en, zh };
 export const AVAILABLE = [
   { code: 'en', label: 'English' },
   { code: 'zh', label: '中文' },
-];
+] as const;
 
 // pure + testable: current-dict → English-fallback → key, then {var} interpolation (same as web).
-export function translate(dict, fallback, key, vars) {
+export function translate(
+  dict: CliDictionary | null | undefined,
+  fallback: CliDictionary | null | undefined,
+  key: string,
+  vars?: Record<string, unknown>,
+): string {
   let s = dict && dict[key] != null ? dict[key]
         : fallback && fallback[key] != null ? fallback[key]
         : key;
-  if (vars) s = s.replace(/\{(\w+)\}/g, (_, k) => (vars[k] != null ? vars[k] : `{${k}}`));
+  if (vars) s = s.replace(/\{(\w+)\}/g, (_match, name: string) => (vars[name] != null ? String(vars[name]) : `{${name}}`));
   return s;
 }
 
 // A POSIX locale string → the base language we might have a dict for: `zh_CN.UTF-8` → `zh`, `en` → `en`.
-const baseOf = (v) => String(v || '').toLowerCase().split(/[._@-]/)[0];
+const baseOf = (value: unknown): string => String(value || '').toLowerCase().split(/[._@-]/)[0] ?? '';
 
 // pure + testable: explicit choice (flag/config) wins, else the first shell locale var that names a known
 // language, else English. `C`/`POSIX`/`C.UTF-8` carry no language → fall through to English.
-export function detectLang(flags = {}, fileCfg = {}, env = {}, available = LOCALES) {
+export function detectLang(
+  flags: Record<string, unknown> = {},
+  fileCfg: Record<string, unknown> = {},
+  env: Record<string, unknown> = {},
+  available: Record<string, CliDictionary> = LOCALES,
+): string {
   const explicit = flags.lang ?? fileCfg.lang;
   if (explicit != null) { const b = baseOf(explicit); if (available[b]) return b; }
   for (const k of ['HANDMUX_LANG', 'LC_ALL', 'LC_MESSAGES', 'LANG']) {
@@ -36,18 +49,25 @@ export function detectLang(flags = {}, fileCfg = {}, env = {}, available = LOCAL
   return 'en';
 }
 
-let current = 'en';
+let current: CliLocale = 'en';
 
 // Resolve + install the active locale for the whole CLI process (called once at startup). Returns the code.
-export function initLocale(flags, fileCfg, env = process.env) {
-  current = detectLang(flags, fileCfg, env);
+export function initLocale(
+  flags: Record<string, unknown>,
+  fileCfg: Record<string, unknown>,
+  env: Record<string, unknown> = process.env,
+): CliLocale {
+  const detected = detectLang(flags, fileCfg, env);
+  current = detected === 'zh' ? 'zh' : 'en';
   return current;
 }
 
 // Force a specific locale (e.g. right after the setup wizard's language question, so the rest of the wizard
 // speaks the chosen language). No-op for an unknown code.
-export function setLocale(code) { if (LOCALES[code]) current = code; }
-export function getLocale() { return current; }
+export function setLocale(code: unknown): void {
+  if (code === 'en' || code === 'zh') current = code;
+}
+export function getLocale(): CliLocale { return current; }
 
 // The one call sites use: translate `key` in the active locale, falling back to English then the key itself.
-export function t(key, vars) { return translate(LOCALES[current], en, key, vars); }
+export function t(key: string, vars?: Record<string, unknown>): string { return translate(LOCALES[current], en, key, vars); }

@@ -381,4 +381,4 @@ start flag(括号内为对应环境变量):
 
 'handmux service install' 也接受上面这些 start flag —— 它们会被烘进自启项。
 `,
-};
+} satisfies Record<string, string>;
