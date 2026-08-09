@@ -17,7 +17,7 @@ function run(arg, env, stdin, file) {
   return fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf8')) : null;
 }
 function freshFile() {
-  return path.join(tmpHome('hookstate-'), 'claude-state.json');
+  return path.join(tmpHome('hookstate-'), '.handmux', 'claude-state.json');
 }
 
 describe('handmux-notify.sh → handmux-write.js', () => {
@@ -28,6 +28,21 @@ describe('handmux-notify.sh → handmux-write.js', () => {
     expect(obj['%263'].payload).toMatchObject({ notification_type: 'permission_prompt', session_id: 'abc', cwd: '/x' });
     expect(typeof obj['%263'].ts).toBe('number');
     expect(obj['%263'].ts).toBeGreaterThan(1_600_000_000_000); // a real ms epoch
+    expect(fs.statSync(path.dirname(file)).mode & 0o777).toBe(0o700);
+    expect(fs.statSync(file).mode & 0o777).toBe(0o600);
+  });
+
+  it('repairs a legacy hook directory and state file before updating it', () => {
+    const file = freshFile();
+    fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o755 });
+    fs.chmodSync(path.dirname(file), 0o755);
+    fs.writeFileSync(file, '{}', { mode: 0o644 });
+    fs.chmodSync(file, 0o644);
+
+    run('prompt', { TMUX_PANE: '%1' }, '{"prompt":"continue"}', file);
+
+    expect(fs.statSync(path.dirname(file)).mode & 0o777).toBe(0o700);
+    expect(fs.statSync(file).mode & 0o777).toBe(0o600);
   });
 
   it('drops an idle_prompt — it must NOT overwrite a prior done (no inbox re-surface, no ts bump)', () => {

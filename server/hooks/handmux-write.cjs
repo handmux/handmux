@@ -14,6 +14,7 @@
 // or corrupt the file. Best-effort throughout and silent — the hook is fire-and-forget and must never
 // fail Claude (the shell wrapper swallows errors and always exits 0).
 const fs = require('node:fs');
+const path = require('node:path');
 
 const [, , file, pane, src, ts, host = ''] = process.argv;
 if (!file || !pane || !src) process.exit(0);
@@ -34,7 +35,26 @@ const nap = (ms) => {
   catch { const end = Date.now() + ms; while (Date.now() < end) { /* spin */ } }
 };
 
-try { fs.mkdirSync(path.dirname(file), { recursive: true }); } catch { /* ignore */ }
+function ensurePrivateDirectory(directory) {
+  const resolved = path.resolve(directory);
+  const parsed = path.parse(resolved);
+  const parts = resolved.slice(parsed.root.length).split(path.sep).filter(Boolean);
+  const privateRoot = parts.indexOf('.handmux');
+  if (privateRoot < 0) {
+    fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
+    return;
+  }
+  for (let i = privateRoot; i < parts.length; i++) {
+    const current = path.join(parsed.root, ...parts.slice(0, i + 1));
+    fs.mkdirSync(current, { recursive: true, mode: 0o700 });
+    fs.chmodSync(current, 0o700);
+  }
+}
+
+try {
+  ensurePrivateDirectory(path.dirname(file));
+  if (fs.existsSync(file)) fs.chmodSync(file, 0o600);
+} catch { /* ignore */ }
 
 function update() {
   let obj = {};
@@ -61,14 +81,15 @@ function update() {
     obj[pane] = { ts: Number(ts) || 0, src, host, payload };
   }
   const tmp = `${file}.${process.pid}.tmp`;
-  fs.writeFileSync(tmp, JSON.stringify(obj));
+  fs.writeFileSync(tmp, JSON.stringify(obj), { mode: 0o600 });
   fs.renameSync(tmp, file);                                   // atomic: a torn write can't corrupt the file
+  fs.chmodSync(file, 0o600);
 }
 
 const lock = `${file}.lock`;
 let held = false;
 for (let i = 0; i < 60 && !held; i++) {                       // ~0.9s budget, then write lockless (best-effort)
-  try { fs.closeSync(fs.openSync(lock, 'wx')); held = true; } // O_EXCL → atomic "I hold it"
+  try { fs.closeSync(fs.openSync(lock, 'wx', 0o600)); held = true; } // O_EXCL → atomic "I hold it"
   catch {
     try { if (Date.now() - fs.statSync(lock).mtimeMs > 3000) fs.unlinkSync(lock); } catch { /* steal a stale lock */ }
     nap(15);

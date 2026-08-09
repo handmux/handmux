@@ -5,6 +5,22 @@ const path = require('node:path');
 
 const CHUNK_BYTES = 64 * 1024;
 
+function ensurePrivateDirectory(directory) {
+  const resolved = path.resolve(directory);
+  const parsed = path.parse(resolved);
+  const parts = resolved.slice(parsed.root.length).split(path.sep).filter(Boolean);
+  const privateRoot = parts.indexOf('.handmux');
+  if (privateRoot < 0) {
+    fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
+    return;
+  }
+  for (let i = privateRoot; i < parts.length; i++) {
+    const current = path.join(parsed.root, ...parts.slice(0, i + 1));
+    fs.mkdirSync(current, { recursive: true, mode: 0o700 });
+    fs.chmodSync(current, 0o700);
+  }
+}
+
 function windowUsage(value) {
   if (!value || typeof value.used_percent !== 'number') return null;
   return {
@@ -79,6 +95,8 @@ function readLatestUsage(transcriptPath) {
 
 function readSnapshot(snapshotPath) {
   try {
+    ensurePrivateDirectory(path.dirname(snapshotPath));
+    fs.chmodSync(snapshotPath, 0o600);
     const value = JSON.parse(fs.readFileSync(snapshotPath, 'utf8'));
     if (!value || value.version !== 1 || typeof value.checkedAt !== 'number') return null;
     if (value.usage !== null && (!value.usage || typeof value.usage.updatedAt !== 'number')) return null;
@@ -94,11 +112,11 @@ function nap(ms) {
 }
 
 function writeSnapshot(snapshotPath, usage, { checkedAt } = {}) {
-  try { fs.mkdirSync(path.dirname(snapshotPath), { recursive: true }); } catch { return null; }
+  try { ensurePrivateDirectory(path.dirname(snapshotPath)); } catch { return null; }
   const lock = `${snapshotPath}.lock`;
   let held = false;
   for (let i = 0; i < 40 && !held; i++) {
-    try { fs.closeSync(fs.openSync(lock, 'wx')); held = true; }
+    try { fs.closeSync(fs.openSync(lock, 'wx', 0o600)); held = true; }
     catch {
       try { if (Date.now() - fs.statSync(lock).mtimeMs > 3000) fs.unlinkSync(lock); } catch { /* retry */ }
       nap(5);
@@ -116,8 +134,9 @@ function writeSnapshot(snapshotPath, usage, { checkedAt } = {}) {
       usage: nextUsage,
     };
     const tmp = `${snapshotPath}.${process.pid}.${Date.now()}.tmp`;
-    fs.writeFileSync(tmp, JSON.stringify(value));
+    fs.writeFileSync(tmp, JSON.stringify(value), { mode: 0o600 });
     fs.renameSync(tmp, snapshotPath);
+    fs.chmodSync(snapshotPath, 0o600);
     return nextUsage;
   } catch {
     return readSnapshot(snapshotPath)?.usage || null;

@@ -21,6 +21,22 @@ const raw = (() => { try { return fs.readFileSync(0, 'utf8'); } catch { return '
 let j = {};
 try { j = JSON.parse(raw || '{}'); } catch { /* not JSON → leave j = {} */ }
 
+function ensurePrivateDirectory(directory) {
+  const resolved = path.resolve(directory);
+  const parsed = path.parse(resolved);
+  const parts = resolved.slice(parsed.root.length).split(path.sep).filter(Boolean);
+  const privateRoot = parts.indexOf('.handmux');
+  if (privateRoot < 0) {
+    fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
+    return;
+  }
+  for (let i = privateRoot; i < parts.length; i++) {
+    const current = path.join(parsed.root, ...parts.slice(0, i + 1));
+    fs.mkdirSync(current, { recursive: true, mode: 0o700 });
+    fs.chmodSync(current, 0o700);
+  }
+}
+
 // One rate-limit window → our shape, or undefined if the field is absent (rate_limits only appears for
 // Pro/Max plans, and only after a session's first API response).
 function win(o) {
@@ -48,7 +64,8 @@ if (file) {
       rateLimits,
     };
     if (snap.context === undefined) delete snap.context;
-    fs.mkdirSync(path.dirname(file), { recursive: true });
+    ensurePrivateDirectory(path.dirname(file));
+    if (fs.existsSync(file)) fs.chmodSync(file, 0o600);
     let previousHasQuota = false;
     try {
       const previous = JSON.parse(fs.readFileSync(file, 'utf8'));
@@ -58,12 +75,13 @@ if (file) {
     // previous machine-wide quota until a real rate-limit payload refreshes it instead of flashing empty.
     if (Object.keys(rateLimits).length > 0) {
       const tmp = `${file}.${process.pid}.tmp`;
-      fs.writeFileSync(tmp, JSON.stringify(snap));
+      fs.writeFileSync(tmp, JSON.stringify(snap), { mode: 0o600 });
       fs.renameSync(tmp, file); // atomic: concurrent statuslines (multiple sessions) can't tear the snapshot
+      fs.chmodSync(file, 0o600);
     } else if (!previousHasQuota) {
       // Create the initial "capturer active, awaiting data" marker only if no concurrent session has
       // already published a real quota snapshot. An empty session can therefore never win that race.
-      try { fs.writeFileSync(file, JSON.stringify(snap), { flag: 'wx' }); } catch { /* file now exists */ }
+      try { fs.writeFileSync(file, JSON.stringify(snap), { flag: 'wx', mode: 0o600 }); } catch { /* file now exists */ }
     }
 
     // Per-session context snapshot. The global file above is last-writer-wins across ALL sessions, so it
@@ -73,12 +91,13 @@ if (file) {
     const sid = typeof j.session_id === 'string' ? j.session_id : null;
     if (sid && /^[\w-]+$/.test(sid) && snap.context) {
       const cdir = path.join(path.dirname(file), 'context');
-      fs.mkdirSync(cdir, { recursive: true });
+      ensurePrivateDirectory(cdir);
       const cfile = path.join(cdir, `${sid}.json`);
       const csnap = { sessionId: sid, model: snap.model, usedPercent: snap.context.usedPercent, updatedAt: snap.updatedAt };
       const ctmp = `${cfile}.${process.pid}.tmp`;
-      fs.writeFileSync(ctmp, JSON.stringify(csnap));
+      fs.writeFileSync(ctmp, JSON.stringify(csnap), { mode: 0o600 });
       fs.renameSync(ctmp, cfile);
+      fs.chmodSync(cfile, 0o600);
       // Best-effort prune of stale session files (ended sessions never clean up after themselves) so the
       // dir can't grow without bound. A day is well past any live session's last statusLine render.
       try {
@@ -86,7 +105,10 @@ if (file) {
         for (const nm of fs.readdirSync(cdir)) {
           if (!nm.endsWith('.json')) continue;
           const fp = path.join(cdir, nm);
-          try { if (fs.statSync(fp).mtimeMs < cutoff) fs.unlinkSync(fp); } catch { /* skip */ }
+          try {
+            fs.chmodSync(fp, 0o600);
+            if (fs.statSync(fp).mtimeMs < cutoff) fs.unlinkSync(fp);
+          } catch { /* skip */ }
         }
       } catch { /* prune is best-effort */ }
     }

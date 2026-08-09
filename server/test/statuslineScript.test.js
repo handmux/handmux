@@ -7,7 +7,7 @@ import { tmpHome } from './tmphome.js';
 const SCRIPT = path.resolve(__dirname, '../hooks/handmux-statusline.cjs');
 
 // Run the capturer with a stdin payload; returns { stdout, snap } where snap is the parsed usage file (or null).
-function run(stdin, { tee = false, file = path.join(tmpHome('sl-cap-'), 'claude-usage.json') } = {}) {
+function run(stdin, { tee = false, file = path.join(tmpHome('sl-cap-'), '.handmux', 'claude-usage.json') } = {}) {
   const stdout = execFileSync('node', [SCRIPT, file], {
     input: stdin,
     env: { ...process.env, ...(tee ? { HANDMUX_STATUS_TEE: '1' } : {}) },
@@ -18,6 +18,7 @@ function run(stdin, { tee = false, file = path.join(tmpHome('sl-cap-'), 'claude-
 }
 
 const FULL = JSON.stringify({
+  session_id: 'session-1',
   model: { display_name: 'Opus 4.8 (1M)' },
   workspace: { current_dir: '/Users/x/proj' },
   context_window: { used_percentage: 34.2 },
@@ -31,7 +32,7 @@ const FULL = JSON.stringify({
 
 describe('handmux-statusline.cjs', () => {
   it('snapshots rate_limits + context + model to the usage file', () => {
-    const { snap } = run(FULL);
+    const { snap, file } = run(FULL);
     expect(snap.model).toBe('Opus 4.8 (1M)');
     expect(snap.context).toEqual({ usedPercent: 34.2 });
     expect(snap.rateLimits.fiveHour).toEqual({ usedPercent: 42.5, resetsAt: 1711540800 });
@@ -39,6 +40,11 @@ describe('handmux-statusline.cjs', () => {
     expect(snap.rateLimits.sevenDayOpus).toEqual({ usedPercent: 12 });
     expect(snap.rateLimits.sevenDaySonnet).toEqual({ usedPercent: 8 });
     expect(typeof snap.updatedAt).toBe('number');
+    const context = path.join(path.dirname(file), 'context', 'session-1.json');
+    expect(fs.statSync(path.dirname(file)).mode & 0o777).toBe(0o700);
+    expect(fs.statSync(file).mode & 0o777).toBe(0o600);
+    expect(fs.statSync(path.dirname(context)).mode & 0o777).toBe(0o700);
+    expect(fs.statSync(context).mode & 0o777).toBe(0o600);
   });
 
   it('renders a compact status line by default', () => {
@@ -64,11 +70,15 @@ describe('handmux-statusline.cjs', () => {
 
   it('does not replace the machine-wide quota with a new session empty snapshot', () => {
     const { snap: before, file } = run(FULL);
+    fs.chmodSync(path.dirname(file), 0o755);
+    fs.chmodSync(file, 0o644);
     const { snap: after } = run(
       JSON.stringify({ model: { display_name: 'Sonnet' }, context_window: { used_percentage: 5 } }),
       { file },
     );
     expect(after).toEqual(before);
+    expect(fs.statSync(path.dirname(file)).mode & 0o777).toBe(0o700);
+    expect(fs.statSync(file).mode & 0o777).toBe(0o600);
   });
 
   it('never crashes on non-JSON stdin (writes nothing meaningful, exits 0)', () => {

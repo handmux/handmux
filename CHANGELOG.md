@@ -21,6 +21,7 @@ All notable changes to handmux. Format follows [Keep a Changelog](https://keepac
 - 对话中的 Markdown 目标现在与终端使用同一套识别规则，未识别的文件或协议不再保留可点击链接。
 - `~/.handmux/state.json` 及其目录现在使用私有权限和原子写入，并会在读取历史文件时自动修复过宽权限。
 - Push 订阅、静态预览、通知收件箱、更新缓存和 CLI 配置现在也统一使用私有原子存储；自定义配置路径不会再修改不属于 Handmux 的共享父目录权限。
+- Claude Hook、Claude Usage 和 Codex Usage 快照现在使用 `0700/0600` 私有权限及原子替换，并会在读写旧文件时修复历史宽松权限。
 - Supervisor 启动参数和系统自启动文件不再包含 Token、VAPID 私钥或语音密钥；完整配置改从 `0600` 私有文件读取。
 - Supervisor 现在分别维护 Server 与 Tunnel 的进程阶段和重启退避；Server 退出会立即撤销就绪状态和 PID，不再让一个子进程的连续失败拖慢另一个子进程，并改为校验 `/health/ready` 的 Workspace、Codex 与 Browser Worker 状态，而不是仅检查 TCP 端口。
 - Codex 回复期间的待发消息和幂等回执现在会私密、原子地持久化；Handmux 重启后可恢复队列，发送超时会先与 App Server 对账再决定是否重试，避免消息丢失或重复。

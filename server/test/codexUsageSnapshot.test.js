@@ -84,7 +84,7 @@ describe('Codex usage snapshot', () => {
 
   it('persists checkedAt separately from usage and never lets an older session win', () => {
     const home = tmpHome('codex-snap-');
-    const snapshotPath = path.join(home, 'codex-usage.json');
+    const snapshotPath = path.join(home, '.handmux', 'codex-usage.json');
     const newer = rollout(home, 'newer.jsonl', [tokenCount('2026-07-23T05:00:00.000Z', 55)]);
     const older = rollout(home, 'older.jsonl', [tokenCount('2026-07-23T04:00:00.000Z', 44)]);
 
@@ -101,6 +101,8 @@ describe('Codex usage snapshot', () => {
     const current = readSnapshot(snapshotPath).usage;
     writeSnapshot(snapshotPath, current, { checkedAt: 1234 });
     expect(readSnapshot(snapshotPath)).toEqual({ version: 1, checkedAt: 1234, usage: current });
+    expect(fs.statSync(path.dirname(snapshotPath)).mode & 0o777).toBe(0o700);
+    expect(fs.statSync(snapshotPath).mode & 0o777).toBe(0o600);
   });
 
   it('can record an empty full calibration without inventing usage', () => {
@@ -110,5 +112,17 @@ describe('Codex usage snapshot', () => {
     writeSnapshot(snapshotPath, null, { checkedAt: 9000 });
 
     expect(readSnapshot(snapshotPath)).toEqual({ version: 1, checkedAt: 9000, usage: null });
+  });
+
+  it('repairs a legacy snapshot file before reading it', () => {
+    const home = tmpHome('codex-snap-');
+    const directory = path.join(home, '.handmux');
+    const snapshotPath = path.join(directory, 'codex-usage.json');
+    fs.mkdirSync(directory, { mode: 0o755 });
+    fs.writeFileSync(snapshotPath, JSON.stringify({ version: 1, checkedAt: 1, usage: null }), { mode: 0o644 });
+
+    expect(readSnapshot(snapshotPath)).toEqual({ version: 1, checkedAt: 1, usage: null });
+    expect(fs.statSync(directory).mode & 0o777).toBe(0o700);
+    expect(fs.statSync(snapshotPath).mode & 0o777).toBe(0o600);
   });
 });

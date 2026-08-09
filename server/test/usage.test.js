@@ -42,11 +42,13 @@ describe('readClaudeUsage', () => {
   it('reads the statusLine snapshot; null when missing or garbage', () => {
     const home = tmpHome('usg-');
     expect(readClaudeUsage(home)).toBeNull();
-    fs.mkdirSync(path.dirname(claudeUsagePath(home)), { recursive: true });
+    fs.mkdirSync(path.dirname(claudeUsagePath(home)), { recursive: true, mode: 0o755 });
     fs.writeFileSync(claudeUsagePath(home), JSON.stringify({
       updatedAt: 5, rateLimits: { fiveHour: { usedPercent: 42, resetsAt: 111 }, sevenDay: { usedPercent: 15 } },
-    }));
+    }), { mode: 0o644 });
     expect(readClaudeUsage(home)).toMatchObject({ rateLimits: { fiveHour: { usedPercent: 42 } } });
+    expect(fs.statSync(path.dirname(claudeUsagePath(home))).mode & 0o777).toBe(0o700);
+    expect(fs.statSync(claudeUsagePath(home)).mode & 0o777).toBe(0o600);
     fs.writeFileSync(claudeUsagePath(home), 'not json');
     expect(readClaudeUsage(home)).toBeNull();
   });
@@ -57,8 +59,10 @@ describe('readClaudeContext (per-session context-window snapshot)', () => {
     const home = tmpHome('ctx-');
     expect(readClaudeContext('sess-1', home)).toBeNull();
     fs.mkdirSync(claudeContextDir(home), { recursive: true });
-    fs.writeFileSync(path.join(claudeContextDir(home), 'sess-1.json'), JSON.stringify({ model: 'Opus 4.8', usedPercent: 24, updatedAt: 9 }));
+    const file = path.join(claudeContextDir(home), 'sess-1.json');
+    fs.writeFileSync(file, JSON.stringify({ model: 'Opus 4.8', usedPercent: 24, updatedAt: 9 }), { mode: 0o644 });
     expect(readClaudeContext('sess-1', home)).toMatchObject({ model: 'Opus 4.8', usedPercent: 24 });
+    expect(fs.statSync(file).mode & 0o777).toBe(0o600);
   });
 
   it('rejects an unsafe session id (path traversal) without reading', () => {

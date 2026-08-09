@@ -10,6 +10,7 @@ import { homedir } from 'node:os';
 import { createRequire } from 'node:module';
 import { spawn } from 'node:child_process';
 import { pocketHome } from './cli/state.js';
+import { PrivateStateStore } from './privateStateStore.js';
 
 const require = createRequire(import.meta.url);
 const {
@@ -26,7 +27,9 @@ export function claudeContextDir(home = homedir()) { return path.join(pocketHome
 export function readClaudeContext(sessionId, home = homedir()) {
   if (typeof sessionId !== 'string' || !/^[\w-]+$/.test(sessionId)) return null;
   try {
-    const snap = JSON.parse(fs.readFileSync(path.join(claudeContextDir(home), `${sessionId}.json`), 'utf8'));
+    const snap = new PrivateStateStore(
+      path.join(claudeContextDir(home), `${sessionId}.json`),
+    ).read();
     return (snap && typeof snap === 'object' && !Array.isArray(snap)) ? snap : null;
   } catch { return null; }
 }
@@ -36,7 +39,7 @@ export function codexUsagePath(home = homedir()) { return path.join(pocketHome(h
 // Claude: read the statusLine snapshot. null if the capturer isn't wired / never populated it.
 export function readClaudeUsage(home = homedir()) {
   try {
-    const snap = JSON.parse(fs.readFileSync(claudeUsagePath(home), 'utf8'));
+    const snap = new PrivateStateStore(claudeUsagePath(home)).read();
     return (snap && typeof snap === 'object' && !Array.isArray(snap)) ? snap : null;
   } catch { return null; }
 }
