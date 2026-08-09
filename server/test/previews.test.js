@@ -134,4 +134,19 @@ describe('legacy registry migration', () => {
       { name: 'old-dir', kind: 'static', dir: join(home, 'site'), expiresAt: clock.t + 1000 },
     ]);
   });
+
+  it('drops malformed persisted rows before they enter lease or path calculations', async () => {
+    await fsp.writeFile(store, JSON.stringify([
+      { name: '../escape', dir: join(home, 'site'), expiresAt: clock.t + 1000 },
+      { name: 'bad-expiry', dir: join(home, 'site'), expiresAt: 'soon' },
+      { name: 'bad-dir', dir: 42, expiresAt: clock.t + 1000 },
+      { name: 'outside', dir: outside, expiresAt: clock.t + 1000 },
+      { name: 'valid', dir: join(home, 'site'), expiresAt: clock.t + 1000 },
+    ]));
+    const reloaded = createPreviews({ home, store, now: () => clock.t, ttlMs: 600_000 });
+    expect(reloaded.list()).toEqual([
+      { name: 'valid', kind: 'static', dir: join(home, 'site'), expiresAt: clock.t + 1000 },
+    ]);
+    expect(reloaded.get('bad-expiry')).toEqual({ state: 'missing' });
+  });
 });
