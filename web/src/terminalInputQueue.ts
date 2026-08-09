@@ -1,34 +1,63 @@
-const toHex = (bytes) =>
-  [...bytes].map((byte) => byte.toString(16).padStart(2, '0')).join('');
+export type TerminalInputData = string | Uint8Array | ArrayBuffer | ArrayLike<number>;
+
+export interface TerminalInputQueueOptions {
+  send(pane: string, hex: string): Promise<unknown>;
+  onDelivered?(pane: string): void;
+  onError?(error: unknown, pane: string): void;
+  encoder?: Pick<TextEncoder, 'encode'>;
+}
+
+export interface TerminalInputQueue {
+  enqueue(pane: string | null | undefined, data: TerminalInputData | null | undefined): void;
+  drop(pane: string): void;
+  dispose(): void;
+}
+
+interface QueuedInput {
+  pane: string;
+  hex: string;
+}
+
+const toHex = (bytes: Uint8Array): string => (
+  [...bytes].map((byte) => byte.toString(16).padStart(2, '0')).join('')
+);
 
 const MAX_BATCH_HEX_LENGTH = 16384 * 2;
+
+function inputBytes(data: TerminalInputData, encoder: Pick<TextEncoder, 'encode'>): Uint8Array {
+  if (typeof data === 'string') return encoder.encode(data);
+  if (data instanceof Uint8Array) return data;
+  if (data instanceof ArrayBuffer) return new Uint8Array(data);
+  return Uint8Array.from(data);
+}
+
+function callSafely<Args extends unknown[]>(callback: (...args: Args) => void, ...args: Args): void {
+  try {
+    callback(...args);
+  } catch {
+    // Notification callbacks must not alter delivery or queue state.
+  }
+}
 
 export function createTerminalInputQueue({
   send,
   onDelivered = () => {},
   onError = () => {},
   encoder = new TextEncoder(),
-}) {
-  let staged = [];
-  let batches = [];
+}: TerminalInputQueueOptions): TerminalInputQueue {
+  let staged: QueuedInput[] = [];
+  let batches: QueuedInput[] = [];
   let scheduled = false;
   let running = false;
   let disposed = false;
 
-  const callSafely = (callback, ...args) => {
-    try {
-      callback(...args);
-    } catch {
-      // Notification callbacks must not alter delivery or queue state.
-    }
-  };
-
-  const pump = async () => {
+  const pump = async (): Promise<void> => {
     if (running || disposed || batches.length === 0) return;
     running = true;
     try {
       while (!disposed && batches.length) {
         const batch = batches.shift();
+        if (!batch) continue;
         try {
           await send(batch.pane, batch.hex);
         } catch (error) {
@@ -44,7 +73,7 @@ export function createTerminalInputQueue({
     }
   };
 
-  const flush = () => {
+  const flush = (): void => {
     scheduled = false;
     const items = staged;
     staged = [];
@@ -68,12 +97,7 @@ export function createTerminalInputQueue({
   return {
     enqueue(pane, data) {
       if (disposed || !pane || !data) return;
-      const bytes = typeof data === 'string'
-        ? encoder.encode(data)
-        : data instanceof Uint8Array
-          ? data
-          : new Uint8Array(data);
-      staged.push({ pane, hex: toHex(bytes) });
+      staged.push({ pane, hex: toHex(inputBytes(data, encoder)) });
       if (!scheduled) {
         scheduled = true;
         queueMicrotask(flush);
