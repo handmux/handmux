@@ -5,7 +5,7 @@ import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { marked } from 'marked';
 import DOMPurify from 'dompurify';
 import { messageIdentity, useTranscript } from '../hooks/useTranscript.js';
-import { durableCoversLiveMessage, useCodexMessageStream } from '../hooks/useCodexMessageStream.js';
+import { useCodexMessageStream } from '../hooks/useCodexMessageStream.js';
 import { usePendingPrompt } from '../hooks/usePendingPrompt.js';
 import { fallbackGate } from '../chatGate.js';
 import PromptGate from './PromptGate.jsx';
@@ -445,27 +445,6 @@ function optimisticMatches(message, optimistic) {
   return message?.type === 'text' && message.role === 'user' && message.text === optimistic.text;
 }
 
-function mergeDurableAndLiveMessages(durableMessages, liveMessages) {
-  const merged = [...durableMessages];
-  liveMessages.forEach((message) => {
-    if (message.type !== 'goal' || !message.turnId) {
-      merged.push(message);
-      return;
-    }
-    let turnEnd = -1;
-    merged.forEach((candidate, index) => {
-      if (candidate.turnId === message.turnId) turnEnd = index;
-    });
-    // A terminal Goal belongs to its originating turn, not to the current chat tail. That turn may sit on
-    // an older transcript page while the App Server still replays the Goal from memory; wait until the
-    // page containing the turn is loaded instead of fabricating a new bottom-of-chat position.
-    if (turnEnd < 0 && ['complete', 'blocked'].includes(message.goal?.status)) return;
-    if (turnEnd < 0) merged.push(message);
-    else merged.splice(turnEnd + 1, 0, message);
-  });
-  return merged;
-}
-
 const NEAR_BOTTOM_PX = 40;
 const NEAR_TOP_PX = 80;
 
@@ -657,26 +636,17 @@ export default function ChatView({
     ? `${refreshToken ?? ''}:stream:${streamRefresh}`
     : refreshToken;
   const {
-    messages: durableMessages, hasMoreOlder, loadOlder, loadingOlder,
-    session, loaded, unavailable, unavailableDetail,
+    messages, hasMoreOlder, loadOlder, loadingOlder,
+    session, loaded, unavailable, unavailableDetail, applyCodexEvent,
   } = useTranscript(pane, true, agent, transcriptRefresh);
-  const liveMessages = useCodexMessageStream({
+  useCodexMessageStream({
     pane,
     threadId: codexSession?.threadId,
-    enabled: agent === 'codex' && !!codexSession?.managed,
-    durableMessages,
+    enabled: loaded && agent === 'codex' && !!codexSession?.managed,
+    onEvent: applyCodexEvent,
     onSettled: () => setStreamRefresh((value) => value + 1),
     onAuthFail,
   });
-  // A tab switch reconnects the live stream faster than the durable transcript can load. Keep accumulating
-  // those deltas in useCodexMessageStream, but do not render them ahead of their historical predecessors.
-  const visibleLiveMessages = useMemo(() => (loaded ? liveMessages.filter((message) => (message.type === 'goal' || message.text)
-    && !durableCoversLiveMessage(durableMessages, message)) : []), [loaded, durableMessages, liveMessages]);
-  // Goal lifecycle notifications carry the turn that changed the Goal. Keep that card with its turn even
-  // after newer durable turns arrive; user-set Goal events without a turn remain current-tail actions.
-  const messages = useMemo(() => mergeDurableAndLiveMessages(
-    durableMessages, visibleLiveMessages,
-  ), [durableMessages, visibleLiveMessages]);
   const historicalPlans = useMemo(() => {
     const latest = new Map();
     messages.forEach((message) => {
@@ -697,7 +667,7 @@ export default function ChatView({
     }
     return byAnswerIndex;
   }, [messages, codexSession?.activeTurnId]);
-  const activeStreamMessage = [...visibleLiveMessages].reverse()
+  const activeStreamMessage = [...messages].reverse()
     .find((message) => message.streaming && message.text) || null;
   const tsIdx = useMemo(() => timeStampedIndices(messages), [messages]);
   // Each later compaction supersedes the previous context boundary. Keep the rollout untouched as the

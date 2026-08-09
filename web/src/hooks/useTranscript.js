@@ -14,6 +14,7 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { usePollingLoop } from './usePollingLoop.js';
 import { fetchTranscript } from '../api.js';
+import { applyCodexConversationEvent } from '../codexConversationState.js';
 
 export const MAX_TRANSCRIPT_MESSAGES = 500;
 export const TRANSCRIPT_PAGE_SIZE = 20;
@@ -145,6 +146,15 @@ export function useTranscript(pane, enabled, agent = 'claude', refreshToken = nu
     if (r.session) { sessionRef.current = r.session; setSession(r.session); }
   }, [agent]);
 
+  const applyCodexEvent = useCallback((event) => {
+    const next = applyCodexConversationEvent(messagesRef.current, event);
+    if (next === messagesRef.current) return;
+    messagesRef.current = next.length > MAX_TRANSCRIPT_MESSAGES
+      ? next.slice(-MAX_TRANSCRIPT_MESSAGES)
+      : next;
+    setMessages(messagesRef.current);
+  }, []);
+
   usePollingLoop({
     fetch,
     apply,
@@ -184,5 +194,8 @@ export function useTranscript(pane, enabled, agent = 'claude', refreshToken = nu
     }
   }, [pane, agent, hasMoreOlder]);
 
-  return { messages, hasMoreOlder, loadOlder, loadingOlder, session, loaded, unavailable, unavailableDetail };
+  return {
+    messages, hasMoreOlder, loadOlder, loadingOlder, session, loaded, unavailable, unavailableDetail,
+    applyCodexEvent,
+  };
 }

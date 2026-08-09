@@ -1,9 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { streamCodexMessages, UnauthorizedError } from '../api.js';
-import type { CodexGoal } from '../../../server/src/codexStreamProtocol.js';
-import type { CodexConversationMutation } from '../../../server/src/codexConversationProjection.js';
 
-const MAX_LIVE_MESSAGES = 20;
 const RETRY_MIN_MS = 500;
 const RETRY_MAX_MS = 4_000;
 
@@ -12,131 +9,8 @@ interface CodexStreamEventLike {
   threadId?: string;
   turnId?: string | null;
   itemId?: string | null;
-  text?: string;
-  delta?: string;
-  completed?: boolean;
-  event?: string;
-  goal?: Partial<CodexGoal>;
   cursor?: number;
   sequence?: number;
-  mutation?: CodexConversationMutation | null;
-}
-
-export interface CodexLiveMessage {
-  id: string;
-  streamKey: string;
-  turnId: string | null;
-  itemId?: string | null;
-  role: 'assistant';
-  type: 'text' | 'goal';
-  text?: string;
-  event?: string;
-  goal?: Partial<CodexGoal>;
-  live: true;
-  completed: boolean;
-  streaming?: boolean;
-  afterK: number;
-}
-
-export interface CodexDurableMessage {
-  id?: string;
-  k?: number | string;
-  i?: number | string;
-  role?: string;
-  type?: string;
-  text?: string;
-  turnId?: string | null;
-  itemId?: string | null;
-  event?: string;
-  goal?: Partial<CodexGoal>;
-}
-
-export function applyCodexStreamEvent(
-  messages: CodexLiveMessage[],
-  event: CodexStreamEventLike,
-  afterK = -1,
-): CodexLiveMessage[] {
-  if (!['ready', 'cursorReset', 'started', 'snapshot', 'delta', 'completed', 'turnCompleted', 'goal', 'goalCleared', 'conversation'].includes(event.type ?? '')) {
-    return messages;
-  }
-  // A new SSE connection replays only unfinished App Server items. Finalized temporary bubbles must not
-  // survive beside the rollout history, otherwise an old reply can remain below the current one forever.
-  if (event.type === 'ready' || event.type === 'cursorReset') {
-    const next = messages.filter((message) => {
-      if (message.type !== 'goal') return !message.completed;
-      return !['complete', 'blocked'].includes(message.goal?.status ?? '') || !!message.turnId;
-    });
-    return next.length === messages.length ? messages : next;
-  }
-  const mutation = event.mutation;
-  if (!mutation) return messages;
-  if (mutation.operation === 'settleTurn') {
-    let changed = false;
-    const next = messages.map((message) => {
-      if (message.turnId !== mutation.turnId || message.completed) return message;
-      changed = true;
-      return { ...message, completed: true, streaming: false };
-    });
-    return changed ? next : messages;
-  }
-
-  const projected = mutation.message;
-  const key = projected.id;
-  const index = messages.findIndex((message) => message.id === key);
-  const previous = index >= 0 ? messages[index] : null;
-  if (projected.type === 'goal') {
-    const nextMessage: CodexLiveMessage = {
-      id: projected.id,
-      streamKey: key,
-      turnId: projected.turnId,
-      role: 'assistant',
-      type: 'goal',
-      event: projected.event,
-      goal: projected.goal,
-      live: true,
-      completed: true,
-      afterK: previous?.afterK ?? afterK,
-    };
-    const next = index >= 0
-      ? messages.map((message, candidate) => (candidate === index ? nextMessage : message))
-      : [...messages, nextMessage];
-    return next.slice(-MAX_LIVE_MESSAGES);
-  }
-  const text = mutation.mode === 'append'
-    ? `${previous?.text || ''}${projected.text}`
-    : projected.text;
-  const completed = projected.completed || previous?.completed === true;
-  // Once a later assistant item starts, every earlier finalized assistant item is already history. Keep
-  // only unfinished accumulators; the durable rollout remains the single source for completed content.
-  const baseMessages = !previous && !completed && mutation.mode === 'replace'
-    ? messages.filter((message) => message.type === 'goal' || !message.completed)
-    : messages;
-  const baseIndex = baseMessages.findIndex((message) => message.id === key);
-  const nextMessage: CodexLiveMessage = {
-    ...(previous || {}),
-    id: projected.id,
-    streamKey: key,
-    turnId: projected.turnId,
-    itemId: projected.itemId,
-    role: 'assistant',
-    type: 'text',
-    text,
-    live: true,
-    streaming: !completed,
-    completed,
-    afterK: previous?.afterK ?? afterK,
-  };
-  const next = baseIndex >= 0
-    ? baseMessages.map((message, candidate) => (candidate === baseIndex ? nextMessage : message))
-    : [...baseMessages, nextMessage];
-  return next.slice(-MAX_LIVE_MESSAGES);
-}
-
-export function durableCoversLiveMessage(
-  durableMessages: CodexDurableMessage[],
-  liveMessage: CodexLiveMessage,
-): boolean {
-  return durableMessages.some((message) => message?.id != null && String(message.id) === liveMessage.id);
 }
 
 function abortableDelay(ms: number, signal: AbortSignal): Promise<void> {
@@ -152,53 +26,34 @@ function abortableDelay(ms: number, signal: AbortSignal): Promise<void> {
   });
 }
 
-// The SSE connection accelerates rendering only. Completed rollout messages still replace these temporary
-// bubbles, and a broken/backgrounded mobile connection silently retries while transcript polling continues.
+// The SSE connection owns only cursor/reconnect transport. Server-projected mutations are forwarded into
+// useTranscript's single message store; a broken/backgrounded mobile connection retries without a second
+// live-message cache.
 export function useCodexMessageStream({
-  pane, threadId, enabled, durableMessages, onSettled, onAuthFail,
+  pane, threadId, enabled, onEvent, onSettled, onAuthFail,
 }: {
   pane?: string | null;
   threadId?: string | null;
   enabled: boolean;
-  durableMessages: CodexDurableMessage[];
+  onEvent?: (event: CodexStreamEventLike) => void;
   onSettled?: () => void;
   onAuthFail?: () => void;
-}): CodexLiveMessage[] {
+}): void {
   const scope = enabled && pane && threadId ? `${pane}\0${threadId}` : null;
-  const [snapshot, setSnapshot] = useState<{
-    scope: string | null;
-    messages: CodexLiveMessage[];
-  }>({ scope, messages: [] });
   const [connectionEpoch, setConnectionEpoch] = useState(0);
-  const latestKRef = useRef(-1);
   const lastSequenceRef = useRef(-1);
+  const onEventRef = useRef<((event: CodexStreamEventLike) => void) | undefined>(onEvent);
   const onSettledRef = useRef<(() => void) | undefined>(onSettled);
   const onAuthFailRef = useRef<(() => void) | undefined>(onAuthFail);
   const streamControllerRef = useRef<AbortController | null>(null);
   const lastForegroundWakeRef = useRef(0);
-  latestKRef.current = durableMessages.reduce((latest, message) => (
-    Number.isFinite(Number(message?.k)) ? Math.max(latest, Number(message.k)) : latest
-  ), -1);
+  onEventRef.current = onEvent;
   onSettledRef.current = onSettled;
   onAuthFailRef.current = onAuthFail;
 
   useEffect(() => {
     lastSequenceRef.current = -1;
-    setSnapshot((current) => (current.scope === scope ? current : { scope, messages: [] }));
   }, [scope]);
-
-  useEffect(() => {
-    if (!scope) return;
-    setSnapshot((current) => {
-      if (current.scope !== scope) return current;
-      // A matching durable partial hides the duplicate in ChatView, but keep its live accumulator until
-      // completion: a later delta still needs the full prefix. Finalized items can be discarded outright.
-      const messages = current.messages.filter((message) => (
-        !message.completed || !durableCoversLiveMessage(durableMessages, message)
-      ));
-      return messages.length === current.messages.length ? current : { scope, messages };
-    });
-  }, [scope, durableMessages]);
 
   useEffect(() => {
     if (!scope || !pane || !threadId) return undefined;
@@ -250,11 +105,7 @@ export function useCodexMessageStream({
         lastSequenceRef.current = sequence;
       }
       if (['completed', 'turnCompleted', 'goal'].includes(event.type ?? '')) onSettledRef.current?.();
-      setSnapshot((current) => {
-        if (current.scope !== scope) return current;
-        const messages = applyCodexStreamEvent(current.messages, event, latestKRef.current);
-        return messages === current.messages ? current : { scope, messages };
-      });
+      onEventRef.current?.(event);
     };
     const run = async () => {
       while (!controller.signal.aborted) {
@@ -282,6 +133,4 @@ export function useCodexMessageStream({
       if (streamControllerRef.current === controller) streamControllerRef.current = null;
     };
   }, [scope, pane, threadId, connectionEpoch]);
-
-  return snapshot.scope === scope ? snapshot.messages : [];
 }

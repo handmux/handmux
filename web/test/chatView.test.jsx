@@ -2,12 +2,14 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, act, cleanup } from '@testing-library/react';
 import ChatView from '../src/components/ChatView.jsx';
 import * as api from '../src/api.js';
+import { projectCodexStreamEvent } from '../../server/src/codexStreamProtocol.js';
 
 // This repo doesn't run vitest with `globals: true`, so testing-library's auto-cleanup (which hooks into
 // a global afterEach) never registers — without this, DOM from one test leaks into the next.
 afterEach(cleanup);
 
 beforeEach(() => {
+  projectionSequence = 0;
   vi.restoreAllMocks();
   // Managed-Codex component cases are about rendering/gates unless a test explicitly drives the stream.
   // Keep the long-lived fetch open until unmount so it cannot retry against jsdom's missing network.
@@ -15,6 +17,12 @@ beforeEach(() => {
     new Promise((resolve) => signal.addEventListener('abort', resolve, { once: true }))
   ));
 });
+
+let projectionSequence = 0;
+function projected(event) {
+  projectionSequence += 1;
+  return projectCodexStreamEvent({ threadId: 'thread-1', ...event }, projectionSequence);
+}
 
 function mockTranscript(messages) {
   vi.spyOn(api, 'fetchTranscript').mockResolvedValue({ messages, hash: 'h', session: 's', hasMore: false, firstSeq: messages[0]?.k ?? 0 });
@@ -60,7 +68,7 @@ describe('ChatView', () => {
     expect(container.querySelector('.lens-boot')).toBeNull();
   });
 
-  it('buffers a streamed reply until tab history loads, then reveals both together', async () => {
+  it('starts the unified stream after tab history loads, then appends the live reply', async () => {
     let resolveTranscript;
     vi.spyOn(api, 'fetchTranscript').mockReturnValue(new Promise((resolve) => {
       resolveTranscript = resolve;
@@ -74,12 +82,7 @@ describe('ChatView', () => {
       codexSession={{ managed: true, threadId: 'thread-1' }} />);
 
     expect(container.querySelector('.lens-boot')).toBeTruthy();
-    await waitFor(() => expect(emit).toBeTypeOf('function'));
-    act(() => emit({
-      type: 'delta', threadId: 'thread-1', turnId: 'turn-1', itemId: 'agent-1', delta: '实时回复已到达',
-    }));
-
-    expect(screen.queryByText('实时回复已到达')).toBeNull();
+    expect(emit).toBeUndefined();
     expect(container.querySelector('.lens-boot')).toBeTruthy();
     await act(async () => resolveTranscript({
       messages: [{ k: 0, i: 0, role: 'user', type: 'text', text: '历史消息先显示' }],
@@ -87,6 +90,10 @@ describe('ChatView', () => {
     }));
 
     expect(await screen.findByText('历史消息先显示')).toBeTruthy();
+    await waitFor(() => expect(emit).toBeTypeOf('function'));
+    act(() => emit(projected({
+      type: 'delta', turnId: 'turn-1', itemId: 'agent-1', delta: '实时回复已到达',
+    })));
     expect(await screen.findByText('实时回复已到达')).toBeTruthy();
     expect(container.querySelector('.lens-boot')).toBeNull();
   });
@@ -223,7 +230,10 @@ describe('ChatView', () => {
   it('does not append an exact live copy after its durable assistant message', async () => {
     mockTranscript([
       { k: 0, i: 0, role: 'user', type: 'text', text: '检查结果' },
-      { k: 1, i: 1, turnId: 'turn-1', role: 'assistant', type: 'text', text: '已经完成检查' },
+      {
+        id: 'codex:turn-1:agent-1', k: 1, i: 1, turnId: 'turn-1', itemId: 'agent-1',
+        role: 'assistant', type: 'text', text: '已经完成检查',
+      },
       { k: 2, i: 2, role: 'assistant', type: 'tool', tool: {
         name: 'exec_command', input: { cmd: 'npm test' }, result: 'ok', isError: false,
       } },
@@ -238,10 +248,10 @@ describe('ChatView', () => {
     await screen.findByText('已经完成检查');
     await waitFor(() => expect(emit).toBeTypeOf('function'));
 
-    act(() => emit({
-      type: 'snapshot', threadId: 'thread-1', turnId: 'turn-1', itemId: 'agent-1',
+    act(() => emit(projected({
+      type: 'snapshot', turnId: 'turn-1', itemId: 'agent-1',
       text: '已经完成检查', completed: false,
-    }));
+    })));
 
     expect(screen.getAllByText('已经完成检查')).toHaveLength(1);
   });
@@ -760,13 +770,13 @@ describe('ChatView', () => {
     const completedReply = await screen.findByText('发布已经完成');
     const laterInput = screen.getByText('再检查文档');
     await waitFor(() => expect(emit).toBeTypeOf('function'));
-    act(() => emit({
-      type: 'goal', threadId: 'thread-1', turnId: 'turn-goal', event: 'complete',
+    act(() => emit(projected({
+      type: 'goal', turnId: 'turn-goal', event: 'complete',
       goal: {
         objective: '完成发布', status: 'complete', createdAt: 10, updatedAt: 20,
         tokensUsed: 500, timeUsedSeconds: 12,
       },
-    }));
+    })));
 
     const card = await screen.findByRole('button', { name: /目标已完成.*完成发布/ });
     expect(completedReply.compareDocumentPosition(card) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
@@ -788,13 +798,13 @@ describe('ChatView', () => {
     await screen.findByText('当前页里的后续回答');
     await waitFor(() => expect(emit).toBeTypeOf('function'));
     await act(async () => {
-      emit({
-        type: 'goal', threadId: 'thread-1', turnId: 'turn-on-older-page', event: 'complete',
+      emit(projected({
+        type: 'goal', turnId: 'turn-on-older-page', event: 'complete',
         goal: {
           objective: '较早完成的目标', status: 'complete', createdAt: 10, updatedAt: 20,
           tokensUsed: 500, timeUsedSeconds: 12,
         },
-      });
+      }));
       await Promise.resolve();
       await Promise.resolve();
     });
@@ -988,25 +998,25 @@ describe('ChatView', () => {
     setGeometry(el, { scrollTop: 700, scrollHeight: 1000, clientHeight: 300 });
 
     act(() => {
-      emit({ type: 'started', threadId: 'thread-1', turnId: 'turn-1', itemId: 'agent-1', text: '' });
-      emit({ type: 'delta', threadId: 'thread-1', turnId: 'turn-1', itemId: 'agent-1', delta: '第一段正在生成' });
+      emit(projected({ type: 'started', turnId: 'turn-1', itemId: 'agent-1', text: '' }));
+      emit(projected({ type: 'delta', turnId: 'turn-1', itemId: 'agent-1', delta: '第一段正在生成' }));
     });
     await screen.findByText('第一段正在生成');
     await waitFor(() => expect(container.querySelector('.new-output')?.textContent).toContain('查看最新回答'));
     const anchoredTop = el.scrollTop;
 
     Object.defineProperty(el, 'scrollHeight', { value: 1400, configurable: true });
-    act(() => emit({
-      type: 'delta', threadId: 'thread-1', turnId: 'turn-1', itemId: 'agent-1', delta: '，后续内容继续增长',
-    }));
+    act(() => emit(projected({
+      type: 'delta', turnId: 'turn-1', itemId: 'agent-1', delta: '，后续内容继续增长',
+    })));
     await screen.findByText('第一段正在生成，后续内容继续增长');
     expect(el.scrollTop).toBe(anchoredTop);
 
     fireEvent.click(container.querySelector('.new-output'));
     Object.defineProperty(el, 'scrollHeight', { value: 1600, configurable: true });
-    act(() => emit({
-      type: 'delta', threadId: 'thread-1', turnId: 'turn-1', itemId: 'agent-1', delta: '，现在跟随最新',
-    }));
+    act(() => emit(projected({
+      type: 'delta', turnId: 'turn-1', itemId: 'agent-1', delta: '，现在跟随最新',
+    })));
     await screen.findByText('第一段正在生成，后续内容继续增长，现在跟随最新');
     expect(el.scrollTop).toBe(1600);
 
@@ -1015,9 +1025,9 @@ describe('ChatView', () => {
       optimisticMessages={[{ id: 'queued-1', text: '排队处理下一项', status: 'sending' }]} />);
     await screen.findByText('排队处理下一项');
     Object.defineProperty(el, 'scrollHeight', { value: 1800, configurable: true });
-    act(() => emit({
-      type: 'delta', threadId: 'thread-1', turnId: 'turn-1', itemId: 'agent-1', delta: '，当前回答仍在继续',
-    }));
+    act(() => emit(projected({
+      type: 'delta', turnId: 'turn-1', itemId: 'agent-1', delta: '，当前回答仍在继续',
+    })));
     await screen.findByText('第一段正在生成，后续内容继续增长，现在跟随最新，当前回答仍在继续');
     expect(el.scrollTop).toBe(1800);
     expect(container.querySelector('.new-output')).toBeNull();
