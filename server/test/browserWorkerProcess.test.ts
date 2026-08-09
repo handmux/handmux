@@ -2,7 +2,14 @@ import { fork } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
-const WORKER = fileURLToPath(new URL('../src/browser/worker.js', import.meta.url));
+const WORKER = fileURLToPath(new URL('../dist/src/browser/worker.js', import.meta.url));
+
+function readyMessage(value: unknown): { type: string; port: number } {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('invalid worker ready message');
+  const record = value as Record<string, unknown>;
+  if (typeof record.type !== 'string' || typeof record.port !== 'number') throw new Error('invalid worker ready message');
+  return { type: record.type, port: record.port };
+}
 
 describe('browser worker process', () => {
   it('announces readiness and exits cleanly on SIGTERM', async () => {
@@ -11,11 +18,11 @@ describe('browser worker process', () => {
       stdio: ['ignore', 'ignore', 'inherit', 'ipc'],
     });
     try {
-      const ready = await new Promise((resolve, reject) => {
-        child.once('message', resolve);
+      const ready = readyMessage(await new Promise<unknown>((resolve, reject) => {
+        child.once('message', (message) => resolve(message));
         child.once('error', reject);
         child.once('exit', (code) => reject(new Error(`worker exited before ready: ${code}`)));
-      });
+      }));
       expect(ready).toMatchObject({ type: 'handmux-browser-ready' });
       expect(Number.isInteger(ready.port)).toBe(true);
 
@@ -24,7 +31,7 @@ describe('browser worker process', () => {
       });
       expect(health.status).toBe(200);
 
-      const exited = new Promise((resolve) => child.once('exit', resolve));
+      const exited = new Promise<number | null>((resolve) => child.once('exit', (code) => resolve(code)));
       child.kill('SIGTERM');
       await expect(exited).resolves.toBe(0);
     } finally {

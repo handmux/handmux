@@ -1,5 +1,9 @@
 import http from 'node:http';
+import type { IncomingMessage } from 'node:http';
+import type { AddressInfo, Socket } from 'node:net';
+import type { Duplex } from 'node:stream';
 import express from 'express';
+import type { Request, RequestHandler } from 'express';
 import { tokenEquals } from '../auth.js';
 import { createBrowserPreviewManager } from './manager.js';
 import { createBrowserBootstrapStore } from './bootstrap.js';
@@ -7,11 +11,46 @@ import { createBrowserPublicProxy } from './publicProxy.js';
 import { browserRoutes } from './routes.js';
 import { BROWSER_INTERNAL_HEADER } from './protocol.js';
 
-function isLoopback(address) {
+interface BrowserManager {
+  close?(): unknown | Promise<unknown>;
+  [key: string]: unknown;
+}
+interface BrowserPublicProxy {
+  handler: RequestHandler;
+  onUpgrade(req: IncomingMessage, socket: Duplex, head: Buffer): boolean;
+}
+interface BrowserWorkerServerOptions {
+  internalToken: string | undefined;
+  previewDomain?: string | null;
+  handmuxOrigin?: string;
+  browser?: BrowserManager | null;
+  managerFactory?: (options: {
+    handmuxOrigin: string;
+    previewDomain: string | null;
+    browserBootstrap: ReturnType<typeof createBrowserBootstrapStore>;
+  }) => BrowserManager | Promise<BrowserManager>;
+  browserPublicFactory?: (options: {
+    browser: BrowserManager;
+    browserBootstrap: ReturnType<typeof createBrowserBootstrapStore>;
+  }) => BrowserPublicProxy;
+  host?: string;
+  port?: number;
+}
+type BrowserManagerFactory = NonNullable<BrowserWorkerServerOptions['managerFactory']>;
+type BrowserPublicFactory = NonNullable<BrowserWorkerServerOptions['browserPublicFactory']>;
+const defaultManagerFactory = createBrowserPreviewManager as unknown as BrowserManagerFactory;
+const defaultBrowserPublicFactory = createBrowserPublicProxy as unknown as BrowserPublicFactory;
+const workerBrowserRoutes = browserRoutes as unknown as (options: {
+  browser: BrowserManager;
+  previewDomain: string | null;
+  browserBootstrap: ReturnType<typeof createBrowserBootstrapStore>;
+}) => RequestHandler;
+
+function isLoopback(address: unknown): boolean {
   return address === '127.0.0.1' || address === '::1' || String(address || '').startsWith('::ffff:127.');
 }
 
-function authenticated(req, token) {
+function authenticated(req: Pick<Request, 'headers' | 'socket'> | IncomingMessage, token: string): boolean {
   const provided = req.headers[BROWSER_INTERNAL_HEADER];
   return isLoopback(req.socket?.remoteAddress)
     && typeof provided === 'string'
@@ -23,11 +62,11 @@ export async function createBrowserWorkerServer({
   previewDomain = null,
   handmuxOrigin = 'http://127.0.0.1',
   browser: suppliedBrowser = null,
-  managerFactory = createBrowserPreviewManager,
-  browserPublicFactory = createBrowserPublicProxy,
+  managerFactory = defaultManagerFactory,
+  browserPublicFactory = defaultBrowserPublicFactory,
   host = '127.0.0.1',
   port = 0,
-} = {}) {
+}: BrowserWorkerServerOptions) {
   if (!internalToken) throw new Error('browser worker internal token required');
   const browserBootstrap = createBrowserBootstrapStore();
   const browser = suppliedBrowser || await managerFactory({
@@ -41,18 +80,18 @@ export async function createBrowserWorkerServer({
   app.use((req, res, next) => {
     if (!authenticated(req, internalToken)) return res.status(401).json({ error: 'browser worker unauthorized' });
     delete req.headers[BROWSER_INTERNAL_HEADER];
-    next();
+    return next();
   });
   app.get('/_browser-worker/health', (_req, res) => res.json({ ok: true }));
   app.use(
     '/api/browser-proxy',
     express.json(),
-    browserRoutes({ browser, previewDomain, browserBootstrap }),
+    workerBrowserRoutes({ browser, previewDomain, browserBootstrap }),
   );
   app.use(browserPublic.handler);
 
   const server = http.createServer(app);
-  const sockets = new Set();
+  const sockets = new Set<Socket>();
   server.on('connection', (socket) => {
     sockets.add(socket);
     socket.once('close', () => sockets.delete(socket));
@@ -66,18 +105,20 @@ export async function createBrowserWorkerServer({
     if (!browserPublic.onUpgrade(req, socket, head)) socket.destroy();
   });
 
-  await new Promise((resolve, reject) => {
-    const onError = (error) => { server.off('listening', onListening); reject(error); };
-    const onListening = () => { server.off('error', onError); resolve(); };
+  await new Promise<void>((resolve, reject) => {
+    const onError = (error: Error): void => { server.off('listening', onListening); reject(error); };
+    const onListening = (): void => { server.off('error', onError); resolve(); };
     server.once('error', onError);
     server.once('listening', onListening);
     server.listen(port, host);
   });
 
-  let closePromise = null;
+  const address = server.address();
+  if (!address || typeof address === 'string') throw new Error('browser worker did not bind a TCP port');
+  let closePromise: Promise<void> | null = null;
   return {
     host,
-    port: server.address().port,
+    port: (address as AddressInfo).port,
     server,
     browser,
     close() {

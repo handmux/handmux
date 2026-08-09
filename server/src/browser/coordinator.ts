@@ -1,11 +1,37 @@
+import type { IncomingHttpHeaders, OutgoingHttpHeader } from 'node:http';
+import type { Request, RequestHandler, Response } from 'express';
+
 const DEVICE_ID = /^[A-Za-z0-9_-]{32,128}$/;
 
-function jsonBody(response) {
-  if (!response?.body?.length) return null;
-  try { return JSON.parse(response.body.toString('utf8')); } catch { return null; }
+export interface BrowserCoordinatorStatus { ready: boolean; generation: number }
+export interface BrowserProxyResponse {
+  status: number;
+  headers?: Record<string, OutgoingHttpHeader | undefined> | IncomingHttpHeaders;
+  body: Buffer;
+}
+export interface BrowserProxyRequest {
+  req: Request;
+  method: string;
+  path: string;
+  body?: unknown;
+}
+export type BrowserCoordinatorHandler = RequestHandler & { close(): void };
+
+function jsonBody(response: BrowserProxyResponse): Record<string, unknown> | null {
+  if (!response.body?.length) return null;
+  try {
+    const parsed = JSON.parse(response.body.toString('utf8')) as unknown;
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown> : null;
+  } catch { return null; }
 }
 
-function sendProxy(res, response, generation, stampGeneration) {
+function sendProxy(
+  res: Response,
+  response: BrowserProxyResponse | null,
+  generation: number,
+  stampGeneration: boolean,
+) {
   if (!response) return res.status(503).json({ error: 'browser unavailable' });
   for (const [name, value] of Object.entries(response.headers || {})) {
     if (value != null && !['connection', 'content-length', 'transfer-encoding'].includes(name.toLowerCase())) {
@@ -22,8 +48,11 @@ function sendProxy(res, response, generation, stampGeneration) {
 export function createBrowserCoordinator({
   proxyRequest,
   getStatus = () => ({ ready: false, generation: 0 }),
-} = {}) {
-  const handler = async (req, res) => {
+}: {
+  proxyRequest: (request: BrowserProxyRequest) => Promise<BrowserProxyResponse | null>;
+  getStatus?: () => BrowserCoordinatorStatus;
+}): BrowserCoordinatorHandler {
+  const handler: BrowserCoordinatorHandler = async (req, res) => {
     if (req.method === 'GET' && req.path === '/status') {
       return res.json(getStatus());
     }
@@ -42,6 +71,6 @@ export function createBrowserCoordinator({
       && ['PUT', 'POST'].includes(req.method);
     return sendProxy(res, response, getStatus().generation, stampGeneration);
   };
-  handler.close = () => {};
+  handler.close = (): void => {};
   return handler;
 }
