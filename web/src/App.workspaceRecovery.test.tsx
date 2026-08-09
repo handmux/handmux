@@ -1,5 +1,21 @@
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { TerminalProps } from './components/Terminal.jsx';
+import type { WindowBarProps, WorkspaceWindow } from './components/WindowBar.jsx';
+import type { WorkspaceRecoveryPlan, WorkspacePlanSession } from './workspaceRecovery.js';
+
+type MockWindowBarProps = Omit<WindowBarProps,
+  'onSelectWindow' | 'onManageWindow' | 'onManagePane' | 'onPaneMapOpenChange'> & {
+  onSelectWindow: (window: WorkspaceWindow) => Promise<void>;
+  onManageWindow: (window: WorkspaceWindow) => Promise<void>;
+  onManagePane: (paneId: string) => Promise<void>;
+  onPaneMapOpenChange: (open: boolean) => void;
+};
+type MockTerminalProps = TerminalProps & {
+  onTap: () => void;
+  onRequestDraft: () => void;
+  onInputFocusChange: (focused: boolean) => void;
+};
 
 const api = vi.hoisted(() => ({
   getSessions: vi.fn(),
@@ -20,9 +36,9 @@ const api = vi.hoisted(() => ({
 }));
 const storage = vi.hoisted(() => ({ applyWorkspaceRestoreMapping: vi.fn() }));
 const push = vi.hoisted(() => ({ getNotifications: vi.fn() }));
-const windowBar = vi.hoisted(() => ({ props: null }));
+const windowBar = vi.hoisted((): { props: WindowBarProps | null } => ({ props: null }));
 const terminal = vi.hoisted(() => ({
-  props: null,
+  props: null as TerminalProps | null,
   focusInput: vi.fn(),
   blurInput: vi.fn(),
   forwardPageKey: vi.fn(),
@@ -31,8 +47,8 @@ const bottomDock = vi.hoisted(() => ({ focusComposer: vi.fn() }));
 const overlayActivity = vi.hoisted(() => {
   const state = {
     active: false,
-    listeners: new Set(),
-    set(active) {
+    listeners: new Set<() => void>(),
+    set(active: boolean) {
       state.active = active;
       for (const listener of [...state.listeners]) listener();
     },
@@ -102,7 +118,7 @@ vi.mock('./desktopInput.js', () => ({
 }));
 
 vi.mock('./components/WindowBar.jsx', () => ({
-  default: (props) => { windowBar.props = props; return null; },
+  default: (props: WindowBarProps) => { windowBar.props = props; return null; },
 }));
 vi.mock('./components/BottomDock.jsx', async () => {
   const { forwardRef, useImperativeHandle } = await import('react');
@@ -119,7 +135,7 @@ vi.mock('./components/BottomDock.jsx', async () => {
 vi.mock('./components/Terminal.jsx', async () => {
   const { forwardRef, useImperativeHandle } = await import('react');
   return {
-    default: forwardRef((props, ref) => {
+    default: forwardRef((props: TerminalProps, ref) => {
       terminal.props = props;
       useImperativeHandle(ref, () => ({
         focusInput: () => {
@@ -145,7 +161,17 @@ const ACTIVE_SESSION = '10000000-0000-4000-8000-000000000001';
 const ACTIVE_WINDOW = '20000000-0000-4000-8000-000000000001';
 const ACTIVE_PANE = '30000000-0000-4000-8000-000000000001';
 
-const activePlan = (overrides = {}) => ({
+interface RecoverySessionFixture extends WorkspacePlanSession {
+  activeWindowId?: string;
+  windowLinks?: Array<{ windowId: string; index: number }>;
+}
+
+interface RecoveryPlanFixture extends Omit<WorkspaceRecoveryPlan, 'sessions'> {
+  sessions?: RecoverySessionFixture[];
+  active?: { sessionId: string; windowId: string; paneId: string };
+}
+
+const activePlan = (overrides: Partial<RecoveryPlanFixture> = {}): RecoveryPlanFixture => ({
   checkpointId: 'checkpoint-a',
   capturedAt: '2026-07-20T01:42:00.000Z',
   changeReason: 'boot-changed',
@@ -166,7 +192,7 @@ const activePlan = (overrides = {}) => ({
   mapping: null,
   ...overrides,
 });
-const resolvedPlan = (overrides = {}) => activePlan({
+const resolvedPlan = (overrides: Partial<RecoveryPlanFixture> = {}): RecoveryPlanFixture => activePlan({
   promptEligible: false,
   resolved: true,
   pendingCount: 0,
@@ -182,11 +208,27 @@ const flush = async (ms = 0) => {
   });
 };
 
-const deferred = () => {
-  let resolve;
-  let reject;
-  const promise = new Promise((res, rej) => { resolve = res; reject = rej; });
+const deferred = <T = unknown>() => {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((res, rej) => { resolve = res; reject = rej; });
   return { promise, resolve, reject };
+};
+
+const windowBarProps = (): MockWindowBarProps => {
+  if (!windowBar.props) throw new Error('expected WindowBar props');
+  return windowBar.props as MockWindowBarProps;
+};
+
+const terminalProps = (): MockTerminalProps => {
+  if (!terminal.props) throw new Error('expected Terminal props');
+  return terminal.props as MockTerminalProps;
+};
+
+const requiredElement = <T extends Element = HTMLElement>(root: ParentNode, selector: string): T => {
+  const element = root.querySelector<T>(selector);
+  if (!element) throw new Error(`expected element: ${selector}`);
+  return element;
 };
 
 async function renderApp() {
@@ -264,7 +306,7 @@ describe('App management dimensions', () => {
     await renderManagedSession();
     api.getWindows.mockResolvedValueOnce([{ ...staleWindow, width: 160, height: 48 }]);
 
-    await act(async () => { await windowBar.props.onManageWindow(staleWindow); });
+    await act(async () => { await windowBarProps().onManageWindow(staleWindow); });
 
     expect(screen.getByRole('dialog', { name: '窗口管理，work · 160×48' })).toBeTruthy();
     expect(api.getWindows).toHaveBeenCalledTimes(2);
@@ -279,7 +321,7 @@ describe('App management dimensions', () => {
     api.getPanes.mockResolvedValue(lonePane);
     await renderApp();
 
-    await act(async () => { await windowBar.props.onManageWindow(loneWindow); });
+    await act(async () => { await windowBarProps().onManageWindow(loneWindow); });
     expect(screen.getByRole('button', { name: /左右分屏/ }).closest('.sheet-row'))
       .toBe(screen.getByRole('button', { name: /上下分屏/ }).closest('.sheet-row'));
     await act(async () => {
@@ -293,7 +335,7 @@ describe('App management dimensions', () => {
 
   it('does not expose whole-window width for a multi-pane window', async () => {
     const view = await renderManagedSession();
-    await act(async () => { await windowBar.props.onManageWindow(staleWindow); });
+    await act(async () => { await windowBarProps().onManageWindow(staleWindow); });
     expect(view.container.querySelector('.sheet-size-control')).toBeNull();
   });
 
@@ -303,7 +345,7 @@ describe('App management dimensions', () => {
       pane.id === '%1' ? { ...pane, width: 59, height: 30 } : { ...pane, width: 60, height: 30, left: 60 }
     )));
 
-    await act(async () => { await windowBar.props.onManagePane('%1'); });
+    await act(async () => { await windowBarProps().onManagePane('%1'); });
 
     expect(screen.getByRole('dialog', { name: '分屏管理，① zsh · 59×30' })).toBeTruthy();
     expect(api.getPanes).toHaveBeenCalledTimes(2);
@@ -311,7 +353,7 @@ describe('App management dimensions', () => {
 
   it('resizes the selected side-by-side pane and restores only its saved split ratio', async () => {
     await renderManagedSession();
-    await act(async () => { await windowBar.props.onManagePane('%1'); });
+    await act(async () => { await windowBarProps().onManagePane('%1'); });
     expect(screen.getByRole('button', { name: /左右分屏/ }).closest('.sheet-row')).toBeNull();
     expect(screen.getByRole('button', { name: /上下分屏/ }).closest('.sheet-row')).toBeNull();
 
@@ -333,6 +375,7 @@ describe('App management dimensions', () => {
     expect(screen.getByText('41 列')).toBeTruthy();
 
     const restore = screen.getByRole('button', { name: /恢复分屏比例/ });
+    if (!(restore instanceof HTMLButtonElement)) throw new Error('expected restore button');
     expect(restore.disabled).toBe(false);
     await act(async () => {
       fireEvent.click(restore);
@@ -354,7 +397,7 @@ describe('App management dimensions', () => {
     api.getPanes.mockResolvedValue(stack);
     const view = await renderApp();
 
-    await act(async () => { await windowBar.props.onManagePane('%1'); });
+    await act(async () => { await windowBarProps().onManagePane('%1'); });
     expect(view.container.querySelector('.sheet-size-control')).toBeNull();
   });
 
@@ -364,32 +407,32 @@ describe('App management dimensions', () => {
       pane.id === '%1' ? { ...pane, width: 59, height: 30 } : { ...pane, width: 60, height: 30, left: 60 }
     )));
 
-    await act(async () => { await windowBar.props.onBeforePaneMapOpen?.('@1'); });
+    await act(async () => { await windowBarProps().onBeforePaneMapOpen?.('@1'); });
 
-    expect(windowBar.props.panes.find((pane) => pane.id === '%1')).toMatchObject({ width: 59, height: 30 });
+    expect(windowBarProps().panes.find((pane) => pane.id === '%1')).toMatchObject({ width: 59, height: 30 });
     expect(api.getPanes).toHaveBeenCalledTimes(2);
   });
 
   it('keeps a pane switched under the pane map unfocused and restores the prior terminal owner on close', async () => {
     await renderManagedSession();
-    act(() => terminal.props.onInputFocusChange(true));
+    act(() => terminalProps().onInputFocusChange(true));
 
     act(() => {
-      windowBar.props.onPaneMapOpenChange(true);
+      windowBarProps().onPaneMapOpenChange(true);
       overlayActivity.set(true);
     });
     await flush();
     expect(terminal.blurInput).toHaveBeenCalled();
-    expect(terminal.props.autoFocusInput).toBe(false);
+    expect(terminalProps().autoFocusInput).toBe(false);
 
-    act(() => windowBar.props.onSelectPane('%2'));
+    act(() => windowBarProps().onSelectPane('%2'));
     await flush();
-    expect(terminal.props.pane).toBe('%2');
-    expect(terminal.props.autoFocusInput).toBe(false);
+    expect(terminalProps().pane).toBe('%2');
+    expect(terminalProps().autoFocusInput).toBe(false);
     expect(terminal.focusInput).not.toHaveBeenCalled();
 
     act(() => {
-      windowBar.props.onPaneMapOpenChange(false);
+      windowBarProps().onPaneMapOpenChange(false);
       overlayActivity.set(false);
     });
     await flush(20);
@@ -399,7 +442,7 @@ describe('App management dimensions', () => {
   it('returns desktop keyboard ownership to the terminal when the terminal is tapped', async () => {
     await renderManagedSession();
 
-    act(() => terminal.props.onTap());
+    act(() => terminalProps().onTap());
 
     expect(terminal.focusInput).toHaveBeenCalledOnce();
   });
@@ -407,7 +450,7 @@ describe('App management dimensions', () => {
   it('moves desktop keyboard ownership into the draft on Shift+Enter', async () => {
     await renderManagedSession();
 
-    act(() => terminal.props.onRequestDraft());
+    act(() => terminalProps().onRequestDraft());
 
     expect(terminal.blurInput).toHaveBeenCalledOnce();
     expect(bottomDock.focusComposer).toHaveBeenCalledOnce();
@@ -460,14 +503,14 @@ describe('App window switching', () => {
       .mockReturnValueOnce(thirdPanes.promise);
     await renderApp();
 
-    let secondSwitch;
-    act(() => { secondSwitch = windowBar.props.onSelectWindow(second); });
-    expect(windowBar.props.currentWindowId).toBe('@2');
+    let secondSwitch: Promise<void> | undefined;
+    act(() => { secondSwitch = windowBarProps().onSelectWindow(second); });
+    expect(windowBarProps().currentWindowId).toBe('@2');
     expect(screen.getByTestId('terminal-pane').textContent).toBe('%2');
 
-    let thirdSwitch;
-    act(() => { thirdSwitch = windowBar.props.onSelectWindow(third); });
-    expect(windowBar.props.currentWindowId).toBe('@3');
+    let thirdSwitch: Promise<void> | undefined;
+    act(() => { thirdSwitch = windowBarProps().onSelectWindow(third); });
+    expect(windowBarProps().currentWindowId).toBe('@3');
     expect(screen.getByTestId('terminal-pane').textContent).toBe('%3');
 
     await act(async () => {
@@ -479,7 +522,7 @@ describe('App window switching', () => {
       await secondSwitch;
     });
 
-    expect(windowBar.props.currentWindowId).toBe('@3');
+    expect(windowBarProps().currentWindowId).toBe('@3');
     expect(screen.getByTestId('terminal-pane').textContent).toBe('%3');
   });
 });
@@ -499,15 +542,15 @@ describe('App workspace recovery', () => {
     api.getSessions.mockResolvedValue([{ id: '$7', name: 'current' }]);
     api.getWorkspaceRestorePlan.mockResolvedValue(activePlan());
     const { container } = await renderApp();
-    const menu = container.querySelector('.hamburger');
+    const menu = requiredElement<HTMLButtonElement>(container, '.hamburger');
     fireEvent.click(menu);
     await flush();
-    const card = container.querySelector('.workspace-recovery-card');
+    const card = requiredElement<HTMLElement>(container, '.workspace-recovery-card');
     card.focus();
     fireEvent.click(card);
     await flush();
 
-    expect(container.querySelector('.drawer').classList.contains('open')).toBe(false);
+    expect(requiredElement(container, '.drawer').classList.contains('open')).toBe(false);
     expect(screen.getByRole('dialog', { name: '恢复上次工作区' })).toBeTruthy();
 
     fireEvent.click(screen.getByRole('button', { name: '关闭' }));
@@ -519,18 +562,18 @@ describe('App workspace recovery', () => {
     const nextPlan = deferred();
     api.getWorkspaceRestorePlan.mockResolvedValueOnce(null).mockReturnValueOnce(nextPlan.promise);
     const { container } = await renderApp();
-    const menu = container.querySelector('.hamburger');
+    const menu = requiredElement<HTMLButtonElement>(container, '.hamburger');
 
     await flush(15_000);
     fireEvent.click(menu);
     await flush();
-    expect(container.querySelector('.drawer').classList.contains('open')).toBe(true);
-    const hiddenFocusTarget = container.querySelector('.drawer-logout');
+    expect(requiredElement(container, '.drawer').classList.contains('open')).toBe(true);
+    const hiddenFocusTarget = requiredElement<HTMLElement>(container, '.drawer-logout');
     hiddenFocusTarget.focus();
 
     nextPlan.resolve(activePlan({ checkpointId: 'checkpoint-b' }));
     await flush();
-    expect(container.querySelector('.drawer').classList.contains('open')).toBe(false);
+    expect(requiredElement(container, '.drawer').classList.contains('open')).toBe(false);
     expect(screen.getByRole('dialog', { name: '恢复上次工作区' })).toBeTruthy();
 
     fireEvent.click(screen.getByRole('button', { name: '关闭' }));
@@ -552,7 +595,7 @@ describe('App workspace recovery', () => {
 
     await flush(15_000);
     expect(screen.queryByRole('dialog', { name: '恢复上次工作区' })).toBeNull();
-    fireEvent.click(container.querySelector('.workspace-recovery-card'));
+    fireEvent.click(requiredElement(container, '.workspace-recovery-card'));
     await flush();
     fireEvent.click(screen.getByRole('button', { name: '忽略此备份' }));
     await flush();
@@ -619,7 +662,7 @@ describe('App workspace recovery', () => {
     await flush(1_000); // 503 poll; operationId must be retained
     await flush(1_000); // disconnected transport poll; operationId must still be retained
     await flush(1_000); // running 2 / 3
-    fireEvent.click(container.querySelector('.workspace-recovery-card'));
+    fireEvent.click(requiredElement(container, '.workspace-recovery-card'));
     await flush();
     expect(screen.getByText('正在恢复 2 / 3…')).toBeTruthy();
     await flush(1_000); // succeeded
@@ -798,7 +841,7 @@ describe('App workspace recovery', () => {
     fireEvent.click(screen.getByRole('button', { name: '恢复' }));
     await flush();
 
-    fireEvent.click(document.querySelector('.drawer-logout'));
+    fireEvent.click(requiredElement(document, '.drawer-logout'));
     await flush();
     start.resolve({ operationId: 'operation-stale', status: 'pending' });
     await flush();
@@ -825,7 +868,9 @@ describe('App workspace recovery', () => {
     expect(api.getWorkspaceRestoreOperation).toHaveBeenCalledTimes(1);
 
     await flush(15_000);
-    expect(screen.getByRole('button', { name: /正在恢复/ }).disabled).toBe(true);
+    const restoring = screen.getByRole('button', { name: /正在恢复/ });
+    if (!(restoring instanceof HTMLButtonElement)) throw new Error('expected restoring button');
+    expect(restoring.disabled).toBe(true);
     operation.resolve({ id: 'operation-a', status: 'pending', progress: { completed: 0, total: 1 }, results: [] });
     await flush();
     await flush(1_000);
@@ -871,7 +916,7 @@ describe('App workspace recovery', () => {
     await flush();
     expect(api.getWorkspaceRestoreOperation).toHaveBeenCalledTimes(1);
 
-    fireEvent.click(document.querySelector('.drawer-logout'));
+    fireEvent.click(requiredElement(document, '.drawer-logout'));
     await flush();
     pending.resolve({
       id: 'operation-a', status: 'succeeded', progress: { completed: 1, total: 1 },
@@ -934,7 +979,7 @@ describe('App workspace recovery', () => {
     fireEvent.click(screen.getByRole('button', { name: '恢复' }));
     await flush();
     expect(api.getWorkspaceRestorePlan).toHaveBeenCalledTimes(2);
-    fireEvent.click(document.querySelector('.drawer-logout'));
+    fireEvent.click(requiredElement(document, '.drawer-logout'));
     await flush();
     planStatus.resolve(resolvedPlan({ mapping: { id: 'late-plan-mapping' } }));
     protectionStatus.resolve({ status: 'degraded', errorCode: 'live-corrupt' });
