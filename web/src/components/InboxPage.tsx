@@ -2,24 +2,9 @@ import { t } from '../i18n';
 import { ChevronDownIcon } from './icons.jsx';
 import { sanitizeNotificationUrl } from '../urlPolicy.js';
 import { OverlayPortal } from '../overlays/OverlayHost.js';
+import type { PushDelivery, PushInboxItem } from '../push.js';
 
 // Relative time, compact (jsdom-safe, no Intl.RelativeTimeFormat): "刚刚" / "5分钟前" / a date.
-export type DeliveryStatus = 'pending' | 'success' | 'failed';
-
-export interface PushDelivery {
-  status: DeliveryStatus;
-  reason?: string | null;
-}
-
-export interface PushInboxItem {
-  id: string;
-  title: string;
-  body: string;
-  ts: number;
-  url?: string | null;
-  delivery?: PushDelivery | null;
-}
-
 interface InboxPageProps {
   open: boolean;
   detailId?: string | null;

@@ -5,6 +5,84 @@ import { getToken, getBoundSessions } from './storage.js';
 import { t } from './i18n';
 import { UnauthorizedError } from './api.js';
 
+export type DeliveryStatus = 'pending' | 'success' | 'failed';
+
+export interface PushDelivery {
+  status: DeliveryStatus;
+  reason?: string | null;
+}
+
+export interface PushInboxItem {
+  id: string;
+  title: string;
+  body: string;
+  ts: number;
+  url?: string | null;
+  delivery?: PushDelivery | null;
+}
+
+class PushError extends Error {
+  readonly code: string;
+
+  constructor(message: string, code: string) {
+    super(message);
+    this.name = 'PushError';
+    this.code = code;
+  }
+}
+
+class PushHttpError extends Error {
+  readonly status: number;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = 'PushHttpError';
+    this.status = status;
+  }
+}
+
+function recordOf(value: unknown): Record<string, unknown> | null {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+}
+
+function pushKeyOf(value: unknown): string | null {
+  const key = recordOf(value)?.pushKey;
+  return typeof key === 'string' ? key : null;
+}
+
+function parsePushDelivery(value: unknown): PushDelivery | null {
+  const record = recordOf(value);
+  if (!record || !['pending', 'success', 'failed'].includes(String(record.status))) return null;
+  return {
+    status: record.status as DeliveryStatus,
+    ...(typeof record.reason === 'string' || record.reason === null ? { reason: record.reason } : {}),
+  };
+}
+
+function parsePushInboxItems(value: unknown): PushInboxItem[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((candidate): PushInboxItem[] => {
+    const record = recordOf(candidate);
+    if (!record
+      || typeof record.id !== 'string'
+      || typeof record.title !== 'string'
+      || typeof record.body !== 'string'
+      || typeof record.ts !== 'number'
+      || !Number.isFinite(record.ts)) return [];
+    const delivery = parsePushDelivery(record.delivery);
+    return [{
+      id: record.id,
+      title: record.title,
+      body: record.body,
+      ts: record.ts,
+      ...(typeof record.url === 'string' || record.url === null ? { url: record.url } : {}),
+      ...(delivery ? { delivery } : {}),
+    }];
+  });
+}
+
 const NOTIFY_KEY = 'tw_notify'; // '1' once the user has enabled device notifications on this device
 const PUSH_DEVICE_KEY = 'tw_push_device_key'; // stable script-push identity across unsubscribe/resubscribe
 const VALID_PUSH_KEY = /^[A-Za-z0-9_-]{16,128}$/;
@@ -12,14 +90,15 @@ const LOCAL_STEP_TIMEOUT_MS = 10000;
 const PUSH_SERVICE_TIMEOUT_MS = 20000;
 
 export const notifyEnabled = () => localStorage.getItem(NOTIFY_KEY) === '1';
-const setNotifyFlag = (on) => localStorage.setItem(NOTIFY_KEY, on ? '1' : '0');
+const setNotifyFlag = (on: boolean): void => localStorage.setItem(NOTIFY_KEY, on ? '1' : '0');
 const storedPushKey = () => {
   const value = localStorage.getItem(PUSH_DEVICE_KEY);
   return VALID_PUSH_KEY.test(value || '') ? value : null;
 };
-const rememberPushKey = (value) => {
-  if (VALID_PUSH_KEY.test(value || '')) localStorage.setItem(PUSH_DEVICE_KEY, value);
-  return VALID_PUSH_KEY.test(value || '') ? value : null;
+const rememberPushKey = (value: unknown): string | null => {
+  if (typeof value !== 'string' || !VALID_PUSH_KEY.test(value)) return null;
+  localStorage.setItem(PUSH_DEVICE_KEY, value);
+  return value;
 };
 
 export function pushSupported() {
@@ -29,48 +108,45 @@ export function pushSupported() {
 
 // iOS Safari only allows push when the site runs as a home-screen PWA (standalone), not in a tab.
 export function isStandalone() {
-  return (typeof window !== 'undefined'
-    && (window.matchMedia?.('(display-mode: standalone)').matches || window.navigator.standalone === true)) || false;
+  if (typeof window === 'undefined') return false;
+  const iosNavigator = window.navigator as Navigator & { standalone?: boolean };
+  return window.matchMedia?.('(display-mode: standalone)').matches || iosNavigator.standalone === true;
 }
 const isIOS = () => /iP(hone|ad|od)/.test(navigator.userAgent || '');
 
-function authHeaders(extra = {}) {
+function authHeaders(extra: Record<string, string> = {}): Record<string, string> {
   return { Authorization: `Bearer ${getToken() ?? ''}`, ...extra };
 }
 
-function timeoutError(key) {
-  const error = new Error(t(key));
-  error.code = key;
-  return error;
+function timeoutError(key: string): PushError {
+  return new PushError(t(key), key);
 }
 
-function setupError(key, vars) {
-  const error = new Error(t(key, vars));
-  error.code = key;
-  return error;
+function setupError(key: string, vars?: Record<string, unknown>): PushError {
+  return new PushError(t(key, vars), key);
 }
 
 // Browser push APIs are allowed to stay pending indefinitely (notably serviceWorker.ready), and
 // Chromium can also leave PushManager.subscribe pending while its push service is unavailable. Keep
 // each boundary finite so Settings always gives control back with the exact stage that stalled.
-function withTimeout(promise, ms, key) {
-  let timer;
+function withTimeout<T>(promise: PromiseLike<T> | T, ms: number, key: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
   return Promise.race([
     Promise.resolve(promise),
-    new Promise((_, reject) => { timer = setTimeout(() => reject(timeoutError(key)), ms); }),
-  ]).finally(() => clearTimeout(timer));
+    new Promise<never>((_, reject) => { timer = setTimeout(() => reject(timeoutError(key)), ms); }),
+  ]).finally(() => { if (timer !== undefined) clearTimeout(timer); });
 }
 
 // Abort network work when its UI deadline expires. Unlike the browser-owned push operations above,
 // fetch is cancellable, so there is no reason to leave a dead request running after Settings recovers.
-async function fetchWithTimeout(url, options, key) {
+async function fetchWithTimeout(url: string, options: RequestInit, key: string): Promise<Response> {
   const controller = new AbortController();
-  let timer;
+  let timer: ReturnType<typeof setTimeout> | undefined;
   let timedOut = false;
   try {
     return await Promise.race([
       fetch(url, { ...options, signal: controller.signal }),
-      new Promise((_, reject) => {
+      new Promise<never>((_, reject) => {
         timer = setTimeout(() => {
           timedOut = true;
           controller.abort();
@@ -84,7 +160,7 @@ async function fetchWithTimeout(url, options, key) {
     if (timedOut) throw timeoutError(key);
     throw error;
   } finally {
-    clearTimeout(timer);
+    if (timer !== undefined) clearTimeout(timer);
   }
 }
 
@@ -94,20 +170,20 @@ const readyServiceWorker = () => withTimeout(
   'push.swTimeout',
 );
 
-const currentSubscription = (reg) => withTimeout(
+const currentSubscription = (reg: ServiceWorkerRegistration): Promise<PushSubscription | null> => withTimeout(
   reg.pushManager.getSubscription(),
   PUSH_SERVICE_TIMEOUT_MS,
   'push.browserTimeout',
 );
 
 // VAPID public key arrives as URL-safe base64; PushManager.subscribe wants a Uint8Array.
-function urlBase64ToUint8Array(b64) {
+function urlBase64ToArrayBuffer(b64: string): ArrayBuffer {
   const pad = '='.repeat((4 - (b64.length % 4)) % 4);
   const base = (b64 + pad).replace(/-/g, '+').replace(/_/g, '/');
   const raw = atob(base);
   const arr = new Uint8Array(raw.length);
   for (let i = 0; i < raw.length; i += 1) arr[i] = raw.charCodeAt(i);
-  return arr;
+  return arr.buffer as ArrayBuffer;
 }
 
 export async function enableNotifications() {
@@ -131,8 +207,10 @@ export async function enableNotifications() {
       'push.swRegisterTimeout',
     );
   } catch (error) {
-    if (error?.code === 'push.swRegisterTimeout') throw error;
-    throw setupError('push.swRegisterFailed', { reason: error?.message || t('push.unknownReason') });
+    if (error instanceof PushError && error.code === 'push.swRegisterTimeout') throw error;
+    throw setupError('push.swRegisterFailed', {
+      reason: error instanceof Error && error.message ? error.message : t('push.unknownReason'),
+    });
   }
   const reg = await readyServiceWorker();
   const res = await fetchWithTimeout(
@@ -141,21 +219,27 @@ export async function enableNotifications() {
     'push.configTimeout',
   );
   if (!res.ok) throw new Error(t('push.noVapid'));
-  const { key } = await res.json();
+  const config = recordOf(await res.json());
+  const key = typeof config?.key === 'string' ? config.key : null;
+  if (!key) throw new Error(t('push.noVapid'));
 
   let sub = await currentSubscription(reg);
   if (!sub) {
     sub = await withTimeout(
       reg.pushManager.subscribe({
         userVisibleOnly: true,
-        applicationServerKey: urlBase64ToUint8Array(key),
+        applicationServerKey: urlBase64ToArrayBuffer(key),
       }),
       PUSH_SERVICE_TIMEOUT_MS,
       'push.browserTimeout',
     );
   }
 
-  const subscribeBody = { subscription: sub, boundSessions: getBoundSessions() };
+  const subscribeBody: {
+    subscription: PushSubscription;
+    boundSessions: string[];
+    pushKey?: string;
+  } = { subscription: sub, boundSessions: getBoundSessions() };
   const previousPushKey = storedPushKey();
   if (previousPushKey) subscribeBody.pushKey = previousPushKey;
   const r = await fetchWithTimeout(
@@ -179,8 +263,7 @@ export async function enableNotifications() {
     if (r.status === 502) throw setupError('push.deliveryRejected');
     throw new Error(t('push.subscribeFailed'));
   }
-  const result = await r.json();
-  rememberPushKey(result.pushKey);
+  rememberPushKey(pushKeyOf(await r.json()));
   setNotifyFlag(true);
   return true;
 }
@@ -207,8 +290,7 @@ export async function disableNotifications() {
         ),
       ]);
       if (serverCleanup.status === 'fulfilled' && serverCleanup.value.ok) {
-        const result = await serverCleanup.value.json();
-        rememberPushKey(result.pushKey);
+        rememberPushKey(pushKeyOf(await serverCleanup.value.json()));
       }
     } catch { /* best effort — the local switch is already off */ }
   })();
@@ -243,7 +325,7 @@ export async function sendTestPush() {
 // This device's addressing key, resolved from the live subscription's endpoint (server-token auth).
 // Returns null if push isn't enabled/subscribed here. The key is not a secret — it only selects a
 // device for `handmux push --device`; sending still requires the loopback server token.
-async function resolveScriptPushKey(strict) {
+async function resolveScriptPushKey(strict: boolean): Promise<string | null> {
   if (!pushSupported()) return null;
   try {
     const reg = await readyServiceWorker();
@@ -257,13 +339,11 @@ async function resolveScriptPushKey(strict) {
     if (r.status === 401) throw new UnauthorizedError();
     if (!r.ok) {
       if (strict) {
-        const error = new Error('push key lookup failed');
-        error.status = r.status;
-        throw error;
+        throw new PushHttpError('push key lookup failed', r.status);
       }
       return null;
     }
-    return rememberPushKey((await r.json()).pushKey);
+    return rememberPushKey(pushKeyOf(await r.json()));
   } catch (e) {
     if (strict) throw e;
     return null;
@@ -273,7 +353,7 @@ async function resolveScriptPushKey(strict) {
 export const getScriptPushKey = () => resolveScriptPushKey(false);
 
 // Clear any OS notification for a pane (called when the user navigates to that pane). Best-effort.
-export async function clearPaneNotification(pane) {
+export async function clearPaneNotification(pane: string): Promise<void> {
   if (!pushSupported()) return;
   try {
     const reg = await readyServiceWorker();
@@ -289,7 +369,7 @@ export async function clearPaneNotification(pane) {
 // Per-device inbox: resolve THIS device's pushKey (its subscription identity) and scope the fetch to it. A
 // device that never subscribed has no pushKey → no inbox. Transport/auth failures MUST reject: treating an
 // outage as [] erases the last good list and falsely tells the user they have no notifications.
-export async function getNotifications() {
+export async function getNotifications(): Promise<PushInboxItem[]> {
   // The inbox is per push subscription. With the device switch off there is no active identity to
   // query, so do not wait on serviceWorker.ready and turn that expected state into a load error.
   if (!notifyEnabled()) return [];
@@ -302,14 +382,12 @@ export async function getNotifications() {
   );
   if (r.status === 401) throw new UnauthorizedError();
   if (!r.ok) {
-    const error = new Error('notification inbox load failed');
-    error.status = r.status;
-    throw error;
+    throw new PushHttpError('notification inbox load failed', r.status);
   }
-  return (await r.json()).items || [];
+  return parsePushInboxItems(recordOf(await r.json())?.items);
 }
 
-export async function deleteNotification(id) {
+export async function deleteNotification(id: string): Promise<boolean> {
   const key = await resolveScriptPushKey(true);
   if (!key) throw new Error('notification device unavailable');
   const r = await fetchWithTimeout(
@@ -318,6 +396,6 @@ export async function deleteNotification(id) {
     'push.reportTimeout',
   );
   if (r.status === 401) throw new UnauthorizedError();
-  if (!r.ok || (await r.json()).ok !== true) throw new Error('notification delete failed');
+  if (!r.ok || recordOf(await r.json())?.ok !== true) throw new Error('notification delete failed');
   return true;
 }
