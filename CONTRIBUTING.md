@@ -14,7 +14,7 @@ Thanks for your interest in handmux. This is a small two-package repo.
 ```bash
 # server (needs tmux >= 3.0 on the host)
 cd server && npm install
-node bin/handmux.js start --foreground          # runs the same CLI as a global install
+npm run dev                                     # compiles Server source, then runs the same CLI as a global install
 
 # web (separate terminal)
 cd web && npm install && npm run dev            # Vite dev server, proxies /api to the server

@@ -1,5 +1,22 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
+import { existsSync } from 'node:fs';
+import path from 'node:path';
+
+function resolveMigratedTypeScript() {
+  return {
+    name: 'resolve-migrated-typescript',
+    enforce: 'pre',
+    resolveId(source, importer) {
+      if (!importer || !/^\.\.?\/.*\.jsx?$/.test(source)) return null;
+      const candidate = path.resolve(
+        path.dirname(importer.split('?')[0]),
+        source.replace(/\.jsx?$/, (extension) => (extension === '.jsx' ? '.tsx' : '.ts')),
+      );
+      return existsSync(candidate) ? candidate : null;
+    },
+  };
+}
 
 // Make the bundled app stylesheet non-render-blocking. By default Vite emits a plain
 // <link rel="stylesheet"> in <head>, which blocks the FIRST paint until that ~48KB CSS finishes
@@ -24,7 +41,7 @@ function asyncAppCss() {
 }
 
 export default defineConfig({
-  plugins: [react(), asyncAppCss()],
+  plugins: [resolveMigratedTypeScript(), react(), asyncAppCss()],
   server: {
     host: true,
     port: 9010, // 开发前端(vite dev)监听端口；它把 /api 代理到后端 9999

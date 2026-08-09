@@ -1,0 +1,11 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "noEmitOnError": true,
+    "rootDir": ".",
+    "outDir": "dist"
+  },
+  "include": ["bin/handmux-main.js", "bin/handmux-main.ts", "src/**/*.js", "src/**/*.ts", "src/**/*.cjs"],
+  "exclude": ["dist", "node_modules", "public", "test"]
+}

@@ -95,7 +95,7 @@ import {
 } from './desktopInput.js';
 import { useDesktopTerminalInput } from './hooks/useDesktopTerminalInput.js';
 import { useCodexSession, codexKind } from './hooks/useCodexSession.js';
-import { settleCodexOutgoing } from './codexOutgoing.ts';
+import { settleCodexOutgoing } from './codexOutgoing.js';
 import { isDraftShortcut, shouldRouteTerminalPageKey } from './terminalPageKeyboard.js';
 import {
   getSnapshotInterval,

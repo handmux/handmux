@@ -1,6 +1,28 @@
 import { defineConfig } from 'vitest/config';
+import { existsSync } from 'node:fs';
+import path from 'node:path';
+
+// TypeScript's NodeNext resolver intentionally lets source import `./module.js` while the implementation
+// is `module.ts`, because tsc emits the exact `.js` specifier Node needs. Vite does not perform that
+// substitution for JS importers, so bridge it only when the requested JS file is absent and a migrated TS
+// sibling exists. This keeps mixed JS/TS tests working throughout the incremental migration.
+function resolveMigratedTypeScript() {
+  return {
+    name: 'resolve-migrated-typescript',
+    enforce: 'pre',
+    resolveId(source, importer) {
+      if (!importer || !/^\.\.?\/.*\.js$/.test(source)) return null;
+      const candidate = path.resolve(
+        path.dirname(importer.split('?')[0]),
+        source.replace(/\.js$/, '.ts'),
+      );
+      return existsSync(candidate) ? candidate : null;
+    },
+  };
+}
 
 export default defineConfig({
+  plugins: [resolveMigratedTypeScript()],
   test: {
     environment: 'node',
     include: ['test/**/*.test.{js,ts}'],

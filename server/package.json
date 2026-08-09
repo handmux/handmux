@@ -28,22 +28,24 @@
     "handmux": "bin/handmux.js"
   },
   "files": [
-    "bin",
-    "src",
-    "hooks",
-    "public",
-    "README.zh-CN.md"
+    "bin/handmux.js",
+    "dist",
+    "README.md",
+    "README.zh-CN.md",
+    "LICENSE"
   ],
   "scripts": {
-    "start": "node bin/handmux.js start",
-    "dev": "node bin/handmux.js start --foreground",
-    "handmux": "node bin/handmux.js",
+    "start": "npm run build:server && node dist/bin/handmux.js start",
+    "dev": "npm run build:server && node dist/bin/handmux.js start --foreground",
+    "handmux": "npm run build:server && node dist/bin/handmux.js",
+    "build:server": "node scripts/build-server.mjs",
     "bundle": "node scripts/bundle-web.mjs",
-    "prepack": "node scripts/bundle-web.mjs",
+    "prepack": "npm run bundle && npm run build:server",
     "typecheck": "tsc --project tsconfig.json",
-    "test": "vitest run",
-    "test:workspace-host": "HANDMUX_WORKSPACE_HOST=1 vitest run test/workspaceHost.test.js",
-    "test:workspace-docker": "HANDMUX_WORKSPACE_DOCKER=1 vitest run test/workspaceDocker.test.js"
+    "test": "npm run build:server && vitest run",
+    "test:pack": "node scripts/pack-smoke.mjs",
+    "test:workspace-host": "npm run build:server && HANDMUX_WORKSPACE_HOST=1 vitest run test/workspaceHost.test.js",
+    "test:workspace-docker": "npm run build:server && HANDMUX_WORKSPACE_DOCKER=1 vitest run test/workspaceDocker.test.js"
   },
   "dependencies": {
     "@clack/prompts": "0.11.0",
