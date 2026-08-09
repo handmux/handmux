@@ -8,6 +8,12 @@ import {
 } from '../src/terminalStream.js';
 
 class FakeChild extends EventEmitter {
+  readonly stdout: EventEmitter;
+  readonly stderr: EventEmitter;
+  readonly writes: string[];
+  readonly stdin: { write: (value: string) => void };
+  readonly kill: ReturnType<typeof vi.fn>;
+
   constructor() {
     super();
     this.stdout = new EventEmitter();
@@ -17,29 +23,53 @@ class FakeChild extends EventEmitter {
     this.kill = vi.fn();
   }
 
-  lines(...lines) {
+  lines(...lines: string[]): void {
     this.stdout.emit('data', Buffer.from(`${lines.join('\n')}\n`));
   }
 }
 
-function fakeSocket() {
+type FakeMessage = Buffer | Record<string, unknown>;
+interface FakeSocket {
+  readonly readyState: number;
+  readonly bufferedAmount: number;
+  readonly messages: FakeMessage[];
+  send(value: string | Buffer, options?: { binary?: boolean }): void;
+  close: ReturnType<typeof vi.fn>;
+}
+
+function fakeSocket(): FakeSocket {
   return {
     readyState: 1,
     bufferedAmount: 0,
-    messages: [],
-    send(value, options) {
-      this.messages.push(options?.binary ? Buffer.from(value) : JSON.parse(value));
+    messages: [] as FakeMessage[],
+    send(value: string | Buffer, options?: { binary?: boolean }): void {
+      if (options?.binary) {
+        this.messages.push(Buffer.from(value));
+        return;
+      }
+      const parsed: unknown = JSON.parse(value.toString());
+      if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+        throw new Error('expected JSON object');
+      }
+      this.messages.push(parsed as Record<string, unknown>);
     },
     close: vi.fn(),
   };
 }
 
-async function finishResync(child, {
+interface FinishResyncOptions {
+  capture?: string[];
+  info?: string;
+  between?: () => void;
+}
+
+async function finishResync(child: FakeChild, {
   capture = ['one'],
   info = '80\t24\t4\t3\t1\t0\t0\t0',
   between,
-} = {}) {
-  const waitFor = (assertion) => vi.waitFor(assertion, { interval: 1 });
+}: FinishResyncOptions = {}): Promise<void> {
+  const waitFor = (assertion: () => void | Promise<void>): Promise<void> =>
+    vi.waitFor(assertion, { interval: 1 });
   await waitFor(() => expect(child.writes.at(-1)).toContain('capture-pane'));
   child.lines('%begin 1 1 1', ...capture, '%end 1 1 1');
   between?.();
@@ -233,7 +263,11 @@ describe('PaneControlStream', () => {
     child.lines('%begin 4 4 1', '8\t3\t0\t2\t0\t0\t0\t0', '%end 4 4 1');
     await started;
 
-    expect(ws.messages[0].ansi.split('\n')[1]).toBe('\x1b[49m        ');
+    const seed = ws.messages[0];
+    expect(seed).not.toBeInstanceOf(Buffer);
+    const ansi = (seed as Record<string, unknown>).ansi;
+    expect(typeof ansi).toBe('string');
+    expect((ansi as string).split('\n')[1]).toBe('\x1b[49m        ');
     stream.close();
   });
 
