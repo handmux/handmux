@@ -773,6 +773,36 @@ describe('ChatView', () => {
     expect(card.compareDocumentPosition(laterInput) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
+  it('does not append a live terminal Goal when its historical turn is outside the loaded page', async () => {
+    let emit;
+    api.streamCodexMessages.mockImplementation((_pane, { signal, onEvent }) => {
+      emit = onEvent;
+      return new Promise((resolve) => signal.addEventListener('abort', resolve, { once: true }));
+    });
+    mockTranscript([
+      { k: 50, i: 50, role: 'user', type: 'text', text: '当前页里的后续问题', turnId: 'turn-later' },
+      { k: 51, i: 51, role: 'assistant', type: 'text', text: '当前页里的后续回答', turnId: 'turn-later' },
+    ]);
+    const { container } = render(<ChatView pane="%0" agent="codex" kind="done"
+      codexSession={{ managed: true, threadId: 'thread-1', activeTurnId: null }} />);
+    await screen.findByText('当前页里的后续回答');
+    await waitFor(() => expect(emit).toBeTypeOf('function'));
+    await act(async () => {
+      emit({
+        type: 'goal', threadId: 'thread-1', turnId: 'turn-on-older-page', event: 'complete',
+        goal: {
+          objective: '较早完成的目标', status: 'complete', createdAt: 10, updatedAt: 20,
+          tokensUsed: 500, timeUsedSeconds: 12,
+        },
+      });
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(container.querySelector('.chat-goal-card')).toBeNull();
+    expect(screen.queryByText('较早完成的目标')).toBeNull();
+  });
+
   it('keeps an unfinished historical task indicator static', async () => {
     mockTranscript([
       { k: 0, i: 0, role: 'assistant', type: 'plan', turnId: 'turn-plan',

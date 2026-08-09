@@ -456,6 +456,10 @@ function mergeDurableAndLiveMessages(durableMessages, liveMessages) {
     merged.forEach((candidate, index) => {
       if (candidate.turnId === message.turnId) turnEnd = index;
     });
+    // A terminal Goal belongs to its originating turn, not to the current chat tail. That turn may sit on
+    // an older transcript page while the App Server still replays the Goal from memory; wait until the
+    // page containing the turn is loaded instead of fabricating a new bottom-of-chat position.
+    if (turnEnd < 0 && ['complete', 'blocked'].includes(message.goal?.status)) return;
     if (turnEnd < 0) merged.push(message);
     else merged.splice(turnEnd + 1, 0, message);
   });
