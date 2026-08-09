@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
+import type { CSSProperties, PointerEvent as ReactPointerEvent } from 'react';
 
-const KEY_DIRECTION = {
+const KEY_DIRECTION: Record<string, number> = {
   ArrowLeft: -1,
   ArrowDown: -1,
   ArrowRight: 1,
@@ -10,13 +11,34 @@ const KEY_DIRECTION = {
 // A compact, discrete slider for short ordered choices. It uses pointer events instead of a native range:
 // native range controls take focus on iOS and can dismiss an already-open keyboard. This slider owns its
 // drag while deliberately cancelling that focus-changing default action.
-export default function DiscreteSlider({ options, value, disabled = false, ariaLabel, onCommit }) {
-  const [draftIndex, setDraftIndex] = useState(null);
+export interface DiscreteSliderOption {
+  value: string;
+  label?: string;
+  description?: string;
+}
+
+interface DiscreteSliderProps {
+  options: DiscreteSliderOption[];
+  value?: string | null;
+  disabled?: boolean;
+  ariaLabel: string;
+  onCommit?: (value: string) => void;
+}
+
+type SliderStyle = CSSProperties & {
+  '--slider-count': number;
+  '--slider-progress': string;
+};
+
+export default function DiscreteSlider({
+  options, value, disabled = false, ariaLabel, onCommit,
+}: DiscreteSliderProps) {
+  const [draftIndex, setDraftIndex] = useState<number | null>(null);
   const draggingRef = useRef(false);
   const indexRef = useRef(0);
   const values = options.map((option) => option.value);
   const optionKey = values.join('\0');
-  const selectedIndex = Math.max(0, values.indexOf(value));
+  const selectedIndex = Math.max(0, value == null ? -1 : values.indexOf(value));
   const shownIndex = draftIndex == null ? selectedIndex : draftIndex;
   indexRef.current = shownIndex;
 
@@ -24,16 +46,22 @@ export default function DiscreteSlider({ options, value, disabled = false, ariaL
 
   if (options.length === 0) return null;
 
-  const preview = (index) => {
+  const sliderStyle: SliderStyle = {
+    '--slider-count': options.length,
+    '--slider-progress': options.length > 1
+      ? `${(shownIndex / (options.length - 1)) * 100}%` : '0%',
+  };
+
+  const preview = (index: number): void => {
     const bounded = Math.min(options.length - 1, Math.max(0, index));
     indexRef.current = bounded;
     setDraftIndex(bounded);
   };
-  const commit = (index) => {
+  const commit = (index: number): void => {
     const next = options[index]?.value;
     if (next != null && next !== value) onCommit?.(next);
   };
-  const indexAt = (element, clientX) => {
+  const indexAt = (element: HTMLDivElement, clientX: number): number => {
     if (options.length <= 1) return 0;
     const rect = element.getBoundingClientRect();
     const edge = rect.width / (options.length * 2);
@@ -41,7 +69,7 @@ export default function DiscreteSlider({ options, value, disabled = false, ariaL
     const ratio = Math.min(1, Math.max(0, (clientX - rect.left - edge) / usableWidth));
     return Math.round(ratio * (options.length - 1));
   };
-  const previewPointer = (event, shouldCommit = false) => {
+  const previewPointer = (event: ReactPointerEvent<HTMLDivElement>, shouldCommit = false): void => {
     const index = indexAt(event.currentTarget, event.clientX);
     preview(index);
     if (shouldCommit) commit(index);
@@ -55,10 +83,7 @@ export default function DiscreteSlider({ options, value, disabled = false, ariaL
       aria-valuemin={0} aria-valuemax={options.length - 1}
       aria-valuenow={shownIndex}
       aria-valuetext={options[shownIndex]?.label || options[shownIndex]?.value || ''}
-      style={{
-        '--slider-count': options.length,
-        '--slider-progress': options.length > 1 ? `${(shownIndex / (options.length - 1)) * 100}%` : '0%',
-      }}
+      style={sliderStyle}
       onPointerDown={(event) => {
         if (disabled) return;
         if (event.cancelable) event.preventDefault();

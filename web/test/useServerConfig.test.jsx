@@ -5,7 +5,7 @@ import { renderHook, cleanup } from '@testing-library/react';
 const api = vi.hoisted(() => ({ getConfig: vi.fn() }));
 vi.mock('../src/api.js', () => ({ getConfig: api.getConfig }));
 
-import { useServerConfig } from '../src/hooks/useServerConfig.js';
+import { parseServerConfig, useServerConfig } from '../src/hooks/useServerConfig.js';
 
 afterEach(() => {
   cleanup();
@@ -22,6 +22,23 @@ const setHidden = (hidden) => {
 };
 
 describe('useServerConfig', () => {
+  it('validates config capabilities and shortcut entries at the network boundary', () => {
+    expect(parseServerConfig(null)).toBeNull();
+    expect(parseServerConfig({
+      asr: 'yes', browserProxy: true, claudeHooks: 'unknown',
+      shortcuts: {
+        command: [{ type: 'key', key: 'C-c', label: 'Ctrl+C' }, { type: 'key', key: 7 }],
+        chat: [{ type: 'text', text: 'ok', enter: true }, null],
+      },
+    })).toEqual({
+      browserProxy: true,
+      shortcuts: {
+        command: [{ type: 'key', key: 'C-c', label: 'Ctrl+C' }],
+        chat: [{ type: 'text', text: 'ok', enter: true }],
+      },
+    });
+  });
+
   it('fetches at launch and whenever the app returns to the foreground, without polling', async () => {
     vi.useFakeTimers();
     const first = { command: [], chat: [{ type: 'text', text: 'old', enter: true }] };
