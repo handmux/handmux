@@ -67,6 +67,14 @@ describe('FileBrowser', () => {
     expect(container.textContent).toContain('report.md');
   });
 
+  it('rejects a malformed directory response at the API boundary', async () => {
+    fetchDir.mockResolvedValueOnce({ path: '/home/u', home: '/home/u', parent: null, entries: [{ name: 'bad', type: 'unknown' }] });
+    await render({ path: null });
+    await settle();
+    expect(container.querySelector('.browse-err').textContent).toContain('无法打开该目录');
+    expect(container.querySelector('.browse-entry')).toBeNull();
+  });
+
   it('restores the persisted directory on (re)mount via the path prop', async () => {
     await render({ path: '/home/u/docs' });
     await settle();

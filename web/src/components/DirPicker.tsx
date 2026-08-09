@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react';
-import type { ComponentType, CSSProperties } from 'react';
+import type { CSSProperties } from 'react';
 import FileBrowser from './FileBrowser.jsx';
 import { fetchPaneCwd } from '../api.js';
 import { t } from '../i18n';
@@ -15,18 +15,6 @@ export interface DirPickerProps {
   inset?: number;
 }
 
-interface PickerFileBrowserProps {
-  path: string | null;
-  onNavigate: (path: string | null) => void;
-  onOpenDoc: () => void;
-  onJumpToCwd: (() => Promise<void>) | null;
-  pickMode: boolean;
-  allowMkdir: boolean;
-  onPick: (dir: string) => void | Promise<void>;
-  overlayActive: boolean;
-}
-
-const PickerFileBrowser = FileBrowser as unknown as ComponentType<PickerFileBrowserProps>;
 const noop = (): void => {};
 
 function cwdOf(value: unknown): string | null {
@@ -77,7 +65,7 @@ export default function DirPicker({
           <button className="settings-close" onClick={onClose} aria-label={t('common.close')}>✕</button>
         </div>
         {hint && <div className="dirpick-hint">{hint}</div>}
-        <PickerFileBrowser
+        <FileBrowser
           path={path} onNavigate={setPath} onOpenDoc={noop}
           onJumpToCwd={jumpToCwd}
           pickMode allowMkdir={allowMkdir} onPick={onPick} overlayActive={open}
