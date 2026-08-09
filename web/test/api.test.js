@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { getHistory, getPanes, createSession, createWindow, renameSession, renameWindow, deleteWindow, swapWindows, createDir, UnauthorizedError, ApiError, fetchDoc, fetchDir, fetchTranscript, signAsr, sendInput, parseSseFrames, streamCodexMessages, getCodexSession, sendCodexMessage } from '../src/api.js';
 import { createPreview, getPreviews, deletePreview, previewUrl, fetchImageUrl } from '../src/api.js';
+import { projectCodexStreamEvent } from '../../server/src/codexStreamProtocol.js';
 
 afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); vi.useRealTimers(); });
 
@@ -15,10 +16,15 @@ describe('Codex message stream', () => {
   it('keeps bearer auth and expands batched SSE payloads in order', async () => {
     vi.stubGlobal('localStorage', { getItem: () => 'stream-token' });
     const encoder = new TextEncoder();
+    const delta = projectCodexStreamEvent({
+      type: 'delta', threadId: 'thread-1', turnId: 'turn-1', itemId: 'item-1', delta: '你',
+    }, 1);
+    const completed = projectCodexStreamEvent({
+      type: 'completed', threadId: 'thread-1', turnId: 'turn-1', itemId: 'item-1', text: '你好',
+    }, 2);
     const chunks = [
       'data: {"type":"ready","threadId":"thread-1"}\n\n',
-      'data: {"type":"events","events":[{"type":"delta","threadId":"thread-1","turnId":"turn-1","itemId":"item-1","delta":"你","eventId":"thread-1:1","sequence":1,"kind":"assistantMessage","lifecycle":"delta"},',
-      '{"type":"invalid"},{"type":"completed","threadId":"thread-1","turnId":"turn-1","itemId":"item-1","text":"你好","eventId":"thread-1:2","sequence":2,"kind":"assistantMessage","lifecycle":"completed"}]}\n\n',
+      `data: ${JSON.stringify({ type: 'events', events: [delta, { type: 'invalid' }, completed] })}\n\n`,
     ].map((value) => encoder.encode(value));
     const reader = {
       read: vi.fn(async () => (chunks.length ? { done: false, value: chunks.shift() } : { done: true })),
@@ -37,14 +43,8 @@ describe('Codex message stream', () => {
     }));
     expect(events).toEqual([
       { type: 'ready', threadId: 'thread-1' },
-      {
-        type: 'delta', threadId: 'thread-1', turnId: 'turn-1', itemId: 'item-1', delta: '你',
-        eventId: 'thread-1:1', sequence: 1, kind: 'assistantMessage', lifecycle: 'delta',
-      },
-      {
-        type: 'completed', threadId: 'thread-1', turnId: 'turn-1', itemId: 'item-1', text: '你好',
-        eventId: 'thread-1:2', sequence: 2, kind: 'assistantMessage', lifecycle: 'completed',
-      },
+      delta,
+      completed,
     ]);
     expect(reader.releaseLock).toHaveBeenCalledOnce();
   });

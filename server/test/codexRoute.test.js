@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import express from 'express';
 import request from 'supertest';
 import { appendCodexStreamEvent, codexRoutes } from '../src/routes/codex.js';
+import { projectCodexStreamEvent } from '../src/codexStreamProtocol.js';
 
 function appFor({
   sessionId = 'thread-1', codexApp = {}, commands = {}, claudeEvents = {}, wait,
@@ -67,9 +68,15 @@ describe('Codex App Server routes', () => {
     const unsubscribe = vi.fn();
     const subscribe = vi.fn(async (pane, threadId, listener) => {
       setTimeout(() => {
-        listener({ type: 'delta', threadId, turnId: 'turn-1', itemId: 'agent-1', delta: '你' });
-        listener({ type: 'delta', threadId, turnId: 'turn-1', itemId: 'agent-1', delta: '好' });
-        listener({ type: 'completed', threadId, turnId: 'turn-1', itemId: 'agent-1', text: '你好' });
+        listener(projectCodexStreamEvent({
+          type: 'delta', threadId, turnId: 'turn-1', itemId: 'agent-1', delta: '你',
+        }, 1));
+        listener(projectCodexStreamEvent({
+          type: 'delta', threadId, turnId: 'turn-1', itemId: 'agent-1', delta: '好',
+        }, 2));
+        listener(projectCodexStreamEvent({
+          type: 'completed', threadId, turnId: 'turn-1', itemId: 'agent-1', text: '你好',
+        }, 3));
         listener({ type: 'disconnected', threadId });
       }, 0);
       return unsubscribe;
@@ -79,7 +86,9 @@ describe('Codex App Server routes', () => {
     const response = await request(app).get('/codex/stream?pane=%251').expect(200);
     expect(response.headers['content-type']).toMatch(/^text\/event-stream/);
     expect(response.text).toContain('"type":"ready"');
-    expect(response.text).toContain('"delta":"你好"');
+    expect(response.text).toContain('"sequence":1');
+    expect(response.text).toContain('"operation":"upsert"');
+    expect(response.text).toContain('"id":"codex:turn-1:agent-1"');
     expect(response.text).toContain('"type":"completed"');
     expect(subscribe).toHaveBeenCalledWith('%1', 'thread-1', expect.any(Function), null);
     expect(unsubscribe).toHaveBeenCalledOnce();

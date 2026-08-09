@@ -41,10 +41,24 @@ describe('Codex stream protocol', () => {
     expect(projected).toEqual({
       type: 'delta', threadId: 'thread-1', turnId: 'turn-1', itemId: 'item-1', delta: 'hello',
       eventId: 'thread-1:7', sequence: 7, kind: 'assistantMessage', lifecycle: 'delta',
+      mutation: {
+        operation: 'upsert', mode: 'append',
+        message: {
+          id: 'codex:turn-1:item-1', role: 'assistant', type: 'text', turnId: 'turn-1',
+          itemId: 'item-1', text: 'hello', completed: false, streaming: true,
+        },
+      },
     });
+    if (!projected || projected.mutation?.operation !== 'upsert') {
+      throw new Error('expected an upsert projection');
+    }
     expect(parseCodexProjectedStreamEvent(projected)).toEqual(projected);
     expect(parseCodexProjectedStreamEvent({ ...projected, sequence: 8 })).toBeNull();
     expect(parseCodexProjectedStreamEvent({ ...projected, lifecycle: 'completed' })).toBeNull();
+    expect(parseCodexProjectedStreamEvent({
+      ...projected,
+      mutation: { ...projected.mutation, message: { ...projected.mutation.message, id: 'forged' } },
+    })).toBeNull();
     expect(projectCodexStreamEvent({ type: 'ready', threadId: 'thread-1' }, 8)).toBeNull();
     expect(projectCodexStreamEvent({
       type: 'turnCompleted', threadId: 'thread-1', turnId: 'turn-1', status: 'completed',

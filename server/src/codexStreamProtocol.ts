@@ -1,3 +1,8 @@
+import {
+  parseCodexConversationMutation, projectCodexConversationMutation,
+} from './codexConversationProjection.js';
+import type { CodexConversationMutation } from './codexConversationProjection.js';
+
 const GOAL_STATUSES = [
   'active', 'paused', 'blocked', 'usageLimited', 'budgetLimited', 'complete',
 ] as const;
@@ -72,6 +77,7 @@ export type CodexProjectedStreamEvent = CodexStreamDomainEvent & {
   itemId: string | null;
   kind: CodexEventKind;
   lifecycle: string;
+  mutation: CodexConversationMutation | null;
 };
 
 function recordOf(value: unknown): Record<string, unknown> | null {
@@ -205,6 +211,7 @@ export function projectCodexStreamEvent(
     sequence,
     itemId: 'itemId' in event ? event.itemId : null,
     ...projectionFields(event),
+    mutation: projectCodexConversationMutation(event),
   } as CodexProjectedStreamEvent;
 }
 
@@ -220,5 +227,7 @@ export function parseCodexProjectedStreamEvent(value: unknown): CodexProjectedSt
   const fields = projectionFields(event);
   const itemId = 'itemId' in event ? event.itemId : null;
   if (record.itemId !== itemId || record.kind !== fields.kind || record.lifecycle !== fields.lifecycle) return null;
-  return { ...event, eventId, sequence, itemId, ...fields } as CodexProjectedStreamEvent;
+  const mutation = parseCodexConversationMutation(record.mutation, event);
+  if (mutation === undefined) return null;
+  return { ...event, eventId, sequence, itemId, ...fields, mutation } as CodexProjectedStreamEvent;
 }

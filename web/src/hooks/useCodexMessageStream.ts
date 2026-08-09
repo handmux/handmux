@@ -1,9 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { streamCodexMessages, UnauthorizedError } from '../api.js';
 import type { CodexGoal } from '../../../server/src/codexStreamProtocol.js';
-import {
-  codexGoalMessageId, codexItemMessageId,
-} from '../../../server/src/codexMessageIdentity.js';
+import type { CodexConversationMutation } from '../../../server/src/codexConversationProjection.js';
 
 const MAX_LIVE_MESSAGES = 20;
 const RETRY_MIN_MS = 500;
@@ -21,6 +19,7 @@ interface CodexStreamEventLike {
   goal?: Partial<CodexGoal>;
   cursor?: number;
   sequence?: number;
+  mutation?: CodexConversationMutation | null;
 }
 
 export interface CodexLiveMessage {
@@ -52,10 +51,6 @@ export interface CodexDurableMessage {
   goal?: Partial<CodexGoal>;
 }
 
-function eventKey(event: CodexStreamEventLike): string | null {
-  return event?.turnId && event?.itemId ? `${event.turnId}:${event.itemId}` : null;
-}
-
 export function applyCodexStreamEvent(
   messages: CodexLiveMessage[],
   event: CodexStreamEventLike,
@@ -73,64 +68,56 @@ export function applyCodexStreamEvent(
     });
     return next.length === messages.length ? messages : next;
   }
-  if (event.type === 'goalCleared') return messages;
-  if (event.type === 'goal' && event.goal?.objective) {
-    // Terminal Goal cards are historical events, not current-tail status. Older App Server builds may
-    // replay one without a turnId after reconnecting; omit that unplaceable overlay and let the ordered
-    // durable rollout render it where update_goal actually ran.
-    if (['complete', 'blocked'].includes(event.goal.status ?? '') && !event.turnId) return messages;
-    const marker = event.goal.createdAt ?? event.goal.updatedAt ?? event.goal.objective;
-    const key = `goal:${marker}:${event.event || event.goal.status || 'set'}`;
-    const id = codexGoalMessageId(event.goal, event.event || event.goal.status || 'set');
-    if (!id) return messages;
-    const nextMessage: CodexLiveMessage = {
-      id,
-      streamKey: key,
-      turnId: event.turnId || null,
-      role: 'assistant',
-      type: 'goal',
-      event: event.event || (event.goal.status === 'active' ? 'set' : event.goal.status),
-      goal: event.goal,
-      live: true,
-      completed: true,
-      afterK,
-    };
-    const index = messages.findIndex((message) => message.streamKey === key);
-    const next = index >= 0
-      ? messages.map((message, candidate) => (candidate === index ? nextMessage : message))
-      : [...messages, nextMessage];
-    return next.slice(-MAX_LIVE_MESSAGES);
-  }
-  if (event.type === 'turnCompleted') {
+  const mutation = event.mutation;
+  if (!mutation) return messages;
+  if (mutation.operation === 'settleTurn') {
     let changed = false;
     const next = messages.map((message) => {
-      if (message.turnId !== event.turnId || message.completed) return message;
+      if (message.turnId !== mutation.turnId || message.completed) return message;
       changed = true;
       return { ...message, completed: true, streaming: false };
     });
     return changed ? next : messages;
   }
 
-  const key = eventKey(event);
-  if (!key) return messages;
-  const index = messages.findIndex((message) => message.streamKey === key);
+  const projected = mutation.message;
+  const key = projected.id;
+  const index = messages.findIndex((message) => message.id === key);
   const previous = index >= 0 ? messages[index] : null;
-  const text = event.type === 'delta'
-    ? `${previous?.text || ''}${event.delta || ''}`
-    : (typeof event.text === 'string' ? event.text : previous?.text || '');
-  const completed = event.type === 'completed' || event.completed === true || previous?.completed === true;
+  if (projected.type === 'goal') {
+    const nextMessage: CodexLiveMessage = {
+      id: projected.id,
+      streamKey: key,
+      turnId: projected.turnId,
+      role: 'assistant',
+      type: 'goal',
+      event: projected.event,
+      goal: projected.goal,
+      live: true,
+      completed: true,
+      afterK: previous?.afterK ?? afterK,
+    };
+    const next = index >= 0
+      ? messages.map((message, candidate) => (candidate === index ? nextMessage : message))
+      : [...messages, nextMessage];
+    return next.slice(-MAX_LIVE_MESSAGES);
+  }
+  const text = mutation.mode === 'append'
+    ? `${previous?.text || ''}${projected.text}`
+    : projected.text;
+  const completed = projected.completed || previous?.completed === true;
   // Once a later assistant item starts, every earlier finalized assistant item is already history. Keep
   // only unfinished accumulators; the durable rollout remains the single source for completed content.
-  const baseMessages = !previous && !completed && (event.type === 'started' || event.type === 'snapshot')
+  const baseMessages = !previous && !completed && mutation.mode === 'replace'
     ? messages.filter((message) => message.type === 'goal' || !message.completed)
     : messages;
-  const baseIndex = baseMessages.findIndex((message) => message.streamKey === key);
+  const baseIndex = baseMessages.findIndex((message) => message.id === key);
   const nextMessage: CodexLiveMessage = {
     ...(previous || {}),
-    id: codexItemMessageId(event.turnId, event.itemId) || `codex-stream:${key}`,
+    id: projected.id,
     streamKey: key,
-    turnId: event.turnId ?? null,
-    itemId: event.itemId,
+    turnId: projected.turnId,
+    itemId: projected.itemId,
     role: 'assistant',
     type: 'text',
     text,

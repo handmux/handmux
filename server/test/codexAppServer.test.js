@@ -356,8 +356,18 @@ describe('Codex App Server client', () => {
       expect.objectContaining({
         type: 'started', threadId: 'thread-1', itemId: 'agent-live',
         eventId: 'thread-1:1', sequence: 1, kind: 'assistantMessage', lifecycle: 'started',
+        mutation: expect.objectContaining({
+          operation: 'upsert', mode: 'replace',
+          message: expect.objectContaining({ id: 'codex:turn-live:agent-live', text: '' }),
+        }),
       }),
-      expect.objectContaining({ type: 'delta', delta: '你好', sequence: 2, lifecycle: 'delta' }),
+      expect.objectContaining({
+        type: 'delta', delta: '你好', sequence: 2, lifecycle: 'delta',
+        mutation: expect.objectContaining({
+          operation: 'upsert', mode: 'append',
+          message: expect.objectContaining({ id: 'codex:turn-live:agent-live', text: '你好' }),
+        }),
+      }),
     ]);
     expect(replayed).toEqual([
       expect.objectContaining({ type: 'snapshot', text: '你好' }),

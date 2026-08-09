@@ -1,31 +1,36 @@
 import { act, cleanup, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import * as api from '../src/api.js';
+import { projectCodexStreamEvent } from '../../server/src/codexStreamProtocol.js';
 import {
   applyCodexStreamEvent, durableCoversLiveMessage, useCodexMessageStream,
 } from '../src/hooks/useCodexMessageStream.js';
 
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
+function projected(event, sequence = 1) {
+  return projectCodexStreamEvent({ threadId: 'thread-1', ...event }, sequence);
+}
+
 describe('Codex message stream projection', () => {
   it('accumulates deltas into one stable temporary assistant message', () => {
     let messages = [];
-    messages = applyCodexStreamEvent(messages, {
+    messages = applyCodexStreamEvent(messages, projected({
       type: 'started', turnId: 'turn-1', itemId: 'agent-1', text: '',
-    }, 7);
-    messages = applyCodexStreamEvent(messages, {
+    }), 7);
+    messages = applyCodexStreamEvent(messages, projected({
       type: 'delta', turnId: 'turn-1', itemId: 'agent-1', delta: '你',
-    }, 8);
-    messages = applyCodexStreamEvent(messages, {
+    }), 8);
+    messages = applyCodexStreamEvent(messages, projected({
       type: 'delta', turnId: 'turn-1', itemId: 'agent-1', delta: '好',
-    }, 9);
+    }), 9);
     expect(messages).toEqual([expect.objectContaining({
       id: 'codex:turn-1:agent-1', text: '你好', streaming: true, afterK: 7,
     })]);
 
-    messages = applyCodexStreamEvent(messages, {
+    messages = applyCodexStreamEvent(messages, projected({
       type: 'completed', turnId: 'turn-1', itemId: 'agent-1', text: '你好！',
-    });
+    }));
     expect(messages[0]).toMatchObject({ text: '你好！', completed: true, streaming: false });
   });
 
@@ -48,16 +53,16 @@ describe('Codex message stream projection', () => {
   it('discards finalized temporary replies before projecting a newer live reply', () => {
     let messages = [];
     for (let index = 1; index <= 4; index += 1) {
-      messages = applyCodexStreamEvent(messages, {
+      messages = applyCodexStreamEvent(messages, projected({
         type: 'completed', turnId: 'turn-old', itemId: `agent-old-${index}`, text: `历史回复 ${index}`,
-      });
+      }));
     }
-    messages = applyCodexStreamEvent(messages, {
+    messages = applyCodexStreamEvent(messages, projected({
       type: 'started', turnId: 'turn-new', itemId: 'agent-current', text: '',
-    });
-    messages = applyCodexStreamEvent(messages, {
+    }));
+    messages = applyCodexStreamEvent(messages, projected({
       type: 'delta', turnId: 'turn-new', itemId: 'agent-current', delta: '当前更新',
-    });
+    }));
 
     expect(messages).toEqual([expect.objectContaining({
       itemId: 'agent-current', text: '当前更新', streaming: true,
@@ -80,16 +85,16 @@ describe('Codex message stream projection', () => {
       objective: 'Finish the release', status: 'complete', createdAt: 10,
       updatedAt: 20, tokensUsed: 500, timeUsedSeconds: 12,
     };
-    const messages = applyCodexStreamEvent([], {
+    const messages = applyCodexStreamEvent([], projected({
       type: 'goal', threadId: 'thread-1', turnId: 'turn-goal', event: 'complete', goal,
-    }, 4);
+    }), 4);
     expect(messages).toEqual([expect.objectContaining({
       type: 'goal', event: 'complete', goal, completed: true, afterK: 4,
     })]);
     expect(applyCodexStreamEvent(messages, { type: 'ready' })).toEqual(messages);
-    expect(applyCodexStreamEvent(messages, {
+    expect(applyCodexStreamEvent(messages, projected({
       type: 'started', turnId: 'turn-next', itemId: 'agent-next', text: '',
-    })).toEqual([
+    }))).toEqual([
       expect.objectContaining({ type: 'goal', event: 'complete' }),
       expect.objectContaining({ type: 'text', turnId: 'turn-next' }),
     ]);
@@ -99,9 +104,9 @@ describe('Codex message stream projection', () => {
     expect(durableCoversLiveMessage([
       { id: 'codex-goal:9:complete', k: 3, type: 'goal', event: 'complete', goal: { ...goal, createdAt: 9 } },
     ], messages[0])).toBe(false);
-    expect(applyCodexStreamEvent([], {
+    expect(applyCodexStreamEvent([], projected({
       type: 'goal', threadId: 'thread-1', turnId: null, event: 'complete', goal,
-    }, 4)).toEqual([]);
+    }), 4)).toEqual([]);
   });
 
   it('renders incoming deltas, requests a durable refresh on completion, and reconciles the final message', async () => {
@@ -119,9 +124,9 @@ describe('Codex message stream projection', () => {
     );
     await waitFor(() => expect(api.streamCodexMessages).toHaveBeenCalled());
 
-    act(() => emit({
+    act(() => emit(projected({
       type: 'delta', threadId: 'thread-1', turnId: 'turn-1', itemId: 'agent-1', delta: '回答',
-    }));
+    }, 1)));
     rerender({ durableMessages: [
       { k: 4, role: 'user', type: 'text', text: '继续' },
       { id: 'codex:turn-1:agent-1', k: 5, role: 'assistant', type: 'text', text: '回答' },
@@ -130,13 +135,13 @@ describe('Codex message stream projection', () => {
     // delta continues from "回答" instead of reappearing as a broken "继续" fragment.
     expect(result.current).toEqual([expect.objectContaining({ text: '回答', streaming: true })]);
 
-    act(() => emit({
+    act(() => emit(projected({
       type: 'delta', threadId: 'thread-1', turnId: 'turn-1', itemId: 'agent-1', delta: '继续',
-    }));
+    }, 2)));
     expect(result.current).toEqual([expect.objectContaining({ text: '回答继续', streaming: true })]);
-    act(() => emit({
+    act(() => emit(projected({
       type: 'completed', threadId: 'thread-1', turnId: 'turn-1', itemId: 'agent-1', text: '回答完成',
-    }));
+    }, 3)));
     expect(result.current).toEqual([expect.objectContaining({ text: '回答完成', completed: true, afterK: 4 })]);
     expect(onSettled).toHaveBeenCalledOnce();
 
@@ -160,10 +165,9 @@ describe('Codex message stream projection', () => {
       pane: '%1', threadId: 'thread-1', enabled: true, durableMessages: [],
     }));
     await waitFor(() => expect(api.streamCodexMessages).toHaveBeenCalledTimes(1));
-    act(() => subscriptions[0].onEvent({
+    act(() => subscriptions[0].onEvent(projected({
       type: 'delta', threadId: 'thread-1', turnId: 'turn-1', itemId: 'agent-1', delta: '继续',
-      eventId: 'thread-1:7', sequence: 7, kind: 'assistantMessage', lifecycle: 'delta',
-    }));
+    }, 7)));
 
     act(() => window.dispatchEvent(new Event('focus')));
 
@@ -184,10 +188,9 @@ describe('Codex message stream projection', () => {
       pane: '%1', threadId: 'thread-1', enabled: true, durableMessages: [], onSettled,
     }));
     await waitFor(() => expect(api.streamCodexMessages).toHaveBeenCalledOnce());
-    act(() => emit({
+    act(() => emit(projected({
       type: 'completed', threadId: 'thread-1', turnId: 'turn-old', itemId: 'agent-old', text: '旧回复',
-      eventId: 'thread-1:9', sequence: 9, kind: 'assistantMessage', lifecycle: 'completed',
-    }));
+    }, 9)));
     expect(result.current).toHaveLength(1);
 
     act(() => emit({ type: 'cursorReset', threadId: 'thread-1', cursor: 0 }));
