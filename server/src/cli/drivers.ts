@@ -10,6 +10,36 @@ import { extractNatappUrl } from './natappUrl.js';
 import { extractCpolarUrl, cpolarNamedArgs } from './cpolarUrl.js';
 import { hostIn } from './urlHost.js';
 
+export type TunnelName = 'none' | 'cloudflare' | 'cloudflare-named' | 'ssh' | 'natapp' | 'cpolar';
+
+export interface TunnelConfig {
+  port?: number;
+  publicUrl?: string | null;
+  cloudflaredBin?: string;
+  cfTunnelName?: string;
+  tunliteBin?: string;
+  sshHost?: string;
+  remotePort?: number;
+  sshJump?: string | null;
+  natappBin?: string;
+  authtoken?: string;
+  cpolarBin?: string;
+  cpolarRegion?: string | null;
+}
+
+export interface TunnelProcessSpec {
+  cmd: string;
+  args: string[];
+}
+
+export interface TunnelDriver {
+  name: TunnelName;
+  needsProcess: boolean;
+  notFoundHint?: string;
+  proc(config: TunnelConfig): TunnelProcessSpec | null;
+  matchUrl(chunk: unknown, config: TunnelConfig): string | null;
+}
+
 export const DRIVERS = {
   none: {
     name: 'none',
@@ -38,9 +68,9 @@ export const DRIVERS = {
       cmd: cfg.cloudflaredBin || 'cloudflared',
       // --grace-period 0s goes BEFORE the `run` subcommand (it's a `cloudflared tunnel` flag). Same reason as
       // the quick tunnel: disconnect immediately on stop so the named tunnel doesn't linger on the edge.
-      args: ['tunnel', '--grace-period', '0s', 'run', cfg.cfTunnelName],
+      args: ['tunnel', '--grace-period', '0s', 'run', cfg.cfTunnelName ?? ''],
     }),
-    matchUrl: (chunk, cfg) => (cfNamedReady(chunk) ? cfg.publicUrl : null),
+    matchUrl: (chunk, cfg) => (cfNamedReady(chunk) && cfg.publicUrl ? cfg.publicUrl : null),
   },
   ssh: {
     name: 'ssh',
@@ -48,10 +78,10 @@ export const DRIVERS = {
     notFoundHint: 'tunlite not found — install it (npm i -g tunlite / npx tunlite install)',
     proc: (cfg) => ({
       cmd: cfg.tunliteBin || 'tunlite',
-      args: ['run', '--to', cfg.sshHost, '-R', `${cfg.remotePort}:localhost:${cfg.port}`,
+      args: ['run', '--to', cfg.sshHost ?? '', '-R', `${cfg.remotePort}:localhost:${cfg.port}`,
         '--name', 'handmux', '--json', ...(cfg.sshJump ? ['--jump', cfg.sshJump] : [])],
     }),
-    matchUrl: (chunk, cfg) => (isTunnelConnected(chunk) ? cfg.publicUrl : null),
+    matchUrl: (chunk, cfg) => (isTunnelConnected(chunk) && cfg.publicUrl ? cfg.publicUrl : null),
   },
   // natapp / cpolar — ngrok-derived domestic tunnels (China-usable when cloudflare's edge isn't). Both take a
   // stable `authtoken`; both default to a full-screen TUI, so we force `-log=stdout` to get scrapeable text.
@@ -62,7 +92,7 @@ export const DRIVERS = {
     notFoundHint: 'natapp not found — download it from https://natapp.cn (login required) into ~/.handmux/bin/',
     proc: (cfg) => ({
       cmd: cfg.natappBin || 'natapp',
-      args: [`-authtoken=${cfg.authtoken}`, '-log=stdout'],
+      args: [`-authtoken=${cfg.authtoken ?? ''}`, '-log=stdout'],
     }),
     // The reserved/paid zone is arbitrary (natapp1.cc / your own) so we can't scrape it — gate on the known
     // host echoing in the log. Free tier has no publicUrl → scrape the natappfree.cc URL.
@@ -88,10 +118,12 @@ export const DRIVERS = {
     matchUrl: (chunk, cfg) => extractCpolarUrl(chunk)
       || (cfg.publicUrl && hostIn(chunk, cfg.publicUrl) ? cfg.publicUrl : null),
   },
-};
+} satisfies Record<TunnelName, TunnelDriver>;
 
-export function getDriver(name) {
-  const d = DRIVERS[name];
+export function getDriver(name: unknown): TunnelDriver {
+  const d = typeof name === 'string' && Object.hasOwn(DRIVERS, name)
+    ? DRIVERS[name as TunnelName]
+    : undefined;
   if (!d) throw new Error(`unknown tunnel: ${name}`);
   return d;
 }
