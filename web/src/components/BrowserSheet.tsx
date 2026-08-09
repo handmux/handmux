@@ -16,6 +16,81 @@ import { t } from '../i18n';
 import { useModalFocusTrap } from '../hooks/useModalFocusTrap.js';
 import DirPicker from './DirPicker.jsx';
 import { OverlayPortal } from '../overlays/OverlayHost.js';
+import type { BrowserCloseAfter, BrowserHistoryEntry, BrowserMode } from '../browserState.js';
+import type { RuntimeBrowserTab, useBrowser } from '../hooks/useBrowser.js';
+import type { ComponentType, CSSProperties, FormEvent } from 'react';
+
+type BrowserController = ReturnType<typeof useBrowser>;
+type BrowserSiteVersion = 'mobile' | 'desktop';
+type StaticPreviewStatus = 'ensuring' | 'ready' | 'error';
+
+interface StaticPreviewTab {
+  kind?: 'static';
+  name: string;
+  dir: string;
+  createdAt?: number;
+  status: StaticPreviewStatus;
+  url: string | null;
+  error: Error | null;
+}
+
+interface StaticPreviewController {
+  selected: boolean;
+  shownPreview: StaticPreviewTab | null;
+  tabs: StaticPreviewTab[];
+  error: Error | null;
+  pane: string | null;
+  lastPreviewDir: string | null;
+  deactivate: () => void;
+  switchTab: (name: string) => void;
+  closeTab: (name: string) => Promise<unknown> | unknown;
+  startPreview: (dir: string) => Promise<unknown> | unknown;
+  retryPreview: (name: string) => Promise<unknown> | unknown;
+}
+
+interface BrowserSheetProps {
+  browser: BrowserController;
+  staticPreview: StaticPreviewController;
+}
+
+interface DirPickerProps {
+  open: boolean;
+  seedCwd?: string | null;
+  pane?: string | null;
+  hint?: string;
+  onPick: (dir: string) => void | Promise<void>;
+  onClose: () => void;
+}
+
+const TypedDirPicker = DirPicker as unknown as ComponentType<DirPickerProps>;
+
+interface StaticOpenTab {
+  name: string;
+  dir: string;
+  createdAt?: number;
+}
+
+type OpenTabEntry = {
+  kind: 'web';
+  tab: RuntimeBrowserTab;
+  legacyIndex: number;
+  createdAt: number;
+} | {
+  kind: 'static';
+  tab: StaticPreviewTab;
+  legacyIndex: number;
+  createdAt: number;
+};
+
+type ClearConfirmation =
+  | { type: 'site'; origin: string }
+  | { type: 'all' | 'help-profile' | 'help-site' | 'help-about' };
+
+function recordOf(value: unknown): Record<string, unknown> | null {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+}
 
 // URL pages are cross-origin (the target origin in direct mode, a dedicated origin in proxy mode),
 // so same-origin is needed for normal site compatibility without exposing the Handmux app origin.
@@ -26,19 +101,22 @@ const STATIC_FRAME_SANDBOX = 'allow-scripts allow-forms allow-downloads allow-mo
 const PAGE_ZOOM_STEPS = [0.75, 0.8, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2];
 const SESSION_RECOVERY_LOCK_MS = 15_000;
 
-function tabLabel(tab) {
+function tabLabel(tab: RuntimeBrowserTab): string {
   if (tab.title) return tab.title;
   try { return new URL(tab.originalUrl).hostname; } catch { return tab.originalUrl; }
 }
 
-function staticTabLabel(tab) {
+function staticTabLabel(tab: StaticOpenTab): string {
   return tab.dir?.split('/').filter(Boolean).at(-1) || tab.name;
 }
 
-function orderedOpenTabs(webTabs, staticTabs) {
+function orderedOpenTabs(
+  webTabs: RuntimeBrowserTab[],
+  staticTabs: StaticPreviewTab[],
+): OpenTabEntry[] {
   const entries = [
-    ...webTabs.map((tab) => ({ kind: 'web', tab })),
-    ...staticTabs.map((tab) => ({ kind: 'static', tab })),
+    ...webTabs.map((tab) => ({ kind: 'web' as const, tab })),
+    ...staticTabs.map((tab) => ({ kind: 'static' as const, tab })),
   ].map((entry, legacyIndex) => ({
     ...entry,
     legacyIndex,
@@ -53,7 +131,7 @@ function orderedOpenTabs(webTabs, staticTabs) {
   });
 }
 
-export default function BrowserSheet({ browser, staticPreview }) {
+export default function BrowserSheet({ browser, staticPreview }: BrowserSheetProps) {
   const {
     open, accessEnabled, consentOpen, tabs, activeId, historyActive, closeAfter, history, error,
     persistProxyLogin, proxyAvailable,
@@ -69,44 +147,44 @@ export default function BrowserSheet({ browser, staticPreview }) {
   const homeActive = historyActive && !staticSelected;
   const active = staticActive || webActive;
   const proxied = webActive?.mode === 'proxy' && !staticSelected;
-  const [newPageMode, setNewPageMode] = useState('direct');
+  const [newPageMode, setNewPageMode] = useState<BrowserMode>('direct');
   const menuMode = staticSelected ? 'static' : (homeActive || !webActive ? newPageMode : webActive.mode);
   const [address, setAddress] = useState(webActive?.originalUrl || '');
   const [optionsOpen, setOptionsOpen] = useState(false);
   const [timeOpen, setTimeOpen] = useState(false);
-  const [pageWidth, setPageWidth] = useState('narrow');
+  const [pageWidth, setPageWidth] = useState<'narrow' | 'wide'>('narrow');
   const [bodySize, setBodySize] = useState({ width: 0, height: 0 });
-  const [loadedTabs, setLoadedTabs] = useState(() => new Set());
-  const [refreshingTabs, setRefreshingTabs] = useState(() => new Set());
-  const [reloadKeys, setReloadKeys] = useState({});
-  const [historyModeOpen, setHistoryModeOpen] = useState(null);
-  const [clearConfirmation, setClearConfirmation] = useState(null);
-  const [historyError, setHistoryError] = useState(null);
-  const [mountedTabs, setMountedTabs] = useState(() => new Set());
-  const [unhealthyTabs, setUnhealthyTabs] = useState(() => new Set());
+  const [loadedTabs, setLoadedTabs] = useState(() => new Set<string>());
+  const [refreshingTabs, setRefreshingTabs] = useState(() => new Set<string>());
+  const [reloadKeys, setReloadKeys] = useState<Record<string, number>>({});
+  const [historyModeOpen, setHistoryModeOpen] = useState<string | null>(null);
+  const [clearConfirmation, setClearConfirmation] = useState<ClearConfirmation | null>(null);
+  const [historyError, setHistoryError] = useState<string | null>(null);
+  const [mountedTabs, setMountedTabs] = useState(() => new Set<string>());
+  const [unhealthyTabs, setUnhealthyTabs] = useState(() => new Set<string>());
   const [pageZoom, setPageZoom] = useState(1);
   const [dirOpen, setDirOpen] = useState(false);
-  const [seedCwd, setSeedCwd] = useState(null);
-  const [mountedStaticTabs, setMountedStaticTabs] = useState(() => new Set());
-  const [loadedStaticTabs, setLoadedStaticTabs] = useState(() => new Set());
-  const [staticReloadKeys, setStaticReloadKeys] = useState({});
-  const frames = useRef(new Map());
-  const frameUrls = useRef(new Map());
-  const staticFrameUrls = useRef(new Map());
-  const refreshSequences = useRef(new Map());
-  const recoveringSessions = useRef(new Map());
+  const [seedCwd, setSeedCwd] = useState<string | null>(null);
+  const [mountedStaticTabs, setMountedStaticTabs] = useState(() => new Set<string>());
+  const [loadedStaticTabs, setLoadedStaticTabs] = useState(() => new Set<string>());
+  const [staticReloadKeys, setStaticReloadKeys] = useState<Record<string, number>>({});
+  const frames = useRef(new Map<string, HTMLIFrameElement>());
+  const frameUrls = useRef(new Map<string, string | undefined>());
+  const staticFrameUrls = useRef(new Map<string, string | null>());
+  const refreshSequences = useRef(new Map<string, number>());
+  const recoveringSessions = useRef(new Map<string, ReturnType<typeof setTimeout>>());
   const activeIdRef = useRef(activeId);
   const openRef = useRef(open);
-  const activeTabRef = useRef(null);
-  const addressRef = useRef(null);
-  const bodyRef = useRef(null);
-  const clearTriggerRef = useRef(null);
-  const clearCancelRef = useRef(null);
-  const clearDialogRef = useRef(null);
+  const activeTabRef = useRef<HTMLSpanElement | null>(null);
+  const addressRef = useRef<HTMLInputElement | null>(null);
+  const bodyRef = useRef<HTMLDivElement | null>(null);
+  const clearTriggerRef = useRef<HTMLElement | null>(null);
+  const clearCancelRef = useRef<HTMLButtonElement | null>(null);
+  const clearDialogRef = useRef<HTMLDivElement | null>(null);
   activeIdRef.current = activeId;
   openRef.current = open;
 
-  const clearSessionRecovery = useCallback((id) => {
+  const clearSessionRecovery = useCallback((id: string): void => {
     const timer = recoveringSessions.current.get(id);
     if (timer != null) clearTimeout(timer);
     recoveringSessions.current.delete(id);
@@ -180,14 +258,15 @@ export default function BrowserSheet({ browser, staticPreview }) {
   });
 
   useEffect(() => {
-    const onMessage = (event) => {
-      if (event.data?.source !== 'handmux-browser') return;
+    const onMessage = (event: MessageEvent<unknown>) => {
+      const data = recordOf(event.data);
+      if (data?.source !== 'handmux-browser') return;
       const frameEntry = [...frames.current.entries()]
         .find(([, frame]) => frame.contentWindow === event.source);
       const tab = frameEntry && tabs.find((item) => item.id === frameEntry[0]);
       if (!tab || tab.mode !== 'proxy') return;
-      if (event.data.type === 'session-unavailable') {
-        if (tab.channel !== event.data.channel) return;
+      if (data.type === 'session-unavailable') {
+        if (tab.channel !== data.channel) return;
         if (!openRef.current || activeIdRef.current !== tab.id) {
           setUnhealthyTabs((current) => new Set(current).add(tab.id));
           return;
@@ -204,10 +283,10 @@ export default function BrowserSheet({ browser, staticPreview }) {
         });
         return;
       }
-      if (tab.channel !== event.data.channel) return;
-      if (event.data.type === 'ready') {
+      if (tab.channel !== data.channel) return;
+      if (data.type === 'ready') {
         clearSessionRecovery(tab.id);
-        markBindingReady(tab.id, event.data.channel);
+        if (typeof data.channel === 'string') markBindingReady(tab.id, data.channel);
         setUnhealthyTabs((current) => {
           if (!current.has(tab.id)) return current;
           const next = new Set(current);
@@ -215,11 +294,11 @@ export default function BrowserSheet({ browser, staticPreview }) {
           return next;
         });
       }
-      if (event.data.type === 'navigate') {
+      if (data.type === 'navigate') {
         setRefreshingTabs((current) => new Set(current).add(tab.id));
       }
-      if (['ready', 'load', 'urlchange', 'title'].includes(event.data.type)) {
-        updateTabMeta(tab.id, { url: event.data.url, title: event.data.title });
+      if (typeof data.type === 'string' && ['ready', 'load', 'urlchange', 'title'].includes(data.type)) {
+        updateTabMeta(tab.id, { url: data.url, title: data.title });
       }
     };
     window.addEventListener('message', onMessage);
@@ -236,7 +315,7 @@ export default function BrowserSheet({ browser, staticPreview }) {
       if (!liveProxy.has(id)) clearSessionRecovery(id);
     }
     setLoadedTabs((current) => {
-      const next = new Set();
+      const next = new Set<string>();
       for (const tab of tabs) {
         if (current.has(tab.id) && frameUrls.current.get(tab.id) === tab.url) next.add(tab.id);
       }
@@ -258,7 +337,7 @@ export default function BrowserSheet({ browser, staticPreview }) {
     const staticTabs = staticPreview?.tabs || [];
     const live = new Set(staticTabs.map((tab) => tab.name));
     setLoadedStaticTabs((current) => {
-      const next = new Set();
+      const next = new Set<string>();
       for (const tab of staticTabs) {
         if (current.has(tab.name) && staticFrameUrls.current.get(tab.name) === tab.url) next.add(tab.name);
       }
@@ -272,19 +351,23 @@ export default function BrowserSheet({ browser, staticPreview }) {
   }, [staticPreview?.tabs]);
 
   useEffect(() => {
-    if (!open || !bodyRef.current) return undefined;
+    const body = bodyRef.current;
+    if (!open || !body) return undefined;
     const measure = () => setBodySize({
-      width: bodyRef.current.clientWidth,
-      height: bodyRef.current.clientHeight,
+      width: body.clientWidth,
+      height: body.clientHeight,
     });
     measure();
     if (typeof ResizeObserver === 'undefined') return undefined;
     const observer = new ResizeObserver(measure);
-    observer.observe(bodyRef.current);
+    observer.observe(body);
     return () => observer.disconnect();
   }, [open]);
 
-  const postTabCommand = useCallback((tab, command) => {
+  const postTabCommand = useCallback((
+    tab: RuntimeBrowserTab | null,
+    command: string,
+  ): void => {
     if (!tab || tab.mode !== 'proxy') return;
     frames.current.get(tab.id)?.contentWindow?.postMessage({
       source: 'handmux-browser-parent',
@@ -293,16 +376,16 @@ export default function BrowserSheet({ browser, staticPreview }) {
     }, '*');
   }, []);
 
-  const postCommand = (command) => postTabCommand(webActive, command);
+  const postCommand = (command: string): void => postTabCommand(webActive, command);
 
-  const selectTab = (tab) => {
+  const selectTab = (tab: RuntimeBrowserTab): void => {
     setOptionsOpen(false);
     setHistoryError(null);
     staticPreview?.deactivate();
     switchTab(tab.id);
   };
 
-  const selectStaticTab = (tab) => {
+  const selectStaticTab = (tab: StaticPreviewTab): void => {
     setOptionsOpen(false);
     setHistoryError(null);
     switchTab('history');
@@ -334,6 +417,7 @@ export default function BrowserSheet({ browser, staticPreview }) {
       }
       return;
     }
+    if (!webActive) return;
     const tab = webActive;
     const sequence = (refreshSequences.current.get(tab.id) || 0) + 1;
     refreshSequences.current.set(tab.id, sequence);
@@ -368,7 +452,7 @@ export default function BrowserSheet({ browser, staticPreview }) {
     });
   };
 
-  const frameLoaded = (tab) => {
+  const frameLoaded = (tab: RuntimeBrowserTab): void => {
     frameUrls.current.set(tab.id, tab.url);
     setLoadedTabs((current) => new Set(current).add(tab.id));
     setRefreshingTabs((current) => {
@@ -378,12 +462,12 @@ export default function BrowserSheet({ browser, staticPreview }) {
     });
   };
 
-  const staticFrameLoaded = (tab) => {
+  const staticFrameLoaded = (tab: StaticPreviewTab): void => {
     staticFrameUrls.current.set(tab.name, tab.url);
     setLoadedStaticTabs((current) => new Set(current).add(tab.name));
   };
 
-  const submitAddress = (event) => {
+  const submitAddress = (event: FormEvent<HTMLFormElement>): void => {
     event.preventDefault();
     if (staticSelected) return;
     setHistoryError(null);
@@ -392,7 +476,7 @@ export default function BrowserSheet({ browser, staticPreview }) {
     else navigateTab(webActive.id, address);
   };
 
-  const chooseMode = (mode) => {
+  const chooseMode = (mode: BrowserMode): void => {
     if (staticSelected || mode === menuMode || (mode === 'proxy' && !proxyAvailable)) return;
     setHistoryError(null);
     if (homeActive || !webActive) {
@@ -402,8 +486,8 @@ export default function BrowserSheet({ browser, staticPreview }) {
     navigateTab(webActive.id, webActive.originalUrl, mode);
   };
 
-  const requestSiteVersion = async (siteVersion) => {
-    if (!proxied || webActive.siteVersion === siteVersion) return;
+  const requestSiteVersion = async (siteVersion: BrowserSiteVersion): Promise<void> => {
+    if (!proxied || !webActive || webActive.siteVersion === siteVersion) return;
     setRefreshingTabs((current) => new Set(current).add(webActive.id));
     const navigated = await navigateTab(
       webActive.id,
@@ -419,7 +503,11 @@ export default function BrowserSheet({ browser, staticPreview }) {
     });
   };
 
-  const openHistory = (entry, mode = entry.lastMode || 'direct', persistMode = false) => {
+  const openHistory = (
+    entry: BrowserHistoryEntry,
+    mode: BrowserMode = entry.kind === 'static' ? 'direct' : entry.lastMode || 'direct',
+    persistMode = false,
+  ): void => {
     setHistoryModeOpen(null);
     if (entry.kind === 'static') {
       setHistoryError(null);
@@ -436,9 +524,12 @@ export default function BrowserSheet({ browser, staticPreview }) {
   };
 
   const requestActiveSiteClear = () => {
-    let origin;
+    if (!webActive) return;
+    let origin: string;
     try { origin = new URL(webActive.originalUrl).origin; } catch { return; }
-    clearTriggerRef.current = document.activeElement;
+    clearTriggerRef.current = document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null;
     setClearConfirmation({ type: 'site', origin });
   };
 
@@ -449,7 +540,7 @@ export default function BrowserSheet({ browser, staticPreview }) {
     if (pending?.type === 'all') clearProxyLogin(null);
   };
 
-  const removeHistory = (entry) => {
+  const removeHistory = (entry: BrowserHistoryEntry): void => {
     setHistoryModeOpen(null);
     deleteHistory(entry);
   };
@@ -464,22 +555,25 @@ export default function BrowserSheet({ browser, staticPreview }) {
     addressRef.current?.blur();
     let seed = staticPreview?.lastPreviewDir || null;
     if (!seed && staticPreview?.pane) {
-      try { seed = (await fetchPaneCwd(staticPreview.pane)).cwd || null; } catch { /* picker falls back home */ }
+      try {
+        const response = recordOf(await fetchPaneCwd(staticPreview.pane));
+        seed = typeof response?.cwd === 'string' ? response.cwd : null;
+      } catch { /* picker falls back home */ }
     }
     setSeedCwd(seed);
     setDirOpen(true);
   };
 
-  const pickDirectory = async (dir) => {
+  const pickDirectory = async (dir: string): Promise<void> => {
     setDirOpen(false);
     await staticPreview?.startPreview(dir);
   };
 
-  const pickTime = (value) => {
+  const pickTime = (value: BrowserCloseAfter): void => {
     setCloseAfter(value);
     setTimeOpen(false);
   };
-  const zoomPageBy = (direction) => setPageZoom((current) => {
+  const zoomPageBy = (direction: number): void => setPageZoom((current) => {
     if (direction > 0) return PAGE_ZOOM_STEPS.find((value) => value > current) || current;
     return [...PAGE_ZOOM_STEPS].reverse().find((value) => value < current) || current;
   });
@@ -489,7 +583,7 @@ export default function BrowserSheet({ browser, staticPreview }) {
       ? bodySize.width / previewWidth
       : Math.min(1, bodySize.width / previewWidth))
     : 1;
-  const scalerStyleFor = (zoom) => {
+  const scalerStyleFor = (zoom: number): CSSProperties => {
     const scaledWidth = Math.round(previewWidth * previewScale * zoom * 1000) / 1000;
     const scaledHeight = Math.round(bodySize.height * zoom * 1000) / 1000;
     const scaledPercent = Math.round(zoom * 1000) / 10;
@@ -499,7 +593,7 @@ export default function BrowserSheet({ browser, staticPreview }) {
       marginInline: pageWidth === 'narrow' && previewScale === 1 ? 'auto' : undefined,
     };
   };
-  const frameStyleFor = (zoom) => {
+  const frameStyleFor = (zoom: number): CSSProperties => {
     return {
       width: `${previewWidth}px`,
       height: bodySize.height > 0 ? `${bodySize.height / previewScale}px` : '100%',
@@ -734,7 +828,9 @@ export default function BrowserSheet({ browser, staticPreview }) {
                     </span>
                   </div>
                   <button className="browser-options-danger" onClick={() => {
-                    clearTriggerRef.current = document.activeElement;
+                    clearTriggerRef.current = document.activeElement instanceof HTMLElement
+                      ? document.activeElement
+                      : null;
                     setClearConfirmation({ type: 'all' });
                   }}>{t('browser.clearAllLogin')}</button>
                 </div>
@@ -759,7 +855,9 @@ export default function BrowserSheet({ browser, staticPreview }) {
               {homeActive && (
                 <div className="browser-options-section">
                   <button className="browser-options-action" onClick={() => {
-                    clearTriggerRef.current = document.activeElement;
+                    clearTriggerRef.current = document.activeElement instanceof HTMLElement
+                      ? document.activeElement
+                      : null;
                     setClearConfirmation({ type: 'help-about' });
                   }}>{t('browser.about')}</button>
                 </div>
@@ -864,7 +962,7 @@ export default function BrowserSheet({ browser, staticPreview }) {
                   className="browser-frame"
                   data-static-tab-name={tab.name}
                   title={tab.name}
-                  src={tab.url}
+                  src={tab.url ?? undefined}
                   sandbox={STATIC_FRAME_SANDBOX}
                   style={frameStyleFor(selected ? pageZoom : 1)}
                   onLoad={() => staticFrameLoaded(tab)}
@@ -893,7 +991,9 @@ export default function BrowserSheet({ browser, staticPreview }) {
         })}
         {displayedError && (
           <div className="browser-error" role="alert">
-            <span>{displayedError?.message || displayedError || t('browser.loadFailed')}</span>
+            <span>{typeof displayedError === 'string'
+              ? displayedError
+              : displayedError.message || t('browser.loadFailed')}</span>
             {!staticSelected && !historyError && webActive && webActive.mode === 'direct' && proxyAvailable
               ? <button onClick={() => navigateTab(webActive.id, webActive.originalUrl, 'proxy')}>{t('browser.tryProxy')}</button>
               : !staticSelected && !historyError && webActive && <button onClick={() => (
@@ -904,7 +1004,7 @@ export default function BrowserSheet({ browser, staticPreview }) {
           </div>
         )}
       </div>
-      <DirPicker
+      <TypedDirPicker
         open={dirOpen}
         seedCwd={seedCwd}
         pane={staticPreview?.pane}
