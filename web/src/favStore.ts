@@ -1,42 +1,92 @@
 import { shortcutIdentity } from './shortcutMerge.js';
+import type { ShortcutItem } from './shortcutMerge.js';
+
+export type StoredFav = Omit<ShortcutItem, 'source'>;
+
+export type FavMutationResult =
+  | { ok: true; items: StoredFav[] }
+  | { ok: false; reason: 'conflict' | 'missing'; items: StoredFav[] };
+
+export type FavTransferResult =
+  | { ok: true; source: StoredFav[]; target: StoredFav[] }
+  | { ok: false; reason: 'conflict' | 'missing'; source: StoredFav[]; target: StoredFav[] };
 
 // Only phone-local additions live here. Shared config provides shortcut content; a device-local layout may
 // hide or reorder those shared actions without ever writing the shared server config. v7 makes text Enter
 // behavior explicit, so same-text actions with different Enter behavior have distinct identities.
-const KEY = (mode) => `hm_favs7_${mode}`;
-const OLD_KEY = (mode) => `hm_favs6_${mode}`;
+const KEY = (mode: string): string => `hm_favs7_${mode}`;
+const OLD_KEY = (mode: string): string => `hm_favs6_${mode}`;
 
 // Command-mode saved commands split into two lists: the GLOBAL one (scope 'command' — the original list,
 // so existing commands stay put) shown first, and a PER-WINDOW one keyed by the tmux window id (following
 // the preview-dir precedent of keying persistent per-window data by window.id). Each item may carry an
 // `enter` flag: tapping it types the command AND presses Enter (runs it) rather than just typing it.
 export const CMD_GLOBAL = 'command';
-export const cmdScope = (windowId) => (windowId ? `command@${windowId}` : CMD_GLOBAL);
+export const cmdScope = (windowId: string | null | undefined): string => (
+  windowId ? `command@${windowId}` : CMD_GLOBAL
+);
 
-export const DEFAULT_FAVS = {
+export const DEFAULT_FAVS: Record<'command' | 'agent', StoredFav[]> = {
   command: [],
   agent: [],
 };
 
-const LEGACY_KEYS = {
+const LEGACY_KEYS: Record<string, StoredFav | undefined> = {
   ESC: { kind: 'key', text: 'Escape', label: 'Esc' },
   Esc: { kind: 'key', text: 'Escape', label: 'Esc' },
   Tab: { kind: 'key', text: 'Tab', label: 'Tab' },
   '⌫': { kind: 'key', text: 'BSpace', label: '⌫' },
 };
 
-function migrateV6(mode, items) {
-  return items.map((item) => {
-    if (item.kind !== 'key' && LEGACY_KEYS[item.text]) return { ...LEGACY_KEYS[item.text] };
-    if (item.kind === 'key') return { kind: 'key', text: item.text, label: item.label || item.text };
-    return { kind: item.kind, text: item.text, enter: mode === 'agent' ? true : !!item.enter };
+const asRecord = (value: unknown): Record<string, unknown> | null => (
+  value !== null && typeof value === 'object' ? value as Record<string, unknown> : null
+);
+
+function normalizeStoredFav(value: unknown): StoredFav | null {
+  const item = asRecord(value);
+  if (!item || typeof item.text !== 'string'
+    || (item.kind !== 'key' && item.kind !== 'reply' && item.kind !== 'cmd')) return null;
+  if (item.kind === 'key') {
+    return {
+      kind: 'key',
+      text: item.text,
+      label: typeof item.label === 'string' ? item.label : item.text,
+    };
+  }
+  return { kind: item.kind, text: item.text, enter: !!item.enter };
+}
+
+const parseStoredFavs = (value: unknown): StoredFav[] => (
+  Array.isArray(value)
+    ? value.map(normalizeStoredFav).filter((item): item is StoredFav => item !== null)
+    : []
+);
+
+function migrateV6(mode: string, value: unknown): StoredFav[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((candidate) => {
+    const item = asRecord(candidate);
+    if (!item || typeof item.text !== 'string') return [];
+    const kind = item.kind === 'key' || item.kind === 'reply' || item.kind === 'cmd'
+      ? item.kind
+      : (mode === 'agent' && !item.text.startsWith('/') ? 'reply' : 'cmd');
+    const legacy = kind !== 'key' ? LEGACY_KEYS[item.text] : undefined;
+    if (legacy) return [{ ...legacy }];
+    if (kind === 'key') {
+      return [{
+        kind: 'key' as const,
+        text: item.text,
+        label: typeof item.label === 'string' && item.label ? item.label : item.text,
+      }];
+    }
+    return [{ kind, text: item.text, enter: mode === 'agent' ? true : !!item.enter }];
   });
 }
 
-export function loadFavs(mode) {
+export function loadFavs(mode: string): StoredFav[] {
   try {
     const raw = localStorage.getItem(KEY(mode));
-    if (raw) return JSON.parse(raw);
+    if (raw) return parseStoredFavs(JSON.parse(raw));
     const oldRaw = localStorage.getItem(OLD_KEY(mode));
     if (oldRaw) {
       const migrated = migrateV6(mode, JSON.parse(oldRaw));
@@ -44,21 +94,22 @@ export function loadFavs(mode) {
       return migrated;
     }
   } catch { /* fall through to defaults */ }
-  return (DEFAULT_FAVS[mode] || []).map((f) => ({ ...f }));
+  const defaults = mode === 'command' || mode === 'agent' ? DEFAULT_FAVS[mode] : [];
+  return defaults.map((fav) => ({ ...fav }));
 }
 
-export function saveFavs(mode, items) {
+export function saveFavs(mode: string, items: StoredFav[]): StoredFav[] {
   try { localStorage.setItem(KEY(mode), JSON.stringify(items)); } catch { /* no localStorage */ }
   return items;
 }
 
-function storedFav(item) {
+function storedFav(item: ShortcutItem): StoredFav {
   return item.kind === 'key'
     ? { kind: 'key', text: item.text, label: item.label }
     : { kind: item.kind, text: item.text, enter: !!item.enter };
 }
 
-export function addFavResult(mode, item) {
+export function addFavResult(mode: string, item: ShortcutItem): FavMutationResult {
   const items = loadFavs(mode);
   const identity = shortcutIdentity(item);
   if (items.some((f) => shortcutIdentity(f) === identity)) {
@@ -69,21 +120,25 @@ export function addFavResult(mode, item) {
   return { ok: true, items: next };
 }
 
-export function addFav(mode, item) {
+export function addFav(mode: string, item: ShortcutItem): StoredFav[] {
   return addFavResult(mode, item).items;
 }
 
-export function removeFav(mode, text) {
+export function removeFav(mode: string, text: string): StoredFav[] {
   return saveFavs(mode, loadFavs(mode).filter((f) => f.text !== text));
 }
 
-export function removeFavByIdentity(mode, identity) {
+export function removeFavByIdentity(mode: string, identity: string): StoredFav[] {
   return saveFavs(mode, loadFavs(mode).filter((f) => shortcutIdentity(f) !== identity));
 }
 
 // Replace the exact identity while keeping its position. Same-text actions with different Enter behavior
 // remain independently addressable throughout edit and cross-scope flows.
-export function updateFavResult(mode, oldIdentity, item) {
+export function updateFavResult(
+  mode: string,
+  oldIdentity: string,
+  item: ShortcutItem,
+): FavMutationResult {
   const items = loadFavs(mode);
   const i = items.findIndex((f) => shortcutIdentity(f) === oldIdentity);
   if (i < 0) return { ok: false, reason: 'missing', items };
@@ -96,7 +151,7 @@ export function updateFavResult(mode, oldIdentity, item) {
   return { ok: true, items: saveFavs(mode, next) };
 }
 
-export function updateFav(mode, oldText, item) {
+export function updateFav(mode: string, oldText: string, item: ShortcutItem): StoredFav[] {
   const old = loadFavs(mode).find((fav) => fav.text === oldText);
   if (!old) return loadFavs(mode);
   return updateFavResult(mode, shortcutIdentity(old), item).items;
@@ -104,7 +159,12 @@ export function updateFav(mode, oldText, item) {
 
 // Move one item between scopes only after validating both lists. A target conflict is therefore a true
 // no-op: neither source nor target is written, and callers can keep their UI/layout unchanged too.
-export function transferFavResult(oldMode, oldIdentity, newMode, item) {
+export function transferFavResult(
+  oldMode: string,
+  oldIdentity: string,
+  newMode: string,
+  item: ShortcutItem,
+): FavTransferResult | FavMutationResult {
   if (oldMode === newMode) return updateFavResult(oldMode, oldIdentity, item);
   const source = loadFavs(oldMode);
   const target = loadFavs(newMode);
@@ -121,7 +181,7 @@ export function transferFavResult(oldMode, oldIdentity, newMode, item) {
 }
 
 // Reorder one item by swapping it with its neighbour. dir < 0 = up, dir > 0 = down. No-op at the ends.
-export function moveFav(mode, text, dir) {
+export function moveFav(mode: string, text: string, dir: number): StoredFav[] {
   const items = loadFavs(mode);
   const i = items.findIndex((f) => f.text === text);
   const j = i + (dir < 0 ? -1 : 1);
@@ -133,7 +193,7 @@ export function moveFav(mode, text, dir) {
 
 // Swap two known visible neighbours at their real storage positions. Hidden effective-global duplicates may
 // sit between them in the full window-local list, so swapping raw adjacent indexes would leave the UI still.
-export function moveFavBeside(mode, text, neighbourText) {
+export function moveFavBeside(mode: string, text: string, neighbourText: string): StoredFav[] {
   const items = loadFavs(mode);
   const i = items.findIndex((f) => f.text === text);
   const j = items.findIndex((f) => f.text === neighbourText);
@@ -143,7 +203,11 @@ export function moveFavBeside(mode, text, neighbourText) {
   return saveFavs(mode, next);
 }
 
-export function moveFavBesideByIdentity(mode, identity, neighbourIdentity) {
+export function moveFavBesideByIdentity(
+  mode: string,
+  identity: string,
+  neighbourIdentity: string,
+): StoredFav[] {
   const items = loadFavs(mode);
   const i = items.findIndex((f) => shortcutIdentity(f) === identity);
   const j = items.findIndex((f) => shortcutIdentity(f) === neighbourIdentity);

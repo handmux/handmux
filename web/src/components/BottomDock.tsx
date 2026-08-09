@@ -1,7 +1,6 @@
 import { forwardRef, useEffect, useImperativeHandle, useLayoutEffect, useRef, useState } from 'react';
 import type {
   ButtonHTMLAttributes,
-  ComponentType,
   Dispatch,
   ForwardedRef,
   PointerEvent as ReactPointerEvent,
@@ -30,26 +29,12 @@ import { t } from '../i18n';
 import { MODIFIERS, modActive, consumeMods, withMods } from '../keybarKeys.js';
 import type { ModifierStateMap } from '../keybarKeys.js';
 import { DEFAULT_SERVER_SHORTCUTS, mergeShortcuts, shortcutIdentity } from '../shortcutMerge.js';
+import type { ServerShortcuts, ShortcutItem } from '../shortcutMerge.js';
 import { applyShortcutLayout, loadShortcutLayout } from '../shortcutLayout.js';
 
 type DockMode = 'command' | 'agent';
 type OverlayOwner = 'terminal' | 'composer';
 type GhostTarget = 'send' | 'mic';
-
-interface ShortcutPresetKey { type: 'key'; key: string; label?: string }
-interface ShortcutPresetText { type: 'text'; text: string; enter?: boolean }
-type ShortcutPreset = ShortcutPresetKey | ShortcutPresetText;
-interface ServerShortcuts {
-  command: ShortcutPreset[];
-  chat: ShortcutPreset[];
-}
-interface ShortcutItem {
-  kind: 'key' | 'reply' | 'cmd';
-  text: string;
-  label?: string;
-  enter?: boolean;
-  source?: string;
-}
 
 export interface BottomDockProps {
   pane: string;
@@ -113,31 +98,6 @@ interface DockGesture {
   cmp: HTMLTextAreaElement | null;
   kbUp: boolean;
 }
-
-interface FavDrawerProps {
-  open: boolean;
-  mode: DockMode;
-  recent?: string[];
-  historyOnly?: boolean;
-  onDelete?: (text: string) => void;
-  onSend: (text: string) => void;
-  onFill: (text: string) => void;
-  onClose: () => void;
-}
-
-interface CmdFavEditorProps {
-  windowId?: string | null;
-  inset?: number;
-  variant?: 'command' | 'chat';
-  presets?: ShortcutPreset[];
-  onChange?: () => void;
-  onClose: () => void;
-}
-
-// These two overlays are still JavaScript in the incremental migration. Give their imported component
-// boundary the exact contract BottomDock consumes; the assertions disappear when each overlay moves to TSX.
-const TypedFavDrawer = FavDrawer as ComponentType<FavDrawerProps>;
-const TypedCmdFavEditor = CmdFavEditor as ComponentType<CmdFavEditorProps>;
 
 // The bottom dock is a two-page pager (swipe the non-key chrome to switch, or TAP the page-dots above;
 // two dots show which page is current):
@@ -247,11 +207,10 @@ function BottomDock({
   const [multi, setMulti] = useState(false); // composer grew past one line → full-width text, mic/send overlay bottom-right
   const [crowd, setCrowd] = useState(false); // last text line would run under the overlaid buttons → reserve a bottom strip
   const [panelOpen, setPanelOpen] = useState(false);
-  const serverShortcuts: ServerShortcuts = shortcuts
-    ?? DEFAULT_SERVER_SHORTCUTS as ServerShortcuts;
+  const serverShortcuts: ServerShortcuts = shortcuts ?? DEFAULT_SERVER_SHORTCUTS;
   // The chat page's horizontal quick-command bar reads the agent 常用 list plus its device-local layout.
   const [favs, setFavs] = useState<ShortcutItem[]>(() => loadFavs('agent'));
-  const [chatLayout, setChatLayout] = useState<unknown>(() => loadShortcutLayout('chat'));
+  const [chatLayout, setChatLayout] = useState(() => loadShortcutLayout('chat'));
   // `chatEditOpen` is the chat page's ⚙ editor sheet (mirrors the command page's ⚙). Reload the agent list
   // whenever either it or the history panel closes so add/edit/delete/reorder flow straight into the bar.
   const [chatEditOpen, setChatEditOpen] = useState(false);
@@ -268,7 +227,7 @@ function BottomDock({
   const [winFavs, setWinFavs] = useState<ShortcutItem[]>(
     () => (windowId ? loadFavs(cmdScope(windowId)) : []),
   );
-  const [commandLayout, setCommandLayout] = useState<unknown>(() => loadShortcutLayout('command'));
+  const [commandLayout, setCommandLayout] = useState(() => loadShortcutLayout('command'));
   const [cmdEditOpen, setCmdEditOpen] = useState(false);
   const refreshCommandShortcuts = () => {
     setCmdFavs(loadFavs('command'));
@@ -1300,18 +1259,18 @@ function BottomDock({
           </div>
         </div>
       </div>
-      <TypedFavDrawer open={panelOpen} mode={mode} recent={recent} historyOnly onDelete={onRemoveRecent}
+      <FavDrawer open={panelOpen} mode={mode} recent={recent} historyOnly onDelete={onRemoveRecent}
         onSend={(text) => { closeOverlay(setPanelOpen); sendFav(text); }}
         onFill={(text) => { setPanelOpen(false); fillFav(text); }}
         onClose={() => closeOverlay(setPanelOpen)} />
       {/* Command-mode saved-command editor (opened by the ⚙ in the command quick-bar): two list sections
           (global + this window) over one add row whose 命令/按键 tab picks what you add. Mounted only while
           open so it seeds fresh each time. Never touches the agent list. */}
-      {cmdEditOpen && <TypedCmdFavEditor windowId={windowId} inset={inset} presets={serverShortcuts.command}
+      {cmdEditOpen && <CmdFavEditor windowId={windowId} inset={inset} presets={serverShortcuts.command}
         onChange={refreshCommandShortcuts} onClose={() => closeOverlay(setCmdEditOpen)} />}
       {/* Chat-mode saved-message editor (opened by the ⚙ in the chat quick-bar): one global list whose
           消息/按键 tab picks what you add. Same card as command mode, chat variant. */}
-      {chatEditOpen && <TypedCmdFavEditor variant="chat" inset={inset} presets={serverShortcuts.chat}
+      {chatEditOpen && <CmdFavEditor variant="chat" inset={inset} presets={serverShortcuts.chat}
         onChange={refreshChatShortcuts} onClose={() => closeOverlay(setChatEditOpen)} />}
     </div>
   );

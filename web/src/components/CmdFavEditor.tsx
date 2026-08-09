@@ -13,6 +13,68 @@ import {
 import { XIcon, ChevronDownIcon, PlusIcon, CheckIcon } from './icons.jsx';
 import { t } from '../i18n';
 import { useBackButton } from '../hooks/useBackButton.js';
+import type { ModifierId } from '../keybarKeys.js';
+import type { StoredFav } from '../favStore.js';
+import type { ShortcutItem, ShortcutPreset } from '../shortcutMerge.js';
+import type { ShortcutLayout } from '../shortcutLayout.js';
+
+type EditorVariant = 'command' | 'chat';
+type ShortcutAccent = 'global' | 'win';
+type MessageKind = 'cmd' | 'reply';
+
+interface StickyOption {
+  key: string;
+  label?: string;
+  mods: Partial<Record<ModifierId, boolean>>;
+}
+
+interface DropdownOption {
+  value: string;
+  label: string;
+}
+
+interface ShortcutScope {
+  key: string;
+  title: string;
+  accent: ShortcutAccent;
+}
+
+interface CardConfig {
+  msgLabel: string;
+  placeholder: string;
+  hasEnter: boolean;
+  defaultEnter: boolean;
+  msgKind: (text: string) => MessageKind;
+}
+
+interface EditorConfig {
+  title: string;
+  scopes: ShortcutScope[];
+  card: CardConfig;
+}
+
+interface EditTarget {
+  fav: ShortcutItem;
+  scope: string;
+}
+
+interface EditorActionResult {
+  ok: boolean;
+  reason?: string;
+}
+
+interface EditorCardState {
+  edit: EditTarget | null;
+}
+
+export interface CmdFavEditorProps {
+  windowId?: string | null;
+  inset?: number;
+  variant?: EditorVariant;
+  presets?: ShortcutPreset[];
+  onChange?: () => void;
+  onClose: () => void;
+}
 
 // Two list sections — GLOBAL (grey) then THIS WINDOW (green). Add / edit both happen in ONE centred card
 // (opened by the header ＋, or by TAPPING a row to edit it), so the panel itself is just a clean, scannable
@@ -20,7 +82,7 @@ import { useBackButton } from '../hooks/useBackButton.js';
 
 // The sticky-key picker is a single-select of the common modifier combos (default: none). Each maps to the
 // {ctrl,shift,alt} shape buildChord() wants.
-const STICKY_OPTS = [
+const STICKY_OPTS: StickyOption[] = [
   { key: 'none', mods: {} },
   { key: 'ctrl', label: 'Ctrl', mods: { ctrl: true } },
   { key: 'shift', label: 'Shift', mods: { shift: true } },
@@ -28,16 +90,18 @@ const STICKY_OPTS = [
   { key: 'ctrl-shift', label: 'Ctrl+Shift', mods: { ctrl: true, shift: true } },
   { key: 'ctrl-alt', label: 'Ctrl+Alt', mods: { ctrl: true, alt: true } },
 ];
-const stickyByKey = (key) => STICKY_OPTS.find((o) => o.key === key) || STICKY_OPTS[0];
+const stickyByKey = (key: string): StickyOption => (
+  STICKY_OPTS.find((option) => option.key === key) ?? STICKY_OPTS[0]
+);
 
 // The base key is PICKED, never typed (you shouldn't have to know to type "up"/"tab"). Special keys you
 // can't type come first, then letters, then digits. Values are what buildChord() expects as its base.
-const NAMED_BASE = [
+const NAMED_BASE: [string, string][] = [
   ['Up', '↑ Up'], ['Down', '↓ Down'], ['Left', '← Left'], ['Right', '→ Right'],
   ['Tab', '⇥ Tab'], ['Enter', '⏎ Enter'], ['Escape', '⎋ Esc'], ['Space', '␣ Space'], ['BSpace', '⌫ Backspace'],
   ['Home', 'Home'], ['End', 'End'], ['PageUp', 'PgUp'], ['PageDown', 'PgDn'],
 ];
-const BASE_KEYS = [
+const BASE_KEYS: DropdownOption[] = [
   ...NAMED_BASE.map(([value, label]) => ({ value, label })),
   ...'abcdefghijklmnopqrstuvwxyz'.split('').map((c) => ({ value: c, label: c.toUpperCase() })),
   ...'0123456789'.split('').map((d) => ({ value: d, label: d })),
@@ -46,7 +110,7 @@ const BASE_KEYS = [
 // Reverse a saved key fav back into { sticky, base } so it can be re-edited. Mirrors buildChord(): C-/M-/S-
 // prefixes stack in that order; BTab is Shift+Tab; a lone uppercase letter is Shift+<char>. A single-char
 // base is lower-cased so it matches the BASE_KEYS option values.
-function parseKeyFav(fav) {
+function parseKeyFav(fav: ShortcutItem): { sticky: string; base: string } {
   let s = fav.text || '';
   if (s === 'BTab') return { sticky: 'shift', base: 'Tab' };
   let ctrl = false, alt = false, shift = false;
@@ -61,7 +125,14 @@ function parseKeyFav(fav) {
 
 // A self-contained dropdown (no native <select>): a button showing the current option's label (or a
 // placeholder), opening a floating option list closed by picking an option or tapping the scrim behind it.
-function Dropdown({ value, options, onChange, placeholder }) {
+interface DropdownProps {
+  value: string;
+  options: DropdownOption[];
+  onChange: (value: string) => void;
+  placeholder?: string;
+}
+
+function Dropdown({ value, options, onChange, placeholder }: DropdownProps) {
   const [open, setOpen] = useState(false);
   const cur = options.find((o) => o.value === value);
   useBackButton(open, () => setOpen(false));
@@ -92,7 +163,17 @@ function Dropdown({ value, options, onChange, placeholder }) {
 
 // `showTitle` is false for a lone list (chat variant) — a single sticky "常用" header is just redundant
 // chrome; command mode keeps it because it distinguishes the 全局 vs 窗口 sections.
-function List({ title, accent, items, showTitle = true, onMove, onDel, onEdit }) {
+interface ListProps {
+  title: string;
+  accent: ShortcutAccent;
+  items: ShortcutItem[];
+  showTitle?: boolean;
+  onMove: (item: ShortcutItem, direction: number) => void;
+  onDel: (item: ShortcutItem) => void;
+  onEdit: (item: ShortcutItem) => void;
+}
+
+function List({ title, accent, items, showTitle = true, onMove, onDel, onEdit }: ListProps) {
   return (
     <div className={`cmd-esection ${accent}`}>
       {showTitle && <div className={`cmd-section ${accent}`}><span className="cmd-section-name">{title}</span></div>}
@@ -125,28 +206,47 @@ function List({ title, accent, items, showTitle = true, onMove, onDel, onEdit })
 // `cfg` carries the per-variant bits (message-tab label/placeholder + whether the 直接发送 toggle applies).
 // Lives inside the .app transform that slides up by `inset` when the keyboard opens, so it adds inset/2 back
 // to re-centre in the visible area ABOVE the keyboard.
-function AddCard({ scopes, cfg, edit, inset, onAdd, onUpdate, onClose }) {
+interface AddCardProps {
+  scopes: ShortcutScope[];
+  cfg: CardConfig;
+  edit: EditTarget | null;
+  inset: number;
+  onAdd: (scope: string, fav: ShortcutItem) => EditorActionResult;
+  onUpdate: (
+    oldScope: string,
+    oldFav: ShortcutItem,
+    newScope: string,
+    fav: ShortcutItem,
+  ) => EditorActionResult;
+  onClose: () => void;
+}
+
+function AddCard({ scopes, cfg, edit, inset, onAdd, onUpdate, onClose }: AddCardProps) {
   const seedKey = edit && edit.fav.kind === 'key' ? parseKeyFav(edit.fav) : null;
-  const [tab, setTab] = useState(edit ? (edit.fav.kind === 'key' ? 'key' : 'msg') : 'msg');
+  const [tab, setTab] = useState<'key' | 'msg'>(
+    edit ? (edit.fav.kind === 'key' ? 'key' : 'msg') : 'msg',
+  );
   const [scopeKey, setScopeKey] = useState(edit ? edit.scope : scopes[0].key);
   const [text, setText] = useState(edit ? (seedKey ? seedKey.base : edit.fav.text) : '');
   const [enter, setEnter] = useState(edit && edit.fav.kind !== 'key' ? !!edit.fav.enter : !!cfg.defaultEnter);
   const [sticky, setSticky] = useState(seedKey ? seedKey.sticky : 'none');
-  const [error, setError] = useState(null);
+  const [error, setError] = useState<string | null>(null);
   // NOT auto-focused on open: focusing pops the soft keyboard, which shoves the card up before you've even
   // chosen 消息/命令 vs 按键. The user taps the field when they're ready.
   // Switching mode clears the field: a text string and a picked base key don't carry over sensibly.
-  const switchTab = (nt) => { if (nt !== tab) { setTab(nt); setText(''); setError(null); } };
+  const switchTab = (nextTab: 'key' | 'msg'): void => {
+    if (nextTab !== tab) { setTab(nextTab); setText(''); setError(null); }
+  };
   const stickyDD = STICKY_OPTS.map((o) => ({ value: o.key, label: o.label ?? t('cmd.stickyNone') }));
 
   const chord = tab === 'key' ? buildChord(stickyByKey(sticky).mods, text) : null;
   const targetScope = scopes.some((s) => s.key === scopeKey) ? scopeKey : scopes[0].key;
   const canSave = tab === 'key' ? !!chord : !!text.trim();
 
-  const submit = () => {
-    if (!canSave) return;
-    const fav = tab === 'key'
-      ? { kind: 'key', text: chord.name, label: chord.label }
+  const submit = (): void => {
+    if (!canSave || (tab === 'key' && !chord)) return;
+    const fav: ShortcutItem = tab === 'key'
+      ? { kind: 'key', text: chord!.name, label: chord!.label }
       : { kind: cfg.msgKind(text.trim()), text: text.trim(), enter };
     const result = edit
       ? onUpdate(edit.scope, edit.fav, targetScope, fav)
@@ -239,7 +339,7 @@ function AddCard({ scopes, cfg, edit, inset, onAdd, onUpdate, onClose }) {
 //  • 'chat' — agent mode: a single global list; the message tab saves a MESSAGE to the agent (kind derived
 //    from the '/' prefix, like the old FavDrawer — a slash-command is 'cmd', anything else a 'reply'); it
 //    has an explicit Enter toggle (default on to preserve the old tap-to-send behavior) and no scope picker.
-function editorConfig(variant, windowId) {
+function editorConfig(variant: EditorVariant, windowId?: string | null): EditorConfig {
   if (variant === 'chat') {
     return {
       title: t('chat.editTitle'),
@@ -249,49 +349,58 @@ function editorConfig(variant, windowId) {
         placeholder: t('chat.addPlaceholder'),
         hasEnter: true,
         defaultEnter: true,
-        msgKind: (txt) => (txt.startsWith('/') ? 'cmd' : 'reply'),
+        msgKind: (text: string) => (text.startsWith('/') ? 'cmd' : 'reply'),
       },
     };
   }
   const winScope = windowId ? cmdScope(windowId) : null;
+  const scopes: ShortcutScope[] = [
+    { key: CMD_GLOBAL, title: t('cmd.global'), accent: 'global' },
+    ...(winScope ? [{ key: winScope, title: t('cmd.window'), accent: 'win' as const }] : []),
+  ];
   return {
     title: t('cmd.editTitle'),
-    scopes: [
-      { key: CMD_GLOBAL, title: t('cmd.global'), accent: 'global' },
-      ...(winScope ? [{ key: winScope, title: t('cmd.window'), accent: 'win' }] : []),
-    ],
+    scopes,
     card: {
       msgLabel: t('cmd.tabCmd'),
       placeholder: t('cmd.addPlaceholder'),
       hasEnter: true,
       defaultEnter: false,
-      msgKind: () => 'cmd',
+      msgKind: () => 'cmd' as const,
     },
   };
 }
 
 export default function CmdFavEditor({
   windowId, inset = 0, variant = 'command', presets = [], onChange, onClose,
-}) {
+}: CmdFavEditorProps) {
   const { title, scopes, card: cardCfg } = editorConfig(variant, windowId);
-  const [items, setItems] = useState(() => Object.fromEntries(scopes.map((s) => [s.key, loadFavs(s.key)])));
-  const [card, setCard] = useState(null); // null | { edit: null } (add) | { edit: { fav, scope } }
+  const [items, setItems] = useState<Record<string, StoredFav[]>>(
+    () => Object.fromEntries(scopes.map((scope) => [scope.key, loadFavs(scope.key)])),
+  );
+  const [card, setCard] = useState<EditorCardState | null>(null);
   const layoutMode = variant === 'chat' ? 'chat' : 'command';
   const globalScope = scopes[0].key;
   const [layout, setLayout] = useState(() => loadShortcutLayout(layoutMode));
-  const [undo, setUndo] = useState(null);
+  const [undo, setUndo] = useState<{ identity: string } | null>(null);
   const [addedNotice, setAddedNotice] = useState(0);
   const mergedGlobal = applyShortcutLayout(
     mergeShortcuts(presets, items[globalScope] || [], layoutMode), layout,
   );
   const visibleGlobalIds = new Set(mergedGlobal.map(shortcutIdentity));
-  const conflictsWithEffectiveGlobal = (identity, oldScope = null, oldFav = null) =>
+  const conflictsWithEffectiveGlobal = (
+    identity: string,
+    oldScope: string | null = null,
+    oldFav: ShortcutItem | null = null,
+  ): boolean =>
     mergedGlobal.some((item) => shortcutIdentity(item) === identity
       && !(oldScope === globalScope && item.source === 'local'
-        && shortcutIdentity(item) === shortcutIdentity(oldFav)));
+        && oldFav !== null && shortcutIdentity(item) === shortcutIdentity(oldFav)));
 
-  const reloadAll = () => setItems(Object.fromEntries(scopes.map((s) => [s.key, loadFavs(s.key)])));
-  const persistLayout = (next) => {
+  const reloadAll = (): void => setItems(
+    Object.fromEntries(scopes.map((scope) => [scope.key, loadFavs(scope.key)])),
+  );
+  const persistLayout = (next: ShortcutLayout): ShortcutLayout => {
     const saved = saveShortcutLayout(layoutMode, next);
     setLayout(saved);
     onChange?.();
@@ -308,13 +417,18 @@ export default function CmdFavEditor({
     return () => clearTimeout(timer);
   }, [addedNotice]);
   useBackButton(!!card, () => setCard(null));
-  const finishAdd = () => {
+  const finishAdd = (): void => {
     reloadAll();
     setUndo(null);
     setCard(null);
     setAddedNotice((version) => version + 1);
   };
-  const doMove = (scope, item, dir, visible) => {
+  const doMove = (
+    scope: string,
+    item: ShortcutItem,
+    dir: number,
+    visible: ShortcutItem[],
+  ): void => {
     if (scope === globalScope) {
       persistLayout(moveShortcutInLayout(layout, mergedGlobal, shortcutIdentity(item), dir));
     } else {
@@ -326,7 +440,7 @@ export default function CmdFavEditor({
       onChange?.();
     }
   };
-  const doDel = (scope, item) => {
+  const doDel = (scope: string, item: ShortcutItem): void => {
     setAddedNotice(0);
     const identity = shortcutIdentity(item);
     if (item.source === 'config') {
@@ -339,12 +453,12 @@ export default function CmdFavEditor({
     else onChange?.();
     reloadAll();
   };
-  const doUndo = () => {
+  const doUndo = (): void => {
     if (!undo) return;
     persistLayout(showShortcutInLayout(layout, undo.identity));
     setUndo(null);
   };
-  const doAdd = (scope, fav) => {
+  const doAdd = (scope: string, fav: ShortcutItem): EditorActionResult => {
     const identity = shortcutIdentity(fav);
     if (conflictsWithEffectiveGlobal(identity)) return { ok: false, reason: 'conflict' };
     const exactPreset = mergeShortcuts(presets, [], layoutMode)
@@ -362,7 +476,12 @@ export default function CmdFavEditor({
     finishAdd();
     return { ok: true };
   };
-  const doUpdate = (oldScope, oldFav, newScope, fav) => {
+  const doUpdate = (
+    oldScope: string,
+    oldFav: ShortcutItem,
+    newScope: string,
+    fav: ShortcutItem,
+  ): EditorActionResult => {
     const oldIdentity = shortcutIdentity(oldFav);
     const newIdentity = shortcutIdentity(fav);
     if (conflictsWithEffectiveGlobal(newIdentity, oldScope, oldFav)) {

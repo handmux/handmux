@@ -3,11 +3,12 @@ import {
   applyShortcutLayout, hideShortcutInLayout, loadShortcutLayout, moveShortcutInLayout,
   removeShortcutFromLayout, replaceShortcutInLayout, saveShortcutLayout, showShortcutInLayout,
 } from '../src/shortcutLayout.js';
+import type { ShortcutPreset } from '../src/shortcutMerge.js';
 
-const a = { type: 'key', key: 'Escape' };
-const b = { type: 'key', key: 'C-c' };
-const c = { type: 'text', text: 'ok', enter: true };
-const id = (item) => item.type === 'key'
+const a: ShortcutPreset = { type: 'key', key: 'Escape' };
+const b: ShortcutPreset = { type: 'key', key: 'C-c' };
+const c: ShortcutPreset = { type: 'text', text: 'ok', enter: true };
+const id = (item: ShortcutPreset): string => item.type === 'key'
   ? `key:${item.key}`
   : `text:${item.text}:${item.enter ? 'enter' : 'no-enter'}`;
 

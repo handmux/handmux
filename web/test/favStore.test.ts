@@ -20,6 +20,17 @@ describe('favStore', () => {
     expect(next.at(-1)).toEqual({ kind: 'cmd', text: 'npm test', enter: false });
     expect(loadFavs('command')).toEqual(next); // persisted
   });
+  it('filters malformed v7 storage records at the localStorage boundary', () => {
+    localStorage.setItem('hm_favs7_command', JSON.stringify([
+      { kind: 'cmd', text: 'valid', enter: true },
+      { kind: 'cmd', text: 42 },
+      { kind: 'unknown', text: 'bad' },
+      null,
+    ]));
+    expect(loadFavs('command')).toEqual([
+      { kind: 'cmd', text: 'valid', enter: true },
+    ]);
+  });
   it('migrates v6 chat items to v7 with their historical tap behavior preserved', () => {
     localStorage.setItem('hm_favs6_agent', JSON.stringify([
       { kind: 'reply', text: 'ok', enter: false },
@@ -31,11 +42,21 @@ describe('favStore', () => {
       { kind: 'cmd', text: '/compact', enter: true },
       { kind: 'key', text: 'Escape', label: 'Esc' },
     ]);
-    expect(JSON.parse(localStorage.getItem('hm_favs7_agent'))).toEqual(loadFavs('agent'));
+    expect(JSON.parse(localStorage.getItem('hm_favs7_agent')!)).toEqual(loadFavs('agent'));
+  });
+  it('infers the kind for earliest v6 text-only chat records', () => {
+    localStorage.setItem('hm_favs6_agent', JSON.stringify([
+      { text: '继续' },
+      { text: '/compact' },
+    ]));
+    expect(loadFavs('agent')).toEqual([
+      { kind: 'reply', text: '继续', enter: true },
+      { kind: 'cmd', text: '/compact', enter: true },
+    ]);
   });
   it('addFav carries the enter flag (a with-Enter command runs on tap)', () => {
     const next = addFav('command', { kind: 'cmd', text: 'make', enter: true });
-    expect(next.at(-1).enter).toBe(true);
+    expect(next.at(-1)?.enter).toBe(true);
   });
   it('moveFav swaps an item with its neighbour; no-op at the ends', () => {
     saveFavs('command', [{ kind: 'cmd', text: 'a' }, { kind: 'cmd', text: 'b' }, { kind: 'cmd', text: 'c' }]);

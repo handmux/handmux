@@ -3,17 +3,39 @@ import { loadFavs, addFav, removeFav } from '../favStore.js';
 import { XIcon, CopyIcon } from './icons.jsx';
 import { t } from '../i18n';
 
-const copyText = (text) => { try { navigator.clipboard?.writeText(text); } catch { /* clipboard blocked */ } };
+export interface FavDrawerProps {
+  open: boolean;
+  mode: 'command' | 'agent';
+  recent?: string[];
+  onSend: (text: string) => void;
+  onFill: (text: string) => void;
+  onClose: () => void;
+  onDelete?: (text: string) => void;
+  historyOnly?: boolean;
+}
+
+const copyText = (text: string): void => {
+  try { void navigator.clipboard?.writeText(text); } catch { /* clipboard blocked */ }
+};
 
 // Bottom drawer. Two shapes:
 //  • default — the 常用 editor for the current mode (reply chips + command rows + add/delete).
 //  • historyOnly — REAL history: just the list of things sent through the composer (recent), tap to
 //    re-send / double-tap to fill. No 常用 (those live in the chat page's quick-command strip now).
-export default function FavDrawer({ open, mode, recent = [], onSend, onFill, onClose, onDelete, historyOnly = false }) {
+export default function FavDrawer({
+  open,
+  mode,
+  recent = [],
+  onSend,
+  onFill,
+  onClose,
+  onDelete,
+  historyOnly = false,
+}: FavDrawerProps) {
   const [items, setItems] = useState(() => loadFavs(mode));
   // Uncontrolled adder: read the field via a ref so the value survives a raw programmatic set (React's
   // controlled value-tracker would otherwise swallow synthetic input events).
-  const inputRef = useRef(null);
+  const inputRef = useRef<HTMLInputElement>(null);
   // Reload when the mode changes (drawer is remounted per open in BottomDock, but guard anyway).
   const [seenMode, setSeenMode] = useState(mode);
   if (seenMode !== mode) { setSeenMode(mode); setItems(loadFavs(mode)); }
@@ -28,7 +50,7 @@ export default function FavDrawer({ open, mode, recent = [], onSend, onFill, onC
     setItems(addFav(mode, { kind, text }));
     if (inputRef.current) inputRef.current.value = '';
   };
-  const del = (text) => setItems(removeFav(mode, text));
+  const del = (text: string): void => setItems(removeFav(mode, text));
 
   return (
     <>
