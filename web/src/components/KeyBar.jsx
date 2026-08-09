@@ -5,10 +5,10 @@ import {
 } from '../keybarKeys.js';
 import { createRepeater } from '../repeat.js';
 
-// Friendly screen-reader names for the symbol / arrow keys (their visible label is just a glyph like ▲ ~ /).
+// Friendly screen-reader names for the symbol / arrow keys (their visible label is just a glyph like ▲ /).
 const KEY_ARIA = {
   up: 'Up', down: 'Down', left: 'Left', right: 'Right',
-  tilde: 'Tilde', slash: 'Slash', at: 'At', del: 'Backspace',
+  slash: 'Slash', at: 'At', del: 'Backspace',
 };
 
 // In command mode the hidden capture <input> holds the system keyboard open. A <button> tap would move
@@ -21,8 +21,8 @@ const keepFocus = (e) => { if (e.cancelable) e.preventDefault(); };
 // a real swipe moves past the 8px gate well inside this window and cancels the repeat.
 const HOLD_MS = 500;
 
-// The command keyboard: a fixed 2×7 grid (never scrolls). Row 1: Esc/Tab, the ~ / @ symbols and ⌫;
-// row 2: the sticky Ctrl/Shift/Alt modifiers, then the inverted-T arrows (▲ over ◀ ▼ ▶) left of Enter.
+// The command keyboard: a fixed 2×7 grid (never scrolls). Row 1 puts Alt beside Esc/Tab, followed by
+// /, ▲, @ and ⌫; row 2 has Ctrl/Shift/Space, then the inverted-T arrows (▲ over ◀ ▼ ▶) left of Enter.
 // The ⌨ keyboard-toggle and the user's saved commands live in the quick-bar ABOVE this grid (BottomDock).
 // Named keys go out via onKey (→ /keys), literals via onText (→ /send). `mods` is controlled (lifted to
 // BottomDock so the hidden capture input can share it).

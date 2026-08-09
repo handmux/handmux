@@ -26,27 +26,33 @@ const clickAt = (node, ts) => act(() => {
 });
 
 describe('KeyBar command grid', () => {
-  it('renders the 2×7 grid (Esc/Tab, ~ / @, ⌫, modifiers, inverted-T arrows, Enter)', () => {
+  it('renders Alt above Space in the 2×7 command grid', () => {
     render();
-    for (const id of ['esc', 'tab', 'tilde', 'slash', 'at', 'del', 'enter',
+    for (const id of ['esc', 'tab', 'space', 'slash', 'at', 'del', 'enter',
       'up', 'down', 'left', 'right', 'ctrl', 'shift', 'alt']) {
       expect(btn(id)).not.toBeNull();
     }
+    expect(btn('tilde')).toBeNull();
+    const ids = [...container.querySelectorAll('.keybar-key')].map((node) => node.dataset.key);
+    expect(ids.slice(0, 3)).toEqual(['esc', 'tab', 'alt']);
+    expect(ids.slice(7, 10)).toEqual(['ctrl', 'shift', 'space']);
     // The ⌨ toggle, 常用 opener, and the buried shell symbols are gone from the grid.
     for (const id of ['kbd', 'fav', 'pipe', 'dash', 'under', 'bslash', 'gt', 'lt']) expect(btn(id)).toBeNull();
   });
 
-  it('a named key calls onKey, a symbol calls onText, enter/⌫ map correctly', () => {
+  it('a named key calls onKey, a symbol calls onText, Space/enter/⌫ map correctly', () => {
     const onKey = vi.fn(), onText = vi.fn();
     render({ onKey, onText });
     fire(btn('esc'), 'click');
     fire(btn('slash'), 'click');
     fire(btn('at'), 'click');
+    fire(btn('space'), 'click');
     fire(btn('enter'), 'click');
     fire(btn('del'), 'pointerdown'); fire(btn('del'), 'pointerup'); // ⌫ is a repeat key
     expect(onKey).toHaveBeenCalledWith('Escape');
     expect(onText).toHaveBeenCalledWith('/');
     expect(onText).toHaveBeenCalledWith('@');
+    expect(onKey).toHaveBeenCalledWith('Space');
     expect(onKey).toHaveBeenCalledWith('Enter');
     expect(onKey).toHaveBeenCalledWith('BSpace');
   });

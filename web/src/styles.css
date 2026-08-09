@@ -817,8 +817,8 @@ div.workspace-restore-errors { padding-left: 10px; }
 .bottom-dock.desktop-unified .dock-track > .dock-page.chat { flex-basis: 100%; width: 100%; }
 .dock-page.command { position: relative; } /* anchors the hidden .cmd-capture */
 /* Command keyboard: a fixed 2×7 grid, never scrolls. Equal columns keep the arrows aligned as an
-   inverted-T (▲ directly above ▼) left of Enter; ⌫/enter are direct keys; Ctrl/Shift/Alt are sticky
-   modifiers. The ⌨ keyboard-toggle + the saved-command strip live in the .quick-bar above this grid. */
+   inverted-T (▲ directly above ▼) left of Enter; Alt sits in the top row, while its former bottom-row
+   slot is a direct Space key. The ⌨ keyboard-toggle + saved commands live in the quick bar above. */
 .keybar-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; min-width: 0; }
 .keybar-key {
   min-width: 0; min-height: 40px; padding: 0 2px;

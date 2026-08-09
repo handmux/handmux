@@ -38,14 +38,17 @@ describe('command grid layout', () => {
     expect(COMMAND_ROWS[1][6]).toBe('enter');
   });
 
-  it('puts the sticky modifiers together on the second row', () => {
-    expect(COMMAND_ROWS[1].slice(0, 3)).toEqual(['ctrl', 'shift', 'alt']);
+  it('puts Alt in the former tilde slot and Space in the former Alt slot', () => {
+    expect(COMMAND_ROWS[0].slice(0, 3)).toEqual(['esc', 'tab', 'alt']);
+    expect(COMMAND_ROWS[1].slice(0, 3)).toEqual(['ctrl', 'shift', 'space']);
   });
 
-  it('keeps only the ~ / @ symbols (the buried ones are gone)', () => {
+  it('keeps only the / and @ symbols (tilde and the buried ones are gone)', () => {
     const ids = COMMAND_ROWS.flat();
-    for (const s of ['tilde', 'slash', 'at']) expect(ids).toContain(s);
-    for (const gone of ['pipe', 'dash', 'under', 'bslash', 'gt', 'lt']) expect(ids).not.toContain(gone);
+    for (const s of ['slash', 'at']) expect(ids).toContain(s);
+    for (const gone of ['tilde', 'pipe', 'dash', 'under', 'bslash', 'gt', 'lt']) {
+      expect(ids).not.toContain(gone);
+    }
   });
 
   it('places the arrows as an inverted-T just left of Enter (▲ over ◀ ▼ ▶)', () => {
@@ -68,19 +71,20 @@ describe('command grid layout', () => {
 });
 
 describe('keyAction', () => {
-  it('maps named keys, symbols, and Enter/Backspace', () => {
+  it('maps named keys, symbols, Space, and Enter/Backspace', () => {
     expect(keyAction('esc')).toEqual({ kind: 'key', name: 'Escape' });
     expect(keyAction('tab')).toEqual({ kind: 'key', name: 'Tab' });
     expect(keyAction('up')).toEqual({ kind: 'key', name: 'Up' });
     expect(keyAction('enter')).toEqual({ kind: 'key', name: 'Enter' });
     expect(keyAction('del')).toEqual({ kind: 'key', name: 'BSpace' });
+    expect(keyAction('space')).toEqual({ kind: 'key', name: 'Space' });
     expect(keyAction('slash')).toEqual({ kind: 'text', ch: '/' });
-    expect(keyAction('tilde')).toEqual({ kind: 'text', ch: '~' });
     expect(keyAction('at')).toEqual({ kind: 'text', ch: '@' });
   });
   it('returns null for control ids, modifier ids, removed symbols, and unknowns', () => {
     expect(keyAction('kbd')).toBe(null);
     expect(keyAction('ctrl')).toBe(null);
+    expect(keyAction('tilde')).toBe(null); // removed from the grid
     expect(keyAction('pipe')).toBe(null); // removed
     expect(keyAction('nope')).toBe(null);
   });
