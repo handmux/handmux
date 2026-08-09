@@ -11,15 +11,15 @@
 // matrix[r][c] === true means a DARK module. renderCompactQr is pure (no I/O) so it's unit-tested; the CLI
 // builds the matrix from qrcode-terminal's QR model and hands it here.
 
-export function renderCompactQr(matrix, { quiet = 2 } = {}) {
+export function renderCompactQr(matrix: readonly (readonly boolean[])[], { quiet = 2 }: { quiet?: number } = {}): string {
   const n = matrix.length;
   const side = n + quiet * 2;
   // A module is LIGHT when it's outside the code (quiet zone, incl. a dangling final half-row) or the matrix
   // cell is not dark.
-  const light = (r, c) => {
+  const light = (r: number, c: number): boolean => {
     const mr = r - quiet, mc = c - quiet;
     if (mr < 0 || mr >= n || mc < 0 || mc >= n) return true;
-    return !matrix[mr][mc];
+    return !(matrix[mr]?.[mc] ?? false);
   };
   let out = '';
   for (let r = 0; r < side; r += 2) {

@@ -24,7 +24,7 @@ describe('renderCompactQr (half-block, square)', () => {
       Array.from({ length: n }, (_, c) => (r + c) % 2 === 0));
     const lines = renderCompactQr(matrix).split('\n').filter(Boolean);
     const side = n + 4; // quiet:2 default
-    expect([...lines[0]].length).toBe(side);          // one char per module across → full width
+    expect([...(lines[0] ?? '')].length).toBe(side);  // one char per module across → full width
     expect(lines.length).toBe(Math.ceil(side / 2));   // two module-rows packed per line
     for (const line of lines) for (const ch of line) expect(GLYPHS.has(ch)).toBe(true);
   });
