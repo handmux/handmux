@@ -16,7 +16,7 @@ describe('capture background restoration', () => {
   });
 
   it('keeps a Codex padding row when its isolated tmux row has a real background', async () => {
-    const readRow = vi.fn(async () => '\x1b[48;2;59;64;75m        \n');
+    const readRow = vi.fn(async (_row: number): Promise<string> => '\x1b[48;2;59;64;75m        \n');
     const restored = await restoreCaptureBackgrounds(
       '\x1b[48;2;59;64;75m        \ntext\n        \n\x1b[49mplain\n',
       4,
@@ -28,7 +28,7 @@ describe('capture background restoration', () => {
   });
 
   it('closes a Claude background before a blank row that tmux reports as default', async () => {
-    const readRow = vi.fn(async () => '        \n');
+    const readRow = vi.fn(async (_row: number): Promise<string> => '        \n');
     const restored = await restoreCaptureBackgrounds(
       '\x1b[48;5;237m❯ hi   \n        \n\x1b[49mreply\n',
       3,
@@ -40,7 +40,7 @@ describe('capture background restoration', () => {
   });
 
   it('maps captured scrollback indexes back to tmux negative row coordinates', async () => {
-    const readRow = vi.fn(async () => '        \n');
+    const readRow = vi.fn(async (_row: number): Promise<string> => '        \n');
     await restoreCaptureBackgrounds(
       'old\n\x1b[48;5;237m❯ hi\n        \n\x1b[49mreply\n',
       2,

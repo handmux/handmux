@@ -1,14 +1,14 @@
 const CSI = /\x1b\[([0-9;]*)m/g;
 const ANSI = /\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1b\\))/g;
 
-function backgroundAfter(line, initial) {
+function backgroundAfter(line: string, initial: boolean): boolean {
   let background = initial;
   const sgr = new RegExp(CSI.source, 'g');
   let match = sgr.exec(line);
   while (match) {
     const params = match[1] === '' ? [0] : match[1].split(';').map(Number);
     for (let i = 0; i < params.length; i += 1) {
-      const value = params[i];
+      const value = params[i] ?? 0;
       if (value === 0 || value === 49) background = false;
       else if ((value >= 40 && value <= 47) || (value >= 100 && value <= 107)) background = true;
       else if (value === 38 || value === 48) {
@@ -27,7 +27,7 @@ function backgroundAfter(line, initial) {
   return background;
 }
 
-function paintsBackground(line) {
+function paintsBackground(line: string): boolean {
   let background = false;
   let offset = 0;
   const sgr = new RegExp(CSI.source, 'g');
@@ -41,18 +41,18 @@ function paintsBackground(line) {
   return background && offset < line.length;
 }
 
-const isBlank = (line) => line.replace(ANSI, '').trim() === '';
+const isBlank = (line: string): boolean => line.replace(ANSI, '').trim() === '';
 
 // `capture-pane -e -N` compresses SGR state across newlines. A default blank row after a shaded
 // row (Claude) and a genuinely shaded padding row (Codex) therefore look identical in the combined
 // capture. Capturing just that row makes tmux emit the row's real starting attributes. Only those
 // ambiguous rows need the extra read; ordinary rows keep the single fast combined capture.
-export function ambiguousBackgroundRows(lines) {
-  const indexes = [];
+export function ambiguousBackgroundRows(lines: readonly string[]): number[] {
+  const indexes: number[] = [];
   let background = false;
   let inBlankRun = false;
   for (let index = 0; index < lines.length; index += 1) {
-    const line = lines[index];
+    const line = lines[index] ?? '';
     const ambiguous = background && isBlank(line);
     // One row resolves the whole trailing run: default closes it before the first LF; shaded is the
     // one real padding row the client preserves and seals before clearing any additional blanks.
@@ -63,7 +63,11 @@ export function ambiguousBackgroundRows(lines) {
   return indexes;
 }
 
-export async function restoreBlankRowBackgrounds(lines, historyLines, readRow) {
+export async function restoreBlankRowBackgrounds(
+  lines: readonly string[],
+  historyLines: number,
+  readRow: (row: number) => Promise<string>,
+): Promise<string[]> {
   const restored = [...lines];
   const indexes = ambiguousBackgroundRows(lines);
   await Promise.all(indexes.map(async (index) => {
@@ -77,7 +81,16 @@ export async function restoreBlankRowBackgrounds(lines, historyLines, readRow) {
   return restored;
 }
 
-export async function restoreCaptureBackgrounds(capture, paneHeight, readRow) {
+export interface RestoredCapture {
+  ansi: string;
+  historyLines: number;
+}
+
+export async function restoreCaptureBackgrounds(
+  capture: string,
+  paneHeight: number,
+  readRow: (row: number) => Promise<string>,
+): Promise<RestoredCapture> {
   const trailingNewline = capture.endsWith('\n');
   const body = trailingNewline ? capture.slice(0, -1) : capture;
   const lines = body.split('\n');
