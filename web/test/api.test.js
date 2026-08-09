@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { getHistory, getPanes, createSession, createWindow, renameSession, renameWindow, deleteWindow, swapWindows, createDir, UnauthorizedError, ApiError, fetchDoc, fetchDir, fetchTranscript, signAsr, sendInput, parseSseFrames, streamCodexMessages, sendCodexMessage } from '../src/api.js';
+import { getHistory, getPanes, createSession, createWindow, renameSession, renameWindow, deleteWindow, swapWindows, createDir, UnauthorizedError, ApiError, fetchDoc, fetchDir, fetchTranscript, signAsr, sendInput, parseSseFrames, streamCodexMessages, getCodexSession, sendCodexMessage } from '../src/api.js';
 import { createPreview, getPreviews, deletePreview, previewUrl, fetchImageUrl } from '../src/api.js';
 
 afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); vi.useRealTimers(); });
@@ -94,15 +94,38 @@ describe('api request timeout', () => {
   });
 
   it('sends the stable Codex request id used to reconcile an uncertain response', async () => {
-    const fetchMock = vi.fn(async () => jsonRes(200, { queued: true }));
+    const item = {
+      id: 'queued-1', text: 'next turn', createdAt: 10, requestId: 'codex-send-request-1',
+    };
+    const fetchMock = vi.fn(async () => jsonRes(200, { queued: true, item }));
     vi.stubGlobal('fetch', fetchMock);
 
-    await sendCodexMessage('%1', 'next turn', 'codex-send-request-1');
+    await expect(sendCodexMessage('%1', 'next turn', 'codex-send-request-1'))
+      .resolves.toEqual({ queued: true, item });
 
     expect(fetchMock).toHaveBeenCalledWith('/api/codex/send', expect.objectContaining({
       method: 'POST',
       body: JSON.stringify({ pane: '%1', text: 'next turn', requestId: 'codex-send-request-1' }),
     }));
+  });
+
+  it('rejects a malformed Codex send acknowledgement', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => jsonRes(200, {
+      queued: true, item: { id: 'queued-1', text: 'next turn', createdAt: '10' },
+    })));
+
+    await expect(sendCodexMessage('%1', 'next turn'))
+      .rejects.toThrow('Codex send returned an invalid response');
+  });
+
+  it('keeps only valid durable queue items in the Codex session projection', async () => {
+    const item = { id: 'queued-1', text: 'next turn', createdAt: 10 };
+    vi.stubGlobal('fetch', vi.fn(async () => jsonRes(200, {
+      threadId: 'thread-1',
+      queue: [item, { id: 'broken', text: 'bad', createdAt: '10' }],
+    })));
+
+    await expect(getCodexSession('%1')).resolves.toMatchObject({ queue: [item] });
   });
 
   it('still maps 401 to UnauthorizedError', async () => {

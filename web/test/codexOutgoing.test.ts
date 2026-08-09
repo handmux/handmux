@@ -5,6 +5,7 @@ import type { CodexOutgoingItem, CodexOutgoingSource } from '../src/codexOutgoin
 const outgoing = (source: CodexOutgoingSource = 'queue'): CodexOutgoingItem[] => [{
   id: 'request-1', paneId: '%1', text: 'continue', source, status: 'sending',
 }];
+const queueItem = { id: 'queued-1', text: 'continue', createdAt: 10 };
 
 describe('Codex outgoing reconciliation', () => {
   it('removes a queue placeholder when its request is no longer pending, even if delivery is ambiguous', () => {
@@ -21,13 +22,13 @@ describe('Codex outgoing reconciliation', () => {
 
   it('hands an acknowledged queue send to the exact server queue item', () => {
     expect(settleCodexOutgoing(outgoing(), 'request-1', {
-      result: { queued: true, item: { id: 'queued-1' } },
+      result: { queued: true, item: queueItem },
     })[0]).toMatchObject({ status: 'queued', queueId: 'queued-1' });
   });
 
   it('lets an authoritative queued response override the clients stale idle prediction', () => {
     expect(settleCodexOutgoing(outgoing('send'), 'request-1', {
-      result: { queued: true, item: { id: 'queued-1' } },
+      result: { queued: true, item: queueItem },
     })[0]).toMatchObject({ source: 'queue', status: 'queued', queueId: 'queued-1' });
   });
 

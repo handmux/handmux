@@ -1,3 +1,5 @@
+import type { CodexSendResult } from '../../server/src/codexQueueProtocol.js';
+
 export type CodexOutgoingSource = 'send' | 'queue' | 'steer';
 
 export type CodexOutgoingStatus = 'sending' | 'queued' | 'accepted' | 'steered';
@@ -9,12 +11,6 @@ export interface CodexOutgoingItem {
   source: CodexOutgoingSource;
   status: CodexOutgoingStatus;
   queueId?: string | null;
-}
-
-export interface CodexSendResult {
-  queued?: boolean;
-  item?: { id?: string | null } | null;
-  turn?: { id?: string | null } | null;
 }
 
 export interface CodexOutgoingSettlement {

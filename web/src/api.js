@@ -4,6 +4,7 @@ import { t } from './i18n';
 import { ApiError, UnauthorizedError, parseApiErrorBody } from './apiErrors.js';
 import { parseCodexStreamEvent } from '../../server/src/codexStreamProtocol.js';
 import { parseCodexToolProjection } from '../../server/src/codexToolProtocol.js';
+import { parseCodexQueueItem, parseCodexSendResult } from '../../server/src/codexQueueProtocol.js';
 
 export { ApiError, UnauthorizedError } from './apiErrors.js';
 
@@ -87,7 +88,10 @@ export const getPaneContext = (pane, agent = 'claude') =>
 export const getPendingPrompt = (pane, agent = 'claude') =>
   req(`/api/pending-prompt?pane=${encodeURIComponent(pane)}&agent=${encodeURIComponent(agent)}`, { timeoutMs: 8000 }).then((r) => r.prompt || null);
 export const getCodexSession = (pane) =>
-  req(`/api/codex/session?pane=${encodeURIComponent(pane)}`, { timeoutMs: 8000 });
+  req(`/api/codex/session?pane=${encodeURIComponent(pane)}`, { timeoutMs: 8000 }).then((session) => {
+    if (!Array.isArray(session?.queue)) return session;
+    return { ...session, queue: session.queue.map(parseCodexQueueItem).filter(Boolean) };
+  });
 export function parseSseFrames(buffer) {
   const frames = [];
   let rest = String(buffer || '');
@@ -159,6 +163,10 @@ export const takeoverCodexSession = (pane) =>
 export const sendCodexMessage = (pane, text, requestId = null) =>
   req('/api/codex/send', {
     method: 'POST', body: JSON.stringify({ pane, text, ...(requestId ? { requestId } : {}) }), timeoutMs: 8000,
+  }).then((result) => {
+    const parsed = parseCodexSendResult(result);
+    if (!parsed) throw new Error('Codex send returned an invalid response');
+    return parsed;
   });
 export const steerCodexQueuedMessage = (pane, id) =>
   req('/api/codex/queue/steer', { method: 'POST', body: JSON.stringify({ pane, id }), timeoutMs: 8000 });
