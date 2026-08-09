@@ -1,20 +1,35 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest';
-import headless from '@xterm/headless';
+import { Terminal } from '@xterm/headless';
 import { SerializeAddon } from '@xterm/addon-serialize';
-import { createTerminalStreamMirror } from '../src/terminalStreamMirror.js';
+import {
+  createTerminalStreamMirror,
+  type TerminalStreamMirror,
+  type TerminalStreamSnapshot,
+} from '../src/terminalStreamMirror.js';
 import { cursorSeq } from '../src/terminalSeed.js';
 
-const { Terminal } = headless;
-const write = (term, data) => new Promise((resolve) => term.write(data, resolve));
-const textAt = (term, line) => term.buffer.active.getLine(line)?.translateToString(true).trimEnd();
-const visibleText = (term) => {
+const encoder = new TextEncoder();
+const bytes = (data: string): Uint8Array => encoder.encode(data);
+const write = (term: Terminal, data: string | Uint8Array): Promise<void> => (
+  new Promise((resolve) => term.write(data, resolve))
+);
+const textAt = (term: Terminal, line: number): string | undefined => (
+  term.buffer.active.getLine(line)?.translateToString(true).trimEnd()
+);
+const visibleText = (term: Terminal): Array<string | undefined> => {
   const buffer = term.buffer.active;
   return Array.from({ length: term.rows }, (_, row) => textAt(term, buffer.viewportY + row));
 };
-const shadedAt = (term, line, col = 0) => {
+const shadedAt = (term: Terminal, line: number, col = 0): boolean => {
   const cell = term.buffer.active.getLine(line)?.getCell(col);
   return !!(cell && (cell.getBgColorMode() !== 0 || cell.isInverse()));
+};
+
+const snapshot = (mirror: TerminalStreamMirror): TerminalStreamSnapshot => {
+  const frame = mirror.snapshot();
+  if (!frame) throw new Error('terminal stream mirror is not ready');
+  return frame;
 };
 
 const create = () => createTerminalStreamMirror({
@@ -56,9 +71,9 @@ describe('terminal stream mirror', () => {
     });
     await mirror.ready({ row: 1, col: 2, vis: true });
     // CUP is interpreted by the exact 3-row parser, not by the taller visible terminal.
-    await mirror.data(new Uint8Array(Buffer.from('\x1b[3;5H!')));
+    await mirror.data(bytes('\x1b[3;5H!'));
 
-    const frame = mirror.snapshot();
+    const frame = snapshot(mirror);
     const visible = new Terminal({ cols: 12, rows: 6, allowProposedApi: true, scrollback: 100 });
     const pad = '\r\n'.repeat(visible.rows - frame.bufferRows);
     await write(
@@ -96,7 +111,7 @@ describe('terminal stream mirror', () => {
     });
     await mirror.ready({ row: 0, col: 6, vis: true });
 
-    const frame = mirror.snapshot();
+    const frame = snapshot(mirror);
     expect(frame.bufferRows).toBe(103);
     expect(frame.boundaryLine).toBe(100);
     expect(frame.ansi).not.toContain('history-000');
@@ -128,12 +143,12 @@ describe('terminal stream mirror', () => {
       ).join('\n') + '\n';
       // Simulate a busy pane arriving in network-sized chunks, with a repaint candidate per batch.
       // eslint-disable-next-line no-await-in-loop
-      await mirror.data(new Uint8Array(Buffer.from(output)));
-      const frame = mirror.snapshot();
+      await mirror.data(bytes(output));
+      const frame = snapshot(mirror);
       expect(frame.bufferRows).toBeLessThanOrEqual(124);
     }
 
-    const frame = mirror.snapshot();
+    const frame = snapshot(mirror);
     expect(frame.ansi).not.toContain('load-00000');
     expect(frame.ansi).toContain('load-19999');
     expect(frame.bufferRows).toBeLessThanOrEqual(124);
@@ -157,7 +172,7 @@ describe('terminal stream mirror', () => {
     });
     await mirror.ready({ row: 59, col: 6, vis: true });
 
-    const frame = mirror.snapshot();
+    const frame = snapshot(mirror);
     expect(frame).toMatchObject({
       bufferRows: 104,
       boundaryLine: 100,
@@ -180,9 +195,10 @@ describe('terminal stream mirror', () => {
 
     // A later pane-addressed write still targets row 60 in the untouched hidden parser. If the seed
     // itself had been trimmed, this would overwrite the wrong row instead of expanding the projection.
-    await mirror.data(new Uint8Array(Buffer.from('\x1b[60;1Hbottom')));
-    expect(mirror.snapshot()).toMatchObject({ bufferRows: 160, cur: null });
-    expect(mirror.snapshot().ansi).toContain('bottom');
+    await mirror.data(bytes('\x1b[60;1Hbottom'));
+    const expanded = snapshot(mirror);
+    expect(expanded).toMatchObject({ bufferRows: 160, cur: null });
+    expect(expanded.ansi).toContain('bottom');
     visible.dispose();
     tallVisible.dispose();
     mirror.dispose();
@@ -205,7 +221,7 @@ describe('terminal stream mirror', () => {
     });
     await mirror.ready({ row: 59, col: 6, vis: true });
 
-    const frame = mirror.snapshot();
+    const frame = snapshot(mirror);
     expect(frame).toMatchObject({ bufferRows: 58, cur: { row: 57, col: 6, vis: true } });
     const visible = new Terminal({ cols: 10, rows: 60, allowProposedApi: true, scrollback: 100 });
     await write(visible, frame.ansi);
@@ -224,9 +240,9 @@ describe('terminal stream mirror', () => {
       mouseAware: false,
     });
     await mirror.ready({ row: 0, col: 0, vis: true });
-    await mirror.data(new Uint8Array(Buffer.from('\x1b[?25l\x1b[?1000h\x1b[?1049h\x1b[Happ')));
+    await mirror.data(bytes('\x1b[?25l\x1b[?1000h\x1b[?1049h\x1b[Happ'));
 
-    const frame = mirror.snapshot();
+    const frame = snapshot(mirror);
     expect(frame.alt).toBe(true);
     expect(frame.cursorVisible).toBe(false);
     expect(frame.mouseAware).toBe(true);
@@ -244,7 +260,7 @@ describe('terminal stream mirror', () => {
       mouseAware: false,
     });
     await mirror.ready({ row: 0, col: 3, vis: true });
-    const frame = mirror.snapshot();
+    const frame = snapshot(mirror);
     const visible = new Terminal({ cols: 10, rows: 6, allowProposedApi: true, scrollback: 100 });
     const pad = '\r\n'.repeat(visible.rows - frame.bufferRows);
     await write(visible, `\x1b[2J\x1b[3J\x1b[H${pad}${frame.ansi}`);
@@ -269,7 +285,7 @@ describe('terminal stream mirror', () => {
     await reused.seed(frame);
     await reused.ready({ row: 3, col: 2, vis: true });
     // Full-screen terminal applications can leave private modes and scroll margins active.
-    await reused.data(new Uint8Array(Buffer.from('\x1b[2;3r\x1b[?6h\x1b[2;1Hdirty')));
+    await reused.data(bytes('\x1b[2;3r\x1b[?6h\x1b[2;1Hdirty'));
     await reused.seed(frame);
     await reused.ready({ row: 3, col: 2, vis: true });
 
@@ -277,10 +293,11 @@ describe('terminal stream mirror', () => {
     await fresh.seed(frame);
     await fresh.ready({ row: 3, col: 2, vis: true });
 
-    expect(reused.snapshot()).toMatchObject({
-      ansi: fresh.snapshot().ansi,
-      boundaryLine: fresh.snapshot().boundaryLine,
-      bufferRows: fresh.snapshot().bufferRows,
+    const freshFrame = snapshot(fresh);
+    expect(snapshot(reused)).toMatchObject({
+      ansi: freshFrame.ansi,
+      boundaryLine: freshFrame.boundaryLine,
+      bufferRows: freshFrame.bufferRows,
     });
     reused.dispose();
     fresh.dispose();

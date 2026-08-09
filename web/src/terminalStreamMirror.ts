@@ -1,13 +1,108 @@
 import { Terminal as XTerm } from '@xterm/xterm';
 import { SerializeAddon } from '@xterm/addon-serialize';
 import { cursorSeq, prepareLiveSeed } from './terminalSeed.js';
+import type { TerminalCursor } from './terminalViewport.js';
 
 const DEFAULT_RENDER_SCROLLBACK = 100;
 const MAX_TRAILING_BLANK_ROWS = 3;
 
-const write = (term, data) => new Promise((resolve) => term.write(data, resolve));
+interface MirrorBufferCell {
+  getChars(): string;
+  isAttributeDefault(): boolean;
+}
 
-function cursorVisibility(data, previous) {
+interface MirrorBufferLine {
+  getCell(column: number): MirrorBufferCell | undefined;
+}
+
+interface MirrorBuffer {
+  readonly type: 'normal' | 'alternate';
+  readonly length: number;
+  readonly baseY: number;
+  readonly cursorY: number;
+  readonly cursorX: number;
+  getLine(line: number): MirrorBufferLine | undefined;
+}
+
+interface MirrorTerminal {
+  readonly cols: number;
+  readonly rows: number;
+  readonly buffer: { readonly active: MirrorBuffer; readonly normal: MirrorBuffer };
+  readonly modes?: { readonly mouseTrackingMode?: string };
+  loadAddon(addon: unknown): void;
+  resize(columns: number, rows: number): void;
+  write(data: string | Uint8Array, callback?: () => void): void;
+  dispose(): void;
+}
+
+interface MirrorTerminalConstructor {
+  new(options?: { allowProposedApi?: boolean; scrollback?: number; convertEol?: boolean }): MirrorTerminal;
+}
+
+interface MirrorSerializer {
+  serialize(options?: {
+    excludeModes?: boolean;
+    scrollback?: number;
+    range?: { start: number; end: number };
+  }): string;
+}
+
+interface MirrorSerializerConstructor {
+  new(): MirrorSerializer;
+}
+
+interface CursorVisibilityState {
+  visible: boolean;
+  tail: string;
+}
+
+interface MouseTrackingState {
+  active: boolean;
+  tail: string;
+}
+
+export interface TerminalStreamSeedFrame {
+  ansi: string;
+  width: number;
+  height: number;
+  alt: boolean;
+  mouseAware?: boolean;
+}
+
+export interface TerminalStreamSnapshot {
+  revision: number;
+  ansi: string;
+  cur: TerminalCursor | null;
+  cursorVisible: boolean;
+  alt: boolean;
+  mouseAware: boolean;
+  boundaryLine: number | null;
+  bufferRows: number;
+  paneRows: number;
+  paneCols: number;
+}
+
+export interface TerminalStreamMirror {
+  seed(frame: TerminalStreamSeedFrame): Promise<void>;
+  data(bytes: Uint8Array): Promise<void>;
+  ready(cur: TerminalCursor | null | undefined): Promise<void>;
+  snapshot(): TerminalStreamSnapshot | null;
+  readonly revision: number;
+  dispose(): void;
+}
+
+export interface TerminalStreamMirrorOptions {
+  scrollback?: number;
+  renderScrollback?: number;
+  TerminalCtor?: MirrorTerminalConstructor;
+  SerializeAddonCtor?: MirrorSerializerConstructor;
+}
+
+const write = (term: MirrorTerminal, data: string | Uint8Array): Promise<void> => (
+  new Promise((resolve) => term.write(data, resolve))
+);
+
+function cursorVisibility(data: Uint8Array, previous: CursorVisibilityState): CursorVisibilityState {
   let ascii = previous.tail;
   for (const byte of data) ascii += byte < 0x80 ? String.fromCharCode(byte) : ' ';
   let visible = previous.visible;
@@ -15,7 +110,7 @@ function cursorVisibility(data, previous) {
   return { visible, tail: ascii.slice(-8) };
 }
 
-function mouseTracking(data, previous) {
+function mouseTracking(data: Uint8Array, previous: MouseTrackingState): MouseTrackingState {
   let ascii = previous.tail;
   for (const byte of data) ascii += byte < 0x80 ? String.fromCharCode(byte) : ' ';
   let active = previous.active;
@@ -25,7 +120,7 @@ function mouseTracking(data, previous) {
   return { active, tail: ascii.slice(-12) };
 }
 
-function isDefaultBlankLine(line, cols) {
+function isDefaultBlankLine(line: MirrorBufferLine | undefined, cols: number): boolean {
   if (!line) return true;
   for (let col = 0; col < cols; col += 1) {
     const cell = line.getCell(col);
@@ -36,7 +131,12 @@ function isDefaultBlankLine(line, cols) {
   return true;
 }
 
-function normalProjection(term, serializer, renderScrollback, cursorVisible) {
+function normalProjection(
+  term: MirrorTerminal,
+  serializer: MirrorSerializer,
+  renderScrollback: number,
+  cursorVisible: boolean,
+): Pick<TerminalStreamSnapshot, 'ansi' | 'bufferRows' | 'cur'> & { start: number } {
   const buffer = term.buffer.normal;
   const bufferRows = Math.min(buffer.length, term.rows + renderScrollback);
   const start = buffer.length - bufferRows;
@@ -89,18 +189,18 @@ export function createTerminalStreamMirror({
   renderScrollback = DEFAULT_RENDER_SCROLLBACK,
   TerminalCtor = XTerm,
   SerializeAddonCtor = SerializeAddon,
-} = {}) {
-  let term = null;
-  let serializer = null;
+}: TerminalStreamMirrorOptions = {}): TerminalStreamMirror {
+  let term: MirrorTerminal | null = null;
+  let serializer: MirrorSerializer | null = null;
   let disposed = false;
   let seeded = false;
   let ready = false;
   let seedRows = 0;
   let revision = 0;
-  let cursor = { visible: false, tail: '' };
-  let mouse = { active: false, tail: '' };
+  let cursor: CursorVisibilityState = { visible: false, tail: '' };
+  let mouse: MouseTrackingState = { active: false, tail: '' };
 
-  const ensureOpen = () => {
+  const ensureOpen = (): void => {
     if (disposed) throw new Error('terminal stream mirror disposed');
   };
 
@@ -142,7 +242,7 @@ export function createTerminalStreamMirror({
       ensureOpen();
       cursor = cursorVisibility(bytes, cursor);
       mouse = mouseTracking(bytes, mouse);
-      await write(term, bytes);
+      await write(term!, bytes);
       ensureOpen();
       revision += 1;
     },
@@ -150,7 +250,7 @@ export function createTerminalStreamMirror({
     async ready(cur) {
       ensureOpen();
       cursor.visible = !!cur?.vis;
-      await write(term, cursorSeq(cur, term.rows, seedRows));
+      await write(term!, cursorSeq(cur, term!.rows, seedRows));
       ensureOpen();
       ready = true;
       revision += 1;
@@ -159,20 +259,22 @@ export function createTerminalStreamMirror({
     snapshot() {
       ensureOpen();
       if (!seeded || !ready) return null;
-      const active = term.buffer.active;
+      const currentTerm = term!;
+      const currentSerializer = serializer!;
+      const active = currentTerm.buffer.active;
       // The hidden core remains the complete, pane-sized terminal state. The visible terminal is only a
       // projection, so repainting its entire accumulated scrollback on every output revision is wasted
       // work (and eventually blocks the browser for tens of milliseconds per frame). Keep one history
       // page beside the live grid; deeper scrolling already switches to the snapshot history loader.
       const projection = active.type === 'alternate'
         ? {
-            ansi: serializer.serialize({ excludeModes: true, scrollback: renderScrollback }),
+            ansi: currentSerializer.serialize({ excludeModes: true, scrollback: renderScrollback }),
             bufferRows: active.length,
             start: 0,
             cur: null,
           }
-        : normalProjection(term, serializer, renderScrollback, cursor.visible);
-      const mouseMode = term.modes?.mouseTrackingMode;
+        : normalProjection(currentTerm, currentSerializer, renderScrollback, cursor.visible);
+      const mouseMode = currentTerm.modes?.mouseTrackingMode;
       return {
         revision,
         ansi: projection.ansi,
@@ -182,10 +284,10 @@ export function createTerminalStreamMirror({
         mouseAware: mouse.active || (!!mouseMode && mouseMode !== 'none'),
         boundaryLine: active.type === 'alternate'
           ? null
-          : Math.max(0, term.buffer.normal.baseY - projection.start),
+          : Math.max(0, currentTerm.buffer.normal.baseY - projection.start),
         bufferRows: projection.bufferRows,
-        paneRows: term.rows,
-        paneCols: term.cols,
+        paneRows: currentTerm.rows,
+        paneCols: currentTerm.cols,
       };
     },
 
