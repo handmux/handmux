@@ -1,4 +1,16 @@
 import { forwardRef, useEffect, useImperativeHandle, useLayoutEffect, useRef, useState } from 'react';
+import type {
+  ButtonHTMLAttributes,
+  ComponentType,
+  Dispatch,
+  ForwardedRef,
+  PointerEvent as ReactPointerEvent,
+  ReactNode,
+  SetStateAction,
+  FormEvent,
+  CompositionEvent,
+  KeyboardEvent as ReactKeyboardEvent,
+} from 'react';
 import { sendText, UnauthorizedError } from '../api.js';
 import KeyBar from './KeyBar.jsx';
 import FavDrawer from './FavDrawer.jsx';
@@ -16,8 +28,116 @@ import { useBackButton } from '../hooks/useBackButton.js';
 import { softKeyboardUp } from '../hooks/useKeyboardInset.js';
 import { t } from '../i18n';
 import { MODIFIERS, modActive, consumeMods, withMods } from '../keybarKeys.js';
+import type { ModifierStateMap } from '../keybarKeys.js';
 import { DEFAULT_SERVER_SHORTCUTS, mergeShortcuts, shortcutIdentity } from '../shortcutMerge.js';
 import { applyShortcutLayout, loadShortcutLayout } from '../shortcutLayout.js';
+
+type DockMode = 'command' | 'agent';
+type OverlayOwner = 'terminal' | 'composer';
+type GhostTarget = 'send' | 'mic';
+
+interface ShortcutPresetKey { type: 'key'; key: string; label?: string }
+interface ShortcutPresetText { type: 'text'; text: string; enter?: boolean }
+type ShortcutPreset = ShortcutPresetKey | ShortcutPresetText;
+interface ServerShortcuts {
+  command: ShortcutPreset[];
+  chat: ShortcutPreset[];
+}
+interface ShortcutItem {
+  kind: 'key' | 'reply' | 'cmd';
+  text: string;
+  label?: string;
+  enter?: boolean;
+  source?: string;
+}
+
+export interface BottomDockProps {
+  pane: string;
+  onAuthFail?: () => void;
+  onKey: (key: string) => void;
+  onText: (text: string) => void;
+  cwd?: string | null;
+  agent?: string | null;
+  windowId?: string | null;
+  recent?: string[];
+  favorites?: ShortcutItem[];
+  onSent?: (text: string) => void;
+  onToggleFav?: (item: ShortcutItem) => void;
+  onRemoveRecent?: (text: string) => void;
+  inset?: number;
+  shortcuts?: ServerShortcuts | null;
+  micAvailable?: boolean;
+  desktopUnified?: boolean;
+  terminalFocused?: boolean;
+  onReturnToTerminal?: () => void;
+  onLeaveTerminal?: () => void;
+}
+
+export interface BottomDockHandle {
+  fill(text: string): void;
+  keepKeyboardForGesture(): boolean;
+  hideKeyboard(): void;
+  composerFocused(): boolean;
+  focusComposer(): void;
+}
+
+interface FilePickerSession {
+  owner: OverlayOwner | null;
+  focusRestored: boolean;
+  phase: 'open' | 'uploading';
+}
+
+interface UploadNote { label: string; error?: boolean }
+interface UploadController {
+  upload: UploadNote | null;
+  uploadFiles(files: File[]): Promise<void>;
+}
+
+type VoicePhase = 'idle' | 'requesting' | 'recording' | 'finalizing' | 'error';
+interface VoiceController {
+  state: VoicePhase;
+  partial: string;
+  start(): void;
+  stop(): void;
+}
+
+interface DockGesture {
+  x: number;
+  y: number;
+  dx: number;
+  dy: number;
+  decided: boolean;
+  horiz: boolean;
+  vert: boolean;
+  strip: HTMLElement | null;
+  cmp: HTMLTextAreaElement | null;
+  kbUp: boolean;
+}
+
+interface FavDrawerProps {
+  open: boolean;
+  mode: DockMode;
+  recent?: string[];
+  historyOnly?: boolean;
+  onDelete?: (text: string) => void;
+  onSend: (text: string) => void;
+  onFill: (text: string) => void;
+  onClose: () => void;
+}
+
+interface CmdFavEditorProps {
+  windowId?: string | null;
+  inset?: number;
+  variant?: 'command' | 'chat';
+  presets?: ShortcutPreset[];
+  onChange?: () => void;
+  onClose: () => void;
+}
+
+// These two overlays are still JavaScript in the incremental migration. Give their imported component
+// boundary the exact contract BottomDock consumes; the assertions disappear when each overlay moves to TSX.
+const TypedFavDrawer = FavDrawer as ComponentType<FavDrawerProps>;
+const TypedCmdFavEditor = CmdFavEditor as ComponentType<CmdFavEditorProps>;
 
 // The bottom dock is a two-page pager (swipe the non-key chrome to switch, or TAP the page-dots above;
 // two dots show which page is current):
@@ -31,15 +151,18 @@ import { applyShortcutLayout, loadShortcutLayout } from '../shortcutLayout.js';
 // Command mode keeps the system keyboard open via the hidden capture. A quick-bar <button> tap would
 // steal focus → the capture blurs → the keyboard collapses. preventDefault on pointer-down keeps focus
 // on the capture; onClick still fires. (Same trick the KeyBar keys use.)
-const keepFocus = (e) => { if (e.cancelable) e.preventDefault(); };
+const keepFocus = (event: ReactPointerEvent<HTMLElement>): void => {
+  if (event.cancelable) event.preventDefault();
+};
 
 // One handler on the whole dock: tapping ANYWHERE inside it (keys, chips, buttons, gaps, the composer's
 // padding) must NOT blur the focused field and drop the phone keyboard — only a tap on a real text field
 // should take focus / move the caret. preventDefault on pointer-down keeps focus where it is; onClick
 // still fires so every button works. Skipping inputs/textarea lets the composer be focused + caret-placed.
-const keepDockFocus = (e) => {
-  if (e.target.closest?.('input, textarea, [contenteditable]')) return;
-  if (e.cancelable) e.preventDefault();
+const keepDockFocus = (event: ReactPointerEvent<HTMLElement>): void => {
+  if (event.target instanceof Element
+    && event.target.closest('input, textarea, [contenteditable]')) return;
+  if (event.cancelable) event.preventDefault();
 };
 
 // How far (px) a horizontal drag must travel before releasing commits a page switch. Higher = harder to
@@ -48,7 +171,7 @@ const SWIPE_COMMIT_PX = 80;
 
 // Chat chips are tinted by CATEGORY (three styles, not a per-label rainbow): a slash-command (/compact …)
 // = blue, everything else (ok/go on/1/2/3 …) = green. Explicit key items are grey at the call site.
-const chipTint = (text) => {
+const chipTint = (text: string): 'cmd' | 'reply' => {
   if (text.startsWith('/')) return 'cmd';
   return 'reply';
 };
@@ -59,27 +182,49 @@ const chipTint = (text) => {
 // so a horizontal scroll never triggers the chip. pointerdown preventDefault keeps the focused field (system
 // keyboard / composer) from blurring — the same keepFocus trick the keybar uses. onHold omitted → tap only.
 const CHIP_HOLD_MS = 450;
-function HoldButton({ className, onTap, onHold, children, ...rest }) {
-  const st = useRef({ timer: null, long: false, moved: false, x: 0, y: 0 });
-  const down = (e) => {
-    if (e.cancelable) e.preventDefault();
-    const s = st.current; s.long = false; s.moved = false; s.x = e.clientX; s.y = e.clientY;
+interface HoldButtonProps extends Omit<
+  ButtonHTMLAttributes<HTMLButtonElement>,
+  'onPointerDown' | 'onPointerMove' | 'onPointerUp' | 'onPointerCancel' | 'onPointerLeave'
+> {
+  onTap: () => void;
+  onHold?: () => void;
+  children: ReactNode;
+}
+
+function HoldButton({ className, onTap, onHold, children, ...rest }: HoldButtonProps) {
+  const st = useRef({
+    timer: null as ReturnType<typeof setTimeout> | null,
+    long: false,
+    moved: false,
+    x: 0,
+    y: 0,
+  });
+  const down = (event: ReactPointerEvent<HTMLButtonElement>): void => {
+    if (event.cancelable) event.preventDefault();
+    const s = st.current; s.long = false; s.moved = false; s.x = event.clientX; s.y = event.clientY;
     if (!onHold) return;
     s.timer = setTimeout(() => { s.long = true; navigator.vibrate?.(12); onHold(); }, CHIP_HOLD_MS);
   };
-  const move = (e) => {
+  const move = (event: ReactPointerEvent<HTMLButtonElement>): void => {
     const s = st.current;
     if (s.moved) return;
-    if (Math.abs(e.clientX - s.x) > 8 || Math.abs(e.clientY - s.y) > 8) { s.moved = true; clearTimeout(s.timer); }
+    if (Math.abs(event.clientX - s.x) > 8 || Math.abs(event.clientY - s.y) > 8) {
+      s.moved = true;
+      if (s.timer != null) clearTimeout(s.timer);
+    }
   };
   const up = () => {
     const s = st.current;
-    clearTimeout(s.timer); s.timer = null;
+    if (s.timer != null) clearTimeout(s.timer); s.timer = null;
     if (s.moved) { s.moved = false; return; } // was a scroll/drag → no tap
     if (s.long) { s.long = false; return; }   // hold already fired
     onTap();
   };
-  const cancel = () => { const s = st.current; clearTimeout(s.timer); s.timer = null; s.long = false; s.moved = false; };
+  const cancel = () => {
+    const s = st.current;
+    if (s.timer != null) clearTimeout(s.timer);
+    s.timer = null; s.long = false; s.moved = false;
+  };
   return (
     <button type="button" className={className} {...rest}
       onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerCancel={cancel} onPointerLeave={cancel}>
@@ -91,7 +236,7 @@ function BottomDock({
   pane, onAuthFail, onKey, onText, cwd = null, agent = null, windowId = null,
   recent = [], onSent, onRemoveRecent, inset = 0, shortcuts = null, micAvailable = false,
   desktopUnified = false, terminalFocused = false, onReturnToTerminal, onLeaveTerminal,
-}, fwdRef) {
+}: BottomDockProps, fwdRef: ForwardedRef<BottomDockHandle>) {
   // The composer restores its unsent draft across an app exit/kill: seeded from storage, mirrored on
   // every change (send/fill set '' → the stored draft clears with it). The mount-time autoGrow +
   // pager ResizeObserver below already size a restored multi-line draft correctly.
@@ -102,10 +247,11 @@ function BottomDock({
   const [multi, setMulti] = useState(false); // composer grew past one line → full-width text, mic/send overlay bottom-right
   const [crowd, setCrowd] = useState(false); // last text line would run under the overlaid buttons → reserve a bottom strip
   const [panelOpen, setPanelOpen] = useState(false);
-  const serverShortcuts = shortcuts || DEFAULT_SERVER_SHORTCUTS;
+  const serverShortcuts: ServerShortcuts = shortcuts
+    ?? DEFAULT_SERVER_SHORTCUTS as ServerShortcuts;
   // The chat page's horizontal quick-command bar reads the agent 常用 list plus its device-local layout.
-  const [favs, setFavs] = useState(() => loadFavs('agent'));
-  const [chatLayout, setChatLayout] = useState(() => loadShortcutLayout('chat'));
+  const [favs, setFavs] = useState<ShortcutItem[]>(() => loadFavs('agent'));
+  const [chatLayout, setChatLayout] = useState<unknown>(() => loadShortcutLayout('chat'));
   // `chatEditOpen` is the chat page's ⚙ editor sheet (mirrors the command page's ⚙). Reload the agent list
   // whenever either it or the history panel closes so add/edit/delete/reorder flow straight into the bar.
   const [chatEditOpen, setChatEditOpen] = useState(false);
@@ -118,9 +264,11 @@ function BottomDock({
   // (shown first, grey) and a PER-WINDOW list (shown after, green) — both in the command page's quick-bar.
   // `cmdEditOpen` is the ⚙ editor sheet; reload BOTH lists whenever it closes (or the window changes) so
   // add/delete/reorder flow straight into the bar.
-  const [cmdFavs, setCmdFavs] = useState(() => loadFavs('command'));
-  const [winFavs, setWinFavs] = useState(() => (windowId ? loadFavs(cmdScope(windowId)) : []));
-  const [commandLayout, setCommandLayout] = useState(() => loadShortcutLayout('command'));
+  const [cmdFavs, setCmdFavs] = useState<ShortcutItem[]>(() => loadFavs('command'));
+  const [winFavs, setWinFavs] = useState<ShortcutItem[]>(
+    () => (windowId ? loadFavs(cmdScope(windowId)) : []),
+  );
+  const [commandLayout, setCommandLayout] = useState<unknown>(() => loadShortcutLayout('command'));
   const [cmdEditOpen, setCmdEditOpen] = useState(false);
   const refreshCommandShortcuts = () => {
     setCmdFavs(loadFavs('command'));
@@ -131,16 +279,16 @@ function BottomDock({
     if (cmdEditOpen) return;
     refreshCommandShortcuts();
   }, [cmdEditOpen, windowId]);
-  const chatShortcuts = applyShortcutLayout(
+  const chatShortcuts: ShortcutItem[] = applyShortcutLayout(
     mergeShortcuts(serverShortcuts.chat, favs, 'chat'), chatLayout,
   );
-  const commandShortcuts = applyShortcutLayout(
+  const commandShortcuts: ShortcutItem[] = applyShortcutLayout(
     mergeShortcuts(serverShortcuts.command, cmdFavs, 'command'), commandLayout,
   );
   const visibleGlobalCommandIds = new Set(commandShortcuts.map(shortcutIdentity));
-  const windowShortcuts = mergeShortcuts([], winFavs, 'command')
+  const windowShortcuts: ShortcutItem[] = mergeShortcuts([], winFavs, 'command')
     .filter((item) => !visibleGlobalCommandIds.has(shortcutIdentity(item)));
-  const [modeOverride, setModeOverride] = useState({}); // pane → 'command' | 'agent'
+  const [modeOverride, setModeOverride] = useState<Record<string, DockMode>>({}); // pane → 'command' | 'agent'
   const mode = desktopUnified ? 'agent' : modeOverride[pane] || (agent ? 'agent' : 'command');
   // Remember the keyboard-DOWN viewport height. Some mobile browsers resize window.innerHeight together
   // with visualViewport.height, so comparing their current values reads zero even while the keyboard is up.
@@ -162,7 +310,7 @@ function BottomDock({
     }
     return softKeyboardUp(viewport.fullHeight);
   };
-  const setMode = (next) => {
+  const setMode = (next: DockMode): void => {
     // Carry the keyboard across a mode switch. The soft keyboard is held up by whichever field has focus
     // (command capture ⇄ chat composer); a switch used to leave focus on the OLD page's field, so the new
     // box wasn't active, the hide gesture landed on an unfocused field (no-op), and sliding the focused
@@ -180,7 +328,7 @@ function BottomDock({
     if (kbUp) (next === 'command' ? cmdRef.current : ref.current)?.focus({ preventScroll: true });
   };
   // Live modifier state, lifted here so the KeyBar and the command-mode capture input can share it.
-  const [mods, setMods] = useState({ ctrl: 'off', shift: 'off', alt: 'off' });
+  const [mods, setMods] = useState<ModifierStateMap>({ ctrl: 'off', shift: 'off', alt: 'off' });
   // Whether the system keyboard is up (the capture input is focused) — lights the ⌨ toggle. Kept in
   // sync by the capture's onFocus/onBlur, so tapping the terminal (which blurs it) also drops the flag.
   const [keyboardUp, setKeyboardUp] = useState(false);
@@ -188,9 +336,9 @@ function BottomDock({
   // ── Swipe carousel ──────────────────────────────────────────────────────────────────────────
   // The dock is a two-page track (command | chat) that follows the finger and snaps with an ease
   // animation on release — both pages stay mounted so you see them slide. pageIndex 0 = command, 1 = chat.
-  const pagerRef = useRef(null);
-  const trackRef = useRef(null);
-  const dockLeftRef = useRef(null); // the whole dock top: ONE gesture zone for both axes (see the unified handler)
+  const pagerRef = useRef<HTMLDivElement | null>(null);
+  const trackRef = useRef<HTMLDivElement | null>(null);
+  const dockLeftRef = useRef<HTMLDivElement | null>(null); // the whole dock top: ONE gesture zone for both axes (see the unified handler)
   const pageIndex = mode === 'command' ? 0 : 1;
   const pageIndexRef = useRef(pageIndex);
   pageIndexRef.current = pageIndex;
@@ -208,7 +356,7 @@ function BottomDock({
   // transform (transition off); on release we CLEAR the inline transform so the class owns rest again and
   // animates the snap. This is the root fix for the old "stuck at half" state, which happened because the
   // rest position used to be imperative too and only re-asserted on a React render (rare in command mode).
-  const setDragX = (px) => {
+  const setDragX = (px: number): void => {
     const t = trackRef.current;
     if (!t) return;
     t.style.transition = 'none';
@@ -225,14 +373,14 @@ function BottomDock({
   // into a single bar) and --drag (the bar follows the finger, resisted by rubberBand; the OS keyboard itself
   // can't be dragged on the web, only slid on focus/blur, so the bar is what carries the motion). Past the
   // commit threshold it arms (turns blue). Cleared on release → the CSS transition springs it back to dots.
-  const handleRef = useRef(null);
+  const handleRef = useRef<HTMLButtonElement | null>(null);
   // Deliberately a bit "stiff": a small drag must NOT change the keyboard. A dead zone means a tiny nudge
   // doesn't even start the morph, and the commit needs real travel — so the dots fully fuse into the bar
   // exactly as it arms (DEAD + RANGE = COMMIT), and only a release past that point toggles.
   const KBD_COMMIT_PX = 50;
   const MORPH_DEAD_PX = 12;  // below this the handle stays two dots — a nudge is inert
   const MORPH_RANGE_PX = 38; // 12 + 38 = 50: fully a bar right at the commit point
-  const setHandleDrag = (dy) => {
+  const setHandleDrag = (dy: number): void => {
     const g = handleRef.current;
     if (!g) return;
     g.classList.add('dragging');
@@ -260,7 +408,9 @@ function BottomDock({
   const syncPagerHeight = () => {
     const pager = pagerRef.current;
     if (!pager) return;
-    const active = pager.querySelector(mode === 'command' ? '.dock-page.command' : '.dock-page.chat');
+    const active = pager.querySelector<HTMLElement>(
+      mode === 'command' ? '.dock-page.command' : '.dock-page.chat',
+    );
     if (active) pager.style.height = `${active.offsetHeight}px`;
   };
   useLayoutEffect(() => {
@@ -281,7 +431,7 @@ function BottomDock({
     const pager = pagerRef.current;
     if (!pager || typeof ResizeObserver === 'undefined') return undefined;
     const ro = new ResizeObserver(() => { if (!draggingRef.current) syncRef.current(); });
-    pager.querySelectorAll('.dock-page').forEach((p) => ro.observe(p));
+    pager.querySelectorAll<HTMLElement>('.dock-page').forEach((page) => ro.observe(page));
     return () => ro.disconnect();
   }, []);
   // Entering CHAT restores the composer's grown height for preserved multi-line text — then RE-syncs the
@@ -315,35 +465,36 @@ function BottomDock({
     const zone = dockLeftRef.current;
     const pager = pagerRef.current;
     if (!zone || !pager) return;
-    let d = null;
-    const onStart = (e) => {
+    let d: DockGesture | null = null;
+    const onStart = (event: TouchEvent): void => {
       releaseTrack(); // drop any inline transform a previous (interrupted) gesture may have left behind
       zone.classList.remove('dock-swiping'); // clear any stale swipe-suppression from an interrupted gesture
       // Remember if the drag began on the horizontally-scrolling quick-command strip: that gesture is
       // normally the strip's own native scroll, but at an EDGE a further drag in the same direction should
       // carry over into a page swipe (decided in onMove once we know the direction). Both pages have a
       // strip: chat's carries LEFT-edge→right-drag to command; command's carries RIGHT-edge→left-drag to chat.
-      const strip = e.target?.closest?.('.quick-scroll') || null;
+      const target = event.target instanceof Element ? event.target : null;
+      const strip = target?.closest<HTMLElement>('.quick-scroll') ?? null;
       // Did the drag begin inside the chat composer's textarea? A vertical drag there scrolls the draft
       // first and only "falls off" into a keyboard toggle at the textarea's top/bottom edge (see onMove).
-      const cmp = e.target?.closest?.('.input-text') || null;
+      const cmp = target?.closest<HTMLTextAreaElement>('.input-text') ?? null;
       // Was the keyboard genuinely up as the gesture BEGAN? The keyboard-down viewport baseline survives
       // focus drift and browsers that resize both viewports; activeElement covers the first opening frame.
       const kbUp = physicalKeyboardUp()
         || document.activeElement === cmdRef.current
         || document.activeElement === ref.current;
-      d = e.touches.length === 1
-        ? { x: e.touches[0].clientX, y: e.touches[0].clientY, dx: 0, dy: 0, decided: false, horiz: false, vert: false, strip, cmp, kbUp }
+      d = event.touches.length === 1
+        ? { x: event.touches[0].clientX, y: event.touches[0].clientY, dx: 0, dy: 0, decided: false, horiz: false, vert: false, strip, cmp, kbUp }
         : null;
     };
-    const onMove = (e) => {
-      if (!d || e.touches.length !== 1) return;
+    const onMove = (event: TouchEvent): void => {
+      if (!d || event.touches.length !== 1) return;
       // A held / auto-repeating keybar key (▲◀▼▶ ⌫) OWNS the touch — never let its finger-drift, esp. with
       // the system keyboard up, get mistaken for a page swipe (which used to park the track between pages).
       // The key releases this the instant IT decides the gesture is a swipe (moved past its own 8px gate),
       // so a deliberate swipe that happens to start on a key still pages. Only blocks BEFORE we commit.
       if (keyHeldRef.current && !d.horiz) return;
-      const dx = e.touches[0].clientX - d.x, dy = e.touches[0].clientY - d.y;
+      const dx = event.touches[0].clientX - d.x, dy = event.touches[0].clientY - d.y;
       if (!d.decided) {
         // Need real travel before deciding, and only lock to a swipe when the drag is CLEARLY horizontal
         // (dominates the vertical by 1.4×). This keeps a press-and-hold on a key — e.g. auto-repeating the
@@ -356,8 +507,10 @@ function BottomDock({
         // grazed into the composer NOW — the moment we know it's a swipe — not at release. The focus glow
         // fades in over .15s (styles.css), so clearing it ~16px in (a frame or two) means it barely starts
         // to green before it's pulled back: no visible flash, and no stray focus for the switch to carry.
-        if (!d.kbUp && (document.activeElement === cmdRef.current || document.activeElement === ref.current)) {
-          document.activeElement.blur();
+        const active = document.activeElement;
+        if (!d.kbUp && active instanceof HTMLElement
+          && (active === cmdRef.current || active === ref.current)) {
+          active.blur();
         }
         // Belt-and-braces on the green flash: for the whole horizontal swipe (only when the keyboard wasn't
         // already up), suppress the composer's focus glow via a class, so even a graze that focuses it AFTER
@@ -387,9 +540,9 @@ function BottomDock({
         // takes over once we're at the top/bottom edge — iOS nested-scroll fall-off.
         if (!d.horiz && Math.abs(dy) > Math.abs(dx) * 1.4 && !composerAbsorbsScroll(d.cmp, dy)) d.vert = true;
       }
-      if (d.vert) { d.dx = dx; d.dy = dy; setHandleDrag(dy); if (e.cancelable) e.preventDefault(); return; }
+      if (d.vert) { d.dx = dx; d.dy = dy; setHandleDrag(dy); if (event.cancelable) event.preventDefault(); return; }
       if (!d.horiz) return; // a vertical drag (or a strip-scroll we handed off) → leave it to native
-      e.preventDefault();
+      event.preventDefault();
       draggingRef.current = true; // the finger owns the transform now
       d.dx = dx;
       const w = trackW() || 1;
@@ -450,12 +603,12 @@ function BottomDock({
     };
   }, [desktopUnified]);
 
-  const ref = useRef(null);      // agent-mode composer textarea
-  const cmdRef = useRef(null);   // command-mode single-line capture (streams to the pane)
-  const uploadRef = useRef(null);
-  const overlayOwnerRef = useRef(null);
+  const ref = useRef<HTMLTextAreaElement | null>(null);      // agent-mode composer textarea
+  const cmdRef = useRef<HTMLInputElement | null>(null);   // command-mode single-line capture (streams to the pane)
+  const uploadRef = useRef<HTMLInputElement | null>(null);
+  const overlayOwnerRef = useRef<OverlayOwner | null>(null);
   const filePickerPendingRef = useRef(false);
-  const filePickerSessionRef = useRef(null);
+  const filePickerSessionRef = useRef<FilePickerSession | null>(null);
 
   const leaveTerminalForControl = () => {
     if (desktopUnified) {
@@ -466,11 +619,14 @@ function BottomDock({
       if (document.activeElement === ref.current) ref.current?.blur();
     }
   };
-  const openOverlay = (setter) => {
+  const openOverlay = (setter: Dispatch<SetStateAction<boolean>>): void => {
     leaveTerminalForControl();
     setter(true);
   };
-  const closeOverlay = (setter, restore = true) => {
+  const closeOverlay = (
+    setter: Dispatch<SetStateAction<boolean>>,
+    restore = true,
+  ): void => {
     setter(false);
     const owner = overlayOwnerRef.current;
     overlayOwnerRef.current = null;
@@ -481,7 +637,7 @@ function BottomDock({
       });
     }
   };
-  const restoreFilePickerOwner = (finalize = false) => {
+  const restoreFilePickerOwner = (finalize = false): void => {
     const session = filePickerSessionRef.current;
     if (!session) return;
     filePickerPendingRef.current = false;
@@ -497,21 +653,21 @@ function BottomDock({
     if (!desktopUnified) return undefined;
     const picker = uploadRef.current;
     let sawWindowBlur = false;
-    let fallbackTimer = null;
+    let fallbackTimer: ReturnType<typeof setTimeout> | null = null;
     const onCancel = () => restoreFilePickerOwner(true);
     const onWindowBlur = () => {
       if (filePickerPendingRef.current) sawWindowBlur = true;
     };
     const onWindowFocus = () => {
       if (!filePickerPendingRef.current || !sawWindowBlur) return;
-      clearTimeout(fallbackTimer);
+      if (fallbackTimer != null) clearTimeout(fallbackTimer);
       fallbackTimer = setTimeout(restoreFilePickerOwner, 0);
     };
     picker?.addEventListener('cancel', onCancel);
     window.addEventListener('blur', onWindowBlur);
     window.addEventListener('focus', onWindowFocus);
     return () => {
-      clearTimeout(fallbackTimer);
+      if (fallbackTimer != null) clearTimeout(fallbackTimer);
       picker?.removeEventListener('cancel', onCancel);
       window.removeEventListener('blur', onWindowBlur);
       window.removeEventListener('focus', onWindowFocus);
@@ -537,7 +693,9 @@ function BottomDock({
       if (!kbdWasUpRef.current) return;
       kbdWasUpRef.current = false;
       const active = document.activeElement;
-      if (active === cmdRef.current || active === ref.current) active.blur();
+      if ((active === cmdRef.current || active === ref.current) && active instanceof HTMLElement) {
+        active.blur();
+      }
       setKeyboardUp(false);
     };
     reconcile();
@@ -546,17 +704,17 @@ function BottomDock({
   }, []);
 
   const anchorRef = useRef({ head: '', tail: '' }); // 起录时的光标两侧文本
-  const caretRef = useRef(null);                    // 程序化改 value 后要落的光标位置
+  const caretRef = useRef<number | null>(null);                    // 程序化改 value 后要落的光标位置
   const suppressVoiceRef = useRef(false);           // 录音中点了发送/填入 → 抑制后续 partial/定稿回写
 
   // 定稿:把整段识别文字插在起录锚点处。录音中已发送过(suppress)则丢弃这次定稿,不再回写。
-  const commitVoice = (text) => {
+  const commitVoice = (text: string): void => {
     if (suppressVoiceRef.current) { suppressVoiceRef.current = false; return; }
     const { head, tail } = anchorRef.current;
     setValue(head + text + tail);
     caretRef.current = head.length + text.length;
   };
-  const voice = usePushToTalk({ onText: commitVoice });
+  const voice = usePushToTalk({ onText: commitVoice }) as VoiceController;
   const recording = voice.state === 'recording' || voice.state === 'finalizing';
   useScreenWakeLock(recording); // 语音激活时屏幕常亮,别中途变暗/锁屏
 
@@ -622,10 +780,10 @@ function BottomDock({
   // slack made the text yield to the buttons a full character early — visibly "wrapping when it
   // clearly still fits".
   const ONE_LINE = 40; // px: 22px line + 14px padding, with slack
-  const mirrorRef = useRef(null);
+  const mirrorRef = useRef<HTMLDivElement | null>(null);
   // Text metrics at an arbitrary rendered width (the mirror's padding matches the textarea's, so
   // `width` means "textarea offsetWidth"): total height + where the last line ends.
-  const measureAt = (text, width) => {
+  const measureAt = (text: string, width: number): { h: number; endX: number } | null => {
     const m = mirrorRef.current;
     if (!m) return null;
     m.style.width = `${width}px`;
@@ -634,14 +792,14 @@ function BottomDock({
     m.appendChild(marker);
     return { h: m.offsetHeight, endX: marker.offsetLeft };
   };
-  const autoGrow = (el) => {
+  const autoGrow = (el: HTMLTextAreaElement | null): void => {
     if (!el) return;
     el.style.height = 'auto';
     // Inline the zone/button widths that are ACTUALLY rendered: a keyless install has no mic, so its
     // text runs up to the send button, not a phantom mic earlier.
     const inline = micAvailable ? 76 : 38; // single-line row: gap 4 + mic 34 (+ gap 4 + send 34)
     const zone = micAvailable ? 86 : 48;   // overlay corner: mic 34 + gap 4 + send 34 + inset 6 + 8 slack
-    const inner = el.parentElement.clientWidth - 11; // pill content width (clientWidth minus 5+6 padding)
+    const inner = (el.parentElement?.clientWidth ?? 0) - 11; // pill content width (clientWidth minus 5+6 padding)
     const narrow = el.value ? measureAt(el.value, inner - inline) : null;
     const isMulti = narrow ? narrow.h > ONE_LINE : false; // no mirror/empty → single-line layout
     setMulti(isMulti);
@@ -658,7 +816,7 @@ function BottomDock({
   // Type the draft, optionally followed by Enter. Lock synchronously before the request: /send waits
   // for tmux's text→Enter pacing, so leaving the editor active let rapid taps launch the same request
   // several times before the first one returned.
-  const submitDraft = async (enter) => {
+  const submitDraft = async (enter: boolean): Promise<void> => {
     if (!pane || (!enter && !value) || submitInFlightRef.current) return;
     const text = value;
     submitInFlightRef.current = true;
@@ -687,7 +845,7 @@ function BottomDock({
   // keyboard still drives it (so IMEs work): while an IME composes we hold, then flush the committed
   // word on compositionend. Agent mode keeps the box as a normal composer.
   const composingRef = useRef(false);
-  const streamInput = (el) => {
+  const streamInput = (el: HTMLInputElement): void => {
     const text = el.value;
     el.value = ''; // keep the capture field empty — the terminal is the display
     if (!text) return;
@@ -696,39 +854,40 @@ function BottomDock({
     const active = MODIFIERS.some((m) => modActive(mods[m]));
     if (active && text.length === 1) {
       const composed = withMods({ kind: 'text', ch: text }, mods);
-      if (composed.kind === 'key') { onKey(composed.name); setMods(consumeMods); return; }
+      if (composed?.kind === 'key') { onKey(composed.name); setMods(consumeMods); return; }
     }
     onText(text); // straight to the pane
     if (active) setMods(consumeMods);
   };
-  const onCommandInput = (e) => {
-    if (e.nativeEvent?.isComposing || composingRef.current) return; // mid-IME — wait for the commit
-    streamInput(e.target);
+  const onCommandInput = (event: FormEvent<HTMLInputElement>): void => {
+    if (event.nativeEvent instanceof InputEvent && event.nativeEvent.isComposing) return;
+    if (composingRef.current) return; // mid-IME — wait for the commit
+    streamInput(event.currentTarget);
   };
   const onCompositionStart = () => { if (mode === 'command') composingRef.current = true; };
-  const onCompositionEnd = (e) => {
+  const onCompositionEnd = (event: CompositionEvent<HTMLInputElement>): void => {
     if (mode !== 'command') return;
     composingRef.current = false;
-    streamInput(e.target); // the committed IME word (e.g. a Chinese character) goes to the pane now
+    streamInput(event.currentTarget); // the committed IME word (e.g. a Chinese character) goes to the pane now
   };
   // Command-mode Enter/Backspace are terminal keys (the text already streamed): Return runs the line,
   // Backspace deletes in the shell (the capture field is empty, so there's nothing local to erase).
-  const onInputKeyDown = (e) => {
-    if (mode !== 'command' || e.nativeEvent?.isComposing) return;
-    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); onKey('Enter'); return; }
-    if (e.key === 'Backspace') { e.preventDefault(); onKey('BSpace'); }
+  const onInputKeyDown = (event: ReactKeyboardEvent<HTMLInputElement>): void => {
+    if (mode !== 'command' || event.nativeEvent.isComposing) return;
+    if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); onKey('Enter'); return; }
+    if (event.key === 'Backspace') { event.preventDefault(); onKey('BSpace'); }
   };
 
-  const onComposerKeyDown = (e) => {
-    if (!desktopUnified || e.nativeEvent?.isComposing) return;
-    if (e.key === 'Escape') {
-      e.preventDefault();
+  const onComposerKeyDown = (event: ReactKeyboardEvent<HTMLTextAreaElement>): void => {
+    if (!desktopUnified || event.nativeEvent.isComposing) return;
+    if (event.key === 'Escape') {
+      event.preventDefault();
       ref.current?.blur();
       onReturnToTerminal?.();
       return;
     }
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
+    if (event.key === 'Enter' && !event.shiftKey) {
+      event.preventDefault();
       void send();
     }
   };
@@ -744,11 +903,13 @@ function BottomDock({
   // The field the keyboard gesture drives depends on the current page: command → the hidden capture,
   // chat → the composer textarea. Keyed off pageIndexRef so it's correct from the long-lived pager effect
   // too (which closes over a stale `mode`). The ⌨ button still taps-to-toggle; the handle's tap flips pages.
-  const fieldForPage = (pg) => (pg === 0 ? cmdRef.current : ref.current);
+  const fieldForPage = (page: number): HTMLInputElement | HTMLTextAreaElement | null => (
+    page === 0 ? cmdRef.current : ref.current
+  );
 
   // Pick a command from the panel: fill the box (never send), close the panel, refocus so the user
   // can edit before submitting.
-  const pick = (cmd) => {
+  const pick = (cmd: string): void => {
     overlayOwnerRef.current = null;
     setValue(cmd);
     setPanelOpen(false);
@@ -756,26 +917,28 @@ function BottomDock({
   };
 
   // Tap a fav → send it (type + Enter, reusing the send path). Long-press (double-tap for now) → fill.
-  const sendFav = async (text) => {
+  const sendFav = async (text: string): Promise<void> => {
     if (!pane) return;
     try { await sendText(pane, text, true); onSent?.(text); }
     catch (err) { if (err instanceof UnauthorizedError) onAuthFail?.(); }
   };
-  const fillFav = (text) => pick(text);
+  const fillFav = (text: string): void => pick(text);
 
   // Explicit key/text items share one dispatcher in both modes. Text items decide whether a tap also
   // presses Enter; old implicit ESC/Tab favorites were converted to key items by the v6→v7 migration.
-  const runShortcut = (f) => {
+  const runShortcut = (f: ShortcutItem): void => {
     if (f.kind === 'key') { onKey(f.text); return; }
     if (f.enter) { sendFav(f.text); return; }
     onText(f.text);
   };
   // A command chip's label: a key fav shows its pretty ⌃C label, a command shows its text.
-  const favLabel = (f) => (f.kind === 'key' ? (f.label || f.text) : f.text);
+  const favLabel = (f: ShortcutItem): string => (
+    f.kind === 'key' ? (f.label || f.text) : f.text
+  );
   // Long-press action for a command chip: only a ⏎ (with-Enter) command gets one — HOLD types it WITHOUT
   // the Enter, so you can edit/append in the shell before running it yourself. Keys and plain (type-only)
   // commands already do exactly that on a tap, so they have no distinct hold (returns undefined = tap only).
-  const holdTypeOnly = (f) =>
+  const holdTypeOnly = (f: ShortcutItem): (() => void) | undefined =>
     (f.kind === 'key' || !f.enter ? undefined : () => onText(f.text));
 
   // Imperative surface: the topbar idea panel drops a picked idea into the box (fill, never send); a clean
@@ -795,7 +958,7 @@ function BottomDock({
     },
     hideKeyboard: () => {
       const a = document.activeElement;
-      if (a === cmdRef.current || a === ref.current) a.blur();
+      if (a instanceof HTMLElement && (a === cmdRef.current || a === ref.current)) a.blur();
     },
     composerFocused: () => document.activeElement === ref.current,
     focusComposer: () => ref.current?.focus({ preventScroll: true }),
@@ -805,9 +968,12 @@ function BottomDock({
   // insertion also focuses the composer: mobile keeps typing there; desktop restores the picker owner.
   // One file → the full path. Multiple → write the shared dir prefix ONCE and brace-expand the names
   // (`/…/.upload/{a.png,b.png}`); if they somehow don't share a dir, fall back to space-joined paths.
-  const insertPaths = (paths, { focusComposer = true } = {}) => {
+  const insertPaths = (
+    paths: string[],
+    { focusComposer = true }: { focusComposer?: boolean } = {},
+  ): void => {
     if (!paths.length) return;
-    let text;
+    let text: string;
     if (paths.length === 1) {
       text = paths[0];
     } else {
@@ -828,12 +994,12 @@ function BottomDock({
   const { upload, uploadFiles } = useUpload({
     cwd,
     onAuthFail,
-    onPaths: (paths) => insertPaths(paths, {
+    onPaths: (paths: string[]) => insertPaths(paths, {
       // Desktop restores the captured picker owner after upload; only a composer-owned session may let
       // the path-insertion frame focus the textarea. Mobile keeps its existing focus/soft-keyboard path.
       focusComposer: !desktopUnified || filePickerSessionRef.current?.owner === 'composer',
     }),
-  });
+  }) as UploadController;
 
   // 填入: type the box text into the pane WITHOUT Enter (no submit), then clear — the secondary to
   // 发送 (which types + Enter). Mirrors send() with enter=false; a filled command is still recorded.
@@ -847,13 +1013,13 @@ function BottomDock({
   // caret-handle drag can start on it — pointer capture routes the eventual up back here even after the
   // finger left, and firing send() on that up meant "drag the caret near the corner" = message sent +
   // keyboard gone. A moved pointer is a drag, not a tap: cancel both tap and long-press.
-  const sendTimer = useRef(null);
+  const sendTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const sendLongRef = useRef(false);
   const sendPtRef = useRef({ x: 0, y: 0, moved: false });
-  const sendDown = (e) => {
-    if (e.cancelable) e.preventDefault();
+  const sendDown = (event: ReactPointerEvent<HTMLElement>): void => {
+    if (event.cancelable) event.preventDefault();
     sendLongRef.current = false;
-    sendPtRef.current = { x: e.clientX, y: e.clientY, moved: false };
+    sendPtRef.current = { x: event.clientX, y: event.clientY, moved: false };
     if (!value || submitInFlightRef.current) return;
     sendTimer.current = setTimeout(() => {
       sendLongRef.current = true;
@@ -861,22 +1027,22 @@ function BottomDock({
       fill();
     }, 450);
   };
-  const sendMove = (e) => {
+  const sendMove = (event: ReactPointerEvent<HTMLElement>): void => {
     const p = sendPtRef.current;
-    if (p.moved || Math.hypot(e.clientX - p.x, e.clientY - p.y) <= 10) return;
+    if (p.moved || Math.hypot(event.clientX - p.x, event.clientY - p.y) <= 10) return;
     p.moved = true;
-    clearTimeout(sendTimer.current); // a drag disarms the long-press too
+    if (sendTimer.current != null) clearTimeout(sendTimer.current); // a drag disarms the long-press too
     sendTimer.current = null;
   };
   const sendUp = () => {
-    clearTimeout(sendTimer.current);
+    if (sendTimer.current != null) clearTimeout(sendTimer.current);
     sendTimer.current = null;
     if (sendLongRef.current) { sendLongRef.current = false; return; } // long-press already filled
     if (sendPtRef.current.moved) return; // drag, not a tap
     send();
   };
   const sendCancel = () => {
-    clearTimeout(sendTimer.current);
+    if (sendTimer.current != null) clearTimeout(sendTimer.current);
     sendTimer.current = null;
     sendLongRef.current = false;
   };
@@ -889,33 +1055,38 @@ function BottomDock({
   // 唯一能改变原生命中测试结果的开关是 pointer-events:none:多行态按钮退出命中测试
   // (styles.css .multi),任何落点都穿透到 textarea(可编辑)→ 键盘不藏。按钮点按改由药丸容
   // 器在 capture 阶段手动命中按钮矩形,复用原手势逻辑(发送 tap/长按、位移门槛全保留)。
-  const ghostRef = useRef(null);                 // 'send' | 'mic' —— 当前被幽灵按下的按钮
+  const ghostRef = useRef<GhostTarget | null>(null);                 // 'send' | 'mic' —— 当前被幽灵按下的按钮
   const micPtRef = useRef({ x: 0, y: 0, moved: false });
-  const ghostHit = (e) => {
+  const ghostHit = (event: ReactPointerEvent<HTMLDivElement>): GhostTarget | null => {
     if (!multi) return null;
-    for (const [name, sel] of [['send', '.input-send'], ['mic', '.input-mic']]) {
-      const b = e.currentTarget.querySelector(sel);
+    const targets: Array<[GhostTarget, string]> = [
+      ['send', '.input-send'],
+      ['mic', '.input-mic'],
+    ];
+    for (const [name, selector] of targets) {
+      const b = event.currentTarget.querySelector<HTMLElement>(selector);
       if (!b) continue;
       const r = b.getBoundingClientRect();
-      if (e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom) return name;
+      if (event.clientX >= r.left && event.clientX <= r.right
+        && event.clientY >= r.top && event.clientY <= r.bottom) return name;
     }
     return null;
   };
-  const ghostDown = (e) => {
-    const hit = ghostHit(e);
+  const ghostDown = (event: ReactPointerEvent<HTMLDivElement>): void => {
+    const hit = ghostHit(event);
     if (!hit) return;
-    e.stopPropagation();                  // 这一下属于按钮:别让 textarea 的录音接管/聚焦逻辑吃到
-    if (e.cancelable) e.preventDefault(); // 也不移光标、不改焦点(textarea 聚焦态原样保留)
+    event.stopPropagation();                  // 这一下属于按钮:别让 textarea 的录音接管/聚焦逻辑吃到
+    if (event.cancelable) event.preventDefault(); // 也不移光标、不改焦点(textarea 聚焦态原样保留)
     ghostRef.current = hit;
-    if (hit === 'send') sendDown(e);
-    else micPtRef.current = { x: e.clientX, y: e.clientY, moved: false };
+    if (hit === 'send') sendDown(event);
+    else micPtRef.current = { x: event.clientX, y: event.clientY, moved: false };
   };
-  const ghostMove = (e) => {
+  const ghostMove = (event: ReactPointerEvent<HTMLDivElement>): void => {
     const g = ghostRef.current;
     if (!g) return;
-    if (g === 'send') { sendMove(e); return; }
+    if (g === 'send') { sendMove(event); return; }
     const p = micPtRef.current;
-    if (!p.moved && Math.hypot(e.clientX - p.x, e.clientY - p.y) > 10) p.moved = true;
+    if (!p.moved && Math.hypot(event.clientX - p.x, event.clientY - p.y) > 10) p.moved = true;
   };
   const ghostUp = () => {
     const g = ghostRef.current;
@@ -1059,7 +1230,8 @@ function BottomDock({
                     // original owner so completion can restore it without relying on event timing.
                     if (session.focusRestored) {
                       onLeaveTerminal?.();
-                      if (document.activeElement === ref.current) ref.current.blur();
+                      const composer = ref.current;
+                      if (document.activeElement === composer) composer?.blur();
                       session.focusRestored = false;
                     }
                   }
@@ -1128,21 +1300,21 @@ function BottomDock({
           </div>
         </div>
       </div>
-      <FavDrawer open={panelOpen} mode={mode} recent={recent} historyOnly onDelete={onRemoveRecent}
+      <TypedFavDrawer open={panelOpen} mode={mode} recent={recent} historyOnly onDelete={onRemoveRecent}
         onSend={(text) => { closeOverlay(setPanelOpen); sendFav(text); }}
         onFill={(text) => { setPanelOpen(false); fillFav(text); }}
         onClose={() => closeOverlay(setPanelOpen)} />
       {/* Command-mode saved-command editor (opened by the ⚙ in the command quick-bar): two list sections
           (global + this window) over one add row whose 命令/按键 tab picks what you add. Mounted only while
           open so it seeds fresh each time. Never touches the agent list. */}
-      {cmdEditOpen && <CmdFavEditor windowId={windowId} inset={inset} presets={serverShortcuts.command}
+      {cmdEditOpen && <TypedCmdFavEditor windowId={windowId} inset={inset} presets={serverShortcuts.command}
         onChange={refreshCommandShortcuts} onClose={() => closeOverlay(setCmdEditOpen)} />}
       {/* Chat-mode saved-message editor (opened by the ⚙ in the chat quick-bar): one global list whose
           消息/按键 tab picks what you add. Same card as command mode, chat variant. */}
-      {chatEditOpen && <CmdFavEditor variant="chat" inset={inset} presets={serverShortcuts.chat}
+      {chatEditOpen && <TypedCmdFavEditor variant="chat" inset={inset} presets={serverShortcuts.chat}
         onChange={refreshChatShortcuts} onClose={() => closeOverlay(setChatEditOpen)} />}
     </div>
   );
 }
 
-export default forwardRef(BottomDock);
+export default forwardRef<BottomDockHandle, BottomDockProps>(BottomDock);

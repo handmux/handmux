@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 
 const styles = readFileSync(`${process.cwd()}/src/styles.css`, 'utf8');
-const terminalSource = readFileSync(`${process.cwd()}/src/components/Terminal.jsx`, 'utf8');
+const terminalSource = readFileSync(`${process.cwd()}/src/components/Terminal.tsx`, 'utf8');
 
 describe('desktop scrollbar styles', () => {
   it('uses one custom scrollbar skin only for precise pointing devices', () => {
