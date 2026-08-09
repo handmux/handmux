@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import { createAgentRunner } from './agentRunner.js';
 import { parseTmuxRows, tmuxFormat } from '../tmux/format.js';
+import type { CapturedTopology } from './capture.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const NO_SERVER_RE = /^(?:no server running on(?: .+)?|no sessions|error connecting to .+ \(no such file or directory\))$/i;
@@ -10,47 +11,86 @@ const WINDOW_FORMAT = tmuxFormat(['session_id', 'window_id', 'window_index', 'wi
 const PANE_FORMAT = tmuxFormat(['window_id', 'pane_id', 'pane_index', 'pane_active', 'pane_current_path', '@handmux_pane_id']);
 const ACTIVE_FORMAT = tmuxFormat(['session_id', 'window_id', 'pane_id']);
 
-const text = (value) => String(value && typeof value === 'object' && 'stdout' in value ? value.stdout : value ?? '');
-const compare = (a, b) => a < b ? -1 : a > b ? 1 : 0;
-const byId = (a, b) => compare(a.id, b.id);
-const byRuntime = (a, b) => compare(a.runtimeId, b.runtimeId);
-
-function isUuid(value) { return typeof value === 'string' && UUID_RE.test(value); }
-function isNoServer(error) {
-  if (error?.code === 'ENOENT') return true;
-  return NO_SERVER_RE.test(String(error?.stderr || error?.message || error || '').trim());
+type RunTmux = (args: string[]) => unknown | Promise<unknown>;
+type WorkspaceAgentRunner = ReturnType<typeof createAgentRunner>;
+interface LogicalItem { runtimeId: string; optionId: string; id?: string }
+interface SessionItem extends LogicalItem {
+  name: string;
+  lastAttached: number;
+  windowLinks: Array<{ windowId: string; index: number }>;
+  activeWindowId: string | null;
 }
-function isMissingOption(error) { return MISSING_OPTION_RE.test(String(error?.stderr || error?.message || error || '')); }
+interface WindowLinkItem {
+  sessionRuntimeId: string;
+  runtimeId: string;
+  index: number;
+  name: string;
+  active: boolean;
+  layout: string;
+  optionId: string;
+}
+interface WindowItem extends LogicalItem { links: WindowLinkItem[] }
+interface PaneItem extends LogicalItem {
+  windowRuntimeId: string;
+  index: number;
+  active: boolean;
+  cwd: string;
+  agent: null;
+}
+interface ErrorFields { code?: unknown; stderr?: unknown; message?: unknown }
 
-function rows(output, columns, label) {
-  return parseTmuxRows(text(output), columns, label);
+const recordOf = (value: unknown): Record<string, unknown> | null => (
+  value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown> : null
+);
+const text = (value: unknown): string => String(recordOf(value)?.stdout ?? value ?? '');
+const compare = (a: string, b: string): number => a < b ? -1 : a > b ? 1 : 0;
+const byId = (a: { id?: string }, b: { id?: string }): number => compare(a.id ?? '', b.id ?? '');
+const byRuntime = (a: { runtimeId: string }, b: { runtimeId: string }): number => compare(a.runtimeId, b.runtimeId);
+
+function errorFields(error: unknown): ErrorFields {
+  return error && typeof error === 'object' ? error as ErrorFields : {};
+}
+function isUuid(value: unknown): value is string { return typeof value === 'string' && UUID_RE.test(value); }
+function isNoServer(error: unknown): boolean {
+  const fields = errorFields(error);
+  if (fields.code === 'ENOENT') return true;
+  return NO_SERVER_RE.test(String(fields.stderr || fields.message || error || '').trim());
+}
+function isMissingOption(error: unknown): boolean {
+  const fields = errorFields(error);
+  return MISSING_OPTION_RE.test(String(fields.stderr || fields.message || error || ''));
 }
 
-function index(value, label) {
+function rows(output: unknown, columns: number, label: string): string[][] {
+  return parseTmuxRows(text(output), columns, label) as string[][];
+}
+
+function index(value: string, label: string): number {
   if (!/^\d+$/.test(value)) throw new Error(`invalid ${label}`);
   return Number(value);
 }
 
-function active(value, label) {
+function active(value: string, label: string): boolean {
   if (value !== '0' && value !== '1') throw new Error(`invalid ${label}`);
   return value === '1';
 }
 
-function runtime(value, prefix, label) {
+function runtime(value: string, prefix: string, label: string): string {
   if (!new RegExp(`^\\${prefix}\\d+$`).test(value)) throw new Error(`invalid ${label}`);
   return value;
 }
 
-function logicalAllocator(randomUUID) {
-  const used = new Set();
+function logicalAllocator(randomUUID: () => string) {
+  const used = new Set<string>();
   return {
-    accept(candidate) {
+    accept(candidate: unknown): string | null {
       const id = candidate;
       if (!isUuid(id) || used.has(id)) return null;
       used.add(id);
       return id;
     },
-    fresh() {
+    fresh(): string {
       for (let tries = 0; tries < 100; tries++) {
         const id = randomUUID();
         if (isUuid(id) && !used.has(id)) { used.add(id); return id; }
@@ -60,21 +100,25 @@ function logicalAllocator(randomUUID) {
   };
 }
 
-function requireLogicalId(value, label) {
+function requireLogicalId(value: unknown, label: string): string {
   if (!isUuid(value)) throw new Error(`${label} must be a UUID`);
   return value;
 }
 
-function ephemeralLogicalId(option, runtimeId) {
+function logicalId(item: { id?: string }, label: string): string {
+  return requireLogicalId(item.id, label);
+}
+
+function ephemeralLogicalId(option: string, runtimeId: string): string {
   const hash = crypto.createHash('sha256').update(`${option}\0${runtimeId}`).digest('hex');
   return `${hash.slice(0, 8)}-${hash.slice(8, 12)}-${hash.slice(12, 16)}-${hash.slice(16, 20)}-${hash.slice(20, 32)}`;
 }
 
-function requireCreatedRuntime(value, prefix, label) {
+function requireCreatedRuntime(value: string, prefix: string, label: string): string {
   return runtime(value, prefix, label);
 }
 
-function isTmuxLayout(value) {
+function isTmuxLayout(value: unknown): value is string {
   if (typeof value !== 'string' || value.length === 0 || value.length > 8192) return false;
   if (!/^[0-9a-f]{4},\d+x\d+,\d+,\d+(?:,\d+|[\[{])/i.test(value)) return false;
   if (!/^[0-9a-fx,{}\[\]]+$/i.test(value)) return false;
@@ -89,38 +133,49 @@ function isTmuxLayout(value) {
   return stack.length === 0;
 }
 
-function errorText(error) {
+function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function withCleanupError(error, cleanupError) {
+function withCleanupError(error: unknown, cleanupError: unknown): unknown {
   if (!cleanupError) return error;
   const combined = new Error(`${errorText(error)}; cleanup failed: ${errorText(cleanupError)}`);
   combined.cause = error;
   return combined;
 }
 
-export function createdTargetGuard(created) {
-  return (target) => {
+export function createdTargetGuard(created: ReadonlySet<string>): (target: string) => string {
+  return (target: string): string => {
     if (!created.has(target)) throw new Error(`workspace target was not created by this restore: ${target}`);
     return target;
   };
 }
 
-export function createWorkspaceTmux({ run, randomUUID = crypto.randomUUID, agentRunner = createAgentRunner(), readOnly = false } = {}) {
-  if (typeof run !== 'function') throw new Error('workspace tmux run is required');
-  const created = new Set();
+export function createWorkspaceTmux({
+  run: inputRun,
+  randomUUID = crypto.randomUUID,
+  agentRunner = createAgentRunner(),
+  readOnly = false,
+}: {
+  run?: RunTmux;
+  randomUUID?: () => string;
+  agentRunner?: WorkspaceAgentRunner;
+  readOnly?: boolean;
+} = {}) {
+  if (typeof inputRun !== 'function') throw new Error('workspace tmux run is required');
+  const run = inputRun;
+  const created = new Set<string>();
   const guard = createdTargetGuard(created);
-  const sessionWindows = new Map();
-  const windowSession = new Map();
-  const windowPanes = new Map();
-  const paneWindow = new Map();
+  const sessionWindows = new Map<string, Set<string>>();
+  const windowSession = new Map<string, string>();
+  const windowPanes = new Map<string, Set<string>>();
+  const paneWindow = new Map<string, string>();
 
-  function ensureWritable() {
+  function ensureWritable(): void {
     if (readOnly) throw new Error('workspace tmux adapter is read-only');
   }
 
-  function trackWindow(sessionId, windowId, paneId) {
+  function trackWindow(sessionId: string, windowId: string, paneId: string): void {
     const windows = sessionWindows.get(sessionId) || new Set();
     windows.add(windowId);
     sessionWindows.set(sessionId, windows);
@@ -129,14 +184,14 @@ export function createWorkspaceTmux({ run, randomUUID = crypto.randomUUID, agent
     paneWindow.set(paneId, windowId);
   }
 
-  function trackPane(targetPaneId, paneId) {
+  function trackPane(targetPaneId: string, paneId: string): void {
     const windowId = paneWindow.get(targetPaneId);
     if (!windowId) throw new Error(`workspace pane owner is unavailable: ${targetPaneId}`);
-    windowPanes.get(windowId).add(paneId);
+    windowPanes.get(windowId)?.add(paneId);
     paneWindow.set(paneId, windowId);
   }
 
-  function forgetWindow(windowId) {
+  function forgetWindow(windowId: string): void {
     for (const paneId of windowPanes.get(windowId) || []) {
       created.delete(paneId);
       paneWindow.delete(paneId);
@@ -148,13 +203,13 @@ export function createWorkspaceTmux({ run, randomUUID = crypto.randomUUID, agent
     created.delete(windowId);
   }
 
-  function forgetSession(sessionId) {
+  function forgetSession(sessionId: string): void {
     for (const windowId of sessionWindows.get(sessionId) || []) forgetWindow(windowId);
     sessionWindows.delete(sessionId);
     created.delete(sessionId);
   }
 
-  function revokeCreatedTargets() {
+  function revokeCreatedTargets(): void {
     created.clear();
     sessionWindows.clear();
     windowSession.clear();
@@ -162,15 +217,15 @@ export function createWorkspaceTmux({ run, randomUUID = crypto.randomUUID, agent
     paneWindow.clear();
   }
 
-  async function cleanupSteps(steps) {
-    const failures = [];
+  async function cleanupSteps(steps: Array<() => unknown | Promise<unknown>>): Promise<void> {
+    const failures: string[] = [];
     for (const step of steps) {
       try { await step(); } catch (error) { failures.push(errorText(error)); }
     }
     if (failures.length) throw new Error(failures.join('; '));
   }
 
-  async function cleanupSession(sessionId, windowId, paneId) {
+  async function cleanupSession(sessionId: string, windowId: string, paneId: string): Promise<void> {
     let killed = false;
     try {
       await cleanupSteps([
@@ -184,7 +239,7 @@ export function createWorkspaceTmux({ run, randomUUID = crypto.randomUUID, agent
     }
   }
 
-  async function cleanupWindow(windowId, paneId) {
+  async function cleanupWindow(windowId: string, paneId: string): Promise<void> {
     let killed = false;
     try {
       await cleanupSteps([
@@ -197,7 +252,7 @@ export function createWorkspaceTmux({ run, randomUUID = crypto.randomUUID, agent
     }
   }
 
-  async function cleanupPane(paneId) {
+  async function cleanupPane(paneId: string): Promise<void> {
     let killed = false;
     try {
       await cleanupSteps([
@@ -207,14 +262,21 @@ export function createWorkspaceTmux({ run, randomUUID = crypto.randomUUID, agent
     } finally {
       if (killed) {
         created.delete(paneId);
-        windowPanes.get(paneWindow.get(paneId))?.delete(paneId);
+        const owner = paneWindow.get(paneId);
+        if (owner) windowPanes.get(owner)?.delete(paneId);
         paneWindow.delete(paneId);
       }
     }
   }
 
-  async function observeEnvironment({ readOnly: observeReadOnly = readOnly } = {}) {
-    let current;
+  async function observeEnvironment({
+    readOnly: observeReadOnly = readOnly,
+  }: { readOnly?: boolean } = {}): Promise<
+    { status: 'present'; tmuxServerId: string }
+    | { status: 'absent'; tmuxServerId: null }
+    | { status: 'unknown' }
+  > {
+    let current: string;
     try {
       current = text(await run(['show-options', '-gv', '@handmux_server_id'])).replace(/\r?\n$/, '');
     } catch (error) {
@@ -234,20 +296,28 @@ export function createWorkspaceTmux({ run, randomUUID = crypto.randomUUID, agent
     }
   }
 
-  async function assignLogicalIds(items, option, scopeArgs, { readOnly: assignReadOnly = readOnly } = {}) {
+  async function assignLogicalIds<T extends LogicalItem>(
+    items: T[],
+    option: string,
+    scopeArgs: string[],
+    { readOnly: assignReadOnly = readOnly }: { readOnly?: boolean } = {},
+  ): Promise<void> {
     const allocator = logicalAllocator(randomUUID);
     for (const item of [...items].sort(byRuntime)) {
       const accepted = allocator.accept(item.optionId);
-      const generated = !accepted && (assignReadOnly
+      const generated = accepted ? null : assignReadOnly
         ? allocator.accept(ephemeralLogicalId(option, item.runtimeId))
-        : allocator.fresh());
-      item.id = accepted || generated;
-      if (!item.id) throw new Error(`could not allocate a read-only logical id for ${item.runtimeId}`);
+        : allocator.fresh();
+      const allocated = accepted ?? generated;
+      if (!allocated) throw new Error(`could not allocate a read-only logical id for ${item.runtimeId}`);
+      item.id = allocated;
       if (!accepted && !assignReadOnly) await run(['set-option', ...scopeArgs, '-t', item.runtimeId, option, item.id]);
     }
   }
 
-  async function captureTopology({ readOnly: captureReadOnly = readOnly } = {}) {
+  async function captureTopology({
+    readOnly: captureReadOnly = readOnly,
+  }: { readOnly?: boolean } = {}): Promise<CapturedTopology | { status: 'unknown'; error: string }> {
     try {
       const environment = await observeEnvironment({ readOnly: captureReadOnly });
       if (environment.status === 'absent') return { status: 'empty', tmuxVersion: 'unknown', active: null, sessions: [], windows: [] };
@@ -255,7 +325,7 @@ export function createWorkspaceTmux({ run, randomUUID = crypto.randomUUID, agent
 
       const tmuxVersion = text(await run(['-V'])).trim().replace(/^tmux\s+/, '');
       if (!tmuxVersion) throw new Error('invalid tmux version');
-      let sessionFields;
+      let sessionFields: string[][];
       try { sessionFields = rows(await run(['list-sessions', '-F', SESSION_FORMAT]), 4, 'session'); }
       catch (error) {
         if (isNoServer(error)) return { status: 'empty', tmuxVersion: 'unknown', active: null, sessions: [], windows: [] };
@@ -263,7 +333,7 @@ export function createWorkspaceTmux({ run, randomUUID = crypto.randomUUID, agent
       }
       if (sessionFields.length === 0) return { status: 'empty', tmuxVersion: 'unknown', active: null, sessions: [], windows: [] };
 
-      const sessions = sessionFields.map(([runtimeId, name, lastAttached, optionId]) => ({
+      const sessions: SessionItem[] = sessionFields.map(([runtimeId, name, lastAttached, optionId]): SessionItem => ({
         runtimeId: runtime(runtimeId, '$', 'session runtime id'), name,
         lastAttached: index(lastAttached === '' ? '0' : lastAttached, 'session last attached'), optionId,
         windowLinks: [], activeWindowId: null,
@@ -273,20 +343,20 @@ export function createWorkspaceTmux({ run, randomUUID = crypto.randomUUID, agent
       const sessionByRuntime = new Map(sessions.map((item) => [item.runtimeId, item]));
 
       const windowFields = rows(await run(['list-windows', '-a', '-F', WINDOW_FORMAT]), 7, 'window');
-      const windowLinks = windowFields.map(([sessionRuntimeId, runtimeId, windowIndex, name, isActive, layout, optionId]) => {
+      const windowLinks: WindowLinkItem[] = windowFields.map(([sessionRuntimeId, runtimeId, windowIndex, name, isActive, layout, optionId]) => {
         if (!sessionByRuntime.has(sessionRuntimeId)) throw new Error('window references unknown session');
         return {
           sessionRuntimeId, runtimeId: runtime(runtimeId, '@', 'window runtime id'), index: index(windowIndex, 'window index'),
           name, active: active(isActive, 'window active'), layout, optionId,
         };
       });
-      const groupedWindows = new Map();
+      const groupedWindows = new Map<string, WindowLinkItem[]>();
       for (const link of windowLinks) {
         const group = groupedWindows.get(link.runtimeId) || [];
         group.push(link);
         groupedWindows.set(link.runtimeId, group);
       }
-      const windows = [...groupedWindows].map(([runtimeId, links]) => {
+      const windows: WindowItem[] = [...groupedWindows].map(([runtimeId, links]): WindowItem => {
         const optionIds = new Set(links.map((item) => item.optionId).filter(Boolean));
         if (optionIds.size > 1) throw new Error('linked window has conflicting logical ids');
         return { runtimeId, optionId: optionIds.values().next().value || '', links };
@@ -297,8 +367,10 @@ export function createWorkspaceTmux({ run, randomUUID = crypto.randomUUID, agent
       for (const window of windows) {
         for (const link of window.links) {
           const session = sessionByRuntime.get(link.sessionRuntimeId);
-          session.windowLinks.push({ windowId: window.id, index: link.index });
-          if (link.active) session.activeWindowId = window.id;
+          if (!session) throw new Error('window references unknown session');
+          const windowId = logicalId(window, 'window logical id');
+          session.windowLinks.push({ windowId, index: link.index });
+          if (link.active) session.activeWindowId = windowId;
         }
       }
       for (const session of sessions) {
@@ -307,16 +379,16 @@ export function createWorkspaceTmux({ run, randomUUID = crypto.randomUUID, agent
       }
 
       const paneFields = rows(await run(['list-panes', '-a', '-F', PANE_FORMAT]), 6, 'pane');
-      const paneByRuntime = new Map();
+      const paneByRuntime = new Map<string, PaneItem>();
       for (const [windowRuntimeId, runtimeId, paneIndex, isActive, cwd, optionId] of paneFields) {
         if (!windowByRuntime.has(windowRuntimeId)) throw new Error('pane references unknown window');
-        const pane = {
+        const pane: PaneItem = {
           windowRuntimeId, runtimeId: runtime(runtimeId, '%', 'pane runtime id'), index: index(paneIndex, 'pane index'),
           active: active(isActive, 'pane active'), cwd, optionId, agent: null,
         };
         const existing = paneByRuntime.get(pane.runtimeId);
         if (existing) {
-          const fields = (item) => [item.windowRuntimeId, item.index, item.active, item.cwd, item.optionId];
+          const fields = (item: PaneItem): unknown[] => [item.windowRuntimeId, item.index, item.active, item.cwd, item.optionId];
           if (JSON.stringify(fields(existing)) !== JSON.stringify(fields(pane))) {
             throw new Error('duplicate pane runtime id has conflicting fields');
           }
@@ -329,19 +401,26 @@ export function createWorkspaceTmux({ run, randomUUID = crypto.randomUUID, agent
 
       const canonicalSessions = sessions.sort(byId);
       const canonicalWindows = windows.map((window) => {
-        const owner = [...window.links].sort((a, b) => compare(sessionByRuntime.get(a.sessionRuntimeId).id, sessionByRuntime.get(b.sessionRuntimeId).id))[0];
+        const owner = [...window.links].sort((a, b) => compare(
+          logicalId(sessionByRuntime.get(a.sessionRuntimeId) ?? {}, 'owner session logical id'),
+          logicalId(sessionByRuntime.get(b.sessionRuntimeId) ?? {}, 'owner session logical id'),
+        ))[0];
+        if (!owner) throw new Error('window has no owner session');
         const windowPanes = panes.filter((pane) => pane.windowRuntimeId === window.runtimeId).sort(byId);
         const activePane = windowPanes.find((pane) => pane.active);
         if (!activePane) throw new Error('window has no active pane');
         return {
-          id: window.id, runtimeId: window.runtimeId, name: owner.name, index: owner.index, layout: owner.layout,
-          activePaneId: activePane.id,
-          panes: windowPanes.map(({ id, runtimeId, index: paneIndex, cwd, agent }) => ({ id, runtimeId, index: paneIndex, cwd, agent })),
+          id: logicalId(window, 'window logical id'), runtimeId: window.runtimeId, name: owner.name, index: owner.index, layout: owner.layout,
+          activePaneId: logicalId(activePane, 'active pane logical id'),
+          panes: windowPanes.map((pane) => ({
+            id: logicalId(pane, 'pane logical id'), runtimeId: pane.runtimeId, index: pane.index, cwd: pane.cwd, agent: pane.agent,
+          })),
         };
       }).sort(byId);
 
       const maxAttached = Math.max(...canonicalSessions.map((session) => session.lastAttached));
       const selected = canonicalSessions.find((session) => session.lastAttached === maxAttached);
+      if (!selected) throw new Error('tmux has no selected session');
       const [activeSessionRuntime, activeWindowRuntime, activePaneRuntime] = rows(
         await run(['display-message', '-p', '-t', selected.runtimeId, ACTIVE_FORMAT]), 3, 'active path',
       )[0] || [];
@@ -352,16 +431,37 @@ export function createWorkspaceTmux({ run, randomUUID = crypto.randomUUID, agent
 
       return {
         status: 'ok', tmuxVersion,
-        active: { sessionId: activeSession.id, windowId: activeWindow.id, paneId: activePane.id },
-        sessions: canonicalSessions.map(({ id, runtimeId, name, windowLinks, activeWindowId }) => ({ id, runtimeId, name, windowLinks, activeWindowId })),
+        active: {
+          sessionId: logicalId(activeSession, 'active session logical id'),
+          windowId: logicalId(activeWindow, 'active window logical id'),
+          paneId: logicalId(activePane, 'active pane logical id'),
+        },
+        sessions: canonicalSessions.map((session) => ({
+          id: logicalId(session, 'session logical id'), runtimeId: session.runtimeId, name: session.name,
+          windowLinks: session.windowLinks, activeWindowId: requireLogicalId(session.activeWindowId, 'active window logical id'),
+        })),
         windows: canonicalWindows,
       };
     } catch (error) {
-      return { status: 'unknown', error: error?.message || String(error) };
+      return { status: 'unknown', error: errorText(error) };
     }
   }
 
-  async function createTemporarySession({ cwd, sessionLogicalId, windowLogicalId, paneLogicalId, windowName, windowIndex }) {
+  async function createTemporarySession({
+    cwd,
+    sessionLogicalId,
+    windowLogicalId,
+    paneLogicalId,
+    windowName,
+    windowIndex,
+  }: {
+    cwd: string;
+    sessionLogicalId: string;
+    windowLogicalId?: string;
+    paneLogicalId?: string;
+    windowName?: string;
+    windowIndex?: number;
+  }): Promise<{ sessionId: string; windowId: string; paneId: string; name: string }> {
     ensureWritable();
     requireLogicalId(sessionLogicalId, 'sessionLogicalId');
     const hasSeed = [windowLogicalId, paneLogicalId, windowName, windowIndex].some((value) => value !== undefined);
@@ -369,18 +469,20 @@ export function createWorkspaceTmux({ run, randomUUID = crypto.randomUUID, agent
       requireLogicalId(windowLogicalId, 'windowLogicalId');
       requireLogicalId(paneLogicalId, 'paneLogicalId');
       if (typeof windowName !== 'string' || !windowName) throw new Error('windowName must be a non-empty string');
-      if (!Number.isInteger(windowIndex) || windowIndex < 0) throw new Error('windowIndex must be a non-negative integer');
+      if (typeof windowIndex !== 'number' || !Number.isInteger(windowIndex) || windowIndex < 0) {
+        throw new Error('windowIndex must be a non-negative integer');
+      }
     }
     const name = `hm-r-${randomUUID().replaceAll('-', '').slice(0, 8)}`;
     if (!/^hm-r-[0-9a-f]{8}$/i.test(name)) throw new Error('could not allocate temporary session name');
     const args = ['new-session', '-d', '-P', '-F', tmuxFormat(['session_id', 'window_id', 'pane_id', 'window_index']), '-s', name];
-    if (hasSeed) args.push('-n', windowName);
+    if (hasSeed) args.push('-n', windowName as string);
     args.push('-c', cwd);
     const output = await run(args);
-    let sessionId;
-    let windowId;
-    let paneId;
-    let seedIndex;
+    let sessionId: string;
+    let windowId: string;
+    let paneId: string;
+    let seedIndex: number;
     try {
       const parsed = rows(output, 4, 'created session')[0];
       if (!parsed) throw new Error('tmux did not return created session ids');
@@ -397,11 +499,11 @@ export function createWorkspaceTmux({ run, randomUUID = crypto.randomUUID, agent
     created.add(sessionId); created.add(windowId); created.add(paneId);
     trackWindow(sessionId, windowId, paneId);
     try {
-      const targetIndex = hasSeed ? windowIndex : 9999;
+      const targetIndex = hasSeed ? windowIndex as number : 9999;
       if (seedIndex !== targetIndex) await run(['move-window', '-s', guard(windowId), '-t', `${guard(sessionId)}:${targetIndex}`]);
       if (hasSeed) {
-        await run(['set-option', '-p', '-t', guard(paneId), '@handmux_pane_id', paneLogicalId]);
-        await run(['set-option', '-w', '-t', guard(windowId), '@handmux_window_id', windowLogicalId]);
+        await run(['set-option', '-p', '-t', guard(paneId), '@handmux_pane_id', paneLogicalId as string]);
+        await run(['set-option', '-w', '-t', guard(windowId), '@handmux_window_id', windowLogicalId as string]);
       }
       // Set the session id last: after this succeeds the helper has no remaining fallible setup step.
       await run(['set-option', '-t', guard(sessionId), '@handmux_session_id', sessionLogicalId]);
@@ -413,7 +515,19 @@ export function createWorkspaceTmux({ run, randomUUID = crypto.randomUUID, agent
     return { sessionId, windowId, paneId, name };
   }
 
-  async function createWindow(sessionId, { name, index: windowIndex, cwd, windowLogicalId, paneLogicalId }) {
+  async function createWindow(sessionId: string, {
+    name,
+    index: windowIndex,
+    cwd,
+    windowLogicalId,
+    paneLogicalId,
+  }: {
+    name: string;
+    index: number;
+    cwd: string;
+    windowLogicalId: string;
+    paneLogicalId: string;
+  }): Promise<{ windowId: string; paneId: string }> {
     ensureWritable();
     guard(sessionId);
     if (!Number.isInteger(windowIndex) || windowIndex < 0) throw new Error('window index must be a non-negative integer');
@@ -437,7 +551,10 @@ export function createWorkspaceTmux({ run, randomUUID = crypto.randomUUID, agent
     return { windowId, paneId };
   }
 
-  async function splitPane(targetPaneId, { cwd, paneLogicalId }) {
+  async function splitPane(
+    targetPaneId: string,
+    { cwd, paneLogicalId }: { cwd: string; paneLogicalId: string },
+  ): Promise<string> {
     ensureWritable();
     guard(targetPaneId);
     requireLogicalId(paneLogicalId, 'paneLogicalId');
@@ -455,7 +572,12 @@ export function createWorkspaceTmux({ run, randomUUID = crypto.randomUUID, agent
     return paneId;
   }
 
-  async function linkWindow(windowId, sessionId, windowIndex, { existing = false } = {}) {
+  async function linkWindow(
+    windowId: string,
+    sessionId: string,
+    windowIndex: number,
+    { existing = false }: { existing?: boolean } = {},
+  ): Promise<void> {
     ensureWritable();
     if (existing) runtime(windowId, '@', 'existing window id');
     else guard(windowId);
@@ -463,22 +585,24 @@ export function createWorkspaceTmux({ run, randomUUID = crypto.randomUUID, agent
     if (!Number.isInteger(windowIndex) || windowIndex < 0) throw new Error('window index must be a non-negative integer');
     await run(['link-window', '-s', windowId, '-t', `${sessionId}:${windowIndex}`]);
   }
-  async function applyLayout(windowId, layout) {
+  async function applyLayout(windowId: string, layout: string): Promise<void> {
     ensureWritable();
     const target = guard(windowId);
     if (!isTmuxLayout(layout)) throw new Error('invalid workspace layout');
     await run(['select-layout', '-t', target, layout]);
   }
-  async function selectPane(paneId) { ensureWritable(); await run(['select-pane', '-t', guard(paneId)]); }
-  async function selectWindow(windowId) { ensureWritable(); await run(['select-window', '-t', guard(windowId)]); }
-  async function selectWindowInSession(sessionId, windowIndex) {
+  async function selectPane(paneId: string): Promise<void> { ensureWritable(); await run(['select-pane', '-t', guard(paneId)]); }
+  async function selectWindow(windowId: string): Promise<void> { ensureWritable(); await run(['select-window', '-t', guard(windowId)]); }
+  async function selectWindowInSession(sessionId: string, windowIndex: number): Promise<void> {
     ensureWritable();
     guard(sessionId);
     if (!Number.isInteger(windowIndex) || windowIndex < 0) throw new Error('window index must be a non-negative integer');
     await run(['select-window', '-t', `${sessionId}:${windowIndex}`]);
   }
-  async function renameCreatedSession(sessionId, name) { ensureWritable(); await run(['rename-session', '-t', guard(sessionId), name]); }
-  async function killCreatedSession(sessionId) {
+  async function renameCreatedSession(sessionId: string, name: string): Promise<void> {
+    ensureWritable(); await run(['rename-session', '-t', guard(sessionId), name]);
+  }
+  async function killCreatedSession(sessionId: string): Promise<void> {
     ensureWritable();
     guard(sessionId);
     let killed = false;
@@ -491,13 +615,13 @@ export function createWorkspaceTmux({ run, randomUUID = crypto.randomUUID, agent
       if (killed) forgetSession(sessionId);
     }
   }
-  async function killCreatedWindow(windowId) {
+  async function killCreatedWindow(windowId: string): Promise<void> {
     ensureWritable();
     await run(['kill-window', '-t', guard(windowId)]);
     forgetWindow(windowId);
   }
 
-  async function startAgent(paneId, cmd, args = []) {
+  async function startAgent(paneId: string, cmd: string, args: string[] = []): Promise<void> {
     ensureWritable();
     guard(paneId);
     const valid = cmd === 'claude'
@@ -513,7 +637,7 @@ export function createWorkspaceTmux({ run, randomUUID = crypto.randomUUID, agent
       const ready = await agentRunner.waitReady(paneId);
       if (ready?.status !== 'ready') throw new Error(ready?.error || 'agent failed before readiness');
     } catch (error) {
-      const cleanupFailures = [];
+      const cleanupFailures: unknown[] = [];
       if (foregroundStarted) {
         try { await run(['send-keys', '-t', paneId, 'C-c']); } catch (failure) { cleanupFailures.push(failure); }
       }
@@ -527,7 +651,7 @@ export function createWorkspaceTmux({ run, randomUUID = crypto.randomUUID, agent
     }
   }
 
-  async function topologyFingerprint() {
+  async function topologyFingerprint(): Promise<string | { status: 'unknown'; error: string }> {
     const topology = await captureTopology();
     if (topology.status === 'unknown') return topology;
     return crypto.createHash('sha256').update(JSON.stringify(topology)).digest('hex');
