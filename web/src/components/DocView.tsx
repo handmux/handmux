@@ -10,7 +10,47 @@ import { PlayIcon, PauseIcon, StopIcon } from './icons.jsx';
 import ImageViewer from './ImageViewer.jsx';
 import { t } from '../i18n';
 
-const LAST = DOC_FONT_SIZES.length - 1;
+export interface DocViewProps {
+  type: string;
+  name: string;
+  content?: string | null;
+}
+
+interface DocSpeechController {
+  supported: boolean;
+  playing: boolean;
+  paused: boolean;
+  idx: number;
+  rate: number;
+  play: (sentences: readonly string[]) => void;
+  pause: () => void;
+  resume: () => void;
+  stop: () => void;
+  cycleRate: () => void;
+}
+
+const useTypedDocSpeech = useDocSpeech as unknown as () => DocSpeechController;
+const collectSentences = markSentences as unknown as (root: HTMLElement | null) => string[];
+const rawFontSizes: unknown = DOC_FONT_SIZES;
+const FONT_SIZES: readonly number[] = Array.isArray(rawFontSizes)
+  && rawFontSizes.length > 0
+  && rawFontSizes.every((value) => typeof value === 'number' && Number.isFinite(value))
+  ? rawFontSizes
+  : [10, 11, 12, 13, 14, 16, 18, 20, 22];
+const LAST = FONT_SIZES.length - 1;
+
+const readFontIndex = (): number => {
+  const value: unknown = getDocFontIndex();
+  return typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= LAST
+    ? value
+    : Math.min(4, LAST);
+};
+
+const renderMarkdown = (source: string): string => {
+  const rendered = marked.parse(source, { async: false });
+  if (typeof rendered !== 'string') throw new Error('Synchronous Markdown rendering returned a Promise');
+  return DOMPurify.sanitize(rendered);
+};
 
 // Render one doc. markdown → marked → DOMPurify → injected HTML, with A−/A+ font stepping over a
 // discrete 9-level ladder (persisted, shared across docs). Single-file html → sandboxed iframe with
@@ -20,14 +60,14 @@ const LAST = DOC_FONT_SIZES.length - 1;
 // Markdown docs also get read-aloud (TTS): the play button wraps each sentence in a span (markSentences)
 // the first time, then useDocSpeech speaks them one at a time; the current sentence is highlighted and
 // scrolled into view. HTML docs (iframe, cross-origin) can't be read, so they show no controls.
-export default function DocView({ type, name, content }) {
-  const [fontIdx, setFontIdx] = useState(() => getDocFontIndex());
-  const mdRef = useRef(null);
-  const speech = useDocSpeech();
+export default function DocView({ type, name, content = '' }: DocViewProps) {
+  const [fontIdx, setFontIdx] = useState<number>(readFontIndex);
+  const mdRef = useRef<HTMLDivElement | null>(null);
+  const speech = useTypedDocSpeech();
   useScreenWakeLock(speech.playing && !speech.paused); // screen sleep kills TTS — hold it awake while reading
 
   const html = useMemo(
-    () => (type === 'markdown' ? DOMPurify.sanitize(marked.parse(content || '')) : ''),
+    () => (type === 'markdown' ? renderMarkdown(content || '') : ''),
     [type, content],
   );
 
@@ -54,7 +94,11 @@ export default function DocView({ type, name, content }) {
     return <iframe className="doc-iframe" sandbox="allow-scripts" srcDoc={content || ''} title={name} />;
   }
 
-  const bump = (d) => { const n = Math.min(LAST, Math.max(0, fontIdx + d)); setFontIdx(n); setDocFontIndex(n); };
+  const bump = (delta: number): void => {
+    const next = Math.min(LAST, Math.max(0, fontIdx + delta));
+    setFontIdx(next);
+    setDocFontIndex(next);
+  };
 
   // Plain text / logs / scripts: render verbatim (no markdown, no TTS), just the font-zoom ladder.
   if (type === 'text') {
@@ -66,14 +110,14 @@ export default function DocView({ type, name, content }) {
             <button className="doc-zoom-btn" onClick={() => bump(1)} disabled={fontIdx >= LAST} aria-label={t('doc.fontLarger')}>A+</button>
           </div>
         </div>
-        <pre className="doc-text" style={{ fontSize: `${DOC_FONT_SIZES[fontIdx]}px` }}>{content || ''}</pre>
+        <pre className="doc-text" style={{ fontSize: `${FONT_SIZES[fontIdx]}px` }}>{content || ''}</pre>
       </div>
     );
   }
 
-  const onPlayToggle = () => {
+  const onPlayToggle = (): void => {
     if (speech.playing) { speech.paused ? speech.resume() : speech.pause(); return; }
-    const sentences = markSentences(mdRef.current);
+    const sentences = collectSentences(mdRef.current);
     if (sentences.length) speech.play(sentences);
   };
   const reading = speech.playing && !speech.paused;
@@ -98,7 +142,7 @@ export default function DocView({ type, name, content }) {
           <button className="doc-zoom-btn" onClick={() => bump(1)} disabled={fontIdx >= LAST} aria-label={t('doc.fontLarger')}>A+</button>
         </div>
       </div>
-      <div ref={mdRef} className="doc-md" style={{ fontSize: `${DOC_FONT_SIZES[fontIdx]}px` }}
+      <div ref={mdRef} className="doc-md" style={{ fontSize: `${FONT_SIZES[fontIdx]}px` }}
         dangerouslySetInnerHTML={{ __html: html }} />
     </div>
   );

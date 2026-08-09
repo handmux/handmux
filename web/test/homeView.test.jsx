@@ -36,4 +36,10 @@ describe('HomeView', () => {
     await render({ onOpenDoc: vi.fn() });
     expect(container.querySelector('.home-empty')?.textContent).toContain('新增');
   });
+
+  it('drops malformed recent entries from the localStorage boundary', async () => {
+    getRecentDocs.mockReturnValueOnce([{ path: 7, name: 'bad' }, null, { path: '/home/u/good.md', name: 'good.md' }]);
+    await render({ onOpenDoc: vi.fn() });
+    expect([...container.querySelectorAll('.home-name')].map((node) => node.textContent)).toEqual(['good.md']);
+  });
 });

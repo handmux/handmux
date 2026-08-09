@@ -216,7 +216,7 @@ export default function FileManager({
                   onJumpToCwd={pane ? jumpToCwd : null} refreshKey={refreshKey}
                   pendingFile={pendingShare} onPendingConsumed={onPendingConsumed} overlayActive={open} />}
           </div>
-        ) : <DocView type={cur.type} name={cur.name} content={cur.content} />}
+        ) : <DocView type={cur.type} name={cur.name} content={typeof cur.content === 'string' ? cur.content : ''} />}
       </div>
     </div>
     </OverlayPortal>
