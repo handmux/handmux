@@ -18,7 +18,7 @@ interface ExternalCookie {
   sameSite?: unknown;
   [key: string]: unknown;
 }
-interface CookieContainer extends Record<string, unknown> {
+export interface CookieContainer extends Record<string, unknown> {
   _cookieJar: unknown;
   _pendingSyncCookies: unknown[];
   setJar(serialized: string | null): void;
