@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import type { ChangeEvent, ReactNode, RefObject } from 'react';
 import { notifyEnabled, enableNotifications, disableNotifications, pushSupported, getScriptPushKey } from '../push.js';
 import { PushScriptContent } from './PushScriptSheet.jsx';
 import { getDocHighlight, setDocHighlight } from '../storage.js';
@@ -7,8 +8,69 @@ import { SNAPSHOT_INTERVALS } from '../terminalTransport.js';
 import { useBackButton } from '../hooks/useBackButton.js';
 import { CheckIcon } from './icons.jsx';
 import { canEnableClaudeChatLens } from '../chatLensAvailability.js';
+import type { TerminalHandle } from './Terminal.js';
+import type { SnapshotInterval, TerminalTransport } from '../terminalTransport.js';
+import type { ClaudeHooksStatus } from '../hooks/useServerConfig.js';
 
-const DETAIL_TITLE = {
+type DetailPage = 'language' | 'font' | 'keyboard' | 'transport' | 'tone' | 'feedback' | 'script';
+type SettingsPage = 'root' | DetailPage;
+type ChatTone = 'dusk' | 'ink' | 'light';
+type KeyboardMode = 'auto' | 'mobile' | 'desktop';
+const KEYBOARD_MODES: readonly KeyboardMode[] = ['auto', 'mobile', 'desktop'];
+const TERMINAL_TRANSPORTS: readonly TerminalTransport[] = ['live', 'snapshot'];
+const CHAT_TONES: readonly ChatTone[] = ['dusk', 'ink', 'light'];
+
+interface UpdateRelease {
+  version: string;
+  zh?: string;
+  en?: string;
+}
+
+interface UpdateInfo {
+  current?: string | null;
+  latest?: string | null;
+  updateAvailable?: boolean;
+  whatsNew?: UpdateRelease[];
+}
+
+interface WorkspaceProtection {
+  status?: string;
+  errorCode?: string | null;
+}
+
+type SettingsTerminalHandle = Pick<
+  TerminalHandle,
+  'getFontSize' | 'setFontSize' | 'autoFont' | 'setDocHighlight'
+>;
+
+export interface SettingsProps {
+  open: boolean;
+  onClose: () => void;
+  termRef: RefObject<SettingsTerminalHandle | null>;
+  onOpenChangelog?: () => void;
+  changelogUnread?: boolean;
+  onReloadApp?: () => void;
+  chatTone?: ChatTone;
+  onChatTone?: (tone: ChatTone) => void;
+  claudeChatLensEnabled?: boolean;
+  onClaudeChatLensEnabled?: (enabled: boolean) => void;
+  codexChatLensEnabled?: boolean;
+  onCodexChatLensEnabled?: (enabled: boolean) => void;
+  keyboardMode?: KeyboardMode;
+  onKeyboardMode?: (mode: KeyboardMode) => void;
+  terminalTransport?: TerminalTransport;
+  onTerminalTransport?: (mode: TerminalTransport) => void;
+  snapshotInterval?: SnapshotInterval;
+  onSnapshotInterval?: (interval: SnapshotInterval) => void;
+  hooksStatus?: ClaudeHooksStatus | null;
+  onEnableHooks?: (() => Promise<unknown>) | null;
+  notifUnread?: boolean;
+  onOpenInbox?: () => void;
+  updateInfo?: UpdateInfo | null;
+  workspaceProtection?: WorkspaceProtection | null;
+}
+
+const DETAIL_TITLE: Record<DetailPage, string> = {
   language: 'settings.language',
   font: 'settings.font_size',
   keyboard: 'settings.keyboard_mode',
@@ -18,7 +80,7 @@ const DETAIL_TITLE = {
   script: 'settings.script_push',
 };
 
-function SettingsHeader({ title, onBack }) {
+function SettingsHeader({ title, onBack }: { title: string; onBack: () => void }) {
   return (
     <header className="settings-page-head">
       <button type="button" className="settings-page-back" onClick={onBack} aria-label={t('common.back')}>‹</button>
@@ -28,7 +90,11 @@ function SettingsHeader({ title, onBack }) {
   );
 }
 
-function SettingsGroup({ title, children, footer }) {
+function SettingsGroup({ title, children, footer }: {
+  title: string;
+  children: ReactNode;
+  footer?: ReactNode;
+}) {
   return (
     <section className="settings-page-group">
       <h2>{title}</h2>
@@ -38,7 +104,13 @@ function SettingsGroup({ title, children, footer }) {
   );
 }
 
-function SettingsNavRow({ label, value, onClick, dot = false, disabled = false }) {
+function SettingsNavRow({ label, value, onClick, dot = false, disabled = false }: {
+  label: string;
+  value?: string;
+  onClick: () => void;
+  dot?: boolean;
+  disabled?: boolean;
+}) {
   return (
     <button type="button" className="settings-page-row" onClick={onClick} disabled={disabled}>
       <span className="settings-page-row-label">{label}</span>
@@ -51,7 +123,11 @@ function SettingsNavRow({ label, value, onClick, dot = false, disabled = false }
   );
 }
 
-function SettingsValueRow({ label, value, dot = false }) {
+function SettingsValueRow({ label, value, dot = false }: {
+  label: string;
+  value: string;
+  dot?: boolean;
+}) {
   return (
     <div className="settings-page-row settings-page-value-row">
       <span className="settings-page-row-label">{label}</span>
@@ -63,7 +139,7 @@ function SettingsValueRow({ label, value, dot = false }) {
   );
 }
 
-function SettingsLinkRow({ label, href }) {
+function SettingsLinkRow({ label, href }: { label: string; href: string }) {
   return (
     <a className="settings-page-row" href={href} target="_blank" rel="noreferrer">
       <span className="settings-page-row-label">{label}</span>
@@ -74,7 +150,13 @@ function SettingsLinkRow({ label, href }) {
   );
 }
 
-function SettingsSwitchRow({ label, checked, onChange, disabled = false, busy = false }) {
+function SettingsSwitchRow({ label, checked, onChange, disabled = false, busy = false }: {
+  label: string;
+  checked: boolean;
+  onChange: (event: ChangeEvent<HTMLInputElement>) => void;
+  disabled?: boolean;
+  busy?: boolean;
+}) {
   return (
     <label className={`settings-page-row settings-page-switch${disabled ? ' disabled' : ''}`}>
       <span className="settings-page-row-label">{label}</span>
@@ -90,7 +172,12 @@ function SettingsSwitchRow({ label, checked, onChange, disabled = false, busy = 
   );
 }
 
-function SettingsChoiceGroup({ label, options, value, onChange }) {
+function SettingsChoiceGroup<T extends string | number>({ label, options, value, onChange }: {
+  label: string;
+  options: readonly { value: T; label: string }[];
+  value: T;
+  onChange: (value: T) => void;
+}) {
   return (
     <div className="settings-page-list settings-choice-list" role="group" aria-label={label}>
       {options.map((option) => (
@@ -106,14 +193,15 @@ function SettingsChoiceGroup({ label, options, value, onChange }) {
   );
 }
 
-function UpdateNotice({ updateInfo }) {
+function UpdateNotice({ updateInfo }: { updateInfo: UpdateInfo | null | undefined }) {
   if (!updateInfo?.updateAvailable) return null;
+  const whatsNew = updateInfo.whatsNew || [];
   return (
     <div className="settings-update">
       <div className="settings-update-title">{t('settings.update_available', { v: updateInfo.latest })}</div>
-      {updateInfo.whatsNew?.length > 0 && (
+      {whatsNew.length > 0 && (
         <ul className="settings-update-new">
-          {updateInfo.whatsNew.slice(0, 1).map((release) => (
+          {whatsNew.slice(0, 1).map((release) => (
             <li key={release.version}>
               <span className="settings-update-new-ver">v{release.version}</span>
               {(getLangCode().startsWith('zh') ? release.zh : release.en) || release.en}
@@ -121,11 +209,11 @@ function UpdateNotice({ updateInfo }) {
           ))}
         </ul>
       )}
-      {updateInfo.whatsNew?.length > 1 && (
+      {whatsNew.length > 1 && (
         <details className="settings-update-more">
-          <summary>{t('settings.update_more', { n: updateInfo.whatsNew.length - 1 })}</summary>
+          <summary>{t('settings.update_more', { n: whatsNew.length - 1 })}</summary>
           <ul className="settings-update-new">
-            {updateInfo.whatsNew.slice(1).map((release) => (
+            {whatsNew.slice(1).map((release) => (
               <li key={release.version}>
                 <span className="settings-update-new-ver">v{release.version}</span>
                 {(getLangCode().startsWith('zh') ? release.zh : release.en) || release.en}
@@ -141,7 +229,7 @@ function UpdateNotice({ updateInfo }) {
 
 // Full-screen, browser-local app preferences. Window/pane sizing stays with its concrete management
 // target, while web-preview settings remain in that tool's own menu.
-export default function Settings({ open, onClose, termRef, onOpenChangelog, changelogUnread,
+export default function Settings({ open, onClose, termRef, onOpenChangelog = () => {}, changelogUnread = false,
   onReloadApp = () => window.location.reload(),
   chatTone = 'ink', onChatTone = () => {},
   claudeChatLensEnabled = false, onClaudeChatLensEnabled = () => {},
@@ -152,9 +240,9 @@ export default function Settings({ open, onClose, termRef, onOpenChangelog, chan
   hooksStatus = null, onEnableHooks = null,
   notifUnread = false, onOpenInbox,
   updateInfo = null,
-  workspaceProtection = null }) {
-  const [page, setPage] = useState('root');
-  const [font, setFont] = useState(null);
+  workspaceProtection = null }: SettingsProps) {
+  const [page, setPage] = useState<SettingsPage>('root');
+  const [font, setFont] = useState<{ size: number | null; auto: boolean } | null>(null);
   const [docHl, setDocHl] = useState(getDocHighlight());
   const [notify, setNotify] = useState(notifyEnabled());
   const [notifyBusy, setNotifyBusy] = useState(false);
@@ -162,8 +250,8 @@ export default function Settings({ open, onClose, termRef, onOpenChangelog, chan
   const [notifyDisableConfirm, setNotifyDisableConfirm] = useState(false);
   const [lensHooksBusy, setLensHooksBusy] = useState(false);
   const [lensHooksErr, setLensHooksErr] = useState(false);
-  const [scriptPushKey, setScriptPushKey] = useState(null);
-  const bodyRef = useRef(null);
+  const [scriptPushKey, setScriptPushKey] = useState<string | null>(null);
+  const bodyRef = useRef<HTMLDivElement>(null);
   const rootScrollRef = useRef(0);
 
   const claudeLensLocked = !canEnableClaudeChatLens(hooksStatus);
@@ -190,33 +278,35 @@ export default function Settings({ open, onClose, termRef, onOpenChangelog, chan
 
   if (!open) return null;
 
-  const openPage = (nextPage) => {
+  const openPage = (nextPage: DetailPage): void => {
     if (page === 'root') rootScrollRef.current = bodyRef.current?.scrollTop ?? 0;
     setPage(nextPage);
   };
-  const backToRoot = () => setPage('root');
+  const backToRoot = (): void => setPage('root');
 
-  const stepFont = (delta) => {
+  const stepFont = (delta: number): void => {
     const current = termRef.current?.getFontSize?.();
     const applied = termRef.current?.setFontSize?.((current?.size ?? 14) + delta);
     if (applied != null) setFont({ size: applied, auto: false });
   };
-  const autoFont = () => {
+  const autoFont = (): void => {
     termRef.current?.autoFont?.();
     setFont({ size: null, auto: true });
   };
-  const toggleDocHl = (on) => {
+  const toggleDocHl = (on: boolean): void => {
     setDocHl(on);
     setDocHighlight(on);
     termRef.current?.setDocHighlight?.(on);
   };
 
-  const enableLensHooks = async () => {
+  const enableLensHooks = async (): Promise<void> => {
     setLensHooksBusy(true);
     setLensHooksErr(false);
     try {
       const result = await onEnableHooks?.();
-      if (!result || result.status !== 'installed') setLensHooksErr(true);
+      const status = result !== null && typeof result === 'object' && !Array.isArray(result)
+        ? (result as Record<string, unknown>).status : null;
+      if (status !== 'installed') setLensHooksErr(true);
     } catch {
       setLensHooksErr(true);
     } finally {
@@ -224,7 +314,7 @@ export default function Settings({ open, onClose, termRef, onOpenChangelog, chan
     }
   };
 
-  const setNotificationEnabled = async (enabled) => {
+  const setNotificationEnabled = async (enabled: boolean): Promise<void> => {
     setNotifyBusy(true);
     setNotifyMsg('');
     try {
@@ -237,29 +327,30 @@ export default function Settings({ open, onClose, termRef, onOpenChangelog, chan
         setNotify(false);
         setNotifyMsg(t('settings.notify_disabled'));
       }
-    } catch (error) {
-      setNotifyMsg(error.message || t('settings.notify_failed'));
+    } catch (error: unknown) {
+      setNotifyMsg(error instanceof Error && error.message ? error.message : t('settings.notify_failed'));
     } finally {
       setNotifyBusy(false);
     }
   };
 
-  const changeNotify = (event) => {
+  const changeNotify = (event: ChangeEvent<HTMLInputElement>): void => {
     if (!event.target.checked) {
       setNotifyDisableConfirm(true);
       return;
     }
-    setNotificationEnabled(true);
+    void setNotificationEnabled(true);
   };
 
-  const confirmDisableNotify = () => {
+  const confirmDisableNotify = (): void => {
     setNotifyDisableConfirm(false);
-    setNotificationEnabled(false);
+    void setNotificationEnabled(false);
   };
 
-  const openScriptPush = async () => {
+  const openScriptPush = async (): Promise<void> => {
     try {
-      setScriptPushKey(notifyEnabled() ? await getScriptPushKey() : null);
+      const key: unknown = notifyEnabled() ? await getScriptPushKey() : null;
+      setScriptPushKey(typeof key === 'string' ? key : null);
     } catch {
       setScriptPushKey(null);
     }
@@ -268,8 +359,9 @@ export default function Settings({ open, onClose, termRef, onOpenChangelog, chan
 
   const fontLabel = font?.auto ? t('settings.font_auto') : font?.size ? `${font.size}px` : '—';
   const languageLabel = AVAILABLE.find((language) => language.code === getLangCode())?.label || '—';
-  const protectionReason = ['live-corrupt', 'live-unavailable'].includes(workspaceProtection?.errorCode)
-    ? workspaceProtection.errorCode : 'unknown';
+  const protectionCode = workspaceProtection?.errorCode;
+  const protectionReason = protectionCode === 'live-corrupt' || protectionCode === 'live-unavailable'
+    ? protectionCode : 'unknown';
 
   const claudeLensFooter = claudeLensLocked ? (
     <>
@@ -348,7 +440,7 @@ export default function Settings({ open, onClose, termRef, onOpenChangelog, chan
     </>
   );
 
-  const detailContent = {
+  const detailContent: Record<DetailPage, ReactNode> = {
     language: (
       <SettingsChoiceGroup label={t('settings.language')} value={getLangCode()} onChange={setLang}
         options={AVAILABLE.map((language) => ({ value: language.code, label: language.label }))} />
@@ -368,7 +460,7 @@ export default function Settings({ open, onClose, termRef, onOpenChangelog, chan
     keyboard: (
       <>
         <SettingsChoiceGroup label={t('settings.keyboard_mode')} value={keyboardMode} onChange={onKeyboardMode}
-          options={['auto', 'mobile', 'desktop'].map((mode) => ({
+          options={KEYBOARD_MODES.map((mode) => ({
             value: mode, label: t(`settings.keyboard_mode_${mode}`),
           }))} />
         <p className="settings-detail-note">{t('settings.keyboard_mode_hint')}</p>
@@ -377,7 +469,7 @@ export default function Settings({ open, onClose, termRef, onOpenChangelog, chan
     transport: (
       <>
         <SettingsChoiceGroup label={t('settings.terminal_transport')} value={terminalTransport}
-          onChange={onTerminalTransport} options={['live', 'snapshot'].map((mode) => ({
+          onChange={onTerminalTransport} options={TERMINAL_TRANSPORTS.map((mode) => ({
             value: mode, label: t(`settings.terminal_transport_${mode}`),
           }))} />
         <p className="settings-detail-note">{t('settings.terminal_transport_hint')}</p>
@@ -397,7 +489,7 @@ export default function Settings({ open, onClose, termRef, onOpenChangelog, chan
     tone: (
       <>
         <SettingsChoiceGroup label={t('settings.chat_tone')} value={chatTone} onChange={onChatTone}
-          options={['dusk', 'ink', 'light'].map((tone) => ({
+          options={CHAT_TONES.map((tone) => ({
             value: tone, label: t(`settings.chat_tone_${tone}`),
           }))} />
         <p className="settings-detail-note">{t('settings.chat_tone_hint')}</p>
