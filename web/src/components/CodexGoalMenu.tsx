@@ -4,14 +4,21 @@ import { t } from '../i18n';
 import { useBackButton } from '../hooks/useBackButton.js';
 import { OverlayPortal } from '../overlays/OverlayHost.js';
 import { TargetIcon, XIcon } from './icons.jsx';
+import type {
+  CodexGoal,
+  CodexGoalEvent,
+  CodexGoalStatus,
+} from '../../../server/src/codexStreamProtocol.js';
 
-const TERMINAL_GOAL_STATUSES = new Set(['blocked', 'usageLimited', 'budgetLimited', 'complete']);
+const TERMINAL_GOAL_STATUSES: ReadonlySet<CodexGoalStatus> = new Set([
+  'blocked', 'usageLimited', 'budgetLimited', 'complete',
+]);
 
-export function isCodexGoalTerminal(goal) {
-  return TERMINAL_GOAL_STATUSES.has(goal?.status);
+export function isCodexGoalTerminal(goal: CodexGoal | null | undefined): boolean {
+  return goal ? TERMINAL_GOAL_STATUSES.has(goal.status) : false;
 }
 
-export function codexGoalStatusLabel(status) {
+export function codexGoalStatusLabel(status: string | null | undefined): string {
   if (status === 'active') return t('chat.goal.statusActive');
   if (status === 'paused') return t('chat.goal.statusPaused');
   if (status === 'blocked') return t('chat.goal.statusBlocked');
@@ -21,7 +28,12 @@ export function codexGoalStatusLabel(status) {
   return status || '';
 }
 
-export function CodexGoalBar({ goal, onOpen }) {
+interface CodexGoalBarProps {
+  goal: CodexGoal;
+  onOpen: () => void;
+}
+
+export function CodexGoalBar({ goal, onOpen }: CodexGoalBarProps) {
   if (!goal?.objective || isCodexGoalTerminal(goal)) return null;
   const title = t('chat.goal.title');
   const status = codexGoalStatusLabel(goal.status);
@@ -41,7 +53,7 @@ export function CodexGoalBar({ goal, onOpen }) {
   );
 }
 
-function goalEventLabel(goal, event) {
+function goalEventLabel(goal: CodexGoal, event?: CodexGoalEvent | null): string {
   if (event === 'set') return t('chat.goal.eventSet');
   if (event === 'restarted') return t('chat.goal.eventRestarted');
   if (goal?.status === 'complete' || event === 'complete') return t('chat.goal.eventComplete');
@@ -51,7 +63,13 @@ function goalEventLabel(goal, event) {
   return codexGoalStatusLabel(goal?.status) || t('chat.goal.title');
 }
 
-export function CodexGoalCard({ goal, event, onOpen }) {
+interface CodexGoalCardProps {
+  goal: CodexGoal;
+  event?: CodexGoalEvent | null;
+  onOpen: (goal: CodexGoal) => void;
+}
+
+export function CodexGoalCard({ goal, event, onOpen }: CodexGoalCardProps) {
   if (!goal?.objective) return null;
   const label = goalEventLabel(goal, event);
   const userInitiated = event === 'set' || event === 'restarted';
@@ -68,13 +86,13 @@ export function CodexGoalCard({ goal, event, onOpen }) {
   );
 }
 
-function sameGoal(left, right) {
+function sameGoal(left: CodexGoal | null, right: CodexGoal | null): boolean {
   if (!left || !right) return false;
   if (left.createdAt != null && right.createdAt != null) return left.createdAt === right.createdAt;
   return left.objective === right.objective;
 }
 
-function GoalMeta({ goal }) {
+function GoalMeta({ goal }: { goal: CodexGoal }) {
   const tokens = Number(goal?.tokensUsed);
   const budget = goal?.tokenBudget == null ? Number.NaN : Number(goal.tokenBudget);
   const elapsed = Number(goal?.timeUsedSeconds);
@@ -90,11 +108,35 @@ function GoalMeta({ goal }) {
   );
 }
 
+export interface CodexGoalMenuProps {
+  open: boolean;
+  pane: string;
+  editOnOpen?: boolean;
+  goalSnapshot?: CodexGoal | null;
+  onClose: () => void;
+  onAuthFail?: () => void;
+  onNotice?: (message: string) => void;
+  onGoalChange?: (goal: CodexGoal | null) => void;
+  portal?: boolean;
+  chatTone?: string;
+  keyboardInset?: number;
+}
+
+const errorMessage = (error: unknown, fallback: string): string => {
+  if (error !== null && typeof error === 'object') {
+    if ('serverError' in error && typeof error.serverError === 'string' && error.serverError) {
+      return error.serverError;
+    }
+    if ('message' in error && typeof error.message === 'string' && error.message) return error.message;
+  }
+  return fallback;
+};
+
 export default function CodexGoalMenu({
   open, pane, editOnOpen, goalSnapshot = null, onClose, onAuthFail, onNotice = () => {}, onGoalChange,
   portal = false, chatTone = 'dusk', keyboardInset = 0,
-}) {
-  const [goal, setGoal] = useState(null);
+}: CodexGoalMenuProps) {
+  const [goal, setGoal] = useState<CodexGoal | null>(null);
   const [draft, setDraft] = useState('');
   const [editing, setEditing] = useState(false);
   const [restarting, setRestarting] = useState(false);
@@ -130,10 +172,10 @@ export default function CodexGoalMenu({
       setDraft(next?.objective || '');
       setHistorical(!!goalSnapshot && !matches);
       setEditing(!goalSnapshot && (editOnOpen || !next));
-    }).catch((err) => {
+    }).catch((error: unknown) => {
       if (requestSeq !== requestSeqRef.current) return;
-      if (err instanceof UnauthorizedError) onAuthFail?.();
-      else setError(err?.serverError || err?.message || t('chat.goal.loadFailed'));
+      if (error instanceof UnauthorizedError) onAuthFail?.();
+      else setError(errorMessage(error, t('chat.goal.loadFailed')));
     }).finally(() => {
       if (requestSeq === requestSeqRef.current) setLoading(false);
     });
@@ -144,7 +186,7 @@ export default function CodexGoalMenu({
 
   if (!open) return null;
 
-  const save = async () => {
+  const save = async (): Promise<void> => {
     const objective = draft.trim();
     if (!objective || objective.length > 4_000 || saving) return;
     setSaving(true);
@@ -160,13 +202,13 @@ export default function CodexGoalMenu({
       setEditing(false);
       setRestarting(false);
       onNotice(t(restarting ? 'chat.goal.restarted' : goal ? 'chat.goal.updated' : 'chat.goal.created'));
-    } catch (err) {
-      if (err instanceof UnauthorizedError) onAuthFail?.();
-      else setError(err?.serverError || err?.message || t('chat.goal.saveFailed'));
+    } catch (error: unknown) {
+      if (error instanceof UnauthorizedError) onAuthFail?.();
+      else setError(errorMessage(error, t('chat.goal.saveFailed')));
     } finally { setSaving(false); }
   };
 
-  const setStatus = async (status) => {
+  const setStatus = async (status: 'active' | 'paused'): Promise<void> => {
     if (saving) return;
     setSaving(true);
     setError('');
@@ -175,13 +217,13 @@ export default function CodexGoalMenu({
       setGoal(result?.goal || null);
       onGoalChange?.(result?.goal || null);
       onNotice(t(status === 'paused' ? 'chat.goal.paused' : 'chat.goal.resumed'));
-    } catch (err) {
-      if (err instanceof UnauthorizedError) onAuthFail?.();
-      else setError(err?.serverError || err?.message || t('chat.goal.saveFailed'));
+    } catch (error: unknown) {
+      if (error instanceof UnauthorizedError) onAuthFail?.();
+      else setError(errorMessage(error, t('chat.goal.saveFailed')));
     } finally { setSaving(false); }
   };
 
-  const clear = async () => {
+  const clear = async (): Promise<void> => {
     if (saving) return;
     setSaving(true);
     setError('');
@@ -193,9 +235,9 @@ export default function CodexGoalMenu({
       setEditing(true);
       setConfirmClear(false);
       onNotice(t('chat.goal.cleared'));
-    } catch (err) {
-      if (err instanceof UnauthorizedError) onAuthFail?.();
-      else setError(err?.serverError || err?.message || t('chat.goal.clearFailed'));
+    } catch (error: unknown) {
+      if (error instanceof UnauthorizedError) onAuthFail?.();
+      else setError(errorMessage(error, t('chat.goal.clearFailed')));
     } finally { setSaving(false); }
   };
 
@@ -238,7 +280,7 @@ export default function CodexGoalMenu({
             {editing ? (
               <>
                 {goal && <button type="button" disabled={saving} onClick={() => {
-                  setDraft(goal.objective);
+                  setDraft(goal?.objective ?? '');
                   setEditing(false);
                   setRestarting(false);
                   setError('');
@@ -249,7 +291,7 @@ export default function CodexGoalMenu({
             ) : terminal ? (
               <>
                 <button type="button" className="primary" disabled={saving} onClick={() => {
-                  setDraft(goal.objective);
+                  setDraft(goal?.objective ?? '');
                   setRestarting(true);
                   setEditing(true);
                   setError('');
@@ -263,8 +305,8 @@ export default function CodexGoalMenu({
                   {t('chat.goal.edit')}
                 </button>
                 <button type="button" disabled={saving}
-                  onClick={() => void setStatus(goal.status === 'active' ? 'paused' : 'active')}>
-                  {t(goal.status === 'active' ? 'chat.goal.pause' : 'chat.goal.resume')}
+                  onClick={() => void setStatus(goal?.status === 'active' ? 'paused' : 'active')}>
+                  {t(goal?.status === 'active' ? 'chat.goal.pause' : 'chat.goal.resume')}
                 </button>
                 <button type="button" className="destructive" disabled={saving}
                   onClick={() => setConfirmClear(true)}>{t('chat.goal.clear')}</button>

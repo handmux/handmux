@@ -1,11 +1,16 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, renderHook, waitFor } from '@testing-library/react';
 import { getCodexSession } from '../src/api.js';
-import { codexKind, useCodexSession } from '../src/hooks/useCodexSession.js';
+import {
+  codexKind,
+  parseCodexSessionSnapshot,
+  useCodexSession,
+} from '../src/hooks/useCodexSession.js';
 
 vi.mock('../src/api.js', () => ({ getCodexSession: vi.fn() }));
+const getCodexSessionMock = vi.mocked(getCodexSession);
 
-beforeEach(() => { getCodexSession.mockReset(); });
+beforeEach(() => { getCodexSessionMock.mockReset(); });
 afterEach(cleanup);
 
 describe('codexKind', () => {
@@ -21,12 +26,27 @@ describe('codexKind', () => {
 });
 
 describe('useCodexSession', () => {
+  it('normalizes the App Server boundary and drops malformed queue items', () => {
+    expect(parseCodexSessionSnapshot({
+      managed: true,
+      status: { type: 'active', activeFlags: ['waitingOnApproval', 7] },
+      queue: [
+        { id: 'q1', text: 'valid', createdAt: 1 },
+        { id: '', text: 'invalid', createdAt: 2 },
+      ],
+    })).toMatchObject({
+      managed: true,
+      status: { type: 'active', activeFlags: ['waitingOnApproval'] },
+      queue: [{ id: 'q1', text: 'valid', createdAt: 1 }],
+    });
+  });
+
   it('does not expose the previous pane session while the next pane loads', async () => {
-    getCodexSession.mockImplementation((pane) => {
+    getCodexSessionMock.mockImplementation((pane: string) => {
       if (pane === '%plain') return Promise.resolve({ managed: false });
       return new Promise(() => {});
     });
-    const renders = [];
+    const renders: Array<{ pane: string; loaded: boolean; managed: boolean }> = [];
     const { result, rerender } = renderHook(
       ({ pane }) => {
         const session = useCodexSession(pane, true);
@@ -47,7 +67,7 @@ describe('useCodexSession', () => {
     vi.useFakeTimers();
     try {
       const good = { managed: true, threadId: 'thread-1', status: { type: 'idle' } };
-      getCodexSession
+      getCodexSessionMock
         .mockResolvedValueOnce(good)
         .mockRejectedValue(new Error('temporary drop'));
       const { result } = renderHook(() => useCodexSession('%1', true));
@@ -61,7 +81,7 @@ describe('useCodexSession', () => {
       await act(async () => { await vi.advanceTimersByTimeAsync(750); });
       expect(result.current).toMatchObject({ managed: true, threadId: 'thread-1', error: 'temporary drop' });
 
-      getCodexSession.mockResolvedValue(good);
+      getCodexSessionMock.mockResolvedValue(good);
       await act(async () => { await vi.advanceTimersByTimeAsync(750); });
       expect(result.current.error).toBeNull();
     } finally {
@@ -72,7 +92,7 @@ describe('useCodexSession', () => {
   it('keeps the neutral loading state while an initial connection is still retrying', async () => {
     vi.useFakeTimers();
     try {
-      getCodexSession.mockRejectedValue(new Error('temporary drop'));
+      getCodexSessionMock.mockRejectedValue(new Error('temporary drop'));
       const { result } = renderHook(() => useCodexSession('%1', true));
       await act(async () => { await Promise.resolve(); await Promise.resolve(); });
       expect(result.current).toMatchObject({ loaded: false, error: null });

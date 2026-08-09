@@ -2,14 +2,28 @@ import { t } from '../i18n';
 import { useBackButton } from '../hooks/useBackButton.js';
 import { OverlayPortal } from '../overlays/OverlayHost.js';
 import { ListChecksIcon, XIcon } from './icons.jsx';
+import type { ReactNode } from 'react';
+import type { CodexPlanStep } from '../../../server/src/codexPlan.js';
 
-export function codexPlanSteps(plan) {
+export interface CodexPlanView {
+  steps?: CodexPlanStep[];
+  plan?: CodexPlanStep[];
+  explanation?: string;
+}
+
+interface PlanMeta {
+  steps: CodexPlanStep[];
+  completed: number;
+  current: CodexPlanStep | null;
+}
+
+export function codexPlanSteps(plan: CodexPlanView | null | undefined): CodexPlanStep[] {
   if (Array.isArray(plan?.steps)) return plan.steps;
   if (Array.isArray(plan?.plan)) return plan.plan;
   return [];
 }
 
-function planMeta(plan) {
+function planMeta(plan: CodexPlanView | null | undefined): PlanMeta {
   const steps = codexPlanSteps(plan);
   const completed = steps.filter((item) => item.status === 'completed').length;
   const current = steps.find((item) => item.status === 'inProgress')
@@ -17,7 +31,13 @@ function planMeta(plan) {
   return { steps, completed, current };
 }
 
-export function CodexPlanBar({ plan, waiting = false, onOpen }) {
+interface CodexPlanBarProps {
+  plan: CodexPlanView;
+  waiting?: boolean;
+  onOpen: () => void;
+}
+
+export function CodexPlanBar({ plan, waiting = false, onOpen }: CodexPlanBarProps) {
   const { steps, current } = planMeta(plan);
   if (!steps.length) return null;
   const position = current ? steps.indexOf(current) + 1 : steps.length;
@@ -44,7 +64,7 @@ export function CodexPlanBar({ plan, waiting = false, onOpen }) {
   );
 }
 
-export function CodexPlanSummary({ plan, onOpen }) {
+export function CodexPlanSummary({ plan, onOpen }: Omit<CodexPlanBarProps, 'waiting'>) {
   const { steps, completed } = planMeta(plan);
   if (!steps.length) return null;
   const done = completed === steps.length;
@@ -62,7 +82,19 @@ export function CodexPlanSummary({ plan, onOpen }) {
   );
 }
 
-function PlanSheetContent({ title, plan, onClose, animateInProgress = false }) {
+interface PlanSheetContentProps {
+  title: string;
+  plan: CodexPlanView;
+  onClose: () => void;
+  animateInProgress?: boolean;
+}
+
+function PlanSheetContent({
+  title,
+  plan,
+  onClose,
+  animateInProgress = false,
+}: PlanSheetContentProps) {
   const { steps, completed } = planMeta(plan);
   return (
     <>
@@ -100,9 +132,15 @@ function PlanSheetContent({ title, plan, onClose, animateInProgress = false }) {
 export function CodexPlanSheet({
   open, title, plan, onClose, portal = false, chatTone = 'dusk', keyboardInset = 0,
   animateInProgress = false,
-}) {
+}: Omit<PlanSheetContentProps, 'plan'> & {
+  plan: CodexPlanView | null | undefined;
+  open: boolean;
+  portal?: boolean;
+  chatTone?: string;
+  keyboardInset?: number;
+}): ReactNode {
   useBackButton(open, onClose);
-  if (!open || !codexPlanSteps(plan).length) return null;
+  if (!open || !plan || !codexPlanSteps(plan).length) return null;
   const content = <PlanSheetContent title={title} plan={plan} onClose={onClose}
     animateInProgress={animateInProgress} />;
   if (!portal) return content;

@@ -1,5 +1,18 @@
 import { useEffect, useRef } from 'react';
 
+export interface PollingLoopOptions<T> {
+  fetch: () => Promise<T>;
+  apply: (result: T) => void;
+  onError?: (error: unknown) => void;
+  intervalMs: number;
+  enabled?: boolean;
+  deps?: readonly unknown[];
+  burstKey?: unknown;
+  burstIntervalMs?: number;
+  burstCount?: number;
+  repeat?: boolean;
+}
+
 // A self-scheduling poll loop (NOT setInterval): fetch → apply on a fixed cadence, paused entirely while
 // the tab is hidden and re-polled immediately on return. Extracted from the two identical inbox loops in
 // App (states @5s, orphans @15s). `fetch`/`apply` are split so the loop owns the cancelled guard — a fetch
@@ -8,7 +21,7 @@ import { useEffect, useRef } from 'react';
 // in refs so an unstable inline closure doesn't restart the loop every render; the loop restarts (and
 // immediately re-polls) only when `enabled`, cadence, `burstKey`, or a value in `deps` changes. A non-null
 // burstKey adds a bounded number of quicker follow-ups, then the loop automatically returns to intervalMs.
-export function usePollingLoop({
+export function usePollingLoop<T>({
   fetch,
   apply,
   onError,
@@ -19,7 +32,7 @@ export function usePollingLoop({
   burstIntervalMs = intervalMs,
   burstCount = 0,
   repeat = true,
-}) {
+}: PollingLoopOptions<T>): void {
   const fetchRef = useRef(fetch);
   const applyRef = useRef(apply);
   const errorRef = useRef(onError);
@@ -29,13 +42,13 @@ export function usePollingLoop({
   useEffect(() => {
     if (!enabled) return undefined;
     let cancelled = false;
-    let timer = null;
+    let timer: ReturnType<typeof setTimeout> | null = null;
     let inFlight = false;
     let repollAfterFlight = false;
     let requestEpoch = 0;
     let hiddenObserved = document.hidden;
     let burstRemaining = burstKey == null ? 0 : burstCount;
-    const tick = async (myRequestEpoch) => {
+    const tick = async (myRequestEpoch: number): Promise<void> => {
       if (document.hidden) return;
       try {
         const r = await fetchRef.current();
@@ -46,12 +59,12 @@ export function usePollingLoop({
         if (!cancelled && myRequestEpoch === requestEpoch) errorRef.current?.(error);
       }
     };
-    const nextDelay = () => {
+    const nextDelay = (): number => {
       const delay = burstRemaining > 0 ? burstIntervalMs : intervalMs;
       if (burstRemaining > 0) burstRemaining -= 1;
       return delay;
     };
-    const loop = async () => {
+    const loop = async (): Promise<void> => {
       if (cancelled || document.hidden) return;
       if (inFlight) { repollAfterFlight = true; return; }
       inFlight = true;
@@ -68,22 +81,22 @@ export function usePollingLoop({
       timer = setTimeout(loop, delay);
     };
     void loop();
-    const abandonInFlight = () => {
+    const abandonInFlight = (): void => {
       if (!inFlight) return;
       requestEpoch += 1;
       inFlight = false;
       repollAfterFlight = false;
     };
-    const suspend = () => {
-      clearTimeout(timer);
+    const suspend = (): void => {
+      if (timer !== null) clearTimeout(timer);
       timer = null;
       // A fetch suspended by the OS may never settle after a long app switch. Logically abandon it now;
       // the epoch guard above drops its result if it eventually returns, preserving authoritative order.
       abandonInFlight();
     };
-    const resume = ({ abandon = false } = {}) => {
+    const resume = ({ abandon = false }: { abandon?: boolean } = {}): void => {
       if (cancelled || document.hidden) return;
-      clearTimeout(timer);
+      if (timer !== null) clearTimeout(timer);
       timer = null;
       if (inFlight) {
         if (abandon) abandonInFlight();
@@ -91,7 +104,7 @@ export function usePollingLoop({
       }
       void loop();
     };
-    const onVis = () => {
+    const onVis = (): void => {
       if (document.hidden) {
         hiddenObserved = true;
         suspend();
@@ -104,16 +117,18 @@ export function usePollingLoop({
     // Installed mobile WebViews do not always deliver a complete visibilitychange pair. `pageshow`
     // covers BFCache/process restoration and `focus` covers an ordinary app switch. Both must discard a
     // logically frozen request; otherwise every surface sharing this loop stays stale until it remounts.
-    const onPageShow = (event) => { if (event.persisted) resume({ abandon: true }); };
-    const onFocus = () => resume({ abandon: true });
-    const onOnline = () => resume({ abandon: true });
+    const onPageShow = (event: PageTransitionEvent): void => {
+      if (event.persisted) resume({ abandon: true });
+    };
+    const onFocus = (): void => resume({ abandon: true });
+    const onOnline = (): void => resume({ abandon: true });
     document.addEventListener('visibilitychange', onVis);
     window.addEventListener('pageshow', onPageShow);
     window.addEventListener('focus', onFocus);
     window.addEventListener('online', onOnline);
     return () => {
       cancelled = true;
-      clearTimeout(timer);
+      if (timer !== null) clearTimeout(timer);
       document.removeEventListener('visibilitychange', onVis);
       window.removeEventListener('pageshow', onPageShow);
       window.removeEventListener('focus', onFocus);

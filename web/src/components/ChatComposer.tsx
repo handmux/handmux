@@ -27,6 +27,187 @@ import { OverlayPortal } from '../overlays/OverlayHost.js';
 import DiscreteSlider from './DiscreteSlider.jsx';
 import CodexGoalMenu, { CodexGoalBar } from './CodexGoalMenu.jsx';
 import { CodexPlanBar, CodexPlanSheet, codexPlanSteps } from './CodexPlan.jsx';
+import type {
+  KeyboardEvent as ReactKeyboardEvent,
+  PointerEvent as ReactPointerEvent,
+} from 'react';
+import { parseCodexGoal } from '../../../server/src/codexStreamProtocol.js';
+import { parseCodexSendResult } from '../../../server/src/codexQueueProtocol.js';
+import type { CodexGoal, CodexGoalStatus } from '../../../server/src/codexStreamProtocol.js';
+import type { CodexQueueItem, CodexSendResult } from '../../../server/src/codexQueueProtocol.js';
+import type {
+  CodexOutgoingItem,
+  CodexOutgoingSettlement,
+  CodexOutgoingSource,
+} from '../codexOutgoing.js';
+import type {
+  CodexSessionSettings,
+  CodexSessionSnapshot,
+} from '../hooks/useCodexSession.js';
+import { parseCodexSessionSettings } from '../hooks/useCodexSession.js';
+import type { ServerShortcuts, ShortcutItem } from '../shortcutMerge.js';
+
+type PermissionMode = 'default' | 'auto-review' | 'full-access' | 'custom';
+type QueueAction = 'steer' | 'remove';
+type CopiedStatusField = 'directory' | 'session';
+
+interface ContextRingProps {
+  percent: number;
+}
+
+interface ContextCopyRowProps {
+  label: string;
+  value: string;
+  copyLabel: string;
+  copied: boolean;
+  onCopy: (value: string) => void | Promise<void>;
+}
+
+interface Activity {
+  key: 'compacting' | 'waiting' | 'working' | 'idle';
+  label: string;
+}
+
+interface ErrorLike {
+  message?: string;
+  serverError?: string;
+  status?: number;
+}
+
+interface ChatActionError {
+  kind: 'send' | 'stop' | 'queue';
+  detail: string | null;
+}
+
+interface QueueEditorState {
+  key: string;
+  pane: string;
+  id: string;
+  original: string;
+  draft: string;
+  token: string | null;
+  busy: boolean;
+  error: string;
+  expiresAt?: number | null;
+}
+
+interface QueueEditResponse {
+  token: string;
+  itemText: string | null;
+  expiresAt: number | null;
+}
+
+interface DisplayQueueItem {
+  id: string;
+  text: string;
+  requestId?: string;
+  optimistic: boolean;
+}
+
+interface ReasoningEffort {
+  reasoningEffort: string;
+  description?: string;
+}
+
+interface ServiceTier {
+  id: string;
+  name?: string;
+  description?: string;
+}
+
+interface CodexModel {
+  id: string;
+  model?: string;
+  displayName?: string;
+  description?: string;
+  supportedReasoningEfforts?: ReasoningEffort[];
+  defaultReasoningEffort?: string;
+  serviceTiers?: ServiceTier[];
+  additionalSpeedTiers?: string[];
+}
+
+type CodexSettingsUpdate = Partial<CodexSessionSettings> & { permissionMode?: PermissionMode };
+
+interface CodexConfigMenuProps {
+  open: boolean;
+  pane: string;
+  settings: CodexSessionSettings | null;
+  busy: boolean;
+  onChange: (settings: CodexSessionSettings | null) => void;
+  onClose: () => void;
+  onAuthFail?: () => void;
+}
+
+export interface ChatComposerProps {
+  pane: string;
+  agent?: string;
+  kind?: string | null;
+  cwd?: string | null;
+  onKey?: (key: string) => void | Promise<void>;
+  onAuthFail?: () => void;
+  onSent?: (text: string) => void;
+  onInteractiveSlash?: (command: string) => void;
+  shortcuts?: ServerShortcuts | null;
+  micAvailable?: boolean;
+  desktop?: boolean;
+  codexSession?: CodexSessionSnapshot | null;
+  optimisticMessages?: CodexOutgoingItem[];
+  onCodexSendStart?: (
+    pane: string,
+    text: string,
+    source: CodexOutgoingSource,
+    requestId?: string | null,
+  ) => string | null | undefined;
+  onCodexSendResult?: (id: string, settlement: CodexOutgoingSettlement) => void;
+  onActionError?: (error: ChatActionError | null) => void;
+  chatTone?: string;
+  keyboardInset?: number;
+}
+
+const asErrorLike = (error: unknown): ErrorLike => (
+  error !== null && typeof error === 'object' ? error as ErrorLike : {}
+);
+
+const sendManagedCodexMessage = sendCodexMessage as (
+  pane: string,
+  text: string,
+  requestId?: string | null,
+) => Promise<unknown>;
+
+const settingsFromResponse = (
+  value: unknown,
+  fallback: CodexSessionSettings,
+): CodexSessionSettings => {
+  const response = recordOf(value);
+  const rawSettings = recordOf(response?.settings);
+  const parsed = parseCodexSessionSettings(rawSettings);
+  if (!rawSettings || !parsed) return fallback;
+  const keys = [
+    'model', 'effort', 'serviceTier', 'cwd', 'approvalPolicy', 'approvalsReviewer', 'sandboxPolicy',
+  ] as const;
+  return keys.reduce<CodexSessionSettings>((settings, key) => (
+    Object.hasOwn(rawSettings, key) ? { ...settings, [key]: parsed[key] } : settings
+  ), fallback);
+};
+
+const goalFromResponse = (value: unknown): CodexGoal | null => {
+  const response = recordOf(value);
+  return parseCodexGoal(response?.goal);
+};
+
+const queueEditResponseOf = (value: unknown): QueueEditResponse | null => {
+  const response = recordOf(value);
+  const item = recordOf(response?.item);
+  const token = optionalText(response?.token);
+  if (!token) return null;
+  const expiresAt = typeof response?.expiresAt === 'number' && Number.isFinite(response.expiresAt)
+    ? response.expiresAt : null;
+  return {
+    token,
+    itemText: optionalText(item?.text) || null,
+    expiresAt,
+  };
+};
 
 // The 对话-lens composer — a single modern AI-agent input CARD (textarea on top, an action row beneath),
 // shown INSTEAD of the terminal BottomDock while the chat lens is active. It rides above the soft keyboard
@@ -40,20 +221,23 @@ import { CodexPlanBar, CodexPlanSheet, codexPlanSteps } from './CodexPlan.jsx';
 // A tap anywhere on the card that ISN'T the textarea must NOT blur it and drop the keyboard — preventDefault
 // on pointerdown keeps focus where it is; onClick still fires. (Same trick the dock uses.) So send/attach/
 // mic/chips all keep the keyboard up, and you can keep chatting after sending.
-const keepFocus = (e) => {
-  if (e.target.closest?.('input, textarea, [contenteditable]')) return;
-  if (e.cancelable) e.preventDefault();
+const keepFocus = (event: ReactPointerEvent<HTMLElement>): void => {
+  if (event.target instanceof Element
+    && event.target.closest('input, textarea, [contenteditable]')) return;
+  if (event.cancelable) event.preventDefault();
 };
 
 // Quick-reply chip tint: a slash-command (/compact …) = blue, everything else (好的 / 继续 / 1 / 2 …) =
 // green. Explicit terminal-key shortcuts use the grey key tint.
-const chipTint = (text) => (text.startsWith('/') ? 'cmd' : 'reply');
+const chipTint = (text: string): 'cmd' | 'reply' => (text.startsWith('/') ? 'cmd' : 'reply');
 
 const tokenFormatter = new Intl.NumberFormat('en-US');
-const contextRingLevel = (percent) => (percent >= 75 ? 'high' : percent >= 40 ? 'medium' : 'low');
+const contextRingLevel = (percent: number): 'high' | 'medium' | 'low' => (
+  percent >= 75 ? 'high' : percent >= 40 ? 'medium' : 'low'
+);
 const UNSUPPORTED_SLASH = Symbol('unsupported slash command');
 
-function ContextRing({ percent }) {
+function ContextRing({ percent }: ContextRingProps) {
   const bounded = Math.min(100, Math.max(0, percent || 0));
   return (
     <svg className="cc-context-ring" viewBox="0 0 24 24" aria-hidden="true">
@@ -64,7 +248,9 @@ function ContextRing({ percent }) {
   );
 }
 
-function ContextCopyRow({ label, value, copyLabel, copied, onCopy }) {
+function ContextCopyRow({
+  label, value, copyLabel, copied, onCopy,
+}: ContextCopyRowProps) {
   return (
     <button type="button" className="cc-context-row cc-context-copy-row"
       aria-label={copied ? `${copyLabel} · ${t('chat.status.copied')}` : copyLabel}
@@ -79,7 +265,10 @@ function ContextCopyRow({ label, value, copyLabel, copied, onCopy }) {
   );
 }
 
-function codexActivity(session, fallbackKind) {
+function codexActivity(
+  session: CodexSessionSnapshot | null,
+  fallbackKind?: string | null,
+): Activity {
   const flags = Array.isArray(session?.status?.activeFlags) ? session.status.activeFlags : [];
   if (session?.activityKind === 'compacting') return { key: 'compacting', label: t('chat.status.compacting') };
   if (flags.includes('waitingOnApproval') || session?.approvals?.length) {
@@ -94,7 +283,7 @@ function codexActivity(session, fallbackKind) {
   return { key: 'idle', label: t('chat.status.idle') };
 }
 
-function sandboxLabel(settings) {
+function sandboxLabel(settings: CodexSessionSettings | null): string | null {
   const type = settings?.sandboxPolicy?.type;
   if (type === 'readOnly' || type === 'read-only') return t('chat.status.sandboxReadOnly');
   if (type === 'workspaceWrite' || type === 'workspace-write') return t('chat.status.sandboxWorkspace');
@@ -102,7 +291,7 @@ function sandboxLabel(settings) {
   return null;
 }
 
-const PERMISSION_MODE_SETTINGS = {
+const PERMISSION_MODE_SETTINGS: Record<Exclude<PermissionMode, 'custom'>, CodexSettingsUpdate> = {
   default: {
     approvalPolicy: 'on-request', approvalsReviewer: 'user',
     sandboxPolicy: { type: 'workspaceWrite' },
@@ -117,7 +306,7 @@ const PERMISSION_MODE_SETTINGS = {
   },
 };
 
-function permissionModeValue(settings) {
+function permissionModeValue(settings: CodexSessionSettings | null): PermissionMode {
   const sandbox = settings?.sandboxPolicy?.type;
   const approval = settings?.approvalPolicy;
   const reviewer = settings?.approvalsReviewer;
@@ -131,7 +320,7 @@ function permissionModeValue(settings) {
   return 'custom';
 }
 
-function permissionModeLabel(mode) {
+function permissionModeLabel(mode: PermissionMode): string {
   if (mode === 'default') return t('chat.permissionMode.default');
   if (mode === 'auto-review') return t('chat.permissionMode.autoReview');
   if (mode === 'full-access') return t('chat.permissionMode.fullAccess');
@@ -140,56 +329,118 @@ function permissionModeLabel(mode) {
 
 // model/list is account-wide and effectively static for one app run. Share one successful request across
 // composer remounts and pane switches; the dropdown's refresh action is the only automatic cache bypass.
-let codexModelsCache = null;
-let codexModelsRequest = null;
+let codexModelsCache: CodexModel[] | null = null;
+let codexModelsRequest: Promise<CodexModel[]> | null = null;
 
-export function clearCodexModelsCache() {
+export function clearCodexModelsCache(): void {
   codexModelsCache = null;
   codexModelsRequest = null;
 }
 
-function loadCodexModels(pane, refresh = false) {
+const recordOf = (value: unknown): Record<string, unknown> | null => (
+  value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null
+);
+
+const optionalText = (value: unknown): string | undefined => (
+  typeof value === 'string' && value ? value : undefined
+);
+
+function parseCodexModels(value: unknown): CodexModel[] {
+  const root = recordOf(value);
+  if (!root || !Array.isArray(root.models)) return [];
+  return root.models.flatMap((candidate): CodexModel[] => {
+    const model = recordOf(candidate);
+    if (!model) return [];
+    const id = optionalText(model.id) || optionalText(model.model);
+    if (!id) return [];
+    const efforts = Array.isArray(model.supportedReasoningEfforts)
+      ? model.supportedReasoningEfforts.flatMap((entry): ReasoningEffort[] => {
+        const effort = recordOf(entry);
+        const reasoningEffort = optionalText(effort?.reasoningEffort);
+        return reasoningEffort ? [{
+          reasoningEffort,
+          ...(optionalText(effort?.description) ? { description: optionalText(effort?.description) } : {}),
+        }] : [];
+      })
+      : undefined;
+    const serviceTiers = Array.isArray(model.serviceTiers)
+      ? model.serviceTiers.flatMap((entry): ServiceTier[] => {
+        const tier = recordOf(entry);
+        const tierId = optionalText(tier?.id);
+        return tierId ? [{
+          id: tierId,
+          ...(optionalText(tier?.name) ? { name: optionalText(tier?.name) } : {}),
+          ...(optionalText(tier?.description) ? { description: optionalText(tier?.description) } : {}),
+        }] : [];
+      })
+      : undefined;
+    const speedTiers = Array.isArray(model.additionalSpeedTiers)
+      ? model.additionalSpeedTiers.filter((entry): entry is string => typeof entry === 'string')
+      : undefined;
+    return [{
+      id,
+      ...(optionalText(model.model) ? { model: optionalText(model.model) } : {}),
+      ...(optionalText(model.displayName) ? { displayName: optionalText(model.displayName) } : {}),
+      ...(optionalText(model.description) ? { description: optionalText(model.description) } : {}),
+      ...(optionalText(model.defaultReasoningEffort)
+        ? { defaultReasoningEffort: optionalText(model.defaultReasoningEffort) }
+        : {}),
+      ...(efforts ? { supportedReasoningEfforts: efforts } : {}),
+      ...(serviceTiers ? { serviceTiers } : {}),
+      ...(speedTiers ? { additionalSpeedTiers: speedTiers } : {}),
+    }];
+  });
+}
+
+function loadCodexModels(pane: string, refresh = false): Promise<CodexModel[]> {
   if (refresh) clearCodexModelsCache();
   if (codexModelsCache) return Promise.resolve(codexModelsCache);
   if (!codexModelsRequest) {
-    codexModelsRequest = getCodexModels(pane).then((result) => {
-      codexModelsCache = Array.isArray(result?.models) ? result.models : [];
+    codexModelsRequest = getCodexModels(pane).then((result: unknown) => {
+      codexModelsCache = parseCodexModels(result);
       return codexModelsCache;
     });
   }
   return codexModelsRequest;
 }
 
-function modelServiceTiers(model) {
+function modelServiceTiers(model?: CodexModel | null): ServiceTier[] {
   if (Array.isArray(model?.serviceTiers) && model.serviceTiers.length) return model.serviceTiers;
   return (model?.additionalSpeedTiers || []).map((id) => ({ id, name: id, description: '' }));
 }
 
-function fastTierFor(model) {
+function fastTierFor(model?: CodexModel | null): ServiceTier | null {
   return modelServiceTiers(model).find((tier) => (
     tier?.id?.toLowerCase() === 'fast' || tier?.name?.toLowerCase() === 'fast'
   )) || null;
 }
 
-function CodexConfigMenu({ open, pane, settings, busy, onChange, onClose, onAuthFail }) {
-  const [models, setModels] = useState([]);
+function CodexConfigMenu({
+  open, pane, settings, busy, onChange, onClose, onAuthFail,
+}: CodexConfigMenuProps) {
+  const [models, setModels] = useState<CodexModel[]>([]);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const requestSeqRef = useRef(0);
   useBackButton(open, onClose);
 
-  const load = async (refresh = false) => {
+  const load = async (refresh = false): Promise<void> => {
     const requestSeq = ++requestSeqRef.current;
     setLoading(true);
     setError('');
     try {
       const next = await loadCodexModels(pane, refresh);
       if (requestSeq === requestSeqRef.current) setModels(next);
-    } catch (err) {
+    } catch (err: unknown) {
       if (requestSeq !== requestSeqRef.current) return;
       if (err instanceof UnauthorizedError) onAuthFail?.();
-      else setError(err?.serverError || err?.message || t('chat.config.loadFailed'));
+      else {
+        const errorLike = asErrorLike(err);
+        setError(errorLike.serverError || errorLike.message || t('chat.config.loadFailed'));
+      }
     } finally {
       if (requestSeq === requestSeqRef.current) setLoading(false);
     }
@@ -211,24 +462,27 @@ function CodexConfigMenu({ open, pane, settings, busy, onChange, onClose, onAuth
 
   if (!open) return null;
   const disabled = saving;
-  const save = async (updates) => {
+  const save = async (updates: CodexSettingsUpdate): Promise<void> => {
     if (disabled) return;
     setSaving(true);
     setError('');
     try {
       const result = await updateCodexSettings(pane, updates);
-      onChange(result?.settings || { ...settings, ...updates });
-    } catch (err) {
+      onChange(settingsFromResponse(result, { ...settings, ...updates }));
+    } catch (err: unknown) {
       if (err instanceof UnauthorizedError) onAuthFail?.();
-      else setError(err?.serverError || err?.message || t('chat.config.saveFailed'));
+      else {
+        const errorLike = asErrorLike(err);
+        setError(errorLike.serverError || errorLike.message || t('chat.config.saveFailed'));
+      }
     } finally { setSaving(false); }
   };
-  const pickModel = (model) => {
+  const pickModel = (model: CodexModel): void => {
     const supported = (model.supportedReasoningEfforts || []).map((item) => item.reasoningEffort);
     const supportedTiers = modelServiceTiers(model).map((tier) => tier.id);
     const nextFastTier = fastTierFor(model);
-    const updates = { model: model.model || model.id };
-    if (supported.length && !supported.includes(settings?.effort)) {
+    const updates: CodexSettingsUpdate = { model: model.model || model.id };
+    if (supported.length && (!settings?.effort || !supported.includes(settings.effort))) {
       updates.effort = model.defaultReasoningEffort || supported[0];
     }
     if (settings?.serviceTier && !supportedTiers.includes(settings.serviceTier)) {
@@ -284,7 +538,7 @@ function CodexConfigMenu({ open, pane, settings, busy, onChange, onClose, onAuth
                 value={settings?.effort}
                 disabled={disabled}
                 ariaLabel={t('chat.config.effort')}
-                onCommit={(effort) => void save({ effort })}
+                onCommit={(effort: string) => void save({ effort })}
               />
               {!loading && efforts.length === 0
                 && <div className="codex-config-state">{t('chat.config.chooseModel')}</div>}
@@ -316,7 +570,7 @@ export default function ChatComposer({
   shortcuts = null, micAvailable = false, desktop = false, codexSession = null,
   optimisticMessages = [], onCodexSendStart, onCodexSendResult, onActionError,
   chatTone = 'dusk', keyboardInset = 0,
-}) {
+}: ChatComposerProps) {
   // Draft persists across an app exit / lens switch (shared store with the dock's chat page — switching
   // lenses carries your half-typed message either way). send/clear set '' → the stored draft clears too.
   const [value, setValue] = useState(() => getChatDraft());
@@ -324,16 +578,16 @@ export default function ChatComposer({
   const [stopping, setStopping] = useState(false);
   const [stopConfirm, setStopConfirm] = useState(false);
   const [queueAction, setQueueAction] = useState('');
-  const [queueDelete, setQueueDelete] = useState(null);
-  const [queueEditor, setQueueEditor] = useState(null);
-  const [handledQueueIds, setHandledQueueIds] = useState([]);
+  const [queueDelete, setQueueDelete] = useState<DisplayQueueItem | null>(null);
+  const [queueEditor, setQueueEditor] = useState<QueueEditorState | null>(null);
+  const [handledQueueIds, setHandledQueueIds] = useState<string[]>([]);
   const [notice, setNotice] = useState('');
   const submitInFlightRef = useRef(false);
   const codexSendSeqRef = useRef(0);
-  const noticeTimerRef = useRef(null);
+  const noticeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const goalRequestSeqRef = useRef(0);
-  const queueEditorRef = useRef(null);
-  const queueEditorInputRef = useRef(null);
+  const queueEditorRef = useRef<QueueEditorState | null>(null);
+  const queueEditorInputRef = useRef<HTMLTextAreaElement>(null);
   useLayoutEffect(() => {
     const input = queueEditorInputRef.current;
     if (!queueEditor?.key || !input) return;
@@ -341,7 +595,9 @@ export default function ChatComposer({
     input.setSelectionRange(end, end);
   }, [queueEditor?.key]);
   useEffect(() => { setChatDraft(value); }, [value]);
-  useEffect(() => () => clearTimeout(noticeTimerRef.current), []);
+  useEffect(() => () => {
+    if (noticeTimerRef.current !== null) clearTimeout(noticeTimerRef.current);
+  }, []);
   useEffect(() => () => {
     const current = queueEditorRef.current;
     queueEditorRef.current = null;
@@ -349,16 +605,19 @@ export default function ChatComposer({
       void cancelCodexQueuedEdit(current.pane, current.id, current.token).catch(() => {});
     }
   }, []);
-  const clearActionError = () => onActionError?.(null);
-  const reportActionError = (kind, error) => onActionError?.({
+  const clearActionError = (): void => onActionError?.(null);
+  const reportActionError = (kind: ChatActionError['kind'], error: unknown): void => {
+    const errorLike = asErrorLike(error);
+    onActionError?.({
     kind,
-    detail: error?.serverError || error?.message || null,
-  });
-  const reportSendError = (error, uncertain) => reportActionError(
+      detail: errorLike.serverError || errorLike.message || null,
+    });
+  };
+  const reportSendError = (error: unknown, uncertain: boolean): void => reportActionError(
     'send', uncertain ? new Error(t('chat.sendUnknown')) : error,
   );
-  const ref = useRef(null);          // the textarea
-  const uploadRef = useRef(null);    // hidden <input type=file>
+  const ref = useRef<HTMLTextAreaElement>(null);          // the textarea
+  const uploadRef = useRef<HTMLInputElement>(null);    // hidden <input type=file>
   const tapPt = useRef({ x: 0, y: 0, moved: false }); // for tap-to-focus on the card's blank areas
   useEffect(() => {
     if (desktop) ref.current?.focus({ preventScroll: true });
@@ -378,24 +637,24 @@ export default function ChatComposer({
   const [permissionExpanded, setPermissionExpanded] = useState(false);
   const [permissionSaving, setPermissionSaving] = useState(false);
   const [permissionError, setPermissionError] = useState('');
-  const [copiedStatusField, setCopiedStatusField] = useState(null);
-  const [localSettings, setLocalSettings] = useState(null);
-  const [currentGoal, setCurrentGoal] = useState(null);
-  const refreshShortcuts = () => {
+  const [copiedStatusField, setCopiedStatusField] = useState<CopiedStatusField | null>(null);
+  const [localSettings, setLocalSettings] = useState<CodexSessionSettings | null>(null);
+  const [currentGoal, setCurrentGoal] = useState<CodexGoal | null>(null);
+  const refreshShortcuts = (): void => {
     setFavs(loadFavs('agent'));
     setLayout(loadShortcutLayout('chat'));
   };
   useEffect(() => { if (!editOpen) refreshShortcuts(); }, [editOpen]);
   useBackButton(editOpen, () => setEditOpen(false));
   useBackButton(contextOpen, () => setContextOpen(false));
-  const managedCodex = agent === 'codex' && codexSession?.managed;
-  const activePlan = managedCodex && codexPlanSteps(codexSession.plan).length
-    ? codexSession.plan : null;
+  const managedCodex = agent === 'codex' && codexSession?.managed === true;
+  const activePlan = managedCodex && codexSession?.plan
+    && codexPlanSteps(codexSession.plan).length ? codexSession.plan : null;
   const planWaiting = kind === 'permission' || !!codexSession?.approvals?.length
     || !!codexSession?.userInputs?.length;
   useEffect(() => { if (!activePlan) setPlanOpen(false); }, [activePlan]);
   useEffect(() => { setPlanOpen(false); }, [pane]);
-  const applyCurrentGoal = (goal) => {
+  const applyCurrentGoal = (goal: CodexGoal | null): void => {
     goalRequestSeqRef.current += 1;
     setCurrentGoal(goal || null);
   };
@@ -411,9 +670,12 @@ export default function ChatComposer({
       setCurrentGoal(null);
       return undefined;
     }
-    void getCodexGoal(pane).then((result) => {
-      if (requestSeq === goalRequestSeqRef.current) setCurrentGoal(result?.goal || null);
-    }).catch((err) => {
+    void getCodexGoal(pane).then((result: unknown) => {
+      const response = recordOf(result);
+      if (requestSeq === goalRequestSeqRef.current) {
+        setCurrentGoal(parseCodexGoal(response?.goal));
+      }
+    }).catch((err: unknown) => {
       if (requestSeq !== goalRequestSeqRef.current) return;
       if (err instanceof UnauthorizedError) onAuthFail?.();
     });
@@ -429,15 +691,16 @@ export default function ChatComposer({
   // Claude replaces send with Stop while working. Managed Codex keeps both: new messages enter the
   // server-owned pending queue while Stop still interrupts the current turn.
   const busy = kind === 'working';
-  const serverQueue = managedCodex ? (codexSession?.queue || []) : [];
+  const serverQueue: CodexQueueItem[] = managedCodex ? (codexSession?.queue || []) : [];
   const pendingQueue = serverQueue.filter((item) => !handledQueueIds.includes(item.id));
   const turnExpectsQueue = managedCodex
-    && (['working', 'permission', 'compacting'].includes(kind) || serverQueue.length > 0);
+    && (['working', 'permission', 'compacting'].includes(kind || '') || serverQueue.length > 0);
   const serverQueueIds = new Set(serverQueue.map((item) => item.id));
-  const serverQueueRequestIds = new Set(serverQueue.map((item) => item.requestId).filter(Boolean));
+  const serverQueueRequestIds = new Set(serverQueue.map((item) => item.requestId)
+    .filter((id): id is string => typeof id === 'string'));
   const optimisticQueue = optimisticMessages.filter((item) => item.source === 'queue'
-    && !serverQueueIds.has(item.queueId) && !serverQueueRequestIds.has(item.id));
-  const displayQueue = [
+    && (!item.queueId || !serverQueueIds.has(item.queueId)) && !serverQueueRequestIds.has(item.id));
+  const displayQueue: DisplayQueueItem[] = [
     ...pendingQueue.map((item) => ({ ...item, optimistic: false })),
     ...optimisticQueue.map((item) => ({ ...item, optimistic: true })),
   ];
@@ -452,7 +715,7 @@ export default function ChatComposer({
     }
     setHandledQueueIds([]);
     setNotice('');
-    clearTimeout(noticeTimerRef.current);
+    if (noticeTimerRef.current !== null) clearTimeout(noticeTimerRef.current);
   }, [pane]);
   useEffect(() => {
     const currentIds = new Set(serverQueue.map((item) => item.id));
@@ -504,13 +767,14 @@ export default function ChatComposer({
   const fastSelected = managedSettings?.serviceTier === 'priority'
     || managedSettings?.serviceTier === 'fast';
   const showCtx = !managedCodex && (!!ctxModel || typeof ctxPct === 'number');
-  const ctxWarn = showCtx && ctxPct >= 80; // near auto-compact → amber
-  const contextUsedTokens = codexSession?.contextUsage?.usedTokens;
-  const contextTotalTokens = codexSession?.contextUsage?.totalTokens;
-  const showContextRing = managedCodex && Number.isFinite(contextUsedTokens) && contextUsedTokens >= 0
-    && Number.isFinite(contextTotalTokens) && contextTotalTokens > 0;
-  const contextPercent = showContextRing ? (contextUsedTokens / contextTotalTokens) * 100 : null;
-  const contextLevel = showContextRing ? contextRingLevel(contextPercent) : null;
+  const ctxWarn = showCtx && typeof ctxPct === 'number' && ctxPct >= 80; // near auto-compact → amber
+  const contextUsedTokens = codexSession?.contextUsage?.usedTokens ?? null;
+  const contextTotalTokens = codexSession?.contextUsage?.totalTokens ?? null;
+  const contextPercent = managedCodex && contextUsedTokens !== null && contextUsedTokens >= 0
+    && contextTotalTokens !== null && contextTotalTokens > 0
+    ? (contextUsedTokens / contextTotalTokens) * 100 : null;
+  const showContextRing = contextPercent !== null;
+  const contextLevel = contextPercent !== null ? contextRingLevel(contextPercent) : null;
   const activity = codexActivity(codexSession, kind);
   const sessionId = codexSession?.threadId || null;
   const workingDirectory = managedSettings?.cwd || null;
@@ -518,7 +782,11 @@ export default function ChatComposer({
   const access = sandboxLabel(managedSettings);
   const permissionMode = permissionModeValue(managedSettings);
   const permissionModeName = permissionModeLabel(permissionMode);
-  const permissionOptions = [
+  const permissionOptions: Array<{
+    value: Exclude<PermissionMode, 'custom'>;
+    label: string;
+    description: string;
+  }> = [
     {
       value: 'default',
       label: t('chat.permissionMode.default'),
@@ -544,7 +812,10 @@ export default function ChatComposer({
     }
   }, [contextOpen]);
 
-  const copyStatusValue = async (valueToCopy, field) => {
+  const copyStatusValue = async (
+    valueToCopy: string,
+    field: CopiedStatusField,
+  ): Promise<void> => {
     if (!valueToCopy || !navigator.clipboard?.writeText) return;
     try {
       await navigator.clipboard.writeText(valueToCopy);
@@ -553,16 +824,18 @@ export default function ChatComposer({
     } catch { /* clipboard can be unavailable outside a secure context */ }
   };
 
-  const showNotice = (message) => {
+  const showNotice = (message: string): void => {
     setNotice(message);
-    clearTimeout(noticeTimerRef.current);
+    if (noticeTimerRef.current !== null) clearTimeout(noticeTimerRef.current);
     noticeTimerRef.current = setTimeout(() => setNotice(''), 2500);
   };
-  const clearNotice = () => {
+  const clearNotice = (): void => {
     setNotice('');
-    clearTimeout(noticeTimerRef.current);
+    if (noticeTimerRef.current !== null) clearTimeout(noticeTimerRef.current);
   };
-  const savePermissionMode = async (nextMode) => {
+  const savePermissionMode = async (
+    nextMode: Exclude<PermissionMode, 'custom'>,
+  ): Promise<void> => {
     if (permissionSaving) return;
     if (nextMode === permissionMode) {
       setPermissionExpanded(false);
@@ -572,25 +845,31 @@ export default function ChatComposer({
     setPermissionError('');
     try {
       const result = await updateCodexSettings(pane, { permissionMode: nextMode });
-      setLocalSettings(result?.settings || { ...managedSettings, ...PERMISSION_MODE_SETTINGS[nextMode] });
+      setLocalSettings(settingsFromResponse(
+        result,
+        { ...managedSettings, ...PERMISSION_MODE_SETTINGS[nextMode] },
+      ));
       setPermissionExpanded(false);
       showNotice(t('chat.permissionMode.saved'));
-    } catch (err) {
+    } catch (err: unknown) {
       if (err instanceof UnauthorizedError) onAuthFail?.();
-      else setPermissionError(err?.serverError || err?.message || t('chat.permissionMode.saveFailed'));
+      else {
+        const errorLike = asErrorLike(err);
+        setPermissionError(errorLike.serverError || errorLike.message || t('chat.permissionMode.saveFailed'));
+      }
     } finally { setPermissionSaving(false); }
   };
 
   // Grow to fit content; CSS max-height caps it (~6 lines) then it scrolls. +2 for the border under
   // box-sizing: border-box. No multi/crowd measuring — the buttons are in a row below, never inline.
-  const autoGrow = (el) => {
+  const autoGrow = (el: HTMLTextAreaElement | null): void => {
     if (!el) return;
     el.style.height = 'auto';
     el.style.height = `${el.scrollHeight + 2}px`;
   };
   useLayoutEffect(() => { autoGrow(ref.current); }, [value]);
 
-  const openConfig = () => {
+  const openConfig = (): void => {
     // Opening this picker must preserve the user's keyboard state. The composer's pointerdown guard keeps
     // an already-focused textarea focused, while a closed keyboard stays closed because the trigger never
     // focuses the textarea itself.
@@ -598,25 +877,33 @@ export default function ChatComposer({
     setGoalOpen(false);
     setConfigOpen(true);
   };
-  const openGoal = (edit = false) => {
+  const openGoal = (edit = false): void => {
     setConfigOpen(false);
     setContextOpen(false);
     setGoalEditOnOpen(edit);
     setGoalOpen(true);
   };
-  const applyConfigSlash = async (trimmed) => {
+  const applyConfigSlash = async (trimmed: string): Promise<boolean> => {
     if (!managedCodex) return false;
     const match = trimmed.match(/^\/(model|effort)(?:\s+(.+))?$/i);
     if (!match) return false;
     if (!match[2]) openConfig();
     else {
-      const result = await updateCodexSettings(pane, { [match[1].toLowerCase()]: match[2].trim() });
-      setLocalSettings(result?.settings || { ...managedSettings, [match[1].toLowerCase()]: match[2].trim() });
+      const settingKey = match[1].toLowerCase() as 'model' | 'effort';
+      const settingValue = match[2].trim();
+      const result = await updateCodexSettings(pane, { [settingKey]: settingValue });
+      setLocalSettings(settingsFromResponse(
+        result,
+        { ...(managedSettings || {}), [settingKey]: settingValue },
+      ));
     }
     return true;
   };
 
-  const dispatchManagedCodex = async (text, requestId = null) => {
+  const dispatchManagedCodex = async (
+    text: string,
+    requestId: string | null = null,
+  ): Promise<CodexSendResult | null | typeof UNSUPPORTED_SLASH> => {
     const trimmed = text.trim();
     if (await applyConfigSlash(trimmed)) return null;
     const goalMatch = trimmed.match(/^\/goal(?:\s+([\s\S]+))?$/i);
@@ -634,27 +921,39 @@ export default function ChatComposer({
         return null;
       }
       if (action === 'pause' || action === 'resume') {
-        const result = await updateCodexGoal(pane, { status: action === 'pause' ? 'paused' : 'active' });
-        applyCurrentGoal(result?.goal || null);
+        const status: CodexGoalStatus = action === 'pause' ? 'paused' : 'active';
+        const result = await updateCodexGoal(pane, { status });
+        applyCurrentGoal(goalFromResponse(result));
         showNotice(t(action === 'pause' ? 'chat.goal.paused' : 'chat.goal.resumed'));
         return null;
       }
       if (argument.length > 4_000) throw new Error(t('chat.goal.tooLong'));
       const result = await updateCodexGoal(pane, { objective: argument });
-      applyCurrentGoal(result?.goal || null);
+      applyCurrentGoal(goalFromResponse(result));
       showNotice(t('chat.goal.created'));
       return null;
     }
-    if (/^\/compact$/i.test(trimmed)) return compactCodexSession(pane);
-    if (/^\/clear$/i.test(trimmed)) return clearCodexSession(pane);
+    if (/^\/compact$/i.test(trimmed)) {
+      await compactCodexSession(pane);
+      return null;
+    }
+    if (/^\/clear$/i.test(trimmed)) {
+      await clearCodexSession(pane);
+      return null;
+    }
     if (trimmed.startsWith('/')) {
       showNotice(t('chat.slash.unsupported'));
       return UNSUPPORTED_SLASH;
     }
-    return sendCodexMessage(pane, text, requestId);
+    const result = parseCodexSendResult(await sendManagedCodexMessage(pane, text, requestId));
+    if (!result) throw new Error(t('chat.sendUnknown'));
+    return result;
   };
 
-  const beginManagedSend = (text, source) => {
+  const beginManagedSend = (
+    text: string,
+    source: CodexOutgoingSource,
+  ): { requestId: string; optimisticId: string } => {
     const requestId = `codex-send-${Date.now().toString(36)}-${(++codexSendSeqRef.current).toString(36)}`;
     const optimisticId = onCodexSendStart?.(pane, text, source, requestId) || requestId;
     return { requestId, optimisticId };
@@ -665,7 +964,7 @@ export default function ChatComposer({
   // when recording started; the live partial rewrites in place; a send mid-recording suppresses the commit.
   const anchorRef = useRef({ head: '', tail: '' });
   const suppressVoiceRef = useRef(false);
-  const commitVoice = (text) => {
+  const commitVoice = (text: string): void => {
     if (suppressVoiceRef.current) { suppressVoiceRef.current = false; return; }
     const { head, tail } = anchorRef.current;
     setValue(head + text + tail);
@@ -679,17 +978,22 @@ export default function ChatComposer({
     const { head, tail } = anchorRef.current;
     setValue(head + voice.partial + tail);
   }, [voice.partial, voice.state]);
-  const toggleMic = () => {
-    if (recording) { voice.stop(); return; }
+  const toggleMic = (): void => {
+    if (recording) { void voice.stop(); return; }
     const el = ref.current;
     const sel = el ? el.selectionStart : value.length;
     anchorRef.current = { head: value.slice(0, sel), tail: value.slice(sel) };
-    voice.start();
+    void voice.start();
   };
-  const stopVoiceIfRecording = () => { if (recording) { suppressVoiceRef.current = true; voice.stop(); } };
+  const stopVoiceIfRecording = (): void => {
+    if (recording) {
+      suppressVoiceRef.current = true;
+      void voice.stop();
+    }
+  };
 
   // Claude still submits through its terminal. Managed Codex sends structured App Server requests only.
-  const send = async () => {
+  const send = async (): Promise<void> => {
     if (!pane || !value.trim() || submitInFlightRef.current) return;
     const text = value;
     const optimistic = managedCodex && !text.trim().startsWith('/');
@@ -708,12 +1012,12 @@ export default function ChatComposer({
       requestAnimationFrame(() => autoGrow(ref.current));
     }
     try {
-      let result;
+      let result: CodexSendResult | null | typeof UNSUPPORTED_SLASH | undefined;
       if (managedCodex) result = await dispatchManagedCodex(text, outgoing?.requestId || null);
       else if (agent === 'codex') throw new Error(t('chat.session.notManaged'));
       else await sendText(pane, text, true);
       if (result === UNSUPPORTED_SLASH) return;
-      if (optimisticId) onCodexSendResult?.(optimisticId, { result });
+      if (optimisticId && result) onCodexSendResult?.(optimisticId, { result });
       onSent?.(text);
       if (!managedCodex && agent !== 'codex' && shouldHandOffSlash(text)) {
         onInteractiveSlash?.(text.trim());
@@ -722,8 +1026,9 @@ export default function ChatComposer({
         setValue('');
         requestAnimationFrame(() => autoGrow(ref.current));
       }
-    } catch (err) {
-      const uncertain = !(err instanceof UnauthorizedError) && !Number.isFinite(err?.status);
+    } catch (err: unknown) {
+      const uncertain = !(err instanceof UnauthorizedError)
+        && !Number.isFinite(asErrorLike(err).status);
       if (optimisticId) onCodexSendResult?.(optimisticId, { error: err, uncertain });
       if (err instanceof UnauthorizedError) onAuthFail?.();
       else reportSendError(err, !!optimisticId && uncertain);
@@ -734,20 +1039,23 @@ export default function ChatComposer({
   };
 
   // Interrupt the working agent — Escape is Claude Code's stop key (same path the terminal ESC uses).
-  const stop = async () => {
+  const stop = async (): Promise<void> => {
     if (stopping) return;
     setStopping(true);
     clearActionError();
     try {
       if (managedCodex) await interruptCodexSession(pane);
       else await onKey('Escape');
-    } catch (err) {
+    } catch (err: unknown) {
       setStopping(false);
       if (err instanceof UnauthorizedError) onAuthFail?.();
       else reportActionError('stop', err);
     }
   };
-  const actOnQueued = async (action, item) => {
+  const actOnQueued = async (
+    action: QueueAction,
+    item: DisplayQueueItem,
+  ): Promise<boolean> => {
     if (!item?.id || queueAction || queueEditorRef.current) return false;
     const optimisticId = action === 'steer' ? onCodexSendStart?.(pane, item.text, 'steer') : null;
     if (action === 'steer') setHandledQueueIds((ids) => [...ids, item.id]);
@@ -760,7 +1068,7 @@ export default function ChatComposer({
       if (optimisticId) onCodexSendResult?.(optimisticId, { result });
       if (action !== 'steer') setHandledQueueIds((ids) => [...ids, item.id]);
       return true;
-    } catch (err) {
+    } catch (err: unknown) {
       if (action === 'steer') setHandledQueueIds((ids) => ids.filter((id) => id !== item.id));
       if (optimisticId) onCodexSendResult?.(optimisticId, { error: err });
       if (err instanceof UnauthorizedError) onAuthFail?.();
@@ -768,19 +1076,20 @@ export default function ChatComposer({
       return false;
     } finally { setQueueAction(''); }
   };
-  const replaceQueueEditor = (next) => {
+  const replaceQueueEditor = (next: QueueEditorState | null): void => {
     queueEditorRef.current = next;
     setQueueEditor(next);
   };
-  const updateQueueEditor = (updates) => {
+  const currentQueueEditor = (): QueueEditorState | null => queueEditorRef.current;
+  const updateQueueEditor = (updates: Partial<QueueEditorState>): void => {
     const current = queueEditorRef.current;
     if (!current) return;
     replaceQueueEditor({ ...current, ...updates });
   };
-  const openQueueEditor = async (item) => {
+  const openQueueEditor = async (item: DisplayQueueItem): Promise<void> => {
     if (!item?.id || queueAction || queueEditorRef.current) return;
     const key = `${pane}\0${item.id}\0${Date.now()}`;
-    const pending = {
+    const pending: QueueEditorState = {
       key, pane, id: item.id, original: item.text, draft: item.text,
       token: null, busy: false, error: '',
     };
@@ -788,31 +1097,33 @@ export default function ChatComposer({
     setQueueAction(`edit:${item.id}`);
     clearActionError();
     try {
-      const result = await beginCodexQueuedEdit(pane, item.id);
-      if (queueEditorRef.current?.key !== key) {
-        if (result?.token) {
+      const result = queueEditResponseOf(await beginCodexQueuedEdit(pane, item.id));
+      if (!result) throw new Error(t('chat.queue.actionFailed'));
+      if (currentQueueEditor()?.key !== key) {
+        if (result.token) {
           void cancelCodexQueuedEdit(pane, item.id, result.token).catch(() => {});
         }
         return;
       }
-      const active = queueEditorRef.current;
-      const serverText = result?.item?.text ?? item.text;
+      const active = currentQueueEditor();
+      if (!active) return;
+      const serverText = result.itemText ?? item.text;
       replaceQueueEditor({
         ...active,
         draft: active.draft === active.original ? serverText : active.draft,
         original: serverText,
-        token: result?.token || null,
-        expiresAt: Number(result?.expiresAt) || null,
+        token: result.token,
+        expiresAt: result.expiresAt,
       });
-    } catch (err) {
-      if (queueEditorRef.current?.key === key) replaceQueueEditor(null);
+    } catch (err: unknown) {
+      if (currentQueueEditor()?.key === key) replaceQueueEditor(null);
       if (err instanceof UnauthorizedError) onAuthFail?.();
       else reportActionError('queue', err);
     } finally {
       setQueueAction((current) => (current === `edit:${item.id}` ? '' : current));
     }
   };
-  const dismissQueueEditor = () => {
+  const dismissQueueEditor = (): void => {
     const current = queueEditorRef.current;
     if (!current) return;
     replaceQueueEditor(null);
@@ -825,7 +1136,7 @@ export default function ChatComposer({
       setQueueAction((action) => (action === `edit-cancel:${current.id}` ? '' : action));
     });
   };
-  const saveQueueEditor = async () => {
+  const saveQueueEditor = async (): Promise<void> => {
     const current = queueEditorRef.current;
     const text = current?.draft.trim() || '';
     if (!current?.token || current.busy || !text) return;
@@ -834,13 +1145,14 @@ export default function ChatComposer({
     try {
       await commitCodexQueuedEdit(current.pane, current.id, current.token, text);
       if (queueEditorRef.current?.key === current.key) replaceQueueEditor(null);
-    } catch (err) {
+    } catch (err: unknown) {
       if (err instanceof UnauthorizedError) onAuthFail?.();
       else if (queueEditorRef.current?.key === current.key) {
         reportActionError('queue', err);
         updateQueueEditor({
           busy: false,
-          error: err?.serverError || err?.message || t('chat.queue.actionFailed'),
+          error: asErrorLike(err).serverError || asErrorLike(err).message
+            || t('chat.queue.actionFailed'),
         });
       }
     }
@@ -854,32 +1166,33 @@ export default function ChatComposer({
     const timer = setInterval(() => {
       const current = queueEditorRef.current;
       if (!current?.token || current.key !== key) return;
-      void renewCodexQueuedEdit(current.pane, current.id, current.token).catch((err) => {
+      void renewCodexQueuedEdit(current.pane, current.id, current.token).catch((err: unknown) => {
+        const errorLike = asErrorLike(err);
         if (err instanceof UnauthorizedError) onAuthFail?.();
-        else if (Number(err?.status) === 409 && queueEditorRef.current?.key === key) {
+        else if (Number(errorLike.status) === 409 && queueEditorRef.current?.key === key) {
           reportActionError('queue', err);
           updateQueueEditor({
             token: null, expiresAt: null, busy: false,
-            error: err?.serverError || err?.message || t('chat.queue.actionFailed'),
+            error: errorLike.serverError || errorLike.message || t('chat.queue.actionFailed'),
           });
         }
       });
     }, heartbeatMs);
     return () => clearInterval(timer);
   }, [queueEditor?.key, queueEditor?.token, queueEditor?.expiresAt]);
-  const confirmQueueDelete = async () => {
+  const confirmQueueDelete = async (): Promise<void> => {
     const item = queueDelete;
     if (!item) return;
     if (await actOnQueued('remove', item)) setQueueDelete(null);
   };
-  const confirmStop = () => {
+  const confirmStop = (): void => {
     setStopConfirm(false);
     void stop();
   };
   useBackButton(!!queueEditor, dismissQueueEditor);
   useBackButton(!!queueDelete, () => setQueueDelete(null));
   useBackButton(stopConfirm, () => setStopConfirm(false));
-  const onComposerKeyDown = (event) => {
+  const onComposerKeyDown = (event: ReactKeyboardEvent<HTMLTextAreaElement>): void => {
     if (!desktop || event.nativeEvent?.isComposing) return;
     if (event.key === 'Escape' && busy) {
       event.preventDefault();
@@ -896,12 +1209,14 @@ export default function ChatComposer({
   // forgiving target than the thin textarea itself. A movement threshold (like MicButton) rejects a
   // scroll/lens-swipe that merely starts here, so it never mis-fires: only a stationary tap focuses. Taps
   // that land on a control or the textarea are left alone (their own handlers / native focus apply).
-  const cardDown = (e) => { tapPt.current = { x: e.clientX, y: e.clientY, moved: false }; };
-  const cardMove = (e) => {
+  const cardDown = (e: ReactPointerEvent<HTMLDivElement>): void => {
+    tapPt.current = { x: e.clientX, y: e.clientY, moved: false };
+  };
+  const cardMove = (e: ReactPointerEvent<HTMLDivElement>): void => {
     const p = tapPt.current;
     if (!p.moved && Math.hypot(e.clientX - p.x, e.clientY - p.y) > 10) p.moved = true;
   };
-  const cardTapFocus = (e) => {
+  const cardTapFocus = (e: ReactPointerEvent<HTMLDivElement>): void => {
     const p = tapPt.current;
     // The model picker is rendered inside the card. Its backdrop therefore bubbles pointer events through
     // this handler; while the picker is open, those taps belong to the picker and must preserve the
@@ -910,13 +1225,14 @@ export default function ChatComposer({
     // Reject if it moved during the press (a scroll/lens-swipe), OR if the up landed far from the down —
     // a second signal in case fast-swipe move events were throttled/missed. Only a stationary tap focuses.
     if (p.moved || Math.hypot(e.clientX - p.x, e.clientY - p.y) > 10) return;
-    if (e.target.closest?.('.cc-queue, button, a, input, textarea, [contenteditable]')) return;
+    if (e.target instanceof Element
+      && e.target.closest('.cc-queue, button, a, input, textarea, [contenteditable]')) return;
     ref.current?.focus();
   };
 
   // Terminal keys remain Claude-only. Managed Codex text shortcuts either fill the draft or use the same
   // structured dispatch as the send button, so a shortcut can never write into the hidden TUI.
-  const runFav = async (fav) => {
+  const runFav = async (fav: ShortcutItem): Promise<void> => {
     clearNotice();
     clearActionError();
     if (fav.kind === 'key') { onKey(fav.text); return; }
@@ -931,19 +1247,20 @@ export default function ChatComposer({
         requestAnimationFrame(() => ref.current?.focus());
         return;
       }
-      let result;
+      let result: CodexSendResult | null | typeof UNSUPPORTED_SLASH | undefined;
       if (managedCodex) result = await dispatchManagedCodex(fav.text, outgoing?.requestId || null);
       else if (agent === 'codex') throw new Error(t('chat.session.notManaged'));
       else await sendText(pane, fav.text, !!fav.enter);
       if (result === UNSUPPORTED_SLASH) return;
-      if (optimisticId) onCodexSendResult?.(optimisticId, { result });
+      if (optimisticId && result) onCodexSendResult?.(optimisticId, { result });
       if (!fav.enter && !managedCodex) return;
       onSent?.(fav.text);
       if (!managedCodex && agent !== 'codex' && shouldHandOffSlash(fav.text)) {
         onInteractiveSlash?.(fav.text.trim());
       }
-    } catch (err) {
-      const uncertain = !(err instanceof UnauthorizedError) && !Number.isFinite(err?.status);
+    } catch (err: unknown) {
+      const uncertain = !(err instanceof UnauthorizedError)
+        && !Number.isFinite(asErrorLike(err).status);
       if (optimisticId) onCodexSendResult?.(optimisticId, { error: err, uncertain });
       if (err instanceof UnauthorizedError) onAuthFail?.();
       else reportSendError(err, !!optimisticId && uncertain);
@@ -952,9 +1269,9 @@ export default function ChatComposer({
 
   // After an upload, append the files' absolute paths to the draft (one → the path; many → the shared dir
   // prefix once + brace-expanded names), then focus to keep typing. Mirrors the dock's insertPaths.
-  const insertPaths = (paths) => {
+  const insertPaths = (paths: string[]): void => {
     if (!paths.length) return;
-    let text;
+    let text: string;
     if (paths.length === 1) {
       text = paths[0];
     } else {
@@ -1008,7 +1325,8 @@ export default function ChatComposer({
                 <div className={`cc-queue-item${item.optimistic ? ' is-pending' : ''}`} key={item.id}
                   onClick={(event) => {
                     if (item.optimistic) return;
-                    if (event.target.closest('.cc-queue-action')) return;
+                    if (event.target instanceof Element
+                      && event.target.closest('.cc-queue-action')) return;
                     void openQueueEditor(item);
                   }}>
                   <span className="cc-queue-index" aria-hidden="true">{index + 1}</span>
@@ -1091,7 +1409,7 @@ export default function ChatComposer({
                 {!ctxEffort && typeof ctxPct === 'number' && <span className="cc-ctx-pct">{Math.round(ctxPct)}%</span>}
               </div>
             )}
-            {showContextRing && (
+            {contextPercent !== null && (
               <button type="button" className={`cc-context-trigger ${contextLevel}`}
                 aria-label={t('chat.status.aria', { percent: Math.round(contextPercent) })}
                 aria-expanded={contextOpen} onClick={() => setContextOpen((open) => !open)}>
@@ -1109,7 +1427,8 @@ export default function ChatComposer({
                 disabled={submitting || !value.trim()} onClick={send}>
                 <ArrowUpIcon /></button>
             )}
-            {contextOpen && showContextRing && (
+            {contextOpen && contextPercent !== null
+              && contextUsedTokens !== null && contextTotalTokens !== null && (
               <>
                 <div className="cc-context-backdrop" onClick={() => setContextOpen(false)} />
                 <section className="cc-context-popover" role="dialog" aria-modal="true"

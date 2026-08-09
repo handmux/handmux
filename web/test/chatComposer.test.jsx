@@ -281,7 +281,10 @@ describe('ChatComposer', () => {
       .toHaveBeenCalledWith('%1', '马上显示这条消息', requestId));
     expect(onCodexSendResult).not.toHaveBeenCalled();
 
-    const result = { queued: true, item: { id: 'queued-1', text: '马上显示这条消息' } };
+    const result = {
+      queued: true,
+      item: { id: 'queued-1', text: '马上显示这条消息', createdAt: Date.now() },
+    };
     request.resolve(result);
     await waitFor(() => expect(onCodexSendResult).toHaveBeenCalledWith('optimistic-1', { result }));
   });
