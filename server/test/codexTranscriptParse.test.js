@@ -22,6 +22,9 @@ describe('Codex rollout transcript', () => {
     ]);
     expect(parsed.map((message) => message.turnId)).toEqual(['turn-1', 'turn-1']);
     expect(parsed.map((message) => message.itemId)).toEqual(['user-1', 'agent-1']);
+    expect(parsed.map((message) => message.id)).toEqual([
+      'codex:turn-1:user-1', 'codex:turn-1:agent-1',
+    ]);
   });
 
   it('omits Codex-injected AGENTS instructions without hiding normal user text', () => {
@@ -92,7 +95,7 @@ describe('Codex rollout transcript', () => {
     ]);
 
     expect(parsed).toEqual([expect.objectContaining({
-      type: 'goal', event: 'complete', turnId: 'turn-goal', goal,
+      id: 'codex-goal:10:complete', type: 'goal', event: 'complete', turnId: 'turn-goal', goal,
     })]);
     expect(parsed[0].tool).toBeUndefined();
   });

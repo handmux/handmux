@@ -20,7 +20,7 @@ describe('Codex message stream projection', () => {
       type: 'delta', turnId: 'turn-1', itemId: 'agent-1', delta: '好',
     }, 9);
     expect(messages).toEqual([expect.objectContaining({
-      id: 'codex-stream:turn-1:agent-1', text: '你好', streaming: true, afterK: 7,
+      id: 'codex:turn-1:agent-1', text: '你好', streaming: true, afterK: 7,
     })]);
 
     messages = applyCodexStreamEvent(messages, {
@@ -29,30 +29,20 @@ describe('Codex message stream projection', () => {
     expect(messages[0]).toMatchObject({ text: '你好！', completed: true, streaming: false });
   });
 
-  it('lets only a newer durable rollout message cover the same temporary text', () => {
-    const live = { completed: false, streaming: true, text: '完成', afterK: 4 };
+  it('covers a live message only by its canonical server identity', () => {
+    const live = {
+      id: 'codex:turn-1:agent-1', streamKey: 'turn-1:agent-1', turnId: 'turn-1', itemId: 'agent-1',
+      role: 'assistant', type: 'text', live: true, completed: false, streaming: true, text: '流式片段', afterK: 99,
+    };
     expect(durableCoversLiveMessage([
-      { k: 3, role: 'assistant', type: 'text', text: '完成' },
+      { id: 'codex:turn-1:agent-other', k: 3, role: 'assistant', type: 'text', text: '流式片段' },
     ], live)).toBe(false);
     expect(durableCoversLiveMessage([
-      { k: 5, role: 'assistant', type: 'text', text: '完成' },
+      { id: 'codex:turn-1:agent-1', k: 3, role: 'assistant', type: 'text', text: '最终回答' },
     ], live)).toBe(true);
     expect(durableCoversLiveMessage([
-      { k: 3, turnId: 'turn-1', role: 'assistant', type: 'text', text: '完成' },
-    ], { ...live, turnId: 'turn-1', afterK: 9 })).toBe(true);
-    expect(durableCoversLiveMessage([
-      { k: 10, turnId: 'turn-old', role: 'assistant', type: 'text', text: '完成' },
-    ], { ...live, turnId: 'turn-new', afterK: 4 })).toBe(false);
-    expect(durableCoversLiveMessage([
-      { k: 3, turnId: 'turn-1', itemId: 'agent-1', role: 'assistant', type: 'text', text: '最终回答' },
-    ], {
-      ...live, turnId: 'turn-1', itemId: 'agent-1', text: '流式片段', afterK: 99,
-    })).toBe(true);
-    expect(durableCoversLiveMessage([
-      { k: 3, turnId: 'turn-1', itemId: 'agent-other', role: 'assistant', type: 'text', text: '流式片段' },
-    ], {
-      ...live, turnId: 'turn-1', itemId: 'agent-1', text: '流式片段', afterK: 1,
-    })).toBe(false);
+      { k: 100, role: 'assistant', type: 'text', text: '流式片段' },
+    ], live)).toBe(false);
   });
 
   it('discards finalized temporary replies before projecting a newer live reply', () => {
@@ -104,13 +94,10 @@ describe('Codex message stream projection', () => {
       expect.objectContaining({ type: 'text', turnId: 'turn-next' }),
     ]);
     expect(durableCoversLiveMessage([
-      { k: 5, type: 'goal', event: 'complete', goal },
+      { id: 'codex-goal:10:complete', k: 5, type: 'goal', event: 'complete', goal },
     ], messages[0])).toBe(true);
     expect(durableCoversLiveMessage([
-      { k: 3, type: 'goal', event: 'complete', goal },
-    ], messages[0])).toBe(true);
-    expect(durableCoversLiveMessage([
-      { k: 3, type: 'goal', event: 'complete', goal: { ...goal, createdAt: 9 } },
+      { id: 'codex-goal:9:complete', k: 3, type: 'goal', event: 'complete', goal: { ...goal, createdAt: 9 } },
     ], messages[0])).toBe(false);
     expect(applyCodexStreamEvent([], {
       type: 'goal', threadId: 'thread-1', turnId: null, event: 'complete', goal,
@@ -137,7 +124,7 @@ describe('Codex message stream projection', () => {
     }));
     rerender({ durableMessages: [
       { k: 4, role: 'user', type: 'text', text: '继续' },
-      { k: 5, role: 'assistant', type: 'text', text: '回答' },
+      { id: 'codex:turn-1:agent-1', k: 5, role: 'assistant', type: 'text', text: '回答' },
     ] });
     // ChatView hides this exact durable duplicate, but the hook must retain the accumulator so the next
     // delta continues from "回答" instead of reappearing as a broken "继续" fragment.
@@ -155,7 +142,7 @@ describe('Codex message stream projection', () => {
 
     rerender({ durableMessages: [
       { k: 4, role: 'user', type: 'text', text: '继续' },
-      { k: 5, role: 'assistant', type: 'text', text: '回答完成' },
+      { id: 'codex:turn-1:agent-1', k: 5, role: 'assistant', type: 'text', text: '回答完成' },
     ] });
     await waitFor(() => expect(result.current).toEqual([]));
   });

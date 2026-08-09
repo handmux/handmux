@@ -22,7 +22,7 @@ All notable changes to handmux. Format follows [Keep a Changelog](https://keepac
 - `~/.handmux/state.json` 及其目录现在使用私有权限和原子写入，并会在读取历史文件时自动修复过宽权限。
 - Supervisor 启动参数和系统自启动文件不再包含 Token、VAPID 私钥或语音密钥；完整配置改从 `0600` 私有文件读取。
 - Codex 回复期间的待发消息和幂等回执现在会私密、原子地持久化；Handmux 重启后可恢复队列，发送超时会先与 App Server 对账再决定是否重试，避免消息丢失或重复。
-- Codex 实时回复现在使用有序事件游标；手机短暂断网或切到后台后，会从最后确认的事件继续补拉，游标失效时再按 rollout 的原生回合与消息身份回退校准。
+- Codex 实时回复现在使用有序事件游标；手机短暂断网或切到后台后，会从最后确认的事件继续补拉，并通过 App Server 与 rollout 共用的消息 ID 精确校准，不再按文本或时间猜测去重。
 
 ## [0.23.0] - 2026-08-09
 

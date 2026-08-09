@@ -1,6 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import { streamCodexMessages, UnauthorizedError } from '../api.js';
 import type { CodexGoal } from '../../../server/src/codexStreamProtocol.js';
+import {
+  codexGoalMessageId, codexItemMessageId,
+} from '../../../server/src/codexMessageIdentity.js';
 
 const MAX_LIVE_MESSAGES = 20;
 const RETRY_MIN_MS = 500;
@@ -78,8 +81,10 @@ export function applyCodexStreamEvent(
     if (['complete', 'blocked'].includes(event.goal.status ?? '') && !event.turnId) return messages;
     const marker = event.goal.createdAt ?? event.goal.updatedAt ?? event.goal.objective;
     const key = `goal:${marker}:${event.event || event.goal.status || 'set'}`;
+    const id = codexGoalMessageId(event.goal, event.event || event.goal.status || 'set');
+    if (!id) return messages;
     const nextMessage: CodexLiveMessage = {
-      id: `codex-stream:${key}`,
+      id,
       streamKey: key,
       turnId: event.turnId || null,
       role: 'assistant',
@@ -122,7 +127,7 @@ export function applyCodexStreamEvent(
   const baseIndex = baseMessages.findIndex((message) => message.streamKey === key);
   const nextMessage: CodexLiveMessage = {
     ...(previous || {}),
-    id: `codex-stream:${key}`,
+    id: codexItemMessageId(event.turnId, event.itemId) || `codex-stream:${key}`,
     streamKey: key,
     turnId: event.turnId ?? null,
     itemId: event.itemId,
@@ -144,29 +149,7 @@ export function durableCoversLiveMessage(
   durableMessages: CodexDurableMessage[],
   liveMessage: CodexLiveMessage,
 ): boolean {
-  if (liveMessage?.type === 'goal') {
-    return durableMessages.some((message) => (
-      message?.type === 'goal'
-      && message.event === liveMessage.event
-      && message.goal?.objective === liveMessage.goal?.objective
-      && ((message.goal?.createdAt != null && liveMessage.goal?.createdAt != null
-        && message.goal.createdAt === liveMessage.goal.createdAt)
-        || Number(message.k) > Number(liveMessage.afterK ?? -1))
-    ));
-  }
-  if (liveMessage?.itemId) {
-    const identified = durableMessages.filter((message) => message?.itemId);
-    if (identified.length) {
-      return identified.some((message) => message.itemId === liveMessage.itemId
-        && (!message.turnId || !liveMessage.turnId || message.turnId === liveMessage.turnId));
-    }
-  }
-  if (!liveMessage?.text) return false;
-  return durableMessages.some((message) => {
-    if (message?.role !== 'assistant' || message.type !== 'text' || message.text !== liveMessage.text) return false;
-    if (message.turnId && liveMessage.turnId) return message.turnId === liveMessage.turnId;
-    return Number(message.k) > Number(liveMessage.afterK ?? -1);
-  });
+  return durableMessages.some((message) => message?.id != null && String(message.id) === liveMessage.id);
 }
 
 function abortableDelay(ms: number, signal: AbortSignal): Promise<void> {

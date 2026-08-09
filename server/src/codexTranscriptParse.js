@@ -1,4 +1,5 @@
 import { codexPlanSnapshot } from './codexPlan.js';
+import { codexGoalMessageId, codexItemMessageId } from './codexMessageIdentity.js';
 
 // Codex's rollout JSONL is the durable, ordered conversation log. App Server notifications drive live
 // controls/status, but its thread snapshots currently omit some completed tools, so transcript rendering
@@ -52,6 +53,7 @@ function sourceIdentity(item) {
   return {
     ...(turnId ? { turnId } : {}),
     ...(itemId ? { itemId } : {}),
+    ...(turnId && itemId ? { id: codexItemMessageId(turnId, itemId) } : {}),
   };
 }
 
@@ -350,6 +352,7 @@ function applyGoalOutput(message, value) {
   message.goal = { ...(message.goal || {}), ...goal };
   message.event = goal.status === 'complete' ? 'complete'
     : goal.status === 'blocked' ? 'blocked' : message.event;
+  message.id = codexGoalMessageId(message.goal, message.event) || message.id;
   return true;
 }
 
@@ -450,6 +453,7 @@ export function createCodexTranscriptParser() {
               messages.push({
                 i, role: 'assistant', type: 'goal', event: 'set', goal, ts,
                 ...sourceIdentity(item),
+                ...(codexGoalMessageId(goal, 'set') ? { id: codexGoalMessageId(goal, 'set') } : {}),
               });
               activeGoalObjective = goal.objective;
             }
@@ -531,6 +535,12 @@ export function createCodexTranscriptParser() {
         const targets = calls
           ? calls.map((call) => callMessage(i, ts, call.name, call.input, call.diff, item))
           : [toolMessage(i, ts, item.name || 'exec', { script: cap(script, SCRIPT_CAP) }, null, item)];
+        if (targets.length > 1) {
+          targets.forEach((message, index) => {
+            const childId = codexItemMessageId(message.turnId, message.itemId, index);
+            if (childId) message.id = childId;
+          });
+        }
         messages.push(...targets);
         if (item.call_id) pending.set(item.call_id, targets);
         continue;
