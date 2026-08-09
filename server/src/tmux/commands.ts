@@ -2,26 +2,73 @@ import { execFile } from 'node:child_process';
 import os from 'node:os';
 import { parseTmuxRows, tmuxFormat } from './format.js';
 
-export const isPaneId = (s) => typeof s === 'string' && /^%\d+$/.test(s);
-export const isWindowId = (s) => typeof s === 'string' && /^@\d+$/.test(s);
-export const isSessionId = (s) => typeof s === 'string' && /^\$\d+$/.test(s);
+export interface TmuxSession { id: string; name: string }
+export interface TmuxWindow {
+  id: string;
+  name: string;
+  active: boolean;
+  panes: number;
+  width: number;
+  height: number;
+  activePaneId: string;
+}
+export interface TmuxPane {
+  id: string;
+  active: boolean;
+  width: number;
+  height: number;
+  command: string;
+  cwd: string;
+  left: number;
+  top: number;
+  tty: string;
+}
+export interface LiveTmuxPane {
+  id: string;
+  cmd: string;
+  tty: string;
+  session: string;
+  window: string;
+  windowName: string;
+}
+export interface PaneInfo {
+  width: number;
+  height: number;
+  cursorX: number;
+  cursorY: number;
+  cursorVisible: boolean;
+  altScreen: boolean;
+  mouseAware: boolean;
+  mouseSgr: boolean;
+}
+export interface PaneLocation { session: string; window: string; windowName: string }
+export interface WheelOptions { sgr?: boolean; col?: number; row?: number }
+export type WheelDirection = 'up' | 'down';
+
+export const isPaneId = (value: unknown): value is string => typeof value === 'string' && /^%\d+$/.test(value);
+export const isWindowId = (value: unknown): value is string => typeof value === 'string' && /^@\d+$/.test(value);
+export const isSessionId = (value: unknown): value is string => typeof value === 'string' && /^\$\d+$/.test(value);
 
 // Letters, digits and hyphens only (1-16 chars). A positive allowlist sidesteps tmux's target
 // syntax entirely (no '.'/':' separators, no whitespace, no control chars) and is trivial to
 // mirror on the client. Only NEW session names are validated — binding an existing PC-made name
 // (which may contain spaces) checks existence first and never calls this.
-export const isValidSessionName = (s) =>
-  typeof s === 'string' && /^[A-Za-z0-9-]{1,16}$/.test(s);
+export const isValidSessionName = (value: unknown): value is string =>
+  typeof value === 'string' && /^[A-Za-z0-9-]{1,16}$/.test(value);
 
 // Optional startup command run in a freshly-created window/session (e.g. "claude"). It's typed via
 // send-keys + Enter, so it must be a single line: reject control chars (newline/CR/tab included) and
 // cap the length. No shell-arg restriction — it runs in the new shell exactly as if typed, same trust
 // model as the existing sendText. Empty means "no command" and is handled by the caller, not here.
-export const isValidStartupCmd = (s) =>
-  typeof s === 'string' && s.length > 0 && s.length <= 200 && [...s].every((c) => { const n = c.charCodeAt(0); return n >= 0x20 && n !== 0x7f; });
+export const isValidStartupCmd = (value: unknown): value is string =>
+  typeof value === 'string' && value.length > 0 && value.length <= 200
+  && [...value].every((character) => {
+    const code = character.charCodeAt(0);
+    return code >= 0x20 && code !== 0x7f;
+  });
 
-export function runTmux(args) {
-  return new Promise((resolve, reject) => {
+export function runTmux(args: string[]): Promise<string> {
+  return new Promise<string>((resolve, reject) => {
     execFile('tmux', args, { maxBuffer: 32 * 1024 * 1024 }, (err, stdout, stderr) => {
       if (err) reject(new Error(stderr?.toString() || err.message));
       else resolve(stdout.toString());
@@ -29,21 +76,26 @@ export function runTmux(args) {
   });
 }
 
-const lines = (out) => out.split('\n').filter((l) => l.length > 0);
+const lines = (output: string): string[] => output.split('\n').filter((line) => line.length > 0);
+const firstRow = <T extends string[]>(rows: T[], label: string): T => {
+  const row = rows[0];
+  if (!row) throw new Error(`invalid ${label} format: expected row`);
+  return row;
+};
 
-export async function listSessions() {
+export async function listSessions(): Promise<TmuxSession[]> {
   try {
     const out = await runTmux(['list-sessions', '-F', tmuxFormat(['session_id', 'session_name'])]);
     return parseTmuxRows(out, 2, 'session').map(([id, name]) => ({ id, name }));
-  } catch (e) {
+  } catch (error) {
     // tmux exits non-zero with "no server running" or "no sessions" when nothing is up yet.
-    const msg = e.message || '';
+    const msg = error instanceof Error ? error.message : '';
     if (msg.includes('no server') || msg.includes('no sessions') || msg.includes('error connecting')) return [];
-    throw e;
+    throw error;
   }
 }
 
-export async function listWindows(sessionId) {
+export async function listWindows(sessionId: string): Promise<TmuxWindow[]> {
   const out = await runTmux(['list-windows', '-t', sessionId, '-F', tmuxFormat([
     'window_id', 'window_name', 'window_active', 'window_panes', 'window_width', 'window_height', 'pane_id',
   ])]);
@@ -52,7 +104,7 @@ export async function listWindows(sessionId) {
   });
 }
 
-export async function listPanes(windowId) {
+export async function listPanes(windowId: string): Promise<TmuxPane[]> {
   const out = await runTmux(['list-panes', '-t', windowId, '-F', tmuxFormat(['pane_id', 'pane_active', 'pane_width', 'pane_height', 'pane_current_command', 'pane_current_path', 'pane_left', 'pane_top', 'pane_tty'])]);
   return parseTmuxRows(out, 9, 'pane').map(([id, active, width, height, command, cwd, left, top, tty]) => {
     return { id, active: active === '1', width: Number(width), height: Number(height), command, cwd, left: Number(left), top: Number(top), tty };
@@ -62,7 +114,7 @@ export async function listPanes(windowId) {
 // All live pane ids across every session — used to reconcile the in-memory Claude paneState against
 // reality. A hard-killed pane fires no hook, so its last state would otherwise linger as a ghost.
 // If a target is provided (window id or session id), list only panes in that target.
-export async function listPaneIds(target) {
+export async function listPaneIds(target?: string): Promise<string[]> {
   const args = ['list-panes', '-F', '#{pane_id}'];
   if (target) {
     args.push('-t', target);
@@ -77,7 +129,7 @@ export async function listPaneIds(target) {
 // shell — a hard kill / crash / Ctrl-C-out fires no SessionEnd yet the shell keeps the pane, so it
 // still EXISTS) and (b) resolve each recorded pane to its session/window for the inbox roster without a
 // per-pane display-message. The hook only records the pane id; location comes from here, always fresh.
-export async function listLivePanes() {
+export async function listLivePanes(): Promise<LiveTmuxPane[]> {
   return parseTmuxRows(await runTmux(['list-panes', '-a', '-F',
     tmuxFormat(['pane_id', 'pane_current_command', 'pane_tty', 'session_name', 'window_id', 'window_name'])]), 6, 'live pane')
     .map(([id, cmd, tty, session, window, windowName]) => {
@@ -90,13 +142,13 @@ export async function listLivePanes() {
 // full-width highlight (Claude Code's sent-message bar) AND loses the SGR reset that closes the
 // background, so the highlight bleeds onto the rows below when re-rendered. With -N the capture
 // faithfully reproduces the pane, so the client can write it verbatim (see prepareSeed).
-export async function capturePane(paneId, linesBack) {
+export async function capturePane(paneId: string, linesBack: number): Promise<string> {
   return runTmux(['capture-pane', '-p', '-e', '-N', '-S', String(-Math.abs(linesBack)), '-t', paneId]);
 }
 
 // A single row capture re-emits that row's real starting attributes. The combined capture above
 // intentionally compresses SGR state across newlines, which makes an inherited background ambiguous.
-export async function capturePaneRow(paneId, row) {
+export async function capturePaneRow(paneId: string, row: number): Promise<string> {
   return runTmux([
     'capture-pane', '-p', '-e', '-N',
     '-S', String(row), '-E', String(row),
@@ -106,7 +158,7 @@ export async function capturePaneRow(paneId, row) {
 
 // Plain visible-screen capture — NO SGR escapes (unlike capturePane's `-e`), so the text parses cleanly.
 // Used to scrape a pending prompt/menu off the screen (see pendingPrompt.js).
-export async function capturePlain(paneId) {
+export async function capturePlain(paneId: string): Promise<string> {
   return runTmux(['capture-pane', '-p', '-t', paneId]);
 }
 
@@ -118,10 +170,13 @@ export async function capturePlain(paneId) {
 // alt buffer has no scrollback, so the phone can't swipe-scroll it. mouse_any_flag = the app has requested
 // mouse reporting (any mode); mouse_sgr_flag = it negotiated the SGR (1006) encoding. Together they let the
 // client translate a swipe into wheel events the app scrolls on (sendWheel) instead of a dead swipe.
-export async function paneInfo(paneId) {
+export async function paneInfo(paneId: string): Promise<PaneInfo> {
   const out = await runTmux(['display-message', '-p', '-t', paneId,
     tmuxFormat(['pane_width', 'pane_height', 'cursor_x', 'cursor_y', 'cursor_flag', 'alternate_on', 'mouse_any_flag', 'mouse_sgr_flag'])]);
-  const [[width, height, cx, cy, cflag, alt, mAny, mSgr] = []] = parseTmuxRows(out, 8, 'pane info');
+  const [width, height, cx, cy, cflag, alt, mAny, mSgr] = firstRow(
+    parseTmuxRows(out, 8, 'pane info'),
+    'pane info',
+  );
   return {
     width: Number(width), height: Number(height),
     cursorX: Number(cx), cursorY: Number(cy), cursorVisible: cflag === '1',
@@ -136,13 +191,22 @@ export async function paneInfo(paneId) {
 // shell as literal text. `sgr` picks the 1006 encoding the app negotiated (else the legacy X10 form);
 // `col`/`row` are the 1-based pointer position the event reports at (the pane centre — irrelevant to a lone
 // full-screen app, but lets a split-aware app scroll the region under the finger).
-export async function sendWheel(paneId, dir, count, opts = {}) {
+export async function sendWheel(
+  paneId: string,
+  dir: WheelDirection,
+  count: number,
+  opts: WheelOptions = {},
+): Promise<void> {
   await runTmux(['send-keys', '-t', paneId, '-l', '--', wheelSeq(dir, count, opts)]);
 }
 
 // Pure: build the terminal byte run for `count` wheel notches (kept separate so the encoding is unit-
 // tested without spawning tmux). `count` is clamped to 1..60 (one flick shouldn't inject hundreds).
-export function wheelSeq(dir, count, { sgr = true, col = 1, row = 1 } = {}) {
+export function wheelSeq(
+  dir: WheelDirection,
+  count: number,
+  { sgr = true, col = 1, row = 1 }: WheelOptions = {},
+): string {
   const n = Math.min(Math.max(Math.trunc(Number(count)) || 1, 1), 60);
   const btn = dir === 'up' ? 64 : 65;
   const c = Math.max(1, Math.trunc(col) || 1);
@@ -156,14 +220,17 @@ export function wheelSeq(dir, count, { sgr = true, col = 1, row = 1 } = {}) {
 
 // Resolve a pane to its tmux session name + window for routing a notification back to it. The hook
 // gives us only $TMUX_PANE; this turns "%263" into the session/window the phone navigates by.
-export async function paneLocation(paneId) {
+export async function paneLocation(paneId: string): Promise<PaneLocation> {
   const out = await runTmux(['display-message', '-p', '-t', paneId,
     tmuxFormat(['session_name', 'window_id', 'window_name'])]);
-  const [[session, windowId, windowName] = []] = parseTmuxRows(out, 3, 'pane location');
+  const [session, windowId, windowName] = firstRow(
+    parseTmuxRows(out, 3, 'pane location'),
+    'pane location',
+  );
   return { session, window: windowId, windowName };
 }
 
-export async function paneSession(paneId) {
+export async function paneSession(paneId: string): Promise<string> {
   const out = await runTmux(['display-message', '-p', '-t', paneId, '#{session_id}']);
   const id = out.trim();
   if (!isSessionId(id)) throw new Error('pane session not found');
@@ -172,25 +239,25 @@ export async function paneSession(paneId) {
 
 // Exit tmux copy/scroll mode if the pane is currently in it. Called before any user input so
 // text and keys reach the shell instead of being swallowed by tmux's mode key-bindings.
-export async function exitCopyModeIfActive(paneId) {
+export async function exitCopyModeIfActive(paneId: string): Promise<void> {
   const out = await runTmux(['display-message', '-p', '-t', paneId, '#{pane_in_mode}']);
   if (out.trim() === '1') await runTmux(['send-keys', '-t', paneId, 'Escape']);
 }
 
-export async function sendText(paneId, text) {
+export async function sendText(paneId: string, text: string): Promise<void> {
   await runTmux(['send-keys', '-t', paneId, '-l', '--', text]);
 }
 
-export async function sendHexInput(paneId, hex) {
+export async function sendHexInput(paneId: string, hex: string): Promise<void> {
   const bytes = hex.match(/../g) || [];
   await runTmux(['send-keys', '-t', paneId, '-H', ...bytes]);
 }
 
-export async function sendEnter(paneId) {
+export async function sendEnter(paneId: string): Promise<void> {
   await runTmux(['send-keys', '-t', paneId, 'Enter']);
 }
 
-export async function sendKey(paneId, key) {
+export async function sendKey(paneId: string, key: string): Promise<void> {
   await runTmux(['send-keys', '-t', paneId, key]);
 }
 
@@ -198,7 +265,7 @@ export async function sendKey(paneId, key) {
 // sets the window-size option to `manual`, so it sticks (and applies to every client on this
 // window — including the PC) until restoreWindowSize is called. Pass rows = null to change
 // only the column count and leave the height untouched.
-export async function resizeWindow(windowId, cols, rows) {
+export async function resizeWindow(windowId: string, cols: number, rows?: number | null): Promise<void> {
   const args = ['resize-window', '-t', windowId, '-x', String(cols)];
   if (rows != null) args.push('-y', String(rows));
   await runTmux(args);
@@ -206,26 +273,26 @@ export async function resizeWindow(windowId, cols, rows) {
 
 // Hand sizing back to the attached clients (tmux default), so the PC's terminal dictates
 // the window size again instead of the phone-sized grid left by resizeWindow.
-export async function restoreWindowSize(windowId) {
+export async function restoreWindowSize(windowId: string): Promise<void> {
   await runTmux(['set-window-option', '-t', windowId, 'window-size', 'latest']);
 }
 
 // Resize just one pane's width inside its window (siblings absorb the difference; the window
 // total is unchanged). Use this for a pane in a split — resizing the whole window would
 // shrink every pane. A lone pane can't be resized this way (it fills the window).
-export async function resizePane(paneId, cols) {
+export async function resizePane(paneId: string, cols: number): Promise<void> {
   await runTmux(['resize-pane', '-t', paneId, '-x', String(cols)]);
 }
 
 // The window's exact pane arrangement, captured so "restore" can put a split back the way it
 // was after resizePane changed the ratio. resizePane doesn't touch window size, so window-size
 // latest alone can't undo it — select-layout with this string does.
-export async function getWindowLayout(windowId) {
+export async function getWindowLayout(windowId: string): Promise<string> {
   const out = await runTmux(['display-message', '-p', '-t', windowId, '#{window_layout}']);
   return out.trim();
 }
 
-export async function applyWindowLayout(windowId, layout) {
+export async function applyWindowLayout(windowId: string, layout: string): Promise<void> {
   await runTmux(['select-layout', '-t', windowId, layout]);
 }
 
@@ -234,7 +301,11 @@ export async function applyWindowLayout(windowId, layout) {
 // error (runTmux rejects) — the route pre-checks and returns a clean 409 before reaching here.
 // Self-guard the name even though the route validates first: this is an exported boundary to tmux,
 // and a name with target-syntax chars ('$', ':', …) would create a hard-to-address session.
-export async function newSession(name, cwd, cmd) {
+export async function newSession(
+  name: string,
+  cwd?: string | null,
+  cmd?: string | null,
+): Promise<string> {
   if (!isValidSessionName(name)) throw new Error(`invalid session name: ${JSON.stringify(name)}`);
   const out = await runTmux(['new-session', '-d', '-s', name, '-c', cwd || os.homedir(), '-P', '-F', '#{session_id}']);
   const id = out.trim(); // e.g. "$7"
@@ -245,21 +316,21 @@ export async function newSession(name, cwd, cmd) {
 // Type a startup command into a freshly-created window/session and press Enter — same path as a user
 // typing it. The target ($id / @id) resolves to the new shell's active pane. Runs inside the shell (we
 // don't pass it to new-window/new-session as the pane command) so the pane survives the command exiting.
-async function runStartupCmd(target, cmd) {
+async function runStartupCmd(target: string, cmd: string): Promise<void> {
   await sendText(target, cmd);
   await sendEnter(target);
 }
 
 // Type a validated single-line command into an existing pane after its foreground TUI has returned to
 // the shell. This does not kill or replace anything; callers must first prove the previous process exited.
-export async function runPaneCommand(paneId, cmd) {
+export async function runPaneCommand(paneId: string, cmd: string): Promise<void> {
   if (!isPaneId(paneId)) throw new Error(`invalid pane id: ${JSON.stringify(paneId)}`);
   if (!isValidStartupCmd(cmd)) throw new Error('invalid startup command');
   await runStartupCmd(paneId, cmd);
 }
 
 // Read a pane's working directory, so a new window can open in the dir you're working in.
-export async function paneCurrentPath(paneId) {
+export async function paneCurrentPath(paneId: string): Promise<string> {
   const out = await runTmux(['display-message', '-p', '-t', paneId, '#{pane_current_path}']);
   return out.trim();
 }
@@ -267,7 +338,12 @@ export async function paneCurrentPath(paneId) {
 // -d: don't steal the active window from the PC (the phone navigates to it itself). -c: start dir
 // (omitted when cwd is falsy → tmux uses the session default). -n: window name (omitted when falsy →
 // tmux auto-names after the running command). -P -F prints the new window id.
-export async function newWindow(sessionId, cwd, name, cmd) {
+export async function newWindow(
+  sessionId: string,
+  cwd?: string | null,
+  name?: string | null,
+  cmd?: string | null,
+): Promise<string> {
   const args = ['new-window', '-d', '-t', sessionId, '-P', '-F', '#{window_id}'];
   if (cwd) args.push('-c', cwd); // tmux accepts -c in any position; push mirrors resizeWindow's style
   if (name) args.push('-n', name);
@@ -279,21 +355,21 @@ export async function newWindow(sessionId, cwd, name, cmd) {
 // rename-session keeps the session's $id — only the name changes. Self-guard the name (exported
 // boundary to tmux; a name with target-syntax chars would create a hard-to-address session). A
 // duplicate name makes tmux error (runTmux rejects); the route pre-checks and returns a clean 409.
-export async function renameSession(id, name) {
+export async function renameSession(id: string, name: string): Promise<void> {
   if (!isValidSessionName(name)) throw new Error(`invalid session name: ${JSON.stringify(name)}`);
   await runTmux(['rename-session', '-t', id, name]);
 }
 
 // rename-window sets the name manually (and implicitly turns off that window's automatic-rename,
 // so the chosen name sticks instead of tracking the running command — the expected tmux behavior).
-export async function renameWindow(id, name) {
+export async function renameWindow(id: string, name: string): Promise<void> {
   if (!isValidSessionName(name)) throw new Error(`invalid window name: ${JSON.stringify(name)}`);
   await runTmux(['rename-window', '-t', id, name]);
 }
 
 // The number of windows in the window's session. The delete guard refuses to kill the last one
 // (killing it would take the whole session with it).
-export async function sessionWindowCount(id) {
+export async function sessionWindowCount(id: string): Promise<number> {
   const out = await runTmux(['display-message', '-p', '-t', id, '#{session_windows}']);
   return Number(out.trim());
 }
@@ -301,7 +377,11 @@ export async function sessionWindowCount(id) {
 // Split a pane into two. -d: don't move the PC's active pane (the phone navigates to the new pane
 // itself, client-side). dir 'h' → left|right (`-h`), 'v' → top/bottom (`-v`). -c: the new pane's
 // start dir (the target pane's cwd), omitted when falsy. -P -F prints the new pane id.
-export async function splitPane(paneId, dir, cwd) {
+export async function splitPane(
+  paneId: string,
+  dir: 'h' | 'v',
+  cwd?: string | null,
+): Promise<string> {
   const flag = dir === 'v' ? '-v' : '-h';
   const args = ['split-window', '-d', flag, '-t', paneId, '-P', '-F', '#{pane_id}'];
   if (cwd) args.push('-c', cwd);
@@ -310,22 +390,22 @@ export async function splitPane(paneId, dir, cwd) {
 
 // Panes in the window that owns this pane — the kill guard refuses to kill the last one (killing it
 // would take the window, and if it's the last window, the whole session).
-export async function windowPaneCount(paneId) {
+export async function windowPaneCount(paneId: string): Promise<number> {
   const out = await runTmux(['display-message', '-p', '-t', paneId, '#{window_panes}']);
   return Number(out.trim());
 }
 
-export async function killPane(paneId) {
+export async function killPane(paneId: string): Promise<void> {
   await runTmux(['kill-pane', '-t', paneId]);
 }
 
-export async function killWindow(id) {
+export async function killWindow(id: string): Promise<void> {
   await runTmux(['kill-window', '-t', id]);
 }
 
 // Swap two windows' positions (indices) within a session. -d keeps the active window unchanged so
 // reordering from the phone doesn't yank the PC's focus to the swapped window. The window ids are
 // unchanged — only their order in list-windows flips.
-export async function swapWindows(a, b) {
+export async function swapWindows(a: string, b: string): Promise<void> {
   await runTmux(['swap-window', '-d', '-s', a, '-t', b]);
 }
