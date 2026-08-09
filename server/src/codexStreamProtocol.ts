@@ -1,7 +1,10 @@
 import {
-  parseCodexConversationMutation, projectCodexConversationMutation,
+  parseCodexConversationMutation, parseCodexConversationMutationValue,
+  projectCodexConversationMutation,
 } from './codexConversationProjection.js';
-import type { CodexConversationMutation } from './codexConversationProjection.js';
+import type {
+  CodexConversationDomainEvent, CodexConversationMutation,
+} from './codexConversationProjection.js';
 
 const GOAL_STATUSES = [
   'active', 'paused', 'blocked', 'usageLimited', 'budgetLimited', 'complete',
@@ -39,6 +42,7 @@ export type CodexAgentStreamEvent = {
 
 export type CodexStreamDomainEvent =
   | CodexAgentStreamEvent
+  | CodexConversationDomainEvent
   | {
     [key: string]: unknown;
     type: 'turnCompleted';
@@ -153,6 +157,14 @@ export function parseCodexStreamEvent(value: unknown): CodexStreamEvent | null {
   }
   const threadId = nonEmptyString(record.threadId);
   if (!threadId) return null;
+  if (type === 'conversation') {
+    const mutation = parseCodexConversationMutationValue(record.mutation);
+    if (!mutation || mutation.operation !== 'upsert') return null;
+    const turnId = mutation.message.turnId;
+    const itemId = mutation.message.type === 'text' ? mutation.message.itemId : null;
+    if (record.turnId !== turnId || record.itemId !== itemId) return null;
+    return { ...record, type, threadId, turnId, itemId, mutation };
+  }
   if (type === 'ready' || type === 'disconnected') return { ...record, type, threadId };
   if (type === 'cursorReset') {
     const cursor = record.cursor;
@@ -187,6 +199,13 @@ function projectionFields(event: CodexStreamDomainEvent): {
   if (event.type === 'started' || event.type === 'snapshot'
     || event.type === 'delta' || event.type === 'completed') {
     return { kind: 'assistantMessage', lifecycle: event.type };
+  }
+  if (event.type === 'conversation') {
+    return {
+      kind: event.mutation.operation === 'upsert' && event.mutation.message.type === 'goal'
+        ? 'goal' : 'assistantMessage',
+      lifecycle: 'persisted',
+    };
   }
   if (event.type === 'turnCompleted') return { kind: 'turn', lifecycle: 'completed' };
   if (event.type === 'goal') return { kind: 'goal', lifecycle: event.event };

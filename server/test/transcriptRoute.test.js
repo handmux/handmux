@@ -123,12 +123,13 @@ describe('GET /api/transcript', () => {
       id: 'turn-1', status: 'completed', startedAt: 1,
       items: [{ id: 'files-1', type: 'fileChange', status: 'completed', changes: [{ path: '/work/a.js' }] }],
     }] } }));
+    const reconcileTranscript = vi.fn(async () => ({ reconciled: 0 }));
     const app = express();
     app.use(transcriptRoutes({
       commands: {},
       codexApp: {
         discover: vi.fn(async () => ({ managed: true, threadId: 'aaaaaaaa-0000-0000-0000-000000000002' })),
-        read,
+        read, reconcileTranscript,
       },
       claudeEvents: noHook,
       findCodexRollout: vi.fn(async () => file),
@@ -142,6 +143,7 @@ describe('GET /api/transcript', () => {
       expect(body.messages.filter((message) => message.type === 'tool').at(-1).tool)
         .toMatchObject({ result: 'aborted by user after 3.6s', outcome: 'declined' });
       expect(read).not.toHaveBeenCalled();
+      expect(reconcileTranscript).toHaveBeenCalledWith('%1', 'aaaaaaaa-0000-0000-0000-000000000002', body.messages);
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   });
 

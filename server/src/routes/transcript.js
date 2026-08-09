@@ -131,6 +131,11 @@ export function transcriptRoutes({
             } catch { /* The rollout remains readable; an unavailable App Server must not fabricate lines. */ }
           }
           if (before == null) {
+            if (codexApp?.reconcileTranscript) {
+              try {
+                await codexApp.reconcileTranscript(req.query.pane, sessionId, messages);
+              } catch { /* Durable history remains authoritative if live reconciliation is unavailable. */ }
+            }
             const hash = createHash('sha1').update(JSON.stringify(messages)).digest('hex').slice(0, 16);
             if (req.query.since === hash) return res.status(204).end();
             return res.json({ messages, hash, session: sessionId, hasMore, firstSeq });

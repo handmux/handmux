@@ -6,6 +6,7 @@ import { parseCodexOutboxSnapshot } from './codexQueueProtocol.js';
 import {
   parseCodexGoal, parseCodexStreamEvent, projectCodexStreamEvent,
 } from './codexStreamProtocol.js';
+import { reconcileCodexRolloutMessages } from './codexConversationProjection.js';
 import { codexAppSocketPath } from './cli/codexManaged.js';
 import { isCodexSyntheticUserText } from './codexTranscriptParse.js';
 
@@ -15,6 +16,7 @@ const MAX_QUEUED_MESSAGES = 20;
 const MAX_SUBMISSION_RECEIPTS = 256;
 const SUBMISSION_RECEIPT_TTL_MS = 24 * 60 * 60 * 1_000;
 const MAX_STREAM_EVENTS = 512;
+const MAX_STREAM_MESSAGE_IDS = 100;
 const QUEUE_EDIT_LEASE_MS = 30_000;
 const APPROVAL_METHODS = new Set([
   'item/commandExecution/requestApproval',
@@ -1281,10 +1283,33 @@ class CodexAppConnection {
     const key = `${this.pane}\0${threadId}`;
     let journal = this.streamEventStore.get(key);
     if (!journal) {
-      journal = { sequence: 0, events: [] };
+      journal = {
+        sequence: 0, events: [], durableFingerprints: new Map(), liveMessageIds: new Set(),
+      };
       this.streamEventStore.set(key, journal);
     }
+    journal.durableFingerprints ||= new Map();
+    journal.liveMessageIds ||= new Set();
     return journal;
+  }
+
+  reconcileTranscript(threadId, messages) {
+    const journal = this.streamJournal(threadId);
+    const reconciled = reconcileCodexRolloutMessages(
+      journal.durableFingerprints, journal.liveMessageIds, Array.isArray(messages) ? messages : [],
+    );
+    journal.durableFingerprints = reconciled.fingerprints;
+    for (const mutation of reconciled.mutations) {
+      if (mutation.operation !== 'upsert') continue;
+      const message = mutation.message;
+      this.emitStream({
+        type: 'conversation', threadId,
+        turnId: message.turnId,
+        itemId: message.type === 'text' ? message.itemId : null,
+        mutation,
+      });
+    }
+    return reconciled.mutations.length;
   }
 
   recordStreamEvent(event) {
@@ -1293,6 +1318,16 @@ class CodexAppConnection {
     if (!projected) return null;
     journal.sequence = projected.sequence;
     journal.events.push(projected);
+    if (projected.mutation?.operation === 'upsert') {
+      const id = projected.mutation.message.id;
+      if (projected.type === 'conversation') journal.liveMessageIds.delete(id);
+      else {
+        journal.liveMessageIds.add(id);
+        while (journal.liveMessageIds.size > MAX_STREAM_MESSAGE_IDS) {
+          journal.liveMessageIds.delete(journal.liveMessageIds.values().next().value);
+        }
+      }
+    }
     if (journal.events.length > MAX_STREAM_EVENTS) {
       journal.events.splice(0, journal.events.length - MAX_STREAM_EVENTS);
     }
@@ -1749,6 +1784,12 @@ export function createCodexAppServer({
       await client.assertCurrentThread(threadId);
       await client.ensureThread(threadId);
       return client.subscribeStream(threadId, listener, afterSequence);
+    },
+    async reconcileTranscript(pane, threadId, messages) {
+      const client = await connection(pane);
+      if (!client) throw new Error('Codex session is not managed by Handmux');
+      await client.assertCurrentThread(threadId);
+      return { reconciled: client.reconcileTranscript(threadId, messages) };
     },
     async send(pane, threadId, text, requestId = null) {
       const client = await connection(pane);

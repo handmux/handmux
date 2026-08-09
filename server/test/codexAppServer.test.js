@@ -373,6 +373,21 @@ describe('Codex App Server client', () => {
       expect.objectContaining({ type: 'snapshot', text: '你好' }),
       expect.objectContaining({ type: 'completed', text: '你好，完成' }),
     ]);
+    await expect(app.reconcileTranscript('%1', 'thread-1', [{
+      id: 'codex:turn-live:agent-live', role: 'assistant', type: 'text',
+      turnId: 'turn-live', itemId: 'agent-live', text: '你好，完成',
+    }])).resolves.toEqual({ reconciled: 1 });
+    expect(replayed.at(-1)).toMatchObject({
+      type: 'conversation', lifecycle: 'persisted',
+      mutation: {
+        operation: 'upsert', mode: 'replace',
+        message: { id: 'codex:turn-live:agent-live', text: '你好，完成', completed: true },
+      },
+    });
+    await expect(app.reconcileTranscript('%1', 'thread-1', [{
+      id: 'codex:turn-live:agent-live', role: 'assistant', type: 'text',
+      turnId: 'turn-live', itemId: 'agent-live', text: '你好，完成',
+    }])).resolves.toEqual({ reconciled: 0 });
     const completedReplay = [];
     const unsubscribeCompleted = await app.subscribe('%1', 'thread-1', (event) => completedReplay.push(event));
     // Completed text is history and must come only from the rollout projection. Replaying it as a live
@@ -383,7 +398,7 @@ describe('Codex App Server client', () => {
       '%1', 'thread-1', (event) => cursorReplay.push(event), events[0].sequence,
     );
     expect(cursorReplay.map((event) => [event.type, event.sequence])).toEqual([
-      ['delta', 2], ['snapshot', 3], ['completed', 4],
+      ['delta', 2], ['snapshot', 3], ['completed', 4], ['conversation', 5],
     ]);
     expect(projectCodexThread((await app.read('%1', 'thread-1')).thread)
       .find((message) => message.id === 'codex:turn-live:agent-live')?.text).toBe('你好，完成');

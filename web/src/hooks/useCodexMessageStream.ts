@@ -56,7 +56,7 @@ export function applyCodexStreamEvent(
   event: CodexStreamEventLike,
   afterK = -1,
 ): CodexLiveMessage[] {
-  if (!['ready', 'cursorReset', 'started', 'snapshot', 'delta', 'completed', 'turnCompleted', 'goal', 'goalCleared'].includes(event.type ?? '')) {
+  if (!['ready', 'cursorReset', 'started', 'snapshot', 'delta', 'completed', 'turnCompleted', 'goal', 'goalCleared', 'conversation'].includes(event.type ?? '')) {
     return messages;
   }
   // A new SSE connection replays only unfinished App Server items. Finalized temporary bubbles must not

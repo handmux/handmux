@@ -73,4 +73,25 @@ describe('Codex stream protocol', () => {
       .toEqual({ type: 'cursorReset', threadId: 'thread-1', cursor: 12 });
     expect(parseCodexStreamEvent({ type: 'cursorReset', threadId: 'thread-1', cursor: -1 })).toBeNull();
   });
+
+  it('places a rollout replacement in the same ordered event journal', () => {
+    const mutation = {
+      operation: 'upsert' as const, mode: 'replace' as const,
+      message: {
+        id: 'codex:turn-1:item-1', role: 'assistant' as const, type: 'text' as const,
+        turnId: 'turn-1', itemId: 'item-1', text: 'final', completed: true, streaming: false,
+      },
+    };
+    const projected = projectCodexStreamEvent({
+      type: 'conversation', threadId: 'thread-1', turnId: 'turn-1', itemId: 'item-1', mutation,
+    }, 9);
+    expect(projected).toMatchObject({
+      type: 'conversation', eventId: 'thread-1:9', sequence: 9,
+      kind: 'assistantMessage', lifecycle: 'persisted', mutation,
+    });
+    expect(parseCodexProjectedStreamEvent(projected)).toEqual(projected);
+    expect(parseCodexStreamEvent({
+      type: 'conversation', threadId: 'thread-1', turnId: 'wrong', itemId: 'item-1', mutation,
+    })).toBeNull();
+  });
 });

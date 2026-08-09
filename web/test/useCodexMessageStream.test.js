@@ -50,6 +50,25 @@ describe('Codex message stream projection', () => {
     ], live)).toBe(false);
   });
 
+  it('replaces a live fragment with the rollout mutation from the same ordered stream', () => {
+    let messages = applyCodexStreamEvent([], projected({
+      type: 'delta', turnId: 'turn-1', itemId: 'agent-1', delta: '流式片段',
+    }, 1));
+    const mutation = {
+      operation: 'upsert', mode: 'replace',
+      message: {
+        id: 'codex:turn-1:agent-1', role: 'assistant', type: 'text',
+        turnId: 'turn-1', itemId: 'agent-1', text: '最终回答', completed: true, streaming: false,
+      },
+    };
+    messages = applyCodexStreamEvent(messages, projected({
+      type: 'conversation', turnId: 'turn-1', itemId: 'agent-1', mutation,
+    }, 2));
+    expect(messages).toEqual([expect.objectContaining({
+      id: 'codex:turn-1:agent-1', text: '最终回答', completed: true, streaming: false,
+    })]);
+  });
+
   it('discards finalized temporary replies before projecting a newer live reply', () => {
     let messages = [];
     for (let index = 1; index <= 4; index += 1) {
