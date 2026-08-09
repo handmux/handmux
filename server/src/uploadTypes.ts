@@ -16,7 +16,7 @@ export const DEFAULT_UPLOAD_EXTS = new Set([
 
 // Read HANDMUX_UPLOAD_EXTS (comma-separated) → a Set, normalising leading dots/case/whitespace.
 // Blank/absent → the default set (returned by reference so callers can `=== DEFAULT_UPLOAD_EXTS`).
-export function loadUploadExts(env = process.env) {
+export function loadUploadExts(env: NodeJS.ProcessEnv = process.env): Set<string> {
   const raw = env.HANDMUX_UPLOAD_EXTS;
   if (!raw || !raw.trim()) return DEFAULT_UPLOAD_EXTS;
   const exts = raw.split(',').map((s) => s.trim().replace(/^\.+/, '').toLowerCase()).filter(Boolean);
@@ -24,7 +24,10 @@ export function loadUploadExts(env = process.env) {
 }
 
 // True if `name`'s final extension is in `exts`. No extension → false.
-export function isAllowedUploadExt(name, exts) {
+export function isAllowedUploadExt(
+  name: string | null | undefined,
+  exts: ReadonlySet<string>,
+): boolean {
   const m = /\.([A-Za-z0-9]+)$/.exec(name || '');
   return m ? exts.has(m[1].toLowerCase()) : false;
 }

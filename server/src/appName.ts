@@ -3,12 +3,12 @@
 // the shell HTML and the PWA manifest as it serves them. Pure string/object transforms so they're
 // unit-testable; the server side-effects (read file / send) live in server.js.
 
-const escAttr = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;')
+const escAttr = (s: string): string => s.replace(/&/g, '&amp;').replace(/</g, '&lt;')
   .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
 // Replace the browser-tab title and the iOS home-screen label in index.html. Matches by tag/attr,
 // not by the default text, so it survives a changed default. No-op when a tag is absent.
-export function applyAppName(html, name) {
+export function applyAppName(html: string, name: string | null | undefined): string {
   if (!name) return html;
   const e = escAttr(name);
   return html
@@ -17,7 +17,7 @@ export function applyAppName(html, name) {
 }
 
 // Override the PWA install name (Android uses short_name; both set so home-screen + app list agree).
-export function applyManifestName(manifest, name) {
+export function applyManifestName<T extends object>(manifest: T, name: string | null | undefined) {
   if (!name) return manifest;
   return { ...manifest, name, short_name: name };
 }

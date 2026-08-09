@@ -10,7 +10,7 @@
 //     `no-cache` = store but always revalidate; the ETag/Last-Modified express.static already sends
 //     make the recheck a cheap 304 when nothing changed, and an actual change is picked up at once.
 // Pure so it unit-tests on its own.
-export function cacheControlFor(filePath) {
+export function cacheControlFor(filePath: string): string {
   if (filePath.endsWith('.html') || filePath.endsWith('/sw.js')) return 'no-store';
   if (/[\\/]assets[\\/]/.test(filePath)) return 'public, max-age=31536000, immutable';
   return 'no-cache';

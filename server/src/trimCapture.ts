@@ -13,9 +13,9 @@
 // a default-background blank may be trimmed normally.
 export const MAX_TRAILING_BLANK = 3;
 
-const isBlank = (row) => row === '' || (/^[ \t]*$/.test(row) && !row.includes('\x1b'));
+const isBlank = (row: string): boolean => row === '' || (/^[ \t]*$/.test(row) && !row.includes('\x1b'));
 
-export function capTrailingBlankRows(ansi, max = MAX_TRAILING_BLANK) {
+export function capTrailingBlankRows(ansi: string, max = MAX_TRAILING_BLANK): string {
   // capture-pane terminates every row with \n (including a trailing one). Peel that off so split
   // gives exactly the rows, then restore it so the output keeps capture-pane's shape (prepareSeed
   // drops a single trailing newline downstream).
