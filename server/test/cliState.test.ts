@@ -8,7 +8,7 @@ import {
   supervisorConfigPath, codexOutboxPath, readSupervisorConfig, writeSupervisorConfig,
 } from '../src/cli/state.js';
 
-let home;
+let home: string;
 beforeEach(() => { home = fs.mkdtempSync(path.join(os.tmpdir(), 'pm-')); });
 afterEach(() => { fs.rmSync(home, { recursive: true, force: true }); });
 
@@ -24,6 +24,13 @@ describe('state', () => {
     expect(readState(home)).toBeNull();
     fs.mkdirSync(path.dirname(statePath(home)), { recursive: true });
     fs.writeFileSync(statePath(home), 'not json');
+    expect(readState(home)).toBeNull();
+  });
+  it('readState rejects valid JSON values that are not state records', () => {
+    fs.mkdirSync(path.dirname(statePath(home)), { recursive: true });
+    fs.writeFileSync(statePath(home), '[]');
+    expect(readState(home)).toBeNull();
+    fs.writeFileSync(statePath(home), '"stale"');
     expect(readState(home)).toBeNull();
   });
   it('clearState removes the file and is idempotent', () => {

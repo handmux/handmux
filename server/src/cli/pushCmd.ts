@@ -93,7 +93,11 @@ export async function runPush({
   const parsed = parsePushArgs(argv);
   if (parsed.error) { err(parsed.error); return 1; }
   const st = readState(home);
-  if (!st || !st.localUrl || !st.token) { err('handmux is not running — run `handmux start` first.'); return 1; }
+  if (!st || typeof st.localUrl !== 'string' || !st.localUrl
+    || typeof st.token !== 'string' || !st.token) {
+    err('handmux is not running — run `handmux start` first.');
+    return 1;
+  }
   try {
     const res = await fetchImpl(`${st.localUrl}/api/push/send-local`, {
       method: 'POST',
