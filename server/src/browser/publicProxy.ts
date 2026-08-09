@@ -1,5 +1,8 @@
 import http from 'node:http';
 import net from 'node:net';
+import type { IncomingHttpHeaders, IncomingMessage } from 'node:http';
+import type { Duplex } from 'node:stream';
+import type { RequestHandler } from 'express';
 import { isBrowserBootstrapPath } from './bootstrap.js';
 import { classifyIp } from './targetPolicy.js';
 
@@ -13,23 +16,39 @@ const SERVICE_PATHS = new Set([
 ]);
 const DEVICE_COOKIE = 'tw_browser_device';
 
-function sessionChannel(pathname) {
+interface BrowserPublicTarget { port: number }
+interface BrowserPublicManager {
+  resolvePublicRequest?(pathname: string, deviceId: string | null, origin: string | null): BrowserPublicTarget | null;
+  hasDevice?(deviceId: string | null): boolean;
+  ownsPublicPath?(pathname: string, deviceId: string | null): boolean;
+  internalPorts?: number[];
+}
+interface BrowserBootstrapConsumer {
+  consume(pathname: unknown, origin: string | null): {
+    deviceId: string;
+    url: string;
+    preserveMethod?: boolean;
+    redirectStatus?: number;
+  } | null;
+}
+
+function sessionChannel(pathname: unknown): string | null {
   const descriptor = String(pathname || '').split('/')[1] || '';
   return descriptor.match(/\*([A-Za-z0-9_-]{1,128})$/)?.[1] || null;
 }
 
-function sessionUnavailableHtml(pathname) {
+function sessionUnavailableHtml(pathname: unknown): string {
   const channel = JSON.stringify(sessionChannel(pathname));
   return `<!doctype html><meta charset="utf-8">
 <script>parent.postMessage({source:'handmux-browser',channel:${channel},type:'session-unavailable'},'*')</script>
 <pre>{"error":"browser session unavailable"}</pre>`;
 }
 
-export function isBrowserServicePath(pathname) {
+export function isBrowserServicePath(pathname: unknown): boolean {
   return SERVICE_PATHS.has(String(pathname || '').split('?')[0]);
 }
 
-function cookieValue(raw, name) {
+function cookieValue(raw: unknown, name: string): string | null {
   for (const part of String(raw || '').split(';')) {
     const [key, ...rest] = part.trim().split('=');
     if (key === name) return rest.join('=');
@@ -37,38 +56,44 @@ function cookieValue(raw, name) {
   return null;
 }
 
-function browserTarget(browser, req, deviceId) {
+function browserTarget(
+  browser: BrowserPublicManager,
+  req: IncomingMessage,
+  deviceId: string | null,
+): BrowserPublicTarget | null {
   const pathname = String(req.url || '').split('?')[0];
   if (!claimedBrowserRequest(req)) return null;
   if (typeof browser.resolvePublicRequest === 'function') {
     return browser.resolvePublicRequest(pathname, deviceId, browserRequestOrigin(req));
   }
-  const allowed = isBrowserServicePath(pathname) ? browser.hasDevice(deviceId) : browser.ownsPublicPath(pathname, deviceId);
-  return allowed ? { port: browser.internalPorts[0] } : null;
+  const allowed = isBrowserServicePath(pathname)
+    ? browser.hasDevice?.(deviceId) : browser.ownsPublicPath?.(pathname, deviceId);
+  const port = browser.internalPorts?.[0];
+  return allowed && typeof port === 'number' ? { port } : null;
 }
 
-function isLoopback(address) {
+function isLoopback(address: unknown): boolean {
   return classifyIp(address) === 'loopback';
 }
 
-export function browserRequestOrigin(req) {
+export function browserRequestOrigin(req: IncomingMessage): string | null {
   const forwardedProto = String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim();
   const protocol = isLoopback(req.socket?.remoteAddress) && (forwardedProto === 'http' || forwardedProto === 'https')
     ? forwardedProto
-    : (req.socket?.encrypted ? 'https' : 'http');
+    : (req.socket && 'encrypted' in req.socket && req.socket.encrypted ? 'https' : 'http');
   const host = req.headers.host;
   if (!host) return null;
   try { return new URL(`${protocol}://${host}`).origin; } catch { return null; }
 }
 
-export function claimedBrowserRequest(req) {
+export function claimedBrowserRequest(req: IncomingMessage): boolean {
   const pathname = String(req.url || '').split('?')[0];
   return isBrowserBootstrapPath(pathname)
     || isBrowserServicePath(pathname)
     || String(pathname).split('/')[1]?.startsWith('_browser-');
 }
 
-function filteredCookie(raw) {
+function filteredCookie(raw: unknown): string {
   const values = String(raw || '')
     .split(';')
     .map((value) => value.trim())
@@ -77,14 +102,14 @@ function filteredCookie(raw) {
   return values.join('; ');
 }
 
-function expectsDocument(req) {
+function expectsDocument(req: IncomingMessage): boolean {
   const destination = String(req.headers['sec-fetch-dest'] || '').toLowerCase();
   const accept = String(req.headers.accept || '').toLowerCase();
   return destination === 'document' || destination === 'iframe' || accept.includes('text/html');
 }
 
-function upstreamHeaders(headers, port, token) {
-  const out = { ...headers, host: `127.0.0.1:${port}` };
+function upstreamHeaders(headers: IncomingHttpHeaders, port: number, token?: string): IncomingHttpHeaders {
+  const out: IncomingHttpHeaders = { ...headers, host: `127.0.0.1:${port}` };
   if (token && out.authorization === `Bearer ${token}`) delete out.authorization;
   delete out['proxy-authorization'];
   if (out.cookie) {
@@ -100,8 +125,14 @@ export function createBrowserPublicProxy({
   token,
   request = http.request,
   connect = net.connect,
+}: {
+  browser?: BrowserPublicManager | null;
+  browserBootstrap?: BrowserBootstrapConsumer | null;
+  token?: string;
+  request?: typeof http.request;
+  connect?: typeof net.connect;
 } = {}) {
-  const handler = (req, res, next) => {
+  const handler: RequestHandler = (req, res, next) => {
     if (!browser) return next();
     const pathname = String(req.url || '').split('?')[0];
     if (isBrowserBootstrapPath(pathname)) {
@@ -149,7 +180,7 @@ export function createBrowserPublicProxy({
     req.pipe(upstream);
   };
 
-  const onUpgrade = (req, socket, head) => {
+  const onUpgrade = (req: IncomingMessage, socket: Duplex, head: Buffer): boolean => {
     const deviceId = cookieValue(req.headers.cookie, DEVICE_COOKIE);
     const target = browser && browserTarget(browser, req, deviceId);
     if (!target) return false;
