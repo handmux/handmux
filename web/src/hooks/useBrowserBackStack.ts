@@ -1,15 +1,21 @@
 import { useEffect, useRef } from 'react';
 import { unwindHistory, useHistoryLayer } from './useBackButton.js';
 
-// Mirror Browser's two UI levels into window.history:
-// History (root) → page (drill). The shared history-layer callback only consumes entries;
-// it never pushes from inside popstate, which keeps Android WebViews balanced.
+interface BrowserBackStackProps {
+  open: boolean;
+  historyActive: boolean;
+  switchTab?: (id: 'history') => unknown;
+  setOpen?: (open: boolean) => unknown;
+}
+
+// Mirror Browser's two UI levels into window.history: History (root) → page (drill). The shared
+// history-layer callback only consumes entries; it never pushes from popstate, keeping WebViews balanced.
 export function useBrowserBackStack({
   open,
   historyActive,
   switchTab,
   setOpen,
-}) {
+}: BrowserBackStackProps): void {
   const depthRef = useRef(0);
   const previousHistoryActiveRef = useRef(historyActive);
   const suppressNextPopRef = useRef(false);
