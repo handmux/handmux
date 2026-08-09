@@ -151,6 +151,11 @@ const planOf = (value: unknown): CodexSessionPlan | null => {
   };
 };
 
+const unfinishedPlanOf = (value: unknown): CodexSessionPlan | null => {
+  const plan = planOf(value);
+  return plan?.steps.some((step) => step.status !== 'completed') ? plan : null;
+};
+
 const approvalDecisionOf = (value: unknown, index: number): CodexApprovalDecision | null => {
   const simple: readonly CodexApprovalSimpleDecision[] = [
     'accept', 'acceptForSession', 'decline', 'cancel',
@@ -227,6 +232,10 @@ const inputOf = (value: unknown): CodexInputRequest | null => {
 export function parseCodexSessionSnapshot(value: unknown): Omit<CodexSessionSnapshot, 'loaded'> | null {
   const session = recordOf(value);
   if (!session) return null;
+  // App Server associates each update_plan snapshot with its originating turn. Between turns it exposes
+  // that snapshot as lastPlan instead of plan; keep an unfinished thread-level plan resident until the
+  // next turn publishes a replacement. A completed lastPlan must not leave a stale composer row behind.
+  const plan = planOf(session.plan) || unfinishedPlanOf(session.lastPlan);
   const queue = Array.isArray(session.queue)
     ? session.queue.map(parseCodexQueueItem).filter((item): item is CodexQueueItem => item !== null)
     : [];
@@ -252,7 +261,7 @@ export function parseCodexSessionSnapshot(value: unknown): Omit<CodexSessionSnap
     activityKind: optionalString(session.activityKind),
     lastTurn: lastTurn ? { status: optionalString(lastTurn.status) } : null,
     gitBranch: optionalString(session.gitBranch),
-    plan: planOf(session.plan),
+    plan,
     ...(hasGoal ? { goal: parseCodexGoal(session.goal) } : {}),
   };
 }

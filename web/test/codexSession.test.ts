@@ -41,6 +41,40 @@ describe('useCodexSession', () => {
     });
   });
 
+  it('keeps an unfinished last-turn plan resident between turns', () => {
+    expect(parseCodexSessionSnapshot({
+      managed: true,
+      plan: null,
+      lastPlan: {
+        turnId: 'turn-plan',
+        steps: [
+          { step: '完成基础设施', status: 'completed' },
+          { step: '迁移 Workspace Shell', status: 'inProgress' },
+        ],
+      },
+    })?.plan).toMatchObject({
+      turnId: 'turn-plan',
+      steps: [
+        { step: '完成基础设施', status: 'completed' },
+        { step: '迁移 Workspace Shell', status: 'inProgress' },
+      ],
+    });
+  });
+
+  it('hides a completed last-turn plan and prefers a current-turn replacement', () => {
+    expect(parseCodexSessionSnapshot({
+      managed: true,
+      plan: null,
+      lastPlan: { steps: [{ step: '全部完成', status: 'completed' }] },
+    })?.plan).toBeNull();
+
+    expect(parseCodexSessionSnapshot({
+      managed: true,
+      plan: { turnId: 'turn-new', steps: [{ step: '收尾', status: 'completed' }] },
+      lastPlan: { turnId: 'turn-old', steps: [{ step: '旧任务', status: 'inProgress' }] },
+    })?.plan).toMatchObject({ turnId: 'turn-new' });
+  });
+
   it('validates approval decisions and user-input questions before exposing them to the UI', () => {
     expect(parseCodexSessionSnapshot({
       managed: true,
