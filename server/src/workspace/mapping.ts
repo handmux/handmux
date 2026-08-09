@@ -2,25 +2,46 @@ import crypto from 'node:crypto';
 
 const HASH = /^[0-9a-f]{64}$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const RUNTIME_ID = {
+const KINDS = ['sessions', 'windows', 'panes'] as const;
+type MappingKind = typeof KINDS[number];
+type MappingGroup = Record<MappingKind, Record<string, string>>;
+
+export interface RecoveryMappingAddition {
+  names: Record<string, string>;
+  runtime: MappingGroup;
+  logical: MappingGroup;
+}
+export interface RecoveryMapping extends RecoveryMappingAddition {
+  id: string;
+  checkpointId: string;
+  restoredAt: string;
+}
+type MappingPayload = RecoveryMappingAddition & { checkpointId: string } & Record<string, unknown>;
+
+const RUNTIME_ID: Record<MappingKind, RegExp> = {
   sessions: /^\$\d+$/,
   windows: /^@\d+$/,
   panes: /^%\d+$/,
 };
 
-function fail(message) {
+function fail(message: string): never {
   throw new Error(`invalid recovery mapping: ${message}`);
 }
 
-function requireExactObject(value, fields, label) {
+function requireExactObject(value: unknown, fields: readonly string[], label: string): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)
     || ![Object.prototype, null].includes(Object.getPrototypeOf(value))) fail(`${label} must be a plain object`);
   const keys = Object.keys(value);
   if (keys.length !== fields.length || fields.some((field) => !keys.includes(field))) fail(`${label} fields are invalid`);
-  return value;
+  return value as Record<string, unknown>;
 }
 
-function validateRecord(value, label, keyPattern, valuePattern) {
+function validateRecord(
+  value: unknown,
+  label: string,
+  keyPattern: RegExp,
+  valuePattern: RegExp,
+): asserts value is Record<string, string> {
   if (!value || typeof value !== 'object' || Array.isArray(value)
     || ![Object.prototype, null].includes(Object.getPrototypeOf(value))) fail(`${label} must be a plain object`);
   for (const [key, entry] of Object.entries(value)) {
@@ -28,13 +49,14 @@ function validateRecord(value, label, keyPattern, valuePattern) {
   }
 }
 
-function sorted(value) {
+function sorted(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(sorted);
   if (!value || typeof value !== 'object') return value;
-  return Object.fromEntries(Object.keys(value).sort().map((key) => [key, sorted(value[key])]));
+  const record = value as Record<string, unknown>;
+  return Object.fromEntries(Object.keys(record).sort().map((key) => [key, sorted(record[key])]));
 }
 
-function payload(mapping) {
+function payload(mapping: MappingPayload): MappingPayload {
   return {
     checkpointId: mapping.checkpointId,
     names: mapping.names,
@@ -43,11 +65,11 @@ function payload(mapping) {
   };
 }
 
-function mappingId(mapping) {
+function mappingId(mapping: MappingPayload): string {
   return crypto.createHash('sha256').update(JSON.stringify(sorted(payload(mapping)))).digest('hex');
 }
 
-function blankMapping(checkpointId) {
+function blankMapping(checkpointId: string): MappingPayload {
   return {
     checkpointId,
     names: {},
@@ -56,7 +78,7 @@ function blankMapping(checkpointId) {
   };
 }
 
-function validatePayload(mapping, checkpointId) {
+function validatePayload(mapping: Record<string, unknown>, checkpointId: string): asserts mapping is MappingPayload {
   if (typeof mapping.checkpointId !== 'string' || !mapping.checkpointId || mapping.checkpointId !== checkpointId) {
     fail('checkpoint id mismatch');
   }
@@ -65,46 +87,54 @@ function validatePayload(mapping, checkpointId) {
   for (const [source, target] of Object.entries(mapping.names)) {
     if (!source || ['__proto__', 'constructor', 'prototype'].includes(source) || typeof target !== 'string' || !target) fail('name entry is invalid');
   }
-  for (const group of ['runtime', 'logical']) {
+  for (const group of ['runtime', 'logical'] as const) {
     requireExactObject(mapping[group], ['sessions', 'windows', 'panes'], group);
   }
-  for (const kind of ['sessions', 'windows', 'panes']) {
-    validateRecord(mapping.runtime[kind], `runtime.${kind}`, RUNTIME_ID[kind], RUNTIME_ID[kind]);
-    validateRecord(mapping.logical[kind], `logical.${kind}`, UUID, RUNTIME_ID[kind]);
+  const runtime = mapping.runtime as Record<string, unknown>;
+  const logical = mapping.logical as Record<string, unknown>;
+  for (const kind of KINDS) {
+    validateRecord(runtime[kind], `runtime.${kind}`, RUNTIME_ID[kind], RUNTIME_ID[kind]);
+    validateRecord(logical[kind], `logical.${kind}`, UUID, RUNTIME_ID[kind]);
   }
 }
 
-export function validateRecoveryMapping(mapping, checkpointId) {
-  requireExactObject(mapping, ['id', 'checkpointId', 'restoredAt', 'names', 'runtime', 'logical'], 'mapping');
-  if (typeof mapping.id !== 'string' || !HASH.test(mapping.id)) fail('id is invalid');
-  if (typeof mapping.restoredAt !== 'string' || Number.isNaN(Date.parse(mapping.restoredAt))) fail('restoredAt is invalid');
-  validatePayload(mapping, checkpointId);
-  if (mapping.id !== mappingId(mapping)) fail('hash mismatch');
-  return mapping;
+export function validateRecoveryMapping(mapping: unknown, checkpointId: string): RecoveryMapping {
+  const record = requireExactObject(mapping, ['id', 'checkpointId', 'restoredAt', 'names', 'runtime', 'logical'], 'mapping');
+  if (typeof record.id !== 'string' || !HASH.test(record.id)) fail('id is invalid');
+  if (typeof record.restoredAt !== 'string' || Number.isNaN(Date.parse(record.restoredAt))) fail('restoredAt is invalid');
+  validatePayload(record, checkpointId);
+  if (record.id !== mappingId(record)) fail('hash mismatch');
+  return record as unknown as RecoveryMapping;
 }
 
-function merge(target, source) {
+function merge(target: MappingPayload, source: RecoveryMappingAddition): void {
   Object.assign(target.names, source.names);
-  for (const kind of ['sessions', 'windows', 'panes']) {
+  for (const kind of KINDS) {
     Object.assign(target.runtime[kind], source.runtime[kind]);
     Object.assign(target.logical[kind], source.logical[kind]);
   }
 }
 
-function validateAddition(value, checkpointId) {
-  requireExactObject(value, ['names', 'runtime', 'logical'], 'mapping addition');
-  validatePayload({ checkpointId, ...value }, checkpointId);
-  return value;
+function validateAddition(value: unknown, checkpointId: string): RecoveryMappingAddition {
+  const record = requireExactObject(value, ['names', 'runtime', 'logical'], 'mapping addition');
+  const candidate: Record<string, unknown> = { checkpointId, ...record };
+  validatePayload(candidate, checkpointId);
+  return candidate;
 }
 
-function hasValues(mapping) {
+function hasValues(mapping: MappingPayload): boolean {
   return Object.keys(mapping.names).length > 0
-    || ['sessions', 'windows', 'panes'].some((kind) => (
+    || KINDS.some((kind) => (
       Object.keys(mapping.runtime[kind]).length > 0 || Object.keys(mapping.logical[kind]).length > 0
     ));
 }
 
-export function buildRecoveryMapping(checkpointId, previous, additions, now = Date.now) {
+export function buildRecoveryMapping(
+  checkpointId: string,
+  previous: unknown,
+  additions: unknown,
+  now: () => number = Date.now,
+): RecoveryMapping | null {
   const combined = blankMapping(checkpointId);
   if (previous) merge(combined, validateRecoveryMapping(previous, checkpointId));
   if (!Array.isArray(additions)) fail('additions must be an array');
