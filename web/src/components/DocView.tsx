@@ -16,21 +16,7 @@ export interface DocViewProps {
   content?: string | null;
 }
 
-interface DocSpeechController {
-  supported: boolean;
-  playing: boolean;
-  paused: boolean;
-  idx: number;
-  rate: number;
-  play: (sentences: readonly string[]) => void;
-  pause: () => void;
-  resume: () => void;
-  stop: () => void;
-  cycleRate: () => void;
-}
-
-const useTypedDocSpeech = useDocSpeech as unknown as () => DocSpeechController;
-const collectSentences = markSentences as unknown as (root: HTMLElement | null) => string[];
+const collectSentences = markSentences;
 const rawFontSizes: unknown = DOC_FONT_SIZES;
 const FONT_SIZES: readonly number[] = Array.isArray(rawFontSizes)
   && rawFontSizes.length > 0
@@ -63,7 +49,7 @@ const renderMarkdown = (source: string): string => {
 export default function DocView({ type, name, content = '' }: DocViewProps) {
   const [fontIdx, setFontIdx] = useState<number>(readFontIndex);
   const mdRef = useRef<HTMLDivElement | null>(null);
-  const speech = useTypedDocSpeech();
+  const speech = useDocSpeech();
   useScreenWakeLock(speech.playing && !speech.paused); // screen sleep kills TTS — hold it awake while reading
 
   const html = useMemo(

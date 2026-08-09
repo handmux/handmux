@@ -14,9 +14,9 @@ const SEG_RE = /[^\n]*?(?:[。！？…]+|[.!?]+(?=\s|$)|\n+|$)/gu;
 const ENDS_SENTENCE = /[。！？…]$|[.!?]$/;
 
 // Split prose into sentences. Terminators stay attached; whitespace is collapsed; blanks dropped.
-export function splitSentences(text) {
+export function splitSentences(text: string | null | undefined): string[] {
   if (!text) return [];
-  const out = [];
+  const out: string[] = [];
   for (const m of text.matchAll(SEG_RE)) {
     const s = m[0].replace(/\s+/g, ' ').trim();
     if (s) out.push(s);
@@ -25,7 +25,7 @@ export function splitSentences(text) {
 }
 
 // True if any ancestor up to (not including) root is a tag whose text we must NOT read/wrap.
-function inSkippedBlock(node, root) {
+function inSkippedBlock(node: Node, root: HTMLElement): boolean {
   for (let p = node.parentNode; p && p !== root; p = p.parentNode) {
     const t = p.nodeName;
     if (t === 'PRE' || t === 'SCRIPT' || t === 'STYLE' || t === 'CODE') return true;
@@ -37,26 +37,29 @@ function inSkippedBlock(node, root) {
 // span multiple text nodes (e.g. across <strong>/<a>); we keep a running index that only advances on
 // a terminator, so every span of one sentence shares its index. Idempotent: if already marked, we
 // just re-read the existing spans. Returns the sentence texts, densely indexed to match data-tts.
-export function markSentences(root) {
+export function markSentences(root: HTMLElement | null): string[] {
   if (!root) return [];
   if (root.querySelector('span.tts-sent')) return readMarked(root);
 
   // Collect first (we'll replace nodes as we go, which would disturb a live TreeWalker).
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
-    acceptNode: (n) =>
-      n.nodeValue && n.nodeValue.trim() && !inSkippedBlock(n, root)
+    acceptNode: (node: Node) =>
+      node.nodeValue && node.nodeValue.trim() && !inSkippedBlock(node, root)
         ? NodeFilter.FILTER_ACCEPT
         : NodeFilter.FILTER_REJECT,
   });
-  const nodes = [];
-  while (walker.nextNode()) nodes.push(walker.currentNode);
+  const nodes: Text[] = [];
+  while (walker.nextNode()) {
+    if (walker.currentNode instanceof Text) nodes.push(walker.currentNode);
+  }
 
-  const provisional = []; // accumulated text per provisional sentence index
-  const spansByIdx = [];  // span elements per provisional index
+  const provisional: string[] = [];
+  const spansByIdx: HTMLSpanElement[][] = [];
   let cur = 0;
   for (const node of nodes) {
     const frag = node.ownerDocument.createDocumentFragment();
-    for (const m of node.nodeValue.matchAll(SEG_RE)) {
+    const nodeValue = node.nodeValue || '';
+    for (const m of nodeValue.matchAll(SEG_RE)) {
       const text = m[0];
       if (text === '') continue;
       const span = node.ownerDocument.createElement('span');
@@ -67,12 +70,12 @@ export function markSentences(root) {
       provisional[cur] = (provisional[cur] || '') + text;
       if (ENDS_SENTENCE.test(text)) cur++;
     }
-    node.parentNode.replaceChild(frag, node);
+    node.parentNode?.replaceChild(frag, node);
   }
 
   // Drop whitespace-only provisional sentences and renumber the rest densely so data-tts indices
   // line up with the returned array (the speech queue indexes into it).
-  const result = [];
+  const result: string[] = [];
   provisional.forEach((txt, provIdx) => {
     const t = (txt || '').replace(/\s+/g, ' ').trim();
     if (!t) return; // its spans stay untagged → never highlighted/spoken
@@ -84,11 +87,11 @@ export function markSentences(root) {
 }
 
 // Rebuild the sentence list from already-wrapped spans (idempotent re-entry).
-function readMarked(root) {
-  const acc = [];
-  root.querySelectorAll('span.tts-sent[data-tts]').forEach((s) => {
-    const i = Number(s.dataset.tts);
-    acc[i] = (acc[i] || '') + s.textContent;
+function readMarked(root: HTMLElement): string[] {
+  const acc: string[] = [];
+  root.querySelectorAll<HTMLSpanElement>('span.tts-sent[data-tts]').forEach((span) => {
+    const i = Number(span.dataset.tts);
+    acc[i] = (acc[i] || '') + (span.textContent || '');
   });
   return acc.map((t) => (t || '').replace(/\s+/g, ' ').trim());
 }
