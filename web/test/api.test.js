@@ -22,9 +22,13 @@ describe('Codex message stream', () => {
     const completed = projectCodexStreamEvent({
       type: 'completed', threadId: 'thread-1', turnId: 'turn-1', itemId: 'item-1', text: '你好',
     }, 2);
+    const snapshot = {
+      type: 'conversationSnapshot', threadId: 'thread-1', cursor: 0,
+      messages: [{ k: 0, type: 'text', role: 'user', text: '开始' }],
+    };
     const chunks = [
       'data: {"type":"ready","threadId":"thread-1"}\n\n',
-      `data: ${JSON.stringify({ type: 'events', events: [delta, { type: 'invalid' }, completed] })}\n\n`,
+      `data: ${JSON.stringify({ type: 'events', events: [snapshot, delta, { type: 'invalid' }, completed] })}\n\n`,
     ].map((value) => encoder.encode(value));
     const reader = {
       read: vi.fn(async () => (chunks.length ? { done: false, value: chunks.shift() } : { done: true })),
@@ -43,6 +47,7 @@ describe('Codex message stream', () => {
     }));
     expect(events).toEqual([
       { type: 'ready', threadId: 'thread-1' },
+      snapshot,
       delta,
       completed,
     ]);

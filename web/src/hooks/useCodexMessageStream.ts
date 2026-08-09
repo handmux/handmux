@@ -92,7 +92,10 @@ export function useCodexMessageStream({
     let retryMs = RETRY_MIN_MS;
     const onEvent = (event: CodexStreamEventLike) => {
       if (event?.threadId && event.threadId !== threadId) return;
-      if (event?.type === 'cursorReset') {
+      if (event?.type === 'conversationSnapshot') {
+        lastSequenceRef.current = typeof event.cursor === 'number' && Number.isSafeInteger(event.cursor)
+          ? event.cursor : -1;
+      } else if (event?.type === 'cursorReset') {
         lastSequenceRef.current = typeof event.cursor === 'number' && Number.isSafeInteger(event.cursor)
           ? event.cursor : -1;
         onSettledRef.current?.();

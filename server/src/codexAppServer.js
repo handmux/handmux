@@ -1284,7 +1284,7 @@ class CodexAppConnection {
     let journal = this.streamEventStore.get(key);
     if (!journal) {
       journal = {
-        sequence: 0, events: [], durableFingerprints: new Map(), liveMessageIds: new Set(),
+        sequence: 0, events: [], durableFingerprints: new Map(), liveMessageIds: new Set(), snapshot: null,
       };
       this.streamEventStore.set(key, journal);
     }
@@ -1295,8 +1295,10 @@ class CodexAppConnection {
 
   reconcileTranscript(threadId, messages) {
     const journal = this.streamJournal(threadId);
+    const snapshotMessages = structuredClone(Array.isArray(messages) ? messages : []);
+    const snapshotFingerprint = JSON.stringify(snapshotMessages);
     const reconciled = reconcileCodexRolloutMessages(
-      journal.durableFingerprints, journal.liveMessageIds, Array.isArray(messages) ? messages : [],
+      journal.durableFingerprints, journal.liveMessageIds, snapshotMessages,
     );
     journal.durableFingerprints = reconciled.fingerprints;
     for (const mutation of reconciled.mutations) {
@@ -1308,6 +1310,31 @@ class CodexAppConnection {
         itemId: message.type === 'text' ? message.itemId : null,
         mutation,
       });
+    }
+    // The durable snapshot is a cursor-addressable checkpoint, not an out-of-band hint. Advancing the
+    // sequence when its contents change lets a reconnecting browser prove that it has (or has not) seen
+    // the latest rollout state even when no live text mutation was produced (for example a Tool/Plan/Diff
+    // update). The snapshot itself stays outside the bounded event array so one recent transcript page is
+    // retained instead of up to MAX_STREAM_EVENTS copies of it.
+    const snapshotChanged = journal.snapshot?.fingerprint !== snapshotFingerprint;
+    if (snapshotChanged) {
+      journal.sequence += 1;
+      journal.snapshot = {
+        cursor: journal.sequence,
+        fingerprint: snapshotFingerprint,
+        messages: snapshotMessages,
+      };
+    }
+    if (!snapshotChanged) return reconciled.mutations.length;
+    for (const subscription of this.streamListeners) {
+      if (subscription.threadId !== threadId) continue;
+      try {
+        subscription.listener({
+          type: 'conversationSnapshot', threadId,
+          cursor: journal.snapshot.cursor,
+          messages: structuredClone(journal.snapshot.messages),
+        });
+      } catch { /* one browser must not break rollout reconciliation */ }
     }
     return reconciled.mutations.length;
   }
@@ -1338,15 +1365,43 @@ class CodexAppConnection {
     const subscription = { threadId, listener };
     this.streamListeners.add(subscription);
     const journal = this.streamJournal(threadId);
-    if (Number.isSafeInteger(afterSequence) && afterSequence >= 0) {
-      const firstSequence = journal.events[0]?.sequence ?? journal.sequence + 1;
-      if (afterSequence > journal.sequence || afterSequence < firstSequence - 1) {
+    const firstSequence = journal.events[0]?.sequence ?? journal.sequence + 1;
+    const hasCursor = Number.isSafeInteger(afterSequence) && afterSequence >= 0;
+    const cursorInvalid = hasCursor
+      && (afterSequence > journal.sequence || afterSequence < firstSequence - 1);
+    let replayAfter = hasCursor ? afterSequence : null;
+    const snapshotIsNewer = journal.snapshot
+      && (!hasCursor || cursorInvalid || afterSequence < journal.snapshot.cursor);
+    if (snapshotIsNewer) {
+      try {
+        listener({
+          type: 'conversationSnapshot', threadId,
+          cursor: journal.snapshot.cursor,
+          messages: structuredClone(journal.snapshot.messages),
+        });
+      } catch { /* snapshot baseline is best effort */ }
+      replayAfter = journal.snapshot.cursor;
+    } else if (cursorInvalid) {
+      try {
+        listener({ type: 'cursorReset', threadId, cursor: journal.sequence });
+      } catch { /* cursor reset is best effort */ }
+      replayAfter = null;
+    }
+    if (Number.isSafeInteger(replayAfter) && replayAfter >= 0) {
+      // A snapshot normally covers every durable event before its cursor. If the bounded live-event
+      // journal has already discarded a later range, force one HTTP reconciliation rather than pretending
+      // that the checkpoint plus a partial tail is complete.
+      if (replayAfter < firstSequence - 1) {
+        try {
+          listener({ type: 'cursorReset', threadId, cursor: journal.sequence });
+        } catch { /* cursor reset is best effort */ }
+      } else if (replayAfter > journal.sequence) {
         try {
           listener({ type: 'cursorReset', threadId, cursor: journal.sequence });
         } catch { /* cursor reset is best effort */ }
       } else {
         for (const event of journal.events) {
-          if (event.sequence <= afterSequence) continue;
+          if (event.sequence <= replayAfter) continue;
           try { listener(event); } catch { /* replay is best effort */ }
         }
       }

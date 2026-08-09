@@ -18,6 +18,7 @@ export function usePollingLoop({
   burstKey = null,
   burstIntervalMs = intervalMs,
   burstCount = 0,
+  repeat = true,
 }) {
   const fetchRef = useRef(fetch);
   const applyRef = useRef(apply);
@@ -61,6 +62,7 @@ export function usePollingLoop({
       if (myRequestEpoch !== requestEpoch) return;
       inFlight = false;
       if (cancelled || document.hidden) return;
+      if (!repeat) return;
       const delay = repollAfterFlight ? 0 : nextDelay();
       repollAfterFlight = false;
       timer = setTimeout(loop, delay);
@@ -118,5 +120,5 @@ export function usePollingLoop({
       window.removeEventListener('online', onOnline);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- fetch/apply via refs; restart only on these
-  }, [enabled, intervalMs, burstKey, burstIntervalMs, burstCount, ...deps]);
+  }, [enabled, intervalMs, burstKey, burstIntervalMs, burstCount, repeat, ...deps]);
 }

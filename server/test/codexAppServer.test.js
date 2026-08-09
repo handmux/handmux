@@ -377,12 +377,16 @@ describe('Codex App Server client', () => {
       id: 'codex:turn-live:agent-live', role: 'assistant', type: 'text',
       turnId: 'turn-live', itemId: 'agent-live', text: '你好，完成',
     }])).resolves.toEqual({ reconciled: 1 });
-    expect(replayed.at(-1)).toMatchObject({
+    expect(replayed.find((event) => event.type === 'conversation')).toMatchObject({
       type: 'conversation', lifecycle: 'persisted',
       mutation: {
         operation: 'upsert', mode: 'replace',
         message: { id: 'codex:turn-live:agent-live', text: '你好，完成', completed: true },
       },
+    });
+    expect(replayed.at(-1)).toMatchObject({
+      type: 'conversationSnapshot', cursor: 6,
+      messages: [expect.objectContaining({ id: 'codex:turn-live:agent-live', text: '你好，完成' })],
     });
     await expect(app.reconcileTranscript('%1', 'thread-1', [{
       id: 'codex:turn-live:agent-live', role: 'assistant', type: 'text',
@@ -390,16 +394,27 @@ describe('Codex App Server client', () => {
     }])).resolves.toEqual({ reconciled: 0 });
     const completedReplay = [];
     const unsubscribeCompleted = await app.subscribe('%1', 'thread-1', (event) => completedReplay.push(event));
-    // Completed text is history and must come only from the rollout projection. Replaying it as a live
-    // snapshot can place old replies below the current stream after a reconnect.
-    expect(completedReplay).toEqual([]);
+    expect(completedReplay).toEqual([expect.objectContaining({
+      type: 'conversationSnapshot', cursor: 6,
+      messages: [expect.objectContaining({ id: 'codex:turn-live:agent-live', text: '你好，完成' })],
+    })]);
     const cursorReplay = [];
     const unsubscribeCursorReplay = await app.subscribe(
       '%1', 'thread-1', (event) => cursorReplay.push(event), events[0].sequence,
     );
-    expect(cursorReplay.map((event) => [event.type, event.sequence])).toEqual([
-      ['delta', 2], ['snapshot', 3], ['completed', 4], ['conversation', 5],
-    ]);
+    // The browser disconnected before cursor 6. Even though cursor 1 is still inside the live-event
+    // journal, the newer durable checkpoint supersedes that partial replay and cannot be missed.
+    expect(cursorReplay).toEqual([expect.objectContaining({
+      type: 'conversationSnapshot', cursor: 6,
+      messages: [expect.objectContaining({ id: 'codex:turn-live:agent-live', text: '你好，完成' })],
+    })]);
+    const staleReplay = [];
+    const unsubscribeStale = await app.subscribe(
+      '%1', 'thread-1', (event) => staleReplay.push(event), 999,
+    );
+    expect(staleReplay).toEqual([expect.objectContaining({
+      type: 'conversationSnapshot', cursor: 6,
+    })]);
     expect(projectCodexThread((await app.read('%1', 'thread-1')).thread)
       .find((message) => message.id === 'codex:turn-live:agent-live')?.text).toBe('你好，完成');
 
@@ -409,6 +424,7 @@ describe('Codex App Server client', () => {
     unsubscribeReplay();
     unsubscribeCompleted();
     unsubscribeCursorReplay();
+    unsubscribeStale();
   });
 
   it('resets a stale client cursor after the server event journal restarts', async () => {
@@ -419,6 +435,38 @@ describe('Codex App Server client', () => {
 
     expect(events).toEqual([{ type: 'cursorReset', threadId: 'thread-1', cursor: 0 }]);
     unsubscribe();
+    app.close();
+  });
+
+  it('advances the reconnect cursor for rollout-only snapshot changes', async () => {
+    const proxy = fakeProxy();
+    const app = createCodexAppServer({ home: '/home/test', exists: () => true, connect: () => proxy.ws });
+    const unsubscribeSeed = await app.subscribe('%1', 'thread-1', () => {});
+    const tool = (result) => ({
+      k: 0, i: 0, role: 'assistant', type: 'tool', turnId: 'turn-tool',
+      tool: { name: 'Bash', input: { command: 'npm test' }, result, isError: false },
+    });
+
+    // Tool messages do not create a live text mutation, but their durable contents still belong to the
+    // unified conversation state and therefore must advance the same reconnect cursor.
+    await expect(app.reconcileTranscript('%1', 'thread-1', [tool('running')]))
+      .resolves.toEqual({ reconciled: 0 });
+    await expect(app.reconcileTranscript('%1', 'thread-1', [tool('passed')]))
+      .resolves.toEqual({ reconciled: 0 });
+
+    const replayed = [];
+    const unsubscribeReplay = await app.subscribe(
+      '%1', 'thread-1', (event) => replayed.push(event), 1,
+    );
+    expect(replayed).toEqual([expect.objectContaining({
+      type: 'conversationSnapshot', cursor: 2,
+      messages: [expect.objectContaining({
+        type: 'tool', tool: expect.objectContaining({ result: 'passed' }),
+      })],
+    })]);
+
+    unsubscribeSeed();
+    unsubscribeReplay();
     app.close();
   });
 

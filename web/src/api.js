@@ -155,7 +155,7 @@ export async function streamCodexMessages(pane, { signal, onEvent, after = null 
         for (const candidate of events) {
           const control = parseCodexStreamEvent(candidate);
           const event = parseCodexProjectedStreamEvent(candidate)
-            || (['ready', 'cursorReset', 'disconnected', 'error'].includes(control?.type) ? control : null);
+            || (['ready', 'cursorReset', 'conversationSnapshot', 'disconnected', 'error'].includes(control?.type) ? control : null);
           if (!event) continue;
           if (event?.type === 'error') throw new Error(event.message || 'Codex message stream failed');
           onEvent?.(event);

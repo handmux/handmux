@@ -330,13 +330,20 @@ describe('ChatView', () => {
 
   it('lets a new durable rollout message replace its temporary bubble without duplication', async () => {
     mockTranscript([]);
+    let emit;
+    api.streamCodexMessages.mockImplementation((_pane, { signal, onEvent }) => {
+      emit = onEvent;
+      return new Promise((resolve) => signal.addEventListener('abort', resolve, { once: true }));
+    });
     const optimistic = [{
       id: 'optimistic-1', text: '不要显示两次', status: 'accepted',
     }];
     const onOptimisticCovered = vi.fn();
     const { rerender } = render(<ChatView pane="%0" agent="codex" kind="working"
+      codexSession={{ managed: true, threadId: 'thread-1' }}
       optimisticMessages={optimistic} onOptimisticCovered={onOptimisticCovered} refreshToken={0} />);
     await screen.findByText('不要显示两次');
+    await waitFor(() => expect(emit).toBeTypeOf('function'));
 
     api.fetchTranscript.mockResolvedValue({
       messages: [{
@@ -345,7 +352,12 @@ describe('ChatView', () => {
       hash: 'h2', session: 's', hasMore: false, firstSeq: 0,
     });
     rerender(<ChatView pane="%0" agent="codex" kind="working"
+      codexSession={{ managed: true, threadId: 'thread-1' }}
       optimisticMessages={optimistic} onOptimisticCovered={onOptimisticCovered} refreshToken={1} />);
+    act(() => emit({
+      type: 'conversationSnapshot', threadId: 'thread-1', cursor: 1,
+      messages: [{ k: 0, i: 4, role: 'user', type: 'text', text: '不要显示两次' }],
+    }));
 
     await waitFor(() => expect(onOptimisticCovered).toHaveBeenCalledWith(['optimistic-1']));
     expect(screen.getAllByText('不要显示两次')).toHaveLength(1);
@@ -353,14 +365,21 @@ describe('ChatView', () => {
 
   it('uses one authoritative message to cover only one identical temporary bubble', async () => {
     mockTranscript([]);
+    let emit;
+    api.streamCodexMessages.mockImplementation((_pane, { signal, onEvent }) => {
+      emit = onEvent;
+      return new Promise((resolve) => signal.addEventListener('abort', resolve, { once: true }));
+    });
     const optimistic = [
       { id: 'optimistic-1', text: '相同内容', status: 'steered' },
       { id: 'optimistic-2', text: '相同内容', status: 'steered' },
     ];
     const onOptimisticCovered = vi.fn();
     const { rerender } = render(<ChatView pane="%0" agent="codex" kind="working"
+      codexSession={{ managed: true, threadId: 'thread-1' }}
       optimisticMessages={optimistic} onOptimisticCovered={onOptimisticCovered} refreshToken={0} />);
     await waitFor(() => expect(screen.getAllByText('相同内容')).toHaveLength(2));
+    await waitFor(() => expect(emit).toBeTypeOf('function'));
 
     api.fetchTranscript.mockResolvedValue({
       messages: [{
@@ -369,7 +388,12 @@ describe('ChatView', () => {
       hash: 'h2', session: 's', hasMore: false, firstSeq: 0,
     });
     rerender(<ChatView pane="%0" agent="codex" kind="working"
+      codexSession={{ managed: true, threadId: 'thread-1' }}
       optimisticMessages={optimistic} onOptimisticCovered={onOptimisticCovered} refreshToken={1} />);
+    act(() => emit({
+      type: 'conversationSnapshot', threadId: 'thread-1', cursor: 1,
+      messages: [{ k: 0, i: 4, role: 'user', type: 'text', text: '相同内容' }],
+    }));
 
     await waitFor(() => expect(onOptimisticCovered).toHaveBeenCalledWith(['optimistic-1']));
     expect(screen.getAllByText('相同内容')).toHaveLength(2);

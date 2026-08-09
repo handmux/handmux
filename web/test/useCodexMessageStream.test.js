@@ -151,6 +151,9 @@ describe('Codex message stream projection', () => {
       pane: '%1', threadId: 'thread-1', enabled: true,
     }));
     await waitFor(() => expect(api.streamCodexMessages).toHaveBeenCalledTimes(1));
+    act(() => subscriptions[0].onEvent({
+      type: 'conversationSnapshot', threadId: 'thread-1', cursor: 6, messages: [],
+    }));
     act(() => subscriptions[0].onEvent(projected({
       type: 'delta', threadId: 'thread-1', turnId: 'turn-1', itemId: 'agent-1', delta: '继续',
     }, 7)));

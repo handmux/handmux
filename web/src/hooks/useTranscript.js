@@ -1,10 +1,11 @@
-// The 对话 lens's read-projection: poll /api/transcript for the pane's agent session, hash-gated省流.
-// A null poll (204 unchanged) keeps the last messages — same discipline as the terminal loop.
+// The 对话 lens's durable read-projection. Claude continuously polls /api/transcript with hash-gated省流.
+// Codex loads one initial page, then its unified SSE snapshot/mutations own current state; completion,
+// cursor reset, thread replacement, foreground return, or an explicit refresh token performs one HTTP
+// calibration. A null response (204 unchanged) keeps the last messages.
 //
 // Paginated (Task 10): the client NEVER holds/requests the whole transcript. Two independent cursors:
-//   - RECENT window (polled, 1500ms): `{since: recentHash, limit: 20}` — hash-gated conditional poll, a
-//     204/null keeps the last state. Both Claude and Codex use their append-only durable logs, so each
-//     normalized message keeps a stable ordinal identity.
+//   - RECENT window: `{since: recentHash, limit: 20}` — Claude polls every 1500ms; Codex fetches only on
+//     the explicit calibration triggers above. Both append-only logs keep stable ordinal identity.
 //   - HISTORY page (`loadOlder()`, scroll-up only, never polled): `{before: oldestK, limit: 20}` — fetched
 //     on demand, prepended and deduped by message identity. Resident messages are capped at
 //     MAX_TRANSCRIPT_MESSAGES so leaving the lens open cannot grow phone memory without bound.
@@ -50,6 +51,7 @@ export function useTranscript(pane, enabled, agent = 'claude', refreshToken = nu
   const loadingOlderRef = useRef(false);
   const sessionRef = useRef(null); // the session id the current `messages` belong to
   const messagesRef = useRef([]); // synchronous count/bound checks across poll + loadOlder callbacks
+  const loadedRef = useRef(false);
   const appServerFailureSinceRef = useRef(null);
   const epochRef = useRef(0); // invalidates an older-page request across pane/agent/session replacement
 
@@ -63,6 +65,7 @@ export function useTranscript(pane, enabled, agent = 'claude', refreshToken = nu
     loadingOlderRef.current = false;
     sessionRef.current = null;
     messagesRef.current = [];
+    loadedRef.current = false;
     appServerFailureSinceRef.current = null;
     setMessages([]);
     setHasMoreOlder(false);
@@ -97,6 +100,8 @@ export function useTranscript(pane, enabled, agent = 'claude', refreshToken = nu
       return;
     }
     appServerFailureSinceRef.current = null;
+    const alreadyLoaded = loadedRef.current;
+    loadedRef.current = true;
     setLoaded(true); // first real response: from now on an empty list means an empty SESSION, not loading
     hashRef.current = r.hash || '';
     if (r.unavailable) {
@@ -130,7 +135,7 @@ export function useTranscript(pane, enabled, agent = 'claude', refreshToken = nu
       oldestKRef.current = r.firstSeq ?? null;
       setHasMoreOlder(!!r.hasMore);
       seededRef.current = true; // the older-page cursor restarts from the new session's window
-    } else {
+    } else if (agent !== 'codex' || !alreadyLoaded) {
       messagesRef.current = mergeTranscriptMessages(messagesRef.current, incoming);
       setMessages(messagesRef.current);
       // Seed the older-page cursor from the FIRST successful recent response only — once loadOlder has
@@ -143,11 +148,16 @@ export function useTranscript(pane, enabled, agent = 'claude', refreshToken = nu
       }
       if (messagesRef.current.length >= MAX_TRANSCRIPT_MESSAGES) setHasMoreOlder(false);
     }
+    // After the initial Codex bootstrap, this HTTP request only asks Server to reconcile rollout. The
+    // resulting conversationSnapshot arrives through the ordered SSE stream and is the sole current-state
+    // mutation; applying the response here as well would recreate the two-channel projection race.
     if (r.session) { sessionRef.current = r.session; setSession(r.session); }
   }, [agent]);
 
   const applyCodexEvent = useCallback((event) => {
-    const next = applyCodexConversationEvent(messagesRef.current, event);
+    const next = event?.type === 'conversationSnapshot' && Array.isArray(event.messages)
+      ? mergeTranscriptMessages(messagesRef.current, event.messages)
+      : applyCodexConversationEvent(messagesRef.current, event);
     if (next === messagesRef.current) return;
     messagesRef.current = next.length > MAX_TRANSCRIPT_MESSAGES
       ? next.slice(-MAX_TRANSCRIPT_MESSAGES)
@@ -164,6 +174,7 @@ export function useTranscript(pane, enabled, agent = 'claude', refreshToken = nu
     burstKey: refreshToken,
     burstIntervalMs: 500,
     burstCount: 3,
+    repeat: agent !== 'codex',
     enabled: enabled && !!pane,
     deps: [pane, agent],
   });

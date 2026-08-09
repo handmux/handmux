@@ -23,6 +23,23 @@ describe('usePollingLoop', () => {
     expect(apply).toHaveBeenLastCalledWith(3);
   });
 
+  it('runs once without a timer when repeat is false and refreshes on an explicit key change', async () => {
+    vi.useFakeTimers();
+    setHidden(false);
+    const fetch = vi.fn(async () => fetch.mock.calls.length);
+    const apply = vi.fn();
+    const { rerender } = render(
+      <Harness fetch={fetch} apply={apply} intervalMs={1500} repeat={false} burstKey={0} enabled />,
+    );
+    await act(async () => {});
+    await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
+    expect(fetch).toHaveBeenCalledTimes(1);
+
+    rerender(<Harness fetch={fetch} apply={apply} intervalMs={1500} repeat={false} burstKey={1} enabled />);
+    await act(async () => {});
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
+
   it('restarts immediately and briefly uses the burst cadence when burstKey changes', async () => {
     vi.useFakeTimers();
     setHidden(false);

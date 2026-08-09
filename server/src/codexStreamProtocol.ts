@@ -68,6 +68,13 @@ export type CodexStreamDomainEvent =
 export type CodexStreamControlEvent =
   | { [key: string]: unknown; type: 'ready'; threadId: string }
   | { [key: string]: unknown; type: 'cursorReset'; threadId: string; cursor: number }
+  | {
+    [key: string]: unknown;
+    type: 'conversationSnapshot';
+    threadId: string;
+    cursor: number;
+    messages: Record<string, unknown>[];
+  }
   | { [key: string]: unknown; type: 'disconnected'; threadId: string }
   | { [key: string]: unknown; type: 'error'; message: string };
 
@@ -103,6 +110,22 @@ function optionalFiniteNumber(record: Record<string, unknown>, key: string): num
   if (!Object.hasOwn(record, key)) return undefined;
   const value = record[key];
   return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+}
+
+function parseConversationSnapshotMessages(value: unknown): Record<string, unknown>[] | null {
+  if (!Array.isArray(value) || value.length > 100) return null;
+  const allowedTypes = new Set([
+    'text', 'thinking', 'tool', 'plan', 'goal', 'compact', 'interrupt', 'slash',
+  ]);
+  const messages = [];
+  for (const candidate of value) {
+    const message = recordOf(candidate);
+    if (!message || typeof message.k !== 'number' || !Number.isSafeInteger(message.k) || message.k < 0
+      || typeof message.type !== 'string' || !allowedTypes.has(message.type)
+      || (message.id != null && !nonEmptyString(message.id))) return null;
+    messages.push(message);
+  }
+  return messages;
 }
 
 export function parseCodexGoal(value: unknown): CodexGoal | null {
@@ -165,6 +188,13 @@ export function parseCodexStreamEvent(value: unknown): CodexStreamEvent | null {
     if (record.turnId !== turnId || record.itemId !== itemId) return null;
     return { ...record, type, threadId, turnId, itemId, mutation };
   }
+  if (type === 'conversationSnapshot') {
+    const cursor = record.cursor;
+    const messages = parseConversationSnapshotMessages(record.messages);
+    return typeof cursor === 'number' && Number.isSafeInteger(cursor) && cursor >= 0 && messages
+      ? { ...record, type, threadId, cursor, messages }
+      : null;
+  }
   if (type === 'ready' || type === 'disconnected') return { ...record, type, threadId };
   if (type === 'cursorReset') {
     const cursor = record.cursor;
@@ -213,7 +243,7 @@ function projectionFields(event: CodexStreamDomainEvent): {
 }
 
 function isDomainEvent(event: CodexStreamEvent): event is CodexStreamDomainEvent {
-  return event.type !== 'ready' && event.type !== 'cursorReset'
+  return event.type !== 'ready' && event.type !== 'cursorReset' && event.type !== 'conversationSnapshot'
     && event.type !== 'disconnected' && event.type !== 'error';
 }
 

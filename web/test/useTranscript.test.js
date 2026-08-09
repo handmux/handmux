@@ -36,6 +36,24 @@ describe('useTranscript', () => {
     expect(merged).toHaveLength(2);
     expect(merged[1].tool.result).toBe('done');
   });
+
+  it('merges a unified stream snapshot into the same resident message state', async () => {
+    vi.spyOn(api, 'fetchTranscript').mockResolvedValueOnce({
+      messages: [{ id: 'user-1', k: 0, role: 'user', type: 'text', text: '开始' }],
+      hash: 'h', session: 'thread-1', hasMore: false, firstSeq: 0,
+    });
+    const { result } = renderHook(() => useTranscript('%0', true, 'codex'));
+    await waitFor(() => expect(result.current.messages).toHaveLength(1));
+
+    act(() => result.current.applyCodexEvent({
+      type: 'conversationSnapshot', cursor: 2,
+      messages: [
+        { id: 'user-1', k: 0, role: 'user', type: 'text', text: '开始' },
+        { id: 'codex:turn-1:agent-1', k: 1, role: 'assistant', type: 'text', text: '完成' },
+      ],
+    }));
+    expect(result.current.messages.map((message) => message.text)).toEqual(['开始', '完成']);
+  });
   it('polls the recent window and returns messages; keeps last on a null (204) poll', async () => {
     const recent = makeMsgs(10, 10); // k=10..19
     const spy = vi.spyOn(api, 'fetchTranscript')
@@ -62,7 +80,7 @@ describe('useTranscript', () => {
     expect(spy).toHaveBeenCalledWith('%0', expect.objectContaining({ agent: 'codex' }));
   });
 
-  it('refreshes immediately when a successful send changes the refresh token', async () => {
+  it('triggers rollout reconciliation on refresh but applies current state only from SSE', async () => {
     const spy = vi.spyOn(api, 'fetchTranscript')
       .mockResolvedValueOnce({ messages: makeMsgs(0, 1), hash: 'h1', session: 's', hasMore: false, firstSeq: 0 })
       .mockResolvedValueOnce({ messages: makeMsgs(0, 2), hash: 'h2', session: 's', hasMore: false, firstSeq: 0 })
@@ -74,30 +92,29 @@ describe('useTranscript', () => {
     await waitFor(() => expect(result.current.messages).toHaveLength(1));
 
     rerender({ refreshToken: 1 });
-    await waitFor(() => expect(result.current.messages).toHaveLength(2));
-    expect(spy).toHaveBeenCalledTimes(2);
+    await waitFor(() => expect(spy).toHaveBeenCalledTimes(2));
+    expect(result.current.messages).toHaveLength(1);
+    act(() => result.current.applyCodexEvent({
+      type: 'conversationSnapshot', cursor: 2, messages: makeMsgs(0, 2),
+    }));
+    expect(result.current.messages).toHaveLength(2);
   });
 
   it('clears previously loaded content when the server refuses an unbound Codex session', async () => {
-    vi.useFakeTimers();
-    try {
-      vi.spyOn(api, 'fetchTranscript')
-        .mockResolvedValueOnce({ messages: makeMsgs(0, 2), hash: 'h1', session: 'old', hasMore: false, firstSeq: 0 })
-        .mockResolvedValueOnce({ messages: [], hash: '', session: null, hasMore: false, firstSeq: null, unavailable: 'session-unbound' })
-        .mockResolvedValue(null);
-      const { result } = renderHook(() => useTranscript('%0', true, 'codex'));
-      await act(async () => { await Promise.resolve(); });
-      await act(async () => { await Promise.resolve(); });
-      expect(result.current.messages).toHaveLength(2);
+    vi.spyOn(api, 'fetchTranscript')
+      .mockResolvedValueOnce({ messages: makeMsgs(0, 2), hash: 'h1', session: 'old', hasMore: false, firstSeq: 0 })
+      .mockResolvedValueOnce({ messages: [], hash: '', session: null, hasMore: false, firstSeq: null, unavailable: 'session-unbound' })
+      .mockResolvedValue(null);
+    const { result, rerender } = renderHook(
+      ({ refreshToken }) => useTranscript('%0', true, 'codex', refreshToken),
+      { initialProps: { refreshToken: 0 } },
+    );
+    await waitFor(() => expect(result.current.messages).toHaveLength(2));
 
-      await act(async () => { await vi.advanceTimersByTimeAsync(1500); });
-
-      expect(result.current.messages).toEqual([]);
-      expect(result.current.session).toBeNull();
-      expect(result.current.unavailable).toBe('session-unbound');
-    } finally {
-      vi.useRealTimers();
-    }
+    rerender({ refreshToken: 1 });
+    await waitFor(() => expect(result.current.unavailable).toBe('session-unbound'));
+    expect(result.current.messages).toEqual([]);
+    expect(result.current.session).toBeNull();
   });
 
   it('keeps the last transcript through a five-second App Server grace period', async () => {
@@ -110,15 +127,20 @@ describe('useTranscript', () => {
       vi.spyOn(api, 'fetchTranscript')
         .mockResolvedValueOnce({ messages: makeMsgs(0, 2), hash: 'h1', session: 'thread-1', hasMore: false, firstSeq: 0 })
         .mockResolvedValue(unavailable);
-      const { result } = renderHook(() => useTranscript('%0', true, 'codex'));
+      const { result, rerender } = renderHook(
+        ({ refreshToken }) => useTranscript('%0', true, 'codex', refreshToken),
+        { initialProps: { refreshToken: 0 } },
+      );
       await act(async () => { await Promise.resolve(); await Promise.resolve(); });
       expect(result.current.messages).toHaveLength(2);
 
-      await act(async () => { await vi.advanceTimersByTimeAsync(1500); });
+      rerender({ refreshToken: 1 });
+      await act(async () => { await Promise.resolve(); await Promise.resolve(); });
       expect(result.current.unavailable).toBeNull();
-      await act(async () => { await vi.advanceTimersByTimeAsync(4500); });
+      await act(async () => { await vi.advanceTimersByTimeAsync(5001); });
       expect(result.current.unavailable).toBeNull();
-      await act(async () => { await vi.advanceTimersByTimeAsync(1500); });
+      rerender({ refreshToken: 2 });
+      await act(async () => { await Promise.resolve(); await Promise.resolve(); });
       expect(result.current).toMatchObject({
         unavailable: 'app-server-unavailable', unavailableDetail: 'temporary disconnect',
         session: 'thread-1',
@@ -126,7 +148,8 @@ describe('useTranscript', () => {
       expect(result.current.messages).toHaveLength(2);
 
       api.fetchTranscript.mockResolvedValue(null);
-      await act(async () => { await vi.advanceTimersByTimeAsync(1500); });
+      rerender({ refreshToken: 3 });
+      await act(async () => { await Promise.resolve(); await Promise.resolve(); });
       expect(result.current.unavailable).toBeNull();
       expect(result.current.messages).toHaveLength(2);
     } finally {
@@ -178,13 +201,17 @@ describe('useTranscript', () => {
         .mockImplementationOnce(() => new Promise((resolve) => { resolveOlder = resolve; }))
         .mockResolvedValueOnce({ messages: makeMsgs(0, 1), hash: 'new', session: 'sess-new', hasMore: false, firstSeq: 0 })
         .mockResolvedValue(null);
-      const { result } = renderHook(() => useTranscript('%0', true, 'codex'));
+      const { result, rerender } = renderHook(
+        ({ refreshToken }) => useTranscript('%0', true, 'codex', refreshToken),
+        { initialProps: { refreshToken: 0 } },
+      );
       await act(async () => { await Promise.resolve(); await Promise.resolve(); });
       expect(result.current.session).toBe('sess-old');
 
       let olderPromise;
       act(() => { olderPromise = result.current.loadOlder(); });
-      await act(async () => { await vi.advanceTimersByTimeAsync(1500); });
+      rerender({ refreshToken: 1 });
+      await act(async () => { await Promise.resolve(); await Promise.resolve(); });
       expect(result.current.session).toBe('sess-new');
 
       await act(async () => {

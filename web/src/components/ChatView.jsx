@@ -632,8 +632,8 @@ export default function ChatView({
   onDocLinkTap,
 }) {
   const [streamRefresh, setStreamRefresh] = useState(0);
-  const transcriptRefresh = streamRefresh
-    ? `${refreshToken ?? ''}:stream:${streamRefresh}`
+  const transcriptRefresh = agent === 'codex'
+    ? `${refreshToken ?? ''}:thread:${codexSession?.threadId ?? ''}:stream:${streamRefresh}`
     : refreshToken;
   const {
     messages, hasMoreOlder, loadOlder, loadingOlder,
