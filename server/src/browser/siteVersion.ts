@@ -1,16 +1,32 @@
-export const DEFAULT_SITE_VERSION = 'mobile';
-export const SITE_VERSIONS = new Set(['mobile', 'desktop']);
+export type BrowserSiteVersion = 'mobile' | 'desktop';
+export interface BrowserSiteIdentity {
+  version: BrowserSiteVersion;
+  mobile: boolean;
+  userAgent: string;
+  appVersion: string;
+  platform: string;
+  clientHintPlatform: string;
+  maxTouchPoints: number;
+}
+type MutableHeaders = Record<string, string | string[] | number | undefined>;
 
-export function normalizeSiteVersion(value, fallback = DEFAULT_SITE_VERSION) {
+export const DEFAULT_SITE_VERSION: BrowserSiteVersion = 'mobile';
+export const SITE_VERSIONS = new Set<BrowserSiteVersion>(['mobile', 'desktop']);
+
+export function normalizeSiteVersion(
+  value: unknown,
+  fallback: BrowserSiteVersion = DEFAULT_SITE_VERSION,
+): BrowserSiteVersion | null {
   if (value == null || value === '') return fallback;
-  return SITE_VERSIONS.has(value) ? value : null;
+  return typeof value === 'string' && SITE_VERSIONS.has(value as BrowserSiteVersion)
+    ? value as BrowserSiteVersion : null;
 }
 
-function versionFrom(ua, pattern, fallback = '120.0.0.0') {
+function versionFrom(ua: string, pattern: RegExp, fallback = '120.0.0.0'): string {
   return ua.match(pattern)?.[1] || fallback;
 }
 
-function identityPlatform(ua, mobile) {
+function identityPlatform(ua: string, mobile: boolean): { navigator: string; clientHint: string } {
   if (/iPhone|iPad|iPod/i.test(ua)) return { navigator: 'iPhone', clientHint: 'iOS' };
   if (/Android/i.test(ua)) return { navigator: 'Linux armv8l', clientHint: 'Android' };
   if (/Windows/i.test(ua)) return { navigator: 'Win32', clientHint: 'Windows' };
@@ -20,11 +36,11 @@ function identityPlatform(ua, mobile) {
     : { navigator: 'Linux x86_64', clientHint: 'Linux' };
 }
 
-function isMobileUserAgent(ua) {
+function isMobileUserAgent(ua: string): boolean {
   return /Android|Mobile|iPhone|iPad|iPod/i.test(ua);
 }
 
-function transformedUserAgent(source, mobile) {
+function transformedUserAgent(source: unknown, mobile: boolean): string {
   const ua = String(source || '');
   if (ua && isMobileUserAgent(ua) === mobile) return ua;
 
@@ -49,7 +65,7 @@ function transformedUserAgent(source, mobile) {
     : `Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${chrome} Safari/537.36`;
 }
 
-export function siteVersionIdentity(siteVersion, sourceUserAgent = '') {
+export function siteVersionIdentity(siteVersion: unknown, sourceUserAgent: unknown = ''): BrowserSiteIdentity {
   const version = normalizeSiteVersion(siteVersion);
   if (!version) throw new Error('invalid browser site version');
   const mobile = version === 'mobile';
@@ -66,21 +82,24 @@ export function siteVersionIdentity(siteVersion, sourceUserAgent = '') {
   };
 }
 
-function headerKey(headers, name) {
+function headerKey(headers: MutableHeaders, name: string): string {
   const lower = name.toLowerCase();
   return Object.keys(headers || {}).find((key) => key.toLowerCase() === lower) || lower;
 }
 
-function setHeader(headers, name, value) {
+function setHeader(headers: MutableHeaders, name: string, value: string): void {
   headers[headerKey(headers, name)] = value;
 }
 
-function deleteHeader(headers, name) {
+function deleteHeader(headers: MutableHeaders, name: string): void {
   const key = Object.keys(headers || {}).find((candidate) => candidate.toLowerCase() === name.toLowerCase());
   if (key) delete headers[key];
 }
 
-export function applySiteVersionHeaders(headers, identity) {
+export function applySiteVersionHeaders<T extends MutableHeaders>(
+  headers: T,
+  identity: BrowserSiteIdentity | null | undefined,
+): T {
   if (!headers || !identity) return headers;
   setHeader(headers, 'user-agent', identity.userAgent);
   setHeader(headers, 'sec-ch-ua-mobile', identity.mobile ? '?1' : '?0');
@@ -93,7 +112,7 @@ export function applySiteVersionHeaders(headers, identity) {
   return headers;
 }
 
-export function siteVersionNavigatorScript(identity) {
+export function siteVersionNavigatorScript(identity: BrowserSiteIdentity): string {
   const encoded = JSON.stringify(identity).replaceAll('<', '\\u003c');
   return `(() => {
     const profile = ${encoded};
