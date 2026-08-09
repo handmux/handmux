@@ -55,6 +55,10 @@ describe('resolveConfig', () => {
   it('rejects a bad port', () => {
     expect(() => resolveConfig({ port: '70000' }, {}, {}, gen)).toThrow(/bad port/);
   });
+  it('rejects non-text values for string options before they reach the supervisor', () => {
+    expect(() => resolveConfig({ host: true }, {}, {}, gen)).toThrow(/bad host/);
+    expect(() => resolveConfig({}, { previewDomain: 42 }, {}, gen)).toThrow(/bad preview-domain/);
+  });
   it('removes the ssh not-available guard and resolves ssh config', () => {
     const c = resolveConfig({ tunnel: 'ssh', sshHost: 'me@box.example.com' }, {}, {}, gen);
     expect(c).toMatchObject({
@@ -149,6 +153,14 @@ describe('resolveConfig', () => {
     expect(c.staticDir).toBe('/srv/dist');
     expect(c.vapid).toEqual({ public: 'pub', private: 'priv', subject: 'mailto:me@x.dev' });
     expect(c.xfyun).toEqual({ appId: 'A', apiKey: 'K', apiSecret: 'S' });
+  });
+  it('projects only string integration fields from untrusted config JSON', () => {
+    const c = resolveConfig({}, {
+      vapid: { public: 'pub', private: 123, subject: false },
+      xfyun: { appId: 'A', apiKey: null, extra: 'ignored' },
+    }, {}, gen);
+    expect(c.vapid).toEqual({ public: 'pub' });
+    expect(c.xfyun).toEqual({ appId: 'A' });
   });
   it('leaves the unified fields null when absent (so the integration stays off)', () => {
     const c = resolveConfig({}, {}, {}, gen);

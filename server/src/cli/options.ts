@@ -3,20 +3,79 @@
 // (generated when unset) so a public tunnel can never come up token-less.
 import crypto from 'node:crypto';
 import { normalizeShortcuts } from '../shortcutConfig.js';
+import type { ShortcutConfig } from '../shortcutConfig.js';
 
-export const TUNNELS = ['none', 'cloudflare', 'cloudflare-named', 'ssh', 'natapp', 'cpolar'];
+export const TUNNELS = ['none', 'cloudflare', 'cloudflare-named', 'ssh', 'natapp', 'cpolar'] as const;
+export type Tunnel = typeof TUNNELS[number];
+type OptionRecord = Record<string, unknown>;
+type FlagAtom = string | boolean;
+export type ParsedFlags = Record<string, FlagAtom | FlagAtom[]>;
 
-const camel = (s) => s.replace(/-([a-z])/g, (_, c) => c.toUpperCase());
+export interface ParsedArgs {
+  command: string;
+  flags: ParsedFlags;
+  positionals?: string[];
+  unknownShortFlags?: string[];
+}
+
+export interface VapidConfig {
+  public?: string;
+  private?: string;
+  subject?: string;
+}
+
+export interface XfyunConfig {
+  appId?: string;
+  apiKey?: string;
+  apiSecret?: string;
+}
+
+export interface ResolvedConfig {
+  tunnel: Tunnel;
+  port: number;
+  name: string | null;
+  host: string;
+  token: string;
+  foreground: boolean;
+  qr: boolean;
+  staticDir: string | null;
+  uploadExts: string | null;
+  previewDomain: string | null;
+  vapid: VapidConfig | null;
+  xfyun: XfyunConfig | null;
+  shortcuts: ShortcutConfig;
+  publicUrl: string | null;
+  sshHost: string | null;
+  remotePort: number | null;
+  sshJump: string | null;
+  cfHostname: string | null;
+  cfTunnelName: string | null;
+  authtoken: string | null;
+  cpolarRegion: string | null;
+}
+
+export interface ConfigExplanationRow {
+  key: string;
+  origin: string;
+  display: string;
+}
+
+const isRecord = (value: unknown): value is OptionRecord =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+const isTunnel = (value: unknown): value is Tunnel =>
+  typeof value === 'string' && TUNNELS.includes(value as Tunnel);
+
+const camel = (value: string): string => value.replace(/-([a-z])/g, (_match, char: string) => char.toUpperCase());
 
 // argv = process.argv.slice(2). `command` is the first bare word; flags are `--key value`,
 // `--key` (boolean true), `--no-key` (boolean false), and `-f` (alias for --foreground).
-export function parseArgs(argv) {
+export function parseArgs(argv: readonly string[]): ParsedArgs {
   const [command = 'help', ...rest] = argv;
-  const flags = {};
-  const positionals = [];
-  const unknownShortFlags = [];
+  const flags: ParsedFlags = {};
+  const positionals: string[] = [];
+  const unknownShortFlags: string[] = [];
   const multiFlags = new Set(['session']);
-  const assign = (key, value) => {
+  const assign = (key: string, value: FlagAtom): void => {
     if (!multiFlags.has(key) || flags[key] === undefined) { flags[key] = value; return; }
     flags[key] = Array.isArray(flags[key]) ? [...flags[key], value] : [flags[key], value];
   };
@@ -43,37 +102,42 @@ export function parseArgs(argv) {
 }
 
 // ssh 回退公网地址:SSH 不生成 URL,无 --public-url 时用 host:remotePort(去掉 user@ 与 :sshPort)。
-export function sshPublicFallback(sshHost, remotePort) {
-  const host = String(sshHost).replace(/^[^@]*@/, '').replace(/:\d+$/, '');
+export function sshPublicFallback(sshHost: string, remotePort: number): string {
+  const host = sshHost.replace(/^[^@]*@/, '').replace(/:\d+$/, '');
   return `http://${host}:${remotePort}`;
 }
 
-export function resolveConfig(flags = {}, fileCfg = {}, env = process.env, gen = defaultGen) {
-  const pick = (k, ...fallbacks) => {
-    for (const v of [flags[k], fileCfg[k], ...fallbacks]) if (v !== undefined && v !== null) return v;
+export function resolveConfig(
+  flags: OptionRecord = {},
+  fileCfg: OptionRecord = {},
+  env: NodeJS.ProcessEnv = process.env,
+  gen: () => string = defaultGen,
+): ResolvedConfig {
+  const pick = (key: string, ...fallbacks: unknown[]): unknown => {
+    for (const v of [flags[key], fileCfg[key], ...fallbacks]) if (v !== undefined && v !== null) return v;
     return undefined;
   };
   const tunnel = pick('tunnel', 'none');
-  if (!TUNNELS.includes(tunnel)) throw new Error(`unknown tunnel: ${tunnel} (use: ${TUNNELS.join(', ')})`);
+  if (!isTunnel(tunnel)) throw new Error(`unknown tunnel: ${String(tunnel)} (use: ${TUNNELS.join(', ')})`);
 
   const port = Number(pick('port', env.HANDMUX_PORT, 19999));
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error(`bad port: ${pick('port', env.HANDMUX_PORT, 19999)}`);
 
-  const cfg = {
+  const cfg: ResolvedConfig = {
     tunnel,
     port,
-    name: pick('name', env.HANDMUX_APP_NAME) || null,
-    host: pick('host', env.HANDMUX_HOST, '0.0.0.0'),
-    token: pick('token', env.HANDMUX_TOKEN) || gen(),
+    name: optionalString(pick('name', env.HANDMUX_APP_NAME), 'name'),
+    host: optionalString(pick('host', env.HANDMUX_HOST, '0.0.0.0'), 'host') ?? '0.0.0.0',
+    token: optionalString(pick('token', env.HANDMUX_TOKEN), 'token') ?? gen(),
     foreground: !!pick('foreground', false),
     qr: pick('qr', true) !== false,
     // Unified config — what used to live in .env. The supervisor injects these into the server child's
     // environment (HANDMUX_STATIC_DIR / VAPID_* / XFYUN_* …), which is exactly where the server reads them.
-    staticDir: pick('staticDir', env.HANDMUX_STATIC_DIR) || null,
-    uploadExts: pick('uploadExts', env.HANDMUX_UPLOAD_EXTS) || null,
-    previewDomain: pick('previewDomain', env.HANDMUX_PREVIEW_DOMAIN) || null,
-    vapid: fileCfg.vapid || null,   // { public, private, subject } — push notifications
-    xfyun: fileCfg.xfyun || null,   // { appId, apiKey, apiSecret } — voice input
+    staticDir: optionalString(pick('staticDir', env.HANDMUX_STATIC_DIR), 'static-dir'),
+    uploadExts: optionalString(pick('uploadExts', env.HANDMUX_UPLOAD_EXTS), 'upload-exts'),
+    previewDomain: optionalString(pick('previewDomain', env.HANDMUX_PREVIEW_DOMAIN), 'preview-domain'),
+    vapid: parseVapid(fileCfg.vapid),   // { public, private, subject } — push notifications
+    xfyun: parseXfyun(fileCfg.xfyun),   // { appId, apiKey, apiSecret } — voice input
     shortcuts: normalizeShortcuts(fileCfg.shortcuts),
     // An explicit public URL is honoured for ANY tunnel mode — including 'none', so someone who runs their
     // own tunnel/reverse-proxy can still have handmux advertise (print + QR) their real domain. The
@@ -82,7 +146,7 @@ export function resolveConfig(flags = {}, fileCfg = {}, env = process.env, gen =
     // Guard: a publicUrl in the FILE was set for the file's tunnel, so it only carries over when the
     // resolved tunnel still matches (or the file pins no tunnel). Otherwise a `--tunnel B` override would
     // advertise tunnel A's URL. A flag/env publicUrl is explicit for THIS run and always wins.
-    publicUrl: resolvePublicUrl(flags, fileCfg, env, tunnel),
+    publicUrl: optionalString(resolvePublicUrl(flags, fileCfg, env, tunnel), 'public-url'),
     // tunnel-specific (null unless the relevant tunnel is selected)
     sshHost: null, remotePort: null, sshJump: null,
     cfHostname: null, cfTunnelName: null,
@@ -90,19 +154,19 @@ export function resolveConfig(flags = {}, fileCfg = {}, env = process.env, gen =
   };
 
   if (tunnel === 'ssh') {
-    cfg.sshHost = pick('sshHost', env.HANDMUX_SSH_HOST) || null;
+    cfg.sshHost = optionalString(pick('sshHost', env.HANDMUX_SSH_HOST), 'ssh-host');
     if (!cfg.sshHost) throw new Error('ssh tunnel needs --ssh-host user@host (or HANDMUX_SSH_HOST)');
     const rp = Number(pick('remotePort', env.HANDMUX_REMOTE_PORT, port));
     if (!Number.isInteger(rp) || rp < 1 || rp > 65535) throw new Error(`bad remote-port: ${pick('remotePort', env.HANDMUX_REMOTE_PORT, port)}`);
     cfg.remotePort = rp;
-    cfg.sshJump = pick('sshJump', env.HANDMUX_SSH_JUMP) || null;
+    cfg.sshJump = optionalString(pick('sshJump', env.HANDMUX_SSH_JUMP), 'ssh-jump');
     cfg.publicUrl = cfg.publicUrl || sshPublicFallback(cfg.sshHost, rp);
   }
 
   if (tunnel === 'cloudflare-named') {
-    cfg.cfHostname = pick('cfHostname', env.HANDMUX_CF_HOSTNAME) || null;
+    cfg.cfHostname = optionalString(pick('cfHostname', env.HANDMUX_CF_HOSTNAME), 'cf-hostname');
     if (!cfg.cfHostname) throw new Error('cloudflare-named needs --cf-hostname handmux.example.com (or HANDMUX_CF_HOSTNAME)');
-    cfg.cfTunnelName = pick('cfTunnelName', env.HANDMUX_CF_TUNNEL_NAME) || 'handmux';
+    cfg.cfTunnelName = optionalString(pick('cfTunnelName', env.HANDMUX_CF_TUNNEL_NAME), 'cf-tunnel-name') || 'handmux';
     cfg.publicUrl = cfg.publicUrl || `https://${cfg.cfHostname}`;
   }
 
@@ -110,20 +174,41 @@ export function resolveConfig(flags = {}, fileCfg = {}, env = process.env, gen =
   // reserved domain) — no separate concept. A bare host is normalised to https:// so the user can paste the
   // domain the provider gave them. cpolar also takes an optional edge --cpolar-region (cn = mainland China).
   if (tunnel === 'natapp' || tunnel === 'cpolar') {
-    cfg.authtoken = pick('authtoken', env.HANDMUX_AUTHTOKEN) || null;
+    cfg.authtoken = optionalString(pick('authtoken', env.HANDMUX_AUTHTOKEN), 'authtoken');
     if (!cfg.authtoken) {
       const where = tunnel === 'natapp' ? 'natapp.cn' : 'cpolar.com';
       throw new Error(`${tunnel} needs --authtoken <token> (or HANDMUX_AUTHTOKEN) — get it from ${where} after logging in`);
     }
     if (cfg.publicUrl && !/^https?:\/\//i.test(cfg.publicUrl)) cfg.publicUrl = `https://${cfg.publicUrl}`;
-    if (tunnel === 'cpolar') cfg.cpolarRegion = pick('cpolarRegion', env.HANDMUX_CPOLAR_REGION) || null;
+    if (tunnel === 'cpolar') cfg.cpolarRegion = optionalString(pick('cpolarRegion', env.HANDMUX_CPOLAR_REGION), 'cpolar-region');
   }
 
   return cfg;
 }
 
 // publicUrl resolution with the cross-tunnel guard (see resolveConfig). flag > file(if tunnel matches) > env.
-function resolvePublicUrl(flags, fileCfg, env, tunnel) {
+function optionalString(value: unknown, name: string): string | null {
+  if (value === undefined || value === null || value === '') return null;
+  if (typeof value !== 'string') throw new Error(`bad ${name}: expected text`);
+  return value;
+}
+
+function stringFields(value: unknown, keys: readonly string[]): Record<string, string> | null {
+  if (!isRecord(value)) return null;
+  const result: Record<string, string> = {};
+  for (const key of keys) if (typeof value[key] === 'string') result[key] = value[key];
+  return result;
+}
+
+function parseVapid(value: unknown): VapidConfig | null {
+  return stringFields(value, ['public', 'private', 'subject']);
+}
+
+function parseXfyun(value: unknown): XfyunConfig | null {
+  return stringFields(value, ['appId', 'apiKey', 'apiSecret']);
+}
+
+function resolvePublicUrl(flags: OptionRecord, fileCfg: OptionRecord, env: NodeJS.ProcessEnv, tunnel: Tunnel): unknown {
   if (flags.publicUrl != null) return flags.publicUrl;
   const fileTunnel = fileCfg.tunnel;
   const fileApplies = fileTunnel == null || fileTunnel === tunnel;
@@ -136,7 +221,7 @@ function resolvePublicUrl(flags, fileCfg, env, tunnel) {
 // so it's quick to thumb in on a phone. A user-supplied token (flag/config/env) is used verbatim — any
 // length, never regenerated. 8 chars over a 32-char alphabet ≈ 40 bits, fine for a single secret URL.
 const TOKEN_ALPHABET = '23456789abcdefghijkmnpqrstuvwxyz';
-export function defaultGen() {
+export function defaultGen(): string {
   let s = '';
   for (let i = 0; i < 8; i++) s += TOKEN_ALPHABET[crypto.randomInt(TOKEN_ALPHABET.length)];
   return s;
@@ -145,7 +230,17 @@ export function defaultGen() {
 // Trace one key's value back to its source through the same flag > file > env > default precedence
 // resolveConfig uses. `null`/`undefined` at a layer is "unset" (skip), matching pick(). Returns the
 // winning value and a human origin label (the file path for a file hit, so the user sees exactly where).
-function trace(flags, fileCfg, env, cfgPath, key, envKey, def) {
+interface TracedValue { value: unknown; origin: string }
+
+function trace(
+  flags: OptionRecord,
+  fileCfg: OptionRecord,
+  env: NodeJS.ProcessEnv,
+  cfgPath: string | null,
+  key: string,
+  envKey: string | null,
+  def: unknown,
+): TracedValue {
   if (flags[key] != null) return { value: flags[key], origin: 'flag' };
   if (fileCfg[key] != null) return { value: fileCfg[key], origin: cfgPath || 'file' };
   if (envKey && env[envKey] != null) return { value: env[envKey], origin: 'env' };
@@ -155,10 +250,17 @@ function trace(flags, fileCfg, env, cfgPath, key, envKey, def) {
 // Build the rows for `handmux config`: the value each key WOULD resolve to plus where it came from.
 // Lenient (never throws — unlike resolveConfig — so a half-finished config still prints) and secret-safe
 // (token masked; push/voice shown only as on/off). Tunnel-specific rows appear only for the live tunnel.
-export function explainConfig(flags = {}, fileCfg = {}, cfgPath = null, env = process.env) {
-  const rows = [];
-  const mask = (s) => (String(s).length <= 8 ? '••••' : `••••${String(s).slice(-4)}`);
-  const add = (key, t, display) => rows.push({ key, origin: t.origin, display: display ?? String(t.value) });
+export function explainConfig(
+  flags: OptionRecord = {},
+  fileCfg: OptionRecord = {},
+  cfgPath: string | null = null,
+  env: NodeJS.ProcessEnv = process.env,
+): ConfigExplanationRow[] {
+  const rows: ConfigExplanationRow[] = [];
+  const mask = (value: unknown): string => (String(value).length <= 8 ? '••••' : `••••${String(value).slice(-4)}`);
+  const add = (key: string, traced: TracedValue, display?: string): void => {
+    rows.push({ key, origin: traced.origin, display: display ?? String(traced.value) });
+  };
 
   const tunnel = trace(flags, fileCfg, env, cfgPath, 'tunnel', null, 'none');
   add('tunnel', tunnel);
