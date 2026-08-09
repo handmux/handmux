@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
 import {
   ChevronDownIcon,
   FolderIcon,
@@ -16,6 +15,7 @@ import { fetchPaneCwd } from '../api.js';
 import { t } from '../i18n';
 import { useModalFocusTrap } from '../hooks/useModalFocusTrap.js';
 import DirPicker from './DirPicker.jsx';
+import { OverlayPortal } from '../overlays/OverlayHost.js';
 
 // URL pages are cross-origin (the target origin in direct mode, a dedicated origin in proxy mode),
 // so same-origin is needed for normal site compatibility without exposing the Handmux app origin.
@@ -518,29 +518,31 @@ export default function BrowserSheet({ browser, staticPreview }) {
     || (!staticSelected ? error : null);
   const tabStripEntries = orderedOpenTabs(tabs, staticPreview?.tabs || []);
 
-  if (consentOpen) return createPortal(
-    <div className="file-sheet browser-sheet open browser-consent" role="dialog" aria-modal="true" aria-label={t('browser.consentTitle')}>
-      <div className="browser-consent-card">
-        <GlobeIcon />
-        <h2>{t('browser.consentTitle')}</h2>
-        <p>{t('browser.consentBody')}</p>
-        <ul>
-          <li>{t('browser.consentComputer')}</li>
-          <li>{t('browser.consentPrivate')}</li>
-          <li>{t('browser.consentLimits')}</li>
-          <li>{t('browser.consentIdle')}</li>
-        </ul>
-        <div className="browser-consent-actions">
-          <button onClick={cancelAccess}>{t('common.cancel')}</button>
-          <button className="browser-consent-enable" onClick={enableAccess}>{t('browser.acknowledge')}</button>
+  if (consentOpen) return (
+    <OverlayPortal>
+      <div className="file-sheet browser-sheet open browser-consent" role="dialog" aria-modal="true" aria-label={t('browser.consentTitle')}>
+        <div className="browser-consent-card">
+          <GlobeIcon />
+          <h2>{t('browser.consentTitle')}</h2>
+          <p>{t('browser.consentBody')}</p>
+          <ul>
+            <li>{t('browser.consentComputer')}</li>
+            <li>{t('browser.consentPrivate')}</li>
+            <li>{t('browser.consentLimits')}</li>
+            <li>{t('browser.consentIdle')}</li>
+          </ul>
+          <div className="browser-consent-actions">
+            <button onClick={cancelAccess}>{t('common.cancel')}</button>
+            <button className="browser-consent-enable" onClick={enableAccess}>{t('browser.acknowledge')}</button>
+          </div>
         </div>
       </div>
-    </div>,
-    document.body,
+    </OverlayPortal>
   );
 
-  return createPortal(
-    <div className={`file-sheet browser-sheet ${open ? 'open' : ''}`} aria-hidden={!open}>
+  return (
+    <OverlayPortal>
+      <div className={`file-sheet browser-sheet ${open ? 'open' : ''}`} aria-hidden={!open}>
       <div className="browser-tabs" role="tablist" aria-label={t('browser.openTabs')}
         inert={clearConfirmation ? '' : undefined}>
         <button className={`browser-tab browser-history-tab ${homeActive ? 'active' : ''}`} role="tab"
@@ -960,7 +962,7 @@ export default function BrowserSheet({ browser, staticPreview }) {
           </div>
         </div>
       )}
-    </div>,
-    document.body,
+    </div>
+    </OverlayPortal>
   );
 }

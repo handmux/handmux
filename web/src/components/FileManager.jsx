@@ -1,6 +1,5 @@
 // web/src/components/FileManager.jsx
 import { useState, useEffect, useRef } from 'react';
-import { createPortal } from 'react-dom';
 import { fetchDir, fetchPaneCwd } from '../api.js';
 import { getBrowseDir, setBrowseDir } from '../storage.js';
 import HomeView from './HomeView.jsx';
@@ -9,6 +8,7 @@ import DocView from './DocView.jsx';
 import { FolderIcon, ClockIcon, ChevronDownIcon } from './icons.jsx';
 import { t as tr } from '../i18n';
 import { useHistoryLayer, unwindHistory } from '../hooks/useBackButton.js';
+import { OverlayPortal } from '../overlays/OverlayHost.js';
 
 // Bottom-sheet shell for the file viewer. Rendered through a portal on <body> — NOT inside .app —
 // so the app's keyboard-inset transform (which makes .app the containing block for fixed children)
@@ -135,8 +135,9 @@ export default function FileManager({ open, pane, windowId, tabs, active, onActi
     return () => { cancelled = true; };
   }, [open, windowId, pane]);
 
-  return createPortal(
-    <div className={`file-sheet ${open ? 'open' : ''}`} aria-hidden={!open}>
+  return (
+    <OverlayPortal>
+      <div className={`file-sheet ${open ? 'open' : ''}`} aria-hidden={!open}>
       <div className="file-tabs">
         <div className="file-tabs-scroll">
           {tabs.map((t) => (
@@ -173,7 +174,7 @@ export default function FileManager({ open, pane, windowId, tabs, active, onActi
           </div>
         ) : <DocView type={cur.type} name={cur.name} content={cur.content} />}
       </div>
-    </div>,
-    document.body,
+    </div>
+    </OverlayPortal>
   );
 }

@@ -19,6 +19,7 @@ All notable changes to handmux. Format follows [Keep a Changelog](https://keepac
 - Browser 确认层的焦点循环与 Escape 现在接入统一 Overlay 层级；软键盘位置也改由严格类型化的单一测量 Hook 提供。
 - Codex 排队编辑、删除与停止确认也迁入统一 Overlay Host；删除确认在软键盘展开时不再留在键盘后方。
 - 全局上传锁、分屏地图和脚本通知 Inbox 改由统一 Overlay Host 挂载，不再各自直接操作页面根节点。
+- Browser、File 与 Git 全屏界面也完成 Overlay Host 迁移，应用组件不再各自直接创建页面根级 Portal。
 - API 未处理异常现在统一返回带错误码和 Request ID 的 JSON，不再向客户端暴露本机路径、源码位置或异常堆栈。
 
 ### Fixed

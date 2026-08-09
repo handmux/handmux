@@ -1,6 +1,5 @@
 // web/src/components/GitPanel.jsx
 import { useEffect, useState, useCallback, useRef } from 'react';
-import { createPortal } from 'react-dom';
 import { fetchPaneCwd, gitRepos as apiRepos, gitStatus, gitLog, gitBranches, gitDiff, gitCommit } from '../api.js';
 import { getGitRepos, addGitRepos, removeGitRepo, getDiffFontIndex, setDiffFontIndex, DOC_FONT_SIZES } from '../storage.js';
 import { parseDiff } from '../gitDiff.js';
@@ -8,6 +7,7 @@ import DirPicker from './DirPicker.jsx';
 import { ChevronDownIcon, GitIcon } from './icons.jsx';
 import { t } from '../i18n';
 import { useBackButton, useHistoryLayer, unwindHistory } from '../hooks/useBackButton.js';
+import { OverlayPortal } from '../overlays/OverlayHost.js';
 
 // basename of an absolute path (the repo-tab label). Exported for the unit test.
 export const basename = (p) => String(p || '').replace(/\/+$/, '').split('/').pop() || p;
@@ -281,8 +281,9 @@ export default function GitPanel({ open, pane, windowId, inset = 0, onClose }) {
     : drill?.kind === 'diff' ? (drill.path || t('git.diff'))
     : '';
 
-  return createPortal(
-    <div className={`file-sheet git-sheet ${open ? 'open' : ''}`} aria-hidden={!open} style={{ '--kb-inset': `${inset}px` }}>
+  return (
+    <OverlayPortal keyboardInset={inset}>
+      <div className={`file-sheet git-sheet ${open ? 'open' : ''}`} aria-hidden={!open} style={{ '--kb-inset': `${inset}px` }}>
       {/* Top row, FileManager-style: repo switching + 绑定 on the left (scrolls), collapse at top-right.
           When drilled into a diff/commit, the left area becomes a back button + the file/commit title. */}
       <div className="file-tabs git-head">
@@ -403,8 +404,8 @@ export default function GitPanel({ open, pane, windowId, inset = 0, onClose }) {
         onPick={onPick}
         onClose={() => window.history.back()}
       />
-    </div>,
-    document.body,
+    </div>
+    </OverlayPortal>
   );
 }
 
