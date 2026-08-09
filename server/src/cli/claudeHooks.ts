@@ -10,6 +10,41 @@ import { homedir } from 'node:os';
 import { spawnSync } from 'node:child_process';
 import { writeJsonAtomic, deployHookScripts, removeHookScripts } from './hookScaffold.js';
 
+export interface ClaudeVersion { major: number; minor: number; patch: number }
+export type ClaudeHookStatus = 'no-claude' | 'installed' | 'absent';
+interface HookEvent {
+  event: string;
+  src: string;
+  matcher?: string;
+  minVersion?: string;
+  pairWith?: string;
+}
+interface HookInstallOptions {
+  srcDir?: string;
+  stateFile?: string;
+  claudeVersion?: ClaudeVersion | null;
+}
+interface VersionRunResult { status: number | null; stdout?: unknown }
+export type ClaudeVersionExec = (
+  command: string,
+  args: readonly string[],
+  options: { encoding: 'utf8'; timeout: number },
+) => VersionRunResult | null | undefined;
+type Settings = Record<string, unknown>;
+type Hooks = Record<string, unknown>;
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+const settingsOf = (value: unknown): Settings => isRecord(value) ? { ...value } : {};
+const readSettings = (home: string): Settings => {
+  try { return settingsOf(JSON.parse(fs.readFileSync(settingsPath(home), 'utf8')) as unknown); }
+  catch { return {}; }
+};
+const defaultVersionExec: ClaudeVersionExec = (command, args, options) => {
+  const result = spawnSync(command, [...args], options);
+  return { status: result.status, stdout: result.stdout };
+};
+
 // The seven events the inbox reads. src is the arg passed to handmux-notify.sh; only PostToolUse is scoped to
 // a matcher (the two "需要你" interaction tools) — every other Read/Bash/Edit must NOT wake the hook, or
 // many concurrent Claude panes would each spawn the hook on every tool call. Keep this table in sync with
@@ -20,7 +55,7 @@ import { writeJsonAtomic, deployHookScripts, removeHookScripts } from './hookSca
 // Fires only at session boundaries (startup/clear/resume), never per tool call, so it adds no hot-path load;
 // classified neutral (no push, no roster entry — see agents/claude.js). Base, not version-gated: SessionStart
 // is a long-standing lifecycle hook every supported Claude recognises.
-export const HOOK_EVENTS = [
+export const HOOK_EVENTS: readonly HookEvent[] = [
   { event: 'Stop', src: 'stop' },
   { event: 'Notification', src: 'notify' },
   { event: 'UserPromptSubmit', src: 'prompt' },
@@ -43,7 +78,7 @@ export const HOOK_EVENTS = [
 // is installed ONLY when its clearer PostCompact is also installed. minVersion is set conservatively to the
 // version we've actually verified emits these (2.1.207); lower it only after test-firing an older build.
 const COMPACT_MIN = '2.1.207';
-export const HOOK_EVENTS_EXT = [
+export const HOOK_EVENTS_EXT: readonly HookEvent[] = [
   { event: 'PostCompact', src: 'compact', minVersion: COMPACT_MIN },
   { event: 'PreCompact', src: 'compacting', minVersion: COMPACT_MIN, pairWith: 'PostCompact' },
   { event: 'StopFailure', src: 'stopfail', minVersion: COMPACT_MIN },
@@ -52,13 +87,13 @@ export const HOOK_EVENTS_EXT = [
 const HOOK_MARK = 'handmux-notify.sh'; // identifies our hooks among the user's own
 
 // Parse `claude --version` output ("2.1.207 (Claude Code)") → { major, minor, patch } | null.
-export function parseClaudeVersion(out) {
+export function parseClaudeVersion(out: unknown): ClaudeVersion | null {
   const m = /(\d+)\.(\d+)\.(\d+)/.exec(String(out || ''));
   return m ? { major: +m[1], minor: +m[2], patch: +m[3] } : null;
 }
 
 // v >= min ("X.Y.Z"), full major.minor.patch compare. A null/undefined version is always below → fail-closed.
-export function claudeVersionAtLeast(v, minStr) {
+export function claudeVersionAtLeast(v: ClaudeVersion | null | undefined, minStr: string): boolean {
   if (!v) return false;
   const [a, b, c] = String(minStr).split('.').map(Number);
   if (v.major !== a) return v.major > a;
@@ -67,7 +102,7 @@ export function claudeVersionAtLeast(v, minStr) {
 }
 
 // Detect the installed Claude Code version, or null if `claude` can't be run/parsed (→ ext hooks skipped).
-export function detectClaudeVersion(exec = spawnSync) {
+export function detectClaudeVersion(exec: ClaudeVersionExec = defaultVersionExec): ClaudeVersion | null {
   try {
     const r = exec('claude', ['--version'], { encoding: 'utf8', timeout: 4000 });
     if (!r || r.status !== 0 || !r.stdout) return null;
@@ -77,40 +112,53 @@ export function detectClaudeVersion(exec = spawnSync) {
 
 // Drop OUR hook from settings.hooks[event] (used to prune an ext event that no longer passes the version
 // gate — e.g. Claude was downgraded after a newer install). Mutates the passed hooks object.
-function dropOurHook(hooks, event) {
-  if (!hooks[event]) return;
-  const kept = hooks[event]
-    .map((g) => ({ ...g, hooks: (g.hooks || []).filter((h) => !(typeof h.command === 'string' && h.command.includes(HOOK_MARK))) }))
-    .filter((g) => (g.hooks || []).length > 0);
+const isOurHook = (value: unknown): boolean => {
+  const hook = isRecord(value) ? value : null;
+  return typeof hook?.command === 'string' && hook.command.includes(HOOK_MARK);
+};
+const cleanGroup = (value: unknown): unknown => {
+  if (!isRecord(value) || !Array.isArray(value.hooks)) return value;
+  return { ...value, hooks: value.hooks.filter((hook) => !isOurHook(hook)) };
+};
+const nonEmptyGroup = (value: unknown): boolean => (
+  !isRecord(value) || !Array.isArray(value.hooks) || value.hooks.length > 0
+);
+
+function dropOurHook(hooks: Hooks, event: string): void {
+  if (!Array.isArray(hooks[event])) return;
+  const kept = hooks[event].map(cleanGroup).filter(nonEmptyGroup);
   if (kept.length) hooks[event] = kept; else delete hooks[event];
 }
 
 // True if `settings.hooks[event]` already has one of our hooks (command references the dest script).
-function alreadyHas(hooks, event) {
-  return (hooks[event] || []).some((g) => (g.hooks || []).some(
-    (h) => typeof h.command === 'string' && h.command.includes(HOOK_MARK)));
+function alreadyHas(hooks: Hooks, event: string): boolean {
+  const groups = hooks[event];
+  return Array.isArray(groups) && groups.some((group) => (
+    isRecord(group) && Array.isArray(group.hooks) && group.hooks.some(isOurHook)
+  ));
 }
 
 // Merge one event's hook group into `hooks` (mutates), idempotently — a no-op if one of ours is already
 // registered for that event, so it's safe to call on every install/sync. Shared by mergeHooks and syncHooks.
-function addHook(hooks, e, dest) {
+function addHook(hooks: Hooks, e: HookEvent, dest: string): void {
   if (alreadyHas(hooks, e.event)) return;
-  const groups = hooks[e.event] = [...(hooks[e.event] || [])];
+  const existing = hooks[e.event];
+  const groups: unknown[] = hooks[e.event] = Array.isArray(existing) ? [...existing] : [];
   groups.push({ matcher: e.matcher || '', hooks: [{ type: 'command', command: `${dest} ${e.src}`, async: true, timeout: 5 }] });
 }
 
 // Pure: return a NEW settings object with our six hooks merged into settings.hooks, idempotently, leaving
 // the user's own hooks and other keys untouched. `dest` is the absolute path to the copied notify script.
-export function mergeHooks(settings, dest, claudeVersion = null) {
-  const s = { ...(settings || {}) };
-  const hooks = (s.hooks && typeof s.hooks === 'object' && !Array.isArray(s.hooks)) ? { ...s.hooks } : {};
+export function mergeHooks(settings: unknown, dest: string, claudeVersion: ClaudeVersion | null = null): Settings {
+  const s = settingsOf(settings);
+  const hooks: Hooks = isRecord(s.hooks) ? { ...s.hooks } : {};
   for (const e of HOOK_EVENTS) addHook(hooks, e, dest);
   // Version-gated ext events: install only when the detected Claude is new enough AND (for a paired event)
   // its clearer is also being installed. Anything that fails the gate is actively PRUNED, so a Claude
   // downgrade after a newer install can't leave an unrecognised event name lingering in settings.json.
   const enabled = new Set();
   for (const e of HOOK_EVENTS_EXT) {
-    const ok = claudeVersionAtLeast(claudeVersion, e.minVersion) && (!e.pairWith || enabled.has(e.pairWith));
+    const ok = !!e.minVersion && claudeVersionAtLeast(claudeVersion, e.minVersion) && (!e.pairWith || enabled.has(e.pairWith));
     if (ok) { enabled.add(e.event); addHook(hooks, e, dest); } else dropOurHook(hooks, e.event);
   }
   s.hooks = hooks;
@@ -119,14 +167,13 @@ export function mergeHooks(settings, dest, claudeVersion = null) {
 
 // Pure: return a NEW settings object with all of OUR hooks removed (uninstall). An event group that ends up
 // empty is dropped; the user's own hooks and other keys are untouched.
-export function stripHooks(settings) {
-  const s = { ...(settings || {}) };
-  if (!s.hooks || typeof s.hooks !== 'object' || Array.isArray(s.hooks)) return s;
-  const hooks = {};
+export function stripHooks(settings: unknown): Settings {
+  const s = settingsOf(settings);
+  if (!isRecord(s.hooks)) return s;
+  const hooks: Hooks = {};
   for (const [event, groups] of Object.entries(s.hooks)) {
-    const kept = (groups || [])
-      .map((g) => ({ ...g, hooks: (g.hooks || []).filter((h) => !(typeof h.command === 'string' && h.command.includes(HOOK_MARK))) }))
-      .filter((g) => (g.hooks || []).length > 0);
+    if (!Array.isArray(groups)) { hooks[event] = groups; continue; }
+    const kept = groups.map(cleanGroup).filter(nonEmptyGroup);
     if (kept.length) hooks[event] = kept;
   }
   s.hooks = hooks;
@@ -134,16 +181,15 @@ export function stripHooks(settings) {
 }
 
 // Path helpers (also used by the IO shell in the next task).
-function claudeDir(home = homedir()) { return path.join(home, '.claude'); }
-function settingsPath(home = homedir()) { return path.join(claudeDir(home), 'settings.json'); }
+function claudeDir(home: string = homedir()): string { return path.join(home, '.claude'); }
+function settingsPath(home: string = homedir()): string { return path.join(claudeDir(home), 'settings.json'); }
 
 // 'no-claude' → ~/.claude absent (don't prompt to enable). 'installed' → our hooks present. 'absent' →
 // Claude Code is here but our hooks aren't (offer to enable).
-export function hooksStatus(home = homedir()) {
+export function hooksStatus(home: string = homedir()): ClaudeHookStatus {
   if (!fs.existsSync(claudeDir(home))) return 'no-claude';
-  let settings = {};
-  try { settings = JSON.parse(fs.readFileSync(settingsPath(home), 'utf8')); } catch { /* missing/corrupt → {} */ }
-  const hooks = (settings && settings.hooks && typeof settings.hooks === 'object' && !Array.isArray(settings.hooks)) ? settings.hooks : {};
+  const settings = readSettings(home);
+  const hooks: Hooks = isRecord(settings.hooks) ? settings.hooks : {};
   return Object.keys(hooks).some((ev) => alreadyHas(hooks, ev)) ? 'installed' : 'absent';
 }
 
@@ -152,14 +198,17 @@ export function hooksStatus(home = homedir()) {
 // absent the user doesn't run Claude Code, so we report 'no-claude' and do nothing.
 //   srcDir   = the bundled hooks dir (server/hooks)
 //   stateFile = the unified ~/.handmux/claude-state.json path the hook writes and the server reads
-export function installHooks(home = homedir(), { srcDir, stateFile, claudeVersion } = {}) {
+export function installHooks(
+  home: string = homedir(),
+  { srcDir, stateFile, claudeVersion }: HookInstallOptions = {},
+): { status: 'no-claude' | 'installed' } {
   if (!fs.existsSync(claudeDir(home))) return { status: 'no-claude' };
+  if (!srcDir || !stateFile) throw new Error('hook srcDir and stateFile are required');
   const hooksDir = path.join(claudeDir(home), 'hooks');
   deployHookScripts(hooksDir, srcDir, stateFile);
 
   const dest = path.join(hooksDir, 'handmux-notify.sh');
-  let settings = {};
-  try { settings = JSON.parse(fs.readFileSync(settingsPath(home), 'utf8')); } catch { /* missing/corrupt → {} */ }
+  const settings = readSettings(home);
   // Gate the version-specific events (compact pair, StopFailure) on the installed Claude. Detect when the
   // caller didn't inject a version; a null result (no `claude` / unparseable) is fail-closed = base 6 only.
   const version = claudeVersion !== undefined ? claudeVersion : detectClaudeVersion();
@@ -179,15 +228,18 @@ export function installHooks(home = homedir(), { srcDir, stateFile, claudeVersio
 // means spawning `claude --version` on the hot startup path. So sync stays pure-fs and non-pruning; ext-event
 // rollout stays with the explicit installHooks (phone re-enable) path. settings.json is rewritten only when
 // the merge actually changes it, so a steady state writes nothing.
-export function syncHooks(home = homedir(), { srcDir, stateFile } = {}) {
+export function syncHooks(
+  home: string = homedir(),
+  { srcDir, stateFile }: HookInstallOptions = {},
+): { status: ClaudeHookStatus; changed: boolean } {
   const status = hooksStatus(home);
   if (status !== 'installed') return { status, changed: false };
+  if (!srcDir || !stateFile) throw new Error('hook srcDir and stateFile are required');
   const hooksDir = path.join(claudeDir(home), 'hooks');
   deployHookScripts(hooksDir, srcDir, stateFile); // refresh the deployed scripts (idempotent)
   const dest = path.join(hooksDir, 'handmux-notify.sh');
-  let settings = {};
-  try { settings = JSON.parse(fs.readFileSync(settingsPath(home), 'utf8')); } catch { /* missing/corrupt → {} */ }
-  const hooks = (settings.hooks && typeof settings.hooks === 'object' && !Array.isArray(settings.hooks)) ? { ...settings.hooks } : {};
+  const settings = readSettings(home);
+  const hooks: Hooks = isRecord(settings.hooks) ? { ...settings.hooks } : {};
   const before = JSON.stringify(hooks);
   for (const e of HOOK_EVENTS) addHook(hooks, e, dest); // add only MISSING base events; never add/prune ext
   const changed = JSON.stringify(hooks) !== before;
@@ -197,9 +249,8 @@ export function syncHooks(home = homedir(), { srcDir, stateFile } = {}) {
 
 // Uninstall: strip our hooks from settings.json and remove the copied scripts/env. Best-effort on the file
 // deletes (a missing file is fine). Leaves ~/.claude and the user's own hooks intact.
-export function uninstallHooks(home = homedir()) {
-  let settings = {};
-  try { settings = JSON.parse(fs.readFileSync(settingsPath(home), 'utf8')); } catch { /* nothing to strip */ }
+export function uninstallHooks(home: string = homedir()): { status: 'absent' } {
+  const settings = readSettings(home);
   if (fs.existsSync(settingsPath(home))) writeJsonAtomic(settingsPath(home), stripHooks(settings));
   removeHookScripts(path.join(claudeDir(home), 'hooks'));
   return { status: 'absent' };

@@ -75,6 +75,15 @@ describe('mergeHooks', () => {
     const out = mergeHooks({ hooks: [] }, DEST);
     expect(hasHook(out, 'Stop')).toBe(true);
   });
+
+  it('repairs malformed managed event groups without crashing or erasing unrelated malformed fields', () => {
+    const out = mergeHooks({ hooks: { Stop: 'broken', Notification: [null, { hooks: 'bad' }], Custom: 42 } }, DEST);
+    expect(Array.isArray(out.hooks.Stop)).toBe(true);
+    expect(out.hooks.Stop.at(-1).hooks[0].command).toBe(`${DEST} stop`);
+    expect(out.hooks.Notification.at(-1).hooks[0].command).toBe(`${DEST} notify`);
+    expect(out.hooks.Custom).toBe(42);
+    expect(stripHooks({ hooks: { Custom: 42 } }).hooks.Custom).toBe(42);
+  });
 });
 
 describe('Claude version detection (fail-closed gating input)', () => {
