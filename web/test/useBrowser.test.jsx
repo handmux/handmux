@@ -457,6 +457,30 @@ describe('useBrowser device ownership', () => {
     expect(result.current.proxyLoginRetentionDays).toBeNull();
   });
 
+  it('rejects malformed profile preferences before updating device state', async () => {
+    api.setBrowserProxyProfilePrefs.mockResolvedValue({ persist: 'yes', retentionDays: 30 });
+    const { result } = renderHook(() => useBrowser({ browserProxy: true }));
+    let saved;
+
+    await act(async () => { saved = await result.current.setPersistProxyLogin(true); });
+
+    expect(saved).toBe(false);
+    expect(result.current.persistProxyLogin).toBe(false);
+    expect(result.current.error?.message).toBe(t('browser.profileSaveFailed'));
+  });
+
+  it('rejects a malformed proxy binding before it enters tab state', async () => {
+    api.acquireBrowserProxyLease.mockResolvedValue({ channel: 'channel-a', generation: 1 });
+    const { result } = renderHook(() => useBrowser({ browserProxy: true }));
+
+    await act(async () => {
+      await result.current.openUrl('https://a.example/', { mode: 'proxy' });
+    });
+
+    expect(result.current.tabs[0].url).toBeUndefined();
+    expect(result.current.error?.message).toBe(t('browser.loadFailed'));
+  });
+
   it('retains the tab when acquire fails and can explicitly recover it', async () => {
     api.acquireBrowserProxyLease.mockRejectedValueOnce(new Error('worker gone'));
     const { result } = renderHook(() => useBrowser({ browserProxy: true }));
