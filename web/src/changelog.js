@@ -11,6 +11,32 @@
 // `entryId`/`LATEST_RELEASE` use `version` when present, else `date`, as the stable unread-dot id.
 export const CHANGELOG = [
   {
+    version: '0.23.0',
+    date: '2026-08-09',
+    highlight: {
+      zh: 'Codex 托管对话正式上线',
+      en: 'Managed Codex chat is here',
+    },
+    items: {
+      zh: [
+        '新增 Codex 托管对话视图：手机与终端保持同一会话，可实时查看 Markdown 回复、完整工具调用、提问与审批，并直接停止任务；断线或重新打开后仍能恢复完整对话。',
+        '可用 handmux codex 直接启动托管会话，也可从普通 Codex 窗格原位接管并恢复准确会话；需要终端确认时会明确提示。',
+        'Codex 回复期间可继续发送消息：默认按条排队到后续回合，也可编辑、删除或立即引导当前回复。',
+        '输入区可直接调整模型、思考强度、Fast 和权限，查看上下文与会话状态，并使用 /goal、/compact、/clear；回复中的文件与网址也可直接在应用内打开。',
+        'Codex 与 Claude Code 对话开关现已分开；Codex 正式支持托管对话，Claude Code 对话仍为独立的实验性功能。',
+        '修复了应用长时间切到后台后不刷新、多窗格面板受网络阻塞，以及 iPhone 软键盘可能导致终端尺寸异常的问题。',
+      ],
+      en: [
+        'Added managed Codex chat: the phone and terminal stay on the same session, with live Markdown replies, complete tool calls, questions, approvals and stopping; the full conversation recovers after a disconnect or reopen.',
+        'Start a managed session with handmux codex, or take over a plain Codex pane in place and resume its exact session; Handmux clearly asks you to switch to the terminal when confirmation is needed.',
+        'Keep sending while Codex is working: messages queue one by one for later turns, or can be edited, deleted, or guided into the current turn immediately.',
+        'Change the model, reasoning effort, Fast and permissions from the composer, inspect context and session status, use /goal, /compact and /clear, and open files or URLs from replies directly in the app.',
+        'Codex and Claude Code chat now have separate switches: managed Codex chat is fully supported, while Claude Code chat remains an independent experimental feature.',
+        'Fixed stale state after a long app switch, network-blocked multi-pane panels, and iPhone soft-keyboard transitions that could leave the terminal at the wrong size.',
+      ],
+    },
+  },
+  {
     version: '0.22.1',
     date: '2026-08-04',
     highlight: {
