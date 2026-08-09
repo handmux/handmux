@@ -41,6 +41,43 @@ describe('useCodexSession', () => {
     });
   });
 
+  it('validates approval decisions and user-input questions before exposing them to the UI', () => {
+    expect(parseCodexSessionSnapshot({
+      managed: true,
+      approvals: [{
+        id: 'approval-1',
+        type: 'command',
+        decisions: [
+          'accept',
+          { id: 'structured:1', type: 'execpolicy', rule: ['git', 'status'] },
+          { id: 'bad', type: 'networkPolicy', action: 'maybe', host: 'example.com' },
+        ],
+      }],
+      userInputs: [{
+        id: 'input-1',
+        questions: [{
+          id: 'branch', question: '选择分支', header: '分支',
+          options: [{ label: 'master', description: '当前主线' }, { label: 7 }],
+        }, { id: '', question: 'invalid' }],
+      }],
+    })).toMatchObject({
+      approvals: [{
+        id: 'approval-1',
+        decisions: [
+          'accept',
+          { id: 'structured:1', type: 'execpolicy', rule: ['git', 'status'] },
+        ],
+      }],
+      userInputs: [{
+        id: 'input-1',
+        questions: [{
+          id: 'branch', question: '选择分支', header: '分支',
+          options: [{ label: 'master', description: '当前主线' }],
+        }],
+      }],
+    });
+  });
+
   it('does not expose the previous pane session while the next pane loads', async () => {
     getCodexSessionMock.mockImplementation((pane: string) => {
       if (pane === '%plain') return Promise.resolve({ managed: false });

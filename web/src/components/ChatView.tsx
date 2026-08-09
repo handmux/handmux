@@ -1,4 +1,4 @@
-// web/src/components/ChatView.jsx
+// web/src/components/ChatView.tsx
 // The 对话 lens: a read-projection of the pane's agent session as IM bubbles + gate cards. Claude gates
 // still drive its TUI; managed Codex gates use App Server requests and never touch the terminal.
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
@@ -20,10 +20,154 @@ import {
 } from './icons.jsx';
 import { CodexPlanSheet, CodexPlanSummary, codexPlanSteps } from './CodexPlan.jsx';
 import CodexGoalMenu, { CodexGoalCard } from './CodexGoalMenu.jsx';
+import type {
+  MouseEvent as ReactMouseEvent,
+  PointerEvent as ReactPointerEvent,
+  ReactNode,
+} from 'react';
+import type { CodexGoal, CodexGoalEvent } from '../../../server/src/codexStreamProtocol.js';
+import type {
+  CodexDiff,
+  CodexDiffHunk,
+  CodexToolProjection,
+} from '../../../server/src/codexToolProtocol.js';
+import type { CodexPlanStep } from '../../../server/src/codexPlan.js';
+import type { CodexOutgoingItem } from '../codexOutgoing.js';
+import type {
+  CodexApprovalDecision as ApprovalDecision,
+  CodexApprovalRequest as CodexApproval,
+  CodexApprovalSimpleDecision as ApprovalSimpleDecision,
+  CodexInputRequest,
+  CodexSessionSnapshot,
+} from '../hooks/useCodexSession.js';
+import type { CodexPlanView } from './CodexPlan.jsx';
+
+type AgentKind = 'working' | 'permission' | 'compacting' | 'error' | null;
+type AgentName = 'claude' | 'codex' | string;
+
+interface ChatMessage extends CodexPlanView {
+  [key: string]: unknown;
+  id?: string | number;
+  k?: number | string;
+  i?: number | string;
+  turnId?: string | null;
+  itemId?: string | null;
+  role?: string;
+  type?: string;
+  text?: string;
+  ts?: string;
+  streaming?: boolean;
+  completed?: boolean;
+  tool?: CodexToolProjection;
+  goal?: CodexGoal;
+  event?: CodexGoalEvent;
+  name?: string;
+  args?: string;
+  result?: string;
+  plan?: CodexPlanStep[];
+}
+
+interface TranscriptState {
+  messages: ChatMessage[];
+  hasMoreOlder: boolean;
+  loadOlder: () => void | Promise<void>;
+  loadingOlder: boolean;
+  session: string | null;
+  loaded: boolean;
+  unavailable: string | null;
+  unavailableDetail: string | null;
+  applyCodexEvent: (event: unknown) => void;
+}
+
+interface SlashEcho {
+  name: string;
+  args?: string;
+}
+
+interface ChatActionError {
+  id?: string;
+  kind: 'send' | 'stop' | 'queue';
+  detail?: string | null;
+}
+
+interface ChatOutputLink {
+  kind: 'url' | 'doc';
+  path?: string;
+  protocol?: 'http' | 'https';
+  port?: number;
+  urlPath?: string;
+  raw?: string;
+}
+
+interface ChatViewProps {
+  pane: string;
+  agent?: AgentName;
+  kind?: AgentKind;
+  msg?: string | null;
+  onAuthFail?: () => void;
+  slashEcho?: SlashEcho | null;
+  onSlashEchoDone?: () => void;
+  refreshToken?: unknown;
+  codexSession?: CodexSessionSnapshot | null;
+  optimisticMessages?: CodexOutgoingItem[];
+  actionError?: ChatActionError | null;
+  onOptimisticCovered?: (ids: string[]) => void;
+  onDocLinkTap?: (link: ChatOutputLink, clientX: number, clientY: number) => void;
+}
+
+interface ErrorLike {
+  message?: string;
+  serverError?: string;
+}
+
+interface CopyBlock {
+  el: HTMLElement;
+  text: string;
+}
+
+interface CopyUI {
+  top: number;
+  left: number;
+  text: string;
+}
+
+interface GateMask {
+  top: number;
+  height: number;
+}
+
+interface LongPressState {
+  timer: ReturnType<typeof setTimeout> | null;
+  x: number;
+  y: number;
+  fired: boolean;
+}
+
+const errorLike = (error: unknown): ErrorLike => (
+  error !== null && typeof error === 'object' ? error as ErrorLike : {}
+);
+
+const toolInput = (tool: CodexToolProjection): Record<string, unknown> => (
+  Array.isArray(tool.input) ? {} : tool.input
+);
+
+const inputText = (input: Record<string, unknown>, ...keys: string[]): string => {
+  for (const key of keys) {
+    if (typeof input[key] === 'string') return input[key];
+  }
+  return '';
+};
+
+const readTranscript = useTranscript as (
+  pane: string,
+  enabled: boolean,
+  agent?: string,
+  refreshToken?: unknown,
+) => TranscriptState;
 
 // Codex App Server exposes the process-launch wrapper, while its terminal UI shows only the command passed
 // to that shell. Keep the raw value in the transcript and remove only this known wrapper at render time.
-function displayCommand(command) {
+function displayCommand(command: unknown): string {
   if (Array.isArray(command)) {
     if (command.length === 3 && command[0] === '/bin/zsh' && command[1] === '-lc') return String(command[2] || '');
     return command.map((part) => displayCommand(part)).filter(Boolean).join('\n');
@@ -45,9 +189,9 @@ function displayCommand(command) {
 // tool, activate a skill, dispatch an Agent — honestly (no laundering into vague phrases); meaningful command/
 // path/args stays and the full result opens on tap. The leading glyph is a real app icon (toolIcon), NOT an
 // emoji, so a tool call reads in the app's own icon language. Cover the high-frequency tools; generic else.
-function toolSummary(tool) {
+function toolSummary(tool: CodexToolProjection): string {
   const n = tool.name || '工具';
-  const inp = tool.input || {};
+  const inp = toolInput(tool);
   if (n === 'Bash') {
     const command = displayCommand(inp.command);
     return command ? `运行 ${command}` : '运行命令';
@@ -81,7 +225,7 @@ function toolSummary(tool) {
 }
 
 // The app-consistent icon (Lucide, currentColor) for a tool family — mirrors toolSummary's branches.
-function toolIcon(name) {
+function toolIcon(name: string): ReactNode {
   if (name === 'Bash' || name === 'exec_command' || name === 'write_stdin') return <CommandIcon />;
   if (name === 'Edit' || name === 'MultiEdit' || name === 'Write' || name === 'NotebookEdit' || name === 'apply_patch') return <FilePenIcon />;
   if (name === 'Read') return <FileIcon />;
@@ -95,7 +239,7 @@ function toolIcon(name) {
 }
 
 const FILE_EDIT_TOOLS = new Set(['Edit', 'MultiEdit', 'Write', 'NotebookEdit', 'apply_patch']);
-const isFileEditTool = (tool) => FILE_EDIT_TOOLS.has(tool?.name);
+const isFileEditTool = (tool: CodexToolProjection): boolean => FILE_EDIT_TOOLS.has(tool.name);
 
 // Three-dot pulse, reused by both the typing bubble and the running-tool head's trailing indicator.
 function TypingDots() {
@@ -110,7 +254,7 @@ function TypingDots() {
 
 // +A/−B badge for an edited file, right-aligned in the chip head (like the CLI / other AI coding tools).
 // Omits a zero side. Green add / red del; tabular-nums so the digits don't jitter.
-function DiffStat({ diff }) {
+function DiffStat({ diff }: { diff?: CodexDiff }): ReactNode {
   if (!diff || (!diff.added && !diff.removed)) return null;
   return (
     <span className="chat-tool-stat" aria-label={`增 ${diff.added} 行，删 ${diff.removed} 行`}>
@@ -122,7 +266,7 @@ function DiffStat({ diff }) {
 
 // The expandable detail. For a real edit we render the coloured hunks (the actual before/after lines);
 // for a create there are no hunks → fall back to the raw tool result string (e.g. "created successfully").
-function ToolBody({ tool }) {
+function ToolBody({ tool }: { tool: CodexToolProjection }): ReactNode {
   if (tool.diff && tool.diff.hunks && tool.diff.hunks.length) {
     return (
       <div className="chat-diff">
@@ -144,7 +288,7 @@ function ToolBody({ tool }) {
 // Final outcome comes only from fields persisted by App Server. In particular, a completed dynamic tool with
 // no explicit success bit is neutral: its inner action may have been declined even though the wrapper itself
 // returned normally. This keeps the live projection identical to a thread restored after restart.
-function ToolStatus({ tool }) {
+function ToolStatus({ tool }: { tool: CodexToolProjection }): ReactNode {
   if (tool.outcome === 'declined') return <span className="chat-tool-status neutral" aria-label="已拒绝">已拒绝</span>;
   if (tool.outcome === 'completed' && isFileEditTool(tool)) return null;
   if (tool.outcome === 'completed') return <span className="chat-tool-status neutral" aria-label="已结束">已结束</span>;
@@ -157,7 +301,13 @@ function ToolStatus({ tool }) {
 
 // The collapsed chip is now a pure trigger — tapping it opens the detail SHEET (no in-page expand). The
 // chip stays one clean line; all detail (mode / command / output) lives in the bottom sheet.
-function ToolChip({ tool, running, onOpen }) {
+function ToolChip({
+  tool, running, onOpen,
+}: {
+  tool: CodexToolProjection;
+  running: boolean;
+  onOpen: () => void;
+}) {
   return (
     <div className={'chat-tool' + (tool.isError ? ' chat-tool-err' : '') + (running ? ' chat-tool-running' : '')}>
       <button type="button" className="chat-tool-head" onClick={onOpen}>
@@ -173,8 +323,8 @@ function ToolChip({ tool, running, onOpen }) {
 
 // Human "执行模式" label per tool family — the verb in words, complementing the raw tool name shown in the
 // sheet header. Mirrors toolSummary's branches; generic 调用工具 for the long tail.
-function toolMode(name) {
-  const map = {
+function toolMode(name: string): string {
+  const map: Record<string, string> = {
     Bash: '运行命令', Edit: '编辑文件', MultiEdit: '编辑文件', Write: '写入文件', Read: '读取文件',
     exec_command: '运行命令', apply_patch: '编辑文件', web__run: '联网查询', view_image: '查看图片',
     wait: '等待任务', write_stdin: '继续任务',
@@ -187,27 +337,27 @@ function toolMode(name) {
 // The "执行的命令" text — the tool's most meaningful input field, else its whole input pretty-printed. Kept
 // raw except for Codex's shell-launch wrapper, matching what its terminal UI shows. Empty string → the
 // command section is omitted.
-function toolCommandText(tool) {
+function toolCommandText(tool: CodexToolProjection): string {
   const n = tool.name;
-  const inp = tool.input || {};
+  const inp = toolInput(tool);
   if (n === 'Bash') return displayCommand(inp.command);
   if (n === 'exec_command') return displayCommand(inp.cmd || inp.script);
-  if (n === 'apply_patch') return inp.patch || inp.script || '';
-  if (n === 'view_image') return inp.path || JSON.stringify(inp, null, 2);
-  if (n === 'Read' || n === 'Edit' || n === 'MultiEdit' || n === 'Write') return inp.file_path || '';
-  if (n === 'NotebookEdit') return inp.notebook_path || '';
-  if (n === 'Grep' || n === 'Glob') return inp.pattern || '';
-  if (n === 'WebSearch') return inp.query || '';
-  if (n === 'WebFetch') return inp.url || '';
-  if (n === 'Skill') return inp.command || inp.skill || '';
-  if (n === 'Task' || n === 'Agent') return inp.prompt || inp.description || '';
+  if (n === 'apply_patch') return inputText(inp, 'patch', 'script');
+  if (n === 'view_image') return inputText(inp, 'path') || JSON.stringify(inp, null, 2);
+  if (n === 'Read' || n === 'Edit' || n === 'MultiEdit' || n === 'Write') return inputText(inp, 'file_path');
+  if (n === 'NotebookEdit') return inputText(inp, 'notebook_path');
+  if (n === 'Grep' || n === 'Glob') return inputText(inp, 'pattern');
+  if (n === 'WebSearch') return inputText(inp, 'query');
+  if (n === 'WebFetch') return inputText(inp, 'url');
+  if (n === 'Skill') return inputText(inp, 'command', 'skill');
+  if (n === 'Task' || n === 'Agent') return inputText(inp, 'prompt', 'description');
   const keys = Object.keys(inp);
   if (!keys.length) return '';
   return JSON.stringify(inp, null, 2);
 }
 
 // Split an absolute path into its directory (with trailing /) and the filename.
-function fileParts(p) {
+function fileParts(p: string): { dir: string; name: string } {
   if (!p) return { dir: '', name: '' };
   const idx = p.lastIndexOf('/');
   return idx >= 0 ? { dir: p.slice(0, idx + 1), name: p.slice(idx + 1) } : { dir: '', name: p };
@@ -217,13 +367,13 @@ function fileParts(p) {
 // file's number for add/context, the old for a deletion), a +/−/· sign column, then the code kept pre-
 // formatted (long lines scroll horizontally without the gutter/sign leaving). Add/del rows are tinted and
 // carry a coloured left bar; hunks are separated by a faint gap. Line numbers are tabular so they stay aligned.
-function DiffView({ hunks }) {
+function DiffView({ hunks }: { hunks: CodexDiffHunk[] }) {
   return (
     <div className="dv">
       {hunks.map((h, hi) => {
         const numbered = Number.isInteger(h.oldStart) && Number.isInteger(h.newStart);
-        let o = numbered ? h.oldStart : null;
-        let n = numbered ? h.newStart : null;
+        let o = Number.isInteger(h.oldStart) ? h.oldStart as number : null;
+        let n = Number.isInteger(h.newStart) ? h.newStart as number : null;
         return (
           <div className="dv-hunk" key={hi}>
             {hi > 0 && <div className="dv-gap"><span>⋯</span></div>}
@@ -232,11 +382,11 @@ function DiffView({ hunks }) {
               const text = typeof ln === 'string' ? ln.slice(1) : '';
               let num;
               let cls;
-              if (sign === '+') { num = numbered ? n++ : null; cls = 'add'; }
-              else if (sign === '-') { num = numbered ? o++ : null; cls = 'del'; }
+              if (sign === '+') { num = numbered && n !== null ? n++ : null; cls = 'add'; }
+              else if (sign === '-') { num = numbered && o !== null ? o++ : null; cls = 'del'; }
               else {
-                num = numbered ? n++ : null;
-                if (numbered) o++;
+                num = numbered && n !== null ? n++ : null;
+                if (numbered && o !== null) o++;
                 cls = 'ctx';
               }
               return (
@@ -255,7 +405,7 @@ function DiffView({ hunks }) {
 }
 
 // The execution state pill shared by both sheet layouts.
-function toolState(tool, running) {
+function toolState(tool: CodexToolProjection, running: boolean): { txt: string; cls: string } | null {
   if (running) return { txt: '执行中', cls: 'run' };
   if (tool.outcome === 'declined') return { txt: '已拒绝', cls: 'idle' };
   if (tool.outcome === 'completed' && isFileEditTool(tool)) return null;
@@ -268,11 +418,15 @@ function toolState(tool, running) {
 // Dedicated file-edit layout: the sheet becomes a code-review surface. Header is the FILE (name bold, dir
 // muted), a compact meta strip (mode · state · +A/−B), then the diff fills the sheet as the main content.
 // A file CREATE has no per-line patch (only a line count) → a friendly note stands in for the diff.
-function EditSheetBody({ tool, running }) {
-  const { dir, name } = fileParts((tool.input && tool.input.file_path) || '');
+function EditSheetBody({
+  tool, running,
+}: { tool: CodexToolProjection; running: boolean }) {
+  const input = toolInput(tool);
+  const { dir, name } = fileParts(typeof input.file_path === 'string' ? input.file_path : '');
   const st = toolState(tool, running);
-  const created = tool.diff && tool.diff.created;
-  const hunks = tool.diff && tool.diff.hunks;
+  const diff = tool.diff;
+  const created = diff?.created;
+  const hunks = diff?.hunks;
   return (
     <>
       <div className="tool-sheet-head es-head">
@@ -291,7 +445,7 @@ function EditSheetBody({ tool, running }) {
         {hunks && hunks.length
           ? <div className="es-diff"><DiffView hunks={hunks} /></div>
           : created
-            ? <div className="es-note">新建文件{tool.diff.added ? ` · 新增 ${tool.diff.added} 行` : ''}</div>
+            ? <div className="es-note">新建文件{diff?.added ? ` · 新增 ${diff.added} 行` : ''}</div>
             : running
               ? <div className="tool-sheet-empty">执行中…</div>
               : <div className="tool-sheet-empty">没有可显示的改动</div>}
@@ -303,7 +457,13 @@ function EditSheetBody({ tool, running }) {
 // Bottom sheet (~half screen) with the full tool detail. FILE EDITS get a dedicated code-review layout
 // (EditSheetBody); every other tool gets the generic 执行模式 / 执行的命令 / 输出结果 sections. Both reuse
 // the same shell (backdrop / grip / close / Esc) and the warm-dusk tokens so they match the lens.
-function ToolSheet({ tool, running, onClose }) {
+function ToolSheet({
+  tool, running, onClose,
+}: {
+  tool: CodexToolProjection | null;
+  running: boolean;
+  onClose: () => void;
+}) {
   if (!tool) return null;
   const isEdit = !!(tool.diff && ((tool.diff.hunks && tool.diff.hunks.length) || tool.diff.created));
   const cmd = toolCommandText(tool);
@@ -351,9 +511,9 @@ function ToolSheet({ tool, running, onClose }) {
   );
 }
 
-function linkedAssistantHtml(text) {
+function linkedAssistantHtml(text: string): string {
   const root = document.createElement('div');
-  root.innerHTML = DOMPurify.sanitize(marked.parse(text || ''));
+  root.innerHTML = DOMPurify.sanitize(marked.parse(text || '') as string);
   // Markdown can create a native <a> for any target, including file types/protocols that the terminal's
   // shared detector deliberately does not expose. Never let those fall through to browser navigation:
   // recognized targets keep the app-owned link flow; everything else becomes ordinary rendered content.
@@ -361,8 +521,8 @@ function linkedAssistantHtml(text) {
     if (!outputLinkFromAnchor(anchor)) anchor.replaceWith(...Array.from(anchor.childNodes));
   }
   const walker = document.createTreeWalker(root, 4); // NodeFilter.SHOW_TEXT
-  const nodes = [];
-  while (walker.nextNode()) nodes.push(walker.currentNode);
+  const nodes: Text[] = [];
+  while (walker.nextNode()) nodes.push(walker.currentNode as Text);
   for (const node of nodes) {
     if (node.parentElement?.closest('a')) continue; // Markdown links are handled by the same delegated click.
     const links = findOutputLinks(node.data);
@@ -386,7 +546,7 @@ function linkedAssistantHtml(text) {
   return root.innerHTML;
 }
 
-function AssistantMarkdown({ text, streaming = false }) {
+function AssistantMarkdown({ text, streaming = false }: { text: string; streaming?: boolean }) {
   const html = useMemo(() => linkedAssistantHtml(text), [text]);
   return (
     <div className="chat-bubble chat-them chat-md"
@@ -395,7 +555,7 @@ function AssistantMarkdown({ text, streaming = false }) {
   );
 }
 
-function outputLinkFromAnchor(anchor) {
+function outputLinkFromAnchor(anchor: HTMLAnchorElement): ChatOutputLink | null {
   const explicitKind = anchor.dataset.handmuxOutputLink;
   const raw = anchor.dataset.handmuxOutputValue || anchor.getAttribute('href') || '';
   const links = findOutputLinks(raw);
@@ -410,9 +570,20 @@ function outputLinkFromAnchor(anchor) {
   return { kind: 'doc', path: match.path || raw.slice(match.start, match.end) };
 }
 
-function Bubble({ m, running, onOpenTool, onOpenGoal }) {
-  if (m.type === 'tool') return <ToolChip tool={m.tool} running={running} onOpen={() => onOpenTool(m)} />;
-  if (m.type === 'goal') return <CodexGoalCard goal={m.goal} event={m.event} onOpen={onOpenGoal} />;
+function Bubble({
+  m, running, onOpenTool, onOpenGoal,
+}: {
+  m: ChatMessage;
+  running: boolean;
+  onOpenTool: (message: ChatMessage) => void;
+  onOpenGoal: (goal: CodexGoal) => void;
+}): ReactNode {
+  if (m.type === 'tool' && m.tool) {
+    return <ToolChip tool={m.tool} running={running} onOpen={() => onOpenTool(m)} />;
+  }
+  if (m.type === 'goal' && m.goal) {
+    return <CodexGoalCard goal={m.goal} event={m.event} onOpen={onOpenGoal} />;
+  }
   // ESC-interrupt marker — a quiet, centered grey hint that the user stopped the turn, NOT a user bubble
   // (Claude Code writes it as a user line, but the user didn't type it).
   if (m.type === 'interrupt') return <div className="chat-interrupt">{t('chat.interrupted')}</div>;
@@ -436,12 +607,12 @@ function Bubble({ m, running, onOpenTool, onOpenGoal }) {
   // Assistant text gets markdown (tables/code/etc render properly); user text stays plain — it's what the
   // user typed, not content to be re-interpreted. Same marked→DOMPurify pipeline as DocView.jsx.
   if (m.role !== 'user') {
-    return <AssistantMarkdown text={m.text} streaming={!!m.streaming} />;
+    return <AssistantMarkdown text={m.text || ''} streaming={!!m.streaming} />;
   }
   return <div className="chat-bubble chat-me">{m.text}</div>;
 }
 
-function optimisticMatches(message, optimistic) {
+function optimisticMatches(message: ChatMessage, optimistic: CodexOutgoingItem): boolean {
   return message?.type === 'text' && message.role === 'user' && message.text === optimistic.text;
 }
 
@@ -453,8 +624,8 @@ const NEAR_TOP_PX = 80;
 // of message indices that should show a time: every user text, plus the last assistant-text before each user
 // message (and the final turn's last reply). Tools/thinking never qualify and don't reset the running "last
 // assistant text" pointer (a reply after a tool is still that turn's concluding line).
-function timeStampedIndices(messages) {
-  const set = new Set();
+function timeStampedIndices(messages: ChatMessage[]): Set<number> {
+  const set = new Set<number>();
   let lastAiText = -1;
   messages.forEach((m, idx) => {
     if (m.type === 'text' && m.role === 'user') {
@@ -470,7 +641,7 @@ function timeStampedIndices(messages) {
 
 // Format a message's ISO timestamp as a label: today → "14:32"; an earlier day →
 // "7月16日 14:32". Returns null for a missing/unparseable stamp so the caller shows nothing (never a fake time).
-function fmtTime(iso) {
+function fmtTime(iso?: string): string | null {
   if (!iso) return null;
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return null;
@@ -482,30 +653,33 @@ function fmtTime(iso) {
 
 // Resolve the block a long-press landed on, innermost-first: a code block copies just its code; a tool's
 // expanded body / diff copies that; otherwise the whole message bubble. Returns { el, text } or null.
-function resolveCopyBlock(target) {
-  const pre = target.closest?.('.chat-md pre');
+function resolveCopyBlock(target: EventTarget | null): CopyBlock | null {
+  if (!(target instanceof Element)) return null;
+  const pre = target.closest<HTMLElement>('.chat-md pre');
   if (pre) return { el: pre, text: pre.innerText };
-  const body = target.closest?.('.chat-tool-body, .chat-diff');
+  const body = target.closest<HTMLElement>('.chat-tool-body, .chat-diff');
   if (body) return { el: body, text: body.innerText };
-  const bubble = target.closest?.('.chat-bubble');
+  const bubble = target.closest<HTMLElement>('.chat-bubble');
   if (bubble) return { el: bubble, text: bubble.innerText };
-  const tool = target.closest?.('.chat-tool');
+  const tool = target.closest<HTMLElement>('.chat-tool');
   if (tool) return { el: tool, text: tool.innerText };
   return null;
 }
 
 const COPY_CALLOUT_W = 72; // estimated callout width (px) for the right-edge clamp (single 拷贝 button)
 
-function CodexApprovalGate({ pane, approval, onAuthFail }) {
+function CodexApprovalGate({
+  pane, approval, onAuthFail,
+}: { pane: string; approval: CodexApproval; onAuthFail?: () => void }) {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
-  const labels = {
+  const labels: Record<ApprovalSimpleDecision, string> = {
     accept: t('chat.approval.accept'),
     acceptForSession: t('chat.approval.acceptSession'),
     decline: t('chat.approval.decline'),
     cancel: t('chat.approval.cancel'),
   };
-  const option = (decision) => {
+  const option = (decision: ApprovalDecision): { id: string; label: string; primary: boolean } | null => {
     if (typeof decision === 'string') return { id: decision, label: labels[decision] || decision, primary: decision === 'accept' };
     if (decision?.type === 'execpolicy') {
       return {
@@ -523,17 +697,22 @@ function CodexApprovalGate({ pane, approval, onAuthFail }) {
     }
     return null;
   };
-  const decide = async (decision) => {
+  const decide = async (decision: string): Promise<void> => {
     if (submitting) return;
     setSubmitting(true);
     setError('');
     try { await answerCodexApproval(pane, approval.id, decision); }
-    catch (err) {
+    catch (err: unknown) {
       if (err instanceof UnauthorizedError) onAuthFail?.();
-      else setError(err?.serverError || err?.message || t('chat.approval.failed'));
+      else {
+        const detail = errorLike(err);
+        setError(detail.serverError || detail.message || t('chat.approval.failed'));
+      }
       setSubmitting(false);
     }
   };
+  const options = approval.decisions.map(option)
+    .filter((decision): decision is NonNullable<ReturnType<typeof option>> => decision !== null);
   return (
     <div className="chat-gate codex-approval-gate" role="dialog" aria-modal="true">
       <div className="chat-gate-step">{t('chat.approval.request')}</div>
@@ -547,7 +726,7 @@ function CodexApprovalGate({ pane, approval, onAuthFail }) {
       {approval.cwd && <div className="codex-approval-cwd">{approval.cwd}</div>}
       {error && <div className="chat-turn-error">{error}</div>}
       <div className="chat-gate-actions chat-gate-decisions">
-        {approval.decisions.map(option).filter(Boolean).map((decision) => (
+        {options.map((decision) => (
           <button key={decision.id} type="button"
             className={`chat-gate-btn${decision.primary ? ' primary' : ''}`}
             disabled={submitting} onClick={() => void decide(decision.id)}>
@@ -559,14 +738,18 @@ function CodexApprovalGate({ pane, approval, onAuthFail }) {
   );
 }
 
-function CodexInputGate({ pane, input, onAuthFail }) {
-  const [answers, setAnswers] = useState({});
+function CodexInputGate({
+  pane, input, onAuthFail,
+}: { pane: string; input: CodexInputRequest; onAuthFail?: () => void }) {
+  const [answers, setAnswers] = useState<Record<string, string>>({});
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
   const questions = input.questions || [];
-  const answer = (id, value) => setAnswers((current) => ({ ...current, [id]: value }));
+  const answer = (id: string, value: string): void => {
+    setAnswers((current) => ({ ...current, [id]: value }));
+  };
   const complete = questions.length > 0 && questions.every((question) => answers[question.id]?.trim());
-  const submit = async () => {
+  const submit = async (): Promise<void> => {
     if (!complete || submitting) return;
     setSubmitting(true);
     setError('');
@@ -574,9 +757,12 @@ function CodexInputGate({ pane, input, onAuthFail }) {
       await answerCodexInput(pane, input.id, Object.fromEntries(
         questions.map((question) => [question.id, [answers[question.id].trim()]]),
       ));
-    } catch (err) {
+    } catch (err: unknown) {
       if (err instanceof UnauthorizedError) onAuthFail?.();
-      else setError(err?.serverError || err?.message || t('chat.input.failed'));
+      else {
+        const detail = errorLike(err);
+        setError(detail.serverError || detail.message || t('chat.input.failed'));
+      }
       setSubmitting(false);
     }
   };
@@ -630,7 +816,7 @@ export default function ChatView({
   pane, agent = 'claude', kind, msg, onAuthFail, slashEcho, onSlashEchoDone,
   refreshToken = null, codexSession = null, optimisticMessages = [], actionError = null, onOptimisticCovered,
   onDocLinkTap,
-}) {
+}: ChatViewProps) {
   const [streamRefresh, setStreamRefresh] = useState(0);
   const transcriptRefresh = agent === 'codex'
     ? `${refreshToken ?? ''}:thread:${codexSession?.threadId ?? ''}:stream:${streamRefresh}`
@@ -638,7 +824,7 @@ export default function ChatView({
   const {
     messages, hasMoreOlder, loadOlder, loadingOlder,
     session, loaded, unavailable, unavailableDetail, applyCodexEvent,
-  } = useTranscript(pane, true, agent, transcriptRefresh);
+  } = readTranscript(pane, true, agent, transcriptRefresh);
   useCodexMessageStream({
     pane,
     threadId: codexSession?.threadId,
@@ -648,13 +834,13 @@ export default function ChatView({
     onAuthFail,
   });
   const historicalPlans = useMemo(() => {
-    const latest = new Map();
+    const latest = new Map<string, ChatMessage>();
     messages.forEach((message) => {
       if (message.type === 'plan' && message.turnId && codexPlanSteps(message).length) {
         latest.set(message.turnId, message);
       }
     });
-    const byAnswerIndex = new Map();
+    const byAnswerIndex = new Map<number, ChatMessage>();
     for (const [turnId, plan] of latest) {
       if (turnId === codexSession?.activeTurnId) continue;
       let answerIndex = -1;
@@ -682,7 +868,7 @@ export default function ChatView({
   // Temporary outgoing bubbles are render-only. Capture matching durable transcript ids that already exist
   // when each bubble first appears, then let only a new rollout message cover it. This prevents an already
   // visible identical user message from swallowing a fresh send while keeping the transcript the sole history.
-  const optimisticMarksRef = useRef(new Map());
+  const optimisticMarksRef = useRef<Map<string, Set<string>>>(new Map());
   const optimisticPaneRef = useRef(pane);
   if (optimisticPaneRef.current !== pane) {
     optimisticPaneRef.current = pane;
@@ -701,10 +887,11 @@ export default function ChatView({
   }
   // One canonical item may cover only one temporary bubble. Without this claim set, two identical sends
   // could both disappear when the first App Server message arrives.
-  const claimedCanonicalIds = new Set();
-  const coveredOptimisticIds = [];
+  const claimedCanonicalIds = new Set<string>();
+  const coveredOptimisticIds: string[] = [];
   const serverQueueIds = new Set((codexSession?.queue || []).map((item) => item.id));
-  const serverQueueRequestIds = new Set((codexSession?.queue || []).map((item) => item.requestId).filter(Boolean));
+  const serverQueueRequestIds = new Set((codexSession?.queue || []).map((item) => item.requestId)
+    .filter((id): id is string => typeof id === 'string'));
   for (const item of optimisticMessages) {
     if ((item.queueId && serverQueueIds.has(item.queueId)) || serverQueueRequestIds.has(item.id)) {
       coveredOptimisticIds.push(item.id);
@@ -736,7 +923,8 @@ export default function ChatView({
   const claudeGate = busy && agent === 'claude';
   const sessionIssue = unavailable || (agent === 'codex' && codexSession?.error ? 'app-server-unavailable' : null);
   const sessionIssueDetail = unavailableDetail || codexSession?.error || null;
-  const sessionGate = ['session-unbound', 'session-unmanaged', 'app-server-unavailable'].includes(sessionIssue);
+  const sessionGate = typeof sessionIssue === 'string'
+    && ['session-unbound', 'session-unmanaged', 'app-server-unavailable'].includes(sessionIssue);
   const codexApproval = agent === 'codex' && codexSession?.managed ? codexSession.approvals?.[0] : null;
   const codexInput = agent === 'codex' && codexSession?.managed ? codexSession.userInputs?.[0] : null;
   const { prompt, refetch } = usePendingPrompt(pane, claudeGate, agent);
@@ -752,7 +940,7 @@ export default function ChatView({
 
   // "Working" indicators (Task 13): state cues, not token streaming — data is polled every 1.5s.
   const last = messages.length ? messages[messages.length - 1] : null;
-  const lastIsRunningTool = last?.type === 'tool' && last.tool.result === null && kind === 'working';
+  const lastIsRunningTool = last?.type === 'tool' && last.tool?.result === null && kind === 'working';
   const toolRunning = lastIsRunningTool;
   // Compaction (压缩中) gets its own labeled indicator; a turn that died on an API error (error) shows a note
   // instead. Both suppress the plain typing wave — neither is "Claude generating a reply".
@@ -764,7 +952,7 @@ export default function ChatView({
   // or a session switch (e.g. /clear — the new
   // session's own /clear marker owns the screen now; only when both ids are known, so the very first
   // transcript load can't spuriously clear it).
-  const echoMarkRef = useRef(null); // { ids, session } captured when the echo first renders
+  const echoMarkRef = useRef<{ ids: Set<string>; session: string | null } | null>(null);
   if (slashEcho && !echoMarkRef.current) {
     echoMarkRef.current = {
       ids: new Set(messages.filter((m) => m.type === 'slash' && m.name === slashEcho.name).map(messageIdentity)),
@@ -772,10 +960,11 @@ export default function ChatView({
     };
   }
   if (!slashEcho && echoMarkRef.current) echoMarkRef.current = null;
-  const echoCovered = !!(slashEcho && echoMarkRef.current && (
-    (echoMarkRef.current.session && session && echoMarkRef.current.session !== session)
+  const echoMark = echoMarkRef.current;
+  const echoCovered = !!(slashEcho && echoMark && (
+    (echoMark.session && session && echoMark.session !== session)
     || messages.some((m) => m.type === 'slash' && m.name === slashEcho.name
-      && !echoMarkRef.current.ids.has(messageIdentity(m)))
+      && !echoMark.ids.has(messageIdentity(m)))
   ));
   useEffect(() => { if (echoCovered) onSlashEchoDone?.(); }, [echoCovered, onSlashEchoDone]);
   // Managed Codex has an authoritative App Server thread status, so never infer work from a trailing user
@@ -785,18 +974,18 @@ export default function ChatView({
   const showTyping = loaded && !lastIsRunningTool && !showCompacting && !showError
     && !activeStreamMessage && (kind === 'working' || inferredClaudeReply);
 
-  const scrollRef = useRef(null);
-  const viewRef = useRef(null); // .chat-view — positioning context for the copy callout
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const viewRef = useRef<HTMLDivElement>(null); // .chat-view — positioning context for the copy callout
   const stickBottomRef = useRef(true); // was the user near the bottom just before this render's messages changed?
-  const followModeRef = useRef('following'); // revealing (anchor the answer start) | reading | following latest
-  const lastStreamTurnRef = useRef(null);
+  const followModeRef = useRef<'revealing' | 'reading' | 'following'>('following');
+  const lastStreamTurnRef = useRef<string | null>(null);
   const lastScrollTopRef = useRef(0);
   const lastScrollGestureAtRef = useRef(0);
-  const prevScrollHeightRef = useRef(null); // captured just before a loadOlder() prepend, to preserve scroll position
+  const prevScrollHeightRef = useRef<number | null>(null);
   const pendingPrependRef = useRef(false); // true only while a loadOlder() round-trip is in flight, so a
   // recent-window poll landing mid-flight doesn't consume the stale prevScrollHeight and jump the view.
-  const lastNewestIdRef = useRef(null); // stable identity of the previous trailing message
-  const lastOptimisticIdRef = useRef(null);
+  const lastNewestIdRef = useRef<string | null>(null);
+  const lastOptimisticIdRef = useRef<string | null>(null);
   const [atBottom, setAtBottom] = useState(true);
 
   // ── Long-press copy. Native selection is disabled on .chat-scroll (CSS) so the browser's ugly system copy
@@ -804,16 +993,16 @@ export default function ChatView({
   // block. Touch-only (mouse/right-click keep native behaviour on desktop). The pressed block's text is
   // captured into state up front, so a background poll re-render can't strip the copy even if it drops the
   // highlight. Any new touch, a scroll, or a move past the slop cancels/dismisses.
-  const [copyUI, setCopyUI] = useState(null); // { top, left, text } in .chat-view px, or null
-  const hlRef = useRef(null);                  // the DOM node currently ring-highlighted (imperative class)
-  const lpRef = useRef({ timer: null, x: 0, y: 0, fired: false });
+  const [copyUI, setCopyUI] = useState<CopyUI | null>(null);
+  const hlRef = useRef<HTMLElement | null>(null);
+  const lpRef = useRef<LongPressState>({ timer: null, x: 0, y: 0, fired: false });
 
   // Tool detail sheet: store the tool message's key (not the object) so the sheet stays LIVE as polls update
   // the tool (a running tool gains its result). Resolve the current message each render; if it scrolls out of
   // the loaded window it's gone → the sheet self-closes.
-  const [sheetKey, setSheetKey] = useState(null);
-  const [planSheet, setPlanSheet] = useState(null);
-  const [goalSheet, setGoalSheet] = useState(null);
+  const [sheetKey, setSheetKey] = useState<string | null>(null);
+  const [planSheet, setPlanSheet] = useState<CodexPlanView | null>(null);
+  const [goalSheet, setGoalSheet] = useState<CodexGoal | null>(null);
   const sheetMsg = sheetKey != null ? messages.find((m) => m.type === 'tool' && messageIdentity(m) === sheetKey) : null;
   useEffect(() => { if (sheetKey != null && !sheetMsg) setSheetKey(null); }, [sheetKey, sheetMsg]);
   useEffect(() => { setPlanSheet(null); }, [pane]);
@@ -835,12 +1024,20 @@ export default function ChatView({
     };
   }, [sheetOpen]);
 
-  const clearHighlight = () => { if (hlRef.current) { hlRef.current.classList.remove('chat-copy-hl'); hlRef.current = null; } };
-  const dismissCopy = () => { clearHighlight(); setCopyUI(null); };
+  const clearHighlight = (): void => {
+    if (hlRef.current) {
+      hlRef.current.classList.remove('chat-copy-hl');
+      hlRef.current = null;
+    }
+  };
+  const dismissCopy = (): void => { clearHighlight(); setCopyUI(null); };
   useBackButton(!!copyUI, dismissCopy);
-  const cancelLongPress = () => { const lp = lpRef.current; if (lp.timer) { clearTimeout(lp.timer); lp.timer = null; } };
+  const cancelLongPress = (): void => {
+    const lp = lpRef.current;
+    if (lp.timer) { clearTimeout(lp.timer); lp.timer = null; }
+  };
 
-  const fireLongPress = (x, y, target) => {
+  const fireLongPress = (x: number, y: number, target: EventTarget | null): void => {
     lpRef.current.timer = null;
     const block = resolveCopyBlock(target);
     const view = viewRef.current;
@@ -857,7 +1054,7 @@ export default function ChatView({
     setCopyUI({ top, left, text: block.text });
   };
 
-  const onCopyDown = (e) => {
+  const onCopyDown = (e: ReactPointerEvent<HTMLDivElement>): void => {
     dismissCopy(); // a fresh touch always clears a showing callout
     lpRef.current.fired = false;
     if (e.pointerType === 'mouse') return; // desktop keeps native selection/right-click
@@ -870,16 +1067,16 @@ export default function ChatView({
   };
   // A long-press fired → swallow the synthetic click it would spawn (capture phase, before the tool head's
   // onClick), so the copy callout stays up instead of the tap also opening the tool sheet.
-  const onCopyClickCapture = (e) => {
+  const onCopyClickCapture = (e: ReactMouseEvent<HTMLDivElement>): void => {
     if (lpRef.current.fired) { lpRef.current.fired = false; e.stopPropagation(); e.preventDefault(); }
   };
-  const onCopyMove = (e) => {
+  const onCopyMove = (e: ReactPointerEvent<HTMLDivElement>): void => {
     const lp = lpRef.current;
     if (e.pointerType !== 'mouse') lastScrollGestureAtRef.current = Date.now();
     if (lp.timer && Math.hypot(e.clientX - lp.x, e.clientY - lp.y) > 10) cancelLongPress(); // moved → scroll, not a hold
   };
 
-  const doCopy = async (text) => {
+  const doCopy = async (text: string): Promise<void> => {
     try { await navigator.clipboard.writeText(text); navigator.vibrate?.(8); }
     catch { /* clipboard blocked (insecure ctx / denied) — nothing else we can do */ }
     dismissCopy();
@@ -898,13 +1095,13 @@ export default function ChatView({
   // box relative to .app (both rects in viewport coords → the difference is layout-true even when .app is
   // translateY-lifted by the Android keyboard, which also re-anchors position:fixed to .app). Re-measure on
   // viewport churn (keyboard, rotate). Falls back to full-screen (CSS inset:0) when unmeasurable (jsdom).
-  const [gateMask, setGateMask] = useState(null); // { top, height } px relative to .app, or null
+  const [gateMask, setGateMask] = useState<GateMask | null>(null);
   const gateUp = !!(prompt || fb || codexApproval || codexInput || sessionGate);
   useEffect(() => {
     if (!gateUp) { setGateMask(null); return; }
-    const measure = () => {
+    const measure = (): void => {
       const view = viewRef.current;
-      const app = view?.closest('.app');
+      const app = view?.closest<HTMLElement>('.app');
       if (!view || !app) return;
       const vr = view.getBoundingClientRect();
       const ar = app.getBoundingClientRect();
@@ -920,7 +1117,7 @@ export default function ChatView({
     };
   }, [gateUp]);
 
-  const onScroll = () => {
+  const onScroll = (): void => {
     const el = scrollRef.current;
     if (!el) return;
     cancelLongPress();
@@ -943,11 +1140,11 @@ export default function ChatView({
     if (el.scrollTop < NEAR_TOP_PX && hasMoreOlder && !loadingOlder) {
       prevScrollHeightRef.current = el.scrollHeight;
       pendingPrependRef.current = true;
-      loadOlder();
+      void loadOlder();
     }
   };
 
-  const scrollToBottom = () => {
+  const scrollToBottom = (): void => {
     const el = scrollRef.current;
     if (!el) return;
     el.scrollTop = el.scrollHeight;
@@ -963,8 +1160,9 @@ export default function ChatView({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [actionError?.id]);
 
-  const onOutputLinkClick = (event) => {
-    const anchor = event.target.closest?.('.chat-md a');
+  const onOutputLinkClick = (event: ReactMouseEvent<HTMLDivElement>): void => {
+    const anchor = event.target instanceof Element
+      ? event.target.closest<HTMLAnchorElement>('.chat-md a') : null;
     if (!anchor || !event.currentTarget.contains(anchor)) return;
     // Every surviving anchor is app-owned. Prevent native navigation even if a malformed target somehow
     // reaches this boundary or the caller has no link handler.
@@ -1007,7 +1205,8 @@ export default function ChatView({
       // (non-prepend) run still sees a trailing new user message as new and force-scrolls to bottom —
       // otherwise a message sent while scrolled up (mid-prepend) would be silently marked "already seen"
       // and permanently strand the user off-screen after their own send.
-      el.scrollTop += el.scrollHeight - prevScrollHeightRef.current;
+      const previousHeight = prevScrollHeightRef.current;
+      if (previousHeight !== null) el.scrollTop += el.scrollHeight - previousHeight;
       prevScrollHeightRef.current = null;
       pendingPrependRef.current = false;
       return;
@@ -1026,7 +1225,7 @@ export default function ChatView({
     lastScrollTopRef.current = el.scrollTop;
 
     if (followModeRef.current !== 'revealing' || !activeStreamMessage) return;
-    const bubble = Array.from(el.querySelectorAll('[data-codex-stream="active"]')).at(-1);
+    const bubble = Array.from(el.querySelectorAll<HTMLElement>('[data-codex-stream="active"]')).at(-1);
     const viewport = el.getBoundingClientRect();
     const rect = bubble?.getBoundingClientRect();
     // jsdom has no layout (all zeroes); real geometry is required before changing this user-visible state.
@@ -1062,7 +1261,7 @@ export default function ChatView({
       if (el.clientHeight > 0 && el.scrollHeight <= el.clientHeight) {
         prevScrollHeightRef.current = el.scrollHeight;
         pendingPrependRef.current = true;
-        loadOlder();
+      void loadOlder();
       }
     };
     fill();
@@ -1119,9 +1318,7 @@ export default function ChatView({
           const label = item.status === 'sending' ? t('chat.outgoing.sending')
             : item.status === 'accepted' ? t('chat.outgoing.sent')
               : item.status === 'steered' ? t('chat.outgoing.steered')
-                : item.status === 'queued' ? t('chat.outgoing.queued')
-                : item.status === 'failed' ? (item.error
-                  ? `${t('chat.outgoing.failed')}：${item.error}` : t('chat.outgoing.failed')) : '';
+                : item.status === 'queued' ? t('chat.outgoing.queued') : '';
           return (
             <Fragment key={item.id}>
               <div className={`chat-bubble chat-me chat-optimistic is-${item.status}`}>{item.text}</div>
@@ -1170,7 +1367,7 @@ export default function ChatView({
         </button>
       )}
 
-      {sheetMsg && (
+      {sheetMsg?.tool && (
         <ToolSheet
           tool={sheetMsg.tool}
           running={toolRunning && sheetMsg === messages[messages.length - 1]}

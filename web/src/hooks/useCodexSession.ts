@@ -36,6 +36,47 @@ export interface CodexContextUsage {
   totalTokens: number;
 }
 
+export type CodexApprovalSimpleDecision = 'accept' | 'acceptForSession' | 'decline' | 'cancel';
+
+export type CodexApprovalDecision = CodexApprovalSimpleDecision | {
+  type: 'execpolicy';
+  id: string;
+  rule?: string[];
+} | {
+  type: 'networkPolicy';
+  id: string;
+  action: 'allow' | 'deny';
+  host: string;
+};
+
+export interface CodexApprovalRequest {
+  id: string;
+  type?: string;
+  reason?: string | null;
+  command?: string | null;
+  cwd?: string | null;
+  decisions: CodexApprovalDecision[];
+}
+
+export interface CodexInputOption {
+  label: string;
+  description?: string;
+}
+
+export interface CodexInputQuestion {
+  id: string;
+  header?: string;
+  question: string;
+  isOther?: boolean;
+  isSecret?: boolean;
+  options?: CodexInputOption[] | null;
+}
+
+export interface CodexInputRequest {
+  id: string;
+  questions: CodexInputQuestion[];
+}
+
 export interface CodexSessionSnapshot {
   loaded: boolean;
   managed: boolean;
@@ -44,8 +85,8 @@ export interface CodexSessionSnapshot {
   activeTurnId: string | null;
   settings: CodexSessionSettings | null;
   contextUsage: CodexContextUsage | null;
-  approvals: unknown[];
-  userInputs: unknown[];
+  approvals: CodexApprovalRequest[];
+  userInputs: CodexInputRequest[];
   queue: CodexQueueItem[];
   error: string | null;
   activityKind?: string | null;
@@ -110,6 +151,79 @@ const planOf = (value: unknown): CodexSessionPlan | null => {
   };
 };
 
+const approvalDecisionOf = (value: unknown, index: number): CodexApprovalDecision | null => {
+  const simple: readonly CodexApprovalSimpleDecision[] = [
+    'accept', 'acceptForSession', 'decline', 'cancel',
+  ];
+  if (typeof value === 'string') return simple.find((decision) => decision === value) ?? null;
+  const decision = recordOf(value);
+  if (!decision) return null;
+  const id = optionalString(decision.id) || `structured:${index}`;
+  if (decision.type === 'execpolicy') {
+    const rule = Array.isArray(decision.rule)
+      ? decision.rule.filter((entry): entry is string => typeof entry === 'string')
+      : undefined;
+    return { type: 'execpolicy', id, ...(rule ? { rule } : {}) };
+  }
+  if (decision.type === 'networkPolicy'
+    && (decision.action === 'allow' || decision.action === 'deny')) {
+    const host = optionalString(decision.host);
+    return host ? { type: 'networkPolicy', id, action: decision.action, host } : null;
+  }
+  return null;
+};
+
+const approvalOf = (value: unknown): CodexApprovalRequest | null => {
+  const approval = recordOf(value);
+  const id = optionalString(approval?.id);
+  if (!approval || !id || !Array.isArray(approval.decisions)) return null;
+  const decisions = approval.decisions.map(approvalDecisionOf)
+    .filter((decision): decision is CodexApprovalDecision => decision !== null);
+  if (!decisions.length) return null;
+  const type = optionalString(approval.type);
+  return {
+    id,
+    ...(type ? { type } : {}),
+    reason: approval.reason == null ? null : optionalString(approval.reason),
+    command: approval.command == null ? null : optionalString(approval.command),
+    cwd: approval.cwd == null ? null : optionalString(approval.cwd),
+    decisions,
+  };
+};
+
+const inputOf = (value: unknown): CodexInputRequest | null => {
+  const input = recordOf(value);
+  const id = optionalString(input?.id);
+  if (!input || !id || !Array.isArray(input.questions)) return null;
+  const questions = input.questions.flatMap((candidate): CodexInputQuestion[] => {
+    const question = recordOf(candidate);
+    const questionId = optionalString(question?.id);
+    const text = optionalString(question?.question);
+    if (!question || !questionId || !text) return [];
+    const options = Array.isArray(question.options)
+      ? question.options.flatMap((entry): CodexInputOption[] => {
+        const option = recordOf(entry);
+        const label = optionalString(option?.label);
+        const description = optionalString(option?.description);
+        return label ? [{
+          label,
+          ...(description ? { description } : {}),
+        }] : [];
+      })
+      : question.options === null ? null : undefined;
+    const header = optionalString(question.header);
+    return [{
+      id: questionId,
+      question: text,
+      ...(header ? { header } : {}),
+      ...(question.isOther === true ? { isOther: true } : {}),
+      ...(question.isSecret === true ? { isSecret: true } : {}),
+      ...(options !== undefined ? { options } : {}),
+    }];
+  });
+  return questions.length ? { id, questions } : null;
+};
+
 export function parseCodexSessionSnapshot(value: unknown): Omit<CodexSessionSnapshot, 'loaded'> | null {
   const session = recordOf(value);
   if (!session) return null;
@@ -125,8 +239,14 @@ export function parseCodexSessionSnapshot(value: unknown): Omit<CodexSessionSnap
     activeTurnId: optionalString(session.activeTurnId),
     settings: parseCodexSessionSettings(session.settings),
     contextUsage: contextUsageOf(session.contextUsage),
-    approvals: Array.isArray(session.approvals) ? session.approvals : [],
-    userInputs: Array.isArray(session.userInputs) ? session.userInputs : [],
+    approvals: Array.isArray(session.approvals)
+      ? session.approvals.map(approvalOf)
+        .filter((approval): approval is CodexApprovalRequest => approval !== null)
+      : [],
+    userInputs: Array.isArray(session.userInputs)
+      ? session.userInputs.map(inputOf)
+        .filter((input): input is CodexInputRequest => input !== null)
+      : [],
     queue,
     error: optionalString(session.error),
     activityKind: optionalString(session.activityKind),
