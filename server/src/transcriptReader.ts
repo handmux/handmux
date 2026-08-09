@@ -1,21 +1,48 @@
 import { createReadStream, promises as fsp } from 'node:fs';
 import { setImmediate as yieldImmediate } from 'node:timers/promises';
 import { createTranscriptParser } from './transcriptParse.js';
+import type { Stats } from 'node:fs';
+import type { TranscriptMessage } from './transcriptParse.js';
+
+export interface IncrementalTranscriptParser<T> {
+  messages: T[];
+  push(lines: readonly unknown[]): T[];
+}
+export type TranscriptParserFactory<T> = () => IncrementalTranscriptParser<T>;
+interface ReaderOptions { maxEntries?: number; yieldEvery?: number }
+interface ReadLinesResult { lines: string[]; offset: number; size: number }
+interface CacheEntry<T> {
+  parser: IncrementalTranscriptParser<T>;
+  createParser: TranscriptParserFactory<T>;
+  offset: number;
+  dev: number;
+  ino: number;
+  size: number;
+  mtimeMs: number;
+  usedAt: number;
+}
+export interface TranscriptReader {
+  read(file: string): Promise<TranscriptMessage[]>;
+  read<T>(file: string, createParser: TranscriptParserFactory<T>): Promise<T[]>;
+  clear(): void;
+  size(): number;
+}
 
 // Append-aware JSONL reader for chat transcripts. A live Claude session is append-only, so after the
 // first asynchronous scan we read and parse only newly completed lines. Replacement/truncation resets
 // the parser; a small LRU bounds server memory across panes. Parsing yields periodically so the initial
 // scan of a long session cannot monopolize the Node event loop.
-export function createTranscriptReader({ maxEntries = 8, yieldEvery = 500 } = {}) {
-  const cache = new Map();
-  const inflight = new Map();
+export function createTranscriptReader({ maxEntries = 8, yieldEvery = 500 }: ReaderOptions = {}): TranscriptReader {
+  const cache = new Map<string, CacheEntry<unknown>>();
+  const inflight = new Map<string, Promise<unknown[]>>();
 
-  async function readCompleteLines(file, start) {
-    const lines = [];
+  async function readCompleteLines(file: string, start: number): Promise<ReadLinesResult> {
+    const lines: string[] = [];
     let pending = Buffer.alloc(0);
     let consumed = 0;
     let bytesRead = 0;
-    for await (const chunk of createReadStream(file, { start })) {
+    for await (const rawChunk of createReadStream(file, { start })) {
+      const chunk = Buffer.isBuffer(rawChunk) ? rawChunk : Buffer.from(rawChunk);
       bytesRead += chunk.length;
       const data = pending.length ? Buffer.concat([pending, chunk]) : chunk;
       let pos = 0;
@@ -31,14 +58,14 @@ export function createTranscriptReader({ maxEntries = 8, yieldEvery = 500 } = {}
     return { lines, offset: start + consumed, size: start + bytesRead };
   }
 
-  async function applyLines(parser, lines) {
+  async function applyLines<T>(parser: IncrementalTranscriptParser<T>, lines: string[]): Promise<void> {
     for (let i = 0; i < lines.length; i += yieldEvery) {
       parser.push(lines.slice(i, i + yieldEvery));
       if (i + yieldEvery < lines.length) await yieldImmediate();
     }
   }
 
-  function trim() {
+  function trim(): void {
     if (cache.size <= maxEntries) return;
     const oldest = Array.from(cache.entries()).sort((a, b) => a[1].usedAt - b[1].usedAt);
     for (const [file] of oldest) {
@@ -47,14 +74,17 @@ export function createTranscriptReader({ maxEntries = 8, yieldEvery = 500 } = {}
     }
   }
 
-  async function load(file, createParser) {
-    let st;
+  async function load<T>(file: string, createParser: TranscriptParserFactory<T>): Promise<T[]> {
+    let st: Stats;
     try { st = await fsp.stat(file); } catch { cache.delete(file); return []; }
     if (!st.isFile()) { cache.delete(file); return []; }
 
-    let entry = cache.get(file);
-    const sameFile = entry && entry.createParser === createParser && entry.dev === st.dev && entry.ino === st.ino;
-    if (sameFile && entry.size === st.size && entry.mtimeMs === st.mtimeMs) {
+    let entry = cache.get(file) as CacheEntry<T> | undefined;
+    const sameFile = Boolean(entry
+      && entry.createParser === createParser
+      && entry.dev === st.dev
+      && entry.ino === st.ino);
+    if (entry && sameFile && entry.size === st.size && entry.mtimeMs === st.mtimeMs) {
       entry.usedAt = Date.now();
       return entry.parser.messages;
     }
@@ -62,8 +92,8 @@ export function createTranscriptReader({ maxEntries = 8, yieldEvery = 500 } = {}
     // A larger file with the same inode is the normal append path. Anything else (truncate, atomic
     // replace, or an in-place rewrite with unchanged size) gets a clean parser so stale messages cannot
     // leak across /clear or log rotation.
-    const append = sameFile && st.size > entry.size;
-    if (!append) {
+    const append = Boolean(sameFile && entry && st.size > entry.size);
+    if (!append || !entry) {
       entry = { parser: createParser(), createParser, offset: 0, dev: st.dev, ino: st.ino, size: 0, mtimeMs: 0, usedAt: 0 };
     }
 
@@ -71,7 +101,7 @@ export function createTranscriptReader({ maxEntries = 8, yieldEvery = 500 } = {}
     await applyLines(entry.parser, lines);
     // Re-stat after reading: the writer may have appended while the stream was open. Metadata reflects
     // the latest observed file; any bytes not consumed as complete lines are deliberately retried later.
-    let end = st;
+    let end: Stats = st;
     try { end = await fsp.stat(file); } catch { /* return the last complete snapshot */ }
     entry.offset = offset;
     // Only adopt the post-read metadata if it describes exactly the bytes the stream consumed. If the
@@ -83,15 +113,19 @@ export function createTranscriptReader({ maxEntries = 8, yieldEvery = 500 } = {}
     entry.size = size;
     entry.mtimeMs = caughtUp ? end.mtimeMs : st.mtimeMs;
     entry.usedAt = Date.now();
-    cache.set(file, entry);
+    cache.set(file, entry as unknown as CacheEntry<unknown>);
     trim();
     return entry.parser.messages;
   }
 
-  async function read(file, createParser = createTranscriptParser) {
-    if (inflight.has(file)) return inflight.get(file);
+  async function read<T = TranscriptMessage>(
+    file: string,
+    createParser: TranscriptParserFactory<T> = createTranscriptParser as unknown as TranscriptParserFactory<T>,
+  ): Promise<T[]> {
+    const active = inflight.get(file);
+    if (active) return active as Promise<T[]>;
     const run = load(file, createParser).finally(() => inflight.delete(file));
-    inflight.set(file, run);
+    inflight.set(file, run as Promise<unknown[]>);
     return run;
   }
 

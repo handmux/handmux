@@ -34,19 +34,62 @@ const CMD_ARGS_RE = /<command-args>([\s\S]*?)<\/command-args>/i;
 const STDOUT_RE = /^\s*<local-command-stdout>([\s\S]*)$/i;
 const ANSI_RE = /\x1b\[[0-9;?]*[ -/]*[@-~]/g;
 const SLASH_RESULT_CAP = 140;
-const stripAnsi = (s) => (typeof s === 'string' ? s.replace(ANSI_RE, '') : '');
+const stripAnsi = (value: unknown): string => typeof value === 'string' ? value.replace(ANSI_RE, '') : '';
+
+interface JsonRecord { [key: string]: unknown }
+export interface TranscriptDiffHunk {
+  oldStart: unknown;
+  newStart: unknown;
+  lines: string[];
+}
+export interface TranscriptDiff {
+  added: number;
+  removed: number;
+  hunks: TranscriptDiffHunk[] | null;
+  created?: boolean;
+}
+export interface TranscriptTool {
+  name: string;
+  input: unknown;
+  result: string | null;
+  isError: boolean;
+  diff?: TranscriptDiff | null;
+}
+export interface TranscriptMessage {
+  i: number;
+  type: 'text' | 'thinking' | 'tool' | 'compact' | 'slash' | 'interrupt';
+  ts: string | undefined;
+  role?: 'user' | 'assistant';
+  text?: string;
+  name?: string;
+  args?: string;
+  result?: string;
+  tool?: TranscriptTool;
+}
+interface ToolMessage extends TranscriptMessage { type: 'tool'; tool: TranscriptTool }
+export interface TranscriptParser {
+  push(lines: readonly unknown[]): TranscriptMessage[];
+  messages: TranscriptMessage[];
+}
+const record = (value: unknown): JsonRecord | null => (
+  value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? value as JsonRecord
+    : null
+);
 
 // A file-edit diff from a jsonl line's top-level `toolUseResult`, or null if the tool didn't edit a file.
 // Non-empty structuredPatch → count +/- lines and keep the hunks (for the expandable coloured view). Empty
 // patch but a create → every content line is an addition. Anything else (Bash/Read/…) → null.
-function extractDiff(r) {
-  if (!r || typeof r !== 'object') return null;
+function extractDiff(value: unknown): TranscriptDiff | null {
+  const r = record(value);
+  if (!r) return null;
   const patch = Array.isArray(r.structuredPatch) ? r.structuredPatch : null;
   if (patch && patch.length) {
     let added = 0, removed = 0;
-    const hunks = [];
-    for (const h of patch) {
-      const lines = Array.isArray(h.lines) ? h.lines : [];
+    const hunks: TranscriptDiffHunk[] = [];
+    for (const rawHunk of patch) {
+      const h = record(rawHunk) || {};
+      const lines = Array.isArray(h.lines) ? h.lines.filter((line): line is string => typeof line === 'string') : [];
       for (const ln of lines) { const c = typeof ln === 'string' ? ln[0] : ''; if (c === '+') added++; else if (c === '-') removed++; }
       hunks.push({ oldStart: h.oldStart, newStart: h.newStart, lines });
     }
@@ -58,19 +101,22 @@ function extractDiff(r) {
   return null;
 }
 
-function resultText(content) {
+function resultText(content: unknown): string {
   if (typeof content === 'string') return content;
-  if (Array.isArray(content)) return content.map((c) => (c && c.type === 'text' ? (c.text || '') : '')).join('');
+  if (Array.isArray(content)) return content.map((item) => {
+    const c = record(item);
+    return c?.type === 'text' && typeof c.text === 'string' ? c.text : '';
+  }).join('');
   return '';
 }
 
 // Leading text of a message's content (string as-is, or the first text item of an array) — used only to
 // probe for a scaffolding tag at the very start. tool_result-only user turns yield '' and are never matched.
-function leadingText(content) {
+function leadingText(content: unknown): string {
   if (typeof content === 'string') return content;
   if (Array.isArray(content)) {
-    const t = content.find((c) => c && c.type === 'text');
-    return t ? (t.text || '') : '';
+    const t = content.map(record).find((item) => item?.type === 'text');
+    return t && typeof t.text === 'string' ? t.text : '';
   }
   return '';
 }
@@ -79,18 +125,19 @@ function leadingText(content) {
 // successive complete JSONL batches: tool results and slash-command stdout in a later batch can still
 // update the tool/slash message created by an earlier batch. The one-shot `parseTranscript()` wrapper
 // below preserves the public pure-function API used everywhere else.
-export function createTranscriptParser() {
-  const msgs = [];
-  const byToolId = new Map(); // tool_use_id → the tool message awaiting its result
+export function createTranscriptParser(): TranscriptParser {
+  const msgs: TranscriptMessage[] = [];
+  const byToolId = new Map<string, ToolMessage>(); // tool_use_id → the tool message awaiting its result
   let i = 0;
-  function push(lines) {
+  function push(lines: readonly unknown[]): TranscriptMessage[] {
     for (const raw of lines) {
     const s = typeof raw === 'string' ? raw.trim() : '';
     if (!s) { i++; continue; }
-    let o;
-    try { o = JSON.parse(s); } catch { i++; continue; }
-    const m = o && o.message;
-    if (!KEEP.has(o && o.type) || !m || typeof m !== 'object') { i++; continue; }
+    let parsed: unknown;
+    try { parsed = JSON.parse(s); } catch { i++; continue; }
+    const o = record(parsed);
+    const m = record(o?.message);
+    if (!o || !KEEP.has(typeof o.type === 'string' ? o.type : '') || !m) { i++; continue; }
     if (o.isMeta === true) { i++; continue; }
     // A compaction wall (isCompactSummary): don't render the (huge) summary text as a bubble, but DO leave a
     // quiet divider marker where it happened, so the 对话 lens shows "上下文已压缩" between the old and new
@@ -111,8 +158,10 @@ export function createTranscriptParser() {
       const nameM = CMD_NAME_RE.exec(lead);
       if (nameM) {
         const argsM = CMD_ARGS_RE.exec(lead);
-        const args = argsM ? argsM[1].trim() : '';
-        const mk = { i, type: 'slash', name: '/' + nameM[1], ts };
+        const args = argsM?.[1]?.trim() || '';
+        const name = nameM[1];
+        if (!name) { i++; continue; }
+        const mk: TranscriptMessage = { i, type: 'slash', name: `/${name}`, ts };
         if (args) mk.args = args;
         msgs.push(mk);
         i++; continue;
@@ -122,7 +171,7 @@ export function createTranscriptParser() {
       if (outM) {
         const last = msgs[msgs.length - 1];
         if (last && last.type === 'slash' && last.result === undefined) {
-          const txt = stripAnsi(outM[1].replace(/<\/local-command-stdout>\s*$/i, '')).trim();
+          const txt = stripAnsi((outM[1] || '').replace(/<\/local-command-stdout>\s*$/i, '')).trim();
           if (txt) last.result = txt.length > SLASH_RESULT_CAP ? txt.slice(0, SLASH_RESULT_CAP) + '…' : txt;
         }
         i++; continue;
@@ -138,24 +187,36 @@ export function createTranscriptParser() {
       msgs.push({ i, type: 'interrupt', ts });
       i++; continue;
     }
-    const items = typeof m.content === 'string'
+    const items: unknown[] = typeof m.content === 'string'
       ? [{ type: 'text', text: m.content }]
       : Array.isArray(m.content) ? m.content : [];
-    for (const it of items) {
-      if (!it || typeof it !== 'object') continue;
+    for (const rawItem of items) {
+      const it = record(rawItem);
+      if (!it) continue;
       // .trim() here is a truthiness guard only (dropping whitespace-only text items to avoid empty
       // bubbles) — the pushed `it.text` below is the untrimmed original, so real text's internal/
       // leading/trailing whitespace is preserved verbatim.
-      if (it.type === 'text' && it.text && it.text.trim()) {
+      if (it.type === 'text' && typeof it.text === 'string' && it.text.trim()) {
         msgs.push({ i, role, type: 'text', text: it.text, ts });
-      } else if (it.type === 'thinking' && it.thinking) {
+      } else if (it.type === 'thinking' && typeof it.thinking === 'string' && it.thinking) {
         msgs.push({ i, role: 'assistant', type: 'thinking', text: it.thinking, ts });
       } else if (it.type === 'tool_use') {
-        const tm = { i, role: 'assistant', type: 'tool', ts, tool: { name: it.name || '', input: it.input || {}, result: null, isError: false } };
-        if (it.id) byToolId.set(it.id, tm);
+        const tm: ToolMessage = {
+          i,
+          role: 'assistant',
+          type: 'tool',
+          ts,
+          tool: {
+            name: typeof it.name === 'string' ? it.name : '',
+            input: it.input || {},
+            result: null,
+            isError: false,
+          },
+        };
+        if (typeof it.id === 'string' && it.id) byToolId.set(it.id, tm);
         msgs.push(tm);
       } else if (it.type === 'tool_result') {
-        const tm = it.tool_use_id && byToolId.get(it.tool_use_id);
+        const tm = typeof it.tool_use_id === 'string' ? byToolId.get(it.tool_use_id) : undefined;
         if (tm) {
           tm.tool.result = resultText(it.content);
           tm.tool.isError = !!it.is_error;
@@ -175,6 +236,6 @@ export function createTranscriptParser() {
   return { push, messages: msgs };
 }
 
-export function parseTranscript(lines) {
+export function parseTranscript(lines: readonly unknown[]): TranscriptMessage[] {
   return createTranscriptParser().push(lines);
 }

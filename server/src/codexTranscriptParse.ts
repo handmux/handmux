@@ -1,5 +1,44 @@
 import { codexPlanSnapshot } from './codexPlan.js';
 import { codexGoalMessageId, codexItemMessageId } from './codexMessageIdentity.js';
+import type { CodexPlanStep } from './codexPlan.js';
+import type { CodexGoal } from './codexStreamProtocol.js';
+import type {
+  CodexDiff,
+  CodexDiffHunk,
+  CodexToolInput,
+  CodexToolOutcome,
+  CodexToolProjection,
+} from './codexToolProtocol.js';
+
+interface JsonRecord { [key: string]: unknown }
+type GoalLike = Partial<CodexGoal> & JsonRecord;
+interface SourceIdentity { turnId?: string; itemId?: string; id?: string }
+export interface CodexTranscriptMessage extends SourceIdentity {
+  [key: string]: unknown;
+  i: number;
+  type: string;
+  ts: string | undefined;
+  role?: 'user' | 'assistant';
+  text?: string;
+  name?: string;
+  args?: string;
+  event?: string;
+  goal?: GoalLike;
+  plan?: CodexPlanStep[];
+  explanation?: string;
+  tool?: CodexToolProjection;
+}
+interface ToolMessage extends CodexTranscriptMessage { tool: CodexToolProjection }
+interface CallArgument { text: string; end: number }
+interface CustomCall { name: string; input: CodexToolInput; diff?: CodexDiff }
+export interface CodexTranscriptParser {
+  push(lines: readonly unknown[]): CodexTranscriptMessage[];
+  messages: CodexTranscriptMessage[];
+}
+const isRecord = (value: unknown): value is JsonRecord => (
+  value !== null && typeof value === 'object' && !Array.isArray(value)
+);
+const asRecord = (value: unknown): JsonRecord => isRecord(value) ? value : {};
 
 // Codex's rollout JSONL is the durable, ordered conversation log. App Server notifications drive live
 // controls/status, but its thread snapshots currently omit some completed tools, so transcript rendering
@@ -8,20 +47,20 @@ const SLASH_CMD_RE = /^\/([a-z][\w-]*)(?:\s+([^\n]*))?$/i;
 const OUTPUT_CAP = 100_000;
 const SCRIPT_CAP = 4_000;
 
-const cap = (value, limit) => {
+const cap = (value: unknown, limit: number): string => {
   const text = String(value ?? '');
   return text.length > limit ? `${text.slice(0, limit)}…` : text;
 };
 
 // Codex persists its injected context as role=user response items. Match only its reserved envelope roots:
 // user prompts may legitimately begin with ordinary HTML/XML and must remain part of the conversation.
-export function isCodexSyntheticUserText(value) {
+export function isCodexSyntheticUserText(value: unknown): boolean {
   const text = String(value ?? '');
   return /^\s*<(?:environment_context|permissions(?:\s+instructions)?|collaboration_mode|apps_instructions|plugins_instructions|skills_instructions|recommended_plugins|codex_internal_context|user_action|user_shell_command|image|turn_aborted)(?:\s|>|\/)/.test(text)
     || /^\s*# AGENTS\.md instructions for [^\r\n]+\r?\n\s*<INSTRUCTIONS>(?:\r?\n|$)/.test(text);
 }
 
-function goalFromInternalContext(value) {
+function goalFromInternalContext(value: unknown): CodexGoal | null {
   const text = String(value ?? '');
   if (!/^\s*<codex_internal_context\s+source=["']goal["']\s*>/.test(text)) return null;
   const objective = text.match(/<objective>\s*\r?\n([\s\S]*?)\r?\n\s*<\/objective>/)?.[1]?.trim();
@@ -38,35 +77,44 @@ function goalFromInternalContext(value) {
   };
 }
 
-function messageText(content) {
+function messageText(content: unknown): string {
   if (typeof content === 'string') return content;
   if (!Array.isArray(content)) return '';
   return content
-    .map((item) => (item && ['input_text', 'output_text', 'text'].includes(item.type)) ? (item.text || '') : '')
+    .map((item) => {
+      const record = asRecord(item);
+      return typeof record.type === 'string'
+        && ['input_text', 'output_text', 'text'].includes(record.type)
+        && typeof record.text === 'string'
+        ? record.text : '';
+    })
     .join('');
 }
 
-function sourceIdentity(item) {
-  const turnId = typeof item?.internal_chat_message_metadata_passthrough?.turn_id === 'string'
-    ? item.internal_chat_message_metadata_passthrough.turn_id : null;
-  const itemId = typeof item?.id === 'string' && item.id ? item.id : null;
+function sourceIdentity(value: unknown): SourceIdentity {
+  const item = asRecord(value);
+  const metadata = asRecord(item.internal_chat_message_metadata_passthrough);
+  const turnId = typeof metadata.turn_id === 'string' ? metadata.turn_id : null;
+  const itemId = typeof item.id === 'string' && item.id ? item.id : null;
+  const id = turnId && itemId ? codexItemMessageId(turnId, itemId) : null;
   return {
     ...(turnId ? { turnId } : {}),
     ...(itemId ? { itemId } : {}),
-    ...(turnId && itemId ? { id: codexItemMessageId(turnId, itemId) } : {}),
+    ...(id ? { id } : {}),
   };
 }
 
-function parseInput(value) {
-  if (value && typeof value === 'object') return value;
+function parseInput(value: unknown): CodexToolInput {
+  if (Array.isArray(value)) return value;
+  if (isRecord(value)) return value;
   if (typeof value !== 'string' || !value.trim()) return {};
   try {
-    const parsed = JSON.parse(value);
-    return parsed && typeof parsed === 'object' ? parsed : { value: parsed };
+    const parsed: unknown = JSON.parse(value);
+    return Array.isArray(parsed) || isRecord(parsed) ? parsed : { value: parsed };
   } catch { return { value }; }
 }
 
-function outputText(value) {
+function outputText(value: unknown): string {
   if (typeof value === 'string') {
     const trimmed = value.trim();
     if ((trimmed.startsWith('[') || trimmed.startsWith('{')) && trimmed.length < OUTPUT_CAP * 2) {
@@ -80,7 +128,7 @@ function outputText(value) {
       return outputText(item);
     }).filter(Boolean).join('\n'), OUTPUT_CAP);
   }
-  if (value && typeof value === 'object') {
+  if (isRecord(value)) {
     if (Object.keys(value).length === 0) return '';
     if (typeof value.output === 'string') return cap(value.output, OUTPUT_CAP);
     try { return cap(JSON.stringify(value, null, 2), OUTPUT_CAP); } catch { return ''; }
@@ -88,11 +136,11 @@ function outputText(value) {
   return value == null ? '' : cap(value, OUTPUT_CAP);
 }
 
-function classicOutput(value) {
+function classicOutput(value: unknown): { result: string; isError: boolean; outcome: CodexToolOutcome } {
   const raw = outputText(value);
   const exit = raw.match(/Process exited with code\s+(-?\d+)/i);
   const marker = raw.match(/(?:^|\n)Output:\n?/i);
-  const result = marker ? raw.slice(marker.index + marker[0].length) : raw;
+  const result = marker ? raw.slice((marker.index ?? 0) + marker[0].length) : raw;
   const declined = /^aborted by user(?:\s+after\s+[\d.]+s)?\s*$/i.test(result.trim());
   const isError = !!(exit && Number(exit[1]) !== 0);
   return {
@@ -102,9 +150,9 @@ function classicOutput(value) {
   };
 }
 
-function resultOutcome(value, result) {
+function resultOutcome(value: unknown, result: string): CodexToolOutcome {
   if (/^aborted by user(?:\s+after\s+[\d.]+s)?\s*$/i.test(String(result).trim())) return 'declined';
-  if (value && typeof value === 'object') {
+  if (isRecord(value)) {
     if (value.success === false) return 'failed';
     if (typeof value.exit_code === 'number') return value.exit_code === 0 ? 'success' : 'failed';
   }
@@ -112,7 +160,7 @@ function resultOutcome(value, result) {
 }
 
 // Bounded extraction only: find known tools.* calls without evaluating generated JavaScript.
-function callArgument(script, open) {
+function callArgument(script: string, open: number): CallArgument | null {
   let depth = 1;
   let quote = null;
   let escaped = false;
@@ -134,17 +182,22 @@ function callArgument(script, open) {
   return null;
 }
 
-function decodeJsString(raw) {
+function decodeJsString(raw: string): string | null {
   if (!raw || !['"', "'", '`'].includes(raw[0]) || raw.at(-1) !== raw[0]) return null;
   if (raw[0] === '"') {
-    try { return JSON.parse(raw); } catch { return null; }
+    try {
+      const parsed: unknown = JSON.parse(raw);
+      return typeof parsed === 'string' ? parsed : null;
+    } catch { return null; }
   }
   const body = raw.slice(1, -1);
   if (raw[0] === '`' && body.includes('${')) return null;
-  return body.replace(/\\([\\'`nrt])/g, (_match, char) => ({ n: '\n', r: '\r', t: '\t' }[char] ?? char));
+  return body.replace(/\\([\\'`nrt])/g, (_match: string, char: string) => (
+    ({ n: '\n', r: '\r', t: '\t' } as Record<string, string>)[char] ?? char
+  ));
 }
 
-function stringTokenAt(script, start) {
+function stringTokenAt(script: string, start: number): string | null {
   const quote = script[start];
   if (!['"', "'", '`'].includes(quote)) return null;
   let escaped = false;
@@ -157,7 +210,7 @@ function stringTokenAt(script, start) {
   return null;
 }
 
-function resolveStringArgument(script, raw, before) {
+function resolveStringArgument(script: string, raw: string, before: number): string | null {
   const direct = decodeJsString(raw);
   if (direct != null || !/^[A-Za-z_$][\w$]*$/.test(raw)) return direct;
   const escaped = raw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -170,8 +223,8 @@ function resolveStringArgument(script, raw, before) {
   return token ? decodeJsString(token) : null;
 }
 
-function splitTopLevel(value, separator) {
-  const parts = [];
+function splitTopLevel(value: string, separator: string): string[] {
+  const parts: string[] = [];
   let start = 0;
   let depth = 0;
   let quote = null;
@@ -196,7 +249,7 @@ function splitTopLevel(value, separator) {
   return parts;
 }
 
-function parseJsLiteral(script, raw, before) {
+function parseJsLiteral(script: string, raw: string, before: number): unknown {
   const value = raw.trim();
   const decoded = decodeJsString(value);
   if (decoded != null) return decoded;
@@ -216,14 +269,14 @@ function parseJsLiteral(script, raw, before) {
 // Orchestrated tool calls are stored as JavaScript source, and their arguments commonly use object-literal
 // keys (`{ cmd: "pwd" }`) rather than strict JSON (`{"cmd":"pwd"}`). Parse only top-level literal fields;
 // never evaluate generated code. Unknown expressions stay as source text so the detail view loses nothing.
-function parseJsObjectInput(script, raw, before) {
+function parseJsObjectInput(script: string, raw: string, before: number): JsonRecord | null {
   const value = raw.trim();
   if (!value.startsWith('{') || !value.endsWith('}')) return null;
-  const input = {};
+  const input: JsonRecord = {};
   for (const field of splitTopLevel(value.slice(1, -1), ',')) {
     const colon = splitTopLevel(field, ':');
     if (colon.length < 2) continue;
-    const rawKey = colon.shift().trim();
+    const rawKey = colon.shift()?.trim() || '';
     const key = decodeJsString(rawKey) ?? (/^[A-Za-z_$][\w$]*$/.test(rawKey) ? rawKey : null);
     if (!key) continue;
     input[key] = parseJsLiteral(script, colon.join(':').trim(), before);
@@ -231,17 +284,17 @@ function parseJsObjectInput(script, raw, before) {
   return Object.keys(input).length ? input : null;
 }
 
-function parseToolInput(script, raw, before) {
+function parseToolInput(script: string, raw: string, before: number): CodexToolInput {
   const parsed = parseInput(raw);
-  if (parsed.value !== raw) return parsed;
+  if (Array.isArray(parsed) || (isRecord(parsed) && parsed.value !== raw)) return parsed;
   return parseJsObjectInput(script, raw, before) || { script: raw };
 }
 
-function applyPatchDiff(body) {
+function applyPatchDiff(body: string): CodexDiff {
   let added = 0;
   let removed = 0;
-  const hunks = [];
-  let current = null;
+  const hunks: CodexDiffHunk[] = [];
+  let current: CodexDiffHunk | null = null;
   const flush = () => {
     if (current?.lines.length) hunks.push(current);
     current = null;
@@ -262,12 +315,15 @@ function applyPatchDiff(body) {
   return { added, removed, hunks: hunks.length ? hunks : null };
 }
 
-function applyPatchCalls(patch) {
+function applyPatchCalls(patch: string): CustomCall[] {
   const header = /^\*\*\* (Add|Update|Delete) File: (.+)$/gm;
-  const sections = [];
-  let match;
+  const sections: Array<{ kind: string; path: string; start: number }> = [];
+  let match: RegExpExecArray | null;
   while ((match = header.exec(patch))) {
-    sections.push({ kind: match[1], path: match[2].trim(), start: match.index });
+    const kind = match[1];
+    const filePath = match[2];
+    if (!kind || !filePath) continue;
+    sections.push({ kind, path: filePath.trim(), start: match.index });
   }
   if (!sections.length) return [{ name: 'apply_patch', input: { patch } }];
   return sections.map((section, index) => {
@@ -287,27 +343,29 @@ function applyPatchCalls(patch) {
   });
 }
 
-function extractCustomCalls(script) {
-  const calls = [];
+function extractCustomCalls(script: string): CustomCall[] | null {
+  const calls: CustomCall[] = [];
   const re = /tools\.([A-Za-z][\w]*)\s*\(/g;
-  let match;
+  let match: RegExpExecArray | null;
   while ((match = re.exec(script))) {
     const arg = callArgument(script, re.lastIndex - 1);
     if (!arg) return null;
-    if (match[1] === 'apply_patch') {
+    const name = match[1];
+    if (!name) continue;
+    if (name === 'apply_patch') {
       const decoded = resolveStringArgument(script, arg.text, match.index);
       calls.push(...(decoded == null
         ? [{ name: 'apply_patch', input: { script: arg.text } }]
         : applyPatchCalls(decoded)));
     } else {
-      calls.push({ name: match[1], input: parseToolInput(script, arg.text, match.index) });
+      calls.push({ name, input: parseToolInput(script, arg.text, match.index) });
     }
     re.lastIndex = arg.end;
   }
   return calls.length ? calls : null;
 }
 
-function structuredResults(value) {
+function structuredResults(value: unknown): unknown[] | null {
   let parsed = value;
   if (typeof parsed === 'string') {
     try { parsed = JSON.parse(parsed); } catch { return null; }
@@ -326,7 +384,7 @@ function structuredResults(value) {
   return parsed && typeof parsed === 'object' ? Object.values(parsed) : null;
 }
 
-function goalResult(value) {
+function goalResult(value: unknown): GoalLike | null {
   if (typeof value === 'string') {
     const trimmed = value.trim();
     try { return goalResult(JSON.parse(trimmed)); } catch { return null; }
@@ -338,15 +396,15 @@ function goalResult(value) {
     }
     return null;
   }
-  if (!value || typeof value !== 'object') return null;
-  if (value.goal && typeof value.goal === 'object') return value.goal;
-  if (typeof value.objective === 'string' && typeof value.status === 'string') return value;
+  if (!isRecord(value)) return null;
+  if (isRecord(value.goal)) return value.goal as GoalLike;
+  if (typeof value.objective === 'string' && typeof value.status === 'string') return value as GoalLike;
   if (value.structuredContent) return goalResult(value.structuredContent);
   if (value.output) return goalResult(value.output);
   return null;
 }
 
-function applyGoalOutput(message, value) {
+function applyGoalOutput(message: CodexTranscriptMessage, value: unknown): boolean {
   const goal = goalResult(value);
   if (!goal) return false;
   message.goal = { ...(message.goal || {}), ...goal };
@@ -356,7 +414,7 @@ function applyGoalOutput(message, value) {
   return true;
 }
 
-function applyCustomOutput(messages, value) {
+function applyCustomOutput(messages: CodexTranscriptMessage[], value: unknown): void {
   if (messages.length === 1 && messages[0].type === 'goal' && applyGoalOutput(messages[0], value)) return;
   const values = structuredResults(value);
   if (values && values.length === messages.length) {
@@ -372,7 +430,7 @@ function applyCustomOutput(messages, value) {
   }
   const raw = outputText(value).replace(/^Script completed[^\n]*\n(?:Wall time[^\n]*\n)?(?:Output:\n?)?/i, '');
   const declined = /^aborted by user(?:\s+after\s+[\d.]+s)?\s*$/i.test(raw.trim());
-  const tools = messages.filter((message) => message.tool);
+  const tools = messages.filter((message): message is ToolMessage => Boolean(message.tool));
   tools.forEach((message, index) => {
     message.tool.result = index === tools.length - 1 ? raw : '';
     // A single extracted call has an exact persisted outcome. With several calls and one unstructured
@@ -382,44 +440,64 @@ function applyCustomOutput(messages, value) {
   });
 }
 
-export function createCodexTranscriptParser() {
-  const messages = [];
-  const pending = new Map();
+export function createCodexTranscriptParser(): CodexTranscriptParser {
+  const messages: CodexTranscriptMessage[] = [];
+  const pending = new Map<string, CodexTranscriptMessage[]>();
   let lineIndex = 0;
-  let activeGoalObjective = null;
+  let activeGoalObjective: string | null = null;
 
-  const toolMessage = (i, ts, name, input, diff, item) => ({
-    i, role: 'assistant', type: 'tool', ts,
+  const toolMessage = (
+    i: number,
+    ts: string | undefined,
+    name: string,
+    input: CodexToolInput,
+    diff: CodexDiff | null | undefined,
+    item: unknown,
+  ): ToolMessage => ({
+    i,
+    role: 'assistant',
+    type: 'tool',
+    ts,
     ...sourceIdentity(item),
     tool: { name, input, result: null, isError: false, ...(diff ? { diff } : {}) },
   });
 
-  const callMessage = (i, ts, name, input, diff, item) => {
+  const callMessage = (
+    i: number,
+    ts: string | undefined,
+    name: string,
+    input: CodexToolInput,
+    diff: CodexDiff | null | undefined,
+    item: unknown,
+  ): CodexTranscriptMessage => {
     const identity = sourceIdentity(item);
     const { turnId } = identity;
-    if (name === 'create_goal' && typeof input?.objective === 'string') {
-      activeGoalObjective = input.objective.trim() || null;
+    const inputRecord = asRecord(input);
+    if (name === 'create_goal' && typeof inputRecord.objective === 'string') {
+      activeGoalObjective = inputRecord.objective.trim() || null;
       return {
         i, role: 'assistant', type: 'goal', event: 'set', ts,
         goal: {
-          objective: input.objective,
+          objective: inputRecord.objective,
           status: 'active',
-          ...(input.token_budget != null && Number.isFinite(Number(input.token_budget))
-            ? { tokenBudget: Number(input.token_budget) } : {}),
+          ...(inputRecord.token_budget != null && Number.isFinite(Number(inputRecord.token_budget))
+            ? { tokenBudget: Number(inputRecord.token_budget) } : {}),
         },
         ...identity,
       };
     }
-    if (name === 'update_goal' && ['complete', 'blocked'].includes(input?.status)) {
+    const goalStatus = inputRecord.status === 'complete' || inputRecord.status === 'blocked'
+      ? inputRecord.status : null;
+    if (name === 'update_goal' && goalStatus) {
       activeGoalObjective = null;
       return {
-        i, role: 'assistant', type: 'goal', event: input.status, ts,
-        goal: { status: input.status },
+        i, role: 'assistant', type: 'goal', event: goalStatus, ts,
+        goal: { status: goalStatus },
         ...identity,
       };
     }
     const plan = name === 'update_plan'
-      ? codexPlanSnapshot(turnId, input?.plan, input?.explanation)
+      ? codexPlanSnapshot(turnId, inputRecord.plan, inputRecord.explanation)
       : null;
     if (plan) {
       const { steps, ...snapshot } = plan;
@@ -428,32 +506,34 @@ export function createCodexTranscriptParser() {
     return toolMessage(i, ts, name, input, diff, item);
   };
 
-  function push(lines) {
+  function push(lines: readonly unknown[]): CodexTranscriptMessage[] {
     for (const raw of lines) {
       const i = lineIndex++;
       const source = typeof raw === 'string' ? raw.trim() : '';
       if (!source) continue;
-      let row;
-      try { row = JSON.parse(source); } catch { continue; }
+      let parsed: unknown;
+      try { parsed = JSON.parse(source); } catch { continue; }
+      const row = asRecord(parsed);
       const ts = typeof row.timestamp === 'string' ? row.timestamp : undefined;
 
       if (row.type === 'compacted') { messages.push({ i, type: 'compact', ts }); continue; }
-      if (row.type !== 'response_item' || !row.payload || typeof row.payload !== 'object') continue;
+      if (row.type !== 'response_item' || !isRecord(row.payload)) continue;
       const item = row.payload;
 
       if (item.type === 'message') {
         const text = messageText(item.content);
         if (/^\s*<turn_aborted>/.test(text)) { messages.push({ i, type: 'interrupt', ts }); continue; }
         if (item.role === 'developer') continue;
-        if (!['user', 'assistant'].includes(item.role) || !text.trim()) continue;
+        if ((item.role !== 'user' && item.role !== 'assistant') || !text.trim()) continue;
         if (item.role === 'user') {
           const goal = goalFromInternalContext(text);
           if (goal) {
             if (goal.objective !== activeGoalObjective) {
+              const goalId = codexGoalMessageId(goal, 'set');
               messages.push({
                 i, role: 'assistant', type: 'goal', event: 'set', goal, ts,
                 ...sourceIdentity(item),
-                ...(codexGoalMessageId(goal, 'set') ? { id: codexGoalMessageId(goal, 'set') } : {}),
+                ...(goalId ? { id: goalId } : {}),
               });
               activeGoalObjective = goal.objective;
             }
@@ -462,21 +542,26 @@ export function createCodexTranscriptParser() {
           if (isCodexSyntheticUserText(text)) continue;
           const slash = SLASH_CMD_RE.exec(text.trim());
           if (slash) {
-            const marker = { i, type: 'slash', name: `/${slash[1]}`, ts };
+            const command = slash[1];
+            if (!command) continue;
+            const marker: CodexTranscriptMessage = { i, type: 'slash', name: `/${command}`, ts };
             if (slash[2]?.trim()) marker.args = slash[2].trim();
             messages.push(marker);
             continue;
           }
         }
         messages.push({
-          i, role: item.role, type: 'text', text, ts, ...sourceIdentity(item),
+          i, role: item.role as 'user' | 'assistant', type: 'text', text, ts, ...sourceIdentity(item),
         });
         continue;
       }
 
       if (item.type === 'reasoning') {
         const text = (Array.isArray(item.summary) ? item.summary : [])
-          .map((part) => part?.text || '').filter(Boolean).join('\n');
+          .map((part) => {
+            const record = asRecord(part);
+            return typeof record.text === 'string' ? record.text : '';
+          }).filter(Boolean).join('\n');
         if (text.trim()) messages.push({
           i, role: 'assistant', type: 'thinking', text, ts, ...sourceIdentity(item),
         });
@@ -484,25 +569,29 @@ export function createCodexTranscriptParser() {
       }
 
       if (item.type === 'function_call') {
-        const message = callMessage(i, ts, item.name || '', parseInput(item.arguments), null, item);
+        const message = callMessage(i, ts, typeof item.name === 'string' ? item.name : '', parseInput(item.arguments), null, item);
         messages.push(message);
-        if (item.call_id) pending.set(item.call_id, [message]);
+        if (typeof item.call_id === 'string' && item.call_id) pending.set(item.call_id, [message]);
         continue;
       }
       if (item.type === 'function_call_output') {
-        const targets = item.call_id && pending.get(item.call_id);
+        const callId = typeof item.call_id === 'string' ? item.call_id : null;
+        if (!callId) continue;
+        const targets = pending.get(callId);
         if (targets?.length === 1) {
-          if (targets[0].type === 'goal') {
-            applyGoalOutput(targets[0], item.output);
-            pending.delete(item.call_id);
+          const target = targets[0];
+          if (!target) continue;
+          if (target.type === 'goal') {
+            applyGoalOutput(target, item.output);
+            pending.delete(callId);
             continue;
           }
-          if (!targets[0].tool) { pending.delete(item.call_id); continue; }
+          if (!target.tool) { pending.delete(callId); continue; }
           const output = classicOutput(item.output);
-          targets[0].tool.result = output.result;
-          targets[0].tool.isError = output.isError;
-          targets[0].tool.outcome = output.outcome;
-          pending.delete(item.call_id);
+          target.tool.result = output.result;
+          target.tool.isError = output.isError;
+          target.tool.outcome = output.outcome;
+          pending.delete(callId);
         }
         continue;
       }
@@ -515,16 +604,20 @@ export function createCodexTranscriptParser() {
           message.tool.outcome = item.status === 'failed' ? 'failed' : 'success';
         }
         messages.push(message);
-        if (item.call_id) pending.set(item.call_id, [message]);
+        if (typeof item.call_id === 'string' && item.call_id) pending.set(item.call_id, [message]);
         continue;
       }
       if (item.type === 'tool_search_output') {
-        const targets = item.call_id && pending.get(item.call_id);
+        const callId = typeof item.call_id === 'string' ? item.call_id : null;
+        if (!callId) continue;
+        const targets = pending.get(callId);
         if (targets?.length === 1) {
-          targets[0].tool.result = outputText(item.tools);
-          targets[0].tool.isError = item.status === 'failed';
-          targets[0].tool.outcome = item.status === 'failed' ? 'failed' : 'success';
-          pending.delete(item.call_id);
+          const target = targets[0];
+          if (!target?.tool) continue;
+          target.tool.result = outputText(item.tools);
+          target.tool.isError = item.status === 'failed';
+          target.tool.outcome = item.status === 'failed' ? 'failed' : 'success';
+          pending.delete(callId);
         }
         continue;
       }
@@ -534,7 +627,7 @@ export function createCodexTranscriptParser() {
         const calls = extractCustomCalls(script);
         const targets = calls
           ? calls.map((call) => callMessage(i, ts, call.name, call.input, call.diff, item))
-          : [toolMessage(i, ts, item.name || 'exec', { script: cap(script, SCRIPT_CAP) }, null, item)];
+          : [toolMessage(i, ts, typeof item.name === 'string' ? item.name : 'exec', { script: cap(script, SCRIPT_CAP) }, null, item)];
         if (targets.length > 1) {
           targets.forEach((message, index) => {
             const childId = codexItemMessageId(message.turnId, message.itemId, index);
@@ -542,14 +635,16 @@ export function createCodexTranscriptParser() {
           });
         }
         messages.push(...targets);
-        if (item.call_id) pending.set(item.call_id, targets);
+        if (typeof item.call_id === 'string' && item.call_id) pending.set(item.call_id, targets);
         continue;
       }
       if (item.type === 'custom_tool_call_output') {
-        const targets = item.call_id && pending.get(item.call_id);
+        const callId = typeof item.call_id === 'string' ? item.call_id : null;
+        if (!callId) continue;
+        const targets = pending.get(callId);
         if (targets) {
           applyCustomOutput(targets, item.output);
-          pending.delete(item.call_id);
+          pending.delete(callId);
         }
       }
     }
@@ -559,6 +654,6 @@ export function createCodexTranscriptParser() {
   return { push, messages };
 }
 
-export function parseCodexTranscript(lines) {
+export function parseCodexTranscript(lines: readonly unknown[]): CodexTranscriptMessage[] {
   return createCodexTranscriptParser().push(lines);
 }
