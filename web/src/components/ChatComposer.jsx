@@ -1224,7 +1224,7 @@ export default function ChatComposer({
       )}
       {notice && <div className="cc-notice" role="status">{notice}</div>}
       <CodexPlanSheet open={planOpen} title={t('chat.plan.currentTitle')} plan={activePlan}
-        onClose={() => setPlanOpen(false)} portal chatTone={chatTone} />
+        onClose={() => setPlanOpen(false)} portal chatTone={chatTone} keyboardInset={keyboardInset} />
       {editOpen && <CmdFavEditor variant="chat" presets={serverShortcuts.chat}
         onChange={refreshShortcuts} onClose={() => setEditOpen(false)} />}
     </div>

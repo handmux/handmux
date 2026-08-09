@@ -78,7 +78,7 @@ const deferred = () => {
 
 describe('ChatComposer', () => {
   it('shows the read-only current task strip immediately above quick replies and opens a bottom sheet', () => {
-    const { container } = render(<ChatComposer pane="%1" agent="codex" kind="working" codexSession={{
+    const { container } = render(<ChatComposer pane="%1" agent="codex" kind="working" keyboardInset={280} codexSession={{
       managed: true,
       plan: {
         turnId: 'turn-plan',
@@ -97,6 +97,8 @@ describe('ChatComposer', () => {
     fireEvent.click(bar);
     const sheet = screen.getByRole('dialog', { name: '当前任务' });
     expect(sheet.classList.contains('codex-plan-sheet')).toBe(true);
+    expect(sheet.style.bottom).toBe('280px');
+    expect(document.body.querySelector('.codex-plan-backdrop').style.bottom).toBe('280px');
     expect(sheet.textContent).toContain('确认协议');
     expect(sheet.textContent).toContain('实现任务条');
     expect(sheet.textContent).toContain('跑测试');

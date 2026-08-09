@@ -56,12 +56,14 @@ export function CodexPlanSummary({ plan, onOpen }) {
   );
 }
 
-function PlanSheetContent({ title, plan, onClose }) {
+function PlanSheetContent({ title, plan, onClose, keyboardInset = 0 }) {
   const { steps, completed } = planMeta(plan);
+  const bottom = `${Math.max(0, Number(keyboardInset) || 0)}px`;
   return (
     <>
-      <div className="codex-plan-backdrop" onClick={onClose} />
-      <section className="codex-plan-sheet" role="dialog" aria-modal="true" aria-label={title}>
+      <div className="codex-plan-backdrop" style={{ bottom }} onClick={onClose} />
+      <section className="codex-plan-sheet" style={{ bottom }}
+        role="dialog" aria-modal="true" aria-label={title}>
         <div className="tool-sheet-grip" />
         <header className="codex-plan-sheet-head">
           <span className="codex-plan-icon" aria-hidden="true"><ListChecksIcon /></span>
@@ -87,10 +89,13 @@ function PlanSheetContent({ title, plan, onClose }) {
   );
 }
 
-export function CodexPlanSheet({ open, title, plan, onClose, portal = false, chatTone = 'dusk' }) {
+export function CodexPlanSheet({
+  open, title, plan, onClose, portal = false, chatTone = 'dusk', keyboardInset = 0,
+}) {
   useBackButton(open, onClose);
   if (!open || !codexPlanSteps(plan).length) return null;
-  const content = <PlanSheetContent title={title} plan={plan} onClose={onClose} />;
+  const content = <PlanSheetContent title={title} plan={plan} onClose={onClose}
+    keyboardInset={keyboardInset} />;
   if (!portal) return content;
   return createPortal(
     <div className="chat-tone-surface" data-chat-tone={chatTone}>{content}</div>,
