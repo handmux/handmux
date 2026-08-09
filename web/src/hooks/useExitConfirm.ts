@@ -21,36 +21,40 @@ import { useEffect, useRef } from 'react';
 // out of step with this window — hint gone but guard not yet re-pushed → a dead zone where Back falls
 // straight through.) onHint is held in a ref so an unstable inline callback doesn't re-run the effect
 // (which would pile up guard entries); the effect depends only on `enabled`.
-export function useExitConfirm(enabled, onHint, windowMs = 2000) {
+export function useExitConfirm(
+  enabled: boolean,
+  onHint?: (show: boolean) => void,
+  windowMs = 2000,
+): void {
   const cbRef = useRef(onHint);
   cbRef.current = onHint;
   useEffect(() => {
     if (!enabled) return undefined;
     let armed = false;
-    let timer = null;
+    let timer: ReturnType<typeof setTimeout> | null = null;
     let pushed = false;
     // Stamp the entry we sit on as OUR root, so we can arm ONLY when a Back actually lands back HERE.
     // Crucial for the notification path: tapping a system notification navigate()s the client to a deep
     // link, and that same-document navigation fires a popstate landing on a FRESH, unmarked entry. That is
     // NOT a Back — without this marker the old code treated any non-guard popstate as a root Back and
     // spuriously popped the "press again to exit" hint the instant you arrived (no key pressed at all).
-    const markRoot = () => {
+    const markRoot = (): void => {
       if (!window.history.state?.exitRoot) {
         window.history.replaceState({ ...window.history.state, exitRoot: true }, '');
       }
     };
-    const pushGuard = () => {
+    const pushGuard = (): void => {
       if (pushed || window.history.state?.exitGuard) return; // never stack two guards
       window.history.pushState({ exitGuard: true }, '');
       pushed = true;
     };
-    const clearArm = () => {           // drop the armed state AND hide the hint together
+    const clearArm = (): void => {           // drop the armed state AND hide the hint together
       if (timer) { clearTimeout(timer); timer = null; }
       if (armed) { armed = false; cbRef.current?.(false); }
     };
     markRoot();
     pushGuard();
-    const onPop = () => {
+    const onPop = (): void => {
       if (window.history.state?.exitGuard) { pushed = true; clearArm(); return; } // back onto our guard: an overlay above closed
       if (!window.history.state?.exitRoot) return; // landed on some other/new entry (forward nav, not a Back) → ignore
       pushed = false;                       // our guard was consumed → we're back on our root

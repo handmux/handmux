@@ -34,6 +34,15 @@ describe('runSplitPane', () => {
       .rejects.toThrow('boom');
     expect(getPanes).not.toHaveBeenCalled();
   });
+
+  it('rejects a malformed split response before refetching panes', async () => {
+    const api = { splitPane: vi.fn().mockResolvedValue({ id: 7 }) };
+    const getPanes = vi.fn();
+
+    await expect(runSplitPane({ paneId: '%1', dir: 'h', windowId: '@1', api, getPanes }))
+      .rejects.toThrow('invalid response');
+    expect(getPanes).not.toHaveBeenCalled();
+  });
 });
 
 describe('runClosePane', () => {

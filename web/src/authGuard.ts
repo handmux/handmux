@@ -7,7 +7,7 @@ import { UnauthorizedError } from './api.js';
 //   catch (e) { if (authHandled(e, onAuthFail)) return; ...non-auth... }
 //   catch (e) { if (authHandled(e, onAuthFail)) throw e; throw new Error(friendly); }
 //   catch (e) { authHandled(e, onAuthFail); }            // swallow non-auth
-export function authHandled(e, onAuthFail) {
-  if (e instanceof UnauthorizedError) { onAuthFail?.(); return true; }
+export function authHandled(error: unknown, onAuthFail?: () => void): boolean {
+  if (error instanceof UnauthorizedError) { onAuthFail?.(); return true; }
   return false;
 }

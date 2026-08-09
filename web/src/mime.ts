@@ -3,7 +3,7 @@
 // uncommon types mime.lookup misses. Android records THAT type for the download, so tapping "Open"
 // finds no handler and shows raw bytes. Re-tagging from the extension makes a downloaded image open
 // in the gallery. Returns '' for an unknown/absent extension (caller keeps the server's own type).
-const MIME = {
+const MIME: Record<string, string> = {
   jpg: 'image/jpeg', jpeg: 'image/jpeg', jfif: 'image/jpeg', png: 'image/png', gif: 'image/gif',
   webp: 'image/webp', bmp: 'image/bmp', svg: 'image/svg+xml', ico: 'image/x-icon',
   heic: 'image/heic', heif: 'image/heif', avif: 'image/avif', tif: 'image/tiff', tiff: 'image/tiff',
@@ -21,14 +21,15 @@ const MIME = {
   pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
 };
 
-export function mimeFromName(name) {
-  const i = (name || '').lastIndexOf('.');
+export function mimeFromName(name: string | null | undefined): string {
+  const safeName = name || '';
+  const i = safeName.lastIndexOf('.');
   if (i < 0) return '';
-  return MIME[name.slice(i + 1).toLowerCase()] || '';
+  return MIME[safeName.slice(i + 1).toLowerCase()] || '';
 }
 
 // True if the filename's extension is an image we show inline (its MIME starts with image/). Drives
 // routing a tapped path to the image viewer instead of the markdown/html doc reader.
-export function isImageName(name) {
+export function isImageName(name: string | null | undefined): boolean {
   return mimeFromName(name).startsWith('image/');
 }

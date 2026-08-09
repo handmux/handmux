@@ -6,12 +6,12 @@ export const SHARE_CACHE = 'tmw-share-v1';
 export const SHARE_PREFIX = '/__share__/';
 
 // True when this load was launched by a share (the ?share flag sw.js redirects with).
-export function hasShareFlag(search = (typeof location !== 'undefined' ? location.search : '')) {
+export function hasShareFlag(search = (typeof location !== 'undefined' ? location.search : '')): boolean {
   try { return new URLSearchParams(search).has('share'); } catch { return false; }
 }
 
 // Strip ?share from the URL (keep path + hash) so a manual refresh doesn't look like a fresh share.
-export function clearShareFlag() {
+export function clearShareFlag(): void {
   if (typeof location === 'undefined' || typeof history === 'undefined') return;
   const url = new URL(location.href);
   url.searchParams.delete('share');
@@ -22,9 +22,9 @@ export function clearShareFlag() {
 // Pull the most-recently shared file out of the cache and delete it (consume). Returns a File, or
 // null if there's nothing pending / the Cache API is unavailable. The name comes from the cache key,
 // the type from the cached Response's Content-Type.
-export async function takeSharedFile() {
+export async function takeSharedFile(): Promise<File | null> {
   if (typeof caches === 'undefined') return null;
-  let cache;
+  let cache: Cache;
   try { cache = await caches.open(SHARE_CACHE); } catch { return null; }
   const keys = await cache.keys();
   if (!keys.length) return null;
