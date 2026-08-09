@@ -1,7 +1,7 @@
 // `tmux capture-pane -p` separates lines with a bare LF (`\n`). xterm.js is configured
 // with convertEol:false, so a bare LF moves the cursor DOWN without returning to column 0,
 // producing a "staircase" where each line marches right. Normalize to CRLF.
-export function normalizeSeedNewlines(ansi) {
+export function normalizeSeedNewlines(ansi: string): string {
   return ansi.replace(/\r?\n/g, '\r\n');
 }
 
@@ -14,12 +14,19 @@ export function normalizeSeedNewlines(ansi) {
 //   hasShadeBlank—any cell (incl. blanks) painted while the background was active. This catches a
 //                 padding row that opens AND closes its background within the row (so neither
 //                 bgStart nor bgEnd is set, yet it still renders as a full-width grey bar).
-function analyzeLine(line, bgStart) {
+interface AnalyzedLine {
+  bgEnd: boolean;
+  hasText: boolean;
+  hasShadeText: boolean;
+  hasShadeBlank: boolean;
+}
+
+function analyzeLine(line: string, bgStart: boolean): AnalyzedLine {
   let bg = bgStart;
   let hasText = false;
   let hasShadeText = false;
   let hasShadeBlank = false;
-  const note = (chunk) => {
+  const note = (chunk: string): void => {
     if (/\S/.test(chunk)) { hasText = true; if (bg) hasShadeText = true; }
     if (bg && chunk.length) hasShadeBlank = true;
   };
@@ -61,13 +68,13 @@ function analyzeLine(line, bgStart) {
 // into a shorter viewport, and a scroll erases the newly-exposed bottom row with the CURRENT
 // background (BCE). Append \x1b[49m to the bottom padding itself so it stays shaded but the following
 // row cannot inherit the background.
-export function trimTrailingShadow(lines) {
-  const out = [];
+export function trimTrailingShadow(lines: string[]): string[] {
+  const out: string[] = [];
   let bgOpen = false;
-  let held = [];
+  let held: Array<{ line: string; bgEnd: boolean }> = [];
   let lastShaded = -1;        // index in `out` of the run's most recent shaded text row
   let lastShadedOpen = false; // did that row leave a non-default bg open at its end?
-  const closeRun = () => {
+  const closeRun = (): void => {
     if (held.length) {
       // The closest blank row is the box's real lower padding. Seal it at its own end; closing the
       // preceding text row would erase the inherited shade before this row is drawn.
@@ -80,7 +87,7 @@ export function trimTrailingShadow(lines) {
     lastShaded = -1;
     lastShadedOpen = false;
   };
-  const keepInteriorHeld = () => {
+  const keepInteriorHeld = (): void => {
     if (!held.length) return;
     out.push(...held.map(({ line }) => line));
     held = [];
@@ -112,7 +119,7 @@ export function trimTrailingShadow(lines) {
 //
 // Then drop the shade from blank rows that trail a highlight (see trimTrailingShadow) so a sent
 // message shades only its text, not the box padding below it.
-export function prepareSeed(ansi) {
+export function prepareSeed(ansi: string): string {
   const body = normalizeSeedNewlines(ansi.replace(/\n$/, ''));
   return trimTrailingShadow(body.split('\r\n')).join('\r\n');
 }
@@ -120,7 +127,7 @@ export function prepareSeed(ansi) {
 // A live %output stream addresses the source pane's exact grid. Keep any captured scrollback ABOVE that
 // grid so xterm can browse history immediately, while restoring plain blank rows when snapshot cleanup
 // leaves fewer than the pane's visible row count.
-export function prepareLiveSeed(ansi, rows) {
+export function prepareLiveSeed(ansi: string, rows: number): string {
   const lines = prepareSeed(ansi).split('\r\n');
   const target = Math.max(1, Number(rows) || 1);
   while (lines.length < target) lines.push('');
@@ -150,10 +157,16 @@ export function prepareLiveSeed(ansi, rows) {
 // briefly light the block at the cursor's real position even if the app has it hidden, so operating the
 // terminal always shows WHERE you're operating (see forceCursorRef in Terminal.jsx). We still need cur
 // (row/col) — tmux reports position even while the cursor is hidden — so a genuinely absent cur stays hidden.
-export function cursorSeq(cur, rows, seedRows = 0, force = false) {
+export function cursorSeq(
+  cur: TerminalCursor | null | undefined,
+  rows: number,
+  seedRows = 0,
+  force = false,
+): string {
   if (!cur || (!cur.vis && !force)) return '\x1b[?25l';
   const base = seedRows ? Math.min(rows | 0, seedRows | 0) : (rows | 0);
   const row = Math.max(1, base - Math.max(0, cur.row | 0)); // 1-based, from the content's bottom row
-  const col = Math.max(0, cur.col | 0) + 1; // CUP is 1-based
+  const col = Math.max(0, (cur.col ?? 0) | 0) + 1; // CUP is 1-based
   return `\x1b[${row};${col}H\x1b[?25h`;
 }
+import type { TerminalCursor } from './terminalViewport.js';
