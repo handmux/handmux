@@ -198,6 +198,31 @@ function parseToolInput(script, raw, before) {
   return parseJsObjectInput(script, raw, before) || { script: raw };
 }
 
+function applyPatchDiff(body) {
+  let added = 0;
+  let removed = 0;
+  const hunks = [];
+  let current = null;
+  const flush = () => {
+    if (current?.lines.length) hunks.push(current);
+    current = null;
+  };
+  for (const line of body.split('\n').slice(1)) {
+    if (line.startsWith('@@')) {
+      flush();
+      current = { oldStart: null, newStart: null, lines: [] };
+      continue;
+    }
+    if (!/^[+\- ]/.test(line)) continue;
+    if (!current) current = { oldStart: null, newStart: null, lines: [] };
+    current.lines.push(line);
+    if (line.startsWith('+')) added++;
+    else if (line.startsWith('-')) removed++;
+  }
+  flush();
+  return { added, removed, hunks: hunks.length ? hunks : null };
+}
+
 function applyPatchCalls(patch) {
   const header = /^\*\*\* (Add|Update|Delete) File: (.+)$/gm;
   const sections = [];
@@ -209,21 +234,14 @@ function applyPatchCalls(patch) {
   return sections.map((section, index) => {
     const end = sections[index + 1]?.start ?? patch.indexOf('\n*** End Patch', section.start);
     const body = patch.slice(section.start, end < 0 ? patch.length : end);
-    let added = 0;
-    let removed = 0;
-    for (const line of body.split('\n').slice(1)) {
-      if (line.startsWith('@@')) continue;
-      if (!/^[+\- ]/.test(line)) continue;
-      if (line.startsWith('+')) added++;
-      else if (line.startsWith('-')) removed++;
-    }
+    const diff = applyPatchDiff(body);
     return {
       name: 'apply_patch',
       input: { file_path: section.path, patch },
       diff: {
-        // apply_patch's persisted input normally uses bare `@@` markers with no file positions. Keep the
-        // stat, but never invent line zero; the transcript route enriches this from App Server's unified diff.
-        added, removed, hunks: null,
+        // Persisted apply_patch input normally has bare `@@` markers. Preserve its lines as unnumbered
+        // hunks; the transcript route replaces them with positioned App Server hunks when available.
+        ...diff,
         ...(section.kind === 'Add' ? { created: true } : {}),
       },
     };

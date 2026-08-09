@@ -158,7 +158,7 @@ describe('Codex rollout transcript', () => {
     expect(parsed.map((message) => message.tool.outcome)).toEqual(['completed', 'completed']);
   });
 
-  it('keeps edited filenames and diff stats from apply_patch scripts', () => {
+  it('keeps edited filenames, stats, and unnumbered hunks from apply_patch scripts', () => {
     const patch = [
       '*** Begin Patch',
       '*** Update File: web/src/App.jsx',
@@ -177,7 +177,39 @@ describe('Codex rollout transcript', () => {
     expect(parsed[0].tool).toMatchObject({
       name: 'apply_patch',
       input: { file_path: 'web/src/App.jsx', patch },
-      diff: { added: 1, removed: 1, hunks: null },
+      diff: {
+        added: 1,
+        removed: 1,
+        hunks: [{ oldStart: null, newStart: null, lines: ['-old', '+new', ' keep'] }],
+      },
+    });
+  });
+
+  it('splits bare apply_patch markers into separate unnumbered hunks', () => {
+    const patch = [
+      '*** Begin Patch',
+      '*** Update File: src/app.js',
+      '@@ first',
+      '-old one',
+      '+new one',
+      '@@ second',
+      ' context',
+      '+new two',
+      '*** End Patch',
+    ].join('\n');
+    const parsed = parseCodexTranscript([
+      row({
+        type: 'custom_tool_call', name: 'exec', call_id: 'patch-hunks',
+        input: `text(await tools.apply_patch(${JSON.stringify(patch)}));`,
+      }),
+    ]);
+    expect(parsed[0].tool.diff).toEqual({
+      added: 2,
+      removed: 1,
+      hunks: [
+        { oldStart: null, newStart: null, lines: ['-old one', '+new one'] },
+        { oldStart: null, newStart: null, lines: [' context', '+new two'] },
+      ],
     });
   });
 });

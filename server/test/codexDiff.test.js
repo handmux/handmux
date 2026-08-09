@@ -41,7 +41,11 @@ describe('Codex file diffs', () => {
       type: 'tool', turnId: 'turn-1',
       tool: {
         name: 'apply_patch', input: { file_path: 'src/a.js', patch },
-        diff: { added: 1, removed: 1, hunks: null },
+        diff: {
+          added: 1,
+          removed: 1,
+          hunks: [{ oldStart: null, newStart: null, lines: ['-second old', '+second new'] }],
+        },
       },
     }];
     const thread = { turns: [{

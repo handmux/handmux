@@ -120,7 +120,10 @@ export function transcriptRoutes({
           let { messages } = page;
           const { firstSeq, hasMore } = page;
           const needsFileLines = messages.some((message) => message.tool?.name === 'apply_patch'
-            && message.tool.diff && !message.tool.diff.hunks?.length);
+            && message.tool.diff
+            && (!message.tool.diff.hunks?.length || message.tool.diff.hunks.some((hunk) => (
+              !Number.isInteger(hunk.oldStart) || !Number.isInteger(hunk.newStart)
+            ))));
           if (needsFileLines && codexApp?.read) {
             try {
               const opened = await codexApp.read(req.query.pane, sessionId);

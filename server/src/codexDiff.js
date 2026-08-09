@@ -90,7 +90,9 @@ export function enrichCodexFileDiffs(messages, thread) {
   const used = new Set();
   return messages.map((message) => {
     const tool = message?.tool;
-    if (tool?.name !== 'apply_patch' || !tool.diff || tool.diff.hunks?.length) return message;
+    const positioned = tool?.diff?.hunks?.length
+      && tool.diff.hunks.every((hunk) => Number.isInteger(hunk.oldStart) && Number.isInteger(hunk.newStart));
+    if (tool?.name !== 'apply_patch' || !tool.diff || positioned) return message;
     const path = tool.input?.file_path || '';
     const key = diffKey(applyPatchSection(tool.input?.patch, path));
     const matches = (candidate, index) => !used.has(index)

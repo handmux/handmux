@@ -613,6 +613,26 @@ describe('ChatView', () => {
     expect(container.querySelector('.tool-sheet').textContent).toContain('编辑文件');
   });
 
+  it('shows an apply_patch hunk as code diff when persisted line numbers are unavailable', async () => {
+    mockTranscript([{
+      k: 0, i: 0, role: 'assistant', type: 'tool',
+      tool: {
+        name: 'apply_patch', input: { file_path: '/work/src/app.js' }, result: '', isError: false,
+        diff: {
+          added: 1, removed: 1,
+          hunks: [{ oldStart: null, newStart: null, lines: [' keep', '-old', '+new'] }],
+        },
+      },
+    }]);
+    const { container } = render(<ChatView pane="%0" kind="done" />);
+    fireEvent.click(await screen.findByRole('button', { name: /app\.js/ }));
+    await waitFor(() => expect(container.querySelector('.tool-sheet-edit .dv')).toBeTruthy());
+    expect([...container.querySelectorAll('.dv-ln')].map((el) => el.textContent)).toEqual(['', '', '']);
+    expect(container.querySelector('.dv-del .dv-code').textContent).toBe('old');
+    expect(container.querySelector('.dv-add .dv-code').textContent).toBe('new');
+    expect(screen.queryByText('apply_patch')).toBeNull();
+  });
+
   it('permission with no parseable menu → 允许/拒绝 fallback, taps send Enter', async () => {
     mockTranscript([{ k: 0, i: 0, role: 'assistant', type: 'tool', tool: { name: 'Bash', input: { command: 'ls' }, result: null, isError: false } }]);
     vi.spyOn(api, 'getPendingPrompt').mockResolvedValue(null); // menu not scraped → fallback

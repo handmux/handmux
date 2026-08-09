@@ -219,8 +219,9 @@ function DiffView({ hunks }) {
   return (
     <div className="dv">
       {hunks.map((h, hi) => {
-        let o = h.oldStart || 0;
-        let n = h.newStart || 0;
+        const numbered = Number.isInteger(h.oldStart) && Number.isInteger(h.newStart);
+        let o = numbered ? h.oldStart : null;
+        let n = numbered ? h.newStart : null;
         return (
           <div className="dv-hunk" key={hi}>
             {hi > 0 && <div className="dv-gap"><span>⋯</span></div>}
@@ -229,9 +230,13 @@ function DiffView({ hunks }) {
               const text = typeof ln === 'string' ? ln.slice(1) : '';
               let num;
               let cls;
-              if (sign === '+') { num = n++; cls = 'add'; }
-              else if (sign === '-') { num = o++; cls = 'del'; }
-              else { num = n++; o++; cls = 'ctx'; }
+              if (sign === '+') { num = numbered ? n++ : null; cls = 'add'; }
+              else if (sign === '-') { num = numbered ? o++ : null; cls = 'del'; }
+              else {
+                num = numbered ? n++ : null;
+                if (numbered) o++;
+                cls = 'ctx';
+              }
               return (
                 <div className={'dv-row dv-' + cls} key={li}>
                   <span className="dv-ln">{num}</span>
