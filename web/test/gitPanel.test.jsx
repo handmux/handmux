@@ -89,6 +89,16 @@ describe('GitPanel', () => {
     expect(q('.git-diff-del')?.textContent).toContain('old');
   });
 
+  it('routes malformed Git API data to the error state', async () => {
+    const api = await import('../src/api.js');
+    api.gitStatus.mockResolvedValueOnce({ changes: [{ x: 'M', y: '', path: 7 }] });
+    store = ['/home/u/proj'];
+    await render({ open: true });
+    await settle();
+    expect(q('.git-error')).not.toBeNull();
+    expect(q('.git-row')).toBeNull();
+  });
+
   it('shows the truncation banner when the diff is capped', async () => {
     const api = await import('../src/api.js');
     api.gitDiff.mockResolvedValueOnce({ diff: 'diff --git a/x b/x\n@@ -1 +1 @@\n-old\n+new\n', truncated: true });

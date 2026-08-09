@@ -1,5 +1,5 @@
-// web/src/components/GitPanel.jsx
 import { useEffect, useState, useCallback, useRef } from 'react';
+import type { CSSProperties, ReactNode, RefObject, UIEvent as ReactUIEvent } from 'react';
 import { fetchPaneCwd, gitRepos as apiRepos, gitStatus, gitLog, gitBranches, gitDiff, gitCommit } from '../api.js';
 import { getGitRepos, addGitRepos, removeGitRepo, getDiffFontIndex, setDiffFontIndex, DOC_FONT_SIZES } from '../storage.js';
 import { parseDiff } from '../gitDiff.js';
@@ -8,13 +8,68 @@ import { ChevronDownIcon, GitIcon } from './icons.jsx';
 import { t } from '../i18n';
 import { useBackButton, useHistoryLayer, unwindHistory } from '../hooks/useBackButton.js';
 import { OverlayPortal } from '../overlays/OverlayHost.js';
+import {
+  parseGitBranches,
+  parseGitCommit,
+  parseGitDiff as parseGitDiffResponse,
+  parseGitLog,
+  parseGitRepos,
+  parseGitStatus,
+} from '../gitContracts.js';
+import type { GitBranch, GitChange, GitCommitDetail, GitCommitSummary } from '../gitContracts.js';
+import type { GitDiffFile } from '../gitDiff.js';
+
+type DrillFrame =
+  | { kind: 'diff'; path: string; commit?: string; staged?: boolean }
+  | { kind: 'commit'; hash: string };
+
+type ExpandedSection = 'changes' | 'commits';
+
+interface DiffPayload {
+  kind: 'diff';
+  files: GitDiffFile[];
+  truncated: boolean;
+}
+
+interface CommitPayload extends GitCommitDetail {
+  kind: 'commit';
+}
+
+type DrillPayload = DiffPayload | CommitPayload;
+
+interface DrillData {
+  key: string;
+  payload: DrillPayload;
+}
+
+export interface GitPanelProps {
+  open: boolean;
+  pane?: string | null;
+  windowId?: string | null;
+  inset?: number;
+  onClose: () => void;
+}
+
+const cwdOf = (value: unknown): string | null => {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return null;
+  const cwd = (value as Record<string, unknown>).cwd;
+  return typeof cwd === 'string' && cwd ? cwd : null;
+};
+
+const stringList = (value: unknown): string[] => (
+  Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === 'string') : []
+);
+
+const errorMessage = (value: unknown): string => value instanceof Error ? value.message : '';
 
 // basename of an absolute path (the repo-tab label). Exported for the unit test.
-export const basename = (p) => String(p || '').replace(/\/+$/, '').split('/').pop() || p;
+export const basename = (path: string | null | undefined): string => (
+  String(path || '').replace(/\/+$/, '').split('/').pop() || path || ''
+);
 
 // A git porcelain status code → a one-letter badge. '?' is untracked, '!' ignored; otherwise the
 // first non-space of x/y (staged/worktree) wins (M/A/D/R/C/U).
-function statusBadge(x, y) {
+function statusBadge(x: string | null | undefined, y: string | null | undefined): string {
   const code = (x && x !== ' ' ? x : y) || '?';
   return code === '?' ? '?' : code;
 }
@@ -25,18 +80,21 @@ function statusBadge(x, y) {
 // middle, paged 20-at-a-time on scroll) — plus a top-right branch dropdown; it drills into per-file
 // diffs / commit details. Picking a branch only re-points 提交 at that branch's log (git log <ref>);
 // it never checks out, so the shared work tree is safe.
-export default function GitPanel({ open, pane, windowId, inset = 0, onClose }) {
+export default function GitPanel({ open, pane, windowId, inset = 0, onClose }: GitPanelProps) {
   const mountedRef = useRef(true);
-  useEffect(() => () => { mountedRef.current = false; }, []);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
 
-  const [repos, setRepos] = useState([]);
-  const [active, setActive] = useState(null);
+  const [repos, setRepos] = useState<string[]>([]);
+  const [active, setActive] = useState<string | null>(null);
   // Drill-down navigation stack: each frame is {kind:'diff',path,commit?,staged?} | {kind:'commit',hash}.
   // The top frame is the page on screen; [] is the repo home (the combined sections page).
-  const [stack, setStack] = useState([]);
-  const drill = stack.length ? stack[stack.length - 1] : null;
+  const [stack, setStack] = useState<DrillFrame[]>([]);
+  const drill = stack.at(-1) ?? null;
   const [pickOpen, setPickOpen] = useState(false);
-  const [seedCwd, setSeedCwd] = useState(null);       // DirPicker start dir (the pane's cwd)
+  const [seedCwd, setSeedCwd] = useState<string | null>(null); // DirPicker start dir
   // Always-fresh windowId ref — onPick is async and captures a closure; using the ref means we
   // always write to storage under the windowId that's valid at the time the pick resolves, not the
   // stale one from when the callback was created (e.g. when current was briefly null).
@@ -45,23 +103,23 @@ export default function GitPanel({ open, pane, windowId, inset = 0, onClose }) {
 
   // Home data, fetched as a bundle. `changes`/`branches` follow the work tree (not branch-specific);
   // `commits` follows `viewedBranch` (null = current HEAD). null = still loading.
-  const [changes, setChanges] = useState(null);
-  const [branches, setBranches] = useState(null);
-  const [commits, setCommits] = useState(null);
-  const [viewedBranch, setViewedBranch] = useState(null); // which branch's log the 提交 section shows
+  const [changes, setChanges] = useState<GitChange[] | null>(null);
+  const [branches, setBranches] = useState<GitBranch[] | null>(null);
+  const [commits, setCommits] = useState<GitCommitSummary[] | null>(null);
+  const [viewedBranch, setViewedBranch] = useState<string | null>(null); // branch whose log is shown
   const [commitLimit, setCommitLimit] = useState(20);     // 提交 grows by 20 as you scroll to the bottom
   const [loadingMore, setLoadingMore] = useState(false);
   // Home zones (both collapsible): 变更 = top, 提交 = elastic middle. 分支 isn't a zone — it's a
   // top-right dropdown that re-points 提交 at the picked branch (read-only).
-  const [expanded, setExpanded] = useState({ changes: true, commits: true });
+  const [expanded, setExpanded] = useState<Record<ExpandedSection, boolean>>({ changes: true, commits: true });
   const [branchMenuOpen, setBranchMenuOpen] = useState(false);
-  const commitsBodyRef = useRef(null);
+  const commitsBodyRef = useRef<HTMLDivElement | null>(null);
 
-  const [data, setData] = useState(null);   // drill payload { key, payload } — tagged with its viewKey
-  const [error, setError] = useState(null);
+  const [data, setData] = useState<DrillData | null>(null); // payload tagged with its viewKey
+  const [error, setError] = useState<string | null>(null);
   // A soft, non-error note (grey, not red): e.g. the directory you picked simply has no git repo in it —
   // that's an expected outcome, not a failure, so it must never look like the red error line.
-  const [notice, setNotice] = useState(null);
+  const [notice, setNotice] = useState<string | null>(null);
 
   // Hardware/browser Back steps back ONE level and only closes the panel at the repo home — never
   // blows the whole app away mid-navigation. We MIRROR the navigation depth into browser history:
@@ -75,9 +133,9 @@ export default function GitPanel({ open, pane, windowId, inset = 0, onClose }) {
   const pickOpenRef = useRef(pickOpen); pickOpenRef.current = pickOpen;
   const onCloseRef = useRef(onClose); onCloseRef.current = onClose;
   const depthRef = useRef(0);   // # of our live history entries (base + drills + picker)
-  const pushHist = () => { window.history.pushState({ gitOverlay: true }, ''); depthRef.current += 1; };
-  const pushDrill = (frame) => { pushHist(); setStack((s) => [...s, frame]); };
-  const openPicker = () => { pushHist(); setPickOpen(true); };
+  const pushHist = (): void => { window.history.pushState({ gitOverlay: true }, ''); depthRef.current += 1; };
+  const pushDrill = (frame: DrillFrame): void => { pushHist(); setStack((current) => [...current, frame]); };
+  const openPicker = (): void => { pushHist(); setPickOpen(true); };
   useBackButton(open && branchMenuOpen, () => setBranchMenuOpen(false));
   useHistoryLayer(open, () => {
     depthRef.current = Math.max(0, depthRef.current - 1);
@@ -101,29 +159,29 @@ export default function GitPanel({ open, pane, windowId, inset = 0, onClose }) {
     if (!open) return undefined;
     let cancelled = false;
     setStack([]); setViewedBranch(null); setError(null); setNotice(null);
-    const stored = getGitRepos(windowId);
+    const stored = stringList(getGitRepos(windowId));
     if (stored.length) {
       setRepos(stored);
-      setActive((a) => (a && stored.includes(a) ? a : stored[0]));
+      setActive((current) => (current && stored.includes(current) ? current : stored[0] ?? null));
       return () => { cancelled = true; };
     }
     setRepos([]); setActive(null);
     (async () => {
       try {
         if (!pane) return;
-        const { cwd } = await fetchPaneCwd(pane);
+        const cwd = cwdOf(await fetchPaneCwd(pane));
         if (!cwd) return;
-        const { repos: found = [] } = await apiRepos(cwd);
+        const found = parseGitRepos(await apiRepos(cwd));
         if (cancelled || !found.length) return;
-        const next = addGitRepos(windowId, found.map((r) => r.path));
+        const next = stringList(addGitRepos(windowId, found.map((repo) => repo.path)));
         if (cancelled) return;
         setRepos(next);
         setActive(next[0] ?? null);
-      } catch (e) {
+      } catch (caught) {
         if (cancelled) return;
         // "outside home" isn't a failure — the repo just sits outside the area handmux can browse.
         // Explain why (and what's reachable) in the soft grey note, not the red error line.
-        if (e?.message === 'outside home') setNotice(t('git.outsideRoots'));
+        if (errorMessage(caught) === 'outside home') setNotice(t('git.outsideRoots'));
         else setError(t('git.errReadRepo'));
       }
     })();
@@ -136,7 +194,10 @@ export default function GitPanel({ open, pane, windowId, inset = 0, onClose }) {
   useEffect(() => {
     if (!open || !pane) return undefined;
     let cancelled = false;
-    fetchPaneCwd(pane).then(({ cwd }) => { if (!cancelled && cwd) setSeedCwd(cwd); }).catch(() => {});
+    fetchPaneCwd(pane).then((response) => {
+      const cwd = cwdOf(response);
+      if (!cancelled && cwd) setSeedCwd(cwd);
+    }).catch(() => {});
     return () => { cancelled = true; };
   }, [open, pane]);
 
@@ -149,10 +210,12 @@ export default function GitPanel({ open, pane, windowId, inset = 0, onClose }) {
     setChanges(null); setBranches(null); setCommits(null); setViewedBranch(null); setCommitLimit(20); setError(null); setNotice(null);
     (async () => {
       try {
-        const [st, br] = await Promise.all([gitStatus(active), gitBranches(active)]);
+        const [statusResponse, branchesResponse] = await Promise.all([gitStatus(active), gitBranches(active)]);
         if (cancelled) return;
-        setChanges(st.changes ?? []);
-        setBranches(br.branches ?? []);
+        const nextChanges = parseGitStatus(statusResponse);
+        const nextBranches = parseGitBranches(branchesResponse);
+        setChanges(nextChanges);
+        setBranches(nextBranches);
       } catch {
         if (!cancelled) setError(t('git.errLoad'));
       }
@@ -168,7 +231,7 @@ export default function GitPanel({ open, pane, windowId, inset = 0, onClose }) {
     let cancelled = false;
     (async () => {
       try {
-        const { commits: list = [] } = await gitLog(active, { ref: viewedBranch || undefined, limit: commitLimit });
+        const list = parseGitLog(await gitLog(active, { ref: viewedBranch || undefined, limit: commitLimit }));
         if (!cancelled) setCommits(list);
       } catch {
         if (!cancelled) setCommits([]);
@@ -193,12 +256,12 @@ export default function GitPanel({ open, pane, windowId, inset = 0, onClose }) {
     setError(null); setData(null);
     (async () => {
       try {
-        let payload;
+        let payload: DrillPayload;
         if (drill.kind === 'diff') {
-          const { diff, truncated } = await gitDiff(active, { path: drill.path, commit: drill.commit, staged: drill.staged });
-          payload = { files: parseDiff(diff), truncated };
+          const response = parseGitDiffResponse(await gitDiff(active, { path: drill.path, commit: drill.commit, staged: drill.staged }));
+          payload = { kind: 'diff', files: parseDiff(response.diff), truncated: response.truncated };
         } else {
-          payload = await gitCommit(active, drill.hash);
+          payload = { kind: 'commit', ...parseGitCommit(await gitCommit(active, drill.hash)) };
         }
         if (!cancelled) setData({ key: viewKey, payload });
       } catch {
@@ -211,57 +274,57 @@ export default function GitPanel({ open, pane, windowId, inset = 0, onClose }) {
   // Both the on-screen ‹ and hardware Back go through history so they share the one back path above.
   const goBack = useCallback(() => { window.history.back(); }, []);
 
-  const switchRepo = (p) => { setActive(p); setStack([]); setViewedBranch(null); };
-  const onPick = async (dir) => {
+  const switchRepo = (path: string): void => { setActive(path); setStack([]); setViewedBranch(null); };
+  const onPick = async (dir: string): Promise<void> => {
     window.history.back();   // dismiss the picker (pops its history entry → onPop closes it)
     setNotice(null);
     try {
-      const { repos: found = [] } = await apiRepos(dir);
+      const found = parseGitRepos(await apiRepos(dir));
       if (!mountedRef.current) return;
       if (!found.length) { setNotice(t('git.noRepoInDir')); return; }
-      const foundPaths = found.map((r) => r.path);
+      const foundPaths = found.map((repo) => repo.path);
       // Use the ref so we always write to the current windowId even if the prop was stale in this closure.
       const wid = windowIdRef.current;
-      const next = wid ? addGitRepos(wid, foundPaths) : foundPaths;
+      const next = wid ? stringList(addGitRepos(wid, foundPaths)) : foundPaths;
       // Functional updater: append to whatever the current list is (avoids stale-closure overwrite).
       setRepos((prev) => {
         const merged = [...prev];
         for (const p of next) if (!merged.includes(p)) merged.push(p);
         return merged;
       });
-      const firstNew = foundPaths.find((p) => !repos.includes(p)) || foundPaths[0];
-      switchRepo(firstNew);
-    } catch (e) {
+      const firstNew = foundPaths.find((path) => !repos.includes(path)) ?? foundPaths[0];
+      if (firstNew) switchRepo(firstNew);
+    } catch (caught) {
       if (!mountedRef.current) return;
-      if (e?.message === 'outside home') setNotice(t('git.outsideRoots'));
+      if (errorMessage(caught) === 'outside home') setNotice(t('git.outsideRoots'));
       else setError(t('git.errReadDir'));
     }
   };
-  const unbind = (p) => {
-    const next = removeGitRepo(windowId, p);
+  const unbind = (path: string): void => {
+    const next = stringList(removeGitRepo(windowId, path));
     setRepos(next);
-    if (active === p) { setActive(next[0] ?? null); setStack([]); setViewedBranch(null); }
+    if (active === path) { setActive(next[0] ?? null); setStack([]); setViewedBranch(null); }
   };
 
   const currentBranch = (branches || []).find((b) => b.current) || null;
   // Pick a branch → point 提交 at it (the current branch maps to null = HEAD). Picking the branch
   // already on screen is a NO-OP: clearing commits without changing viewedBranch/commitLimit would
   // leave the fetch effect's deps unchanged, so it'd never re-run and 提交 would hang on 加载中.
-  const selectBranch = (name) => {
+  const selectBranch = (name: string): void => {
     const next = name === currentBranch?.name ? null : name;
     if (next === viewedBranch) return;
     setViewedBranch(next);
     setCommits(null); setCommitLimit(20);
   };
-  const toggle = (k) => setExpanded((e) => ({ ...e, [k]: !e[k] }));
+  const toggle = (key: ExpandedSection): void => setExpanded((current) => ({ ...current, [key]: !current[key] }));
 
   // 提交 is the middle zone with its own scroll: near the bottom, pull the next 20 (only while the
   // last page came back full — a short page means we've reached the end).
   const commitsHasMore = commits != null && commits.length >= commitLimit;
-  const onCommitsScroll = (e) => {
+  const onCommitsScroll = (event: ReactUIEvent<HTMLDivElement>): void => {
     if (!commitsHasMore || loadingMore) return;
-    const el = e.currentTarget;
-    if (el.scrollHeight - el.scrollTop - el.clientHeight < 80) {
+    const element = event.currentTarget;
+    if (element.scrollHeight - element.scrollTop - element.clientHeight < 80) {
       setLoadingMore(true);
       setCommitLimit((l) => l + 20);
     }
@@ -275,15 +338,20 @@ export default function GitPanel({ open, pane, windowId, inset = 0, onClose }) {
   // Stay mounted while closed (translated off-screen) so opening slides up via the .file-sheet
   // transition, exactly like the file browser — returning null would mount already-open and skip it.
   // Only surface drill data that belongs to the page on screen (see viewKey).
-  const shown = data && data.key === viewKey ? data.payload : null;
+  const shown: DrillPayload | null = data && data.key === viewKey ? data.payload : null;
   const drilledIn = !!drill;
   const title = drill?.kind === 'commit' ? t('git.commitDetail')
     : drill?.kind === 'diff' ? (drill.path || t('git.diff'))
     : '';
+  const sheetStyle: CSSProperties & { '--kb-inset': string } = { '--kb-inset': `${inset}px` };
 
   return (
     <OverlayPortal keyboardInset={inset}>
-      <div className={`file-sheet git-sheet ${open ? 'open' : ''}`} aria-hidden={!open} style={{ '--kb-inset': `${inset}px` }}>
+      <div
+        className={`file-sheet git-sheet ${open ? 'open' : ''}`}
+        aria-hidden={!open}
+        style={sheetStyle}
+      >
       {/* Top row, FileManager-style: repo switching + 绑定 on the left (scrolls), collapse at top-right.
           When drilled into a diff/commit, the left area becomes a back button + the file/commit title. */}
       <div className="file-tabs git-head">
@@ -368,8 +436,15 @@ export default function GitPanel({ open, pane, windowId, inset = 0, onClose }) {
         {drilledIn && active && !error && (
           <div className="git-scroll">
             {!shown ? <div className="git-loading">{t('common.loading')}</div>
-              : drill.kind === 'diff' ? <DiffView data={shown} />
-              : <CommitView data={shown} onOpenFile={(path) => pushDrill({ kind: 'diff', path, commit: drill.hash })} />}
+              : shown.kind === 'diff' ? <DiffView data={shown} />
+              : <CommitView
+                  data={shown}
+                  onOpenFile={(path) => pushDrill({
+                    kind: 'diff',
+                    path,
+                    commit: drill.kind === 'commit' ? drill.hash : undefined,
+                  })}
+                />}
           </div>
         )}
 
@@ -412,7 +487,29 @@ export default function GitPanel({ open, pane, windowId, inset = 0, onClose }) {
 // One home zone. `variant` (top|mid) fixes where it sits and how it flexes. A tap-to-toggle caret
 // header hides the body when collapsed; the body scrolls internally (the middle zone also wires a
 // scroll handler for the 提交 load-more) so the zones keep their positions as content grows/shrinks.
-function Section({ variant, title, subtitle, count, expanded, onToggle, onScroll, bodyRef, children }) {
+interface SectionProps {
+  variant: 'top' | 'mid';
+  title: string;
+  subtitle?: string | null;
+  count?: number;
+  expanded: boolean;
+  onToggle: () => void;
+  onScroll?: (event: ReactUIEvent<HTMLDivElement>) => void;
+  bodyRef?: RefObject<HTMLDivElement>;
+  children: ReactNode;
+}
+
+function Section({
+  variant,
+  title,
+  subtitle,
+  count,
+  expanded,
+  onToggle,
+  onScroll,
+  bodyRef,
+  children,
+}: SectionProps) {
   return (
     <div className={`git-section git-section--${variant} ${expanded ? 'open' : ''}`}>
       <button className="git-section-head" onClick={onToggle} aria-expanded={expanded}>
@@ -426,8 +523,13 @@ function Section({ variant, title, subtitle, count, expanded, onToggle, onScroll
   );
 }
 
-function ChangesView({ data, onOpenFile }) {
-  const changes = data?.changes ?? [];
+interface ChangesViewProps {
+  data: { changes: GitChange[] };
+  onOpenFile: (path: string, staged: boolean) => void;
+}
+
+function ChangesView({ data, onOpenFile }: ChangesViewProps) {
+  const changes = data.changes;
   if (!changes.length) return <div className="git-empty">{t('git.cleanTree')}</div>;
   return (
     <div className="git-list">
@@ -444,8 +546,13 @@ function ChangesView({ data, onOpenFile }) {
   );
 }
 
-function CommitsView({ data, onOpen }) {
-  const commits = data?.commits ?? [];
+interface CommitsViewProps {
+  data: { commits: GitCommitSummary[] };
+  onOpen: (hash: string) => void;
+}
+
+function CommitsView({ data, onOpen }: CommitsViewProps) {
+  const commits = data.commits;
   if (!commits.length) return <div className="git-empty">{t('git.noCommits')}</div>;
   return (
     <div className="git-list">
@@ -462,9 +569,13 @@ function CommitsView({ data, onOpen }) {
   );
 }
 
-function CommitView({ data, onOpenFile }) {
-  if (!data) return null;
-  const files = data.files ?? [];
+interface CommitViewProps {
+  data: CommitPayload;
+  onOpenFile: (path: string) => void;
+}
+
+function CommitView({ data, onOpenFile }: CommitViewProps) {
+  const files = data.files;
   return (
     <div className="git-commit-detail">
       {data.message && <pre className="git-commit-msg">{data.message}</pre>}
@@ -480,16 +591,32 @@ function CommitView({ data, onOpenFile }) {
   );
 }
 
-const DIFF_FONT_LAST = DOC_FONT_SIZES.length - 1;
+const rawDiffFontSizes: unknown = DOC_FONT_SIZES;
+const DIFF_FONT_SIZES: readonly number[] = Array.isArray(rawDiffFontSizes)
+  && rawDiffFontSizes.length > 0
+  && rawDiffFontSizes.every((value) => typeof value === 'number' && Number.isFinite(value))
+  ? rawDiffFontSizes
+  : [10, 11, 12, 13, 14, 16, 18, 20, 22];
+const DIFF_FONT_LAST = DIFF_FONT_SIZES.length - 1;
 
-function DiffView({ data }) {
-  const [fontIdx, setFontIdx] = useState(() => getDiffFontIndex());
-  const bump = (d) => { const n = Math.min(DIFF_FONT_LAST, Math.max(0, fontIdx + d)); setFontIdx(n); setDiffFontIndex(n); };
-  if (!data) return null;
-  const files = data.files ?? [];
+const readDiffFontIndex = (): number => {
+  const value: unknown = getDiffFontIndex();
+  return typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= DIFF_FONT_LAST
+    ? value
+    : Math.min(2, DIFF_FONT_LAST);
+};
+
+function DiffView({ data }: { data: DiffPayload }) {
+  const [fontIdx, setFontIdx] = useState<number>(readDiffFontIndex);
+  const bump = (delta: number): void => {
+    const next = Math.min(DIFF_FONT_LAST, Math.max(0, fontIdx + delta));
+    setFontIdx(next);
+    setDiffFontIndex(next);
+  };
+  const files = data.files;
   if (!files.length) return <div className="git-empty">{t('git.noDiff')}</div>;
   return (
-    <div className="git-diff-wrap" style={{ fontSize: `${DOC_FONT_SIZES[fontIdx]}px` }}>
+    <div className="git-diff-wrap" style={{ fontSize: `${DIFF_FONT_SIZES[fontIdx]}px` }}>
       <div className="git-diff-zoom">
         <button className="doc-zoom-btn" onClick={() => bump(-1)} disabled={fontIdx <= 0} aria-label={t('git.fontSmaller')}>A−</button>
         <button className="doc-zoom-btn" onClick={() => bump(1)} disabled={fontIdx >= DIFF_FONT_LAST} aria-label={t('git.fontLarger')}>A+</button>
