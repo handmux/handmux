@@ -7,7 +7,12 @@
 // NOTE: options are NOT read from the transcript here — a pending prompt's options aren't written to the
 // .jsonl until AFTER it's answered (verified live), which is exactly why the old transcript-based gate could
 // only ever show 允许/拒绝. See server/src/pendingPrompt.js.
-export function fallbackGate() {
+export interface FallbackGate {
+  prompt: string;
+  options: Array<{ label: string; keys: string[] }>;
+}
+
+export function fallbackGate(): FallbackGate {
   return {
     prompt: '需要你确认',
     options: [

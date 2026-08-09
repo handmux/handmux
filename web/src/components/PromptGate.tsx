@@ -1,5 +1,13 @@
 import { useEffect, useState } from 'react';
 import { sendText, sendKeys, UnauthorizedError } from '../api.js';
+import type { PendingPrompt } from '../hooks/usePendingPrompt.js';
+
+interface PromptGateProps {
+  pane: string;
+  prompt: PendingPrompt;
+  onAuthFail?: () => void;
+  onAct?: () => void;
+}
 
 // The 对话-lens action gate: renders a pending AskUserQuestion / permission menu (scraped from the pane via
 // usePendingPrompt) as a native single-select list + 确认/取消 — instead of blindly showing 允许/拒绝.
@@ -12,10 +20,10 @@ import { sendText, sendKeys, UnauthorizedError } from '../api.js';
 // it selects AND submits; for a multi-question it selects AND auto-advances to the next tab; on the review
 // screen digit 1 = "Submit answers". So 确认 sends String(sel), and the poll (usePendingPrompt) picks up
 // whatever screen comes next (next question → review → gate gone). 取消 sends Escape.
-export default function PromptGate({ pane, prompt, onAuthFail, onAct }) {
+export default function PromptGate({ pane, prompt, onAuthFail, onAct }: PromptGateProps) {
   const first = prompt.cursor ?? prompt.options[0]?.n ?? null;
-  const [sel, setSel] = useState(first);
-  const [cancelSig, setCancelSig] = useState(null);
+  const [sel, setSel] = useState<number | null>(first);
+  const [cancelSig, setCancelSig] = useState<string | null>(null);
   // Reset the local selection whenever the underlying screen changes (a new question / the review screen),
   // keyed by a signature of the prompt so a stale pick never carries across steps. Cancellation stores that
   // same signature: a new screen is synchronously unarmed, without waiting for this effect to run.
@@ -30,16 +38,21 @@ export default function PromptGate({ pane, prompt, onAuthFail, onAct }) {
     return () => clearTimeout(timer);
   }, [cancelArmed]);
 
-  const send = async (fn) => {
+  const send = async (fn: () => void | Promise<unknown>): Promise<void> => {
     try { await fn(); onAct?.(); }
     catch (e) { if (e instanceof UnauthorizedError) onAuthFail?.(); }
   };
-  const pick = (n) => send(() => sendText(pane, String(n), false)); // bare digit = the menu hotkey
-  const cancel = () => send(() => sendKeys(pane, ['Escape']));
-  const requestCancel = (action = cancel) => {
+  const pick = (n: number): Promise<void> => send(() => sendText(pane, String(n), false));
+  const cancel = (): Promise<void> => send(() => sendKeys(pane, ['Escape']));
+  const requestCancel = (action: () => void | Promise<unknown> = cancel): void => {
     if (!cancelArmed) { setCancelSig(sig); return; }
     setCancelSig(null);
-    action();
+    void action();
+  };
+  const confirm = (): void => {
+    if (sel === null) return;
+    setCancelSig(null);
+    void pick(sel);
   };
   const cancelLabel = cancelArmed ? '再点一次取消' : '取消';
 
@@ -74,7 +87,8 @@ export default function PromptGate({ pane, prompt, onAuthFail, onAct }) {
       </div>
       <div className="chat-gate-actions">
         <button type="button" className="chat-gate-btn" onClick={() => requestCancel()}>{cancelLabel}</button>
-        <button type="button" className="chat-gate-btn primary" disabled={sel == null} onClick={() => { setCancelSig(null); pick(sel); }}>确认</button>
+        <button type="button" className="chat-gate-btn primary" disabled={sel == null}
+          onClick={confirm}>确认</button>
       </div>
     </div>
   );
