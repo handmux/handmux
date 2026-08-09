@@ -1210,13 +1210,14 @@ const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Terminal({
           term.write('\x1b[?25l\x1b[0m\x1b[2J\x1b[3J\x1b[H' + framed, resolve);
         });
         if (disposed) return false;
-        if (historyMode && Number.isFinite(hist.historyLines)) {
+        if (historyMode && typeof hist.historyLines === 'number'
+          && Number.isFinite(hist.historyLines)) {
           liveBoundaryLine = hist.historyLines;
           drawHistoryBoundary();
         }
         lastAnsi = hist.ansi;
         lastCur = curKey;
-        curInfo = hist.cur; // placed by placeCursor() below (and again by fit, after any resize)
+        curInfo = hist.cur ?? null; // placed by placeCursor() below (and again by fit, after any resize)
         // Reveal-on-activity handoff: a send set forceCursorRef so the block stays lit while the app hides
         // the cursor (Claude working). The moment the app shows its OWN cursor again (cur.vis=1 → back to
         // idle/accepting input), drop the force so a LATER app-driven hide can hide it normally.

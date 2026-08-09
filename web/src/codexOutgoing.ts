@@ -14,7 +14,7 @@ export interface CodexOutgoingItem {
 }
 
 export interface CodexOutgoingSettlement {
-  result?: CodexSendResult;
+  result?: CodexSendResult | Record<string, unknown>;
   error?: unknown;
   uncertain?: boolean;
 }
@@ -31,9 +31,10 @@ export function settleCodexOutgoing(
     // failure, so the composer reports that uncertainty separately without inventing a durable message.
     return items.filter((candidate) => candidate.id !== id);
   }
-  if (result?.queued) {
+  if (result && 'queued' in result && result.queued === true && 'item' in result) {
+    const queued = result as Extract<CodexSendResult, { queued: true }>;
     return items.map((candidate) => candidate.id === id
-      ? { ...candidate, source: 'queue', status: 'queued', queueId: result.item?.id || null }
+      ? { ...candidate, source: 'queue', status: 'queued', queueId: queued.item.id || null }
       : candidate);
   }
   const status = item.source === 'steer' ? 'steered' : 'accepted';

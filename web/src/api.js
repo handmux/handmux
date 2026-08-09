@@ -7,57 +7,15 @@ import {
 } from '../../server/src/codexStreamProtocol.js';
 import { parseCodexToolProjection } from '../../server/src/codexToolProtocol.js';
 import { parseCodexQueueItem, parseCodexSendResult } from '../../server/src/codexQueueProtocol.js';
+import { requestJson as req } from './apiRequest.js';
 
 export { ApiError, UnauthorizedError } from './apiErrors.js';
-
-async function req(path, opts = {}) {
-  const token = getToken();
-  const { timeoutMs, signal: externalSignal, ...rest } = opts;
-  const headers = { Authorization: `Bearer ${token ?? ''}`, ...(rest.headers || {}) };
-  if (rest.body) headers['Content-Type'] = 'application/json';
-  let controller = null;
-  let to = null;
-  const forwardAbort = () => controller?.abort();
-  if (timeoutMs || externalSignal) {
-    controller = new AbortController();
-    if (externalSignal?.aborted) controller.abort();
-    else externalSignal?.addEventListener('abort', forwardAbort, { once: true });
-    if (timeoutMs) to = setTimeout(() => controller.abort(), timeoutMs);
-  }
-  try {
-    const res = await fetch(path, { cache: 'no-store', ...rest, headers, signal: controller?.signal });
-    if (res.status === 401) throw new UnauthorizedError();
-    if (!res.ok) {
-      // Surface the server's {error} token (e.g. "port not listening") so callers can show why, and carry
-      // the status + token as structured fields on the thrown ApiError (callers branch on e.status /
-      // e.serverError instead of parsing the message).
-      let errorBody = null;
-      try { errorBody = parseApiErrorBody(await res.json()); } catch { /* not json */ }
-      throw new ApiError(
-        errorBody?.error || `${path} -> ${res.status}`,
-        res.status,
-        errorBody?.error,
-        errorBody?.code,
-        errorBody?.requestId,
-      );
-    }
-    if (res.status === 204) return { unchanged: true }; // conditional poll: server says nothing changed
-    return await res.json();
-  } catch (e) {
-    // An abort surfaces as a DOMException — normalize it to a plain Error so callers only ever
-    // special-case UnauthorizedError and treat everything else (incl. timeouts) as a poll failure.
-    if (controller?.signal.aborted && !externalSignal?.aborted) throw new Error(`${path} -> timeout`);
-    throw e;
-  } finally {
-    if (to) clearTimeout(to);
-    externalSignal?.removeEventListener('abort', forwardAbort);
-  }
-}
 
 export const getSessions = () => req('/api/sessions');
 export const getUsage = () => req('/api/usage');
 export const getWindows = (session) => req(`/api/windows?session=${encodeURIComponent(session)}`);
 export const getPanes = (window) => req(`/api/panes?window=${encodeURIComponent(window)}`, { timeoutMs: 8000 });
+/** @returns {Promise<import('./apiRequest.js').TerminalHistoryResponse>} */
 export const getHistory = (pane, lines = 1500, since) =>
   req(`/api/history?pane=${encodeURIComponent(pane)}&lines=${lines}${since ? `&since=${since}` : ''}`, { timeoutMs: 8000 });
 // The 对话 lens's transcript: same req()-based conditional-poll convention as getHistory (8s timeout),
@@ -177,8 +135,10 @@ export const sendCodexMessage = (pane, text, requestId = null) =>
     if (!parsed) throw new Error('Codex send returned an invalid response');
     return parsed;
   });
+/** @returns {Promise<import('./apiRequest.js').JsonObjectResponse>} */
 export const steerCodexQueuedMessage = (pane, id) =>
   req('/api/codex/queue/steer', { method: 'POST', body: JSON.stringify({ pane, id }), timeoutMs: 8000 });
+/** @returns {Promise<import('./apiRequest.js').JsonObjectResponse>} */
 export const removeCodexQueuedMessage = (pane, id) =>
   req('/api/codex/queue/remove', { method: 'POST', body: JSON.stringify({ pane, id }), timeoutMs: 8000 });
 export const beginCodexQueuedEdit = (pane, id) =>
@@ -201,8 +161,10 @@ export const clearCodexSession = (pane) =>
   req('/api/codex/clear', { method: 'POST', body: JSON.stringify({ pane }), timeoutMs: 8000 });
 export const getCodexModels = (pane) =>
   req(`/api/codex/models?pane=${encodeURIComponent(pane)}`, { timeoutMs: 8000 });
+/** @returns {Promise<import('./apiRequest.js').GoalResponse>} */
 export const getCodexGoal = (pane) =>
   req(`/api/codex/goal?pane=${encodeURIComponent(pane)}`, { timeoutMs: 8000 });
+/** @returns {Promise<import('./apiRequest.js').GoalResponse>} */
 export const updateCodexGoal = (pane, updates) =>
   req('/api/codex/goal', { method: 'POST', body: JSON.stringify({ pane, ...updates }), timeoutMs: 8000 });
 export const clearCodexGoal = (pane) =>
@@ -265,6 +227,7 @@ export const fetchPaneCwd = (pane) =>
   req(`/api/pane-cwd?pane=${encodeURIComponent(pane)}`, { timeoutMs: 8000 });
 // Mint a short-lived signed iFlytek IAT WebSocket URL (server holds the secret). The browser then
 // connects to iFlytek directly. 8s timeout so a hung sign call doesn't freeze the mic press.
+/** @returns {Promise<import('./apiRequest.js').AsrSignResponse>} */
 export const signAsr = () => req('/api/asr/sign', { timeoutMs: 8000 });
 
 // Which optional integrations this install has configured (e.g. { asr: true }). Drives the UI hiding
