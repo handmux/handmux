@@ -1,37 +1,112 @@
 import crypto from 'node:crypto';
 import { buildRestorePlan } from './planner.js';
-import { executeRestore } from './restore.js';
-import { createOperationManager, normalizeRestoreRequest } from './operations.js';
-import { buildRecoveryMapping } from './mapping.js';
+import { executeRestore, type RestoreResult } from './restore.js';
+import {
+  createOperationManager,
+  normalizeRestoreRequest,
+  type RestoreOperation,
+  type RestoreRequest,
+} from './operations.js';
+import {
+  buildRecoveryMapping,
+  type RecoveryMapping,
+  type RecoveryMappingAddition,
+} from './mapping.js';
+import type { createWorkspaceStore, WorkspaceRecovery } from './store.js';
+import type {
+  WorkspaceCheckpoint,
+  WorkspaceSnapshot,
+} from './schema.js';
 
-function unwrapCheckpoint(result) {
-  if (result?.status !== 'ok' || !result.value) {
-    throw new Error(result?.error || `checkpoint is ${result?.status || 'unavailable'}`);
-  }
-  return { checkpoint: result.value, warnings: [result.warning, ...(result.warnings || [])].filter(Boolean) };
+type WorkspaceStore = ReturnType<typeof createWorkspaceStore>;
+type ExecutorOptions = Parameters<typeof executeRestore>[0];
+type ExecutorResult = Awaited<ReturnType<typeof executeRestore>>;
+type RuntimeRestoreResult = Omit<ExecutorResult, 'mapping'> & {
+  mapping: RecoveryMapping | null;
+  warnings?: string[];
+};
+type MappingKind = keyof RecoveryMappingAddition['runtime'];
+type LiveTopology = Pick<WorkspaceSnapshot, 'tmuxVersion' | 'active' | 'sessions' | 'windows'> & {
+  status: 'ok' | 'empty';
+  error?: unknown;
+};
+type RuntimeTmux = ExecutorOptions['tmux'] & {
+  captureTopology(options?: { readOnly?: boolean }): Promise<LiveTopology | { status: string; error?: unknown }>;
+};
+interface RuntimeLock {
+  tryAcquire(owner: { operationId: string }): Promise<{ release(): Promise<void> } | null>;
+  withLock<T>(owner: { operationId: string }, fn: () => T | Promise<T>): Promise<T>;
+}
+interface ReconcileResult { status: string; [key: string]: unknown }
+interface RuntimeCheckpointer {
+  start?(): unknown | Promise<unknown>;
+  health?(): RuntimeHealth;
+  stop(): unknown;
+  requestReconcile(): unknown;
+  confirmEmpty(): unknown;
+  reconcile(cause?: string): Promise<ReconcileResult>;
+}
+interface RuntimeHealth { status: 'starting' | 'ready' | 'degraded'; detail: string | null }
+interface WorkspaceRuntimeOptions {
+  store: WorkspaceStore;
+  tmux: RuntimeTmux;
+  lock: RuntimeLock;
+  checkpointer: RuntimeCheckpointer;
+  now?: () => number;
+  randomUUID?: () => string;
+  planner?: typeof buildRestorePlan;
+  executor?: typeof executeRestore;
+  agents?: ExecutorOptions['agents'];
+  access?: ExecutorOptions['access'];
+  home?: string;
+  restoreGuardAttempts?: number;
 }
 
-async function readCheckpoint(store, checkpointId) {
+const recordOf = (value: unknown): Record<string, unknown> | null => (
+  value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown> : null
+);
+const errorMessage = (error: unknown): string => error instanceof Error ? error.message : String(error);
+
+function unwrapCheckpoint(result: unknown): { checkpoint: WorkspaceCheckpoint; warnings: string[] } {
+  const record = recordOf(result);
+  if (record?.status !== 'ok' || !record.value) {
+    const detail = typeof record?.error === 'string' ? record.error : `checkpoint is ${String(record?.status || 'unavailable')}`;
+    throw new Error(detail);
+  }
+  const warnings = [record.warning, ...(Array.isArray(record.warnings) ? record.warnings : [])]
+    .filter((warning): warning is string => typeof warning === 'string' && Boolean(warning));
+  return { checkpoint: record.value as WorkspaceCheckpoint, warnings };
+}
+
+async function readCheckpoint(
+  store: WorkspaceStore,
+  checkpointId: string,
+): Promise<{ checkpoint: WorkspaceCheckpoint; warnings: string[] }> {
   return unwrapCheckpoint(checkpointId === 'latest'
     ? await store.readLatestCheckpoint()
     : await store.readCheckpoint(checkpointId));
 }
 
-async function readRecovery(store, checkpointId, historical) {
+async function readRecovery(
+  store: WorkspaceStore,
+  checkpointId: string,
+  historical: boolean,
+): Promise<WorkspaceRecovery | null> {
   const result = await store.readRecovery(checkpointId);
   if (result.status === 'ok') return result.value;
   if (historical && result.status === 'missing') return null;
-  throw new Error(result.error || `recovery state is ${result.status}`);
+  throw new Error(result.status === 'corrupt' ? result.error : `recovery state is ${result.status}`);
 }
 
-async function captureLive(tmux) {
+async function captureLive(tmux: RuntimeTmux): Promise<LiveTopology> {
   const live = await tmux.captureTopology({ readOnly: true });
-  if (live?.status === 'ok') return live;
-  if (live?.status === 'empty') return { ...live, sessions: [], windows: [] };
-  throw new Error(live?.error || 'current tmux topology is unavailable');
+  if (live.status === 'ok') return live as LiveTopology;
+  if (live.status === 'empty') return { ...live, sessions: [], windows: [] } as LiveTopology;
+  throw new Error(typeof live.error === 'string' ? live.error : 'current tmux topology is unavailable');
 }
 
-function blankMapping() {
+function blankMapping(): RecoveryMappingAddition {
   return {
     names: {},
     runtime: { sessions: {}, windows: {}, panes: {} },
@@ -39,12 +114,22 @@ function blankMapping() {
   };
 }
 
-function mapRuntime(mapping, kind, source, logical, runtime) {
+function mapRuntime(
+  mapping: RecoveryMappingAddition,
+  kind: MappingKind,
+  source: unknown,
+  logical: unknown,
+  runtime: string,
+): void {
   if (typeof source === 'string' && source) mapping.runtime[kind][source] = runtime;
   if (typeof logical === 'string' && logical) mapping.logical[kind][logical] = runtime;
 }
 
-function mappingForAlreadyPresent(checkpoint, live, results) {
+function mappingForAlreadyPresent(
+  checkpoint: WorkspaceCheckpoint,
+  live: LiveTopology,
+  results: RestoreResult[],
+): RecoveryMappingAddition {
   const mapping = blankMapping();
   const resolved = new Set(results.filter((row) => row.status === 'already-present').map((row) => row.logicalId));
   const liveSessions = new Map(live.sessions.map((session) => [session.id, session]));
@@ -71,13 +156,23 @@ function mappingForAlreadyPresent(checkpoint, live, results) {
   return mapping;
 }
 
-function sorted(value) {
+function sorted(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(sorted);
   if (!value || typeof value !== 'object') return value;
-  return Object.fromEntries(Object.keys(value).sort().map((key) => [key, sorted(value[key])]));
+  const record = value as Record<string, unknown>;
+  return Object.fromEntries(Object.keys(record).sort().map((key) => [key, sorted(record[key])]));
 }
 
-function restoreGuard(live) {
+interface RestoreGuard {
+  topologyFingerprint: string;
+  identities: {
+    sessions: string[][];
+    windows: string[][];
+    panes: string[][];
+  };
+}
+
+function restoreGuard(live: LiveTopology): RestoreGuard {
   const topology = {
     status: live.status,
     tmuxVersion: live.tmuxVersion || null,
@@ -95,7 +190,7 @@ function restoreGuard(live) {
   };
 }
 
-function sameRestoreGuard(left, right) {
+function sameRestoreGuard(left: RestoreGuard, right: RestoreGuard): boolean {
   return JSON.stringify(left) === JSON.stringify(right);
 }
 
@@ -112,24 +207,24 @@ export function createWorkspaceRuntime({
   access,
   home,
   restoreGuardAttempts = 3,
-} = {}) {
+}: WorkspaceRuntimeOptions) {
   const operations = createOperationManager({
     store,
     now,
     randomUUID,
     tryAcquireOperationLock: (owner) => lock.tryAcquire(owner),
   });
-  let startPromise = null;
-  let startupHealth = { status: 'starting', detail: 'workspace-starting' };
+  let startPromise: Promise<[number | undefined, unknown]> | null = null;
+  let startupHealth: RuntimeHealth = { status: 'starting', detail: 'workspace-starting' };
 
-  async function resolveOperationRequest(requestInput = {}) {
+  async function resolveOperationRequest(requestInput: unknown = {}): Promise<RestoreRequest> {
     const request = normalizeRestoreRequest(requestInput);
     if (request.checkpointId !== 'latest') return request;
     const { checkpoint } = unwrapCheckpoint(await store.readLatestCheckpoint());
     return { ...request, checkpointId: checkpoint.id };
   }
 
-  async function planRestore(requestInput = {}) {
+  async function planRestore(requestInput: unknown = {}) {
     const request = normalizeRestoreRequest(requestInput);
     const { checkpoint, warnings } = await readCheckpoint(store, request.checkpointId);
     const recovery = await readRecovery(store, checkpoint.id, request.historical);
@@ -143,7 +238,7 @@ export function createWorkspaceRuntime({
     return { request, checkpoint, recovery, live, plan };
   }
 
-  async function guardedPlanRestore(requestInput = {}) {
+  async function guardedPlanRestore(requestInput: unknown = {}) {
     const request = normalizeRestoreRequest(requestInput);
     const { checkpoint, warnings } = await readCheckpoint(store, request.checkpointId);
     const recovery = await readRecovery(store, checkpoint.id, request.historical);
@@ -165,7 +260,7 @@ export function createWorkspaceRuntime({
     throw new Error(`tmux topology changed during restore planning ${restoreGuardAttempts} times; retry restore`);
   }
 
-  async function getRestorePlan(request = {}) {
+  async function getRestorePlan(request: unknown = {}) {
     await start();
     const state = await planRestore(request);
     const serverNow = new Date(now()).toISOString();
@@ -179,29 +274,39 @@ export function createWorkspaceRuntime({
     return Object.freeze({ ...state.plan, mapping: state.recovery?.mapping || null, serverNow, promptEligible });
   }
 
-  async function getProtectionStatus() {
-    let live;
+  async function getProtectionStatus(): Promise<{
+    status: 'protected' | 'unprotected' | 'degraded';
+    lastSuccessfulCaptureAt: string | null;
+    errorCode: string | null;
+  }> {
+    let live: Awaited<ReturnType<WorkspaceStore['readLive']>>;
     try {
       live = await store.readLive();
     } catch {
       return { status: 'degraded', lastSuccessfulCaptureAt: null, errorCode: 'live-unavailable' };
     }
-    if (live?.status === 'ok') {
-      return { status: 'protected', lastSuccessfulCaptureAt: live.value?.capturedAt || null, errorCode: null };
+    if (live.status === 'ok') {
+      return { status: 'protected', lastSuccessfulCaptureAt: live.value.capturedAt || null, errorCode: null };
     }
-    if (live?.status === 'empty') {
+    if (live.status === 'empty') {
       return { status: 'unprotected', lastSuccessfulCaptureAt: null, errorCode: null };
     }
     return {
       status: 'degraded',
       lastSuccessfulCaptureAt: null,
-      errorCode: live?.status === 'corrupt' ? 'live-corrupt' : 'live-unavailable',
+      errorCode: live.status === 'corrupt' ? 'live-corrupt' : 'live-unavailable',
     };
   }
 
-  async function performRestore(operationId, request, onProgress, onRunning, onTerminal) {
-    let result;
-    let restoreError;
+  async function performRestore(
+    operationId: string,
+    request: RestoreRequest,
+    onProgress: (progress: { completed: number; total: number; result?: unknown }) => Promise<void>,
+    onRunning: () => Promise<RestoreOperation>,
+    onTerminal: (value: unknown) => Promise<RestoreOperation>,
+  ): Promise<RuntimeRestoreResult> {
+    let result: RuntimeRestoreResult | undefined;
+    let restoreError: unknown;
     try {
       result = await lock.withLock({ operationId }, async () => {
         try {
@@ -231,7 +336,7 @@ export function createWorkspaceRuntime({
           // Persist migration data before resolving pending ids. If the second write fails, retry planning
           // still sees the session and will recognize it as already-present instead of losing its mapping.
           if (resolvedIds.length > 0) await store.resolveSessions(state.checkpoint.id, resolvedIds);
-          const lockedResult = { ...restored, mapping };
+          const lockedResult: RuntimeRestoreResult = { ...restored, mapping };
           await onTerminal(lockedResult);
           return lockedResult;
         } catch (error) {
@@ -249,28 +354,30 @@ export function createWorkspaceRuntime({
         reconcileWarning = `live reconcile ${reconciled?.status || 'unknown'}; workspace protection may be degraded`;
       }
     } catch (error) {
-      reconcileWarning = `live reconcile failed: ${error?.message || String(error)}`;
+      reconcileWarning = `live reconcile failed: ${errorMessage(error)}`;
     }
     if (restoreError) throw restoreError;
+    const completed = result;
+    if (!completed) throw new Error('restore completed without a result');
     if (reconcileWarning) {
       result = {
-        ...result,
-        warnings: [...(result.warnings || []), reconcileWarning],
+        ...completed,
+        warnings: [...(completed.warnings || []), reconcileWarning],
       };
     }
-    return result;
+    return result ?? completed;
   }
 
-  async function startOnce() {
-    let interrupted;
-    let sweepError;
+  async function startOnce(): Promise<[number | undefined, unknown]> {
+    let interrupted: number | undefined;
+    let sweepError: unknown;
     try {
       interrupted = await operations.interruptOrphans();
     } catch (error) {
       sweepError = error;
     }
-    let started;
-    let startError;
+    let started: unknown;
+    let startError: unknown;
     try {
       started = await checkpointer.start?.();
     } catch (error) {
@@ -286,7 +393,7 @@ export function createWorkspaceRuntime({
     return [interrupted, started];
   }
 
-  function start() {
+  function start(): Promise<[number | undefined, unknown]> {
     if (!startPromise) {
       startupHealth = { status: 'starting', detail: 'workspace-starting' };
       startPromise = startOnce().then((result) => {
@@ -315,7 +422,7 @@ export function createWorkspaceRuntime({
     startRestore: async (request = {}) => operations.start(await resolveOperationRequest(request), ({ operationId, request: normalized, onProgress, onRunning, onTerminal }) => (
       performRestore(operationId, normalized, onProgress, onRunning, onTerminal)
     ), { deferRunning: true }),
-    getOperation: (id) => operations.get(id),
+    getOperation: (id: string) => operations.get(id),
     restoreNow: async (request = {}) => operations.run(await resolveOperationRequest(request), ({ operationId, request: normalized, onProgress, onRunning, onTerminal }) => (
       performRestore(operationId, normalized, onProgress, onRunning, onTerminal)
     ), { deferRunning: true }),
