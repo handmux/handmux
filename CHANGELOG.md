@@ -4,6 +4,8 @@ All notable changes to handmux. Format follows [Keep a Changelog](https://keepac
 
 ## [Unreleased]
 
+## [0.23.0] - 2026-08-09
+
 ### Added
 
 - 新增 Codex 托管对话视图：终端与手机保持同一会话，可实时查看 Markdown 回复、完整工具调用、提问与审批，并直接停止任务；断线或重新打开后仍能恢复完整对话。
