@@ -3,7 +3,7 @@ import { setLocale } from '../src/cli/i18n/index.js';
 import { CANCELLED } from '../src/cli/prompt.js';
 import { createStandaloneWorkspaceRuntime, runWorkspaceCommand } from '../src/cli/workspaceCmd.js';
 
-const checkpoint = (id, archivedAt = '2026-07-20T02:00:00.000Z') => ({
+const checkpoint = (id: string, archivedAt = '2026-07-20T02:00:00.000Z') => ({
   status: 'ok',
   id,
   value: {
@@ -28,17 +28,21 @@ const plan = (checkpointId = 'newest') => ({
   warnings: [],
 });
 
-function output() {
+interface TestOutput { value: string; write(chunk: unknown): void }
+
+function output(): TestOutput {
   return {
     value: '',
-    write(chunk) { this.value += String(chunk); },
+    write(chunk: unknown): void { this.value += String(chunk); },
   };
 }
 
-function fakeRuntime({ rows = [checkpoint('newest')], restore, restorePlan } = {}) {
+interface FakeRuntimeOptions { rows?: unknown[]; restore?: unknown; restorePlan?: unknown }
+
+function fakeRuntime({ rows = [checkpoint('newest')], restore, restorePlan }: FakeRuntimeOptions = {}) {
   return {
     listCheckpoints: vi.fn(async () => rows),
-    getRestorePlan: vi.fn(async ({ checkpointId }) => restorePlan || plan(checkpointId)),
+    getRestorePlan: vi.fn(async ({ checkpointId }: { checkpointId: string }) => restorePlan || plan(checkpointId)),
     restoreNow: vi.fn(async () => restore || {
       status: 'succeeded', restored: 1, alreadyPresent: 1, failed: 0,
       results: [
@@ -50,10 +54,21 @@ function fakeRuntime({ rows = [checkpoint('newest')], restore, restorePlan } = {
   };
 }
 
+type FakeRuntime = ReturnType<typeof fakeRuntime>;
+interface RunTestOptions {
+  flags?: Record<string, unknown>;
+  positionals?: string[];
+  unknownShortFlags?: string[];
+  runtime?: FakeRuntime;
+  inputIsTTY?: boolean;
+  outputIsTTY?: boolean;
+  selectCheckpoint?: ReturnType<typeof vi.fn>;
+}
+
 async function run({
   flags = {}, positionals = [], unknownShortFlags = [], runtime = fakeRuntime(),
   inputIsTTY = false, outputIsTTY = false, selectCheckpoint = vi.fn(),
-} = {}) {
+}: RunTestOptions = {}) {
   const stdout = output();
   const stderr = output();
   const code = await runWorkspaceCommand({
@@ -368,8 +383,8 @@ describe('standalone runtime composition', () => {
 
   it('uses the real read-only adapter for capture without emitting any tmux mutation', async () => {
     const serverId = '10000000-0000-4000-8000-000000000001';
-    const calls = [];
-    const runTmux = vi.fn(async (args) => {
+    const calls: string[][] = [];
+    const runTmux = vi.fn(async (args: string[]) => {
       calls.push(args);
       if (args[0] === 'show-options') return `${serverId}\n`;
       if (args[0] === '-V') return 'tmux 3.6a\n';
