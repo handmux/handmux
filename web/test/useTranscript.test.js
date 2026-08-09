@@ -37,6 +37,16 @@ describe('useTranscript', () => {
     expect(merged[1].tool.result).toBe('done');
   });
 
+  it('drops malformed transcript messages at the network boundary', async () => {
+    vi.spyOn(api, 'fetchTranscript').mockResolvedValueOnce({
+      messages: [null, { text: 'missing type' }, { k: 1, type: 'text', text: 'valid' }],
+      hash: 'h', session: 's', hasMore: false, firstSeq: 1,
+    });
+    const { result } = renderHook(() => useTranscript('%0', true));
+    await waitFor(() => expect(result.current.loaded).toBe(true));
+    expect(result.current.messages).toEqual([{ k: 1, type: 'text', text: 'valid' }]);
+  });
+
   it('merges a unified stream snapshot into the same resident message state', async () => {
     vi.spyOn(api, 'fetchTranscript').mockResolvedValueOnce({
       messages: [{ id: 'user-1', k: 0, role: 'user', type: 'text', text: '开始' }],

@@ -25,14 +25,14 @@ import type {
   PointerEvent as ReactPointerEvent,
   ReactNode,
 } from 'react';
-import type { CodexGoal, CodexGoalEvent } from '../../../server/src/codexStreamProtocol.js';
+import type { CodexGoal } from '../../../server/src/codexStreamProtocol.js';
 import type {
   CodexDiff,
   CodexDiffHunk,
   CodexToolProjection,
 } from '../../../server/src/codexToolProtocol.js';
-import type { CodexPlanStep } from '../../../server/src/codexPlan.js';
 import type { CodexOutgoingItem } from '../codexOutgoing.js';
+import type { TranscriptMessage } from '../hooks/useTranscript.js';
 import type {
   CodexApprovalDecision as ApprovalDecision,
   CodexApprovalRequest as CodexApproval,
@@ -45,39 +45,7 @@ import type { CodexPlanView } from './CodexPlan.jsx';
 type AgentKind = 'working' | 'permission' | 'compacting' | 'error' | null;
 type AgentName = 'claude' | 'codex' | string;
 
-interface ChatMessage extends CodexPlanView {
-  [key: string]: unknown;
-  id?: string | number;
-  k?: number | string;
-  i?: number | string;
-  turnId?: string | null;
-  itemId?: string | null;
-  role?: string;
-  type?: string;
-  text?: string;
-  ts?: string;
-  streaming?: boolean;
-  completed?: boolean;
-  tool?: CodexToolProjection;
-  goal?: CodexGoal;
-  event?: CodexGoalEvent;
-  name?: string;
-  args?: string;
-  result?: string;
-  plan?: CodexPlanStep[];
-}
-
-interface TranscriptState {
-  messages: ChatMessage[];
-  hasMoreOlder: boolean;
-  loadOlder: () => void | Promise<void>;
-  loadingOlder: boolean;
-  session: string | null;
-  loaded: boolean;
-  unavailable: string | null;
-  unavailableDetail: string | null;
-  applyCodexEvent: (event: unknown) => void;
-}
+type ChatMessage = TranscriptMessage;
 
 interface SlashEcho {
   name: string;
@@ -157,13 +125,6 @@ const inputText = (input: Record<string, unknown>, ...keys: string[]): string =>
   }
   return '';
 };
-
-const readTranscript = useTranscript as (
-  pane: string,
-  enabled: boolean,
-  agent?: string,
-  refreshToken?: unknown,
-) => TranscriptState;
 
 // Codex App Server exposes the process-launch wrapper, while its terminal UI shows only the command passed
 // to that shell. Keep the raw value in the transcript and remove only this known wrapper at render time.
@@ -824,7 +785,7 @@ export default function ChatView({
   const {
     messages, hasMoreOlder, loadOlder, loadingOlder,
     session, loaded, unavailable, unavailableDetail, applyCodexEvent,
-  } = readTranscript(pane, true, agent, transcriptRefresh);
+  } = useTranscript(pane, true, agent, transcriptRefresh);
   useCodexMessageStream({
     pane,
     threadId: codexSession?.threadId,
