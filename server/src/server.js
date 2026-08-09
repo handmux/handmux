@@ -29,6 +29,8 @@ import { createTerminalStream } from './terminalStream.js';
 import { createCodexAppServer } from './codexAppServer.js';
 import { apiErrorBoundary, apiRequestContext } from './apiErrors.js';
 import { PrivateStateStore } from './privateStateStore.js';
+import { RuntimeHealth } from './healthProtocol.js';
+import { healthRoutes } from './routes/health.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
@@ -41,6 +43,8 @@ const cfg = loadConfig();
 const token = loadToken();
 const uploadExts = loadUploadExts();
 const home = homedir();
+const previewDomain = process.env.HANDMUX_PREVIEW_DOMAIN || null;
+const health = new RuntimeHealth({ browserRequired: Boolean(previewDomain) });
 
 // One writer set is shared by background capture today and the restore runtime added on top of it. The
 // lock is filesystem-backed because the CLI may restore while this daemon is alive in another process.
@@ -85,7 +89,12 @@ codexApp = createCodexAppServer({
 });
 events = createClaudeEvents({ commands, push, codexApp, file: stateFile, onStateChange: workspace.requestReconcile });
 events.start();
-codexApp.start();
+try {
+  codexApp.start();
+  health.set('codex', 'ready');
+} catch {
+  health.set('codex', 'degraded', 'codex-start-failed');
+}
 workspace.start().catch(() => {});
 
 // Keep an already-opted-in user's Claude hooks in step with this handmux version on restart: newly-added
@@ -106,7 +115,6 @@ try { removeLegacyCodexHooks(home); } catch { /* best effort — migration never
 // use the built-in browser below; previewDomain may provide its dedicated public origin.
 const previews = createPreviews({ home });
 const preview = createPreview({ previews });
-const previewDomain = process.env.HANDMUX_PREVIEW_DOMAIN || null;
 const handmuxOrigin = (() => {
   try {
     return new URL(process.env.HANDMUX_PUBLIC_URL || `http://127.0.0.1:${cfg.port}`).origin;
@@ -116,6 +124,15 @@ const handmuxOrigin = (() => {
 })();
 const browserWorker = createBrowserWorkerClient({ appToken: token, previewDomain, handmuxOrigin });
 const app = express();
+app.use(healthRoutes({
+  health,
+  refresh: async () => {
+    const browser = browserWorker.health();
+    health.set('browser', browser.status, browser.detail);
+    const workspaceStatus = workspace.health();
+    health.set('workspace', workspaceStatus.status, workspaceStatus.detail);
+  },
+}));
 // Browser proxy leases stay behind normal Handmux auth. Client-owned direct tabs never enter
 // server state; proxy operations and all claimed Hammerhead paths use the isolated worker.
 app.use(browserWorker.publicHandler);

@@ -14,12 +14,6 @@ class FakeChild extends EventEmitter {
   kill() {}
 }
 
-class FakeSocket extends EventEmitter {
-  setTimeout() {}
-
-  destroy() {}
-}
-
 describe('browser public origin supervisor environment', () => {
   it('passes previewDomain to the server process', () => {
     expect(browserPublicOriginEnv({
@@ -34,9 +28,9 @@ describe('browser public origin supervisor environment', () => {
 });
 
 describe('Supervisor process state wiring', () => {
-  it('clears Server readiness immediately on exit and restarts with its own backoff', () => {
+  it('clears Server readiness immediately on exit and restarts with its own backoff', async () => {
     const children = [];
-    const sockets = [];
+    const readiness = [];
     const timers = [];
     let clock = 1_000;
     const spawnChild = vi.fn(() => {
@@ -44,11 +38,7 @@ describe('Supervisor process state wiring', () => {
       children.push(child);
       return child;
     });
-    const connectSocket = vi.fn(() => {
-      const socket = new FakeSocket();
-      sockets.push(socket);
-      return socket;
-    });
+    const probeServerReady = vi.fn(() => new Promise((resolve) => readiness.push(resolve)));
     const processRef = {
       pid: 50,
       env: {},
@@ -61,7 +51,7 @@ describe('Supervisor process state wiring', () => {
     const { state } = supervise({
       tunnel: 'none', port: 19_999, host: '127.0.0.1', token: 'secret', shortcuts: [],
     }, {
-      home: tmpHome('hm-supervisor-'), processRef, spawnChild, connectSocket,
+      home: tmpHome('hm-supervisor-'), processRef, spawnChild, probeServerReady,
       now: () => clock,
       setTimer: (fn, delay) => { timers.push({ fn, delay }); return timers.length; },
       log: { warn: vi.fn() },
@@ -75,7 +65,8 @@ describe('Supervisor process state wiring', () => {
         tunnel: { phase: 'ready', restartAttempt: 0 },
       },
     });
-    sockets[0].emit('connect');
+    readiness[0](true);
+    await Promise.resolve();
     expect(state).toMatchObject({ ready: true, components: { server: { phase: 'ready' } } });
 
     clock = 1_100;
@@ -97,7 +88,8 @@ describe('Supervisor process state wiring', () => {
       serverPid: 101,
       components: { server: { phase: 'starting', restartAttempt: 1 } },
     });
-    sockets[1].emit('connect');
+    readiness[1](true);
+    await Promise.resolve();
     expect(state).toMatchObject({
       ready: true,
       components: { server: { phase: 'ready', restartAttempt: 0 } },

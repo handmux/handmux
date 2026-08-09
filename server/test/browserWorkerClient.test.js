@@ -71,6 +71,7 @@ describe('browser worker client', () => {
       .expect(503, { error: 'browser unavailable' });
 
     expect(forkWorker).not.toHaveBeenCalled();
+    expect(client.health()).toEqual({ status: 'disabled', detail: null });
   });
 
   it('reports a configured proxy worker unavailable while starting and after exit', async () => {
@@ -96,6 +97,7 @@ describe('browser worker client', () => {
       .set('X-Handmux-Browser-Device', DEVICE)
       .send({ url: 'https://target.example/' })
       .expect(503, { error: 'browser unavailable' });
+    expect(client.health()).toEqual({ status: 'starting', detail: 'browser-worker-starting' });
 
     child.emit('exit', 1, null);
     await request(app).get('/api/browser-proxy/status')

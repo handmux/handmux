@@ -120,6 +120,7 @@ export function createWorkspaceRuntime({
     tryAcquireOperationLock: (owner) => lock.tryAcquire(owner),
   });
   let startPromise = null;
+  let startupHealth = { status: 'starting', detail: 'workspace-starting' };
 
   async function resolveOperationRequest(requestInput = {}) {
     const request = normalizeRestoreRequest(requestInput);
@@ -287,7 +288,12 @@ export function createWorkspaceRuntime({
 
   function start() {
     if (!startPromise) {
-      startPromise = startOnce().catch((error) => {
+      startupHealth = { status: 'starting', detail: 'workspace-starting' };
+      startPromise = startOnce().then((result) => {
+        startupHealth = { status: 'ready', detail: null };
+        return result;
+      }).catch((error) => {
+        startupHealth = { status: 'degraded', detail: 'workspace-start-failed' };
         startPromise = null;
         throw error;
       });
@@ -297,6 +303,9 @@ export function createWorkspaceRuntime({
 
   return {
     start,
+    health: () => (startupHealth.status === 'ready'
+      ? (checkpointer.health?.() || startupHealth)
+      : startupHealth),
     stop: () => checkpointer.stop(),
     requestReconcile: () => checkpointer.requestReconcile(),
     confirmEmpty: () => checkpointer.confirmEmpty(),

@@ -331,6 +331,27 @@ describe('workspace checkpointer', () => {
     expect(d.observeEnvironment).not.toHaveBeenCalled();
     expect(d.capture).not.toHaveBeenCalled();
   });
+
+  it('reports the latest reconciliation result as a stable health state', async () => {
+    const healthy = createCheckpointer(deps());
+    expect(healthy.health()).toEqual({
+      status: 'starting', detail: 'workspace-reconcile-starting',
+    });
+    await healthy.reconcile('start');
+    expect(healthy.health()).toEqual({ status: 'ready', detail: null });
+
+    const unknown = createCheckpointer(deps({
+      capture: vi.fn(async () => ({ status: 'unknown' })),
+    }));
+    await unknown.reconcile('start');
+    expect(unknown.health()).toEqual({ status: 'degraded', detail: 'workspace-unknown' });
+
+    const failed = createCheckpointer(deps({
+      observeEnvironment: vi.fn(async () => { throw new Error('tmux unavailable'); }),
+    }));
+    await expect(failed.reconcile('start')).rejects.toThrow('tmux unavailable');
+    expect(failed.health()).toEqual({ status: 'degraded', detail: 'workspace-reconcile-failed' });
+  });
 });
 
 describe('workspace graceful shutdown', () => {

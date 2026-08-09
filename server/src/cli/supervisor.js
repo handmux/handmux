@@ -3,7 +3,6 @@
 // the live public URL into state.json. There is only ever one daemon here — cloudflared (and, later,
 // `tunlite run`) are just its children, exactly like the server is.
 import { spawn } from 'node:child_process';
-import net from 'node:net';
 import path from 'node:path';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -13,6 +12,7 @@ import { writeState, clearState, claudeStatePath, pushStorePath, previewStorePat
 import {
   initialSupervisorComponentState, reduceSupervisorComponent,
 } from './supervisorState.js';
+import { probeServerReadiness } from './supervisorHealth.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const SERVER = path.resolve(here, '../server.js');
@@ -53,7 +53,7 @@ export function supervise(cfg, {
   home,
   log = console,
   spawnChild = spawn,
-  connectSocket = net.connect,
+  probeServerReady = () => probeServerReadiness(cfg.port),
   setTimer = setTimeout,
   now = Date.now,
   processRef = process,
@@ -98,30 +98,21 @@ export function supervise(cfg, {
   };
   persist();
 
-  // The server socket comes up a beat after spawn; don't report "ready" (and don't let the CLI print an
-  // access URL) until a TCP connect to it actually succeeds, or callers race an unbound port.
-  const waitListening = (serverChild) => {
+  // Readiness belongs to the Server generation that answered the structured health probe. A bare TCP
+  // listener could be an old process or a half-initialized API with Workspace/Browser already degraded.
+  const waitReady = (serverChild) => {
     if (stopping || children.server !== serverChild || components.server.phase === 'ready') return;
-    const s = connectSocket({ port: cfg.port, host: '127.0.0.1' });
-    let settled = false;
     const retry = () => {
-      if (settled) return;
-      settled = true;
-      s.destroy();
       if (!stopping && children.server === serverChild) {
-        setTimer(() => waitListening(serverChild), 200);
+        setTimer(() => waitReady(serverChild), 200);
       }
     };
-    s.setTimeout(500, retry);
-    s.once('error', retry);
-    s.once('connect', () => {
-      if (settled) return;
-      settled = true;
-      s.destroy();
+    Promise.resolve(probeServerReady()).then((ready) => {
+      if (!ready) { retry(); return; }
       if (!stopping && children.server === serverChild) {
         transition('server', { type: 'ready', at: now() });
       }
-    });
+    }, retry);
   };
 
   const startServer = () => {
@@ -157,7 +148,7 @@ export function supervise(cfg, {
     const c = spawnChild(processRef.execPath, [SERVER], { env, stdio: ['ignore', 'inherit', 'inherit'] });
     children.server = c;
     transition('server', { type: 'spawned', pid: c.pid ?? null, at: now() });
-    waitListening(c);
+    waitReady(c);
     let finalized = false;
     const finalize = (error = null) => {
       if (finalized || children.server !== c) return;

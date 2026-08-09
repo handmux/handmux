@@ -562,6 +562,7 @@ describe('workspace runtime orchestration', () => {
     const runtime = createWorkspaceRuntime({ store, tmux: {}, lock: {}, checkpointer });
 
     await expect(runtime.start()).rejects.toThrow(/operation directory unreadable/);
+    expect(runtime.health()).toEqual({ status: 'degraded', detail: 'workspace-start-failed' });
     expect(order).toEqual(['sweep', 'checkpointer']);
     expect(checkpointer.start).toHaveBeenCalledOnce();
   });
@@ -628,8 +629,10 @@ describe('workspace runtime orchestration', () => {
 
     await expect(runtime.getRestorePlan({ checkpointId: 'latest' }))
       .rejects.toThrow('temporary workspace read failure');
+    expect(runtime.health()).toEqual({ status: 'degraded', detail: 'workspace-start-failed' });
     await expect(runtime.getRestorePlan({ checkpointId: 'latest' }))
       .resolves.toMatchObject({ checkpointId: 'cp-a' });
+    expect(runtime.health()).toEqual({ status: 'ready', detail: null });
     expect(checkpointer.start).toHaveBeenCalledTimes(2);
   });
 

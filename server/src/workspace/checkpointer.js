@@ -76,6 +76,8 @@ export function createCheckpointer({
   let stopping = false;
   let stopped = false;
   let stopPromise = null;
+  let lastResult = null;
+  let lastError = null;
 
   function launch(cause) {
     const current = reconcileOnce(deps, cause);
@@ -89,7 +91,14 @@ export function createCheckpointer({
         launch('confirmed-empty').then(pending.resolve, pending.reject);
       }
     };
-    current.then(settled, settled);
+    current.then((result) => {
+      lastResult = result;
+      lastError = null;
+      settled();
+    }, () => {
+      lastError = 'workspace-reconcile-failed';
+      settled();
+    });
     return current;
   }
 
@@ -123,6 +132,18 @@ export function createCheckpointer({
 
   return {
     reconcile,
+    health() {
+      if (stopping || stopped) return { status: 'degraded', detail: 'workspace-stopped' };
+      if (lastError) return { status: 'degraded', detail: lastError };
+      if (!lastResult) return { status: 'starting', detail: 'workspace-reconcile-starting' };
+      if (lastResult.status === 'written' || lastResult.status === 'unchanged') {
+        return { status: 'ready', detail: null };
+      }
+      if (lastResult.status === 'locked') {
+        return { status: 'ready', detail: 'workspace-writer-locked' };
+      }
+      return { status: 'degraded', detail: `workspace-${lastResult.status || 'unknown'}` };
+    },
     start() {
       if (stopping || stopped) return Promise.resolve({ status: 'stopped' });
       if (!interval) interval = setInterval(() => { reconcile('timer').catch(() => {}); }, 60_000);

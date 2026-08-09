@@ -217,6 +217,13 @@ export function createBrowserWorkerClient({
     apiHandler,
     publicHandler: proxyHttp(false),
     onUpgrade,
+    health() {
+      if (!previewDomain) return { status: 'disabled', detail: null };
+      if (stopping) return { status: 'degraded', detail: 'browser-stopping' };
+      return port != null
+        ? { status: 'ready', detail: null }
+        : { status: 'starting', detail: 'browser-worker-starting' };
+    },
     close() {
       if (!closePromise) {
         stopping = true;
