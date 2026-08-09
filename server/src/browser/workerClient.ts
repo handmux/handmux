@@ -6,11 +6,31 @@ import { fileURLToPath } from 'node:url';
 import { claimedBrowserRequest } from './publicProxy.js';
 import { BROWSER_INTERNAL_HEADER } from './protocol.js';
 import { createBrowserCoordinator } from './coordinator.js';
+import type { ChildProcess, ForkOptions } from 'node:child_process';
+import type { IncomingHttpHeaders, IncomingMessage } from 'node:http';
+import type { Duplex } from 'node:stream';
+import type { RequestHandler, Response } from 'express';
+import type { BrowserProxyRequest, BrowserProxyResponse } from './coordinator.js';
 
 const WORKER_FILE = fileURLToPath(new URL('./worker.js', import.meta.url));
 
-function forwardedHeaders(headers, internalToken, appToken, api) {
-  const out = { ...headers, [BROWSER_INTERNAL_HEADER]: internalToken };
+type WorkerChild = Pick<ChildProcess, 'on' | 'once' | 'kill'>;
+type ForkWorker = (modulePath: string, args: readonly string[], options: ForkOptions) => WorkerChild;
+type TimerHandle = ReturnType<typeof setTimeout> | number;
+type SetTimer = (callback: () => void, delay: number) => TimerHandle;
+type ClearTimer = (timer: TimerHandle) => void;
+interface BrowserWorkerHealth {
+  status: 'disabled' | 'starting' | 'ready' | 'degraded';
+  detail: string | null;
+}
+
+function forwardedHeaders(
+  headers: IncomingHttpHeaders,
+  internalToken: string,
+  appToken: string | undefined,
+  api: boolean,
+): IncomingHttpHeaders {
+  const out: IncomingHttpHeaders = { ...headers, [BROWSER_INTERNAL_HEADER]: internalToken };
   if (api || out.authorization === `Bearer ${appToken}`) delete out.authorization;
   delete out['proxy-authorization'];
   return out;
@@ -31,18 +51,33 @@ export function createBrowserWorkerClient({
   stableAfterMs = 30_000,
   requestTimeoutMs = 15_000,
   stopTimeoutMs = 3_000,
+}: {
+  appToken?: string;
+  previewDomain?: string | null;
+  handmuxOrigin?: string;
+  forkWorker?: ForkWorker;
+  request?: typeof http.request;
+  connect?: typeof net.connect;
+  randomToken?: () => string;
+  parentEnv?: NodeJS.ProcessEnv;
+  setTimer?: SetTimer;
+  clearTimer?: ClearTimer;
+  readyTimeoutMs?: number;
+  stableAfterMs?: number;
+  requestTimeoutMs?: number;
+  stopTimeoutMs?: number;
 } = {}) {
   const internalToken = randomToken();
-  let child = null;
-  let port = null;
+  let child: WorkerChild | null = null;
+  let port: number | null = null;
   let generation = 0;
   let stopping = false;
   let restartDelay = 250;
-  let restartTimer = null;
-  let readyTimer = null;
-  let stableTimer = null;
-  const activeSockets = new Set();
-  const workerEnv = {};
+  let restartTimer: TimerHandle | null = null;
+  let readyTimer: TimerHandle | null = null;
+  let stableTimer: TimerHandle | null = null;
+  const activeSockets = new Set<Duplex>();
+  const workerEnv: NodeJS.ProcessEnv = {};
   for (const name of [
     'PATH', 'HOME', 'USER', 'LOGNAME', 'SHELL', 'TMPDIR', 'TMP', 'TEMP',
     'LANG', 'LC_ALL', 'TZ', 'NODE_EXTRA_CA_CERTS', 'SSL_CERT_FILE', 'SSL_CERT_DIR',
@@ -52,15 +87,15 @@ export function createBrowserWorkerClient({
     if (parentEnv[name] != null) workerEnv[name] = parentEnv[name];
   }
 
-  const clearReadyTimer = () => {
+  const clearReadyTimer = (): void => {
     if (readyTimer != null) clearTimer(readyTimer);
     readyTimer = null;
   };
-  const clearStableTimer = () => {
+  const clearStableTimer = (): void => {
     if (stableTimer != null) clearTimer(stableTimer);
     stableTimer = null;
   };
-  const scheduleRestart = () => {
+  const scheduleRestart = (): void => {
     if (stopping || restartTimer != null) return;
     const delay = restartDelay;
     restartDelay = Math.min(restartDelay * 2, 5_000);
@@ -69,8 +104,8 @@ export function createBrowserWorkerClient({
       if (!stopping) start();
     }, delay);
   };
-  const start = () => {
-    let spawned;
+  const start = (): void => {
+    let spawned: WorkerChild;
     try {
       spawned = forkWorker(WORKER_FILE, [], {
         env: {
@@ -92,9 +127,12 @@ export function createBrowserWorkerClient({
     readyTimer = setTimer(() => {
       if (child === spawned && port == null) spawned.kill('SIGTERM');
     }, readyTimeoutMs);
-    spawned.on('message', (message) => {
-      if (child !== spawned || message?.type !== 'handmux-browser-ready' || !Number.isInteger(message.port)) return;
-      port = message.port;
+    spawned.on('message', (message: unknown) => {
+      const record = message && typeof message === 'object' && !Array.isArray(message)
+        ? message as Record<string, unknown> : null;
+      if (child !== spawned || record?.type !== 'handmux-browser-ready'
+        || typeof record.port !== 'number' || !Number.isInteger(record.port)) return;
+      port = record.port;
       generation += 1;
       clearReadyTimer();
       clearStableTimer();
@@ -103,7 +141,7 @@ export function createBrowserWorkerClient({
         if (child === spawned && port != null) restartDelay = 250;
       }, stableAfterMs);
     });
-    const finalize = () => {
+    const finalize = (): void => {
       if (child !== spawned) return;
       child = null;
       port = null;
@@ -123,8 +161,8 @@ export function createBrowserWorkerClient({
     spawned.once('close', finalize);
   };
 
-  const unavailable = (res, status) => res.status(status).json({ error: 'browser unavailable' });
-  const proxyHttp = (api) => (req, res, next) => {
+  const unavailable = (res: Response, status: number) => res.status(status).json({ error: 'browser unavailable' });
+  const proxyHttp = (api: boolean): RequestHandler => (req, res, next) => {
     if (!api && !claimedBrowserRequest(req)) return next();
     const targetPort = port;
     if (!targetPort) return unavailable(res, api ? 503 : 502);
@@ -140,7 +178,7 @@ export function createBrowserWorkerClient({
       res.once('close', () => { if (!res.writableEnded) incoming.destroy(); });
     });
     if (api) upstream.setTimeout?.(requestTimeoutMs, () => upstream.destroy(new Error('browser worker request timeout')));
-    const abort = () => upstream.destroy();
+    const abort = (): void => { upstream.destroy(); };
     req.once('aborted', abort);
     res.once('close', () => { if (!res.writableEnded) abort(); });
     upstream.once('error', () => {
@@ -150,14 +188,14 @@ export function createBrowserWorkerClient({
     req.pipe(upstream);
   };
 
-  const onUpgrade = (req, socket, head) => {
+  const onUpgrade = (req: IncomingMessage, socket: Duplex, head: Buffer): boolean => {
     if (!claimedBrowserRequest(req)) return false;
     const targetPort = port;
     if (!targetPort) { socket.destroy(); return true; }
     const upstream = connect({ host: '127.0.0.1', port: targetPort });
     activeSockets.add(socket);
     activeSockets.add(upstream);
-    const cleanup = () => {
+    const cleanup = (): void => {
       activeSockets.delete(socket);
       activeSockets.delete(upstream);
     };
@@ -179,7 +217,7 @@ export function createBrowserWorkerClient({
     return true;
   };
 
-  const proxyRequest = ({ req, method, path, body }) => new Promise((resolve) => {
+  const proxyRequest = ({ req, method, path, body }: BrowserProxyRequest) => new Promise<BrowserProxyResponse | null>((resolve) => {
     const targetPort = port;
     if (!targetPort) return resolve(null);
     const payload = body === undefined ? null : Buffer.from(JSON.stringify(body));
@@ -192,8 +230,8 @@ export function createBrowserWorkerClient({
       delete headers['content-type'];
     }
     const upstream = request({ hostname: '127.0.0.1', port: targetPort, method, path, headers }, (incoming) => {
-      const chunks = [];
-      incoming.on('data', (chunk) => chunks.push(chunk));
+      const chunks: Buffer[] = [];
+      incoming.on('data', (chunk: Buffer | string) => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
       incoming.on('end', () => resolve({
         status: incoming.statusCode || 502,
         headers: incoming.headers,
@@ -212,19 +250,19 @@ export function createBrowserWorkerClient({
   });
 
   if (previewDomain) start();
-  let closePromise = null;
+  let closePromise: Promise<void> | null = null;
   return {
     apiHandler,
     publicHandler: proxyHttp(false),
     onUpgrade,
-    health() {
+    health(): BrowserWorkerHealth {
       if (!previewDomain) return { status: 'disabled', detail: null };
       if (stopping) return { status: 'degraded', detail: 'browser-stopping' };
       return port != null
         ? { status: 'ready', detail: null }
         : { status: 'starting', detail: 'browser-worker-starting' };
     },
-    close() {
+    close(): Promise<void> {
       if (!closePromise) {
         stopping = true;
         apiHandler.close();
@@ -236,13 +274,13 @@ export function createBrowserWorkerClient({
         activeSockets.clear();
         const current = child;
         if (!current) closePromise = Promise.resolve();
-        else closePromise = new Promise((resolve) => {
+        else closePromise = new Promise<void>((resolve) => {
           let finished = false;
-          let forceTimer = setTimer(() => {
+          let forceTimer: TimerHandle | null = setTimer(() => {
             forceTimer = null;
             current.kill('SIGKILL');
           }, stopTimeoutMs);
-          const finish = () => {
+          const finish = (): void => {
             if (finished) return;
             finished = true;
             if (forceTimer != null) clearTimer(forceTimer);
