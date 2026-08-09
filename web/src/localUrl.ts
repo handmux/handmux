@@ -8,14 +8,23 @@ const HOST = '(?:\\[[0-9a-f:]+\\]|[a-z0-9.-]+)';
 // may legally start immediately after the host without an explicit slash.
 const LOCAL_URL_RE = new RegExp(`https?://${HOST}(?::(\\d{1,5}))?([/?#][^${DELIMS}]*)?`, 'gi');
 
+export interface LocalUrlLink {
+  start: number;
+  end: number;
+  protocol: 'http' | 'https';
+  port: number;
+  path: string;
+  raw: string;
+}
+
 // Find every HTTP(S) URL in one line of text → [{ start, end, protocol, port, path, raw }] (end exclusive).
 // Protocol/port/path stay in the payload for compatibility; Browser opens the exact `raw` URL.
 //   - raw: the exact matched substring (trailing prose dots stripped), for the confirm popover's label.
-export function findLocalUrls(line) {
-  const out = [];
+export function findLocalUrls(line: string): LocalUrlLink[] {
+  const out: LocalUrlLink[] = [];
   if (!line) return out;
   LOCAL_URL_RE.lastIndex = 0;
-  let m;
+  let m: RegExpExecArray | null;
   while ((m = LOCAL_URL_RE.exec(line)) !== null) {
     const isHttps = /^https:/i.test(m[0]);
     const port = m[1] ? Number(m[1]) : (isHttps ? 443 : 80);

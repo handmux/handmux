@@ -3,7 +3,10 @@ import xterm from '@xterm/headless';
 import { scanDocLinks, docLinksOnLine } from '../src/docDecorations.js';
 
 const { Terminal } = xterm;
-const write = (t, d) => new Promise((res) => t.write(d, res));
+type HeadlessTerminal = InstanceType<typeof Terminal>;
+const write = (terminal: HeadlessTerminal, data: string): Promise<void> => (
+  new Promise((resolve) => terminal.write(data, resolve))
+);
 
 describe('scanDocLinks', () => {
   it('locates a doc path on a visible row with correct y/x/width/path', async () => {
@@ -105,7 +108,7 @@ describe('scanDocLinks', () => {
     // and stitch — else row1 has no extension, so only the tail (…/报告.md) would be found/tappable.
     const t = new Terminal({ cols: 16, rows: 6, allowProposedApi: true, scrollback: 100 });
     await write(t, 'xx ~/目录占位占 \r\n位/报告.md end');
-    expect(t.buffer.active.getLine(1).isWrapped).toBe(false); // genuinely a hard line, like tmux delivers
+    expect(t.buffer.active.getLine(1)?.isWrapped).toBe(false); // genuinely a hard line, like tmux delivers
     expect([...new Set(scanDocLinks(t).map((s) => s.path))]).toEqual(['~/目录占位占位/报告.md']);
     t.dispose();
   });

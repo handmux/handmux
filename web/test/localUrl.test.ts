@@ -1,9 +1,14 @@
 import { describe, it, expect } from 'vitest';
+import type { LocalUrlLink } from '../src/localUrl.js';
 import { findLocalUrls } from '../src/localUrl.js';
 import { findDocLinks } from '../src/docPath.js';
 
 describe('findLocalUrls', () => {
-  const one = (line) => { const r = findLocalUrls(line); expect(r).toHaveLength(1); return r[0]; };
+  const one = (line: string): LocalUrlLink => {
+    const result = findLocalUrls(line);
+    expect(result).toHaveLength(1);
+    return result[0];
+  };
 
   it('matches localhost with port and path', () => {
     const u = one('running at http://localhost:3000/foo/bar');

@@ -16,7 +16,13 @@ const FILE_TOKEN_RE = new RegExp(`[^${DELIMS}]+`, 'g');
 const RESERVED_BARE_EXT = new Set([...DOC_LINK_EXTS, ...IMAGE_LINK_EXTS].map((ext) => `.${ext}`));
 const EXTENSIONLESS_NAMES = /^(?:readme|license|makefile|dockerfile|gemfile|rakefile|procfile|notice)$/i;
 
-function looksLikeFilePath(value) {
+export interface DocumentPathLink {
+  start: number;
+  end: number;
+  path: string;
+}
+
+function looksLikeFilePath(value: string): boolean {
   if (!value || value === '.' || value === '..') return false;
   if (value.endsWith('/')) return false; // directory path, not a previewable file
   if (RESERVED_BARE_EXT.has(value.toLowerCase())) return false;
@@ -29,11 +35,11 @@ function looksLikeFilePath(value) {
 }
 
 // Find every doc-path link in one line of text → [{ start, end, path }] (end exclusive).
-export function findDocLinks(line) {
-  const out = [];
+export function findDocLinks(line: string): DocumentPathLink[] {
+  const out: DocumentPathLink[] = [];
   if (!line) return out;
   FILE_TOKEN_RE.lastIndex = 0;
-  let m;
+  let m: RegExpExecArray | null;
   while ((m = FILE_TOKEN_RE.exec(line)) !== null) {
     let start = m.index;
     let path = m[0].replace(/\.+$/, ''); // sentence-ending dots cling to terminal output
@@ -49,13 +55,15 @@ export function findDocLinks(line) {
   return out;
 }
 
-export const isAbsolute = (p) => typeof p === 'string' && p.startsWith('/');
+export const isAbsolute = (path: unknown): path is string => (
+  typeof path === 'string' && path.startsWith('/')
+);
 
 // Pure posix join + normalize (resolves '.' and '..'). An absolute `rel` ignores `base`.
-export function joinPath(base, rel) {
+export function joinPath(base: string, rel: string): string {
   const raw = isAbsolute(rel) ? rel : `${base.replace(/\/+$/, '')}/${rel}`;
   const abs = raw.startsWith('/');
-  const out = [];
+  const out: string[] = [];
   for (const seg of raw.split('/')) {
     if (!seg || seg === '.') continue;
     if (seg === '..') { out.pop(); continue; }
