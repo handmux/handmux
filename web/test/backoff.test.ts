@@ -1,7 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import { backoffDelay } from '../src/backoff.js';
+import type { BackoffOptions } from '../src/backoff.js';
 
-const mid = { rng: () => 0.5 }; // 0.5 → 抖动项为 0,拿到原始延迟
+const mid: BackoffOptions = { rng: () => 0.5 }; // 0.5 → 抖动项为 0,拿到原始延迟
 
 describe('backoffDelay', () => {
   it('returns 0 for non-positive fail counts (healthy → caller uses REFRESH_MS)', () => {

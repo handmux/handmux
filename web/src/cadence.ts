@@ -5,7 +5,7 @@ export const FAST_MS = 1000;
 
 // idleMs = time since the last change/activity. <8s → selected active rate; <60s → 5s;
 // longer → 10s (cap).
-export function idleDelay(idleMs, fastMs = FAST_MS) {
+export function idleDelay(idleMs: number, fastMs = FAST_MS): number {
   if (idleMs < 8000) return fastMs;
   if (idleMs < 60000) return 5000;
   return 10000;
