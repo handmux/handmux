@@ -5,19 +5,39 @@ import { promisify } from 'node:util';
 
 const execFileAsync = promisify(execFile);
 
-function normalizeMacBootTime(value) {
+export interface EnvironmentIdentity {
+  id: string;
+  bootIdentity: string;
+  tmuxServerId: string | null;
+}
+export type ObservedEnvironment =
+  | ({ status: 'present' | 'absent' } & EnvironmentIdentity)
+  | { status: 'unknown' };
+export type EnvironmentChange =
+  | { status: 'unknown' }
+  | { status: 'initial'; current: Exclude<ObservedEnvironment, { status: 'unknown' }> }
+  | { status: 'attached' | 'same'; reason: 'same'; current: Exclude<ObservedEnvironment, { status: 'unknown' }> }
+  | { status: 'changed'; reason: 'boot-changed' | 'tmux-changed'; current: Exclude<ObservedEnvironment, { status: 'unknown' }> };
+
+type ReadFile = (path: string, encoding: 'utf8') => Promise<string | Buffer>;
+type ExecFile = (file: string, args: string[]) => Promise<{ stdout: string | Buffer }>;
+
+function normalizeMacBootTime(value: unknown): string | null {
   const seconds = String(value).match(/\bsec\s*=\s*(\d+)\b/)?.[1];
   return seconds && seconds !== '0' ? seconds : null;
 }
 
-function environmentId(bootIdentity, tmuxServerId) {
+function environmentId(bootIdentity: string, tmuxServerId: string | null): string {
   return crypto
     .createHash('sha256')
     .update(`${bootIdentity}\0${tmuxServerId || 'no-tmux'}`)
     .digest('hex');
 }
 
-export function detectEnvironmentChange(previous, observed) {
+export function detectEnvironmentChange(
+  previous: EnvironmentIdentity | null | undefined,
+  observed: ObservedEnvironment | null | undefined,
+): EnvironmentChange {
   if (!observed || observed.status === 'unknown') return { status: 'unknown' };
   if (!previous) return { status: 'initial', current: observed };
   if (previous.bootIdentity !== observed.bootIdentity) return { status: 'changed', reason: 'boot-changed', current: observed };
@@ -33,10 +53,10 @@ export function detectEnvironmentChange(previous, observed) {
 
 export function createBootIdentityProvider({
   platform = process.platform,
-  readFile = fsp.readFile,
-  exec = execFileAsync,
-} = {}) {
-  return async () => {
+  readFile = fsp.readFile as ReadFile,
+  exec = execFileAsync as ExecFile,
+}: { platform?: string; readFile?: ReadFile; exec?: ExecFile } = {}): () => Promise<string | null> {
+  return async (): Promise<string | null> => {
     try {
       if (platform === 'linux') {
         const identity = String(await readFile('/proc/sys/kernel/random/boot_id', 'utf8')).trim();
@@ -55,12 +75,15 @@ export function createBootIdentityProvider({
 export function createEnvironmentProvider({
   bootIdentityProvider = createBootIdentityProvider(),
   tmuxServerIdProvider,
-} = {}) {
-  return async () => {
+}: {
+  bootIdentityProvider?: () => Promise<unknown>;
+  tmuxServerIdProvider?: () => Promise<unknown>;
+} = {}): () => Promise<ObservedEnvironment> {
+  return async (): Promise<ObservedEnvironment> => {
     try {
       const bootIdentity = await bootIdentityProvider();
       if (typeof bootIdentity !== 'string' || !bootIdentity) return { status: 'unknown' };
-      const tmuxServerId = await tmuxServerIdProvider();
+      const tmuxServerId = await tmuxServerIdProvider?.();
       if (tmuxServerId !== null && (typeof tmuxServerId !== 'string' || !tmuxServerId)) return { status: 'unknown' };
       return {
         status: tmuxServerId === null ? 'absent' : 'present',
