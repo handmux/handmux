@@ -2767,6 +2767,16 @@ button.cmd-text { background: none; border: none; text-align: left; }
 .cc-queue-action svg { width: 14px; height: 14px; display: block; }
 .cc-queue-action:active:not(:disabled) { background: var(--ct-chip-line); color: var(--ct-ink); }
 .cc-queue-action:disabled { opacity: .45; }
+.cc-queue-item.is-pending { cursor: default; }
+.cc-queue-pending {
+  flex: none; display: inline-flex; align-items: center; justify-content: center; width: 60px; height: 30px;
+}
+.cc-queue-pending > span {
+  width: 13px; height: 13px; border: 1.5px solid var(--ct-chip-line); border-top-color: var(--ct-accent);
+  border-radius: 50%; animation: cc-queue-spin .8s linear infinite;
+}
+@keyframes cc-queue-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .cc-queue-pending > span { animation: none; } }
 .cc-queue-dialog-backdrop {
   z-index: 52; overflow-y: auto; overscroll-behavior: contain;
   padding: max(12px, env(safe-area-inset-top, 0px)) 12px max(12px, env(safe-area-inset-bottom, 0px));

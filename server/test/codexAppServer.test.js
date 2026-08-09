@@ -315,6 +315,28 @@ describe('Codex App Server client', () => {
     app.close();
   });
 
+  it('deduplicates a retried send and exposes its request id in the authoritative queue', async () => {
+    const proxy = fakeProxy();
+    const app = createCodexAppServer({ home: '/home/test', exists: () => true, connect: () => proxy.ws });
+    await app.status('%1', 'thread-1');
+    proxy.push({
+      jsonrpc: '2.0', method: 'turn/started',
+      params: { threadId: 'thread-1', turn: { id: 'turn-live', status: 'inProgress', items: [] } },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const first = await app.send('%1', 'thread-1', 'only once', 'request-1');
+    const retry = await app.send('%1', 'thread-1', 'only once', 'request-1');
+
+    expect(retry).toEqual(first);
+    expect((await app.status('%1', 'thread-1')).queue).toEqual([expect.objectContaining({
+      id: first.item.id, requestId: 'request-1', text: 'only once',
+    })]);
+    await expect(app.send('%1', 'thread-1', 'different text', 'request-1'))
+      .rejects.toThrow('request id was already used');
+    app.close();
+  });
+
   it('serializes simultaneous idle submissions so only the first starts immediately', async () => {
     let releaseStart;
     const turnStartWait = new Promise((resolve) => { releaseStart = resolve; });

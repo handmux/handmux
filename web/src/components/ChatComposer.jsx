@@ -313,7 +313,8 @@ function CodexConfigMenu({ open, pane, settings, busy, onChange, onClose, onAuth
 export default function ChatComposer({
   pane, agent = 'claude', kind, cwd = null, onKey = () => {}, onAuthFail, onSent, onInteractiveSlash,
   shortcuts = null, micAvailable = false, desktop = false, codexSession = null,
-  onCodexSendStart, onCodexSendResult, onActionError, chatTone = 'dusk', keyboardInset = 0,
+  optimisticMessages = [], onCodexSendStart, onCodexSendResult, onActionError,
+  chatTone = 'dusk', keyboardInset = 0,
 }) {
   // Draft persists across an app exit / lens switch (shared store with the dock's chat page — switching
   // lenses carries your half-typed message either way). send/clear set '' → the stored draft clears too.
@@ -327,6 +328,7 @@ export default function ChatComposer({
   const [handledQueueIds, setHandledQueueIds] = useState([]);
   const [notice, setNotice] = useState('');
   const submitInFlightRef = useRef(false);
+  const codexSendSeqRef = useRef(0);
   const noticeTimerRef = useRef(null);
   const queueEditorRef = useRef(null);
   const queueEditorInputRef = useRef(null);
@@ -389,6 +391,16 @@ export default function ChatComposer({
   const managedCodex = agent === 'codex' && codexSession?.managed;
   const serverQueue = managedCodex ? (codexSession?.queue || []) : [];
   const pendingQueue = serverQueue.filter((item) => !handledQueueIds.includes(item.id));
+  const turnExpectsQueue = managedCodex
+    && (['working', 'permission', 'compacting'].includes(kind) || serverQueue.length > 0);
+  const serverQueueIds = new Set(serverQueue.map((item) => item.id));
+  const serverQueueRequestIds = new Set(serverQueue.map((item) => item.requestId).filter(Boolean));
+  const optimisticQueue = optimisticMessages.filter((item) => item.source === 'queue'
+    && !serverQueueIds.has(item.queueId) && !serverQueueRequestIds.has(item.id));
+  const displayQueue = [
+    ...pendingQueue.map((item) => ({ ...item, optimistic: false })),
+    ...optimisticQueue.map((item) => ({ ...item, optimistic: true })),
+  ];
   const serverQueueKey = serverQueue.map((item) => item.id).join('\0');
   useEffect(() => {
     const currentEdit = queueEditorRef.current;
@@ -564,7 +576,7 @@ export default function ChatComposer({
     return true;
   };
 
-  const dispatchManagedCodex = async (text) => {
+  const dispatchManagedCodex = async (text, requestId = null) => {
     const trimmed = text.trim();
     if (await applyConfigSlash(trimmed)) return null;
     const goalMatch = trimmed.match(/^\/goal(?:\s+([\s\S]+))?$/i);
@@ -596,7 +608,13 @@ export default function ChatComposer({
       showNotice(t('chat.slash.unsupported'));
       return UNSUPPORTED_SLASH;
     }
-    return sendCodexMessage(pane, text);
+    return sendCodexMessage(pane, text, requestId);
+  };
+
+  const beginManagedSend = (text, source) => {
+    const requestId = `codex-send-${Date.now().toString(36)}-${(++codexSendSeqRef.current).toString(36)}`;
+    const optimisticId = onCodexSendStart?.(pane, text, source, requestId) || requestId;
+    return { requestId, optimisticId };
   };
 
   // ── Voice dictation (single-column, simpler than the dock: no caret-restore, so it dodges the iOS
@@ -632,7 +650,9 @@ export default function ChatComposer({
     if (!pane || !value.trim() || submitInFlightRef.current) return;
     const text = value;
     const optimistic = managedCodex && !text.trim().startsWith('/');
-    const optimisticId = optimistic ? onCodexSendStart?.(pane, text, 'send') : null;
+    const source = turnExpectsQueue ? 'queue' : 'send';
+    const outgoing = optimistic ? beginManagedSend(text, source) : null;
+    const optimisticId = outgoing?.optimisticId || null;
     clearNotice();
     submitInFlightRef.current = true;
     setSubmitting(true);
@@ -646,7 +666,7 @@ export default function ChatComposer({
     }
     try {
       let result;
-      if (managedCodex) result = await dispatchManagedCodex(text);
+      if (managedCodex) result = await dispatchManagedCodex(text, outgoing?.requestId || null);
       else if (agent === 'codex') throw new Error(t('chat.session.notManaged'));
       else await sendText(pane, text, true);
       if (result === UNSUPPORTED_SLASH) return;
@@ -660,9 +680,10 @@ export default function ChatComposer({
         requestAnimationFrame(() => autoGrow(ref.current));
       }
     } catch (err) {
-      if (optimisticId) onCodexSendResult?.(optimisticId, { error: err });
+      const uncertain = !(err instanceof UnauthorizedError) && !Number.isFinite(err?.status);
+      if (optimisticId) onCodexSendResult?.(optimisticId, { error: err, uncertain });
       if (err instanceof UnauthorizedError) onAuthFail?.();
-      else if (!optimisticId) reportActionError('send', err);
+      else if (!optimisticId || (source === 'queue' && !uncertain)) reportActionError('send', err);
     } finally {
       submitInFlightRef.current = false;
       setSubmitting(false);
@@ -835,7 +856,9 @@ export default function ChatComposer({
     if (fav.kind === 'key') { onKey(fav.text); return; }
     if (!pane) return;
     const optimistic = managedCodex && !!fav.enter && !fav.text.trim().startsWith('/');
-    const optimisticId = optimistic ? onCodexSendStart?.(pane, fav.text, 'send') : null;
+    const source = turnExpectsQueue ? 'queue' : 'send';
+    const outgoing = optimistic ? beginManagedSend(fav.text, source) : null;
+    const optimisticId = outgoing?.optimisticId || null;
     try {
       if (managedCodex && !fav.enter) {
         setValue(fav.text);
@@ -843,7 +866,7 @@ export default function ChatComposer({
         return;
       }
       let result;
-      if (managedCodex) result = await dispatchManagedCodex(fav.text);
+      if (managedCodex) result = await dispatchManagedCodex(fav.text, outgoing?.requestId || null);
       else if (agent === 'codex') throw new Error(t('chat.session.notManaged'));
       else await sendText(pane, fav.text, !!fav.enter);
       if (result === UNSUPPORTED_SLASH) return;
@@ -854,9 +877,10 @@ export default function ChatComposer({
         onInteractiveSlash?.(fav.text.trim());
       }
     } catch (err) {
-      if (optimisticId) onCodexSendResult?.(optimisticId, { error: err });
+      const uncertain = !(err instanceof UnauthorizedError) && !Number.isFinite(err?.status);
+      if (optimisticId) onCodexSendResult?.(optimisticId, { error: err, uncertain });
       if (err instanceof UnauthorizedError) onAuthFail?.();
-      else if (!optimisticId) reportActionError('send', err);
+      else if (!optimisticId || (source === 'queue' && !uncertain)) reportActionError('send', err);
     }
   };
 
@@ -900,37 +924,47 @@ export default function ChatComposer({
         }} />
       <div className={`cc-card${recording ? ' recording' : ''}`}
         onPointerDown={cardDown} onPointerMove={cardMove} onPointerUp={cardTapFocus}>
-        {pendingQueue.length > 0 && (
+        {displayQueue.length > 0 && (
           <div className="cc-queue" aria-label={t('chat.queue.title')}>
             <div className="cc-queue-head">
               <span className="cc-queue-title">{t('chat.queue.title')}
-                <span className="cc-queue-count">{pendingQueue.length}</span>
+                <span className="cc-queue-count">{displayQueue.length}</span>
               </span>
               <span>{t('chat.queue.hint')}</span>
             </div>
             <div className="cc-queue-list">
-              {pendingQueue.map((item, index) => (
-                <div className="cc-queue-item" key={item.id}
+              {displayQueue.map((item, index) => (
+                <div className={`cc-queue-item${item.optimistic ? ' is-pending' : ''}`} key={item.id}
                   onClick={(event) => {
+                    if (item.optimistic) return;
                     if (event.target.closest('.cc-queue-action')) return;
                     void openQueueEditor(item);
                   }}>
                   <span className="cc-queue-index" aria-hidden="true">{index + 1}</span>
-                  <span className="cc-queue-text" role="button" tabIndex={queueAction ? -1 : 0}
-                    aria-label={t('chat.queue.edit')} aria-disabled={!!queueAction}
+                  <span className="cc-queue-text" role={item.optimistic ? undefined : 'button'}
+                    tabIndex={item.optimistic || queueAction ? -1 : 0}
+                    aria-label={item.optimistic ? undefined : t('chat.queue.edit')}
+                    aria-disabled={item.optimistic || !!queueAction}
                     onKeyDown={(event) => {
+                      if (item.optimistic) return;
                       if (event.key !== 'Enter' && event.key !== ' ') return;
                       event.preventDefault();
                       void openQueueEditor(item);
                     }}>{item.text}</span>
-                  <span className="cc-queue-actions">
-                    <button type="button" className="cc-queue-action cc-queue-send"
-                      aria-label={t('chat.queue.steer')} disabled={!!queueAction}
-                      onClick={() => void actOnQueued('steer', item)}><ArrowUpIcon /></button>
-                    <button type="button" className="cc-queue-action cc-queue-delete"
-                      aria-label={t('chat.queue.remove')} disabled={!!queueAction}
-                      onClick={() => setQueueDelete(item)}><XIcon /></button>
-                  </span>
+                  {item.optimistic ? (
+                    <span className="cc-queue-pending" role="status" aria-label={t('chat.outgoing.sending')}>
+                      <span aria-hidden="true" />
+                    </span>
+                  ) : (
+                    <span className="cc-queue-actions">
+                      <button type="button" className="cc-queue-action cc-queue-send"
+                        aria-label={t('chat.queue.steer')} disabled={!!queueAction}
+                        onClick={() => void actOnQueued('steer', item)}><ArrowUpIcon /></button>
+                      <button type="button" className="cc-queue-action cc-queue-delete"
+                        aria-label={t('chat.queue.remove')} disabled={!!queueAction}
+                        onClick={() => setQueueDelete(item)}><XIcon /></button>
+                    </span>
+                  )}
                 </div>
               ))}
             </div>

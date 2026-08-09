@@ -286,7 +286,11 @@ export function codexRoutes({ codexApp, commands, claudeEvents, wait = pause }) 
     if (routeError(res, target)) return;
     const text = typeof req.body?.text === 'string' ? req.body.text.trim() : '';
     if (!text) return res.status(400).json({ error: 'message is empty' });
-    try { res.json(await codexApp.send(target.pane, target.threadId, text)); }
+    const requestId = typeof req.body?.requestId === 'string' ? req.body.requestId.trim() : '';
+    if (requestId && (requestId.length > 128 || !/^[a-zA-Z0-9._:-]+$/.test(requestId))) {
+      return res.status(400).json({ error: 'bad Codex request id' });
+    }
+    try { res.json(await codexApp.send(target.pane, target.threadId, text, requestId || null)); }
     catch (error) { codexError(res, error); }
   });
 

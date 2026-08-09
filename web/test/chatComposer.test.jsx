@@ -199,7 +199,9 @@ describe('ChatComposer', () => {
     const input = screen.getByPlaceholderText('和 Agent 对话…');
     typeInto(input, '继续实现');
     fireEvent.click(screen.getByRole('button', { name: '发送' }));
-    await waitFor(() => expect(sendCodexMessage).toHaveBeenCalledWith('%1', '继续实现'));
+    await waitFor(() => expect(sendCodexMessage).toHaveBeenCalledWith(
+      '%1', '继续实现', expect.stringMatching(/^codex-send-/),
+    ));
     rerender(<ChatComposer {...props} />);
     typeInto(input, '/compact');
     fireEvent.click(screen.getByRole('button', { name: '发送' }));
@@ -212,7 +214,7 @@ describe('ChatComposer', () => {
     expect(onInteractiveSlash).not.toHaveBeenCalled();
   });
 
-  it('clears a managed Codex draft and exposes a sending bubble before App Server replies', async () => {
+  it('clears a busy managed Codex draft and targets its temporary state at the queue', async () => {
     const request = deferred();
     sendCodexMessage.mockReturnValueOnce(request.promise);
     const onCodexSendStart = vi.fn(() => 'optimistic-1');
@@ -224,12 +226,41 @@ describe('ChatComposer', () => {
     fireEvent.click(screen.getByRole('button', { name: '发送' }));
 
     expect(input.value).toBe('');
-    expect(onCodexSendStart).toHaveBeenCalledWith('%1', '马上显示这条消息', 'send');
+    expect(onCodexSendStart).toHaveBeenCalledWith(
+      '%1', '马上显示这条消息', 'queue', expect.stringMatching(/^codex-send-/),
+    );
+    const requestId = onCodexSendStart.mock.calls[0][3];
+    await waitFor(() => expect(sendCodexMessage)
+      .toHaveBeenCalledWith('%1', '马上显示这条消息', requestId));
     expect(onCodexSendResult).not.toHaveBeenCalled();
 
     const result = { queued: true, item: { id: 'queued-1', text: '马上显示这条消息' } };
     request.resolve(result);
     await waitFor(() => expect(onCodexSendResult).toHaveBeenCalledWith('optimistic-1', { result }));
+  });
+
+  it('renders an unconfirmed busy send in the queue and lets the matching server row replace it', () => {
+    const requestId = 'codex-send-request-1';
+    const optimistic = [{
+      id: requestId, text: '直接进入排队区', source: 'queue', status: 'sending',
+    }];
+    const props = {
+      pane: '%1', agent: 'codex', kind: 'working', optimisticMessages: optimistic,
+    };
+    const { container, rerender } = render(<ChatComposer {...props}
+      codexSession={{ managed: true, queue: [] }} />);
+
+    expect(screen.getByText('直接进入排队区').closest('.cc-queue-item').classList.contains('is-pending')).toBe(true);
+    expect(container.querySelectorAll('.cc-queue-item')).toHaveLength(1);
+    expect(container.querySelector('.cc-queue-pending')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: '立刻引导' })).toBeNull();
+
+    rerender(<ChatComposer {...props} codexSession={{
+      managed: true, queue: [{ id: 'queued-1', requestId, text: '直接进入排队区' }],
+    }} />);
+    expect(container.querySelectorAll('.cc-queue-item')).toHaveLength(1);
+    expect(container.querySelector('.cc-queue-item.is-pending')).toBeNull();
+    expect(screen.getByRole('button', { name: '立刻引导' })).toBeTruthy();
   });
 
   it('rejects unsupported managed Codex slash commands without writing to the terminal', async () => {
@@ -665,7 +696,9 @@ describe('ChatComposer', () => {
     const input = screen.getByPlaceholderText('和 Agent 对话…');
     typeInto(input, '排到最后');
     fireEvent.click(screen.getByRole('button', { name: '发送' }));
-    await waitFor(() => expect(sendCodexMessage).toHaveBeenCalledWith('%1', '排到最后'));
+    await waitFor(() => expect(sendCodexMessage).toHaveBeenCalledWith(
+      '%1', '排到最后', expect.stringMatching(/^codex-send-/),
+    ));
 
     fireEvent.click(screen.getAllByRole('button', { name: '立刻引导' })[0]);
     expect(beginCodexQueuedEdit).not.toHaveBeenCalled();
@@ -845,7 +878,9 @@ describe('ChatComposer', () => {
       onCodexSendStart={onCodexSendStart} onCodexSendResult={onCodexSendResult} />);
 
     fireEvent.click(screen.getByRole('button', { name: '继续' }));
-    expect(onCodexSendStart).toHaveBeenCalledWith('%1', '继续', 'send');
+    expect(onCodexSendStart).toHaveBeenCalledWith(
+      '%1', '继续', 'queue', expect.stringMatching(/^codex-send-/),
+    );
     expect(onCodexSendResult).not.toHaveBeenCalled();
 
     const result = { turn: { id: 'turn-quick-reply' } };

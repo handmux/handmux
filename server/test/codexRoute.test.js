@@ -84,7 +84,22 @@ describe('Codex App Server routes', () => {
     await request(app).get('/codex/session?pane=%251').expect(200, { managed: true, threadId: 'thread-1' });
     await request(app).post('/codex/send').send({ pane: '%1', text: ' continue ' }).expect(200);
     expect(status).toHaveBeenCalledWith('%1', 'thread-1');
-    expect(send).toHaveBeenCalledWith('%1', 'thread-1', 'continue');
+    expect(send).toHaveBeenCalledWith('%1', 'thread-1', 'continue', null);
+  });
+
+  it('passes a stable send request id through and rejects malformed ids', async () => {
+    const send = vi.fn(async () => ({ queued: true, item: { id: 'queued-1' } }));
+    const app = appFor({ codexApp: { send } });
+
+    await request(app).post('/codex/send').send({
+      pane: '%1', text: 'queue this', requestId: 'codex-send-request_1',
+    }).expect(200, { queued: true, item: { id: 'queued-1' } });
+    expect(send).toHaveBeenCalledWith('%1', 'thread-1', 'queue this', 'codex-send-request_1');
+
+    await request(app).post('/codex/send').send({
+      pane: '%1', text: 'invalid', requestId: 'spaces are not allowed',
+    }).expect(400, { error: 'bad Codex request id' });
+    expect(send).toHaveBeenCalledTimes(1);
   });
 
   it('runs /clear through the remote TUI and returns only after App Server confirms its new thread', async () => {

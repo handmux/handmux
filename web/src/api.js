@@ -142,8 +142,10 @@ export async function streamCodexMessages(pane, { signal, onEvent } = {}) {
 }
 export const takeoverCodexSession = (pane) =>
   req('/api/codex/takeover', { method: 'POST', body: JSON.stringify({ pane }), timeoutMs: 30000 });
-export const sendCodexMessage = (pane, text) =>
-  req('/api/codex/send', { method: 'POST', body: JSON.stringify({ pane, text }), timeoutMs: 8000 });
+export const sendCodexMessage = (pane, text, requestId = null) =>
+  req('/api/codex/send', {
+    method: 'POST', body: JSON.stringify({ pane, text, ...(requestId ? { requestId } : {}) }), timeoutMs: 8000,
+  });
 export const steerCodexQueuedMessage = (pane, id) =>
   req('/api/codex/queue/steer', { method: 'POST', body: JSON.stringify({ pane, id }), timeoutMs: 8000 });
 export const removeCodexQueuedMessage = (pane, id) =>

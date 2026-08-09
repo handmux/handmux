@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { getHistory, getPanes, createSession, createWindow, renameSession, renameWindow, deleteWindow, swapWindows, createDir, UnauthorizedError, ApiError, fetchDoc, fetchDir, signAsr, sendInput, parseSseFrames, streamCodexMessages } from '../src/api.js';
+import { getHistory, getPanes, createSession, createWindow, renameSession, renameWindow, deleteWindow, swapWindows, createDir, UnauthorizedError, ApiError, fetchDoc, fetchDir, signAsr, sendInput, parseSseFrames, streamCodexMessages, sendCodexMessage } from '../src/api.js';
 import { createPreview, getPreviews, deletePreview, previewUrl, fetchImageUrl } from '../src/api.js';
 
 afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); vi.useRealTimers(); });
@@ -70,6 +70,18 @@ describe('api request timeout', () => {
   it('returns the json on a normal response (timeout cleared, no abort)', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => jsonRes(200, { ansi: 'x', width: 80, height: 24 })));
     await expect(getHistory('%1')).resolves.toEqual({ ansi: 'x', width: 80, height: 24 });
+  });
+
+  it('sends the stable Codex request id used to reconcile an uncertain response', async () => {
+    const fetchMock = vi.fn(async () => jsonRes(200, { queued: true }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await sendCodexMessage('%1', 'next turn', 'codex-send-request-1');
+
+    expect(fetchMock).toHaveBeenCalledWith('/api/codex/send', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({ pane: '%1', text: 'next turn', requestId: 'codex-send-request-1' }),
+    }));
   });
 
   it('still maps 401 to UnauthorizedError', async () => {

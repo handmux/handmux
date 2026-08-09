@@ -95,6 +95,7 @@ import {
 } from './desktopInput.js';
 import { useDesktopTerminalInput } from './hooks/useDesktopTerminalInput.js';
 import { useCodexSession, codexKind } from './hooks/useCodexSession.js';
+import { settleCodexOutgoing } from './codexOutgoing.js';
 import { isDraftShortcut, shouldRouteTerminalPageKey } from './terminalPageKeyboard.js';
 import {
   getSnapshotInterval,
@@ -1350,37 +1351,18 @@ export default function App() {
     }
   }, [current?.paneId, codexSession.managed, codexSession.threadId, setCodexTakeoverPending]);
 
-  const beginCodexSend = useCallback((paneId, text, source) => {
-    const id = `codex-outgoing-${Date.now().toString(36)}-${(++codexOptimisticSeqRef.current).toString(36)}`;
+  const beginCodexSend = useCallback((paneId, text, source, requestId = null) => {
+    const id = requestId
+      || `codex-outgoing-${Date.now().toString(36)}-${(++codexOptimisticSeqRef.current).toString(36)}`;
     setCodexOptimisticMessages((items) => [
       ...items.slice(-49), { id, paneId, text, source, status: 'sending' },
     ]);
     return id;
   }, []);
-  const finishCodexSend = useCallback((id, { result, error } = {}) => {
-    setCodexOptimisticMessages((items) => {
-      const item = items.find((candidate) => candidate.id === id);
-      if (!item) return items;
-      if (error) {
-        // A failed steer remains authoritative in the server queue, so reveal that queue item again and
-        // drop only its temporary moving bubble. A failed fresh send stays visible as page-local feedback.
-        return item.source === 'steer'
-          ? items.filter((candidate) => candidate.id !== id)
-          : items.map((candidate) => candidate.id === id
-            ? { ...candidate, status: 'failed', error: error?.serverError || error?.message || null }
-            : candidate);
-      }
-      if (result?.queued) {
-        // Keep the temporary bubble until the authoritative queue snapshot contains this exact item. ChatView
-        // then swaps the bubble for the queue row in one render, avoiding an empty flash between both states.
-        return items.map((candidate) => candidate.id === id
-          ? { ...candidate, status: 'queued', queueId: result.item?.id || null }
-          : candidate);
-      }
-      const status = item.source === 'steer' ? 'steered' : 'accepted';
-      return items.map((candidate) => candidate.id === id
-        ? { ...candidate, status } : candidate);
-    });
+  const finishCodexSend = useCallback((id, { result, error, uncertain = false } = {}) => {
+    // Transport failure means "response unknown", not "server rejected". Keep the temporary state until
+    // the authoritative transcript/queue snapshot claims its stable request id.
+    setCodexOptimisticMessages((items) => settleCodexOutgoing(items, id, { result, error, uncertain }));
   }, []);
   const reportChatActionError = useCallback((paneId, error) => {
     if (!paneId) return;
@@ -2174,6 +2156,7 @@ export default function App() {
                 onKey={sendKey}
                 onAuthFail={onAuthFail}
                 onSent={onCommandSent}
+                optimisticMessages={codexOptimisticMessages.filter((item) => item.paneId === current.paneId)}
                 onCodexSendStart={beginCodexSend}
                 onCodexSendResult={finishCodexSend}
                 onActionError={(error) => reportChatActionError(current.paneId, error)}

@@ -7,6 +7,7 @@ import { isCodexSyntheticUserText } from './codexTranscriptParse.js';
 const RPC_TIMEOUT_MS = 8_000;
 const SOCKET_SCAN_MS = 2_000;
 const MAX_QUEUED_MESSAGES = 20;
+const MAX_SUBMISSION_RECEIPTS = 256;
 const APPROVAL_METHODS = new Set([
   'item/commandExecution/requestApproval',
   'item/fileChange/requestApproval',
@@ -439,7 +440,7 @@ class CodexAppConnection {
   constructor({
     pane, socketPath, connect = connectUnixWebSocket, timeoutMs = RPC_TIMEOUT_MS,
     now = () => Date.now(), baseline = false, onStateChange = () => {}, onClose = () => {},
-    queueStore = new Map(), nextQueueId = () => `${Date.now()}`,
+    queueStore = new Map(), submissionStore = new Map(), nextQueueId = () => `${Date.now()}`,
   }) {
     this.pane = pane;
     this.socketPath = socketPath;
@@ -450,6 +451,7 @@ class CodexAppConnection {
     this.baseline = baseline;
     this.onStateChange = onStateChange;
     this.queueStore = queueStore;
+    this.submissionStore = submissionStore;
     this.nextQueueId = nextQueueId;
     this.nextId = 1;
     this.pending = new Map();
@@ -724,10 +726,13 @@ class CodexAppConnection {
       || null;
   }
 
-  enqueue(threadId, text) {
+  enqueue(threadId, text, requestId = null) {
     const queue = this.queueState(threadId);
     if (queue.items.length >= MAX_QUEUED_MESSAGES) throw new Error('pending message queue is full');
-    const item = { id: this.nextQueueId(), text, createdAt: this.now() };
+    const item = {
+      id: this.nextQueueId(), text, createdAt: this.now(),
+      ...(requestId ? { requestId } : {}),
+    };
     queue.items.push(item);
     this.bump(threadId);
     return { ...item };
@@ -760,14 +765,49 @@ class CodexAppConnection {
     }
   }
 
-  async submit(threadId, text) {
-    const state = await this.ensureThread(threadId);
+  async submitOnce(threadId, text, requestId = null) {
     const queue = this.queueState(threadId);
+    const knownState = this.state(threadId);
+    if (this.activeTurn(threadId) || knownState.status?.type === 'active'
+      || queue.items.length || queue.starting || queue.draining) {
+      return { queued: true, item: this.enqueue(threadId, text, requestId) };
+    }
+    const state = await this.ensureThread(threadId);
     if (this.activeTurn(threadId) || state.status?.type === 'active'
       || queue.items.length || queue.starting || queue.draining) {
-      return { queued: true, item: this.enqueue(threadId, text) };
+      return { queued: true, item: this.enqueue(threadId, text, requestId) };
     }
     return this.startTurn(threadId, text);
+  }
+
+  pruneSubmissionReceipts() {
+    if (this.submissionStore.size <= MAX_SUBMISSION_RECEIPTS) return;
+    for (const [key, receipt] of this.submissionStore) {
+      if (!receipt.settled) continue;
+      this.submissionStore.delete(key);
+      if (this.submissionStore.size <= MAX_SUBMISSION_RECEIPTS) break;
+    }
+  }
+
+  async submit(threadId, text, requestId = null) {
+    if (!requestId) return this.submitOnce(threadId, text);
+    const key = `${this.pane}\0${threadId}\0${requestId}`;
+    const existing = this.submissionStore.get(key);
+    if (existing) {
+      if (existing.text !== text) throw new Error('Codex request id was already used for another message');
+      return existing.promise;
+    }
+    const receipt = { text, settled: false, promise: null };
+    receipt.promise = this.submitOnce(threadId, text, requestId);
+    this.submissionStore.set(key, receipt);
+    receipt.promise.then(() => {
+      receipt.settled = true;
+      this.pruneSubmissionReceipts();
+    }, () => {
+      if (this.submissionStore.get(key) === receipt) this.submissionStore.delete(key);
+    });
+    this.pruneSubmissionReceipts();
+    return receipt.promise;
   }
 
   async drainQueue(threadId) {
@@ -1212,6 +1252,7 @@ export function createCodexAppServer({
 } = {}) {
   const connections = new Map();
   const queues = new Map();
+  const submissions = new Map();
   let queueSequence = 0;
   let scanTimer = null;
   let started = false;
@@ -1224,7 +1265,8 @@ export function createCodexAppServer({
     if (!current || current.closed) {
       current = new CodexAppConnection({
         pane, socketPath, connect, now, baseline: baseline || priming, onStateChange,
-        queueStore: queues, nextQueueId: () => `${now().toString(36)}-${(++queueSequence).toString(36)}`,
+        queueStore: queues, submissionStore: submissions,
+        nextQueueId: () => `${now().toString(36)}-${(++queueSequence).toString(36)}`,
         onClose: (closed) => { if (connections.get(pane) === closed) connections.delete(pane); },
       });
       connections.set(pane, current);
@@ -1308,11 +1350,11 @@ export function createCodexAppServer({
       await client.ensureThread(threadId);
       return client.subscribeStream(threadId, listener);
     },
-    async send(pane, threadId, text) {
+    async send(pane, threadId, text, requestId = null) {
       const client = await connection(pane);
       if (!client) throw new Error('Codex session is not managed by Handmux');
       await client.assertCurrentThread(threadId);
-      return client.submit(threadId, text);
+      return client.submit(threadId, text, requestId);
     },
     async steerQueued(pane, threadId, itemId) {
       const client = await connection(pane);
@@ -1448,6 +1490,7 @@ export function createCodexAppServer({
       for (const client of connections.values()) client.close();
       connections.clear();
       queues.clear();
+      submissions.clear();
     },
   };
 }

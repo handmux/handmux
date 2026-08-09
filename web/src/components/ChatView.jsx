@@ -676,8 +676,9 @@ export default function ChatView({
   const claimedCanonicalIds = new Set();
   const coveredOptimisticIds = [];
   const serverQueueIds = new Set((codexSession?.queue || []).map((item) => item.id));
+  const serverQueueRequestIds = new Set((codexSession?.queue || []).map((item) => item.requestId).filter(Boolean));
   for (const item of optimisticMessages) {
-    if (item.status === 'queued' && item.queueId && serverQueueIds.has(item.queueId)) {
+    if ((item.queueId && serverQueueIds.has(item.queueId)) || serverQueueRequestIds.has(item.id)) {
       coveredOptimisticIds.push(item.id);
       continue;
     }
@@ -693,7 +694,8 @@ export default function ChatView({
   }
   const coveredOptimisticKey = coveredOptimisticIds.join('\0');
   const coveredOptimisticSet = new Set(coveredOptimisticIds);
-  const visibleOptimistic = optimisticMessages.filter((item) => !coveredOptimisticSet.has(item.id));
+  const visibleOptimistic = optimisticMessages.filter((item) => item.source !== 'queue'
+    && !coveredOptimisticSet.has(item.id));
   useEffect(() => {
     if (coveredOptimisticIds.length) onOptimisticCovered?.(coveredOptimisticIds);
     // ids are the stable handoff contract; message array identity changes on every poll.

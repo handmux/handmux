@@ -221,6 +221,45 @@ describe('ChatView', () => {
     expect(container.querySelector('.chat-optimistic')).toBeNull();
   });
 
+  it('keeps ordinary sends instant in chat but leaves queue-targeted sends to the composer', async () => {
+    mockTranscript([]);
+    const { container, rerender } = render(<ChatView pane="%0" agent="codex" kind="done"
+      codexSession={{ managed: true, threadId: 'thread-1', queue: [] }}
+      optimisticMessages={[{
+        id: 'ordinary-1', text: '普通消息立即显示', source: 'send', status: 'sending',
+      }]} />);
+
+    expect(await screen.findByText('普通消息立即显示')).toBeTruthy();
+    expect(container.querySelector('.chat-optimistic')).toBeTruthy();
+
+    rerender(<ChatView pane="%0" agent="codex" kind="working"
+      codexSession={{ managed: true, threadId: 'thread-1', queue: [] }}
+      optimisticMessages={[{
+        id: 'queued-1', text: '排队消息不闪进聊天区', source: 'queue', status: 'sending',
+      }]} />);
+    await waitFor(() => expect(screen.queryByText('普通消息立即显示')).toBeNull());
+    expect(screen.queryByText('排队消息不闪进聊天区')).toBeNull();
+    expect(container.querySelector('.chat-optimistic')).toBeNull();
+  });
+
+  it('reconciles a timed-out queue request from the authoritative request id', async () => {
+    mockTranscript([]);
+    const optimistic = [{
+      id: 'request-1', text: '服务端实际已接收', source: 'queue', status: 'sending',
+    }];
+    const onOptimisticCovered = vi.fn();
+    const { rerender } = render(<ChatView pane="%0" agent="codex" kind="working"
+      codexSession={{ managed: true, threadId: 'thread-1', queue: [] }}
+      optimisticMessages={optimistic} onOptimisticCovered={onOptimisticCovered} />);
+
+    expect(screen.queryByText('服务端实际已接收')).toBeNull();
+    rerender(<ChatView pane="%0" agent="codex" kind="working" codexSession={{
+      managed: true, threadId: 'thread-1',
+      queue: [{ id: 'server-queue-1', requestId: 'request-1', text: '服务端实际已接收' }],
+    }} optimisticMessages={optimistic} onOptimisticCovered={onOptimisticCovered} />);
+    await waitFor(() => expect(onOptimisticCovered).toHaveBeenCalledWith(['request-1']));
+  });
+
   it('renders a composer failure inside the conversation with its actionable reason', async () => {
     mockTranscript([]);
     const { container } = render(<ChatView pane="%0" kind="done"
