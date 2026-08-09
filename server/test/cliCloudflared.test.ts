@@ -3,10 +3,14 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { assetFor, resolveCloudflared, drain } from '../src/cli/cloudflared.js';
+import type { DownloadResponse } from '../src/cli/cloudflared.js';
 
 // A minimal fetch-Response stand-in whose body streams the given chunks through a getReader(), so we can
 // exercise the progress path without a network. content-length is optional (omit to test unknown-size).
-function fakeRes(chunks, { contentLength, ok = true, status = 200 } = {}) {
+function fakeRes(
+  chunks: Buffer[],
+  { contentLength, ok = true, status = 200 }: { contentLength?: number; ok?: boolean; status?: number } = {},
+): DownloadResponse {
   let i = 0;
   return {
     ok, status,
@@ -28,7 +32,7 @@ describe('assetFor', () => {
 });
 
 describe('resolveCloudflared', () => {
-  let home;
+  let home: string;
   beforeEach(() => { home = fs.mkdtempSync(path.join(os.tmpdir(), 'pm-cf-')); });
   afterEach(() => { fs.rmSync(home, { recursive: true, force: true }); });
 

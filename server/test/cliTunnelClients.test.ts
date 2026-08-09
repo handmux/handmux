@@ -7,8 +7,8 @@ import { assetForCpolar, resolveCpolar, resolveNatapp } from '../src/cli/tunnelC
 describe('assetForCpolar', () => {
   it('maps linux/darwin to a per-arch stable zip url', () => {
     expect(assetForCpolar('linux', 'x64')).toMatchObject({ bin: 'cpolar', file: 'cpolar-stable-linux-amd64.zip' });
-    expect(assetForCpolar('linux', 'arm64').file).toBe('cpolar-stable-linux-arm64.zip');
-    expect(assetForCpolar('darwin', 'arm64').file).toBe('cpolar-stable-darwin-arm64.zip');
+    expect(assetForCpolar('linux', 'arm64')).toMatchObject({ file: 'cpolar-stable-linux-arm64.zip' });
+    expect(assetForCpolar('darwin', 'arm64')).toMatchObject({ file: 'cpolar-stable-darwin-arm64.zip' });
     expect(assetForCpolar('linux', 'x64').url).toMatch(/^https:\/\/www\.cpolar\.com\/.*cpolar-stable-linux-amd64\.zip$/);
   });
   it('has no auto-download url on windows (installer-only)', () => {
@@ -17,7 +17,7 @@ describe('assetForCpolar', () => {
 });
 
 describe('resolveCpolar / resolveNatapp', () => {
-  let home;
+  let home: string;
   beforeEach(() => { home = fs.mkdtempSync(path.join(os.tmpdir(), 'pm-tc-')); });
   afterEach(() => { fs.rmSync(home, { recursive: true, force: true }); });
 

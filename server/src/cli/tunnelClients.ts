@@ -8,13 +8,25 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { pocketHome } from './state.js';
 import { onPath, drain, defaultProgress } from './cloudflared.js';
+import type { DownloadFetch, DownloadProgress, DownloadResponse } from './cloudflared.js';
 import { t } from './i18n/index.js';
 
 // cpolar release asset for this OS/arch. Linux/macOS ship a bare binary inside a .zip; Windows ships a
 // `-setup.zip` INSTALLER (not a bare binary), so we don't auto-extract it — Windows users install manually.
 const CPOLAR_VERSION = '3.3.12';
-export function assetForCpolar(platform = process.platform, arch = process.arch) {
-  const a = { x64: 'amd64', arm64: 'arm64', arm: 'arm', ia32: '386' }[arch] || arch;
+export type CpolarAsset =
+  | { bin: 'cpolar.exe'; url: null }
+  | { bin: 'cpolar'; file: string; url: string };
+
+interface TunnelResolverOptions {
+  which?: (exec: string) => string | null | undefined;
+  fetchImpl?: DownloadFetch;
+  log?: { log?(message: string): void };
+  progress?: DownloadProgress;
+}
+
+export function assetForCpolar(platform: string = process.platform, arch: string = process.arch): CpolarAsset {
+  const a = ({ x64: 'amd64', arm64: 'arm64', arm: 'arm', ia32: '386' } as Record<string, string>)[arch] || arch;
   const base = `https://www.cpolar.com/static/downloads/releases/${CPOLAR_VERSION}`;
   if (platform === 'win32') return { bin: 'cpolar.exe', url: null };            // installer-only → manual
   const file = `cpolar-stable-${platform === 'darwin' ? 'darwin' : 'linux'}-${a}.zip`;
@@ -23,7 +35,10 @@ export function assetForCpolar(platform = process.platform, arch = process.arch)
 
 // PATH → ~/.handmux/bin/cpolar → download+unzip. Any download/extract failure surfaces the friendly manual
 // hint (t('client.cpolarManual')) so the worst case is "install it yourself", never a silent dead child.
-export async function resolveCpolar(home, { which = onPath, fetchImpl, log = console, progress } = {}) {
+export async function resolveCpolar(
+  home: string,
+  { which = onPath, fetchImpl, log = console, progress }: TunnelResolverOptions = {},
+): Promise<string> {
   const found = which('cpolar');
   if (found) return found;
 
@@ -37,7 +52,7 @@ export async function resolveCpolar(home, { which = onPath, fetchImpl, log = con
   if (!doFetch) throw new Error(t('client.cpolarManual'));
   fs.mkdirSync(dir, { recursive: true });
   log.log?.(t('client.downloading', { name: 'cpolar', file: asset.file }));
-  let res;
+  let res: DownloadResponse;
   try { res = await doFetch(asset.url, { redirect: 'follow' }); }
   catch { throw new Error(t('client.cpolarManual')); }
   if (!res.ok) throw new Error(t('client.cpolarManual'));
@@ -53,7 +68,7 @@ export async function resolveCpolar(home, { which = onPath, fetchImpl, log = con
 }
 
 // natapp: PATH → ~/.handmux/bin/natapp, else a clear manual-download hint (no auto-download — login-gated).
-export function resolveNatapp(home, { which = onPath } = {}) {
+export function resolveNatapp(home: string, { which = onPath }: Pick<TunnelResolverOptions, 'which'> = {}): string {
   const found = which('natapp');
   if (found) return found;
   const dest = path.join(pocketHome(home), 'bin', process.platform === 'win32' ? 'natapp.exe' : 'natapp');
