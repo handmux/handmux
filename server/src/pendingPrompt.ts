@@ -28,7 +28,7 @@ const CURSOR_RE = /^\s*[❯›»>]\s*\d+\.\s/;
 // Any option row: optional cursor, then "N. label".
 const OPTION_RE = /^\s*[❯›»>]?\s*(\d+)\.\s+(.+?)\s*$/;
 // A description row: indented, not itself an option.
-const isDesc = (l) => /^\s{3,}\S/.test(l) && !OPTION_RE.test(l);
+const isDesc = (line: string): boolean => /^\s{3,}\S/.test(line) && !OPTION_RE.test(line);
 // A horizontal rule Claude draws inside/around the card (kept within an option block so meta rows past it
 // are still seen and dropped).
 const RULE_RE = /^[\s─━—–\-_=·⎯]{8,}$/;
@@ -44,13 +44,13 @@ const FOOTER_RE = /enter to select|esc to (cancel|reject)/i;
 const ACTIVITY_RE = /^\s*[✻✳✶✽⏺]\s|worked for|cogitated|crafting|cooked for|crunched for|esc to interrupt/i;
 // The input cursor ❯ leading the user's echoed prompt (above the card).
 const PROMPT_ECHO_RE = /^\s*[❯›»>]\s*\D/; // ❯ NOT followed by a digit (that would be an option)
-const isTitleBoundary = (l) =>
-  ACTIVITY_RE.test(l) || RULE_RE.test(l) || TAB_BAR_RE.test(l) || FOOTER_RE.test(l) || PROMPT_ECHO_RE.test(l);
+const isTitleBoundary = (line: string): boolean =>
+  ACTIVITY_RE.test(line) || RULE_RE.test(line) || TAB_BAR_RE.test(line) || FOOTER_RE.test(line) || PROMPT_ECHO_RE.test(line);
 
-const stripRight = (s) => String(s == null ? '' : s).replace(/\s+$/, '');
+const stripRight = (value: unknown): string => String(value == null ? '' : value).replace(/\s+$/, '');
 // Strip ANSI/OSC escapes so a capture taken WITH `-e` (SGR) still parses — belt-and-suspenders even though
 // the endpoint captures plain.
-const stripAnsi = (s) => String(s || '').replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, '').replace(/\x1b[[0-9;?]*[ -/]*[@-~]/g, '');
+const stripAnsi = (value: unknown): string => String(value || '').replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, '').replace(/\x1b[[0-9;?]*[ -/]*[@-~]/g, '');
 
 // The assistant text immediately PRECEDING the menu, scraped because the turn (text + AskUserQuestion) is NOT
 // flushed to the session jsonl until AFTER the user answers (verified live: probe + out-of-order line
@@ -61,31 +61,62 @@ const stripAnsi = (s) => String(s || '').replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b
 // title walk, so adjacent lead-in the title already absorbed is never duplicated here.
 const LEADIN_MAX = 2;
 const MSG_MARK_RE = /^\s*⏺/; // ⏺ opens an assistant message in the scrollback — include it, stop there
-function extractLeadIn(lines, fromIdx) {
-  const block = [];
+function extractLeadIn(lines: string[], fromIdx: number): string | null {
+  const block: string[] = [];
   let i = fromIdx;
   // Skip the chrome between the menu and the preceding text (spinner / rules / tab bar / stale footer /
   // blanks) — but never past a ❯ prompt echo (above it is the PREVIOUS exchange, stale context) nor past a
   // ⏺ message head (it IS the text's first line — the collect loop includes it).
-  while (i >= 0 && (!lines[i].trim() || (isTitleBoundary(lines[i]) && !PROMPT_ECHO_RE.test(lines[i]) && !MSG_MARK_RE.test(lines[i])))) i--;
-  for (; i >= 0 && block.length < 12; i--) {
-    const l = lines[i];
-    if (!l.trim()) break;                                        // blank = the block's top (last paragraph)
-    if (MSG_MARK_RE.test(l)) { block.unshift(l.trim()); break; } // the ⏺ message head: include & stop
-    if (isTitleBoundary(l)) break;                               // hard chrome (incl. ❯ echo): stop
-    block.unshift(l.trim());
+  while (i >= 0) {
+    const line = lines[i] ?? '';
+    if (line.trim() && (!isTitleBoundary(line) || PROMPT_ECHO_RE.test(line) || MSG_MARK_RE.test(line))) break;
+    i--;
   }
-  const tail = block.slice(-LEADIN_MAX).map((l) => l.replace(/^⏺\s*/, '').trim()).filter(Boolean);
+  for (; i >= 0 && block.length < 12; i--) {
+    const line = lines[i] ?? '';
+    if (!line.trim()) break;                                               // blank = the block's top (last paragraph)
+    if (MSG_MARK_RE.test(line)) { block.unshift(line.trim()); break; }     // the ⏺ message head: include & stop
+    if (isTitleBoundary(line)) break;                                      // hard chrome (incl. ❯ echo): stop
+    block.unshift(line.trim());
+  }
+  const tail = block.slice(-LEADIN_MAX).map((line) => line.replace(/^⏺\s*/, '').trim()).filter(Boolean);
   return tail.length ? tail.join(' ') : null;
 }
 
 // Parse the multi-question tab strip → [{ label, answered }]. ☒ = answered, ☐ = not. "✔ Submit" is excluded.
-function parseTabs(line) {
-  const tabs = [];
+interface PromptTab {
+  label: string;
+  answered: boolean;
+}
+
+function parseTabs(line: string): PromptTab[] {
+  const tabs: PromptTab[] = [];
   const re = /([☐☒])\s*(\S+)/g;
-  let m;
-  while ((m = re.exec(line))) tabs.push({ label: m[2], answered: m[1] === '☒' });
+  let match: RegExpExecArray | null;
+  while ((match = re.exec(line))) {
+    const mark = match[1];
+    const label = match[2];
+    if (mark && label) tabs.push({ label, answered: mark === '☒' });
+  }
   return tabs;
+}
+
+export interface PendingPromptOption {
+  n: number;
+  label: string;
+  description: string;
+}
+
+export interface PendingPrompt {
+  kind: 'question' | 'permission';
+  title: string;
+  options: PendingPromptOption[];
+  cursor: number | null;
+  leadIn?: string;
+  multi?: true;
+  step?: number;
+  total?: number;
+  submit?: boolean;
 }
 
 // capture-pane text → a normalized pending prompt, or null when no interactive menu is on screen.
@@ -93,34 +124,44 @@ function parseTabs(line) {
 //     multi, step, total, submit }
 // `n` is the digit to send to pick that option. For multi, `step`/`total` drive the "第 i/N 题" progress and
 // `submit` marks the final review screen (options are Submit answers / Cancel).
-export function parsePendingPrompt(text) {
+export function parsePendingPrompt(text: unknown): PendingPrompt | null {
   const lines = stripAnsi(text).split('\n').map(stripRight);
 
   // Anchor on the cursor-selected option (present in every menu: question, permission, review). Take the
   // LAST one so stale menus higher in the scrollback are ignored — the live menu is at the bottom.
-  const anchor = lines.findLastIndex((l) => CURSOR_RE.test(l));
+  let anchor = -1;
+  for (let i = lines.length - 1; i >= 0; i--) {
+    if (CURSOR_RE.test(lines[i] ?? '')) {
+      anchor = i;
+      break;
+    }
+  }
   if (anchor < 0) return null;
 
   // The option block = the contiguous run of option / description / rule lines around the anchor.
-  const inBlock = (l) => OPTION_RE.test(l) || isDesc(l) || RULE_RE.test(l);
+  const inBlock = (line: string): boolean => OPTION_RE.test(line) || isDesc(line) || RULE_RE.test(line);
   let top = anchor;
   let bot = anchor;
-  while (top - 1 >= 0 && inBlock(lines[top - 1])) top--;
-  while (bot + 1 < lines.length && inBlock(lines[bot + 1])) bot++;
+  while (top - 1 >= 0 && inBlock(lines[top - 1] ?? '')) top--;
+  while (bot + 1 < lines.length && inBlock(lines[bot + 1] ?? '')) bot++;
 
-  const options = [];
-  let cursor = null;
+  const options: PendingPromptOption[] = [];
+  let cursor: number | null = null;
   for (let i = top; i <= bot; i++) {
-    const m = lines[i].match(OPTION_RE);
-    if (!m) continue;
-    const n = Number(m[1]);
-    const label = m[2].trim();
-    if (CURSOR_RE.test(lines[i])) cursor = n;
+    const line = lines[i] ?? '';
+    const match = line.match(OPTION_RE);
+    const numberText = match?.[1];
+    const labelText = match?.[2];
+    if (!numberText || !labelText) continue;
+    const n = Number(numberText);
+    const label = labelText.trim();
+    if (CURSOR_RE.test(line)) cursor = n;
     let description = '';
     for (let j = i + 1; j <= bot; j++) {
-      if (OPTION_RE.test(lines[j])) break;
-      if (!isDesc(lines[j])) break;
-      description += (description ? ' ' : '') + lines[j].trim();
+      const candidate = lines[j] ?? '';
+      if (OPTION_RE.test(candidate)) break;
+      if (!isDesc(candidate)) break;
+      description += (description ? ' ' : '') + candidate.trim();
     }
     if (META_LABELS.has(label.toLowerCase())) continue; // drop Claude's built-in meta-options
     options.push({ n, label, description });
@@ -128,27 +169,30 @@ export function parsePendingPrompt(text) {
   if (!options.length) return null;
 
   // Title = header/question text above the block, skipping in-card blanks, stopping at the card's top edge.
-  const head = [];
+  const head: string[] = [];
   let headStop = top - 1;
   for (let i = top - 1; i >= 0 && head.length < 5; i--) {
-    if (!lines[i].trim()) { headStop = i - 1; continue; }
-    if (isTitleBoundary(lines[i])) { headStop = i; break; }
-    head.unshift(lines[i]);
+    const line = lines[i] ?? '';
+    if (!line.trim()) { headStop = i - 1; continue; }
+    if (isTitleBoundary(line)) { headStop = i; break; }
+    head.unshift(line);
     headStop = i - 1;
   }
-  const title = head.map((l) => l.replace(HEADER_DECOR_RE, '').trim()).filter(Boolean).join(' — ') || '需要你选择';
+  const title = head.map((line) => line.replace(HEADER_DECOR_RE, '').trim()).filter(Boolean).join(' — ') || '需要你选择';
 
   // Multi-question: the tab strip drives progress. `answered` ☒ tabs → current step is the next unanswered.
-  const tabLine = lines.find((l) => TAB_BAR_RE.test(l));
+  const tabLine = lines.find((line) => TAB_BAR_RE.test(line));
   const tabs = tabLine ? parseTabs(tabLine) : [];
   const multi = tabs.length > 1;
   const answered = tabs.filter((t) => t.answered).length;
-  const submit = /^submit answers?$/i.test(options[0].label) || (multi && answered >= tabs.length);
+  const firstOption = options[0];
+  if (!firstOption) return null;
+  const submit = /^submit answers?$/i.test(firstOption.label) || (multi && answered >= tabs.length);
 
-  const kind = /do you want to proceed/i.test(title) || /^yes\b/i.test(options[0].label)
+  const kind: PendingPrompt['kind'] = /do you want to proceed/i.test(title) || /^yes\b/i.test(firstOption.label)
     ? 'permission' : 'question';
 
-  const out = { kind, title, options, cursor };
+  const out: PendingPrompt = { kind, title, options, cursor };
   // Lead-in context the title walk didn't absorb (it stopped at a boundary or its 5-line cap) — the
   // assistant's last line(s) before the question, shown above the gate so the phone isn't asked blind.
   const leadIn = extractLeadIn(lines, headStop);
