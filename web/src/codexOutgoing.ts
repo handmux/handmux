@@ -1,4 +1,33 @@
-export function settleCodexOutgoing(items, id, { result, error } = {}) {
+export type CodexOutgoingSource = 'send' | 'queue' | 'steer';
+
+export type CodexOutgoingStatus = 'sending' | 'queued' | 'accepted' | 'steered';
+
+export interface CodexOutgoingItem {
+  id: string;
+  paneId: string;
+  text: string;
+  source: CodexOutgoingSource;
+  status: CodexOutgoingStatus;
+  queueId?: string | null;
+}
+
+export interface CodexSendResult {
+  queued?: boolean;
+  item?: { id?: string | null } | null;
+  turn?: { id?: string | null } | null;
+}
+
+export interface CodexOutgoingSettlement {
+  result?: CodexSendResult;
+  error?: unknown;
+  uncertain?: boolean;
+}
+
+export function settleCodexOutgoing(
+  items: CodexOutgoingItem[],
+  id: string,
+  { result, error }: CodexOutgoingSettlement = {},
+): CodexOutgoingItem[] {
   const item = items.find((candidate) => candidate.id === id);
   if (!item) return items;
   if (error) {

@@ -13,6 +13,7 @@ All notable changes to handmux. Format follows [Keep a Changelog](https://keepac
 
 - 手机命令模式键盘将 Alt 移到原波浪号位置，并在原 Alt 位置提供直接空格键。
 - Codex 对话将原生 Goal 的设置与终态显示为可恢复的对话卡片：用户设置与重新开始靠右，Codex 终态反馈留在对应回合并靠左；统一使用底部半屏详情，终态目标可修改后重新开始，仅进行中或暂停的 Goal 常驻在实时任务列表下方。
+- 项目开始渐进迁移至严格 TypeScript：新增 Server/Web 类型检查与 CI 生产构建门禁，核心状态模型将在保持行为兼容的前提下逐域迁移。
 
 ### Fixed
 

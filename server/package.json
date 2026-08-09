@@ -40,6 +40,7 @@
     "handmux": "node bin/handmux.js",
     "bundle": "node scripts/bundle-web.mjs",
     "prepack": "node scripts/bundle-web.mjs",
+    "typecheck": "tsc --project tsconfig.json",
     "test": "vitest run",
     "test:workspace-host": "HANDMUX_WORKSPACE_HOST=1 vitest run test/workspaceHost.test.js",
     "test:workspace-docker": "HANDMUX_WORKSPACE_DOCKER=1 vitest run test/workspaceDocker.test.js"
@@ -58,7 +59,10 @@
     "qrcode-terminal": "^0.12.0"
   },
   "devDependencies": {
+    "@types/express": "4.17.25",
+    "@types/node": "20.19.43",
     "supertest": "^7.0.0",
+    "typescript": "6.0.3",
     "vitest": "^2.0.0"
   },
   "whatsNew": [

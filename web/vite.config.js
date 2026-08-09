@@ -39,7 +39,7 @@ export default defineConfig({
   test: {
     environment: 'jsdom',
     // Component tests carry JSX, so they're named .test.jsx (plain logic tests stay .test.js).
-    include: ['test/**/*.test.{js,jsx}', 'src/**/*.test.{js,jsx}'],
+    include: ['test/**/*.test.{js,jsx,ts,tsx}', 'src/**/*.test.{js,jsx,ts,tsx}'],
     setupFiles: ['./test/setup.js'],
     // React warnings are test failures, not harmless stderr. This keeps async state updates from
     // silently drifting back outside act() while the suite still reports green.

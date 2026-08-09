@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { settleCodexOutgoing } from '../src/codexOutgoing.js';
+import { settleCodexOutgoing } from '../src/codexOutgoing.ts';
+import type { CodexOutgoingItem, CodexOutgoingSource } from '../src/codexOutgoing.ts';
 
-const outgoing = (source = 'queue') => [{
+const outgoing = (source: CodexOutgoingSource = 'queue'): CodexOutgoingItem[] => [{
   id: 'request-1', paneId: '%1', text: 'continue', source, status: 'sending',
 }];
 
