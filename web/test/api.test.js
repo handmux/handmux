@@ -331,6 +331,12 @@ describe('asr api', () => {
     expect(fetchMock).toHaveBeenCalledWith('/api/asr/sign', expect.objectContaining({ cache: 'no-store' }));
     expect(out).toEqual({ url: 'wss://x/v2/iat?a=1', appId: 'A1' });
   });
+
+  it('rejects a malformed ASR signature at the API boundary', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => jsonRes(200, { url: 'wss://iat.example.test' })));
+
+    await expect(signAsr()).rejects.toThrow('ASR sign returned an invalid response');
+  });
 });
 
 describe('previews api', () => {
