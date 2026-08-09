@@ -696,7 +696,7 @@ class CodexAppConnection {
     if (!this.threadState.has(threadId)) this.threadState.set(threadId, {
       revision: 0, readRevision: -1, thread: null, status: null, activeTurnId: null, settings: null,
       activePrompt: '', contextUsage: null, lastTurn: null, loadedOnly: false, liveItemIds: new Map(),
-      completedAgentItemIds: new Set(), plans: new Map(), goal: undefined,
+      completedAgentItemIds: new Set(), plans: new Map(), goal: undefined, goalTurnId: null,
     });
     return this.threadState.get(threadId);
   }
@@ -705,10 +705,13 @@ class CodexAppConnection {
     if (!threadId) return false;
     const state = this.state(threadId);
     const previous = state.goal;
+    const replaced = !!goal && (!previous || previous.createdAt !== goal.createdAt
+      || previous.objective !== goal.objective);
     state.goal = goal || null;
+    if (!goal || !TERMINAL_GOAL_STATUSES.has(goal.status)) state.goalTurnId = null;
+    else if (turnId) state.goalTurnId = turnId;
+    else if (replaced) state.goalTurnId = null;
     if (!emit || !goal) return previous !== state.goal;
-    const replaced = !previous || previous.createdAt !== goal.createdAt
-      || previous.objective !== goal.objective;
     const enteredTerminal = TERMINAL_GOAL_STATUSES.has(goal.status)
       && previous?.status !== goal.status;
     const restarted = TERMINAL_GOAL_STATUSES.has(previous?.status) && goal.status === 'active';
@@ -1144,7 +1147,8 @@ class CodexAppConnection {
     if (state?.goal && TERMINAL_GOAL_STATUSES.has(state.goal.status)) {
       try {
         listener({
-          type: 'goal', threadId, turnId: null, event: state.goal.status, goal: state.goal,
+          type: 'goal', threadId, turnId: state.goalTurnId || null,
+          event: state.goal.status, goal: state.goal,
         });
       } catch { /* initial Goal projection is best effort */ }
     }

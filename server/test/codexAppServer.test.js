@@ -198,7 +198,8 @@ describe('Codex App Server client', () => {
     const replayed = [];
     const unsubscribeReplay = await app.subscribe('%1', 'thread-1', (event) => replayed.push(event));
     expect(replayed).toEqual([expect.objectContaining({
-      type: 'goal', event: 'complete', goal: expect.objectContaining({ status: 'complete' }),
+      type: 'goal', event: 'complete', turnId: 'turn-goal',
+      goal: expect.objectContaining({ status: 'complete' }),
     })]);
     unsubscribeReplay();
 

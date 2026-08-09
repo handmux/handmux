@@ -90,7 +90,8 @@ describe('ChatComposer', () => {
       },
     }} />);
     const bar = screen.getByRole('button', { name: /当前任务/ });
-    expect(bar.textContent).toContain('1/3');
+    expect(bar.textContent).toContain('2/3');
+    expect(bar.getAttribute('aria-label')).toContain('2/3');
     expect(bar.textContent).toContain('正在：实现任务条');
     expect(bar.querySelector('.codex-plan-spinner:not(.is-static)')).toBeTruthy();
     expect(bar.nextElementSibling).toBe(container.querySelector('.cc-quick'));

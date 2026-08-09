@@ -743,6 +743,36 @@ describe('ChatView', () => {
     expect(sheet.querySelector('.codex-goal-actions')).toBeNull();
   });
 
+  it('keeps a live terminal Goal card inside the turn that completed it', async () => {
+    let emit;
+    api.streamCodexMessages.mockImplementation((_pane, { signal, onEvent }) => {
+      emit = onEvent;
+      return new Promise((resolve) => signal.addEventListener('abort', resolve, { once: true }));
+    });
+    mockTranscript([
+      { k: 0, i: 0, role: 'user', type: 'text', text: '完成发布', turnId: 'turn-goal' },
+      { k: 1, i: 1, role: 'assistant', type: 'text', text: '发布已经完成', turnId: 'turn-goal' },
+      { k: 2, i: 2, role: 'user', type: 'text', text: '再检查文档', turnId: 'turn-later' },
+      { k: 3, i: 3, role: 'assistant', type: 'text', text: '文档也检查好了', turnId: 'turn-later' },
+    ]);
+    render(<ChatView pane="%0" agent="codex" kind="done"
+      codexSession={{ managed: true, threadId: 'thread-1', activeTurnId: null }} />);
+    const completedReply = await screen.findByText('发布已经完成');
+    const laterInput = screen.getByText('再检查文档');
+    await waitFor(() => expect(emit).toBeTypeOf('function'));
+    act(() => emit({
+      type: 'goal', threadId: 'thread-1', turnId: 'turn-goal', event: 'complete',
+      goal: {
+        objective: '完成发布', status: 'complete', createdAt: 10, updatedAt: 20,
+        tokensUsed: 500, timeUsedSeconds: 12,
+      },
+    }));
+
+    const card = await screen.findByRole('button', { name: /目标已完成.*完成发布/ });
+    expect(completedReply.compareDocumentPosition(card) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(card.compareDocumentPosition(laterInput) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
   it('keeps an unfinished historical task indicator static', async () => {
     mockTranscript([
       { k: 0, i: 0, role: 'assistant', type: 'plan', turnId: 'turn-plan',

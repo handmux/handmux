@@ -12,7 +12,7 @@ All notable changes to handmux. Format follows [Keep a Changelog](https://keepac
 ### Changed
 
 - 手机命令模式键盘将 Alt 移到原波浪号位置，并在原 Alt 位置提供直接空格键。
-- Codex 对话将原生 Goal 的设置与终态显示为可恢复的对话卡片：用户设置与重新开始靠右，Codex 终态反馈靠左；统一使用底部半屏详情，终态目标可修改后重新开始，仅进行中或暂停的 Goal 常驻在实时任务列表下方。
+- Codex 对话将原生 Goal 的设置与终态显示为可恢复的对话卡片：用户设置与重新开始靠右，Codex 终态反馈留在对应回合并靠左；统一使用底部半屏详情，终态目标可修改后重新开始，仅进行中或暂停的 Goal 常驻在实时任务列表下方。
 
 ### Fixed
 

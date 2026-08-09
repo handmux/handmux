@@ -445,6 +445,23 @@ function optimisticMatches(message, optimistic) {
   return message?.type === 'text' && message.role === 'user' && message.text === optimistic.text;
 }
 
+function mergeDurableAndLiveMessages(durableMessages, liveMessages) {
+  const merged = [...durableMessages];
+  liveMessages.forEach((message) => {
+    if (message.type !== 'goal' || !message.turnId) {
+      merged.push(message);
+      return;
+    }
+    let turnEnd = -1;
+    merged.forEach((candidate, index) => {
+      if (candidate.turnId === message.turnId) turnEnd = index;
+    });
+    if (turnEnd < 0) merged.push(message);
+    else merged.splice(turnEnd + 1, 0, message);
+  });
+  return merged;
+}
+
 const NEAR_BOTTOM_PX = 40;
 const NEAR_TOP_PX = 80;
 
@@ -651,10 +668,11 @@ export default function ChatView({
   // those deltas in useCodexMessageStream, but do not render them ahead of their historical predecessors.
   const visibleLiveMessages = useMemo(() => (loaded ? liveMessages.filter((message) => (message.type === 'goal' || message.text)
     && !durableCoversLiveMessage(durableMessages, message)) : []), [loaded, durableMessages, liveMessages]);
-  const messages = useMemo(() => [
-    ...durableMessages,
-    ...visibleLiveMessages,
-  ], [durableMessages, visibleLiveMessages]);
+  // Goal lifecycle notifications carry the turn that changed the Goal. Keep that card with its turn even
+  // after newer durable turns arrive; user-set Goal events without a turn remain current-tail actions.
+  const messages = useMemo(() => mergeDurableAndLiveMessages(
+    durableMessages, visibleLiveMessages,
+  ), [durableMessages, visibleLiveMessages]);
   const historicalPlans = useMemo(() => {
     const latest = new Map();
     messages.forEach((message) => {

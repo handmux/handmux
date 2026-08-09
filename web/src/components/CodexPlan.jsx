@@ -18,8 +18,9 @@ function planMeta(plan) {
 }
 
 export function CodexPlanBar({ plan, waiting = false, onOpen }) {
-  const { steps, completed, current } = planMeta(plan);
+  const { steps, current } = planMeta(plan);
   if (!steps.length) return null;
+  const position = current ? steps.indexOf(current) + 1 : steps.length;
   const showActivity = current?.status === 'inProgress';
   const detail = waiting && current
     ? t('chat.plan.waiting', { step: current.step })
@@ -28,10 +29,10 @@ export function CodexPlanBar({ plan, waiting = false, onOpen }) {
   const title = t('chat.plan.currentTitle');
   return (
     <button type="button" className="cc-plan-bar"
-      aria-label={`${title} ${completed}/${steps.length} ${detail}`} onClick={onOpen}>
+      aria-label={`${title} ${position}/${steps.length} ${detail}`} onClick={onOpen}>
       <span className="codex-plan-icon" aria-hidden="true"><ListChecksIcon /></span>
       <span className="cc-plan-copy">
-        <span className="cc-plan-top"><strong>{title}</strong><span>{completed}/{steps.length}</span></span>
+        <span className="cc-plan-top"><strong>{title}</strong><span>{position}/{steps.length}</span></span>
         <span className="cc-plan-current">
           {showActivity && <span className={`codex-plan-spinner${waiting ? ' is-static' : ''}`}
             aria-hidden="true" />}
