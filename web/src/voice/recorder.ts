@@ -1,6 +1,6 @@
 // web/src/voice/recorder.js
 import { toPcm16k, createFramer, bytesToBase64 } from './resample.js';
-import workletUrl from './pcm-worklet.js?url'; // Vite resolves this to a hashed asset URL
+import workletUrl from './pcm-worklet.ts?worker&url'; // Vite compiles this to a hashed JavaScript asset URL
 
 type AudioContextConstructor = new () => AudioContext;
 
