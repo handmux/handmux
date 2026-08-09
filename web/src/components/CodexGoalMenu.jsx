@@ -43,6 +43,7 @@ export function CodexGoalBar({ goal, onOpen }) {
 
 function goalEventLabel(goal, event) {
   if (event === 'set') return t('chat.goal.eventSet');
+  if (event === 'restarted') return t('chat.goal.eventRestarted');
   if (goal?.status === 'complete' || event === 'complete') return t('chat.goal.eventComplete');
   if (goal?.status === 'blocked' || event === 'blocked') return t('chat.goal.eventBlocked');
   if (goal?.status === 'usageLimited' || event === 'usageLimited') return t('chat.goal.eventUsageLimited');
@@ -53,8 +54,9 @@ function goalEventLabel(goal, event) {
 export function CodexGoalCard({ goal, event, onOpen }) {
   if (!goal?.objective) return null;
   const label = goalEventLabel(goal, event);
+  const userInitiated = event === 'set' || event === 'restarted';
   return (
-    <button type="button" className={`chat-goal-card is-${event || goal.status || 'set'}`}
+    <button type="button" className={`chat-goal-card is-${event || goal.status || 'set'}${userInitiated ? ' is-user' : ''}`}
       aria-label={`${label} ${goal.objective}`} onClick={() => onOpen(goal)}>
       <span className="codex-goal-icon" aria-hidden="true"><TargetIcon /></span>
       <span className="chat-goal-copy">
@@ -95,6 +97,7 @@ export default function CodexGoalMenu({
   const [goal, setGoal] = useState(null);
   const [draft, setDraft] = useState('');
   const [editing, setEditing] = useState(false);
+  const [restarting, setRestarting] = useState(false);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [confirmClear, setConfirmClear] = useState(false);
@@ -110,6 +113,7 @@ export default function CodexGoalMenu({
     setLoading(true);
     setError('');
     setConfirmClear(false);
+    setRestarting(false);
     if (goalSnapshot) {
       setGoal(goalSnapshot);
       setDraft(goalSnapshot.objective || '');
@@ -146,12 +150,16 @@ export default function CodexGoalMenu({
     setSaving(true);
     setError('');
     try {
-      const result = await updateCodexGoal(pane, { objective });
+      const result = await updateCodexGoal(pane, {
+        objective,
+        ...(restarting ? { status: 'active' } : {}),
+      });
       setGoal(result?.goal || null);
       onGoalChange?.(result?.goal || null);
       setDraft(result?.goal?.objective || objective);
       setEditing(false);
-      onNotice(t(goal ? 'chat.goal.updated' : 'chat.goal.created'));
+      setRestarting(false);
+      onNotice(t(restarting ? 'chat.goal.restarted' : goal ? 'chat.goal.updated' : 'chat.goal.created'));
     } catch (err) {
       if (err instanceof UnauthorizedError) onAuthFail?.();
       else setError(err?.serverError || err?.message || t('chat.goal.saveFailed'));
@@ -191,7 +199,7 @@ export default function CodexGoalMenu({
     } finally { setSaving(false); }
   };
 
-  const readOnly = historical || isCodexGoalTerminal(goal);
+  const terminal = isCodexGoalTerminal(goal);
   const bottom = `${Math.max(0, Number(keyboardInset) || 0)}px`;
   const content = (
     <>
@@ -226,17 +234,29 @@ export default function CodexGoalMenu({
           )}
           {error && <div className="codex-goal-error" role="status">{error}</div>}
         </div>
-        {!loading && (goal || editing) && !readOnly && (
+        {!loading && (goal || editing) && !historical && (
           <footer className="codex-goal-actions">
             {editing ? (
               <>
                 {goal && <button type="button" disabled={saving} onClick={() => {
                   setDraft(goal.objective);
                   setEditing(false);
+                  setRestarting(false);
                   setError('');
                 }}>{t('common.cancel')}</button>}
                 <button type="button" className="primary" disabled={saving || !draft.trim()}
-                  onClick={() => void save()}>{t('common.save')}</button>
+                  onClick={() => void save()}>{t(restarting ? 'chat.goal.restart' : 'common.save')}</button>
+              </>
+            ) : terminal ? (
+              <>
+                <button type="button" className="primary" disabled={saving} onClick={() => {
+                  setDraft(goal.objective);
+                  setRestarting(true);
+                  setEditing(true);
+                  setError('');
+                }}>{t('chat.goal.restart')}</button>
+                <button type="button" className="destructive" disabled={saving}
+                  onClick={() => setConfirmClear(true)}>{t('chat.goal.clear')}</button>
               </>
             ) : (
               <>

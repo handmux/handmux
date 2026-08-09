@@ -203,6 +203,21 @@ describe('Codex App Server client', () => {
     unsubscribeReplay();
 
     proxy.push({
+      jsonrpc: '2.0', method: 'thread/goal/updated', params: {
+        threadId: 'thread-1', turnId: null,
+        goal: {
+          ...initialGoal, objective: 'Ship the release safely', status: 'active', updatedAt: 3,
+          tokensUsed: 500, timeUsedSeconds: 12,
+        },
+      },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(events.at(-1)).toMatchObject({
+      type: 'goal', event: 'restarted',
+      goal: { objective: 'Ship the release safely', status: 'active' },
+    });
+
+    proxy.push({
       jsonrpc: '2.0', method: 'thread/goal/cleared', params: { threadId: 'thread-1', turnId: null },
     });
     await new Promise((resolve) => setTimeout(resolve, 0));

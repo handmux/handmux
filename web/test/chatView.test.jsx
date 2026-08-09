@@ -668,21 +668,29 @@ describe('ChatView', () => {
     expect(sheet.querySelector('input, textarea, [role="checkbox"]')).toBeNull();
   });
 
-  it('renders Goal lifecycle cards and opens their shared read-only Bottom Sheet', async () => {
+  it('renders user-side Goal changes and restarts the current terminal Goal after editing', async () => {
     const goal = {
       objective: 'Finish the release', status: 'complete', createdAt: 10, updatedAt: 20,
       tokensUsed: 500, timeUsedSeconds: 12, tokenBudget: null,
     };
     mockTranscript([
       { k: 0, i: 0, role: 'assistant', type: 'goal', event: 'set', goal: { ...goal, status: 'active' } },
-      { k: 1, i: 1, role: 'assistant', type: 'goal', event: 'complete', goal },
+      { k: 1, i: 1, role: 'assistant', type: 'goal', event: 'restarted', goal: { ...goal, status: 'active' } },
+      { k: 2, i: 2, role: 'assistant', type: 'goal', event: 'complete', goal },
     ]);
     vi.spyOn(api, 'getCodexGoal').mockResolvedValue({ goal });
+    const updateGoal = vi.spyOn(api, 'updateCodexGoal').mockImplementation(async (_pane, updates) => ({
+      goal: { ...goal, ...updates },
+    }));
     const { container } = render(<ChatView pane="%0" agent="codex" kind="done" />);
 
     const setCard = await screen.findByRole('button', { name: /已设置目标.*Finish the release/ });
+    const restartedCard = screen.getByRole('button', { name: /已重新开始目标.*Finish the release/ });
     const completeCard = screen.getByRole('button', { name: /目标已完成.*Finish the release/ });
-    expect(container.querySelectorAll('.chat-goal-card')).toHaveLength(2);
+    expect(container.querySelectorAll('.chat-goal-card')).toHaveLength(3);
+    expect(setCard.classList.contains('is-user')).toBe(true);
+    expect(restartedCard.classList.contains('is-user')).toBe(true);
+    expect(completeCard.classList.contains('is-user')).toBe(false);
     fireEvent.click(setCard);
     let sheet = await waitFor(() => {
       const value = container.querySelector('.codex-goal-menu');
@@ -698,8 +706,41 @@ describe('ChatView', () => {
     sheet = await screen.findByRole('dialog', { name: '任务目标' });
     expect(sheet.textContent).toContain('Token 500');
     expect(sheet.textContent).toContain('耗时 12 秒');
-    expect(sheet.querySelector('.codex-goal-actions')).toBeNull();
+    expect(screen.getByRole('button', { name: '重新开始' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: '清除' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: '编辑' })).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: '重新开始' }));
+    const objective = screen.getByRole('textbox', { name: '目标内容' });
+    expect(objective.value).toBe('Finish the release');
+    fireEvent.change(objective, { target: { value: 'Ship the release safely' } });
+    fireEvent.click(screen.getByRole('button', { name: '重新开始' }));
+    await waitFor(() => expect(updateGoal).toHaveBeenCalledWith('%0', {
+      objective: 'Ship the release safely', status: 'active',
+    }));
+    await waitFor(() => expect(sheet.textContent).toContain('Ship the release safely'));
+    expect(sheet.textContent).toContain('进行中');
     expect(container.querySelector('.codex-goal-backdrop')).toBeTruthy();
+  });
+
+  it('keeps a terminal Goal fully read-only when it is no longer current', async () => {
+    const historical = {
+      objective: 'Old release', status: 'complete', createdAt: 10, updatedAt: 20,
+      tokensUsed: 500, timeUsedSeconds: 12,
+    };
+    mockTranscript([
+      { k: 0, i: 0, role: 'assistant', type: 'goal', event: 'complete', goal: historical },
+    ]);
+    vi.spyOn(api, 'getCodexGoal').mockResolvedValue({ goal: {
+      objective: 'Current release', status: 'active', createdAt: 30, updatedAt: 31,
+      tokensUsed: 10, timeUsedSeconds: 1,
+    } });
+    const { container } = render(<ChatView pane="%0" agent="codex" kind="done" />);
+
+    fireEvent.click(await screen.findByRole('button', { name: /目标已完成.*Old release/ }));
+    const sheet = await screen.findByRole('dialog', { name: '任务目标' });
+    await waitFor(() => expect(sheet.textContent).toContain('Old release'));
+    expect(sheet.querySelector('.codex-goal-actions')).toBeNull();
   });
 
   it('keeps an unfinished historical task indicator static', async () => {

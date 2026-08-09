@@ -711,10 +711,12 @@ class CodexAppConnection {
       || previous.objective !== goal.objective;
     const enteredTerminal = TERMINAL_GOAL_STATUSES.has(goal.status)
       && previous?.status !== goal.status;
-    if (!replaced && !enteredTerminal) return false;
+    const restarted = TERMINAL_GOAL_STATUSES.has(previous?.status) && goal.status === 'active';
+    if (!replaced && !enteredTerminal && !restarted) return false;
     this.emitStream({
       type: 'goal', threadId, turnId: turnId || null,
-      event: TERMINAL_GOAL_STATUSES.has(goal.status) ? goal.status : 'set',
+      event: restarted ? 'restarted'
+        : TERMINAL_GOAL_STATUSES.has(goal.status) ? goal.status : 'set',
       goal,
     });
     return true;

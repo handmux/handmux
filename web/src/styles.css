@@ -2773,6 +2773,13 @@ button.cmd-text { background: none; border: none; text-align: left; }
   padding: 7px 9px; border: 1px solid var(--ct-chip-line); border-radius: 12px;
   background: var(--ct-chip); color: var(--ct-ink); text-align: left; touch-action: manipulation;
 }
+.chat-goal-card.is-user {
+  align-self: flex-end; background: var(--ct-me-bg); color: var(--ct-me-ink);
+  border-color: transparent; border-bottom-right-radius: 5px; box-shadow: 0 1px 2px rgba(0,0,0,.12);
+}
+.chat-goal-card.is-user .codex-goal-icon,
+.chat-goal-card.is-user .chat-goal-copy > span,
+.chat-goal-card.is-user .codex-goal-chevron { color: currentColor; opacity: .78; }
 .chat-goal-card .codex-goal-icon svg { width: 17px; height: 17px; }
 .chat-goal-copy { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
 .chat-goal-copy strong { font-size: 12px; line-height: 16px; }
