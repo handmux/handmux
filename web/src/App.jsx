@@ -1511,7 +1511,7 @@ export default function App() {
     const status = m ? Number(m[1]) : 0;
     if (status === 404) return t('app.docNotFound');
     if (status === 413) return t('app.docTooLarge');
-    if (status === 400) return t('app.docUnsupported');
+    if (status === 400 || status === 415) return t('app.docUnsupported');
     return t('app.docOpenFailed');
   };
 

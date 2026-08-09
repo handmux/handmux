@@ -19,6 +19,9 @@ beforeAll(async () => {
   await fs.writeFile(join(home, 'proj', 'a.md'), '# proj');
   await fs.mkdir(join(home, '.config'));
   await fs.writeFile(join(home, 'docs', 'b.md'), 'b');
+  await fs.writeFile(join(home, 'docs', 'settings.toml'), 'theme = "dark"');
+  await fs.writeFile(join(home, 'docs', 'NOTICE'), 'plain extensionless text');
+  await fs.writeFile(join(home, 'docs', 'binary.dat'), Buffer.from([0x00, 0x01, 0xff, 0x00]));
   await fs.writeFile(join(outside, 'secret.md'), 'secret');
   await fs.symlink(join(outside, 'secret.md'), join(home, 'escape.md')); // points outside home
   await fs.writeFile(join(home, 'big.md'), Buffer.alloc(2 * 1024 * 1024 + 1, '#'));
@@ -44,8 +47,14 @@ describe('readDoc', () => {
   it('400s a non-absolute path', async () => {
     expect((await docs.readDoc('a.md')).status).toBe(400);
   });
-  it('400s a non-doc extension', async () => {
-    expect((await docs.readDoc(join(home, 'note.bin'))).status).toBe(400);
+  it('reads text files regardless of extension, including extensionless names', async () => {
+    expect(await docs.readDoc(join(home, 'docs', 'settings.toml')))
+      .toMatchObject({ name: 'settings.toml', type: 'text', content: 'theme = "dark"' });
+    expect(await docs.readDoc(join(home, 'docs', 'NOTICE')))
+      .toMatchObject({ name: 'NOTICE', type: 'text', content: 'plain extensionless text' });
+  });
+  it('rejects binary content instead of decoding it as text', async () => {
+    expect((await docs.readDoc(join(home, 'docs', 'binary.dat'))).status).toBe(415);
   });
   it('reads a .txt/.log/.sh file as plain text', async () => {
     expect(await docs.readDoc(join(home, 'note.txt'))).toMatchObject({ name: 'note.txt', type: 'text', content: 'plain' });

@@ -347,6 +347,12 @@ function ToolSheet({ tool, running, onClose }) {
 function linkedAssistantHtml(text) {
   const root = document.createElement('div');
   root.innerHTML = DOMPurify.sanitize(marked.parse(text || ''));
+  // Markdown can create a native <a> for any target, including file types/protocols that the terminal's
+  // shared detector deliberately does not expose. Never let those fall through to browser navigation:
+  // recognized targets keep the app-owned link flow; everything else becomes ordinary rendered content.
+  for (const anchor of root.querySelectorAll('a')) {
+    if (!outputLinkFromAnchor(anchor)) anchor.replaceWith(...Array.from(anchor.childNodes));
+  }
   const walker = document.createTreeWalker(root, 4); // NodeFilter.SHOW_TEXT
   const nodes = [];
   while (walker.nextNode()) nodes.push(walker.currentNode);
@@ -932,10 +938,12 @@ export default function ChatView({
   const onOutputLinkClick = (event) => {
     const anchor = event.target.closest?.('.chat-md a');
     if (!anchor || !event.currentTarget.contains(anchor)) return;
-    const link = outputLinkFromAnchor(anchor);
-    if (!link || !onDocLinkTap) return;
+    // Every surviving anchor is app-owned. Prevent native navigation even if a malformed target somehow
+    // reaches this boundary or the caller has no link handler.
     event.preventDefault();
     event.stopPropagation();
+    const link = outputLinkFromAnchor(anchor);
+    if (!link || !onDocLinkTap) return;
     onDocLinkTap(link, event.clientX ?? 0, event.clientY ?? 0);
   };
 

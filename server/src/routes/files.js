@@ -12,7 +12,8 @@ import { isAllowedUploadExt } from '../uploadTypes.js';
 export function fileRoutes({ docs, uploadExts, maxUploadBytes }) {
   const r = express.Router();
 
-  // Read a single doc (md/html) under $HOME. The docs layer realpaths and enforces containment;
+  // Read a single text file under $HOME. The docs layer realpaths, enforces containment and rejects
+  // binary content; known Markdown/HTML extensions keep their richer renderer.
   // the route only maps its {error,status} to an HTTP status.
   r.get('/file', async (req, res, next) => {
     try {

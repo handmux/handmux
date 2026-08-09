@@ -1,5 +1,5 @@
-// Renderable doc types by extension. Exported so the web mirror (docPath.js DOC_LINK_EXTS) can be
-// parity-checked against it — the client's tappable-path detector must open exactly what we can render.
+// Rich-rendered doc types by extension. Every other filename can still open as plain text after the
+// docs layer validates its bytes; this map only selects Markdown/HTML/plain presentation.
 export const EXT = {
   '.md': 'markdown', '.markdown': 'markdown', '.html': 'html', '.htm': 'html',
   // Plain-text files: rendered verbatim in a <pre> (no markdown parsing).

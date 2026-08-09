@@ -193,6 +193,23 @@ describe('ChatView', () => {
     expect(onDocLinkTap).toHaveBeenCalledWith({ kind: 'doc', path: '/work/docs/spec.md' }, 0, 0);
   });
 
+  it('allows arbitrary text-file targets but renders unrecognized protocols as non-clickable text', async () => {
+    mockTranscript([{
+      k: 0, i: 0, role: 'assistant', type: 'text',
+      text: '[Codex 配置](/home/tester/.codex/config.toml:1) 和 [邮件](mailto:test@example.com)',
+    }]);
+    const onDocLinkTap = vi.fn();
+    const { container } = render(<ChatView pane="%0" kind="done" onDocLinkTap={onDocLinkTap} />);
+
+    fireEvent.click(await screen.findByRole('link', { name: 'Codex 配置' }));
+    expect(onDocLinkTap).toHaveBeenCalledWith(
+      { kind: 'doc', path: '/home/tester/.codex/config.toml' }, 0, 0,
+    );
+    expect(container.textContent).toContain('邮件');
+    expect(screen.queryByRole('link', { name: '邮件' })).toBeNull();
+    expect(onDocLinkTap).toHaveBeenCalledTimes(1);
+  });
+
   it('renders a page-local Codex message immediately with its sending state', async () => {
     mockTranscript([]);
     const { container } = render(<ChatView pane="%0" agent="codex" kind="working"

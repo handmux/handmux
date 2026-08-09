@@ -14,9 +14,19 @@ describe('findDocLinks', () => {
     expect(findDocLinks('open report.html.').map((l) => l.path)).toEqual(['report.html']);
     expect(findDocLinks('(see /x/y.md)').map((l) => l.path)).toEqual(['/x/y.md']);
   });
-  it('ignores non-openable extensions and plain text', () => {
-    expect(findDocLinks('archive.mdx and data.bin')).toEqual([]);
+  it('finds paths with arbitrary extensions but ignores plain prose', () => {
+    expect(findDocLinks('archive.mdx and data.bin').map((l) => l.path))
+      .toEqual(['archive.mdx', 'data.bin']);
     expect(findDocLinks('no links here')).toEqual([]);
+  });
+  it('finds config, dotfile, and extensionless paths', () => {
+    expect(findDocLinks('edit config.toml, .env and ./NOTICE').map((l) => l.path))
+      .toEqual(['config.toml', '.env', './NOTICE']);
+    expect(findDocLinks('open /work/Dockerfile now').map((l) => l.path))
+      .toEqual(['/work/Dockerfile']);
+  });
+  it('does not turn version numbers or bare email addresses into file links', () => {
+    expect(findDocLinks('released v1.2.3; mail test@example.com')).toEqual([]);
   });
   it('finds plain-text paths (txt/log/sh) so they are tappable', () => {
     expect(findDocLinks('tail app.log and ./run.sh, notes.txt').map((l) => l.path))

@@ -7,32 +7,43 @@
 //   `:` — a label/line-number separator with no space (`参考:docs/plan.md`, `file.md:12`);
 //   `│` — box-drawing border, so a path never fuses across a framed panel's `│ … │` padding.
 export const DELIMS = "\\s'\"`()\\[\\]<>,;，。、；：！？（）【】《》「」“”‘’*…:│";
-// Openable extensions: in-app docs (md/html/text) AND images the viewer shows inline. A terminal path
-// ending in any of these is a tappable link; onOpenDoc routes it to the doc reader or the image viewer
-// by extension. These two lists MUST mirror the server's classifiers (docPath.js `EXT` keys and `IMG_EXT`)
-// — a shared-types parity test (web/test/sharedTypesParity.test.js) fails loudly if they ever drift.
+// Rich-rendered document extensions and inline-image extensions. The server content-checks every other
+// filename as plain text, so these lists choose presentation only; they no longer gate whether a path
+// is tappable. They still mirror the server's rich/image classifiers.
 export const DOC_LINK_EXTS = ['md', 'markdown', 'html', 'htm', 'txt', 'log', 'sh'];
 export const IMAGE_LINK_EXTS = ['png', 'jpg', 'jpeg', 'jfif', 'gif', 'webp', 'svg', 'bmp', 'ico', 'avif', 'apng'];
-const LINK_EXT = [...DOC_LINK_EXTS, ...IMAGE_LINK_EXTS].join('|');
-// Match a path token (≥1 non-delimiter char) ending in an openable extension; the lookahead pins the
-// extension to a boundary (a delimiter, end-of-line, or a trailing `.`) so `foo.png.` yields `foo.png`
-// and `archive.mdx` matches nothing.
-const DOC_LINK_RE = new RegExp(`[^${DELIMS}]+\\.(?:${LINK_EXT})(?=$|[${DELIMS}.])`, 'gi');
+const FILE_TOKEN_RE = new RegExp(`[^${DELIMS}]+`, 'g');
+const RESERVED_BARE_EXT = new Set([...DOC_LINK_EXTS, ...IMAGE_LINK_EXTS].map((ext) => `.${ext}`));
+const EXTENSIONLESS_NAMES = /^(?:readme|license|makefile|dockerfile|gemfile|rakefile|procfile|notice)$/i;
+
+function looksLikeFilePath(value) {
+  if (!value || value === '.' || value === '..') return false;
+  if (value.endsWith('/')) return false; // directory path, not a previewable file
+  if (RESERVED_BARE_EXT.has(value.toLowerCase())) return false;
+  if (/^v?\d+(?:\.\d+)+$/i.test(value)) return false; // versions/IP-like numbers are prose, not paths
+  if (value.includes('@') && !value.includes('/')) return false; // bare email address
+  if (value.includes('/')) return true;                         // includes extensionless paths
+  if (value.startsWith('.') && value.length > 1) return true;   // dotfiles such as .env
+  if (EXTENSIONLESS_NAMES.test(value)) return true;
+  return /^[^.][^/]*\.[^.]+$/.test(value);                     // arbitrary file extension
+}
 
 // Find every doc-path link in one line of text → [{ start, end, path }] (end exclusive).
 export function findDocLinks(line) {
   const out = [];
   if (!line) return out;
-  DOC_LINK_RE.lastIndex = 0;
+  FILE_TOKEN_RE.lastIndex = 0;
   let m;
-  while ((m = DOC_LINK_RE.exec(line)) !== null) {
+  while ((m = FILE_TOKEN_RE.exec(line)) !== null) {
     let start = m.index;
-    let path = m[0];
+    let path = m[0].replace(/\.+$/, ''); // sentence-ending dots cling to terminal output
+    const assignment = path.lastIndexOf('=');
+    if (assignment >= 0) { start += assignment + 1; path = path.slice(assignment + 1); }
     // Strip a leading `@` (Claude Code's `@file` mention prefix) but ONLY at the head, so an internal
     // `@` in a genuine path (`node_modules/@types/x.md`) is kept — `@` can't be a plain delimiter.
     const lead = /^@+/.exec(path);
     if (lead) { start += lead[0].length; path = path.slice(lead[0].length); }
-    if (!path) continue;
+    if (!looksLikeFilePath(path)) continue;
     out.push({ start, end: start + path.length, path });
   }
   return out;
