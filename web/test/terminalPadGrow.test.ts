@@ -2,7 +2,7 @@
 // bug. Terminal seeds bottom-aligned padding against term.rows AT SEED TIME, then fit() grows the grid
 // to fill the container AFTER the seed — so short content padded for the pre-fit row count ends up
 // mid-grid with the cursor at the grown bottom, until a repaint re-pads it ("type to fix"). The fix
-// (reframeForRows in Terminal.jsx) re-pads for the FINAL row count once fit settles. These headless
+// (reframeForRows in Terminal.tsx) re-pads for the FINAL row count once fit settles. These headless
 // assertions capture the xterm buffer geometry the fix depends on (per CLAUDE.md: verify real bytes).
 import { describe, it, expect } from 'vitest';
 import xterm from '@xterm/headless';
@@ -10,16 +10,22 @@ import { prepareSeed } from '../src/terminalSeed.js';
 import { bottomPadRows } from '../src/terminalViewport.js';
 
 const { Terminal } = xterm;
-const write = (t, d) => new Promise((res) => t.write(d, res));
-const rowFromBottom = (t, n) => {
-  const b = t.buffer.active;
-  return b.getLine(b.viewportY + t.rows - 1 - n)?.translateToString(true).trimEnd();
+type HeadlessTerminal = InstanceType<typeof Terminal>;
+const write = (terminal: HeadlessTerminal, data: string): Promise<void> => (
+  new Promise((resolve) => terminal.write(data, resolve))
+);
+const rowFromBottom = (terminal: HeadlessTerminal, offset: number): string | undefined => {
+  const buffer = terminal.buffer.active;
+  return buffer.getLine(buffer.viewportY + terminal.rows - 1 - offset)
+    ?.translateToString(true).trimEnd();
 };
 
 describe('short-content bottom-pad survives a fit grow', () => {
   const seed = prepareSeed('r0\nr1\nr2\n'); // 3 content rows; r2 is the live prompt row
   const contentRows = 3;
-  const seedFramed = (rows) => '\x1b[2J\x1b[3J\x1b[H' + '\n'.repeat(bottomPadRows(contentRows, rows)) + seed;
+  const seedFramed = (rows: number): string => (
+    '\x1b[2J\x1b[3J\x1b[H' + '\n'.repeat(bottomPadRows(contentRows, rows)) + seed
+  );
 
   it('padding for the seed-time rows bottom-aligns the prompt', async () => {
     const t = new Terminal({ cols: 12, rows: 24, allowProposedApi: true, scrollback: 200 });

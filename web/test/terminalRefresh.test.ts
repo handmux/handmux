@@ -3,8 +3,13 @@ import xterm from '@xterm/headless';
 import { prepareSeed, prepareLiveSeed, cursorSeq } from '../src/terminalSeed.js';
 
 const { Terminal } = xterm;
-const write = (t, d) => new Promise((res) => t.write(d, res));
-const line = (t, row) => t.buffer.active.getLine(row)?.translateToString(true).trimEnd();
+type HeadlessTerminal = InstanceType<typeof Terminal>;
+const write = (terminal: HeadlessTerminal, data: string): Promise<void> => (
+  new Promise((resolve) => terminal.write(data, resolve))
+);
+const line = (terminal: HeadlessTerminal, row: number): string | undefined => (
+  terminal.buffer.active.getLine(row)?.translateToString(true).trimEnd()
+);
 
 describe('prepareSeed alignment', () => {
   it('keeps live history in scrollback while the latest pane grid stays visible', async () => {
@@ -67,7 +72,7 @@ describe('prepareSeed alignment', () => {
     // after the close must NOT inherit it (no bleed down).
     await write(t, '\x1b[2J\x1b[3J\x1b[H' + prepareSeed('\x1b[41mline1\n     \nlast\x1b[49m\nplain\n'));
     const b = t.buffer.active;
-    const bgAt = (row, col) => {
+    const bgAt = (row: number, col: number): boolean => {
       const cell = b.getLine(row)?.getCell(col);
       return !!(cell && (cell.getBgColorMode() !== 0 || cell.isInverse()));
     };
@@ -85,7 +90,7 @@ describe('prepareSeed alignment', () => {
     // padding row, then the next plain line closes the background.
     await write(t, '\x1b[2J\x1b[3J\x1b[H' + prepareSeed('\x1b[48;5;237m          \n❯ hi      \n          \n\x1b[49mout\n'));
     const b = t.buffer.active;
-    const bgAt = (row, col) => {
+    const bgAt = (row: number, col: number): boolean => {
       const cell = b.getLine(row)?.getCell(col);
       return !!(cell && (cell.getBgColorMode() !== 0 || cell.isInverse()));
     };
@@ -108,7 +113,7 @@ describe('prepareSeed alignment', () => {
     const cap = 'x0\nx1\n\x1b[48;5;237m❯ hi\x1b[39m   \n\x1b[49m\nout\n';
     await write(t, '\x1b[2J\x1b[3J\x1b[H' + prepareSeed(cap));
     const b = t.buffer.active;
-    const bgAt = (row, col) => {
+    const bgAt = (row: number, col: number): boolean => {
       const cell = b.getLine(row)?.getCell(col);
       return !!(cell && (cell.getBgColorMode() !== 0 || cell.isInverse()));
     };
@@ -140,7 +145,7 @@ describe('prepareSeed alignment', () => {
     // so passing seedRows=2 lands the cursor on row 1 ('p1'), NOT at row 5 (the stranded-at-bottom bug).
     const t = new Terminal({ cols: 12, rows: 6, allowProposedApi: true, scrollback: 100 });
     const seed = prepareSeed('p0\np1\n');
-    const seedRows = seed.split('\n').length; // 2 — same count Terminal.jsx computes
+    const seedRows = seed.split('\n').length; // 2 — same count Terminal.tsx computes
     await write(t, '\x1b[2J\x1b[3J\x1b[H' + seed);
     t.scrollToBottom();
     await write(t, cursorSeq({ row: 0, col: 0, vis: true }, t.rows, seedRows));
