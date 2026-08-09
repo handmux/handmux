@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, cleanup, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, cleanup, waitFor, act } from '@testing-library/react';
 import { readFileSync } from 'node:fs';
 
 vi.mock('../src/api.js', () => ({
@@ -8,8 +8,10 @@ vi.mock('../src/api.js', () => ({
   steerCodexQueuedMessage: vi.fn(async () => ({ steered: true })),
   removeCodexQueuedMessage: vi.fn(async () => ({ removed: true })),
   beginCodexQueuedEdit: vi.fn(async (_pane, id) => ({
-    editing: true, token: 'edit-token', item: { id, text: '再整理结果', editing: true },
+    editing: true, token: 'edit-token', expiresAt: Date.now() + 30_000,
+    item: { id, text: '再整理结果', editing: true },
   })),
+  renewCodexQueuedEdit: vi.fn(async () => ({ editing: true })),
   commitCodexQueuedEdit: vi.fn(async (_pane, id, _token, text) => ({
     edited: true, item: { id, text },
   })),
@@ -38,6 +40,7 @@ import {
   sendText, sendCodexMessage, compactCodexSession, clearCodexSession, interruptCodexSession,
   steerCodexQueuedMessage, removeCodexQueuedMessage,
   beginCodexQueuedEdit, commitCodexQueuedEdit, cancelCodexQueuedEdit,
+  renewCodexQueuedEdit,
   getCodexModels, getCodexGoal, updateCodexGoal, clearCodexGoal,
   updateCodexSettings, getPaneContext,
 } from '../src/api.js';
@@ -237,6 +240,27 @@ describe('ChatComposer', () => {
     const result = { queued: true, item: { id: 'queued-1', text: '马上显示这条消息' } };
     request.resolve(result);
     await waitFor(() => expect(onCodexSendResult).toHaveBeenCalledWith('optimistic-1', { result }));
+  });
+
+  it('reports an ambiguous managed send without claiming that delivery failed', async () => {
+    const networkError = new Error('network request timed out');
+    sendCodexMessage.mockRejectedValueOnce(networkError);
+    const onCodexSendStart = vi.fn(() => 'optimistic-unknown');
+    const onCodexSendResult = vi.fn();
+    const onActionError = vi.fn();
+    render(<ChatComposer pane="%1" agent="codex" kind="idle" codexSession={{ managed: true }}
+      onCodexSendStart={onCodexSendStart} onCodexSendResult={onCodexSendResult}
+      onActionError={onActionError} />);
+
+    typeInto(screen.getByPlaceholderText('和 Agent 对话…'), '确认发送结果');
+    fireEvent.click(screen.getByRole('button', { name: '发送' }));
+
+    await waitFor(() => expect(onCodexSendResult).toHaveBeenCalledWith('optimistic-unknown', {
+      error: networkError, uncertain: true,
+    }));
+    expect(onActionError).toHaveBeenLastCalledWith({
+      kind: 'send', detail: '无法确认消息是否送达，请检查对话后再重试',
+    });
   });
 
   it('renders an unconfirmed busy send in the queue and lets the matching server row replace it', () => {
@@ -761,6 +785,55 @@ describe('ChatComposer', () => {
     await waitFor(() => expect(cancelCodexQueuedEdit)
       .toHaveBeenCalledWith('%1', 'queued-1', 'edit-token'));
     expect(commitCodexQueuedEdit).not.toHaveBeenCalled();
+  });
+
+  it('renews the server edit lease while the queued-message editor stays open', async () => {
+    vi.useFakeTimers();
+    let unmount = null;
+    try {
+      ({ unmount } = render(<ChatComposer pane="%1" agent="codex" kind="working" codexSession={{
+        managed: true, queue: [{ id: 'queued-1', text: '慢慢编辑' }],
+      }} />));
+      fireEvent.click(screen.getByText('慢慢编辑').closest('.cc-queue-item'));
+      await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+      expect(beginCodexQueuedEdit).toHaveBeenCalledWith('%1', 'queued-1');
+
+      await act(async () => { await vi.advanceTimersByTimeAsync(10_000); });
+
+      expect(renewCodexQueuedEdit).toHaveBeenCalledWith('%1', 'queued-1', 'edit-token');
+    } finally {
+      unmount?.();
+      vi.useRealTimers();
+    }
+  });
+
+  it('stops renewing after the server says the queue edit lease expired', async () => {
+    vi.useFakeTimers();
+    let unmount = null;
+    try {
+      renewCodexQueuedEdit.mockRejectedValueOnce(Object.assign(new Error('edit expired'), {
+        status: 409, serverError: 'queued message edit is no longer active',
+      }));
+      const onActionError = vi.fn();
+      ({ unmount } = render(<ChatComposer pane="%1" agent="codex" kind="working" codexSession={{
+        managed: true, queue: [{ id: 'queued-1', text: '过期编辑' }],
+      }} onActionError={onActionError} />));
+      fireEvent.click(screen.getByText('过期编辑').closest('.cc-queue-item'));
+      await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+
+      await act(async () => { await vi.advanceTimersByTimeAsync(10_000); });
+      expect(renewCodexQueuedEdit).toHaveBeenCalledTimes(1);
+      expect(onActionError).toHaveBeenCalledWith({
+        kind: 'queue', detail: 'queued message edit is no longer active',
+      });
+
+      await act(async () => { await vi.advanceTimersByTimeAsync(20_000); });
+      expect(renewCodexQueuedEdit).toHaveBeenCalledTimes(1);
+      expect(screen.getByRole('button', { name: '保存' }).disabled).toBe(true);
+    } finally {
+      unmount?.();
+      vi.useRealTimers();
+    }
   });
 
   it('a saved chip that is a bare interactive command also hands off to the terminal lens', async () => {

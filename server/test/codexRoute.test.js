@@ -407,14 +407,20 @@ describe('Codex App Server routes', () => {
     expect(removeQueued).toHaveBeenCalledWith('%1', 'thread-1', 'queued-2');
   });
 
-  it('begins, commits and cancels queued-message editing through the exact bound thread', async () => {
+  it('begins, renews, commits and cancels queued-message editing through the exact bound thread', async () => {
     const beginQueuedEdit = vi.fn(async () => ({ editing: true, token: 'edit-token' }));
+    const renewQueuedEdit = vi.fn(async () => ({ editing: true }));
     const commitQueuedEdit = vi.fn(async () => ({ edited: true }));
     const cancelQueuedEdit = vi.fn(async () => ({ editing: false }));
-    const app = appFor({ codexApp: { beginQueuedEdit, commitQueuedEdit, cancelQueuedEdit } });
+    const app = appFor({ codexApp: {
+      beginQueuedEdit, renewQueuedEdit, commitQueuedEdit, cancelQueuedEdit,
+    } });
 
     await request(app).post('/codex/queue/edit/begin').send({ pane: '%1', id: 'queued-1' })
       .expect(200, { editing: true, token: 'edit-token' });
+    await request(app).post('/codex/queue/edit/renew').send({
+      pane: '%1', id: 'queued-1', token: 'edit-token',
+    }).expect(200, { editing: true });
     await request(app).post('/codex/queue/edit/commit').send({
       pane: '%1', id: 'queued-1', token: 'edit-token', text: ' revised text ',
     }).expect(200, { edited: true });
@@ -423,6 +429,7 @@ describe('Codex App Server routes', () => {
     }).expect(200, { editing: false });
 
     expect(beginQueuedEdit).toHaveBeenCalledWith('%1', 'thread-1', 'queued-1');
+    expect(renewQueuedEdit).toHaveBeenCalledWith('%1', 'thread-1', 'queued-1', 'edit-token');
     expect(commitQueuedEdit).toHaveBeenCalledWith(
       '%1', 'thread-1', 'queued-1', 'edit-token', 'revised text',
     );

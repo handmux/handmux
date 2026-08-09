@@ -428,6 +428,7 @@ export default {
 'chat.input.submit': '提交回答',
 'chat.input.failed': '回答没有提交成功',
 'chat.sendFailed': '消息没有发送成功',
+'chat.sendUnknown': '无法确认消息是否送达，请检查对话后再重试',
 'chat.stopFailed': '没有停止成功，请稍后重试',
 'chat.queue.title': '排队消息',
 'chat.queue.hint': '当前回合结束后自动逐条发送',

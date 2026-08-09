@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import {
   sendText, sendCodexMessage, compactCodexSession, clearCodexSession, interruptCodexSession,
   steerCodexQueuedMessage, removeCodexQueuedMessage, beginCodexQueuedEdit,
-  commitCodexQueuedEdit, cancelCodexQueuedEdit,
+  renewCodexQueuedEdit, commitCodexQueuedEdit, cancelCodexQueuedEdit,
   getCodexModels, updateCodexGoal, clearCodexGoal, updateCodexSettings, UnauthorizedError,
 } from '../api.js';
 import { shouldHandOffSlash } from '../slashCommands.js';
@@ -352,6 +352,9 @@ export default function ChatComposer({
     kind,
     detail: error?.serverError || error?.message || null,
   });
+  const reportSendError = (error, uncertain) => reportActionError(
+    'send', uncertain ? new Error(t('chat.sendUnknown')) : error,
+  );
   const ref = useRef(null);          // the textarea
   const uploadRef = useRef(null);    // hidden <input type=file>
   const tapPt = useRef({ x: 0, y: 0, moved: false }); // for tap-to-focus on the card's blank areas
@@ -683,7 +686,7 @@ export default function ChatComposer({
       const uncertain = !(err instanceof UnauthorizedError) && !Number.isFinite(err?.status);
       if (optimisticId) onCodexSendResult?.(optimisticId, { error: err, uncertain });
       if (err instanceof UnauthorizedError) onAuthFail?.();
-      else if (!optimisticId || (source === 'queue' && !uncertain)) reportActionError('send', err);
+      else reportSendError(err, !!optimisticId && uncertain);
     } finally {
       submitInFlightRef.current = false;
       setSubmitting(false);
@@ -759,6 +762,7 @@ export default function ChatComposer({
         draft: active.draft === active.original ? serverText : active.draft,
         original: serverText,
         token: result?.token || null,
+        expiresAt: Number(result?.expiresAt) || null,
       });
     } catch (err) {
       if (queueEditorRef.current?.key === key) replaceQueueEditor(null);
@@ -801,6 +805,28 @@ export default function ChatComposer({
       }
     }
   };
+  useEffect(() => {
+    if (!queueEditor?.token || !queueEditor.expiresAt) return undefined;
+    const key = queueEditor.key;
+    // Derive the heartbeat from the lease granted by the server, so changing the lease duration cannot
+    // silently make the client renew too slowly. Retry at the same cadence on transient network failures.
+    const heartbeatMs = Math.max(1_000, Math.floor((queueEditor.expiresAt - Date.now()) / 3));
+    const timer = setInterval(() => {
+      const current = queueEditorRef.current;
+      if (!current?.token || current.key !== key) return;
+      void renewCodexQueuedEdit(current.pane, current.id, current.token).catch((err) => {
+        if (err instanceof UnauthorizedError) onAuthFail?.();
+        else if (Number(err?.status) === 409 && queueEditorRef.current?.key === key) {
+          reportActionError('queue', err);
+          updateQueueEditor({
+            token: null, expiresAt: null, busy: false,
+            error: err?.serverError || err?.message || t('chat.queue.actionFailed'),
+          });
+        }
+      });
+    }, heartbeatMs);
+    return () => clearInterval(timer);
+  }, [queueEditor?.key, queueEditor?.token, queueEditor?.expiresAt]);
   const confirmQueueDelete = async () => {
     const item = queueDelete;
     if (!item) return;
@@ -880,7 +906,7 @@ export default function ChatComposer({
       const uncertain = !(err instanceof UnauthorizedError) && !Number.isFinite(err?.status);
       if (optimisticId) onCodexSendResult?.(optimisticId, { error: err, uncertain });
       if (err instanceof UnauthorizedError) onAuthFail?.();
-      else if (!optimisticId || (source === 'queue' && !uncertain)) reportActionError('send', err);
+      else reportSendError(err, !!optimisticId && uncertain);
     }
   };
 

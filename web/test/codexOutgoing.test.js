@@ -6,22 +6,28 @@ const outgoing = (source = 'queue') => [{
 }];
 
 describe('Codex outgoing reconciliation', () => {
-  it('does not turn an ambiguous transport timeout into a false failed message', () => {
+  it('removes a queue placeholder when its request is no longer pending, even if delivery is ambiguous', () => {
     expect(settleCodexOutgoing(outgoing(), 'request-1', {
       error: new Error('/api/codex/send -> timeout'), uncertain: true,
-    })).toEqual(outgoing());
+    })).toEqual([]);
   });
 
-  it('keeps ordinary instant messages pending on an ambiguous transport failure', () => {
+  it('never leaves an ordinary message marked as sending after its request rejects', () => {
     expect(settleCodexOutgoing(outgoing('send'), 'request-1', {
       error: new Error('network lost'), uncertain: true,
-    })).toEqual(outgoing('send'));
+    })).toEqual([]);
   });
 
   it('hands an acknowledged queue send to the exact server queue item', () => {
     expect(settleCodexOutgoing(outgoing(), 'request-1', {
       result: { queued: true, item: { id: 'queued-1' } },
     })[0]).toMatchObject({ status: 'queued', queueId: 'queued-1' });
+  });
+
+  it('lets an authoritative queued response override the clients stale idle prediction', () => {
+    expect(settleCodexOutgoing(outgoing('send'), 'request-1', {
+      result: { queued: true, item: { id: 'queued-1' } },
+    })[0]).toMatchObject({ source: 'queue', status: 'queued', queueId: 'queued-1' });
   });
 
   it('removes a queue placeholder only after a definite server rejection', () => {

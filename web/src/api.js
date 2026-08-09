@@ -152,6 +152,10 @@ export const removeCodexQueuedMessage = (pane, id) =>
   req('/api/codex/queue/remove', { method: 'POST', body: JSON.stringify({ pane, id }), timeoutMs: 8000 });
 export const beginCodexQueuedEdit = (pane, id) =>
   req('/api/codex/queue/edit/begin', { method: 'POST', body: JSON.stringify({ pane, id }), timeoutMs: 8000 });
+export const renewCodexQueuedEdit = (pane, id, token) =>
+  req('/api/codex/queue/edit/renew', {
+    method: 'POST', body: JSON.stringify({ pane, id, token }), timeoutMs: 8000,
+  });
 export const commitCodexQueuedEdit = (pane, id, token, text) =>
   req('/api/codex/queue/edit/commit', {
     method: 'POST', body: JSON.stringify({ pane, id, token, text }), timeoutMs: 8000,

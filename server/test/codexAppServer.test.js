@@ -1,5 +1,5 @@
 import { EventEmitter } from 'node:events';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { createCodexAppServer, projectCodexThread } from '../src/codexAppServer.js';
 
 function fixtureThread(status = { type: 'idle' }) {
@@ -479,6 +479,130 @@ describe('Codex App Server client', () => {
       }),
     );
     app.close();
+  });
+
+  it('releases an abandoned queue edit lease and resumes automatic delivery', async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(0);
+      const proxy = fakeProxy();
+      const app = createCodexAppServer({
+        home: '/home/test', exists: () => true, connect: () => proxy.ws, now: () => Date.now(),
+      });
+      await app.status('%1', 'thread-1');
+      proxy.push({
+        jsonrpc: '2.0', method: 'turn/started',
+        params: { threadId: 'thread-1', turn: { id: 'turn-live', status: 'inProgress', items: [] } },
+      });
+      await Promise.resolve();
+      const queued = (await app.send('%1', 'thread-1', 'send after abandoned edit')).item;
+      await app.beginQueuedEdit('%1', 'thread-1', queued.id);
+      proxy.push({
+        jsonrpc: '2.0', method: 'turn/completed',
+        params: { threadId: 'thread-1', turn: { id: 'turn-live', status: 'completed', items: [] } },
+      });
+      await Promise.resolve();
+      expect(proxy.sent.filter((message) => message.method === 'turn/start')).toEqual([]);
+
+      await vi.advanceTimersByTimeAsync(31_000);
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(proxy.sent.filter((message) => message.method === 'turn/start')).toContainEqual(
+        expect.objectContaining({
+          params: { threadId: 'thread-1', input: [{ type: 'text', text: 'send after abandoned edit' }] },
+        }),
+      );
+      app.close();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('keeps a live queue editor leased while its heartbeat continues', async () => {
+    vi.useFakeTimers();
+    let app = null;
+    try {
+      vi.setSystemTime(0);
+      const proxy = fakeProxy();
+      app = createCodexAppServer({
+        home: '/home/test', exists: () => true, connect: () => proxy.ws, now: () => Date.now(),
+      });
+      await app.status('%1', 'thread-1');
+      proxy.push({
+        jsonrpc: '2.0', method: 'turn/started',
+        params: { threadId: 'thread-1', turn: { id: 'turn-live', status: 'inProgress', items: [] } },
+      });
+      await Promise.resolve();
+      const queued = (await app.send('%1', 'thread-1', 'wait for editor')).item;
+      const edit = await app.beginQueuedEdit('%1', 'thread-1', queued.id);
+      proxy.push({
+        jsonrpc: '2.0', method: 'turn/completed',
+        params: { threadId: 'thread-1', turn: { id: 'turn-live', status: 'completed', items: [] } },
+      });
+      await Promise.resolve();
+
+      await vi.advanceTimersByTimeAsync(20_000);
+      await app.renewQueuedEdit('%1', 'thread-1', queued.id, edit.token);
+      await vi.advanceTimersByTimeAsync(20_000);
+      expect(proxy.sent.filter((message) => message.method === 'turn/start')).toEqual([]);
+
+      await vi.advanceTimersByTimeAsync(11_000);
+      await Promise.resolve();
+      expect(proxy.sent.filter((message) => message.method === 'turn/start')).toContainEqual(
+        expect.objectContaining({
+          params: { threadId: 'thread-1', input: [{ type: 'text', text: 'wait for editor' }] },
+        }),
+      );
+    } finally {
+      app?.close();
+      vi.useRealTimers();
+    }
+  });
+
+  it('resumes an expired edit lease through the replacement App Server connection', async () => {
+    vi.useFakeTimers();
+    let app = null;
+    try {
+      vi.setSystemTime(0);
+      const proxies = [];
+      app = createCodexAppServer({
+        home: '/home/test', exists: () => true, now: () => Date.now(),
+        connect: () => { const proxy = fakeProxy(); proxies.push(proxy); return proxy.ws; },
+      });
+      await app.status('%1', 'thread-1');
+      const first = proxies[0];
+      first.push({
+        jsonrpc: '2.0', method: 'turn/started',
+        params: { threadId: 'thread-1', turn: { id: 'turn-live', status: 'inProgress', items: [] } },
+      });
+      await Promise.resolve();
+      const queued = (await app.send('%1', 'thread-1', 'resume after reconnect')).item;
+      await app.beginQueuedEdit('%1', 'thread-1', queued.id);
+      first.push({
+        jsonrpc: '2.0', method: 'turn/completed',
+        params: { threadId: 'thread-1', turn: { id: 'turn-live', status: 'completed', items: [] } },
+      });
+      await Promise.resolve();
+      first.ws.emit('close');
+      await Promise.resolve();
+
+      await app.status('%1', 'thread-1');
+      const replacement = proxies[1];
+      await vi.advanceTimersByTimeAsync(31_000);
+      await app.status('%1', 'thread-1');
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(replacement.sent.filter((message) => message.method === 'turn/start')).toContainEqual(
+        expect.objectContaining({
+          params: { threadId: 'thread-1', input: [{ type: 'text', text: 'resume after reconnect' }] },
+        }),
+      );
+    } finally {
+      app?.close();
+      vi.useRealTimers();
+    }
   });
 
   it('keeps an interrupted turn active until App Server confirms turn completion', async () => {
@@ -1019,6 +1143,58 @@ describe('Codex App Server client', () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
     const state = (await app.inboxStates([{ id: '%1' }]))['%1'];
     expect(state).toMatchObject({ kind: 'permission', suppressPush: true });
+    app.close();
+  });
+
+  it('treats a Codex socket first discovered after startup as a no-replay baseline', async () => {
+    let sockets = [];
+    let scanTick = null;
+    let proxy = null;
+    const app = createCodexAppServer({
+      home: '/home/test', exists: () => true, readdir: () => sockets,
+      connect: () => { proxy ||= fakeProxy(); return proxy.ws; },
+      setTimer: (callback) => { scanTick = callback; return { unref() {} }; }, clearTimer: () => {},
+    });
+    app.start();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    sockets = ['1.sock'];
+    await scanTick();
+    const state = (await app.inboxStates([{ id: '%1' }]))['%1'];
+
+    expect(state).toMatchObject({ kind: 'done', suppressPush: true });
+    app.close();
+  });
+
+  it('ends baseline suppression after observing an empty managed App Server', async () => {
+    const completed = {
+      id: 'thread-new', status: { type: 'idle' },
+      turns: [{
+        id: 'turn-new', status: 'completed', completedAt: 2,
+        items: [{ id: 'user-new', type: 'userMessage', content: [{ type: 'text', text: 'new work' }] }],
+      }],
+    };
+    const proxy = fakeProxy({ loaded: [], resumeThread: () => completed });
+    const app = createCodexAppServer({ home: '/home/test', exists: () => true, connect: () => proxy.ws });
+    expect(await app.discover('%1')).toEqual({ managed: true, threadId: null });
+
+    proxy.push({
+      jsonrpc: '2.0', method: 'thread/started',
+      params: { thread: { id: 'thread-new', parentThreadId: null } },
+    });
+    proxy.push({
+      jsonrpc: '2.0', method: 'turn/completed', params: {
+        threadId: 'thread-new', turn: {
+          id: 'turn-new', status: 'completed',
+          items: [{ id: 'user-new', type: 'userMessage', content: [{ type: 'text', text: 'new work' }] }],
+        },
+      },
+    });
+    await Promise.resolve();
+
+    expect((await app.inboxStates([{ id: '%1' }]))['%1'])
+      .toMatchObject({ kind: 'done', msg: 'new work', suppressPush: false });
     app.close();
   });
 

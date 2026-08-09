@@ -429,6 +429,7 @@ export default {
 'chat.input.submit': 'Submit answer',
 'chat.input.failed': 'The answer could not be submitted',
 'chat.sendFailed': 'The message could not be sent',
+'chat.sendUnknown': 'Delivery could not be confirmed. Check the conversation before trying again.',
 'chat.stopFailed': 'Could not stop the turn. Try again.',
 'chat.queue.title': 'Queued messages',
 'chat.queue.hint': 'Sent one by one after the current turn',

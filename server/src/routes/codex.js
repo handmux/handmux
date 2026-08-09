@@ -314,7 +314,9 @@ export function codexRoutes({ codexApp, commands, claudeEvents, wait = pause }) 
     catch (error) { codexError(res, error); }
   });
 
-  for (const [action, method] of [['commit', 'commitQueuedEdit'], ['cancel', 'cancelQueuedEdit']]) {
+  for (const [action, method] of [
+    ['renew', 'renewQueuedEdit'], ['commit', 'commitQueuedEdit'], ['cancel', 'cancelQueuedEdit'],
+  ]) {
     r.post(`/codex/queue/edit/${action}`, async (req, res) => {
       const target = await binding(codexApp, req.body?.pane);
       if (routeError(res, target)) return;

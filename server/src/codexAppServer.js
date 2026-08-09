@@ -8,6 +8,7 @@ const RPC_TIMEOUT_MS = 8_000;
 const SOCKET_SCAN_MS = 2_000;
 const MAX_QUEUED_MESSAGES = 20;
 const MAX_SUBMISSION_RECEIPTS = 256;
+const QUEUE_EDIT_LEASE_MS = 30_000;
 const APPROVAL_METHODS = new Set([
   'item/commandExecution/requestApproval',
   'item/fileChange/requestApproval',
@@ -439,7 +440,7 @@ function connectUnixWebSocket(socketPath) {
 class CodexAppConnection {
   constructor({
     pane, socketPath, connect = connectUnixWebSocket, timeoutMs = RPC_TIMEOUT_MS,
-    now = () => Date.now(), baseline = false, onStateChange = () => {}, onClose = () => {},
+    now = () => Date.now(), baseline = true, onStateChange = () => {}, onClose = () => {},
     queueStore = new Map(), submissionStore = new Map(), nextQueueId = () => `${Date.now()}`,
   }) {
     this.pane = pane;
@@ -692,13 +693,56 @@ class CodexAppConnection {
     const key = this.queueKey(threadId);
     let state = this.queueStore.get(key);
     if (!state && create) {
-      state = { items: [], starting: false, draining: false, steering: new Set(), editing: null };
+      state = {
+        items: [], starting: false, draining: false, steering: new Set(), editing: null, editTimer: null,
+      };
       this.queueStore.set(key, state);
     }
     return state || null;
   }
 
+  clearQueueEditTimer(queue) {
+    if (!queue?.editTimer) return;
+    clearTimeout(queue.editTimer);
+    queue.editTimer = null;
+  }
+
+  scheduleQueueEditExpiry(threadId) {
+    const queue = this.queueState(threadId, false);
+    this.clearQueueEditTimer(queue);
+    if (!queue?.editing) return;
+    const token = queue.editing.token;
+    const delay = Math.max(1, queue.editing.expiresAt - this.now());
+    queue.editTimer = setTimeout(() => {
+      queue.editTimer = null;
+      if (queue.editing?.token !== token) return;
+      if (!this.expireQueueEdit(threadId)) this.scheduleQueueEditExpiry(threadId);
+    }, delay);
+    queue.editTimer.unref?.();
+  }
+
+  expireQueueEdit(threadId, { resume = true } = {}) {
+    const queue = this.queueState(threadId, false);
+    if (!queue?.editing || queue.editing.expiresAt > this.now()) return false;
+    this.clearQueueEditTimer(queue);
+    queue.editing = null;
+    this.bump(threadId);
+    this.cleanupQueue(threadId);
+    if (resume) queueMicrotask(() => { void this.drainQueue(threadId).catch(() => {}); });
+    return true;
+  }
+
+  wakeQueue(threadId) {
+    this.expireQueueEdit(threadId, { resume: false });
+    const queue = this.queueState(threadId, false);
+    const state = this.state(threadId);
+    if (!queue?.items.length || queue.editing || state.status?.type !== 'idle'
+      || state.lastTurn?.status !== 'completed') return;
+    queueMicrotask(() => { void this.drainQueue(threadId).catch(() => {}); });
+  }
+
   queuedFor(threadId) {
+    this.wakeQueue(threadId);
     const queue = this.queueState(threadId, false);
     return (queue?.items || []).map((item) => ({
       ...item,
@@ -710,11 +754,13 @@ class CodexAppConnection {
     const state = this.queueState(threadId, false);
     if (state && !state.items.length && !state.starting && !state.draining
       && !state.steering.size && !state.editing) {
+      this.clearQueueEditTimer(state);
       this.queueStore.delete(this.queueKey(threadId));
     }
   }
 
   discardQueue(threadId) {
+    this.clearQueueEditTimer(this.queueState(threadId, false));
     this.queueStore.delete(this.queueKey(threadId));
     this.bump(threadId);
   }
@@ -812,6 +858,7 @@ class CodexAppConnection {
 
   async drainQueue(threadId) {
     await this.assertCurrentThread(threadId);
+    this.expireQueueEdit(threadId, { resume: false });
     const queue = this.queueState(threadId, false);
     if (!queue?.items.length || queue.draining || queue.starting || queue.editing || this.activeTurn(threadId)
       || this.state(threadId).status?.type === 'active') return;
@@ -874,6 +921,7 @@ class CodexAppConnection {
 
   async beginQueuedEdit(threadId, itemId) {
     await this.ensureThread(threadId);
+    this.expireQueueEdit(threadId);
     const queue = this.queueState(threadId, false);
     const item = queue?.items.find((candidate) => candidate.id === itemId);
     if (!item) throw new Error('queued message is no longer pending');
@@ -886,12 +934,27 @@ class CodexAppConnection {
     // Reopening the same editor replaces its token. This lets a reloaded client recover an in-memory edit
     // hold while ensuring an older dialog can no longer overwrite the newer draft.
     const token = this.nextQueueId();
-    queue.editing = { itemId, token };
+    queue.editing = { itemId, token, expiresAt: this.now() + QUEUE_EDIT_LEASE_MS };
+    this.scheduleQueueEditExpiry(threadId);
     this.bump(threadId);
-    return { editing: true, token, item: { ...item, editing: true } };
+    return {
+      editing: true, token, expiresAt: queue.editing.expiresAt, item: { ...item, editing: true },
+    };
+  }
+
+  renewQueuedEdit(threadId, itemId, token) {
+    this.expireQueueEdit(threadId);
+    const queue = this.queueState(threadId, false);
+    if (!queue?.editing || queue.editing.itemId !== itemId || queue.editing.token !== token) {
+      throw new Error('queued message edit is no longer active');
+    }
+    queue.editing.expiresAt = this.now() + QUEUE_EDIT_LEASE_MS;
+    this.scheduleQueueEditExpiry(threadId);
+    return { editing: true, expiresAt: queue.editing.expiresAt };
   }
 
   commitQueuedEdit(threadId, itemId, token, text) {
+    this.expireQueueEdit(threadId);
     const queue = this.queueState(threadId, false);
     if (!queue?.editing || queue.editing.itemId !== itemId || queue.editing.token !== token) {
       throw new Error('queued message edit is no longer active');
@@ -899,6 +962,7 @@ class CodexAppConnection {
     const item = queue.items.find((candidate) => candidate.id === itemId);
     if (!item) throw new Error('queued message is no longer pending');
     item.text = text;
+    this.clearQueueEditTimer(queue);
     queue.editing = null;
     this.bump(threadId);
     this.cleanupQueue(threadId);
@@ -907,10 +971,12 @@ class CodexAppConnection {
   }
 
   cancelQueuedEdit(threadId, itemId, token) {
+    this.expireQueueEdit(threadId);
     const queue = this.queueState(threadId, false);
     if (!queue?.editing || queue.editing.itemId !== itemId || queue.editing.token !== token) {
       throw new Error('queued message edit is no longer active');
     }
+    this.clearQueueEditTimer(queue);
     queue.editing = null;
     this.bump(threadId);
     this.cleanupQueue(threadId);
@@ -1093,10 +1159,7 @@ class CodexAppConnection {
       }
       // The completion event may have happened while this WebSocket was disconnected. Resume a retained
       // next-turn queue only when the durable snapshot proves the previous turn completed successfully.
-      if (state.status?.type === 'idle' && last?.status === 'completed'
-        && this.queueState(threadId, false)?.items.length) {
-        queueMicrotask(() => { void this.drainQueue(threadId).catch(() => {}); });
-      }
+      this.wakeQueue(threadId);
     } catch (error) {
       // A newly opened TUI thread is authoritative but has no rollout until its first turn. It cannot yet
       // be resumed by a second client, so verify it against this pane's loaded-thread set and keep an empty
@@ -1109,6 +1172,10 @@ class CodexAppConnection {
       state.readRevision = state.revision;
       state.loadedOnly = true;
     }
+    // Every connection begins by projecting the App Server's resting snapshot. Only events received after
+    // that first projection are new activity; this rule is connection-local and must not depend on when
+    // Handmux itself happened to start.
+    this.baseline = false;
     return state;
   }
 
@@ -1259,15 +1326,14 @@ export function createCodexAppServer({
   let queueSequence = 0;
   let scanTimer = null;
   let started = false;
-  let priming = false;
 
-  async function connection(pane, { baseline = false } = {}) {
+  async function connection(pane) {
     const socketPath = codexAppSocketPath(pane, home);
     if (!exists(socketPath)) return null;
     let current = connections.get(pane);
     if (!current || current.closed) {
       current = new CodexAppConnection({
-        pane, socketPath, connect, now, baseline: baseline || priming, onStateChange,
+        pane, socketPath, connect, now, baseline: true, onStateChange,
         queueStore: queues, submissionStore: submissions,
         nextQueueId: () => `${now().toString(36)}-${(++queueSequence).toString(36)}`,
         onClose: (closed) => { if (connections.get(pane) === closed) connections.delete(pane); },
@@ -1278,22 +1344,27 @@ export function createCodexAppServer({
     return current;
   }
 
-  async function observe(pane, { baseline = false } = {}) {
-    const client = await connection(pane, { baseline });
+  async function observe(pane) {
+    const client = await connection(pane);
     if (!client) return null;
     const threadId = await client.discoverThread();
-    if (threadId) await client.ensureThread(threadId);
+    if (threadId) {
+      await client.ensureThread(threadId);
+      client.wakeQueue(threadId);
+    }
+    // An empty loaded-thread list is also a complete baseline. A thread started after this observation is
+    // new work and must not inherit suppression merely because there was no snapshot to resume yet.
     client.baseline = false;
     return { client, threadId };
   }
 
-  async function scan({ baseline = false } = {}) {
+  async function scan() {
     const dir = codexAppSocketPath('%0', home).replace(/\/0\.sock$/, '');
     let names = [];
     try { names = readdir(dir); } catch { return; }
     await Promise.all(names.filter((name) => /^\d+\.sock$/.test(name)).map((name) => {
       const pane = `%${name.slice(0, -5)}`;
-      return observe(pane, { baseline }).catch(() => {});
+      return observe(pane).catch(() => {});
     }));
   }
 
@@ -1376,6 +1447,12 @@ export function createCodexAppServer({
       if (!client) throw new Error('Codex session is not managed by Handmux');
       await client.assertCurrentThread(threadId);
       return client.beginQueuedEdit(threadId, itemId);
+    },
+    async renewQueuedEdit(pane, threadId, itemId, token) {
+      const client = await connection(pane);
+      if (!client) throw new Error('Codex session is not managed by Handmux');
+      await client.assertCurrentThread(threadId);
+      return client.renewQueuedEdit(threadId, itemId, token);
     },
     async commitQueuedEdit(pane, threadId, itemId, token, text) {
       const client = await connection(pane);
@@ -1481,8 +1558,7 @@ export function createCodexAppServer({
     start() {
       if (started) return;
       started = true;
-      priming = true;
-      scan({ baseline: true }).catch(() => {}).finally(() => { priming = false; });
+      scan().catch(() => {});
       scanTimer = setTimer(() => scan().catch(() => {}), scanIntervalMs);
       scanTimer?.unref?.();
     },
@@ -1492,6 +1568,9 @@ export function createCodexAppServer({
       scanTimer = null;
       for (const client of connections.values()) client.close();
       connections.clear();
+      for (const queue of queues.values()) {
+        if (queue.editTimer) clearTimeout(queue.editTimer);
+      }
       queues.clear();
       submissions.clear();
     },
