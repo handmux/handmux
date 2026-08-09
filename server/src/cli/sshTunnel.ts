@@ -2,11 +2,14 @@
 // self-reconnects, so we only flip to "live" on a real connected event (mirrors cloudflare URL-scrape:
 // don't surface the public URL until the tunnel is actually up). Side-effect-free → unit-tested against
 // real captured NDJSON lines.
-export function isTunnelConnected(text) {
+export function isTunnelConnected(text: unknown): boolean {
   for (const line of String(text || '').split('\n')) {
     const s = line.trim();
     if (!s) continue;
-    try { if (JSON.parse(s).state === 'connected') return true; } catch { /* partial / non-json line */ }
+    try {
+      const event: unknown = JSON.parse(s);
+      if (event && typeof event === 'object' && 'state' in event && event.state === 'connected') return true;
+    } catch { /* partial / non-json line */ }
   }
   return false;
 }

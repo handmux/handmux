@@ -7,7 +7,7 @@ import { hostOf } from './urlHost.js';
 
 const RE = /https?:\/\/[a-z0-9][a-z0-9.-]*\.cpolar\.(?:top|cn|io|com)/;
 
-export function extractCpolarUrl(text) {
+export function extractCpolarUrl(text: unknown): string | null {
   const m = RE.exec(String(text || ''));
   return m ? m[0] : null;
 }
@@ -15,7 +15,7 @@ export function extractCpolarUrl(text) {
 // The cpolar CLI flag for a fixed domain, derived from its host: a cpolar-owned zone → -subdomain=<label>
 // (cpolar reserves you the leftmost label; the region prefix, if any, is handled by cpolar itself), anything
 // else → -hostname=<host> (you bound your own domain). Empty when no fixed domain (free tier).
-export function cpolarNamedArgs(publicUrl) {
+export function cpolarNamedArgs(publicUrl: unknown): string[] {
   const host = hostOf(publicUrl);
   if (!host) return [];
   if (/\.cpolar\.(?:top|cn|io|com)$/i.test(host)) return [`-subdomain=${host.split('.')[0]}`];

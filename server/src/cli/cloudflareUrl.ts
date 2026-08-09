@@ -3,7 +3,7 @@
 // the public URL. Kept tiny + side-effect-free so it unit-tests against real captured log lines.
 const RE = /https:\/\/[a-z0-9][a-z0-9-]*\.trycloudflare\.com/;
 
-export function extractCloudflareUrl(text) {
+export function extractCloudflareUrl(text: unknown): string | null {
   const m = RE.exec(String(text || ''));
   return m ? m[0] : null;
 }

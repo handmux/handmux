@@ -5,7 +5,7 @@
 // unit-tested against captured log lines.
 const RE = /https?:\/\/[a-z0-9][a-z0-9-]*\.natappfree\.cc/;
 
-export function extractNatappUrl(text) {
+export function extractNatappUrl(text: unknown): string | null {
   const m = RE.exec(String(text || ''));
   return m ? m[0] : null;
 }
