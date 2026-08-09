@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import net from 'node:net';
 import WebSocket from 'ws';
 import { codexPlanSnapshot } from './codexPlan.js';
+import { parseCodexGoal, parseCodexStreamEvent } from './codexStreamProtocol.js';
 import { codexAppSocketPath } from './cli/codexManaged.js';
 import { isCodexSyntheticUserText } from './codexTranscriptParse.js';
 
@@ -709,6 +710,9 @@ class CodexAppConnection {
 
   applyGoalSnapshot(threadId, goal, turnId = null, { emit = true } = {}) {
     if (!threadId) return false;
+    const normalizedGoal = goal == null ? null : parseCodexGoal(goal);
+    if (goal != null && !normalizedGoal) return false;
+    goal = normalizedGoal;
     const state = this.state(threadId);
     const previous = state.goal;
     const replaced = !!goal && (!previous || previous.createdAt !== goal.createdAt
@@ -1165,10 +1169,11 @@ class CodexAppConnection {
   }
 
   emitStream(event) {
-    if (!event?.threadId) return;
+    const parsed = parseCodexStreamEvent(event);
+    if (!parsed || !parsed.threadId) return;
     for (const subscription of this.streamListeners) {
-      if (subscription.threadId !== event.threadId) continue;
-      try { subscription.listener(event); } catch { /* one browser must not break the App Server observer */ }
+      if (subscription.threadId !== parsed.threadId) continue;
+      try { subscription.listener(parsed); } catch { /* one browser must not break the App Server observer */ }
     }
   }
 
@@ -1598,7 +1603,8 @@ export function createCodexAppServer({
       await client.assertCurrentThread(threadId);
       await client.ensureThread(threadId);
       const result = await client.rpc('thread/goal/get', { threadId });
-      const goal = result?.goal || null;
+      const goal = result?.goal == null ? null : parseCodexGoal(result.goal);
+      if (result?.goal != null && !goal) throw new Error('Codex App Server returned an invalid Goal');
       client.applyGoalSnapshot(threadId, goal, null, {
         emit: !!goal && TERMINAL_GOAL_STATUSES.has(goal.status),
       });
@@ -1610,7 +1616,8 @@ export function createCodexAppServer({
       await client.assertCurrentThread(threadId);
       await client.ensureThread(threadId);
       const result = await client.rpc('thread/goal/set', { threadId, ...updates });
-      const goal = result?.goal || null;
+      const goal = result?.goal == null ? null : parseCodexGoal(result.goal);
+      if (result?.goal != null && !goal) throw new Error('Codex App Server returned an invalid Goal');
       client.applyGoalSnapshot(threadId, goal);
       client.bump(threadId);
       return goal;

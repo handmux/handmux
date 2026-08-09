@@ -1,16 +1,44 @@
+import type { CodexDiff, CodexDiffHunk, CodexToolProjection } from './codexToolProtocol.js';
+
 const HUNK_HEADER = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/;
 
-function changedLines(lines) {
+interface AppServerChange {
+  path?: unknown;
+  diff?: unknown;
+  kind?: { type?: unknown } | null;
+}
+
+interface AppServerItem {
+  type?: unknown;
+  changes?: AppServerChange[] | null;
+}
+
+interface AppServerTurn {
+  id?: unknown;
+  items?: AppServerItem[] | null;
+}
+
+interface AppServerThread {
+  turns?: AppServerTurn[] | null;
+}
+
+export interface CodexMessageProjection {
+  [key: string]: unknown;
+  turnId?: unknown;
+  tool?: CodexToolProjection | null;
+}
+
+function changedLines(lines: string[]): string[] {
   return lines.filter((line) => /^[+-]/.test(line)
     && !line.startsWith('+++') && !line.startsWith('---'));
 }
 
-export function parseUnifiedDiff(value, { created = false } = {}) {
+export function parseUnifiedDiff(value: unknown, { created = false }: { created?: boolean } = {}): CodexDiff {
   const lines = String(value || '').split('\n');
   let added = 0;
   let removed = 0;
-  const hunks = [];
-  let current = null;
+  const hunks: CodexDiffHunk[] = [];
+  let current: CodexDiffHunk | null = null;
   const flush = () => {
     if (current?.lines.length) hunks.push(current);
     current = null;
@@ -38,7 +66,7 @@ export function parseUnifiedDiff(value, { created = false } = {}) {
   };
 }
 
-function applyPatchSection(value, path) {
+function applyPatchSection(value: unknown, path: string): string[] {
   const lines = String(value || '').split('\n');
   let active = false;
   const section = [];
@@ -55,18 +83,18 @@ function applyPatchSection(value, path) {
   return section;
 }
 
-function diffKey(lines) {
+function diffKey(lines: string[]): string {
   return changedLines(lines).join('\0');
 }
 
-function sameFilePath(left, right) {
+function sameFilePath(left: unknown, right: unknown): boolean {
   const a = String(left || '').replaceAll('\\', '/').replace(/^\.\//, '');
   const b = String(right || '').replaceAll('\\', '/').replace(/^\.\//, '');
   return a === b || a.endsWith(`/${b}`) || b.endsWith(`/${a}`);
 }
 
-function candidateDiffs(thread) {
-  const candidates = [];
+function candidateDiffs(thread: AppServerThread | null | undefined) {
+  const candidates: Array<{ turnId: string | null; path: string; key: string; diff: CodexDiff }> = [];
   for (const turn of thread?.turns || []) {
     for (const item of turn?.items || []) {
       if (item?.type !== 'fileChange') continue;
@@ -74,8 +102,8 @@ function candidateDiffs(thread) {
         const diff = parseUnifiedDiff(change?.diff, { created: change?.kind?.type === 'add' });
         if (!diff.hunks) continue;
         candidates.push({
-          turnId: turn.id || null,
-          path: change?.path || '',
+          turnId: typeof turn.id === 'string' && turn.id ? turn.id : null,
+          path: typeof change?.path === 'string' ? change.path : '',
           key: diffKey(String(change?.diff || '').split('\n')),
           diff,
         });
@@ -85,26 +113,31 @@ function candidateDiffs(thread) {
   return candidates;
 }
 
-export function enrichCodexFileDiffs(messages, thread) {
+export function enrichCodexFileDiffs<T extends CodexMessageProjection>(
+  messages: T[],
+  thread: AppServerThread | null | undefined,
+): T[] {
   const candidates = candidateDiffs(thread);
-  const used = new Set();
+  const used = new Set<number>();
   return messages.map((message) => {
     const tool = message?.tool;
     const positioned = tool?.diff?.hunks?.length
       && tool.diff.hunks.every((hunk) => Number.isInteger(hunk.oldStart) && Number.isInteger(hunk.newStart));
     if (tool?.name !== 'apply_patch' || !tool.diff || positioned) return message;
-    const path = tool.input?.file_path || '';
-    const key = diffKey(applyPatchSection(tool.input?.patch, path));
-    const matches = (candidate, index) => !used.has(index)
+    const targetDiff = tool.diff;
+    const input = Array.isArray(tool.input) ? null : tool.input;
+    const path = typeof input?.file_path === 'string' ? input.file_path : '';
+    const key = diffKey(applyPatchSection(input?.patch, path));
+    const matches = (candidate: (typeof candidates)[number], index: number) => !used.has(index)
       && sameFilePath(candidate.path, path)
-      && candidate.diff.added === tool.diff.added
-      && candidate.diff.removed === tool.diff.removed
+      && candidate.diff.added === targetDiff.added
+      && candidate.diff.removed === targetDiff.removed
       && (!message.turnId || !candidate.turnId || candidate.turnId === message.turnId);
     let index = candidates.findIndex((candidate, candidateIndex) => matches(candidate, candidateIndex)
       && (!key || !candidate.key || candidate.key === key));
     if (index < 0 && !key) index = candidates.findIndex(matches);
     if (index < 0) return message;
     used.add(index);
-    return { ...message, tool: { ...tool, diff: candidates[index].diff } };
+    return { ...message, tool: { ...tool, diff: candidates[index].diff } } as T;
   });
 }

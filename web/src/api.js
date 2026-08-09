@@ -2,6 +2,8 @@ import { getBrowserDeviceId, getToken } from './storage.js';
 import { mimeFromName } from './mime.js';
 import { t } from './i18n';
 import { ApiError, UnauthorizedError, parseApiErrorBody } from './apiErrors.js';
+import { parseCodexStreamEvent } from '../../server/src/codexStreamProtocol.js';
+import { parseCodexToolProjection } from '../../server/src/codexToolProtocol.js';
 
 export { ApiError, UnauthorizedError } from './apiErrors.js';
 
@@ -65,7 +67,16 @@ export const fetchTranscript = (pane, { since, before, limit = 10, agent = 'clau
   let url = `/api/transcript?pane=${encodeURIComponent(pane)}&agent=${encodeURIComponent(agent)}&limit=${encodeURIComponent(limit)}`;
   if (since) url += `&since=${encodeURIComponent(since)}`;
   if (before != null) url += `&before=${encodeURIComponent(before)}`;
-  return req(url, { timeoutMs: 8000 }).then((r) => (r.unchanged ? null : r));
+  return req(url, { timeoutMs: 8000 }).then((r) => {
+    if (r.unchanged) return null;
+    if (agent !== 'codex' || !Array.isArray(r.messages)) return r;
+    const messages = r.messages.flatMap((message) => {
+      if (!message || typeof message !== 'object' || message.type !== 'tool') return [message];
+      const tool = parseCodexToolProjection(message.tool);
+      return tool ? [{ ...message, tool }] : [];
+    });
+    return { ...r, messages };
+  });
 };
 // The pane's current context-window state: { model, usedPercent } — either may be null when the statusLine
 // capturer isn't opted in / the session hasn't rendered. Polled by the 对话 composer to show a small chip.
@@ -130,7 +141,9 @@ export async function streamCodexMessages(pane, { signal, onEvent } = {}) {
         try { payload = JSON.parse(frame); } catch { continue; }
         const events = payload?.type === 'events' && Array.isArray(payload.events)
           ? payload.events : [payload];
-        for (const event of events) {
+        for (const candidate of events) {
+          const event = parseCodexStreamEvent(candidate);
+          if (!event) continue;
           if (event?.type === 'error') throw new Error(event.message || 'Codex message stream failed');
           onEvent?.(event);
         }

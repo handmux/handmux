@@ -41,6 +41,7 @@ describe('Codex file diffs', () => {
       type: 'tool', turnId: 'turn-1',
       tool: {
         name: 'apply_patch', input: { file_path: 'src/a.js', patch },
+        result: '', isError: false,
         diff: {
           added: 1,
           removed: 1,
@@ -57,7 +58,7 @@ describe('Codex file diffs', () => {
       }],
     }] };
 
-    expect(enrichCodexFileDiffs(messages, thread)[0].tool.diff.hunks[0])
+    expect(enrichCodexFileDiffs(messages, thread)[0]?.tool?.diff?.hunks?.[0])
       .toMatchObject({ oldStart: 70, newStart: 70 });
   });
 });

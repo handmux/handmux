@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { getHistory, getPanes, createSession, createWindow, renameSession, renameWindow, deleteWindow, swapWindows, createDir, UnauthorizedError, ApiError, fetchDoc, fetchDir, signAsr, sendInput, parseSseFrames, streamCodexMessages, sendCodexMessage } from '../src/api.js';
+import { getHistory, getPanes, createSession, createWindow, renameSession, renameWindow, deleteWindow, swapWindows, createDir, UnauthorizedError, ApiError, fetchDoc, fetchDir, fetchTranscript, signAsr, sendInput, parseSseFrames, streamCodexMessages, sendCodexMessage } from '../src/api.js';
 import { createPreview, getPreviews, deletePreview, previewUrl, fetchImageUrl } from '../src/api.js';
 
 afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); vi.useRealTimers(); });
@@ -17,8 +17,8 @@ describe('Codex message stream', () => {
     const encoder = new TextEncoder();
     const chunks = [
       'data: {"type":"ready","threadId":"thread-1"}\n\n',
-      'data: {"type":"events","events":[{"type":"delta","delta":"你"},',
-      '{"type":"completed","text":"你好"}]}\n\n',
+      'data: {"type":"events","events":[{"type":"delta","threadId":"thread-1","turnId":"turn-1","itemId":"item-1","delta":"你"},',
+      '{"type":"invalid"},{"type":"completed","threadId":"thread-1","turnId":"turn-1","itemId":"item-1","text":"你好"}]}\n\n',
     ].map((value) => encoder.encode(value));
     const reader = {
       read: vi.fn(async () => (chunks.length ? { done: false, value: chunks.shift() } : { done: true })),
@@ -37,10 +37,31 @@ describe('Codex message stream', () => {
     }));
     expect(events).toEqual([
       { type: 'ready', threadId: 'thread-1' },
-      { type: 'delta', delta: '你' },
-      { type: 'completed', text: '你好' },
+      { type: 'delta', threadId: 'thread-1', turnId: 'turn-1', itemId: 'item-1', delta: '你' },
+      { type: 'completed', threadId: 'thread-1', turnId: 'turn-1', itemId: 'item-1', text: '你好' },
     ]);
     expect(reader.releaseLock).toHaveBeenCalledOnce();
+  });
+
+  it('validates Codex tool and diff cards before returning a transcript page', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => jsonRes(200, { messages: [
+      { type: 'text', text: 'kept' },
+      { type: 'tool', tool: {
+        name: 'apply_patch', input: { file_path: 'src/a.ts' }, result: '', isError: false,
+        diff: { added: 1, removed: 0, hunks: null },
+      } },
+      { type: 'tool', tool: {
+        name: 'apply_patch', input: {}, result: '', isError: false,
+        diff: { added: '1', removed: 0, hunks: null },
+      } },
+    ] })));
+
+    await expect(fetchTranscript('%1', { agent: 'codex' })).resolves.toMatchObject({
+      messages: [
+        { type: 'text', text: 'kept' },
+        { type: 'tool', tool: { name: 'apply_patch', diff: { added: 1 } } },
+      ],
+    });
   });
 });
 

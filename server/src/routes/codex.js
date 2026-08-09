@@ -2,6 +2,7 @@ import express from 'express';
 import { isPaneId } from '../tmux/commands.js';
 import { getAgent } from '../agents/index.js';
 import { codexExitSessionId } from '../agents/codex.js';
+import { parseCodexStreamEvent } from '../codexStreamProtocol.js';
 
 const TAKEOVER_TERMINAL_HINT_MS = 10_000;
 const TAKEOVER_TIMEOUT_MS = 30_000;
@@ -121,6 +122,8 @@ function codexError(res, error) {
 // App Server can emit many tiny token deltas. Keep their order, but fold adjacent chunks for the same
 // message before crossing the tunnel to a phone; lifecycle events always flush immediately.
 export function appendCodexStreamEvent(queue, event) {
+  event = parseCodexStreamEvent(event);
+  if (!event) return queue;
   const last = queue.at(-1);
   if (event?.type === 'delta' && last?.type === 'delta'
     && last.threadId === event.threadId && last.turnId === event.turnId && last.itemId === event.itemId) {
