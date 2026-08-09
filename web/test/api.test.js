@@ -90,11 +90,15 @@ describe('api request timeout', () => {
   });
 
   it('a non-2xx error carries the status + server token as structured fields (message stays the token)', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => jsonRes(409, { error: 'exists' })));
+    vi.stubGlobal('fetch', vi.fn(async () => jsonRes(409, {
+      error: 'exists', code: 'name_conflict', requestId: 'request-1',
+    })));
     const err = await renameSession('$1', 'taken').catch((e) => e);
     expect(err).toBeInstanceOf(ApiError);
     expect(err.status).toBe(409);
     expect(err.serverError).toBe('exists');
+    expect(err.code).toBe('name_conflict');
+    expect(err.requestId).toBe('request-1');
     expect(err.message).toBe('exists'); // backward-compatible message
   });
 

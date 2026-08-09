@@ -26,6 +26,7 @@ import { DEFAULT_SHORTCUTS } from './shortcutConfig.js';
 import { workspaceRoutes } from './routes/workspace.js';
 import { browserRoutes } from './browser/routes.js';
 import { codexRoutes } from './routes/codex.js';
+import { apiErrorBoundary, apiNotFound, apiRequestContext } from './apiErrors.js';
 
 // Re-exported for tests (test/keys.test.js) and any caller that imported it by this path historically.
 export { isAllowedKey } from './routes/terminal.js';
@@ -40,9 +41,11 @@ export function createApiRouter({
   previewDomain,
   workspace,
   codexApp,
+  apiErrors,
   home = homedir(), stateFile = process.env.CLAUDE_STATE_FILE || claudeStatePath(homedir()),
 } = {}) {
   const r = express.Router();
+  r.use(apiRequestContext(apiErrors));
   r.use(expressAuth(token));
   r.use(express.json());
   const claudeEvents = events || createClaudeEvents({ commands, push });
@@ -67,6 +70,8 @@ export function createApiRouter({
   r.use(transcriptRoutes(deps));
   r.use(codexRoutes(deps));
   if (workspace) r.use(workspaceRoutes(deps));
+  r.use(apiNotFound(apiErrors));
+  r.use(apiErrorBoundary(apiErrors));
 
   return r;
 }

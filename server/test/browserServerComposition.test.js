@@ -12,7 +12,7 @@ describe('browser worker server composition', () => {
   });
 
   it('authenticates browser APIs before raw proxying and leaves normal APIs alone', () => {
-    expect(source).toContain("app.use('/api/browser-proxy', expressAuth(token), express.json(), browserWorker.apiHandler)");
+    expect(source).toContain("app.use('/api/browser-proxy', apiRequestContext(), expressAuth(token), express.json(), browserWorker.apiHandler)");
     expect(source.indexOf("app.use('/api/browser-proxy'")).toBeLessThan(source.indexOf("app.use('/api', createApiRouter"));
     expect(source).toContain('app.use(browserWorker.publicHandler)');
   });

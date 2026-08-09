@@ -27,6 +27,7 @@ import { createWorkspaceRuntime } from './workspace/runtime.js';
 import { createBrowserWorkerClient } from './browser/workerClient.js';
 import { createTerminalStream } from './terminalStream.js';
 import { createCodexAppServer } from './codexAppServer.js';
+import { apiErrorBoundary, apiRequestContext } from './apiErrors.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
@@ -116,7 +117,7 @@ const app = express();
 // Browser proxy leases stay behind normal Handmux auth. Client-owned direct tabs never enter
 // server state; proxy operations and all claimed Hammerhead paths use the isolated worker.
 app.use(browserWorker.publicHandler);
-app.use('/api/browser-proxy', expressAuth(token), express.json(), browserWorker.apiHandler);
+app.use('/api/browser-proxy', apiRequestContext(), expressAuth(token), express.json(), browserWorker.apiHandler);
 app.use('/api', createApiRouter({
   token, events, uploadExts, previews, shortcuts: cfg.shortcuts, workspace, previewDomain, codexApp,
 }));
@@ -166,6 +167,7 @@ app.get('*', (req, res, next) => {
   }
   res.sendFile(indexPath);
 });
+app.use(apiErrorBoundary());
 
 const server = app.listen(cfg.port, cfg.host, () => {
   console.log(`[handmux] listening on http://${cfg.host}:${cfg.port} (serving ${staticDir})`);

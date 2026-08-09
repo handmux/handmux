@@ -1,20 +1,9 @@
 import { getBrowserDeviceId, getToken } from './storage.js';
 import { mimeFromName } from './mime.js';
 import { t } from './i18n';
+import { ApiError, UnauthorizedError, parseApiErrorBody } from './apiErrors.js';
 
-export class UnauthorizedError extends Error {}
-
-// A non-2xx API response. Carries the HTTP `status` and the server's short `{error}` token (`serverError`,
-// e.g. 'exists' / 'too large' / 'type not allowed') as structured fields so callers can branch precisely
-// instead of regex-parsing the message. `.message` stays backward-compatible (the token when present, else
-// "path -> status"), so existing `e.message` readers keep working — this is purely additive.
-export class ApiError extends Error {
-  constructor(message, status, serverError) {
-    super(message);
-    this.status = status;
-    this.serverError = serverError ?? null;
-  }
-}
+export { ApiError, UnauthorizedError } from './apiErrors.js';
 
 async function req(path, opts = {}) {
   const token = getToken();
@@ -37,9 +26,15 @@ async function req(path, opts = {}) {
       // Surface the server's {error} token (e.g. "port not listening") so callers can show why, and carry
       // the status + token as structured fields on the thrown ApiError (callers branch on e.status /
       // e.serverError instead of parsing the message).
-      let serverError = null;
-      try { const body = await res.json(); if (body?.error) serverError = body.error; } catch { /* not json */ }
-      throw new ApiError(serverError || `${path} -> ${res.status}`, res.status, serverError);
+      let errorBody = null;
+      try { errorBody = parseApiErrorBody(await res.json()); } catch { /* not json */ }
+      throw new ApiError(
+        errorBody?.error || `${path} -> ${res.status}`,
+        res.status,
+        errorBody?.error,
+        errorBody?.code,
+        errorBody?.requestId,
+      );
     }
     if (res.status === 204) return { unchanged: true }; // conditional poll: server says nothing changed
     return await res.json();
@@ -109,9 +104,15 @@ export async function streamCodexMessages(pane, { signal, onEvent } = {}) {
   });
   if (res.status === 401) throw new UnauthorizedError();
   if (!res.ok) {
-    let serverError = null;
-    try { const body = await res.json(); if (body?.error) serverError = body.error; } catch { /* not json */ }
-    throw new ApiError(serverError || `${path} -> ${res.status}`, res.status, serverError);
+    let errorBody = null;
+    try { errorBody = parseApiErrorBody(await res.json()); } catch { /* not json */ }
+    throw new ApiError(
+      errorBody?.error || `${path} -> ${res.status}`,
+      res.status,
+      errorBody?.error,
+      errorBody?.code,
+      errorBody?.requestId,
+    );
   }
   if (!res.body?.getReader) throw new Error('Codex message stream is unavailable');
 
