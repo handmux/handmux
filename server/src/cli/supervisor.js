@@ -10,6 +10,9 @@ import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { getDriver } from './drivers.js';
 import { writeState, clearState, claudeStatePath, pushStorePath, previewStorePath, notificationsDirPath } from './state.js';
+import {
+  initialSupervisorComponentState, reduceSupervisorComponent,
+} from './supervisorState.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const SERVER = path.resolve(here, '../server.js');
@@ -46,17 +49,28 @@ export function browserPublicOriginEnv(cfg) {
   };
 }
 
-export function supervise(cfg, { home, log = console } = {}) {
+export function supervise(cfg, {
+  home,
+  log = console,
+  spawnChild = spawn,
+  connectSocket = net.connect,
+  setTimer = setTimeout,
+  now = Date.now,
+  processRef = process,
+} = {}) {
   const driver = getDriver(cfg.tunnel);
   const children = {};
   let stopping = false;
   let urlBuf = '';
-  let backoff = 500;
+  const components = {
+    server: initialSupervisorComponentState('server'),
+    tunnel: initialSupervisorComponentState('tunnel'),
+  };
 
   const state = {
-    supervisorPid: process.pid,
+    supervisorPid: processRef.pid,
     version: VERSION,
-    startedAt: Date.now(),
+    startedAt: now(),
     tunnel: cfg.tunnel,
     port: cfg.port,
     host: cfg.host,
@@ -65,20 +79,49 @@ export function supervise(cfg, { home, log = console } = {}) {
     lanUrl: lanUrl(cfg.port),
     publicUrl: null,
     ready: false,
+    serverPid: null,
+    tunnelPid: null,
+    components,
     error: null,
   };
-  const persist = () => writeState(state, home);
+  const persist = () => {
+    // Keep the legacy top-level fields during migration, but derive them from the explicit component
+    // machines so `ready` can never outlive the Server process that earned it.
+    state.serverPid = components.server.pid;
+    state.tunnelPid = components.tunnel.pid;
+    state.ready = components.server.phase === 'ready';
+    writeState(state, home);
+  };
+  const transition = (name, event) => {
+    components[name] = reduceSupervisorComponent(components[name], event);
+    persist();
+  };
   persist();
 
   // The server socket comes up a beat after spawn; don't report "ready" (and don't let the CLI print an
   // access URL) until a TCP connect to it actually succeeds, or callers race an unbound port.
-  const waitListening = () => {
-    if (stopping || state.ready) return;
-    const s = net.connect({ port: cfg.port, host: '127.0.0.1' });
-    const retry = () => { s.destroy(); if (!stopping) setTimeout(waitListening, 200); };
+  const waitListening = (serverChild) => {
+    if (stopping || children.server !== serverChild || components.server.phase === 'ready') return;
+    const s = connectSocket({ port: cfg.port, host: '127.0.0.1' });
+    let settled = false;
+    const retry = () => {
+      if (settled) return;
+      settled = true;
+      s.destroy();
+      if (!stopping && children.server === serverChild) {
+        setTimer(() => waitListening(serverChild), 200);
+      }
+    };
     s.setTimeout(500, retry);
     s.once('error', retry);
-    s.once('connect', () => { s.destroy(); state.ready = true; persist(); });
+    s.once('connect', () => {
+      if (settled) return;
+      settled = true;
+      s.destroy();
+      if (!stopping && children.server === serverChild) {
+        transition('server', { type: 'ready', at: now() });
+      }
+    });
   };
 
   const startServer = () => {
@@ -86,7 +129,7 @@ export function supervise(cfg, { home, log = console } = {}) {
     // hand the server everything it needs here. This is the single injection point: config.json fields →
     // the env names the server already reads (HANDMUX_* / VAPID_* / XFYUN_*).
     const env = {
-      ...process.env,
+      ...processRef.env,
       NODE_ENV: 'handmux',
       HANDMUX_PORT: String(cfg.port),
       HANDMUX_HOST: cfg.host,
@@ -111,44 +154,79 @@ export function supervise(cfg, { home, log = console } = {}) {
       if (cfg.xfyun.apiKey) env.XFYUN_APIKEY = cfg.xfyun.apiKey;
       if (cfg.xfyun.apiSecret) env.XFYUN_APISECRET = cfg.xfyun.apiSecret;
     }
-    const c = spawn(process.execPath, [SERVER], { env, stdio: ['ignore', 'inherit', 'inherit'] });
+    const c = spawnChild(processRef.execPath, [SERVER], { env, stdio: ['ignore', 'inherit', 'inherit'] });
     children.server = c;
-    state.serverPid = c.pid; persist();
-    c.on('exit', () => { if (!stopping) backoffRestart('server', startServer); });
+    transition('server', { type: 'spawned', pid: c.pid ?? null, at: now() });
+    waitListening(c);
+    let finalized = false;
+    const finalize = (error = null) => {
+      if (finalized || children.server !== c) return;
+      finalized = true;
+      delete children.server;
+      if (stopping) {
+        components.server = reduceSupervisorComponent(components.server, { type: 'stopped', at: now() });
+        return;
+      }
+      transition('server', { type: 'exited', at: now(), error });
+      backoffRestart('server', startServer);
+    };
+    c.once('error', (error) => finalize(String(error)));
+    c.once('exit', (code, signal) => finalize(code || signal ? `exit ${code ?? signal}` : null));
   };
 
   const startTunnel = () => {
     if (!driver.needsProcess) { // 'none' — reachable directly on LAN/localhost (or a tunnel you run yourself)
-      state.publicUrl = cfg.publicUrl || state.lanUrl || state.localUrl; persist(); return;
+      state.publicUrl = cfg.publicUrl || state.lanUrl || state.localUrl;
+      transition('tunnel', { type: 'spawned', pid: null, at: now() });
+      transition('tunnel', { type: 'ready', at: now() });
+      return;
     }
+    urlBuf = '';
     const spec = driver.proc(cfg);
-    const c = spawn(spec.cmd, spec.args, { stdio: ['ignore', 'pipe', 'pipe'] });
+    const c = spawnChild(spec.cmd, spec.args, { stdio: ['ignore', 'pipe', 'pipe'] });
     children.tunnel = c;
-    state.tunnelPid = c.pid; persist();
+    transition('tunnel', { type: 'spawned', pid: c.pid ?? null, at: now() });
     const onData = (b) => {
       const s = b.toString();
-      process.stdout.write(s);
+      processRef.stdout.write(s);
       if (state.publicUrl) return;
       urlBuf = (urlBuf + s).slice(-4000);
       const url = driver.matchUrl(urlBuf, cfg);
-      if (url) { state.publicUrl = url; state.error = null; backoff = 500; persist(); }
+      if (url) {
+        state.publicUrl = url;
+        state.error = null;
+        transition('tunnel', { type: 'ready', at: now() });
+      }
     };
     c.stdout.on('data', onData);
     c.stderr.on('data', onData);
-    c.on('error', (e) => {
-      state.error = e.code === 'ENOENT'
+    let finalized = false;
+    const finalize = (error = null) => {
+      if (finalized || children.tunnel !== c) return;
+      finalized = true;
+      delete children.tunnel;
+      state.publicUrl = null;
+      if (stopping) {
+        components.tunnel = reduceSupervisorComponent(components.tunnel, { type: 'stopped', at: now() });
+        return;
+      }
+      transition('tunnel', { type: 'exited', at: now(), error });
+      backoffRestart('tunnel', startTunnel);
+    };
+    c.once('error', (e) => {
+      const message = e.code === 'ENOENT'
         ? (driver.notFoundHint || `${spec.cmd} not found`)
         : String(e);
-      persist();
+      state.error = message;
+      finalize(message);
     });
-    c.on('exit', () => { if (!stopping) { state.publicUrl = null; persist(); backoffRestart('tunnel', startTunnel); } });
+    c.once('exit', (code, signal) => finalize(code || signal ? `exit ${code ?? signal}` : null));
   };
 
   const backoffRestart = (what, fn) => {
-    const d = Math.min(backoff, 15000);
-    backoff = Math.min(backoff * 2, 15000);
+    const d = Math.max(0, (components[what].restartAt ?? now()) - now());
     log.warn?.(`[handmux] ${what} exited; restarting in ${d}ms`);
-    setTimeout(() => { if (!stopping) fn(); }, d);
+    setTimer(() => { if (!stopping) fn(); }, d);
   };
 
   const shutdown = () => {
@@ -160,24 +238,23 @@ export function supervise(cfg, { home, log = console } = {}) {
     // supervisor was how a stray cloudflared kept running after `stop`). Poll until the children are gone,
     // then SIGKILL any straggler so we NEVER leak a tunnel process. With --grace-period 0s, cloudflared
     // exits near-instantly; the 3s ceiling is just a backstop.
-    const alive = () => kids.filter((c) => { try { process.kill(c.pid, 0); return true; } catch { return false; } });
+    const alive = () => kids.filter((c) => { try { processRef.kill(c.pid, 0); return true; } catch { return false; } });
     let waited = 0;
     const tick = () => {
       const left = alive();
       if (left.length === 0 || waited >= 3000) {
         for (const c of left) { try { c.kill('SIGKILL'); } catch { /* already dead */ } }
-        process.exit(0);
+        processRef.exit(0);
       }
       waited += 150;
-      setTimeout(tick, 150);
+      setTimer(tick, 150);
     };
     tick();
   };
-  process.on('SIGTERM', shutdown);
-  process.on('SIGINT', shutdown);
+  processRef.on('SIGTERM', shutdown);
+  processRef.on('SIGINT', shutdown);
 
   startServer();
   startTunnel();
-  waitListening();
   return { state };
 }
