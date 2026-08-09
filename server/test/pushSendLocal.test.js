@@ -5,6 +5,7 @@ import express from 'express';
 const sent = [];
 const dataSeen = [];
 const failureStatuses = new Map();
+const subscription = (endpoint) => ({ endpoint, keys: { p256dh: 'p', auth: 'a' } });
 vi.mock('web-push', () => ({
   default: {
     setVapidDetails: vi.fn(),
@@ -35,8 +36,8 @@ beforeEach(async () => {
   vi.resetModules();
   push = await import('../src/push.js');
   const { createApiRouter } = await import('../src/httpApi.js');
-  push.addSubscription({ endpoint: 'A', keys: {} }, ['proj-a']);
-  push.addSubscription({ endpoint: 'B', keys: {} }, ['proj-b']);
+  push.addSubscription(subscription('A'), ['proj-a']);
+  push.addSubscription(subscription('B'), ['proj-b']);
   keyA = push.getPushKey('A');
   app = express();
   app.use('/api', createApiRouter({ token: 'good' }));
@@ -82,18 +83,23 @@ describe('POST /api/push/send-local', () => {
 });
 
 describe('key retrieval', () => {
+  it('/push/subscribe rejects a subscription without encryption keys', async () => {
+    await request(app).post('/api/push/subscribe').set('Authorization', 'Bearer good')
+      .send({ subscription: { endpoint: 'C', keys: {} }, boundSessions: [] }).expect(400);
+  });
+
   it('/api/push/key returns the endpoint pushKey; /push/subscribe returns one too', async () => {
     const r1 = await request(app).post('/api/push/key').set('Authorization', 'Bearer good').send({ endpoint: 'A' }).expect(200);
     expect(r1.body.pushKey).toBe(keyA);
     const r2 = await request(app).post('/api/push/subscribe').set('Authorization', 'Bearer good')
-      .send({ subscription: { endpoint: 'C', keys: {} }, boundSessions: [] }).expect(200);
+      .send({ subscription: subscription('C'), boundSessions: [] }).expect(200);
     expect(typeof r2.body.pushKey).toBe('string');
   });
 
   it('/push/subscribe reuses a requested device key and /unsubscribe returns it', async () => {
     const stableKey = 'stable_device_key_123456';
     const subscribed = await request(app).post('/api/push/subscribe').set('Authorization', 'Bearer good')
-      .send({ subscription: { endpoint: 'C', keys: {} }, boundSessions: [], pushKey: stableKey }).expect(200);
+      .send({ subscription: subscription('C'), boundSessions: [], pushKey: stableKey }).expect(200);
     expect(subscribed.body.pushKey).toBe(stableKey);
 
     const removed = await request(app).post('/api/push/unsubscribe').set('Authorization', 'Bearer good')
@@ -104,7 +110,7 @@ describe('key retrieval', () => {
   it('/push/subscribe rejects and prunes an expired welcome subscription', async () => {
     failureStatuses.set('C', 410);
     const r = await request(app).post('/api/push/subscribe').set('Authorization', 'Bearer good')
-      .send({ subscription: { endpoint: 'C', keys: {} }, boundSessions: [] }).expect(410);
+      .send({ subscription: subscription('C'), boundSessions: [] }).expect(410);
     expect(r.body.error).toMatch(/expired/);
     expect(push.count()).toBe(2);
   });
@@ -112,7 +118,7 @@ describe('key retrieval', () => {
   it('/push/subscribe does not claim success for a non-expiry delivery rejection', async () => {
     failureStatuses.set('C', 503);
     const r = await request(app).post('/api/push/subscribe').set('Authorization', 'Bearer good')
-      .send({ subscription: { endpoint: 'C', keys: {} }, boundSessions: [] }).expect(502);
+      .send({ subscription: subscription('C'), boundSessions: [] }).expect(502);
     expect(r.body.error).toMatch(/rejected/);
     expect(push.count()).toBe(3);
   });

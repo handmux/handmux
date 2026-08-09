@@ -7,6 +7,7 @@ import path from 'node:path';
 
 const deliveredData = [];
 const failedEndpoints = new Map();
+const subscription = (endpoint) => ({ endpoint, keys: { p256dh: 'p', auth: 'a' } });
 vi.mock('web-push', () => ({
   default: {
     setVapidDetails: vi.fn(),
@@ -36,7 +37,7 @@ beforeEach(async () => {
   const push = await import('../src/push.js');
   await import('../src/notifications.js');
   const { createApiRouter } = await import('../src/httpApi.js');
-  push.addSubscription({ endpoint: 'A', keys: {} }, ['proj-a']);
+  push.addSubscription(subscription('A'), ['proj-a']);
   app = express();
   app.use('/api', createApiRouter({ token: 'good' }));
 });
@@ -47,7 +48,7 @@ describe('notification inbox routes', () => {
   it('a send-local push lands only in the targeted device inbox; others stay empty', async () => {
     // device A bound to proj-a; add device B bound to proj-b
     const push = await import('../src/push.js');
-    push.addSubscription({ endpoint: 'B', keys: {} }, ['proj-b']);
+    push.addSubscription(subscription('B'), ['proj-b']);
     const keyA = push.getPushKey('A');
     const keyB = push.getPushKey('B');
     // scope: session proj-a → only device A
@@ -64,7 +65,7 @@ describe('notification inbox routes', () => {
 
   it('stores an independent success/failure result in each targeted device inbox', async () => {
     const push = await import('../src/push.js');
-    push.addSubscription({ endpoint: 'B', keys: {} }, []);
+    push.addSubscription(subscription('B'), []);
     const keyA = push.getPushKey('A');
     const keyB = push.getPushKey('B');
     failedEndpoints.set('B', 503);

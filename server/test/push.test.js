@@ -33,10 +33,22 @@ beforeEach(async () => {
   failEndpoints.clear();
   try { fs.unlinkSync('/tmp/tmw-push-test.json'); } catch {}
   vi.resetModules();
-  push = await import('../src/push.js');
+  const mod = await import('../src/push.js');
+  push = {
+    ...mod,
+    addSubscription: (subscription, ...args) => mod.addSubscription({
+      ...subscription,
+      keys: { p256dh: 'p', auth: 'a', ...subscription.keys },
+    }, ...args),
+  };
 });
 
 describe('push sendToAll and dead-endpoint pruning', () => {
+  it('rejects a malformed browser subscription before persistence or delivery', () => {
+    expect(push.parsePushSubscription({ endpoint: 'A', keys: {} })).toBeNull();
+    expect(push.count()).toBe(0);
+  });
+
   it('sendToAll delivers to every registered subscription', async () => {
     push.addSubscription({ endpoint: 'A', keys: {} }, ['proj-a']);
     push.addSubscription({ endpoint: 'B', keys: {} }, ['proj-b']);
