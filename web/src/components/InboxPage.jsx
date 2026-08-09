@@ -1,7 +1,7 @@
-import { createPortal } from 'react-dom';
 import { t } from '../i18n';
 import { ChevronDownIcon } from './icons.jsx';
 import { sanitizeNotificationUrl } from '../urlPolicy.js';
+import { OverlayPortal } from '../overlays/OverlayHost.js';
 
 // Relative time, compact (jsdom-safe, no Intl.RelativeTimeFormat): "刚刚" / "5分钟前" / a date.
 function ago(ts) {
@@ -48,8 +48,9 @@ export default function InboxPage({ open, detailId, items, readIds = [], onOpenD
   const detailDelivery = deliveryLabel(detail?.delivery, true);
   const hasUnread = items.some((n) => !readSet.has(n.id));
 
-  return createPortal(
-    <div className={`file-sheet push-inbox-sheet ${open ? 'open' : ''}`} aria-hidden={!open}
+  return (
+    <OverlayPortal>
+      <div className={`file-sheet push-inbox-sheet ${open ? 'open' : ''}`} aria-hidden={!open}
       role="dialog" aria-label={t('pushInbox.title')}>
       <div className="file-tabs push-inbox-head">
         {inDetail ? (
@@ -114,7 +115,7 @@ export default function InboxPage({ open, detailId, items, readIds = [], onOpenD
           </ul>
         ) : null}
       </div>
-    </div>,
-    document.body,
+    </div>
+    </OverlayPortal>
   );
 }

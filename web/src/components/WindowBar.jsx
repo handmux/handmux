@@ -6,13 +6,13 @@
 // long-press still works on the expanded pane tab (its tap opens the menu instead of switching, since
 // the window is already active). Selecting a window picks its remembered pane.
 import { useRef, useLayoutEffect, useState, useEffect } from 'react';
-import { createPortal } from 'react-dom';
 import { useLongPress } from '../hooks/useLongPress.js';
 import { AgentMark } from './icons.jsx';
 import { paneLayout, hasGeometry, cellFit, MAP_W, MAP_H, MAP_PAD } from '../paneLayout.js';
 import { t } from '../i18n';
 import LensSwitch from './LensSwitch.jsx';
 import { useBackButton } from '../hooks/useBackButton.js';
+import { OverlayPortal } from '../overlays/OverlayHost.js';
 
 const CIRCLED = '①②③④⑤⑥⑦⑧⑨';
 const seq = (i) => (i < CIRCLED.length ? CIRCLED[i] : String(i + 1));
@@ -221,7 +221,7 @@ function PaneTab({ window: win, panes, paneAgents = {}, currentPaneId, agent, on
       </button>
       {open && pos && (
         hasGeometry(panes) ? (
-          createPortal(
+          <OverlayPortal>
             <div ref={popupRef} className="pane-map" role="listbox" style={{ top: pos.top, left: pos.left, width: mapW, height: mapH }}>
               {layout.cells.map((c) => {
                 const isCur = c.id === currentPaneId;
@@ -238,9 +238,8 @@ function PaneTab({ window: win, panes, paneAgents = {}, currentPaneId, agent, on
                   />
                 );
               })}
-            </div>,
-            document.body,
-          )
+            </div>
+          </OverlayPortal>
         ) : (
           <div className="dd-menu wt-menu" role="listbox" style={{ top: pos.top, left: pos.left }}>
             {panes.map((p, i) => (

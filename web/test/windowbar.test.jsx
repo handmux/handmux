@@ -293,7 +293,8 @@ describe('WindowBar', () => {
     openPaneMenu();
     const map = paneMap();
     expect(map).not.toBeNull();
-    expect(map.parentElement).toBe(document.body);
+    expect(map.parentElement?.classList.contains('overlay-layer')).toBe(true);
+    expect(map.parentElement?.parentElement).toBe(document.body);
   });
 
   it('disables iOS native selection and callout on long-pressable map cells', () => {
