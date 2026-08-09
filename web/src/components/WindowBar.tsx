@@ -13,14 +13,61 @@ import { t } from '../i18n';
 import LensSwitch from './LensSwitch.jsx';
 import { useBackButton } from '../hooks/useBackButton.js';
 import { OverlayPortal } from '../overlays/OverlayHost.js';
+import type { PaneLayoutCell, PaneLayoutSource } from '../paneLayout.js';
+import type { WorkspaceLens } from './LensSwitch.jsx';
+
+export interface WorkspaceWindow {
+  id: string;
+  name?: string | null;
+  active?: boolean;
+  panes: number;
+}
+
+export interface WorkspacePane extends PaneLayoutSource {
+  agent?: string | null;
+}
+
+type AgentMap = Readonly<Record<string, string | null | undefined>>;
+
+export interface WindowBarProps {
+  windows: readonly WorkspaceWindow[];
+  windowAgents?: AgentMap;
+  paneAgents?: AgentMap;
+  currentAgent?: string | null;
+  currentWindowId: string;
+  panes: readonly WorkspacePane[];
+  currentPaneId: string;
+  onSelectWindow: (window: WorkspaceWindow) => void;
+  onSelectPane: (paneId: string) => void;
+  onNewWindow: () => void;
+  onManageWindow: (window: WorkspaceWindow) => void;
+  onManagePane?: (paneId: string) => void;
+  onBeforePaneMapOpen?: (windowId: string) => void | Promise<void>;
+  paneSheetOpen?: boolean;
+  openMapFor?: string | null;
+  onMapOpened?: () => void;
+  onPaneMapOpenChange?: (open: boolean) => void;
+  trackWindowId?: string | null;
+  lens?: WorkspaceLens;
+  onLensChange?: (lens: WorkspaceLens) => void;
+  chatLensEnabled?: boolean;
+}
 
 const CIRCLED = '①②③④⑤⑥⑦⑧⑨';
-const seq = (i) => (i < CIRCLED.length ? CIRCLED[i] : String(i + 1));
-const paneLabel = (p, i) => `${seq(i)} ${p.command || p.id}`;
+const seq = (index: number): string => (index < CIRCLED.length ? CIRCLED[index] : String(index + 1));
+const paneLabel = (pane: WorkspacePane | undefined, index: number): string => `${seq(index)} ${pane?.command || pane?.id || ''}`;
 
 // `agent` is the agent id running in this window; when set, its logo prefixes the tab name.
-function WindowTab({ window: win, active, agent, onSelect, onManage }) {
-  const lp = useLongPress(() => onManage(win), { onClick: () => onSelect(win) });
+interface WindowTabProps {
+  window: WorkspaceWindow;
+  active: boolean;
+  agent?: string | null;
+  onSelect: (window: WorkspaceWindow) => void;
+  onManage: (window: WorkspaceWindow) => void;
+}
+
+function WindowTab({ window: win, active, agent, onSelect, onManage }: WindowTabProps) {
+  const lp = useLongPress<HTMLButtonElement>(() => onManage(win), { onClick: () => onSelect(win) });
   return (
     <button data-win={win.id} className={`win-tab ${active ? 'active' : ''}`} {...lp}>
       <span className="win-title">
@@ -42,13 +89,23 @@ const DIMENSIONS_MIN_W = 90; // below this, cols×rows would compete with seq / 
 
 // One map tile. Tap = switch (onChoose); long-press = manage this pane (onManage). Its own component
 // so useLongPress is a valid per-tile hook. `releasing` drives the blue-handoff on the outgoing tile.
-function PaneMapCell({ cell, cur, releasing, picking, agent, onChoose, onManage }) {
+interface PaneMapCellProps {
+  cell: PaneLayoutCell;
+  cur: boolean;
+  releasing: boolean;
+  picking: boolean;
+  agent?: string | null;
+  onChoose: (paneId: string) => void;
+  onManage?: (paneId: string) => void;
+}
+
+function PaneMapCell({ cell, cur, releasing, picking, agent, onChoose, onManage }: PaneMapCellProps) {
   const fit = cellFit(cell); // '' | 'flat' | 'narrow' | 'tiny'
   const cmd = cell.command || cell.id;
   const hasDimensions = Number.isFinite(cell.cols) && Number.isFinite(cell.rows);
   const dimensions = hasDimensions ? `${cell.cols}×${cell.rows}` : '';
   const showDimensions = fit === '' && cell.width >= DIMENSIONS_MIN_W && dimensions;
-  const lp = useLongPress(() => onManage(cell.id), { onClick: () => onChoose(cell.id) });
+  const lp = useLongPress<HTMLButtonElement>(() => onManage?.(cell.id), { onClick: () => onChoose(cell.id) });
   return (
     <button
       type="button"
@@ -82,7 +139,37 @@ function PaneMapCell({ cell, cur, releasing, picking, agent, onChoose, onManage 
   );
 }
 
-function PaneTab({ window: win, panes, paneAgents = {}, currentPaneId, agent, onManage, onManagePane, onSelectPane, onBeforePaneMapOpen, paneSheetOpen = false, openMapFor = null, onMapOpened, onPaneMapOpenChange }) {
+interface PaneTabProps {
+  window: WorkspaceWindow;
+  panes: readonly WorkspacePane[];
+  paneAgents?: AgentMap;
+  currentPaneId: string;
+  agent?: string | null;
+  onManage: (window: WorkspaceWindow) => void;
+  onManagePane?: (paneId: string) => void;
+  onSelectPane: (paneId: string) => void;
+  onBeforePaneMapOpen?: (windowId: string) => void | Promise<void>;
+  paneSheetOpen?: boolean;
+  openMapFor?: string | null;
+  onMapOpened?: () => void;
+  onPaneMapOpenChange?: (open: boolean) => void;
+}
+
+function PaneTab({
+  window: win,
+  panes,
+  paneAgents = {},
+  currentPaneId,
+  agent,
+  onManage,
+  onManagePane,
+  onSelectPane,
+  onBeforePaneMapOpen,
+  paneSheetOpen = false,
+  openMapFor = null,
+  onMapOpened,
+  onPaneMapOpenChange,
+}: PaneTabProps) {
   const [open, setOpen] = useState(false);
   useBackButton(open, () => setOpen(false));
   const openRef = useRef(open);
@@ -96,12 +183,12 @@ function PaneTab({ window: win, panes, paneAgents = {}, currentPaneId, agent, on
     if (openRef.current) onPaneMapOpenChangeRef.current?.(false);
   }, []);
   // Id of the tile mid-selection (drives the .is-picking flash) until the switch commits.
-  const [picking, setPicking] = useState(null);
-  const pickTimer = useRef(null);
-  useEffect(() => () => clearTimeout(pickTimer.current), []);
+  const [picking, setPicking] = useState<string | null>(null);
+  const pickTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => { if (pickTimer.current !== null) clearTimeout(pickTimer.current); }, []);
   // Tap a tile: give a nudge of haptic (Android; iOS Safari has no web haptic → silently ignored),
   // flash the tile selected, then commit the switch. Under reduced-motion, skip the flash and switch now.
-  const choose = (id) => {
+  const choose = (id: string): void => {
     try { navigator.vibrate?.(10); } catch { /* unsupported */ }
     // If the pane-manage sheet is already open, tapping another tile re-points that sheet at the tapped
     // pane too — its title and its split/close target follow your selection, not just the viewed pane.
@@ -110,7 +197,7 @@ function PaneTab({ window: win, panes, paneAgents = {}, currentPaneId, agent, on
       && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     if (reduce) { onSelectPane(id); return; } // map stays open — outside tap closes it
     setPicking(id);
-    clearTimeout(pickTimer.current);
+    if (pickTimer.current !== null) clearTimeout(pickTimer.current);
     pickTimer.current = setTimeout(() => {
       setPicking(null);
       onSelectPane(id); // no setOpen(false): dwell in the map to split/close next
@@ -120,9 +207,9 @@ function PaneTab({ window: win, panes, paneAgents = {}, currentPaneId, agent, on
   // horizontally-scrolling .windowbar-scroll, whose overflow would otherwise CLIP a normal dropdown.
   // The geometry-backed map is also portalled to <body>, because iOS WebKit can still clip a fixed
   // descendant of an overflow scroller. Recompute its viewport coordinates on scroll/resize.
-  const [pos, setPos] = useState(null);
-  const rootRef = useRef(null);
-  const popupRef = useRef(null);
+  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const popupRef = useRef<HTMLDivElement | null>(null);
   // The pixel-accurate mosaic (null → no geometry → flat-list fallback). Its own size can grow a little
   // past the base box when a tiny pane is padded to a minimum, so the viewport clamp below uses the
   // real dims, not the base constants.
@@ -132,7 +219,7 @@ function PaneTab({ window: win, panes, paneAgents = {}, currentPaneId, agent, on
   // Anchor under the tab, then CLAMP inside the viewport so a tab near the right/bottom edge can't
   // push the fixed-position popover off-screen: pin its right edge in when it would overflow right,
   // and flip it above the tab when it would overflow the bottom. MARGIN keeps it off the very edge.
-  const place = () => {
+  const place = (): void => {
     const r = rootRef.current?.getBoundingClientRect();
     if (!r) return;
     const MARGIN = 8;
@@ -153,7 +240,7 @@ function PaneTab({ window: win, panes, paneAgents = {}, currentPaneId, agent, on
     // `place` intentionally reads the current render's map dimensions and anchor ref.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, mapW, mapH]);
-  const lp = useLongPress(() => onManage(win), {
+  const lp = useLongPress<HTMLButtonElement>(() => onManage(win), {
     onClick: () => {
       if (open) { setOpen(false); return; }
       const show = () => { place(); setOpen(true); };
@@ -185,11 +272,12 @@ function PaneTab({ window: win, panes, paneAgents = {}, currentPaneId, agent, on
   // its own dismissal, and normal outside-close resumes once it closes.
   useEffect(() => {
     if (!open) return undefined;
-    const onDocDown = (e) => {
+    const onDocDown = (event: PointerEvent): void => {
       if (paneSheetOpen) return;
-      if (!rootRef.current?.contains(e.target) && !popupRef.current?.contains(e.target)) setOpen(false);
+      if (!(event.target instanceof Node)
+        || (!rootRef.current?.contains(event.target) && !popupRef.current?.contains(event.target))) setOpen(false);
     };
-    const reflow = () => place();
+    const reflow = (): void => place();
     document.addEventListener('pointerdown', onDocDown, true);
     window.addEventListener('scroll', reflow, true);
     window.addEventListener('resize', reflow);
@@ -220,7 +308,7 @@ function PaneTab({ window: win, panes, paneAgents = {}, currentPaneId, agent, on
         <span className={`wt-caret${open ? ' open' : ''}`} aria-hidden="true">▾</span>
       </button>
       {open && pos && (
-        hasGeometry(panes) ? (
+        layout ? (
           <OverlayPortal>
             <div ref={popupRef} className="pane-map" role="listbox" style={{ top: pos.top, left: pos.left, width: mapW, height: mapH }}>
               {layout.cells.map((c) => {
@@ -270,8 +358,8 @@ export default function WindowBar({
   windows, windowAgents = {}, paneAgents = {}, currentAgent, currentWindowId, panes, currentPaneId, onSelectWindow, onSelectPane, onNewWindow, onManageWindow,
   onManagePane, onBeforePaneMapOpen, paneSheetOpen = false, openMapFor = null, onMapOpened, onPaneMapOpenChange, trackWindowId,
   lens = 'terminal', onLensChange = () => {}, chatLensEnabled = false,
-}) {
-  const scrollRef = useRef(null);
+}: WindowBarProps) {
+  const scrollRef = useRef<HTMLDivElement | null>(null);
   // While a window is being managed (its long-press menu open), keep its tab in view as the order
   // shifts underneath — a reorder can push it out of the scroll strip, and then you can't see it
   // move. No-op when nothing is tracked, so normal manual scrolling isn't hijacked.

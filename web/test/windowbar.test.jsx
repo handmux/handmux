@@ -272,6 +272,16 @@ describe('WindowBar', () => {
     expect(cells[1].querySelector('.pmc-dims').textContent).toBe('40×24');
   });
 
+  it('falls back to the flat pane list when finite geometry has no drawable area', () => {
+    render({
+      ...base,
+      panes: panes.map((pane) => ({ ...pane, left: 0, top: 0, width: 0, height: 0 })),
+    });
+    openPaneMenu();
+    expect(paneMap()).toBeNull();
+    expect(container.querySelectorAll('.wt-menu [role="option"]')).toHaveLength(2);
+  });
+
   it('opens from cached panes immediately and refreshes in the background without reopening', async () => {
     let finishRefresh;
     const onBeforePaneMapOpen = vi.fn(() => new Promise((resolve) => { finishRefresh = resolve; }));

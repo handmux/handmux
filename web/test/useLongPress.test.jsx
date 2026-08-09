@@ -73,4 +73,14 @@ describe('useLongPress', () => {
     act(() => vi.advanceTimersByTime(500));
     expect(onLong).not.toHaveBeenCalled();
   });
+
+  it('clears a pending hold timer when the owner unmounts', () => {
+    vi.useFakeTimers();
+    const onLong = vi.fn();
+    render({ onLong, onClick: vi.fn() });
+    fire('pointerdown', { clientX: 0, clientY: 0 });
+    act(() => root.render(null));
+    act(() => vi.advanceTimersByTime(500));
+    expect(onLong).not.toHaveBeenCalled();
+  });
 });
