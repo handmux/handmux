@@ -1,4 +1,4 @@
-// 繁體中文 strings. Missing keys fall back to English (see ./index.js translate()).
+// 繁體中文 strings. Missing keys fall back to English (see ./index.ts translate()).
 export default {
   'terminal.transport_live': '即時',
   'terminal.transport_snapshot': '快照',
@@ -610,4 +610,4 @@ export default {
   'chat.plan.status.pending': '待處理',
   'chat.plan.status.inProgress': '進行中',
   'chat.plan.status.completed': '已完成',
-};
+} as Record<string, string>;

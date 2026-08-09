@@ -298,7 +298,6 @@ export default {
   'cmd.pickKey': 'Pick a key',
   'cmd.moveUp': 'Move up',
   'cmd.moveDown': 'Move down',
-  'cmd.empty': 'None yet',
   'chat.editTitle': 'Saved messages',
   'chat.composer.placeholder': 'Message the agent…',
   'chat.stop': 'Stop',
@@ -846,4 +845,4 @@ export default {
   'workspace.warning.live-reconcile-failed': 'live workspace reconciliation failed; check the handmux log',
   'workspace.warning.workspace-unavailable': 'workspace storage is temporarily unavailable; check disk space and permissions',
   'workspace.warning.restore-warning': 'the restore completed with a warning that may need attention',
-};
+} as Record<string, string>;

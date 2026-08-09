@@ -40,9 +40,9 @@ function ago(ts: number): string {
   const d = Math.max(0, Date.now() - ts);
   const m = Math.floor(d / 60000);
   if (m < 1) return t('pushInbox.justNow');
-  if (m < 60) return t('pushInbox.minutesAgo').replace('{n}', m);
+  if (m < 60) return t('pushInbox.minutesAgo').replace('{n}', String(m));
   const h = Math.floor(m / 60);
-  if (h < 24) return t('pushInbox.hoursAgo').replace('{n}', h);
+  if (h < 24) return t('pushInbox.hoursAgo').replace('{n}', String(h));
   return new Date(ts).toLocaleDateString();
 }
 
@@ -95,7 +95,9 @@ export default function InboxPage({ open, detailId, items, readIds = [], onOpenD
         ) : (
           <span className="push-inbox-head-title push-inbox-list-title">
             {t('pushInbox.title')}
-            {unreadCount > 0 && <span className="push-inbox-unread-count">{t('pushInbox.unreadCount').replace('{n}', unreadCount)}</span>}
+            {unreadCount > 0 && <span className="push-inbox-unread-count">
+              {t('pushInbox.unreadCount').replace('{n}', String(unreadCount))}
+            </span>}
           </span>
         )}
         {!inDetail && hasUnread && (

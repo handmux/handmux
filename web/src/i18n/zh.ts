@@ -1,4 +1,4 @@
-// 中文 strings. Missing keys fall back to English (see ./index.js translate()).
+// 中文 strings. Missing keys fall back to English (see ./index.ts translate()).
 export default {
   'terminal.disconnected': '连接断开，重连中…',
   'terminal.paneMissing': '窗格已关闭，请切换到其他窗格。',
@@ -297,7 +297,6 @@ export default {
   'cmd.pickKey': '选择按键',
   'cmd.moveUp': '上移',
   'cmd.moveDown': '下移',
-  'cmd.empty': '还没有',
   'chat.editTitle': '常用消息',
   'chat.composer.placeholder': '和 Agent 对话…',
   'chat.stop': '停止',
@@ -845,4 +844,4 @@ export default {
   'workspace.warning.live-reconcile-failed': '实时工作区状态核对失败；请检查 handmux 日志',
   'workspace.warning.workspace-unavailable': '工作区存储暂时不可用；请检查磁盘空间和权限',
   'workspace.warning.restore-warning': '恢复时出现了可继续处理的提醒；请检查恢复结果',
-};
+} as Record<string, string>;

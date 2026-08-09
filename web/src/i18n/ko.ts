@@ -1,4 +1,4 @@
-// 한국어 strings. Missing keys fall back to English (see ./index.js translate()).
+// 한국어 strings. Missing keys fall back to English (see ./index.ts translate()).
 export default {
   'terminal.transport_live': '실시간',
   'terminal.transport_snapshot': '스냅샷',
@@ -569,4 +569,4 @@ export default {
   'chat.plan.status.pending': '대기',
   'chat.plan.status.inProgress': '진행 중',
   'chat.plan.status.completed': '완료',
-};
+} as Record<string, string>;
