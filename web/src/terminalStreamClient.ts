@@ -1,4 +1,10 @@
 import { getToken } from './storage.js';
+import {
+  parseTerminalStreamMessage,
+  type TerminalReadyMessage,
+  type TerminalSeedMessage,
+  type TerminalStreamMessage,
+} from './terminalStreamProtocol.js';
 
 const RECONNECT_MS = 1000;
 const CONNECT_TIMEOUT_MS = 3000;
@@ -7,6 +13,55 @@ const MAX_FRAME_LAG_MS = 300;
 const MAX_PENDING_DATA_BYTES = 256 * 1024;
 const PROBE_INTERVAL_MS = 10000;
 const PROBE_TIMEOUT_MS = 5000;
+
+export type TerminalStreamStatus = 'connecting' | 'live' | 'paused' | 'reconnecting' | 'error';
+export type TerminalProbeResult = { ok: true; rttMs: number } | { ok: false };
+
+type AsyncCallback<Result = void> = Result | Promise<Result>;
+type TerminalClientMessage =
+  | { type: 'subscribe'; token: string; pane: string }
+  | { type: 'resync' }
+  | { type: 'pause' }
+  | { type: 'probe'; id: number };
+
+interface PendingProbe {
+  id: number;
+  sentAt: number;
+}
+
+interface DataBatch {
+  epoch: number;
+  queuedAt: number;
+  chunks: ArrayBuffer[];
+  byteLength: number;
+}
+
+export interface TerminalStreamOptions {
+  pane: string;
+  onSeed?: (message: TerminalSeedMessage) => AsyncCallback;
+  onData?: (data: Uint8Array) => AsyncCallback;
+  onReady?: (message: TerminalReadyMessage) => AsyncCallback;
+  onStatus?: (status: TerminalStreamStatus) => void;
+  onProbe?: (result: TerminalProbeResult) => void;
+  onAuthFail?: () => void;
+  WebSocketCtor?: typeof WebSocket;
+  token?: string;
+  reconnectMs?: number;
+  connectTimeoutMs?: number;
+  readyTimeoutMs?: number;
+  maxFrameLagMs?: number;
+  maxPendingDataBytes?: number;
+  probeIntervalMs?: number;
+  probeTimeoutMs?: number;
+  now?: () => number;
+}
+
+export interface TerminalStreamController {
+  pause(): void;
+  suspend(): Promise<void>;
+  resync(): void;
+  close(): Promise<void>;
+}
 
 export function openTerminalStream({
   pane,
@@ -26,27 +81,27 @@ export function openTerminalStream({
   probeIntervalMs = PROBE_INTERVAL_MS,
   probeTimeoutMs = PROBE_TIMEOUT_MS,
   now = () => Date.now(),
-}) {
-  let socket = null;
-  let subscribedSocket = null;
-  let reconnectTimer = null;
+}: TerminalStreamOptions): TerminalStreamController {
+  let socket: WebSocket | null = null;
+  let subscribedSocket: WebSocket | null = null;
+  let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   let closed = false;
   let paused = false;
-  let writes = Promise.resolve();
-  let connectTimer = null;
+  let writes: Promise<void> = Promise.resolve();
+  let connectTimer: ReturnType<typeof setTimeout> | null = null;
   let messageEpoch = 0;
-  let probeTimer = null;
-  let probeTimeout = null;
+  let probeTimer: ReturnType<typeof setInterval> | null = null;
+  let probeTimeout: ReturnType<typeof setTimeout> | null = null;
   let probeId = 0;
-  let pendingProbe = null;
+  let pendingProbe: PendingProbe | null = null;
   let pendingDataBytes = 0;
   let awaitingSeed = true;
   let streamReady = false;
-  let queuedDataBatch = null;
+  let queuedDataBatch: DataBatch | null = null;
   let hasBeenLive = false;
   let startupFailures = 0;
 
-  const clearProbe = () => {
+  const clearProbe = (): void => {
     if (probeTimer) clearInterval(probeTimer);
     if (probeTimeout) clearTimeout(probeTimeout);
     probeTimer = null;
@@ -54,23 +109,23 @@ export function openTerminalStream({
     pendingProbe = null;
   };
 
-  const clearConnectTimer = () => {
+  const clearConnectTimer = (): void => {
     if (connectTimer) {
       clearTimeout(connectTimer);
       connectTimer = null;
     }
   };
-  const armConnectTimer = (target, timeoutMs) => {
+  const armConnectTimer = (target: WebSocket, timeoutMs: number): void => {
     clearConnectTimer();
     connectTimer = setTimeout(() => {
       if (socket === target && target.readyState !== 3) target.close(4000, 'stream timeout');
     }, timeoutMs);
   };
 
-  const send = (message) => {
+  const send = (message: TerminalClientMessage): void => {
     if (socket?.readyState === WebSocketCtor.OPEN) socket.send(JSON.stringify(message));
   };
-  const probe = () => {
+  const probe = (): void => {
     if (closed || paused || !subscribedSocket || pendingProbe) return;
     const id = ++probeId;
     pendingProbe = { id, sentAt: now() };
@@ -82,20 +137,20 @@ export function openTerminalStream({
       onProbe?.({ ok: false });
     }, probeTimeoutMs);
   };
-  const startProbes = () => {
+  const startProbes = (): void => {
     clearProbe();
     probe();
     probeTimer = setInterval(probe, probeIntervalMs);
   };
 
-  const clearReconnectTimer = () => {
+  const clearReconnectTimer = (): void => {
     if (reconnectTimer) {
       clearTimeout(reconnectTimer);
       reconnectTimer = null;
     }
   };
 
-  const detachSocket = () => {
+  const detachSocket = (): void => {
     const target = socket;
     socket = null;
     if (subscribedSocket === target) subscribedSocket = null;
@@ -108,7 +163,9 @@ export function openTerminalStream({
     try { target?.close(); } catch { /* already closed */ }
   };
 
-  const requestFreshSeed = () => {
+  let connect: () => void;
+
+  const requestFreshSeed = (): void => {
     if (closed || paused || awaitingSeed) return;
     messageEpoch += 1;
     pendingDataBytes = 0;
@@ -127,7 +184,7 @@ export function openTerminalStream({
     } else connect();
   };
 
-  const connect = () => {
+  connect = (): void => {
     if (closed || paused) return;
     if (socket && (socket.readyState === 0 || socket.readyState === WebSocketCtor.OPEN)) return;
     clearReconnectTimer();
@@ -150,11 +207,19 @@ export function openTerminalStream({
       armConnectTimer(nextSocket, readyTimeoutMs);
       send({ type: 'subscribe', token, pane });
     };
-    nextSocket.onmessage = (event) => {
+    nextSocket.onmessage = (event: MessageEvent) => {
       if (socket !== nextSocket) return;
-      let message = null;
-      if (typeof event.data === 'string') {
-        try { message = JSON.parse(event.data); } catch {
+      const incoming: unknown = event.data;
+      let message: TerminalStreamMessage | null = null;
+      let binaryData: ArrayBuffer | null = null;
+      if (typeof incoming === 'string') {
+        let decoded: unknown;
+        try { decoded = JSON.parse(incoming); } catch {
+          nextSocket.close(1003, 'bad stream frame');
+          return;
+        }
+        message = parseTerminalStreamMessage(decoded);
+        if (!message) {
           nextSocket.close(1003, 'bad stream frame');
           return;
         }
@@ -177,26 +242,31 @@ export function openTerminalStream({
           streamReady = false;
         }
       } else {
+        if (!(incoming instanceof ArrayBuffer)) {
+          nextSocket.close(1003, 'bad stream frame');
+          return;
+        }
         if (awaitingSeed) return;
-        pendingDataBytes += event.data.byteLength;
+        binaryData = incoming;
+        pendingDataBytes += binaryData.byteLength;
         if (pendingDataBytes > maxPendingDataBytes) {
           requestFreshSeed();
           return;
         }
         if (queuedDataBatch?.epoch === messageEpoch) {
-          queuedDataBatch.chunks.push(event.data);
-          queuedDataBatch.byteLength += event.data.byteLength;
+          queuedDataBatch.chunks.push(binaryData);
+          queuedDataBatch.byteLength += binaryData.byteLength;
           return;
         }
       }
       const frameEpoch = messageEpoch;
       const queuedAt = Date.now();
-      const dataBatch = typeof event.data === 'string' ? null : {
+      const dataBatch: DataBatch | null = binaryData ? {
         epoch: frameEpoch,
         queuedAt,
-        chunks: [event.data],
-        byteLength: event.data.byteLength,
-      };
+        chunks: [binaryData],
+        byteLength: binaryData.byteLength,
+      } : null;
       if (dataBatch) queuedDataBatch = dataBatch;
       writes = writes.then(async () => {
         if (dataBatch && queuedDataBatch === dataBatch) queuedDataBatch = null;
@@ -221,6 +291,7 @@ export function openTerminalStream({
           await onData?.(joined);
           return;
         }
+        if (!message) return;
         if (message.type === 'seed') await onSeed?.(message);
         else if (message.type === 'ready') {
           await onReady?.(message);

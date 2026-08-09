@@ -26,11 +26,29 @@ class FakeWebSocket {
     this.sent.push(JSON.parse(data));
   }
 
-  close(code = 1000) {
+  close(code = 1000, reason = '') {
     this.readyState = 3;
+    this.closeReason = reason;
     this.onclose?.({ code });
   }
 }
+
+const seedFrame = (overrides = {}) => JSON.stringify({
+  type: 'seed',
+  ansi: '',
+  width: 80,
+  height: 24,
+  historyLines: 0,
+  alt: false,
+  mouseAware: false,
+  mouseSgr: false,
+  ...overrides,
+});
+const readyFrame = (overrides = {}) => JSON.stringify({
+  type: 'ready',
+  cur: { row: 0, col: 0, vis: true },
+  ...overrides,
+});
 
 describe('terminalStreamEnabled', () => {
   it('is enabled by default and supports an emergency query override', () => {
@@ -61,14 +79,29 @@ describe('openTerminalStream', () => {
     const ws = FakeWebSocket.instances[0];
     ws.open();
     expect(ws.sent).toEqual([{ type: 'subscribe', token: 'secret', pane: '%7' }]);
-    ws.message(JSON.stringify({ type: 'seed' }));
+    ws.message(seedFrame());
     ws.message(new Uint8Array([1, 2]).buffer);
-    ws.message(JSON.stringify({ type: 'ready' }));
+    ws.message(readyFrame());
     await vi.waitFor(() => expect(events).toEqual(['seed', 'data', 'ready']));
 
     stream.resync();
     expect(ws.sent.at(-1)).toEqual({ type: 'resync' });
     stream.close();
+  });
+
+  it('closes the socket when a protocol frame is structurally incomplete', async () => {
+    const stream = openTerminalStream({
+      pane: '%7',
+      token: 'secret',
+      WebSocketCtor: FakeWebSocket,
+    });
+    const ws = FakeWebSocket.instances[0];
+    ws.open();
+    ws.message(JSON.stringify({ type: 'seed' }));
+
+    expect(ws.readyState).toBe(3);
+    expect(ws.closeReason).toBe('bad stream frame');
+    await stream.close();
   });
 
   it('measures application RTT on the live socket', async () => {
@@ -84,8 +117,8 @@ describe('openTerminalStream', () => {
     });
     const ws = FakeWebSocket.instances[0];
     ws.open();
-    ws.message(JSON.stringify({ type: 'seed' }));
-    const ready = JSON.stringify({ type: 'ready' });
+    ws.message(seedFrame());
+    const ready = readyFrame();
     ws.message(ready);
     for (let i = 0; i < 6; i += 1) await Promise.resolve();
     expect(ws.sent.at(-1)).toEqual({ type: 'probe', id: 1 });
@@ -110,8 +143,8 @@ describe('openTerminalStream', () => {
     });
     const ws = FakeWebSocket.instances[0];
     ws.open();
-    ws.message(JSON.stringify({ type: 'seed' }));
-    ws.message(JSON.stringify({ type: 'ready' }));
+    ws.message(seedFrame());
+    ws.message(readyFrame());
     for (let i = 0; i < 6; i += 1) await Promise.resolve();
     vi.advanceTimersByTime(20);
     expect(onProbe).toHaveBeenCalledWith({ ok: false });
@@ -181,9 +214,9 @@ describe('openTerminalStream', () => {
     for (let cycle = 0; cycle < 100; cycle += 1) {
       stream.pause();
       stream.resync();
-      ws.message(JSON.stringify({ type: 'seed' }));
+      ws.message(seedFrame());
       ws.message(new Uint8Array([cycle]).buffer);
-      ws.message(JSON.stringify({ type: 'ready' }));
+      ws.message(readyFrame());
       // Drain the serialized parser callbacks before the next lifecycle boundary.
       // eslint-disable-next-line no-await-in-loop
       for (let tick = 0; tick < 20; tick += 1) await Promise.resolve();
@@ -258,7 +291,7 @@ describe('openTerminalStream', () => {
     });
     const ws = FakeWebSocket.instances[0];
     ws.open();
-    ws.message(JSON.stringify({ type: 'seed' }));
+    ws.message(seedFrame());
     ws.message(new Uint8Array([1]).buffer);
     await vi.waitFor(() => expect(events).toEqual(['seed']));
 
@@ -288,8 +321,8 @@ describe('openTerminalStream', () => {
     });
     const first = FakeWebSocket.instances[0];
     first.open();
-    first.message(JSON.stringify({ type: 'seed' }));
-    first.message(JSON.stringify({ type: 'ready' }));
+    first.message(seedFrame());
+    first.message(readyFrame());
     for (let i = 0; i < 6; i += 1) await Promise.resolve();
 
     first.message(new Uint8Array([1]).buffer);
@@ -307,13 +340,13 @@ describe('openTerminalStream', () => {
     expect(first.sent.at(-1)).toEqual({ type: 'resync' });
 
     first.message(new Uint8Array([9]).buffer);
-    first.message(JSON.stringify({ type: 'ready' }));
+    first.message(readyFrame());
     await Promise.resolve();
     expect(onData).toHaveBeenCalledTimes(1);
 
-    first.message(JSON.stringify({ type: 'seed' }));
+    first.message(seedFrame());
     first.message(new Uint8Array([3]).buffer);
-    first.message(JSON.stringify({ type: 'ready' }));
+    first.message(readyFrame());
     for (let i = 0; i < 8; i += 1) await Promise.resolve();
     expect(onData).toHaveBeenCalledTimes(2);
     expect([...onData.mock.calls[1][0]]).toEqual([3]);
@@ -337,8 +370,8 @@ describe('openTerminalStream', () => {
     });
     const ws = FakeWebSocket.instances[0];
     ws.open();
-    ws.message(JSON.stringify({ type: 'seed' }));
-    ws.message(JSON.stringify({ type: 'ready' }));
+    ws.message(seedFrame());
+    ws.message(readyFrame());
     for (let i = 0; i < 6; i += 1) await Promise.resolve();
 
     ws.message(new Uint8Array([1]).buffer);
@@ -369,11 +402,11 @@ describe('openTerminalStream', () => {
     });
     const ws = FakeWebSocket.instances[0];
     ws.open();
-    ws.message(JSON.stringify({ type: 'seed' }));
+    ws.message(seedFrame());
     await Promise.resolve();
     ws.message(new Uint8Array([1]).buffer);
     ws.message(new Uint8Array([2]).buffer);
-    ws.message(JSON.stringify({ type: 'ready' }));
+    ws.message(readyFrame());
     ws.message(new Uint8Array([3]).buffer);
 
     seed.resolve();
@@ -395,7 +428,7 @@ describe('openTerminalStream', () => {
     });
     const ws = FakeWebSocket.instances[0];
     ws.open();
-    ws.message(JSON.stringify({ type: 'seed' }));
+    ws.message(seedFrame());
     ws.message(new Uint8Array([1, 2]).buffer);
     ws.message(new Uint8Array([3, 4]).buffer);
 
@@ -427,13 +460,13 @@ describe('openTerminalStream', () => {
     });
     const ws = FakeWebSocket.instances[0];
     ws.open();
-    ws.message(JSON.stringify({ type: 'seed' }));
+    ws.message(seedFrame());
     await vi.waitFor(() => expect(seedCount).toBe(1));
     ws.message(new Uint8Array([1, 2]).buffer);
     ws.message(new Uint8Array([3, 4]).buffer);
     expect(ws.sent.filter(({ type }) => type === 'resync')).toHaveLength(1);
 
-    ws.message(JSON.stringify({ type: 'seed' }));
+    ws.message(seedFrame());
     ws.message(new Uint8Array([5, 6]).buffer);
     firstSeed.resolve();
     await vi.waitFor(() => expect(seedCount).toBe(2));
@@ -460,8 +493,8 @@ describe('openTerminalStream', () => {
     });
     const ws = FakeWebSocket.instances[0];
     ws.open();
-    ws.message(JSON.stringify({ type: 'seed' }));
-    ws.message(JSON.stringify({ type: 'ready' }));
+    ws.message(seedFrame());
+    ws.message(readyFrame());
 
     vi.advanceTimersByTime(301);
     seed.resolve();
@@ -491,12 +524,12 @@ describe('openTerminalStream', () => {
     });
     const ws = FakeWebSocket.instances[0];
     ws.open();
-    ws.message(JSON.stringify({ type: 'seed' }));
+    ws.message(seedFrame());
     await Promise.resolve();
     expect(onSeed).toHaveBeenCalledOnce();
 
     ws.message(new Uint8Array([1, 2, 3]).buffer);
-    ws.message(JSON.stringify({ type: 'ready' }));
+    ws.message(readyFrame());
     vi.advanceTimersByTime(301);
     seed.resolve();
     for (let i = 0; i < 12; i += 1) await Promise.resolve();
@@ -566,8 +599,8 @@ describe('openTerminalStream', () => {
     vi.advanceTimersByTime(10);
     const retry = FakeWebSocket.instances[1];
     retry.open();
-    retry.message(JSON.stringify({ type: 'seed' }));
-    retry.message(JSON.stringify({ type: 'ready' }));
+    retry.message(seedFrame());
+    retry.message(readyFrame());
     for (let i = 0; i < 6; i += 1) await Promise.resolve();
     expect(statuses).toContain('live');
     expect(statuses).not.toContain('reconnecting');
@@ -609,8 +642,8 @@ describe('openTerminalStream', () => {
     });
     const ws = FakeWebSocket.instances[0];
     ws.open();
-    ws.message(JSON.stringify({ type: 'seed' }));
-    ws.message(JSON.stringify({ type: 'ready' }));
+    ws.message(seedFrame());
+    ws.message(readyFrame());
     for (let i = 0; i < 6; i += 1) await Promise.resolve();
 
     ws.close(1006);
