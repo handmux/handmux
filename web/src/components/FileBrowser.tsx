@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import type { ComponentType, KeyboardEvent as ReactKeyboardEvent } from 'react';
+import type { KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { fetchDir, downloadFile, uploadFile, createDir, UploadAbort } from '../api.js';
 import { startUpload, updateUpload, finishUpload } from '../uploadJob.js';
 import { UPLOAD_ACCEPT, splitUploadable } from '../uploadTypes.js';
@@ -42,16 +42,6 @@ interface LoadOptions {
   notify?: boolean;
   fallbackHome?: boolean;
 }
-
-interface FileActionSheetProps {
-  open: boolean;
-  title: string;
-  actions: { key: string; label: string; onClick: () => void }[];
-  onClose: () => void;
-}
-
-// ActionSheet remains JSX in this migration stage; isolate its inferred `never[]` default here.
-const FileActionSheet = ActionSheet as unknown as ComponentType<FileActionSheetProps>;
 
 export interface FileBrowserProps {
   path?: string | null;
@@ -557,7 +547,7 @@ export default function FileBrowser({
           </button>
         </div>
       )}
-      <FileActionSheet
+      <ActionSheet
         open={!!confirmName}
         title={confirmName ? t('filebrowser.downloadConfirm', { name: confirmName }) : ''}
         actions={[{ key: 'dl', label: t('filebrowser.download'), onClick: confirmDownload }]}
