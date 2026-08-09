@@ -1,27 +1,41 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { act, useState } from 'react';
 import { createRoot } from 'react-dom/client';
+import type { Root } from 'react-dom/client';
 import KeyBar from '../src/components/KeyBar.jsx';
+import type { KeyBarProps } from '../src/components/KeyBar.jsx';
+import type { CommandKeyId, ModifierStateMap } from '../src/keybarKeys.js';
 
-let container, root;
+let container: HTMLDivElement;
+let root: Root;
 beforeEach(() => { container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container); });
 afterEach(() => { act(() => root.unmount()); container.remove(); vi.useRealTimers(); });
 
 // mods are controlled (lifted to BottomDock). Wrap KeyBar in a tiny stateful harness so the modifier
 // arm/lock transitions actually take effect between fires.
-function Harness(props) {
-  const [mods, setMods] = useState({ ctrl: 'off', shift: 'off', alt: 'off' });
+type HarnessProps = Pick<KeyBarProps, 'onKey' | 'onText' | 'keyHeldRef'>;
+
+function Harness(props: HarnessProps) {
+  const [mods, setMods] = useState<ModifierStateMap>({ ctrl: 'off', shift: 'off', alt: 'off' });
   return <KeyBar mods={mods} setMods={setMods} {...props} />;
 }
-const render = (props) => act(() => root.render(
+const render = (props: Partial<HarnessProps> = {}) => act(() => root.render(
   <Harness onKey={vi.fn()} onText={vi.fn()} {...props} />));
-const btn = (id) => container.querySelector(`[data-key="${id}"]`);
-const fire = (node, type, EventCtor = MouseEvent) => act(() => node.dispatchEvent(new EventCtor(type, { bubbles: true })));
+function btn(id: CommandKeyId): HTMLButtonElement;
+function btn(id: string): HTMLButtonElement | null;
+function btn(id: string): HTMLButtonElement | null {
+  return container.querySelector<HTMLButtonElement>(`[data-key="${id}"]`);
+}
+const fire = (
+  node: EventTarget,
+  type: string,
+  EventCtor: typeof MouseEvent = MouseEvent,
+) => act(() => node.dispatchEvent(new EventCtor(type, { bubbles: true })));
 // A click with an explicit timeStamp — the modifier double-tap-to-lock detection reads e.timeStamp, so
 // tests must control it (MouseEvent's constructor ignores a timeStamp option).
-const clickAt = (node, ts) => act(() => {
+const clickAt = (node: EventTarget, timestamp: number) => act(() => {
   const e = new MouseEvent('click', { bubbles: true });
-  Object.defineProperty(e, 'timeStamp', { value: ts });
+  Object.defineProperty(e, 'timeStamp', { value: timestamp });
   node.dispatchEvent(e);
 });
 
@@ -33,7 +47,8 @@ describe('KeyBar command grid', () => {
       expect(btn(id)).not.toBeNull();
     }
     expect(btn('tilde')).toBeNull();
-    const ids = [...container.querySelectorAll('.keybar-key')].map((node) => node.dataset.key);
+    const ids = [...container.querySelectorAll<HTMLElement>('.keybar-key')]
+      .map((node) => node.dataset.key);
     expect(ids.slice(0, 3)).toEqual(['esc', 'tab', 'alt']);
     expect(ids.slice(7, 10)).toEqual(['ctrl', 'shift', 'space']);
     expect(btn('space').textContent).toBe('␣');

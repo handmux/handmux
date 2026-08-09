@@ -1,12 +1,25 @@
 import { useRef } from 'react';
+import type {
+  Dispatch,
+  MutableRefObject,
+  PointerEvent as ReactPointerEvent,
+  SetStateAction,
+} from 'react';
 import {
   COMMAND_ROWS, MODIFIERS, KEY_LABELS, REPEAT_KEYS, keyAction,
   MOD_OFF, MOD_ARMED, MOD_LOCKED, modActive, consumeMods, withMods,
 } from '../keybarKeys.js';
+import type {
+  CommandKeyId,
+  ModifierId,
+  ModifierState,
+  ModifierStateMap,
+} from '../keybarKeys.js';
 import { createRepeater } from '../repeat.js';
+import type { Repeater } from '../repeat.js';
 
 // Friendly screen-reader names for the symbol / arrow keys (their visible label is just a glyph like ▲ /).
-const KEY_ARIA = {
+const KEY_ARIA: Partial<Record<CommandKeyId, string>> = {
   up: 'Up', down: 'Down', left: 'Left', right: 'Right',
   space: 'Space', slash: 'Slash', at: 'At', del: 'Backspace',
 };
@@ -14,7 +27,9 @@ const KEY_ARIA = {
 // In command mode the hidden capture <input> holds the system keyboard open. A <button> tap would move
 // focus to itself → the capture blurs → the keyboard collapses (so you couldn't tap Ctrl then a letter
 // on the system keyboard). preventDefault on pointer-down keeps focus on the capture; onClick still fires.
-const keepFocus = (e) => { if (e.cancelable) e.preventDefault(); };
+const keepFocus = (event: ReactPointerEvent<HTMLButtonElement>): void => {
+  if (event.cancelable) event.preventDefault();
+};
 
 // How long a repeat key (arrow / ⌫) must be held STILL before it commits to auto-repeat. Long enough
 // that brushing an arrow mid-swipe and pausing briefly doesn't fire it (which recalled shell history) —
@@ -26,21 +41,36 @@ const HOLD_MS = 500;
 // The ⌨ keyboard-toggle and the user's saved commands live in the quick-bar ABOVE this grid (BottomDock).
 // Named keys go out via onKey (→ /keys), literals via onText (→ /send). `mods` is controlled (lifted to
 // BottomDock so the hidden capture input can share it).
-export default function KeyBar({ onKey, onText, mods, setMods, keyHeldRef }) {
+type SetModifiers = Dispatch<SetStateAction<ModifierStateMap>>;
+
+export interface KeyBarProps {
+  onKey: (key: string) => void;
+  onText: (text: string) => void;
+  mods: ModifierStateMap;
+  setMods: SetModifiers;
+  keyHeldRef?: MutableRefObject<boolean>;
+}
+
+function isModifier(id: CommandKeyId): id is ModifierId {
+  return MODIFIERS.some((modifier) => modifier === id);
+}
+
+export default function KeyBar({ onKey, onText, mods, setMods, keyHeldRef }: KeyBarProps) {
   const modsRef = useRef(mods);
   modsRef.current = mods;
 
-  const dispatch = (id) => {
+  const dispatch = (id: CommandKeyId): void => {
     const a = keyAction(id);
     if (!a) return;
     const active = MODIFIERS.some((m) => modActive(modsRef.current[m]));
     const act = active ? withMods(a, modsRef.current) : a;
+    if (!act) return;
     if (act.kind === 'key') onKey(act.name); else onText(act.ch);
     if (active) setMods(consumeMods);
   };
 
-  const cell = (id) => {
-    if (MODIFIERS.includes(id)) return <ModKey key={id} id={id} state={mods[id]} setMods={setMods} />;
+  const cell = (id: CommandKeyId) => {
+    if (isModifier(id)) return <ModKey key={id} id={id} state={mods[id]} setMods={setMods} />;
     return <Key key={id} id={id} dispatch={dispatch} keyHeldRef={keyHeldRef} />;
   };
 
@@ -58,10 +88,16 @@ export default function KeyBar({ onKey, onText, mods, setMods, keyHeldRef }) {
 // the second tap landed on), which latched the second key by accident. A per-key timestamp only counts two
 // taps on the SAME key as a lock — tapping key A then key B fast just arms each once.
 const DBL_MS = 300;
-function ModKey({ id, state, setMods }) {
+interface ModKeyProps {
+  id: ModifierId;
+  state: ModifierState;
+  setMods: SetModifiers;
+}
+
+function ModKey({ id, state, setMods }: ModKeyProps) {
   const lastTapRef = useRef(-Infinity);                            // -Infinity so the very first tap is never a "double"
-  const onTap = (e) => {
-    const now = e.timeStamp || 0;
+  const onTap = (event: ReactPointerEvent<HTMLButtonElement>): void => {
+    const now = event.timeStamp || 0;
     if (now - lastTapRef.current < DBL_MS) {
       lastTapRef.current = -Infinity;                              // consume — a 3rd fast tap isn't a lock
       setMods((m) => ({ ...m, [id]: MOD_LOCKED }));
@@ -78,14 +114,28 @@ function ModKey({ id, state, setMods }) {
   );
 }
 
-function Key({ id, dispatch, keyHeldRef }) {
-  const repRef = useRef(null);
+interface KeyGesture {
+  x: number;
+  y: number;
+  held: boolean;
+  moved: boolean;
+  guard: ReturnType<typeof setTimeout> | null;
+}
+
+interface KeyProps {
+  id: CommandKeyId;
+  dispatch: (id: CommandKeyId) => void;
+  keyHeldRef?: MutableRefObject<boolean>;
+}
+
+function Key({ id, dispatch, keyHeldRef }: KeyProps) {
+  const repRef = useRef<Repeater | null>(null);
   const dispatchRef = useRef(dispatch);
   dispatchRef.current = dispatch; // repeater must always call the latest dispatch (pane id changes)
-  const gRef = useRef(null);      // in-flight gesture: { x, y, guard, held, moved }
+  const gRef = useRef<KeyGesture | null>(null);      // in-flight gesture: { x, y, guard, held, moved }
   // Mark this touch as "owned by a held key" so the pager won't swipe out from under it (BottomDock reads
   // keyHeldRef). Released the moment we detect a swipe, so a deliberate swipe starting here still pages.
-  const claim = (v) => { if (keyHeldRef) keyHeldRef.current = v; };
+  const claim = (value: boolean): void => { if (keyHeldRef) keyHeldRef.current = value; };
   const label = KEY_LABELS[id];
   if (!REPEAT_KEYS.has(id)) {
     // Fires on CLICK (release), never on touch-down — a left/right page swipe that starts on the key
@@ -98,32 +148,38 @@ function Key({ id, dispatch, keyHeldRef }) {
   // touch-down. A HOLD_MS guard disambiguates: hold still past it → the repeater kicks in (first press +
   // repeat); release before it → one press (a tap); move the finger (a swipe) → cancel, no press.
   const clearGuard = () => { const g = gRef.current; if (g?.guard) { clearTimeout(g.guard); g.guard = null; } };
-  const down = (e) => {
-    if (e.cancelable) e.preventDefault();
+  const down = (event: ReactPointerEvent<HTMLButtonElement>): void => {
+    if (event.cancelable) event.preventDefault();
     if (!repRef.current) repRef.current = createRepeater(() => dispatchRef.current(id));
-    const g = { x: e.clientX, y: e.clientY, held: false, moved: false, guard: null };
-    g.guard = setTimeout(() => { g.held = true; g.guard = null; repRef.current.start(); }, HOLD_MS);
+    const g: KeyGesture = {
+      x: event.clientX,
+      y: event.clientY,
+      held: false,
+      moved: false,
+      guard: null,
+    };
+    g.guard = setTimeout(() => { g.held = true; g.guard = null; repRef.current?.start(); }, HOLD_MS);
     gRef.current = g;
     claim(true); // this touch is a key press until proven a swipe
   };
-  const move = (e) => {
+  const move = (event: ReactPointerEvent<HTMLButtonElement>): void => {
     const g = gRef.current;
     if (!g || g.held) return; // once repeating we've committed to a press; a later drift doesn't matter
-    if (Math.abs(e.clientX - g.x) > 8 || Math.abs(e.clientY - g.y) > 8) { g.moved = true; clearGuard(); claim(false); } // it's a swipe → hand it to the pager
+    if (Math.abs(event.clientX - g.x) > 8 || Math.abs(event.clientY - g.y) > 8) { g.moved = true; clearGuard(); claim(false); } // it's a swipe → hand it to the pager
   };
   const up = () => {
     const g = gRef.current;
     claim(false);
     if (!g) return;
     clearGuard();
-    if (g.held) repRef.current.stop();          // was repeating → stop
+    if (g.held) repRef.current?.stop();          // was repeating → stop
     else if (!g.moved) dispatchRef.current(id); // quick tap, never moved → one press
     gRef.current = null;
   };
   const cancel = () => {
     claim(false);
     clearGuard();
-    if (gRef.current?.held) repRef.current.stop();
+    if (gRef.current?.held) repRef.current?.stop();
     gRef.current = null; // swipe / leave / cancel → no press
   };
   return (
