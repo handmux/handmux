@@ -1,4 +1,3 @@
-// web/src/components/FileManager.jsx
 import { useState, useEffect, useRef } from 'react';
 import { fetchDir, fetchPaneCwd } from '../api.js';
 import { getBrowseDir, setBrowseDir } from '../storage.js';
@@ -9,6 +8,34 @@ import { FolderIcon, ClockIcon, ChevronDownIcon } from './icons.jsx';
 import { t as tr } from '../i18n';
 import { useHistoryLayer, unwindHistory } from '../hooks/useBackButton.js';
 import { OverlayPortal } from '../overlays/OverlayHost.js';
+import { HOME_TAB } from '../hooks/useDocTabs.js';
+import type { DocTab } from '../hooks/useDocTabs.js';
+
+type HomeMode = 'recent' | 'browse';
+
+type FileHistoryEntry =
+  | { type: 'nav'; prev: string | null }
+  | { type: 'doc' };
+
+export interface FileManagerProps {
+  open: boolean;
+  pane?: string | null;
+  windowId?: string | null;
+  tabs: readonly DocTab[];
+  active: string;
+  onActivate: (key: string) => void;
+  onCloseTab: (key: string) => void;
+  onMinimize: () => void;
+  onOpenDoc: (path: string) => void | Promise<void>;
+  pendingShare?: File | null;
+  onPendingConsumed?: () => void;
+}
+
+function cwdOf(value: unknown): string | null {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return null;
+  const cwd = (value as Record<string, unknown>).cwd;
+  return typeof cwd === 'string' && cwd ? cwd : null;
+}
 
 // Bottom-sheet shell for the file viewer. Rendered through a portal on <body> — NOT inside .app —
 // so the app's keyboard-inset transform (which makes .app the containing block for fixed children)
@@ -23,16 +50,28 @@ import { OverlayPortal } from '../overlays/OverlayHost.js';
 // On each open the browser lands on THIS WINDOW's remembered dir (persisted per window in
 // localStorage), or — a window's first open / a stale memory — the active pane's cwd, so an upload
 // drops straight into the session's directory.
-export default function FileManager({ open, pane, windowId, tabs, active, onActivate, onCloseTab, onMinimize, onOpenDoc, pendingShare, onPendingConsumed }) {
-  const cur = tabs.find((t) => t.key === active) || tabs[0];
-  const [homeMode, setHomeMode] = useState('recent'); // 'recent' | 'browse'
-  const [browsePath, setBrowsePath] = useState(null);  // browser dir to show (null → $HOME)
+export default function FileManager({
+  open,
+  pane,
+  windowId,
+  tabs,
+  active,
+  onActivate,
+  onCloseTab,
+  onMinimize,
+  onOpenDoc,
+  pendingShare,
+  onPendingConsumed,
+}: FileManagerProps) {
+  const cur = tabs.find((tab) => tab.key === active) ?? tabs[0] ?? HOME_TAB;
+  const [homeMode, setHomeMode] = useState<HomeMode>('recent');
+  const [browsePath, setBrowsePath] = useState<string | null>(null); // browser dir to show (null → $HOME)
   // Bumped on every (re)open so the directory listing / recents re-fetch even when nothing changed. The
   // sheet is always mounted (portal) and FileBrowser/HomeView stay mounted while minimized, so without an
   // explicit signal a reopen to the SAME dir would keep showing the stale listing captured on first open.
   const [refreshKey, setRefreshKey] = useState(0);
   const isHome = cur.type === 'home';
-  const seededForRef = useRef(null); // windowId we've already seeded for this open (null when closed)
+  const seededForRef = useRef<string | null | undefined>(null); // windowId seeded for this open; null when closed
 
   // ── Layered Back ──────────────────────────────────────────────────────────────────────────────
   // Hardware/browser Back RETRACES the user's actual forward path, one recorded action at a time
@@ -52,8 +91,8 @@ export default function FileManager({ open, pane, windowId, tabs, active, onActi
   const onActivateRef = useRef(onActivate); onActivateRef.current = onActivate;
   const prevActiveRef = useRef(active); // last active tab — to spot a home→doc transition (a preview opening)
   const depthRef = useRef(0);           // # of our live history entries (base + recorded actions)
-  const histRef = useRef([]);           // action stack: { type:'nav', prev } dir move | { type:'doc' } preview opened
-  const pushHist = () => { window.history.pushState({ fileOverlay: true }, ''); depthRef.current += 1; };
+  const histRef = useRef<FileHistoryEntry[]>([]); // nav dir move | doc preview opened
+  const pushHist = (): void => { window.history.pushState({ fileOverlay: true }, ''); depthRef.current += 1; };
   useHistoryLayer(open, () => {
     depthRef.current = Math.max(0, depthRef.current - 1);
     const entry = histRef.current.pop();
@@ -71,7 +110,7 @@ export default function FileManager({ open, pane, windowId, tabs, active, onActi
 
   // Persist every directory the browser lands on, keyed by window → next open returns here. A real
   // move (new path) also records where we came from and mirrors one history entry so Back retraces.
-  const onNavigate = (absPath) => {
+  const onNavigate = (absPath: string): void => {
     if (open && absPath !== browsePathRef.current) { histRef.current.push({ type: 'nav', prev: browsePathRef.current }); pushHist(); }
     setBrowsePath(absPath);
     setBrowseDir(windowId, absPath);
@@ -102,8 +141,12 @@ export default function FileManager({ open, pane, windowId, tabs, active, onActi
     };
   }, [open]);
   // Snap to the active pane's LIVE cwd (re-fetched each press, so a mid-session `cd` is honored).
-  const jumpToCwd = async () => {
-    try { const { cwd } = await fetchPaneCwd(pane); if (cwd) setBrowsePath(cwd); } catch { /* ignore */ }
+  const jumpToCwd = async (): Promise<void> => {
+    if (!pane) return;
+    try {
+      const cwd = cwdOf(await fetchPaneCwd(pane));
+      if (cwd) setBrowsePath(cwd);
+    } catch { /* ignore */ }
   };
 
   // A file shared in (Web Share Target) needs the directory browser to pick its destination — force
@@ -126,10 +169,11 @@ export default function FileManager({ open, pane, windowId, tabs, active, onActi
     setHomeMode('browse');
     let cancelled = false;
     (async () => {
-      const remembered = getBrowseDir(windowId);
-      let target = null;
+      const storedDir: unknown = getBrowseDir(windowId);
+      const remembered = typeof storedDir === 'string' && storedDir ? storedDir : null;
+      let target: string | null = null;
       if (remembered) { try { await fetchDir(remembered); target = remembered; } catch { /* stale → cwd */ } }
-      if (!target && pane) { try { const { cwd } = await fetchPaneCwd(pane); target = cwd; } catch { /* → $HOME */ } }
+      if (!target && pane) { try { target = cwdOf(await fetchPaneCwd(pane)); } catch { /* → $HOME */ } }
       if (!cancelled && target) setBrowsePath(target);
     })();
     return () => { cancelled = true; };
