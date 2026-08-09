@@ -14,6 +14,7 @@ COPY package.json package-lock.json ./
 RUN npm ci
 
 COPY src ./src
+COPY bin ./bin
 COPY test ./test
 COPY vitest.config.js ./
 

@@ -49,6 +49,9 @@ const FIXTURES = {
   claude: '/app/test/fixtures/workspace/claude-session.jsonl',
   codex: '/app/test/fixtures/workspace/codex-rollout.jsonl',
 };
+const CODEX_SESSIONS = path.join(HOME, '.codex', 'sessions');
+const CODEX_ROLLOUT_DIR = path.join(CODEX_SESSIONS, '2026', '08', '09');
+const CODEX_ROLLOUT = path.join(CODEX_ROLLOUT_DIR, `rollout-2026-08-09T00-00-00-${CODEX_ID}.jsonl`);
 
 async function runTmux(args) {
   return execFile('/usr/bin/tmux', ['-L', SOCKET, ...args], { env: process.env });
@@ -71,6 +74,36 @@ async function writeFakeAgent(name) {
   await fsp.chmod(file, 0o755);
 }
 
+async function writeFakeCodex() {
+  const dir = path.join(HOME, 'fake-bin');
+  await fsp.mkdir(dir, { recursive: true });
+  const script = `#!/usr/bin/env node
+const fs = require('node:fs');
+const net = require('node:net');
+const path = require('node:path');
+const args = process.argv.slice(2);
+if (args[0] === 'app-server') {
+  const listenAt = args.indexOf('--listen');
+  const socketPath = args[listenAt + 1]?.replace(/^unix:\\/\\//, '');
+  if (listenAt < 0 || !socketPath) process.exit(2);
+  fs.mkdirSync(path.dirname(socketPath), { recursive: true });
+  const server = net.createServer((socket) => socket.destroy());
+  server.listen(socketPath);
+  const close = () => server.close(() => process.exit(0));
+  process.on('SIGTERM', close);
+  process.on('SIGINT', close);
+} else if (args[0] === '--remote') {
+  fs.appendFileSync(path.join(process.env.HOME, 'agent-argv.log'), ['codex', ...args.slice(2)].join('\\t') + '\\n');
+  setTimeout(() => process.exit(0), 2_000);
+} else {
+  process.exit(2);
+}
+`;
+  const file = path.join(dir, 'codex');
+  await fsp.writeFile(file, script, { mode: 0o755 });
+  await fsp.chmod(file, 0o755);
+}
+
 function environmentProvider(tmux, bootIdentity) {
   return createEnvironmentProvider({
     bootIdentityProvider: async () => bootIdentity,
@@ -83,16 +116,23 @@ function environmentProvider(tmux, bootIdentity) {
   });
 }
 
-function createCore(bootIdentity, stateFile) {
+function createCore(bootIdentity, stateFile, { managedCodexPane = null } = {}) {
   const store = createWorkspaceStore({ home: HOME });
   const tmux = createWorkspaceTmux({ run: (args) => runTmux(args) });
   const lock = createWorkspaceLock({ dir: store.paths.lockDir });
+  const codexApp = managedCodexPane ? {
+    discover: async (paneId) => paneId === managedCodexPane
+      ? { managed: true, threadId: CODEX_ID }
+      : { managed: false, threadId: null },
+  } : null;
   const checkpointer = createWorkspaceBackground({
     store,
     tmux,
     lock,
     stateFile,
     observeEnvironment: environmentProvider(tmux, bootIdentity),
+    getCodexApp: () => codexApp,
+    codexSessions: CODEX_SESSIONS,
   });
   return { store, tmux, lock, checkpointer };
 }
@@ -124,7 +164,7 @@ async function assertFixtureFormats() {
 
 async function phaseA() {
   await assertFixtureFormats();
-  await Promise.all([writeFakeAgent('claude'), writeFakeAgent('codex')]);
+  await Promise.all([writeFakeAgent('claude'), writeFakeCodex()]);
   process.env.PATH = `${HOME}/fake-bin:${process.env.PATH}`;
   await fsp.rm(AGENT_LOG, { force: true });
   await fsp.rm(ORDINARY_LOG, { force: true });
@@ -137,6 +177,8 @@ async function phaseA() {
   const apiAgentPane = await tmuxText(['new-window', '-d', '-P', '-F', '#{pane_id}', '-t', 'api:1', '-n', 'agent', '-c', '/workspace/api']);
   await runTmux(['new-session', '-d', '-s', 'docs', '-n', 'agent', '-c', '/workspace/docs']);
   const codexPane = await tmuxText(['display-message', '-p', '-t', 'docs:agent.0', '#{pane_id}']);
+  await fsp.mkdir(CODEX_ROLLOUT_DIR, { recursive: true });
+  await fsp.copyFile(FIXTURES.codex, CODEX_ROLLOUT);
   await runTmux(['link-window', '-s', 'api:shared', '-t', 'docs:5']);
 
   const apiSharedRuntime = await tmuxText(['display-message', '-p', '-t', 'api:shared', '#{window_id}']);
@@ -155,7 +197,7 @@ async function phaseA() {
     [codexPane]: { agent: 'codex', payload: { session_id: CODEX_ID, transcript_path: FIXTURES.codex } },
   })}\n`, { mode: 0o600 });
 
-  const first = createCore('boot-a', STATE_A);
+  const first = createCore('boot-a', STATE_A, { managedCodexPane: codexPane });
   const observed = await first.tmux.observeEnvironment();
   console.log('container A environment:', JSON.stringify(observed));
   assert.equal(observed.status, 'present', JSON.stringify(observed));
@@ -172,7 +214,9 @@ async function phaseA() {
   assert.equal(live.value.sessions.length, 2);
   assert.equal(live.value.windows.length, 3);
   assert.equal(live.value.windows.flatMap((window) => window.panes).length, 4);
-  assert.equal(live.value.windows.flatMap((window) => window.panes).filter((pane) => pane.agent).length, 2);
+  const capturedAgents = live.value.windows.flatMap((window) => window.panes).filter((pane) => pane.agent);
+  assert.deepEqual(capturedAgents.map((pane) => pane.agent.id).sort(), ['claude', 'codex']);
+  assert.equal(capturedAgents.find((pane) => pane.agent.id === 'codex').agent.transcriptPath, CODEX_ROLLOUT);
   const linked = live.value.sessions.map((session) => session.windowLinks.find((link) => {
     const window = live.value.windows.find((item) => item.id === link.windowId);
     return window?.runtimeId === apiSharedRuntime;
@@ -186,7 +230,7 @@ async function phaseA() {
   await fsp.writeFile(EXPECTED_GEOMETRY, `${JSON.stringify(await captureGeometry())}\n`, { mode: 0o600 });
   await first.checkpointer.stop();
 
-  const restarted = createCore('boot-a', STATE_A);
+  const restarted = createCore('boot-a', STATE_A, { managedCodexPane: codexPane });
   const restartResult = await restarted.checkpointer.start();
   assert.equal(restartResult.status, 'unchanged');
   assert.equal(await checkpointCount(restarted.store), 0, 'ordinary handmux restart must not archive');
