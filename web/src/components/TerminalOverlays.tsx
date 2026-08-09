@@ -1,9 +1,47 @@
+import type { CSSProperties, MutableRefObject } from 'react';
 import { shouldKeepKeyboard } from '../dockKeyboard.js';
 import { expandToLines, expandToParagraph } from '../terminalSelection.js';
+import type {
+  TerminalSelectionActions,
+  TerminalSelectionUI,
+} from '../terminalSelectionController.js';
+import type { ConnectionTelemetryState } from '../connectionTelemetry.js';
+import type { TerminalTransport } from '../terminalTransport.js';
 import { t } from '../i18n';
 import LensBoot from './LensBoot.jsx';
 
 const CALLOUT_W = 200;
+
+interface SelectionTerminal {
+  cols: number;
+  buffer: { active: { length: number } };
+}
+
+export interface TerminalOverlaysProps {
+  ready: boolean;
+  connectionInfo: ConnectionTelemetryState | null;
+  configuredTransport: TerminalTransport;
+  transportFallback: 'network' | 'unavailable' | null;
+  transportOpen: boolean;
+  transportNow: number;
+  onTransportToggle: () => void;
+  connected: boolean;
+  inputFailure: 'pane-missing' | 'disconnected' | null;
+  dbgVisible: boolean;
+  dbg: string;
+  scrollInfo: string;
+  selInfo: string;
+  onResume: () => void;
+  altScreen: boolean;
+  onPageScroll: (direction: 'up' | 'down') => void;
+  onFitScreen: () => void;
+  locateOn: boolean;
+  onToggleLocate: () => void;
+  selUI: TerminalSelectionUI | null;
+  onCopy: () => void;
+  selActionsRef: MutableRefObject<TerminalSelectionActions | null>;
+  termRef: MutableRefObject<SelectionTerminal | null>;
+}
 
 export default function TerminalOverlays({
   ready,
@@ -29,7 +67,7 @@ export default function TerminalOverlays({
   onCopy,
   selActionsRef,
   termRef,
-}) {
+}: TerminalOverlaysProps) {
   const recoverySeconds = connectionInfo?.recoveryAt
     ? Math.max(0, Math.ceil((connectionInfo.recoveryAt - transportNow) / 1000))
     : null;
@@ -153,25 +191,27 @@ export default function TerminalOverlays({
         return (
           <>
             <div className="sel-handle sel-handle--start"
-                 style={{ left: selUI.start.x, top: selUI.start.y, '--h': `${selUI.start.ch}px` }}
+                 style={{ left: selUI.start.x, top: selUI.start.y, '--h': `${selUI.start.ch}px` } as CSSProperties}
                  data-end="start" />
             <div className="sel-handle sel-handle--end"
-                 style={{ left: selUI.end.x, top: selUI.end.y, '--h': `${selUI.end.ch}px` }}
+                 style={{ left: selUI.end.x, top: selUI.end.y, '--h': `${selUI.end.ch}px` } as CSSProperties}
                  data-end="end" />
             <div className="sel-callout" style={{ left: calloutLeft, top: calloutTop }}>
               <button type="button" onClick={onCopy}>拷贝</button>
               <button type="button" onClick={() => {
                 const actions = selActionsRef.current;
                 const term = termRef.current;
-                if (actions && term) actions.selectRange(expandToLines(actions.currentRange(), term.cols));
+                const range = actions?.currentRange();
+                if (actions && term && range) actions.selectRange(expandToLines(range, term.cols));
               }}>整行</button>
               <button type="button" onClick={() => {
                 const actions = selActionsRef.current;
                 const term = termRef.current;
-                if (!actions || !term) return;
+                const range = actions?.currentRange();
+                if (!actions || !term || !range) return;
                 const buffer = term.buffer.active;
                 actions.selectRange(expandToParagraph(
-                  actions.currentRange(),
+                  range,
                   term.cols,
                   actions.paraLineText,
                   0,

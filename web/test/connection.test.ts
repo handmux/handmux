@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { initialConnection, nextConnection } from '../src/connection.js';
 
 describe('connection reducer', () => {

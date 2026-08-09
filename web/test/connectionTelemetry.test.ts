@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   classifyConnectionSample,
   createConnectionTelemetry,
+  type ConnectionTelemetryState,
 } from '../src/connectionTelemetry.js';
 
 describe('connection telemetry', () => {
@@ -15,13 +16,11 @@ describe('connection telemetry', () => {
 
   it('reports the actual fallback mode and dampens quality flapping', () => {
     let now = 0;
-    const updates = [];
+    const updates: ConnectionTelemetryState[] = [];
     const telemetry = createConnectionTelemetry({
       mode: 'live',
       now: () => now,
-      onChange: (value) => updates.push(value),
-      setIntervalFn: vi.fn(() => 1),
-      clearIntervalFn: vi.fn(),
+      onChange: (value) => { updates.push(value); },
     });
     telemetry.sample({ ok: true, rttMs: 100 });
     expect(telemetry.getSnapshot()).toMatchObject({ quality: 'good', stableQuality: 'good' });
@@ -38,15 +37,13 @@ describe('connection telemetry', () => {
       quality: 'poor',
       stableQuality: 'degraded',
     });
-    expect(updates.at(-1).mode).toBe('snapshot');
+    expect(updates.at(-1)!.mode).toBe('snapshot');
     telemetry.destroy();
   });
 
   it('starts a first failed sample as unstable instead of declaring a poor connection immediately', () => {
     const telemetry = createConnectionTelemetry({
       mode: 'live',
-      setIntervalFn: vi.fn(() => 1),
-      clearIntervalFn: vi.fn(),
     });
     telemetry.sample({ ok: false });
     expect(telemetry.getSnapshot()).toMatchObject({
@@ -62,8 +59,6 @@ describe('connection telemetry', () => {
     const telemetry = createConnectionTelemetry({
       mode: 'snapshot',
       now: () => now,
-      setIntervalFn: vi.fn(() => 1),
-      clearIntervalFn: vi.fn(),
     });
     telemetry.status('error');
     telemetry.sample({ ok: true, rttMs: 100 });

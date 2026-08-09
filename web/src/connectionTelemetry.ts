@@ -1,16 +1,46 @@
 const DEGRADE_AFTER_MS = 15000;
 const RECOVER_AFTER_MS = 30000;
 
-const QUALITY_RANK = {
+export type ConnectionQuality = 'connecting' | 'good' | 'degraded' | 'poor';
+
+export interface ConnectionSample {
+  ok: boolean;
+  rttMs?: number | null;
+}
+
+export interface ConnectionTelemetryState {
+  mode: TerminalTransport;
+  quality: ConnectionQuality;
+  stableQuality: ConnectionQuality;
+  rttMs: number | null;
+  recoveryAt: number | null;
+}
+
+export interface ConnectionTelemetry {
+  sample(sample: ConnectionSample): void;
+  status(status: TerminalStreamStatus): void;
+  setMode(mode: TerminalTransport, options?: { fallback?: boolean }): void;
+  getSnapshot(): ConnectionTelemetryState;
+  peek(): ConnectionTelemetryState;
+  destroy(): void;
+}
+
+export interface ConnectionTelemetryOptions {
+  mode: TerminalTransport;
+  onChange?: (state: ConnectionTelemetryState) => void;
+  now?: () => number;
+}
+
+const QUALITY_RANK: Record<ConnectionQuality, number> = {
   connecting: -1,
   good: 0,
   degraded: 1,
   poor: 2,
 };
 
-export function classifyConnectionSample({ ok, rttMs }) {
+export function classifyConnectionSample({ ok, rttMs }: ConnectionSample): ConnectionQuality {
   if (!ok) return 'poor';
-  if (!Number.isFinite(rttMs)) return 'connecting';
+  if (typeof rttMs !== 'number' || !Number.isFinite(rttMs)) return 'connecting';
   if (rttMs > 1000) return 'poor';
   if (rttMs >= 300) return 'degraded';
   return 'good';
@@ -20,13 +50,13 @@ export function createConnectionTelemetry({
   mode,
   onChange,
   now = () => Date.now(),
-}) {
+}: ConnectionTelemetryOptions): ConnectionTelemetry {
   let disposed = false;
-  let pendingQuality = null;
+  let pendingQuality: ConnectionQuality | null = null;
   let pendingSince = 0;
   // `quality` always matches the displayed RTT. `stableQuality` is deliberately dampened and is
   // consumed only by automatic live↔snapshot switching, so policy delays never make the label lie.
-  let state = {
+  let state: ConnectionTelemetryState = {
     mode,
     quality: 'connecting',
     stableQuality: 'connecting',
@@ -34,10 +64,10 @@ export function createConnectionTelemetry({
     recoveryAt: null,
   };
 
-  const emit = () => {
+  const emit = (): void => {
     if (!disposed) onChange?.({ ...state });
   };
-  const applyStableQuality = (quality, immediate = false) => {
+  const applyStableQuality = (quality: ConnectionQuality, immediate = false): void => {
     if (quality === 'connecting') {
       if (state.stableQuality === 'connecting') emit();
       return;
@@ -90,10 +120,13 @@ export function createConnectionTelemetry({
     sample({ ok, rttMs }) {
       if (disposed) return;
       const quality = classifyConnectionSample({ ok, rttMs });
+      const measuredRtt = typeof rttMs === 'number' && Number.isFinite(rttMs)
+        ? Math.max(0, Math.round(rttMs))
+        : null;
       state = {
         ...state,
         quality,
-        rttMs: Number.isFinite(rttMs) ? Math.max(0, Math.round(rttMs)) : null,
+        rttMs: measuredRtt,
       };
       applyStableQuality(quality);
     },
@@ -122,3 +155,5 @@ export function createConnectionTelemetry({
     },
   };
 }
+import type { TerminalStreamStatus } from './terminalStreamClient.js';
+import type { TerminalTransport } from './terminalTransport.js';
