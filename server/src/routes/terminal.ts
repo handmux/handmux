@@ -7,6 +7,19 @@ import { isPaneId, isWindowId } from '../tmux/commands.js';
 import { capTrailingBlankRows } from '../trimCapture.js';
 import { isAllowedKey } from '../keyNames.js';
 import { restoreCaptureBackgrounds } from '../captureBackground.js';
+import type { NextFunction, Request, Response, Router } from 'express';
+
+type CommandsModule = typeof import('../tmux/commands.js');
+type TerminalCommands = Pick<CommandsModule,
+  | 'paneInfo' | 'capturePane' | 'exitCopyModeIfActive' | 'sendText' | 'sendEnter'
+  | 'sendHexInput' | 'getWindowLayout' | 'applyWindowLayout' | 'restoreWindowSize'
+  | 'resizePane' | 'resizeWindow' | 'sendKey' | 'sendWheel'
+> & { capturePaneRow?: CommandsModule['capturePaneRow'] };
+interface TerminalRouteOptions { commands: TerminalCommands }
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+const requestBody = (req: Request): Record<string, unknown> => isRecord(req.body) ? req.body : {};
 
 export { isAllowedKey } from '../keyNames.js';
 
@@ -21,25 +34,26 @@ export { isAllowedKey } from '../keyNames.js';
 // instead of submitting. 120ms is imperceptible but enough to settle.
 const SUBMIT_GAP_MS = 120;
 const RAW_INPUT_MAX_BYTES = 16 * 1024;
-const delay = (ms) => new Promise((r) => setTimeout(r, ms));
-const validHexInput = (hex) => typeof hex === 'string'
+const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+const validHexInput = (hex: unknown): hex is string => typeof hex === 'string'
   && hex.length >= 2
   && hex.length <= RAW_INPUT_MAX_BYTES * 2
   && hex.length % 2 === 0
   && /^[0-9a-f]+$/i.test(hex);
-const isMissingPane = (error) =>
+const isMissingPane = (error: unknown): boolean =>
   /(?:can't find|cannot find|no such|unknown|not found).*\bpane\b|\bpane\b.*(?:can't find|cannot find|no such|unknown|not found)/i
     .test(error instanceof Error ? error.message : String(error));
 
-export function terminalRoutes({ commands }) {
+export function terminalRoutes({ commands }: TerminalRouteOptions): Router {
   const r = express.Router();
 
-  r.get('/history', async (req, res, next) => {
-    if (!isPaneId(req.query.pane)) return res.status(400).json({ error: 'bad pane id' });
+  r.get('/history', async (req: Request, res: Response, next: NextFunction) => {
+    const paneId = req.query.pane;
+    if (!isPaneId(paneId)) return res.status(400).json({ error: 'bad pane id' });
     const lines = Math.min(Math.max(Number(req.query.lines) || 1000, 1), 5000);
     try {
       // Read the pane's state FIRST — whether it's on the alternate screen decides how we capture it.
-      const { width, height, cursorX, cursorY, cursorVisible, altScreen, mouseAware } = await commands.paneInfo(req.query.pane);
+      const { width, height, cursorX, cursorY, cursorVisible, altScreen, mouseAware } = await commands.paneInfo(paneId);
       // An ALT-screen pane (a full-screen app: vim/less/htop) is a fixed height×width screen with NO
       // scrollback. Asking tmux for history (-S -lines) there bleeds the MAIN screen's scrollback in
       // ABOVE the app — you'd scroll up into terminal history that isn't the app's — and capping its
@@ -47,12 +61,13 @@ export function terminalRoutes({ commands }) {
       // pane as exactly its visible screen (lines=0) and skip the blank-trim. A normal pane still pulls
       // `lines` of scrollback and caps the empty grid below the cursor (fresh shell = "prompt + a wall of
       // blank rows") so the phone's bottom-anchored render shows content, not blank. See trimCapture.js.
-      const captured = await commands.capturePane(req.query.pane, altScreen ? 0 : lines);
-      const restored = typeof commands.capturePaneRow === 'function'
+      const captured = await commands.capturePane(paneId, altScreen ? 0 : lines);
+      const capturePaneRow = commands.capturePaneRow;
+      const restored = typeof capturePaneRow === 'function'
         ? await restoreCaptureBackgrounds(
           captured,
           height,
-          (row) => commands.capturePaneRow(req.query.pane, row),
+          (row) => capturePaneRow(paneId, row),
         )
         : {
           ansi: captured,
@@ -67,7 +82,7 @@ export function terminalRoutes({ commands }) {
       // capture's last `height` rows, so the cursor sits `height-1-cursorY` rows above the bottom —
       // less however many trailing blank rows capTrailingBlankRows dropped (all of them below the
       // cursor). The client re-places xterm's cursor this many rows up from the seed's last row.
-      const rowsOf = (s) => (s.endsWith('\n') ? s.slice(0, -1) : s).split('\n').length;
+      const rowsOf = (value: string): number => (value.endsWith('\n') ? value.slice(0, -1) : value).split('\n').length;
       const historyLines = altScreen ? 0 : restored.historyLines;
       const cur = {
         row: Math.max(0, (height - 1 - cursorY) - (rowsOf(raw) - rowsOf(ansi))),
@@ -92,15 +107,15 @@ export function terminalRoutes({ commands }) {
       if (/\bgzip\b/.test(req.headers['accept-encoding'] || '')) {
         res.set('Content-Encoding', 'gzip');
         // gzipSync is fine here — captures are KBs; the event-loop stall is sub-ms.
-        res.end(gzipSync(json));
+        return res.end(gzipSync(json));
       } else {
-        res.end(json);
+        return res.end(json);
       }
-    } catch (e) { next(e); }
+    } catch (e) { return next(e); }
   });
 
-  r.post('/send', async (req, res, next) => {
-    const { pane, text, enter } = req.body || {};
+  r.post('/send', async (req: Request, res: Response, next: NextFunction) => {
+    const { pane, text, enter } = requestBody(req);
     if (!isPaneId(pane)) return res.status(400).json({ error: 'bad pane id' });
     const body = typeof text === 'string' ? text : '';
     try {
@@ -110,47 +125,47 @@ export function terminalRoutes({ commands }) {
         if (body) await delay(SUBMIT_GAP_MS); // a bare Enter has nothing to settle — send at once
         await commands.sendEnter(pane);
       }
-      res.json({ ok: true });
-    } catch (e) { next(e); }
+      return res.json({ ok: true });
+    } catch (e) { return next(e); }
   });
 
-  r.post('/input', async (req, res, next) => {
-    const { pane, hex } = req.body || {};
+  r.post('/input', async (req: Request, res: Response, next: NextFunction) => {
+    const { pane, hex } = requestBody(req);
     if (!isPaneId(pane)) return res.status(400).json({ error: 'bad pane id' });
     if (!validHexInput(hex)) return res.status(400).json({ error: 'bad input bytes' });
     try {
       await commands.exitCopyModeIfActive(pane);
       await commands.sendHexInput(pane, hex);
-      res.json({ ok: true });
+      return res.json({ ok: true });
     } catch (error) {
       if (isMissingPane(error)) return res.status(404).json({ error: 'pane not found' });
-      next(error);
+      return next(error);
     }
   });
 
   // Resize the tmux window so it reflows to the phone (auto:false), or hand sizing back to
   // attached clients (auto:true). NOTE: this mutates the shared window — the PC's view of it
   // changes too.
-  r.get('/layout', async (req, res, next) => {
+  r.get('/layout', async (req: Request, res: Response, next: NextFunction) => {
     if (!isWindowId(req.query.window)) return res.status(400).json({ error: 'bad window id' });
-    try { res.json({ layout: await commands.getWindowLayout(req.query.window) }); }
-    catch (e) { next(e); }
+    try { return res.json({ layout: await commands.getWindowLayout(req.query.window) }); }
+    catch (e) { return next(e); }
   });
 
   // Restore only the pane arrangement. Window sizing remains untouched; handing the whole window
   // back to an attached client is the separate `auto` resize operation below.
-  r.post('/layout', async (req, res, next) => {
-    const { window, layout } = req.body || {};
+  r.post('/layout', async (req: Request, res: Response, next: NextFunction) => {
+    const { window, layout } = requestBody(req);
     if (!isWindowId(window)) return res.status(400).json({ error: 'bad window id' });
     if (typeof layout !== 'string' || !layout) return res.status(400).json({ error: 'bad window layout' });
     try {
       await commands.applyWindowLayout(window, layout);
-      res.json({ ok: true });
-    } catch (e) { next(e); }
+      return res.json({ ok: true });
+    } catch (e) { return next(e); }
   });
 
-  r.post('/resize', async (req, res, next) => {
-    const { window, pane, cols, rows, auto, layout } = req.body || {};
+  r.post('/resize', async (req: Request, res: Response, next: NextFunction) => {
+    const { window, pane, cols, rows, auto, layout } = requestBody(req);
     const c = Math.min(Math.max(Number(cols) || 0, 20), 500);
     try {
       if (auto) {
@@ -166,12 +181,12 @@ export function terminalRoutes({ commands }) {
       } else {
         return res.status(400).json({ error: 'bad resize target' });
       }
-      res.json({ ok: true });
-    } catch (e) { next(e); }
+      return res.json({ ok: true });
+    } catch (e) { return next(e); }
   });
 
-  r.post('/keys', async (req, res, next) => {
-    const { pane, keys } = req.body || {};
+  r.post('/keys', async (req: Request, res: Response, next: NextFunction) => {
+    const { pane, keys } = requestBody(req);
     if (!isPaneId(pane)) return res.status(400).json({ error: 'bad pane id' });
     if (!Array.isArray(keys) || keys.some((k) => !isAllowedKey(k))) {
       return res.status(400).json({ error: 'disallowed key' });
@@ -179,8 +194,8 @@ export function terminalRoutes({ commands }) {
     try {
       await commands.exitCopyModeIfActive(pane);
       for (const k of keys) await commands.sendKey(pane, k);
-      res.json({ ok: true });
-    } catch (e) { next(e); }
+      return res.json({ ok: true });
+    } catch (e) { return next(e); }
   });
 
   // Swipe-to-scroll for full-screen (ALT-screen) apps: the client can't scroll the alt buffer itself
@@ -190,20 +205,20 @@ export function terminalRoutes({ commands }) {
   // client's cached mouseAware is only a UX hint; this check is the real guard (mouse mode can toggle
   // between the poll and the gesture). Positioned at the pane centre so a split-aware app scrolls the
   // region the finger is over; a lone full-screen app ignores the position.
-  r.post('/scroll', async (req, res, next) => {
-    const { pane, dir, lines } = req.body || {};
+  r.post('/scroll', async (req: Request, res: Response, next: NextFunction) => {
+    const { pane, dir, lines } = requestBody(req);
     if (!isPaneId(pane)) return res.status(400).json({ error: 'bad pane id' });
     if (dir !== 'up' && dir !== 'down') return res.status(400).json({ error: 'bad dir' });
     try {
       const { altScreen, mouseAware, mouseSgr, width, height } = await commands.paneInfo(pane);
       if (!altScreen || !mouseAware) return res.json({ ok: false, reason: 'no-mouse' });
-      await commands.sendWheel(pane, dir, lines, {
+      await commands.sendWheel(pane, dir, Number(lines), {
         sgr: mouseSgr,
         col: Math.max(1, Math.floor((width || 2) / 2)),
         row: Math.max(1, Math.floor((height || 2) / 2)),
       });
-      res.json({ ok: true });
-    } catch (e) { next(e); }
+      return res.json({ ok: true });
+    } catch (e) { return next(e); }
   });
 
   return r;
