@@ -31,7 +31,8 @@ function fixtureThread(status = { type: 'idle' }) {
 
 function fakeProxy({
   empty = false, loaded = ['thread-1'], updatedAt = {}, status = { type: 'idle' }, readThread = null,
-  resumeThread = null, turnStartWait = null, parentThreadIds = {}, initialGoal = null,
+  resumeThread = null, turnStartWait = null, turnStartReply = true, turnSteerReply = true,
+  parentThreadIds = {}, initialGoal = null,
 } = {}) {
   const ws = new EventEmitter();
   ws.readyState = 0;
@@ -67,10 +68,14 @@ function fakeProxy({
     } else if (message.method === 'turn/start') {
       persisted = true;
       const finish = () => reply({ jsonrpc: '2.0', id: message.id, result: { turn: { id: 'turn-2', status: 'inProgress', items: [] } } });
-      if (turnStartWait) void Promise.resolve(turnStartWait).then(finish);
-      else finish();
+      if (turnStartReply) {
+        if (turnStartWait) void Promise.resolve(turnStartWait).then(finish);
+        else finish();
+      }
     } else if (message.method === 'turn/steer') {
-      reply({ jsonrpc: '2.0', id: message.id, result: { turnId: message.params.expectedTurnId } });
+      if (turnSteerReply) {
+        reply({ jsonrpc: '2.0', id: message.id, result: { turnId: message.params.expectedTurnId } });
+      }
     } else if (message.method === 'thread/compact/start') {
       reply({ jsonrpc: '2.0', id: message.id, result: {} });
     } else if (message.method === 'thread/start') {
@@ -371,15 +376,53 @@ describe('Codex App Server client', () => {
     await app.steerQueued('%1', 'thread-1', first.id);
     expect(proxy.sent).toContainEqual(expect.objectContaining({
       method: 'turn/steer',
-      params: {
+      params: expect.objectContaining({
         threadId: 'thread-1', expectedTurnId: 'turn-live',
         input: [{ type: 'text', text: 'guide now' }],
-      },
+        clientUserMessageId: `handmux-queue:${first.id}`,
+      }),
     }));
     expect((await app.status('%1', 'thread-1')).queue.map((item) => item.id)).toEqual([second.id]);
 
     expect(await app.removeQueued('%1', 'thread-1', second.id)).toEqual({ removed: true });
     expect((await app.status('%1', 'thread-1')).queue).toEqual([]);
+    app.close();
+  });
+
+  it('removes a steered queue item as soon as App Server confirms its client id', async () => {
+    const proxy = fakeProxy({ turnSteerReply: false });
+    const app = createCodexAppServer({ home: '/home/test', exists: () => true, connect: () => proxy.ws });
+    await app.status('%1', 'thread-1');
+    proxy.push({
+      jsonrpc: '2.0', method: 'turn/started',
+      params: { threadId: 'thread-1', turn: { id: 'turn-live', status: 'inProgress', items: [] } },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const queued = (await app.send('%1', 'thread-1', 'guide once', 'request-guide')).item;
+    const steering = app.steerQueued('%1', 'thread-1', queued.id);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(proxy.sent).toContainEqual(expect.objectContaining({
+      method: 'turn/steer',
+      params: {
+        threadId: 'thread-1', expectedTurnId: 'turn-live',
+        input: [{ type: 'text', text: 'guide once' }], clientUserMessageId: 'request-guide',
+      },
+    }));
+    proxy.push({
+      jsonrpc: '2.0', method: 'item/started', params: {
+        threadId: 'thread-1', turnId: 'turn-live',
+        item: {
+          id: 'user-guide', type: 'userMessage', clientId: 'request-guide',
+          content: [{ type: 'text', text: 'guide once' }],
+        },
+      },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect((await app.status('%1', 'thread-1')).queue).toEqual([]);
+
+    proxy.ws.close();
+    await expect(steering).rejects.toThrow('connection closed');
     app.close();
   });
 
@@ -392,7 +435,7 @@ describe('Codex App Server client', () => {
       params: { threadId: 'thread-1', turn: { id: 'turn-live', status: 'inProgress', items: [] } },
     });
     await new Promise((resolve) => setTimeout(resolve, 0));
-    await app.send('%1', 'thread-1', 'next turn');
+    const queued = (await app.send('%1', 'thread-1', 'next turn')).item;
 
     proxy.push({
       jsonrpc: '2.0', method: 'turn/completed',
@@ -402,7 +445,10 @@ describe('Codex App Server client', () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(proxy.sent.filter((message) => message.method === 'turn/start')).toContainEqual(expect.objectContaining({
-      params: { threadId: 'thread-1', input: [{ type: 'text', text: 'next turn' }] },
+      params: expect.objectContaining({
+        threadId: 'thread-1', input: [{ type: 'text', text: 'next turn' }],
+        clientUserMessageId: `handmux-queue:${queued.id}`,
+      }),
     }));
     expect((await app.status('%1', 'thread-1')).queue).toEqual([]);
     app.close();
@@ -417,7 +463,7 @@ describe('Codex App Server client', () => {
       params: { threadId: 'thread-1', turn: { id: 'turn-live', status: 'inProgress', items: [] } },
     });
     await new Promise((resolve) => setTimeout(resolve, 0));
-    await app.send('%1', 'thread-1', 'send first');
+    const firstQueued = (await app.send('%1', 'thread-1', 'send first')).item;
     const queued = (await app.send('%1', 'thread-1', 'original text')).item;
     const edit = await app.beginQueuedEdit('%1', 'thread-1', queued.id);
 
@@ -436,7 +482,10 @@ describe('Codex App Server client', () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(proxy.sent.filter((message) => message.method === 'turn/start')).toContainEqual(
       expect.objectContaining({
-        params: { threadId: 'thread-1', input: [{ type: 'text', text: 'send first' }] },
+        params: expect.objectContaining({
+          threadId: 'thread-1', input: [{ type: 'text', text: 'send first' }],
+          clientUserMessageId: `handmux-queue:${firstQueued.id}`,
+        }),
       }),
     );
     proxy.push({
@@ -447,7 +496,10 @@ describe('Codex App Server client', () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(proxy.sent.filter((message) => message.method === 'turn/start')).toContainEqual(
       expect.objectContaining({
-        params: { threadId: 'thread-1', input: [{ type: 'text', text: 'revised text' }] },
+        params: expect.objectContaining({
+          threadId: 'thread-1', input: [{ type: 'text', text: 'revised text' }],
+          clientUserMessageId: `handmux-queue:${queued.id}`,
+        }),
       }),
     );
     app.close();
@@ -475,7 +527,10 @@ describe('Codex App Server client', () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(proxy.sent.filter((message) => message.method === 'turn/start')).toContainEqual(
       expect.objectContaining({
-        params: { threadId: 'thread-1', input: [{ type: 'text', text: 'keep original' }] },
+        params: expect.objectContaining({
+          threadId: 'thread-1', input: [{ type: 'text', text: 'keep original' }],
+          clientUserMessageId: `handmux-queue:${queued.id}`,
+        }),
       }),
     );
     app.close();
@@ -510,7 +565,10 @@ describe('Codex App Server client', () => {
 
       expect(proxy.sent.filter((message) => message.method === 'turn/start')).toContainEqual(
         expect.objectContaining({
-          params: { threadId: 'thread-1', input: [{ type: 'text', text: 'send after abandoned edit' }] },
+          params: expect.objectContaining({
+            threadId: 'thread-1', input: [{ type: 'text', text: 'send after abandoned edit' }],
+            clientUserMessageId: `handmux-queue:${queued.id}`,
+          }),
         }),
       );
       app.close();
@@ -551,7 +609,10 @@ describe('Codex App Server client', () => {
       await Promise.resolve();
       expect(proxy.sent.filter((message) => message.method === 'turn/start')).toContainEqual(
         expect.objectContaining({
-          params: { threadId: 'thread-1', input: [{ type: 'text', text: 'wait for editor' }] },
+          params: expect.objectContaining({
+            threadId: 'thread-1', input: [{ type: 'text', text: 'wait for editor' }],
+            clientUserMessageId: `handmux-queue:${queued.id}`,
+          }),
         }),
       );
     } finally {
@@ -596,7 +657,10 @@ describe('Codex App Server client', () => {
 
       expect(replacement.sent.filter((message) => message.method === 'turn/start')).toContainEqual(
         expect.objectContaining({
-          params: { threadId: 'thread-1', input: [{ type: 'text', text: 'resume after reconnect' }] },
+          params: expect.objectContaining({
+            threadId: 'thread-1', input: [{ type: 'text', text: 'resume after reconnect' }],
+            clientUserMessageId: `handmux-queue:${queued.id}`,
+          }),
         }),
       );
     } finally {
@@ -680,7 +744,7 @@ describe('Codex App Server client', () => {
       params: { threadId: 'thread-1', turn: { id: 'turn-live', status: 'inProgress', items: [] } },
     });
     await new Promise((resolve) => setTimeout(resolve, 0));
-    await app.send('%1', 'thread-1', 'continue after reconnect');
+    const queued = (await app.send('%1', 'thread-1', 'continue after reconnect')).item;
     expect((await app.status('%1', 'thread-1')).queue).toHaveLength(1);
 
     first.ws.close();
@@ -690,9 +754,62 @@ describe('Codex App Server client', () => {
 
     expect(second.sent).toContainEqual(expect.objectContaining({
       method: 'turn/start',
-      params: { threadId: 'thread-1', input: [{ type: 'text', text: 'continue after reconnect' }] },
+      params: expect.objectContaining({
+        threadId: 'thread-1', input: [{ type: 'text', text: 'continue after reconnect' }],
+        clientUserMessageId: `handmux-queue:${queued.id}`,
+      }),
     }));
     expect((await app.status('%1', 'thread-1')).queue).toEqual([]);
+    app.close();
+  });
+
+  it('does not resend a queued message accepted before its turn/start reply was lost', async () => {
+    const first = fakeProxy({ turnStartReply: false });
+    const completed = fixtureThread({ type: 'idle' });
+    completed.turns.push({
+      id: 'turn-accepted', status: 'completed',
+      items: [{
+        id: 'user-accepted', type: 'userMessage', clientId: 'request-accepted',
+        content: [{ type: 'text', text: 'accepted once' }],
+      }],
+    });
+    let second;
+    let connectCount = 0;
+    const app = createCodexAppServer({
+      home: '/home/test', exists: () => true,
+      connect: () => {
+        if (connectCount++ === 0) return first.ws;
+        second = fakeProxy({ resumeThread: () => completed });
+        return second.ws;
+      },
+    });
+    await app.status('%1', 'thread-1');
+    first.push({
+      jsonrpc: '2.0', method: 'turn/started',
+      params: { threadId: 'thread-1', turn: { id: 'turn-live', status: 'inProgress', items: [] } },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await app.send('%1', 'thread-1', 'accepted once', 'request-accepted');
+    first.push({
+      jsonrpc: '2.0', method: 'turn/completed',
+      params: { threadId: 'thread-1', turn: { id: 'turn-live', status: 'completed', items: [] } },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(first.sent).toContainEqual(expect.objectContaining({
+      method: 'turn/start',
+      params: {
+        threadId: 'thread-1', input: [{ type: 'text', text: 'accepted once' }],
+        clientUserMessageId: 'request-accepted',
+      },
+    }));
+    first.ws.close();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await app.status('%1', 'thread-1');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect((await app.status('%1', 'thread-1')).queue).toEqual([]);
+    expect(second.sent.filter((message) => message.method === 'turn/start')).toEqual([]);
     app.close();
   });
 

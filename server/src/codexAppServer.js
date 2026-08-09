@@ -745,9 +745,41 @@ class CodexAppConnection {
     this.wakeQueue(threadId);
     const queue = this.queueState(threadId, false);
     return (queue?.items || []).map((item) => ({
-      ...item,
+      ...this.queueItemView(item),
       ...(queue.editing?.itemId === item.id ? { editing: true } : {}),
     }));
+  }
+
+  queueItemView(item) {
+    const { clientId: _clientId, ...view } = item;
+    return view;
+  }
+
+  reconcileQueuedDeliveries(threadId, source) {
+    const turns = Array.isArray(source?.turns)
+      ? source.turns
+      : (Array.isArray(source?.items) ? [source] : []);
+    const items = source?.type === 'userMessage'
+      ? [source]
+      : turns.flatMap((turn) => turn?.items || []);
+    const clientIds = new Set(items
+      .filter((item) => item?.type === 'userMessage' && typeof item.clientId === 'string' && item.clientId)
+      .map((item) => item.clientId));
+    if (!clientIds.size) return false;
+    const queue = this.queueState(threadId, false);
+    if (!queue?.items.length) return false;
+    const removedIds = new Set(queue.items
+      .filter((item) => clientIds.has(item.clientId))
+      .map((item) => item.id));
+    if (!removedIds.size) return false;
+    queue.items = queue.items.filter((item) => !removedIds.has(item.id));
+    if (removedIds.has(queue.editing?.itemId)) {
+      this.clearQueueEditTimer(queue);
+      queue.editing = null;
+    }
+    this.bump(threadId);
+    this.cleanupQueue(threadId);
+    return true;
   }
 
   cleanupQueue(threadId) {
@@ -775,23 +807,27 @@ class CodexAppConnection {
   enqueue(threadId, text, requestId = null) {
     const queue = this.queueState(threadId);
     if (queue.items.length >= MAX_QUEUED_MESSAGES) throw new Error('pending message queue is full');
+    const id = this.nextQueueId();
     const item = {
-      id: this.nextQueueId(), text, createdAt: this.now(),
+      id, text, createdAt: this.now(), clientId: requestId || `handmux-queue:${id}`,
       ...(requestId ? { requestId } : {}),
     };
     queue.items.push(item);
     this.bump(threadId);
-    return { ...item };
+    return this.queueItemView(item);
   }
 
-  async startTurn(threadId, text) {
+  async startTurn(threadId, text, clientUserMessageId = null) {
     const queue = this.queueState(threadId);
     queue.starting = true;
     const state = this.state(threadId);
     const previousPrompt = state.activePrompt;
     state.activePrompt = text.trim();
     try {
-      const result = await this.rpc('turn/start', { threadId, input: [{ type: 'text', text }] });
+      const result = await this.rpc('turn/start', {
+        threadId, input: [{ type: 'text', text }],
+        ...(clientUserMessageId ? { clientUserMessageId } : {}),
+      });
       state.activeTurnId = result.turn?.id || null;
       state.status = { type: 'active', activeFlags: [] };
       this.currentThreadId ||= threadId;
@@ -823,7 +859,7 @@ class CodexAppConnection {
       || queue.items.length || queue.starting || queue.draining) {
       return { queued: true, item: this.enqueue(threadId, text, requestId) };
     }
-    return this.startTurn(threadId, text);
+    return this.startTurn(threadId, text, requestId);
   }
 
   pruneSubmissionReceipts() {
@@ -865,7 +901,7 @@ class CodexAppConnection {
     queue.draining = true;
     const item = queue.items[0];
     try {
-      await this.startTurn(threadId, item.text);
+      await this.startTurn(threadId, item.text, item.clientId);
       if (queue.items[0]?.id === item.id) queue.items.shift();
       else queue.items = queue.items.filter((candidate) => candidate.id !== item.id);
       this.bump(threadId);
@@ -892,14 +928,15 @@ class CodexAppConnection {
       if (turnId) {
         result = await this.rpc('turn/steer', {
           threadId, expectedTurnId: turnId, input: [{ type: 'text', text: item.text }],
+          clientUserMessageId: item.clientId,
         });
       } else {
         if (queue.starting || queue.draining) throw new Error('queued message is already being sent');
-        result = await this.startTurn(threadId, item.text);
+        result = await this.startTurn(threadId, item.text, item.clientId);
       }
       queue.items = queue.items.filter((candidate) => candidate.id !== itemId);
       this.bump(threadId);
-      return { steered: true, item: { ...item }, result };
+      return { steered: true, item: this.queueItemView(item), result };
     } finally {
       queue.steering.delete(itemId);
       this.cleanupQueue(threadId);
@@ -938,7 +975,8 @@ class CodexAppConnection {
     this.scheduleQueueEditExpiry(threadId);
     this.bump(threadId);
     return {
-      editing: true, token, expiresAt: queue.editing.expiresAt, item: { ...item, editing: true },
+      editing: true, token, expiresAt: queue.editing.expiresAt,
+      item: { ...this.queueItemView(item), editing: true },
     };
   }
 
@@ -967,7 +1005,7 @@ class CodexAppConnection {
     this.bump(threadId);
     this.cleanupQueue(threadId);
     queueMicrotask(() => { void this.drainQueue(threadId).catch(() => {}); });
-    return { edited: true, item: { ...item } };
+    return { edited: true, item: this.queueItemView(item) };
   }
 
   cancelQueuedEdit(threadId, itemId, token) {
@@ -1003,6 +1041,7 @@ class CodexAppConnection {
     const turn = mergeTurnWithLive(previous, incoming, state.liveItemIds.get(incoming.id));
     if (index >= 0) state.thread.turns[index] = turn;
     else state.thread.turns.push(turn);
+    this.reconcileQueuedDeliveries(threadId, turn);
     return turn;
   }
 
@@ -1033,6 +1072,7 @@ class CodexAppConnection {
     const index = turn.items.findIndex((candidate) => candidate.id === item.id);
     if (index >= 0) turn.items[index] = item;
     else turn.items.push(item);
+    this.reconcileQueuedDeliveries(threadId, item);
   }
 
   appendAgentDelta(threadId, turnId, itemId, delta) {
@@ -1129,6 +1169,7 @@ class CodexAppConnection {
       const result = await this.rpc('thread/resume', { threadId });
       this.subscribed.add(threadId);
       state.thread = result.thread || null;
+      this.reconcileQueuedDeliveries(threadId, state.thread);
       state.readRevision = state.revision;
       state.status = result.thread?.status || state.status;
       state.settings = settingsFromResume(result);
@@ -1189,6 +1230,7 @@ class CodexAppConnection {
     const requestedRevision = state.revision;
     const result = await this.rpc('thread/read', { threadId, includeTurns: true });
     state.thread = mergeThreadWithLive(state.thread, result.thread, state.liveItemIds);
+    this.reconcileQueuedDeliveries(threadId, state.thread);
     state.readRevision = requestedRevision;
     state.status = result.thread?.status || state.status;
     const active = [...(state.thread?.turns || [])].reverse().find((turn) => turn.status === 'inProgress');
