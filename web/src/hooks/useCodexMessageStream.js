@@ -10,14 +10,36 @@ function eventKey(event) {
 }
 
 export function applyCodexStreamEvent(messages, event, afterK = -1) {
-  if (!event || !['ready', 'started', 'snapshot', 'delta', 'completed', 'turnCompleted'].includes(event.type)) {
+  if (!event || !['ready', 'started', 'snapshot', 'delta', 'completed', 'turnCompleted', 'goal', 'goalCleared'].includes(event.type)) {
     return messages;
   }
   // A new SSE connection replays only unfinished App Server items. Finalized temporary bubbles must not
   // survive beside the rollout history, otherwise an old reply can remain below the current one forever.
   if (event.type === 'ready') {
-    const next = messages.filter((message) => !message.completed);
+    const next = messages.filter((message) => message.type === 'goal' || !message.completed);
     return next.length === messages.length ? messages : next;
+  }
+  if (event.type === 'goalCleared') return messages;
+  if (event.type === 'goal' && event.goal?.objective) {
+    const marker = event.goal.createdAt ?? event.goal.updatedAt ?? event.goal.objective;
+    const key = `goal:${marker}:${event.event || event.goal.status || 'set'}`;
+    const nextMessage = {
+      id: `codex-stream:${key}`,
+      streamKey: key,
+      turnId: event.turnId || null,
+      role: 'assistant',
+      type: 'goal',
+      event: event.event || (event.goal.status === 'active' ? 'set' : event.goal.status),
+      goal: event.goal,
+      live: true,
+      completed: true,
+      afterK,
+    };
+    const index = messages.findIndex((message) => message.streamKey === key);
+    const next = index >= 0
+      ? messages.map((message, candidate) => (candidate === index ? nextMessage : message))
+      : [...messages, nextMessage];
+    return next.slice(-MAX_LIVE_MESSAGES);
   }
   if (event.type === 'turnCompleted') {
     let changed = false;
@@ -40,7 +62,7 @@ export function applyCodexStreamEvent(messages, event, afterK = -1) {
   // Once a later assistant item starts, every earlier finalized assistant item is already history. Keep
   // only unfinished accumulators; the durable rollout remains the single source for completed content.
   const baseMessages = !previous && !completed && (event.type === 'started' || event.type === 'snapshot')
-    ? messages.filter((message) => !message.completed)
+    ? messages.filter((message) => message.type === 'goal' || !message.completed)
     : messages;
   const baseIndex = baseMessages.findIndex((message) => message.streamKey === key);
   const nextMessage = {
@@ -64,6 +86,16 @@ export function applyCodexStreamEvent(messages, event, afterK = -1) {
 }
 
 export function durableCoversLiveMessage(durableMessages, liveMessage) {
+  if (liveMessage?.type === 'goal') {
+    return durableMessages.some((message) => (
+      message?.type === 'goal'
+      && message.event === liveMessage.event
+      && message.goal?.objective === liveMessage.goal?.objective
+      && ((message.goal?.createdAt != null && liveMessage.goal?.createdAt != null
+        && message.goal.createdAt === liveMessage.goal.createdAt)
+        || Number(message.k) > Number(liveMessage.afterK ?? -1))
+    ));
+  }
   if (!liveMessage?.text) return false;
   return durableMessages.some((message) => {
     if (message?.role !== 'assistant' || message.type !== 'text' || message.text !== liveMessage.text) return false;
@@ -158,7 +190,7 @@ export function useCodexMessageStream({
     let retryMs = RETRY_MIN_MS;
     const onEvent = (event) => {
       if (event?.threadId && event.threadId !== threadId) return;
-      if (event?.type === 'completed' || event?.type === 'turnCompleted') onSettledRef.current?.();
+      if (['completed', 'turnCompleted', 'goal'].includes(event?.type)) onSettledRef.current?.();
       setSnapshot((current) => {
         if (current.scope !== scope) return current;
         const messages = applyCodexStreamEvent(current.messages, event, latestKRef.current);

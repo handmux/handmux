@@ -668,6 +668,40 @@ describe('ChatView', () => {
     expect(sheet.querySelector('input, textarea, [role="checkbox"]')).toBeNull();
   });
 
+  it('renders Goal lifecycle cards and opens their shared read-only Bottom Sheet', async () => {
+    const goal = {
+      objective: 'Finish the release', status: 'complete', createdAt: 10, updatedAt: 20,
+      tokensUsed: 500, timeUsedSeconds: 12, tokenBudget: null,
+    };
+    mockTranscript([
+      { k: 0, i: 0, role: 'assistant', type: 'goal', event: 'set', goal: { ...goal, status: 'active' } },
+      { k: 1, i: 1, role: 'assistant', type: 'goal', event: 'complete', goal },
+    ]);
+    vi.spyOn(api, 'getCodexGoal').mockResolvedValue({ goal });
+    const { container } = render(<ChatView pane="%0" agent="codex" kind="done" />);
+
+    const setCard = await screen.findByRole('button', { name: /已设置目标.*Finish the release/ });
+    const completeCard = screen.getByRole('button', { name: /目标已完成.*Finish the release/ });
+    expect(container.querySelectorAll('.chat-goal-card')).toHaveLength(2);
+    fireEvent.click(setCard);
+    let sheet = await waitFor(() => {
+      const value = container.querySelector('.codex-goal-menu');
+      expect(value).toBeTruthy();
+      return value;
+    });
+    // The earlier set card resolves the same native Goal, so it opens its final state rather than a stale
+    // second detail model. The terminal card then opens this exact shared sheet as well.
+    expect(sheet.textContent).toContain('已完成');
+    fireEvent.click(sheet.querySelector('.codex-goal-sheet-x'));
+    await waitFor(() => expect(container.querySelector('.codex-goal-menu')).toBeNull());
+    fireEvent.click(completeCard);
+    sheet = await screen.findByRole('dialog', { name: '任务目标' });
+    expect(sheet.textContent).toContain('Token 500');
+    expect(sheet.textContent).toContain('耗时 12 秒');
+    expect(sheet.querySelector('.codex-goal-actions')).toBeNull();
+    expect(container.querySelector('.codex-goal-backdrop')).toBeTruthy();
+  });
+
   it('keeps an unfinished historical task indicator static', async () => {
     mockTranscript([
       { k: 0, i: 0, role: 'assistant', type: 'plan', turnId: 'turn-plan',

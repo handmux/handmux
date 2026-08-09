@@ -1,8 +1,15 @@
 import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { clearCodexGoal, getCodexGoal, UnauthorizedError, updateCodexGoal } from '../api.js';
 import { t } from '../i18n';
 import { useBackButton } from '../hooks/useBackButton.js';
-import { TargetIcon } from './icons.jsx';
+import { TargetIcon, XIcon } from './icons.jsx';
+
+const TERMINAL_GOAL_STATUSES = new Set(['blocked', 'usageLimited', 'budgetLimited', 'complete']);
+
+export function isCodexGoalTerminal(goal) {
+  return TERMINAL_GOAL_STATUSES.has(goal?.status);
+}
 
 export function codexGoalStatusLabel(status) {
   if (status === 'active') return t('chat.goal.statusActive');
@@ -15,7 +22,7 @@ export function codexGoalStatusLabel(status) {
 }
 
 export function CodexGoalBar({ goal, onOpen }) {
-  if (!goal?.objective) return null;
+  if (!goal?.objective || isCodexGoalTerminal(goal)) return null;
   const title = t('chat.goal.title');
   const status = codexGoalStatusLabel(goal.status);
   return (
@@ -34,8 +41,56 @@ export function CodexGoalBar({ goal, onOpen }) {
   );
 }
 
+function goalEventLabel(goal, event) {
+  if (event === 'set') return t('chat.goal.eventSet');
+  if (goal?.status === 'complete' || event === 'complete') return t('chat.goal.eventComplete');
+  if (goal?.status === 'blocked' || event === 'blocked') return t('chat.goal.eventBlocked');
+  if (goal?.status === 'usageLimited' || event === 'usageLimited') return t('chat.goal.eventUsageLimited');
+  if (goal?.status === 'budgetLimited' || event === 'budgetLimited') return t('chat.goal.eventBudgetLimited');
+  return codexGoalStatusLabel(goal?.status) || t('chat.goal.title');
+}
+
+export function CodexGoalCard({ goal, event, onOpen }) {
+  if (!goal?.objective) return null;
+  const label = goalEventLabel(goal, event);
+  return (
+    <button type="button" className={`chat-goal-card is-${event || goal.status || 'set'}`}
+      aria-label={`${label} ${goal.objective}`} onClick={() => onOpen(goal)}>
+      <span className="codex-goal-icon" aria-hidden="true"><TargetIcon /></span>
+      <span className="chat-goal-copy">
+        <strong>{label}</strong>
+        <span>{goal.objective}</span>
+      </span>
+      <span className="codex-goal-chevron" aria-hidden="true">›</span>
+    </button>
+  );
+}
+
+function sameGoal(left, right) {
+  if (!left || !right) return false;
+  if (left.createdAt != null && right.createdAt != null) return left.createdAt === right.createdAt;
+  return left.objective === right.objective;
+}
+
+function GoalMeta({ goal }) {
+  const tokens = Number(goal?.tokensUsed);
+  const budget = goal?.tokenBudget == null ? Number.NaN : Number(goal.tokenBudget);
+  const elapsed = Number(goal?.timeUsedSeconds);
+  if (!Number.isFinite(tokens) && !Number.isFinite(elapsed)) return null;
+  return (
+    <div className="codex-goal-meta">
+      {Number.isFinite(tokens) && <span>{t('chat.goal.tokens', {
+        value: Number.isFinite(budget) ? `${tokens.toLocaleString()} / ${budget.toLocaleString()}` : tokens.toLocaleString(),
+      })}</span>}
+      {Number.isFinite(elapsed) && elapsed > 0
+        && <span>{t('chat.goal.elapsed', { value: Math.round(elapsed).toLocaleString() })}</span>}
+    </div>
+  );
+}
+
 export default function CodexGoalMenu({
-  open, pane, editOnOpen, onClose, onAuthFail, onNotice, onGoalChange,
+  open, pane, editOnOpen, goalSnapshot = null, onClose, onAuthFail, onNotice = () => {}, onGoalChange,
+  portal = false, chatTone = 'dusk', keyboardInset = 0,
 }) {
   const [goal, setGoal] = useState(null);
   const [draft, setDraft] = useState('');
@@ -43,6 +98,7 @@ export default function CodexGoalMenu({
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [confirmClear, setConfirmClear] = useState(false);
+  const [historical, setHistorical] = useState(false);
   const [error, setError] = useState('');
   const requestSeqRef = useRef(0);
   useBackButton(open && confirmClear, () => setConfirmClear(false));
@@ -54,13 +110,22 @@ export default function CodexGoalMenu({
     setLoading(true);
     setError('');
     setConfirmClear(false);
+    if (goalSnapshot) {
+      setGoal(goalSnapshot);
+      setDraft(goalSnapshot.objective || '');
+      setEditing(false);
+      setHistorical(true);
+    }
     void getCodexGoal(pane).then((result) => {
       if (requestSeq !== requestSeqRef.current) return;
-      const next = result?.goal || null;
+      const current = result?.goal || null;
+      const matches = goalSnapshot ? sameGoal(goalSnapshot, current) : true;
+      const next = goalSnapshot && !matches ? goalSnapshot : current;
       setGoal(next);
-      onGoalChange?.(next);
+      if (!goalSnapshot || matches) onGoalChange?.(current);
       setDraft(next?.objective || '');
-      setEditing(editOnOpen || !next);
+      setHistorical(!!goalSnapshot && !matches);
+      setEditing(!goalSnapshot && (editOnOpen || !next));
     }).catch((err) => {
       if (requestSeq !== requestSeqRef.current) return;
       if (err instanceof UnauthorizedError) onAuthFail?.();
@@ -71,7 +136,7 @@ export default function CodexGoalMenu({
     return () => { requestSeqRef.current++; };
     // Event callbacks are not goal identity; changing their function identity must not refetch.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, pane, editOnOpen]);
+  }, [open, pane, editOnOpen, goalSnapshot]);
 
   if (!open) return null;
 
@@ -126,17 +191,23 @@ export default function CodexGoalMenu({
     } finally { setSaving(false); }
   };
 
-  return (
+  const readOnly = historical || isCodexGoalTerminal(goal);
+  const bottom = `${Math.max(0, Number(keyboardInset) || 0)}px`;
+  const content = (
     <>
-      <div className="codex-goal-backdrop" onClick={onClose} />
-      <section className="codex-goal-menu" role="dialog" aria-modal="true"
+      <div className="codex-goal-backdrop" style={{ bottom }} onClick={onClose} />
+      <section className="codex-goal-menu" style={{ bottom }} role="dialog" aria-modal="true"
         aria-label={t('chat.goal.title')}>
+        <div className="tool-sheet-grip" />
         <header className="codex-goal-head">
+          <span className="codex-goal-icon" aria-hidden="true"><TargetIcon /></span>
           <strong>{t('chat.goal.title')}</strong>
           {goal && !editing && <span className={`codex-goal-status ${goal.status || ''}`}>
             {codexGoalStatusLabel(goal.status)}
           </span>}
         </header>
+        <button type="button" className="cmd-close codex-goal-sheet-x"
+          aria-label={t('common.close')} onClick={onClose}><XIcon /></button>
         <div className="codex-goal-body">
           {loading && <div className="codex-goal-state">{t('chat.goal.loading')}</div>}
           {!loading && editing && (
@@ -147,10 +218,15 @@ export default function CodexGoalMenu({
               <div className="codex-goal-count">{draft.length.toLocaleString()} / 4,000</div>
             </>
           )}
-          {!loading && goal && !editing && <p className="codex-goal-objective">{goal.objective}</p>}
+          {!loading && goal && !editing && (
+            <>
+              <p className="codex-goal-objective">{goal.objective}</p>
+              <GoalMeta goal={goal} />
+            </>
+          )}
           {error && <div className="codex-goal-error" role="status">{error}</div>}
         </div>
-        {!loading && (goal || editing) && (
+        {!loading && (goal || editing) && !readOnly && (
           <footer className="codex-goal-actions">
             {editing ? (
               <>
@@ -194,5 +270,10 @@ export default function CodexGoalMenu({
         </div>
       )}
     </>
+  );
+  if (!portal) return content;
+  return createPortal(
+    <div className="chat-tone-surface" data-chat-tone={chatTone}>{content}</div>,
+    document.body,
   );
 }

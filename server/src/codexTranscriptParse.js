@@ -16,8 +16,25 @@ const cap = (value, limit) => {
 // user prompts may legitimately begin with ordinary HTML/XML and must remain part of the conversation.
 export function isCodexSyntheticUserText(value) {
   const text = String(value ?? '');
-  return /^\s*<(?:environment_context|permissions(?:\s+instructions)?|collaboration_mode|apps_instructions|plugins_instructions|skills_instructions|recommended_plugins|user_action|user_shell_command|image|turn_aborted)(?:\s|>|\/)/.test(text)
+  return /^\s*<(?:environment_context|permissions(?:\s+instructions)?|collaboration_mode|apps_instructions|plugins_instructions|skills_instructions|recommended_plugins|codex_internal_context|user_action|user_shell_command|image|turn_aborted)(?:\s|>|\/)/.test(text)
     || /^\s*# AGENTS\.md instructions for [^\r\n]+\r?\n\s*<INSTRUCTIONS>(?:\r?\n|$)/.test(text);
+}
+
+function goalFromInternalContext(value) {
+  const text = String(value ?? '');
+  if (!/^\s*<codex_internal_context\s+source=["']goal["']\s*>/.test(text)) return null;
+  const objective = text.match(/<objective>\s*\r?\n([\s\S]*?)\r?\n\s*<\/objective>/)?.[1]?.trim();
+  if (!objective) return null;
+  const tokens = text.match(/^- Tokens used:\s*([\d,]+)/mi)?.[1]?.replaceAll(',', '');
+  const rawBudget = text.match(/^- Token budget:\s*([^\r\n]+)/mi)?.[1]?.trim();
+  const tokenBudget = rawBudget && !/^(?:none|unbounded)$/i.test(rawBudget)
+    ? Number(rawBudget.replaceAll(',', '')) : null;
+  return {
+    objective,
+    status: 'active',
+    tokensUsed: Number.isFinite(Number(tokens)) ? Number(tokens) : 0,
+    tokenBudget: Number.isFinite(tokenBudget) ? tokenBudget : null,
+  };
 }
 
 function messageText(content) {
@@ -297,10 +314,41 @@ function structuredResults(value) {
   return parsed && typeof parsed === 'object' ? Object.values(parsed) : null;
 }
 
+function goalResult(value) {
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    try { return goalResult(JSON.parse(trimmed)); } catch { return null; }
+  }
+  if (Array.isArray(value)) {
+    for (let i = value.length - 1; i >= 0; i--) {
+      const candidate = goalResult(value[i]?.text ?? value[i]);
+      if (candidate) return candidate;
+    }
+    return null;
+  }
+  if (!value || typeof value !== 'object') return null;
+  if (value.goal && typeof value.goal === 'object') return value.goal;
+  if (typeof value.objective === 'string' && typeof value.status === 'string') return value;
+  if (value.structuredContent) return goalResult(value.structuredContent);
+  if (value.output) return goalResult(value.output);
+  return null;
+}
+
+function applyGoalOutput(message, value) {
+  const goal = goalResult(value);
+  if (!goal) return false;
+  message.goal = { ...(message.goal || {}), ...goal };
+  message.event = goal.status === 'complete' ? 'complete'
+    : goal.status === 'blocked' ? 'blocked' : message.event;
+  return true;
+}
+
 function applyCustomOutput(messages, value) {
+  if (messages.length === 1 && messages[0].type === 'goal' && applyGoalOutput(messages[0], value)) return;
   const values = structuredResults(value);
   if (values && values.length === messages.length) {
     messages.forEach((message, index) => {
+      if (message.type === 'goal') { applyGoalOutput(message, values[index]); return; }
       if (!message.tool) return;
       const result = values[index];
       message.tool.result = outputText(result);
@@ -325,6 +373,7 @@ export function createCodexTranscriptParser() {
   const messages = [];
   const pending = new Map();
   let lineIndex = 0;
+  let activeGoalObjective = null;
 
   const toolMessage = (i, ts, name, input, diff, item) => ({
     i, role: 'assistant', type: 'tool', ts,
@@ -336,6 +385,27 @@ export function createCodexTranscriptParser() {
 
   const callMessage = (i, ts, name, input, diff, item) => {
     const turnId = item?.internal_chat_message_metadata_passthrough?.turn_id;
+    if (name === 'create_goal' && typeof input?.objective === 'string') {
+      activeGoalObjective = input.objective.trim() || null;
+      return {
+        i, role: 'assistant', type: 'goal', event: 'set', ts,
+        goal: {
+          objective: input.objective,
+          status: 'active',
+          ...(input.token_budget != null && Number.isFinite(Number(input.token_budget))
+            ? { tokenBudget: Number(input.token_budget) } : {}),
+        },
+        ...(turnId ? { turnId } : {}),
+      };
+    }
+    if (name === 'update_goal' && ['complete', 'blocked'].includes(input?.status)) {
+      activeGoalObjective = null;
+      return {
+        i, role: 'assistant', type: 'goal', event: input.status, ts,
+        goal: { status: input.status },
+        ...(turnId ? { turnId } : {}),
+      };
+    }
     const plan = name === 'update_plan'
       ? codexPlanSnapshot(turnId, input?.plan, input?.explanation)
       : null;
@@ -365,6 +435,14 @@ export function createCodexTranscriptParser() {
         if (item.role === 'developer') continue;
         if (!['user', 'assistant'].includes(item.role) || !text.trim()) continue;
         if (item.role === 'user') {
+          const goal = goalFromInternalContext(text);
+          if (goal) {
+            if (goal.objective !== activeGoalObjective) {
+              messages.push({ i, role: 'assistant', type: 'goal', event: 'set', goal, ts });
+              activeGoalObjective = goal.objective;
+            }
+            continue;
+          }
           if (isCodexSyntheticUserText(text)) continue;
           const slash = SLASH_CMD_RE.exec(text.trim());
           if (slash) {
@@ -395,6 +473,11 @@ export function createCodexTranscriptParser() {
       if (item.type === 'function_call_output') {
         const targets = item.call_id && pending.get(item.call_id);
         if (targets?.length === 1) {
+          if (targets[0].type === 'goal') {
+            applyGoalOutput(targets[0], item.output);
+            pending.delete(item.call_id);
+            continue;
+          }
           if (!targets[0].tool) { pending.delete(item.call_id); continue; }
           const output = classicOutput(item.output);
           targets[0].tool.result = output.result;

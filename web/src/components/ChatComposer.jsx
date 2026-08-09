@@ -401,6 +401,11 @@ export default function ChatComposer({
   };
   useEffect(() => { setCurrentGoal(null); }, [managedCodex, pane]);
   useEffect(() => {
+    if (!managedCodex || !Object.hasOwn(codexSession || {}, 'goal')) return;
+    goalRequestSeqRef.current += 1;
+    setCurrentGoal(codexSession.goal || null);
+  }, [managedCodex, codexSession?.goal]);
+  useEffect(() => {
     const requestSeq = ++goalRequestSeqRef.current;
     if (!managedCodex || !pane) {
       setCurrentGoal(null);
@@ -1074,9 +1079,6 @@ export default function ChatComposer({
             )}
             <CodexConfigMenu open={configOpen} pane={pane} settings={managedSettings} busy={busy}
               onChange={setLocalSettings} onClose={() => setConfigOpen(false)} onAuthFail={onAuthFail} />
-            <CodexGoalMenu open={goalOpen} pane={pane} editOnOpen={goalEditOnOpen}
-              onClose={() => setGoalOpen(false)} onAuthFail={onAuthFail} onNotice={showNotice}
-              onGoalChange={applyCurrentGoal} />
           </div>
           <div className="cc-actions-right">
             {/* Context-window chip — model + used %, right-aligned just left of mic/send. pointer-events:none
@@ -1256,6 +1258,9 @@ export default function ChatComposer({
       <CodexPlanSheet open={planOpen} title={t('chat.plan.currentTitle')} plan={activePlan}
         onClose={() => setPlanOpen(false)} portal chatTone={chatTone} keyboardInset={keyboardInset}
         animateInProgress={!planWaiting} />
+      <CodexGoalMenu open={goalOpen} pane={pane} editOnOpen={goalEditOnOpen}
+        onClose={() => setGoalOpen(false)} onAuthFail={onAuthFail} onNotice={showNotice}
+        onGoalChange={applyCurrentGoal} portal chatTone={chatTone} keyboardInset={keyboardInset} />
       {editOpen && <CmdFavEditor variant="chat" presets={serverShortcuts.chat}
         onChange={refreshShortcuts} onClose={() => setEditOpen(false)} />}
     </div>

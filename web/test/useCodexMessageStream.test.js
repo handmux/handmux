@@ -74,6 +74,35 @@ describe('Codex message stream projection', () => {
     ]);
   });
 
+  it('keeps native Goal lifecycle cards until the durable rollout covers them', () => {
+    const goal = {
+      objective: 'Finish the release', status: 'complete', createdAt: 10,
+      updatedAt: 20, tokensUsed: 500, timeUsedSeconds: 12,
+    };
+    const messages = applyCodexStreamEvent([], {
+      type: 'goal', threadId: 'thread-1', turnId: 'turn-goal', event: 'complete', goal,
+    }, 4);
+    expect(messages).toEqual([expect.objectContaining({
+      type: 'goal', event: 'complete', goal, completed: true, afterK: 4,
+    })]);
+    expect(applyCodexStreamEvent(messages, { type: 'ready' })).toEqual(messages);
+    expect(applyCodexStreamEvent(messages, {
+      type: 'started', turnId: 'turn-next', itemId: 'agent-next', text: '',
+    })).toEqual([
+      expect.objectContaining({ type: 'goal', event: 'complete' }),
+      expect.objectContaining({ type: 'text', turnId: 'turn-next' }),
+    ]);
+    expect(durableCoversLiveMessage([
+      { k: 5, type: 'goal', event: 'complete', goal },
+    ], messages[0])).toBe(true);
+    expect(durableCoversLiveMessage([
+      { k: 3, type: 'goal', event: 'complete', goal },
+    ], messages[0])).toBe(true);
+    expect(durableCoversLiveMessage([
+      { k: 3, type: 'goal', event: 'complete', goal: { ...goal, createdAt: 9 } },
+    ], messages[0])).toBe(false);
+  });
+
   it('renders incoming deltas, requests a durable refresh on completion, and reconciles the final message', async () => {
     let emit;
     vi.spyOn(api, 'streamCodexMessages').mockImplementation((_pane, { signal, onEvent }) => {

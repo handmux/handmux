@@ -170,6 +170,58 @@ describe('Codex App Server projection', () => {
 });
 
 describe('Codex App Server client', () => {
+  it('projects native Goal lifecycle notifications into status and the live stream', async () => {
+    const initialGoal = {
+      threadId: 'thread-1', objective: 'Finish the release', status: 'active',
+      createdAt: 1, updatedAt: 1, tokensUsed: 0, timeUsedSeconds: 0, tokenBudget: null,
+    };
+    const proxy = fakeProxy({ initialGoal });
+    const app = createCodexAppServer({ home: '/home/test', exists: () => true, connect: () => proxy.ws });
+    const events = [];
+    const unsubscribe = await app.subscribe('%1', 'thread-1', (event) => events.push(event));
+    await app.getGoal('%1', 'thread-1');
+
+    proxy.push({
+      jsonrpc: '2.0', method: 'thread/goal/updated', params: {
+        threadId: 'thread-1', turnId: 'turn-goal',
+        goal: { ...initialGoal, status: 'complete', updatedAt: 2, tokensUsed: 500, timeUsedSeconds: 12 },
+      },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(events).toEqual([expect.objectContaining({
+      type: 'goal', event: 'complete', threadId: 'thread-1', turnId: 'turn-goal',
+      goal: expect.objectContaining({ objective: 'Finish the release', status: 'complete' }),
+    })]);
+    expect(await app.status('%1', 'thread-1')).toMatchObject({
+      goal: { objective: 'Finish the release', status: 'complete', tokensUsed: 500 },
+    });
+    const replayed = [];
+    const unsubscribeReplay = await app.subscribe('%1', 'thread-1', (event) => replayed.push(event));
+    expect(replayed).toEqual([expect.objectContaining({
+      type: 'goal', event: 'complete', goal: expect.objectContaining({ status: 'complete' }),
+    })]);
+    unsubscribeReplay();
+
+    proxy.push({
+      jsonrpc: '2.0', method: 'thread/goal/cleared', params: { threadId: 'thread-1', turnId: null },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(events.at(-1)).toMatchObject({ type: 'goalCleared', threadId: 'thread-1' });
+    expect(await app.status('%1', 'thread-1')).toMatchObject({ goal: null });
+    proxy.push({
+      jsonrpc: '2.0', method: 'thread/goal/updated', params: {
+        threadId: 'thread-1', turnId: null,
+        goal: { ...initialGoal, objective: 'Ship the release', createdAt: 3, updatedAt: 3 },
+      },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(events.at(-1)).toMatchObject({
+      type: 'goal', event: 'set', goal: { objective: 'Ship the release', status: 'active' },
+    });
+    unsubscribe();
+    app.close();
+  });
+
   it('projects the authoritative live turn plan and retains its completed-turn summary', async () => {
     const proxy = fakeProxy();
     const app = createCodexAppServer({ home: '/home/test', exists: () => true, connect: () => proxy.ws });

@@ -376,7 +376,7 @@ describe('ChatComposer', () => {
     getCodexGoal.mockResolvedValue({ goal: {
       objective: 'Keep tests green', status: 'active', tokensUsed: 120, timeUsedSeconds: 3,
     } });
-    const { container } = render(<ChatComposer pane="%1" agent="codex" kind="working" codexSession={{
+    const { container } = render(<ChatComposer pane="%1" agent="codex" kind="working" keyboardInset={280} codexSession={{
       managed: true,
       plan: { steps: [{ step: '实现常驻目标', status: 'inProgress' }] },
     }} />);
@@ -389,6 +389,8 @@ describe('ChatComposer', () => {
     const panel = await screen.findByRole('dialog', { name: '任务目标' });
     await waitFor(() => expect(panel.textContent).toContain('Keep tests green'));
     expect(panel.textContent).toContain('进行中');
+    expect(panel.style.bottom).toBe('280px');
+    expect(panel.parentElement.getAttribute('data-chat-tone')).toBe('dusk');
     fireEvent.click(screen.getByRole('button', { name: '编辑' }));
     const objective = screen.getByRole('textbox', { name: '目标内容' });
     typeInto(objective, 'Ship after review');
@@ -414,6 +416,20 @@ describe('ChatComposer', () => {
     expect(container.querySelector('.cc-goal-bar')).toBeNull();
     expect(container.querySelector('.chat-composer').firstElementChild)
       .toBe(container.querySelector('.cc-quick'));
+  });
+
+  it('removes the resident Goal row as soon as native status becomes terminal', async () => {
+    const active = { objective: 'Finish the release', status: 'active', createdAt: 10, updatedAt: 10 };
+    getCodexGoal.mockResolvedValue({ goal: active });
+    const { container, rerender } = render(<ChatComposer pane="%1" agent="codex" kind="working"
+      codexSession={{ managed: true, goal: active }} />);
+    await screen.findByRole('button', { name: /任务目标.*Finish the release/ });
+
+    rerender(<ChatComposer pane="%1" agent="codex" kind="done" codexSession={{
+      managed: true,
+      goal: { ...active, status: 'complete', updatedAt: 20, tokensUsed: 500, timeUsedSeconds: 12 },
+    }} />);
+    await waitFor(() => expect(container.querySelector('.cc-goal-bar')).toBeNull());
   });
 
   it('removes the previous thread Goal row immediately when switching panes', async () => {

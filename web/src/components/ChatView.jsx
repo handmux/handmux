@@ -19,6 +19,7 @@ import {
   CheckIcon, XIcon,
 } from './icons.jsx';
 import { CodexPlanSheet, CodexPlanSummary, codexPlanSteps } from './CodexPlan.jsx';
+import CodexGoalMenu, { CodexGoalCard } from './CodexGoalMenu.jsx';
 
 // Codex App Server exposes the process-launch wrapper, while its terminal UI shows only the command passed
 // to that shell. Keep the raw value in the transcript and remove only this known wrapper at render time.
@@ -409,8 +410,9 @@ function outputLinkFromAnchor(anchor) {
   return { kind: 'doc', path: match.path || raw.slice(match.start, match.end) };
 }
 
-function Bubble({ m, running, onOpenTool }) {
+function Bubble({ m, running, onOpenTool, onOpenGoal }) {
   if (m.type === 'tool') return <ToolChip tool={m.tool} running={running} onOpen={() => onOpenTool(m)} />;
+  if (m.type === 'goal') return <CodexGoalCard goal={m.goal} event={m.event} onOpen={onOpenGoal} />;
   // ESC-interrupt marker — a quiet, centered grey hint that the user stopped the turn, NOT a user bubble
   // (Claude Code writes it as a user line, but the user didn't type it).
   if (m.type === 'interrupt') return <div className="chat-interrupt">{t('chat.interrupted')}</div>;
@@ -647,7 +649,7 @@ export default function ChatView({
   });
   // A tab switch reconnects the live stream faster than the durable transcript can load. Keep accumulating
   // those deltas in useCodexMessageStream, but do not render them ahead of their historical predecessors.
-  const visibleLiveMessages = useMemo(() => (loaded ? liveMessages.filter((message) => message.text
+  const visibleLiveMessages = useMemo(() => (loaded ? liveMessages.filter((message) => (message.type === 'goal' || message.text)
     && !durableCoversLiveMessage(durableMessages, message)) : []), [loaded, durableMessages, liveMessages]);
   const messages = useMemo(() => [
     ...durableMessages,
@@ -819,6 +821,7 @@ export default function ChatView({
   // the loaded window it's gone → the sheet self-closes.
   const [sheetKey, setSheetKey] = useState(null);
   const [planSheet, setPlanSheet] = useState(null);
+  const [goalSheet, setGoalSheet] = useState(null);
   const sheetMsg = sheetKey != null ? messages.find((m) => m.type === 'tool' && messageIdentity(m) === sheetKey) : null;
   useEffect(() => { if (sheetKey != null && !sheetMsg) setSheetKey(null); }, [sheetKey, sheetMsg]);
   useEffect(() => { setPlanSheet(null); }, [pane]);
@@ -891,7 +894,12 @@ export default function ChatView({
   };
 
   useEffect(() => cancelLongPress, []); // clear a pending hold on unmount
-  useEffect(() => { dismissCopy(); setSheetKey(null); }, [pane]); // pane switch drops any callout / sheet
+  useEffect(() => {
+    dismissCopy();
+    setSheetKey(null);
+    setPlanSheet(null);
+    setGoalSheet(null);
+  }, [pane]); // pane switch drops any callout / sheet
 
   // Gate backdrop scope: the dim must cover ONLY the chat lens (messages + composer), never the topbar /
   // window tabs above — those stay visible and tappable while a question is pending. Measure .chat-view's
@@ -1108,7 +1116,8 @@ export default function ChatView({
           return (
             <Fragment key={messageIdentity(m)}>
               <Bubble m={m} running={toolRunning && idx === messages.length - 1}
-                onOpenTool={(msg) => setSheetKey(messageIdentity(msg))} />
+                onOpenTool={(msg) => setSheetKey(messageIdentity(msg))}
+                onOpenGoal={setGoalSheet} />
               {label && <div className={'chat-ts ' + (m.role === 'user' ? 'ts-me' : 'ts-them')}>{label}</div>}
               {turnPlan && <CodexPlanSummary plan={turnPlan} onOpen={() => setPlanSheet(turnPlan)} />}
             </Fragment>
@@ -1179,6 +1188,8 @@ export default function ChatView({
 
       <CodexPlanSheet open={!!planSheet} title={t('chat.plan.historyTitle')} plan={planSheet}
         onClose={() => setPlanSheet(null)} />
+      <CodexGoalMenu open={!!goalSheet} pane={pane} goalSnapshot={goalSheet}
+        onClose={() => setGoalSheet(null)} onAuthFail={onAuthFail} />
 
       {/* The gate (rich or fallback) is a modal bottom sheet: the backdrop dims the chat lens and,
          critically, covers the composer — a SHORT gate (e.g. the 提交/取消 review card) would otherwise leave

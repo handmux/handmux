@@ -17,6 +17,7 @@ const APPROVAL_METHODS = new Set([
 ]);
 const USER_INPUT_METHOD = 'item/tool/requestUserInput';
 const SIMPLE_DECISIONS = new Set(['accept', 'acceptForSession', 'decline', 'cancel']);
+const TERMINAL_GOAL_STATUSES = new Set(['blocked', 'usageLimited', 'budgetLimited', 'complete']);
 
 function structuredDecision(value, index) {
   const execpolicy = value?.acceptWithExecpolicyAmendment?.execpolicy_amendment;
@@ -643,6 +644,12 @@ class CodexAppConnection {
         type: 'turnCompleted', threadId: params.threadId,
         turnId: turn?.id || params.turnId || null, status: status || null,
       });
+    } else if (message.method === 'thread/goal/updated') {
+      this.applyGoalSnapshot(params.threadId, params.goal, params.turnId);
+    } else if (message.method === 'thread/goal/cleared') {
+      if (this.applyGoalSnapshot(params.threadId, null, params.turnId)) {
+        this.emitStream({ type: 'goalCleared', threadId: params.threadId, turnId: params.turnId || null });
+      }
     } else if (message.method === 'thread/settings/updated') {
       const state = this.state(params.threadId);
       state.settings = params.threadSettings
@@ -689,9 +696,28 @@ class CodexAppConnection {
     if (!this.threadState.has(threadId)) this.threadState.set(threadId, {
       revision: 0, readRevision: -1, thread: null, status: null, activeTurnId: null, settings: null,
       activePrompt: '', contextUsage: null, lastTurn: null, loadedOnly: false, liveItemIds: new Map(),
-      completedAgentItemIds: new Set(), plans: new Map(),
+      completedAgentItemIds: new Set(), plans: new Map(), goal: undefined,
     });
     return this.threadState.get(threadId);
+  }
+
+  applyGoalSnapshot(threadId, goal, turnId = null, { emit = true } = {}) {
+    if (!threadId) return false;
+    const state = this.state(threadId);
+    const previous = state.goal;
+    state.goal = goal || null;
+    if (!emit || !goal) return previous !== state.goal;
+    const replaced = !previous || previous.createdAt !== goal.createdAt
+      || previous.objective !== goal.objective;
+    const enteredTerminal = TERMINAL_GOAL_STATUSES.has(goal.status)
+      && previous?.status !== goal.status;
+    if (!replaced && !enteredTerminal) return false;
+    this.emitStream({
+      type: 'goal', threadId, turnId: turnId || null,
+      event: TERMINAL_GOAL_STATUSES.has(goal.status) ? goal.status : 'set',
+      goal,
+    });
+    return true;
   }
 
   queueKey(threadId) { return `${this.pane}\0${threadId}`; }
@@ -1113,6 +1139,13 @@ class CodexAppConnection {
         } catch { /* initial projection is best effort */ }
       }
     }
+    if (state?.goal && TERMINAL_GOAL_STATUSES.has(state.goal.status)) {
+      try {
+        listener({
+          type: 'goal', threadId, turnId: null, event: state.goal.status, goal: state.goal,
+        });
+      } catch { /* initial Goal projection is best effort */ }
+    }
     return () => this.streamListeners.delete(subscription);
   }
 
@@ -1459,6 +1492,7 @@ export function createCodexAppServer({
         activeTurnId,
         plan: activeTurnId ? state.plans.get(activeTurnId) || null : null,
         lastPlan: state.lastTurn?.id ? state.plans.get(state.lastTurn.id) || null : null,
+        ...(state.goal !== undefined ? { goal: state.goal } : {}),
         settings: state.settings,
         contextUsage: state.contextUsage,
         activityKind: client.inbox.kind,
@@ -1549,7 +1583,11 @@ export function createCodexAppServer({
       await client.assertCurrentThread(threadId);
       await client.ensureThread(threadId);
       const result = await client.rpc('thread/goal/get', { threadId });
-      return result?.goal || null;
+      const goal = result?.goal || null;
+      client.applyGoalSnapshot(threadId, goal, null, {
+        emit: !!goal && TERMINAL_GOAL_STATUSES.has(goal.status),
+      });
+      return goal;
     },
     async updateGoal(pane, threadId, updates) {
       const client = await connection(pane);
@@ -1557,7 +1595,10 @@ export function createCodexAppServer({
       await client.assertCurrentThread(threadId);
       await client.ensureThread(threadId);
       const result = await client.rpc('thread/goal/set', { threadId, ...updates });
-      return result?.goal || null;
+      const goal = result?.goal || null;
+      client.applyGoalSnapshot(threadId, goal);
+      client.bump(threadId);
+      return goal;
     },
     async clearGoal(pane, threadId) {
       const client = await connection(pane);
@@ -1565,6 +1606,10 @@ export function createCodexAppServer({
       await client.assertCurrentThread(threadId);
       await client.ensureThread(threadId);
       await client.rpc('thread/goal/clear', { threadId });
+      if (client.applyGoalSnapshot(threadId, null, null, { emit: false })) {
+        client.emitStream({ type: 'goalCleared', threadId, turnId: null });
+      }
+      client.bump(threadId);
       return { cleared: true };
     },
     async updateSettings(pane, threadId, updates) {

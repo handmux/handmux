@@ -213,7 +213,7 @@ export function codexRoutes({ codexApp, commands, claudeEvents, wait = pause }) 
         return;
       }
       appendCodexStreamEvent(pending, event);
-      if (event?.type === 'completed' || event?.type === 'turnCompleted') flush();
+      if (['completed', 'turnCompleted', 'goal', 'goalCleared'].includes(event?.type)) flush();
       else if (!flushTimer) {
         flushTimer = setTimeout(flush, STREAM_BATCH_MS);
         flushTimer.unref?.();

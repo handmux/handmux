@@ -50,6 +50,52 @@ describe('Codex rollout transcript', () => {
     ]);
   });
 
+  it('projects Codex Goal context as one compact set event instead of exposing internal instructions', () => {
+    const context = [
+      '<codex_internal_context source="goal">',
+      'Continue working toward the active thread goal.',
+      '<objective>',
+      'Finish the release',
+      '</objective>',
+      'Budget:',
+      '- Tokens used: 1,234',
+      '- Token budget: 40,000',
+      '</codex_internal_context>',
+    ].join('\n');
+    const parsed = parseCodexTranscript([
+      row({ type: 'message', role: 'user', content: [{ type: 'input_text', text: context }] }),
+      row({ type: 'message', role: 'user', content: [{ type: 'input_text', text: context }] }),
+    ]);
+
+    expect(parsed).toEqual([expect.objectContaining({
+      type: 'goal', event: 'set', role: 'assistant',
+      goal: { objective: 'Finish the release', status: 'active', tokensUsed: 1234, tokenBudget: 40000 },
+    })]);
+  });
+
+  it('projects the native update_goal result as a terminal Goal event', () => {
+    const goal = {
+      threadId: 'thread-1', objective: 'Finish the release', status: 'complete',
+      tokensUsed: 69602, timeUsedSeconds: 277, createdAt: 10, updatedAt: 20,
+    };
+    const parsed = parseCodexTranscript([
+      row({
+        type: 'custom_tool_call', name: 'exec', call_id: 'goal-complete',
+        input: 'const result = await tools.update_goal({status:"complete"});\ntext(result);',
+        internal_chat_message_metadata_passthrough: { turn_id: 'turn-goal' },
+      }),
+      row({
+        type: 'custom_tool_call_output', call_id: 'goal-complete',
+        output: [{ type: 'input_text', text: JSON.stringify({ goal, completionBudgetReport: 'done' }) }],
+      }),
+    ]);
+
+    expect(parsed).toEqual([expect.objectContaining({
+      type: 'goal', event: 'complete', turnId: 'turn-goal', goal,
+    })]);
+    expect(parsed[0].tool).toBeUndefined();
+  });
+
   it('keeps every tool in durable rollout order instead of the incomplete App Server snapshot', () => {
     const script = [
       'const first = await tools.exec_command({"cmd":"pwd"});',
