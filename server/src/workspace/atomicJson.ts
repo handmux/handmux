@@ -2,7 +2,13 @@ import crypto from 'node:crypto';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
 
-export async function ensurePrivateDir(dir, { fs = fsp } = {}) {
+type AtomicFs = Pick<typeof fsp, 'mkdir' | 'chmod' | 'open' | 'rename' | 'unlink'>;
+export interface AtomicJsonOptions { fs?: AtomicFs }
+
+export async function ensurePrivateDir(
+  dir: string,
+  { fs = fsp }: AtomicJsonOptions = {},
+): Promise<void> {
   const resolved = path.resolve(dir);
   const { root } = path.parse(resolved);
   const parts = resolved.slice(root.length).split(path.sep).filter(Boolean);
@@ -15,7 +21,11 @@ export async function ensurePrivateDir(dir, { fs = fsp } = {}) {
   }
 }
 
-export async function writeJsonAtomic(file, value, { fs = fsp } = {}) {
+export async function writeJsonAtomic(
+  file: string,
+  value: unknown,
+  { fs = fsp }: AtomicJsonOptions = {},
+): Promise<void> {
   const temp = `${file}.${process.pid}.${crypto.randomUUID()}.tmp`;
   const handle = await fs.open(temp, 'wx', 0o600);
   try {
