@@ -1,5 +1,13 @@
 import { describe, it, expect } from 'vitest';
-import { newIdea, moveItem } from '../src/ideas.js';
+import { newIdea, moveItem, parseIdeas } from '../src/ideas.js';
+
+describe('parseIdeas', () => {
+  it('drops malformed persisted ideas', () => {
+    expect(parseIdeas([{ id: 'a', text: 'keep' }, { id: 7, text: 'drop' }, null]))
+      .toEqual([{ id: 'a', text: 'keep' }]);
+    expect(parseIdeas({})).toEqual([]);
+  });
+});
 
 describe('newIdea', () => {
   it('trims and builds an idea with a stable id + text', () => {
