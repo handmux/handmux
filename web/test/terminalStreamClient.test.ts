@@ -1,39 +1,60 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { openTerminalStream } from '../src/terminalStreamClient.js';
+import type { TerminalStreamStatus } from '../src/terminalStreamClient.js';
 import { terminalStreamEnabled } from '../src/terminalTransport.js';
+
+interface SentMessage {
+  type: string;
+  [key: string]: unknown;
+}
+
+function isSentMessage(value: unknown): value is SentMessage {
+  return typeof value === 'object' && value !== null && 'type' in value
+    && typeof value.type === 'string';
+}
 
 class FakeWebSocket {
   static OPEN = 1;
-  static instances = [];
+  static instances: FakeWebSocket[] = [];
 
-  constructor(url) {
-    this.url = url;
-    this.readyState = 0;
-    this.sent = [];
+  readonly url: string;
+  readyState = 0;
+  binaryType: BinaryType = 'blob';
+  sent: SentMessage[] = [];
+  closeReason = '';
+  onopen: ((event: Event) => void) | null = null;
+  onmessage: ((event: MessageEvent<unknown>) => void) | null = null;
+  onclose: ((event: CloseEvent) => void) | null = null;
+  onerror: ((event: Event) => void) | null = null;
+
+  constructor(url: string | URL) {
+    this.url = String(url);
     FakeWebSocket.instances.push(this);
   }
 
-  open() {
+  open(): void {
     this.readyState = FakeWebSocket.OPEN;
-    this.onopen?.();
+    this.onopen?.(new Event('open'));
   }
 
-  message(data) {
-    this.onmessage?.({ data });
+  message(data: string | ArrayBuffer): void {
+    this.onmessage?.(new MessageEvent('message', { data }));
   }
 
-  send(data) {
-    this.sent.push(JSON.parse(data));
+  send(data: string): void {
+    const parsed: unknown = JSON.parse(data);
+    if (!isSentMessage(parsed)) throw new Error('invalid client message');
+    this.sent.push(parsed);
   }
 
-  close(code = 1000, reason = '') {
+  close(code = 1000, reason = ''): void {
     this.readyState = 3;
     this.closeReason = reason;
-    this.onclose?.({ code });
+    this.onclose?.(new CloseEvent('close', { code, reason }));
   }
 }
 
-const seedFrame = (overrides = {}) => JSON.stringify({
+const seedFrame = (overrides: Record<string, unknown> = {}): string => JSON.stringify({
   type: 'seed',
   ansi: '',
   width: 80,
@@ -44,11 +65,28 @@ const seedFrame = (overrides = {}) => JSON.stringify({
   mouseSgr: false,
   ...overrides,
 });
-const readyFrame = (overrides = {}) => JSON.stringify({
+const readyFrame = (overrides: Record<string, unknown> = {}): string => JSON.stringify({
   type: 'ready',
   cur: { row: 0, col: 0, vis: true },
   ...overrides,
 });
+
+interface Deferred {
+  promise: Promise<void>;
+  resolve(): void;
+}
+
+function deferred(): Deferred {
+  let resolve!: () => void;
+  const promise = new Promise<void>((done) => { resolve = done; });
+  return { promise, resolve };
+}
+
+function latestSocket(): FakeWebSocket {
+  const socket = FakeWebSocket.instances.at(-1);
+  if (!socket) throw new Error('expected a fake WebSocket instance');
+  return socket;
+}
 
 describe('terminalStreamEnabled', () => {
   it('is enabled by default and supports an emergency query override', () => {
@@ -67,14 +105,14 @@ describe('openTerminalStream', () => {
   });
 
   it('subscribes, serializes seed/output/ready, and resyncs on the same socket', async () => {
-    const events = [];
+    const events: string[] = [];
     const stream = openTerminalStream({
       pane: '%7',
       token: 'secret',
       WebSocketCtor: FakeWebSocket,
-      onSeed: async () => events.push('seed'),
-      onData: async () => events.push('data'),
-      onReady: async () => events.push('ready'),
+      onSeed: async () => { events.push('seed'); },
+      onData: async () => { events.push('data'); },
+      onReady: async () => { events.push('ready'); },
     });
     const ws = FakeWebSocket.instances[0];
     ws.open();
@@ -176,7 +214,7 @@ describe('openTerminalStream', () => {
   });
 
   it('suspends the socket and starts from a fresh connection when resumed', () => {
-    const statuses = [];
+    const statuses: TerminalStreamStatus[] = [];
     const stream = openTerminalStream({
       pane: '%7',
       token: 'secret',
@@ -201,12 +239,12 @@ describe('openTerminalStream', () => {
 
   it('survives repeated background pause/resync cycles on one socket without mixing generations', async () => {
     vi.useFakeTimers();
-    const delivered = [];
+    const delivered: number[] = [];
     const stream = openTerminalStream({
       pane: '%7',
       token: 'secret',
       WebSocketCtor: FakeWebSocket,
-      onData: (data) => delivered.push(data[0]),
+      onData: (data) => { delivered.push(data[0]); },
     });
     const ws = FakeWebSocket.instances[0];
     ws.open();
@@ -241,16 +279,16 @@ describe('openTerminalStream', () => {
     });
 
     for (let failure = 0; failure < 100; failure += 1) {
-      const ws = FakeWebSocket.instances.at(-1);
+      const ws = latestSocket();
       ws.open();
       ws.close(1006);
       // A stale duplicate close must not create a parallel reconnect timer.
-      ws.onclose?.({ code: 1006 });
+      ws.onclose?.(new CloseEvent('close', { code: 1006 }));
       vi.advanceTimersByTime(10);
       expect(FakeWebSocket.instances).toHaveLength(failure + 2);
     }
 
-    const current = FakeWebSocket.instances.at(-1);
+    const current = latestSocket();
     current.open();
     stream.close();
     vi.advanceTimersByTime(1000);
@@ -276,9 +314,8 @@ describe('openTerminalStream', () => {
   });
 
   it('drops queued frames across a pause and resync boundary', async () => {
-    const seed = {};
-    seed.promise = new Promise((resolve) => { seed.resolve = resolve; });
-    const events = [];
+    const seed = deferred();
+    const events: string[] = [];
     const stream = openTerminalStream({
       pane: '%7',
       token: 'secret',
@@ -287,7 +324,7 @@ describe('openTerminalStream', () => {
         events.push('seed');
         await seed.promise;
       },
-      onData: async () => events.push('stale-data'),
+      onData: async () => { events.push('stale-data'); },
     });
     const ws = FakeWebSocket.instances[0];
     ws.open();
@@ -304,10 +341,9 @@ describe('openTerminalStream', () => {
 
   it('resyncs on the same socket instead of painting frames queued for over 300ms', async () => {
     vi.useFakeTimers();
-    const blockedData = {};
-    blockedData.promise = new Promise((resolve) => { blockedData.resolve = resolve; });
+    const blockedData = deferred();
     let dataCount = 0;
-    const onData = vi.fn(() => {
+    const onData = vi.fn<(data: Uint8Array) => Promise<void> | void>(() => {
       dataCount += 1;
       return dataCount === 1 ? blockedData.promise : undefined;
     });
@@ -349,16 +385,15 @@ describe('openTerminalStream', () => {
     first.message(readyFrame());
     for (let i = 0; i < 8; i += 1) await Promise.resolve();
     expect(onData).toHaveBeenCalledTimes(2);
-    expect([...onData.mock.calls[1][0]]).toEqual([3]);
+    expect(Array.from(onData.mock.calls[1]?.[0] ?? [])).toEqual([3]);
     stream.close();
     vi.useRealTimers();
   });
 
   it('coalesces adjacent output queued behind an in-flight parser write', async () => {
-    const blocked = {};
-    blocked.promise = new Promise((resolve) => { blocked.resolve = resolve; });
+    const blocked = deferred();
     let dataCount = 0;
-    const onData = vi.fn(() => {
+    const onData = vi.fn<(data: Uint8Array) => Promise<void> | void>(() => {
       dataCount += 1;
       return dataCount === 1 ? blocked.promise : undefined;
     });
@@ -383,22 +418,21 @@ describe('openTerminalStream', () => {
 
     blocked.resolve();
     await vi.waitFor(() => expect(onData).toHaveBeenCalledTimes(2));
-    expect([...onData.mock.calls[0][0]]).toEqual([1]);
-    expect([...onData.mock.calls[1][0]]).toEqual([2, 3, 4, 5]);
+    expect(Array.from(onData.mock.calls[0]?.[0] ?? [])).toEqual([1]);
+    expect(Array.from(onData.mock.calls[1]?.[0] ?? [])).toEqual([2, 3, 4, 5]);
     stream.close();
   });
 
   it('never coalesces output across a ready protocol boundary', async () => {
-    const seed = {};
-    seed.promise = new Promise((resolve) => { seed.resolve = resolve; });
-    const events = [];
+    const seed = deferred();
+    const events: Array<number[] | string> = [];
     const stream = openTerminalStream({
       pane: '%7',
       token: 'secret',
       WebSocketCtor: FakeWebSocket,
       onSeed: () => seed.promise,
-      onData: (data) => events.push([...data]),
-      onReady: () => events.push('ready'),
+      onData: (data) => { events.push([...data]); },
+      onReady: () => { events.push('ready'); },
     });
     const ws = FakeWebSocket.instances[0];
     ws.open();
@@ -415,8 +449,7 @@ describe('openTerminalStream', () => {
   });
 
   it('resyncs on the same socket when queued output exceeds the byte limit', async () => {
-    const seed = {};
-    seed.promise = new Promise((resolve) => { seed.resolve = resolve; });
+    const seed = deferred();
     const onData = vi.fn();
     const stream = openTerminalStream({
       pane: '%7',
@@ -443,10 +476,8 @@ describe('openTerminalStream', () => {
   });
 
   it('does not let stale queued frames reduce the next resync generation byte count', async () => {
-    const firstSeed = {};
-    firstSeed.promise = new Promise((resolve) => { firstSeed.resolve = resolve; });
-    const freshSeed = {};
-    freshSeed.promise = new Promise((resolve) => { freshSeed.resolve = resolve; });
+    const firstSeed = deferred();
+    const freshSeed = deferred();
     let seedCount = 0;
     const stream = openTerminalStream({
       pane: '%7',
@@ -480,8 +511,7 @@ describe('openTerminalStream', () => {
 
   it('does not treat a slow initial seed as an overloaded output queue', async () => {
     vi.useFakeTimers();
-    const seed = {};
-    seed.promise = new Promise((resolve) => { seed.resolve = resolve; });
+    const seed = deferred();
     const onReady = vi.fn();
     const stream = openTerminalStream({
       pane: '%7',
@@ -508,8 +538,7 @@ describe('openTerminalStream', () => {
 
   it('keeps resync catch-up output queued behind a slow seed', async () => {
     vi.useFakeTimers();
-    const seed = {};
-    seed.promise = new Promise((resolve) => { seed.resolve = resolve; });
+    const seed = deferred();
     const onSeed = vi.fn(() => seed.promise);
     const onData = vi.fn();
     const onReady = vi.fn();
@@ -568,7 +597,7 @@ describe('openTerminalStream', () => {
     vi.advanceTimersByTime(10);
     const second = FakeWebSocket.instances[1];
     second.open();
-    first.onclose?.({ code: 1006 });
+    first.onclose?.(new CloseEvent('close', { code: 1006 }));
     stream.resync();
     expect(second.sent.at(-1)).toEqual({ type: 'resync' });
     expect(FakeWebSocket.instances).toHaveLength(2);
@@ -578,7 +607,7 @@ describe('openTerminalStream', () => {
 
   it('uses a separate longer deadline after the WebSocket handshake opens', async () => {
     vi.useFakeTimers();
-    const statuses = [];
+    const statuses: TerminalStreamStatus[] = [];
     const stream = openTerminalStream({
       pane: '%7',
       token: 'secret',
@@ -610,7 +639,7 @@ describe('openTerminalStream', () => {
 
   it('reports reconnecting only after two complete cold-start attempts fail', () => {
     vi.useFakeTimers();
-    const statuses = [];
+    const statuses: TerminalStreamStatus[] = [];
     const stream = openTerminalStream({
       pane: '%7',
       token: 'secret',
@@ -633,7 +662,7 @@ describe('openTerminalStream', () => {
   });
 
   it('reports a drop immediately after the stream has already been live', async () => {
-    const statuses = [];
+    const statuses: TerminalStreamStatus[] = [];
     const stream = openTerminalStream({
       pane: '%7',
       token: 'secret',

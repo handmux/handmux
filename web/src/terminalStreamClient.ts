@@ -36,6 +36,22 @@ interface DataBatch {
   byteLength: number;
 }
 
+export interface TerminalWebSocket {
+  readyState: number;
+  binaryType: BinaryType;
+  onopen: ((event: Event) => void) | null;
+  onmessage: ((event: MessageEvent<unknown>) => void) | null;
+  onclose: ((event: CloseEvent) => void) | null;
+  onerror: ((event: Event) => void) | null;
+  send(data: string): void;
+  close(code?: number, reason?: string): void;
+}
+
+export interface TerminalWebSocketConstructor {
+  readonly OPEN: number;
+  new(url: string | URL): TerminalWebSocket;
+}
+
 export interface TerminalStreamOptions {
   pane: string;
   onSeed?: (message: TerminalSeedMessage) => AsyncCallback;
@@ -44,7 +60,7 @@ export interface TerminalStreamOptions {
   onStatus?: (status: TerminalStreamStatus) => void;
   onProbe?: (result: TerminalProbeResult) => void;
   onAuthFail?: () => void;
-  WebSocketCtor?: typeof WebSocket;
+  WebSocketCtor?: TerminalWebSocketConstructor;
   token?: string;
   reconnectMs?: number;
   connectTimeoutMs?: number;
@@ -82,8 +98,8 @@ export function openTerminalStream({
   probeTimeoutMs = PROBE_TIMEOUT_MS,
   now = () => Date.now(),
 }: TerminalStreamOptions): TerminalStreamController {
-  let socket: WebSocket | null = null;
-  let subscribedSocket: WebSocket | null = null;
+  let socket: TerminalWebSocket | null = null;
+  let subscribedSocket: TerminalWebSocket | null = null;
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   let closed = false;
   let paused = false;
@@ -115,7 +131,7 @@ export function openTerminalStream({
       connectTimer = null;
     }
   };
-  const armConnectTimer = (target: WebSocket, timeoutMs: number): void => {
+  const armConnectTimer = (target: TerminalWebSocket, timeoutMs: number): void => {
     clearConnectTimer();
     connectTimer = setTimeout(() => {
       if (socket === target && target.readyState !== 3) target.close(4000, 'stream timeout');
@@ -207,7 +223,7 @@ export function openTerminalStream({
       armConnectTimer(nextSocket, readyTimeoutMs);
       send({ type: 'subscribe', token, pane });
     };
-    nextSocket.onmessage = (event: MessageEvent) => {
+    nextSocket.onmessage = (event: MessageEvent<unknown>) => {
       if (socket !== nextSocket) return;
       const incoming: unknown = event.data;
       let message: TerminalStreamMessage | null = null;
