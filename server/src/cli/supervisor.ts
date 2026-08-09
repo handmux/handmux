@@ -13,14 +13,92 @@ import {
   initialSupervisorComponentState, reduceSupervisorComponent,
 } from './supervisorState.js';
 import { probeServerReadiness } from './supervisorHealth.js';
+import type { NetworkInterfaceInfo } from 'node:os';
+import type { TunnelConfig, TunnelName } from './drivers.js';
+import type { SupervisorComponentName, SupervisorComponentState, SupervisorComponentEvent } from './supervisorState.js';
+import type { VapidConfig, XfyunConfig } from './options.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const SERVER = path.resolve(here, '../server.js');
 const require = createRequire(import.meta.url);
-const VERSION = require('../../package.json').version;
+const packageInfo: unknown = require('../../package.json');
+const VERSION = typeof packageInfo === 'object' && packageInfo !== null && 'version' in packageInfo
+  && typeof packageInfo.version === 'string' ? packageInfo.version : 'unknown';
+
+interface SupervisorConfig extends TunnelConfig {
+  tunnel: TunnelName;
+  port: number;
+  host: string;
+  token: string;
+  name?: string | null;
+  staticDir?: string | null;
+  uploadExts?: string | null;
+  previewDomain?: string | null;
+  shortcuts: unknown;
+  vapid?: VapidConfig | null;
+  xfyun?: XfyunConfig | null;
+}
+interface ChildStream { on(event: 'data', listener: (chunk: unknown) => void): unknown }
+interface SupervisorChild {
+  pid?: number;
+  stdout: ChildStream;
+  stderr: ChildStream;
+  once(event: 'error', listener: (error: unknown) => void): unknown;
+  once(event: 'exit', listener: (code: number | null, signal: NodeJS.Signals | null) => void): unknown;
+  kill(signal?: NodeJS.Signals): unknown;
+}
+type SpawnChild = (
+  command: string,
+  args: readonly string[],
+  options: { env?: NodeJS.ProcessEnv; stdio: ['ignore', 'inherit' | 'pipe', 'inherit' | 'pipe'] },
+) => SupervisorChild;
+interface SupervisorProcess {
+  pid: number;
+  env: NodeJS.ProcessEnv;
+  execPath: string;
+  stdout: { write(chunk: string): unknown };
+  on(signal: 'SIGTERM' | 'SIGINT', listener: () => void): unknown;
+  kill(pid: number, signal: 0): unknown;
+  exit(code: number): unknown;
+}
+interface SupervisorLogger { warn?(message: string): void }
+interface SuperviseOptions {
+  home: string;
+  log?: SupervisorLogger;
+  spawnChild?: SpawnChild;
+  probeServerReady?: () => boolean | Promise<boolean>;
+  setTimer?: (callback: () => void, delay: number) => unknown;
+  now?: () => number;
+  processRef?: SupervisorProcess;
+}
+interface SupervisorState {
+  supervisorPid: number;
+  version: string;
+  startedAt: number;
+  tunnel: TunnelName;
+  port: number;
+  host: string;
+  token: string;
+  localUrl: string;
+  lanUrl: string | null;
+  publicUrl: string | null;
+  ready: boolean;
+  serverPid: number | null;
+  tunnelPid: number | null;
+  components: Record<SupervisorComponentName, SupervisorComponentState>;
+  error: string | null;
+}
+const defaultSpawnChild: SpawnChild = (command, args, options) => spawn(command, [...args], options) as SupervisorChild;
+const errorCode = (error: unknown): string | null => {
+  if (typeof error !== 'object' || error === null || !('code' in error)) return null;
+  return typeof error.code === 'string' ? error.code : null;
+};
 
 // First non-internal IPv4 — the address a phone on the same wifi uses when there's no tunnel.
-export function lanUrl(port, ifaces = os.networkInterfaces()) {
+export function lanUrl(
+  port: number,
+  ifaces: NodeJS.Dict<NetworkInterfaceInfo[]> = os.networkInterfaces(),
+): string | null {
   for (const list of Object.values(ifaces)) {
     for (const ni of list || []) {
       if (ni.family === 'IPv4' && !ni.internal) return `http://${ni.address}:${port}`;
@@ -30,44 +108,44 @@ export function lanUrl(port, ifaces = os.networkInterfaces()) {
 }
 
 // The token rides in the query string so the first navigation (or a QR scan) authenticates in one shot.
-export function publicUrlWithToken(base, token) {
+export function publicUrlWithToken(base: string | null, token: string): string | null {
   if (!base) return base;
   return `${base.replace(/\/$/, '')}/?token=${encodeURIComponent(token)}`;
 }
 
 // Bare address with no token in it — printed/QR-encoded so a link can be shared or screenshotted without
 // leaking the secret; the token is shown separately for the user to paste in.
-export function bareUrl(base) {
+export function bareUrl(base: string | null): string | null {
   if (!base) return base;
   return `${base.replace(/\/$/, '')}/`;
 }
 
-export function browserPublicOriginEnv(cfg) {
+export function browserPublicOriginEnv(cfg: Pick<SupervisorConfig, 'previewDomain' | 'publicUrl'>): NodeJS.ProcessEnv {
   return {
     ...(cfg.previewDomain ? { HANDMUX_PREVIEW_DOMAIN: cfg.previewDomain } : {}),
     ...(cfg.publicUrl ? { HANDMUX_PUBLIC_URL: cfg.publicUrl } : {}),
   };
 }
 
-export function supervise(cfg, {
+export function supervise(cfg: SupervisorConfig, {
   home,
   log = console,
-  spawnChild = spawn,
+  spawnChild = defaultSpawnChild,
   probeServerReady = () => probeServerReadiness(cfg.port),
   setTimer = setTimeout,
   now = Date.now,
-  processRef = process,
-} = {}) {
+  processRef = process as unknown as SupervisorProcess,
+}: SuperviseOptions): { state: SupervisorState } {
   const driver = getDriver(cfg.tunnel);
-  const children = {};
+  const children: Partial<Record<SupervisorComponentName, SupervisorChild>> = {};
   let stopping = false;
   let urlBuf = '';
-  const components = {
+  const components: Record<SupervisorComponentName, SupervisorComponentState> = {
     server: initialSupervisorComponentState('server'),
     tunnel: initialSupervisorComponentState('tunnel'),
   };
 
-  const state = {
+  const state: SupervisorState = {
     supervisorPid: processRef.pid,
     version: VERSION,
     startedAt: now(),
@@ -84,7 +162,7 @@ export function supervise(cfg, {
     components,
     error: null,
   };
-  const persist = () => {
+  const persist = (): void => {
     // Keep the legacy top-level fields during migration, but derive them from the explicit component
     // machines so `ready` can never outlive the Server process that earned it.
     state.serverPid = components.server.pid;
@@ -92,7 +170,7 @@ export function supervise(cfg, {
     state.ready = components.server.phase === 'ready';
     writeState(state, home);
   };
-  const transition = (name, event) => {
+  const transition = (name: SupervisorComponentName, event: SupervisorComponentEvent): void => {
     components[name] = reduceSupervisorComponent(components[name], event);
     persist();
   };
@@ -100,9 +178,9 @@ export function supervise(cfg, {
 
   // Readiness belongs to the Server generation that answered the structured health probe. A bare TCP
   // listener could be an old process or a half-initialized API with Workspace/Browser already degraded.
-  const waitReady = (serverChild) => {
+  const waitReady = (serverChild: SupervisorChild): void => {
     if (stopping || children.server !== serverChild || components.server.phase === 'ready') return;
-    const retry = () => {
+    const retry = (): void => {
       if (!stopping && children.server === serverChild) {
         setTimer(() => waitReady(serverChild), 200);
       }
@@ -115,11 +193,11 @@ export function supervise(cfg, {
     }, retry);
   };
 
-  const startServer = () => {
+  const startServer = (): void => {
     // The server reads only process.env (no .env files) — the CLI resolved the one config file and we
     // hand the server everything it needs here. This is the single injection point: config.json fields →
     // the env names the server already reads (HANDMUX_* / VAPID_* / XFYUN_*).
-    const env = {
+    const env: NodeJS.ProcessEnv = {
       ...processRef.env,
       NODE_ENV: 'handmux',
       HANDMUX_PORT: String(cfg.port),
@@ -150,7 +228,7 @@ export function supervise(cfg, {
     transition('server', { type: 'spawned', pid: c.pid ?? null, at: now() });
     waitReady(c);
     let finalized = false;
-    const finalize = (error = null) => {
+    const finalize = (error: string | null = null): void => {
       if (finalized || children.server !== c) return;
       finalized = true;
       delete children.server;
@@ -165,7 +243,7 @@ export function supervise(cfg, {
     c.once('exit', (code, signal) => finalize(code || signal ? `exit ${code ?? signal}` : null));
   };
 
-  const startTunnel = () => {
+  const startTunnel = (): void => {
     if (!driver.needsProcess) { // 'none' — reachable directly on LAN/localhost (or a tunnel you run yourself)
       state.publicUrl = cfg.publicUrl || state.lanUrl || state.localUrl;
       transition('tunnel', { type: 'spawned', pid: null, at: now() });
@@ -174,11 +252,12 @@ export function supervise(cfg, {
     }
     urlBuf = '';
     const spec = driver.proc(cfg);
+    if (!spec) throw new Error(`tunnel driver ${driver.name} did not provide a process`);
     const c = spawnChild(spec.cmd, spec.args, { stdio: ['ignore', 'pipe', 'pipe'] });
     children.tunnel = c;
     transition('tunnel', { type: 'spawned', pid: c.pid ?? null, at: now() });
-    const onData = (b) => {
-      const s = b.toString();
+    const onData = (chunk: unknown): void => {
+      const s = String(chunk);
       processRef.stdout.write(s);
       if (state.publicUrl) return;
       urlBuf = (urlBuf + s).slice(-4000);
@@ -192,7 +271,7 @@ export function supervise(cfg, {
     c.stdout.on('data', onData);
     c.stderr.on('data', onData);
     let finalized = false;
-    const finalize = (error = null) => {
+    const finalize = (error: string | null = null): void => {
       if (finalized || children.tunnel !== c) return;
       finalized = true;
       delete children.tunnel;
@@ -205,7 +284,7 @@ export function supervise(cfg, {
       backoffRestart('tunnel', startTunnel);
     };
     c.once('error', (e) => {
-      const message = e.code === 'ENOENT'
+      const message = errorCode(e) === 'ENOENT'
         ? (driver.notFoundHint || `${spec.cmd} not found`)
         : String(e);
       state.error = message;
@@ -214,13 +293,13 @@ export function supervise(cfg, {
     c.once('exit', (code, signal) => finalize(code || signal ? `exit ${code ?? signal}` : null));
   };
 
-  const backoffRestart = (what, fn) => {
+  const backoffRestart = (what: SupervisorComponentName, fn: () => void): void => {
     const d = Math.max(0, (components[what].restartAt ?? now()) - now());
     log.warn?.(`[handmux] ${what} exited; restarting in ${d}ms`);
     setTimer(() => { if (!stopping) fn(); }, d);
   };
 
-  const shutdown = () => {
+  const shutdown = (): void => {
     stopping = true;
     const kids = Object.values(children).filter(Boolean);
     for (const c of kids) { try { c.kill('SIGTERM'); } catch { /* already dead */ } }
@@ -229,9 +308,12 @@ export function supervise(cfg, {
     // supervisor was how a stray cloudflared kept running after `stop`). Poll until the children are gone,
     // then SIGKILL any straggler so we NEVER leak a tunnel process. With --grace-period 0s, cloudflared
     // exits near-instantly; the 3s ceiling is just a backstop.
-    const alive = () => kids.filter((c) => { try { processRef.kill(c.pid, 0); return true; } catch { return false; } });
+    const alive = (): SupervisorChild[] => kids.filter((child) => {
+      if (child.pid == null) return false;
+      try { processRef.kill(child.pid, 0); return true; } catch { return false; }
+    });
     let waited = 0;
-    const tick = () => {
+    const tick = (): void => {
       const left = alive();
       if (left.length === 0 || waited >= 3000) {
         for (const c of left) { try { c.kill('SIGKILL'); } catch { /* already dead */ } }
