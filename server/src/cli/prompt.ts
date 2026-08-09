@@ -10,7 +10,7 @@ export { select, text, password, confirm, note, intro, outro, cancel };
 export const CANCELLED = Symbol('setup-cancelled');
 
 // Await a clack prompt, converting a cancel into a throw. Usage: `const v = await ask(select({…}))`.
-export async function ask(promptResult) {
+export async function ask<T>(promptResult: Promise<T | symbol>): Promise<T> {
   const v = await promptResult;
   if (isCancel(v)) throw CANCELLED;
   return v;

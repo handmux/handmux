@@ -2,20 +2,22 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-export const HOOK_SCRIPTS = ['handmux-notify.sh', 'handmux-write.cjs'];
+export const HOOK_SCRIPTS = ['handmux-notify.sh', 'handmux-write.cjs'] as const;
 const LEGACY_HOOK_SCRIPTS = ['handmux-codex-usage.cjs'];
 
 // Atomic write (tmp + rename) so a crash can't leave a half-written config file. Text in, text out — callers
 // pass raw TOML for config.toml, or use writeJsonAtomic for pretty-printed settings.json.
-export function writeFileAtomic(file, text) {
+export function writeFileAtomic(file: string, text: string): void {
   const tmp = `${file}.tmp`;
   fs.writeFileSync(tmp, text);
   fs.renameSync(tmp, file);
 }
-export const writeJsonAtomic = (file, obj) => writeFileAtomic(file, JSON.stringify(obj, null, 2));
+export const writeJsonAtomic = (file: string, value: unknown): void => (
+  writeFileAtomic(file, JSON.stringify(value, null, 2))
+);
 
 // Deploy the Claude notify/write scripts into `hooksDir` and point their env at the shared state file.
-export function deployHookScripts(hooksDir, srcDir, stateFile) {
+export function deployHookScripts(hooksDir: string, srcDir: string, stateFile: string): void {
   fs.mkdirSync(hooksDir, { recursive: true });
   for (const f of HOOK_SCRIPTS) fs.copyFileSync(path.join(srcDir, f), path.join(hooksDir, f));
   for (const f of LEGACY_HOOK_SCRIPTS) {
@@ -26,7 +28,7 @@ export function deployHookScripts(hooksDir, srcDir, stateFile) {
 }
 
 // Remove the deployed scripts + env (uninstall). Best-effort: a missing file is fine.
-export function removeHookScripts(hooksDir) {
+export function removeHookScripts(hooksDir: string): void {
   for (const f of [...HOOK_SCRIPTS, ...LEGACY_HOOK_SCRIPTS, 'handmux-notify.env']) {
     try { fs.unlinkSync(path.join(hooksDir, f)); } catch { /* already gone */ }
   }
