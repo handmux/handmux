@@ -5,6 +5,7 @@ import path from 'node:path';
 import {
   readState, writeState, clearState, isAlive, statePath, lifecycleLockPath,
   acquireLifecycleLock, claudeStatePath, pushStorePath, previewStorePath,
+  supervisorConfigPath, readSupervisorConfig, writeSupervisorConfig,
 } from '../src/cli/state.js';
 
 let home;
@@ -63,5 +64,11 @@ describe('state', () => {
   it('push/preview stores live in ~/.handmux (survive a global reinstall)', () => {
     expect(pushStorePath('/home/x')).toBe('/home/x/.handmux/push-subs.json');
     expect(previewStorePath('/home/x')).toBe('/home/x/.handmux/previews.json');
+  });
+  it('stores the resolved supervisor config privately instead of putting secrets in argv', () => {
+    writeSupervisorConfig({ token: 'secret', vapid: { private: 'private-key' } }, home);
+    expect(readSupervisorConfig(home)).toEqual({ token: 'secret', vapid: { private: 'private-key' } });
+    expect(supervisorConfigPath(home)).toBe(path.join(home, '.handmux', 'supervisor-config.json'));
+    expect(fs.statSync(supervisorConfigPath(home)).mode & 0o777).toBe(0o600);
   });
 });

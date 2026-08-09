@@ -1,11 +1,12 @@
 // Boot/login autostart. The OS keeps the handmux SUPERVISOR (`__supervise`) alive; the supervisor
 // keeps server + tunnel alive — same model as a foreground run, just parented by launchd/systemd.
-// The intended config is baked into the service file as a base64 payload (self-contained: no reliance
-// on config.json). Text generators are pure (unit-tested); the launchctl/systemctl calls inject `exec`.
+// The service definition receives only a private supervisor-config path. Secrets stay out of argv, plist,
+// and unit text. Text generators are pure (unit-tested); the launchctl/systemctl calls inject `exec`.
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { pocketHome, logPath } from './state.js';
+import { ensurePrivateDirectorySync } from '../privateStateStore.js';
 
 export const LABEL = 'com.handmux.agent';
 export const UNIT = 'handmux.service';
@@ -21,7 +22,7 @@ export function isServiceInstalled(home, platform = process.platform) {
 
 const xmlEscape = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
-// launchd LaunchAgent. args = full argv for the process (node, script, __supervise, --payload, b64).
+// launchd LaunchAgent. args = full argv for the process (node, script, __supervise, --payload-file, path).
 export function plistFor({ args, log, label = LABEL }) {
   const items = args.map((a) => `    <string>${xmlEscape(a)}</string>`).join('\n');
   return `<?xml version="1.0" encoding="UTF-8"?>
@@ -61,10 +62,16 @@ WantedBy=default.target
 }
 
 export function installService(args, { home, platform = process.platform, exec = spawnSync, log = console } = {}) {
+  ensurePrivateDirectorySync(pocketHome(home));
+  const runtimeLog = logPath(home);
+  const descriptor = fs.openSync(runtimeLog, 'a', 0o600);
+  fs.closeSync(descriptor);
+  fs.chmodSync(runtimeLog, 0o600);
   if (platform === 'darwin') {
     const p = plistPath(home);
     fs.mkdirSync(path.dirname(p), { recursive: true });
-    fs.writeFileSync(p, plistFor({ args, log: logPath(home) }));
+    fs.writeFileSync(p, plistFor({ args, log: runtimeLog }), { mode: 0o600 });
+    fs.chmodSync(p, 0o600);
     exec('launchctl', ['unload', p], { stdio: 'ignore' }); // best-effort: clear any prior load
     const r = exec('launchctl', ['load', '-w', p], { encoding: 'utf8' });
     if (r.status !== 0) throw new Error(`launchctl load failed: ${r.stderr || r.status}`);
@@ -74,7 +81,8 @@ export function installService(args, { home, platform = process.platform, exec =
   if (platform === 'linux') {
     const p = unitPath(home);
     fs.mkdirSync(path.dirname(p), { recursive: true });
-    fs.writeFileSync(p, unitFor({ args }));
+    fs.writeFileSync(p, unitFor({ args }), { mode: 0o600 });
+    fs.chmodSync(p, 0o600);
     exec('systemctl', ['--user', 'daemon-reload'], { stdio: 'ignore' });
     const enabled = exec('systemctl', ['--user', 'enable', UNIT], { encoding: 'utf8' });
     if (enabled.status !== 0) throw new Error(`systemctl enable failed: ${enabled.stderr || enabled.status}`);

@@ -7,12 +7,13 @@ describe('supervisor process detection', () => {
       '  101 Ss   /usr/bin/node /usr/lib/node_modules/handmux/bin/handmux.js __supervise --payload abc',
       '  202 S    /opt/homebrew/Cellar/node/24/bin/node /opt/homebrew/Cellar/handmux/1/libexec/bin/handmux.js __supervise --payload def',
       '  250 S    /usr/bin/node /usr/local/bin/handmux __supervise --payload symlink-entry',
+      '  275 S    /usr/bin/node /usr/local/bin/handmux __supervise --payload-file /home/u/.handmux/supervisor-config.json',
       '  303 Z    /usr/bin/node /x/handmux.js __supervise --payload zombie',
       '  404 S    node /x/handmux.js status',
       '  505 S    sh -c node /x/handmux.js __supervise --payload shell-text-only',
       '  606 S    node -e setInterval /x/handmux.js __supervise --payload test-argv',
     ].join('\n');
-    expect(parseSupervisorPids(ps)).toEqual([101, 202, 250]);
+    expect(parseSupervisorPids(ps)).toEqual([101, 202, 250, 275]);
   });
 
   it('deduplicates/sorts pids and scans only the current user process table', () => {

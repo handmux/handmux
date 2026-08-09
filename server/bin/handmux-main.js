@@ -29,7 +29,11 @@ import { resolveTunlite, checkSshAuth } from '../src/cli/tunlite.js';
 import { resolveNatapp, resolveCpolar } from '../src/cli/tunnelClients.js';
 import { installService, uninstallService, isServiceInstalled, stopService } from '../src/cli/service.js';
 import { checkTmux, MIN_TMUX, tmuxInstallHint } from '../src/cli/tmuxVersion.js';
-import { readState, clearState, isAlive, acquireLifecycleLock, pocketHome, logPath, configPath, claudeStatePath } from '../src/cli/state.js';
+import {
+  readState, clearState, isAlive, acquireLifecycleLock, logPath, configPath,
+  claudeStatePath,
+} from '../src/cli/state.js';
+import { readSupervisorLaunchConfig, supervisorLaunchArgs } from '../src/cli/supervisorLaunch.js';
 import { scanSupervisorPids, terminateSupervisorPids } from '../src/cli/supervisorProcesses.js';
 import { runSetup } from '../src/cli/setupWizard.js';
 import { commitShortcuts, reportShortcutCommit, runShortcutEditor } from '../src/cli/shortcutEditor.js';
@@ -312,16 +316,17 @@ async function start() {
   // Once autostart is registered, the service manager must remain the sole owner of the supervisor.
   // Rewriting + restarting the entry also refreshes baked config and upgrade-sensitive executable paths.
   if (isServiceInstalled(HOME)) {
-    try { installService(supervisorArgs(cfg), { home: HOME, log: { log() {} } }); }
+    try { installService(supervisorLaunchArgs(cfg, { home: HOME, entry: SELF }), { home: HOME, log: { log() {} } }); }
     catch (e) { console.error(t('err.generic', { msg: e.message })); process.exit(1); }
     console.log(t('start.starting', { tunnel: cfg.tunnel, port: cfg.port }));
     await waitAndPrint(true);
     return;
   }
 
-  fs.mkdirSync(pocketHome(HOME), { recursive: true });
-  const out = fs.openSync(logPath(HOME), 'a');
-  const [supervisorBin, ...supervisorArgv] = supervisorArgs(cfg);
+  const [supervisorBin, ...supervisorArgv] = supervisorLaunchArgs(cfg, { home: HOME, entry: SELF });
+  const logFile = logPath(HOME);
+  const out = fs.openSync(logFile, 'a', 0o600);
+  fs.chmodSync(logFile, 0o600);
   const child = spawn(supervisorBin, supervisorArgv,
     { detached: true, stdio: ['ignore', out, out] });
   child.unref();
@@ -405,7 +410,9 @@ async function status() {
 }
 
 function runSupervise() {
-  const cfg = JSON.parse(Buffer.from(flags.payload, 'base64').toString('utf8'));
+  const cfg = readSupervisorLaunchConfig({
+    payloadFile: flags.payloadFile, legacyPayload: flags.payload,
+  }, HOME);
   supervise(cfg, { home: HOME });
 }
 
@@ -470,15 +477,10 @@ async function serviceInstall() {
   if (isServiceInstalled(HOME) || supervisors.pids.length || (existing && isAlive(existing.supervisorPid))) {
     if (!await stopAndWait()) return;
   }
-  const args = supervisorArgs(cfg);
+  const args = supervisorLaunchArgs(cfg, { home: HOME, entry: SELF });
   try { installService(args, { home: HOME }); }
   catch (e) { console.error(t('err.generic', { msg: e.message })); process.exit(1); }
   console.log(t('service.installed'));
-}
-
-function supervisorArgs(cfg) {
-  const payload = Buffer.from(JSON.stringify(cfg)).toString('base64');
-  return [process.execPath, SELF, '__supervise', '--payload', payload];
 }
 
 async function setupCmd() {

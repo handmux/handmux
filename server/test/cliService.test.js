@@ -7,7 +7,7 @@ import {
   isServiceInstalled, stopService, LABEL, UNIT,
 } from '../src/cli/service.js';
 
-const ARGS = ['/usr/bin/node', '/abs/bin/handmux.js', '__supervise', '--payload', 'eyJ4Ijox'];
+const ARGS = ['/usr/bin/node', '/abs/bin/handmux.js', '__supervise', '--payload-file', '/home/u/.handmux/supervisor-config.json'];
 
 describe('service text generators', () => {
   it('plist lists every arg and sets RunAtLoad/KeepAlive', () => {
@@ -22,7 +22,7 @@ describe('service text generators', () => {
   });
   it('systemd unit has ExecStart with the joined command and Restart=always', () => {
     const u = unitFor({ args: ARGS });
-    expect(u).toContain('ExecStart=/usr/bin/node /abs/bin/handmux.js __supervise --payload eyJ4Ijox');
+    expect(u).toContain('ExecStart=/usr/bin/node /abs/bin/handmux.js __supervise --payload-file /home/u/.handmux/supervisor-config.json');
     expect(u).toContain('Restart=always');
     expect(u).toContain('WantedBy=default.target');
   });
@@ -37,20 +37,23 @@ describe('install/uninstall (mocked exec, temp home)', () => {
   it('darwin writes the plist and runs launchctl load', () => {
     installService(ARGS, { home, platform: 'darwin', exec, log: { log() {} } });
     expect(fs.existsSync(plistPath(home))).toBe(true);
+    expect(fs.statSync(plistPath(home)).mode & 0o777).toBe(0o600);
+    expect(fs.statSync(path.join(home, '.handmux', 'handmux.log')).mode & 0o777).toBe(0o600);
     expect(calls.some(([c, a]) => c === 'launchctl' && a === 'load')).toBe(true);
   });
   it('linux writes the unit and enables it', () => {
     installService(ARGS, { home, platform: 'linux', exec, log: { log() {} } });
     expect(fs.existsSync(unitPath(home))).toBe(true);
+    expect(fs.statSync(unitPath(home)).mode & 0o777).toBe(0o600);
     expect(calls.some((c) => c.join(' ') === `systemctl --user enable ${UNIT}`)).toBe(true);
     expect(calls.some((c) => c.join(' ') === `systemctl --user restart ${UNIT}`)).toBe(true);
   });
   it('linux reinstall replaces an upgrade-stale executable path and restarts the one unit', () => {
     installService(ARGS, { home, platform: 'linux', exec, log: { log() {} } });
-    const upgraded = ['/new/node', '/new/handmux.js', '__supervise', '--payload', 'bmV3'];
+    const upgraded = ['/new/node', '/new/handmux.js', '__supervise', '--payload-file', '/home/u/.handmux/supervisor-config.json'];
     installService(upgraded, { home, platform: 'linux', exec, log: { log() {} } });
     const unit = fs.readFileSync(unitPath(home), 'utf8');
-    expect(unit).toContain('ExecStart=/new/node /new/handmux.js __supervise --payload bmV3');
+    expect(unit).toContain('ExecStart=/new/node /new/handmux.js __supervise --payload-file /home/u/.handmux/supervisor-config.json');
     expect(unit).not.toContain('/abs/bin/handmux.js');
     expect(calls.filter((c) => c.join(' ') === `systemctl --user restart ${UNIT}`)).toHaveLength(2);
   });

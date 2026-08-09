@@ -10,6 +10,7 @@ export function statePath(home) { return path.join(pocketHome(home), 'state.json
 export function lifecycleLockPath(home) { return path.join(pocketHome(home), 'lifecycle.lock'); }
 export function logPath(home) { return path.join(pocketHome(home), 'handmux.log'); }
 export function configPath(home) { return path.join(pocketHome(home), 'config.json'); }
+export function supervisorConfigPath(home) { return path.join(pocketHome(home), 'supervisor-config.json'); }
 
 // The hook-maintained Claude state file, on a stable per-user path (survives a global reinstall, unlike
 // the package-internal server/data default). The CLI sets this as CLAUDE_STATE_FILE for the server child
@@ -26,6 +27,14 @@ export function notificationsDirPath(home) { return path.join(pocketHome(home), 
 
 export function readState(home) {
   return new PrivateStateStore(statePath(home)).read();
+}
+
+export function readSupervisorConfig(home) {
+  return new PrivateStateStore(supervisorConfigPath(home)).read();
+}
+
+export function writeSupervisorConfig(config, home) {
+  new PrivateStateStore(supervisorConfigPath(home)).write(config);
 }
 
 // Atomic write (tmp + rename): the supervisor persist()s frequently while the CLI concurrently readState()s

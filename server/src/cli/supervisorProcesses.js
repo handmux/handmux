@@ -10,7 +10,7 @@ export function parseSupervisorPids(psOut) {
     if (!m || m[2][0] === 'Z') continue;
     // Anchor the executable as Node and handmux.js as its direct script argument. A shell command or test
     // runner can contain the same words in its own command text; it is not a supervisor and must not match.
-    if (/^(?:\S*\/)?node(?:js)?\s+(?:"[^"]*(?:handmux\.js|\/handmux)"|'[^']*(?:handmux\.js|\/handmux)'|\S*(?:handmux\.js|\/handmux))\s+__supervise\s+--payload(?:\s|$)/.test(m[3])) {
+    if (/^(?:\S*\/)?node(?:js)?\s+(?:"[^"]*(?:handmux\.js|\/handmux)"|'[^']*(?:handmux\.js|\/handmux)'|\S*(?:handmux\.js|\/handmux))\s+__supervise\s+--payload(?:-file)?(?:\s|$)/.test(m[3])) {
       pids.push(Number(m[1]));
     }
   }
