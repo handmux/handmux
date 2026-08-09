@@ -1,20 +1,73 @@
 import fsp from 'node:fs/promises';
 import os from 'node:os';
 import { AGENTS } from '../agents/index.js';
+import type { RecoveryMappingAddition } from './mapping.js';
+import type { PlanSession, WindowDisposition } from './planner.js';
+import type { WorkspacePane, WorkspaceSession, WorkspaceWindow } from './schema.js';
 
-function message(error) {
+const KINDS = ['sessions', 'windows', 'panes'] as const;
+type MappingKind = typeof KINDS[number];
+interface RestoreCheckpoint { sessions: WorkspaceSession[]; windows: WorkspaceWindow[] }
+interface RestorePlan { sessions: PlanSession[]; windows?: WindowDisposition[] }
+type RestorableItem = PlanSession & {
+  logicalId: string;
+  sourceName: string;
+  targetName: string;
+  activeWindowId: string;
+  windowLinks: Array<{ windowId: string; index: number }>;
+};
+interface AgentDriver {
+  id: string;
+  sessions: {
+    isId(value: unknown): boolean;
+    resumeArgs(sessionId: string): string[];
+  };
+}
+interface TemporarySession { sessionId: string; windowId: string; paneId: string }
+interface RestoreTmux {
+  createTemporarySession(input: Record<string, unknown>): Promise<TemporarySession>;
+  createWindow(sessionId: string, input: Record<string, unknown>): Promise<{ windowId: string; paneId: string }>;
+  splitPane(target: string | undefined, input: Record<string, unknown>): Promise<string>;
+  linkWindow(source: string, sessionId: string, index: number, options: { existing: boolean }): Promise<unknown>;
+  applyLayout(target: string, layout: string): Promise<unknown>;
+  selectPane(target: string): Promise<unknown>;
+  selectWindow(target: string): Promise<unknown>;
+  selectWindowInSession?(sessionId: string, index: number): Promise<unknown>;
+  killCreatedWindow(target: string): Promise<unknown>;
+  renameCreatedSession(target: string, name: string): Promise<unknown>;
+  startAgent(target: string, command: string, args: string[]): Promise<unknown>;
+  killCreatedSession(target: string): Promise<unknown>;
+  revokeCreatedTargets?(): void;
+}
+export interface RestoreResult {
+  logicalId: string | null;
+  sourceName: string | null;
+  targetName?: string;
+  status: 'restored' | 'already-present' | 'failed';
+  stage?: string;
+  error?: string;
+  warnings?: string[];
+  mapping?: RecoveryMappingAddition;
+}
+type Access = (path: string) => Promise<unknown>;
+const errorStage = (error: unknown): string | undefined => (
+  error && typeof error === 'object' && 'stage' in error && typeof error.stage === 'string'
+    ? error.stage : undefined
+);
+
+function message(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function windowMap(checkpoint) {
+function windowMap(checkpoint: RestoreCheckpoint): Map<string, WorkspaceWindow> {
   return new Map(checkpoint.windows.map((window) => [window.id, window]));
 }
 
-function sessionMap(checkpoint) {
+function sessionMap(checkpoint: RestoreCheckpoint): Map<string, WorkspaceSession> {
   return new Map(checkpoint.sessions.map((session) => [session.id, session]));
 }
 
-function emptyMapping() {
+function emptyMapping(): RecoveryMappingAddition {
   return {
     names: {},
     runtime: { sessions: {}, windows: {}, panes: {} },
@@ -22,21 +75,29 @@ function emptyMapping() {
   };
 }
 
-function mergeMapping(target, source) {
+function mergeMapping(target: RecoveryMappingAddition, source: RecoveryMappingAddition): RecoveryMappingAddition {
   Object.assign(target.names, source.names);
-  for (const kind of ['sessions', 'windows', 'panes']) {
+  for (const kind of KINDS) {
     Object.assign(target.runtime[kind], source.runtime[kind]);
     Object.assign(target.logical[kind], source.logical[kind]);
   }
   return target;
 }
 
-function mapRuntime(mapping, kind, source, logical, actual) {
+function mapRuntime(
+  mapping: RecoveryMappingAddition,
+  kind: MappingKind,
+  source: unknown,
+  logical: unknown,
+  actual: string,
+): void {
   if (typeof source === 'string' && source) mapping.runtime[kind][source] = actual;
   if (typeof logical === 'string' && logical) mapping.logical[kind][logical] = actual;
 }
 
-async function usableCwd(cwd, { access, home, warnings }) {
+async function usableCwd(cwd: unknown, {
+  access, home, warnings,
+}: { access: Access; home: string; warnings: string[] }): Promise<string> {
   if (typeof cwd === 'string' && cwd) {
     try {
       await access(cwd);
@@ -47,43 +108,69 @@ async function usableCwd(cwd, { access, home, warnings }) {
   return home;
 }
 
-function sortedPanes(window) {
+function sortedPanes(window: WorkspaceWindow): WorkspacePane[] {
   return [...window.panes].sort((a, b) => a.index - b.index);
 }
 
-function dispositionMap(plan) {
+function requiredWindow(windows: ReadonlyMap<string, WorkspaceWindow>, id: string): WorkspaceWindow {
+  const window = windows.get(id);
+  if (!window) throw new Error(`checkpoint window ${id} is missing`);
+  return window;
+}
+
+function firstPane(window: WorkspaceWindow): WorkspacePane {
+  const pane = sortedPanes(window)[0];
+  if (!pane) throw new Error(`checkpoint window ${window.id} has no panes`);
+  return pane;
+}
+
+function dispositionMap(plan: RestorePlan): Map<string | null, WindowDisposition> {
   return new Map((plan.windows || []).map((window) => [window.logicalId, window]));
 }
 
-async function notify(onProgress, results, result, total) {
+async function notify(
+  onProgress: ((progress: { completed: number; total: number; result: RestoreResult }) => unknown | Promise<unknown>) | undefined,
+  results: RestoreResult[],
+  result: RestoreResult,
+  total: number,
+): Promise<void> {
   if (typeof onProgress !== 'function') return;
   await onProgress({ completed: results.length, total, result });
 }
 
 async function restoreOneSession({
   item, checkpoint, tmux, agents, access, home, dispositions, restoredWindows,
-}) {
+}: {
+  item: RestorableItem;
+  checkpoint: RestoreCheckpoint;
+  tmux: RestoreTmux;
+  agents: readonly AgentDriver[];
+  access: Access;
+  home: string;
+  dispositions: ReadonlyMap<string | null, WindowDisposition>;
+  restoredWindows: Map<string, string>;
+}): Promise<RestoreResult> {
   const sessions = sessionMap(checkpoint);
   const windows = windowMap(checkpoint);
   const source = sessions.get(item.logicalId);
   if (!source) throw Object.assign(new Error('checkpoint session is missing'), { stage: 'plan' });
 
-  const warnings = [];
+  const warnings: string[] = [];
   const mapping = emptyMapping();
-  const localWindows = new Map();
-  const localPanes = new Map();
+  const localWindows = new Map<string, string>();
+  const localPanes = new Map<string, string>();
   const links = [...item.windowLinks].sort((a, b) => a.index - b.index);
   const seedLink = links.find((link) => {
     if (restoredWindows.has(link.windowId)) return false;
     return dispositions.get(link.windowId)?.action !== 'reuse';
   });
-  let temp = null;
+  let temp: TemporarySession | null = null;
   let topologyComplete = false;
 
   try {
     if (seedLink) {
-      const seedWindow = windows.get(seedLink.windowId);
-      const seedPane = sortedPanes(seedWindow)[0];
+      const seedWindow = requiredWindow(windows, seedLink.windowId);
+      const seedPane = firstPane(seedWindow);
       const cwd = await usableCwd(seedPane.cwd, { access, home, warnings });
       temp = await tmux.createTemporarySession({
         cwd,
@@ -98,8 +185,10 @@ async function restoreOneSession({
       mapRuntime(mapping, 'windows', seedWindow.runtimeId, seedWindow.id, temp.windowId);
       mapRuntime(mapping, 'panes', seedPane.runtimeId, seedPane.id, temp.paneId);
     } else {
-      const fallbackWindow = windows.get(links[0]?.windowId);
-      const cwd = await usableCwd(sortedPanes(fallbackWindow)[0].cwd, { access, home, warnings });
+      const fallbackId = links[0]?.windowId;
+      if (!fallbackId) throw new Error('checkpoint session has no windows');
+      const fallbackWindow = requiredWindow(windows, fallbackId);
+      const cwd = await usableCwd(firstPane(fallbackWindow).cwd, { access, home, warnings });
       temp = await tmux.createTemporarySession({ cwd, sessionLogicalId: item.logicalId });
     }
     mapRuntime(mapping, 'sessions', source.runtimeId, source.id, temp.sessionId);
@@ -111,30 +200,32 @@ async function restoreOneSession({
 
       const sharedRuntime = restoredWindows.get(window.id);
       const disposition = dispositions.get(window.id);
-      if (sharedRuntime || disposition?.action === 'reuse') {
-        const windowId = sharedRuntime || disposition.runtimeId;
+      const dispositionRuntime = disposition?.action === 'reuse' ? disposition.runtimeId : undefined;
+      if (sharedRuntime || dispositionRuntime) {
+        const windowId = sharedRuntime || dispositionRuntime;
+        if (!windowId) throw new Error(`reused window ${window.id} has no runtime id`);
         await tmux.linkWindow(windowId, temp.sessionId, link.index, { existing: !sharedRuntime });
         if (!sharedRuntime) mapRuntime(mapping, 'windows', window.runtimeId, window.id, windowId);
         continue;
       }
 
-      const firstPane = sortedPanes(window)[0];
-      const cwd = await usableCwd(firstPane.cwd, { access, home, warnings });
+      const initialPane = firstPane(window);
+      const cwd = await usableCwd(initialPane.cwd, { access, home, warnings });
       const created = await tmux.createWindow(temp.sessionId, {
         name: window.name,
         index: link.index,
         cwd,
         windowLogicalId: window.id,
-        paneLogicalId: firstPane.id,
+        paneLogicalId: initialPane.id,
       });
       localWindows.set(window.id, created.windowId);
-      localPanes.set(firstPane.id, created.paneId);
+      localPanes.set(initialPane.id, created.paneId);
       mapRuntime(mapping, 'windows', window.runtimeId, window.id, created.windowId);
-      mapRuntime(mapping, 'panes', firstPane.runtimeId, firstPane.id, created.paneId);
+      mapRuntime(mapping, 'panes', initialPane.runtimeId, initialPane.id, created.paneId);
     }
 
     for (const [logicalId, runtimeId] of localWindows) {
-      const window = windows.get(logicalId);
+      const window = requiredWindow(windows, logicalId);
       const panes = sortedPanes(window);
       const seedPaneId = localPanes.get(panes[0].id);
       for (const pane of panes.slice(1)) {
@@ -170,22 +261,30 @@ async function restoreOneSession({
     for (const [logicalId, paneId] of localPanes) {
       const pane = [...windows.values()].flatMap((window) => window.panes).find((candidate) => candidate.id === logicalId);
       if (!pane?.agent) continue;
-      const driver = agents.find((candidate) => candidate.id === pane.agent.id);
+      const binding = pane.agent;
+      const agentId = typeof binding.id === 'string' ? binding.id : '';
+      const sessionId = typeof binding.sessionId === 'string' ? binding.sessionId : '';
+      const transcriptPath = typeof binding.transcriptPath === 'string' ? binding.transcriptPath : '';
+      const driver = agents.find((candidate) => candidate.id === agentId);
       if (!driver) {
-        warnings.push(`agent ${pane.agent.id || '(missing)'} is unsupported; shell was restored`);
+        warnings.push(`agent ${agentId || '(missing)'} is unsupported; shell was restored`);
         continue;
       }
-      if (!driver.sessions.isId(pane.agent.sessionId)) {
+      if (!driver.sessions.isId(sessionId)) {
         warnings.push(`agent ${driver.id} session id is invalid; shell was restored`);
         continue;
       }
       try {
-        await access(pane.agent.transcriptPath);
+        await access(transcriptPath);
       } catch {
         warnings.push(`agent ${driver.id} context is unavailable; shell was restored`);
         continue;
       }
-      const [cmd, ...args] = driver.sessions.resumeArgs(pane.agent.sessionId);
+      const [cmd, ...args] = driver.sessions.resumeArgs(sessionId);
+      if (!cmd) {
+        warnings.push(`agent ${driver.id} resume command is unavailable; shell was restored`);
+        continue;
+      }
       try {
         await tmux.startAgent(paneId, cmd, args);
       } catch (error) {
@@ -202,19 +301,22 @@ async function restoreOneSession({
       mapping,
     };
   } catch (error) {
-    let cleanupError;
+    let cleanupError: unknown;
     if (temp && !topologyComplete) {
       try { await tmux.killCreatedSession(temp.sessionId); } catch (failure) { cleanupError = failure; }
     }
-    const failure = cleanupError
+    const failure: Error & { stage?: string } = cleanupError
       ? new Error(`${message(error)}; cleanup failed: ${message(cleanupError)}`)
-      : error;
-    failure.stage ||= error?.stage || 'topology';
+      : error instanceof Error ? error : new Error(message(error));
+    failure.stage ||= errorStage(error) || 'topology';
     throw failure;
   }
 }
 
-function restoredTopologySummary(checkpoint, results) {
+function restoredTopologySummary(
+  checkpoint: RestoreCheckpoint | null,
+  results: RestoreResult[],
+): { sessions: number; windows: number; panes: number } {
   const restoredSessions = new Set(results
     .filter((result) => result.status === 'restored')
     .map((result) => result.logicalId));
@@ -227,7 +329,7 @@ function restoredTopologySummary(checkpoint, results) {
   return { sessions: restoredSessions.size, windows: windowIds.size, panes: paneIds.size };
 }
 
-export function summarizeRestore(results, checkpoint = null) {
+export function summarizeRestore(results: RestoreResult[], checkpoint: RestoreCheckpoint | null = null) {
   const mapping = emptyMapping();
   for (const result of results) if (result.mapping) mergeMapping(mapping, result.mapping);
   const restored = results.filter((result) => result.status === 'restored').length;
@@ -245,26 +347,37 @@ export async function executeRestore({
   onProgress,
   access = fsp.access,
   home = os.homedir(),
-} = {}) {
-  const results = [];
+}: {
+  plan: RestorePlan;
+  checkpoint: RestoreCheckpoint;
+  tmux: RestoreTmux;
+  agents?: readonly AgentDriver[];
+  onProgress?: (progress: { completed: number; total: number; result: RestoreResult }) => unknown | Promise<unknown>;
+  access?: Access;
+  home?: string;
+}): Promise<ReturnType<typeof summarizeRestore>> {
+  const results: RestoreResult[] = [];
   const dispositions = dispositionMap(plan);
   const restoredWindows = new Map();
   try {
     for (const item of plan.sessions) {
-      let result;
+      let result: RestoreResult;
       if (item.action === 'already-present') {
         result = { logicalId: item.logicalId, sourceName: item.sourceName, status: 'already-present' };
       } else if (item.action === 'unsupported') {
         result = { logicalId: item.logicalId, sourceName: item.sourceName, status: 'failed', stage: 'plan', error: item.reason };
       } else {
         try {
-          result = await restoreOneSession({ item, checkpoint, tmux, agents, access, home, dispositions, restoredWindows });
+          result = await restoreOneSession({
+            item: item as RestorableItem,
+            checkpoint, tmux, agents, access, home, dispositions, restoredWindows,
+          });
         } catch (error) {
           result = {
             logicalId: item.logicalId,
             sourceName: item.sourceName,
             status: 'failed',
-            stage: error.stage || 'topology',
+            stage: errorStage(error) || 'topology',
             error: message(error),
           };
         }

@@ -7,12 +7,12 @@ interface ProjectedSource {
   activeWindowId: string | null;
   windowLinks: ProjectedLink[];
 }
-interface PlanSession extends ProjectedSource {
+export interface PlanSession extends ProjectedSource {
   action: RestoreAction;
   targetName?: string;
   reason?: string;
 }
-interface WindowDisposition {
+export interface WindowDisposition {
   logicalId: string | null;
   action: 'reuse' | 'create';
   runtimeId?: string;
