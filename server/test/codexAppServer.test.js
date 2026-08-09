@@ -170,6 +170,48 @@ describe('Codex App Server projection', () => {
 });
 
 describe('Codex App Server client', () => {
+  it('projects the authoritative live turn plan and retains its completed-turn summary', async () => {
+    const proxy = fakeProxy();
+    const app = createCodexAppServer({ home: '/home/test', exists: () => true, connect: () => proxy.ws });
+    await app.status('%1', 'thread-1');
+    proxy.push({
+      jsonrpc: '2.0', method: 'turn/started', params: {
+        threadId: 'thread-1', turn: { id: 'turn-plan', status: 'inProgress', items: [] },
+      },
+    });
+    proxy.push({
+      jsonrpc: '2.0', method: 'turn/plan/updated', params: {
+        threadId: 'thread-1', turnId: 'turn-plan', explanation: '开始实现',
+        plan: [
+          { step: '确认协议', status: 'completed' },
+          { step: '实现任务条', status: 'inProgress' },
+        ],
+      },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(await app.status('%1', 'thread-1')).toMatchObject({
+      plan: {
+        turnId: 'turn-plan', explanation: '开始实现',
+        steps: [
+          { step: '确认协议', status: 'completed' },
+          { step: '实现任务条', status: 'inProgress' },
+        ],
+      },
+    });
+
+    proxy.push({
+      jsonrpc: '2.0', method: 'turn/completed', params: {
+        threadId: 'thread-1', turn: { id: 'turn-plan', status: 'completed', items: [] },
+      },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(await app.status('%1', 'thread-1')).toMatchObject({
+      plan: null,
+      lastPlan: { turnId: 'turn-plan', steps: expect.any(Array) },
+    });
+    app.close();
+  });
+
   it('streams agent message deltas only to the matching thread and closes subscribers with the connection', async () => {
     const proxy = fakeProxy();
     const app = createCodexAppServer({ home: '/home/test', exists: () => true, connect: () => proxy.ws });

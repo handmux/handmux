@@ -18,6 +18,7 @@ import {
   CommandIcon, FileIcon, FilePenIcon, SearchIcon, GlobeIcon, ListChecksIcon, PuzzleIcon, BotIcon, WrenchIcon,
   CheckIcon, XIcon,
 } from './icons.jsx';
+import { CodexPlanSheet, CodexPlanSummary, codexPlanSteps } from './CodexPlan.jsx';
 
 // Codex App Server exposes the process-launch wrapper, while its terminal UI shows only the command passed
 // to that shell. Keep the raw value in the transcript and remove only this known wrapper at render time.
@@ -652,6 +653,26 @@ export default function ChatView({
     ...durableMessages,
     ...visibleLiveMessages,
   ], [durableMessages, visibleLiveMessages]);
+  const historicalPlans = useMemo(() => {
+    const latest = new Map();
+    messages.forEach((message) => {
+      if (message.type === 'plan' && message.turnId && codexPlanSteps(message).length) {
+        latest.set(message.turnId, message);
+      }
+    });
+    const byAnswerIndex = new Map();
+    for (const [turnId, plan] of latest) {
+      if (turnId === codexSession?.activeTurnId) continue;
+      let answerIndex = -1;
+      messages.forEach((message, index) => {
+        if (message.turnId === turnId && message.role === 'assistant' && message.type === 'text') {
+          answerIndex = index;
+        }
+      });
+      if (answerIndex >= 0) byAnswerIndex.set(answerIndex, plan);
+    }
+    return byAnswerIndex;
+  }, [messages, codexSession?.activeTurnId]);
   const activeStreamMessage = [...visibleLiveMessages].reverse()
     .find((message) => message.streaming && message.text) || null;
   const tsIdx = useMemo(() => timeStampedIndices(messages), [messages]);
@@ -797,8 +818,10 @@ export default function ChatView({
   // the tool (a running tool gains its result). Resolve the current message each render; if it scrolls out of
   // the loaded window it's gone → the sheet self-closes.
   const [sheetKey, setSheetKey] = useState(null);
+  const [planSheet, setPlanSheet] = useState(null);
   const sheetMsg = sheetKey != null ? messages.find((m) => m.type === 'tool' && messageIdentity(m) === sheetKey) : null;
   useEffect(() => { if (sheetKey != null && !sheetMsg) setSheetKey(null); }, [sheetKey, sheetMsg]);
+  useEffect(() => { setPlanSheet(null); }, [pane]);
 
   // Android/browser Back must close the sheet and land back on the chat lens — not navigate the app away
   // (or trip the exit-confirm guard). Same overlay contract as FileManager/GitPanel: push ONE history entry
@@ -1078,13 +1101,16 @@ export default function ChatView({
           && <div className="chat-new">{t('boot.chat_empty')}</div>}
         {messages.map((m, idx) => {
           if (m.type === 'thinking') return null; // dropped (see Bubble) — no bubble, no time
+          if (m.type === 'plan') return null;
           if (m.type === 'compact' && idx !== latestCompactIndex) return null;
           const label = tsIdx.has(idx) ? fmtTime(m.ts) : null;
+          const turnPlan = historicalPlans.get(idx);
           return (
             <Fragment key={messageIdentity(m)}>
               <Bubble m={m} running={toolRunning && idx === messages.length - 1}
                 onOpenTool={(msg) => setSheetKey(messageIdentity(msg))} />
               {label && <div className={'chat-ts ' + (m.role === 'user' ? 'ts-me' : 'ts-them')}>{label}</div>}
+              {turnPlan && <CodexPlanSummary plan={turnPlan} onOpen={() => setPlanSheet(turnPlan)} />}
             </Fragment>
           );
         })}
@@ -1150,6 +1176,9 @@ export default function ChatView({
           onClose={() => setSheetKey(null)}
         />
       )}
+
+      <CodexPlanSheet open={!!planSheet} title={t('chat.plan.historyTitle')} plan={planSheet}
+        onClose={() => setPlanSheet(null)} />
 
       {/* The gate (rich or fallback) is a modal bottom sheet: the backdrop dims the chat lens and,
          critically, covers the composer — a SHORT gate (e.g. the 提交/取消 review card) would otherwise leave

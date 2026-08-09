@@ -633,6 +633,41 @@ describe('ChatView', () => {
     expect(screen.queryByText('apply_patch')).toBeNull();
   });
 
+  it('collapses plan updates into one read-only summary after the turn answer', async () => {
+    mockTranscript([
+      { k: 0, i: 0, role: 'user', type: 'text', text: '实现任务列表', turnId: 'turn-plan' },
+      {
+        k: 1, i: 1, role: 'assistant', type: 'plan', turnId: 'turn-plan',
+        plan: [
+          { step: '确认协议', status: 'inProgress' },
+          { step: '实现界面', status: 'pending' },
+        ],
+      },
+      {
+        k: 2, i: 2, role: 'assistant', type: 'plan', turnId: 'turn-plan',
+        plan: [
+          { step: '确认协议', status: 'completed' },
+          { step: '实现界面', status: 'completed' },
+        ],
+      },
+      { k: 3, i: 3, role: 'assistant', type: 'text', text: '已经完成。', turnId: 'turn-plan' },
+    ]);
+    const { container } = render(<ChatView pane="%0" agent="codex" kind="done"
+      codexSession={{ managed: true, threadId: 'thread-1', activeTurnId: null }} />);
+    const answer = await screen.findByText('已经完成。');
+    const summary = screen.getByRole('button', { name: /本轮任务/ });
+    expect(summary.textContent).toContain('2/2');
+    expect(summary.textContent).toContain('已完成');
+    expect(answer.compareDocumentPosition(summary) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(container.querySelectorAll('.chat-plan-summary')).toHaveLength(1);
+
+    fireEvent.click(summary);
+    const sheet = screen.getByRole('dialog', { name: '本轮任务' });
+    expect(sheet.textContent).toContain('确认协议');
+    expect(sheet.textContent).toContain('实现界面');
+    expect(sheet.querySelector('input, textarea, [role="checkbox"]')).toBeNull();
+  });
+
   it('permission with no parseable menu → 允许/拒绝 fallback, taps send Enter', async () => {
     mockTranscript([{ k: 0, i: 0, role: 'assistant', type: 'tool', tool: { name: 'Bash', input: { command: 'ls' }, result: null, isError: false } }]);
     vi.spyOn(api, 'getPendingPrompt').mockResolvedValue(null); // menu not scraped → fallback

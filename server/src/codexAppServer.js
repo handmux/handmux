@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import net from 'node:net';
 import WebSocket from 'ws';
+import { codexPlanSnapshot } from './codexPlan.js';
 import { codexAppSocketPath } from './cli/codexManaged.js';
 import { isCodexSyntheticUserText } from './codexTranscriptParse.js';
 
@@ -571,6 +572,12 @@ class CodexAppConnection {
           itemId: params.itemId, delta,
         });
       }
+    } else if (message.method === 'turn/plan/updated') {
+      const state = this.state(params.threadId);
+      const plan = codexPlanSnapshot(params.turnId, params.plan, params.explanation);
+      if (plan) state.plans.set(params.turnId, plan);
+      else if (params.turnId) state.plans.delete(params.turnId);
+      while (state.plans.size > 20) state.plans.delete(state.plans.keys().next().value);
     } else if (message.method === 'serverRequest/resolved') {
       this.approvals.delete(String(params.requestId));
       this.userInputs.delete(String(params.requestId));
@@ -682,7 +689,7 @@ class CodexAppConnection {
     if (!this.threadState.has(threadId)) this.threadState.set(threadId, {
       revision: 0, readRevision: -1, thread: null, status: null, activeTurnId: null, settings: null,
       activePrompt: '', contextUsage: null, lastTurn: null, loadedOnly: false, liveItemIds: new Map(),
-      completedAgentItemIds: new Set(),
+      completedAgentItemIds: new Set(), plans: new Map(),
     });
     return this.threadState.get(threadId);
   }
@@ -1443,12 +1450,15 @@ export function createCodexAppServer({
       if (!client) return { managed: false };
       await client.assertCurrentThread(threadId);
       const state = await client.ensureThread(threadId);
+      const activeTurnId = client.activeTurn(threadId);
       return {
         managed: true,
         threadId,
         gitBranch: state.thread?.gitInfo?.branch || null,
         status: state.status || state.thread?.status,
-        activeTurnId: state.activeTurnId,
+        activeTurnId,
+        plan: activeTurnId ? state.plans.get(activeTurnId) || null : null,
+        lastPlan: state.lastTurn?.id ? state.plans.get(state.lastTurn.id) || null : null,
         settings: state.settings,
         contextUsage: state.contextUsage,
         activityKind: client.inbox.kind,

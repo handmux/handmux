@@ -26,6 +26,7 @@ import { t } from '../i18n';
 import { useBackButton } from '../hooks/useBackButton.js';
 import DiscreteSlider from './DiscreteSlider.jsx';
 import CodexGoalMenu from './CodexGoalMenu.jsx';
+import { CodexPlanBar, CodexPlanSheet, codexPlanSteps } from './CodexPlan.jsx';
 
 // The 对话-lens composer — a single modern AI-agent input CARD (textarea on top, an action row beneath),
 // shown INSTEAD of the terminal BottomDock while the chat lens is active. It rides above the soft keyboard
@@ -370,6 +371,7 @@ export default function ChatComposer({
   const [editOpen, setEditOpen] = useState(false);
   const [configOpen, setConfigOpen] = useState(false);
   const [goalOpen, setGoalOpen] = useState(false);
+  const [planOpen, setPlanOpen] = useState(false);
   const [goalEditOnOpen, setGoalEditOnOpen] = useState(false);
   const [contextOpen, setContextOpen] = useState(false);
   const [permissionExpanded, setPermissionExpanded] = useState(false);
@@ -384,6 +386,10 @@ export default function ChatComposer({
   useEffect(() => { if (!editOpen) refreshShortcuts(); }, [editOpen]);
   useBackButton(editOpen, () => setEditOpen(false));
   useBackButton(contextOpen, () => setContextOpen(false));
+  const activePlan = agent === 'codex' && codexSession?.managed && codexPlanSteps(codexSession.plan).length
+    ? codexSession.plan : null;
+  useEffect(() => { if (!activePlan) setPlanOpen(false); }, [activePlan]);
+  useEffect(() => { setPlanOpen(false); }, [pane]);
   const allQuickFavs = applyShortcutLayout(
     mergeShortcuts(serverShortcuts.chat, favs, 'chat'), layout,
   );
@@ -930,6 +936,11 @@ export default function ChatComposer({
 
   return (
     <div className="chat-composer" onPointerDown={keepFocus}>
+      {activePlan && (
+        <CodexPlanBar plan={activePlan}
+          waiting={kind === 'permission' || !!codexSession?.approvals?.length || !!codexSession?.userInputs?.length}
+          onOpen={() => setPlanOpen(true)} />
+      )}
       {/* Quick-reply chips — tap to send. Reuses the dock's chip styling (.quick-cmd/.qc-*). */}
       <div className="cc-quick quick-scroll">
         {quickFavs.map((f, i) => (
@@ -1212,6 +1223,8 @@ export default function ChatComposer({
         document.body,
       )}
       {notice && <div className="cc-notice" role="status">{notice}</div>}
+      <CodexPlanSheet open={planOpen} title={t('chat.plan.currentTitle')} plan={activePlan}
+        onClose={() => setPlanOpen(false)} portal chatTone={chatTone} />
       {editOpen && <CmdFavEditor variant="chat" presets={serverShortcuts.chat}
         onChange={refreshShortcuts} onClose={() => setEditOpen(false)} />}
     </div>

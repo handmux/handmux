@@ -7,6 +7,7 @@ All notable changes to handmux. Format follows [Keep a Changelog](https://keepac
 ### Added
 
 - 终端与对话现可预览任意扩展名的文本文件；打开前按内容识别文本，二进制文件仍保持不可预览。
+- Codex 对话新增只读回合任务列表：执行中固定在快捷输入上方，点按可用 Bottom Sheet 查看完整步骤；结束后在最终回复下保留可恢复的任务摘要。
 
 ### Fixed
 

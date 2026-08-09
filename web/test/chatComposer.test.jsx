@@ -77,6 +77,32 @@ const deferred = () => {
 };
 
 describe('ChatComposer', () => {
+  it('shows the read-only current task strip immediately above quick replies and opens a bottom sheet', () => {
+    const { container } = render(<ChatComposer pane="%1" agent="codex" kind="working" codexSession={{
+      managed: true,
+      plan: {
+        turnId: 'turn-plan',
+        steps: [
+          { step: '确认协议', status: 'completed' },
+          { step: '实现任务条', status: 'inProgress' },
+          { step: '跑测试', status: 'pending' },
+        ],
+      },
+    }} />);
+    const bar = screen.getByRole('button', { name: /当前任务/ });
+    expect(bar.textContent).toContain('1/3');
+    expect(bar.textContent).toContain('正在：实现任务条');
+    expect(bar.nextElementSibling).toBe(container.querySelector('.cc-quick'));
+
+    fireEvent.click(bar);
+    const sheet = screen.getByRole('dialog', { name: '当前任务' });
+    expect(sheet.classList.contains('codex-plan-sheet')).toBe(true);
+    expect(sheet.textContent).toContain('确认协议');
+    expect(sheet.textContent).toContain('实现任务条');
+    expect(sheet.textContent).toContain('跑测试');
+    expect(sheet.querySelector('input, textarea, [role="checkbox"]')).toBeNull();
+  });
+
   it('keeps vertical swipes on the horizontal shortcut strip from panning the page', () => {
     expect(styles).toMatch(/\.cc-quick\s*\{[^}]*overflow-y:\s*hidden[^}]*overscroll-behavior:\s*contain[^}]*touch-action:\s*pan-x/);
   });

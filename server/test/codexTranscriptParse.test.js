@@ -212,4 +212,34 @@ describe('Codex rollout transcript', () => {
       ],
     });
   });
+
+  it('projects Code Mode update_plan calls as plan state instead of tool cards', () => {
+    const script = [
+      'const result = await tools.update_plan({',
+      '  explanation: "开始实现",',
+      '  plan: [',
+      '    { step: "确认协议", status: "completed" },',
+      '    { step: "实现任务条", status: "in_progress" },',
+      '    { step: "跑测试", status: "pending" },',
+      '  ],',
+      '});',
+      'text(result);',
+    ].join('\n');
+    const parsed = parseCodexTranscript([
+      row({
+        type: 'custom_tool_call', name: 'exec', call_id: 'plan-1', input: script,
+        internal_chat_message_metadata_passthrough: { turn_id: 'turn-plan' },
+      }),
+      row({ type: 'custom_tool_call_output', call_id: 'plan-1', output: '{}' }),
+    ]);
+    expect(parsed).toEqual([expect.objectContaining({
+      type: 'plan', turnId: 'turn-plan', explanation: '开始实现',
+      plan: [
+        { step: '确认协议', status: 'completed' },
+        { step: '实现任务条', status: 'inProgress' },
+        { step: '跑测试', status: 'pending' },
+      ],
+    })]);
+    expect(parsed[0].tool).toBeUndefined();
+  });
 });

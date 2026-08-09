@@ -1,3 +1,5 @@
+import { codexPlanSnapshot } from './codexPlan.js';
+
 // Codex's rollout JSONL is the durable, ordered conversation log. App Server notifications drive live
 // controls/status, but its thread snapshots currently omit some completed tools, so transcript rendering
 // must come from this log alone. event_msg mirrors response_item content and is deliberately ignored.
@@ -170,6 +172,14 @@ function parseJsLiteral(script, raw, before) {
   const decoded = decodeJsString(value);
   if (decoded != null) return decoded;
   try { return JSON.parse(value); } catch { /* JavaScript object syntax is not strict JSON. */ }
+  if (value.startsWith('[') && value.endsWith(']')) {
+    const body = value.slice(1, -1).trim();
+    return body ? splitTopLevel(body, ',').map((item) => parseJsLiteral(script, item, before)) : [];
+  }
+  if (value.startsWith('{') && value.endsWith('}')) {
+    const object = parseJsObjectInput(script, value, before);
+    if (object) return object;
+  }
   const resolved = resolveStringArgument(script, value, before);
   return resolved == null ? value : resolved;
 }
@@ -291,6 +301,7 @@ function applyCustomOutput(messages, value) {
   const values = structuredResults(value);
   if (values && values.length === messages.length) {
     messages.forEach((message, index) => {
+      if (!message.tool) return;
       const result = values[index];
       message.tool.result = outputText(result);
       message.tool.outcome = resultOutcome(result, message.tool.result);
@@ -300,12 +311,13 @@ function applyCustomOutput(messages, value) {
   }
   const raw = outputText(value).replace(/^Script completed[^\n]*\n(?:Wall time[^\n]*\n)?(?:Output:\n?)?/i, '');
   const declined = /^aborted by user(?:\s+after\s+[\d.]+s)?\s*$/i.test(raw.trim());
-  messages.forEach((message, index) => {
-    message.tool.result = index === messages.length - 1 ? raw : '';
+  const tools = messages.filter((message) => message.tool);
+  tools.forEach((message, index) => {
+    message.tool.result = index === tools.length - 1 ? raw : '';
     // A single extracted call has an exact persisted outcome. With several calls and one unstructured
     // wrapper result, the rollout cannot identify which nested call produced it, so keep every card neutral.
-    message.tool.outcome = declined && messages.length === 1 ? 'declined'
-      : messages.length === 1 ? 'success' : 'completed';
+    message.tool.outcome = declined && tools.length === 1 ? 'declined'
+      : tools.length === 1 ? 'success' : 'completed';
   });
 }
 
@@ -321,6 +333,18 @@ export function createCodexTranscriptParser() {
       : {}),
     tool: { name, input, result: null, isError: false, ...(diff ? { diff } : {}) },
   });
+
+  const callMessage = (i, ts, name, input, diff, item) => {
+    const turnId = item?.internal_chat_message_metadata_passthrough?.turn_id;
+    const plan = name === 'update_plan'
+      ? codexPlanSnapshot(turnId, input?.plan, input?.explanation)
+      : null;
+    if (plan) {
+      const { steps, ...snapshot } = plan;
+      return { i, role: 'assistant', type: 'plan', ts, ...snapshot, plan: steps };
+    }
+    return toolMessage(i, ts, name, input, diff, item);
+  };
 
   function push(lines) {
     for (const raw of lines) {
@@ -363,7 +387,7 @@ export function createCodexTranscriptParser() {
       }
 
       if (item.type === 'function_call') {
-        const message = toolMessage(i, ts, item.name || '', parseInput(item.arguments), null, item);
+        const message = callMessage(i, ts, item.name || '', parseInput(item.arguments), null, item);
         messages.push(message);
         if (item.call_id) pending.set(item.call_id, [message]);
         continue;
@@ -371,6 +395,7 @@ export function createCodexTranscriptParser() {
       if (item.type === 'function_call_output') {
         const targets = item.call_id && pending.get(item.call_id);
         if (targets?.length === 1) {
+          if (!targets[0].tool) { pending.delete(item.call_id); continue; }
           const output = classicOutput(item.output);
           targets[0].tool.result = output.result;
           targets[0].tool.isError = output.isError;
@@ -406,7 +431,7 @@ export function createCodexTranscriptParser() {
         const script = typeof item.input === 'string' ? item.input : '';
         const calls = extractCustomCalls(script);
         const targets = calls
-          ? calls.map((call) => toolMessage(i, ts, call.name, call.input, call.diff, item))
+          ? calls.map((call) => callMessage(i, ts, call.name, call.input, call.diff, item))
           : [toolMessage(i, ts, item.name || 'exec', { script: cap(script, SCRIPT_CAP) }, null, item)];
         messages.push(...targets);
         if (item.call_id) pending.set(item.call_id, targets);
