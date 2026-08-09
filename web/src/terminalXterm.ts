@@ -1,4 +1,4 @@
-import { Terminal as XTerm } from '@xterm/xterm';
+import { Terminal as XTerm, type ITheme } from '@xterm/xterm';
 import { WebglAddon } from '@xterm/addon-webgl';
 import '@xterm/xterm/css/xterm.css';
 import { docLinksOnLine } from './docDecorations.js';
@@ -7,13 +7,52 @@ import { ensureBundledFonts } from './bundledFonts.js';
 import { isBrowserFunctionKey } from './terminalPageKeyboard.js';
 
 export const TERMINAL_FONT_FAMILY = "ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Monaco, 'Cascadia Mono', 'Roboto Mono', 'Noto Sans Mono', 'DejaVu Sans Mono', 'Courier New', 'JetBrainsMono Nerd Font', 'TW Unifont', monospace";
-export const TERMINAL_THEME = {
+export const TERMINAL_THEME: ITheme = {
   selectionBackground: 'rgba(10,132,255,0.9)',
   selectionForeground: '#ffffff',
 };
 
-function primeCursorRenderer(term, host) {
-  const helper = host?.querySelector('.xterm-helper-textarea');
+export interface TerminalOutputLink {
+  kind: 'url' | 'doc';
+  path: string;
+  raw?: string;
+  protocol?: string;
+  port?: string | number;
+  urlPath?: string;
+  range?: {
+    start: { x: number; y: number };
+    end: { x: number; y: number };
+  };
+}
+
+export type TerminalDocLinkHandler = (
+  link: TerminalOutputLink,
+  clientX: number,
+  clientY: number,
+) => void;
+
+export interface OpenXtermOptions {
+  host: HTMLElement;
+  desktop: boolean;
+  autoFocusInput: boolean;
+  fontSize: number;
+  scrollback: number;
+  pane: string;
+  onInputData?: (pane: string, data: string | Uint8Array) => void;
+  onInputFocusChange?: (focused: boolean) => void;
+  onRequestDraft?: () => void;
+  onDesktopSelection?: (active: boolean) => void;
+  getDocLinkHandler?: () => TerminalDocLinkHandler | null | undefined;
+}
+
+export interface OpenXtermResult {
+  term: XTerm;
+  forwardPageKey(event: KeyboardEvent): boolean;
+  dispose(): void;
+}
+
+function primeCursorRenderer(term: XTerm, host: HTMLElement): void {
+  const helper = host.querySelector<HTMLTextAreaElement>('.xterm-helper-textarea');
   if (helper) {
     helper.readOnly = true;
     helper.tabIndex = -1;
@@ -23,13 +62,18 @@ function primeCursorRenderer(term, host) {
   const previousFocus = document.activeElement;
   term.focus();
   term.blur();
-  if (previousFocus && previousFocus !== document.body && typeof previousFocus.focus === 'function') {
+  if (previousFocus instanceof HTMLElement && previousFocus !== document.body) {
     previousFocus.focus();
   }
 }
 
-function prepareInput(term, host, desktop, autoFocusInput) {
-  const helper = host?.querySelector('.xterm-helper-textarea');
+function prepareInput(
+  term: XTerm,
+  host: HTMLElement,
+  desktop: boolean,
+  autoFocusInput: boolean,
+): void {
+  const helper = host.querySelector<HTMLTextAreaElement>('.xterm-helper-textarea');
   if (!desktop) {
     primeCursorRenderer(term, host);
     return;
@@ -43,14 +87,20 @@ function prepareInput(term, host, desktop, autoFocusInput) {
   if (autoFocusInput) term.focus();
 }
 
-function usesAppleCommandKey() {
-  const platform = navigator.userAgentData?.platform || navigator.platform || '';
+function usesAppleCommandKey(): boolean {
+  const nav = navigator as Navigator & { userAgentData?: { platform?: string } };
+  const platform = nav.userAgentData?.platform || nav.platform || '';
   return /mac|iphone|ipad|ipod/i.test(platform);
 }
 
-function cloneKeyboardEvent(event, type = 'keydown') {
-  const KeyboardEventCtor = event.view?.KeyboardEvent
-    || event.target?.ownerDocument?.defaultView?.KeyboardEvent
+function cloneKeyboardEvent(event: KeyboardEvent, type = 'keydown'): KeyboardEvent {
+  type KeyboardEventView = Window & { KeyboardEvent?: typeof KeyboardEvent };
+  const targetWindow = event.target instanceof Node
+    ? event.target.ownerDocument?.defaultView as KeyboardEventView | null
+    : null;
+  const eventWindow = event.view as KeyboardEventView | null;
+  const KeyboardEventCtor = eventWindow?.KeyboardEvent
+    || targetWindow?.KeyboardEvent
     || window.KeyboardEvent;
   const forwarded = new KeyboardEventCtor(type, {
     key: event.key,
@@ -66,14 +116,18 @@ function cloneKeyboardEvent(event, type = 'keydown') {
     composed: true,
   });
   // xterm's terminal-key mapping intentionally still uses these legacy fields.
-  for (const name of ['keyCode', 'which', 'charCode']) {
+  for (const name of ['keyCode', 'which', 'charCode'] as const) {
     if (event[name] == null) continue;
     try { Object.defineProperty(forwarded, name, { value: event[name] }); } catch { /* read-only */ }
   }
   return forwarded;
 }
 
-function forwardPageKey(term, helper, event) {
+function forwardPageKey(
+  term: XTerm,
+  helper: HTMLTextAreaElement | null,
+  event: KeyboardEvent,
+): boolean {
   if (!helper || isBrowserFunctionKey(event)) return false;
   term.focus();
   const forwarded = cloneKeyboardEvent(event);
@@ -102,7 +156,7 @@ export function openXterm({
   onRequestDraft,
   onDesktopSelection,
   getDocLinkHandler,
-}) {
+}: OpenXtermOptions): OpenXtermResult {
   const term = new XTerm({
     disableStdin: !desktop,
     allowProposedApi: true,
@@ -179,9 +233,9 @@ export function openXterm({
     onInputData?.(pane, bytes);
   }) : null;
   const selectionSub = desktop ? term.onSelectionChange(() => onDesktopSelection?.(term.hasSelection())) : null;
-  const helper = desktop ? host.querySelector('.xterm-helper-textarea') : null;
-  const focus = () => onInputFocusChange?.(true);
-  const blur = () => onInputFocusChange?.(false);
+  const helper = desktop ? host.querySelector<HTMLTextAreaElement>('.xterm-helper-textarea') : null;
+  const focus = (): void => onInputFocusChange?.(true);
+  const blur = (): void => onInputFocusChange?.(false);
   helper?.addEventListener('focus', focus);
   helper?.addEventListener('blur', blur);
   prepareInput(term, host, desktop, autoFocusInput);
@@ -197,15 +251,18 @@ export function openXterm({
         range: link.range,
         text: link.raw ?? link.path,
         decorations: { pointerCursor: true, underline: false },
-        activate: (event) => handler(link, event?.clientX ?? 0, event?.clientY ?? 0),
+        activate: (event: MouseEvent) => handler({
+          ...link,
+          kind: link.kind === 'url' ? 'url' : 'doc',
+        }, event?.clientX ?? 0, event?.clientY ?? 0),
       }));
       callback(links.length ? links : undefined);
     },
   });
 
   let disposed = false;
-  let webgl = null;
-  const mountWebgl = () => {
+  let webgl: WebglAddon | null = null;
+  const mountWebgl = (): void => {
     try {
       const addon = new WebglAddon();
       addon.onContextLoss(() => addon.dispose());
