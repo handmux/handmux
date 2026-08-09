@@ -7,40 +7,75 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { homedir } from 'node:os';
-import { createRequire } from 'node:module';
 import { spawn } from 'node:child_process';
 import { pocketHome } from './cli/state.js';
 import { PrivateStateStore } from './privateStateStore.js';
 
-const require = createRequire(import.meta.url);
-const {
+import {
   readLatestUsage, readSnapshot, writeSnapshot,
-} = require('./codexUsageSnapshot.cjs');
+} from './codexUsageSnapshot.js';
+import type { CodexUsage, UsageRateLimitWindow } from './codexUsageSnapshot.js';
 
-export function claudeUsagePath(home = homedir()) { return path.join(pocketHome(home), 'claude-usage.json'); }
-export function claudeContextDir(home = homedir()) { return path.join(pocketHome(home), 'context'); }
+export interface ClaudeContextSnapshot {
+  model?: string;
+  usedPercent?: number;
+  updatedAt?: number;
+}
+
+export interface CodexRateLimits {
+  primary: UsageRateLimitWindow | null;
+  secondary: UsageRateLimitWindow | null;
+}
+
+export interface UsageOptions {
+  now?: number;
+  calibrationMs?: number;
+  codexCommand?: string;
+  codexArgs?: readonly string[];
+  codexTimeoutMs?: number;
+  codexRateLimitsTtlMs?: number;
+  ttlMs?: number;
+}
+
+export interface UsageSummary {
+  claude: Record<string, unknown> | null;
+  codex: CodexUsage | null;
+}
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+const finiteNumber = (value: unknown): value is number =>
+  typeof value === 'number' && Number.isFinite(value);
+
+export function claudeUsagePath(home: string = homedir()): string { return path.join(pocketHome(home), 'claude-usage.json'); }
+export function claudeContextDir(home: string = homedir()): string { return path.join(pocketHome(home), 'context'); }
 
 // Per-session context-window snapshot the statusLine capturer writes to ~/.handmux/context/<sessionId>.json
 // ({ model, usedPercent, updatedAt }). null if the capturer isn't wired, the session never rendered, or the
 // id is unsafe. Used to show the CURRENT pane's context % (the global claude-usage.json can't — it's one
 // last-writer-wins snapshot across all sessions). sessionId is sanitised to keep the read inside the dir.
-export function readClaudeContext(sessionId, home = homedir()) {
+export function readClaudeContext(sessionId: unknown, home: string = homedir()): ClaudeContextSnapshot | null {
   if (typeof sessionId !== 'string' || !/^[\w-]+$/.test(sessionId)) return null;
   try {
-    const snap = new PrivateStateStore(
+    const snap = new PrivateStateStore<unknown>(
       path.join(claudeContextDir(home), `${sessionId}.json`),
     ).read();
-    return (snap && typeof snap === 'object' && !Array.isArray(snap)) ? snap : null;
+    if (!isRecord(snap)) return null;
+    const context: ClaudeContextSnapshot = {};
+    if (typeof snap.model === 'string') context.model = snap.model;
+    if (finiteNumber(snap.usedPercent)) context.usedPercent = snap.usedPercent;
+    if (finiteNumber(snap.updatedAt)) context.updatedAt = snap.updatedAt;
+    return context;
   } catch { return null; }
 }
-export function codexSessionsDir(home = homedir()) { return path.join(home, '.codex', 'sessions'); }
-export function codexUsagePath(home = homedir()) { return path.join(pocketHome(home), 'codex-usage.json'); }
+export function codexSessionsDir(home: string = homedir()): string { return path.join(home, '.codex', 'sessions'); }
+export function codexUsagePath(home: string = homedir()): string { return path.join(pocketHome(home), 'codex-usage.json'); }
 
 // Claude: read the statusLine snapshot. null if the capturer isn't wired / never populated it.
-export function readClaudeUsage(home = homedir()) {
+export function readClaudeUsage(home: string = homedir()): Record<string, unknown> | null {
   try {
-    const snap = new PrivateStateStore(claudeUsagePath(home)).read();
-    return (snap && typeof snap === 'object' && !Array.isArray(snap)) ? snap : null;
+    const snap = new PrivateStateStore<unknown>(claudeUsagePath(home)).read();
+    return isRecord(snap) ? snap : null;
   } catch { return null; }
 }
 
@@ -48,10 +83,12 @@ export function readClaudeUsage(home = homedir()) {
 // files by modification time: an active older session can be newer than a freshly-created rollout, while
 // a new rollout may have no token_count until its first response. Once a file's mtime is older than the
 // newest event already found, no remaining file can contain a newer event, so the scan stays bounded.
-function rolloutFilesByMtime(dir) {
-  const files = [];
-  const visit = (current) => {
-    let entries;
+interface RolloutFile { file: string; mtimeMs: number }
+
+function rolloutFilesByMtime(dir: string): RolloutFile[] {
+  const files: RolloutFile[] = [];
+  const visit = (current: string): void => {
+    let entries: fs.Dirent[];
     try { entries = fs.readdirSync(current, { withFileTypes: true }); } catch { return; }
     for (const entry of entries) {
       if (entry.name.startsWith('.')) continue;
@@ -67,8 +104,8 @@ function rolloutFilesByMtime(dir) {
 }
 
 // Zero-config reconciliation runs at most once per calibration interval and updates a persistent cache.
-function scanCodexUsage(home) {
-  let latest = null;
+function scanCodexUsage(home: string): CodexUsage | null {
+  let latest: CodexUsage | null = null;
   for (const { file, mtimeMs } of rolloutFilesByMtime(codexSessionsDir(home))) {
     if (latest?.updatedAt && mtimeMs < latest.updatedAt) break;
     const usage = readLatestUsage(file);
@@ -80,9 +117,9 @@ function scanCodexUsage(home) {
 // Prefer the machine-wide cache. A bounded rollout scan refreshes it at most once per minute; App Server
 // supplies live account rate limits separately below.
 export function readCodexUsage(
-  home = homedir(),
-  { now = Date.now(), calibrationMs = 60_000 } = {},
-) {
+  home: string = homedir(),
+  { now = Date.now(), calibrationMs = 60_000 }: UsageOptions = {},
+): CodexUsage | null {
   const file = codexUsagePath(home);
   const snapshot = readSnapshot(file);
   if (snapshot && (now - snapshot.checkedAt) < calibrationMs) return snapshot.usage;
@@ -92,31 +129,31 @@ export function readCodexUsage(
   return readSnapshot(file)?.usage || null;
 }
 
-function normalizeRateLimitWindow(value) {
-  if (!value || typeof value.usedPercent !== 'number') return null;
+function normalizeRateLimitWindow(value: unknown): UsageRateLimitWindow | null {
+  if (!isRecord(value) || !finiteNumber(value.usedPercent)) return null;
   return {
     usedPercent: value.usedPercent,
-    windowMinutes: typeof value.windowDurationMins === 'number' ? value.windowDurationMins : null,
-    resetsAt: typeof value.resetsAt === 'number' ? value.resetsAt : null,
+    windowMinutes: finiteNumber(value.windowDurationMins) ? value.windowDurationMins : null,
+    resetsAt: finiteNumber(value.resetsAt) ? value.resetsAt : null,
   };
 }
 
 // Query the same stable local account method used by Codex's own rich clients. The child process reuses
 // Codex's auth internally; handmux neither reads nor receives credentials. Every failure is a null fallback.
 export function fetchCodexRateLimits(
-  home = homedir(),
+  home: string = homedir(),
   {
     codexCommand = 'codex',
     codexArgs = ['app-server', '--stdio'],
     codexTimeoutMs = 5000,
-  } = {},
-) {
-  return new Promise((resolve) => {
-    let child;
+  }: UsageOptions = {},
+): Promise<CodexRateLimits | null> {
+  return new Promise<CodexRateLimits | null>((resolve) => {
+    let child: ReturnType<typeof spawn> | undefined;
     let settled = false;
     let stdout = '';
 
-    const finish = (value) => {
+    const finish = (value: CodexRateLimits | null): void => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
@@ -137,7 +174,7 @@ export function fetchCodexRateLimits(
 
     child.on('error', () => finish(null));
     child.on('exit', () => finish(null));
-    child.stdout.on('data', (chunk) => {
+    child.stdout?.on('data', (chunk: Buffer | string) => {
       stdout += chunk;
       if (stdout.length > 1024 * 1024) {
         finish(null);
@@ -148,15 +185,17 @@ export function fetchCodexRateLimits(
         const line = stdout.slice(0, newline);
         stdout = stdout.slice(newline + 1);
         if (!line) continue;
-        let message;
+        let message: unknown;
         try { message = JSON.parse(line); } catch { continue; }
 
+        if (!isRecord(message)) continue;
         if (message.id === 1 && message.result) {
-          child.stdin.write(`${JSON.stringify({ method: 'initialized', params: {} })}\n`);
-          child.stdin.write(`${JSON.stringify({ method: 'account/rateLimits/read', id: 2 })}\n`);
+          child?.stdin?.write(`${JSON.stringify({ method: 'initialized', params: {} })}\n`);
+          child?.stdin?.write(`${JSON.stringify({ method: 'account/rateLimits/read', id: 2 })}\n`);
         } else if (message.id === 2) {
-          const source = message.result?.rateLimits;
-          if (!source || typeof source !== 'object') {
+          const result = isRecord(message.result) ? message.result : null;
+          const source = result && isRecord(result.rateLimits) ? result.rateLimits : null;
+          if (!source) {
             finish(null);
             return;
           }
@@ -169,8 +208,8 @@ export function fetchCodexRateLimits(
       }
     });
 
-    child.stdin.on('error', () => finish(null));
-    child.stdin.write(`${JSON.stringify({
+    child.stdin?.on('error', () => finish(null));
+    child.stdin?.write(`${JSON.stringify({
       method: 'initialize',
       id: 1,
       params: { clientInfo: { name: 'handmux', title: 'handmux', version: '0.0.0' } },
@@ -178,18 +217,26 @@ export function fetchCodexRateLimits(
   });
 }
 
-let _codexLimitsCache = {
+interface CodexLimitsCache {
+  at: number;
+  home: string | null;
+  data: CodexRateLimits | null;
+  ready: boolean;
+  promise: Promise<CodexRateLimits | null> | null;
+}
+
+let _codexLimitsCache: CodexLimitsCache = {
   at: 0, home: null, data: null, ready: false, promise: null,
 };
 
 async function getCodexRateLimitsCached(
-  home,
+  home: string,
   {
     now = Date.now(),
     codexRateLimitsTtlMs = 60_000,
     ...fetchOptions
-  } = {},
-) {
+  }: UsageOptions = {},
+): Promise<CodexRateLimits | null> {
   if (_codexLimitsCache.home === home
     && _codexLimitsCache.ready
     && (now - _codexLimitsCache.at) < codexRateLimitsTtlMs) {
@@ -215,7 +262,11 @@ async function getCodexRateLimitsCached(
   return promise;
 }
 
-function mergeCodexRateLimits(usage, rateLimits, now) {
+function mergeCodexRateLimits(
+  usage: CodexUsage | null,
+  rateLimits: CodexRateLimits | null,
+  now: number,
+): CodexUsage | null {
   if (!rateLimits) return usage;
   return {
     updatedAt: now,
@@ -227,7 +278,7 @@ function mergeCodexRateLimits(usage, rateLimits, now) {
   };
 }
 
-export async function getUsage(home = homedir(), options = {}) {
+export async function getUsage(home: string = homedir(), options: UsageOptions = {}): Promise<UsageSummary> {
   const codex = readCodexUsage(home, options);
   const rateLimits = await getCodexRateLimitsCached(home, options);
   return {
@@ -238,13 +289,20 @@ export async function getUsage(home = homedir(), options = {}) {
 
 // Small TTL cache so a phone that re-polls doesn't rescan the rollout every few seconds. In-flight requests
 // share the same promise, while the heavier Codex account query has its own one-minute cache above.
-let _cache = {
+interface UsageCache {
+  at: number;
+  home: string | null;
+  data: UsageSummary | null;
+  promise: Promise<UsageSummary> | null;
+}
+
+let _cache: UsageCache = {
   at: 0, home: null, data: null, promise: null,
 };
 export async function getUsageCached(
-  home = homedir(),
-  options = {},
-) {
+  home: string = homedir(),
+  options: UsageOptions = {},
+): Promise<UsageSummary> {
   const { ttlMs = 15000, now = Date.now(), calibrationMs = 60_000 } = options;
   if (_cache.data && _cache.home === home && (now - _cache.at) < ttlMs) return _cache.data;
   if (_cache.promise && _cache.home === home) return _cache.promise;

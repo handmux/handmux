@@ -1,11 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
-import { createRequire } from 'node:module';
 import { tmpHome } from './tmphome.js';
 
-const require = createRequire(import.meta.url);
-const { writeSnapshot } = require('../src/codexUsageSnapshot.cjs');
+import { writeSnapshot } from '../src/codexUsageSnapshot.js';
 import {
   readClaudeUsage, readCodexUsage, getUsage, getUsageCached, claudeUsagePath,
   readClaudeContext, claudeContextDir,

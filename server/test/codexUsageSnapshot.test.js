@@ -1,13 +1,11 @@
 import { describe, it, expect } from 'vitest';
-import { createRequire } from 'node:module';
 import fs from 'node:fs';
 import path from 'node:path';
 import { tmpHome } from './tmphome.js';
 
-const require = createRequire(import.meta.url);
-const {
+import {
   readLatestUsage, readSnapshot, writeSnapshot,
-} = require('../src/codexUsageSnapshot.cjs');
+} from '../src/codexUsageSnapshot.js';
 
 function tokenCount(timestamp, usedPercent, total = 10, extra = {}) {
   return {
