@@ -9,7 +9,7 @@ import { loadUploadExts } from './uploadTypes.js';
 import { createClaudeEvents } from './claudeEvents.js';
 import { syncHooks } from './cli/claudeHooks.js';
 import { removeLegacyCodexHooks } from './cli/legacyCodexHooks.js';
-import { claudeStatePath } from './cli/state.js';
+import { claudeStatePath, codexOutboxPath } from './cli/state.js';
 import * as commands from './tmux/commands.js';
 import * as push from './push.js';
 import { cacheControlFor } from './staticCache.js';
@@ -28,6 +28,7 @@ import { createBrowserWorkerClient } from './browser/workerClient.js';
 import { createTerminalStream } from './terminalStream.js';
 import { createCodexAppServer } from './codexAppServer.js';
 import { apiErrorBoundary, apiRequestContext } from './apiErrors.js';
+import { PrivateStateStore } from './privateStateStore.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
@@ -76,6 +77,7 @@ const workspace = createWorkspaceRuntime({
 let events = null;
 codexApp = createCodexAppServer({
   home,
+  outboxStore: new PrivateStateStore(codexOutboxPath(home)),
   onStateChange: () => {
     if (!events) return;
     events.getStates().then(() => workspace.requestReconcile()).catch(() => {});

@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import net from 'node:net';
 import WebSocket from 'ws';
 import { codexPlanSnapshot } from './codexPlan.js';
+import { parseCodexOutboxSnapshot } from './codexQueueProtocol.js';
 import { parseCodexGoal, parseCodexStreamEvent } from './codexStreamProtocol.js';
 import { codexAppSocketPath } from './cli/codexManaged.js';
 import { isCodexSyntheticUserText } from './codexTranscriptParse.js';
@@ -10,6 +11,7 @@ const RPC_TIMEOUT_MS = 8_000;
 const SOCKET_SCAN_MS = 2_000;
 const MAX_QUEUED_MESSAGES = 20;
 const MAX_SUBMISSION_RECEIPTS = 256;
+const SUBMISSION_RECEIPT_TTL_MS = 24 * 60 * 60 * 1_000;
 const QUEUE_EDIT_LEASE_MS = 30_000;
 const APPROVAL_METHODS = new Set([
   'item/commandExecution/requestApproval',
@@ -59,6 +61,22 @@ function userPromptFromItem(item) {
   if (item?.type !== 'userMessage') return '';
   const text = inputText(item.content).trim();
   return text && !isCodexSyntheticUserText(text) ? text : '';
+}
+
+function deliveredClientMessages(source) {
+  const turns = Array.isArray(source?.turns)
+    ? source.turns
+    : (Array.isArray(source?.items) ? [source] : []);
+  if (source?.type === 'userMessage') turns.push({ id: null, items: [source] });
+  const delivered = new Map();
+  for (const turn of turns) {
+    for (const item of turn?.items || []) {
+      if (item?.type === 'userMessage' && typeof item.clientId === 'string' && item.clientId) {
+        delivered.set(item.clientId, turn?.id || null);
+      }
+    }
+  }
+  return delivered;
 }
 
 function diffInfo(change) {
@@ -445,6 +463,7 @@ class CodexAppConnection {
     pane, socketPath, connect = connectUnixWebSocket, timeoutMs = RPC_TIMEOUT_MS,
     now = () => Date.now(), baseline = true, onStateChange = () => {}, onClose = () => {},
     queueStore = new Map(), submissionStore = new Map(), nextQueueId = () => `${Date.now()}`,
+    persistOutbox = () => {},
   }) {
     this.pane = pane;
     this.socketPath = socketPath;
@@ -457,6 +476,7 @@ class CodexAppConnection {
     this.queueStore = queueStore;
     this.submissionStore = submissionStore;
     this.nextQueueId = nextQueueId;
+    this.persistOutbox = persistOutbox;
     this.nextId = 1;
     this.pending = new Map();
     this.approvals = new Map();
@@ -806,23 +826,54 @@ class CodexAppConnection {
     return view;
   }
 
+  submissionKey(threadId, requestId) { return `${this.pane}\0${threadId}\0${requestId}`; }
+
+  queuedItemForReceipt(threadId, receipt) {
+    const queue = this.queueState(threadId, false);
+    return queue?.items.find((item) => item.id === receipt.queueItemId
+      || (item.requestId && item.requestId === receipt.requestId)) || null;
+  }
+
+  submissionResult(threadId, receipt) {
+    if (receipt.status === 'queued') {
+      const item = this.queuedItemForReceipt(threadId, receipt);
+      if (item) return { queued: true, item: this.queueItemView(item) };
+    }
+    if (receipt.status === 'accepted') {
+      if (receipt.result) return receipt.result;
+      return {
+        queued: false,
+        ...(receipt.turnId ? { turn: { id: receipt.turnId } } : {}),
+      };
+    }
+    return null;
+  }
+
+  markSubmissionAccepted(threadId, item, turnId = null) {
+    if (!item?.requestId) return;
+    const receipt = this.submissionStore.get(this.submissionKey(threadId, item.requestId));
+    if (!receipt) return;
+    receipt.status = 'accepted';
+    receipt.updatedAt = this.now();
+    receipt.settled = true;
+    delete receipt.queueItemId;
+    delete receipt.result;
+    if (turnId) receipt.turnId = turnId;
+  }
+
+  deleteSubmissionForItem(threadId, item) {
+    if (item?.requestId) this.submissionStore.delete(this.submissionKey(threadId, item.requestId));
+  }
+
   reconcileQueuedDeliveries(threadId, source) {
-    const turns = Array.isArray(source?.turns)
-      ? source.turns
-      : (Array.isArray(source?.items) ? [source] : []);
-    const items = source?.type === 'userMessage'
-      ? [source]
-      : turns.flatMap((turn) => turn?.items || []);
-    const clientIds = new Set(items
-      .filter((item) => item?.type === 'userMessage' && typeof item.clientId === 'string' && item.clientId)
-      .map((item) => item.clientId));
-    if (!clientIds.size) return false;
+    const delivered = deliveredClientMessages(source);
+    if (!delivered.size) return false;
     const queue = this.queueState(threadId, false);
     if (!queue?.items.length) return false;
-    const removedIds = new Set(queue.items
-      .filter((item) => clientIds.has(item.clientId))
-      .map((item) => item.id));
+    const removed = queue.items.filter((item) => delivered.has(item.clientId));
+    const removedIds = new Set(removed.map((item) => item.id));
     if (!removedIds.size) return false;
+    for (const item of removed) this.markSubmissionAccepted(threadId, item, delivered.get(item.clientId));
     queue.items = queue.items.filter((item) => !removedIds.has(item.id));
     if (removedIds.has(queue.editing?.itemId)) {
       this.clearQueueEditTimer(queue);
@@ -830,6 +881,7 @@ class CodexAppConnection {
     }
     this.bump(threadId);
     this.cleanupQueue(threadId);
+    this.persistOutbox();
     return true;
   }
 
@@ -845,6 +897,12 @@ class CodexAppConnection {
   discardQueue(threadId) {
     this.clearQueueEditTimer(this.queueState(threadId, false));
     this.queueStore.delete(this.queueKey(threadId));
+    for (const [key, receipt] of this.submissionStore) {
+      if (receipt.pane === this.pane && receipt.threadId === threadId && receipt.status !== 'accepted') {
+        this.submissionStore.delete(key);
+      }
+    }
+    this.persistOutbox();
     this.bump(threadId);
   }
 
@@ -864,6 +922,11 @@ class CodexAppConnection {
       ...(requestId ? { requestId } : {}),
     };
     queue.items.push(item);
+    try { this.persistOutbox(); } catch (error) {
+      queue.items.pop();
+      this.cleanupQueue(threadId);
+      throw error;
+    }
     this.bump(threadId);
     return this.queueItemView(item);
   }
@@ -914,33 +977,94 @@ class CodexAppConnection {
   }
 
   pruneSubmissionReceipts() {
+    const cutoff = this.now() - SUBMISSION_RECEIPT_TTL_MS;
+    for (const [key, receipt] of this.submissionStore) {
+      if (receipt.status !== 'accepted' || receipt.updatedAt >= cutoff) continue;
+      this.submissionStore.delete(key);
+    }
     if (this.submissionStore.size <= MAX_SUBMISSION_RECEIPTS) return;
     for (const [key, receipt] of this.submissionStore) {
-      if (!receipt.settled) continue;
+      if (receipt.status !== 'accepted') continue;
       this.submissionStore.delete(key);
-      if (this.submissionStore.size <= MAX_SUBMISSION_RECEIPTS) break;
+      if (this.submissionStore.size <= MAX_SUBMISSION_RECEIPTS) return;
     }
+  }
+
+  async runSubmission(threadId, receipt) {
+    const result = await this.submitOnce(threadId, receipt.text, receipt.requestId);
+    if (result?.queued) {
+      receipt.status = 'queued';
+      receipt.queueItemId = result.item.id;
+      delete receipt.turnId;
+      delete receipt.result;
+    } else {
+      receipt.status = 'accepted';
+      delete receipt.queueItemId;
+      receipt.result = result;
+      const turnId = result?.turn?.id;
+      if (turnId) receipt.turnId = turnId;
+    }
+    receipt.updatedAt = this.now();
+    receipt.settled = true;
+    this.pruneSubmissionReceipts();
+    this.persistOutbox();
+    return result;
+  }
+
+  async reconcilePendingSubmission(threadId, receipt) {
+    const queued = this.queuedItemForReceipt(threadId, receipt);
+    if (queued) {
+      receipt.status = 'queued';
+      receipt.queueItemId = queued.id;
+      receipt.updatedAt = this.now();
+      receipt.settled = true;
+      this.persistOutbox();
+      return { queued: true, item: this.queueItemView(queued) };
+    }
+    let thread;
+    try { thread = await this.readThread(threadId, { force: true }); } catch (error) {
+      if (!/no rollout found/i.test(error?.message || '')) throw error;
+      thread = this.state(threadId).thread;
+    }
+    const delivered = deliveredClientMessages(thread);
+    if (delivered.has(receipt.requestId)) {
+      receipt.status = 'accepted';
+      receipt.updatedAt = this.now();
+      receipt.settled = true;
+      delete receipt.queueItemId;
+      const turnId = delivered.get(receipt.requestId);
+      if (turnId) receipt.turnId = turnId;
+      this.persistOutbox();
+      return this.submissionResult(threadId, receipt);
+    }
+    return this.runSubmission(threadId, receipt);
   }
 
   async submit(threadId, text, requestId = null) {
     if (!requestId) return this.submitOnce(threadId, text);
-    const key = `${this.pane}\0${threadId}\0${requestId}`;
+    const key = this.submissionKey(threadId, requestId);
     const existing = this.submissionStore.get(key);
     if (existing) {
       if (existing.text !== text) throw new Error('Codex request id was already used for another message');
-      return existing.promise;
+      if (existing.promise) return existing.promise;
+      const result = this.submissionResult(threadId, existing);
+      if (result) return result;
+      existing.promise = this.reconcilePendingSubmission(threadId, existing);
+      try { return await existing.promise; } finally { existing.promise = null; }
     }
-    const receipt = { text, settled: false, promise: null };
-    receipt.promise = this.submitOnce(threadId, text, requestId);
+    const timestamp = this.now();
+    const receipt = {
+      pane: this.pane, threadId, requestId, text, status: 'pending',
+      createdAt: timestamp, updatedAt: timestamp, settled: false, promise: null,
+    };
     this.submissionStore.set(key, receipt);
-    receipt.promise.then(() => {
-      receipt.settled = true;
-      this.pruneSubmissionReceipts();
-    }, () => {
-      if (this.submissionStore.get(key) === receipt) this.submissionStore.delete(key);
-    });
     this.pruneSubmissionReceipts();
-    return receipt.promise;
+    try { this.persistOutbox(); } catch (error) {
+      this.submissionStore.delete(key);
+      throw error;
+    }
+    receipt.promise = this.runSubmission(threadId, receipt);
+    try { return await receipt.promise; } finally { receipt.promise = null; }
   }
 
   async drainQueue(threadId) {
@@ -952,10 +1076,12 @@ class CodexAppConnection {
     queue.draining = true;
     const item = queue.items[0];
     try {
-      await this.startTurn(threadId, item.text, item.clientId);
+      const result = await this.startTurn(threadId, item.text, item.clientId);
+      this.markSubmissionAccepted(threadId, item, result?.turn?.id || null);
       if (queue.items[0]?.id === item.id) queue.items.shift();
       else queue.items = queue.items.filter((candidate) => candidate.id !== item.id);
       this.bump(threadId);
+      this.persistOutbox();
     } finally {
       queue.draining = false;
       this.cleanupQueue(threadId);
@@ -985,8 +1111,10 @@ class CodexAppConnection {
         if (queue.starting || queue.draining) throw new Error('queued message is already being sent');
         result = await this.startTurn(threadId, item.text, item.clientId);
       }
+      this.markSubmissionAccepted(threadId, item, result?.turn?.id || result?.turnId || turnId || null);
       queue.items = queue.items.filter((candidate) => candidate.id !== itemId);
       this.bump(threadId);
+      this.persistOutbox();
       return { steered: true, item: this.queueItemView(item), result };
     } finally {
       queue.steering.delete(itemId);
@@ -1001,9 +1129,11 @@ class CodexAppConnection {
     if (queue.draining && index === 0) throw new Error('queued message is already being sent');
     if (queue.editing?.itemId === itemId) throw new Error('queued message is being edited');
     if (queue.steering.has(itemId)) throw new Error('queued message is already being sent');
-    queue.items.splice(index, 1);
+    const [removed] = queue.items.splice(index, 1);
+    this.deleteSubmissionForItem(threadId, removed);
     this.bump(threadId);
     this.cleanupQueue(threadId);
+    this.persistOutbox();
     return { removed: true };
   }
 
@@ -1051,10 +1181,18 @@ class CodexAppConnection {
     const item = queue.items.find((candidate) => candidate.id === itemId);
     if (!item) throw new Error('queued message is no longer pending');
     item.text = text;
+    if (item.requestId) {
+      const receipt = this.submissionStore.get(this.submissionKey(threadId, item.requestId));
+      if (receipt) {
+        receipt.text = text;
+        receipt.updatedAt = this.now();
+      }
+    }
     this.clearQueueEditTimer(queue);
     queue.editing = null;
     this.bump(threadId);
     this.cleanupQueue(threadId);
+    this.persistOutbox();
     queueMicrotask(() => { void this.drainQueue(threadId).catch(() => {}); });
     return { edited: true, item: this.queueItemView(item) };
   }
@@ -1280,16 +1418,17 @@ class CodexAppConnection {
     return state;
   }
 
-  async readThread(threadId) {
+  async readThread(threadId, { force = false } = {}) {
     await this.ensureThread(threadId);
     const state = this.state(threadId);
-    if (state.loadedOnly) return state.thread;
+    if (state.loadedOnly && !force) return state.thread;
     // Keep refreshing this internal partial view while it still contains event-only overlays.
     const hasLiveOverlays = [...state.liveItemIds.values()].some((ids) => ids.size > 0);
-    if (state.thread && state.readRevision === state.revision && !hasLiveOverlays) return state.thread;
+    if (!force && state.thread && state.readRevision === state.revision && !hasLiveOverlays) return state.thread;
     const requestedRevision = state.revision;
     const result = await this.rpc('thread/read', { threadId, includeTurns: true });
     state.thread = mergeThreadWithLive(state.thread, result.thread, state.liveItemIds);
+    state.loadedOnly = false;
     this.reconcileQueuedDeliveries(threadId, state.thread);
     state.readRevision = requestedRevision;
     state.status = result.thread?.status || state.status;
@@ -1421,10 +1560,51 @@ export function createCodexAppServer({
   scanIntervalMs = SOCKET_SCAN_MS,
   setTimer = setInterval,
   clearTimer = clearInterval,
+  outboxStore = null,
+  rpcTimeoutMs = RPC_TIMEOUT_MS,
 } = {}) {
   const connections = new Map();
   const queues = new Map();
   const submissions = new Map();
+  const persisted = parseCodexOutboxSnapshot(outboxStore?.read?.());
+  for (const record of persisted?.queues || []) {
+    queues.set(`${record.pane}\0${record.threadId}`, {
+      items: record.items.map((item) => ({
+        ...item, clientId: item.requestId || `handmux-queue:${item.id}`,
+      })),
+      starting: false, draining: false, steering: new Set(), editing: null, editTimer: null,
+    });
+  }
+  for (const receipt of persisted?.receipts || []) {
+    const queue = queues.get(`${receipt.pane}\0${receipt.threadId}`);
+    const queuedItem = queue?.items.find((item) => item.id === receipt.queueItemId
+      || (item.requestId && item.requestId === receipt.requestId));
+    const normalized = receipt.status === 'queued' && !queuedItem
+      ? { ...receipt, status: 'pending', queueItemId: undefined }
+      : receipt.status === 'pending' && queuedItem
+        ? { ...receipt, status: 'queued', queueItemId: queuedItem.id }
+        : receipt;
+    submissions.set(`${receipt.pane}\0${receipt.threadId}\0${receipt.requestId}`, {
+      ...normalized, settled: normalized.status !== 'pending', promise: null,
+    });
+  }
+
+  function persistOutbox() {
+    if (!outboxStore?.write) return;
+    const queueRecords = [];
+    for (const [key, state] of queues) {
+      if (!state.items.length) continue;
+      const [pane, threadId] = key.split('\0');
+      queueRecords.push({
+        pane, threadId,
+        items: state.items.map(({ clientId: _clientId, ...item }) => item),
+      });
+    }
+    const receipts = [...submissions.values()].map(({
+      promise: _promise, settled: _settled, result: _result, ...receipt
+    }) => receipt);
+    outboxStore.write({ version: 1, queues: queueRecords, receipts });
+  }
   let queueSequence = 0;
   let scanTimer = null;
   let started = false;
@@ -1435,8 +1615,9 @@ export function createCodexAppServer({
     let current = connections.get(pane);
     if (!current || current.closed) {
       current = new CodexAppConnection({
-        pane, socketPath, connect, now, baseline: true, onStateChange,
+        pane, socketPath, connect, now, baseline: true, onStateChange, timeoutMs: rpcTimeoutMs,
         queueStore: queues, submissionStore: submissions,
+        persistOutbox,
         nextQueueId: () => `${now().toString(36)}-${(++queueSequence).toString(36)}`,
         onClose: (closed) => { if (connections.get(pane) === closed) connections.delete(pane); },
       });

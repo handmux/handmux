@@ -11,6 +11,7 @@ export function lifecycleLockPath(home) { return path.join(pocketHome(home), 'li
 export function logPath(home) { return path.join(pocketHome(home), 'handmux.log'); }
 export function configPath(home) { return path.join(pocketHome(home), 'config.json'); }
 export function supervisorConfigPath(home) { return path.join(pocketHome(home), 'supervisor-config.json'); }
+export function codexOutboxPath(home) { return path.join(pocketHome(home), 'codex-outbox.json'); }
 
 // The hook-maintained Claude state file, on a stable per-user path (survives a global reinstall, unlike
 // the package-internal server/data default). The CLI sets this as CLAUDE_STATE_FILE for the server child

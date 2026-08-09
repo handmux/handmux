@@ -29,6 +29,15 @@ function fixtureThread(status = { type: 'idle' }) {
   };
 }
 
+function memoryStore(initial = null) {
+  let value = initial == null ? null : structuredClone(initial);
+  return {
+    read: vi.fn(() => (value == null ? null : structuredClone(value))),
+    write: vi.fn((next) => { value = structuredClone(next); }),
+    snapshot: () => (value == null ? null : structuredClone(value)),
+  };
+}
+
 function fakeProxy({
   empty = false, loaded = ['thread-1'], updatedAt = {}, status = { type: 'idle' }, readThread = null,
   resumeThread = null, turnStartWait = null, turnStartReply = true, turnSteerReply = true,
@@ -478,6 +487,109 @@ describe('Codex App Server client', () => {
     app.close();
   });
 
+  it('restores a durable queue after a Handmux restart and deduplicates its request id', async () => {
+    const outboxStore = memoryStore();
+    const firstProxy = fakeProxy();
+    const firstApp = createCodexAppServer({
+      home: '/home/test', exists: () => true, connect: () => firstProxy.ws, outboxStore,
+    });
+    await firstApp.status('%1', 'thread-1');
+    firstProxy.push({
+      jsonrpc: '2.0', method: 'turn/started',
+      params: { threadId: 'thread-1', turn: { id: 'turn-live', status: 'inProgress', items: [] } },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const first = await firstApp.send('%1', 'thread-1', 'survive restart', 'request-durable');
+    expect(outboxStore.snapshot()).toMatchObject({
+      version: 1,
+      queues: [{ pane: '%1', threadId: 'thread-1', items: [{
+        id: first.item.id, text: 'survive restart', requestId: 'request-durable',
+      }] }],
+      receipts: [{ requestId: 'request-durable', status: 'queued', queueItemId: first.item.id }],
+    });
+    firstApp.close();
+
+    const secondProxy = fakeProxy({ status: { type: 'active', activeFlags: [] } });
+    const secondApp = createCodexAppServer({
+      home: '/home/test', exists: () => true, connect: () => secondProxy.ws, outboxStore,
+    });
+    expect((await secondApp.status('%1', 'thread-1')).queue).toEqual([first.item]);
+    await expect(secondApp.send('%1', 'thread-1', 'survive restart', 'request-durable'))
+      .resolves.toEqual(first);
+    expect(secondProxy.sent.filter((message) => message.method === 'turn/start')).toEqual([]);
+    await secondApp.removeQueued('%1', 'thread-1', first.item.id);
+    expect(outboxStore.snapshot()).toMatchObject({ queues: [], receipts: [] });
+    secondApp.close();
+  });
+
+  it('reconciles a pending durable receipt against App Server before retrying it', async () => {
+    const outboxStore = memoryStore({
+      version: 1,
+      queues: [],
+      receipts: [{
+        pane: '%1', threadId: 'thread-1', requestId: 'request-accepted', text: 'already accepted',
+        status: 'pending', createdAt: 10, updatedAt: 10,
+      }],
+    });
+    const acceptedThread = () => ({
+      id: 'thread-1', status: { type: 'active', activeFlags: [] },
+      turns: [{
+        id: 'turn-existing', status: 'inProgress', items: [{
+          id: 'user-existing', type: 'userMessage', clientId: 'request-accepted',
+          content: [{ type: 'text', text: 'already accepted' }],
+        }],
+      }],
+    });
+    const proxy = fakeProxy({
+      resumeThread: acceptedThread,
+      readThread: acceptedThread,
+    });
+    const app = createCodexAppServer({
+      home: '/home/test', exists: () => true, connect: () => proxy.ws, outboxStore,
+    });
+
+    await expect(app.send('%1', 'thread-1', 'already accepted', 'request-accepted'))
+      .resolves.toEqual({ queued: false, turn: { id: 'turn-existing' } });
+    expect(proxy.sent.filter((message) => message.method === 'turn/start')).toEqual([]);
+    expect(outboxStore.snapshot().receipts).toEqual([expect.objectContaining({
+      requestId: 'request-accepted', status: 'accepted', turnId: 'turn-existing',
+    })]);
+    app.close();
+  });
+
+  it('keeps an uncertain submission pending and reconciles it after restart', async () => {
+    const outboxStore = memoryStore();
+    const firstProxy = fakeProxy({ turnStartReply: false });
+    const firstApp = createCodexAppServer({
+      home: '/home/test', exists: () => true, connect: () => firstProxy.ws,
+      outboxStore, rpcTimeoutMs: 5,
+    });
+    await expect(firstApp.send('%1', 'thread-1', 'uncertain delivery', 'request-uncertain'))
+      .rejects.toThrow('timed out: turn/start');
+    expect(outboxStore.snapshot().receipts).toEqual([expect.objectContaining({
+      requestId: 'request-uncertain', status: 'pending',
+    })]);
+    firstApp.close();
+
+    const acceptedThread = () => ({
+      id: 'thread-1', status: { type: 'idle' },
+      turns: [{
+        id: 'turn-uncertain', status: 'completed', items: [{
+          id: 'user-uncertain', type: 'userMessage', clientId: 'request-uncertain',
+          content: [{ type: 'text', text: 'uncertain delivery' }],
+        }],
+      }],
+    });
+    const secondProxy = fakeProxy({ resumeThread: acceptedThread, readThread: acceptedThread });
+    const secondApp = createCodexAppServer({
+      home: '/home/test', exists: () => true, connect: () => secondProxy.ws, outboxStore,
+    });
+    await expect(secondApp.send('%1', 'thread-1', 'uncertain delivery', 'request-uncertain'))
+      .resolves.toEqual({ queued: false, turn: { id: 'turn-uncertain' } });
+    expect(secondProxy.sent.filter((message) => message.method === 'turn/start')).toEqual([]);
+    secondApp.close();
+  });
+
   it('serializes simultaneous idle submissions so only the first starts immediately', async () => {
     let releaseStart;
     const turnStartWait = new Promise((resolve) => { releaseStart = resolve; });
@@ -494,6 +606,18 @@ describe('Codex App Server client', () => {
     releaseStart();
     await first;
     expect((await app.status('%1', 'thread-1')).queue.map((item) => item.text)).toEqual(['wait next']);
+    app.close();
+  });
+
+  it('returns the original App Server result for an in-process retry of an accepted request', async () => {
+    const proxy = fakeProxy();
+    const app = createCodexAppServer({ home: '/home/test', exists: () => true, connect: () => proxy.ws });
+
+    const first = await app.send('%1', 'thread-1', 'start once', 'request-start-once');
+    const retry = await app.send('%1', 'thread-1', 'start once', 'request-start-once');
+
+    expect(retry).toEqual(first);
+    expect(proxy.sent.filter((message) => message.method === 'turn/start')).toHaveLength(1);
     app.close();
   });
 

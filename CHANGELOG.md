@@ -21,6 +21,7 @@ All notable changes to handmux. Format follows [Keep a Changelog](https://keepac
 - 对话中的 Markdown 目标现在与终端使用同一套识别规则，未识别的文件或协议不再保留可点击链接。
 - `~/.handmux/state.json` 及其目录现在使用私有权限和原子写入，并会在读取历史文件时自动修复过宽权限。
 - Supervisor 启动参数和系统自启动文件不再包含 Token、VAPID 私钥或语音密钥；完整配置改从 `0600` 私有文件读取。
+- Codex 回复期间的待发消息和幂等回执现在会私密、原子地持久化；Handmux 重启后可恢复队列，发送超时会先与 App Server 对账再决定是否重试，避免消息丢失或重复。
 
 ## [0.23.0] - 2026-08-09
 
