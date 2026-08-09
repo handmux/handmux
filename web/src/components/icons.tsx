@@ -3,8 +3,9 @@
 // from CSS (.topbar-icon svg); 1.75 stroke matches the hairline feel of the rest of the chrome.
 import claudeLogo from '../assets/agent-claude.svg?raw';
 import codexLogo from '../assets/agent-codex.svg?raw';
+import type { SVGProps } from 'react';
 
-const base = {
+const base: SVGProps<SVGSVGElement> = {
   viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor',
   strokeWidth: 1.75, strokeLinecap: 'round', strokeLinejoin: 'round', 'aria-hidden': true,
 };
@@ -350,7 +351,7 @@ export function RenewIcon() {
 
 // ⌨ Keyboard toggle with a direction chevron: an up chevron when the keyboard is down (tap to raise it)
 // and a down chevron when it's up (tap to dismiss it).
-export function KeyboardIcon({ down = false }) {
+export function KeyboardIcon({ down = false }: { down?: boolean }) {
   return (
     <svg {...base}>
       <rect x="3" y="9" width="18" height="11" rx="2" />
@@ -472,11 +473,11 @@ export function WrenchIcon() {
 // <img src="data:…svg…">: iOS standalone-PWA WKWebView doesn't reliably render percent-encoded svg+xml
 // data-URIs in <img> (only these two logos vanished while every other icon — all inline <svg> — showed).
 // Inlining still rides the content-hashed JS, so a changed logo busts the cache. Sized via CSS (.agent-mark).
-const AGENT_LOGO = { claude: claudeLogo, codex: codexLogo };
+const AGENT_LOGO: Record<'claude' | 'codex', string> = { claude: claudeLogo, codex: codexLogo };
 
 // Pick the logo for an agent id (defaults to Claude for legacy/untagged entries).
-export function AgentMark({ agent }) {
-  const id = AGENT_LOGO[agent] ? agent : 'claude';
+export function AgentMark({ agent }: { agent?: string | null }) {
+  const id: 'claude' | 'codex' = agent === 'codex' ? 'codex' : 'claude';
   return <span className="agent-mark" role="img" aria-label={id}
     dangerouslySetInnerHTML={{ __html: AGENT_LOGO[id] }} />;
 }
