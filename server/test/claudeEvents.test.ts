@@ -5,6 +5,21 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
+interface TestLivePane {
+  id: string;
+  cmd: string;
+  tty?: string;
+  session: string;
+  window: string;
+  windowName: string;
+}
+
+interface TestPushCall {
+  session: string;
+  payload: Record<string, unknown>;
+  opts: Record<string, unknown>;
+}
+
 describe('classifyEvent', () => {
   it('stop → done with the last assistant message', () => {
     expect(classifyEvent('stop', { last_assistant_message: 'hi' })).toEqual({ kind: 'done', msg: 'hi' });
@@ -26,7 +41,7 @@ describe('classifyEvent', () => {
       .toEqual({ kind: 'working', msg: '已答：Red' });
   });
   it('resume joins multiple/array answers; ExitPlanMode resume reads 已批准计划; bare resume is blank', () => {
-    expect(classifyEvent('resume', { tool_input: { answers: { a: 'Red', b: ['X', 'Y'] } } }).msg).toBe('已答：Red、X、Y');
+    expect(classifyEvent('resume', { tool_input: { answers: { a: 'Red', b: ['X', 'Y'] } } })?.msg).toBe('已答：Red、X、Y');
     expect(classifyEvent('resume', { tool_name: 'ExitPlanMode' })).toEqual({ kind: 'working', msg: '已批准计划' });
     expect(classifyEvent('resume', {})).toEqual({ kind: 'working', msg: '' });
   });
@@ -92,16 +107,16 @@ describe('resolvedPermissionKind (transcript last line: interrupt vs resume)', (
 });
 
 // Write a { pane: {ts,src,host,payload} } state file like the hook does, into a fresh temp path.
-function stateFile(panes) {
+function stateFile(panes: unknown) {
   const file = path.join(tmpHome('cstate-'), 'claude-state.json');
   fs.writeFileSync(file, JSON.stringify(panes));
   return file;
 }
 // listLivePanes mock: every id is a live `claude` in session `proj`, unless overridden.
-function liveAll(ids, over = {}) {
+function liveAll(ids: string[], over: Record<string, Partial<TestLivePane>> = {}): TestLivePane[] {
   return ids.map((id) => ({ id, cmd: 'claude', session: 'proj', window: '@5', windowName: 'dev', ...(over[id] || {}) }));
 }
-const rec = (src, payload = {}, ts = 1000) => ({ ts, src, host: 'h', payload });
+const rec = (src: string, payload: Record<string, unknown> = {}, ts = 1000) => ({ ts, src, host: 'h', payload });
 
 describe('createClaudeEvents paneSession', () => {
   it('returns Claude binding metadata and rejects legacy Codex Hook rows', () => {
@@ -120,10 +135,10 @@ describe('createClaudeEvents getStates (reads the hook state file)', () => {
   const push = { sendToSession: async () => ({ sent: 0 }) };
 
   it('notifies state changes only after the debounced watcher refresh completes', async () => {
-    let watchCallback;
-    let timerCallback;
-    let finishList;
-    const listed = new Promise((resolve) => { finishList = resolve; });
+    let watchCallback!: (event: string, filename: string | Buffer | null) => void;
+    let timerCallback!: () => void;
+    let finishList!: (value: unknown[] | PromiseLike<unknown[]>) => void;
+    const listed = new Promise<unknown[]>((resolve) => { finishList = resolve; });
     const onStateChange = vi.fn();
     const ev = createClaudeEvents({
       commands: { listLivePanes: () => listed },
@@ -231,7 +246,7 @@ describe('createClaudeEvents getStates (reads the hook state file)', () => {
 
   it('a 压缩中 with no closing signal at all (crash/abort) is swept only after the generous COMPACTING_TTL (5 min)', async () => {
     const commands = { listLivePanes: async () => liveAll(['%1']) };
-    const mk = (now) => createClaudeEvents({ commands, push, file: stateFile({ '%1': rec('compacting', {}, 0) }), now: () => now });
+    const mk = (now: number) => createClaudeEvents({ commands, push, file: stateFile({ '%1': rec('compacting', {}, 0) }), now: () => now });
     expect((await mk(2 * 60 * 1000).getStates())['%1']).toMatchObject({ kind: 'compacting' }); // 2 min in — a real compaction, kept
     expect((await mk(6 * 60 * 1000).getStates())['%1']).toMatchObject({ kind: null });          // 6 min — backstop fires
   });
@@ -336,7 +351,7 @@ describe('createClaudeEvents getStates (reads the hook state file)', () => {
 
   it('treats a native-install version-named binary (pane_current_command = bare semver) as Claude — but ONLY with exe-path corroboration', async () => {
     const panes = liveAll(['%1'], { '%1': { cmd: '2_1_196', tty: '/dev/ttys077' } });
-    const mkRun = (exe) => async (cmd) => cmd === 'lsof'
+    const mkRun = (exe: string) => async (cmd: string) => cmd === 'lsof'
       ? `p4242\nftxt\nn${exe}\n`
       : 'ttys077 4242 S+'; // only foreground pids are candidates; identity comes from the real exe
     // process presence (no hooks yet): corroborated version-named comm → icon / lens switch work
@@ -355,7 +370,7 @@ describe('createClaudeEvents getStates (reads the hook state file)', () => {
 
   it('does NOT surface a non-agent process — a plain shell or bare node is not an agent (procName match, never the ambiguous "node")', async () => {
     const commands = { listLivePanes: async () => liveAll(['%1', '%2'], { '%1': { cmd: 'zsh' }, '%2': { cmd: 'node', tty: '/dev/ttys078' } }) };
-    const run = async (cmd) => cmd === 'ps' ? 'ttys078 777 S+' : 'p777\nftxt\nn/usr/local/bin/node\n';
+    const run = async (cmd: string) => cmd === 'ps' ? 'ttys078 777 S+' : 'p777\nftxt\nn/usr/local/bin/node\n';
     const ev = createClaudeEvents({ commands, push, file: '/no/such/file.json', run });
     expect(await ev.getStates()).toEqual({});
   });
@@ -385,9 +400,9 @@ describe('createClaudeEvents getStates (reads the hook state file)', () => {
 });
 
 describe('createClaudeEvents push (需要你 / 已完成 transitions, mirroring the inbox views, via the getStates pass)', () => {
-  function setup(panes) {
-    const pushed = [];
-    const push = { sendToSession: async (session, payload, opts) => { pushed.push({ session, payload, opts }); return { sent: 1 }; } };
+  function setup(panes: Record<string, unknown>) {
+    const pushed: TestPushCall[] = [];
+    const push = { sendToSession: async (session: string, payload: Record<string, unknown>, opts: Record<string, unknown>) => { pushed.push({ session, payload, opts }); return { sent: 1 }; } };
     const file = stateFile(panes);
     const commands = { listLivePanes: async () => liveAll(Object.keys(panes)) };
     const ev = createClaudeEvents({ commands, push, file });
@@ -505,8 +520,8 @@ describe('createClaudeEvents push (需要你 / 已完成 transitions, mirroring 
   });
 
   it('does not push for 进行中, and never for a pruned (dead) pane', async () => {
-    const pushed = [];
-    const push = { sendToSession: async (s, p, o) => { pushed.push({ s }); return { sent: 1 }; } };
+    const pushed: Array<{ s: string }> = [];
+    const push = { sendToSession: async (s: string) => { pushed.push({ s }); return { sent: 1 }; } };
     const file = stateFile({ '%1': rec('prompt', { prompt: 'x' }), '%2': rec('notify', { notification_type: 'permission_prompt' }) });
     const commands = { listLivePanes: async () => liveAll(['%1']) }; // %2 is a ghost (would-be 需要你, but gone)
     const ev = createClaudeEvents({ commands, push, file });
@@ -516,10 +531,10 @@ describe('createClaudeEvents push (需要你 / 已完成 transitions, mirroring 
 });
 
 describe('createClaudeEvents with Codex App Server state', () => {
-  const cdone = (msg, ts) => ({ ts, src: 'stop', host: 'h', payload: { last_assistant_message: msg }, agent: 'codex' });
+  const cdone = (msg: string, ts: number) => ({ ts, src: 'stop', host: 'h', payload: { last_assistant_message: msg }, agent: 'codex' });
   // Some Codex launchers leave pane_current_command as node; process inspection identifies presence only.
-  const liveCodex = (ids, cmd = 'node') => ids.map((id) => ({ id, cmd, tty: '/dev/ttys030', session: 'proj', window: '@5', windowName: 'dev' }));
-  const codexRun = async (cmd, args) => {
+  const liveCodex = (ids: string[], cmd = 'node') => ids.map((id) => ({ id, cmd, tty: '/dev/ttys030', session: 'proj', window: '@5', windowName: 'dev' }));
+  const codexRun = async (cmd: string, args: string[]) => {
     if (cmd === 'ps') return 'ttys030 501 S+\nttys030 502 R+';
     if (cmd === 'lsof') {
       const pid = args[args.indexOf('-p') + 1];
@@ -530,7 +545,7 @@ describe('createClaudeEvents with Codex App Server state', () => {
   };
 
   it('ignores legacy Codex Hook activity and exposes only neutral process presence', async () => {
-    const pushed = [];
+    const pushed: unknown[] = [];
     const file = stateFile({ '%1': cdone('ok', 1000) });
     const states = await createClaudeEvents({
       commands: { listLivePanes: async () => liveCodex(['%1'], 'node') },
@@ -560,7 +575,7 @@ describe('createClaudeEvents with Codex App Server state', () => {
   });
 
   it('suppresses a restart baseline, then pushes only fresh managed Codex transitions', async () => {
-    const pushed = [];
+    const pushed: unknown[] = [];
     const snapshots = [
       { kind: 'done', msg: 'old', ts: 1000, suppressPush: true },
       { kind: 'done', msg: 'old', ts: 1000, suppressPush: false },

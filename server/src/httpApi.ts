@@ -86,7 +86,7 @@ export function createApiRouter({
     commands: typeof defaultCommands;
     push: typeof push;
   } = { commands, push };
-  const claudeEvents = (events || createClaudeEvents(eventOptions)) as RoutedClaudeEvents;
+  const claudeEvents: RoutedClaudeEvents = events || createClaudeEvents(eventOptions);
 
   const deps = {
     token, commands, docs, git, push, notifications, claudeEvents,

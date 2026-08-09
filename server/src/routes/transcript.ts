@@ -41,8 +41,9 @@ interface ChatAgent {
 }
 interface HookSession {
   agent?: string;
-  sessionId?: string;
-  transcriptPath?: string;
+  sessionId?: string | null;
+  transcriptPath?: string | null;
+  cwd?: string | null;
   [key: string]: unknown;
 }
 type ChatRequest = Request & {

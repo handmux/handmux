@@ -6,6 +6,9 @@ import { resolveVersionedComms } from './agents/claude.js';
 import { resolveCodexComms } from './agents/codex.js';
 import { defaultRun } from './agents/scanUtils.js';
 import { claude } from './agents/claude.js';
+import type { ClaudeClassification, ClaudeEventKind } from './agents/claude.js';
+import type { ExecutableVerdict, ProcessPane } from './agents/processIdentity.js';
+import type { RunCommand } from './agents/scanUtils.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 // The hook-maintained state file: ONE JSON object keyed by tmux pane id, each value the pane's latest
@@ -21,14 +24,91 @@ export const classifyEvent = claude.classify;
 // waiting") is dropped UPSTREAM at the hook (handmux-write.cjs), so neither push nor the inbox ever sees
 // it — that's the single source of truth. The idle NO-OP in the loop below is defense-in-depth for one
 // that ever slips through. working / end / unclassifiable map to undefined → no push + re-arm the dedup.
-const PUSH_VIEW = { permission: 'needs', done: 'done' };
-const VIEW_LABEL = { needs: '需要你', done: '已完成' };
+type PushView = 'needs' | 'done';
+interface HookRecord {
+  ts: number;
+  src: string;
+  payload: Record<string, unknown>;
+  agent?: string;
+}
+interface LivePane extends ProcessPane {
+  id: string;
+  cmd: string;
+  tty: string;
+  session: string;
+  window: string;
+  windowName: string;
+}
+interface IdentifiablePane extends ProcessPane {
+  id: string;
+  cmd: string;
+  tty: string;
+  command?: unknown;
+  session?: string;
+  window?: string;
+  windowName?: string;
+}
+export interface ClaudePaneState {
+  session?: string;
+  window?: string;
+  windowName?: string;
+  kind: ClaudeEventKind | null;
+  msg: string;
+  ts?: number;
+  agent: string;
+}
+export type ClaudePaneStates = Record<string, ClaudePaneState>;
+interface EventCommands { listLivePanes?(): Promise<unknown> }
+interface EventPush {
+  sendToSession(session: string, payload: Record<string, unknown>, options: Record<string, unknown>): Promise<unknown>;
+}
+interface CodexInbox { inboxStates?(panes: LivePane[]): Promise<unknown> }
+interface Watcher { close(): unknown }
+type Watch = (
+  directory: string,
+  listener: (event: string, filename: string | Buffer | null) => void,
+) => Watcher;
+type TimerHandle = unknown;
+interface ClaudeEventsOptions {
+  commands?: EventCommands;
+  push?: EventPush | null;
+  codexApp?: CodexInbox | null;
+  file?: string;
+  now?: () => number;
+  statMtime?: (path: string) => number | null;
+  readTail?: (path: string) => string | null;
+  run?: RunCommand;
+  onStateChange?: () => unknown | Promise<unknown>;
+  watch?: Watch;
+  mkdir?: (directory: string, options: { recursive: true }) => unknown;
+  setTimer?: (callback: () => void, delay: number) => TimerHandle;
+  clearTimer?: (handle: TimerHandle) => unknown;
+}
+interface ManagedCodexState {
+  kind: ClaudeEventKind | null;
+  msg: string;
+  ts: number;
+  suppressPush: boolean;
+}
+
+const EVENT_KINDS = new Set<ClaudeEventKind>([
+  'done', 'working', 'permission', 'compacting', 'error', 'end', 'idle',
+]);
+const VIEW_LABEL: Record<PushView, string> = { needs: '需要你', done: '已完成' };
+const recordOf = (value: unknown): Record<string, unknown> | null =>
+  value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown> : null;
+const eventKind = (value: unknown): ClaudeEventKind | null =>
+  typeof value === 'string' && EVENT_KINDS.has(value as ClaudeEventKind)
+    ? value as ClaudeEventKind : null;
+const pushView = (kind: ClaudeEventKind | null): PushView | null =>
+  kind === 'permission' ? 'needs' : kind === 'done' ? 'done' : null;
 
 // The dedup key for a pane's current push view. `needs` is view-only: Claude signals one permission gate via
 // TWO hooks (permreq then permission_prompt) at different ts, and both must collapse to a SINGLE 需要你. But
 // `done` is ts-sensitive: each finished turn is a fresh "已完成 / 该你了". For Claude, two dones are normally
 // separated by a 进行中 that re-arms the dedup; the timestamp also protects unusual missing-start sequences.
-function pushKey(view, ts) { return view === 'done' ? `done:${ts}` : view; }
+function pushKey(view: PushView, ts: number): string { return view === 'done' ? `done:${ts}` : view; }
 
 // A 进行中 (working) is a LATCHED state: set by UserPromptSubmit, normally closed by Stop. But an ESC
 // interrupt / walk-away fires NO hook at all (verified across all 26 hook event types), so working never
@@ -60,20 +140,20 @@ const COMPACTING_TTL_MS = 5 * 60 * 1000;
 const PERM_RESOLVED_GUARD_MS = 1500;
 
 // Read a transcript file's mtime in ms, or null if it's missing/unreadable (→ can't tell, keep 需要你).
-function defaultStatMtime(p) { try { return fs.statSync(p).mtimeMs; } catch { return null; } }
+function defaultStatMtime(file: string): number | null { try { return fs.statSync(file).mtimeMs; } catch { return null; } }
 
 // Read the LAST complete JSON line of a (possibly multi-MB) transcript, or null if unreadable. Reads only a
 // bounded tail so cost is one small read regardless of transcript size; a last line longer than the window
 // won't parse cleanly, but the only line we care to recognise (the interrupt marker) is tiny.
-function defaultReadTail(p) {
+function defaultReadTail(file: string): string | null {
   try {
-    const fd = fs.openSync(p, 'r');
+    const fd = fs.openSync(file, 'r');
     try {
       const size = fs.fstatSync(fd).size;
       const len = Math.min(size, 65536);
       const buf = Buffer.alloc(len);
       fs.readSync(fd, buf, 0, len, size - len);
-      const lines = buf.toString('utf8').split('\n').filter((l) => l.trim());
+      const lines = buf.toString('utf8').split('\n').filter((line) => line.trim());
       return lines.length ? lines[lines.length - 1] : null;
     } finally { fs.closeSync(fd); }
   } catch { return null; }
@@ -81,8 +161,13 @@ function defaultReadTail(p) {
 
 // Pure: has the user resolved the permission prompt recorded by `rec`, judged by its transcript mtime?
 // True only once the transcript has grown past the event ts by more than the guard. Exported for testing.
-export function permissionResolved(rec, mtimeMs, guard = PERM_RESOLVED_GUARD_MS) {
-  return typeof mtimeMs === 'number' && mtimeMs > (rec.ts || 0) + guard;
+export function permissionResolved(
+  rec: { ts?: unknown },
+  mtimeMs: unknown,
+  guard = PERM_RESOLVED_GUARD_MS,
+): boolean {
+  const ts = typeof rec.ts === 'number' && Number.isFinite(rec.ts) ? rec.ts : 0;
+  return typeof mtimeMs === 'number' && mtimeMs > ts + guard;
 }
 
 // Pure: once resolved, the transcript's last line tells a RESUME from an INTERRUPT. Approving (yes) or
@@ -90,15 +175,15 @@ export function permissionResolved(rec, mtimeMs, guard = PERM_RESOLVED_GUARD_MS)
 // Pressing ESC appends a `[Request interrupted by user…]` marker → the turn ended, back to idle → drop the
 // pane to neutral (null). An unparseable/absent tail is treated as a resume (clears the stale 需要你 and
 // shows active — a truncated huge last line is a big tool_result, never the tiny interrupt marker).
-export function resolvedPermissionKind(lastLine) {
+export function resolvedPermissionKind(lastLine: unknown): ClaudeClassification | null {
   if (isInterruptTail(lastLine)) return null;       // ESC → neutral
   return { kind: 'working', msg: '' };              // approve / deny → 进行中
 }
 
 // Pure: does a transcript's last line mark a user ESC-interrupt? Matches both the plain and the
 // "…for tool use" forms. Used to un-stick a 进行中 pane the instant the user aborts a turn.
-export function isInterruptTail(lastLine) {
-  return !!(lastLine && /Request interrupted by user/.test(lastLine));
+export function isInterruptTail(lastLine: unknown): boolean {
+  return typeof lastLine === 'string' && /Request interrupted by user/.test(lastLine);
 }
 
 // Pure: does a transcript's last line mark a /compact having RESOLVED — i.e. Claude wrote the command's
@@ -106,30 +191,94 @@ export function isInterruptTail(lastLine) {
 // a real compaction stays silent for its whole (often 1-2min) run and writes it only at the very end — the
 // same moment PostCompact already clears us. So a fresh stdout tail while still 压缩中 ⇒ the compaction is
 // over (nothing to do / done) ⇒ drop the stuck state. Recognised by the system entry's subtype or the tag.
-export function isLocalCommandStdout(lastLine) {
-  if (!lastLine) return false;
+export function isLocalCommandStdout(lastLine: unknown): boolean {
+  if (typeof lastLine !== 'string' || !lastLine) return false;
   try {
-    const o = JSON.parse(lastLine);
-    if (o && o.subtype === 'local_command') return true;
-    const c = o && o.message && o.message.content;
+    const o = recordOf(JSON.parse(lastLine));
+    if (o?.subtype === 'local_command') return true;
+    const c = recordOf(o?.message)?.content;
     if (typeof c === 'string' && /<local-command-stdout>/.test(c)) return true;
   } catch { /* not JSON → fall through to a raw tag match */ }
   return /<local-command-stdout>/.test(lastLine);
 }
 
 // Truncate a Claude message to a notification-friendly one-liner.
-function summarize(msg) {
-  const oneLine = (msg || '').replace(/\s+/g, ' ').trim();
+function summarize(msg: unknown): string {
+  const oneLine = typeof msg === 'string' ? msg.replace(/\s+/g, ' ').trim() : '';
   return oneLine.length > 120 ? `${oneLine.slice(0, 117)}…` : oneLine;
 }
 
 // Read the hook's JSON state file. Tolerant of a missing / corrupt / half-written file (returns {}),
 // never throws — the hook replaces it atomically, but a read can still land on a transient state.
-function readStateFile(file) {
+function readStateFile(file: string): Record<string, HookRecord> {
   try {
-    const obj = JSON.parse(fs.readFileSync(file, 'utf8'));
-    return obj && typeof obj === 'object' && !Array.isArray(obj) ? obj : {};
+    const parsed: unknown = JSON.parse(fs.readFileSync(file, 'utf8'));
+    const object = recordOf(parsed);
+    if (!object) return {};
+    return Object.fromEntries(Object.entries(object).flatMap(([pane, value]) => {
+      const row = recordOf(value);
+      if (!row) return [];
+      const payload = recordOf(row.payload) ?? {};
+      const record: HookRecord = {
+        ts: typeof row.ts === 'number' && Number.isFinite(row.ts) ? row.ts : 0,
+        src: typeof row.src === 'string' ? row.src : '',
+        payload,
+      };
+      if (typeof row.agent === 'string' && row.agent) record.agent = row.agent;
+      return [[pane, record]];
+    }));
   } catch { return {}; }
+}
+
+function classification(value: unknown): ClaudeClassification | null {
+  const record = recordOf(value);
+  const kind = eventKind(record?.kind);
+  if (!kind) return null;
+  return { kind, msg: typeof record?.msg === 'string' ? record.msg : '' };
+}
+
+function classifyRecord(record: HookRecord): ClaudeClassification | null {
+  if (!record.src) return null;
+  return classification(getAgent(record.agent).classify?.(record.src, record.payload));
+}
+
+function identifiablePanes(value: unknown): IdentifiablePane[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((candidate) => {
+    const pane = recordOf(candidate);
+    if (!pane || typeof pane.id !== 'string') return [];
+    const cmd = typeof pane.cmd === 'string' ? pane.cmd
+      : typeof pane.command === 'string' ? pane.command : '';
+    return [{
+      ...pane,
+      id: pane.id,
+      cmd,
+      tty: typeof pane.tty === 'string' ? pane.tty : '',
+    } as IdentifiablePane];
+  });
+}
+
+function livePanes(value: unknown): LivePane[] {
+  return identifiablePanes(value).flatMap((pane) => (
+    typeof pane.session === 'string' && typeof pane.window === 'string'
+      && typeof pane.windowName === 'string'
+      ? [pane as LivePane] : []
+  ));
+}
+
+function managedStates(value: unknown): Record<string, ManagedCodexState> {
+  const object = recordOf(value);
+  if (!object) return {};
+  return Object.fromEntries(Object.entries(object).flatMap(([pane, candidate]) => {
+    const state = recordOf(candidate);
+    if (!state) return [];
+    return [[pane, {
+      kind: eventKind(state.kind),
+      msg: typeof state.msg === 'string' ? state.msg : '',
+      ts: typeof state.ts === 'number' && Number.isFinite(state.ts) ? state.ts : 0,
+      suppressPush: state.suppressPush === true,
+    } satisfies ManagedCodexState]];
+  }));
 }
 
 // Per-process event reader. Deps injected for testability:
@@ -152,23 +301,23 @@ export function createClaudeEvents({
   watch = fs.watch,
   mkdir = fs.mkdirSync,
   setTimer = setTimeout,
-  clearTimer = clearTimeout,
-} = {}) {
+  clearTimer = (handle) => clearTimeout(handle as NodeJS.Timeout),
+}: ClaudeEventsOptions = {}) {
   // Short-lived executable-identity verdicts. Each poll still checks the foreground pid signature; the
   // cache only avoids repeating lsof while that exact process set is unchanged.
-  const commVerdicts = new Map();
-  const lastPushed = {}; // pane → 'needs' | 'done' | null  (in-process push-transition dedup, by display view)
+  const commVerdicts = new Map<string, ExecutableVerdict>();
+  const lastPushed: Record<string, string | null | undefined> = {}; // pane → 'needs' | 'done' | null  (in-process push-transition dedup, by display view)
   // The dedup above is in-process ONLY: a restart (e.g. ./deploy.sh) wipes it while the hook's state
   // file on disk keeps every pane's latest 需要你/已完成. Without priming, the first read after boot
   // would see an empty dedup and re-push every resting pane — a flood of "historical" notifications on
   // every redeploy. prime() (run from start(), before any request is served) adopts the file's current
   // resting states as already-notified, so only transitions that happen AFTER boot push.
-  function prime() {
+  function prime(): void {
     const recorded = readStateFile(file);
     for (const [pane, r] of Object.entries(recorded)) {
       if (r?.agent === 'codex') continue; // legacy rows are never a Codex state source
-      const c = r && typeof r.src === 'string' ? getAgent(r.agent).classify(r.src, r.payload || {}) : null;
-      const view = c ? PUSH_VIEW[c.kind] : undefined;
+      const c = classifyRecord(r);
+      const view = c ? pushView(c.kind) : null;
       if (view) lastPushed[pane] = pushKey(view, r.ts); // resting 需要你/已完成 → treat as seen, don't replay
     }
   }
@@ -176,7 +325,12 @@ export function createClaudeEvents({
   // Notify the device that a pane entered 需要你 / 已完成. Title carries the state label + session so the
   // user can tell the two apart at a glance (the inbox shows the same label as a chip); body is the
   // pane's one-line message, falling back to the bare label. 需要你 is high-urgency (wake the phone).
-  async function sendPush(pane, view, c, lp) {
+  async function sendPush(
+    pane: string,
+    view: PushView,
+    c: ClaudeClassification,
+    lp: LivePane,
+  ): Promise<void> {
     const label = VIEW_LABEL[view];
     const body = summarize(c.msg) || label;
     const payload = { title: `${label} · ${lp.session}`, body, tag: `pane-${pane}`, data: { session: lp.session, window: lp.window, pane } };
@@ -185,19 +339,25 @@ export function createClaudeEvents({
     // 已完成 ~30min (a stale "done" is less useful). A force-stopped app still can't be reached at all —
     // that's an OS limit, not a TTL one.
     const opts = { topic: `pane-${pane}`, ttl: view === 'needs' ? 14400 : 1800, urgency: view === 'needs' ? 'high' : 'normal' };
-    try { await push.sendToSession(lp.session, payload, opts); } catch { /* best effort */ }
+    try { await push?.sendToSession(lp.session, payload, opts); } catch { /* best effort */ }
   }
 
-  async function updatePush(pane, c, ts, lp, { gone = false, suppressPush = false } = {}) {
+  async function updatePush(
+    pane: string,
+    c: ClaudeClassification | null,
+    ts: number,
+    lp: LivePane | null | undefined,
+    { gone = false, suppressPush = false }: { gone?: boolean; suppressPush?: boolean } = {},
+  ): Promise<void> {
     const kind = c ? c.kind : null;
-    const view = PUSH_VIEW[kind];
-    const key = view ? pushKey(view, ts) : undefined;
+    const view = pushView(kind);
+    const key = view ? pushKey(view, ts) : null;
     if (kind === 'idle') return;
     if (gone || !view) {
       lastPushed[pane] = null;
     } else if (suppressPush) {
       lastPushed[pane] = key;
-    } else if (lastPushed[pane] !== key && lp?.session) {
+    } else if (lastPushed[pane] !== key && lp?.session && c) {
       lastPushed[pane] = key;
       await sendPush(pane, view, c, lp);
     }
@@ -206,14 +366,11 @@ export function createClaudeEvents({
   // Agent identity is part of pane navigation, not inbox state. Resolve it from the pane's live foreground
   // process so the phone can choose terminal/chat during the initial /panes load instead of waiting for the
   // slower /states reconciliation pass. Work on copies because executable corroboration normalizes `cmd`.
-  async function identifyPaneAgents(panes = []) {
-    const livePanes = panes.map((pane) => ({
-      ...pane,
-      cmd: typeof pane?.cmd === 'string' ? pane.cmd : (pane?.command || ''),
-    }));
-    try { await resolveVersionedComms(livePanes, run, commVerdicts); } catch { /* exact names still work */ }
-    try { await resolveCodexComms(livePanes, run, commVerdicts); } catch { /* exact names still work */ }
-    return Object.fromEntries(livePanes.flatMap((pane) => {
+  async function identifyPaneAgents(panesInput: unknown = []): Promise<Record<string, string>> {
+    const panes = identifiablePanes(panesInput);
+    try { await resolveVersionedComms(panes, run, commVerdicts); } catch { /* exact names still work */ }
+    try { await resolveCodexComms(panes, run, commVerdicts); } catch { /* exact names still work */ }
+    return Object.fromEntries(panes.flatMap((pane) => {
       const agent = agentForProc(pane.cmd);
       return agent ? [[pane.id, agent.id]] : [];
     }));
@@ -226,32 +383,37 @@ export function createClaudeEvents({
   // crash / Ctrl-C-out with no SessionEnd). `allowedSessions` (session NAMES, or null) scopes only the
   // OUTPUT — push and reconciliation run over every pane. On a tmux failure we degrade: no location, no
   // reconciliation, no push (we'd have no session name to route to), roster returned best-effort.
-  async function _getStates(allowedSessions = null) {
+  async function _getStates(allowedSessions: string[] | null = null): Promise<ClaudePaneStates> {
     const allow = allowedSessions == null ? null : new Set(allowedSessions);
     const recorded = readStateFile(file);
-    let live = null;
-    let managedCodex = {};
+    let live: Map<string, LivePane> | null = null;
+    let managedCodex: Record<string, ManagedCodexState> = {};
     try {
-      const panes = await commands.listLivePanes();
+      if (!commands?.listLivePanes) throw new Error('tmux commands unavailable');
+      const panes = livePanes(await commands.listLivePanes());
       const agents = await identifyPaneAgents(panes);
-      for (const pane of panes) if (agents[pane.id]) pane.cmd = agents[pane.id];
-      live = new Map(panes.map((p) => [p.id, p]));
-      managedCodex = codexApp?.inboxStates ? await codexApp.inboxStates(panes) : {};
+      for (const pane of panes) {
+        const agent = agents[pane.id];
+        if (agent) pane.cmd = agent;
+      }
+      live = new Map(panes.map((pane) => [pane.id, pane]));
+      managedCodex = codexApp?.inboxStates
+        ? managedStates(await codexApp.inboxStates(panes)) : {};
     } catch { /* tmux down */ }
 
-    const out = {};
+    const out: ClaudePaneStates = {};
     for (const [pane, rec] of Object.entries(recorded)) {
       // Older Handmux versions wrote Codex events into this Claude Hook state file. Codex is now strictly
       // App Server-backed, so even an unmanaged pane must ignore those stale rows instead of reviving an
       // approximate status or notification.
       if (rec?.agent === 'codex') continue;
-      const agent = getAgent(rec && rec.agent);
-      let c = rec && typeof rec.src === 'string' ? agent.classify(rec.src, rec.payload || {}) : null;
+      const agent = getAgent(rec.agent);
+      let c = classifyRecord(rec);
       // A 需要你 the user already resolved leaves no closing hook (see PERM_RESOLVED_GUARD_MS). statMtime
       // gates the cheap "still pending" path; only once the transcript has grown past the event do we pay the
       // bounded tail read to tell a RESUME (approve/deny → 进行中) from an INTERRUPT (ESC → neutral present).
       if (c && c.kind === 'permission') {
-        const tp = rec.payload && rec.payload.transcript_path;
+        const tp = typeof rec.payload.transcript_path === 'string' ? rec.payload.transcript_path : null;
         if (tp && permissionResolved(rec, statMtime(tp))) c = resolvedPermissionKind(readTail(tp));
       } else if (c && c.kind === 'working') {
         // ESC-interrupt during a turn leaves the last hook as the stale 'prompt' (working) — no Stop fires,
@@ -259,15 +421,17 @@ export function createClaudeEvents({
         // Once the transcript has grown past the prompt event, a bounded tail read settles it: an interrupt
         // marker → neutral (un-stick now); any other line → Claude is still producing, stay 进行中. Content is
         // definitive so no guard window is needed; an unreadable stat/tail can't tell → keep working.
-        const tp = rec.payload && rec.payload.transcript_path;
-        if (tp && statMtime(tp) > (rec.ts || 0) && isInterruptTail(readTail(tp))) c = null;
+        const tp = typeof rec.payload.transcript_path === 'string' ? rec.payload.transcript_path : null;
+        const mtime = tp ? statMtime(tp) : null;
+        if (tp && typeof mtime === 'number' && mtime > rec.ts && isInterruptTail(readTail(tp))) c = null;
       } else if (c && c.kind === 'compacting') {
         // A no-op /compact fires no PostCompact; it writes its <local-command-stdout> at once. Once the
         // transcript has grown past the PreCompact event and its tail is that stdout, the /compact is done
         // (nothing to compact) → drop 压缩中. A real compaction stays silent until PostCompact, so it keeps
         // showing for its whole run. Unreadable stat/tail → can't tell → keep 压缩中 (the TTL is the backstop).
-        const tp = rec.payload && rec.payload.transcript_path;
-        if (tp && statMtime(tp) > (rec.ts || 0) && isLocalCommandStdout(readTail(tp))) c = null;
+        const tp = typeof rec.payload.transcript_path === 'string' ? rec.payload.transcript_path : null;
+        const mtime = tp ? statMtime(tp) : null;
+        if (tp && typeof mtime === 'number' && mtime > rec.ts && isLocalCommandStdout(readTail(tp))) c = null;
       }
       const lp = live ? live.get(pane) : null;
       // Dropped when tmux says the pane is gone or no longer running THIS agent (hard kill / crash /
@@ -290,7 +454,7 @@ export function createClaudeEvents({
       if (c.kind === 'working' && now() - (rec.ts || 0) > WORKING_TTL_MS) continue;
       if (c.kind === 'compacting' && now() - (rec.ts || 0) > COMPACTING_TTL_MS) continue;
       const loc = lp ? { session: lp.session, window: lp.window, windowName: lp.windowName } : {};
-      if (allow && !allow.has(loc.session)) continue;
+      if (allow && (!lp || !allow.has(lp.session))) continue;
       out[pane] = { ...loc, kind: c.kind, msg: c.msg || '', ts: rec.ts || 0, agent: agent.id };
     }
 
@@ -300,7 +464,8 @@ export function createClaudeEvents({
       for (const [pane, state] of Object.entries(managedCodex)) {
         const lp = live.get(pane);
         if (!lp) continue;
-        const c = state.kind ? { kind: state.kind, msg: state.msg || '' } : null;
+        const c: ClaudeClassification | null = state.kind
+          ? { kind: state.kind, msg: state.msg } : null;
         await updatePush(pane, c, state.ts || 0, lp, { suppressPush: state.suppressPush });
         if (allow && !allow.has(lp.session)) continue;
         out[pane] = {
@@ -334,20 +499,20 @@ export function createClaudeEvents({
   // shared `lastPushed` dedup and `await sendPush` mid-loop — overlapping runs could interleave on that state.
   // Serialize on a tail promise so calls queue instead of racing; each caller still gets its own filtered
   // roster (allowedSessions differs per call), and the tmux read isn't duplicated concurrently.
-  let tail = Promise.resolve();
-  function getStates(allowedSessions = null) {
-    const run = tail.then(() => _getStates(allowedSessions), () => _getStates(allowedSessions));
-    tail = run.catch(() => {});
-    return run;
+  let tail: Promise<unknown> = Promise.resolve();
+  function getStates(allowedSessions: string[] | null = null): Promise<ClaudePaneStates> {
+    const current = tail.then(() => _getStates(allowedSessions), () => _getStates(allowedSessions));
+    tail = current.catch(() => {});
+    return current;
   }
 
   // Watch the state file's directory (the hook replaces the file via rename, which changes the inode, so
   // watching the file itself would go deaf after the first write — watch the dir and filter by name).
   // On a change, re-run getStates so 需要你/已完成 push fires even when NO client is polling — that's
   // the whole point of push (notify you while you're away). Debounced so a burst of writes pumps once.
-  let watcher = null;
-  let deb = null;
-  function start() {
+  let watcher: Watcher | null = null;
+  let deb: TimerHandle | null = null;
+  function start(): void {
     if (watcher) return;
     prime(); // boot baseline: don't replay the file's resting 需要你/已完成 as fresh push (see prime())
     const dir = path.dirname(file);
@@ -355,8 +520,8 @@ export function createClaudeEvents({
     try { mkdir(dir, { recursive: true }); } catch { /* ignore */ }
     try {
       watcher = watch(dir, (_evt, fname) => {
-        if (fname && fname !== base) return;
-        clearTimer(deb);
+        if (fname && String(fname) !== base) return;
+        if (deb !== null) clearTimer(deb);
         deb = setTimer(() => {
           getStates()
             .then(() => onStateChange())
@@ -365,30 +530,38 @@ export function createClaudeEvents({
       });
     } catch { /* fs.watch unsupported → push falls back to evaluation on each /states poll */ }
   }
-  function stop() { if (watcher) { watcher.close(); watcher = null; } clearTimer(deb); }
+  function stop(): void {
+    if (watcher) { watcher.close(); watcher = null; }
+    if (deb !== null) clearTimer(deb);
+    deb = null;
+  }
 
   // The chat lens's pane→session bind: the hook state file records THIS pane's exact session (session_id +
   // transcript_path), authoritative over the terminal-side cwd→newest-jsonl guess (which collapses distinct
   // sessions that happen to share a cwd — see transcript.js). Returns null when hooks are off / the pane
   // isn't a Claude pane / the recorded payload carries no session info, so callers can fall back cleanly.
-  function paneSession(pane) {
+  function paneSession(pane: string): {
+    sessionId: string | null;
+    transcriptPath: string | null;
+    cwd: string | null;
+    agent?: string;
+  } | null {
     const rec = readStateFile(file)[pane];
     if (rec?.agent === 'codex') return null;
-    const p = rec && rec.payload;
-    if (!p || typeof p !== 'object') return null;
+    const p = rec?.payload;
+    if (!p) return null;
     const transcriptPath = typeof p.transcript_path === 'string' ? p.transcript_path : null;
     const sessionId = typeof p.session_id === 'string' ? p.session_id : null;
     const cwd = typeof p.cwd === 'string' ? p.cwd : null;
     if (!transcriptPath && !sessionId) return null;
-    return {
-      sessionId, transcriptPath, cwd,
-      agent: typeof rec.agent === 'string' ? rec.agent : undefined,
-    };
+    return typeof rec.agent === 'string'
+      ? { sessionId, transcriptPath, cwd, agent: rec.agent }
+      : { sessionId, transcriptPath, cwd };
   }
 
   // Agent identity is needed independently of session metadata so the chat lens chooses the matching
   // backend (Claude transcript or Codex App Server). Untagged legacy hook rows are Claude.
-  function paneAgent(pane) {
+  function paneAgent(pane: string): string | null {
     const rec = readStateFile(file)[pane];
     if (!rec || typeof rec !== 'object') return null;
     if (rec.agent === 'codex') return null;
