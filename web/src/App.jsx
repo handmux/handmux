@@ -43,6 +43,7 @@ import { authHandled } from './authGuard.js';
 import { canUseChatLens } from './chatLensAvailability.js';
 import { currentPaneAgent, reconcilePaneAgents } from './paneAgents.js';
 import { OverlayProvider } from './overlays/OverlayHost.js';
+import { useOverlayActivity } from './hooks/useOverlayActivity.js';
 
 import Drawer from './components/Drawer.jsx';
 import WindowBar from './components/WindowBar.jsx';
@@ -340,12 +341,9 @@ export default function App() {
     ...browser.tabs,
     ...staticPreview.tabs.map((tab) => ({ ...tab, mode: 'static' })),
   ]);
-  const terminalOverlayOpen = !!(
-    drawerOpen || settingsOpen || usageOpen || bindOpen || newWinOpen || renameTarget
-    || manageWindow || managePane || fileManagerOpen || gitOpen || basePrompt || docLinkPrompt
-    || localUrlPrompt || recoveryDialogOpen || takeoverTarget || inboxOpen || ideaOpen
-    || changelogOpen || notifInboxOpen || paneMapOpen || browser.open
-  );
+  // Every visible layer registers with the shared Overlay Stack. That stack is the single focus/keyboard
+  // ownership signal, so a component-internal Overlay cannot be forgotten in a hand-maintained App list.
+  const terminalOverlayOpen = useOverlayActivity();
   const terminalOverlayWasOpenRef = useRef(false);
   const restoreFocusAfterOverlayRef = useRef(null);
   const chooseKeyboardMode = useCallback((mode) => {

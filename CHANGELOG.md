@@ -21,6 +21,7 @@ All notable changes to handmux. Format follows [Keep a Changelog](https://keepac
 - 全局上传锁、分屏地图和脚本通知 Inbox 改由统一 Overlay Host 挂载，不再各自直接操作页面根节点。
 - Browser、File 与 Git 全屏界面也完成 Overlay Host 迁移，应用组件不再各自直接创建页面根级 Portal。
 - 跨界面 Overlay 的层级改用一套语义化 CSS Token，并增加顺序门禁，避免弹窗通过分散的 `z-index` 魔法数字互相覆盖。
+- Terminal 的自动聚焦、页面键盘转发、失焦和关闭后恢复现在统一由 Overlay Stack 驱动，App 不再手工枚举各弹窗状态。
 - API 未处理异常现在统一返回带错误码和 Request ID 的 JSON，不再向客户端暴露本机路径、源码位置或异常堆栈。
 
 ### Fixed

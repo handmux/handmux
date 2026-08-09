@@ -28,6 +28,17 @@ const terminal = vi.hoisted(() => ({
   forwardPageKey: vi.fn(),
 }));
 const bottomDock = vi.hoisted(() => ({ focusComposer: vi.fn() }));
+const overlayActivity = vi.hoisted(() => {
+  const state = {
+    active: false,
+    listeners: new Set(),
+    set(active) {
+      state.active = active;
+      for (const listener of [...state.listeners]) listener();
+    },
+  };
+  return state;
+});
 
 vi.mock('./api.js', async (importOriginal) => ({ ...(await importOriginal()), ...api }));
 vi.mock('./storage.js', async (importOriginal) => ({
@@ -68,6 +79,19 @@ vi.mock('./hooks/useBackButton.js', () => ({
 }));
 vi.mock('./hooks/useExitConfirm.js', () => ({ useExitConfirm: () => {} }));
 vi.mock('./hooks/useKeyboardInset.js', () => ({ useKeyboardInset: () => 0 }));
+vi.mock('./hooks/useOverlayActivity.js', async () => {
+  const { useSyncExternalStore } = await import('react');
+  return {
+    useOverlayActivity: () => useSyncExternalStore(
+      (listener) => {
+        overlayActivity.listeners.add(listener);
+        return () => overlayActivity.listeners.delete(listener);
+      },
+      () => overlayActivity.active,
+      () => overlayActivity.active,
+    ),
+  };
+});
 vi.mock('./hooks/usePageScrollLock.js', () => ({ usePageScrollLock: () => {} }));
 vi.mock('./hooks/useLongPress.js', () => ({ useLongPress: () => ({}) }));
 vi.mock('./desktopInput.js', () => ({
@@ -183,6 +207,8 @@ beforeEach(() => {
   terminal.blurInput.mockReset();
   terminal.forwardPageKey.mockReset();
   bottomDock.focusComposer.mockReset();
+  overlayActivity.active = false;
+  overlayActivity.listeners.clear();
   localStorage.clear();
   localStorage.setItem('tw_lang', 'zh');
   localStorage.setItem('tw_token', 'good');
@@ -348,7 +374,10 @@ describe('App management dimensions', () => {
     await renderManagedSession();
     act(() => terminal.props.onInputFocusChange(true));
 
-    act(() => windowBar.props.onPaneMapOpenChange(true));
+    act(() => {
+      windowBar.props.onPaneMapOpenChange(true);
+      overlayActivity.set(true);
+    });
     await flush();
     expect(terminal.blurInput).toHaveBeenCalled();
     expect(terminal.props.autoFocusInput).toBe(false);
@@ -359,7 +388,10 @@ describe('App management dimensions', () => {
     expect(terminal.props.autoFocusInput).toBe(false);
     expect(terminal.focusInput).not.toHaveBeenCalled();
 
-    act(() => windowBar.props.onPaneMapOpenChange(false));
+    act(() => {
+      windowBar.props.onPaneMapOpenChange(false);
+      overlayActivity.set(false);
+    });
     await flush(20);
     expect(terminal.focusInput).toHaveBeenCalledOnce();
   });

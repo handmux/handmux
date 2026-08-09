@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useLayoutEffect, useRef } from 'react';
 import {
   createOverlayStackEntry,
   overlayStackSize,
@@ -25,7 +25,8 @@ export function useEscapeLayer(active: boolean, onEscape: () => void, layerId?: 
     layer.current = createOverlayStackEntry('escape', () => callback.current(), layerId);
   }
 
-  useEffect(() => {
+  // Layout timing lets focus/keyboard ownership update before the newly opened layer is painted.
+  useLayoutEffect(() => {
     if (!active) return undefined;
     const entry = layer.current;
     if (!entry) return undefined;

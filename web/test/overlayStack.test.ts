@@ -3,6 +3,7 @@ import {
   createOverlayStackEntry,
   overlayStackSize,
   registerOverlayStackEntry,
+  subscribeOverlayStack,
   topOverlayStackEntry,
 } from '../src/overlays/overlayStack.js';
 
@@ -26,5 +27,16 @@ describe('overlayStack', () => {
     unregisterParentEscape();
     expect(topOverlayStackEntry('escape')).toBeNull();
     expect(topOverlayStackEntry('history')).toBeNull();
+  });
+
+  it('notifies focus/keyboard owners when the first layer opens and the last closes', () => {
+    const changed = vi.fn();
+    const unsubscribe = subscribeOverlayStack(changed);
+    const layer = createOverlayStackEntry('escape', vi.fn());
+    const unregister = registerOverlayStackEntry(layer);
+    expect(changed).toHaveBeenCalledTimes(1);
+    unregister();
+    expect(changed).toHaveBeenCalledTimes(2);
+    unsubscribe();
   });
 });
