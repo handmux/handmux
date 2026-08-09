@@ -2,7 +2,9 @@ import { getBrowserDeviceId, getToken } from './storage.js';
 import { mimeFromName } from './mime.js';
 import { t } from './i18n';
 import { ApiError, UnauthorizedError, parseApiErrorBody } from './apiErrors.js';
-import { parseCodexStreamEvent } from '../../server/src/codexStreamProtocol.js';
+import {
+  parseCodexProjectedStreamEvent, parseCodexStreamEvent,
+} from '../../server/src/codexStreamProtocol.js';
 import { parseCodexToolProjection } from '../../server/src/codexToolProtocol.js';
 import { parseCodexQueueItem, parseCodexSendResult } from '../../server/src/codexQueueProtocol.js';
 
@@ -111,8 +113,9 @@ export function parseSseFrames(buffer) {
 
 // Fetch-based SSE keeps the normal Authorization header (native EventSource cannot set it) while still
 // giving the conversation a one-way, reconnectable stream. Durable transcript polling remains authoritative.
-export async function streamCodexMessages(pane, { signal, onEvent } = {}) {
-  const path = `/api/codex/stream?pane=${encodeURIComponent(pane)}`;
+export async function streamCodexMessages(pane, { signal, onEvent, after = null } = {}) {
+  const cursor = Number.isSafeInteger(after) && after >= 0 ? `&after=${after}` : '';
+  const path = `/api/codex/stream?pane=${encodeURIComponent(pane)}${cursor}`;
   const res = await fetch(path, {
     cache: 'no-store', signal,
     headers: { Authorization: `Bearer ${getToken() ?? ''}`, Accept: 'text/event-stream' },
@@ -146,7 +149,9 @@ export async function streamCodexMessages(pane, { signal, onEvent } = {}) {
         const events = payload?.type === 'events' && Array.isArray(payload.events)
           ? payload.events : [payload];
         for (const candidate of events) {
-          const event = parseCodexStreamEvent(candidate);
+          const control = parseCodexStreamEvent(candidate);
+          const event = parseCodexProjectedStreamEvent(candidate)
+            || (['ready', 'cursorReset', 'disconnected', 'error'].includes(control?.type) ? control : null);
           if (!event) continue;
           if (event?.type === 'error') throw new Error(event.message || 'Codex message stream failed');
           onEvent?.(event);

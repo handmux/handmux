@@ -152,19 +152,49 @@ describe('Codex message stream projection', () => {
 
   it('reconnects a stream frozen by an app switch when the window regains focus', async () => {
     const signals = [];
-    vi.spyOn(api, 'streamCodexMessages').mockImplementation((_pane, { signal }) => {
+    const subscriptions = [];
+    vi.spyOn(api, 'streamCodexMessages').mockImplementation((_pane, options) => {
+      const { signal } = options;
       signals.push(signal);
+      subscriptions.push(options);
       return new Promise((resolve) => signal.addEventListener('abort', resolve, { once: true }));
     });
     renderHook(() => useCodexMessageStream({
       pane: '%1', threadId: 'thread-1', enabled: true, durableMessages: [],
     }));
     await waitFor(() => expect(api.streamCodexMessages).toHaveBeenCalledTimes(1));
+    act(() => subscriptions[0].onEvent({
+      type: 'delta', threadId: 'thread-1', turnId: 'turn-1', itemId: 'agent-1', delta: '继续',
+      eventId: 'thread-1:7', sequence: 7, kind: 'assistantMessage', lifecycle: 'delta',
+    }));
 
     act(() => window.dispatchEvent(new Event('focus')));
 
     await waitFor(() => expect(api.streamCodexMessages).toHaveBeenCalledTimes(2));
     expect(signals[0].aborted).toBe(true);
     expect(signals[1].aborted).toBe(false);
+    expect(subscriptions[1].after).toBe(7);
+  });
+
+  it('refreshes durable history and resets its cursor when the server journal has restarted', async () => {
+    let emit;
+    vi.spyOn(api, 'streamCodexMessages').mockImplementation((_pane, { signal, onEvent }) => {
+      emit = onEvent;
+      return new Promise((resolve) => signal.addEventListener('abort', resolve, { once: true }));
+    });
+    const onSettled = vi.fn();
+    const { result } = renderHook(() => useCodexMessageStream({
+      pane: '%1', threadId: 'thread-1', enabled: true, durableMessages: [], onSettled,
+    }));
+    await waitFor(() => expect(api.streamCodexMessages).toHaveBeenCalledOnce());
+    act(() => emit({
+      type: 'completed', threadId: 'thread-1', turnId: 'turn-old', itemId: 'agent-old', text: '旧回复',
+      eventId: 'thread-1:9', sequence: 9, kind: 'assistantMessage', lifecycle: 'completed',
+    }));
+    expect(result.current).toHaveLength(1);
+
+    act(() => emit({ type: 'cursorReset', threadId: 'thread-1', cursor: 0 }));
+    expect(result.current).toEqual([]);
+    expect(onSettled).toHaveBeenCalledTimes(2);
   });
 });

@@ -353,8 +353,11 @@ describe('Codex App Server client', () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(events).toEqual([
-      expect.objectContaining({ type: 'started', threadId: 'thread-1', itemId: 'agent-live' }),
-      expect.objectContaining({ type: 'delta', delta: '你好' }),
+      expect.objectContaining({
+        type: 'started', threadId: 'thread-1', itemId: 'agent-live',
+        eventId: 'thread-1:1', sequence: 1, kind: 'assistantMessage', lifecycle: 'started',
+      }),
+      expect.objectContaining({ type: 'delta', delta: '你好', sequence: 2, lifecycle: 'delta' }),
     ]);
     expect(replayed).toEqual([
       expect.objectContaining({ type: 'snapshot', text: '你好' }),
@@ -365,6 +368,13 @@ describe('Codex App Server client', () => {
     // Completed text is history and must come only from the rollout projection. Replaying it as a live
     // snapshot can place old replies below the current stream after a reconnect.
     expect(completedReplay).toEqual([]);
+    const cursorReplay = [];
+    const unsubscribeCursorReplay = await app.subscribe(
+      '%1', 'thread-1', (event) => cursorReplay.push(event), events[0].sequence,
+    );
+    expect(cursorReplay.map((event) => [event.type, event.sequence])).toEqual([
+      ['delta', 2], ['snapshot', 3], ['completed', 4],
+    ]);
     expect(projectCodexThread((await app.read('%1', 'thread-1')).thread)
       .find((message) => message.id === 'codex:turn-live:agent-live')?.text).toBe('你好，完成');
 
@@ -373,6 +383,18 @@ describe('Codex App Server client', () => {
     unsubscribe();
     unsubscribeReplay();
     unsubscribeCompleted();
+    unsubscribeCursorReplay();
+  });
+
+  it('resets a stale client cursor after the server event journal restarts', async () => {
+    const proxy = fakeProxy();
+    const app = createCodexAppServer({ home: '/home/test', exists: () => true, connect: () => proxy.ws });
+    const events = [];
+    const unsubscribe = await app.subscribe('%1', 'thread-1', (event) => events.push(event), 99);
+
+    expect(events).toEqual([{ type: 'cursorReset', threadId: 'thread-1', cursor: 0 }]);
+    unsubscribe();
+    app.close();
   });
 
   it('discovers and sends the first message to a loaded thread before its rollout exists', async () => {

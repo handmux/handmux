@@ -119,13 +119,13 @@ function codexError(res, error) {
   return res.status(conflict ? 409 : 503).json({ error: message });
 }
 
-// App Server can emit many tiny token deltas. Keep their order, but fold adjacent chunks for the same
-// message before crossing the tunnel to a phone; lifecycle events always flush immediately.
+// Legacy/unsequenced App Server deltas may still be folded. Projected events keep every sequence intact:
+// collapsing two cursor-addressable events would create an artificial gap on the next reconnect.
 export function appendCodexStreamEvent(queue, event) {
   event = parseCodexStreamEvent(event);
   if (!event) return queue;
   const last = queue.at(-1);
-  if (event?.type === 'delta' && last?.type === 'delta'
+  if (event?.sequence == null && event?.type === 'delta' && last?.type === 'delta'
     && last.threadId === event.threadId && last.turnId === event.turnId && last.itemId === event.itemId) {
     last.delta += event.delta || '';
   } else if (event) queue.push({ ...event });
@@ -172,6 +172,11 @@ export function codexRoutes({ codexApp, commands, claudeEvents, wait = pause }) 
   r.get('/codex/stream', async (req, res) => {
     const target = await binding(codexApp, req.query.pane);
     if (routeError(res, target)) return;
+    const rawAfter = req.query.after;
+    const afterSequence = rawAfter == null || rawAfter === '' ? null : Number(rawAfter);
+    if (afterSequence != null && (!Number.isSafeInteger(afterSequence) || afterSequence < 0)) {
+      return res.status(400).json({ error: 'bad Codex stream cursor' });
+    }
 
     res.status(200);
     res.set({
@@ -226,7 +231,7 @@ export function codexRoutes({ codexApp, commands, claudeEvents, wait = pause }) 
     req.once('aborted', cleanup);
     res.once('close', cleanup);
     try {
-      unsubscribe = await codexApp.subscribe(target.pane, target.threadId, enqueue);
+      unsubscribe = await codexApp.subscribe(target.pane, target.threadId, enqueue, afterSequence);
       if (closed) { unsubscribe(); unsubscribe = null; return; }
       heartbeat = setInterval(() => {
         if (!closed) res.write(`: keepalive ${Date.now()}\n\n`);

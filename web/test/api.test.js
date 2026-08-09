@@ -17,8 +17,8 @@ describe('Codex message stream', () => {
     const encoder = new TextEncoder();
     const chunks = [
       'data: {"type":"ready","threadId":"thread-1"}\n\n',
-      'data: {"type":"events","events":[{"type":"delta","threadId":"thread-1","turnId":"turn-1","itemId":"item-1","delta":"你"},',
-      '{"type":"invalid"},{"type":"completed","threadId":"thread-1","turnId":"turn-1","itemId":"item-1","text":"你好"}]}\n\n',
+      'data: {"type":"events","events":[{"type":"delta","threadId":"thread-1","turnId":"turn-1","itemId":"item-1","delta":"你","eventId":"thread-1:1","sequence":1,"kind":"assistantMessage","lifecycle":"delta"},',
+      '{"type":"invalid"},{"type":"completed","threadId":"thread-1","turnId":"turn-1","itemId":"item-1","text":"你好","eventId":"thread-1:2","sequence":2,"kind":"assistantMessage","lifecycle":"completed"}]}\n\n',
     ].map((value) => encoder.encode(value));
     const reader = {
       read: vi.fn(async () => (chunks.length ? { done: false, value: chunks.shift() } : { done: true })),
@@ -37,8 +37,14 @@ describe('Codex message stream', () => {
     }));
     expect(events).toEqual([
       { type: 'ready', threadId: 'thread-1' },
-      { type: 'delta', threadId: 'thread-1', turnId: 'turn-1', itemId: 'item-1', delta: '你' },
-      { type: 'completed', threadId: 'thread-1', turnId: 'turn-1', itemId: 'item-1', text: '你好' },
+      {
+        type: 'delta', threadId: 'thread-1', turnId: 'turn-1', itemId: 'item-1', delta: '你',
+        eventId: 'thread-1:1', sequence: 1, kind: 'assistantMessage', lifecycle: 'delta',
+      },
+      {
+        type: 'completed', threadId: 'thread-1', turnId: 'turn-1', itemId: 'item-1', text: '你好',
+        eventId: 'thread-1:2', sequence: 2, kind: 'assistantMessage', lifecycle: 'completed',
+      },
     ]);
     expect(reader.releaseLock).toHaveBeenCalledOnce();
   });

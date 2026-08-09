@@ -52,6 +52,15 @@ describe('Codex App Server routes', () => {
       expect.objectContaining({ type: 'delta', delta: '你好' }),
       expect.objectContaining({ type: 'completed', text: '你好' }),
     ]);
+
+    const projected = [];
+    appendCodexStreamEvent(projected, {
+      type: 'delta', threadId: 'one', turnId: 't', itemId: 'i', delta: '你', sequence: 1,
+    });
+    appendCodexStreamEvent(projected, {
+      type: 'delta', threadId: 'one', turnId: 't', itemId: 'i', delta: '好', sequence: 2,
+    });
+    expect(projected).toHaveLength(2);
   });
 
   it('streams batched App Server deltas for the exact pane thread', async () => {
@@ -72,8 +81,21 @@ describe('Codex App Server routes', () => {
     expect(response.text).toContain('"type":"ready"');
     expect(response.text).toContain('"delta":"你好"');
     expect(response.text).toContain('"type":"completed"');
-    expect(subscribe).toHaveBeenCalledWith('%1', 'thread-1', expect.any(Function));
+    expect(subscribe).toHaveBeenCalledWith('%1', 'thread-1', expect.any(Function), null);
     expect(unsubscribe).toHaveBeenCalledOnce();
+  });
+
+  it('passes a validated stream cursor to the App Server subscription', async () => {
+    const subscribe = vi.fn(async (_pane, threadId, listener) => {
+      setTimeout(() => listener({ type: 'disconnected', threadId }), 0);
+      return vi.fn();
+    });
+    const app = appFor({ codexApp: { subscribe } });
+
+    await request(app).get('/codex/stream?pane=%251&after=12').expect(200);
+    expect(subscribe).toHaveBeenCalledWith('%1', 'thread-1', expect.any(Function), 12);
+    await request(app).get('/codex/stream?pane=%251&after=-1')
+      .expect(400, { error: 'bad Codex stream cursor' });
   });
 
   it('binds every operation to the exact App Server thread without Hook metadata', async () => {

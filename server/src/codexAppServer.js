@@ -3,7 +3,9 @@ import net from 'node:net';
 import WebSocket from 'ws';
 import { codexPlanSnapshot } from './codexPlan.js';
 import { parseCodexOutboxSnapshot } from './codexQueueProtocol.js';
-import { parseCodexGoal, parseCodexStreamEvent } from './codexStreamProtocol.js';
+import {
+  parseCodexGoal, parseCodexStreamEvent, projectCodexStreamEvent,
+} from './codexStreamProtocol.js';
 import { codexAppSocketPath } from './cli/codexManaged.js';
 import { isCodexSyntheticUserText } from './codexTranscriptParse.js';
 
@@ -12,6 +14,7 @@ const SOCKET_SCAN_MS = 2_000;
 const MAX_QUEUED_MESSAGES = 20;
 const MAX_SUBMISSION_RECEIPTS = 256;
 const SUBMISSION_RECEIPT_TTL_MS = 24 * 60 * 60 * 1_000;
+const MAX_STREAM_EVENTS = 512;
 const QUEUE_EDIT_LEASE_MS = 30_000;
 const APPROVAL_METHODS = new Set([
   'item/commandExecution/requestApproval',
@@ -463,7 +466,7 @@ class CodexAppConnection {
     pane, socketPath, connect = connectUnixWebSocket, timeoutMs = RPC_TIMEOUT_MS,
     now = () => Date.now(), baseline = true, onStateChange = () => {}, onClose = () => {},
     queueStore = new Map(), submissionStore = new Map(), nextQueueId = () => `${Date.now()}`,
-    persistOutbox = () => {},
+    persistOutbox = () => {}, streamEventStore = new Map(),
   }) {
     this.pane = pane;
     this.socketPath = socketPath;
@@ -477,6 +480,7 @@ class CodexAppConnection {
     this.submissionStore = submissionStore;
     this.nextQueueId = nextQueueId;
     this.persistOutbox = persistOutbox;
+    this.streamEventStore = streamEventStore;
     this.nextId = 1;
     this.pending = new Map();
     this.approvals = new Map();
@@ -1273,9 +1277,45 @@ class CodexAppConnection {
     });
   }
 
-  subscribeStream(threadId, listener) {
+  streamJournal(threadId) {
+    const key = `${this.pane}\0${threadId}`;
+    let journal = this.streamEventStore.get(key);
+    if (!journal) {
+      journal = { sequence: 0, events: [] };
+      this.streamEventStore.set(key, journal);
+    }
+    return journal;
+  }
+
+  recordStreamEvent(event) {
+    const journal = this.streamJournal(event.threadId);
+    const projected = projectCodexStreamEvent(event, journal.sequence + 1);
+    if (!projected) return null;
+    journal.sequence = projected.sequence;
+    journal.events.push(projected);
+    if (journal.events.length > MAX_STREAM_EVENTS) {
+      journal.events.splice(0, journal.events.length - MAX_STREAM_EVENTS);
+    }
+    return projected;
+  }
+
+  subscribeStream(threadId, listener, afterSequence = null) {
     const subscription = { threadId, listener };
     this.streamListeners.add(subscription);
+    const journal = this.streamJournal(threadId);
+    if (Number.isSafeInteger(afterSequence) && afterSequence >= 0) {
+      const firstSequence = journal.events[0]?.sequence ?? journal.sequence + 1;
+      if (afterSequence > journal.sequence || afterSequence < firstSequence - 1) {
+        try {
+          listener({ type: 'cursorReset', threadId, cursor: journal.sequence });
+        } catch { /* cursor reset is best effort */ }
+      } else {
+        for (const event of journal.events) {
+          if (event.sequence <= afterSequence) continue;
+          try { listener(event); } catch { /* replay is best effort */ }
+        }
+      }
+    }
     const state = this.threadState.get(threadId);
     for (const turn of state?.thread?.turns || []) {
       const liveIds = state.liveItemIds.get(turn.id);
@@ -1287,21 +1327,17 @@ class CodexAppConnection {
         // older event-only overlays after the current reply and permanently scramble the visible order.
         if (turn.status !== 'inProgress'
           || state.completedAgentItemIds.has(`${turn.id}\0${item.id}`)) continue;
-        try {
-          listener({
-            type: 'snapshot', threadId, turnId: turn.id, itemId: item.id,
-            text: item.text, completed: false,
-          });
-        } catch { /* initial projection is best effort */ }
+        this.emitStream({
+          type: 'snapshot', threadId, turnId: turn.id, itemId: item.id,
+          text: item.text, completed: false,
+        });
       }
     }
     if (state?.goal && TERMINAL_GOAL_STATUSES.has(state.goal.status) && state.goalTurnId) {
-      try {
-        listener({
-          type: 'goal', threadId, turnId: state.goalTurnId,
-          event: state.goal.status, goal: state.goal,
-        });
-      } catch { /* initial Goal projection is best effort */ }
+      this.emitStream({
+        type: 'goal', threadId, turnId: state.goalTurnId,
+        event: state.goal.status, goal: state.goal,
+      });
     }
     return () => this.streamListeners.delete(subscription);
   }
@@ -1309,9 +1345,11 @@ class CodexAppConnection {
   emitStream(event) {
     const parsed = parseCodexStreamEvent(event);
     if (!parsed || !parsed.threadId) return;
+    const projected = this.recordStreamEvent(parsed);
+    if (!projected) return;
     for (const subscription of this.streamListeners) {
-      if (subscription.threadId !== parsed.threadId) continue;
-      try { subscription.listener(parsed); } catch { /* one browser must not break the App Server observer */ }
+      if (subscription.threadId !== projected.threadId) continue;
+      try { subscription.listener(projected); } catch { /* one browser must not break the App Server observer */ }
     }
   }
 
@@ -1566,6 +1604,7 @@ export function createCodexAppServer({
   const connections = new Map();
   const queues = new Map();
   const submissions = new Map();
+  const streamEvents = new Map();
   const persisted = parseCodexOutboxSnapshot(outboxStore?.read?.());
   for (const record of persisted?.queues || []) {
     queues.set(`${record.pane}\0${record.threadId}`, {
@@ -1617,7 +1656,7 @@ export function createCodexAppServer({
       current = new CodexAppConnection({
         pane, socketPath, connect, now, baseline: true, onStateChange, timeoutMs: rpcTimeoutMs,
         queueStore: queues, submissionStore: submissions,
-        persistOutbox,
+        persistOutbox, streamEventStore: streamEvents,
         nextQueueId: () => `${now().toString(36)}-${(++queueSequence).toString(36)}`,
         onClose: (closed) => { if (connections.get(pane) === closed) connections.delete(pane); },
       });
@@ -1704,12 +1743,12 @@ export function createCodexAppServer({
         revision: state.revision,
       };
     },
-    async subscribe(pane, threadId, listener) {
+    async subscribe(pane, threadId, listener, afterSequence = null) {
       const client = await connection(pane);
       if (!client) throw new Error('Codex session is not managed by Handmux');
       await client.assertCurrentThread(threadId);
       await client.ensureThread(threadId);
-      return client.subscribeStream(threadId, listener);
+      return client.subscribeStream(threadId, listener, afterSequence);
     },
     async send(pane, threadId, text, requestId = null) {
       const client = await connection(pane);
@@ -1873,6 +1912,7 @@ export function createCodexAppServer({
       }
       queues.clear();
       submissions.clear();
+      streamEvents.clear();
     },
   };
 }

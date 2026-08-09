@@ -10,12 +10,12 @@ function eventKey(event) {
 }
 
 export function applyCodexStreamEvent(messages, event, afterK = -1) {
-  if (!event || !['ready', 'started', 'snapshot', 'delta', 'completed', 'turnCompleted', 'goal', 'goalCleared'].includes(event.type)) {
+  if (!event || !['ready', 'cursorReset', 'started', 'snapshot', 'delta', 'completed', 'turnCompleted', 'goal', 'goalCleared'].includes(event.type)) {
     return messages;
   }
   // A new SSE connection replays only unfinished App Server items. Finalized temporary bubbles must not
   // survive beside the rollout history, otherwise an old reply can remain below the current one forever.
-  if (event.type === 'ready') {
+  if (event.type === 'ready' || event.type === 'cursorReset') {
     const next = messages.filter((message) => {
       if (message.type !== 'goal') return !message.completed;
       return !['complete', 'blocked'].includes(message.goal?.status) || !!message.turnId;
@@ -133,6 +133,7 @@ export function useCodexMessageStream({
   const [snapshot, setSnapshot] = useState({ scope, messages: [] });
   const [connectionEpoch, setConnectionEpoch] = useState(0);
   const latestKRef = useRef(-1);
+  const lastSequenceRef = useRef(-1);
   const onSettledRef = useRef(onSettled);
   const onAuthFailRef = useRef(onAuthFail);
   const streamControllerRef = useRef(null);
@@ -144,6 +145,7 @@ export function useCodexMessageStream({
   onAuthFailRef.current = onAuthFail;
 
   useEffect(() => {
+    lastSequenceRef.current = -1;
     setSnapshot((current) => (current.scope === scope ? current : { scope, messages: [] }));
   }, [scope]);
 
@@ -197,6 +199,16 @@ export function useCodexMessageStream({
     let retryMs = RETRY_MIN_MS;
     const onEvent = (event) => {
       if (event?.threadId && event.threadId !== threadId) return;
+      if (event?.type === 'cursorReset') {
+        lastSequenceRef.current = Number.isSafeInteger(event.cursor) ? event.cursor : -1;
+        onSettledRef.current?.();
+      } else if (Number.isSafeInteger(event?.sequence)) {
+        if (event.sequence <= lastSequenceRef.current) return;
+        if (lastSequenceRef.current >= 0 && event.sequence > lastSequenceRef.current + 1) {
+          onSettledRef.current?.();
+        }
+        lastSequenceRef.current = event.sequence;
+      }
       if (['completed', 'turnCompleted', 'goal'].includes(event?.type)) onSettledRef.current?.();
       setSnapshot((current) => {
         if (current.scope !== scope) return current;
@@ -207,7 +219,11 @@ export function useCodexMessageStream({
     const run = async () => {
       while (!controller.signal.aborted) {
         try {
-          await streamCodexMessages(pane, { signal: controller.signal, onEvent });
+          await streamCodexMessages(pane, {
+            signal: controller.signal,
+            onEvent,
+            after: lastSequenceRef.current >= 0 ? lastSequenceRef.current : null,
+          });
           retryMs = RETRY_MIN_MS;
         } catch (error) {
           if (controller.signal.aborted) break;

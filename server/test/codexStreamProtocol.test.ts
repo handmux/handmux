@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { parseCodexGoal, parseCodexStreamEvent } from '../src/codexStreamProtocol.js';
+import {
+  parseCodexGoal, parseCodexProjectedStreamEvent, parseCodexStreamEvent, projectCodexStreamEvent,
+} from '../src/codexStreamProtocol.js';
 
 describe('Codex stream protocol', () => {
   it('validates a native Goal while retaining forward-compatible metadata', () => {
@@ -30,5 +32,31 @@ describe('Codex stream protocol', () => {
     })).toMatchObject({ type: 'goal', goal: { objective: 'Ship', status: 'active' } });
     expect(parseCodexStreamEvent({ type: 'delta', delta: 'missing identity' })).toBeNull();
     expect(parseCodexStreamEvent({ type: 'future/event', threadId: 'thread-1' })).toBeNull();
+  });
+
+  it('projects domain events onto a strict ordered wire identity', () => {
+    const projected = projectCodexStreamEvent({
+      type: 'delta', threadId: 'thread-1', turnId: 'turn-1', itemId: 'item-1', delta: 'hello',
+    }, 7);
+    expect(projected).toEqual({
+      type: 'delta', threadId: 'thread-1', turnId: 'turn-1', itemId: 'item-1', delta: 'hello',
+      eventId: 'thread-1:7', sequence: 7, kind: 'assistantMessage', lifecycle: 'delta',
+    });
+    expect(parseCodexProjectedStreamEvent(projected)).toEqual(projected);
+    expect(parseCodexProjectedStreamEvent({ ...projected, sequence: 8 })).toBeNull();
+    expect(parseCodexProjectedStreamEvent({ ...projected, lifecycle: 'completed' })).toBeNull();
+    expect(projectCodexStreamEvent({ type: 'ready', threadId: 'thread-1' }, 8)).toBeNull();
+    expect(projectCodexStreamEvent({
+      type: 'turnCompleted', threadId: 'thread-1', turnId: 'turn-1', status: 'completed',
+    }, 8)).toMatchObject({
+      eventId: 'thread-1:8', sequence: 8, turnId: 'turn-1', itemId: null,
+      kind: 'turn', lifecycle: 'completed',
+    });
+  });
+
+  it('validates a cursor reset without treating it as a projected domain event', () => {
+    expect(parseCodexStreamEvent({ type: 'cursorReset', threadId: 'thread-1', cursor: 12 }))
+      .toEqual({ type: 'cursorReset', threadId: 'thread-1', cursor: 12 });
+    expect(parseCodexStreamEvent({ type: 'cursorReset', threadId: 'thread-1', cursor: -1 })).toBeNull();
   });
 });

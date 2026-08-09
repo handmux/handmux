@@ -32,8 +32,7 @@ export type CodexAgentStreamEvent = {
   completed?: boolean;
 };
 
-export type CodexStreamEvent =
-  | { [key: string]: unknown; type: 'ready'; threadId: string }
+export type CodexStreamDomainEvent =
   | CodexAgentStreamEvent
   | {
     [key: string]: unknown;
@@ -55,9 +54,25 @@ export type CodexStreamEvent =
     type: 'goalCleared';
     threadId: string;
     turnId: string | null;
-  }
+  };
+
+export type CodexStreamControlEvent =
+  | { [key: string]: unknown; type: 'ready'; threadId: string }
+  | { [key: string]: unknown; type: 'cursorReset'; threadId: string; cursor: number }
   | { [key: string]: unknown; type: 'disconnected'; threadId: string }
   | { [key: string]: unknown; type: 'error'; message: string };
+
+export type CodexStreamEvent = CodexStreamDomainEvent | CodexStreamControlEvent;
+
+export type CodexEventKind = 'assistantMessage' | 'turn' | 'goal';
+
+export type CodexProjectedStreamEvent = CodexStreamDomainEvent & {
+  eventId: string;
+  sequence: number;
+  itemId: string | null;
+  kind: CodexEventKind;
+  lifecycle: string;
+};
 
 function recordOf(value: unknown): Record<string, unknown> | null {
   return value != null && typeof value === 'object' && !Array.isArray(value)
@@ -133,6 +148,12 @@ export function parseCodexStreamEvent(value: unknown): CodexStreamEvent | null {
   const threadId = nonEmptyString(record.threadId);
   if (!threadId) return null;
   if (type === 'ready' || type === 'disconnected') return { ...record, type, threadId };
+  if (type === 'cursorReset') {
+    const cursor = record.cursor;
+    return typeof cursor === 'number' && Number.isSafeInteger(cursor) && cursor >= 0
+      ? { ...record, type, threadId, cursor }
+      : null;
+  }
   if (type === 'turnCompleted') {
     const turnId = nullableString(record.turnId);
     const status = nullableString(record.status);
@@ -151,4 +172,53 @@ export function parseCodexStreamEvent(value: unknown): CodexStreamEvent | null {
     return { ...record, type, threadId, turnId, event, goal };
   }
   return null;
+}
+
+function projectionFields(event: CodexStreamDomainEvent): {
+  kind: CodexEventKind;
+  lifecycle: string;
+} {
+  if (event.type === 'started' || event.type === 'snapshot'
+    || event.type === 'delta' || event.type === 'completed') {
+    return { kind: 'assistantMessage', lifecycle: event.type };
+  }
+  if (event.type === 'turnCompleted') return { kind: 'turn', lifecycle: 'completed' };
+  if (event.type === 'goal') return { kind: 'goal', lifecycle: event.event };
+  return { kind: 'goal', lifecycle: 'cleared' };
+}
+
+function isDomainEvent(event: CodexStreamEvent): event is CodexStreamDomainEvent {
+  return event.type !== 'ready' && event.type !== 'cursorReset'
+    && event.type !== 'disconnected' && event.type !== 'error';
+}
+
+export function projectCodexStreamEvent(
+  value: unknown,
+  sequence: number,
+): CodexProjectedStreamEvent | null {
+  if (!Number.isSafeInteger(sequence) || sequence <= 0) return null;
+  const event = parseCodexStreamEvent(value);
+  if (!event || !isDomainEvent(event)) return null;
+  return {
+    ...event,
+    eventId: `${event.threadId}:${sequence}`,
+    sequence,
+    itemId: 'itemId' in event ? event.itemId : null,
+    ...projectionFields(event),
+  } as CodexProjectedStreamEvent;
+}
+
+export function parseCodexProjectedStreamEvent(value: unknown): CodexProjectedStreamEvent | null {
+  const record = recordOf(value);
+  if (!record) return null;
+  const event = parseCodexStreamEvent(record);
+  if (!event || !isDomainEvent(event)) return null;
+  const sequence = record.sequence;
+  const eventId = nonEmptyString(record.eventId);
+  if (typeof sequence !== 'number' || !Number.isSafeInteger(sequence) || sequence <= 0
+    || eventId !== `${event.threadId}:${sequence}`) return null;
+  const fields = projectionFields(event);
+  const itemId = 'itemId' in event ? event.itemId : null;
+  if (record.itemId !== itemId || record.kind !== fields.kind || record.lifecycle !== fields.lifecycle) return null;
+  return { ...event, eventId, sequence, itemId, ...fields } as CodexProjectedStreamEvent;
 }
