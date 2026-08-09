@@ -7,14 +7,23 @@ function privateDirectoryChain(directory: string): string[] {
   const { root } = path.parse(resolved);
   const parts = resolved.slice(root.length).split(path.sep).filter(Boolean);
   const privateRoot = parts.indexOf('.handmux');
-  const first = privateRoot === -1 ? Math.max(0, parts.length - 1) : privateRoot;
+  if (privateRoot === -1) return [];
+  const first = privateRoot;
   return parts.slice(first).map((_part, offset) => (
     path.join(root, ...parts.slice(0, first + offset + 1))
   ));
 }
 
 export function ensurePrivateDirectorySync(directory: string): void {
-  for (const current of privateDirectoryChain(directory)) {
+  const privateDirectories = privateDirectoryChain(directory);
+  if (privateDirectories.length === 0) {
+    // Explicit custom paths (for example `--config /srv/handmux.json`) may live in a shared parent that
+    // Handmux does not own. Create a missing leaf privately, but never chmod an existing /tmp, HOME, or
+    // administrator-managed directory. The JSON file itself is still always repaired to 0600.
+    fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
+    return;
+  }
+  for (const current of privateDirectories) {
     fs.mkdirSync(current, { recursive: true, mode: 0o700 });
     fs.chmodSync(current, 0o700);
   }
@@ -27,7 +36,7 @@ export class PrivateStateStore<T> {
     this.file = path.resolve(file);
   }
 
-  read(): T | null {
+  readStrict(): T | null {
     const directory = path.dirname(this.file);
     if (!fs.existsSync(this.file)) {
       if (fs.existsSync(directory)) ensurePrivateDirectorySync(directory);
@@ -35,8 +44,12 @@ export class PrivateStateStore<T> {
     }
     ensurePrivateDirectorySync(directory);
     fs.chmodSync(this.file, 0o600);
+    return JSON.parse(fs.readFileSync(this.file, 'utf8')) as T;
+  }
+
+  read(): T | null {
     try {
-      return JSON.parse(fs.readFileSync(this.file, 'utf8')) as T;
+      return this.readStrict();
     } catch {
       return null;
     }

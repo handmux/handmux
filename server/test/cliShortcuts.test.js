@@ -56,6 +56,8 @@ describe('shortcut editor model', () => {
       shortcuts: { command: [], chat: [{ type: 'text', text: 'ok', enter: true }] },
     });
     expect(fs.existsSync(`${target}.tmp`)).toBe(false);
+    expect(fs.statSync(path.dirname(target)).mode & 0o777).toBe(0o700);
+    expect(fs.statSync(target).mode & 0o777).toBe(0o600);
   });
 });
 

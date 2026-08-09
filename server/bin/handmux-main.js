@@ -47,6 +47,7 @@ import { t, initLocale, setLocale } from '../src/cli/i18n/index.js';
 import { runPush } from '../src/cli/pushCmd.js';
 import { runWorkspaceCommand } from '../src/cli/workspaceCmd.js';
 import { runManagedCodex } from '../src/cli/codexManaged.js';
+import { PrivateStateStore } from '../src/privateStateStore.js';
 
 const HOME = homedir();
 const SELF = fileURLToPath(import.meta.url);
@@ -64,7 +65,7 @@ const { command, flags, positionals = [], unknownShortFlags = [] } = parseArgs(p
 function peekConfigLang() {
   try {
     const p = flags.config ? path.resolve(flags.config) : configPath(HOME);
-    return fs.existsSync(p) ? JSON.parse(fs.readFileSync(p, 'utf8')) : {};
+    return new PrivateStateStore(p).read() || {};
   } catch { return {}; }
 }
 initLocale(flags, peekConfigLang(), process.env);
@@ -85,7 +86,7 @@ function resolveFileConfig() {
     if (fs.existsSync(homeP)) p = homeP;
   }
   if (!p) return { path: null, cfg: {} };
-  try { return { path: p, cfg: JSON.parse(fs.readFileSync(p, 'utf8')) }; }
+  try { return { path: p, cfg: new PrivateStateStore(p).readStrict() }; }
   catch (e) { console.error(t('err.badConfig', { path: p, msg: e.message })); process.exit(2); }
 }
 

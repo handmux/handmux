@@ -16,6 +16,7 @@ import { resolveTunlite, checkSshAuth } from './tunlite.js';
 import { resolveNatapp, resolveCpolar } from './tunnelClients.js';
 import { t, setLocale } from './i18n/index.js';
 import { intro, outro, note, cancel, select, text, password, confirm, ask, CANCELLED } from './prompt.js';
+import { PrivateStateStore } from '../privateStateStore.js';
 
 // The pure answer↔config model + validators + cloudflared text helpers live in setupModel.js. Imported for
 // the interactive shell below; re-exported so their historical import path (this module) stays valid for
@@ -33,7 +34,7 @@ export {
 } from './setupModel.js';
 
 function readExisting(file) {
-  try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return {}; }
+  try { return new PrivateStateStore(file).readStrict() || {}; } catch { return {}; }
 }
 
 // The hub. Pre-fills from the existing config so a re-run edits/switches rather than starts over; a brand-
@@ -88,8 +89,7 @@ export async function runSetup({ home = homedir(), target = configPath(home), lo
       if (choice === 'exit') { cancel(t('setup.exited')); return null; }
       if (choice === 'save' || choice === 'start') {
         const cfg = mergeConfig(existing, a);
-        fs.mkdirSync(path.dirname(target), { recursive: true });
-        fs.writeFileSync(target, JSON.stringify(cfg, null, 2) + '\n', { mode: 0o600 });
+        new PrivateStateStore(target).write(cfg);
         outro(t('setup.wrote', { path: target }));
         if (a.tunnel === 'ssh') printSshServerHelp(a, log);
         return { cfg, start: choice === 'start' };

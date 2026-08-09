@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { EventEmitter } from 'node:events';
 import fs from 'node:fs';
+import path from 'node:path';
 import {
   compareVersions, isNewer, shouldRefresh, fetchLatest, parseView, VIEW_ARGS,
   readCache, writeCache, updateCachePath, runUpdateCheck, notifyUpdate,
@@ -94,6 +95,8 @@ describe('cache round-trip', () => {
     expect(readCache(home)).toBeNull();
     writeCache(home, { checkedAt: 5, latest: '9.9.9', whatsNew: WN });
     expect(readCache(home)).toEqual({ checkedAt: 5, latest: '9.9.9', whatsNew: WN });
+    expect(fs.statSync(path.join(home, '.handmux')).mode & 0o777).toBe(0o700);
+    expect(fs.statSync(updateCachePath(home)).mode & 0o777).toBe(0o600);
     fs.writeFileSync(updateCachePath(home), 'not json');
     expect(readCache(home)).toBeNull();
   });

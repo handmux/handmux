@@ -39,6 +39,22 @@ describe('CLI lifecycle', () => {
     expect(r.stdout).toContain(`handmux ${VERSION} stopped`);
   });
 
+  it('repairs legacy config permissions while reading the CLI language hint', () => {
+    const home = tmpHome('hm-cli-');
+    const directory = path.join(home, '.handmux');
+    const file = path.join(directory, 'config.json');
+    fs.mkdirSync(directory, { recursive: true, mode: 0o755 });
+    fs.chmodSync(directory, 0o755);
+    fs.writeFileSync(file, '{"lang":"en"}', { mode: 0o644 });
+    fs.chmodSync(file, 0o644);
+
+    const r = status(home);
+
+    expect(r.status).toBe(0);
+    expect(fs.statSync(directory).mode & 0o777).toBe(0o700);
+    expect(fs.statSync(file).mode & 0o777).toBe(0o600);
+  });
+
   it('status distinguishes the running version after an upgrade and exits', () => {
     const home = tmpHome('hm-cli-');
     writeState({

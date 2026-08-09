@@ -7,11 +7,10 @@
 // the list of session names this device cares about (used by sendToSession for targeted delivery). A
 // dead subscription (404/410 from the push service) is pruned on the next send.
 import webpush from 'web-push';
-import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import crypto from 'node:crypto';
-import { writeJsonAtomic } from './jsonStore.js';
+import { readJsonArray, writeJsonAtomic } from './jsonStore.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const STORE = process.env.PUSH_STORE || path.resolve(here, '../data/push-subs.json');
@@ -44,12 +43,9 @@ const VALID_PUSH_KEY = /^[A-Za-z0-9_-]{16,128}$/;
 let subs = load();
 
 function load() {
-  try {
-    const raw = JSON.parse(fs.readFileSync(STORE, 'utf8')) || [];
-    return raw.map((e) => (e && e.subscription)
-      ? { subscription: e.subscription, boundSessions: e.boundSessions || [], pushKey: e.pushKey || undefined }
-      : { subscription: e, boundSessions: [] }); // migrate old bare-subscription entries
-  } catch { return []; }
+  return readJsonArray(STORE).map((e) => (e && e.subscription)
+    ? { subscription: e.subscription, boundSessions: e.boundSessions || [], pushKey: e.pushKey || undefined }
+    : { subscription: e, boundSessions: [] }); // migrate old bare-subscription entries
 }
 function persist() { writeJsonAtomic(STORE, subs); }
 

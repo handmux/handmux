@@ -1,9 +1,8 @@
-import fs from 'node:fs';
-import path from 'node:path';
 import { normalizeShortcuts, shortcutIdentity } from '../shortcutConfig.js';
 import { t } from './i18n/index.js';
 import * as prompts from './prompt.js';
 import { acquireLifecycleLock, isAlive, readState } from './state.js';
+import { PrivateStateStore } from '../privateStateStore.js';
 
 const MODIFIERS = {
   none: { prefixes: [], labels: [] },
@@ -39,21 +38,13 @@ export function moveShortcut(items, index, target) {
 }
 
 function readExisting(target) {
-  try { return JSON.parse(fs.readFileSync(target, 'utf8')); }
-  catch (error) {
-    if (error.code === 'ENOENT') return {};
-    throw error;
-  }
+  return new PrivateStateStore(target).readStrict() || {};
 }
 
 export function saveShortcutConfig(target, shortcuts) {
   const existing = readExisting(target);
   const cfg = { ...existing, shortcuts: normalizeShortcuts(shortcuts) };
-  fs.mkdirSync(path.dirname(target), { recursive: true });
-  const tmp = `${target}.tmp`;
-  fs.writeFileSync(tmp, JSON.stringify(cfg, null, 2) + '\n', { mode: 0o600 });
-  fs.renameSync(tmp, target);
-  fs.chmodSync(target, 0o600);
+  new PrivateStateStore(target).write(cfg);
   return cfg;
 }
 

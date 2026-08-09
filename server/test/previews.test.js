@@ -1,6 +1,6 @@
 // server/test/previews.test.js
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { promises as fsp } from 'node:fs';
+import fs, { promises as fsp } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createPreviews, safePreviewName } from '../src/previews.js';
@@ -59,6 +59,7 @@ describe('register', () => {
     expect(out.accessToken).toBe('preview-token-1000000');
     expect(previews.get('foo').entry.accessToken).toBe(out.accessToken);
     expect(JSON.parse(await fsp.readFile(store, 'utf8'))[0]).not.toHaveProperty('accessToken');
+    expect(fs.statSync(store).mode & 0o777).toBe(0o600);
   });
   it('rejects a dir outside home', async () => {
     expect(await previews.register({ name: 'foo', dir: outside })).toMatchObject({ status: 400 });

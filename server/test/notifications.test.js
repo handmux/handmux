@@ -19,6 +19,7 @@ describe('per-device notifications store', () => {
     expect(mod.list('k1').map((n) => n.title)).toEqual(['b', 'a']); // newest first
     expect(mod.list('k2').map((n) => n.title)).toEqual(['b']);
     expect(mod.list('k3')).toEqual([]); // untargeted device
+    expect(fs.statSync(path.join(process.env.NOTIF_DIR, 'k1.json')).mode & 0o777).toBe(0o600);
   });
 
   it('the same push shares one id across target devices', async () => {

@@ -7,11 +7,11 @@
 //   2. The version query goes through the user's own npm (`npm view handmux version`), so it honours a
 //      configured China mirror / private registry instead of hard-coding registry.npmjs.org. Any failure
 //      (offline, blocked, npm missing) is swallowed — the notifier is best-effort, never an error.
-import fs from 'node:fs';
 import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { pocketHome } from './state.js';
 import { t } from './i18n/index.js';
+import { PrivateStateStore } from '../privateStateStore.js';
 
 export const PKG_NAME = 'handmux';
 export const CHECK_INTERVAL_MS = 60 * 60 * 1000; // refresh the cached "latest" at most once an hour
@@ -25,14 +25,12 @@ export function isBrewInstall(selfPath = '') { return /\/(Cellar|homebrew)\//.te
 export function updateCachePath(home) { return path.join(pocketHome(home), 'update-check.json'); }
 
 export function readCache(home) {
-  try { return JSON.parse(fs.readFileSync(updateCachePath(home), 'utf8')); } catch { return null; }
+  return new PrivateStateStore(updateCachePath(home)).read();
 }
 
 export function writeCache(home, obj) {
-  try {
-    fs.mkdirSync(pocketHome(home), { recursive: true });
-    fs.writeFileSync(updateCachePath(home), JSON.stringify(obj));
-  } catch { /* best effort — a missing cache just means we re-check next time */ }
+  try { new PrivateStateStore(updateCachePath(home)).write(obj); }
+  catch { /* best effort — a missing cache just means we re-check next time */ }
 }
 
 // "1.2.3" → [1,2,3]; a prerelease/build tail (`-rc.1`, `+meta`) is ignored. null if unparseable.

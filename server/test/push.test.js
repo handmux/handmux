@@ -49,6 +49,7 @@ describe('push sendToAll and dead-endpoint pruning', () => {
       { pushKey: keyA, status: 'success' },
       { pushKey: keyB, status: 'success' },
     ]));
+    expect(fs.statSync(process.env.PUSH_STORE).mode & 0o777).toBe(0o600);
   });
 
   it('a 410 prunes the dead subscription from the store', async () => {

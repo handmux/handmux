@@ -42,4 +42,28 @@ describe('PrivateStateStore', () => {
     store.remove();
     expect(() => store.remove()).not.toThrow();
   });
+
+  it('keeps a custom shared parent mode unchanged while protecting the file', () => {
+    const shared = path.join(home, 'shared');
+    const file = path.join(shared, 'custom-config.json');
+    fs.mkdirSync(shared, { mode: 0o755 });
+    const before = fs.statSync(shared).mode & 0o777;
+
+    new PrivateStateStore(file).write({ token: 'secret' });
+
+    expect(fs.statSync(shared).mode & 0o777).toBe(before);
+    expect(fs.statSync(file).mode & 0o777).toBe(0o600);
+  });
+
+  it('offers a strict read for callers that must distinguish corrupt JSON', () => {
+    const file = path.join(home, '.handmux', 'config.json');
+    fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o755 });
+    fs.writeFileSync(file, 'not json', { mode: 0o644 });
+    const store = new PrivateStateStore(file);
+
+    expect(() => store.readStrict()).toThrow();
+    expect(store.read()).toBeNull();
+    expect(fs.statSync(path.dirname(file)).mode & 0o777).toBe(0o700);
+    expect(fs.statSync(file).mode & 0o777).toBe(0o600);
+  });
 });
