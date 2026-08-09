@@ -9,6 +9,21 @@ import {
 } from '../src/cli/shortcutEditor.js';
 import en from '../src/cli/i18n/en.js';
 import zh from '../src/cli/i18n/zh.js';
+import type { ShortcutConfig } from '../src/shortcutConfig.js';
+
+interface TestPromptOption { value: unknown; label?: string; hint?: string }
+interface TestPromptInput {
+  message?: string;
+  options?: TestPromptOption[];
+  initialValue?: unknown;
+  validate?: (value: unknown) => string | undefined;
+}
+interface CapturedRequest { url: string; options: RequestInit }
+
+function saved(result: Awaited<ReturnType<typeof runShortcutEditor>>) {
+  if (!result || !('cfg' in result)) throw new Error('expected saved shortcut result');
+  return result;
+}
 
 describe('shortcut editor model', () => {
   it('describes server shortcuts as shared rather than required', () => {
@@ -76,22 +91,23 @@ describe('runShortcutEditor', () => {
       chat: [],
     } }));
     const answers = ['command', 'item:1', 'move', 2, 'back', 'save'];
-    const selectCalls = [];
+    const selectCalls: TestPromptInput[] = [];
     const ui = {
       intro: vi.fn(), outro: vi.fn(), cancel: vi.fn(),
-      select: vi.fn((options) => { selectCalls.push(options); return { kind: 'select', options }; }),
-      text: vi.fn((options) => ({ kind: 'text', options })),
-      confirm: vi.fn((options) => ({ kind: 'confirm', options })),
+      select: vi.fn((options: TestPromptInput) => { selectCalls.push(options); return { kind: 'select', options }; }),
+      text: vi.fn((options: TestPromptInput) => ({ kind: 'text', options })),
+      confirm: vi.fn((options: TestPromptInput) => ({ kind: 'confirm', options })),
       ask: vi.fn(async () => answers.shift()),
     };
 
-    const result = await runShortcutEditor({ target, running: false, isTTY: true, ui });
+    const result = saved(await runShortcutEditor({ target, running: false, isTTY: true, ui }));
 
-    expect(result.cfg.shortcuts.command.map((item) => item.text)).toEqual(['a', 'c', 'b', 'd']);
-    const actionMenu = selectCalls.find((call) => call.options.some((option) => option.value === 'move'));
-    expect(actionMenu.options.some((option) => option.value === 'move')).toBe(true);
+    expect(result.cfg.shortcuts.command.map((item) => item.type === 'text' ? item.text : item.label))
+      .toEqual(['a', 'c', 'b', 'd']);
+    const actionMenu = selectCalls.find((call) => call.options?.some((option) => option.value === 'move'));
+    expect(actionMenu?.options?.some((option) => option.value === 'move')).toBe(true);
     const positionMenu = selectCalls.find((call) => call.message === 'Move to (current: position 2)');
-    expect(positionMenu.options).toEqual([
+    expect(positionMenu?.options).toEqual([
       { value: 0, label: 'First (position 1)' },
       { value: 1, label: 'After a (position 2)' },
       { value: 2, label: 'After c (position 3)' },
@@ -107,19 +123,19 @@ describe('runShortcutEditor', () => {
       command: [{ type: 'text', text: 'only', enter: false }], chat: [],
     } }));
     const answers = ['command', 'item:0', 'back', 'back', 'exit'];
-    const selectCalls = [];
+    const selectCalls: TestPromptInput[] = [];
     const ui = {
       intro: vi.fn(), outro: vi.fn(), cancel: vi.fn(),
-      select: vi.fn((options) => { selectCalls.push(options); return { kind: 'select', options }; }),
-      text: vi.fn((options) => ({ kind: 'text', options })),
-      confirm: vi.fn((options) => ({ kind: 'confirm', options })),
+      select: vi.fn((options: TestPromptInput) => { selectCalls.push(options); return { kind: 'select', options }; }),
+      text: vi.fn((options: TestPromptInput) => ({ kind: 'text', options })),
+      confirm: vi.fn((options: TestPromptInput) => ({ kind: 'confirm', options })),
       ask: vi.fn(async () => answers.shift()),
     };
 
     await runShortcutEditor({ target, running: false, isTTY: true, ui });
 
     const itemMenu = selectCalls.find((call) => call.message === 'only');
-    expect(itemMenu.options.some((option) => option.value === 'move')).toBe(false);
+    expect(itemMenu?.options?.some((option) => option.value === 'move')).toBe(false);
   });
 
   it('guides a text shortcut from mode selection through Enter behavior and save', async () => {
@@ -128,36 +144,36 @@ describe('runShortcutEditor', () => {
     fs.mkdirSync(path.dirname(target), { recursive: true });
     fs.writeFileSync(target, JSON.stringify({ shortcuts: { command: [], chat: [] } }));
     const answers = ['command', 'add-text', 'git status', true, 0, 'back', 'save'];
-    const selectCalls = [];
+    const selectCalls: TestPromptInput[] = [];
     const ui = {
       intro: vi.fn(), outro: vi.fn(), cancel: vi.fn(),
-      select: vi.fn((options) => { selectCalls.push(options); return { kind: 'select', options }; }),
-      text: vi.fn((options) => ({ kind: 'text', options })),
-      confirm: vi.fn((options) => {
-        if (/restart handmux/i.test(options.message)) throw new Error('restart prompt must not be shown');
+      select: vi.fn((options: TestPromptInput) => { selectCalls.push(options); return { kind: 'select', options }; }),
+      text: vi.fn((options: TestPromptInput) => ({ kind: 'text', options })),
+      confirm: vi.fn((options: TestPromptInput) => {
+        if (/restart handmux/i.test(options.message ?? '')) throw new Error('restart prompt must not be shown');
         return { kind: 'confirm', options };
       }),
       ask: vi.fn(async () => answers.shift()),
     };
 
-    const result = await runShortcutEditor({ target, running: true, isTTY: true, ui });
+    const result = saved(await runShortcutEditor({ target, running: true, isTTY: true, ui }));
 
     expect(result.cfg.shortcuts.command).toEqual([
       { type: 'text', text: 'git status', enter: true },
     ]);
     expect(JSON.parse(fs.readFileSync(target, 'utf8')).shortcuts.command).toEqual(result.cfg.shortcuts.command);
     expect(ui.outro).toHaveBeenCalled();
-    const modeMenu = selectCalls.find((call) => call.options.some((option) => option.value === 'add-text'));
-    expect(modeMenu.options.map((option) => option.value)).toContain('add-key');
-    expect(modeMenu.options.map((option) => option.value)).not.toContain('add');
+    const modeMenu = selectCalls.find((call) => call.options?.some((option) => option.value === 'add-text'));
+    expect(modeMenu?.options?.map((option) => option.value)).toContain('add-key');
+    expect(modeMenu?.options?.map((option) => option.value)).not.toContain('add');
   });
 
   it('applies saved shortcuts to the running server through its authenticated local API', async () => {
     const mod = await import('../src/cli/shortcutEditor.js');
     expect(typeof mod.applyShortcutsLive).toBe('function');
-    const shortcuts = { command: [], chat: [{ type: 'text', text: 'ok', enter: true }] };
-    let captured;
-    const fetchImpl = async (url, options) => {
+    const shortcuts: ShortcutConfig = { command: [], chat: [{ type: 'text', text: 'ok', enter: true }] };
+    let captured: CapturedRequest | undefined;
+    const fetchImpl = async (url: string, options: RequestInit) => {
       captured = { url, options };
       return { ok: true, status: 200, json: async () => ({ ok: true }) };
     };
@@ -166,13 +182,14 @@ describe('runShortcutEditor', () => {
       state: { localUrl: 'http://localhost:12345', token: 'secret' }, shortcuts, fetchImpl,
     });
 
+    if (!captured) throw new Error('request was not captured');
     expect(captured.url).toBe('http://localhost:12345/api/config/shortcuts');
     expect(captured.options).toMatchObject({
       method: 'PUT',
       redirect: 'manual',
       headers: { Authorization: 'Bearer secret', 'Content-Type': 'application/json' },
     });
-    expect(JSON.parse(captured.options.body)).toEqual({ shortcuts });
+    expect(JSON.parse(String(captured.options.body))).toEqual({ shortcuts });
   });
 
   it('reports a live-apply HTTP failure so the CLI can give a restart fallback', async () => {
@@ -201,7 +218,8 @@ describe('runShortcutEditor', () => {
         state: { localUrl: 'http://localhost:12345', token: 'secret' },
         shortcuts: { command: [], chat: [] },
         timeoutMs: 25,
-        fetchImpl: async (_url, { signal }) => new Promise((_resolve, reject) => {
+        fetchImpl: async (_url: string, { signal }: RequestInit) => new Promise((_resolve, reject) => {
+          if (!signal) throw new Error('abort signal is required');
           signal.addEventListener('abort', () => reject(new Error('aborted')), { once: true });
         }),
       });
@@ -237,7 +255,7 @@ describe('runShortcutEditor', () => {
     const mod = await import('../src/cli/shortcutEditor.js');
     const home = tmpHome('tw-shortcuts-lock-');
     const target = path.join(home, '.handmux', 'config.json');
-    let finishRequest;
+    let finishRequest: ((response: { ok: boolean; status: number; json(): Promise<{ ok: boolean }> }) => void) | undefined;
     const first = mod.commitShortcuts({
       home, target,
       shortcuts: { command: [], chat: [{ type: 'text', text: 'first', enter: true }] },
@@ -252,6 +270,7 @@ describe('runShortcutEditor', () => {
       readStateImpl: () => null,
     })).rejects.toMatchObject({ ownerPid: process.pid });
 
+    if (!finishRequest) throw new Error('request did not start');
     finishRequest({ ok: true, status: 200, json: async () => ({ ok: true }) });
     await expect(first).resolves.toMatchObject({ running: true, applied: true });
     expect(JSON.parse(fs.readFileSync(target, 'utf8')).shortcuts.chat[0].text).toBe('first');
@@ -278,13 +297,13 @@ describe('runShortcutEditor', () => {
     const answers = ['command', 'add-key', 'none', 'Escape', 0, 'back', 'save'];
     const ui = {
       intro: vi.fn(), outro: vi.fn(), cancel: vi.fn(),
-      select: vi.fn((options) => ({ kind: 'select', options })),
-      text: vi.fn((options) => ({ kind: 'text', options })),
-      confirm: vi.fn((options) => ({ kind: 'confirm', options })),
+      select: vi.fn((options: TestPromptInput) => ({ kind: 'select', options })),
+      text: vi.fn((options: TestPromptInput) => ({ kind: 'text', options })),
+      confirm: vi.fn((options: TestPromptInput) => ({ kind: 'confirm', options })),
       ask: vi.fn(async () => answers.shift()),
     };
 
-    const result = await runShortcutEditor({ target, running: false, isTTY: true, ui });
+    const result = saved(await runShortcutEditor({ target, running: false, isTTY: true, ui }));
 
     expect(result.cfg.shortcuts.command).toEqual([
       { type: 'key', key: 'Escape', label: 'Esc' },
