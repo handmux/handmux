@@ -4,9 +4,37 @@
 import { claude } from './claude.js';
 import { codex } from './codex.js';
 
+export interface AgentDriver {
+  id: string;
+  label: string;
+  procName: string;
+  procNames: string[];
+  procMatch: RegExp;
+  takeoverPrefix: string;
+  classify?: (source: unknown, body?: unknown) => unknown;
+  transcript: {
+    createParser(): { messages: unknown[]; push(lines: readonly unknown[]): unknown[] };
+    parse(lines: readonly unknown[]): unknown[];
+  };
+  sessions: {
+    isId(value: unknown): boolean;
+    dirOptKey: string;
+    dir(home?: string): string;
+    resolve(dir: string, cwd: string, options?: Record<string, unknown>): Promise<{
+      sessionId?: string;
+      state?: 'busy' | 'idle';
+      snippet?: string;
+      lastActivity?: number;
+      file?: string;
+    }>;
+    resumeArgs(id: string): string[];
+    resumeCmd(id: string): string;
+    managedResumeCmd?(id: string): string;
+  };
+}
+
 // Order matters for proc matching (parseAgentProcs takes the first match) — keep the patterns disjoint so
 // order is irrelevant in practice, but list the flagship first.
-export type AgentDriver = typeof claude | typeof codex;
 export const AGENTS: readonly AgentDriver[] = [claude, codex];
 
 const BY_ID = new Map<string, AgentDriver>(AGENTS.map((agent) => [agent.id, agent]));

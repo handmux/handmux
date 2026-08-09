@@ -24,6 +24,80 @@ import {
   defaultRun, parseAgentProcs, parsePaneMembership, findOrphans,
   takeoverSessionName, sanitizeSessionName, freeSessionName, isShell, lsofCwd, isSessionUuid,
 } from './agents/scanUtils.js';
+import type { AgentDriver } from './agents/index.js';
+import type { AgentProcess, RunCommand } from './agents/scanUtils.js';
+import type { TmuxPane, TmuxSession, TmuxWindow } from './tmux/commands.js';
+
+interface OrphanCandidate extends Partial<AgentProcess> {
+  pid: number;
+  sessionId?: string | null;
+  cwd?: string;
+  cwdLabel?: string;
+}
+export interface OrphanScanResult {
+  pid: number;
+  agent: string;
+  agentLabel: string;
+  cwd: string;
+  cwdLabel: string;
+  suggestedName: string;
+  sessionId: string | null;
+  state: 'busy' | 'idle' | 'unknown';
+  snippet: string;
+  lastActivity: number;
+  startedAt: number;
+}
+interface OrphanCommands {
+  listSessions(): Promise<TmuxSession[]>;
+  newSession(name: string, cwd?: string | null, command?: string | null): Promise<string>;
+  listWindows(sessionId: string): Promise<TmuxWindow[]>;
+  newWindow(sessionId: string, cwd?: string | null, name?: string | null, command?: string | null): Promise<string>;
+  listPanes(windowId: string): Promise<TmuxPane[]>;
+}
+interface ScanOptions {
+  run?: RunCommand;
+  home?: string;
+  busyMs?: number;
+  now?: () => number;
+  agents?: readonly AgentDriver[];
+  projectsDir?: string;
+  sessionsDir?: string;
+  [key: string]: unknown;
+}
+type ScanFunction = (options?: ScanOptions) => Promise<OrphanCandidate[]>;
+interface TakeoverDependencies {
+  commands: OrphanCommands;
+  scanFn?: ScanFunction;
+  scanOpts?: ScanOptions;
+  killProc?: (pid: number, signal: NodeJS.Signals) => unknown;
+  delay?: (milliseconds: number) => Promise<unknown>;
+  pollTries?: number;
+  pollMs?: number;
+}
+interface TakeoverInput {
+  pid?: unknown;
+  sessionId?: unknown;
+  target?: unknown;
+  kill?: boolean;
+  name?: unknown;
+}
+export interface TakeoverResult {
+  error?: string;
+  status?: number;
+  session?: string;
+  name?: string | null;
+  window?: string;
+  pane?: string | null;
+  agentUp?: boolean;
+  claudeUp?: boolean;
+  killed?: boolean;
+  agent?: string;
+}
+const record = (value: unknown): Record<string, unknown> | null => (
+  value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null
+);
 
 // Back-compat re-exports: these were originally defined here and are imported by tests and callers by this
 // path. They're all agent-agnostic (or Claude's, kept as the default) and now live in scanUtils / claude.
@@ -36,7 +110,7 @@ export { projectsDir as defaultProjectsDir } from './agents/claude.js';
 
 // Parse `ps …` to LIVE Claude CLI procs only — the original Claude-specific helper, kept for the tests.
 // The general engine uses parseAgentProcs(psOut, AGENTS) directly.
-export function parseClaudeProcs(psOut) {
+export function parseClaudeProcs(psOut: unknown): AgentProcess[] {
   return parseAgentProcs(psOut, [getAgent('claude')]);
 }
 
@@ -53,10 +127,10 @@ export async function takeoverOrphan(
     killProc = (pid, sig) => process.kill(pid, sig),
     delay = (ms) => new Promise((r) => setTimeout(r, ms)),
     pollTries = 16, pollMs = 400,
-  },
-  { pid, sessionId, target = { mode: 'new' }, kill = true, name: wantName } = {},
-) {
-  if (!Number.isInteger(pid) || pid <= 0) return { error: 'bad pid', status: 400 };
+  }: TakeoverDependencies,
+  { pid, sessionId, target = { mode: 'new' }, kill = true, name: wantName }: TakeoverInput = {},
+): Promise<TakeoverResult> {
+  if (typeof pid !== 'number' || !Number.isInteger(pid) || pid <= 0) return { error: 'bad pid', status: 400 };
   // Both agents use UUID session ids; validate up front (takeover types the id into a shell via send-keys).
   if (!isSessionUuid(sessionId)) return { error: 'bad session id', status: 400 };
 
@@ -69,12 +143,13 @@ export async function takeoverOrphan(
     ? agent.sessions.managedResumeCmd(sessionId)
     : agent.sessions.resumeArgs(sessionId).join(' ');
 
-  let sid;
-  let wid;
-  let name; // the target session NAME — returned so the client can bind it into its session list
-  if (target.mode === 'window') {
-    if (!isSessionId(target.session)) return { error: 'bad target session', status: 400 };
-    sid = target.session;
+  let sid: string;
+  let wid: string | undefined;
+  let name: string | null = null; // the target session NAME — returned so the client can bind it into its session list
+  const targetRecord = record(target) || { mode: 'new' };
+  if (targetRecord.mode === 'window') {
+    if (!isSessionId(targetRecord.session)) return { error: 'bad target session', status: 400 };
+    sid = targetRecord.session;
     name = (await commands.listSessions()).find((s) => s.id === sid)?.name || null;
     wid = await commands.newWindow(sid, o.cwd, agent.procName, cmd);
   } else {
@@ -95,6 +170,9 @@ export async function takeoverOrphan(
     wid = (await commands.listWindows(sid))[0]?.id;
   }
 
+  if (!wid) return {
+    error: 'created window unavailable', status: 500, session: sid, name,
+  };
   let up = false;
   let pane = null;
   for (let i = 0; i < pollTries && !up; i++) {
@@ -120,17 +198,18 @@ export async function takeoverOrphan(
 // server, which pin the dir off the resolved $HOME).
 export async function scanOrphans({
   run = defaultRun, home = os.homedir(), busyMs = 8000, now = Date.now, agents = AGENTS, ...dirOverrides
-} = {}) {
+}: ScanOptions = {}): Promise<OrphanScanResult[]> {
   const [psOut, tmuxOut] = await Promise.all([
     run('ps', ['-Ao', 'pid=,ppid=,stat=,etime=,tty=,args=']),
     run('tmux', ['list-panes', '-a', '-F', tmuxFormat(['pane_tty', 'pane_pid'])]),
   ]);
   const orphans = findOrphans(parseAgentProcs(psOut, agents), parsePaneMembership(tmuxOut));
-  const results = [];
+  const results: OrphanScanResult[] = [];
   for (const o of orphans) {
     const agent = getAgent(o.agent);
     const cwd = await lsofCwd(run, o.pid);
-    const dir = dirOverrides[agent.sessions.dirOptKey] || agent.sessions.dir(home);
+    const override = dirOverrides[agent.sessions.dirOptKey];
+    const dir = typeof override === 'string' && override ? override : agent.sessions.dir(home);
     const meta = cwd ? await agent.sessions.resolve(dir, cwd, { busyMs, now }) : {};
     const cwdLabel = cwd ? path.basename(cwd) : '';
     results.push({
