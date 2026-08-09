@@ -1,6 +1,29 @@
-import { useCallback, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef, type RefObject } from 'react';
 import { sendInput, UnauthorizedError } from '../api.js';
-import { createTerminalInputQueue } from '../terminalInputQueue.js';
+import {
+  createTerminalInputQueue,
+  type TerminalInputData,
+  type TerminalInputQueue,
+  type TerminalInputQueueOptions,
+} from '../terminalInputQueue.js';
+
+export interface DesktopTerminalHandle {
+  wake?(): void;
+  inputFailed?(error: unknown): void;
+}
+
+export interface DesktopTerminalInputOptions {
+  enabled: boolean;
+  currentPane?: string | null;
+  terminalRef: RefObject<DesktopTerminalHandle | null>;
+  onAuthFail?: () => void;
+  send?: TerminalInputQueueOptions['send'];
+}
+
+export type EnqueueDesktopTerminalInput = (
+  pane: string | null | undefined,
+  data: TerminalInputData | null | undefined,
+) => void;
 
 export function useDesktopTerminalInput({
   enabled,
@@ -8,8 +31,8 @@ export function useDesktopTerminalInput({
   terminalRef,
   onAuthFail,
   send = sendInput,
-}) {
-  const queueRef = useRef(null);
+}: DesktopTerminalInputOptions): EnqueueDesktopTerminalInput {
+  const queueRef = useRef<TerminalInputQueue | null>(null);
   const currentPaneRef = useRef(currentPane);
   const onAuthFailRef = useRef(onAuthFail);
   currentPaneRef.current = currentPane;
