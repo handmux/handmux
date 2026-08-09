@@ -1,27 +1,80 @@
 import crypto from 'node:crypto';
 
 export const WORKSPACE_SCHEMA_VERSION = 1;
-const byId = (a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
-const byLink = (a, b) => a.index - b.index || (a.windowId < b.windowId ? -1 : a.windowId > b.windowId ? 1 : 0);
-const hash = (value) => crypto.createHash('sha256').update(JSON.stringify(value)).digest('hex');
+export interface WorkspaceEnvironment {
+  id: string;
+  bootIdentity: string;
+  tmuxServerId: string | null;
+}
+export interface WorkspaceActive { sessionId: string; windowId: string; paneId: string }
+export interface WorkspaceWindowLink { windowId: string; index: number }
+export interface WorkspaceSession {
+  id: string;
+  runtimeId: string;
+  name: string;
+  activeWindowId: string;
+  windowLinks: WorkspaceWindowLink[];
+  [key: string]: unknown;
+}
+export interface WorkspacePane {
+  id: string;
+  runtimeId: string;
+  index: number;
+  cwd: string;
+  agent?: Record<string, unknown> | null;
+  [key: string]: unknown;
+}
+export interface WorkspaceWindow {
+  id: string;
+  runtimeId: string;
+  name: string;
+  index: number;
+  layout: string;
+  activePaneId: string;
+  panes: WorkspacePane[];
+  [key: string]: unknown;
+}
+export interface WorkspaceSnapshot {
+  schemaVersion: 1;
+  capturedAt: string;
+  environment: WorkspaceEnvironment;
+  tmuxVersion: string;
+  active: WorkspaceActive | null;
+  sessions: WorkspaceSession[];
+  windows: WorkspaceWindow[];
+  [key: string]: unknown;
+}
+export interface WorkspaceCheckpoint extends WorkspaceSnapshot {
+  id: string;
+  archivedAt: string;
+  payloadHash: string;
+}
 
-function requireObject(value, label) {
+const byId = <T extends { id: string }>(a: T, b: T): number => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+const byLink = (a: WorkspaceWindowLink, b: WorkspaceWindowLink): number => (
+  a.index - b.index || (a.windowId < b.windowId ? -1 : a.windowId > b.windowId ? 1 : 0)
+);
+const hash = (value: unknown): string => crypto.createHash('sha256').update(JSON.stringify(value)).digest('hex');
+
+function requireObject(value: unknown, label: string): asserts value is Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error(`${label} must be an object`);
 }
 
-function requireArray(value, label) {
+function requireArray(value: unknown, label: string): asserts value is unknown[] {
   if (!Array.isArray(value)) throw new Error(`${label} must be an array`);
 }
 
-function requireString(value, label) {
+function requireString(value: unknown, label: string): asserts value is string {
   if (typeof value !== 'string' || !value) throw new Error(`${label} must be a non-empty string`);
 }
 
-function requireIndex(value, label) {
-  if (!Number.isInteger(value) || value < 0) throw new Error(`${label} must be a non-negative integer`);
+function requireIndex(value: unknown, label: string): asserts value is number {
+  if (typeof value !== 'number' || !Number.isInteger(value) || value < 0) {
+    throw new Error(`${label} must be a non-negative integer`);
+  }
 }
 
-function validateShape(input) {
+function validateShape(input: Record<string, unknown>): asserts input is WorkspaceSnapshot {
   requireString(input.capturedAt, 'capturedAt');
   requireObject(input.environment, 'environment');
   for (const field of ['id', 'bootIdentity']) requireString(input.environment[field], `environment.${field}`);
@@ -69,10 +122,16 @@ function validateShape(input) {
   }
 }
 
-function validateReferences(input, sessions, windows) {
+function validateReferences(
+  input: WorkspaceSnapshot,
+  sessions: WorkspaceSession[],
+  windows: WorkspaceWindow[],
+): void {
   if (sessions.length === 0) return;
   const windowsById = new Map(windows.map((window) => [window.id, window]));
   const sessionsById = new Map(sessions.map((session) => [session.id, session]));
+  const active = input.active;
+  if (!active) throw new Error('active must be an object');
 
   for (const session of sessions) {
     const windowIds = session.windowLinks.map((link) => link.windowId);
@@ -89,15 +148,16 @@ function validateReferences(input, sessions, windows) {
     if (!window.panes.some((pane) => pane.id === window.activePaneId)) throw new Error(`dangling activePaneId reference ${window.activePaneId}`);
   }
 
-  const activeSession = sessionsById.get(input.active.sessionId);
-  if (!activeSession) throw new Error(`dangling active.sessionId reference ${input.active.sessionId}`);
-  if (!activeSession.windowLinks.some((link) => link.windowId === input.active.windowId)) throw new Error(`dangling active.windowId reference ${input.active.windowId}`);
-  const activeWindow = windowsById.get(input.active.windowId);
-  if (!activeWindow?.panes.some((pane) => pane.id === input.active.paneId)) throw new Error(`dangling active.paneId reference ${input.active.paneId}`);
+  const activeSession = sessionsById.get(active.sessionId);
+  if (!activeSession) throw new Error(`dangling active.sessionId reference ${active.sessionId}`);
+  if (!activeSession.windowLinks.some((link) => link.windowId === active.windowId)) throw new Error(`dangling active.windowId reference ${active.windowId}`);
+  const activeWindow = windowsById.get(active.windowId);
+  if (!activeWindow?.panes.some((pane) => pane.id === active.paneId)) throw new Error(`dangling active.paneId reference ${active.paneId}`);
 }
 
-export function canonicalizeSnapshot(input) {
-  if (input?.schemaVersion !== WORKSPACE_SCHEMA_VERSION) throw new Error('unsupported workspace schema');
+export function canonicalizeSnapshot(input: unknown): WorkspaceSnapshot {
+  requireObject(input, 'workspace');
+  if (input.schemaVersion !== WORKSPACE_SCHEMA_VERSION) throw new Error('unsupported workspace schema');
   validateShape(input);
   const sessions = input.sessions.map((s) => ({ ...s, windowLinks: s.windowLinks.map((link) => ({ ...link })).sort(byLink) })).sort(byId);
   const windows = input.windows.map((w) => ({ ...w, panes: [...w.panes].sort(byId) })).sort(byId);
@@ -112,25 +172,28 @@ export function canonicalizeSnapshot(input) {
   return { ...input, sessions, windows };
 }
 
-export function fingerprintSnapshot(input) {
+export function fingerprintSnapshot(input: unknown): string {
   const { capturedAt, revision, payloadHash, ...payload } = canonicalizeSnapshot(input);
   return hash(payload);
 }
 
-export function sealPayload(input) {
+export function sealPayload(input: unknown): WorkspaceSnapshot & { payloadHash: string } {
   const payload = canonicalizeSnapshot(input);
   return { ...payload, payloadHash: fingerprintSnapshot(payload) };
 }
 
-export function validateCheckpoint(input) {
+export type CheckpointValidation = { ok: true; value: WorkspaceCheckpoint } | { ok: false; error: string };
+
+export function validateCheckpoint(input: unknown): CheckpointValidation {
   try {
-    requireString(input?.id, 'checkpoint id');
-    requireString(input?.archivedAt, 'checkpoint archivedAt');
-    if (typeof input?.payloadHash !== 'string' || !/^[0-9a-f]{64}$/.test(input.payloadHash)) throw new Error('invalid checkpoint payloadHash');
+    requireObject(input, 'checkpoint');
+    requireString(input.id, 'checkpoint id');
+    requireString(input.archivedAt, 'checkpoint archivedAt');
+    if (typeof input.payloadHash !== 'string' || !/^[0-9a-f]{64}$/.test(input.payloadHash)) throw new Error('invalid checkpoint payloadHash');
     const expected = fingerprintSnapshot(input);
     if (input.payloadHash !== expected) throw new Error('checkpoint hash mismatch');
-    return { ok: true, value: canonicalizeSnapshot(input) };
+    return { ok: true, value: canonicalizeSnapshot(input) as WorkspaceCheckpoint };
   } catch (error) {
-    return { ok: false, error: error.message };
+    return { ok: false, error: error instanceof Error ? error.message : String(error) };
   }
 }
