@@ -2,6 +2,25 @@ import { useState } from 'react';
 import { InboxIcon, AgentMark } from './icons.jsx';
 import { VIEW_LABEL, relTime, viewCounts } from '../inbox.js';
 import { t } from '../i18n';
+import type { InboxRow, InboxView } from '../inbox.js';
+import type { ClaudeHooksStatus } from '../hooks/useServerConfig.js';
+
+interface InboxGroup {
+  session: string;
+  items: InboxRow[];
+}
+
+interface InboxProps {
+  rows: InboxRow[];
+  top: InboxView | null;
+  open: boolean;
+  onToggle: () => void;
+  onClose: () => void;
+  onSelectRow: (row: InboxRow) => void;
+  onMarkAllRead: () => void;
+  hooksStatus: ClaudeHooksStatus | null;
+  onEnableHooks?: (() => Promise<unknown>) | null;
+}
 
 // Top-bar inbox: tray icon + a single priority dot (orange needs > green done > blue working) that
 // gives an at-a-glance signal even when nothing "needs you". Opens a dropdown roster of every Claude
@@ -9,8 +28,10 @@ import { t } from '../i18n';
 // taps bubble out via the callbacks. 清除已完成 advances the device read-ts high-water mark — it drops
 // only the present done rows (working/needs are never history-filtered), so it's shown ONLY when there
 // is at least one done row to clear.
-export default function Inbox({ rows, top, open, onToggle, onClose, onSelectRow, onMarkAllRead, hooksStatus, onEnableHooks }) {
-  const groups = [];
+export default function Inbox({
+  rows, top, open, onToggle, onClose, onSelectRow, onMarkAllRead, hooksStatus, onEnableHooks,
+}: InboxProps) {
+  const groups: InboxGroup[] = [];
   for (const r of rows) {
     const last = groups[groups.length - 1];
     if (last && last.session === r.session) last.items.push(r);
@@ -23,9 +44,14 @@ export default function Inbox({ rows, top, open, onToggle, onClose, onSelectRow,
   const [enabling, setEnabling] = useState(false);
   const [enableErr, setEnableErr] = useState(false);
   const showEnable = groups.length === 0 && hooksStatus === 'absent';
-  const doEnable = async () => {
+  const doEnable = async (): Promise<void> => {
     setEnabling(true); setEnableErr(false);
-    try { const r = await onEnableHooks?.(); if (!r || r.status !== 'installed') setEnableErr(true); }
+    try {
+      const result = await onEnableHooks?.();
+      const status = result !== null && typeof result === 'object' && !Array.isArray(result)
+        ? (result as Record<string, unknown>).status : null;
+      if (status !== 'installed') setEnableErr(true);
+    }
     catch { setEnableErr(true); }
     finally { setEnabling(false); }
   };
@@ -55,7 +81,7 @@ export default function Inbox({ rows, top, open, onToggle, onClose, onSelectRow,
                 <div className="inbox-empty inbox-enable">
                   <div className="inbox-enable-title">{t('inbox.enableTitle')}</div>
                   <div className="inbox-enable-hint">{t('inbox.enableHint')}</div>
-                  <button className="inbox-enable-btn" onClick={doEnable} disabled={enabling}>
+                  <button className="inbox-enable-btn" onClick={() => void doEnable()} disabled={enabling}>
                     {enabling ? t('inbox.enabling') : t('inbox.enableBtn')}
                   </button>
                   {enableErr && <div className="inbox-enable-err">{t('inbox.enableFailed')}</div>}

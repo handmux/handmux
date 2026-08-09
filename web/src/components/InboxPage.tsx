@@ -4,7 +4,39 @@ import { sanitizeNotificationUrl } from '../urlPolicy.js';
 import { OverlayPortal } from '../overlays/OverlayHost.js';
 
 // Relative time, compact (jsdom-safe, no Intl.RelativeTimeFormat): "刚刚" / "5分钟前" / a date.
-function ago(ts) {
+export type DeliveryStatus = 'pending' | 'success' | 'failed';
+
+export interface PushDelivery {
+  status: DeliveryStatus;
+  reason?: string | null;
+}
+
+export interface PushInboxItem {
+  id: string;
+  title: string;
+  body: string;
+  ts: number;
+  url?: string | null;
+  delivery?: PushDelivery | null;
+}
+
+interface InboxPageProps {
+  open: boolean;
+  detailId?: string | null;
+  items: PushInboxItem[];
+  readIds?: string[];
+  onOpenDetail: (id: string) => void;
+  onCloseDetail: () => void;
+  onClose: () => void;
+  onDelete: (id: string) => Promise<boolean> | boolean;
+  deletingId?: string | null;
+  error?: string;
+  onRetry: () => void;
+  onMarkAllRead: () => void;
+  unreadCount?: number;
+}
+
+function ago(ts: number): string {
   const d = Math.max(0, Date.now() - ts);
   const m = Math.floor(d / 60000);
   if (m < 1) return t('pushInbox.justNow');
@@ -14,7 +46,7 @@ function ago(ts) {
   return new Date(ts).toLocaleDateString();
 }
 
-const DELIVERY_REASON_KEY = {
+const DELIVERY_REASON_KEY: Record<string, string> = {
   expired: 'pushInbox.deliveryReasonExpired',
   rate_limited: 'pushInbox.deliveryReasonRateLimited',
   service_unavailable: 'pushInbox.deliveryReasonUnavailable',
@@ -23,12 +55,14 @@ const DELIVERY_REASON_KEY = {
   not_configured: 'pushInbox.deliveryReasonNotConfigured',
 };
 
-function deliveryLabel(delivery, withReason = false) {
+function deliveryLabel(delivery: PushDelivery | null | undefined, withReason = false): string {
   if (delivery?.status === 'pending') return t('pushInbox.deliveryPending');
   if (delivery?.status === 'success') return t('pushInbox.deliverySuccess');
   if (delivery?.status === 'failed') {
     if (!withReason) return t('pushInbox.deliveryFailed');
-    const reason = t(DELIVERY_REASON_KEY[delivery.reason] || 'pushInbox.deliveryReasonUnknown');
+    const reasonKey = typeof delivery.reason === 'string'
+      ? DELIVERY_REASON_KEY[delivery.reason] : undefined;
+    const reason = t(reasonKey || 'pushInbox.deliveryReasonUnknown');
     return `${t('pushInbox.deliveryFailed')} · ${reason}`;
   }
   return '';
@@ -40,7 +74,7 @@ function deliveryLabel(delivery, withReason = false) {
 // (matches App's single back-guard: detail→list→close). App owns state/read/delete; this is presentational.
 // Classes stay push-inbox-* (not inbox-*) — .inbox-* belongs to the unrelated pane-status Inbox.
 export default function InboxPage({ open, detailId, items, readIds = [], onOpenDetail, onCloseDetail, onClose,
-  onDelete, deletingId = null, error = '', onRetry, onMarkAllRead, unreadCount = 0 }) {
+  onDelete, deletingId = null, error = '', onRetry, onMarkAllRead, unreadCount = 0 }: InboxPageProps) {
   const readSet = new Set(readIds);
   const inDetail = detailId != null;
   const detail = inDetail ? items.find((x) => x.id === detailId) : null;
@@ -82,7 +116,7 @@ export default function InboxPage({ open, detailId, items, readIds = [], onOpenD
             <div className="push-inbox-detail">
               <div className="push-inbox-detail-title">{detail.title}</div>
               <div className="push-inbox-detail-time">{ago(detail.ts)}</div>
-              {detailDelivery && <div className={`push-inbox-delivery detail ${detail.delivery.status}`}>{detailDelivery}</div>}
+              {detailDelivery && <div className={`push-inbox-delivery detail ${detail.delivery?.status || ''}`}>{detailDelivery}</div>}
               <div className="push-inbox-detail-text">{detail.body}</div>
               {detailUrl && <a className="fontbtn push-inbox-openurl" href={detailUrl}>{t('pushInbox.openUrl')}</a>}
               <button className="fontbtn push-inbox-detail-del" disabled={deletingId != null}
@@ -103,13 +137,14 @@ export default function InboxPage({ open, detailId, items, readIds = [], onOpenD
                   <div className="push-inbox-row-top">
                     <span className="push-inbox-row-title">{n.title}</span>
                     {deliveryLabel(n.delivery) && (
-                      <span className={`push-inbox-delivery ${n.delivery.status}`}>{deliveryLabel(n.delivery)}</span>
+                      <span className={`push-inbox-delivery ${n.delivery?.status || ''}`}>{deliveryLabel(n.delivery)}</span>
                     )}
                     <span className="push-inbox-row-time">{ago(n.ts)}</span>
                   </div>
                   <div className="push-inbox-row-body">{n.body}</div>
                 </button>
-                <button className="push-inbox-del" disabled={deletingId != null} onClick={() => onDelete(n.id)} aria-label={t('pushInbox.delete')}>✕</button>
+                <button className="push-inbox-del" disabled={deletingId != null}
+                  onClick={() => void onDelete(n.id)} aria-label={t('pushInbox.delete')}>✕</button>
               </li>
             ))}
           </ul>
