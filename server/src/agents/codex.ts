@@ -8,28 +8,45 @@ import { resolveByExecutable, executableBasename } from './processIdentity.js';
 import {
   createCodexTranscriptParser, isCodexSyntheticUserText, parseCodexTranscript,
 } from '../codexTranscriptParse.js';
+import type { ResolvedAgentSession, RunCommand } from './scanUtils.js';
+import type {
+  ExecutableVerdict,
+  ProcessPane,
+  ResolveExecutableOptions,
+} from './processIdentity.js';
 
-export const sessionsDir = (home = os.homedir()) => path.join(home, '.codex', 'sessions');
+type IdentityOptions = Partial<Omit<ResolveExecutableOptions, 'candidate' | 'normalized' | 'matches'>>;
+interface JsonRecord { [key: string]: unknown }
+interface RolloutFile { file: string; name: string; mtime: number }
+interface ResolveCodexOptions { busyMs?: number; now?: () => number }
+export type ResolvedCodexSession = ResolvedAgentSession & { file: string };
+const isRecord = (value: unknown): value is JsonRecord => (
+  value !== null && typeof value === 'object' && !Array.isArray(value)
+);
+
+export const sessionsDir = (home = os.homedir()): string => path.join(home, '.codex', 'sessions');
 
 // A Codex rollout file is `rollout-<ISO-ish timestamp>-<uuid>.jsonl`; the session id Codex's `resume` wants
 // is that trailing uuid. Pull it out of the basename.
-export function rolloutSessionId(name) {
+export function rolloutSessionId(name: unknown): string | null {
   const m = String(name).match(/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$/i);
-  return m ? m[1] : null;
+  return m?.[1] || null;
 }
 
 const UUID_PARTS = '([0-9a-f]{8})\\s*-\\s*([0-9a-f]{4})\\s*-\\s*([0-9a-f]{4})\\s*-\\s*([0-9a-f]{4})\\s*-\\s*([0-9a-f]{12})';
 
-function lastUuidAfter(text, prefix) {
+function lastUuidAfter(text: unknown, prefix: string): string | null {
   const matches = [...String(text || '').matchAll(new RegExp(`${prefix}\\s*${UUID_PARTS}`, 'gi'))];
   const match = matches.at(-1);
-  return match ? match.slice(1).join('-').toLowerCase() : null;
+  if (!match) return null;
+  const parts = match.slice(1, 6);
+  return parts.length === 5 && parts.every(Boolean) ? parts.join('-').toLowerCase() : null;
 }
 
 // A normal Codex exit prints the exact command for the session that just exited. Keep this deliberately
 // stricter than a generic `codex resume` search so conversation text or shell history is not mistaken for
 // the current exit notice.
-export function codexExitSessionId(text) {
+export function codexExitSessionId(text: unknown): string | null {
   return lastUuidAfter(text, 'To continue this session, run\\s+codex\\s+resume');
 }
 
@@ -37,20 +54,26 @@ export function codexExitSessionId(text) {
 // response_item messages: {payload:{type:'message',role:'user',content:[{type:'input_text',text}]}} (and a
 // flatter {type:'message',role:'user',...} in some versions). Skips the synthetic context turns Codex
 // injects (including repository instructions after a resume). Best-effort → '' on miss.
-export function codexUserSnippet(tailText, max = 80) {
+export function codexUserSnippet(tailText: unknown, max = 80): string {
   const rows = String(tailText).split('\n');
   for (let i = rows.length - 1; i >= 0; i--) {
     const line = rows[i].trim();
     if (!line || line[0] !== '{') continue;
-    let d;
-    try { d = JSON.parse(line); } catch { continue; }
-    const msg = (d.payload && d.payload.type === 'message') ? d.payload
-      : (d.type === 'message') ? d : null;
+    let data: unknown;
+    try { data = JSON.parse(line); } catch { continue; }
+    if (!isRecord(data)) continue;
+    const payload = isRecord(data.payload) ? data.payload : null;
+    const msg = payload?.type === 'message' ? payload
+      : data.type === 'message' ? data : null;
     if (!msg || msg.role !== 'user') continue;
     const c = msg.content;
     let text = '';
     if (typeof c === 'string') text = c;
-    else if (Array.isArray(c)) text = c.filter((b) => b && (b.type === 'input_text' || b.type === 'text')).map((b) => b.text).join(' ');
+    else if (Array.isArray(c)) text = c
+      .filter((block): block is JsonRecord => isRecord(block)
+        && (block.type === 'input_text' || block.type === 'text'))
+      .map((block) => typeof block.text === 'string' ? block.text : '')
+      .join(' ');
     if (!text || isCodexSyntheticUserText(text)) continue;
     text = text.replace(/\s+/g, ' ').trim();
     if (!text) continue;
@@ -62,7 +85,12 @@ export function codexUserSnippet(tailText, max = 80) {
 // The npm-installed Codex launcher leaves `node` as tmux's pane_current_command. Never accept that
 // ambiguous name by itself: prove a foreground process on the same TTY has a real executable named
 // `codex` from a Codex path, then normalize the pane to the canonical agent name.
-export async function resolveCodexComms(panes, run, verdicts = new Map(), opts = {}) {
+export async function resolveCodexComms<T extends ProcessPane>(
+  panes: T[],
+  run: RunCommand,
+  verdicts: Map<string, ExecutableVerdict> = new Map(),
+  opts: IdentityOptions = {},
+): Promise<T[]> {
   return resolveByExecutable(panes, run, verdicts, {
     candidate: (cmd) => cmd === 'node',
     normalized: 'codex',
@@ -75,9 +103,9 @@ export async function resolveCodexComms(panes, run, verdicts = new Map(), opts =
 // rollout files with their mtimes. Unlike Claude's flat encoded-cwd dir, Codex partitions by date, so we
 // descend year→month→day in descending name order and stop once we have enough — the newest sessions are
 // always in the latest date dir, so a live orphan's session is found without reading the whole history.
-async function recentRollouts(dir, limit = 80) {
-  const out = [];
-  async function descend(d, depth) {
+async function recentRollouts(dir: string, limit = 80): Promise<RolloutFile[]> {
+  const out: RolloutFile[] = [];
+  async function descend(d: string, depth: number): Promise<void> {
     if (out.length >= limit) return;
     let entries;
     try { entries = await fsp.readdir(d, { withFileTypes: true }); } catch { return; }
@@ -98,8 +126,8 @@ async function recentRollouts(dir, limit = 80) {
 
 // Resolve one known App Server thread id to its exact rollout. This never falls back by cwd: several
 // Codex panes can share a project, while the UUID suffix is the durable one-to-one session identity.
-const rolloutPathCache = new Map();
-export async function resolveCodexRollout(dir, sessionId) {
+const rolloutPathCache = new Map<string, string>();
+export async function resolveCodexRollout(dir: string, sessionId: unknown): Promise<string | null> {
   if (!isSessionUuid(sessionId)) return null;
   const key = `${dir}\0${sessionId}`;
   const cached = rolloutPathCache.get(key);
@@ -107,8 +135,8 @@ export async function resolveCodexRollout(dir, sessionId) {
     try { await fsp.access(cached); return cached; } catch { rolloutPathCache.delete(key); }
   }
   const suffix = `-${sessionId}.jsonl`;
-  let found = null;
-  async function descend(current, depth) {
+  let found: string | null = null;
+  async function descend(current: string, depth: number): Promise<void> {
     if (found) return;
     let entries;
     try { entries = await fsp.readdir(current, { withFileTypes: true }); } catch { return; }
@@ -131,7 +159,11 @@ export async function resolveCodexRollout(dir, sessionId) {
 
 // Resolve a live orphan's cwd to its Codex session: the newest rollout whose recorded cwd matches. Same
 // shape as Claude's resolver ({ sessionId, state, snippet, lastActivity }) so the orphan engine is agnostic.
-export async function resolveCodexSession(dir, cwd, { busyMs = 8000, now = Date.now } = {}) {
+export async function resolveCodexSession(
+  dir: string,
+  cwd: string,
+  { busyMs = 8000, now = Date.now }: ResolveCodexOptions = {},
+): Promise<ResolvedCodexSession | Record<string, never>> {
   const files = await recentRollouts(dir);
   for (const { file, name, mtime } of files) {
     let head;
@@ -159,10 +191,10 @@ export const codex = {
     isId: isSessionUuid,
     dirOptKey: 'sessionsDir', // scanOrphans option that overrides `dir`
     dir: sessionsDir,
-    resolve: (dir, cwd, opts = {}) => resolveCodexSession(dir, cwd, opts),
+    resolve: (dir: string, cwd: string, opts = {}) => resolveCodexSession(dir, cwd, opts),
     // `codex resume <uuid>` continues the session from its rollout file.
-    resumeArgs: (id) => ['codex', 'resume', id],
-    resumeCmd: (id) => `codex resume ${id}`,
-    managedResumeCmd: (id) => `handmux codex resume ${id}`,
+    resumeArgs: (id: string): string[] => ['codex', 'resume', id],
+    resumeCmd: (id: string): string => `codex resume ${id}`,
+    managedResumeCmd: (id: string): string => `handmux codex resume ${id}`,
   },
 };

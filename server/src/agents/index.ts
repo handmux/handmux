@@ -6,16 +6,21 @@ import { codex } from './codex.js';
 
 // Order matters for proc matching (parseAgentProcs takes the first match) — keep the patterns disjoint so
 // order is irrelevant in practice, but list the flagship first.
-export const AGENTS = [claude, codex];
+export type AgentDriver = typeof claude | typeof codex;
+export const AGENTS: readonly AgentDriver[] = [claude, codex];
 
-const BY_ID = new Map(AGENTS.map((a) => [a.id, a]));
+const BY_ID = new Map<string, AgentDriver>(AGENTS.map((agent) => [agent.id, agent]));
 
 // Resolve a driver by id. State-file entries written before agents existed carry no `agent` field, and the
 // only writer then was Claude — so an unknown/missing id defaults to Claude (back-compat, never undefined).
-export function getAgent(id) { return BY_ID.get(id) || claude; }
+export function getAgent(id: unknown): AgentDriver {
+  return typeof id === 'string' ? BY_ID.get(id) || claude : claude;
+}
 
 // The driver whose foreground process this tmux #{pane_current_command} is, or null. Used by the inbox to
 // decide a recorded pane is still running its agent (vs. the agent having exited to a shell). Matches the
 // canonical procName only — never the ambiguous extras in procNames (e.g. Codex's 'node'); native-install
 // Claude binaries (comm = version string) are normalized to 'claude' at ingest (resolveVersionedComms).
-export function agentForProc(cmd) { return AGENTS.find((a) => a.procName === cmd) || null; }
+export function agentForProc(cmd: unknown): AgentDriver | null {
+  return AGENTS.find((agent) => agent.procName === cmd) || null;
+}
