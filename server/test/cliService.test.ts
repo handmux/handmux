@@ -6,6 +6,7 @@ import {
   plistFor, unitFor, plistPath, unitPath, installService, uninstallService,
   isServiceInstalled, stopService, LABEL, UNIT,
 } from '../src/cli/service.js';
+import type { ServiceExec } from '../src/cli/service.js';
 
 const ARGS = ['/usr/bin/node', '/abs/bin/handmux.js', '__supervise', '--payload-file', '/home/u/.handmux/supervisor-config.json'];
 
@@ -29,10 +30,14 @@ describe('service text generators', () => {
 });
 
 describe('install/uninstall (mocked exec, temp home)', () => {
-  let home, calls;
+  let home: string;
+  let calls: string[][];
   beforeEach(() => { home = fs.mkdtempSync(path.join(os.tmpdir(), 'pm-svc-')); calls = []; });
   afterEach(() => { fs.rmSync(home, { recursive: true, force: true }); });
-  const exec = (cmd, args) => { calls.push([cmd, ...args]); return { status: 0, stdout: '', stderr: '' }; };
+  const exec: ServiceExec = (cmd, args) => {
+    calls.push([cmd, ...args]);
+    return { status: 0, stderr: '' };
+  };
 
   it('darwin writes the plist and runs launchctl load', () => {
     installService(ARGS, { home, platform: 'darwin', exec, log: { log() {} } });
