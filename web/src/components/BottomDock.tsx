@@ -72,20 +72,6 @@ interface FilePickerSession {
   phase: 'open' | 'uploading';
 }
 
-interface UploadNote { label: string; error?: boolean }
-interface UploadController {
-  upload: UploadNote | null;
-  uploadFiles(files: File[]): Promise<void>;
-}
-
-type VoicePhase = 'idle' | 'requesting' | 'recording' | 'finalizing' | 'error';
-interface VoiceController {
-  state: VoicePhase;
-  partial: string;
-  start(): void;
-  stop(): void;
-}
-
 interface DockGesture {
   x: number;
   y: number;
@@ -673,7 +659,7 @@ function BottomDock({
     setValue(head + text + tail);
     caretRef.current = head.length + text.length;
   };
-  const voice = usePushToTalk({ onText: commitVoice }) as VoiceController;
+  const voice = usePushToTalk({ onText: commitVoice });
   const recording = voice.state === 'recording' || voice.state === 'finalizing';
   useScreenWakeLock(recording); // 语音激活时屏幕常亮,别中途变暗/锁屏
 
@@ -958,7 +944,7 @@ function BottomDock({
       // the path-insertion frame focus the textarea. Mobile keeps its existing focus/soft-keyboard path.
       focusComposer: !desktopUnified || filePickerSessionRef.current?.owner === 'composer',
     }),
-  }) as UploadController;
+  });
 
   // 填入: type the box text into the pane WITHOUT Enter (no submit), then clear — the secondary to
   // 发送 (which types + Enter). Mirrors send() with enter=false; a filled command is still recorded.

@@ -2,13 +2,20 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import { renderHook } from '@testing-library/react';
 import { useScreenWakeLock } from '../src/hooks/useScreenWakeLock.js';
 
-afterEach(() => { delete navigator.wakeLock; });
+interface MutableWakeNavigator {
+  wakeLock?: {
+    request(type: 'screen'): Promise<{ release(): Promise<void> | void }>;
+  };
+}
+const wakeNavigator = navigator as unknown as MutableWakeNavigator;
+
+afterEach(() => { delete wakeNavigator.wakeLock; });
 
 describe('useScreenWakeLock', () => {
   it('requests a screen lock when active, releases it when inactive', async () => {
     const release = vi.fn();
     const request = vi.fn(async () => ({ release }));
-    navigator.wakeLock = { request };
+    wakeNavigator.wakeLock = { request };
 
     const { rerender } = renderHook(({ active }) => useScreenWakeLock(active), { initialProps: { active: false } });
     expect(request).not.toHaveBeenCalled();          // 不激活:不申请
@@ -23,7 +30,7 @@ describe('useScreenWakeLock', () => {
 
   it('re-acquires on return to foreground while still active (lock auto-drops when hidden)', async () => {
     const request = vi.fn(async () => ({ release: vi.fn() }));
-    navigator.wakeLock = { request };
+    wakeNavigator.wakeLock = { request };
 
     renderHook(() => useScreenWakeLock(true));
     await Promise.resolve();
@@ -36,7 +43,7 @@ describe('useScreenWakeLock', () => {
   });
 
   it('no-op (no throw) where the API is unsupported', () => {
-    expect(navigator.wakeLock).toBeUndefined();
+    expect(wakeNavigator.wakeLock).toBeUndefined();
     expect(() => renderHook(() => useScreenWakeLock(true))).not.toThrow();
   });
 });

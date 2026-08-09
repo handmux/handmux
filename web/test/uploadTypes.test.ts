@@ -12,7 +12,9 @@ describe('uploadTypes', () => {
   });
 
   it('splitUploadable separates allowed files from rejected names', () => {
-    const files = [{ name: 'note.md' }, { name: 'a.out' }, { name: 'pic.jpg' }, { name: 'go' }];
+    const files: { name: string }[] = [
+      { name: 'note.md' }, { name: 'a.out' }, { name: 'pic.jpg' }, { name: 'go' },
+    ];
     const { allowed, rejected } = splitUploadable(files);
     expect(allowed.map((f) => f.name)).toEqual(['note.md', 'pic.jpg']);
     expect(rejected).toEqual(['a.out', 'go']);

@@ -33,7 +33,7 @@ describe('IAT outgoing frames', () => {
   });
 });
 
-const res = (sn, words, pgs, rg) => ({
+const res = (sn: number, words: string[], pgs: string, rg?: [number, number]) => ({
   data: { result: { sn, pgs, rg, ws: words.map((w) => ({ cw: [{ w }] })) } },
 });
 

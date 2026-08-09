@@ -3,7 +3,7 @@ import { toPcm16k, createFramer, bytesToBase64 } from '../src/voice/resample.js'
 
 describe('toPcm16k', () => {
   it('decimates 48k → 16k (1/3 length) and yields Int16 LE bytes', () => {
-    const inRate = 48000;
+    const inRate: number = 48000;
     const f = new Float32Array(48000).fill(1); // 1s of full-scale
     const out = toPcm16k(f, inRate);
     expect(out.length).toBe(16000 * 2); // 16000 samples × 2 bytes

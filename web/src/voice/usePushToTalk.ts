@@ -2,6 +2,55 @@ import { useRef, useState, useCallback, useEffect } from 'react';
 import { signAsr as realSignAsr } from '../api.js';
 import { createRecorder } from './recorder.js';
 import { buildFirstFrame, buildAudioFrame, buildEndFrame, emptyTranscript, accumulate, textOf } from './iatProtocol.js';
+import type { TranscriptState } from './iatProtocol.js';
+import type { VoiceRecorder } from './recorder.js';
+
+export type VoicePhase = 'idle' | 'requesting' | 'recording' | 'finalizing' | 'error';
+
+interface AsrSignature {
+  url: string;
+  appId: string;
+}
+
+export interface VoiceSocket {
+  readyState: number;
+  send(data: string): void;
+  close(): void;
+  onmessage: ((event: { data: unknown }) => void) | null;
+  onerror: (() => void) | null;
+  onclose: (() => void) | null;
+}
+
+export type VoiceSocketConstructor = new (url: string) => VoiceSocket;
+
+export interface PushToTalkDependencies {
+  signAsr?: () => Promise<AsrSignature>;
+  WebSocketCtor?: VoiceSocketConstructor;
+  makeRecorder?: () => VoiceRecorder;
+}
+
+export interface UsePushToTalkOptions {
+  onText: (text: string) => void;
+  deps?: PushToTalkDependencies;
+}
+
+export interface PushToTalkController {
+  state: VoicePhase;
+  partial: string;
+  start: () => Promise<void>;
+  stop: () => Promise<void>;
+}
+
+const parseSocketData = (data: unknown): unknown => {
+  if (typeof data !== 'string') return data;
+  try { return JSON.parse(data) as unknown; } catch { return null; }
+};
+
+const isFinalMessage = (value: unknown): boolean => {
+  if (value === null || typeof value !== 'object' || !('data' in value)) return false;
+  const data = value.data;
+  return data !== null && typeof data === 'object' && 'status' in data && data.status === 2;
+};
 
 const MAX_MS = 55000; // IAT caps a session at 60s; self-finalize at 55s and prompt to press again.
 const FINALIZE_MS = 4000; // after the end frame, wait this long for the server's final; else salvage + reset.
@@ -11,57 +60,74 @@ const FINALIZE_MS = 4000; // after the end frame, wait this long for the server'
 // Guards read a stateRef (live phase) rather than the captured `state`, so the 55s cap timer and any
 // long-lived closure act on the real current phase instead of the phase baked in at press time.
 // Deps are injectable for tests; production uses the real signAsr/WebSocket/recorder.
-export function usePushToTalk({ onText, deps = {} }) {
-  const signAsr = deps.signAsr || realSignAsr;
-  const WebSocketCtor = deps.WebSocketCtor || window.WebSocket;
-  const makeRecorder = deps.makeRecorder || (() => createRecorder());
+export function usePushToTalk({
+  onText,
+  deps = {},
+}: UsePushToTalkOptions): PushToTalkController {
+  const signAsr = deps.signAsr ?? realSignAsr;
+  const WebSocketCtor = deps.WebSocketCtor ?? window.WebSocket as unknown as VoiceSocketConstructor;
+  const makeRecorder = deps.makeRecorder ?? (() => createRecorder());
 
-  const [state, setState] = useState('idle'); // idle|requesting|recording|finalizing|error
+  const [state, setState] = useState<VoicePhase>('idle');
   const [partial, setPartial] = useState('');
-  const stateRef = useRef('idle');
-  const setPhase = useCallback((s) => { stateRef.current = s; setState(s); }, []);
+  const stateRef = useRef<VoicePhase>('idle');
+  const setPhase = useCallback((next: VoicePhase): void => {
+    stateRef.current = next;
+    setState(next);
+  }, []);
 
-  const wsRef = useRef(null);
-  const recRef = useRef(null);
-  const transRef = useRef(emptyTranscript());
+  const wsRef = useRef<VoiceSocket | null>(null);
+  const recRef = useRef<VoiceRecorder | null>(null);
+  const transRef = useRef<TranscriptState>(emptyTranscript());
   const appIdRef = useRef('');
   const firstSentRef = useRef(false);
-  const capTimer = useRef(null);
-  const finalizeTimer = useRef(null);
-  const stopRef = useRef(null);
+  const capTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const finalizeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const stopRef = useRef<(() => Promise<void>) | null>(null);
   const onTextRef = useRef(onText);
   onTextRef.current = onText; // always call the latest onText
 
-  const cleanup = useCallback(() => {
-    clearTimeout(capTimer.current);
-    clearTimeout(finalizeTimer.current);
+  const cleanup = useCallback((): void => {
+    if (capTimer.current !== null) clearTimeout(capTimer.current);
+    if (finalizeTimer.current !== null) clearTimeout(finalizeTimer.current);
+    capTimer.current = null;
+    finalizeTimer.current = null;
     try { wsRef.current && wsRef.current.close(); } catch {}
-    wsRef.current = null; recRef.current = null; firstSentRef.current = false;
+    wsRef.current = null;
+    const recorder = recRef.current;
+    recRef.current = null;
+    if (recorder) void recorder.stop().catch(() => {});
+    firstSentRef.current = false;
   }, []);
 
   // Commit whatever we've accumulated and return to idle. The single exit used by the server's final
   // frame, the finalize watchdog, and an unexpected ws close — so none of those can strand the hook in
   // recording/finalizing (which leaves the input box readOnly + unresponsive). Idempotent: a no-op once
   // already idle, so the ws.close() inside cleanup re-firing onclose can't double-commit.
-  const finish = useCallback(() => {
+  const finish = useCallback((): void => {
     if (stateRef.current === 'idle') return;
     onTextRef.current?.(textOf(transRef.current));
     setPartial(''); setPhase('idle'); cleanup();
   }, [cleanup, setPhase]);
 
-  const sendAudio = useCallback((b64) => {
+  const sendAudio = useCallback((base64: string): void => {
     const ws = wsRef.current;
     if (!ws || ws.readyState !== 1) return;
-    ws.send(JSON.stringify(firstSentRef.current ? buildAudioFrame(b64) : buildFirstFrame(appIdRef.current, b64)));
+    ws.send(JSON.stringify(firstSentRef.current
+      ? buildAudioFrame(base64)
+      : buildFirstFrame(appIdRef.current, base64)));
     firstSentRef.current = true;
   }, []);
 
-  const stop = useCallback(async () => {
+  const stop = useCallback(async (): Promise<void> => {
     if (stateRef.current !== 'recording') return;
     setPhase('finalizing');
-    clearTimeout(capTimer.current);
+    if (capTimer.current !== null) clearTimeout(capTimer.current);
+    capTimer.current = null;
     try {
-      const tail = recRef.current ? await recRef.current.stop() : null;
+      const recorder = recRef.current;
+      recRef.current = null;
+      const tail = recorder ? await recorder.stop() : null;
       if (tail) sendAudio(tail);
       const ws = wsRef.current;
       if (ws && ws.readyState === 1) {
@@ -76,7 +142,7 @@ export function usePushToTalk({ onText, deps = {} }) {
   }, [sendAudio, cleanup, setPhase, finish]);
   stopRef.current = stop;
 
-  const start = useCallback(async () => {
+  const start = useCallback(async (): Promise<void> => {
     // Start only from a settled state. 'error' is settled (and recoverable) — gating on 'idle' alone
     // would strand the mic forever after any failure (denied permission, sign error, ws drop).
     if (stateRef.current !== 'idle' && stateRef.current !== 'error') return;
@@ -86,11 +152,11 @@ export function usePushToTalk({ onText, deps = {} }) {
       appIdRef.current = appId;
       const ws = new WebSocketCtor(url);
       wsRef.current = ws;
-      ws.onmessage = (e) => {
-        const msg = JSON.parse(e.data);
-        transRef.current = accumulate(transRef.current, msg);
+      ws.onmessage = (event) => {
+        const message = parseSocketData(event.data);
+        transRef.current = accumulate(transRef.current, message);
         setPartial(textOf(transRef.current));
-        if (msg?.data?.status === 2) finish();
+        if (isFinalMessage(message)) finish();
       };
       ws.onerror = () => { setPhase('error'); cleanup(); };
       // An unexpected close mid-session must not strand us in recording/finalizing — salvage + reset.
