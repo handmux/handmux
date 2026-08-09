@@ -124,4 +124,33 @@ describe('usePollingLoop', () => {
     await act(async () => { resolveFrozen(1); });
     expect(apply).not.toHaveBeenCalledWith(1);
   });
+
+  it.each(['pageshow', 'focus'])(
+    'abandons a frozen request when a mobile app returns through %s without visibilitychange',
+    async (eventName) => {
+      vi.useFakeTimers();
+      setHidden(false);
+      let resolveFrozen;
+      const fetch = vi.fn()
+        .mockImplementationOnce(() => new Promise((resolve) => { resolveFrozen = resolve; }))
+        .mockResolvedValue(2);
+      const apply = vi.fn();
+      render(<Harness fetch={fetch} apply={apply} intervalMs={1500} enabled />);
+      expect(fetch).toHaveBeenCalledTimes(1);
+
+      // Some installed mobile WebViews suspend the page without delivering a complete hidden -> visible
+      // visibilitychange pair. The old request then remains logically in flight forever.
+      await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
+      const event = new Event(eventName);
+      if (eventName === 'pageshow') Object.defineProperty(event, 'persisted', { value: true });
+      window.dispatchEvent(event);
+
+      await act(async () => {});
+      expect(fetch).toHaveBeenCalledTimes(2);
+      expect(apply).toHaveBeenCalledWith(2);
+
+      await act(async () => { resolveFrozen(1); });
+      expect(apply).not.toHaveBeenCalledWith(1);
+    },
+  );
 });

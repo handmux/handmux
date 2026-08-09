@@ -80,9 +80,12 @@ export function useCodexMessageStream({
 }) {
   const scope = enabled && pane && threadId ? `${pane}\0${threadId}` : null;
   const [snapshot, setSnapshot] = useState({ scope, messages: [] });
+  const [connectionEpoch, setConnectionEpoch] = useState(0);
   const latestKRef = useRef(-1);
   const onSettledRef = useRef(onSettled);
   const onAuthFailRef = useRef(onAuthFail);
+  const streamControllerRef = useRef(null);
+  const lastForegroundWakeRef = useRef(0);
   latestKRef.current = durableMessages.reduce((latest, message) => (
     Number.isFinite(Number(message?.k)) ? Math.max(latest, Number(message.k)) : latest
   ), -1);
@@ -108,7 +111,38 @@ export function useCodexMessageStream({
 
   useEffect(() => {
     if (!scope) return undefined;
+    const wake = () => {
+      if (document.hidden) return;
+      const now = Date.now();
+      // One app return can report visibilitychange, focus and pageshow back-to-back. Reconnect once.
+      if (now - lastForegroundWakeRef.current < 100) return;
+      lastForegroundWakeRef.current = now;
+      setConnectionEpoch((value) => value + 1);
+    };
+    const onVisibility = () => {
+      if (document.hidden) {
+        lastForegroundWakeRef.current = 0;
+        streamControllerRef.current?.abort();
+      }
+      else wake();
+    };
+    const onPageShow = (event) => { if (event.persisted) wake(); };
+    document.addEventListener('visibilitychange', onVisibility);
+    window.addEventListener('pageshow', onPageShow);
+    window.addEventListener('focus', wake);
+    window.addEventListener('online', wake);
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibility);
+      window.removeEventListener('pageshow', onPageShow);
+      window.removeEventListener('focus', wake);
+      window.removeEventListener('online', wake);
+    };
+  }, [scope]);
+
+  useEffect(() => {
+    if (!scope) return undefined;
     const controller = new AbortController();
+    streamControllerRef.current = controller;
     let retryMs = RETRY_MIN_MS;
     const onEvent = (event) => {
       if (event?.threadId && event.threadId !== threadId) return;
@@ -136,8 +170,11 @@ export function useCodexMessageStream({
       }
     };
     void run();
-    return () => controller.abort();
-  }, [scope, pane, threadId]);
+    return () => {
+      controller.abort();
+      if (streamControllerRef.current === controller) streamControllerRef.current = null;
+    };
+  }, [scope, pane, threadId, connectionEpoch]);
 
   return snapshot.scope === scope ? snapshot.messages : [];
 }

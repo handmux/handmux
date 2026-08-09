@@ -87,4 +87,22 @@ describe('Codex message stream projection', () => {
     ] });
     await waitFor(() => expect(result.current).toEqual([]));
   });
+
+  it('reconnects a stream frozen by an app switch when the window regains focus', async () => {
+    const signals = [];
+    vi.spyOn(api, 'streamCodexMessages').mockImplementation((_pane, { signal }) => {
+      signals.push(signal);
+      return new Promise((resolve) => signal.addEventListener('abort', resolve, { once: true }));
+    });
+    renderHook(() => useCodexMessageStream({
+      pane: '%1', threadId: 'thread-1', enabled: true, durableMessages: [],
+    }));
+    await waitFor(() => expect(api.streamCodexMessages).toHaveBeenCalledTimes(1));
+
+    act(() => window.dispatchEvent(new Event('focus')));
+
+    await waitFor(() => expect(api.streamCodexMessages).toHaveBeenCalledTimes(2));
+    expect(signals[0].aborted).toBe(true);
+    expect(signals[1].aborted).toBe(false);
+  });
 });

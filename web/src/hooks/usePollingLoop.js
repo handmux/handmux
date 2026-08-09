@@ -32,6 +32,7 @@ export function usePollingLoop({
     let inFlight = false;
     let repollAfterFlight = false;
     let requestEpoch = 0;
+    let hiddenObserved = document.hidden;
     let burstRemaining = burstKey == null ? 0 : burstCount;
     const tick = async (myRequestEpoch) => {
       if (document.hidden) return;
@@ -65,24 +66,57 @@ export function usePollingLoop({
       timer = setTimeout(loop, delay);
     };
     void loop();
+    const abandonInFlight = () => {
+      if (!inFlight) return;
+      requestEpoch += 1;
+      inFlight = false;
+      repollAfterFlight = false;
+    };
+    const suspend = () => {
+      clearTimeout(timer);
+      timer = null;
+      // A fetch suspended by the OS may never settle after a long app switch. Logically abandon it now;
+      // the epoch guard above drops its result if it eventually returns, preserving authoritative order.
+      abandonInFlight();
+    };
+    const resume = ({ abandon = false } = {}) => {
+      if (cancelled || document.hidden) return;
+      clearTimeout(timer);
+      timer = null;
+      if (inFlight) {
+        if (abandon) abandonInFlight();
+        else { repollAfterFlight = true; return; }
+      }
+      void loop();
+    };
     const onVis = () => {
       if (document.hidden) {
-        clearTimeout(timer);
-        // A fetch suspended by the OS may never settle after a long app switch. Logically abandon it now;
-        // the epoch guard above drops its result if it eventually returns, preserving authoritative order.
-        if (inFlight) {
-          requestEpoch += 1;
-          inFlight = false;
-          repollAfterFlight = false;
-        }
+        hiddenObserved = true;
+        suspend();
         return;
       }
-      clearTimeout(timer);
-      if (inFlight) repollAfterFlight = true;
-      else void loop();
+      const returning = hiddenObserved;
+      hiddenObserved = false;
+      resume({ abandon: returning });
     };
+    // Installed mobile WebViews do not always deliver a complete visibilitychange pair. `pageshow`
+    // covers BFCache/process restoration and `focus` covers an ordinary app switch. Both must discard a
+    // logically frozen request; otherwise every surface sharing this loop stays stale until it remounts.
+    const onPageShow = (event) => { if (event.persisted) resume({ abandon: true }); };
+    const onFocus = () => resume({ abandon: true });
+    const onOnline = () => resume({ abandon: true });
     document.addEventListener('visibilitychange', onVis);
-    return () => { cancelled = true; clearTimeout(timer); document.removeEventListener('visibilitychange', onVis); };
+    window.addEventListener('pageshow', onPageShow);
+    window.addEventListener('focus', onFocus);
+    window.addEventListener('online', onOnline);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+      document.removeEventListener('visibilitychange', onVis);
+      window.removeEventListener('pageshow', onPageShow);
+      window.removeEventListener('focus', onFocus);
+      window.removeEventListener('online', onOnline);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- fetch/apply via refs; restart only on these
   }, [enabled, intervalMs, burstKey, burstIntervalMs, burstCount, ...deps]);
 }
