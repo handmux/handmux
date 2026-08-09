@@ -10,8 +10,14 @@ function eventKey(event) {
 }
 
 export function applyCodexStreamEvent(messages, event, afterK = -1) {
-  if (!event || !['started', 'snapshot', 'delta', 'completed', 'turnCompleted'].includes(event.type)) {
+  if (!event || !['ready', 'started', 'snapshot', 'delta', 'completed', 'turnCompleted'].includes(event.type)) {
     return messages;
+  }
+  // A new SSE connection replays only unfinished App Server items. Finalized temporary bubbles must not
+  // survive beside the rollout history, otherwise an old reply can remain below the current one forever.
+  if (event.type === 'ready') {
+    const next = messages.filter((message) => !message.completed);
+    return next.length === messages.length ? messages : next;
   }
   if (event.type === 'turnCompleted') {
     let changed = false;
@@ -31,6 +37,12 @@ export function applyCodexStreamEvent(messages, event, afterK = -1) {
     ? `${previous?.text || ''}${event.delta || ''}`
     : (typeof event.text === 'string' ? event.text : previous?.text || '');
   const completed = event.type === 'completed' || event.completed === true || previous?.completed === true;
+  // Once a later assistant item starts, every earlier finalized assistant item is already history. Keep
+  // only unfinished accumulators; the durable rollout remains the single source for completed content.
+  const baseMessages = !previous && !completed && (event.type === 'started' || event.type === 'snapshot')
+    ? messages.filter((message) => !message.completed)
+    : messages;
+  const baseIndex = baseMessages.findIndex((message) => message.streamKey === key);
   const nextMessage = {
     ...(previous || {}),
     id: `codex-stream:${key}`,
@@ -45,9 +57,9 @@ export function applyCodexStreamEvent(messages, event, afterK = -1) {
     completed,
     afterK: previous?.afterK ?? afterK,
   };
-  const next = index >= 0
-    ? messages.map((message, candidate) => (candidate === index ? nextMessage : message))
-    : [...messages, nextMessage];
+  const next = baseIndex >= 0
+    ? baseMessages.map((message, candidate) => (candidate === baseIndex ? nextMessage : message))
+    : [...baseMessages, nextMessage];
   return next.slice(-MAX_LIVE_MESSAGES);
 }
 

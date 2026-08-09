@@ -212,9 +212,9 @@ describe('Codex App Server client', () => {
     ]);
     const completedReplay = [];
     const unsubscribeCompleted = await app.subscribe('%1', 'thread-1', (event) => completedReplay.push(event));
-    expect(completedReplay).toEqual([expect.objectContaining({
-      type: 'snapshot', text: '你好，完成', completed: true,
-    })]);
+    // Completed text is history and must come only from the rollout projection. Replaying it as a live
+    // snapshot can place old replies below the current stream after a reconnect.
+    expect(completedReplay).toEqual([]);
     expect(projectCodexThread((await app.read('%1', 'thread-1')).thread)
       .find((message) => message.id === 'codex:turn-live:agent-live')?.text).toBe('你好，完成');
 

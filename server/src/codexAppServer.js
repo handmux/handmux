@@ -987,12 +987,15 @@ class CodexAppConnection {
       if (!liveIds?.size) continue;
       for (const item of turn.items || []) {
         if (item?.type !== 'agentMessage' || !liveIds.has(item.id) || !item.text) continue;
+        // SSE is only a low-latency overlay for the reply that is still being generated. Completed
+        // messages belong exclusively to the rollout projection; replaying them on reconnect can append
+        // older event-only overlays after the current reply and permanently scramble the visible order.
+        if (turn.status !== 'inProgress'
+          || state.completedAgentItemIds.has(`${turn.id}\0${item.id}`)) continue;
         try {
           listener({
             type: 'snapshot', threadId, turnId: turn.id, itemId: item.id,
-            text: item.text,
-            completed: turn.status !== 'inProgress'
-              || state.completedAgentItemIds.has(`${turn.id}\0${item.id}`),
+            text: item.text, completed: false,
           });
         } catch { /* initial projection is best effort */ }
       }

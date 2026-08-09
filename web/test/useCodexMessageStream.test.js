@@ -45,6 +45,35 @@ describe('Codex message stream projection', () => {
     ], { ...live, turnId: 'turn-new', afterK: 4 })).toBe(false);
   });
 
+  it('discards finalized temporary replies before projecting a newer live reply', () => {
+    let messages = [];
+    for (let index = 1; index <= 4; index += 1) {
+      messages = applyCodexStreamEvent(messages, {
+        type: 'completed', turnId: 'turn-old', itemId: `agent-old-${index}`, text: `历史回复 ${index}`,
+      });
+    }
+    messages = applyCodexStreamEvent(messages, {
+      type: 'started', turnId: 'turn-new', itemId: 'agent-current', text: '',
+    });
+    messages = applyCodexStreamEvent(messages, {
+      type: 'delta', turnId: 'turn-new', itemId: 'agent-current', delta: '当前更新',
+    });
+
+    expect(messages).toEqual([expect.objectContaining({
+      itemId: 'agent-current', text: '当前更新', streaming: true,
+    })]);
+  });
+
+  it('drops finalized temporary replies when a stream reconnects', () => {
+    const messages = [
+      { itemId: 'old', text: '旧回复', completed: true },
+      { itemId: 'current', text: '当前回复', completed: false },
+    ];
+    expect(applyCodexStreamEvent(messages, { type: 'ready' })).toEqual([
+      expect.objectContaining({ itemId: 'current' }),
+    ]);
+  });
+
   it('renders incoming deltas, requests a durable refresh on completion, and reconciles the final message', async () => {
     let emit;
     vi.spyOn(api, 'streamCodexMessages').mockImplementation((_pane, { signal, onEvent }) => {
