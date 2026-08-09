@@ -615,9 +615,8 @@ describe('ChatComposer', () => {
     fireEvent.click(stop);
     let dialog = screen.getByRole('alertdialog', { name: '停止当前任务？' });
     expect(dialog.textContent).toContain('当前正在执行的回合会被中断。');
-    expect(dialog.classList.contains('cc-stop-dialog')).toBe(true);
-    expect(styles).toMatch(/\.cc-stop-dialog \.cc-stop-dialog-actions\s*\{[^}]*border:\s*0/);
-    expect(styles).toMatch(/\.cc-stop-dialog \.cc-stop-dialog-actions button \+ button\s*\{[^}]*border-left:\s*0/);
+    expect(dialog.classList.contains('cc-confirm-dialog')).toBe(true);
+    expect(styles).toMatch(/\.settings-confirm-actions button\s*\{[^}]*outline:\s*none[^}]*appearance:\s*none[^}]*box-shadow:\s*none/);
     expect(interruptCodexSession).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('button', { name: '取消' }));
     expect(interruptCodexSession).not.toHaveBeenCalled();
@@ -692,7 +691,8 @@ describe('ChatComposer', () => {
     expect(cancelCodexQueuedEdit).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole('button', { name: '删除排队消息' }));
-    expect(screen.getByRole('alertdialog', { name: '删除这条排队消息？' })).toBeTruthy();
+    const deleteDialog = screen.getByRole('alertdialog', { name: '删除这条排队消息？' });
+    expect(deleteDialog.classList.contains('cc-confirm-dialog')).toBe(true);
     expect(removeCodexQueuedMessage).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('button', { name: '删除' }));
     await waitFor(() => expect(removeCodexQueuedMessage).toHaveBeenCalledWith('%1', 'queued-2'));
@@ -713,7 +713,7 @@ describe('ChatComposer', () => {
     expect(styles).toMatch(/\.cc-queue-text\s*\{[^}]*-webkit-line-clamp:\s*2/);
     expect(styles).toMatch(/\.cc-queue-actions\s*\{[^}]*gap:\s*0/);
     expect(styles).toMatch(/\.cc-queue-action\s*\{[^}]*width:\s*30px[^}]*height:\s*30px/);
-    expect(styles).toMatch(/\.cc-queue-list\s*\{[^}]*max-height:\s*102px[^}]*overflow-y:\s*auto/);
+    expect(styles).toMatch(/\.cc-queue-list\s*\{[^}]*max-height:\s*min\(216px,\s*32dvh\)[^}]*overflow-y:\s*auto/);
     expect(styles).toMatch(/\.cc-queue-index\s*\{[^}]*width:\s*16px[^}]*height:\s*16px[^}]*border-radius:\s*50%/);
   });
 

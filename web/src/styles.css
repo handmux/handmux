@@ -216,11 +216,14 @@ button.settings-page-row:disabled, .settings-page-row.disabled { color: rgba(235
   display: flex; margin: 17px -18px 0; border-top: .5px solid rgba(84,84,88,.7);
 }
 .settings-confirm-actions button {
-  flex: 1; min-height: 48px; padding: 0 10px; border: none; background: transparent;
+  flex: 1; min-height: 48px; padding: 0 10px; border: none; border-radius: 0; outline: none;
+  -webkit-appearance: none; appearance: none; background: transparent; box-shadow: none;
   color: #d8d8dc; font: 15px/1.2 -apple-system, system-ui, sans-serif; touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
 }
 .settings-confirm-actions button + button { border-left: .5px solid rgba(84,84,88,.7); }
 .settings-confirm-actions button:active { background: rgba(120,120,128,.18); }
+.settings-confirm-actions button:focus-visible { background: rgba(120,120,128,.18); }
 .settings-confirm-actions button.danger { color: var(--red); font-weight: 600; }
 
 @media (min-width: 700px) {
@@ -2738,7 +2741,7 @@ button.cmd-text { background: none; border: none; text-align: left; }
 }
 .cc-queue-head > span:last-child { min-width: 0; overflow: hidden; text-align: right; text-overflow: ellipsis; white-space: nowrap; }
 .cc-queue-list {
-  display: flex; flex-direction: column; gap: 4px; max-height: 102px; overflow-y: auto;
+  display: flex; flex-direction: column; gap: 4px; max-height: min(216px, 32dvh); overflow-y: auto;
   overscroll-behavior: contain; scrollbar-width: thin;
 }
 .cc-queue-item {
@@ -2777,15 +2780,13 @@ button.cmd-text { background: none; border: none; text-align: left; }
 .cc-queue-dialog-backdrop .settings-confirm-actions button { color: var(--ct-ink); }
 .cc-queue-dialog-backdrop .settings-confirm-actions button + button { border-color: var(--ct-line); }
 .cc-queue-dialog-backdrop .settings-confirm-actions button.danger { color: var(--danger, #d34b45); }
-.cc-stop-dialog { padding-bottom: 14px; }
-.cc-stop-dialog .cc-stop-dialog-actions { margin: 17px 0 0; gap: 8px; border: 0; }
-.cc-stop-dialog .cc-stop-dialog-actions button {
-  min-height: 44px; border: 0; border-radius: 10px; background: var(--ct-chip-2, #2b2216);
+.cc-confirm-dialog .settings-confirm-actions {
+  border-top-color: var(--ct-field-line, rgba(84,84,88,.45));
 }
-.cc-stop-dialog .cc-stop-dialog-actions button + button { border-left: 0; }
-.cc-stop-dialog .cc-stop-dialog-actions button.danger {
-  background: var(--ct-err-bg, rgba(255,120,90,.16)); color: var(--ct-err-ink, #ff9a80);
+.cc-confirm-dialog .settings-confirm-actions button + button {
+  border-left-color: var(--ct-field-line, rgba(84,84,88,.45));
 }
+.cc-confirm-dialog .settings-confirm-actions button:focus-visible { background: var(--ct-chip-2); }
 .cc-queue-edit-dialog { width: min(330px, 100%); max-height: 100%; display: flex; flex-direction: column; }
 .cc-queue-edit-dialog textarea {
   width: 100%; min-height: 84px; max-height: min(32dvh, 220px); margin-top: 12px; padding: 9px 10px;
