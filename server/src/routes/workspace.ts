@@ -1,9 +1,12 @@
 import express from 'express';
 import { validateRecoveryMapping } from '../workspace/mapping.js';
+import {
+  isWorkspaceSafeId,
+  parseWorkspaceRestoreRequest,
+} from '../workspaceProtocol.js';
+import type { WorkspaceRestoreRequest } from '../workspaceProtocol.js';
 import type { Request, RequestHandler, Response, Router } from 'express';
 
-const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
-const RESTORE_FIELDS = new Set(['checkpointId', 'sessions']);
 const CHANGE_REASONS = new Set(['boot-changed', 'tmux-changed']);
 const OPERATION_STATUSES = new Set(['pending', 'running', 'succeeded', 'partial', 'failed', 'interrupted']);
 const RESULT_STATUSES = new Set(['restored', 'already-present', 'failed']);
@@ -26,12 +29,11 @@ type WarningCode = 'cwd-fallback' | 'layout-fallback' | 'agent-warning' | 'live-
 type ResultStatus = 'restored' | 'already-present' | 'failed';
 type ResultStage = 'plan' | 'topology' | 'agent' | 'restore' | 'reconcile';
 type OperationStatus = 'pending' | 'running' | 'succeeded' | 'partial' | 'failed' | 'interrupted';
-interface RestoreRequest { checkpointId: string; sessions?: string[] }
 interface WorkspaceService {
   getProtectionStatus(): Promise<unknown>;
   listCheckpoints(): Promise<unknown>;
-  getRestorePlan(request: RestoreRequest): Promise<unknown>;
-  startRestore(request: RestoreRequest): Promise<unknown>;
+  getRestorePlan(request: WorkspaceRestoreRequest): Promise<unknown>;
+  startRestore(request: WorkspaceRestoreRequest): Promise<unknown>;
   getOperation(operationId: string): Promise<unknown>;
 }
 interface WorkspaceRouteOptions { workspace: WorkspaceService }
@@ -42,10 +44,6 @@ const record = (value: unknown): Record<string, unknown> | null => (
     ? value as Record<string, unknown>
     : null
 );
-
-function isSafeId(value: unknown): value is string {
-  return typeof value === 'string' && SAFE_ID.test(value) && value !== '.' && value !== '..';
-}
 
 function isCheckpointMissing(error: unknown): boolean {
   const details = record(error);
@@ -76,7 +74,7 @@ function asyncHandler(
 
 function checkpointId(value: unknown, fallback: string | null): string | null {
   const id = value === undefined ? fallback : value;
-  return isSafeId(id) ? id : null;
+  return isWorkspaceSafeId(id) ? id : null;
 }
 
 function timestamp(value: unknown): string | null {
@@ -94,7 +92,7 @@ function displayName(value: unknown): string | null {
 
 function projectCheckpoint(row: unknown) {
   const source = record(row);
-  const id = isSafeId(source?.id) ? source.id : null;
+  const id = isWorkspaceSafeId(source?.id) ? source.id : null;
   const value = record(source?.value);
   if (source?.status !== 'ok' || !value) {
     const corrupt = source?.status === 'corrupt';
@@ -230,7 +228,7 @@ function projectOperation(operation: unknown) {
   const progress = record(source?.progress);
   const summary = record(source?.summary);
   return {
-    id: isSafeId(source?.id) ? source.id : null,
+    id: isWorkspaceSafeId(source?.id) ? source.id : null,
     status,
     request: {
       checkpointId: id,
@@ -258,22 +256,6 @@ function projectOperation(operation: unknown) {
   };
 }
 
-function parseRestoreRequest(body: unknown): RestoreRequest | null {
-  const source = record(body);
-  if (!source || Object.keys(source).some((key) => !RESTORE_FIELDS.has(key))) return null;
-  const id = checkpointId(source.checkpointId, 'latest');
-  if (!id) return null;
-  const request: RestoreRequest = { checkpointId: id };
-  if (source.sessions !== undefined) {
-    if (!Array.isArray(source.sessions)
-      || source.sessions.some((name) => typeof name !== 'string' || !name || name.length > 256 || /[\x00-\x1f\x7f]/.test(name))) {
-      return null;
-    }
-    request.sessions = source.sessions as string[];
-  }
-  return request;
-}
-
 export function workspaceRoutes({ workspace }: WorkspaceRouteOptions): Router {
   const r = express.Router();
 
@@ -295,13 +277,13 @@ export function workspaceRoutes({ workspace }: WorkspaceRouteOptions): Router {
   }, { checkpoint: true }));
 
   r.post('/workspace/restore', asyncHandler(async (req, res) => {
-    const restoreRequest = parseRestoreRequest(req.body);
+    const restoreRequest = parseWorkspaceRestoreRequest(req.body);
     if (!restoreRequest) return res.status(400).json({ error: 'bad request' });
     return res.status(202).json(await workspace.startRestore(restoreRequest));
   }, { checkpoint: true }));
 
   r.get('/workspace/restore/:operationId', asyncHandler(async (req, res) => {
-    if (!isSafeId(req.params.operationId)) return res.status(400).json({ error: 'bad operation id' });
+    if (!isWorkspaceSafeId(req.params.operationId)) return res.status(400).json({ error: 'bad operation id' });
     const operation = await workspace.getOperation(req.params.operationId);
     if (!operation) return res.status(404).json({ error: 'operation not found' });
     return res.json(projectOperation(operation));

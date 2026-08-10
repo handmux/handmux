@@ -10,10 +10,17 @@ import type {
   TerminalHistoryResponse,
 } from './apiRequest.js';
 import {
+  parseWorkspaceProtectionStatus,
   parseWorkspaceRecoveryPlan,
   parseWorkspaceRestoreOperation,
+  parseWorkspaceRestoreStart,
 } from './workspaceRecovery.js';
 import type { WorkspaceRecoveryPlan, WorkspaceRestoreOperation } from './workspaceRecovery.js';
+import type {
+  WorkspaceProtectionStatus,
+  WorkspaceRestoreRequest,
+  WorkspaceRestoreStart,
+} from '../../server/src/workspaceProtocol.js';
 
 export { ApiError, UnauthorizedError } from './apiErrors.js';
 export {
@@ -323,33 +330,22 @@ export const getServerVersion = async (): Promise<ServerVersionInfo> => {
     ...(whatsNew ? { whatsNew } : {}),
   } : {};
 };
-export const getWorkspaceProtectionStatus = async (): Promise<{ status?: string; errorCode?: string | null }> => {
-  const value = recordOf(await req('/api/workspace/status', { timeoutMs: 8_000 }));
-  return value ? {
-    ...(typeof value.status === 'string' ? { status: value.status } : {}),
-    ...(typeof value.errorCode === 'string' || value.errorCode === null ? { errorCode: value.errorCode } : {}),
-  } : {};
-};
+export const getWorkspaceProtectionStatus = async (): Promise<WorkspaceProtectionStatus> => (
+  parseWorkspaceProtectionStatus(await req('/api/workspace/status', { timeoutMs: 8_000 })) ?? {}
+);
 export const getWorkspaceRestorePlan = async (checkpointId = 'latest'): Promise<WorkspaceRecoveryPlan | null> => (
   parseWorkspaceRecoveryPlan(await req(
     `/api/workspace/restore-plan?checkpoint=${encodeURIComponent(checkpointId)}`,
     { timeoutMs: 8_000 },
   ))
 );
-export interface WorkspaceRestoreStart {
-  operationId?: string;
-  status?: string;
-}
 export const startWorkspaceRestore = async (
-  body: Record<string, unknown> = { checkpointId: 'latest' },
+  body: WorkspaceRestoreRequest = { checkpointId: 'latest' },
 ): Promise<WorkspaceRestoreStart> => {
-  const value = recordOf(await req(
+  const value = await req(
     '/api/workspace/restore', { method: 'POST', body: JSON.stringify(body), timeoutMs: 8_000 },
-  ));
-  return value ? {
-    ...(typeof value.operationId === 'string' ? { operationId: value.operationId } : {}),
-    ...(typeof value.status === 'string' ? { status: value.status } : {}),
-  } : {};
+  );
+  return parseWorkspaceRestoreStart(value) ?? {};
 };
 export const getWorkspaceRestoreOperation = async (
   operationId: string,

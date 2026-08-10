@@ -3,7 +3,7 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { readFileSync } from 'node:fs';
 
 import WorkspaceRestoreDialog from './WorkspaceRestoreDialog.jsx';
-import type { WorkspaceRecoveryPlan } from '../workspaceRecovery.js';
+import type { WorkspaceRecoveryPlan, WorkspaceRestoreOperation } from '../workspaceRecovery.js';
 import en from '../i18n/en.js';
 import zh from '../i18n/zh.js';
 import zhTW from '../i18n/zh-TW.js';
@@ -47,7 +47,7 @@ describe('WorkspaceRestoreDialog', () => {
   });
 
   it('counts only restored results in partial progress and shows localized per-session failures', () => {
-    const operation = {
+    const operation: WorkspaceRestoreOperation = {
       status: 'partial',
       progress: { completed: 2, total: 3 },
       results: [
@@ -63,7 +63,7 @@ describe('WorkspaceRestoreDialog', () => {
   });
 
   it('renders top-level and per-session safe warning codes without raw server text', () => {
-    const operation = {
+    const operation: WorkspaceRestoreOperation = {
       status: 'succeeded',
       progress: { completed: 2, total: 2 },
       warningCodes: ['live-reconcile-failed', 'workspace-unavailable'],
