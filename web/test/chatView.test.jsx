@@ -242,6 +242,47 @@ describe('ChatView', () => {
     expect(container.textContent).not.toContain('发送你的第一条消息');
   });
 
+  it('keeps an acknowledged temporary user message before replies from the same turn', async () => {
+    mockTranscript([{
+      id: 'codex:turn-1:agent-1', k: 1, i: 1, turnId: 'turn-1', itemId: 'agent-1',
+      role: 'assistant', type: 'text', text: '这条回复先到达了',
+    }]);
+    const { container } = render(<ChatView pane="%0" agent="codex" kind="working"
+      optimisticMessages={[{
+        id: 'optimistic-1', text: '刚发送的问题', source: 'send', status: 'accepted', turnId: 'turn-1',
+      }]} />);
+
+    await screen.findByText('这条回复先到达了');
+    const bubbles = Array.from(container.querySelectorAll('.chat-bubble'));
+    expect(bubbles.map((bubble) => bubble.textContent.trim())).toEqual(['刚发送的问题', '这条回复先到达了']);
+  });
+
+  it('keeps a still-sending user message before a live reply during acknowledgement', async () => {
+    mockTranscript([{ k: 0, i: 0, role: 'assistant', type: 'text', text: '上一轮内容' }]);
+    let emit;
+    api.streamCodexMessages.mockImplementation((_pane, { signal, onEvent }) => {
+      emit = onEvent;
+      return new Promise((resolve) => signal.addEventListener('abort', resolve, { once: true }));
+    });
+    const { container } = render(<ChatView pane="%0" agent="codex" kind="working"
+      codexSession={{ managed: true, threadId: 'thread-1' }}
+      optimisticMessages={[{
+        id: 'optimistic-1', text: '正在发送的问题', source: 'send', status: 'sending',
+      }]} />);
+    await screen.findByText('上一轮内容');
+    await waitFor(() => expect(emit).toBeTypeOf('function'));
+
+    act(() => emit(projected({
+      type: 'delta', turnId: 'turn-1', itemId: 'agent-1', delta: '确认响应前到达的回复',
+    })));
+
+    await screen.findByText('确认响应前到达的回复');
+    const bubbles = Array.from(container.querySelectorAll('.chat-bubble'));
+    expect(bubbles.map((bubble) => bubble.textContent.trim())).toEqual([
+      '上一轮内容', '正在发送的问题', '确认响应前到达的回复',
+    ]);
+  });
+
   it('does not append an exact live copy after its durable assistant message', async () => {
     mockTranscript([
       { k: 0, i: 0, role: 'user', type: 'text', text: '检查结果' },

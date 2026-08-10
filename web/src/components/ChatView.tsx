@@ -1247,6 +1247,52 @@ export default function ChatView({
     lastNewestIdRef.current = null;
   }, [pane]);
 
+  // The App Server can publish the first reply before its durable UserPromptSubmit item reaches the
+  // rollout. Keep the page-local user bubble in the same turn slot during that handoff instead of always
+  // appending it after every canonical message. Before the send response supplies a turn id, live items are
+  // the safe boundary; once acknowledged, the native turn id is authoritative even for persisted replies.
+  const optimisticSlots = new Map<number, CodexOutgoingItem[]>();
+  for (const item of visibleOptimistic) {
+    const turnIndex = item.turnId
+      ? messages.findIndex((message) => message.turnId === item.turnId)
+      : -1;
+    const liveIndex = messages.findIndex((message) => message.live === true);
+    const index = turnIndex >= 0 ? turnIndex : liveIndex >= 0 ? liveIndex : messages.length;
+    optimisticSlots.set(index, [...(optimisticSlots.get(index) || []), item]);
+  }
+  const renderOptimistic = (item: CodexOutgoingItem): ReactNode => {
+    const label = item.status === 'sending' ? t('chat.outgoing.sending')
+      : item.status === 'accepted' ? t('chat.outgoing.sent')
+        : item.status === 'steered' ? t('chat.outgoing.steered')
+          : item.status === 'queued' ? t('chat.outgoing.queued') : '';
+    return (
+      <Fragment key={`optimistic:${item.id}`}>
+        <div className={`chat-bubble chat-me chat-optimistic is-${item.status}`}>{item.text}</div>
+        {label && <div className={`chat-optimistic-state is-${item.status}`} role="status">{label}</div>}
+      </Fragment>
+    );
+  };
+  const conversationRows: ReactNode[] = [];
+  messages.forEach((m, idx) => {
+    for (const item of optimisticSlots.get(idx) || []) conversationRows.push(renderOptimistic(item));
+    if (m.type === 'thinking' || m.type === 'plan') return;
+    if (m.type === 'compact' && idx !== latestCompactIndex) return;
+    const label = tsIdx.has(idx) ? fmtTime(m.ts) : null;
+    const turnPlan = historicalPlans.get(idx);
+    conversationRows.push(
+      <Fragment key={messageIdentity(m)}>
+        <Bubble m={m} running={toolRunning && idx === messages.length - 1}
+          onOpenTool={(msg) => setSheetKey(messageIdentity(msg))}
+          onOpenGoal={setGoalSheet} />
+        {label && <div className={'chat-ts ' + (m.role === 'user' ? 'ts-me' : 'ts-them')}>{label}</div>}
+        {turnPlan && <CodexPlanSummary plan={turnPlan} onOpen={() => setPlanSheet(turnPlan)} />}
+      </Fragment>,
+    );
+  });
+  for (const item of optimisticSlots.get(messages.length) || []) {
+    conversationRows.push(renderOptimistic(item));
+  }
+
   return (
     <div className="chat-view" ref={viewRef} onClick={onOutputLinkClick}>
       <div className="chat-scroll" ref={scrollRef} onScroll={onScroll}
@@ -1259,34 +1305,7 @@ export default function ChatView({
             response confirms the session is genuinely empty; never flash a fake assistant reply. */}
         {messages.length === 0 && visibleOptimistic.length === 0 && !actionError && !sessionGate && loaded
           && <div className="chat-new">{t('boot.chat_empty')}</div>}
-        {messages.map((m, idx) => {
-          if (m.type === 'thinking') return null; // dropped (see Bubble) — no bubble, no time
-          if (m.type === 'plan') return null;
-          if (m.type === 'compact' && idx !== latestCompactIndex) return null;
-          const label = tsIdx.has(idx) ? fmtTime(m.ts) : null;
-          const turnPlan = historicalPlans.get(idx);
-          return (
-            <Fragment key={messageIdentity(m)}>
-              <Bubble m={m} running={toolRunning && idx === messages.length - 1}
-                onOpenTool={(msg) => setSheetKey(messageIdentity(msg))}
-                onOpenGoal={setGoalSheet} />
-              {label && <div className={'chat-ts ' + (m.role === 'user' ? 'ts-me' : 'ts-them')}>{label}</div>}
-              {turnPlan && <CodexPlanSummary plan={turnPlan} onOpen={() => setPlanSheet(turnPlan)} />}
-            </Fragment>
-          );
-        })}
-        {visibleOptimistic.map((item) => {
-          const label = item.status === 'sending' ? t('chat.outgoing.sending')
-            : item.status === 'accepted' ? t('chat.outgoing.sent')
-              : item.status === 'steered' ? t('chat.outgoing.steered')
-                : item.status === 'queued' ? t('chat.outgoing.queued') : '';
-          return (
-            <Fragment key={item.id}>
-              <div className={`chat-bubble chat-me chat-optimistic is-${item.status}`}>{item.text}</div>
-              {label && <div className={`chat-optimistic-state is-${item.status}`} role="status">{label}</div>}
-            </Fragment>
-          );
-        })}
+        {conversationRows}
         {actionError && (() => {
           const fallback = actionError.kind === 'stop' ? t('chat.stopFailed')
             : actionError.kind === 'queue' ? t('chat.queue.actionFailed') : t('chat.sendFailed');

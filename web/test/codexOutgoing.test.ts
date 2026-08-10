@@ -41,6 +41,6 @@ describe('Codex outgoing reconciliation', () => {
   it('moves a queue-predicted send into chat if the server starts it immediately', () => {
     expect(settleCodexOutgoing(outgoing(), 'request-1', {
       result: { turn: { id: 'turn-1' } },
-    })[0]).toMatchObject({ source: 'send', status: 'accepted' });
+    })[0]).toMatchObject({ source: 'send', status: 'accepted', turnId: 'turn-1' });
   });
 });
