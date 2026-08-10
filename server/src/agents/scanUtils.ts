@@ -175,7 +175,7 @@ export function firstCwd(headText: unknown): string {
 export function lastUserSnippet(tailText: unknown, max = 80): string {
   const rows = String(tailText).split('\n');
   for (let i = rows.length - 1; i >= 0; i--) {
-    const line = rows[i].trim();
+    const line = rows[i]?.trim() ?? '';
     if (!line || line[0] !== '{') continue;
     let data: unknown;
     try { data = JSON.parse(line); } catch { continue; }

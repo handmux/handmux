@@ -66,6 +66,12 @@ function rows(output: unknown, columns: number, label: string): string[][] {
   return parseTmuxRows(text(output), columns, label) as string[][];
 }
 
+function field(values: readonly string[], offset: number, label: string): string {
+  const value = values[offset];
+  if (value === undefined) throw new Error(`missing ${label}`);
+  return value;
+}
+
 function index(value: string, label: string): number {
   if (!/^\d+$/.test(value)) throw new Error(`invalid ${label}`);
   return Number(value);
@@ -333,17 +339,33 @@ export function createWorkspaceTmux({
       }
       if (sessionFields.length === 0) return { status: 'empty', tmuxVersion: 'unknown', active: null, sessions: [], windows: [] };
 
-      const sessions: SessionItem[] = sessionFields.map(([runtimeId, name, lastAttached, optionId]): SessionItem => ({
-        runtimeId: runtime(runtimeId, '$', 'session runtime id'), name,
-        lastAttached: index(lastAttached === '' ? '0' : lastAttached, 'session last attached'), optionId,
-        windowLinks: [], activeWindowId: null,
-      }));
+      const sessions: SessionItem[] = sessionFields.map((values): SessionItem => {
+        const runtimeId = field(values, 0, 'session runtime id');
+        const name = field(values, 1, 'session name');
+        const lastAttached = field(values, 2, 'session last attached');
+        const optionId = field(values, 3, 'session logical id option');
+        return {
+          runtimeId: runtime(runtimeId, '$', 'session runtime id'),
+          name,
+          lastAttached: index(lastAttached === '' ? '0' : lastAttached, 'session last attached'),
+          optionId,
+          windowLinks: [],
+          activeWindowId: null,
+        };
+      });
       if (new Set(sessions.map((item) => item.runtimeId)).size !== sessions.length) throw new Error('duplicate session runtime id');
       await assignLogicalIds(sessions, '@handmux_session_id', [], { readOnly: captureReadOnly });
       const sessionByRuntime = new Map(sessions.map((item) => [item.runtimeId, item]));
 
       const windowFields = rows(await run(['list-windows', '-a', '-F', WINDOW_FORMAT]), 7, 'window');
-      const windowLinks: WindowLinkItem[] = windowFields.map(([sessionRuntimeId, runtimeId, windowIndex, name, isActive, layout, optionId]) => {
+      const windowLinks: WindowLinkItem[] = windowFields.map((values) => {
+        const sessionRuntimeId = field(values, 0, 'window session runtime id');
+        const runtimeId = field(values, 1, 'window runtime id');
+        const windowIndex = field(values, 2, 'window index');
+        const name = field(values, 3, 'window name');
+        const isActive = field(values, 4, 'window active');
+        const layout = field(values, 5, 'window layout');
+        const optionId = field(values, 6, 'window logical id option');
         if (!sessionByRuntime.has(sessionRuntimeId)) throw new Error('window references unknown session');
         return {
           sessionRuntimeId, runtimeId: runtime(runtimeId, '@', 'window runtime id'), index: index(windowIndex, 'window index'),
@@ -380,7 +402,13 @@ export function createWorkspaceTmux({
 
       const paneFields = rows(await run(['list-panes', '-a', '-F', PANE_FORMAT]), 6, 'pane');
       const paneByRuntime = new Map<string, PaneItem>();
-      for (const [windowRuntimeId, runtimeId, paneIndex, isActive, cwd, optionId] of paneFields) {
+      for (const values of paneFields) {
+        const windowRuntimeId = field(values, 0, 'pane window runtime id');
+        const runtimeId = field(values, 1, 'pane runtime id');
+        const paneIndex = field(values, 2, 'pane index');
+        const isActive = field(values, 3, 'pane active');
+        const cwd = field(values, 4, 'pane current path');
+        const optionId = field(values, 5, 'pane logical id option');
         if (!windowByRuntime.has(windowRuntimeId)) throw new Error('pane references unknown window');
         const pane: PaneItem = {
           windowRuntimeId, runtimeId: runtime(runtimeId, '%', 'pane runtime id'), index: index(paneIndex, 'pane index'),
@@ -421,9 +449,13 @@ export function createWorkspaceTmux({
       const maxAttached = Math.max(...canonicalSessions.map((session) => session.lastAttached));
       const selected = canonicalSessions.find((session) => session.lastAttached === maxAttached);
       if (!selected) throw new Error('tmux has no selected session');
-      const [activeSessionRuntime, activeWindowRuntime, activePaneRuntime] = rows(
+      const activeFields = rows(
         await run(['display-message', '-p', '-t', selected.runtimeId, ACTIVE_FORMAT]), 3, 'active path',
-      )[0] || [];
+      )[0];
+      if (!activeFields) throw new Error('tmux has no active path');
+      const activeSessionRuntime = field(activeFields, 0, 'active session runtime id');
+      const activeWindowRuntime = field(activeFields, 1, 'active window runtime id');
+      const activePaneRuntime = field(activeFields, 2, 'active pane runtime id');
       const activeSession = sessionByRuntime.get(activeSessionRuntime);
       const activeWindow = windowByRuntime.get(activeWindowRuntime);
       const activePane = panes.find((pane) => pane.runtimeId === activePaneRuntime);
@@ -486,11 +518,13 @@ export function createWorkspaceTmux({
     try {
       const parsed = rows(output, 4, 'created session')[0];
       if (!parsed) throw new Error('tmux did not return created session ids');
-      [sessionId, windowId, paneId] = parsed;
+      sessionId = field(parsed, 0, 'created session id');
+      windowId = field(parsed, 1, 'created window id');
+      paneId = field(parsed, 2, 'created pane id');
       requireCreatedRuntime(sessionId, '$', 'created session id');
       requireCreatedRuntime(windowId, '@', 'created window id');
       requireCreatedRuntime(paneId, '%', 'created pane id');
-      seedIndex = index(parsed[3], 'created window index');
+      seedIndex = index(field(parsed, 3, 'created window index'), 'created window index');
     } catch (error) {
       let cleanupError;
       try { await run(['kill-session', '-t', `=${name}`]); } catch (failure) { cleanupError = failure; }
@@ -535,7 +569,8 @@ export function createWorkspaceTmux({
     requireLogicalId(paneLogicalId, 'paneLogicalId');
     const parsed = rows(await run(['new-window', '-d', '-P', '-F', tmuxFormat(['window_id', 'pane_id']), '-t', `${sessionId}:${windowIndex}`, '-n', name, '-c', cwd]), 2, 'created window')[0];
     if (!parsed) throw new Error('tmux did not return created window ids');
-    const [windowId, paneId] = parsed;
+    const windowId = field(parsed, 0, 'created window id');
+    const paneId = field(parsed, 1, 'created pane id');
     requireCreatedRuntime(windowId, '@', 'created window id');
     requireCreatedRuntime(paneId, '%', 'created pane id');
     created.add(windowId); created.add(paneId);

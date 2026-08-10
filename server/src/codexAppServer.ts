@@ -1529,6 +1529,10 @@ class CodexAppConnection {
       || this.state(threadId).status?.type === 'active') return;
     queue.draining = true;
     const item = queue.items[0];
+    if (!item) {
+      queue.draining = false;
+      return;
+    }
     try {
       const result = await this.startTurn(threadId, item.text, item.clientId);
       this.markSubmissionAccepted(threadId, item, result?.turn?.id || null);
@@ -1586,6 +1590,7 @@ class CodexAppConnection {
     if (queue.editing?.itemId === itemId) throw new Error('queued message is being edited');
     if (queue.steering.has(itemId)) throw new Error('queued message is already being sent');
     const [removed] = queue.items.splice(index, 1);
+    if (!removed) throw new Error('queued message is no longer pending');
     this.deleteSubmissionForItem(threadId, removed);
     this.bump(threadId);
     this.cleanupQueue(threadId);

@@ -19,7 +19,7 @@ export function docTypeFor(name: string | null | undefined): DocType | null {
 export const IMG_EXT = new Set(['png', 'jpg', 'jpeg', 'jfif', 'gif', 'webp', 'svg', 'bmp', 'ico', 'avif', 'apng']);
 export function imageTypeFor(name: string | null | undefined): 'image' | null {
   const m = /\.([A-Za-z0-9]+)$/.exec(name || '');
-  return m && IMG_EXT.has(m[1].toLowerCase()) ? 'image' : null;
+  return m?.[1] && IMG_EXT.has(m[1].toLowerCase()) ? 'image' : null;
 }
 
 // True if `child` equals `parent` or sits inside it. Both are expected to be realpaths.

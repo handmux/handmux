@@ -25,7 +25,7 @@ describe('Codex Plan contract', () => {
       [{ step: 'x'.repeat(2_100), status: 'pending' }],
       `  ${'y'.repeat(4_100)}  `,
     );
-    expect(snapshot?.steps[0].step).toHaveLength(2_000);
+    expect(snapshot?.steps[0]?.step).toHaveLength(2_000);
     expect(snapshot?.explanation).toHaveLength(4_000);
   });
 

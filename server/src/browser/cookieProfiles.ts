@@ -428,9 +428,12 @@ export function createDeviceCookieProfiles({
     if (!internalCookies.length) return { cleared: false };
     const matches = profile.cookies._convertToExternalCookies(internalCookies);
     for (let index = 0; index < matches.length; index++) {
-      matches[index].expires = internalCookies[index].expires;
-      matches[index].maxAge = internalCookies[index].maxAge;
-      matches[index].sameSite = internalCookies[index].sameSite;
+      const match = matches[index];
+      const internal = internalCookies[index];
+      if (!match || !internal) continue;
+      match.expires = internal.expires;
+      match.maxAge = internal.maxAge;
+      match.sameSite = internal.sameSite;
     }
     profile.cookies.deleteCookies(matches);
     markDirty(deviceId);

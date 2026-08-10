@@ -23,7 +23,8 @@ export function notificationRoutes({ notifications }: NotificationRouteOptions):
 
   r.delete('/notifications/:id', (req: Request, res: Response) => {
     const device = req.query.device;
-    res.json({ ok: typeof device === 'string' && device ? notifications.remove(device, req.params.id) : false });
+    const id = req.params.id;
+    res.json({ ok: typeof device === 'string' && device && id ? notifications.remove(device, id) : false });
   });
 
   return r;

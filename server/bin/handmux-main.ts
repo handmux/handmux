@@ -361,6 +361,7 @@ async function start(): Promise<void> {
   }
 
   const [supervisorBin, ...supervisorArgv] = supervisorLaunchArgs(cfg, { home: HOME, entry: SELF });
+  if (!supervisorBin) throw new Error('supervisor command is unavailable');
   const logFile = logPath(HOME);
   const out = fs.openSync(logFile, 'a', 0o600);
   fs.chmodSync(logFile, 0o600);

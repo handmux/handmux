@@ -358,7 +358,7 @@ describe('standalone runtime composition', () => {
       runTmux: vi.fn(), observeEnvironment: vi.fn(), stateFile: '/fake/agents.json', readOnly: true,
     });
 
-    expect(runtime).toBe(createRuntime.mock.results[0].value);
+    expect(runtime).toBe(createRuntime.mock.results[0]?.value);
     expect(createStore).toHaveBeenCalledWith({ home: '/fake/home' });
     expect(createTmux).toHaveBeenCalledWith({ run: expect.any(Function), readOnly: true });
     expect(createLock).toHaveBeenCalledWith({ dir: '/fake/workspaces/restore.lock' });

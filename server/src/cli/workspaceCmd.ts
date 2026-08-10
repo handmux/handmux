@@ -382,16 +382,18 @@ export async function runWorkspaceCommand({
         line(stderr, t('restore.noCheckpoint'));
         return 1;
       }
+      const firstRow = rows[0];
+      if (!firstRow) return 1;
       if (parsed.checkpoint === 'latest') {
-        checkpointId = rows[0].id;
+        checkpointId = firstRow.id;
         historical = true;
       } else if (rows.length === 1) {
-        checkpointId = rows[0].id;
+        checkpointId = firstRow.id;
       } else if (inputIsTTY && outputIsTTY) {
         checkpointId = await selectCheckpoint(rows);
         historical = true;
       } else {
-        checkpointId = rows[0].id;
+        checkpointId = firstRow.id;
       }
     }
 

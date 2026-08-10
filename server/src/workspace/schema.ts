@@ -161,11 +161,12 @@ export function canonicalizeSnapshot(input: unknown): WorkspaceSnapshot {
   validateShape(input);
   const sessions = input.sessions.map((s) => ({ ...s, windowLinks: s.windowLinks.map((link) => ({ ...link })).sort(byLink) })).sort(byId);
   const windows = input.windows.map((w) => ({ ...w, panes: [...w.panes].sort(byId) })).sort(byId);
-  for (const [label, ids] of [
+  const identitySets: Array<[string, string[]]> = [
     ['session', sessions.map((x) => x.id)],
     ['window', windows.map((x) => x.id)],
     ['pane', windows.flatMap((w) => w.panes.map((p) => p.id))],
-  ]) {
+  ];
+  for (const [label, ids] of identitySets) {
     if (new Set(ids).size !== ids.length) throw new Error(`duplicate ${label} id`);
   }
   validateReferences(input, sessions, windows);

@@ -45,7 +45,7 @@ function sessionUnavailableHtml(pathname: unknown): string {
 }
 
 export function isBrowserServicePath(pathname: unknown): boolean {
-  return SERVICE_PATHS.has(String(pathname || '').split('?')[0]);
+  return SERVICE_PATHS.has(String(pathname || '').split('?')[0] ?? '');
 }
 
 function cookieValue(raw: unknown, name: string): string | null {
@@ -61,7 +61,7 @@ function browserTarget(
   req: IncomingMessage,
   deviceId: string | null,
 ): BrowserPublicTarget | null {
-  const pathname = String(req.url || '').split('?')[0];
+  const pathname = String(req.url || '').split('?')[0] ?? '';
   if (!claimedBrowserRequest(req)) return null;
   if (typeof browser.resolvePublicRequest === 'function') {
     return browser.resolvePublicRequest(pathname, deviceId, browserRequestOrigin(req));
@@ -77,7 +77,7 @@ function isLoopback(address: unknown): boolean {
 }
 
 export function browserRequestOrigin(req: IncomingMessage): string | null {
-  const forwardedProto = String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim();
+  const forwardedProto = (String(req.headers['x-forwarded-proto'] || '').split(',')[0] ?? '').trim();
   const protocol = isLoopback(req.socket?.remoteAddress) && (forwardedProto === 'http' || forwardedProto === 'https')
     ? forwardedProto
     : (req.socket && 'encrypted' in req.socket && req.socket.encrypted ? 'https' : 'http');
@@ -87,10 +87,10 @@ export function browserRequestOrigin(req: IncomingMessage): string | null {
 }
 
 export function claimedBrowserRequest(req: IncomingMessage): boolean {
-  const pathname = String(req.url || '').split('?')[0];
+  const pathname = String(req.url || '').split('?')[0] ?? '';
   return isBrowserBootstrapPath(pathname)
     || isBrowserServicePath(pathname)
-    || String(pathname).split('/')[1]?.startsWith('_browser-');
+    || String(pathname).split('/')[1]?.startsWith('_browser-') === true;
 }
 
 function filteredCookie(raw: unknown): string {

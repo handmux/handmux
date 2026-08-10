@@ -29,5 +29,5 @@ export function isAllowedUploadExt(
   exts: ReadonlySet<string>,
 ): boolean {
   const m = /\.([A-Za-z0-9]+)$/.exec(name || '');
-  return m ? exts.has(m[1].toLowerCase()) : false;
+  return m?.[1] ? exts.has(m[1].toLowerCase()) : false;
 }

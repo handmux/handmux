@@ -6,7 +6,8 @@ function backgroundAfter(line: string, initial: boolean): boolean {
   const sgr = new RegExp(CSI.source, 'g');
   let match = sgr.exec(line);
   while (match) {
-    const params = match[1] === '' ? [0] : match[1].split(';').map(Number);
+    const rawParams = match[1] ?? '';
+    const params = rawParams === '' ? [0] : rawParams.split(';').map(Number);
     for (let i = 0; i < params.length; i += 1) {
       const value = params[i] ?? 0;
       if (value === 0 || value === 49) background = false;

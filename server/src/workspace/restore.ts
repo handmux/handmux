@@ -227,7 +227,9 @@ async function restoreOneSession({
     for (const [logicalId, runtimeId] of localWindows) {
       const window = requiredWindow(windows, logicalId);
       const panes = sortedPanes(window);
-      const seedPaneId = localPanes.get(panes[0].id);
+      const firstPane = panes[0];
+      if (!firstPane) throw new Error(`window ${logicalId} has no panes`);
+      const seedPaneId = localPanes.get(firstPane.id);
       for (const pane of panes.slice(1)) {
         const cwd = await usableCwd(pane.cwd, { access, home, warnings });
         const paneId = await tmux.splitPane(seedPaneId, { cwd, paneLogicalId: pane.id });

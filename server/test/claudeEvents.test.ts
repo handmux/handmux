@@ -413,20 +413,20 @@ describe('createClaudeEvents push (需要你 / 已完成 transitions, mirroring 
     const { ev, pushed } = setup({ '%1': rec('notify', { notification_type: 'permission_prompt', message: 'perm' }) });
     await ev.getStates();
     expect(pushed).toHaveLength(1);
-    expect(pushed[0].opts.urgency).toBe('high');
-    expect(pushed[0].opts.ttl).toBe(14400); // 可靠优先: hold 需要你 for hours so a Doze'd phone still补到
-    expect(pushed[0].session).toBe('proj');
-    expect(pushed[0].payload.title).toBe('需要你 · proj');
+    expect(pushed[0]?.opts.urgency).toBe('high');
+    expect(pushed[0]?.opts.ttl).toBe(14400); // 可靠优先: hold 需要你 for hours so a Doze'd phone still补到
+    expect(pushed[0]?.session).toBe('proj');
+    expect(pushed[0]?.payload.title).toBe('需要你 · proj');
   });
 
   it('a finished turn (stop) pushes 已完成 (normal urgency) — the formerly-missing half, now matching the inbox', async () => {
     const { ev, pushed } = setup({ '%1': rec('stop', { last_assistant_message: 'all done' }) });
     await ev.getStates();
     expect(pushed).toHaveLength(1);
-    expect(pushed[0].opts.urgency).toBe('normal');
-    expect(pushed[0].opts.ttl).toBe(1800); // 已完成 staler-than-30min is dropped rather than popped late
-    expect(pushed[0].payload.title).toBe('已完成 · proj');
-    expect(pushed[0].payload.body).toBe('all done');
+    expect(pushed[0]?.opts.urgency).toBe('normal');
+    expect(pushed[0]?.opts.ttl).toBe(1800); // 已完成 staler-than-30min is dropped rather than popped late
+    expect(pushed[0]?.payload.title).toBe('已完成 · proj');
+    expect(pushed[0]?.payload.body).toBe('all done');
   });
 
   it('the trailing idle reminder is a push no-op — it does NOT add a second 已完成 after a done', async () => {
@@ -444,7 +444,7 @@ describe('createClaudeEvents push (需要你 / 已完成 transitions, mirroring 
     fs.writeFileSync(file, JSON.stringify({ '%1': rec('stop', { last_assistant_message: 'ok' }, 2000) }));
     await ev.getStates();                                                              // done → 已完成 pings (idle didn't arm-block it)
     expect(pushed).toHaveLength(1);
-    expect(pushed[0].payload.title).toBe('已完成 · proj');
+    expect(pushed[0]?.payload.title).toBe('已完成 · proj');
   });
 
   it('a 需要你 → 已完成 change pushes both (the view genuinely changed)', async () => {
@@ -461,7 +461,7 @@ describe('createClaudeEvents push (需要你 / 已完成 transitions, mirroring 
     fs.writeFileSync(file, JSON.stringify({ '%1': rec('notify', { notification_type: 'permission_prompt' }, 2000) }));
     await ev.getStates();                                                              // same 需要你 view → deduped, no push
     expect(pushed).toHaveLength(1);
-    expect(pushed[0].opts.urgency).toBe('high');
+    expect(pushed[0]?.opts.urgency).toBe('high');
   });
 
   it('de-dupes the same view across polls (no repeat push)', async () => {
@@ -469,7 +469,7 @@ describe('createClaudeEvents push (需要你 / 已完成 transitions, mirroring 
     await ev.getStates();
     await ev.getStates();
     expect(pushed).toHaveLength(1);
-    expect(pushed[0].opts.urgency).toBe('normal');
+    expect(pushed[0]?.opts.urgency).toBe('normal');
   });
 
   it('进行中 (a new prompt) re-arms the dedup so the next 已完成 pushes again', async () => {
@@ -516,7 +516,7 @@ describe('createClaudeEvents push (需要你 / 已完成 transitions, mirroring 
     }));
     await ev.getStates();
     expect(pushed).toHaveLength(1);
-    expect(pushed[0].payload.body).toBe('new done'); // only the post-boot done, never the primed pair
+    expect(pushed[0]?.payload.body).toBe('new done'); // only the post-boot done, never the primed pair
   });
 
   it('does not push for 进行中, and never for a pruned (dead) pane', async () => {

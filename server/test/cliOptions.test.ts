@@ -210,23 +210,23 @@ describe('explainConfig', () => {
   it('masks the token and never prints push/voice secrets', () => {
     const rows = explainConfig({ token: 'supersecrettoken1234' }, { vapid: { public: 'p', private: 'x' } }, '/c.json');
     const by = Object.fromEntries(rows.map((r) => [r.key, r]));
-    expect(by.token.display).toBe('••••1234');
+    expect(by.token?.display).toBe('••••1234');
     expect(by['push (vapid)']).toMatchObject({ display: 'on', origin: '/c.json' });
-    expect(by['voice (xfyun)'].display).toBe('off');
+    expect(by['voice (xfyun)']?.display).toBe('off');
   });
   it('shows tunnel-specific rows only for the live tunnel and applies the publicUrl guard', () => {
     const rows = explainConfig({ tunnel: 'cloudflare-named', cfHostname: 'h.x.com' }, { tunnel: 'ssh', publicUrl: 'https://my.ssh' }, '/c.json');
     const by = Object.fromEntries(rows.map((r) => [r.key, r]));
     expect(by.cfHostname).toMatchObject({ display: 'h.x.com', origin: 'flag' });
     expect(by.sshHost).toBeUndefined();
-    expect(by.publicUrl.display).toMatch(/derived from tunnel/); // stale ssh url dropped
+    expect(by.publicUrl?.display).toMatch(/derived from tunnel/); // stale ssh url dropped
   });
   it('masks the natapp/cpolar authtoken and shows cpolar region only for cpolar', () => {
     const nat = Object.fromEntries(explainConfig({ tunnel: 'natapp', authtoken: 'supersecrettoken1234' }, {}, '/c.json').map((r) => [r.key, r]));
-    expect(nat.authtoken.display).toBe('••••1234');
+    expect(nat.authtoken?.display).toBe('••••1234');
     expect(nat.cpolarRegion).toBeUndefined();
     const cp = Object.fromEntries(explainConfig({ tunnel: 'cpolar', cpolarRegion: 'cn' }, {}, '/c.json').map((r) => [r.key, r]));
-    expect(cp.authtoken.display).toMatch(/required/);
+    expect(cp.authtoken?.display).toMatch(/required/);
     expect(cp.cpolarRegion).toMatchObject({ display: 'cn', origin: 'flag' });
   });
 });

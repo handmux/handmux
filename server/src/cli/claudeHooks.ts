@@ -89,13 +89,17 @@ const HOOK_MARK = 'handmux-notify.sh'; // identifies our hooks among the user's 
 // Parse `claude --version` output ("2.1.207 (Claude Code)") → { major, minor, patch } | null.
 export function parseClaudeVersion(out: unknown): ClaudeVersion | null {
   const m = /(\d+)\.(\d+)\.(\d+)/.exec(String(out || ''));
-  return m ? { major: +m[1], minor: +m[2], patch: +m[3] } : null;
+  return m ? {
+    major: Number(m[1] ?? 0),
+    minor: Number(m[2] ?? 0),
+    patch: Number(m[3] ?? 0),
+  } : null;
 }
 
 // v >= min ("X.Y.Z"), full major.minor.patch compare. A null/undefined version is always below → fail-closed.
 export function claudeVersionAtLeast(v: ClaudeVersion | null | undefined, minStr: string): boolean {
   if (!v) return false;
-  const [a, b, c] = String(minStr).split('.').map(Number);
+  const [a = 0, b = 0, c = 0] = String(minStr).split('.').map(Number);
   if (v.major !== a) return v.major > a;
   if (v.minor !== b) return v.minor > b;
   return v.patch >= c;

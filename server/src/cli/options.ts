@@ -81,6 +81,7 @@ export function parseArgs(argv: readonly string[]): ParsedArgs {
   };
   for (let i = 0; i < rest.length; i++) {
     const a = rest[i];
+    if (a === undefined) continue;
     if (a === '-f') { flags.foreground = true; continue; }
     if (!a.startsWith('--')) {
       if (a.startsWith('-')) unknownShortFlags.push(a);

@@ -37,8 +37,9 @@ export function previewRoutes({ previews }: PreviewRouteOptions): Router {
 
   r.delete('/previews/:name', (req: Request, res: Response) => {
     if (!previews) return res.status(503).json({ error: 'previews disabled' });
-    if (!safePreviewName(req.params.name)) return res.status(400).json({ error: 'bad name' });
-    previews.remove(req.params.name);
+    const name = req.params.name;
+    if (!name || !safePreviewName(name)) return res.status(400).json({ error: 'bad name' });
+    previews.remove(name);
     return res.status(204).end();
   });
 

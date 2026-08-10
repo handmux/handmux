@@ -264,12 +264,14 @@ export function createWorkspaceStore({ home, now = Date.now, fs = fsp }: Workspa
       return { status: 'corrupt', errors: copies.map((copy) => copy.status === 'corrupt' ? copy.error : copy.status) };
     }
 
-    const chosen = valid[0].value;
+    const chosenCopy = valid[0];
+    if (!chosenCopy) return { status: 'corrupt', errors: ['missing valid live copy'] };
+    const chosen = chosenCopy.value;
     let repaired = false;
     await ensureDirectories();
     for (let index = 0; index < copies.length; index += 1) {
       const copy = copies[index];
-      if (copy.status === 'ok' && copy.value.revision === chosen.revision && copy.value.payloadHash === chosen.payloadHash) continue;
+      if (copy?.status === 'ok' && copy.value.revision === chosen.revision && copy.value.payloadHash === chosen.payloadHash) continue;
       await writeJsonAtomic(index === 0 ? paths.liveCurrent : paths.liveMirror, chosen, { fs });
       repaired = true;
     }

@@ -74,7 +74,7 @@ function applyPatchSection(value: unknown, path: string): string[] {
     const header = /^\*\*\* (?:Add|Update|Delete) File: (.+)$/.exec(line);
     if (header) {
       if (active) break;
-      active = header[1].trim() === path;
+      active = (header[1] ?? '').trim() === path;
       continue;
     }
     if (active && line === '*** End Patch') break;
@@ -137,7 +137,9 @@ export function enrichCodexFileDiffs<T extends CodexMessageProjection>(
       && (!key || !candidate.key || candidate.key === key));
     if (index < 0 && !key) index = candidates.findIndex(matches);
     if (index < 0) return message;
+    const candidate = candidates[index];
+    if (!candidate) return message;
     used.add(index);
-    return { ...message, tool: { ...tool, diff: candidates[index].diff } } as T;
+    return { ...message, tool: { ...tool, diff: candidate.diff } } as T;
   });
 }

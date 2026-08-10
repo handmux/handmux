@@ -59,7 +59,9 @@ export function rewritePreviewText(source: string, extension: string, prefix: st
     (_match: string, start: string, quote: string, value: string) => {
       const rewritten = value.split(',').map((candidate: string) => {
         const match = /^(\s*)(\S+)(.*)$/.exec(candidate);
-        return match ? `${match[1]}${prefixedRoot(match[2], prefix)}${match[3]}` : candidate;
+        return match
+          ? `${match[1] ?? ''}${prefixedRoot(match[2] ?? '', prefix)}${match[3] ?? ''}`
+          : candidate;
       }).join(',');
       return `${start}${quote}${rewritten}${quote}`;
     },
@@ -154,18 +156,24 @@ export function createPreview({ previews }: CreatePreviewOptions): PreviewServer
   // shape. Keeping this explicit makes the failure an authentication result instead of an SPA fallback.
   router.get('/:name', (_req: Request, res: Response) => res.status(401).send('unauthorized'));
   router.get('/:name/:accessToken', (req: Request, res: Response) => {
-    const entry = resolveEntry(req.params.name, req.params.accessToken, res);
+    const name = req.params.name;
+    const accessToken = req.params.accessToken;
+    if (!name || !accessToken) return res.status(401).send('unauthorized');
+    const entry = resolveEntry(name, accessToken, res);
     if (!entry || res.headersSent) return undefined;
-    const prefix = `/preview/${encodeURIComponent(req.params.name)}/${encodeURIComponent(req.params.accessToken)}/`;
+    const prefix = `/preview/${encodeURIComponent(name)}/${encodeURIComponent(accessToken)}/`;
     if (!(req.url.split('?', 1)[0] ?? '').endsWith('/')) {
       return res.redirect(301, prefix);
     }
     return void serve(entry, '', prefix, res);
   });
   router.get('/:name/:accessToken/*', (req: Request, res: Response) => {
-    const entry = resolveEntry(req.params.name, req.params.accessToken, res);
+    const name = req.params.name;
+    const accessToken = req.params.accessToken;
+    if (!name || !accessToken) return res.status(401).send('unauthorized');
+    const entry = resolveEntry(name, accessToken, res);
     if (!entry || res.headersSent) return undefined;
-    const prefix = `/preview/${encodeURIComponent(req.params.name)}/${encodeURIComponent(req.params.accessToken)}/`;
+    const prefix = `/preview/${encodeURIComponent(name)}/${encodeURIComponent(accessToken)}/`;
     return void serve(entry, req.params[0] ?? '', prefix, res);
   });
 

@@ -154,7 +154,7 @@ function defaultReadTail(file: string): string | null {
       const buf = Buffer.alloc(len);
       fs.readSync(fd, buf, 0, len, size - len);
       const lines = buf.toString('utf8').split('\n').filter((line) => line.trim());
-      return lines.length ? lines[lines.length - 1] : null;
+      return lines.at(-1) ?? null;
     } finally { fs.closeSync(fd); }
   } catch { return null; }
 }

@@ -100,7 +100,7 @@ export function assetFor(platform: string = process.platform, arch: string = pro
 export function onPath(exec = 'cloudflared'): string | null {
   const finder = process.platform === 'win32' ? 'where' : 'which';
   const r = spawnSync(finder, [exec], { encoding: 'utf8' });
-  return r.status === 0 ? String(r.stdout).trim().split(/\r?\n/)[0] : null;
+  return r.status === 0 ? String(r.stdout).trim().split(/\r?\n/)[0] ?? null : null;
 }
 
 export async function resolveCloudflared(

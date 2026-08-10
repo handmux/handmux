@@ -15,7 +15,10 @@ function fakeRes(
   return {
     ok, status,
     headers: { get: (k) => (k.toLowerCase() === 'content-length' && contentLength != null ? String(contentLength) : null) },
-    body: { getReader: () => ({ read: async () => (i < chunks.length ? { done: false, value: chunks[i++] } : { done: true }) }) },
+    body: { getReader: () => ({ read: async () => {
+      const value = chunks[i++];
+      return value ? { done: false, value } : { done: true };
+    } }) },
   };
 }
 

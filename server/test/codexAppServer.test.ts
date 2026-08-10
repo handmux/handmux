@@ -67,6 +67,12 @@ interface TestThread extends UnknownRecord {
   turns: TestTurn[];
 }
 
+function firstTurn(thread: TestThread): TestTurn {
+  const turn = thread.turns[0];
+  if (!turn) throw new Error('expected a thread turn');
+  return turn;
+}
+
 interface TestGoal extends UnknownRecord {
   threadId: string;
   objective: string;
@@ -261,20 +267,20 @@ describe('Codex App Server projection', () => {
       'text', 'text', 'tool', 'tool', 'tool', 'tool', 'tool', 'tool', 'tool', 'tool', 'tool', 'tool', 'compact',
     ]);
     expect(messages[0]).toMatchObject({ id: 'codex:turn-1:user-1', k: 0, role: 'user', text: 'hello' });
-    expect(messages[2].tool).toMatchObject({ name: 'exec_command', result: '/work\n', isError: false, outcome: 'success' });
+    expect(messages[2]?.tool).toMatchObject({ name: 'exec_command', result: '/work\n', isError: false, outcome: 'success' });
     expect(messages.slice(3, 5).map((message) => message.tool?.input.file_path)).toEqual(['/work/a.js', '/work/b.js']);
     expect(messages.slice(5, 12).map((message) => message.tool?.name)).toEqual([
       'web__run', 'docs:search', 'custom', 'view_image', 'wait', 'spawn_agent', 'image_gen__imagegen',
     ]);
     expect(messages[5]?.tool?.result).toContain('https://example.com');
     expect(messages[10]?.tool?.input).toMatchObject({ target: 'thread-2', prompt: 'review' });
-    expect(messages[7].tool).toMatchObject({ name: 'custom', outcome: 'success' });
+    expect(messages[7]?.tool).toMatchObject({ name: 'custom', outcome: 'success' });
     expect(new Set(messages.map((message) => message.id)).size).toBe(messages.length);
   });
 
   it('keeps persisted declines distinct and treats dynamic completion without success as neutral', () => {
     const thread = fixtureThread();
-    thread.turns[0].items = [
+    firstTurn(thread).items = [
       { id: 'cmd-declined', type: 'commandExecution', command: 'sw_vers', cwd: '/work', status: 'declined' },
       {
         id: 'dynamic-unknown', type: 'dynamicToolCall', tool: 'functions.exec', arguments: {},
@@ -282,14 +288,14 @@ describe('Codex App Server projection', () => {
       },
     ];
     const messages = projectCodexThread(thread);
-    expect(messages[0].tool).toMatchObject({ outcome: 'declined', isError: false });
-    expect(messages[1].tool).toMatchObject({ outcome: 'completed', isError: false, result: 'aborted by user' });
+    expect(messages[0]?.tool).toMatchObject({ outcome: 'declined', isError: false });
+    expect(messages[1]?.tool).toMatchObject({ outcome: 'completed', isError: false, result: 'aborted by user' });
   });
 
   it('keeps message identity stable when a snapshot inserts an earlier item', () => {
     const before = projectCodexThread(fixtureThread());
     const thread = fixtureThread();
-    thread.turns[0].items.unshift({ id: 'reasoning-0', type: 'reasoning', summary: ['thinking'], content: [] });
+    firstTurn(thread).items.unshift({ id: 'reasoning-0', type: 'reasoning', summary: ['thinking'], content: [] });
     const after = projectCodexThread(thread);
     const beforeHello = before.find((message) => message.text === 'hello');
     expect(beforeHello).toBeDefined();
@@ -301,7 +307,7 @@ describe('Codex App Server projection', () => {
 
   it('keeps interrupted turns as a visible structural marker', () => {
     const thread = fixtureThread();
-    thread.turns[0].status = 'interrupted';
+    firstTurn(thread).status = 'interrupted';
     expect(projectCodexThread(thread).at(-1)?.type).toBe('interrupt');
   });
 });
@@ -1120,6 +1126,7 @@ describe('Codex App Server client', () => {
       });
       await app.status('%1', 'thread-1');
       const first = proxies[0];
+      if (!first) throw new Error('expected the first proxy');
       first.push({
         jsonrpc: '2.0', method: 'turn/started',
         params: { threadId: 'thread-1', turn: { id: 'turn-live', status: 'inProgress', items: [] } },
@@ -1137,6 +1144,7 @@ describe('Codex App Server client', () => {
 
       await app.status('%1', 'thread-1');
       const replacement = proxies[1];
+      if (!replacement) throw new Error('expected a replacement proxy');
       await vi.advanceTimersByTimeAsync(31_000);
       await app.status('%1', 'thread-1');
       await Promise.resolve();
@@ -1214,7 +1222,7 @@ describe('Codex App Server client', () => {
   it('resumes a retained queue when a successful completion happened during reconnect', async () => {
     const first = fakeProxy();
     const completed = fixtureThread({ type: 'idle' });
-    completed.turns[0].status = 'completed';
+    firstTurn(completed).status = 'completed';
     let second: ReturnType<typeof fakeProxy> | undefined;
     let connectCount = 0;
     const app = createCodexAppServer({
@@ -1304,7 +1312,7 @@ describe('Codex App Server client', () => {
 
   it('restores a failed last-turn status from the App Server snapshot', async () => {
     const failed = fixtureThread({ type: 'idle' });
-    failed.turns[0].status = 'failed';
+    firstTurn(failed).status = 'failed';
     const proxy = fakeProxy({ resumeThread: () => failed });
     const app = createCodexAppServer({ home: '/home/test', exists: () => true, connect: () => proxy.ws });
 
@@ -1830,7 +1838,7 @@ describe('Codex App Server client', () => {
 
   it('restores the last completion with its stable timestamp without replaying its push', async () => {
     const completed = fixtureThread();
-    completed.turns[0].items = [
+    firstTurn(completed).items = [
       { id: 'user-1', type: 'userMessage', content: [{ type: 'text', text: 'hello' }] },
     ];
     const proxy = fakeProxy({ resumeThread: () => completed });

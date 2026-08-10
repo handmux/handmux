@@ -7,6 +7,7 @@
     "allowJs": false,
     "noEmit": true,
     "strict": true,
+    "noUncheckedIndexedAccess": true,
     "noImplicitReturns": true,
     "noFallthroughCasesInSwitch": true,
     "useUnknownInCatchVariables": true,

@@ -19,7 +19,7 @@ export function tokenEquals(a: unknown, b: unknown): boolean {
 export function bearerFrom(header: string | null | undefined): string | null {
   if (!header) return null;
   const m = /^Bearer (.+)$/.exec(header);
-  return m ? m[1] : null;
+  return m?.[1] ?? null;
 }
 
 export function expressAuth(token: string): RequestHandler {

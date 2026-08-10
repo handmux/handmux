@@ -75,7 +75,7 @@ describe('Supervisor process state wiring', () => {
     expect(state).toMatchObject({ ready: true, components: { server: { phase: 'ready' } } });
 
     clock = 1_100;
-    children[0].emit('exit', 1, null);
+    children[0]?.emit('exit', 1, null);
     expect(state).toMatchObject({
       ready: false,
       serverPid: null,

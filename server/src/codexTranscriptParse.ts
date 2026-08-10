@@ -183,15 +183,16 @@ function callArgument(script: string, open: number): CallArgument | null {
 }
 
 function decodeJsString(raw: string): string | null {
-  if (!raw || !['"', "'", '`'].includes(raw[0]) || raw.at(-1) !== raw[0]) return null;
-  if (raw[0] === '"') {
+  const quote = raw[0];
+  if (!quote || !['"', "'", '`'].includes(quote) || raw.at(-1) !== quote) return null;
+  if (quote === '"') {
     try {
       const parsed: unknown = JSON.parse(raw);
       return typeof parsed === 'string' ? parsed : null;
     } catch { return null; }
   }
   const body = raw.slice(1, -1);
-  if (raw[0] === '`' && body.includes('${')) return null;
+  if (quote === '`' && body.includes('${')) return null;
   return body.replace(/\\([\\'`nrt])/g, (_match: string, char: string) => (
     ({ n: '\n', r: '\r', t: '\t' } as Record<string, string>)[char] ?? char
   ));
@@ -199,7 +200,7 @@ function decodeJsString(raw: string): string | null {
 
 function stringTokenAt(script: string, start: number): string | null {
   const quote = script[start];
-  if (!['"', "'", '`'].includes(quote)) return null;
+  if (!quote || !['"', "'", '`'].includes(quote)) return null;
   let escaped = false;
   for (let i = start + 1; i < script.length; i++) {
     const ch = script[i];
@@ -417,7 +418,8 @@ function applyGoalOutput(message: CodexTranscriptMessage, value: unknown): boole
 }
 
 function applyCustomOutput(messages: CodexTranscriptMessage[], value: unknown): void {
-  if (messages.length === 1 && messages[0].type === 'goal' && applyGoalOutput(messages[0], value)) return;
+  const onlyMessage = messages[0];
+  if (messages.length === 1 && onlyMessage?.type === 'goal' && applyGoalOutput(onlyMessage, value)) return;
   const values = structuredResults(value);
   if (values && values.length === messages.length) {
     messages.forEach((message, index) => {

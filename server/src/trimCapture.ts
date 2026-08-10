@@ -22,7 +22,7 @@ export function capTrailingBlankRows(ansi: string, max = MAX_TRAILING_BLANK): st
   const hadNL = ansi.endsWith('\n');
   const rows = (hadNL ? ansi.slice(0, -1) : ansi).split('\n');
   let end = rows.length;
-  while (end > 0 && isBlank(rows[end - 1])) end -= 1;
+  while (end > 0 && isBlank(rows[end - 1] ?? '')) end -= 1;
   if (rows.length - end > max) rows.length = end + max;
   return rows.join('\n') + (hadNL ? '\n' : '');
 }

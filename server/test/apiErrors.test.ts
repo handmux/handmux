@@ -38,7 +38,7 @@ describe('API error contract', () => {
     expect(response.text).not.toContain('/Users/private');
     expect(response.text).not.toContain('apiErrors.test');
     expect(log.error).toHaveBeenCalledOnce();
-    expect(log.error.mock.calls[0][1]).toMatchObject({
+    expect(log.error.mock.calls[0]?.[1]).toMatchObject({
       requestId: 'request-fixed', method: 'GET', path: '/api/sessions',
     });
   });

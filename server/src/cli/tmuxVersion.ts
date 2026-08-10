@@ -23,13 +23,16 @@ type ExecCommand = (command: string, args: string[], options: object) => Command
 export function parseTmuxVersion(out: unknown): TmuxVersion | null {
   const m = /tmux\s+(?:next-|openbsd-)?(\d+)\.(\d+)([a-z]?)/i.exec(String(out || ''));
   if (!m) return null;
-  return { major: +m[1], minor: +m[2], suffix: m[3] || '', raw: `${m[1]}.${m[2]}${m[3] || ''}` };
+  const major = Number(m[1] ?? 0);
+  const minor = Number(m[2] ?? 0);
+  const suffix = m[3] || '';
+  return { major, minor, suffix, raw: `${major}.${minor}${suffix}` };
 }
 
 // v >= min, comparing major.minor only (patch letters don't change the capture behaviour we rely on).
 export function versionAtLeast(v: TmuxVersion | null | undefined, minStr = MIN_TMUX): boolean {
   if (!v) return false;
-  const [maj, min] = minStr.split('.').map(Number);
+  const [maj = 0, min = 0] = minStr.split('.').map(Number);
   return v.major > maj || (v.major === maj && v.minor >= min);
 }
 

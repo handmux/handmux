@@ -369,7 +369,7 @@ export async function createBrowserPreviewManager({
     }
     const pending = (async () => {
       const proxy = new ProxyClass();
-      const ports = poolCount++ === 0 ? internalPorts : [0, 0];
+      const ports: [number, number] = poolCount++ === 0 ? internalPorts : [0, 0];
       try {
         proxy.start({
           hostname: '127.0.0.1',
@@ -640,7 +640,7 @@ export async function createBrowserPreviewManager({
 
   const sessionIdForPath = (pathname: unknown): string | null => {
     const descriptor = String(pathname || '').split('/')[1] || '';
-    const sessionId = descriptor.split(/[!*]/, 1)[0];
+    const sessionId = descriptor.split(/[!*]/, 1)[0] ?? '';
     return sessionId.startsWith('_browser-') ? sessionId : null;
   };
 
