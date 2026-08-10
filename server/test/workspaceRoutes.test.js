@@ -332,7 +332,7 @@ describe('workspace API routes', () => {
 
 describe('workspace production composition', () => {
   it('wraps the background checkpointer in the unified runtime used by events and API', () => {
-    const source = fs.readFileSync(new URL('../src/server.js', import.meta.url), 'utf8');
+    const source = fs.readFileSync(new URL('../src/server.ts', import.meta.url), 'utf8');
     expect(source).toContain("import { createWorkspaceRuntime } from './workspace/runtime.js';");
     expect(source).toMatch(/const workspaceBackground = createWorkspaceBackground\(/);
     expect(source).toMatch(/const workspace = createWorkspaceRuntime\(\{[\s\S]*checkpointer: workspaceBackground/);

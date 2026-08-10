@@ -59,7 +59,7 @@ const observeEnvironment = createEnvironmentProvider({
   },
 });
 const stateFile = process.env.CLAUDE_STATE_FILE || claudeStatePath(home);
-let codexApp = null;
+let codexApp: ReturnType<typeof createCodexAppServer> | null = null;
 const workspaceBackground = createWorkspaceBackground({
   store: workspaceStore,
   tmux: workspaceTmux,
@@ -78,7 +78,7 @@ const workspace = createWorkspaceRuntime({
 
 // Claude states come from Hooks; Codex states come only from App Server. Both feed the same inbox and
 // workspace checkpointer, but no Codex Hook state is accepted as a fallback.
-let events = null;
+let events: ReturnType<typeof createClaudeEvents> | null = null;
 codexApp = createCodexAppServer({
   home,
   outboxStore: new PrivateStateStore(codexOutboxPath(home)),
@@ -155,7 +155,7 @@ const indexPath = path.join(staticDir, 'index.html');
 // rewritten on the way out so the browser-tab title and "Add to Home Screen" label match the user's
 // name — the bundle ships generic and is renamed at serve time, never rebuilt. Unset → serve as-is.
 const appName = process.env.HANDMUX_APP_NAME || null;
-let renamedIndex = null; // computed once; the name is fixed for the process lifetime
+let renamedIndex: string | null = null; // computed once; the name is fixed for the process lifetime
 if (appName) {
   app.get('/manifest.webmanifest', (req, res, next) => {
     try {

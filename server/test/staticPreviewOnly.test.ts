@@ -20,22 +20,22 @@ describe('static-only preview replacement', () => {
   });
 
   it('accepts only a directory in the preview API', async () => {
-    const previews = { register: vi.fn(), list: vi.fn(() => []) };
+    const previews = { register: vi.fn(), list: vi.fn(() => []), remove: vi.fn() };
     const app = express();
     app.use(express.json());
-    app.use('/api', previewRoutes({ previews, token: 'secret' }));
+    app.use('/api', previewRoutes({ previews }));
 
     await request(app).post('/api/previews').send({ name: 'app', port: 5173 }).expect(400);
     expect(previews.register).not.toHaveBeenCalled();
   });
 
   it('exposes only static router and referer fallback from previewServer', () => {
-    const preview = createPreview({ previews: { get: vi.fn() }, token: 'secret' });
+    const preview = createPreview({ previews: { get: vi.fn() } });
     expect(Object.keys(preview).sort()).toEqual(['refererFallback', 'router']);
   });
 
   it('uses previewDomain only for the browser public origin, not the retired dynamic preview proxy', () => {
-    const source = fs.readFileSync(new URL('../src/server.js', import.meta.url), 'utf8');
+    const source = fs.readFileSync(new URL('../src/server.ts', import.meta.url), 'utf8');
     expect(source).toContain('const previewDomain = process.env.HANDMUX_PREVIEW_DOMAIN || null');
     expect(source).toContain('createBrowserWorkerClient({ appToken: token, previewDomain, handmuxOrigin })');
     expect(source).not.toContain('createApiRouter({ token, events, uploadExts, previews, previewDomain,');
@@ -44,7 +44,7 @@ describe('static-only preview replacement', () => {
   });
 
   it('runs the built-in browser behind an isolated worker instead of inside the main server process', () => {
-    const source = fs.readFileSync(new URL('../src/server.js', import.meta.url), 'utf8');
+    const source = fs.readFileSync(new URL('../src/server.ts', import.meta.url), 'utf8');
     expect(source).toContain('createBrowserWorkerClient');
     expect(source).not.toContain('createBrowserPreviewManager');
     expect(source).not.toContain('createBrowserPublicProxy');

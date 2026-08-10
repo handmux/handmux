@@ -1,7 +1,7 @@
 // Runtime app-name injection. The web bundle ships prebuilt, so a user's custom name (set at
 // `handmux start --name`) can't be baked at build time — instead the server rewrites the name into
 // the shell HTML and the PWA manifest as it serves them. Pure string/object transforms so they're
-// unit-testable; the server side-effects (read file / send) live in server.js.
+// unit-testable; the server side-effects (read file / send) live in server.ts.
 
 const escAttr = (s: string): string => s.replace(/&/g, '&amp;').replace(/</g, '&lt;')
   .replace(/>/g, '&gt;').replace(/"/g, '&quot;');

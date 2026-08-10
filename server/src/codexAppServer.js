@@ -1678,6 +1678,21 @@ class CodexAppConnection {
   }
 }
 
+/**
+ * @param {{
+ *   home?: string,
+ *   connect?: typeof connectUnixWebSocket,
+ *   exists?: typeof fs.existsSync,
+ *   readdir?: typeof fs.readdirSync,
+ *   now?: () => number,
+ *   onStateChange?: () => unknown,
+ *   scanIntervalMs?: number,
+ *   setTimer?: typeof setInterval,
+ *   clearTimer?: typeof clearInterval,
+ *   outboxStore?: { read?: () => unknown, write?: (value: unknown) => unknown } | null,
+ *   rpcTimeoutMs?: number,
+ * }} [options]
+ */
 export function createCodexAppServer({
   home,
   connect = connectUnixWebSocket,

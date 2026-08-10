@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 describe('browser worker server composition', () => {
-  const source = fs.readFileSync(new URL('../src/server.js', import.meta.url), 'utf8');
+  const source = fs.readFileSync(new URL('../src/server.ts', import.meta.url), 'utf8');
 
   it('keeps Hammerhead and browser state out of the main process', () => {
     expect(source).toContain("import { createBrowserWorkerClient } from './browser/workerClient.js'");

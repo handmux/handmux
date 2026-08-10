@@ -132,6 +132,14 @@ export function appendCodexStreamEvent(queue, event) {
   return queue;
 }
 
+/**
+ * @param {{
+ *   codexApp?: ReturnType<typeof import('../codexAppServer.js').createCodexAppServer> | null,
+ *   commands?: object,
+ *   claudeEvents?: object,
+ *   wait?: (ms: number) => Promise<unknown>,
+ * }} options
+ */
 export function codexRoutes({ codexApp, commands, claudeEvents, wait = pause }) {
   const r = express.Router();
   if (!codexApp) return r;

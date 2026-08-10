@@ -24,6 +24,10 @@ interface CheckpointerStore {
 type TimerHandle = unknown;
 type SetTimer = (callback: () => void, delay: number) => TimerHandle;
 type ClearTimer = (handle: TimerHandle) => void;
+export interface WorkspaceCheckpointerHealth {
+  status: 'starting' | 'ready' | 'degraded';
+  detail: string | null;
+}
 
 export interface CheckpointerOptions {
   store: CheckpointerStore;
@@ -180,7 +184,7 @@ export function createCheckpointer({
 
   return {
     reconcile,
-    health() {
+    health(): WorkspaceCheckpointerHealth {
       if (stopping || stopped) return { status: 'degraded', detail: 'workspace-stopped' };
       if (lastError) return { status: 'degraded', detail: lastError };
       if (!lastResult) return { status: 'starting', detail: 'workspace-reconcile-starting' };
@@ -249,10 +253,10 @@ export function createWorkspaceBackground({
 }
 
 export function createGracefulShutdown({ events, workspace, browser, server }: {
-  events: { stop(): Promise<unknown> };
-  workspace: { stop(): Promise<unknown> };
-  browser?: { close(): Promise<unknown> } | null;
-  server: { close(): void };
+  events: { stop(): unknown | Promise<unknown> };
+  workspace: { stop(): unknown | Promise<unknown> };
+  browser?: { close(): unknown | Promise<unknown> } | null;
+  server: { close(): unknown };
 }): () => Promise<void> {
   let closing: Promise<void> | null = null;
   return function shutdown(): Promise<void> {
