@@ -37,7 +37,7 @@ verified by replaying real capture bytes through `@xterm/headless` (see `web/tes
 
 ## Shipping a user-facing feature
 
-When a user-felt feature lands, add one concise entry to `web/src/changelog.js` (newest first; the top entry
+When a user-felt feature lands, add one concise entry to `web/src/changelog.ts` (newest first; the top entry
 drives the unread dot on the settings gear). Skip pure bug fixes.
 
 ## Notes
