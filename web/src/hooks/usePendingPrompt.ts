@@ -43,15 +43,18 @@ export function parsePendingPrompt(value: unknown): PendingPrompt | null {
     typeof prompt[key] === 'number' && Number.isFinite(prompt[key])
       ? prompt[key] as number : undefined
   );
+  const cursor = finite('cursor');
+  const step = finite('step');
+  const total = finite('total');
   return {
     title: prompt.title,
     options,
     ...(typeof prompt.leadIn === 'string' && prompt.leadIn ? { leadIn: prompt.leadIn } : {}),
     ...(prompt.cursor === null ? { cursor: null }
-      : finite('cursor') !== undefined ? { cursor: finite('cursor') } : {}),
+      : cursor !== undefined ? { cursor } : {}),
     ...(prompt.multi === true ? { multi: true } : {}),
-    ...(finite('step') !== undefined ? { step: finite('step') } : {}),
-    ...(finite('total') !== undefined ? { total: finite('total') } : {}),
+    ...(step !== undefined ? { step } : {}),
+    ...(total !== undefined ? { total } : {}),
     ...(prompt.submit === true ? { submit: true } : {}),
   };
 }

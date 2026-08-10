@@ -274,7 +274,7 @@ function ToolChip({
       <button type="button" className="chat-tool-head" onClick={onOpen}>
         <span className="chat-tool-ic">{toolIcon(tool.name)}</span>
         <span className="chat-tool-head-text">{toolSummary(tool)}</span>
-        <DiffStat diff={tool.diff} />
+        <DiffStat {...(tool.diff ? { diff: tool.diff } : {})} />
         {/* Running: the wave (the pulse already says in-progress). Done: a ✓/✗ outcome mark. */}
         {running ? <span className="chat-tool-head-running"><TypingDots /></span> : <ToolStatus tool={tool} />}
       </button>
@@ -401,7 +401,7 @@ function EditSheetBody({
         <div className="es-meta">
           <span className="tool-sheet-mode-val">{toolMode(tool.name)}</span>
           {st && <span className={'tool-sheet-state ' + st.cls}>{st.txt}</span>}
-          <DiffStat diff={tool.diff} />
+          <DiffStat {...(tool.diff ? { diff: tool.diff } : {})} />
         </div>
         {hunks && hunks.length
           ? <div className="es-diff"><DiffView hunks={hunks} /></div>
@@ -543,7 +543,7 @@ function Bubble({
     return <ToolChip tool={m.tool} running={running} onOpen={() => onOpenTool(m)} />;
   }
   if (m.type === 'goal' && m.goal) {
-    return <CodexGoalCard goal={m.goal} event={m.event} onOpen={onOpenGoal} />;
+    return <CodexGoalCard goal={m.goal} event={m.event ?? null} onOpen={onOpenGoal} />;
   }
   // ESC-interrupt marker — a quiet, centered grey hint that the user stopped the turn, NOT a user bubble
   // (Claude Code writes it as a user line, but the user didn't type it).
@@ -788,11 +788,11 @@ export default function ChatView({
   } = useTranscript(pane, true, agent, transcriptRefresh);
   useCodexMessageStream({
     pane,
-    threadId: codexSession?.threadId,
+    threadId: codexSession?.threadId ?? null,
     enabled: loaded && agent === 'codex' && !!codexSession?.managed,
     onEvent: applyCodexEvent,
     onSettled: () => setStreamRefresh((value) => value + 1),
-    onAuthFail,
+    ...(onAuthFail ? { onAuthFail } : {}),
   });
   const historicalPlans = useMemo(() => {
     const latest = new Map<string, ChatMessage>();
@@ -1339,7 +1339,7 @@ export default function ChatView({
       <CodexPlanSheet open={!!planSheet} title={t('chat.plan.historyTitle')} plan={planSheet}
         onClose={() => setPlanSheet(null)} />
       <CodexGoalMenu open={!!goalSheet} pane={pane} goalSnapshot={goalSheet}
-        onClose={() => setGoalSheet(null)} onAuthFail={onAuthFail} />
+        onClose={() => setGoalSheet(null)} {...(onAuthFail ? { onAuthFail } : {})} />
 
       {/* The gate (rich or fallback) is a modal bottom sheet: the backdrop dims the chat lens and,
          critically, covers the composer — a SHORT gate (e.g. the 提交/取消 review card) would otherwise leave
@@ -1347,7 +1347,8 @@ export default function ChatView({
          .chat-view's top edge down): the topbar and window/lens tabs above stay visible and usable. */}
       {gateUp && <div className="chat-gate-backdrop"
         style={gateMask ? { top: gateMask.top + 'px', height: gateMask.height + 'px', bottom: 'auto' } : undefined} />}
-      {prompt && <PromptGate pane={pane} prompt={prompt} onAuthFail={onAuthFail} onAct={refetch} />}
+      {prompt && <PromptGate pane={pane} prompt={prompt} onAct={refetch}
+        {...(onAuthFail ? { onAuthFail } : {})} />}
       {fb && (
         <div className="chat-gate">
           <div className="chat-gate-prompt">{fb.prompt}</div>
@@ -1360,8 +1361,10 @@ export default function ChatView({
           </div>
         </div>
       )}
-      {codexApproval && <CodexApprovalGate key={codexApproval.id} pane={pane} approval={codexApproval} onAuthFail={onAuthFail} />}
-      {codexInput && <CodexInputGate key={codexInput.id} pane={pane} input={codexInput} onAuthFail={onAuthFail} />}
+      {codexApproval && <CodexApprovalGate key={codexApproval.id} pane={pane} approval={codexApproval}
+        {...(onAuthFail ? { onAuthFail } : {})} />}
+      {codexInput && <CodexInputGate key={codexInput.id} pane={pane} input={codexInput}
+        {...(onAuthFail ? { onAuthFail } : {})} />}
       {sessionGate && (
         <div className="chat-gate chat-terminal-gate">
           <div className="chat-gate-prompt">{sessionIssue === 'session-unmanaged'

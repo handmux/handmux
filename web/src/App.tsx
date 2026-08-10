@@ -392,7 +392,7 @@ export default function App() {
   const onAuthFail = useCallback(() => setNeedToken(true), []);
   const enqueueDesktopInput = useDesktopTerminalInput({
     enabled: desktopInput,
-    currentPane: current?.paneId,
+    currentPane: current?.paneId ?? null,
     terminalRef: termRef,
     onAuthFail,
   });
@@ -1020,7 +1020,10 @@ export default function App() {
     try {
       if (out.name && out.session) {
         setDrawerOpen(false);
-        await openSession({ id: out.session, name: out.name }, { window: out.window, pane: out.pane });
+        await openSession({ id: out.session, name: out.name }, {
+          window: out.window ?? null,
+          pane: out.pane ?? null,
+        });
       }
     } catch (e) { handledAuth(e); }
     try { setOrphans(await getOrphans()); } catch { /* refresh best-effort */ }
@@ -1393,7 +1396,7 @@ export default function App() {
       try {
         const sessions = await getSessions();
         const s = sessions.find((x) => x.name === session);
-        if (s) { setDrawerOpen(false); await openSession(s, { window, pane }); }
+        if (s) { setDrawerOpen(false); await openSession(s, { window: window ?? null, pane: pane ?? null }); }
       } catch (e) { handledAuth(e); }
     };
     const onMsg = (event: MessageEvent<unknown>) => {
@@ -1509,7 +1512,11 @@ export default function App() {
   ) => {
     // Transport failure means "response unknown", not "server rejected". Keep the temporary state until
     // the authoritative transcript/queue snapshot claims its stable request id.
-    setCodexOptimisticMessages((items) => settleCodexOutgoing(items, id, { result, error, uncertain }));
+    setCodexOptimisticMessages((items) => settleCodexOutgoing(items, id, {
+      ...(result !== undefined ? { result } : {}),
+      ...(error !== undefined ? { error } : {}),
+      uncertain,
+    }));
   }, []);
   const reportChatActionError = useCallback((paneId: string, error: Omit<ChatActionError, 'id'> | null) => {
     if (!paneId) return;
@@ -1605,7 +1612,12 @@ export default function App() {
     }
     const res = await fetchDoc(abs); // throws on non-2xx (404/400/…)
     if ('notModified' in res) return;
-    docTabs.openDoc(abs, { type: res.type, name: res.name, content: res.content, mtime: res.mtimeMs });
+    docTabs.openDoc(abs, {
+      type: res.type,
+      name: res.name,
+      content: res.content,
+      ...(res.mtimeMs !== undefined ? { mtime: res.mtimeMs } : {}),
+    });
     pushRecentDoc({ path: abs, name: res.name, type: res.type, ts: Date.now() });
     setFileManagerOpen(true);
   };
@@ -1643,7 +1655,12 @@ export default function App() {
     fetchDoc(key, tab.mtime ?? null)
       .then((res) => {
         if ('notModified' in res) return; // unchanged on disk → leave the tab (and its scroll/TTS) alone
-        docTabs.refreshDoc(key, { type: res.type, name: res.name, content: res.content, mtime: res.mtimeMs });
+        docTabs.refreshDoc(key, {
+          type: res.type,
+          name: res.name,
+          content: res.content,
+          ...(res.mtimeMs !== undefined ? { mtime: res.mtimeMs } : {}),
+        });
       })
       .catch(() => { /* keep the last-good content */ });
   };
@@ -2008,7 +2025,7 @@ export default function App() {
       />
       <Drawer
         open={drawerOpen}
-        currentSessionName={current?.session?.name}
+        currentSessionName={current?.session?.name ?? null}
         bound={bound}
         onSelectSession={selectSession}
         onUnbind={unbindSession}
@@ -2046,7 +2063,7 @@ export default function App() {
         open={newWinOpen}
         onClose={() => setNewWinOpen(false)}
         onCreate={createNewWindow}
-        paneId={current?.paneId}
+        paneId={current?.paneId ?? null}
         inset={inset}
       />
       <RenameModal
@@ -2127,11 +2144,14 @@ export default function App() {
       <ActionSheet
         open={!!managePane}
         title={t('pane.manageTitle')}
-        subtitle={paneManageSubtitle(managedPaneSubtitlePanes?.map((pane) => ({
-          ...pane,
-          width: pane.width ?? undefined,
-          height: pane.height ?? undefined,
-        })), managePane)}
+        subtitle={paneManageSubtitle(managedPaneSubtitlePanes?.map((pane) => {
+          const { width, height, ...rest } = pane;
+          return {
+            ...rest,
+            ...(width != null ? { width } : {}),
+            ...(height != null ? { height } : {}),
+          };
+        }), managePane)}
         onClose={closePaneManagement}
         actions={managePane ? [
           { key: 'split-h', icon: <SplitHIcon />, label: t('pane.splitH'), onClick: () => splitPaneAction(managePane, 'h') },
@@ -2155,8 +2175,8 @@ export default function App() {
       </ActionSheet>
       <FileManager
         open={fileManagerOpen}
-        pane={current?.paneId}
-        windowId={current?.window?.id}
+        pane={current?.paneId ?? null}
+        windowId={current?.window?.id ?? null}
         tabs={docTabs.tabs}
         active={docTabs.active}
         onActivate={activateDocTab}
@@ -2166,7 +2186,8 @@ export default function App() {
         pendingShare={pendingShare}
         onPendingConsumed={() => setPendingShare(null)}
       />
-      <GitPanel open={gitOpen} pane={current?.paneId} windowId={current?.window?.id} inset={inset} onClose={() => setGitOpen(false)} />
+      <GitPanel open={gitOpen} pane={current?.paneId ?? null} windowId={current?.window?.id ?? null}
+        inset={inset} onClose={() => setGitOpen(false)} />
       {/* App-wide upload lock (portal on <body>) — driven by the shared uploadJob store from either the
           chat ＋ or the file browser; blocks interaction during a transfer, Cancel is the only control. */}
       <UploadOverlay />
@@ -2197,7 +2218,7 @@ export default function App() {
           name={t('localurl.title')}
           path={localUrlPrompt.raw}
           openLabel={t('localurl.open')}
-          note={localUrlError || undefined}
+          {...(localUrlError ? { note: localUrlError } : {})}
           x={localUrlPrompt.x}
           y={localUrlPrompt.y}
           busy={localUrlOpening}
@@ -2247,7 +2268,7 @@ export default function App() {
             openMapFor={openMapFor}
             onMapOpened={() => setOpenMapFor(null)}
             onPaneMapOpenChange={setPaneMapOpen}
-            trackWindowId={manageWindow?.id}
+            trackWindowId={manageWindow?.id ?? null}
             lens={lens}
             chatLensEnabled={chatLensAvailable}
             onLensChange={(v) => { setLens(v); localStorage.setItem('tw_lens_' + current.paneId, v); }}
@@ -2270,7 +2291,8 @@ export default function App() {
                     localStorage.setItem('tw_lens_' + current.paneId, 'terminal');
                   }} />
               ) : (
-                <ChatView pane={current.paneId} agent={currentAgent || undefined} kind={currentKind} msg={states[current.paneId]?.msg} onAuthFail={onAuthFail}
+                <ChatView pane={current.paneId} agent={currentAgent || 'claude'} kind={currentKind}
+                  msg={states[current.paneId]?.msg ?? null} onAuthFail={onAuthFail}
                   onDocLinkTap={onDocLinkTap}
                   codexSession={codexSession}
                   optimisticMessages={codexOptimisticMessages.filter((item) => item.paneId === current.paneId)}
@@ -2308,7 +2330,7 @@ export default function App() {
             codexChatReady ? (
               <ChatComposer
                 pane={current.paneId}
-                agent={currentAgent || undefined}
+                agent={currentAgent || 'claude'}
                 codexSession={codexSession}
                 desktop={desktopInput}
                 kind={currentKind}
@@ -2324,9 +2346,13 @@ export default function App() {
                 micAvailable={!!micAvailable}
                 chatTone={chatTone}
                 keyboardInset={inset}
-                onInteractiveSlash={currentAgent === 'claude'
-                  ? (cmd) => { setLens('terminal'); localStorage.setItem('tw_lens_' + current.paneId, 'terminal'); setHandoffToast(cmd); }
-                  : undefined}
+                {...(currentAgent === 'claude' ? {
+                  onInteractiveSlash: (cmd: string) => {
+                    setLens('terminal');
+                    localStorage.setItem('tw_lens_' + current.paneId, 'terminal');
+                    setHandoffToast(cmd);
+                  },
+                } : {})}
               />
             ) : null
           ) : (
@@ -2337,7 +2363,7 @@ export default function App() {
               onKey={sendKey}
               onText={sendChar}
               cwd={currentPaneCwd}
-              agent={currentAgent || undefined}
+              agent={currentAgent ?? null}
               windowId={current.window?.id}
               recent={recent}
               favorites={favorites.map((text): ShortcutItem => ({ kind: 'cmd', text, source: 'local' }))}
@@ -2350,7 +2376,7 @@ export default function App() {
               desktopUnified={desktopInput}
               terminalFocused={terminalFocused}
               onLeaveTerminal={() => termRef.current?.blurInput?.()}
-              onReturnToTerminal={focusTerminal}
+              onReturnToTerminal={() => { focusTerminal(); }}
             />
           )}
         </>

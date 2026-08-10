@@ -102,7 +102,7 @@ export async function streamCodexMessages(
   const path = `/api/codex/stream?pane=${encodeURIComponent(pane)}${cursor}`;
   const response = await fetch(path, {
     cache: 'no-store',
-    signal,
+    ...(signal ? { signal } : {}),
     headers: { Authorization: `Bearer ${getToken() ?? ''}`, Accept: 'text/event-stream' },
   });
   if (response.status === 401) throw new UnauthorizedError();

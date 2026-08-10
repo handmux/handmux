@@ -209,7 +209,7 @@ export function createTerminalStreamMirror({
       ensureOpen();
       const nextTerm = new TerminalCtor({
         allowProposedApi: true,
-        scrollback,
+        ...(scrollback !== undefined ? { scrollback } : {}),
         convertEol: false,
       });
       const nextSerializer = new SerializeAddonCtor();

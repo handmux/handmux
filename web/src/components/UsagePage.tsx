@@ -67,6 +67,7 @@ const claudeUsageOf = (value: unknown): ClaudeUsage | null => {
   const usage = recordOf(value);
   if (!usage) return null;
   const limits = recordOf(usage.rateLimits) || {};
+  const updatedAt = updatedAtOf(usage);
   return {
     rateLimits: {
       fiveHour: usageWindowOf(limits.fiveHour),
@@ -74,7 +75,7 @@ const claudeUsageOf = (value: unknown): ClaudeUsage | null => {
       sevenDayOpus: usageWindowOf(limits.sevenDayOpus),
       sevenDaySonnet: usageWindowOf(limits.sevenDaySonnet),
     },
-    ...(updatedAtOf(usage) != null ? { updatedAt: updatedAtOf(usage) } : {}),
+    ...(updatedAt !== undefined ? { updatedAt } : {}),
   };
 };
 
@@ -82,12 +83,13 @@ const codexUsageOf = (value: unknown): CodexUsage | null => {
   const usage = recordOf(value);
   if (!usage) return null;
   const limits = recordOf(usage.rateLimits) || {};
+  const updatedAt = updatedAtOf(usage);
   return {
     rateLimits: {
       primary: usageWindowOf(limits.primary),
       secondary: usageWindowOf(limits.secondary),
     },
-    ...(updatedAtOf(usage) != null ? { updatedAt: updatedAtOf(usage) } : {}),
+    ...(updatedAt !== undefined ? { updatedAt } : {}),
   };
 };
 
@@ -170,7 +172,7 @@ function LimitRow({ label, pct, reset, sub, timePct }: {
         <span className="usage-row-label">{label}{sub && <span className="usage-row-sub"> · {sub}</span>}</span>
         <span className="usage-row-pct">{Math.round(pct)}%</span>
       </div>
-      <Bar pct={pct} timePct={timePct} />
+      <Bar pct={pct} timePct={timePct ?? null} />
       {reset && <div className="usage-row-reset">{reset}</div>}
     </div>
   );
@@ -179,7 +181,7 @@ function LimitRow({ label, pct, reset, sub, timePct }: {
 function ClaudeCard({ claude, now }: { claude: ClaudeUsage | null; now: number }) {
   return (
     <section className="usage-agent">
-      <div className="usage-agent-head"><AgentMark agent="claude" /><span>Claude Code</span><Updated at={claude?.updatedAt} now={now} /></div>
+      <div className="usage-agent-head"><AgentMark agent="claude" /><span>Claude Code</span><Updated at={claude?.updatedAt ?? null} now={now} /></div>
       {!claude ? (
         <div className="usage-empty">
           <div>{t('usage.claudeOff')}</div>
@@ -217,7 +219,7 @@ function CodexCard({ codex, now }: { codex: CodexUsage | null; now: number }) {
   const rl = codex?.rateLimits;
   return (
     <section className="usage-agent">
-      <div className="usage-agent-head"><AgentMark agent="codex" /><span>Codex CLI</span><Updated at={codex?.updatedAt} now={now} /></div>
+      <div className="usage-agent-head"><AgentMark agent="codex" /><span>Codex CLI</span><Updated at={codex?.updatedAt ?? null} now={now} /></div>
       {!codex ? (
         <div className="usage-empty">{t('usage.codexOff')}</div>
       ) : (

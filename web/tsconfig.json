@@ -6,6 +6,7 @@
     "allowJs": false,
     "noEmit": true,
     "strict": true,
+    "exactOptionalPropertyTypes": true,
     "noImplicitReturns": true,
     "noFallthroughCasesInSwitch": true,
     "useUnknownInCatchVariables": true,

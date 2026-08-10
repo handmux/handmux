@@ -885,6 +885,10 @@ function BottomDock({
   // commands already do exactly that on a tap, so they have no distinct hold (returns undefined = tap only).
   const holdTypeOnly = (f: ShortcutItem): (() => void) | undefined =>
     (f.kind === 'key' || !f.enter ? undefined : () => onText(f.text));
+  const holdProps = (f: ShortcutItem): { onHold?: () => void } => {
+    const onHold = holdTypeOnly(f);
+    return onHold ? { onHold } : {};
+  };
 
   // Imperative surface: the topbar idea panel drops a picked idea into the box (fill, never send); a clean
   // single tap on the terminal dismisses the keyboard (blur whichever field — command capture or composer —
@@ -938,7 +942,7 @@ function BottomDock({
   // transfer via the app-wide overlay); onPaths pastes the uploaded absolute paths into the composer.
   const { upload, uploadFiles } = useUpload({
     cwd,
-    onAuthFail,
+    ...(onAuthFail ? { onAuthFail } : {}),
     onPaths: (paths: string[]) => insertPaths(paths, {
       // Desktop restores the captured picker owner after upload; only a composer-owned session may let
       // the path-insertion frame focus the textarea. Mobile keeps its existing focus/soft-keyboard path.
@@ -1102,12 +1106,12 @@ function BottomDock({
                       (drop it in the shell and edit/append before you run it yourself). */}
                   {commandShortcuts.map((f, i) => (
                     <HoldButton key={`g:${shortcutIdentity(f)}:${i}`} className="quick-cmd quick-cmd-plain"
-                      onTap={() => runShortcut(f)} onHold={holdTypeOnly(f)}>
+                      onTap={() => runShortcut(f)} {...holdProps(f)}>
                       {favLabel(f)}{f.kind !== 'key' && f.enter && <span className="qc-enter" aria-hidden="true">⏎</span>}</HoldButton>
                   ))}
                   {windowShortcuts.map((f, i) => (
                     <HoldButton key={`w:${shortcutIdentity(f)}:${i}`} className="quick-cmd quick-cmd-win"
-                      onTap={() => runShortcut(f)} onHold={holdTypeOnly(f)}>
+                      onTap={() => runShortcut(f)} {...holdProps(f)}>
                       {favLabel(f)}{f.kind !== 'key' && f.enter && <span className="qc-enter" aria-hidden="true">⏎</span>}</HoldButton>
                   ))}
                   <button type="button" className="quick-cmd quick-cmd-add" aria-label={t('cmd.editTitle')}
@@ -1149,7 +1153,7 @@ function BottomDock({
                   {chatShortcuts.map((f, i) => (
                     <HoldButton key={`${shortcutIdentity(f)}:${i}`}
                       className={`quick-cmd qc-${f.kind === 'key' ? 'esc' : chipTint(f.text)}`}
-                      onTap={() => runShortcut(f)} onHold={holdTypeOnly(f)}>
+                      onTap={() => runShortcut(f)} {...holdProps(f)}>
                       {favLabel(f)}</HoldButton>
                   ))}
                   <button type="button" className="quick-cmd quick-cmd-add" aria-label={t('chat.editTitle')}
@@ -1245,7 +1249,8 @@ function BottomDock({
           </div>
         </div>
       </div>
-      <FavDrawer open={panelOpen} mode={mode} recent={recent} historyOnly onDelete={onRemoveRecent}
+      <FavDrawer open={panelOpen} mode={mode} recent={recent} historyOnly
+        {...(onRemoveRecent ? { onDelete: onRemoveRecent } : {})}
         onSend={(text) => { closeOverlay(setPanelOpen); sendFav(text); }}
         onFill={(text) => { setPanelOpen(false); fillFav(text); }}
         onClose={() => closeOverlay(setPanelOpen)} />

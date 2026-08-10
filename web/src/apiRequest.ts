@@ -49,7 +49,8 @@ export async function requestJson<T = unknown>(
   }
   try {
     const response = await fetch(path, {
-      cache: 'no-store', ...rest, headers, signal: controller?.signal,
+      cache: 'no-store', ...rest, headers,
+      ...(controller ? { signal: controller.signal } : {}),
     });
     if (response.status === 401) throw new UnauthorizedError();
     if (!response.ok) {

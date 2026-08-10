@@ -17,7 +17,6 @@ const FONTS: BundledFont[] = [
   {
     family: 'JetBrainsMono Nerd Font',
     url: '/fonts/JetBrainsMonoNerdFontMono-Regular.woff2',
-    probe: undefined,
   },
   {
     family: 'TW Unifont',

@@ -79,7 +79,7 @@ export default function PushScriptSheet({
           <span className="settings-title">{t('scriptPush.title')}</span>
           <button className="settings-close" onClick={onClose} aria-label={t('common.close')}>✕</button>
         </div>
-        <PushScriptContent pushKey={pushKey} notifyOn={notifyOn} />
+        <PushScriptContent pushKey={pushKey ?? null} notifyOn={notifyOn} />
       </div>
     </>
   );

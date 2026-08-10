@@ -320,9 +320,9 @@ function PaneTab({
                     cur={isCur}
                     releasing={isCur && !!picking && picking !== currentPaneId}
                     picking={picking === c.id}
-                    agent={paneAgents[c.id]}
+                    agent={paneAgents[c.id] ?? null}
                     onChoose={choose}
-                    onManage={onManagePane}
+                    {...(onManagePane ? { onManage: onManagePane } : {})}
                   />
                 );
               })}
@@ -341,7 +341,7 @@ function PaneTab({
               >
                 <span className="dd-option-label">
                   <span className="dd-pane-seq" aria-hidden="true">{seq(i)}</span>
-                  {paneAgents[p.id] && <AgentMark agent={paneAgents[p.id]} />}
+                  {paneAgents[p.id] && <AgentMark agent={paneAgents[p.id] ?? null} />}
                   <span className="dd-pane-cmd">{p.command || p.id}</span>
                 </span>
                 {p.id === currentPaneId && <span className="dd-check" aria-hidden="true">✓</span>}
@@ -382,15 +382,15 @@ export default function WindowBar({
                 panes={panes}
                 paneAgents={paneAgents}
                 currentPaneId={currentPaneId}
-                agent={currentAgent}
+                agent={currentAgent ?? null}
                 onManage={onManageWindow}
-                onManagePane={onManagePane}
+                {...(onManagePane ? { onManagePane } : {})}
                 onSelectPane={onSelectPane}
-                onBeforePaneMapOpen={onBeforePaneMapOpen}
+                {...(onBeforePaneMapOpen ? { onBeforePaneMapOpen } : {})}
                 paneSheetOpen={paneSheetOpen}
                 openMapFor={openMapFor}
-                onMapOpened={onMapOpened}
-                onPaneMapOpenChange={onPaneMapOpenChange}
+                {...(onMapOpened ? { onMapOpened } : {})}
+                {...(onPaneMapOpenChange ? { onPaneMapOpenChange } : {})}
               />
             );
           }
@@ -399,7 +399,7 @@ export default function WindowBar({
               key={w.id}
               window={w}
               active={active}
-              agent={windowAgents[w.id]}
+              agent={windowAgents[w.id] ?? null}
               onSelect={onSelectWindow}
               onManage={onManageWindow}
             />

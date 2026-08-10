@@ -105,7 +105,11 @@ export function saveFavs(mode: string, items: StoredFav[]): StoredFav[] {
 
 function storedFav(item: ShortcutItem): StoredFav {
   return item.kind === 'key'
-    ? { kind: 'key', text: item.text, label: item.label }
+    ? {
+      kind: 'key',
+      text: item.text,
+      ...(item.label !== undefined ? { label: item.label } : {}),
+    }
     : { kind: item.kind, text: item.text, enter: !!item.enter };
 }
 

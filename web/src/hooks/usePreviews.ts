@@ -223,7 +223,11 @@ export function usePreviews(current?: PreviewCurrent | null) {
   }, [ensurePreview]);
 
   const curPreviewName = current
-    ? previewName({ session: current.session?.name, windowName: current.window?.name, windowId: current.window?.id })
+    ? previewName({
+      session: current.session?.name ?? null,
+      windowName: current.window?.name ?? null,
+      windowId: current.window?.id ?? null,
+    })
     : null;
   const tabs: StaticPreviewTab[] = openTabs.map((saved) => ({
     ...saved,

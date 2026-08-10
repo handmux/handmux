@@ -42,6 +42,16 @@ export interface RuntimeBrowserTab extends PersistedBrowserTab {
   generation?: ProxyGeneration;
 }
 
+function withoutBinding(tab: RuntimeBrowserTab): RuntimeBrowserTab {
+  const { url: _url, channel: _channel, generation: _generation, ...rest } = tab;
+  return rest;
+}
+
+function withoutProxyState(tab: RuntimeBrowserTab): RuntimeBrowserTab {
+  const { siteVersion: _siteVersion, ...rest } = withoutBinding(tab);
+  return rest;
+}
+
 interface BrowserBinding {
   url: string;
   channel?: string;
@@ -308,20 +318,21 @@ export function useBrowser({ enabled = true, browserProxy = false }: UseBrowserO
       proxyGeneration.current = binding.generation;
       commitTabs((current) => current.map((item) => (
         item.mode === 'proxy' && item.id !== id
-          ? { ...item, url: undefined, channel: undefined, generation: undefined }
+          ? withoutBinding(item)
           : item
       )));
     }
     let result: RuntimeBrowserTab | null = null;
     commitTabs((current) => current.map((item) => {
       if (item.id !== id || item.mode !== 'proxy') return item;
-      result = {
-        ...item,
+      const bound: RuntimeBrowserTab = {
+        ...withoutBinding(item),
         url: binding.url,
-        channel: binding.channel,
-        generation: binding.generation,
+        ...(binding.channel !== undefined ? { channel: binding.channel } : {}),
+        ...(binding.generation !== undefined ? { generation: binding.generation } : {}),
       };
-      return result;
+      result = bound;
+      return bound;
     }));
     return result;
   }, [commitTabs]);
@@ -434,7 +445,7 @@ export function useBrowser({ enabled = true, browserProxy = false }: UseBrowserO
 
   const recoverBinding = useCallback((id: string): Promise<RuntimeBrowserTab | null> => {
     commitTabs((current) => current.map((tab) => tab.id === id && tab.mode === 'proxy'
-      ? { ...tab, url: undefined, channel: undefined, generation: undefined }
+      ? withoutBinding(tab)
       : tab));
     return ensureBinding(id, { force: true });
   }, [commitTabs, ensureBinding]);
@@ -448,7 +459,7 @@ export function useBrowser({ enabled = true, browserProxy = false }: UseBrowserO
       proxyGeneration.current = status.generation;
       if (changed) {
         commitTabs((current) => current.map((tab) => tab.mode === 'proxy'
-          ? { ...tab, url: undefined, channel: undefined, generation: undefined }
+          ? withoutBinding(tab)
           : tab));
       }
     } catch {
@@ -671,13 +682,11 @@ export function useBrowser({ enabled = true, browserProxy = false }: UseBrowserO
       return null;
     }
     const mode = requestedMode || current.mode;
-    const siteVersion = mode === 'proxy'
-      ? (requestedSiteVersion === 'desktop'
-        ? 'desktop'
-        : requestedSiteVersion === 'mobile'
-          ? 'mobile'
-          : current.mode === 'proxy' && current.siteVersion === 'desktop' ? 'desktop' : 'mobile')
-      : undefined;
+    const siteVersion: BrowserSiteVersion = requestedSiteVersion === 'desktop'
+      ? 'desktop'
+      : requestedSiteVersion === 'mobile'
+        ? 'mobile'
+        : current.mode === 'proxy' && current.siteVersion === 'desktop' ? 'desktop' : 'mobile';
     if (mode === 'proxy' && !browserProxy) {
       setError(new Error(t('browser.proxyUnavailable')));
       return null;
@@ -687,17 +696,18 @@ export function useBrowser({ enabled = true, browserProxy = false }: UseBrowserO
     navigateSequence.current.set(id, sequence);
     navigatingTabs.current.set(id, sequence);
     if (current.mode === 'proxy' && mode === 'direct') release(current);
-    commitTabs((all) => all.map((tab) => tab.id === id ? {
-      ...tab,
-      mode,
-      originalUrl: url,
-      title: '',
-      ...(mode === 'direct'
-        ? { url, channel: undefined, generation: undefined, siteVersion: undefined }
-        : (current.mode === 'proxy'
-          ? { siteVersion }
-          : { url: undefined, channel: undefined, generation: undefined, siteVersion })),
-    } : tab));
+    commitTabs((all) => all.map((tab) => {
+      if (tab.id !== id) return tab;
+      const next: RuntimeBrowserTab = {
+        ...tab,
+        mode,
+        originalUrl: url,
+        title: '',
+      };
+      return mode === 'direct'
+        ? { ...withoutProxyState(next), url }
+        : { ...withoutBinding(next), siteVersion };
+    }));
     if (mode === 'proxy') {
       const prior = navigateQueues.current.get(id) || Promise.resolve();
       const request: Promise<BrowserBinding | null> = prior.catch(() => {}).then(async () => {
@@ -736,7 +746,7 @@ export function useBrowser({ enabled = true, browserProxy = false }: UseBrowserO
           && latest.originalUrl === url
           && latest.siteVersion === siteVersion) {
           commitTabs((all) => all.map((tab) => tab.id === id
-            ? { ...tab, url: undefined, channel: undefined, generation: undefined }
+            ? withoutBinding(tab)
             : tab));
           const message = errorRecord(nextError).message || t('browser.loadFailed');
           setError(nextError instanceof Error ? nextError : new Error(message));

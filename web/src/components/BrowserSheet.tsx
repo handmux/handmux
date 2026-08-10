@@ -604,7 +604,7 @@ export default function BrowserSheet({ browser, staticPreview }: BrowserSheetPro
     <OverlayPortal>
       <div className={`file-sheet browser-sheet ${open ? 'open' : ''}`} aria-hidden={!open}>
       <div className="browser-tabs" role="tablist" aria-label={t('browser.openTabs')}
-        inert={clearConfirmation ? '' : undefined}>
+        {...(clearConfirmation ? { inert: '' as const } : {})}>
         <button className={`browser-tab browser-history-tab ${homeActive ? 'active' : ''}`} role="tab"
           aria-selected={homeActive} aria-label={t('browser.history')} title={t('browser.history')}
           onClick={selectHistory}>
@@ -651,7 +651,7 @@ export default function BrowserSheet({ browser, staticPreview }: BrowserSheetPro
           onClick={() => { setOptionsOpen(false); setOpen(false); }}><ChevronDownIcon /></button>
       </div>
 
-      <div className="browser-nav" inert={clearConfirmation ? '' : undefined}>
+      <div className="browser-nav" {...(clearConfirmation ? { inert: '' as const } : {})}>
         <form className="browser-address-form" onSubmit={submitAddress}>
           <GlobeIcon />
           <span className={`browser-address-mode ${menuMode}`}>
@@ -834,7 +834,7 @@ export default function BrowserSheet({ browser, staticPreview }: BrowserSheetPro
       </div>
 
       <div ref={bodyRef} className={`browser-content ${pageWidth}`}
-        inert={clearConfirmation ? '' : undefined}>
+        {...(clearConfirmation ? { inert: '' as const } : {})}>
         <section className="browser-history" hidden={!homeActive}>
           <div className="browser-history-head">
             <h2>{t('browser.history')}</h2>

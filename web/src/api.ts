@@ -89,12 +89,13 @@ function parseWindows(value: unknown): TmuxWindow[] {
   return value.flatMap((candidate): TmuxWindow[] => {
     const win = recordOf(candidate);
     if (!win || typeof win.id !== 'string') return [];
+    const width = finiteOrUndefined(win.width);
     return [{
       id: win.id,
       name: typeof win.name === 'string' ? win.name : win.id,
       panes: finiteOrUndefined(win.panes) ?? 0,
       ...(typeof win.active === 'boolean' ? { active: win.active } : {}),
-      ...(finiteOrUndefined(win.width) !== undefined ? { width: finiteOrUndefined(win.width) } : {}),
+      ...(width !== undefined ? { width } : {}),
       ...(typeof win.activePaneId === 'string' ? { activePaneId: win.activePaneId } : {}),
     }];
   });
@@ -105,15 +106,19 @@ function parsePanes(value: unknown): TmuxPane[] {
   return value.flatMap((candidate): TmuxPane[] => {
     const pane = recordOf(candidate);
     if (!pane || typeof pane.id !== 'string') return [];
+    const left = finiteOrUndefined(pane.left);
+    const top = finiteOrUndefined(pane.top);
+    const width = finiteOrUndefined(pane.width);
+    const height = finiteOrUndefined(pane.height);
     return [{
       id: pane.id,
       ...(typeof pane.active === 'boolean' ? { active: pane.active } : {}),
       ...(typeof pane.command === 'string' || pane.command === null ? { command: pane.command } : {}),
       ...(typeof pane.agent === 'string' || pane.agent === null ? { agent: pane.agent } : {}),
-      ...(finiteOrUndefined(pane.left) !== undefined ? { left: finiteOrUndefined(pane.left) } : {}),
-      ...(finiteOrUndefined(pane.top) !== undefined ? { top: finiteOrUndefined(pane.top) } : {}),
-      ...(finiteOrUndefined(pane.width) !== undefined ? { width: finiteOrUndefined(pane.width) } : {}),
-      ...(finiteOrUndefined(pane.height) !== undefined ? { height: finiteOrUndefined(pane.height) } : {}),
+      ...(left !== undefined ? { left } : {}),
+      ...(top !== undefined ? { top } : {}),
+      ...(width !== undefined ? { width } : {}),
+      ...(height !== undefined ? { height } : {}),
     }];
   });
 }
@@ -447,6 +452,8 @@ export const getOrphans = async (): Promise<OrphanProcess[]> => {
     const orphan = recordOf(candidate);
     if (!orphan || typeof orphan.pid !== 'number' || !Number.isFinite(orphan.pid)
       || typeof orphan.cwd !== 'string') return [];
+    const startedAt = finiteOrUndefined(orphan.startedAt);
+    const lastActivity = finiteOrUndefined(orphan.lastActivity);
     return [{
       pid: orphan.pid,
       cwd: orphan.cwd,
@@ -456,8 +463,8 @@ export const getOrphans = async (): Promise<OrphanProcess[]> => {
       ...(typeof orphan.snippet === 'string' ? { snippet: orphan.snippet } : {}),
       ...(typeof orphan.agentLabel === 'string' ? { agentLabel: orphan.agentLabel } : {}),
       ...(typeof orphan.suggestedName === 'string' ? { suggestedName: orphan.suggestedName } : {}),
-      ...(finiteOrUndefined(orphan.startedAt) !== undefined ? { startedAt: finiteOrUndefined(orphan.startedAt) } : {}),
-      ...(finiteOrUndefined(orphan.lastActivity) !== undefined ? { lastActivity: finiteOrUndefined(orphan.lastActivity) } : {}),
+      ...(startedAt !== undefined ? { startedAt } : {}),
+      ...(lastActivity !== undefined ? { lastActivity } : {}),
     }];
   });
 };

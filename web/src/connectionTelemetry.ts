@@ -119,7 +119,10 @@ export function createConnectionTelemetry({
   return {
     sample({ ok, rttMs }) {
       if (disposed) return;
-      const quality = classifyConnectionSample({ ok, rttMs });
+      const quality = classifyConnectionSample({
+        ok,
+        ...(rttMs !== undefined ? { rttMs } : {}),
+      });
       const measuredRtt = typeof rttMs === 'number' && Number.isFinite(rttMs)
         ? Math.max(0, Math.round(rttMs))
         : null;

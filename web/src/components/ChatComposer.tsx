@@ -359,9 +359,10 @@ function parseCodexModels(value: unknown): CodexModel[] {
       ? model.supportedReasoningEfforts.flatMap((entry): ReasoningEffort[] => {
         const effort = recordOf(entry);
         const reasoningEffort = optionalText(effort?.reasoningEffort);
+        const description = optionalText(effort?.description);
         return reasoningEffort ? [{
           reasoningEffort,
-          ...(optionalText(effort?.description) ? { description: optionalText(effort?.description) } : {}),
+          ...(description ? { description } : {}),
         }] : [];
       })
       : undefined;
@@ -369,24 +370,28 @@ function parseCodexModels(value: unknown): CodexModel[] {
       ? model.serviceTiers.flatMap((entry): ServiceTier[] => {
         const tier = recordOf(entry);
         const tierId = optionalText(tier?.id);
+        const name = optionalText(tier?.name);
+        const description = optionalText(tier?.description);
         return tierId ? [{
           id: tierId,
-          ...(optionalText(tier?.name) ? { name: optionalText(tier?.name) } : {}),
-          ...(optionalText(tier?.description) ? { description: optionalText(tier?.description) } : {}),
+          ...(name ? { name } : {}),
+          ...(description ? { description } : {}),
         }] : [];
       })
       : undefined;
     const speedTiers = Array.isArray(model.additionalSpeedTiers)
       ? model.additionalSpeedTiers.filter((entry): entry is string => typeof entry === 'string')
       : undefined;
+    const modelName = optionalText(model.model);
+    const displayName = optionalText(model.displayName);
+    const description = optionalText(model.description);
+    const defaultReasoningEffort = optionalText(model.defaultReasoningEffort);
     return [{
       id,
-      ...(optionalText(model.model) ? { model: optionalText(model.model) } : {}),
-      ...(optionalText(model.displayName) ? { displayName: optionalText(model.displayName) } : {}),
-      ...(optionalText(model.description) ? { description: optionalText(model.description) } : {}),
-      ...(optionalText(model.defaultReasoningEffort)
-        ? { defaultReasoningEffort: optionalText(model.defaultReasoningEffort) }
-        : {}),
+      ...(modelName ? { model: modelName } : {}),
+      ...(displayName ? { displayName } : {}),
+      ...(description ? { description } : {}),
+      ...(defaultReasoningEffort ? { defaultReasoningEffort } : {}),
       ...(efforts ? { supportedReasoningEfforts: efforts } : {}),
       ...(serviceTiers ? { serviceTiers } : {}),
       ...(speedTiers ? { additionalSpeedTiers: speedTiers } : {}),
@@ -533,9 +538,9 @@ function CodexConfigMenu({
                 options={efforts.map((item) => ({
                   value: item.reasoningEffort,
                   label: item.reasoningEffort,
-                  description: item.description,
+                  ...(item.description !== undefined ? { description: item.description } : {}),
                 }))}
-                value={settings?.effort}
+                value={settings?.effort ?? null}
                 disabled={disabled}
                 ariaLabel={t('chat.config.effort')}
                 onCommit={(effort: string) => void save({ effort })}
@@ -1283,7 +1288,11 @@ export default function ChatComposer({
     setValue((v) => (v && !/\s$/.test(v) ? `${v} ${text}` : v + text));
     requestAnimationFrame(() => { ref.current?.focus(); autoGrow(ref.current); });
   };
-  const { uploadFiles } = useUpload({ cwd, onAuthFail, onPaths: insertPaths });
+  const { uploadFiles } = useUpload({
+    cwd,
+    onPaths: insertPaths,
+    ...(onAuthFail ? { onAuthFail } : {}),
+  });
 
   return (
     <div className="chat-composer" onPointerDown={keepFocus}>
@@ -1396,7 +1405,8 @@ export default function ChatComposer({
               </button>
             )}
             <CodexConfigMenu open={configOpen} pane={pane} settings={managedSettings} busy={busy}
-              onChange={setLocalSettings} onClose={() => setConfigOpen(false)} onAuthFail={onAuthFail} />
+              onChange={setLocalSettings} onClose={() => setConfigOpen(false)}
+              {...(onAuthFail ? { onAuthFail } : {})} />
           </div>
           <div className="cc-actions-right">
             {/* Context-window chip — model + used %, right-aligned just left of mic/send. pointer-events:none
@@ -1578,7 +1588,8 @@ export default function ChatComposer({
         onClose={() => setPlanOpen(false)} portal chatTone={chatTone} keyboardInset={keyboardInset}
         animateInProgress={!planWaiting} />
       <CodexGoalMenu open={goalOpen} pane={pane} editOnOpen={goalEditOnOpen}
-        onClose={() => setGoalOpen(false)} onAuthFail={onAuthFail} onNotice={showNotice}
+        onClose={() => setGoalOpen(false)} onNotice={showNotice}
+        {...(onAuthFail ? { onAuthFail } : {})}
         onGoalChange={applyCurrentGoal} portal chatTone={chatTone} keyboardInset={keyboardInset} />
       {editOpen && <CmdFavEditor variant="chat" presets={serverShortcuts.chat}
         onChange={refreshShortcuts} onClose={() => setEditOpen(false)} />}

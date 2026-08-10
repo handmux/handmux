@@ -139,7 +139,9 @@ export function paneLayout(panes: readonly PaneLayoutSource[] | null | undefined
     const y0 = yOff[ys.indexOf(p.top)].at;
     const y1 = yOff[ys.indexOf(p.top + p.height)].at;
     return {
-      id: p.id, active: !!p.active, command: p.command, seq,
+      id: p.id, active: !!p.active,
+      ...(p.command !== undefined ? { command: p.command } : {}),
+      seq,
       left: x0, top: y0, width: x1 - x0, height: y1 - y0,
       cols: p.width, rows: p.height,
     };

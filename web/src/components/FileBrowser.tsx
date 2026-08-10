@@ -86,12 +86,16 @@ function parseDirectoryListing(value: unknown): DirectoryListing {
       || !(entry.size === undefined || (typeof entry.size === 'number' && Number.isFinite(entry.size)))) {
       throw new Error('Directory API returned an invalid entry');
     }
-    return { name: entry.name, type: entry.type, size: entry.size as number | undefined };
+    return {
+      name: entry.name,
+      type: entry.type,
+      ...(typeof entry.size === 'number' ? { size: entry.size } : {}),
+    };
   });
   return {
     path: listing.path,
     home: listing.home,
-    roots: listing.roots as string[] | undefined,
+    ...(Array.isArray(listing.roots) ? { roots: listing.roots as string[] } : {}),
     parent: listing.parent,
     entries,
   };

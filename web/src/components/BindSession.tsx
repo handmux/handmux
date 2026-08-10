@@ -37,7 +37,10 @@ const parseSessions = (value: unknown): HostSession[] => {
     if (typeof session.name !== 'string' || !(session.id === undefined || typeof session.id === 'string')) {
       throw new Error('Sessions API returned an invalid entry');
     }
-    return { name: session.name, id: session.id as string | undefined };
+    return {
+      name: session.name,
+      ...(typeof session.id === 'string' ? { id: session.id } : {}),
+    };
   });
 };
 

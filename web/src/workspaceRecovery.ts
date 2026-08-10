@@ -69,27 +69,30 @@ const optionalString = (value: unknown): string | null | undefined => (
 const stringArray = (value: unknown): string[] => (
   Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : []
 );
-const defined = <T extends object>(value: T): T => Object.fromEntries(
-  Object.entries(value).filter(([, entry]) => entry !== undefined),
-) as T;
+const optionalField = <K extends string, V>(
+  key: K,
+  value: V | undefined,
+): { [P in K]?: V } => (
+  value === undefined ? {} : { [key]: value } as { [P in K]: V }
+);
 const countsOf = (value: unknown): WorkspaceCounts | undefined => {
   const counts = recordOf(value);
   if (!counts) return undefined;
-  return defined({
-    sessions: finiteNumber(counts.sessions),
-    windows: finiteNumber(counts.windows),
-    panes: finiteNumber(counts.panes),
-    agents: finiteNumber(counts.agents),
-  });
+  return {
+    ...optionalField('sessions', finiteNumber(counts.sessions)),
+    ...optionalField('windows', finiteNumber(counts.windows)),
+    ...optionalField('panes', finiteNumber(counts.panes)),
+    ...optionalField('agents', finiteNumber(counts.agents)),
+  };
 };
 const planSessionOf = (value: unknown): WorkspacePlanSession | null => {
   const session = recordOf(value);
-  return session ? defined({
-    logicalId: optionalString(session.logicalId),
-    sourceName: optionalString(session.sourceName),
-    targetName: optionalString(session.targetName),
-    action: optionalString(session.action),
-  }) : null;
+  return session ? {
+    ...optionalField('logicalId', optionalString(session.logicalId)),
+    ...optionalField('sourceName', optionalString(session.sourceName)),
+    ...optionalField('targetName', optionalString(session.targetName)),
+    ...optionalField('action', optionalString(session.action)),
+  } : null;
 };
 
 export function parseWorkspaceRecoveryPlan(value: unknown): WorkspaceRecoveryPlan | null {
@@ -97,28 +100,30 @@ export function parseWorkspaceRecoveryPlan(value: unknown): WorkspaceRecoveryPla
   if (!plan) return null;
   const rawPlanSummary = recordOf(plan.planSummary);
   const summary = countsOf(plan.summary);
-  const planSummary: WorkspacePlanSummary | undefined = rawPlanSummary ? defined({
+  const planSummary: WorkspacePlanSummary | undefined = rawPlanSummary ? {
     ...countsOf(rawPlanSummary),
-    create: finiteNumber(rawPlanSummary.create),
-    renamed: finiteNumber(rawPlanSummary.renamed),
-    alreadyPresent: finiteNumber(rawPlanSummary.alreadyPresent),
-    unsupported: finiteNumber(rawPlanSummary.unsupported),
-  }) : undefined;
-  return defined({
-    checkpointId: optionalString(plan.checkpointId),
-    capturedAt: optionalString(plan.capturedAt),
-    changeReason: optionalString(plan.changeReason),
-    promptEligible: typeof plan.promptEligible === 'boolean' ? plan.promptEligible : undefined,
-    resolved: typeof plan.resolved === 'boolean' ? plan.resolved : undefined,
-    pendingCount: finiteNumber(plan.pendingCount) ?? (plan.pendingCount === null ? null : undefined),
-    summary,
-    planSummary,
+    ...optionalField('create', finiteNumber(rawPlanSummary.create)),
+    ...optionalField('renamed', finiteNumber(rawPlanSummary.renamed)),
+    ...optionalField('alreadyPresent', finiteNumber(rawPlanSummary.alreadyPresent)),
+    ...optionalField('unsupported', finiteNumber(rawPlanSummary.unsupported)),
+  } : undefined;
+  const pendingCount = finiteNumber(plan.pendingCount)
+    ?? (plan.pendingCount === null ? null : undefined);
+  return {
+    ...optionalField('checkpointId', optionalString(plan.checkpointId)),
+    ...optionalField('capturedAt', optionalString(plan.capturedAt)),
+    ...optionalField('changeReason', optionalString(plan.changeReason)),
+    ...optionalField('promptEligible', typeof plan.promptEligible === 'boolean' ? plan.promptEligible : undefined),
+    ...optionalField('resolved', typeof plan.resolved === 'boolean' ? plan.resolved : undefined),
+    ...optionalField('pendingCount', pendingCount),
+    ...optionalField('summary', summary),
+    ...optionalField('planSummary', planSummary),
     ...(Array.isArray(plan.sessions) ? { sessions: plan.sessions.flatMap((session) => {
         const parsed = planSessionOf(session);
         return parsed ? [parsed] : [];
       }) } : {}),
     ...(plan.mapping !== undefined ? { mapping: plan.mapping } : {}),
-  });
+  };
 }
 
 export function parseWorkspaceRestoreOperation(value: unknown): (WorkspaceRestoreOperation & { id?: string }) | null {
@@ -130,26 +135,27 @@ export function parseWorkspaceRestoreOperation(value: unknown): (WorkspaceRestor
       const result = recordOf(candidate);
       const session = planSessionOf(candidate);
       if (!result || !session) return [];
-      return [defined({
+      return [{
         ...session,
-        status: optionalString(result.status),
-        errorCode: optionalString(result.errorCode),
+        ...optionalField('status', optionalString(result.status)),
+        ...optionalField('errorCode', optionalString(result.errorCode)),
         warningCodes: stringArray(result.warningCodes),
-      })];
+      }];
     }) : [];
-  return defined({
+  const parsedProgress = progress ? {
+    ...optionalField('completed', finiteNumber(progress.completed)),
+    ...optionalField('total', finiteNumber(progress.total)),
+  } : undefined;
+  return {
     ...(typeof operation.id === 'string' ? { id: operation.id } : {}),
-    status: optionalString(operation.status),
-    progress: progress ? defined({
-      completed: finiteNumber(progress.completed),
-      total: finiteNumber(progress.total),
-    }) : undefined,
-    summary: countsOf(operation.summary),
+    ...optionalField('status', optionalString(operation.status)),
+    ...optionalField('progress', parsedProgress),
+    ...optionalField('summary', countsOf(operation.summary)),
     ...(Array.isArray(operation.results) ? { results } : {}),
-    errorCode: optionalString(operation.errorCode),
+    ...optionalField('errorCode', optionalString(operation.errorCode)),
     ...(Array.isArray(operation.warningCodes) ? { warningCodes: stringArray(operation.warningCodes) } : {}),
     ...(operation.mapping !== undefined ? { mapping: operation.mapping } : {}),
-  });
+  };
 }
 
 export function recoveryPromptMode(plan: WorkspaceRecoveryPlan | null | undefined, {

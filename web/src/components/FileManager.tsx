@@ -214,7 +214,8 @@ export default function FileManager({
               ? <HomeView onOpenDoc={onOpenDoc} refreshKey={refreshKey} />
               : <FileBrowser path={browsePath} onNavigate={onNavigate} onOpenDoc={onOpenDoc}
                   onJumpToCwd={pane ? jumpToCwd : null} refreshKey={refreshKey}
-                  pendingFile={pendingShare} onPendingConsumed={onPendingConsumed} overlayActive={open} />}
+                  pendingFile={pendingShare ?? null} overlayActive={open}
+                  {...(onPendingConsumed ? { onPendingConsumed } : {})} />}
           </div>
         ) : <DocView type={cur.type} name={cur.name} content={typeof cur.content === 'string' ? cur.content : ''} />}
       </div>

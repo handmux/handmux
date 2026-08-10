@@ -32,13 +32,20 @@ export const HOME_TAB: DocTab = {
 };
 
 // Undefined content/mtime means "reuse the existing value" (not "clear it").
-const mergeMeta = (tab: DocTab, meta: DocTabMeta): DocTab => ({
-  ...tab,
-  type: meta.type ?? tab.type,
-  name: meta.name ?? tab.name,
-  content: meta.content !== undefined ? meta.content : tab.content,
-  mtime: meta.mtime !== undefined ? meta.mtime : tab.mtime,
-});
+const mergeMeta = (tab: DocTab, meta: DocTabMeta): DocTab => {
+  const merged: DocTab = {
+    ...tab,
+    type: meta.type ?? tab.type,
+    name: meta.name ?? tab.name,
+  };
+  const content = meta.content !== undefined ? meta.content : tab.content;
+  const mtime = meta.mtime !== undefined ? meta.mtime : tab.mtime;
+  if (content !== undefined) merged.content = content;
+  else delete merged.content;
+  if (mtime !== undefined) merged.mtime = mtime;
+  else delete merged.mtime;
+  return merged;
+};
 
 export function openDocState(state: DocTabsState, path: string, meta: OpenDocMeta): DocTabsState {
   if (state.tabs.some((tab) => tab.key === path)) {
@@ -51,8 +58,8 @@ export function openDocState(state: DocTabsState, path: string, meta: OpenDocMet
     key: path,
     type: meta.type,
     name: meta.name,
-    content: meta.content,
-    mtime: meta.mtime,
+    ...(meta.content !== undefined ? { content: meta.content } : {}),
+    ...(meta.mtime !== undefined ? { mtime: meta.mtime } : {}),
     path,
   };
   return { tabs: [...state.tabs, tab], active: path };

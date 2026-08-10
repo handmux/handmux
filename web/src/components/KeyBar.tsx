@@ -71,7 +71,8 @@ export default function KeyBar({ onKey, onText, mods, setMods, keyHeldRef }: Key
 
   const cell = (id: CommandKeyId) => {
     if (isModifier(id)) return <ModKey key={id} id={id} state={mods[id]} setMods={setMods} />;
-    return <Key key={id} id={id} dispatch={dispatch} keyHeldRef={keyHeldRef} />;
+    return <Key key={id} id={id} dispatch={dispatch}
+      {...(keyHeldRef ? { keyHeldRef } : {})} />;
   };
 
   // A 7-column grid: flattening the rows keeps every column aligned, so ▲ sits directly above ▼ (the

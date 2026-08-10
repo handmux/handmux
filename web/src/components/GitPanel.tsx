@@ -231,7 +231,10 @@ export default function GitPanel({ open, pane, windowId, inset = 0, onClose }: G
     let cancelled = false;
     (async () => {
       try {
-        const list = parseGitLog(await gitLog(active, { ref: viewedBranch || undefined, limit: commitLimit }));
+        const list = parseGitLog(await gitLog(active, {
+          limit: commitLimit,
+          ...(viewedBranch ? { ref: viewedBranch } : {}),
+        }));
         if (!cancelled) setCommits(list);
       } catch {
         if (!cancelled) setCommits([]);
@@ -258,7 +261,11 @@ export default function GitPanel({ open, pane, windowId, inset = 0, onClose }: G
       try {
         let payload: DrillPayload;
         if (drill.kind === 'diff') {
-          const response = parseGitDiffResponse(await gitDiff(active, { path: drill.path, commit: drill.commit, staged: drill.staged }));
+          const response = parseGitDiffResponse(await gitDiff(active, {
+            path: drill.path,
+            ...(drill.commit !== undefined ? { commit: drill.commit } : {}),
+            ...(drill.staged !== undefined ? { staged: drill.staged } : {}),
+          }));
           payload = { kind: 'diff', files: parseDiff(response.diff), truncated: response.truncated };
         } else {
           payload = { kind: 'commit', ...parseGitCommit(await gitCommit(active, drill.hash)) };
@@ -442,7 +449,7 @@ export default function GitPanel({ open, pane, windowId, inset = 0, onClose }: G
                   onOpenFile={(path) => pushDrill({
                     kind: 'diff',
                     path,
-                    commit: drill.kind === 'commit' ? drill.hash : undefined,
+                    ...(drill.kind === 'commit' ? { commit: drill.hash } : {}),
                   })}
                 />}
           </div>
@@ -452,7 +459,8 @@ export default function GitPanel({ open, pane, windowId, inset = 0, onClose }: G
             rest and scrolls (load-more). Both collapse independently. 分支 lives in the header dropdown. */}
         {!drilledIn && active && !error && (
           <>
-            <Section variant="top" title={t('git.changes')} count={changes?.length} expanded={expanded.changes} onToggle={() => toggle('changes')}>
+            <Section variant="top" title={t('git.changes')} expanded={expanded.changes} onToggle={() => toggle('changes')}
+              {...(changes ? { count: changes.length } : {})}>
               {changes == null ? <div className="git-loading">{t('common.loading')}</div>
                 : <ChangesView data={{ changes }} onOpenFile={(path, staged) => pushDrill({ kind: 'diff', path, staged })} />}
             </Section>
@@ -473,7 +481,7 @@ export default function GitPanel({ open, pane, windowId, inset = 0, onClose }: G
       <DirPicker
         open={pickOpen}
         seedCwd={seedCwd}
-        pane={pane}
+        pane={pane ?? null}
         inset={inset}
         hint={t('git.pickerHint')}
         onPick={onPick}

@@ -87,7 +87,13 @@ export default function OrphanTakeoverSheet({
     setOrphanKill(kill); // remember the choice for next time
     const tgt: OrphanTakeoverTarget = target === 'new'
       ? { mode: 'new' } : { mode: 'window', session: target };
-    try { await onConfirm({ target: tgt, kill, name: target === 'new' ? name.trim() : undefined }); } // success → App closes this sheet
+    try {
+      await onConfirm({
+        target: tgt,
+        kill,
+        ...(target === 'new' ? { name: name.trim() } : {}),
+      });
+    } // success → App closes this sheet
     catch { setBusy(false); setError(t('inbox.orphans.failed')); }
   };
 

@@ -117,7 +117,7 @@ export default function NewWindowModal({ open, onClose, onCreate, paneId, inset 
       <DirPicker
         open={pickerOpen}
         seedCwd={cwd || defaultCwd || null}
-        pane={paneId}
+        pane={paneId ?? null}
         allowMkdir
         onPick={(p) => { setCwd(p); setPickerOpen(false); }}
         onClose={() => setPickerOpen(false)}
