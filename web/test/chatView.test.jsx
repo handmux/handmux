@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, act, cleanup } from '@testing-library/react';
+import { readFileSync } from 'node:fs';
 import ChatView from '../src/components/ChatView.jsx';
 import * as api from '../src/api.js';
 import { projectCodexStreamEvent } from '../../server/src/codexStreamProtocol.js';
@@ -19,6 +20,7 @@ beforeEach(() => {
 });
 
 let projectionSequence = 0;
+const styles = readFileSync(`${process.cwd()}/src/styles.css`, 'utf8');
 function projected(event) {
   projectionSequence += 1;
   return projectCodexStreamEvent({ threadId: 'thread-1', ...event }, projectionSequence);
@@ -791,6 +793,18 @@ describe('ChatView', () => {
     const card = await screen.findByRole('button', { name: /已设置目标.*Ship a fresh release/ });
     expect(card.classList.contains('is-user')).toBe(true);
     expect(container.querySelector('.codex-goal-menu')).toBeNull();
+
+    act(() => emit({
+      type: 'conversationSnapshot', threadId: 'thread-1', cursor: projectionSequence + 1,
+      messages: [{
+        id: 'codex-goal:Ship%20a%20fresh%20release:set', k: 1, role: 'assistant', type: 'goal', event: 'set',
+        goal: { objective: 'Ship a fresh release', status: 'active' }, completed: true,
+      }],
+    }));
+    await waitFor(() => expect(container.querySelectorAll('.chat-goal-card')).toHaveLength(1));
+    expect(container.querySelector('.chat-goal-card').textContent).toContain('Ship a fresh release');
+    expect(styles).toMatch(/\.chat-goal-card\s*\{[^}]*padding:\s*9px 10px/);
+    expect(styles).toMatch(/\.chat-goal-copy > span\s*\{[^}]*-webkit-line-clamp:\s*3/);
   });
 
   it('keeps a terminal Goal fully read-only when it is no longer current', async () => {

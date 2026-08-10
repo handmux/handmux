@@ -37,6 +37,51 @@ describe('useTranscript', () => {
     expect(merged[1].tool.result).toBe('done');
   });
 
+  it('lets one durable Goal replace its matching live card even when their ids differ', () => {
+    const objective = '审核距离上一个公开版本的改动并准备发布';
+    const existing = [{
+      id: 'codex-goal:1754838000000:set', k: 2.5, role: 'assistant', type: 'goal', event: 'set',
+      goal: { objective, status: 'active', createdAt: 1754838000000 }, live: true, completed: true,
+    }];
+    const incoming = [{
+      id: `codex-goal:${encodeURIComponent(objective)}:set`, k: 3, role: 'assistant', type: 'goal', event: 'set',
+      goal: { objective, status: 'active' }, completed: true,
+    }];
+
+    expect(mergeTranscriptMessages(existing, incoming)).toEqual(incoming);
+  });
+
+  it('covers repeated identical live Goals one-to-one', () => {
+    const objective = '同一个目标';
+    const existing = [1, 2].map((createdAt) => ({
+      id: `codex-goal:${createdAt}:set`, k: createdAt, type: 'goal', event: 'set',
+      goal: { objective, status: 'active', createdAt }, live: true, completed: true,
+    }));
+    const incoming = [{
+      id: `codex-goal:${encodeURIComponent(objective)}:set`, k: 3, type: 'goal', event: 'set',
+      goal: { objective, status: 'active' }, completed: true,
+    }];
+
+    const merged = mergeTranscriptMessages(existing, incoming);
+    expect(merged).toHaveLength(2);
+    expect(merged.filter((message) => message.live)).toHaveLength(1);
+    expect(merged.filter((message) => !message.live)).toEqual(incoming);
+  });
+
+  it('does not let an already loaded historical Goal cover a fresh identical live Goal', () => {
+    const objective = '同一个目标';
+    const historical = {
+      id: `codex-goal:${encodeURIComponent(objective)}:set`, k: 1, type: 'goal', event: 'set',
+      goal: { objective, status: 'active' }, completed: true,
+    };
+    const live = {
+      id: 'codex-goal:2:set', k: 2.5, type: 'goal', event: 'set',
+      goal: { objective, status: 'active', createdAt: 2 }, live: true, completed: true,
+    };
+
+    expect(mergeTranscriptMessages([historical, live], [historical])).toEqual([historical, live]);
+  });
+
   it('drops malformed transcript messages at the network boundary', async () => {
     vi.spyOn(api, 'fetchTranscript').mockResolvedValueOnce({
       messages: [null, { text: 'missing type' }, { k: 1, type: 'text', text: 'valid' }],

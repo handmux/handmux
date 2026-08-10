@@ -67,11 +67,18 @@ describe('Codex rollout transcript', () => {
       '</codex_internal_context>',
     ].join('\n');
     const parsed = parseCodexTranscript([
-      row({ type: 'message', role: 'user', content: [{ type: 'input_text', text: context }] }),
-      row({ type: 'message', role: 'user', content: [{ type: 'input_text', text: context }] }),
+      row({
+        id: 'goal-context-1', type: 'message', role: 'user', content: [{ type: 'input_text', text: context }],
+        internal_chat_message_metadata_passthrough: { turn_id: 'turn-goal-1' },
+      }),
+      row({
+        id: 'goal-context-duplicate', type: 'message', role: 'user', content: [{ type: 'input_text', text: context }],
+        internal_chat_message_metadata_passthrough: { turn_id: 'turn-goal-1' },
+      }),
     ]);
 
     expect(parsed).toEqual([expect.objectContaining({
+      id: 'codex:turn-goal-1:goal-context-1',
       type: 'goal', event: 'set', role: 'assistant',
       goal: { objective: 'Finish the release', status: 'active', tokensUsed: 1234, tokenBudget: 40000 },
     })]);

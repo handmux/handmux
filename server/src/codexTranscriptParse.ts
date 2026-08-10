@@ -533,10 +533,14 @@ export function createCodexTranscriptParser(): CodexTranscriptParser {
           const goal = goalFromInternalContext(text);
           if (goal) {
             if (goal.objective !== activeGoalObjective) {
-              const goalId = codexGoalMessageId(goal, 'set');
+              // The injected context item is the durable occurrence identity. Prefer it over the Goal's
+              // objective fallback so setting the same objective again creates a distinct historical card.
+              // The Web reconciles this durable id with the timestamp-based immediate native card.
+              const identity = sourceIdentity(item);
+              const goalId = identity.id || codexGoalMessageId(goal, 'set');
               messages.push({
                 i, role: 'assistant', type: 'goal', event: 'set', goal, ts,
-                ...sourceIdentity(item),
+                ...identity,
                 ...(goalId ? { id: goalId } : {}),
               });
               activeGoalObjective = goal.objective;

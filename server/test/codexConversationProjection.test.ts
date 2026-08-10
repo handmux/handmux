@@ -84,5 +84,13 @@ describe('Codex conversation projection', () => {
       operation: 'upsert', mode: 'replace',
       message: { id: 'codex-goal:10:complete', type: 'goal', turnId: 'turn-1' },
     });
+    expect(projectCodexRolloutMutation({
+      id: 'codex:turn-2:goal-context-1', role: 'assistant', type: 'goal',
+      turnId: 'turn-2', itemId: 'goal-context-1', event: 'set',
+      goal: { objective: 'Ship again', status: 'active' },
+    })).toMatchObject({
+      operation: 'upsert', mode: 'replace',
+      message: { id: 'codex:turn-2:goal-context-1', type: 'goal', turnId: 'turn-2' },
+    });
   });
 });

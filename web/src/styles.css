@@ -2798,7 +2798,7 @@ button.cmd-text { background: none; border: none; text-align: left; }
    Goal Bottom Sheet as the resident composer row; the raw internal Goal instruction is never shown. */
 .chat-goal-card {
   align-self: flex-start; max-width: 92%; min-height: 44px; display: flex; align-items: center; gap: 9px;
-  padding: 7px 9px; border: 1px solid var(--ct-chip-line); border-radius: 12px;
+  padding: 9px 10px; border: 1px solid var(--ct-chip-line); border-radius: 12px;
   background: var(--ct-chip); color: var(--ct-ink); text-align: left; touch-action: manipulation;
 }
 .chat-goal-card.is-user {
@@ -2809,11 +2809,11 @@ button.cmd-text { background: none; border: none; text-align: left; }
 .chat-goal-card.is-user .chat-goal-copy > span,
 .chat-goal-card.is-user .codex-goal-chevron { color: currentColor; opacity: .78; }
 .chat-goal-card .codex-goal-icon svg { width: 17px; height: 17px; }
-.chat-goal-copy { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.chat-goal-copy { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .chat-goal-copy strong { font-size: 12px; line-height: 16px; }
 .chat-goal-copy > span {
   display: -webkit-box; overflow: hidden; color: var(--ct-muted); font-size: 11.5px; line-height: 16px;
-  overflow-wrap: anywhere; -webkit-box-orient: vertical; -webkit-line-clamp: 2;
+  overflow-wrap: anywhere; -webkit-box-orient: vertical; -webkit-line-clamp: 3;
 }
 .chat-goal-card.is-complete .codex-goal-icon { color: #34c759; }
 .chat-goal-card.is-blocked .codex-goal-icon,

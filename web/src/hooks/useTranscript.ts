@@ -142,7 +142,31 @@ export function mergeTranscriptMessages(
   existing: TranscriptMessage[],
   incoming: TranscriptMessage[],
 ): TranscriptMessage[] {
-  const byId = new Map(existing.map((message) => [messageIdentity(message), message]));
+  // A native Goal is emitted immediately with App Server timestamps, while its later rollout context can
+  // only identify the same lifecycle by objective + event. Their canonical ids therefore differ. Retire
+  // exactly one matching live card when the durable snapshot arrives; one-to-one matching preserves a
+  // genuinely repeated Goal with the same text until its own durable entry arrives.
+  const coveredLiveGoals = new Set<number>();
+  const existingIds = new Set(existing.map(messageIdentity));
+  for (const durable of incoming) {
+    if (durable.type !== 'goal' || !durable.event || !durable.goal?.objective) continue;
+    // A historical durable card already held by the client is not evidence for covering a newly emitted
+    // identical Goal. Only a newly arriving durable identity can complete the handoff.
+    if (existingIds.has(messageIdentity(durable))) continue;
+    const index = existing.findIndex((candidate, candidateIndex) => (
+      !coveredLiveGoals.has(candidateIndex)
+      && candidate.live === true
+      && candidate.type === 'goal'
+      && candidate.event === durable.event
+      && candidate.goal?.objective === durable.goal?.objective
+      && (!Number.isFinite(Number(candidate.k ?? candidate.i))
+        || !Number.isFinite(Number(durable.k ?? durable.i))
+        || Number(durable.k ?? durable.i) >= Number(candidate.k ?? candidate.i))
+    ));
+    if (index >= 0) coveredLiveGoals.add(index);
+  }
+  const retained = existing.filter((_message, index) => !coveredLiveGoals.has(index));
+  const byId = new Map(retained.map((message) => [messageIdentity(message), message]));
   for (const message of incoming) byId.set(messageIdentity(message), message);
   const merged = Array.from(byId.values()).sort((a, b) => (
     Number(a.k ?? a.i ?? 0) - Number(b.k ?? b.i ?? 0)

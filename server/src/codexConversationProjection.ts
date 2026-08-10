@@ -143,6 +143,7 @@ export function parseCodexConversationMutationValue(
   }
   const goal = recordOf(message.goal);
   const event = nonEmpty(message.event) as CodexGoalEvent | null;
+  const itemId = nonEmpty(message.itemId);
   const statuses = ['active', 'paused', 'blocked', 'usageLimited', 'budgetLimited', 'complete'];
   const events = ['set', 'restarted', ...statuses];
   const objective = nonEmpty(goal?.objective);
@@ -155,7 +156,8 @@ export function parseCodexConversationMutationValue(
     || !statuses.includes(String(goal.status)) || !event || !events.includes(event)
     || invalidNumber || invalidBudget
     || (message.turnId !== null && !turnId)
-    || id !== codexGoalMessageId(goal as Partial<CodexGoal>, event)) return null;
+    || (id !== codexGoalMessageId(goal as Partial<CodexGoal>, event)
+      && (!turnId || !itemId || id !== codexItemMessageId(turnId, itemId)))) return null;
   return {
     operation: 'upsert', mode: record.mode as 'append' | 'replace',
     message: {
