@@ -188,7 +188,8 @@ export async function captureWorkspace({
     if (!topology || topology.status === 'unknown') return { status: 'unknown' };
     const bindings = await readAgentBindings(stateFile, agents, readFile, access, stat);
     const managedCodex = await readManagedCodexBindings(topology, {
-      codexApp, codexSessions, agents, findRollout: findCodexRollout, access, stat,
+      ...(codexApp ? { codexApp } : {}), codexSessions, agents,
+      findRollout: findCodexRollout, access, stat,
     });
     for (const [pane, binding] of managedCodex) bindings.set(pane, binding);
     const after = await tmux.topologyFingerprint();

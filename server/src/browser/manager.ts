@@ -689,9 +689,9 @@ export async function createBrowserPreviewManager({
       return cookieProfiles.configure(deviceId, prefs);
     },
     async clearDeviceProfile(deviceId: string, { origin }: { origin: string | null }) {
-      await cookieProfiles.clear(deviceId, {
-        hostname: origin === null ? undefined : new URL(origin).hostname,
-      });
+      await cookieProfiles.clear(deviceId, origin === null
+        ? {}
+        : { hostname: new URL(origin).hostname });
       await cookieProfiles.flush?.(deviceId);
       return { closedTabIds: [] };
     },

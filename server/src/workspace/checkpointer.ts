@@ -246,9 +246,15 @@ export function createWorkspaceBackground({
     observeEnvironment,
     lock,
     now,
-    capture: (environment) => captureWorkspace({
-      tmux, stateFile, environment, codexApp: getCodexApp() ?? undefined, codexSessions, now,
-    }),
+    capture: (environment) => {
+      const codexApp = getCodexApp();
+      return captureWorkspace({
+        tmux, stateFile, environment,
+        ...(codexApp ? { codexApp } : {}),
+        ...(codexSessions ? { codexSessions } : {}),
+        now,
+      });
+    },
   });
 }
 

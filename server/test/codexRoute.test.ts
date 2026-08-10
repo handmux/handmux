@@ -53,7 +53,7 @@ function appFor({
     codexApp: service,
     commands,
     claudeEvents,
-    wait,
+    ...(wait ? { wait } : {}),
   }));
   return app;
 }

@@ -318,10 +318,10 @@ export function createWorkspaceRuntime({
             plan: state.plan,
             checkpoint: state.checkpoint,
             tmux,
-            agents,
+            ...(agents ? { agents } : {}),
             onProgress,
-            access,
-            home,
+            ...(access ? { access } : {}),
+            ...(home ? { home } : {}),
           });
           const resolvedIds = restored.results
             .filter((row) => row.status === 'restored' || row.status === 'already-present')

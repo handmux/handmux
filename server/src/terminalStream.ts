@@ -23,7 +23,8 @@ type ControlOnEnd = (lines: ControlLines) => void;
 interface TerminalSocket {
   readonly readyState: number;
   readonly bufferedAmount: number;
-  send(data: string | Buffer, options?: { binary?: boolean }): unknown;
+  send(data: string | Buffer): unknown;
+  send(data: string | Buffer, options: { binary: boolean }): unknown;
   close(code?: number, reason?: string): unknown;
 }
 
@@ -244,7 +245,7 @@ export class PaneControlStream {
         reject(new Error('tmux control stream closed'));
         return;
       }
-      this.waiters.push({ resolve, reject, onEnd });
+      this.waiters.push({ resolve, reject, ...(onEnd ? { onEnd } : {}) });
       this.child.stdin.write(`${command}\n`);
     });
   }
@@ -448,7 +449,10 @@ export function createTerminalStream({
       try {
         const session = await commands.paneSession(message.pane);
         if (ws.readyState !== 1) return;
-        stream = new PaneControlStream({ ws, pane: message.pane, session, spawnControl });
+        stream = new PaneControlStream({
+          ws, pane: message.pane, session,
+          ...(spawnControl ? { spawnControl } : {}),
+        });
         streams.add(stream);
         await stream.start();
       } catch {

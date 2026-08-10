@@ -78,30 +78,48 @@ export function parseSupervisorConfig(value: unknown): SupervisorConfig {
     throw new Error('invalid supervisor config: token is required');
   }
 
-  return {
+  const config: SupervisorConfig = {
     tunnel,
     port,
     host: record.host,
     token: record.token,
     shortcuts: normalizeShortcuts(record.shortcuts),
-    name: optionalString(record.name, 'name'),
-    staticDir: optionalString(record.staticDir, 'staticDir'),
-    uploadExts: optionalString(record.uploadExts, 'uploadExts'),
-    previewDomain: optionalString(record.previewDomain, 'previewDomain'),
-    publicUrl: optionalString(record.publicUrl, 'publicUrl'),
-    cloudflaredBin: optionalString(record.cloudflaredBin, 'cloudflaredBin') ?? undefined,
-    cfTunnelName: optionalString(record.cfTunnelName, 'cfTunnelName'),
-    tunliteBin: optionalString(record.tunliteBin, 'tunliteBin') ?? undefined,
-    sshHost: optionalString(record.sshHost, 'sshHost'),
-    remotePort: optionalNumber(record.remotePort, 'remotePort'),
-    sshJump: optionalString(record.sshJump, 'sshJump'),
-    natappBin: optionalString(record.natappBin, 'natappBin') ?? undefined,
-    authtoken: optionalString(record.authtoken, 'authtoken'),
-    cpolarBin: optionalString(record.cpolarBin, 'cpolarBin') ?? undefined,
-    cpolarRegion: optionalString(record.cpolarRegion, 'cpolarRegion'),
-    vapid: stringFields(record.vapid, ['public', 'private', 'subject'], 'vapid'),
-    xfyun: stringFields(record.xfyun, ['appId', 'apiKey', 'apiSecret'], 'xfyun'),
   };
+  const name = optionalString(record.name, 'name');
+  const staticDir = optionalString(record.staticDir, 'staticDir');
+  const uploadExts = optionalString(record.uploadExts, 'uploadExts');
+  const previewDomain = optionalString(record.previewDomain, 'previewDomain');
+  const publicUrl = optionalString(record.publicUrl, 'publicUrl');
+  const cloudflaredBin = optionalString(record.cloudflaredBin, 'cloudflaredBin');
+  const cfTunnelName = optionalString(record.cfTunnelName, 'cfTunnelName');
+  const tunliteBin = optionalString(record.tunliteBin, 'tunliteBin');
+  const sshHost = optionalString(record.sshHost, 'sshHost');
+  const remotePort = optionalNumber(record.remotePort, 'remotePort');
+  const sshJump = optionalString(record.sshJump, 'sshJump');
+  const natappBin = optionalString(record.natappBin, 'natappBin');
+  const authtoken = optionalString(record.authtoken, 'authtoken');
+  const cpolarBin = optionalString(record.cpolarBin, 'cpolarBin');
+  const cpolarRegion = optionalString(record.cpolarRegion, 'cpolarRegion');
+  const vapid = stringFields(record.vapid, ['public', 'private', 'subject'], 'vapid');
+  const xfyun = stringFields(record.xfyun, ['appId', 'apiKey', 'apiSecret'], 'xfyun');
+  if (name !== undefined) config.name = name;
+  if (staticDir !== undefined) config.staticDir = staticDir;
+  if (uploadExts !== undefined) config.uploadExts = uploadExts;
+  if (previewDomain !== undefined) config.previewDomain = previewDomain;
+  if (publicUrl !== undefined) config.publicUrl = publicUrl;
+  if (typeof cloudflaredBin === 'string') config.cloudflaredBin = cloudflaredBin;
+  if (cfTunnelName !== undefined) config.cfTunnelName = cfTunnelName;
+  if (typeof tunliteBin === 'string') config.tunliteBin = tunliteBin;
+  if (sshHost !== undefined) config.sshHost = sshHost;
+  if (remotePort !== undefined) config.remotePort = remotePort;
+  if (sshJump !== undefined) config.sshJump = sshJump;
+  if (typeof natappBin === 'string') config.natappBin = natappBin;
+  if (authtoken !== undefined) config.authtoken = authtoken;
+  if (typeof cpolarBin === 'string') config.cpolarBin = cpolarBin;
+  if (cpolarRegion !== undefined) config.cpolarRegion = cpolarRegion;
+  if (vapid !== undefined) config.vapid = vapid;
+  if (xfyun !== undefined) config.xfyun = xfyun;
+  return config;
 }
 
 export function supervisorLaunchArgs(

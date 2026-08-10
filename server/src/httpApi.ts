@@ -90,7 +90,13 @@ export function createApiRouter({
 
   const deps = {
     token, commands, docs, git, push, notifications, claudeEvents,
-    uploadExts, maxUploadBytes, asrEnv, previews, shortcuts, home, stateFile, workspace, browser, browserBootstrap, previewDomain, codexApp,
+    uploadExts, maxUploadBytes, asrEnv, shortcuts, home, stateFile,
+    ...(previews !== undefined ? { previews } : {}),
+    ...(workspace !== undefined ? { workspace } : {}),
+    ...(browser !== undefined ? { browser } : {}),
+    ...(browserBootstrap !== undefined ? { browserBootstrap } : {}),
+    ...(previewDomain !== undefined ? { previewDomain } : {}),
+    ...(codexApp !== undefined ? { codexApp } : {}),
   };
 
   r.use(sessionRoutes(deps));

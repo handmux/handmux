@@ -158,10 +158,11 @@ function normalizeFlags(flags: Record<string, unknown>): FlagParseResult {
   if (flags.list && (flags.dryRun || flags.checkpoint !== undefined || flags.session !== undefined)) {
     return { error: t('restore.listExclusive') };
   }
+  const checkpoint = typeof flags.checkpoint === 'string' ? flags.checkpoint.trim() : undefined;
   return {
     list: flags.list === true,
     dryRun: flags.dryRun === true,
-    checkpoint: flags.checkpoint?.trim(),
+    ...(checkpoint ? { checkpoint } : {}),
     sessions: (rawSessions as string[]).map((name) => name.trim()),
   };
 }

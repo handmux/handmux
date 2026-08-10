@@ -612,8 +612,8 @@ function normalizeApproval(message: RpcMessage): NormalizedApproval {
     id: String(message.id),
     type: permissions ? 'permissions' : message.method === 'item/fileChange/requestApproval' ? 'file' : 'command',
     threadId: params.threadId!,
-    turnId: params.turnId,
-    itemId: params.itemId,
+    ...(typeof params.turnId === 'string' ? { turnId: params.turnId } : {}),
+    ...(typeof params.itemId === 'string' ? { itemId: params.itemId } : {}),
     command: typeof params.command === 'string' ? params.command : null,
     cwd: typeof params.cwd === 'string' ? params.cwd : null,
     reason: typeof params.reason === 'string' ? params.reason : null,
@@ -651,8 +651,8 @@ function normalizeUserInput(message: RpcMessage): NormalizedUserInput {
   return {
     id: String(message.id),
     threadId: params.threadId!,
-    turnId: params.turnId,
-    itemId: params.itemId,
+    ...(typeof params.turnId === 'string' ? { turnId: params.turnId } : {}),
+    ...(typeof params.itemId === 'string' ? { itemId: params.itemId } : {}),
     autoResolutionMs: params.autoResolutionMs ?? null,
     questions: Array.isArray(params.questions) ? params.questions.map((value) => {
       const question = recordOf(value) || {};
@@ -2185,11 +2185,13 @@ export function createCodexAppServer({
     const queue = queues.get(`${receipt.pane}\0${receipt.threadId}`);
     const queuedItem = queue?.items.find((item) => item.id === receipt.queueItemId
       || (item.requestId && item.requestId === receipt.requestId));
-    const normalized: CodexSubmissionReceipt = receipt.status === 'queued' && !queuedItem
-      ? { ...receipt, status: 'pending', queueItemId: undefined }
-      : receipt.status === 'pending' && queuedItem
-        ? { ...receipt, status: 'queued', queueItemId: queuedItem.id }
-        : receipt;
+    let normalized: CodexSubmissionReceipt = receipt;
+    if (receipt.status === 'queued' && !queuedItem) {
+      const { queueItemId: _queueItemId, ...pending } = receipt;
+      normalized = { ...pending, status: 'pending' };
+    } else if (receipt.status === 'pending' && queuedItem) {
+      normalized = { ...receipt, status: 'queued', queueItemId: queuedItem.id };
+    }
     submissions.set(`${receipt.pane}\0${receipt.threadId}\0${receipt.requestId}`, {
       ...normalized, settled: normalized.status !== 'pending', promise: null,
     });

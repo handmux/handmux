@@ -408,9 +408,11 @@ function applyGoalOutput(message: CodexTranscriptMessage, value: unknown): boole
   const goal = goalResult(value);
   if (!goal) return false;
   message.goal = { ...(message.goal || {}), ...goal };
-  message.event = goal.status === 'complete' ? 'complete'
+  const event = goal.status === 'complete' ? 'complete'
     : goal.status === 'blocked' ? 'blocked' : message.event;
-  message.id = codexGoalMessageId(message.goal, message.event) || message.id;
+  if (event) message.event = event; else delete message.event;
+  const id = codexGoalMessageId(message.goal, event) || message.id;
+  if (id) message.id = id; else delete message.id;
   return true;
 }
 

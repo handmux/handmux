@@ -129,8 +129,13 @@ export async function runSetup({
         else if (choice === 'token') a.token = await editToken(a);
         else if (choice === 'browser') a.previewDomain = await editBrowserDomain(a);
         else if (choice === 'language') a.lang = await editLanguage(a);
-        else if (choice === 'push') a.vapid = await editPush(a);
-        else if (choice === 'voice') a.xfyun = await editVoice(a);
+        else if (choice === 'push') {
+          const vapid = await editPush(a);
+          if (vapid) a.vapid = vapid; else delete a.vapid;
+        } else if (choice === 'voice') {
+          const xfyun = await editVoice(a);
+          if (xfyun) a.xfyun = xfyun; else delete a.xfyun;
+        }
       } catch (e) {
         if (e !== CANCELLED) throw e;
       }
@@ -335,9 +340,16 @@ async function provisionConnection(a: SetupAnswers, { home, log }: SetupContext)
     if (!a.cfHostname) throw new Error('cloudflare hostname is required');
     await provisionCloudflareNamed({ home, hostname: a.cfHostname, tunnelName: a.cfTunnelName || 'handmux', port: a.port, log });
   }
-  else if (a.tunnel === 'ssh') await provisionSsh({ sshHost: a.sshHost, log });
-  else if (a.tunnel === 'natapp' || a.tunnel === 'cpolar') await provisionNgrokClient({ tunnel: a.tunnel, home, authtoken: a.authtoken, log });
+  else if (a.tunnel === 'ssh') await provisionSsh({
+    ...(a.sshHost ? { sshHost: a.sshHost } : {}), log,
+  });
+  else if (a.tunnel === 'natapp' || a.tunnel === 'cpolar') await provisionNgrokClient({
+    tunnel: a.tunnel, home, ...(a.authtoken ? { authtoken: a.authtoken } : {}), log,
+  });
 }
+
+const isConnectionField = (value: unknown, rows: readonly ConnectionFieldRow[]): value is ConnectionField =>
+  typeof value === 'string' && rows.some((row) => row.value === value);
 
 // Level 2 — the field hub for the chosen tunnel: each config field is a row showing its value (secrets
 // masked); edit any in place. Esc leaves the field hub. Returns the updated answers.
@@ -352,6 +364,8 @@ async function editTunnelFields(a: SetupAnswers): Promise<SetupAnswers> {
       if (e !== CANCELLED) throw e;
       return next;
     }
+    const rows = connectionFieldRows(next);
+    if (!isConnectionField(pick, rows)) throw new Error('invalid connection field');
     cur = pick;
     try { next = await editConnField(next, pick); }
     catch (e) { if (e !== CANCELLED) throw e; }   // Esc in a sub-edit → back to the field hub

@@ -365,7 +365,10 @@ export async function executeRestore({
       if (item.action === 'already-present') {
         result = { logicalId: item.logicalId, sourceName: item.sourceName, status: 'already-present' };
       } else if (item.action === 'unsupported') {
-        result = { logicalId: item.logicalId, sourceName: item.sourceName, status: 'failed', stage: 'plan', error: item.reason };
+        result = {
+          logicalId: item.logicalId, sourceName: item.sourceName, status: 'failed', stage: 'plan',
+          ...(item.reason ? { error: item.reason } : {}),
+        };
       } else {
         try {
           result = await restoreOneSession({
