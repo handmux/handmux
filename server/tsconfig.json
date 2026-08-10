@@ -4,8 +4,7 @@
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
     "lib": ["ES2022"],
-    "allowJs": true,
-    "checkJs": false,
+    "allowJs": false,
     "noEmit": true,
     "strict": true,
     "noImplicitReturns": true,
@@ -16,6 +15,6 @@
     "resolveJsonModule": true,
     "types": ["node"]
   },
-  "include": ["bin/**/*.js", "bin/**/*.ts", "src/**/*.js", "src/**/*.ts", "src/**/*.cjs", "test/**/*.js", "test/**/*.ts"],
+  "include": ["bin/**/*.ts", "src/**/*.ts", "test/**/*.ts"],
   "exclude": ["dist", "node_modules", "public"]
 }

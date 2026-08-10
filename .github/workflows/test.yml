@@ -27,6 +27,8 @@ jobs:
         if: runner.os == 'macOS'
       - run: npm ci
         working-directory: server
+      - run: npm run typecheck:source
+        working-directory: server
       - run: npm run typecheck
         working-directory: server
       - run: npm test -- --exclude test/commands.test.js --exclude test/workspaceDocker.test.js --exclude test/workspaceHost.test.js

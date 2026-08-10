@@ -6,6 +6,6 @@
     "rootDir": ".",
     "outDir": "dist"
   },
-  "include": ["bin/handmux-main.ts", "src/**/*.js", "src/**/*.ts", "src/**/*.cjs"],
+  "include": ["bin/handmux-main.ts", "src/**/*.ts"],
   "exclude": ["dist", "node_modules", "public", "test"]
 }

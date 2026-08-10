@@ -17,4 +17,4 @@
 - [ ] Focused on a single change
 - [ ] No secrets, tokens, tunnel URLs, or personal paths in the diff
 - [ ] Added/updated tests for changed behavior
-- [ ] If it's a user-facing feature, added one entry to `web/src/changelog.js` (skip pure bug fixes)
+- [ ] If it's a user-facing feature, added one entry to `web/src/changelog.ts` (skip pure bug fixes)

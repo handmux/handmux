@@ -41,6 +41,7 @@
     "build:server": "node scripts/build-server.mjs",
     "bundle": "node scripts/bundle-web.mjs",
     "prepack": "npm run bundle && npm run build:server",
+    "typecheck:source": "node scripts/check-typescript-product-source.mjs",
     "typecheck": "tsc --project tsconfig.json",
     "test": "npm run build:server && vitest run",
     "test:pack": "node scripts/pack-smoke.mjs",

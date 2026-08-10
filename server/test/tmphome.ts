@@ -7,9 +7,9 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach } from 'vitest';
 
-const created = [];
+const created: string[] = [];
 
-export function tmpHome(prefix = 'hm-') {
+export function tmpHome(prefix = 'hm-'): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
   created.push(dir);
   return dir;
@@ -17,6 +17,8 @@ export function tmpHome(prefix = 'hm-') {
 
 afterEach(() => {
   while (created.length) {
-    try { fs.rmSync(created.pop(), { recursive: true, force: true }); } catch { /* already gone */ }
+    const dir = created.pop();
+    if (!dir) continue;
+    try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* already gone */ }
   }
 });
