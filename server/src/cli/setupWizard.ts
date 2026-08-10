@@ -10,13 +10,37 @@ import { homedir } from 'node:os';
 import { spawnSync } from 'node:child_process';
 import webpush from 'web-push';
 import { configPath, pocketHome } from './state.js';
-import { defaultGen as genToken } from './options.js';
+import { defaultGen as genToken, TUNNELS } from './options.js';
 import { resolveCloudflared } from './cloudflared.js';
 import { resolveTunlite, checkSshAuth } from './tunlite.js';
 import { resolveNatapp, resolveCpolar } from './tunnelClients.js';
 import { t, setLocale } from './i18n/index.js';
 import { intro, outro, note, cancel, select, text, password, confirm, ask, CANCELLED } from './prompt.js';
 import { PrivateStateStore } from '../privateStateStore.js';
+import type { Tunnel, VapidConfig, XfyunConfig } from './options.js';
+import type { SetupAnswers, SetupConfig } from './setupModel.js';
+
+interface SetupLog {
+  log(message: string): void;
+  error(message: string): void;
+}
+interface SetupContext { home: string; log: SetupLog }
+interface RunSetupOptions extends SetupContext { target?: string; running?: boolean }
+type ConnectionField =
+  | 'cfHostname' | 'cfTunnelName' | 'sshHost' | 'remotePort' | 'publicUrl'
+  | 'sshJump' | 'authtoken' | 'cpolarRegion' | 'domain';
+interface ConnectionFieldRow { value: ConnectionField; label: string; hint: string }
+type OptionalConnectionStringKey = 'publicUrl' | 'sshJump' | 'cpolarRegion';
+const errorMessage = (error: unknown): string => {
+  if (error instanceof Error) return error.message;
+  if (error && typeof error === 'object' && 'message' in error && typeof error.message === 'string') {
+    return error.message;
+  }
+  return String(error);
+};
+const isTunnel = (value: unknown): value is Tunnel => (
+  typeof value === 'string' && TUNNELS.includes(value as Tunnel)
+);
 
 // The pure answer↔config model + validators + cloudflared text helpers live in setupModel.js. Imported for
 // the interactive shell below; re-exported so their historical import path (this module) stays valid for
@@ -33,7 +57,7 @@ export {
   validatePort, validateHost, validatePreviewDomain, validateNonEmpty, validateContact, validateToken,
 } from './setupModel.js';
 
-function readExisting(file) {
+function readExisting(file: string): unknown {
   try { return new PrivateStateStore(file).readStrict() || {}; } catch { return {}; }
 }
 
@@ -42,7 +66,9 @@ function readExisting(file) {
 // Returns { cfg, start } (start = the user chose the save-and-run action), or null on cancel/exit. When an
 // instance is already `running`, that action reads "Save & restart" (the caller stop+starts to apply the new
 // config). `home` and the write `target` are injectable for tests / `--config`.
-export async function runSetup({ home = homedir(), target = configPath(home), log = console, running = false } = {}) {
+export async function runSetup({
+  home = homedir(), target = configPath(home), log = console, running = false,
+}: Partial<RunSetupOptions> = {}): Promise<{ cfg: SetupConfig; start: boolean } | null> {
   if (!process.stdin.isTTY) { log.error(t('setup.needTty')); return null; }
   const existing = readExisting(target);
   const isNew = !existing || Object.keys(existing).length === 0;
@@ -117,9 +143,9 @@ export async function runSetup({ home = homedir(), target = configPath(home), lo
 
 // clack's footer only shows ↑/↓ + Enter, so append the Esc-backs-out hint to each section's entry prompt —
 // otherwise a user inside a section can't tell there's a way back to the hub.
-const withBack = (msg) => `${msg}  ${t('setup.escBack')}`;
+const withBack = (msg: string): string => `${msg}  ${t('setup.escBack')}`;
 
-async function editLanguage(a) {
+async function editLanguage(a: SetupAnswers): Promise<string> {
   const lang = await ask(select({
     message: withBack(t('setup.langQ')),
     options: [{ value: 'en', label: 'English' }, { value: 'zh', label: '中文' }],
@@ -129,18 +155,18 @@ async function editLanguage(a) {
   return lang;
 }
 
-async function editName(a) {
+async function editName(a: SetupAnswers): Promise<string> {
   // initialValue puts the current name IN the editable field (defaultValue only fills a blank submit, unseen).
   const v = await ask(text({ message: withBack(t('setup.askName')), placeholder: t('setup.default'), initialValue: a.name || '' }));
   return (v || '').trim();
 }
 
-async function editPort(a) {
+async function editPort(a: SetupAnswers): Promise<number> {
   const v = await ask(text({ message: withBack(t('setup.askPort')), initialValue: String(a.port), validate: validatePort }));
   return Number(v);
 }
 
-async function editBrowserDomain(a) {
+async function editBrowserDomain(a: SetupAnswers): Promise<string> {
   note(t('setup.browserAbout'));
   const value = await ask(text({
     message: withBack(t('setup.askBrowserDomain')),
@@ -156,7 +182,7 @@ async function editBrowserDomain(a) {
 // push/voice): type your own, generate + pin a strong random one, or reset back to auto. Editing custom
 // pre-fills the current value (so you can read it off); the hub hint masks it. Esc returns to the main hub,
 // keeping the choice. Returns the token string ('' = auto).
-async function editToken(a) {
+async function editToken(a: SetupAnswers): Promise<string> {
   let token = a.token || '';
   for (;;) {
     let pick;
@@ -179,10 +205,10 @@ async function editToken(a) {
   }
 }
 
-const bareHost = (u) => String(u || '').replace(/^https?:\/\//, '');
+const bareHost = (url: unknown): string => String(url || '').replace(/^https?:\/\//, '');
 // cloudflare's two drivers are ONE family in the UI: 'cloudflare' (quick, no login) and 'cloudflare-named'
 // (your domain, needs a login) are picked as a mode INSIDE cloudflare, not as two separate tunnels.
-const cfFamily = (tunnel) => (tunnel === 'cloudflare-named' ? 'cloudflare' : tunnel);
+const cfFamily = (tunnel: Tunnel): Tunnel => (tunnel === 'cloudflare-named' ? 'cloudflare' : tunnel);
 
 function tunnelOptions() {
   return [
@@ -195,11 +221,13 @@ function tunnelOptions() {
 }
 
 // Which tunnels have config fields to edit a level deeper (none/cloudflare-quick have nothing to configure).
-const hasConnFields = (tunnel) => ['cloudflare-named', 'ssh', 'natapp', 'cpolar'].includes(tunnel);
+const hasConnFields = (tunnel: Tunnel): boolean => (
+  ['cloudflare-named', 'ssh', 'natapp', 'cpolar'] as Tunnel[]
+).includes(tunnel);
 
 // The editable field rows for the CURRENT tunnel — the type/mode is chosen a level up (the picker), so this
 // lists ONLY that tunnel's config, values shown and secrets masked. Empty for none / cloudflare-quick.
-function connectionFieldRows(a) {
+function connectionFieldRows(a: SetupAnswers): ConnectionFieldRow[] {
   const none = t('setup.connNone');
   if (a.tunnel === 'cloudflare-named') return [
     { value: 'cfHostname', label: t('setup.connHostname'), hint: a.cfHostname || none },
@@ -212,7 +240,7 @@ function connectionFieldRows(a) {
     { value: 'sshJump', label: t('setup.connJump'), hint: a.sshJump || none },
   ];
   if (a.tunnel === 'natapp' || a.tunnel === 'cpolar') {
-    const rows = [
+    const rows: ConnectionFieldRow[] = [
       { value: 'authtoken', label: 'authtoken', hint: a.authtoken ? maskSecret(a.authtoken) : none },
       { value: 'domain', label: t('setup.connDomain'), hint: a.publicUrl ? bareHost(a.publicUrl) : t('setup.domainTemp') },
     ];
@@ -223,7 +251,7 @@ function connectionFieldRows(a) {
 }
 
 // cloudflare mode: temporary quick tunnel (no login) vs a named tunnel on your own domain (needs login).
-async function editCfMode(a) {
+async function editCfMode(a: SetupAnswers): Promise<SetupAnswers> {
   const named = await ask(select({
     message: t('setup.cfModeQ'),
     options: [
@@ -247,11 +275,12 @@ async function editCfMode(a) {
 // Level 1 — choose the tunnel type (and, for cloudflare, temporary vs named). On a real change, clear the old
 // fields and collect the new type's REQUIRED field(s) so a half-set tunnel never reaches the field hub.
 // Returns the answers (unchanged if you re-pick the same type — you still drop into its field hub).
-async function pickTunnel(a) {
+async function pickTunnel(a: SetupAnswers): Promise<SetupAnswers> {
   // Default the cursor to the current tunnel; a brand-new user starts on `none` — the zero-config core that
   // just works on the same Wi-Fi. Tunnels are opt-in help for the user's own "reach it from outside" problem.
   const start = cfFamily(a.tunnel);
   const picked = await ask(select({ message: withBack(t('setup.tunnelQ')), options: tunnelOptions(), initialValue: start }));
+  if (!isTunnel(picked)) throw new Error('invalid tunnel selection');
   const base = { ...a };
   for (const k of TUNNEL_KEYS) delete base[k];
   // Staying in the cloudflare family keeps its fields as defaults; arriving from another tunnel starts clean.
@@ -268,9 +297,12 @@ async function pickTunnel(a) {
 }
 
 // Edit one Connection field in place (from its mini-hub row).
-async function editConnField(a, field) {
+async function editConnField(a: SetupAnswers, field: ConnectionField): Promise<SetupAnswers> {
   const n = { ...a };
-  const setOpt = (k, v) => { if (v) n[k] = v; else delete n[k]; };
+  const setOpt = (key: OptionalConnectionStringKey, value: string): void => {
+    if (value) n[key] = value;
+    else delete n[key];
+  };
   switch (field) {
     // initialValue pre-fills the field with the current value so you edit in place (and can just Enter to keep
     // it); an empty submit clears the optional ones (setOpt). Secrets use password() — never pre-filled.
@@ -298,17 +330,20 @@ async function editConnField(a, field) {
 
 // Run the tunnel's provisioning (browser login / key setup / client download) — idempotent, so it's safe to
 // run once on the way OUT of the Connection mini-hub whenever something changed.
-async function provisionConnection(a, { home, log }) {
-  if (a.tunnel === 'cloudflare-named') await provisionCloudflareNamed({ home, hostname: a.cfHostname, tunnelName: a.cfTunnelName || 'handmux', port: a.port, log });
+async function provisionConnection(a: SetupAnswers, { home, log }: SetupContext): Promise<void> {
+  if (a.tunnel === 'cloudflare-named') {
+    if (!a.cfHostname) throw new Error('cloudflare hostname is required');
+    await provisionCloudflareNamed({ home, hostname: a.cfHostname, tunnelName: a.cfTunnelName || 'handmux', port: a.port, log });
+  }
   else if (a.tunnel === 'ssh') await provisionSsh({ sshHost: a.sshHost, log });
   else if (a.tunnel === 'natapp' || a.tunnel === 'cpolar') await provisionNgrokClient({ tunnel: a.tunnel, home, authtoken: a.authtoken, log });
 }
 
 // Level 2 — the field hub for the chosen tunnel: each config field is a row showing its value (secrets
 // masked); edit any in place. Esc leaves the field hub. Returns the updated answers.
-async function editTunnelFields(a) {
+async function editTunnelFields(a: SetupAnswers): Promise<SetupAnswers> {
   let next = { ...a };
-  let cur;
+  let cur: ConnectionField | undefined;
   for (;;) {
     let pick;
     try {
@@ -326,7 +361,7 @@ async function editTunnelFields(a) {
 // Connection is TWO levels: FIRST pick the tunnel type (and, for cloudflare, temporary vs named) — level 1;
 // THEN that tunnel's config fields appear inside it — level 2. Provisioning (browser login / key setup /
 // client download) runs once on the way out, only if something changed. Esc at either level → main hub.
-async function editConnection(a, ctx) {
+async function editConnection(a: SetupAnswers, ctx: SetupContext): Promise<SetupAnswers> {
   const before = JSON.stringify(a);
   let next;
   try {
@@ -346,13 +381,15 @@ async function editConnection(a, ctx) {
 // Localise clack's Yes/No toggle for every confirm().
 const yesno = () => ({ active: t('setup.yes'), inactive: t('setup.no') });
 // A masked preview of an already-set secret for a sub-menu hint (last 4 shown, like `handmux config`).
-const maskSecret = (s) => (String(s || '').length <= 8 ? '••••' : `••••${String(s).slice(-4)}`);
+const maskSecret = (secret: unknown): string => (
+  String(secret || '').length <= 8 ? '••••' : `••••${String(secret).slice(-4)}`
+);
 
 // Composite sections (push/voice) are their OWN mini-hub: when already configured, show the current values
 // and let you edit/regenerate/turn-off in place — no "keep it? [y/n]" gate, matching how every other row
 // shows its value and edits directly. Esc in the mini-hub returns to the main hub (keeping edits); Esc in a
 // sub-edit returns to the mini-hub. Push needs a VAPID keypair, so turning it ON is a genuine one-shot setup.
-async function editPush(a) {
+async function editPush(a: SetupAnswers): Promise<VapidConfig | undefined> {
   let vapid = a.vapid;
   if (!vapid) {
     let on;
@@ -395,7 +432,7 @@ async function editPush(a) {
 
 // Voice input (iFlytek/xfyun) — three credentials; appId is shown/edited in the clear, the two secrets show
 // only a masked preview and are replaced (never revealed) when edited.
-async function editVoice(a) {
+async function editVoice(a: SetupAnswers): Promise<XfyunConfig | undefined> {
   let x = a.xfyun;
   if (!x) {
     let on;
@@ -431,7 +468,9 @@ async function editVoice(a) {
 }
 
 // login (browser) → create → route dns → write config.yml. The only human step is the browser login.
-async function provisionCloudflareNamed({ home, hostname, tunnelName, port, log }) {
+async function provisionCloudflareNamed({
+  home, hostname, tunnelName, port, log,
+}: SetupContext & { hostname: string; tunnelName: string; port: number }): Promise<void> {
   const bin = await resolveCloudflared(home);
   const cfDir = path.join(home, '.cloudflared');
   if (!fs.existsSync(path.join(cfDir, 'cert.pem'))) {
@@ -474,7 +513,8 @@ async function provisionCloudflareNamed({ home, hostname, tunnelName, port, log 
 }
 
 // drive tunlite passwordless setup inline (one password) if not already set up.
-async function provisionSsh({ sshHost, log }) {
+async function provisionSsh({ sshHost, log }: { sshHost?: string; log: SetupLog }): Promise<void> {
+  if (!sshHost) throw new Error('ssh host is required');
   const bin = resolveTunlite();
   if (checkSshAuth(sshHost, { bin }) === 0) { log.log(t('setup.sshReady')); return; }
   log.log(t('setup.sshSetup', { host: sshHost }));
@@ -484,7 +524,9 @@ async function provisionSsh({ sshHost, log }) {
 // Get the client binary ready (cpolar auto-downloads; natapp must be pre-installed) and, for cpolar, seed
 // the authtoken into its config. NON-FATAL: if the binary isn't there yet we print the hint and still write
 // the config, so the user can install it later and just `handmux start` — the wizard never dead-ends here.
-async function provisionNgrokClient({ tunnel, home, authtoken, log }) {
+async function provisionNgrokClient({
+  tunnel, home, authtoken, log,
+}: SetupContext & { tunnel: 'natapp' | 'cpolar'; authtoken?: string }): Promise<void> {
   try {
     if (tunnel === 'cpolar') {
       const bin = await resolveCpolar(home);
@@ -494,10 +536,10 @@ async function provisionNgrokClient({ tunnel, home, authtoken, log }) {
       resolveNatapp(home);
       log.log(t('setup.natappReady'));
     }
-  } catch (e) { log.log(t('err.generic', { msg: e.message })); }
+  } catch (error) { log.log(t('err.generic', { msg: errorMessage(error) })); }
 }
 
-function printSshServerHelp(a, log) {
+function printSshServerHelp(a: SetupAnswers, log: SetupLog): void {
   log.log('');
   log.log(t('setup.sshHelp1'));
   log.log(t('setup.sshHelpNginx', { port: a.remotePort }));

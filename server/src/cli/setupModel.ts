@@ -1,6 +1,6 @@
 // Pure model for `handmux setup`: the answer↔config mappers, the wizard-owned key sets, the connection
 // summary, the cloudflared provisioning text helpers, and the clack validators. Extracted from the
-// interactive shell (setupWizard.js) so the tested, side-effect-free logic stands on its own. Depends only
+// interactive shell (setupWizard.ts) so the tested, side-effect-free logic stands on its own. Depends only
 // on i18n (t/getLocale) for user-facing strings — otherwise deterministic given its inputs.
 import { t, getLocale } from './i18n/index.js';
 import { TUNNELS } from './options.js';
