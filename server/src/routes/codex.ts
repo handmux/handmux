@@ -25,6 +25,7 @@ export interface CodexRouteApp {
   compact(pane: string, threadId: string): Promise<unknown>;
   models(pane: string, threadId: string): Promise<unknown>;
   getGoal(pane: string, threadId: string): Promise<unknown>;
+  startGoal(pane: string, threadId: string, objective: string): Promise<unknown>;
   updateGoal(pane: string, threadId: string, updates: Record<string, unknown>): Promise<unknown>;
   clearGoal(pane: string, threadId: string): Promise<unknown>;
   updateSettings(pane: string, threadId: string, updates: Record<string, unknown>): Promise<unknown>;
@@ -467,6 +468,17 @@ export function codexRoutes({ codexApp, commands, claudeEvents, wait = pause }: 
     if (routeError(res, target)) return;
     try { res.json({ goal: await codexApp.getGoal(target.pane, target.threadId) }); }
     catch (error) { codexError(res, error); }
+  });
+
+  r.post('/codex/goal/start', async (req, res) => {
+    const target = await binding(codexApp, req.body?.pane);
+    if (routeError(res, target)) return;
+    const objective = typeof req.body?.objective === 'string' ? req.body.objective.trim() : '';
+    if (!objective || objective.length > 4_000) {
+      return res.status(400).json({ error: 'bad goal objective' });
+    }
+    try { return res.json({ goal: await codexApp.startGoal(target.pane, target.threadId, objective) }); }
+    catch (error) { return codexError(res, error); }
   });
 
   r.post('/codex/goal', async (req, res) => {

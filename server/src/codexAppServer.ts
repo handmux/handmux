@@ -2418,6 +2418,24 @@ export function createCodexAppServer({
       });
       return goal;
     },
+    async startGoal(pane: string, threadId: string, objective: string) {
+      const client = await connection(pane);
+      if (!client) throw new Error('Codex session is not managed by Handmux');
+      await client.assertCurrentThread(threadId);
+      await client.ensureThread(threadId);
+      // App Server treats a repeated non-terminal objective as an update and preserves its status and
+      // usage. A user choosing "set/restart" needs a fresh native Goal even when the text is identical,
+      // so clear the old native state before setting the new active objective. `active` is what enables
+      // Codex's built-in automatic Goal continuation; Handmux does not synthesize a turn or Goal object.
+      await client.rpc('thread/goal/clear', { threadId });
+      client.applyGoalSnapshot(threadId, null, null, { emit: false });
+      const result = await client.rpc('thread/goal/set', { threadId, objective, status: 'active' });
+      const goal = result?.goal == null ? null : parseCodexGoal(result.goal);
+      if (!goal) throw new Error('Codex App Server returned an invalid Goal');
+      client.applyGoalSnapshot(threadId, goal);
+      client.bump(threadId);
+      return goal;
+    },
     async updateGoal(pane: string, threadId: string, updates: UnknownRecord) {
       const client = await connection(pane);
       if (!client) throw new Error('Codex session is not managed by Handmux');

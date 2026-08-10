@@ -40,6 +40,7 @@ export {
   removeCodexQueuedMessage,
   renewCodexQueuedEdit,
   sendCodexMessage,
+  startCodexGoal,
   steerCodexQueuedMessage,
   streamCodexMessages,
   takeoverCodexSession,

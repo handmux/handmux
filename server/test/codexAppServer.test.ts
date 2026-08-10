@@ -180,6 +180,7 @@ function fakeProxy({
   const sent: TestRpcMessage[] = [];
   let persisted = !empty;
   let goal = initialGoal;
+  let nextGoalCreatedAt = Math.max(1, Number(initialGoal?.createdAt || 0) + 1);
   const reply = (message: unknown) => queueMicrotask(() => ws.emit('message', Buffer.from(JSON.stringify(message))));
   ws.send = (data: string) => {
     const message = JSON.parse(data) as TestRpcMessage;
@@ -239,7 +240,7 @@ function fakeProxy({
         threadId: message.params.threadId!,
         objective: message.params.objective ?? goal?.objective ?? '',
         status: message.params.status ?? goal?.status ?? 'active',
-        createdAt: goal?.createdAt ?? 1,
+        createdAt: goal?.createdAt ?? nextGoalCreatedAt++,
         updatedAt: 2,
         tokensUsed: goal?.tokensUsed ?? 0,
         timeUsedSeconds: goal?.timeUsedSeconds ?? 0,
@@ -1563,6 +1564,35 @@ describe('Codex App Server client', () => {
     expect(proxy.sent).toContainEqual(expect.objectContaining({
       method: 'thread/goal/set', params: { threadId: 'thread-1', objective: 'Ship it' },
     }));
+    app.close();
+  });
+
+  it('starts a fresh active native Goal instead of reviving the previous Goal', async () => {
+    const proxy = fakeProxy({ initialGoal: {
+      threadId: 'thread-1', objective: 'Finish the migration', status: 'paused',
+      createdAt: 1, updatedAt: 4, tokensUsed: 1200, timeUsedSeconds: 45, tokenBudget: null,
+    } });
+    const app = createCodexAppServer({ home: '/home/test', exists: () => true, connect: () => proxy.ws });
+    const events: CodexStreamEvent[] = [];
+    const unsubscribe = await app.subscribe('%1', 'thread-1', (event) => events.push(event));
+    await app.getGoal('%1', 'thread-1');
+
+    expect(await app.startGoal('%1', 'thread-1', 'Finish the migration')).toMatchObject({
+      objective: 'Finish the migration', status: 'active', createdAt: 2,
+      tokensUsed: 0, timeUsedSeconds: 0,
+    });
+    expect(proxy.sent.slice(-2)).toEqual([
+      expect.objectContaining({ method: 'thread/goal/clear', params: { threadId: 'thread-1' } }),
+      expect.objectContaining({
+        method: 'thread/goal/set',
+        params: { threadId: 'thread-1', objective: 'Finish the migration', status: 'active' },
+      }),
+    ]);
+    expect(events.at(-1)).toMatchObject({
+      type: 'goal', event: 'set', turnId: null,
+      goal: { objective: 'Finish the migration', status: 'active', createdAt: 2 },
+    });
+    unsubscribe();
     app.close();
   });
 

@@ -3,7 +3,8 @@ import {
   sendText, sendCodexMessage, compactCodexSession, clearCodexSession, interruptCodexSession,
   steerCodexQueuedMessage, removeCodexQueuedMessage, beginCodexQueuedEdit,
   renewCodexQueuedEdit, commitCodexQueuedEdit, cancelCodexQueuedEdit,
-  getCodexModels, getCodexGoal, updateCodexGoal, clearCodexGoal, updateCodexSettings, UnauthorizedError,
+  getCodexModels, getCodexGoal, startCodexGoal, updateCodexGoal, clearCodexGoal,
+  updateCodexSettings, UnauthorizedError,
 } from '../api.js';
 import { shouldHandOffSlash } from '../slashCommands.js';
 import MicButton from './MicButton.jsx';
@@ -936,9 +937,8 @@ export default function ChatComposer({
         return null;
       }
       if (argument.length > 4_000) throw new Error(t('chat.goal.tooLong'));
-      const result = await updateCodexGoal(pane, { objective: argument });
+      const result = await startCodexGoal(pane, argument);
       applyCurrentGoal(goalFromResponse(result));
-      showNotice(t('chat.goal.created'));
       return null;
     }
     if (/^\/compact$/i.test(trimmed)) {

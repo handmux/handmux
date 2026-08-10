@@ -217,6 +217,12 @@ export async function updateCodexGoal(
 ): Promise<CodexGoalResponse> {
   return parseGoalResponse(await post('/api/codex/goal', { pane, ...updates }));
 }
+export async function startCodexGoal(
+  pane: string,
+  objective: string,
+): Promise<CodexGoalResponse> {
+  return parseGoalResponse(await post('/api/codex/goal/start', { pane, objective }));
+}
 export const clearCodexGoal = (pane: string): Promise<unknown> => (
   post('/api/codex/goal/clear', { pane })
 );

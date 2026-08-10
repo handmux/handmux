@@ -713,8 +713,11 @@ describe('ChatView', () => {
       { k: 2, i: 2, role: 'assistant', type: 'goal', event: 'complete', goal },
     ]);
     vi.spyOn(api, 'getCodexGoal').mockResolvedValue({ goal });
-    const updateGoal = vi.spyOn(api, 'updateCodexGoal').mockImplementation(async (_pane, updates) => ({
-      goal: { ...goal, ...updates },
+    const startGoal = vi.spyOn(api, 'startCodexGoal').mockImplementation(async (_pane, objective) => ({
+      goal: {
+        ...goal, objective, status: 'active', createdAt: 30, updatedAt: 30,
+        tokensUsed: 0, timeUsedSeconds: 0,
+      },
     }));
     const { container } = render(<ChatView pane="%0" agent="codex" kind="done" />);
 
@@ -749,12 +752,32 @@ describe('ChatView', () => {
     expect(objective.value).toBe('Finish the release');
     fireEvent.change(objective, { target: { value: 'Ship the release safely' } });
     fireEvent.click(screen.getByRole('button', { name: '重新开始' }));
-    await waitFor(() => expect(updateGoal).toHaveBeenCalledWith('%0', {
-      objective: 'Ship the release safely', status: 'active',
-    }));
-    await waitFor(() => expect(sheet.textContent).toContain('Ship the release safely'));
-    expect(sheet.textContent).toContain('进行中');
-    expect(container.querySelector('.codex-goal-backdrop')).toBeTruthy();
+    await waitFor(() => expect(startGoal).toHaveBeenCalledWith('%0', 'Ship the release safely'));
+    await waitFor(() => expect(container.querySelector('.codex-goal-menu')).toBeNull());
+  });
+
+  it('immediately appends a newly set Goal as a user-side stream card', async () => {
+    let emit;
+    api.streamCodexMessages.mockImplementation((_pane, { signal, onEvent }) => {
+      emit = onEvent;
+      return new Promise((resolve) => signal.addEventListener('abort', resolve, { once: true }));
+    });
+    mockTranscript([]);
+    const { container } = render(<ChatView pane="%0" agent="codex" kind="working"
+      codexSession={{ managed: true, threadId: 'thread-1', activeTurnId: null }} />);
+    await waitFor(() => expect(emit).toBeTypeOf('function'));
+
+    act(() => emit(projected({
+      type: 'goal', turnId: null, event: 'set',
+      goal: {
+        objective: 'Ship a fresh release', status: 'active', createdAt: 30, updatedAt: 30,
+        tokensUsed: 0, timeUsedSeconds: 0, tokenBudget: null,
+      },
+    })));
+
+    const card = await screen.findByRole('button', { name: /已设置目标.*Ship a fresh release/ });
+    expect(card.classList.contains('is-user')).toBe(true);
+    expect(container.querySelector('.codex-goal-menu')).toBeNull();
   });
 
   it('keeps a terminal Goal fully read-only when it is no longer current', async () => {

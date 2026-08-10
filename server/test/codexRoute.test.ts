@@ -41,6 +41,7 @@ function appFor({
     compact: empty,
     models: async () => [],
     getGoal: async () => null,
+    startGoal: empty,
     updateGoal: empty,
     clearGoal: empty,
     updateSettings: empty,
@@ -402,22 +403,26 @@ describe('Codex App Server routes', () => {
 
   it('reads and manages the native goal for the bound thread', async () => {
     const getGoal = vi.fn(async () => ({ objective: 'Ship it', status: 'active' }));
+    const startGoal = vi.fn(async (_pane, _thread, objective) => ({ objective, status: 'active' }));
     const updateGoal = vi.fn(async (_pane, _thread, updates) => ({
       objective: updates.objective || 'Ship it', status: updates.status || 'active',
     }));
     const clearGoal = vi.fn(async () => ({ cleared: true }));
-    const app = appFor({ codexApp: { getGoal, updateGoal, clearGoal } });
+    const app = appFor({ codexApp: { getGoal, startGoal, updateGoal, clearGoal } });
 
     await request(app).get('/codex/goal?pane=%251').expect(200, {
       goal: { objective: 'Ship it', status: 'active' },
     });
     await request(app).post('/codex/goal').send({ pane: '%1', objective: ' Finish tests ' })
       .expect(200, { goal: { objective: 'Finish tests', status: 'active' } });
+    await request(app).post('/codex/goal/start').send({ pane: '%1', objective: ' New run ' })
+      .expect(200, { goal: { objective: 'New run', status: 'active' } });
     await request(app).post('/codex/goal').send({ pane: '%1', status: 'paused' })
       .expect(200, { goal: { objective: 'Ship it', status: 'paused' } });
     await request(app).post('/codex/goal/clear').send({ pane: '%1' }).expect(200, { cleared: true });
 
     expect(getGoal).toHaveBeenCalledWith('%1', 'thread-1');
+    expect(startGoal).toHaveBeenCalledWith('%1', 'thread-1', 'New run');
     expect(updateGoal).toHaveBeenNthCalledWith(1, '%1', 'thread-1', { objective: 'Finish tests' });
     expect(updateGoal).toHaveBeenNthCalledWith(2, '%1', 'thread-1', { status: 'paused' });
     expect(clearGoal).toHaveBeenCalledWith('%1', 'thread-1');
@@ -515,6 +520,8 @@ describe('Codex App Server routes', () => {
     await request(app).post('/codex/settings').send({ pane: '%1', permissionMode: 'automatic' })
       .expect(400, { error: 'bad permissionMode' });
     await request(app).post('/codex/goal').send({ pane: '%1', objective: '' })
+      .expect(400, { error: 'bad goal objective' });
+    await request(app).post('/codex/goal/start').send({ pane: '%1', objective: '   ' })
       .expect(400, { error: 'bad goal objective' });
     await request(app).post('/codex/goal').send({ pane: '%1', status: 'complete' })
       .expect(400, { error: 'bad goal status' });

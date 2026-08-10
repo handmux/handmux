@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
-import { clearCodexGoal, getCodexGoal, UnauthorizedError, updateCodexGoal } from '../api.js';
+import {
+  clearCodexGoal, getCodexGoal, startCodexGoal, UnauthorizedError, updateCodexGoal,
+} from '../api.js';
 import { t } from '../i18n';
 import { useBackButton } from '../hooks/useBackButton.js';
 import { OverlayPortal } from '../overlays/OverlayHost.js';
@@ -192,16 +194,17 @@ export default function CodexGoalMenu({
     setSaving(true);
     setError('');
     try {
-      const result = await updateCodexGoal(pane, {
-        objective,
-        ...(restarting ? { status: 'active' } : {}),
-      });
+      const startsNewGoal = restarting || !goal;
+      const result = startsNewGoal
+        ? await startCodexGoal(pane, objective)
+        : await updateCodexGoal(pane, { objective });
       setGoal(result?.goal || null);
       onGoalChange?.(result?.goal || null);
       setDraft(result?.goal?.objective || objective);
       setEditing(false);
       setRestarting(false);
-      onNotice(t(restarting ? 'chat.goal.restarted' : goal ? 'chat.goal.updated' : 'chat.goal.created'));
+      if (startsNewGoal) onClose();
+      else onNotice(t('chat.goal.updated'));
     } catch (error: unknown) {
       if (error instanceof UnauthorizedError) onAuthFail?.();
       else setError(errorMessage(error, t('chat.goal.saveFailed')));

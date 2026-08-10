@@ -21,6 +21,9 @@ vi.mock('../src/api.js', () => ({
   interruptCodexSession: vi.fn(async () => ({ interrupted: true })),
   getCodexModels: vi.fn(async () => ({ models: [] })),
   getCodexGoal: vi.fn(async () => ({ goal: null })),
+  startCodexGoal: vi.fn(async (_pane, objective) => ({ goal: {
+    objective, status: 'active', createdAt: 2, updatedAt: 2, tokensUsed: 0, timeUsedSeconds: 0,
+  } })),
   updateCodexGoal: vi.fn(async (_pane, updates) => ({ goal: {
     objective: updates.objective || 'Current goal', status: updates.status || 'active',
   } })),
@@ -41,7 +44,7 @@ import {
   steerCodexQueuedMessage, removeCodexQueuedMessage,
   beginCodexQueuedEdit, commitCodexQueuedEdit, cancelCodexQueuedEdit,
   renewCodexQueuedEdit,
-  getCodexModels, getCodexGoal, updateCodexGoal, clearCodexGoal,
+  getCodexModels, getCodexGoal, startCodexGoal, updateCodexGoal, clearCodexGoal,
   updateCodexSettings, getPaneContext,
 } from '../src/api.js';
 
@@ -55,6 +58,9 @@ beforeEach(() => {
   getPaneContext.mockImplementation(() => new Promise(() => {}));
   getCodexModels.mockResolvedValue({ models: [] });
   getCodexGoal.mockImplementation(() => new Promise(() => {}));
+  startCodexGoal.mockImplementation(async (_pane, objective) => ({ goal: {
+    objective, status: 'active', createdAt: 2, updatedAt: 2, tokensUsed: 0, timeUsedSeconds: 0,
+  } }));
   updateCodexGoal.mockImplementation(async (_pane, updates) => ({ goal: {
     objective: updates.objective || 'Current goal', status: updates.status || 'active',
   } }));
@@ -375,16 +381,14 @@ describe('ChatComposer', () => {
     expect(onInteractiveSlash).not.toHaveBeenCalled();
   });
 
-  it('runs native /goal actions without sending command text to the terminal or model', async () => {
+  it('starts a fresh native Goal from /goal text without a transient success notice', async () => {
     render(<ChatComposer pane="%1" agent="codex" kind="idle" codexSession={{ managed: true }} />);
     const input = screen.getByPlaceholderText('和 Agent 对话…');
 
     typeInto(input, '/goal Finish the release');
     fireEvent.click(screen.getByRole('button', { name: '发送' }));
-    await waitFor(() => expect(updateCodexGoal).toHaveBeenCalledWith('%1', {
-      objective: 'Finish the release',
-    }));
-    expect(await screen.findByText('任务目标已设置')).toBeTruthy();
+    await waitFor(() => expect(startCodexGoal).toHaveBeenCalledWith('%1', 'Finish the release'));
+    expect(screen.queryByText('任务目标已设置')).toBeNull();
     expect(screen.getByRole('button', { name: /任务目标.*Finish the release/ })).toBeTruthy();
 
     typeInto(input, '/goal pause');
