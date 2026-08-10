@@ -2,18 +2,26 @@ import { act, cleanup, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import * as api from '../src/api.js';
 import { projectCodexStreamEvent } from '../../server/src/codexStreamProtocol.js';
+import type {
+  CodexProjectedStreamEvent,
+  CodexStreamEvent,
+} from '../../server/src/codexStreamProtocol.js';
 import { applyCodexConversationEvent } from '../src/codexConversationState.js';
+import type { CodexConversationMessage } from '../src/codexConversationState.js';
+import type { CodexStreamOptions } from '../src/codexApi.js';
 import { useCodexMessageStream } from '../src/hooks/useCodexMessageStream.js';
 
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
-function projected(event, sequence = 1) {
-  return projectCodexStreamEvent({ threadId: 'thread-1', ...event }, sequence);
+function projected(event: Record<string, unknown>, sequence = 1): CodexProjectedStreamEvent {
+  const result = projectCodexStreamEvent({ threadId: 'thread-1', ...event }, sequence);
+  if (!result) throw new Error('test event must be projectable');
+  return result;
 }
 
 describe('Codex message stream projection', () => {
   it('accumulates deltas into one stable temporary assistant message', () => {
-    let messages = [];
+    let messages: CodexConversationMessage[] = [];
     messages = applyCodexConversationEvent(messages, projected({
       type: 'started', turnId: 'turn-1', itemId: 'agent-1', text: '',
     }));
@@ -43,7 +51,7 @@ describe('Codex message stream projection', () => {
         id: 'codex:turn-1:agent-1', role: 'assistant', type: 'text',
         turnId: 'turn-1', itemId: 'agent-1', text: '最终回答', completed: true, streaming: false,
       },
-    };
+    } as const;
     messages = applyCodexConversationEvent(messages, projected({
       type: 'conversation', turnId: 'turn-1', itemId: 'agent-1', mutation,
     }, 2));
@@ -54,7 +62,7 @@ describe('Codex message stream projection', () => {
   });
 
   it('discards finalized temporary replies before projecting a newer live reply', () => {
-    let messages = [];
+    let messages: CodexConversationMessage[] = [];
     for (let index = 1; index <= 4; index += 1) {
       messages = applyCodexConversationEvent(messages, projected({
         type: 'completed', turnId: 'turn-old', itemId: `agent-old-${index}`, text: `历史回复 ${index}`,
@@ -73,7 +81,7 @@ describe('Codex message stream projection', () => {
   });
 
   it('drops finalized temporary replies when a stream reconnects', () => {
-    const messages = [
+    const messages: CodexConversationMessage[] = [
       { itemId: 'old', text: '旧回复', live: true, completed: true },
       { itemId: 'current', text: '当前回复', live: true, completed: false },
       { type: 'goal', goal: { status: 'complete' }, turnId: null, live: true, completed: true },
@@ -111,10 +119,14 @@ describe('Codex message stream projection', () => {
   });
 
   it('forwards ordered mutations and requests a rollout reconciliation on completion', async () => {
-    let emit;
-    vi.spyOn(api, 'streamCodexMessages').mockImplementation((_pane, { signal, onEvent }) => {
+    let emit: (event: CodexStreamEvent) => void = () => {
+      throw new Error('stream callback is not ready');
+    };
+    vi.spyOn(api, 'streamCodexMessages').mockImplementation((_pane, options) => {
+      if (!options?.signal || !options.onEvent) throw new Error('stream options are required');
+      const { signal, onEvent } = options;
       emit = onEvent;
-      return new Promise((resolve) => signal.addEventListener('abort', resolve, { once: true }));
+      return new Promise<void>((resolve) => signal.addEventListener('abort', () => resolve(), { once: true }));
     });
     const onSettled = vi.fn();
     const onEvent = vi.fn();
@@ -139,38 +151,46 @@ describe('Codex message stream projection', () => {
   });
 
   it('reconnects a stream frozen by an app switch when the window regains focus', async () => {
-    const signals = [];
-    const subscriptions = [];
+    const signals: AbortSignal[] = [];
+    const subscriptions: CodexStreamOptions[] = [];
     vi.spyOn(api, 'streamCodexMessages').mockImplementation((_pane, options) => {
+      if (!options) throw new Error('stream options are required');
       const { signal } = options;
+      if (!signal) throw new Error('stream signal is required');
       signals.push(signal);
       subscriptions.push(options);
-      return new Promise((resolve) => signal.addEventListener('abort', resolve, { once: true }));
+      return new Promise<void>((resolve) => signal.addEventListener('abort', () => resolve(), { once: true }));
     });
     renderHook(() => useCodexMessageStream({
       pane: '%1', threadId: 'thread-1', enabled: true,
     }));
     await waitFor(() => expect(api.streamCodexMessages).toHaveBeenCalledTimes(1));
-    act(() => subscriptions[0].onEvent({
+    const firstSubscription = subscriptions[0];
+    if (!firstSubscription?.onEvent) throw new Error('first stream subscription is missing');
+    act(() => firstSubscription.onEvent?.({
       type: 'conversationSnapshot', threadId: 'thread-1', cursor: 6, messages: [],
     }));
-    act(() => subscriptions[0].onEvent(projected({
+    act(() => firstSubscription.onEvent?.(projected({
       type: 'delta', threadId: 'thread-1', turnId: 'turn-1', itemId: 'agent-1', delta: '继续',
     }, 7)));
 
     act(() => window.dispatchEvent(new Event('focus')));
 
     await waitFor(() => expect(api.streamCodexMessages).toHaveBeenCalledTimes(2));
-    expect(signals[0].aborted).toBe(true);
-    expect(signals[1].aborted).toBe(false);
-    expect(subscriptions[1].after).toBe(7);
+    expect(signals[0]?.aborted).toBe(true);
+    expect(signals[1]?.aborted).toBe(false);
+    expect(subscriptions[1]?.after).toBe(7);
   });
 
   it('refreshes durable history and resets its cursor when the server journal has restarted', async () => {
-    let emit;
-    vi.spyOn(api, 'streamCodexMessages').mockImplementation((_pane, { signal, onEvent }) => {
+    let emit: (event: CodexStreamEvent) => void = () => {
+      throw new Error('stream callback is not ready');
+    };
+    vi.spyOn(api, 'streamCodexMessages').mockImplementation((_pane, options) => {
+      if (!options?.signal || !options.onEvent) throw new Error('stream options are required');
+      const { signal, onEvent } = options;
       emit = onEvent;
-      return new Promise((resolve) => signal.addEventListener('abort', resolve, { once: true }));
+      return new Promise<void>((resolve) => signal.addEventListener('abort', () => resolve(), { once: true }));
     });
     const onSettled = vi.fn();
     const onEvent = vi.fn();
