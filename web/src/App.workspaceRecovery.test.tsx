@@ -466,7 +466,7 @@ describe('App management dimensions', () => {
     fireEvent.keyDown(toolbarButton, { key: 'a', code: 'KeyA', keyCode: 65 });
 
     expect(terminal.forwardPageKey).toHaveBeenCalledOnce();
-    expect(terminal.forwardPageKey.mock.calls[0][0]).toMatchObject({ key: 'a', code: 'KeyA' });
+    expect(terminal.forwardPageKey.mock.calls[0]?.[0]).toMatchObject({ key: 'a', code: 'KeyA' });
   });
 
   it('opens the draft page-wide while leaving editors, F5, and F12 alone', async () => {
@@ -670,8 +670,8 @@ describe('App workspace recovery', () => {
     expect(api.getWorkspaceRestoreOperation).toHaveBeenCalledTimes(5);
     expect(api.getWorkspaceRestoreOperation.mock.calls.every(([id]) => id === 'operation-a')).toBe(true);
     expect(storage.applyWorkspaceRestoreMapping).toHaveBeenCalledWith(mapping);
-    expect(storage.applyWorkspaceRestoreMapping.mock.invocationCallOrder[0])
-      .toBeGreaterThan(api.getSessions.mock.invocationCallOrder[0]);
+    expect(storage.applyWorkspaceRestoreMapping.mock.invocationCallOrder[0] ?? 0)
+      .toBeGreaterThan(api.getSessions.mock.invocationCallOrder[0] ?? 0);
     expect(api.getSessions).toHaveBeenCalledTimes(1);
     expect(api.getWindows).not.toHaveBeenCalled();
     expect(api.getPanes).not.toHaveBeenCalled();

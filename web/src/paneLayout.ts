@@ -103,6 +103,7 @@ function trackOffsets(edges: readonly number[], spans: readonly (readonly [numbe
   for (let i = 0; i < edges.length - 1; i += 1) {
     const a = edges[i];
     const b = edges[i + 1];
+    if (a === undefined || b === undefined) continue;
     const isPane = spans.some(([s, e]) => s === a && e === b);
     seams.push(b - a <= 1 && !isPane);
   }
@@ -134,10 +135,10 @@ export function paneLayout(panes: readonly PaneLayoutSource[] | null | undefined
   const yOff = trackOffsets(ys, ySpans, MAP_H - MAP_PAD * 2);
 
   const cells = panes.map((p, seq) => {
-    const x0 = xOff[xs.indexOf(p.left)].at;
-    const x1 = xOff[xs.indexOf(p.left + p.width)].at;
-    const y0 = yOff[ys.indexOf(p.top)].at;
-    const y1 = yOff[ys.indexOf(p.top + p.height)].at;
+    const x0 = xOff[xs.indexOf(p.left)]?.at ?? 0;
+    const x1 = xOff[xs.indexOf(p.left + p.width)]?.at ?? x0;
+    const y0 = yOff[ys.indexOf(p.top)]?.at ?? 0;
+    const y1 = yOff[ys.indexOf(p.top + p.height)]?.at ?? y0;
     return {
       id: p.id, active: !!p.active,
       ...(p.command !== undefined ? { command: p.command } : {}),

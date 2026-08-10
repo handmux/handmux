@@ -106,7 +106,8 @@ export default function DiscreteSlider({
       onKeyDown={(event) => {
         if (disabled) return;
         let next;
-        if (KEY_DIRECTION[event.key]) next = indexRef.current + KEY_DIRECTION[event.key];
+        const direction = KEY_DIRECTION[event.key];
+        if (direction !== undefined) next = indexRef.current + direction;
         else if (event.key === 'Home') next = 0;
         else if (event.key === 'End') next = options.length - 1;
         else return;

@@ -32,15 +32,15 @@ describe('command grid layout', () => {
   });
 
   it('pins the corners: Esc/Tab top-left, ⌫ top-right, Enter bottom-right', () => {
-    expect(COMMAND_ROWS[0][0]).toBe('esc');
-    expect(COMMAND_ROWS[0][1]).toBe('tab');
-    expect(COMMAND_ROWS[0][6]).toBe('del');
-    expect(COMMAND_ROWS[1][6]).toBe('enter');
+    expect(COMMAND_ROWS[0]?.[0]).toBe('esc');
+    expect(COMMAND_ROWS[0]?.[1]).toBe('tab');
+    expect(COMMAND_ROWS[0]?.[6]).toBe('del');
+    expect(COMMAND_ROWS[1]?.[6]).toBe('enter');
   });
 
   it('puts Alt in the former tilde slot and Space in the former Alt slot', () => {
-    expect(COMMAND_ROWS[0].slice(0, 3)).toEqual(['esc', 'tab', 'alt']);
-    expect(COMMAND_ROWS[1].slice(0, 3)).toEqual(['ctrl', 'shift', 'space']);
+    expect(COMMAND_ROWS[0]?.slice(0, 3)).toEqual(['esc', 'tab', 'alt']);
+    expect(COMMAND_ROWS[1]?.slice(0, 3)).toEqual(['ctrl', 'shift', 'space']);
   });
 
   it('keeps only the / and @ symbols (tilde and the buried ones are gone)', () => {
@@ -52,8 +52,8 @@ describe('command grid layout', () => {
   });
 
   it('places the arrows as an inverted-T just left of Enter (▲ over ◀ ▼ ▶)', () => {
-    expect(COMMAND_ROWS[0][4]).toBe('up');                              // ▲ above ▼
-    expect(COMMAND_ROWS[1].slice(3, 6)).toEqual(['left', 'down', 'right']); // ◀ ▼ ▶, left of Enter
+    expect(COMMAND_ROWS[0]?.[4]).toBe('up');                              // ▲ above ▼
+    expect(COMMAND_ROWS[1]?.slice(3, 6)).toEqual(['left', 'down', 'right']); // ◀ ▼ ▶, left of Enter
   });
 
   it('ctrl/shift/alt are the live modifiers; kbd is a control (the quick-bar toggle)', () => {

@@ -146,7 +146,9 @@ export default function IdeaPanel({
     const y = event.clientY;
     let to = rows.length - 1;
     for (let i = 0; i < rows.length; i++) {
-      const r = rows[i].getBoundingClientRect();
+      const row = rows.item(i);
+      if (!row) continue;
+      const r = row.getBoundingClientRect();
       if (y < r.top + r.height / 2) { to = i; break; }
     }
     setList((cur) => {

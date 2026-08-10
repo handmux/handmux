@@ -44,7 +44,13 @@ export function readRoute(): AppRoute {
   const inboxM = raw.match(/^\/inbox(?:\/(.*))?$/);
   if (inboxM) return { session: null, window: null, pane: null, inbox: true, inboxId: inboxM[1] ? dec(inboxM[1]) : null };
   const m = raw.match(/^\/s\/([^/]*)\/w\/([^/]*)\/p\/(.*)$/);
-  if (m) return { session: dec(m[1]), window: dec(m[2]), pane: dec(m[3]), inbox: false, inboxId: null };
+  if (m) return {
+    session: dec(m[1] ?? ''),
+    window: dec(m[2] ?? ''),
+    pane: dec(m[3] ?? ''),
+    inbox: false,
+    inboxId: null,
+  };
   const session = dec(raw);
   return { session: session || null, window: null, pane: null, inbox: false, inboxId: null };
 }

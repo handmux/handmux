@@ -34,7 +34,7 @@ export function detectLang(
     const full = String(l).toLowerCase();
     if (available[full]) return full as LanguageCode;
     const base = full.split('-')[0];
-    if (available[base]) return base as LanguageCode;
+    if (base && available[base]) return base as LanguageCode;
   }
   return 'en';
 }

@@ -6,7 +6,7 @@ export function toPcm16k(float32: Float32Array, inRate: number): Uint8Array {
   const outLen = Math.floor(float32.length / ratio);
   const pcm = new Int16Array(outLen);
   for (let i = 0; i < outLen; i++) {
-    let s = float32[Math.floor(i * ratio)];
+    let s = float32[Math.floor(i * ratio)] ?? 0;
     if (s > 1) s = 1; else if (s < -1) s = -1;
     pcm[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
   }
@@ -43,6 +43,6 @@ export function createFramer(frameBytes = 1280): ByteFramer {
 
 export function bytesToBase64(bytes: Uint8Array): string {
   let bin = '';
-  for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+  for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i] ?? 0);
   return btoa(bin);
 }

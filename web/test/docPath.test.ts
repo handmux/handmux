@@ -69,7 +69,7 @@ describe('findDocLinks', () => {
   it("strips a leading @ (Claude Code's @file mention) but keeps an internal @", () => {
     const link = findDocLinks('see @src/notes.md mention');
     expect(link.map((l) => l.path)).toEqual(['src/notes.md']);
-    expect(link[0].start).toBe(5); // offset advances past the '@' so the underline lands on the path
+    expect(link[0]?.start).toBe(5); // offset advances past the '@' so the underline lands on the path
     expect(findDocLinks('open node_modules/@types/x.md here').map((l) => l.path))
       .toEqual(['node_modules/@types/x.md']);
   });

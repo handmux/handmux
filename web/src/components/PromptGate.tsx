@@ -58,7 +58,9 @@ export default function PromptGate({ pane, prompt, onAuthFail, onAct }: PromptGa
 
   // The multi-question review screen: options are Submit answers / Cancel — show it as a plain confirm.
   if (prompt.submit) {
-    const submitN = (prompt.options.find((o) => /submit/i.test(o.label)) || prompt.options[0]).n;
+    const submitOption = prompt.options.find((o) => /submit/i.test(o.label)) || prompt.options[0];
+    if (!submitOption) return null;
+    const submitN = submitOption.n;
     const cancelOpt = prompt.options.find((o) => /cancel/i.test(o.label));
     return (
       <div className="chat-gate">

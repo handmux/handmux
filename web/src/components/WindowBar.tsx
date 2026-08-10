@@ -54,7 +54,7 @@ export interface WindowBarProps {
 }
 
 const CIRCLED = '①②③④⑤⑥⑦⑧⑨';
-const seq = (index: number): string => (index < CIRCLED.length ? CIRCLED[index] : String(index + 1));
+const seq = (index: number): string => CIRCLED[index] ?? String(index + 1);
 const paneLabel = (pane: WorkspacePane | undefined, index: number): string => `${seq(index)} ${pane?.command || pane?.id || ''}`;
 
 // `agent` is the agent id running in this window; when set, its logo prefixes the tab name.

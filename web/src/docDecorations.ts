@@ -154,7 +154,8 @@ function readLogicalLine(
     if (cont) while (n > 0 && (chars[n - 1] === '' || chars[n - 1] === ' ')) n--;
     for (let k = 0; k < n; k++) {
       text += chars[k] || ' ';
-      cells.push(rowCells[k]);
+      const logicalCell = rowCells[k];
+      if (logicalCell) cells.push(logicalCell);
     }
     if (cont) { r++; continue; }
     break;
@@ -201,7 +202,7 @@ export function scanDocLinks(term: DecorationTerminal): TerminalDecorationSegmen
       }
     }
     // advance past every row this logical line covered
-    y = cells.length ? cells[cells.length - 1].row + 1 : y + 1;
+    y = (cells.at(-1)?.row ?? y) + 1;
   }
   return out;
 }

@@ -488,7 +488,7 @@ function CodexConfigMenu({
     const nextFastTier = fastTierFor(model);
     const updates: CodexSettingsUpdate = { model: model.model || model.id };
     if (supported.length && (!settings?.effort || !supported.includes(settings.effort))) {
-      updates.effort = model.defaultReasoningEffort || supported[0];
+      updates.effort = model.defaultReasoningEffort || supported[0] || null;
     }
     if (settings?.serviceTier && !supportedTiers.includes(settings.serviceTier)) {
       updates.serviceTier = settings.serviceTier === 'fast' && nextFastTier ? nextFastTier.id : null;
@@ -894,8 +894,8 @@ export default function ChatComposer({
     if (!match) return false;
     if (!match[2]) openConfig();
     else {
-      const settingKey = match[1].toLowerCase() as 'model' | 'effort';
-      const settingValue = match[2].trim();
+      const settingKey = (match[1] ?? '').toLowerCase() as 'model' | 'effort';
+      const settingValue = (match[2] ?? '').trim();
       const result = await updateCodexSettings(pane, { [settingKey]: settingValue });
       setLocalSettings(settingsFromResponse(
         result,
@@ -1276,11 +1276,13 @@ export default function ChatComposer({
   // prefix once + brace-expanded names), then focus to keep typing. Mirrors the dock's insertPaths.
   const insertPaths = (paths: string[]): void => {
     if (!paths.length) return;
+    const firstPath = paths[0];
+    if (firstPath === undefined) return;
     let text: string;
     if (paths.length === 1) {
-      text = paths[0];
+      text = firstPath;
     } else {
-      const dir = paths[0].slice(0, paths[0].lastIndexOf('/') + 1);
+      const dir = firstPath.slice(0, firstPath.lastIndexOf('/') + 1);
       text = paths.every((p) => p.startsWith(dir))
         ? `${dir}{${paths.map((p) => p.slice(dir.length)).join(',')}}`
         : paths.join(' ');

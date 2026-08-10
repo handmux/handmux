@@ -33,6 +33,7 @@ export function moveItem<T>(list: readonly T[], from: number, to: number): T[] {
   const next = [...list];
   if (from < 0 || from >= next.length || to < 0 || to >= next.length || from === to) return next;
   const [item] = next.splice(from, 1);
+  if (item === undefined) return next;
   next.splice(to, 0, item);
   return next;
 }

@@ -105,10 +105,13 @@ export function createTerminalTouchController({
       longPressTimer = null;
     }
   };
-  const touchDistance = (touches: TouchList): number => Math.hypot(
-    touches[0].clientX - touches[1].clientX,
-    touches[0].clientY - touches[1].clientY,
-  );
+  const touchDistance = (touches: TouchList): number => {
+    const first = touches[0];
+    const second = touches[1];
+    return first && second
+      ? Math.hypot(first.clientX - second.clientX, first.clientY - second.clientY)
+      : 0;
+  };
   const stopFling = (): void => {
     if (flingRAF != null) {
       cancelAnimationFrame(flingRAF);
@@ -187,13 +190,15 @@ export function createTerminalTouchController({
       axis = -1;
       return;
     }
+    const touch = event.touches[0];
+    if (!touch) return;
     const liveSurface = host.querySelector<HTMLElement>('.terminal__live');
     if (getStreamExact() && !getAltScreen() && liveSurface
-      && event.touches[0].clientY < liveSurface.getBoundingClientRect().top) {
+      && touch.clientY < liveSurface.getBoundingClientRect().top) {
       enterStreamHistory?.(0);
     }
-    startX = event.touches[0].clientX;
-    startY = event.touches[0].clientY;
+    startX = touch.clientX;
+    startY = touch.clientY;
     startLeft = host.scrollLeft;
     axis = 0;
     lastMoveX = startX;
@@ -228,14 +233,18 @@ export function createTerminalTouchController({
       return;
     }
     if (selecting && event.touches.length === 1) {
-      selection.extend(event.touches[0].clientX, event.touches[0].clientY);
+      const touch = event.touches[0];
+      if (!touch) return;
+      selection.extend(touch.clientX, touch.clientY);
       event.preventDefault();
       event.stopPropagation();
       return;
     }
     if (event.touches.length !== 1) return;
-    const dx = event.touches[0].clientX - startX;
-    const dy = event.touches[0].clientY - startY;
+    const touch = event.touches[0];
+    if (!touch) return;
+    const dx = touch.clientX - startX;
+    const dy = touch.clientY - startY;
     if (Math.abs(dx) > 6 || Math.abs(dy) > 6) cancelLongPress();
     if (axis === 0) {
       if (Math.abs(dx) < 6 && Math.abs(dy) < 6) return;
@@ -243,7 +252,7 @@ export function createTerminalTouchController({
     }
     if (axis === 1) {
       host.scrollLeft = startLeft - dx;
-      const x = event.touches[0].clientX;
+      const x = touch.clientX;
       const elapsed = event.timeStamp - lastMoveTime;
       if (elapsed > 0) scrollVelocityX = (lastMoveX - x) / elapsed;
       lastMoveX = x;
@@ -273,7 +282,7 @@ export function createTerminalTouchController({
       return;
     }
 
-    const y = event.touches[0].clientY;
+    const y = touch.clientY;
     const stepY = y - wheelPreviousY;
     wheelPreviousY = y;
     if (getStreamExact()) {

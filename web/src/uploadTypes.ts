@@ -28,7 +28,7 @@ const EXT_SET: ReadonlySet<string> = new Set(UPLOAD_EXTS);
 // True if `name`'s final extension is allowed. No extension → false (executables usually have none).
 export function isAllowedUploadName(name: string): boolean {
   const m = /\.([A-Za-z0-9]+)$/.exec(name || '');
-  return m ? EXT_SET.has(m[1].toLowerCase()) : false;
+  return m?.[1] ? EXT_SET.has(m[1].toLowerCase()) : false;
 }
 
 // Split a File list into { allowed, rejected } (rejected = array of names) by extension. Accepts an

@@ -70,11 +70,14 @@ export function useUpload({ cwd, onAuthFail, onPaths }: UseUploadOptions): Uploa
     // One AbortController for the whole batch → the overlay's Cancel aborts the in-flight file and we
     // break out of the loop. Active-transfer feedback lives in the app-wide overlay (uploadJob store).
     const ac = new AbortController();
-    startUpload(ac, t('dock.upload.progress', { name: list[0].name, tag: total > 1 ? `（1/${total}）` : '' }));
+    const firstFile = list[0];
+    if (!firstFile) return;
+    startUpload(ac, t('dock.upload.progress', { name: firstFile.name, tag: total > 1 ? `（1/${total}）` : '' }));
     try {
       for (let i = 0; i < total; i++) {
         if (ac.signal.aborted) break;
         const f = list[i];
+        if (!f) continue;
         const tag = total > 1 ? `（${i + 1}/${total}）` : '';
         updateUpload({ label: t('dock.upload.progress', { name: f.name, tag }), phase: 'sending', pct: 0 });
         try {

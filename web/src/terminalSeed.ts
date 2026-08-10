@@ -36,9 +36,11 @@ function analyzeLine(line: string, bgStart: boolean): AnalyzedLine {
   while (m) {
     note(line.slice(idx, m.index));
     idx = sgr.lastIndex;
-    const ps = m[1] === '' ? [0] : m[1].split(';').map(Number);
+    const params = m[1] ?? '';
+    const ps = params === '' ? [0] : params.split(';').map(Number);
     for (let i = 0; i < ps.length; i += 1) {
       const p = ps[i];
+      if (p === undefined) continue;
       if (p === 0 || p === 49) bg = false; // reset-all / default background
       else if ((p >= 40 && p <= 47) || (p >= 100 && p <= 107)) bg = true; // 8/16-colour bg
       else if (p === 38 || p === 48) {
@@ -78,10 +80,12 @@ export function trimTrailingShadow(lines: string[]): string[] {
     if (held.length) {
       // The closest blank row is the box's real lower padding. Seal it at its own end; closing the
       // preceding text row would erase the inherited shade before this row is drawn.
-      out.push(`${held[0].line}${held[0].bgEnd ? '\x1b[49m' : ''}`);
+      const firstHeld = held[0];
+      if (firstHeld) out.push(`${firstHeld.line}${firstHeld.bgEnd ? '\x1b[49m' : ''}`);
       for (let i = 1; i < held.length; i += 1) out.push('');
     } else if (lastShaded >= 0 && lastShadedOpen) {
-      out[lastShaded] += '\x1b[49m';
+      const shaded = out[lastShaded];
+      if (shaded !== undefined) out[lastShaded] = `${shaded}\x1b[49m`;
     }
     held = [];
     lastShaded = -1;

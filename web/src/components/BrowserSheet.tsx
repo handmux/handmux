@@ -728,12 +728,12 @@ export default function BrowserSheet({ browser, staticPreview }: BrowserSheetPro
                   <div className="browser-options-row browser-zoom-row">
                     <strong>{t('browser.zoomPage')}</strong>
                     <div className="browser-zoom-stepper" role="group" aria-label={t('browser.zoomPage')}>
-                      <button onClick={() => zoomPageBy(-1)} disabled={pageZoom <= PAGE_ZOOM_STEPS[0]}
+                      <button onClick={() => zoomPageBy(-1)} disabled={pageZoom <= (PAGE_ZOOM_STEPS[0] ?? pageZoom)}
                         aria-label={t('preview.zoomOut')}>−</button>
                       <button className="browser-zoom-value" onClick={() => setPageZoom(1)}
                         aria-label={t('browser.resetZoom')}>{Math.round(pageZoom * 100)}%</button>
                       <button onClick={() => zoomPageBy(1)}
-                        disabled={pageZoom >= PAGE_ZOOM_STEPS[PAGE_ZOOM_STEPS.length - 1]}
+                        disabled={pageZoom >= (PAGE_ZOOM_STEPS.at(-1) ?? pageZoom)}
                         aria-label={t('preview.zoomIn')}>＋</button>
                     </div>
                   </div>

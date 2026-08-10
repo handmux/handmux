@@ -23,7 +23,7 @@ describe('workspace restore api', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     await expect(getWorkspaceProtectionStatus()).resolves.toEqual({ status: 'protected' });
-    expect(fetchMock.mock.calls[0][0]).toBe('/api/workspace/status');
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/workspace/status');
   });
 
   it('gets the server-authored latest restore plan', async () => {
@@ -41,7 +41,7 @@ describe('workspace restore api', () => {
     const fetchMock = vi.fn(async (..._args: Parameters<typeof fetch>) => jsonRes(200, { checkpointId: 'checkpoint a' }));
     vi.stubGlobal('fetch', fetchMock);
     await getWorkspaceRestorePlan('checkpoint a');
-    expect(fetchMock.mock.calls[0][0]).toBe('/api/workspace/restore-plan?checkpoint=checkpoint%20a');
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/workspace/restore-plan?checkpoint=checkpoint%20a');
   });
 
   it('starts a restore with a checkpoint-scoped JSON request', async () => {
@@ -60,6 +60,6 @@ describe('workspace restore api', () => {
     const fetchMock = vi.fn(async (..._args: Parameters<typeof fetch>) => jsonRes(200, { id: 'operation a', status: 'running' }));
     vi.stubGlobal('fetch', fetchMock);
     await getWorkspaceRestoreOperation('operation a');
-    expect(fetchMock.mock.calls[0][0]).toBe('/api/workspace/restore/operation%20a');
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/workspace/restore/operation%20a');
   });
 });

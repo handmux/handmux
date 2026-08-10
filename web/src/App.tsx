@@ -220,8 +220,12 @@ const clampCols = (cols: number): number => Math.max(20, Math.min(500, cols));
 
 // Pick the remembered id if it still exists, else the first. We deliberately don't fall back
 // to tmux's "active" — the local last-opened choice wins, first is the fallback.
-const pickId = <T extends { id: string }>(items: readonly T[], prefer?: string | null): string =>
-  (prefer && items.some((x) => x.id === prefer) ? prefer : items[0].id);
+const pickId = <T extends { id: string }>(items: readonly T[], prefer?: string | null): string => {
+  if (prefer && items.some((item) => item.id === prefer)) return prefer;
+  const first = items[0];
+  if (!first) throw new Error('Cannot pick from an empty item list');
+  return first.id;
+};
 
 export default function App() {
   const detectedDesktopInput = useMemo(() => desktopInputEnvironment(), []);
@@ -601,8 +605,9 @@ export default function App() {
   // Opening the inbox = "seen": advance the top-dot high-water to the newest ts present (covers items that
   // load right after open). Clears the gear / 通知记录 dot even if some messages inside stay unread.
   useEffect(() => {
-    if (notifInboxOpen && notifItems.length && notifItems[0].ts > notifSeenTs) {
-      setNotifSeenTs(notifItems[0].ts); setNotifSeenTsState(notifItems[0].ts);
+    const newest = notifItems[0];
+    if (notifInboxOpen && newest && newest.ts > notifSeenTs) {
+      setNotifSeenTs(newest.ts); setNotifSeenTsState(newest.ts);
     }
   }, [notifInboxOpen, notifItems, notifSeenTs]);
   // Root double-back-to-exit: on the main page (a pane is showing, all the overlays above push their own
@@ -641,6 +646,7 @@ export default function App() {
     const selectedWindow = (target?.window && windows.find((w) => w.id === target.window))
       || windows.find((w) => w.id === pickId(windows, getLastWindow(session.id)))
       || windows[0];
+    if (!selectedWindow) return false;
     const panes = await getPanes(selectedWindow.id);
     if (isCancelled() || switchEpoch !== windowSwitchRef.current) return false;
     if (!panes.length) return false;
@@ -940,6 +946,7 @@ export default function App() {
     const windows = await getWindows(sessionId);
     if (w.id === current.window.id && windows.length) {
       const next = windows.find((x) => x.active) || windows[0];
+      if (!next) return;
       const panes = await getPanes(next.id);
       if (!panes.length) return;
       const paneId = pickId(panes, getLastPane(next.id));
@@ -1839,7 +1846,7 @@ export default function App() {
           if (lastId) session = alive.find((s) => s.id === lastId);
         }
         if (!session) session = alive[0];
-        if (!cancelled) await openSession(session, target);
+        if (!cancelled && session) await openSession(session, target);
       } catch (e) {
         handledAuth(e); // onAuthFail === setNeedToken(true)
       } finally {
@@ -1913,7 +1920,7 @@ export default function App() {
   // Top red dot follows the LATEST-time high-water: it shows only while a notification newer than the last
   // one you've SEEN (by opening the page) exists. Opening the page clears it even if messages inside are
   // still unread; a newer push relights it. (Per-message unread lives on the rows / the count, not here.)
-  const hasNewNotif = notifItems.length > 0 && notifItems[0].ts > notifSeenTs; // items are newest-first
+  const hasNewNotif = (notifItems[0]?.ts ?? -Infinity) > notifSeenTs; // items are newest-first
   const gearDot = changelogUnread || updateDot || hasNewNotif;
   const openSettings = () => {
     setSettingsOpen(true);

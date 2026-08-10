@@ -428,18 +428,21 @@ function BottomDock({
       const kbUp = physicalKeyboardUp()
         || document.activeElement === cmdRef.current
         || document.activeElement === ref.current;
-      d = event.touches.length === 1
-        ? { x: event.touches[0].clientX, y: event.touches[0].clientY, dx: 0, dy: 0, decided: false, horiz: false, vert: false, strip, cmp, kbUp }
+      const touch = event.touches[0];
+      d = event.touches.length === 1 && touch
+        ? { x: touch.clientX, y: touch.clientY, dx: 0, dy: 0, decided: false, horiz: false, vert: false, strip, cmp, kbUp }
         : null;
     };
     const onMove = (event: TouchEvent): void => {
       if (!d || event.touches.length !== 1) return;
+      const touch = event.touches[0];
+      if (!touch) return;
       // A held / auto-repeating keybar key (▲◀▼▶ ⌫) OWNS the touch — never let its finger-drift, esp. with
       // the system keyboard up, get mistaken for a page swipe (which used to park the track between pages).
       // The key releases this the instant IT decides the gesture is a swipe (moved past its own 8px gate),
       // so a deliberate swipe that happens to start on a key still pages. Only blocks BEFORE we commit.
       if (keyHeldRef.current && !d.horiz) return;
-      const dx = event.touches[0].clientX - d.x, dy = event.touches[0].clientY - d.y;
+      const dx = touch.clientX - d.x, dy = touch.clientY - d.y;
       if (!d.decided) {
         // Need real travel before deciding, and only lock to a swipe when the drag is CLEARLY horizontal
         // (dominates the vertical by 1.4×). This keeps a press-and-hold on a key — e.g. auto-repeating the
@@ -922,11 +925,13 @@ function BottomDock({
     { focusComposer = true }: { focusComposer?: boolean } = {},
   ): void => {
     if (!paths.length) return;
+    const firstPath = paths[0];
+    if (firstPath === undefined) return;
     let text: string;
     if (paths.length === 1) {
-      text = paths[0];
+      text = firstPath;
     } else {
-      const dir = paths[0].slice(0, paths[0].lastIndexOf('/') + 1);
+      const dir = firstPath.slice(0, firstPath.lastIndexOf('/') + 1);
       text = paths.every((p) => p.startsWith(dir))
         ? `${dir}{${paths.map((p) => p.slice(dir.length)).join(',')}}`
         : paths.join(' ');

@@ -82,8 +82,9 @@ export interface CmdFavEditorProps {
 
 // The sticky-key picker is a single-select of the common modifier combos (default: none). Each maps to the
 // {ctrl,shift,alt} shape buildChord() wants.
+const DEFAULT_STICKY: StickyOption = { key: 'none', mods: {} };
 const STICKY_OPTS: StickyOption[] = [
-  { key: 'none', mods: {} },
+  DEFAULT_STICKY,
   { key: 'ctrl', label: 'Ctrl', mods: { ctrl: true } },
   { key: 'shift', label: 'Shift', mods: { shift: true } },
   { key: 'alt', label: 'Alt', mods: { alt: true } },
@@ -91,7 +92,7 @@ const STICKY_OPTS: StickyOption[] = [
   { key: 'ctrl-alt', label: 'Ctrl+Alt', mods: { ctrl: true, alt: true } },
 ];
 const stickyByKey = (key: string): StickyOption => (
-  STICKY_OPTS.find((option) => option.key === key) ?? STICKY_OPTS[0]
+  STICKY_OPTS.find((option) => option.key === key) ?? DEFAULT_STICKY
 );
 
 // The base key is PICKED, never typed (you shouldn't have to know to type "up"/"tab"). Special keys you
@@ -226,7 +227,7 @@ function AddCard({ scopes, cfg, edit, inset, onAdd, onUpdate, onClose }: AddCard
   const [tab, setTab] = useState<'key' | 'msg'>(
     edit ? (edit.fav.kind === 'key' ? 'key' : 'msg') : 'msg',
   );
-  const [scopeKey, setScopeKey] = useState(edit ? edit.scope : scopes[0].key);
+  const [scopeKey, setScopeKey] = useState(edit ? edit.scope : (scopes[0]?.key ?? ''));
   const [text, setText] = useState(edit ? (seedKey ? seedKey.base : edit.fav.text) : '');
   const [enter, setEnter] = useState(edit && edit.fav.kind !== 'key' ? !!edit.fav.enter : !!cfg.defaultEnter);
   const [sticky, setSticky] = useState(seedKey ? seedKey.sticky : 'none');
@@ -240,7 +241,7 @@ function AddCard({ scopes, cfg, edit, inset, onAdd, onUpdate, onClose }: AddCard
   const stickyDD = STICKY_OPTS.map((o) => ({ value: o.key, label: o.label ?? t('cmd.stickyNone') }));
 
   const chord = tab === 'key' ? buildChord(stickyByKey(sticky).mods, text) : null;
-  const targetScope = scopes.some((s) => s.key === scopeKey) ? scopeKey : scopes[0].key;
+  const targetScope = scopes.some((s) => s.key === scopeKey) ? scopeKey : (scopes[0]?.key ?? '');
   const canSave = tab === 'key' ? !!chord : !!text.trim();
 
   const submit = (): void => {
@@ -380,7 +381,7 @@ export default function CmdFavEditor({
   );
   const [card, setCard] = useState<EditorCardState | null>(null);
   const layoutMode = variant === 'chat' ? 'chat' : 'command';
-  const globalScope = scopes[0].key;
+  const globalScope = scopes[0]?.key ?? '';
   const [layout, setLayout] = useState(() => loadShortcutLayout(layoutMode));
   const [undo, setUndo] = useState<{ identity: string } | null>(null);
   const [addedNotice, setAddedNotice] = useState(0);

@@ -29,6 +29,7 @@ export async function takeSharedFile(): Promise<File | null> {
   const keys = await cache.keys();
   if (!keys.length) return null;
   const reqKey = keys[keys.length - 1]; // newest (sw.js clears old entries, so usually the only one)
+  if (!reqKey) return null;
   const res = await cache.match(reqKey);
   await cache.delete(reqKey);
   if (!res) return null;

@@ -10,8 +10,8 @@ describe('fallbackGate', () => {
   it('returns 允许/拒绝 driving Enter / Escape', () => {
     const g = fallbackGate();
     expect(g.options.map((o) => o.label)).toEqual(['允许', '拒绝']);
-    expect(g.options[0].keys).toEqual(['Enter']);
-    expect(g.options[1].keys).toEqual(['Escape']);
+    expect(g.options[0]?.keys).toEqual(['Enter']);
+    expect(g.options[1]?.keys).toEqual(['Escape']);
   });
 
   it('validates scraped prompt options before rendering the gate', () => {

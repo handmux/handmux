@@ -345,6 +345,8 @@ export default function FileBrowser({
       return rejected;
     }
     if (!dir) return [...list.map((file) => file.name), ...rejected];
+    const firstFile = list[0];
+    if (!firstFile) return rejected;
     setUploading(true);
     setErr('');
     const total = list.length;
@@ -353,11 +355,12 @@ export default function FileBrowser({
     // AbortController for the batch so Cancel aborts the in-flight file and breaks the loop. Download
     // keeps its own inline `progress` bar — only uploads move to the overlay.
     const ac = new AbortController();
-    startUpload(ac, t('filebrowser.uploading', { name: list[0].name, tag: total > 1 ? `（1/${total}）` : '' }));
+    startUpload(ac, t('filebrowser.uploading', { name: firstFile.name, tag: total > 1 ? `（1/${total}）` : '' }));
     try {
       for (let i = 0; i < total; i++) {
         if (ac.signal.aborted) break;
         const file = list[i];
+        if (!file) continue;
         const tag = total > 1 ? `（${i + 1}/${total}）` : '';
         updateUpload({ label: t('filebrowser.uploading', { name: file.name, tag }), phase: 'sending', pct: 0 });
         try {

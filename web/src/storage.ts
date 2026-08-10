@@ -256,6 +256,7 @@ function remapMapKey(key: string, keyMapping: StringMap, valueMapping: StringMap
   }
   for (const oldKey of matched) {
     const actualKey = keyMapping[oldKey];
+    if (actualKey === undefined) continue;
     const oldValue = current[oldKey];
     next[actualKey] = typeof oldValue === 'string' && hasOwn(valueMapping, oldValue)
       ? valueMapping[oldValue]
@@ -271,7 +272,8 @@ function remapKnownWorkspaceKeys(runtime: RuntimeMapping): void {
   if (Object.keys(sessions).length > 0) {
     const lastSession = localStorage.getItem(LAST_SESSION_KEY);
     if (lastSession && hasOwn(sessions, lastSession)) {
-      localStorage.setItem(LAST_SESSION_KEY, sessions[lastSession]);
+      const mappedSession = sessions[lastSession];
+      if (mappedSession !== undefined) localStorage.setItem(LAST_SESSION_KEY, mappedSession);
     }
     remapMapKey(WIN_BY_SESSION_KEY, sessions, windows);
   }

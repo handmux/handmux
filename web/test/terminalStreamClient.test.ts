@@ -88,6 +88,12 @@ function latestSocket(): FakeWebSocket {
   return socket;
 }
 
+function socketAt(index: number): FakeWebSocket {
+  const socket = FakeWebSocket.instances[index];
+  if (!socket) throw new Error(`expected fake WebSocket instance ${index}`);
+  return socket;
+}
+
 describe('terminalStreamEnabled', () => {
   it('is enabled by default and supports an emergency query override', () => {
     expect(terminalStreamEnabled({ search: '?terminalStream=1' })).toBe(true);
@@ -114,7 +120,7 @@ describe('openTerminalStream', () => {
       onData: async () => { events.push('data'); },
       onReady: async () => { events.push('ready'); },
     });
-    const ws = FakeWebSocket.instances[0];
+    const ws = socketAt(0);
     ws.open();
     expect(ws.sent).toEqual([{ type: 'subscribe', token: 'secret', pane: '%7' }]);
     ws.message(seedFrame());
@@ -133,7 +139,7 @@ describe('openTerminalStream', () => {
       token: 'secret',
       WebSocketCtor: FakeWebSocket,
     });
-    const ws = FakeWebSocket.instances[0];
+    const ws = socketAt(0);
     ws.open();
     ws.message(JSON.stringify({ type: 'seed' }));
 
@@ -153,7 +159,7 @@ describe('openTerminalStream', () => {
       now: () => now,
       onProbe,
     });
-    const ws = FakeWebSocket.instances[0];
+    const ws = socketAt(0);
     ws.open();
     ws.message(seedFrame());
     const ready = readyFrame();
@@ -179,7 +185,7 @@ describe('openTerminalStream', () => {
       probeTimeoutMs: 20,
       onProbe,
     });
-    const ws = FakeWebSocket.instances[0];
+    const ws = socketAt(0);
     ws.open();
     ws.message(seedFrame());
     ws.message(readyFrame());
@@ -199,7 +205,7 @@ describe('openTerminalStream', () => {
       WebSocketCtor: FakeWebSocket,
       reconnectMs: 10,
     });
-    const ws = FakeWebSocket.instances[0];
+    const ws = socketAt(0);
     ws.open();
     stream.pause();
     expect(ws.sent.at(-1)).toEqual({ type: 'pause' });
@@ -221,7 +227,7 @@ describe('openTerminalStream', () => {
       WebSocketCtor: FakeWebSocket,
       onStatus: (status) => statuses.push(status),
     });
-    const first = FakeWebSocket.instances[0];
+    const first = socketAt(0);
     first.open();
 
     stream.pause();
@@ -231,7 +237,7 @@ describe('openTerminalStream', () => {
 
     stream.resync();
     expect(FakeWebSocket.instances).toHaveLength(2);
-    const second = FakeWebSocket.instances[1];
+    const second = socketAt(1);
     second.open();
     expect(second.sent).toEqual([{ type: 'subscribe', token: 'secret', pane: '%7' }]);
     stream.close();
@@ -244,9 +250,9 @@ describe('openTerminalStream', () => {
       pane: '%7',
       token: 'secret',
       WebSocketCtor: FakeWebSocket,
-      onData: (data) => { delivered.push(data[0]); },
+      onData: (data) => { delivered.push(data[0] ?? -1); },
     });
-    const ws = FakeWebSocket.instances[0];
+    const ws = socketAt(0);
     ws.open();
 
     for (let cycle = 0; cycle < 100; cycle += 1) {
@@ -302,7 +308,7 @@ describe('openTerminalStream', () => {
       token: 'secret',
       WebSocketCtor: FakeWebSocket,
     });
-    const ws = FakeWebSocket.instances[0];
+    const ws = socketAt(0);
 
     stream.pause();
     ws.open();
@@ -326,7 +332,7 @@ describe('openTerminalStream', () => {
       },
       onData: async () => { events.push('stale-data'); },
     });
-    const ws = FakeWebSocket.instances[0];
+    const ws = socketAt(0);
     ws.open();
     ws.message(seedFrame());
     ws.message(new Uint8Array([1]).buffer);
@@ -355,7 +361,7 @@ describe('openTerminalStream', () => {
       maxFrameLagMs: 300,
       onData,
     });
-    const first = FakeWebSocket.instances[0];
+    const first = socketAt(0);
     first.open();
     first.message(seedFrame());
     first.message(readyFrame());
@@ -403,7 +409,7 @@ describe('openTerminalStream', () => {
       WebSocketCtor: FakeWebSocket,
       onData,
     });
-    const ws = FakeWebSocket.instances[0];
+    const ws = socketAt(0);
     ws.open();
     ws.message(seedFrame());
     ws.message(readyFrame());
@@ -434,7 +440,7 @@ describe('openTerminalStream', () => {
       onData: (data) => { events.push([...data]); },
       onReady: () => { events.push('ready'); },
     });
-    const ws = FakeWebSocket.instances[0];
+    const ws = socketAt(0);
     ws.open();
     ws.message(seedFrame());
     await Promise.resolve();
@@ -459,7 +465,7 @@ describe('openTerminalStream', () => {
       onSeed: () => seed.promise,
       onData,
     });
-    const ws = FakeWebSocket.instances[0];
+    const ws = socketAt(0);
     ws.open();
     ws.message(seedFrame());
     ws.message(new Uint8Array([1, 2]).buffer);
@@ -489,7 +495,7 @@ describe('openTerminalStream', () => {
         return seedCount === 1 ? firstSeed.promise : freshSeed.promise;
       },
     });
-    const ws = FakeWebSocket.instances[0];
+    const ws = socketAt(0);
     ws.open();
     ws.message(seedFrame());
     await vi.waitFor(() => expect(seedCount).toBe(1));
@@ -521,7 +527,7 @@ describe('openTerminalStream', () => {
       onSeed: () => seed.promise,
       onReady,
     });
-    const ws = FakeWebSocket.instances[0];
+    const ws = socketAt(0);
     ws.open();
     ws.message(seedFrame());
     ws.message(readyFrame());
@@ -551,7 +557,7 @@ describe('openTerminalStream', () => {
       onData,
       onReady,
     });
-    const ws = FakeWebSocket.instances[0];
+    const ws = socketAt(0);
     ws.open();
     ws.message(seedFrame());
     await Promise.resolve();
@@ -564,7 +570,7 @@ describe('openTerminalStream', () => {
     for (let i = 0; i < 12; i += 1) await Promise.resolve();
 
     expect(onData).toHaveBeenCalledOnce();
-    expect([...onData.mock.calls[0][0]]).toEqual([1, 2, 3]);
+    expect([...(onData.mock.calls[0]?.[0] ?? [])]).toEqual([1, 2, 3]);
     expect(onReady).toHaveBeenCalledOnce();
     expect(ws.sent).not.toContainEqual({ type: 'resync' });
     stream.close();
@@ -591,11 +597,11 @@ describe('openTerminalStream', () => {
       WebSocketCtor: FakeWebSocket,
       reconnectMs: 10,
     });
-    const first = FakeWebSocket.instances[0];
+    const first = socketAt(0);
     first.open();
     first.close(1006);
     vi.advanceTimersByTime(10);
-    const second = FakeWebSocket.instances[1];
+    const second = socketAt(1);
     second.open();
     first.onclose?.(new CloseEvent('close', { code: 1006 }));
     stream.resync();
@@ -617,7 +623,7 @@ describe('openTerminalStream', () => {
       readyTimeoutMs: 50,
       onStatus: (status) => statuses.push(status),
     });
-    const ws = FakeWebSocket.instances[0];
+    const ws = socketAt(0);
     ws.open();
     vi.advanceTimersByTime(20);
     expect(ws.readyState).toBe(FakeWebSocket.OPEN);
@@ -626,7 +632,7 @@ describe('openTerminalStream', () => {
     expect(statuses).not.toContain('reconnecting');
 
     vi.advanceTimersByTime(10);
-    const retry = FakeWebSocket.instances[1];
+    const retry = socketAt(1);
     retry.open();
     retry.message(seedFrame());
     retry.message(readyFrame());
@@ -669,7 +675,7 @@ describe('openTerminalStream', () => {
       WebSocketCtor: FakeWebSocket,
       onStatus: (status) => statuses.push(status),
     });
-    const ws = FakeWebSocket.instances[0];
+    const ws = socketAt(0);
     ws.open();
     ws.message(seedFrame());
     ws.message(readyFrame());

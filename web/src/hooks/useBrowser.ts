@@ -410,7 +410,9 @@ export function useBrowser({ enabled = true, browserProxy = false }: UseBrowserO
         if (attempt === PROXY_RETRY_DELAYS.length) {
           throw new Error(t('browser.loadFailed'));
         }
-        await wait(PROXY_RETRY_DELAYS[attempt]);
+        const delay = PROXY_RETRY_DELAYS[attempt];
+        if (delay === undefined) throw new Error(t('browser.loadFailed'));
+        await wait(delay);
       }
       return null;
     })().then((binding): RuntimeBrowserTab | null => {

@@ -191,7 +191,11 @@ export function moveFav(mode: string, text: string, dir: number): StoredFav[] {
   const j = i + (dir < 0 ? -1 : 1);
   if (i < 0 || j < 0 || j >= items.length) return items;
   const next = items.slice();
-  [next[i], next[j]] = [next[j], next[i]];
+  const source = next[i];
+  const target = next[j];
+  if (!source || !target) return items;
+  next[i] = target;
+  next[j] = source;
   return saveFavs(mode, next);
 }
 
@@ -203,7 +207,11 @@ export function moveFavBeside(mode: string, text: string, neighbourText: string)
   const j = items.findIndex((f) => f.text === neighbourText);
   if (i < 0 || j < 0 || i === j) return items;
   const next = items.slice();
-  [next[i], next[j]] = [next[j], next[i]];
+  const source = next[i];
+  const target = next[j];
+  if (!source || !target) return items;
+  next[i] = target;
+  next[j] = source;
   return saveFavs(mode, next);
 }
 
@@ -217,6 +225,10 @@ export function moveFavBesideByIdentity(
   const j = items.findIndex((f) => shortcutIdentity(f) === neighbourIdentity);
   if (i < 0 || j < 0 || i === j) return items;
   const next = items.slice();
-  [next[i], next[j]] = [next[j], next[i]];
+  const source = next[i];
+  const target = next[j];
+  if (!source || !target) return items;
+  next[i] = target;
+  next[j] = source;
   return saveFavs(mode, next);
 }

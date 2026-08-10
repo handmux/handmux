@@ -73,9 +73,9 @@ describe('usePushToTalk', () => {
     act(() => { fireChunk('QUJD'); });
 
     expect(result.current.state).toBe('recording');
-    expect(ws.sent[0].common).toEqual({ app_id: 'APP1' });
-    expect(ws.sent[0].data.status).toBe(0);
-    expect(ws.sent[0].data.audio).toBe('QUJD');
+    expect(ws.sent[0]?.common).toEqual({ app_id: 'APP1' });
+    expect(ws.sent[0]?.data.status).toBe(0);
+    expect(ws.sent[0]?.data.audio).toBe('QUJD');
   });
 
   it('updates partial from wpgs results', async () => {
@@ -96,6 +96,7 @@ describe('usePushToTalk', () => {
     act(() => { ws.onmessage?.({ data: JSON.stringify({ data: { result: { sn: 1, pgs: 'apd', ws: [{ cw: [{ w: '开始' }] }] } } }) }); });
     await act(async () => { await result.current.stop(); });
     const endFrame = ws.sent[ws.sent.length - 1];
+    if (!endFrame) throw new Error('expected an end frame');
     expect(endFrame.data.status).toBe(2);
     act(() => { ws.onmessage?.({ data: JSON.stringify({ data: { status: 2, result: { sn: 1, pgs: 'apd', ws: [{ cw: [{ w: '开始' }] }] } } }) }); });
     await waitFor(() => expect(result.current.state).toBe('idle'));
@@ -177,6 +178,7 @@ describe('usePushToTalk', () => {
       expect(result.current.state).toBe('recording');
       await act(async () => { await vi.advanceTimersByTimeAsync(55000); });
       const endFrame = ws.sent[ws.sent.length - 1];
+      if (!endFrame) throw new Error('expected an end frame');
       expect(endFrame.data.status).toBe(2);          // cap actually fired stop()
       expect(result.current.state).toBe('finalizing');
     } finally {

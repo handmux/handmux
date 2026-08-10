@@ -7,7 +7,9 @@ describe('findLocalUrls', () => {
   const one = (line: string): LocalUrlLink => {
     const result = findLocalUrls(line);
     expect(result).toHaveLength(1);
-    return result[0];
+    const first = result[0];
+    if (!first) throw new Error('expected one local URL');
+    return first;
   };
 
   it('matches localhost with port and path', () => {
@@ -77,10 +79,12 @@ describe('local URL vs doc-path do not collide', () => {
     const line = 'preview http://localhost:3000/foo.html';
     const urls = findLocalUrls(line);
     expect(urls).toHaveLength(1);
-    expect(urls[0].path).toBe('/foo.html');
+    const url = urls[0];
+    if (!url) throw new Error('expected one local URL');
+    expect(url.path).toBe('/foo.html');
     // The raw findDocLinks WOULD spuriously see `3000/foo.html`; docDecorations drops it because it
     // overlaps the URL span. Assert the overlap so the drop rule in docDecorations stays justified.
-    const doc = findDocLinks(line).find((d) => d.start < urls[0].end && d.end > urls[0].start);
+    const doc = findDocLinks(line).find((d) => d.start < url.end && d.end > url.start);
     expect(doc).toBeTruthy();
   });
 

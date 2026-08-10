@@ -17,8 +17,8 @@ export const ONESHOT_SLASH = new Set<string>([
 export function shouldHandOffSlash(text: unknown): boolean {
   const m = /^\s*\/([a-z][\w-]*)\s*(.*)$/i.exec(typeof text === 'string' ? text : '');
   if (!m) return false;
-  if (m[2].trim()) return false;             // has args → applies directly, stays in chat
-  return !ONESHOT_SLASH.has(m[1].toLowerCase()); // bare + not a known one-shot → hand off to the terminal
+  if ((m[2] ?? '').trim()) return false;             // has args → applies directly, stays in chat
+  return !ONESHOT_SLASH.has((m[1] ?? '').toLowerCase()); // bare + not a known one-shot → hand off to the terminal
 }
 
 // The optimistic echo for a chat-staying slash command, or null. Claude Code logs a slash command's
@@ -34,8 +34,8 @@ export interface SlashEcho {
 export function slashEchoFor(text: unknown): SlashEcho | null {
   const m = /^\s*\/([a-z][\w-]*)\s*(.*)$/i.exec(typeof text === 'string' ? text : '');
   if (!m || shouldHandOffSlash(text)) return null;
-  const echo: SlashEcho = { name: '/' + m[1] };
-  const args = m[2].trim();
+  const echo: SlashEcho = { name: '/' + (m[1] ?? '') };
+  const args = (m[2] ?? '').trim();
   if (args) echo.args = args;
   return echo;
 }

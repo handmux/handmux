@@ -145,8 +145,8 @@ export function createTerminalSelectionController({
     let first = cell.col;
     let last = cell.col;
     if (/\S/.test(text[cell.col] || '')) {
-      while (first > 0 && /\S/.test(text[first - 1])) first -= 1;
-      while (last < term.cols - 1 && /\S/.test(text[last + 1])) last += 1;
+      while (first > 0 && /\S/.test(text[first - 1] ?? '')) first -= 1;
+      while (last < term.cols - 1 && /\S/.test(text[last + 1] ?? '')) last += 1;
     }
     anchor = { col: first, row: cell.row };
     activeRef.current = true;

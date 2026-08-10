@@ -294,7 +294,8 @@ export function openTerminalStream({
         }
         if (dataBatch) {
           if (dataBatch.chunks.length === 1) {
-            await onData?.(new Uint8Array(dataBatch.chunks[0]));
+            const chunk = dataBatch.chunks[0];
+            if (chunk) await onData?.(new Uint8Array(chunk));
             return;
           }
           const joined = new Uint8Array(dataBatch.byteLength);

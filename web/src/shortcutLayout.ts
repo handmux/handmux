@@ -68,14 +68,21 @@ export function moveShortcutInLayout(
   const from = ids.indexOf(identity);
   const to = from + (direction < 0 ? -1 : 1);
   if (from < 0 || to < 0 || to >= ids.length) return normalized;
-  [ids[from], ids[to]] = [ids[to], ids[from]];
+  const fromId = ids[from];
+  const toId = ids[to];
+  if (fromId === undefined || toId === undefined) return normalized;
+  ids[from] = toId;
+  ids[to] = fromId;
   const hidden = new Set(normalized.hidden);
   const visible = new Set(ids);
   let nextVisible = 0;
   const order: string[] = [];
   for (const current of normalized.order) {
     if (hidden.has(current)) order.push(current);
-    else if (visible.has(current)) order.push(ids[nextVisible++]);
+    else if (visible.has(current)) {
+      const next = ids[nextVisible++];
+      if (next !== undefined) order.push(next);
+    }
   }
   order.push(...ids.slice(nextVisible));
   return { ...normalized, order: strings(order) };

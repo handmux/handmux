@@ -53,8 +53,10 @@ const CHARS: Record<string, string> = {
 };
 
 export function keyAction(id: string): KeyAction | null {
-  if (id in NAMED) return { kind: 'key', name: NAMED[id] };
-  if (id in CHARS) return { kind: 'text', ch: CHARS[id] };
+  const named = NAMED[id];
+  if (named !== undefined) return { kind: 'key', name: named };
+  const char = CHARS[id];
+  if (char !== undefined) return { kind: 'text', ch: char };
   return null; // control ids (kbd/fav) + modifiers (ctrl/shift/alt) are not dispatched as keys
 }
 

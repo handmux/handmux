@@ -31,6 +31,7 @@ export function paneManageSubtitle(
   const idx = items.findIndex((pane) => pane.id === paneId);
   if (idx < 0) return '';
   const pane = items[idx];
-  const seq = idx < CIRCLED.length ? CIRCLED[idx] : String(idx + 1);
+  if (!pane) return '';
+  const seq = CIRCLED[idx] ?? String(idx + 1);
   return withDimensions(`${seq} ${pane.command || pane.id}`, pane);
 }

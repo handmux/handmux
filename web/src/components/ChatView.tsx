@@ -136,7 +136,7 @@ function displayCommand(command: unknown): string {
   const raw = String(command || '');
   const match = raw.match(/^\/bin\/zsh\s+-lc\s+([\s\S]+)$/);
   if (!match) return raw;
-  const shellArg = match[1].trim();
+  const shellArg = (match[1] ?? '').trim();
   if (shellArg.length >= 2 && shellArg[0] === "'" && shellArg[shellArg.length - 1] === "'") {
     return shellArg.slice(1, -1).replace(/'\\''/g, "'");
   }
@@ -716,7 +716,7 @@ function CodexInputGate({
     setError('');
     try {
       await answerCodexInput(pane, input.id, Object.fromEntries(
-        questions.map((question) => [question.id, [answers[question.id].trim()]]),
+        questions.map((question) => [question.id, [(answers[question.id] ?? '').trim()]]),
       ));
     } catch (err: unknown) {
       if (err instanceof UnauthorizedError) onAuthFail?.();
@@ -822,7 +822,7 @@ export default function ChatView({
   // automatic compactions do not look like one duplicated UI event.
   const latestCompactIndex = useMemo(() => {
     for (let i = messages.length - 1; i >= 0; i--) {
-      if (messages[i].type === 'compact') return i;
+      if (messages[i]?.type === 'compact') return i;
     }
     return -1;
   }, [messages]);

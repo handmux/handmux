@@ -14,7 +14,7 @@ describe('pane agent identity', () => {
 
   it('prefers later live state and clears an agent that has exited', () => {
     const panes = reconcilePaneAgents(current.panes, {});
-    expect(panes[0].agent).toBeNull();
+    expect(panes[0]?.agent).toBeNull();
     expect(currentPaneAgent({ ...current, panes }, {})).toBeNull();
   });
 
