@@ -188,6 +188,19 @@ describe('ChatView', () => {
     }, 55, 89);
   });
 
+  it('keeps ordinary slash-separated assistant prose as plain text', async () => {
+    mockTranscript([{
+      k: 0, i: 0, role: 'assistant', type: 'text',
+      text: '可用开始/暂停、设置/清除或 /goal；文件在 docs/spec.md',
+    }]);
+    const { container } = render(<ChatView pane="%0" kind="done" onDocLinkTap={vi.fn()} />);
+
+    await screen.findByText('docs/spec.md');
+    expect(container.querySelector('.chat-md').textContent).toContain('开始/暂停');
+    expect([...container.querySelectorAll('.chat-md a')].map((anchor) => anchor.textContent))
+      .toEqual(['docs/spec.md']);
+  });
+
   it('routes explicit Markdown file links through the same handler and strips line suffixes', async () => {
     mockTranscript([{
       k: 0, i: 0, role: 'assistant', type: 'text',

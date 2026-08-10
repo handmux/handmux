@@ -25,6 +25,15 @@ describe('findDocLinks', () => {
     expect(findDocLinks('open /work/Dockerfile now').map((l) => l.path))
       .toEqual(['/work/Dockerfile']);
   });
+  it('does not mistake ordinary slash-separated prose for file paths', () => {
+    expect(findDocLinks('开始/暂停、设置/清除、iOS/Android、read/write、2026/08/10、/goal、/clear')).toEqual([]);
+    expect(findDocLinks('scripts/build is ambiguous, but docs/README is a named file').map((l) => l.path))
+      .toEqual(['docs/README']);
+  });
+  it('keeps explicitly rooted extensionless paths tappable', () => {
+    expect(findDocLinks('run /work/bin/task ./scripts/build ../bin/check ~/bin/tool').map((l) => l.path))
+      .toEqual(['/work/bin/task', './scripts/build', '../bin/check', '~/bin/tool']);
+  });
   it('does not turn version numbers or bare email addresses into file links', () => {
     expect(findDocLinks('released v1.2.3; mail test@example.com')).toEqual([]);
   });

@@ -76,7 +76,7 @@ handmux start --tunnel cloudflare   # instant public URL (cloudflared auto-insta
 - **Workspace recovery** — handmux keeps the metadata needed to restore your latest tmux workspace after a computer or tmux-server restart, without replacing existing sessions.
 - **Git viewer** — changes / commit history / any branch / full-screen colored diff, multi-repo tabs, read-only, never touches your tree.
 - **Web Preview for URLs and static folders** — preview URLs by phone or computer proxy, or open an isolated static folder, with narrow/wide page widths and zoom; computer proxy can also request a mobile or desktop site version. It embeds pages rather than replacing a full browser.
-- **Docs** — tap any text-file path in the terminal to open it, regardless of extension; Markdown rendered, font zoom, sentence-by-sentence read-aloud. Binary files stay download-only.
+- **Docs** — tap recognized text-file paths in the terminal to open them, regardless of extension; ordinary slash-separated prose stays plain. Markdown rendered, font zoom, sentence-by-sentence read-aloud. Binary files stay download-only.
 - **Mobile select & copy** — long-press to select in the terminal, drag iOS-style handles to fine-tune, copy the selection / a whole line / a whole paragraph.
 - **Files both ways** — multi-select upload from the chat box, download, share in, copy any absolute path.
 - **Ideas — catch every one** — a thought the moment it strikes: a per-window idea/to-do list, jot one by voice and drop it straight into the prompt.

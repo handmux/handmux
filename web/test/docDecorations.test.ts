@@ -69,6 +69,13 @@ describe('scanDocLinks', () => {
     t.dispose();
   });
 
+  it('does not decorate ordinary slash-separated terminal text', async () => {
+    const t = new Terminal({ cols: 40, rows: 2, allowProposedApi: true, scrollback: 100 });
+    await write(t, 'start/stop iOS/Android read/write /goal');
+    expect(scanDocLinks(t)).toEqual([]);
+    t.dispose();
+  });
+
   // A program (Ink / Claude Code) that width-folds its OWN output emits a real '\n', so the second row
   // is NOT flagged isWrapped. We still stitch it when the first row is filled to the edge and the next
   // starts flush at col 0 — otherwise only the tail fragment ('plans/push-api.md') would be tappable.

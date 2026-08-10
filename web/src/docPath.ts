@@ -28,7 +28,18 @@ function looksLikeFilePath(value: string): boolean {
   if (RESERVED_BARE_EXT.has(value.toLowerCase())) return false;
   if (/^v?\d+(?:\.\d+)+$/i.test(value)) return false; // versions/IP-like numbers are prose, not paths
   if (value.includes('@') && !value.includes('/')) return false; // bare email address
-  if (value.includes('/')) return true;                         // includes extensionless paths
+  // A slash alone is not enough evidence: ordinary prose is full of alternatives such as
+  // `start/stop`, `iOS/Android`, `设置/清除` and slash commands such as `/goal`. Extensionless paths must
+  // identify themselves with an explicit relative prefix or an absolute path that has a directory segment;
+  // ordinary relative paths still qualify when their leaf looks like a file.
+  if (/^(?:\.\.?\/|~\/)/.test(value)) return true;
+  if (value.includes('/')) {
+    const leaf = value.slice(value.lastIndexOf('/') + 1);
+    return (value.startsWith('/') && value.indexOf('/', 1) >= 0)
+      || (leaf.startsWith('.') && leaf.length > 1)
+      || EXTENSIONLESS_NAMES.test(leaf)
+      || /^[^.][^/]*\.[^.]+$/.test(leaf);
+  }
   if (value.startsWith('.') && value.length > 1) return true;   // dotfiles such as .env
   if (EXTENSIONLESS_NAMES.test(value)) return true;
   return /^[^.][^/]*\.[^.]+$/.test(value);                     // arbitrary file extension

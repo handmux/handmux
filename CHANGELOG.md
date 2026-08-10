@@ -26,7 +26,7 @@ All notable changes to handmux. Format follows [Keep a Changelog](https://keepac
 
 ### Fixed
 
-- 对话中的 Markdown 目标现在与终端使用同一套识别规则，未识别的文件或协议不再保留可点击链接。
+- 对话与终端使用同一套严格的文件识别规则；普通的“开始/暂停”等斜杠文字和未识别的 Markdown 目标不再高亮或允许点击。
 - `~/.handmux/state.json` 及其目录现在使用私有权限和原子写入，并会在读取历史文件时自动修复过宽权限。
 - Push 订阅、静态预览、通知收件箱、更新缓存和 CLI 配置现在也统一使用私有原子存储；自定义配置路径不会再修改不属于 Handmux 的共享父目录权限。
 - Claude Hook、Claude Usage 和 Codex Usage 快照现在使用 `0700/0600` 私有权限及原子替换，并会在读写旧文件时修复历史宽松权限。
