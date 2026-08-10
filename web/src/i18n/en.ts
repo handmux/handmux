@@ -336,7 +336,7 @@ export default {
 'chat.goal.restart': 'Restart',
 'chat.goal.clear': 'Clear',
 'chat.goal.clearConfirmTitle': 'Clear this task goal?',
-'chat.goal.clearConfirmBody': 'Codex will stop tracking this goal.',
+'chat.goal.clearConfirmBody': 'The current task goal will be deleted and Codex will stop tracking it. Its historical chat card will remain.',
 'chat.goal.statusActive': 'Active',
 'chat.goal.statusPaused': 'Paused',
 'chat.goal.statusBlocked': 'Blocked',

@@ -235,12 +235,15 @@ export default function CodexGoalMenu({
       setGoal(null);
       onGoalChange?.(null);
       setDraft('');
-      setEditing(true);
       setConfirmClear(false);
+      onClose();
       onNotice(t('chat.goal.cleared'));
     } catch (error: unknown) {
       if (error instanceof UnauthorizedError) onAuthFail?.();
-      else setError(errorMessage(error, t('chat.goal.clearFailed')));
+      else {
+        setConfirmClear(false);
+        setError(errorMessage(error, t('chat.goal.clearFailed')));
+      }
     } finally { setSaving(false); }
   };
 
@@ -279,7 +282,7 @@ export default function CodexGoalMenu({
           {error && <div className="codex-goal-error" role="status">{error}</div>}
         </div>
         {!loading && (goal || editing) && !historical && (
-          <footer className="codex-goal-actions">
+          <footer className={`codex-goal-actions${editing ? '' : ' is-action-list'}`}>
             {editing ? (
               <>
                 {goal && <button type="button" disabled={saving} onClick={() => {
@@ -292,20 +295,20 @@ export default function CodexGoalMenu({
                   onClick={() => void save()}>{t(restarting ? 'chat.goal.restart' : 'common.save')}</button>
               </>
             ) : terminal ? (
-              <>
-                <button type="button" className="primary" disabled={saving} onClick={() => {
+              <div className="codex-goal-action-list">
+                <button type="button" disabled={saving} onClick={() => {
                   setDraft(goal?.objective ?? '');
                   setRestarting(true);
                   setEditing(true);
                   setError('');
-                }}>{t('chat.goal.restart')}</button>
+                }}><span>{t('chat.goal.restart')}</span><span aria-hidden="true">›</span></button>
                 <button type="button" className="destructive" disabled={saving}
                   onClick={() => setConfirmClear(true)}>{t('chat.goal.clear')}</button>
-              </>
+              </div>
             ) : (
-              <>
+              <div className="codex-goal-action-list">
                 <button type="button" disabled={saving} onClick={() => setEditing(true)}>
-                  {t('chat.goal.edit')}
+                  <span>{t('chat.goal.edit')}</span><span aria-hidden="true">›</span>
                 </button>
                 <button type="button" disabled={saving}
                   onClick={() => void setStatus(goal?.status === 'active' ? 'paused' : 'active')}>
@@ -313,13 +316,14 @@ export default function CodexGoalMenu({
                 </button>
                 <button type="button" className="destructive" disabled={saving}
                   onClick={() => setConfirmClear(true)}>{t('chat.goal.clear')}</button>
-              </>
+              </div>
             )}
           </footer>
         )}
       </section>
       {confirmClear && (
-        <div className="settings-confirm-backdrop" onClick={() => setConfirmClear(false)}>
+        <div className="settings-confirm-backdrop codex-goal-confirm-backdrop"
+          onClick={() => setConfirmClear(false)}>
           <div className="settings-confirm" role="alertdialog" aria-modal="true"
             aria-label={t('chat.goal.clearConfirmTitle')} onClick={(event) => event.stopPropagation()}>
             <h2>{t('chat.goal.clearConfirmTitle')}</h2>

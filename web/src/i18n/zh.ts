@@ -335,7 +335,7 @@ export default {
 'chat.goal.restart': '重新开始',
 'chat.goal.clear': '清除',
 'chat.goal.clearConfirmTitle': '清除任务目标？',
-'chat.goal.clearConfirmBody': 'Codex 将不再继续跟踪这个目标。',
+'chat.goal.clearConfirmBody': '当前任务目标会被删除，Codex 将停止继续跟踪；对话中的历史卡片仍会保留。',
 'chat.goal.statusActive': '进行中',
 'chat.goal.statusPaused': '已暂停',
 'chat.goal.statusBlocked': '已阻塞',

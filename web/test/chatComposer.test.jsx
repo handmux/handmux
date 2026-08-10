@@ -435,11 +435,20 @@ describe('ChatComposer', () => {
     await waitFor(() => expect(panel.textContent).toContain('Ship after review'));
     expect(screen.getByRole('button', { name: /任务目标.*Ship after review/ })).toBeTruthy();
 
+    const actionList = panel.querySelector('.codex-goal-action-list');
+    expect(actionList).toBeTruthy();
+    expect(Array.from(actionList.children).map((button) => button.textContent)).toEqual([
+      '编辑›', '暂停', '清除',
+    ]);
+    expect(styles).toMatch(/\.codex-goal-action-list button\s*\{[^}]*width:\s*100%[^}]*min-height:\s*46px/);
     fireEvent.click(screen.getByRole('button', { name: '清除' }));
-    expect(screen.getByRole('alertdialog', { name: '清除任务目标？' })).toBeTruthy();
+    const confirmation = screen.getByRole('alertdialog', { name: '清除任务目标？' });
+    expect(confirmation.closest('.codex-goal-confirm-backdrop')).toBeTruthy();
+    expect(styles).toMatch(/\.codex-goal-confirm-backdrop\s*\{[^}]*z-index:\s*var\(--z-overlay-confirm\)/);
     fireEvent.click(screen.getByRole('alertdialog').querySelector('button.danger'));
     await waitFor(() => expect(clearCodexGoal).toHaveBeenCalledWith('%1'));
     await waitFor(() => expect(container.querySelector('.cc-goal-bar')).toBeNull());
+    expect(container.querySelector('.codex-goal-menu')).toBeNull();
   });
 
   it('does not reserve a Goal row when the current thread has no goal', async () => {

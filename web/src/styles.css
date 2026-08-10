@@ -3301,7 +3301,24 @@ button.cmd-text { background: none; border: none; text-align: left; }
 .codex-goal-actions button.primary { background: var(--ct-accent); color: #fff; }
 .codex-goal-actions button.destructive { color: var(--danger, #d34b45); }
 .codex-goal-actions button:disabled { opacity: .48; }
-.chat-composer .settings-confirm-backdrop { z-index: var(--z-overlay-workspace); }
+.codex-goal-actions.is-action-list {
+  display: block; min-height: 0; padding: 10px 14px calc(10px + env(safe-area-inset-bottom, 0px));
+}
+.codex-goal-action-list {
+  overflow: hidden; border: 1px solid var(--ct-line); border-radius: 12px;
+  background: var(--ct-chip-2);
+}
+.codex-goal-actions .codex-goal-action-list button {
+  width: 100%; min-height: 46px; padding: 0 14px; border-radius: 0;
+  display: flex; align-items: center; justify-content: space-between;
+  background: transparent; color: var(--ct-accent); font-size: 14px; font-weight: 500; text-align: left;
+}
+.codex-goal-actions .codex-goal-action-list button + button { border-top: 1px solid var(--ct-line); }
+.codex-goal-actions .codex-goal-action-list button span:last-child {
+  color: var(--ct-muted); font-size: 21px; font-weight: 400; line-height: 1;
+}
+.codex-goal-actions .codex-goal-action-list button.destructive { color: var(--danger, #d34b45); }
+.codex-goal-confirm-backdrop { z-index: var(--z-overlay-confirm); }
 @media (prefers-reduced-motion: reduce) {
   .codex-config-menu, .codex-goal-menu, .codex-config-head button.is-refreshing svg { animation: none; }
   .cc-context-permission-row svg { transition: none; }
