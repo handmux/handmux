@@ -1,8 +1,134 @@
 import { EventEmitter } from 'node:events';
 import { describe, expect, it, vi } from 'vitest';
 import { createCodexAppServer, projectCodexThread } from '../src/codexAppServer.js';
+import type WebSocket from 'ws';
+import type { CodexStreamEvent } from '../src/codexStreamProtocol.js';
 
-function fixtureThread(status = { type: 'idle' }) {
+type UnknownRecord = Record<string, unknown>;
+
+function recordOf(value: unknown): UnknownRecord | null {
+  return value != null && typeof value === 'object' && !Array.isArray(value)
+    ? value as UnknownRecord
+    : null;
+}
+
+interface TestQueueItem extends UnknownRecord {
+  id: string;
+  text: string;
+  requestId?: string;
+}
+
+function queueItemOf(result: unknown): TestQueueItem {
+  const item = recordOf(recordOf(result)?.item);
+  if (!item || typeof item.id !== 'string' || typeof item.text !== 'string') {
+    throw new Error('expected a queued send result');
+  }
+  return item as TestQueueItem;
+}
+
+function threadFromRead(result: unknown): unknown {
+  const record = recordOf(result);
+  if (!record || !Object.hasOwn(record, 'thread')) throw new Error('expected a managed thread read');
+  return record.thread;
+}
+
+interface TestStatus extends UnknownRecord {
+  type: string;
+  activeFlags?: string[];
+}
+
+interface TestItem extends UnknownRecord {
+  id: string;
+  type: string;
+  text?: string;
+  content?: unknown[];
+  summary?: string[];
+  command?: string;
+  cwd?: string;
+  status?: string;
+  aggregatedOutput?: string;
+  changes?: UnknownRecord[];
+  arguments?: UnknownRecord;
+  contentItems?: UnknownRecord[];
+  success?: boolean | null;
+}
+
+interface TestTurn extends UnknownRecord {
+  id: string;
+  status: string;
+  startedAt?: number;
+  completedAt?: number;
+  items: TestItem[];
+}
+
+interface TestThread extends UnknownRecord {
+  id: string;
+  status: TestStatus;
+  turns: TestTurn[];
+}
+
+interface TestGoal extends UnknownRecord {
+  threadId: string;
+  objective: string;
+  status: string;
+  createdAt: number;
+  updatedAt: number;
+  tokensUsed: number;
+  timeUsedSeconds: number;
+  tokenBudget: number | null;
+}
+
+interface TestRpcParams extends UnknownRecord {
+  threadId?: string;
+  includeTurns?: boolean;
+  expectedTurnId?: string;
+  objective?: string;
+  status?: string;
+  model?: string;
+  modelProvider?: string;
+  serviceTier?: string | null;
+  cwd?: string;
+  runtimeWorkspaceRoots?: string[];
+  approvalPolicy?: string;
+  approvalsReviewer?: string;
+  input?: UnknownRecord[];
+}
+
+interface TestRpcMessage extends UnknownRecord {
+  id?: string | number;
+  method?: string;
+  params: TestRpcParams;
+}
+
+interface TestSocket extends EventEmitter {
+  readyState: number;
+  send(data: string): void;
+  close(): void;
+}
+
+type TestWebSocket = TestSocket & WebSocket;
+
+interface FakeProxyOptions {
+  empty?: boolean;
+  loaded?: string[];
+  updatedAt?: Record<string, number>;
+  status?: TestStatus;
+  readThread?: ((threadId: string) => TestThread) | null;
+  resumeThread?: ((threadId: string) => TestThread) | null;
+  turnStartWait?: PromiseLike<unknown> | null;
+  turnStartReply?: boolean;
+  turnSteerReply?: boolean;
+  parentThreadIds?: Record<string, string | null>;
+  initialGoal?: TestGoal | null;
+}
+
+interface TestOutbox extends UnknownRecord {
+  version?: number;
+  queues: UnknownRecord[];
+  receipts: UnknownRecord[];
+}
+
+function fixtureThread(status: TestStatus = { type: 'idle' }): TestThread {
   return {
     id: 'thread-1', status,
     gitInfo: { branch: 'main', sha: 'abc123', originUrl: null },
@@ -29,12 +155,12 @@ function fixtureThread(status = { type: 'idle' }) {
   };
 }
 
-function memoryStore(initial = null) {
-  let value = initial == null ? null : structuredClone(initial);
+function memoryStore(initial: TestOutbox | null = null) {
+  let value: TestOutbox | null = initial == null ? null : structuredClone(initial);
   return {
     read: vi.fn(() => (value == null ? null : structuredClone(value))),
-    write: vi.fn((next) => { value = structuredClone(next); }),
-    snapshot: () => (value == null ? null : structuredClone(value)),
+    write: vi.fn((next: unknown) => { value = structuredClone(next) as TestOutbox; }),
+    snapshot: () => structuredClone(value) as TestOutbox,
   };
 }
 
@@ -42,15 +168,15 @@ function fakeProxy({
   empty = false, loaded = ['thread-1'], updatedAt = {}, status = { type: 'idle' }, readThread = null,
   resumeThread = null, turnStartWait = null, turnStartReply = true, turnSteerReply = true,
   parentThreadIds = {}, initialGoal = null,
-} = {}) {
-  const ws = new EventEmitter();
+}: FakeProxyOptions = {}) {
+  const ws = new EventEmitter() as TestSocket;
   ws.readyState = 0;
-  const sent = [];
+  const sent: TestRpcMessage[] = [];
   let persisted = !empty;
   let goal = initialGoal;
-  const reply = (message) => queueMicrotask(() => ws.emit('message', Buffer.from(JSON.stringify(message))));
-  ws.send = (data) => {
-    const message = JSON.parse(data);
+  const reply = (message: unknown) => queueMicrotask(() => ws.emit('message', Buffer.from(JSON.stringify(message))));
+  ws.send = (data: string) => {
+    const message = JSON.parse(data) as TestRpcMessage;
     sent.push(message);
     if (message.id == null) return;
     if (message.method === 'initialize') reply({ jsonrpc: '2.0', id: message.id, result: {} });
@@ -60,8 +186,8 @@ function fakeProxy({
       if (!persisted) reply({ jsonrpc: '2.0', id: message.id, error: { code: -32600, message: 'no rollout found for thread id thread-1' } });
       else reply({ jsonrpc: '2.0', id: message.id, result: {
         thread: {
-          ...(resumeThread ? resumeThread(message.params.threadId) : fixtureThread(status)),
-          id: message.params.threadId, updatedAt: updatedAt[message.params.threadId],
+          ...(resumeThread ? resumeThread(message.params.threadId!) : fixtureThread(status)),
+          id: message.params.threadId, updatedAt: updatedAt[message.params.threadId!],
         },
         model: 'gpt-test', modelProvider: 'openai', serviceTier: null, cwd: '/work', approvalPolicy: 'on-request',
         runtimeWorkspaceRoots: ['/work', '/shared'],
@@ -69,10 +195,10 @@ function fakeProxy({
         reasoningEffort: 'high', multiAgentMode: 'explicitRequestOnly',
       } });
     } else if (message.method === 'thread/read') {
-      const thread = message.params.includeTurns !== false && readThread ? readThread(message.params.threadId) : fixtureThread();
+      const thread = message.params.includeTurns !== false && readThread ? readThread(message.params.threadId!) : fixtureThread();
       reply({ jsonrpc: '2.0', id: message.id, result: { thread: {
-        ...thread, id: message.params.threadId, updatedAt: updatedAt[message.params.threadId],
-        parentThreadId: parentThreadIds[message.params.threadId] ?? null,
+        ...thread, id: message.params.threadId, updatedAt: updatedAt[message.params.threadId!],
+        parentThreadId: parentThreadIds[message.params.threadId!] ?? null,
       } } });
     } else if (message.method === 'turn/start') {
       persisted = true;
@@ -104,8 +230,8 @@ function fakeProxy({
       reply({ jsonrpc: '2.0', id: message.id, result: { goal } });
     } else if (message.method === 'thread/goal/set') {
       goal = {
-        threadId: message.params.threadId,
-        objective: message.params.objective ?? goal?.objective,
+        threadId: message.params.threadId!,
+        objective: message.params.objective ?? goal?.objective ?? '',
         status: message.params.status ?? goal?.status ?? 'active',
         createdAt: goal?.createdAt ?? 1,
         updatedAt: 2,
@@ -125,7 +251,7 @@ function fakeProxy({
   };
   ws.close = () => { ws.readyState = 3; ws.emit('close'); };
   queueMicrotask(() => { ws.readyState = 1; ws.emit('open'); });
-  return { ws, sent, push: (message) => reply(message) };
+  return { ws: ws as TestWebSocket, sent, push: (message: unknown) => reply(message) };
 }
 
 describe('Codex App Server projection', () => {
@@ -136,12 +262,12 @@ describe('Codex App Server projection', () => {
     ]);
     expect(messages[0]).toMatchObject({ id: 'codex:turn-1:user-1', k: 0, role: 'user', text: 'hello' });
     expect(messages[2].tool).toMatchObject({ name: 'exec_command', result: '/work\n', isError: false, outcome: 'success' });
-    expect(messages.slice(3, 5).map((message) => message.tool.input.file_path)).toEqual(['/work/a.js', '/work/b.js']);
-    expect(messages.slice(5, 12).map((message) => message.tool.name)).toEqual([
+    expect(messages.slice(3, 5).map((message) => message.tool?.input.file_path)).toEqual(['/work/a.js', '/work/b.js']);
+    expect(messages.slice(5, 12).map((message) => message.tool?.name)).toEqual([
       'web__run', 'docs:search', 'custom', 'view_image', 'wait', 'spawn_agent', 'image_gen__imagegen',
     ]);
-    expect(messages[5].tool.result).toContain('https://example.com');
-    expect(messages[10].tool.input).toMatchObject({ target: 'thread-2', prompt: 'review' });
+    expect(messages[5]?.tool?.result).toContain('https://example.com');
+    expect(messages[10]?.tool?.input).toMatchObject({ target: 'thread-2', prompt: 'review' });
     expect(messages[7].tool).toMatchObject({ name: 'custom', outcome: 'success' });
     expect(new Set(messages.map((message) => message.id)).size).toBe(messages.length);
   });
@@ -165,16 +291,18 @@ describe('Codex App Server projection', () => {
     const thread = fixtureThread();
     thread.turns[0].items.unshift({ id: 'reasoning-0', type: 'reasoning', summary: ['thinking'], content: [] });
     const after = projectCodexThread(thread);
+    const beforeHello = before.find((message) => message.text === 'hello');
+    expect(beforeHello).toBeDefined();
     expect(after.find((message) => message.text === 'hello')).toMatchObject({
-      id: before.find((message) => message.text === 'hello').id,
-      k: before.find((message) => message.text === 'hello').k + 1,
+      id: beforeHello!.id,
+      k: beforeHello!.k + 1,
     });
   });
 
   it('keeps interrupted turns as a visible structural marker', () => {
     const thread = fixtureThread();
     thread.turns[0].status = 'interrupted';
-    expect(projectCodexThread(thread).at(-1).type).toBe('interrupt');
+    expect(projectCodexThread(thread).at(-1)?.type).toBe('interrupt');
   });
 });
 
@@ -186,7 +314,7 @@ describe('Codex App Server client', () => {
     };
     const proxy = fakeProxy({ initialGoal });
     const app = createCodexAppServer({ home: '/home/test', exists: () => true, connect: () => proxy.ws });
-    const events = [];
+    const events: CodexStreamEvent[] = [];
     const unsubscribe = await app.subscribe('%1', 'thread-1', (event) => events.push(event));
     await app.getGoal('%1', 'thread-1');
 
@@ -209,7 +337,7 @@ describe('Codex App Server client', () => {
     expect(await app.status('%1', 'thread-1')).toMatchObject({
       goal: { objective: 'Finish the release', status: 'complete', tokensUsed: 500 },
     });
-    const replayed = [];
+    const replayed: CodexStreamEvent[] = [];
     const unsubscribeReplay = await app.subscribe('%1', 'thread-1', (event) => replayed.push(event));
     expect(replayed).toEqual([expect.objectContaining({
       type: 'goal', event: 'complete', turnId: 'turn-goal',
@@ -259,7 +387,7 @@ describe('Codex App Server client', () => {
     };
     const proxy = fakeProxy({ initialGoal });
     const app = createCodexAppServer({ home: '/home/test', exists: () => true, connect: () => proxy.ws });
-    const events = [];
+    const events: CodexStreamEvent[] = [];
     const unsubscribe = await app.subscribe('%1', 'thread-1', (event) => events.push(event));
     await app.getGoal('%1', 'thread-1');
     const unsubscribeReplay = await app.subscribe('%1', 'thread-1', (event) => events.push(event));
@@ -318,7 +446,7 @@ describe('Codex App Server client', () => {
   it('streams agent message deltas only to the matching thread and closes subscribers with the connection', async () => {
     const proxy = fakeProxy();
     const app = createCodexAppServer({ home: '/home/test', exists: () => true, connect: () => proxy.ws });
-    const events = [];
+    const events: CodexStreamEvent[] = [];
     const unsubscribe = await app.subscribe('%1', 'thread-1', (event) => events.push(event));
 
     proxy.push({
@@ -334,7 +462,7 @@ describe('Codex App Server client', () => {
     });
     await new Promise((resolve) => setTimeout(resolve, 0));
     unsubscribe();
-    const replayed = [];
+    const replayed: CodexStreamEvent[] = [];
     const unsubscribeReplay = await app.subscribe('%1', 'thread-1', (event) => replayed.push(event));
     expect(replayed).toEqual([expect.objectContaining({
       type: 'snapshot', turnId: 'turn-live', itemId: 'agent-live', text: '你好',
@@ -392,15 +520,17 @@ describe('Codex App Server client', () => {
       id: 'codex:turn-live:agent-live', role: 'assistant', type: 'text',
       turnId: 'turn-live', itemId: 'agent-live', text: '你好，完成',
     }])).resolves.toEqual({ reconciled: 0 });
-    const completedReplay = [];
+    const completedReplay: CodexStreamEvent[] = [];
     const unsubscribeCompleted = await app.subscribe('%1', 'thread-1', (event) => completedReplay.push(event));
     expect(completedReplay).toEqual([expect.objectContaining({
       type: 'conversationSnapshot', cursor: 6,
       messages: [expect.objectContaining({ id: 'codex:turn-live:agent-live', text: '你好，完成' })],
     })]);
-    const cursorReplay = [];
+    const cursorReplay: CodexStreamEvent[] = [];
+    const firstSequence = recordOf(events[0])?.sequence;
+    expect(typeof firstSequence).toBe('number');
     const unsubscribeCursorReplay = await app.subscribe(
-      '%1', 'thread-1', (event) => cursorReplay.push(event), events[0].sequence,
+      '%1', 'thread-1', (event) => cursorReplay.push(event), firstSequence as number,
     );
     // The browser disconnected before cursor 6. Even though cursor 1 is still inside the live-event
     // journal, the newer durable checkpoint supersedes that partial replay and cannot be missed.
@@ -408,14 +538,14 @@ describe('Codex App Server client', () => {
       type: 'conversationSnapshot', cursor: 6,
       messages: [expect.objectContaining({ id: 'codex:turn-live:agent-live', text: '你好，完成' })],
     })]);
-    const staleReplay = [];
+    const staleReplay: CodexStreamEvent[] = [];
     const unsubscribeStale = await app.subscribe(
       '%1', 'thread-1', (event) => staleReplay.push(event), 999,
     );
     expect(staleReplay).toEqual([expect.objectContaining({
       type: 'conversationSnapshot', cursor: 6,
     })]);
-    expect(projectCodexThread((await app.read('%1', 'thread-1')).thread)
+    expect(projectCodexThread(threadFromRead(await app.read('%1', 'thread-1')))
       .find((message) => message.id === 'codex:turn-live:agent-live')?.text).toBe('你好，完成');
 
     app.close();
@@ -430,7 +560,7 @@ describe('Codex App Server client', () => {
   it('resets a stale client cursor after the server event journal restarts', async () => {
     const proxy = fakeProxy();
     const app = createCodexAppServer({ home: '/home/test', exists: () => true, connect: () => proxy.ws });
-    const events = [];
+    const events: CodexStreamEvent[] = [];
     const unsubscribe = await app.subscribe('%1', 'thread-1', (event) => events.push(event), 99);
 
     expect(events).toEqual([{ type: 'cursorReset', threadId: 'thread-1', cursor: 0 }]);
@@ -442,7 +572,7 @@ describe('Codex App Server client', () => {
     const proxy = fakeProxy();
     const app = createCodexAppServer({ home: '/home/test', exists: () => true, connect: () => proxy.ws });
     const unsubscribeSeed = await app.subscribe('%1', 'thread-1', () => {});
-    const tool = (result) => ({
+    const tool = (result: string) => ({
       k: 0, i: 0, role: 'assistant', type: 'tool', turnId: 'turn-tool',
       tool: { name: 'Bash', input: { command: 'npm test' }, result, isError: false },
     });
@@ -454,7 +584,7 @@ describe('Codex App Server client', () => {
     await expect(app.reconcileTranscript('%1', 'thread-1', [tool('passed')]))
       .resolves.toEqual({ reconciled: 0 });
 
-    const replayed = [];
+    const replayed: CodexStreamEvent[] = [];
     const unsubscribeReplay = await app.subscribe(
       '%1', 'thread-1', (event) => replayed.push(event), 1,
     );
@@ -572,10 +702,11 @@ describe('Codex App Server client', () => {
 
     const first = await app.send('%1', 'thread-1', 'only once', 'request-1');
     const retry = await app.send('%1', 'thread-1', 'only once', 'request-1');
+    const firstItem = queueItemOf(first);
 
     expect(retry).toEqual(first);
     expect((await app.status('%1', 'thread-1')).queue).toEqual([expect.objectContaining({
-      id: first.item.id, requestId: 'request-1', text: 'only once',
+      id: firstItem.id, requestId: 'request-1', text: 'only once',
     })]);
     await expect(app.send('%1', 'thread-1', 'different text', 'request-1'))
       .rejects.toThrow('request id was already used');
@@ -595,12 +726,13 @@ describe('Codex App Server client', () => {
     });
     await new Promise((resolve) => setTimeout(resolve, 0));
     const first = await firstApp.send('%1', 'thread-1', 'survive restart', 'request-durable');
+    const firstItem = queueItemOf(first);
     expect(outboxStore.snapshot()).toMatchObject({
       version: 1,
       queues: [{ pane: '%1', threadId: 'thread-1', items: [{
-        id: first.item.id, text: 'survive restart', requestId: 'request-durable',
+        id: firstItem.id, text: 'survive restart', requestId: 'request-durable',
       }] }],
-      receipts: [{ requestId: 'request-durable', status: 'queued', queueItemId: first.item.id }],
+      receipts: [{ requestId: 'request-durable', status: 'queued', queueItemId: firstItem.id }],
     });
     firstApp.close();
 
@@ -608,11 +740,11 @@ describe('Codex App Server client', () => {
     const secondApp = createCodexAppServer({
       home: '/home/test', exists: () => true, connect: () => secondProxy.ws, outboxStore,
     });
-    expect((await secondApp.status('%1', 'thread-1')).queue).toEqual([first.item]);
+    expect((await secondApp.status('%1', 'thread-1')).queue).toEqual([firstItem]);
     await expect(secondApp.send('%1', 'thread-1', 'survive restart', 'request-durable'))
       .resolves.toEqual(first);
     expect(secondProxy.sent.filter((message) => message.method === 'turn/start')).toEqual([]);
-    await secondApp.removeQueued('%1', 'thread-1', first.item.id);
+    await secondApp.removeQueued('%1', 'thread-1', firstItem.id);
     expect(outboxStore.snapshot()).toMatchObject({ queues: [], receipts: [] });
     secondApp.close();
   });
@@ -686,8 +818,8 @@ describe('Codex App Server client', () => {
   });
 
   it('serializes simultaneous idle submissions so only the first starts immediately', async () => {
-    let releaseStart;
-    const turnStartWait = new Promise((resolve) => { releaseStart = resolve; });
+    let releaseStart: () => void = () => {};
+    const turnStartWait = new Promise<void>((resolve) => { releaseStart = resolve; });
     const proxy = fakeProxy({ turnStartWait });
     const app = createCodexAppServer({ home: '/home/test', exists: () => true, connect: () => proxy.ws });
     await app.status('%1', 'thread-1');
@@ -725,8 +857,8 @@ describe('Codex App Server client', () => {
       params: { threadId: 'thread-1', turn: { id: 'turn-live', status: 'inProgress', items: [] } },
     });
     await new Promise((resolve) => setTimeout(resolve, 0));
-    const first = (await app.send('%1', 'thread-1', 'guide now')).item;
-    const second = (await app.send('%1', 'thread-1', 'discard me')).item;
+    const first = queueItemOf(await app.send('%1', 'thread-1', 'guide now'));
+    const second = queueItemOf(await app.send('%1', 'thread-1', 'discard me'));
 
     await app.steerQueued('%1', 'thread-1', first.id);
     expect(proxy.sent).toContainEqual(expect.objectContaining({
@@ -753,7 +885,7 @@ describe('Codex App Server client', () => {
       params: { threadId: 'thread-1', turn: { id: 'turn-live', status: 'inProgress', items: [] } },
     });
     await new Promise((resolve) => setTimeout(resolve, 0));
-    const queued = (await app.send('%1', 'thread-1', 'guide once', 'request-guide')).item;
+    const queued = queueItemOf(await app.send('%1', 'thread-1', 'guide once', 'request-guide'));
     const steering = app.steerQueued('%1', 'thread-1', queued.id);
     await new Promise((resolve) => setTimeout(resolve, 0));
 
@@ -790,7 +922,7 @@ describe('Codex App Server client', () => {
       params: { threadId: 'thread-1', turn: { id: 'turn-live', status: 'inProgress', items: [] } },
     });
     await new Promise((resolve) => setTimeout(resolve, 0));
-    const queued = (await app.send('%1', 'thread-1', 'next turn')).item;
+    const queued = queueItemOf(await app.send('%1', 'thread-1', 'next turn'));
 
     proxy.push({
       jsonrpc: '2.0', method: 'turn/completed',
@@ -818,8 +950,8 @@ describe('Codex App Server client', () => {
       params: { threadId: 'thread-1', turn: { id: 'turn-live', status: 'inProgress', items: [] } },
     });
     await new Promise((resolve) => setTimeout(resolve, 0));
-    const firstQueued = (await app.send('%1', 'thread-1', 'send first')).item;
-    const queued = (await app.send('%1', 'thread-1', 'original text')).item;
+    const firstQueued = queueItemOf(await app.send('%1', 'thread-1', 'send first'));
+    const queued = queueItemOf(await app.send('%1', 'thread-1', 'original text'));
     const edit = await app.beginQueuedEdit('%1', 'thread-1', queued.id);
 
     proxy.push({
@@ -869,7 +1001,7 @@ describe('Codex App Server client', () => {
       params: { threadId: 'thread-1', turn: { id: 'turn-live', status: 'inProgress', items: [] } },
     });
     await new Promise((resolve) => setTimeout(resolve, 0));
-    const queued = (await app.send('%1', 'thread-1', 'keep original')).item;
+    const queued = queueItemOf(await app.send('%1', 'thread-1', 'keep original'));
     const edit = await app.beginQueuedEdit('%1', 'thread-1', queued.id);
     proxy.push({
       jsonrpc: '2.0', method: 'turn/completed',
@@ -905,7 +1037,7 @@ describe('Codex App Server client', () => {
         params: { threadId: 'thread-1', turn: { id: 'turn-live', status: 'inProgress', items: [] } },
       });
       await Promise.resolve();
-      const queued = (await app.send('%1', 'thread-1', 'send after abandoned edit')).item;
+      const queued = queueItemOf(await app.send('%1', 'thread-1', 'send after abandoned edit'));
       await app.beginQueuedEdit('%1', 'thread-1', queued.id);
       proxy.push({
         jsonrpc: '2.0', method: 'turn/completed',
@@ -947,7 +1079,7 @@ describe('Codex App Server client', () => {
         params: { threadId: 'thread-1', turn: { id: 'turn-live', status: 'inProgress', items: [] } },
       });
       await Promise.resolve();
-      const queued = (await app.send('%1', 'thread-1', 'wait for editor')).item;
+      const queued = queueItemOf(await app.send('%1', 'thread-1', 'wait for editor'));
       const edit = await app.beginQueuedEdit('%1', 'thread-1', queued.id);
       proxy.push({
         jsonrpc: '2.0', method: 'turn/completed',
@@ -981,7 +1113,7 @@ describe('Codex App Server client', () => {
     let app = null;
     try {
       vi.setSystemTime(0);
-      const proxies = [];
+      const proxies: ReturnType<typeof fakeProxy>[] = [];
       app = createCodexAppServer({
         home: '/home/test', exists: () => true, now: () => Date.now(),
         connect: () => { const proxy = fakeProxy(); proxies.push(proxy); return proxy.ws; },
@@ -993,7 +1125,7 @@ describe('Codex App Server client', () => {
         params: { threadId: 'thread-1', turn: { id: 'turn-live', status: 'inProgress', items: [] } },
       });
       await Promise.resolve();
-      const queued = (await app.send('%1', 'thread-1', 'resume after reconnect')).item;
+      const queued = queueItemOf(await app.send('%1', 'thread-1', 'resume after reconnect'));
       await app.beginQueuedEdit('%1', 'thread-1', queued.id);
       first.push({
         jsonrpc: '2.0', method: 'turn/completed',
@@ -1083,7 +1215,7 @@ describe('Codex App Server client', () => {
     const first = fakeProxy();
     const completed = fixtureThread({ type: 'idle' });
     completed.turns[0].status = 'completed';
-    let second;
+    let second: ReturnType<typeof fakeProxy> | undefined;
     let connectCount = 0;
     const app = createCodexAppServer({
       home: '/home/test', exists: () => true,
@@ -1099,7 +1231,7 @@ describe('Codex App Server client', () => {
       params: { threadId: 'thread-1', turn: { id: 'turn-live', status: 'inProgress', items: [] } },
     });
     await new Promise((resolve) => setTimeout(resolve, 0));
-    const queued = (await app.send('%1', 'thread-1', 'continue after reconnect')).item;
+    const queued = queueItemOf(await app.send('%1', 'thread-1', 'continue after reconnect'));
     expect((await app.status('%1', 'thread-1')).queue).toHaveLength(1);
 
     first.ws.close();
@@ -1107,7 +1239,8 @@ describe('Codex App Server client', () => {
     expect(await app.status('%1', 'thread-1')).toMatchObject({ lastTurn: { status: 'completed' } });
     await new Promise((resolve) => setTimeout(resolve, 0));
 
-    expect(second.sent).toContainEqual(expect.objectContaining({
+    expect(second).toBeDefined();
+    expect(second!.sent).toContainEqual(expect.objectContaining({
       method: 'turn/start',
       params: expect.objectContaining({
         threadId: 'thread-1', input: [{ type: 'text', text: 'continue after reconnect' }],
@@ -1128,7 +1261,7 @@ describe('Codex App Server client', () => {
         content: [{ type: 'text', text: 'accepted once' }],
       }],
     });
-    let second;
+    let second: ReturnType<typeof fakeProxy> | undefined;
     let connectCount = 0;
     const app = createCodexAppServer({
       home: '/home/test', exists: () => true,
@@ -1164,7 +1297,8 @@ describe('Codex App Server client', () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect((await app.status('%1', 'thread-1')).queue).toEqual([]);
-    expect(second.sent.filter((message) => message.method === 'turn/start')).toEqual([]);
+    expect(second).toBeDefined();
+    expect(second!.sent.filter((message) => message.method === 'turn/start')).toEqual([]);
     app.close();
   });
 
@@ -1242,7 +1376,8 @@ describe('Codex App Server client', () => {
     });
     await new Promise((resolve) => setTimeout(resolve, 0));
     let opened = await app.read('%1', 'thread-1');
-    expect(projectCodexThread(opened.thread).find((message) => message.tool?.input?.cmd === 'npm test')?.tool.result)
+    expect(projectCodexThread(threadFromRead(opened))
+      .find((message) => message.tool?.input?.cmd === 'npm test')?.tool?.result)
       .toBeNull();
 
     proxy.push({
@@ -1253,7 +1388,8 @@ describe('Codex App Server client', () => {
     });
     await new Promise((resolve) => setTimeout(resolve, 0));
     opened = await app.read('%1', 'thread-1');
-    expect(projectCodexThread(opened.thread).find((message) => message.tool?.input?.cmd === 'npm test')?.tool.result)
+    expect(projectCodexThread(threadFromRead(opened))
+      .find((message) => message.tool?.input?.cmd === 'npm test')?.tool?.result)
       .toBe('passed\n');
     app.close();
   });
@@ -1290,14 +1426,14 @@ describe('Codex App Server client', () => {
     });
     await new Promise((resolve) => setTimeout(resolve, 0));
 
-    const provisional = projectCodexThread((await app.read('%1', 'thread-1')).thread).slice(-3);
+    const provisional = projectCodexThread(threadFromRead(await app.read('%1', 'thread-1'))).slice(-3);
     expect(provisional.map((message) => message.text || message.tool?.input?.cmd))
       .toEqual(['fix it', 'done', 'npm test']);
 
     // App Server persistence catches up without another notification. The next phone poll must therefore
     // read again while an overlay remains instead of freezing the provisional tail forever.
     canonicalReady = true;
-    const converged = projectCodexThread((await app.read('%1', 'thread-1')).thread).slice(-3);
+    const converged = projectCodexThread(threadFromRead(await app.read('%1', 'thread-1'))).slice(-3);
     expect(converged.map((message) => message.text || message.tool?.input?.cmd))
       .toEqual(['fix it', 'npm test', 'done']);
     app.close();
@@ -1353,23 +1489,25 @@ describe('Codex App Server client', () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     const opened = await app.read('%1', 'thread-1');
-    const texts = projectCodexThread(opened.thread)
+    const texts = projectCodexThread(threadFromRead(opened))
       .filter((message) => message.type === 'text')
       .map((message) => [message.role, message.text]);
     expect(texts.filter((message) => message[1] === 'only once')).toEqual([['user', 'only once']]);
     expect(texts.filter((message) => message[1] === 'one reply')).toEqual([['assistant', 'one reply']]);
     expect(texts.slice(-2)).toEqual([['user', 'only once'], ['assistant', 'one reply']]);
-    const projected = projectCodexThread(opened.thread);
+    const projected = projectCodexThread(threadFromRead(opened));
     expect(projected.filter((message) => message.tool?.input?.cmd === 'npm test')).toHaveLength(1);
-    expect(projected.filter((message) => ['only once', 'one reply'].includes(message.text)).map((message) => message.id))
+    expect(projected.filter((message) => typeof message.text === 'string'
+      && ['only once', 'one reply'].includes(message.text)).map((message) => message.id))
       .toEqual(['codex:turn-2:live-user', 'codex:turn-2:live-agent']);
 
     // A later unrelated revision reads the same canonical ids after the live overlay has retired; identity
     // must still stay on the original notification ids or the phone will render them as new messages.
     proxy.push({ jsonrpc: '2.0', method: 'item/agentMessage/delta', params: { threadId: 'thread-1', turnId: 'turn-2', itemId: 'snapshot-agent', delta: '' } });
     await new Promise((resolve) => setTimeout(resolve, 0));
-    const reread = projectCodexThread((await app.read('%1', 'thread-1')).thread);
-    expect(reread.filter((message) => ['only once', 'one reply'].includes(message.text)).map((message) => message.id))
+    const reread = projectCodexThread(threadFromRead(await app.read('%1', 'thread-1')));
+    expect(reread.filter((message) => typeof message.text === 'string'
+      && ['only once', 'one reply'].includes(message.text)).map((message) => message.id))
       .toEqual(['codex:turn-2:live-user', 'codex:turn-2:live-agent']);
     app.close();
   });
@@ -1477,7 +1615,7 @@ describe('Codex App Server client', () => {
 
   it('projects turn and approval events into one authoritative inbox state', async () => {
     let ts = 100;
-    const changed = [];
+    const changed: string[] = [];
     const proxy = fakeProxy();
     const app = createCodexAppServer({
       home: '/home/test', exists: () => true, connect: () => proxy.ws,
@@ -1619,20 +1757,24 @@ describe('Codex App Server client', () => {
   });
 
   it('treats a Codex socket first discovered after startup as a no-replay baseline', async () => {
-    let sockets = [];
-    let scanTick = null;
-    let proxy = null;
+    let sockets: string[] = [];
+    const scanTimer: { run?: () => Promise<void> } = {};
+    let proxy: ReturnType<typeof fakeProxy> | null = null;
     const app = createCodexAppServer({
       home: '/home/test', exists: () => true, readdir: () => sockets,
       connect: () => { proxy ||= fakeProxy(); return proxy.ws; },
-      setTimer: (callback) => { scanTick = callback; return { unref() {} }; }, clearTimer: () => {},
+      setTimer: (callback) => {
+        scanTimer.run = async () => callback();
+        return { unref() {} };
+      }, clearTimer: () => {},
     });
     app.start();
     await Promise.resolve();
     await Promise.resolve();
 
     sockets = ['1.sock'];
-    await scanTick();
+    if (!scanTimer.run) throw new Error('scan timer was not installed');
+    await scanTimer.run();
     const state = (await app.inboxStates([{ id: '%1' }]))['%1'];
 
     expect(state).toMatchObject({ kind: 'done', suppressPush: true });
