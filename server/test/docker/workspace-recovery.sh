@@ -25,15 +25,17 @@ import { execFile as execFileCallback } from 'node:child_process';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
-import { createEnvironmentProvider } from './src/workspace/environment.js';
-import { createWorkspaceBackground } from './src/workspace/checkpointer.js';
-import { createWorkspaceLock } from './src/workspace/lock.js';
-import { buildRestorePlan } from './src/workspace/planner.js';
-import { executeRestore } from './src/workspace/restore.js';
-import { createWorkspaceRuntime } from './src/workspace/runtime.js';
-import { createWorkspaceStore } from './src/workspace/store.js';
-import { createWorkspaceTmux } from './src/workspace/tmuxAdapter.js';
-import { parseTmuxRows, tmuxFormat } from './src/tmux/format.js';
+// Exercise the same compiled JavaScript modules shipped in the npm package. Importing source `.js`
+// specifiers only worked before the TypeScript migration and bypassed the production build contract.
+import { createEnvironmentProvider } from './dist/src/workspace/environment.js';
+import { createWorkspaceBackground } from './dist/src/workspace/checkpointer.js';
+import { createWorkspaceLock } from './dist/src/workspace/lock.js';
+import { buildRestorePlan } from './dist/src/workspace/planner.js';
+import { executeRestore } from './dist/src/workspace/restore.js';
+import { createWorkspaceRuntime } from './dist/src/workspace/runtime.js';
+import { createWorkspaceStore } from './dist/src/workspace/store.js';
+import { createWorkspaceTmux } from './dist/src/workspace/tmuxAdapter.js';
+import { parseTmuxRows, tmuxFormat } from './dist/src/tmux/format.js';
 
 const execFile = promisify(execFileCallback);
 const SOCKET = 'handmux-workspace-test';
