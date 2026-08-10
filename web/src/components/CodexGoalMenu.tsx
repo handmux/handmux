@@ -149,7 +149,10 @@ export default function CodexGoalMenu({
   const [error, setError] = useState('');
   const requestSeqRef = useRef(0);
   useBackButton(open && confirmClear, () => setConfirmClear(false));
-  useBackButton(open && !confirmClear, onClose);
+  // Keep the Goal sheet registered underneath its confirmation. Toggling the parent history layer
+  // off while adding the child can schedule a cleanup history.back() that immediately closes the
+  // newly mounted confirmation on mobile browsers.
+  useBackButton(open, onClose);
 
   useEffect(() => {
     if (!open || !pane) return undefined;
@@ -295,20 +298,20 @@ export default function CodexGoalMenu({
                   onClick={() => void save()}>{t(restarting ? 'chat.goal.restart' : 'common.save')}</button>
               </>
             ) : terminal ? (
-              <div className="codex-goal-action-list">
+              <div className="codex-goal-action-list is-two">
                 <button type="button" disabled={saving} onClick={() => {
                   setDraft(goal?.objective ?? '');
                   setRestarting(true);
                   setEditing(true);
                   setError('');
-                }}><span>{t('chat.goal.restart')}</span><span aria-hidden="true">›</span></button>
+                }}>{t('chat.goal.restart')}</button>
                 <button type="button" className="destructive" disabled={saving}
                   onClick={() => setConfirmClear(true)}>{t('chat.goal.clear')}</button>
               </div>
             ) : (
-              <div className="codex-goal-action-list">
+              <div className="codex-goal-action-list is-three">
                 <button type="button" disabled={saving} onClick={() => setEditing(true)}>
-                  <span>{t('chat.goal.edit')}</span><span aria-hidden="true">›</span>
+                  {t('chat.goal.edit')}
                 </button>
                 <button type="button" disabled={saving}
                   onClick={() => void setStatus(goal?.status === 'active' ? 'paused' : 'active')}>
