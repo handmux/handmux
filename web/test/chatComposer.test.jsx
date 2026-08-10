@@ -80,6 +80,7 @@ describe('ChatComposer', () => {
   it('shows the read-only current task strip immediately above quick replies and opens a bottom sheet', () => {
     const { container } = render(<ChatComposer pane="%1" agent="codex" kind="working" keyboardInset={280} codexSession={{
       managed: true,
+      activeTurnId: 'turn-plan',
       plan: {
         turnId: 'turn-plan',
         steps: [
@@ -111,7 +112,8 @@ describe('ChatComposer', () => {
   it('stops the current task spinner while Codex is waiting for the user', () => {
     render(<ChatComposer pane="%1" agent="codex" kind="permission" codexSession={{
       managed: true,
-      plan: { steps: [{ step: '等待授权', status: 'inProgress' }] },
+      activeTurnId: 'turn-waiting',
+      plan: { turnId: 'turn-waiting', steps: [{ step: '等待授权', status: 'inProgress' }] },
     }} />);
     const bar = screen.getByRole('button', { name: /当前任务/ });
     expect(bar.querySelector('.codex-plan-spinner.is-static')).toBeTruthy();
@@ -119,6 +121,30 @@ describe('ChatComposer', () => {
     expect(screen.getByRole('dialog', { name: '当前任务' })
       .querySelector('.codex-plan-spinner.is-static')).toBeTruthy();
     expect(styles).toMatch(/prefers-reduced-motion:\s*reduce[\s\S]*\.codex-plan-spinner\s*\{\s*animation:\s*none/);
+  });
+
+  it('stops the retained current task spinner after its turn ends', () => {
+    const plan = {
+      turnId: 'turn-stopped',
+      steps: [{ step: '等待复测', status: 'inProgress' }],
+    };
+    const { rerender } = render(<ChatComposer pane="%1" agent="codex" kind="working" codexSession={{
+      managed: true,
+      activeTurnId: 'turn-stopped',
+      plan,
+    }} />);
+    const bar = screen.getByRole('button', { name: /当前任务/ });
+    expect(bar.querySelector('.codex-plan-spinner:not(.is-static)')).toBeTruthy();
+
+    rerender(<ChatComposer pane="%1" agent="codex" kind="done" codexSession={{
+      managed: true,
+      activeTurnId: null,
+      plan,
+    }} />);
+    expect(bar.querySelector('.codex-plan-spinner.is-static')).toBeTruthy();
+    fireEvent.click(bar);
+    expect(screen.getByRole('dialog', { name: '当前任务' })
+      .querySelector('.codex-plan-spinner.is-static')).toBeTruthy();
   });
 
   it('keeps vertical swipes on the horizontal shortcut strip from panning the page', () => {

@@ -34,10 +34,16 @@ function planMeta(plan: CodexPlanView | null | undefined): PlanMeta {
 interface CodexPlanBarProps {
   plan: CodexPlanView;
   waiting?: boolean;
+  animateInProgress?: boolean;
   onOpen: () => void;
 }
 
-export function CodexPlanBar({ plan, waiting = false, onOpen }: CodexPlanBarProps) {
+export function CodexPlanBar({
+  plan,
+  waiting = false,
+  animateInProgress = false,
+  onOpen,
+}: CodexPlanBarProps) {
   const { steps, current } = planMeta(plan);
   if (!steps.length) return null;
   const position = current ? steps.indexOf(current) + 1 : steps.length;
@@ -54,7 +60,7 @@ export function CodexPlanBar({ plan, waiting = false, onOpen }: CodexPlanBarProp
       <span className="cc-plan-copy">
         <span className="cc-plan-top"><strong>{title}</strong><span>{position}/{steps.length}</span></span>
         <span className="cc-plan-current">
-          {showActivity && <span className={`codex-plan-spinner${waiting ? ' is-static' : ''}`}
+          {showActivity && <span className={`codex-plan-spinner${waiting || !animateInProgress ? ' is-static' : ''}`}
             aria-hidden="true" />}
           {detail}
         </span>
@@ -64,7 +70,10 @@ export function CodexPlanBar({ plan, waiting = false, onOpen }: CodexPlanBarProp
   );
 }
 
-export function CodexPlanSummary({ plan, onOpen }: Omit<CodexPlanBarProps, 'waiting'>) {
+export function CodexPlanSummary({
+  plan,
+  onOpen,
+}: Omit<CodexPlanBarProps, 'waiting' | 'animateInProgress'>) {
   const { steps, completed } = planMeta(plan);
   if (!steps.length) return null;
   const done = completed === steps.length;

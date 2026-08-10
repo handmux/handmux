@@ -657,6 +657,9 @@ export default function ChatComposer({
     && codexPlanSteps(codexSession.plan).length ? codexSession.plan : null;
   const planWaiting = kind === 'permission' || !!codexSession?.approvals?.length
     || !!codexSession?.userInputs?.length;
+  const animatePlan = !!activePlan?.turnId
+    && activePlan.turnId === codexSession?.activeTurnId
+    && !planWaiting;
   useEffect(() => { if (!activePlan) setPlanOpen(false); }, [activePlan]);
   useEffect(() => { setPlanOpen(false); }, [pane]);
   const applyCurrentGoal = (goal: CodexGoal | null): void => {
@@ -1299,7 +1302,7 @@ export default function ChatComposer({
   return (
     <div className="chat-composer" onPointerDown={keepFocus}>
       {activePlan && (
-        <CodexPlanBar plan={activePlan} waiting={planWaiting}
+        <CodexPlanBar plan={activePlan} waiting={planWaiting} animateInProgress={animatePlan}
           onOpen={() => setPlanOpen(true)} />
       )}
       {currentGoal && <CodexGoalBar goal={currentGoal} onOpen={() => openGoal(false)} />}
@@ -1588,7 +1591,7 @@ export default function ChatComposer({
       {notice && <div className="cc-notice" role="status">{notice}</div>}
       <CodexPlanSheet open={planOpen} title={t('chat.plan.currentTitle')} plan={activePlan}
         onClose={() => setPlanOpen(false)} portal chatTone={chatTone} keyboardInset={keyboardInset}
-        animateInProgress={!planWaiting} />
+        animateInProgress={animatePlan} />
       <CodexGoalMenu open={goalOpen} pane={pane} editOnOpen={goalEditOnOpen}
         onClose={() => setGoalOpen(false)} onNotice={showNotice}
         {...(onAuthFail ? { onAuthFail } : {})}
