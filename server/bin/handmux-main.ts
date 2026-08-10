@@ -22,8 +22,10 @@ import { fileURLToPath } from 'node:url';
 import { homedir } from 'node:os';
 import { createRequire } from 'node:module';
 import { parseArgs, resolveConfig, explainConfig } from '../src/cli/options.js';
+import type { OptionRecord, ResolvedConfig } from '../src/cli/options.js';
 import { renderCompactQr } from '../src/cli/qr.js';
 import { supervise, bareUrl, publicUrlWithToken } from '../src/cli/supervisor.js';
+import type { TunnelConfig } from '../src/cli/drivers.js';
 import { resolveCloudflared } from '../src/cli/cloudflared.js';
 import { resolveTunlite, checkSshAuth } from '../src/cli/tunlite.js';
 import { resolveNatapp, resolveCpolar } from '../src/cli/tunnelClients.js';
@@ -33,10 +35,14 @@ import {
   readState, clearState, isAlive, acquireLifecycleLock, logPath, configPath,
   claudeStatePath,
 } from '../src/cli/state.js';
-import { readSupervisorLaunchConfig, supervisorLaunchArgs } from '../src/cli/supervisorLaunch.js';
+import type { StoredState } from '../src/cli/state.js';
+import {
+  parseSupervisorConfig, readSupervisorLaunchConfig, supervisorLaunchArgs,
+} from '../src/cli/supervisorLaunch.js';
 import { scanSupervisorPids, terminateSupervisorPids } from '../src/cli/supervisorProcesses.js';
 import { runSetup } from '../src/cli/setupWizard.js';
 import { commitShortcuts, reportShortcutCommit, runShortcutEditor } from '../src/cli/shortcutEditor.js';
+import type { ShortcutCommitResult } from '../src/cli/shortcutEditor.js';
 import { hooksStatus, installHooks, uninstallHooks } from '../src/cli/claudeHooks.js';
 import { removeLegacyCodexHooks } from '../src/cli/legacyCodexHooks.js';
 import { statusLineStatus, installStatusLine, uninstallStatusLine, composeHint, refreshStatusLineScript } from '../src/cli/statusLine.js';
@@ -55,17 +61,31 @@ const SELF = fileURLToPath(import.meta.url);
 // so isBrewInstall() needs the real target, not the symlink, to spot the `/Cellar/` segment.
 const SELF_REAL = (() => { try { return fs.realpathSync(SELF); } catch { return SELF; } })();
 const HOOKS_SRC = path.resolve(path.dirname(SELF), '../hooks'); // server/hooks (bundled scripts)
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+
+type RuntimeConfig = ResolvedConfig & TunnelConfig;
+type UnknownRecord = Record<string, unknown>;
+
+const recordOf = (value: unknown): UnknownRecord | null =>
+  typeof value === 'object' && value !== null && !Array.isArray(value)
+    ? value as UnknownRecord : null;
+const errorMessage = (error: unknown): string => error instanceof Error ? error.message : String(error);
+const ownerPidOf = (error: unknown): number | null => {
+  const ownerPid = recordOf(error)?.ownerPid;
+  return typeof ownerPid === 'number' && Number.isSafeInteger(ownerPid) && ownerPid > 0 ? ownerPid : null;
+};
+const stringFlag = (value: unknown): string | null => typeof value === 'string' && value ? value : null;
 
 const { command, flags, positionals = [], unknownShortFlags = [] } = parseArgs(process.argv.slice(2));
+const configFlag = stringFlag(flags.config);
 
 // Resolve the CLI language ONCE, up front, so every command (help, errors, access block) prints in it.
 // Priority: --lang > config `lang` > shell locale (LANG/LC_*) > English. The config peek is lenient — a
 // missing/broken file just means "no language hint here"; the real validation happens per-command later.
-function peekConfigLang() {
+function peekConfigLang(): OptionRecord {
   try {
-    const p = flags.config ? path.resolve(flags.config) : configPath(HOME);
-    return new PrivateStateStore(p).read() || {};
+    const p = configFlag ? path.resolve(configFlag) : configPath(HOME);
+    return recordOf(new PrivateStateStore<unknown>(p).read()) ?? {};
   } catch { return {}; }
 }
 initLocale(flags, peekConfigLang(), process.env);
@@ -76,22 +96,28 @@ initLocale(flags, peekConfigLang(), process.env);
 // read. Flags (applied later in resolveConfig) override individual settings from it for that one run and
 // never persist. Returns { path, cfg } — path is the file used (or null), for the startup print so it's
 // never ambiguous what a run loaded.
-function resolveFileConfig() {
-  let p = null;
-  if (flags.config) {                                              // explicit: must exist
-    p = path.resolve(flags.config);
+function resolveFileConfig(): { path: string | null; cfg: OptionRecord } {
+  let p: string | null = null;
+  if (configFlag) {                                              // explicit: must exist
+    p = path.resolve(configFlag);
     if (!fs.existsSync(p)) { console.error(t('err.configNotFound', { path: p })); process.exit(2); }
   } else {
     const homeP = configPath(HOME);
     if (fs.existsSync(homeP)) p = homeP;
   }
   if (!p) return { path: null, cfg: {} };
-  try { return { path: p, cfg: new PrivateStateStore(p).readStrict() }; }
-  catch (e) { console.error(t('err.badConfig', { path: p, msg: e.message })); process.exit(2); }
+  try {
+    const cfg = recordOf(new PrivateStateStore<unknown>(p).readStrict());
+    if (!cfg) throw new Error('expected a JSON object');
+    return { path: p, cfg };
+  } catch (error) {
+    console.error(t('err.badConfig', { path: p, msg: errorMessage(error) }));
+    process.exit(2);
+  }
 }
 
 // Human-readable summary of which config file a run loaded.
-function describeConfig(p) {
+function describeConfig(p: string | null): string {
   return p || t('config.none');
 }
 
@@ -99,9 +125,12 @@ function describeConfig(p) {
 // Kept to the two people actually re-run `start` to change — the tunnel and the port; each row is ready to
 // drop straight into the `start.running.changedRow` message ({key, from, to}). Only compares fields the
 // running state actually recorded, so an older state.json can't manufacture phantom diffs.
-function configChanges(cfg, st) {
-  const out = [];
-  for (const key of ['tunnel', 'port']) {
+function configChanges(
+  cfg: ResolvedConfig,
+  st: StoredState,
+): Array<{ key: 'tunnel' | 'port'; from: unknown; to: string | number }> {
+  const out: Array<{ key: 'tunnel' | 'port'; from: unknown; to: string | number }> = [];
+  for (const key of ['tunnel', 'port'] as const) {
     const running = st[key];
     if (running != null && String(cfg[key]) !== String(running)) out.push({ key, from: running, to: cfg[key] });
   }
@@ -109,17 +138,18 @@ function configChanges(cfg, st) {
 }
 
 // 一次性 [Y/n] 提问(默认 Yes)。非 TTY 直接返回 false,绝不卡住。
-async function confirm(question) {
+async function confirm(question: string): Promise<boolean> {
   if (!process.stdin.isTTY) return false;
   const rl = createInterface({ input: process.stdin, output: process.stdout });
   try {
-    const a = (await new Promise((res) => rl.question(`${question} [Y/n] `, res))).trim().toLowerCase();
+    const a = (await new Promise<string>((resolve) => rl.question(`${question} [Y/n] `, resolve))).trim().toLowerCase();
     return a === '' || a === 'y' || a === 'yes';
   } finally { rl.close(); }
 }
 
 // ssh 隧道预检:解析 tunlite → 免密就绪?有 TTY 就内嵌 setup-key(输一次密码)再复检,无 TTY 快速失败。
-async function preflightSsh(cfg) {
+async function preflightSsh(cfg: RuntimeConfig): Promise<void> {
+  if (!cfg.sshHost) throw new Error('ssh host is missing');
   cfg.tunliteBin = resolveTunlite();                 // 抛出 → 调用方打印并退出
   if (checkSshAuth(cfg.sshHost, { bin: cfg.tunliteBin }) === 0) return;
   if (process.stdin.isTTY && await confirm(t('ssh.confirmSetup', { host: cfg.sshHost }))) {
@@ -132,10 +162,11 @@ async function preflightSsh(cfg) {
 // natapp/cpolar preflight: resolve the client binary (cpolar auto-downloads; natapp must be pre-installed),
 // and for cpolar seed the authtoken into its own config so the detached `cpolar http` authenticates. Throws
 // a friendly message the caller prints.
-async function preflightNgrok(cfg) {
+async function preflightNgrok(cfg: RuntimeConfig): Promise<void> {
   if (cfg.tunnel === 'natapp') {
     cfg.natappBin = resolveNatapp(HOME);
   } else {
+    if (!cfg.authtoken) throw new Error('cpolar authtoken is missing');
     cfg.cpolarBin = await resolveCpolar(HOME);
     if (spawnSync(cfg.cpolarBin, ['authtoken', cfg.authtoken], { stdio: 'ignore' }).status !== 0) {
       throw new Error(t('client.cpolarAuthFail'));
@@ -143,7 +174,7 @@ async function preflightNgrok(cfg) {
   }
 }
 
-async function main() {
+async function main(): Promise<unknown> {
   switch (command) {
     case 'start': return withLifecycleLock(start);
     case 'open': return openCmd();
@@ -167,13 +198,14 @@ async function main() {
   }
 }
 
-async function withLifecycleLock(fn) {
-  let release;
+async function withLifecycleLock(fn: () => unknown | Promise<unknown>): Promise<unknown> {
+  let release: (() => void) | undefined;
   try { release = acquireLifecycleLock(HOME); }
-  catch (e) {
-    console.error(e.ownerPid
-      ? t('lifecycle.busy', { pid: e.ownerPid })
-      : t('err.generic', { msg: e.message }));
+  catch (error) {
+    const ownerPid = ownerPidOf(error);
+    console.error(ownerPid
+      ? t('lifecycle.busy', { pid: ownerPid })
+      : t('err.generic', { msg: errorMessage(error) }));
     process.exitCode = 1;
     return;
   }
@@ -183,25 +215,29 @@ async function withLifecycleLock(fn) {
 
 // `handmux --version` / `-v` — print the package version (read from this package's package.json, so it
 // stays in lockstep with what npm installed; no hardcoded string to forget to bump).
-function version() {
+function version(): void {
   console.log(currentVersion());
 }
 
-async function codexCmd() {
+async function codexCmd(): Promise<void> {
   removeLegacyCodexHooks(HOME);
   try { process.exitCode = await runManagedCodex(process.argv.slice(3), { home: HOME }); }
   catch (error) {
-    console.error(`[handmux] ${error?.message || error}`);
+    console.error(`[handmux] ${errorMessage(error)}`);
     process.exitCode = 1;
   }
 }
 
-function currentVersion() { return requireOpt('../package.json').version; }
+function currentVersion(): string {
+  const version = recordOf(requireOpt('../package.json'))?.version;
+  if (typeof version !== 'string') throw new Error('package version is missing');
+  return version;
+}
 
 // `handmux update` (alias `upgrade`) — run the plain global install for the user. We don't self-patch or
 // restart a running instance; on success we refresh the update cache so the "upgrade available" notice
 // clears, and remind them to `handmux restart` to actually run the new code.
-function updateCmd() {
+function updateCmd(): void {
   if (isBrewInstall(SELF_REAL)) { console.log(t('update.brew')); return; }
   console.log(t('update.running'));
   const r = spawnSync('npm', ['install', '-g', `${PKG_NAME}@latest`], { stdio: 'inherit' });
@@ -216,16 +252,16 @@ function updateCmd() {
 }
 
 // Best-effort upgrade notice from the cached "latest version" (never blocks; refreshes in the background).
-function maybeNotifyUpdate() {
-  notifyUpdate(HOME, { version: requireOpt('../package.json').version, selfPath: SELF_REAL });
+function maybeNotifyUpdate(): void {
+  notifyUpdate(HOME, { version: currentVersion(), selfPath: SELF_REAL });
 }
 
-async function start() {
+async function start(): Promise<void> {
   const { path: cfgPath, cfg: fileCfg } = resolveFileConfig();
   console.log(t('config.loaded', { path: describeConfig(cfgPath) }));
-  let cfg;
+  let cfg: RuntimeConfig;
   try { cfg = resolveConfig(flags, fileCfg); }
-  catch (e) { console.error(t('err.generic', { msg: e.message })); process.exit(2); }
+  catch (error) { console.error(t('err.generic', { msg: errorMessage(error) })); process.exit(2); }
 
   // tmux is the whole point — absent is fatal; an untested-old version only warns (rendering may drift).
   const tmux = checkTmux();
@@ -290,22 +326,22 @@ async function start() {
   // clear message here rather than a silent child that never prints a URL.
   if (cfg.tunnel === 'cloudflare') {
     try { cfg.cloudflaredBin = await resolveCloudflared(HOME); }
-    catch (e) { console.error(t('err.generic', { msg: e.message })); process.exit(1); }
+    catch (error) { console.error(t('err.generic', { msg: errorMessage(error) })); process.exit(1); }
   }
   if (cfg.tunnel === 'cloudflare-named') {
     try { cfg.cloudflaredBin = await resolveCloudflared(HOME); }
-    catch (e) { console.error(t('err.generic', { msg: e.message })); process.exit(1); }
+    catch (error) { console.error(t('err.generic', { msg: errorMessage(error) })); process.exit(1); }
     if (!fs.existsSync(path.join(HOME, '.cloudflared', 'config.yml'))) {
       console.error(t('err.namedNotProvisioned')); process.exit(1);
     }
   }
   if (cfg.tunnel === 'ssh') {
     try { await preflightSsh(cfg); }
-    catch (e) { console.error(t('err.generic', { msg: e.message })); process.exit(1); }
+    catch (error) { console.error(t('err.generic', { msg: errorMessage(error) })); process.exit(1); }
   }
   if (cfg.tunnel === 'natapp' || cfg.tunnel === 'cpolar') {
     try { await preflightNgrok(cfg); }
-    catch (e) { console.error(t('err.generic', { msg: e.message })); process.exit(1); }
+    catch (error) { console.error(t('err.generic', { msg: errorMessage(error) })); process.exit(1); }
   }
 
   if (cfg.foreground) {
@@ -318,7 +354,7 @@ async function start() {
   // Rewriting + restarting the entry also refreshes baked config and upgrade-sensitive executable paths.
   if (isServiceInstalled(HOME)) {
     try { installService(supervisorLaunchArgs(cfg, { home: HOME, entry: SELF }), { home: HOME, log: { log() {} } }); }
-    catch (e) { console.error(t('err.generic', { msg: e.message })); process.exit(1); }
+    catch (error) { console.error(t('err.generic', { msg: errorMessage(error) })); process.exit(1); }
     console.log(t('start.starting', { tunnel: cfg.tunnel, port: cfg.port }));
     await waitAndPrint(true);
     return;
@@ -339,7 +375,7 @@ async function start() {
 // graceful SIGTERM (supervisor.js shutdown), but if it was SIGKILL'd or crashed, its server/tunnel children
 // are orphaned with no reaper — the classic "stray cloudflared after stop". Only called on the dead-
 // supervisor branch, so these pids have no live parent to clean them up.
-function reapOrphans(st) {
+function reapOrphans(st: StoredState): void {
   for (const pid of [st.serverPid, st.tunnelPid]) {
     if (isAlive(pid)) { try { process.kill(pid, 'SIGTERM'); } catch { /* raced away */ } }
   }
@@ -348,7 +384,7 @@ function reapOrphans(st) {
 // A lifecycle command must not start the replacement while the previous supervisor can still own the
 // port/tunnel. Stop every real supervisor, not only the one last writer recorded in state.json, then rescan
 // until none remain. This both repairs historical duplicates and prevents restart from racing a straggler.
-async function stopAndWait() {
+async function stopAndWait(): Promise<boolean> {
   const st = readState(HOME);
   const initial = scanSupervisorPids();
   if (!initial.ok) {
@@ -359,7 +395,11 @@ async function stopAndWait() {
   const managed = isServiceInstalled(HOME);
   if (managed) {
     try { stopService({ home: HOME }); }
-    catch (e) { console.error(t('err.generic', { msg: e.message })); process.exitCode = 1; return false; }
+    catch (error) {
+      console.error(t('err.generic', { msg: errorMessage(error) }));
+      process.exitCode = 1;
+      return false;
+    }
   }
   const seen = new Set(initial.pids);
   if (st && isAlive(st.supervisorPid)) seen.add(st.supervisorPid);
@@ -384,7 +424,7 @@ async function stopAndWait() {
   return true;
 }
 
-async function status() {
+async function status(): Promise<void> {
   const st = readState(HOME);
   const installed = currentVersion();
   const supervisors = scanSupervisorPids();
@@ -396,7 +436,10 @@ async function status() {
     process.exitCode = 1;
     return;
   }
-  if (!stateAlive) { console.log(t('status.stopped', { version: installed })); return; }
+  if (!st || !isAlive(st.supervisorPid)) {
+    console.log(t('status.stopped', { version: installed }));
+    return;
+  }
   const running = st.version || installed;
   console.log(t('status.running', { version: running }));
   if (running !== installed) console.log(t('status.installed', { version: installed }));
@@ -410,19 +453,19 @@ async function status() {
   await printAccess(st);
 }
 
-function runSupervise() {
-  const cfg = readSupervisorLaunchConfig({
+function runSupervise(): void {
+  const cfg = parseSupervisorConfig(readSupervisorLaunchConfig({
     payloadFile: flags.payloadFile, legacyPayload: flags.payload,
-  }, HOME);
+  }, HOME));
   supervise(cfg, { home: HOME });
 }
 
 // `handmux push <title> <body> [--session X]... [--device K]... [--tag T] [--url U]` — see src/cli/pushCmd.js.
-function pushCmd() {
+function pushCmd(): Promise<number> | number {
   return runPush({ argv: process.argv.slice(2), home: HOME });
 }
 
-function logs() {
+function logs(): void {
   const p = logPath(HOME);
   if (!fs.existsSync(p)) { console.log(t('logs.none')); return; }
   const lines = String(flags.lines || 200);
@@ -433,30 +476,31 @@ function logs() {
 // `handmux service install|uninstall` — the autostart subsystem, mirroring `handmux hooks …`: subsystem
 // name first, then the action. `install` bakes the resolved config into an OS autostart entry (launchd /
 // systemd --user) that runs the supervisor at login; `uninstall` removes it. The action is argv[3].
-async function serviceCmd() {
+async function serviceCmd(): Promise<void> {
   const sub = process.argv[3];
   if (sub === 'install') return serviceInstall();
   if (sub === 'uninstall') {
     try { uninstallService({ home: HOME }); }
-    catch (e) { console.error(t('err.generic', { msg: e.message })); process.exit(1); }
+    catch (error) { console.error(t('err.generic', { msg: errorMessage(error) })); process.exit(1); }
     return;
   }
   console.error(t('service.usage'));
   process.exit(2);
 }
 
-async function serviceInstall() {
+async function serviceInstall(): Promise<void> {
   const { path: cfgPath, cfg: fileCfg } = resolveFileConfig();
   console.log(t('config.loaded', { path: describeConfig(cfgPath) }));
-  let cfg;
+  let cfg: RuntimeConfig;
   try { cfg = resolveConfig(flags, fileCfg); }
-  catch (e) { console.error(t('err.generic', { msg: e.message })); process.exit(2); }
+  catch (error) { console.error(t('err.generic', { msg: errorMessage(error) })); process.exit(2); }
   if (cfg.tunnel === 'cloudflare' || cfg.tunnel === 'cloudflare-named') {
     try { cfg.cloudflaredBin = await resolveCloudflared(HOME); }
-    catch (e) { console.error(t('err.generic', { msg: e.message })); process.exit(1); }
+    catch (error) { console.error(t('err.generic', { msg: errorMessage(error) })); process.exit(1); }
   }
   if (cfg.tunnel === 'ssh') {
     // 开机自启无 TTY:要求事先已配好免密,否则快速失败。
+    if (!cfg.sshHost) throw new Error('ssh host is missing');
     cfg.tunliteBin = resolveTunlite();
     if (checkSshAuth(cfg.sshHost, { bin: cfg.tunliteBin }) !== 0) {
       console.error(t('err.generic', { msg: t('ssh.notSetup', { bin: cfg.tunliteBin, host: cfg.sshHost }) })); process.exit(1);
@@ -464,7 +508,7 @@ async function serviceInstall() {
   }
   if (cfg.tunnel === 'natapp' || cfg.tunnel === 'cpolar') {
     try { await preflightNgrok(cfg); }
-    catch (e) { console.error(t('err.generic', { msg: e.message })); process.exit(1); }
+    catch (error) { console.error(t('err.generic', { msg: errorMessage(error) })); process.exit(1); }
   }
   // Converge a pre-existing manual run (and any old broken managed/manual pair) before loading the service.
   // Otherwise the very first `service install` can itself create two supervisors fighting over one port.
@@ -480,13 +524,13 @@ async function serviceInstall() {
   }
   const args = supervisorLaunchArgs(cfg, { home: HOME, entry: SELF });
   try { installService(args, { home: HOME }); }
-  catch (e) { console.error(t('err.generic', { msg: e.message })); process.exit(1); }
+  catch (error) { console.error(t('err.generic', { msg: errorMessage(error) })); process.exit(1); }
   console.log(t('service.installed'));
 }
 
-async function setupCmd() {
+async function setupCmd(): Promise<unknown> {
   removeLegacyCodexHooks(HOME);
-  const target = flags.config ? path.resolve(flags.config) : configPath(HOME);
+  const target = configFlag ? path.resolve(configFlag) : configPath(HOME);
   // Is an instance already up? Then the run-action reads "Save & restart" and applying means a real restart
   // (a running supervisor won't pick up the new config on its own). Captured before the interactive setup so
   // the label and the action agree; stop() below is a safe no-op if it died meanwhile.
@@ -509,25 +553,27 @@ async function setupCmd() {
     });
   }
   console.log(t(running ? 'setup.laterRestart' : 'setup.later'));
+  return undefined;
 }
 
-async function shortcutsCmd() {
-  const target = flags.config ? path.resolve(flags.config) : configPath(HOME);
-  let res;
+async function shortcutsCmd(): Promise<void> {
+  const target = configFlag ? path.resolve(configFlag) : configPath(HOME);
+  let res: ShortcutCommitResult | { error: 'non-tty' } | null;
   try {
     res = await runShortcutEditor({
       target,
       commit: (file, shortcuts) => commitShortcuts({ home: HOME, target: file, shortcuts }),
     });
   } catch (error) {
-    console.error(error.ownerPid
-      ? t('lifecycle.busy', { pid: error.ownerPid })
-      : t('err.badConfig', { path: target, msg: error.message }));
+    const ownerPid = ownerPidOf(error);
+    console.error(ownerPid
+      ? t('lifecycle.busy', { pid: ownerPid })
+      : t('err.badConfig', { path: target, msg: errorMessage(error) }));
     process.exitCode = 2;
     return;
   }
   if (!res) return;
-  if (res.error) { process.exitCode = 2; return; }
+  if (!('running' in res)) { process.exitCode = 2; return; }
   process.exitCode = reportShortcutCommit(res) || process.exitCode;
 }
 
@@ -536,7 +582,7 @@ async function shortcutsCmd() {
 // DESTRUCTIVE: auto-installs only when there's no statusLine yet; if the user already has one we print a
 // one-line compose snippet and change nothing. Codex needs no capturer — its rollout already carries the
 // quota. No-op when Claude Code isn't installed or ours is already in place.
-async function maybeOfferStatusLine() {
+async function maybeOfferStatusLine(): Promise<void> {
   const st = statusLineStatus(HOME);
   if (st === 'no-claude') return;
   // Already ours (plain OR composed into the user's own statusline): don't re-prompt, but silently REFRESH
@@ -558,7 +604,7 @@ async function maybeOfferStatusLine() {
 }
 
 // Install Claude Code lifecycle hooks for inbox state and push. Codex never enters this path.
-function installClaudeHooks() {
+function installClaudeHooks(): boolean {
   if (hooksStatus(HOME) === 'no-claude') return false;
   installHooks(HOME, { srcDir: HOOKS_SRC, stateFile: claudeStatePath(HOME) });
   console.log(t('hooks.installedClaude'));
@@ -567,7 +613,7 @@ function installClaudeHooks() {
 
 // `handmux hooks install|uninstall` controls Claude Code lifecycle hooks. Codex is App Server-only;
 // uninstall also removes the exact Handmux Codex hook block left by older releases.
-async function hooksCmd() {
+async function hooksCmd(): Promise<void> {
   const sub = process.argv[3];
   if (sub === 'install') {
     removeLegacyCodexHooks(HOME);
@@ -593,11 +639,11 @@ async function hooksCmd() {
 // `handmux config` — read-only: print the config that WOULD be used, with each value's origin (flag /
 // the config file path / env / default). This is the answer to "what's actually in effect and where did
 // it come from", so flag-vs-file is never a mystery. Secrets are masked.
-function configCmd() {
+function configCmd(): void {
   const { path: cfgPath, cfg: fileCfg } = resolveFileConfig();
   let rows;
   try { rows = explainConfig(flags, fileCfg, cfgPath); }
-  catch (e) { console.error(t('err.generic', { msg: e.message })); process.exit(2); }
+  catch (error) { console.error(t('err.generic', { msg: errorMessage(error) })); process.exit(2); }
   console.log(t('configcmd.file', { path: cfgPath || t('configcmd.fileNone') }));
   console.log('');
   const w = Math.max(...rows.map((r) => r.key.length));
@@ -610,9 +656,9 @@ function configCmd() {
 
 // Poll state.json until the public URL (or an error) shows up, then print access info. cloudflare needs
 // a few seconds to hand back its hostname; none is instant.
-async function waitAndPrint(exitWhenDone) {
+async function waitAndPrint(exitWhenDone: boolean): Promise<void> {
   const deadline = Date.now() + 25000;
-  let st;
+  let st: StoredState | null;
   for (;;) {
     st = readState(HOME);
     if (st && ((st.publicUrl && st.ready) || st.error)) break;
@@ -624,23 +670,26 @@ async function waitAndPrint(exitWhenDone) {
   if (exitWhenDone) process.exit(process.exitCode || 0);
 }
 
-async function printAccess(st) {
+async function printAccess(st: StoredState | null): Promise<void> {
   if (!st) { console.log(t('access.noState')); return; }
   if (st.error) { console.error(t('access.error', { msg: st.error })); return; }
-  const scan = bareUrl(st.publicUrl);
+  const publicUrl = st.publicUrl ?? null;
+  const localUrl = st.localUrl ?? null;
+  const token = st.token ?? '';
+  const scan = bareUrl(publicUrl);
   console.log('');
   console.log(t('access.tunnel', { tunnel: st.tunnel, pid: st.supervisorPid }));
   console.log(t('access.open', { url: scan || t('access.pending') }));
   if (st.tunnel === 'none' && st.lanUrl) console.log(t('access.lan', { url: bareUrl(st.lanUrl) }));
-  console.log(t('access.local', { url: bareUrl(st.localUrl) }));
-  console.log(t('access.token', { token: st.token }));
+  console.log(t('access.local', { url: bareUrl(localUrl) }));
+  console.log(t('access.token', { token }));
   // The QR carries the token so a phone scan signs in one-tap; the PRINTED links above stay token-free
   // (safe to screenshot/share — paste the token shown above to sign in there).
-  await maybeQr(st.publicUrl ? publicUrlWithToken(st.publicUrl, st.token) : scan, st);
-  if (st.publicUrl && st.tunnel !== 'none') {
-    const ok = await probe(st.publicUrl);
+  await maybeQr(publicUrl && token ? publicUrlWithToken(publicUrl, token) : scan, st);
+  if (publicUrl && st.tunnel !== 'none') {
+    const ok = await probe(publicUrl);
     if (ok) console.log(t('access.reachable'));
-    else console.log(t('access.unreachable', { url: st.publicUrl }));
+    else console.log(t('access.unreachable', { url: publicUrl }));
   }
   console.log('');
   console.log(t('access.hint'));
@@ -653,11 +702,19 @@ async function printAccess(st) {
 // square on a 2:1 terminal cell. If qrcode-terminal isn't installed we just skip it — the URL above is
 // always printed.
 const requireOpt = createRequire(import.meta.url);
-async function maybeQr(url, st) {
+interface QrCodeModel {
+  addData(value: string): void;
+  make(): void;
+  getModuleCount(): number;
+  isDark(row: number, column: number): boolean;
+}
+interface QrCodeConstructor { new(typeNumber: number, level: unknown): QrCodeModel }
+
+async function maybeQr(url: string | null, _st: StoredState): Promise<void> {
   if (!url) return;
   try {
-    const QRCode = requireOpt('qrcode-terminal/vendor/QRCode');
-    const ECL = requireOpt('qrcode-terminal/vendor/QRCode/QRErrorCorrectLevel');
+    const QRCode = requireOpt('qrcode-terminal/vendor/QRCode') as QrCodeConstructor;
+    const ECL = requireOpt('qrcode-terminal/vendor/QRCode/QRErrorCorrectLevel') as { L: unknown };
     const qr = new QRCode(-1, ECL.L);
     qr.addData(url);
     qr.make();
@@ -671,7 +728,7 @@ async function maybeQr(url, st) {
 // `open` is deliberately DECOUPLED from the server lifecycle: it never starts/stops anything. It's the
 // desk-side quick attach — `handmux open foo` attaches session foo (creating it if missing), including
 // sessions that were created from the phone. Inside tmux it refuses (don't nest tmux in tmux).
-function openCmd() {
+function openCmd(): never | void {
   const name = process.argv[3];
   if (!name || name.startsWith('-')) { console.error(t('open.usage')); process.exit(2); }
   if (process.env.TMUX) { console.error(t('open.insideTmux')); process.exit(1); }
@@ -685,7 +742,7 @@ function openCmd() {
   process.exit(r.status ?? 0);
 }
 
-function help() {
+function help(): void {
   if (process.argv[3] === 'flags') { console.log(t('help.flags')); return; }
   console.log(t('help.body'));
 }

@@ -7,7 +7,7 @@ import type { ShortcutConfig } from '../shortcutConfig.js';
 
 export const TUNNELS = ['none', 'cloudflare', 'cloudflare-named', 'ssh', 'natapp', 'cpolar'] as const;
 export type Tunnel = typeof TUNNELS[number];
-type OptionRecord = Record<string, unknown>;
+export type OptionRecord = Record<string, unknown>;
 type FlagAtom = string | boolean;
 export type ParsedFlags = Record<string, FlagAtom | FlagAtom[]>;
 

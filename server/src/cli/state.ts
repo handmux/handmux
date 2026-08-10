@@ -5,7 +5,21 @@ import path from 'node:path';
 import { homedir } from 'node:os';
 import { PrivateStateStore, ensurePrivateDirectorySync } from '../privateStateStore.js';
 
-export type StoredState = Record<string, unknown>;
+export interface StoredState extends Record<string, unknown> {
+  supervisorPid?: number;
+  version?: string;
+  tunnel?: string;
+  port?: number;
+  host?: string;
+  token?: string;
+  localUrl?: string;
+  lanUrl?: string | null;
+  publicUrl?: string | null;
+  ready?: boolean;
+  serverPid?: number | null;
+  tunnelPid?: number | null;
+  error?: string | null;
+}
 
 const isRecord = (value: unknown): value is StoredState =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -63,7 +77,7 @@ export function clearState(home: string): void {
 
 // pid liveness without sending a real signal: kill(pid, 0) throws ESRCH if dead, EPERM if alive but
 // not ours (still counts as running).
-export function isAlive(pid: unknown): boolean {
+export function isAlive(pid: unknown): pid is number {
   if (typeof pid !== 'number' || !Number.isSafeInteger(pid) || pid <= 0) return false;
   try { process.kill(pid, 0); return true; } catch (e) { return errorCode(e) === 'EPERM'; }
 }

@@ -16,13 +16,13 @@ export interface TunnelConfig {
   port?: number;
   publicUrl?: string | null;
   cloudflaredBin?: string;
-  cfTunnelName?: string;
+  cfTunnelName?: string | null;
   tunliteBin?: string;
-  sshHost?: string;
-  remotePort?: number;
+  sshHost?: string | null;
+  remotePort?: number | null;
   sshJump?: string | null;
   natappBin?: string;
-  authtoken?: string;
+  authtoken?: string | null;
   cpolarBin?: string;
   cpolarRegion?: string | null;
 }

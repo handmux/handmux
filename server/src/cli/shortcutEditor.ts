@@ -33,21 +33,21 @@ interface ShortcutUi {
   confirm(options: ConfirmPrompt): unknown;
   ask(prompt: unknown): Promise<unknown>;
 }
-interface SavedConfig extends Record<string, unknown> { shortcuts: ShortcutConfig }
-interface ShortcutEditorResult extends Record<string, unknown> { cfg: SavedConfig }
+export interface SavedConfig extends Record<string, unknown> { shortcuts: ShortcutConfig }
+export interface ShortcutEditorResult { cfg: SavedConfig }
 interface ShortcutLog { error(message: string): unknown }
-interface ShortcutEditorOptions {
+interface ShortcutEditorOptions<TResult extends ShortcutEditorResult = ShortcutEditorResult> {
   target: string;
   log?: ShortcutLog;
   isTTY?: boolean;
   ui?: ShortcutUi;
-  commit?: (file: string, shortcuts: ShortcutConfig) => Promise<ShortcutEditorResult>;
+  commit?: (file: string, shortcuts: ShortcutConfig) => Promise<TResult>;
   running?: unknown;
 }
 interface FetchResponse { ok: boolean; status: number; json?(): Promise<unknown> }
 type FetchImpl = (url: string, options: RequestInit) => Promise<FetchResponse>;
 interface ShortcutServerState { localUrl: string; token: string }
-interface ShortcutCommitResult {
+export interface ShortcutCommitResult extends ShortcutEditorResult {
   cfg: SavedConfig;
   running: boolean;
   applied: boolean;
@@ -265,9 +265,17 @@ async function editMode(mode: ShortcutMode, initial: readonly Shortcut[], ui: Sh
   }
 }
 
+export function runShortcutEditor(
+  options: ShortcutEditorOptions<ShortcutCommitResult> & {
+    commit: (file: string, shortcuts: ShortcutConfig) => Promise<ShortcutCommitResult>;
+  },
+): Promise<ShortcutCommitResult | { error: 'non-tty' } | null>;
+export function runShortcutEditor(
+  options: ShortcutEditorOptions,
+): Promise<ShortcutEditorResult | { error: 'non-tty' } | null>;
 export async function runShortcutEditor({
   target, log = console, isTTY = process.stdin.isTTY, ui = defaultUi,
-  commit = async (file, shortcuts) => ({ cfg: saveShortcutConfig(file, shortcuts) }),
+  commit,
 }: ShortcutEditorOptions): Promise<ShortcutEditorResult | { error: 'non-tty' } | null> {
   if (!isTTY) { log.error(t('shortcuts.needTty')); return { error: 'non-tty' }; }
   const existing = readExisting(target);
@@ -290,7 +298,9 @@ export async function runShortcutEditor({
         continue;
       }
       if (choice !== 'save') throw new Error('invalid shortcut mode');
-      const result = await commit(target, shortcuts);
+      const result = commit
+        ? await commit(target, shortcuts)
+        : { cfg: saveShortcutConfig(target, shortcuts) };
       ui.outro(t('shortcuts.wrote', { path: target }));
       return result;
     }

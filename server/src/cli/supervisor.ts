@@ -17,6 +17,7 @@ import type { NetworkInterfaceInfo } from 'node:os';
 import type { TunnelConfig, TunnelName } from './drivers.js';
 import type { SupervisorComponentName, SupervisorComponentState, SupervisorComponentEvent } from './supervisorState.js';
 import type { VapidConfig, XfyunConfig } from './options.js';
+import type { ShortcutConfig } from '../shortcutConfig.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const SERVER = path.resolve(here, '../server.js');
@@ -25,7 +26,7 @@ const packageInfo: unknown = require('../../package.json');
 const VERSION = typeof packageInfo === 'object' && packageInfo !== null && 'version' in packageInfo
   && typeof packageInfo.version === 'string' ? packageInfo.version : 'unknown';
 
-interface SupervisorConfig extends TunnelConfig {
+export interface SupervisorConfig extends TunnelConfig {
   tunnel: TunnelName;
   port: number;
   host: string;
@@ -34,7 +35,7 @@ interface SupervisorConfig extends TunnelConfig {
   staticDir?: string | null;
   uploadExts?: string | null;
   previewDomain?: string | null;
-  shortcuts: unknown;
+  shortcuts: ShortcutConfig;
   vapid?: VapidConfig | null;
   xfyun?: XfyunConfig | null;
 }

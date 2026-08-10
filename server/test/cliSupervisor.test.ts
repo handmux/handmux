@@ -53,7 +53,8 @@ describe('Supervisor process state wiring', () => {
       exit: vi.fn(),
     };
     const { state } = supervise({
-      tunnel: 'none', port: 19_999, host: '127.0.0.1', token: 'secret', shortcuts: [],
+      tunnel: 'none', port: 19_999, host: '127.0.0.1', token: 'secret',
+      shortcuts: { command: [], chat: [] },
     }, {
       home: tmpHome('hm-supervisor-'), processRef, spawnChild, probeServerReady,
       now: () => clock,
