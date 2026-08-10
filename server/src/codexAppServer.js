@@ -1848,6 +1848,12 @@ export function createCodexAppServer({
         revision: state.revision,
       };
     },
+    /**
+     * @param {string} pane
+     * @param {string} threadId
+     * @param {(event: import('./codexStreamProtocol.js').CodexStreamEvent) => void} listener
+     * @param {number | null} [afterSequence]
+     */
     async subscribe(pane, threadId, listener, afterSequence = null) {
       const client = await connection(pane);
       if (!client) throw new Error('Codex session is not managed by Handmux');
@@ -1861,6 +1867,12 @@ export function createCodexAppServer({
       await client.assertCurrentThread(threadId);
       return { reconciled: client.reconcileTranscript(threadId, messages) };
     },
+    /**
+     * @param {string} pane
+     * @param {string} threadId
+     * @param {string} text
+     * @param {string | null} [requestId]
+     */
     async send(pane, threadId, text, requestId = null) {
       const client = await connection(pane);
       if (!client) throw new Error('Codex session is not managed by Handmux');

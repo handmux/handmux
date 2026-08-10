@@ -3,6 +3,70 @@ import { isPaneId } from '../tmux/commands.js';
 import { getAgent } from '../agents/index.js';
 import { codexExitSessionId } from '../agents/codex.js';
 import { parseCodexStreamEvent } from '../codexStreamProtocol.js';
+import type { Response } from 'express';
+import type { CodexStreamEvent } from '../codexStreamProtocol.js';
+
+export interface CodexRouteApp {
+  discover(pane: string): Promise<{ managed: boolean; threadId?: string | null } | null>;
+  status(pane: string, threadId: string): Promise<unknown>;
+  subscribe(
+    pane: string,
+    threadId: string,
+    listener: (event: CodexStreamEvent) => void,
+    afterSequence?: number | null,
+  ): Promise<() => void>;
+  send(pane: string, threadId: string, text: string, requestId: string | null): Promise<unknown>;
+  steerQueued(pane: string, threadId: string, id: string): Promise<unknown>;
+  removeQueued(pane: string, threadId: string, id: string): Promise<unknown>;
+  beginQueuedEdit(pane: string, threadId: string, id: string): Promise<unknown>;
+  renewQueuedEdit(pane: string, threadId: string, id: string, token: string): Promise<unknown>;
+  commitQueuedEdit(pane: string, threadId: string, id: string, token: string, text: string): Promise<unknown>;
+  cancelQueuedEdit(pane: string, threadId: string, id: string, token: string): Promise<unknown>;
+  compact(pane: string, threadId: string): Promise<unknown>;
+  models(pane: string, threadId: string): Promise<unknown>;
+  getGoal(pane: string, threadId: string): Promise<unknown>;
+  updateGoal(pane: string, threadId: string, updates: Record<string, unknown>): Promise<unknown>;
+  clearGoal(pane: string, threadId: string): Promise<unknown>;
+  updateSettings(pane: string, threadId: string, updates: Record<string, unknown>): Promise<unknown>;
+  interrupt(pane: string, threadId: string): Promise<unknown>;
+  decide(pane: string, threadId: string, requestId: string | number, decision: string): Promise<unknown>;
+  answerInput(
+    pane: string,
+    threadId: string,
+    requestId: string | number,
+    answers: Record<string, string[]>,
+  ): Promise<unknown>;
+}
+export interface CodexRouteCommands {
+  listLivePanes?(): Promise<unknown>;
+  sendKey?(pane: string, key: string): Promise<unknown>;
+  capturePlain?(pane: string): Promise<string>;
+  runPaneCommand?(pane: string, command: string): Promise<unknown>;
+  exitCopyModeIfActive?(pane: string): Promise<unknown>;
+  sendText?(pane: string, text: string): Promise<unknown>;
+  sendEnter?(pane: string): Promise<unknown>;
+}
+export interface CodexRouteClaudeEvents {
+  identifyPaneAgents?(panes: unknown): Promise<Record<string, string>>;
+}
+type Wait = (ms: number) => Promise<unknown>;
+type BindingResult =
+  | { pane: string; threadId: string; error?: never; status?: never }
+  | { error: string; status: number; pane?: never; threadId?: never };
+interface CodexRoutesOptions {
+  codexApp?: CodexRouteApp | null;
+  commands: CodexRouteCommands;
+  claudeEvents: CodexRouteClaudeEvents;
+  wait?: Wait;
+}
+interface Takeover { threadId: string | null; startedAt: number }
+const errorMessage = (error: unknown): string => {
+  if (error instanceof Error) return error.message;
+  if (error && typeof error === 'object' && 'message' in error && typeof error.message === 'string') {
+    return error.message;
+  }
+  return String(error);
+};
 
 const TAKEOVER_TERMINAL_HINT_MS = 10_000;
 const TAKEOVER_TIMEOUT_MS = 30_000;
@@ -27,10 +91,13 @@ const PERMISSION_MODES = {
     sandboxPolicy: { type: 'dangerFullAccess' },
   },
 };
+const isPermissionMode = (value: unknown): value is keyof typeof PERMISSION_MODES => (
+  typeof value === 'string' && Object.hasOwn(PERMISSION_MODES, value)
+);
 
-const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const pause = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
-async function paneAgent(commands, claudeEvents, pane) {
+async function paneAgent(commands: CodexRouteCommands, claudeEvents: CodexRouteClaudeEvents, pane: string) {
   const panes = await commands?.listLivePanes?.();
   const live = Array.isArray(panes) ? panes.find((candidate) => candidate.id === pane) : null;
   if (!live) return { live: null, agent: null };
@@ -38,7 +105,12 @@ async function paneAgent(commands, claudeEvents, pane) {
   return { live, agent: agents[pane] || null };
 }
 
-async function exitCurrentCodex(commands, claudeEvents, pane) {
+async function exitCurrentCodex(
+  commands: CodexRouteCommands,
+  claudeEvents: CodexRouteClaudeEvents,
+  pane: string,
+) {
+  if (!commands.sendKey) throw new Error('Codex terminal control is unavailable');
   // During an active turn Codex can spend several seconds writing interruption details, token usage and
   // its recovery command. Give each Ctrl+C a full five-second window; only send a second one if the pane
   // still proves Codex is the foreground process after that wait.
@@ -53,7 +125,12 @@ async function exitCurrentCodex(commands, claudeEvents, pane) {
   return null;
 }
 
-async function waitForRecoverySession(commands, pane, isId) {
+async function waitForRecoverySession(
+  commands: CodexRouteCommands,
+  pane: string,
+  isId: (value: unknown) => boolean,
+): Promise<string | null> {
+  if (!commands.capturePlain) return null;
   // tmux can report pane_current_command=the shell before the last buffered Codex output has been painted.
   // Poll the visible pane briefly instead of treating the first incomplete frame as a permanent failure.
   for (let attempt = 0; attempt < RECOVERY_OUTPUT_ATTEMPTS; attempt += 1) {
@@ -66,7 +143,13 @@ async function waitForRecoverySession(commands, pane, isId) {
   return null;
 }
 
-async function clearCurrentCodexThroughTui(codexApp, commands, pane, previousThreadId, wait) {
+async function clearCurrentCodexThroughTui(
+  codexApp: CodexRouteApp,
+  commands: CodexRouteCommands,
+  pane: string,
+  previousThreadId: string,
+  wait: Wait,
+): Promise<{ threadId: string }> {
   if (typeof commands?.exitCopyModeIfActive !== 'function'
     || typeof commands?.sendKey !== 'function'
     || typeof commands?.sendText !== 'function'
@@ -95,59 +178,51 @@ async function clearCurrentCodexThroughTui(codexApp, commands, pane, previousThr
   throw new Error('Codex terminal did not accept /clear; switch to the terminal, close any open panel, and try again');
 }
 
-async function binding(codexApp, pane) {
+async function binding(codexApp: CodexRouteApp, pane: unknown): Promise<BindingResult> {
   if (!isPaneId(pane)) return { error: 'bad pane id', status: 400 };
   try {
     const discovered = await codexApp?.discover?.(pane);
     if (!discovered?.managed) return { error: 'Codex session is not managed by Handmux', status: 409 };
     if (discovered.threadId) return { pane, threadId: discovered.threadId };
   } catch (error) {
-    return { error: error?.message || String(error), status: 503 };
+    return { error: errorMessage(error), status: 503 };
   }
   return { error: 'Codex session is not bound yet', status: 409 };
 }
 
-function routeError(res, result) {
+function routeError(res: Response, result: BindingResult): result is Extract<BindingResult, { error: string }> {
   if (!result.error) return false;
   res.status(result.status).json({ error: result.error });
   return true;
 }
 
-function codexError(res, error) {
-  const message = error?.message || String(error);
+function codexError(res: Response, error: unknown) {
+  const message = errorMessage(error);
   const conflict = /not managed|session changed|no longer pending|already being sent|being edited|edit is no longer active|queue is full|decision is unavailable|bad user input response/i.test(message);
   return res.status(conflict ? 409 : 503).json({ error: message });
 }
 
 // Legacy/unsequenced App Server deltas may still be folded. Projected events keep every sequence intact:
 // collapsing two cursor-addressable events would create an artificial gap on the next reconnect.
-export function appendCodexStreamEvent(queue, event) {
-  event = parseCodexStreamEvent(event);
+export function appendCodexStreamEvent(queue: CodexStreamEvent[], value: unknown): CodexStreamEvent[] {
+  const event = parseCodexStreamEvent(value);
   if (!event) return queue;
   const last = queue.at(-1);
   if (event?.sequence == null && event?.type === 'delta' && last?.type === 'delta'
     && last.threadId === event.threadId && last.turnId === event.turnId && last.itemId === event.itemId) {
-    last.delta += event.delta || '';
+    last.delta = (last.delta || '') + (event.delta || '');
   } else if (event) queue.push({ ...event });
   return queue;
 }
 
-/**
- * @param {{
- *   codexApp?: ReturnType<typeof import('../codexAppServer.js').createCodexAppServer> | null,
- *   commands?: object,
- *   claudeEvents?: object,
- *   wait?: (ms: number) => Promise<unknown>,
- * }} options
- */
-export function codexRoutes({ codexApp, commands, claudeEvents, wait = pause }) {
+export function codexRoutes({ codexApp, commands, claudeEvents, wait = pause }: CodexRoutesOptions) {
   const r = express.Router();
   if (!codexApp) return r;
   // A takeover is pane-scoped and deliberately kept in server memory. Besides making repeated taps
   // idempotent, this gates discovery while the replacement process starts: App Server may briefly list
   // another historical thread, but the UI must not enter chat until the exact pre-takeover thread appears.
-  const takeovers = new Map(); // pane -> { threadId, startedAt }
-  const takeoverView = (takeover) => {
+  const takeovers = new Map<string, Takeover>(); // pane -> { threadId, startedAt }
+  const takeoverView = (takeover: Takeover) => {
     const elapsed = Date.now() - takeover.startedAt;
     return {
       state: elapsed >= TAKEOVER_TIMEOUT_MS ? 'timed-out' : 'starting',
@@ -197,10 +272,10 @@ export function codexRoutes({ codexApp, commands, claudeEvents, wait = pause }) 
     res.write(`data: ${JSON.stringify({ type: 'ready', threadId: target.threadId })}\n\n`);
 
     let closed = false;
-    let unsubscribe = null;
-    let flushTimer = null;
-    let heartbeat = null;
-    const pending = [];
+    let unsubscribe: (() => void) | null = null;
+    let flushTimer: NodeJS.Timeout | null = null;
+    let heartbeat: NodeJS.Timeout | null = null;
+    const pending: CodexStreamEvent[] = [];
     const flush = () => {
       if (flushTimer) clearTimeout(flushTimer);
       flushTimer = null;
@@ -219,7 +294,7 @@ export function codexRoutes({ codexApp, commands, claudeEvents, wait = pause }) 
       unsubscribe?.();
       unsubscribe = null;
     };
-    const enqueue = (event) => {
+    const enqueue = (event: CodexStreamEvent) => {
       if (closed) return;
       if (event?.type === 'disconnected') {
         appendCodexStreamEvent(pending, event);
@@ -247,11 +322,12 @@ export function codexRoutes({ codexApp, commands, claudeEvents, wait = pause }) 
       heartbeat.unref?.();
     } catch (error) {
       if (!closed) {
-        res.write(`data: ${JSON.stringify({ type: 'error', message: error?.message || String(error) })}\n\n`);
+        res.write(`data: ${JSON.stringify({ type: 'error', message: errorMessage(error) })}\n\n`);
         res.end();
       }
       cleanup();
     }
+    return undefined;
   });
 
   r.post('/codex/takeover', async (req, res) => {
@@ -273,7 +349,7 @@ export function codexRoutes({ codexApp, commands, claudeEvents, wait = pause }) 
       if (current.agent !== 'codex') return res.status(409).json({ error: 'codex-pane-changed' });
 
       const driver = getAgent('codex');
-      const takeover = { threadId: null, startedAt: Date.now() };
+      const takeover: Takeover = { threadId: null, startedAt: Date.now() };
       takeovers.set(pane, takeover);
       try {
         const exited = await exitCurrentCodex(commands, claudeEvents, pane);
@@ -288,7 +364,11 @@ export function codexRoutes({ codexApp, commands, claudeEvents, wait = pause }) 
         }
         takeover.threadId = sessionId;
         await pause(INPUT_SETTLE_MS); // let the restored shell finish drawing its prompt
-        await commands.runPaneCommand(pane, driver.sessions.managedResumeCmd(sessionId));
+        const managedResumeCmd = driver.sessions.managedResumeCmd;
+        if (!managedResumeCmd || !commands.runPaneCommand) {
+          throw new Error('Codex managed resume command is unavailable');
+        }
+        await commands.runPaneCommand(pane, managedResumeCmd(sessionId));
       } catch (error) {
         takeovers.delete(pane);
         throw error;
@@ -306,18 +386,21 @@ export function codexRoutes({ codexApp, commands, claudeEvents, wait = pause }) 
     if (requestId && (requestId.length > 128 || !/^[a-zA-Z0-9._:-]+$/.test(requestId))) {
       return res.status(400).json({ error: 'bad Codex request id' });
     }
-    try { res.json(await codexApp.send(target.pane, target.threadId, text, requestId || null)); }
-    catch (error) { codexError(res, error); }
+    try { return res.json(await codexApp.send(target.pane, target.threadId, text, requestId || null)); }
+    catch (error) { return codexError(res, error); }
   });
 
-  for (const [path, method] of [['/codex/queue/steer', 'steerQueued'], ['/codex/queue/remove', 'removeQueued']]) {
+  const queueMethods: Array<[string, 'steerQueued' | 'removeQueued']> = [
+    ['/codex/queue/steer', 'steerQueued'], ['/codex/queue/remove', 'removeQueued'],
+  ];
+  for (const [path, method] of queueMethods) {
     r.post(path, async (req, res) => {
       const target = await binding(codexApp, req.body?.pane);
       if (routeError(res, target)) return;
       const id = typeof req.body?.id === 'string' ? req.body.id.trim() : '';
       if (!id || id.length > 128) return res.status(400).json({ error: 'bad queued message id' });
-      try { res.json(await codexApp[method](target.pane, target.threadId, id)); }
-      catch (error) { codexError(res, error); }
+      try { return res.json(await codexApp[method](target.pane, target.threadId, id)); }
+      catch (error) { return codexError(res, error); }
     });
   }
 
@@ -326,13 +409,11 @@ export function codexRoutes({ codexApp, commands, claudeEvents, wait = pause }) 
     if (routeError(res, target)) return;
     const id = typeof req.body?.id === 'string' ? req.body.id.trim() : '';
     if (!id || id.length > 128) return res.status(400).json({ error: 'bad queued message id' });
-    try { res.json(await codexApp.beginQueuedEdit(target.pane, target.threadId, id)); }
-    catch (error) { codexError(res, error); }
+    try { return res.json(await codexApp.beginQueuedEdit(target.pane, target.threadId, id)); }
+    catch (error) { return codexError(res, error); }
   });
 
-  for (const [action, method] of [
-    ['renew', 'renewQueuedEdit'], ['commit', 'commitQueuedEdit'], ['cancel', 'cancelQueuedEdit'],
-  ]) {
+  for (const action of ['renew', 'commit', 'cancel'] as const) {
     r.post(`/codex/queue/edit/${action}`, async (req, res) => {
       const target = await binding(codexApp, req.body?.pane);
       if (routeError(res, target)) return;
@@ -343,10 +424,15 @@ export function codexRoutes({ codexApp, commands, claudeEvents, wait = pause }) 
       if (action === 'commit') {
         const text = typeof req.body?.text === 'string' ? req.body.text.trim() : '';
         if (!text) return res.status(400).json({ error: 'message is empty' });
-        try { return res.json(await codexApp[method](target.pane, target.threadId, id, token, text)); }
+        try { return res.json(await codexApp.commitQueuedEdit(target.pane, target.threadId, id, token, text)); }
         catch (error) { return codexError(res, error); }
       }
-      try { return res.json(await codexApp[method](target.pane, target.threadId, id, token)); }
+      try {
+        const result = action === 'renew'
+          ? await codexApp.renewQueuedEdit(target.pane, target.threadId, id, token)
+          : await codexApp.cancelQueuedEdit(target.pane, target.threadId, id, token);
+        return res.json(result);
+      }
       catch (error) { return codexError(res, error); }
     });
   }
@@ -386,7 +472,7 @@ export function codexRoutes({ codexApp, commands, claudeEvents, wait = pause }) 
   r.post('/codex/goal', async (req, res) => {
     const target = await binding(codexApp, req.body?.pane);
     if (routeError(res, target)) return;
-    const updates = {};
+    const updates: { objective?: string; status?: 'active' | 'paused' } = {};
     if (Object.hasOwn(req.body || {}, 'objective')) {
       const objective = req.body.objective;
       const trimmed = typeof objective === 'string' ? objective.trim() : '';
@@ -397,12 +483,12 @@ export function codexRoutes({ codexApp, commands, claudeEvents, wait = pause }) 
     }
     if (Object.hasOwn(req.body || {}, 'status')) {
       const status = req.body.status;
-      if (!['active', 'paused'].includes(status)) return res.status(400).json({ error: 'bad goal status' });
+      if (status !== 'active' && status !== 'paused') return res.status(400).json({ error: 'bad goal status' });
       updates.status = status;
     }
     if (!Object.keys(updates).length) return res.status(400).json({ error: 'no goal update supplied' });
-    try { res.json({ goal: await codexApp.updateGoal(target.pane, target.threadId, updates) }); }
-    catch (error) { codexError(res, error); }
+    try { return res.json({ goal: await codexApp.updateGoal(target.pane, target.threadId, updates) }); }
+    catch (error) { return codexError(res, error); }
   });
 
   r.post('/codex/goal/clear', async (req, res) => {
@@ -415,7 +501,7 @@ export function codexRoutes({ codexApp, commands, claudeEvents, wait = pause }) 
   r.post('/codex/settings', async (req, res) => {
     const target = await binding(codexApp, req.body?.pane);
     if (routeError(res, target)) return;
-    const updates = {};
+    const updates: Record<string, unknown> = {};
     for (const key of ['model', 'effort']) {
       const value = req.body?.[key];
       if (value == null) continue;
@@ -440,14 +526,14 @@ export function codexRoutes({ codexApp, commands, claudeEvents, wait = pause }) 
     }
     const permissionMode = req.body?.permissionMode;
     if (permissionMode != null) {
-      if (typeof permissionMode !== 'string' || !PERMISSION_MODES[permissionMode]) {
+      if (!isPermissionMode(permissionMode)) {
         return res.status(400).json({ error: 'bad permissionMode' });
       }
       Object.assign(updates, PERMISSION_MODES[permissionMode]);
     }
     if (!Object.keys(updates).length) return res.status(400).json({ error: 'no settings supplied' });
-    try { res.json({ settings: await codexApp.updateSettings(target.pane, target.threadId, updates) }); }
-    catch (error) { codexError(res, error); }
+    try { return res.json({ settings: await codexApp.updateSettings(target.pane, target.threadId, updates) }); }
+    catch (error) { return codexError(res, error); }
   });
 
   r.post('/codex/interrupt', async (req, res) => {
@@ -465,8 +551,8 @@ export function codexRoutes({ codexApp, commands, claudeEvents, wait = pause }) 
     if ((typeof requestId !== 'string' && typeof requestId !== 'number') || typeof decision !== 'string') {
       return res.status(400).json({ error: 'bad approval response' });
     }
-    try { res.json(await codexApp.decide(target.pane, target.threadId, requestId, decision)); }
-    catch (error) { codexError(res, error); }
+    try { return res.json(await codexApp.decide(target.pane, target.threadId, requestId, decision)); }
+    catch (error) { return codexError(res, error); }
   });
 
   r.post('/codex/input', async (req, res) => {
@@ -481,8 +567,8 @@ export function codexRoutes({ codexApp, commands, claudeEvents, wait = pause }) 
         || value.some((answer) => typeof answer !== 'string' || !answer.trim()))) {
       return res.status(400).json({ error: 'bad user input response' });
     }
-    try { res.json(await codexApp.answerInput(target.pane, target.threadId, requestId, answers)); }
-    catch (error) { codexError(res, error); }
+    try { return res.json(await codexApp.answerInput(target.pane, target.threadId, requestId, answers)); }
+    catch (error) { return codexError(res, error); }
   });
 
   return r;

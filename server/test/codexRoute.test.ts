@@ -2,18 +2,55 @@ import { describe, expect, it, vi } from 'vitest';
 import express from 'express';
 import request from 'supertest';
 import { appendCodexStreamEvent, codexRoutes } from '../src/routes/codex.js';
+import type {
+  CodexRouteApp,
+  CodexRouteClaudeEvents,
+  CodexRouteCommands,
+} from '../src/routes/codex.js';
 import { projectCodexStreamEvent } from '../src/codexStreamProtocol.js';
+import type { CodexStreamEvent } from '../src/codexStreamProtocol.js';
+
+interface AppForOptions {
+  sessionId?: string | null;
+  codexApp?: Partial<CodexRouteApp> & {
+    clear?: (pane: string, threadId: string) => Promise<unknown>;
+  };
+  commands?: CodexRouteCommands;
+  claudeEvents?: CodexRouteClaudeEvents;
+  wait?: (ms: number) => Promise<unknown>;
+}
+
+const empty = async (): Promise<Record<string, never>> => ({});
 
 function appFor({
   sessionId = 'thread-1', codexApp = {}, commands = {}, claudeEvents = {}, wait,
-} = {}) {
+}: AppForOptions = {}) {
   const app = express();
   app.use(express.json());
+  const service: CodexRouteApp = {
+    discover: async () => ({ managed: true, threadId: sessionId }),
+    status: empty,
+    subscribe: async () => () => {},
+    send: empty,
+    steerQueued: empty,
+    removeQueued: empty,
+    beginQueuedEdit: empty,
+    renewQueuedEdit: empty,
+    commitQueuedEdit: empty,
+    cancelQueuedEdit: empty,
+    compact: empty,
+    models: async () => [],
+    getGoal: async () => null,
+    updateGoal: empty,
+    clearGoal: empty,
+    updateSettings: empty,
+    interrupt: empty,
+    decide: empty,
+    answerInput: empty,
+    ...codexApp,
+  };
   app.use(codexRoutes({
-    codexApp: {
-      discover: async () => ({ managed: true, threadId: sessionId }),
-      ...codexApp,
-    },
+    codexApp: service,
     commands,
     claudeEvents,
     wait,
@@ -45,7 +82,7 @@ function takeoverHarness({ exitId = THREAD_ID } = {}) {
 
 describe('Codex App Server routes', () => {
   it('coalesces adjacent text deltas without reordering lifecycle events', () => {
-    const queue = [];
+    const queue: CodexStreamEvent[] = [];
     appendCodexStreamEvent(queue, { type: 'delta', threadId: 'one', turnId: 't', itemId: 'i', delta: '你' });
     appendCodexStreamEvent(queue, { type: 'delta', threadId: 'one', turnId: 't', itemId: 'i', delta: '好' });
     appendCodexStreamEvent(queue, { type: 'completed', threadId: 'one', turnId: 't', itemId: 'i', text: '你好' });
@@ -54,7 +91,7 @@ describe('Codex App Server routes', () => {
       expect.objectContaining({ type: 'completed', text: '你好' }),
     ]);
 
-    const projected = [];
+    const projected: CodexStreamEvent[] = [];
     appendCodexStreamEvent(projected, {
       type: 'delta', threadId: 'one', turnId: 't', itemId: 'i', delta: '你', sequence: 1,
     });
