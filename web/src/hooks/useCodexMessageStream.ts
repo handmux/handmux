@@ -72,7 +72,9 @@ export function useCodexMessageStream({
       }
       else wake();
     };
-    const onPageShow = (event: PageTransitionEvent) => { if (event.persisted) wake(); };
+    // Installed mobile browsers may restore the app with a normal pageshow rather than a BFCache pageshow.
+    // Both mean the old fetch/SSE reader can be logically frozen and must be replaced.
+    const onPageShow = () => wake();
     document.addEventListener('visibilitychange', onVisibility);
     window.addEventListener('pageshow', onPageShow);
     window.addEventListener('focus', wake);

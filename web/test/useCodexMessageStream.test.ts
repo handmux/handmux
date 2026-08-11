@@ -182,6 +182,27 @@ describe('Codex message stream projection', () => {
     expect(subscriptions[1]?.after).toBe(7);
   });
 
+  it('reconnects on an ordinary pageshow from an installed mobile app', async () => {
+    const signals: AbortSignal[] = [];
+    vi.spyOn(api, 'streamCodexMessages').mockImplementation((_pane, options) => {
+      if (!options?.signal) throw new Error('stream signal is required');
+      signals.push(options.signal);
+      return new Promise<void>((resolve) => options.signal?.addEventListener(
+        'abort', () => resolve(), { once: true },
+      ));
+    });
+    renderHook(() => useCodexMessageStream({
+      pane: '%1', threadId: 'thread-1', enabled: true,
+    }));
+    await waitFor(() => expect(api.streamCodexMessages).toHaveBeenCalledTimes(1));
+
+    act(() => window.dispatchEvent(new Event('pageshow')));
+
+    await waitFor(() => expect(api.streamCodexMessages).toHaveBeenCalledTimes(2));
+    expect(signals[0]?.aborted).toBe(true);
+    expect(signals[1]?.aborted).toBe(false);
+  });
+
   it('refreshes durable history and resets its cursor when the server journal has restarted', async () => {
     let emit: (event: CodexStreamEvent) => void = () => {
       throw new Error('stream callback is not ready');

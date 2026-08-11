@@ -674,6 +674,27 @@ describe('desktop terminal input', () => {
 
   });
 
+  it.each(['focus', 'pageshow'])(
+    'replaces a possibly frozen live stream when the app returns through %s without visibilitychange',
+    async (eventName) => {
+      const suspend = vi.fn();
+      const resync = vi.fn();
+      mocks.openTerminalStream.mockReturnValue({
+        pause: vi.fn(),
+        suspend,
+        resync,
+        close: vi.fn(() => Promise.resolve()),
+      });
+      render(<Terminal pane="%1" desktop stream />);
+      await vi.waitFor(() => expect(mocks.openTerminalStream).toHaveBeenCalled());
+
+      act(() => window.dispatchEvent(new Event(eventName)));
+
+      expect(suspend).toHaveBeenCalledOnce();
+      expect(resync).toHaveBeenCalledOnce();
+    },
+  );
+
   it('parses stream cursor moves off-screen instead of writing raw bytes into the visible grid', async () => {
     let callbacks;
     mocks.openTerminalStream.mockImplementation((options) => {

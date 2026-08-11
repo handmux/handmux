@@ -117,9 +117,10 @@ export function usePollingLoop<T>({
     // Installed mobile WebViews do not always deliver a complete visibilitychange pair. `pageshow`
     // covers BFCache/process restoration and `focus` covers an ordinary app switch. Both must discard a
     // logically frozen request; otherwise every surface sharing this loop stays stale until it remounts.
-    const onPageShow = (event: PageTransitionEvent): void => {
-      if (event.persisted) resume({ abandon: true });
-    };
+    // Installed mobile browsers also emit a normal pageshow (`persisted === false`) for some app restores.
+    // The listener is installed after the initial page show, so every pageshow observed here is a useful
+    // wake signal; restricting this to BFCache restores leaves a frozen request stuck until a remount.
+    const onPageShow = (): void => resume({ abandon: true });
     const onFocus = (): void => resume({ abandon: true });
     const onOnline = (): void => resume({ abandon: true });
     document.addEventListener('visibilitychange', onVis);

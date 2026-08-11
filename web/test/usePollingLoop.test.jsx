@@ -158,9 +158,9 @@ describe('usePollingLoop', () => {
       // Some installed mobile WebViews suspend the page without delivering a complete hidden -> visible
       // visibilitychange pair. The old request then remains logically in flight forever.
       await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
-      const event = new Event(eventName);
-      if (eventName === 'pageshow') Object.defineProperty(event, 'persisted', { value: true });
-      window.dispatchEvent(event);
+      // Installed mobile browsers can emit an ordinary pageshow (`persisted === false`) after restoring the
+      // app. It is still a foreground wake and must not be filtered out as a non-BFCache navigation.
+      window.dispatchEvent(new Event(eventName));
 
       await act(async () => {});
       expect(fetch).toHaveBeenCalledTimes(2);

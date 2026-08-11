@@ -1501,7 +1501,30 @@ const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Terminal({
         startLoop();
       }
     };
+    // Some installed mobile WebViews return from another app without delivering the hidden -> visible pair.
+    // In that path the browser can leave a dead WebSocket looking OPEN indefinitely. A lens switch fixes it
+    // only because Terminal remounts; do the same connection replacement in place on every fallback wake.
+    let lastForegroundWakeAt = 0;
+    const onForegroundWake = () => {
+      if (disposed || document.hidden) return;
+      const now = Date.now();
+      // visibilitychange, pageshow and focus often arrive as one burst. One fresh socket is enough.
+      if (now - lastForegroundWakeAt < 100) return;
+      lastForegroundWakeAt = now;
+      if (streamMode) {
+        streamClient?.suspend();
+        resumeStream();
+      } else {
+        setConn(nextConnection(connState, 'reset'));
+        depth = liveDepth();
+        idleSince = now;
+        startLoop();
+      }
+    };
     document.addEventListener('visibilitychange', onVisibility);
+    window.addEventListener('pageshow', onForegroundWake);
+    window.addEventListener('focus', onForegroundWake);
+    window.addEventListener('online', onForegroundWake);
 
     const handleBufferScroll = () => {
       if (disposed) return;
@@ -1552,6 +1575,9 @@ const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Terminal({
       streamMirror?.dispose();
       streamMirror = null;
       document.removeEventListener('visibilitychange', onVisibility);
+      window.removeEventListener('pageshow', onForegroundWake);
+      window.removeEventListener('focus', onForegroundWake);
+      window.removeEventListener('online', onForegroundWake);
       window.removeEventListener('resize', onResize);
       window.removeEventListener('orientationchange', onResize);
       visualViewport?.removeEventListener('resize', onResize);
