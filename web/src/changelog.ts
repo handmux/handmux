@@ -19,6 +19,30 @@ export interface ChangelogEntry {
 // `entryId`/`LATEST_RELEASE` use `version` when present, else `date`, as the stable unread-dot id.
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '0.24.0',
+    date: '2026-08-11',
+    highlight: {
+      zh: 'Codex 任务进度与 Goal 原生上线',
+      en: 'Native Codex task progress and Goals',
+    },
+    items: {
+      zh: [
+        'Codex 对话新增只读回合任务列表：当前运行步骤带动态状态，点按可用 Bottom Sheet 查看完整计划；回合结束后保留可恢复的任务摘要。',
+        'Goal 现在完整融入对话：设置或重新开始会立即创建并启动新目标，进行中或暂停的目标常驻在任务列表下方，历史状态留在对应回合；统一详情支持编辑后重新开始、暂停、继续与清除。',
+        '终端与对话可预览任意扩展名的文本文件；打开前会按内容区分文本与二进制，普通斜杠文字和未知 Markdown 目标不再误变成可点击路径。',
+        '修复了发送消息后回复偶尔排到用户消息上方，以及主屏 App 从其他应用返回后终端或 Codex 对话可能停在旧画面的问题。',
+        'Server、Web 与 CLI 底层完成严格 TypeScript 迁移，发布包改为只运行编译产物，并补强了私密状态、会话队列、服务恢复与错误边界。',
+      ],
+      en: [
+        'Added a read-only turn task list to Codex chat: the active step carries a live indicator, the full plan opens in a Bottom Sheet, and a restorable task summary remains after the turn.',
+        'Goals now live naturally in chat: setting or restarting creates and starts a fresh Goal immediately, active or paused Goals stay below the task list, and history stays with its original turn; one shared detail sheet supports edit-and-restart, pause, resume, and clear.',
+        'Preview text files with any extension from terminal or chat. A content check separates text from binary files, while slash-separated prose and unknown Markdown targets no longer become misleading file links.',
+        'Fixed replies occasionally appearing above the user message that started them, and terminal or Codex chat getting stuck on an old screen after returning to the installed app.',
+        'Migrated the Server, Web app, and CLI internals to strict TypeScript, made release packages run compiled output only, and strengthened private state, session queues, service recovery, and API error boundaries.',
+      ],
+    },
+  },
+  {
     version: '0.23.0',
     date: '2026-08-09',
     highlight: {
