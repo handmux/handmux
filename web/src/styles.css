@@ -2797,7 +2797,8 @@ button.cmd-text { background: none; border: none; text-align: left; }
 /* Goal lifecycle entries are native Codex state projected into the transcript. Every entry opens the same
    Goal Bottom Sheet as the resident composer row; the raw internal Goal instruction is never shown. */
 .chat-goal-card {
-  align-self: flex-start; max-width: 92%; min-height: 44px; display: flex; align-items: center; gap: 9px;
+  flex: 0 0 auto; align-self: flex-start; max-width: 92%; min-height: 44px;
+  display: flex; align-items: center; gap: 9px;
   padding: 9px 10px; border: 1px solid var(--ct-chip-line); border-radius: 12px;
   background: var(--ct-chip); color: var(--ct-ink); text-align: left; white-space: normal;
   touch-action: manipulation;
