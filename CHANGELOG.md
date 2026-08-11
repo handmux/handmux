@@ -22,6 +22,7 @@ All notable changes to handmux. Format follows [Keep a Changelog](https://keepac
 
 - 对话与终端使用同一套严格的文件识别规则；普通的“开始/暂停”等斜杠文字和未识别的 Markdown 目标不再高亮或允许点击。
 - 修复用户发送消息后，实时回复偶尔显示在用户消息上方、直到切换页面才恢复的问题；临时消息现在始终位于对应回合回复之前。
+- 修复 Goal 与其他工具在同一批次结束时，“目标已阻塞”等终态卡片可能在服务重启后消失的问题；恢复后的目标正文继续按最多三行展示。
 - `~/.handmux` 中的鉴权状态、CLI 配置、Push、预览、通知、更新缓存、Hook 与 Usage 快照统一使用私有权限和原子替换，并在读取旧文件时修复历史宽松权限；自定义配置路径不会修改不属于 Handmux 的共享父目录。
 - Supervisor 启动参数和系统自启动文件不再包含 Token、VAPID 私钥或语音密钥；完整配置改从 `0600` 私有文件读取。
 - Supervisor 现在分别维护 Server 与 Tunnel 的进程阶段和重启退避；Server 退出会立即撤销就绪状态和 PID，不再让一个子进程的连续失败拖慢另一个子进程，并改为校验 `/health/ready` 的 Workspace、Codex 与 Browser Worker 状态，而不是仅检查 TCP 端口。

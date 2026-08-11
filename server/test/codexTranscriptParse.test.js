@@ -107,6 +107,42 @@ describe('Codex rollout transcript', () => {
     expect(parsed[0].tool).toBeUndefined();
   });
 
+  it('restores a terminal Goal when exec persists several results as separate blocks', () => {
+    const goal = {
+      threadId: 'thread-1',
+      objective: 'Review every change since the previous public release and prepare an interim release',
+      status: 'blocked', tokensUsed: 1007347, timeUsedSeconds: 8753,
+      createdAt: 10, updatedAt: 20,
+    };
+    const parsed = parseCodexTranscript([
+      row({
+        type: 'custom_tool_call', name: 'exec', call_id: 'goal-blocked',
+        input: [
+          'const status = await tools.exec_command({cmd:"git status --short"});',
+          'text(status);',
+          'const result = await tools.update_goal({status:"blocked"});',
+          'text(result);',
+        ].join('\n'),
+        internal_chat_message_metadata_passthrough: { turn_id: 'turn-goal' },
+      }),
+      row({
+        type: 'custom_tool_call_output', call_id: 'goal-blocked',
+        output: [
+          { type: 'input_text', text: 'Script completed\nWall time 0.1 seconds\nOutput:\n' },
+          { type: 'input_text', text: JSON.stringify({ exit_code: 0, output: '' }) },
+          { type: 'input_text', text: JSON.stringify({ goal, remainingTokens: null }) },
+        ],
+      }),
+    ]);
+
+    expect(parsed).toHaveLength(2);
+    expect(parsed[0].tool).toMatchObject({ name: 'exec_command', outcome: 'success' });
+    expect(parsed[1]).toMatchObject({
+      id: 'codex-goal:10:blocked', type: 'goal', event: 'blocked', turnId: 'turn-goal', goal,
+    });
+    expect(parsed[1].tool).toBeUndefined();
+  });
+
   it('keeps every tool in durable rollout order instead of the incomplete App Server snapshot', () => {
     const script = [
       'const first = await tools.exec_command({"cmd":"pwd"});',

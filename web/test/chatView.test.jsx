@@ -868,6 +868,24 @@ describe('ChatView', () => {
     expect(sheet.querySelector('.codex-goal-actions')).toBeNull();
   });
 
+  it('renders a restored blocked Goal with the shared three-line objective layout', async () => {
+    const objective = 'Review every change since the previous public release, verify the full release gate, and keep the original objective visible after reconnecting';
+    mockTranscript([{
+      k: 0, i: 0, role: 'assistant', type: 'goal', event: 'blocked', turnId: 'turn-goal',
+      goal: {
+        objective, status: 'blocked', createdAt: 10, updatedAt: 20,
+        tokensUsed: 500, timeUsedSeconds: 12,
+      },
+    }]);
+
+    render(<ChatView pane="%0" agent="codex" kind="done" />);
+
+    const card = await screen.findByRole('button', { name: new RegExp(`目标已阻塞.*${objective}`) });
+    expect(card.classList.contains('is-blocked')).toBe(true);
+    expect(card.querySelector('.chat-goal-copy > span').textContent).toBe(objective);
+    expect(styles).toMatch(/\.chat-goal-copy > span\s*\{[^}]*-webkit-line-clamp:\s*3/);
+  });
+
   it('keeps a live terminal Goal card inside the turn that completed it', async () => {
     let emit;
     api.streamCodexMessages.mockImplementation((_pane, { signal, onEvent }) => {

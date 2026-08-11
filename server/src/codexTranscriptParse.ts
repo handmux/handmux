@@ -366,12 +366,21 @@ function extractCustomCalls(script: string): CustomCall[] | null {
   return calls.length ? calls : null;
 }
 
-function structuredResults(value: unknown): unknown[] | null {
+function structuredResults(value: unknown, expectedCount: number): unknown[] | null {
   let parsed = value;
   if (typeof parsed === 'string') {
     try { parsed = JSON.parse(parsed); } catch { return null; }
   }
   if (Array.isArray(parsed)) {
+    // `functions.exec` may persist one content block per `text(...)` call. Preserve those blocks as
+    // individual tool results when they line up with the extracted calls; flattening the final Goal
+    // response with Object.values() would otherwise discard its enclosing `goal` field.
+    const emitted = parsed.flatMap((item) => {
+      const text = isRecord(item) ? item.text : item;
+      if (typeof text !== 'string') return [];
+      try { return [JSON.parse(text)]; } catch { return []; }
+    });
+    if (emitted.length === expectedCount) return emitted;
     for (let i = parsed.length - 1; i >= 0; i--) {
       const text = parsed[i] && typeof parsed[i] === 'object' ? parsed[i].text : null;
       if (typeof text !== 'string') continue;
@@ -420,7 +429,7 @@ function applyGoalOutput(message: CodexTranscriptMessage, value: unknown): boole
 function applyCustomOutput(messages: CodexTranscriptMessage[], value: unknown): void {
   const onlyMessage = messages[0];
   if (messages.length === 1 && onlyMessage?.type === 'goal' && applyGoalOutput(onlyMessage, value)) return;
-  const values = structuredResults(value);
+  const values = structuredResults(value, messages.length);
   if (values && values.length === messages.length) {
     messages.forEach((message, index) => {
       if (message.type === 'goal') { applyGoalOutput(message, values[index]); return; }
