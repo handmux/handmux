@@ -4,6 +4,8 @@ All notable changes to handmux. Format follows [Keep a Changelog](https://keepac
 
 ## [Unreleased]
 
+## [0.24.0] - 2026-08-11
+
 ### Added
 
 - 终端与对话现可预览任意扩展名的文本文件；打开前按内容识别文本，二进制文件仍保持不可预览。
