@@ -883,7 +883,8 @@ describe('ChatView', () => {
     const card = await screen.findByRole('button', { name: new RegExp(`目标已阻塞.*${objective}`) });
     expect(card.classList.contains('is-blocked')).toBe(true);
     expect(card.querySelector('.chat-goal-copy > span').textContent).toBe(objective);
-    expect(styles).toMatch(/\.chat-goal-copy > span\s*\{[^}]*-webkit-line-clamp:\s*3/);
+    expect(styles).toMatch(/\.chat-goal-card\s*\{[^}]*white-space:\s*normal/);
+    expect(styles).toMatch(/\.chat-goal-copy > span\s*\{[^}]*white-space:\s*normal[^}]*-webkit-line-clamp:\s*3/);
   });
 
   it('keeps a live terminal Goal card inside the turn that completed it', async () => {

@@ -2799,7 +2799,8 @@ button.cmd-text { background: none; border: none; text-align: left; }
 .chat-goal-card {
   align-self: flex-start; max-width: 92%; min-height: 44px; display: flex; align-items: center; gap: 9px;
   padding: 9px 10px; border: 1px solid var(--ct-chip-line); border-radius: 12px;
-  background: var(--ct-chip); color: var(--ct-ink); text-align: left; touch-action: manipulation;
+  background: var(--ct-chip); color: var(--ct-ink); text-align: left; white-space: normal;
+  touch-action: manipulation;
 }
 .chat-goal-card.is-user {
   align-self: flex-end; background: var(--ct-me-bg); color: var(--ct-me-ink);
@@ -2813,7 +2814,8 @@ button.cmd-text { background: none; border: none; text-align: left; }
 .chat-goal-copy strong { font-size: 12px; line-height: 16px; }
 .chat-goal-copy > span {
   display: -webkit-box; overflow: hidden; color: var(--ct-muted); font-size: 11.5px; line-height: 16px;
-  overflow-wrap: anywhere; -webkit-box-orient: vertical; -webkit-line-clamp: 3;
+  white-space: normal; overflow-wrap: anywhere; word-break: break-word;
+  -webkit-box-orient: vertical; -webkit-line-clamp: 3;
 }
 .chat-goal-card.is-complete .codex-goal-icon { color: #34c759; }
 .chat-goal-card.is-blocked .codex-goal-icon,
