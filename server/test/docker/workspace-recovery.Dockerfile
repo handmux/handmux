@@ -16,6 +16,7 @@ RUN npm ci
 COPY tsconfig.json tsconfig.build.json ./
 COPY src ./src
 COPY bin ./bin
+COPY connectors ./connectors
 COPY hooks ./hooks
 COPY scripts/build-server.mjs ./scripts/build-server.mjs
 RUN npm run build:server

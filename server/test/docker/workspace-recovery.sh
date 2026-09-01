@@ -461,7 +461,7 @@ async function phaseB() {
       paneId: '44444444-4444-4444-8444-444444444422',
       name: 'agent-missing-cli',
       transcriptPath: FIXTURES.claude,
-    }), /binary not found.*shell was restored|shell was restored.*binary not found/i);
+    }), /executable is unavailable.*shell was restored|shell was restored.*executable unavailable/i);
   } finally {
     await fsp.rename(savedClaudeBinary, claudeBinary);
   }
