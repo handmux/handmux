@@ -19,6 +19,22 @@ export interface ChangelogEntry {
 // `entryId`/`LATEST_RELEASE` use `version` when present, else `date`, as the stable unread-dot id.
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '0.25.1',
+    date: '2026-09-02',
+    highlight: {
+      zh: '修复 Codex 幽灵任务与对话空白',
+      en: 'Fixed Codex ghost tasks and blank chats',
+    },
+    items: {
+      zh: [
+        '修复 Codex 自动生成标题或回顾摘要的临时线程被误认成当前会话，导致收件箱批量出现无法完成的幽灵“进行中”、对话页报错后空白的问题；服务重启后会重新绑定真实会话并自动撤销旧假状态。',
+      ],
+      en: [
+        'Fixed Codex title and catch-up helper threads being mistaken for the current conversation, which created ghost “Working” inbox entries and left chat blank after an error. A Server restart now rebinds the real conversation and automatically withdraws stale false states.',
+      ],
+    },
+  },
+  {
     version: '0.25.0',
     date: '2026-09-01',
     highlight: {
