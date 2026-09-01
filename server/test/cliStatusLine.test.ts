@@ -49,6 +49,12 @@ describe('statusLineStatus', () => {
     installStatusLine(home, { srcDir: SRC, usageFile: usageFile(home) });
     expect(statusLineStatus(home)).toBe('ours');
   });
+  it("'foreign' when the user composes our capturer with their renderer", () => {
+    const home = withClaude('sl-');
+    const composed = `HANDMUX_STATUS_TEE=1 node ${path.join(home, '.claude/hooks/handmux-statusline.cjs')} ${usageFile(home)} | bash ~/.claude/mystatus.sh`;
+    writeSettings(home, { statusLine: { type: 'command', command: composed } });
+    expect(statusLineStatus(home)).toBe('foreign');
+  });
 });
 
 describe('installStatusLine', () => {
@@ -105,6 +111,18 @@ describe('uninstallStatusLine', () => {
     uninstallStatusLine(home);
     expect(statusLine(home).command).toBe('bash ~/.claude/mystatus.sh');
   });
+
+  it('preserves a composed user renderer and the capturer it references', () => {
+    const home = withClaude('sl-');
+    const script = path.join(home, '.claude/hooks/handmux-statusline.cjs');
+    const composed = `HANDMUX_STATUS_TEE=1 node ${script} ${usageFile(home)} | bash ~/.claude/mystatus.sh`;
+    writeSettings(home, { statusLine: { type: 'command', command: composed } });
+    fs.mkdirSync(path.dirname(script), { recursive: true });
+    fs.writeFileSync(script, 'capturer');
+    uninstallStatusLine(home);
+    expect(statusLine(home).command).toBe(composed);
+    expect(fs.existsSync(script)).toBe(true);
+  });
 });
 
 describe('refreshStatusLineScript (upgrade path — refresh the on-disk capturer without touching settings)', () => {
@@ -120,16 +138,16 @@ describe('refreshStatusLineScript (upgrade path — refresh the on-disk capturer
     expect(statusLine(home).command).toBe(before); // settings untouched
   });
 
-  it('refreshes the script but KEEPS a composed (TEE) statusline command intact', () => {
+  it('does not mutate a user-owned composed (TEE) statusline', () => {
     const home = withClaude('sl-');
-    // user composed our capturer into their own renderer — reads as 'ours' via the mark, must not be rewritten
+    // The pipeline includes the user's renderer, so the complete command is foreign/user-owned.
     const composed = 'HANDMUX_STATUS_TEE=1 node ~/.claude/hooks/handmux-statusline.cjs ~/.handmux/claude-usage.json | bash ~/.claude/mystatus.sh';
     writeSettings(home, { statusLine: { type: 'command', command: composed } });
     fs.mkdirSync(path.dirname(scriptPath(home)), { recursive: true });
     fs.writeFileSync(scriptPath(home), '// stale');
-    expect(statusLineStatus(home)).toBe('ours');
-    expect(refreshStatusLineScript(home, { srcDir: SRC })).toBe(true);
-    expect(fs.readFileSync(scriptPath(home), 'utf8')).toContain('handmux statusLine capturer');
+    expect(statusLineStatus(home)).toBe('foreign');
+    expect(refreshStatusLineScript(home, { srcDir: SRC })).toBe(false);
+    expect(fs.readFileSync(scriptPath(home), 'utf8')).toBe('// stale');
     expect(statusLine(home).command).toBe(composed); // downstream renderer preserved
   });
 

@@ -14,10 +14,14 @@ describe('findDocLinks', () => {
     expect(findDocLinks('open report.html.').map((l) => l.path)).toEqual(['report.html']);
     expect(findDocLinks('(see /x/y.md)').map((l) => l.path)).toEqual(['/x/y.md']);
   });
-  it('finds paths with arbitrary extensions but ignores plain prose', () => {
-    expect(findDocLinks('archive.mdx and data.bin').map((l) => l.path))
-      .toEqual(['archive.mdx', 'data.bin']);
+  it('requires path evidence for arbitrary extensions but keeps common bare filenames', () => {
+    expect(findDocLinks('archive.mdx, data.bin, artifacts/data.bin and ./raw.unknown').map((l) => l.path))
+      .toEqual(['archive.mdx', 'artifacts/data.bin', './raw.unknown']);
     expect(findDocLinks('no links here')).toEqual([]);
+  });
+  it('does not mistake period-joined prose for a bare filename', () => {
+    expect(findDocLinks('已经完成.接下来继续')).toEqual([]);
+    expect(findDocLinks('finished.Next comes prose; e.g. this')).toEqual([]);
   });
   it('finds config, dotfile, and extensionless paths', () => {
     expect(findDocLinks('edit config.toml, .env and ./NOTICE').map((l) => l.path))

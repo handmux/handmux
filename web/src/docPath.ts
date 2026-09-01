@@ -15,6 +15,16 @@ export const IMAGE_LINK_EXTS = ['png', 'jpg', 'jpeg', 'jfif', 'gif', 'webp', 'sv
 const FILE_TOKEN_RE = new RegExp(`[^${DELIMS}]+`, 'g');
 const RESERVED_BARE_EXT = new Set([...DOC_LINK_EXTS, ...IMAGE_LINK_EXTS].map((ext) => `.${ext}`));
 const EXTENSIONLESS_NAMES = /^(?:readme|license|makefile|dockerfile|gemfile|rakefile|procfile|notice)$/i;
+// A bare `name.ext` has no path syntax to distinguish it from prose joined by a period. Keep the
+// automatic case conservative; arbitrary extensions remain available when the token carries explicit
+// path evidence (`dir/file.unknown`, `./file.unknown`, `/...`).
+const BARE_FILE_EXTS = new Set([
+  ...DOC_LINK_EXTS, ...IMAGE_LINK_EXTS,
+  'mdx', 'rst', 'csv', 'tsv', 'json', 'jsonl', 'yaml', 'yml', 'toml', 'ini', 'conf', 'xml',
+  'css', 'scss', 'sass', 'less', 'js', 'mjs', 'cjs', 'jsx', 'ts', 'tsx', 'vue', 'svelte',
+  'py', 'pyi', 'rb', 'go', 'rs', 'java', 'kt', 'kts', 'c', 'cc', 'cpp', 'cxx', 'h', 'hpp',
+  'cs', 'swift', 'php', 'sql', 'graphql', 'gql', 'proto', 'properties', 'gradle', 'lock',
+]);
 
 export interface DocumentPathLink {
   start: number;
@@ -36,13 +46,14 @@ function looksLikeFilePath(value: string): boolean {
   if (value.includes('/')) {
     const leaf = value.slice(value.lastIndexOf('/') + 1);
     return (value.startsWith('/') && value.indexOf('/', 1) >= 0)
-      || (leaf.startsWith('.') && leaf.length > 1)
+      || /^\.[A-Za-z0-9][A-Za-z0-9._-]*$/.test(leaf)
       || EXTENSIONLESS_NAMES.test(leaf)
       || /^[^.][^/]*\.[^.]+$/.test(leaf);
   }
-  if (value.startsWith('.') && value.length > 1) return true;   // dotfiles such as .env
+  if (/^\.[A-Za-z0-9][A-Za-z0-9._-]*$/.test(value)) return true; // dotfiles such as .env
   if (EXTENSIONLESS_NAMES.test(value)) return true;
-  return /^[^.][^/]*\.[^.]+$/.test(value);                     // arbitrary file extension
+  const extension = /\.([A-Za-z0-9]+)$/.exec(value)?.[1]?.toLowerCase();
+  return extension !== undefined && BARE_FILE_EXTS.has(extension);
 }
 
 // Find every doc-path link in one line of text → [{ start, end, path }] (end exclusive).

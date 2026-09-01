@@ -8,8 +8,13 @@ import { createApiRouter } from './httpApi.js';
 import { loadUploadExts } from './uploadTypes.js';
 import { createClaudeEvents } from './claudeEvents.js';
 import { syncHooks } from './cli/claudeHooks.js';
+import { syncPiExtension } from './cli/piExtension.js';
 import { removeLegacyCodexHooks } from './cli/legacyCodexHooks.js';
-import { claudeStatePath, codexOutboxPath } from './cli/state.js';
+import {
+  agentRuntimeDirectoryPath,
+  claudeStatePath,
+  codexOutboxPath,
+} from './cli/state.js';
 import * as commands from './tmux/commands.js';
 import * as push from './push.js';
 import { cacheControlFor } from './staticCache.js';
@@ -27,10 +32,22 @@ import { createWorkspaceRuntime } from './workspace/runtime.js';
 import { createBrowserWorkerClient } from './browser/workerClient.js';
 import { createTerminalStream } from './terminalStream.js';
 import { createCodexAppServer } from './codexAppServer.js';
+import { migrateLegacyCodexOutbox } from './agent-runtime/migrateLegacyCodexOutbox.js';
 import { apiErrorBoundary, apiRequestContext } from './apiErrors.js';
-import { PrivateStateStore } from './privateStateStore.js';
 import { RuntimeHealth } from './healthProtocol.js';
 import { healthRoutes } from './routes/health.js';
+import { createBuiltinAgentRuntime } from './agent-runtime/builtinRuntime.js';
+import { interruptPane, sendPaneChoice, sendPanePrompt } from './paneInput.js';
+import {
+  createLocalAgentProcessContext,
+  TmuxAgentPaneSource,
+} from './agent-runtime/tmuxRuntime.js';
+import { InboxPushProjection } from './agent-runtime/inboxPushProjection.js';
+import { defaultGit } from './git.js';
+import { createProjectTaskRuntime } from './projectTask/runtime.js';
+import { clearCodexConversationThroughTui } from './agents/codexTerminalControl.js';
+import { ApiAccountService, apiAccountsPath } from './apiAccounts.js';
+import { ClaudeHookBridgeConnector } from '../connectors/claude/index.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
@@ -43,8 +60,21 @@ const cfg = loadConfig();
 const token = loadToken();
 const uploadExts = loadUploadExts();
 const home = homedir();
+const apiAccounts = new ApiAccountService({ file: apiAccountsPath(home) });
 const previewDomain = process.env.HANDMUX_PREVIEW_DOMAIN || null;
 const health = new RuntimeHealth({ browserRequired: Boolean(previewDomain) });
+const projectTask = await createProjectTaskRuntime({
+  home,
+  storeOptions: {
+    resolveRepositoryRoot: async (rootPath) => {
+      const result = await defaultGit.worktree(rootPath);
+      return 'error' in result ? null : result.worktree?.path ?? null;
+    },
+  },
+});
+if (projectTask.status().status === 'unavailable') {
+  console.warn(`[handmux] Project Task unavailable: ${projectTask.status().error?.message ?? 'unknown error'}`);
+}
 
 // One writer set is shared by background capture today and the restore runtime added on top of it. The
 // lock is filesystem-backed because the CLI may restore while this daemon is alive in another process.
@@ -60,6 +90,19 @@ const observeEnvironment = createEnvironmentProvider({
 });
 const stateFile = process.env.CLAUDE_STATE_FILE || claudeStatePath(home);
 let codexApp: ReturnType<typeof createCodexAppServer> | null = null;
+const agentRuntimeDirectory = agentRuntimeDirectoryPath(home);
+const legacyCodexOutbox = codexOutboxPath(home);
+let conversationStartupBlockReason: string | undefined;
+try {
+  migrateLegacyCodexOutbox(
+    legacyCodexOutbox,
+    path.join(agentRuntimeDirectory, 'conversation-state.json'),
+  );
+} catch (error) {
+  const detail = error instanceof Error ? error.message : String(error);
+  conversationStartupBlockReason = `Codex queue migration requires attention: ${detail}`;
+  console.warn(`[handmux] Conversation dispatch disabled: ${conversationStartupBlockReason}`);
+}
 const workspaceBackground = createWorkspaceBackground({
   store: workspaceStore,
   tmux: workspaceTmux,
@@ -81,13 +124,16 @@ const workspace = createWorkspaceRuntime({
 let events: ReturnType<typeof createClaudeEvents> | null = null;
 codexApp = createCodexAppServer({
   home,
-  outboxStore: new PrivateStateStore(codexOutboxPath(home)),
+  // Conversation Core is the only queue owner. The legacy file is migrated above and retained as a backup.
+  outboxStore: null,
   onStateChange: () => {
     if (!events) return;
     events.getStates().then(() => workspace.requestReconcile()).catch(() => {});
   },
 });
-events = createClaudeEvents({ commands, push, codexApp, file: stateFile, onStateChange: workspace.requestReconcile });
+// Legacy Hook watching still drives workspace reconciliation and compatibility reads. Canonical Agent
+// notifications are delivered below from Inbox Core, so this reader no longer owns Web Push side effects.
+events = createClaudeEvents({ commands, codexApp, file: stateFile, onStateChange: workspace.requestReconcile });
 events.start();
 try {
   codexApp.start();
@@ -95,6 +141,59 @@ try {
 } catch {
   health.set('codex', 'degraded', 'codex-start-failed');
 }
+const agentPanes = new TmuxAgentPaneSource({ commands });
+const agentProcess = createLocalAgentProcessContext();
+const agentRuntime = createBuiltinAgentRuntime({
+  home,
+  panes: agentPanes,
+  process: agentProcess,
+  stateDirectory: agentRuntimeDirectory,
+  ...(conversationStartupBlockReason === undefined ? {} : { conversationStartupBlockReason }),
+  claudeEvents: events,
+  claudeConversationControl: {
+    sendPrompt: (paneId, text, guard) => sendPanePrompt(commands, paneId, text, guard),
+    interrupt: (paneId) => interruptPane(commands, paneId),
+  },
+  claudeInteractionControl: {
+    capturePlain: (paneId) => commands.capturePlain(paneId),
+    sendChoice: (paneId, choice) => sendPaneChoice(commands, paneId, choice),
+    pendingKind: (paneId) => events?.paneKind(paneId) ?? null,
+  },
+  codexApp,
+  codexActivationCommands: {
+    sendKey: (pane, key) => commands.sendKey(pane, key),
+    capturePlain: (pane) => commands.capturePlain(pane),
+    runPaneCommand: (pane, command) => commands.runPaneCommand(pane, command),
+  },
+  codexClear: async (pane, threadId) => {
+    await clearCodexConversationThroughTui(codexApp, commands, pane, threadId);
+  },
+});
+const claudeInboxBridge = new ClaudeHookBridgeConnector({
+  socketPath: agentRuntime.socketPath,
+  credentialFile: path.join(agentRuntimeDirectory, 'bridge-credential.json'),
+  stateDirectory: path.join(agentRuntimeDirectory, 'connectors', 'claude'),
+  hookStateFile: stateFile,
+  eventDirectory: `${stateFile}.events`,
+  panes: agentPanes,
+  process: agentProcess,
+  logger: (message, error) => {
+    const detail = error === undefined
+      ? '' : `: ${error instanceof Error ? error.message : String(error)}`;
+    console.warn(`[handmux] ${message}${detail}`);
+  },
+});
+const inboxPush = new InboxPushProjection({
+  inbox: agentRuntime.inbox,
+  runs: agentRuntime.runs,
+  panes: agentPanes,
+  push,
+});
+inboxPush.start();
+agentRuntime.start().catch((error) => {
+  console.warn(`[handmux] Agent Runtime unavailable: ${error instanceof Error ? error.message : String(error)}`);
+});
+claudeInboxBridge.start();
 workspace.start().catch(() => {});
 
 // Keep an already-opted-in user's Claude hooks in step with this handmux version on restart: newly-added
@@ -107,6 +206,11 @@ try {
     stateFile,
   });
 } catch { /* best effort — hook sync never fails startup */ }
+// Keep an explicitly installed Pi wrapper pointed at this package version (notably across Homebrew
+// Cellar upgrades). Absent or foreign extensions are untouched; this never opts a user in silently.
+try {
+  syncPiExtension(home, { entryFile: path.resolve(here, '../connectors/pi/index.js') });
+} catch { /* best effort — Pi integration never fails startup */ }
 // Versions before App Server support installed a marked Handmux block under ~/.codex. Remove only that
 // exact legacy block and Handmux-owned files; all user Codex configuration and third-party hooks remain.
 try { removeLegacyCodexHooks(home); } catch { /* best effort — migration never fails startup */ }
@@ -138,7 +242,8 @@ app.use(healthRoutes({
 app.use(browserWorker.publicHandler);
 app.use('/api/browser-proxy', apiRequestContext(), expressAuth(token), express.json(), browserWorker.apiHandler);
 app.use('/api', createApiRouter({
-  token, events, uploadExts, previews, shortcuts: cfg.shortcuts, workspace, previewDomain, codexApp,
+  token, events, uploadExts, previews, shortcuts: cfg.shortcuts, workspace, previewDomain,
+  agentRuntime, projectTask, apiAccounts,
 }));
 app.use('/preview', preview.router);
 app.use(preview.refererFallback);
@@ -201,7 +306,13 @@ const shutdown = createGracefulShutdown({ events, workspace, browser: browserWor
 const handleSignal = () => {
   terminalStream.close();
   codexApp.close();
-  shutdown().catch(() => {});
+  inboxPush.close();
+  Promise.all([
+    claudeInboxBridge.close(),
+    projectTask.close(),
+    agentRuntime.close(),
+    shutdown(),
+  ]).catch(() => {});
 };
 process.on('SIGINT', handleSignal);
 process.on('SIGTERM', handleSignal);

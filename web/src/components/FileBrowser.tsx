@@ -53,6 +53,7 @@ export interface FileBrowserProps {
   pickMode?: boolean;
   allowMkdir?: boolean;
   onPick?: (dir: string) => void | Promise<void>;
+  pickDisabled?: boolean;
   refreshKey?: number;
   overlayActive?: boolean;
 }
@@ -156,6 +157,7 @@ export default function FileBrowser({
   pickMode = false,
   allowMkdir = !pickMode,
   onPick,
+  pickDisabled = false,
   refreshKey = 0,
   overlayActive = true,
 }: FileBrowserProps) {
@@ -549,7 +551,8 @@ export default function FileBrowser({
       </div>
       {pickMode && dir && (
         <div className="browse-pick-bar">
-          <button className="browse-pick-confirm" onClick={() => onPick?.(dir.path)}>
+          <button className="browse-pick-confirm" disabled={pickDisabled}
+            onClick={() => onPick?.(dir.path)}>
             {t('filebrowser.pickThisDir', { path: toRel(dir.path, dir.home) ? `~/${toRel(dir.path, dir.home)}` : '~' })}
           </button>
         </div>

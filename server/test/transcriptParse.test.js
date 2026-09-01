@@ -95,16 +95,19 @@ describe('parseTranscript', () => {
     expect(msgs.map((m) => m.text)).toEqual(['留']);
   });
 
-  it('drops isMeta scaffolding; turns isCompactSummary into a centered compact divider marker', () => {
+  it('drops isMeta scaffolding and keeps a compact summary only as marker detail data', () => {
     const msgs = parseTranscript([
       line({ type: 'user', isMeta: true, message: { role: 'user', content: 'Base directory for this skill: /x' } }),
       line({ type: 'user', isCompactSummary: true, timestamp: '2026-07-17T01:11:58.618Z', message: { role: 'user', content: 'This session is being continued…' } }),
       line({ type: 'user', message: { role: 'user', content: '真的问题' } }),
     ]);
-    // isMeta dropped entirely; the compaction wall becomes a marker (no summary text), then the real turn
+    // isMeta is dropped; the compaction wall retains its exact summary for the on-demand detail sheet.
     expect(msgs.map((m) => m.type)).toEqual(['compact', 'text']);
-    expect(msgs[0]).toMatchObject({ type: 'compact', ts: '2026-07-17T01:11:58.618Z' });
-    expect(msgs[0].text).toBeUndefined(); // the huge summary text is NOT rendered
+    expect(msgs[0]).toMatchObject({
+      type: 'compact', ts: '2026-07-17T01:11:58.618Z',
+      summary: 'This session is being continued…',
+    });
+    expect(msgs[0].text).toBeUndefined(); // it is never projected as a normal chat bubble
     expect(msgs[1].text).toBe('真的问题');
   });
 

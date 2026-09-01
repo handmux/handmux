@@ -24,7 +24,7 @@ describe('global Overlay layers', () => {
   it('routes representative cross-surface selectors through semantic tokens', () => {
     for (const selector of [
       '.drawer', '.settings-backdrop', '.cmd-backdrop', '.workspace-restore-backdrop',
-      '.file-sheet', '.tool-sheet-backdrop', '.codex-plan-backdrop', '.cc-queue-dialog-backdrop',
+      '.file-sheet', '.tool-sheet-backdrop', '.conversation-plan-backdrop', '.cc-queue-dialog-backdrop',
       '.doclink-backdrop', '.upload-overlay',
     ]) {
       const escaped = selector.replace('.', '\\.');

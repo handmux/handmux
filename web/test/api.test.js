@@ -1,78 +1,110 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { getHistory, getPanes, createSession, createWindow, renameSession, renameWindow, deleteWindow, swapWindows, createDir, UnauthorizedError, ApiError, fetchDoc, fetchDir, fetchTranscript, signAsr, sendInput, parseSseFrames, streamCodexMessages, getCodexSession, sendCodexMessage, getCodexGoal } from '../src/api.js';
+import { getHistory, getPanes, createSession, createWindow, renameSession, renameWindow, deleteWindow, swapWindows, createDir, UnauthorizedError, ApiError, fetchDoc, fetchDir, signAsr, sendInput, getAgentCatalog, getAgentDiscovery, markAgentTerminalNotificationsRead, gitWorktree } from '../src/api.js';
 import { createPreview, getPreviews, deletePreview, previewUrl, fetchImageUrl } from '../src/api.js';
-import { projectCodexStreamEvent } from '../../server/src/codexStreamProtocol.js';
 
 afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); vi.useRealTimers(); });
 
 const jsonRes = (status, body) => ({ status, ok: status >= 200 && status < 300, json: async () => body });
 
-describe('Codex message stream', () => {
-  it('parses complete SSE frames and retains a split trailing frame', () => {
-    expect(parseSseFrames('data: {"type":"ready"}\n\ndata: {"type":"events"'))
-      .toEqual({ frames: ['{"type":"ready"}'], rest: 'data: {"type":"events"' });
-  });
-
-  it('keeps bearer auth and expands batched SSE payloads in order', async () => {
-    vi.stubGlobal('localStorage', { getItem: () => 'stream-token' });
-    const encoder = new TextEncoder();
-    const delta = projectCodexStreamEvent({
-      type: 'delta', threadId: 'thread-1', turnId: 'turn-1', itemId: 'item-1', delta: '你',
-    }, 1);
-    const completed = projectCodexStreamEvent({
-      type: 'completed', threadId: 'thread-1', turnId: 'turn-1', itemId: 'item-1', text: '你好',
-    }, 2);
-    const snapshot = {
-      type: 'conversationSnapshot', threadId: 'thread-1', cursor: 0,
-      messages: [{ k: 0, type: 'text', role: 'user', text: '开始' }],
-    };
-    const chunks = [
-      'data: {"type":"ready","threadId":"thread-1"}\n\n',
-      `data: ${JSON.stringify({ type: 'events', events: [snapshot, delta, { type: 'invalid' }, completed] })}\n\n`,
-    ].map((value) => encoder.encode(value));
-    const reader = {
-      read: vi.fn(async () => (chunks.length ? { done: false, value: chunks.shift() } : { done: true })),
-      releaseLock: vi.fn(),
-    };
-    const fetchMock = vi.fn(async () => ({
-      status: 200, ok: true, body: { getReader: () => reader },
-    }));
-    vi.stubGlobal('fetch', fetchMock);
-    const events = [];
-
-    await streamCodexMessages('%7', { onEvent: (event) => events.push(event) });
-
-    expect(fetchMock).toHaveBeenCalledWith('/api/codex/stream?pane=%257', expect.objectContaining({
-      headers: expect.objectContaining({ Authorization: 'Bearer stream-token' }),
-    }));
-    expect(events).toEqual([
-      { type: 'ready', threadId: 'thread-1' },
-      snapshot,
-      delta,
-      completed,
-    ]);
-    expect(reader.releaseLock).toHaveBeenCalledOnce();
-  });
-
-  it('validates Codex tool and diff cards before returning a transcript page', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => jsonRes(200, { messages: [
-      { type: 'text', text: 'kept' },
-      { type: 'tool', tool: {
-        name: 'apply_patch', input: { file_path: 'src/a.ts' }, result: '', isError: false,
-        diff: { added: 1, removed: 0, hunks: null },
-      } },
-      { type: 'tool', tool: {
-        name: 'apply_patch', input: {}, result: '', isError: false,
-        diff: { added: '1', removed: 0, hunks: null },
-      } },
+describe('Agent capability catalog', () => {
+  it('validates descriptors at the network boundary and deduplicates ids', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => jsonRes(200, { adapters: [
+      {
+        id: 'claude', label: 'Claude Code', iconId: 'claude',
+        capabilities: { inbox: true, conversation: true, interaction: false, subscriptionUsage: true },
+      },
+      { id: 'bad id', label: 'Bad', capabilities: {} },
+      {
+        id: 'missing-usage', label: 'Missing usage capability',
+        capabilities: { inbox: true, conversation: true, interaction: false },
+      },
+      {
+        id: 'claude', label: 'Latest Claude',
+        capabilities: { inbox: true, conversation: false, interaction: false, subscriptionUsage: true },
+      },
+      {
+        id: 'pi', label: 'Pi',
+        capabilities: { inbox: true, conversation: true, interaction: false, subscriptionUsage: false },
+      },
     ] })));
+    await expect(getAgentCatalog()).resolves.toEqual([{
+      id: 'pi', label: 'Pi',
+      capabilities: { inbox: true, conversation: true, interaction: false, subscriptionUsage: false },
+    }]);
+  });
 
-    await expect(fetchTranscript('%1', { agent: 'codex' })).resolves.toMatchObject({
-      messages: [
-        { type: 'text', text: 'kept' },
-        { type: 'tool', tool: { name: 'apply_patch', diff: { added: 1 } } },
+  it('keeps only known, unambiguous pane attachments for capability control', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => jsonRes(200, {
+      adapters: [
+        { id: 'pi', label: 'Pi', capabilities: { inbox: true, conversation: true, interaction: false, subscriptionUsage: false } },
+        { id: 'codex', label: 'Codex', capabilities: {
+          inbox: true, conversation: true, conversationActivation: true,
+          conversationQueue: true,
+          interaction: true, subscriptionUsage: true,
+        }, capabilityMetadata: { conversation: { experimental: false } } },
       ],
+      runs: [
+        { agentId: 'pi', paneId: '%1', runId: 'pi-run', sessionId: 'pi-session' },
+        { agentId: 'unknown', paneId: '%2', runId: 'unknown-run' },
+        { agentId: 'codex', paneId: '%3', runId: 'codex-a', sessionId: 'thread-a' },
+        { agentId: 'codex', paneId: '%3', runId: 'codex-b', sessionId: 'thread-b' },
+      ],
+      health: [
+        { adapterId: 'codex', capability: 'inbox', availability: 'degraded', message: 'reconnecting' },
+        { adapterId: 'unknown', capability: 'inbox', availability: 'unavailable' },
+        { adapterId: 'pi', capability: 'inbox', availability: 'invalid' },
+      ],
+    })));
+
+    await expect(getAgentDiscovery()).resolves.toEqual({
+      descriptors: [
+        { id: 'pi', label: 'Pi', capabilities: { inbox: true, conversation: true, interaction: false, subscriptionUsage: false } },
+        { id: 'codex', label: 'Codex', capabilities: {
+          inbox: true, conversation: true, conversationActivation: true,
+          interaction: true, subscriptionUsage: true,
+        }, capabilityMetadata: { conversation: { experimental: false } } },
+      ],
+      runs: [{ agentId: 'pi', paneId: '%1', runId: 'pi-run', sessionId: 'pi-session' }],
+      health: [{
+        adapterId: 'codex', capability: 'inbox', availability: 'degraded', message: 'reconnecting',
+      }],
     });
+  });
+});
+
+describe('Agent Inbox read ledger', () => {
+  it('marks bounded canonical terminal notification ids and parses the receipt', async () => {
+    const fetch = vi.fn(async () => jsonRes(200, {
+      serviceEpoch: 'epoch', revision: 2, markedIds: ['notification-1'], readAt: 2_000,
+    }));
+    vi.stubGlobal('fetch', fetch);
+    await expect(markAgentTerminalNotificationsRead(['notification-1'])).resolves.toEqual({
+      markedIds: ['notification-1'], readAt: 2_000,
+    });
+    expect(JSON.parse(fetch.mock.calls[0][1].body)).toEqual({ notificationIds: ['notification-1'] });
+    await expect(markAgentTerminalNotificationsRead([])).rejects.toBeInstanceOf(TypeError);
+    expect(fetch).toHaveBeenCalledOnce();
+  });
+});
+
+describe('Git worktree lookup', () => {
+  it('parses the worktree identity from a cwd without retaining client state', async () => {
+    const fetch = vi.fn(async () => jsonRes(200, {
+      worktree: { path: '/repo/.worktrees/agent-runtime-v1' },
+    }));
+    vi.stubGlobal('fetch', fetch);
+
+    await expect(gitWorktree('/repo/.worktrees/agent-runtime-v1/web')).resolves.toEqual({
+      path: '/repo/.worktrees/agent-runtime-v1',
+    });
+    expect(fetch.mock.calls[0][0]).toBe(
+      '/api/git/worktree?dir=%2Frepo%2F.worktrees%2Fagent-runtime-v1%2Fweb',
+    );
+  });
+
+  it('treats a null or malformed result as no worktree', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => jsonRes(200, { worktree: { path: null } })));
+    await expect(gitWorktree('/repo')).resolves.toBeNull();
   });
 });
 
@@ -102,50 +134,6 @@ describe('api request timeout', () => {
   it('returns the json on a normal response (timeout cleared, no abort)', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => jsonRes(200, { ansi: 'x', width: 80, height: 24 })));
     await expect(getHistory('%1')).resolves.toEqual({ ansi: 'x', width: 80, height: 24 });
-  });
-
-  it('sends the stable Codex request id used to reconcile an uncertain response', async () => {
-    const item = {
-      id: 'queued-1', text: 'next turn', createdAt: 10, requestId: 'codex-send-request-1',
-    };
-    const fetchMock = vi.fn(async () => jsonRes(200, { queued: true, item }));
-    vi.stubGlobal('fetch', fetchMock);
-
-    await expect(sendCodexMessage('%1', 'next turn', 'codex-send-request-1'))
-      .resolves.toEqual({ queued: true, item });
-
-    expect(fetchMock).toHaveBeenCalledWith('/api/codex/send', expect.objectContaining({
-      method: 'POST',
-      body: JSON.stringify({ pane: '%1', text: 'next turn', requestId: 'codex-send-request-1' }),
-    }));
-  });
-
-  it('rejects a malformed Codex send acknowledgement', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => jsonRes(200, {
-      queued: true, item: { id: 'queued-1', text: 'next turn', createdAt: '10' },
-    })));
-
-    await expect(sendCodexMessage('%1', 'next turn'))
-      .rejects.toThrow('Codex send returned an invalid response');
-  });
-
-  it('keeps only valid durable queue items in the Codex session projection', async () => {
-    const item = { id: 'queued-1', text: 'next turn', createdAt: 10 };
-    vi.stubGlobal('fetch', vi.fn(async () => jsonRes(200, {
-      threadId: 'thread-1',
-      queue: [item, { id: 'broken', text: 'bad', createdAt: '10' }],
-    })));
-
-    await expect(getCodexSession('%1')).resolves.toMatchObject({ queue: [item] });
-  });
-
-  it('rejects a malformed Codex goal at the API boundary', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => jsonRes(200, {
-      goal: { objective: 'migrate', status: 'finished' },
-    })));
-
-    await expect(getCodexGoal('%1'))
-      .rejects.toThrow('Codex goal returned an invalid response');
   });
 
   it('still maps 401 to UnauthorizedError', async () => {

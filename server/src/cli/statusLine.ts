@@ -35,10 +35,16 @@ function readSettings(home: string): JsonRecord {
   } catch { return {}; }
 }
 
-function isOurs(statusLine: unknown): boolean {
-  return isRecord(statusLine)
-    && typeof statusLine.command === 'string'
-    && statusLine.command.includes(STATUS_MARK);
+function commandOf(statusLine: unknown): string | null {
+  return isRecord(statusLine) && typeof statusLine.command === 'string' ? statusLine.command : null;
+}
+
+function isOurs(statusLine: unknown, home: string): boolean {
+  const command = commandOf(statusLine);
+  const prefix = `node ${path.join(claudeDir(home), 'hooks', SCRIPT)} `;
+  // Only the exact bare capturer form written by installStatusLine is ours. A TEE pipeline produced by
+  // composeHint contains the same script marker but also the user's renderer, so the whole setting is theirs.
+  return command !== null && command.startsWith(prefix) && !/[|;&<>]/.test(command);
 }
 
 // 'no-claude' → ~/.claude absent. 'ours' → our statusLine is installed. 'foreign' → the user has their own
@@ -46,7 +52,7 @@ function isOurs(statusLine: unknown): boolean {
 export function statusLineStatus(home: string = homedir()): StatusLineState {
   if (!fs.existsSync(claudeDir(home))) return 'no-claude';
   const sl = readSettings(home).statusLine;
-  if (isOurs(sl)) return 'ours';
+  if (isOurs(sl, home)) return 'ours';
   if (isRecord(sl) && (sl.command || sl.type)) return 'foreign';
   return 'absent';
 }
@@ -82,11 +88,8 @@ export function installStatusLine(
   return { status: 'installed' };
 }
 
-// Refresh the on-disk capturer script to the BUNDLED version without touching settings.statusLine — so an
-// npm upgrade actually reaches a user who already opted in. Critically settings-safe: a user who composed us
-// into their OWN statusline (the TEE form) still reads as 'ours' (the command contains our mark), and we must
-// NOT rewrite their command to the bare form (that would drop their downstream renderer). So this only ever
-// copies the script. No-op (returns false) when we're not installed. Idempotent; safe to call every start.
+// Refresh the on-disk capturer script to the BUNDLED version without touching settings.statusLine. Composed
+// TEE pipelines are foreign/user-owned and deliberately stay outside this automatic mutation path.
 export function refreshStatusLineScript(
   home: string = homedir(),
   { srcDir }: Pick<InstallStatusLineOptions, 'srcDir'> = {},
@@ -105,10 +108,15 @@ export function refreshStatusLineScript(
 // statusLine and everything else intact.
 export function uninstallStatusLine(home: string = homedir()): { status: 'absent' } {
   const settings = readSettings(home);
-  if (isOurs(settings.statusLine)) {
+  const command = commandOf(settings.statusLine);
+  const composed = command?.includes(STATUS_MARK) && !isOurs(settings.statusLine, home);
+  if (isOurs(settings.statusLine, home)) {
     delete settings.statusLine;
     if (fs.existsSync(settingsPath(home))) writeJsonAtomic(settingsPath(home), settings);
   }
+  // The script is part of a user-owned composed pipeline. Removing it would leave their renderer command
+  // in place but broken, so preserve both the setting and its referenced capturer.
+  if (composed) return { status: 'absent' };
   try { fs.unlinkSync(path.join(claudeDir(home), 'hooks', SCRIPT)); } catch { /* already gone */ }
   return { status: 'absent' };
 }

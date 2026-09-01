@@ -123,23 +123,22 @@ export default function GitPanel({ open, pane, windowId, inset = 0, onClose }: G
 
   // Hardware/browser Back steps back ONE level and only closes the panel at the repo home — never
   // blows the whole app away mid-navigation. We MIRROR the navigation depth into browser history:
-  // one entry for the open panel, one more per drill level (and one for the DirPicker). Back pops one
+  // one entry for the open panel and one more per drill level. DirPicker owns its own history layer,
+  // so opening it here must not push a second entry for the same visible overlay. Back pops one
   // entry → we pop one level; at the base (home) Back closes the panel. The popstate handler only
   // *reads* state and decrements a counter — it never pushState()s (some Android WebViews drop a
   // pushState made inside a popstate handler, which would unbalance history and exit the app). A
-  // close-by-button unwinds the remaining entries in the cleanup. The on-screen ‹ and the DirPicker's
-  // dismiss both route through window.history.back() so every level change flows through this one path.
+  // close-by-button unwinds the remaining entries in the cleanup. The on-screen ‹ routes through
+  // window.history.back(); DirPicker balances its own Back/close lifecycle independently.
   const stackRef = useRef(stack); stackRef.current = stack;
-  const pickOpenRef = useRef(pickOpen); pickOpenRef.current = pickOpen;
   const onCloseRef = useRef(onClose); onCloseRef.current = onClose;
-  const depthRef = useRef(0);   // # of our live history entries (base + drills + picker)
+  const depthRef = useRef(0);   // # of our live history entries (base + drills)
   const pushHist = (): void => { window.history.pushState({ gitOverlay: true }, ''); depthRef.current += 1; };
   const pushDrill = (frame: DrillFrame): void => { pushHist(); setStack((current) => [...current, frame]); };
-  const openPicker = (): void => { pushHist(); setPickOpen(true); };
+  const openPicker = (): void => { setPickOpen(true); };
   useBackButton(open && branchMenuOpen, () => setBranchMenuOpen(false));
   useHistoryLayer(open, () => {
     depthRef.current = Math.max(0, depthRef.current - 1);
-    if (pickOpenRef.current) { setPickOpen(false); return; }
     if (stackRef.current.length) { setStack((s) => s.slice(0, -1)); return; }
     onCloseRef.current?.();
   });
@@ -283,7 +282,7 @@ export default function GitPanel({ open, pane, windowId, inset = 0, onClose }: G
 
   const switchRepo = (path: string): void => { setActive(path); setStack([]); setViewedBranch(null); };
   const onPick = async (dir: string): Promise<void> => {
-    window.history.back();   // dismiss the picker (pops its history entry → onPop closes it)
+    setPickOpen(false);      // DirPicker cleanup balances the history entry it owns.
     setNotice(null);
     try {
       const found = parseGitRepos(await apiRepos(dir));
@@ -485,7 +484,7 @@ export default function GitPanel({ open, pane, windowId, inset = 0, onClose }: G
         inset={inset}
         hint={t('git.pickerHint')}
         onPick={onPick}
-        onClose={() => window.history.back()}
+        onClose={() => setPickOpen(false)}
       />
     </div>
     </OverlayPortal>

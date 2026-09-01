@@ -110,19 +110,63 @@ describe('tmux commands (integration)', () => {
     expect(info.mouseAware).toBe(false); // …nor is it reporting mouse
   });
 
+  it('sendText uses an explicit bracketed-paste boundary when the pane requests it', async () => {
+    if (!hasTmux) return;
+    const s = (await listSessions()).find((x) => x.name === SES);
+    const w = (await listWindows(s.id))[0];
+    const recorderSource = "process.stdout.write('\\x1b[?2004hRECORDER_ACTIVE\\n');let b=Buffer.alloc(0),t;process.stdin.on('data',d=>{b=Buffer.concat([b,d]);clearTimeout(t);t=setTimeout(()=>{process.stdout.write('INPUTHEX:'+b.toString('hex')+'\\n\\x1b[?2004l',()=>process.exit())},100)})";
+    const recorder = `node -e "eval(Buffer.from('${Buffer.from(recorderSource).toString('base64')}','base64').toString())"; sleep 5`;
+    const { stdout } = await execFile('tmux', [
+      'split-window', '-d', '-P', '-F', '#{pane_id}', '-t', w.id, recorder,
+    ]);
+    const pane = stdout.trim();
+    try {
+      let ansi = '';
+      for (let i = 0; i < 30 && !ansi.includes('RECORDER_ACTIVE'); i++) {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        ansi = await capturePane(pane, 20);
+      }
+      expect(ansi).toContain('RECORDER_ACTIVE');
+
+      await sendText(pane, 'PASTE_BOUNDARY');
+      await sendEnter(pane);
+      for (let i = 0; i < 30 && !ansi.includes('INPUTHEX:'); i++) {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        ansi = await capturePane(pane, 20);
+      }
+      expect(ansi).toContain(
+        `INPUTHEX:${Buffer.from('\u001b[200~PASTE_BOUNDARY\u001b[201~').toString('hex')}`,
+      );
+    } finally {
+      try { await execFile('tmux', ['kill-pane', '-t', pane]); } catch {}
+    }
+  });
+
   it('sendHexInput writes UTF-8 and control bytes in order', async () => {
     if (!hasTmux) return;
     const s = (await listSessions()).find((x) => x.name === SES);
     const w = (await listWindows(s.id))[0];
     const pane = (await listPanes(w.id))[0].id;
 
-    await sendText(pane, "stty raw -echo; node -e \"process.stdin.once('data',d=>{console.log(d.toString('hex'));process.stdin.pause()})\"; stty sane");
+    await sendText(
+      pane,
+      "stty raw -echo; node -e \"process.stdout.write(String.fromCharCode(84,87,72,69,88,95,82,69,65,68,89,10));process.stdin.once('data',d=>{console.log(d.toString('hex'));process.stdin.pause()})\"; stty sane",
+    );
+    await new Promise((resolve) => setTimeout(resolve, 150));
     await sendEnter(pane);
-    await new Promise((resolve) => setTimeout(resolve, 150));
+    let output = '';
+    for (let i = 0; i < 50 && !output.includes('TWHEX_READY'); i += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      output = await capturePane(pane, 20);
+    }
+    expect(output).toContain('TWHEX_READY');
     await sendHexInput(pane, 'e4bda0e5a5bd0d');
-    await new Promise((resolve) => setTimeout(resolve, 150));
-    expect(await capturePane(pane, 20)).toContain('e4bda0e5a5bd0d');
-  });
+    for (let i = 0; i < 50 && !output.includes('e4bda0e5a5bd0d'); i += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      output = await capturePane(pane, 20);
+    }
+    expect(output).toContain('e4bda0e5a5bd0d');
+  }, 15_000);
 
   // Named guard for the tmux capture behaviours the terminal rendering depends on (CLAUDE.md). If a tmux
   // version changes these, this fails loudly here instead of as a mysterious mobile-render glitch. Deep
@@ -149,7 +193,7 @@ describe('tmux commands (integration)', () => {
       return plain.length > 0 && plain.length > plain.replace(/\s+$/, '').length;
     });
     expect(hasTrailing).toBe(true);
-  });
+  }, 10_000);
 
   it('resizes the window so the pane reflows to the new grid', async () => {
     if (!hasTmux) return;

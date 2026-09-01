@@ -6,6 +6,7 @@ import {
   getFavorites, addFavorite, removeFavorite, getRecent, pushRecent, removeRecent,
   getInboxSeen, markInboxSeen,
   getInboxReadTs, setInboxReadTs,
+  getProjectTaskBeta, setProjectTaskBeta, getRootView, setRootView, getLastProject, setLastProject,
 } from '../src/storage.js';
 import {
   getRecentDocs, pushRecentDoc, removeRecentDoc, getPaneBase, setPaneBase,
@@ -72,6 +73,20 @@ describe('ideas per window (tw_ideas)', () => {
 });
 
 describe('storage', () => {
+  it('keeps Project Task beta off by default and remembers each Project root choice explicitly', () => {
+    expect(getProjectTaskBeta()).toBe(false);
+    expect(getRootView()).toBe('session');
+    expect(getLastProject()).toBe(null);
+    setProjectTaskBeta(true);
+    setRootView('project');
+    setLastProject('project-1');
+    expect(getProjectTaskBeta()).toBe(true);
+    expect(getRootView()).toBe('project');
+    expect(getLastProject()).toBe('project-1');
+    setProjectTaskBeta(false);
+    expect(getProjectTaskBeta()).toBe(false);
+  });
+
   it('stores and reads token', () => {
     expect(getToken()).toBe(null);
     setToken('abc');

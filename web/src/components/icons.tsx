@@ -3,7 +3,9 @@
 // from CSS (.topbar-icon svg); 1.75 stroke matches the hairline feel of the rest of the chrome.
 import claudeLogo from '../assets/agent-claude.svg?raw';
 import codexLogo from '../assets/agent-codex.svg?raw';
+import piLogo from '../assets/agent-pi.svg?raw';
 import type { SVGProps } from 'react';
+import { useAgentCatalogDescriptor } from '../agentCatalog.js';
 
 const base: SVGProps<SVGSVGElement> = {
   viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor',
@@ -468,16 +470,34 @@ export function WrenchIcon() {
   );
 }
 
-// Agent logo — the OFFICIAL brand mark, kept as a swappable asset (src/assets/agent-<id>.svg; replace the
-// file to change the logo). Imported as raw SVG source (?raw) and inlined as a REAL DOM <svg>, not an
+// Known Agent logos are trusted, bundled assets (src/assets/agent-<id>.svg; replace the file to change the
+// logo). Imported as raw SVG source (?raw) and inlined as a REAL DOM <svg>, not an
 // <img src="data:…svg…">: iOS standalone-PWA WKWebView doesn't reliably render percent-encoded svg+xml
-// data-URIs in <img> (only these two logos vanished while every other icon — all inline <svg> — showed).
+// data-URIs in <img> (the bundled logos vanished while every other icon — all inline <svg> — showed).
 // Inlining still rides the content-hashed JS, so a changed logo busts the cache. Sized via CSS (.agent-mark).
-const AGENT_LOGO: Record<'claude' | 'codex', string> = { claude: claudeLogo, codex: codexLogo };
+const AGENT_LOGO: Readonly<Record<string, string>> = {
+  claude: claudeLogo,
+  codex: codexLogo,
+  pi: piLogo,
+};
 
-// Pick the logo for an agent id (defaults to Claude for legacy/untagged entries).
+// Unknown and not-yet-branded adapters must stay visually neutral; never mislabel them as another Agent.
 export function AgentMark({ agent }: { agent?: string | null }) {
-  const id: 'claude' | 'codex' = agent === 'codex' ? 'codex' : 'claude';
-  return <span className="agent-mark" role="img" aria-label={id}
-    dangerouslySetInnerHTML={{ __html: AGENT_LOGO[id] }} />;
+  const id = agent || 'agent';
+  const catalog = useAgentCatalogDescriptor(id);
+  const iconId = catalog.loaded ? catalog.descriptor?.iconId : id;
+  const label = catalog.descriptor?.label ?? id;
+  const logo = iconId ? AGENT_LOGO[iconId] : undefined;
+  if (logo) {
+    return <span className="agent-mark" role="img" aria-label={label} data-agent-icon={iconId}
+      dangerouslySetInnerHTML={{ __html: logo }} />;
+  }
+  return (
+    <span className="agent-mark" role="img" aria-label={label} data-agent-icon="generic">
+      <svg {...base}>
+        <rect x="4" y="5" width="16" height="15" rx="4" />
+        <path d="M9 12h.01M15 12h.01M9 16h6M12 5V2" />
+      </svg>
+    </span>
+  );
 }

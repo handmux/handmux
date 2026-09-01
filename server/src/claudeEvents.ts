@@ -29,7 +29,7 @@ interface HookRecord {
   ts: number;
   src: string;
   payload: Record<string, unknown>;
-  agent?: string;
+  agent?: string | null;
 }
 interface LivePane extends ProcessPane {
   id: string;
@@ -224,7 +224,9 @@ function readStateFile(file: string): Record<string, HookRecord> {
         src: typeof row.src === 'string' ? row.src : '',
         payload,
       };
-      if (typeof row.agent === 'string' && row.agent) record.agent = row.agent;
+      if (Object.hasOwn(row, 'agent')) {
+        record.agent = typeof row.agent === 'string' && row.agent ? row.agent : null;
+      }
       return [[pane, record]];
     }));
   } catch { return {}; }
@@ -239,7 +241,10 @@ function classification(value: unknown): ClaudeClassification | null {
 
 function classifyRecord(record: HookRecord): ClaudeClassification | null {
   if (!record.src) return null;
-  return classification(getAgent(record.agent).classify?.(record.src, record.payload));
+  // Rows predating the multi-Agent format have no `agent` and are known Claude records. An explicit
+  // unknown id is not legacy absence and must fail closed instead of borrowing Claude's classifier.
+  const agent = record.agent === undefined ? getAgent('claude') : getAgent(record.agent);
+  return classification(agent?.classify?.(record.src, record.payload));
 }
 
 function identifiablePanes(value: unknown): IdentifiablePane[] {
@@ -407,7 +412,8 @@ export function createClaudeEvents({
       // App Server-backed, so even an unmanaged pane must ignore those stale rows instead of reviving an
       // approximate status or notification.
       if (rec?.agent === 'codex') continue;
-      const agent = getAgent(rec.agent);
+      const agent = rec.agent === undefined ? getAgent('claude') : getAgent(rec.agent);
+      if (!agent) continue;
       let c = classifyRecord(rec);
       // A 需要你 the user already resolved leaves no closing hook (see PERM_RESOLVED_GUARD_MS). statMtime
       // gates the cheap "still pending" path; only once the transcript has grown past the event do we pay the
@@ -501,7 +507,10 @@ export function createClaudeEvents({
   // roster (allowedSessions differs per call), and the tmux read isn't duplicated concurrently.
   let tail: Promise<unknown> = Promise.resolve();
   function getStates(allowedSessions: string[] | null = null): Promise<ClaudePaneStates> {
-    const current = tail.then(() => _getStates(allowedSessions), () => _getStates(allowedSessions));
+    const current = tail.then(
+      () => _getStates(allowedSessions),
+      () => _getStates(allowedSessions),
+    );
     tail = current.catch(() => {});
     return current;
   }
@@ -544,7 +553,7 @@ export function createClaudeEvents({
     sessionId: string | null;
     transcriptPath: string | null;
     cwd: string | null;
-    agent?: string;
+    agent?: string | null;
   } | null {
     const rec = readStateFile(file)[pane];
     if (rec?.agent === 'codex') return null;
@@ -554,8 +563,8 @@ export function createClaudeEvents({
     const sessionId = typeof p.session_id === 'string' ? p.session_id : null;
     const cwd = typeof p.cwd === 'string' ? p.cwd : null;
     if (!transcriptPath && !sessionId) return null;
-    return typeof rec.agent === 'string'
-      ? { sessionId, transcriptPath, cwd, agent: rec.agent }
+    return Object.hasOwn(rec, 'agent')
+      ? { sessionId, transcriptPath, cwd, agent: rec.agent ?? null }
       : { sessionId, transcriptPath, cwd };
   }
 
@@ -564,9 +573,28 @@ export function createClaudeEvents({
   function paneAgent(pane: string): string | null {
     const rec = readStateFile(file)[pane];
     if (!rec || typeof rec !== 'object') return null;
-    if (rec.agent === 'codex') return null;
-    return typeof rec.agent === 'string' && rec.agent ? rec.agent : 'claude';
+    // Only absence denotes a pre-multi-Agent Claude record. Any explicit unsupported/empty identity must
+    // fail closed at this legacy boundary instead of borrowing Claude's transcript controls.
+    if (rec.agent === undefined) return 'claude';
+    return rec.agent === 'claude' ? 'claude' : null;
   }
 
-  return { getStates, identifyPaneAgents, start, stop, paneSession, paneAgent };
+  function paneKind(pane: string): ClaudeEventKind | null {
+    const rec = readStateFile(file)[pane];
+    if (!rec || rec.agent === 'codex') return null;
+    return classifyRecord(rec)?.kind ?? null;
+  }
+
+  function paneCompletionToken(pane: string): string | null {
+    const rec = readStateFile(file)[pane];
+    if (!rec || rec.agent === 'codex') return null;
+    const kind = classifyRecord(rec)?.kind ?? null;
+    if (kind !== 'done' && kind !== 'error' && kind !== 'end' && kind !== 'idle') return null;
+    return Number.isFinite(rec.ts) && rec.ts >= 0 ? `claude-completed:${rec.ts}` : null;
+  }
+
+  return {
+    getStates, identifyPaneAgents, start, stop, paneSession, paneAgent,
+    paneKind, paneCompletionToken,
+  };
 }

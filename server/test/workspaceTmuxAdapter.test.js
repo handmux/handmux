@@ -183,6 +183,7 @@ describe('workspace restore command safety', () => {
       return '';
     };
     const prepared = [];
+    const executableWaits = [];
     const tmux = createWorkspaceTmux({
       run,
       randomUUID: () => 'abcdef12-0000-4000-8000-000000000000',
@@ -190,8 +191,16 @@ describe('workspace restore command safety', () => {
         command: 'handmux-agent-runner',
         prepare: async (request) => { prepared.push(request); },
         waitReady: async () => ({ status: 'ready' }),
+        waitForExecutable: (command) => {
+          executableWaits.push(command);
+          return Promise.resolve({ status: 'ready' });
+        },
       },
     });
+    const agentWaits = tmux.waitForAgents(['codex', 'codex', 'claude']);
+    expect([...agentWaits.keys()]).toEqual(['codex', 'claude']);
+    await Promise.all(agentWaits.values());
+    expect(executableWaits).toEqual(['codex', 'claude']);
     const temp = await tmux.createTemporarySession({
       cwd: '/work dir', sessionLogicalId: IDS.sessionA, windowLogicalId: IDS.window, paneLogicalId: IDS.paneA,
       windowName: 'first window', windowIndex: 3,

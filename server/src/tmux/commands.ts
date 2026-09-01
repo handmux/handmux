@@ -244,8 +244,29 @@ export async function exitCopyModeIfActive(paneId: string): Promise<void> {
   if (out.trim() === '1') await runTmux(['send-keys', '-t', paneId, 'Escape']);
 }
 
+let inputBufferSerial = 0;
+
+const nextInputBufferName = (): string => {
+  inputBufferSerial = (inputBufferSerial + 1) % Number.MAX_SAFE_INTEGER;
+  return `handmux-input-${process.pid}-${inputBufferSerial}`;
+};
+
 export async function sendText(paneId: string, text: string): Promise<void> {
-  await runTmux(['send-keys', '-t', paneId, '-l', '--', text]);
+  if (!text) return;
+  const buffer = nextInputBufferName();
+  await runTmux(['set-buffer', '-b', buffer, '--', text]);
+  try {
+    // `-p` asks tmux to wrap the payload in bracketed-paste markers when the target application has
+    // enabled that terminal mode. The explicit end marker lets TUIs distinguish the pasted body from a
+    // following Enter without guessing from byte timing; shells/apps without the mode still receive the
+    // same literal text. A per-call named buffer prevents concurrent panes from overwriting each other.
+    await runTmux(['paste-buffer', '-p', '-d', '-b', buffer, '-t', paneId]);
+  } catch (error) {
+    // `-d` removes the buffer on success. If the target disappeared first, avoid retaining the payload in
+    // tmux's global buffer list; cleanup failure must not hide the original send error.
+    try { await runTmux(['delete-buffer', '-b', buffer]); } catch { /* best effort */ }
+    throw error;
+  }
 }
 
 export async function sendHexInput(paneId: string, hex: string): Promise<void> {
@@ -318,6 +339,10 @@ export async function newSession(
 // don't pass it to new-window/new-session as the pane command) so the pane survives the command exiting.
 async function runStartupCmd(target: string, cmd: string): Promise<void> {
   await sendText(target, cmd);
+  // tmux has handed the paste to the pane at this point, but the foreground shell still consumes PTY
+  // input asynchronously. Match the interactive /send pacing so a long startup command cannot absorb the
+  // following Enter as part of its paste.
+  await new Promise((resolve) => setTimeout(resolve, 120));
   await sendEnter(target);
 }
 

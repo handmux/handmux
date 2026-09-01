@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import net from 'node:net';
+import { isDeepStrictEqual } from 'node:util';
 import WebSocket from 'ws';
 import { codexPlanSnapshot } from './codexPlan.js';
 import { parseCodexOutboxSnapshot } from './codexQueueProtocol.js';
@@ -11,10 +12,10 @@ import { codexAppSocketPath } from './cli/codexManaged.js';
 import { isCodexSyntheticUserText } from './codexTranscriptParse.js';
 import type { CodexPlanSnapshot } from './codexPlan.js';
 import type {
-  CodexQueueItem, CodexQueueRecord, CodexSubmissionReceipt,
+  CodexQueueItem, CodexQueueRecord, CodexSubmissionReceipt, CodexSubmissionReceiptView,
 } from './codexQueueProtocol.js';
 import type {
-  CodexGoal, CodexProjectedStreamEvent, CodexStreamEvent,
+  CodexGoal, CodexGoalEvent, CodexProjectedStreamEvent, CodexStreamEvent,
 } from './codexStreamProtocol.js';
 
 const RPC_TIMEOUT_MS = 8_000;
@@ -24,6 +25,13 @@ const MAX_SUBMISSION_RECEIPTS = 256;
 const SUBMISSION_RECEIPT_TTL_MS = 24 * 60 * 60 * 1_000;
 const MAX_STREAM_EVENTS = 512;
 const MAX_STREAM_MESSAGE_IDS = 100;
+const MAX_OBSERVATION_SETUP_EVENTS = 512;
+const MAX_GOAL_READ_ATTEMPTS = 3;
+const CONTROL_TURN_LIMIT = 2;
+const RECEIPT_RECONCILE_PAGE_LIMIT = 10;
+// Resource/protocol fuse only. Valid histories are still scanned exhaustively; this permits 10,000 turns
+// while preventing a broken server from growing an unbounded cursor set or issuing RPCs forever.
+const MAX_RECEIPT_RECONCILE_PAGES = 1_000;
 const QUEUE_EDIT_LEASE_MS = 30_000;
 const APPROVAL_METHODS = new Set([
   'item/commandExecution/requestApproval',
@@ -33,6 +41,16 @@ const APPROVAL_METHODS = new Set([
 const USER_INPUT_METHOD = 'item/tool/requestUserInput';
 const SIMPLE_DECISIONS = new Set(['accept', 'acceptForSession', 'decline', 'cancel']);
 const TERMINAL_GOAL_STATUSES = new Set(['blocked', 'usageLimited', 'budgetLimited', 'complete']);
+const RESUME_SNAPSHOT_INVALIDATING_METHODS = new Set([
+  'item/started',
+  'item/completed',
+  'serverRequest/resolved',
+  'thread/status/changed',
+  'turn/started',
+  'turn/completed',
+  'thread/compacted',
+  'thread/started',
+]);
 
 type UnknownRecord = Record<string, unknown>;
 type StreamListener = (event: CodexStreamEvent) => void;
@@ -162,6 +180,8 @@ interface RpcResult extends UnknownRecord {
   turnId?: string;
   data?: unknown[];
   nextCursor?: string | null;
+  initialTurnsPage?: { data?: unknown[]; nextCursor?: string | null; [key: string]: unknown };
+  userAgent?: string;
   goal?: unknown;
   model?: unknown;
   modelProvider?: unknown;
@@ -174,6 +194,11 @@ interface RpcResult extends UnknownRecord {
   activePermissionProfile?: unknown;
   reasoningEffort?: unknown;
   multiAgentMode?: unknown;
+}
+
+interface TurnPage {
+  turns: AppTurn[];
+  nextCursor: string | null;
 }
 
 interface InternalQueueItem extends CodexQueueItem {
@@ -221,6 +246,8 @@ interface StreamJournal {
 
 interface ThreadState {
   revision: number;
+  eventRevision: number;
+  settingsRevision: number;
   readRevision: number;
   thread: AppThread | null;
   status: AppStatus | null;
@@ -234,7 +261,17 @@ interface ThreadState {
   completedAgentItemIds: Set<string>;
   plans: Map<string, CodexPlanSnapshot>;
   goal: CodexGoal | null | undefined;
+  goalRevision: number;
+  goalEvent: CodexGoalEvent | null;
   goalTurnId: string | null;
+  compacting: boolean;
+  deliveryHistorySafe: boolean;
+  deliveryProofClientIds: Set<string>;
+}
+
+interface PendingGoalMutation {
+  token: symbol;
+  turnId: string | null;
 }
 
 interface InboxState {
@@ -242,6 +279,7 @@ interface InboxState {
   msg: string;
   ts: number;
   key: string;
+  correlationId?: string;
   suppressPush: boolean;
 }
 
@@ -265,6 +303,7 @@ interface CodexAppConnectionOptions {
   baseline?: boolean;
   onStateChange?: (pane: string) => unknown;
   onClose?: (connection: CodexAppConnection) => void;
+  onThreadBind?: (connection: CodexAppConnection, threadId: string) => void | Promise<void>;
   queueStore?: Map<string, QueueState>;
   submissionStore?: Map<string, InternalSubmissionReceipt>;
   nextQueueId?: () => string;
@@ -280,19 +319,20 @@ interface StructuredDecision extends UnknownRecord {
   action?: 'allow' | 'deny';
 }
 
-interface NormalizedApproval {
+export interface NormalizedApproval {
   id: string;
   type: 'permissions' | 'file' | 'command';
   threadId: string;
   turnId?: string;
   itemId?: string;
+  correlationId?: string;
   command: string | null;
   cwd: string | null;
   reason: string | null;
   decisions: Array<string | StructuredDecision>;
 }
 
-interface NormalizedQuestion {
+export interface NormalizedQuestion {
   id: string;
   header: string;
   question: string;
@@ -301,16 +341,30 @@ interface NormalizedQuestion {
   options: Array<{ label: string; description: string }> | null;
 }
 
-interface NormalizedUserInput {
+export interface NormalizedUserInput {
   id: string;
   threadId: string;
   turnId?: string;
   itemId?: string;
+  correlationId?: string;
   autoResolutionMs: unknown;
   questions: NormalizedQuestion[];
 }
 
 interface ScanTimer { unref?(): void }
+
+export interface CodexInteractionSnapshot {
+  cursor: number;
+  approvals: NormalizedApproval[];
+  userInputs: NormalizedUserInput[];
+  disconnected?: true;
+}
+
+type InteractionSnapshotListener = (snapshot: CodexInteractionSnapshot) => void;
+interface InteractionSubscription {
+  threadId: string;
+  listener: InteractionSnapshotListener;
+}
 
 interface CodexAppServerOptions {
   home?: string;
@@ -322,7 +376,12 @@ interface CodexAppServerOptions {
   scanIntervalMs?: number;
   setTimer?: (callback: () => void, delay: number) => ScanTimer;
   clearTimer?: (timer: ScanTimer) => void;
-  outboxStore?: { read?: () => unknown; write?: (value: unknown) => unknown } | null;
+  outboxStore?: {
+    read?: () => unknown;
+    readStrict?: () => unknown;
+    write?: (value: unknown) => unknown;
+    quarantine?: () => unknown;
+  } | null;
   rpcTimeoutMs?: number;
 }
 
@@ -331,6 +390,7 @@ interface LivePane extends UnknownRecord { id: string }
 interface CodexAppStatus extends UnknownRecord {
   managed: boolean;
   queue: CodexQueueItem[];
+  receipts: CodexSubmissionReceiptView[];
   approvals: NormalizedApproval[];
   userInputs: NormalizedUserInput[];
 }
@@ -400,6 +460,67 @@ function asError(error: unknown): Error {
   const record = recordOf(error);
   if (typeof record?.message === 'string') return new Error(record.message);
   return new Error(typeof error === 'string' ? error : JSON.stringify(error));
+}
+
+function codexVersion(userAgent: string | null): [number, number, number] | null {
+  const match = userAgent?.match(
+    /^[a-z0-9._-]+\/v?(\d+)\.(\d+)\.(\d+)(?=$|[\s;(])/i,
+  );
+  return match ? [Number(match[1]), Number(match[2]), Number(match[3])] : null;
+}
+
+function supportsBoundedTurns(userAgent: string | null): boolean {
+  const version = codexVersion(userAgent);
+  if (!version) return false;
+  const [major, minor] = version;
+  return major > 0 || minor >= 149;
+}
+
+function boundedTurnParams(limit = CONTROL_TURN_LIMIT, cursor: string | null = null): UnknownRecord {
+  return {
+    limit,
+    sortDirection: 'desc',
+    itemsView: 'summary',
+    ...(cursor ? { cursor } : {}),
+  };
+}
+
+function turnPage(value: unknown): TurnPage {
+  const page = recordOf(value);
+  if (!page || !Array.isArray(page.data)
+    || !page.data.every((turn) => recordOf(turn) != null)
+    || (page.nextCursor !== null && typeof page.nextCursor !== 'string')) {
+    throw new Error('Codex App Server returned an invalid turn page');
+  }
+  return {
+    turns: page.data.map((turn) => recordOf(turn) as AppTurn).reverse(),
+    nextCursor: page.nextCursor,
+  };
+}
+
+function largeThreadUpgradeError(error: unknown, userAgent: string | null): Error {
+  const failure = asError(error);
+  if (supportsBoundedTurns(userAgent)
+    || !failure.message.toLowerCase().includes('max payload size exceeded')) return failure;
+  const version = codexVersion(userAgent)?.join('.') || 'unknown';
+  return new Error(
+    `Codex CLI ${version} cannot safely resume this large conversation; upgrade Codex CLI to 0.149.0 or newer`,
+  );
+}
+
+function deliveryReconcileError(): Error {
+  return new Error(
+    'Codex send receipt could not be reconciled safely; retry after the conversation becomes idle',
+  );
+}
+
+function isMissingThreadRollout(error: unknown): boolean {
+  const message = asError(error).message.toLowerCase();
+  return message.includes('no rollout found') || (
+    message.includes('failed to read session metadata')
+    && message.includes('rollout')
+    && message.includes('is empty')
+  );
 }
 
 function inputText(content: unknown): string {
@@ -614,6 +735,8 @@ function normalizeApproval(message: RpcMessage): NormalizedApproval {
     threadId: params.threadId!,
     ...(typeof params.turnId === 'string' ? { turnId: params.turnId } : {}),
     ...(typeof params.itemId === 'string' ? { itemId: params.itemId } : {}),
+    ...(typeof params.itemId === 'string' ? { correlationId: params.itemId }
+      : typeof params.turnId === 'string' ? { correlationId: params.turnId } : {}),
     command: typeof params.command === 'string' ? params.command : null,
     cwd: typeof params.cwd === 'string' ? params.cwd : null,
     reason: typeof params.reason === 'string' ? params.reason : null,
@@ -653,6 +776,8 @@ function normalizeUserInput(message: RpcMessage): NormalizedUserInput {
     threadId: params.threadId!,
     ...(typeof params.turnId === 'string' ? { turnId: params.turnId } : {}),
     ...(typeof params.itemId === 'string' ? { itemId: params.itemId } : {}),
+    ...(typeof params.itemId === 'string' ? { correlationId: params.itemId }
+      : typeof params.turnId === 'string' ? { correlationId: params.turnId } : {}),
     autoResolutionMs: params.autoResolutionMs ?? null,
     questions: Array.isArray(params.questions) ? params.questions.map((value) => {
       const question = recordOf(value) || {};
@@ -672,10 +797,21 @@ function normalizeUserInput(message: RpcMessage): NormalizedUserInput {
   };
 }
 
-function turnSummary(turn: AppTurn | null | undefined): string {
+function turnAssistantSummary(turn: AppTurn | null | undefined): string {
   const items = Array.isArray(turn?.items) ? turn.items : [];
   const message = [...items].reverse().find((item) => item?.type === 'agentMessage' && item.text?.trim());
-  return message?.text || turn?.error?.message || '';
+  return message?.text || '';
+}
+
+function turnSummary(turn: AppTurn | null | undefined): string {
+  return turnAssistantSummary(turn) || turn?.error?.message || '';
+}
+
+function inboxTurnSummary(
+  canonicalTurn: AppTurn | null | undefined,
+  mergedTurn: AppTurn | null | undefined,
+): string {
+  return turnAssistantSummary(canonicalTurn) || turnSummary(mergedTurn);
 }
 
 function turnPrompt(turn: AppTurn | null | undefined): string {
@@ -841,6 +977,7 @@ class CodexAppConnection {
   readonly connect: typeof connectUnixWebSocket;
   readonly timeoutMs: number;
   readonly onClose: (connection: CodexAppConnection) => void;
+  readonly onThreadBind: (connection: CodexAppConnection, threadId: string) => void | Promise<void>;
   readonly now: () => number;
   baseline: boolean;
   readonly onStateChange: (pane: string) => unknown;
@@ -854,18 +991,27 @@ class CodexAppConnection {
   readonly approvals: Map<string, RpcMessage>;
   readonly userInputs: Map<string, RpcMessage>;
   readonly streamListeners: Set<StreamSubscription>;
+  readonly interactionListeners: Set<InteractionSubscription>;
   readonly threadState: Map<string, ThreadState>;
+  readonly ensuringThreads: Map<string, Promise<ThreadState>>;
+  readonly pendingGoalMutations: Map<string, PendingGoalMutation[]>;
+  readonly goalWriteTails: Map<string, Promise<void>>;
+  readonly goalReadTails: Map<string, Promise<void>>;
   readonly subscribed: Set<string>;
   lastStartedThreadId: string | null;
   currentThreadId: string | null;
+  threadBindingKnown: boolean;
   inbox: InboxState;
   opening: Promise<this> | null;
   closed: boolean;
+  appServerUserAgent: string | null;
+  boundedTurns: boolean;
   ws?: WebSocket;
 
   constructor({
     pane, socketPath, connect = connectUnixWebSocket, timeoutMs = RPC_TIMEOUT_MS,
     now = () => Date.now(), baseline = true, onStateChange = () => {}, onClose = () => {},
+    onThreadBind = () => {},
     queueStore = new Map(), submissionStore = new Map(), nextQueueId = () => `${Date.now()}`,
     persistOutbox = () => {}, streamEventStore = new Map(),
   }: CodexAppConnectionOptions) {
@@ -874,6 +1020,7 @@ class CodexAppConnection {
     this.connect = connect;
     this.timeoutMs = timeoutMs;
     this.onClose = onClose;
+    this.onThreadBind = onThreadBind;
     this.now = now;
     this.baseline = baseline;
     this.onStateChange = onStateChange;
@@ -887,13 +1034,21 @@ class CodexAppConnection {
     this.approvals = new Map();
     this.userInputs = new Map();
     this.streamListeners = new Set();
+    this.interactionListeners = new Set();
     this.threadState = new Map();
+    this.ensuringThreads = new Map();
+    this.pendingGoalMutations = new Map();
+    this.goalWriteTails = new Map();
+    this.goalReadTails = new Map();
     this.subscribed = new Set();
     this.lastStartedThreadId = null;
     this.currentThreadId = null;
+    this.threadBindingKnown = false;
     this.inbox = { kind: null, msg: '', ts: 0, key: 'idle', suppressPush: false };
     this.opening = null;
     this.closed = false;
+    this.appServerUserAgent = null;
+    this.boundedTurns = false;
   }
 
   open(): Promise<this> {
@@ -913,14 +1068,34 @@ class CodexAppConnection {
     // Keep a lifetime error listener, not only the startup rejector: otherwise a stale socket that errors
     // once during connect and again while closing can become an unhandled EventEmitter error.
     ws.on('error', (error) => this.fail(error));
-    await new Promise((resolve, reject) => {
-      ws.once('open', resolve);
-      ws.once('error', reject);
+    await new Promise<void>((resolve, reject) => {
+      let settled = false;
+      const onOpen = (): void => finish(resolve);
+      const onError = (error: unknown): void => finish(() => reject(asError(error)));
+      const onClose = (): void => finish(() => reject(new Error('Codex App Server connection closed')));
+      const timer = setTimeout(() => {
+        finish(() => reject(new Error('Codex App Server timed out: open')));
+      }, Math.max(1, this.timeoutMs));
+      const finish = (callback: () => void): void => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        ws.off('open', onOpen);
+        ws.off('error', onError);
+        ws.off('close', onClose);
+        callback();
+      };
+      timer.unref?.();
+      ws.once('open', onOpen);
+      ws.once('error', onError);
+      ws.once('close', onClose);
     });
-    await this.rpc('initialize', {
+    const initialized = await this.rpc('initialize', {
       clientInfo: { name: 'handmux', title: 'Handmux', version: process.env.npm_package_version || 'unknown' },
       capabilities: { experimentalApi: true },
     });
+    this.appServerUserAgent = typeof initialized.userAgent === 'string' ? initialized.userAgent : null;
+    this.boundedTurns = supportsBoundedTurns(this.appServerUserAgent);
     this.notify('initialized', {});
     return this;
   }
@@ -949,9 +1124,12 @@ class CodexAppConnection {
           'permission',
           approval.reason || approval.command || activeTurnPrompt(this.state(approval.threadId)),
           `approval:${message.id}`,
+          undefined,
+          approval.correlationId,
         );
       }
-      this.bump(message.params?.threadId);
+      this.bumpEvent(message.params?.threadId);
+      this.emitInteractionSnapshot(message.params.threadId);
       return;
     }
     if (message.id != null && message.method === USER_INPUT_METHOD) {
@@ -964,9 +1142,12 @@ class CodexAppConnection {
           'permission',
           input.questions[0]?.question || activeTurnPrompt(this.state(input.threadId)),
           `input:${message.id}`,
+          undefined,
+          input.correlationId,
         );
       }
-      this.bump(message.params?.threadId);
+      this.bumpEvent(message.params?.threadId);
+      this.emitInteractionSnapshot(message.params.threadId);
       return;
     }
     if (!message.method) return;
@@ -979,8 +1160,11 @@ class CodexAppConnection {
     if (!params.threadId) return;
     if ((message.method === 'item/started' || message.method === 'item/completed') && params.item) {
       this.upsertLiveItem(params.threadId, params.turnId, params.item);
+      const state = this.state(params.threadId);
+      if (message.method === 'item/started' && params.item.type === 'contextCompaction') {
+        state.compacting = true;
+      }
       if (params.item.type === 'agentMessage') {
-        const state = this.state(params.threadId);
         const itemKey = `${params.turnId}\0${params.item.id}`;
         if (message.method === 'item/completed') state.completedAgentItemIds.add(itemKey);
         else state.completedAgentItemIds.delete(itemKey);
@@ -992,7 +1176,6 @@ class CodexAppConnection {
           text: params.item.text || '',
         });
       }
-      const state = this.state(params.threadId);
       const prompt = userPromptFromItem(params.item);
       if (prompt && state.activeTurnId === params.turnId) {
         state.activePrompt = prompt;
@@ -1021,6 +1204,10 @@ class CodexAppConnection {
         state.plans.delete(oldest);
       }
     } else if (message.method === 'serverRequest/resolved') {
+      const requestKey = String(params.requestId);
+      const native = this.approvals.get(requestKey) ?? this.userInputs.get(requestKey);
+      const correlationId = native?.method === USER_INPUT_METHOD
+        ? normalizeUserInput(native).correlationId : native ? normalizeApproval(native).correlationId : undefined;
       this.approvals.delete(String(params.requestId));
       this.userInputs.delete(String(params.requestId));
       this.markWorking(params.threadId);
@@ -1028,6 +1215,8 @@ class CodexAppConnection {
         this.setInbox(
           'working', activeTurnPrompt(this.state(params.threadId)) || this.inbox.msg,
           `resolved:${params.requestId}`,
+          undefined,
+          correlationId,
         );
       }
     } else if (message.method === 'thread/status/changed') {
@@ -1042,8 +1231,12 @@ class CodexAppConnection {
         const pendingMessage = kind === 'permission' && this.inbox.kind === kind ? this.inbox.msg : '';
         const activeMessage = activeTurnPrompt(state)
           || (this.inbox.kind === 'working' || this.inbox.kind === 'permission' ? this.inbox.msg : '');
-        this.setInbox(kind, pendingMessage || activeMessage, `status:${params.threadId}:${kind}`);
+        this.setInbox(
+          kind, pendingMessage || activeMessage, `status:${params.threadId}:${kind}`,
+          undefined, kind === 'permission' ? this.inbox.correlationId : undefined,
+        );
       } else if (params.status?.type === 'idle' && this.inbox.kind === 'compacting') {
+        state.compacting = false;
         this.setInbox(null, '', `thread:${params.threadId}:compacted`);
       }
     } else if (message.method === 'turn/started') {
@@ -1074,7 +1267,10 @@ class CodexAppConnection {
         /* stale/background completion: update only its own thread state */
       } else if (status === 'completed' || status === 'failed') {
         const completedAt = typeof turn?.completedAt === 'number' ? turn.completedAt * 1000 : undefined;
-        this.setInbox('done', turnSummary(turn) || prompt, `turn:${turn?.id || params.turnId}:${status}`, completedAt);
+        this.setInbox(
+          'done', inboxTurnSummary(params.turn, turn) || prompt,
+          `turn:${turn?.id || params.turnId}:${status}`, completedAt,
+        );
       } else {
         this.setInbox(null, '', `turn:${params.turn?.id || params.turnId}:${status || 'ended'}`);
       }
@@ -1086,27 +1282,30 @@ class CodexAppConnection {
         turnId: turn?.id || params.turnId || null, status: status || null,
       });
     } else if (message.method === 'thread/goal/updated') {
-      // Native Goal notifications do not consistently carry turnId. A terminal transition is agent-side
-      // work, so bind it to the turn that is currently producing it instead of emitting an unanchored card
-      // that the chat can only append at the live tail.
+      // Native Goal notifications do not consistently carry turnId. Bind every live lifecycle transition
+      // to the turn that is currently producing it so an active Goal set before the first item event cannot
+      // later mistake that same turn for its next durable injection opportunity.
       const state = this.state(params.threadId);
       const notifiedGoal = parseCodexGoal(params.goal);
-      const turnId = params.turnId || (notifiedGoal && TERMINAL_GOAL_STATUSES.has(notifiedGoal.status)
-        ? state.activeTurnId : null);
-      this.applyGoalSnapshot(params.threadId, notifiedGoal, turnId);
+      const pendingTurnId = this.pendingGoalTurn(params.threadId);
+      const turnId = params.turnId
+        || (pendingTurnId !== undefined ? pendingTurnId : state.activeTurnId)
+        || null;
+      this.applyGoalSnapshot(params.threadId, notifiedGoal, turnId, { emitClear: true });
     } else if (message.method === 'thread/goal/cleared') {
-      if (this.applyGoalSnapshot(params.threadId, null, params.turnId)) {
-        this.emitStream({ type: 'goalCleared', threadId: params.threadId, turnId: params.turnId || null });
-      }
+      this.applyGoalSnapshot(params.threadId, null, params.turnId, { emitClear: true });
     } else if (message.method === 'thread/settings/updated') {
       const state = this.state(params.threadId);
       state.settings = params.threadSettings
         ? { ...(state.settings || {}), ...params.threadSettings }
         : state.settings;
+      state.settingsRevision += 1;
     } else if (message.method === 'thread/tokenUsage/updated') {
       this.state(params.threadId).contextUsage = contextUsageFromNotification(params.tokenUsage);
     } else if (message.method === 'thread/compacted') {
-      this.state(params.threadId).status = { type: 'idle' };
+      const state = this.state(params.threadId);
+      state.status = { type: 'idle' };
+      state.compacting = false;
       if (this.isCurrentThread(params.threadId)) this.setInbox(null, '', `thread:${params.threadId}:compacted`);
       void this.drainQueue(params.threadId).catch(() => {});
     } else if (message.method === 'thread/started') {
@@ -1117,6 +1316,7 @@ class CodexAppConnection {
         const previous = this.currentThreadId;
         this.lastStartedThreadId = startedThreadId;
         this.currentThreadId = startedThreadId;
+        this.threadBindingKnown = true;
         if (previous && previous !== startedThreadId) {
           // A TUI-originated /clear switches this pane without going through Handmux's request path. Any
           // pending messages still belong to the old conversation and must never drain after the switch.
@@ -1125,12 +1325,25 @@ class CodexAppConnection {
         }
       }
     }
-    this.bump(params.threadId);
+    if (RESUME_SNAPSHOT_INVALIDATING_METHODS.has(message.method)) this.bumpEvent(params.threadId);
+    else this.bump(params.threadId);
+    if (message.method === 'serverRequest/resolved') this.emitInteractionSnapshot(params.threadId);
   }
 
-  setInbox(kind: InboxKind, msg = '', key = `${kind || 'idle'}`, ts?: number): void {
-    if (this.inbox.key === key && this.inbox.kind === kind && this.inbox.msg === msg) return;
-    this.inbox = { kind, msg, ts: ts ?? this.now(), key, suppressPush: this.baseline };
+  setInbox(
+    kind: InboxKind,
+    msg = '',
+    key = `${kind || 'idle'}`,
+    ts?: number,
+    correlationId?: string,
+  ): void {
+    if (this.inbox.key === key && this.inbox.kind === kind && this.inbox.msg === msg
+      && this.inbox.correlationId === correlationId) return;
+    this.inbox = {
+      kind, msg, ts: ts ?? this.now(), key,
+      ...(correlationId === undefined ? {} : { correlationId }),
+      suppressPush: this.baseline,
+    };
     queueMicrotask(() => Promise.resolve(this.onStateChange(this.pane)).catch(() => {}));
   }
 
@@ -1142,9 +1355,12 @@ class CodexAppConnection {
 
   state(threadId: string): ThreadState {
     if (!this.threadState.has(threadId)) this.threadState.set(threadId, {
-      revision: 0, readRevision: -1, thread: null, status: null, activeTurnId: null, settings: null,
+      revision: 0, eventRevision: 0, settingsRevision: 0, readRevision: -1,
+      thread: null, status: null, activeTurnId: null, settings: null,
       activePrompt: '', contextUsage: null, lastTurn: null, loadedOnly: false, liveItemIds: new Map(),
-      completedAgentItemIds: new Set(), plans: new Map(), goal: undefined, goalTurnId: null,
+      completedAgentItemIds: new Set(), plans: new Map(), goal: undefined,
+      goalRevision: 0, goalEvent: null, goalTurnId: null,
+      compacting: false, deliveryHistorySafe: true, deliveryProofClientIds: new Set(),
     });
     return this.threadState.get(threadId)!;
   }
@@ -1153,32 +1369,50 @@ class CodexAppConnection {
     threadId: string | null | undefined,
     goal: unknown,
     turnId: string | null | undefined = null,
-    { emit = true }: { emit?: boolean } = {},
+    { emit = true, emitClear = false }: { emit?: boolean; emitClear?: boolean } = {},
   ): boolean {
     if (!threadId) return false;
     const normalizedGoal = goal == null ? null : parseCodexGoal(goal);
     if (goal != null && !normalizedGoal) return false;
     const goalValue = normalizedGoal;
     const state = this.state(threadId);
+    state.goalRevision += 1;
     const previous = state.goal;
     const replaced = !!goalValue && (!previous || previous.createdAt !== goalValue.createdAt
       || previous.objective !== goalValue.objective);
     state.goal = goalValue;
-    if (!goalValue || !TERMINAL_GOAL_STATUSES.has(goalValue.status)) state.goalTurnId = null;
-    else if (turnId) state.goalTurnId = turnId;
-    else if (replaced) state.goalTurnId = null;
-    if (!emit || !goalValue) return previous !== state.goal;
-    const enteredTerminal = TERMINAL_GOAL_STATUSES.has(goalValue.status)
+    const enteredTerminal = !!goalValue && TERMINAL_GOAL_STATUSES.has(goalValue.status)
       && previous?.status !== goalValue.status;
-    const restarted = !!previous && TERMINAL_GOAL_STATUSES.has(previous.status) && goalValue.status === 'active';
-    if (!replaced && !enteredTerminal && !restarted) return false;
+    const restarted = !!goalValue && !!previous
+      && TERMINAL_GOAL_STATUSES.has(previous.status) && goalValue.status === 'active';
+    const lifecycle: CodexGoalEvent | null = !goalValue ? null : restarted ? 'restarted'
+      : TERMINAL_GOAL_STATUSES.has(goalValue.status) ? goalValue.status as CodexGoalEvent : 'set';
+    if (!goalValue) {
+      state.goalEvent = null;
+      state.goalTurnId = null;
+    } else if (replaced || enteredTerminal || restarted) {
+      state.goalEvent = lifecycle;
+      state.goalTurnId = turnId || null;
+    } else {
+      state.goalEvent ||= goalValue.status === 'active' ? 'active'
+        : TERMINAL_GOAL_STATUSES.has(goalValue.status) ? goalValue.status as CodexGoalEvent : null;
+      if (goalValue.status === 'active' && !state.goalTurnId && turnId) state.goalTurnId = turnId;
+      if (TERMINAL_GOAL_STATUSES.has(goalValue.status) && turnId) state.goalTurnId = turnId;
+    }
+    if (emitClear && previous?.status === 'active'
+      && (!goalValue || goalValue.status === 'paused')) {
+      this.emitGoalCleared(threadId, turnId);
+    }
+    if (!emit || !goalValue) return previous !== state.goal;
+    if (!replaced && !enteredTerminal && !restarted) {
+      return false;
+    }
     // A terminal Goal without an originating turn can be read as state, but cannot be placed truthfully in
     // the conversation. Its durable rollout entry will render at the exact historical position instead.
     if (TERMINAL_GOAL_STATUSES.has(goalValue.status) && !turnId) return true;
     this.emitStream({
       type: 'goal', threadId, turnId: turnId || null,
-      event: restarted ? 'restarted'
-        : TERMINAL_GOAL_STATUSES.has(goalValue.status) ? goalValue.status : 'set',
+      event: lifecycle!,
       goal: goalValue,
     });
     return true;
@@ -1235,7 +1469,7 @@ class CodexAppConnection {
     this.expireQueueEdit(threadId, { resume: false });
     const queue = this.queueState(threadId, false);
     const state = this.state(threadId);
-    if (!queue?.items.length || queue.editing || state.status?.type !== 'idle'
+    if (!state.deliveryHistorySafe || !queue?.items.length || queue.editing || state.status?.type !== 'idle'
       || state.lastTurn?.status !== 'completed') return;
     queueMicrotask(() => { void this.drainQueue(threadId).catch(() => {}); });
   }
@@ -1248,6 +1482,19 @@ class CodexAppConnection {
       ...this.queueItemView(item),
       ...(editingItemId === item.id ? { editing: true } : {}),
     }));
+  }
+
+  submissionReceiptsFor(threadId: string): CodexSubmissionReceiptView[] {
+    return [...this.submissionStore.values()]
+      .filter((receipt) => receipt.pane === this.pane && receipt.threadId === threadId)
+      .sort((left, right) => right.updatedAt - left.updatedAt)
+      .slice(0, 50)
+      .map((receipt) => ({
+        requestId: receipt.requestId,
+        status: receipt.status,
+        ...(receipt.queueItemId ? { queueItemId: receipt.queueItemId } : {}),
+        ...(receipt.turnId ? { turnId: receipt.turnId } : {}),
+      }));
   }
 
   queueItemView(item: InternalQueueItem): CodexQueueItem {
@@ -1296,29 +1543,145 @@ class CodexAppConnection {
     if (item?.requestId) this.submissionStore.delete(this.submissionKey(threadId, item.requestId));
   }
 
+  releaseDeliveryHistoryGuardIfSettled(threadId: string): boolean {
+    const state = this.state(threadId);
+    state.deliveryHistorySafe = state.deliveryProofClientIds.size === 0;
+    return state.deliveryHistorySafe;
+  }
+
+  settleDeliveryHistoryProof(threadId: string, clientIds: Iterable<string>): boolean {
+    const state = this.state(threadId);
+    for (const clientId of clientIds) state.deliveryProofClientIds.delete(clientId);
+    return this.releaseDeliveryHistoryGuardIfSettled(threadId);
+  }
+
+  requireDeliveryHistoryProof(threadId: string, clientIds: Iterable<string>): void {
+    const state = this.state(threadId);
+    const unsettled = this.unsettledDeliveryClientIds(threadId);
+    for (const clientId of clientIds) {
+      if (unsettled.has(clientId)) state.deliveryProofClientIds.add(clientId);
+    }
+    this.releaseDeliveryHistoryGuardIfSettled(threadId);
+  }
+
   reconcileQueuedDeliveries(
     threadId: string,
     source: AppThread | AppTurn | AppItem | null | undefined,
   ): boolean {
     const delivered = deliveredClientMessages(source);
     if (!delivered.size) return false;
+    this.settleDeliveryHistoryProof(threadId, delivered.keys());
+    let changed = false;
     const queue = this.queueState(threadId, false);
-    if (!queue?.items.length) return false;
-    const removed = queue.items.filter((item) => delivered.has(item.clientId));
+    const removed = (queue?.items || []).filter((item) => delivered.has(item.clientId));
     const removedIds = new Set(removed.map((item) => item.id));
-    if (!removedIds.size) return false;
     for (const item of removed) {
       this.markSubmissionAccepted(threadId, item, delivered.get(item.clientId) ?? null);
     }
-    queue.items = queue.items.filter((item) => !removedIds.has(item.id));
-    if (queue.editing && removedIds.has(queue.editing.itemId)) {
-      this.clearQueueEditTimer(queue);
-      queue.editing = null;
+    if (queue && removedIds.size) {
+      queue.items = queue.items.filter((item) => !removedIds.has(item.id));
+      if (queue.editing && removedIds.has(queue.editing.itemId)) {
+        this.clearQueueEditTimer(queue);
+        queue.editing = null;
+      }
+      changed = true;
     }
+    for (const receipt of this.submissionStore.values()) {
+      if (receipt.pane !== this.pane || receipt.threadId !== threadId || receipt.status === 'accepted'
+        || !delivered.has(receipt.requestId)) continue;
+      receipt.status = 'accepted';
+      receipt.updatedAt = this.now();
+      receipt.settled = true;
+      delete receipt.queueItemId;
+      delete receipt.result;
+      const turnId = delivered.get(receipt.requestId);
+      if (turnId) receipt.turnId = turnId;
+      changed = true;
+    }
+    if (!changed) return false;
+    this.releaseDeliveryHistoryGuardIfSettled(threadId);
     this.bump(threadId);
     this.cleanupQueue(threadId);
     this.persistOutbox();
     return true;
+  }
+
+  unsettledDeliveryClientIds(threadId: string): Set<string> {
+    const ids = new Set((this.queueState(threadId, false)?.items || []).map((item) => item.clientId));
+    for (const receipt of this.submissionStore.values()) {
+      if (receipt.pane === this.pane && receipt.threadId === threadId && receipt.status !== 'accepted') {
+        ids.add(receipt.requestId);
+      }
+    }
+    return ids;
+  }
+
+  async reconcileDurableDeliveryHistory(
+    threadId: string,
+    initial: AppThread | null,
+    { initialComplete = false }: { initialComplete?: boolean } = {},
+  ): Promise<void> {
+    // This scan may overlap a pane migration. It can settle only the proof obligations that existed when
+    // it began; a later migration owns a separate scan and must remain fail-closed until that scan finishes.
+    const state = this.state(threadId);
+    const proofClientIds = new Set(state.deliveryProofClientIds);
+    const requestedEventRevision = state.eventRevision;
+    this.reconcileQueuedDeliveries(threadId, initial);
+    if (![...proofClientIds].some((clientId) => (
+      this.state(threadId).deliveryProofClientIds.has(clientId)
+    ))) return;
+    if (!this.boundedTurns) {
+      if (!initialComplete) {
+        const result = await this.rpc('thread/read', { threadId, includeTurns: true });
+        this.requireCurrentThread(threadId);
+        if (this.state(threadId).eventRevision !== requestedEventRevision) return;
+        if (!result.thread) throw deliveryReconcileError();
+        this.reconcileQueuedDeliveries(threadId, result.thread);
+      }
+      this.settleDeliveryHistoryProof(threadId, proofClientIds);
+      return;
+    }
+    let cursor: string | null = null;
+    const seenCursors = new Set<string>();
+    // Absence is safe only at the authoritative end of history. Normal histories scan exhaustively in
+    // bounded payloads; the high shared page budget exists only as a corrupt-pagination resource fuse.
+    for (let pageIndex = 0; pageIndex < MAX_RECEIPT_RECONCILE_PAGES; pageIndex++) {
+      const page = await this.listTurns(threadId, RECEIPT_RECONCILE_PAGE_LIMIT, cursor);
+      this.reconcileQueuedDeliveries(threadId, { turns: page.turns });
+      if (![...proofClientIds].some((clientId) => (
+        this.state(threadId).deliveryProofClientIds.has(clientId)
+      ))) return;
+      if (!page.nextCursor) {
+        if (this.state(threadId).eventRevision !== requestedEventRevision) return;
+        this.settleDeliveryHistoryProof(threadId, proofClientIds);
+        return;
+      }
+      if (seenCursors.has(page.nextCursor)) return;
+      seenCursors.add(page.nextCursor);
+      cursor = page.nextCursor;
+    }
+    throw deliveryReconcileError();
+  }
+
+  async reconcileMigratedDeliveryHistory(
+    threadId: string,
+    clientIds: Iterable<string>,
+  ): Promise<void> {
+    const state = this.state(threadId);
+    this.requireDeliveryHistoryProof(threadId, clientIds);
+    if (state.deliveryHistorySafe) {
+      this.wakeQueue(threadId);
+      return;
+    }
+    if (!this.subscribed.has(threadId)) return;
+    try {
+      await this.reconcileDurableDeliveryHistory(threadId, state.thread);
+    } catch {
+      // Keep every remaining proof obligation fail-closed. A concurrent scan may already have settled all
+      // of them, so derive the guard from the current set instead of overwriting it with this stale failure.
+    }
+    this.releaseDeliveryHistoryGuardIfSettled(threadId);
+    if (state.deliveryHistorySafe) this.wakeQueue(threadId);
   }
 
   cleanupQueue(threadId: string): void {
@@ -1338,6 +1701,8 @@ class CodexAppConnection {
         this.submissionStore.delete(key);
       }
     }
+    this.state(threadId).deliveryProofClientIds.clear();
+    this.releaseDeliveryHistoryGuardIfSettled(threadId);
     this.persistOutbox();
     this.bump(threadId);
   }
@@ -1347,6 +1712,55 @@ class CodexAppConnection {
     return state.activeTurnId
       || [...(state.thread?.turns || [])].reverse().find((turn) => turn.status === 'inProgress')?.id
       || null;
+  }
+
+  beginGoalMutation(threadId: string): PendingGoalMutation {
+    const mutation = { token: Symbol('goal-mutation'), turnId: this.activeTurn(threadId) };
+    const pending = this.pendingGoalMutations.get(threadId) || [];
+    pending.push(mutation);
+    this.pendingGoalMutations.set(threadId, pending);
+    return mutation;
+  }
+
+  async withGoalWrite<T>(threadId: string, action: () => Promise<T>): Promise<T> {
+    const previous = this.goalWriteTails.get(threadId) || Promise.resolve();
+    let release!: () => void;
+    const completion = new Promise<void>((resolve) => { release = resolve; });
+    this.goalWriteTails.set(threadId, completion);
+    await previous.catch(() => {});
+    try {
+      return await action();
+    } finally {
+      release();
+      if (this.goalWriteTails.get(threadId) === completion) this.goalWriteTails.delete(threadId);
+    }
+  }
+
+  async withGoalRead<T>(threadId: string, action: () => Promise<T>): Promise<T> {
+    const previous = this.goalReadTails.get(threadId) || Promise.resolve();
+    let release!: () => void;
+    const completion = new Promise<void>((resolve) => { release = resolve; });
+    this.goalReadTails.set(threadId, completion);
+    await previous.catch(() => {});
+    try {
+      return await action();
+    } finally {
+      release();
+      if (this.goalReadTails.get(threadId) === completion) this.goalReadTails.delete(threadId);
+    }
+  }
+
+  endGoalMutation(threadId: string, token: symbol): void {
+    const pending = this.pendingGoalMutations.get(threadId);
+    if (!pending) return;
+    const index = pending.findIndex((mutation) => mutation.token === token);
+    if (index >= 0) pending.splice(index, 1);
+    if (!pending.length) this.pendingGoalMutations.delete(threadId);
+  }
+
+  pendingGoalTurn(threadId: string): string | null | undefined {
+    const pending = this.pendingGoalMutations.get(threadId);
+    return pending?.length ? pending[pending.length - 1]?.turnId : undefined;
   }
 
   enqueue(threadId: string, text: string, requestId: string | null = null): CodexQueueItem {
@@ -1372,6 +1786,9 @@ class CodexAppConnection {
     text: string,
     clientUserMessageId: string | null = null,
   ): Promise<RpcResult> {
+    // Keep the ownership check adjacent to the native mutation. Callers may have awaited resume/read after
+    // their initial assertion, during which a TUI-originated /clear can switch this pane to another thread.
+    this.requireCurrentThread(threadId);
     const queue = this.queueState(threadId);
     queue.starting = true;
     const state = this.state(threadId);
@@ -1385,7 +1802,10 @@ class CodexAppConnection {
       state.activeTurnId = result.turn?.id || null;
       state.status = { type: 'active', activeFlags: [] };
       this.currentThreadId ||= threadId;
-      this.setInbox('working', state.activePrompt, `turn:${result.turn?.id || 'starting'}:started`);
+      this.threadBindingKnown = true;
+      if (this.isCurrentThread(threadId)) {
+        this.setInbox('working', state.activePrompt, `turn:${result.turn?.id || 'starting'}:started`);
+      }
       this.bump(threadId);
       if (state.loadedOnly) {
         // turn/start normally persists the first rollout synchronously; attach this observer immediately.
@@ -1406,18 +1826,74 @@ class CodexAppConnection {
     text: string,
     requestId: string | null = null,
   ): Promise<InternalSendResult> {
+    this.requireCurrentThread(threadId);
     const queue = this.queueState(threadId);
-    const knownState = this.state(threadId);
+    let knownState = this.state(threadId);
+    if (!queue.items.length && !queue.starting && !queue.draining
+      && this.activeTurn(threadId) && knownState.status?.type !== 'active') {
+      try {
+        await this.readThread(threadId, { force: true });
+        knownState = this.state(threadId);
+      } catch { /* retain the safer queued behavior while App Server is unavailable */ }
+      this.requireCurrentThread(threadId);
+    }
     if (this.activeTurn(threadId) || knownState.status?.type === 'active'
       || queue.items.length || queue.starting || queue.draining) {
       return { queued: true, item: this.enqueue(threadId, text, requestId) };
     }
     const state = await this.ensureThread(threadId);
+    this.requireCurrentThread(threadId);
     if (this.activeTurn(threadId) || state.status?.type === 'active'
       || queue.items.length || queue.starting || queue.draining) {
       return { queued: true, item: this.enqueue(threadId, text, requestId) };
     }
     return this.startTurn(threadId, text, requestId);
+  }
+
+  async dispatchPromptDirect(
+    threadId: string,
+    text: string,
+    requestId: string,
+  ): Promise<{ busy: true } | { busy: false; result: AppTurn | UnknownRecord | null }> {
+    this.requireCurrentThread(threadId);
+    const queue = this.queueState(threadId);
+    let state = this.state(threadId);
+    if (this.activeTurn(threadId) || state.status?.type === 'active'
+      || queue.items.length || queue.starting || queue.draining || queue.steering.size) {
+      return { busy: true };
+    }
+    state = await this.ensureThread(threadId);
+    this.requireCurrentThread(threadId);
+    if (this.activeTurn(threadId) || state.status?.type === 'active'
+      || queue.items.length || queue.starting || queue.draining || queue.steering.size) {
+      return { busy: true };
+    }
+    return { busy: false, result: await this.startTurn(threadId, text, requestId) };
+  }
+
+  async dispatchSteerDirect(
+    threadId: string,
+    text: string,
+    requestId: string,
+    plan: { kind: 'steer-active-turn' | 'start-turn-fallback'; nativeTurnId?: string },
+  ): Promise<{ busy: true } | { busy: false; result: AppTurn | UnknownRecord | null }> {
+    await this.ensureThread(threadId);
+    this.requireCurrentThread(threadId);
+    const activeTurnId = this.activeTurn(threadId);
+    if (plan.kind === 'steer-active-turn') {
+      if (!plan.nativeTurnId || activeTurnId !== plan.nativeTurnId) return { busy: true };
+      const result = await this.rpc('turn/steer', {
+        threadId, expectedTurnId: plan.nativeTurnId,
+        input: [{ type: 'text', text }], clientUserMessageId: requestId,
+      });
+      return { busy: false, result };
+    }
+    const queue = this.queueState(threadId);
+    if (activeTurnId || this.state(threadId).status?.type === 'active'
+      || queue.items.length || queue.starting || queue.draining || queue.steering.size) {
+      return { busy: true };
+    }
+    return { busy: false, result: await this.startTurn(threadId, text, requestId) };
   }
 
   pruneSubmissionReceipts() {
@@ -1453,6 +1929,7 @@ class CodexAppConnection {
     }
     receipt.updatedAt = this.now();
     receipt.settled = true;
+    this.settleDeliveryHistoryProof(threadId, [receipt.requestId]);
     this.pruneSubmissionReceipts();
     this.persistOutbox();
     return result;
@@ -1471,23 +1948,64 @@ class CodexAppConnection {
       this.persistOutbox();
       return { queued: true, item: this.queueItemView(queued) };
     }
-    let thread: AppThread | null;
-    try { thread = await this.readThread(threadId, { force: true }); } catch (error) {
-      if (!/no rollout found/i.test(asError(error).message)) throw error;
-      thread = this.state(threadId).thread;
+    let thread: AppThread | null = this.state(threadId).thread;
+    if (this.boundedTurns) {
+      try { thread = await this.readThread(threadId, { force: true }); } catch (error) {
+        if (!isMissingThreadRollout(error)) throw error;
+        thread = this.state(threadId).thread;
+      }
     }
-    const delivered = deliveredClientMessages(thread);
-    if (delivered.has(receipt.requestId)) {
+    this.requireCurrentThread(threadId);
+    const delivered = await this.findDeliveredClientMessage(threadId, receipt.requestId, thread);
+    if (delivered !== undefined) {
       receipt.status = 'accepted';
       receipt.updatedAt = this.now();
       receipt.settled = true;
       delete receipt.queueItemId;
-      const turnId = delivered.get(receipt.requestId);
+      const turnId = delivered;
       if (turnId) receipt.turnId = turnId;
+      this.settleDeliveryHistoryProof(threadId, [receipt.requestId]);
       this.persistOutbox();
       return this.submissionResult(threadId, receipt);
     }
     return this.runSubmission(threadId, receipt);
+  }
+
+  async findDeliveredClientMessage(
+    threadId: string,
+    requestId: string,
+    initial: AppThread | null,
+  ): Promise<string | null | undefined> {
+    const requestedEventRevision = this.state(threadId).eventRevision;
+    const initialDelivered = deliveredClientMessages(initial);
+    if (initialDelivered.has(requestId)) return initialDelivered.get(requestId) ?? null;
+    if (!this.boundedTurns) {
+      const result = await this.rpc('thread/read', { threadId, includeTurns: true });
+      this.requireCurrentThread(threadId);
+      if (this.state(threadId).eventRevision !== requestedEventRevision || !result.thread) {
+        throw deliveryReconcileError();
+      }
+      const delivered = deliveredClientMessages(result.thread);
+      return delivered.has(requestId) ? delivered.get(requestId) ?? null : undefined;
+    }
+    let cursor: string | null = null;
+    const seenCursors = new Set<string>();
+    // Keep the same exhaustive absence proof and high resource fuse as reconnect recovery.
+    for (let pageIndex = 0; pageIndex < MAX_RECEIPT_RECONCILE_PAGES; pageIndex++) {
+      const page = await this.listTurns(threadId, RECEIPT_RECONCILE_PAGE_LIMIT, cursor);
+      const delivered = deliveredClientMessages({ turns: page.turns });
+      if (delivered.has(requestId)) return delivered.get(requestId) ?? null;
+      if (this.state(threadId).eventRevision !== requestedEventRevision) {
+        throw deliveryReconcileError();
+      }
+      if (!page.nextCursor) return undefined;
+      if (seenCursors.has(page.nextCursor)) {
+        throw deliveryReconcileError();
+      }
+      seenCursors.add(page.nextCursor);
+      cursor = page.nextCursor;
+    }
+    throw deliveryReconcileError();
   }
 
   async submit(
@@ -1525,7 +2043,9 @@ class CodexAppConnection {
     await this.assertCurrentThread(threadId);
     this.expireQueueEdit(threadId, { resume: false });
     const queue = this.queueState(threadId, false);
-    if (!queue?.items.length || queue.draining || queue.starting || queue.editing || this.activeTurn(threadId)
+    if (!this.state(threadId).deliveryHistorySafe
+      || !queue?.items.length || queue.draining || queue.starting || queue.steering.size
+      || queue.editing || this.activeTurn(threadId)
       || this.state(threadId).status?.type === 'active') return;
     queue.draining = true;
     const item = queue.items[0];
@@ -1538,6 +2058,7 @@ class CodexAppConnection {
       this.markSubmissionAccepted(threadId, item, result?.turn?.id || null);
       if (queue.items[0]?.id === item.id) queue.items.shift();
       else queue.items = queue.items.filter((candidate) => candidate.id !== item.id);
+      this.settleDeliveryHistoryProof(threadId, [item.clientId]);
       this.bump(threadId);
       this.persistOutbox();
     } finally {
@@ -1548,10 +2069,14 @@ class CodexAppConnection {
 
   async steerQueued(threadId: string, itemId: string) {
     await this.ensureThread(threadId);
+    this.requireCurrentThread(threadId);
     const queue = this.queueState(threadId, false);
     if (!queue) throw new Error('queued message is no longer pending');
     const item = queue?.items.find((candidate) => candidate.id === itemId);
     if (!item) throw new Error('queued message is no longer pending');
+    if (!this.state(threadId).deliveryHistorySafe) {
+      throw new Error('Codex delivery status is still being reconciled; the message remains queued');
+    }
     if (queue.draining && queue.items[0]?.id === itemId) {
       throw new Error('queued message is already being sent');
     }
@@ -1559,19 +2084,29 @@ class CodexAppConnection {
     if (queue.steering.has(itemId)) throw new Error('queued message is already being sent');
     queue.steering.add(itemId);
     try {
+      if (this.activeTurn(threadId) && this.state(threadId).status?.type !== 'active') {
+        try { await this.readThread(threadId, { force: true }); }
+        catch { /* steer against the retained active turn while App Server is reconnecting */ }
+        this.requireCurrentThread(threadId);
+      }
       const turnId = this.activeTurn(threadId);
       let result;
       if (turnId) {
+        this.requireCurrentThread(threadId);
         result = await this.rpc('turn/steer', {
           threadId, expectedTurnId: turnId, input: [{ type: 'text', text: item.text }],
           clientUserMessageId: item.clientId,
         });
       } else {
+        if (this.state(threadId).status?.type === 'active') {
+          throw new Error('Codex is busy without a steerable turn; the message remains queued');
+        }
         if (queue.starting || queue.draining) throw new Error('queued message is already being sent');
         result = await this.startTurn(threadId, item.text, item.clientId);
       }
       this.markSubmissionAccepted(threadId, item, result?.turn?.id || result?.turnId || turnId || null);
       queue.items = queue.items.filter((candidate) => candidate.id !== itemId);
+      this.settleDeliveryHistoryProof(threadId, [item.clientId]);
       this.bump(threadId);
       this.persistOutbox();
       return { steered: true, item: this.queueItemView(item), result };
@@ -1592,6 +2127,7 @@ class CodexAppConnection {
     const [removed] = queue.items.splice(index, 1);
     if (!removed) throw new Error('queued message is no longer pending');
     this.deleteSubmissionForItem(threadId, removed);
+    this.settleDeliveryHistoryProof(threadId, [removed.clientId]);
     this.bump(threadId);
     this.cleanupQueue(threadId);
     this.persistOutbox();
@@ -1677,9 +2213,17 @@ class CodexAppConnection {
     return !!threadId && this.currentThreadId === threadId;
   }
 
-  async assertCurrentThread(threadId: string): Promise<void> {
-    if (!this.currentThreadId) await this.discoverThread();
+  requireCurrentThread(threadId: string): void {
+    if (this.closed) throw new Error('Codex App Server connection closed');
     if (!this.isCurrentThread(threadId)) throw new Error('Codex session changed');
+  }
+
+  async assertCurrentThread(threadId: string): Promise<void> {
+    if (this.closed) throw new Error('Codex App Server connection closed');
+    if (!this.currentThreadId) await this.discoverThread();
+    this.requireCurrentThread(threadId);
+    await this.onThreadBind(this, threadId);
+    this.requireCurrentThread(threadId);
   }
 
   upsertTurn(threadId: string | undefined, incoming: AppTurn | undefined): AppTurn | null {
@@ -1880,6 +2424,28 @@ class CodexAppConnection {
         }
       }
     }
+    this.emitLiveStreamOverlays(threadId);
+    const state = this.threadState.get(threadId);
+    if (state?.goal && TERMINAL_GOAL_STATUSES.has(state.goal.status) && state.goalTurnId) {
+      this.emitStream({
+        type: 'goal', threadId, turnId: state.goalTurnId,
+        event: state.goal.status, goal: state.goal,
+      });
+    }
+    return () => this.streamListeners.delete(subscription);
+  }
+
+  observeStream(threadId: string, listener: StreamListener): { cursor: number; close(): boolean } {
+    const journal = this.streamJournal(threadId);
+    const subscription = { threadId, listener };
+    this.streamListeners.add(subscription);
+    return {
+      cursor: journal.sequence,
+      close: () => this.streamListeners.delete(subscription),
+    };
+  }
+
+  emitLiveStreamOverlays(threadId: string): void {
     const state = this.threadState.get(threadId);
     for (const turn of state?.thread?.turns || []) {
       if (!state || !turn.id) continue;
@@ -1898,18 +2464,56 @@ class CodexAppConnection {
         });
       }
     }
-    if (state?.goal && TERMINAL_GOAL_STATUSES.has(state.goal.status) && state.goalTurnId) {
-      this.emitStream({
+  }
+
+  currentConversationGoal(threadId: string): ThreadStreamEvent | null {
+    const state = this.threadState.get(threadId);
+    const goal = state?.goal;
+    if (!goal) return null;
+    if (goal.status === 'active') {
+      return {
         type: 'goal', threadId, turnId: state.goalTurnId,
-        event: state.goal.status, goal: state.goal,
-      });
+        event: state.goalEvent || 'active', goal,
+      };
     }
-    return () => this.streamListeners.delete(subscription);
+    if (TERMINAL_GOAL_STATUSES.has(goal.status) && state?.goalTurnId) {
+      return { type: 'goal', threadId, turnId: state.goalTurnId, event: goal.status, goal };
+    }
+    return null;
+  }
+
+  conversationGoalRevision(threadId: string): number {
+    return this.state(threadId).goalRevision;
+  }
+
+  conversationGoal(threadId: string): CodexGoal | null {
+    return this.state(threadId).goal ?? null;
+  }
+
+  goalMutationIsCurrent(threadId: string, token: symbol, revision: number): boolean {
+    const pending = this.pendingGoalMutations.get(threadId);
+    return pending?.[pending.length - 1]?.token === token
+      && this.conversationGoalRevision(threadId) === revision;
+  }
+
+  goalMutationOwns(threadId: string, token: symbol): boolean {
+    const pending = this.pendingGoalMutations.get(threadId);
+    return pending?.[pending.length - 1]?.token === token;
+  }
+
+  emitGoalCleared(threadId: string, turnId: string | null | undefined): void {
+    this.emitStream({ type: 'goalCleared', threadId, turnId: turnId || null });
   }
 
   emitStream(event: unknown): void {
     const parsed = parseCodexStreamEvent(event);
     if (!parsed || parsed.type === 'error' || !parsed.threadId) return;
+    if (this.state(parsed.threadId).compacting
+      && ['started', 'snapshot', 'delta', 'completed'].includes(parsed.type)) {
+      // Codex exposes the compactor model's generated handoff as a normal agentMessage stream. It is
+      // implementation data for the later compaction event, not an assistant reply for the user.
+      return;
+    }
     const projected = this.recordStreamEvent(parsed);
     if (!projected) return;
     for (const subscription of this.streamListeners) {
@@ -1918,15 +2522,63 @@ class CodexAppConnection {
     }
   }
 
+  observeInteractions(threadId: string, listener: InteractionSnapshotListener): CodexInteractionSnapshot & {
+    close(): void;
+  } {
+    const subscription = { threadId, listener };
+    this.interactionListeners.add(subscription);
+    return {
+      ...this.interactionSnapshot(threadId),
+      close: () => this.interactionListeners.delete(subscription),
+    };
+  }
+
+  interactionSnapshot(threadId: string): CodexInteractionSnapshot {
+    return {
+      cursor: this.state(threadId).revision,
+      approvals: this.approvalsFor(threadId),
+      userInputs: this.userInputsFor(threadId),
+    };
+  }
+
+  emitInteractionSnapshot(threadId: string): void {
+    if (!threadId) return;
+    const snapshot = this.interactionSnapshot(threadId);
+    for (const subscription of this.interactionListeners) {
+      if (subscription.threadId !== threadId) continue;
+      try { subscription.listener(structuredClone(snapshot)); } catch { /* isolate observers */ }
+    }
+  }
+
   closeStreamListeners() {
     for (const subscription of this.streamListeners) {
       try { subscription.listener({ type: 'disconnected', threadId: subscription.threadId }); } catch { /* closing */ }
     }
     this.streamListeners.clear();
+    const interactionThreads = new Set([...this.interactionListeners].map((item) => item.threadId));
+    for (const threadId of interactionThreads) {
+      const snapshot: CodexInteractionSnapshot = {
+        cursor: this.state(threadId).revision,
+        approvals: [],
+        userInputs: [],
+        disconnected: true,
+      };
+      for (const subscription of this.interactionListeners) {
+        if (subscription.threadId !== threadId) continue;
+        try { subscription.listener(structuredClone(snapshot)); } catch { /* closing */ }
+      }
+    }
+    this.interactionListeners.clear();
   }
 
   bump(threadId: string | null | undefined): void {
     if (threadId) this.state(threadId).revision++;
+  }
+
+  bumpEvent(threadId: string | null | undefined): void {
+    if (!threadId) return;
+    this.state(threadId).eventRevision++;
+    this.bump(threadId);
   }
 
   markWaiting(threadId: string | null | undefined, flag: string): void {
@@ -1968,39 +2620,88 @@ class CodexAppConnection {
   }
 
   async ensureThread(threadId: string): Promise<ThreadState> {
+    const state = this.state(threadId);
+    if (this.subscribed.has(threadId)) return state;
+    const active = this.ensuringThreads.get(threadId);
+    if (active) return active;
+    const pending = this.resumeThread(threadId).finally(() => {
+      if (this.ensuringThreads.get(threadId) === pending) this.ensuringThreads.delete(threadId);
+    });
+    this.ensuringThreads.set(threadId, pending);
+    return pending;
+  }
+
+  private async resumeThread(threadId: string): Promise<ThreadState> {
     await this.open();
     const state = this.state(threadId);
     if (this.subscribed.has(threadId)) return state;
+    this.requireDeliveryHistoryProof(threadId, this.unsettledDeliveryClientIds(threadId));
+    const requestedEventRevision = state.eventRevision;
+    const requestedSettingsRevision = state.settingsRevision;
     try {
-      const result = await this.rpc('thread/resume', { threadId });
+      if (!codexVersion(this.appServerUserAgent)) {
+        throw new Error(
+          'Codex App Server version could not be identified; upgrade Codex CLI to 0.149.0 or newer',
+        );
+      }
+      const result = await this.rpc('thread/resume', this.boundedTurns ? {
+        threadId,
+        excludeTurns: true,
+        initialTurnsPage: boundedTurnParams(),
+      } : { threadId });
+      const resumedThread = this.boundedTurns && result.thread
+        ? { ...result.thread, turns: turnPage(result.initialTurnsPage).turns }
+        : result.thread;
       this.subscribed.add(threadId);
-      state.thread = result.thread || null;
-      this.reconcileQueuedDeliveries(threadId, state.thread);
-      state.readRevision = state.revision;
-      state.status = result.thread?.status || state.status;
-      state.settings = settingsFromResume(result);
-      state.loadedOnly = false;
-      const previousActiveTurnId = state.activeTurnId;
-      const previousActivePrompt = state.activePrompt;
-      state.activeTurnId = [...(result.thread?.turns || [])].reverse()
-        .find((turn) => turn.status === 'inProgress')?.id || null;
-      const resumedPrompt = state.activeTurnId
-        ? turnPrompt((result.thread?.turns || []).find((turn) => turn.id === state.activeTurnId))
-        : '';
-      const last = [...(result.thread?.turns || [])].reverse().find((turn) => turn.status !== 'inProgress') || null;
-      state.lastTurn = last;
-      const samePendingTurn = state.activeTurnId
-        && (!previousActiveTurnId || previousActiveTurnId === state.activeTurnId);
-      state.activePrompt = resumedPrompt || (samePendingTurn ? previousActivePrompt : '');
       this.currentThreadId ||= threadId;
-      if (this.isCurrentThread(threadId)) {
-        const kind = activeKind(state.status);
-        if (kind) {
-          this.setInbox(kind, activeTurnPrompt(state), `status:${threadId}:${kind}`);
-        } else {
-          if (last?.status === 'completed' || last?.status === 'failed') {
+      this.threadBindingKnown = true;
+      if (this.isCurrentThread(threadId)) await this.onThreadBind(this, threadId);
+      try {
+        await this.reconcileDurableDeliveryHistory(
+          threadId,
+          resumedThread || null,
+          {
+            initialComplete: !this.boundedTurns
+              && state.eventRevision === requestedEventRevision,
+          },
+        );
+      } catch {
+        // Opening the conversation is still safe. Keep durable submissions visible and block automatic
+        // delivery until their native history can be reconciled without risking duplicate execution.
+      }
+      this.releaseDeliveryHistoryGuardIfSettled(threadId);
+      state.loadedOnly = false;
+      const resumedSettings = settingsFromResume(result);
+      state.settings = state.settingsRevision === requestedSettingsRevision
+        ? resumedSettings
+        : { ...resumedSettings, ...(state.settings || {}) };
+      if (state.eventRevision === requestedEventRevision) {
+        state.thread = resumedThread || null;
+        state.readRevision = state.revision;
+        state.status = resumedThread?.status || state.status;
+        const previousActiveTurnId = state.activeTurnId;
+        const previousActivePrompt = state.activePrompt;
+        state.activeTurnId = [...(resumedThread?.turns || [])].reverse()
+          .find((turn) => turn.status === 'inProgress')?.id || null;
+        const resumedPrompt = state.activeTurnId
+          ? turnPrompt((resumedThread?.turns || []).find((turn) => turn.id === state.activeTurnId))
+          : '';
+        const last = [...(resumedThread?.turns || [])].reverse()
+          .find((turn) => turn.status !== 'inProgress') || null;
+        state.lastTurn = last;
+        const samePendingTurn = state.activeTurnId
+          && (!previousActiveTurnId || previousActiveTurnId === state.activeTurnId);
+        state.activePrompt = resumedPrompt || (samePendingTurn ? previousActivePrompt : '');
+        if (this.isCurrentThread(threadId)) {
+          const kind = activeKind(state.status);
+          if (kind) {
+            this.setInbox(kind, activeTurnPrompt(state), `status:${threadId}:${kind}`);
+          } else if (last?.status === 'completed' || last?.status === 'failed') {
             const completedAt = typeof last.completedAt === 'number' ? last.completedAt * 1000 : undefined;
-            this.setInbox('done', turnSummary(last) || turnPrompt(last), `turn:${last.id}:${last.status}`, completedAt);
+            this.setInbox(
+              'done', inboxTurnSummary(last, last) || turnPrompt(last),
+              `turn:${last.id}:${last.status}`, completedAt,
+            );
           }
         }
       }
@@ -2011,7 +2712,7 @@ class CodexAppConnection {
       // A newly opened TUI thread is authoritative but has no rollout until its first turn. It cannot yet
       // be resumed by a second client, so verify it against this pane's loaded-thread set and keep an empty
       // projection. turn/start persists it; the next poll then resumes normally and subscribes to events.
-      if (!/no rollout found/i.test(asError(error).message)) throw error;
+      if (!isMissingThreadRollout(error)) throw largeThreadUpgradeError(error, this.appServerUserAgent);
       const loaded = await this.loadedThreads();
       if (!loaded.includes(threadId)) throw error;
       state.thread ||= { id: threadId, turns: [], status: { type: 'idle' } };
@@ -2033,16 +2734,73 @@ class CodexAppConnection {
     // Keep refreshing this internal partial view while it still contains event-only overlays.
     const hasLiveOverlays = [...state.liveItemIds.values()].some((ids) => ids.size > 0);
     if (!force && state.thread && state.readRevision === state.revision && !hasLiveOverlays) return state.thread;
-    const requestedRevision = state.revision;
-    const result = await this.rpc('thread/read', { threadId, includeTurns: true });
-    state.thread = mergeThreadWithLive(state.thread, result.thread, state.liveItemIds);
+    const requestedEventRevision = state.eventRevision;
+    let fresh: AppThread | undefined;
+    try {
+      if (this.boundedTurns) {
+        const metadata = await this.rpc('thread/read', { threadId, includeTurns: false });
+        const page = await this.listTurns(threadId);
+        fresh = metadata.thread ? { ...metadata.thread, turns: page.turns } : undefined;
+      } else {
+        const result = await this.rpc('thread/read', { threadId, includeTurns: true });
+        fresh = result.thread;
+      }
+    } catch (error) {
+      throw largeThreadUpgradeError(error, this.appServerUserAgent);
+    }
+    // Notifications are authoritative after the read begins. A completion or status change can arrive
+    // between metadata and turns/list; discard the whole two-RPC snapshot so stale active state cannot
+    // overwrite that event. Leaving readRevision behind makes the next read retry convergence.
+    if (state.eventRevision !== requestedEventRevision) return state.thread;
+    state.thread = mergeThreadWithLive(state.thread, fresh, state.liveItemIds);
     state.loadedOnly = false;
     this.reconcileQueuedDeliveries(threadId, state.thread);
-    state.readRevision = requestedRevision;
-    state.status = result.thread?.status || state.status;
+    // Lightweight overlays may advance the public revision while the two RPCs are in flight. The fresh
+    // base snapshot still applies, and the cache now represents that current combined projection.
+    state.readRevision = state.revision;
+    state.status = fresh?.status || state.status;
     const active = [...(state.thread?.turns || [])].reverse().find((turn) => turn.status === 'inProgress');
-    if (active?.id) state.activeTurnId = active.id;
+    const previousActiveTurnId = state.activeTurnId;
+    const previousActivePrompt = state.activePrompt;
+    state.activeTurnId = active?.id || null;
+    const snapshotPrompt = active ? turnPrompt(active) : '';
+    const samePendingTurn = state.activeTurnId
+      && (!previousActiveTurnId || previousActiveTurnId === state.activeTurnId);
+    state.activePrompt = snapshotPrompt || (samePendingTurn ? previousActivePrompt : '');
+    const last = [...(state.thread?.turns || [])].reverse()
+      .find((turn) => turn.status !== 'inProgress') || null;
+    state.lastTurn = last;
+    if (this.isCurrentThread(threadId)) {
+      const kind = activeKind(state.status);
+      if (kind) {
+        this.setInbox(kind, activeTurnPrompt(state), `status:${threadId}:${kind}`);
+      } else if (last?.status === 'completed' || last?.status === 'failed') {
+        const completedAt = typeof last.completedAt === 'number' ? last.completedAt * 1000 : undefined;
+        const canonicalLast = (fresh?.turns || []).find((turn) => (
+          turn.id === last.id && turn.status !== 'inProgress'
+        ));
+        this.setInbox(
+          'done', inboxTurnSummary(canonicalLast, last) || turnPrompt(last),
+          `turn:${last.id}:${last.status}`, completedAt,
+        );
+      } else if (state.status?.type === 'idle') {
+        this.setInbox(null, '', `thread:${threadId}:idle`);
+      }
+    }
+    this.wakeQueue(threadId);
     return state.thread;
+  }
+
+  async listTurns(
+    threadId: string,
+    limit = CONTROL_TURN_LIMIT,
+    cursor: string | null = null,
+  ): Promise<TurnPage> {
+    const result = await this.rpc('thread/turns/list', {
+      threadId,
+      ...boundedTurnParams(limit, cursor),
+    });
+    return turnPage(result);
   }
 
   async loadedThreads(): Promise<string[]> {
@@ -2054,13 +2812,29 @@ class CodexAppConnection {
   }
 
   async discoverThread(): Promise<string | null> {
-    if (this.currentThreadId) return this.currentThreadId;
-    const loaded = await this.loadedThreads();
-    if (this.lastStartedThreadId && loaded.includes(this.lastStartedThreadId)) {
-      this.currentThreadId = this.lastStartedThreadId;
+    if (this.currentThreadId) {
+      this.threadBindingKnown = true;
+      await this.onThreadBind(this, this.currentThreadId);
       return this.currentThreadId;
     }
-    if (!loaded.length) return null;
+    const loaded = await this.loadedThreads();
+    // Native thread/started is newer than the startup list/read RPCs. Never let their stale replies
+    // overwrite a /clear (or first-thread) event that arrived while discovery was awaiting I/O.
+    if (this.currentThreadId) {
+      this.threadBindingKnown = true;
+      await this.onThreadBind(this, this.currentThreadId);
+      return this.currentThreadId;
+    }
+    if (this.lastStartedThreadId && loaded.includes(this.lastStartedThreadId)) {
+      this.currentThreadId = this.lastStartedThreadId;
+      this.threadBindingKnown = true;
+      await this.onThreadBind(this, this.currentThreadId);
+      return this.currentThreadId;
+    }
+    if (!loaded.length) {
+      this.threadBindingKnown = true;
+      return null;
+    }
     const threads = await Promise.all(loaded.map(async (threadId, index) => {
       try {
         const result = await this.rpc('thread/read', { threadId, includeTurns: false });
@@ -2076,7 +2850,14 @@ class CodexAppConnection {
     const roots = threads.filter((thread) => thread.root);
     const candidates = roots.length ? roots : threads.filter((thread) => !thread.known);
     candidates.sort((a, b) => b.order - a.order);
+    if (this.currentThreadId) {
+      this.threadBindingKnown = true;
+      await this.onThreadBind(this, this.currentThreadId);
+      return this.currentThreadId;
+    }
     this.currentThreadId = candidates[0]?.threadId || null;
+    this.threadBindingKnown = true;
+    if (this.currentThreadId) await this.onThreadBind(this, this.currentThreadId);
     return this.currentThreadId;
   }
 
@@ -2102,13 +2883,18 @@ class CodexAppConnection {
       ? (approval.decisions.includes(decision) ? decision : null)
       : resolveApprovalDecision(request, decision);
     if (resolved == null) throw new Error('approval decision is unavailable');
+    this.requireCurrentThread(threadId);
     this.respond(request.id, request.method === 'item/permissions/requestApproval'
       ? permissionResponse(request, decision)
       : { decision: resolved });
     this.approvals.delete(key);
     this.markWorking(threadId);
-    this.setInbox('working', activeTurnPrompt(this.state(threadId)) || this.inbox.msg, `approval:${key}:resolved`);
+    this.setInbox(
+      'working', activeTurnPrompt(this.state(threadId)) || this.inbox.msg,
+      `approval:${key}:resolved`, undefined, approval.correlationId,
+    );
     this.bump(threadId);
+    this.emitInteractionSnapshot(threadId);
   }
 
   answerInput(threadId: string, requestId: string | number, answers: Record<string, string[]>): void {
@@ -2127,11 +2913,16 @@ class CodexAppConnection {
     if ([...expected].some((questionId) => !normalized[questionId]?.answers.length)) {
       throw new Error('bad user input response');
     }
+    this.requireCurrentThread(threadId);
     this.respond(request.id, { answers: normalized });
     this.userInputs.delete(key);
     this.markWorking(threadId);
-    this.setInbox('working', activeTurnPrompt(this.state(threadId)) || this.inbox.msg, `input:${key}:resolved`);
+    this.setInbox(
+      'working', activeTurnPrompt(this.state(threadId)) || this.inbox.msg,
+      `input:${key}:resolved`, undefined, input.correlationId,
+    );
     this.bump(threadId);
+    this.emitInteractionSnapshot(threadId);
   }
 
   fail(error: unknown): void {
@@ -2177,7 +2968,30 @@ export function createCodexAppServer({
   const queues = new Map<string, QueueState>();
   const submissions = new Map<string, InternalSubmissionReceipt>();
   const streamEvents = new Map<string, StreamJournal>();
-  const persisted = parseCodexOutboxSnapshot(outboxStore?.read?.());
+  let persisted: ReturnType<typeof parseCodexOutboxSnapshot> = null;
+  let recoveredCorruptOutbox = false;
+  if (outboxStore) {
+    let raw: unknown;
+    let corrupt = false;
+    try {
+      raw = outboxStore.readStrict ? outboxStore.readStrict() : outboxStore.read?.();
+    } catch (error) {
+      if (error instanceof SyntaxError) corrupt = true;
+      else throw error;
+    }
+    if (!corrupt && raw != null) {
+      persisted = parseCodexOutboxSnapshot(raw);
+      corrupt = persisted == null;
+    }
+    if (corrupt) {
+      if (!outboxStore.quarantine || !outboxStore.write) {
+        throw new Error('Codex outbox is corrupt and cannot be quarantined safely');
+      }
+      outboxStore.quarantine();
+      recoveredCorruptOutbox = true;
+      persisted = null;
+    }
+  }
   for (const record of persisted?.queues || []) {
     queues.set(`${record.pane}\0${record.threadId}`, {
       items: record.items.map((item) => ({
@@ -2218,11 +3032,210 @@ export function createCodexAppServer({
     }) => receipt);
     outboxStore.write({ version: 1, queues: queueRecords, receipts });
   }
+  if (recoveredCorruptOutbox) persistOutbox();
+
+  let outboxBindTail: Promise<void> = Promise.resolve();
+
+  function assertOutboxBindTarget(connection: CodexAppConnection, threadId: string): void {
+    if (connection.closed) throw new Error('Codex App Server connection closed');
+    if (!connection.isCurrentThread(threadId)) throw new Error('Codex session changed');
+  }
+
+  async function bindOutboxToCurrentPaneNow(
+    boundConnection: CodexAppConnection,
+    threadId: string,
+  ): Promise<void> {
+    assertOutboxBindTarget(boundConnection, threadId);
+    const pane = boundConnection.pane;
+    const targetQueueKey = `${pane}\0${threadId}`;
+    const sourcePanes = new Set<string>();
+    for (const key of queues.keys()) {
+      const separator = key.indexOf('\0');
+      if (separator < 0 || key.slice(separator + 1) !== threadId) continue;
+      const sourcePane = key.slice(0, separator);
+      if (sourcePane !== pane) sourcePanes.add(sourcePane);
+    }
+    for (const receipt of submissions.values()) {
+      if (receipt.threadId === threadId && receipt.pane !== pane) sourcePanes.add(receipt.pane);
+    }
+    const movable: string[] = [];
+    let blocked = false;
+    for (const sourcePane of sourcePanes) {
+      let owner = connections.get(sourcePane);
+      if ((!owner || owner.closed) && exists(codexAppSocketPath(sourcePane, home))) {
+        // A socket pathname can survive SIGKILL. Prove that it still accepts and initializes a client
+        // before treating it as live ownership; otherwise a dead file would strand this thread's durable
+        // queue forever. A newly reachable source stays blocked until its own thread binding is known.
+        try { owner = await connection(sourcePane) ?? undefined; }
+        catch { owner = undefined; }
+        assertOutboxBindTarget(boundConnection, threadId);
+      }
+      if (owner && !owner.closed) {
+        // `null` means two different things until discovery completes: not inspected yet, or an
+        // authoritative empty loaded-thread list. Only the former can still own this outbox.
+        if (!owner.threadBindingKnown || owner.currentThreadId === threadId) blocked = true;
+        else movable.push(sourcePane);
+        continue;
+      }
+      movable.push(sourcePane);
+    }
+    if (blocked || !movable.length) return;
+    movable.sort();
+    const movableSet = new Set(movable);
+    const targetQueue = queues.get(targetQueueKey);
+    // Never replace a QueueState object still referenced by a target-pane mutation. The next status/send
+    // assertion retries binding after that short operation settles.
+    const targetBusy = Boolean(targetQueue && (
+      targetQueue.starting || targetQueue.draining || targetQueue.steering.size || targetQueue.editing
+    )) || [...submissions.values()].some((receipt) => (
+      receipt.pane === pane && receipt.threadId === threadId && receipt.promise !== null
+    ));
+    if (targetBusy) return;
+
+    const sourceQueues = movable.map((sourcePane) => ({
+      key: `${sourcePane}\0${threadId}`,
+      state: queues.get(`${sourcePane}\0${threadId}`),
+    }));
+    const queueCandidates = [
+      ...(targetQueue?.items || []),
+      ...sourceQueues.flatMap(({ state }) => state?.items || []),
+    ].sort((left, right) => left.createdAt - right.createdAt || left.id.localeCompare(right.id));
+    const queueItems: InternalQueueItem[] = [];
+    const itemsById = new Map<string, InternalQueueItem>();
+    const itemsByRequest = new Map<string, InternalQueueItem>();
+    for (const item of queueCandidates) {
+      const sameId = itemsById.get(item.id);
+      if (sameId) {
+        if (sameId.text !== item.text || sameId.requestId !== item.requestId) {
+          throw new Error('Codex outbox has conflicting queued message ids');
+        }
+        continue;
+      }
+      const sameRequest = item.requestId ? itemsByRequest.get(item.requestId) : undefined;
+      if (sameRequest) {
+        if (sameRequest.text !== item.text) {
+          throw new Error('Codex request id was already used for another message');
+        }
+        // Multiple old pane snapshots can contain the same retry. Point every historical item id at one
+        // canonical queue item so its durable receipt remains idempotent after the merge.
+        itemsById.set(item.id, sameRequest);
+        continue;
+      }
+      const copy = { ...item };
+      queueItems.push(copy);
+      itemsById.set(copy.id, copy);
+      if (copy.requestId) itemsByRequest.set(copy.requestId, copy);
+    }
+
+    const receiptEntries = [...submissions].filter(([, receipt]) => (
+      receipt.threadId === threadId && (receipt.pane === pane || movableSet.has(receipt.pane))
+    ));
+    const receiptGroups = new Map<string, InternalSubmissionReceipt[]>();
+    for (const [, receipt] of receiptEntries) {
+      const group = receiptGroups.get(receipt.requestId) || [];
+      group.push(receipt);
+      receiptGroups.set(receipt.requestId, group);
+    }
+    const acceptedRequests = new Set<string>();
+    const migratedReceipts: InternalSubmissionReceipt[] = [];
+    const statusRank = { pending: 0, queued: 1, accepted: 2 } as const;
+    for (const [requestId, group] of receiptGroups) {
+      const text = group[0]!.text;
+      if (group.some((receipt) => receipt.text !== text)) {
+        throw new Error('Codex request id was already used for another message');
+      }
+      const ranked = [...group].sort((left, right) => (
+        statusRank[right.status] - statusRank[left.status] || right.updatedAt - left.updatedAt
+      ));
+      const chosen = ranked[0]!;
+      const queueItem = itemsByRequest.get(requestId)
+        || (chosen.queueItemId ? itemsById.get(chosen.queueItemId) : undefined);
+      if (queueItem && queueItem.text !== text) {
+        throw new Error('Codex request id was already used for another message');
+      }
+      const accepted = ranked.find((receipt) => receipt.status === 'accepted');
+      const status: CodexSubmissionReceipt['status'] = accepted
+        ? 'accepted' : queueItem ? 'queued' : 'pending';
+      if (accepted) acceptedRequests.add(requestId);
+      const turnId = ranked.find((receipt) => receipt.status === 'accepted' && receipt.turnId)?.turnId;
+      const result = ranked.find((receipt) => receipt.status === 'accepted' && receipt.result)?.result;
+      migratedReceipts.push({
+        pane,
+        threadId,
+        requestId,
+        text,
+        status,
+        createdAt: Math.min(...group.map((receipt) => receipt.createdAt)),
+        updatedAt: Math.max(...group.map((receipt) => receipt.updatedAt)),
+        ...(status === 'queued' && queueItem ? { queueItemId: queueItem.id } : {}),
+        ...(status === 'accepted' && turnId ? { turnId } : {}),
+        settled: status !== 'pending',
+        promise: null,
+        ...(status === 'accepted' && result ? { result } : {}),
+      });
+    }
+    const migratedItems = queueItems.filter((item) => (
+      !item.requestId || !acceptedRequests.has(item.requestId)
+    ));
+    const migratedProofClientIds = new Set<string>();
+    for (const { state } of sourceQueues) {
+      for (const item of state?.items || []) migratedProofClientIds.add(item.clientId);
+    }
+    for (const [, receipt] of receiptEntries) {
+      if (receipt.pane !== pane && receipt.status !== 'accepted') {
+        migratedProofClientIds.add(receipt.requestId);
+      }
+    }
+    const hasSourceState = sourceQueues.some(({ state }) => state !== undefined)
+      || receiptEntries.some(([, receipt]) => receipt.pane !== pane);
+    if (!hasSourceState) return;
+
+    assertOutboxBindTarget(boundConnection, threadId);
+    const previousQueues = new Map(queues);
+    const previousSubmissions = new Map(submissions);
+    for (const { key } of sourceQueues) queues.delete(key);
+    if (migratedItems.length) {
+      queues.set(targetQueueKey, {
+        items: migratedItems,
+        starting: false,
+        draining: false,
+        steering: new Set(),
+        editing: null,
+        editTimer: null,
+      });
+    } else queues.delete(targetQueueKey);
+    for (const [key] of receiptEntries) submissions.delete(key);
+    for (const receipt of migratedReceipts) {
+      submissions.set(`${pane}\0${threadId}\0${receipt.requestId}`, receipt);
+    }
+    try {
+      persistOutbox();
+    } catch (error) {
+      queues.clear();
+      for (const [key, state] of previousQueues) queues.set(key, state);
+      submissions.clear();
+      for (const [key, receipt] of previousSubmissions) submissions.set(key, receipt);
+      throw error;
+    }
+    for (const { state } of sourceQueues) {
+      if (state?.editTimer) clearTimeout(state.editTimer);
+    }
+    await boundConnection.reconcileMigratedDeliveryHistory(threadId, migratedProofClientIds);
+  }
+
+  function bindOutboxToCurrentPane(
+    connection: CodexAppConnection,
+    threadId: string,
+  ): Promise<void> {
+    const operation = outboxBindTail.then(() => bindOutboxToCurrentPaneNow(connection, threadId));
+    outboxBindTail = operation.catch(() => {});
+    return operation;
+  }
   let queueSequence = 0;
   let scanTimer: ScanTimer | null = null;
   let started = false;
 
-  async function connection(pane: string): Promise<CodexAppConnection | null> {
+  function connectionCandidate(pane: string): CodexAppConnection | null {
     const socketPath = codexAppSocketPath(pane, home);
     if (!exists(socketPath)) return null;
     let current = connections.get(pane);
@@ -2231,11 +3244,18 @@ export function createCodexAppServer({
         pane, socketPath, connect, now, baseline: true, onStateChange, timeoutMs: rpcTimeoutMs,
         queueStore: queues, submissionStore: submissions,
         persistOutbox, streamEventStore: streamEvents,
+        onThreadBind: bindOutboxToCurrentPane,
         nextQueueId: () => `${now().toString(36)}-${(++queueSequence).toString(36)}`,
         onClose: (closed) => { if (connections.get(pane) === closed) connections.delete(pane); },
       });
       connections.set(pane, current);
     }
+    return current;
+  }
+
+  async function connection(pane: string): Promise<CodexAppConnection | null> {
+    const current = connectionCandidate(pane);
+    if (!current) return null;
     await current.open();
     return current;
   }
@@ -2265,6 +3285,77 @@ export function createCodexAppServer({
       const pane = `%${name.slice(0, -5)}`;
       return observe(pane).catch(() => {});
     }));
+  }
+
+  function sameGoalSnapshot(left: CodexGoal | null, right: CodexGoal | null): boolean {
+    return isDeepStrictEqual(left, right);
+  }
+
+  function goalFromRpcResult(result: RpcResult): CodexGoal | null {
+    const goal = result?.goal == null ? null : parseCodexGoal(result.goal);
+    if (result?.goal != null && !goal) throw new Error('Codex App Server returned an invalid Goal');
+    return goal;
+  }
+
+  async function readStableGoal({
+    client, threadId, canApply = () => true, turnIdFor = () => null,
+    emitFor = () => false, emitClear = true,
+  }: {
+    client: CodexAppConnection;
+    threadId: string;
+    canApply?: () => boolean;
+    turnIdFor?: (goal: CodexGoal | null) => string | null;
+    emitFor?: (goal: CodexGoal | null) => boolean;
+    emitClear?: boolean;
+  }): Promise<CodexGoal | null> {
+    return client.withGoalRead(threadId, async () => {
+      for (let attempt = 0; attempt < MAX_GOAL_READ_ATTEMPTS; attempt += 1) {
+        if (!canApply()) return client.conversationGoal(threadId);
+        const revision = client.conversationGoalRevision(threadId);
+        const result = await client.rpc('thread/goal/get', { threadId });
+        const goal = goalFromRpcResult(result);
+        if (!canApply()) return client.conversationGoal(threadId);
+        if (client.conversationGoalRevision(threadId) === revision) {
+          client.applyGoalSnapshot(threadId, goal, turnIdFor(goal), {
+            emit: emitFor(goal), emitClear,
+          });
+          return client.conversationGoal(threadId);
+        }
+        if (sameGoalSnapshot(client.conversationGoal(threadId), goal)) {
+          return client.conversationGoal(threadId);
+        }
+      }
+      throw new Error('Codex Goal state did not stabilize');
+    });
+  }
+
+  async function reconcileGoalWriteStage({
+    client, threadId, mutation, revision, goal, turnId, emit = true,
+  }: {
+    client: CodexAppConnection;
+    threadId: string;
+    mutation: PendingGoalMutation;
+    revision: number;
+    goal: CodexGoal | null;
+    turnId: string | null;
+    emit?: boolean;
+  }): Promise<void> {
+    if (!client.goalMutationOwns(threadId, mutation.token)) return;
+    if (client.goalMutationIsCurrent(threadId, mutation.token, revision)) {
+      client.applyGoalSnapshot(threadId, goal, turnId, { emit, emitClear: true });
+      return;
+    }
+    if (sameGoalSnapshot(client.conversationGoal(threadId), goal)) return;
+
+    // A different native notification raced with the write response. The response alone cannot prove
+    // whether it predates or includes that notification, so refresh App Server state instead of choosing.
+    await readStableGoal({
+      client,
+      threadId,
+      canApply: () => client.goalMutationOwns(threadId, mutation.token),
+      turnIdFor: (refreshed) => sameGoalSnapshot(refreshed, goal) ? turnId : null,
+      emitFor: () => emit,
+    });
   }
 
   return {
@@ -2297,7 +3388,7 @@ export function createCodexAppServer({
     },
     async status(pane: string, threadId: string): Promise<CodexAppStatus> {
       const client = await connection(pane);
-      if (!client) return { managed: false, queue: [], approvals: [], userInputs: [] };
+      if (!client) return { managed: false, queue: [], receipts: [], approvals: [], userInputs: [] };
       await client.assertCurrentThread(threadId);
       const state = await client.ensureThread(threadId);
       const activeTurnId = client.activeTurn(threadId);
@@ -2313,10 +3404,17 @@ export function createCodexAppServer({
         settings: state.settings,
         contextUsage: state.contextUsage,
         activityKind: client.inbox.kind,
-        lastTurn: state.lastTurn,
+        // Session status is polled every 750ms. The durable transcript/SSE own turn content; the Web
+        // client only needs this terminal status to derive the current kind. Returning the native turn
+        // here can resend megabytes of tool items on every poll for a long-running conversation.
+        lastTurn: state.lastTurn ? {
+          id: state.lastTurn.id || null,
+          status: state.lastTurn.status || null,
+        } : null,
         approvals: client.approvalsFor(threadId),
         userInputs: client.userInputsFor(threadId),
         queue: client.queuedFor(threadId),
+        receipts: client.submissionReceiptsFor(threadId),
         revision: state.revision,
       };
     },
@@ -2332,6 +3430,94 @@ export function createCodexAppServer({
       await client.ensureThread(threadId);
       return client.subscribeStream(threadId, listener, afterSequence);
     },
+    async observeConversation(pane: string, threadId: string, listener: StreamListener) {
+      // Reserve the journal suffix synchronously, before opening/resuming the native thread. Goal and
+      // message notifications can arrive during any of those awaits and must not fall between the
+      // returned baseline cursor and the installed listener.
+      const client = connectionCandidate(pane);
+      if (!client) throw new Error('Codex session is not managed by Handmux');
+      const setupEvents: CodexStreamEvent[] = [];
+      let setup = true;
+      let closed = false;
+      let overflowed = false;
+      const observation = client.observeStream(threadId, (event) => {
+        if (closed) return;
+        if (setup) {
+          if (setupEvents.length >= MAX_OBSERVATION_SETUP_EVENTS) overflowed = true;
+          else setupEvents.push(event);
+          return;
+        }
+        try { listener(event); } catch { /* isolate the Conversation adapter */ }
+      });
+      const close = () => {
+        if (closed) return false;
+        closed = true;
+        return observation.close();
+      };
+      try {
+        await client.open();
+        await client.assertCurrentThread(threadId);
+        await client.ensureThread(threadId);
+        // A Goal that already existed before this observer may not have a journal event. Refresh it as
+        // state, but never overwrite a newer notification captured during setup with an older RPC reply.
+        const goalSetupCount = setupEvents.filter((event) => (
+          event.type === 'goal' || event.type === 'goalCleared'
+        )).length;
+        if (goalSetupCount === 0) {
+          try {
+            await readStableGoal({
+              client,
+              threadId,
+              canApply: () => setupEvents.filter((event) => (
+                event.type === 'goal' || event.type === 'goalCleared'
+              )).length === goalSetupCount,
+            });
+          } catch { /* Goal state is optional on older App Server versions */ }
+        }
+        client.emitLiveStreamOverlays(threadId);
+        if (overflowed) throw new Error('Codex Conversation observation setup buffer overflowed');
+
+        const currentGoal = client.currentConversationGoal(threadId);
+        const currentAlreadyBuffered = currentGoal?.type === 'goal' && setupEvents.some((event) => (
+          event.type === 'goal'
+          && event.goal.objective === currentGoal.goal.objective
+          && event.goal.status === currentGoal.goal.status
+          && (event.goal.createdAt == null || currentGoal.goal.createdAt == null
+            || event.goal.createdAt === currentGoal.goal.createdAt)
+        ));
+        // This state snapshot is private to the Conversation adapter. Do not record/broadcast it through
+        // emitStream: doing so would manufacture a public journal lifecycle every time a view opens.
+        if (currentGoal && !currentAlreadyBuffered) {
+          try { listener({ ...currentGoal, observationSnapshot: true }); } catch { /* adapter isolation */ }
+        }
+        // The raw listener is synchronous with journal publication, so insertion order is journal order;
+        // retaining it also keeps cursor-addressed control snapshots in their exact arrival position.
+        for (const event of setupEvents) {
+          if (closed) throw new Error('Codex Conversation observation closed while opening');
+          try { listener(event); } catch { /* adapter isolation */ }
+        }
+        setup = false;
+        return { cursor: observation.cursor, close };
+      } catch (error) {
+        setup = false;
+        setupEvents.length = 0;
+        close();
+        throw error;
+      }
+    },
+    async observeInteractions(
+      pane: string,
+      threadId: string,
+      listener: InteractionSnapshotListener,
+    ) {
+      const client = await connection(pane);
+      if (!client) throw new Error('Codex session is not managed by Handmux');
+      await client.assertCurrentThread(threadId);
+      await client.ensureThread(threadId);
+      // Subscribe and capture synchronously after the final await, so no request can open or resolve
+      // between the baseline and observer installation.
+      return client.observeInteractions(threadId, listener);
+    },
     async reconcileTranscript(pane: string, threadId: string, messages: unknown) {
       const client = await connection(pane);
       if (!client) throw new Error('Codex session is not managed by Handmux');
@@ -2343,6 +3529,24 @@ export function createCodexAppServer({
       if (!client) throw new Error('Codex session is not managed by Handmux');
       await client.assertCurrentThread(threadId);
       return client.submit(threadId, text, requestId);
+    },
+    async dispatchPrompt(pane: string, threadId: string, text: string, requestId: string) {
+      const client = await connection(pane);
+      if (!client) throw new Error('Codex session is not managed by Handmux');
+      await client.assertCurrentThread(threadId);
+      return client.dispatchPromptDirect(threadId, text, requestId);
+    },
+    async dispatchSteer(
+      pane: string,
+      threadId: string,
+      text: string,
+      requestId: string,
+      plan: { kind: 'steer-active-turn' | 'start-turn-fallback'; nativeTurnId?: string },
+    ) {
+      const client = await connection(pane);
+      if (!client) throw new Error('Codex session is not managed by Handmux');
+      await client.assertCurrentThread(threadId);
+      return client.dispatchSteerDirect(threadId, text, requestId, plan);
     },
     async steerQueued(pane: string, threadId: string, itemId: string) {
       const client = await connection(pane);
@@ -2385,9 +3589,19 @@ export function createCodexAppServer({
       if (!client) throw new Error('Codex session is not managed by Handmux');
       await client.assertCurrentThread(threadId);
       const state = await client.ensureThread(threadId);
-      const result = await client.rpc('thread/compact/start', { threadId });
+      client.requireCurrentThread(threadId);
+      state.compacting = true;
+      let result;
+      try {
+        result = await client.rpc('thread/compact/start', { threadId });
+      } catch (error) {
+        state.compacting = false;
+        throw error;
+      }
       state.status = { type: 'active', activeFlags: [] };
-      client.setInbox('compacting', '', `thread:${threadId}:compacting`);
+      if (client.isCurrentThread(threadId)) {
+        client.setInbox('compacting', '', `thread:${threadId}:compacting`);
+      }
       client.bump(threadId);
       return result;
     },
@@ -2410,63 +3624,100 @@ export function createCodexAppServer({
       if (!client) throw new Error('Codex session is not managed by Handmux');
       await client.assertCurrentThread(threadId);
       await client.ensureThread(threadId);
-      const result = await client.rpc('thread/goal/get', { threadId });
-      const goal = result?.goal == null ? null : parseCodexGoal(result.goal);
-      if (result?.goal != null && !goal) throw new Error('Codex App Server returned an invalid Goal');
-      client.applyGoalSnapshot(threadId, goal, null, {
-        emit: !!goal && TERMINAL_GOAL_STATUSES.has(goal.status),
+      return readStableGoal({
+        client,
+        threadId,
+        emitFor: (goal) => !!goal && TERMINAL_GOAL_STATUSES.has(goal.status),
       });
-      return goal;
     },
     async startGoal(pane: string, threadId: string, objective: string) {
       const client = await connection(pane);
       if (!client) throw new Error('Codex session is not managed by Handmux');
-      await client.assertCurrentThread(threadId);
-      await client.ensureThread(threadId);
-      // App Server treats a repeated non-terminal objective as an update and preserves its status and
-      // usage. A user choosing "set/restart" needs a fresh native Goal even when the text is identical,
-      // so clear the old native state before setting the new active objective. `active` is what enables
-      // Codex's built-in automatic Goal continuation; Handmux does not synthesize a turn or Goal object.
-      await client.rpc('thread/goal/clear', { threadId });
-      client.applyGoalSnapshot(threadId, null, null, { emit: false });
-      const result = await client.rpc('thread/goal/set', { threadId, objective, status: 'active' });
-      const goal = result?.goal == null ? null : parseCodexGoal(result.goal);
-      if (!goal) throw new Error('Codex App Server returned an invalid Goal');
-      client.applyGoalSnapshot(threadId, goal);
-      client.bump(threadId);
-      return goal;
+      return client.withGoalWrite(threadId, async () => {
+        await client.assertCurrentThread(threadId);
+        await client.ensureThread(threadId);
+        // Keep the initiating turn available to a native notification that can race ahead of the RPC reply.
+        const mutation = client.beginGoalMutation(threadId);
+        try {
+          // App Server treats a repeated non-terminal objective as an update and preserves its status and
+          // usage. A user choosing "set/restart" needs a fresh native Goal even when the text is identical,
+          // so clear the old native state before setting the new active objective. `active` is what enables
+          // Codex's built-in automatic Goal continuation; Handmux does not synthesize a turn or Goal object.
+          const clearRevision = client.conversationGoalRevision(threadId);
+          client.requireCurrentThread(threadId);
+          await client.rpc('thread/goal/clear', { threadId });
+          await reconcileGoalWriteStage({
+            client, threadId, mutation, revision: clearRevision, goal: null, turnId: null, emit: false,
+          });
+          const setRevision = client.conversationGoalRevision(threadId);
+          client.requireCurrentThread(threadId);
+          const result = await client.rpc('thread/goal/set', { threadId, objective, status: 'active' });
+          const goal = goalFromRpcResult(result);
+          if (!goal) throw new Error('Codex App Server returned an invalid Goal');
+          await reconcileGoalWriteStage({
+            client, threadId, mutation, revision: setRevision,
+            goal, turnId: mutation.turnId,
+          });
+          client.bump(threadId);
+          return client.conversationGoal(threadId);
+        } finally {
+          client.endGoalMutation(threadId, mutation.token);
+        }
+      });
     },
     async updateGoal(pane: string, threadId: string, updates: UnknownRecord) {
       const client = await connection(pane);
       if (!client) throw new Error('Codex session is not managed by Handmux');
-      await client.assertCurrentThread(threadId);
-      await client.ensureThread(threadId);
-      const result = await client.rpc('thread/goal/set', { threadId, ...updates });
-      const goal = result?.goal == null ? null : parseCodexGoal(result.goal);
-      if (result?.goal != null && !goal) throw new Error('Codex App Server returned an invalid Goal');
-      client.applyGoalSnapshot(threadId, goal);
-      client.bump(threadId);
-      return goal;
+      return client.withGoalWrite(threadId, async () => {
+        await client.assertCurrentThread(threadId);
+        await client.ensureThread(threadId);
+        const mutation = client.beginGoalMutation(threadId);
+        try {
+          const goalRevision = client.conversationGoalRevision(threadId);
+          client.requireCurrentThread(threadId);
+          const result = await client.rpc('thread/goal/set', { threadId, ...updates });
+          const goal = goalFromRpcResult(result);
+          await reconcileGoalWriteStage({
+            client, threadId, mutation, revision: goalRevision,
+            goal, turnId: mutation.turnId,
+          });
+          client.bump(threadId);
+          return client.conversationGoal(threadId);
+        } finally {
+          client.endGoalMutation(threadId, mutation.token);
+        }
+      });
     },
     async clearGoal(pane: string, threadId: string) {
       const client = await connection(pane);
       if (!client) throw new Error('Codex session is not managed by Handmux');
-      await client.assertCurrentThread(threadId);
-      await client.ensureThread(threadId);
-      await client.rpc('thread/goal/clear', { threadId });
-      if (client.applyGoalSnapshot(threadId, null, null, { emit: false })) {
-        client.emitStream({ type: 'goalCleared', threadId, turnId: null });
-      }
-      client.bump(threadId);
-      return { cleared: true };
+      return client.withGoalWrite(threadId, async () => {
+        await client.assertCurrentThread(threadId);
+        await client.ensureThread(threadId);
+        const mutation = client.beginGoalMutation(threadId);
+        try {
+          const goalRevision = client.conversationGoalRevision(threadId);
+          client.requireCurrentThread(threadId);
+          await client.rpc('thread/goal/clear', { threadId });
+          await reconcileGoalWriteStage({
+            client, threadId, mutation, revision: goalRevision, goal: null, turnId: null, emit: false,
+          });
+          client.bump(threadId);
+          return { cleared: true };
+        } finally {
+          client.endGoalMutation(threadId, mutation.token);
+        }
+      });
     },
     async updateSettings(pane: string, threadId: string, updates: UnknownRecord) {
       const client = await connection(pane);
       if (!client) throw new Error('Codex session is not managed by Handmux');
       await client.assertCurrentThread(threadId);
       const state = await client.ensureThread(threadId);
+      client.requireCurrentThread(threadId);
       await client.rpc('thread/settings/update', { threadId, ...updates });
       state.settings = { ...(state.settings || {}), ...updates };
+      state.settingsRevision += 1;
       client.bump(threadId);
       return state.settings;
     },
@@ -2478,9 +3729,11 @@ export function createCodexAppServer({
       let turnId = state.activeTurnId;
       if (!turnId) {
         const thread = await client.readThread(threadId);
+        client.requireCurrentThread(threadId);
         turnId = [...(thread?.turns || [])].reverse().find((turn) => turn.status === 'inProgress')?.id || null;
       }
       if (!turnId) return { interrupted: false };
+      client.requireCurrentThread(threadId);
       await client.rpc('turn/interrupt', { threadId, turnId });
       return { interrupted: true, turnId };
     },

@@ -47,18 +47,25 @@ describe('Inbox v2', () => {
     await act(async () => { container.querySelector('.inbox-row').dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     expect(onSelectRow).toHaveBeenCalledWith(rows[0]);
   });
-  it('清除已完成 button (shown when a done row exists) calls onMarkAllRead', async () => {
+  it('清除结果 button (shown when a terminal row exists) calls onMarkAllRead', async () => {
     const onMarkAllRead = vi.fn();
     await render({ open: true, onMarkAllRead }); // default rows include a done row (%3)
     const btn = container.querySelector('.inbox-readall');
-    expect(btn.textContent).toBe('清除已完成');
+    expect(btn.textContent).toBe('清除结果');
     await act(async () => { btn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     expect(onMarkAllRead).toHaveBeenCalled();
   });
-  it('hides the 清除已完成 button when there is no done row (nothing to clear)', async () => {
+  it('shows error as a terminal state and hides clear when no terminal row remains', async () => {
     const noDone = rows.filter((r) => r.view !== 'done'); // only needs + working remain
     await render({ open: true, rows: noDone });
     expect(container.querySelector('.inbox-readall')).toBeNull();
+    await render({
+      open: true,
+      rows: [...noDone, { pane: '%4', session: 'b', window: '@4', view: 'error', msg: 'failed', ts: 90 }],
+    });
+    expect(container.querySelector('.inbox-row .inbox-chip.error')?.textContent).toBe('出错');
+    expect(container.querySelector('.inbox-summary .inbox-chip.error')?.textContent).toBe('出错 1');
+    expect(container.querySelector('.inbox-readall')?.textContent).toBe('清除结果');
   });
   it('empty state when no rows', async () => {
     await render({ open: true, rows: [] });

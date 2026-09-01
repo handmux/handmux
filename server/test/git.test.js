@@ -79,6 +79,25 @@ describe('detectRepos', () => {
   });
 });
 
+describe('worktree', () => {
+  it('resolves a nested cwd to its Git worktree root', async () => {
+    const nested = join(repo, 'src', 'feature');
+    await fs.mkdir(nested, { recursive: true });
+    const realRepo = await fs.realpath(repo);
+    await expect(git.worktree(nested)).resolves.toEqual({
+      worktree: { path: realRepo },
+    });
+  });
+
+  it('returns null for a non-Git directory', async () => {
+    await expect(git.worktree(home)).resolves.toEqual({ worktree: null });
+  });
+
+  it('keeps the existing path boundary', async () => {
+    expect((await git.worktree('/etc')).error).toBe('outside home');
+  });
+});
+
 describe('status', () => {
   it('lists working-tree + untracked changes with XY codes', async () => {
     const out = await git.status(repo);

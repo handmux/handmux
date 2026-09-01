@@ -3,6 +3,7 @@ import type { CSSProperties, ReactNode } from 'react';
 import FileBrowser from './FileBrowser.jsx';
 import { fetchPaneCwd } from '../api.js';
 import { t } from '../i18n';
+import { useBackButton } from '../hooks/useBackButton.js';
 
 export interface DirPickerProps {
   open: boolean;
@@ -13,6 +14,7 @@ export interface DirPickerProps {
   onPick: (dir: string) => void | Promise<void>;
   onClose: () => void;
   inset?: number;
+  busy?: boolean;
 }
 
 const noop = (): void => {};
@@ -33,8 +35,22 @@ export default function DirPicker({
   onPick,
   onClose,
   inset = 0,
+  busy = false,
 }: DirPickerProps) {
   const [path, setPath] = useState<string | null>(seedCwd);
+  const restoringHistory = useRef(false);
+  useBackButton(open, () => {
+    if (restoringHistory.current) {
+      restoringHistory.current = false;
+      return;
+    }
+    if (busy) {
+      restoringHistory.current = true;
+      window.history.forward();
+      return;
+    }
+    onClose();
+  });
   // Adjust during render on the open edge so FileBrowser mounts on the new seed without a one-frame HOME flash.
   const wasOpen = useRef(false);
   if (open && !wasOpen.current) {
@@ -57,18 +73,19 @@ export default function DirPicker({
   };
   return (
     <>
-      <div className="settings-backdrop dirpick-backdrop" onClick={onClose} />
+      <div className="settings-backdrop dirpick-backdrop" onClick={busy ? undefined : onClose} />
       <div className="settings-card dirpick-card" style={style}
-        role="dialog" aria-label={t('dirpicker.title')} aria-modal="true">
+        role="dialog" aria-label={t('dirpicker.title')} aria-modal="true" aria-busy={busy || undefined}>
         <div className="settings-head">
           <span className="settings-title">{t('dirpicker.title')}</span>
-          <button className="settings-close" onClick={onClose} aria-label={t('common.close')}>✕</button>
+          <button className="settings-close" disabled={busy} onClick={onClose}
+            aria-label={t('common.close')}>✕</button>
         </div>
         {hint && <div className="dirpick-hint">{hint}</div>}
         <FileBrowser
           path={path} onNavigate={setPath} onOpenDoc={noop}
           onJumpToCwd={jumpToCwd}
-          pickMode allowMkdir={allowMkdir} onPick={onPick} overlayActive={open}
+          pickMode allowMkdir={allowMkdir} onPick={onPick} pickDisabled={busy} overlayActive={open}
         />
       </div>
     </>

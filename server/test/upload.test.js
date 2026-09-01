@@ -20,7 +20,7 @@ beforeEach(async () => {
   app.use('/api', createApiRouter({
     token: 'good', commands: {},
     docs: createDocs({ home }),
-    uploadExts: new Set(['txt', 'png']),
+    uploadExts: new Set(['txt', 'png', 'zip']),
     maxUploadBytes: 32, // tiny cap → >32 bytes trips 413
   }));
 });
@@ -36,6 +36,12 @@ describe('POST /api/upload', () => {
     const res = await post().field('dir', join(home, 'sub')).attach('file', Buffer.from('hi'), 'a.txt').expect(201);
     expect(res.body).toMatchObject({ name: 'a.txt', size: 2 });
     expect(await fs.readFile(join(home, 'sub', 'a.txt'), 'utf8')).toBe('hi');
+  });
+  it('uploads a ZIP archive when ZIP is allowed', async () => {
+    const body = Buffer.from('PK\u0003\u0004test');
+    const res = await post().field('dir', join(home, 'sub')).attach('file', body, 'bundle.zip').expect(201);
+    expect(res.body).toMatchObject({ name: 'bundle.zip', size: body.length });
+    expect(await fs.readFile(join(home, 'sub', 'bundle.zip'))).toEqual(body);
   });
   it('preserves a UTF-8 (Chinese) filename instead of mangling it to latin1 mojibake', async () => {
     const res = await post().field('dir', join(home, 'sub')).attach('file', Buffer.from('hi'), '中文报告.txt').expect(201);

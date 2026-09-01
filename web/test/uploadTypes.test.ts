@@ -2,11 +2,11 @@ import { describe, it, expect } from 'vitest';
 import { UPLOAD_ACCEPT, isAllowedUploadName, splitUploadable } from '../src/uploadTypes.js';
 
 describe('uploadTypes', () => {
-  it('allows text/code, images, documents and video; rejects executables and extensionless names', () => {
-    for (const ok of ['a.txt', 'main.py', 'App.tsx', 'shot.PNG', 'doc.pdf', 'sheet.xlsx', 'clip.mp4', 'demo.MOV']) {
+  it('allows text/code, images, documents, video and ZIP; rejects executables and extensionless names', () => {
+    for (const ok of ['a.txt', 'main.py', 'App.tsx', 'shot.PNG', 'doc.pdf', 'sheet.xlsx', 'clip.mp4', 'demo.MOV', 'archive.zip']) {
       expect(isAllowedUploadName(ok)).toBe(true);
     }
-    for (const bad of ['run', 'tool.exe', 'a.bin', 'lib.so', 'archive.zip', '']) {
+    for (const bad of ['run', 'tool.exe', 'a.bin', 'lib.so', '']) {
       expect(isAllowedUploadName(bad)).toBe(false);
     }
   });
@@ -29,6 +29,7 @@ describe('uploadTypes', () => {
   it('accept string carries dot-extensions but NO media wildcard (so the OS opens the file picker, not camera/gallery)', () => {
     expect(UPLOAD_ACCEPT).toContain('.txt');
     expect(UPLOAD_ACCEPT).toContain('.png');
+    expect(UPLOAD_ACCEPT).toContain('.zip');
     expect(UPLOAD_ACCEPT).not.toContain('image/*');
     expect(UPLOAD_ACCEPT).not.toContain('video/*');
   });

@@ -21,11 +21,20 @@ describe('service text generators', () => {
   it('plist escapes XML metacharacters', () => {
     expect(plistFor({ args: ['a&b', 'c<d'], log: 'x' })).toContain('<string>a&amp;b</string>');
   });
+  it('persists the interactive PATH for launchd children', () => {
+    const p = plistFor({ args: ARGS, log: 'x', pathEnv: '/opt/homebrew/bin:/Users/u/.local/bin:/usr/bin' });
+    expect(p).toContain('<key>EnvironmentVariables</key>');
+    expect(p).toContain('<key>PATH</key><string>/opt/homebrew/bin:/Users/u/.local/bin:/usr/bin</string>');
+  });
   it('systemd unit has ExecStart with the joined command and Restart=always', () => {
     const u = unitFor({ args: ARGS });
     expect(u).toContain('ExecStart=/usr/bin/node /abs/bin/handmux.js __supervise --payload-file /home/u/.handmux/supervisor-config.json');
     expect(u).toContain('Restart=always');
     expect(u).toContain('WantedBy=default.target');
+  });
+  it('persists the interactive PATH for systemd children', () => {
+    const u = unitFor({ args: ARGS, pathEnv: '/home/u/.local/bin:/usr/bin' });
+    expect(u).toContain('Environment="PATH=/home/u/.local/bin:/usr/bin"');
   });
 });
 
@@ -40,15 +49,22 @@ describe('install/uninstall (mocked exec, temp home)', () => {
   };
 
   it('darwin writes the plist and runs launchctl load', () => {
-    installService(ARGS, { home, platform: 'darwin', exec, log: { log() {} } });
+    installService(ARGS, {
+      home, platform: 'darwin', exec, log: { log() {} }, pathEnv: '/Users/u/.local/bin:/usr/bin',
+    });
     expect(fs.existsSync(plistPath(home))).toBe(true);
+    expect(fs.readFileSync(plistPath(home), 'utf8')).toContain('/Users/u/.local/bin:/usr/bin');
     expect(fs.statSync(plistPath(home)).mode & 0o777).toBe(0o600);
     expect(fs.statSync(path.join(home, '.handmux', 'handmux.log')).mode & 0o777).toBe(0o600);
     expect(calls.some(([c, a]) => c === 'launchctl' && a === 'load')).toBe(true);
   });
   it('linux writes the unit and enables it', () => {
-    installService(ARGS, { home, platform: 'linux', exec, log: { log() {} } });
+    installService(ARGS, {
+      home, platform: 'linux', exec, log: { log() {} }, pathEnv: '/home/u/.volta/bin:/usr/bin',
+    });
     expect(fs.existsSync(unitPath(home))).toBe(true);
+    expect(fs.readFileSync(unitPath(home), 'utf8'))
+      .toContain('Environment="PATH=/home/u/.volta/bin:/usr/bin"');
     expect(fs.statSync(unitPath(home)).mode & 0o777).toBe(0o600);
     expect(calls.some((c) => c.join(' ') === `systemctl --user enable ${UNIT}`)).toBe(true);
     expect(calls.some((c) => c.join(' ') === `systemctl --user restart ${UNIT}`)).toBe(true);

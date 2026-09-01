@@ -1,14 +1,34 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { PrivateStateStore } from '../src/privateStateStore.js';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { fsyncDirectorySync, PrivateStateStore } from '../src/privateStateStore.js';
 
 let home: string;
 beforeEach(() => { home = fs.mkdtempSync(path.join(os.tmpdir(), 'handmux-private-state-')); });
 afterEach(() => { fs.rmSync(home, { recursive: true, force: true }); });
 
 describe('PrivateStateStore', () => {
+  it('keeps directory fsync strict on POSIX and tolerates only known Windows unsupported errors', () => {
+    const unsupported = Object.assign(new Error('directory fsync unsupported'), { code: 'EINVAL' });
+    const open = vi.spyOn(fs, 'openSync').mockImplementation(() => { throw unsupported; });
+    expect(() => fsyncDirectorySync(home, 'win32')).not.toThrow();
+    expect(() => fsyncDirectorySync(home, 'linux')).toThrow(unsupported);
+    open.mockRestore();
+
+    const denied = Object.assign(new Error('unexpected'), { code: 'EACCES' });
+    const deniedOpen = vi.spyOn(fs, 'openSync').mockImplementation(() => { throw denied; });
+    expect(() => fsyncDirectorySync(home, 'win32')).toThrow(denied);
+    deniedOpen.mockRestore();
+
+    const fsync = vi.spyOn(fs, 'fsyncSync').mockImplementation(() => { throw unsupported; });
+    const originalClose = fs.closeSync;
+    const close = vi.spyOn(fs, 'closeSync').mockImplementation((descriptor) => originalClose(descriptor));
+    expect(() => fsyncDirectorySync(home, 'win32')).not.toThrow();
+    expect(close).toHaveBeenCalledTimes(1);
+    fsync.mockRestore(); close.mockRestore();
+  });
+
   it('writes atomically with private directory and file permissions', () => {
     const file = path.join(home, '.handmux', 'nested', 'state.json');
     const store = new PrivateStateStore<{ token: string }>(file);
@@ -65,5 +85,23 @@ describe('PrivateStateStore', () => {
     expect(store.read()).toBeNull();
     expect(fs.statSync(path.dirname(file)).mode & 0o777).toBe(0o700);
     expect(fs.statSync(file).mode & 0o777).toBe(0o600);
+  });
+
+  it('quarantines a corrupt file without changing its bytes and leaves the live path reusable', () => {
+    const file = path.join(home, '.handmux', 'codex-outbox.json');
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, 'not json', { mode: 0o644 });
+    const store = new PrivateStateStore(file);
+
+    const quarantined = store.quarantine();
+
+    expect(quarantined).toMatch(/codex-outbox\.json\.corrupt\./);
+    expect(fs.existsSync(file)).toBe(false);
+    expect(fs.readFileSync(quarantined!, 'utf8')).toBe('not json');
+    expect(fs.statSync(quarantined!).mode & 0o777).toBe(0o600);
+    store.write({ version: 1 });
+    expect(store.read()).toEqual({ version: 1 });
+    expect(store.quarantine()).toMatch(/codex-outbox\.json\.corrupt\./);
+    expect(store.quarantine()).toBeNull();
   });
 });

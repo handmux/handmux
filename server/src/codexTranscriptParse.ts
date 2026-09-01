@@ -12,7 +12,12 @@ import type {
 
 interface JsonRecord { [key: string]: unknown }
 type GoalLike = Partial<CodexGoal> & JsonRecord;
-interface SourceIdentity { turnId?: string; itemId?: string; id?: string }
+interface SourceIdentity {
+  turnId?: string;
+  itemId?: string;
+  id?: string;
+  correlationId?: string;
+}
 export interface CodexTranscriptMessage extends SourceIdentity {
   [key: string]: unknown;
   i: number;
@@ -26,6 +31,9 @@ export interface CodexTranscriptMessage extends SourceIdentity {
   goal?: GoalLike;
   plan?: CodexPlanStep[];
   explanation?: string;
+  summary?: string;
+  summaryTruncated?: boolean;
+  summaryOriginalBytes?: number;
   tool?: CodexToolProjection;
 }
 interface ToolMessage extends CodexTranscriptMessage { tool: CodexToolProjection }
@@ -34,11 +42,45 @@ interface CustomCall { name: string; input: CodexToolInput; diff?: CodexDiff }
 export interface CodexTranscriptParser {
   push(lines: readonly unknown[]): CodexTranscriptMessage[];
   messages: CodexTranscriptMessage[];
+  takeChangedFrom(): number | null;
 }
 const isRecord = (value: unknown): value is JsonRecord => (
   value !== null && typeof value === 'object' && !Array.isArray(value)
 );
 const asRecord = (value: unknown): JsonRecord => isRecord(value) ? value : {};
+
+const MAX_COMPACTION_SUMMARY_BYTES = 240 * 1024;
+const COMPACTION_HANDOFF_PREFIX = [
+  'Another language model started to solve this problem and produced a summary of its thinking process.',
+  'You also have access to the state of the tools that were used by that language model.',
+  'Use this to build on the work that has already been done and avoid duplicating work.',
+  'Here is the summary produced by the other language model, use the information in this summary to assist with your own analysis:',
+].join(' ') + '\n';
+
+function compactionSummary(value: unknown): {
+  text: string;
+  truncated: boolean;
+  originalBytes: number;
+} | null {
+  if (typeof value !== 'string' || !value) return null;
+  const originalBytes = Buffer.byteLength(value);
+  if (originalBytes <= MAX_COMPACTION_SUMMARY_BYTES) {
+    return { text: value, truncated: false, originalBytes };
+  }
+  let text = Buffer.from(value).subarray(0, MAX_COMPACTION_SUMMARY_BYTES).toString('utf8');
+  while (Buffer.byteLength(text) > MAX_COMPACTION_SUMMARY_BYTES) text = text.slice(0, -1);
+  return { text, truncated: true, originalBytes };
+}
+
+function isCompactionSummaryPrecursor(
+  candidate: CodexTranscriptMessage | undefined,
+  retainedMessage: unknown,
+): candidate is CodexTranscriptMessage & { type: 'text'; role: 'assistant'; text: string } {
+  return candidate?.type === 'text'
+    && candidate.role === 'assistant'
+    && typeof candidate.text === 'string'
+    && retainedMessage === `${COMPACTION_HANDOFF_PREFIX}${candidate.text}`;
+}
 
 // Codex's rollout JSONL is the durable, ordered conversation log. App Server notifications drive live
 // controls/status, but its thread snapshots currently omit some completed tools, so transcript rendering
@@ -91,7 +133,7 @@ function messageText(content: unknown): string {
     .join('');
 }
 
-function sourceIdentity(value: unknown): SourceIdentity {
+function sourceIdentity(value: unknown, correlationId?: string): SourceIdentity {
   const item = asRecord(value);
   const metadata = asRecord(item.internal_chat_message_metadata_passthrough);
   const turnId = typeof metadata.turn_id === 'string' ? metadata.turn_id : null;
@@ -101,6 +143,7 @@ function sourceIdentity(value: unknown): SourceIdentity {
     ...(turnId ? { turnId } : {}),
     ...(itemId ? { itemId } : {}),
     ...(id ? { id } : {}),
+    ...(correlationId ? { correlationId } : {}),
   };
 }
 
@@ -456,8 +499,12 @@ function applyCustomOutput(messages: CodexTranscriptMessage[], value: unknown): 
 export function createCodexTranscriptParser(): CodexTranscriptParser {
   const messages: CodexTranscriptMessage[] = [];
   const pending = new Map<string, CodexTranscriptMessage[]>();
+  const messageIndexes = new Map<CodexTranscriptMessage, number>();
+  let changedFrom: number | null = null;
   let lineIndex = 0;
   let activeGoalObjective: string | null = null;
+  let activeGoalTokensUsed: number | null = null;
+  let adjacentUserClientId: string | undefined;
 
   const toolMessage = (
     i: number,
@@ -488,6 +535,7 @@ export function createCodexTranscriptParser(): CodexTranscriptParser {
     const inputRecord = asRecord(input);
     if (name === 'create_goal' && typeof inputRecord.objective === 'string') {
       activeGoalObjective = inputRecord.objective.trim() || null;
+      activeGoalTokensUsed = 0;
       return {
         i, role: 'assistant', type: 'goal', event: 'set', ts,
         goal: {
@@ -503,6 +551,7 @@ export function createCodexTranscriptParser(): CodexTranscriptParser {
       ? inputRecord.status : null;
     if (name === 'update_goal' && goalStatus) {
       activeGoalObjective = null;
+      activeGoalTokensUsed = null;
       return {
         i, role: 'assistant', type: 'goal', event: goalStatus, ts,
         goal: { status: goalStatus },
@@ -521,6 +570,8 @@ export function createCodexTranscriptParser(): CodexTranscriptParser {
 
   function push(lines: readonly unknown[]): CodexTranscriptMessage[] {
     for (const raw of lines) {
+      const previousLength = messages.length;
+      try {
       const i = lineIndex++;
       const source = typeof raw === 'string' ? raw.trim() : '';
       if (!source) continue;
@@ -529,7 +580,44 @@ export function createCodexTranscriptParser(): CodexTranscriptParser {
       const row = asRecord(parsed);
       const ts = typeof row.timestamp === 'string' ? row.timestamp : undefined;
 
-      if (row.type === 'compacted') { messages.push({ i, type: 'compact', ts }); continue; }
+      if (row.type === 'event_msg') {
+        const payload = asRecord(row.payload);
+        adjacentUserClientId = payload.type === 'user_message'
+          && typeof payload.client_id === 'string' && payload.client_id
+          ? payload.client_id : undefined;
+        continue;
+      }
+      const userClientId = adjacentUserClientId;
+      adjacentUserClientId = undefined;
+
+      if (row.type === 'compacted') {
+        const payload = asRecord(row.payload);
+        // `message` is the provider's explicit retained summary. Never project `replacement_history`:
+        // it can contain system/developer records and internal payloads that are not user-facing detail.
+        const summary = compactionSummary(payload.message);
+        const compact: CodexTranscriptMessage = {
+          i, type: 'compact', ts,
+          ...(summary ? { summary: summary.text } : {}),
+          ...(summary?.truncated ? {
+            summaryTruncated: true, summaryOriginalBytes: summary.originalBytes,
+          } : {}),
+        };
+        const prior = messages.at(-1);
+        if (isCompactionSummaryPrecursor(prior, payload.message)) {
+          // Codex writes the compactor model's final answer as an ordinary assistant response immediately
+          // before the durable `compacted` row. It is the implementation payload for this event, not a
+          // user-facing reply. Replace that bubble with the compact marker so incremental readers also
+          // retract a precursor they may have observed in the short gap between the two rollout records.
+          const index = messages.length - 1;
+          messages[index] = compact;
+          messageIndexes.delete(prior);
+          messageIndexes.set(compact, index);
+          changedFrom = changedFrom === null ? index : Math.min(changedFrom, index);
+        } else {
+          messages.push(compact);
+        }
+        continue;
+      }
       if (row.type !== 'response_item' || !isRecord(row.payload)) continue;
       const item = row.payload;
 
@@ -541,7 +629,14 @@ export function createCodexTranscriptParser(): CodexTranscriptParser {
         if (item.role === 'user') {
           const goal = goalFromInternalContext(text);
           if (goal) {
-            if (goal.objective !== activeGoalObjective) {
+            const tokensUsed = typeof goal.tokensUsed === 'number' && Number.isFinite(goal.tokensUsed)
+              ? goal.tokensUsed : null;
+            // App Server clear→set does not always leave its own rollout record. A same-objective Goal
+            // is nevertheless a new lifecycle when native usage has reset below the prior context.
+            const usageReset = goal.objective === activeGoalObjective
+              && tokensUsed !== null && activeGoalTokensUsed !== null
+              && tokensUsed < activeGoalTokensUsed;
+            if (goal.objective !== activeGoalObjective || usageReset) {
               // The injected context item is the durable occurrence identity. Prefer it over the Goal's
               // objective fallback so setting the same objective again creates a distinct historical card.
               // The Web reconciles this durable id with the timestamp-based immediate native card.
@@ -554,6 +649,7 @@ export function createCodexTranscriptParser(): CodexTranscriptParser {
               });
               activeGoalObjective = goal.objective;
             }
+            if (tokensUsed !== null) activeGoalTokensUsed = tokensUsed;
             continue;
           }
           if (isCodexSyntheticUserText(text)) continue;
@@ -568,7 +664,8 @@ export function createCodexTranscriptParser(): CodexTranscriptParser {
           }
         }
         messages.push({
-          i, role: item.role as 'user' | 'assistant', type: 'text', text, ts, ...sourceIdentity(item),
+          i, role: item.role as 'user' | 'assistant', type: 'text', text, ts,
+          ...sourceIdentity(item, item.role === 'user' ? userClientId : undefined),
         });
         continue;
       }
@@ -598,6 +695,9 @@ export function createCodexTranscriptParser(): CodexTranscriptParser {
         if (targets?.length === 1) {
           const target = targets[0];
           if (!target) continue;
+          const targetIndex = messageIndexes.get(target);
+          if (targetIndex !== undefined) changedFrom = changedFrom === null
+            ? targetIndex : Math.min(changedFrom, targetIndex);
           if (target.type === 'goal') {
             applyGoalOutput(target, item.output);
             pending.delete(callId);
@@ -631,6 +731,9 @@ export function createCodexTranscriptParser(): CodexTranscriptParser {
         if (targets?.length === 1) {
           const target = targets[0];
           if (!target?.tool) continue;
+          const targetIndex = messageIndexes.get(target);
+          if (targetIndex !== undefined) changedFrom = changedFrom === null
+            ? targetIndex : Math.min(changedFrom, targetIndex);
           target.tool.result = outputText(item.tools);
           target.tool.isError = item.status === 'failed';
           target.tool.outcome = item.status === 'failed' ? 'failed' : 'success';
@@ -660,15 +763,37 @@ export function createCodexTranscriptParser(): CodexTranscriptParser {
         if (!callId) continue;
         const targets = pending.get(callId);
         if (targets) {
+          for (const target of targets) {
+            const targetIndex = messageIndexes.get(target);
+            if (targetIndex !== undefined) changedFrom = changedFrom === null
+              ? targetIndex : Math.min(changedFrom, targetIndex);
+          }
           applyCustomOutput(targets, item.output);
           pending.delete(callId);
+        }
+      }
+      } finally {
+        if (messages.length > previousLength) {
+          changedFrom = changedFrom === null ? previousLength : Math.min(changedFrom, previousLength);
+          for (let index = previousLength; index < messages.length; index++) {
+            const message = messages[index];
+            if (message) messageIndexes.set(message, index);
+          }
         }
       }
     }
     return messages;
   }
 
-  return { push, messages };
+  return {
+    push,
+    messages,
+    takeChangedFrom() {
+      const value = changedFrom;
+      changedFrom = null;
+      return value;
+    },
+  };
 }
 
 export function parseCodexTranscript(lines: readonly unknown[]): CodexTranscriptMessage[] {

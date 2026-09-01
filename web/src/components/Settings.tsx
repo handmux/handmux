@@ -7,10 +7,13 @@ import { t, getLangCode, setLang, AVAILABLE } from '../i18n';
 import { SNAPSHOT_INTERVALS } from '../terminalTransport.js';
 import { useBackButton } from '../hooks/useBackButton.js';
 import { CheckIcon } from './icons.jsx';
-import { canEnableClaudeChatLens } from '../chatLensAvailability.js';
 import type { TerminalHandle } from './Terminal.js';
 import type { SnapshotInterval, TerminalTransport } from '../terminalTransport.js';
-import type { ClaudeHooksStatus } from '../hooks/useServerConfig.js';
+import type { AgentIntegrationsController } from '../hooks/useAgentIntegrations.js';
+import type {
+  AgentIntegrationName,
+  AgentIntegrationSnapshot,
+} from '../agentIntegrationApi.js';
 
 type DetailPage = 'language' | 'font' | 'keyboard' | 'transport' | 'tone' | 'feedback' | 'script';
 type SettingsPage = 'root' | DetailPage;
@@ -52,18 +55,15 @@ export interface SettingsProps {
   onReloadApp?: () => void;
   chatTone?: ChatTone;
   onChatTone?: (tone: ChatTone) => void;
-  claudeChatLensEnabled?: boolean;
-  onClaudeChatLensEnabled?: (enabled: boolean) => void;
-  codexChatLensEnabled?: boolean;
-  onCodexChatLensEnabled?: (enabled: boolean) => void;
+  conversationAgents?: readonly { id: string; label: string; enabled: boolean; experimental: boolean }[];
+  onConversationAgentEnabled?: (agentId: string, enabled: boolean) => void;
   keyboardMode?: KeyboardMode;
   onKeyboardMode?: (mode: KeyboardMode) => void;
   terminalTransport?: TerminalTransport;
   onTerminalTransport?: (mode: TerminalTransport) => void;
   snapshotInterval?: SnapshotInterval;
   onSnapshotInterval?: (interval: SnapshotInterval) => void;
-  hooksStatus?: ClaudeHooksStatus | null;
-  onEnableHooks?: (() => Promise<unknown>) | null;
+  agentIntegrations?: AgentIntegrationsController | null;
   notifUnread?: boolean;
   onOpenInbox?: () => void;
   updateInfo?: UpdateInfo | null;
@@ -139,6 +139,28 @@ function SettingsValueRow({ label, value, dot = false }: {
   );
 }
 
+function AgentIntegrationRow({ label, status, action, busy = false, disabled = false, onAction }: {
+  label: string;
+  status: string;
+  action?: string;
+  busy?: boolean;
+  disabled?: boolean;
+  onAction?: () => void;
+}) {
+  return (
+    <div className="settings-page-row settings-agent-integration-row">
+      <span className="settings-page-row-label">{label}</span>
+      <span className="settings-page-row-trailing">
+        <span className="settings-page-row-value">{status}</span>
+        {action && <button type="button" className="settings-agent-integration-action"
+          disabled={disabled} onClick={onAction}>
+          {busy ? t('settings.agent_integration_processing') : action}
+        </button>}
+      </span>
+    </div>
+  );
+}
+
 function SettingsLinkRow({ label, href }: { label: string; href: string }) {
   return (
     <a className="settings-page-row" href={href} target="_blank" rel="noreferrer">
@@ -151,7 +173,7 @@ function SettingsLinkRow({ label, href }: { label: string; href: string }) {
 }
 
 function SettingsSwitchRow({ label, checked, onChange, disabled = false, busy = false }: {
-  label: string;
+  label: ReactNode;
   checked: boolean;
   onChange: (event: ChangeEvent<HTMLInputElement>) => void;
   disabled?: boolean;
@@ -232,12 +254,11 @@ function UpdateNotice({ updateInfo }: { updateInfo: UpdateInfo | null | undefine
 export default function Settings({ open, onClose, termRef, onOpenChangelog = () => {}, changelogUnread = false,
   onReloadApp = () => window.location.reload(),
   chatTone = 'ink', onChatTone = () => {},
-  claudeChatLensEnabled = false, onClaudeChatLensEnabled = () => {},
-  codexChatLensEnabled = false, onCodexChatLensEnabled = () => {},
+  conversationAgents = [], onConversationAgentEnabled = () => {},
   keyboardMode = 'auto', onKeyboardMode = () => {},
   terminalTransport = 'live', onTerminalTransport = () => {},
   snapshotInterval = 1000, onSnapshotInterval = () => {},
-  hooksStatus = null, onEnableHooks = null,
+  agentIntegrations = null,
   notifUnread = false, onOpenInbox,
   updateInfo = null,
   workspaceProtection = null }: SettingsProps) {
@@ -248,13 +269,10 @@ export default function Settings({ open, onClose, termRef, onOpenChangelog = () 
   const [notifyBusy, setNotifyBusy] = useState(false);
   const [notifyMsg, setNotifyMsg] = useState('');
   const [notifyDisableConfirm, setNotifyDisableConfirm] = useState(false);
-  const [lensHooksBusy, setLensHooksBusy] = useState(false);
-  const [lensHooksErr, setLensHooksErr] = useState(false);
   const [scriptPushKey, setScriptPushKey] = useState<string | null>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
   const rootScrollRef = useRef(0);
 
-  const claudeLensLocked = !canEnableClaudeChatLens(hooksStatus);
   const notificationsSupported = pushSupported();
 
   useEffect(() => {
@@ -297,21 +315,6 @@ export default function Settings({ open, onClose, termRef, onOpenChangelog = () 
     setDocHl(on);
     setDocHighlight(on);
     termRef.current?.setDocHighlight?.(on);
-  };
-
-  const enableLensHooks = async (): Promise<void> => {
-    setLensHooksBusy(true);
-    setLensHooksErr(false);
-    try {
-      const result = await onEnableHooks?.();
-      const status = result !== null && typeof result === 'object' && !Array.isArray(result)
-        ? (result as Record<string, unknown>).status : null;
-      if (status !== 'installed') setLensHooksErr(true);
-    } catch {
-      setLensHooksErr(true);
-    } finally {
-      setLensHooksBusy(false);
-    }
   };
 
   const setNotificationEnabled = async (enabled: boolean): Promise<void> => {
@@ -362,25 +365,47 @@ export default function Settings({ open, onClose, termRef, onOpenChangelog = () 
   const protectionCode = workspaceProtection?.errorCode;
   const protectionReason = protectionCode === 'live-corrupt' || protectionCode === 'live-unavailable'
     ? protectionCode : 'unknown';
-
-  const claudeLensFooter = claudeLensLocked ? (
-    <>
-      <div>{t(hooksStatus === 'no-claude' ? 'settings.chat_lens_no_claude' : 'settings.chat_lens_need_hooks')}</div>
-      {hooksStatus === 'absent' && (
-        <button type="button" className="settings-page-inline-action" disabled={lensHooksBusy}
-          onClick={enableLensHooks}>
-          {lensHooksBusy ? t('settings.chat_lens_installing') : t('settings.chat_lens_install_hooks')}
-        </button>
-      )}
-      {lensHooksErr && <div className="settings-hint-err">{t('settings.chat_lens_hooks_err')}</div>}
-    </>
-  ) : <div>{t('settings.chat_lens_claude_hint')}</div>;
-  const lensFooter = (
-    <>
-      {claudeLensFooter}
-      <div>{t('settings.chat_lens_codex_hint')}</div>
-    </>
+  const integrationItems: readonly (AgentIntegrationSnapshot | {
+    name: AgentIntegrationName;
+    status: null;
+  })[] = agentIntegrations?.items.length ? agentIntegrations.items : [
+    { name: 'claude', status: null }, { name: 'pi', status: null },
+  ];
+  const integrationLabel = (name: AgentIntegrationName): string => t(
+    name === 'claude' ? 'settings.agent_integration_claude' : 'settings.agent_integration_pi',
   );
+  const integrationFooter = agentIntegrations ? (
+    <>
+      {agentIntegrations.error?.kind === 'load' && <div>
+        {t('settings.agent_integration_load_error')}
+        <button type="button" className="settings-page-inline-action"
+          onClick={() => { void agentIntegrations.refresh(); }}>{t('common.retry')}</button>
+      </div>}
+      {agentIntegrations.error?.kind === 'action' && <div className="settings-hint-err">
+        {t('settings.agent_integration_action_error')} <code>
+          handmux agent enable {agentIntegrations.error.name}
+        </code>
+      </div>}
+      {agentIntegrations.items.filter((item) => item.status === 'conflict').map((item) => (
+        <div key={`conflict:${item.name}`}>
+          {t('settings.agent_integration_conflict_hint', { agent: integrationLabel(item.name) })}{' '}
+          <code>handmux agent status {item.name}</code>
+        </div>
+      ))}
+      {agentIntegrations.items.filter((item) => item.status === 'not-installed').map((item) => (
+        <div key={`missing:${item.name}`}>{t('settings.agent_integration_not_installed_hint', {
+          agent: integrationLabel(item.name),
+        })}</div>
+      ))}
+      {agentIntegrations.items.filter((item) => item.reason === 'initialize-first').map((item) => (
+        <div key={`initialize:${item.name}`}>
+          {t('settings.agent_integration_initialize_first_hint', {
+            agent: integrationLabel(item.name),
+          })}
+        </div>
+      ))}
+    </>
+  ) : null;
 
   const rootContent = (
     <>
@@ -405,16 +430,36 @@ export default function Settings({ open, onClose, termRef, onOpenChangelog = () 
           onChange={(event) => toggleDocHl(event.target.checked)} />
       </SettingsGroup>
 
-      <SettingsGroup title={t('settings.group_chat')} footer={lensFooter}>
-        <SettingsSwitchRow label={t('settings.chat_lens_claude')} checked={claudeChatLensEnabled}
-          disabled={claudeLensLocked && !claudeChatLensEnabled}
-          onChange={(event) => onClaudeChatLensEnabled(event.target.checked)} />
-        <SettingsSwitchRow label={t('settings.chat_lens_codex')} checked={codexChatLensEnabled}
-          onChange={(event) => onCodexChatLensEnabled(event.target.checked)} />
-        {(claudeChatLensEnabled || codexChatLensEnabled) && (
-          <SettingsNavRow label={t('settings.chat_tone')} value={t(`settings.chat_tone_${chatTone}`)}
-            onClick={() => openPage('tone')} />
-        )}
+      <SettingsGroup title={t('settings.group_chat')}>
+        {conversationAgents.map((agent) => (
+          <SettingsSwitchRow key={agent.id}
+            label={<span className="settings-conversation-agent-label">
+              <span className="settings-conversation-agent-name">
+                {t('settings.conversation_view_agent', { agent: agent.label })}
+              </span>
+              {agent.experimental && <span className="settings-conversation-experimental">
+                {t('settings.experimental')}
+              </span>}
+            </span>}
+            checked={agent.enabled}
+            onChange={(event) => onConversationAgentEnabled(agent.id, event.target.checked)} />
+        ))}
+        <SettingsNavRow label={t('settings.chat_tone')} value={t(`settings.chat_tone_${chatTone}`)}
+          onClick={() => openPage('tone')} />
+      </SettingsGroup>
+
+      <SettingsGroup title={t('settings.group_agent_integration')} footer={integrationFooter}>
+        {integrationItems.map((item) => {
+          const action = item.status === 'not-enabled' && item.reason !== 'initialize-first'
+            ? t('settings.agent_integration_enable')
+            : item.status === 'needs-repair' ? t('settings.agent_integration_repair') : undefined;
+          return <AgentIntegrationRow key={item.name} label={integrationLabel(item.name)}
+            status={item.status === null ? t('settings.agent_integration_loading')
+              : t(`settings.agent_integration_status_${item.status.replace('-', '_')}`)}
+            {...(action ? { action } : {})} busy={agentIntegrations?.busy === item.name}
+            disabled={Boolean(agentIntegrations?.busy)}
+            onAction={() => { if (agentIntegrations) void agentIntegrations.enable(item.name); }} />;
+        })}
       </SettingsGroup>
 
       <SettingsGroup title={t('settings.group_notifications')} footer={notifyMsg || (

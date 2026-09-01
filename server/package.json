@@ -1,6 +1,6 @@
 {
   "name": "handmux",
-  "version": "0.24.0",
+  "version": "0.25.0",
   "description": "A mobile vibe-coding cockpit — built on tmux: drive your live session, Claude Code / Codex — anything a terminal can run — from your phone.",
   "type": "module",
   "license": "AGPL-3.0-only",
@@ -22,13 +22,14 @@
     "pwa"
   ],
   "engines": {
-    "node": ">=20"
+    "node": ">=22.16.0"
   },
   "bin": {
     "handmux": "bin/handmux.js"
   },
   "files": [
     "bin/handmux.js",
+    "bin/node-version.js",
     "dist",
     "README.md",
     "README.zh-CN.md",
@@ -65,7 +66,7 @@
     "@types/busboy": "^1.5.4",
     "@types/compression": "^1.8.1",
     "@types/express": "4.17.25",
-    "@types/node": "20.19.43",
+    "@types/node": "22.20.1",
     "@types/supertest": "7.2.1",
     "@types/web-push": "^3.6.4",
     "@types/ws": "^8.18.1",
@@ -74,13 +75,13 @@
     "vitest": "^2.0.0"
   },
   "whatsNew": [
+    {"version":"0.25.0","date":"2026-09-01","zh":"Pi 原生接入 · 多 Agent 对话更可靠","en":"Native Pi support · more reliable agent chat"},
     {"version":"0.24.0","date":"2026-08-11","zh":"Codex 任务进度与 Goal 原生上线","en":"Native Codex task progress and Goals"},
     {"version":"0.23.0","date":"2026-08-09","zh":"Codex 托管对话正式上线","en":"Managed Codex chat is here"},
     {"version":"0.22.1","date":"2026-08-04","zh":"网页宽度与网站版本分开控制","en":"Separate page width and site-version controls"},
     {"version":"0.22.0","date":"2026-08-03","zh":"全屏设置 · 窗口与分屏管理更清晰","en":"Full-screen Settings · clearer window and pane management"},
     {"version":"0.21.0","date":"2026-08-03","zh":"网页预览：手机直连、电脑代理与静态目录","en":"Web preview: direct, computer proxy, and static folders"},
     {"version":"0.20.3","date":"2026-08-01","zh":"实时终端显示更稳定流畅","en":"More stable, smoother live terminals"},
-    {"version":"0.20.2","date":"2026-07-27","zh":"实时终端长时间运行更流畅","en":"Smoother long-running live terminals"},
-    {"version":"0.20.1","date":"2026-07-26","zh":"聊天发送修复 · 电脑键盘不中断","en":"Reliable chat sending · uninterrupted desktop input"}
+    {"version":"0.20.2","date":"2026-07-27","zh":"实时终端长时间运行更流畅","en":"Smoother long-running live terminals"}
   ]
 }

@@ -4,7 +4,7 @@ import path from 'node:path';
 import { tmpHome } from './tmphome.js';
 
 import {
-  readLatestUsage, readSnapshot, writeSnapshot,
+  readLatestContextUsage, readLatestUsage, readSnapshot, writeSnapshot,
 } from '../src/codexUsageSnapshot.js';
 
 function tokenCount(timestamp, usedPercent, total = 10, extra = {}) {
@@ -69,6 +69,26 @@ describe('Codex usage snapshot', () => {
     expect(readLatestUsage(file).rateLimits.primary.usedPercent).toBe(32);
   });
 
+  it('recovers context from last_token_usage across the shared 64 KiB reader boundary', () => {
+    const home = tmpHome('codex-context-');
+    const file = rollout(home, 'rollout.jsonl', [{
+      timestamp: '2026-07-23T02:30:00.000Z',
+      type: 'event_msg',
+      payload: {
+        type: 'token_count',
+        info: {
+          total_token_usage: { total_tokens: 999_999 },
+          last_token_usage: { total_tokens: 731 },
+          model_context_window: 258_400,
+        },
+        padding: '界'.repeat(30 * 1024),
+      },
+    }, JSON.stringify({ payload: { type: 'message', text: 'y'.repeat(70 * 1024) } }),
+    '{"timestamp":"unfinished"']);
+
+    expect(readLatestContextUsage(file)).toEqual({ usedTokens: 731, totalTokens: 258_400 });
+  });
+
   it('returns a stable no-quota usage and leaves empty rollouts as no-ops', () => {
     const home = tmpHome('codex-snap-');
     const noQuota = tokenCount('2026-07-23T03:00:00.000Z', 0, 50);
@@ -78,6 +98,25 @@ describe('Codex usage snapshot', () => {
 
     expect(readLatestUsage(file).rateLimits).toEqual({ primary: null, secondary: null });
     expect(readLatestUsage(empty)).toBeNull();
+  });
+
+  it('ignores a model-specific quota without discarding its token usage', () => {
+    const home = tmpHome('codex-snap-');
+    const file = rollout(home, 'spark.jsonl', [tokenCount(
+      '2026-07-23T03:30:00.000Z',
+      0,
+      60,
+      { rate_limits: {
+        limit_id: 'codex_bengalfox',
+        primary: { used_percent: 0, window_minutes: 10080, resets_at: 1785600000 },
+        secondary: null,
+      } },
+    )]);
+
+    expect(readLatestUsage(file)).toMatchObject({
+      rateLimits: { primary: null, secondary: null },
+      tokens: { total: 60 },
+    });
   });
 
   it('persists checkedAt separately from usage and never lets an older session win', () => {

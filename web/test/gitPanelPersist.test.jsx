@@ -30,6 +30,7 @@ vi.mock('../src/api.js', () => ({
 
 import GitPanel from '../src/components/GitPanel.jsx';
 import { getGitRepos } from '../src/storage.js';
+import { gitRepos } from '../src/api.js';
 
 let container, root;
 beforeEach(() => { localStorage.clear(); container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container); });
@@ -42,6 +43,24 @@ const qa = (sel) => [...document.querySelectorAll(sel)].map((b) => b.textContent
 const click = (el) => act(() => el.dispatchEvent(new MouseEvent('click', { bubbles: true })));
 
 describe('GitPanel persistence across close→reopen', () => {
+  it('closes the bind picker from an empty Git panel without closing the panel', async () => {
+    gitRepos.mockResolvedValueOnce({ repos: [] });
+    const onClose = vi.fn();
+    await render({ open: true, onClose });
+    await settle();
+    expect(q('.git-tab-label')).toBeNull();
+
+    click(q('.git-tab-add'));
+    await settle();
+    expect(q('.dirpick-card')).not.toBeNull();
+
+    click(q('.dirpick-card .settings-close'));
+    await settle();
+    expect(q('.dirpick-card')).toBeNull();
+    expect(q('.git-sheet.open')).not.toBeNull();
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
   it('auto-discovered repo persists and reappears on reopen', async () => {
     await render({ open: true });
     await settle();

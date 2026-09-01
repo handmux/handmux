@@ -49,10 +49,20 @@ function parseForegroundProcesses(out: unknown): ForegroundProcess[] {
   return rows;
 }
 
+async function foregroundProcesses(run: RunCommand, ttys: string[]): Promise<ForegroundProcess[]> {
+  let targeted = '';
+  try {
+    targeted = await run('ps', ['-t', ttys.join(','), '-o', 'tty=,pid=,stat=']);
+  } catch { /* fall back to the portable full snapshot below */ }
+  if (String(targeted).trim()) return parseForegroundProcesses(targeted);
+  return parseForegroundProcesses(await run('ps', ['-Ao', 'tty=,pid=,stat=']));
+}
+
 // Normalize ambiguous tmux pane_current_command values only after tying the pane's TTY to a foreground
-// process whose REAL executable proves the agent identity. Every call refreshes the cheap ps snapshot;
+// process whose REAL executable proves the agent identity. Every call refreshes the candidate TTYs with ps;
 // the cache only skips lsof while the exact foreground pid set is unchanged and its short TTL is live.
-// This makes TTY reuse/process replacement invalidate immediately, and failed probes retry quickly.
+// This makes TTY reuse/process replacement invalidate immediately, and failed probes retry quickly. If a
+// platform rejects the targeted query (defaultRun returns ''), retain the old full-system scan as fallback.
 export async function resolveByExecutable<T extends ProcessPane>(
   panes: T[],
   run: RunCommand,
@@ -69,7 +79,9 @@ export async function resolveByExecutable<T extends ProcessPane>(
   const candidates = panes.filter((p) => p && p.tty && candidate(p.cmd || ''));
   if (!candidates.length) return panes;
 
-  const rows = parseForegroundProcesses(await run('ps', ['-Ao', 'tty=,pid=,stat=']));
+  const ttys = [...new Set(candidates.map((pane) => normTty(pane.tty)).filter(Boolean))];
+  if (!ttys.length) return panes;
+  const rows = await foregroundProcesses(run, ttys);
   for (const pane of candidates) {
     const tty = normTty(pane.tty);
     const procs = rows.filter((r) => r.tty === tty);

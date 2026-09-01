@@ -83,14 +83,14 @@ function finish(child: ManagedChild): Promise<{ code: number | null; signal: Nod
 
 // One App Server belongs to one tmux pane. The TUI and Handmux connect to that pane-owned Unix socket,
 // so thread identity, messages, approvals, settings, interrupts and inbox state share one runtime.
-export async function runManagedCodex(args: readonly string[] = [], {
+export async function runManagedCodexProcess(args: readonly string[] = [], {
   home = os.homedir(),
   env = process.env,
   spawn = spawnChild as unknown as ManagedSpawn,
   mkdir = (dir: string) => fs.mkdirSync(dir, { recursive: true, mode: 0o700 }),
   unlink = (file: string) => { try { fs.unlinkSync(file); } catch (error) { if (errorCode(error) !== 'ENOENT') throw error; } },
   waitOptions,
-}: RunManagedCodexOptions = {}): Promise<number> {
+}: RunManagedCodexOptions = {}): Promise<{ code: number | null; signal: NodeJS.Signals | null }> {
   const pane = env.TMUX_PANE;
   const socketPath = codexAppSocketPath(pane, home);
   mkdir(path.dirname(socketPath));
@@ -108,11 +108,18 @@ export async function runManagedCodex(args: readonly string[] = [], {
       env: managedEnv,
       stdio: 'inherit',
     });
-    const result = await finish(tui);
-    return typeof result.code === 'number' && Number.isInteger(result.code) ? result.code : 1;
+    return await finish(tui);
   } finally {
     if (tui && tui.exitCode == null && tui.signalCode == null) tui.kill('SIGTERM');
     if (appServer.exitCode == null && appServer.signalCode == null) appServer.kill('SIGTERM');
     unlink(socketPath);
   }
+}
+
+export async function runManagedCodex(
+  args: readonly string[] = [],
+  options: RunManagedCodexOptions = {},
+): Promise<number> {
+  const result = await runManagedCodexProcess(args, options);
+  return typeof result.code === 'number' && Number.isInteger(result.code) ? result.code : 1;
 }

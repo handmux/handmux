@@ -123,11 +123,25 @@ describe('createClaudeEvents paneSession', () => {
     const file = stateFile({
       '%1': { ...rec('stop', { session_id: 'cx', transcript_path: '/tmp/codex.jsonl', cwd: '/x' }), agent: 'codex', bindingVersion: 2 },
       '%2': rec('stop', { session_id: 'cc', transcript_path: '/tmp/claude.jsonl', cwd: '/y' }),
+      '%3': { ...rec('stop', { session_id: 'empty' }), agent: '' },
+      '%4': { ...rec('stop', { session_id: 'unknown' }), agent: 'future-agent' },
     });
     const events = createClaudeEvents({ commands: {}, push: null, file });
     expect(events.paneSession('%1')).toBeNull();
     expect(events.paneAgent('%1')).toBeNull();
     expect(events.paneSession('%2')).toEqual({ sessionId: 'cc', transcriptPath: '/tmp/claude.jsonl', cwd: '/y', agent: undefined });
+    expect(events.paneAgent('%2')).toBe('claude');
+    expect(events.paneSession('%3')).toEqual({ sessionId: 'empty', transcriptPath: null, cwd: null, agent: null });
+    expect(events.paneAgent('%3')).toBeNull();
+    expect(events.paneAgent('%4')).toBeNull();
+  });
+
+  it('exposes a stable token for terminal hook events and not for an active turn', () => {
+    const file = stateFile({ '%1': rec('stop', {}, 1234) });
+    const events = createClaudeEvents({ commands: {}, push: null, file });
+    expect(events.paneCompletionToken('%1')).toBe('claude-completed:1234');
+    fs.writeFileSync(file, JSON.stringify({ '%1': rec('prompt', {}, 2345) }));
+    expect(events.paneCompletionToken('%1')).toBeNull();
   });
 });
 
@@ -164,6 +178,20 @@ describe('createClaudeEvents getStates (reads the hook state file)', () => {
     const commands = { listLivePanes: async () => liveAll(['%1']) };
     const ev = createClaudeEvents({ commands, push, file });
     expect((await ev.getStates())['%1']).toMatchObject({ session: 'proj', window: '@5', windowName: 'dev', kind: 'done', msg: 'done' });
+  });
+
+  it('keeps missing legacy identity as Claude but ignores an explicit unknown agent id', async () => {
+    const file = stateFile({
+      '%1': rec('stop', { last_assistant_message: 'legacy Claude' }),
+      '%2': { ...rec('stop', { last_assistant_message: 'must not be Claude' }), agent: 'future-agent' },
+    });
+    const commands = { listLivePanes: async () => liveAll(['%1', '%2'], {
+      '%2': { cmd: 'shell' },
+    }) };
+    const ev = createClaudeEvents({ commands, push, file });
+    const states = await ev.getStates();
+    expect(states['%1']).toMatchObject({ agent: 'claude', kind: 'done', msg: 'legacy Claude' });
+    expect(states['%2']).toBeUndefined();
   });
 
   it('working carries the prompt; multi-digit pane ids work (no URL encoding involved)', async () => {

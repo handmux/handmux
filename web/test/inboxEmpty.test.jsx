@@ -29,6 +29,19 @@ describe('Inbox empty state', () => {
     expect(screen.getByText('No pane status yet')).toBeTruthy();
   });
 
+  it('shows the shared reconnecting treatment instead of a false empty state', () => {
+    render(<Inbox {...base} reconnecting hooksStatus="installed" onEnableHooks={() => {}} />);
+    expect(screen.getByRole('status').textContent).toBe('Reconnecting to the inbox…');
+    expect(screen.queryByText('No pane status yet')).toBeNull();
+  });
+
+  it('keeps existing rows visible while the inbox source reconnects', () => {
+    const rows = [{ pane: '%1', session: 's', window: '0', view: 'working', ts: 1, msg: '' }];
+    render(<Inbox {...base} rows={rows} reconnecting hooksStatus="installed" onEnableHooks={() => {}} />);
+    expect(screen.getByText('Running')).toBeTruthy();
+    expect(screen.getByRole('status').textContent).toBe('Reconnecting to the inbox…');
+  });
+
   it('hides the prompt entirely when Claude Code is absent', () => {
     render(<Inbox {...base} hooksStatus="no-claude" onEnableHooks={() => {}} />);
     expect(screen.getByText('No pane status yet')).toBeTruthy();

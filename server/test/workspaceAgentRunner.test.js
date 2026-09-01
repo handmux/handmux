@@ -1,6 +1,17 @@
 import { EventEmitter } from 'node:events';
+import fsp from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
-import { createAgentRunner, launchAgentRequest, publishAgentReadiness, validateAgentRequest } from '../src/workspace/agentRunner.js';
+import {
+  createAgentRunner,
+  launchAgentRequest,
+  launchPreparedAgentRequest,
+  publishAgentReadiness,
+  validateAgentRequest,
+  validatePreparedAgentRequest,
+  waitForAgentExecutable,
+} from '../src/workspace/agentRunner.js';
 
 const ID = 'aaaaaaaa-0000-4000-8000-000000000001';
 
@@ -31,6 +42,58 @@ describe('workspace agent runner', () => {
     [{ cmd: 'sh', args: ['-c', 'anything'] }],
   ])('rejects unsafe persisted requests before spawn', (request) => {
     expect(() => validateAgentRequest(request)).toThrow(/unsafe agent request/i);
+  });
+
+  it.each([
+    '/usr/local/bin:relative/bin',
+    '/usr/local/bin::/usr/bin',
+    '/usr/local/bin\n/usr/bin',
+    `/${'x'.repeat(32_768)}`,
+  ])('rejects an unsafe prepared PATH snapshot: %s', (pathEnv) => {
+    expect(() => validatePreparedAgentRequest({
+      paneId: '%7', cmd: 'codex', args: ['resume', ID], pathEnv,
+    }, 'darwin')).toThrow(/unsafe agent PATH snapshot/i);
+  });
+
+  it('persists the Server PATH at prepare and uses it even when the pane runner PATH differs', async () => {
+    const home = await fsp.mkdtemp(path.join(os.tmpdir(), 'handmux-agent-runner-'));
+    const serverPath = '/usr/local/bin:/usr/bin:/bin';
+    try {
+      const runner = createAgentRunner({ home, pathEnv: serverPath, platform: 'darwin' });
+      await runner.prepare({
+        paneId: '%7', cmd: 'codex', args: ['resume', ID], pathEnv: '/untrusted/request/path',
+      });
+      const requestFile = path.join(home, '.handmux', 'workspaces', 'agent-runs', '7.request.json');
+      const prepared = JSON.parse(await fsp.readFile(requestFile, 'utf8'));
+      expect(prepared.pathEnv).toBe(serverPath);
+
+      vi.useFakeTimers();
+      const child = childProcess();
+      const spawn = vi.fn(() => child);
+      const launched = launchPreparedAgentRequest(prepared, {
+        spawn,
+        env: { PATH: '/usr/bin', HOME: '/pane-home' },
+        platform: 'darwin',
+        readinessMs: 10,
+      });
+      child.emit('spawn');
+      await vi.advanceTimersByTimeAsync(10);
+      expect(await launched.ready).toEqual({ status: 'ready' });
+      expect(spawn).toHaveBeenCalledWith(
+        process.execPath,
+        expect.arrayContaining(['codex', 'resume', ID]),
+        expect.objectContaining({
+          shell: false,
+          env: expect.objectContaining({ PATH: serverPath, HOME: '/pane-home' }),
+        }),
+      );
+      child.emit('exit', 0, null);
+      await launched.completion;
+      vi.useRealTimers();
+    } finally {
+      vi.useRealTimers();
+      await fsp.rm(home, { recursive: true, force: true });
+    }
   });
 
   it('reports binary absence and immediate nonzero exit before readiness', async () => {
@@ -68,5 +131,40 @@ describe('workspace agent runner', () => {
 
     await expect(runner.cancel('%7')).rejects.toThrow(/cleanup EACCES/i);
     expect(fs.unlink).toHaveBeenCalled();
+  });
+
+  it('waits through a short executable replacement without consulting a shell', async () => {
+    let now = 0;
+    const checks = vi.fn(async () => now >= 250);
+    const waits = [];
+
+    await expect(waitForAgentExecutable('codex', {
+      available: checks,
+      now: () => now,
+      wait: async (ms) => { waits.push(ms); now += ms; },
+      timeoutMs: 800,
+      pollMs: 100,
+    })).resolves.toEqual({ status: 'ready' });
+
+    expect(waits).toEqual([100, 100, 100]);
+    expect(checks).toHaveBeenCalledTimes(4);
+  });
+
+  it('bounds a truly missing executable with one clear startup result', async () => {
+    let now = 0;
+    const waits = [];
+
+    await expect(waitForAgentExecutable('claude', {
+      available: async () => false,
+      now: () => now,
+      wait: async (ms) => { waits.push(ms); now += ms; },
+      timeoutMs: 250,
+      pollMs: 100,
+    })).resolves.toEqual({
+      status: 'failed',
+      error: 'claude executable unavailable after startup wait',
+    });
+
+    expect(waits).toEqual([100, 100, 50]);
   });
 });

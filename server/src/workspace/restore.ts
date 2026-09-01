@@ -4,6 +4,7 @@ import { AGENTS } from '../agents/index.js';
 import type { RecoveryMappingAddition } from './mapping.js';
 import type { PlanSession, WindowDisposition } from './planner.js';
 import type { WorkspacePane, WorkspaceSession, WorkspaceWindow } from './schema.js';
+import type { AgentReadiness } from './agentRunner.js';
 
 const KINDS = ['sessions', 'windows', 'panes'] as const;
 type MappingKind = typeof KINDS[number];
@@ -36,6 +37,7 @@ interface RestoreTmux {
   killCreatedWindow(target: string): Promise<unknown>;
   renameCreatedSession(target: string, name: string): Promise<unknown>;
   startAgent(target: string, command: string, args: string[]): Promise<unknown>;
+  waitForAgents?(commands: string[]): ReadonlyMap<string, Promise<AgentReadiness>>;
   killCreatedSession(target: string): Promise<unknown>;
   revokeCreatedTargets?(): void;
 }
@@ -139,7 +141,7 @@ async function notify(
 }
 
 async function restoreOneSession({
-  item, checkpoint, tmux, agents, access, home, dispositions, restoredWindows,
+  item, checkpoint, tmux, agents, access, home, dispositions, restoredWindows, agentReadiness,
 }: {
   item: RestorableItem;
   checkpoint: RestoreCheckpoint;
@@ -149,6 +151,7 @@ async function restoreOneSession({
   home: string;
   dispositions: ReadonlyMap<string | null, WindowDisposition>;
   restoredWindows: Map<string, string>;
+  agentReadiness: ReadonlyMap<string, Promise<AgentReadiness>>;
 }): Promise<RestoreResult> {
   const sessions = sessionMap(checkpoint);
   const windows = windowMap(checkpoint);
@@ -287,6 +290,19 @@ async function restoreOneSession({
         warnings.push(`agent ${driver.id} resume command is unavailable; shell was restored`);
         continue;
       }
+      const executable = agentReadiness.get(cmd);
+      if (executable) {
+        let readiness: AgentReadiness;
+        try {
+          readiness = await executable;
+        } catch (error) {
+          readiness = { status: 'failed', error: message(error) };
+        }
+        if (readiness.status !== 'ready') {
+          warnings.push(`agent ${driver.id} executable is unavailable; shell was restored (${readiness.error})`);
+          continue;
+        }
+      }
       try {
         await tmux.startAgent(paneId, cmd, args);
       } catch (error) {
@@ -313,6 +329,37 @@ async function restoreOneSession({
     failure.stage ||= errorStage(error) || 'topology';
     throw failure;
   }
+}
+
+function requiredAgentCommands(
+  plan: RestorePlan,
+  checkpoint: RestoreCheckpoint,
+  agents: readonly AgentDriver[],
+): string[] {
+  const sessions = sessionMap(checkpoint);
+  const windows = windowMap(checkpoint);
+  const dispositions = dispositionMap(plan);
+  const commands = new Set<string>();
+  for (const item of plan.sessions) {
+    if (item.action === 'already-present' || item.action === 'unsupported') continue;
+    if (typeof item.logicalId !== 'string') continue;
+    const session = sessions.get(item.logicalId);
+    if (!session) continue;
+    for (const link of session.windowLinks) {
+      if (dispositions.get(link.windowId)?.action === 'reuse') continue;
+      for (const pane of windows.get(link.windowId)?.panes || []) {
+        const binding = pane.agent;
+        if (!binding) continue;
+        const agentId = typeof binding.id === 'string' ? binding.id : '';
+        const sessionId = typeof binding.sessionId === 'string' ? binding.sessionId : '';
+        const driver = agents.find((candidate) => candidate.id === agentId);
+        if (!driver || !driver.sessions.isId(sessionId)) continue;
+        const [command] = driver.sessions.resumeArgs(sessionId);
+        if (command) commands.add(command);
+      }
+    }
+  }
+  return [...commands];
 }
 
 function restoredTopologySummary(
@@ -362,6 +409,8 @@ export async function executeRestore({
   const dispositions = dispositionMap(plan);
   const restoredWindows = new Map();
   try {
+    const commands = requiredAgentCommands(plan, checkpoint, agents);
+    const agentReadiness = tmux.waitForAgents?.(commands) ?? new Map();
     for (const item of plan.sessions) {
       let result: RestoreResult;
       if (item.action === 'already-present') {
@@ -375,7 +424,7 @@ export async function executeRestore({
         try {
           result = await restoreOneSession({
             item: item as RestorableItem,
-            checkpoint, tmux, agents, access, home, dispositions, restoredWindows,
+            checkpoint, tmux, agents, access, home, dispositions, restoredWindows, agentReadiness,
           });
         } catch (error) {
           result = {

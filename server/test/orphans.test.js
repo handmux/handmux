@@ -282,4 +282,14 @@ describe('takeoverOrphan', () => {
       { pid: 4717, sessionId: UUID, kill: true });
     expect(out).toMatchObject({ status: 409 });
   });
+
+  it('keeps absent legacy agent as Claude but rejects an explicit unknown agent id', async () => {
+    const commands = fakeCommands({ paneCmds: ['node'] });
+    const out = await takeoverOrphan({
+      commands,
+      scanFn: async () => [{ ...orphan, agent: 'future-agent' }],
+      delay: nap,
+    }, { pid: 4717, sessionId: UUID, kill: false });
+    expect(out).toEqual({ error: 'unknown agent', status: 409 });
+  });
 });

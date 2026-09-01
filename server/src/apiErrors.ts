@@ -7,6 +7,7 @@ export interface ApiErrorBody {
   error: string;
   code: ApiErrorCode;
   requestId: string;
+  retryAfterSeconds?: number;
 }
 
 export interface ApiErrorLog {
@@ -21,12 +22,14 @@ export interface ApiErrorOptions {
 export class PublicApiError extends Error {
   readonly status: number;
   readonly code: ApiErrorCode;
+  readonly retryAfterSeconds?: number;
 
-  constructor(status: number, code: ApiErrorCode, message: string) {
+  constructor(status: number, code: ApiErrorCode, message: string, retryAfterSeconds?: number) {
     super(message);
     this.name = 'PublicApiError';
     this.status = status;
     this.code = code;
+    if (retryAfterSeconds !== undefined) this.retryAfterSeconds = retryAfterSeconds;
   }
 }
 
@@ -98,7 +101,12 @@ export function apiErrorBoundary({
         error: errorFields(error),
       });
     }
-    const body: ApiErrorBody = { error: message, code, requestId };
+    const retryAfterSeconds = error instanceof PublicApiError ? error.retryAfterSeconds : undefined;
+    if (retryAfterSeconds !== undefined) res.setHeader('Retry-After', String(retryAfterSeconds));
+    const body: ApiErrorBody = {
+      error: message, code, requestId,
+      ...(retryAfterSeconds === undefined ? {} : { retryAfterSeconds }),
+    };
     res.status(status).json(body);
   };
 }

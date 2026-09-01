@@ -219,6 +219,63 @@ describe('workspace restore executor', () => {
     expect(tmux.calls.find((call) => call.method === 'startAgent')).toMatchObject({ cmd: 'claude', args: ['--resume', ID.agent] });
   });
 
+  it('shares one executable wait across every pane in the restore and skips launches when it stays unavailable', async () => {
+    const tmux = fakeTmux();
+    const source = checkpoint();
+    source.windows.find((window) => window.id === ID.wB).panes[0].agent = {
+      id: 'claude', sessionId: ID.agent, transcriptPath: '/sessions/b.jsonl',
+    };
+    tmux.waitForAgents = vi.fn((commands) => new Map(commands.map((command) => [
+      command,
+      Promise.resolve({ status: 'failed', error: `${command} executable unavailable after startup wait` }),
+    ])));
+
+    const result = await executeRestore({
+      plan: plan(), checkpoint: source, tmux, agents, access: async () => {}, home: '/home/me',
+    });
+
+    expect(tmux.waitForAgents).toHaveBeenCalledTimes(1);
+    expect(tmux.waitForAgents).toHaveBeenCalledWith(['claude']);
+    expect(tmux.calls.filter((call) => call.method === 'startAgent')).toHaveLength(0);
+    expect(result.results).toEqual(expect.arrayContaining([
+      expect.objectContaining({ warnings: [expect.stringMatching(/claude executable.*shell was restored/i)] }),
+      expect.objectContaining({ warnings: [expect.stringMatching(/claude executable.*shell was restored/i)] }),
+    ]));
+  });
+
+  it('still resumes an available Agent when another required executable stays missing', async () => {
+    const tmux = fakeTmux();
+    const source = checkpoint();
+    source.windows.find((window) => window.id === ID.wB).panes[0].agent = {
+      id: 'codex', sessionId: ID.agent, transcriptPath: '/sessions/b.jsonl',
+    };
+    const mixedAgents = [...agents, {
+      id: 'codex',
+      sessions: {
+        isId: (id) => id === ID.agent,
+        resumeArgs: (id) => ['codex', 'resume', id],
+      },
+    }];
+    tmux.waitForAgents = vi.fn((commands) => new Map(commands.map((command) => [
+      command,
+      Promise.resolve(command === 'claude'
+        ? { status: 'ready' }
+        : { status: 'failed', error: 'codex executable unavailable after startup wait' }),
+    ])));
+
+    const result = await executeRestore({
+      plan: plan(), checkpoint: source, tmux, agents: mixedAgents, access: async () => {}, home: '/home/me',
+    });
+
+    expect(tmux.waitForAgents).toHaveBeenCalledWith(['claude', 'codex']);
+    expect(tmux.calls.filter((call) => call.method === 'startAgent')).toEqual([
+      expect.objectContaining({ cmd: 'claude', args: ['--resume', ID.agent] }),
+    ]);
+    expect(result.results[1].warnings).toEqual([
+      expect.stringMatching(/codex executable.*shell was restored/i),
+    ]);
+  });
+
   it('falls back missing cwd and invalid layout as warnings without failing topology', async () => {
     const tmux = fakeTmux({ failLayout: true });
     const result = await executeRestore({

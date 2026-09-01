@@ -67,7 +67,10 @@ export function OverlayPortal({
     ?? (typeof document !== 'undefined' ? document.body : null);
   if (!target) return null;
   const inset = normalizedInset(keyboardInset ?? environment.keyboardInset);
-  const style = { '--overlay-keyboard-inset': `${inset}px` } as CSSProperties;
+  const style = {
+    '--overlay-keyboard-inset': `${inset}px`,
+    '--overlay-keyboard-center-shift': `${inset / 2}px`,
+  } as CSSProperties;
   const classes = `overlay-layer chat-tone-surface${className ? ` ${className}` : ''}`;
   return createPortal(
     <div className={classes} data-chat-tone={chatTone ?? environment.chatTone} style={style}>

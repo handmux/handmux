@@ -686,6 +686,15 @@ export function createWorkspaceTmux({
     }
   }
 
+  function waitForAgents(commands: string[]): ReadonlyMap<string, Promise<import('./agentRunner.js').AgentReadiness>> {
+    const waits = new Map<string, Promise<import('./agentRunner.js').AgentReadiness>>();
+    for (const command of new Set(commands)) {
+      if (command !== 'claude' && command !== 'codex') throw new Error('unsafe agent command token');
+      waits.set(command, agentRunner.waitForExecutable(command));
+    }
+    return waits;
+  }
+
   async function topologyFingerprint(): Promise<string | { status: 'unknown'; error: string }> {
     const topology = await captureTopology();
     if (topology.status === 'unknown') return topology;
@@ -707,6 +716,7 @@ export function createWorkspaceTmux({
     killCreatedSession,
     killCreatedWindow,
     startAgent,
+    waitForAgents,
     topologyFingerprint,
     revokeCreatedTargets,
   };

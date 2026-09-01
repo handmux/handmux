@@ -24,7 +24,10 @@ export function deployHookScripts(hooksDir: string, srcDir: string, stateFile: s
     try { fs.unlinkSync(path.join(hooksDir, f)); } catch { /* absent */ }
   }
   fs.chmodSync(path.join(hooksDir, 'handmux-notify.sh'), 0o755);
-  fs.writeFileSync(path.join(hooksDir, 'handmux-notify.env'), `HANDMUX_STATE=${stateFile}\n`, { mode: 0o600 });
+  fs.writeFileSync(path.join(hooksDir, 'handmux-notify.env'), [
+    `HANDMUX_STATE=${stateFile}`,
+    '',
+  ].join('\n'), { mode: 0o600 });
 }
 
 // Remove the deployed scripts + env (uninstall). Best-effort: a missing file is fine.

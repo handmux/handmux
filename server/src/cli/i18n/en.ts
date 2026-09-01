@@ -128,10 +128,36 @@ export default {
   // hooks
   'hooks.confirmEnable': 'Enable Claude Code states and notifications (inbox)?',
   'hooks.noClaude': 'Claude Code not detected (~/.claude missing) — nothing to install.',
-  'hooks.installedClaude': '✓ Claude Code hooks installed → ~/.claude/settings.json',
-  'hooks.installedHint': '  Restart or open a new Claude Code session to load them; the inbox lights up as panes report.',
-  'hooks.removed': '✓ Claude Code hooks removed.',
+  'hooks.installedClaude': '✓ Claude integration enabled.',
+  'hooks.installedHint': '  Restart or open a new Claude Code session to load it.',
+  'hooks.removed': '✓ Claude integration disabled.',
   'hooks.usage': 'usage: handmux hooks install|uninstall',
+
+  // Agent launchers and Handmux integration management
+  'agent.state.ready': 'ready',
+  'agent.state.not-installed': 'not installed',
+  'agent.state.not-enabled': 'not enabled',
+  'agent.state.needs-repair': 'needs repair',
+  'agent.state.conflict': 'conflict',
+  'agent.builtIn': ' (built-in)',
+  'agent.status': '{name}: {status}{detail}',
+  'agent.hint.install': '  Install {name} first, then run `handmux agent enable {name}`.',
+  'agent.hint.initializeClaude': '  Run Claude Code once to initialize ~/.claude, then run `handmux agent enable claude`.',
+  'agent.hint.enable': '  Run `handmux agent enable {name}`.',
+  'agent.hint.conflict': '  The integration target is owned by another extension; move it aside, then run `handmux agent enable {name}`.',
+  'agent.enabled': '✓ {name} integration enabled.',
+  'agent.alreadyReady': '= {name} integration is already ready.',
+  'agent.disabled': '✓ {name} integration disabled.',
+  'agent.alreadyDisabled': '= {name} integration is already disabled.',
+  'agent.codexBuiltIn': '= Codex integration is built in and already ready.',
+  'agent.codexDisable': 'Codex integration is built in and cannot be disabled. Run native `codex` directly to bypass Handmux.',
+  'agent.unknown': 'unknown Agent: {name}',
+  'agent.usage': 'usage: handmux agent [list] | handmux agent status|enable|disable <codex|pi|claude>',
+
+  // Pi Extension
+  'piExtension.confirmEnable': 'Enable the Pi integration with Handmux?',
+  'piExtension.installed': '✓ Pi integration enabled.',
+  'piExtension.reload': '  Open a new Pi session, or run /reload in Pi, to apply the change.',
 
   // Claude statusLine usage capturer (powers the phone Usage page's 5h/weekly bars)
   'statusline.confirmEnable': "Show Claude's 5h/weekly usage on the phone? (installs a Claude statusLine)",
@@ -338,6 +364,9 @@ export default {
   handmux logs [--follow] [--lines N]
   handmux push <title> <body>   notify your phone from a script (--session X · --device K · --tag T · --url U)
   handmux codex [args...]       launch a Codex TUI synchronized with chat view
+  handmux pi [args...]          launch Pi with its arguments unchanged
+  handmux agent [list]          show supported Agent integrations
+  handmux agent status|enable|disable <name>
   handmux restore [--dry-run] [--checkpoint <id>] [--session <name>]
   handmux restore --list
   handmux update           upgrade to the latest published version (npm i -g handmux@latest)
@@ -347,7 +376,6 @@ The model: 'start' runs · 'setup' configures (writes ~/.handmux/config.json) ·
 
 more:
   handmux config                          show the effective config + where each value came from
-  handmux hooks install|uninstall         enable/disable Claude Code notifications (inbox)
   handmux service install|uninstall       start at login (launchd/systemd)
   handmux help flags                      one-run flags + env vars (scripting / headless / Docker)
   --config PATH · --lang en|zh · --version, -v

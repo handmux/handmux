@@ -12,6 +12,8 @@ export const DEFAULT_UPLOAD_EXTS = new Set([
   'rs', 'java', 'c', 'h', 'cpp', 'sh',
   // documents / office
   'pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'odt', 'ods', 'odp', 'rtf',
+  // archives
+  'zip',
 ]);
 
 // Read HANDMUX_UPLOAD_EXTS (comma-separated) → a Set, normalising leading dots/case/whitespace.

@@ -22,6 +22,10 @@ export interface GitRepo {
   dirty: boolean;
 }
 
+export interface GitWorktree {
+  path: string;
+}
+
 export interface GitChange {
   x: string;
   y: string;
@@ -53,6 +57,7 @@ export interface GitDiffOptions {
 export interface GitService {
   resolveRepo(rawPath: unknown): Promise<{ real: string } | GitError>;
   isRepo(dir: string): Promise<boolean>;
+  worktree(rawDir: unknown): Promise<{ worktree: GitWorktree | null } | GitError>;
   detectRepos(rawDir: unknown): Promise<{ repos: GitRepo[] } | GitError>;
   status(rawRepo: unknown): Promise<{ changes: GitChange[] } | GitError>;
   log(rawRepo: unknown, limit?: unknown, ref?: unknown): Promise<{ commits: GitCommitSummary[] } | GitError>;
@@ -113,6 +118,17 @@ export function createGit({ home = homedir(), extraRoots = [] }: CreateGitOption
   async function isRepo(dir: string): Promise<boolean> {
     try { return (await git(dir, ['rev-parse', '--is-inside-work-tree'])).trim() === 'true'; }
     catch { return false; }
+  }
+
+  async function worktree(rawDir: unknown): Promise<{ worktree: GitWorktree | null } | GitError> {
+    const r = await resolveRepo(rawDir);
+    if ('error' in r) return r;
+    try {
+      const path = (await git(r.real, ['rev-parse', '--show-toplevel'])).trim();
+      return path ? { worktree: { path } } : { worktree: null };
+    } catch {
+      return { worktree: null };
+    }
   }
 
   // `realDir` is used for git operations; `displayPath` is what we expose (the caller's original path,
@@ -260,7 +276,7 @@ export function createGit({ home = homedir(), extraRoots = [] }: CreateGitOption
     return { message, files };
   }
 
-  return { resolveRepo, isRepo, detectRepos, status, log, branches, diff, commit };
+  return { resolveRepo, isRepo, worktree, detectRepos, status, log, branches, diff, commit };
 }
 
 export const defaultGit = createGit({ home: homedir(), extraRoots: defaultExtraRoots() });

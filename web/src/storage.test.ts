@@ -2,14 +2,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   applyWorkspaceRestoreMapping,
   getBoundSessions,
+  getAgentConversationEnabled,
+  getAgentUsageEnabled,
   getWorkspacePromptState,
-  getClaudeChatLensEnabled,
-  getCodexChatLensEnabled,
   ignoreWorkspaceCheckpoint,
   markWorkspaceAutoShown,
   removeRestoredSessionBindings,
-  setClaudeChatLensEnabled,
-  setCodexChatLensEnabled,
+  setAgentConversationEnabled,
+  setAgentUsageEnabled,
 } from './storage.js';
 
 const read = (key: string): unknown => JSON.parse(localStorage.getItem(key) ?? 'null');
@@ -23,27 +23,52 @@ const snapshotStorage = (): Record<string, string | null> => Object.fromEntries(
 beforeEach(() => localStorage.clear());
 afterEach(() => vi.restoreAllMocks());
 
-describe('agent chat-view preferences', () => {
-  it('migrates the legacy shared opt-in until each agent gets an explicit value', () => {
-    localStorage.setItem('tw_chat_lens', '1');
-    expect(getClaudeChatLensEnabled()).toBe(true);
-    expect(getCodexChatLensEnabled()).toBe(true);
-
-    setClaudeChatLensEnabled(false);
-    expect(getClaudeChatLensEnabled()).toBe(false);
-    expect(getCodexChatLensEnabled()).toBe(true);
-
-    setCodexChatLensEnabled(false);
-    expect(getClaudeChatLensEnabled()).toBe(false);
-    expect(getCodexChatLensEnabled()).toBe(false);
+describe('Agent Conversation preferences', () => {
+  it('defaults formal and future Conversation capabilities on', () => {
+    expect(getAgentConversationEnabled('pi')).toBe(true);
+    expect(getAgentConversationEnabled('future-agent')).toBe(true);
   });
 
-  it('keeps new installs off and stores the two switches independently', () => {
-    expect(getClaudeChatLensEnabled()).toBe(false);
-    expect(getCodexChatLensEnabled()).toBe(false);
-    setCodexChatLensEnabled(true);
-    expect(getClaudeChatLensEnabled()).toBe(false);
-    expect(getCodexChatLensEnabled()).toBe(true);
+  it('migrates old per-Agent keys by presence before the shared key', () => {
+    localStorage.setItem('tw_chat_lens', '1');
+    localStorage.setItem('tw_chat_lens_claude', '0');
+    expect(getAgentConversationEnabled('claude')).toBe(false);
+    expect(getAgentConversationEnabled('codex')).toBe(true);
+    expect(read('tw_agent_conversation_enabled_v1')).toEqual({ claude: false, codex: true });
+  });
+
+  it('keeps one Agent preference when metadata changes from experimental to stable', () => {
+    setAgentConversationEnabled('preview-agent', false);
+    expect(getAgentConversationEnabled('preview-agent')).toBe(false);
+    setAgentConversationEnabled('preview-agent', true);
+    expect(getAgentConversationEnabled('preview-agent')).toBe(true);
+  });
+});
+
+describe('Agent Usage preferences', () => {
+  it('defaults every provider on and persists provider switches independently', () => {
+    expect(getAgentUsageEnabled('claude')).toBe(true);
+    expect(getAgentUsageEnabled('codex')).toBe(true);
+
+    setAgentUsageEnabled('claude', false);
+    expect(getAgentUsageEnabled('claude')).toBe(false);
+    expect(getAgentUsageEnabled('codex')).toBe(true);
+    expect(read('tw_agent_usage_enabled_v1')).toEqual({ claude: false });
+
+    setAgentUsageEnabled('codex', false);
+    expect(read('tw_agent_usage_enabled_v1')).toEqual({ claude: false, codex: false });
+
+    setAgentUsageEnabled('claude', true);
+    expect(getAgentUsageEnabled('claude')).toBe(true);
+    expect(read('tw_agent_usage_enabled_v1')).toEqual({ claude: true, codex: false });
+  });
+
+  it('ignores malformed storage and invalid provider ids', () => {
+    localStorage.setItem('tw_agent_usage_enabled_v1', '{broken');
+    expect(getAgentUsageEnabled('claude')).toBe(true);
+
+    setAgentUsageEnabled('../claude', false);
+    expect(localStorage.getItem('tw_agent_usage_enabled_v1')).toBe('{broken');
   });
 });
 

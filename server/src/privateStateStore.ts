@@ -2,6 +2,29 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 
+const WINDOWS_DIRECTORY_FSYNC_UNSUPPORTED = new Set(['EBADF', 'EISDIR', 'EINVAL', 'ENOTSUP', 'EPERM']);
+
+function errorCode(error: unknown): string | null {
+  return error instanceof Error && 'code' in error && typeof error.code === 'string' ? error.code : null;
+}
+
+export function fsyncDirectorySync(
+  directory: string,
+  platform: NodeJS.Platform = process.platform,
+): void {
+  let descriptor: number | null = null;
+  try {
+    descriptor = fs.openSync(directory, 'r');
+    fs.fsyncSync(descriptor);
+  } catch (error) {
+    // Windows does not provide a portable directory-fsync primitive through Node. Only its known
+    // unsupported-operation errors are tolerated; POSIX and every other error remain strict.
+    if (platform !== 'win32' || !WINDOWS_DIRECTORY_FSYNC_UNSUPPORTED.has(errorCode(error) ?? '')) throw error;
+  } finally {
+    if (descriptor !== null) fs.closeSync(descriptor);
+  }
+}
+
 function privateDirectoryChain(directory: string): string[] {
   const resolved = path.resolve(directory);
   const { root } = path.parse(resolved);
@@ -75,6 +98,20 @@ export class PrivateStateStore<T> {
       try { fs.unlinkSync(temporary); } catch { /* never created or already removed */ }
       throw error;
     }
+  }
+
+  quarantine(): string | null {
+    const directory = path.dirname(this.file);
+    if (!fs.existsSync(this.file)) {
+      if (fs.existsSync(directory)) ensurePrivateDirectorySync(directory);
+      return null;
+    }
+    ensurePrivateDirectorySync(directory);
+    fs.chmodSync(this.file, 0o600);
+    const quarantined = `${this.file}.corrupt.${Date.now()}.${crypto.randomUUID()}`;
+    fs.renameSync(this.file, quarantined);
+    fs.chmodSync(quarantined, 0o600);
+    return quarantined;
   }
 
   remove(): void {

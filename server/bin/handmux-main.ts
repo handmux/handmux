@@ -43,16 +43,36 @@ import { scanSupervisorPids, terminateSupervisorPids } from '../src/cli/supervis
 import { runSetup } from '../src/cli/setupWizard.js';
 import { commitShortcuts, reportShortcutCommit, runShortcutEditor } from '../src/cli/shortcutEditor.js';
 import type { ShortcutCommitResult } from '../src/cli/shortcutEditor.js';
-import { hooksStatus, installHooks, uninstallHooks } from '../src/cli/claudeHooks.js';
+import { hooksStatus } from '../src/cli/claudeHooks.js';
 import { removeLegacyCodexHooks } from '../src/cli/legacyCodexHooks.js';
-import { statusLineStatus, installStatusLine, uninstallStatusLine, composeHint, refreshStatusLineScript } from '../src/cli/statusLine.js';
-import { claudeUsagePath } from '../src/usage.js';
+import { statusLineStatus, installStatusLine, composeHint, refreshStatusLineScript } from '../src/cli/statusLine.js';
+import { claudeUsagePath } from '../src/usagePaths.js';
 import { probe } from '../src/cli/probe.js';
 import { notifyUpdate, runUpdateCheck, isBrewInstall, PKG_NAME } from '../src/cli/updateCheck.js';
 import { t, initLocale, setLocale } from '../src/cli/i18n/index.js';
 import { runPush } from '../src/cli/pushCmd.js';
 import { runWorkspaceCommand } from '../src/cli/workspaceCmd.js';
-import { runManagedCodex } from '../src/cli/codexManaged.js';
+import { runManagedCodexProcess } from '../src/cli/codexManaged.js';
+import {
+  launchErrorCode,
+  launchRawAgent,
+  rawAgentInvocation,
+} from '../src/cli/agentLauncher.js';
+import {
+  AGENT_NAMES,
+  agentIntegrationStatus,
+  agentName,
+  defaultAgentIntegrationContext,
+  disableAgentIntegration,
+  enableAgentIntegration,
+  shouldOfferClaudeIntegration,
+} from '../src/cli/agentIntegration.js';
+import type {
+  AgentIntegrationContext,
+  AgentIntegrationResult,
+  AgentIntegrationStatus,
+  AgentName,
+} from '../src/cli/agentIntegration.js';
 import { PrivateStateStore } from '../src/privateStateStore.js';
 
 const HOME = homedir();
@@ -61,6 +81,7 @@ const SELF = fileURLToPath(import.meta.url);
 // so isBrewInstall() needs the real target, not the symlink, to spot the `/Cellar/` segment.
 const SELF_REAL = (() => { try { return fs.realpathSync(SELF); } catch { return SELF; } })();
 const HOOKS_SRC = path.resolve(path.dirname(SELF), '../hooks'); // server/hooks (bundled scripts)
+const PI_EXTENSION_ENTRY = path.resolve(path.dirname(SELF), '../connectors/pi/index.js');
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
 type RuntimeConfig = ResolvedConfig & TunnelConfig;
@@ -75,6 +96,33 @@ const ownerPidOf = (error: unknown): number | null => {
   return typeof ownerPid === 'number' && Number.isSafeInteger(ownerPid) && ownerPid > 0 ? ownerPid : null;
 };
 const stringFlag = (value: unknown): string | null => typeof value === 'string' && value ? value : null;
+
+// Agent launchers own every token after their built-in slug. Run this before Handmux parseArgs, locale and
+// config peeking so Agent flags such as --config/--lang (including duplicates and `--`) stay byte-for-byte
+// positional input and a broken Handmux config cannot block the Agent from starting.
+const rawAgent = rawAgentInvocation(process.argv.slice(2));
+if (rawAgent) {
+  try {
+    const result = rawAgent.slug === 'codex'
+      ? await (async () => {
+          removeLegacyCodexHooks(HOME);
+          return runManagedCodexProcess(rawAgent.args, { home: HOME });
+        })()
+      : await launchRawAgent(rawAgent.slug, rawAgent.args);
+    if (result.signal) {
+      process.kill(process.pid, result.signal);
+      process.exit(1); // kill should terminate; deterministic fallback for unusual embedders.
+    }
+    process.exit(typeof result.code === 'number' ? result.code : 1);
+  } catch (error) {
+    if (launchErrorCode(error) === 'ENOENT') {
+      console.error(`[handmux] ${rawAgent.slug} executable not found; install ${rawAgent.slug} and try again.`);
+      process.exit(127);
+    }
+    console.error(`[handmux] ${errorMessage(error)}`);
+    process.exit(1);
+  }
+}
 
 const { command, flags, positionals = [], unknownShortFlags = [] } = parseArgs(process.argv.slice(2));
 const configFlag = stringFlag(flags.config);
@@ -183,12 +231,12 @@ async function main(): Promise<unknown> {
     case 'status': await status(); process.exit(process.exitCode || 0);
     case 'logs': return logs();
     case 'push': process.exitCode = await pushCmd(); return;
-    case 'codex': return codexCmd();
     case 'restore': process.exitCode = await runWorkspaceCommand({ flags, positionals, unknownShortFlags, home: HOME }); return;
     case 'config': return configCmd();
     case 'setup': return setupCmd();
     case 'shortcuts': return shortcutsCmd();
     case 'hooks': return hooksCmd();
+    case 'agent': return agentCmd();
     case 'service': return withLifecycleLock(serviceCmd);
     case 'update': case 'upgrade': return updateCmd();
     case '__supervise': return runSupervise();
@@ -217,15 +265,6 @@ async function withLifecycleLock(fn: () => unknown | Promise<unknown>): Promise<
 // stays in lockstep with what npm installed; no hardcoded string to forget to bump).
 function version(): void {
   console.log(currentVersion());
-}
-
-async function codexCmd(): Promise<void> {
-  removeLegacyCodexHooks(HOME);
-  try { process.exitCode = await runManagedCodex(process.argv.slice(3), { home: HOME }); }
-  catch (error) {
-    console.error(`[handmux] ${errorMessage(error)}`);
-    process.exitCode = 1;
-  }
 }
 
 function currentVersion(): string {
@@ -541,10 +580,12 @@ async function setupCmd(): Promise<unknown> {
   if (!res) { process.exit(2); }
   const { cfg, start: doStart } = res;   // hub's "save & start/restart" carries the intent — no separate confirm
   // Codex uses App Server and needs no hooks. Offer this only when Claude Code is present but not wired.
-  const offerHooks = hooksStatus(HOME) === 'absent';
+  const offerHooks = shouldOfferClaudeIntegration(agentContext());
   if (offerHooks && await confirm(t('hooks.confirmEnable'))) {
-    installClaudeHooks();
+    const result = enableAgentIntegration('claude', agentContext());
+    if (result.status === 'ready') console.log(t('hooks.installedClaude'));
   }
+  await maybeOfferPiExtension();
   await maybeOfferStatusLine();
   if (doStart) {
     return withLifecycleLock(async () => {
@@ -586,9 +627,8 @@ async function shortcutsCmd(): Promise<void> {
 async function maybeOfferStatusLine(): Promise<void> {
   const st = statusLineStatus(HOME);
   if (st === 'no-claude') return;
-  // Already ours (plain OR composed into the user's own statusline): don't re-prompt, but silently REFRESH
-  // the capturer script to the bundled version so an npm upgrade reaches the on-disk copy. Settings-safe —
-  // refreshStatusLineScript never rewrites settings.statusLine, so a composed downstream renderer is kept.
+  // A bare Handmux statusLine is ours, so refresh only its script. A composed TEE pipeline is classified
+  // foreign/user-owned below: its complete command and downstream renderer are never rewritten or removed.
   if (st === 'ours') { refreshStatusLineScript(HOME, { srcDir: HOOKS_SRC }); return; }
   if (st === 'foreign') {
     // Deploy the capturer script (doesn't touch their statusLine) so the compose one-liner is runnable.
@@ -604,37 +644,158 @@ async function maybeOfferStatusLine(): Promise<void> {
   }
 }
 
-// Install Claude Code lifecycle hooks for inbox state and push. Codex never enters this path.
-function installClaudeHooks(): boolean {
-  if (hooksStatus(HOME) === 'no-claude') return false;
-  installHooks(HOME, { srcDir: HOOKS_SRC, stateFile: claudeStatePath(HOME) });
-  console.log(t('hooks.installedClaude'));
-  return true;
+function agentContext(): AgentIntegrationContext {
+  return defaultAgentIntegrationContext({
+    home: HOME,
+    piEntryFile: PI_EXTENSION_ENTRY,
+    hooksSrcDir: HOOKS_SRC,
+    claudeStateFile: claudeStatePath(HOME),
+  });
 }
 
-// `handmux hooks install|uninstall` controls Claude Code lifecycle hooks. Codex is App Server-only;
-// uninstall also removes the exact Handmux Codex hook block left by older releases.
+function stateText(status: AgentIntegrationStatus): string {
+  return t(`agent.state.${status}`);
+}
+
+function printAgentStatus(name: AgentName, status: AgentIntegrationStatus, hint = true): void {
+  const detail = name === 'codex' && status === 'ready' ? t('agent.builtIn') : '';
+  console.log(t('agent.status', { name, status: stateText(status), detail }));
+  if (!hint || status === 'ready') return;
+  if (status === 'not-installed') console.log(t('agent.hint.install', { name }));
+  else if (name === 'claude' && status === 'not-enabled' && hooksStatus(HOME) === 'no-claude') {
+    console.log(t('agent.hint.initializeClaude'));
+  }
+  else if (status === 'conflict') console.log(t('agent.hint.conflict', { name }));
+  else console.log(t('agent.hint.enable', { name }));
+}
+
+function reportAgentResult(result: AgentIntegrationResult, action: 'enable' | 'disable'): number {
+  const { name, status } = result;
+  if (action === 'enable') {
+    if (status !== 'ready') { printAgentStatus(name, status); return 1; }
+    if (name === 'codex') console.log(t('agent.codexBuiltIn'));
+    else console.log(t(result.changed ? 'agent.enabled' : 'agent.alreadyReady', { name }));
+    return 0;
+  }
+  if (name === 'codex') {
+    console.error(t('agent.codexDisable'));
+    return 1;
+  }
+  if (status === 'conflict') { printAgentStatus(name, status); return 1; }
+  console.log(t(result.changed ? 'agent.disabled' : 'agent.alreadyDisabled', { name }));
+  return 0;
+}
+
+async function runAgentAction(
+  action: 'enable' | 'disable',
+  name: AgentName,
+  context: AgentIntegrationContext = agentContext(),
+): Promise<number> {
+  try {
+    if (action === 'enable') {
+      const code = reportAgentResult(enableAgentIntegration(name, context), action);
+      // The statusLine is an optional Claude enhancement, not part of integration health. Only an
+      // interactive enable may offer it; automation never prompts or writes this optional component.
+      if (code === 0 && name === 'claude' && process.stdin.isTTY) await maybeOfferStatusLine();
+      return code;
+    }
+    return reportAgentResult(disableAgentIntegration(name, context), action);
+  } catch (error) {
+    console.error(t('err.generic', { msg: errorMessage(error) }));
+    return 1;
+  }
+}
+
+async function agentCmd(): Promise<void> {
+  const args = process.argv.slice(3);
+  const action = args[0] ?? 'list';
+  if (action === 'list' && args.length <= 1) {
+    const context = agentContext();
+    for (const name of AGENT_NAMES) {
+      printAgentStatus(name, agentIntegrationStatus(name, context), false);
+    }
+    return; // Optional/unconfigured Agents never make the directory listing fail.
+  }
+  if (action === 'status' && args.length === 2) {
+    const name = agentName(args[1]);
+    if (!name) { console.error(t('agent.unknown', { name: args[1] })); process.exitCode = 2; return; }
+    const status = agentIntegrationStatus(name, agentContext());
+    printAgentStatus(name, status);
+    process.exitCode = status === 'ready' ? 0 : 1;
+    return;
+  }
+  if ((action === 'enable' || action === 'disable') && args.length === 2) {
+    const name = agentName(args[1]);
+    if (!name) { console.error(t('agent.unknown', { name: args[1] })); process.exitCode = 2; return; }
+    process.exitCode = await runAgentAction(action, name);
+    return;
+  }
+  console.error(t('agent.usage'));
+  process.exitCode = 2;
+}
+
+// Public compatibility alias. It invokes the exact same Claude integration action as the new namespace,
+// including exit codes and ownership boundaries; there is no second hook-management implementation.
 async function hooksCmd(): Promise<void> {
   const sub = process.argv[3];
   if (sub === 'install') {
     removeLegacyCodexHooks(HOME);
     if (hooksStatus(HOME) === 'no-claude') {
       console.log(t('hooks.noClaude'));
+      process.exitCode = 0;
       return;
     }
-    if (installClaudeHooks()) console.log(t('hooks.installedHint'));
-    await maybeOfferStatusLine();
+    // Compatibility: the public alias historically used ~/.claude as its installation boundary and did
+    // not require `claude` to resolve from PATH. Keep that shell while reusing the unified service.
+    const context = { ...agentContext(), executableAvailable: () => true };
+    try {
+      const result = enableAgentIntegration('claude', context);
+      if (result.status !== 'ready') { printAgentStatus('claude', result.status); process.exitCode = 1; return; }
+      console.log(t('hooks.installedClaude'));
+      console.log(t('hooks.installedHint'));
+      if (process.stdin.isTTY) await maybeOfferStatusLine();
+      process.exitCode = 0;
+    } catch (error) {
+      console.error(t('err.generic', { msg: errorMessage(error) }));
+      process.exitCode = 1;
+    }
     return;
   }
   if (sub === 'uninstall') {
-    uninstallHooks(HOME);
     removeLegacyCodexHooks(HOME);
-    uninstallStatusLine(HOME);
-    console.log(t('hooks.removed'));
+    try {
+      disableAgentIntegration('claude', agentContext());
+      console.log(t('hooks.removed'));
+      process.exitCode = 0;
+    } catch (error) {
+      console.error(t('err.generic', { msg: errorMessage(error) }));
+      process.exitCode = 1;
+    }
     return;
   }
   console.error(t('hooks.usage'));
-  process.exit(2);
+  process.exitCode = 2;
+}
+
+async function maybeOfferPiExtension(): Promise<void> {
+  const status = agentIntegrationStatus('pi', agentContext());
+  if (status === 'ready' || status === 'conflict' || status === 'not-installed') return;
+  if (status === 'needs-repair') {
+    try { enableAgentIntegration('pi', agentContext()); } catch { /* explicit command can repair */ }
+    return;
+  }
+  if (await confirm(t('piExtension.confirmEnable'))) {
+    try {
+      const result = enableAgentIntegration('pi', agentContext());
+      if (result.status === 'ready') {
+        console.log(t('piExtension.installed', { file: path.join(HOME, '.pi', 'agent', 'extensions', 'handmux', 'index.ts') }));
+        console.log(t('piExtension.reload'));
+      }
+    } catch (error) {
+      console.error(t('err.generic', { msg: errorMessage(error) }));
+      process.exitCode = 1;
+    }
+  }
 }
 
 // `handmux config` — read-only: print the config that WOULD be used, with each value's origin (flag /

@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useState, useCallback, useMemo, useRef } from 'react';
+import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { t } from './i18n';
 import {
   getToken, getLastSession, getLastWindow, getLastPane, remember, clearToken,
@@ -9,18 +9,17 @@ import {
   renameWindowIdeas, getChangelogSeen, setChangelogSeen,
   getVersionSeen, setVersionSeen,
   getReadInboxIds, addReadInboxId, pruneReadInboxIds, getNotifSeenTs, setNotifSeenTs,
-  getIdeas, getChatTone, setChatTone,
-  getClaudeChatLensEnabled, setClaudeChatLensEnabled, getCodexChatLensEnabled, setCodexChatLensEnabled,
+  getIdeas, getChatTone, setChatTone, getAgentConversationEnabled, setAgentConversationEnabled,
   getWorkspacePromptState, markWorkspaceAutoShown, ignoreWorkspaceCheckpoint,
-  applyWorkspaceRestoreMapping, removeRestoredSessionBindings,
+  applyWorkspaceRestoreMapping, removeRestoredSessionBindings, setRootView,
 } from './storage.js';
-import type { ChatTone } from './storage.js';
+import type { ChatTone, RootView } from './storage.js';
 import { LATEST_RELEASE } from './changelog.js';
 import {
   getSessions, getWindows, getPanes, resizeWindow, resizePane, getWindowLayout,
   applyWindowLayout, restoreWindowSize, sendKeys, sendText, createWindow,
   renameSession, renameWindow, deleteWindow, swapWindows, fetchDoc, fetchImageUrl,
-  getStates, getOrphans, takeoverOrphan,
+  getStates, getOrphans, takeoverOrphan, getAgentDiscovery, markAgentTerminalNotificationsRead,
   getServerVersion,
   getWorkspaceProtectionStatus, getWorkspaceRestorePlan, startWorkspaceRestore, getWorkspaceRestoreOperation,
   ApiError,
@@ -28,7 +27,7 @@ import {
 } from './api.js';
 import { runSplitPane, runClosePane } from './paneActions.js';
 import BrowserSheet from './components/BrowserSheet.jsx';
-import { inboxRows, topView, maxTs } from './inbox.js';
+import { applyTerminalReads, inboxRows, topView, maxTs, visibleCurrentPaneState } from './inbox.js';
 import type { PaneInboxState } from './inbox.js';
 import { moveTarget } from './windowOrder.js';
 import { reportBound, clearPaneNotification, getNotifications, deleteNotification } from './push.js';
@@ -43,8 +42,12 @@ import { browserEntryStatus } from './browserState.js';
 import { usePollingLoop } from './hooks/usePollingLoop.js';
 import { useServerConfig } from './hooks/useServerConfig.js';
 import { authHandled } from './authGuard.js';
-import { canUseChatLens } from './chatLensAvailability.js';
-import { currentPaneAgent, reconcilePaneAgents } from './paneAgents.js';
+import {
+  clearPaneConversationIdentities,
+  currentPaneAgent,
+  hasCanonicalCurrentPaneAgent,
+  navigationAgentMaps,
+} from './paneAgents.js';
 import { OverlayProvider } from './overlays/OverlayHost.js';
 import { useOverlayActivity } from './hooks/useOverlayActivity.js';
 
@@ -57,13 +60,19 @@ import type { TerminalHandle } from './components/Terminal.jsx';
 import type { TerminalOutputLink } from './terminalXterm.js';
 import BottomDock from './components/BottomDock.jsx';
 import type { BottomDockHandle } from './components/BottomDock.jsx';
-import ChatComposer from './components/ChatComposer.jsx';
 import LensSwitch from './components/LensSwitch.jsx';
 import type { WorkspaceLens } from './components/LensSwitch.jsx';
-import LensBoot from './components/LensBoot.jsx';
-import ChatView from './components/ChatView.jsx';
-import CodexManagedGuide from './components/CodexManagedGuide.jsx';
-import { slashEchoFor } from './slashCommands.js';
+import AgentConversationView, { AgentConversationErrorView } from './components/AgentConversationView.jsx';
+import AgentConversationComposer from './components/AgentConversationComposer.jsx';
+import AgentInteractionLayer from './components/AgentInteractionLayer.jsx';
+import AgentConversationActivationGuide from './components/AgentConversationActivationGuide.jsx';
+import AgentModelControl from './components/AgentModelControl.jsx';
+import {
+  AgentConversationActionControls,
+  AgentConversationMilestoneControls,
+  AgentConversationQueueControl,
+} from './components/AgentConversationCapabilityControls.js';
+import PaneSurfaceHost from './components/PaneSurfaceHost.jsx';
 import TokenPrompt from './components/TokenPrompt.jsx';
 import Settings from './components/Settings.jsx';
 import WorkspaceRestoreDialog from './components/WorkspaceRestoreDialog.jsx';
@@ -104,6 +113,20 @@ import type {
   WorkspaceRestoreResult,
 } from './workspaceRecovery.js';
 import { canResizePaneWidth } from './paneLayout.js';
+import { AgentCatalogProvider, inboxReconnectNeeded } from './agentCatalog.js';
+import type { AgentCatalogDescriptor, AgentDiscoverySnapshot, AgentRunRef } from './agentCatalog.js';
+import { canSendConversation, useAgentConversation } from './hooks/useAgentConversation.js';
+import { useAgentInteraction } from './hooks/useAgentInteraction.js';
+import { useAgentSessionControl } from './hooks/useAgentSessionControl.js';
+import { useAgentIntegrations } from './hooks/useAgentIntegrations.js';
+import { useAgentConversationControls } from './hooks/useAgentConversationControls.js';
+import {
+  projectConversationActivity,
+  projectConversationSubmissions,
+  projectConversationTimeline,
+} from './conversationSubmissionProjection.js';
+import { useAgentConversationActivation } from './hooks/useAgentConversationActivation.js';
+import type { AgentConversationIdentity } from './hooks/useAgentConversation.js';
 import {
   desktopInputEnvironment,
   getKeyboardMode,
@@ -111,10 +134,7 @@ import {
   setKeyboardMode,
 } from './desktopInput.js';
 import { useDesktopTerminalInput } from './hooks/useDesktopTerminalInput.js';
-import { useCodexSession, codexKind } from './hooks/useCodexSession.js';
-import { settleCodexOutgoing } from './codexOutgoing.js';
-import type { CodexOutgoingItem, CodexOutgoingSettlement, CodexOutgoingSource } from './codexOutgoing.js';
-import type { SlashEcho } from './slashCommands.js';
+import ProjectRoot from './projectTask/ProjectRoot.js';
 import type { ShortcutItem } from './shortcutMerge.js';
 import type { BrowserMode } from './browserState.js';
 import { isDraftShortcut, shouldRouteTerminalPageKey } from './terminalPageKeyboard.js';
@@ -130,6 +150,8 @@ interface HostSession {
   id: string;
   name: string;
 }
+
+const EMPTY_AGENT_CATALOG: readonly AgentCatalogDescriptor[] = [];
 
 interface HostWindow extends WorkspaceWindow {
   name: string;
@@ -156,10 +178,11 @@ interface RenameTarget {
   name: string;
 }
 
-interface ChatActionError {
-  id: string;
-  kind: 'send' | 'stop' | 'queue';
-  detail: string | null;
+interface CompletedChatEntryRequest {
+  paneId: string;
+  session: string;
+  window: string;
+  request: number;
 }
 
 interface UpdateInfo {
@@ -217,6 +240,17 @@ const hostWindow = (window: WorkspaceWindow): HostWindow => ({
 });
 
 const clampCols = (cols: number): number => Math.max(20, Math.min(500, cols));
+const MAX_REMEMBERED_PANES = 128;
+
+function rememberRecent<K, V>(cache: Map<K, V>, key: K, value: V): void {
+  cache.delete(key);
+  cache.set(key, value);
+  while (cache.size > MAX_REMEMBERED_PANES) {
+    const oldest = cache.keys().next().value;
+    if (oldest === undefined) break;
+    cache.delete(oldest);
+  }
+}
 
 // Pick the remembered id if it still exists, else the first. We deliberately don't fall back
 // to tmux's "active" — the local last-opened choice wins, first is the fallback.
@@ -241,12 +275,19 @@ export default function App() {
   const micAvailable = useAsrAvailable(serverConfig);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  // Keep the unfinished Project Task control plane dormant until it can actually run and advance work.
+  // In particular, ignore any development-only browser flag left behind by an earlier local build.
+  const projectTaskBeta = false;
+  const [rootView, setRootViewState] = useState<RootView>('session');
+  const chooseRootView = (view: RootView): void => {
+    if (view === 'project' && !projectTaskBeta) return;
+    setRootView(view);
+    setRootViewState(view);
+    setDrawerOpen(false);
+  };
   const [chatTone, setChatToneState] = useState(getChatTone); // 对话-lens colour tone (persisted); default 深墨
   const pickChatTone = (tone: ChatTone) => { setChatTone(tone); setChatToneState(tone); };
-  const [claudeChatLensOn, setClaudeChatLensOn] = useState(getClaudeChatLensEnabled);
-  const toggleClaudeChatLens = (on: boolean) => { setClaudeChatLensEnabled(on); setClaudeChatLensOn(on); };
-  const [codexChatLensOn, setCodexChatLensOn] = useState(getCodexChatLensEnabled);
-  const toggleCodexChatLens = (on: boolean) => { setCodexChatLensEnabled(on); setCodexChatLensOn(on); };
+  const [conversationEnabledByAgent, setConversationEnabledByAgent] = useState<Record<string, boolean>>({});
   const [usageOpen, setUsageOpen] = useState(false);
   const [bindOpen, setBindOpen] = useState(false);
   const [newWinOpen, setNewWinOpen] = useState(false);
@@ -263,18 +304,15 @@ export default function App() {
   const [gitOpen, setGitOpen] = useState(false);
   const [pendingShare, setPendingShare] = useState<File | null>(null); // a File shared in via Web Share Target, awaiting a destination
   const [basePrompt, setBasePrompt] = useState<BasePrompt | null>(null); // { rawPath } while asking for a relative path's base dir
-  const [handoffToast, setHandoffToast] = useState<string | null>(null); // "switched to terminal to run /x" hint after a slash hand-off
-  const [slashEcho, setSlashEcho] = useState<(SlashEcho & { paneId: string }) | null>(null); // optimistic command pill for a chat-staying slash command {name,args,paneId}
-  const [codexOptimisticMessages, setCodexOptimisticMessages] = useState<CodexOutgoingItem[]>([]);
-  const [chatActionErrors, setChatActionErrors] = useState<Record<string, ChatActionError>>({}); // paneId -> latest composer action error shown in ChatView
-  const [codexTakeoverPanes, setCodexTakeoverPanes] = useState<Set<string>>(() => new Set());
-  const codexOptimisticSeqRef = useRef(0);
-  const chatActionErrorSeqRef = useRef(0);
-  const codexThreadByPaneRef = useRef<Map<string, string | null>>(new Map());
-  const [transcriptWake, setTranscriptWake] = useState<{ paneId: string | null; seq: number }>({ paneId: null, seq: 0 }); // successful send -> immediate transcript refresh
+  const [chatFollowLatest, setChatFollowLatest] = useState({ paneId: '', request: 0 });
+  const [completedChatEntry, setCompletedChatEntry] = useState<CompletedChatEntryRequest | null>(null);
+  const completedChatEntrySeqRef = useRef(0);
+  const conversationIdentityByPaneRef = useRef(new Map<string, AgentConversationIdentity>());
   const [docToast, setDocToast] = useState<string | null>(null); // transient error toast for absolute-path doc failures
   const [exitHint, setExitHint] = useState(false); // "press Back again to exit" hint (double-back guard)
   const [docLinkPrompt, setDocLinkPrompt] = useState<DocLinkPrompt | null>(null); // { path, x, y } confirm popover for a tapped terminal path
+  const [docLinkOpening, setDocLinkOpening] = useState(false);
+  const pendingDocLinkRef = useRef<string | null>(null);
   const [localUrlPrompt, setLocalUrlPrompt] = useState<LocalUrlPrompt | null>(null); // { raw, x, y } for a tapped web URL
   const docTabs = useDocTabs(); // file-viewer tab state, kept across sheet open/close
   const browser = useBrowser({ enabled: !needToken, browserProxy: !!serverConfig?.browserProxy });
@@ -282,7 +320,9 @@ export default function App() {
   const [favorites, setFavorites] = useState(getFavorites); // global favorite commands
   const [recent, setRecent] = useState<string[]>([]); // current session's recent commands (keyed by session name)
   const [current, setCurrent] = useState<CurrentWorkspace | null>(null); // { session, windows, window, panes, paneId }
+  const currentRef = useRef<CurrentWorkspace | null>(null); currentRef.current = current;
   const windowSwitchRef = useRef(0); // only the newest async pane lookup may finish a window switch
+  const topologyRecoveryRef = useRef<Promise<void> | null>(null);
   const [booting, setBooting] = useState(true);
   const [recoveryPlan, setRecoveryPlan] = useState<WorkspaceRecoveryPlan | null>(null);
   const [recoveryDialogOpen, setRecoveryDialogOpen] = useState(false);
@@ -290,14 +330,25 @@ export default function App() {
   const [recoverySubmitting, setRecoverySubmitting] = useState(false);
   const [workspaceProtection, setWorkspaceProtection] = useState<WorkspaceProtection | null>(null);
   const [states, setStates] = useState<Record<string, PaneInboxState>>({}); // pane → {session,window,kind,…} from /api/states
-  const [lens, setLens] = useState<WorkspaceLens>('terminal'); // 'terminal' | 'chat' — per-pane, remembered in localStorage
-  useLayoutEffect(() => {
-    setLens(localStorage.getItem('tw_lens_' + current?.paneId) === 'chat' ? 'chat' : 'terminal');
-  }, [current?.paneId]);
+  const [agentDiscovery, setAgentDiscovery] = useState<AgentDiscoverySnapshot | null>(null);
+  const currentPaneId = current?.paneId ?? null;
+  const [lensSelection, setLensSelection] = useState<{
+    paneId: string | null;
+    value: WorkspaceLens;
+  }>({ paneId: null, value: 'terminal' });
+  // Resolve a pane's saved lens during render. Waiting for an effect would commit the previous pane's
+  // lens once, briefly mounting the wrong Terminal/Conversation consumer and issuing avoidable requests.
+  const lens: WorkspaceLens = lensSelection.paneId === currentPaneId
+    ? lensSelection.value
+    : localStorage.getItem('tw_lens_' + currentPaneId) === 'chat' ? 'chat' : 'terminal';
+  const setLens = useCallback((value: WorkspaceLens): void => {
+    setLensSelection({ paneId: currentPaneId, value });
+  }, [currentPaneId]);
   const [orphans, setOrphans] = useState<DrawerOrphan[]>([]); // claude sessions running outside tmux (/api/orphans)
   const [takeoverTarget, setTakeoverTarget] = useState<OrphanSession | null>(null); // orphan being taken over (opens the sheet)
   const [inboxOpen, setInboxOpen] = useState(false); // inbox dropdown open
   const { status: hooksStatus, enable: enableHooks } = useClaudeHooks(serverConfig);
+  const agentIntegrations = useAgentIntegrations({ enabled: settingsOpen });
   const [ideaOpen, setIdeaOpen] = useState(false); // per-window idea sheet open
   const [ideaCount, setIdeaCount] = useState(0);   // idea count for the current window (badge)
   const [changelogOpen, setChangelogOpen] = useState(false); // "what's new" sheet open
@@ -516,6 +567,21 @@ export default function App() {
     window.addEventListener('keydown', onPageKeyDown, true);
     return () => window.removeEventListener('keydown', onPageKeyDown, true);
   }, [desktopInput, terminalOverlayOpen, lens, current?.paneId, focusDraft]);
+  useEffect(() => {
+    if (!desktopInput || terminalOverlayOpen || lens !== 'chat' || !current?.paneId) return undefined;
+    const onPageKeyDown = (event: KeyboardEvent): void => {
+      // Outside an editor, Shift+Enter is the one page-wide way into the chat composer. Once focused,
+      // shouldRouteTerminalPageKey returns false and the textarea keeps native Shift+Enter newlines.
+      if (!isDraftShortcut(event) || !shouldRouteTerminalPageKey(event)) return;
+      const input = document.querySelector<HTMLTextAreaElement>('.chat-composer textarea.cc-text');
+      if (!input) return;
+      event.preventDefault();
+      event.stopPropagation();
+      input.focus({ preventScroll: true });
+    };
+    window.addEventListener('keydown', onPageKeyDown, true);
+    return () => window.removeEventListener('keydown', onPageKeyDown, true);
+  }, [desktopInput, terminalOverlayOpen, lens, current?.paneId]);
 
   // Update check: once per app launch (not polled), ask the server whether the installed CLI is behind the
   // latest npm release. The result lights the gear's dot and drives the "run `handmux update`" hint in Settings.
@@ -559,7 +625,6 @@ export default function App() {
   useBackButton(bindOpen, () => setBindOpen(false));
   useBackButton(newWinOpen, () => setNewWinOpen(false));
   useBackButton(ideaOpen, () => setIdeaOpen(false));
-  useBackButton(!!basePrompt, () => setBasePrompt(null));
   useBackButton(!!takeoverTarget, () => setTakeoverTarget(null));
   useBackButton(!!docLinkPrompt || !!localUrlPrompt, () => {
     if (localUrlPrompt) closeLocalUrl(); else setDocLinkPrompt(null);
@@ -658,6 +723,46 @@ export default function App() {
     writeSessionHash(session.name);
     return true;
   }, []);
+
+  // A phone can keep its React tree alive while the host or tmux restarts. tmux then recreates every
+  // session/window/pane id, so retrying the old pane forever can never recover. A precise 404 from the
+  // topology routes means the target is gone (not merely offline): resolve the same pinned session by
+  // name and reopen it against the new ids. Coalesce the 5s poll and mobile foreground bursts, and cancel
+  // if the user navigates elsewhere while discovery is in flight.
+  const recoverCurrentTopology = useCallback((error: unknown): void => {
+    if (handledAuth(error)) return;
+    if (!(error instanceof ApiError) || error.status !== 404 || topologyRecoveryRef.current) return;
+    const expected = currentRef.current;
+    if (!expected) return;
+    const recovery = (async () => {
+      try {
+        const sessions = await getSessions();
+        const replacement = sessions.find((session) => session.name === expected.session.name);
+        if (!replacement) {
+          // An empty list is normal while tmux/workspace recovery is still starting. Keep the old target
+          // so the next poll retries instead of stranding the user on a non-retrying empty screen.
+          if (sessions.length) {
+            setCurrent((value) => (value?.session.name === expected.session.name
+              && value.window.id === expected.window.id ? null : value));
+          }
+          return;
+        }
+        await openSession(replacement, null, {
+          isCancelled: () => {
+            const latest = currentRef.current;
+            return !latest
+              || latest.session.name !== expected.session.name
+              || latest.window.id !== expected.window.id;
+          },
+        });
+      } catch (recoveryError) {
+        handledAuth(recoveryError);
+      }
+    })().finally(() => {
+      if (topologyRecoveryRef.current === recovery) topologyRecoveryRef.current = null;
+    });
+    topologyRecoveryRef.current = recovery;
+  }, [handledAuth, openSession]);
 
   const applyRecoveryMapping = useCallback((mapping: unknown) => {
     if (!mapping) return;
@@ -998,18 +1103,44 @@ export default function App() {
     }
   }, [openSession, onAuthFail]);
 
+  const markCanonicalTerminalRead = useCallback(async (notificationIds: readonly string[]) => {
+    if (!notificationIds.length) return;
+    try {
+      await markAgentTerminalNotificationsRead(notificationIds);
+      const ids = new Set(notificationIds);
+      setStates((currentStates) => applyTerminalReads(currentStates, ids));
+    } catch (error) { handledAuth(error); }
+  }, [handledAuth]);
+
   // Tap an inbox row → mark it seen and deep-link to that pane (cross-session safe). Mirrors the
   // notification-tap resolver: resolve the live session by name, then openSession with the target.
-  const openInboxRow = useCallback(async (row: ReturnType<typeof inboxRows>[number]) => {
+  const openInboxRow = useCallback(async (
+    row: ReturnType<typeof inboxRows>[number],
+  ): Promise<boolean> => {
     setInboxOpen(false);
-    setSeen(markInboxSeen(row.pane, row.ts));
+    setCompletedChatEntry(null);
+    if (row.terminalNotificationId) {
+      void markCanonicalTerminalRead([row.terminalNotificationId]);
+    } else setSeen(markInboxSeen(row.pane, row.ts));
     try {
       const session = (await getSessions()).find((s) => s.name === row.session);
-      if (!session) { window.alert(t('app.sessionGone', { name: row.session })); return; }
+      if (!session) { window.alert(t('app.sessionGone', { name: row.session })); return false; }
       setDrawerOpen(false);
-      await openSession(session, { window: row.window, pane: row.pane });
-    } catch (e) { handledAuth(e); }
-  }, [openSession, onAuthFail]);
+      const opened = await openSession(session, { window: row.window, pane: row.pane });
+      if (opened && row.view === 'done') {
+        setCompletedChatEntry({
+          paneId: row.pane,
+          session: row.session,
+          window: row.window,
+          request: ++completedChatEntrySeqRef.current,
+        });
+      }
+      return opened;
+    } catch (e) {
+      handledAuth(e);
+      return false;
+    }
+  }, [openSession, handledAuth, markCanonicalTerminalRead]);
 
   // Take over an orphan (claude running outside tmux): the server spawns `claude --resume` in the chosen
   // target (new session, or a new window of an existing session) and — if kill — SIGTERMs the original,
@@ -1039,9 +1170,12 @@ export default function App() {
   // 清除已完成: advance the high-water mark to the current max ts → all present done rows become history
   // (working/needs are never filtered, so this only clears completed). Button is hidden when no done row.
   const markAllRead = useCallback(() => {
+    const canonicalIds = inboxRows(states, seen, readTs == null ? Infinity : readTs)
+      .flatMap((row) => row.terminalNotificationId ? [row.terminalNotificationId] : []);
+    if (canonicalIds.length) void markCanonicalTerminalRead(canonicalIds);
     const m = maxTs(states);
     setInboxReadTs(m); setReadTs(m);
-  }, [states]);
+  }, [states, seen, readTs, markCanonicalTerminalRead]);
 
   // Save a validated name locally, then open it immediately so "绑定上" is usable right away.
   const bindSession = useCallback((name: string) => {
@@ -1074,9 +1208,23 @@ export default function App() {
     setCurrent((c) => {
       if (!c) return c;
       const windows = c.windows.map((w) => (w.id === windowId ? { ...w, panes: panes.length } : w));
-      return c.window.id === windowId ? { ...c, windows, panes } : { ...c, windows };
+      if (c.window.id !== windowId) return { ...c, windows };
+      const paneId = panes.some((pane) => pane.id === c.paneId) || !panes.length
+        ? c.paneId
+        : pickId(panes, getLastPane(windowId));
+      return { ...c, windows, panes, paneId };
     });
   }, []);
+
+  // Persist automatic pane replacement as well as explicit navigation. Without this, a reload after an
+  // externally closed pane would briefly retry the same stale id before the topology poll corrected it.
+  useEffect(() => {
+    if (current) remember({
+      sessionId: current.session.id,
+      windowId: current.window.id,
+      paneId: current.paneId,
+    });
+  }, [current?.session.id, current?.window.id, current?.paneId]);
 
   // Sizes can change outside handmux (another tmux client, terminal resize, etc.). Management sheets
   // must therefore resolve their target from tmux when they open instead of reusing the dimensions
@@ -1362,17 +1510,30 @@ export default function App() {
 
   // Seeing a pane clears its pending notification (you've arrived; the alert has done its job).
   useEffect(() => {
-    if (current?.paneId) clearPaneNotification(current.paneId);
-  }, [current?.paneId]);
+    // The remembered session stays mounted behind Project view, but the user has not arrived at that pane.
+    // Full-screen tools also obscure the workspace, so completing behind Files/Git/Browser/Settings must
+    // remain unread until the user actually returns to the pane.
+    if (rootView === 'session' && !terminalOverlayOpen && current?.paneId) {
+      clearPaneNotification(current.paneId);
+    }
+  }, [rootView, terminalOverlayOpen, current?.paneId]);
 
-  // While a pane is open, keep it marked "seen" as new events land — you're watching it live, so its
-  // idle/permission shouldn't show as unread. Re-renders only when its ts actually advances.
+  // While a pane is open, keep it marked "seen" as new events land — you're watching it live. New Core
+  // terminal events use the service-level read ledger; only an older Server falls back to device-local ts.
   useEffect(() => {
+    // The session workspace remains mounted in state behind the project root. It is not visible there,
+    // so treating its current pane as watched would make fresh project-inbox rows disappear unread.
     const pane = current?.paneId;
-    if (!pane) return;
-    const ts = states[pane]?.ts;
+    if (!pane || terminalOverlayOpen) return;
+    const state = visibleCurrentPaneState(rootView, pane, states);
+    if (!state) return;
+    if (state?.terminalUnread && state.terminalNotificationId) {
+      void markCanonicalTerminalRead([state.terminalNotificationId]);
+      return;
+    }
+    const ts = state?.ts;
     if (ts != null && getInboxSeen()[pane] !== ts) setSeen(markInboxSeen(pane, ts));
-  }, [current?.paneId, states]);
+  }, [rootView, terminalOverlayOpen, current?.paneId, states, markCanonicalTerminalRead]);
 
   // Web Share Target: when launched from the system share sheet (Android only — iOS Safari has no
   // share target, so this never fires there), sw.js stashed the file in a cache and redirected with
@@ -1403,7 +1564,14 @@ export default function App() {
       try {
         const sessions = await getSessions();
         const s = sessions.find((x) => x.name === session);
-        if (s) { setDrawerOpen(false); await openSession(s, { window: window ?? null, pane: pane ?? null }); }
+        if (s) {
+          const opened = await openSession(s, { window: window ?? null, pane: pane ?? null });
+          if (opened) {
+            setRootView('session');
+            setRootViewState('session');
+            setDrawerOpen(false);
+          }
+        }
       } catch (e) { handledAuth(e); }
     };
     const onMsg = (event: MessageEvent<unknown>) => {
@@ -1425,7 +1593,7 @@ export default function App() {
       navigator.serviceWorker.removeEventListener('message', onMsg);
       window.removeEventListener('hashchange', onHash);
     };
-  }, [needToken, openSession, onAuthFail]);
+  }, [needToken, openSession, handledAuth]);
 
   // Cold-launch deep-link: a notification tap opened `/#/inbox/<id>`. Open the page+detail, mark read, then
   // clean the hash (replaceState) so the back-button/exit-guard state machines aren't left on an inbox URL.
@@ -1474,104 +1642,55 @@ export default function App() {
   // A controlled takeover briefly replaces the old Codex with a shell before the managed Codex child is
   // visible. Pin that pane's identity through the gap so the chat page and its App Server poll do not
   // disappear halfway through startup.
-  const currentAgent = currentPaneAgent(current, states, codexTakeoverPanes);
-  const codexSessionWake = transcriptWake.paneId === current?.paneId ? transcriptWake.seq : 0;
-  const codexSession = useCodexSession(
-    current?.paneId || '', codexChatLensOn && currentAgent === 'codex', codexSessionWake,
-  );
-  const rawCurrentKind = currentAgent === 'codex'
-    ? codexKind(codexSession)
-    : (current?.paneId ? states[current.paneId]?.kind : null);
+  const currentAgent = currentPaneAgent(current, states);
+  const canonicalCurrentAgent = hasCanonicalCurrentPaneAgent(current);
+  // The pane's last verified Agent owns an explicitly selected chat view until the user leaves it. Runtime
+  // and tmux discovery are asynchronous health signals: a transient null must not replace the Conversation Surface with a
+  // freshly mounted Terminal and then switch back on the next poll.
+  const chatAgentByPaneRef = useRef(new Map<string, string>());
+  if (current?.paneId && currentAgent) {
+    if (chatAgentByPaneRef.current.get(current.paneId) !== currentAgent) {
+      rememberRecent(chatAgentByPaneRef.current, current.paneId, currentAgent);
+      localStorage.setItem(`tw_chat_agent_${current.paneId}`, currentAgent);
+    }
+  } else if (current?.paneId && canonicalCurrentAgent) {
+    // A canonical `agent:null` means the process exited to a shell; it is not a discovery gap. Forget the
+    // previous owner so this pane cannot resurrect a stale chat/run if a later legacy response is sparse.
+    chatAgentByPaneRef.current.delete(current.paneId);
+    clearPaneConversationIdentities(conversationIdentityByPaneRef.current, current.paneId);
+    localStorage.removeItem(`tw_chat_agent_${current.paneId}`);
+  }
+  const persistedChatAgent = current?.paneId
+    ? localStorage.getItem(`tw_chat_agent_${current.paneId}`) : null;
+  const chatAgent = current?.paneId
+    ? currentAgent ?? (canonicalCurrentAgent ? null : chatAgentByPaneRef.current.get(current.paneId)
+      ?? (persistedChatAgent && persistedChatAgent.length <= 64 ? persistedChatAgent : null))
+    : null;
+  const rawCurrentKind = current?.paneId ? states[current.paneId]?.kind : null;
   const currentKind = rawCurrentKind === 'working' || rawCurrentKind === 'permission'
     || rawCurrentKind === 'compacting' || rawCurrentKind === 'error' ? rawCurrentKind : null;
-  const setCodexTakeoverPending = useCallback((paneId: string, pending: boolean) => {
-    if (!paneId) return;
-    setCodexTakeoverPanes((currentPanes) => {
-      const has = currentPanes.has(paneId);
-      if (has === pending) return currentPanes;
-      const next = new Set(currentPanes);
-      if (pending) next.add(paneId); else next.delete(paneId);
-      return next;
-    });
-  }, []);
-  useEffect(() => {
-    if (current?.paneId && codexSession.managed && codexSession.threadId) {
-      setCodexTakeoverPending(current.paneId, false);
-    }
-  }, [current?.paneId, codexSession.managed, codexSession.threadId, setCodexTakeoverPending]);
 
-  const beginCodexSend = useCallback((
-    paneId: string,
-    text: string,
-    source: CodexOutgoingSource,
-    requestId: string | null = null,
-  ): string => {
-    const id = requestId
-      || `codex-outgoing-${Date.now().toString(36)}-${(++codexOptimisticSeqRef.current).toString(36)}`;
-    setCodexOptimisticMessages((items) => [
-      ...items.slice(-49), { id, paneId, text, source, status: 'sending' },
-    ]);
-    return id;
-  }, []);
-  const finishCodexSend = useCallback((
-    id: string,
-    { result, error, uncertain = false }: CodexOutgoingSettlement = {},
-  ) => {
-    // Transport failure means "response unknown", not "server rejected". Keep the temporary state until
-    // the authoritative transcript/queue snapshot claims its stable request id.
-    setCodexOptimisticMessages((items) => settleCodexOutgoing(items, id, {
-      ...(result !== undefined ? { result } : {}),
-      ...(error !== undefined ? { error } : {}),
-      uncertain,
+  const requestChatFollowLatest = useCallback((paneId: string): void => {
+    setChatFollowLatest((currentRequest) => ({
+      paneId,
+      request: currentRequest.request + 1,
     }));
   }, []);
-  const reportChatActionError = useCallback((paneId: string, error: Omit<ChatActionError, 'id'> | null) => {
-    if (!paneId) return;
-    setChatActionErrors((currentErrors) => {
-      if (!error) {
-        if (!(paneId in currentErrors)) return currentErrors;
-        const next = { ...currentErrors };
-        delete next[paneId];
-        return next;
-      }
-      return {
-        ...currentErrors,
-        [paneId]: { ...error, id: `chat-action-error-${++chatActionErrorSeqRef.current}` },
-      };
-    });
+
+  const consumeCompletedChatEntry = useCallback((request: number): void => {
+    setCompletedChatEntry((currentRequest) => (
+      currentRequest?.request === request ? null : currentRequest
+    ));
   }, []);
-  const coverCodexOptimistic = useCallback((ids: string[]) => {
-    const covered = new Set(ids);
-    setCodexOptimisticMessages((items) => items.filter((item) => !covered.has(item.id)));
-  }, []);
-  useEffect(() => {
-    const paneId = current?.paneId;
-    const threadId = codexSession?.threadId;
-    if (!paneId || !threadId) return;
-    const previous = codexThreadByPaneRef.current.get(paneId);
-    codexThreadByPaneRef.current.set(paneId, threadId);
-    if (previous && previous !== threadId) {
-      setCodexOptimisticMessages((items) => items.filter((item) => item.paneId !== paneId));
-    }
-  }, [current?.paneId, codexSession?.threadId]);
 
   // Record a just-sent command into this WINDOW's recent history (deduped + capped in storage).
   const onCommandSent = useCallback((cmd: string) => {
     termRef.current?.wake?.(); // a dock send/fill landed → wake the poll loop (covers BottomDock too)
     const paneId = current?.paneId;
-    if (paneId && (currentAgent === 'claude' || currentAgent === 'codex')) {
-      setTranscriptWake((prev) => ({ paneId, seq: prev.seq + 1 }));
-    }
     const name = current?.session?.name;
     const win = current?.window?.id; // stable window ID, not the auto-renamed window.name
     if (name && win) setRecent(pushRecent(name, win, cmd));
-    // A chat-staying slash command (/compact, /model sonnet) logs its scaffold to the jsonl only when it
-    // COMPLETES — minutes for /compact — so echo the command pill now; ChatView drops it when the real
-    // marker lands. null for handed-off commands (the lens switch is their feedback) and plain text.
-    // Codex App Server operations have their own live state, so they do not need a transcript echo.
-    const echo = currentAgent === 'codex' ? null : slashEchoFor(cmd);
-    setSlashEcho(echo && current?.paneId ? { ...echo, paneId: current.paneId } : null);
-  }, [current, currentAgent]);
+  }, [current]);
 
   // ★/☆ on a panel row: toggle membership of the global favorites list.
   const toggleFavorite = useCallback((cmd: string) => {
@@ -1587,16 +1706,226 @@ export default function App() {
   // The current pane's cwd (from /panes), used as the default base when resolving a relative doc path.
   const currentPaneCwd = current?.panes?.find((p) => p.id === current.paneId)?.cwd || null;
 
-  const agentChatLensOn = currentAgent === 'claude' ? claudeChatLensOn
-    : currentAgent === 'codex' ? codexChatLensOn : false;
-  const chatLensAvailable = agentChatLensOn && canUseChatLens(currentAgent, hooksStatus);
-  // Chat lens is active only for a supported pane whose lens is set to 'chat'. Drives BOTH swaps: the main
-  // view (ChatView vs Terminal) and the bottom bar (ChatComposer vs the terminal BottomDock).
-  const chatLens = chatLensAvailable && lens === 'chat';
-  const codexChatLoading = chatLens && currentAgent === 'codex' && !codexSession.loaded;
-  const codexNeedsManagedSetup = chatLens && currentAgent === 'codex'
-    && codexSession.loaded && !codexSession.error && !codexSession.managed;
-  const codexChatReady = currentAgent !== 'codex' || (codexSession.managed && !!codexSession.threadId);
+  const refreshAgentRun = useCallback(async (stale: AgentRunRef): Promise<AgentRunRef | null> => {
+    const next = await getAgentDiscovery();
+    setAgentDiscovery(next);
+    return next.runs.find((candidate) => (
+      candidate.agentId === stale.agentId && candidate.paneId === stale.paneId
+      && candidate.sessionId === stale.sessionId
+    )) ?? null;
+  }, []);
+  const discoverActivatedRun = useCallback(async (stale: AgentRunRef): Promise<AgentRunRef | null> => {
+    const next = await getAgentDiscovery();
+    setAgentDiscovery(next);
+    return next.runs.find((candidate) => (
+      candidate.agentId === stale.agentId && candidate.paneId === stale.paneId
+      && candidate.sessionId !== undefined
+    )) ?? null;
+  }, []);
+
+  const discoveredAgentRun: AgentRunRef | null = agentDiscovery?.runs.find((run) => (
+    run.paneId === current?.paneId && run.agentId === chatAgent
+  )) ?? null;
+  // Run leases are process-local and revoked authoritatively. Keeping the previous lease across a missing
+  // discovery snapshot creates an infinite stale-run loop after exit/restart; the selected chat lens stays
+  // mounted without it and reconnects as soon as Runtime publishes the replacement.
+  const currentAgentRun = discoveredAgentRun;
+  const currentAgentDescriptor = agentDiscovery?.descriptors.find((descriptor) => (
+    descriptor.id === chatAgent
+  )) ?? null;
+  const conversationEnabled = chatAgent
+    ? conversationEnabledByAgent[chatAgent] ?? getAgentConversationEnabled(chatAgent) : false;
+  const conversationIdentityKey = current?.paneId && chatAgent
+    ? `${current.paneId}\0${chatAgent}` : null;
+  if (conversationIdentityKey && currentAgentRun?.sessionId) {
+    rememberRecent(conversationIdentityByPaneRef.current, conversationIdentityKey, {
+      agentId: currentAgentRun.agentId,
+      paneId: currentAgentRun.paneId,
+      sessionId: currentAgentRun.sessionId,
+    });
+  }
+  // A current Runtime lease is authoritative: a newly started raw run must never inherit the previous
+  // managed session remembered for this pane. The remembered identity is only a discovery-gap fallback.
+  const currentConversationIdentity = currentAgentRun
+    ? currentAgentRun.sessionId ? conversationIdentityByPaneRef.current.get(conversationIdentityKey!) ?? null : null
+    : conversationIdentityKey
+      ? conversationIdentityByPaneRef.current.get(conversationIdentityKey) ?? null : null;
+  // Conversation capability owns one normalized Web Surface for every Agent. Provider identity stops at
+  // Runtime discovery; Timeline and Composer never select a provider-specific implementation.
+  const normalizedConversationRun = currentAgentDescriptor?.capabilities.conversation === true
+    && currentAgentRun?.sessionId
+    ? currentAgentRun : null;
+  const normalizedConversationIdentity = currentAgentDescriptor?.capabilities.conversation === true
+    ? currentConversationIdentity : null;
+  const chatLensAvailable = currentAgentDescriptor?.capabilities.conversation === true
+    && conversationEnabled
+    && (!!normalizedConversationRun || !!normalizedConversationIdentity
+      || (currentAgentDescriptor.capabilities.conversationActivation === true && !!currentAgentRun));
+  // `lens` is the sole view owner. Availability controls only whether a terminal pane can opt into chat;
+  // it must never evict an already selected chat view during a transient discovery or connection outage.
+  const chatLens = lens === 'chat' && conversationEnabled;
+  useEffect(() => {
+    if (lens !== 'chat' || conversationEnabled || !current?.paneId) return;
+    setLens('terminal');
+    localStorage.setItem(`tw_lens_${current.paneId}`, 'terminal');
+  }, [conversationEnabled, current?.paneId, lens, setLens]);
+  const conversationAgents = (agentDiscovery?.descriptors ?? [])
+    .filter((descriptor) => descriptor.capabilities.conversation)
+    .map((descriptor) => ({
+      id: descriptor.id,
+      label: descriptor.label,
+      enabled: conversationEnabledByAgent[descriptor.id]
+        ?? getAgentConversationEnabled(descriptor.id),
+      experimental: descriptor.capabilityMetadata?.conversation?.experimental === true,
+    }));
+  const toggleAgentConversation = useCallback((agentId: string, enabled: boolean): void => {
+    setAgentConversationEnabled(agentId, enabled);
+    setConversationEnabledByAgent((currentValue) => ({ ...currentValue, [agentId]: enabled }));
+    if (!enabled && agentId === chatAgent && current?.paneId) {
+      setLens('terminal');
+      localStorage.setItem(`tw_lens_${current.paneId}`, 'terminal');
+    }
+  }, [chatAgent, current?.paneId, setLens]);
+  const genericConversation = useAgentConversation(
+    chatLens && normalizedConversationRun ? normalizedConversationRun : null,
+    onAuthFail,
+    refreshAgentRun,
+    chatLens ? normalizedConversationIdentity : null,
+  );
+  const conversationActivation = useAgentConversationActivation(
+    chatLens && !normalizedConversationIdentity
+      && currentAgentDescriptor?.capabilities.conversationActivation === true
+      ? currentAgentRun : null,
+    chatLens && !normalizedConversationIdentity
+      && currentAgentDescriptor?.capabilities.conversationActivation === true,
+    discoverActivatedRun,
+    onAuthFail,
+  );
+  const agentInteraction = useAgentInteraction(
+    chatLens && normalizedConversationRun ? normalizedConversationRun : null,
+    currentAgentDescriptor?.capabilities.interaction === true,
+    onAuthFail,
+  );
+  const agentSessionControl = useAgentSessionControl(
+    chatLens && currentAgentDescriptor?.capabilities.sessionControl === true
+      ? currentAgentRun : null,
+    onAuthFail,
+  );
+  const conversationControlCapabilities = currentAgentDescriptor?.capabilities;
+  const conversationSendable = canSendConversation(genericConversation.descriptor?.capabilities);
+  const conversationControlsEnabled = !!conversationControlCapabilities && [
+    conversationControlCapabilities.conversationGoal,
+    conversationControlCapabilities.conversationPlan,
+    conversationControlCapabilities.conversationContext,
+    conversationControlCapabilities.conversationPermission,
+    conversationControlCapabilities.conversationCommands,
+  ].some(Boolean) || conversationSendable;
+  const agentConversationControls = useAgentConversationControls(
+    chatLens && conversationControlsEnabled ? currentAgentRun : null,
+    chatLens && conversationControlsEnabled,
+    onAuthFail,
+  );
+  const serverConversationActivity = agentConversationControls.snapshot?.activity
+    ?? agentConversationControls.snapshot?.context?.activity
+    ?? (genericConversation.status === 'loading' || genericConversation.status === 'reconnecting'
+      ? 'unknown'
+      : currentKind === 'compacting' ? 'compacting'
+        : currentKind === 'permission' ? 'waiting'
+          : currentKind === 'working' ? 'working' : 'idle');
+  const canonicalConversationItems = genericConversation.canonicalItems ?? genericConversation.items;
+  const conversationSubmissionProjection = useMemo(() => projectConversationSubmissions(
+    canonicalConversationItems,
+    genericConversation.localSubmissions ?? [],
+    agentConversationControls.snapshot?.queue?.items ?? [],
+  ), [canonicalConversationItems, genericConversation.localSubmissions,
+    agentConversationControls.snapshot?.queue?.items]);
+  const conversationActivity = projectConversationActivity(
+    serverConversationActivity,
+    conversationSubmissionProjection.timeline,
+  );
+  const projectedConversation = useMemo(() => ({
+    ...genericConversation,
+    items: projectConversationTimeline(
+      canonicalConversationItems,
+      conversationSubmissionProjection.timeline,
+    ),
+  }), [canonicalConversationItems, conversationSubmissionProjection.timeline, genericConversation]);
+  const [conversationControlRequest, setConversationControlRequest] = useState({
+    identity: '', goal: 0, goalEdit: 0, model: 0,
+  });
+  const conversationRequestIdentity = normalizedConversationIdentity
+    ? `${normalizedConversationIdentity.agentId}\0${normalizedConversationIdentity.sessionId}` : '';
+  const requestForCurrentConversation = conversationControlRequest.identity === conversationRequestIdentity
+    ? conversationControlRequest : { identity: conversationRequestIdentity, goal: 0, goalEdit: 0, model: 0 };
+  const handleConversationSlash = useCallback(async (text: string): Promise<boolean> => {
+    const match = text.trim().match(/^\/(model|effort|goal|compact|clear)(?:\s+([\s\S]+))?$/i);
+    if (!match) return false;
+    const command = match[1]!.toLowerCase();
+    const argument = match[2]?.trim() ?? '';
+    if (command === 'model' || command === 'effort') {
+      if (!conversationControlCapabilities?.sessionControl) return false;
+      if (!argument) {
+        setConversationControlRequest((current) => ({
+          ...current, identity: conversationRequestIdentity, model: current.model + 1,
+        }));
+        return true;
+      }
+      await agentSessionControl.update(command === 'model' ? { model: argument } : { effort: argument });
+      return true;
+    }
+    if (command === 'goal') {
+      if (!conversationControlCapabilities?.conversationGoal) return false;
+      const action = argument.toLowerCase();
+      if (!argument || action === 'edit') {
+        setConversationControlRequest((current) => {
+          const request = current.goal + 1;
+          return {
+            ...current, identity: conversationRequestIdentity, goal: request,
+            goalEdit: action === 'edit' ? request : 0,
+          };
+        });
+        return true;
+      }
+      const goalActions = agentConversationControls.snapshot?.goalActions ?? [];
+      if (action === 'clear') {
+        if (!goalActions.includes('clear')) return false;
+        await agentConversationControls.goalAction('clear');
+      }
+      else if (action === 'pause' || action === 'resume') {
+        if (!goalActions.includes('update')) return false;
+        await agentConversationControls.goalAction('update', {
+          status: action === 'pause' ? 'paused' : 'active',
+        });
+      } else {
+        if (!goalActions.includes('start')) return false;
+        await agentConversationControls.goalAction('start', { objective: argument });
+      }
+      return true;
+    }
+    if (!conversationControlCapabilities?.conversationCommands
+      || !agentConversationControls.snapshot?.commands?.includes(command as 'compact' | 'clear')) return false;
+    await agentConversationControls.command(command as 'compact' | 'clear');
+    return true;
+  }, [agentConversationControls, agentSessionControl, conversationControlCapabilities,
+    conversationRequestIdentity]);
+  const paneSurfaceIdentity = !chatLens
+    ? 'terminal'
+    : normalizedConversationIdentity
+      ? `conversation\0${normalizedConversationIdentity.agentId}\0${normalizedConversationIdentity.sessionId}`
+      : currentAgentRun && currentAgentDescriptor?.capabilities.conversationActivation === true
+        ? `conversation-activation\0${currentAgentRun.runId}` : 'chat-unavailable';
+  const paneSurfaceOwnerKey = `${currentPaneId ?? 'none'}\0${paneSurfaceIdentity}`;
+  const completedEntryRequest = completedChatEntry
+    && completedChatEntry.paneId === current?.paneId
+    && completedChatEntry.window === current?.window.id
+    && completedChatEntry.session === current?.session.name
+    ? completedChatEntry.request : 0;
+  useEffect(() => {
+    if (!completedChatEntry || !current) return;
+    if (completedChatEntry.paneId !== current.paneId
+      || completedChatEntry.window !== current.window.id
+      || completedChatEntry.session !== current.session.name) setCompletedChatEntry(null);
+  }, [completedChatEntry, current]);
 
   // Fetch + open a doc by ABSOLUTE path: dedupe into a tab, record the recent, reveal the sheet.
   // Throws on fetch failure so callers can decide (prompt for a base dir, or surface inline).
@@ -1705,6 +2034,20 @@ export default function App() {
     setBasePrompt({ rawPath });
   };
 
+  // Opening a confirmed link is a history transition, not two independent overlay changes. First let
+  // Back pop the confirmation card's own entry; only after that pop has closed the card may the file
+  // sheet (or relative-path picker) push its entry. Otherwise the delayed pop can immediately close the
+  // newly opened layer, producing the visible "flash and disappear" failure.
+  useEffect(() => {
+    if (docLinkPrompt || !pendingDocLinkRef.current) return undefined;
+    const path = pendingDocLinkRef.current;
+    pendingDocLinkRef.current = null;
+    const timer = window.setTimeout(() => {
+      void onOpenDoc(path).finally(() => setDocLinkOpening(false));
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [docLinkPrompt]); // eslint-disable-line react-hooks/exhaustive-deps -- run once after this prompt's history pop
+
   // DirPicker pick: resolve+open the unresolved relative path against the chosen base dir, then
   // remember it for this pane. On failure (still not found there), keep the picker open and surface
   // the reason as a toast so the user can pick another directory.
@@ -1736,7 +2079,12 @@ export default function App() {
       if (raw) setLocalUrlPrompt({ raw, x: cx, y: cy });
     } else if (link.path) setDocLinkPrompt({ path: link.path, x: cx, y: cy });
   };
-  const confirmDocLink = (path: string) => { setDocLinkPrompt(null); void onOpenDoc(path); };
+  const confirmDocLink = (path: string) => {
+    if (docLinkOpening) return;
+    pendingDocLinkRef.current = path;
+    setDocLinkOpening(true);
+    window.history.back();
+  };
 
   // Confirm a terminal web link → open it as a new built-in browser tab.
   const [localUrlError, setLocalUrlError] = useState<string | null>(null);
@@ -1788,14 +2136,6 @@ export default function App() {
     return () => clearTimeout(id);
   }, [docToast]);
 
-  // Auto-dismiss the slash hand-off hint after a few seconds. Re-runs (and resets the timer) each time a new
-  // command is handed off, so a second hand-off refreshes rather than clearing early.
-  useEffect(() => {
-    if (!handoffToast) return;
-    const id = setTimeout(() => setHandoffToast(null), 3500);
-    return () => clearTimeout(id);
-  }, [handoffToast]);
-
   // Workspace recovery is a light authenticated poll: the server owns expiry/eligibility, while this
   // browser owns only per-checkpoint autoShown/ignored state. allSettled keeps the protection warning
   // fresh even when there is no checkpoint (restore-plan may legitimately be unavailable).
@@ -1846,7 +2186,13 @@ export default function App() {
           if (lastId) session = alive.find((s) => s.id === lastId);
         }
         if (!session) session = alive[0];
-        if (!cancelled && session) await openSession(session, target);
+        if (!cancelled && session) {
+          const opened = await openSession(session, target, { isCancelled: () => cancelled });
+          if (!cancelled && route.session && opened) {
+            setRootView('session');
+            setRootViewState('session');
+          }
+        }
       } catch (e) {
         handledAuth(e); // onAuthFail === setNeedToken(true)
       } finally {
@@ -1864,15 +2210,32 @@ export default function App() {
     apply: (s) => {
       const next = s || {};
       setStates(next);
-      setCurrent((value) => {
-        if (!value) return value;
-        const panes = reconcilePaneAgents(value.panes, next);
-        return panes === value.panes ? value : { ...value, panes };
-      });
     },
     intervalMs: 5000,
     enabled: !needToken,
     deps: [bound],
+  });
+
+  // Pane identity belongs to Runtime's /panes projection, not the Inbox compatibility roster. Refresh only
+  // the open window so process exits/switches clear or replace its logo without probing every host pane.
+  usePollingLoop({
+    fetch: () => getPanes(current?.window?.id || ''),
+    apply: (panes) => {
+      const windowId = current?.window?.id;
+      if (windowId) refreshPanes(windowId, panes);
+    },
+    onError: recoverCurrentTopology,
+    intervalMs: 5_000,
+    enabled: !needToken && !!current?.window?.id,
+    deps: [current?.window?.id],
+  });
+
+  usePollingLoop({
+    fetch: getAgentDiscovery,
+    apply: setAgentDiscovery,
+    onError: handledAuth,
+    intervalMs: 5_000,
+    enabled: !needToken,
   });
 
   // First non-empty /states with no stored read-ts: treat everything already there as history (seed the
@@ -1898,18 +2261,14 @@ export default function App() {
 
   const inboxList = inboxRows(states, seen, readTs == null ? Infinity : readTs);
   const inboxTop = topView(inboxList);
+  const inboxReconnecting = inboxReconnectNeeded(agentDiscovery, inboxList.length > 0);
   // windowId → agent id, for the per-window agent logo on a collapsed WindowTab (a single-pane window, or an
   // inactive multi-pane one where we only have this aggregate). The active multi-pane window renders per-pane
   // instead (paneAgents below), so it doesn't rely on this squash. A state entry exists only for a pane
   // actually running an agent, so this is its agent.
-  const windowAgents: Record<string, string> = {};
-  for (const st of Object.values(states)) if (st.window && st.agent) windowAgents[st.window] = st.agent;
-  if (current) for (const pane of current.panes) if (pane.agent) windowAgents[current.window.id] = pane.agent;
+  const { windowAgents, paneAgents } = navigationAgentMaps(current, states);
   // paneId → agent id, for the per-pane agent logo inside the active window's pane menu (states is keyed by
   // pane, so this is the live truth for each one; a pane not running an agent simply has no entry → no logo).
-  const paneAgents: Record<string, string> = {};
-  for (const [pane, st] of Object.entries(states)) if (st.agent) paneAgents[pane] = st.agent;
-  for (const pane of current?.panes || []) if (pane.agent) paneAgents[pane.id] = pane.agent;
   const changelogUnread = !!LATEST_RELEASE && clSeen !== LATEST_RELEASE;
   // The gear's dot fuses two phases of "there's something new": an available npm update (before you upgrade)
   // and, after upgrading+reloading, the unread changelog it brought. `updateDot` stays off once the user has
@@ -1943,16 +2302,52 @@ export default function App() {
     setPaneLayoutRestoreReady(false);
     setManagePane(null);
   };
+  const inboxControl = (
+    <Inbox
+      rows={inboxList}
+      top={inboxTop}
+      open={inboxOpen}
+      onToggle={() => setInboxOpen((o) => !o)}
+      onClose={() => setInboxOpen(false)}
+      onSelectRow={openInboxRow}
+      onMarkAllRead={markAllRead}
+      reconnecting={inboxReconnecting}
+      hooksStatus={hooksStatus}
+      onEnableHooks={enableHooks}
+    />
+  );
+  const projectInboxControl = (
+    <Inbox
+      rows={inboxList}
+      top={inboxTop}
+      open={inboxOpen}
+      onToggle={() => setInboxOpen((o) => !o)}
+      onClose={() => setInboxOpen(false)}
+      onSelectRow={(row) => {
+        void openInboxRow(row).then((opened) => {
+          if (opened) chooseRootView('session');
+        });
+      }}
+      onMarkAllRead={markAllRead}
+      reconnecting={inboxReconnecting}
+      hooksStatus={hooksStatus}
+      onEnableHooks={enableHooks}
+    />
+  );
 
   return (
     // When the soft keyboard opens, slide the WHOLE app up by the keyboard height so it moves
     // as one unit: the keys + input land just above the keyboard and the terminal's bottom sits
     // right above the keys (the topbar scrolls off the top, which is fine while typing). Uses a
     // transform — the same lift that worked on the dock — so iOS can't undo it by re-scrolling.
+    <AgentCatalogProvider descriptors={agentDiscovery?.descriptors ?? EMPTY_AGENT_CATALOG}
+      runs={agentDiscovery?.runs ?? []} loaded={agentDiscovery !== null}>
     <OverlayProvider keyboardInset={inset} chatTone={chatTone}>
-      <div className="app" data-chat-tone={chatTone} onPointerDownCapture={captureTerminalOwner}
+      <div className="app" data-chat-tone={chatTone}
+        data-desktop-input={detectedDesktopInput || undefined}
+        onPointerDownCapture={captureTerminalOwner}
         style={inset ? { transform: `translateY(-${inset}px)` } : undefined}>
-      <header className="topbar">
+      {rootView === 'session' && <header className="topbar">
         <button ref={drawerMenuRef} className="hamburger" onClick={() => setDrawerOpen(true)}>☰</button>
         <span className="session-name" {...sessionNameLongPress}>{current?.session?.name ?? '—'}</span>
         {/* Always render so it doesn't pop in late once `current` loads — just disable until ready. */}
@@ -1961,17 +2356,7 @@ export default function App() {
           <BulbIcon />
           {ideaCount > 0 && <span className="idea-badge">{ideaCount}</span>}
         </button>
-        <Inbox
-          rows={inboxList}
-          top={inboxTop}
-          open={inboxOpen}
-          onToggle={() => setInboxOpen((o) => !o)}
-          onClose={() => setInboxOpen(false)}
-          onSelectRow={openInboxRow}
-          onMarkAllRead={markAllRead}
-          hooksStatus={hooksStatus}
-          onEnableHooks={enableHooks}
-        />
+        {inboxControl}
         <button className="topbar-icon" onClick={() => setUsageOpen(true)} aria-label={t('usage.title')} title={t('usage.title')}><GaugeIcon /></button>
         <button className={`topbar-icon browser-entry${browserStatus ? ` ${browserStatus}` : ''}`}
           onClick={() => browser.setOpen(true)} aria-label={t('app.browser')} title={t('app.browser')}>
@@ -1983,7 +2368,7 @@ export default function App() {
           <GearIcon />
           {gearDot && <span className="topbar-dot" aria-hidden="true" />}
         </button>
-      </header>
+      </header>}
       <UsagePage
         open={usageOpen}
         onClose={() => setUsageOpen(false)}
@@ -1995,18 +2380,15 @@ export default function App() {
         workspaceProtection={workspaceProtection}
         chatTone={chatTone}
         onChatTone={pickChatTone}
-        claudeChatLensEnabled={claudeChatLensOn}
-        onClaudeChatLensEnabled={toggleClaudeChatLens}
-        codexChatLensEnabled={codexChatLensOn}
-        onCodexChatLensEnabled={toggleCodexChatLens}
+        conversationAgents={conversationAgents}
+        onConversationAgentEnabled={toggleAgentConversation}
         keyboardMode={keyboardMode}
         onKeyboardMode={chooseKeyboardMode}
         terminalTransport={terminalTransport}
         onTerminalTransport={chooseTerminalTransport}
         snapshotInterval={snapshotInterval}
         onSnapshotInterval={chooseSnapshotInterval}
-        hooksStatus={hooksStatus}
-        onEnableHooks={enableHooks}
+        agentIntegrations={agentIntegrations}
         termRef={termRef}
         onOpenChangelog={openChangelog}
         changelogUnread={changelogUnread}
@@ -2030,7 +2412,7 @@ export default function App() {
         onMarkAllRead={markAllNotifRead}
         unreadCount={notifUnreadCount}
       />
-      <Drawer
+      {rootView === 'session' && <Drawer
         open={drawerOpen}
         currentSessionName={current?.session?.name ?? null}
         bound={bound}
@@ -2046,7 +2428,9 @@ export default function App() {
         recoveryPlan={recoveryPlan}
         recoveryOperation={recoveryOperation}
         onOpenRecovery={openRecoveryFromDrawer}
-      />
+        projectTaskBeta={projectTaskBeta}
+        onSwitchProject={() => chooseRootView('project')}
+      />}
       <WorkspaceRestoreDialog
         open={recoveryDialogOpen}
         plan={recoveryPlan}
@@ -2207,16 +2591,14 @@ export default function App() {
       {exitHint && (
         <div className="exit-toast" role="status">{t('app.backToExit')}</div>
       )}
-      {handoffToast && (
-        <div className="handoff-toast" role="status">{t('chat.slash.handedOff', { cmd: handoffToast })}</div>
-      )}
       {docLinkPrompt && (
         <DocLinkPopover
           path={docLinkPrompt.path}
           x={docLinkPrompt.x}
           y={docLinkPrompt.y}
+          busy={docLinkOpening}
           onOpen={confirmDocLink}
-          onClose={() => setDocLinkPrompt(null)}
+          onClose={() => { if (!docLinkOpening) setDocLinkPrompt(null); }}
         />
       )}
       {localUrlPrompt && (
@@ -2255,7 +2637,13 @@ export default function App() {
         onClose={() => setBasePrompt(null)}
         inset={inset}
       />
-      {current ? (
+      {rootView === 'project' ? (
+        <ProjectRoot drawerOpen={drawerOpen} inbox={projectInboxControl} inset={inset}
+          onOpenDrawer={() => setDrawerOpen(true)} onCloseDrawer={() => setDrawerOpen(false)}
+          onSwitchSession={() => chooseRootView('session')}
+          onOpenUsage={() => setUsageOpen(true)}
+          onOpenSettings={openSettings} />
+      ) : current ? (
         <>
           <WindowBar
             windows={current.windows}
@@ -2277,37 +2665,35 @@ export default function App() {
             onPaneMapOpenChange={setPaneMapOpen}
             trackWindowId={manageWindow?.id ?? null}
             lens={lens}
-            chatLensEnabled={chatLensAvailable}
+            chatLensEnabled={chatLensAvailable || chatLens}
             onLensChange={(v) => { setLens(v); localStorage.setItem('tw_lens_' + current.paneId, v); }}
           />
-          {current.paneId && (
+          {/* The host replaces the primary Surface and its matching controls as one keyed bundle. */}
+          <PaneSurfaceHost
+            key={paneSurfaceOwnerKey}
+            ownerKey={paneSurfaceOwnerKey}
+            primary={current.paneId && (
             chatLens ? (
-              codexChatLoading ? (
-                <div className="chat-view">
-                  <div className="chat-scroll"><LensBoot hint={t('boot.loading')} /></div>
-                </div>
-              ) : codexNeedsManagedSetup ? (
-                <CodexManagedGuide
-                  pane={current.paneId}
-                  session={codexSession}
-                  onAuthFail={onAuthFail}
-                  onTakeoverChange={setCodexTakeoverPending}
-                  onTerminal={() => {
-                    setCodexTakeoverPending(current.paneId, false);
-                    setLens('terminal');
-                    localStorage.setItem('tw_lens_' + current.paneId, 'terminal');
-                  }} />
-              ) : (
-                <ChatView pane={current.paneId} agent={currentAgent || 'claude'} kind={currentKind}
-                  msg={states[current.paneId]?.msg ?? null} onAuthFail={onAuthFail}
+              normalizedConversationIdentity ? (
+                <AgentConversationView
+                  key={`conversation-view\0${normalizedConversationIdentity.agentId}\0${normalizedConversationIdentity.sessionId}`}
+                  conversation={projectedConversation}
+                  working={conversationActivity === 'working'}
+                  activity={conversationActivity}
                   onDocLinkTap={onDocLinkTap}
-                  codexSession={codexSession}
-                  optimisticMessages={codexOptimisticMessages.filter((item) => item.paneId === current.paneId)}
-                  actionError={chatActionErrors[current.paneId] || null}
-                  onOptimisticCovered={coverCodexOptimistic}
-                  slashEcho={slashEcho && slashEcho.paneId === current.paneId ? slashEcho : null}
-                  refreshToken={transcriptWake.paneId === current.paneId ? transcriptWake.seq : null}
-                  onSlashEchoDone={() => setSlashEcho(null)} />
+                  completedEntryRequest={completedEntryRequest}
+                  onCompletedEntryConsumed={consumeCompletedChatEntry}
+                  followLatestRequest={chatFollowLatest.paneId === current.paneId
+                    ? chatFollowLatest.request : 0} />
+              ) : currentAgentRun
+                && currentAgentDescriptor?.capabilities.conversationActivation === true ? (
+                <AgentConversationActivationGuide controller={conversationActivation} onCancel={() => {
+                  setLens('terminal');
+                  localStorage.setItem(`tw_lens_${current.paneId}`, 'terminal');
+                }} />
+              ) : (
+                <AgentConversationErrorView message={t('chat.session.connectionTitle')}
+                  resetKey={`${current.paneId}\0${chatAgent ?? ''}`} />
               )
             ) : (
               <Terminal
@@ -2332,36 +2718,59 @@ export default function App() {
               />
             )
           )}
-          {/* Chat lens gets its own modern composer card; the terminal keeps the two-page dock. */}
-          {chatLens ? (
-            codexChatReady ? (
-              <ChatComposer
-                pane={current.paneId}
-                agent={currentAgent || 'claude'}
-                codexSession={codexSession}
+            controls={chatLens ? (
+            normalizedConversationIdentity ? (<>
+              <AgentInteractionLayer controller={agentInteraction} waiting={currentKind === 'permission'}
+                onOpenTerminal={() => {
+                setLens('terminal');
+                localStorage.setItem(`tw_lens_${current.paneId}`, 'terminal');
+              }} />
+              <AgentConversationComposer
+                key={`conversation-controls\0${normalizedConversationIdentity.agentId}\0${normalizedConversationIdentity.sessionId}`}
+                agentId={normalizedConversationIdentity.agentId}
+                sessionId={normalizedConversationIdentity.sessionId}
                 desktop={desktopInput}
-                kind={currentKind}
+                busy={currentKind === 'working' || currentKind === 'permission'
+                  || currentKind === 'compacting'
+                  || genericConversation.items.some((item) => item.provisional)}
+                activity={conversationActivity}
+                conversation={projectedConversation}
+                onSendStart={() => requestChatFollowLatest(current.paneId)}
                 cwd={currentPaneCwd}
-                onKey={sendKey}
-                onAuthFail={onAuthFail}
-                onSent={onCommandSent}
-                optimisticMessages={codexOptimisticMessages.filter((item) => item.paneId === current.paneId)}
-                onCodexSendStart={beginCodexSend}
-                onCodexSendResult={finishCodexSend}
-                onActionError={(error) => reportChatActionError(current.paneId, error)}
                 shortcuts={serverShortcuts}
                 micAvailable={!!micAvailable}
+                onAuthFail={onAuthFail}
+                onSlashCommand={handleConversationSlash}
+                headerContent={<>
+                  {(conversationControlCapabilities?.conversationGoal
+                    || conversationControlCapabilities?.conversationPlan)
+                    ? <AgentConversationMilestoneControls controller={agentConversationControls}
+                      goalOpenRequest={requestForCurrentConversation.goal}
+                      goalEditRequest={requestForCurrentConversation.goalEdit}
+                      chatTone={chatTone} keyboardInset={inset} /> : null}
+                </>}
+                queueContent={conversationSendable
+                  ? <AgentConversationQueueControl controller={agentConversationControls}
+                    conversation={projectedConversation}
+                    items={conversationSubmissionProjection.queue}
+                    activity={serverConversationActivity}
+                    chatTone={chatTone} keyboardInset={inset} /> : undefined}
+                actionContent={(conversationControlCapabilities?.conversationContext
+                  || conversationControlCapabilities?.conversationPermission)
+                  ? <AgentConversationActionControls controller={agentConversationControls}
+                    sessionId={normalizedConversationIdentity.sessionId}
+                    showPermission={conversationControlCapabilities.conversationPermission === true}
+                    showContext={conversationControlCapabilities.conversationContext === true} /> : undefined}
+                sessionControl={currentAgentDescriptor?.capabilities.sessionControl === true
+                  ? <AgentModelControl control={agentSessionControl} busy={currentKind === 'working'
+                    || currentKind === 'permission' || currentKind === 'compacting'
+                    || genericConversation.items.some((item) => item.provisional)}
+                    openRequest={requestForCurrentConversation.model} />
+                  : undefined}
                 chatTone={chatTone}
                 keyboardInset={inset}
-                {...(currentAgent === 'claude' ? {
-                  onInteractiveSlash: (cmd: string) => {
-                    setLens('terminal');
-                    localStorage.setItem('tw_lens_' + current.paneId, 'terminal');
-                    setHandoffToast(cmd);
-                  },
-                } : {})}
               />
-            ) : null
+            </>) : null
           ) : (
             <BottomDock
               ref={dockRef}
@@ -2385,7 +2794,7 @@ export default function App() {
               onLeaveTerminal={() => termRef.current?.blurInput?.()}
               onReturnToTerminal={() => { focusTerminal(); }}
             />
-          )}
+          )} />
         </>
       ) : booting ? (
         <div className="loading">{t('common.loading')}</div>
@@ -2398,5 +2807,6 @@ export default function App() {
       )}
       </div>
     </OverlayProvider>
+    </AgentCatalogProvider>
   );
 }

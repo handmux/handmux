@@ -33,6 +33,11 @@ export interface CodexUsageSnapshot {
   usage: CodexUsage | null;
 }
 
+export interface CodexContextUsage {
+  usedTokens: number;
+  totalTokens: number;
+}
+
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
 const finiteNumber = (value: unknown): value is number =>
@@ -74,7 +79,12 @@ function normalize(record: unknown): CodexUsage | null {
   if (!Number.isFinite(updatedAt)) return null;
   const info = isRecord(payload.info) ? payload.info : {};
   const totals = isRecord(info.total_token_usage) ? info.total_token_usage : {};
-  const limits = isRecord(payload.rate_limits) ? payload.rate_limits : {};
+  const rawLimits = isRecord(payload.rate_limits) ? payload.rate_limits : {};
+  // A rollout may carry a model-specific limit (for example GPT-5.3-Codex-Spark's
+  // `codex_bengalfox`) instead of the account's main Codex limit. Keep its token/context data, but never
+  // project that independent percentage as the generic Codex quota shown by HandMux.
+  const limitId = typeof rawLimits.limit_id === 'string' ? rawLimits.limit_id : null;
+  const limits = limitId === null || limitId === 'codex' ? rawLimits : {};
   return {
     updatedAt,
     rateLimits: {
@@ -92,19 +102,30 @@ function normalize(record: unknown): CodexUsage | null {
   };
 }
 
-function parseLatest(lines: readonly string[]): CodexUsage | null {
+function contextUsage(record: unknown): CodexContextUsage | null {
+  if (!isRecord(record) || !isRecord(record.payload) || record.payload.type !== 'token_count') return null;
+  const info = isRecord(record.payload.info) ? record.payload.info : null;
+  const last = isRecord(info?.last_token_usage) ? info.last_token_usage : null;
+  const usedTokens = last?.total_tokens;
+  const totalTokens = info?.model_context_window;
+  if (!finiteNumber(usedTokens) || usedTokens < 0
+    || !finiteNumber(totalTokens) || totalTokens <= 0) return null;
+  return { usedTokens, totalTokens };
+}
+
+function parseLatest<T>(lines: readonly string[], normalizeLine: (record: unknown) => T | null): T | null {
   for (let i = lines.length - 1; i >= 0; i--) {
     const line = lines[i];
     if (!line || !line.includes('token_count')) continue;
     try {
-      const usage = normalize(JSON.parse(line));
+      const usage = normalizeLine(JSON.parse(line));
       if (usage) return usage;
     } catch { /* damaged/incomplete line: continue toward older complete records */ }
   }
   return null;
 }
 
-export function readLatestUsage(transcriptPath: string): CodexUsage | null {
+function readLatest<T>(transcriptPath: string, normalizeLine: (record: unknown) => T | null): T | null {
   let fd: number | undefined;
   try {
     fd = fs.openSync(transcriptPath, 'r');
@@ -116,11 +137,11 @@ export function readLatestUsage(transcriptPath: string): CodexUsage | null {
       fs.readSync(fd, buffer, 0, buffer.length, start);
       const lines = `${buffer.toString('utf8')}${suffix}`.split('\n');
       if (start > 0) suffix = lines.shift() || '';
-      const usage = parseLatest(lines);
+      const usage = parseLatest(lines, normalizeLine);
       if (usage) return usage;
       end = start;
     }
-    return suffix ? parseLatest([suffix]) : null;
+    return suffix ? parseLatest([suffix], normalizeLine) : null;
   } catch {
     return null;
   } finally {
@@ -128,6 +149,14 @@ export function readLatestUsage(transcriptPath: string): CodexUsage | null {
       try { fs.closeSync(fd); } catch { /* best effort */ }
     }
   }
+}
+
+export function readLatestUsage(transcriptPath: string): CodexUsage | null {
+  return readLatest(transcriptPath, normalize);
+}
+
+export function readLatestContextUsage(transcriptPath: string): CodexContextUsage | null {
+  return readLatest(transcriptPath, contextUsage);
 }
 
 function isUsageWindow(value: unknown): value is UsageRateLimitWindow {

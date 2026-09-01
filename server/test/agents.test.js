@@ -13,11 +13,11 @@ import { parseAgentProcs } from '../src/agents/scanUtils.js';
 import { scanOrphans, takeoverOrphan } from '../src/orphans.js';
 
 describe('registry', () => {
-  it('resolves drivers by id and defaults unknown/missing to Claude (legacy entries)', () => {
+  it('resolves only registered driver ids and fails closed for unknown identity', () => {
     expect(getAgent('claude').id).toBe('claude');
     expect(getAgent('codex').id).toBe('codex');
-    expect(getAgent(undefined).id).toBe('claude');
-    expect(getAgent('nope').id).toBe('claude');
+    expect(getAgent(undefined)).toBe(null);
+    expect(getAgent('nope')).toBe(null);
   });
   it('maps a tmux pane_current_command to its driver', () => {
     expect(agentForProc('claude').id).toBe('claude');
@@ -228,8 +228,12 @@ describe('resolveCodexComms (ambiguous node launcher)', () => {
       { id: '%1', cmd: 'node', tty: '/dev/ttys030' },
       { id: '%2', cmd: 'node', tty: '/dev/ttys031' },
     ];
+    const psArgs = [];
     const run = async (cmd, args) => {
-      if (cmd === 'ps') return 'ttys030 501 S+\nttys030 502 R+\nttys031 601 S+';
+      if (cmd === 'ps') {
+        psArgs.push(args);
+        return 'ttys030 501 S+\nttys030 502 R+\nttys031 601 S+';
+      }
       if (cmd === 'lsof') {
         const pid = args[args.indexOf('-p') + 1];
         const exe = { 501: '/usr/local/bin/node', 502: '/opt/@openai/codex/bin/codex', 601: '/usr/local/bin/node' }[pid];
@@ -240,6 +244,27 @@ describe('resolveCodexComms (ambiguous node launcher)', () => {
     await resolveCodexComms(panes, run);
     expect(panes[0].cmd).toBe('codex');
     expect(panes[1].cmd).toBe('node');
+    expect(psArgs).toEqual([['-t', 'ttys030,ttys031', '-o', 'tty=,pid=,stat=']]);
+  });
+
+  it('falls back to the full process snapshot when targeted TTY lookup fails', async () => {
+    const psArgs = [];
+    const run = async (cmd, args) => {
+      if (cmd === 'ps') {
+        psArgs.push(args);
+        if (args[0] === '-t') return ''; // defaultRun's contract for an unsupported/failed command
+        return 'ttys030 502 S+';
+      }
+      if (cmd === 'lsof') return 'p502\nftxt\nn/opt/@openai/codex/bin/codex\n';
+      return '';
+    };
+    const panes = [{ id: '%1', cmd: 'node', tty: '/dev/ttys030' }];
+    await resolveCodexComms(panes, run);
+    expect(panes[0].cmd).toBe('codex');
+    expect(psArgs).toEqual([
+      ['-t', 'ttys030', '-o', 'tty=,pid=,stat='],
+      ['-Ao', 'tty=,pid=,stat='],
+    ]);
   });
 
   it('invalidates a cached success immediately when the foreground pid set changes', async () => {

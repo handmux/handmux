@@ -7,8 +7,15 @@ import type { TranscriptMessage } from './transcriptParse.js';
 export interface IncrementalTranscriptParser<T> {
   messages: T[];
   push(lines: readonly unknown[]): T[];
+  takeChangedFrom?(): number | null;
 }
 export type TranscriptParserFactory<T> = () => IncrementalTranscriptParser<T>;
+export interface TranscriptReadSnapshot<T> {
+  messages: T[];
+  version: string;
+  changedFrom: number | null;
+  generation?: number;
+}
 interface ReaderOptions { maxEntries?: number; yieldEvery?: number }
 interface ReadLinesResult { lines: string[]; offset: number; size: number }
 interface CacheEntry<T> {
@@ -20,10 +27,25 @@ interface CacheEntry<T> {
   size: number;
   mtimeMs: number;
   usedAt: number;
+  generation: number;
 }
 export interface TranscriptReader {
   read(file: string): Promise<TranscriptMessage[]>;
   read<T>(file: string, createParser: TranscriptParserFactory<T>): Promise<T[]>;
+  readPrefix?<T>(
+    file: string,
+    endExclusive: number,
+    createParser: TranscriptParserFactory<T>,
+  ): Promise<T[]>;
+  readSnapshot?<T>(
+    file: string,
+    createParser: TranscriptParserFactory<T>,
+  ): Promise<TranscriptReadSnapshot<T>>;
+  readPrefixSnapshot?<T>(
+    file: string,
+    endExclusive: number,
+    createParser: TranscriptParserFactory<T>,
+  ): Promise<TranscriptReadSnapshot<T>>;
   clear(): void;
   size(): number;
 }
@@ -35,13 +57,24 @@ export interface TranscriptReader {
 export function createTranscriptReader({ maxEntries = 8, yieldEvery = 500 }: ReaderOptions = {}): TranscriptReader {
   const cache = new Map<string, CacheEntry<unknown>>();
   const inflight = new Map<string, Promise<unknown[]>>();
+  let generation = 0;
 
-  async function readCompleteLines(file: string, start: number): Promise<ReadLinesResult> {
+  async function readCompleteLines(
+    file: string,
+    start: number,
+    endExclusive?: number,
+  ): Promise<ReadLinesResult> {
     const lines: string[] = [];
     let pending = Buffer.alloc(0);
     let consumed = 0;
     let bytesRead = 0;
-    for await (const rawChunk of createReadStream(file, { start })) {
+    if (endExclusive !== undefined && endExclusive <= start) {
+      return { lines, offset: start, size: start };
+    }
+    const options = endExclusive === undefined
+      ? { start }
+      : { start, end: endExclusive - 1 };
+    for await (const rawChunk of createReadStream(file, options)) {
       const chunk = Buffer.isBuffer(rawChunk) ? rawChunk : Buffer.from(rawChunk);
       bytesRead += chunk.length;
       const data = pending.length ? Buffer.concat([pending, chunk]) : chunk;
@@ -94,7 +127,10 @@ export function createTranscriptReader({ maxEntries = 8, yieldEvery = 500 }: Rea
     // leak across /clear or log rotation.
     const append = Boolean(sameFile && entry && st.size > entry.size);
     if (!append || !entry) {
-      entry = { parser: createParser(), createParser, offset: 0, dev: st.dev, ino: st.ino, size: 0, mtimeMs: 0, usedAt: 0 };
+      entry = {
+        parser: createParser(), createParser, offset: 0, dev: st.dev, ino: st.ino,
+        size: 0, mtimeMs: 0, usedAt: 0, generation: ++generation,
+      };
     }
 
     const { lines, offset, size } = await readCompleteLines(file, entry.offset);
@@ -129,7 +165,103 @@ export function createTranscriptReader({ maxEntries = 8, yieldEvery = 500 }: Rea
     return run;
   }
 
-  return { read, clear: () => cache.clear(), size: () => cache.size };
+  async function readPrefix<T>(
+    file: string,
+    endExclusive: number,
+    createParser: TranscriptParserFactory<T>,
+  ): Promise<T[]> {
+    if (!Number.isSafeInteger(endExclusive) || endExclusive < 0) {
+      throw new TypeError('Transcript prefix boundary must be a non-negative safe integer');
+    }
+    const parser = createParser();
+    if (endExclusive === 0) return parser.messages;
+    const { lines } = await readCompleteLines(file, 0, endExclusive);
+    await applyLines(parser, lines);
+    return parser.messages;
+  }
+
+  async function readSnapshot<T>(
+    file: string,
+    createParser: TranscriptParserFactory<T>,
+  ): Promise<TranscriptReadSnapshot<T>> {
+    const messages = await read(file, createParser);
+    const entry = cache.get(file) as CacheEntry<T> | undefined;
+    // `offset` advances only after complete JSONL records were parsed. Metadata distinguishes an in-place
+    // rewrite/replace that happens to end at the same byte boundary. Consumers can therefore skip all
+    // projection and hashing work when this token is unchanged.
+    const version = entry
+      ? `${entry.dev}:${entry.ino}:${entry.offset}:${entry.size}:${entry.mtimeMs}`
+      : 'missing';
+    return {
+      messages,
+      version,
+      changedFrom: entry
+        ? entry.parser.takeChangedFrom ? entry.parser.takeChangedFrom() : 0
+        : null,
+      ...(entry ? { generation: entry.generation } : {}),
+    };
+  }
+
+  async function readPrefixSnapshot<T>(
+    file: string,
+    endExclusive: number,
+    createParser: TranscriptParserFactory<T>,
+  ): Promise<TranscriptReadSnapshot<T>> {
+    if (!Number.isSafeInteger(endExclusive) || endExclusive < 0) {
+      throw new TypeError('Transcript prefix boundary must be a non-negative safe integer');
+    }
+    // A normal read may already be advancing this parser. Wait for that mutation before deciding whether
+    // its append state can satisfy the immutable opening boundary.
+    await inflight.get(file)?.catch(() => {});
+    let st: Stats;
+    try { st = await fsp.stat(file); } catch {
+      return { messages: [], version: 'missing', changedFrom: null };
+    }
+    if (!st.isFile() || endExclusive > st.size) {
+      return { messages: [], version: 'missing', changedFrom: null };
+    }
+    let entry = cache.get(file) as CacheEntry<T> | undefined;
+    const reusable = Boolean(entry
+      && entry.createParser === createParser
+      && entry.dev === st.dev
+      && entry.ino === st.ino
+      && entry.offset <= endExclusive
+      && entry.size <= endExclusive);
+    if (!reusable || !entry) {
+      // A cached parser beyond the cutoff cannot be rewound. Build this rare historical prefix in
+      // isolation and leave the newer append cache intact.
+      const parser = createParser();
+      const { lines, offset, size } = await readCompleteLines(file, 0, endExclusive);
+      await applyLines(parser, lines);
+      return {
+        messages: parser.messages,
+        version: `${st.dev}:${st.ino}:${offset}:${size}:${st.mtimeMs}`,
+        changedFrom: parser.takeChangedFrom ? parser.takeChangedFrom() : 0,
+        generation: ++generation,
+      };
+    }
+    if (entry.size < endExclusive || entry.offset < endExclusive) {
+      const { lines, offset, size } = await readCompleteLines(file, entry.offset, endExclusive);
+      await applyLines(entry.parser, lines);
+      entry.offset = offset;
+      entry.size = size;
+      entry.mtimeMs = st.mtimeMs;
+      entry.usedAt = Date.now();
+      cache.set(file, entry as unknown as CacheEntry<unknown>);
+      trim();
+    }
+    return {
+      messages: entry.parser.messages,
+      version: `${entry.dev}:${entry.ino}:${entry.offset}:${entry.size}:${entry.mtimeMs}`,
+      changedFrom: entry.parser.takeChangedFrom ? entry.parser.takeChangedFrom() : 0,
+      generation: entry.generation,
+    };
+  }
+
+  return {
+    read, readPrefix, readSnapshot, readPrefixSnapshot,
+    clear: () => cache.clear(), size: () => cache.size,
+  };
 }
 
 export const transcriptReader = createTranscriptReader();

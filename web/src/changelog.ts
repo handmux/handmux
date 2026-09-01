@@ -19,6 +19,34 @@ export interface ChangelogEntry {
 // `entryId`/`LATEST_RELEASE` use `version` when present, else `date`, as the stable unread-dot id.
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '0.25.0',
+    date: '2026-09-01',
+    highlight: {
+      zh: 'Pi 原生接入 · 多 Agent 对话更可靠',
+      en: 'Native Pi support · more reliable agent chat',
+    },
+    items: {
+      zh: [
+        '新增 Pi 原生接入：运行 handmux agent enable pi 显式启用接入，以后用 handmux pi 日常启动原生 TUI；Handmux 离线时 Pi 仍可正常使用，结果会在本机等待重放。Pi 对话需在设置中独立开启，当前仍为实验性功能。',
+        'Claude Code、Codex 与 Pi 统一接入新的 Agent Runtime：多 pane 状态、完成与出错通知、跨设备已读和实时对话现在由同一套持久数据链提供。',
+        '用量页支持单独刷新订阅；Codex 可查看账号、套餐与细分额度，API 分栏可在本机加密保存多个 DeepSeek 和 Moonshot (Kimi) 账户并读取官方余额。',
+        'Codex 对话在长会话、切换 pane、Server 重启和弱网重连时更稳定；新会话首条消息、排队与立即引导、发送失败重试、上下文压缩详情都会原位恢复并持续对账。',
+        '重写对话滚动与历史分页：上拉阅读不再被新输出抢回底部或推到页首；桌面复制、键盘焦点、前后台重连和统一错误提示也更符合系统习惯。',
+        '文件上传支持 ZIP；中文 Markdown 路径、绝对目录和普通句点不再误判或乱码。会话状态还能直接查看当前 Git worktree 根路径与分支。',
+        '最低运行环境提高到 Node.js 22.16；低版本会在启动前得到明确升级提示，Homebrew 安装仍会自动提供所需 Node。开机恢复恰遇 npm 替换 Agent 时会短暂等待安装完成，不再误报未安装或丢失恢复的 pane。',
+      ],
+      en: [
+        'Added native Pi integration. Run handmux agent enable pi once, then use handmux pi for everyday native-TUI launches; Pi remains usable while Handmux is offline, with results queued locally for replay. Pi chat is independently enabled in Settings and remains experimental.',
+        'Claude Code, Codex, and Pi now share the new Agent Runtime, with one durable data path for multi-pane state, completion and error notifications, cross-device read state, and live conversations.',
+        'Usage subscriptions can now be refreshed individually. Codex shows account, plan, and detailed limits, while the API tab saves multiple DeepSeek and Moonshot (Kimi) accounts encrypted on this computer and reads their official balances.',
+        'Codex chat is more reliable across long sessions, pane switches, Server restarts, and weak-network reconnects. First sends, queued and guided messages, safe retries, and context-compaction details now recover and reconcile in place.',
+        'Reworked chat scrolling and history pagination so new output no longer steals the reading position or jumps to the top. Desktop copy, keyboard focus, foreground reconnects, and unified error feedback now follow platform conventions more closely.',
+        'ZIP uploads are supported. Chinese Markdown paths, absolute directories, and ordinary punctuation no longer become broken links, while session status now shows the current Git worktree root and branch.',
+        'The minimum runtime is now Node.js 22.16. Older runtimes receive a clear pre-launch upgrade message, while Homebrew continues to install the required Node automatically. If startup recovery overlaps an npm Agent replacement, Handmux briefly waits for installation instead of falsely reporting the Agent missing or losing restored panes.',
+      ],
+    },
+  },
+  {
     version: '0.24.0',
     date: '2026-08-11',
     highlight: {

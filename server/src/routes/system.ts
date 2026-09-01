@@ -9,25 +9,40 @@ import { isSessionId } from '../tmux/commands.js';
 import { buildIatSignedUrl } from '../asr/iflySign.js';
 import { asrConfig, isAsrConfigured } from '../asr/iflyConfig.js';
 import { hooksStatus, installHooks } from '../cli/claudeHooks.js';
+import {
+  agentIntegrationStatus,
+  defaultAgentIntegrationContext,
+  enableAgentIntegration,
+} from '../cli/agentIntegration.js';
 import { scanOrphans, takeoverOrphan, defaultProjectsDir } from '../orphans.js';
-import { getUsageCached } from '../usage.js';
 import { readCache, isNewer, shouldRefresh, refreshLatestAsync } from '../cli/updateCheck.js';
 import { normalizeShortcuts } from '../shortcutConfig.js';
+import { projectLegacyInboxStates } from '../agent-runtime/legacyInboxProjection.js';
+import type { AgentRuntime } from '../agent-runtime/runtime.js';
+import type { LivePane } from '../agent-runtime/adapter.js';
 import type { NextFunction, Request, Response, Router } from 'express';
 import type { ShortcutConfig } from '../shortcutConfig.js';
+import type { AgentIntegrationContext, AgentName } from '../cli/agentIntegration.js';
 
 type TakeoverCommands = Parameters<typeof takeoverOrphan>[0]['commands'];
+interface LivePaneCommands {
+  listLivePanes?(): Promise<Array<{
+    id: string; cmd: string; tty: string; session: string; window: string; windowName: string;
+  }>>;
+}
 interface ClaudeEvents {
   getStates(allowedSessions: string[] | null): Promise<unknown>;
 }
 interface SystemRouteOptions {
-  commands: TakeoverCommands;
+  commands: TakeoverCommands & LivePaneCommands;
   claudeEvents: ClaudeEvents;
+  agentRuntime?: Pick<AgentRuntime, 'activeRuns' | 'inbox' | 'deprecatedSubscriptionUsage'> | null;
   asrEnv: NodeJS.ProcessEnv;
   shortcuts: unknown;
   home: string;
   stateFile: string;
   previewDomain?: string | null;
+  agentIntegrationContext?: AgentIntegrationContext;
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -36,6 +51,8 @@ const errorMessage = (error: unknown): string => error instanceof Error ? error.
 
 const here = dirname(fileURLToPath(import.meta.url));
 const HOOKS_SRC = resolvePath(here, '../../hooks'); // server/hooks (bundled scripts)
+const PI_ENTRY = resolvePath(here, '../../connectors/pi/index.js');
+const WEB_AGENT_INTEGRATIONS = ['claude', 'pi'] as const satisfies readonly AgentName[];
 
 // The installed CLI version (server/package.json) — read once. The phone compares this against the cached
 // npm "latest" to surface an update hint ("run `handmux update` on your computer"); see the /version route.
@@ -48,10 +65,17 @@ const PKG_VERSION = (() => {
 })();
 
 export function systemRoutes({
-  commands, claudeEvents, asrEnv, shortcuts, home, stateFile, previewDomain,
+  commands, claudeEvents, agentRuntime, asrEnv, shortcuts, home, stateFile, previewDomain,
+  agentIntegrationContext,
 }: SystemRouteOptions): Router {
   const r = express.Router();
   let activeShortcuts: ShortcutConfig = normalizeShortcuts(shortcuts);
+  const integrationContext = agentIntegrationContext ?? defaultAgentIntegrationContext({
+    home,
+    piEntryFile: PI_ENTRY,
+    hooksSrcDir: HOOKS_SRC,
+    claudeStateFile: stateFile,
+  });
 
   // --- Capabilities probe ---------------------------------------------------------------------
   // Optional integrations are configured per-install (open-source installs ship without keys), so the
@@ -107,6 +131,32 @@ export function systemRoutes({
     } catch (e) { return res.status(500).json({ ok: false, error: String(e) }); }
   });
 
+  // User-facing Agent integration management. The shared CLI service owns all provider-specific status,
+  // ownership, repair, and install behavior; Web only exposes Claude Code and Pi as product concepts.
+  r.get('/agent-integrations', (_req: Request, res: Response, next: NextFunction) => {
+    try {
+      return res.json({
+        integrations: WEB_AGENT_INTEGRATIONS.map((name) => {
+          const status = agentIntegrationStatus(name, integrationContext);
+          return {
+            name,
+            status,
+            ...(name === 'claude' && status === 'not-enabled'
+              && hooksStatus(integrationContext.home) === 'no-claude'
+              ? { reason: 'initialize-first' as const } : {}),
+          };
+        }),
+      });
+    } catch (error) { return next(error); }
+  });
+
+  r.post('/agent-integrations/:name/enable', (req: Request, res: Response, next: NextFunction) => {
+    const name = WEB_AGENT_INTEGRATIONS.find((candidate) => candidate === req.params.name);
+    if (!name) return res.status(404).json({ error: 'agent integration not found' });
+    try { return res.json(enableAgentIntegration(name, integrationContext)); }
+    catch (error) { return next(error); }
+  });
+
   // --- Voice input: iFlytek IAT signed-URL handoff -------------------------------------------
   // The browser connects to iFlytek directly; we only mint a short-lived signed wss URL so the
   // apiSecret never reaches the phone. 503 if creds aren't configured (front-end hides the mic).
@@ -121,13 +171,39 @@ export function systemRoutes({
   r.get('/states', async (req: Request, res: Response, next: NextFunction) => {
     const q = req.query.sessions;
     const allowed = q === undefined ? null : String(q).split(',').map((s) => s.trim()).filter(Boolean);
-    try { return res.json(await claudeEvents.getStates(allowed)); } catch (e) { return next(e); }
+    try {
+      const snapshot = agentRuntime?.inbox.read();
+      const runs = agentRuntime?.activeRuns() ?? [];
+      // revision is scoped to this serviceEpoch. Persisted availability from an older Server process is
+      // diagnostic state, not proof that this Runtime has completed its first provider baseline.
+      const coreReady = snapshot !== undefined && snapshot.revision > 0;
+      if (coreReady) {
+        let panes: LivePane[] = [];
+        try {
+          panes = commands.listLivePanes ? (await commands.listLivePanes()).map((pane) => ({
+            paneId: pane.id,
+            sessionName: pane.session,
+            windowId: pane.window,
+            windowName: pane.windowName,
+            currentCommand: pane.cmd,
+            ...(pane.tty ? { tty: pane.tty } : {}),
+          })) : [];
+        } catch { /* Core state remains authoritative; location degrades to unknown. */ }
+        return res.json(projectLegacyInboxStates({ snapshot, runs, panes, allowedSessions: allowed }));
+      }
+      return res.json(await claudeEvents.getStates(allowed));
+    } catch (e) { return next(e); }
   });
 
-  // Agent usage/quota for the Usage page. Claude reads its statusLine snapshot; Codex asks its own local
-  // app-server for account limits and merges rollout token/context data. Cached briefly; never handles auth.
+  // Historical provider-shaped response. It is a pure projection of the same Runtime/Core snapshot used
+  // by /agents/usage and never performs another provider read.
   r.get('/usage', async (_req: Request, res: Response, next: NextFunction) => {
-    try { return res.json(await getUsageCached(home)); } catch (e) { return next(e); }
+    if (!agentRuntime?.deprecatedSubscriptionUsage) {
+      return res.status(503).json({ error: 'subscription usage unsupported', code: 'unsupported' });
+    }
+    try {
+      return res.json(await agentRuntime.deprecatedSubscriptionUsage.snapshot());
+    } catch (e) { return next(e); }
   });
 
   // Orphan Claude sessions: `claude` processes running on this host but NOT inside a tmux pane, so

@@ -33,6 +33,7 @@ interface ServiceOptions {
   platform?: string;
   exec?: ServiceExec;
   log?: ServiceLogger;
+  pathEnv?: string;
 }
 
 const defaultExec: ServiceExec = (command, args, options) => {
@@ -54,9 +55,21 @@ export function isServiceInstalled(home: string, platform: string = process.plat
 
 const xmlEscape = (value: string): string => value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
-// launchd LaunchAgent. args = full argv for the process (node, script, __supervise, --payload-file, path).
-export function plistFor({ args, log, label = LABEL }: { args: readonly string[]; log: string; label?: string }): string {
+// launchd does not inherit the interactive shell PATH. Persist the caller's PATH so the supervised Server
+// resolves the same npm/Homebrew/nvm/volta Agent executables that `handmux start` could resolve.
+// args = full argv for the process (node, script, __supervise, --payload-file, path).
+export function plistFor({ args, log, label = LABEL, pathEnv }: {
+  args: readonly string[];
+  log: string;
+  label?: string;
+  pathEnv?: string;
+}): string {
   const items = args.map((a) => `    <string>${xmlEscape(a)}</string>`).join('\n');
+  const environment = pathEnv ? `
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key><string>${xmlEscape(pathEnv)}</string>
+  </dict>` : '';
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -66,6 +79,7 @@ export function plistFor({ args, log, label = LABEL }: { args: readonly string[]
   <array>
 ${items}
   </array>
+${environment}
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
   <key>StandardOutPath</key><string>${xmlEscape(log)}</string>
@@ -75,17 +89,19 @@ ${items}
 `;
 }
 
-// systemd --user unit. ExecStart needs a single command line; args are space-joined (our args have no
-// spaces except an absolute path with none in practice — quote the script path defensively).
-export function unitFor({ args }: { args: readonly string[] }): string {
+// systemd --user may likewise start with a manager PATH rather than the invoking shell's. ExecStart needs
+// a single command line; args are space-joined (our args have no spaces except an absolute path with none
+// in practice — quote the script path defensively).
+export function unitFor({ args, pathEnv }: { args: readonly string[]; pathEnv?: string }): string {
   const cmd = args.map((a) => (/\s/.test(a) ? JSON.stringify(a) : a)).join(' ');
+  const environment = pathEnv ? `Environment=${JSON.stringify(`PATH=${pathEnv}`)}\n` : '';
   return `[Unit]
 Description=handmux — drive your tmux from your phone
 After=network-online.target
 
 [Service]
 ExecStart=${cmd}
-Restart=always
+${environment}Restart=always
 RestartSec=2
 
 [Install]
@@ -95,7 +111,10 @@ WantedBy=default.target
 
 export function installService(
   args: readonly string[],
-  { home, platform = process.platform, exec = defaultExec, log = console }: ServiceOptions,
+  {
+    home, platform = process.platform, exec = defaultExec, log = console,
+    pathEnv = process.env.PATH,
+  }: ServiceOptions,
 ): string {
   ensurePrivateDirectorySync(pocketHome(home));
   const runtimeLog = logPath(home);
@@ -105,7 +124,7 @@ export function installService(
   if (platform === 'darwin') {
     const p = plistPath(home);
     fs.mkdirSync(path.dirname(p), { recursive: true });
-    fs.writeFileSync(p, plistFor({ args, log: runtimeLog }), { mode: 0o600 });
+    fs.writeFileSync(p, plistFor({ args, log: runtimeLog, ...(pathEnv ? { pathEnv } : {}) }), { mode: 0o600 });
     fs.chmodSync(p, 0o600);
     exec('launchctl', ['unload', p], { stdio: 'ignore' }); // best-effort: clear any prior load
     const r = exec('launchctl', ['load', '-w', p], { encoding: 'utf8' });
@@ -116,7 +135,7 @@ export function installService(
   if (platform === 'linux') {
     const p = unitPath(home);
     fs.mkdirSync(path.dirname(p), { recursive: true });
-    fs.writeFileSync(p, unitFor({ args }), { mode: 0o600 });
+    fs.writeFileSync(p, unitFor({ args, ...(pathEnv ? { pathEnv } : {}) }), { mode: 0o600 });
     fs.chmodSync(p, 0o600);
     exec('systemctl', ['--user', 'daemon-reload'], { stdio: 'ignore' });
     const enabled = exec('systemctl', ['--user', 'enable', UNIT], { encoding: 'utf8' });

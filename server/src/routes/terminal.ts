@@ -7,6 +7,7 @@ import { isPaneId, isWindowId } from '../tmux/commands.js';
 import { capTrailingBlankRows } from '../trimCapture.js';
 import { isAllowedKey } from '../keyNames.js';
 import { restoreCaptureBackgrounds } from '../captureBackground.js';
+import { serializePaneInput } from '../paneInput.js';
 import type { NextFunction, Request, Response, Router } from 'express';
 
 type CommandsModule = typeof import('../tmux/commands.js');
@@ -29,11 +30,10 @@ export { isAllowedKey } from '../keyNames.js';
 // one here. tmux send-keys key names are themselves a closed set, so this stays a strict allowlist
 // (never a passthrough): a key either names an approved token or matches the modifier shape, or it's
 // rejected. The old fixed C-c/C-d/C-z/C-l/C-r/C-o/C-e all still match `C-[a-z0-9]`.
-// Pause between typing the text and pressing Enter on a /send. A TUI like Claude Code needs a
-// beat to ingest the pasted line; without it, the Enter can fold into the input as a newline
-// instead of submitting. 120ms is imperceptible but enough to settle.
-const SUBMIT_GAP_MS = 120;
+// Keep a short fallback gap for applications that do not negotiate bracketed paste. Supporting TUIs get
+// an explicit paste boundary from commands.sendText; the delay is no longer the correctness mechanism.
 const RAW_INPUT_MAX_BYTES = 16 * 1024;
+const SUBMIT_GAP_MS = 120;
 const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 const validHexInput = (hex: unknown): hex is string => typeof hex === 'string'
   && hex.length >= 2
@@ -119,12 +119,14 @@ export function terminalRoutes({ commands }: TerminalRouteOptions): Router {
     if (!isPaneId(pane)) return res.status(400).json({ error: 'bad pane id' });
     const body = typeof text === 'string' ? text : '';
     try {
-      await commands.exitCopyModeIfActive(pane);
-      await commands.sendText(pane, body);
-      if (enter) {
-        if (body) await delay(SUBMIT_GAP_MS); // a bare Enter has nothing to settle — send at once
-        await commands.sendEnter(pane);
-      }
+      await serializePaneInput(pane, async () => {
+        await commands.exitCopyModeIfActive(pane);
+        await commands.sendText(pane, body);
+        if (enter) {
+          if (body) await delay(SUBMIT_GAP_MS); // a bare Enter has nothing to settle — send at once
+          await commands.sendEnter(pane);
+        }
+      });
       return res.json({ ok: true });
     } catch (e) { return next(e); }
   });
@@ -134,8 +136,10 @@ export function terminalRoutes({ commands }: TerminalRouteOptions): Router {
     if (!isPaneId(pane)) return res.status(400).json({ error: 'bad pane id' });
     if (!validHexInput(hex)) return res.status(400).json({ error: 'bad input bytes' });
     try {
-      await commands.exitCopyModeIfActive(pane);
-      await commands.sendHexInput(pane, hex);
+      await serializePaneInput(pane, async () => {
+        await commands.exitCopyModeIfActive(pane);
+        await commands.sendHexInput(pane, hex);
+      });
       return res.json({ ok: true });
     } catch (error) {
       if (isMissingPane(error)) return res.status(404).json({ error: 'pane not found' });
@@ -192,8 +196,10 @@ export function terminalRoutes({ commands }: TerminalRouteOptions): Router {
       return res.status(400).json({ error: 'disallowed key' });
     }
     try {
-      await commands.exitCopyModeIfActive(pane);
-      for (const k of keys) await commands.sendKey(pane, k);
+      await serializePaneInput(pane, async () => {
+        await commands.exitCopyModeIfActive(pane);
+        for (const k of keys) await commands.sendKey(pane, k);
+      });
       return res.json({ ok: true });
     } catch (e) { return next(e); }
   });

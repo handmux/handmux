@@ -14,6 +14,7 @@ import type {
   ProcessPane,
   ResolveExecutableOptions,
 } from './processIdentity.js';
+import type { LivePane, ProcessContext } from '../agent-runtime/adapter.js';
 
 type IdentityOptions = Partial<Omit<ResolveExecutableOptions, 'candidate' | 'normalized' | 'matches'>>;
 interface JsonRecord { [key: string]: unknown }
@@ -126,13 +127,25 @@ async function recentRollouts(dir: string, limit = 80): Promise<RolloutFile[]> {
 
 // Resolve one known App Server thread id to its exact rollout. This never falls back by cwd: several
 // Codex panes can share a project, while the UUID suffix is the durable one-to-one session identity.
-const rolloutPathCache = new Map<string, string>();
+const ROLLOUT_PATH_CACHE_MAX = 256;
+const ROLLOUT_MISS_TTL_MS = 5_000;
+const rolloutPathCache = new Map<string, { file: string | null; retryAt: number }>();
 export async function resolveCodexRollout(dir: string, sessionId: unknown): Promise<string | null> {
   if (!isSessionUuid(sessionId)) return null;
   const key = `${dir}\0${sessionId}`;
   const cached = rolloutPathCache.get(key);
   if (cached) {
-    try { await fsp.access(cached); return cached; } catch { rolloutPathCache.delete(key); }
+    if (cached.file === null) {
+      if (Date.now() < cached.retryAt) return null;
+      rolloutPathCache.delete(key);
+    } else {
+      try {
+        await fsp.access(cached.file);
+        rolloutPathCache.delete(key);
+        rolloutPathCache.set(key, cached);
+        return cached.file;
+      } catch { rolloutPathCache.delete(key); }
+    }
   }
   const suffix = `-${sessionId}.jsonl`;
   let found: string | null = null;
@@ -153,7 +166,15 @@ export async function resolveCodexRollout(dir: string, sessionId: unknown): Prom
     if (match) found = path.join(current, match.name);
   }
   await descend(dir, 0);
-  if (found) rolloutPathCache.set(key, found);
+  rolloutPathCache.set(key, {
+    file: found,
+    retryAt: found ? Number.POSITIVE_INFINITY : Date.now() + ROLLOUT_MISS_TTL_MS,
+  });
+  while (rolloutPathCache.size > ROLLOUT_PATH_CACHE_MAX) {
+    const oldest = rolloutPathCache.keys().next().value;
+    if (oldest === undefined) break;
+    rolloutPathCache.delete(oldest);
+  }
   return found;
 }
 
@@ -179,8 +200,33 @@ export async function resolveCodexSession(
 }
 
 export const codex = {
+  adapterApiVersion: 1 as const,
   id: 'codex',
   label: 'Codex CLI',
+  presentation: { iconId: 'codex' },
+  process: {
+    commands: ['codex'],
+    ambiguousCommands: ['node'],
+    verify: async (pane: LivePane, context: ProcessContext) => {
+      const foreground = await context.inspectForeground(pane);
+      const executable = foreground?.executable;
+      if (!executable) throw new Error('Codex foreground executable is unavailable');
+      return /^codex(?:\.exe)?$/i.test(executableBasename(executable)) && /codex/i.test(executable);
+    },
+  },
+  capabilities: {
+    inbox: { apiVersion: 1 as const },
+    conversation: { apiVersion: 1 as const },
+    conversationActivation: { apiVersion: 1 as const },
+    conversationGoal: { apiVersion: 1 as const },
+    conversationPlan: { apiVersion: 1 as const },
+    conversationContext: { apiVersion: 1 as const },
+    conversationPermission: { apiVersion: 1 as const },
+    conversationCommands: { apiVersion: 1 as const },
+    interaction: { apiVersion: 1 as const },
+    sessionControl: { apiVersion: 1 as const },
+    subscriptionUsage: { apiVersion: 1 as const },
+  },
   procName: 'codex',
   // Ambiguous `node` launchers are normalized by resolveCodexComms only after real-executable proof.
   procNames: ['codex'],

@@ -12,6 +12,7 @@ import { writeJsonAtomic, deployHookScripts, removeHookScripts } from './hookSca
 
 export interface ClaudeVersion { major: number; minor: number; patch: number }
 export type ClaudeHookStatus = 'no-claude' | 'installed' | 'absent';
+export type ClaudeHookHealth = ClaudeHookStatus | 'stale';
 interface HookEvent {
   event: string;
   src: string;
@@ -142,10 +143,21 @@ function alreadyHas(hooks: Hooks, event: string): boolean {
   ));
 }
 
-// Merge one event's hook group into `hooks` (mutates), idempotently — a no-op if one of ours is already
-// registered for that event, so it's safe to call on every install/sync. Shared by mergeHooks and syncHooks.
+function ownedHookCount(hooks: Hooks, event: string): number {
+  const groups = hooks[event];
+  if (!Array.isArray(groups)) return 0;
+  return groups.reduce((count, group) => (
+    count + (isRecord(group) && Array.isArray(group.hooks)
+      ? group.hooks.filter(isOurHook).length : 0)
+  ), 0);
+}
+
+// Merge one event's hook group into `hooks` (mutates), idempotently. First remove Handmux-owned entries for
+// this event, then append the canonical destination. This repairs wrappers left by moved package installs
+// without touching any user/third-party hook that does not carry our marker.
 function addHook(hooks: Hooks, e: HookEvent, dest: string): void {
-  if (alreadyHas(hooks, e.event)) return;
+  if (ownedHookCount(hooks, e.event) === 1 && hasExpectedHook(hooks, e, dest)) return;
+  dropOurHook(hooks, e.event);
   const existing = hooks[e.event];
   const groups: unknown[] = hooks[e.event] = Array.isArray(existing) ? [...existing] : [];
   groups.push({ matcher: e.matcher || '', hooks: [{ type: 'command', command: `${dest} ${e.src}`, async: true, timeout: 5 }] });
@@ -195,6 +207,44 @@ export function hooksStatus(home: string = homedir()): ClaudeHookStatus {
   const settings = readSettings(home);
   const hooks: Hooks = isRecord(settings.hooks) ? settings.hooks : {};
   return Object.keys(hooks).some((ev) => alreadyHas(hooks, ev)) ? 'installed' : 'absent';
+}
+
+function hasExpectedHook(hooks: Hooks, event: HookEvent, dest: string): boolean {
+  const groups = hooks[event.event];
+  const command = `${dest} ${event.src}`;
+  return Array.isArray(groups) && groups.some((group) => (
+    isRecord(group)
+    && group.matcher === (event.matcher || '')
+    && Array.isArray(group.hooks)
+    && group.hooks.some((hook) => (
+      isRecord(hook)
+      && hook.type === 'command'
+      && hook.command === command
+      && hook.async === true
+      && hook.timeout === 5
+    ))
+  ));
+}
+
+function regularFile(file: string): boolean {
+  try { return fs.statSync(file).isFile(); } catch { return false; }
+}
+
+// Stronger diagnostic used by `handmux agent`: any partial/old registration is repairable, not ready.
+// Version-gated extension events stay optional; every base event and every deployed runtime file is required.
+export function hooksHealthStatus(home: string = homedir()): ClaudeHookHealth {
+  const status = hooksStatus(home);
+  if (status !== 'installed') return status;
+  const hooksDir = path.join(claudeDir(home), 'hooks');
+  const dest = path.join(hooksDir, 'handmux-notify.sh');
+  const settings = readSettings(home);
+  const hooks: Hooks = isRecord(settings.hooks) ? settings.hooks : {};
+  if (!HOOK_EVENTS.every((event) => (
+    ownedHookCount(hooks, event.event) === 1 && hasExpectedHook(hooks, event, dest)
+  ))) return 'stale';
+  if (![dest, path.join(hooksDir, 'handmux-write.cjs'), path.join(hooksDir, 'handmux-notify.env')]
+    .every(regularFile)) return 'stale';
+  return 'installed';
 }
 
 // Install (opt-in): copy the bundled hook scripts to ~/.claude/hooks/, write the env pointing at the state

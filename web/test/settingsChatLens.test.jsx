@@ -5,7 +5,6 @@ import { createRoot } from 'react-dom/client';
 vi.mock('../src/push.js', () => ({
   notifyEnabled: () => false, enableNotifications: vi.fn(), disableNotifications: vi.fn(), pushSupported: () => false,
 }));
-vi.mock('../src/api.js', () => ({ fetchPaneCwd: vi.fn(async () => ({ cwd: '/home/u/proj' })) }));
 
 import Settings from '../src/components/Settings.jsx';
 
@@ -14,82 +13,142 @@ const termRef = { current: { getFontSize: () => ({ size: 14, auto: false }) } };
 beforeEach(() => { container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container); });
 afterEach(async () => { await act(() => root.unmount()); container.remove(); vi.clearAllMocks(); });
 const render = (props) => act(() => root.render(
-  <Settings open onClose={() => {}} termRef={termRef}
-    onColAdjust={() => {}} onColRestore={() => {}} onOpenChangelog={() => {}} changelogUnread={false}
-    {...props} />));
-const click = (n) => act(() => n.dispatchEvent(new MouseEvent('click', { bubbles: true })));
+  <Settings open onClose={() => {}} termRef={termRef} onOpenChangelog={() => {}}
+    changelogUnread={false} {...props} />));
+const click = (node) => act(() => node.dispatchEvent(new MouseEvent('click', { bubbles: true })));
+const lensBox = (name) => [...container.querySelectorAll('.settings-page-switch')]
+  .find((label) => label.textContent.includes(name))?.querySelector('input[type="checkbox"]');
+const conversationRow = (name) => [...container.querySelectorAll('.settings-page-switch')]
+  .find((label) => label.textContent.includes(name));
+const integrationController = (items, overrides = {}) => ({
+  status: 'ready', items, busy: null, error: null,
+  refresh: vi.fn(async () => {}), enable: vi.fn(async () => {}),
+  ...overrides,
+});
 
-describe('Settings agent chat-view switches', () => {
-  it('shows separate Claude experimental and Codex stable switches; tone appears when either is enabled', async () => {
-    await render({ claudeChatLensEnabled: false, codexChatLensEnabled: false });
-    expect(container.textContent).toContain('Claude Code 对话视图（实验性）');
-    expect(container.textContent).toContain('Codex CLI 对话视图');
-    expect(container.textContent).not.toContain('Codex CLI 对话视图（实验性）');
-    expect([...container.querySelectorAll('.settings-page-row-label')]
-      .some((label) => label.textContent === '对话配色')).toBe(false);
-
-    await render({ claudeChatLensEnabled: false, codexChatLensEnabled: true });
-    const toneRow = [...container.querySelectorAll('.settings-page-row')]
-      .find((row) => row.querySelector('.settings-page-row-label')?.textContent === '对话配色');
-    expect(toneRow).toBeTruthy();
-    click(toneRow);
-    expect([...container.querySelectorAll('.settings-choice-row')].some((b) => b.textContent === '暖夜')).toBe(true);
+describe('Settings catalog-driven Conversation views', () => {
+  it('keeps Codex, Claude Code, Pi, and chat colour in one Conversation group', async () => {
+    await render({ conversationAgents: [
+      { id: 'codex', label: 'Codex', enabled: true, experimental: false },
+      { id: 'claude', label: 'Claude Code', enabled: true, experimental: true },
+      { id: 'pi', label: 'Pi', enabled: false, experimental: true },
+    ] });
+    const chatHeading = [...container.querySelectorAll('.settings-page-group > h2')]
+      .filter((heading) => heading.textContent === '对话');
+    expect(chatHeading).toHaveLength(1);
+    const chatGroup = chatHeading[0].closest('.settings-page-group');
+    expect(chatGroup.textContent).toContain('Codex 对话视图');
+    expect(chatGroup.textContent).toContain('Claude Code 对话视图');
+    expect(chatGroup.textContent).toContain('Pi 对话视图');
+    expect(chatGroup.textContent).toContain('对话配色');
+    const rowLabels = [...chatGroup.querySelectorAll('.settings-page-row-label')];
+    expect(rowLabels).toHaveLength(4);
+    expect(rowLabels.at(-1)?.textContent).toBe('对话配色');
+    expect(conversationRow('Codex').querySelector('.settings-conversation-experimental')).toBeNull();
+    expect(conversationRow('Claude Code').querySelector('.settings-conversation-experimental')?.textContent)
+      .toBe('实验性');
+    expect(conversationRow('Pi').querySelector('.settings-conversation-experimental')?.textContent)
+      .toBe('实验性');
   });
 
-  it('reports each iOS switch independently', async () => {
-    const onClaudeChatLensEnabled = vi.fn();
-    const onCodexChatLensEnabled = vi.fn();
+  it('drives the inline marker and switch callback only from catalog metadata', async () => {
+    const onConversationAgentEnabled = vi.fn();
     await render({
-      claudeChatLensEnabled: false, codexChatLensEnabled: true,
-      onClaudeChatLensEnabled, onCodexChatLensEnabled,
+      conversationAgents: [
+        { id: 'claude', label: 'Stable Alias', enabled: true, experimental: false },
+        { id: 'future', label: 'Future Agent', enabled: false, experimental: true },
+      ],
+      onConversationAgentEnabled,
     });
-    expect(lensBox('Claude Code').checked).toBe(false);
-    expect(lensBox('Codex CLI').checked).toBe(true);
-    click(lensBox('Claude Code'));
-    expect(onClaudeChatLensEnabled).toHaveBeenCalledWith(true);
-    expect(onCodexChatLensEnabled).not.toHaveBeenCalled();
-    click(lensBox('Codex CLI'));
-    expect(onCodexChatLensEnabled).toHaveBeenCalledWith(false);
+    expect(conversationRow('Stable Alias').querySelector('.settings-conversation-experimental')).toBeNull();
+    expect(conversationRow('Future Agent').querySelector('.settings-conversation-experimental')).not.toBeNull();
+    click(lensBox('Future Agent'));
+    expect(onConversationAgentEnabled).toHaveBeenCalledWith('future', true);
   });
 
-  const lensBox = (name) => [...container.querySelectorAll('.settings-page-switch')]
-    .find((label) => label.textContent.includes(name))?.querySelector('input[type="checkbox"]');
+  it('keeps an unbroken long catalog label in the shrinkable name slot', async () => {
+    const longLabel = 'FutureAgent'.repeat(16);
+    await render({ conversationAgents: [
+      { id: 'future', label: longLabel, enabled: true, experimental: true },
+    ] });
+    const row = conversationRow(longLabel);
+    expect(row.querySelector('.settings-conversation-agent-name')?.textContent)
+      .toBe(`${longLabel} 对话视图`);
+    expect(row.querySelector('.settings-conversation-experimental')).not.toBeNull();
+    expect(row.querySelector('input[type="checkbox"]')).not.toBeNull();
+  });
 
-  it('hooks absent locks only Claude and offers hook installation', async () => {
-    const onEnableHooks = vi.fn(async () => ({ status: 'installed' }));
-    await render({
-      claudeChatLensEnabled: false, codexChatLensEnabled: false, hooksStatus: 'absent', onEnableHooks,
-    });
-    expect(lensBox('Claude Code').disabled).toBe(true);
-    expect(lensBox('Codex CLI').disabled).toBe(false);
-    expect(container.textContent).toContain('需先安装 Agent hooks');
-    expect(container.textContent).toContain('普通 Codex 仍可使用终端，但不会同步状态和通知');
-    const btn = [...container.querySelectorAll('button')].find((b) => b.textContent === '一键安装 hooks');
-    expect(btn).toBeTruthy();
-    click(btn);
+  it('shows only Claude Code and Pi and enables a disabled integration', async () => {
+    const agentIntegrations = integrationController([
+      { name: 'claude', status: 'ready' },
+      { name: 'pi', status: 'not-enabled' },
+    ]);
+    await render({ agentIntegrations, conversationAgents: [] });
+    expect(container.textContent).toContain('Agent 集成');
+    expect(container.textContent).toContain('Claude Code');
+    expect(container.textContent).toContain('Pi');
+    expect(container.textContent).toContain('已接入');
+    expect(container.textContent).toContain('未启用');
+    expect(container.textContent).not.toContain('Codex');
+    expect(container.textContent.toLowerCase()).not.toContain('hooks');
+    expect(container.textContent.toLowerCase()).not.toContain('extension');
+    expect(container.textContent).not.toContain('实验性 Agent 视图');
+    const button = [...container.querySelectorAll('button')]
+      .find((candidate) => candidate.textContent === '启用');
+    expect(button).toBeTruthy();
+    click(button);
     await act(async () => { await Promise.resolve(); });
-    expect(onEnableHooks).toHaveBeenCalled();
+    expect(agentIntegrations.enable).toHaveBeenCalledWith('pi');
   });
 
-  it('hooks absent but Claude is already enabled still allows turning Claude off', async () => {
-    await render({ claudeChatLensEnabled: true, hooksStatus: 'absent' });
-    expect(lensBox('Claude Code').disabled).toBe(false);
-    expect(lensBox('Claude Code').checked).toBe(true);
+  it('repairs owned setup and gives a safe computer-side command for conflicts', async () => {
+    const agentIntegrations = integrationController([
+      { name: 'claude', status: 'needs-repair' },
+      { name: 'pi', status: 'conflict' },
+    ]);
+    await render({ agentIntegrations, conversationAgents: [] });
+    expect(container.textContent).toContain('需要修复');
+    expect(container.textContent).toContain('需要处理');
+    expect(container.textContent).toContain('handmux agent status pi');
+    const repair = [...container.querySelectorAll('button')]
+      .find((candidate) => candidate.textContent === '修复');
+    expect(repair).toBeTruthy();
+    click(repair);
+    await act(async () => { await Promise.resolve(); });
+    expect(agentIntegrations.enable).toHaveBeenCalledWith('claude');
   });
 
-  it('no Claude Code locks only Claude and does not imply Codex is missing', async () => {
-    await render({ claudeChatLensEnabled: false, codexChatLensEnabled: false, hooksStatus: 'no-claude' });
-    expect(lensBox('Claude Code').disabled).toBe(true);
-    expect(lensBox('Codex CLI').disabled).toBe(false);
-    expect(container.textContent).toContain('未检测到 Claude Code');
-    expect(container.textContent).not.toContain('未检测到 Claude Code 或 Codex CLI');
-    expect([...container.querySelectorAll('button')].some((b) => b.textContent === '一键安装 hooks')).toBe(false);
+  it('reports a missing Agent without offering an enable action', async () => {
+    const agentIntegrations = integrationController([
+      { name: 'claude', status: 'not-installed' },
+      { name: 'pi', status: 'ready' },
+    ]);
+    await render({ agentIntegrations, conversationAgents: [] });
+    expect(container.textContent).toContain('这台电脑尚未安装 Claude Code。');
+    expect([...container.querySelectorAll('button')]
+      .some((candidate) => candidate.textContent === '启用' || candidate.textContent === '修复')).toBe(false);
   });
 
-  it('hooks installed or still unknown keeps the Claude switch usable', async () => {
-    await render({ claudeChatLensEnabled: false, hooksStatus: 'installed' });
-    expect(lensBox('Claude Code').disabled).toBe(false);
-    await render({ claudeChatLensEnabled: false, hooksStatus: null });
-    expect(lensBox('Claude Code').disabled).toBe(false);
+  it('asks for Claude Code first-run initialization instead of offering a no-op action', async () => {
+    const agentIntegrations = integrationController([
+      { name: 'claude', status: 'not-enabled', reason: 'initialize-first' },
+      { name: 'pi', status: 'ready' },
+    ]);
+    await render({ agentIntegrations, conversationAgents: [] });
+    expect(container.textContent).toContain('请先在电脑上运行一次 Claude Code，再回来启用。');
+    expect([...container.querySelectorAll('button')]
+      .some((candidate) => candidate.textContent === '启用')).toBe(false);
+  });
+
+  it('disables every integration action while one Agent is being updated', async () => {
+    const agentIntegrations = integrationController([
+      { name: 'claude', status: 'not-enabled' },
+      { name: 'pi', status: 'needs-repair' },
+    ], { busy: 'claude' });
+    await render({ agentIntegrations, conversationAgents: [] });
+    const actions = [...container.querySelectorAll('.settings-agent-integration-action')];
+    expect(actions).toHaveLength(2);
+    expect(actions.every((button) => button.disabled)).toBe(true);
+    expect(actions.map((button) => button.textContent)).toEqual(['处理中…', '修复']);
   });
 });

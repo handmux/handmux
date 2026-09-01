@@ -99,6 +99,12 @@ const record = (value: unknown): Record<string, unknown> | null => (
     : null
 );
 
+// Orphan candidates created before multi-Agent scanning had no `agent` field and were necessarily Claude.
+// Preserve only that absent-field format default; an explicit unknown id must still fail closed.
+function orphanAgent(id: unknown): AgentDriver | null {
+  return id === undefined ? getAgent('claude') : getAgent(id);
+}
+
 // Back-compat re-exports: these were originally defined here and are imported by tests and callers by this
 // path. They're all agent-agnostic (or Claude's, kept as the default) and now live in scanUtils / claude.
 export {
@@ -111,7 +117,8 @@ export { projectsDir as defaultProjectsDir } from './agents/claude.js';
 // Parse `ps …` to LIVE Claude CLI procs only — the original Claude-specific helper, kept for the tests.
 // The general engine uses parseAgentProcs(psOut, AGENTS) directly.
 export function parseClaudeProcs(psOut: unknown): AgentProcess[] {
-  return parseAgentProcs(psOut, [getAgent('claude')]);
+  const agent = getAgent('claude');
+  return agent ? parseAgentProcs(psOut, [agent]) : [];
 }
 
 // Take over an orphan: spawn the agent's `resume <sessionId>` in a fresh tmux session (target.mode 'new')
@@ -138,7 +145,8 @@ export async function takeoverOrphan(
   if (!o) return { error: 'gone', status: 409 };            // no longer a live orphan
   if (o.sessionId !== sessionId) return { error: 'session changed', status: 409 };
   if (!o.cwd) return { error: 'no cwd', status: 409 };
-  const agent = getAgent(o.agent);
+  const agent = orphanAgent(o.agent);
+  if (!agent) return { error: 'unknown agent', status: 409 };
   const cmd = agent.sessions.managedResumeCmd
     ? agent.sessions.managedResumeCmd(sessionId)
     : agent.sessions.resumeArgs(sessionId).join(' ');
@@ -206,7 +214,8 @@ export async function scanOrphans({
   const orphans = findOrphans(parseAgentProcs(psOut, agents), parsePaneMembership(tmuxOut));
   const results: OrphanScanResult[] = [];
   for (const o of orphans) {
-    const agent = getAgent(o.agent);
+    const agent = orphanAgent(o.agent);
+    if (!agent) continue;
     const cwd = await lsofCwd(run, o.pid);
     const override = dirOverrides[agent.sessions.dirOptKey];
     const dir = typeof override === 'string' && override ? override : agent.sessions.dir(home);

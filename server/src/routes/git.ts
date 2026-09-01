@@ -12,6 +12,13 @@ export function gitRoutes({ git }: GitRouteOptions): Router {
   const r = express.Router();
   const q = (value: unknown): string => (typeof value === 'string' ? value : '');
 
+  r.get('/git/worktree', async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const out = await git.worktree(q(req.query.dir));
+      if ('error' in out) return res.status(out.status).json({ error: out.error });
+      return res.json({ worktree: out.worktree });
+    } catch (e) { return next(e); }
+  });
   r.get('/git/repos', async (req: Request, res: Response, next: NextFunction) => {
     try {
       const out = await git.detectRepos(q(req.query.dir));

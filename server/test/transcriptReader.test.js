@@ -72,4 +72,70 @@ describe('transcriptReader', () => {
       expect((await reader.read(file, createSelectedParser)).map((m) => m.text)).toEqual(['custom']);
     } finally { await fs.rm(dir, { recursive: true, force: true }); }
   });
+
+  it('reads an immutable byte prefix even when the rollout grows before parsing finishes', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'handmux-transcript-'));
+    const file = path.join(dir, 'rollout.jsonl');
+    const reader = createTranscriptReader({ yieldEvery: 1 });
+    const createSelectedParser = () => ({
+      messages: [],
+      push(lines) {
+        this.messages.push(...lines.map((text) => ({ text: JSON.parse(text).selected })));
+        return this.messages;
+      },
+    });
+    try {
+      const initial = line({ selected: 'baseline' });
+      await fs.writeFile(file, initial);
+      const prefix = reader.readPrefix(file, Buffer.byteLength(initial), createSelectedParser);
+      await fs.appendFile(file, line({ selected: 'live-suffix' }));
+
+      expect((await prefix).map((message) => message.text)).toEqual(['baseline']);
+      expect((await reader.read(file, createSelectedParser)).map((message) => message.text))
+        .toEqual(['baseline', 'live-suffix']);
+    } finally { await fs.rm(dir, { recursive: true, force: true }); }
+  });
+
+  it('reuses the append parser for a later immutable opening prefix', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'handmux-transcript-'));
+    const file = path.join(dir, 'rollout.jsonl');
+    const reader = createTranscriptReader();
+    let pushed = 0;
+    const createTrackedParser = () => {
+      const messages = [];
+      let changedFrom = null;
+      return {
+        messages,
+        push(lines) {
+          const start = messages.length;
+          messages.push(...lines.map((text) => ({ text: JSON.parse(text).selected })));
+          pushed += lines.length;
+          if (messages.length > start) changedFrom = changedFrom === null ? start : Math.min(changedFrom, start);
+          return messages;
+        },
+        takeChangedFrom() {
+          const value = changedFrom;
+          changedFrom = null;
+          return value;
+        },
+      };
+    };
+    try {
+      await fs.writeFile(file, line({ selected: 'baseline' }));
+      const first = await reader.readSnapshot(file, createTrackedParser);
+      expect(first.changedFrom).toBe(0);
+      const firstSize = (await fs.stat(file)).size;
+      const unchanged = await reader.readPrefixSnapshot(file, firstSize, createTrackedParser);
+      expect(unchanged.messages.map((message) => message.text)).toEqual(['baseline']);
+      expect(unchanged.changedFrom).toBeNull();
+      expect(pushed).toBe(1);
+
+      await fs.appendFile(file, line({ selected: 'suffix' }));
+      const secondSize = (await fs.stat(file)).size;
+      const appended = await reader.readPrefixSnapshot(file, secondSize, createTrackedParser);
+      expect(appended.messages.map((message) => message.text)).toEqual(['baseline', 'suffix']);
+      expect(appended.changedFrom).toBe(1);
+      expect(pushed).toBe(2);
+    } finally { await fs.rm(dir, { recursive: true, force: true }); }
+  });
 });

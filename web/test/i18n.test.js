@@ -53,6 +53,17 @@ describe('AVAILABLE', () => {
   });
 });
 
+describe('API account security copy', () => {
+  it.each([['en', en], ['zh', zh]])('%s states encrypted storage and safe recovery ordering', (_code, dict) => {
+    expect(dict['apiBalance.storageNote']).toMatch(/encrypted|加密/);
+    expect(dict['apiBalance.storageNote']).toMatch(/browser|浏览器/);
+    expect(dict['apiBalance.error.storage_unavailable']).toContain('api-accounts.key');
+    expect(dict['apiBalance.error.storage_unavailable']).toContain('.corrupt.*');
+    expect(dict['apiBalance.error.storage_unavailable']).toContain('.unavailable');
+    expect(dict['apiBalance.error.storage_unavailable']).toMatch(/do not clear|请勿直接清空/);
+  });
+});
+
 describe('browser dual-mode copy', () => {
   it.each([
     ['en', en, 'Recently Visited'],

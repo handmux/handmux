@@ -5,6 +5,7 @@ import { isPaneId, isWindowId, isSessionId, isValidSessionName, isValidStartupCm
 import type { NextFunction, Request, Response, Router } from 'express';
 import type { TmuxPane, TmuxSession, TmuxWindow } from '../tmux/commands.js';
 import type { RealPathResult } from '../docs.js';
+import type { LivePane } from '../agent-runtime/adapter.js';
 
 interface SessionCommands {
   listSessions(): Promise<TmuxSession[]>;
@@ -26,21 +27,24 @@ interface WorkspaceNotifier {
   requestReconcile?(): unknown;
   confirmEmpty?(): unknown;
 }
-interface ClaudeEvents {
-  identifyPaneAgents?(panes: readonly TmuxPane[]): Promise<unknown> | unknown;
+interface AgentIdentity {
+  identifyPanes?(panes: readonly LivePane[]): Promise<unknown> | unknown;
 }
 interface SessionRouteOptions {
   commands: SessionCommands;
   docs: SessionDocs;
   workspace?: WorkspaceNotifier | null;
-  claudeEvents?: ClaudeEvents | null;
+  agentIdentity?: AgentIdentity | null;
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
 const requestBody = (req: Request): Record<string, unknown> => isRecord(req.body) ? req.body : {};
+const missingTmuxTarget = (error: unknown, kind: 'session' | 'window'): boolean => (
+  error instanceof Error && error.message.includes(`can't find ${kind}:`)
+);
 
-export function sessionRoutes({ commands, docs, workspace, claudeEvents }: SessionRouteOptions): Router {
+export function sessionRoutes({ commands, docs, workspace, agentIdentity }: SessionRouteOptions): Router {
   const r = express.Router();
 
   function notify(method: keyof WorkspaceNotifier): void {
@@ -76,7 +80,10 @@ export function sessionRoutes({ commands, docs, workspace, claudeEvents }: Sessi
 
   r.get('/windows', async (req: Request, res: Response, next: NextFunction) => {
     if (!isSessionId(req.query.session)) return res.status(400).json({ error: 'bad session id' });
-    try { return res.json(await commands.listWindows(req.query.session)); } catch (e) { return next(e); }
+    try { return res.json(await commands.listWindows(req.query.session)); } catch (e) {
+      if (missingTmuxTarget(e, 'session')) return res.status(404).json({ error: 'session not found' });
+      return next(e);
+    }
   });
 
   r.post('/windows', async (req: Request, res: Response, next: NextFunction) => {
@@ -164,15 +171,29 @@ export function sessionRoutes({ commands, docs, workspace, claudeEvents }: Sessi
     if (!isWindowId(req.query.window)) return res.status(400).json({ error: 'bad window id' });
     try {
       const panes = await commands.listPanes(req.query.window);
-      let agents: Record<string, string> = {};
+      let agents: Record<string, string | null> = {};
       try {
-        const value = await claudeEvents?.identifyPaneAgents?.(panes);
+        const value = await agentIdentity?.identifyPanes?.(panes.map((pane) => ({
+          paneId: pane.id,
+          sessionName: '',
+          windowId: req.query.window as string,
+          windowName: '',
+          currentCommand: pane.command,
+          ...(pane.tty ? { tty: pane.tty } : {}),
+        })));
         if (isRecord(value)) {
-          agents = Object.fromEntries(Object.entries(value).filter((entry): entry is [string, string] => typeof entry[1] === 'string'));
+          agents = Object.fromEntries(Object.entries(value).filter(
+            (entry): entry is [string, string | null] => typeof entry[1] === 'string' || entry[1] === null,
+          ));
         }
       } catch { /* identity is additive */ }
-      return res.json(panes.map(({ tty: _tty, ...pane }) => ({ ...pane, agent: agents[pane.id] || null })));
-    } catch (e) { return next(e); }
+      return res.json(panes.map(({ tty: _tty, ...pane }) => (
+        Object.hasOwn(agents, pane.id) ? { ...pane, agent: agents[pane.id] } : pane
+      )));
+    } catch (e) {
+      if (missingTmuxTarget(e, 'window')) return res.status(404).json({ error: 'window not found' });
+      return next(e);
+    }
   });
 
   // A pane's current working directory — the file browser uses it to land on (and "jump to") the

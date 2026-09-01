@@ -64,6 +64,9 @@ export interface TranscriptMessage {
   name?: string;
   args?: string;
   result?: string;
+  summary?: string;
+  summaryTruncated?: boolean;
+  summaryOriginalBytes?: number;
   tool?: TranscriptTool;
 }
 interface ToolMessage extends TranscriptMessage { type: 'tool'; tool: TranscriptTool }
@@ -110,6 +113,24 @@ function resultText(content: unknown): string {
   return '';
 }
 
+const MAX_COMPACTION_SUMMARY_BYTES = 240 * 1024;
+
+function compactionSummary(content: unknown): {
+  text: string;
+  truncated: boolean;
+  originalBytes: number;
+} | null {
+  const value = resultText(content);
+  if (!value) return null;
+  const originalBytes = Buffer.byteLength(value);
+  if (originalBytes <= MAX_COMPACTION_SUMMARY_BYTES) {
+    return { text: value, truncated: false, originalBytes };
+  }
+  let text = Buffer.from(value).subarray(0, MAX_COMPACTION_SUMMARY_BYTES).toString('utf8');
+  while (Buffer.byteLength(text) > MAX_COMPACTION_SUMMARY_BYTES) text = text.slice(0, -1);
+  return { text, truncated: true, originalBytes };
+}
+
 // Leading text of a message's content (string as-is, or the first text item of an array) — used only to
 // probe for a scaffolding tag at the very start. tool_result-only user turns yield '' and are never matched.
 function leadingText(content: unknown): string {
@@ -144,7 +165,14 @@ export function createTranscriptParser(): TranscriptParser {
     // context instead of the conversation silently jumping. (A no-op /compact writes no such entry → no
     // divider, correctly.) Rendered centered like the interrupt marker.
     if (o.isCompactSummary === true) {
-      msgs.push({ i, type: 'compact', ts: typeof o.timestamp === 'string' ? o.timestamp : undefined });
+      const summary = compactionSummary(m.content);
+      msgs.push({
+        i, type: 'compact', ts: typeof o.timestamp === 'string' ? o.timestamp : undefined,
+        ...(summary ? { summary: summary.text } : {}),
+        ...(summary?.truncated ? {
+          summaryTruncated: true, summaryOriginalBytes: summary.originalBytes,
+        } : {}),
+      });
       i++; continue;
     }
     // The jsonl line's wall-clock (ISO string) — carried onto each message so the 对话 lens can show a

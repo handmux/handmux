@@ -27,7 +27,7 @@ execFileSync(
 // Keep the public launcher path stable while the implementation itself migrates from JS to TS.
 renameSync(path.join(out, 'bin', 'handmux-main.js'), path.join(out, 'bin', 'handmux.js'));
 
-// Runtime code keeps the same relative layout inside dist: bin/, src/, hooks/, public/ and package.json.
+// Runtime code keeps the same relative layout inside dist: bin/, src/, connectors/, hooks/, public/ and package.json.
 // This lets migration happen file-by-file without making asset lookup depend on whether a module is JS or TS.
 cpSync(path.join(server, 'hooks'), path.join(out, 'hooks'), { recursive: true });
 

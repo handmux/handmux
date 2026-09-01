@@ -18,6 +18,7 @@ interface InboxProps {
   onClose: () => void;
   onSelectRow: (row: InboxRow) => void;
   onMarkAllRead: () => void;
+  reconnecting?: boolean;
   hooksStatus: ClaudeHooksStatus | null;
   onEnableHooks?: (() => Promise<unknown>) | null;
 }
@@ -29,7 +30,8 @@ interface InboxProps {
 // only the present done rows (working/needs are never history-filtered), so it's shown ONLY when there
 // is at least one done row to clear.
 export default function Inbox({
-  rows, top, open, onToggle, onClose, onSelectRow, onMarkAllRead, hooksStatus, onEnableHooks,
+  rows, top, open, onToggle, onClose, onSelectRow, onMarkAllRead, reconnecting = false,
+  hooksStatus, onEnableHooks,
 }: InboxProps) {
   const groups: InboxGroup[] = [];
   for (const r of rows) {
@@ -38,7 +40,7 @@ export default function Inbox({
     else groups.push({ session: r.session, items: [r] });
   }
   const now = Date.now();
-  const hasDone = rows.some((r) => r.view === 'done');
+  const hasTerminal = rows.some((r) => r.view === 'done' || r.view === 'error');
   const counts = viewCounts(rows);
 
   const [enabling, setEnabling] = useState(false);
@@ -73,11 +75,18 @@ export default function Inbox({
                 <span className="inbox-chip working">{t('inbox.working')} {counts.working}</span>
                 <span className="inbox-chip done">{t('inbox.done')} {counts.done}</span>
                 <span className="inbox-chip needs">{t('inbox.needs')} {counts.needs}</span>
+                {counts.error > 0 && <span className="inbox-chip error">{t('inbox.error')} {counts.error}</span>}
               </div>
-              {hasDone && <button className="inbox-readall" onClick={onMarkAllRead}>{t('inbox.clearDone')}</button>}
+              {hasTerminal && <button className="inbox-readall" onClick={onMarkAllRead}>{t('inbox.clearDone')}</button>}
             </div>
             {groups.length === 0 ? (
-              showEnable ? (
+              reconnecting ? (
+                <div className="inbox-empty">
+                  <div className="agent-conversation-reconnecting inbox-reconnecting" role="status">
+                    {t('inbox.reconnecting')}
+                  </div>
+                </div>
+              ) : showEnable ? (
                 <div className="inbox-empty inbox-enable">
                   <div className="inbox-enable-title">{t('inbox.enableTitle')}</div>
                   <div className="inbox-enable-hint">{t('inbox.enableHint')}</div>
@@ -105,6 +114,11 @@ export default function Inbox({
                 ))}
               </div>
             ))}
+            {groups.length > 0 && reconnecting && (
+              <div className="agent-conversation-reconnecting inbox-reconnecting" role="status">
+                {t('inbox.reconnecting')}
+              </div>
+            )}
           </div>
         </>
       )}

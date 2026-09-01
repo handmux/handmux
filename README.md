@@ -27,7 +27,7 @@ handmux is more than a terminal on your phone. It puts the *same* live **tmux** 
 
 ## Quick start · about a minute
 
-Your computer needs tmux and Node ≥ 20; the phone just needs a browser. Pick one:
+Your computer needs tmux and Node ≥ 22.16; the phone just needs a browser. Pick one:
 
 **Homebrew — macOS (recommended)** · installs Node + tmux for you:
 
@@ -62,13 +62,13 @@ handmux start --tunnel cloudflare   # instant public URL (cloudflared auto-insta
 - **🧰 More than a terminal — a whole mobile vibe-coding cockpit in your pocket.** Full-screen colored git diffs, one-tap preview of a running site, docs read aloud line by line, files moved both ways — a whole dev kit in hand, no hopping between apps.
 - **🚀 One minute from zero to coding on your phone.** One `handmux start`, one scan, done — no sign-up, no App Store, no app to sideload; just a link. "Add to Home Screen" and it's a full-screen **PWA**, as smooth as a native app.
 - **🧶 Walk away, keep working.** Your phone drives the *one* live tmux pane on your desk (not a new shell, not a screenshot). Close the laptop and keep watching from your thumb — exact same state.
-- **🔔 When it needs you, your phone rings.** Claude Code / Codex push the moment they need a decision; add it to your home screen and they come through as system notifications. An inbox tags each pane working / needs-you / done — many projects at a glance — and you approve permissions and plans with a tap, so you stop babysitting the screen.
+- **🔔 When it needs you, your phone rings.** Claude Code / Codex push the moment they need a decision; add it to your home screen and they come through as system notifications. An inbox tags each pane working / needs-you / done / error — many projects at a glance — while the host keeps terminal-result reads consistent across refreshes and devices. Open a completed item to start at the final completed AI answer in the authoritative latest tail. Claude Hook outcomes queue locally while the Server is offline and replay in session order after it returns. Approve permissions and plans with a tap, so you stop babysitting the screen.
 - **🔒 Your code goes through no middleman.** Free and fully open-source; we run no server in the middle — your data travels straight between your computer and your phone, so it stays secure.
 
 ## Features
 
-- **Claude Code / Codex, deeply** — an inbox status ledger, thumb-approve permissions & plans, and stable host-wide usage bars shared by every connected device.
-- **Chat view** — drive Codex CLI through App Server with streaming Markdown bubbles, tool cards, native Goal lifecycle cards, and session status; setting or restarting a Goal creates a fresh active native Goal, immediately shows its user-side card on the right, and starts Codex's built-in continuation. An active or paused Goal stays beneath the live read-only turn task list, Codex terminal feedback stays with its originating turn on the left, and every entry opens the same Bottom Sheet. The current Goal uses one equal-width iOS-style action row; clearing it removes the resident Goal and closes the sheet, while its historical chat card remains. The current terminal Goal can be edited before restarting. Long replies hold at their beginning for reading, with an explicit jump back to the latest output. Existing panes can switch in place, and messages sent during a turn form an editable server queue. The queue and delivery receipts survive Handmux restarts, and uncertain sends are reconciled before retrying. Claude Code chat is an independently enabled experimental option.
+- **Claude Code / Codex, deeply** — an inbox status ledger, thumb-approve permissions & plans, and stable host-wide subscription usage shared by every connected device; each visible provider can refresh its latest limits from the card action menu, while keeping the previous values visible if that provider cannot be reached. Codex also shows the current account and plan, separate account/model limits, remaining rate-limit resets, and each provided expiry. The same Usage screen can save multiple DeepSeek and Moonshot (Kimi) API accounts encrypted at rest within the Handmux computer's local trust boundary; full API Keys never return to browsers.
+- **Chat view** — drive Codex CLI through App Server with streaming Markdown bubbles, tool cards, native Goal lifecycle cards, and session status; the context-ring details show the absolute Git worktree root path and branch that contain the thread `cwd`. Setting or restarting a Goal creates a fresh active native Goal, immediately shows its user-side card on the right, and starts Codex's built-in continuation. An active or paused Goal stays beneath the live read-only turn task list, Codex terminal feedback stays with its originating turn on the left, and every entry opens the same Bottom Sheet. The current Goal uses one equal-width iOS-style action row; clearing it removes the resident Goal and closes the sheet, while its historical chat card remains. The current terminal Goal can be edited before restarting. Long replies hold at their beginning for reading, with an explicit jump back to the latest output. Existing panes can switch in place. Every sendable Agent uses the same persistent server queue: queued messages can be viewed, edited or deleted and are delivered automatically; Guide now appears only when that Agent supports steering. Failed or unconfirmed sends stay visible under the same request id so the server can reconcile them without duplicate execution. On desktop, <kbd>Shift</kbd>+<kbd>Enter</kbd> focuses the composer or inserts a newline when already focused, <kbd>Enter</kbd> sends, and <kbd>Esc</kbd> releases focus without stopping the Agent. Codex chat is stable; Claude Code and Pi chat are independently enabled experimental options.
 - **Real-time terminal + desktop keyboard** — stream the same tmux pane on phone and desktop with scrollback, weak-network fallback, direct physical-keyboard input, and native copy/paste.
 - **Command & chat modes** — switch between direct terminal input and natural-language agent chat, with direct Alt and Space keys on the mobile command keyboard and a customizable quick bar that stays in sync across devices.
 - **Client reload after updates** — once the server update has finished, use Settings → Reload app to load the new client without quitting and reopening the home-screen app.
@@ -78,10 +78,33 @@ handmux start --tunnel cloudflare   # instant public URL (cloudflared auto-insta
 - **Web Preview for URLs and static folders** — preview URLs by phone or computer proxy, or open an isolated static folder, with narrow/wide page widths and zoom; computer proxy can also request a mobile or desktop site version. It embeds pages rather than replacing a full browser.
 - **Docs** — tap recognized text-file paths in the terminal to open them, regardless of extension; ordinary slash-separated prose stays plain. Markdown rendered, font zoom, sentence-by-sentence read-aloud. Binary files stay download-only.
 - **Mobile select & copy** — long-press to select in the terminal, drag iOS-style handles to fine-tune, copy the selection / a whole line / a whole paragraph.
-- **Files both ways** — multi-select upload from the chat box, download, share in, copy any absolute path.
+- **Files both ways** — multi-select upload from the chat box (including ZIP archives), download, share in, copy any absolute path.
 - **Ideas — catch every one** — a thought the moment it strikes: a per-window idea/to-do list, jot one by voice and drop it straight into the prompt.
 - **Built for flaky networks** — backoff reconnect, connection-lost banner, offline page, polling that pauses in the background; a reflow-safe cursor.
 - **Zero-install PWA** — runs full-screen from your home screen, with English, 简体 / 繁體中文, 日本語, and 한국어.
+
+## Agent integration
+
+Use `handmux <agent> [args...]` to start a supported Agent; every argument after the Agent name is passed through unchanged. Use the separate `handmux agent` namespace to enable or inspect Handmux integration. Codex support is built in, while Pi and Claude Code are explicitly enabled:
+
+```bash
+handmux codex [args...]
+handmux pi [args...]
+
+handmux agent                 # list Agent integration status
+handmux agent enable pi
+handmux agent status pi
+handmux agent disable pi
+
+handmux agent enable claude
+handmux agent status claude
+handmux agent disable claude
+handmux agent status codex    # ready (built-in) when Codex is installed
+```
+
+The legacy `handmux hooks install|uninstall` commands remain compatibility aliases for Claude Code. Pi integration uses a trusted Handmux-owned Extension wrapper for the same native Pi TUI process; enabling it writes only that wrapper under Pi's documented global extension directory and never scans projects or loads third-party extensions. Open a new Pi session, or run `/reload` in Pi, after enabling or disabling it. The wrapper is refreshed automatically across Handmux upgrades, but a file not marked as Handmux-owned is never overwritten or deleted. Pi keeps working normally when the Handmux server is offline; terminal outcomes are queued locally and delivered after it returns.
+
+The capability-driven Agent chat downloads attachments only after a tap. Providers register an opaque, session-bound resource ID; the app never receives a local path, and potentially active content such as HTML or SVG is always downloaded rather than rendered inline.
 
 ## Workspace recovery
 
@@ -146,7 +169,7 @@ Once autostart is installed, `handmux start` / `stop` / `restart` coordinate wit
 
 ## Requirements
 
-Your computer needs **Node ≥ 20** and **tmux ≥ 3.0**; the phone just needs a browser. On **Windows**, run it inside **WSL2** (a real Linux kernel + real tmux) — see the [docs](https://handmux.com/docs#windows).
+Your computer needs **Node ≥ 22.16** and **tmux ≥ 3.0**; the phone just needs a browser. On **Windows**, run it inside **WSL2** (a real Linux kernel + real tmux) — see the [docs](https://handmux.com/docs#windows).
 
 ## Feedback & community
 

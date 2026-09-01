@@ -22,6 +22,7 @@ const api = vi.hoisted(() => ({
   getWindows: vi.fn(),
   getPanes: vi.fn(),
   getStates: vi.fn(),
+  getAgentDiscovery: vi.fn(),
   getOrphans: vi.fn(),
   getServerVersion: vi.fn(),
   getWorkspaceProtectionStatus: vi.fn(),
@@ -33,9 +34,11 @@ const api = vi.hoisted(() => ({
   getWindowLayout: vi.fn(),
   applyWindowLayout: vi.fn(),
   restoreWindowSize: vi.fn(),
+  markAgentTerminalNotificationsRead: vi.fn(),
+  fetchDoc: vi.fn(),
 }));
 const storage = vi.hoisted(() => ({ applyWorkspaceRestoreMapping: vi.fn() }));
-const push = vi.hoisted(() => ({ getNotifications: vi.fn() }));
+const push = vi.hoisted(() => ({ getNotifications: vi.fn(), clearPaneNotification: vi.fn() }));
 const windowBar = vi.hoisted((): { props: WindowBarProps | null } => ({ props: null }));
 const terminal = vi.hoisted(() => ({
   props: null as TerminalProps | null,
@@ -44,6 +47,7 @@ const terminal = vi.hoisted(() => ({
   forwardPageKey: vi.fn(),
 }));
 const bottomDock = vi.hoisted(() => ({ focusComposer: vi.fn() }));
+const backButtons = vi.hoisted(() => ({ active: [] as Array<() => void> }));
 const overlayActivity = vi.hoisted(() => {
   const state = {
     active: false,
@@ -64,7 +68,7 @@ vi.mock('./storage.js', async (importOriginal) => ({
 vi.mock('./push.js', async (importOriginal) => ({
   ...(await importOriginal()),
   reportBound: vi.fn(),
-  clearPaneNotification: vi.fn(),
+  clearPaneNotification: push.clearPaneNotification,
   getNotifications: push.getNotifications,
   deleteNotification: vi.fn(async () => {}),
   notifyEnabled: () => false,
@@ -89,7 +93,7 @@ vi.mock('./hooks/usePreviews.js', () => ({
 }));
 vi.mock('./useClaudeHooks.js', () => ({ useClaudeHooks: () => ({ status: 'installed', enable: vi.fn() }) }));
 vi.mock('./hooks/useBackButton.js', () => ({
-  useBackButton: () => {},
+  useBackButton: (active: boolean, onClose: () => void) => { if (active) backButtons.active.push(onClose); },
   useHistoryLayer: () => {},
   unwindHistory: () => {},
 }));
@@ -155,6 +159,7 @@ vi.mock('./components/Terminal.jsx', async () => {
 
 import App from './App.jsx';
 import { ApiError, UnauthorizedError } from './api.js';
+import { buildDeepLink } from './hashRoute.js';
 import { getBoundSessions, getWorkspacePromptState } from './storage.js';
 
 const ACTIVE_SESSION = '10000000-0000-4000-8000-000000000001';
@@ -243,12 +248,14 @@ beforeEach(() => {
   Object.values(api).forEach((mock) => mock.mockReset());
   storage.applyWorkspaceRestoreMapping.mockReset();
   push.getNotifications.mockReset();
+  push.clearPaneNotification.mockReset();
   windowBar.props = null;
   terminal.props = null;
   terminal.focusInput.mockReset();
   terminal.blurInput.mockReset();
   terminal.forwardPageKey.mockReset();
   bottomDock.focusComposer.mockReset();
+  backButtons.active = [];
   overlayActivity.active = false;
   overlayActivity.listeners.clear();
   localStorage.clear();
@@ -262,6 +269,7 @@ beforeEach(() => {
   api.getWindows.mockResolvedValue([]);
   api.getPanes.mockResolvedValue([]);
   api.getStates.mockResolvedValue({});
+  api.getAgentDiscovery.mockResolvedValue({ descriptors: [], runs: [], health: [] });
   api.getOrphans.mockResolvedValue([]);
   api.getServerVersion.mockResolvedValue({ current: '0.0.0', latest: '0.0.0', updateAvailable: false });
   api.getWorkspaceProtectionStatus.mockResolvedValue({ status: 'protected', errorCode: null });
@@ -273,6 +281,8 @@ beforeEach(() => {
   api.getWindowLayout.mockResolvedValue({ layout: '80x24,0,0{40x24,0,0,1,39x24,41,0,2}' });
   api.applyWindowLayout.mockResolvedValue({ ok: true });
   api.restoreWindowSize.mockResolvedValue({ ok: true });
+  api.markAgentTerminalNotificationsRead.mockResolvedValue({ ok: true });
+  api.fetchDoc.mockResolvedValue({ type: 'markdown', name: '数据现状.md', content: '# 数据现状' });
   push.getNotifications.mockResolvedValue([]);
 });
 
@@ -282,6 +292,170 @@ afterEach(() => {
   vi.useRealTimers();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
+  Reflect.deleteProperty(navigator, 'serviceWorker');
+  history.replaceState(history.state, '', '#');
+});
+
+describe('App hidden Project Task beta', () => {
+  it('marks a detected desktop so conversation text keeps native selection', async () => {
+    const view = await renderApp();
+    expect(view.container.querySelector('.app')?.getAttribute('data-desktop-input')).toBe('true');
+  });
+
+  it('ignores an old development flag and keeps the unfinished surface unreachable', async () => {
+    localStorage.setItem('hm_project_task_beta', '1');
+    localStorage.setItem('hm_root_view', 'project');
+    const view = await renderApp();
+    expect(view.container.querySelector('.project-root')).toBeNull();
+    expect(view.container.querySelector('.topbar')).toBeTruthy();
+  });
+});
+
+describe('App live tmux topology recovery', () => {
+  const oldSession = { id: '$71', name: 'project' };
+  const oldWindow = { id: '@71', name: 'main', active: true, panes: 1 };
+  const oldPane = { id: '%73', active: true, width: 80, height: 24, command: 'zsh', cwd: '/work' };
+  const newSession = { id: '$1', name: 'project' };
+  const newWindow = { id: '@3', name: 'main', active: true, panes: 1 };
+  const newPane = { id: '%4', active: true, width: 80, height: 24, command: 'zsh', cwd: '/work' };
+
+  it('switches to a surviving pane when the remembered pane is closed externally', async () => {
+    const refreshed = deferred<typeof oldPane[]>();
+    localStorage.setItem('tw_bound', JSON.stringify([oldSession.name]));
+    api.getSessions.mockResolvedValue([oldSession]);
+    api.getWindows.mockResolvedValue([oldWindow]);
+    api.getPanes
+      .mockResolvedValueOnce([oldPane])
+      .mockReturnValueOnce(refreshed.promise)
+      .mockResolvedValue([newPane]);
+
+    await renderApp();
+    expect(screen.getByTestId('terminal-pane').textContent).toBe(oldPane.id);
+
+    refreshed.resolve([newPane]);
+    await flush();
+    expect(screen.getByTestId('terminal-pane').textContent).toBe(newPane.id);
+  });
+
+  it('reopens the same session by name after tmux recreates every topology id', async () => {
+    const missing = deferred<typeof oldPane[]>();
+    localStorage.setItem('tw_bound', JSON.stringify([oldSession.name]));
+    api.getSessions.mockResolvedValueOnce([oldSession]).mockResolvedValue([newSession]);
+    api.getWindows.mockResolvedValueOnce([oldWindow]).mockResolvedValue([newWindow]);
+    api.getPanes
+      .mockResolvedValueOnce([oldPane])
+      .mockReturnValueOnce(missing.promise)
+      .mockResolvedValue([newPane]);
+
+    await renderApp();
+    expect(screen.getByTestId('terminal-pane').textContent).toBe(oldPane.id);
+
+    missing.reject(new ApiError('window not found', 404, 'window not found'));
+    await flush();
+    await flush();
+
+    expect(api.getSessions.mock.calls.length).toBeGreaterThanOrEqual(2);
+    expect(api.getWindows).toHaveBeenLastCalledWith(newSession.id);
+    expect(screen.getByTestId('terminal-pane').textContent).toBe(newPane.id);
+  });
+});
+
+describe('App document-link transition', () => {
+  async function renderDocumentSession() {
+    const session = { id: '$docs', name: 'docs' };
+    const workspaceWindow = { id: '@docs', name: 'main', active: true, panes: 1 };
+    const pane = {
+      id: '%docs', active: true, width: 80, height: 24, command: 'codex', cwd: '/work',
+      left: 0, top: 0,
+    };
+    localStorage.setItem('tw_bound', JSON.stringify([session.name]));
+    api.getSessions.mockResolvedValue([session]);
+    api.getWindows.mockResolvedValue([workspaceWindow]);
+    api.getPanes.mockResolvedValue([pane]);
+    return renderApp();
+  }
+
+  const finishConfirmationPop = () => {
+    // useBackButton owns the real popstate listener; this focused App test mocks it and invokes the
+    // active confirmation layer callback to model that pop completing.
+    const closeConfirmation = backButtons.active.at(-1);
+    expect(closeConfirmation).toBeTruthy();
+    act(() => closeConfirmation?.());
+  };
+
+  it('finishes closing the confirmation history layer before opening a Chinese document', async () => {
+    const view = await renderDocumentSession();
+
+    act(() => terminalProps().onDocLinkTap?.(
+      { kind: 'doc', path: '/work/数据现状.md' }, 20, 30,
+    ));
+    const open = requiredElement<HTMLButtonElement>(document, '.doclink-open');
+    fireEvent.click(open);
+    expect(api.fetchDoc).not.toHaveBeenCalled();
+
+    finishConfirmationPop();
+    await flush();
+    await flush();
+
+    expect(api.fetchDoc).toHaveBeenCalledWith('/work/数据现状.md');
+    expect(document.querySelector('.file-sheet.open')).toBeTruthy();
+    expect(view.baseElement.textContent).toContain('数据现状.md');
+  });
+
+  it('keeps the directory picker open when a relative Chinese document is not under the pane cwd', async () => {
+    api.fetchDoc.mockRejectedValueOnce(new Error('/api/file -> 404'));
+    await renderDocumentSession();
+
+    act(() => terminalProps().onDocLinkTap?.(
+      { kind: 'doc', path: './数据现状.md' }, 20, 30,
+    ));
+    fireEvent.click(requiredElement<HTMLButtonElement>(document, '.doclink-open'));
+    finishConfirmationPop();
+    await flush();
+    await flush();
+
+    expect(api.fetchDoc).toHaveBeenCalledWith('/work/数据现状.md');
+    expect(document.querySelector('.dirpick-card')).toBeTruthy();
+    expect(document.body.textContent).toContain('./数据现状.md');
+  });
+});
+
+describe('App visible-pane acknowledgement', () => {
+  it('keeps a pane unread while a full-screen tool obscures the Session workspace', async () => {
+    const session = { id: '$visible', name: 'visible' };
+    const workspaceWindow = { id: '@visible', name: 'main', active: true, panes: 1 };
+    const pane = {
+      id: '%visible', active: true, width: 80, height: 24, command: 'codex', cwd: '/repo',
+      left: 0, top: 0,
+    };
+    localStorage.setItem('tw_bound', JSON.stringify([session.name]));
+    api.getSessions.mockResolvedValue([session]);
+    api.getWindows.mockResolvedValue([workspaceWindow]);
+    api.getPanes.mockResolvedValue([pane]);
+    api.getStates.mockResolvedValue({});
+    await renderApp();
+    push.clearPaneNotification.mockReset();
+    api.markAgentTerminalNotificationsRead.mockClear();
+
+    act(() => overlayActivity.set(true));
+    api.getStates.mockResolvedValue({
+      [pane.id]: {
+        session: session.name, window: workspaceWindow.id, windowName: workspaceWindow.name,
+        kind: 'done', msg: 'finished behind settings', ts: 10,
+        terminalUnread: true, terminalNotificationId: 'notification-visible',
+      },
+    });
+    await flush(5_000);
+
+    expect(push.clearPaneNotification).not.toHaveBeenCalledWith(pane.id);
+    expect(api.markAgentTerminalNotificationsRead).not.toHaveBeenCalled();
+
+    act(() => overlayActivity.set(false));
+    await flush();
+    expect(push.clearPaneNotification).toHaveBeenCalledWith(pane.id);
+    expect(api.markAgentTerminalNotificationsRead)
+      .toHaveBeenCalledWith(['notification-visible']);
+  });
 });
 
 describe('App management dimensions', () => {
@@ -341,6 +515,7 @@ describe('App management dimensions', () => {
 
   it('refreshes the pane dimensions from tmux before opening split management', async () => {
     await renderManagedSession();
+    const callsBeforeOpen = api.getPanes.mock.calls.length;
     api.getPanes.mockResolvedValueOnce(stalePanes.map((pane) => (
       pane.id === '%1' ? { ...pane, width: 59, height: 30 } : { ...pane, width: 60, height: 30, left: 60 }
     )));
@@ -348,7 +523,7 @@ describe('App management dimensions', () => {
     await act(async () => { await windowBarProps().onManagePane('%1'); });
 
     expect(screen.getByRole('dialog', { name: '分屏管理，① zsh · 59×30' })).toBeTruthy();
-    expect(api.getPanes).toHaveBeenCalledTimes(2);
+    expect(api.getPanes).toHaveBeenCalledTimes(callsBeforeOpen + 1);
   });
 
   it('resizes the selected side-by-side pane and restores only its saved split ratio', async () => {
@@ -403,6 +578,7 @@ describe('App management dimensions', () => {
 
   it('refreshes pane geometry from tmux before opening the pane map', async () => {
     await renderManagedSession();
+    const callsBeforeOpen = api.getPanes.mock.calls.length;
     api.getPanes.mockResolvedValueOnce(stalePanes.map((pane) => (
       pane.id === '%1' ? { ...pane, width: 59, height: 30 } : { ...pane, width: 60, height: 30, left: 60 }
     )));
@@ -410,7 +586,7 @@ describe('App management dimensions', () => {
     await act(async () => { await windowBarProps().onBeforePaneMapOpen?.('@1'); });
 
     expect(windowBarProps().panes.find((pane) => pane.id === '%1')).toMatchObject({ width: 59, height: 30 });
-    expect(api.getPanes).toHaveBeenCalledTimes(2);
+    expect(api.getPanes).toHaveBeenCalledTimes(callsBeforeOpen + 1);
   });
 
   it('keeps a pane switched under the pane map unfocused and restores the prior terminal owner on close', async () => {
@@ -483,6 +659,109 @@ describe('App management dimensions', () => {
     fireEvent.keyDown(toolbarButton, { key: 'F12' });
     fireEvent.keyDown(editor, { key: 'x', code: 'KeyX', keyCode: 88 });
     expect(terminal.forwardPageKey).not.toHaveBeenCalled();
+  });
+
+  it('focuses the chat composer page-wide on Shift+Enter but leaves focused Shift+Enter local', async () => {
+    localStorage.setItem('tw_bound', JSON.stringify([session.name]));
+    api.getSessions.mockResolvedValue([session]);
+    api.getWindows.mockResolvedValue([staleWindow]);
+    api.getPanes.mockResolvedValue([{ ...stalePanes[0], agent: 'pi', command: 'pi' }, stalePanes[1]]);
+    api.getAgentDiscovery.mockResolvedValue({
+      descriptors: [{ id: 'pi', label: 'Pi', capabilities: {
+        inbox: true, conversation: true, interaction: false, subscriptionUsage: false,
+      } }],
+      runs: [{ agentId: 'pi', paneId: '%1', runId: 'run-1', sessionId: 'session-1' }],
+      health: [],
+    });
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) => {
+      const path = String(input);
+      const body = path.includes('/api/agents/conversation/discover') ? {
+        descriptor: {
+          session: { agentId: 'pi', sessionId: 'session-1' },
+          run: { agentId: 'pi', paneId: '%1', runId: 'run-1', sessionId: 'session-1' },
+          viewId: 'view-1', historyVersion: 'history-1',
+          capabilities: { history: true, live: 'poll', sendable: true },
+        },
+      } : path.includes('/api/agents/conversation/page') ? {
+        status: 'ok', page: {
+          sessionId: 'session-1', viewId: 'view-1', historyVersion: 'history-1',
+          items: [], hasMore: false,
+        },
+      } : path.includes('/api/agents/conversation-controls') ? {
+        controls: {
+          activity: 'idle', submissions: [],
+          queue: { items: [], canSteer: false, canEdit: true, canRemove: true },
+        },
+      } : {};
+      return { ok: true, status: 200, json: async () => body } as Response;
+    }));
+    const view = await renderApp();
+    await flush();
+    act(() => windowBarProps().onLensChange?.('chat'));
+    await flush();
+
+    const input = requiredElement<HTMLTextAreaElement>(view.container, '.chat-composer textarea.cc-text');
+    const toolbarButton = document.createElement('button');
+    view.container.append(toolbarButton);
+    toolbarButton.focus();
+
+    fireEvent.keyDown(toolbarButton, { key: 'Enter', shiftKey: true });
+    expect(document.activeElement).toBe(input);
+    expect(fireEvent.keyDown(input, { key: 'Enter', shiftKey: true })).toBe(true);
+    expect(document.activeElement).toBe(input);
+  });
+
+  it('keeps the composer mounted while the new session history is still loading', async () => {
+    localStorage.setItem('tw_bound', JSON.stringify([session.name]));
+    api.getSessions.mockResolvedValue([session]);
+    api.getWindows.mockResolvedValue([staleWindow]);
+    api.getPanes.mockResolvedValue([{ ...stalePanes[0], agent: 'pi', command: 'pi' }, stalePanes[1]]);
+    api.getAgentDiscovery.mockResolvedValue({
+      descriptors: [{ id: 'pi', label: 'Pi', capabilities: {
+        inbox: true, conversation: true, interaction: false, subscriptionUsage: false,
+      } }],
+      runs: [{ agentId: 'pi', paneId: '%1', runId: 'run-1', sessionId: 'session-1' }],
+      health: [],
+    });
+    const pageResponse = deferred<Response>();
+    vi.stubGlobal('fetch', vi.fn((input: string | URL | Request) => {
+      const path = String(input);
+      const body = path.includes('/api/agents/conversation/discover') ? {
+        descriptor: {
+          session: { agentId: 'pi', sessionId: 'session-1' },
+          run: { agentId: 'pi', paneId: '%1', runId: 'run-1', sessionId: 'session-1' },
+          viewId: 'view-1', historyVersion: 'history-1',
+          capabilities: { history: true, live: 'poll', sendable: true },
+        },
+      } : path.includes('/api/agents/conversation-controls') ? {
+        controls: {
+          activity: 'idle', submissions: [],
+          queue: { items: [], settled: [], canSteer: false, canEdit: true, canRemove: true },
+        },
+      } : null;
+      if (path.includes('/api/agents/conversation/page')) return pageResponse.promise;
+      return Promise.resolve({ ok: true, status: 200, json: async () => body } as Response);
+    }));
+    const view = await renderApp();
+    act(() => windowBarProps().onLensChange?.('chat'));
+    await flush();
+
+    expect(view.container.querySelector('.agent-conversation-state')).toBeTruthy();
+    const composer = requiredElement<HTMLTextAreaElement>(
+      view.container, '.chat-composer textarea.cc-text',
+    );
+    fireEvent.change(composer, { target: { value: 'loading 期间也能编辑' } });
+    expect(composer.value).toBe('loading 期间也能编辑');
+
+    pageResponse.resolve({
+      ok: true, status: 200, json: async () => ({
+        status: 'ok', page: {
+          sessionId: 'session-1', viewId: 'view-1', historyVersion: 'history-1',
+          items: [], hasMore: false,
+        },
+      }),
+    } as Response);
+    await flush();
   });
 });
 

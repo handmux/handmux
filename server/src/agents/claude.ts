@@ -19,6 +19,7 @@ import type {
   ProcessPane,
   ResolveExecutableOptions,
 } from './processIdentity.js';
+import type { LivePane, ProcessContext } from '../agent-runtime/adapter.js';
 
 type IdentityOptions = Partial<Omit<ResolveExecutableOptions, 'candidate' | 'normalized' | 'matches'>>;
 type ClaudeBody = Record<string, unknown>;
@@ -163,8 +164,29 @@ export function classifyClaude(src: unknown, rawBody: unknown = {}): ClaudeClass
 export const projectsDir = (home = os.homedir()): string => path.join(home, '.claude', 'projects');
 
 export const claude = {
+  adapterApiVersion: 1 as const,
   id: 'claude',
   label: 'Claude Code',
+  presentation: { iconId: 'claude' },
+  process: {
+    commands: ['claude'],
+    ambiguousCommand: (command: string) => VERSION_COMM_RE.test(command),
+    verify: async (pane: LivePane, context: ProcessContext) => {
+      const executable = (await context.inspectForeground(pane))?.executable;
+      // A version-shaped command is ambiguous by definition. Missing lsof/proc evidence is a transient
+      // unknown result, not affirmative proof that the previously identified Claude process exited.
+      if (!executable) throw new Error('Claude foreground executable is unavailable');
+      const base = executableBasename(executable);
+      return (base === pane.currentCommand || base === pane.currentCommand.replace(/_/g, '.'))
+        && CLAUDE_PATH_RE.test(executable);
+    },
+  },
+  capabilities: {
+    inbox: { apiVersion: 1 as const },
+    conversation: { apiVersion: 1 as const, experimental: true },
+    interaction: { apiVersion: 1 as const },
+    subscriptionUsage: { apiVersion: 1 as const },
+  },
   procName: 'claude',
   // Which tmux #{pane_current_command} values mean "this agent is still the pane's foreground app" (inbox
   // liveness). Claude sets its process title to "claude", so an exact single-name match is right — for

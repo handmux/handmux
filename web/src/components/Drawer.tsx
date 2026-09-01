@@ -36,18 +36,27 @@ interface DrawerProps {
   recoveryPlan?: WorkspaceRecoveryPlan | null;
   recoveryOperation?: WorkspaceRestoreOperation | null;
   onOpenRecovery?: () => void;
+  projectTaskBeta?: boolean;
+  onSwitchProject?: () => void;
 }
 
 export default function Drawer({
   open, currentSessionName, bound, onSelectSession, onUnbind, onBind, onClose, onLogout,
   orphans = [], onTakeoverRequest,
   recoveryPlan = null, recoveryOperation = null, onOpenRecovery = () => {},
+  projectTaskBeta = false, onSwitchProject = () => {},
 }: DrawerProps) {
   const [orphOpen, setOrphOpen] = useState(false);
   return (
     <>
       <div className={`drawer ${open ? 'open' : ''}`}>
         <div className="drawer-list">
+          {projectTaskBeta && (
+            <div className="project-root-switch" role="group">
+              <button type="button" aria-pressed="false" onClick={onSwitchProject}>{t('project.root.projects')}</button>
+              <button type="button" aria-pressed="true">{t('project.root.sessions')}</button>
+            </div>
+          )}
           <div className="drawer-title">SESSIONS</div>
           {bound.length === 0 && <div className="drawer-empty">{t('drawer.empty')}</div>}
           {bound.map((name) => (

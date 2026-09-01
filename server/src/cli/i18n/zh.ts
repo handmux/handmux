@@ -127,10 +127,36 @@ export default {
   // hooks
   'hooks.confirmEnable': '启用 Claude Code 状态与通知(收件箱)?',
   'hooks.noClaude': '未检测到 Claude Code(缺少 ~/.claude)—— 无需安装。',
-  'hooks.installedClaude': '✓ Claude Code hooks 已安装 → ~/.claude/settings.json',
-  'hooks.installedHint': '  重启或新开一个 Claude Code 会话以加载;窗格上报后收件箱就会亮起。',
-  'hooks.removed': '✓ Claude Code hooks 已移除。',
+  'hooks.installedClaude': '✓ 已启用 Claude 接入。',
+  'hooks.installedHint': '  重启或新开一个 Claude Code 会话以加载接入。',
+  'hooks.removed': '✓ 已停用 Claude 接入。',
   'hooks.usage': '用法:handmux hooks install|uninstall',
+
+  // Agent 启动与 Handmux 接入管理
+  'agent.state.ready': 'ready',
+  'agent.state.not-installed': 'not installed',
+  'agent.state.not-enabled': 'not enabled',
+  'agent.state.needs-repair': 'needs repair',
+  'agent.state.conflict': 'conflict',
+  'agent.builtIn': '（内置）',
+  'agent.status': '{name}: {status}{detail}',
+  'agent.hint.install': '  请先安装 {name}，再运行 `handmux agent enable {name}`。',
+  'agent.hint.initializeClaude': '  请先运行一次 Claude Code，让它初始化 ~/.claude，再运行 `handmux agent enable claude`。',
+  'agent.hint.enable': '  运行 `handmux agent enable {name}`。',
+  'agent.hint.conflict': '  接入目标属于其他扩展；请先移走它，再运行 `handmux agent enable {name}`。',
+  'agent.enabled': '✓ 已启用 {name} 接入。',
+  'agent.alreadyReady': '= {name} 接入已经 ready。',
+  'agent.disabled': '✓ 已停用 {name} 接入。',
+  'agent.alreadyDisabled': '= {name} 接入已经停用。',
+  'agent.codexBuiltIn': '= Codex 接入已内置，当前已经 ready。',
+  'agent.codexDisable': 'Codex 接入已内置，不能停用。若要绕过 Handmux，请直接运行原生 `codex`。',
+  'agent.unknown': '未知 Agent：{name}',
+  'agent.usage': '用法:handmux agent [list] | handmux agent status|enable|disable <codex|pi|claude>',
+
+  // Pi Extension
+  'piExtension.confirmEnable': '启用 Pi 与 Handmux 的接入能力?',
+  'piExtension.installed': '✓ 已启用 Pi 接入。',
+  'piExtension.reload': '  新开 Pi 会话,或在 Pi 中运行 /reload,即可应用变更。',
 
   // Claude statusLine 用量捕获(点亮手机用量页的 5h/周额度条)
   'statusline.confirmEnable': '在手机上显示 Claude 的 5h/周额度?(会安装一个 Claude statusLine)',
@@ -337,6 +363,9 @@ export default {
   handmux logs [--follow] [--lines N]
   handmux push <标题> <正文>    从脚本推一条通知到手机（--session 会话 · --device 设备key · --tag · --url）
   handmux codex [参数...]      启动与对话视图同步的 Codex TUI
+  handmux pi [参数...]         原样传递参数并启动 Pi
+  handmux agent [list]         查看支持的 Agent 接入状态
+  handmux agent status|enable|disable <名称>
   handmux restore [--dry-run] [--checkpoint <id>] [--session <name>]
   handmux restore --list
   handmux update           升级到最新发布版本(npm i -g handmux@latest)
@@ -346,7 +375,6 @@ export default {
 
 更多:
   handmux config                          显示生效的配置 + 每一项来自哪里
-  handmux hooks install|uninstall         启用/停用 Claude Code 通知(收件箱)
   handmux service install|uninstall       开机自启(launchd/systemd)
   handmux help flags                      一次性 flag + 环境变量(脚本 / 无头 / Docker)
   --config PATH · --lang en|zh · --version, -v

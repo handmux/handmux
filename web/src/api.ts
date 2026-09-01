@@ -2,7 +2,6 @@ import { getBrowserDeviceId, getToken } from './storage.js';
 import { mimeFromName } from './mime.js';
 import { t } from './i18n';
 import { UnauthorizedError } from './apiErrors.js';
-import { parseCodexToolProjection } from '../../server/src/codexToolProtocol.js';
 import { requestJson as req } from './apiRequest.js';
 import type {
   AsrSignResponse,
@@ -21,37 +20,182 @@ import type {
   WorkspaceRestoreRequest,
   WorkspaceRestoreStart,
 } from '../../server/src/workspaceProtocol.js';
+import type {
+  AgentCatalogDescriptor,
+  AgentDiscoverySnapshot,
+  AgentHealthEntry,
+  AgentRunRef,
+} from './agentCatalog.js';
 
 export { ApiError, UnauthorizedError } from './apiErrors.js';
-export {
-  answerCodexApproval,
-  answerCodexInput,
-  beginCodexQueuedEdit,
-  cancelCodexQueuedEdit,
-  clearCodexGoal,
-  clearCodexSession,
-  commitCodexQueuedEdit,
-  compactCodexSession,
-  getCodexGoal,
-  getCodexModels,
-  getCodexSession,
-  interruptCodexSession,
-  parseSseFrames,
-  removeCodexQueuedMessage,
-  renewCodexQueuedEdit,
-  sendCodexMessage,
-  startCodexGoal,
-  steerCodexQueuedMessage,
-  streamCodexMessages,
-  takeoverCodexSession,
-  updateCodexGoal,
-  updateCodexSettings,
-} from './codexApi.js';
 
 function recordOf(value: unknown): Record<string, unknown> | null {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
     ? value as Record<string, unknown>
     : null;
+}
+
+const AGENT_ID_RE = /^[a-z][a-z0-9-]{0,63}$/;
+
+function parseAgentCatalogDescriptor(value: unknown): AgentCatalogDescriptor | null {
+  const descriptor = recordOf(value);
+  const capabilities = recordOf(descriptor?.capabilities);
+  const capabilityMetadata = descriptor?.capabilityMetadata === undefined
+    ? undefined : recordOf(descriptor.capabilityMetadata);
+  const conversationMetadata = capabilityMetadata?.conversation === undefined
+    ? undefined : recordOf(capabilityMetadata.conversation);
+  if (!descriptor || typeof descriptor.id !== 'string' || !AGENT_ID_RE.test(descriptor.id)
+    || typeof descriptor.label !== 'string' || !descriptor.label.trim()
+    || descriptor.label.length > 128
+    || (descriptor.iconId !== undefined
+      && (typeof descriptor.iconId !== 'string' || !AGENT_ID_RE.test(descriptor.iconId)))
+    || !capabilities
+    || typeof capabilities.inbox !== 'boolean'
+    || typeof capabilities.conversation !== 'boolean'
+    || (capabilities.conversationActivation !== undefined
+      && typeof capabilities.conversationActivation !== 'boolean')
+    || (capabilities.conversationGoal !== undefined
+      && typeof capabilities.conversationGoal !== 'boolean')
+    || (capabilities.conversationPlan !== undefined
+      && typeof capabilities.conversationPlan !== 'boolean')
+    || (capabilities.conversationContext !== undefined
+      && typeof capabilities.conversationContext !== 'boolean')
+    || (capabilities.conversationPermission !== undefined
+      && typeof capabilities.conversationPermission !== 'boolean')
+    || (capabilities.conversationCommands !== undefined
+      && typeof capabilities.conversationCommands !== 'boolean')
+    || typeof capabilities.interaction !== 'boolean'
+    || (capabilities.sessionControl !== undefined
+      && typeof capabilities.sessionControl !== 'boolean')
+    || typeof capabilities.subscriptionUsage !== 'boolean') return null;
+  if ((descriptor.capabilityMetadata !== undefined && !capabilityMetadata)
+    || (capabilityMetadata?.conversation !== undefined
+      && (!conversationMetadata || typeof conversationMetadata.experimental !== 'boolean'))) return null;
+  const conversationExperimental = conversationMetadata?.experimental as boolean | undefined;
+  return {
+    id: descriptor.id,
+    label: descriptor.label,
+    ...(descriptor.iconId === undefined ? {} : { iconId: descriptor.iconId }),
+    capabilities: {
+      inbox: capabilities.inbox,
+      conversation: capabilities.conversation,
+      ...(capabilities.conversationActivation === undefined ? {} : {
+        conversationActivation: capabilities.conversationActivation,
+      }),
+      ...(capabilities.conversationGoal === undefined ? {} : {
+        conversationGoal: capabilities.conversationGoal,
+      }),
+      ...(capabilities.conversationPlan === undefined ? {} : {
+        conversationPlan: capabilities.conversationPlan,
+      }),
+      ...(capabilities.conversationContext === undefined ? {} : {
+        conversationContext: capabilities.conversationContext,
+      }),
+      ...(capabilities.conversationPermission === undefined ? {} : {
+        conversationPermission: capabilities.conversationPermission,
+      }),
+      ...(capabilities.conversationCommands === undefined ? {} : {
+        conversationCommands: capabilities.conversationCommands,
+      }),
+      interaction: capabilities.interaction,
+      ...(capabilities.sessionControl === undefined ? {} : {
+        sessionControl: capabilities.sessionControl,
+      }),
+      subscriptionUsage: capabilities.subscriptionUsage,
+    },
+    ...(conversationExperimental === undefined ? {} : { capabilityMetadata: {
+      conversation: { experimental: conversationExperimental },
+    } }),
+  };
+}
+
+function parseAgentRunRef(value: unknown): AgentRunRef | null {
+  const run = recordOf(value);
+  if (!run || typeof run.agentId !== 'string' || !AGENT_ID_RE.test(run.agentId)
+    || typeof run.paneId !== 'string' || !run.paneId || run.paneId.length > 256
+    || typeof run.runId !== 'string' || !run.runId || run.runId.length > 256
+    || (run.sessionId !== undefined
+      && (typeof run.sessionId !== 'string' || !run.sessionId || run.sessionId.length > 1024))) return null;
+  return {
+    agentId: run.agentId,
+    paneId: run.paneId,
+    runId: run.runId,
+    ...(run.sessionId === undefined ? {} : { sessionId: run.sessionId as string }),
+  };
+}
+
+const AGENT_AVAILABILITIES = new Set(['starting', 'ready', 'degraded', 'unavailable']);
+
+function parseAgentHealth(value: unknown, knownAgents: ReadonlySet<string>): AgentHealthEntry | null {
+  const health = recordOf(value);
+  if (!health || typeof health.adapterId !== 'string' || !knownAgents.has(health.adapterId)
+    || typeof health.availability !== 'string' || !AGENT_AVAILABILITIES.has(health.availability)
+    || (health.capability !== undefined
+      && (typeof health.capability !== 'string' || !health.capability || health.capability.length > 64))
+    || (health.message !== undefined
+      && (typeof health.message !== 'string' || health.message.length > 1_024))
+    || (health.lastSuccessAt !== undefined
+      && (typeof health.lastSuccessAt !== 'number' || !Number.isFinite(health.lastSuccessAt)))) return null;
+  return {
+    adapterId: health.adapterId,
+    availability: health.availability as AgentHealthEntry['availability'],
+    ...(health.capability === undefined ? {} : { capability: health.capability as string }),
+    ...(health.message === undefined ? {} : { message: health.message as string }),
+    ...(health.lastSuccessAt === undefined ? {} : { lastSuccessAt: health.lastSuccessAt as number }),
+  };
+}
+
+export async function getAgentDiscovery(): Promise<AgentDiscoverySnapshot> {
+  const response = recordOf(await req('/api/agents/capabilities', { timeoutMs: 4_000 }));
+  if (!response || !Array.isArray(response.adapters)) return { descriptors: [], runs: [], health: [] };
+  const candidates = response.adapters
+    .map(parseAgentCatalogDescriptor)
+    .filter((descriptor): descriptor is AgentCatalogDescriptor => descriptor !== null);
+  const counts = new Map<string, number>();
+  for (const descriptor of candidates) counts.set(descriptor.id, (counts.get(descriptor.id) ?? 0) + 1);
+  const descriptors = candidates.filter((descriptor) => counts.get(descriptor.id) === 1);
+  const knownAgents = new Set(descriptors.map((descriptor) => descriptor.id));
+  const runCandidates = Array.isArray(response.runs)
+    ? response.runs.map(parseAgentRunRef)
+      .filter((run): run is AgentRunRef => run !== null && knownAgents.has(run.agentId))
+    : [];
+  const paneCounts = new Map<string, number>();
+  for (const run of runCandidates) paneCounts.set(run.paneId, (paneCounts.get(run.paneId) ?? 0) + 1);
+  return {
+    descriptors,
+    // A pane is a control boundary. Conflicting attachments must never be guessed from array order.
+    runs: runCandidates.filter((run) => paneCounts.get(run.paneId) === 1),
+    health: Array.isArray(response.health)
+      ? response.health.map((entry) => parseAgentHealth(entry, knownAgents))
+        .filter((entry): entry is AgentHealthEntry => entry !== null)
+      : [],
+  };
+}
+
+export async function getAgentCatalog(): Promise<AgentCatalogDescriptor[]> {
+  return (await getAgentDiscovery()).descriptors;
+}
+
+export interface AgentTerminalReadReceipt {
+  markedIds: string[];
+  readAt?: number;
+}
+
+export async function markAgentTerminalNotificationsRead(
+  notificationIds: readonly string[],
+): Promise<AgentTerminalReadReceipt> {
+  if (!notificationIds.length || notificationIds.length > 256
+    || notificationIds.some((id) => typeof id !== 'string' || !id || id.length > 256)) {
+    throw new TypeError('Invalid terminal notification ids');
+  }
+  const response = recordOf(await req('/api/agents/inbox/notifications/read', {
+    method: 'POST', body: JSON.stringify({ notificationIds: [...notificationIds] }), timeoutMs: 4_000,
+  }));
+  const markedIds = Array.isArray(response?.markedIds)
+    ? response.markedIds.filter((id): id is string => typeof id === 'string' && id.length > 0)
+    : [];
+  const readAt = finiteOrUndefined(response?.readAt);
+  return { markedIds, ...(readAt === undefined ? {} : { readAt }) };
 }
 
 export interface TmuxSession {
@@ -133,6 +277,24 @@ function parsePanes(value: unknown): TmuxPane[] {
 
 export const getSessions = async (): Promise<TmuxSession[]> => parseSessions(await req('/api/sessions'));
 export const getUsage = (): Promise<unknown> => req('/api/usage');
+export const getAgentUsage = (refresh = false, targetAgentId?: string): Promise<unknown> => req(
+  `/api/agents/usage${refresh ? `?refresh=true${targetAgentId ? `&target=${encodeURIComponent(targetAgentId)}` : ''}` : ''}`,
+  refresh ? { timeoutMs: 30_000 } : {},
+);
+export const getApiAccounts = (): Promise<unknown> => req('/api/api-accounts');
+export const createApiAccount = (body: unknown, signal?: AbortSignal): Promise<unknown> => req('/api/api-accounts', {
+  method: 'POST', body: JSON.stringify(body), timeoutMs: 15_000, ...(signal ? { signal } : {}),
+});
+export const patchApiAccount = (id: string, body: unknown, signal?: AbortSignal): Promise<unknown> => req(
+  `/api/api-accounts/${encodeURIComponent(id)}`,
+  { method: 'PATCH', body: JSON.stringify(body), timeoutMs: 15_000, ...(signal ? { signal } : {}) },
+);
+export const deleteApiAccount = (id: string): Promise<unknown> => req(
+  `/api/api-accounts/${encodeURIComponent(id)}`, { method: 'DELETE' },
+);
+export const queryApiAccount = (id: string): Promise<unknown> => req(
+  `/api/api-accounts/${encodeURIComponent(id)}/query`, { method: 'POST', timeoutMs: 15_000 },
+);
 export const getWindows = async (session: string): Promise<TmuxWindow[]> => (
   parseWindows(await req(`/api/windows?session=${encodeURIComponent(session)}`))
 );
@@ -149,54 +311,6 @@ export const getHistory = (
     { timeoutMs: 8_000 },
   )
 );
-// The 对话 lens's transcript: same req()-based conditional-poll convention as getHistory (8s timeout),
-// but translates the 204 { unchanged: true } into a plain null — a simpler "keep last" contract for
-// useTranscript's polling consumer. Paginated (Task 10): the RECENT window is `{since, limit}` (hash-gated
-// conditional poll), a HISTORY page is `{before, limit}` (page back from the current ordinal cursor `k`,
-// no hash — always returns whatever's there). limit defaults to 10 so the client never asks for more than
-// one page at a time (it never holds/requests the whole transcript).
-export interface TranscriptRequestOptions {
-  since?: string;
-  before?: number;
-  limit?: number;
-  agent?: string;
-}
-
-export async function fetchTranscript(
-  pane: string,
-  { since, before, limit = 10, agent = 'claude' }: TranscriptRequestOptions = {},
-): Promise<unknown | null> {
-  let url = `/api/transcript?pane=${encodeURIComponent(pane)}&agent=${encodeURIComponent(agent)}&limit=${encodeURIComponent(limit)}`;
-  if (since) url += `&since=${encodeURIComponent(since)}`;
-  if (before != null) url += `&before=${encodeURIComponent(before)}`;
-  const response = await req<unknown>(url, { timeoutMs: 8_000 });
-  const page = recordOf(response);
-  if (page?.unchanged === true) return null;
-  if (!page || agent !== 'codex' || !Array.isArray(page.messages)) return response;
-  const messages = page.messages.flatMap((candidate) => {
-    const message = recordOf(candidate);
-    if (!message || message.type !== 'tool') return [candidate];
-    const tool = parseCodexToolProjection(message.tool);
-    return tool ? [{ ...message, tool }] : [];
-  });
-  return { ...page, messages };
-}
-// The pane's current context-window state: { model, usedPercent } — either may be null when the statusLine
-// capturer isn't opted in / the session hasn't rendered. Polled by the 对话 composer to show a small chip.
-export const getPaneContext = (pane: string, agent = 'claude'): Promise<unknown> => (
-  req(`/api/context?pane=${encodeURIComponent(pane)}&agent=${encodeURIComponent(agent)}`, {
-    timeoutMs: 8_000,
-  })
-);
-// The pending interactive prompt (AskUserQuestion / permission menu) scraped off the pane, or null when no
-// gate is up. Polled by the 对话 lens only while a gate is up (kind==='permission').
-export async function getPendingPrompt(pane: string, agent = 'claude'): Promise<unknown | null> {
-  const response = await req<unknown>(
-    `/api/pending-prompt?pane=${encodeURIComponent(pane)}&agent=${encodeURIComponent(agent)}`,
-    { timeoutMs: 8_000 },
-  );
-  return recordOf(response)?.prompt || null;
-}
 export const sendText = (pane: string, text: string, enter = true): Promise<unknown> =>
   req('/api/send', { method: 'POST', body: JSON.stringify({ pane, text, enter }) });
 export const sendKeys = (pane: string, keys: unknown): Promise<unknown> =>
@@ -368,6 +482,8 @@ export interface PaneStateResponse {
   msg?: string | null;
   ts?: number | null;
   agent?: string | null;
+  terminalUnread?: boolean;
+  terminalNotificationId?: string;
 }
 
 export const getStates = async (sessions: string[] = []): Promise<Record<string, PaneStateResponse>> => {
@@ -387,6 +503,9 @@ export const getStates = async (sessions: string[] = []): Promise<Record<string,
       ...(typeof state.msg === 'string' || state.msg === null ? { msg: state.msg } : {}),
       ...(typeof state.ts === 'number' && Number.isFinite(state.ts) ? { ts: state.ts } : {}),
       ...(typeof state.agent === 'string' || state.agent === null ? { agent: state.agent } : {}),
+      ...(typeof state.terminalUnread === 'boolean' ? { terminalUnread: state.terminalUnread } : {}),
+      ...(typeof state.terminalNotificationId === 'string' && state.terminalNotificationId
+        ? { terminalNotificationId: state.terminalNotificationId } : {}),
     };
   }
   return result;
@@ -470,6 +589,20 @@ export const takeoverOrphan = async (body: unknown): Promise<TmuxLocationResult>
 ));
 
 // --- git viewer (read-only) ---
+export interface GitWorktree {
+  path: string;
+}
+
+export const gitWorktree = async (dir: string): Promise<GitWorktree | null> => {
+  const response = recordOf(await req(
+    `/api/git/worktree?dir=${encodeURIComponent(dir)}`,
+    { timeoutMs: 8_000 },
+  ));
+  const worktree = recordOf(response?.worktree);
+  return worktree && typeof worktree.path === 'string' && worktree.path
+    ? { path: worktree.path }
+    : null;
+};
 export const gitRepos = (dir: string): Promise<unknown> => (
   req(`/api/git/repos?dir=${encodeURIComponent(dir)}`, { timeoutMs: 8_000 })
 );

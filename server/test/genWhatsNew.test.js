@@ -8,10 +8,14 @@ import { generateWhatsNew, projectWhatsNew, readChangelog } from '../scripts/gen
 const SERVER = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 describe('release whatsNew generation', () => {
-  it('loads the TypeScript changelog and matches the package metadata', async () => {
+  it('matches package metadata from its current version while the next release is being prepared', async () => {
     const entries = await readChangelog();
-    const expected = projectWhatsNew(entries);
     const packageJson = JSON.parse(fs.readFileSync(path.join(SERVER, 'package.json'), 'utf8'));
+    const currentIndex = entries.findIndex((entry) => entry?.version === packageJson.version);
+
+    expect(currentIndex).toBeGreaterThanOrEqual(0);
+
+    const expected = projectWhatsNew(entries.slice(currentIndex));
 
     expect(expected).toEqual(packageJson.whatsNew);
     expect(expected[0]?.version).toBe(packageJson.version);

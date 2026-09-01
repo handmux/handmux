@@ -5,6 +5,7 @@ import express from 'express';
 import { expressAuth } from '../src/auth.js';
 import { createApiRouter } from '../src/httpApi.js';
 import { writeCache } from '../src/cli/updateCheck.js';
+import { installPiExtension, piExtensionFile } from '../src/cli/piExtension.js';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -98,6 +99,22 @@ describe('REST API', () => {
   it('GET /sessions', async () => {
     const res = await auth(request(appWith(baseCommands)).get('/api/sessions')).expect(200);
     expect(res.body).toEqual([{ id: '$0', name: 'main' }]);
+  });
+
+  it('returns precise 404s when remembered tmux topology ids no longer exist', async () => {
+    const missingSession = {
+      ...baseCommands,
+      listWindows: vi.fn(async () => { throw new Error("can't find session: $71\n"); }),
+    };
+    await auth(request(appWith(missingSession)).get('/api/windows?session=$71'))
+      .expect(404, { error: 'session not found' });
+
+    const missingWindow = {
+      ...baseCommands,
+      listPanes: vi.fn(async () => { throw new Error("can't find window: @71\n"); }),
+    };
+    await auth(request(appWith(missingWindow)).get('/api/panes?window=@71'))
+      .expect(404, { error: 'window not found' });
   });
 
   it('POST /sessions creates a session with a valid new name', async () => {
@@ -308,6 +325,40 @@ describe('REST API', () => {
       .send({ pane: '%1', enter: true }).expect(200);
     expect(cmds.sendText).toHaveBeenCalledWith('%1', '');
     expect(cmds.sendEnter).toHaveBeenCalledWith('%1');
+  });
+
+  it('serializes whole input operations for the same pane', async () => {
+    const events = [];
+    let releaseText;
+    let markTextStarted;
+    const textStarted = new Promise((resolve) => { markTextStarted = resolve; });
+    const textGate = new Promise((resolve) => { releaseText = resolve; });
+    const cmds = {
+      ...baseCommands,
+      exitCopyModeIfActive: vi.fn(async () => { events.push('exit-copy'); }),
+      sendText: vi.fn(async () => {
+        events.push('text');
+        markTextStarted();
+        await textGate;
+      }),
+      sendEnter: vi.fn(async () => { events.push('enter'); }),
+      sendHexInput: vi.fn(async () => { events.push('hex'); }),
+    };
+    const app = appWith(cmds);
+    const sendRequest = auth(request(app).post('/api/send'))
+      .send({ pane: '%1', text: 'hello', enter: true });
+    const sendPromise = Promise.resolve(sendRequest);
+    await textStarted;
+
+    const inputRequest = auth(request(app).post('/api/input'))
+      .send({ pane: '%1', hex: '61' });
+    const inputPromise = Promise.resolve(inputRequest);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(events).toEqual(['exit-copy', 'text']);
+
+    releaseText();
+    await Promise.all([sendPromise, inputPromise]);
+    expect(events).toEqual(['exit-copy', 'text', 'enter', 'exit-copy', 'hex']);
   });
 
   it('POST /input exits copy mode and sends validated hex bytes', async () => {
@@ -523,7 +574,7 @@ describe('REST API', () => {
   it('GET /panes passes through cwd', async () => {
     const res = await auth(request(appWith(baseCommands)).get('/api/panes?window=@1')).expect(200);
     expect(res.body[0].cwd).toBe('/home/u/proj');
-    expect(res.body[0]).toMatchObject({ agent: null });
+    expect(res.body[0]).not.toHaveProperty('agent');
     expect(res.body[0]).not.toHaveProperty('tty');
   });
 
@@ -700,9 +751,9 @@ describe('POST /dir (mkdir)', () => {
 });
 
 describe('claude events + push bound', () => {
-  function appWithEvents(events) {
+  function appWithEvents(events, agentRuntime, commands = baseCommands) {
     const app = express();
-    app.use('/api', createApiRouter({ token: 'good', commands: baseCommands, events }));
+    app.use('/api', createApiRouter({ token: 'good', commands, events, agentRuntime }));
     return app;
   }
 
@@ -710,6 +761,56 @@ describe('claude events + push bound', () => {
     const events = { getStates: async () => ({ '%1': { session: 'proj', kind: 'idle' } }) };
     const res = await auth(request(appWithEvents(events)).get('/api/states')).expect(200);
     expect(res.body).toEqual({ '%1': { session: 'proj', kind: 'idle' } });
+  });
+
+  it('GET /panes uses Runtime identity instead of the legacy Claude event resolver', async () => {
+    const identifyPanes = vi.fn(async () => ({ '%1': 'pi' }));
+    const legacyIdentify = vi.fn(async () => ({ '%1': 'claude' }));
+    const agentRuntime = {
+      identifyPanes,
+      capabilities: () => [], health: () => [], activeRuns: () => [],
+      inbox: { read: () => ({}) }, conversation: null, interaction: null,
+      resources: {}, runs: {},
+    };
+    const commands = {
+      ...baseCommands,
+      listPanes: vi.fn(async () => [{
+        id: '%1', active: true, width: 80, height: 24,
+        command: 'pi', cwd: '/home/u/proj', tty: '/dev/ttys001',
+      }]),
+    };
+    const events = { getStates: async () => ({}), identifyPaneAgents: legacyIdentify };
+    const res = await auth(request(appWithEvents(events, agentRuntime, commands))
+      .get('/api/panes?window=@1')).expect(200);
+    expect(res.body[0]).toMatchObject({ id: '%1', agent: 'pi' });
+    expect(identifyPanes).toHaveBeenCalledWith([expect.objectContaining({
+      paneId: '%1', currentCommand: 'pi', tty: '/dev/ttys001',
+    })]);
+    expect(legacyIdentify).not.toHaveBeenCalled();
+  });
+
+  it('GET /panes distinguishes confirmed Agent exit from a temporarily unknown identity', async () => {
+    const commands = {
+      ...baseCommands,
+      listPanes: vi.fn(async () => [{
+        id: '%1', active: true, width: 80, height: 24,
+        command: 'node', cwd: '/home/u/proj', tty: '/dev/ttys001',
+      }]),
+    };
+    const baseRuntime = {
+      capabilities: () => [], health: () => [], activeRuns: () => [],
+      inbox: { read: () => ({}) }, conversation: null, interaction: null,
+      resources: {}, runs: {},
+    };
+    const unknown = await auth(request(appWithEvents({}, {
+      ...baseRuntime, identifyPanes: async () => ({}),
+    }, commands)).get('/api/panes?window=@1')).expect(200);
+    expect(unknown.body[0]).not.toHaveProperty('agent');
+
+    const exited = await auth(request(appWithEvents({}, {
+      ...baseRuntime, identifyPanes: async () => ({ '%1': null }),
+    }, commands)).get('/api/panes?window=@1')).expect(200);
+    expect(exited.body[0]).toHaveProperty('agent', null);
   });
 
   it('GET /states awaits an async getStates', async () => {
@@ -728,6 +829,77 @@ describe('claude events + push bound', () => {
     expect(getStates).toHaveBeenLastCalledWith([]);
     await auth(request(app).get('/api/states')).expect(200);            // omitted → null
     expect(getStates).toHaveBeenLastCalledWith(null);
+  });
+
+  it('GET /states projects a ready Core Inbox snapshot instead of provider state', async () => {
+    const getStates = vi.fn(async () => ({ legacy: { kind: 'done' } }));
+    const ref = { agentId: 'claude', paneId: '%1', runId: 'run-1', sessionId: 'session-1' };
+    const agentRuntime = {
+      activeRuns: vi.fn(() => [ref]),
+      inbox: { read: vi.fn(() => ({
+        serviceEpoch: 'epoch', revision: 1, availability: { claude: { availability: 'ready' } },
+        records: [{
+          run: ref, source: { sourceId: 'claude.hooks', cursor: '1' },
+          state: 'done', message: 'Finished', eventId: 'done-1',
+          acceptedAt: 2_000, receivedAt: 2_000,
+        }],
+        terminalNotifications: [],
+      })) },
+    };
+    const commands = {
+      ...baseCommands,
+      listLivePanes: vi.fn(async () => [{
+        id: '%1', cmd: 'claude', tty: '/dev/ttys001',
+        session: 'alpha', window: '@1', windowName: 'Agent',
+      }]),
+    };
+    const response = await auth(request(appWithEvents({ getStates }, agentRuntime, commands))
+      .get('/api/states?sessions=alpha')).expect(200);
+    expect(response.body).toEqual({
+      '%1': {
+        session: 'alpha', window: '@1', windowName: 'Agent',
+        kind: 'done', msg: 'Finished', ts: 2_000, agent: 'claude', terminalUnread: false,
+      },
+    });
+    expect(getStates).not.toHaveBeenCalled();
+  });
+
+  it('GET /states falls back only while Core has no baseline and keeps Core truth when tmux is down', async () => {
+    const getStates = vi.fn(async () => ({ '%1': { session: 'alpha', kind: 'working' } }));
+    const coldRuntime = {
+      activeRuns: vi.fn(() => []),
+      inbox: { read: vi.fn(() => ({
+        serviceEpoch: 'epoch', revision: 0,
+        availability: { claude: { availability: 'ready' } },
+        records: [], terminalNotifications: [],
+      })) },
+    };
+    await auth(request(appWithEvents({ getStates }, coldRuntime)).get('/api/states')).expect(200, {
+      '%1': { session: 'alpha', kind: 'working' },
+    });
+    const readyRuntime = {
+      activeRuns: vi.fn(() => [{
+        agentId: 'claude', paneId: '%1', runId: 'run-1', sessionId: 'session-1',
+      }]),
+      inbox: { read: vi.fn(() => ({
+        serviceEpoch: 'epoch', revision: 1,
+        availability: { claude: { availability: 'ready' } },
+        records: [{
+          run: { agentId: 'claude', paneId: '%1', runId: 'run-1', sessionId: 'session-1' },
+          source: { sourceId: 'claude.hooks', cursor: '1' }, state: 'working',
+          message: 'Core working', receivedAt: 2_000,
+        }],
+        terminalNotifications: [],
+      })) },
+    };
+    const commands = {
+      ...baseCommands,
+      listLivePanes: vi.fn(async () => { throw new Error('tmux down'); }),
+    };
+    await auth(request(appWithEvents({ getStates }, readyRuntime, commands)).get('/api/states')).expect(200, {
+      '%1': { kind: 'working', msg: 'Core working', agent: 'claude' },
+    });
+    expect(getStates).toHaveBeenCalledOnce();
   });
 });
 
@@ -813,6 +985,19 @@ describe('git viewer routes', () => {
     app.use('/api', createApiRouter({ token: 'good', commands: baseCommands, git }));
     return app;
   };
+
+  it('GET /git/worktree returns the worktree for a cwd', async () => {
+    const worktree = { path: '/h/proj' };
+    const git = { worktree: vi.fn(async () => ({ worktree })) };
+    const res = await auth(request(appWithGit(git)).get('/api/git/worktree?dir=/h/proj/src')).expect(200);
+    expect(res.body).toEqual({ worktree });
+    expect(git.worktree).toHaveBeenCalledWith('/h/proj/src');
+  });
+
+  it('GET /git/worktree returns null outside a Git worktree', async () => {
+    const git = { worktree: vi.fn(async () => ({ worktree: null })) };
+    await auth(request(appWithGit(git)).get('/api/git/worktree?dir=/h')).expect(200, { worktree: null });
+  });
 
   it('GET /git/repos returns the detected repos', async () => {
     const git = { detectRepos: vi.fn(async () => ({ repos: [{ name: 'proj', path: '/h/proj', branch: 'main', dirty: false }] })) };
@@ -1022,6 +1207,100 @@ describe('claude hooks API', () => {
       .expect(200, { ok: false, status: 'no-claude' });
     expect(fs.readFileSync(configFile, 'utf8')).toBe('model = "gpt-5"\n');
     expect(fs.existsSync(path.join(codexDir, 'hooks'))).toBe(false);
+  });
+});
+
+describe('Agent integration API', () => {
+  function integrationFixture(available = new Set(['claude', 'pi']), initializeClaude = true) {
+    const home = tmpHome('hm-agent-web-');
+    if (initializeClaude) fs.mkdirSync(path.join(home, '.claude'), { recursive: true });
+    const piEntryFile = path.join(home, 'bundled-pi-entry.js');
+    fs.writeFileSync(piEntryFile, 'export default function handmuxPi() {}\n');
+    const context = {
+      home,
+      piEntryFile,
+      hooksSrcDir: path.resolve('hooks'),
+      claudeStateFile: path.join(home, '.handmux', 'claude-state.json'),
+      executableAvailable: (command) => available.has(command),
+    };
+    const app = express();
+    app.use('/api', createApiRouter({
+      token: 'good', commands: baseCommands, home,
+      stateFile: context.claudeStateFile, agentIntegrationContext: context,
+    }));
+    return { app, context, home, piEntryFile };
+  }
+
+  it('lists only Claude Code and Pi and enables both through the shared integration service', async () => {
+    const { app, home } = integrationFixture();
+    const initial = await auth(request(app).get('/api/agent-integrations')).expect(200);
+    expect(initial.body.integrations).toEqual([
+      { name: 'claude', status: 'not-enabled' },
+      { name: 'pi', status: 'not-enabled' },
+    ]);
+    expect(JSON.stringify(initial.body)).not.toContain('codex');
+
+    await auth(request(app).post('/api/agent-integrations/claude/enable')).expect(200, {
+      name: 'claude', status: 'ready', changed: true,
+    });
+    await auth(request(app).post('/api/agent-integrations/pi/enable')).expect(200, {
+      name: 'pi', status: 'ready', changed: true,
+    });
+    expect(fs.existsSync(path.join(home, '.claude', 'settings.json'))).toBe(true);
+    expect(fs.readFileSync(piExtensionFile(home), 'utf8')).toContain('handmux-managed-pi-extension');
+  });
+
+  it('repairs a stale Pi wrapper without exposing the installer mechanism', async () => {
+    const { app, context, home, piEntryFile } = integrationFixture();
+    const oldEntry = path.join(home, 'old-pi-entry.js');
+    fs.writeFileSync(oldEntry, 'export default function oldPi() {}\n');
+    installPiExtension(home, { entryFile: oldEntry });
+
+    const before = await auth(request(app).get('/api/agent-integrations')).expect(200);
+    expect(before.body.integrations).toContainEqual({ name: 'pi', status: 'needs-repair' });
+    await auth(request(app).post('/api/agent-integrations/pi/enable')).expect(200, {
+      name: 'pi', status: 'ready', changed: true,
+    });
+    expect(fs.readFileSync(piExtensionFile(home), 'utf8')).toContain(piEntryFile);
+    expect(context.executableAvailable('pi')).toBe(true);
+  });
+
+  it('requires Claude Code first-run initialization before offering Web enable', async () => {
+    const { app, home } = integrationFixture(new Set(['claude', 'pi']), false);
+    const status = await auth(request(app).get('/api/agent-integrations')).expect(200);
+    expect(status.body.integrations).toContainEqual({
+      name: 'claude', status: 'not-enabled', reason: 'initialize-first',
+    });
+    await auth(request(app).post('/api/agent-integrations/claude/enable')).expect(200, {
+      name: 'claude', status: 'not-enabled', changed: false,
+    });
+    expect(fs.existsSync(path.join(home, '.claude'))).toBe(false);
+  });
+
+  it('reports not-installed and preserves a foreign Pi conflict', async () => {
+    const missing = integrationFixture(new Set());
+    const unavailable = await auth(request(missing.app).get('/api/agent-integrations')).expect(200);
+    expect(unavailable.body.integrations).toEqual([
+      { name: 'claude', status: 'not-installed' },
+      { name: 'pi', status: 'not-installed' },
+    ]);
+
+    const conflict = integrationFixture();
+    fs.mkdirSync(path.dirname(piExtensionFile(conflict.home)), { recursive: true });
+    fs.writeFileSync(piExtensionFile(conflict.home), '// user-owned Pi configuration\n');
+    const status = await auth(request(conflict.app).get('/api/agent-integrations')).expect(200);
+    expect(status.body.integrations).toContainEqual({ name: 'pi', status: 'conflict' });
+    await auth(request(conflict.app).post('/api/agent-integrations/pi/enable')).expect(200, {
+      name: 'pi', status: 'conflict', changed: false,
+    });
+    expect(fs.readFileSync(piExtensionFile(conflict.home), 'utf8'))
+      .toBe('// user-owned Pi configuration\n');
+  });
+
+  it('requires auth and rejects Codex management from the Web surface', async () => {
+    const { app } = integrationFixture();
+    await request(app).get('/api/agent-integrations').expect(401);
+    await auth(request(app).post('/api/agent-integrations/codex/enable')).expect(404);
   });
 });
 

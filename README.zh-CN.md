@@ -27,7 +27,7 @@ handmux 不只是把终端搬上手机。它把你电脑上**正跑着的 tmux �
 
 ## 快速上手 · 约一分钟
 
-**电脑上**需要 tmux 和 Node ≥ 20(手机只要个浏览器)。二选一:
+**电脑上**需要 tmux 和 Node ≥ 22.16(手机只要个浏览器)。二选一:
 
 **Homebrew —— macOS 首选** · 顺带帮你装好 Node + tmux:
 
@@ -62,13 +62,13 @@ handmux start --tunnel cloudflare   # 即时公网地址(自动装 cloudflared)
 - **🧰 不只是终端——一整套装进口袋的移动 Vibe Coding 驾驶舱。** git 全屏看彩色 diff、一键预览正跑着的网站、文档逐句朗读、文件随手双向传——一整套开发能力,此刻全套在手,不用在几个 App 间来回切。
 - **🚀 一分钟从零到手机上敲代码。** 一条 `handmux start`、扫个码,完事——不注册、不上应用商店、不装 App,一个链接就进去。"添加到主屏"后即为全屏 **PWA**,和原生 App 一样顺手。
 - **🧶 人走,活不停。** 手机连的是你工位上**那一个**正跑着的 tmux pane(不是新 shell、不是截图)。合上电脑,拇指接着盯,状态一点不差。
-- **🔔 需要你时,手机会响。** Claude Code / Codex 一到要你拍板就推送;添加到主屏后直接走系统通知。收件箱标「进行中 / 需要你 / 已完成」,多项目并行状态一览无余,拇指一点批授权批计划,别再守着屏幕等它。
+- **🔔 需要你时,手机会响。** Claude Code / Codex 一到要你拍板就推送;添加到主屏后直接走系统通知。收件箱标「进行中 / 需要你 / 已完成 / 出错」,多项目并行状态一览无余;终态结果的已读状态由电脑端统一记录,刷新或换设备也不会重复提醒。打开“已完成”会刷新权威最新尾部，并直接从最后一条已完成 AI 回复开头开始阅读。Server 离线时 Claude Hook 结果先在本机排队,恢复后按会话顺序补交。拇指一点批授权批计划,别再守着屏幕等它。
 - **🔒 你的代码,不经过任何中转。** 免费、完全开源;我们没有中转服务器,数据只在你的电脑和手机之间直接走,确保安全。
 
 ## 功能一览
 
-- **Claude Code / Codex 深度**——收件箱状态台账、拇指批授权批计划，以及所有设备共享的本机最新 agent 用量。
-- **对话视图**——通过 App Server 用流式 Markdown 气泡、工具卡、原生 Goal 生命周期卡片和实时状态操作 Codex CLI；设置或重新开始会创建全新的 active 原生 Goal，立即在右侧显示用户侧卡片并启动 Codex 自带的自动续跑。进行中或暂停的 Goal 常驻在实时任务列表下方，Codex 终态反馈留在对应回合并靠左，所有入口统一打开同一个 Bottom Sheet；当前 Goal 使用 iOS 风格单行等分操作，清除后会移除常驻目标并关闭详情，已经发生的历史卡片仍保留；当前终态 Goal 可修改内容后重新开始。长回答会稳定在开头供阅读，用户可随时回到最新内容；支持现有 pane 原位接入和回复期间可编辑的服务端消息队列，队列和发送回执会跨 Handmux 重启恢复，并在不确定投递后先对账再重试。Claude Code 对话是独立开启的实验性功能。
+- **Claude Code / Codex 深度**——收件箱状态台账、拇指批授权批计划，以及所有设备共享的本机最新订阅用量；每个已开启显示的 Provider 都可从卡片操作菜单单独刷新最新额度，厂家暂时不可达时仍保留上一份数值。Codex 还会显示当前账号与套餐、主账号和特定模型的独立额度，以及剩余重置次数与官方提供的各次到期时间。同一个用量页还能在 Handmux 电脑的本机信任边界内静态加密保存多个 DeepSeek 和 Moonshot (Kimi) API 账户，完整 API Key 不会返回浏览器。
+- **对话视图**——通过 App Server 用流式 Markdown 气泡、工具卡、原生 Goal 生命周期卡片和实时状态操作 Codex CLI；上下文圆环详情直接显示 thread `cwd` 所属 Git worktree 的绝对根路径与分支。设置或重新开始会创建全新的 active 原生 Goal，立即在右侧显示用户侧卡片并启动 Codex 自带的自动续跑。进行中或暂停的 Goal 常驻在实时任务列表下方，Codex 终态反馈留在对应回合并靠左，所有入口统一打开同一个 Bottom Sheet；当前 Goal 使用 iOS 风格单行等分操作，清除后会移除常驻目标并关闭详情，已经发生的历史卡片仍保留；当前终态 Goal 可修改内容后重新开始。长回答会稳定在开头供阅读，用户可随时回到最新内容；现有 pane 可原位接入。所有可发送 Agent 共用同一套持久服务端队列：待发消息可查看、编辑、删除并自动发送，只有 Agent 支持 steer 时才显示“立刻引导”。发送失败或送达状态未知的消息会保留在原位置，并用同一个请求标识安全对账，避免重复执行。电脑端可用 <kbd>Shift</kbd>+<kbd>Enter</kbd> 聚焦输入框，聚焦后该组合键换行，<kbd>Enter</kbd> 发送，<kbd>Esc</kbd> 只取消聚焦而不会停止 Agent。Codex 对话为稳定功能；Claude Code 与 Pi 对话均需独立开启，且仍为实验性功能。
 - **实时终端 + 电脑键盘**——在手机和电脑上实时操控同一个 tmux pane，支持历史滚动、弱网回退、物理键盘直输和原生复制粘贴。
 - **命令 / 聊天双模式**——在终端直输与自然语言对话间切换；手机命令键盘提供直接可用的 Alt 与空格键，并可用跨设备同步的快捷栏快速操作。
 - **更新后重新加载客户端**——服务端更新完成后，在设置里点「重新加载应用」即可载入新版客户端，无需退出主屏应用再重新打开。
@@ -78,10 +78,33 @@ handmux start --tunnel cloudflare   # 即时公网地址(自动装 cloudflared)
 - **网页预览器**——用手机直连或电脑代理预览网址，也可隔离打开静态目录，支持窄屏 / 宽屏和缩放；电脑代理还可向网站请求手机版或电脑版。它只嵌入网页，不替代完整浏览器。
 - **文档**——终端里明确识别出的文本文件路径不分扩展名均可点开，普通斜杠文字保持纯文本；支持 Markdown 排版、字号缩放、逐句高亮朗读，二进制文件仍只下载。
 - **选中 · 拷贝**——终端里长按选中,拖 iOS 式手柄精调,一键拷贝选区 / 整行 / 整段。
-- **文件双向传**——聊天框多选上传、下载、系统分享进来、复制绝对路径。
+- **文件双向传**——聊天框多选上传（含 ZIP 压缩包）、下载、系统分享进来、复制绝对路径。
 - **想法 · 随想随记**——不错过任何点子:每窗口一份想法清单,灵感一冒就记(能语音速记),一点填进输入框。
 - **专治弱网**——退避重连、掉线横幅、离线兜底页、后台暂停轮询;光标不乱跳。
 - **零安装 PWA**——添加到主屏即可全屏运行，支持 English、简体 / 繁體中文、日本語和 한국어。
+
+## Agent 接入
+
+用 `handmux <Agent> [args...]` 启动受支持的 Agent，Agent 名后的参数会原样透传；用独立的 `handmux agent` 命名空间启用或检查 Handmux 接入。Codex 接入已内置，Pi 和 Claude Code 需要显式启用：
+
+```bash
+handmux codex [args...]
+handmux pi [args...]
+
+handmux agent                 # 列出 Agent 接入状态
+handmux agent enable pi
+handmux agent status pi
+handmux agent disable pi
+
+handmux agent enable claude
+handmux agent status claude
+handmux agent disable claude
+handmux agent status codex    # 已安装 Codex 时就绪（接入已内置）
+```
+
+旧的 `handmux hooks install|uninstall` 暂作 Claude Code 兼容别名。Pi 接入使用受信任的 Handmux 自有 Extension wrapper，连接的仍是电脑上同一个原生 Pi TUI 进程；启用时只在 Pi 官方全局 Extension 目录写入这一个 wrapper，不扫描项目，也不加载第三方扩展。启用或禁用后，新开 Pi 会话，或在 Pi 中运行 `/reload`。Handmux 升级后会自动刷新已启用的自有 wrapper；没有 Handmux 所有权标记的文件绝不会被覆盖或删除。Handmux Server 离线时 Pi 仍可正常使用，终态结果会先在本机排队，Server 恢复后再补交。
+
+通用 Agent 对话中的附件只在用户点按后下载。Provider 只注册与会话绑定的 opaque resource ID，手机不会收到本机路径；HTML、SVG 等潜在主动内容始终作为附件下载，不在页面内直接渲染。
 
 ## 工作区恢复
 
@@ -146,7 +169,7 @@ handmux push <title> <body> [选项]
 
 ## 环境要求
 
-电脑需 **Node ≥ 20** 与 **tmux ≥ 3.0**;手机只要浏览器。**Windows** 请装进 **WSL2**(真 Linux 内核 + 真 tmux)——见 [文档](https://handmux.com/docs#windows)。
+电脑需 **Node ≥ 22.16** 与 **tmux ≥ 3.0**;手机只要浏览器。**Windows** 请装进 **WSL2**(真 Linux 内核 + 真 tmux)——见 [文档](https://handmux.com/docs#windows)。
 
 ## 反馈与交流
 

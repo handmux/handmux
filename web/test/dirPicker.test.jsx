@@ -68,6 +68,41 @@ describe('DirPicker', () => {
     expect(onClose).toHaveBeenCalled();
   });
 
+  it('owns one browser Back level while open', async () => {
+    const onClose = vi.fn();
+    await render({ open: true, seedCwd: null, onClose });
+    act(() => window.history.back());
+    await vi.waitFor(() => expect(onClose).toHaveBeenCalledOnce());
+  });
+
+  it('re-arms its Back level instead of closing during a busy mutation', async () => {
+    const onClose = vi.fn();
+    await render({ open: true, seedCwd: null, busy: true, onClose });
+    act(() => window.history.back());
+    await vi.waitFor(() => expect(window.history.state?.overlayId).toBeTruthy());
+    expect(onClose).not.toHaveBeenCalled();
+    expect(container.querySelector('.dirpick-card')).not.toBeNull();
+  });
+
+  it('keeps the picker open and disables confirmation while its mutation is busy', async () => {
+    const onClose = vi.fn();
+    const onPick = vi.fn();
+    await render({ open: true, seedCwd: '/home/u/proj', busy: true, onClose, onPick });
+    await settle();
+    const close = container.querySelector('.settings-close');
+    const confirm = container.querySelector('.browse-pick-confirm');
+    expect(close.disabled).toBe(true);
+    expect(confirm.disabled).toBe(true);
+    act(() => {
+      container.querySelector('.settings-backdrop').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      close.click();
+      confirm.click();
+    });
+    expect(onClose).not.toHaveBeenCalled();
+    expect(onPick).not.toHaveBeenCalled();
+    expect(container.querySelector('[role="dialog"]').getAttribute('aria-busy')).toBe('true');
+  });
+
   it('passes the keyboard inset to the card so it can shrink above the keyboard', async () => {
     await render({ open: true, seedCwd: null, inset: 320 });
     await settle();

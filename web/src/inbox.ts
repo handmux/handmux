@@ -6,9 +6,8 @@ import { t } from './i18n';
 // Raw server kind → display view. idle is just an aged done; permission is the "needs you" bucket
 // (covers tool-permission, AskUserQuestion, ExitPlanMode — all fire permission_prompt).
 // compacting (context compaction) is a busy state → reads as 进行中. `error` (a turn that died on an API
-// error) is deliberately absent: it stays out of the inbox roster and fires no push — surfaced only in the
-// chat lens for now, until the StopFailure payload is verified against a real error.
-export type InboxView = 'working' | 'done' | 'needs';
+// error) is a terminal result with the same canonical unread lifecycle as done, but a distinct red state.
+export type InboxView = 'working' | 'done' | 'needs' | 'error';
 
 export interface PaneInboxState {
   kind?: string | null;
@@ -18,6 +17,8 @@ export interface PaneInboxState {
   msg?: string | null;
   ts?: number | null;
   agent?: string | null;
+  terminalUnread?: boolean;
+  terminalNotificationId?: string;
 }
 
 export interface InboxRow {
@@ -28,21 +29,23 @@ export interface InboxRow {
   view: InboxView;
   msg: string;
   ts: number;
-  agent: string;
+  agent: string | null;
+  terminalNotificationId?: string;
 }
 
 export type InboxCounts = Record<InboxView, number>;
 
 const VIEW: Record<string, InboxView | undefined> = {
-  working: 'working', compacting: 'working', done: 'done', idle: 'done', permission: 'needs',
+  working: 'working', compacting: 'working', done: 'done', idle: 'done', permission: 'needs', error: 'error',
 };
-// Urgency for ordering within a session AND for the topbar dot's colour: needs > done > working.
-const VIEW_RANK: Record<InboxView, number> = { needs: 3, done: 2, working: 1 };
+// Urgency for ordering within a session AND for the topbar dot's colour: error > needs > done > working.
+const VIEW_RANK: Record<InboxView, number> = { error: 4, needs: 3, done: 2, working: 1 };
 
 export const VIEW_LABEL: Record<InboxView, string> = {
   working: t('inbox.view.working'),
   done: t('inbox.view.done'),
   needs: t('inbox.view.needs'),
+  error: t('inbox.view.error'),
 };
 
 // One row per Claude pane, grouped-sortable. `done` rows are HISTORY-FILTERED: a done shows only when
@@ -58,7 +61,8 @@ export function inboxRows(
     const view = typeof st.kind === 'string' ? VIEW[st.kind] : undefined;
     if (!view) continue;
     const ts = st.ts || 0;
-    if (view === 'done' && !(ts > Math.max(readTs || 0, seen[pane] || 0))) continue;
+    if ((view === 'done' || view === 'error') && (st.terminalUnread === false
+      || (st.terminalUnread === undefined && !(ts > Math.max(readTs || 0, seen[pane] || 0))))) continue;
     rows.push({
       pane,
       session: st.session || '',
@@ -67,7 +71,11 @@ export function inboxRows(
       view,
       msg: st.msg || '',
       ts,
-      agent: st.agent || 'claude',
+      // Compatibility is limited to legacy rows that predate the `agent` field. A present but empty
+      // identity is not evidence of Claude and must stay visually neutral.
+      agent: Object.hasOwn(st, 'agent') ? (st.agent || null) : 'claude',
+      ...(st.terminalNotificationId === undefined
+        ? {} : { terminalNotificationId: st.terminalNotificationId }),
     });
   }
   rows.sort((a, b) => (
@@ -82,7 +90,7 @@ export function inboxRows(
 // already-filtered rows, so 已完成 matches the dones actually shown (history-suppressed ones aren't
 // counted) — the header numbers line up exactly with the list below.
 export function viewCounts(rows: readonly InboxRow[]): InboxCounts {
-  const c: InboxCounts = { working: 0, done: 0, needs: 0 };
+  const c: InboxCounts = { working: 0, done: 0, needs: 0, error: 0 };
   for (const row of rows) c[row.view] += 1;
   return c;
 }
@@ -107,6 +115,29 @@ export function maxTs(states: Record<string, PaneInboxState>): number {
     if (ts > m) m = ts;
   }
   return m;
+}
+
+export function applyTerminalReads(
+  states: Record<string, PaneInboxState>,
+  notificationIds: ReadonlySet<string>,
+): Record<string, PaneInboxState> {
+  let changed = false;
+  const next = Object.fromEntries(Object.entries(states).map(([pane, state]) => {
+    if (!state.terminalUnread || !state.terminalNotificationId
+      || !notificationIds.has(state.terminalNotificationId)) return [pane, state];
+    changed = true;
+    return [pane, { ...state, terminalUnread: false }];
+  }));
+  return changed ? next : states;
+}
+
+export function visibleCurrentPaneState(
+  rootView: 'session' | 'project',
+  pane: string | null | undefined,
+  states: Record<string, PaneInboxState>,
+): PaneInboxState | null {
+  if (rootView !== 'session' || !pane) return null;
+  return states[pane] ?? null;
 }
 
 // Humanise a ms-epoch timestamp as a short "x 秒/分钟/小时/天前" relative to now (ms-epoch).

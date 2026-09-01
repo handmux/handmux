@@ -36,6 +36,9 @@ export function logPath(home: string): string { return path.join(pocketHome(home
 export function configPath(home: string): string { return path.join(pocketHome(home), 'config.json'); }
 export function supervisorConfigPath(home: string): string { return path.join(pocketHome(home), 'supervisor-config.json'); }
 export function codexOutboxPath(home: string): string { return path.join(pocketHome(home), 'codex-outbox.json'); }
+export function agentRuntimeDirectoryPath(home: string): string {
+  return path.join(pocketHome(home), 'agent-runtime');
+}
 
 // The hook-maintained Claude state file, on a stable per-user path (survives a global reinstall, unlike
 // the package-internal server/data default). The CLI sets this as CLAUDE_STATE_FILE for the server child

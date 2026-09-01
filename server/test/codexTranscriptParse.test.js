@@ -4,6 +4,55 @@ import { createCodexTranscriptParser, parseCodexTranscript } from '../src/codexT
 const row = (payload) => JSON.stringify({ type: 'response_item', payload });
 
 describe('Codex rollout transcript', () => {
+  it('keeps only the public compacted message as detail data', () => {
+    const parsed = parseCodexTranscript([JSON.stringify({
+      type: 'compacted', timestamp: '2026-08-22T05:04:24.151Z',
+      payload: {
+        message: '## 保留摘要\n\n继续完成当前任务。',
+        replacement_history: [{ role: 'developer', content: 'hidden control data' }],
+      },
+    })]);
+
+    expect(parsed).toEqual([{
+      i: 0, type: 'compact', ts: '2026-08-22T05:04:24.151Z',
+      summary: '## 保留摘要\n\n继续完成当前任务。',
+    }]);
+    expect(JSON.stringify(parsed)).not.toContain('hidden control data');
+  });
+
+  it('replaces Codex compactor output with the compact marker across incremental reads', () => {
+    const parser = createCodexTranscriptParser();
+    const summary = '## 当前任务\n\n继续修复压缩展示。';
+    const handoff = [
+      'Another language model started to solve this problem and produced a summary of its thinking process.',
+      'You also have access to the state of the tools that were used by that language model.',
+      'Use this to build on the work that has already been done and avoid duplicating work.',
+      'Here is the summary produced by the other language model, use the information in this summary to assist with your own analysis:',
+    ].join(' ') + `\n${summary}`;
+
+    parser.push([row({
+      id: 'compactor-answer', type: 'message', role: 'assistant', phase: 'final_answer',
+      content: [{ type: 'output_text', text: summary }],
+      internal_chat_message_metadata_passthrough: { turn_id: 'compact-turn' },
+    })]);
+    expect(parser.messages).toEqual([expect.objectContaining({ type: 'text', text: summary })]);
+    expect(parser.takeChangedFrom()).toBe(0);
+
+    parser.push([
+      JSON.stringify({ type: 'event_msg', payload: { type: 'token_count' } }),
+      JSON.stringify({
+        type: 'compacted', timestamp: '2026-08-23T05:45:28.826Z',
+        payload: { message: handoff, replacement_history: [{ role: 'developer', content: 'hidden' }] },
+      }),
+    ]);
+
+    expect(parser.messages).toEqual([{
+      i: 2, type: 'compact', ts: '2026-08-23T05:45:28.826Z', summary: handoff,
+    }]);
+    expect(parser.takeChangedFrom()).toBe(0);
+    expect(JSON.stringify(parser.messages)).not.toContain('hidden');
+  });
+
   it('renders response_item once and ignores its duplicated event stream', () => {
     const parsed = parseCodexTranscript([
       JSON.stringify({ type: 'event_msg', payload: { type: 'user_message', message: '重复问题' } }),
@@ -25,6 +74,47 @@ describe('Codex rollout transcript', () => {
     expect(parsed.map((message) => message.id)).toEqual([
       'codex:turn-1:user-1', 'codex:turn-1:agent-1',
     ]);
+  });
+
+  it('carries an adjacent native user_message client id onto only its durable user item', () => {
+    const parsed = parseCodexTranscript([
+      JSON.stringify({
+        type: 'event_msg',
+        payload: { type: 'user_message', message: '问题', client_id: 'request-1' },
+      }),
+      row({
+        id: 'user-1', type: 'message', role: 'user',
+        content: [{ type: 'input_text', text: '问题' }],
+        internal_chat_message_metadata_passthrough: { turn_id: 'turn-1' },
+      }),
+      row({
+        id: 'agent-1', type: 'message', role: 'assistant',
+        content: [{ type: 'output_text', text: '回答' }],
+        internal_chat_message_metadata_passthrough: { turn_id: 'turn-1' },
+      }),
+    ]);
+
+    expect(parsed[0]).toMatchObject({
+      role: 'user', turnId: 'turn-1', itemId: 'user-1', correlationId: 'request-1',
+    });
+    expect(parsed[1]).toMatchObject({ role: 'assistant', turnId: 'turn-1', itemId: 'agent-1' });
+    expect(parsed[1]).not.toHaveProperty('correlationId');
+  });
+
+  it('does not carry a client id across a non-adjacent rollout record', () => {
+    const parsed = parseCodexTranscript([
+      JSON.stringify({
+        type: 'event_msg', payload: { type: 'user_message', client_id: 'request-stale' },
+      }),
+      JSON.stringify({ type: 'turn_context', payload: {} }),
+      row({
+        id: 'user-1', type: 'message', role: 'user',
+        content: [{ type: 'input_text', text: '问题' }],
+        internal_chat_message_metadata_passthrough: { turn_id: 'turn-1' },
+      }),
+    ]);
+
+    expect(parsed[0]).not.toHaveProperty('correlationId');
   });
 
   it('omits Codex-injected AGENTS instructions without hiding normal user text', () => {
@@ -82,6 +172,43 @@ describe('Codex rollout transcript', () => {
       type: 'goal', event: 'set', role: 'assistant',
       goal: { objective: 'Finish the release', status: 'active', tokensUsed: 1234, tokenBudget: 40000 },
     })]);
+  });
+
+  it('keeps a same-objective Goal when its durable usage resets for a new lifecycle', () => {
+    const context = (tokens) => [
+      '<codex_internal_context source="goal">',
+      'Continue working toward the active thread goal.',
+      '<objective>',
+      'Finish the release',
+      '</objective>',
+      'Budget:',
+      `- Tokens used: ${tokens}`,
+      '- Token budget: 40,000',
+      '</codex_internal_context>',
+    ].join('\n');
+    const parsed = parseCodexTranscript([
+      row({
+        id: 'goal-context-1', type: 'message', role: 'user',
+        content: [{ type: 'input_text', text: context('1,234') }],
+        internal_chat_message_metadata_passthrough: { turn_id: 'turn-goal-1' },
+      }),
+      row({
+        id: 'goal-context-2', type: 'message', role: 'user',
+        content: [{ type: 'input_text', text: context('1,500') }],
+        internal_chat_message_metadata_passthrough: { turn_id: 'turn-goal-2' },
+      }),
+      row({
+        id: 'goal-context-3', type: 'message', role: 'user',
+        content: [{ type: 'input_text', text: context('0') }],
+        internal_chat_message_metadata_passthrough: { turn_id: 'turn-goal-3' },
+      }),
+    ]);
+
+    expect(parsed.map((message) => message.id)).toEqual([
+      'codex:turn-goal-1:goal-context-1',
+      'codex:turn-goal-3:goal-context-3',
+    ]);
+    expect(parsed.map((message) => message.goal.tokensUsed)).toEqual([1234, 0]);
   });
 
   it('projects the native update_goal result as a terminal Goal event', () => {

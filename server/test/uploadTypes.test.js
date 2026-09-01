@@ -3,10 +3,11 @@ import { describe, it, expect } from 'vitest';
 import { DEFAULT_UPLOAD_EXTS, loadUploadExts, isAllowedUploadExt } from '../src/uploadTypes.js';
 
 describe('uploadTypes', () => {
-  it('default set covers image/text/office, not arbitrary binaries', () => {
+  it('default set covers image/text/office/ZIP, not arbitrary binaries', () => {
     expect(isAllowedUploadExt('a.png', DEFAULT_UPLOAD_EXTS)).toBe(true);
     expect(isAllowedUploadExt('a.md', DEFAULT_UPLOAD_EXTS)).toBe(true);
     expect(isAllowedUploadExt('a.docx', DEFAULT_UPLOAD_EXTS)).toBe(true);
+    expect(isAllowedUploadExt('archive.zip', DEFAULT_UPLOAD_EXTS)).toBe(true);
     expect(isAllowedUploadExt('a.exe', DEFAULT_UPLOAD_EXTS)).toBe(false);
     expect(isAllowedUploadExt('a.sh.bin', DEFAULT_UPLOAD_EXTS)).toBe(false);
   });

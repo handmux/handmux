@@ -53,9 +53,8 @@ const PREVIEW_DIR_KEY = 'tw_preview_dir';   // { [windowId]: absPath } — last 
 const STARTUP_CMD_KEY = 'tw_startup_cmd';   // last startup command chosen in new window/session (e.g. "claude")
 const CHAT_DRAFT_KEY = 'tw_chat_draft';     // the chat composer's unsent text — survives an app exit/kill
 const CHAT_TONE_KEY = 'tw_chat_tone';       // the 对话-lens colour tone the user picked (ink | light | dusk)
-const CHAT_LENS_KEY = 'tw_chat_lens';       // legacy shared opt-in; read only as a migration fallback
-const CLAUDE_CHAT_LENS_KEY = 'tw_chat_lens_claude';
-const CODEX_CHAT_LENS_KEY = 'tw_chat_lens_codex';
+const AGENT_CONVERSATION_ENABLED_KEY = 'tw_agent_conversation_enabled_v1';
+const AGENT_USAGE_ENABLED_KEY = 'tw_agent_usage_enabled_v1';
 const IDEAS_KEY = 'tw_ideas';               // { [sessionName]: { [windowName]: Idea[] } } — per-window todo list
 const CHANGELOG_SEEN_KEY = 'tw_changelog_seen'; // the latest changelog entry id (v) the user has opened
 const VERSION_SEEN_KEY = 'tw_version_seen';     // the npm "latest" version already acknowledged in Settings
@@ -63,6 +62,9 @@ const GIT_REPOS_KEY = 'tw_git_repos';          // { [windowId]: absPath[] } —
 const GIT_DIRS_KEY = 'tw_git_dirs';            // { [windowId]: absPath[] } — dirs the user picked repos from (history, newest first) bound git repos per window absolute paths (order = tab order)
 const WORKSPACE_PROMPT_KEY = 'tw_workspace_prompt';
 const WORKSPACE_APPLIED_MAPPINGS_KEY = 'tw_workspace_applied_mappings';
+const PROJECT_TASK_BETA_KEY = 'hm_project_task_beta';
+const ROOT_VIEW_KEY = 'hm_root_view';
+const LAST_PROJECT_KEY = 'hm_last_project';
 const SAFE_MAPPING_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 const RUNTIME_ID_PATTERNS: Record<RuntimeKind, RegExp> = {
   sessions: /^\$\d+$/,
@@ -91,6 +93,20 @@ function stringList(value: unknown): string[] {
 export const getToken = () => localStorage.getItem(TOKEN_KEY);
 export const setToken = (t: string) => localStorage.setItem(TOKEN_KEY, t);
 export const clearToken = () => localStorage.removeItem(TOKEN_KEY);
+
+export type RootView = 'project' | 'session';
+export const getProjectTaskBeta = (): boolean => localStorage.getItem(PROJECT_TASK_BETA_KEY) === '1';
+export const setProjectTaskBeta = (enabled: boolean): void => {
+  if (enabled) localStorage.setItem(PROJECT_TASK_BETA_KEY, '1');
+  else localStorage.removeItem(PROJECT_TASK_BETA_KEY);
+};
+export const getRootView = (): RootView => localStorage.getItem(ROOT_VIEW_KEY) === 'project' ? 'project' : 'session';
+export const setRootView = (view: RootView): void => localStorage.setItem(ROOT_VIEW_KEY, view);
+export const getLastProject = (): string | null => localStorage.getItem(LAST_PROJECT_KEY);
+export const setLastProject = (id: string): void => {
+  if (id) localStorage.setItem(LAST_PROJECT_KEY, id);
+  else localStorage.removeItem(LAST_PROJECT_KEY);
+};
 
 // Opaque per-install identity for isolating authenticated Browser sessions between phones. It is not an
 // account credential: the normal Handmux token is still required for every API request.
@@ -464,17 +480,64 @@ export const setChatTone = (tone: ChatTone): void => {
   if (isChatTone(tone)) localStorage.setItem(CHAT_TONE_KEY, tone);
 };
 
-// Claude and Codex have independent chat-view opt-ins. Existing installs inherit the old shared value until
-// each new switch is changed; explicit '0' is retained so turning one agent off never falls back to legacy '1'.
-const getAgentChatLensEnabled = (key: string): boolean => {
-  const value = localStorage.getItem(key);
-  return value == null ? localStorage.getItem(CHAT_LENS_KEY) === '1' : value === '1';
-};
-const setAgentChatLensEnabled = (key: string, on: boolean): void => localStorage.setItem(key, on ? '1' : '0');
-export const getClaudeChatLensEnabled = () => getAgentChatLensEnabled(CLAUDE_CHAT_LENS_KEY);
-export const setClaudeChatLensEnabled = (on: boolean) => setAgentChatLensEnabled(CLAUDE_CHAT_LENS_KEY, on);
-export const getCodexChatLensEnabled = () => getAgentChatLensEnabled(CODEX_CHAT_LENS_KEY);
-export const setCodexChatLensEnabled = (on: boolean) => setAgentChatLensEnabled(CODEX_CHAT_LENS_KEY, on);
+function agentConversationPreferences(): Record<string, boolean> {
+  try {
+    const value = JSON.parse(localStorage.getItem(AGENT_CONVERSATION_ENABLED_KEY) || '{}') as unknown;
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+    return Object.fromEntries(Object.entries(value).filter((entry): entry is [string, boolean] => (
+      /^[a-z][a-z0-9-]{0,63}$/.test(entry[0]) && typeof entry[1] === 'boolean'
+    )));
+  } catch { return {}; }
+}
+
+// Conversation is a formal Adapter capability and defaults on. This generic migration absorbs the old
+// per-Agent keys and then the older shared flag by key presence, preserving explicit opt-outs.
+export function getAgentConversationEnabled(agentId: string): boolean {
+  const preferences = agentConversationPreferences();
+  if (Object.hasOwn(preferences, agentId)) return preferences[agentId]!;
+  const previousAgentValue = localStorage.getItem(`tw_chat_lens_${agentId}`);
+  const sharedValue = localStorage.getItem('tw_chat_lens');
+  const enabled = previousAgentValue !== null ? previousAgentValue === '1'
+    : sharedValue !== null ? sharedValue === '1' : true;
+  if (/^[a-z][a-z0-9-]{0,63}$/.test(agentId)) {
+    preferences[agentId] = enabled;
+    localStorage.setItem(AGENT_CONVERSATION_ENABLED_KEY, JSON.stringify(preferences));
+  }
+  return enabled;
+}
+
+export function setAgentConversationEnabled(agentId: string, enabled: boolean): void {
+  if (!/^[a-z][a-z0-9-]{0,63}$/.test(agentId)) return;
+  const preferences = agentConversationPreferences();
+  preferences[agentId] = enabled;
+  localStorage.setItem(AGENT_CONVERSATION_ENABLED_KEY, JSON.stringify(preferences));
+}
+
+function agentUsagePreferences(): Record<string, boolean> {
+  try {
+    const value = JSON.parse(localStorage.getItem(AGENT_USAGE_ENABLED_KEY) || '{}') as unknown;
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+    return Object.fromEntries(Object.entries(value).filter((entry): entry is [string, boolean] => (
+      /^[a-z][a-z0-9-]{0,63}$/.test(entry[0]) && typeof entry[1] === 'boolean'
+    )));
+  } catch { return {}; }
+}
+
+// Subscription usage stays visible by default. A browser may collapse one provider without changing
+// collection on the Handmux host or affecting another browser connected to the same host.
+export function getAgentUsageEnabled(agentId: string): boolean {
+  const preferences = agentUsagePreferences();
+  return Object.hasOwn(preferences, agentId) ? preferences[agentId]! : true;
+}
+
+export function setAgentUsageEnabled(agentId: string, enabled: boolean): void {
+  if (!/^[a-z][a-z0-9-]{0,63}$/.test(agentId)) return;
+  const preferences = agentUsagePreferences();
+  preferences[agentId] = enabled;
+  try { localStorage.setItem(AGENT_USAGE_ENABLED_KEY, JSON.stringify(preferences)); }
+  catch { /* private mode: keep the in-memory React state for this open page */ }
+}
+
 
 // Chat composer draft — mirrored on every change (send/fill clear the box, which removes the key),
 // so whatever was typed when the app was killed comes back on the next open.

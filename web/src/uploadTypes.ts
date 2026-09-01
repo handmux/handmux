@@ -14,6 +14,8 @@ export const UPLOAD_EXTS: readonly string[] = [
   'rs', 'java', 'c', 'h', 'cpp', 'sh',
   // documents / office
   'pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'odt', 'ods', 'odp', 'rtf',
+  // archives
+  'zip',
 ];
 
 // The `accept` attribute: dot-extensions ONLY, deliberately no `image/*` (or `video/*`) wildcard.
