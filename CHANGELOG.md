@@ -6,6 +6,7 @@ All notable changes to handmux. Format follows [Keep a Changelog](https://keepac
 
 ### Fixed
 
+- 修复 Agent 尚无用量更新时间时，订阅用量卡片的操作菜单没有靠右对齐的问题。
 - 修复 Codex 完成上下文压缩后，Handmux 仍把后续回复当作压缩器内部输出丢弃、导致对话只能在回复结束后整段刷新的问题。
 - 修复 Pi 工具仍在运行时遇到历史推进，页面重连会丢失工具开始事件并导致对话流报错或空白的问题。
 - 修复 Codex 同一授权请求内容更新时 Interaction 实时流被误判为非法并断开的情况。

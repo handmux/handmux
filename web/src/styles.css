@@ -2457,7 +2457,7 @@ button.cmd-text { background: none; border: none; text-align: left; }
   padding-left: 12px; font-weight: 600; font-size: 15px; }
 .usage-agent-head .agent-mark { width: 18px; height: 18px; }
 .usage-agent-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.usage-agent-menu { flex: none; }
+.usage-agent-menu { grid-column: 4; flex: none; }
 .usage-agent-menu:disabled { opacity: .38; }
 .usage-agent-head .usage-updated { min-width: 0; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
 .usage-agent-body { padding: 8px 12px 10px; border-top: 1px solid rgba(84,84,88,.55); }

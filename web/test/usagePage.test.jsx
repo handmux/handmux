@@ -78,6 +78,7 @@ describe('UsagePage', () => {
     const menuIconRule = styles.match(/\.api-balance-menu svg, \.usage-agent-menu svg\s*\{([^}]*)\}/)?.[1] ?? '';
     expect(menuIconRule).toContain('width: 20px');
     expect(menuIconRule).toContain('height: 20px');
+    expect(styles).toMatch(/\.usage-agent-menu\s*\{[^}]*grid-column:\s*4/);
     const popoverRule = styles.match(/\.usage-action-popover\s*\{([^}]*)\}/)?.[1] ?? '';
     expect(popoverRule).toContain('position: fixed');
     expect(popoverRule).toContain('max-width:');
@@ -124,6 +125,17 @@ describe('UsagePage', () => {
     expect([...container.querySelectorAll('.usage-agent-menu')].every((button) => !button.disabled)).toBe(true);
     expect(container.querySelector('[data-usage-agent="claude"]')).not.toBeNull();
     expect(container.querySelector('[data-usage-agent="codex"]')?.textContent).toMatch(/message|消息/);
+  });
+
+  it('keeps the subscription menu in its trailing grid column without hook usage timestamps', async () => {
+    getAgentUsage.mockResolvedValue({ agents: [{
+      agentId: 'claude', label: 'Claude Code', status: 'setup_required', groups: [],
+    }] });
+    await render(); await settle();
+
+    const head = container.querySelector('[data-usage-agent="claude"] .usage-agent-head');
+    expect(head?.querySelector('.usage-updated')).toBeNull();
+    expect(head?.querySelector('.usage-agent-menu')).not.toBeNull();
   });
 
   it('persists each fixed provider display toggle and leaves only its title row when hidden', async () => {
