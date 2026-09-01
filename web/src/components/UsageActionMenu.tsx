@@ -106,7 +106,7 @@ export default function UsageActionMenu({ anchor, label, actions, onClose }: {
   };
 
   return <OverlayPortal className="usage-menu-overlay">
-    <div className="usage-menu-backdrop" onPointerDown={onClose} />
+    <div className="usage-menu-backdrop" onClick={onClose} />
     <div ref={menuRef} className="usage-action-popover" role="menu" aria-label={label} onKeyDown={moveFocus}
       style={position ? { left: position.left, top: position.top } : { left: 0, top: 0, visibility: 'hidden' }}>
       {actions.map((action, index) => <div role="none" key={action.key}>

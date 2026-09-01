@@ -399,8 +399,11 @@ describe('UsagePage', () => {
       expect(document.activeElement).toBe(items[0]);
       expect(items.map((item) => item.tabIndex)).toEqual([0, -1]);
 
-      await act(async () => container.querySelector('.usage-menu-backdrop')
-        .dispatchEvent(new MouseEvent('pointerdown', { bubbles: true })));
+      const backdrop = container.querySelector('.usage-menu-backdrop');
+      await act(async () => backdrop.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true })));
+      expect(container.querySelector('[role="menu"]')).not.toBeNull();
+      await act(async () => backdrop.dispatchEvent(new MouseEvent('pointerup', { bubbles: true })));
+      await act(async () => backdrop.dispatchEvent(new MouseEvent('click', { bubbles: true })));
       expect(container.querySelector('[role="menu"]')).toBeNull();
       expect(document.activeElement).toBe(trigger);
 
