@@ -323,6 +323,7 @@ export class AgentRuntime {
   readonly #transport: LocalAgentBridgeTransportServer;
   #unsubscribePanes: (() => void) | undefined;
   #reconcileTail: Promise<void> = Promise.resolve();
+  #startPromise: Promise<void> | undefined;
   #started = false;
   #closed = false;
   #closePromise: Promise<void> | undefined;
@@ -728,17 +729,50 @@ export class AgentRuntime {
   async start(): Promise<void> {
     if (this.#closed) throw new Error('AgentRuntime is closed');
     if (this.#started) return;
-    this.#started = true;
-    for (const adapter of this.adapters) await this.#startAdapter(adapter);
-    await this.#transport.start();
-    this.#unsubscribePanes = this.#panes.subscribe((snapshot) => {
-      const operation = this.#reconcileTail.then(() => this.#reconcile(snapshot));
-      this.#reconcileTail = operation.catch((error) => {
-        this.#logger.warn('Agent pane reconciliation failed', {
-          error: error instanceof Error ? error.message : String(error),
+    if (this.#startPromise) return this.#startPromise;
+    const operation = this.#start();
+    this.#startPromise = operation;
+    try {
+      await operation;
+    } finally {
+      if (this.#startPromise === operation) this.#startPromise = undefined;
+    }
+  }
+
+  async #start(): Promise<void> {
+    let unsubscribe: (() => void) | undefined;
+    try {
+      // Establish the only fallible shared prerequisite before adapters acquire resources. Connections
+      // arriving inside this short starting window fail closed and can retry once #started is committed.
+      await this.#transport.start();
+      if (this.#closed) throw new Error('AgentRuntime is closed');
+      unsubscribe = this.#panes.subscribe((snapshot) => {
+        const operation = this.#reconcileTail.then(() => this.#reconcile(snapshot));
+        this.#reconcileTail = operation.catch((error) => {
+          this.#logger.warn('Agent pane reconciliation failed', {
+            error: error instanceof Error ? error.message : String(error),
+          });
         });
       });
-    });
+      this.#unsubscribePanes = unsubscribe;
+      for (const adapter of this.adapters) {
+        if (this.#closed) throw new Error('AgentRuntime is closed');
+        await this.#startAdapter(adapter);
+      }
+      if (this.#closed) throw new Error('AgentRuntime is closed');
+      this.#started = true;
+    } catch (error) {
+      unsubscribe?.();
+      if (this.#unsubscribePanes === unsubscribe) this.#unsubscribePanes = undefined;
+      await this.#transport.close();
+      if (!this.#closed) {
+        const message = error instanceof Error ? error.message : String(error);
+        for (const adapter of this.adapters) this.#report(adapter.id, {
+          availability: 'unavailable', message,
+        });
+      }
+      throw error;
+    }
   }
 
   close(): Promise<void> {
@@ -750,6 +784,7 @@ export class AgentRuntime {
   async #close(): Promise<void> {
     if (this.#closed) return;
     this.#closed = true;
+    await this.#startPromise?.catch(() => {});
     this.#unsubscribePanes?.();
     this.#unsubscribePanes = undefined;
     await this.#reconcileTail.catch(() => {});

@@ -190,4 +190,55 @@ describe('ConversationLiveHub', () => {
     expect(await waiting).toEqual({ value: undefined, done: true });
     expect(h.close).toHaveBeenCalledOnce();
   });
+
+  it('retains an active provisional lifecycle across a history barrier for late subscribers', async () => {
+    const h = harness();
+    const { lease } = run();
+    const hub = new ConversationLiveHub({ conversation: h.conversation });
+    hubs.push(hub);
+    await hub.subscribe(lease);
+    await h.emit({
+      type: 'item.opened', sequence: 1, provisionalId: 'tool-1',
+      draft: { kind: 'tool_call', callId: 'call-1', name: 'shell' },
+    });
+    await h.emit({
+      type: 'history.changed', sequence: 2, viewId: 'view-1', historyVersion: 'history-2',
+    });
+    await h.emit({
+      type: 'item.delta', sequence: 3, provisionalId: 'tool-1',
+      delta: {
+        op: 'item.replace',
+        draft: { kind: 'tool_call', callId: 'call-1', name: 'shell', summary: 'running' },
+      },
+    });
+
+    const late = await hub.subscribe(lease);
+    expect(late.checkpoint).toEqual({
+      viewId: 'view-1', historyVersion: 'history-1', streamSequence: 0,
+    });
+    expect(await next(late)).toMatchObject({
+      value: { type: 'item.opened', sequence: 1, provisionalId: 'tool-1' }, done: false,
+    });
+    expect(await next(late)).toMatchObject({
+      value: { type: 'history.changed', sequence: 2, historyVersion: 'history-2' }, done: false,
+    });
+    expect(await next(late)).toMatchObject({
+      value: { type: 'item.delta', sequence: 3, provisionalId: 'tool-1' }, done: false,
+    });
+
+    await h.emit({
+      type: 'item.settled', sequence: 4, provisionalId: 'tool-1',
+      item: {
+        id: 'tool-1', sessionId: 'session-1', kind: 'tool_call', status: 'complete',
+        callId: 'call-1', name: 'shell', summary: 'done',
+      },
+    });
+    await h.emit({
+      type: 'history.changed', sequence: 5, viewId: 'view-1', historyVersion: 'history-3',
+    });
+    const afterSettlement = await hub.subscribe(lease);
+    expect(afterSettlement.checkpoint).toEqual({
+      viewId: 'view-1', historyVersion: 'history-3', streamSequence: 5,
+    });
+  });
 });

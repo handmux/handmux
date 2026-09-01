@@ -209,10 +209,15 @@ export class InteractionLiveHub {
     }
     const pending = new Map(checkpoint.pending.map((item) => [item.id, item]));
     if (event.type === 'opened') {
-      if (event.interaction.runId !== shared.run.ref.runId || pending.has(event.interaction.id)) {
+      const previous = pending.get(event.interaction.id);
+      if (event.interaction.runId !== shared.run.ref.runId
+        || (previous !== undefined
+          && previous.resolutionToken !== event.interaction.resolutionToken)) {
         this.#terminate(shared);
         throw new InteractionLiveHubError('unavailable', 'Interaction opened event is invalid');
       }
+      // Core deliberately reuses the public identity and resolution token when a native pending item
+      // changes in place. Mirror its upsert contract so prompt/option updates do not tear down SSE.
       pending.set(event.interaction.id, structuredClone(event.interaction));
     } else if (!pending.delete(event.interactionId)) {
       this.#terminate(shared);

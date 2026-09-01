@@ -39,6 +39,7 @@ interface SharedObservation {
   baseline?: ConversationLiveHandle['checkpoint'];
   checkpoint?: ConversationLiveHandle['checkpoint'];
   replay: ConversationEvent[];
+  provisional: Set<string>;
   subscribers: Set<EventQueue>;
   idleTimer: NodeJS.Timeout | undefined;
   detachAbort: () => void;
@@ -219,6 +220,7 @@ export class ConversationLiveHub {
       ready: Promise.resolve(),
       subscribers: new Set(),
       replay: [],
+      provisional: new Set(),
       idleTimer: undefined,
       detachAbort: () => {},
       terminated: false,
@@ -249,8 +251,9 @@ export class ConversationLiveHub {
       || !Number.isSafeInteger(event.sequence)
       || event.sequence <= shared.checkpoint.streamSequence) return;
     const previousSequence = shared.checkpoint.streamSequence;
+    const advancesBaseline = event.type === 'history.changed' && shared.provisional.size === 0;
     if (shared.replay.length >= this.#maxReplayEvents
-      && event.type !== 'history.changed' && event.type !== 'stream.gap') {
+      && !advancesBaseline && event.type !== 'stream.gap') {
       const gap: ConversationEvent = {
         type: 'stream.gap', sequence: event.sequence, afterSequence: previousSequence,
       };
@@ -268,10 +271,13 @@ export class ConversationLiveHub {
     const terminal = event.type === 'stream.gap';
     shared.replay.push(structuredClone(event));
     for (const subscriber of [...shared.subscribers]) subscriber.push(event, terminal);
-    if (event.type === 'history.changed') {
-      // A durable barrier advances the baseline without ending the native observation. Existing clients
-      // receive the barrier and reconcile their page; later subscribers start directly from the new
-      // checkpoint, so pre-barrier replay can be released immediately.
+    if (event.type === 'item.opened') shared.provisional.add(event.provisionalId);
+    else if (event.type === 'item.settled' || event.type === 'item.cancelled') {
+      shared.provisional.delete(event.provisionalId);
+    } else if (event.type === 'stream.gap') shared.provisional.clear();
+    if (advancesBaseline) {
+      // A barrier can release replay only when no provisional lifecycle crosses it. Otherwise a late
+      // subscriber must replay item.opened before receiving that item's later delta or settlement.
       shared.baseline = structuredClone(shared.checkpoint);
       shared.replay = [];
     }

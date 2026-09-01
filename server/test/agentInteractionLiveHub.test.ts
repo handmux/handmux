@@ -87,6 +87,32 @@ describe('InteractionLiveHub', () => {
     hub.close();
   });
 
+  it('upserts an opened interaction whose public identity is already pending', async () => {
+    const h = harness();
+    const hub = new InteractionLiveHub({ interaction: { open: h.open }, idleGraceMs: 60_000 });
+    const first = await hub.subscribe(h.lease);
+    const updated: InteractionEvent = {
+      type: 'opened', revision: 5,
+      interaction: {
+        id: 'interaction-1', runId: 'run-1', type: 'approval', prompt: 'Allow updated command?',
+        options: [{ id: 'allow', label: 'Allow' }], resolutionToken: 'resolution-1',
+      },
+    };
+
+    await h.emit(updated);
+    expect(await first[Symbol.asyncIterator]().next()).toEqual({ value: updated, done: false });
+    const late = await hub.subscribe(h.lease);
+    expect(late.checkpoint).toEqual({
+      revision: 5,
+      pending: [expect.objectContaining({
+        id: 'interaction-1', prompt: 'Allow updated command?', resolutionToken: 'resolution-1',
+      })],
+    });
+    first.close();
+    late.close();
+    hub.close();
+  });
+
   it('fails a corrupt revision closed instead of exposing divergent pending state', async () => {
     const h = harness();
     const hub = new InteractionLiveHub({ interaction: { open: h.open } });
@@ -94,6 +120,23 @@ describe('InteractionLiveHub', () => {
     await expect(h.emit({
       type: 'resolved', revision: 8, interactionId: 'interaction-1',
     })).rejects.toThrow(/revision/i);
+    expect(await subscription[Symbol.asyncIterator]().next()).toEqual({
+      value: undefined, done: true,
+    });
+    expect(h.close).toHaveBeenCalledOnce();
+  });
+
+  it('fails a same-id opened event closed when its Core-owned resolution token changes', async () => {
+    const h = harness();
+    const hub = new InteractionLiveHub({ interaction: { open: h.open } });
+    const subscription = await hub.subscribe(h.lease);
+    await expect(h.emit({
+      type: 'opened', revision: 5,
+      interaction: {
+        id: 'interaction-1', runId: 'run-1', type: 'approval', prompt: 'Allow?',
+        options: [{ id: 'allow', label: 'Allow' }], resolutionToken: 'replacement-token',
+      },
+    })).rejects.toThrow(/opened event is invalid/i);
     expect(await subscription[Symbol.asyncIterator]().next()).toEqual({
       value: undefined, done: true,
     });

@@ -469,6 +469,48 @@ describe('AgentRuntime composition root', () => {
     expect(restarted.bridgeAuthToken).toBe(AUTH_TOKEN);
   });
 
+  it('rolls back a transport start failure and retries without double-starting adapters', async () => {
+    const stateDirectory = directory();
+    const socketDirectory = path.join(stateDirectory, 'shared');
+    fs.mkdirSync(socketDirectory, { mode: 0o755 });
+    const panes = new TestPanes([]);
+    const activateCleanup = vi.fn();
+    const activate = vi.fn(async () => activateCleanup);
+    const bindingCleanup = vi.fn();
+    const bindingStart = vi.fn(async () => bindingCleanup);
+    const runtime = new AgentRuntime({
+      adapters: [{ ...adapter('pi'), activate }],
+      panes,
+      process: { inspectForeground: async () => null },
+      stateDirectory,
+      socketPath: path.join(socketDirectory, 'agent.sock'),
+      authToken: AUTH_TOKEN,
+      adapterFactories: { pi: () => ({ start: bindingStart }) },
+    });
+    runtimes.push(runtime);
+
+    await expect(runtime.start()).rejects.toThrow(/private directory/i);
+    expect(activate).not.toHaveBeenCalled();
+    expect(bindingStart).not.toHaveBeenCalled();
+    expect(panes.listeners.size).toBe(0);
+    expect(runtime.health()).toContainEqual(expect.objectContaining({
+      adapterId: 'pi', availability: 'unavailable', message: expect.stringMatching(/private directory/i),
+    }));
+
+    fs.chmodSync(socketDirectory, 0o700);
+    await expect(Promise.all([runtime.start(), runtime.start()])).resolves.toEqual([undefined, undefined]);
+    expect(activate).toHaveBeenCalledOnce();
+    expect(bindingStart).toHaveBeenCalledOnce();
+    expect(panes.listeners.size).toBe(1);
+    expect(runtime.health()).toContainEqual(expect.objectContaining({
+      adapterId: 'pi', availability: 'ready',
+    }));
+
+    await runtime.close();
+    expect(activateCleanup).toHaveBeenCalledOnce();
+    expect(bindingCleanup).toHaveBeenCalledOnce();
+  });
+
   it('waits for Interaction cancellation and native close during Runtime shutdown', async () => {
     const panes = new TestPanes([pane()]);
     let releaseNativeClose!: () => void;
