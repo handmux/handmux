@@ -4,6 +4,10 @@ All notable changes to handmux. Format follows [Keep a Changelog](https://keepac
 
 ## [Unreleased]
 
+### Fixed
+
+- 修复 Codex 完成上下文压缩后，Handmux 仍把后续回复当作压缩器内部输出丢弃、导致对话只能在回复结束后整段刷新的问题。
+
 ## [0.25.1] - 2026-09-02
 
 ### Fixed

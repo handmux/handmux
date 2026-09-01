@@ -1164,6 +1164,8 @@ class CodexAppConnection {
       const state = this.state(params.threadId);
       if (message.method === 'item/started' && params.item.type === 'contextCompaction') {
         state.compacting = true;
+      } else if (message.method === 'item/completed' && params.item.type === 'contextCompaction') {
+        state.compacting = false;
       }
       if (params.item.type === 'agentMessage') {
         const itemKey = `${params.turnId}\0${params.item.id}`;

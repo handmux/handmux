@@ -4639,13 +4639,18 @@ describe('Codex App Server client', () => {
     app.close();
   });
 
-  it('does not stream the compactor handoff as an assistant reply', async () => {
+  it('hides the compactor handoff and resumes streaming when the compaction item completes', async () => {
     const proxy = fakeProxy();
     const app = createCodexAppServer({ home: '/home/test', exists: () => true, connect: () => proxy.ws });
     const events: CodexStreamEvent[] = [];
     const unsubscribe = await app.subscribe('%1', 'thread-1', (event) => events.push(event));
 
-    await app.compact('%1', 'thread-1');
+    proxy.push({
+      jsonrpc: '2.0', method: 'item/started', params: {
+        threadId: 'thread-1', turnId: 'compact-turn',
+        item: { id: 'compaction', type: 'contextCompaction' },
+      },
+    });
     proxy.push({
       jsonrpc: '2.0', method: 'item/started', params: {
         threadId: 'thread-1', turnId: 'compact-turn',
@@ -4668,8 +4673,10 @@ describe('Codex App Server client', () => {
     expect(events).toEqual([]);
 
     proxy.push({
-      jsonrpc: '2.0', method: 'thread/compacted',
-      params: { threadId: 'thread-1', turnId: 'compact-turn' },
+      jsonrpc: '2.0', method: 'item/completed', params: {
+        threadId: 'thread-1', turnId: 'compact-turn',
+        item: { id: 'compaction', type: 'contextCompaction' },
+      },
     });
     proxy.push({
       jsonrpc: '2.0', method: 'item/started', params: {
@@ -4677,10 +4684,22 @@ describe('Codex App Server client', () => {
         item: { id: 'normal-answer', type: 'agentMessage', text: '' },
       },
     });
+    proxy.push({
+      jsonrpc: '2.0', method: 'item/agentMessage/delta', params: {
+        threadId: 'thread-1', turnId: 'normal-turn',
+        itemId: 'normal-answer', delta: 'Visible live reply',
+      },
+    });
     await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(events).toEqual([expect.objectContaining({
-      type: 'started', threadId: 'thread-1', turnId: 'normal-turn', itemId: 'normal-answer',
-    })]);
+    expect(events).toEqual([
+      expect.objectContaining({
+        type: 'started', threadId: 'thread-1', turnId: 'normal-turn', itemId: 'normal-answer',
+      }),
+      expect.objectContaining({
+        type: 'delta', threadId: 'thread-1', turnId: 'normal-turn',
+        itemId: 'normal-answer', delta: 'Visible live reply',
+      }),
+    ]);
 
     unsubscribe();
     app.close();
