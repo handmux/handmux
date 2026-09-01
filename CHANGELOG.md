@@ -4,6 +4,8 @@ All notable changes to handmux. Format follows [Keep a Changelog](https://keepac
 
 ## [Unreleased]
 
+## [0.25.1] - 2026-09-02
+
 ### Fixed
 
 - 修复 Codex 自动生成标题或回顾摘要的临时线程被误认成 pane 主会话，导致对话页无法读取、收件箱批量出现无法完成的幽灵“进行中”的问题；实时绑定与服务重连现在都忽略 `ephemeral` thread，恢复正确 root thread 后会自动撤销旧假状态。
