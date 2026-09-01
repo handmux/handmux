@@ -122,6 +122,28 @@ describe('NativeInboxCoordinator', () => {
     expect(first.signal.reason).toBe('session_replaced');
   });
 
+  it('removes a stale working record when the pane returns to its idle root session', async () => {
+    const h = setup({
+      availability: 'ready',
+      rows: [{ paneId: '%1', sessionId: 'ephemeral-helper', cursor: 'working', state: 'working' }],
+    });
+    await h.coordinator.reconcile();
+    expect(h.inbox.read().records).toEqual([
+      expect.objectContaining({
+        state: 'working', run: expect.objectContaining({ sessionId: 'ephemeral-helper' }),
+      }),
+    ]);
+
+    h.setSnapshot({
+      availability: 'ready',
+      rows: [{ paneId: '%1', sessionId: 'root-thread', cursor: 'idle', state: null }],
+    });
+    await h.coordinator.reconcile();
+
+    expect(h.inbox.read().records).toEqual([]);
+    expect(h.runs.currentForPane('%1')?.ref.sessionId).toBe('root-thread');
+  });
+
   it('preserves a live terminal transition during late session association', async () => {
     const h = setup({
       availability: 'ready',

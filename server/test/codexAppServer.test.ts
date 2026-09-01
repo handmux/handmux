@@ -141,6 +141,7 @@ interface FakeProxyOptions {
   turnStartReply?: boolean;
   turnSteerReply?: boolean;
   parentThreadIds?: Record<string, string | null>;
+  ephemeralThreadIds?: string[];
   initialGoal?: TestGoal | null;
   goalGetWait?: PromiseLike<unknown> | null;
   goalSetWait?: PromiseLike<unknown> | null;
@@ -207,7 +208,7 @@ function fakeProxy({
   readWait = null, metadataReadWait = null, resumeThread = null, resumeError = null, resumeWait = null,
   listWaits = [], fixedListNextCursor = null, listResult,
   turnStartWait = null, turnStartReply = true, turnSteerReply = true,
-  parentThreadIds = {}, initialGoal = null,
+  parentThreadIds = {}, ephemeralThreadIds = [], initialGoal = null,
   goalGetWait = null, goalSetWait = null, goalSetWaits = [], goalSetError = false,
   goalClearWait = null, userAgent = 'codex-cli/0.149.1',
 }: FakeProxyOptions = {}) {
@@ -267,6 +268,7 @@ function fakeProxy({
         reply({ jsonrpc: '2.0', id: message.id, result: { thread: {
           ...thread, id: message.params.threadId, updatedAt: updatedAt[message.params.threadId!],
           parentThreadId: parentThreadIds[message.params.threadId!] ?? null,
+          ephemeral: ephemeralThreadIds.includes(message.params.threadId!),
         } } });
       };
       const wait = message.params.includeTurns === false ? metadataReadWait : readWait;
@@ -4227,6 +4229,27 @@ describe('Codex App Server client', () => {
     app.close();
   });
 
+  it('keeps the root conversation when a newer ephemeral helper is also loaded', async () => {
+    const proxy = fakeProxy({
+      loaded: ['thread-root', 'thread-helper'],
+      updatedAt: { 'thread-root': 10, 'thread-helper': 20 },
+      ephemeralThreadIds: ['thread-helper'],
+    });
+    const app = createCodexAppServer({ home: '/home/test', exists: () => true, connect: () => proxy.ws });
+    expect(await app.discover('%1')).toEqual({ managed: true, threadId: 'thread-root' });
+    app.close();
+  });
+
+  it('does not discover an ephemeral helper as a pane conversation', async () => {
+    const proxy = fakeProxy({
+      loaded: ['thread-helper'],
+      ephemeralThreadIds: ['thread-helper'],
+    });
+    const app = createCodexAppServer({ home: '/home/test', exists: () => true, connect: () => proxy.ws });
+    expect(await app.discover('%1')).toEqual({ managed: true, threadId: null });
+    app.close();
+  });
+
   it('does not let a collaboration child thread replace the pane conversation', async () => {
     const proxy = fakeProxy();
     const app = createCodexAppServer({ home: '/home/test', exists: () => true, connect: () => proxy.ws });
@@ -4238,6 +4261,27 @@ describe('Codex App Server client', () => {
     });
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect((await app.discover('%1')).threadId).toBe('thread-1');
+    app.close();
+  });
+
+  it('does not let an ephemeral helper replace or update the pane conversation', async () => {
+    const proxy = fakeProxy();
+    const app = createCodexAppServer({ home: '/home/test', exists: () => true, connect: () => proxy.ws });
+    expect((await app.discover('%1')).threadId).toBe('thread-1');
+
+    proxy.push({
+      jsonrpc: '2.0', method: 'thread/started',
+      params: { thread: { id: 'thread-helper', parentThreadId: null, ephemeral: true } },
+    });
+    proxy.push({
+      jsonrpc: '2.0', method: 'turn/started',
+      params: { threadId: 'thread-helper', turn: { id: 'helper-turn' } },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect((await app.discover('%1')).threadId).toBe('thread-1');
+    expect((await app.inboxStates([{ id: '%1' }]))['%1'])
+      .toMatchObject({ threadId: 'thread-1', kind: 'done' });
     app.close();
   });
 

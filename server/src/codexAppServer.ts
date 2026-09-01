@@ -121,6 +121,7 @@ interface AppTurn extends UnknownRecord {
 interface AppThread extends UnknownRecord {
   id?: string;
   parentThreadId?: string | null;
+  ephemeral?: boolean;
   turns?: AppTurn[];
   status?: AppStatus;
   createdAt?: number;
@@ -1310,9 +1311,10 @@ class CodexAppConnection {
       void this.drainQueue(params.threadId).catch(() => {});
     } else if (message.method === 'thread/started') {
       const startedThreadId = params.thread?.id || params.threadId || null;
-      // Collaboration child threads share this App Server connection. They are independent work, not a
-      // replacement for the root TUI conversation represented by this pane.
-      if (startedThreadId && params.thread?.parentThreadId == null) {
+      // Collaboration children and ephemeral helpers share this App Server connection. They are
+      // independent work, not a replacement for the durable root conversation represented by this pane.
+      if (startedThreadId && params.thread?.parentThreadId == null
+        && params.thread?.ephemeral !== true) {
         const previous = this.currentThreadId;
         this.lastStartedThreadId = startedThreadId;
         this.currentThreadId = startedThreadId;
@@ -2842,7 +2844,7 @@ class CodexAppConnection {
         return {
           threadId,
           order: Number(thread.updatedAt ?? thread.createdAt ?? index),
-          root: thread.parentThreadId == null,
+          root: thread.parentThreadId == null && thread.ephemeral !== true,
           known: true,
         };
       } catch { return { threadId, order: index, root: false, known: false }; }
