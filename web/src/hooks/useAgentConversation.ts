@@ -1043,6 +1043,43 @@ export function useAgentConversation(
   const retryOutgoing = useCallback(async (clientRequestId: string): Promise<void> => {
     const attempt = outgoing.find((item) => item.clientRequestId === clientRequestId);
     if (!attempt || attempt.status !== 'unknown' || !run?.sessionId) return;
+    if (attempt.owner === 'queue' && !attempt.actionId) {
+      const request = {
+        clientRequestId: attempt.clientRequestId,
+        text: attempt.text,
+        delivery: 'prompt' as const,
+      };
+      let receipt;
+      try {
+        receipt = await sendAgentConversationMessage(run, request);
+      } catch (cause) {
+        if (!staleRun(cause)) throw cause;
+        const fresh = await recoverRun(run);
+        if (!fresh) throw cause;
+        receipt = await sendAgentConversationMessage(fresh, request);
+      }
+      if (receipt.submission) observeSubmissionSnapshot([receipt.submission]);
+      if (receipt.status === 'queued' || receipt.submission?.state === 'queued'
+        || (receipt.submission?.state === 'dispatching'
+          && receipt.submission.dispatchOrigin === 'queue')) {
+        setOutgoing((items) => items.map((entry) => {
+          if (entry.clientRequestId !== clientRequestId) return entry;
+          const { error: _error, ...accepted } = entry;
+          return { ...accepted, owner: 'queue' as const, status: 'accepted' as const };
+        }));
+        forgetSendAttempt(sendAttemptsRef.current, clientRequestId);
+      } else if (receipt.status === 'accepted' && !receipt.submission) {
+        setOutgoing((items) => items.map((entry) => {
+          if (entry.clientRequestId !== clientRequestId) return entry;
+          const { error: _error, ...accepted } = entry;
+          return { ...accepted, owner: 'timeline' as const, status: 'accepted' as const };
+        }));
+        forgetSendAttempt(sendAttemptsRef.current, clientRequestId);
+      } else if (receipt.status === 'accepted') {
+        forgetSendAttempt(sendAttemptsRef.current, clientRequestId);
+      }
+      return;
+    }
     const request = {
       submissionId: attempt.clientRequestId,
       ...(attempt.actionId ? { actionId: attempt.actionId } : {}),

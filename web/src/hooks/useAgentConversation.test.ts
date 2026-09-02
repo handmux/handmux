@@ -1137,6 +1137,48 @@ describe('useAgentConversation', () => {
     unmount();
   });
 
+  it('retries an unknown Queue submission with the same id and text', async () => {
+    const run = { agentId: 'pi', paneId: '%1', runId: 'run-1', sessionId: 'session-1' };
+    vi.mocked(discoverAgentConversation).mockResolvedValue({
+      session: { agentId: 'pi', sessionId: 'session-1' }, run,
+      viewId: 'view-1', historyVersion: 'history-1',
+      capabilities: { history: true, live: 'poll', sendable: true },
+    });
+    vi.mocked(readAgentConversationPage).mockResolvedValue({ status: 'ok', page: {
+      sessionId: 'session-1', viewId: 'view-1', historyVersion: 'history-1',
+      items: [], hasMore: false,
+    } });
+    vi.mocked(sendAgentConversationMessage)
+      .mockRejectedValueOnce(new Error('request timed out'))
+      .mockImplementationOnce(async (_run, request) => ({ status: 'queued', submission: {
+        id: request.clientRequestId, text: request.text, state: 'queued', revision: 5,
+        createdAt: 1, updatedAt: 3,
+      } }));
+    const { result, unmount } = renderHook(() => useAgentConversation(run));
+    await waitFor(() => expect(result.current.status).toBe('ready'));
+    await act(async () => {
+      await result.current.send('retry queue', { queueHint: true }).catch(() => {});
+    });
+    const clientRequestId = vi.mocked(sendAgentConversationMessage).mock.calls[0]?.[1].clientRequestId;
+    if (!clientRequestId) throw new Error('expected Queue request id');
+    expect(result.current.localSubmissions).toEqual([
+      expect.objectContaining({ clientRequestId, owner: 'queue', status: 'unknown' }),
+    ]);
+
+    await act(async () => { await result.current.retryOutgoing?.(clientRequestId); });
+
+    expect(sendAgentConversationMessage).toHaveBeenNthCalledWith(2, run, {
+      clientRequestId, text: 'retry queue', delivery: 'prompt',
+    });
+    expect(queryAgentConversationSubmission).not.toHaveBeenCalled();
+    expect(result.current.localSubmissions).toEqual([
+      expect.objectContaining({
+        clientRequestId, owner: 'queue', status: 'accepted',
+      }),
+    ]);
+    unmount();
+  });
+
   it('falls back to a submission-only query when a recovered steer action conflicts', async () => {
     const run = { agentId: 'codex', paneId: '%1', runId: 'run-1', sessionId: 'session-1' };
     vi.mocked(discoverAgentConversation).mockResolvedValue({

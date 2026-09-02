@@ -482,7 +482,12 @@ export function AgentConversationQueueControl({
               event.preventDefault();
               void openEditor(item);
             }}><span className="cc-queue-text">{item.text}</span>
-            {statusLabel && <span className="cc-queue-failure is-unknown">{statusLabel}</span>}
+            {statusLabel && <span className="cc-queue-failure is-unknown">{statusLabel}
+              {unknownQueue && conversation?.retryOutgoing && <button type="button"
+                className="cc-queue-action" onClick={() => {
+                  void conversation.retryOutgoing?.(submissionId).catch(() => {});
+                }}>{t('common.retry')}</button>}
+            </span>}
           </span>
           <span className="cc-queue-actions">
             {showSteer && <button type="button" className="cc-queue-action cc-queue-send"

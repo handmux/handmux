@@ -243,7 +243,8 @@ describe('Agent Conversation controls UI', () => {
     expect(screen.queryByRole('button', { name: '删除排队消息' })).toBeNull();
   });
 
-  it('shows neutral terminal guidance for rejected and unknown Queue rows', () => {
+  it('shows neutral terminal guidance and retries an unknown Queue row', async () => {
+    const retryOutgoing = vi.fn(async () => {});
     const view = render(<AgentConversationQueueControl activity="idle" controller={controller({
       snapshot: { queue: {
         items: [{
@@ -265,11 +266,12 @@ describe('Agent Conversation controls UI', () => {
         }],
         canSteer: true, canEdit: true, canRemove: true,
       } },
-    })} />);
+    })} conversation={{ items: [], localSubmissions: [], retryOutgoing } as never} />);
     expect(screen.getByText('发送状态待确认，不会自动重发')).toBeTruthy();
     expect(screen.queryByRole('button', { name: '立刻引导' })).toBeNull();
     expect(screen.queryByRole('button', { name: '删除排队消息' })).toBeNull();
-    expect(screen.queryByRole('button', { name: /unknown/ })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: '重试' }));
+    await waitFor(() => expect(retryOutgoing).toHaveBeenCalledWith('q1'));
   });
 
   it('reacquires an expired queue edit lease after foregrounding and preserves the draft', async () => {
