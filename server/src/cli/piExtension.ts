@@ -6,6 +6,8 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const MANAGED_MARK = '// handmux-managed-pi-extension:v1';
 const ENTRY_MARK = '// handmux-entry:';
+const NATIVE_IMPORT_MODULE_URL = 'data:text/javascript;base64,'
+  + 'ZXhwb3J0IGZ1bmN0aW9uIGltcG9ydFBpQ29ubmVjdG9yKHNwZWNpZmllcikgeyByZXR1cm4gaW1wb3J0KHNwZWNpZmllcik7IH0K';
 
 export type PiExtensionStatus = 'absent' | 'installed' | 'stale' | 'conflict';
 
@@ -76,7 +78,12 @@ function wrapper(entryFile: string): string {
     MANAGED_MARK,
     `${ENTRY_MARK}${entryUrl}`,
     '// This tiny wrapper is owned by Handmux. Pi loads it from its documented global extension path.',
-    `export { default } from ${JSON.stringify(importUrl)};`,
+    '// Native ESM import preserves the fingerprint that Pi\'s jiti strips from static re-exports.',
+    `import { importPiConnector } from ${JSON.stringify(NATIVE_IMPORT_MODULE_URL)};`,
+    'export default async function handmux(api) {',
+    `  const connector = await importPiConnector(${JSON.stringify(importUrl)});`,
+    '  return connector.default(api);',
+    '}',
     '',
   ].join('\n');
 }

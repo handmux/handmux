@@ -33,9 +33,13 @@ describe('managed Pi Extension installer', () => {
     const fingerprint = createHash('sha256').update(fs.readFileSync(first.entryFile)).digest('hex');
     expect(content).toContain('// handmux-managed-pi-extension:v1');
     expect(content).toContain(`// handmux-entry:${entryUrl}\n`);
+    expect(content).toContain('import { importPiConnector } from "data:text/javascript;base64,');
     expect(content).toContain(
-      `export { default } from ${JSON.stringify(`${entryUrl}?handmux=${fingerprint}`)}`,
+      `const connector = await importPiConnector(${JSON.stringify(`${entryUrl}?handmux=${fingerprint}`)})`,
     );
+    expect(content).toContain('return connector.default(api);');
+    expect(content).not.toContain('export { default } from');
+    expect(content).not.toContain('new Function');
     expect(fs.statSync(first.file).mode & 0o777).toBe(0o600);
     expect(fs.statSync(path.dirname(first.file)).mode & 0o777).toBe(0o700);
     expect(piExtensionStatus(home, { entryFile: source })).toBe('installed');
@@ -60,9 +64,9 @@ describe('managed Pi Extension installer', () => {
     expect(after).not.toBe(before);
     expect(after).toContain(`// handmux-entry:${entryUrl}\n`);
     expect(after).toContain(
-      `export { default } from ${JSON.stringify(
+      `const connector = await importPiConnector(${JSON.stringify(
         `${entryUrl}?handmux=${createHash('sha256').update(fs.readFileSync(source)).digest('hex')}`,
-      )}`,
+      )})`,
     );
     expect(piExtensionStatus(home, { entryFile: source })).toBe('installed');
     expect(syncPiExtension(home, { entryFile: source })?.changed).toBe(false);
