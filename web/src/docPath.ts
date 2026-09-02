@@ -78,7 +78,7 @@ export function findDocLinks(line: string): DocumentPathLink[] {
 }
 
 export const isAbsolute = (path: unknown): path is string => (
-  typeof path === 'string' && path.startsWith('/')
+  typeof path === 'string' && (path.startsWith('/') || path === '~' || path.startsWith('~/'))
 );
 
 // Pure posix join + normalize (resolves '.' and '..'). An absolute `rel` ignores `base`.

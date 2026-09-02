@@ -306,7 +306,8 @@ describe('Codex Conversation adapter', () => {
     expect(serialized).not.toContain('cookie-secret');
     expect(serialized).not.toContain('mcp-result-secret');
     expect(serialized).not.toContain('/Users/alice');
-    expect(serialized).not.toContain('/private/tmp');
+    expect(serialized).toContain('/private/tmp/result.json');
+    expect(serialized).toContain('~/mcp-output.json');
     expect(serialized).not.toContain('localhost');
     expect(serialized).not.toContain('127.0.0.1');
     expect(Buffer.byteLength(serialized)).toBeLessThan(1024 * 1024);

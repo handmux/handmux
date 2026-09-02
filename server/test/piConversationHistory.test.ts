@@ -88,7 +88,7 @@ describe('PiConversationHistory', () => {
     expect(JSON.stringify(page)).not.toContain('pi-input-secret');
     expect(JSON.stringify(page)).not.toContain('/Users/alice');
     expect(page.items.find((item) => item.kind === 'tool_result')).toMatchObject({
-      callId: 'pi:call_001', content: [{ type: 'text', text: '[redacted]' }],
+      callId: 'pi:call_001', content: [{ type: 'text', text: '/work' }],
     });
   });
 

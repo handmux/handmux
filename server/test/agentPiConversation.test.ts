@@ -374,7 +374,7 @@ describe('Pi Conversation Bridge adapter', () => {
     expect(events.find((event) => event.type === 'item.settled'))
       .not.toHaveProperty('item.truncation');
     expect(JSON.stringify(events)).not.toContain('settled-secret');
-    expect(JSON.stringify(events)).not.toContain('/private/tmp');
+    expect(JSON.stringify(events)).toContain('/private/tmp/pi-result');
     expect(events.some((event) => event.type === 'stream.gap')).toBe(false);
   });
 

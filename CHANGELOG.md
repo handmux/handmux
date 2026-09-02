@@ -6,6 +6,7 @@ All notable changes to handmux. Format follows [Keep a Changelog](https://keepac
 
 ### Fixed
 
+- Agent 对话中的工具输入和输出现在保留可读的本地文件路径，并将用户主目录缩写为 `~/`；密码、Token、Cookie 和 URL 凭证仍会脱敏。
 - 发送状态待确认的排队消息现在先用原消息 ID 安全重试；若 Core 已经派发仍无法确认，则移入对话并由用户确认是否作为新消息再次发送。
 - 修复 Agent 尚无用量更新时间时，订阅用量卡片的操作菜单没有靠右对齐的问题。
 - 修复再次点击已展开的用量菜单按钮时，菜单收起后又被同一次触摸重新打开的问题。

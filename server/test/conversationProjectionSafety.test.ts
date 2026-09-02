@@ -4,6 +4,7 @@ import {
   MAX_CONVERSATION_TEXT_BYTES,
   MAX_TOOL_INPUT_BYTES,
   sanitizeConversationToolItem,
+  safeProviderPathLabel,
   safeRelativeProviderPath,
   sanitizeToolInput,
   sanitizeToolInputWithMetadata,
@@ -38,10 +39,11 @@ describe('Conversation adapter projection safety', () => {
     const serialized = JSON.stringify(safe);
 
     expect(safe).toMatchObject({
+      cwd: '~/project', savedPath: '~/result.png',
       file_path: 'src/app.ts', token_budget: 4_096,
       url: 'https://docs.example.com/reference',
       publicEndpoint: 'https://mcp.example.com/rpc',
-      cmd: 'node [redacted] --config config/local.json',
+      cmd: 'node ~/project/script.js --config config/local.json',
     });
     expect(serialized).not.toContain('api-secret');
     expect(serialized).not.toContain('access-secret');
@@ -71,11 +73,12 @@ describe('Conversation adapter projection safety', () => {
     expect(Buffer.byteLength(structured.text)).toBeLessThanOrEqual(MAX_CONVERSATION_TEXT_BYTES);
     expect(structured.text).not.toContain('\uFFFD');
     expect(structured.text).not.toContain('result-secret');
-    expect(structured.text).not.toContain('/private/tmp');
+    expect(structured.text).toContain('/private/tmp/provider-work');
     expect(structured.text).not.toContain('localhost');
     expect(structured.text).toContain('https://docs.example.com/tool');
     expect(plain.text).not.toContain('plain-secret');
     expect(plain.text).not.toContain('/Users/alice');
+    expect(plain.text).toContain('~/output.txt');
     expect(plain.text).not.toContain('bob:password');
   });
 
@@ -94,7 +97,7 @@ describe('Conversation adapter projection safety', () => {
     });
 
     expect(input).toMatchObject({
-      redacted: true, truncated: false, value: { query: 'keep', cwd: 'work' },
+      redacted: true, truncated: false, value: { query: 'keep', cwd: '~/work' },
     });
     expect(item).toMatchObject({
       status: 'complete', input: { query: 'keep' },
@@ -161,7 +164,7 @@ describe('Conversation adapter projection safety', () => {
     expect(serialized).not.toContain('provider.lan');
   });
 
-  it('keeps safe relative paths and absolute basenames without exposing directories', () => {
+  it('keeps safe relative and absolute paths while abbreviating user homes', () => {
     expect(safeRelativeProviderPath('src/app.ts')).toBe('src/app.ts');
     for (const unsafe of [
       '/Users/alice/app.ts', 'C:\\Users\\alice\\app.ts', '\\\\server\\share\\app.ts',
@@ -177,7 +180,8 @@ describe('Conversation adapter projection safety', () => {
     expect(projected).toMatchObject({
       redacted: true,
       value: {
-        file_path: 'app.ts', outputPath: 'result.json', relativePath: 'src/components/View.tsx',
+        file_path: '~/project/app.ts', outputPath: '~/build/result.json',
+        relativePath: 'src/components/View.tsx',
       },
     });
     expect(projected.value).not.toHaveProperty('unsafePath');
@@ -185,6 +189,8 @@ describe('Conversation adapter projection safety', () => {
     expect(JSON.stringify(projected.value)).not.toContain('C:\\Users');
     expect(sanitizeToolInput({ file_path: '/Users/a/../secret.ts' })).toEqual({});
     expect(sanitizeToolInput({ file_path: 'C:\\a\\..\\secret.ts' })).toEqual({});
+    expect(safeProviderPathLabel('file:///Users/alice/project/app.ts')).toBe('~/project/app.ts');
+    expect(safeProviderPathLabel('file://remote-host/share/app.ts')).toBeUndefined();
 
     const item = sanitizeConversationToolItem({
       id: 'pi:result-link', sessionId: 'session-1', status: 'complete', kind: 'tool_result',

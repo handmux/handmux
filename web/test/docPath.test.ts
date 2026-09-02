@@ -92,8 +92,9 @@ describe('findDocLinks', () => {
 });
 
 describe('isAbsolute', () => {
-  it('is true only for a leading slash', () => {
+  it('treats absolute and home-abbreviated paths as rooted', () => {
     expect(isAbsolute('/a/b.md')).toBe(true);
+    expect(isAbsolute('~/a/b.md')).toBe(true);
     expect(isAbsolute('a/b.md')).toBe(false);
     expect(isAbsolute('./a.md')).toBe(false);
   });

@@ -90,6 +90,12 @@ export interface DownloadStat {
 export type RealPathResult = DocsError | { real: string };
 
 export function createDocs({ home, extraRoots = [], maxDownloadBytes = MAX_TRANSFER_BYTES }: DocsOptions) {
+  const rootedClientPath = (rawPath: unknown): string | null => {
+    if (typeof rawPath !== 'string') return null;
+    if (rawPath === '~') return home;
+    if (rawPath.startsWith('~/')) return join(home, rawPath.slice(2));
+    return rawPath.startsWith('/') ? rawPath : null;
+  };
   // $HOME is constant at runtime — resolve once at construction, reuse the same promise everywhere.
   const realHomeP = fs.realpath(home);
   // Browse / read / download / upload may also reach a few EXTRA roots OUTSIDE $HOME (e.g. /tmp,
@@ -121,12 +127,13 @@ export function createDocs({ home, extraRoots = [], maxDownloadBytes = MAX_TRANS
   // the phone neither transfers content nor forces a re-render. `mtimeMs` is always returned so the
   // client can store it for the next check.
   async function readDoc(rawPath: unknown, knownMtime: number | null = null): Promise<ReadDocResult> {
-    if (typeof rawPath !== 'string' || rawPath[0] !== '/') return { error: 'not absolute', status: 400 };
+    const requestedPath = rootedClientPath(rawPath);
+    if (!requestedPath) return { error: 'not absolute', status: 400 };
     // Markdown/HTML keep their rich renderer; every other filename gets a content-checked plain-text
     // preview. Extension is presentation metadata, never the permission to read a file as text.
-    const type = docTypeFor(rawPath) || 'text';
+    const type = docTypeFor(requestedPath) || 'text';
     let real;
-    try { real = await fs.realpath(rawPath); }
+    try { real = await fs.realpath(requestedPath); }
     catch { return { error: 'not found', status: 404 }; }
     if (!rootOf(real, await rootsP)) return { error: 'outside home', status: 400 };
     let st;
@@ -181,9 +188,10 @@ export function createDocs({ home, extraRoots = [], maxDownloadBytes = MAX_TRANS
   // Resolve a path for DOWNLOAD: any regular file under home, no extension white-list (unlike
   // readDoc). Same realpath+isUnder boundary; symlinks escaping home resolve outside → rejected.
   async function statForDownload(rawPath: unknown): Promise<DocsError | DownloadStat> {
-    if (typeof rawPath !== 'string' || rawPath[0] !== '/') return { error: 'not absolute', status: 400 };
+    const requestedPath = rootedClientPath(rawPath);
+    if (!requestedPath) return { error: 'not absolute', status: 400 };
     let real;
-    try { real = await fs.realpath(rawPath); }
+    try { real = await fs.realpath(requestedPath); }
     catch { return { error: 'not found', status: 404 }; }
     if (!rootOf(real, await rootsP)) return { error: 'outside home', status: 400 };
     let st;

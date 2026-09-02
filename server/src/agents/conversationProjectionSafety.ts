@@ -109,13 +109,27 @@ export function safeProviderPathLabel(value: unknown): string | undefined {
   const relative = safeRelativeProviderPath(value);
   if (relative !== undefined) return relative;
   if (typeof value !== 'string' || value.length === 0) return undefined;
-  if (!(value.startsWith('/') || value.startsWith('\\') || /^[a-zA-Z]:[\\/]/.test(value))) {
-    return undefined;
+  let path = value;
+  if (path.startsWith('~/') || path.startsWith('~\\')) {
+    return path.split(/[\\/]/).includes('..') ? undefined : path.replaceAll('\\', '/');
   }
-  if (value.split(/[\\/]/).includes('..')) return undefined;
-  const leaf = value.replace(/[\\/]+$/, '').split(/[\\/]/).at(-1);
-  return leaf && leaf !== '.' && leaf !== '..' && safeRelativeProviderPath(leaf) === leaf
-    ? leaf : undefined;
+  if (/^file:/i.test(path)) {
+    try {
+      const url = new URL(path);
+      if (url.protocol !== 'file:' || (url.hostname && url.hostname !== 'localhost')) return undefined;
+      path = decodeURIComponent(url.pathname);
+    } catch { return undefined; }
+  }
+  const windows = path.match(/^([a-zA-Z]:)[\\/]Users[\\/][^\\/]+(?<tail>(?:[\\/].*)?)$/i);
+  if (windows) path = windows.groups?.tail ? `~${windows.groups.tail.replaceAll('\\', '/')}` : '~';
+  else path = path
+    .replace(/^\/Users\/[^/]+(?=\/|$)/, '~')
+    .replace(/^\/home\/[^/]+(?=\/|$)/, '~')
+    .replace(/^\/root(?=\/|$)/, '~');
+  if (!(path === '~' || path.startsWith('~/') || path.startsWith('/')
+    || /^[a-zA-Z]:[\\/]/.test(path))) return undefined;
+  if (path.split(/[\\/]/).includes('..')) return undefined;
+  return path;
 }
 
 function urlContainsPrivateData(value: string): boolean {
@@ -157,8 +171,9 @@ function safePublicEndpoint(value: unknown): value is string {
 }
 
 /**
- * Redacts provider-local data from otherwise useful command output. This intentionally keeps commands,
- * relative paths, and ordinary public URLs readable.
+ * Redacts credentials and private endpoints from otherwise useful command output. Local paths stay
+ * readable because this authenticated self-hosted UI exposes the same workspace through its terminal;
+ * conventional user-home prefixes are abbreviated to avoid repeating account names.
  */
 export function sanitizeToolText(value: string): { text: string; redacted: boolean } {
   let redacted = false;
@@ -166,8 +181,14 @@ export function sanitizeToolText(value: string): { text: string; redacted: boole
     redacted = true;
     return `${prefix}[redacted]`;
   };
+  const keepPath = (match: string, prefix: string, path: string): string => {
+    const safe = safeProviderPathLabel(path);
+    if (safe === undefined) return replace(match, prefix);
+    if (safe !== path) redacted = true;
+    return `${prefix}${safe}`;
+  };
   let text = value
-    .replace(/\b(?:file):\/\/[^\s<>'"`]+/gi, (match) => replace(match))
+    .replace(/\b(?:file):\/\/[^\s<>'"`]+/gi, (match) => keepPath(match, '', match))
     .replace(/\b(?:https?|wss?):\/\/[^\s<>'"`]+/gi, (match) => (
       urlContainsPrivateData(match) ? replace(match) : match
     ))
@@ -180,9 +201,9 @@ export function sanitizeToolText(value: string): { text: string; redacted: boole
         privateEndpointText(endpoint) ? replace(match, prefix) : match
       ))
     .replace(/(^|[\s"'=(+\-])([a-zA-Z]:[\\/][^\s"'`,;)\]}]+)/g,
-      (match, prefix: string) => replace(match, prefix))
+      (match, prefix: string, path: string) => keepPath(match, prefix, path))
     .replace(/(^|[\s"'=(+\-])(\/(?!\/)[^\s"'`,;)\]}]+)/g,
-      (match, prefix: string) => replace(match, prefix));
+      (match, prefix: string, path: string) => keepPath(match, prefix, path));
   return { text, redacted };
 }
 

@@ -40,6 +40,10 @@ describe('readDoc', () => {
     const out = await docs.readDoc(join(home, 'a.md'));
     expect(out).toMatchObject({ name: 'a.md', type: 'markdown', content: '# hello' });
   });
+  it('expands a home-abbreviated document path', async () => {
+    const out = await docs.readDoc('~/a.md');
+    expect(out).toMatchObject({ name: 'a.md', type: 'markdown', content: '# hello' });
+  });
   it('reads an html file under home', async () => {
     const out = await docs.readDoc(join(home, 'page.html'));
     expect(out).toMatchObject({ name: 'page.html', type: 'html' });
@@ -64,6 +68,9 @@ describe('readDoc', () => {
   });
   it('400s a symlink escaping home (realpath lands outside)', async () => {
     expect((await docs.readDoc(join(home, 'escape.md'))).status).toBe(400);
+  });
+  it('does not let a home-abbreviated path traverse outside home', async () => {
+    expect((await docs.readDoc(`~/../${outside.split('/').at(-1)}/secret.md`)).status).toBe(400);
   });
   it('400s a directory path (not a file)', async () => {
     expect((await docs.readDoc(join(home, 'docs'))).status).toBe(400);
@@ -159,6 +166,11 @@ describe('statForDownload', () => {
     expect(out.real).toBe(await fs.realpath(join(home, 'note.txt')));
     expect(out.size).toBe((await fs.stat(join(home, 'note.txt'))).size);
   });
+  it('expands a home-abbreviated download path', async () => {
+    const out = await docs.statForDownload('~/note.txt');
+    expect(out).toMatchObject({ name: 'note.txt' });
+    expect(out.real).toBe(await fs.realpath(join(home, 'note.txt')));
+  });
   it('400s a non-absolute path', async () => {
     expect((await docs.statForDownload('note.txt')).status).toBe(400);
   });
@@ -167,6 +179,9 @@ describe('statForDownload', () => {
   });
   it('400s a symlink escaping home', async () => {
     expect((await docs.statForDownload(join(home, 'escape.md'))).status).toBe(400);
+  });
+  it('does not let a home-abbreviated download path traverse outside home', async () => {
+    expect((await docs.statForDownload(`~/../${outside.split('/').at(-1)}/secret.md`)).status).toBe(400);
   });
   it('400s a directory path', async () => {
     expect((await docs.statForDownload(join(home, 'docs'))).status).toBe(400);
