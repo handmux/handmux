@@ -4,6 +4,8 @@ All notable changes to handmux. Format follows [Keep a Changelog](https://keepac
 
 ## [Unreleased]
 
+## [0.25.2] - 2026-09-02
+
 ### Fixed
 
 - Agent 对话中的工具输入和输出现在保留可读的本地文件路径，并将用户主目录缩写为 `~/`；密码、Token、Cookie 和 URL 凭证仍会脱敏。
