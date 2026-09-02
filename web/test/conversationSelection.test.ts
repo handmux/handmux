@@ -42,6 +42,42 @@ describe('conversation DOM selection', () => {
     root.remove();
   });
 
+  it('returns null for invalid caret frames unless a real in-root fallback target exists', () => {
+    const root = rootWith('<strong>alpha</strong> beta');
+    const outside = document.createElement('span');
+    outside.textContent = 'overlay handle';
+    document.body.append(outside);
+    const originalPosition = Object.getOwnPropertyDescriptor(document, 'caretPositionFromPoint');
+    const originalRange = Object.getOwnPropertyDescriptor(document, 'caretRangeFromPoint');
+    try {
+      Object.defineProperty(document, 'caretPositionFromPoint', {
+        configurable: true,
+        value: () => ({ offsetNode: outside.firstChild!, offset: 0 }),
+      });
+      Object.defineProperty(document, 'caretRangeFromPoint', {
+        configurable: true,
+        value: () => null,
+      });
+      expect(textOffsetAtPoint(root, 20, 30)).toBeNull();
+      expect(textOffsetAtPoint(root, 20, 30, outside)).toBeNull();
+      expect(textOffsetAtPoint(root, 20, 30, root.querySelector('strong'))).toBe(0);
+
+      Object.defineProperty(document, 'caretPositionFromPoint', {
+        configurable: true,
+        value: () => null,
+      });
+      expect(textOffsetAtPoint(root, 20, 30)).toBeNull();
+      expect(textOffsetAtPoint(root, 20, 30, root.querySelector('strong'))).toBe(0);
+    } finally {
+      if (originalPosition) Object.defineProperty(document, 'caretPositionFromPoint', originalPosition);
+      else Reflect.deleteProperty(document, 'caretPositionFromPoint');
+      if (originalRange) Object.defineProperty(document, 'caretRangeFromPoint', originalRange);
+      else Reflect.deleteProperty(document, 'caretRangeFromPoint');
+      outside.remove();
+      root.remove();
+    }
+  });
+
   it('selects complete Latin tokens and paths but uses language word boundaries for Chinese', () => {
     expect(wordRangeAt('run --flag=value next', 7)).toEqual({ start: 4, end: 16 });
     expect(wordRangeAt('open ~/src/main.ts now', 10)).toEqual({ start: 5, end: 18 });

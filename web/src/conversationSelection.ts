@@ -128,7 +128,7 @@ export function textOffsetAtPoint(
     ? map.entries.find((entry) => fallbackTarget === entry.node
       || (fallbackTarget instanceof Element && fallbackTarget.contains(entry.node)))
     : undefined;
-  return fallback?.start ?? map.entries[0]?.start ?? null;
+  return fallback?.start ?? null;
 }
 
 const CJK = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u;

@@ -2727,7 +2727,7 @@ button.cmd-text { background: none; border: none; text-align: left; }
   user-select: text; -webkit-user-select: text;
 }
 .chat-copy-active [data-conversation-copy-root]::selection {
-  background: rgba(10,132,255,.32);
+  background: rgba(10,132,255,.50);
 }
 /* Reuse the terminal handles/callout. Fixed coordinates let the same controls follow text in both the
    conversation scroller and the fixed tool-detail sheet. */

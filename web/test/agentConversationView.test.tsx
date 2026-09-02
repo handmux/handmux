@@ -184,6 +184,7 @@ describe('generic Agent Conversation UI', () => {
     expect(styles).toMatch(/\.chat-scroll,\s*\.tool-sheet\[role="dialog"\]\s*\{[^}]*user-select:\s*none;[^}]*-webkit-user-select:\s*none;[^}]*-webkit-touch-callout:\s*none/);
     expect(styles).toMatch(/\.app\[data-desktop-input="true"\] \.chat-scroll,\s*\.app\[data-desktop-input="true"\] \.tool-sheet\[role="dialog"\]\s*\{[^}]*user-select:\s*text;[^}]*-webkit-user-select:\s*text/);
     expect(styles).toMatch(/\.chat-copy-active \[data-conversation-copy-root\]\s*\{[^}]*user-select:\s*text;[^}]*-webkit-user-select:\s*text/);
+    expect(styles).toMatch(/\.chat-copy-active \[data-conversation-copy-root\]::selection\s*\{[^}]*background:\s*rgba\(10,132,255,\.50\)/);
     vi.useFakeTimers();
     try {
       const { container } = render(<AgentConversationView conversation={controller({
@@ -637,6 +638,81 @@ describe('generic Agent Conversation UI', () => {
     } finally {
       if (originalCaret) Object.defineProperty(document, 'caretPositionFromPoint', originalCaret);
       else Reflect.deleteProperty(document, 'caretPositionFromPoint');
+      vi.useRealTimers();
+    }
+  });
+
+  it('keeps the last drag selection through invalid external or null caret frames', () => {
+    vi.useFakeTimers();
+    const originalCaret = Object.getOwnPropertyDescriptor(document, 'caretPositionFromPoint');
+    const outside = document.createElement('span');
+    outside.textContent = 'overlay';
+    document.body.append(outside);
+    let hit: number | 'outside' | null = 5;
+    try {
+      const { container } = render(<AgentConversationView conversation={controller({
+        items: [{
+          key: 'stable-drag', provisional: false,
+          item: {
+            id: 'stable-drag', sessionId: 'session-1', status: 'complete', kind: 'message',
+            role: 'assistant', content: [{ type: 'text', text: 'one two three' }],
+          },
+        }],
+      })} />);
+      const bubble = container.querySelector('.chat-bubble') as HTMLElement;
+      const scroll = container.querySelector('.chat-scroll') as HTMLElement;
+      const rect = {
+        left: 0, right: 140, top: 0, bottom: 100, width: 140, height: 100,
+        x: 0, y: 0, toJSON: () => ({}),
+      } as DOMRect;
+      bubble.getBoundingClientRect = () => rect;
+      scroll.getBoundingClientRect = () => rect;
+      Object.defineProperty(document, 'caretPositionFromPoint', {
+        configurable: true,
+        value: () => hit === 'outside'
+          ? { offsetNode: outside.firstChild!, offset: 0 }
+          : typeof hit === 'number'
+            ? { offsetNode: bubble.querySelector('p')!.firstChild!, offset: hit }
+            : null,
+      });
+
+      firePointer(bubble, 'pointerdown', {
+        pointerType: 'touch', pointerId: 50, clientX: 50, clientY: 50,
+      });
+      act(() => vi.advanceTimersByTime(480));
+      expect(document.getSelection()?.toString()).toBe('two');
+      const end = document.querySelector('.chat-copy-handle[data-end="end"]')!;
+      firePointer(end, 'pointerdown', {
+        pointerType: 'touch', pointerId: 51, clientX: 70, clientY: 50,
+      });
+
+      hit = 9;
+      firePointer(container.querySelector('.chat-view')!, 'pointermove', {
+        pointerType: 'touch', pointerId: 51, clientX: 90, clientY: 50,
+      });
+      expect(document.getSelection()?.toString()).toBe('two th');
+      hit = 'outside';
+      firePointer(container.querySelector('.chat-view')!, 'pointermove', {
+        pointerType: 'touch', pointerId: 51, clientX: 92, clientY: 50,
+      });
+      expect(document.getSelection()?.toString()).toBe('two th');
+      hit = null;
+      firePointer(container.querySelector('.chat-view')!, 'pointermove', {
+        pointerType: 'touch', pointerId: 51, clientX: 94, clientY: 50,
+      });
+      expect(document.getSelection()?.toString()).toBe('two th');
+      hit = 6;
+      firePointer(container.querySelector('.chat-view')!, 'pointermove', {
+        pointerType: 'touch', pointerId: 51, clientX: 60, clientY: 50,
+      });
+      expect(document.getSelection()?.toString()).toBe('two');
+      firePointer(container.querySelector('.chat-view')!, 'pointerup', {
+        pointerType: 'touch', pointerId: 51, clientX: 60, clientY: 50,
+      });
+    } finally {
+      if (originalCaret) Object.defineProperty(document, 'caretPositionFromPoint', originalCaret);
+      else Reflect.deleteProperty(document, 'caretPositionFromPoint');
+      outside.remove();
       vi.useRealTimers();
     }
   });
