@@ -26,7 +26,7 @@ import type { CodexStreamEvent } from '../codexStreamProtocol.js';
 import { resolveCodexRollout, sessionsDir } from './codex.js';
 import {
   clipConversationText,
-  safeProviderPathLabel,
+  safeProviderDiffPath,
   sanitizeToolInputWithMetadata,
   sanitizeToolResultText,
 } from './conversationProjectionSafety.js';
@@ -524,7 +524,7 @@ function projectDurableMessage(message: CodexTranscriptMessage, sessionId: strin
       && !Array.isArray(message.tool.input) ? message.tool.input as Record<string, unknown> : {};
     if (message.tool.diff) {
       const rawPath = rawInput.file_path ?? rawInput.path;
-      const path = safeProviderPathLabel(rawPath);
+      const path = safeProviderDiffPath(rawPath);
       const patch = typeof rawInput.patch === 'string'
         ? sanitizeToolResultText(rawInput.patch) : undefined;
       items.push({

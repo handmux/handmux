@@ -4,6 +4,7 @@ import {
   MAX_CONVERSATION_TEXT_BYTES,
   MAX_TOOL_INPUT_BYTES,
   sanitizeConversationToolItem,
+  safeProviderDiffPath,
   safeProviderPathLabel,
   safeRelativeProviderPath,
   sanitizeToolInput,
@@ -191,6 +192,10 @@ describe('Conversation adapter projection safety', () => {
     expect(sanitizeToolInput({ file_path: 'C:\\a\\..\\secret.ts' })).toEqual({});
     expect(safeProviderPathLabel('file:///Users/alice/project/app.ts')).toBe('~/project/app.ts');
     expect(safeProviderPathLabel('file://remote-host/share/app.ts')).toBeUndefined();
+    expect(safeProviderDiffPath('src/app.ts')).toBe('src/app.ts');
+    expect(safeProviderDiffPath('/Users/alice/project/app.ts')).toBe('~/project/app.ts');
+    expect(safeProviderDiffPath('/private/tmp/generated.patch')).toBeUndefined();
+    expect(safeProviderDiffPath('C:\\temp\\generated.patch')).toBeUndefined();
 
     const item = sanitizeConversationToolItem({
       id: 'pi:result-link', sessionId: 'session-1', status: 'complete', kind: 'tool_result',

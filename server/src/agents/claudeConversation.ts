@@ -20,7 +20,7 @@ import { projectsDir } from './claude.js';
 import { isSessionUuid } from './scanUtils.js';
 import {
   clipConversationText as clipped,
-  safeProviderPathLabel,
+  safeProviderDiffPath,
   sanitizeToolInputWithMetadata,
   sanitizeToolResultText,
 } from './conversationProjectionSafety.js';
@@ -196,7 +196,7 @@ function toolItems(
     const input = tool.input && typeof tool.input === 'object' && !Array.isArray(tool.input)
       ? tool.input as Record<string, unknown> : {};
     const rawPath = input.file_path ?? input.path;
-    const providerPath = safeProviderPathLabel(rawPath);
+    const providerPath = safeProviderDiffPath(rawPath);
     const patch = diffPatch(tool);
     items.push({
       ...itemBase(message, sessionId, `${id}:diff`),

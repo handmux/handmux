@@ -174,6 +174,31 @@ describe('Codex Conversation adapter', () => {
     });
   });
 
+  it('keeps an absolute temporary apply-patch path from invalidating history pagination', async () => {
+    const messages: CodexTranscriptMessage[] = [{
+      i: 0, id: 'codex:turn-1:tool-1', turnId: 'turn-1',
+      type: 'tool', role: 'assistant', ts: undefined,
+      tool: {
+        name: 'apply_patch',
+        input: { file_path: '/private/tmp/generated.patch', patch: '+new' },
+        result: 'done', isError: false,
+        diff: { added: 1, removed: 0, hunks: [] },
+      },
+    }];
+    const { service } = await setup(messages);
+
+    const result = await service.readPage(
+      { agentId: 'codex', sessionId: 'thread-1' }, { limit: 20 },
+    );
+
+    expect(result.status).toBe('ok');
+    if (result.status !== 'ok') throw new Error('expected history');
+    expect(result.page.items.find((item) => item.kind === 'diff')).toEqual(expect.objectContaining({
+      kind: 'diff', patch: '+new', summary: '+1 -0',
+    }));
+    expect(result.page.items.find((item) => item.kind === 'diff')).not.toHaveProperty('path');
+  });
+
   it('requires the pane-owned App Server thread for live capabilities', async () => {
     const { service, harness, lease } = await setup();
     const descriptor = await service.discover(lease.ref);

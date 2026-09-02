@@ -9,6 +9,10 @@ All notable changes to handmux. Format follows [Keep a Changelog](https://keepac
 - Agent 对话新增精细复制：在消息、工具输入输出、Diff 和错误文字上长按选词，拖动首尾手柄调整，并可扩展到屏幕整行或语义整段；流式更新和滚动期间保留选区，桌面端继续使用原生鼠标选择。
 - Pi 对话接入通用上下文圆环，显示原生实时上下文用量、运行状态和工作目录；旧 Connector 保持聊天可用，升级时自动为 wrapper 刷新内容指纹，执行 `/reload` 后可靠启用新能力。
 
+### Fixed
+
+- 修复 Codex 历史中的 Diff 使用工作区外绝对临时路径时，上翻到该页会提示“更早的消息没有加载成功”的问题；不符合 Diff 路径契约的标签现在会安全省略，不再阻断整页历史。
+
 ## [0.25.2] - 2026-09-02
 
 ### Fixed

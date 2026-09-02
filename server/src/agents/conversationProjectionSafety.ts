@@ -132,6 +132,14 @@ export function safeProviderPathLabel(value: unknown): string | undefined {
   return path;
 }
 
+export function safeProviderDiffPath(value: unknown): string | undefined {
+  const label = safeProviderPathLabel(value);
+  if (label === undefined || label.startsWith('/') || /^[a-zA-Z]:[\\/]/.test(label)) {
+    return undefined;
+  }
+  return label;
+}
+
 function urlContainsPrivateData(value: string): boolean {
   try {
     const url = new URL(value);
