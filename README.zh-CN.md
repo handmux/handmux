@@ -102,7 +102,7 @@ handmux agent disable claude
 handmux agent status codex    # 已安装 Codex 时就绪（接入已内置）
 ```
 
-旧的 `handmux hooks install|uninstall` 暂作 Claude Code 兼容别名。Pi 接入使用受信任的 Handmux 自有 Extension wrapper，连接的仍是电脑上同一个原生 Pi TUI 进程；启用时只在 Pi 官方全局 Extension 目录写入这一个 wrapper，不扫描项目，也不加载第三方扩展。启用或禁用后，新开 Pi 会话，或在 Pi 中运行 `/reload`。Handmux 升级后会自动刷新已启用的自有 wrapper；没有 Handmux 所有权标记的文件绝不会被覆盖或删除。Handmux Server 离线时 Pi 仍可正常使用，终态结果会先在本机排队，Server 恢复后再补交。Pi 对话使用通用上下文圆环显示 Pi 的实时上下文用量、运行状态和工作目录；Handmux 升级后，已在运行的 Pi 会话需执行 `/reload` 才能获得新增的 Connector 能力。
+旧的 `handmux hooks install|uninstall` 暂作 Claude Code 兼容别名。Pi 接入使用受信任的 Handmux 自有 Extension wrapper，连接的仍是电脑上同一个原生 Pi TUI 进程；启用时只在 Pi 官方全局 Extension 目录写入这一个 wrapper，不扫描项目，也不加载第三方扩展。启用或禁用后，新开 Pi 会话，或在 Pi 中运行 `/reload`。Handmux 升级后会自动刷新已启用的自有 wrapper，并为每份 Connector 内容生成带指纹的 import URL，避免 `/reload` 复用模块缓存里的旧版本；没有 Handmux 所有权标记的文件绝不会被覆盖或删除。Handmux Server 离线时 Pi 仍可正常使用，终态结果会先在本机排队，Server 恢复后再补交。Pi 对话使用通用上下文圆环显示 Pi 的实时上下文用量、运行状态和工作目录；Handmux 升级后，已在运行的 Pi 会话需执行 `/reload` 才能获得新增的 Connector 能力。
 
 通用 Agent 对话中的附件只在用户点按后下载。Provider 只注册与会话绑定的 opaque resource ID，手机不会收到本机路径；HTML、SVG 等潜在主动内容始终作为附件下载，不在页面内直接渲染。
 

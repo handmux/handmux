@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { homedir } from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -69,11 +70,13 @@ function expectedEntryUrl(entryFile: string): string {
 
 function wrapper(entryFile: string): string {
   const entryUrl = expectedEntryUrl(entryFile);
+  const fingerprint = createHash('sha256').update(fs.readFileSync(entryFile)).digest('hex');
+  const importUrl = `${entryUrl}?handmux=${fingerprint}`;
   return [
     MANAGED_MARK,
     `${ENTRY_MARK}${entryUrl}`,
     '// This tiny wrapper is owned by Handmux. Pi loads it from its documented global extension path.',
-    `export { default } from ${JSON.stringify(entryUrl)};`,
+    `export { default } from ${JSON.stringify(importUrl)};`,
     '',
   ].join('\n');
 }

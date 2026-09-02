@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { describe, expect, it } from 'vitest';
@@ -29,14 +30,42 @@ describe('managed Pi Extension installer', () => {
     expect(first.file).toBe(path.join(home, '.pi/agent/extensions/handmux/index.ts'));
     const content = fs.readFileSync(first.file, 'utf8');
     const entryUrl = pathToFileURL(first.entryFile).href;
+    const fingerprint = createHash('sha256').update(fs.readFileSync(first.entryFile)).digest('hex');
     expect(content).toContain('// handmux-managed-pi-extension:v1');
-    expect(content).toContain(entryUrl);
-    expect(content).toContain(`export { default } from ${JSON.stringify(entryUrl)}`);
+    expect(content).toContain(`// handmux-entry:${entryUrl}\n`);
+    expect(content).toContain(
+      `export { default } from ${JSON.stringify(`${entryUrl}?handmux=${fingerprint}`)}`,
+    );
     expect(fs.statSync(first.file).mode & 0o777).toBe(0o600);
     expect(fs.statSync(path.dirname(first.file)).mode & 0o777).toBe(0o700);
     expect(piExtensionStatus(home, { entryFile: source })).toBe('installed');
 
     expect(installPiExtension(home, { entryFile: source }).changed).toBe(false);
+  });
+
+  it('refreshes the import URL when package content changes at the same path', () => {
+    const home = tmpHome('hm-pi-ext-');
+    const source = entry(home);
+    installPiExtension(home, { entryFile: source });
+    const file = piExtensionFile(home);
+    const before = fs.readFileSync(file, 'utf8');
+    const entryUrl = pathToFileURL(fs.realpathSync(source)).href;
+
+    fs.writeFileSync(source, 'export default function handmuxV2() {}\n');
+    expect(piExtensionStatus(home, { entryFile: source })).toBe('installed');
+    const result = syncPiExtension(home, { entryFile: source });
+    const after = fs.readFileSync(file, 'utf8');
+
+    expect(result?.changed).toBe(true);
+    expect(after).not.toBe(before);
+    expect(after).toContain(`// handmux-entry:${entryUrl}\n`);
+    expect(after).toContain(
+      `export { default } from ${JSON.stringify(
+        `${entryUrl}?handmux=${createHash('sha256').update(fs.readFileSync(source)).digest('hex')}`,
+      )}`,
+    );
+    expect(piExtensionStatus(home, { entryFile: source })).toBe('installed');
+    expect(syncPiExtension(home, { entryFile: source })?.changed).toBe(false);
   });
 
   it('detects and repairs an owned wrapper after the package entry moves', () => {
