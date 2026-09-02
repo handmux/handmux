@@ -19,6 +19,28 @@ export interface ChangelogEntry {
 // `entryId`/`LATEST_RELEASE` use `version` when present, else `date`, as the stable unread-dot id.
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '0.25.2',
+    date: '2026-09-02',
+    highlight: {
+      zh: '修复 Agent 对话断流、排队与工具路径',
+      en: 'Fixed Agent chat streams, queues, and tool paths',
+    },
+    items: {
+      zh: [
+        '修复 Codex 上下文压缩后回复不再实时显示，以及 Pi 历史推进、授权内容更新或 Bridge 启动失败后，对话可能断开、空白或无法重试的问题。',
+        '发送状态未知的排队消息会先沿用原消息 ID 安全重试；若仍无法确认，消息会回到对话中，由你决定是否作为新消息再次发送。',
+        '工具输入和输出中的本地路径恢复可读；用户主目录缩写为 ~/，密码、Token、Cookie 和私有地址仍会脱敏。',
+        '修复订阅用量卡片操作菜单未靠右，以及再次点击三点按钮不能收起菜单的问题。',
+      ],
+      en: [
+        'Fixed replies no longer streaming after Codex compaction, plus chats disconnecting, going blank, or becoming non-retryable after Pi history advances, authorization updates, or Bridge startup failures.',
+        'Queued messages with unknown delivery now retry under their original message ID first; if delivery still cannot be confirmed, the message returns to the conversation so you can choose whether to send it again as new.',
+        'Local paths in tool input and output are readable again. User home directories are shortened to ~/, while passwords, tokens, cookies, and private endpoints remain redacted.',
+        'Fixed subscription-usage action menus not aligning to the right and not closing when their three-dot button was tapped again.',
+      ],
+    },
+  },
+  {
     version: '0.25.1',
     date: '2026-09-02',
     highlight: {
