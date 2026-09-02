@@ -74,11 +74,13 @@ export function linkedAssistantHtml(text: string): string {
 export function AssistantMarkdown({
   text,
   streaming = false,
-}: { text: string; streaming?: boolean }) {
+  copyId,
+}: { text: string; streaming?: boolean; copyId: string }) {
   const html = useMemo(() => linkedAssistantHtml(text), [text]);
   return (
     <div className="chat-bubble chat-them chat-md"
       data-conversation-stream={streaming ? 'active' : undefined}
+      data-conversation-copy-root data-conversation-copy-id={copyId}
       dangerouslySetInnerHTML={{ __html: html }} />
   );
 }
@@ -159,9 +161,11 @@ function messageResources(message: TranscriptMessage) {
 export function ConversationResources({
   message,
   downloadResource,
+  copyId,
 }: {
   message: TranscriptMessage;
   downloadResource?: AgentConversationController['downloadResource'];
+  copyId: string;
 }) {
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState<string | null>(null);
@@ -184,20 +188,24 @@ export function ConversationResources({
             ? t('common.loading') : resource.name || t('agentConversation.attachment')}
         </button>
       ))}
-      {error && <small className="agent-conversation-item-error" role="alert">{error}</small>}
+      {error && <small className="agent-conversation-item-error" role="alert"
+        data-conversation-copy-root data-conversation-copy-id={`${copyId}:attachment-error`}>
+        {error}</small>}
     </div>
   );
 }
 
-function ConversationItemStatus({ message }: { message: TranscriptMessage }) {
+function ConversationItemStatus({ message, copyId }: { message: TranscriptMessage; copyId: string }) {
   if (message.conversationStatus === 'error') {
-    return <div className="chat-turn-error" role="status">
+    return <div className="chat-turn-error" role="status" data-conversation-copy-root
+      data-conversation-copy-id={`${copyId}:status`}>
       {typeof message.conversationStatusMessage === 'string'
         ? message.conversationStatusMessage : t('chat.sendFailed')}
     </div>;
   }
   if (message.conversationStatus === 'truncated') {
-    return <div className="chat-turn-notice is-info" role="status">
+    return <div className="chat-turn-notice is-info" role="status" data-conversation-copy-root
+      data-conversation-copy-id={`${copyId}:status`}>
       {t('agentConversation.truncated')}
     </div>;
   }
@@ -211,6 +219,7 @@ export function ConversationEntry({
   renderGoal,
   onOpenCompaction,
   downloadResource,
+  copyId,
 }: {
   message: TranscriptMessage;
   running: boolean;
@@ -218,45 +227,57 @@ export function ConversationEntry({
   renderGoal?: (message: TranscriptMessage) => ReactNode;
   onOpenCompaction: (message: TranscriptMessage) => void;
   downloadResource?: AgentConversationController['downloadResource'];
+  copyId: string;
 }): ReactNode {
   if (message.type === 'tool' && message.tool) return (
     <>
       {renderTool(message, running)}
-      <ConversationResources message={message} {...(downloadResource ? { downloadResource } : {})} />
-      <ConversationItemStatus message={message} />
+      <ConversationResources message={message} copyId={copyId}
+        {...(downloadResource ? { downloadResource } : {})} />
+      <ConversationItemStatus message={message} copyId={copyId} />
     </>
   );
   if (message.type === 'goal') return renderGoal?.(message) ?? null;
-  if (message.type === 'interrupt') return <div className="chat-interrupt">{t('chat.interrupted')}</div>;
+  if (message.type === 'interrupt') return <div className="chat-interrupt"
+    data-conversation-copy-root data-conversation-copy-id={`${copyId}:interrupt`}>
+    {t('chat.interrupted')}</div>;
   if (message.type === 'compact') {
     return <CompactionBanner onOpen={() => onOpenCompaction(message)} />;
   }
   if (message.type === 'slash') {
     return (
       <>
-        <div className="chat-slash-cmd">{message.name}{message.args ? ` ${message.args}` : ''}</div>
-        {message.result && <div className="chat-slash-result">{message.result}</div>}
+        <div className="chat-slash-cmd" data-conversation-copy-root
+          data-conversation-copy-id={`${copyId}:slash-input`}>
+          {message.name}{message.args ? ` ${message.args}` : ''}</div>
+        {message.result && <div className="chat-slash-result" data-conversation-copy-root
+          data-conversation-copy-id={`${copyId}:slash-output`}>{message.result}</div>}
       </>
     );
   }
   if (message.type === 'thinking') return null;
   if (message.type === 'notice') {
     return message.noticeLevel === 'error'
-      ? <div className="chat-turn-error" role="status">{message.text}</div>
+      ? <div className="chat-turn-error" role="status" data-conversation-copy-root
+        data-conversation-copy-id={`${copyId}:notice`}>{message.text}</div>
       : <div className={`chat-turn-notice is-${message.noticeLevel === 'warning' ? 'warning' : 'info'}`}
-        role="status">{message.text}</div>;
+        role="status" data-conversation-copy-root data-conversation-copy-id={`${copyId}:notice`}>
+        {message.text}</div>;
   }
   const content = message.role !== 'user'
-    ? <AssistantMarkdown text={message.text || ''} streaming={!!message.streaming} />
-    : <div className="chat-bubble chat-me">{message.text}</div>;
+    ? <AssistantMarkdown text={message.text || ''} streaming={!!message.streaming}
+      copyId={`${copyId}:message`} />
+    : <div className="chat-bubble chat-me" data-conversation-copy-root
+      data-conversation-copy-id={`${copyId}:message`}>{message.text}</div>;
   const attachments = (
-    <ConversationResources message={message} {...(downloadResource ? { downloadResource } : {})} />
+    <ConversationResources message={message} copyId={copyId}
+      {...(downloadResource ? { downloadResource } : {})} />
   );
   return (
     <Fragment>
       {content}
       {attachments}
-      <ConversationItemStatus message={message} />
+      <ConversationItemStatus message={message} copyId={copyId} />
     </Fragment>
   );
 }

@@ -31,6 +31,8 @@ export default {
   'common.close': '關閉',
   'common.delete': '刪除',
   'common.copy': '複製',
+  'conversationCopy.line': '整行',
+  'conversationCopy.paragraph': '整段',
   'common.rename': '重新命名',
   'common.create': '新增',
   'common.back': '返回',

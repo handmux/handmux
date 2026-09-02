@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import { Fragment, type ReactNode } from 'react';
 import { t } from '../i18n';
 import {
   BotIcon,
@@ -110,7 +110,7 @@ const FILE_EDIT_TOOLS = new Set(['Edit', 'MultiEdit', 'Write', 'NotebookEdit', '
 function DiffStat({ diff }: { diff?: ConversationDiff }): ReactNode {
   if (!diff || (!diff.added && !diff.removed)) return null;
   return (
-    <span className="chat-tool-stat" aria-label={t('conversationTool.diffStat', {
+    <span className="chat-tool-stat chat-copy-ignore" aria-label={t('conversationTool.diffStat', {
       added: diff.added, removed: diff.removed,
     })}>
       {diff.added > 0 && <span className="cts-add">+{diff.added}</span>}
@@ -119,59 +119,71 @@ function DiffStat({ diff }: { diff?: ConversationDiff }): ReactNode {
   );
 }
 
-function ToolBody({ tool }: { tool: ConversationToolProjection }): ReactNode {
+export function ToolBody({
+  tool,
+  copyId,
+}: { tool: ConversationToolProjection; copyId: string }): ReactNode {
   if (tool.diff?.hunks?.length) {
     return (
-      <div className="chat-diff">
+      <div className="chat-diff" data-conversation-copy-root data-conversation-copy-id={copyId}>
         {tool.diff.hunks.map((hunk, hunkIndex) => (
           <div className="chat-diff-hunk" key={hunkIndex}>
             {hunk.lines.map((line, lineIndex) => {
               const tone = line[0] === '+' ? 'add' : line[0] === '-' ? 'del' : 'ctx';
-              return <div className={`chat-diff-line cd-${tone}`} key={lineIndex}>{line || ' '}</div>;
+              return <Fragment key={lineIndex}>
+                <div className={`chat-diff-line cd-${tone}`}>{line || ' '}</div>{'\n'}
+              </Fragment>;
             })}
           </div>
         ))}
       </div>
     );
   }
-  return tool.result != null ? <pre className="chat-tool-body">{tool.result}</pre> : null;
+  return tool.result != null ? <pre className="chat-tool-body"
+    data-conversation-copy-root data-conversation-copy-id={copyId}>{tool.result}</pre> : null;
 }
 
 function ToolStatus({ tool }: { tool: ConversationToolProjection }): ReactNode {
   if (tool.outcome === 'declined') {
-    return <span className="chat-tool-status neutral" aria-label={t('conversationTool.declined')}>
+    return <span className="chat-tool-status neutral chat-copy-ignore"
+      aria-label={t('conversationTool.declined')}>
       {t('conversationTool.declined')}</span>;
   }
   if (tool.outcome === 'completed' && FILE_EDIT_TOOLS.has(tool.name)) return null;
   if (tool.outcome === 'completed') {
-    return <span className="chat-tool-status neutral" aria-label={t('conversationTool.completed')}>
+    return <span className="chat-tool-status neutral chat-copy-ignore"
+      aria-label={t('conversationTool.completed')}>
       {t('conversationTool.completed')}</span>;
   }
-  if (tool.isError) return <span className="chat-tool-status err"
+  if (tool.isError) return <span className="chat-tool-status err chat-copy-ignore"
     aria-label={t('conversationTool.failed')}><XIcon /></span>;
   const hasDiff = !!(tool.diff && (tool.diff.added || tool.diff.removed));
   const succeeded = tool.outcome === 'success' || (tool.outcome == null && tool.result != null);
   return succeeded && !hasDiff
-    ? <span className="chat-tool-status ok" aria-label={t('conversationTool.success')}><CheckIcon /></span> : null;
+    ? <span className="chat-tool-status ok chat-copy-ignore"
+      aria-label={t('conversationTool.success')}><CheckIcon /></span> : null;
 }
 
 export function ToolChip({
   tool,
   running,
   onOpen,
+  copyId,
 }: {
   tool: ConversationToolProjection;
   running: boolean;
   onOpen: () => void;
+  copyId: string;
 }) {
   return (
     <div className={`chat-tool${tool.isError ? ' chat-tool-err' : ''}${running ? ' chat-tool-running' : ''}`}>
-      <button type="button" className="chat-tool-head" onClick={onOpen}>
-        <span className="chat-tool-ic">{toolIcon(tool.name)}</span>
+      <button type="button" className="chat-tool-head" onClick={onOpen}
+        data-conversation-copy-root data-conversation-copy-id={`${copyId}:summary`}>
+        <span className="chat-tool-ic chat-copy-ignore">{toolIcon(tool.name)}</span>
         <span className="chat-tool-head-text">{toolSummary(tool)}</span>
         <DiffStat {...(tool.diff ? { diff: tool.diff } : {})} />
         {running
-          ? <span className="chat-tool-head-running"><TypingDots /></span>
+          ? <span className="chat-tool-head-running chat-copy-ignore"><TypingDots /></span>
           : <ToolStatus tool={tool} />}
       </button>
     </div>
@@ -213,16 +225,16 @@ function fileParts(path: string): { dir: string; name: string } {
     : { dir: '', name: path };
 }
 
-function DiffView({ hunks }: { hunks: ConversationDiffHunk[] }) {
+function DiffView({ hunks, copyId }: { hunks: ConversationDiffHunk[]; copyId: string }) {
   return (
-    <div className="dv">
+    <div className="dv" data-conversation-copy-root data-conversation-copy-id={copyId}>
       {hunks.map((hunk, hunkIndex) => {
         const numbered = Number.isInteger(hunk.oldStart) && Number.isInteger(hunk.newStart);
         let oldLine = Number.isInteger(hunk.oldStart) ? hunk.oldStart as number : null;
         let newLine = Number.isInteger(hunk.newStart) ? hunk.newStart as number : null;
         return (
           <div className="dv-hunk" key={hunkIndex}>
-            {hunkIndex > 0 && <div className="dv-gap"><span>⋯</span></div>}
+            {hunkIndex > 0 && <div className="dv-gap" aria-label="⋯"><span /></div>}
             {hunk.lines.map((line, lineIndex) => {
               const sign = line[0] || ' ';
               const text = line.slice(1);
@@ -240,13 +252,13 @@ function DiffView({ hunks }: { hunks: ConversationDiffHunk[] }) {
                 if (numbered && oldLine !== null) oldLine++;
                 tone = 'ctx';
               }
-              return (
-                <div className={`dv-row dv-${tone}`} key={lineIndex}>
-                  <span className="dv-ln">{number}</span>
-                  <span className="dv-sign">{sign === '+' ? '+' : sign === '-' ? '−' : ''}</span>
+              return <Fragment key={lineIndex}>
+                <div className={`dv-row dv-${tone}`}>
+                  <span className="dv-ln" data-line-number={number ?? ''} aria-hidden="true" />
+                  <span className="dv-sign">{sign === '+' ? '+' : sign === '-' ? '-' : ' '}</span>
                   <span className="dv-code">{text || ' '}</span>
-                </div>
-              );
+                </div>{'\n'}
+              </Fragment>;
             })}
           </div>
         );
@@ -267,7 +279,11 @@ function toolState(tool: ConversationToolProjection, running: boolean): { txt: s
   return { txt: t('conversationTool.noReturn'), cls: 'idle' };
 }
 
-function EditSheetBody({ tool, running }: { tool: ConversationToolProjection; running: boolean }) {
+function EditSheetBody({
+  tool,
+  running,
+  copyId,
+}: { tool: ConversationToolProjection; running: boolean; copyId: string }) {
   const input = toolInput(tool);
   const { dir, name } = fileParts(typeof input.file_path === 'string' ? input.file_path : '');
   const state = toolState(tool, running);
@@ -288,7 +304,7 @@ function EditSheetBody({ tool, running }: { tool: ConversationToolProjection; ru
           <DiffStat {...(tool.diff ? { diff: tool.diff } : {})} />
         </div>
         {hunks?.length
-          ? <div className="es-diff"><DiffView hunks={hunks} /></div>
+          ? <div className="es-diff"><DiffView hunks={hunks} copyId={`${copyId}:diff`} /></div>
           : tool.diff?.created
             ? <div className="es-note">{t('conversationTool.createdFile', { added: tool.diff.added || 0 })}</div>
             : running
@@ -303,10 +319,12 @@ export function ToolSheet({
   tool,
   running,
   onClose,
+  copyId,
 }: {
   tool: ConversationToolProjection | null;
   running: boolean;
   onClose: () => void;
+  copyId: string;
 }) {
   if (!tool) return null;
   const edit = !!(tool.diff && (tool.diff.hunks?.length || tool.diff.created));
@@ -320,7 +338,7 @@ export function ToolSheet({
         <button type="button" className="cmd-close tool-sheet-x" aria-label={t('common.close')} onClick={onClose}>
           <XIcon />
         </button>
-        {edit ? <EditSheetBody tool={tool} running={running} /> : (
+        {edit ? <EditSheetBody tool={tool} running={running} copyId={copyId} /> : (
           <>
             <div className="tool-sheet-head">
               <span className="tool-sheet-ic">{toolIcon(tool.name)}</span>
@@ -337,13 +355,14 @@ export function ToolSheet({
               {command && (
                 <section className="tool-sheet-sec">
                   <div className="tool-sheet-label">{t('conversationTool.command')}</div>
-                  <pre className="tool-sheet-cmd">{command}</pre>
+                  <pre className="tool-sheet-cmd" data-conversation-copy-root
+                    data-conversation-copy-id={`${copyId}:input`}>{command}</pre>
                 </section>
               )}
               <section className="tool-sheet-sec tool-sheet-out">
                 <div className="tool-sheet-label"><span>{t('conversationTool.output')}</span></div>
                 {tool.result != null
-                  ? <ToolBody tool={tool} />
+                  ? <ToolBody tool={tool} copyId={`${copyId}:output`} />
                   : <div className="tool-sheet-empty">{running
                     ? t('conversationTool.runningEllipsis') : t('conversationTool.noOutput')}</div>}
               </section>
@@ -357,30 +376,13 @@ export function ToolSheet({
 
 export interface CopyBlock {
   el: HTMLElement;
-  text: string;
+  id: string;
 }
 
 export function resolveConversationCopyBlock(target: EventTarget | null): CopyBlock | null {
   if (!(target instanceof Element)) return null;
-  const copy = (element: HTMLElement): CopyBlock => ({
-    el: element,
-    text: element.innerText || element.textContent || '',
-  });
-  const pre = target.closest<HTMLElement>('.chat-md pre');
-  if (pre) return copy(pre);
-  const body = target.closest<HTMLElement>('.chat-tool-body, .chat-diff');
-  if (body) return copy(body);
-  const error = target.closest<HTMLElement>([
-    '.chat-turn-error',
-    '.agent-conversation-item-error',
-    '.chat-history-retry',
-    '.agent-conversation-empty.is-error',
-  ].join(', '));
-  if (error) return copy(error);
-  const bubble = target.closest<HTMLElement>('.chat-bubble');
-  if (bubble) return copy(bubble);
-  const notice = target.closest<HTMLElement>('.chat-turn-notice, .chat-interrupt');
-  if (notice) return copy(notice);
-  const tool = target.closest<HTMLElement>('.chat-tool');
-  return tool ? copy(tool) : null;
+  if (target.closest('.chat-copy-ignore')) return null;
+  const root = target.closest<HTMLElement>('[data-conversation-copy-root]');
+  const id = root?.dataset.conversationCopyId;
+  return root && id ? { el: root, id } : null;
 }

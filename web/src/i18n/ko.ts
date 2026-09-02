@@ -31,6 +31,8 @@ export default {
   'common.close': '닫기',
   'common.delete': '삭제',
   'common.copy': '복사',
+  'conversationCopy.line': '전체 줄',
+  'conversationCopy.paragraph': '전체 단락',
   'common.rename': '이름 변경',
   'common.create': '새로 만들기',
   'common.back': '뒤로',

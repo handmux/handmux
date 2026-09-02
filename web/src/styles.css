@@ -2677,17 +2677,21 @@ button.cmd-text { background: none; border: none; text-align: left; }
   flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior-y: contain; -webkit-overflow-scrolling: touch;
   display: flex; flex-direction: column; gap: 8px;
   padding: 12px 12px calc(12px + env(safe-area-inset-bottom, 0px));
-  /* Kill the browser's native long-press selection + its ugly system copy menu (Chrome's bottom bar,
-     iOS's callout). Copy is handled by the shared conversation long-press callout. */
+}
+.chat-scroll,
+.tool-sheet[role="dialog"] {
+  /* Suppress the browser's competing long-press menu. Handmux creates a bounded DOM Range itself on
+     touch; desktop input restores ordinary native text selection below. */
   user-select: none; -webkit-user-select: none; -webkit-touch-callout: none;
 }
 .chat-entry-row {
   align-self: stretch; display: flex; flex-direction: column; gap: 8px; min-width: 0;
 }
-/* Touch keeps Handmux's block-level long-press copy. A real desktop must keep the browser's native text
+/* Touch keeps Handmux's precise long-press copy. A real desktop must keep the browser's native text
    selection contract: mouse drag, right-click, and Cmd/Ctrl+C. Device detection lives on .app so forcing
    the terminal keyboard mode cannot accidentally remove ordinary desktop selection. */
-.app[data-desktop-input="true"] .chat-scroll {
+.app[data-desktop-input="true"] .chat-scroll,
+.app[data-desktop-input="true"] .tool-sheet[role="dialog"] {
   user-select: text; -webkit-user-select: text;
 }
 .chat-history-slot {
@@ -2717,15 +2721,25 @@ button.cmd-text { background: none; border: none; text-align: left; }
   .chat-history-spinner > i { opacity: .35; }
   .chat-history-spinner > i:first-child { opacity: 1; }
 }
-/* The block under a long-press: a soft blue ring (radius-following box-shadow) + faint tint, matching the
-   terminal selection's blue. Imperatively toggled by the shared copy hook. */
-.chat-copy-hl {
-  border-radius: 10px;
-  box-shadow: 0 0 0 2px rgba(10,132,255,0.55);
-  background-color: rgba(10,132,255,0.12);
+/* Touch copy temporarily enables selection only inside the active bounded root. The actual highlight is
+   the browser's Range paint, while Handmux owns the handles and actions. */
+.chat-copy-active [data-conversation-copy-root] {
+  user-select: text; -webkit-user-select: text;
 }
-/* Reuses the terminal .sel-callout chrome; only the anchor differs (absolute within .chat-view). */
-.chat-copy-callout { position: absolute; }
+.chat-copy-active [data-conversation-copy-root]::selection {
+  background: rgba(10,132,255,.32);
+}
+/* Reuse the terminal handles/callout. Fixed coordinates let the same controls follow text in both the
+   conversation scroller and the fixed tool-detail sheet. */
+.conversation-copy-overlay {
+  position: fixed; inset: 0; z-index: calc(var(--z-overlay-detail) + 1); pointer-events: none;
+}
+.chat-copy-handle, .chat-copy-callout { position: fixed; }
+.chat-copy-handle { z-index: calc(var(--z-overlay-detail) + 1); pointer-events: auto; }
+.chat-copy-callout {
+  z-index: calc(var(--z-overlay-detail) + 2); max-width: calc(100vw - 16px); pointer-events: auto;
+}
+.chat-copy-callout button { min-width: 0; flex: 1 1 auto; padding-inline: 12px; }
 /* Waiting state for both lenses (LensBoot): a small typing wave + a short hint. Centered by context: in
    the chat scroll it's a flex item with margin:auto; over the terminal it's an absolute overlay filling
    .terminal-wrap (the grid stays opacity:0 underneath until ready). */
@@ -3105,6 +3119,7 @@ button.cmd-text { background: none; border: none; text-align: left; }
   border-top: 1px dashed var(--ct-chip-line); border-bottom: 1px dashed var(--ct-chip-line);
   position: sticky; left: 0;
 }
+.dv-gap > span::before { content: '⋯'; }
 .dv-row { display: flex; align-items: flex-start; min-width: max-content; }
 .dv-ln {
   position: sticky; left: 0; z-index: 1; flex: none; box-sizing: border-box;
@@ -3112,7 +3127,8 @@ button.cmd-text { background: none; border: none; text-align: left; }
   color: var(--ct-muted); background: var(--ct-body); font-variant-numeric: tabular-nums;
   border-right: 2px solid transparent; user-select: none;
 }
-.dv-sign { flex: none; width: 15px; text-align: center; user-select: none; }
+.dv-ln::before { content: attr(data-line-number); }
+.dv-sign { flex: none; width: 15px; text-align: center; }
 .dv-code { flex: 1; white-space: pre; padding: 0 12px 0 4px; color: var(--ct-ink); }
 .dv-add { background: rgba(63,185,80,.12); }
 .dv-add .dv-ln { background: rgba(63,185,80,.16); border-right-color: #3fb950; color: #6fca7f; }

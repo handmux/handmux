@@ -37,7 +37,7 @@ import {
   type ConversationPlan,
 } from './ConversationMilestones.js';
 import {
-  ConversationCopyCallout,
+  ConversationCopyControls,
   useConversationLongPressCopy,
 } from '../hooks/useConversationLongPressCopy.js';
 import { OverlayPortal } from '../overlays/OverlayHost.js';
@@ -81,25 +81,31 @@ export function AgentConversationErrorView({
   resetKey: string | null;
 }) {
   const viewRef = useRef<HTMLDivElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
   const copy = useConversationLongPressCopy({
     viewRef,
+    scrollRef,
     resolveBlock: resolveConversationCopyBlock,
     resetKey,
+    restoreKey: message,
   });
-  const endPress = (): void => copy.cancel();
   return (
     <div className="chat-view" ref={viewRef}
       onPointerDown={copy.onPointerDown} onPointerMove={copy.onPointerMove}
-      onPointerUp={endPress} onPointerCancel={endPress} onPointerLeave={endPress}
+      onPointerUp={copy.onPointerUp} onPointerCancel={copy.onPointerCancel}
+      onPointerLeave={copy.onPointerLeave}
+      onScrollCapture={copy.onScroll}
       onClickCapture={copy.onClickCapture}>
-      <div className="chat-scroll" onScroll={() => {
-        copy.cancel();
-        if (copy.active) copy.dismiss();
-      }}>
-        <div className="chat-turn-error" role="status">{message}</div>
+      <div className="chat-scroll" ref={scrollRef}>
+        <div className="chat-turn-error" role="status" data-conversation-copy-root
+          data-conversation-copy-id="standalone:error">{message}</div>
       </div>
-      {copy.calloutStyle && (
-        <ConversationCopyCallout style={copy.calloutStyle} onCopy={() => void copy.copy()} />
+      {copy.ui && (
+        <OverlayPortal className="conversation-copy-overlay">
+          <ConversationCopyControls ui={copy.ui} calloutRef={copy.calloutRef}
+            onCopy={() => void copy.copy()} onLine={copy.expandLine}
+            onParagraph={copy.expandParagraph} />
+        </OverlayPortal>
       )}
     </div>
   );
@@ -161,10 +167,18 @@ export default function AgentConversationView({
     setResendCandidate(null);
   }, [sessionId]);
 
+  const enterReadingMode = (): void => {
+    readingRef.current = true;
+    stickBottomRef.current = false;
+  };
+
   const copy = useConversationLongPressCopy({
     viewRef,
+    scrollRef,
     resolveBlock: resolveConversationCopyBlock,
     resetKey: sessionId,
+    restoreKey: conversation.items,
+    onActivate: enterReadingMode,
     onPointerDown: (event) => {
       pointerGestureActiveRef.current = true;
       pointerStartYRef.current = event.clientY;
@@ -266,10 +280,6 @@ export default function AgentConversationView({
   const locatingCompletedEntry = completedEntryPending && conversation.status === 'ready'
     && completedEntryCanonicalReady && !completedEntryRefreshed;
 
-  const enterReadingMode = (): void => {
-    readingRef.current = true;
-    stickBottomRef.current = false;
-  };
   const scrollToBottom = useCallback((): void => {
     if (completedEntryRequest > 0) consumeCompletedEntry(completedEntryRequest);
     const element = scrollRef.current;
@@ -438,18 +448,19 @@ export default function AgentConversationView({
   return (
     <div className="chat-view agent-conversation-view" ref={viewRef} onClick={onOutputLinkClick}
       onPointerDown={copy.onPointerDown} onPointerMove={copy.onPointerMove}
-      onPointerUp={() => {
+      onPointerUp={(event) => {
+        copy.onPointerUp(event);
         pointerGestureActiveRef.current = false;
-        copy.cancel();
       }}
-      onPointerCancel={() => {
+      onPointerCancel={(event) => {
+        copy.onPointerCancel(event);
         pointerGestureActiveRef.current = false;
-        copy.cancel();
       }}
-      onPointerLeave={() => {
+      onPointerLeave={(event) => {
+        copy.onPointerLeave(event);
         pointerGestureActiveRef.current = false;
-        copy.cancel();
       }}
+      onScrollCapture={copy.onScroll}
       onClickCapture={copy.onClickCapture}>
       {hasTimeline ? <div className="chat-scroll" ref={scrollRef}
         onPointerUp={() => {
@@ -480,8 +491,6 @@ export default function AgentConversationView({
         onScroll={() => {
           const element = scrollRef.current;
           if (!element) return;
-          copy.cancel();
-          if (copy.active) copy.dismiss();
           const previousTop = lastScrollTopRef.current;
           const movingUp = element.scrollTop < previousTop - 1;
           const movingDown = element.scrollTop > previousTop + 1;
@@ -512,7 +521,8 @@ export default function AgentConversationView({
           if (movingUp && element.scrollTop <= HISTORY_TOP_TRIGGER_PX) requestOlder();
         }}>
         {reloadRequired && (
-          <div className="chat-turn-notice is-warning" role="status">
+          <div className="chat-turn-notice is-warning" role="status"
+            data-conversation-copy-root data-conversation-copy-id="conversation:reload-required">
             {t('agentConversation.reloadRequired')}
           </div>
         )}
@@ -522,7 +532,8 @@ export default function AgentConversationView({
               <HistoryActivityIndicator label={t('chat.historyPulling')} />
             )}
             {pageError && (
-              <button type="button" className="chat-history-retry" onClick={requestOlder}>
+              <button type="button" className="chat-history-retry" onClick={requestOlder}
+                data-conversation-copy-root data-conversation-copy-id="conversation:history-error">
                 {t('agentConversation.loadOlderFailed')}
               </button>
             )}
@@ -539,9 +550,10 @@ export default function AgentConversationView({
           );
           return (
             <div key={key} className="chat-entry-row" data-completed-entry-key={key}>
-              <ConversationEntry message={message} running={running}
+              <ConversationEntry message={message} running={running} copyId={key}
                 renderTool={(toolMessage, toolRunning) => toolMessage.tool && (
                   <ToolChip tool={toolMessage.tool} running={toolRunning}
+                    copyId={key}
                     onOpen={() => setSheetKey(messageIdentity(toolMessage))} />
                 )}
                 renderGoal={(goalMessage) => goalMessage.goal && (
@@ -592,7 +604,8 @@ export default function AgentConversationView({
         </div>}
         {showTyping && <TypingIndicator />}
         {(reconnecting || unavailable) && (
-          <div className="agent-conversation-reconnecting" role="status">
+          <div className="agent-conversation-reconnecting" role="status"
+            data-conversation-copy-root data-conversation-copy-id="conversation:connection">
             {connectionNotice}
           </div>
         )}
@@ -602,19 +615,25 @@ export default function AgentConversationView({
             && <LensBoot hint={t('common.loading')} />}
           {empty && <div className="chat-new">{t('agentConversation.empty')}</div>}
           {reconnectingEmpty && (
-            <div className="agent-conversation-reconnecting" role="status">
+            <div className="agent-conversation-reconnecting" role="status"
+              data-conversation-copy-root data-conversation-copy-id="conversation:connection-empty">
               {t('agentConversation.reconnecting')}
             </div>
           )}
           {unavailable && (
-            <div className="agent-conversation-reconnecting" role="status">
+            <div className="agent-conversation-reconnecting" role="status"
+              data-conversation-copy-root data-conversation-copy-id="conversation:unavailable">
               {t('agentConversation.unavailable')}
             </div>
           )}
         </div>
       )}
-      {copy.calloutStyle && (
-        <ConversationCopyCallout style={copy.calloutStyle} onCopy={() => void copy.copy()} />
+      {copy.ui && (
+        <OverlayPortal className="conversation-copy-overlay">
+          <ConversationCopyControls ui={copy.ui} calloutRef={copy.calloutRef}
+            onCopy={() => void copy.copy()} onLine={copy.expandLine}
+            onParagraph={copy.expandParagraph} />
+        </OverlayPortal>
       )}
       {(!atBottom || !atLatestWindow) && (
         <button type="button" className="new-output" aria-label={t('chat.scroll.latest')}
@@ -630,6 +649,7 @@ export default function AgentConversationView({
       {sheetMessage?.tool && (
         <ToolSheet tool={sheetMessage.tool} running={sheetMessage.streaming === true
           || (timelineWorking && sheetMessage === messages.at(-1) && sheetMessage.tool.result == null)}
+          copyId={`tool-sheet:${sheetKey}`}
           onClose={() => setSheetKey(null)} />
       )}
       <ConversationPlanSheet plan={planSheet} onClose={() => setPlanSheet(null)} />

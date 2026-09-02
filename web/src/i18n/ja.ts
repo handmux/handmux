@@ -31,6 +31,8 @@ export default {
   'common.close': '閉じる',
   'common.delete': '削除',
   'common.copy': 'コピー',
+  'conversationCopy.line': '行全体',
+  'conversationCopy.paragraph': '段落全体',
   'common.rename': '名前を変更',
   'common.create': '新規作成',
   'common.back': '戻る',

@@ -12,7 +12,17 @@ import {
   AgentConversationPermissionControl,
 } from '../src/components/AgentConversationCapabilityControls.js';
 import { OverlayPortal } from '../src/overlays/OverlayHost.js';
-import { resolveConversationCopyBlock } from '../src/components/ConversationTool.js';
+import {
+  resolveConversationCopyBlock,
+  ToolBody,
+  ToolSheet,
+} from '../src/components/ConversationTool.js';
+import {
+  conversationTextMap,
+  copyTextForRange,
+  domRangeForOffsets,
+  paragraphRange,
+} from '../src/conversationSelection.js';
 import {
   ConversationSendError,
   type AgentConversationController,
@@ -79,6 +89,17 @@ function deferred() {
   let resolve!: () => void;
   const promise = new Promise<void>((nextResolve) => { resolve = nextResolve; });
   return { promise, resolve };
+}
+
+function firePointer(
+  target: Element,
+  type: 'pointerdown' | 'pointermove' | 'pointerup' | 'pointercancel',
+  values: Record<string, unknown>,
+): Event {
+  const event = new Event(type, { bubbles: true, cancelable: true });
+  Object.assign(event, values);
+  fireEvent(target, event);
+  return event;
 }
 
 function PortaledComposerControl({ label }: { label: string }) {
@@ -160,8 +181,9 @@ describe('generic Agent Conversation UI', () => {
   });
 
   it('keeps native mouse selection on desktop while touch uses the custom callout', () => {
-    expect(styles).toMatch(/\.chat-scroll\s*\{[^}]*user-select:\s*none/);
-    expect(styles).toMatch(/\.app\[data-desktop-input="true"\] \.chat-scroll\s*\{[^}]*user-select:\s*text/);
+    expect(styles).toMatch(/\.chat-scroll,\s*\.tool-sheet\[role="dialog"\]\s*\{[^}]*user-select:\s*none;[^}]*-webkit-user-select:\s*none;[^}]*-webkit-touch-callout:\s*none/);
+    expect(styles).toMatch(/\.app\[data-desktop-input="true"\] \.chat-scroll,\s*\.app\[data-desktop-input="true"\] \.tool-sheet\[role="dialog"\]\s*\{[^}]*user-select:\s*text;[^}]*-webkit-user-select:\s*text/);
+    expect(styles).toMatch(/\.chat-copy-active \[data-conversation-copy-root\]\s*\{[^}]*user-select:\s*text;[^}]*-webkit-user-select:\s*text/);
     vi.useFakeTimers();
     try {
       const { container } = render(<AgentConversationView conversation={controller({
@@ -184,7 +206,7 @@ describe('generic Agent Conversation UI', () => {
     }
   });
 
-  it('copies a long-pressed error after the touch pointer sequence on the callout button', async () => {
+  it('copies the touched word from a long-pressed error', async () => {
     vi.useFakeTimers();
     const originalClipboard = navigator.clipboard;
     const writeText = vi.fn(async () => {});
@@ -217,7 +239,42 @@ describe('generic Agent Conversation UI', () => {
       expect(screen.getByRole('button', { name: '复制' })).toBe(copy);
       fireEvent.click(copy);
       await act(async () => { await Promise.resolve(); });
-      expect(writeText).toHaveBeenCalledWith('请求失败，请稍后重试');
+      expect(writeText).toHaveBeenCalledWith('请求');
+    } finally {
+      Object.defineProperty(navigator, 'clipboard', {
+        value: originalClipboard, configurable: true,
+      });
+      vi.useRealTimers();
+    }
+  });
+
+  it('expands a touched Markdown word to its semantic paragraph before copying', async () => {
+    vi.useFakeTimers();
+    const originalClipboard = navigator.clipboard;
+    const writeText = vi.fn(async () => {});
+    Object.defineProperty(navigator, 'clipboard', {
+      value: { writeText }, configurable: true,
+    });
+    try {
+      const { container } = render(<AgentConversationView conversation={controller({
+        items: [{
+          key: 'paragraph', provisional: false,
+          item: {
+            id: 'paragraph', sessionId: 'session-1', status: 'complete', kind: 'message',
+            role: 'assistant', content: [{ type: 'text', text:
+              'First **bold phrase** tail.\n\nSecond paragraph.' }],
+          },
+        }],
+      })} />);
+      const bold = container.querySelector('.chat-md strong')!;
+      fireEvent.pointerDown(bold, { pointerType: 'touch', clientX: 80, clientY: 100 });
+      act(() => vi.advanceTimersByTime(480));
+      expect(document.getSelection()?.toString()).toBe('bold');
+      fireEvent.click(screen.getByRole('button', { name: '整段' }));
+      expect(document.getSelection()?.toString()).toBe('First bold phrase tail.');
+      fireEvent.click(screen.getByRole('button', { name: '复制' }));
+      await act(async () => { await Promise.resolve(); });
+      expect(writeText).toHaveBeenCalledWith('First bold phrase tail.');
     } finally {
       Object.defineProperty(navigator, 'clipboard', {
         value: originalClipboard, configurable: true,
@@ -257,6 +314,500 @@ describe('generic Agent Conversation UI', () => {
     }
   });
 
+  it('keeps an active selection during an outside scroll gesture and dismisses on an outside tap', () => {
+    vi.useFakeTimers();
+    try {
+      const { container } = render(<AgentConversationView conversation={controller({
+        items: [{
+          key: 'outside-tap', provisional: false,
+          item: {
+            id: 'outside-tap', sessionId: 'session-1', status: 'complete', kind: 'message',
+            role: 'assistant', content: [{ type: 'text', text: 'alpha beta' }],
+          },
+        }],
+      })} />);
+      const bubble = container.querySelector('.chat-bubble')!;
+      const scroll = container.querySelector('.chat-scroll')!;
+      firePointer(bubble, 'pointerdown', {
+        pointerType: 'touch', pointerId: 1, clientX: 20, clientY: 20,
+      });
+      act(() => vi.advanceTimersByTime(480));
+      expect(document.getSelection()?.toString()).toBe('alpha');
+
+      firePointer(scroll, 'pointerdown', {
+        pointerType: 'touch', pointerId: 2, clientX: 200, clientY: 100,
+      });
+      firePointer(scroll, 'pointermove', {
+        pointerType: 'touch', pointerId: 2, clientX: 200, clientY: 120,
+      });
+      fireEvent.scroll(scroll);
+      firePointer(scroll, 'pointerup', {
+        pointerType: 'touch', pointerId: 2, clientX: 200, clientY: 120,
+      });
+      expect(document.getSelection()?.toString()).toBe('alpha');
+      expect(document.querySelector('.chat-copy-callout')).toBeTruthy();
+
+      firePointer(scroll, 'pointerdown', {
+        pointerType: 'touch', pointerId: 3, clientX: 200, clientY: 100,
+      });
+      firePointer(scroll, 'pointerup', {
+        pointerType: 'touch', pointerId: 3, clientX: 200, clientY: 100,
+      });
+      expect(document.getSelection()?.toString()).toBe('');
+      expect(document.querySelector('.chat-copy-callout')).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('portals copy controls outside transformed content while preserving pointer bubbling', () => {
+    expect(styles).toMatch(/\.conversation-copy-overlay\s*\{[^}]*z-index:\s*calc\(var\(--z-overlay-detail\) \+ 1\)/);
+    expect(styles).toMatch(/--z-overlay-tool:\s*42;/);
+    expect(styles).toMatch(/--z-overlay-detail:\s*46;/);
+    expect(styles).toMatch(/\.tool-sheet\s*\{[^}]*z-index:\s*var\(--z-overlay-tool\)/);
+    vi.useFakeTimers();
+    try {
+      const { container } = render(<div data-transformed style={{ transform: 'translateY(120px)' }}>
+        <AgentConversationView conversation={controller({
+          items: [{
+            key: 'portal-copy', provisional: false,
+            item: {
+              id: 'portal-copy', sessionId: 'session-1', status: 'complete', kind: 'message',
+              role: 'assistant', content: [{ type: 'text', text: 'alpha beta' }],
+            },
+          }],
+        })} />
+      </div>);
+      const bubble = container.querySelector('.chat-bubble')!;
+      firePointer(bubble, 'pointerdown', {
+        pointerType: 'touch', pointerId: 4, clientX: 20, clientY: 20,
+      });
+      act(() => vi.advanceTimersByTime(480));
+
+      const overlay = document.querySelector('.conversation-copy-overlay')!;
+      const transformed = container.querySelector('[data-transformed]')!;
+      expect(transformed.contains(overlay)).toBe(false);
+      expect(document.body.contains(overlay)).toBe(true);
+
+      const view = container.querySelector('.chat-view') as HTMLElement;
+      const handle = document.querySelector('.chat-copy-handle[data-end="end"]')!;
+      (handle as HTMLElement).setPointerCapture = vi.fn();
+      (handle as HTMLElement).releasePointerCapture = vi.fn();
+      firePointer(handle, 'pointerdown', {
+        pointerType: 'touch', pointerId: 5, clientX: 20, clientY: 20,
+      });
+      expect((handle as HTMLElement).setPointerCapture).toHaveBeenCalledWith(5);
+      firePointer(view, 'pointerup', {
+        pointerType: 'touch', pointerId: 5, clientX: 20, clientY: 20,
+      });
+      expect((handle as HTMLElement).releasePointerCapture).toHaveBeenCalledWith(5);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('dismisses from composer and topbar siblings without swallowing their click or focus', () => {
+    vi.useFakeTimers();
+    const topbarClick = vi.fn();
+    const composerClick = vi.fn();
+    try {
+      const { container } = render(<div>
+        <button type="button" data-topbar onClick={topbarClick}>Topbar</button>
+        <AgentConversationView conversation={controller({
+          items: [{
+            key: 'document-outside', provisional: false,
+            item: {
+              id: 'document-outside', sessionId: 'session-1', status: 'complete', kind: 'message',
+              role: 'assistant', content: [{ type: 'text', text: 'alpha beta' }],
+            },
+          }],
+        })} />
+        <button type="button" data-composer onClick={composerClick}>Composer</button>
+      </div>);
+      const bubble = container.querySelector('.chat-bubble')!;
+      const topbar = container.querySelector('[data-topbar]')!;
+      const composer = container.querySelector('[data-composer]') as HTMLButtonElement;
+      const select = (pointerId: number): void => {
+        firePointer(bubble, 'pointerdown', {
+          pointerType: 'touch', pointerId, clientX: 20, clientY: 20,
+        });
+        act(() => vi.advanceTimersByTime(480));
+        expect(document.querySelector('.chat-copy-callout')).toBeTruthy();
+      };
+
+      select(20);
+      firePointer(topbar, 'pointerdown', {
+        pointerType: 'touch', pointerId: 21, clientX: 20, clientY: 20,
+      });
+      firePointer(topbar, 'pointermove', {
+        pointerType: 'touch', pointerId: 21, clientX: 20, clientY: 40,
+      });
+      firePointer(topbar, 'pointerup', {
+        pointerType: 'touch', pointerId: 21, clientX: 20, clientY: 40,
+      });
+      fireEvent.click(topbar);
+      expect(topbarClick).toHaveBeenCalledOnce();
+      expect(document.querySelector('.chat-copy-callout')).toBeTruthy();
+
+      const topbarUp = (() => {
+        firePointer(topbar, 'pointerdown', {
+          pointerType: 'touch', pointerId: 22, clientX: 20, clientY: 20,
+        });
+        return firePointer(topbar, 'pointerup', {
+          pointerType: 'touch', pointerId: 22, clientX: 20, clientY: 20,
+        });
+      })();
+      fireEvent.click(topbar);
+      expect(topbarUp.defaultPrevented).toBe(false);
+      expect(topbarClick).toHaveBeenCalledTimes(2);
+      expect(document.querySelector('.chat-copy-callout')).toBeNull();
+
+      select(23);
+      firePointer(composer, 'pointerdown', {
+        pointerType: 'touch', pointerId: 24, clientX: 20, clientY: 20,
+      });
+      const composerUp = firePointer(composer, 'pointerup', {
+        pointerType: 'touch', pointerId: 24, clientX: 20, clientY: 20,
+      });
+      fireEvent.click(composer);
+      composer.focus();
+      expect(composerUp.defaultPrevented).toBe(false);
+      expect(composerClick).toHaveBeenCalledOnce();
+      expect(document.activeElement).toBe(composer);
+      expect(document.querySelector('.chat-copy-callout')).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('measures and clamps the localized copy callout instead of assuming a fixed width', () => {
+    vi.useFakeTimers();
+    const rect = (left: number, top: number, width: number, height: number): DOMRect => ({
+      left, right: left + width, top, bottom: top + height, width, height,
+      x: left, y: top, toJSON: () => ({}),
+    });
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function getRect(
+      this: HTMLElement,
+    ) {
+      if (this.classList.contains('chat-copy-callout')) return rect(0, 0, 260, 40);
+      if (this.classList.contains('chat-view') || this.classList.contains('chat-scroll')
+        || this.classList.contains('chat-bubble')) return rect(10, 0, 300, 400);
+      return rect(0, 0, 0, 0);
+    });
+    const originalRects = Object.getOwnPropertyDescriptor(Range.prototype, 'getClientRects');
+    Object.defineProperty(Range.prototype, 'getClientRects', {
+      configurable: true,
+      value: () => [rect(280, 100, 10, 20)] as unknown as DOMRectList,
+    });
+    try {
+      const { container } = render(<AgentConversationView conversation={controller({
+        items: [{
+          key: 'wide-callout', provisional: false,
+          item: {
+            id: 'wide-callout', sessionId: 'session-1', status: 'complete', kind: 'message',
+            role: 'assistant', content: [{ type: 'text', text: 'alpha beta' }],
+          },
+        }],
+      })} />);
+      firePointer(container.querySelector('.chat-bubble')!, 'pointerdown', {
+        pointerType: 'touch', pointerId: 6, clientX: 280, clientY: 100,
+      });
+      act(() => vi.advanceTimersByTime(480));
+      const callout = document.querySelector('.chat-copy-callout') as HTMLElement;
+      expect(callout.style.left).toBe('42px');
+      expect(callout.style.maxWidth).toBe('284px');
+    } finally {
+      if (originalRects) Object.defineProperty(Range.prototype, 'getClientRects', originalRects);
+      else Reflect.deleteProperty(Range.prototype, 'getClientRects');
+      vi.useRealTimers();
+    }
+  });
+
+  it('restores a precise selection after streaming DOM replacement and keeps it while scrolling', () => {
+    vi.useFakeTimers();
+    const item = (text: string) => ({
+      key: 'streaming-answer', provisional: true,
+      item: {
+        kind: 'message' as const, role: 'assistant' as const,
+        content: [{ type: 'text' as const, text }],
+      },
+    });
+    try {
+      const { container, rerender } = render(<AgentConversationView conversation={controller({
+        items: [item('alpha beta')],
+      })} />);
+      const bubble = container.querySelector('.chat-bubble') as HTMLElement;
+      fireEvent.pointerDown(bubble, { pointerType: 'touch', clientX: 40, clientY: 80 });
+      act(() => vi.advanceTimersByTime(480));
+      expect(document.getSelection()?.toString()).toBe('alpha');
+      expect(screen.getByRole('button', { name: '整行' })).toBeTruthy();
+      expect(screen.getByRole('button', { name: '整段' })).toBeTruthy();
+
+      fireEvent.scroll(container.querySelector('.chat-scroll')!);
+      expect(document.getSelection()?.toString()).toBe('alpha');
+
+      rerender(<AgentConversationView conversation={controller({
+        items: [item('alpha beta, appended output')],
+      })} />);
+      expect(document.getSelection()?.toString()).toBe('alpha');
+      expect(document.querySelectorAll('.chat-copy-handle')).toHaveLength(2);
+
+      rerender(<AgentConversationView conversation={controller({
+        items: [item('omega beta, appended output')],
+      })} />);
+      expect(document.querySelector('.chat-copy-callout')).toBeNull();
+      expect(document.getSelection()?.toString()).toBe('');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('lets either handle cross the fixed endpoint and return without an off-by-one jump', () => {
+    vi.useFakeTimers();
+    const originalCaret = Object.getOwnPropertyDescriptor(document, 'caretPositionFromPoint');
+    try {
+      const { container } = render(<AgentConversationView conversation={controller({
+        items: [{
+          key: 'drag-answer', provisional: false,
+          item: {
+            id: 'drag-answer', sessionId: 'session-1', status: 'complete', kind: 'message',
+            role: 'assistant', content: [{ type: 'text', text: 'one two three' }],
+          },
+        }],
+      })} />);
+      const bubble = container.querySelector('.chat-bubble') as HTMLElement;
+      bubble.getBoundingClientRect = () => ({
+        left: 0, right: 130, top: 0, bottom: 30, width: 130, height: 30,
+        x: 0, y: 0, toJSON: () => ({}),
+      });
+      Object.defineProperty(document, 'caretPositionFromPoint', {
+        configurable: true,
+        value: (x: number) => ({
+          offsetNode: bubble.querySelector('p')!.firstChild!, offset: Math.floor(x / 10),
+        }),
+      });
+      firePointer(bubble, 'pointerdown', {
+        pointerType: 'touch', pointerId: 1, clientX: 50, clientY: 15,
+      });
+      act(() => vi.advanceTimersByTime(480));
+      expect(document.getSelection()?.toString()).toBe('two');
+
+      const start = document.querySelector('.chat-copy-handle[data-end="start"]')!;
+      firePointer(start, 'pointerdown', {
+        pointerType: 'touch', pointerId: 7, clientX: 40, clientY: 15,
+      });
+      firePointer(container.querySelector('.chat-view')!, 'pointermove', {
+        pointerType: 'touch', pointerId: 7, clientX: 90, clientY: 15,
+      });
+      expect(document.getSelection()?.toString()).toBe(' th');
+      firePointer(container.querySelector('.chat-view')!, 'pointermove', {
+        pointerType: 'touch', pointerId: 7, clientX: 50, clientY: 15,
+      });
+      expect(document.getSelection()?.toString()).toBe('wo');
+      firePointer(container.querySelector('.chat-view')!, 'pointerup', {
+        pointerType: 'touch', pointerId: 7, clientX: 50, clientY: 15,
+      });
+
+      firePointer(container.querySelector('.chat-view')!, 'pointerdown', {
+        pointerType: 'touch', pointerId: 9, clientX: 200, clientY: 200,
+      });
+      firePointer(container.querySelector('.chat-view')!, 'pointerup', {
+        pointerType: 'touch', pointerId: 9, clientX: 200, clientY: 200,
+      });
+      firePointer(bubble, 'pointerdown', {
+        pointerType: 'touch', pointerId: 2, clientX: 50, clientY: 15,
+      });
+      act(() => vi.advanceTimersByTime(480));
+      expect(document.getSelection()?.toString()).toBe('two');
+      const end = document.querySelector('.chat-copy-handle[data-end="end"]')!;
+      firePointer(end, 'pointerdown', {
+        pointerType: 'touch', pointerId: 8, clientX: 70, clientY: 15,
+      });
+      firePointer(container.querySelector('.chat-view')!, 'pointermove', {
+        pointerType: 'touch', pointerId: 8, clientX: 10, clientY: 15,
+      });
+      expect(document.getSelection()?.toString()).toBe('ne ');
+      firePointer(container.querySelector('.chat-view')!, 'pointermove', {
+        pointerType: 'touch', pointerId: 8, clientX: 50, clientY: 15,
+      });
+      expect(document.getSelection()?.toString()).toBe('tw');
+      firePointer(container.querySelector('.chat-view')!, 'pointerup', {
+        pointerType: 'touch', pointerId: 8, clientX: 50, clientY: 15,
+      });
+    } finally {
+      if (originalCaret) Object.defineProperty(document, 'caretPositionFromPoint', originalCaret);
+      else Reflect.deleteProperty(document, 'caretPositionFromPoint');
+      vi.useRealTimers();
+    }
+  });
+
+  it('auto-scrolls the conversation while a selection handle stays at its edge', () => {
+    vi.useFakeTimers();
+    const originalCaret = Object.getOwnPropertyDescriptor(document, 'caretPositionFromPoint');
+    let frame: FrameRequestCallback | null = null;
+    vi.spyOn(window, 'requestAnimationFrame').mockImplementation((callback) => {
+      frame = callback;
+      return 17;
+    });
+    vi.spyOn(window, 'cancelAnimationFrame').mockImplementation(() => {});
+    try {
+      const { container } = render(<AgentConversationView conversation={controller({
+        items: [{
+          key: 'scroll-select', provisional: false,
+          item: {
+            id: 'scroll-select', sessionId: 'session-1', status: 'complete', kind: 'message',
+            role: 'assistant', content: [{ type: 'text', text: 'one two three' }],
+          },
+        }],
+      })} />);
+      const bubble = container.querySelector('.chat-bubble') as HTMLElement;
+      const scroll = container.querySelector('.chat-scroll') as HTMLElement;
+      bubble.getBoundingClientRect = () => ({
+        left: 0, right: 130, top: 0, bottom: 300, width: 130, height: 300,
+        x: 0, y: 0, toJSON: () => ({}),
+      });
+      scroll.getBoundingClientRect = () => ({
+        left: 0, right: 130, top: 0, bottom: 100, width: 130, height: 100,
+        x: 0, y: 0, toJSON: () => ({}),
+      });
+      Object.defineProperty(scroll, 'clientHeight', { value: 100, configurable: true });
+      Object.defineProperty(scroll, 'scrollHeight', { value: 1_000, configurable: true });
+      Object.defineProperty(document, 'caretPositionFromPoint', {
+        configurable: true,
+        value: () => ({ offsetNode: bubble.querySelector('p')!.firstChild!, offset: 5 }),
+      });
+      fireEvent.pointerDown(bubble, { pointerType: 'touch', clientX: 40, clientY: 40 });
+      act(() => vi.advanceTimersByTime(480));
+
+      const end = document.querySelector('.chat-copy-handle[data-end="end"]')!;
+      fireEvent.pointerDown(end, { pointerType: 'touch', pointerId: 8, clientX: 40, clientY: 40 });
+      const move = new Event('pointermove', { bubbles: true, cancelable: true });
+      Object.assign(move, { pointerType: 'touch', pointerId: 8, clientX: 40, clientY: 96 });
+      fireEvent(container.querySelector('.chat-view')!, move);
+      expect(frame).not.toBeNull();
+      act(() => { if (frame) (frame as FrameRequestCallback)(16); });
+      expect(scroll.scrollTop).toBeGreaterThan(0);
+      fireEvent.pointerUp(container.querySelector('.chat-view')!, {
+        pointerType: 'touch', pointerId: 8, clientX: 40, clientY: 96,
+      });
+    } finally {
+      if (originalCaret) Object.defineProperty(document, 'caretPositionFromPoint', originalCaret);
+      else Reflect.deleteProperty(document, 'caretPositionFromPoint');
+      vi.useRealTimers();
+    }
+  });
+
+  it('swallows the link click produced by a long press', () => {
+    vi.useFakeTimers();
+    try {
+      const onDocLinkTap = vi.fn();
+      const { container } = render(<AgentConversationView onDocLinkTap={onDocLinkTap}
+        conversation={controller({
+          items: [{
+            key: 'link-answer', provisional: false,
+            item: {
+              id: 'link-answer', sessionId: 'session-1', status: 'complete', kind: 'message',
+              role: 'assistant', content: [{ type: 'text', text: '[Docs](https://example.com/guide)' }],
+            },
+          }],
+        })} />);
+      const link = container.querySelector('.chat-md a')!;
+      fireEvent.pointerDown(link, { pointerType: 'touch', clientX: 40, clientY: 80 });
+      act(() => vi.advanceTimersByTime(480));
+      fireEvent.pointerUp(link, { pointerType: 'touch', clientX: 40, clientY: 80 });
+      fireEvent.click(link);
+      expect(onDocLinkTap).not.toHaveBeenCalled();
+      expect(document.querySelector('.chat-copy-callout')).toBeTruthy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('dismisses an existing selection without opening a different Markdown link', () => {
+    vi.useFakeTimers();
+    try {
+      const onDocLinkTap = vi.fn();
+      const { container } = render(<AgentConversationView onDocLinkTap={onDocLinkTap}
+        conversation={controller({
+          items: [{
+            key: 'two-links', provisional: false,
+            item: {
+              id: 'two-links', sessionId: 'session-1', status: 'complete', kind: 'message',
+              role: 'assistant', content: [{ type: 'text', text:
+                '[First](https://example.com/first) and [Second](https://example.com/second)' }],
+            },
+          }],
+        })} />);
+      const links = container.querySelectorAll('.chat-md a');
+      firePointer(links[0]!, 'pointerdown', {
+        pointerType: 'touch', pointerId: 40, clientX: 20, clientY: 20,
+      });
+      act(() => vi.advanceTimersByTime(480));
+      firePointer(links[0]!, 'pointerup', {
+        pointerType: 'touch', pointerId: 40, clientX: 20, clientY: 20,
+      });
+      fireEvent.click(links[0]!);
+      expect(document.querySelector('.chat-copy-callout')).toBeTruthy();
+      expect(onDocLinkTap).not.toHaveBeenCalled();
+
+      firePointer(links[1]!, 'pointerdown', {
+        pointerType: 'touch', pointerId: 41, clientX: 120, clientY: 20,
+      });
+      firePointer(links[1]!, 'pointerup', {
+        pointerType: 'touch', pointerId: 41, clientX: 120, clientY: 20,
+      });
+      fireEvent.click(links[1]!);
+      expect(document.querySelector('.chat-copy-callout')).toBeNull();
+      expect(onDocLinkTap).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('dismisses an existing selection without opening a different ToolChip', () => {
+    vi.useFakeTimers();
+    try {
+      const { container } = render(<AgentConversationView conversation={controller({
+        items: [{
+          key: 'before-tool', provisional: false,
+          item: {
+            id: 'before-tool', sessionId: 'session-1', status: 'complete', kind: 'message',
+            role: 'assistant', content: [{ type: 'text', text: 'select this text' }],
+          },
+        }, {
+          key: 'tap-tool', provisional: false,
+          item: {
+            id: 'tap-tool', sessionId: 'session-1', status: 'complete', kind: 'tool_call',
+            callId: 'tap-tool', name: 'exec_command', input: { cmd: 'pwd' },
+          },
+        }],
+      })} />);
+      const bubble = container.querySelector('.chat-bubble')!;
+      const tool = container.querySelector('.chat-tool-head')!;
+      firePointer(bubble, 'pointerdown', {
+        pointerType: 'touch', pointerId: 42, clientX: 20, clientY: 20,
+      });
+      act(() => vi.advanceTimersByTime(480));
+      firePointer(bubble, 'pointerup', {
+        pointerType: 'touch', pointerId: 42, clientX: 20, clientY: 20,
+      });
+      fireEvent.click(bubble);
+      expect(document.querySelector('.chat-copy-callout')).toBeTruthy();
+
+      firePointer(tool, 'pointerdown', {
+        pointerType: 'touch', pointerId: 43, clientX: 20, clientY: 80,
+      });
+      firePointer(tool, 'pointerup', {
+        pointerType: 'touch', pointerId: 43, clientX: 20, clientY: 80,
+      });
+      fireEvent.click(tool);
+      expect(document.querySelector('.chat-copy-callout')).toBeNull();
+      expect(screen.queryByRole('dialog')).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('cancels a pending long press when the conversation session changes', () => {
     vi.useFakeTimers();
     try {
@@ -285,7 +836,7 @@ describe('generic Agent Conversation UI', () => {
       act(() => vi.advanceTimersByTime(500));
 
       expect(container.querySelector('.chat-copy-callout')).toBeNull();
-      expect(oldError.classList.contains('chat-copy-hl')).toBe(false);
+      expect(container.querySelector('.chat-view')?.classList.contains('chat-copy-active')).toBe(false);
     } finally {
       vi.useRealTimers();
     }
@@ -308,11 +859,11 @@ describe('generic Agent Conversation UI', () => {
   it('resolves every conversation error surface without regressing bubble or tool copy targets', () => {
     const host = document.createElement('div');
     host.innerHTML = `
-      <div class="chat-bubble"><span id="bubble">bubble</span></div>
-      <div class="chat-tool"><span id="tool">tool</span></div>
-      <small class="agent-conversation-item-error" id="item-error">attachment failed</small>
-      <button class="chat-history-retry" id="history-error">history failed</button>
-      <div class="agent-conversation-empty is-error" id="empty-error">unavailable</div>
+      <div class="chat-bubble" data-conversation-copy-root data-conversation-copy-id="bubble"><span id="bubble">bubble</span></div>
+      <div class="chat-tool" data-conversation-copy-root data-conversation-copy-id="tool"><span id="tool">tool</span></div>
+      <small class="agent-conversation-item-error" data-conversation-copy-root data-conversation-copy-id="item-error" id="item-error">attachment failed</small>
+      <button class="chat-history-retry" data-conversation-copy-root data-conversation-copy-id="history-error" id="history-error">history failed</button>
+      <div class="agent-conversation-empty is-error" data-conversation-copy-root data-conversation-copy-id="empty-error" id="empty-error">unavailable</div>
     `;
     document.body.append(host);
     const target = (id: string): HTMLElement => host.querySelector(`#${id}`) as HTMLElement;
@@ -323,6 +874,222 @@ describe('generic Agent Conversation UI', () => {
     expect(resolveConversationCopyBlock(target('history-error'))?.el).toBe(target('history-error'));
     expect(resolveConversationCopyBlock(target('empty-error'))?.el).toBe(target('empty-error'));
     host.remove();
+  });
+
+  it('copies signs but not line numbers across rows from the actual expanded diff DOM', () => {
+    const { container } = render(<ToolSheet running={false} onClose={() => {}} copyId="diff-tool"
+      tool={{
+        name: 'apply_patch', input: { file_path: '/work/file.ts' }, result: 'Done!',
+        isError: false, outcome: 'success',
+        diff: {
+          added: 1, removed: 1,
+          hunks: [{ oldStart: 7, newStart: 9, lines: ['-old value', '+new value'] }],
+        },
+      }} />);
+    const diff = container.querySelector('.dv') as HTMLElement;
+    const map = conversationTextMap(diff);
+    expect(map.text).toBe('-old value\n+new value\n');
+    const range = domRangeForOffsets(diff, {
+      start: 0,
+      end: map.text.lastIndexOf('\n'),
+    }, map)!;
+    const selection = document.getSelection()!;
+    selection.removeAllRanges();
+    selection.addRange(range);
+
+    expect(selection.toString()).toBe('-old value\n+new value');
+    expect(copyTextForRange(range)).toBe(selection.toString());
+    expect(selection.toString()).not.toMatch(/7|9|10/);
+  });
+
+  it('treats sign-only rows as paragraph breaks in collapsed and detailed diff DOM', () => {
+    const tool = {
+      name: 'apply_patch', input: { file_path: '/work/file.ts' }, result: 'Done!',
+      isError: false, outcome: 'success' as const,
+      diff: {
+        added: 2, removed: 2,
+        hunks: [{ oldStart: 1, newStart: 1, lines: ['-removed', '-', '+', '+added'] }],
+      },
+    };
+    const { container } = render(<>
+      <ToolBody tool={tool} copyId="collapsed-diff" />
+      <ToolSheet tool={tool} running={false} onClose={() => {}} copyId="detailed-diff" />
+    </>);
+    const roots = [
+      container.querySelector('.chat-diff') as HTMLElement,
+      container.querySelector('.dv') as HTMLElement,
+    ];
+    for (const root of roots) {
+      const map = conversationTextMap(root);
+      const removed = map.text.indexOf('-removed');
+      const added = map.text.indexOf('+added');
+      const removedRange = paragraphRange(root, { start: removed + 2, end: removed + 3 }, map);
+      const addedRange = paragraphRange(root, { start: added + 2, end: added + 3 }, map);
+      expect(map.text.slice(removedRange.start, removedRange.end)).toBe('-removed');
+      expect(map.text.slice(addedRange.start, addedRange.end)).toBe('+added');
+    }
+  });
+
+  it('refreshes and clips selection controls against an inner tool scroller', () => {
+    vi.useFakeTimers();
+    const rect = (left: number, top: number, width: number, height: number): DOMRect => ({
+      left, right: left + width, top, bottom: top + height, width, height,
+      x: left, y: top, toJSON: () => ({}),
+    });
+    let characterTop = 280;
+    const originalRects = Object.getOwnPropertyDescriptor(Range.prototype, 'getClientRects');
+    Object.defineProperty(Range.prototype, 'getClientRects', {
+      configurable: true,
+      value: () => [rect(40, characterTop, 8, 18)] as unknown as DOMRectList,
+    });
+    const originalCaret = Object.getOwnPropertyDescriptor(document, 'caretPositionFromPoint');
+    try {
+      const { container } = render(<AgentConversationView conversation={controller({
+        items: [{
+          key: 'scrolling-diff', provisional: false,
+          item: {
+            id: 'scrolling-diff', sessionId: 'session-1', status: 'complete',
+            kind: 'tool_call', callId: 'scrolling-diff', name: 'apply_patch',
+            extensions: { 'conversation.tool': {
+              name: 'apply_patch', input: { file_path: '/work/file.ts' }, result: 'Done!',
+              isError: false, outcome: 'success',
+              diff: {
+                added: 1, removed: 1,
+                hunks: [{ oldStart: 1, newStart: 1, lines: ['-old', '+new'] }],
+              },
+            } },
+          },
+        }],
+      })} />);
+      fireEvent.click(container.querySelector('.chat-tool-head')!);
+      const view = container.querySelector('.chat-view') as HTMLElement;
+      const transcript = container.querySelector('.chat-scroll') as HTMLElement;
+      const sheet = container.querySelector('.tool-sheet') as HTMLElement;
+      const sheetBody = container.querySelector('.tool-sheet-body') as HTMLElement;
+      const inner = container.querySelector('.es-diff') as HTMLElement;
+      const diff = container.querySelector('.dv') as HTMLElement;
+      view.getBoundingClientRect = () => rect(0, 0, 300, 400);
+      transcript.getBoundingClientRect = () => rect(0, 0, 300, 80);
+      sheet.getBoundingClientRect = () => rect(0, 100, 300, 300);
+      sheetBody.getBoundingClientRect = () => rect(10, 110, 240, 280);
+      inner.getBoundingClientRect = () => rect(20, 150, 200, 200);
+      diff.getBoundingClientRect = () => rect(20, 120, 200, 260);
+      const hitText = diff.querySelector('.dv-code')!.firstChild!;
+      Object.defineProperty(document, 'caretPositionFromPoint', {
+        configurable: true,
+        value: () => ({ offsetNode: hitText, offset: 1 }),
+      });
+
+      firePointer(hitText.parentElement!, 'pointerdown', {
+        pointerType: 'touch', pointerId: 12, clientX: 44, clientY: 280,
+      });
+      act(() => vi.advanceTimersByTime(480));
+      const start = document.querySelector('.chat-copy-handle[data-end="start"]') as HTMLElement;
+      expect(start.style.visibility).toBe('visible');
+      expect(start.style.top).toBe('280px');
+
+      characterTop = 120;
+      fireEvent.scroll(inner);
+      expect(start.style.visibility).toBe('hidden');
+      expect(start.style.top).toBe('120px');
+      characterTop = 180;
+      fireEvent.scroll(inner);
+      expect(start.style.visibility).toBe('visible');
+      expect(start.style.top).toBe('180px');
+    } finally {
+      if (originalRects) Object.defineProperty(Range.prototype, 'getClientRects', originalRects);
+      else Reflect.deleteProperty(Range.prototype, 'getClientRects');
+      if (originalCaret) Object.defineProperty(document, 'caretPositionFromPoint', originalCaret);
+      else Reflect.deleteProperty(document, 'caretPositionFromPoint');
+      vi.useRealTimers();
+    }
+  });
+
+  it('auto-scrolls a vertical tool ancestor instead of a horizontal-only copy root or transcript', () => {
+    vi.useFakeTimers();
+    const rect = (left: number, top: number, width: number, height: number): DOMRect => ({
+      left, right: left + width, top, bottom: top + height, width, height,
+      x: left, y: top, toJSON: () => ({}),
+    });
+    const originalRects = Object.getOwnPropertyDescriptor(Range.prototype, 'getClientRects');
+    Object.defineProperty(Range.prototype, 'getClientRects', {
+      configurable: true,
+      value: () => [rect(40, 300, 8, 18)] as unknown as DOMRectList,
+    });
+    const originalCaret = Object.getOwnPropertyDescriptor(document, 'caretPositionFromPoint');
+    let frame: FrameRequestCallback | null = null;
+    vi.spyOn(window, 'requestAnimationFrame').mockImplementation((callback) => {
+      frame = callback;
+      return 31;
+    });
+    vi.spyOn(window, 'cancelAnimationFrame').mockImplementation(() => {});
+    try {
+      const { container } = render(<AgentConversationView conversation={controller({
+        items: [{
+          key: 'wide-command', provisional: false,
+          item: {
+            id: 'wide-command', sessionId: 'session-1', status: 'complete',
+            kind: 'tool_call', callId: 'wide-command', name: 'exec_command',
+            input: { cmd: 'alpha beta gamma' },
+          },
+        }],
+      })} />);
+      fireEvent.click(container.querySelector('.chat-tool-head')!);
+      const view = container.querySelector('.chat-view') as HTMLElement;
+      const transcript = container.querySelector('.chat-scroll') as HTMLElement;
+      const sheet = container.querySelector('.tool-sheet') as HTMLElement;
+      const body = container.querySelector('.tool-sheet-body') as HTMLElement;
+      const command = container.querySelector('.tool-sheet-cmd') as HTMLElement;
+      view.getBoundingClientRect = () => rect(0, 0, 300, 400);
+      transcript.getBoundingClientRect = () => rect(0, 0, 300, 80);
+      sheet.getBoundingClientRect = () => rect(0, 100, 300, 300);
+      body.getBoundingClientRect = () => rect(10, 100, 280, 250);
+      command.getBoundingClientRect = () => rect(20, 270, 240, 60);
+      Object.defineProperties(command, {
+        clientHeight: { value: 60, configurable: true },
+        scrollHeight: { value: 60, configurable: true },
+        clientWidth: { value: 240, configurable: true },
+        scrollWidth: { value: 800, configurable: true },
+      });
+      Object.defineProperties(body, {
+        clientHeight: { value: 250, configurable: true },
+        scrollHeight: { value: 1_000, configurable: true },
+      });
+      Object.defineProperties(transcript, {
+        clientHeight: { value: 80, configurable: true },
+        scrollHeight: { value: 1_000, configurable: true },
+      });
+      Object.defineProperty(document, 'caretPositionFromPoint', {
+        configurable: true,
+        value: () => ({ offsetNode: command.firstChild!, offset: 2 }),
+      });
+
+      firePointer(command, 'pointerdown', {
+        pointerType: 'touch', pointerId: 30, clientX: 44, clientY: 300,
+      });
+      act(() => vi.advanceTimersByTime(480));
+      const end = document.querySelector('.chat-copy-handle[data-end="end"]')!;
+      firePointer(end, 'pointerdown', {
+        pointerType: 'touch', pointerId: 31, clientX: 44, clientY: 300,
+      });
+      firePointer(view, 'pointermove', {
+        pointerType: 'touch', pointerId: 31, clientX: 44, clientY: 345,
+      });
+      expect(frame).not.toBeNull();
+      act(() => { if (frame) (frame as FrameRequestCallback)(16); });
+      expect(body.scrollTop).toBeGreaterThan(0);
+      expect(command.scrollTop).toBe(0);
+      expect(transcript.scrollTop).toBe(0);
+      firePointer(view, 'pointerup', {
+        pointerType: 'touch', pointerId: 31, clientX: 44, clientY: 345,
+      });
+    } finally {
+      if (originalRects) Object.defineProperty(Range.prototype, 'getClientRects', originalRects);
+      else Reflect.deleteProperty(Range.prototype, 'getClientRects');
+      if (originalCaret) Object.defineProperty(document, 'caretPositionFromPoint', originalCaret);
+      else Reflect.deleteProperty(document, 'caretPositionFromPoint');
+      vi.useRealTimers();
+    }
   });
 
   it('offers an explicit confirmed resend only when an uncertain send remains unresolved', async () => {
@@ -760,8 +1527,11 @@ describe('generic Agent Conversation UI', () => {
     });
     const initial = controller({ items: [call(true)] });
     const { container, rerender } = render(<AgentConversationView conversation={initial} />);
+    expect(container.querySelector('.chat-tool-head')?.hasAttribute('data-conversation-copy-root')).toBe(true);
     fireEvent.click(container.querySelector('.chat-tool-head')!);
     expect(screen.getByRole('dialog').textContent).toContain('执行中');
+    expect(container.querySelector<HTMLElement>('.tool-sheet-cmd')?.dataset.conversationCopyId)
+      .toContain(':input');
 
     rerender(<AgentConversationView conversation={controller({
       items: [call(false), {
@@ -774,6 +1544,8 @@ describe('generic Agent Conversation UI', () => {
       }],
     })} />);
     expect(screen.getByRole('dialog').textContent).toContain('ready from settled result');
+    expect(container.querySelector<HTMLElement>('.chat-tool-body')?.dataset.conversationCopyId)
+      .toContain(':output');
 
     act(() => window.dispatchEvent(new PopStateEvent('popstate')));
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());

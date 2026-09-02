@@ -34,6 +34,8 @@ export default {
   'common.done': '完成',
   'common.retry': '重试',
   'common.continue': '继续',
+  'conversationCopy.line': '整行',
+  'conversationCopy.paragraph': '整段',
 
   'app.browser': '网页预览器',
   'browser.openTabs': '打开的网页预览器标签页',

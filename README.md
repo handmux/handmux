@@ -77,7 +77,7 @@ handmux start --tunnel cloudflare   # instant public URL (cloudflared auto-insta
 - **Git viewer** — changes / commit history / any branch / full-screen colored diff, multi-repo tabs, read-only, never touches your tree.
 - **Web Preview for URLs and static folders** — preview URLs by phone or computer proxy, or open an isolated static folder, with narrow/wide page widths and zoom; computer proxy can also request a mobile or desktop site version. It embeds pages rather than replacing a full browser.
 - **Docs** — tap recognized text-file paths in the terminal or Agent tool input/output to open them, regardless of extension; user-home paths appear as `~/…`, while ordinary slash-separated prose stays plain. Markdown rendered, font zoom, sentence-by-sentence read-aloud. Binary files stay download-only.
-- **Mobile select & copy** — long-press to select in the terminal, drag iOS-style handles to fine-tune, copy the selection / a whole line / a whole paragraph.
+- **Mobile select & copy** — long-press text in either the terminal or an Agent conversation, drag iOS-style handles to fine-tune, then copy the exact selection, its rendered line, or its semantic paragraph.
 - **Files both ways** — multi-select upload from the chat box (including ZIP archives), download, share in, copy any absolute path.
 - **Ideas — catch every one** — a thought the moment it strikes: a per-window idea/to-do list, jot one by voice and drop it straight into the prompt.
 - **Built for flaky networks** — backoff reconnect, connection-lost banner, offline page, polling that pauses in the background; a reflow-safe cursor.
