@@ -23,6 +23,7 @@ export const piAgentAdapter: AgentAdapter = {
   capabilities: {
     inbox: { apiVersion: 1 },
     conversation: { apiVersion: 1, experimental: true },
+    conversationContext: { apiVersion: 1 },
     sessionControl: { apiVersion: 1 },
   },
   presentation: { iconId: 'pi' },

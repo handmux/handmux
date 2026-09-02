@@ -20,6 +20,7 @@ interface PiSessionManager {
 }
 
 interface PiContext {
+  cwd?: string;
   sessionManager: PiSessionManager;
   modelRegistry?: {
     refresh(options?: { force?: boolean }): Promise<unknown>;
@@ -30,6 +31,11 @@ interface PiContext {
   abort(): void;
   isIdle(): boolean;
   hasPendingMessages(): boolean;
+  getContextUsage?(): {
+    tokens: number | null;
+    contextWindow: number;
+    percent: number | null;
+  } | undefined;
 }
 
 type PiEventName =
@@ -134,7 +140,7 @@ interface PiInboxItem {
 // Increment when a running Pi Extension must be reloaded to satisfy the Connector contract.
 // The Server treats an absent version as the legacy v1 implementation and surfaces one actionable
 // reload notice instead of silently continuing with stale message/inbox behavior.
-const PI_CONNECTOR_IMPLEMENTATION_VERSION = 6;
+const PI_CONNECTOR_IMPLEMENTATION_VERSION = 7;
 const PI_THINKING_LEVELS: readonly PiThinkingLevel[] = [
   'off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max',
 ];
@@ -197,6 +203,21 @@ function modelControlSnapshot(pi: PiExtensionApi, context: PiContext) {
       model: context.model ? modelReference(context.model) : null,
       effort: pi.getThinkingLevel(),
     },
+  };
+}
+
+function conversationContextSnapshot(context: PiContext) {
+  const usage = context.getContextUsage?.();
+  const usedTokens = typeof usage?.tokens === 'number' && Number.isFinite(usage.tokens)
+    && usage.tokens >= 0 ? usage.tokens : undefined;
+  const totalTokens = typeof usage?.contextWindow === 'number' && Number.isFinite(usage.contextWindow)
+    && usage.contextWindow > 0 ? usage.contextWindow : undefined;
+  const hasUsage = usedTokens !== undefined && totalTokens !== undefined;
+  const cwd = typeof context.cwd === 'string' && context.cwd.trim() ? context.cwd : undefined;
+  return {
+    activity: context.isIdle() ? 'idle' : 'working',
+    ...(hasUsage ? { usedTokens, totalTokens } : {}),
+    ...(cwd === undefined ? {} : { cwd }),
   };
 }
 
@@ -569,6 +590,7 @@ export default function handmuxPiExtension(pi: PiExtensionApi): void {
         ...(idle ? { completionToken: `pi-completed:${session.turn}` } : {}),
       };
     });
+    client.handle('conversation', 'context', () => conversationContextSnapshot(session.context));
     client.handle('conversation', 'send', async (payload, requestContext) => {
       const request = record(payload);
       if (!request || !boundedText(request.text, 256 * 1024)

@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { AgentConversationControlService } from '../src/agent-runtime/conversationControls.js';
 import type { AgentRunLease } from '../src/agent-runtime/run.js';
 import { createCodexConversationControls } from '../src/agents/codexConversationControls.js';
+import { createPiConversationContextAdapter } from '../src/agents/piConversationContext.js';
 
 const run: AgentRunLease = {
   ref: { agentId: 'future-agent', paneId: '%1', runId: 'run-1', sessionId: 'session-1' },
@@ -81,6 +82,41 @@ describe('AgentConversationControlService capability isolation', () => {
     expect(snapshot.permission).toEqual({ mode: 'default', options: ['default'] });
     expect(snapshot.slotErrors).toEqual({ context: 'temporarily unavailable' });
     expect(JSON.stringify(snapshot)).not.toContain('/private/rollout.jsonl');
+  });
+});
+
+describe('Pi conversation context', () => {
+  const piRun = (implementationVersion: number): AgentRunLease => ({
+    ...run,
+    ref: { ...run.ref, agentId: 'pi', implementationVersion },
+  });
+
+  it('does not probe pre-v7 Connectors and maps the native v7 context snapshot', async () => {
+    const request = vi.fn(async () => ({
+      activity: 'working', usedTokens: 42_000, totalTokens: 128_000, cwd: '/work/project',
+    }));
+    const context = createPiConversationContextAdapter({
+      host: { request } as unknown as Parameters<typeof createPiConversationContextAdapter>[0]['host'],
+    });
+
+    await expect(context.read(piRun(6))).resolves.toBeNull();
+    expect(request).not.toHaveBeenCalled();
+    await expect(context.read(piRun(7))).resolves.toEqual({
+      activity: 'working', usedTokens: 42_000, totalTokens: 128_000, cwd: '/work/project',
+    });
+    expect(request).toHaveBeenCalledWith(
+      expect.objectContaining({ ref: expect.objectContaining({ implementationVersion: 7 }) }),
+      'conversation', 'context', {}, expect.objectContaining({ timeoutMs: 8_000 }),
+    );
+  });
+
+  it('rejects incomplete native usage instead of publishing a misleading ring', async () => {
+    const request = vi.fn(async () => ({ activity: 'idle', usedTokens: 42 }));
+    const context = createPiConversationContextAdapter({
+      host: { request } as unknown as Parameters<typeof createPiConversationContextAdapter>[0]['host'],
+    });
+
+    await expect(context.read(piRun(7))).rejects.toThrow('invalid context usage');
   });
 });
 

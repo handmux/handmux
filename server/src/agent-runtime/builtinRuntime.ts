@@ -13,6 +13,7 @@ import {
   createPiConversationActivityReader,
   createPiConversationAdapter,
 } from '../agents/piConversation.js';
+import { createPiConversationContextAdapter } from '../agents/piConversationContext.js';
 import { createPiSessionControlAdapter } from '../agents/piSessionControl.js';
 import { createCodexSessionControlAdapter } from '../agents/codexSessionControl.js';
 import { createCodexConversationControls } from '../agents/codexConversationControls.js';
@@ -194,6 +195,7 @@ export function createBuiltinAgentRuntime({
           ...(piSessionsRoot === undefined ? {} : { sessionsRoot: piSessionsRoot }),
         }),
         conversationActivity: createPiConversationActivityReader(context.bridge),
+        conversationContext: createPiConversationContextAdapter({ host: context.bridge }),
         sessionControl: createPiSessionControlAdapter({ host: context.bridge }),
         start: () => {
           inbox.start();

@@ -14,6 +14,7 @@ import type {
 import { AgentRunRuntime } from '../src/agent-runtime/run.js';
 
 interface TestContext {
+  cwd?: string;
   sessionManager: {
     getSessionId(): string;
     getSessionFile(): string;
@@ -35,6 +36,7 @@ interface TestContext {
   abort: ReturnType<typeof vi.fn>;
   isIdle(): boolean;
   hasPendingMessages(): boolean;
+  getContextUsage?(): { tokens: number | null; contextWindow: number; percent: number | null } | undefined;
 }
 type Handler = (event: Record<string, unknown>, context: TestContext) => void;
 const directories: string[] = [];
@@ -112,6 +114,48 @@ describe('Handmux Pi Extension', () => {
     expect(activity?.({}, request)).toMatchObject({
       activity: 'idle', completionToken: 'pi-completed:1',
     });
+    handlers.get('session_shutdown')?.({}, ctx);
+  });
+
+  it('exposes native activity, working directory and current context-window usage', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'handmux-pi-extension-'));
+    directories.push(root);
+    process.env.TMUX_PANE = '%conversation-context';
+    process.env.HANDMUX_AGENT_RUNTIME_DIR = root;
+    const handlers = new Map<string, Handler>();
+    const bridgeHandlers = new Map<string, Parameters<PiBridgeClient['handle']>[2]>();
+    vi.spyOn(PiBridgeClient.prototype, 'handle').mockImplementation((channel, method, handler) => {
+      bridgeHandlers.set(`${channel}/${method}`, handler);
+      return () => {};
+    });
+    let idle = false;
+    let usage: { tokens: number | null; contextWindow: number; percent: number | null } = {
+      tokens: 64_000, contextWindow: 128_000, percent: 50,
+    };
+    const ctx = context();
+    ctx.cwd = '/work/project';
+    ctx.isIdle = () => idle;
+    ctx.getContextUsage = () => usage;
+    handmuxPiExtension({
+      on: (event: string, handler: Handler) => { handlers.set(event, handler); },
+      sendUserMessage: vi.fn(),
+    });
+    handlers.get('session_start')?.({}, ctx);
+
+    const read = bridgeHandlers.get('conversation/context');
+    expect(await read?.({}, {
+      requestId: 'context', deadlineAt: Date.now() + 1_000,
+      signal: new AbortController().signal,
+    })).toEqual({
+      activity: 'working', usedTokens: 64_000, totalTokens: 128_000, cwd: '/work/project',
+    });
+
+    idle = true;
+    usage = { tokens: null, contextWindow: 128_000, percent: null };
+    expect(await read?.({}, {
+      requestId: 'context-after-compact', deadlineAt: Date.now() + 1_000,
+      signal: new AbortController().signal,
+    })).toEqual({ activity: 'idle', cwd: '/work/project' });
     handlers.get('session_shutdown')?.({}, ctx);
   });
 
@@ -1574,7 +1618,7 @@ describe('Handmux Pi Extension', () => {
     expect(new Set(files)).toHaveLength(2);
     for (const file of files) {
       const state = JSON.parse(fs.readFileSync(path.join(root, 'connectors', file), 'utf8'));
-      expect(state.snapshots.conversation.implementationVersion).toBe(6);
+      expect(state.snapshots.conversation.implementationVersion).toBe(7);
     }
     newHandlers.get('session_shutdown')?.({ reason: 'quit' }, ctx);
   });

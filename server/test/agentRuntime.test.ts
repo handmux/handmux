@@ -715,7 +715,10 @@ describe('AgentRuntime composition root', () => {
     runtimes.push(runtime);
     expect(runtime.capabilities().find((value) => value.id === 'pi')).toMatchObject({
       iconId: 'pi',
-      capabilities: { inbox: true, conversation: true, interaction: false, subscriptionUsage: false },
+      capabilities: {
+        inbox: true, conversation: true, conversationContext: true,
+        interaction: false, subscriptionUsage: false,
+      },
       capabilityMetadata: { conversation: { experimental: true } },
     });
     expect(runtime.capabilities().some((value) => (
@@ -729,10 +732,22 @@ describe('AgentRuntime composition root', () => {
       socketPath: runtime.socketPath,
       authToken: AUTH_TOKEN,
       adapterId: 'pi',
-      candidate: candidate(),
+      candidate: candidate({ implementationVersion: 7 }),
     });
+    client.channel('conversation').handle('context', async () => ({
+      activity: 'working', usedTokens: 64_000, totalTokens: 128_000, cwd: '/work/project',
+    }));
     await client.channel('inbox').setSnapshot({ availability: 'ready' });
     await vi.waitFor(() => expect(runtime.inbox.read().availability.pi).toEqual({ availability: 'ready' }));
+    const lease = runtime.runs.resolve({
+      agentId: 'pi', paneId: '%1', runId: 'pi-run', sessionId: 'session-1',
+    });
+    expect(lease).not.toBeNull();
+    await expect(runtime.conversationControls?.read(lease!)).resolves.toMatchObject({
+      context: {
+        activity: 'working', usedTokens: 64_000, totalTokens: 128_000, cwd: '/work/project',
+      },
+    });
     client.close();
   });
 

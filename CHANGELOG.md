@@ -4,6 +4,10 @@ All notable changes to handmux. Format follows [Keep a Changelog](https://keepac
 
 ## [Unreleased]
 
+### Added
+
+- Pi 对话接入通用上下文圆环，显示原生实时上下文用量、运行状态和工作目录；旧 Connector 保持聊天可用，执行 `/reload` 后启用新能力。
+
 ## [0.25.2] - 2026-09-02
 
 ### Fixed
