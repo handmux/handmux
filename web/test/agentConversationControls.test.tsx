@@ -244,7 +244,7 @@ describe('Agent Conversation controls UI', () => {
   });
 
   it('shows neutral terminal guidance and retries an unknown Queue row', async () => {
-    const retryOutgoing = vi.fn(async () => {});
+    const retryOutgoing = vi.fn(async () => false);
     const view = render(<AgentConversationQueueControl activity="idle" controller={controller({
       snapshot: { queue: {
         items: [{

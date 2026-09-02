@@ -1052,7 +1052,7 @@ describe('useAgentConversation', () => {
     unmount();
   });
 
-  it('restores an unknown Queue dispatch to Queue ownership after reload', async () => {
+  it('restores an unknown Queue dispatch to Timeline ownership after Core claimed it', async () => {
     const run = { agentId: 'pi', paneId: '%1', runId: 'run-1', sessionId: 'session-1' };
     vi.mocked(discoverAgentConversation).mockResolvedValue({
       session: { agentId: 'pi', sessionId: 'session-1' }, run,
@@ -1071,10 +1071,9 @@ describe('useAgentConversation', () => {
       dispatchOrigin: 'queue', queueOrderKey: '0001', createdAt: 1, updatedAt: 2,
     }]));
 
-    expect(result.current.items.filter((item) => item.outgoing)).toEqual([]);
     expect(result.current.localSubmissions).toEqual([
       expect.objectContaining({
-        clientRequestId: 'submission-queued-unknown', owner: 'queue', status: 'unknown',
+        clientRequestId: 'submission-queued-unknown', owner: 'timeline', status: 'unknown',
       }),
     ]);
     unmount();
@@ -1129,11 +1128,55 @@ describe('useAgentConversation', () => {
       dispatchOrigin: 'direct', createdAt: 1, updatedAt: 1,
     }]));
 
-    await act(async () => { await result.current.retryOutgoing?.('submission-unknown'); });
+    let remainsUnknown: boolean | void = false;
+    await act(async () => {
+      remainsUnknown = await result.current.retryOutgoing?.('submission-unknown');
+    });
     expect(queryAgentConversationSubmission).toHaveBeenCalledWith(run, {
       submissionId: 'submission-unknown',
     });
     expect(sendAgentConversationMessage).not.toHaveBeenCalled();
+    expect(remainsUnknown).toBe(true);
+    unmount();
+  });
+
+  it('resends a confirmed unknown delivery as a new request while retaining the original', async () => {
+    const run = { agentId: 'pi', paneId: '%1', runId: 'run-1', sessionId: 'session-1' };
+    vi.mocked(discoverAgentConversation).mockResolvedValue({
+      session: { agentId: 'pi', sessionId: 'session-1' }, run,
+      viewId: 'view-1', historyVersion: 'history-1',
+      capabilities: { history: true, live: 'poll', sendable: true },
+    });
+    vi.mocked(readAgentConversationPage).mockResolvedValue({ status: 'ok', page: {
+      sessionId: 'session-1', viewId: 'view-1', historyVersion: 'history-1',
+      items: [], hasMore: false,
+    } });
+    vi.mocked(sendAgentConversationMessage)
+      .mockResolvedValueOnce({ status: 'unknown' })
+      .mockResolvedValueOnce({ status: 'accepted' });
+    const { result, unmount } = renderHook(() => useAgentConversation(run));
+    await waitFor(() => expect(result.current.status).toBe('ready'));
+    await act(async () => {
+      await result.current.send('run it again').catch(() => {});
+    });
+    const otherUnknownId = vi.mocked(sendAgentConversationMessage).mock.calls[0]?.[1].clientRequestId;
+    act(() => result.current.observeSubmissionSnapshot?.([{
+      id: 'submission-unknown', text: 'run it again', state: 'unknown', revision: 3,
+      dispatchOrigin: 'queue', createdAt: 1, updatedAt: 2,
+    }]));
+
+    await act(async () => { await result.current.resendOutgoing?.('submission-unknown'); });
+
+    expect(sendAgentConversationMessage).toHaveBeenCalledWith(run, expect.objectContaining({
+      text: 'run it again', delivery: 'prompt',
+    }));
+    const replacementId = vi.mocked(sendAgentConversationMessage).mock.calls[1]?.[1].clientRequestId;
+    expect(replacementId).not.toBe('submission-unknown');
+    expect(replacementId).not.toBe(otherUnknownId);
+    expect(result.current.localSubmissions).toEqual(expect.arrayContaining([
+      expect.objectContaining({ clientRequestId: 'submission-unknown', status: 'unknown' }),
+      expect.objectContaining({ clientRequestId: replacementId, status: 'accepted' }),
+    ]));
     unmount();
   });
 

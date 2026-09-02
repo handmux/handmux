@@ -64,7 +64,7 @@ export interface AgentConversationController {
   sending: boolean;
   interrupting: boolean;
   downloadResource(resource: { resourceId: string; name?: string; mediaType?: string }): Promise<void>;
-  send(text: string, options?: { queueHint?: boolean }): Promise<void>;
+  send(text: string, options?: { queueHint?: boolean; forceNewRequest?: boolean }): Promise<void>;
   localSubmissions?: Array<{
     clientRequestId: string;
     text: string;
@@ -107,7 +107,8 @@ export interface AgentConversationController {
   interrupt(): Promise<void>;
   loadOlder(): Promise<void>;
   loadLatest?(options?: { force?: boolean }): Promise<void>;
-  retryOutgoing?(clientRequestId: string): Promise<void>;
+  retryOutgoing?(clientRequestId: string): Promise<boolean>;
+  resendOutgoing?(clientRequestId: string): Promise<void>;
 }
 
 export type RefreshAgentRun = (stale: AgentRunRef) => Promise<AgentRunRef | null>;
@@ -694,7 +695,7 @@ export function useAgentConversation(
 
   const send = useCallback(async (
     text: string,
-    options: { queueHint?: boolean } = {},
+    options: { queueHint?: boolean; forceNewRequest?: boolean } = {},
   ): Promise<void> => {
     const value = text.trim();
     if (!value) return;
@@ -704,7 +705,8 @@ export function useAgentConversation(
     if (!canSendConversation(activeDescriptor.capabilities)) {
       throw new Error('This Agent does not accept messages here');
     }
-    const previous = sendAttemptsRef.current.get(operationKey);
+    const previous = options.forceNewRequest
+      ? undefined : sendAttemptsRef.current.get(operationKey);
     const attempt = previous?.text === value
       ? previous
       : {
@@ -936,8 +938,7 @@ export function useAgentConversation(
         if (pendingSteer && submission.state === 'queued'
           && submission.revision <= Math.max(existing.baseRevision ?? 0, existing.revision ?? 0)) continue;
         const owner = submission.state === 'queued'
-          || (submission.dispatchOrigin === 'queue'
-            && (submission.state === 'dispatching' || submission.state === 'unknown'))
+          || (submission.dispatchOrigin === 'queue' && submission.state === 'dispatching')
           ? 'queue' as const : 'timeline' as const;
         const status = submission.state === 'unknown' ? 'unknown' as const : 'sending' as const;
         const currentSlots = projectionRef.current.slots;
@@ -1040,9 +1041,9 @@ export function useAgentConversation(
     });
   }, [activeIdentity]);
 
-  const retryOutgoing = useCallback(async (clientRequestId: string): Promise<void> => {
+  const retryOutgoing = useCallback(async (clientRequestId: string): Promise<boolean> => {
     const attempt = outgoing.find((item) => item.clientRequestId === clientRequestId);
-    if (!attempt || attempt.status !== 'unknown' || !run?.sessionId) return;
+    if (!attempt || attempt.status !== 'unknown' || !run?.sessionId) return false;
     if (attempt.owner === 'queue' && !attempt.actionId) {
       const request = {
         clientRequestId: attempt.clientRequestId,
@@ -1078,7 +1079,8 @@ export function useAgentConversation(
       } else if (receipt.status === 'accepted') {
         forgetSendAttempt(sendAttemptsRef.current, clientRequestId);
       }
-      return;
+      return receipt.status === 'unknown' || receipt.status === 'rejected'
+        || receipt.submission?.state === 'unknown';
     }
     const request = {
       submissionId: attempt.clientRequestId,
@@ -1107,7 +1109,15 @@ export function useAgentConversation(
         return { ...accepted, owner: 'timeline' as const, status: 'accepted' as const };
       }));
     }
+    return receipt.status === 'unknown' || receipt.status === 'rejected'
+      || receipt.submission?.state === 'unknown';
   }, [observeSubmissionSnapshot, outgoing, recoverRun, run]);
+
+  const resendOutgoing = useCallback(async (clientRequestId: string): Promise<void> => {
+    const attempt = outgoing.find((item) => item.clientRequestId === clientRequestId);
+    if (!attempt || attempt.status !== 'unknown') return;
+    await send(attempt.text, { queueHint: true, forceNewRequest: true });
+  }, [outgoing, send]);
 
   const removeQueueSubmission = useCallback((submissionId: string): void => {
     setOutgoing((items) => items.filter((entry) => entry.clientRequestId !== submissionId));
@@ -1379,7 +1389,7 @@ export function useAgentConversation(
     observeSubmissionSnapshot,
     settleQueueSteer,
     removeQueueSubmission,
-    send, interrupt, loadOlder, loadLatest, downloadResource, retryOutgoing,
+    send, interrupt, loadOlder, loadLatest, downloadResource, retryOutgoing, resendOutgoing,
   };
 }
 

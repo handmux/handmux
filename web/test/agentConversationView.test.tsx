@@ -69,7 +69,8 @@ function controller(overrides: Partial<AgentConversationController> = {}): Agent
     },
     items: [], hasMore: false, loadingOlder: false, sending: false, interrupting: false,
     send: vi.fn(async () => {}), interrupt: vi.fn(async () => {}), loadOlder: vi.fn(async () => {}),
-    downloadResource: vi.fn(async () => {}), retryOutgoing: vi.fn(async () => {}),
+    downloadResource: vi.fn(async () => {}), retryOutgoing: vi.fn(async () => false),
+    resendOutgoing: vi.fn(async () => {}),
     ...overrides,
   } as AgentConversationController;
 }
@@ -324,8 +325,9 @@ describe('generic Agent Conversation UI', () => {
     host.remove();
   });
 
-  it('shows one quiet outgoing state and retries failed or uncertain sends through Conversation', () => {
-    const retryOutgoing = vi.fn(async () => {});
+  it('offers an explicit confirmed resend only when an uncertain send remains unresolved', async () => {
+    const retryOutgoing = vi.fn(async (id: string) => id === 'unknown-send');
+    const resendOutgoing = vi.fn(async () => {});
     const outgoing = (key: string, status: 'failed' | 'unknown') => ({
       key, provisional: true, live: true,
       item: {
@@ -336,7 +338,7 @@ describe('generic Agent Conversation UI', () => {
     });
     const { container } = render(<AgentConversationView conversation={controller({
       items: [outgoing('failed-send', 'failed'), outgoing('unknown-send', 'unknown')],
-      retryOutgoing,
+      retryOutgoing, resendOutgoing,
     })} />);
 
     expect(container.querySelectorAll('.chat-turn-error')).toHaveLength(0);
@@ -344,8 +346,33 @@ describe('generic Agent Conversation UI', () => {
     expect(container.querySelector('.chat-typing')).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: '重试' }));
     fireEvent.click(screen.getByRole('button', { name: '查询状态' }));
+    await waitFor(() => expect(screen.getByRole('alertdialog')).toBeTruthy());
+    expect(screen.getByText('这条消息可能已经发送。继续会作为一条新消息再次发送，可能导致任务重复执行。')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: '仍然发送' }));
+    await waitFor(() => expect(resendOutgoing).toHaveBeenCalledWith('unknown-send'));
     expect(retryOutgoing).toHaveBeenNthCalledWith(1, 'failed-send');
     expect(retryOutgoing).toHaveBeenNthCalledWith(2, 'unknown-send');
+  });
+
+  it('does not offer another send when the status query resolves the uncertainty', async () => {
+    const retryOutgoing = vi.fn(async () => false);
+    render(<AgentConversationView conversation={controller({
+      items: [{
+        key: 'unknown-send', provisional: true, live: true,
+        item: {
+          kind: 'message', role: 'user',
+          content: [{ type: 'text', text: 'already resolved' }],
+        },
+        outgoing: {
+          clientRequestId: 'unknown-send', text: 'already resolved', status: 'unknown',
+        },
+      }],
+      retryOutgoing,
+    })} />);
+
+    fireEvent.click(screen.getByRole('button', { name: '查询状态' }));
+    await waitFor(() => expect(retryOutgoing).toHaveBeenCalledWith('unknown-send'));
+    expect(screen.queryByRole('alertdialog')).toBeNull();
   });
 
   it('renders normalized Plan history after its answer and opens the shared detail sheet', () => {

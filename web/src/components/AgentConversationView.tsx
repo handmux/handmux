@@ -40,6 +40,7 @@ import {
   ConversationCopyCallout,
   useConversationLongPressCopy,
 } from '../hooks/useConversationLongPressCopy.js';
+import { OverlayPortal } from '../overlays/OverlayHost.js';
 
 const BOTTOM_REJOIN_PX = 2;
 const BOTTOM_JUMP_THRESHOLD_PX = 80;
@@ -140,6 +141,9 @@ export default function AgentConversationView({
   const [sheetKey, setSheetKey] = useState<string | null>(null);
   const [planSheet, setPlanSheet] = useState<ConversationPlan | null>(null);
   const [goalSheet, setGoalSheet] = useState<ConversationGoal | null>(null);
+  const [resendCandidate, setResendCandidate] = useState<{
+    clientRequestId: string;
+  } | null>(null);
   const conversationRef = useRef(conversation);
   const completedEntryConsumedRef = useRef(0);
   const completedEntryRefreshRef = useRef(new Set<number>());
@@ -154,6 +158,7 @@ export default function AgentConversationView({
     setSheetKey(null);
     setPlanSheet(null);
     setGoalSheet(null);
+    setResendCandidate(null);
   }, [sessionId]);
 
   const copy = useConversationLongPressCopy({
@@ -217,6 +222,7 @@ export default function AgentConversationView({
     if (sheetKey != null && !sheetMessage) setSheetKey(null);
   }, [sheetKey, sheetMessage]);
   useBackButton(sheetKey != null, () => setSheetKey(null));
+  useBackButton(resendCandidate != null, () => setResendCandidate(null));
   const consumeCompletedEntry = useCallback((request: number): void => {
     if (request <= 0 || completedEntryConsumedRef.current === request) return;
     completedEntryConsumedRef.current = request;
@@ -558,7 +564,18 @@ export default function AgentConversationView({
                     <button type="button"
                       aria-label={t(outgoing.status === 'unknown'
                         ? 'chat.outgoing.retryUnknown' : 'chat.outgoing.retry')}
-                      onClick={() => void conversation.retryOutgoing?.(outgoing.clientRequestId)}>
+                      onClick={() => {
+                        const queriedSessionId = sessionId;
+                        void conversation.retryOutgoing?.(outgoing.clientRequestId).then((unresolved) => {
+                          if (outgoing.status === 'unknown' && unresolved
+                            && conversation.resendOutgoing
+                            && conversationRef.current.descriptor?.session.sessionId === queriedSessionId) {
+                            setResendCandidate({
+                              clientRequestId: outgoing.clientRequestId,
+                            });
+                          }
+                        }).catch(() => {});
+                      }}>
                       {t(outgoing.status === 'unknown'
                         ? 'chat.outgoing.retryUnknown' : 'chat.outgoing.retry')}
                     </button>
@@ -617,6 +634,25 @@ export default function AgentConversationView({
       )}
       <ConversationPlanSheet plan={planSheet} onClose={() => setPlanSheet(null)} />
       <ConversationGoalSheet goal={goalSheet} onClose={() => setGoalSheet(null)} />
+      {resendCandidate && <OverlayPortal>
+        <div className="settings-confirm-backdrop cc-queue-dialog-backdrop"
+          onClick={() => setResendCandidate(null)}>
+          <div className="settings-confirm cc-confirm-dialog" role="alertdialog" aria-modal="true"
+            aria-label={t('chat.outgoing.resendTitle')}
+            onClick={(event) => event.stopPropagation()}>
+            <h2>{t('chat.outgoing.resendTitle')}</h2>
+            <p>{t('chat.outgoing.resendBody')}</p>
+            <div className="settings-confirm-actions">
+              <button type="button" onClick={() => setResendCandidate(null)}>{t('common.cancel')}</button>
+              <button type="button" className="danger" onClick={() => {
+                const candidate = resendCandidate;
+                setResendCandidate(null);
+                void conversation.resendOutgoing?.(candidate.clientRequestId).catch(() => {});
+              }}>{t('chat.outgoing.resendConfirm')}</button>
+            </div>
+          </div>
+        </div>
+      </OverlayPortal>}
     </div>
   );
 }

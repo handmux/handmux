@@ -41,7 +41,7 @@ function conversation(send = vi.fn(async () => {})): AgentConversationController
     },
     items: [], hasMore: false, loadingOlder: false, sending: false, interrupting: false,
     send, interrupt: vi.fn(async () => {}), loadOlder: vi.fn(async () => {}),
-    downloadResource: vi.fn(async () => {}), retryOutgoing: vi.fn(async () => {}),
+    downloadResource: vi.fn(async () => {}), retryOutgoing: vi.fn(async () => false),
   } as AgentConversationController;
 }
 
