@@ -1768,6 +1768,117 @@ describe('generic Agent Conversation UI', () => {
     }
   });
 
+  it.each([
+    ['scrolling', 120],
+    ['hard-top', 0],
+  ] as const)(
+    'keeps the copy callout hidden through repeated upward edge-scroll frames at %s',
+    (_mode, initialScrollTop) => {
+    vi.useFakeTimers();
+    const originalCaret = Object.getOwnPropertyDescriptor(document, 'caretPositionFromPoint');
+    const originalRects = Object.getOwnPropertyDescriptor(Range.prototype, 'getClientRects');
+    let frame: FrameRequestCallback | null = null;
+    vi.spyOn(window, 'requestAnimationFrame').mockImplementation((callback) => {
+      frame = callback;
+      return 18;
+    });
+    vi.spyOn(window, 'cancelAnimationFrame').mockImplementation(() => {});
+    try {
+      const { container } = render(<AgentConversationView conversation={controller({
+        items: [{
+          key: 'stable-upward-scroll-callout', provisional: false,
+          item: {
+            id: `stable-upward-scroll-callout-${_mode}`, sessionId: 'session-1',
+            status: 'complete', kind: 'message', role: 'assistant',
+            content: [{ type: 'text', text: 'zero one two three' }],
+          },
+        }],
+      })} />);
+      const rect = (left: number, top: number, width: number, height: number): DOMRect => ({
+        left, right: left + width, top, bottom: top + height, width, height,
+        x: left, y: top, toJSON: () => ({}),
+      });
+      const bubble = container.querySelector('.chat-bubble') as HTMLElement;
+      const view = container.querySelector('.chat-view') as HTMLElement;
+      const scroll = container.querySelector('.chat-scroll') as HTMLElement;
+      view.getBoundingClientRect = () => rect(0, 0, 130, 100);
+      bubble.getBoundingClientRect = () => rect(0, 0, 130, 300);
+      scroll.getBoundingClientRect = () => rect(0, 0, 130, 100);
+      let scrollPosition: number = initialScrollTop;
+      Object.defineProperties(scroll, {
+        clientHeight: { value: 100, configurable: true },
+        scrollHeight: { value: 1_000, configurable: true },
+        scrollTop: {
+          get: () => scrollPosition,
+          set: (value: number) => { scrollPosition = Math.max(0, value); },
+          configurable: true,
+        },
+      });
+      Object.defineProperty(Range.prototype, 'getClientRects', {
+        configurable: true,
+        value: () => [rect(
+          20,
+          60 + (initialScrollTop - scroll.scrollTop),
+          10,
+          20,
+        )] as unknown as DOMRectList,
+      });
+      Object.defineProperty(document, 'caretPositionFromPoint', {
+        configurable: true,
+        value: (_x: number, y: number) => ({
+          offsetNode: bubble.querySelector('p')!.firstChild!, offset: y < 36 ? 0 : 10,
+        }),
+      });
+      const held = touchPoint(900, 40, 50);
+      firePointer(bubble, 'pointerdown', {
+        pointerType: 'touch', pointerId: 90, clientX: 40, clientY: 50,
+      });
+      fireTouch(bubble, 'touchstart', [held], [held]);
+      act(() => vi.advanceTimersByTime(480));
+      const callout = document.querySelector('.chat-copy-callout') as HTMLElement;
+      expect(callout.style.visibility).toBe('visible');
+
+      const edgeTouch = touchPoint(900, 40, 4);
+      fireTouch(view, 'touchmove', [edgeTouch]);
+      expect(callout.style.visibility).toBe('hidden');
+      const tops: string[] = [];
+      for (let index = 0; index < 3; index += 1) {
+        if (index > 0) fireTouch(view, 'touchmove', [edgeTouch]);
+        const currentFrame = frame;
+        expect(currentFrame).not.toBeNull();
+        act(() => { if (currentFrame) (currentFrame as FrameRequestCallback)(index * 16); });
+        const currentCallout = document.querySelector('.chat-copy-callout') as HTMLElement;
+        expect(currentCallout).toBe(callout);
+        expect(currentCallout.style.visibility).toBe('hidden');
+        tops.push(currentCallout.style.top);
+      }
+      if (initialScrollTop > 0) {
+        expect(new Set(tops).size).toBeGreaterThan(1);
+        expect(scroll.scrollTop).toBeLessThan(initialScrollTop);
+      } else {
+        expect(new Set(tops).size).toBe(1);
+        expect(scroll.scrollTop).toBe(0);
+      }
+      expect(document.getSelection()?.toString()).toBe('zero one two');
+
+      fireTouch(view, 'touchmove', [touchPoint(900, 40, 50)]);
+      expect(callout.style.visibility).toBe('visible');
+      fireTouch(view, 'touchmove', [edgeTouch]);
+      expect(callout.style.visibility).toBe('hidden');
+      fireTouch(view, 'touchend', [], [edgeTouch]);
+      expect(document.querySelector('.chat-copy-callout')).toBe(callout);
+      expect(callout.style.visibility).toBe('visible');
+      expect(document.getSelection()?.toString()).toBe('zero one two');
+    } finally {
+      if (originalCaret) Object.defineProperty(document, 'caretPositionFromPoint', originalCaret);
+      else Reflect.deleteProperty(document, 'caretPositionFromPoint');
+      if (originalRects) Object.defineProperty(Range.prototype, 'getClientRects', originalRects);
+      else Reflect.deleteProperty(Range.prototype, 'getClientRects');
+      vi.useRealTimers();
+    }
+  },
+  );
+
   it('swallows the link click produced by a long press', () => {
     vi.useFakeTimers();
     try {
