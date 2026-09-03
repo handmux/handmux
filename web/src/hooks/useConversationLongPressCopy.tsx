@@ -62,6 +62,7 @@ interface DragState {
   mode: 'handle' | 'initial-word';
   fixedOffset: number;
   initialRange: TextOffsetRange | null;
+  touchIdentifier: number | null;
   pointerId: number;
   captureTarget: Element;
   point: { x: number; y: number };
@@ -151,6 +152,8 @@ export function useConversationLongPressCopy({
     timer: null, x: 0, y: 0, target: null, pointerId: null, captureTarget: null,
   });
   const dragRef = useRef<DragState | null>(null);
+  const touchIdentifierRef = useRef<number | null>(null);
+  const multiTouchBlockedRef = useRef(false);
   const pendingOutsideRef = useRef<PendingOutsideTap | null>(null);
   const autoScrollRef = useRef<number | null>(null);
   const suppressClickRef = useRef(false);
@@ -176,6 +179,7 @@ export function useConversationLongPressCopy({
     const drag = dragRef.current;
     dragRef.current = null;
     stopAutoScroll();
+    if (drag?.mode === 'initial-word') touchIdentifierRef.current = null;
     if (!drag || !releaseCapture) return;
     try {
       drag.captureTarget.releasePointerCapture?.(drag.pointerId);
@@ -319,6 +323,7 @@ export function useConversationLongPressCopy({
       mode: 'initial-word',
       fixedOffset: initial.start,
       initialRange: initial,
+      touchIdentifier: touchIdentifierRef.current,
       pointerId,
       captureTarget,
       point: { x: press.x, y: press.y },
@@ -394,7 +399,100 @@ export function useConversationLongPressCopy({
     autoScrollRef.current = requestAnimationFrame(tick);
   }, [updateDrag]);
 
+  const moveDrag = useCallback((x: number, y: number): void => {
+    const drag = dragRef.current;
+    if (!drag) return;
+    drag.point = { x, y };
+    updateDrag(x, y);
+    const rect = drag.scroller.getBoundingClientRect();
+    let over = 0;
+    if (y < rect.top + EDGE_SCROLL_PX) {
+      drag.direction = -1;
+      over = rect.top + EDGE_SCROLL_PX - y;
+    } else if (y > rect.bottom - EDGE_SCROLL_PX) {
+      drag.direction = 1;
+      over = y - (rect.bottom - EDGE_SCROLL_PX);
+    } else {
+      drag.direction = 0;
+    }
+    drag.step = Math.min(16, 2 + over * .3);
+    if (drag.direction) startAutoScroll();
+    else stopAutoScroll();
+  }, [startAutoScroll, stopAutoScroll, updateDrag]);
+
   useBackButton(copyUI != null, dismiss);
+  useLayoutEffect(() => {
+    const view = viewRef.current;
+    if (!view) return undefined;
+    const passiveOptions: AddEventListenerOptions = { passive: true };
+    const blockingOptions: AddEventListenerOptions = { passive: false };
+    const onlyTouch = (touches: TouchList): Touch | null => touches.length === 1
+      ? touches.item(0) : null;
+    const includesTouch = (touches: TouchList, identifier: number): boolean => Array.from(touches)
+      .some((touch) => touch.identifier === identifier);
+    const onTouchStart = (event: TouchEvent): void => {
+      const touch = onlyTouch(event.touches);
+      const drag = dragRef.current;
+      if (!touch) {
+        cancel();
+        if (drag?.mode === 'initial-word') finishDrag();
+        touchIdentifierRef.current = null;
+        pendingOutsideRef.current = null;
+        multiTouchBlockedRef.current = true;
+        return;
+      }
+      if (drag?.mode === 'initial-word') {
+        if (drag.touchIdentifier !== touch.identifier) finishDrag();
+        return;
+      }
+      if (!multiTouchBlockedRef.current) touchIdentifierRef.current = touch.identifier;
+    };
+    const onTouchMove = (event: TouchEvent): void => {
+      const drag = dragRef.current;
+      if (drag?.mode === 'initial-word') {
+        const touch = onlyTouch(event.touches);
+        if (!touch || drag.touchIdentifier == null
+          || touch.identifier !== drag.touchIdentifier) {
+          finishDrag();
+          return;
+        }
+        event.preventDefault();
+        moveDrag(touch.clientX, touch.clientY);
+        return;
+      }
+      const press = pressRef.current;
+      if (press.timer == null) return;
+      const touch = onlyTouch(event.touches);
+      const identifier = touchIdentifierRef.current;
+      if (!touch || (identifier != null && touch.identifier !== identifier)) {
+        cancel();
+        return;
+      }
+      if (Math.hypot(touch.clientX - press.x, touch.clientY - press.y) > MOVE_SLOP_PX) cancel();
+    };
+    const endTouch = (event: TouchEvent): void => {
+      if (event.touches.length === 0) multiTouchBlockedRef.current = false;
+      const drag = dragRef.current;
+      const identifier = drag?.mode === 'initial-word'
+        ? drag.touchIdentifier : touchIdentifierRef.current;
+      if (identifier != null && !includesTouch(event.changedTouches, identifier)) return;
+      if (identifier == null && event.touches.length > 0) return;
+      cancel();
+      if (drag?.mode === 'initial-word') finishDrag();
+      touchIdentifierRef.current = null;
+    };
+    view.addEventListener('touchstart', onTouchStart, passiveOptions);
+    view.addEventListener('touchmove', onTouchMove, blockingOptions);
+    view.addEventListener('touchend', endTouch, passiveOptions);
+    view.addEventListener('touchcancel', endTouch, passiveOptions);
+    return () => {
+      view.removeEventListener('touchstart', onTouchStart, passiveOptions);
+      view.removeEventListener('touchmove', onTouchMove, blockingOptions);
+      view.removeEventListener('touchend', endTouch, passiveOptions);
+      view.removeEventListener('touchcancel', endTouch, passiveOptions);
+      multiTouchBlockedRef.current = false;
+    };
+  }, [cancel, finishDrag, moveDrag, viewRef]);
   useEffect(() => () => {
     cancel();
     finishDrag();
@@ -479,6 +577,11 @@ export function useConversationLongPressCopy({
       // Releasing a reused id here could drop the new gesture's implicit browser capture.
       finishDrag({ releaseCapture: eventPointerId !== currentDrag.pointerId });
     }
+    if (event.pointerType === 'touch' && multiTouchBlockedRef.current) {
+      cancel();
+      pendingOutsideRef.current = null;
+      return;
+    }
     if (target?.closest('.chat-copy-callout')) return;
     const handleTarget = target?.closest<HTMLElement>('.chat-copy-handle') ?? null;
     const endpoint = handleTarget?.dataset.end;
@@ -492,6 +595,7 @@ export function useConversationLongPressCopy({
         mode: 'handle',
         fixedOffset: endpoint === 'start' ? model.end : model.start,
         initialRange: null,
+        touchIdentifier: null,
         pointerId: eventPointerId,
         captureTarget: handleTarget,
         point: { x: event.clientX, y: event.clientY },
@@ -544,22 +648,7 @@ export function useConversationLongPressCopy({
     if (drag) {
       const pointerId = Number.isFinite(event.pointerId) ? event.pointerId : 0;
       if (drag.pointerId !== pointerId) return;
-      drag.point = { x: event.clientX, y: event.clientY };
-      updateDrag(event.clientX, event.clientY);
-      const rect = drag.scroller.getBoundingClientRect();
-      let over = 0;
-      if (event.clientY < rect.top + EDGE_SCROLL_PX) {
-        drag.direction = -1;
-        over = rect.top + EDGE_SCROLL_PX - event.clientY;
-      } else if (event.clientY > rect.bottom - EDGE_SCROLL_PX) {
-        drag.direction = 1;
-        over = event.clientY - (rect.bottom - EDGE_SCROLL_PX);
-      } else {
-        drag.direction = 0;
-      }
-      drag.step = Math.min(16, 2 + over * .3);
-      if (drag.direction) startAutoScroll();
-      else stopAutoScroll();
+      moveDrag(event.clientX, event.clientY);
       event.preventDefault();
       event.stopPropagation();
       return;
