@@ -361,6 +361,54 @@ describe('generic Agent Conversation UI', () => {
     }
   });
 
+  it('clears stale JS drag state without releasing a same-target gesture that reuses its pointer id', () => {
+    vi.useFakeTimers();
+    const originalCaret = Object.getOwnPropertyDescriptor(document, 'caretPositionFromPoint');
+    try {
+      const { container } = render(<AgentConversationView conversation={controller({
+        items: [{
+          key: 'reused-pointer', provisional: false,
+          item: {
+            id: 'reused-pointer', sessionId: 'session-1', status: 'complete', kind: 'message',
+            role: 'assistant', content: [{ type: 'text', text: 'alpha beta' }],
+          },
+        }],
+      })} />);
+      const bubble = container.querySelector('.chat-bubble') as HTMLElement;
+      const release = vi.fn();
+      bubble.setPointerCapture = vi.fn();
+      bubble.releasePointerCapture = release;
+      Object.defineProperty(document, 'caretPositionFromPoint', {
+        configurable: true,
+        value: (x: number) => ({
+          offsetNode: bubble.querySelector('p')!.firstChild!, offset: x < 100 ? 1 : 7,
+        }),
+      });
+
+      firePointer(bubble, 'pointerdown', {
+        pointerType: 'touch', pointerId: 1, clientX: 20, clientY: 20,
+      });
+      act(() => vi.advanceTimersByTime(480));
+      expect(document.getSelection()?.toString()).toBe('alpha');
+
+      firePointer(bubble, 'pointerdown', {
+        pointerType: 'touch', pointerId: 1, clientX: 160, clientY: 20,
+      });
+      expect(release).not.toHaveBeenCalled();
+      const up = firePointer(bubble, 'pointerup', {
+        pointerType: 'touch', pointerId: 1, clientX: 160, clientY: 20,
+      });
+      expect(up.defaultPrevented).toBe(true);
+      expect(release).not.toHaveBeenCalled();
+      expect(document.getSelection()?.toString()).toBe('');
+      expect(document.querySelector('.chat-copy-callout')).toBeNull();
+    } finally {
+      if (originalCaret) Object.defineProperty(document, 'caretPositionFromPoint', originalCaret);
+      else Reflect.deleteProperty(document, 'caretPositionFromPoint');
+      vi.useRealTimers();
+    }
+  });
+
   it('portals copy controls outside transformed content while preserving pointer bubbling', () => {
     expect(styles).toMatch(/\.conversation-copy-overlay\s*\{[^}]*z-index:\s*calc\(var\(--z-overlay-detail\) \+ 1\)/);
     expect(styles).toMatch(/--z-overlay-tool:\s*42;/);
@@ -481,6 +529,48 @@ describe('generic Agent Conversation UI', () => {
     }
   });
 
+  it('releases a stale initial drag from document capture before a callout action stops bubbling', () => {
+    vi.useFakeTimers();
+    try {
+      const { container } = render(<AgentConversationView conversation={controller({
+        items: [{
+          key: 'stale-drag-callout', provisional: false,
+          item: {
+            id: 'stale-drag-callout', sessionId: 'session-1', status: 'complete', kind: 'message',
+            role: 'assistant', content: [{ type: 'text', text: 'alpha beta' }],
+          },
+        }],
+      })} />);
+      const bubble = container.querySelector('.chat-bubble') as HTMLElement;
+      const release = vi.fn();
+      bubble.setPointerCapture = vi.fn();
+      bubble.releasePointerCapture = release;
+      firePointer(bubble, 'pointerdown', {
+        pointerType: 'touch', pointerId: 70, clientX: 20, clientY: 20,
+      });
+      act(() => vi.advanceTimersByTime(480));
+      expect(document.getSelection()?.toString()).toBe('alpha');
+
+      const paragraph = screen.getByRole('button', { name: '整段' });
+      firePointer(paragraph, 'pointerdown', {
+        pointerType: 'touch', pointerId: 71, clientX: 20, clientY: 20,
+      });
+      firePointer(paragraph, 'pointerup', {
+        pointerType: 'touch', pointerId: 71, clientX: 20, clientY: 20,
+      });
+      expect(release).toHaveBeenCalledWith(70);
+      fireEvent.click(paragraph);
+      expect(document.getSelection()?.toString()).toBe('alpha beta');
+
+      firePointer(container.querySelector('.chat-view')!, 'pointermove', {
+        pointerType: 'touch', pointerId: 70, clientX: 200, clientY: 200,
+      });
+      expect(document.getSelection()?.toString()).toBe('alpha beta');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('measures and clamps the localized copy callout instead of assuming a fixed width', () => {
     vi.useFakeTimers();
     const rect = (left: number, top: number, width: number, height: number): DOMRect => ({
@@ -517,6 +607,92 @@ describe('generic Agent Conversation UI', () => {
       const callout = document.querySelector('.chat-copy-callout') as HTMLElement;
       expect(callout.style.left).toBe('42px');
       expect(callout.style.maxWidth).toBe('284px');
+    } finally {
+      if (originalRects) Object.defineProperty(Range.prototype, 'getClientRects', originalRects);
+      else Reflect.deleteProperty(Range.prototype, 'getClientRects');
+      vi.useRealTimers();
+    }
+  });
+
+  it('uses the last full-range layout rect when the selected tail character has no rect', () => {
+    vi.useFakeTimers();
+    const rect = (left: number, top: number, width: number, height: number): DOMRect => ({
+      left, right: left + width, top, bottom: top + height, width, height,
+      x: left, y: top, toJSON: () => ({}),
+    });
+    const firstLine = rect(10, 20, 40, 18);
+    const lastLine = rect(10, 50, 30, 22);
+    const originalRects = Object.getOwnPropertyDescriptor(Range.prototype, 'getClientRects');
+    Object.defineProperty(Range.prototype, 'getClientRects', {
+      configurable: true,
+      value(this: Range) {
+        if (this.toString() === 'alpha') {
+          return [firstLine, lastLine] as unknown as DOMRectList;
+        }
+        if (this.startOffset === 0 && this.endOffset === 1) {
+          return [firstLine] as unknown as DOMRectList;
+        }
+        return [] as unknown as DOMRectList;
+      },
+    });
+    try {
+      const { container } = render(<AgentConversationView conversation={controller({
+        items: [{
+          key: 'wrapped-selection', provisional: false,
+          item: {
+            id: 'wrapped-selection', sessionId: 'session-1', status: 'complete', kind: 'message',
+            role: 'assistant', content: [{ type: 'text', text: 'alpha' }],
+          },
+        }],
+      })} />);
+      firePointer(container.querySelector('.chat-bubble')!, 'pointerdown', {
+        pointerType: 'touch', pointerId: 62, clientX: 20, clientY: 20,
+      });
+      act(() => vi.advanceTimersByTime(480));
+
+      const end = document.querySelector('.chat-copy-handle[data-end="end"]') as HTMLElement;
+      expect(end.style.left).toBe('40px');
+      expect(end.style.top).toBe('50px');
+      expect(end.style.getPropertyValue('--h')).toBe('22px');
+    } finally {
+      if (originalRects) Object.defineProperty(Range.prototype, 'getClientRects', originalRects);
+      else Reflect.deleteProperty(Range.prototype, 'getClientRects');
+      vi.useRealTimers();
+    }
+  });
+
+  it('hides selection handles when neither endpoints nor the full range have layout rects', () => {
+    vi.useFakeTimers();
+    const originalRects = Object.getOwnPropertyDescriptor(Range.prototype, 'getClientRects');
+    Object.defineProperty(Range.prototype, 'getClientRects', {
+      configurable: true,
+      value: () => [] as unknown as DOMRectList,
+    });
+    try {
+      const { container } = render(<AgentConversationView conversation={controller({
+        items: [{
+          key: 'unlaid-selection', provisional: false,
+          item: {
+            id: 'unlaid-selection', sessionId: 'session-1', status: 'complete', kind: 'message',
+            role: 'assistant', content: [{ type: 'text', text: 'alpha' }],
+          },
+        }],
+      })} />);
+      const bubble = container.querySelector('.chat-bubble') as HTMLElement;
+      bubble.getBoundingClientRect = () => ({
+        left: 0, right: 300, top: 0, bottom: 600, width: 300, height: 600,
+        x: 0, y: 0, toJSON: () => ({}),
+      });
+      firePointer(bubble, 'pointerdown', {
+        pointerType: 'touch', pointerId: 63, clientX: 20, clientY: 20,
+      });
+      act(() => vi.advanceTimersByTime(480));
+
+      const handles = Array.from(document.querySelectorAll<HTMLElement>('.chat-copy-handle'));
+      expect(handles).toHaveLength(2);
+      expect(handles.every((handle) => handle.style.visibility === 'hidden')).toBe(true);
+      expect(handles.every((handle) => handle.style.getPropertyValue('--h') === '1px')).toBe(true);
+      expect(handles.some((handle) => handle.style.getPropertyValue('--h') === '600px')).toBe(false);
     } finally {
       if (originalRects) Object.defineProperty(Range.prototype, 'getClientRects', originalRects);
       else Reflect.deleteProperty(Range.prototype, 'getClientRects');
@@ -642,6 +818,254 @@ describe('generic Agent Conversation UI', () => {
     }
   });
 
+  it('keeps a handle drag owned by its pointer through foreign move, up, and cancel events', () => {
+    vi.useFakeTimers();
+    const originalCaret = Object.getOwnPropertyDescriptor(document, 'caretPositionFromPoint');
+    try {
+      const { container } = render(<AgentConversationView conversation={controller({
+        items: [{
+          key: 'owned-handle-drag', provisional: false,
+          item: {
+            id: 'owned-handle-drag', sessionId: 'session-1', status: 'complete', kind: 'message',
+            role: 'assistant', content: [{ type: 'text', text: 'one two three' }],
+          },
+        }],
+      })} />);
+      const bubble = container.querySelector('.chat-bubble') as HTMLElement;
+      const view = container.querySelector('.chat-view') as HTMLElement;
+      const bounds = {
+        left: 0, right: 130, top: 0, bottom: 100, width: 130, height: 100,
+        x: 0, y: 0, toJSON: () => ({}),
+      } as DOMRect;
+      bubble.getBoundingClientRect = () => bounds;
+      Object.defineProperty(document, 'caretPositionFromPoint', {
+        configurable: true,
+        value: (x: number) => ({
+          offsetNode: bubble.querySelector('p')!.firstChild!, offset: Math.floor(x / 10),
+        }),
+      });
+      firePointer(bubble, 'pointerdown', {
+        pointerType: 'touch', pointerId: 6, clientX: 50, clientY: 50,
+      });
+      act(() => vi.advanceTimersByTime(480));
+      firePointer(bubble, 'pointerup', {
+        pointerType: 'touch', pointerId: 6, clientX: 50, clientY: 50,
+      });
+      fireEvent.click(bubble);
+      expect(document.getSelection()?.toString()).toBe('two');
+
+      const end = document.querySelector('.chat-copy-handle[data-end="end"]') as HTMLElement;
+      const release = vi.fn();
+      end.setPointerCapture = vi.fn();
+      end.releasePointerCapture = release;
+      firePointer(end, 'pointerdown', {
+        pointerType: 'touch', pointerId: 7, clientX: 70, clientY: 50,
+      });
+      firePointer(view, 'pointermove', {
+        pointerType: 'touch', pointerId: 8, clientX: 90, clientY: 50,
+      });
+      firePointer(view, 'pointerup', {
+        pointerType: 'touch', pointerId: 8, clientX: 90, clientY: 50,
+      });
+      firePointer(view, 'pointercancel', {
+        pointerType: 'touch', pointerId: 8, clientX: 90, clientY: 50,
+      });
+      expect(document.getSelection()?.toString()).toBe('two');
+      expect(release).not.toHaveBeenCalled();
+
+      firePointer(view, 'pointermove', {
+        pointerType: 'touch', pointerId: 7, clientX: 90, clientY: 50,
+      });
+      expect(document.getSelection()?.toString()).toBe('two th');
+      firePointer(view, 'pointerup', {
+        pointerType: 'touch', pointerId: 7, clientX: 90, clientY: 50,
+      });
+      expect(release).toHaveBeenCalledWith(7);
+      expect(document.getSelection()?.toString()).toBe('two th');
+    } finally {
+      if (originalCaret) Object.defineProperty(document, 'caretPositionFromPoint', originalCaret);
+      else Reflect.deleteProperty(document, 'caretPositionFromPoint');
+      vi.useRealTimers();
+    }
+  });
+
+  it('extends the initial word in either direction while the original long press stays down', () => {
+    vi.useFakeTimers();
+    const originalCaret = Object.getOwnPropertyDescriptor(document, 'caretPositionFromPoint');
+    try {
+      const { container } = render(<AgentConversationView conversation={controller({
+        items: [{
+          key: 'hold-drag-answer', provisional: false,
+          item: {
+            id: 'hold-drag-answer', sessionId: 'session-1', status: 'complete', kind: 'message',
+            role: 'assistant', content: [{ type: 'text', text: 'one two three' }],
+          },
+        }],
+      })} />);
+      const bubble = container.querySelector('.chat-bubble') as HTMLElement;
+      const view = container.querySelector('.chat-view') as HTMLElement;
+      const capture = vi.fn();
+      const release = vi.fn();
+      bubble.setPointerCapture = capture;
+      bubble.releasePointerCapture = release;
+      bubble.getBoundingClientRect = () => ({
+        left: 0, right: 130, top: 0, bottom: 30, width: 130, height: 30,
+        x: 0, y: 0, toJSON: () => ({}),
+      });
+      Object.defineProperty(document, 'caretPositionFromPoint', {
+        configurable: true,
+        value: (x: number) => ({
+          offsetNode: bubble.querySelector('p')!.firstChild!, offset: Math.floor(x / 10),
+        }),
+      });
+
+      firePointer(bubble, 'pointerdown', {
+        pointerType: 'touch', pointerId: 60, clientX: 50, clientY: 15,
+      });
+      act(() => vi.advanceTimersByTime(480));
+      expect(document.getSelection()?.toString()).toBe('two');
+      expect(capture).toHaveBeenCalledWith(60);
+
+      firePointer(view, 'pointermove', {
+        pointerType: 'touch', pointerId: 60, clientX: 90, clientY: 15,
+      });
+      expect(document.getSelection()?.toString()).toBe('two th');
+      firePointer(view, 'pointermove', {
+        pointerType: 'touch', pointerId: 60, clientX: 50, clientY: 15,
+      });
+      expect(document.getSelection()?.toString()).toBe('two');
+      firePointer(view, 'pointermove', {
+        pointerType: 'touch', pointerId: 60, clientX: 10, clientY: 15,
+      });
+      expect(document.getSelection()?.toString()).toBe('ne two');
+      firePointer(view, 'pointermove', {
+        pointerType: 'touch', pointerId: 60, clientX: 90, clientY: 15,
+      });
+      expect(document.getSelection()?.toString()).toBe('two th');
+
+      firePointer(view, 'pointerup', {
+        pointerType: 'touch', pointerId: 60, clientX: 90, clientY: 15,
+      });
+      expect(release).toHaveBeenCalledWith(60);
+      expect(document.getSelection()?.toString()).toBe('two th');
+      expect(document.querySelectorAll('.chat-copy-handle')).toHaveLength(2);
+    } finally {
+      if (originalCaret) Object.defineProperty(document, 'caretPositionFromPoint', originalCaret);
+      else Reflect.deleteProperty(document, 'caretPositionFromPoint');
+      vi.useRealTimers();
+    }
+  });
+
+  it('keeps movement before the long-press threshold as ordinary scrolling without capture', () => {
+    vi.useFakeTimers();
+    try {
+      const { container } = render(<AgentConversationView conversation={controller({
+        items: [{
+          key: 'scroll-before-hold', provisional: false,
+          item: {
+            id: 'scroll-before-hold', sessionId: 'session-1', status: 'complete', kind: 'message',
+            role: 'assistant', content: [{ type: 'text', text: 'one two three' }],
+          },
+        }],
+      })} />);
+      const bubble = container.querySelector('.chat-bubble') as HTMLElement;
+      const capture = vi.fn();
+      bubble.setPointerCapture = capture;
+      firePointer(bubble, 'pointerdown', {
+        pointerType: 'touch', pointerId: 61, clientX: 50, clientY: 30,
+      });
+      firePointer(container.querySelector('.chat-view')!, 'pointermove', {
+        pointerType: 'touch', pointerId: 61, clientX: 50, clientY: 45,
+      });
+      act(() => vi.advanceTimersByTime(500));
+      expect(capture).not.toHaveBeenCalled();
+      expect(document.querySelector('.chat-copy-callout')).toBeNull();
+      expect(document.getSelection()?.toString()).toBe('');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it.each([
+    ['initial', 'abnormal-click'],
+    ['handle', 'abnormal-click'],
+    ['initial', 'dismiss-then-click'],
+    ['handle', 'dismiss-then-click'],
+  ] as const)(
+    'handles %s pointercancel through the %s path',
+    async (mode, path) => {
+      vi.useFakeTimers();
+      const originalClipboard = navigator.clipboard;
+      Object.defineProperty(navigator, 'clipboard', {
+        value: { writeText: vi.fn(async () => {}) }, configurable: true,
+      });
+      try {
+        const onDocLinkTap = vi.fn();
+        const { container } = render(<AgentConversationView onDocLinkTap={onDocLinkTap}
+          conversation={controller({
+            items: [{
+              key: `cancel-${mode}-drag`, provisional: false,
+              item: {
+                id: `cancel-${mode}-drag`, sessionId: 'session-1', status: 'complete', kind: 'message',
+                role: 'assistant', content: [{ type: 'text', text:
+                  '[Docs](https://example.com/docs) alpha' }],
+              },
+            }],
+          })} />);
+        const bubble = container.querySelector('.chat-bubble') as HTMLElement;
+        const link = container.querySelector('.chat-md a') as HTMLElement;
+        const release = vi.fn();
+        bubble.setPointerCapture = vi.fn();
+        bubble.releasePointerCapture = release;
+        firePointer(bubble, 'pointerdown', {
+          pointerType: 'touch', pointerId: 64, clientX: 20, clientY: 20,
+        });
+        act(() => vi.advanceTimersByTime(480));
+        if (mode === 'handle') {
+          firePointer(bubble, 'pointerup', {
+            pointerType: 'touch', pointerId: 64, clientX: 20, clientY: 20,
+          });
+          fireEvent.click(bubble);
+          const end = document.querySelector('.chat-copy-handle[data-end="end"]')!;
+          firePointer(end, 'pointerdown', {
+            pointerType: 'touch', pointerId: 65, clientX: 40, clientY: 20,
+          });
+        }
+        firePointer(container.querySelector('.chat-view')!, 'pointercancel', {
+          pointerType: 'touch', pointerId: mode === 'initial' ? 64 : 65, clientX: 20, clientY: 20,
+        });
+
+        if (mode === 'initial') expect(release).toHaveBeenCalledWith(64);
+        expect(document.getSelection()?.toString()).toBe('Docs');
+        expect(document.querySelectorAll('.chat-copy-handle')).toHaveLength(2);
+        if (path === 'abnormal-click') {
+          fireEvent.click(link);
+          expect(onDocLinkTap).not.toHaveBeenCalled();
+          expect(document.getSelection()?.toString()).toBe('Docs');
+          return;
+        }
+        await act(async () => {
+          fireEvent.click(screen.getByRole('button', { name: '复制' }));
+        });
+        expect(document.querySelector('.chat-copy-callout')).toBeNull();
+
+        firePointer(link, 'pointerdown', {
+          pointerType: 'touch', pointerId: 66, clientX: 20, clientY: 20,
+        });
+        firePointer(link, 'pointerup', {
+          pointerType: 'touch', pointerId: 66, clientX: 20, clientY: 20,
+        });
+        fireEvent.click(link);
+        expect(onDocLinkTap).toHaveBeenCalledOnce();
+      } finally {
+        Object.defineProperty(navigator, 'clipboard', {
+          value: originalClipboard, configurable: true,
+        });
+        vi.useRealTimers();
+      }
+    },
+  );
+
   it('keeps the last drag selection through invalid external or null caret frames', () => {
     vi.useFakeTimers();
     const originalCaret = Object.getOwnPropertyDescriptor(document, 'caretPositionFromPoint');
@@ -717,7 +1141,7 @@ describe('generic Agent Conversation UI', () => {
     }
   });
 
-  it('auto-scrolls the conversation while a selection handle stays at its edge', () => {
+  it('auto-scrolls the conversation while the original long press stays at its edge', () => {
     vi.useFakeTimers();
     const originalCaret = Object.getOwnPropertyDescriptor(document, 'caretPositionFromPoint');
     let frame: FrameRequestCallback | null = null;
@@ -752,11 +1176,11 @@ describe('generic Agent Conversation UI', () => {
         configurable: true,
         value: () => ({ offsetNode: bubble.querySelector('p')!.firstChild!, offset: 5 }),
       });
-      fireEvent.pointerDown(bubble, { pointerType: 'touch', clientX: 40, clientY: 40 });
+      firePointer(bubble, 'pointerdown', {
+        pointerType: 'touch', pointerId: 8, clientX: 40, clientY: 40,
+      });
       act(() => vi.advanceTimersByTime(480));
 
-      const end = document.querySelector('.chat-copy-handle[data-end="end"]')!;
-      fireEvent.pointerDown(end, { pointerType: 'touch', pointerId: 8, clientX: 40, clientY: 40 });
       const move = new Event('pointermove', { bubbles: true, cancelable: true });
       Object.assign(move, { pointerType: 'touch', pointerId: 8, clientX: 40, clientY: 96 });
       fireEvent(container.querySelector('.chat-view')!, move);

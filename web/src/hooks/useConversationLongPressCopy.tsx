@@ -54,12 +54,16 @@ interface LongPressState {
   x: number;
   y: number;
   target: EventTarget | null;
+  pointerId: number | null;
+  captureTarget: Element | null;
 }
 
 interface DragState {
+  mode: 'handle' | 'initial-word';
   fixedOffset: number;
+  initialRange: TextOffsetRange | null;
   pointerId: number;
-  captureTarget: HTMLElement;
+  captureTarget: Element;
   point: { x: number; y: number };
   scroller: HTMLElement;
   direction: number;
@@ -143,7 +147,9 @@ export function useConversationLongPressCopy({
   const [copyUI, setCopyUI] = useState<CopyUI | null>(null);
   const modelRef = useRef<SelectionModel | null>(null);
   const activeRef = useRef(false);
-  const pressRef = useRef<LongPressState>({ timer: null, x: 0, y: 0, target: null });
+  const pressRef = useRef<LongPressState>({
+    timer: null, x: 0, y: 0, target: null, pointerId: null, captureTarget: null,
+  });
   const dragRef = useRef<DragState | null>(null);
   const pendingOutsideRef = useRef<PendingOutsideTap | null>(null);
   const autoScrollRef = useRef<number | null>(null);
@@ -154,6 +160,8 @@ export function useConversationLongPressCopy({
     const press = pressRef.current;
     if (press.timer != null) window.clearTimeout(press.timer);
     press.timer = null;
+    press.pointerId = null;
+    press.captureTarget = null;
   }, []);
 
   const stopAutoScroll = useCallback((): void => {
@@ -162,21 +170,33 @@ export function useConversationLongPressCopy({
     if (dragRef.current) dragRef.current.direction = 0;
   }, []);
 
+  const finishDrag = useCallback(({
+    releaseCapture = true,
+  }: { releaseCapture?: boolean } = {}): void => {
+    const drag = dragRef.current;
+    dragRef.current = null;
+    stopAutoScroll();
+    if (!drag || !releaseCapture) return;
+    try {
+      drag.captureTarget.releasePointerCapture?.(drag.pointerId);
+    } catch { /* capture may already have been released by the browser */ }
+  }, [stopAutoScroll]);
+
   const clearNativeSelection = useCallback((): void => {
     viewRef.current?.ownerDocument.getSelection()?.removeAllRanges();
   }, [viewRef]);
 
   const dismiss = useCallback((): void => {
     cancel();
-    stopAutoScroll();
-    dragRef.current = null;
+    finishDrag();
+    suppressClickRef.current = false;
     pendingOutsideRef.current = null;
     modelRef.current = null;
     activeRef.current = false;
     viewRef.current?.classList.remove('chat-copy-active');
     clearNativeSelection();
     setCopyUI(null);
-  }, [cancel, clearNativeSelection, stopAutoScroll, viewRef]);
+  }, [cancel, clearNativeSelection, finishDrag, viewRef]);
 
   const refresh = useCallback((validateText = true): boolean => {
     const view = viewRef.current;
@@ -206,27 +226,34 @@ export function useConversationLongPressCopy({
     const baseSurface = root.closest<HTMLElement>('.tool-sheet')?.getBoundingClientRect() ?? viewRect;
     const surfaceRect = scrollSurfaces(root, scrollRef?.current ?? null)
       .reduce((current, scroller) => intersectRect(current, scroller.getBoundingClientRect()), baseSurface);
-    const rootRect = root.getBoundingClientRect();
-    const first = characterRect(root, model.start, map) ?? rootRect;
-    const last = characterRect(root, Math.max(model.start, model.end - 1), map) ?? rootRect;
+    const layoutRects = typeof range.getClientRects === 'function'
+      ? Array.from(range.getClientRects()).filter((rect) => rect.width > 0 || rect.height > 0)
+      : [];
+    const first = characterRect(root, model.start, map) ?? layoutRects[0] ?? null;
+    const last = characterRect(root, Math.max(model.start, model.end - 1), map)
+      ?? layoutRects.at(-1) ?? null;
     const visibleTop = Math.max(surfaceRect.top, 0);
     const visibleBottom = Math.min(
       surfaceRect.bottom,
       window.innerHeight || surfaceRect.bottom,
     );
-    const handle = (rect: DOMRect, x: number): HandleUI => ({
-      x,
+    const handle = (rect: DOMRect | null, edge: 'left' | 'right'): HandleUI => rect ? ({
+      x: rect[edge],
       y: rect.top,
       h: Math.max(1, rect.height),
       visible: rect.bottom >= visibleTop && rect.top <= visibleBottom
         && rect.right >= surfaceRect.left && rect.left <= surfaceRect.right,
-    });
-    const start = handle(first, first.left);
-    const end = handle(last, last.right);
+    }) : ({ x: 0, y: 0, h: 1, visible: false });
+    const start = handle(first, 'left');
+    const end = handle(last, 'right');
+    const firstAnchor = first ?? last;
+    const lastAnchor = last ?? first;
     const topEdge = visibleTop + 4;
     const bottomEdge = Math.max(topEdge, visibleBottom - 44);
-    const selectedTop = Math.max(topEdge, Math.min(start.y, end.y));
-    const selectedBottom = Math.min(bottomEdge, Math.max(start.y + start.h, end.y + end.h));
+    const selectedTop = firstAnchor && lastAnchor
+      ? Math.max(topEdge, Math.min(firstAnchor.top, lastAnchor.top)) : topEdge;
+    const selectedBottom = firstAnchor && lastAnchor
+      ? Math.min(bottomEdge, Math.max(firstAnchor.bottom, lastAnchor.bottom)) : topEdge;
     const above = selectedTop - 44;
     const calloutTop = Math.max(topEdge, Math.min(
       above >= topEdge ? above : selectedBottom + 8,
@@ -237,7 +264,8 @@ export function useConversationLongPressCopy({
       Math.max(0, surfaceRect.width - 16),
     );
     const calloutLeft = Math.max(surfaceRect.left + 8, Math.min(
-      Math.min(start.x, end.x),
+      firstAnchor && lastAnchor
+        ? Math.min(firstAnchor.left, lastAnchor.right) : surfaceRect.left + 8,
       Math.max(surfaceRect.left + 8, surfaceRect.right - measuredWidth - 8),
     ));
     const next = {
@@ -274,8 +302,12 @@ export function useConversationLongPressCopy({
   const fire = useCallback((): void => {
     const press = pressRef.current;
     press.timer = null;
+    const pointerId = press.pointerId;
+    const captureTarget = press.captureTarget;
+    press.pointerId = null;
+    press.captureTarget = null;
     const block = resolveBlock(press.target);
-    if (!block || !viewRef.current) return;
+    if (!block || !viewRef.current || pointerId == null || !captureTarget) return;
     const map = conversationTextMap(block.el);
     const offset = textOffsetAtPoint(block.el, press.x, press.y, press.target);
     const initial = offset == null ? null : wordRangeAt(map.text, offset);
@@ -283,8 +315,22 @@ export function useConversationLongPressCopy({
     suppressClickRef.current = true;
     onActivate?.();
     select(block.el, block.id, initial);
+    dragRef.current = {
+      mode: 'initial-word',
+      fixedOffset: initial.start,
+      initialRange: initial,
+      pointerId,
+      captureTarget,
+      point: { x: press.x, y: press.y },
+      scroller: scrollContainer(block.el, scrollRef?.current ?? null),
+      direction: 0,
+      step: 0,
+    };
+    try {
+      captureTarget.setPointerCapture?.(pointerId);
+    } catch { /* selection still works when pointer capture is unavailable */ }
     navigator.vibrate?.(12);
-  }, [onActivate, resolveBlock, select, viewRef]);
+  }, [onActivate, resolveBlock, scrollRef, select, viewRef]);
 
   const updateDrag = useCallback((x: number, y: number): void => {
     const drag = dragRef.current;
@@ -305,10 +351,26 @@ export function useConversationLongPressCopy({
       offset = y <= rootRect.top ? 0 : y >= rootRect.bottom ? map.text.length : null;
     }
     if (offset == null) return;
-    // Once a handle crosses the fixed edge, the finger naturally becomes the opposite endpoint.
-    // Select the character under the finger on either side: its left edge below the anchor, right edge above.
-    const draggedEdge = offset < drag.fixedOffset ? offset : Math.min(map.text.length, offset + 1);
-    const next = normalizedOffsetRange(drag.fixedOffset, draggedEdge, map.text.length);
+    let next: TextOffsetRange | null;
+    if (drag.mode === 'initial-word' && drag.initialRange) {
+      const initial = drag.initialRange;
+      if (offset < initial.start) {
+        next = normalizedOffsetRange(initial.end, offset, map.text.length);
+      } else if (offset >= initial.end) {
+        next = normalizedOffsetRange(
+          initial.start,
+          Math.min(map.text.length, offset + 1),
+          map.text.length,
+        );
+      } else {
+        next = initial;
+      }
+    } else {
+      // Once a handle crosses the fixed edge, the finger naturally becomes the opposite endpoint.
+      // Select the character under the finger on either side: its left edge below the anchor, right edge above.
+      const draggedEdge = offset < drag.fixedOffset ? offset : Math.min(map.text.length, offset + 1);
+      next = normalizedOffsetRange(drag.fixedOffset, draggedEdge, map.text.length);
+    }
     if (next) select(root, model.rootId, next, model.preserveStructure);
   }, [select, viewRef]);
 
@@ -335,9 +397,9 @@ export function useConversationLongPressCopy({
   useBackButton(copyUI != null, dismiss);
   useEffect(() => () => {
     cancel();
-    stopAutoScroll();
+    finishDrag();
     clearNativeSelection();
-  }, [cancel, clearNativeSelection, stopAutoScroll]);
+  }, [cancel, clearNativeSelection, finishDrag]);
   useEffect(() => {
     suppressClickRef.current = false;
     dismiss();
@@ -367,6 +429,11 @@ export function useConversationLongPressCopy({
       && !view.contains(target)
       && !(target instanceof Element && target.closest('.conversation-copy-overlay'));
     const onDocumentPointerDown = (event: PointerEvent): void => {
+      const staleDrag = dragRef.current;
+      if (staleDrag?.mode === 'initial-word') {
+        const pointerId = Number.isFinite(event.pointerId) ? event.pointerId : 0;
+        finishDrag({ releaseCapture: pointerId !== staleDrag.pointerId });
+      }
       if (!outside(event.target)) return;
       pendingOutsideRef.current = {
         owner: 'document',
@@ -401,10 +468,17 @@ export function useConversationLongPressCopy({
       doc.removeEventListener('pointercancel', clearDocumentPointer, true);
       doc.removeEventListener('scroll', clearDocumentPointer, true);
     };
-  }, [copyUI, dismiss, viewRef]);
+  }, [copyUI, dismiss, finishDrag, viewRef]);
 
   const handlePointerDown = (event: ReactPointerEvent<HTMLDivElement>): void => {
     const target = event.target instanceof Element ? event.target : null;
+    const eventPointerId = Number.isFinite(event.pointerId) ? event.pointerId : 0;
+    const currentDrag = dragRef.current;
+    if (currentDrag?.mode === 'initial-word') {
+      // Any new pointerdown means the original hold ended even when its terminal event was lost.
+      // Releasing a reused id here could drop the new gesture's implicit browser capture.
+      finishDrag({ releaseCapture: eventPointerId !== currentDrag.pointerId });
+    }
     if (target?.closest('.chat-copy-callout')) return;
     const handleTarget = target?.closest<HTMLElement>('.chat-copy-handle') ?? null;
     const endpoint = handleTarget?.dataset.end;
@@ -413,9 +487,12 @@ export function useConversationLongPressCopy({
     if (handleTarget && (endpoint === 'start' || endpoint === 'end') && model && view) {
       const root = copyRootById(view, model.rootId);
       if (!root) return;
+      finishDrag();
       dragRef.current = {
+        mode: 'handle',
         fixedOffset: endpoint === 'start' ? model.end : model.start,
-        pointerId: event.pointerId,
+        initialRange: null,
+        pointerId: eventPointerId,
         captureTarget: handleTarget,
         point: { x: event.clientX, y: event.clientY },
         scroller: scrollContainer(root, scrollRef?.current ?? null),
@@ -423,7 +500,9 @@ export function useConversationLongPressCopy({
         step: 0,
       };
       suppressClickRef.current = true;
-      handleTarget.setPointerCapture?.(event.pointerId);
+      try {
+        handleTarget.setPointerCapture?.(eventPointerId);
+      } catch { /* drag remains available without pointer capture */ }
       event.preventDefault();
       event.stopPropagation();
       return;
@@ -455,12 +534,16 @@ export function useConversationLongPressCopy({
       x: Number.isFinite(event.clientX) ? event.clientX : 0,
       y: Number.isFinite(event.clientY) ? event.clientY : 0,
       target: event.target,
+      pointerId: eventPointerId,
+      captureTarget: event.target instanceof Element ? event.target : event.currentTarget,
     };
   };
 
   const handlePointerMove = (event: ReactPointerEvent<HTMLDivElement>): void => {
     const drag = dragRef.current;
     if (drag) {
+      const pointerId = Number.isFinite(event.pointerId) ? event.pointerId : 0;
+      if (drag.pointerId !== pointerId) return;
       drag.point = { x: event.clientX, y: event.clientY };
       updateDrag(event.clientX, event.clientY);
       const rect = drag.scroller.getBoundingClientRect();
@@ -492,13 +575,16 @@ export function useConversationLongPressCopy({
       && Math.hypot(event.clientX - press.x, event.clientY - press.y) > MOVE_SLOP_PX) cancel();
   };
 
-  const endPointer = (event: ReactPointerEvent<HTMLDivElement>, commitOutsideTap: boolean): void => {
+  const endPointer = (
+    event: ReactPointerEvent<HTMLDivElement>,
+    commitOutsideTap: boolean,
+  ): void => {
     cancel();
     const drag = dragRef.current;
     if (drag) {
-      dragRef.current = null;
-      stopAutoScroll();
-      drag.captureTarget.releasePointerCapture?.(drag.pointerId);
+      const pointerId = Number.isFinite(event.pointerId) ? event.pointerId : 0;
+      if (drag.pointerId !== pointerId) return;
+      finishDrag();
       event.preventDefault();
       event.stopPropagation();
       return;
