@@ -7,7 +7,7 @@ const descriptors = [{
 }];
 
 describe('Inbox reconnect visibility', () => {
-  it('does not turn a partial provider degradation into a global warning when rows remain usable', () => {
+  it('does not turn a partial provider degradation into a global warning, including for an empty Inbox', () => {
     const degraded = {
       descriptors,
       runs: [],
@@ -15,19 +15,19 @@ describe('Inbox reconnect visibility', () => {
         adapterId: 'codex', capability: 'inbox' as const, availability: 'degraded' as const,
       }],
     };
-    expect(inboxReconnectNeeded(degraded, true)).toBe(false);
-    expect(inboxReconnectNeeded(degraded, false)).toBe(true);
+    expect(inboxReconnectNeeded(degraded)).toBe(false);
   });
 
-  it('keeps the warning for a fully unavailable Inbox even when stale rows remain rendered', () => {
-    expect(inboxReconnectNeeded({
-      descriptors,
-      runs: [],
-      health: [{
-        adapterId: 'codex', capability: 'inbox', availability: 'unavailable',
-      }],
-    }, true)).toBe(true);
-  });
+  it.each(['starting', 'unavailable'] as const)(
+    'keeps the warning while an Inbox source is %s',
+    (availability) => {
+      expect(inboxReconnectNeeded({
+        descriptors,
+        runs: [],
+        health: [{ adapterId: 'codex', capability: 'inbox', availability }],
+      })).toBe(true);
+    },
+  );
 
   it('ignores unrelated capability health and adapters without Inbox support', () => {
     expect(inboxReconnectNeeded({
@@ -40,6 +40,6 @@ describe('Inbox reconnect visibility', () => {
         { adapterId: 'codex', capability: 'conversation', availability: 'unavailable' },
         { adapterId: 'codex', capability: 'inbox', availability: 'unavailable' },
       ],
-    }, false)).toBe(false);
+    })).toBe(false);
   });
 });

@@ -2261,7 +2261,7 @@ export default function App() {
 
   const inboxList = inboxRows(states, seen, readTs == null ? Infinity : readTs);
   const inboxTop = topView(inboxList);
-  const inboxReconnecting = inboxReconnectNeeded(agentDiscovery, inboxList.length > 0);
+  const inboxReconnecting = inboxReconnectNeeded(agentDiscovery);
   // windowId → agent id, for the per-window agent logo on a collapsed WindowTab (a single-pane window, or an
   // inactive multi-pane one where we only have this aggregate). The active multi-pane window renders per-pane
   // instead (paneAgents below), so it doesn't rely on this squash. A state entry exists only for a pane

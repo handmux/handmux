@@ -47,19 +47,15 @@ export interface AgentDiscoverySnapshot {
 }
 
 // The global reconnect pill means the Inbox as a whole cannot currently provide a usable view. A degraded
-// provider can still publish healthy rows while isolating one bad pane, so do not turn that partial condition
-// into a permanent global warning once the user already has usable Inbox content.
-export function inboxReconnectNeeded(
-  snapshot: AgentDiscoverySnapshot | null,
-  hasRows: boolean,
-): boolean {
+// provider is still serving the Inbox while isolating one bad pane, and an empty Inbox is itself a usable
+// result, so only a source that has not started or is fully unavailable gets the global warning.
+export function inboxReconnectNeeded(snapshot: AgentDiscoverySnapshot | null): boolean {
   return snapshot?.health.some((entry) => (
     entry.capability === 'inbox'
     && snapshot.descriptors.some((descriptor) => (
       descriptor.id === entry.adapterId && descriptor.capabilities.inbox
     ))
-    && (entry.availability === 'starting' || entry.availability === 'unavailable'
-      || (entry.availability === 'degraded' && !hasRows))
+    && (entry.availability === 'starting' || entry.availability === 'unavailable')
   )) ?? false;
 }
 

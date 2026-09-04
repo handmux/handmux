@@ -11,6 +11,7 @@ All notable changes to handmux. Format follows [Keep a Changelog](https://keepac
 
 ### Fixed
 
+- 修复空收件箱被单个异常 Agent pane 的降级状态永久覆盖为“正在重新连接”的问题。
 - 修复 Codex 使用只读沙箱与自动审批时，权限模式被误显示为“自定义”的问题。
 - 修复 Codex 历史中的 Diff 使用工作区外绝对临时路径时，上翻到该页会提示“更早的消息没有加载成功”的问题；不符合 Diff 路径契约的标签现在会安全省略，不再阻断整页历史。
 
