@@ -146,6 +146,7 @@ export function useConversationLongPressCopy({
   onPointerMove?: (event: ReactPointerEvent<HTMLDivElement>) => void;
 }) {
   const [copyUI, setCopyUI] = useState<CopyUI | null>(null);
+  const [dragging, setDragging] = useState(false);
   const modelRef = useRef<SelectionModel | null>(null);
   const activeRef = useRef(false);
   const pressRef = useRef<LongPressState>({
@@ -180,6 +181,7 @@ export function useConversationLongPressCopy({
     dragRef.current = null;
     stopAutoScroll();
     if (drag?.mode === 'initial-word') touchIdentifierRef.current = null;
+    if (drag) setDragging(false);
     if (!drag || !releaseCapture) return;
     try {
       drag.captureTarget.releasePointerCapture?.(drag.pointerId);
@@ -195,6 +197,7 @@ export function useConversationLongPressCopy({
     finishDrag();
     suppressClickRef.current = false;
     pendingOutsideRef.current = null;
+    setDragging(false);
     modelRef.current = null;
     activeRef.current = false;
     viewRef.current?.classList.remove('chat-copy-active');
@@ -331,6 +334,7 @@ export function useConversationLongPressCopy({
       direction: 0,
       step: 0,
     };
+    setDragging(true);
     try {
       captureTarget.setPointerCapture?.(pointerId);
     } catch { /* selection still works when pointer capture is unavailable */ }
@@ -606,6 +610,7 @@ export function useConversationLongPressCopy({
         direction: 0,
         step: 0,
       };
+      setDragging(true);
       suppressClickRef.current = true;
       try {
         handleTarget.setPointerCapture?.(eventPointerId);
@@ -746,6 +751,7 @@ export function useConversationLongPressCopy({
 
   return {
     active: copyUI != null,
+    dragging,
     ui: copyUI,
     calloutRef,
     cancel,
@@ -766,12 +772,14 @@ export function useConversationLongPressCopy({
 
 export function ConversationCopyControls({
   ui,
+  dragging,
   calloutRef,
   onCopy,
   onLine,
   onParagraph,
 }: {
   ui: CopyUI;
+  dragging: boolean;
   calloutRef: RefObject<HTMLDivElement>;
   onCopy: () => void;
   onLine: () => void;
@@ -789,7 +797,12 @@ export function ConversationCopyControls({
         data-end="start" style={handleStyle(ui.start)} />
       <div className="sel-handle sel-handle--end chat-copy-handle"
         data-end="end" style={handleStyle(ui.end)} />
-      <div className="sel-callout chat-copy-callout" style={ui.callout} ref={calloutRef}
+      <div className="sel-callout chat-copy-callout" style={{
+        top: ui.callout.top,
+        left: ui.callout.left,
+        maxWidth: ui.callout.maxWidth,
+        pointerEvents: dragging ? 'none' : 'auto',
+      }} ref={calloutRef}
         onPointerDown={(event) => {
           event.preventDefault();
           event.stopPropagation();

@@ -1074,6 +1074,81 @@ describe('generic Agent Conversation UI', () => {
     }
   });
 
+  it('keeps a visible callout out of hit testing during initial and handle drags', () => {
+    vi.useFakeTimers();
+    const originalCaret = Object.getOwnPropertyDescriptor(document, 'caretPositionFromPoint');
+    try {
+      const { container } = render(<AgentConversationView conversation={controller({
+        items: [{
+          key: 'drag-through-callout', provisional: false,
+          item: {
+            id: 'drag-through-callout', sessionId: 'session-1', status: 'complete', kind: 'message',
+            role: 'assistant', content: [{ type: 'text', text: 'alpha beta gamma' }],
+          },
+        }],
+      })} />);
+      const bubble = container.querySelector('.chat-bubble') as HTMLElement;
+      const view = container.querySelector('.chat-view') as HTMLElement;
+      bubble.getBoundingClientRect = () => ({
+        left: 0, right: 240, top: 0, bottom: 120, width: 240, height: 120,
+        x: 0, y: 0, toJSON: () => ({}),
+      });
+      Object.defineProperty(document, 'caretPositionFromPoint', {
+        configurable: true,
+        value: (x: number) => ({
+          offsetNode: bubble.querySelector('p')!.firstChild!,
+          offset: x < 100 ? 1 : x < 200 ? 7 : 12,
+        }),
+      });
+
+      const held = touchPoint(910, 20, 50);
+      firePointer(bubble, 'pointerdown', {
+        pointerType: 'touch', pointerId: 91, clientX: 20, clientY: 50,
+      });
+      fireTouch(bubble, 'touchstart', [held], [held]);
+      act(() => vi.advanceTimersByTime(480));
+      const callout = document.querySelector('.chat-copy-callout') as HTMLElement;
+      expect(view.contains(callout)).toBe(false);
+      expect(callout.style.visibility).not.toBe('hidden');
+      expect(callout.style.pointerEvents).toBe('none');
+
+      const crossed = touchPoint(910, 160, 50);
+      fireTouch(callout, 'touchmove', [crossed]);
+      expect(document.getSelection()?.toString()).toBe('alpha');
+      const touchHitTarget = callout.style.pointerEvents === 'none' ? view : callout;
+      fireTouch(touchHitTarget, 'touchmove', [crossed]);
+      expect(document.getSelection()?.toString()).toBe('alpha be');
+
+      firePointer(view, 'pointerup', {
+        pointerType: 'touch', pointerId: 91, clientX: 160, clientY: 50,
+      });
+      fireTouch(view, 'touchend', [], [crossed]);
+      expect(callout.style.pointerEvents).toBe('auto');
+
+      const endHandle = document.querySelector('.chat-copy-handle[data-end="end"]') as HTMLElement;
+      firePointer(endHandle, 'pointerdown', {
+        pointerType: 'touch', pointerId: 92, clientX: 160, clientY: 50,
+      });
+      expect(callout.style.pointerEvents).toBe('none');
+      const pointerHitTarget = callout.style.pointerEvents === 'none' ? view : callout;
+      firePointer(pointerHitTarget, 'pointermove', {
+        pointerType: 'touch', pointerId: 92, clientX: 220, clientY: 50,
+      });
+      expect(document.getSelection()?.toString()).toBe('alpha beta ga');
+      firePointer(view, 'pointerup', {
+        pointerType: 'touch', pointerId: 92, clientX: 220, clientY: 50,
+      });
+      expect(callout.style.pointerEvents).toBe('auto');
+
+      fireEvent.click(screen.getByRole('button', { name: '整段' }));
+      expect(document.getSelection()?.toString()).toBe('alpha beta gamma');
+    } finally {
+      if (originalCaret) Object.defineProperty(document, 'caretPositionFromPoint', originalCaret);
+      else Reflect.deleteProperty(document, 'caretPositionFromPoint');
+      vi.useRealTimers();
+    }
+  });
+
   it('keeps movement before the long-press threshold as ordinary scrolling without capture', () => {
     vi.useFakeTimers();
     try {
