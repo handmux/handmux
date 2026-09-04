@@ -292,6 +292,26 @@ describe('usePushToTalk', () => {
     expect(onText).not.toHaveBeenCalled();
   });
 
+  it('automatically dismisses a voice error after it has been readable', async () => {
+    vi.useFakeTimers();
+    try {
+      const { result } = renderHook(() => usePushToTalk({
+        onText: vi.fn(), mode: 'sentence', deps: {
+          recognizeSentence: vi.fn(async () => { throw new Error('cloud unavailable'); }),
+          makeRecorder: () => ({
+            start: vi.fn(async (onChunk) => { onChunk('AQI='); }),
+            stop: vi.fn(async () => null),
+          }),
+        },
+      }));
+      await act(async () => { await result.current.start(); });
+      await act(async () => { await result.current.stop(); });
+      expect(result.current.error).toBeTruthy();
+      await act(async () => { await vi.advanceTimersByTimeAsync(7_000); });
+      expect(result.current.error).toBeNull();
+    } finally { vi.useRealTimers(); }
+  });
+
   it('sentence mode stops and submits automatically at the 55s cap', async () => {
     vi.useFakeTimers();
     try {

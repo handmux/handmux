@@ -67,6 +67,7 @@ const mergeAudio = (chunks: readonly string[]): Uint8Array => {
 
 const MAX_MS = 55000; // Providers cap short sessions at 60s; self-finalize at 55s with payload headroom.
 const FINALIZE_MS = 4000; // after the end frame, wait this long for the server's final; else salvage + reset.
+const ERROR_MS = 7000; // enough to read an actionable error, without permanently growing the composer.
 
 // Provider-neutral push-to-talk orchestration: start mic + request session in parallel, buffer until the
 // socket opens, stream via the selected driver, then commit its latest partial when the final frame arrives.
@@ -107,9 +108,24 @@ export function usePushToTalk({
   const pendingEndRef = useRef(false);
   const capTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const finalizeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const errorTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const stopRef = useRef<(() => Promise<void>) | null>(null);
   const onTextRef = useRef(onText);
   onTextRef.current = onText; // always call the latest onText
+
+  const clearError = useCallback((): void => {
+    if (errorTimer.current !== null) clearTimeout(errorTimer.current);
+    errorTimer.current = null;
+    setError(null);
+  }, []);
+  const showError = useCallback((message: string): void => {
+    if (errorTimer.current !== null) clearTimeout(errorTimer.current);
+    setError(message);
+    errorTimer.current = setTimeout(() => {
+      errorTimer.current = null;
+      setError(null);
+    }, ERROR_MS);
+  }, []);
 
   const cleanup = useCallback((): void => {
     if (capTimer.current !== null) clearTimeout(capTimer.current);
@@ -190,17 +206,17 @@ export function usePushToTalk({
       }
       else finish();
     } catch (cause) {
-      setError(voiceErrorText(cause));
+      showError(voiceErrorText(cause));
       setPhase('error'); cleanup();
     }
-  }, [sendAudio, cleanup, setPhase, finish, flush, startFinalizeTimer, recognizeSentence]);
+  }, [sendAudio, cleanup, setPhase, finish, flush, startFinalizeTimer, recognizeSentence, showError]);
   stopRef.current = stop;
 
   const start = useCallback(async (): Promise<void> => {
     // Start only from a settled state. 'error' is settled (and recoverable) — gating on 'idle' alone
     // would strand the mic forever after any failure (denied permission, sign error, ws drop).
     if (stateRef.current !== 'idle' && stateRef.current !== 'error') return;
-    setPhase('requesting'); setPartial(''); partialRef.current = ''; setError(null);
+    setPhase('requesting'); setPartial(''); partialRef.current = ''; clearError();
     setLevel(0); activeModeRef.current = mode;
     pendingAudioRef.current = []; pendingEndRef.current = false; driverRef.current = null;
     sentenceAudioRef.current = [];
@@ -233,12 +249,12 @@ export function usePushToTalk({
         partialRef.current = result.text;
         setPartial(result.text);
         if (result.error) {
-          setError(t('mic.error.provider', { reason: result.error }));
+          showError(t('mic.error.provider', { reason: result.error }));
           setPhase('error'); cleanup();
         }
         else if (result.final) finish();
       };
-      ws.onerror = () => { setError(t('mic.error.network')); setPhase('error'); cleanup(); };
+      ws.onerror = () => { showError(t('mic.error.network')); setPhase('error'); cleanup(); };
       // An unexpected close mid-session must not strand us in recording/finalizing — salvage + reset.
       // (Our own cleanup() also closes the ws, but finish() is idempotent once idle, so that's a no-op.)
       ws.onclose = () => {
@@ -248,12 +264,16 @@ export function usePushToTalk({
       flush();
       capTimer.current = setTimeout(() => { stopRef.current?.(); }, MAX_MS);
     } catch (cause) {
-      setError(voiceErrorText(cause));
+      showError(voiceErrorText(cause));
       setPhase('error'); cleanup();
     }
-  }, [mode, createSession, WebSocketCtor, makeRecorder, sendAudio, cleanup, setPhase, finish, flush]);
+  }, [mode, createSession, WebSocketCtor, makeRecorder, sendAudio, cleanup, setPhase, finish, flush,
+    clearError, showError]);
 
-  useEffect(() => cleanup, [cleanup]); // close ws + mic on unmount
+  useEffect(() => () => {
+    cleanup();
+    if (errorTimer.current !== null) clearTimeout(errorTimer.current);
+  }, [cleanup]); // close ws + mic and pending notice timer on unmount
 
   return { state, partial, level, error, start, stop };
 }
