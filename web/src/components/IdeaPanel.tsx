@@ -181,6 +181,7 @@ export default function IdeaPanel({
           <button className="cmd-close" onClick={onClose} aria-label={t('common.close')}>✕</button>
         </div>
 
+        {voice.error && <div className="voice-error voice-error-idea" role="alert">{voice.error}</div>}
         <div className={`idea-compose${capturing ? ' recording' : ''}${recognizing ? ' recognizing' : ''}`}>
           <textarea
             ref={inputRef}

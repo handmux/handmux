@@ -288,6 +288,7 @@ describe('usePushToTalk', () => {
     await act(async () => { await result.current.start(); });
     await act(async () => { await result.current.stop(); });
     expect(result.current.state).toBe('error');
+    expect(result.current.error).toBe('语音输入失败，请重试。');
     expect(onText).not.toHaveBeenCalled();
   });
 

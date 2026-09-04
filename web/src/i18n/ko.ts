@@ -240,6 +240,16 @@ export default {
   'mic.stop': '음성 입력 중지',
   'mic.start': '음성 입력',
   'mic.recognizing': '음성 인식 중',
+  'mic.error.tencentPermission': 'Tencent Cloud가 인식을 거부했습니다. 현재 SecretId에 asr:SentenceRecognition 권한을 부여한 뒤 다시 시도하세요.',
+  'mic.error.tencentCredentials': 'Tencent Cloud 자격 증명이 올바르지 않습니다. handmux setup에서 AppId, SecretId, SecretKey를 확인하세요.',
+  'mic.error.browserPermission': '마이크 접근이 차단되었습니다. 브라우저 사이트 설정에서 마이크를 허용한 뒤 다시 시도하세요.',
+  'mic.error.device': '마이크를 사용할 수 없습니다. 장치 연결과 다른 앱의 사용 여부를 확인하세요.',
+  'mic.error.secureContext': '이 주소에서는 마이크를 사용할 수 없습니다. HTTPS 또는 localhost로 Handmux를 여세요.',
+  'mic.error.tooLong': '녹음이 너무 깁니다. 더 짧게 녹음한 뒤 다시 시도하세요.',
+  'mic.error.notSelected': '선택한 음성 모드가 활성화되지 않았습니다. Handmux를 재시작한 뒤 다시 시도하세요.',
+  'mic.error.network': '음성 서비스에 연결할 수 없습니다. 네트워크를 확인한 뒤 다시 시도하세요.',
+  'mic.error.provider': '음성 서비스가 요청을 거부했습니다: {reason}',
+  'mic.error.generic': '음성 입력에 실패했습니다. 다시 시도하세요.',
 
   // dock
   'dock.send': '보내기',

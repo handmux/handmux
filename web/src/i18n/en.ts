@@ -263,6 +263,16 @@ export default {
   'mic.stop': 'Stop voice input',
   'mic.start': 'Voice input',
   'mic.recognizing': 'Recognizing speech',
+  'mic.error.tencentPermission': 'Tencent Cloud rejected recognition. Grant the current SecretId the asr:SentenceRecognition permission, then try again.',
+  'mic.error.tencentCredentials': 'The Tencent Cloud credentials are invalid. Check AppId, SecretId, and SecretKey in handmux setup.',
+  'mic.error.browserPermission': 'Microphone access is blocked. Allow it in this site\'s browser settings, then try again.',
+  'mic.error.device': 'The microphone is unavailable. Check that it exists and is not in use by another app.',
+  'mic.error.secureContext': 'This address cannot access the microphone. Open Handmux over HTTPS or localhost.',
+  'mic.error.tooLong': 'The recording is too long. Record a shorter message and try again.',
+  'mic.error.notSelected': 'The selected voice mode is not active. Restart Handmux and try again.',
+  'mic.error.network': 'Could not reach the speech service. Check the network and try again.',
+  'mic.error.provider': 'The speech service rejected the request: {reason}',
+  'mic.error.generic': 'Voice input failed. Please try again.',
 
   // dock
   'dock.send': 'Send',

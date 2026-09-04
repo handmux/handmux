@@ -240,6 +240,16 @@ export default {
   'mic.stop': '音声入力を停止',
   'mic.start': '音声入力',
   'mic.recognizing': '音声を認識中',
+  'mic.error.tencentPermission': 'Tencent Cloud が認識を拒否しました。現在の SecretId に asr:SentenceRecognition 権限を付与して再試行してください。',
+  'mic.error.tencentCredentials': 'Tencent Cloud の認証情報が無効です。handmux setup で AppId、SecretId、SecretKey を確認してください。',
+  'mic.error.browserPermission': 'マイクへのアクセスが許可されていません。ブラウザのサイト設定でマイクを許可して再試行してください。',
+  'mic.error.device': 'マイクを使用できません。接続状態と、他のアプリが使用していないか確認してください。',
+  'mic.error.secureContext': 'このアドレスではマイクを使用できません。HTTPS または localhost で Handmux を開いてください。',
+  'mic.error.tooLong': '録音が長すぎます。短くして再試行してください。',
+  'mic.error.notSelected': '選択した音声モードが有効ではありません。Handmux を再起動して再試行してください。',
+  'mic.error.network': '音声サービスに接続できません。ネットワークを確認して再試行してください。',
+  'mic.error.provider': '音声サービスがリクエストを拒否しました：{reason}',
+  'mic.error.generic': '音声入力に失敗しました。再試行してください。',
 
   // dock
   'dock.send': '送信',

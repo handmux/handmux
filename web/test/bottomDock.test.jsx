@@ -15,7 +15,7 @@ vi.mock('../src/api.js', () => ({
 
 // 可驱动的语音 mock:测试改 voice.state/voice.partial 再重渲染来模拟"录音中/实时增量";
 // 捕获组件传入的 onText 以便模拟"定稿"。start/stop 是 spy。
-const voice = vi.hoisted(() => ({ state: 'idle', partial: '', start: vi.fn(), stop: vi.fn(), onText: null }));
+const voice = vi.hoisted(() => ({ state: 'idle', partial: '', error: null, start: vi.fn(), stop: vi.fn(), onText: null }));
 vi.mock('../src/voice/usePushToTalk.js', () => ({
   usePushToTalk: ({ onText }) => { voice.onText = onText; return voice; },
 }));
@@ -33,7 +33,7 @@ let root;
 beforeEach(() => {
   vi.clearAllMocks();
   localStorage.clear(); // hermetic favs — chat list falls back to the seeded defaults
-  voice.state = 'idle'; voice.partial = '';
+  voice.state = 'idle'; voice.partial = ''; voice.error = null;
   voice.start.mockClear(); voice.stop.mockClear();
   container = document.createElement('div');
   document.body.appendChild(container);
@@ -103,6 +103,12 @@ const typeInto = (node, text) => act(() => {
 });
 
 describe('BottomDock', () => {
+  it('shows an actionable voice error above the composer', () => {
+    voice.error = '请允许麦克风权限';
+    render({ pane: '%1' });
+    expect(container.querySelector('.voice-error')?.textContent).toBe('请允许麦克风权限');
+  });
+
   it('keeps the mobile composer placeholder conversational', () => {
     render({ pane: '%1' });
     expect(container.querySelector('.input-text').placeholder).toBe('说点什么…');

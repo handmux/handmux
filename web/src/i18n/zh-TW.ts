@@ -240,6 +240,16 @@ export default {
   'mic.stop': '停止語音輸入',
   'mic.start': '語音輸入',
   'mic.recognizing': '正在識別語音',
+  'mic.error.tencentPermission': '騰訊雲拒絕了辨識：請為目前 SecretId 授予 asr:SentenceRecognition 權限後重試。',
+  'mic.error.tencentCredentials': '騰訊雲憑證無效，請在 handmux setup 中檢查 AppId、SecretId 和 SecretKey。',
+  'mic.error.browserPermission': '沒有麥克風權限，請在瀏覽器網站設定中允許麥克風後重試。',
+  'mic.error.device': '無法使用麥克風，請檢查裝置是否存在或被其他程式占用。',
+  'mic.error.secureContext': '目前網址不能使用麥克風，請改用 HTTPS 或 localhost 開啟 Handmux。',
+  'mic.error.tooLong': '錄音過長，請縮短後重試。',
+  'mic.error.notSelected': '目前語音模式尚未生效，請重新啟動 Handmux 後重試。',
+  'mic.error.network': '語音服務連線失敗，請檢查網路後重試。',
+  'mic.error.provider': '語音服務拒絕了要求：{reason}',
+  'mic.error.generic': '語音輸入失敗，請重試。',
 
   // dock
   'dock.send': '傳送',

@@ -1080,6 +1080,9 @@ div.workspace-restore-errors { padding-left: 10px; }
   margin-top: 6px; /* 与上方快捷栏拉开呼吸感(快捷栏自带 6px,共 12px) */
   padding: 5px 6px 5px 5px; border: 1px solid #3a3d44; border-radius: 20px; background: #202227;
   box-shadow: 0 1px 6px rgba(0,0,0,.35); transition: border-color .15s, box-shadow .15s; }
+.voice-error { color: #ff9b94; font-size: 12px; line-height: 1.35; overflow-wrap: anywhere; }
+.voice-error-dock { padding: 2px 8px 0; }
+.voice-error-idea { padding: 8px 14px 0; }
 /* 药丸下方留白:用聊天页的 padding(不用 margin——最后一个孩子的 margin 会塌出去,pager 量
    offsetHeight 就漏掉它)。与 .bottom-dock 自身 8px 叠加。 */
 .dock-page.chat { padding-bottom: 6px; }

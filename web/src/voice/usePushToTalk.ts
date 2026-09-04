@@ -9,6 +9,8 @@ import { base64ToBytes } from './tencentProtocol.js';
 import type { AsrDriver, VoiceSocketData } from './asrDriver.js';
 import type { AsrSessionResponse, AsrSignResponse } from '../apiRequest.js';
 import type { VoiceRecorder } from './recorder.js';
+import { voiceErrorText } from './error.js';
+import { t } from '../i18n';
 
 export type VoicePhase = 'idle' | 'requesting' | 'recording' | 'finalizing' | 'error';
 export type AsrMode = 'streaming' | 'sentence';
@@ -44,6 +46,7 @@ export interface PushToTalkController {
   state: VoicePhase;
   partial: string;
   level: number;
+  error: string | null;
   start: () => Promise<void>;
   stop: () => Promise<void>;
 }
@@ -87,6 +90,7 @@ export function usePushToTalk({
   const [state, setState] = useState<VoicePhase>('idle');
   const [partial, setPartial] = useState('');
   const [level, setLevel] = useState(0);
+  const [error, setError] = useState<string | null>(null);
   const partialRef = useRef('');
   const stateRef = useRef<VoicePhase>('idle');
   const setPhase = useCallback((next: VoicePhase): void => {
@@ -185,7 +189,8 @@ export function usePushToTalk({
         startFinalizeTimer();
       }
       else finish();
-    } catch {
+    } catch (cause) {
+      setError(voiceErrorText(cause));
       setPhase('error'); cleanup();
     }
   }, [sendAudio, cleanup, setPhase, finish, flush, startFinalizeTimer, recognizeSentence]);
@@ -195,7 +200,7 @@ export function usePushToTalk({
     // Start only from a settled state. 'error' is settled (and recoverable) — gating on 'idle' alone
     // would strand the mic forever after any failure (denied permission, sign error, ws drop).
     if (stateRef.current !== 'idle' && stateRef.current !== 'error') return;
-    setPhase('requesting'); setPartial(''); partialRef.current = '';
+    setPhase('requesting'); setPartial(''); partialRef.current = ''; setError(null);
     setLevel(0); activeModeRef.current = mode;
     pendingAudioRef.current = []; pendingEndRef.current = false; driverRef.current = null;
     sentenceAudioRef.current = [];
@@ -227,10 +232,13 @@ export function usePushToTalk({
         const result = driver.consume(message);
         partialRef.current = result.text;
         setPartial(result.text);
-        if (result.error) { setPhase('error'); cleanup(); }
+        if (result.error) {
+          setError(t('mic.error.provider', { reason: result.error }));
+          setPhase('error'); cleanup();
+        }
         else if (result.final) finish();
       };
-      ws.onerror = () => { setPhase('error'); cleanup(); };
+      ws.onerror = () => { setError(t('mic.error.network')); setPhase('error'); cleanup(); };
       // An unexpected close mid-session must not strand us in recording/finalizing — salvage + reset.
       // (Our own cleanup() also closes the ws, but finish() is idempotent once idle, so that's a no-op.)
       ws.onclose = () => {
@@ -239,12 +247,13 @@ export function usePushToTalk({
       setPhase('recording');
       flush();
       capTimer.current = setTimeout(() => { stopRef.current?.(); }, MAX_MS);
-    } catch {
+    } catch (cause) {
+      setError(voiceErrorText(cause));
       setPhase('error'); cleanup();
     }
   }, [mode, createSession, WebSocketCtor, makeRecorder, sendAudio, cleanup, setPhase, finish, flush]);
 
   useEffect(() => cleanup, [cleanup]); // close ws + mic on unmount
 
-  return { state, partial, level, start, stop };
+  return { state, partial, level, error, start, stop };
 }

@@ -3,7 +3,7 @@ import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 
 // Voice is stubbed idle — these tests cover the add/edit/delete/send paths, not dictation.
-const voice = vi.hoisted(() => ({ state: 'idle', partial: '', start: vi.fn(), stop: vi.fn(), onText: null }));
+const voice = vi.hoisted(() => ({ state: 'idle', partial: '', error: null, start: vi.fn(), stop: vi.fn(), onText: null }));
 vi.mock('../src/voice/usePushToTalk.js', () => ({
   usePushToTalk: ({ onText }) => { voice.onText = onText; return voice; },
 }));
@@ -16,7 +16,7 @@ let root;
 
 beforeEach(() => {
   localStorage.clear();
-  voice.state = 'idle'; voice.partial = '';
+  voice.state = 'idle'; voice.partial = ''; voice.error = null;
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
@@ -47,6 +47,12 @@ describe('IdeaPanel', () => {
     render();
     expect($('.cmd-title').textContent).toContain('w');
     expect($('.cmd-empty')).not.toBeNull();
+  });
+
+  it('shows an actionable voice error', () => {
+    voice.error = '请给腾讯云授权';
+    render();
+    expect($('.voice-error').textContent).toBe('请给腾讯云授权');
   });
 
   it('adds an idea (persists per session+window) and clears the box', () => {

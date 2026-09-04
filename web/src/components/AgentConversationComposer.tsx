@@ -312,7 +312,7 @@ export default function AgentConversationComposer({
           event.target.value = '';
           void uploadFiles(files);
         }} />
-      {error && <div className="cc-notice" role="alert">{error}</div>}
+      {(voice.error || error) && <div className="cc-notice" role="alert">{voice.error || error}</div>}
       <div className={`cc-card${capturing ? ' recording' : ''}${recognizing ? ' recognizing' : ''}`}
         onPointerDown={cardPointerDown} onPointerMove={cardPointerMove} onPointerUp={cardPointerUp}>
         {queueContent}

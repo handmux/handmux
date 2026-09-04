@@ -262,6 +262,16 @@ export default {
   'mic.stop': '停止语音输入',
   'mic.start': '语音输入',
   'mic.recognizing': '正在识别语音',
+  'mic.error.tencentPermission': '腾讯云拒绝了识别：请为当前 SecretId 授予 asr:SentenceRecognition 权限后重试。',
+  'mic.error.tencentCredentials': '腾讯云凭据无效，请在 handmux setup 中检查 AppId、SecretId 和 SecretKey。',
+  'mic.error.browserPermission': '没有麦克风权限，请在浏览器的网站设置中允许麦克风后重试。',
+  'mic.error.device': '无法使用麦克风，请检查设备是否存在或被其他应用占用。',
+  'mic.error.secureContext': '当前地址不能使用麦克风，请改用 HTTPS 或 localhost 打开 Handmux。',
+  'mic.error.tooLong': '录音过长，请缩短后重试。',
+  'mic.error.notSelected': '当前语音模式未生效，请重启 Handmux 后重试。',
+  'mic.error.network': '语音服务连接失败，请检查网络后重试。',
+  'mic.error.provider': '语音服务拒绝了请求：{reason}',
+  'mic.error.generic': '语音输入失败，请重试。',
 
   // dock
   'dock.send': '发送',

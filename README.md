@@ -79,7 +79,7 @@ handmux start --tunnel cloudflare   # instant public URL (cloudflared auto-insta
 - **Docs** — tap recognized text-file paths in the terminal or Agent tool input/output to open them, regardless of extension; user-home paths appear as `~/…`, while ordinary slash-separated prose stays plain. Markdown rendered, font zoom, sentence-by-sentence read-aloud. Binary files stay download-only.
 - **Mobile select & copy** — long-press text in either the terminal or an Agent conversation, drag iOS-style handles to fine-tune, then copy the exact selection, its rendered line, or its semantic paragraph.
 - **Files both ways** — multi-select upload from the chat box (including ZIP archives), download, share in, copy any absolute path.
-- **Ideas — catch every one** — a thought the moment it strikes: a per-window idea/to-do list with click-to-toggle voice input—iFlytek/Tencent live dictation or Tencent sentence recognition after stopping—and one-tap insertion into the prompt.
+- **Ideas — catch every one** — a thought the moment it strikes: a per-window idea/to-do list with click-to-toggle voice input—iFlytek/Tencent live dictation or Tencent sentence recognition after stopping—and one-tap insertion into the prompt. Tencent sentence recognition requires the SecretId to have the CAM action `asr:SentenceRecognition`.
 - **Built for flaky networks** — backoff reconnect, connection-lost banner, offline page, polling that pauses in the background; a reflow-safe cursor.
 - **Zero-install PWA** — runs full-screen from your home screen, with English, 简体 / 繁體中文, 日本語, and 한국어.
 

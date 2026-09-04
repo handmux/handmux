@@ -10,6 +10,7 @@ All notable changes to handmux. Format follows [Keep a Changelog](https://keepac
 
 ### Fixed
 
+- 修复语音录音或云端识别失败后输入区没有任何错误提示的问题；现在会区分浏览器麦克风权限、安全地址、网络、腾讯凭据和缺少 `asr:SentenceRecognition` CAM 权限，并给出对应处理方式。
 - Agent 对话的工具详情会在输入、输出或 Diff 的实际裁剪位置说明原因，不再统一显示无法判断影响范围的“部分内容已截断”。
 
 ## [0.26.0] - 2026-09-04

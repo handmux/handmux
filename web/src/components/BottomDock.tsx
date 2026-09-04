@@ -1199,6 +1199,7 @@ function BottomDock({
                 }} />
               {/* flex 行:textarea(占满)· 麦克风 · 发送,全是 flex 兄弟、不重叠文字框,所以选词/移光标碰不到
                   按键。录音时整条变绿 + 呼吸。＋上传与▤常用已上移到快捷栏。 */}
+              {voice.error && <div className="voice-error voice-error-dock" role="alert">{voice.error}</div>}
               <div className={`input-wrap${capturing ? ' recording' : ''}${recognizing ? ' recognizing' : ''}${multi ? ' multi' : ''}${crowd ? ' crowd' : ''}`}
                 onPointerDownCapture={ghostDown} onPointerMoveCapture={ghostMove}
                 onPointerUpCapture={ghostUp} onPointerCancelCapture={ghostCancel}>

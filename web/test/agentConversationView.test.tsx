@@ -38,6 +38,7 @@ const upload = vi.hoisted(() => ({
 const voice = vi.hoisted(() => ({
   state: 'idle',
   partial: '',
+  error: null as string | null,
   onText: (_text: string) => {},
   start: vi.fn(async () => {}),
   stop: vi.fn(async () => {}),
@@ -65,6 +66,7 @@ afterEach(() => {
   cleanup();
   voice.state = 'idle';
   voice.partial = '';
+  voice.error = null;
   voice.start.mockClear();
   voice.stop.mockClear();
   vi.restoreAllMocks();
@@ -3631,6 +3633,14 @@ describe('generic Agent Conversation UI', () => {
     expect(conversation.send).not.toHaveBeenCalled();
     act(() => voice.onText(' spoken'));
     expect(input.value).toBe('original body spoken');
+  });
+
+  it('shows a voice failure in the existing composer notice', () => {
+    voice.error = '请给腾讯云授权';
+    const conversation = controller();
+    render(<AgentConversationComposer agentId="pi" sessionId="voice-error" busy={false}
+      micAvailable conversation={conversation} />);
+    expect(screen.getByRole('alert').textContent).toContain('请给腾讯云授权');
   });
 
   it('restores a definitively failed send after the composer unmounts', async () => {
