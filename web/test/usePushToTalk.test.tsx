@@ -15,7 +15,6 @@ interface FakeFrame {
 
 interface FakeVoiceSocket extends VoiceSocket {
   sent: FakeFrame[];
-  onopen?: () => void;
 }
 
 let activeWs: FakeVoiceSocket;
@@ -27,6 +26,7 @@ function makeFakeWs(): FakeVoiceSocket {
     readyState: 1,
     close: vi.fn(),
     send: (message: string) => { ws.sent.push(JSON.parse(message) as FakeFrame); },
+    onopen: null,
     onmessage: null,
     onerror: null,
     onclose: null,
@@ -184,5 +184,52 @@ describe('usePushToTalk', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+  it('Tencent streams buffered PCM as binary and replaces live sentence text before finalizing', async () => {
+    const onText = vi.fn();
+    const sent: unknown[] = [];
+    let fireTencentChunk: (base64: string) => void = () => {};
+    const ws: VoiceSocket = {
+      readyState: 0,
+      send: vi.fn((data: unknown) => sent.push(data)),
+      close: vi.fn(),
+      onopen: null,
+      onmessage: null,
+      onerror: null,
+      onclose: null,
+    };
+    const deps: PushToTalkDependencies = {
+      createSession: vi.fn(async (): Promise<{
+        provider: 'tencent'; protocol: 'tencent-asr-v2'; url: string;
+      }> => ({
+        provider: 'tencent', protocol: 'tencent-asr-v2', url: 'wss://asr.cloud.tencent.com/asr/v2/1',
+      })),
+      WebSocketCtor: vi.fn(() => ws) as unknown as VoiceSocketConstructor,
+      makeRecorder: () => ({
+        start: vi.fn(async (callback) => { fireTencentChunk = callback; callback('QUJD'); }),
+        stop: vi.fn(async () => null),
+      }),
+    };
+    const { result } = renderHook(() => usePushToTalk({ onText, deps }));
+    await act(async () => { await result.current.start(); });
+    expect(sent).toEqual([]); // socket is not open: opening audio was retained, not dropped
+    ws.readyState = 1;
+    act(() => { ws.onopen?.(); });
+    expect([...sent[0] as Uint8Array]).toEqual([65, 66, 67]);
+    act(() => { fireTencentChunk('REVG'); });
+    expect([...sent[1] as Uint8Array]).toEqual([68, 69, 70]);
+    act(() => { ws.onmessage?.({ data: JSON.stringify({
+      code: 0, final: 0, sentences: { sentence_list: [{ sentence_id: 0, sentence_type: 0, sentence: '你号' }] },
+    }) }); });
+    expect(result.current.partial).toBe('你号');
+    act(() => { ws.onmessage?.({ data: JSON.stringify({
+      code: 0, final: 0, sentences: { sentence_list: [{ sentence_id: 0, sentence_type: 1, sentence: '你好' }] },
+    }) }); });
+    expect(result.current.partial).toBe('你好');
+    await act(async () => { await result.current.stop(); });
+    expect(sent.at(-1)).toBe(JSON.stringify({ type: 'end' }));
+    act(() => { ws.onmessage?.({ data: JSON.stringify({ code: 0, final: 1 }) }); });
+    expect(onText).toHaveBeenCalledWith('你好');
+    expect(result.current.state).toBe('idle');
   });
 });

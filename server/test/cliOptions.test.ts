@@ -153,6 +153,19 @@ describe('resolveConfig', () => {
     expect(c.staticDir).toBe('/srv/dist');
     expect(c.vapid).toEqual({ public: 'pub', private: 'priv', subject: 'mailto:me@x.dev' });
     expect(c.xfyun).toEqual({ appId: 'A', apiKey: 'K', apiSecret: 'S' });
+    expect(c.voice).toEqual({
+      provider: 'xfyun', providers: { xfyun: { appId: 'A', apiKey: 'K', apiSecret: 'S' } },
+    });
+  });
+  it('selects one pluggable voice provider while preserving both provider configs', () => {
+    const voice = {
+      provider: 'tencent',
+      providers: {
+        xfyun: { appId: 'A', apiKey: 'K', apiSecret: 'S' },
+        tencent: { appId: '1', secretId: 'ID', secretKey: 'KEY', engineModelType: '16k_zh' },
+      },
+    };
+    expect(resolveConfig({}, { voice }, {}, gen).voice).toEqual(voice);
   });
   it('projects only string integration fields from untrusted config JSON', () => {
     const c = resolveConfig({}, {
@@ -167,6 +180,7 @@ describe('resolveConfig', () => {
     expect(c.staticDir).toBeNull();
     expect(c.vapid).toBeNull();
     expect(c.xfyun).toBeNull();
+    expect(c.voice).toBeNull();
   });
   it('keeps previewDomain as the built-in browser public origin', () => {
     const c = resolveConfig(
@@ -212,7 +226,7 @@ describe('explainConfig', () => {
     const by = Object.fromEntries(rows.map((r) => [r.key, r]));
     expect(by.token?.display).toBe('••••1234');
     expect(by['push (vapid)']).toMatchObject({ display: 'on', origin: '/c.json' });
-    expect(by['voice (xfyun)']?.display).toBe('off');
+    expect(by.voice?.display).toBe('off');
   });
   it('shows tunnel-specific rows only for the live tunnel and applies the publicUrl guard', () => {
     const rows = explainConfig({ tunnel: 'cloudflare-named', cfHostname: 'h.x.com' }, { tunnel: 'ssh', publicUrl: 'https://my.ssh' }, '/c.json');

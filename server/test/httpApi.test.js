@@ -1088,6 +1088,28 @@ describe('GET /api/asr/sign', () => {
   });
 });
 
+describe('GET /api/asr/session', () => {
+  it('returns a provider-tagged Tencent real-time v2 URL without the SecretKey', async () => {
+    const asrEnv = {
+      HANDMUX_ASR_PROVIDER: 'tencent',
+      TENCENT_ASR_APPID: '123456',
+      TENCENT_ASR_SECRET_ID: 'AKID-private-id',
+      TENCENT_ASR_SECRET_KEY: 'private-key-DO-NOT-LEAK',
+      TENCENT_ASR_ENGINE_MODEL_TYPE: '16k_zh',
+    };
+    const app = express();
+    app.use('/api', createApiRouter({ token: 'good', commands: baseCommands, asrEnv }));
+    const res = await request(app).get('/api/asr/session').set('Authorization', 'Bearer good').expect(200);
+    expect(res.body).toMatchObject({ provider: 'tencent', protocol: 'tencent-asr-v2' });
+    const url = new URL(res.body.url);
+    expect(url.pathname).toBe('/asr/v2/123456');
+    expect(url.searchParams.get('secretid')).toBe('AKID-private-id');
+    expect(url.searchParams.get('signature')).toBeTruthy();
+    expect(JSON.stringify(res.body)).not.toContain('private-key-DO-NOT-LEAK');
+    await request(app).get('/api/asr/sign').set('Authorization', 'Bearer good').expect(503);
+  });
+});
+
 describe('GET /api/config (capabilities)', () => {
   it('reports browser proxy availability from preview-domain configuration', async () => {
     const withoutProxy = express();
@@ -1115,6 +1137,17 @@ describe('GET /api/config (capabilities)', () => {
     app.use('/api', createApiRouter({ token: 'good', commands: baseCommands, asrEnv }));
     const res = await request(app).get('/api/config').set('Authorization', 'Bearer good').expect(200);
     expect(res.body.asr).toBe(true);
+    expect(res.body.asrProvider).toBe('xfyun');
+  });
+  it('reports the explicitly selected Tencent provider', async () => {
+    const asrEnv = {
+      HANDMUX_ASR_PROVIDER: 'tencent', TENCENT_ASR_APPID: '1',
+      TENCENT_ASR_SECRET_ID: 'id', TENCENT_ASR_SECRET_KEY: 'key',
+    };
+    const app = express();
+    app.use('/api', createApiRouter({ token: 'good', commands: baseCommands, asrEnv }));
+    const res = await request(app).get('/api/config').set('Authorization', 'Bearer good').expect(200);
+    expect(res.body).toMatchObject({ asr: true, asrProvider: 'tencent' });
   });
   it('returns the server-owned mandatory shortcuts', async () => {
     const shortcuts = {

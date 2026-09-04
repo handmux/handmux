@@ -1,21 +1,18 @@
 import { useRef, useState, useCallback, useEffect } from 'react';
-import { signAsr as realSignAsr } from '../api.js';
+import { createAsrSession as realCreateAsrSession } from '../api.js';
 import { createRecorder } from './recorder.js';
-import { buildFirstFrame, buildAudioFrame, buildEndFrame, emptyTranscript, accumulate, textOf } from './iatProtocol.js';
-import type { TranscriptState } from './iatProtocol.js';
+import { createAsrDriver } from './asrDriver.js';
+import type { AsrDriver, VoiceSocketData } from './asrDriver.js';
+import type { AsrSessionResponse, AsrSignResponse } from '../apiRequest.js';
 import type { VoiceRecorder } from './recorder.js';
 
 export type VoicePhase = 'idle' | 'requesting' | 'recording' | 'finalizing' | 'error';
 
-interface AsrSignature {
-  url: string;
-  appId: string;
-}
-
 export interface VoiceSocket {
   readyState: number;
-  send(data: string): void;
+  send(data: VoiceSocketData): void;
   close(): void;
+  onopen: (() => void) | null;
   onmessage: ((event: { data: unknown }) => void) | null;
   onerror: (() => void) | null;
   onclose: (() => void) | null;
@@ -24,7 +21,9 @@ export interface VoiceSocket {
 export type VoiceSocketConstructor = new (url: string) => VoiceSocket;
 
 export interface PushToTalkDependencies {
-  signAsr?: () => Promise<AsrSignature>;
+  createSession?: () => Promise<AsrSessionResponse>;
+  /** @deprecated test/integration compatibility for the former XFYUN-only handoff. */
+  signAsr?: () => Promise<AsrSignResponse>;
   WebSocketCtor?: VoiceSocketConstructor;
   makeRecorder?: () => VoiceRecorder;
 }
@@ -46,30 +45,29 @@ const parseSocketData = (data: unknown): unknown => {
   try { return JSON.parse(data) as unknown; } catch { return null; }
 };
 
-const isFinalMessage = (value: unknown): boolean => {
-  if (value === null || typeof value !== 'object' || !('data' in value)) return false;
-  const data = value.data;
-  return data !== null && typeof data === 'object' && 'status' in data && data.status === 2;
-};
-
 const MAX_MS = 55000; // IAT caps a session at 60s; self-finalize at 55s and prompt to press again.
 const FINALIZE_MS = 4000; // after the end frame, wait this long for the server's final; else salvage + reset.
 
-// Push-to-talk orchestration: signAsr → open ws → stream mic frames → accumulate wpgs → on stop send
-// the end frame and, when the server returns its final (data.status===2), hand the text to onText().
+// Provider-neutral push-to-talk orchestration: start mic + request session in parallel, buffer until the
+// socket opens, stream via the selected driver, then commit its latest partial when the final frame arrives.
 // Guards read a stateRef (live phase) rather than the captured `state`, so the 55s cap timer and any
 // long-lived closure act on the real current phase instead of the phase baked in at press time.
-// Deps are injectable for tests; production uses the real signAsr/WebSocket/recorder.
+// Deps are injectable for tests; production uses the real session handoff/WebSocket/recorder.
 export function usePushToTalk({
   onText,
   deps = {},
 }: UsePushToTalkOptions): PushToTalkController {
-  const signAsr = deps.signAsr ?? realSignAsr;
+  const createSession = deps.createSession ?? (deps.signAsr
+    ? async (): Promise<AsrSessionResponse> => ({
+      provider: 'xfyun', protocol: 'xfyun-iat-v2', ...await deps.signAsr!(),
+    })
+    : realCreateAsrSession);
   const WebSocketCtor = deps.WebSocketCtor ?? window.WebSocket as unknown as VoiceSocketConstructor;
   const makeRecorder = deps.makeRecorder ?? (() => createRecorder());
 
   const [state, setState] = useState<VoicePhase>('idle');
   const [partial, setPartial] = useState('');
+  const partialRef = useRef('');
   const stateRef = useRef<VoicePhase>('idle');
   const setPhase = useCallback((next: VoicePhase): void => {
     stateRef.current = next;
@@ -78,9 +76,9 @@ export function usePushToTalk({
 
   const wsRef = useRef<VoiceSocket | null>(null);
   const recRef = useRef<VoiceRecorder | null>(null);
-  const transRef = useRef<TranscriptState>(emptyTranscript());
-  const appIdRef = useRef('');
-  const firstSentRef = useRef(false);
+  const driverRef = useRef<AsrDriver | null>(null);
+  const pendingAudioRef = useRef<string[]>([]);
+  const pendingEndRef = useRef(false);
   const capTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const finalizeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const stopRef = useRef<(() => Promise<void>) | null>(null);
@@ -97,7 +95,9 @@ export function usePushToTalk({
     const recorder = recRef.current;
     recRef.current = null;
     if (recorder) void recorder.stop().catch(() => {});
-    firstSentRef.current = false;
+    driverRef.current = null;
+    pendingAudioRef.current = [];
+    pendingEndRef.current = false;
   }, []);
 
   // Commit whatever we've accumulated and return to idle. The single exit used by the server's final
@@ -106,18 +106,31 @@ export function usePushToTalk({
   // already idle, so the ws.close() inside cleanup re-firing onclose can't double-commit.
   const finish = useCallback((): void => {
     if (stateRef.current === 'idle') return;
-    onTextRef.current?.(textOf(transRef.current));
+    onTextRef.current?.(partialRef.current);
     setPartial(''); setPhase('idle'); cleanup();
   }, [cleanup, setPhase]);
 
-  const sendAudio = useCallback((base64: string): void => {
+  const startFinalizeTimer = useCallback((): void => {
+    if (finalizeTimer.current !== null) return;
+    finalizeTimer.current = setTimeout(finish, FINALIZE_MS);
+  }, [finish]);
+
+  const flush = useCallback((): void => {
     const ws = wsRef.current;
-    if (!ws || ws.readyState !== 1) return;
-    ws.send(JSON.stringify(firstSentRef.current
-      ? buildAudioFrame(base64)
-      : buildFirstFrame(appIdRef.current, base64)));
-    firstSentRef.current = true;
-  }, []);
+    const driver = driverRef.current;
+    if (!ws || ws.readyState !== 1 || !driver) return;
+    for (const base64 of pendingAudioRef.current.splice(0)) ws.send(driver.audio(base64));
+    if (pendingEndRef.current) {
+      pendingEndRef.current = false;
+      ws.send(driver.end());
+      startFinalizeTimer();
+    }
+  }, [startFinalizeTimer]);
+
+  const sendAudio = useCallback((base64: string): void => {
+    pendingAudioRef.current.push(base64);
+    flush();
+  }, [flush]);
 
   const stop = useCallback(async (): Promise<void> => {
     if (stateRef.current !== 'recording') return;
@@ -130,33 +143,44 @@ export function usePushToTalk({
       const tail = recorder ? await recorder.stop() : null;
       if (tail) sendAudio(tail);
       const ws = wsRef.current;
-      if (ws && ws.readyState === 1) {
-        ws.send(JSON.stringify(buildEndFrame()));
-        // Don't wait forever for the server's final frame — a stalled IAT/ws would pin us in
-        // finalizing and lock the input. Salvage the current text and reset if it doesn't arrive.
-        finalizeTimer.current = setTimeout(() => finish(), FINALIZE_MS);
-      } else finish();
+      if (ws) {
+        pendingEndRef.current = true;
+        flush();
+        // A socket stuck in CONNECTING cannot receive the end frame; still guarantee the composer unlocks.
+        startFinalizeTimer();
+      }
+      else finish();
     } catch {
       setPhase('error'); cleanup();
     }
-  }, [sendAudio, cleanup, setPhase, finish]);
+  }, [sendAudio, cleanup, setPhase, finish, flush, startFinalizeTimer]);
   stopRef.current = stop;
 
   const start = useCallback(async (): Promise<void> => {
     // Start only from a settled state. 'error' is settled (and recoverable) — gating on 'idle' alone
     // would strand the mic forever after any failure (denied permission, sign error, ws drop).
     if (stateRef.current !== 'idle' && stateRef.current !== 'error') return;
-    setPhase('requesting'); setPartial(''); transRef.current = emptyTranscript(); firstSentRef.current = false;
+    setPhase('requesting'); setPartial(''); partialRef.current = '';
+    pendingAudioRef.current = []; pendingEndRef.current = false; driverRef.current = null;
     try {
-      const { url, appId } = await signAsr();
-      appIdRef.current = appId;
-      const ws = new WebSocketCtor(url);
+      // Begin mic acquisition in the tap call stack (required by iOS), while the server signs the selected
+      // provider URL in parallel. Audio produced before WebSocket open is buffered and flushed in order.
+      const rec = makeRecorder();
+      recRef.current = rec;
+      const recorderStarted = rec.start(sendAudio);
+      const [session] = await Promise.all([createSession(), recorderStarted]);
+      const driver = createAsrDriver(session);
+      driverRef.current = driver;
+      const ws = new WebSocketCtor(session.url);
       wsRef.current = ws;
+      ws.onopen = flush;
       ws.onmessage = (event) => {
         const message = parseSocketData(event.data);
-        transRef.current = accumulate(transRef.current, message);
-        setPartial(textOf(transRef.current));
-        if (isFinalMessage(message)) finish();
+        const result = driver.consume(message);
+        partialRef.current = result.text;
+        setPartial(result.text);
+        if (result.error) { setPhase('error'); cleanup(); }
+        else if (result.final) finish();
       };
       ws.onerror = () => { setPhase('error'); cleanup(); };
       // An unexpected close mid-session must not strand us in recording/finalizing — salvage + reset.
@@ -164,15 +188,13 @@ export function usePushToTalk({
       ws.onclose = () => {
         if (stateRef.current === 'recording' || stateRef.current === 'finalizing') finish();
       };
-      const rec = makeRecorder();
-      recRef.current = rec;
-      await rec.start(sendAudio);
       setPhase('recording');
+      flush();
       capTimer.current = setTimeout(() => { stopRef.current?.(); }, MAX_MS);
     } catch {
       setPhase('error'); cleanup();
     }
-  }, [signAsr, WebSocketCtor, makeRecorder, sendAudio, cleanup, setPhase, finish]);
+  }, [createSession, WebSocketCtor, makeRecorder, sendAudio, cleanup, setPhase, finish, flush]);
 
   useEffect(() => cleanup, [cleanup]); // close ws + mic on unmount
 

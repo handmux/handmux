@@ -4,7 +4,7 @@
 // on i18n (t/getLocale) for user-facing strings — otherwise deterministic given its inputs.
 import { t, getLocale } from './i18n/index.js';
 import { TUNNELS } from './options.js';
-import type { Tunnel, VapidConfig, XfyunConfig } from './options.js';
+import type { Tunnel, VapidConfig, VoiceConfig, XfyunConfig } from './options.js';
 
 export interface ConnectionAnswers {
   tunnel: Tunnel;
@@ -21,7 +21,7 @@ export interface ConnectionAnswers {
   authtoken?: string;
   cpolarRegion?: string;
   vapid?: VapidConfig;
-  xfyun?: XfyunConfig;
+  voice?: VoiceConfig;
 }
 
 export interface SetupAnswers extends ConnectionAnswers { port: number }
@@ -83,7 +83,7 @@ const WIZARD_KEYS = [
   'lang', 'name', 'port', 'tunnel', 'token', 'previewDomain',
   'sshHost', 'remotePort', 'sshJump', 'cfHostname', 'cfTunnelName', 'publicUrl',
   'authtoken', 'cpolarRegion',
-  'vapid', 'xfyun',
+  'vapid', 'voice', 'xfyun',
 ] as const;
 
 // The tunnel-specific keys, cleared whenever the tunnel changes so a switch never carries a stale field.
@@ -112,7 +112,7 @@ export function configFromAnswers(a: SetupAnswers): SetupConfig {
     if (a.cpolarRegion) cfg.cpolarRegion = a.cpolarRegion;
   }
   if (a.vapid) cfg.vapid = a.vapid;
-  if (a.xfyun) cfg.xfyun = a.xfyun;
+  if (a.voice) cfg.voice = a.voice;
   return cfg;
 }
 
@@ -144,10 +144,26 @@ export function answersFromConfig(config: unknown = {}): SetupAnswers {
   }
   if (typeof cfg.remotePort === 'number' && Number.isFinite(cfg.remotePort)) a.remotePort = cfg.remotePort;
   const vapid = stringObject<VapidConfig>(cfg.vapid, ['public', 'private', 'subject']);
+  const voice = voiceFromConfig(cfg.voice);
   const xfyun = stringObject<XfyunConfig>(cfg.xfyun, ['appId', 'apiKey', 'apiSecret']);
   if (vapid) a.vapid = vapid;
-  if (xfyun) a.xfyun = xfyun;
+  if (voice) a.voice = voice;
+  else if (xfyun) a.voice = { provider: 'xfyun', providers: { xfyun } };
   return a;
+}
+
+function voiceFromConfig(value: unknown): VoiceConfig | undefined {
+  if (!isRecord(value) || (value.provider !== 'xfyun' && value.provider !== 'tencent')
+    || !isRecord(value.providers)) return undefined;
+  const xfyun = stringObject<XfyunConfig>(value.providers.xfyun, ['appId', 'apiKey', 'apiSecret']);
+  const tencent = stringObject<NonNullable<VoiceConfig['providers']['tencent']>>(
+    value.providers.tencent,
+    ['appId', 'secretId', 'secretKey', 'engineModelType'],
+  );
+  return {
+    provider: value.provider,
+    providers: { ...(xfyun ? { xfyun } : {}), ...(tencent ? { tencent } : {}) },
+  };
 }
 
 // The dim one-line summary shown next to the Connection row (and reused nowhere else). Pure.

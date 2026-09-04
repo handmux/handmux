@@ -57,6 +57,28 @@ const stringFields = (value: unknown, keys: readonly string[], key: string): Rec
   return result;
 };
 
+const voiceConfig = (value: unknown): SupervisorConfig['voice'] | undefined | null => {
+  if (value === undefined || value === null) return value;
+  const record = recordOf(value);
+  const providers = recordOf(record?.providers);
+  if (!record || (record.provider !== 'xfyun' && record.provider !== 'tencent') || !providers) {
+    throw new Error('invalid supervisor config: voice must select a known provider');
+  }
+  const xfyun = stringFields(providers.xfyun, ['appId', 'apiKey', 'apiSecret'], 'voice.providers.xfyun');
+  const tencent = stringFields(
+    providers.tencent,
+    ['appId', 'secretId', 'secretKey', 'engineModelType'],
+    'voice.providers.tencent',
+  );
+  return {
+    provider: record.provider,
+    providers: {
+      ...(xfyun ? { xfyun } : {}),
+      ...(tencent ? { tencent } : {}),
+    },
+  };
+};
+
 // The persisted file and the legacy base64 argv are untrusted process boundaries. Parse them before the
 // supervisor starts so malformed or stale data fails as one explicit configuration error instead of being
 // used as partially-typed process arguments.
@@ -101,6 +123,7 @@ export function parseSupervisorConfig(value: unknown): SupervisorConfig {
   const cpolarBin = optionalString(record.cpolarBin, 'cpolarBin');
   const cpolarRegion = optionalString(record.cpolarRegion, 'cpolarRegion');
   const vapid = stringFields(record.vapid, ['public', 'private', 'subject'], 'vapid');
+  const voice = voiceConfig(record.voice);
   const xfyun = stringFields(record.xfyun, ['appId', 'apiKey', 'apiSecret'], 'xfyun');
   if (name !== undefined) config.name = name;
   if (staticDir !== undefined) config.staticDir = staticDir;
@@ -118,6 +141,7 @@ export function parseSupervisorConfig(value: unknown): SupervisorConfig {
   if (typeof cpolarBin === 'string') config.cpolarBin = cpolarBin;
   if (cpolarRegion !== undefined) config.cpolarRegion = cpolarRegion;
   if (vapid !== undefined) config.vapid = vapid;
+  if (voice !== undefined) config.voice = voice;
   if (xfyun !== undefined) config.xfyun = xfyun;
   return config;
 }

@@ -32,6 +32,39 @@ describe('browser public origin supervisor environment', () => {
 });
 
 describe('Supervisor process state wiring', () => {
+  it('injects only the selected voice provider into the server child', () => {
+    let childEnv: NodeJS.ProcessEnv = {};
+    const spawnChild = vi.fn((
+      _command: string,
+      _args: readonly string[],
+      options: { env?: NodeJS.ProcessEnv; stdio: ['ignore', 'inherit' | 'pipe', 'inherit' | 'pipe'] },
+    ) => { childEnv = options.env || {}; return new FakeChild(100); });
+    const processRef = {
+      pid: 50, env: { XFYUN_APPID: 'inherited-inactive' }, execPath: '/usr/bin/node', stdout: { write: vi.fn() },
+      on: vi.fn(), kill: vi.fn(), exit: vi.fn(),
+    };
+    supervise({
+      tunnel: 'none', port: 19_999, host: '127.0.0.1', token: 'secret',
+      shortcuts: { command: [], chat: [] },
+      voice: {
+        provider: 'tencent',
+        providers: {
+          xfyun: { appId: 'inactive', apiKey: 'inactive', apiSecret: 'inactive' },
+          tencent: { appId: '1', secretId: 'ID', secretKey: 'KEY', engineModelType: '16k_zh' },
+        },
+      },
+    }, {
+      home: tmpHome('hm-supervisor-voice-'), processRef, spawnChild,
+      probeServerReady: () => false, setTimer: () => 1,
+    });
+    expect(childEnv).toMatchObject({
+      HANDMUX_ASR_PROVIDER: 'tencent', TENCENT_ASR_APPID: '1',
+      TENCENT_ASR_SECRET_ID: 'ID', TENCENT_ASR_SECRET_KEY: 'KEY',
+      TENCENT_ASR_ENGINE_MODEL_TYPE: '16k_zh',
+    });
+    expect(childEnv.XFYUN_APPID).toBeUndefined();
+  });
+
   it('clears Server readiness immediately on exit and restarts with its own backoff', async () => {
     const children: FakeChild[] = [];
     const readiness: Array<(value: boolean) => void> = [];

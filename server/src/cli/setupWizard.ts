@@ -17,7 +17,7 @@ import { resolveNatapp, resolveCpolar } from './tunnelClients.js';
 import { t, setLocale } from './i18n/index.js';
 import { intro, outro, note, cancel, select, text, password, confirm, ask, CANCELLED } from './prompt.js';
 import { PrivateStateStore } from '../privateStateStore.js';
-import type { Tunnel, VapidConfig, XfyunConfig } from './options.js';
+import type { TencentAsrConfig, Tunnel, VapidConfig, VoiceConfig, XfyunConfig } from './options.js';
 import type { SetupAnswers, SetupConfig } from './setupModel.js';
 
 interface SetupLog {
@@ -102,7 +102,10 @@ export async function runSetup({
           { value: 'token', label: t('setup.secToken'), hint: a.token ? maskSecret(a.token) : t('setup.tokenAuto') },
           { value: 'browser', label: t('setup.secBrowser'), hint: a.previewDomain || t('setup.browserOff') },
           { value: 'push', label: t('setup.secPush'), hint: a.vapid ? (a.vapid.subject || t('setup.on')) : t('setup.off') },
-          { value: 'voice', label: t('setup.secVoice'), hint: a.xfyun ? (a.xfyun.appId || t('setup.on')) : t('setup.off') },
+          {
+            value: 'voice', label: t('setup.secVoice'),
+            hint: a.voice ? `${a.voice.provider} · ${a.voice.providers[a.voice.provider]?.appId || t('setup.on')}` : t('setup.off'),
+          },
           // A CLI-tool preference (language of handmux's own terminal output), not an app setting — so it
           // sits at the bottom of the settings, just above the actions.
           { value: 'language', label: t('setup.secLanguage'), hint: a.lang === 'zh' ? '中文' : 'English' },
@@ -133,8 +136,8 @@ export async function runSetup({
           const vapid = await editPush(a);
           if (vapid) a.vapid = vapid; else delete a.vapid;
         } else if (choice === 'voice') {
-          const xfyun = await editVoice(a);
-          if (xfyun) a.xfyun = xfyun; else delete a.xfyun;
+          const voice = await editVoice(a);
+          if (voice) a.voice = voice; else delete a.voice;
         }
       } catch (e) {
         if (e !== CANCELLED) throw e;
@@ -444,41 +447,93 @@ async function editPush(a: SetupAnswers): Promise<VapidConfig | undefined> {
   }
 }
 
-// Voice input (iFlytek/xfyun) — three credentials; appId is shown/edited in the clear, the two secrets show
-// only a masked preview and are replaced (never revealed) when edited.
-async function editVoice(a: SetupAnswers): Promise<XfyunConfig | undefined> {
-  let x = a.xfyun;
-  if (!x) {
+// Voice input provider hub. Credentials for multiple providers may coexist, but only the explicitly selected
+// provider is injected into the server process. Secrets are masked and replaced, never revealed.
+async function editVoice(a: SetupAnswers): Promise<VoiceConfig | undefined> {
+  let voice = a.voice;
+  if (!voice) {
     let on;
     try { on = await ask(confirm({ message: withBack(t('setup.voiceSetup')), initialValue: false, ...yesno() })); }
     catch (e) { if (e === CANCELLED) return undefined; throw e; }
     if (!on) return undefined;
-    const appId = await ask(text({ message: t('setup.voiceAppId'), validate: validateNonEmpty('appId') }));
-    const apiKey = await ask(password({ message: t('setup.voiceApiKey'), validate: validateNonEmpty('apiKey') }));
-    const apiSecret = await ask(password({ message: t('setup.voiceApiSecret'), validate: validateNonEmpty('apiSecret') }));
-    x = { appId, apiKey, apiSecret };
+    const provider = await chooseVoiceProvider('tencent');
+    voice = await ensureVoiceProvider({ provider, providers: {} });
   }
   for (;;) {
+    const provider = voice.provider;
+    const current = voice.providers[provider] || {};
     let pick;
     try {
       pick = await ask(select({
         message: withBack(t('setup.secVoice')),
         options: [
-          { value: 'appId', label: 'appId', hint: x.appId || '' },
-          { value: 'apiKey', label: 'apiKey', hint: maskSecret(x.apiKey) },
-          { value: 'apiSecret', label: 'apiSecret', hint: maskSecret(x.apiSecret) },
+          { value: 'provider', label: t('setup.voiceProvider'), hint: provider },
+          { value: 'appId', label: 'appId', hint: current.appId || '' },
+          ...(provider === 'xfyun' ? [
+            { value: 'apiKey', label: 'apiKey', hint: maskSecret(voice.providers.xfyun?.apiKey) },
+            { value: 'apiSecret', label: 'apiSecret', hint: maskSecret(voice.providers.xfyun?.apiSecret) },
+          ] : [
+            { value: 'secretId', label: 'secretId', hint: maskSecret(voice.providers.tencent?.secretId) },
+            { value: 'secretKey', label: 'secretKey', hint: maskSecret(voice.providers.tencent?.secretKey) },
+            { value: 'engineModelType', label: 'engineModelType', hint: voice.providers.tencent?.engineModelType || '16k_zh' },
+          ]),
           { value: 'off', label: t('setup.voiceOff') },
         ],
-        initialValue: 'appId',
+        initialValue: 'provider',
       }));
-    } catch (e) { if (e === CANCELLED) return x; throw e; }
+    } catch (e) { if (e === CANCELLED) return voice; throw e; }
     if (pick === 'off') return undefined;
     try {
-      if (pick === 'appId') x = { ...x, appId: await ask(text({ message: t('setup.voiceAppId'), initialValue: x.appId || '', validate: validateNonEmpty('appId') })) };
-      else if (pick === 'apiKey') x = { ...x, apiKey: await ask(password({ message: t('setup.voiceApiKey'), validate: validateNonEmpty('apiKey') })) };
-      else if (pick === 'apiSecret') x = { ...x, apiSecret: await ask(password({ message: t('setup.voiceApiSecret'), validate: validateNonEmpty('apiSecret') })) };
+      if (pick === 'provider') {
+        const selected = await chooseVoiceProvider(provider);
+        voice = await ensureVoiceProvider({ ...voice, provider: selected });
+      } else if (provider === 'xfyun') {
+        const config: XfyunConfig = voice.providers.xfyun || {};
+        if (pick === 'appId') config.appId = await ask(text({ message: t('setup.voiceAppId'), initialValue: config.appId || '', validate: validateNonEmpty('appId') }));
+        else if (pick === 'apiKey') config.apiKey = await ask(password({ message: t('setup.voiceApiKey'), validate: validateNonEmpty('apiKey') }));
+        else if (pick === 'apiSecret') config.apiSecret = await ask(password({ message: t('setup.voiceApiSecret'), validate: validateNonEmpty('apiSecret') }));
+        voice = { ...voice, providers: { ...voice.providers, xfyun: { ...config } } };
+      } else {
+        const config: TencentAsrConfig = voice.providers.tencent || {};
+        if (pick === 'appId') config.appId = await ask(text({ message: t('setup.voiceTencentAppId'), initialValue: config.appId || '', validate: validateNonEmpty('appId') }));
+        else if (pick === 'secretId') config.secretId = await ask(password({ message: t('setup.voiceTencentSecretId'), validate: validateNonEmpty('secretId') }));
+        else if (pick === 'secretKey') config.secretKey = await ask(password({ message: t('setup.voiceTencentSecretKey'), validate: validateNonEmpty('secretKey') }));
+        else if (pick === 'engineModelType') config.engineModelType = await ask(text({ message: t('setup.voiceTencentEngine'), initialValue: config.engineModelType || '16k_zh', validate: validateNonEmpty('engineModelType') }));
+        voice = { ...voice, providers: { ...voice.providers, tencent: { ...config } } };
+      }
     } catch (e) { if (e !== CANCELLED) throw e; }
   }
+}
+
+async function chooseVoiceProvider(initialValue: VoiceConfig['provider']): Promise<VoiceConfig['provider']> {
+  return ask(select({
+    message: t('setup.voiceProvider'),
+    options: [
+      { value: 'tencent', label: t('setup.voiceTencent'), hint: t('setup.voiceTencentHint') },
+      { value: 'xfyun', label: t('setup.voiceXfyun') },
+    ],
+    initialValue,
+  }));
+}
+
+async function ensureVoiceProvider(voice: VoiceConfig): Promise<VoiceConfig> {
+  if (voice.provider === 'xfyun') {
+    const current = voice.providers.xfyun || {};
+    const appId = current.appId || await ask(text({ message: t('setup.voiceAppId'), validate: validateNonEmpty('appId') }));
+    const apiKey = current.apiKey || await ask(password({ message: t('setup.voiceApiKey'), validate: validateNonEmpty('apiKey') }));
+    const apiSecret = current.apiSecret || await ask(password({ message: t('setup.voiceApiSecret'), validate: validateNonEmpty('apiSecret') }));
+    return { ...voice, providers: { ...voice.providers, xfyun: { appId, apiKey, apiSecret } } };
+  }
+  const current = voice.providers.tencent || {};
+  const appId = current.appId || await ask(text({ message: t('setup.voiceTencentAppId'), validate: validateNonEmpty('appId') }));
+  const secretId = current.secretId || await ask(password({ message: t('setup.voiceTencentSecretId'), validate: validateNonEmpty('secretId') }));
+  const secretKey = current.secretKey || await ask(password({ message: t('setup.voiceTencentSecretKey'), validate: validateNonEmpty('secretKey') }));
+  return {
+    ...voice,
+    providers: { ...voice.providers, tencent: {
+      appId, secretId, secretKey, engineModelType: current.engineModelType || '16k_zh',
+    } },
+  };
 }
 
 // login (browser) → create → route dns → write config.yml. The only human step is the browser login.

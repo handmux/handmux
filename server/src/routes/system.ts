@@ -7,7 +7,8 @@ import { fileURLToPath } from 'node:url';
 import { readFileSync } from 'node:fs';
 import { isSessionId } from '../tmux/commands.js';
 import { buildIatSignedUrl } from '../asr/iflySign.js';
-import { asrConfig, isAsrConfigured } from '../asr/iflyConfig.js';
+import { asrConfig, isAsrConfigured } from '../asr/config.js';
+import { buildTencentAsrSignedUrl } from '../asr/tencentSign.js';
 import { hooksStatus, installHooks } from '../cli/claudeHooks.js';
 import {
   agentIntegrationStatus,
@@ -86,6 +87,7 @@ export function systemRoutes({
   r.get('/config', (_req: Request, res: Response) => {
     return res.json({
       asr: isAsrConfigured(asrEnv),
+      asrProvider: asrConfig(asrEnv)?.provider ?? null,
       claudeHooks: hooksStatus(home),
       managedCodex: true,
       shortcuts: activeShortcuts,
@@ -157,12 +159,29 @@ export function systemRoutes({
     catch (error) { return next(error); }
   });
 
-  // --- Voice input: iFlytek IAT signed-URL handoff -------------------------------------------
-  // The browser connects to iFlytek directly; we only mint a short-lived signed wss URL so the
-  // apiSecret never reaches the phone. 503 if creds aren't configured (front-end hides the mic).
+  // --- Voice input: provider-neutral, short-lived session handoff -----------------------------
+  r.get('/asr/session', (_req: Request, res: Response) => {
+    const config = asrConfig(asrEnv);
+    if (!config) return res.status(503).json({ error: 'asr not configured' });
+    if (config.provider === 'tencent') {
+      return res.json({
+        provider: 'tencent',
+        protocol: 'tencent-asr-v2',
+        ...buildTencentAsrSignedUrl(config),
+      });
+    }
+    return res.json({
+      provider: 'xfyun',
+      protocol: 'xfyun-iat-v2',
+      ...buildIatSignedUrl({ ...config, date: new Date().toUTCString() }),
+    });
+  });
+
+  // Historical endpoint retained for already-loaded Web clients. It can only describe XFYUN's protocol.
   r.get('/asr/sign', (_req: Request, res: Response) => {
-    if (!isAsrConfigured(asrEnv)) return res.status(503).json({ error: 'asr not configured' });
-    const { appId, apiKey, apiSecret } = asrConfig(asrEnv);
+    const config = asrConfig(asrEnv);
+    if (!config || config.provider !== 'xfyun') return res.status(503).json({ error: 'xfyun asr not configured' });
+    const { appId, apiKey, apiSecret } = config;
     return res.json(buildIatSignedUrl({ appId, apiKey, apiSecret, date: new Date().toUTCString() }));
   });
 

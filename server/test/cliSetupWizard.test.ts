@@ -75,6 +75,16 @@ describe('configFromAnswers', () => {
     expect(configFromAnswers({ tunnel: 'none', port: 19999, name: '' }))
       .toEqual({ tunnel: 'none', port: 19999 });
   });
+  it('writes the provider-neutral voice config and migrates legacy xfyun on read', () => {
+    const voice = {
+      provider: 'tencent' as const,
+      providers: { tencent: { appId: '1', secretId: 'ID', secretKey: 'KEY', engineModelType: '16k_zh' } },
+    };
+    expect(configFromAnswers({ tunnel: 'none', port: 19999, voice })).toMatchObject({ voice });
+    expect(answersFromConfig({ xfyun: { appId: 'A', apiKey: 'K', apiSecret: 'S' } }).voice).toEqual({
+      provider: 'xfyun', providers: { xfyun: { appId: 'A', apiKey: 'K', apiSecret: 'S' } },
+    });
+  });
   it('pins the token when set, omits it when blank (blank = auto each start)', () => {
     expect(configFromAnswers({ tunnel: 'none', port: 19999, token: 'pinned1' }))
       .toEqual({ tunnel: 'none', port: 19999, token: 'pinned1' });

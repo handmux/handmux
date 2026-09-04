@@ -4,6 +4,10 @@ All notable changes to handmux. Format follows [Keep a Changelog](https://keepac
 
 ## [Unreleased]
 
+### Added
+
+- 语音输入改为可指定的 provider 架构，新增腾讯云实时语音识别 WebSocket 2.0：录音时持续回填非稳态/稳态文字、连接建立前缓冲开头音频，并保留讯飞 IAT 与旧配置兼容；密钥仍只留在电脑端。
+
 ## [0.26.0] - 2026-09-04
 
 ### Added

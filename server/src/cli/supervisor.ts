@@ -16,7 +16,7 @@ import { probeServerReadiness } from './supervisorHealth.js';
 import type { NetworkInterfaceInfo } from 'node:os';
 import type { TunnelConfig, TunnelName } from './drivers.js';
 import type { SupervisorComponentName, SupervisorComponentState, SupervisorComponentEvent } from './supervisorState.js';
-import type { VapidConfig, XfyunConfig } from './options.js';
+import type { VapidConfig, VoiceConfig, XfyunConfig } from './options.js';
 import type { ShortcutConfig } from '../shortcutConfig.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -37,6 +37,7 @@ export interface SupervisorConfig extends TunnelConfig {
   previewDomain?: string | null;
   shortcuts: ShortcutConfig;
   vapid?: VapidConfig | null;
+  voice?: VoiceConfig | null;
   xfyun?: XfyunConfig | null;
 }
 interface ChildStream { on(event: 'data', listener: (chunk: unknown) => void): unknown }
@@ -197,7 +198,7 @@ export function supervise(cfg: SupervisorConfig, {
   const startServer = (): void => {
     // The server reads only process.env (no .env files) — the CLI resolved the one config file and we
     // hand the server everything it needs here. This is the single injection point: config.json fields →
-    // the env names the server already reads (HANDMUX_* / VAPID_* / XFYUN_*).
+    // the env names the server reads. Voice injects only the selected provider's credentials.
     const env: NodeJS.ProcessEnv = {
       ...processRef.env,
       NODE_ENV: 'handmux',
@@ -219,10 +220,29 @@ export function supervise(cfg: SupervisorConfig, {
       if (cfg.vapid.private) env.VAPID_PRIVATE = cfg.vapid.private;
       if (cfg.vapid.subject) env.VAPID_SUBJECT = cfg.vapid.subject;
     }
-    if (cfg.xfyun) {
-      if (cfg.xfyun.appId) env.XFYUN_APPID = cfg.xfyun.appId;
-      if (cfg.xfyun.apiKey) env.XFYUN_APIKEY = cfg.xfyun.apiKey;
-      if (cfg.xfyun.apiSecret) env.XFYUN_APISECRET = cfg.xfyun.apiSecret;
+    const voice = cfg.voice ?? (cfg.xfyun ? { provider: 'xfyun' as const, providers: { xfyun: cfg.xfyun } } : null);
+    if (voice) {
+      // The supervisor environment may itself contain legacy credentials. Once config selects a provider,
+      // remove both inherited sets before injecting only the active one.
+      for (const key of [
+        'HANDMUX_ASR_PROVIDER',
+        'XFYUN_APPID', 'XFYUN_APIKEY', 'XFYUN_APISECRET',
+        'TENCENT_ASR_APPID', 'TENCENT_ASR_SECRET_ID', 'TENCENT_ASR_SECRET_KEY',
+        'TENCENT_ASR_ENGINE_MODEL_TYPE',
+      ]) delete env[key];
+      env.HANDMUX_ASR_PROVIDER = voice.provider;
+      if (voice.provider === 'xfyun') {
+        const provider = voice.providers.xfyun;
+        if (provider?.appId) env.XFYUN_APPID = provider.appId;
+        if (provider?.apiKey) env.XFYUN_APIKEY = provider.apiKey;
+        if (provider?.apiSecret) env.XFYUN_APISECRET = provider.apiSecret;
+      } else {
+        const provider = voice.providers.tencent;
+        if (provider?.appId) env.TENCENT_ASR_APPID = provider.appId;
+        if (provider?.secretId) env.TENCENT_ASR_SECRET_ID = provider.secretId;
+        if (provider?.secretKey) env.TENCENT_ASR_SECRET_KEY = provider.secretKey;
+        if (provider?.engineModelType) env.TENCENT_ASR_ENGINE_MODEL_TYPE = provider.engineModelType;
+      }
     }
     const c = spawnChild(processRef.execPath, [SERVER], { env, stdio: ['ignore', 'inherit', 'inherit'] });
     children.server = c;

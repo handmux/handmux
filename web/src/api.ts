@@ -5,6 +5,7 @@ import { UnauthorizedError } from './apiErrors.js';
 import { requestJson as req } from './apiRequest.js';
 import type {
   AsrSignResponse,
+  AsrSessionResponse,
   JsonRequestOptions,
   TerminalHistoryResponse,
 } from './apiRequest.js';
@@ -416,8 +417,23 @@ export async function signAsr(): Promise<AsrSignResponse> {
   return { url: response.url, appId: response.appId };
 }
 
-// Which optional integrations this install has configured (e.g. { asr: true }). Drives the UI hiding
-// controls that can't work — voice/ASR ships disabled on open-source installs without iFlytek keys.
+// Create a provider-neutral streaming session. Private signing keys remain on the server; the phone receives
+// only the selected protocol and its short-lived signed WebSocket URL.
+export async function createAsrSession(): Promise<AsrSessionResponse> {
+  const response = recordOf(await req('/api/asr/session', { timeoutMs: 8_000 }));
+  if (!response || typeof response.url !== 'string') throw new Error('ASR session returned an invalid response');
+  if (response.provider === 'xfyun' && response.protocol === 'xfyun-iat-v2'
+    && typeof response.appId === 'string') {
+    return { provider: 'xfyun', protocol: 'xfyun-iat-v2', url: response.url, appId: response.appId };
+  }
+  if (response.provider === 'tencent' && response.protocol === 'tencent-asr-v2') {
+    return { provider: 'tencent', protocol: 'tencent-asr-v2', url: response.url };
+  }
+  throw new Error('ASR session returned an unsupported provider');
+}
+
+// Which optional integrations this install has configured (e.g. { asr: true, asrProvider: 'tencent' }).
+// Drives UI hiding; voice ships disabled on installs without credentials for the selected provider.
 export const getConfig = (): Promise<unknown> => req('/api/config', { timeoutMs: 8_000 });
 // { current, latest, updateAvailable } — is the installed CLI behind the latest npm release? Checked once
 // per app launch; when true the phone hints the user to run `handmux update` on their computer.

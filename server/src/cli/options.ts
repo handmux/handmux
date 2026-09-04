@@ -30,6 +30,21 @@ export interface XfyunConfig {
   apiSecret?: string;
 }
 
+export interface TencentAsrConfig {
+  appId?: string;
+  secretId?: string;
+  secretKey?: string;
+  engineModelType?: string;
+}
+
+export interface VoiceConfig {
+  provider: 'xfyun' | 'tencent';
+  providers: {
+    xfyun?: XfyunConfig;
+    tencent?: TencentAsrConfig;
+  };
+}
+
 export interface ResolvedConfig {
   tunnel: Tunnel;
   port: number;
@@ -42,6 +57,8 @@ export interface ResolvedConfig {
   uploadExts: string | null;
   previewDomain: string | null;
   vapid: VapidConfig | null;
+  voice: VoiceConfig | null;
+  /** Legacy top-level config, retained as an input compatibility surface. */
   xfyun: XfyunConfig | null;
   shortcuts: ShortcutConfig;
   publicUrl: string | null;
@@ -138,7 +155,8 @@ export function resolveConfig(
     uploadExts: optionalString(pick('uploadExts', env.HANDMUX_UPLOAD_EXTS), 'upload-exts'),
     previewDomain: optionalString(pick('previewDomain', env.HANDMUX_PREVIEW_DOMAIN), 'preview-domain'),
     vapid: parseVapid(fileCfg.vapid),   // { public, private, subject } — push notifications
-    xfyun: parseXfyun(fileCfg.xfyun),   // { appId, apiKey, apiSecret } — voice input
+    voice: parseVoice(fileCfg.voice, fileCfg.xfyun),
+    xfyun: parseXfyun(fileCfg.xfyun),   // legacy voice input; parseVoice migrates it at runtime
     shortcuts: normalizeShortcuts(fileCfg.shortcuts),
     // An explicit public URL is honoured for ANY tunnel mode — including 'none', so someone who runs their
     // own tunnel/reverse-proxy can still have handmux advertise (print + QR) their real domain. The
@@ -207,6 +225,24 @@ function parseVapid(value: unknown): VapidConfig | null {
 
 function parseXfyun(value: unknown): XfyunConfig | null {
   return stringFields(value, ['appId', 'apiKey', 'apiSecret']);
+}
+
+function parseTencent(value: unknown): TencentAsrConfig | null {
+  return stringFields(value, ['appId', 'secretId', 'secretKey', 'engineModelType']);
+}
+
+function parseVoice(value: unknown, legacyXfyun: unknown): VoiceConfig | null {
+  if (isRecord(value) && (value.provider === 'xfyun' || value.provider === 'tencent')) {
+    const providers = isRecord(value.providers) ? value.providers : {};
+    const xfyun = parseXfyun(providers.xfyun);
+    const tencent = parseTencent(providers.tencent);
+    return {
+      provider: value.provider,
+      providers: { ...(xfyun ? { xfyun } : {}), ...(tencent ? { tencent } : {}) },
+    };
+  }
+  const xfyun = parseXfyun(legacyXfyun);
+  return xfyun ? { provider: 'xfyun', providers: { xfyun } } : null;
 }
 
 function resolvePublicUrl(flags: OptionRecord, fileCfg: OptionRecord, env: NodeJS.ProcessEnv, tunnel: Tunnel): unknown {
@@ -309,6 +345,11 @@ export function explainConfig(
 
   // Integrations live only in the file (secrets); show presence, never the keys.
   rows.push({ key: 'push (vapid)', origin: fileCfg.vapid ? (cfgPath || 'file') : 'default', display: fileCfg.vapid ? 'on' : 'off' });
-  rows.push({ key: 'voice (xfyun)', origin: fileCfg.xfyun ? (cfgPath || 'file') : 'default', display: fileCfg.xfyun ? 'on' : 'off' });
+  const voice = parseVoice(fileCfg.voice, fileCfg.xfyun);
+  rows.push({
+    key: 'voice',
+    origin: voice ? (cfgPath || 'file') : 'default',
+    display: voice ? voice.provider : 'off',
+  });
   return rows;
 }

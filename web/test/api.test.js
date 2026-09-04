@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { getHistory, getPanes, createSession, createWindow, renameSession, renameWindow, deleteWindow, swapWindows, createDir, UnauthorizedError, ApiError, fetchDoc, fetchDir, signAsr, sendInput, getAgentCatalog, getAgentDiscovery, markAgentTerminalNotificationsRead, gitWorktree } from '../src/api.js';
+import { getHistory, getPanes, createSession, createWindow, renameSession, renameWindow, deleteWindow, swapWindows, createDir, UnauthorizedError, ApiError, fetchDoc, fetchDir, signAsr, createAsrSession, sendInput, getAgentCatalog, getAgentDiscovery, markAgentTerminalNotificationsRead, gitWorktree } from '../src/api.js';
 import { createPreview, getPreviews, deletePreview, previewUrl, fetchImageUrl } from '../src/api.js';
 
 afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); vi.useRealTimers(); });
@@ -310,6 +310,17 @@ describe('docs api', () => {
 });
 
 describe('asr api', () => {
+  it('createAsrSession accepts the selected Tencent streaming protocol', async () => {
+    const fetchMock = vi.fn(async () => jsonRes(200, {
+      provider: 'tencent', protocol: 'tencent-asr-v2', url: 'wss://asr.cloud.tencent.com/asr/v2/1',
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+    await expect(createAsrSession()).resolves.toEqual({
+      provider: 'tencent', protocol: 'tencent-asr-v2', url: 'wss://asr.cloud.tencent.com/asr/v2/1',
+    });
+    expect(fetchMock).toHaveBeenCalledWith('/api/asr/session', expect.objectContaining({ cache: 'no-store' }));
+  });
+
   it('signAsr GETs /api/asr/sign and returns {url, appId}', async () => {
     const fetchMock = vi.fn(async () => ({
       ok: true, status: 200, json: async () => ({ url: 'wss://x/v2/iat?a=1', appId: 'A1' }),

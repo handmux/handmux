@@ -27,6 +27,17 @@ export interface AsrSignResponse {
   appId: string;
 }
 
+export type AsrSessionResponse = {
+  provider: 'xfyun';
+  protocol: 'xfyun-iat-v2';
+  url: string;
+  appId: string;
+} | {
+  provider: 'tencent';
+  protocol: 'tencent-asr-v2';
+  url: string;
+};
+
 export async function requestJson<T = unknown>(
   path: string,
   opts: JsonRequestOptions = {},
