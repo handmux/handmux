@@ -1,6 +1,8 @@
 import { describe, it, expect, vi } from 'vitest';
 import { toPcm16k, createFramer, bytesToBase64 } from '../src/voice/resample.js';
-import { createRecorder, pcmSamples, voiceLevel } from '../src/voice/recorder.js';
+import {
+  createRecorder, createVoiceLevelMeter, pcmSamples, voiceLevel, voiceLevelEnvelope,
+} from '../src/voice/recorder.js';
 
 describe('toPcm16k', () => {
   it('decimates 48k → 16k (1/3 length) and yields Int16 LE bytes', () => {
@@ -40,6 +42,22 @@ describe('voiceLevel', () => {
     expect(voiceLevel(new Float32Array(16).fill(0.1))).toBeCloseTo(0.875, 5);
     expect(voiceLevel(new Float32Array(16).fill(0.5))).toBe(1);
   });
+
+  it('uses one shared fast-attack, slow-release envelope for every composer', () => {
+    expect(voiceLevelEnvelope(0.8, 0.2)).toBe(0.8);
+    expect(voiceLevelEnvelope(0.1, 0.8)).toBeCloseTo(0.656, 5);
+    expect(voiceLevelEnvelope(0, 2)).toBe(0.82);
+  });
+
+  it('emits one level for each fixed 40ms PCM window', () => {
+    const levels: number[] = [];
+    const meter = createVoiceLevelMeter(48_000, (level) => levels.push(level));
+    meter(new Float32Array(960).fill(0.02));
+    expect(levels).toHaveLength(0);
+    meter(new Float32Array(960).fill(0.02));
+    expect(levels).toHaveLength(1);
+    expect(levels[0]).toBeCloseTo(voiceLevel(new Float32Array(16).fill(0.02)), 5);
+  });
 });
 
 describe('pcmSamples', () => {
@@ -53,14 +71,8 @@ describe('pcmSamples', () => {
 });
 
 describe('createRecorder level meter', () => {
-  it('reads real analyser samples once per animation frame and still frames worklet PCM', async () => {
-    let animationFrame: FrameRequestCallback = () => {};
+  it('reads the same worklet PCM used for recognition on a fixed audio window', async () => {
     const source = { connect: vi.fn(), disconnect: vi.fn() };
-    const analyser = {
-      fftSize: 0,
-      connect: vi.fn(), disconnect: vi.fn(),
-      getFloatTimeDomainData: vi.fn((samples: Float32Array) => samples.fill(0.02)),
-    };
     const node = {
       port: { onmessage: null as ((event: MessageEvent<unknown>) => void) | null },
       connect: vi.fn(), disconnect: vi.fn(),
@@ -71,10 +83,8 @@ describe('createRecorder level meter', () => {
       audioWorklet: { addModule: vi.fn(async () => {}) },
       resume: vi.fn(async () => {}), close: vi.fn(async () => {}),
       createMediaStreamSource: vi.fn(() => source),
-      createAnalyser: vi.fn(() => analyser),
     };
     const stream = { getTracks: () => [{ stop: vi.fn() }] };
-    const cancelFrame = vi.fn();
     const levels: number[] = [];
     const chunks: string[] = [];
     const recorder = createRecorder({
@@ -82,19 +92,13 @@ describe('createRecorder level meter', () => {
       AudioCtor: (function FakeAudioContext() { return context; }) as unknown as new () => AudioContext,
       WorkletNodeCtor: (function FakeWorkletNode() { return node; }) as unknown as
         new (context: BaseAudioContext, name: string) => AudioWorkletNode,
-      requestFrame: vi.fn((callback) => { animationFrame = callback; return 7; }),
-      cancelFrame,
     });
 
     await recorder.start((chunk) => chunks.push(chunk), (level) => levels.push(level));
-    animationFrame(0);
-    expect(levels[0]).toBeGreaterThan(0);
-    expect(source.connect).toHaveBeenCalledWith(analyser);
-    expect(analyser.connect).toHaveBeenCalledWith(node);
-
     node.port.onmessage?.({ data: new Float32Array(1920).fill(0.1).buffer } as MessageEvent<unknown>);
+    expect(levels[0]).toBeGreaterThan(0);
+    expect(source.connect).toHaveBeenCalledWith(node);
     expect(chunks).toHaveLength(1);
     await recorder.stop();
-    expect(cancelFrame).toHaveBeenCalledWith(7);
   });
 });
