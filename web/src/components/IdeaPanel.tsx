@@ -194,7 +194,7 @@ export default function IdeaPanel({
           />
           {editing && <button className="idea-cancel" onClick={cancelEdit}>{t('common.cancel')}</button>}
           {micAvailable && <MicButton active={capturing} recognizing={recognizing}
-            waveform={voiceMode === 'sentence'} level={voice.level}
+            waveform level={voice.level}
             disabled={voice.state === 'requesting'} onToggle={toggleMic} />}
           <button className="idea-act" onClick={submit} disabled={!value.trim()} aria-label={editing ? t('common.save') : t('idea.add')}>
             {editing ? <CheckIcon /> : <PlusIcon />}

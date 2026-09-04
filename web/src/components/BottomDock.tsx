@@ -1249,7 +1249,7 @@ function BottomDock({
                       : openOverlay(setPanelOpen))}><ClockIcon /></button>
                 )}
                 {micAvailable && <MicButton active={capturing} recognizing={recognizing}
-                  waveform={voiceMode === 'sentence'} level={voice.level}
+                  waveform level={voice.level}
                   disabled={voice.state === 'requesting'} onToggle={toggleMic} />}
                 {/* 发送 ↑ 常驻:点 = 发送组合文本（空框发送裸 Enter）,长按 = 填入。 */}
                 <button type="button" className={`input-send${value ? '' : ' is-empty'}`} aria-label={t('dock.send')} title={t('dock.send.hint')}

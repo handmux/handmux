@@ -3,7 +3,7 @@ import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 
 // Voice is stubbed idle — these tests cover the add/edit/delete/send paths, not dictation.
-const voice = vi.hoisted(() => ({ state: 'idle', partial: '', error: null, start: vi.fn(), stop: vi.fn(), onText: null }));
+const voice = vi.hoisted(() => ({ state: 'idle', partial: '', level: 0, error: null, start: vi.fn(), stop: vi.fn(), onText: null }));
 vi.mock('../src/voice/usePushToTalk.js', () => ({
   usePushToTalk: ({ onText }) => { voice.onText = onText; return voice; },
 }));
@@ -16,7 +16,7 @@ let root;
 
 beforeEach(() => {
   localStorage.clear();
-  voice.state = 'idle'; voice.partial = ''; voice.error = null;
+  voice.state = 'idle'; voice.partial = ''; voice.level = 0; voice.error = null;
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
@@ -31,6 +31,10 @@ const render = (props = {}) => act(() => root.render(<IdeaPanel {...base} {...pr
 const $ = (sel) => container.querySelector(sel);
 const $$ = (sel) => [...container.querySelectorAll(sel)];
 const click = (node) => act(() => node.dispatchEvent(new MouseEvent('click', { bubbles: true })));
+const tap = (node) => act(() => {
+  node.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true }));
+  node.dispatchEvent(new MouseEvent('pointerup', { bubbles: true }));
+});
 const typeInto = (node, text) => act(() => {
   const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set;
   setter.call(node, text);
@@ -53,6 +57,20 @@ describe('IdeaPanel', () => {
     voice.error = '请给腾讯云授权';
     render();
     expect($('.voice-error').textContent).toBe('请给腾讯云授权');
+  });
+
+  it('一句话定稿补入已有内容，并且实时模式也显示音量波形', () => {
+    render({ voiceMode: 'sentence' });
+    const input = $('.idea-input');
+    typeInto(input, '前后');
+    act(() => { input.selectionStart = input.selectionEnd = 1; });
+    tap($('.input-mic'));
+    act(() => { voice.onText('语音'); });
+    expect($('.idea-input').value).toBe('前语音后');
+
+    voice.state = 'recording'; voice.level = 0.41;
+    render({ voiceMode: 'streaming' });
+    expect($('.input-mic-wave')?.dataset.level).toBe('0.41');
   });
 
   it('adds an idea (persists per session+window) and clears the box', () => {

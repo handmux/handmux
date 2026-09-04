@@ -15,7 +15,7 @@ vi.mock('../src/api.js', () => ({
 
 // 可驱动的语音 mock:测试改 voice.state/voice.partial 再重渲染来模拟"录音中/实时增量";
 // 捕获组件传入的 onText 以便模拟"定稿"。start/stop 是 spy。
-const voice = vi.hoisted(() => ({ state: 'idle', partial: '', error: null, start: vi.fn(), stop: vi.fn(), onText: null }));
+const voice = vi.hoisted(() => ({ state: 'idle', partial: '', level: 0, error: null, start: vi.fn(), stop: vi.fn(), onText: null }));
 vi.mock('../src/voice/usePushToTalk.js', () => ({
   usePushToTalk: ({ onText }) => { voice.onText = onText; return voice; },
 }));
@@ -33,7 +33,7 @@ let root;
 beforeEach(() => {
   vi.clearAllMocks();
   localStorage.clear(); // hermetic favs — chat list falls back to the seeded defaults
-  voice.state = 'idle'; voice.partial = ''; voice.error = null;
+  voice.state = 'idle'; voice.partial = ''; voice.level = 0; voice.error = null;
   voice.start.mockClear(); voice.stop.mockClear();
   container = document.createElement('div');
   document.body.appendChild(container);
@@ -646,6 +646,28 @@ describe('BottomDock', () => {
     await render({ pane: '%1', agent: 'claude', onSent: () => {} });
     expect(container.querySelector('.input-text').value).toBe('你好世界');
     expect(container.querySelector('.input-text').readOnly).toBe(false);
+  });
+
+  it('一句话定稿只补入起录光标处，不清空已有内容', async () => {
+    await render({ pane: '%1', agent: 'claude', voiceMode: 'sentence', onSent: () => {} });
+    const input = container.querySelector('.input-text');
+    typeInto(input, '前后');
+    act(() => { input.selectionStart = input.selectionEnd = 1; });
+    tap(container.querySelector('.input-mic'));
+    voice.state = 'finalizing';
+    await render({ pane: '%1', agent: 'claude', voiceMode: 'sentence', onSent: () => {} });
+    act(() => { voice.onText('语音'); });
+    voice.state = 'idle';
+    await render({ pane: '%1', agent: 'claude', voiceMode: 'sentence', onSent: () => {} });
+    expect(container.querySelector('.input-text').value).toBe('前语音后');
+  });
+
+  it('终端聊天的实时识别录音也显示真实音量波形', async () => {
+    await render({ pane: '%1', agent: 'claude', voiceMode: 'streaming', onSent: () => {} });
+    tap(container.querySelector('.input-mic'));
+    voice.state = 'recording'; voice.level = 0.68;
+    await render({ pane: '%1', agent: 'claude', voiceMode: 'streaming', onSent: () => {} });
+    expect(container.querySelector('.input-mic-wave')?.dataset.level).toBe('0.68');
   });
 
   it('a successful send reports the command via onSent', async () => {

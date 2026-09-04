@@ -38,6 +38,7 @@ const upload = vi.hoisted(() => ({
 const voice = vi.hoisted(() => ({
   state: 'idle',
   partial: '',
+  level: 0,
   error: null as string | null,
   onText: (_text: string) => {},
   start: vi.fn(async () => {}),
@@ -66,6 +67,7 @@ afterEach(() => {
   cleanup();
   voice.state = 'idle';
   voice.partial = '';
+  voice.level = 0;
   voice.error = null;
   voice.start.mockClear();
   voice.stop.mockClear();
@@ -3610,7 +3612,7 @@ describe('generic Agent Conversation UI', () => {
     const conversation = controller();
     const props = {
       agentId: 'pi', sessionId: 'voice-send-lock', busy: false, desktop: true,
-      micAvailable: true, conversation,
+      micAvailable: true, voiceMode: 'sentence' as const, conversation,
     };
     const view = render(<AgentConversationComposer {...props} />);
     const input = screen.getByRole('textbox') as HTMLTextAreaElement;
@@ -3620,7 +3622,9 @@ describe('generic Agent Conversation UI', () => {
     fireEvent.pointerUp(mic, { clientX: 10, clientY: 10 });
 
     voice.state = 'recording';
+    voice.level = 0.52;
     view.rerender(<AgentConversationComposer {...props} />);
+    expect(view.container.querySelector('.input-mic-wave')?.getAttribute('data-level')).toBe('0.52');
     expect((view.container.querySelector('button.cc-send') as HTMLButtonElement).disabled).toBe(true);
     fireEvent.keyDown(input, { key: 'Enter' });
     fireEvent.click(screen.getByRole('button', { name: 'ok' }));

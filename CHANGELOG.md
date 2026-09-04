@@ -6,7 +6,7 @@ All notable changes to handmux. Format follows [Keep a Changelog](https://keepac
 
 ### Added
 
-- 语音输入改为可指定的 provider/mode 架构：保留讯飞 IAT，新增腾讯云实时语音识别 WebSocket 2.0 与停止后整段回填的一句话识别；三者均点击开始/停止，一句话录音时在按钮内显示实时音量波形，长期密钥仍只留在电脑端。
+- 语音输入改为可指定的 provider/mode 架构：保留讯飞 IAT，新增腾讯云实时语音识别 WebSocket 2.0 与停止后整段回填的一句话识别；三者均点击开始/停止，录音时在按钮内显示实时音量波形，识别结果只补入起录时的光标位置而不清空已有内容，长期密钥仍只留在电脑端。
 
 ### Fixed
 

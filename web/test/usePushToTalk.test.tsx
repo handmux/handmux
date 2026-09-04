@@ -272,6 +272,31 @@ describe('usePushToTalk', () => {
     expect(result.current.level).toBe(0);
   });
 
+  it('streaming mode exposes the same recorder level signal', async () => {
+    let fireLevel: (level: number) => void = () => {};
+    const ws = makeFakeWs();
+    const recorder = {
+      start: vi.fn(async (_onChunk: (base64: string) => void, onLevel?: (level: number) => void) => {
+        fireLevel = onLevel ?? (() => {});
+      }),
+      stop: vi.fn(async () => null),
+    } satisfies VoiceRecorder;
+    const { result } = renderHook(() => usePushToTalk({
+      onText: vi.fn(), mode: 'streaming', deps: {
+        createSession: vi.fn(async () => ({
+          provider: 'xfyun' as const, protocol: 'xfyun-iat-v2' as const,
+          appId: 'app', url: 'wss://asr.test',
+        })),
+        WebSocketCtor: vi.fn(() => ws) as unknown as VoiceSocketConstructor,
+        makeRecorder: () => recorder,
+      },
+    }));
+
+    await act(async () => { await result.current.start(); });
+    act(() => { fireLevel(0.73); });
+    expect(result.current.level).toBe(0.73);
+  });
+
   it('sentence recognition failure unlocks the composer without committing text', async () => {
     const onText = vi.fn();
     const { result } = renderHook(() => usePushToTalk({

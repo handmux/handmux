@@ -351,7 +351,7 @@ export default function AgentConversationComposer({
           <div className="cc-actions-right">
             {actionContent}
             {micAvailable && <MicButton active={capturing} recognizing={recognizing}
-              waveform={voiceMode === 'sentence'} level={voice.level}
+              waveform level={voice.level}
               disabled={voice.state === 'requesting' || (draftLocked && !recording)}
               onToggle={toggleMic} />}
             {currentActivity === 'working' && canInterrupt && (

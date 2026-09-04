@@ -229,7 +229,7 @@ export function usePushToTalk({
         mode === 'sentence'
           ? (base64) => { sentenceAudioRef.current.push(base64); }
           : sendAudio,
-        mode === 'sentence' ? setLevel : undefined,
+        setLevel,
       );
       if (mode === 'sentence') {
         await recorderStarted;
