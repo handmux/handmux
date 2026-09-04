@@ -48,6 +48,7 @@ describe('Supervisor process state wiring', () => {
       shortcuts: { command: [], chat: [] },
       voice: {
         provider: 'tencent',
+        mode: 'sentence',
         providers: {
           xfyun: { appId: 'inactive', apiKey: 'inactive', apiSecret: 'inactive' },
           tencent: { appId: '1', secretId: 'ID', secretKey: 'KEY', engineModelType: '16k_zh' },
@@ -58,7 +59,7 @@ describe('Supervisor process state wiring', () => {
       probeServerReady: () => false, setTimer: () => 1,
     });
     expect(childEnv).toMatchObject({
-      HANDMUX_ASR_PROVIDER: 'tencent', TENCENT_ASR_APPID: '1',
+      HANDMUX_ASR_PROVIDER: 'tencent', HANDMUX_ASR_MODE: 'sentence', TENCENT_ASR_APPID: '1',
       TENCENT_ASR_SECRET_ID: 'ID', TENCENT_ASR_SECRET_KEY: 'KEY',
       TENCENT_ASR_ENGINE_MODEL_TYPE: '16k_zh',
     });

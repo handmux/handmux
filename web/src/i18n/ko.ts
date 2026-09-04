@@ -239,6 +239,7 @@ export default {
   'imageviewer.shareImage': '이미지 공유',
   'mic.stop': '음성 입력 중지',
   'mic.start': '음성 입력',
+  'mic.recognizing': '음성 인식 중',
 
   // dock
   'dock.send': '보내기',

@@ -1235,6 +1235,7 @@ div.workspace-restore-errors { padding-left: 10px; }
 /* 录音态:整条输入框变绿 + 明显的呼吸发光(替代单独的"聆听中"提示)。粗绿边 + 一明一暗的绿光晕。 */
 .input-wrap.recording { background: rgba(var(--green-rgb),.14); border: 2px solid var(--green); animation: rec-breathe 1.3s ease-in-out infinite; }
 .input-wrap.recording .input-text { color: #eafff3; }
+.input-wrap.recognizing { background: rgba(var(--blue-rgb),.11); border: 2px solid var(--blue); }
 @keyframes rec-breathe {
   0%,100% { box-shadow: 0 0 5px 0 rgba(var(--green-rgb),.30); border-color: #2fd07e; }
   50%     { box-shadow: 0 0 16px 4px rgba(var(--green-rgb),.80); border-color: var(--green); }
@@ -1245,8 +1246,21 @@ div.workspace-restore-errors { padding-left: 10px; }
   border: none; border-radius: 50%; background: rgba(0,0,0,.25); color: #b6c0cc; padding: 0;
   touch-action: manipulation; -webkit-user-select: none; user-select: none; }
 .input-mic.on { color: #fff; background: var(--green); }
+.input-mic.recognizing { color: #fff; background: var(--blue); }
 .input-mic:disabled { opacity: .5; }
+.input-mic.recognizing:disabled { opacity: 1; }
 .input-mic svg { width: 21px; height: 21px; display: block; }
+.input-mic-wave { width: 19px; height: 18px; display: inline-flex; align-items: center;
+  justify-content: center; gap: 2px; }
+.input-mic-wave > span { width: 2.5px; min-height: 3px; max-height: 15px; border-radius: 999px;
+  background: currentColor; transition: height 70ms linear; }
+.input-mic-spinner { width: 15px; height: 15px; border: 2px solid rgba(255,255,255,.38);
+  border-top-color: #fff; border-radius: 50%; animation: input-mic-spin .75s linear infinite; }
+@keyframes input-mic-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .input-mic-wave > span { transition: none; }
+  .input-mic-spinner { animation: none; }
+}
 /* Command panel: a bottom sheet over a dim backdrop. position:fixed bottom:0 — when the keyboard is
    open the whole .app is lifted by its inset transform, which carries this fixed sheet above the
    keyboard too (no separate inset handling needed). */
@@ -1446,6 +1460,8 @@ button.cmd-text { background: none; border: none; text-align: left; }
   font: 14px/1.4 -apple-system, system-ui, sans-serif;
 }
 .idea-input:focus { outline: none; border-color: var(--blue); }
+.idea-compose.recording .idea-input { border-color: var(--green); }
+.idea-compose.recognizing .idea-input { border-color: var(--blue); }
 /* Mic + add form one round-button cluster at the box's bottom-right. The shared MicButton is
    absolute-anchored for the dock; here it's a normal flex item, same 34px circle as the add ＋. */
 .idea-compose .input-mic { position: static; right: auto; bottom: auto; flex: none; }
@@ -3480,6 +3496,7 @@ button.cmd-text { background: none; border: none; text-align: left; }
 }
 .cc-card:focus-within { border-color: var(--ct-accent); }
 .cc-card.recording { border-color: #34c759; }
+.cc-card.recognizing { border-color: var(--ct-accent); }
 .cc-queue {
   display: flex; flex-direction: column; gap: 4px;
   margin: -2px 0 7px -6px; padding: 0 0 7px; border-bottom: 1px solid var(--ct-field-line);
@@ -3758,6 +3775,7 @@ button.cmd-text { background: none; border: none; text-align: left; }
 .chat-composer .input-mic svg { width: 20px; height: 20px; }
 .chat-composer .input-mic:active { background: var(--ct-chip-2); }
 .chat-composer .input-mic.on { color: #fff; background: var(--green); }
+.chat-composer .input-mic.recognizing { color: #fff; background: var(--blue); }
 
 /* Agent model / reasoning controls. Like ChatGPT's model picker, the compact value lives on the
    composer's left and opens a lightweight menu above itself; the transparent backdrop only dismisses it. */

@@ -104,7 +104,7 @@ export async function runSetup({
           { value: 'push', label: t('setup.secPush'), hint: a.vapid ? (a.vapid.subject || t('setup.on')) : t('setup.off') },
           {
             value: 'voice', label: t('setup.secVoice'),
-            hint: a.voice ? `${a.voice.provider} · ${a.voice.providers[a.voice.provider]?.appId || t('setup.on')}` : t('setup.off'),
+            hint: a.voice ? `${voiceProfileLabel(a.voice)} · ${a.voice.providers[a.voice.provider]?.appId || t('setup.on')}` : t('setup.off'),
           },
           // A CLI-tool preference (language of handmux's own terminal output), not an app setting — so it
           // sits at the bottom of the settings, just above the actions.
@@ -456,8 +456,8 @@ async function editVoice(a: SetupAnswers): Promise<VoiceConfig | undefined> {
     try { on = await ask(confirm({ message: withBack(t('setup.voiceSetup')), initialValue: false, ...yesno() })); }
     catch (e) { if (e === CANCELLED) return undefined; throw e; }
     if (!on) return undefined;
-    const provider = await chooseVoiceProvider('tencent');
-    voice = await ensureVoiceProvider({ provider, providers: {} });
+    const profile = await chooseVoiceProfile({ provider: 'tencent', mode: 'streaming' });
+    voice = await ensureVoiceProvider({ ...profile, providers: {} });
   }
   for (;;) {
     const provider = voice.provider;
@@ -467,7 +467,7 @@ async function editVoice(a: SetupAnswers): Promise<VoiceConfig | undefined> {
       pick = await ask(select({
         message: withBack(t('setup.secVoice')),
         options: [
-          { value: 'provider', label: t('setup.voiceProvider'), hint: provider },
+          { value: 'provider', label: t('setup.voiceProvider'), hint: voiceProfileLabel(voice) },
           { value: 'appId', label: 'appId', hint: current.appId || '' },
           ...(provider === 'xfyun' ? [
             { value: 'apiKey', label: 'apiKey', hint: maskSecret(voice.providers.xfyun?.apiKey) },
@@ -485,8 +485,8 @@ async function editVoice(a: SetupAnswers): Promise<VoiceConfig | undefined> {
     if (pick === 'off') return undefined;
     try {
       if (pick === 'provider') {
-        const selected = await chooseVoiceProvider(provider);
-        voice = await ensureVoiceProvider({ ...voice, provider: selected });
+        const selected = await chooseVoiceProfile(voice);
+        voice = await ensureVoiceProvider({ ...voice, ...selected });
       } else if (provider === 'xfyun') {
         const config: XfyunConfig = voice.providers.xfyun || {};
         if (pick === 'appId') config.appId = await ask(text({ message: t('setup.voiceAppId'), initialValue: config.appId || '', validate: validateNonEmpty('appId') }));
@@ -505,15 +505,30 @@ async function editVoice(a: SetupAnswers): Promise<VoiceConfig | undefined> {
   }
 }
 
-async function chooseVoiceProvider(initialValue: VoiceConfig['provider']): Promise<VoiceConfig['provider']> {
-  return ask(select({
+type VoiceProfile = Pick<VoiceConfig, 'provider' | 'mode'>;
+
+function voiceProfileLabel(voice: VoiceProfile): string {
+  if (voice.provider === 'xfyun') return t('setup.voiceXfyun');
+  return voice.mode === 'sentence' ? t('setup.voiceTencentSentence') : t('setup.voiceTencent');
+}
+
+async function chooseVoiceProfile(initial: VoiceProfile): Promise<VoiceProfile> {
+  const initialValue = initial.provider === 'xfyun'
+    ? 'xfyun-streaming' : `tencent-${initial.mode === 'sentence' ? 'sentence' : 'streaming'}`;
+  const selected = await ask(select({
     message: t('setup.voiceProvider'),
     options: [
-      { value: 'tencent', label: t('setup.voiceTencent'), hint: t('setup.voiceTencentHint') },
-      { value: 'xfyun', label: t('setup.voiceXfyun') },
+      { value: 'tencent-streaming', label: t('setup.voiceTencent'), hint: t('setup.voiceTencentHint') },
+      { value: 'tencent-sentence', label: t('setup.voiceTencentSentence'), hint: t('setup.voiceTencentSentenceHint') },
+      { value: 'xfyun-streaming', label: t('setup.voiceXfyun'), hint: t('setup.voiceXfyunHint') },
     ],
     initialValue,
   }));
+  return selected === 'tencent-sentence'
+    ? { provider: 'tencent', mode: 'sentence' }
+    : selected === 'xfyun-streaming'
+      ? { provider: 'xfyun', mode: 'streaming' }
+      : { provider: 'tencent', mode: 'streaming' };
 }
 
 async function ensureVoiceProvider(voice: VoiceConfig): Promise<VoiceConfig> {

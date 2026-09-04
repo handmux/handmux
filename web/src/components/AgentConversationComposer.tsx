@@ -28,6 +28,7 @@ import {
   mergeConversationDraftAfterFailure,
   saveConversationDraft,
 } from '../conversationDraftStore.js';
+import type { AsrMode } from '../voice/usePushToTalk.js';
 
 function autoGrow(element: HTMLTextAreaElement | null): void {
   if (!element) return;
@@ -46,6 +47,7 @@ export default function AgentConversationComposer({
   cwd = null,
   shortcuts = null,
   micAvailable = false,
+  voiceMode = 'streaming',
   onAuthFail,
   sessionControl,
   headerContent,
@@ -65,6 +67,7 @@ export default function AgentConversationComposer({
   cwd?: string | null;
   shortcuts?: ServerShortcuts | null;
   micAvailable?: boolean;
+  voiceMode?: AsrMode;
   onAuthFail?: () => void;
   sessionControl?: ReactNode;
   headerContent?: ReactNode;
@@ -179,6 +182,7 @@ export default function AgentConversationComposer({
 
   const voiceAnchorRef = useRef({ head: '', tail: '' });
   const voice = usePushToTalk({
+    mode: voiceMode,
     onText: (text) => {
       const { head, tail } = voiceAnchorRef.current;
       const next = head + text + tail;
@@ -191,6 +195,8 @@ export default function AgentConversationComposer({
     },
   });
   const recording = voice.state === 'recording' || voice.state === 'finalizing';
+  const capturing = voice.state === 'recording';
+  const recognizing = voice.state === 'finalizing';
   const recordingRef = useRef(recording);
   recordingRef.current = recording;
   useScreenWakeLock(recording);
@@ -307,7 +313,7 @@ export default function AgentConversationComposer({
           void uploadFiles(files);
         }} />
       {error && <div className="cc-notice" role="alert">{error}</div>}
-      <div className={`cc-card${recording ? ' recording' : ''}`}
+      <div className={`cc-card${capturing ? ' recording' : ''}${recognizing ? ' recognizing' : ''}`}
         onPointerDown={cardPointerDown} onPointerMove={cardPointerMove} onPointerUp={cardPointerUp}>
         {queueContent}
         <textarea ref={ref} className="cc-text" rows={2} value={value}
@@ -344,7 +350,8 @@ export default function AgentConversationComposer({
           </div>
           <div className="cc-actions-right">
             {actionContent}
-            {micAvailable && <MicButton active={recording}
+            {micAvailable && <MicButton active={capturing} recognizing={recognizing}
+              waveform={voiceMode === 'sentence'} level={voice.level}
               disabled={voice.state === 'requesting' || (draftLocked && !recording)}
               onToggle={toggleMic} />}
             {currentActivity === 'working' && canInterrupt && (

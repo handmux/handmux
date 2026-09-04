@@ -1,12 +1,17 @@
 import { useRef, useState, useCallback, useEffect } from 'react';
-import { createAsrSession as realCreateAsrSession } from '../api.js';
+import {
+  createAsrSession as realCreateAsrSession,
+  recognizeSentence as realRecognizeSentence,
+} from '../api.js';
 import { createRecorder } from './recorder.js';
 import { createAsrDriver } from './asrDriver.js';
+import { base64ToBytes } from './tencentProtocol.js';
 import type { AsrDriver, VoiceSocketData } from './asrDriver.js';
 import type { AsrSessionResponse, AsrSignResponse } from '../apiRequest.js';
 import type { VoiceRecorder } from './recorder.js';
 
 export type VoicePhase = 'idle' | 'requesting' | 'recording' | 'finalizing' | 'error';
+export type AsrMode = 'streaming' | 'sentence';
 
 export interface VoiceSocket {
   readyState: number;
@@ -26,16 +31,19 @@ export interface PushToTalkDependencies {
   signAsr?: () => Promise<AsrSignResponse>;
   WebSocketCtor?: VoiceSocketConstructor;
   makeRecorder?: () => VoiceRecorder;
+  recognizeSentence?: (audio: Uint8Array) => Promise<string>;
 }
 
 export interface UsePushToTalkOptions {
   onText: (text: string) => void;
+  mode?: AsrMode;
   deps?: PushToTalkDependencies;
 }
 
 export interface PushToTalkController {
   state: VoicePhase;
   partial: string;
+  level: number;
   start: () => Promise<void>;
   stop: () => Promise<void>;
 }
@@ -45,7 +53,16 @@ const parseSocketData = (data: unknown): unknown => {
   try { return JSON.parse(data) as unknown; } catch { return null; }
 };
 
-const MAX_MS = 55000; // IAT caps a session at 60s; self-finalize at 55s and prompt to press again.
+const mergeAudio = (chunks: readonly string[]): Uint8Array => {
+  const parts = chunks.map(base64ToBytes);
+  const total = parts.reduce((sum, part) => sum + part.byteLength, 0);
+  const result = new Uint8Array(total);
+  let offset = 0;
+  for (const part of parts) { result.set(part, offset); offset += part.byteLength; }
+  return result;
+};
+
+const MAX_MS = 55000; // Providers cap short sessions at 60s; self-finalize at 55s with payload headroom.
 const FINALIZE_MS = 4000; // after the end frame, wait this long for the server's final; else salvage + reset.
 
 // Provider-neutral push-to-talk orchestration: start mic + request session in parallel, buffer until the
@@ -55,6 +72,7 @@ const FINALIZE_MS = 4000; // after the end frame, wait this long for the server'
 // Deps are injectable for tests; production uses the real session handoff/WebSocket/recorder.
 export function usePushToTalk({
   onText,
+  mode = 'streaming',
   deps = {},
 }: UsePushToTalkOptions): PushToTalkController {
   const createSession = deps.createSession ?? (deps.signAsr
@@ -64,9 +82,11 @@ export function usePushToTalk({
     : realCreateAsrSession);
   const WebSocketCtor = deps.WebSocketCtor ?? window.WebSocket as unknown as VoiceSocketConstructor;
   const makeRecorder = deps.makeRecorder ?? (() => createRecorder());
+  const recognizeSentence = deps.recognizeSentence ?? realRecognizeSentence;
 
   const [state, setState] = useState<VoicePhase>('idle');
   const [partial, setPartial] = useState('');
+  const [level, setLevel] = useState(0);
   const partialRef = useRef('');
   const stateRef = useRef<VoicePhase>('idle');
   const setPhase = useCallback((next: VoicePhase): void => {
@@ -78,6 +98,8 @@ export function usePushToTalk({
   const recRef = useRef<VoiceRecorder | null>(null);
   const driverRef = useRef<AsrDriver | null>(null);
   const pendingAudioRef = useRef<string[]>([]);
+  const sentenceAudioRef = useRef<string[]>([]);
+  const activeModeRef = useRef<AsrMode>(mode);
   const pendingEndRef = useRef(false);
   const capTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const finalizeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -97,7 +119,9 @@ export function usePushToTalk({
     if (recorder) void recorder.stop().catch(() => {});
     driverRef.current = null;
     pendingAudioRef.current = [];
+    sentenceAudioRef.current = [];
     pendingEndRef.current = false;
+    setLevel(0);
   }, []);
 
   // Commit whatever we've accumulated and return to idle. The single exit used by the server's final
@@ -141,6 +165,17 @@ export function usePushToTalk({
       const recorder = recRef.current;
       recRef.current = null;
       const tail = recorder ? await recorder.stop() : null;
+      if (activeModeRef.current === 'sentence') {
+        if (tail) sentenceAudioRef.current.push(tail);
+        const audio = mergeAudio(sentenceAudioRef.current);
+        if (audio.byteLength === 0) throw new Error('audio is empty');
+        const text = await recognizeSentence(audio);
+        onTextRef.current?.(text);
+        setPartial('');
+        setPhase('idle');
+        cleanup();
+        return;
+      }
       if (tail) sendAudio(tail);
       const ws = wsRef.current;
       if (ws) {
@@ -153,7 +188,7 @@ export function usePushToTalk({
     } catch {
       setPhase('error'); cleanup();
     }
-  }, [sendAudio, cleanup, setPhase, finish, flush, startFinalizeTimer]);
+  }, [sendAudio, cleanup, setPhase, finish, flush, startFinalizeTimer, recognizeSentence]);
   stopRef.current = stop;
 
   const start = useCallback(async (): Promise<void> => {
@@ -161,13 +196,26 @@ export function usePushToTalk({
     // would strand the mic forever after any failure (denied permission, sign error, ws drop).
     if (stateRef.current !== 'idle' && stateRef.current !== 'error') return;
     setPhase('requesting'); setPartial(''); partialRef.current = '';
+    setLevel(0); activeModeRef.current = mode;
     pendingAudioRef.current = []; pendingEndRef.current = false; driverRef.current = null;
+    sentenceAudioRef.current = [];
     try {
       // Begin mic acquisition in the tap call stack (required by iOS), while the server signs the selected
       // provider URL in parallel. Audio produced before WebSocket open is buffered and flushed in order.
       const rec = makeRecorder();
       recRef.current = rec;
-      const recorderStarted = rec.start(sendAudio);
+      const recorderStarted = rec.start(
+        mode === 'sentence'
+          ? (base64) => { sentenceAudioRef.current.push(base64); }
+          : sendAudio,
+        mode === 'sentence' ? setLevel : undefined,
+      );
+      if (mode === 'sentence') {
+        await recorderStarted;
+        setPhase('recording');
+        capTimer.current = setTimeout(() => { stopRef.current?.(); }, MAX_MS);
+        return;
+      }
       const [session] = await Promise.all([createSession(), recorderStarted]);
       const driver = createAsrDriver(session);
       driverRef.current = driver;
@@ -194,9 +242,9 @@ export function usePushToTalk({
     } catch {
       setPhase('error'); cleanup();
     }
-  }, [createSession, WebSocketCtor, makeRecorder, sendAudio, cleanup, setPhase, finish, flush]);
+  }, [mode, createSession, WebSocketCtor, makeRecorder, sendAudio, cleanup, setPhase, finish, flush]);
 
   useEffect(() => cleanup, [cleanup]); // close ws + mic on unmount
 
-  return { state, partial, start, stop };
+  return { state, partial, level, start, stop };
 }

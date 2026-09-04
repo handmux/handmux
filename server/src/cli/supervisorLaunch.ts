@@ -72,6 +72,7 @@ const voiceConfig = (value: unknown): SupervisorConfig['voice'] | undefined | nu
   );
   return {
     provider: record.provider,
+    mode: record.provider === 'tencent' && record.mode === 'sentence' ? 'sentence' : 'streaming',
     providers: {
       ...(xfyun ? { xfyun } : {}),
       ...(tencent ? { tencent } : {}),

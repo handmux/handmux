@@ -1,7 +1,9 @@
 export type AsrProviderName = 'xfyun' | 'tencent';
+export type AsrMode = 'streaming' | 'sentence';
 
 export interface XfyunAsrConfig {
   provider: 'xfyun';
+  mode: 'streaming';
   appId: string;
   apiKey: string;
   apiSecret: string;
@@ -9,6 +11,7 @@ export interface XfyunAsrConfig {
 
 export interface TencentAsrConfig {
   provider: 'tencent';
+  mode: AsrMode;
   appId: string;
   secretId: string;
   secretKey: string;
@@ -19,6 +22,7 @@ export type AsrConfig = XfyunAsrConfig | TencentAsrConfig;
 
 const xfyunConfig = (env: NodeJS.ProcessEnv): XfyunAsrConfig => ({
   provider: 'xfyun',
+  mode: 'streaming',
   appId: env.XFYUN_APPID || '',
   apiKey: env.XFYUN_APIKEY || '',
   apiSecret: env.XFYUN_APISECRET || '',
@@ -26,6 +30,7 @@ const xfyunConfig = (env: NodeJS.ProcessEnv): XfyunAsrConfig => ({
 
 const tencentConfig = (env: NodeJS.ProcessEnv): TencentAsrConfig => ({
   provider: 'tencent',
+  mode: env.HANDMUX_ASR_MODE === 'sentence' ? 'sentence' : 'streaming',
   appId: env.TENCENT_ASR_APPID || '',
   secretId: env.TENCENT_ASR_SECRET_ID || '',
   secretKey: env.TENCENT_ASR_SECRET_KEY || '',

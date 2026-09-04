@@ -148,7 +148,7 @@ export function answersFromConfig(config: unknown = {}): SetupAnswers {
   const xfyun = stringObject<XfyunConfig>(cfg.xfyun, ['appId', 'apiKey', 'apiSecret']);
   if (vapid) a.vapid = vapid;
   if (voice) a.voice = voice;
-  else if (xfyun) a.voice = { provider: 'xfyun', providers: { xfyun } };
+  else if (xfyun) a.voice = { provider: 'xfyun', mode: 'streaming', providers: { xfyun } };
   return a;
 }
 
@@ -162,6 +162,7 @@ function voiceFromConfig(value: unknown): VoiceConfig | undefined {
   );
   return {
     provider: value.provider,
+    mode: value.provider === 'tencent' && value.mode === 'sentence' ? 'sentence' : 'streaming',
     providers: { ...(xfyun ? { xfyun } : {}), ...(tencent ? { tencent } : {}) },
   };
 }

@@ -432,6 +432,23 @@ export async function createAsrSession(): Promise<AsrSessionResponse> {
   throw new Error('ASR session returned an unsupported provider');
 }
 
+// Submit one complete 16 kHz mono PCM recording. Unlike streaming sessions this request is proxied by
+// Handmux Server because Tencent's TC3 request must be signed with the long-lived SecretKey.
+export async function recognizeSentence(audio: Uint8Array): Promise<string> {
+  const body = new ArrayBuffer(audio.byteLength);
+  new Uint8Array(body).set(audio);
+  const response = recordOf(await req('/api/asr/sentence', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/octet-stream' },
+    body,
+    timeoutMs: 70_000,
+  }));
+  if (!response || typeof response.text !== 'string') {
+    throw new Error('Sentence ASR returned an invalid response');
+  }
+  return response.text;
+}
+
 // Which optional integrations this install has configured (e.g. { asr: true, asrProvider: 'tencent' }).
 // Drives UI hiding; voice ships disabled on installs without credentials for the selected provider.
 export const getConfig = (): Promise<unknown> => req('/api/config', { timeoutMs: 8_000 });

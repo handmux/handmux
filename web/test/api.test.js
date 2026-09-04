@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { getHistory, getPanes, createSession, createWindow, renameSession, renameWindow, deleteWindow, swapWindows, createDir, UnauthorizedError, ApiError, fetchDoc, fetchDir, signAsr, createAsrSession, sendInput, getAgentCatalog, getAgentDiscovery, markAgentTerminalNotificationsRead, gitWorktree } from '../src/api.js';
+import { getHistory, getPanes, createSession, createWindow, renameSession, renameWindow, deleteWindow, swapWindows, createDir, UnauthorizedError, ApiError, fetchDoc, fetchDir, signAsr, createAsrSession, recognizeSentence, sendInput, getAgentCatalog, getAgentDiscovery, markAgentTerminalNotificationsRead, gitWorktree } from '../src/api.js';
 import { createPreview, getPreviews, deletePreview, previewUrl, fetchImageUrl } from '../src/api.js';
 
 afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); vi.useRealTimers(); });
@@ -329,6 +329,17 @@ describe('asr api', () => {
     const out = await signAsr();
     expect(fetchMock).toHaveBeenCalledWith('/api/asr/sign', expect.objectContaining({ cache: 'no-store' }));
     expect(out).toEqual({ url: 'wss://x/v2/iat?a=1', appId: 'A1' });
+  });
+
+  it('recognizeSentence POSTs raw PCM without replacing its content type with JSON', async () => {
+    const fetchMock = vi.fn(async () => jsonRes(200, { text: '整句话' }));
+    vi.stubGlobal('fetch', fetchMock);
+    await expect(recognizeSentence(Uint8Array.from([0, 1, 2]))).resolves.toBe('整句话');
+    const [path, init] = fetchMock.mock.calls[0];
+    expect(path).toBe('/api/asr/sentence');
+    expect(init).toMatchObject({ method: 'POST' });
+    expect(init.headers['Content-Type']).toBe('application/octet-stream');
+    expect([...new Uint8Array(init.body)]).toEqual([0, 1, 2]);
   });
 
   it('rejects a malformed ASR signature at the API boundary', async () => {

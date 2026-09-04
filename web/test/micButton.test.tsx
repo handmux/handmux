@@ -22,6 +22,21 @@ describe('MicButton', () => {
     await render({ active: true });
     expect(container.querySelector('.input-mic')?.classList.contains('on')).toBe(true);
   });
+  it('一句话录音时用四根音量条替换麦克风，条高跟随 level', async () => {
+    await render({ active: true, waveform: true, level: 0.75 });
+    const wave = container.querySelector('.input-mic-wave');
+    expect(wave?.children).toHaveLength(4);
+    expect(wave?.getAttribute('data-level')).toBe('0.75');
+    expect(container.querySelector('.input-mic svg')).toBeNull();
+  });
+  it('停止后显示蓝色识别中状态并禁止重复点击', async () => {
+    await render({ active: false, recognizing: true });
+    const button = container.querySelector('.input-mic') as HTMLButtonElement;
+    expect(button.classList.contains('recognizing')).toBe(true);
+    expect(button.querySelector('.input-mic-spinner')).not.toBeNull();
+    expect(button.disabled).toBe(true);
+    expect(button.getAttribute('aria-busy')).toBe('true');
+  });
   // 点按 = pointerdown + 原地 pointerup(无 onClick:多行时按钮悬在文字上,拖光标经过不能触发)。
   it('点按调用 onToggle', async () => {
     const onToggle = vi.fn();

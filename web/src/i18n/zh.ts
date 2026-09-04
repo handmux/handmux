@@ -261,6 +261,7 @@ export default {
   'imageviewer.shareImage': '分享图片',
   'mic.stop': '停止语音输入',
   'mic.start': '语音输入',
+  'mic.recognizing': '正在识别语音',
 
   // dock
   'dock.send': '发送',

@@ -22,6 +22,7 @@ import { UPLOAD_ACCEPT } from '../uploadTypes.js';
 import { ArrowUpIcon, UploadIcon, ClockIcon, KeyboardIcon, GearIcon } from './icons.jsx';
 import { useUpload } from '../hooks/useUpload.js';
 import { usePushToTalk } from '../voice/usePushToTalk.js';
+import type { AsrMode } from '../voice/usePushToTalk.js';
 import { useScreenWakeLock } from '../hooks/useScreenWakeLock.js';
 import { useBackButton } from '../hooks/useBackButton.js';
 import { softKeyboardUp } from '../hooks/useKeyboardInset.js';
@@ -52,6 +53,7 @@ export interface BottomDockProps {
   inset?: number;
   shortcuts?: ServerShortcuts | null;
   micAvailable?: boolean;
+  voiceMode?: AsrMode;
   desktopUnified?: boolean;
   terminalFocused?: boolean;
   onReturnToTerminal?: () => void;
@@ -181,6 +183,7 @@ function HoldButton({ className, onTap, onHold, children, ...rest }: HoldButtonP
 function BottomDock({
   pane, onAuthFail, onKey, onText, cwd = null, agent = null, windowId = null,
   recent = [], onSent, onRemoveRecent, inset = 0, shortcuts = null, micAvailable = false,
+  voiceMode = 'streaming',
   desktopUnified = false, terminalFocused = false, onReturnToTerminal, onLeaveTerminal,
 }: BottomDockProps, fwdRef: ForwardedRef<BottomDockHandle>) {
   // The composer restores its unsent draft across an app exit/kill: seeded from storage, mirrored on
@@ -662,8 +665,10 @@ function BottomDock({
     setValue(head + text + tail);
     caretRef.current = head.length + text.length;
   };
-  const voice = usePushToTalk({ onText: commitVoice });
+  const voice = usePushToTalk({ onText: commitVoice, mode: voiceMode });
   const recording = voice.state === 'recording' || voice.state === 'finalizing';
+  const capturing = voice.state === 'recording';
+  const recognizing = voice.state === 'finalizing';
   useScreenWakeLock(recording); // 语音激活时屏幕常亮,别中途变暗/锁屏
 
   // 录音中:partial 实时写进框、插在锚点处,光标跟到插入末尾。已 suppress(发送过)则不再回写。
@@ -1047,7 +1052,7 @@ function BottomDock({
     ghostRef.current = null;
     if (!g) return;
     if (g === 'send') { sendUp(); return; }
-    if (!micPtRef.current.moved && voice.state !== 'requesting') toggleMic();
+    if (!micPtRef.current.moved && voice.state !== 'requesting' && voice.state !== 'finalizing') toggleMic();
   };
   const ghostCancel = () => {
     const g = ghostRef.current;
@@ -1194,7 +1199,7 @@ function BottomDock({
                 }} />
               {/* flex 行:textarea(占满)· 麦克风 · 发送,全是 flex 兄弟、不重叠文字框,所以选词/移光标碰不到
                   按键。录音时整条变绿 + 呼吸。＋上传与▤常用已上移到快捷栏。 */}
-              <div className={`input-wrap${recording ? ' recording' : ''}${multi ? ' multi' : ''}${crowd ? ' crowd' : ''}`}
+              <div className={`input-wrap${capturing ? ' recording' : ''}${recognizing ? ' recognizing' : ''}${multi ? ' multi' : ''}${crowd ? ' crowd' : ''}`}
                 onPointerDownCapture={ghostDown} onPointerMoveCapture={ghostMove}
                 onPointerUpCapture={ghostUp} onPointerCancelCapture={ghostCancel}>
                 <textarea
@@ -1242,7 +1247,9 @@ function BottomDock({
                       ? closeOverlay(setPanelOpen)
                       : openOverlay(setPanelOpen))}><ClockIcon /></button>
                 )}
-                {micAvailable && <MicButton active={recording} disabled={voice.state === 'requesting'} onToggle={toggleMic} />}
+                {micAvailable && <MicButton active={capturing} recognizing={recognizing}
+                  waveform={voiceMode === 'sentence'} level={voice.level}
+                  disabled={voice.state === 'requesting'} onToggle={toggleMic} />}
                 {/* 发送 ↑ 常驻:点 = 发送组合文本（空框发送裸 Enter）,长按 = 填入。 */}
                 <button type="button" className={`input-send${value ? '' : ' is-empty'}`} aria-label={t('dock.send')} title={t('dock.send.hint')}
                   disabled={submitting}

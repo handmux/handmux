@@ -5,7 +5,7 @@ import workletUrl from './pcm-worklet.ts?worker&url'; // Vite compiles this to a
 type AudioContextConstructor = new () => AudioContext;
 
 export interface VoiceRecorder {
-  start(onChunk: (base64: string) => void): Promise<void>;
+  start(onChunk: (base64: string) => void, onLevel?: (level: number) => void): Promise<void>;
   stop(): Promise<string | null>;
 }
 
@@ -21,6 +21,16 @@ const browserAudioContext = (): AudioContextConstructor => {
   return AudioCtor;
 };
 
+// Map microphone RMS into a useful 0..1 visual range. The noise floor stays still while normal speech
+// reaches most of the waveform height without requiring device-specific gain calibration.
+export function voiceLevel(samples: Float32Array): number {
+  if (samples.length === 0) return 0;
+  let sum = 0;
+  for (const sample of samples) sum += sample * sample;
+  const rms = Math.sqrt(sum / samples.length);
+  return Math.max(0, Math.min(1, (rms - 0.008) / 0.152));
+}
+
 // Capture the mic and emit base64 1280-byte (40ms) PCM frames via onChunk(base64). Dependencies are
 // injectable so this stays testable-by-substitution; defaults use the real browser APIs.
 export function createRecorder({
@@ -33,7 +43,7 @@ export function createRecorder({
   let src: MediaStreamAudioSourceNode | null = null;
   const framer = createFramer(1280);
 
-  async function start(onChunk: (base64: string) => void): Promise<void> {
+  async function start(onChunk: (base64: string) => void, onLevel?: (level: number) => void): Promise<void> {
     stream = await getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true } });
     ctx = new AudioCtor();
     await ctx.resume(); // iOS: must resume inside the user-gesture that called start()
@@ -42,6 +52,7 @@ export function createRecorder({
     node = new AudioWorkletNode(ctx, 'pcm-forwarder');
     node.port.onmessage = (event: MessageEvent<unknown>) => {
       if (!(event.data instanceof Float32Array) || !ctx) return;
+      onLevel?.(voiceLevel(event.data));
       const bytes = toPcm16k(event.data, ctx.sampleRate);
       for (const frame of framer.push(bytes)) onChunk(bytesToBase64(frame));
     };

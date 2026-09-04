@@ -9,6 +9,7 @@ import { t } from '../i18n';
 import type { ChangeEvent, PointerEvent as ReactPointerEvent } from 'react';
 import { parseIdeas } from '../ideas.js';
 import type { Idea } from '../ideas.js';
+import type { AsrMode } from '../voice/usePushToTalk.js';
 
 interface IdeaPanelProps {
   open: boolean;
@@ -18,6 +19,7 @@ interface IdeaPanelProps {
   onSend?: (text: string) => void;
   onCountChange?: (count: number) => void;
   micAvailable?: boolean;
+  voiceMode?: AsrMode;
 }
 
 type DragState = { active: false } | { active: true; pointerId: number; id: string };
@@ -29,6 +31,7 @@ type DragState = { active: false } | { active: true; pointerId: number; id: stri
 // the bottom input box (never sends); ✕ deletes. The compose box supports the app's push-to-talk mic.
 export default function IdeaPanel({
   open, session, window: win, onClose, onSend, onCountChange, micAvailable = false,
+  voiceMode = 'streaming',
 }: IdeaPanelProps) {
   const [list, setList] = useState<Idea[]>([]);
   const [value, setValue] = useState('');
@@ -68,8 +71,10 @@ export default function IdeaPanel({
     setValue(head + text + tail);
     caretRef.current = head.length + text.length;
   };
-  const voice = usePushToTalk({ onText: commitVoice });
+  const voice = usePushToTalk({ onText: commitVoice, mode: voiceMode });
   const recording = voice.state === 'recording' || voice.state === 'finalizing';
+  const capturing = voice.state === 'recording';
+  const recognizing = voice.state === 'finalizing';
   useScreenWakeLock(recording);
 
   // Live partial → write at the anchor while recording (unless a send already suppressed write-back).
@@ -176,7 +181,7 @@ export default function IdeaPanel({
           <button className="cmd-close" onClick={onClose} aria-label={t('common.close')}>✕</button>
         </div>
 
-        <div className={`idea-compose${recording ? ' recording' : ''}`}>
+        <div className={`idea-compose${capturing ? ' recording' : ''}${recognizing ? ' recognizing' : ''}`}>
           <textarea
             ref={inputRef}
             className="idea-input"
@@ -187,7 +192,9 @@ export default function IdeaPanel({
             onChange={(event: ChangeEvent<HTMLTextAreaElement>) => setValue(event.target.value)}
           />
           {editing && <button className="idea-cancel" onClick={cancelEdit}>{t('common.cancel')}</button>}
-          {micAvailable && <MicButton active={recording} disabled={voice.state === 'requesting'} onToggle={toggleMic} />}
+          {micAvailable && <MicButton active={capturing} recognizing={recognizing}
+            waveform={voiceMode === 'sentence'} level={voice.level}
+            disabled={voice.state === 'requesting'} onToggle={toggleMic} />}
           <button className="idea-act" onClick={submit} disabled={!value.trim()} aria-label={editing ? t('common.save') : t('idea.add')}>
             {editing ? <CheckIcon /> : <PlusIcon />}
           </button>

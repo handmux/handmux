@@ -232,4 +232,86 @@ describe('usePushToTalk', () => {
     expect(onText).toHaveBeenCalledWith('你好');
     expect(result.current.state).toBe('idle');
   });
+
+  it('sentence mode records silently, exposes level, then uploads one PCM buffer after stop', async () => {
+    let fireChunk: (base64: string) => void = () => {};
+    let fireLevel: (level: number) => void = () => {};
+    let finishRecognition: (text: string) => void = () => {};
+    const recognition = new Promise<string>((resolve) => { finishRecognition = resolve; });
+    const recognizeSentence = vi.fn((_audio: Uint8Array) => recognition);
+    const createSession = vi.fn();
+    const recorder = {
+      start: vi.fn(async (onChunk: (base64: string) => void, onLevel?: (level: number) => void) => {
+        fireChunk = onChunk;
+        fireLevel = onLevel ?? (() => {});
+      }),
+      stop: vi.fn(async () => 'Rw=='),
+    } satisfies VoiceRecorder;
+    const onText = vi.fn();
+    const { result } = renderHook(() => usePushToTalk({
+      onText, mode: 'sentence', deps: { createSession, recognizeSentence, makeRecorder: () => recorder },
+    }));
+
+    await act(async () => { await result.current.start(); });
+    act(() => { fireChunk('QUJD'); fireLevel(0.64); fireChunk('REVG'); });
+    expect(result.current.state).toBe('recording');
+    expect(result.current.partial).toBe('');
+    expect(result.current.level).toBe(0.64);
+    expect(createSession).not.toHaveBeenCalled();
+    expect(onText).not.toHaveBeenCalled();
+
+    let stopped!: Promise<void>;
+    act(() => { stopped = result.current.stop(); });
+    expect(result.current.state).toBe('finalizing');
+    expect(onText).not.toHaveBeenCalled();
+    await waitFor(() => expect(recognizeSentence).toHaveBeenCalledOnce());
+    expect([...recognizeSentence.mock.calls[0]![0]]).toEqual([65, 66, 67, 68, 69, 70, 71]);
+    await act(async () => { finishRecognition('识别完成'); await stopped; });
+    expect(onText).toHaveBeenCalledWith('识别完成');
+    expect(result.current.state).toBe('idle');
+    expect(result.current.level).toBe(0);
+  });
+
+  it('sentence recognition failure unlocks the composer without committing text', async () => {
+    const onText = vi.fn();
+    const { result } = renderHook(() => usePushToTalk({
+      onText,
+      mode: 'sentence',
+      deps: {
+        recognizeSentence: vi.fn(async () => { throw new Error('cloud unavailable'); }),
+        makeRecorder: () => ({
+          start: vi.fn(async (onChunk) => { onChunk('AQI='); }),
+          stop: vi.fn(async () => null),
+        }),
+      },
+    }));
+    await act(async () => { await result.current.start(); });
+    await act(async () => { await result.current.stop(); });
+    expect(result.current.state).toBe('error');
+    expect(onText).not.toHaveBeenCalled();
+  });
+
+  it('sentence mode stops and submits automatically at the 55s cap', async () => {
+    vi.useFakeTimers();
+    try {
+      const recognizeSentence = vi.fn(async () => '到时定稿');
+      const onText = vi.fn();
+      const { result } = renderHook(() => usePushToTalk({
+        onText,
+        mode: 'sentence',
+        deps: {
+          recognizeSentence,
+          makeRecorder: () => ({
+            start: vi.fn(async (onChunk) => { onChunk('AQI='); }),
+            stop: vi.fn(async () => null),
+          }),
+        },
+      }));
+      await act(async () => { await result.current.start(); });
+      await act(async () => { await vi.advanceTimersByTimeAsync(55_000); });
+      expect(recognizeSentence).toHaveBeenCalledOnce();
+      expect(onText).toHaveBeenCalledWith('到时定稿');
+      expect(result.current.state).toBe('idle');
+    } finally { vi.useRealTimers(); }
+  });
 });

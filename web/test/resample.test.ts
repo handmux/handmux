@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { toPcm16k, createFramer, bytesToBase64 } from '../src/voice/resample.js';
+import { voiceLevel } from '../src/voice/recorder.js';
 
 describe('toPcm16k', () => {
   it('decimates 48k → 16k (1/3 length) and yields Int16 LE bytes', () => {
@@ -29,5 +30,13 @@ describe('createFramer', () => {
 describe('bytesToBase64', () => {
   it('encodes bytes to base64', () => {
     expect(bytesToBase64(new Uint8Array([65, 66, 67]))).toBe('QUJD'); // "ABC"
+  });
+});
+
+describe('voiceLevel', () => {
+  it('keeps room noise still and maps normal/loud speech into 0..1', () => {
+    expect(voiceLevel(new Float32Array(16).fill(0.005))).toBe(0);
+    expect(voiceLevel(new Float32Array(16).fill(0.084))).toBeCloseTo(0.5, 5);
+    expect(voiceLevel(new Float32Array(16).fill(0.5))).toBe(1);
   });
 });

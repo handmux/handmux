@@ -154,12 +154,14 @@ describe('resolveConfig', () => {
     expect(c.vapid).toEqual({ public: 'pub', private: 'priv', subject: 'mailto:me@x.dev' });
     expect(c.xfyun).toEqual({ appId: 'A', apiKey: 'K', apiSecret: 'S' });
     expect(c.voice).toEqual({
-      provider: 'xfyun', providers: { xfyun: { appId: 'A', apiKey: 'K', apiSecret: 'S' } },
+      provider: 'xfyun', mode: 'streaming',
+      providers: { xfyun: { appId: 'A', apiKey: 'K', apiSecret: 'S' } },
     });
   });
   it('selects one pluggable voice provider while preserving both provider configs', () => {
     const voice = {
       provider: 'tencent',
+      mode: 'sentence',
       providers: {
         xfyun: { appId: 'A', apiKey: 'K', apiSecret: 'S' },
         tencent: { appId: '1', secretId: 'ID', secretKey: 'KEY', engineModelType: '16k_zh' },

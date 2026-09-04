@@ -48,7 +48,9 @@ export async function requestJson<T = unknown>(
     Authorization: `Bearer ${token ?? ''}`,
     ...(rest.headers || {}),
   };
-  if (rest.body) headers['Content-Type'] = 'application/json';
+  if (rest.body && !Object.keys(headers).some((key) => key.toLowerCase() === 'content-type')) {
+    headers['Content-Type'] = 'application/json';
+  }
   let controller: AbortController | null = null;
   let timer: ReturnType<typeof setTimeout> | null = null;
   const forwardAbort = (): void => controller?.abort();

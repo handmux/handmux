@@ -78,11 +78,13 @@ describe('configFromAnswers', () => {
   it('writes the provider-neutral voice config and migrates legacy xfyun on read', () => {
     const voice = {
       provider: 'tencent' as const,
+      mode: 'sentence' as const,
       providers: { tencent: { appId: '1', secretId: 'ID', secretKey: 'KEY', engineModelType: '16k_zh' } },
     };
     expect(configFromAnswers({ tunnel: 'none', port: 19999, voice })).toMatchObject({ voice });
     expect(answersFromConfig({ xfyun: { appId: 'A', apiKey: 'K', apiSecret: 'S' } }).voice).toEqual({
-      provider: 'xfyun', providers: { xfyun: { appId: 'A', apiKey: 'K', apiSecret: 'S' } },
+      provider: 'xfyun', mode: 'streaming',
+      providers: { xfyun: { appId: 'A', apiKey: 'K', apiSecret: 'S' } },
     });
   });
   it('pins the token when set, omits it when blank (blank = auto each start)', () => {

@@ -39,6 +39,7 @@ export interface TencentAsrConfig {
 
 export interface VoiceConfig {
   provider: 'xfyun' | 'tencent';
+  mode?: 'streaming' | 'sentence';
   providers: {
     xfyun?: XfyunConfig;
     tencent?: TencentAsrConfig;
@@ -238,11 +239,12 @@ function parseVoice(value: unknown, legacyXfyun: unknown): VoiceConfig | null {
     const tencent = parseTencent(providers.tencent);
     return {
       provider: value.provider,
+      mode: value.provider === 'tencent' && value.mode === 'sentence' ? 'sentence' : 'streaming',
       providers: { ...(xfyun ? { xfyun } : {}), ...(tencent ? { tencent } : {}) },
     };
   }
   const xfyun = parseXfyun(legacyXfyun);
-  return xfyun ? { provider: 'xfyun', providers: { xfyun } } : null;
+  return xfyun ? { provider: 'xfyun', mode: 'streaming', providers: { xfyun } } : null;
 }
 
 function resolvePublicUrl(flags: OptionRecord, fileCfg: OptionRecord, env: NodeJS.ProcessEnv, tunnel: Tunnel): unknown {

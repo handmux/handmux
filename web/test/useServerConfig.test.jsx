@@ -37,6 +37,9 @@ describe('useServerConfig', () => {
         chat: [{ type: 'text', text: 'ok', enter: true }],
       },
     });
+    expect(parseServerConfig({
+      asr: true, asrProvider: 'tencent', asrMode: 'sentence', shortcuts: { command: [], chat: [] },
+    })).toMatchObject({ asr: true, asrProvider: 'tencent', asrMode: 'sentence' });
   });
 
   it('fetches at launch and whenever the app returns to the foreground, without polling', async () => {

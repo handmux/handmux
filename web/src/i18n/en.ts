@@ -262,6 +262,7 @@ export default {
   'imageviewer.shareImage': 'Share image',
   'mic.stop': 'Stop voice input',
   'mic.start': 'Voice input',
+  'mic.recognizing': 'Recognizing speech',
 
   // dock
   'dock.send': 'Send',

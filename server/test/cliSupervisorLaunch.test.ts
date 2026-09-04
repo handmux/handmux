@@ -53,6 +53,7 @@ describe('supervisor launch contract', () => {
   it('validates and retains provider-neutral voice configuration', () => {
     const voice = {
       provider: 'tencent',
+      mode: 'streaming',
       providers: { tencent: { appId: '1', secretId: 'ID', secretKey: 'KEY', engineModelType: '16k_zh' } },
     };
     expect(parseSupervisorConfig({

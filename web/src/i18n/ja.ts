@@ -239,6 +239,7 @@ export default {
   'imageviewer.shareImage': '画像を共有',
   'mic.stop': '音声入力を停止',
   'mic.start': '音声入力',
+  'mic.recognizing': '音声を認識中',
 
   // dock
   'dock.send': '送信',

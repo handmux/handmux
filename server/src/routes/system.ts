@@ -7,8 +7,12 @@ import { fileURLToPath } from 'node:url';
 import { readFileSync } from 'node:fs';
 import { isSessionId } from '../tmux/commands.js';
 import { buildIatSignedUrl } from '../asr/iflySign.js';
-import { asrConfig, isAsrConfigured } from '../asr/config.js';
+import { asrConfig } from '../asr/config.js';
 import { buildTencentAsrSignedUrl } from '../asr/tencentSign.js';
+import {
+  recognizeTencentSentence,
+  TencentSentenceError,
+} from '../asr/tencentSentence.js';
 import { hooksStatus, installHooks } from '../cli/claudeHooks.js';
 import {
   agentIntegrationStatus,
@@ -21,7 +25,7 @@ import { normalizeShortcuts } from '../shortcutConfig.js';
 import { projectLegacyInboxStates } from '../agent-runtime/legacyInboxProjection.js';
 import type { AgentRuntime } from '../agent-runtime/runtime.js';
 import type { LivePane } from '../agent-runtime/adapter.js';
-import type { NextFunction, Request, Response, Router } from 'express';
+import type { NextFunction, Request, RequestHandler, Response, Router } from 'express';
 import type { ShortcutConfig } from '../shortcutConfig.js';
 import type { AgentIntegrationContext, AgentName } from '../cli/agentIntegration.js';
 
@@ -44,7 +48,10 @@ interface SystemRouteOptions {
   stateFile: string;
   previewDomain?: string | null;
   agentIntegrationContext?: AgentIntegrationContext;
+  sentenceRecognizer?: typeof recognizeTencentSentence;
 }
+
+export const MAX_SENTENCE_PCM_BYTES = 2 * 1024 * 1024;
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -67,7 +74,7 @@ const PKG_VERSION = (() => {
 
 export function systemRoutes({
   commands, claudeEvents, agentRuntime, asrEnv, shortcuts, home, stateFile, previewDomain,
-  agentIntegrationContext,
+  agentIntegrationContext, sentenceRecognizer = recognizeTencentSentence,
 }: SystemRouteOptions): Router {
   const r = express.Router();
   let activeShortcuts: ShortcutConfig = normalizeShortcuts(shortcuts);
@@ -85,9 +92,11 @@ export function systemRoutes({
   // `claudeHooks` is intentionally Claude-only. Codex is always App Server-backed and never affects
   // this setup prompt or endpoint.
   r.get('/config', (_req: Request, res: Response) => {
+    const voice = asrConfig(asrEnv);
     return res.json({
-      asr: isAsrConfigured(asrEnv),
-      asrProvider: asrConfig(asrEnv)?.provider ?? null,
+      asr: voice !== null,
+      asrProvider: voice?.provider ?? null,
+      asrMode: voice?.mode ?? null,
       claudeHooks: hooksStatus(home),
       managedCodex: true,
       shortcuts: activeShortcuts,
@@ -163,6 +172,9 @@ export function systemRoutes({
   r.get('/asr/session', (_req: Request, res: Response) => {
     const config = asrConfig(asrEnv);
     if (!config) return res.status(503).json({ error: 'asr not configured' });
+    if (config.mode !== 'streaming') {
+      return res.status(503).json({ error: 'streaming asr is not selected' });
+    }
     if (config.provider === 'tencent') {
       return res.json({
         provider: 'tencent',
@@ -175,6 +187,59 @@ export function systemRoutes({
       protocol: 'xfyun-iat-v2',
       ...buildIatSignedUrl({ ...config, date: new Date().toUTCString() }),
     });
+  });
+
+  const rawSentenceAudio = express.raw({
+    type: 'application/octet-stream', limit: MAX_SENTENCE_PCM_BYTES,
+  });
+  const parseSentenceAudio: RequestHandler = (req, res, next) => {
+    if (!req.is('application/octet-stream')) {
+      res.status(415).json({
+        error: 'audio must use application/octet-stream',
+        code: 'unsupported_audio_type', requestId: res.locals.requestId,
+      });
+      return;
+    }
+    rawSentenceAudio(req, res, (error?: unknown) => {
+      const bodyError = error && typeof error === 'object'
+        ? error as { status?: unknown; type?: unknown } : null;
+      if (bodyError?.status === 413 || bodyError?.type === 'entity.too.large') {
+        res.status(413).json({
+          error: `audio exceeds ${MAX_SENTENCE_PCM_BYTES} bytes`,
+          code: 'audio_too_large', requestId: res.locals.requestId,
+        });
+        return;
+      }
+      next(error);
+    });
+  };
+
+  r.post('/asr/sentence', parseSentenceAudio, async (req: Request, res: Response, next: NextFunction) => {
+    const config = asrConfig(asrEnv);
+    if (!config || config.provider !== 'tencent' || config.mode !== 'sentence') {
+      return res.status(503).json({
+        error: 'Tencent sentence ASR is not selected',
+        code: 'sentence_asr_not_selected', requestId: res.locals.requestId,
+      });
+    }
+    const audio = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
+    if (audio.byteLength === 0) return res.status(400).json({
+      error: 'audio is empty', code: 'audio_empty', requestId: res.locals.requestId,
+    });
+    try {
+      const result = await sentenceRecognizer(config, audio);
+      return res.json({ text: result.text });
+    } catch (error) {
+      if (error instanceof TencentSentenceError) {
+        return res.status(502).json({
+          error: error.message,
+          code: error.code,
+          requestId: res.locals.requestId,
+          ...(error.requestId ? { providerRequestId: error.requestId } : {}),
+        });
+      }
+      return next(error);
+    }
   });
 
   // Historical endpoint retained for already-loaded Web clients. It can only describe XFYUN's protocol.

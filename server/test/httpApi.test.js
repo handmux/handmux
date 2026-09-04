@@ -1108,6 +1108,82 @@ describe('GET /api/asr/session', () => {
     expect(JSON.stringify(res.body)).not.toContain('private-key-DO-NOT-LEAK');
     await request(app).get('/api/asr/sign').set('Authorization', 'Bearer good').expect(503);
   });
+
+  it('refuses a streaming session when Tencent sentence mode is selected', async () => {
+    const asrEnv = {
+      HANDMUX_ASR_PROVIDER: 'tencent', HANDMUX_ASR_MODE: 'sentence',
+      TENCENT_ASR_APPID: '123456', TENCENT_ASR_SECRET_ID: 'id', TENCENT_ASR_SECRET_KEY: 'key',
+    };
+    const app = express();
+    app.use('/api', createApiRouter({ token: 'good', commands: baseCommands, asrEnv }));
+    await request(app).get('/api/asr/session').set('Authorization', 'Bearer good').expect(503);
+  });
+});
+
+describe('POST /api/asr/sentence', () => {
+  const sentenceEnv = {
+    HANDMUX_ASR_PROVIDER: 'tencent', HANDMUX_ASR_MODE: 'sentence',
+    TENCENT_ASR_APPID: '123456', TENCENT_ASR_SECRET_ID: 'AKID-private',
+    TENCENT_ASR_SECRET_KEY: 'private-key-DO-NOT-LEAK',
+  };
+
+  it('accepts PCM bytes and returns only the recognized text', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
+      Response: { Result: '整句话', RequestId: 'tencent-request-1' },
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    try {
+      const app = express();
+      app.use('/api', createApiRouter({ token: 'good', commands: baseCommands, asrEnv: sentenceEnv }));
+      const res = await request(app).post('/api/asr/sentence')
+        .set('Authorization', 'Bearer good')
+        .set('Content-Type', 'application/octet-stream')
+        .send(Buffer.from([0, 1, 2, 3]))
+        .expect(200);
+      expect(res.body).toEqual({ text: '整句话' });
+      const [, init] = fetchSpy.mock.calls[0];
+      expect(JSON.parse(init.body)).toMatchObject({ Data: 'AAECAw==', DataLen: 4, VoiceFormat: 'pcm' });
+      expect(JSON.stringify(res.body)).not.toContain('private-key-DO-NOT-LEAK');
+    } finally { fetchSpy.mockRestore(); }
+  });
+
+  it('rejects inactive mode, wrong content type, empty audio, and oversized audio', async () => {
+    const streamingApp = express();
+    streamingApp.use('/api', createApiRouter({
+      token: 'good', commands: baseCommands,
+      asrEnv: { ...sentenceEnv, HANDMUX_ASR_MODE: 'streaming' },
+    }));
+    await request(streamingApp).post('/api/asr/sentence')
+      .set('Authorization', 'Bearer good').set('Content-Type', 'application/octet-stream')
+      .send(Buffer.from([1])).expect(503);
+
+    const app = express();
+    app.use('/api', createApiRouter({ token: 'good', commands: baseCommands, asrEnv: sentenceEnv }));
+    await request(app).post('/api/asr/sentence')
+      .set('Authorization', 'Bearer good').send({ audio: 'bad' }).expect(415);
+    await request(app).post('/api/asr/sentence')
+      .set('Authorization', 'Bearer good').set('Content-Type', 'application/octet-stream')
+      .send(Buffer.alloc(0)).expect(400);
+    await request(app).post('/api/asr/sentence')
+      .set('Authorization', 'Bearer good').set('Content-Type', 'application/octet-stream')
+      .send(Buffer.alloc(2 * 1024 * 1024 + 1)).expect(413);
+  });
+
+  it('maps Tencent Cloud errors without exposing its long-lived key', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({ Response: {
+      Error: { Code: 'InvalidParameterValue', Message: 'invalid PCM data' }, RequestId: 'cloud-req-2',
+    } }), { status: 400, headers: { 'Content-Type': 'application/json' } }));
+    try {
+      const app = express();
+      app.use('/api', createApiRouter({ token: 'good', commands: baseCommands, asrEnv: sentenceEnv }));
+      const res = await request(app).post('/api/asr/sentence')
+        .set('Authorization', 'Bearer good').set('Content-Type', 'application/octet-stream')
+        .send(Buffer.from([1])).expect(502);
+      expect(res.body).toMatchObject({
+        error: 'invalid PCM data', code: 'InvalidParameterValue', providerRequestId: 'cloud-req-2',
+      });
+      expect(JSON.stringify(res.body)).not.toContain('private-key-DO-NOT-LEAK');
+    } finally { fetchSpy.mockRestore(); }
+  });
 });
 
 describe('GET /api/config (capabilities)', () => {
@@ -1138,6 +1214,7 @@ describe('GET /api/config (capabilities)', () => {
     const res = await request(app).get('/api/config').set('Authorization', 'Bearer good').expect(200);
     expect(res.body.asr).toBe(true);
     expect(res.body.asrProvider).toBe('xfyun');
+    expect(res.body.asrMode).toBe('streaming');
   });
   it('reports the explicitly selected Tencent provider', async () => {
     const asrEnv = {
@@ -1147,7 +1224,18 @@ describe('GET /api/config (capabilities)', () => {
     const app = express();
     app.use('/api', createApiRouter({ token: 'good', commands: baseCommands, asrEnv }));
     const res = await request(app).get('/api/config').set('Authorization', 'Bearer good').expect(200);
-    expect(res.body).toMatchObject({ asr: true, asrProvider: 'tencent' });
+    expect(res.body).toMatchObject({ asr: true, asrProvider: 'tencent', asrMode: 'streaming' });
+  });
+
+  it('reports Tencent sentence mode to the browser', async () => {
+    const asrEnv = {
+      HANDMUX_ASR_PROVIDER: 'tencent', HANDMUX_ASR_MODE: 'sentence', TENCENT_ASR_APPID: '1',
+      TENCENT_ASR_SECRET_ID: 'id', TENCENT_ASR_SECRET_KEY: 'key',
+    };
+    const app = express();
+    app.use('/api', createApiRouter({ token: 'good', commands: baseCommands, asrEnv }));
+    const res = await request(app).get('/api/config').set('Authorization', 'Bearer good').expect(200);
+    expect(res.body).toMatchObject({ asr: true, asrProvider: 'tencent', asrMode: 'sentence' });
   });
   it('returns the server-owned mandatory shortcuts', async () => {
     const shortcuts = {

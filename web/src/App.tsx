@@ -2624,6 +2624,7 @@ export default function App() {
         session={current?.session?.name || ''}
         window={current?.window?.name || current?.window?.id || ''}
         micAvailable={!!micAvailable}
+        voiceMode={serverConfig?.asrMode ?? 'streaming'}
         onClose={() => setIdeaOpen(false)}
         onSend={(text) => { dockRef.current?.fill(text); setIdeaOpen(false); }}
         onCountChange={setIdeaCount}
@@ -2739,6 +2740,7 @@ export default function App() {
                 cwd={currentPaneCwd}
                 shortcuts={serverShortcuts}
                 micAvailable={!!micAvailable}
+                voiceMode={serverConfig?.asrMode ?? 'streaming'}
                 onAuthFail={onAuthFail}
                 onSlashCommand={handleConversationSlash}
                 headerContent={<>
@@ -2789,6 +2791,7 @@ export default function App() {
               inset={inset}
               shortcuts={serverShortcuts}
               micAvailable={!!micAvailable}
+              voiceMode={serverConfig?.asrMode ?? 'streaming'}
               desktopUnified={desktopInput}
               terminalFocused={terminalFocused}
               onLeaveTerminal={() => termRef.current?.blurInput?.()}
