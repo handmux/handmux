@@ -80,8 +80,10 @@ function permissionMode(settings: JsonRecord): ConversationPermissionMode {
   if ((sandbox === 'dangerFullAccess' || sandbox === 'danger-full-access') && approval === 'never') {
     return 'full-access';
   }
+  if (approval === 'on-request'
+    && (reviewer === 'auto_review' || reviewer === 'guardian_subagent')) return 'auto-review';
   if ((sandbox === 'workspaceWrite' || sandbox === 'workspace-write') && approval === 'on-request') {
-    return reviewer === 'auto_review' || reviewer === 'guardian_subagent' ? 'auto-review' : 'default';
+    return reviewer === undefined || reviewer === 'user' ? 'default' : 'custom';
   }
   return 'custom';
 }

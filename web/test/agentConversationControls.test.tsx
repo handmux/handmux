@@ -391,4 +391,20 @@ describe('Agent Conversation controls UI', () => {
     fireEvent.click(screen.getByRole('radio', { name: /自动审批/ }));
     await waitFor(() => expect(setPermission).toHaveBeenCalledWith('auto-review'));
   });
+
+  it('closes without rewriting settings when the selected permission is tapped', () => {
+    const setPermission = vi.fn();
+    render(<AgentConversationPermissionControl controller={controller({
+      setPermission,
+      snapshot: {
+        permission: { mode: 'auto-review', options: ['default', 'auto-review'] },
+        permissionCanUpdate: true,
+      },
+    })} />);
+
+    fireEvent.click(screen.getByRole('button', { name: '权限模式' }));
+    fireEvent.click(screen.getByRole('radio', { name: /自动审批/ }));
+    expect(setPermission).not.toHaveBeenCalled();
+    expect(screen.queryByRole('dialog', { name: '权限模式' })).toBeNull();
+  });
 });

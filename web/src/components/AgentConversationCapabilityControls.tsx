@@ -672,6 +672,7 @@ export function AgentConversationPermissionControl({
             className={mode === permission.mode ? 'selected' : ''}
             onClick={() => {
               setError('');
+              if (mode === permission.mode) { setOpen(false); return; }
               void controller.setPermission(mode).then(() => setOpen(false))
                 .catch(() => setError(t('chat.controls.actionFailed')));
             }}>

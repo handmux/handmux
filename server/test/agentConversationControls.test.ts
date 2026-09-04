@@ -188,6 +188,27 @@ describe('Codex conversation context recovery', () => {
     expect(reader).toHaveBeenCalledOnce();
   });
 
+  it.each([
+    ['readOnly', 'on-request', 'auto_review', 'auto-review'],
+    ['readOnly', 'on-request', 'guardian_subagent', 'auto-review'],
+    ['readOnly', 'never', 'auto_review', 'custom'],
+    ['dangerFullAccess', 'never', 'auto_review', 'full-access'],
+    ['workspaceWrite', 'on-request', undefined, 'default'],
+    ['workspaceWrite', 'on-request', 'future_reviewer', 'custom'],
+  ] as const)('maps sandbox %s, approval %s, and reviewer %s to %s', async (
+    sandbox, approvalPolicy, approvalsReviewer, mode,
+  ) => {
+    const controls = createCodexConversationControls(app({
+      status: { type: 'idle' },
+      settings: {
+        sandboxPolicy: { type: sandbox }, approvalPolicy,
+        ...(approvalsReviewer === undefined ? {} : { approvalsReviewer }),
+      },
+    }), vi.fn(async () => {}));
+
+    await expect(controls.permission.read(codexRun('thread-a'))).resolves.toMatchObject({ mode });
+  });
+
   it('never crosses thread identities while recovering two contexts', async () => {
     const findRollout = vi.fn(async (root: string, threadId: string) => `${root}/${threadId}.jsonl`);
     const reader = vi.fn(async (file: string) => file.endsWith('/thread-a.jsonl')
