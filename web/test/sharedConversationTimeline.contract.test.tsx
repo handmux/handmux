@@ -145,6 +145,147 @@ describe('shared Conversation Timeline contract', () => {
 
     fireEvent.click(container.querySelector('.chat-tool-head')!);
     expect(screen.getByRole('dialog').textContent).toContain('tool output only inside detail');
+    expect(screen.getByRole('dialog').querySelector('.tool-truncation-note')).toBeNull();
+  });
+
+  it('keeps input truncation with the tool input and removes the generic outer notice', () => {
+    const items = [
+      {
+        key: 'truncated-call', provisional: false,
+        item: {
+          id: 'truncated-call', sessionId: 'session-1', status: 'truncated' as const,
+          kind: 'tool_call' as const, callId: 'truncated-input', name: 'exec_command',
+          input: { cmd: 'git status --short' },
+          truncation: { reason: 'size_limit' as const, originalBytes: 22_989 },
+        },
+      },
+      {
+        key: 'complete-result', provisional: false,
+        item: {
+          id: 'complete-result', sessionId: 'session-1', status: 'complete' as const,
+          kind: 'tool_result' as const, callId: 'truncated-input',
+          content: [{ type: 'text' as const, text: 'complete output' }],
+        },
+      },
+    ] as AgentConversationController['items'];
+
+    const [projected] = projectConversationMessages(items);
+    expect(projected?.tool).toMatchObject({
+      inputTruncation: { reason: 'size_limit', originalBytes: 22_989 },
+    });
+    expect(projected?.tool).not.toHaveProperty('outputTruncation');
+
+    const { container } = render(<AgentConversationView conversation={{
+      ...controller('pi'), items,
+    }} />);
+    expect(container.textContent).not.toContain('部分内容已截断');
+    expect(container.querySelector('.tool-truncation-note')).toBeNull();
+
+    fireEvent.click(container.querySelector('.chat-tool-head')!);
+    const dialog = screen.getByRole('dialog');
+    expect(dialog.querySelector('.tool-truncation-input')?.textContent)
+      .toContain('工具执行时使用了完整输入');
+    expect(dialog.querySelector('.tool-truncation-output')).toBeNull();
+  });
+
+  it('keeps output truncation with the tool output only', () => {
+    const items = [
+      {
+        key: 'complete-call', provisional: false,
+        item: {
+          id: 'complete-call', sessionId: 'session-1', status: 'complete' as const,
+          kind: 'tool_call' as const, callId: 'truncated-output', name: 'exec_command',
+          input: { cmd: 'git status --short' },
+        },
+      },
+      {
+        key: 'truncated-result', provisional: false,
+        item: {
+          id: 'truncated-result', sessionId: 'session-1', status: 'truncated' as const,
+          kind: 'tool_result' as const, callId: 'truncated-output',
+          content: [{ type: 'text' as const, text: 'retained output' }],
+          truncation: { reason: 'size_limit' as const, originalBytes: 80_000 },
+        },
+      },
+    ] as AgentConversationController['items'];
+
+    const [projected] = projectConversationMessages(items);
+    expect(projected?.tool).toMatchObject({
+      outputTruncation: { reason: 'size_limit', originalBytes: 80_000 },
+    });
+    expect(projected?.tool).not.toHaveProperty('inputTruncation');
+
+    const { container } = render(<AgentConversationView conversation={{
+      ...controller('pi'), items,
+    }} />);
+    fireEvent.click(container.querySelector('.chat-tool-head')!);
+    const dialog = screen.getByRole('dialog');
+    expect(dialog.querySelector('.tool-truncation-output')?.textContent)
+      .toContain('工具执行不受影响');
+    expect(dialog.querySelector('.tool-truncation-input')).toBeNull();
+  });
+
+  it('moves normalized diff truncation onto its native edit tool', () => {
+    const items = [
+      {
+        key: 'native-edit', provisional: false,
+        item: {
+          id: 'native-edit', sessionId: 'session-1', status: 'complete' as const,
+          kind: 'tool_call' as const, callId: 'call-edit', name: 'apply_patch',
+          correlationId: 'turn-edit',
+          extensions: { 'conversation.tool': {
+            name: 'apply_patch', input: { file_path: '/work/a.ts' }, result: 'Done!',
+            isError: false, outcome: 'success', diff: {
+              added: 1, removed: 1,
+              hunks: [{ oldStart: 1, newStart: 1, lines: ['-old', '+new'] }],
+            },
+          } },
+        },
+      },
+      {
+        key: 'truncated-diff', provisional: false,
+        item: {
+          id: 'truncated-diff', sessionId: 'session-1', status: 'truncated' as const,
+          kind: 'diff' as const, correlationId: 'turn-edit', path: '/work/a.ts',
+          patch: '-old\n+new', truncation: { reason: 'size_limit' as const },
+        },
+      },
+    ] as AgentConversationController['items'];
+
+    const projected = projectConversationMessages(items);
+    expect(projected).toHaveLength(1);
+    expect(projected[0]?.tool?.diffTruncation).toEqual({ reason: 'size_limit' });
+
+    const { container } = render(<AgentConversationView conversation={{
+      ...controller('codex'), items,
+    }} />);
+    fireEvent.click(container.querySelector('.chat-tool-head')!);
+    const dialog = screen.getByRole('dialog');
+    expect(dialog.querySelector('.es-diff')).toBeTruthy();
+    expect(dialog.querySelector('.es-diff + .tool-truncation-diff')?.textContent)
+      .toContain('实际修改不受影响');
+  });
+
+  it('does not over-promise when the provider already truncated a tool record', () => {
+    const items = [{
+      key: 'provider-truncated-call', provisional: false,
+      item: {
+        id: 'provider-truncated-call', sessionId: 'session-1', status: 'truncated' as const,
+        kind: 'tool_call' as const, callId: 'provider-truncated', name: 'exec_command',
+        input: { cmd: 'retained command' },
+        truncation: { reason: 'provider_truncated' as const },
+      },
+    }] as AgentConversationController['items'];
+    const { container } = render(<AgentConversationView conversation={{
+      ...controller('third-party-agent'), items,
+    }} />);
+
+    fireEvent.click(container.querySelector('.chat-tool-head')!);
+    const note = screen.getByRole('dialog').querySelector('.tool-truncation-input');
+    expect(note?.textContent).toContain('当前记录可能不完整');
+    expect(note?.textContent).not.toContain('工具执行不受影响');
+    expect(note?.textContent).not.toContain('实际修改不受影响');
+    expect(note?.textContent).not.toContain('完整输入');
   });
 
   it('renders a normalized Pi command through the shared command presentation', () => {

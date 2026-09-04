@@ -1,4 +1,7 @@
-import type { ConversationContentBlock } from './agentConversationTypes.js';
+import type {
+  ConversationContentBlock,
+  ConversationTruncation,
+} from './agentConversationTypes.js';
 
 export interface ConversationDiffHunk {
   oldStart: number | null;
@@ -20,6 +23,9 @@ export interface ConversationToolProjection {
   isError: boolean;
   outcome?: 'running' | 'success' | 'failed' | 'declined' | 'completed';
   diff?: ConversationDiff;
+  inputTruncation?: ConversationTruncation;
+  outputTruncation?: ConversationTruncation;
+  diffTruncation?: ConversationTruncation;
 }
 
 export interface ConversationPlanStep {

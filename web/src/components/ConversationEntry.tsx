@@ -234,7 +234,8 @@ export function ConversationEntry({
       {renderTool(message, running)}
       <ConversationResources message={message} copyId={copyId}
         {...(downloadResource ? { downloadResource } : {})} />
-      <ConversationItemStatus message={message} copyId={copyId} />
+      {message.conversationStatus === 'error'
+        && <ConversationItemStatus message={message} copyId={copyId} />}
     </>
   );
   if (message.type === 'goal') return renderGoal?.(message) ?? null;

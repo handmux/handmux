@@ -8,6 +8,7 @@ import type {
   ConversationContentBlock,
   ConversationItem,
   ConversationItemDraft,
+  ConversationTruncation,
   JsonValue,
 } from './agentConversationTypes.js';
 
@@ -40,6 +41,10 @@ function itemTimestamp(item: NormalizedItem): string | undefined {
 
 function presentationGroupingId(item: NormalizedItem): string | undefined {
   return item.groupingId ?? item.correlationId;
+}
+
+function itemTruncation(item: NormalizedItem): ConversationTruncation | undefined {
+  return 'truncation' in item ? item.truncation : undefined;
 }
 
 function baseMessage(value: AgentConversationViewItem, index: number) {
@@ -115,8 +120,16 @@ function normalizedTool(
   call: Extract<NormalizedItem, { kind: 'tool_call' }>,
   result: Extract<NormalizedItem, { kind: 'tool_result' }> | undefined,
   running: boolean,
+  diffTruncation?: ConversationTruncation,
 ): ConversationToolProjection {
   const parsed = nativeTool(call);
+  const inputTruncation = itemTruncation(call);
+  const outputTruncation = result ? itemTruncation(result) : undefined;
+  const truncations = {
+    ...(inputTruncation ? { inputTruncation } : {}),
+    ...(outputTruncation ? { outputTruncation } : {}),
+    ...(diffTruncation ? { diffTruncation } : {}),
+  };
   const isError = result?.isError === true
     || ('status' in call && call.status === 'error')
     || (!!result && 'status' in result && result.status === 'error');
@@ -128,6 +141,7 @@ function normalizedTool(
       ...(running ? { outcome: 'running' as const }
         : result ? { outcome: isError ? 'failed' as const : 'success' as const }
           : parsed.outcome ? { outcome: parsed.outcome } : {}),
+      ...truncations,
     };
   }
   return {
@@ -137,6 +151,7 @@ function normalizedTool(
     result: result ? conversationContentText(result.content) : null,
     isError,
     outcome: running ? 'running' : result ? (isError ? 'failed' : 'success') : 'completed',
+    ...truncations,
   };
 }
 
@@ -153,6 +168,7 @@ export function projectConversationMessages(
   }
   const coveredDiffIndices = new Set<number>();
   const claimedNativeCalls = new Set<number>();
+  const diffTruncations = new Map<number, ConversationTruncation>();
   items.forEach((value, diffIndex) => {
     if (value.item.kind !== 'diff') return;
     for (let callIndex = diffIndex - 1; callIndex >= 0; callIndex--) {
@@ -169,6 +185,8 @@ export function projectConversationMessages(
       if (value.item.path && toolPath && value.item.path !== toolPath) continue;
       claimedNativeCalls.add(callIndex);
       coveredDiffIndices.add(diffIndex);
+      const truncation = itemTruncation(value.item);
+      if (truncation) diffTruncations.set(callIndex, truncation);
       break;
     }
   });
@@ -197,7 +215,7 @@ export function projectConversationMessages(
       return [{
         ...base,
         type: 'tool', role: 'assistant', callId: item.callId,
-        tool: normalizedTool(item, result, running) as NonNullable<TranscriptMessage['tool']>,
+        tool: normalizedTool(item, result, running, diffTruncations.get(index)),
         conversationResources: result ? resources(result.content) : [],
         streaming: running,
         completed: !running,
@@ -211,12 +229,14 @@ export function projectConversationMessages(
     }
     if (item.kind === 'diff') {
       if (coveredDiffIndices.has(index)) return [];
+      const diffTruncation = itemTruncation(item);
       return [{
         ...base, type: 'tool', role: 'assistant',
         tool: {
           name: 'apply_patch', input: item.path ? { file_path: item.path } : {},
           result: item.patch || item.summary || null,
           isError: 'status' in item && item.status === 'error', outcome: 'completed',
+          ...(diffTruncation ? { diffTruncation } : {}),
         },
         ...itemStatus(item),
       }];

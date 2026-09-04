@@ -338,6 +338,36 @@ describe('Codex Conversation adapter', () => {
     expect(Buffer.byteLength(serialized)).toBeLessThan(1024 * 1024);
   });
 
+  it('attributes an oversized native diff only to the diff item', async () => {
+    const oversizedDiffLine = `+${'x'.repeat(20 * 1024)}`;
+    const nativeDiff = {
+      added: 1, removed: 0,
+      hunks: [{ oldStart: 1, newStart: 1, lines: [oversizedDiffLine] }],
+    };
+    const { service } = await setup([{
+      i: 0, id: 'codex:turn-large-diff:tool', turnId: 'turn-large-diff',
+      type: 'tool', role: 'assistant', ts: undefined,
+      tool: {
+        name: 'apply_patch', input: { file_path: 'src/app.ts' }, result: 'done',
+        isError: false, outcome: 'success', diff: nativeDiff,
+      },
+    }]);
+
+    const result = await service.readPage(
+      { agentId: 'codex', sessionId: 'thread-1' }, { limit: 20 },
+    );
+    if (result.status !== 'ok') throw new Error('expected readable oversized diff history');
+    const tool = result.page.items.find((item) => item.kind === 'tool_call');
+    const diff = result.page.items.find((item) => item.kind === 'diff');
+
+    expect(tool).toMatchObject({ status: 'complete', input: { file_path: 'src/app.ts' } });
+    expect(tool).not.toHaveProperty('truncation');
+    expect(diff).toMatchObject({
+      status: 'truncated',
+      truncation: { reason: 'size_limit', originalBytes: Buffer.byteLength(JSON.stringify(nativeDiff)) },
+    });
+  });
+
   it('maps App Server text lifecycle and reconciles durable history without a legacy snapshot', async () => {
     const durable: CodexTranscriptMessage[] = [];
     const { service, harness, lease } = await setup(durable, 10);

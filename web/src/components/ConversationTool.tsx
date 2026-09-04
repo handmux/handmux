@@ -19,6 +19,7 @@ import type {
   ConversationDiffHunk,
   ConversationToolProjection,
 } from '../conversationTimelineTypes.js';
+import type { ConversationTruncation } from '../agentConversationTypes.js';
 export type {
   ConversationDiff,
   ConversationDiffHunk,
@@ -106,6 +107,26 @@ function toolIcon(name: string): ReactNode {
 }
 
 const FILE_EDIT_TOOLS = new Set(['Edit', 'MultiEdit', 'Write', 'NotebookEdit', 'apply_patch']);
+
+type ToolTruncationPart = 'input' | 'output' | 'diff';
+
+function ToolTruncationNote({
+  truncation,
+  part,
+  className = 'tool-sheet-empty',
+}: {
+  truncation: ConversationTruncation | undefined;
+  part: ToolTruncationPart;
+  className?: string;
+}): ReactNode {
+  if (!truncation) return null;
+  const key = truncation.reason === 'size_limit'
+    ? `conversationTool.truncation.${part}.sizeLimit`
+    : `conversationTool.truncation.${truncation.reason}`;
+  return <div className={`${className} tool-truncation-note tool-truncation-${part}`} role="status">
+    {t(key)}
+  </div>;
+}
 
 function DiffStat({ diff }: { diff?: ConversationDiff }): ReactNode {
   if (!diff || (!diff.added && !diff.removed)) return null;
@@ -303,6 +324,7 @@ function EditSheetBody({
           {state && <span className={`tool-sheet-state ${state.cls}`}>{state.txt}</span>}
           <DiffStat {...(tool.diff ? { diff: tool.diff } : {})} />
         </div>
+        <ToolTruncationNote truncation={tool.inputTruncation} part="input" className="es-note" />
         {hunks?.length
           ? <div className="es-diff"><DiffView hunks={hunks} copyId={`${copyId}:diff`} /></div>
           : tool.diff?.created
@@ -310,6 +332,8 @@ function EditSheetBody({
             : running
               ? <div className="tool-sheet-empty">{t('conversationTool.runningEllipsis')}</div>
               : <div className="tool-sheet-empty">{t('conversationTool.noChanges')}</div>}
+        <ToolTruncationNote truncation={tool.diffTruncation} part="diff" className="es-note" />
+        <ToolTruncationNote truncation={tool.outputTruncation} part="output" className="es-note" />
       </div>
     </>
   );
@@ -352,19 +376,23 @@ export function ToolSheet({
                   {state && <span className={`tool-sheet-state ${state.cls}`}>{state.txt}</span>}
                 </div>
               </section>
-              {command && (
+              {(command || tool.inputTruncation) && (
                 <section className="tool-sheet-sec">
                   <div className="tool-sheet-label">{t('conversationTool.command')}</div>
-                  <pre className="tool-sheet-cmd" data-conversation-copy-root
-                    data-conversation-copy-id={`${copyId}:input`}>{command}</pre>
+                  {command && <pre className="tool-sheet-cmd" data-conversation-copy-root
+                    data-conversation-copy-id={`${copyId}:input`}>{command}</pre>}
+                  <ToolTruncationNote truncation={tool.inputTruncation} part="input" />
                 </section>
               )}
               <section className="tool-sheet-sec tool-sheet-out">
-                <div className="tool-sheet-label"><span>{t('conversationTool.output')}</span></div>
+                <div className="tool-sheet-label"><span>{t(tool.diffTruncation
+                  ? 'agentConversation.diff' : 'conversationTool.output')}</span></div>
                 {tool.result != null
                   ? <ToolBody tool={tool} copyId={`${copyId}:output`} />
                   : <div className="tool-sheet-empty">{running
                     ? t('conversationTool.runningEllipsis') : t('conversationTool.noOutput')}</div>}
+                <ToolTruncationNote truncation={tool.diffTruncation} part="diff" />
+                <ToolTruncationNote truncation={tool.outputTruncation} part="output" />
               </section>
             </div>
           </>

@@ -485,17 +485,15 @@ function projectDurableMessage(message: CodexTranscriptMessage, sessionId: strin
     const diffProjection = message.tool.diff === undefined
       ? undefined : sanitizeToolInputWithMetadata(message.tool.diff);
     const safeDiff = diffProjection?.value;
-    const toolProjectionBytes = inputProjection.originalBytes + (diffProjection?.originalBytes ?? 0);
-    const toolProjectionTruncated = inputProjection.truncated || diffProjection?.truncated === true;
     const outcomes = ['running', 'success', 'failed', 'declined', 'completed'];
     const outcome = typeof message.tool.outcome === 'string' && outcomes.includes(message.tool.outcome)
       ? message.tool.outcome : undefined;
     const items: ConversationItem[] = [{
       ...itemBase(message, sessionId, callId), kind: 'tool_call', callId,
       name, ...(input === undefined ? {} : { input }),
-      ...(toolProjectionTruncated ? {
+      ...(inputProjection.truncated ? {
         status: 'truncated' as const,
-        truncation: { reason: 'size_limit' as const, originalBytes: toolProjectionBytes },
+        truncation: { reason: 'size_limit' as const, originalBytes: inputProjection.originalBytes },
       } : {}),
       extensions: {
         'conversation.tool': {
