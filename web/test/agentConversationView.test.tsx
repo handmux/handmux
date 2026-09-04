@@ -3624,7 +3624,10 @@ describe('generic Agent Conversation UI', () => {
     voice.state = 'recording';
     voice.level = 0.52;
     view.rerender(<AgentConversationComposer {...props} />);
+    expect(view.container.querySelector('.cc-card')?.classList.contains('recording')).toBe(true);
     expect(view.container.querySelector('.input-mic-wave')?.getAttribute('data-level')).toBe('0.52');
+    expect(styles).toMatch(/\.cc-card\.recording\s*\{[^}]*background:\s*rgba\(var\(--green-rgb\),\.14\)[^}]*border:\s*2px solid var\(--green\)[^}]*animation:\s*rec-breathe 1\.3s/);
+    expect(styles).toMatch(/prefers-reduced-motion:\s*reduce\)[^{]*\{\s*\.cc-card\.recording\s*\{\s*animation:\s*none/);
     expect((view.container.querySelector('button.cc-send') as HTMLButtonElement).disabled).toBe(true);
     fireEvent.keyDown(input, { key: 'Enter' });
     fireEvent.click(screen.getByRole('button', { name: 'ok' }));

@@ -3491,15 +3491,18 @@ button.cmd-text { background: none; border: none; text-align: left; }
   .conversation-plan-sheet, .conversation-plan-spinner { animation: none; }
 }
 /* The card: textarea on top, action row beneath. Buttons never overlay the text (own row) → none of the
-   dock's multi/crowd/ghost-hit machinery is needed. Subtle border, faint accent on focus, green while dictating. */
+   dock's multi/crowd/ghost-hit machinery is needed. While dictating it uses the same green breathing
+   surface as the terminal chat composer, so voice has one consistent active state in both views. */
 .cc-card {
   display: flex; flex-direction: column; gap: 0;
   background: var(--ct-field); border: 1px solid var(--ct-field-line); border-radius: 20px;
   padding: 10px 8px 8px 14px; transition: border-color .15s;
 }
 .cc-card:focus-within { border-color: var(--ct-accent); }
-.cc-card.recording { border-color: #34c759; }
+.cc-card.recording { background: rgba(var(--green-rgb),.14); border: 2px solid var(--green);
+  animation: rec-breathe 1.3s ease-in-out infinite; }
 .cc-card.recognizing { border-color: var(--ct-accent); }
+@media (prefers-reduced-motion: reduce) { .cc-card.recording { animation: none; } }
 .cc-queue {
   display: flex; flex-direction: column; gap: 4px;
   margin: -2px 0 7px -6px; padding: 0 0 7px; border-bottom: 1px solid var(--ct-field-line);
