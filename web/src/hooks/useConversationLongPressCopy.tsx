@@ -40,7 +40,7 @@ interface HandleUI {
 interface CopyUI {
   start: HandleUI;
   end: HandleUI;
-  callout: { top: number; left: number; maxWidth: number; visible: boolean };
+  callout: { top: number; left: number; maxWidth: number };
 }
 
 interface SelectionModel extends TextOffsetRange {
@@ -84,8 +84,7 @@ const sameUI = (left: CopyUI | null, right: CopyUI): boolean => !!left
   && left.end.x === right.end.x && left.end.y === right.end.y
   && left.end.h === right.end.h && left.end.visible === right.end.visible
   && left.callout.left === right.callout.left && left.callout.top === right.callout.top
-  && left.callout.maxWidth === right.callout.maxWidth
-  && left.callout.visible === right.callout.visible;
+  && left.callout.maxWidth === right.callout.maxWidth;
 
 function copyRootById(view: HTMLElement, id: string): HTMLElement | null {
   return Array.from(view.querySelectorAll<HTMLElement>('[data-conversation-copy-root]'))
@@ -160,13 +159,6 @@ export function useConversationLongPressCopy({
   const suppressClickRef = useRef(false);
   const calloutRef = useRef<HTMLDivElement>(null);
 
-  const setCalloutVisible = useCallback((visible: boolean): void => {
-    setCopyUI((current) => current && current.callout.visible !== visible ? ({
-      ...current,
-      callout: { ...current.callout, visible },
-    }) : current);
-  }, []);
-
   const cancel = useCallback((): void => {
     const press = pressRef.current;
     if (press.timer != null) window.clearTimeout(press.timer);
@@ -179,8 +171,7 @@ export function useConversationLongPressCopy({
     if (autoScrollRef.current != null) cancelAnimationFrame(autoScrollRef.current);
     autoScrollRef.current = null;
     if (dragRef.current) dragRef.current.direction = 0;
-    setCalloutVisible(true);
-  }, [setCalloutVisible]);
+  }, []);
 
   const finishDrag = useCallback(({
     releaseCapture = true,
@@ -284,12 +275,7 @@ export function useConversationLongPressCopy({
     const next = {
       start,
       end,
-      callout: {
-        top: calloutTop,
-        left: calloutLeft,
-        maxWidth: Math.max(0, surfaceRect.width - 16),
-        visible: !dragRef.current || dragRef.current.direction === 0,
-      },
+      callout: { top: calloutTop, left: calloutLeft, maxWidth: Math.max(0, surfaceRect.width - 16) },
     };
     setCopyUI((current) => sameUI(current, next) ? current : next);
     return true;
@@ -362,11 +348,14 @@ export function useConversationLongPressCopy({
     const rootRect = root.getBoundingClientRect();
     const minY = Math.max(rootRect.top + 1, scrollerRect.top + 1);
     const maxY = Math.min(rootRect.bottom - 1, scrollerRect.bottom - 1);
+    const hasVisibleHitPoint = minY <= maxY;
     const pointX = Math.max(rootRect.left + 1, Math.min(rootRect.right - 1, x));
-    const pointY = minY <= maxY ? Math.max(minY, Math.min(maxY, y)) : y;
+    const pointY = hasVisibleHitPoint ? Math.max(minY, Math.min(maxY, y)) : y;
     let offset = textOffsetAtPoint(root, pointX, pointY);
     const map = conversationTextMap(root);
-    if (offset == null) {
+    // A null caret at a valid clamped edge is transient. Falling back from the raw offscreen y
+    // would alternate the endpoint between the finger's column and the root boundary.
+    if (offset == null && !hasVisibleHitPoint) {
       offset = y <= rootRect.top ? 0 : y >= rootRect.bottom ? map.text.length : null;
     }
     if (offset == null) return;
@@ -395,7 +384,6 @@ export function useConversationLongPressCopy({
 
   const startAutoScroll = useCallback((): void => {
     if (autoScrollRef.current != null) return;
-    setCalloutVisible(false);
     const tick = (): void => {
       const drag = dragRef.current;
       if (!drag || drag.direction === 0) {
@@ -412,7 +400,7 @@ export function useConversationLongPressCopy({
       autoScrollRef.current = requestAnimationFrame(tick);
     };
     autoScrollRef.current = requestAnimationFrame(tick);
-  }, [setCalloutVisible, updateDrag]);
+  }, [updateDrag]);
 
   const moveDrag = useCallback((x: number, y: number): void => {
     const drag = dragRef.current;
@@ -801,12 +789,7 @@ export function ConversationCopyControls({
         data-end="start" style={handleStyle(ui.start)} />
       <div className="sel-handle sel-handle--end chat-copy-handle"
         data-end="end" style={handleStyle(ui.end)} />
-      <div className="sel-callout chat-copy-callout" style={{
-        top: ui.callout.top,
-        left: ui.callout.left,
-        maxWidth: ui.callout.maxWidth,
-        visibility: ui.callout.visible ? 'visible' : 'hidden',
-      }} ref={calloutRef}
+      <div className="sel-callout chat-copy-callout" style={ui.callout} ref={calloutRef}
         onPointerDown={(event) => {
           event.preventDefault();
           event.stopPropagation();
