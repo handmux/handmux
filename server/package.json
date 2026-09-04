@@ -1,6 +1,6 @@
 {
   "name": "handmux",
-  "version": "0.25.2",
+  "version": "0.26.0",
   "description": "A mobile vibe-coding cockpit — built on tmux: drive your live session, Claude Code / Codex — anything a terminal can run — from your phone.",
   "type": "module",
   "license": "AGPL-3.0-only",
@@ -75,13 +75,13 @@
     "vitest": "^2.0.0"
   },
   "whatsNew": [
+    {"version":"0.26.0","date":"2026-09-04","zh":"对话精细复制 · Pi 上下文状态","en":"Precise chat copy · Pi context status"},
     {"version":"0.25.2","date":"2026-09-02","zh":"修复 Agent 对话断流、排队与工具路径","en":"Fixed Agent chat streams, queues, and tool paths"},
     {"version":"0.25.1","date":"2026-09-02","zh":"修复 Codex 幽灵任务与对话空白","en":"Fixed Codex ghost tasks and blank chats"},
     {"version":"0.25.0","date":"2026-09-01","zh":"Pi 原生接入 · 多 Agent 对话更可靠","en":"Native Pi support · more reliable agent chat"},
     {"version":"0.24.0","date":"2026-08-11","zh":"Codex 任务进度与 Goal 原生上线","en":"Native Codex task progress and Goals"},
     {"version":"0.23.0","date":"2026-08-09","zh":"Codex 托管对话正式上线","en":"Managed Codex chat is here"},
     {"version":"0.22.1","date":"2026-08-04","zh":"网页宽度与网站版本分开控制","en":"Separate page width and site-version controls"},
-    {"version":"0.22.0","date":"2026-08-03","zh":"全屏设置 · 窗口与分屏管理更清晰","en":"Full-screen Settings · clearer window and pane management"},
-    {"version":"0.21.0","date":"2026-08-03","zh":"网页预览：手机直连、电脑代理与静态目录","en":"Web preview: direct, computer proxy, and static folders"}
+    {"version":"0.22.0","date":"2026-08-03","zh":"全屏设置 · 窗口与分屏管理更清晰","en":"Full-screen Settings · clearer window and pane management"}
   ]
 }

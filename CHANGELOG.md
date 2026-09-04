@@ -4,6 +4,8 @@ All notable changes to handmux. Format follows [Keep a Changelog](https://keepac
 
 ## [Unreleased]
 
+## [0.26.0] - 2026-09-04
+
 ### Added
 
 - Agent 对话新增精细复制：在消息、工具输入输出、Diff 和错误文字上长按选词，拖动首尾手柄调整，并可扩展到屏幕整行或语义整段；流式更新和滚动期间保留选区，桌面端继续使用原生鼠标选择。
