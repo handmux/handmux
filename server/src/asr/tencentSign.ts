@@ -29,7 +29,6 @@ export function buildTencentAsrSignedUrl({
     engine_model_type: engineModelType,
     expired: String(expired),
     nonce: String(nonce),
-    result_mod: '1',
     secretid: secretId,
     speaker_diarization: '0',
     timestamp: String(timestamp),

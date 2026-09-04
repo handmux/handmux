@@ -13,7 +13,7 @@ describe('Tencent real-time ASR v2 signing', () => {
     expect(url.host).toBe('asr.cloud.tencent.com');
     expect(url.pathname).toBe('/asr/v2/123456');
     expect(url.searchParams.get('voice_format')).toBe('1');
-    expect(url.searchParams.get('result_mod')).toBe('1');
+    expect(url.searchParams.has('result_mod')).toBe(false);
     const queryWithoutSignature = result.url.slice('wss://'.length).replace(/&signature=.*$/, '');
     const expected = createHmac('sha1', 'DO-NOT-LEAK').update(queryWithoutSignature).digest('base64');
     expect(url.searchParams.get('signature')).toBe(expected);
