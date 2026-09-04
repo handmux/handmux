@@ -19,6 +19,30 @@ export interface ChangelogEntry {
 // `entryId`/`LATEST_RELEASE` use `version` when present, else `date`, as the stable unread-dot id.
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '0.26.0',
+    date: '2026-09-04',
+    highlight: {
+      zh: '对话精细复制 · Pi 上下文状态',
+      en: 'Precise chat copy · Pi context status',
+    },
+    items: {
+      zh: [
+        '手机端 Agent 对话支持精细复制：长按消息、工具、Diff 或错误文字选词，拖动首尾手柄调整，并可扩展到屏幕整行或语义整段；流式更新和滚动期间也会保留选区。',
+        'Pi 对话的上下文圆环现在显示原生实时用量、运行状态和工作目录；升级会可靠刷新 Connector，已在运行的 Pi 会话执行 /reload 后即可获得新能力。',
+        '修复 Codex 历史中的 Diff 使用工作区外绝对临时路径时，更早的消息无法加载的问题。',
+        '修复 Codex 只读沙箱配合自动审批时，权限模式被误显示为“自定义”的问题。',
+        '修复空收件箱被单个异常 Agent pane 的降级状态长期覆盖为“正在重新连接”的问题。',
+      ],
+      en: [
+        'Agent chat now supports precise copying on touch devices: long-press message, tool, diff, or error text to select a word, drag either handle to refine it, or expand to the rendered line or semantic paragraph; selections also survive streaming updates and scrolling.',
+        'Pi chat’s context ring now shows native live usage, activity, and working directory. Upgrades reliably refresh the Connector; run /reload in an already-open Pi session to expose the new capability.',
+        'Fixed older Codex history failing to load when a diff used an absolute temporary path outside the workspace.',
+        'Fixed Codex read-only sandbox with automatic approval being mislabeled as a custom permission mode.',
+        'Fixed an empty Inbox being indefinitely replaced by “Reconnecting” when a single Agent pane was degraded.',
+      ],
+    },
+  },
+  {
     version: '0.25.2',
     date: '2026-09-02',
     highlight: {
