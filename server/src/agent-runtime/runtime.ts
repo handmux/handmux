@@ -84,6 +84,16 @@ interface AdapterLifecycle {
   cleanup: Array<() => void | Promise<void>>;
 }
 
+interface ReconcileWaiter {
+  resolve(): void;
+  reject(error: unknown): void;
+}
+
+interface PendingReconcile {
+  snapshot: readonly LivePane[];
+  waiters: ReconcileWaiter[];
+}
+
 export interface AgentRuntimeCapabilityContext extends AgentAdapterContext {
   inbox: InboxOrderedProjector;
   process: ProcessContext;
@@ -347,7 +357,8 @@ export class AgentRuntime {
   readonly #health = new Map<string, AgentRuntimeHealthEntry>();
   readonly #transport: LocalAgentBridgeTransportServer;
   #unsubscribePanes: (() => void) | undefined;
-  #reconcileTail: Promise<void> = Promise.resolve();
+  #pendingReconcile: PendingReconcile | undefined;
+  #reconcileDrain: Promise<void> | undefined;
   #startPromise: Promise<void> | undefined;
   #started = false;
   #closed = false;
@@ -772,21 +783,14 @@ export class AgentRuntime {
       await this.#transport.start();
       if (this.#closed) throw new Error('AgentRuntime is closed');
       unsubscribe = this.#panes.subscribe((snapshot) => {
-        const operation = this.#reconcileTail.then(() => this.#reconcile(snapshot));
-        this.#reconcileTail = operation.catch((error) => {
-          this.#logger.warn('Agent pane reconciliation failed', {
-            error: error instanceof Error ? error.message : String(error),
-          });
-        });
+        this.#offerReconcile(snapshot);
       });
       this.#unsubscribePanes = unsubscribe;
       // Establish Runtime-owned process runs before capability coordinators consume provider rows.
       // The subscription remains the retry path when this best-effort initial read is unavailable.
       try {
         const initial = await this.#panes.list();
-        const operation = this.#reconcileTail.then(() => this.#reconcile(initial));
-        this.#reconcileTail = operation.catch(() => {});
-        await operation;
+        await this.#waitForReconcile(initial);
       } catch (error) {
         this.#logger.warn('Initial Agent pane reconciliation failed', {
           error: error instanceof Error ? error.message : String(error),
@@ -821,10 +825,11 @@ export class AgentRuntime {
   async #close(): Promise<void> {
     if (this.#closed) return;
     this.#closed = true;
+    this.#cancelPendingReconcile(new Error('AgentRuntime is closed'));
     await this.#startPromise?.catch(() => {});
     this.#unsubscribePanes?.();
     this.#unsubscribePanes = undefined;
-    await this.#reconcileTail.catch(() => {});
+    await this.#reconcileDrain?.catch(() => {});
     await this.#transport.close();
     await this.runs.shutdown();
     await this.interaction?.shutdown();
@@ -928,6 +933,72 @@ export class AgentRuntime {
   ): void {
     const key = `${adapterId}\0${update.capability ?? ''}`;
     this.#health.set(key, { adapterId, ...structuredClone(update) });
+  }
+
+  #offerReconcile(snapshot: readonly LivePane[]): void {
+    if (this.#closed) return;
+    if (this.#pendingReconcile) this.#pendingReconcile.snapshot = structuredClone(snapshot);
+    else this.#pendingReconcile = { snapshot: structuredClone(snapshot), waiters: [] };
+    this.#ensureReconcileDrain();
+  }
+
+  #waitForReconcile(snapshot: readonly LivePane[]): Promise<void> {
+    if (this.#closed) return Promise.reject(new Error('AgentRuntime is closed'));
+    const operation = new Promise<void>((resolve, reject) => {
+      const waiter = { resolve, reject };
+      if (this.#pendingReconcile) {
+        this.#pendingReconcile.snapshot = structuredClone(snapshot);
+        this.#pendingReconcile.waiters.push(waiter);
+      } else {
+        this.#pendingReconcile = { snapshot: structuredClone(snapshot), waiters: [waiter] };
+      }
+    });
+    this.#ensureReconcileDrain();
+    return operation;
+  }
+
+  #ensureReconcileDrain(): void {
+    if (this.#closed || this.#reconcileDrain || !this.#pendingReconcile) return;
+    const drain = this.#drainReconciles();
+    this.#reconcileDrain = drain;
+    const finish = (): void => {
+      if (this.#reconcileDrain === drain) this.#reconcileDrain = undefined;
+      if (!this.#closed && this.#pendingReconcile) this.#ensureReconcileDrain();
+    };
+    void drain.then(finish, (error) => {
+      try {
+        this.#logger.warn('Agent pane reconciliation drain failed', {
+          error: error instanceof Error ? error.message : String(error),
+        });
+      } catch { /* diagnostics must not create an unhandled rejection */ }
+      finish();
+    });
+  }
+
+  async #drainReconciles(): Promise<void> {
+    while (!this.#closed) {
+      const pending = this.#pendingReconcile;
+      if (!pending) return;
+      this.#pendingReconcile = undefined;
+      try {
+        await this.#reconcile(pending.snapshot);
+        pending.waiters.forEach((waiter) => waiter.resolve());
+      } catch (error) {
+        pending.waiters.forEach((waiter) => waiter.reject(error));
+        try {
+          this.#logger.warn('Agent pane reconciliation failed', {
+            error: error instanceof Error ? error.message : String(error),
+          });
+        } catch { /* diagnostics must not strand reconciliation waiters */ }
+      }
+    }
+    this.#cancelPendingReconcile(new Error('AgentRuntime is closed'));
+  }
+
+  #cancelPendingReconcile(error: Error): void {
+    const pending = this.#pendingReconcile;
+    this.#pendingReconcile = undefined;
+    pending?.waiters.forEach((waiter) => waiter.reject(error));
   }
 
   #trackedController(

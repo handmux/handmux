@@ -47,7 +47,11 @@ async function setup(initial: NativeInboxSnapshot) {
   await Promise.all(panes.map((value) => runControl.attach({
     paneId: value.paneId,
     attachmentId: `runtime:${value.paneId}`,
-    process: { pid: value.paneId === '%1' ? 101 : 202, startedAt: 500, tty: value.tty },
+    process: {
+      pid: value.paneId === '%1' ? 101 : 202,
+      startedAt: 500,
+      ...(value.tty === undefined ? {} : { tty: value.tty }),
+    },
   })));
   return {
     runs, inbox, coordinator,

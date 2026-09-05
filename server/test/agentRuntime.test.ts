@@ -593,7 +593,8 @@ describe('AgentRuntime composition root', () => {
   });
 
   it('owns a sessionless foreground run only for an opted-in Adapter and replaces it on process change', async () => {
-    const codexPane = { ...pane('codex'), foregroundPid: undefined };
+    const codexPane: LivePane = { ...pane('codex') };
+    delete codexPane.foregroundPid;
     const panes = new TestPanes([codexPane]);
     let foreground: ForegroundProcessIdentity = {
       pid: 101, startedAt: 1_000, tty: '/dev/ttys001', executable: '/opt/codex/bin/codex',
@@ -638,6 +639,57 @@ describe('AgentRuntime composition root', () => {
     panes.emit([pane('pi')]);
     await vi.waitFor(() => expect(runtime.activeRuns()).toEqual([]));
     expect(run).toBe(2);
+  });
+
+  it('coalesces slow pane reconciliation to the first and latest snapshots and drops pending work on close', async () => {
+    const base = pane('pi');
+    const panes = new TestPanes([base]);
+    const seen: string[] = [];
+    let gate: Promise<void> | null = null;
+    const runtime = new AgentRuntime({
+      adapters: [adapter('pi')],
+      panes,
+      process: { inspectForeground: async (value) => {
+        seen.push(value.windowName);
+        if (gate) await gate;
+        return {
+          pid: 101, startedAt: 1_000, tty: '/dev/ttys001', executable: '/opt/pi/bin/pi',
+        };
+      } },
+      stateDirectory: directory(),
+      authToken: AUTH_TOKEN,
+      newRunId: () => 'coalesced-run',
+    });
+    runtimes.push(runtime);
+    await runtime.start();
+    await runtime.runControlFor('pi').attach(candidate());
+    seen.length = 0;
+
+    let release!: () => void;
+    gate = new Promise<void>((resolve) => { release = resolve; });
+    panes.emit([{ ...base, windowName: 'first' }]);
+    await vi.waitFor(() => expect(seen).toEqual(['first']));
+    panes.emit([{ ...base, windowName: 'middle-1' }]);
+    panes.emit([{ ...base, windowName: 'middle-2' }]);
+    panes.emit([{ ...base, windowName: 'latest' }]);
+    release();
+    gate = null;
+    await vi.waitFor(() => expect(seen).toEqual(['first', 'latest']));
+
+    let releaseClose!: () => void;
+    gate = new Promise<void>((resolve) => { releaseClose = resolve; });
+    panes.emit([{ ...base, windowName: 'close-current' }]);
+    await vi.waitFor(() => expect(seen).toEqual(['first', 'latest', 'close-current']));
+    for (let index = 0; index < 1_000; index += 1) {
+      panes.emit([{ ...base, windowName: `close-pending-${index}` }]);
+    }
+    let closed = false;
+    const closing = runtime.close().then(() => { closed = true; });
+    await Promise.resolve();
+    expect(closed).toBe(false);
+    releaseClose();
+    await closing;
+    expect(seen).toEqual(['first', 'latest', 'close-current']);
   });
 
   it('auto-attaches only a verified built-in Codex node launcher', async () => {
