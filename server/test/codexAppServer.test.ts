@@ -4671,6 +4671,9 @@ describe('Codex App Server client', () => {
     });
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(events).toEqual([]);
+    expect(await app.compactorItemKeys('%1', 'thread-1')).toEqual([
+      'compact-turn\0compactor-answer',
+    ]);
 
     proxy.push({
       jsonrpc: '2.0', method: 'item/completed', params: {

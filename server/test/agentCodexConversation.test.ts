@@ -28,6 +28,7 @@ function appHarness() {
       listener = next;
       return { cursor: 20, close };
     }),
+    compactorItemKeys: vi.fn(async (): Promise<string[]> => []),
     send: vi.fn(async (): Promise<unknown> => ({ turn: { id: 'turn-new' } })),
     dispatchPrompt: vi.fn(async (): Promise<unknown> => ({
       busy: false, result: { turn: { id: 'turn-new' } },
@@ -412,6 +413,43 @@ describe('Codex Conversation adapter', () => {
     expect(events.filter((event) => event.type === 'history.changed')).toHaveLength(1);
     expect(JSON.stringify(events)).not.toContain('codex-thread:');
     expect(harness.close).not.toHaveBeenCalled();
+  });
+
+  it('never publishes a durable compactor message before its compact marker lands', async () => {
+    const durable: CodexTranscriptMessage[] = [{
+      i: 0, id: 'codex:turn-1:user-1', turnId: 'turn-1', itemId: 'user-1',
+      type: 'text', role: 'user', text: 'question', ts: undefined,
+    }];
+    const { service, harness, lease } = await setup(durable, 10);
+    harness.app.compactorItemKeys.mockResolvedValue([
+      'compact-turn\0compactor-answer',
+    ]);
+    const events: ConversationEvent[] = [];
+    const handle = await service.open(lease, {}, (event) => { events.push(event); });
+    const opening = await service.readPage(lease.ref, { limit: 20 });
+    if (opening.status !== 'ok') throw new Error('expected opening history');
+
+    durable.push({
+      i: 1, id: 'codex:compact-turn:compactor-answer', turnId: 'compact-turn',
+      itemId: 'compactor-answer', type: 'text', role: 'assistant',
+      text: 'internal retained summary', ts: undefined,
+    });
+    harness.emit({ type: 'conversationSnapshot', threadId: 'thread-1', cursor: 21, messages: [] });
+    await new Promise((resolve) => setTimeout(resolve, 250));
+
+    expect(events.some((event) => event.type === 'history.changed')).toBe(false);
+    const during = await service.readPage(lease.ref, { limit: 20 });
+    if (during.status !== 'ok') throw new Error('expected history during compaction');
+    expect(JSON.stringify(during.page)).not.toContain('internal retained summary');
+
+    durable[1] = { i: 2, type: 'compact', summary: 'retained context', ts: undefined };
+    harness.emit({ type: 'conversationSnapshot', threadId: 'thread-1', cursor: 22, messages: [] });
+    await vi.waitFor(() => expect(events.some((event) => event.type === 'history.changed')).toBe(true));
+    const completed = await service.readPage(lease.ref, { limit: 20 });
+    if (completed.status !== 'ok') throw new Error('expected completed history');
+    expect(completed.page.items.map((item) => item.kind)).toEqual(['message', 'compaction']);
+    expect(JSON.stringify(completed.page)).not.toContain('internal retained summary');
+    await handle.close();
   });
 
   it('keeps the settled frontier across a transient readable rollout candidate', async () => {

@@ -25,6 +25,7 @@ const MAX_SUBMISSION_RECEIPTS = 256;
 const SUBMISSION_RECEIPT_TTL_MS = 24 * 60 * 60 * 1_000;
 const MAX_STREAM_EVENTS = 512;
 const MAX_STREAM_MESSAGE_IDS = 100;
+const MAX_COMPACTOR_ITEM_KEYS = 128;
 const MAX_OBSERVATION_SETUP_EVENTS = 512;
 const MAX_GOAL_READ_ATTEMPTS = 3;
 const CONTROL_TURN_LIMIT = 2;
@@ -266,6 +267,7 @@ interface ThreadState {
   goalEvent: CodexGoalEvent | null;
   goalTurnId: string | null;
   compacting: boolean;
+  compactorItemKeys: Set<string>;
   deliveryHistorySafe: boolean;
   deliveryProofClientIds: Set<string>;
 }
@@ -273,6 +275,21 @@ interface ThreadState {
 interface PendingGoalMutation {
   token: symbol;
   turnId: string | null;
+}
+
+function compactorItemKey(turnId: string, itemId: string): string {
+  return `${turnId}\0${itemId}`;
+}
+
+function rememberCompactorItem(state: ThreadState, turnId: string, itemId: string): void {
+  const key = compactorItemKey(turnId, itemId);
+  state.compactorItemKeys.delete(key);
+  state.compactorItemKeys.add(key);
+  while (state.compactorItemKeys.size > MAX_COMPACTOR_ITEM_KEYS) {
+    const oldest = state.compactorItemKeys.values().next().value;
+    if (typeof oldest !== 'string') break;
+    state.compactorItemKeys.delete(oldest);
+  }
 }
 
 interface InboxState {
@@ -1168,6 +1185,9 @@ class CodexAppConnection {
         state.compacting = false;
       }
       if (params.item.type === 'agentMessage') {
+        if (state.compacting && params.turnId && params.item.id) {
+          rememberCompactorItem(state, params.turnId, params.item.id);
+        }
         const itemKey = `${params.turnId}\0${params.item.id}`;
         if (message.method === 'item/completed') state.completedAgentItemIds.add(itemKey);
         else state.completedAgentItemIds.delete(itemKey);
@@ -1364,7 +1384,8 @@ class CodexAppConnection {
       activePrompt: '', contextUsage: null, lastTurn: null, loadedOnly: false, liveItemIds: new Map(),
       completedAgentItemIds: new Set(), plans: new Map(), goal: undefined,
       goalRevision: 0, goalEvent: null, goalTurnId: null,
-      compacting: false, deliveryHistorySafe: true, deliveryProofClientIds: new Set(),
+      compacting: false, compactorItemKeys: new Set(),
+      deliveryHistorySafe: true, deliveryProofClientIds: new Set(),
     });
     return this.threadState.get(threadId)!;
   }
@@ -3421,6 +3442,13 @@ export function createCodexAppServer({
         receipts: client.submissionReceiptsFor(threadId),
         revision: state.revision,
       };
+    },
+    async compactorItemKeys(pane: string, threadId: string): Promise<string[]> {
+      const client = await connection(pane);
+      if (!client) throw new Error('Codex session is not managed by Handmux');
+      await client.assertCurrentThread(threadId);
+      const state = await client.ensureThread(threadId);
+      return [...state.compactorItemKeys];
     },
     async subscribe(
       pane: string,

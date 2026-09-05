@@ -45,6 +45,7 @@ interface CodexConversationApp {
     threadId: string,
     listener: (event: unknown) => void,
   ): Promise<{ cursor: number; close(): unknown }>;
+  compactorItemKeys(paneId: string, threadId: string): Promise<string[]>;
   send(paneId: string, threadId: string, text: string, requestId?: string | null): Promise<unknown>;
   dispatchPrompt(paneId: string, threadId: string, text: string, requestId: string): Promise<unknown>;
   dispatchSteer(
@@ -113,6 +114,7 @@ interface CodexDurableCheckpoint {
   file: string | null;
   version?: string;
   readerGeneration?: number;
+  suppressionKey: string;
   messageCount: number;
   itemOffsets: number[];
   historyHashes: string[];
@@ -450,7 +452,20 @@ function itemBase(message: CodexTranscriptMessage, sessionId: string, id = stabl
   };
 }
 
-function projectDurableMessage(message: CodexTranscriptMessage, sessionId: string): ConversationItem[] {
+function compactorItemKey(message: CodexTranscriptMessage): string | null {
+  return typeof message.turnId === 'string' && message.turnId
+    && typeof message.itemId === 'string' && message.itemId
+    ? `${message.turnId}\0${message.itemId}` : null;
+}
+
+function projectDurableMessage(
+  message: CodexTranscriptMessage,
+  sessionId: string,
+  suppressedCompactorItems: ReadonlySet<string>,
+): ConversationItem[] {
+  const sourceKey = compactorItemKey(message);
+  if (message.type === 'text' && message.role === 'assistant'
+    && sourceKey && suppressedCompactorItems.has(sourceKey)) return [];
   if (message.type === 'text' && message.role && typeof message.text === 'string') {
     const output = clipConversationText(message.text);
     return [{
@@ -669,6 +684,7 @@ export function createCodexConversationAdapter({
   // read at the same byte cutoff as the adapter baseline so later rollout suffixes cannot appear in both
   // the page and the already-buffered native stream.
   const openingSnapshots = new Map<string, CodexOpeningSnapshot>();
+  const suppressedCompactorItemsBySession = new Map<string, ReadonlySet<string>>();
 
   function cloneCheckpoint(checkpoint: CodexDurableCheckpoint): CodexDurableCheckpoint {
     return {
@@ -677,6 +693,22 @@ export function createCodexConversationAdapter({
       historyHashes: [...checkpoint.historyHashes],
       snapshot: { ...checkpoint.snapshot, items: [...checkpoint.snapshot.items] },
     };
+  }
+
+  const suppressionKeyOf = (values: ReadonlySet<string>): string => [...values].sort().join('\n');
+
+  async function readCompactorItemKeys(paneId: string, sessionId: string): Promise<ReadonlySet<string>> {
+    const values = new Set((await app.compactorItemKeys(paneId, sessionId)).filter((value) => (
+      typeof value === 'string' && value.includes('\0')
+    )));
+    suppressedCompactorItemsBySession.delete(sessionId);
+    suppressedCompactorItemsBySession.set(sessionId, values);
+    while (suppressedCompactorItemsBySession.size > MAX_DURABLE_CHECKPOINTS) {
+      const oldest = suppressedCompactorItemsBySession.keys().next().value;
+      if (typeof oldest !== 'string') break;
+      suppressedCompactorItemsBySession.delete(oldest);
+    }
+    return values;
   }
 
   function rememberCheckpoint(sessionId: string, checkpoint: CodexDurableCheckpoint): void {
@@ -697,17 +729,21 @@ export function createCodexConversationAdapter({
     readerGeneration: number | undefined,
     changedFrom: number | null,
     checkpoint: CodexDurableCheckpoint | undefined,
+    suppressedCompactorItems: ReadonlySet<string>,
   ): CodexDurableCheckpoint {
+    const suppressionKey = suppressionKeyOf(suppressedCompactorItems);
     const sameReader = readerGeneration === undefined || checkpoint?.readerGeneration === undefined
       || checkpoint.readerGeneration === readerGeneration;
     const reusable = checkpoint?.file === file && sameReader && changedFrom !== null
+      && checkpoint.suppressionKey === suppressionKey
       && changedFrom >= 0 && changedFrom <= checkpoint.messageCount
       && changedFrom <= parsed.length;
     // Build transactionally. A backwards/truncated read must not corrupt the last readable checkpoint
     // before the floor check rejects it.
     const next = reusable && checkpoint ? cloneCheckpoint(checkpoint) : undefined;
     const from = next ? changedFrom! : 0;
-    const durableFloor = checkpoint?.snapshot.items.length ?? 0;
+    const durableFloor = checkpoint?.suppressionKey === suppressionKey
+      ? checkpoint.snapshot.items.length : 0;
     const items = next?.snapshot.items ?? [];
     const itemOffsets = next?.itemOffsets ?? [0];
     const historyHashes = next?.historyHashes ?? [];
@@ -717,14 +753,20 @@ export function createCodexConversationAdapter({
     historyHashes.length = from;
     let historyHash = historyHashes.at(-1) ?? HISTORY_HASH_SEED;
     for (let index = from; index < parsed.length; index++) {
-      const projected = projectDurableMessage(parsed[index]!, session.sessionId);
+      const projected = projectDurableMessage(
+        parsed[index]!, session.sessionId, suppressedCompactorItems,
+      );
       items.push(...projected);
       itemOffsets.push(items.length);
-      historyHash = createHash('sha256')
-        .update(historyHash)
-        .update('\0')
-        .update(JSON.stringify(projected))
-        .digest('hex');
+      // A suppressed compactor record is not a visible history revision. Keep the token unchanged until
+      // the parser replaces it with the durable compact marker, avoiding an identical-page refresh.
+      if (projected.length > 0) {
+        historyHash = createHash('sha256')
+          .update(historyHash)
+          .update('\0')
+          .update(JSON.stringify(projected))
+          .digest('hex');
+      }
       historyHashes.push(historyHash);
     }
     if (items.length < durableFloor) {
@@ -734,6 +776,7 @@ export function createCodexConversationAdapter({
       file,
       ...(version === undefined ? {} : { version }),
       ...(readerGeneration === undefined ? {} : { readerGeneration }),
+      suppressionKey,
       messageCount: parsed.length,
       itemOffsets,
       historyHashes,
@@ -746,7 +789,10 @@ export function createCodexConversationAdapter({
     };
   }
 
-  async function readDurableSnapshot(session: AgentSessionRef): Promise<CodexDurableSnapshot> {
+  async function readDurableSnapshot(
+    session: AgentSessionRef,
+    suppressionProvider?: () => Promise<ReadonlySet<string>>,
+  ): Promise<CodexDurableSnapshot> {
     const file = await findRollout(sessionsRoot, session.sessionId);
     const read = file && reader.readSnapshot
       ? await reader.readSnapshot(file, createCodexTranscriptParser)
@@ -756,8 +802,13 @@ export function createCodexConversationAdapter({
         changedFrom: 0,
         generation: undefined,
       };
+    const suppressedCompactorItems = suppressionProvider
+      ? await suppressionProvider()
+      : suppressedCompactorItemsBySession.get(session.sessionId) ?? new Set<string>();
+    const suppressionKey = suppressionKeyOf(suppressedCompactorItems);
     const known = durableCheckpoints.get(session.sessionId);
-    if (known && known.file === file && read.version !== undefined && known.version === read.version) {
+    if (known && known.file === file && known.suppressionKey === suppressionKey
+      && read.version !== undefined && known.version === read.version) {
       rememberCheckpoint(session.sessionId, known);
       return known.snapshot;
     }
@@ -771,6 +822,7 @@ export function createCodexConversationAdapter({
     }
     const checkpoint = snapshotFromMessages(
       session, read.messages, file, read.version, read.generation, read.changedFrom, known,
+      suppressedCompactorItems,
     );
     rememberCheckpoint(session.sessionId, checkpoint);
     return checkpoint.snapshot;
@@ -788,6 +840,7 @@ export function createCodexConversationAdapter({
   async function readDurablePrefix(
     session: AgentSessionRef,
     cutoff: CodexDurableCutoff,
+    suppressionProvider?: () => Promise<ReadonlySet<string>>,
   ): Promise<{ snapshot: CodexDurableSnapshot; checkpoint: CodexDurableCheckpoint }> {
     const known = durableCheckpoints.get(session.sessionId);
     const working = known ? cloneCheckpoint(known) : undefined;
@@ -802,12 +855,17 @@ export function createCodexConversationAdapter({
         changedFrom: 0,
         generation: undefined,
       };
+    const suppressedCompactorItems = suppressionProvider
+      ? await suppressionProvider()
+      : suppressedCompactorItemsBySession.get(session.sessionId) ?? new Set<string>();
+    const suppressionKey = suppressionKeyOf(suppressedCompactorItems);
     const checkpoint = working && working.file === cutoff.file
+      && working.suppressionKey === suppressionKey
       && read.version !== undefined && working.version === read.version
       ? working
       : snapshotFromMessages(
         session, read.messages, cutoff.file, read.version, read.generation,
-        read.changedFrom, working,
+        read.changedFrom, working, suppressedCompactorItems,
       );
     return {
       checkpoint,
@@ -926,7 +984,10 @@ export function createCodexConversationAdapter({
         );
         let page: CodexDurableSnapshot;
         try {
-          page = await readDurableSnapshot({ agentId: 'codex', sessionId });
+          page = await readDurableSnapshot(
+            { agentId: 'codex', sessionId },
+            () => readCompactorItemKeys(run.ref.paneId, sessionId),
+          );
         } catch (error) {
           // A writer can transiently rotate or replace the rollout. Periodic reconciliation retries
           // read failures; the initial baseline still fails the open because Core has no safe checkpoint.
@@ -1181,7 +1242,10 @@ export function createCodexConversationAdapter({
         // Capture the append-only byte boundary only after the observer owns the native suffix. Anything
         // appended later belongs to that buffered suffix or the first post-open durable reconciliation.
         const cutoff = await captureDurableCutoff(sessionId);
-        const openingRead = await readDurablePrefix({ agentId: 'codex', sessionId }, cutoff);
+        const openingRead = await readDurablePrefix(
+          { agentId: 'codex', sessionId }, cutoff,
+          () => readCompactorItemKeys(run.ref.paneId, sessionId),
+        );
         const baseline = openingRead.snapshot;
         live.durableToken = baseline.sourceHistoryToken;
         live.durableItems = [...baseline.items];
