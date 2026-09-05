@@ -4,6 +4,10 @@ All notable changes to handmux. Format follows [Keep a Changelog](https://keepac
 
 ## [Unreleased]
 
+### Fixed
+
+- 修复 iOS 上 Agent 对话发送按钮只显示圆形背景、箭头图标不可见的问题。
+
 ## [0.27.0] - 2026-09-05
 
 ### Added

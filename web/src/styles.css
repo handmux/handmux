@@ -3649,10 +3649,11 @@ button.cmd-text { background: none; border: none; text-align: left; }
 .cc-config-trigger:active { background: var(--ct-chip-2); }
 .cc-config-trigger:disabled { opacity: .48; }
 .cc-attach, .cc-send {
-  display: inline-flex; align-items: center; justify-content: center;
-  width: 32px; height: 32px; border: none; border-radius: 999px;
+  flex: none; display: inline-flex; align-items: center; justify-content: center;
+  width: 32px; height: 32px; padding: 0; border: none; border-radius: 999px;
   touch-action: manipulation; -webkit-tap-highlight-color: transparent;
 }
+.cc-attach svg, .cc-send svg { width: 20px; height: 20px; display: block; }
 .cc-attach { flex: none; background: transparent; color: var(--ct-chip-ink); margin-left: -7px; }
 .cc-attach:active { background: var(--ct-chip-2); }
 .cc-send { background: var(--ct-accent); color: #fff; }

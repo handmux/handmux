@@ -207,6 +207,8 @@ describe('generic Agent Conversation UI', () => {
     expect(styles).toMatch(/\.cc-actions-left\s*\{[^}]*min-width:\s*0;[^}]*flex:\s*1 1 auto/);
     expect(styles).toMatch(/\.cc-actions-right\s*\{[^}]*flex:\s*none/);
     expect(styles).toMatch(/\.cc-actions-right\s*>\s*\*\s*\{[^}]*flex:\s*none/);
+    expect(styles).toMatch(/\.cc-attach,\s*\.cc-send\s*\{[^}]*flex:\s*none;[^}]*width:\s*32px;[^}]*height:\s*32px;[^}]*padding:\s*0/);
+    expect(styles).toMatch(/\.cc-attach svg,\s*\.cc-send svg\s*\{[^}]*width:\s*20px;[^}]*height:\s*20px;[^}]*display:\s*block/);
     expect(styles).toMatch(/\.cc-attach\s*\{[^}]*flex:\s*none/);
     expect(styles).toMatch(/\.cc-config-trigger\s*\{[^}]*min-width:\s*0;[^}]*flex:\s*0 1 auto/);
     expect(styles).toMatch(/\.cc-ctx-model\s*\{[^}]*flex:\s*1 1 auto;[^}]*overflow:\s*hidden;[^}]*text-overflow:\s*ellipsis/);
