@@ -23,6 +23,7 @@ import type { LivePane } from '../agent-runtime/adapter.js';
 import type { NextFunction, Request, RequestHandler, Response, Router } from 'express';
 import type { ShortcutConfig } from '../shortcutConfig.js';
 import type { AgentIntegrationContext, AgentName } from '../cli/agentIntegration.js';
+import type { FillerFilterLevel } from '../asr/providerRegistry.js';
 
 type TakeoverCommands = Parameters<typeof takeoverOrphan>[0]['commands'];
 interface LivePaneCommands {
@@ -55,6 +56,13 @@ const here = dirname(fileURLToPath(import.meta.url));
 const HOOKS_SRC = resolvePath(here, '../../hooks'); // server/hooks (bundled scripts)
 const PI_ENTRY = resolvePath(here, '../../connectors/pi/index.js');
 const WEB_AGENT_INTEGRATIONS = ['claude', 'pi'] as const satisfies readonly AgentName[];
+const FILLER_FILTER_LEVELS = ['low', 'medium', 'high'] as const satisfies readonly FillerFilterLevel[];
+
+const requestFillerFilter = (value: unknown): FillerFilterLevel | null => {
+  if (value === undefined) return 'medium';
+  return typeof value === 'string' && FILLER_FILTER_LEVELS.includes(value as FillerFilterLevel)
+    ? value as FillerFilterLevel : null;
+};
 
 // The installed CLI version (server/package.json) — read once. The phone compares this against the cached
 // npm "latest" to surface an update hint ("run `handmux update` on your computer"); see the /version route.
@@ -87,10 +95,12 @@ export function systemRoutes({
   // this setup prompt or endpoint.
   r.get('/config', (_req: Request, res: Response) => {
     const voice = asrConfig(asrEnv);
+    const voiceAdapter = voice ? voiceProviderRegistry.get(voice.provider) : undefined;
     return res.json({
       asr: voice !== null,
       asrProvider: voice?.provider ?? null,
       asrMode: voice?.mode ?? null,
+      asrFillerFilter: voiceAdapter?.capabilities?.fillerFilter === true,
       claudeHooks: hooksStatus(home),
       managedCodex: true,
       shortcuts: activeShortcuts,
@@ -163,7 +173,7 @@ export function systemRoutes({
   });
 
   // --- Voice input: provider-neutral, short-lived session handoff -----------------------------
-  r.get('/asr/session', (_req: Request, res: Response) => {
+  r.get('/asr/session', (req: Request, res: Response) => {
     const config = asrConfig(asrEnv);
     if (!config) return res.status(503).json({ error: 'asr not configured' });
     if (config.mode !== 'streaming') {
@@ -173,7 +183,9 @@ export function systemRoutes({
     if (!adapter?.createStreamingSession) {
       return res.status(503).json({ error: 'streaming asr is unsupported by the selected provider' });
     }
-    return res.json(adapter.createStreamingSession(config));
+    const fillerFilter = requestFillerFilter(req.query.fillerFilter);
+    if (!fillerFilter) return res.status(400).json({ error: 'invalid filler filter level' });
+    return res.json(adapter.createStreamingSession(config, { fillerFilter }));
   });
 
   const rawSentenceAudio = express.raw({
@@ -214,8 +226,12 @@ export function systemRoutes({
     if (audio.byteLength === 0) return res.status(400).json({
       error: 'audio is empty', code: 'audio_empty', requestId: res.locals.requestId,
     });
+    const fillerFilter = requestFillerFilter(req.query.fillerFilter);
+    if (!fillerFilter) return res.status(400).json({
+      error: 'invalid filler filter level', code: 'invalid_filler_filter', requestId: res.locals.requestId,
+    });
     try {
-      const result = await adapter.recognizeSentence(config, audio);
+      const result = await adapter.recognizeSentence(config, audio, { fillerFilter });
       return res.json({ text: result.text });
     } catch (error) {
       const publicError = adapter.publicError?.(error);
@@ -236,7 +252,9 @@ export function systemRoutes({
   r.get('/asr/sign', (_req: Request, res: Response) => {
     const config = asrConfig(asrEnv);
     if (!config || config.provider !== 'xfyun') return res.status(503).json({ error: 'xfyun asr not configured' });
-    const session = voiceProviderRegistry.get(config.provider)?.createStreamingSession?.(config);
+    const session = voiceProviderRegistry.get(config.provider)?.createStreamingSession?.(
+      config, { fillerFilter: 'medium' },
+    );
     return session ? res.json({ url: session.url, appId: session.appId })
       : res.status(503).json({ error: 'xfyun asr not configured' });
   });

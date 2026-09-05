@@ -25,11 +25,11 @@ describe('Tencent sentence ASR', () => {
     expect(request.headers.Authorization).toBe(
       'TC3-HMAC-SHA256 Credential=AKID-example/2023-11-14/asr/tc3_request, '
       + 'SignedHeaders=content-type;host, '
-      + 'Signature=f030fb93337537e1362f363cd5e6cc4ffb5006955f4b1bbc37426a2c76da0a89',
+      + 'Signature=8cc833b4fc3ee64ae550dd82739b8fa6fda00ee913ea676e75987f5021aeb877',
     );
     expect(JSON.parse(request.body)).toEqual({
       ProjectId: 0, SubServiceType: 2, EngSerViceType: '16k_zh', SourceType: 1,
-      VoiceFormat: 'pcm', Data: 'AAEC/w==', DataLen: 4,
+      VoiceFormat: 'pcm', FilterModal: 1, Data: 'AAEC/w==', DataLen: 4,
     });
     expect(JSON.stringify(request)).not.toContain('DO-NOT-LEAK');
   });
@@ -42,6 +42,12 @@ describe('Tencent sentence ASR', () => {
       fetch: fetchMock as typeof fetch, timestamp: 1_700_000_000,
     })).resolves.toEqual({ text: '你好', requestId: 'req-1' });
     expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it('passes every Tencent filler-word filtering level as a number', () => {
+    expect(([0, 1, 2] as const).map((filterModal) => JSON.parse(buildTencentSentenceRequest(
+      config, Uint8Array.of(1), 1_700_000_000, filterModal,
+    ).body).FilterModal)).toEqual([0, 1, 2]);
   });
 
   it('surfaces the Tencent error code and request ID without leaking credentials', async () => {

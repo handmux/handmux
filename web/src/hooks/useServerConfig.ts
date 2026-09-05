@@ -9,6 +9,7 @@ export interface ServerConfig {
   asr?: boolean;
   asrProvider?: string | null;
   asrMode?: 'streaming' | 'sentence' | null;
+  asrFillerFilter?: boolean;
   claudeHooks?: ClaudeHooksStatus;
   managedCodex?: boolean;
   browserProxy?: boolean;
@@ -63,6 +64,7 @@ export function parseServerConfig(value: unknown): ServerConfig | null {
       ? { asrProvider: config.asrProvider } : {}),
     ...(config.asrMode === null || config.asrMode === 'streaming' || config.asrMode === 'sentence'
       ? { asrMode: config.asrMode } : {}),
+    ...(typeof config.asrFillerFilter === 'boolean' ? { asrFillerFilter: config.asrFillerFilter } : {}),
     ...(claudeHooks ? { claudeHooks } : {}),
     ...(typeof config.managedCodex === 'boolean' ? { managedCodex: config.managedCodex } : {}),
     ...(typeof config.browserProxy === 'boolean' ? { browserProxy: config.browserProxy } : {}),

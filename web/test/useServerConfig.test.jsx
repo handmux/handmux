@@ -38,8 +38,11 @@ describe('useServerConfig', () => {
       },
     });
     expect(parseServerConfig({
-      asr: true, asrProvider: 'tencent', asrMode: 'sentence', shortcuts: { command: [], chat: [] },
-    })).toMatchObject({ asr: true, asrProvider: 'tencent', asrMode: 'sentence' });
+      asr: true, asrProvider: 'tencent', asrMode: 'sentence', asrFillerFilter: true,
+      shortcuts: { command: [], chat: [] },
+    })).toMatchObject({
+      asr: true, asrProvider: 'tencent', asrMode: 'sentence', asrFillerFilter: true,
+    });
   });
 
   it('fetches at launch and whenever the app returns to the foreground, without polling', async () => {

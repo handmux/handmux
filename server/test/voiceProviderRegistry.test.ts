@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { asrConfigFromRegistry } from '../src/asr/config.js';
 import {
-  createVoiceProviderRegistry, providerMode,
+  createVoiceProviderRegistry, providerMode, voiceProviderRegistry,
 } from '../src/asr/providerRegistry.js';
 import type { VoiceProviderAdapter } from '../src/asr/providerRegistry.js';
 
@@ -26,13 +26,16 @@ describe('voice provider registry', () => {
     const config = asrConfigFromRegistry({
       HANDMUX_ASR_PROVIDER: 'example', HANDMUX_ASR_MODE: 'sentence', EXAMPLE_TOKEN: 'secret',
     }, registry);
+    const options = { fillerFilter: 'medium' as const };
 
     expect(config).toEqual({ provider: 'example', mode: 'sentence', token: 'secret' });
     expect(providerMode(adapter, 'unsupported')).toBe('streaming');
-    expect(registry.get('example')?.createStreamingSession?.(config!)).toMatchObject({
+    expect(registry.get('example')?.createStreamingSession?.(config!, options)).toMatchObject({
       provider: 'example', protocol: 'example-v1',
     });
-    await expect(registry.get('example')?.recognizeSentence?.(config!, Uint8Array.of(1)))
+    await expect(registry.get('example')?.recognizeSentence?.(
+      config!, Uint8Array.of(1), options,
+    ))
       .resolves.toEqual({ text: 'example text' });
   });
 
@@ -43,5 +46,10 @@ describe('voice provider registry', () => {
       isConfigured: () => true,
     };
     expect(() => createVoiceProviderRegistry([empty, empty])).toThrow(/duplicate voice provider/);
+  });
+
+  it('advertises filler filtering only from adapters that implement it', () => {
+    expect(voiceProviderRegistry.get('tencent')?.capabilities?.fillerFilter).toBe(true);
+    expect(voiceProviderRegistry.get('xfyun')?.capabilities?.fillerFilter).not.toBe(true);
   });
 });

@@ -2395,6 +2395,9 @@ export default function App() {
         notifUnread={hasNewNotif}
         onOpenInbox={openNotifInbox}
         updateInfo={updateInfo}
+        voiceEnabled={serverConfig?.asr ?? false}
+        voiceProvider={serverConfig?.asrProvider ?? null}
+        voiceFillerFilterSupported={serverConfig?.asrFillerFilter ?? false}
       />
       <Changelog open={changelogOpen} onClose={() => setChangelogOpen(false)} />
       <InboxPage

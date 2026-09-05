@@ -11,6 +11,8 @@ import type { AsrSessionResponse, AsrSignResponse } from '../apiRequest.js';
 import type { VoiceRecorder } from './recorder.js';
 import { voiceErrorText } from './error.js';
 import { t } from '../i18n';
+import { getVoiceFillerFilter } from '../storage.js';
+import type { VoiceFillerFilterLevel } from '../storage.js';
 
 export type VoicePhase = 'idle' | 'requesting' | 'recording' | 'finalizing' | 'error';
 export type AsrMode = 'streaming' | 'sentence';
@@ -28,12 +30,13 @@ export interface VoiceSocket {
 export type VoiceSocketConstructor = new (url: string) => VoiceSocket;
 
 export interface PushToTalkDependencies {
-  createSession?: () => Promise<AsrSessionResponse>;
+  createSession?: (fillerFilter: VoiceFillerFilterLevel) => Promise<AsrSessionResponse>;
   /** @deprecated test/integration compatibility for the former XFYUN-only handoff. */
   signAsr?: () => Promise<AsrSignResponse>;
   WebSocketCtor?: VoiceSocketConstructor;
   makeRecorder?: () => VoiceRecorder;
-  recognizeSentence?: (audio: Uint8Array) => Promise<string>;
+  recognizeSentence?: (audio: Uint8Array, fillerFilter: VoiceFillerFilterLevel) => Promise<string>;
+  getFillerFilter?: () => VoiceFillerFilterLevel;
 }
 
 export interface UsePushToTalkOptions {
@@ -87,6 +90,7 @@ export function usePushToTalk({
   const WebSocketCtor = deps.WebSocketCtor ?? window.WebSocket as unknown as VoiceSocketConstructor;
   const makeRecorder = deps.makeRecorder ?? (() => createRecorder());
   const recognizeSentence = deps.recognizeSentence ?? realRecognizeSentence;
+  const readFillerFilter = deps.getFillerFilter ?? getVoiceFillerFilter;
 
   const [state, setState] = useState<VoicePhase>('idle');
   const [partial, setPartial] = useState('');
@@ -105,6 +109,7 @@ export function usePushToTalk({
   const pendingAudioRef = useRef<string[]>([]);
   const sentenceAudioRef = useRef<string[]>([]);
   const activeModeRef = useRef<AsrMode>(mode);
+  const activeFillerFilterRef = useRef<VoiceFillerFilterLevel>('medium');
   const pendingEndRef = useRef(false);
   const capTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const finalizeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -189,7 +194,7 @@ export function usePushToTalk({
         if (tail) sentenceAudioRef.current.push(tail);
         const audio = mergeAudio(sentenceAudioRef.current);
         if (audio.byteLength === 0) throw new Error('audio is empty');
-        const text = await recognizeSentence(audio);
+        const text = await recognizeSentence(audio, activeFillerFilterRef.current);
         onTextRef.current?.(text);
         setPartial('');
         setPhase('idle');
@@ -218,6 +223,7 @@ export function usePushToTalk({
     if (stateRef.current !== 'idle' && stateRef.current !== 'error') return;
     setPhase('requesting'); setPartial(''); partialRef.current = ''; clearError();
     setLevel(0); activeModeRef.current = mode;
+    activeFillerFilterRef.current = readFillerFilter();
     pendingAudioRef.current = []; pendingEndRef.current = false; driverRef.current = null;
     sentenceAudioRef.current = [];
     try {
@@ -237,7 +243,7 @@ export function usePushToTalk({
         capTimer.current = setTimeout(() => { stopRef.current?.(); }, MAX_MS);
         return;
       }
-      const [session] = await Promise.all([createSession(), recorderStarted]);
+      const [session] = await Promise.all([createSession(activeFillerFilterRef.current), recorderStarted]);
       const driver = createAsrDriver(session);
       driverRef.current = driver;
       const ws = new WebSocketCtor(session.url);
@@ -268,7 +274,7 @@ export function usePushToTalk({
       setPhase('error'); cleanup();
     }
   }, [mode, createSession, WebSocketCtor, makeRecorder, sendAudio, cleanup, setPhase, finish, flush,
-    clearError, showError]);
+    clearError, showError, readFillerFilter]);
 
   useEffect(() => () => {
     cleanup();

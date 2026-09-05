@@ -198,12 +198,14 @@ describe('usePushToTalk', () => {
       onerror: null,
       onclose: null,
     };
-    const deps: PushToTalkDependencies = {
-      createSession: vi.fn(async (): Promise<{
+    const createSession = vi.fn(async (): Promise<{
         provider: 'tencent'; protocol: 'tencent-asr-v2'; url: string;
       }> => ({
         provider: 'tencent', protocol: 'tencent-asr-v2', url: 'wss://asr.cloud.tencent.com/asr/v2/1',
-      })),
+      }));
+    const deps: PushToTalkDependencies = {
+      createSession,
+      getFillerFilter: () => 'high',
       WebSocketCtor: vi.fn(() => ws) as unknown as VoiceSocketConstructor,
       makeRecorder: () => ({
         start: vi.fn(async (callback) => { fireTencentChunk = callback; callback('QUJD'); }),
@@ -212,6 +214,7 @@ describe('usePushToTalk', () => {
     };
     const { result } = renderHook(() => usePushToTalk({ onText, deps }));
     await act(async () => { await result.current.start(); });
+    expect(createSession).toHaveBeenCalledWith('high');
     expect(sent).toEqual([]); // socket is not open: opening audio was retained, not dropped
     ws.readyState = 1;
     act(() => { ws.onopen?.(); });
@@ -238,7 +241,9 @@ describe('usePushToTalk', () => {
     let fireLevel: (level: number) => void = () => {};
     let finishRecognition: (text: string) => void = () => {};
     const recognition = new Promise<string>((resolve) => { finishRecognition = resolve; });
-    const recognizeSentence = vi.fn((_audio: Uint8Array) => recognition);
+    const recognizeSentence = vi.fn((
+      _audio: Uint8Array, _filter: 'low' | 'medium' | 'high',
+    ) => recognition);
     const createSession = vi.fn();
     const recorder = {
       start: vi.fn(async (onChunk: (base64: string) => void, onLevel?: (level: number) => void) => {
@@ -249,7 +254,9 @@ describe('usePushToTalk', () => {
     } satisfies VoiceRecorder;
     const onText = vi.fn();
     const { result } = renderHook(() => usePushToTalk({
-      onText, mode: 'sentence', deps: { createSession, recognizeSentence, makeRecorder: () => recorder },
+      onText, mode: 'sentence', deps: {
+        createSession, recognizeSentence, getFillerFilter: () => 'low', makeRecorder: () => recorder,
+      },
     }));
 
     await act(async () => { await result.current.start(); });
@@ -266,6 +273,7 @@ describe('usePushToTalk', () => {
     expect(onText).not.toHaveBeenCalled();
     await waitFor(() => expect(recognizeSentence).toHaveBeenCalledOnce());
     expect([...recognizeSentence.mock.calls[0]![0]]).toEqual([65, 66, 67, 68, 69, 70, 71]);
+    expect(recognizeSentence.mock.calls[0]![1]).toBe('low');
     await act(async () => { finishRecognition('识别完成'); await stopped; });
     expect(onText).toHaveBeenCalledWith('识别完成');
     expect(result.current.state).toBe('idle');

@@ -5,6 +5,7 @@ export interface TencentAsrSignOptions {
   secretId: string;
   secretKey: string;
   engineModelType?: string;
+  filterModal?: '0' | '1' | '2';
   host?: string;
   timestamp?: number;
   expired?: number;
@@ -19,6 +20,7 @@ export function buildTencentAsrSignedUrl({
   secretId,
   secretKey,
   engineModelType = '16k_zh',
+  filterModal = '1',
   host = 'asr.cloud.tencent.com',
   timestamp = Math.floor(Date.now() / 1000),
   expired = timestamp + 300,
@@ -28,6 +30,7 @@ export function buildTencentAsrSignedUrl({
   const params: Record<string, string> = {
     engine_model_type: engineModelType,
     expired: String(expired),
+    filter_modal: filterModal,
     nonce: String(nonce),
     secretid: secretId,
     speaker_diarization: '0',

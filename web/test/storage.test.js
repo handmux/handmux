@@ -7,6 +7,7 @@ import {
   getInboxSeen, markInboxSeen,
   getInboxReadTs, setInboxReadTs,
   getProjectTaskBeta, setProjectTaskBeta, getRootView, setRootView, getLastProject, setLastProject,
+  getVoiceFillerFilter, setVoiceFillerFilter,
 } from '../src/storage.js';
 import {
   getRecentDocs, pushRecentDoc, removeRecentDoc, getPaneBase, setPaneBase,
@@ -73,6 +74,14 @@ describe('ideas per window (tw_ideas)', () => {
 });
 
 describe('storage', () => {
+  it('keeps the filler-word filtering level on this browser and defaults to medium', () => {
+    expect(getVoiceFillerFilter()).toBe('medium');
+    setVoiceFillerFilter('high');
+    expect(getVoiceFillerFilter()).toBe('high');
+    localStorage.setItem('tw_voice_filler_filter', 'invalid');
+    expect(getVoiceFillerFilter()).toBe('medium');
+  });
+
   it('keeps Project Task beta off by default and remembers each Project root choice explicitly', () => {
     expect(getProjectTaskBeta()).toBe(false);
     expect(getRootView()).toBe('session');

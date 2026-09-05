@@ -14,6 +14,7 @@ type FetchLike = typeof fetch;
 export interface TencentSentenceDependencies {
   fetch?: FetchLike;
   timestamp?: number;
+  filterModal?: 0 | 1 | 2;
 }
 
 export interface TencentSentenceResult {
@@ -49,6 +50,7 @@ export function buildTencentSentenceRequest(
   config: TencentAsrConfig,
   audio: Uint8Array,
   timestamp = Math.floor(Date.now() / 1000),
+  filterModal: 0 | 1 | 2 = 1,
 ): { url: string; headers: Record<string, string>; body: string } {
   const body = JSON.stringify({
     ProjectId: 0,
@@ -56,6 +58,7 @@ export function buildTencentSentenceRequest(
     EngSerViceType: config.engineModelType,
     SourceType: 1,
     VoiceFormat: 'pcm',
+    FilterModal: filterModal,
     Data: Buffer.from(audio).toString('base64'),
     DataLen: audio.byteLength,
   });
@@ -92,9 +95,9 @@ export function buildTencentSentenceRequest(
 export async function recognizeTencentSentence(
   config: TencentAsrConfig,
   audio: Uint8Array,
-  { fetch: fetchImpl = fetch, timestamp }: TencentSentenceDependencies = {},
+  { fetch: fetchImpl = fetch, timestamp, filterModal = 1 }: TencentSentenceDependencies = {},
 ): Promise<TencentSentenceResult> {
-  const request = buildTencentSentenceRequest(config, audio, timestamp);
+  const request = buildTencentSentenceRequest(config, audio, timestamp, filterModal);
   let response: Response;
   try {
     response = await fetchImpl(request.url, {

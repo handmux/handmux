@@ -2,6 +2,7 @@ import { tencentAdapter } from './providers/tencent.js';
 import { xfyunAdapter } from './providers/xfyun.js';
 
 export type AsrMode = 'streaming' | 'sentence';
+export type FillerFilterLevel = 'low' | 'medium' | 'high';
 
 export interface AsrConfig {
   provider: string;
@@ -34,6 +35,14 @@ export interface VoiceConfigField {
   defaultValue?: string;
 }
 
+export interface VoiceProviderCapabilities {
+  fillerFilter?: boolean;
+}
+
+export interface VoiceRecognitionOptions {
+  fillerFilter: FillerFilterLevel;
+}
+
 export interface VoiceProviderProfile {
   mode: AsrMode;
   labelKey: string;
@@ -63,10 +72,15 @@ export interface VoiceProviderAdapter {
   defaultMode: AsrMode;
   fields: readonly VoiceConfigField[];
   profiles: readonly VoiceProviderProfile[];
+  capabilities?: VoiceProviderCapabilities;
   readConfig(env: NodeJS.ProcessEnv, mode: AsrMode): AsrConfig;
   isConfigured(config: AsrConfig): boolean;
-  createStreamingSession?(config: AsrConfig): StreamingAsrSession;
-  recognizeSentence?(config: AsrConfig, audio: Uint8Array): Promise<SentenceAsrResult>;
+  createStreamingSession?(config: AsrConfig, options: VoiceRecognitionOptions): StreamingAsrSession;
+  recognizeSentence?(
+    config: AsrConfig,
+    audio: Uint8Array,
+    options: VoiceRecognitionOptions,
+  ): Promise<SentenceAsrResult>;
   publicError?(error: unknown): PublicAsrError | null;
 }
 

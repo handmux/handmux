@@ -1103,9 +1103,15 @@ describe('GET /api/asr/session', () => {
     expect(res.body).toMatchObject({ provider: 'tencent', protocol: 'tencent-asr-v2' });
     const url = new URL(res.body.url);
     expect(url.pathname).toBe('/asr/v2/123456');
+    expect(url.searchParams.get('filter_modal')).toBe('1');
     expect(url.searchParams.get('secretid')).toBe('AKID-private-id');
     expect(url.searchParams.get('signature')).toBeTruthy();
     expect(JSON.stringify(res.body)).not.toContain('private-key-DO-NOT-LEAK');
+    const strict = await request(app).get('/api/asr/session?fillerFilter=high')
+      .set('Authorization', 'Bearer good').expect(200);
+    expect(new URL(strict.body.url).searchParams.get('filter_modal')).toBe('2');
+    await request(app).get('/api/asr/session?fillerFilter=invalid')
+      .set('Authorization', 'Bearer good').expect(400);
     await request(app).get('/api/asr/sign').set('Authorization', 'Bearer good').expect(503);
   });
 
@@ -1128,9 +1134,11 @@ describe('POST /api/asr/sentence', () => {
   };
 
   it('accepts PCM bytes and returns only the recognized text', async () => {
-    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
-      Response: { Result: '整句话', RequestId: 'tencent-request-1' },
-    }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => (
+      new Response(JSON.stringify({
+        Response: { Result: '整句话', RequestId: 'tencent-request-1' },
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+    ));
     try {
       const app = express();
       app.use('/api', createApiRouter({ token: 'good', commands: baseCommands, asrEnv: sentenceEnv }));
@@ -1141,7 +1149,20 @@ describe('POST /api/asr/sentence', () => {
         .expect(200);
       expect(res.body).toEqual({ text: '整句话' });
       const [, init] = fetchSpy.mock.calls[0];
-      expect(JSON.parse(init.body)).toMatchObject({ Data: 'AAECAw==', DataLen: 4, VoiceFormat: 'pcm' });
+      expect(JSON.parse(init.body)).toMatchObject({
+        Data: 'AAECAw==', DataLen: 4, VoiceFormat: 'pcm', FilterModal: 1,
+      });
+      await request(app).post('/api/asr/sentence?fillerFilter=high')
+        .set('Authorization', 'Bearer good')
+        .set('Content-Type', 'application/octet-stream')
+        .send(Buffer.from([0, 1, 2, 3]))
+        .expect(200);
+      expect(JSON.parse(fetchSpy.mock.calls[1][1].body).FilterModal).toBe(2);
+      await request(app).post('/api/asr/sentence?fillerFilter=invalid')
+        .set('Authorization', 'Bearer good')
+        .set('Content-Type', 'application/octet-stream')
+        .send(Buffer.from([0, 1, 2, 3]))
+        .expect(400);
       expect(JSON.stringify(res.body)).not.toContain('private-key-DO-NOT-LEAK');
     } finally { fetchSpy.mockRestore(); }
   });
@@ -1215,6 +1236,7 @@ describe('GET /api/config (capabilities)', () => {
     expect(res.body.asr).toBe(true);
     expect(res.body.asrProvider).toBe('xfyun');
     expect(res.body.asrMode).toBe('streaming');
+    expect(res.body.asrFillerFilter).toBe(false);
   });
   it('reports the explicitly selected Tencent provider', async () => {
     const asrEnv = {
@@ -1224,7 +1246,9 @@ describe('GET /api/config (capabilities)', () => {
     const app = express();
     app.use('/api', createApiRouter({ token: 'good', commands: baseCommands, asrEnv }));
     const res = await request(app).get('/api/config').set('Authorization', 'Bearer good').expect(200);
-    expect(res.body).toMatchObject({ asr: true, asrProvider: 'tencent', asrMode: 'streaming' });
+    expect(res.body).toMatchObject({
+      asr: true, asrProvider: 'tencent', asrMode: 'streaming', asrFillerFilter: true,
+    });
   });
 
   it('reports Tencent sentence mode to the browser', async () => {

@@ -10,6 +10,7 @@ import type {
   JsonRequestOptions,
   TerminalHistoryResponse,
 } from './apiRequest.js';
+import type { VoiceFillerFilterLevel } from './storage.js';
 import {
   parseWorkspaceProtectionStatus,
   parseWorkspaceRecoveryPlan,
@@ -420,18 +421,27 @@ export async function signAsr(): Promise<AsrSignResponse> {
 
 // Create a provider-neutral streaming session. Private signing keys remain on the server; the phone receives
 // only the selected protocol and its short-lived signed WebSocket URL.
-export async function createAsrSession(): Promise<AsrSessionResponse> {
-  const response = parseAsrSession(await req('/api/asr/session', { timeoutMs: 8_000 }));
+export async function createAsrSession(
+  fillerFilter: VoiceFillerFilterLevel = 'medium',
+): Promise<AsrSessionResponse> {
+  const response = parseAsrSession(await req(
+    `/api/asr/session?fillerFilter=${encodeURIComponent(fillerFilter)}`,
+    { timeoutMs: 8_000 },
+  ));
   if (response) return response;
   throw new Error('ASR session returned an unsupported provider');
 }
 
 // Submit one complete 16 kHz mono PCM recording. Unlike streaming sessions this request is proxied by
 // Handmux Server because Tencent's TC3 request must be signed with the long-lived SecretKey.
-export async function recognizeSentence(audio: Uint8Array): Promise<string> {
+export async function recognizeSentence(
+  audio: Uint8Array,
+  fillerFilter: VoiceFillerFilterLevel = 'medium',
+): Promise<string> {
   const body = new ArrayBuffer(audio.byteLength);
   new Uint8Array(body).set(audio);
-  const response = recordOf(await req('/api/asr/sentence', {
+  const response = recordOf(await req(
+    `/api/asr/sentence?fillerFilter=${encodeURIComponent(fillerFilter)}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/octet-stream' },
     body,

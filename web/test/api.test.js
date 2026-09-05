@@ -315,10 +315,12 @@ describe('asr api', () => {
       provider: 'tencent', protocol: 'tencent-asr-v2', url: 'wss://asr.cloud.tencent.com/asr/v2/1',
     }));
     vi.stubGlobal('fetch', fetchMock);
-    await expect(createAsrSession()).resolves.toEqual({
+    await expect(createAsrSession('high')).resolves.toEqual({
       provider: 'tencent', protocol: 'tencent-asr-v2', url: 'wss://asr.cloud.tencent.com/asr/v2/1',
     });
-    expect(fetchMock).toHaveBeenCalledWith('/api/asr/session', expect.objectContaining({ cache: 'no-store' }));
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/asr/session?fillerFilter=high', expect.objectContaining({ cache: 'no-store' }),
+    );
   });
 
   it('signAsr GETs /api/asr/sign and returns {url, appId}', async () => {
@@ -334,9 +336,9 @@ describe('asr api', () => {
   it('recognizeSentence POSTs raw PCM without replacing its content type with JSON', async () => {
     const fetchMock = vi.fn(async () => jsonRes(200, { text: '整句话' }));
     vi.stubGlobal('fetch', fetchMock);
-    await expect(recognizeSentence(Uint8Array.from([0, 1, 2]))).resolves.toBe('整句话');
+    await expect(recognizeSentence(Uint8Array.from([0, 1, 2]), 'low')).resolves.toBe('整句话');
     const [path, init] = fetchMock.mock.calls[0];
-    expect(path).toBe('/api/asr/sentence');
+    expect(path).toBe('/api/asr/sentence?fillerFilter=low');
     expect(init).toMatchObject({ method: 'POST' });
     expect(init.headers['Content-Type']).toBe('application/octet-stream');
     expect([...new Uint8Array(init.body)]).toEqual([0, 1, 2]);

@@ -53,6 +53,7 @@ const PREVIEW_DIR_KEY = 'tw_preview_dir';   // { [windowId]: absPath } — last 
 const STARTUP_CMD_KEY = 'tw_startup_cmd';   // last startup command chosen in new window/session (e.g. "claude")
 const CHAT_DRAFT_KEY = 'tw_chat_draft';     // the chat composer's unsent text — survives an app exit/kill
 const CHAT_TONE_KEY = 'tw_chat_tone';       // the 对话-lens colour tone the user picked (ink | light | dusk)
+const VOICE_FILLER_FILTER_KEY = 'tw_voice_filler_filter'; // browser-local low / medium / high preference
 const AGENT_CONVERSATION_ENABLED_KEY = 'tw_agent_conversation_enabled_v1';
 const AGENT_USAGE_ENABLED_KEY = 'tw_agent_usage_enabled_v1';
 const IDEAS_KEY = 'tw_ideas';               // { [sessionName]: { [windowName]: Idea[] } } — per-window todo list
@@ -478,6 +479,19 @@ export const getChatTone = (): ChatTone => {
 };
 export const setChatTone = (tone: ChatTone): void => {
   if (isChatTone(tone)) localStorage.setItem(CHAT_TONE_KEY, tone);
+};
+
+export const VOICE_FILLER_FILTER_LEVELS = ['low', 'medium', 'high'] as const;
+export type VoiceFillerFilterLevel = typeof VOICE_FILLER_FILTER_LEVELS[number];
+const isVoiceFillerFilterLevel = (value: unknown): value is VoiceFillerFilterLevel => (
+  typeof value === 'string' && (VOICE_FILLER_FILTER_LEVELS as readonly string[]).includes(value)
+);
+export const getVoiceFillerFilter = (): VoiceFillerFilterLevel => {
+  const value = localStorage.getItem(VOICE_FILLER_FILTER_KEY);
+  return isVoiceFillerFilterLevel(value) ? value : 'medium';
+};
+export const setVoiceFillerFilter = (level: VoiceFillerFilterLevel): void => {
+  if (isVoiceFillerFilterLevel(level)) localStorage.setItem(VOICE_FILLER_FILTER_KEY, level);
 };
 
 function agentConversationPreferences(): Record<string, boolean> {

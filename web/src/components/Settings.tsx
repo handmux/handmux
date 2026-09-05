@@ -2,13 +2,17 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { ChangeEvent, ReactNode, RefObject } from 'react';
 import { notifyEnabled, enableNotifications, disableNotifications, pushSupported, getScriptPushKey } from '../push.js';
 import { PushScriptContent } from './PushScriptSheet.jsx';
-import { getDocHighlight, setDocHighlight } from '../storage.js';
+import {
+  getDocHighlight, getVoiceFillerFilter, setDocHighlight, setVoiceFillerFilter,
+  VOICE_FILLER_FILTER_LEVELS,
+} from '../storage.js';
 import { t, getLangCode, setLang, AVAILABLE } from '../i18n';
 import { SNAPSHOT_INTERVALS } from '../terminalTransport.js';
 import { useBackButton } from '../hooks/useBackButton.js';
 import { CheckIcon } from './icons.jsx';
 import type { TerminalHandle } from './Terminal.js';
 import type { SnapshotInterval, TerminalTransport } from '../terminalTransport.js';
+import type { VoiceFillerFilterLevel } from '../storage.js';
 import type { AgentIntegrationsController } from '../hooks/useAgentIntegrations.js';
 import type {
   AgentIntegrationName,
@@ -68,6 +72,9 @@ export interface SettingsProps {
   onOpenInbox?: () => void;
   updateInfo?: UpdateInfo | null;
   workspaceProtection?: WorkspaceProtection | null;
+  voiceEnabled?: boolean;
+  voiceProvider?: string | null;
+  voiceFillerFilterSupported?: boolean;
 }
 
 const DETAIL_TITLE: Record<DetailPage, string> = {
@@ -215,6 +222,29 @@ function SettingsChoiceGroup<T extends string | number>({ label, options, value,
   );
 }
 
+function SettingsLevelSlider({ label, value, onChange }: {
+  label: string;
+  value: VoiceFillerFilterLevel;
+  onChange: (value: VoiceFillerFilterLevel) => void;
+}) {
+  const current = VOICE_FILLER_FILTER_LEVELS.indexOf(value);
+  const labels = VOICE_FILLER_FILTER_LEVELS.map((level) => t(`settings.voice_filter_${level}`));
+  return (
+    <div className="settings-page-row settings-level-row">
+      <div className="settings-level-head">
+        <span className="settings-page-row-label">{label}</span>
+        <span className="settings-page-row-value">{labels[current]}</span>
+      </div>
+      <input type="range" min="0" max="2" step="1" value={current}
+        aria-label={label} aria-valuetext={labels[current]}
+        onChange={(event) => onChange(VOICE_FILLER_FILTER_LEVELS[Number(event.target.value)] ?? 'medium')} />
+      <div className="settings-level-labels" aria-hidden="true">
+        {labels.map((item) => <span key={item}>{item}</span>)}
+      </div>
+    </div>
+  );
+}
+
 function UpdateNotice({ updateInfo }: { updateInfo: UpdateInfo | null | undefined }) {
   if (!updateInfo?.updateAvailable) return null;
   const whatsNew = updateInfo.whatsNew || [];
@@ -261,10 +291,12 @@ export default function Settings({ open, onClose, termRef, onOpenChangelog = () 
   agentIntegrations = null,
   notifUnread = false, onOpenInbox,
   updateInfo = null,
-  workspaceProtection = null }: SettingsProps) {
+  workspaceProtection = null,
+  voiceEnabled, voiceProvider = null, voiceFillerFilterSupported = false }: SettingsProps) {
   const [page, setPage] = useState<SettingsPage>('root');
   const [font, setFont] = useState<{ size: number | null; auto: boolean } | null>(null);
   const [docHl, setDocHl] = useState(getDocHighlight());
+  const [voiceFillerFilter, setVoiceFillerFilterState] = useState(getVoiceFillerFilter);
   const [notify, setNotify] = useState(notifyEnabled());
   const [notifyBusy, setNotifyBusy] = useState(false);
   const [notifyMsg, setNotifyMsg] = useState('');
@@ -279,6 +311,7 @@ export default function Settings({ open, onClose, termRef, onOpenChangelog = () 
     if (open) {
       setFont(termRef.current?.getFontSize?.() ?? null);
       setNotify(notifyEnabled());
+      setVoiceFillerFilterState(getVoiceFillerFilter());
     } else {
       setPage('root');
       setNotifyMsg('');
@@ -362,6 +395,15 @@ export default function Settings({ open, onClose, termRef, onOpenChangelog = () 
 
   const fontLabel = font?.auto ? t('settings.font_auto') : font?.size ? `${font.size}px` : '—';
   const languageLabel = AVAILABLE.find((language) => language.code === getLangCode())?.label || '—';
+  const voiceEnabledLabel = voiceEnabled === undefined ? '—'
+    : t(voiceEnabled ? 'settings.voice_on' : 'settings.voice_off');
+  const voiceProviderLabel = !voiceEnabled ? t('settings.voice_not_configured')
+    : voiceProvider === 'tencent' ? t('settings.voice_provider_tencent')
+      : voiceProvider === 'xfyun' ? t('settings.voice_provider_xfyun') : voiceProvider || '—';
+  const changeVoiceFillerFilter = (level: VoiceFillerFilterLevel): void => {
+    setVoiceFillerFilter(level);
+    setVoiceFillerFilterState(level);
+  };
   const protectionCode = workspaceProtection?.errorCode;
   const protectionReason = protectionCode === 'live-corrupt' || protectionCode === 'live-unavailable'
     ? protectionCode : 'unknown';
@@ -421,6 +463,18 @@ export default function Settings({ open, onClose, termRef, onOpenChangelog = () 
         <SettingsNavRow label={t('settings.font_size')} value={fontLabel} onClick={() => openPage('font')} />
         <SettingsNavRow label={t('settings.keyboard_mode')} value={t(`settings.keyboard_mode_${keyboardMode}`)}
           onClick={() => openPage('keyboard')} />
+      </SettingsGroup>
+
+      <SettingsGroup title={t('settings.group_voice')}>
+        <SettingsValueRow label={t('settings.voice_enabled')} value={voiceEnabledLabel} />
+        <SettingsValueRow label={t('settings.voice_provider')} value={voiceProviderLabel} />
+        {voiceFillerFilterSupported ? (
+          <SettingsLevelSlider label={t('settings.voice_filler_filter')} value={voiceFillerFilter}
+            onChange={changeVoiceFillerFilter} />
+        ) : (
+          <SettingsValueRow label={t('settings.voice_filler_filter')}
+            value={t('settings.voice_not_supported')} />
+        )}
       </SettingsGroup>
 
       <SettingsGroup title={t('settings.group_terminal')} footer={t('settings.path_highlight_hint')}>
