@@ -801,6 +801,88 @@ describe('desktop terminal input', () => {
       .toBeLessThan(term.write.mock.invocationCallOrder[1]);
   });
 
+  it('keeps a TUI-drawn cursor authoritative when input wakes the live renderer', async () => {
+    vi.useFakeTimers();
+    let callbacks;
+    const ref = React.createRef();
+    mocks.openTerminalStream.mockImplementation((options) => {
+      callbacks = options;
+      return {
+        pause: vi.fn(),
+        suspend: vi.fn(),
+        resync: vi.fn(),
+        close: vi.fn(() => Promise.resolve()),
+      };
+    });
+    render(<Terminal ref={ref} pane="%1" stream />);
+    await vi.waitFor(() => expect(callbacks).toBeDefined());
+    await act(async () => callbacks.onSeed({
+      ansi: '> a\x1b[7m \x1b[0m\n',
+      width: 80,
+      height: 24,
+      historyLines: 0,
+      alt: false,
+      mouseAware: false,
+    }));
+    await act(async () => callbacks.onReady({ cur: { row: 0, col: 3, vis: false } }));
+    await act(async () => {
+      vi.advanceTimersByTime(450);
+      await Promise.resolve();
+    });
+
+    const term = mocks.instances[0];
+    expect(term.write.mock.calls.some(([data]) => data.includes('\x1b[7m'))).toBe(true);
+    expect(term.write.mock.calls.some(([data]) => data.includes('\x1b[?25h'))).toBe(false);
+    term.write.mockClear();
+    term.registerDecoration.mockClear();
+
+    await act(async () => {
+      ref.current.wake();
+      await Promise.resolve();
+      vi.advanceTimersByTime(40);
+      await Promise.resolve();
+    });
+
+    expect(term.write).toHaveBeenCalled();
+    expect(term.write.mock.calls.some(([data]) => data.includes('\x1b[?25h'))).toBe(false);
+    expect(term.write.mock.calls.at(-1)[0]).toBe('\x1b[?25l');
+    expect(term.registerDecoration).not.toHaveBeenCalled();
+  });
+
+  it('does not replace an alternate-screen hidden cursor with a decoration', async () => {
+    vi.useFakeTimers();
+    let callbacks;
+    mocks.openTerminalStream.mockImplementation((options) => {
+      callbacks = options;
+      return {
+        pause: vi.fn(),
+        suspend: vi.fn(),
+        resync: vi.fn(),
+        close: vi.fn(() => Promise.resolve()),
+      };
+    });
+    render(<Terminal pane="%1" stream />);
+    await vi.waitFor(() => expect(callbacks).toBeDefined());
+    const term = mocks.instances[0];
+    Object.assign(term.buffer.active, { baseY: 5, viewportY: 0, cursorX: 3, cursorY: 2 });
+    await act(async () => callbacks.onSeed({
+      ansi: 'app\x1b[7m \x1b[0m\n',
+      width: 80,
+      height: 24,
+      historyLines: 0,
+      alt: true,
+      mouseAware: false,
+    }));
+    await act(async () => callbacks.onReady({ cur: { row: 0, col: 3, vis: false } }));
+    await act(async () => {
+      vi.advanceTimersByTime(450);
+      await Promise.resolve();
+    });
+
+    expect(term.write.mock.calls.some(([data]) => data.includes('\x1b[?25h'))).toBe(false);
+    expect(term.registerDecoration).not.toHaveBeenCalled();
+  });
+
   it('does not restore a live cursor into the stale layout when leaving alternate screen', async () => {
     vi.useFakeTimers();
     let callbacks;
@@ -1406,6 +1488,38 @@ describe('desktop terminal input', () => {
     await act(async () => {
       await vi.waitFor(() => expect(mocks.getHistory.mock.calls.length).toBeGreaterThan(1));
     });
+  });
+
+  it('wakes snapshot polling without revealing a tmux-hidden cursor', async () => {
+    const ref = React.createRef();
+    mocks.getHistory
+      .mockResolvedValueOnce({
+        ansi: '> a\x1b[7m \x1b[0m\n',
+        hash: 'hidden-cursor',
+        width: 80,
+        height: 24,
+        alt: false,
+        mouseAware: false,
+        cur: { row: 0, col: 3, vis: false },
+      })
+      .mockResolvedValue({ unchanged: true });
+    render(<Terminal ref={ref} pane="%1" />);
+    const term = mocks.instances[0];
+    await act(async () => {
+      await vi.waitFor(() => expect(mocks.getHistory).toHaveBeenCalledOnce());
+      await vi.waitFor(() => expect(term.write.mock.calls.some(
+        ([data]) => data.includes('\x1b[7m'),
+      )).toBe(true));
+    });
+    expect(term.write.mock.calls.some(([data]) => data.includes('\x1b[?25h'))).toBe(false);
+    term.write.mockClear();
+
+    await act(async () => {
+      ref.current.wake();
+      await vi.waitFor(() => expect(mocks.getHistory.mock.calls.length).toBeGreaterThan(1));
+    });
+
+    expect(term.write).not.toHaveBeenCalled();
   });
 
   it('routes unauthorized input failures to authentication handling', async () => {

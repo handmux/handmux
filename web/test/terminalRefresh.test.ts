@@ -139,6 +139,17 @@ describe('prepareSeed alignment', () => {
     t.dispose();
   });
 
+  it('keeps a TUI-drawn inverse cursor without adding an xterm cursor when DECTCEM is hidden', async () => {
+    const t = new Terminal({ cols: 12, rows: 3, allowProposedApi: true, scrollback: 100 });
+    await write(t, `\x1b[2J\x1b[3J\x1b[H${prepareSeed('> a\x1b[7m \x1b[0m\n')}`);
+    await write(t, cursorSeq({ row: 0, col: 3, vis: false }, t.rows, 1));
+
+    const softwareCursor = t.buffer.active.getLine(0)?.getCell(3);
+    expect(softwareCursor?.isInverse()).toBeTruthy();
+    expect(cursorSeq({ row: 0, col: 3, vis: false }, t.rows, 1)).toBe('\x1b[?25l');
+    t.dispose();
+  });
+
   it('places the cursor ON the content (top), not the empty grid bottom, when the pane is sparse', async () => {
     // Fresh shell / sparse pane: a 2-row seed (prompt + a line) written top-anchored into a taller
     // 6-row grid leaves 4 blank rows BELOW. cur.row counts up from the seed's last row (the prompt),

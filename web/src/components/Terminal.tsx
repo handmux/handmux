@@ -231,11 +231,6 @@ const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Terminal({
   // poll immediately. Bridged through a ref like fitRef so the imperative handle can reach effect scope.
   const wakeRef = useRef<(() => void) | null>(null);
   const resyncRef = useRef<(() => void) | null>(null);
-  // When true, placeCursor lights the block at the cursor's real position even if the app has hidden it
-  // (cur.vis === false). Set by every key/command send (see wake); cleared by the repaint loop once the app
-  // shows its own cursor again (cur.vis=1). So operating the terminal always reveals WHERE the cursor is —
-  // through Claude's whole working spell — without a stray block lingering after the app deliberately hides.
-  const forceCursorRef = useRef(false);
   // Callout 整行/整段 buttons live in render scope but need effect-scope helpers (term, buf, refreshSelUI).
   // Bridged via a ref, same pattern as fitRef/wakeRef. Populated once inside the effect.
   const selActionsRef = useRef<TerminalSelectionActions | null>(null);
@@ -598,12 +593,12 @@ const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Terminal({
       if (disposed) return;
       const { cur, line, liveOwned } = cursorDisplayState();
       const b = term.buffer.active;
-      const useDeco = cur && (cur.vis || forceCursorRef.current) && altScreenRef.current && b.viewportY < b.baseY;
+      const useDeco = cur?.vis && altScreenRef.current && b.viewportY < b.baseY;
       if (!useDeco || !cur || line == null) {
         disposeCursorDeco();
         // Once the live stream is ready, xterm's parser is the cursor authority. Replaying an older
         // snapshot cursor here would make the real position flash and then jump backwards.
-        if (!liveOwned) term.write(cursorSeq(cur, term.rows, seedRows, forceCursorRef.current));
+        if (!liveOwned) term.write(cursorSeq(cur, term.rows, seedRows));
         drawLocate();
         return;
       }
@@ -1012,12 +1007,7 @@ const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Terminal({
       }
       const pad = frame.alt ? 0 : Math.max(0, term.rows - frame.bufferRows);
       const padding = pad ? '\r\n'.repeat(pad) : '';
-      const cursorMode = cursorSeq(
-        frame.cur,
-        term.rows,
-        frame.bufferRows + pad,
-        forceCursorRef.current,
-      );
+      const cursorMode = cursorSeq(frame.cur, term.rows, frame.bufferRows + pad);
       term.write(
         `\x1b[?1049l\x1b[?25l\x1b[0m\x1b[2J\x1b[3J\x1b[H${padding}${frame.ansi}`,
         () => {
@@ -1039,7 +1029,6 @@ const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Terminal({
             && Number.isFinite(frame.boundaryLine) && frame.boundaryLine > 0
             ? frame.boundaryLine + pad
             : null;
-          if (frame.cursorVisible) forceCursorRef.current = false;
           if (keepPosition) {
             term.scrollToLine(Math.max(0, buf().length - anchorFromBottom));
           } else if (frame.alt && firstFrame) {
@@ -1255,10 +1244,6 @@ const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Terminal({
         lastAnsi = hist.ansi;
         lastCur = curKey;
         curInfo = hist.cur ?? null; // placed by placeCursor() below (and again by fit, after any resize)
-        // Reveal-on-activity handoff: a send set forceCursorRef so the block stays lit while the app hides
-        // the cursor (Claude working). The moment the app shows its OWN cursor again (cur.vis=1 → back to
-        // idle/accepting input), drop the force so a LATER app-driven hide can hide it normally.
-        if (hist.cur && hist.cur.vis) forceCursorRef.current = false;
         if (keepPosition) {
           const target = Math.max(0, buf().length - anchorFromBottom);
           if (preserveLatestPosition) settleHistoryAnchor(target);
@@ -1481,11 +1466,6 @@ const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Terminal({
     // back-to-back polls instead of stacking timer chains.
     const wake = () => {
       idleSince = Date.now();
-      // A send/keypress is the user operating the terminal → reveal the cursor even if the app has hidden it
-      // (Claude working). Hold it lit until the app shows its own cursor again — the repaint loop clears the
-      // force on the first cur.vis=1 frame. placeCursor shows it this frame; the immediate poll re-places it.
-      forceCursorRef.current = true;
-      placeCursor();
       if (streamMode) {
         if (historyMode) resumeStream();
         else scheduleStreamRender();
