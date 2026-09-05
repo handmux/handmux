@@ -105,7 +105,9 @@ export async function runSetup({
           { value: 'push', label: t('setup.secPush'), hint: a.vapid ? (a.vapid.subject || t('setup.on')) : t('setup.off') },
           {
             value: 'voice', label: t('setup.secVoice'),
-            hint: a.voice ? `${voiceProfileLabel(a.voice)} · ${a.voice.providers[a.voice.provider]?.appId || t('setup.on')}` : t('setup.off'),
+            hint: a.voice && a.voice.enabled !== false
+              ? `${voiceProfileLabel(a.voice)} · ${a.voice.providers[a.voice.provider]?.appId || t('setup.on')}`
+              : t('setup.off'),
           },
           // A CLI-tool preference (language of handmux's own terminal output), not an app setting — so it
           // sits at the bottom of the settings, just above the actions.
@@ -452,13 +454,17 @@ async function editPush(a: SetupAnswers): Promise<VapidConfig | undefined> {
 // provider is injected into the server process. Secrets are masked and replaced, never revealed.
 async function editVoice(a: SetupAnswers): Promise<VoiceConfig | undefined> {
   let voice = a.voice;
-  if (!voice) {
+  if (!voice || voice.enabled === false) {
     let on;
     try { on = await ask(confirm({ message: withBack(t('setup.voiceSetup')), initialValue: false, ...yesno() })); }
     catch (e) { if (e === CANCELLED) return undefined; throw e; }
-    if (!on) return undefined;
-    const profile = await chooseVoiceProfile({ provider: 'tencent', mode: 'streaming' });
-    voice = await ensureVoiceProvider({ ...profile, providers: {} });
+    if (!on) return voice;
+    if (voice) {
+      voice = await ensureVoiceProvider({ ...voice, enabled: true });
+    } else {
+      const profile = await chooseVoiceProfile({ provider: 'tencent', mode: 'streaming' });
+      voice = await ensureVoiceProvider({ ...profile, enabled: true, providers: {} });
+    }
   }
   for (;;) {
     const provider: string = voice.provider;
@@ -482,7 +488,7 @@ async function editVoice(a: SetupAnswers): Promise<VoiceConfig | undefined> {
         initialValue: 'provider',
       }));
     } catch (e) { if (e === CANCELLED) return voice; throw e; }
-    if (pick === 'off') return undefined;
+    if (pick === 'off') return { ...voice, enabled: false };
     try {
       if (pick === 'provider') {
         const selected = await chooseVoiceProfile(voice);

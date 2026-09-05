@@ -15,6 +15,7 @@ All notable changes to handmux. Format follows [Keep a Changelog](https://keepac
 
 ### Fixed
 
+- 修复在 Setup 关闭语音时删除全部服务商凭据的问题；现在只持久化 `enabled: false`，重新开启会沿用原 provider、mode 和凭据，旧配置仍默认开启。
 - 修复在 `handmux setup` 关闭语音后，supervisor 仍可能把继承的旧 ASR 环境变量传给 Server，导致 Web 端继续显示并使用讯飞的问题。
 - 修复语音录音或云端识别失败后输入区没有任何错误提示，以及波形在部分浏览器不动、终端聊天中同样音量的幅度明显更小的问题；现在会短暂显示浏览器麦克风权限、安全地址、网络、腾讯凭据或 CAM 缺权的对应处理方式，波形使用更稳定的真实音量窗口与统一包络。
 - 修复部分腾讯云账号使用 `16k_zh` 实时语音识别时，因不支持 `result_mod=1` 而立即提示“参数不合法”，以及腾讯已经返回识别结果但输入框没有文字的问题。

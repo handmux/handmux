@@ -230,7 +230,8 @@ export function supervise(cfg: SupervisorConfig, {
         candidate.fields.map((field) => field.env)
       )),
     ]) delete env[key];
-    const voice = cfg.voice ?? (cfg.xfyun ? { provider: 'xfyun' as const, providers: { xfyun: cfg.xfyun } } : null);
+    const voice = cfg.voice === null || cfg.voice?.enabled === false ? null
+      : cfg.voice ?? (cfg.xfyun ? { provider: 'xfyun' as const, providers: { xfyun: cfg.xfyun } } : null);
     if (voice) {
       const adapter = voiceProviderRegistry.get(voice.provider);
       if (adapter) {

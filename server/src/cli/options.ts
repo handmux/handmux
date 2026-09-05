@@ -43,6 +43,8 @@ export interface TencentAsrConfig extends VoiceProviderConfig {
 }
 
 export interface VoiceConfig {
+  /** Missing keeps existing configs enabled; false disables recognition without deleting credentials. */
+  enabled?: boolean;
   provider: string;
   mode?: 'streaming' | 'sentence';
   providers: Record<string, VoiceProviderConfig | undefined>;
@@ -235,6 +237,7 @@ function parseVoice(value: unknown, legacyXfyun: unknown): VoiceConfig | null {
     const adapter = voiceProviderRegistry.get(value.provider);
     const providers = isRecord(value.providers) ? value.providers : {};
     if (adapter) {
+      if (value.enabled === false) return null;
       const parsed: Record<string, VoiceProviderConfig> = {};
       for (const candidate of voiceProviderRegistry.adapters) {
         const config = stringFields(providers[candidate.id], candidate.fields.map((field) => field.key));

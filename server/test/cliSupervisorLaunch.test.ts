@@ -61,4 +61,16 @@ describe('supervisor launch contract', () => {
       shortcuts: { command: [], chat: [] }, voice,
     }).voice).toEqual(voice);
   });
+  it('retains the disabled marker with the saved provider credentials', () => {
+    const voice = {
+      enabled: false,
+      provider: 'tencent',
+      mode: 'sentence',
+      providers: { tencent: { appId: '1', secretId: 'ID', secretKey: 'KEY' } },
+    };
+    expect(parseSupervisorConfig({
+      tunnel: 'none', port: 19999, host: '0.0.0.0', token: 'secret',
+      shortcuts: { command: [], chat: [] }, voice,
+    }).voice).toEqual(voice);
+  });
 });

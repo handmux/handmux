@@ -169,6 +169,19 @@ describe('resolveConfig', () => {
     };
     expect(resolveConfig({}, { voice }, {}, gen).voice).toEqual(voice);
   });
+  it('treats a retained disabled voice profile as off without deleting its stored credentials', () => {
+    const voice = {
+      enabled: false,
+      provider: 'tencent',
+      mode: 'sentence',
+      providers: {
+        xfyun: { appId: 'A', apiKey: 'K', apiSecret: 'S' },
+        tencent: { appId: '1', secretId: 'ID', secretKey: 'KEY', engineModelType: '16k_zh' },
+      },
+    };
+    expect(resolveConfig({}, { voice }, {}, gen).voice).toBeNull();
+    expect(voice.providers.tencent.secretKey).toBe('KEY');
+  });
   it('projects only string integration fields from untrusted config JSON', () => {
     const c = resolveConfig({}, {
       vapid: { public: 'pub', private: 123, subject: false },

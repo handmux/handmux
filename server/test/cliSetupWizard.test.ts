@@ -87,6 +87,32 @@ describe('configFromAnswers', () => {
       providers: { xfyun: { appId: 'A', apiKey: 'K', apiSecret: 'S' } },
     });
   });
+  it('round-trips a disabled voice profile without deleting either provider configuration', () => {
+    const voice = {
+      enabled: false as const,
+      provider: 'tencent' as const,
+      mode: 'sentence' as const,
+      providers: {
+        xfyun: { appId: 'A', apiKey: 'K', apiSecret: 'S' },
+        tencent: { appId: '1', secretId: 'ID', secretKey: 'KEY', engineModelType: '16k_zh' },
+      },
+    };
+    const config = configFromAnswers({ tunnel: 'none', port: 19999, voice });
+    expect(config.voice).toEqual(voice);
+    expect(answersFromConfig(config).voice).toEqual(voice);
+    expect(mergeConfig(config, { tunnel: 'none', port: 19999, voice }).voice).toEqual(voice);
+  });
+  it('migrates an enabled legacy XFYUN config to disabled without losing its credentials', () => {
+    const legacy = { xfyun: { appId: 'A', apiKey: 'K', apiSecret: 'S' } };
+    const migrated = answersFromConfig(legacy).voice!;
+    const disabled = { ...migrated, enabled: false as const };
+    const config = mergeConfig(legacy, { tunnel: 'none', port: 19999, voice: disabled });
+    expect(config.xfyun).toBeUndefined();
+    expect(config.voice).toEqual({
+      enabled: false, provider: 'xfyun', mode: 'streaming',
+      providers: { xfyun: { appId: 'A', apiKey: 'K', apiSecret: 'S' } },
+    });
+  });
   it('pins the token when set, omits it when blank (blank = auto each start)', () => {
     expect(configFromAnswers({ tunnel: 'none', port: 19999, token: 'pinned1' }))
       .toEqual({ tunnel: 'none', port: 19999, token: 'pinned1' });

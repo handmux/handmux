@@ -167,6 +167,7 @@ function voiceFromConfig(value: unknown): VoiceConfig | undefined {
     if (config) providers[candidate.id] = config;
   }
   return {
+    ...(value.enabled === false ? { enabled: false } : {}),
     provider: adapter.id,
     mode: providerMode(adapter, value.mode),
     providers,

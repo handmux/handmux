@@ -52,7 +52,17 @@ describe('Supervisor process state wiring', () => {
     };
     supervise({
       tunnel: 'none', port: 19_999, host: '127.0.0.1', token: 'secret',
-      shortcuts: { command: [], chat: [] }, voice: null, xfyun: null,
+      shortcuts: { command: [], chat: [] },
+      voice: {
+        enabled: false, provider: 'tencent', mode: 'sentence',
+        providers: {
+          xfyun: { appId: 'saved', apiKey: 'saved', apiSecret: 'saved' },
+          tencent: {
+            appId: 'saved', secretId: 'saved', secretKey: 'saved', engineModelType: '16k_zh',
+          },
+        },
+      },
+      xfyun: { appId: 'legacy', apiKey: 'legacy', apiSecret: 'legacy' },
     }, {
       home: tmpHome('hm-supervisor-voice-off-'), processRef, spawnChild,
       probeServerReady: () => false, setTimer: () => 1,

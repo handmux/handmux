@@ -75,6 +75,7 @@ const voiceConfig = (value: unknown): SupervisorConfig['voice'] | undefined | nu
     if (config) parsed[candidate.id] = config;
   }
   return {
+    ...(record.enabled === false ? { enabled: false } : {}),
     provider: adapter.id,
     mode: providerMode(adapter, record.mode),
     providers: parsed,
