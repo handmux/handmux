@@ -219,11 +219,11 @@ describe('usePushToTalk', () => {
     act(() => { fireTencentChunk('REVG'); });
     expect([...sent[1] as Uint8Array]).toEqual([68, 69, 70]);
     act(() => { ws.onmessage?.({ data: JSON.stringify({
-      code: 0, final: 0, sentences: { sentence_list: [{ sentence_id: 0, sentence_type: 0, sentence: '你号' }] },
+      code: 0, result: { slice_type: 1, index: 0, voice_text_str: '你号' },
     }) }); });
     expect(result.current.partial).toBe('你号');
     act(() => { ws.onmessage?.({ data: JSON.stringify({
-      code: 0, final: 0, sentences: { sentence_list: [{ sentence_id: 0, sentence_type: 1, sentence: '你好' }] },
+      code: 0, result: { slice_type: 2, index: 0, voice_text_str: '你好' },
     }) }); });
     expect(result.current.partial).toBe('你好');
     await act(async () => { await result.current.stop(); });

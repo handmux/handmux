@@ -1,5 +1,5 @@
 export interface TencentTranscriptState {
-  sentences: Map<number, string>;
+  slices: Map<number, string>;
 }
 
 const asRecord = (value: unknown): Record<string, unknown> | null => (
@@ -8,29 +8,25 @@ const asRecord = (value: unknown): Record<string, unknown> | null => (
 );
 
 export function emptyTencentTranscript(): TencentTranscriptState {
-  return { sentences: new Map() };
+  return { slices: new Map() };
 }
 
-// ASR v2 repeatedly emits a sentence_id while sentence_type=0, then replaces it with the stable type=1
-// text. Replacing by id keeps the live partial honest without duplicating each intermediate hypothesis.
+// ASR v2 repeatedly emits result.voice_text_str for the same result.index while slice_type is 0/1,
+// then stabilizes it at slice_type=2. Replacing by index keeps partials without duplicating hypotheses.
 export function accumulateTencent(
   state: TencentTranscriptState,
   message: unknown,
 ): TencentTranscriptState {
-  const sentences = asRecord(asRecord(message)?.sentences);
-  const list = sentences?.sentence_list;
-  if (!Array.isArray(list)) return state;
-  const next = new Map(state.sentences);
-  for (const candidate of list) {
-    const sentence = asRecord(candidate);
-    if (!sentence || typeof sentence.sentence_id !== 'number' || typeof sentence.sentence !== 'string') continue;
-    next.set(sentence.sentence_id, sentence.sentence);
+  const next = new Map(state.slices);
+  const result = asRecord(asRecord(message)?.result);
+  if (typeof result?.index === 'number' && typeof result.voice_text_str === 'string') {
+    next.set(result.index, result.voice_text_str);
   }
-  return { sentences: next };
+  return { slices: next };
 }
 
 export function tencentTextOf(state: TencentTranscriptState): string {
-  return [...state.sentences.keys()].sort((a, b) => a - b).map((id) => state.sentences.get(id)).join('');
+  return [...state.slices.keys()].sort((a, b) => a - b).map((id) => state.slices.get(id)).join('');
 }
 
 export function base64ToBytes(base64: string): Uint8Array {

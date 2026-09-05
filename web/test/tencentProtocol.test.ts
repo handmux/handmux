@@ -4,16 +4,18 @@ import {
 } from '../src/voice/tencentProtocol.js';
 
 describe('Tencent real-time ASR v2 protocol', () => {
-  it('replaces unstable sentence hypotheses by sentence_id and orders them', () => {
+  it('replaces live hypotheses by result index and orders completed slices', () => {
     let state = emptyTencentTranscript();
-    state = accumulateTencent(state, { sentences: { sentence_list: [
-      { sentence_id: 1, sentence_type: 0, sentence: '世界' },
-      { sentence_id: 0, sentence_type: 0, sentence: '你号' },
-    ] } });
+    state = accumulateTencent(state, {
+      code: 0, result: { slice_type: 1, index: 1, voice_text_str: '世界' },
+    });
+    state = accumulateTencent(state, {
+      code: 0, result: { slice_type: 1, index: 0, voice_text_str: '你号' },
+    });
     expect(tencentTextOf(state)).toBe('你号世界');
-    state = accumulateTencent(state, { sentences: { sentence_list: [
-      { sentence_id: 0, sentence_type: 1, sentence: '你好' },
-    ] } });
+    state = accumulateTencent(state, {
+      code: 0, result: { slice_type: 2, index: 0, voice_text_str: '你好' },
+    });
     expect(tencentTextOf(state)).toBe('你好世界');
   });
 
