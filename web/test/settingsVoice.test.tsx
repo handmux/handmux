@@ -40,10 +40,13 @@ const render = (props: Record<string, unknown>) => act(() => root.render(
 
 describe('Settings speech-to-text section', () => {
   it('shows Tencent status and persists the low/medium/high slider on this browser', async () => {
-    await render({ voiceEnabled: true, voiceProvider: 'tencent', voiceFillerFilterSupported: true });
+    await render({
+      voiceEnabled: true, voiceProvider: 'tencent', voiceMode: 'sentence',
+      voiceFillerFilterSupported: true,
+    });
     expect(container.textContent).toContain('语音转文字');
     expect(container.textContent).toContain('已开启');
-    expect(container.textContent).toContain('腾讯云');
+    expect(container.textContent).toContain('腾讯云一句话识别');
 
     const slider = container.querySelector<HTMLInputElement>('input[aria-label="语气词过滤"]');
     expect(slider?.value).toBe('1');
@@ -56,9 +59,21 @@ describe('Settings speech-to-text section', () => {
   });
 
   it('states that iFlytek does not support filler-word filtering', async () => {
-    await render({ voiceEnabled: true, voiceProvider: 'xfyun', voiceFillerFilterSupported: false });
-    expect(container.textContent).toContain('科大讯飞');
+    await render({
+      voiceEnabled: true, voiceProvider: 'xfyun', voiceMode: 'streaming',
+      voiceFillerFilterSupported: false,
+    });
+    expect(container.textContent).toContain('讯飞语音听写');
     expect(container.textContent).toContain('语气词过滤不支持');
     expect(container.querySelector('input[aria-label="语气词过滤"]')).toBeNull();
+  });
+
+  it('uses the same Tencent streaming profile name as handmux setup', async () => {
+    await render({
+      voiceEnabled: true, voiceProvider: 'tencent', voiceMode: 'streaming',
+      voiceFillerFilterSupported: true,
+    });
+    expect(container.textContent).toContain('腾讯云实时语音识别');
+    expect(container.textContent).not.toContain('腾讯云一句话识别');
   });
 });

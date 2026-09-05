@@ -74,6 +74,7 @@ export interface SettingsProps {
   workspaceProtection?: WorkspaceProtection | null;
   voiceEnabled?: boolean;
   voiceProvider?: string | null;
+  voiceMode?: 'streaming' | 'sentence' | null;
   voiceFillerFilterSupported?: boolean;
 }
 
@@ -292,7 +293,8 @@ export default function Settings({ open, onClose, termRef, onOpenChangelog = () 
   notifUnread = false, onOpenInbox,
   updateInfo = null,
   workspaceProtection = null,
-  voiceEnabled, voiceProvider = null, voiceFillerFilterSupported = false }: SettingsProps) {
+  voiceEnabled, voiceProvider = null, voiceMode = null,
+  voiceFillerFilterSupported = false }: SettingsProps) {
   const [page, setPage] = useState<SettingsPage>('root');
   const [font, setFont] = useState<{ size: number | null; auto: boolean } | null>(null);
   const [docHl, setDocHl] = useState(getDocHighlight());
@@ -398,8 +400,13 @@ export default function Settings({ open, onClose, termRef, onOpenChangelog = () 
   const voiceEnabledLabel = voiceEnabled === undefined ? '—'
     : t(voiceEnabled ? 'settings.voice_on' : 'settings.voice_off');
   const voiceProviderLabel = !voiceEnabled ? t('settings.voice_not_configured')
-    : voiceProvider === 'tencent' ? t('settings.voice_provider_tencent')
-      : voiceProvider === 'xfyun' ? t('settings.voice_provider_xfyun') : voiceProvider || '—';
+    : voiceProvider === 'tencent' && voiceMode === 'sentence'
+      ? t('settings.voice_profile_tencent_sentence')
+      : voiceProvider === 'tencent'
+        ? t('settings.voice_profile_tencent_streaming')
+        : voiceProvider === 'xfyun'
+          ? t('settings.voice_profile_xfyun')
+          : voiceProvider || '—';
   const changeVoiceFillerFilter = (level: VoiceFillerFilterLevel): void => {
     setVoiceFillerFilter(level);
     setVoiceFillerFilterState(level);

@@ -2397,6 +2397,7 @@ export default function App() {
         updateInfo={updateInfo}
         voiceEnabled={serverConfig?.asr ?? false}
         voiceProvider={serverConfig?.asrProvider ?? null}
+        voiceMode={serverConfig?.asrMode ?? null}
         voiceFillerFilterSupported={serverConfig?.asrFillerFilter ?? false}
       />
       <Changelog open={changelogOpen} onClose={() => setChangelogOpen(false)} />
