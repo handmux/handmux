@@ -251,6 +251,7 @@ describe('desktop terminal input', () => {
       configurable: true,
       value: 'Win32',
     });
+    localStorage.removeItem('tw_doc_highlight');
   });
 
   afterEach(() => {
@@ -798,6 +799,50 @@ describe('desktop terminal input', () => {
     expect(term.write.mock.invocationCallOrder[0])
       .toBeLessThan(term.scrollToBottom.mock.invocationCallOrder[0]);
     expect(term.scrollToBottom.mock.invocationCallOrder[0])
+      .toBeLessThan(term.write.mock.invocationCallOrder[1]);
+  });
+
+  it('installs path highlights before the cursor-only write can reveal a decoration-free frame', async () => {
+    vi.useFakeTimers();
+    localStorage.setItem('tw_doc_highlight', '1');
+    let callbacks;
+    mocks.openTerminalStream.mockImplementation((options) => {
+      callbacks = options;
+      return {
+        pause: vi.fn(),
+        suspend: vi.fn(),
+        resync: vi.fn(),
+        close: vi.fn(() => Promise.resolve()),
+      };
+    });
+    render(<Terminal pane="%1" stream onDocLinkTap={vi.fn()} />);
+    await vi.waitFor(() => expect(callbacks).toBeDefined());
+    await revealStreamFrame(callbacks, 'open /tmp/report.md');
+
+    const term = mocks.instances[0];
+    const text = 'open /tmp/report.md';
+    term.buffer.active.getLine = (row) => row === 0 ? {
+      isWrapped: false,
+      getCell: (column) => ({
+        getChars: () => text[column] || '',
+        getWidth: () => 1,
+      }),
+    } : undefined;
+    let contentCallback;
+    term.write.mockClear();
+    term.registerDecoration.mockClear();
+    term.write.mockImplementationOnce((_data, callback) => { contentCallback = callback; });
+
+    await act(async () => callbacks.onData(new Uint8Array([0x78])));
+    await act(async () => {
+      vi.advanceTimersByTime(40);
+      await Promise.resolve();
+    });
+    expect(contentCallback).toBeTypeOf('function');
+    act(() => contentCallback());
+
+    expect(term.registerDecoration).toHaveBeenCalled();
+    expect(term.registerDecoration.mock.invocationCallOrder[0])
       .toBeLessThan(term.write.mock.invocationCallOrder[1]);
   });
 

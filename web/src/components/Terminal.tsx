@@ -1045,6 +1045,9 @@ const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Terminal({
             finishStreamPaint({ aborted: true, resync: leftAltScreen });
             return;
           }
+          // Decorations belong to the content replay, not the cursor restoration. Register them before
+          // the second parser write so xterm cannot paint a transient decoration-free frame in between.
+          try { refreshDocDecorations(term); } catch { /* cosmetic */ }
           // Keep the native cursor hidden while content is replayed and the viewport is restored,
           // then place the cursor from the same immutable mirror revision in a second parser write.
           term.write(cursorMode, () => {
@@ -1060,7 +1063,6 @@ const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Terminal({
             seeded = true;
             setPaused(false);
             setConn(nextConnection(connState, 'ok'));
-            try { refreshDocDecorations(term); } catch { /* cosmetic */ }
             drawHistoryBoundary();
             placeCursor();
             reveal();
