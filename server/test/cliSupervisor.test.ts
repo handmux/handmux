@@ -32,6 +32,39 @@ describe('browser public origin supervisor environment', () => {
 });
 
 describe('Supervisor process state wiring', () => {
+  it('removes inherited ASR credentials when setup disabled voice', () => {
+    let childEnv: NodeJS.ProcessEnv = {};
+    const spawnChild = vi.fn((
+      _command: string,
+      _args: readonly string[],
+      options: { env?: NodeJS.ProcessEnv; stdio: ['ignore', 'inherit' | 'pipe', 'inherit' | 'pipe'] },
+    ) => { childEnv = options.env || {}; return new FakeChild(100); });
+    const processRef = {
+      pid: 50,
+      env: {
+        HANDMUX_ASR_PROVIDER: 'xfyun', HANDMUX_ASR_MODE: 'streaming',
+        XFYUN_APPID: 'stale', XFYUN_APIKEY: 'stale', XFYUN_APISECRET: 'stale',
+        TENCENT_ASR_APPID: 'stale', TENCENT_ASR_SECRET_ID: 'stale',
+        TENCENT_ASR_SECRET_KEY: 'stale', TENCENT_ASR_ENGINE_MODEL_TYPE: 'stale',
+      },
+      execPath: '/usr/bin/node', stdout: { write: vi.fn() },
+      on: vi.fn(), kill: vi.fn(), exit: vi.fn(),
+    };
+    supervise({
+      tunnel: 'none', port: 19_999, host: '127.0.0.1', token: 'secret',
+      shortcuts: { command: [], chat: [] }, voice: null, xfyun: null,
+    }, {
+      home: tmpHome('hm-supervisor-voice-off-'), processRef, spawnChild,
+      probeServerReady: () => false, setTimer: () => 1,
+    });
+    for (const key of [
+      'HANDMUX_ASR_PROVIDER', 'HANDMUX_ASR_MODE',
+      'XFYUN_APPID', 'XFYUN_APIKEY', 'XFYUN_APISECRET',
+      'TENCENT_ASR_APPID', 'TENCENT_ASR_SECRET_ID', 'TENCENT_ASR_SECRET_KEY',
+      'TENCENT_ASR_ENGINE_MODEL_TYPE',
+    ]) expect(childEnv[key]).toBeUndefined();
+  });
+
   it('injects only the selected voice provider into the server child', () => {
     let childEnv: NodeJS.ProcessEnv = {};
     const spawnChild = vi.fn((

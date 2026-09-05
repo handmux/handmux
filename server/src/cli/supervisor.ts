@@ -221,18 +221,18 @@ export function supervise(cfg: SupervisorConfig, {
       if (cfg.vapid.private) env.VAPID_PRIVATE = cfg.vapid.private;
       if (cfg.vapid.subject) env.VAPID_SUBJECT = cfg.vapid.subject;
     }
+    // Config is authoritative for voice. Always remove inherited ASR state first, including when setup
+    // explicitly disabled voice; otherwise stale shell/service credentials silently re-enable XFYUN.
+    for (const key of [
+      'HANDMUX_ASR_PROVIDER',
+      'HANDMUX_ASR_MODE',
+      ...voiceProviderRegistry.adapters.flatMap((candidate) => (
+        candidate.fields.map((field) => field.env)
+      )),
+    ]) delete env[key];
     const voice = cfg.voice ?? (cfg.xfyun ? { provider: 'xfyun' as const, providers: { xfyun: cfg.xfyun } } : null);
     if (voice) {
       const adapter = voiceProviderRegistry.get(voice.provider);
-      // The supervisor environment may itself contain legacy credentials. Once config selects a provider,
-      // remove both inherited sets before injecting only the active one.
-      for (const key of [
-        'HANDMUX_ASR_PROVIDER',
-        'HANDMUX_ASR_MODE',
-        ...voiceProviderRegistry.adapters.flatMap((candidate) => (
-          candidate.fields.map((field) => field.env)
-        )),
-      ]) delete env[key];
       if (adapter) {
         env.HANDMUX_ASR_PROVIDER = adapter.id;
         env.HANDMUX_ASR_MODE = providerMode(adapter, voice.mode);
