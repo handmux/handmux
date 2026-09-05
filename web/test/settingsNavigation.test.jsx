@@ -37,7 +37,7 @@ describe('Settings full-screen navigation', () => {
     expect(container.querySelector('.settings-backdrop')).toBeNull();
     expect(row('项目任务 Beta')).toBeUndefined();
     expect([...container.querySelectorAll('.settings-page-group > h2')].map((heading) => heading.textContent))
-      .toEqual(['通用', '语音转文字', '终端', '对话', 'Agent 集成', '通知', '关于']);
+      .toEqual(['通用', '终端', '对话', 'Agent 集成', '通知', '语音转文字', '关于']);
   });
 
   it('returns from a detail page before closing Settings and restores the root scroll position', () => {

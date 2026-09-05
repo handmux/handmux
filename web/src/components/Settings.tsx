@@ -472,18 +472,6 @@ export default function Settings({ open, onClose, termRef, onOpenChangelog = () 
           onClick={() => openPage('keyboard')} />
       </SettingsGroup>
 
-      <SettingsGroup title={t('settings.group_voice')}>
-        <SettingsValueRow label={t('settings.voice_enabled')} value={voiceEnabledLabel} />
-        <SettingsValueRow label={t('settings.voice_provider')} value={voiceProviderLabel} />
-        {voiceFillerFilterSupported ? (
-          <SettingsLevelSlider label={t('settings.voice_filler_filter')} value={voiceFillerFilter}
-            onChange={changeVoiceFillerFilter} />
-        ) : (
-          <SettingsValueRow label={t('settings.voice_filler_filter')}
-            value={t('settings.voice_not_supported')} />
-        )}
-      </SettingsGroup>
-
       <SettingsGroup title={t('settings.group_terminal')} footer={t('settings.path_highlight_hint')}>
         <SettingsNavRow label={t('settings.terminal_transport')}
           value={t(`settings.terminal_transport_${terminalTransport}`)} onClick={() => openPage('transport')} />
@@ -531,6 +519,18 @@ export default function Settings({ open, onClose, termRef, onOpenChangelog = () 
         <SettingsNavRow label={t('settings.script_push')} value={t('settings.script_push_open')}
           disabled={!notificationsSupported} onClick={openScriptPush} />
         <SettingsNavRow label={t('pushInbox.title')} dot={notifUnread} onClick={() => onOpenInbox?.()} />
+      </SettingsGroup>
+
+      <SettingsGroup title={t('settings.group_voice')}>
+        <SettingsValueRow label={t('settings.voice_enabled')} value={voiceEnabledLabel} />
+        <SettingsValueRow label={t('settings.voice_provider')} value={voiceProviderLabel} />
+        {voiceFillerFilterSupported ? (
+          <SettingsLevelSlider label={t('settings.voice_filler_filter')} value={voiceFillerFilter}
+            onChange={changeVoiceFillerFilter} />
+        ) : (
+          <SettingsValueRow label={t('settings.voice_filler_filter')}
+            value={t('settings.voice_not_supported')} />
+        )}
       </SettingsGroup>
 
       <SettingsGroup title={t('settings.group_about')}
