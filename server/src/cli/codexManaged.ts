@@ -33,11 +33,23 @@ interface WaitForSocketOptions {
 
 interface RunManagedCodexOptions {
   home?: string;
+  cwd?: string;
   env?: NodeJS.ProcessEnv;
   spawn?: ManagedSpawn;
   mkdir?: (directory: string) => unknown;
   unlink?: (file: string) => unknown;
   waitOptions?: WaitForSocketOptions;
+}
+
+function hasExplicitCwd(args: readonly string[]): boolean {
+  const optionsEnd = args.indexOf('--');
+  const options = optionsEnd === -1 ? args : args.slice(0, optionsEnd);
+  return options.some((arg) => arg === '-C' || arg === '--cd'
+    || arg.startsWith('--cd=') || (arg.startsWith('-C') && arg.length > 2));
+}
+
+export function managedCodexArgs(args: readonly string[], cwd: string): string[] {
+  return hasExplicitCwd(args) ? [...args] : ['--cd', cwd, ...args];
 }
 
 const errorCode = (error: unknown): string | null => {
@@ -85,6 +97,7 @@ function finish(child: ManagedChild): Promise<{ code: number | null; signal: Nod
 // so thread identity, messages, approvals, settings, interrupts and inbox state share one runtime.
 export async function runManagedCodexProcess(args: readonly string[] = [], {
   home = os.homedir(),
+  cwd = process.cwd(),
   env = process.env,
   spawn = spawnChild as unknown as ManagedSpawn,
   mkdir = (dir: string) => fs.mkdirSync(dir, { recursive: true, mode: 0o700 }),
@@ -104,7 +117,9 @@ export async function runManagedCodexProcess(args: readonly string[] = [], {
   let tui: ManagedChild | null = null;
   try {
     await waitForSocket(socketPath, appServer, waitOptions);
-    tui = spawn('codex', ['--remote', `unix://${socketPath}`, ...args], {
+    tui = spawn('codex', [
+      '--remote', `unix://${socketPath}`, ...managedCodexArgs(args, cwd),
+    ], {
       env: managedEnv,
       stdio: 'inherit',
     });

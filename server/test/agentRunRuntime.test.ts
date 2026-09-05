@@ -73,6 +73,33 @@ describe('AgentRunRuntime', () => {
     await expectCode(runs.associateSession(lease, 'session-b'), 'session-replacement-required');
   });
 
+  it('keeps session verification and association atomic against a process replacement', async () => {
+    const runtime = runtimeWithIds('run-1', 'run-2');
+    let verificationCount = 0;
+    let releaseAssociation!: () => void;
+    const associationGate = new Promise<void>((resolve) => { releaseAssociation = resolve; });
+    const runs = runtime.controller('codex', async () => {
+      verificationCount += 1;
+      if (verificationCount === 2) await associationGate;
+      return true;
+    });
+    const oldLease = await runs.attach(candidate());
+
+    const association = runs.associateSession(oldLease, 'thread-a');
+    await vi.waitFor(() => expect(verificationCount).toBe(2));
+    const replacement = runs.attach(candidate({
+      process: { pid: 202, startedAt: 2_000, tty: '/dev/ttys001' },
+    }));
+    await Promise.resolve();
+    expect(verificationCount).toBe(2);
+
+    releaseAssociation();
+    await expect(association).resolves.toMatchObject({ sessionId: 'thread-a' });
+    const nextLease = await replacement;
+    expect(nextLease.ref.runId).toBe('run-2');
+    expect(oldLease.signal.reason).toBe('process_exit');
+  });
+
   it('requires replace when reconnect reports a different known session', async () => {
     const runtime = runtimeWithIds('run-1');
     const runs = runtime.controller('pi', async () => true);
@@ -81,6 +108,20 @@ describe('AgentRunRuntime', () => {
       runs.attach(candidate({ sessionId: 'session-b' })),
       'session-replacement-required',
     );
+  });
+
+  it('replaces only the session generation while preserving Runtime process ownership', async () => {
+    const runtime = runtimeWithIds('run-1', 'run-2');
+    const verify = vi.fn(async () => true);
+    const runs = runtime.controller('codex', verify);
+    const oldLease = await runs.attach(candidate({ sessionId: 'thread-a' }));
+    const nextLease = await runs.replaceSession(oldLease, 'thread-b');
+
+    expect(nextLease.ref).toEqual({
+      agentId: 'codex', paneId: '%1', runId: 'run-2', sessionId: 'thread-b',
+    });
+    expect(oldLease.signal.reason).toBe('session_replaced');
+    expect(verify).toHaveBeenLastCalledWith(candidate({ sessionId: 'thread-b' }));
   });
 
   it('atomically replaces a session generation and aborts every old control path', async () => {

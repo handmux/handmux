@@ -75,6 +75,9 @@ export interface AgentAdapterContext {
 export interface AgentProcessIdentity {
   commands: readonly string[];
   ambiguousCommands?: readonly string[];
+  // Process presence itself can establish a sessionless root run. Provider sources may associate a
+  // session later, but must not create a competing attachment.
+  runtimeAttach?: true;
   // Some native installers expose a versioned tmux command instead of a stable binary name. This
   // predicate may only nominate a command for the same executable-backed verification used below;
   // it can never identify an Agent by itself.
@@ -178,6 +181,7 @@ function validAdapter(value: unknown): value is AgentAdapter {
     && process.ambiguousCommands.some((command) => commands.includes(command))) return false;
   if (process.ambiguousCommand !== undefined && typeof process.ambiguousCommand !== 'function') return false;
   if (process.verify !== undefined && typeof process.verify !== 'function') return false;
+  if (process.runtimeAttach !== undefined && process.runtimeAttach !== true) return false;
   if ((process.ambiguousCommands !== undefined || process.ambiguousCommand !== undefined)
     && typeof process.verify !== 'function') return false;
   return validCapabilities(value.capabilities);

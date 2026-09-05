@@ -46,6 +46,7 @@ export interface AgentAttachmentCandidate {
 export interface ScopedAgentRunController {
   attach(candidate: AgentAttachmentCandidate): Promise<AgentRunLease>;
   associateSession(lease: AgentRunLease, sessionId: string): Promise<AgentRunRef>;
+  replaceSession(lease: AgentRunLease, sessionId: string): Promise<AgentRunLease>;
   replace(
     current: AgentRunLease,
     candidate: AgentAttachmentCandidate,
@@ -202,7 +203,10 @@ export class AgentRunRuntime implements AgentRunRegistry {
     return Object.freeze({
       attach: (candidate: AgentAttachmentCandidate) => this.#attach(agentId, verify, candidate),
       associateSession: (lease: AgentRunLease, sessionId: string) => (
-        this.#associateSession(agentId, lease, sessionId)
+        this.#associateSession(agentId, verify, lease, sessionId)
+      ),
+      replaceSession: (lease: AgentRunLease, sessionId: string) => (
+        this.#replaceSession(agentId, verify, lease, sessionId)
       ),
       replace: (
         current: AgentRunLease,
@@ -403,6 +407,7 @@ export class AgentRunRuntime implements AgentRunRegistry {
 
   async #associateSession(
     agentId: string,
+    verify: AgentAttachmentVerifier,
     lease: AgentRunLease,
     sessionId: string,
   ): Promise<AgentRunRef> {
@@ -415,6 +420,14 @@ export class AgentRunRuntime implements AgentRunRegistry {
       if (this.#byRunId.get(record.ref.runId) !== record || record.abort.signal.aborted) {
         throw new AgentRunError('stale-lease', 'Cannot associate a session with a stale Agent run');
       }
+      await this.#verify(verify, {
+        paneId: record.paneId,
+        attachmentId: record.attachmentId,
+        ...(record.ref.sessionId === undefined ? {} : { sessionId: record.ref.sessionId }),
+        ...(record.ref.implementationVersion === undefined
+          ? {} : { implementationVersion: record.ref.implementationVersion }),
+        process: { ...record.process },
+      });
       if (record.ref.sessionId === sessionId) return record.ref;
       if (record.ref.sessionId !== undefined) {
         throw new AgentRunError(
@@ -459,6 +472,23 @@ export class AgentRunRuntime implements AgentRunRegistry {
       const created = this.#create(agentId, candidate);
       return this.#replaceInstalled(record, created, reason);
     });
+  }
+
+  async #replaceSession(
+    agentId: string,
+    verify: AgentAttachmentVerifier,
+    current: AgentRunLease,
+    sessionId: string,
+  ): Promise<AgentRunLease> {
+    const record = this.#recordFor(agentId, current);
+    return this.#replace(agentId, verify, current, {
+      paneId: record.paneId,
+      attachmentId: record.attachmentId,
+      sessionId,
+      ...(record.ref.implementationVersion === undefined
+        ? {} : { implementationVersion: record.ref.implementationVersion }),
+      process: { ...record.process },
+    }, 'session_replaced');
   }
 
   async #revoke(

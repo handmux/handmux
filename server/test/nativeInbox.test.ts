@@ -18,10 +18,9 @@ function pane(paneId: string, pid: number): LivePane {
   };
 }
 
-function setup(initial: NativeInboxSnapshot) {
+async function setup(initial: NativeInboxSnapshot) {
   const panes = [pane('%1', 101), pane('%2', 202)];
   let snapshot = initial;
-  let missingProcessPane: string | null = null;
   let runId = 0;
   let now = 1_000;
   const runs = new AgentRunRuntime({ newRunId: () => `run-${++runId}` });
@@ -29,16 +28,13 @@ function setup(initial: NativeInboxSnapshot) {
     runs, adapterIds: ['claude'], now: () => now,
     newServiceEpoch: () => 'epoch', newNotificationId: () => `notification-${now}`,
   });
+  const runControl = runs.controller('claude', async () => true);
   const context = {
     runs,
-    runControl: runs.controller('claude', async () => true),
+    runControl,
     panes: { list: async () => panes, subscribe: () => () => {} },
-    process: { inspectForeground: async (value: LivePane) => (
-      value.paneId === missingProcessPane ? null : {
-        pid: value.paneId === '%1' ? 101 : 202, startedAt: 500,
-        tty: value.tty,
-      }
-    ) },
+    process: { inspectForeground: async () => null },
+    currentRunForPane: (paneId: string) => runs.currentForPane(paneId),
     inbox: inbox.projectorFor('claude'),
     health: { report: vi.fn() },
     signal: new AbortController().signal,
@@ -48,17 +44,21 @@ function setup(initial: NativeInboxSnapshot) {
     source: { read: async () => structuredClone(snapshot) }, pollMs: 10_000,
   });
   coordinators.push(coordinator);
+  await Promise.all(panes.map((value) => runControl.attach({
+    paneId: value.paneId,
+    attachmentId: `runtime:${value.paneId}`,
+    process: { pid: value.paneId === '%1' ? 101 : 202, startedAt: 500, tty: value.tty },
+  })));
   return {
     runs, inbox, coordinator,
     setSnapshot(value: NativeInboxSnapshot) { snapshot = value; },
     setNow(value: number) { now = value; },
-    setMissingProcessPane(value: string | null) { missingProcessPane = value; },
   };
 }
 
 describe('NativeInboxCoordinator', () => {
   it('restores a multi-pane baseline without creating unread terminal events', async () => {
-    const h = setup({
+    const h = await setup({
       availability: 'ready',
       rows: [
         { paneId: '%1', sessionId: 'session-1', cursor: 'a', state: 'done', eventId: 'done-1' },
@@ -72,7 +72,7 @@ describe('NativeInboxCoordinator', () => {
   });
 
   it('submits later transitions with Core time and isolates pane removal', async () => {
-    const h = setup({
+    const h = await setup({
       availability: 'ready',
       rows: [
         {
@@ -101,11 +101,11 @@ describe('NativeInboxCoordinator', () => {
       }),
     ]);
     expect(h.inbox.read().terminalNotifications).toHaveLength(1);
-    expect(h.runs.status(secondRun)).toBe('revoked');
+    expect(h.runs.status(secondRun)).toBe('current');
   });
 
   it('replaces the lease when the same pane changes session', async () => {
-    const h = setup({
+    const h = await setup({
       availability: 'ready',
       rows: [{ paneId: '%1', sessionId: 'session-1', cursor: 'one', state: null }],
     });
@@ -123,7 +123,7 @@ describe('NativeInboxCoordinator', () => {
   });
 
   it('removes a stale working record when the pane returns to its idle root session', async () => {
-    const h = setup({
+    const h = await setup({
       availability: 'ready',
       rows: [{ paneId: '%1', sessionId: 'ephemeral-helper', cursor: 'working', state: 'working' }],
     });
@@ -145,7 +145,7 @@ describe('NativeInboxCoordinator', () => {
   });
 
   it('preserves a live terminal transition during late session association', async () => {
-    const h = setup({
+    const h = await setup({
       availability: 'ready',
       rows: [{ paneId: '%1', cursor: 'working', state: 'working' }],
     });
@@ -171,7 +171,7 @@ describe('NativeInboxCoordinator', () => {
   });
 
   it('deduplicates repeated availability baselines and commits recovery once', async () => {
-    const h = setup({
+    const h = await setup({
       availability: 'degraded', message: 'source reconnecting',
       rows: [{ paneId: '%1', sessionId: 'session-1', cursor: 'working', state: 'working' }],
     });
@@ -188,31 +188,24 @@ describe('NativeInboxCoordinator', () => {
     expect(h.inbox.read().availability.claude).toEqual({ availability: 'ready' });
   });
 
-  it('isolates an unverified pane and recovers it without blocking healthy rows', async () => {
-    const h = setup({
+  it('ignores a source row without Runtime process ownership and keeps healthy rows', async () => {
+    const h = await setup({
       availability: 'ready',
       rows: [
         { paneId: '%1', sessionId: 'session-1', cursor: 'one', state: 'working' },
         { paneId: '%2', sessionId: 'session-2', cursor: 'two', state: 'working' },
       ],
     });
-    h.setMissingProcessPane('%2');
+    await h.runs.revokePane('%2', 'process_exit');
     await expect(h.coordinator.reconcile()).resolves.toBeUndefined();
     expect(h.inbox.read().records).toEqual([
       expect.objectContaining({ run: expect.objectContaining({ paneId: '%1' }), state: 'working' }),
     ]);
-    expect(h.inbox.read().availability.claude).toMatchObject({
-      availability: 'degraded', message: 'claude foreground process is unavailable',
-    });
-
-    h.setMissingProcessPane(null);
-    await expect(h.coordinator.reconcile()).resolves.toBeUndefined();
-    expect(h.inbox.read().records.map((record) => record.run.paneId).sort()).toEqual(['%1', '%2']);
     expect(h.inbox.read().availability.claude).toEqual({ availability: 'ready' });
   });
 
-  it('reattaches an externally revoked row without recreating its terminal notification', async () => {
-    const h = setup({
+  it('does not let a provider row recreate a Runtime-revoked process run', async () => {
+    const h = await setup({
       availability: 'ready',
       rows: [{ paneId: '%1', sessionId: 'session-1', cursor: 'one', state: 'working' }],
     });
@@ -228,19 +221,12 @@ describe('NativeInboxCoordinator', () => {
     h.setNow(2_500);
     const notification = h.inbox.read().terminalNotifications[0]!;
     await h.inbox.markTerminalRead([notification.id]);
-    const previous = h.runs.currentForPane('%1')!;
     await h.runs.revokePane('%1', 'process_exit');
 
     h.setNow(3_000);
     await expect(h.coordinator.reconcile()).resolves.toBeUndefined();
-    const recovered = h.runs.currentForPane('%1')!;
-    expect(recovered.ref.runId).not.toBe(previous.ref.runId);
-    expect(h.inbox.read().records).toEqual([
-      expect.objectContaining({
-        run: expect.objectContaining({ runId: recovered.ref.runId }),
-        state: 'done', eventId: 'done-1', acceptedAt: 2_000,
-      }),
-    ]);
+    expect(h.runs.currentForPane('%1')).toBeNull();
+    expect(h.inbox.read().records).toEqual([]);
     expect(h.inbox.read().terminalNotifications).toEqual([
       expect.objectContaining({ id: notification.id, eventId: 'done-1', acceptedAt: 2_000, readAt: 2_500 }),
     ]);

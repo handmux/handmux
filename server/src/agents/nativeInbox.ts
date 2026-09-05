@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto';
 import type {
   AgentRuntimeCapabilityContext,
 } from '../agent-runtime/runtime.js';
@@ -10,7 +9,7 @@ import type {
   InboxRunProjector,
   InboxState,
 } from '../agent-runtime/inboxTypes.js';
-import type { AgentAttachmentCandidate, AgentRunLease } from '../agent-runtime/run.js';
+import type { AgentRunLease } from '../agent-runtime/run.js';
 
 export interface NativeInboxRow {
   paneId: string;
@@ -45,14 +44,7 @@ export interface NativeInboxCoordinatorOptions {
 interface TrackedPane {
   lease: AgentRunLease;
   projector: InboxRunProjector;
-  attachmentId: string;
   row: NativeInboxRow;
-}
-
-function attachmentId(sourceId: string, candidate: Omit<AgentAttachmentCandidate, 'attachmentId'>): string {
-  return `${sourceId}:${createHash('sha256').update(JSON.stringify({
-    paneId: candidate.paneId, process: candidate.process,
-  })).digest('hex')}`;
 }
 
 function operation(sourceId: string, row: NativeInboxRow): InboxOperation {
@@ -142,11 +134,7 @@ export class NativeInboxCoordinator {
     if (this.#timer) clearTimeout(this.#timer);
     this.#timer = undefined;
     await this.#tail.catch(() => {});
-    const tracked = [...this.#tracked.values()];
     this.#tracked.clear();
-    await Promise.all(tracked.map((entry) => (
-      this.#context.runControl.revoke(entry.lease, 'adapter_stopped').catch(() => {})
-    )));
   }
 
   reconcile(): Promise<void> {
@@ -208,78 +196,57 @@ export class NativeInboxCoordinator {
     let topologyChanged = !this.#baselineReady;
     const rows = new Map(snapshot.rows.map((row) => [row.paneId, structuredClone(row)]));
     // Root Runtime independently revokes a run when its foreground-process proof changes. A coordinator
-    // entry must not outlive that lease: retaining it makes this loop skip re-attach forever, then feeds a
-    // revoked run into Inbox.restore() and blocks every healthy pane in the same provider snapshot.
+    // entry must not outlive that lease: retaining it feeds a revoked run into Inbox.restore() and blocks
+    // every healthy pane in the same provider snapshot.
     for (const [paneId, tracked] of [...this.#tracked]) {
       if (!tracked.lease.signal.aborted
         && this.#context.runs.resolve(tracked.lease.ref) === tracked.lease) continue;
       this.#tracked.delete(paneId);
       topologyChanged = true;
     }
-    for (const [paneId, tracked] of [...this.#tracked]) {
+    for (const [paneId] of [...this.#tracked]) {
       if (rows.has(paneId)) continue;
       this.#tracked.delete(paneId);
-      await this.#context.runControl.revoke(tracked.lease, 'adapter_stopped').catch(() => {});
       topologyChanged = true;
     }
 
-    let attachmentError: string | undefined;
+    let associationError: string | undefined;
     for (const row of rows.values()) {
       try {
-        const pane = paneMap.get(row.paneId)!;
-        const process = await this.#context.process.inspectForeground(pane);
-        if (!process) throw new Error(`${this.#agentId} foreground process is unavailable`);
-        const candidateBase = {
-          paneId: row.paneId,
-          ...(row.sessionId === undefined ? {} : { sessionId: row.sessionId }),
-          process: {
-            pid: process.pid,
-            ...(process.startedAt === undefined ? {} : { startedAt: process.startedAt }),
-            ...(process.tty === undefined ? (pane.tty === undefined ? {} : { tty: pane.tty }) : { tty: process.tty }),
-          },
-        };
-        const nextAttachmentId = attachmentId(this.#sourceId, candidateBase);
-        const candidate: AgentAttachmentCandidate = { ...candidateBase, attachmentId: nextAttachmentId };
+        let lease = this.#context.currentRunForPane(row.paneId);
+        if (!lease || lease.ref.agentId !== this.#agentId
+          || this.#context.runs.resolve(lease.ref) !== lease) {
+          // A stale socket/source row is not process ownership evidence. Runtime will retry process
+          // discovery independently; until then this row must not create or degrade a run.
+          rows.delete(row.paneId);
+          continue;
+        }
+        if (row.sessionId !== undefined && lease.ref.sessionId === undefined) {
+          await this.#context.runControl.associateSession(lease, row.sessionId);
+          topologyChanged = true;
+        } else if (row.sessionId !== undefined && lease.ref.sessionId !== row.sessionId) {
+          lease = await this.#context.runControl.replaceSession(lease, row.sessionId);
+          topologyChanged = true;
+        }
         let tracked = this.#tracked.get(row.paneId);
-        if (!tracked) {
-          const lease = await this.#context.runControl.attach(candidate);
+        if (!tracked || tracked.lease !== lease) {
           tracked = {
             lease, projector: this.#context.inbox.forRun(lease),
-            attachmentId: nextAttachmentId, row,
+            row,
           };
           this.#tracked.set(row.paneId, tracked);
-          topologyChanged = true;
-        } else if (tracked.attachmentId !== nextAttachmentId) {
-          const lease = await this.#context.runControl.attach(candidate);
-          tracked = {
-            lease, projector: this.#context.inbox.forRun(lease),
-            attachmentId: nextAttachmentId, row,
-          };
-          this.#tracked.set(row.paneId, tracked);
-          topologyChanged = true;
-        } else if (tracked.lease.ref.sessionId !== undefined && row.sessionId !== undefined
-          && tracked.lease.ref.sessionId !== row.sessionId) {
-          const lease = await this.#context.runControl.replace(tracked.lease, candidate, 'session_replaced');
-          tracked = {
-            lease, projector: this.#context.inbox.forRun(lease),
-            attachmentId: nextAttachmentId, row,
-          };
-          this.#tracked.set(row.paneId, tracked);
-          topologyChanged = true;
-        } else if (tracked.lease.ref.sessionId === undefined && row.sessionId !== undefined) {
-          await this.#context.runControl.associateSession(tracked.lease, row.sessionId);
           topologyChanged = true;
         }
       } catch (error) {
-        // One transient/invalid pane must not suppress every other pane from the same provider. Keep any
-        // previously verified row, exclude only the failed newcomer from this cycle, and retry next poll.
+        // One stale run/session association must not suppress every other pane from the same provider.
+        // Keep any previously projected row and retry after Runtime has reconciled process ownership.
         rows.delete(row.paneId);
-        attachmentError ??= error instanceof Error ? error.message : String(error);
+        associationError ??= error instanceof Error ? error.message : String(error);
       }
     }
 
-    const effectiveAvailability = attachmentError ? 'degraded' : snapshot.availability;
-    const effectiveMessage = attachmentError ?? snapshot.message;
+    const effectiveAvailability = associationError ? 'degraded' : snapshot.availability;
+    const effectiveMessage = associationError ?? snapshot.message;
     const availabilityChanged = this.#availability !== effectiveAvailability
       || this.#availabilityMessage !== effectiveMessage;
     const restoreNeeded = topologyChanged || availabilityChanged;

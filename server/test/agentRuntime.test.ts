@@ -592,6 +592,82 @@ describe('AgentRuntime composition root', () => {
     expect(runtime.runs.status(client.run)).toBe('revoked');
   });
 
+  it('owns a sessionless foreground run only for an opted-in Adapter and replaces it on process change', async () => {
+    const codexPane = { ...pane('codex'), foregroundPid: undefined };
+    const panes = new TestPanes([codexPane]);
+    let foreground: ForegroundProcessIdentity = {
+      pid: 101, startedAt: 1_000, tty: '/dev/ttys001', executable: '/opt/codex/bin/codex',
+    };
+    let run = 0;
+    const runtime = new AgentRuntime({
+      adapters: [{
+        ...adapter('codex'),
+        process: { commands: ['codex'], runtimeAttach: true },
+      }, adapter('pi')],
+      panes,
+      process: { inspectForeground: async () => foreground },
+      stateDirectory: directory(),
+      authToken: AUTH_TOKEN,
+      newRunId: () => `process-run-${++run}`,
+    });
+    runtimes.push(runtime);
+    await runtime.start();
+
+    expect(runtime.activeRuns()).toEqual([{
+      agentId: 'codex', paneId: '%1', runId: 'process-run-1',
+    }]);
+    const first = runtime.runs.currentForPane('%1')!;
+
+    panes.emit([codexPane]);
+    await vi.waitFor(() => expect(runtime.activeRuns()[0]?.runId).toBe('process-run-1'));
+    expect(run).toBe(1);
+
+    foreground = {
+      pid: 202, startedAt: 2_000, tty: '/dev/ttys001', executable: '/opt/codex/bin/codex',
+    };
+    await expect(runtime.runControlFor('codex').associateSession(first, 'stale-thread'))
+      .rejects.toMatchObject({ code: 'attachment-unverified' });
+    expect(first.ref).not.toHaveProperty('sessionId');
+    // Tmux pane metadata is unchanged: only the separately inspected process generation changed.
+    panes.emit([codexPane]);
+    await vi.waitFor(() => expect(runtime.activeRuns()).toEqual([{
+      agentId: 'codex', paneId: '%1', runId: 'process-run-2',
+    }]));
+    expect(first.signal.reason).toBe('process_exit');
+
+    panes.emit([pane('pi')]);
+    await vi.waitFor(() => expect(runtime.activeRuns()).toEqual([]));
+    expect(run).toBe(2);
+  });
+
+  it('auto-attaches only a verified built-in Codex node launcher', async () => {
+    const panes = new TestPanes([
+      pane('node'),
+      { ...pane('node'), paneId: '%2', windowId: '@2', tty: '/dev/ttys002', foregroundPid: 202 },
+    ]);
+    const runtime = createBuiltinAgentRuntime({
+      panes,
+      process: { inspectForeground: async (value) => value.paneId === '%1' ? {
+        pid: 101, startedAt: 1_000, tty: '/dev/ttys001',
+        executable: '/opt/node_modules/@openai/codex/vendor/aarch64-apple-darwin/codex',
+        commandLine: 'codex --remote unix:///tmp/codex.sock',
+      } : {
+        pid: 202, startedAt: 2_000, tty: '/dev/ttys002', executable: '/usr/local/bin/node',
+        commandLine: 'node server.js',
+      } },
+      stateDirectory: directory(),
+      authToken: AUTH_TOKEN,
+      newRunId: () => 'verified-codex-run',
+    });
+    runtimes.push(runtime);
+    await runtime.start();
+
+    expect(runtime.activeRuns()).toEqual([{
+      agentId: 'codex', paneId: '%1', runId: 'verified-codex-run',
+    }]);
+    expect(runtime.runs.currentForPane('%2')).toBeNull();
+  });
+
   it('uses the canonical resolver for pane identity and fails closed on ambiguous conflicts', async () => {
     const first = {
       ...adapter('first'),
@@ -908,6 +984,7 @@ describe('AgentRuntime composition root', () => {
     expect(runtime.activeRuns()).not.toEqual(expect.arrayContaining([
       expect.objectContaining({ agentId: 'claude' }),
     ]));
+    expect(run).toBe(1);
 
     codexKind = 'done';
     await vi.waitFor(() => expect(runtime.inbox.read().terminalNotifications).toEqual(expect.arrayContaining([

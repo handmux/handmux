@@ -37,14 +37,14 @@ function pane(value: TmuxLivePane): LivePane {
   };
 }
 
-// Tmux has no lifecycle subscription. One shared, non-overlapping poller publishes complete snapshots;
-// an unavailable tmux command preserves the last trusted snapshot instead of fabricating process exits.
+// Tmux has no lifecycle subscription. One shared, non-overlapping poller publishes every successful
+// complete snapshot: unchanged pane metadata can still hide a replaced foreground PID. An unavailable
+// tmux command preserves the last trusted snapshot instead of fabricating process exits.
 export class TmuxAgentPaneSource implements ReadonlyPaneSource {
   readonly #commands: AgentTmuxCommands;
   readonly #pollMs: number;
   readonly #listeners = new Set<(snapshot: readonly LivePane[]) => void>();
   #timer: NodeJS.Timeout | undefined;
-  #signature = '';
   #polling = false;
 
   constructor({ commands, pollMs = 1_000 }: TmuxAgentPaneSourceOptions) {
@@ -83,9 +83,6 @@ export class TmuxAgentPaneSource implements ReadonlyPaneSource {
     void (async () => {
       let snapshot: readonly LivePane[];
       try { snapshot = await this.list(); } catch { return; }
-      const signature = JSON.stringify(snapshot);
-      if (signature === this.#signature) return;
-      this.#signature = signature;
       for (const listener of this.#listeners) listener(structuredClone(snapshot));
     })().finally(() => {
       this.#polling = false;

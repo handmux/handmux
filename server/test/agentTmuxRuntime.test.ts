@@ -12,18 +12,20 @@ function live(command = 'pi') {
 }
 
 describe('Tmux Agent Runtime context', () => {
-  it('publishes complete changed snapshots and retains the last truth across a failed poll', async () => {
+  it('publishes every successful snapshot and retains the last truth across a failed poll', async () => {
     const listLivePanes = vi.fn()
       .mockResolvedValueOnce([live()])
       .mockRejectedValueOnce(new Error('tmux unavailable'))
+      .mockResolvedValueOnce([live()])
       .mockResolvedValueOnce([live('zsh')]);
     const source = new TmuxAgentPaneSource({ commands: { listLivePanes }, pollMs: 100 });
     const snapshots: unknown[] = [];
     const unsubscribe = source.subscribe((snapshot) => snapshots.push(snapshot));
     await vi.waitFor(() => expect(snapshots).toHaveLength(1));
-    await vi.waitFor(() => expect(listLivePanes).toHaveBeenCalledTimes(3));
-    await vi.waitFor(() => expect(snapshots).toHaveLength(2));
+    await vi.waitFor(() => expect(listLivePanes).toHaveBeenCalledTimes(4));
+    await vi.waitFor(() => expect(snapshots).toHaveLength(3));
     expect(snapshots).toEqual([
+      [expect.objectContaining({ paneId: '%1', currentCommand: 'pi', tty: '/dev/ttys001' })],
       [expect.objectContaining({ paneId: '%1', currentCommand: 'pi', tty: '/dev/ttys001' })],
       [expect.objectContaining({ paneId: '%1', currentCommand: 'zsh', tty: '/dev/ttys001' })],
     ]);

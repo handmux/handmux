@@ -207,6 +207,7 @@ export const codex = {
   process: {
     commands: ['codex'],
     ambiguousCommands: ['node'],
+    runtimeAttach: true as const,
     verify: async (pane: LivePane, context: ProcessContext) => {
       const foreground = await context.inspectForeground(pane);
       const executable = foreground?.executable;

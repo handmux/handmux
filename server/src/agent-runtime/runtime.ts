@@ -87,6 +87,7 @@ interface AdapterLifecycle {
 export interface AgentRuntimeCapabilityContext extends AgentAdapterContext {
   inbox: InboxOrderedProjector;
   process: ProcessContext;
+  currentRunForPane(paneId: string): AgentRunLease | null;
 }
 
 export interface AgentRuntimeAdapterBinding {
@@ -221,6 +222,30 @@ function sameProcess(
     && foreground.startedAt !== candidate.process.startedAt) return false;
   const observedTty = foreground.tty ?? pane.tty;
   return candidate.process.tty === undefined || observedTty === candidate.process.tty;
+}
+
+function processAttachmentCandidate(
+  adapter: AgentAdapter,
+  pane: LivePane,
+  foreground: ForegroundProcessIdentity,
+): AgentAttachmentCandidate {
+  const process = {
+    pid: foreground.pid,
+    ...(foreground.startedAt === undefined ? {} : { startedAt: foreground.startedAt }),
+    ...(foreground.tty === undefined
+      ? (pane.tty === undefined ? {} : { tty: pane.tty })
+      : { tty: foreground.tty }),
+  };
+  const fingerprint = crypto.createHash('sha256').update(JSON.stringify({
+    agentId: adapter.id,
+    paneId: pane.paneId,
+    process,
+  })).digest('hex');
+  return {
+    paneId: pane.paneId,
+    attachmentId: `runtime.process:${fingerprint}`,
+    process,
+  };
 }
 
 function recoverCorruptState<T>({
@@ -755,6 +780,18 @@ export class AgentRuntime {
         });
       });
       this.#unsubscribePanes = unsubscribe;
+      // Establish Runtime-owned process runs before capability coordinators consume provider rows.
+      // The subscription remains the retry path when this best-effort initial read is unavailable.
+      try {
+        const initial = await this.#panes.list();
+        const operation = this.#reconcileTail.then(() => this.#reconcile(initial));
+        this.#reconcileTail = operation.catch(() => {});
+        await operation;
+      } catch (error) {
+        this.#logger.warn('Initial Agent pane reconciliation failed', {
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
       for (const adapter of this.adapters) {
         if (this.#closed) throw new Error('AgentRuntime is closed');
         await this.#startAdapter(adapter);
@@ -866,6 +903,7 @@ export class AgentRuntime {
       runControl: this.#controllers.get(adapter.id)!,
       panes: this.#panes,
       process: this.#process,
+      currentRunForPane: (paneId: string) => this.runs.currentForPane(paneId),
       bridge: this.bridge.hostFor(adapter.id),
       resources: this.resources.forAdapter(adapter.id),
       logger: this.#logger,
@@ -905,6 +943,14 @@ export class AgentRuntime {
         const tracked = this.#tracked.get(ref.runId);
         if (tracked && tracked.lease === lease) tracked.candidate.sessionId = sessionId;
         return ref;
+      },
+      replaceSession: async (lease: AgentRunLease, sessionId: string) => {
+        const tracked = this.#tracked.get(lease.ref.runId);
+        if (!tracked || tracked.adapter.id !== adapter.id || tracked.lease !== lease) {
+          throw new Error('Agent run lease is not tracked by Runtime');
+        }
+        const candidate = { ...cloneCandidate(tracked.candidate), sessionId };
+        return this.#track(adapter, await raw.replaceSession(lease, sessionId), candidate);
       },
       replace: async (
         current: AgentRunLease,
@@ -1037,6 +1083,37 @@ export class AgentRuntime {
         : 'invalid';
       if (verdict === 'invalid' && this.runs.resolve(tracked.lease.ref) === tracked.lease) {
         await this.runs.revokePane(tracked.lease.ref.paneId, pane ? 'process_exit' : 'pane_detached');
+      }
+    }
+    const activeAdapters = this.adapters.filter((adapter) => (
+      !this.#lifecycles.get(adapter.id)?.abort.signal.aborted
+    ));
+    for (const pane of panes.values()) {
+      if (this.#closed || this.runs.currentForPane(pane.paneId)) continue;
+      let inspected: Promise<ForegroundProcessIdentity | null> | undefined;
+      const context: ProcessContext = {
+        inspectForeground: () => {
+          inspected ??= this.#process.inspectForeground(pane);
+          return inspected;
+        },
+      };
+      const identity = await resolveAgentIdentity(pane, activeAdapters, context, {
+        verifyTimeoutMs: this.#verifyTimeoutMs,
+      });
+      if (identity.kind !== 'matched' || identity.adapter.process.runtimeAttach !== true) continue;
+      let foreground: ForegroundProcessIdentity | null;
+      try { foreground = await context.inspectForeground(pane); } catch { continue; }
+      if (!foreground) continue;
+      try {
+        await this.#controllers.get(identity.adapter.id)!.attach(
+          processAttachmentCandidate(identity.adapter, pane, foreground),
+        );
+      } catch (error) {
+        this.#logger.warn('Agent process attachment failed', {
+          adapterId: identity.adapter.id,
+          paneId: pane.paneId,
+          error: error instanceof Error ? error.message : String(error),
+        });
       }
     }
   }

@@ -2,6 +2,7 @@ import { EventEmitter } from 'node:events';
 import { describe, expect, it } from 'vitest';
 import {
   codexAppSocketPath,
+  managedCodexArgs,
   runManagedCodex,
   type ManagedChild,
   type ManagedSpawnOptions,
@@ -26,7 +27,7 @@ describe('managed Codex launcher', () => {
     const calls: Array<{ command: string; args: readonly string[]; options: ManagedSpawnOptions }> = [];
     const server = child();
     const code = await runManagedCodex(['resume', 'thread-1'], {
-      home: '/home/me', env: { TMUX_PANE: '%7' },
+      home: '/home/me', cwd: '/work/current', env: { TMUX_PANE: '%7' },
       mkdir: () => {}, unlink: () => {},
       waitOptions: { exists: () => true },
       spawn: (command, args, options) => {
@@ -36,7 +37,31 @@ describe('managed Codex launcher', () => {
     });
     expect(code).toBe(0);
     expect(calls[0]?.args).toEqual(['app-server', '--listen', 'unix:///home/me/.handmux/codex-app/7.sock']);
-    expect(calls[1]?.args).toEqual(['--remote', 'unix:///home/me/.handmux/codex-app/7.sock', 'resume', 'thread-1']);
+    expect(calls[1]?.args).toEqual([
+      '--remote', 'unix:///home/me/.handmux/codex-app/7.sock',
+      '--cd', '/work/current', 'resume', 'thread-1',
+    ]);
     expect(calls[0]?.options.env.HANDMUX_CODEX_MANAGED).toBe('1');
+  });
+
+  it.each([
+    [['-C', '/work/explicit', 'resume'], ['-C', '/work/explicit', 'resume']],
+    [['--cd', '/work/explicit', 'resume'], ['--cd', '/work/explicit', 'resume']],
+    [['--cd=/work/explicit', 'resume'], ['--cd=/work/explicit', 'resume']],
+    [['-C/work/explicit', 'resume'], ['-C/work/explicit', 'resume']],
+  ])('preserves an explicit Codex cwd in %j', (args, expected) => {
+    expect(managedCodexArgs(args, '/work/current')).toEqual(expected);
+  });
+
+  it('keeps resume selectors while injecting cwd before the Codex subcommand', () => {
+    expect(managedCodexArgs(['resume', '--all'], '/work/current'))
+      .toEqual(['--cd', '/work/current', 'resume', '--all']);
+    expect(managedCodexArgs(['resume', '--last'], '/work/current'))
+      .toEqual(['--cd', '/work/current', 'resume', '--last']);
+  });
+
+  it('does not mistake arguments after the option terminator for an explicit cwd', () => {
+    expect(managedCodexArgs(['exec', '--', '--cd', '/untrusted'], '/work/current'))
+      .toEqual(['--cd', '/work/current', 'exec', '--', '--cd', '/untrusted']);
   });
 });

@@ -126,7 +126,7 @@ process.stdout.write(JSON.stringify({ argv: process.argv.slice(2), cwd: process.
     expect(result.stderr).toContain('pi executable not found');
   });
 
-  it('routes Codex before Handmux parsing and passes every raw argument to its TUI', () => {
+  it('routes Codex before Handmux parsing and preserves raw arguments after managed cwd', () => {
     const home = tmpHome('hm-codex-launch-');
     codexExecutable(home);
     fs.mkdirSync(path.join(home, '.handmux'));
@@ -135,7 +135,9 @@ process.stdout.write(JSON.stringify({ argv: process.argv.slice(2), cwd: process.
     const result = runCodex(home, raw);
     expect(result.status).toBe(0);
     expect(result.stderr).toBe('');
-    expect(JSON.parse(result.stdout)).toMatchObject({ argv: raw, marker: 'codex-kept' });
+    expect(JSON.parse(result.stdout)).toMatchObject({
+      argv: ['--cd', fs.realpathSync(process.cwd()), ...raw], marker: 'codex-kept',
+    });
   });
 
   it('preserves Codex cwd/env/stdin/stdout/stderr across the managed launcher', () => {
@@ -148,7 +150,8 @@ process.stdout.write(JSON.stringify({ argv: process.argv.slice(2), cwd: process.
     });
     expect(result.status).toBe(0);
     expect(JSON.parse(result.stdout)).toEqual({
-      argv: ['--model', 'test'], cwd: fs.realpathSync(cwd), marker: 'codex-kept', input: 'from-stdin',
+      argv: ['--cd', fs.realpathSync(cwd), '--model', 'test'],
+      cwd: fs.realpathSync(cwd), marker: 'codex-kept', input: 'from-stdin',
     });
     expect(result.stderr).toBe('codex-stderr');
   });
