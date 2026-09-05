@@ -3,6 +3,7 @@ import { mimeFromName } from './mime.js';
 import { t } from './i18n';
 import { UnauthorizedError } from './apiErrors.js';
 import { requestJson as req } from './apiRequest.js';
+import { parseAsrSession } from './voice/providerRegistry.js';
 import type {
   AsrSignResponse,
   AsrSessionResponse,
@@ -420,15 +421,8 @@ export async function signAsr(): Promise<AsrSignResponse> {
 // Create a provider-neutral streaming session. Private signing keys remain on the server; the phone receives
 // only the selected protocol and its short-lived signed WebSocket URL.
 export async function createAsrSession(): Promise<AsrSessionResponse> {
-  const response = recordOf(await req('/api/asr/session', { timeoutMs: 8_000 }));
-  if (!response || typeof response.url !== 'string') throw new Error('ASR session returned an invalid response');
-  if (response.provider === 'xfyun' && response.protocol === 'xfyun-iat-v2'
-    && typeof response.appId === 'string') {
-    return { provider: 'xfyun', protocol: 'xfyun-iat-v2', url: response.url, appId: response.appId };
-  }
-  if (response.provider === 'tencent' && response.protocol === 'tencent-asr-v2') {
-    return { provider: 'tencent', protocol: 'tencent-asr-v2', url: response.url };
-  }
+  const response = parseAsrSession(await req('/api/asr/session', { timeoutMs: 8_000 }));
+  if (response) return response;
   throw new Error('ASR session returned an unsupported provider');
 }
 

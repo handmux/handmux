@@ -6,13 +6,8 @@ import { dirname, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { readFileSync } from 'node:fs';
 import { isSessionId } from '../tmux/commands.js';
-import { buildIatSignedUrl } from '../asr/iflySign.js';
 import { asrConfig } from '../asr/config.js';
-import { buildTencentAsrSignedUrl } from '../asr/tencentSign.js';
-import {
-  recognizeTencentSentence,
-  TencentSentenceError,
-} from '../asr/tencentSentence.js';
+import { voiceProviderRegistry } from '../asr/providerRegistry.js';
 import { hooksStatus, installHooks } from '../cli/claudeHooks.js';
 import {
   agentIntegrationStatus,
@@ -48,7 +43,6 @@ interface SystemRouteOptions {
   stateFile: string;
   previewDomain?: string | null;
   agentIntegrationContext?: AgentIntegrationContext;
-  sentenceRecognizer?: typeof recognizeTencentSentence;
 }
 
 export const MAX_SENTENCE_PCM_BYTES = 2 * 1024 * 1024;
@@ -74,7 +68,7 @@ const PKG_VERSION = (() => {
 
 export function systemRoutes({
   commands, claudeEvents, agentRuntime, asrEnv, shortcuts, home, stateFile, previewDomain,
-  agentIntegrationContext, sentenceRecognizer = recognizeTencentSentence,
+  agentIntegrationContext,
 }: SystemRouteOptions): Router {
   const r = express.Router();
   let activeShortcuts: ShortcutConfig = normalizeShortcuts(shortcuts);
@@ -175,18 +169,11 @@ export function systemRoutes({
     if (config.mode !== 'streaming') {
       return res.status(503).json({ error: 'streaming asr is not selected' });
     }
-    if (config.provider === 'tencent') {
-      return res.json({
-        provider: 'tencent',
-        protocol: 'tencent-asr-v2',
-        ...buildTencentAsrSignedUrl(config),
-      });
+    const adapter = voiceProviderRegistry.get(config.provider);
+    if (!adapter?.createStreamingSession) {
+      return res.status(503).json({ error: 'streaming asr is unsupported by the selected provider' });
     }
-    return res.json({
-      provider: 'xfyun',
-      protocol: 'xfyun-iat-v2',
-      ...buildIatSignedUrl({ ...config, date: new Date().toUTCString() }),
-    });
+    return res.json(adapter.createStreamingSession(config));
   });
 
   const rawSentenceAudio = express.raw({
@@ -216,9 +203,10 @@ export function systemRoutes({
 
   r.post('/asr/sentence', parseSentenceAudio, async (req: Request, res: Response, next: NextFunction) => {
     const config = asrConfig(asrEnv);
-    if (!config || config.provider !== 'tencent' || config.mode !== 'sentence') {
+    const adapter = config ? voiceProviderRegistry.get(config.provider) : undefined;
+    if (!config || config.mode !== 'sentence' || !adapter?.recognizeSentence) {
       return res.status(503).json({
-        error: 'Tencent sentence ASR is not selected',
+        error: 'sentence ASR is not selected',
         code: 'sentence_asr_not_selected', requestId: res.locals.requestId,
       });
     }
@@ -227,15 +215,17 @@ export function systemRoutes({
       error: 'audio is empty', code: 'audio_empty', requestId: res.locals.requestId,
     });
     try {
-      const result = await sentenceRecognizer(config, audio);
+      const result = await adapter.recognizeSentence(config, audio);
       return res.json({ text: result.text });
     } catch (error) {
-      if (error instanceof TencentSentenceError) {
+      const publicError = adapter.publicError?.(error);
+      if (publicError) {
         return res.status(502).json({
-          error: error.message,
-          code: error.code,
+          error: publicError.message,
+          code: publicError.code,
           requestId: res.locals.requestId,
-          ...(error.requestId ? { providerRequestId: error.requestId } : {}),
+          ...(publicError.providerRequestId
+            ? { providerRequestId: publicError.providerRequestId } : {}),
         });
       }
       return next(error);
@@ -246,8 +236,9 @@ export function systemRoutes({
   r.get('/asr/sign', (_req: Request, res: Response) => {
     const config = asrConfig(asrEnv);
     if (!config || config.provider !== 'xfyun') return res.status(503).json({ error: 'xfyun asr not configured' });
-    const { appId, apiKey, apiSecret } = config;
-    return res.json(buildIatSignedUrl({ appId, apiKey, apiSecret, date: new Date().toUTCString() }));
+    const session = voiceProviderRegistry.get(config.provider)?.createStreamingSession?.(config);
+    return session ? res.json({ url: session.url, appId: session.appId })
+      : res.status(503).json({ error: 'xfyun asr not configured' });
   });
 
   // ?sessions=a,b scopes the roster to the session NAMES this device subscribed to (per-device inbox

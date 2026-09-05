@@ -1,5 +1,5 @@
 import { createHash, createHmac } from 'node:crypto';
-import type { TencentAsrConfig } from './config.js';
+import type { TencentAsrConfig } from './providerRegistry.js';
 
 const HOST = 'asr.tencentcloudapi.com';
 const ENDPOINT = `https://${HOST}`;

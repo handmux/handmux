@@ -9,6 +9,7 @@ import path from 'node:path';
 import { homedir } from 'node:os';
 import { spawnSync } from 'node:child_process';
 import webpush from 'web-push';
+import { providerMode, voiceProviderRegistry } from '../asr/providerRegistry.js';
 import { configPath, pocketHome } from './state.js';
 import { defaultGen as genToken, TUNNELS } from './options.js';
 import { resolveCloudflared } from './cloudflared.js';
@@ -17,7 +18,7 @@ import { resolveNatapp, resolveCpolar } from './tunnelClients.js';
 import { t, setLocale } from './i18n/index.js';
 import { intro, outro, note, cancel, select, text, password, confirm, ask, CANCELLED } from './prompt.js';
 import { PrivateStateStore } from '../privateStateStore.js';
-import type { TencentAsrConfig, Tunnel, VapidConfig, VoiceConfig, XfyunConfig } from './options.js';
+import type { Tunnel, VapidConfig, VoiceConfig, VoiceProviderConfig } from './options.js';
 import type { SetupAnswers, SetupConfig } from './setupModel.js';
 
 interface SetupLog {
@@ -460,7 +461,9 @@ async function editVoice(a: SetupAnswers): Promise<VoiceConfig | undefined> {
     voice = await ensureVoiceProvider({ ...profile, providers: {} });
   }
   for (;;) {
-    const provider = voice.provider;
+    const provider: string = voice.provider;
+    const adapter = voiceProviderRegistry.get(provider);
+    if (!adapter) throw new Error(`unknown voice provider: ${provider}`);
     const current = voice.providers[provider] || {};
     let pick;
     try {
@@ -468,15 +471,12 @@ async function editVoice(a: SetupAnswers): Promise<VoiceConfig | undefined> {
         message: withBack(t('setup.secVoice')),
         options: [
           { value: 'provider', label: t('setup.voiceProvider'), hint: voiceProfileLabel(voice) },
-          { value: 'appId', label: 'appId', hint: current.appId || '' },
-          ...(provider === 'xfyun' ? [
-            { value: 'apiKey', label: 'apiKey', hint: maskSecret(voice.providers.xfyun?.apiKey) },
-            { value: 'apiSecret', label: 'apiSecret', hint: maskSecret(voice.providers.xfyun?.apiSecret) },
-          ] : [
-            { value: 'secretId', label: 'secretId', hint: maskSecret(voice.providers.tencent?.secretId) },
-            { value: 'secretKey', label: 'secretKey', hint: maskSecret(voice.providers.tencent?.secretKey) },
-            { value: 'engineModelType', label: 'engineModelType', hint: voice.providers.tencent?.engineModelType || '16k_zh' },
-          ]),
+          ...adapter.fields.map((field) => ({
+            value: field.key,
+            label: field.key,
+            hint: field.secret ? maskSecret(current[field.key])
+              : current[field.key] || field.defaultValue || '',
+          })),
           { value: 'off', label: t('setup.voiceOff') },
         ],
         initialValue: 'provider',
@@ -487,19 +487,18 @@ async function editVoice(a: SetupAnswers): Promise<VoiceConfig | undefined> {
       if (pick === 'provider') {
         const selected = await chooseVoiceProfile(voice);
         voice = await ensureVoiceProvider({ ...voice, ...selected });
-      } else if (provider === 'xfyun') {
-        const config: XfyunConfig = voice.providers.xfyun || {};
-        if (pick === 'appId') config.appId = await ask(text({ message: t('setup.voiceAppId'), initialValue: config.appId || '', validate: validateNonEmpty('appId') }));
-        else if (pick === 'apiKey') config.apiKey = await ask(password({ message: t('setup.voiceApiKey'), validate: validateNonEmpty('apiKey') }));
-        else if (pick === 'apiSecret') config.apiSecret = await ask(password({ message: t('setup.voiceApiSecret'), validate: validateNonEmpty('apiSecret') }));
-        voice = { ...voice, providers: { ...voice.providers, xfyun: { ...config } } };
       } else {
-        const config: TencentAsrConfig = voice.providers.tencent || {};
-        if (pick === 'appId') config.appId = await ask(text({ message: t('setup.voiceTencentAppId'), initialValue: config.appId || '', validate: validateNonEmpty('appId') }));
-        else if (pick === 'secretId') config.secretId = await ask(password({ message: t('setup.voiceTencentSecretId'), validate: validateNonEmpty('secretId') }));
-        else if (pick === 'secretKey') config.secretKey = await ask(password({ message: t('setup.voiceTencentSecretKey'), validate: validateNonEmpty('secretKey') }));
-        else if (pick === 'engineModelType') config.engineModelType = await ask(text({ message: t('setup.voiceTencentEngine'), initialValue: config.engineModelType || '16k_zh', validate: validateNonEmpty('engineModelType') }));
-        voice = { ...voice, providers: { ...voice.providers, tencent: { ...config } } };
+        const field = adapter.fields.find((candidate) => candidate.key === pick);
+        if (!field) continue;
+        const config: VoiceProviderConfig = { ...current };
+        config[field.key] = field.secret
+          ? await ask(password({ message: t(field.promptKey), validate: validateNonEmpty(field.key) }))
+          : await ask(text({
+            message: t(field.promptKey),
+            initialValue: config[field.key] || field.defaultValue || '',
+            validate: validateNonEmpty(field.key),
+          }));
+        voice = { ...voice, providers: { ...voice.providers, [provider]: config } };
       }
     } catch (e) { if (e !== CANCELLED) throw e; }
   }
@@ -508,47 +507,49 @@ async function editVoice(a: SetupAnswers): Promise<VoiceConfig | undefined> {
 type VoiceProfile = Pick<VoiceConfig, 'provider' | 'mode'>;
 
 function voiceProfileLabel(voice: VoiceProfile): string {
-  if (voice.provider === 'xfyun') return t('setup.voiceXfyun');
-  return voice.mode === 'sentence' ? t('setup.voiceTencentSentence') : t('setup.voiceTencent');
+  const adapter = voiceProviderRegistry.get(voice.provider);
+  const profile = adapter?.profiles.find((candidate) => candidate.mode === voice.mode)
+    ?? adapter?.profiles.find((candidate) => candidate.mode === adapter.defaultMode);
+  return profile ? t(profile.labelKey) : voice.provider;
 }
 
 async function chooseVoiceProfile(initial: VoiceProfile): Promise<VoiceProfile> {
-  const initialValue = initial.provider === 'xfyun'
-    ? 'xfyun-streaming' : `tencent-${initial.mode === 'sentence' ? 'sentence' : 'streaming'}`;
+  const profiles = voiceProviderRegistry.adapters.flatMap((adapter) => (
+    adapter.profiles.map((profile) => ({ adapter, profile, value: `${adapter.id}:${profile.mode}` }))
+  ));
+  const initialAdapter = voiceProviderRegistry.get(initial.provider) ?? voiceProviderRegistry.adapters[0];
+  if (!initialAdapter) throw new Error('no voice providers registered');
+  const initialValue = `${initialAdapter.id}:${providerMode(initialAdapter, initial.mode)}`;
   const selected = await ask(select({
     message: t('setup.voiceProvider'),
-    options: [
-      { value: 'tencent-streaming', label: t('setup.voiceTencent'), hint: t('setup.voiceTencentHint') },
-      { value: 'tencent-sentence', label: t('setup.voiceTencentSentence'), hint: t('setup.voiceTencentSentenceHint') },
-      { value: 'xfyun-streaming', label: t('setup.voiceXfyun'), hint: t('setup.voiceXfyunHint') },
-    ],
+    options: profiles.map(({ profile, value }) => ({
+      value, label: t(profile.labelKey), hint: t(profile.hintKey),
+    })),
     initialValue,
   }));
-  return selected === 'tencent-sentence'
-    ? { provider: 'tencent', mode: 'sentence' }
-    : selected === 'xfyun-streaming'
-      ? { provider: 'xfyun', mode: 'streaming' }
-      : { provider: 'tencent', mode: 'streaming' };
+  const match = profiles.find((candidate) => candidate.value === selected);
+  return match ? { provider: match.adapter.id, mode: match.profile.mode }
+    : { provider: initialAdapter.id, mode: providerMode(initialAdapter, initial.mode) };
 }
 
 async function ensureVoiceProvider(voice: VoiceConfig): Promise<VoiceConfig> {
-  if (voice.provider === 'xfyun') {
-    const current = voice.providers.xfyun || {};
-    const appId = current.appId || await ask(text({ message: t('setup.voiceAppId'), validate: validateNonEmpty('appId') }));
-    const apiKey = current.apiKey || await ask(password({ message: t('setup.voiceApiKey'), validate: validateNonEmpty('apiKey') }));
-    const apiSecret = current.apiSecret || await ask(password({ message: t('setup.voiceApiSecret'), validate: validateNonEmpty('apiSecret') }));
-    return { ...voice, providers: { ...voice.providers, xfyun: { appId, apiKey, apiSecret } } };
+  const adapter = voiceProviderRegistry.get(voice.provider);
+  if (!adapter) throw new Error(`unknown voice provider: ${voice.provider}`);
+  const config: VoiceProviderConfig = { ...voice.providers[adapter.id] };
+  for (const field of adapter.fields) {
+    if (config[field.key]) continue;
+    if (field.defaultValue) {
+      config[field.key] = field.defaultValue;
+      continue;
+    }
+    config[field.key] = field.secret
+      ? await ask(password({ message: t(field.promptKey), validate: validateNonEmpty(field.key) }))
+      : await ask(text({
+        message: t(field.promptKey), initialValue: field.defaultValue || '',
+        validate: validateNonEmpty(field.key),
+      }));
   }
-  const current = voice.providers.tencent || {};
-  const appId = current.appId || await ask(text({ message: t('setup.voiceTencentAppId'), validate: validateNonEmpty('appId') }));
-  const secretId = current.secretId || await ask(password({ message: t('setup.voiceTencentSecretId'), validate: validateNonEmpty('secretId') }));
-  const secretKey = current.secretKey || await ask(password({ message: t('setup.voiceTencentSecretKey'), validate: validateNonEmpty('secretKey') }));
-  return {
-    ...voice,
-    providers: { ...voice.providers, tencent: {
-      appId, secretId, secretKey, engineModelType: current.engineModelType || '16k_zh',
-    } },
-  };
+  return { ...voice, providers: { ...voice.providers, [adapter.id]: config } };
 }
 
 // login (browser) → create → route dns → write config.yml. The only human step is the browser login.

@@ -3,8 +3,11 @@
 // interactive shell (setupWizard.ts) so the tested, side-effect-free logic stands on its own. Depends only
 // on i18n (t/getLocale) for user-facing strings — otherwise deterministic given its inputs.
 import { t, getLocale } from './i18n/index.js';
+import { providerMode, voiceProviderRegistry } from '../asr/providerRegistry.js';
 import { TUNNELS } from './options.js';
-import type { Tunnel, VapidConfig, VoiceConfig, XfyunConfig } from './options.js';
+import type {
+  Tunnel, VapidConfig, VoiceConfig, VoiceProviderConfig, XfyunConfig,
+} from './options.js';
 
 export interface ConnectionAnswers {
   tunnel: Tunnel;
@@ -153,17 +156,20 @@ export function answersFromConfig(config: unknown = {}): SetupAnswers {
 }
 
 function voiceFromConfig(value: unknown): VoiceConfig | undefined {
-  if (!isRecord(value) || (value.provider !== 'xfyun' && value.provider !== 'tencent')
-    || !isRecord(value.providers)) return undefined;
-  const xfyun = stringObject<XfyunConfig>(value.providers.xfyun, ['appId', 'apiKey', 'apiSecret']);
-  const tencent = stringObject<NonNullable<VoiceConfig['providers']['tencent']>>(
-    value.providers.tencent,
-    ['appId', 'secretId', 'secretKey', 'engineModelType'],
-  );
+  if (!isRecord(value) || !isRecord(value.providers)) return undefined;
+  const adapter = voiceProviderRegistry.get(value.provider);
+  if (!adapter) return undefined;
+  const providers: Record<string, VoiceProviderConfig> = {};
+  for (const candidate of voiceProviderRegistry.adapters) {
+    const config = stringObject<VoiceProviderConfig>(
+      value.providers[candidate.id], candidate.fields.map((field) => field.key),
+    );
+    if (config) providers[candidate.id] = config;
+  }
   return {
-    provider: value.provider,
-    mode: value.provider === 'tencent' && value.mode === 'sentence' ? 'sentence' : 'streaming',
-    providers: { ...(xfyun ? { xfyun } : {}), ...(tencent ? { tencent } : {}) },
+    provider: adapter.id,
+    mode: providerMode(adapter, value.mode),
+    providers,
   };
 }
 

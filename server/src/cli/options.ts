@@ -2,6 +2,7 @@
 // Resolution order is flags > config file > env > built-in default. The token is ALWAYS materialised
 // (generated when unset) so a public tunnel can never come up token-less.
 import crypto from 'node:crypto';
+import { providerMode, voiceProviderRegistry } from '../asr/providerRegistry.js';
 import { normalizeShortcuts } from '../shortcutConfig.js';
 import type { ShortcutConfig } from '../shortcutConfig.js';
 
@@ -24,13 +25,17 @@ export interface VapidConfig {
   subject?: string;
 }
 
-export interface XfyunConfig {
+export interface VoiceProviderConfig {
+  [key: string]: string | undefined;
+}
+
+export interface XfyunConfig extends VoiceProviderConfig {
   appId?: string;
   apiKey?: string;
   apiSecret?: string;
 }
 
-export interface TencentAsrConfig {
+export interface TencentAsrConfig extends VoiceProviderConfig {
   appId?: string;
   secretId?: string;
   secretKey?: string;
@@ -38,12 +43,9 @@ export interface TencentAsrConfig {
 }
 
 export interface VoiceConfig {
-  provider: 'xfyun' | 'tencent';
+  provider: string;
   mode?: 'streaming' | 'sentence';
-  providers: {
-    xfyun?: XfyunConfig;
-    tencent?: TencentAsrConfig;
-  };
+  providers: Record<string, VoiceProviderConfig | undefined>;
 }
 
 export interface ResolvedConfig {
@@ -228,20 +230,18 @@ function parseXfyun(value: unknown): XfyunConfig | null {
   return stringFields(value, ['appId', 'apiKey', 'apiSecret']);
 }
 
-function parseTencent(value: unknown): TencentAsrConfig | null {
-  return stringFields(value, ['appId', 'secretId', 'secretKey', 'engineModelType']);
-}
-
 function parseVoice(value: unknown, legacyXfyun: unknown): VoiceConfig | null {
-  if (isRecord(value) && (value.provider === 'xfyun' || value.provider === 'tencent')) {
+  if (isRecord(value)) {
+    const adapter = voiceProviderRegistry.get(value.provider);
     const providers = isRecord(value.providers) ? value.providers : {};
-    const xfyun = parseXfyun(providers.xfyun);
-    const tencent = parseTencent(providers.tencent);
-    return {
-      provider: value.provider,
-      mode: value.provider === 'tencent' && value.mode === 'sentence' ? 'sentence' : 'streaming',
-      providers: { ...(xfyun ? { xfyun } : {}), ...(tencent ? { tencent } : {}) },
-    };
+    if (adapter) {
+      const parsed: Record<string, VoiceProviderConfig> = {};
+      for (const candidate of voiceProviderRegistry.adapters) {
+        const config = stringFields(providers[candidate.id], candidate.fields.map((field) => field.key));
+        if (config) parsed[candidate.id] = config;
+      }
+      return { provider: adapter.id, mode: providerMode(adapter, value.mode), providers: parsed };
+    }
   }
   const xfyun = parseXfyun(legacyXfyun);
   return xfyun ? { provider: 'xfyun', mode: 'streaming', providers: { xfyun } } : null;

@@ -1,5 +1,6 @@
 import { getToken } from './storage.js';
 import { ApiError, UnauthorizedError, parseApiErrorBody } from './apiErrors.js';
+export type { AsrSessionResponse } from './voice/providerRegistry.js';
 
 export interface JsonRequestOptions extends Omit<RequestInit, 'headers'> {
   timeoutMs?: number;
@@ -26,17 +27,6 @@ export interface AsrSignResponse {
   url: string;
   appId: string;
 }
-
-export type AsrSessionResponse = {
-  provider: 'xfyun';
-  protocol: 'xfyun-iat-v2';
-  url: string;
-  appId: string;
-} | {
-  provider: 'tencent';
-  protocol: 'tencent-asr-v2';
-  url: string;
-};
 
 export async function requestJson<T = unknown>(
   path: string,

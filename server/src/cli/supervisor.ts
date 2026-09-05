@@ -7,6 +7,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
+import { providerMode, voiceProviderRegistry } from '../asr/providerRegistry.js';
 import { getDriver } from './drivers.js';
 import { writeState, clearState, claudeStatePath, pushStorePath, previewStorePath, notificationsDirPath } from './state.js';
 import {
@@ -222,29 +223,24 @@ export function supervise(cfg: SupervisorConfig, {
     }
     const voice = cfg.voice ?? (cfg.xfyun ? { provider: 'xfyun' as const, providers: { xfyun: cfg.xfyun } } : null);
     if (voice) {
+      const adapter = voiceProviderRegistry.get(voice.provider);
       // The supervisor environment may itself contain legacy credentials. Once config selects a provider,
       // remove both inherited sets before injecting only the active one.
       for (const key of [
         'HANDMUX_ASR_PROVIDER',
         'HANDMUX_ASR_MODE',
-        'XFYUN_APPID', 'XFYUN_APIKEY', 'XFYUN_APISECRET',
-        'TENCENT_ASR_APPID', 'TENCENT_ASR_SECRET_ID', 'TENCENT_ASR_SECRET_KEY',
-        'TENCENT_ASR_ENGINE_MODEL_TYPE',
+        ...voiceProviderRegistry.adapters.flatMap((candidate) => (
+          candidate.fields.map((field) => field.env)
+        )),
       ]) delete env[key];
-      env.HANDMUX_ASR_PROVIDER = voice.provider;
-      env.HANDMUX_ASR_MODE = voice.provider === 'tencent' && voice.mode === 'sentence'
-        ? 'sentence' : 'streaming';
-      if (voice.provider === 'xfyun') {
-        const provider = voice.providers.xfyun;
-        if (provider?.appId) env.XFYUN_APPID = provider.appId;
-        if (provider?.apiKey) env.XFYUN_APIKEY = provider.apiKey;
-        if (provider?.apiSecret) env.XFYUN_APISECRET = provider.apiSecret;
-      } else {
-        const provider = voice.providers.tencent;
-        if (provider?.appId) env.TENCENT_ASR_APPID = provider.appId;
-        if (provider?.secretId) env.TENCENT_ASR_SECRET_ID = provider.secretId;
-        if (provider?.secretKey) env.TENCENT_ASR_SECRET_KEY = provider.secretKey;
-        if (provider?.engineModelType) env.TENCENT_ASR_ENGINE_MODEL_TYPE = provider.engineModelType;
+      if (adapter) {
+        env.HANDMUX_ASR_PROVIDER = adapter.id;
+        env.HANDMUX_ASR_MODE = providerMode(adapter, voice.mode);
+        const provider = voice.providers[adapter.id];
+        for (const field of adapter.fields) {
+          const value = provider?.[field.key] || field.defaultValue;
+          if (value) env[field.env] = value;
+        }
       }
     }
     const c = spawnChild(processRef.execPath, [SERVER], { env, stdio: ['ignore', 'inherit', 'inherit'] });

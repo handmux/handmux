@@ -7,7 +7,7 @@ export type ClaudeHooksStatus = 'installed' | 'absent' | 'no-claude';
 
 export interface ServerConfig {
   asr?: boolean;
-  asrProvider?: 'xfyun' | 'tencent' | null;
+  asrProvider?: string | null;
   asrMode?: 'streaming' | 'sentence' | null;
   claudeHooks?: ClaudeHooksStatus;
   managedCodex?: boolean;
@@ -59,7 +59,7 @@ export function parseServerConfig(value: unknown): ServerConfig | null {
   return {
     shortcuts: shortcutsOf(config.shortcuts) || DEFAULT_SERVER_SHORTCUTS,
     ...(typeof config.asr === 'boolean' ? { asr: config.asr } : {}),
-    ...(config.asrProvider === null || config.asrProvider === 'xfyun' || config.asrProvider === 'tencent'
+    ...(config.asrProvider === null || typeof config.asrProvider === 'string'
       ? { asrProvider: config.asrProvider } : {}),
     ...(config.asrMode === null || config.asrMode === 'streaming' || config.asrMode === 'sentence'
       ? { asrMode: config.asrMode } : {}),

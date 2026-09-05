@@ -2,6 +2,7 @@ import path from 'node:path';
 import {
   readSupervisorConfig, supervisorConfigPath, writeSupervisorConfig,
 } from './state.js';
+import { providerMode, voiceProviderRegistry } from '../asr/providerRegistry.js';
 import { TUNNELS } from './options.js';
 import { normalizeShortcuts } from '../shortcutConfig.js';
 import type { SupervisorConfig } from './supervisor.js';
@@ -61,22 +62,22 @@ const voiceConfig = (value: unknown): SupervisorConfig['voice'] | undefined | nu
   if (value === undefined || value === null) return value;
   const record = recordOf(value);
   const providers = recordOf(record?.providers);
-  if (!record || (record.provider !== 'xfyun' && record.provider !== 'tencent') || !providers) {
+  const adapter = voiceProviderRegistry.get(record?.provider);
+  if (!record || !adapter || !providers) {
     throw new Error('invalid supervisor config: voice must select a known provider');
   }
-  const xfyun = stringFields(providers.xfyun, ['appId', 'apiKey', 'apiSecret'], 'voice.providers.xfyun');
-  const tencent = stringFields(
-    providers.tencent,
-    ['appId', 'secretId', 'secretKey', 'engineModelType'],
-    'voice.providers.tencent',
-  );
+  const parsed: NonNullable<SupervisorConfig['voice']>['providers'] = {};
+  for (const candidate of voiceProviderRegistry.adapters) {
+    const config = stringFields(
+      providers[candidate.id], candidate.fields.map((field) => field.key),
+      `voice.providers.${candidate.id}`,
+    );
+    if (config) parsed[candidate.id] = config;
+  }
   return {
-    provider: record.provider,
-    mode: record.provider === 'tencent' && record.mode === 'sentence' ? 'sentence' : 'streaming',
-    providers: {
-      ...(xfyun ? { xfyun } : {}),
-      ...(tencent ? { tencent } : {}),
-    },
+    provider: adapter.id,
+    mode: providerMode(adapter, record.mode),
+    providers: parsed,
   };
 };
 
