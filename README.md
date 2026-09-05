@@ -13,7 +13,7 @@
 
 > **One phone, a whole mobile vibe-coding cockpit.** Built on tmux — one command on your computer, scan a QR, and your live session, Claude Code, Codex, git, previews and docs are all in your hand, creativity ready wherever you are.
 
-handmux is more than a terminal on your phone. It puts the *same* live **tmux** session running on your computer into your phone's browser (real panes, not a read-only mirror), then builds a whole **mobile vibe-coding cockpit** around it: **Claude Code / Codex** push you the moment a pane needs a decision — approve with your thumb, or fire off a new instruction by voice; browse a full-screen colored **git** diff; **preview** a running site in one tap; hear a **doc** read aloud line by line; move files both ways. Nothing to install on the phone — open a link and you're in; "Add to Home Screen" and it runs full-screen as a **PWA**, basically a native app. Curl up on the couch or squeeze onto the train — the vibe coding never stops, your creativity stays in hand.
+handmux puts the *same live tmux workspace* from your computer in any phone or desktop browser. Keep coding with Claude Code, Codex, Pi, or any terminal tool; review changes, answer prompts, preview apps, and move files without starting a separate remote session. It is self-hosted, open-source, and needs no phone app or handmux account.
 
 <p align="center">
   <img src="assets/handmux-run.gif" alt="handmux: say what you need, Claude Code writes it, then tap the filename to preview the result" width="280">
@@ -59,113 +59,40 @@ handmux start --tunnel cloudflare   # instant public URL (cloudflared auto-insta
 
 ## Why handmux
 
-- **🧰 More than a terminal — a whole mobile vibe-coding cockpit in your pocket.** Full-screen colored git diffs, one-tap preview of a running site, docs read aloud line by line, files moved both ways — a whole dev kit in hand, no hopping between apps.
-- **🚀 One minute from zero to coding on your phone.** One `handmux start`, one scan, done — no sign-up, no App Store, no app to sideload; just a link. "Add to Home Screen" and it's a full-screen **PWA**, as smooth as a native app.
-- **🧶 Walk away, keep working.** Your phone drives the *one* live tmux pane on your desk (not a new shell, not a screenshot). Close the laptop and keep watching from your thumb — exact same state.
-- **🔔 When it needs you, your phone rings.** Claude Code / Codex push the moment they need a decision; add it to your home screen and they come through as system notifications. An inbox tags each pane working / needs-you / done / error — many projects at a glance — while the host keeps terminal-result reads consistent across refreshes and devices. Open a completed item to start at the final completed AI answer in the authoritative latest tail. Claude Hook outcomes queue locally while the Server is offline and replay in session order after it returns. Approve permissions and plans with a tap, so you stop babysitting the screen.
-- **🔒 Your code goes through no middleman.** Free and fully open-source; we run no server in the middle — your data travels straight between your computer and your phone, so it stays secure.
+- **🧶 One workspace, everywhere.** Your phone drives the real tmux panes already running on your computer—not a screenshot or a separate cloud session.
+- **🔔 Stop babysitting agents.** See which panes are working or waiting, get notified when you are needed, and approve from your phone.
+- **🧰 A complete coding cockpit.** Terminal, Agent conversations, Git, previews, docs, files, usage, and idea capture stay together.
+- **🔒 Self-hosted by design.** Your browser connects to your computer; handmux runs no account service or relay in between.
 
 ## Features
 
-- **Claude Code / Codex, deeply** — an inbox status ledger, thumb-approve permissions & plans, and stable host-wide subscription usage shared by every connected device; each visible provider can refresh its latest limits from the card action menu, while keeping the previous values visible if that provider cannot be reached. Codex also shows the current account and plan, separate account/model limits, remaining rate-limit resets, and each provided expiry. The same Usage screen can save multiple DeepSeek and Moonshot (Kimi) API accounts encrypted at rest within the Handmux computer's local trust boundary; full API Keys never return to browsers.
-- **Chat view** — drive Codex CLI through App Server with streaming Markdown bubbles, tool cards, native Goal lifecycle cards, and session status; the context-ring details show the absolute Git worktree root path and branch that contain the thread `cwd`. Setting or restarting a Goal creates a fresh active native Goal, immediately shows its user-side card on the right, and starts Codex's built-in continuation. An active or paused Goal stays beneath the live read-only turn task list, Codex terminal feedback stays with its originating turn on the left, and every entry opens the same Bottom Sheet. The current Goal uses one equal-width iOS-style action row; clearing it removes the resident Goal and closes the sheet, while its historical chat card remains. The current terminal Goal can be edited before restarting. Long replies hold at their beginning for reading, with an explicit jump back to the latest output. Existing panes can switch in place. Every sendable Agent uses the same persistent server queue: queued messages can be viewed, edited or deleted and are delivered automatically; Guide now appears only when that Agent supports steering. Failed sends stay visible and retry under the same request ID. If delivery remains unknown after reconciliation, the message returns to the conversation and you choose whether to send it again as new, with a clear duplicate-delivery warning. On desktop, <kbd>Shift</kbd>+<kbd>Enter</kbd> focuses the composer or inserts a newline when already focused, <kbd>Enter</kbd> sends, and <kbd>Esc</kbd> releases focus without stopping the Agent. Codex chat is stable; Claude Code and Pi chat are independently enabled experimental options.
-- **Real-time terminal + desktop keyboard** — stream the same tmux pane on phone and desktop with scrollback, weak-network fallback, direct physical-keyboard input, and native copy/paste.
-- **Command & chat modes** — switch between direct terminal input and natural-language agent chat, with direct Alt and Space keys on the mobile command keyboard and a customizable quick bar that stays in sync across devices.
-- **Client reload after updates** — once the server update has finished, use Settings → Reload app to load the new client without quitting and reopening the home-screen app.
-- **Script push** — notify your phone from any script or CI step with `handmux push`; target all devices, a named session, or a specific device.
-- **Workspace recovery** — handmux keeps the metadata needed to restore your latest tmux workspace after a computer or tmux-server restart, without replacing existing sessions.
-- **Git viewer** — changes / commit history / any branch / full-screen colored diff, multi-repo tabs, read-only, never touches your tree.
-- **Web Preview for URLs and static folders** — preview URLs by phone or computer proxy, or open an isolated static folder, with narrow/wide page widths and zoom; computer proxy can also request a mobile or desktop site version. It embeds pages rather than replacing a full browser.
-- **Docs** — tap recognized text-file paths in the terminal or Agent tool input/output to open them, regardless of extension; user-home paths appear as `~/…`, while ordinary slash-separated prose stays plain. Markdown rendered, font zoom, sentence-by-sentence read-aloud. Binary files stay download-only.
-- **Mobile select & copy** — long-press text in either the terminal or an Agent conversation, drag iOS-style handles to fine-tune, then copy the exact selection, its rendered line, or its semantic paragraph.
-- **Files both ways** — multi-select upload from the chat box (including ZIP archives), download, share in, copy any absolute path.
-- **Ideas — catch every one** — a thought the moment it strikes: a per-window idea/to-do list with click-to-toggle voice input—iFlytek/Tencent live dictation or Tencent sentence recognition after stopping—and one-tap insertion into the prompt. Every recording mode shows the same live level waveform; terminal chat and Agent conversations share the same speaking animation, and recognized text is inserted without clearing the existing draft. Settings shows whether speech-to-text is enabled; when off, provider controls stay hidden and point to `handmux setup`, while an enabled service shows the current voice profile using the same name as Setup and a browser-local Low/Medium/High filler-word filtering slider (Medium by default). Both Tencent modes support filtering; iFlytek reports it as unsupported. Tencent sentence recognition requires the SecretId to have the CAM action `asr:SentenceRecognition`.
-- **Built for flaky networks** — backoff reconnect, connection-lost banner, offline page, polling that pauses in the background; a reflow-safe cursor.
-- **Zero-install PWA** — runs full-screen from your home screen, with English, 简体 / 繁體中文, 日本語, and 한국어.
+- **Live terminal** — use the same tmux pane from phone and desktop, with history, physical-keyboard input, and native copy/paste.
+- **Agent conversations** — work with Codex in a streaming chat view; optional Claude Code and Pi integrations bring the same workspace into their supported conversation flows.
+- **Inbox and approvals** — follow multiple panes, receive push notifications, and answer permission or plan prompts remotely.
+- **Git and previews** — review repositories and open running sites, intranet pages, or static folders from the browser.
+- **Docs and files** — open readable files, listen to documents, and upload, download, or share files in either direction.
+- **Ideas and voice** — keep notes per window and dictate text through supported iFlytek or Tencent recognition modes.
+- **Usage at a glance** — view supported Agent subscription limits and configured API-provider balances without exposing full keys to the browser.
+- **Resilient sessions** — reconnect across weak networks and restore saved tmux workspace structure after a restart.
+- **Script push** — send a notification to your phone from local scripts or CI with `handmux push`.
+- **Zero-install PWA** — add it to your home screen for a full-screen experience in English, Chinese, Japanese, or Korean.
 
 ## Agent integration
 
-Use `handmux <agent> [args...]` to start a supported Agent; every argument after the Agent name is passed through unchanged. Use the separate `handmux agent` namespace to enable or inspect Handmux integration. Codex support is built in, while Pi and Claude Code are explicitly enabled:
+Codex integration is built in. Pi and Claude Code integration are optional:
 
 ```bash
 handmux codex [args...]
 handmux pi [args...]
-
-handmux agent                 # list Agent integration status
 handmux agent enable pi
-handmux agent status pi
-handmux agent disable pi
-
 handmux agent enable claude
-handmux agent status claude
-handmux agent disable claude
-handmux agent status codex    # ready (built-in) when Codex is installed
 ```
 
-The legacy `handmux hooks install|uninstall` commands remain compatibility aliases for Claude Code. Pi integration uses a trusted Handmux-owned Extension wrapper for the same native Pi TUI process; enabling it writes only that wrapper under Pi's documented global extension directory and never scans projects or loads third-party extensions. Open a new Pi session, or run `/reload` in Pi, after enabling or disabling it. The wrapper is refreshed automatically across Handmux upgrades and gives each Connector build a content-fingerprinted import URL, so `/reload` cannot reuse the previous build from the module cache; a file not marked as Handmux-owned is never overwritten or deleted. Pi keeps working normally when the Handmux server is offline; terminal outcomes are queued locally and delivered after it returns. In Pi chat, the shared context ring reads Pi's live context-window usage, activity and working directory; reload an already-running Pi session after upgrading Handmux to expose newly added Connector capabilities.
+See the **[Agent integration guide](https://handmux.com/docs#cmd-agent)** for status, disable, compatibility, and reload behavior.
 
-The capability-driven Agent chat downloads attachments only after a tap. Providers register an opaque, session-bound resource ID; the app never receives a local path, and potentially active content such as HTML or SVG is always downloaded rather than rendered inline.
+## Connectivity
 
-## Workspace recovery
-
-handmux continuously maintains two redundant copies of the latest workspace metadata. They are not browsing history: ordinary changes and deletions handmux can confirm simply update the current state. A selectable checkpoint is archived only when the computer or tmux environment changes. If the final tmux session disappears outside handmux, tmux cannot distinguish an intentional deletion from a crash, so handmux retains the last state and can offer recovery immediately, without waiting for a new tmux server or session. Every checkpoint from the latest 24 hours is kept; older history is then trimmed to the newest 10, while the latest valid checkpoint never expires just because of age.
-
-After such a restart, the phone shows **Restore last workspace** for one hour when a checkpoint has work left to restore; if tmux has no sessions it opens the confirmation directly. Choosing **Ignore this backup** suppresses that checkpoint only on that phone; an ordinary close does not. When recovery finishes, the phone reports the actual sessions, windows, and panes restored, but does not automatically open or bind them; choose **Bind restored sessions** if you want them on that phone. The CLI remains available after the phone prompt expires:
-
-```bash
-handmux restore --dry-run                         # preview the latest plan
-handmux restore                                  # restore; TTY picker, otherwise latest
-handmux restore --list                           # list retained checkpoints
-handmux restore --checkpoint <id> --session api  # select history / restore one session
-```
-
-Restore is additive and idempotent. It never stops, renames, replaces, or changes the topology of a current session; a name collision becomes `name-restored`, then `name-restored-2`. Windows, panes, working directories and layouts are rebuilt where safe. Only verified Claude Code/Codex sessions are resumed from their persisted session IDs; ordinary panes reopen as shells in their saved directories, without replaying commands or scrollback. Metadata lives under `~/.handmux/workspaces/`; it can include paths, tmux names/layout and agent session IDs, but not pane output.
-
-## Script push
-
-Send a push notification to your phone from any script, CI step, or build hook:
-
-```bash
-handmux push "Build done" "Took 3m12s"
-```
-
-Runs **on your computer** against the already-running `handmux` server (loopback + local server token — no config, no remote endpoint). Web Push must be enabled first (`handmux setup`).
-
-**Syntax**
-
-```
-handmux push <title> <body> [options]
-```
-
-| Flag | Description |
-|---|---|
-| `--session <name>` | Target all devices subscribed to this tmux session (repeatable; comma-separated values OK) |
-| `--device <key>` | Target a specific device by its key (repeatable; comma-separated values OK) |
-| `--tag <T>` | Notification tag (collapses duplicates) |
-| `--url <U>` | HTTP(S) URL or same-origin relative path to open when the notification is tapped |
-
-**Scopes — pick at most one:**
-
-- _(default)_ — all subscribed devices
-- `--session` — only devices subscribed to the named session(s)
-- `--device` — only the specified device(s) by key
-
-`--session` and `--device` are mutually exclusive.
-
-The **device key** is shown in the phone app under Settings → Script push. It is an addressing identifier, not a secret — the security boundary is the local server token.
-
-> **Reliability:** Web Push is best-effort. For delivery-critical alerts use a dedicated messaging app (WeChat, Slack, etc.).
-
-## Networking: one decision
-
-No tunnel by default — the phone connects **straight to your own computer**, nothing exposed and no middleman. To reach it from outside, just ask: **does your machine already have a public address?**
-
-- **Yes** (cloud box / public IP / forwarded port) — no tunnel needed, connect directly; fastest and most private.
-- **No** — open a tunnel. Each runs on **your own free third-party account** — handmux just wires it up and operates no relay of its own: `cloudflare` (zero-config, up in seconds, but its public edge can be slow or unreliable in some regions) · `cloudflare-named` (your own domain, steadier) · `natapp` / `cpolar` (domestic providers that stay reachable inside mainland China) · `ssh` self-hosted (through your own server).
-
-> Tunnel config, Web Preview, autostart, and voice/push credentials → see the **[docs](https://handmux.com/docs)**.
-
-Once autostart is installed, `handmux start` / `stop` / `restart` coordinate with that same launchd/systemd service (including after an upgrade). A lifecycle lock prevents concurrent launches; `status` shows the running version and warns with PIDs if stale/duplicate supervisors exist, while `stop` reaps every copy.
+The default is a direct connection to your own computer. For access away from home or work, use a public address or a tunnel on your own Cloudflare, natapp, cpolar, or SSH setup. See the **[connectivity guide](https://handmux.com/docs#tunnels)**.
 
 ## Requirements
 
