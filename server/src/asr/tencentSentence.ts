@@ -15,6 +15,7 @@ export interface TencentSentenceDependencies {
   fetch?: FetchLike;
   timestamp?: number;
   filterModal?: 0 | 1 | 2;
+  signal?: AbortSignal;
 }
 
 export interface TencentSentenceResult {
@@ -95,13 +96,14 @@ export function buildTencentSentenceRequest(
 export async function recognizeTencentSentence(
   config: TencentAsrConfig,
   audio: Uint8Array,
-  { fetch: fetchImpl = fetch, timestamp, filterModal = 1 }: TencentSentenceDependencies = {},
+  { fetch: fetchImpl = fetch, timestamp, filterModal = 1, signal }: TencentSentenceDependencies = {},
 ): Promise<TencentSentenceResult> {
   const request = buildTencentSentenceRequest(config, audio, timestamp, filterModal);
   let response: Response;
   try {
     response = await fetchImpl(request.url, {
       method: 'POST', headers: request.headers, body: request.body,
+      ...(signal ? { signal } : {}),
     });
   } catch (error) {
     throw new TencentSentenceError(

@@ -10,7 +10,7 @@ All notable changes to handmux. Format follows [Keep a Changelog](https://keepac
 
 ### Changed
 
-- 语音转写改为 provider adapter 注册架构：模式、配置字段、环境注入、签名、整句识别和浏览器实时协议均由 adapter 声明；新增服务不再修改公共录音、路由、setup 或输入框流程，现有讯飞与腾讯配置保持兼容。
+- 语音转写改为 provider adapter 注册架构：模式、配置字段、环境注入、签名、配置验证、整句识别和浏览器实时协议均由 adapter 声明；Setup 会自动去掉语音字段的前后空格，并在首次配置、切换方案或修改字段后直接向服务商验证，现有讯飞与腾讯配置保持兼容。
 - 设置新增“语音转文字”板块：未开启时隐藏服务商与语气词过滤并提示通过 `handmux setup` 配置；开启后显示与 Setup 一致的当前语音方案名称，以及端上保存的语气词过滤低/中/高滑块（默认中）。腾讯实时与一句话识别分别映射 `0/1/2`，讯飞明确显示不支持。
 
 ### Fixed

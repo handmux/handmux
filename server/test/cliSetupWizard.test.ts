@@ -102,6 +102,27 @@ describe('configFromAnswers', () => {
     expect(answersFromConfig(config).voice).toEqual(voice);
     expect(mergeConfig(config, { tunnel: 'none', port: 19999, voice }).voice).toEqual(voice);
   });
+  it('trims every provider field before voice configuration is saved or reused', () => {
+    const voice = {
+      provider: 'tencent' as const,
+      mode: 'sentence' as const,
+      providers: {
+        xfyun: { appId: ' A ', apiKey: '\tK\n', apiSecret: ' S ' },
+        tencent: {
+          appId: ' 1 ', secretId: ' ID ', secretKey: '\tKEY ', engineModelType: ' 16k_zh\n',
+        },
+      },
+    };
+    const saved = configFromAnswers({ tunnel: 'none', port: 19999, voice });
+    expect(saved.voice).toEqual({
+      provider: 'tencent', mode: 'sentence',
+      providers: {
+        xfyun: { appId: 'A', apiKey: 'K', apiSecret: 'S' },
+        tencent: { appId: '1', secretId: 'ID', secretKey: 'KEY', engineModelType: '16k_zh' },
+      },
+    });
+    expect(answersFromConfig(saved).voice).toEqual(saved.voice);
+  });
   it('migrates an enabled legacy XFYUN config to disabled without losing its credentials', () => {
     const legacy = { xfyun: { appId: 'A', apiKey: 'K', apiSecret: 'S' } };
     const migrated = answersFromConfig(legacy).voice!;

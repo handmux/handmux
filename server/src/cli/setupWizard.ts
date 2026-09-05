@@ -49,12 +49,14 @@ const isTunnel = (value: unknown): value is Tunnel => (
 import {
   cfConfigYaml, parseTunnelCreate, findTunnelId,
   mergeConfig, answersFromConfig, summarizeConnection,
+  normalizeVoiceConfig,
   validatePort, validateHost, validatePreviewDomain, validateNonEmpty, validateContact, validateToken,
   TUNNEL_KEYS,
 } from './setupModel.js';
 export {
   cfConfigYaml, parseTunnelCreate, findTunnelId,
   configFromAnswers, mergeConfig, answersFromConfig, summarizeConnection,
+  normalizeVoiceConfig,
   validatePort, validateHost, validatePreviewDomain, validateNonEmpty, validateContact, validateToken,
 } from './setupModel.js';
 
@@ -465,6 +467,7 @@ async function editVoice(a: SetupAnswers): Promise<VoiceConfig | undefined> {
       const profile = await chooseVoiceProfile({ provider: 'tencent', mode: 'streaming' });
       voice = await ensureVoiceProvider({ ...profile, enabled: true, providers: {} });
     }
+    await verifyVoiceConfiguration(voice);
   }
   for (;;) {
     const provider: string = voice.provider;
@@ -493,18 +496,22 @@ async function editVoice(a: SetupAnswers): Promise<VoiceConfig | undefined> {
       if (pick === 'provider') {
         const selected = await chooseVoiceProfile(voice);
         voice = await ensureVoiceProvider({ ...voice, ...selected });
+        await verifyVoiceConfiguration(voice);
       } else {
         const field = adapter.fields.find((candidate) => candidate.key === pick);
         if (!field) continue;
         const config: VoiceProviderConfig = { ...current };
-        config[field.key] = field.secret
+        config[field.key] = String(field.secret
           ? await ask(password({ message: t(field.promptKey), validate: validateNonEmpty(field.key) }))
           : await ask(text({
             message: t(field.promptKey),
             initialValue: config[field.key] || field.defaultValue || '',
             validate: validateNonEmpty(field.key),
-          }));
-        voice = { ...voice, providers: { ...voice.providers, [provider]: config } };
+          }))).trim();
+        voice = normalizeVoiceConfig({
+          ...voice, providers: { ...voice.providers, [provider]: config },
+        });
+        await verifyVoiceConfiguration(voice);
       }
     } catch (e) { if (e !== CANCELLED) throw e; }
   }
@@ -543,19 +550,57 @@ async function ensureVoiceProvider(voice: VoiceConfig): Promise<VoiceConfig> {
   if (!adapter) throw new Error(`unknown voice provider: ${voice.provider}`);
   const config: VoiceProviderConfig = { ...voice.providers[adapter.id] };
   for (const field of adapter.fields) {
-    if (config[field.key]) continue;
+    const existing = config[field.key]?.trim();
+    if (existing) {
+      config[field.key] = existing;
+      continue;
+    }
     if (field.defaultValue) {
       config[field.key] = field.defaultValue;
       continue;
     }
-    config[field.key] = field.secret
+    config[field.key] = String(field.secret
       ? await ask(password({ message: t(field.promptKey), validate: validateNonEmpty(field.key) }))
       : await ask(text({
         message: t(field.promptKey), initialValue: field.defaultValue || '',
         validate: validateNonEmpty(field.key),
-      }));
+      }))).trim();
   }
-  return { ...voice, providers: { ...voice.providers, [adapter.id]: config } };
+  return normalizeVoiceConfig({
+    ...voice, providers: { ...voice.providers, [adapter.id]: config },
+  });
+}
+
+async function verifyVoiceConfiguration(voice: VoiceConfig): Promise<boolean> {
+  const adapter = voiceProviderRegistry.get(voice.provider);
+  if (!adapter) throw new Error(`unknown voice provider: ${voice.provider}`);
+  if (!adapter.verify) {
+    note(t('setup.voiceVerifyUnavailable'));
+    return false;
+  }
+  const providerConfig = voice.providers[adapter.id] || {};
+  const env: NodeJS.ProcessEnv = {};
+  for (const field of adapter.fields) env[field.env] = providerConfig[field.key] || '';
+  const config = adapter.readConfig(env, providerMode(adapter, voice.mode));
+  if (!adapter.isConfigured(config)) {
+    note(t('setup.voiceVerifyFailed', { msg: t('setup.voiceSkipped') }));
+    return false;
+  }
+  note(t('setup.voiceVerifying', { profile: voiceProfileLabel(voice) }));
+  try {
+    await adapter.verify(config);
+    note(t('setup.voiceVerified'));
+    return true;
+  } catch (error) {
+    let message = errorMessage(error);
+    for (const field of adapter.fields) {
+      if (!field.secret) continue;
+      const secret = providerConfig[field.key];
+      if (secret) message = message.split(secret).join('••••');
+    }
+    note(t('setup.voiceVerifyFailed', { msg: message }));
+    return false;
+  }
 }
 
 // login (browser) → create → route dns → write config.yml. The only human step is the browser login.

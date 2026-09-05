@@ -75,6 +75,7 @@ export interface VoiceProviderAdapter {
   capabilities?: VoiceProviderCapabilities;
   readConfig(env: NodeJS.ProcessEnv, mode: AsrMode): AsrConfig;
   isConfigured(config: AsrConfig): boolean;
+  verify?(config: AsrConfig): Promise<void>;
   createStreamingSession?(config: AsrConfig, options: VoiceRecognitionOptions): StreamingAsrSession;
   recognizeSentence?(
     config: AsrConfig,

@@ -42,6 +42,25 @@ const stringObject = <T extends object>(value: unknown, keys: readonly string[])
   return result as T;
 };
 
+// Voice credentials and identifiers are copied from provider consoles, where an unnoticed leading or
+// trailing space makes an otherwise valid signature fail. Normalize at the persistence boundary as well as
+// in the interactive editor so every setup caller gets the same behavior.
+export function normalizeVoiceConfig(voice: VoiceConfig): VoiceConfig {
+  const providers: Record<string, VoiceProviderConfig | undefined> = {};
+  for (const [provider, value] of Object.entries(voice.providers)) {
+    if (!value) {
+      providers[provider] = value;
+      continue;
+    }
+    const normalized: VoiceProviderConfig = {};
+    for (const [key, fieldValue] of Object.entries(value)) {
+      if (typeof fieldValue === 'string') normalized[key] = fieldValue.trim();
+    }
+    providers[provider] = normalized;
+  }
+  return { ...voice, providers };
+}
+
 // ~/.cloudflared/config.yml for a named tunnel: route the hostname to the local handmux port.
 export function cfConfigYaml({
   tunnelName, credentialsFile, hostname, port,
@@ -115,7 +134,7 @@ export function configFromAnswers(a: SetupAnswers): SetupConfig {
     if (a.cpolarRegion) cfg.cpolarRegion = a.cpolarRegion;
   }
   if (a.vapid) cfg.vapid = a.vapid;
-  if (a.voice) cfg.voice = a.voice;
+  if (a.voice) cfg.voice = normalizeVoiceConfig(a.voice);
   return cfg;
 }
 
@@ -151,7 +170,9 @@ export function answersFromConfig(config: unknown = {}): SetupAnswers {
   const xfyun = stringObject<XfyunConfig>(cfg.xfyun, ['appId', 'apiKey', 'apiSecret']);
   if (vapid) a.vapid = vapid;
   if (voice) a.voice = voice;
-  else if (xfyun) a.voice = { provider: 'xfyun', mode: 'streaming', providers: { xfyun } };
+  else if (xfyun) a.voice = normalizeVoiceConfig({
+    provider: 'xfyun', mode: 'streaming', providers: { xfyun },
+  });
   return a;
 }
 
@@ -166,12 +187,12 @@ function voiceFromConfig(value: unknown): VoiceConfig | undefined {
     );
     if (config) providers[candidate.id] = config;
   }
-  return {
+  return normalizeVoiceConfig({
     ...(value.enabled === false ? { enabled: false } : {}),
     provider: adapter.id,
     mode: providerMode(adapter, value.mode),
     providers,
-  };
+  });
 }
 
 // The dim one-line summary shown next to the Connection row (and reused nowhere else). Pure.

@@ -7,6 +7,7 @@ import type { VoiceProviderAdapter } from '../src/asr/providerRegistry.js';
 
 describe('voice provider registry', () => {
   it('runs a newly registered provider through common config and capability flow', async () => {
+    const verify = async () => {};
     const adapter: VoiceProviderAdapter = {
       id: 'example',
       defaultMode: 'streaming',
@@ -17,6 +18,7 @@ describe('voice provider registry', () => {
       ],
       readConfig: (env, mode) => ({ provider: 'example', mode, token: env.EXAMPLE_TOKEN || '' }),
       isConfigured: (config) => !!config.token,
+      verify,
       createStreamingSession: (config) => ({
         provider: config.provider, protocol: 'example-v1', url: 'wss://example.test/asr',
       }),
@@ -30,6 +32,7 @@ describe('voice provider registry', () => {
 
     expect(config).toEqual({ provider: 'example', mode: 'sentence', token: 'secret' });
     expect(providerMode(adapter, 'unsupported')).toBe('streaming');
+    await expect(registry.get('example')?.verify?.(config!)).resolves.toBeUndefined();
     expect(registry.get('example')?.createStreamingSession?.(config!, options)).toMatchObject({
       provider: 'example', protocol: 'example-v1',
     });
