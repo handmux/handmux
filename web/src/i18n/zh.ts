@@ -753,6 +753,7 @@ export default {
   'settings.voice_filter_medium': '中',
   'settings.voice_filter_high': '高',
   'settings.voice_not_supported': '不支持',
+  'settings.voice_setup_hint': '请在终端执行 handmux setup，然后进入“语音输入”完成设置。',
   'settings.project_task_beta': '项目任务 Beta',
   'project.root.projects': '项目',
   'project.root.sessions': '会话',

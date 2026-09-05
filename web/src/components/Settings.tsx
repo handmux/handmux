@@ -521,16 +521,19 @@ export default function Settings({ open, onClose, termRef, onOpenChangelog = () 
         <SettingsNavRow label={t('pushInbox.title')} dot={notifUnread} onClick={() => onOpenInbox?.()} />
       </SettingsGroup>
 
-      <SettingsGroup title={t('settings.group_voice')}>
+      <SettingsGroup title={t('settings.group_voice')}
+        footer={voiceEnabled === false ? t('settings.voice_setup_hint') : null}>
         <SettingsValueRow label={t('settings.voice_enabled')} value={voiceEnabledLabel} />
-        <SettingsValueRow label={t('settings.voice_provider')} value={voiceProviderLabel} />
-        {voiceFillerFilterSupported ? (
-          <SettingsLevelSlider label={t('settings.voice_filler_filter')} value={voiceFillerFilter}
-            onChange={changeVoiceFillerFilter} />
-        ) : (
-          <SettingsValueRow label={t('settings.voice_filler_filter')}
-            value={t('settings.voice_not_supported')} />
-        )}
+        {voiceEnabled && <>
+          <SettingsValueRow label={t('settings.voice_provider')} value={voiceProviderLabel} />
+          {voiceFillerFilterSupported ? (
+            <SettingsLevelSlider label={t('settings.voice_filler_filter')} value={voiceFillerFilter}
+              onChange={changeVoiceFillerFilter} />
+          ) : (
+            <SettingsValueRow label={t('settings.voice_filler_filter')}
+              value={t('settings.voice_not_supported')} />
+          )}
+        </>}
       </SettingsGroup>
 
       <SettingsGroup title={t('settings.group_about')}

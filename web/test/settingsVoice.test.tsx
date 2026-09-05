@@ -39,6 +39,19 @@ const render = (props: Record<string, unknown>) => act(() => root.render(
 ));
 
 describe('Settings speech-to-text section', () => {
+  it('hides provider controls and points to handmux setup when voice is off', async () => {
+    await render({
+      voiceEnabled: false, voiceProvider: null, voiceMode: null,
+      voiceFillerFilterSupported: false,
+    });
+    expect(container.textContent).toContain('是否已开启未开启');
+    expect(container.textContent).not.toContain('当前服务商');
+    expect(container.textContent).not.toContain('语气词过滤');
+    expect(container.textContent).toContain(
+      '请在终端执行 handmux setup，然后进入“语音输入”完成设置。',
+    );
+  });
+
   it('shows Tencent status and persists the low/medium/high slider on this browser', async () => {
     await render({
       voiceEnabled: true, voiceProvider: 'tencent', voiceMode: 'sentence',

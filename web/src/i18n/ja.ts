@@ -335,6 +335,7 @@ export default {
   'settings.voice_filter_medium': '中',
   'settings.voice_filter_high': '高',
   'settings.voice_not_supported': '未対応',
+  'settings.voice_setup_hint': 'ターミナルで handmux setup を実行し、「音声入力」で設定してください。',
   'settings.project_task_beta': 'プロジェクトタスク Beta',
   'settings.group_terminal': 'ターミナル',
   'settings.group_chat': 'チャット',

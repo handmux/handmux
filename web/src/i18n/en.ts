@@ -754,6 +754,7 @@ export default {
   'settings.voice_filter_medium': 'Medium',
   'settings.voice_filter_high': 'High',
   'settings.voice_not_supported': 'Not supported',
+  'settings.voice_setup_hint': 'Run handmux setup in your terminal, then open Voice input to configure it.',
   'settings.project_task_beta': 'Project Tasks Beta',
   'project.root.projects': 'Projects',
   'project.root.sessions': 'Sessions',

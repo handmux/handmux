@@ -335,6 +335,7 @@ export default {
   'settings.voice_filter_medium': '中',
   'settings.voice_filter_high': '高',
   'settings.voice_not_supported': '不支援',
+  'settings.voice_setup_hint': '請在終端機執行 handmux setup，然後進入「語音輸入」完成設定。',
   'settings.project_task_beta': '專案任務 Beta',
   'settings.group_terminal': '終端機',
   'settings.group_chat': '對話',
