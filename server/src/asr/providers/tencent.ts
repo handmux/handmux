@@ -12,39 +12,54 @@ const FILTER_MODAL: Record<FillerFilterLevel, '0' | '1' | '2'> = {
   low: '0', medium: '1', high: '2',
 };
 
+async function verifyTencentStreamingConfig(
+  config: TencentAsrConfig,
+  dependencies: VoiceVerificationDependencies,
+): Promise<void> {
+  const session = buildTencentAsrSignedUrl({ ...config, filterModal: '1' });
+  await verifyStreamingConnection({
+    url: session.url,
+    sendOnOpen: (socket) => {
+      socket.send(silentPcmProbe().subarray(0, 1_280));
+      socket.send(JSON.stringify({ type: 'end' }));
+    },
+    acceptMessage: (message) => {
+      let value: unknown;
+      try { value = JSON.parse(message); }
+      catch { throw new VoiceVerificationError('invalid_response', 'provider returned an invalid response'); }
+      const root = value && typeof value === 'object' ? value as Record<string, unknown> : {};
+      if (typeof root.code !== 'number') {
+        throw new VoiceVerificationError('invalid_response', 'provider returned an invalid response');
+      }
+      if (root.code !== 0) {
+        throw new VoiceVerificationError(
+          `tencent_${root.code}`,
+          `Tencent Cloud ASR rejected the configuration (${root.code}): ${String(root.message || 'unknown error')}`,
+        );
+      }
+      return true;
+    },
+  }, dependencies);
+}
+
 export async function verifyTencentAsr(
   config: TencentAsrConfig,
   dependencies: VoiceVerificationDependencies = {},
 ): Promise<void> {
+  const timeoutMs = dependencies.timeoutMs ?? 8_000;
+  const startedAt = Date.now();
+  // SentenceRecognition authenticates SecretId/SecretKey but has no AppId parameter. Probe the signed
+  // streaming endpoint first so a mistyped AppId cannot produce a false-positive sentence verification.
+  await verifyTencentStreamingConfig(config, { ...dependencies, timeoutMs });
   if (config.mode === 'streaming') {
-    const session = buildTencentAsrSignedUrl({ ...config, filterModal: '1' });
-    await verifyStreamingConnection({
-      url: session.url,
-      sendOnOpen: (socket) => {
-        socket.send(silentPcmProbe().subarray(0, 1_280));
-        socket.send(JSON.stringify({ type: 'end' }));
-      },
-      acceptMessage: (message) => {
-        let value: unknown;
-        try { value = JSON.parse(message); }
-        catch { throw new VoiceVerificationError('invalid_response', 'provider returned an invalid response'); }
-        const root = value && typeof value === 'object' ? value as Record<string, unknown> : {};
-        if (typeof root.code !== 'number') {
-          throw new VoiceVerificationError('invalid_response', 'provider returned an invalid response');
-        }
-        if (root.code !== 0) {
-          throw new VoiceVerificationError(
-            `tencent_${root.code}`,
-            `Tencent Cloud ASR rejected the configuration (${root.code}): ${String(root.message || 'unknown error')}`,
-          );
-        }
-        return true;
-      },
-    }, dependencies);
     return;
   }
+  const remainingMs = timeoutMs - (Date.now() - startedAt);
+  if (remainingMs <= 0) {
+    throw new VoiceVerificationError('verification_timeout', 'provider verification timed out');
+  }
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), dependencies.timeoutMs ?? 8_000);
+  const timeout = setTimeout(() => controller.abort(), remainingMs);
   try {
     await recognizeTencentSentence(config, silentPcmProbe(), {
       ...(dependencies.fetch ? { fetch: dependencies.fetch } : {}),

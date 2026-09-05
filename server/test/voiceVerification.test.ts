@@ -20,14 +20,19 @@ class FakeSocket extends EventEmitter {
 
 const asProbeSocket = (socket: FakeSocket): VoiceProbeSocket => socket as unknown as VoiceProbeSocket;
 
+function successfulTencentSocket(): FakeSocket {
+  const socket = new FakeSocket();
+  socket.onSend = () => {
+    if (socket.sent.length === 2) {
+      queueMicrotask(() => socket.emit('message', JSON.stringify({ code: 0, message: 'success' })));
+    }
+  };
+  return socket;
+}
+
 describe('voice provider verification', () => {
   it('verifies Tencent real-time credentials through a signed WebSocket probe', async () => {
-    const socket = new FakeSocket();
-    socket.onSend = () => {
-      if (socket.sent.length === 2) {
-        queueMicrotask(() => socket.emit('message', JSON.stringify({ code: 0, message: 'success' })));
-      }
-    };
+    const socket = successfulTencentSocket();
     let signedUrl = '';
     const config: TencentAsrConfig = {
       provider: 'tencent', mode: 'streaming', appId: '123456',
@@ -49,6 +54,7 @@ describe('voice provider verification', () => {
   });
 
   it('verifies Tencent sentence credentials, permissions, and model with one second of silent PCM', async () => {
+    const socket = successfulTencentSocket();
     const fetchMock = vi.fn(async (_input: string | URL | Request, _init?: RequestInit) => new Response(JSON.stringify({
       Response: { Result: '', RequestId: 'verify-1' },
     }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
@@ -56,13 +62,43 @@ describe('voice provider verification', () => {
       provider: 'tencent', mode: 'sentence', appId: '123456',
       secretId: 'AKID-example', secretKey: 'DO-NOT-LEAK', engineModelType: '16k_zh',
     };
-    await expect(verifyTencentAsr(config, { fetch: fetchMock as typeof fetch }))
+    await expect(verifyTencentAsr(config, {
+      fetch: fetchMock as typeof fetch,
+      socketFactory: () => {
+        queueMicrotask(() => socket.emit('open'));
+        return asProbeSocket(socket);
+      },
+    }))
       .resolves.toBeUndefined();
     const init = fetchMock.mock.calls[0]?.[1];
     expect(JSON.parse(String(init?.body))).toMatchObject({
       DataLen: 32_000, VoiceFormat: 'pcm', EngSerViceType: '16k_zh',
     });
     expect(String(init?.body)).not.toContain(config.secretKey);
+  });
+
+  it('rejects a Tencent sentence configuration when its AppId fails the streaming probe', async () => {
+    const socket = new FakeSocket();
+    socket.onSend = () => {
+      if (socket.sent.length === 2) {
+        queueMicrotask(() => socket.emit('message', JSON.stringify({
+          code: 4002, message: 'AppID does not match',
+        })));
+      }
+    };
+    const fetchMock = vi.fn();
+    const config: TencentAsrConfig = {
+      provider: 'tencent', mode: 'sentence', appId: 'wrong-app-id',
+      secretId: 'AKID-example', secretKey: 'DO-NOT-LEAK', engineModelType: '16k_zh',
+    };
+    await expect(verifyTencentAsr(config, {
+      fetch: fetchMock as typeof fetch,
+      socketFactory: () => {
+        queueMicrotask(() => socket.emit('open'));
+        return asProbeSocket(socket);
+      },
+    })).rejects.toMatchObject({ code: 'tencent_4002' });
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it('verifies XFYUN with its real first and end frames and surfaces a provider rejection', async () => {
