@@ -10,16 +10,21 @@ interface PaneWorkspace {
   panes?: PaneAgentItem[];
 }
 
+export interface PaneAgentPin {
+  paneId: string;
+  agentId: string;
+}
+
 export function currentPaneAgent(
   current: { paneId?: string | null; panes?: PaneAgentItem[] } | null | undefined,
   states: PaneStates = {},
-  pinnedCodexPanes: ReadonlySet<string> | null = null,
+  pin: PaneAgentPin | null = null,
 ): string | null {
   const paneId = current?.paneId;
   if (!paneId) return null;
   // Controlled takeover owns this pane's product identity until the exact managed thread appears or the
   // user explicitly returns to terminal. Transient shell/stale process scans must never hide chat midway.
-  if (pinnedCodexPanes?.has(paneId)) return 'codex';
+  if (pin?.paneId === paneId) return pin.agentId;
   const pane = current.panes?.find((candidate) => candidate.id === paneId);
   // New /panes responses always carry `agent: string | null` from Runtime identity. Only an older Server
   // that omits the field may fall back to the compatibility /states identity.

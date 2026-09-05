@@ -213,17 +213,11 @@ export function agentRoutes({ runtime }: { runtime: AgentFacadeRuntime }): expre
         error: ref ? 'stale agent run' : 'invalid agent run',
         ...(ref ? { code: 'stale_run' } : {}),
       });
-      const operation = new AbortController();
-      const cancel = (): void => {
-        if (!res.writableEnded) operation.abort(new Error('Activation request disconnected'));
-      };
-      req.once('aborted', cancel);
-      res.once('close', cancel);
-      try { await runtime.conversationActivation.activate(lease, operation.signal); }
-      finally {
-        req.removeListener('aborted', cancel);
-        res.removeListener('close', cancel);
-      }
+      // The user already confirmed a destructive process replacement. Once accepted, C-c → managed
+      // resume is one bounded server operation: a mobile navigation or dropped HTTP connection must not
+      // strand the pane at the intermediate shell. AgentConversationActivationService still owns its
+      // hard timeout and the controller revalidates the process before every irreversible step.
+      await runtime.conversationActivation.activate(lease);
       return res.status(202).json({ accepted: true });
     } catch (error) {
       if (activationError(error, res)) return;

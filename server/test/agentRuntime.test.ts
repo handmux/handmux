@@ -23,6 +23,8 @@ import type { AgentRuntimeAdapterFactory } from '../src/agent-runtime/runtime.js
 import { AgentRunRuntime } from '../src/agent-runtime/run.js';
 import type { AgentAttachmentCandidate, AgentRunLease } from '../src/agent-runtime/run.js';
 import { PrivateStateStore } from '../src/privateStateStore.js';
+import { createCodexConversationActivationController } from '../src/agents/codexConversationActivation.js';
+import { NativeInboxCoordinator } from '../src/agents/nativeInbox.js';
 
 const AUTH_TOKEN = 'runtime-test-auth-token-that-is-at-least-32-bytes';
 const directories: string[] = [];
@@ -690,6 +692,92 @@ describe('AgentRuntime composition root', () => {
     releaseClose();
     await closing;
     expect(seen).toEqual(['first', 'latest', 'close-current']);
+  });
+
+  it('replaces Codex through the shell gap and lets its coordinator bind the resumed session', async () => {
+    const sessionId = '12345678-1234-1234-1234-123456789abc';
+    let livePane = pane('codex');
+    const panes = new TestPanes([livePane]);
+    let identity: ForegroundProcessIdentity = {
+      pid: 101, startedAt: 1_000, tty: '/dev/ttys001', executable: '/usr/bin/codex',
+    };
+    let runSequence = 0;
+    let first: AgentRunLease | null = null;
+    let nativeSessionId: string | undefined;
+    const runPaneCommand = vi.fn(async (_paneId: string, command: string) => {
+      expect(command).toBe(`handmux codex resume ${sessionId}`);
+      identity = {
+        pid: 202, startedAt: 2_000, tty: '/dev/ttys001', executable: '/usr/bin/codex',
+      };
+      livePane = { ...livePane, currentCommand: 'node', foregroundPid: 202 };
+      nativeSessionId = sessionId;
+      panes.emit([livePane]);
+    });
+    const codexAdapter: AgentAdapter = {
+      ...adapter('codex', {
+        conversationActivation: { apiVersion: 1 }, inbox: { apiVersion: 1 },
+      }),
+      process: {
+        commands: ['codex'], ambiguousCommands: ['node'], runtimeAttach: true,
+        verify: async (candidate, context) => (
+          (await context.inspectForeground(candidate))?.executable === '/usr/bin/codex'
+        ),
+      },
+    };
+    const runtime = new AgentRuntime({
+      adapters: [codexAdapter],
+      panes,
+      process: { inspectForeground: async () => identity },
+      stateDirectory: directory(),
+      authToken: AUTH_TOKEN,
+      newRunId: () => `takeover-run-${++runSequence}`,
+      adapterFactories: {
+        codex: (context) => {
+          const inbox = new NativeInboxCoordinator({
+            agentId: 'codex', sourceId: 'codex.test', context, pollMs: 100,
+            source: { read: async () => ({
+              availability: 'ready',
+              rows: nativeSessionId ? [{
+                paneId: '%1', sessionId: nativeSessionId, cursor: nativeSessionId, state: null,
+              }] : [],
+            }) },
+          });
+          return {
+            inbox: true,
+            conversationActivation: createCodexConversationActivationController({
+              panes,
+              process: { inspectForeground: async () => identity },
+              commands: {
+                sendKey: vi.fn(async () => {
+                  identity = {
+                    pid: 150, startedAt: 1_500, tty: '/dev/ttys001', executable: '/bin/zsh',
+                  };
+                  livePane = { ...livePane, currentCommand: 'zsh', foregroundPid: 150 };
+                  panes.emit([livePane]);
+                  await vi.waitFor(() => expect(first?.signal.aborted).toBe(true));
+                }),
+                capturePlain: vi.fn(async () => (
+                  `To continue this session, run codex resume ${sessionId}`
+                )),
+                runPaneCommand,
+              },
+              wait: vi.fn(async () => {}),
+            }),
+            start: () => inbox.start(),
+          };
+        },
+      },
+    });
+    runtimes.push(runtime);
+    await runtime.start();
+    first = runtime.runs.currentForPane('%1');
+    expect(first?.ref).toEqual({ agentId: 'codex', paneId: '%1', runId: 'takeover-run-1' });
+
+    await runtime.conversationActivation!.activate(first!);
+    expect(runPaneCommand).toHaveBeenCalledOnce();
+    await vi.waitFor(() => expect(runtime.activeRuns()).toEqual([{
+      agentId: 'codex', paneId: '%1', runId: 'takeover-run-2', sessionId,
+    }]), { timeout: 2_000 });
   });
 
   it('auto-attaches only a verified built-in Codex node launcher', async () => {

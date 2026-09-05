@@ -15,6 +15,9 @@ export interface AgentConversationActivationController {
   retry(): void;
 }
 
+const DISCOVERY_ATTEMPTS = 75;
+const DISCOVERY_INTERVAL_MS = 400;
+
 const delay = (ms: number, signal: AbortSignal): Promise<void> => new Promise((resolve, reject) => {
   if (signal.aborted) { reject(signal.reason); return; }
   const timer = window.setTimeout(resolve, ms);
@@ -71,7 +74,7 @@ export function useAgentConversationActivation(
       activationRef.current = null;
       generation.current += 1;
     };
-  }, [enabled, retryKey, run?.runId, run?.sessionId]);
+  }, [enabled, retryKey, run?.agentId, run?.paneId, run?.runId, run?.sessionId]);
 
   const activate = useCallback(async (): Promise<void> => {
     const active = runRef.current;
@@ -86,12 +89,12 @@ export function useAgentConversationActivation(
       await activateConversation(active, controller.signal);
       if (generation.current !== requestGeneration) return;
       setStatus('waiting');
-      for (let attempt = 0; attempt < 30; attempt += 1) {
+      for (let attempt = 0; attempt < DISCOVERY_ATTEMPTS; attempt += 1) {
         if (controller.signal.aborted) return;
         const discovered = await discoverRef.current(active);
         if (generation.current !== requestGeneration) return;
         if (discovered?.sessionId) return;
-        await delay(400, controller.signal);
+        await delay(DISCOVERY_INTERVAL_MS, controller.signal);
       }
       if (controller.signal.aborted || generation.current !== requestGeneration) return;
       setError('discovery_timeout');

@@ -66,6 +66,7 @@ import AgentConversationView, { AgentConversationErrorView } from './components/
 import AgentConversationComposer from './components/AgentConversationComposer.jsx';
 import AgentInteractionLayer from './components/AgentInteractionLayer.jsx';
 import AgentConversationActivationGuide from './components/AgentConversationActivationGuide.jsx';
+import CodexManagedGuide from './components/CodexManagedGuide.jsx';
 import AgentModelControl from './components/AgentModelControl.jsx';
 import {
   AgentConversationActionControls,
@@ -127,6 +128,11 @@ import {
 } from './conversationSubmissionProjection.js';
 import { useAgentConversationActivation } from './hooks/useAgentConversationActivation.js';
 import type { AgentConversationIdentity } from './hooks/useAgentConversation.js';
+import {
+  activationRunFor,
+  activationTargetMatches,
+  useConversationActivationTarget,
+} from './conversationActivationTarget.js';
 import {
   desktopInputEnvironment,
   getKeyboardMode,
@@ -344,6 +350,22 @@ export default function App() {
   const setLens = useCallback((value: WorkspaceLens): void => {
     setLensSelection({ paneId: currentPaneId, value });
   }, [currentPaneId]);
+  const isAgentConversationEnabled = useCallback((agentId: string): boolean => (
+    conversationEnabledByAgent[agentId] ?? getAgentConversationEnabled(agentId)
+  ), [conversationEnabledByAgent]);
+  const {
+    target: conversationActivationTarget,
+    displayTarget: conversationActivationDisplayTarget,
+    ownershipPin: conversationActivationOwnershipPin,
+    setPending: setConversationActivationPending,
+    clear: clearConversationActivation,
+  } = useConversationActivationTarget({
+    paneId: currentPaneId,
+    rootView,
+    lens,
+    runs: agentDiscovery?.runs ?? [],
+    isConversationEnabled: isAgentConversationEnabled,
+  });
   const [orphans, setOrphans] = useState<DrawerOrphan[]>([]); // claude sessions running outside tmux (/api/orphans)
   const [takeoverTarget, setTakeoverTarget] = useState<OrphanSession | null>(null); // orphan being taken over (opens the sheet)
   const [inboxOpen, setInboxOpen] = useState(false); // inbox dropdown open
@@ -1645,7 +1667,7 @@ export default function App() {
   // A controlled takeover briefly replaces the old Codex with a shell before the managed Codex child is
   // visible. Pin that pane's identity through the gap so the chat page and its App Server poll do not
   // disappear halfway through startup.
-  const currentAgent = currentPaneAgent(current, states);
+  const currentAgent = currentPaneAgent(current, states, conversationActivationOwnershipPin);
   const canonicalCurrentAgent = hasCanonicalCurrentPaneAgent(current);
   // The pane's last verified Agent owns an explicitly selected chat view until the user leaves it. Runtime
   // and tmux discovery are asynchronous health signals: a transient null must not replace the Conversation Surface with a
@@ -1666,8 +1688,9 @@ export default function App() {
   const persistedChatAgent = current?.paneId
     ? localStorage.getItem(`tw_chat_agent_${current.paneId}`) : null;
   const chatAgent = current?.paneId
-    ? currentAgent ?? (canonicalCurrentAgent ? null : chatAgentByPaneRef.current.get(current.paneId)
-      ?? (persistedChatAgent && persistedChatAgent.length <= 64 ? persistedChatAgent : null))
+    ? conversationActivationDisplayTarget?.agentId
+      ?? currentAgent ?? (canonicalCurrentAgent ? null : chatAgentByPaneRef.current.get(current.paneId)
+        ?? (persistedChatAgent && persistedChatAgent.length <= 64 ? persistedChatAgent : null))
     : null;
   const rawCurrentKind = current?.paneId ? states[current.paneId]?.kind : null;
   const currentKind = rawCurrentKind === 'working' || rawCurrentKind === 'permission'
@@ -1733,11 +1756,19 @@ export default function App() {
   // discovery snapshot creates an infinite stale-run loop after exit/restart; the selected chat lens stays
   // mounted without it and reconnects as soon as Runtime publishes the replacement.
   const currentAgentRun = discoveredAgentRun;
+  const activationPending = activationTargetMatches(
+    conversationActivationTarget, currentPaneId, chatAgent,
+  );
+  // Keep the confirmed source lease stable while Runtime moves through raw process → shell → managed
+  // process. A replacement sessionless run is not ready yet and must not abort/restart activation.
+  const activationRun = activationRunFor(
+    conversationActivationDisplayTarget, currentPaneId, currentAgentRun,
+  );
   const currentAgentDescriptor = agentDiscovery?.descriptors.find((descriptor) => (
     descriptor.id === chatAgent
   )) ?? null;
   const conversationEnabled = chatAgent
-    ? conversationEnabledByAgent[chatAgent] ?? getAgentConversationEnabled(chatAgent) : false;
+    ? isAgentConversationEnabled(chatAgent) : false;
   const conversationIdentityKey = current?.paneId && chatAgent
     ? `${current.paneId}\0${chatAgent}` : null;
   if (conversationIdentityKey && currentAgentRun?.sessionId) {
@@ -1749,10 +1780,13 @@ export default function App() {
   }
   // A current Runtime lease is authoritative: a newly started raw run must never inherit the previous
   // managed session remembered for this pane. The remembered identity is only a discovery-gap fallback.
-  const currentConversationIdentity = currentAgentRun
-    ? currentAgentRun.sessionId ? conversationIdentityByPaneRef.current.get(conversationIdentityKey!) ?? null : null
-    : conversationIdentityKey
-      ? conversationIdentityByPaneRef.current.get(conversationIdentityKey) ?? null : null;
+  const currentConversationIdentity = activationPending && !currentAgentRun?.sessionId
+    ? null
+    : currentAgentRun
+      ? currentAgentRun.sessionId
+        ? conversationIdentityByPaneRef.current.get(conversationIdentityKey!) ?? null : null
+      : conversationIdentityKey
+        ? conversationIdentityByPaneRef.current.get(conversationIdentityKey) ?? null : null;
   // Conversation capability owns one normalized Web Surface for every Agent. Provider identity stops at
   // Runtime discovery; Timeline and Composer never select a provider-specific implementation.
   const normalizedConversationRun = currentAgentDescriptor?.capabilities.conversation === true
@@ -1763,7 +1797,7 @@ export default function App() {
   const chatLensAvailable = currentAgentDescriptor?.capabilities.conversation === true
     && conversationEnabled
     && (!!normalizedConversationRun || !!normalizedConversationIdentity
-      || (currentAgentDescriptor.capabilities.conversationActivation === true && !!currentAgentRun));
+      || (currentAgentDescriptor.capabilities.conversationActivation === true && !!activationRun));
   // `lens` is the sole view owner. Availability controls only whether a terminal pane can opt into chat;
   // it must never evict an already selected chat view during a transient discovery or connection outage.
   const chatLens = lens === 'chat' && conversationEnabled;
@@ -1798,7 +1832,7 @@ export default function App() {
   const conversationActivation = useAgentConversationActivation(
     chatLens && !normalizedConversationIdentity
       && currentAgentDescriptor?.capabilities.conversationActivation === true
-      ? currentAgentRun : null,
+      ? activationRun : null,
     chatLens && !normalizedConversationIdentity
       && currentAgentDescriptor?.capabilities.conversationActivation === true,
     discoverActivatedRun,
@@ -1811,6 +1845,7 @@ export default function App() {
   );
   const agentSessionControl = useAgentSessionControl(
     chatLens && currentAgentDescriptor?.capabilities.sessionControl === true
+      && !!currentAgentRun?.sessionId
       ? currentAgentRun : null,
     onAuthFail,
   );
@@ -1824,8 +1859,8 @@ export default function App() {
     conversationControlCapabilities.conversationCommands,
   ].some(Boolean) || conversationSendable;
   const agentConversationControls = useAgentConversationControls(
-    chatLens && conversationControlsEnabled ? currentAgentRun : null,
-    chatLens && conversationControlsEnabled,
+    chatLens && conversationControlsEnabled && currentAgentRun?.sessionId ? currentAgentRun : null,
+    chatLens && conversationControlsEnabled && !!currentAgentRun?.sessionId,
     onAuthFail,
   );
   const serverConversationActivity = agentConversationControls.snapshot?.activity
@@ -1915,8 +1950,8 @@ export default function App() {
     ? 'terminal'
     : normalizedConversationIdentity
       ? `conversation\0${normalizedConversationIdentity.agentId}\0${normalizedConversationIdentity.sessionId}`
-      : currentAgentRun && currentAgentDescriptor?.capabilities.conversationActivation === true
-        ? `conversation-activation\0${currentAgentRun.runId}` : 'chat-unavailable';
+      : activationRun && currentAgentDescriptor?.capabilities.conversationActivation === true
+        ? `conversation-activation\0${activationRun.runId}` : 'chat-unavailable';
   const paneSurfaceOwnerKey = `${currentPaneId ?? 'none'}\0${paneSurfaceIdentity}`;
   const completedEntryRequest = completedChatEntry
     && completedChatEntry.paneId === current?.paneId
@@ -2693,12 +2728,27 @@ export default function App() {
                   onCompletedEntryConsumed={consumeCompletedChatEntry}
                   followLatestRequest={chatFollowLatest.paneId === current.paneId
                     ? chatFollowLatest.request : 0} />
-              ) : currentAgentRun
+              ) : activationRun
                 && currentAgentDescriptor?.capabilities.conversationActivation === true ? (
-                <AgentConversationActivationGuide controller={conversationActivation} onCancel={() => {
-                  setLens('terminal');
-                  localStorage.setItem(`tw_lens_${current.paneId}`, 'terminal');
-                }} />
+                activationRun.agentId === 'codex' ? (
+                  <CodexManagedGuide run={activationRun}
+                    controller={conversationActivation}
+                    onActivationChange={setConversationActivationPending}
+                    onTerminal={() => {
+                      clearConversationActivation();
+                      setLens('terminal');
+                      localStorage.setItem(`tw_lens_${current.paneId}`, 'terminal');
+                    }} />
+                ) : (
+                  <AgentConversationActivationGuide run={activationRun}
+                    controller={conversationActivation}
+                    onActivationChange={setConversationActivationPending}
+                    onCancel={() => {
+                      clearConversationActivation();
+                      setLens('terminal');
+                      localStorage.setItem(`tw_lens_${current.paneId}`, 'terminal');
+                    }} />
+                )
               ) : (
                 <AgentConversationErrorView message={t('chat.session.connectionTitle')}
                   resetKey={`${current.paneId}\0${chatAgent ?? ''}`} />

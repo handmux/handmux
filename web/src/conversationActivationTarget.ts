@@ -1,0 +1,62 @@
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import type { AgentRunRef } from './agentCatalog.js';
+
+export interface ConversationActivationTarget {
+  agentId: string;
+  paneId: string;
+  run: AgentRunRef;
+  ownsPane: boolean;
+}
+
+export function activationTargetMatches(
+  target: ConversationActivationTarget | null,
+  paneId: string | null,
+  agentId: string | null,
+): target is ConversationActivationTarget {
+  return target?.paneId === paneId && target.agentId === agentId;
+}
+
+export function activationRunFor(
+  target: ConversationActivationTarget | null,
+  paneId: string | null,
+  currentRun: AgentRunRef | null,
+): AgentRunRef | null {
+  return target?.paneId === paneId ? target.run : currentRun;
+}
+
+interface ActivationTargetContext {
+  paneId: string | null;
+  rootView: 'session' | 'project';
+  lens: 'terminal' | 'chat';
+  runs: readonly AgentRunRef[];
+  isConversationEnabled(agentId: string): boolean;
+}
+
+export function useConversationActivationTarget({
+  paneId, rootView, lens, runs, isConversationEnabled,
+}: ActivationTargetContext) {
+  const [target, setTarget] = useState<ConversationActivationTarget | null>(null);
+  const setPending = useCallback((run: AgentRunRef, active: boolean): void => {
+    setTarget((current) => {
+      if (active) return { agentId: run.agentId, paneId: run.paneId, run, ownsPane: true };
+      if (current?.agentId !== run.agentId || current.paneId !== run.paneId
+        || current.run.runId !== run.runId || !current.ownsPane) return current;
+      return { ...current, ownsPane: false };
+    });
+  }, []);
+  const clear = useCallback((): void => setTarget(null), []);
+
+  useEffect(() => {
+    if (!target) return;
+    const activated = runs.some((run) => run.agentId === target.agentId
+      && run.paneId === target.paneId && !!run.sessionId);
+    if (paneId !== target.paneId || rootView !== 'session' || lens !== 'chat'
+      || !isConversationEnabled(target.agentId) || activated) clear();
+  }, [clear, isConversationEnabled, lens, paneId, rootView, runs, target]);
+
+  const displayTarget = target?.paneId === paneId ? target : null;
+  const ownershipPin = displayTarget?.ownsPane ? displayTarget : null;
+  return useMemo(() => ({ target, displayTarget, ownershipPin, setPending, clear }), [
+    clear, displayTarget, ownershipPin, setPending, target,
+  ]);
+}

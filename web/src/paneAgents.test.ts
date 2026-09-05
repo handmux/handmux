@@ -35,10 +35,13 @@ describe('pane agent identity', () => {
     expect(hasCanonicalCurrentPaneAgent({ ...current, panes: [] })).toBe(false);
   });
 
-  it('pins Codex identity throughout a controlled takeover, even over stale detection', () => {
-    const pinned = new Set(['%1']);
-    expect(currentPaneAgent({ ...current, panes: [{ id: '%1', agent: null }] }, {}, pinned)).toBe('codex');
-    expect(currentPaneAgent({ ...current, panes: [{ id: '%1', agent: 'claude' }] }, {}, pinned)).toBe('codex');
+  it('pins the activation provider throughout a controlled takeover, even over stale detection', () => {
+    const pin = { paneId: '%1', agentId: 'future-agent' };
+    expect(currentPaneAgent({ ...current, panes: [{ id: '%1', agent: null }] }, {}, pin))
+      .toBe('future-agent');
+    expect(currentPaneAgent({ ...current, panes: [{ id: '%1', agent: 'claude' }] }, {}, pin))
+      .toBe('future-agent');
+    expect(currentPaneAgent({ ...current, paneId: '%2' }, {}, pin)).toBeNull();
   });
 
   it('forgets every cached conversation when canonical identity says the pane exited', () => {

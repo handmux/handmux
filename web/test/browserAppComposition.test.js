@@ -24,13 +24,23 @@ describe('built-in browser App composition', () => {
     expect(source).not.toMatch(/chatAgent\s*===\s*['"](?:codex|claude|pi)['"]/);
     expect(source).toContain('chatLensEnabled={chatLensAvailable || chatLens}');
     expect(source).toContain('currentAgentDescriptor.capabilities.conversationActivation === true');
-    expect(source).toContain('<AgentConversationActivationGuide controller={conversationActivation}');
+    expect(source).toContain('<CodexManagedGuide run={activationRun}');
+    expect(source).toContain('<AgentConversationActivationGuide run={activationRun}');
     expect(source).not.toContain('/api/codex/takeover');
     expect(source).not.toContain('codexChatReady');
     expect(source).not.toContain('codexChatLoading');
     expect(source).not.toContain('onInteractiveSlash');
     expect(source).toContain('lensSelection.paneId === currentPaneId');
     expect(source).not.toContain('useLayoutEffect');
+  });
+
+  it('pins a confirmed activation through the shell gap and avoids sessionless controls', () => {
+    expect(source).toContain('currentPaneAgent(current, states, conversationActivationOwnershipPin)');
+    expect(source).toContain('useConversationActivationTarget({');
+    expect(source).toContain('activationPending && !currentAgentRun?.sessionId');
+    expect(source).toContain('clearConversationActivation();');
+    expect(source).toContain('&& !!currentAgentRun?.sessionId');
+    expect(source).toContain('conversationControlsEnabled && currentAgentRun?.sessionId');
   });
 
   it('uses Catalog-driven Conversation preferences and never provider-specific Settings props', () => {
@@ -43,7 +53,7 @@ describe('built-in browser App composition', () => {
   });
 
   it('treats a current raw run as authoritative over a remembered managed identity', () => {
-    expect(source).toMatch(/const currentConversationIdentity = currentAgentRun[\s\S]*?currentAgentRun\.sessionId[\s\S]*?: null/);
+    expect(source).toMatch(/const currentConversationIdentity = activationPending[\s\S]*?currentAgentRun[\s\S]*?currentAgentRun\.sessionId[\s\S]*?: null/);
     expect(source).toContain('waiting={currentKind === \'permission\'}');
   });
 

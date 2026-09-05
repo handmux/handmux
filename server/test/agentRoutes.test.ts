@@ -160,7 +160,7 @@ describe('Agent app facade routes', () => {
     await request(app(supported)).post('/agents/conversation-activation').send({ run: h.lease.ref })
       .expect(202, { accepted: true });
     expect(describe).toHaveBeenCalledWith(h.lease);
-    expect(activate).toHaveBeenCalledWith(h.lease, expect.any(AbortSignal));
+    expect(activate).toHaveBeenCalledWith(h.lease);
 
     await request(app(supported)).post('/agents/conversation-activation').send({
       run: { ...h.lease.ref, runId: 'stale' },
@@ -175,6 +175,67 @@ describe('Agent app facade routes', () => {
       code: 'unavailable',
     });
     expect(JSON.stringify(failure.body)).not.toContain('/Users/private');
+  });
+
+  it('finishes a confirmed Conversation activation after the HTTP client disconnects', async () => {
+    const h = runtime();
+    const started = deferred<void>();
+    const release = deferred<void>();
+    let activationSignal: AbortSignal | undefined;
+    let completed = false;
+    const supported = {
+      ...h.value,
+      conversationActivation: {
+        describe: vi.fn(async () => ({ effect: 'replace-process-preserve-session' as const })),
+        activate: vi.fn(async (_lease, signal?: AbortSignal) => {
+          activationSignal = signal;
+          started.resolve();
+          await release.promise;
+          completed = true;
+        }),
+      },
+    } as unknown as typeof h.value;
+    const application = express();
+    let responseClosed = false;
+    application.use(express.json());
+    application.use((_req, res, next) => {
+      res.once('close', () => { responseClosed = true; });
+      next();
+    });
+    application.use(agentRoutes({ runtime: supported }));
+    const server = http.createServer(application);
+    let client: http.ClientRequest | undefined;
+    try {
+      await new Promise<void>((resolve, reject) => {
+        server.once('error', reject);
+        server.listen(0, '127.0.0.1', () => {
+          server.off('error', reject);
+          resolve();
+        });
+      });
+      const port = (server.address() as AddressInfo).port;
+      client = http.request({
+        host: '127.0.0.1', port, path: '/agents/conversation-activation', method: 'POST',
+        headers: { 'content-type': 'application/json' },
+      });
+      client.on('error', () => {});
+      client.end(JSON.stringify({ run: h.lease.ref }));
+      await started.promise;
+
+      client.destroy();
+      await vi.waitFor(() => expect(responseClosed).toBe(true));
+      expect(activationSignal).toBeUndefined();
+      release.resolve();
+      await vi.waitFor(() => expect(completed).toBe(true));
+    } finally {
+      client?.destroy();
+      release.resolve();
+      if (server.listening) {
+        await new Promise<void>((resolve, reject) => {
+          server.close((error) => { if (error) reject(error); else resolve(); });
+        });
+      }
+    }
   });
 
   it('reads and updates model control only through a current run lease', async () => {
