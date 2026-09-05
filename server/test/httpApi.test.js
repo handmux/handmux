@@ -1205,6 +1205,41 @@ describe('POST /api/asr/sentence', () => {
       expect(JSON.stringify(res.body)).not.toContain('private-key-DO-NOT-LEAK');
     } finally { fetchSpy.mockRestore(); }
   });
+
+  it.each(['', '  \n\t'])('rejects Tencent empty speech result (%j) and logs only safe diagnostics', async (result) => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({ Response: {
+      Result: result, RequestId: 'cloud-empty-1',
+    } }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    const log = { error: vi.fn() };
+    try {
+      const app = express();
+      app.use('/api', createApiRouter({
+        token: 'good', commands: baseCommands, asrEnv: sentenceEnv,
+        apiErrors: { idFactory: () => 'handmux-request-1', log },
+      }));
+      const res = await request(app).post('/api/asr/sentence')
+        .set('Authorization', 'Bearer good').set('Content-Type', 'application/octet-stream')
+        .send(Buffer.alloc(32_000)).expect(502);
+      expect(res.body).toEqual({
+        error: 'Tencent Cloud ASR did not recognize any speech',
+        code: 'speech_not_recognized',
+        requestId: 'handmux-request-1',
+        providerRequestId: 'cloud-empty-1',
+      });
+      expect(log.error).toHaveBeenCalledOnce();
+      const fields = log.error.mock.calls[0]?.[1];
+      expect(fields).toMatchObject({
+        requestId: 'handmux-request-1', providerRequestId: 'cloud-empty-1',
+        method: 'POST', path: '/api/asr/sentence', provider: 'tencent', mode: 'sentence',
+        audioByteLength: 32_000, audioDurationMs: 1_000,
+      });
+      const serialized = JSON.stringify({ response: res.body, log: log.error.mock.calls });
+      expect(serialized).not.toContain('private-key-DO-NOT-LEAK');
+      expect(serialized).not.toContain('AKID-private');
+      expect(fields).not.toHaveProperty('audio');
+      expect(fields).not.toHaveProperty('text');
+    } finally { fetchSpy.mockRestore(); }
+  });
 });
 
 describe('GET /api/config (capabilities)', () => {

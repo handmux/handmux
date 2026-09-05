@@ -325,6 +325,26 @@ describe('usePushToTalk', () => {
     expect(onText).not.toHaveBeenCalled();
   });
 
+  it.each(['', '  \n\t'])('sentence result %j shows a retry prompt without committing text', async (text) => {
+    const onText = vi.fn();
+    const { result } = renderHook(() => usePushToTalk({
+      onText,
+      mode: 'sentence',
+      deps: {
+        recognizeSentence: vi.fn(async () => text),
+        makeRecorder: () => ({
+          start: vi.fn(async (onChunk) => { onChunk('AQI='); }),
+          stop: vi.fn(async () => null),
+        }),
+      },
+    }));
+    await act(async () => { await result.current.start(); });
+    await act(async () => { await result.current.stop(); });
+    expect(result.current.state).toBe('error');
+    expect(result.current.error).toBe('未识别到语音，请重试。');
+    expect(onText).not.toHaveBeenCalled();
+  });
+
   it('automatically dismisses a voice error after it has been readable', async () => {
     vi.useFakeTimers();
     try {

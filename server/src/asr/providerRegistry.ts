@@ -65,6 +65,7 @@ export interface PublicAsrError {
   message: string;
   code: string;
   providerRequestId?: string;
+  logFields?: Readonly<Record<string, unknown>>;
 }
 
 export interface VoiceProviderAdapter {

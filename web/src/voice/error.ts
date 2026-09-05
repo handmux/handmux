@@ -23,6 +23,7 @@ export function voiceErrorText(error: unknown): string {
     }
     if (error.code === 'audio_too_large') return t('mic.error.tooLong');
     if (error.code === 'sentence_asr_not_selected') return t('mic.error.notSelected');
+    if (error.code === 'speech_not_recognized') return t('mic.error.noSpeech');
     if (error.code === 'TencentNetworkError' || /timeout/i.test(error.message)) return t('mic.error.network');
     if (error.code) return t('mic.error.provider', { reason: error.code });
     return t('mic.error.generic');

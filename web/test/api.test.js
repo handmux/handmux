@@ -344,6 +344,12 @@ describe('asr api', () => {
     expect([...new Uint8Array(init.body)]).toEqual([0, 1, 2]);
   });
 
+  it.each(['', '  \n\t'])('recognizeSentence rejects an empty result (%j) with a stable code', async (text) => {
+    vi.stubGlobal('fetch', vi.fn(async () => jsonRes(200, { text })));
+    await expect(recognizeSentence(Uint8Array.from([0, 1, 2])))
+      .rejects.toMatchObject({ code: 'speech_not_recognized' });
+  });
+
   it('rejects a malformed ASR signature at the API boundary', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => jsonRes(200, { url: 'wss://iat.example.test' })));
 

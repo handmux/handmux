@@ -35,6 +35,23 @@ export class TencentSentenceError extends Error {
   }
 }
 
+export class TencentSentenceEmptyResultError extends TencentSentenceError {
+  readonly audioByteLength: number;
+  readonly audioDurationMs: number;
+
+  constructor(audioByteLength: number, requestId?: string) {
+    super(
+      'speech_not_recognized',
+      'Tencent Cloud ASR did not recognize any speech',
+      requestId,
+    );
+    this.name = 'TencentSentenceEmptyResultError';
+    this.audioByteLength = audioByteLength;
+    // SentenceRecognition receives 16 kHz, mono, signed 16-bit PCM: 32 bytes per millisecond.
+    this.audioDurationMs = audioByteLength / 32;
+  }
+}
+
 const isRecord = (value: unknown): value is Record<string, unknown> => (
   value !== null && typeof value === 'object' && !Array.isArray(value)
 );
@@ -134,6 +151,9 @@ export async function recognizeTencentSentence(
       `Tencent Cloud ASR returned an invalid response (HTTP ${response.status})`,
       requestId,
     );
+  }
+  if (root.Result.trim() === '') {
+    throw new TencentSentenceEmptyResultError(audio.byteLength, requestId);
   }
   return { text: root.Result, ...(requestId ? { requestId } : {}) };
 }

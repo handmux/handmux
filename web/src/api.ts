@@ -1,7 +1,7 @@
 import { getBrowserDeviceId, getToken } from './storage.js';
 import { mimeFromName } from './mime.js';
 import { t } from './i18n';
-import { UnauthorizedError } from './apiErrors.js';
+import { SpeechNotRecognizedError, UnauthorizedError } from './apiErrors.js';
 import { requestJson as req } from './apiRequest.js';
 import { parseAsrSession } from './voice/providerRegistry.js';
 import type {
@@ -449,6 +449,9 @@ export async function recognizeSentence(
   }));
   if (!response || typeof response.text !== 'string') {
     throw new Error('Sentence ASR returned an invalid response');
+  }
+  if (response.text.trim() === '') {
+    throw new SpeechNotRecognizedError();
   }
   return response.text;
 }

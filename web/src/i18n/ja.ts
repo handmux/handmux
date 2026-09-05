@@ -247,6 +247,7 @@ export default {
   'mic.error.secureContext': 'このアドレスではマイクを使用できません。HTTPS または localhost で Handmux を開いてください。',
   'mic.error.tooLong': '録音が長すぎます。短くして再試行してください。',
   'mic.error.notSelected': '選択した音声モードが有効ではありません。Handmux を再起動して再試行してください。',
+  'mic.error.noSpeech': '音声を認識できませんでした。もう一度お試しください。',
   'mic.error.network': '音声サービスに接続できません。ネットワークを確認して再試行してください。',
   'mic.error.provider': '音声サービスがリクエストを拒否しました：{reason}',
   'mic.error.generic': '音声入力に失敗しました。再試行してください。',

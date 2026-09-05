@@ -15,6 +15,13 @@ describe('voice error messages', () => {
     expect(voiceErrorText(new DOMException('denied', 'NotAllowedError'))).toContain('麦克风权限');
   });
 
+  it('turns an empty recognition result into a specific retry prompt', () => {
+    expect(voiceErrorText(new ApiError(
+      'provider returned an empty result', 502, 'provider returned an empty result',
+      'speech_not_recognized', 'request-empty',
+    ))).toBe('未识别到语音，请重试。');
+  });
+
   it('does not expose an unknown provider response body', () => {
     const message = voiceErrorText(new ApiError(
       'sensitive provider body', 502, 'sensitive provider body', 'ProviderRejected', 'request-2',

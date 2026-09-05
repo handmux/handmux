@@ -247,6 +247,7 @@ export default {
   'mic.error.secureContext': '이 주소에서는 마이크를 사용할 수 없습니다. HTTPS 또는 localhost로 Handmux를 여세요.',
   'mic.error.tooLong': '녹음이 너무 깁니다. 더 짧게 녹음한 뒤 다시 시도하세요.',
   'mic.error.notSelected': '선택한 음성 모드가 활성화되지 않았습니다. Handmux를 재시작한 뒤 다시 시도하세요.',
+  'mic.error.noSpeech': '음성을 인식하지 못했습니다. 다시 시도하세요.',
   'mic.error.network': '음성 서비스에 연결할 수 없습니다. 네트워크를 확인한 뒤 다시 시도하세요.',
   'mic.error.provider': '음성 서비스가 요청을 거부했습니다: {reason}',
   'mic.error.generic': '음성 입력에 실패했습니다. 다시 시도하세요.',

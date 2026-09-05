@@ -8,6 +8,7 @@ export interface ApiErrorBody {
   code: ApiErrorCode;
   requestId: string;
   retryAfterSeconds?: number;
+  providerRequestId?: string;
 }
 
 export interface ApiErrorLog {
@@ -23,13 +24,26 @@ export class PublicApiError extends Error {
   readonly status: number;
   readonly code: ApiErrorCode;
   readonly retryAfterSeconds?: number;
+  readonly providerRequestId?: string;
+  readonly logFields?: Readonly<Record<string, unknown>>;
 
-  constructor(status: number, code: ApiErrorCode, message: string, retryAfterSeconds?: number) {
+  constructor(
+    status: number,
+    code: ApiErrorCode,
+    message: string,
+    retryAfterSeconds?: number,
+    diagnostics: {
+      providerRequestId?: string;
+      logFields?: Readonly<Record<string, unknown>>;
+    } = {},
+  ) {
     super(message);
     this.name = 'PublicApiError';
     this.status = status;
     this.code = code;
     if (retryAfterSeconds !== undefined) this.retryAfterSeconds = retryAfterSeconds;
+    if (diagnostics.providerRequestId) this.providerRequestId = diagnostics.providerRequestId;
+    if (diagnostics.logFields) this.logFields = diagnostics.logFields;
   }
 }
 
@@ -95,6 +109,7 @@ export function apiErrorBoundary({
 
     if (status >= 500) {
       log.error('[handmux] api error', {
+        ...(error instanceof PublicApiError ? error.logFields : {}),
         requestId,
         method: req.method,
         path: req.originalUrl,
@@ -106,6 +121,8 @@ export function apiErrorBoundary({
     const body: ApiErrorBody = {
       error: message, code, requestId,
       ...(retryAfterSeconds === undefined ? {} : { retryAfterSeconds }),
+      ...(error instanceof PublicApiError && error.providerRequestId
+        ? { providerRequestId: error.providerRequestId } : {}),
     };
     res.status(status).json(body);
   };

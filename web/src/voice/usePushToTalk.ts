@@ -10,6 +10,7 @@ import type { AsrDriver, VoiceSocketData } from './asrDriver.js';
 import type { AsrSessionResponse, AsrSignResponse } from '../apiRequest.js';
 import type { VoiceRecorder } from './recorder.js';
 import { voiceErrorText } from './error.js';
+import { SpeechNotRecognizedError } from '../apiErrors.js';
 import { t } from '../i18n';
 import { getVoiceFillerFilter } from '../storage.js';
 import type { VoiceFillerFilterLevel } from '../storage.js';
@@ -195,6 +196,7 @@ export function usePushToTalk({
         const audio = mergeAudio(sentenceAudioRef.current);
         if (audio.byteLength === 0) throw new Error('audio is empty');
         const text = await recognizeSentence(audio, activeFillerFilterRef.current);
+        if (text.trim() === '') throw new SpeechNotRecognizedError();
         onTextRef.current?.(text);
         setPartial('');
         setPhase('idle');

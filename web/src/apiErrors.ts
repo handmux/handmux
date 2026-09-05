@@ -43,3 +43,15 @@ export class ApiError extends Error {
     this.requestId = requestId ?? null;
   }
 }
+
+export class SpeechNotRecognizedError extends ApiError {
+  constructor() {
+    super(
+      'Sentence ASR returned no recognized speech',
+      502,
+      'Sentence ASR returned no recognized speech',
+      'speech_not_recognized',
+    );
+    this.name = 'SpeechNotRecognizedError';
+  }
+}

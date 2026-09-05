@@ -247,6 +247,7 @@ export default {
   'mic.error.secureContext': '目前網址不能使用麥克風，請改用 HTTPS 或 localhost 開啟 Handmux。',
   'mic.error.tooLong': '錄音過長，請縮短後重試。',
   'mic.error.notSelected': '目前語音模式尚未生效，請重新啟動 Handmux 後重試。',
+  'mic.error.noSpeech': '未辨識到語音，請重試。',
   'mic.error.network': '語音服務連線失敗，請檢查網路後重試。',
   'mic.error.provider': '語音服務拒絕了要求：{reason}',
   'mic.error.generic': '語音輸入失敗，請重試。',

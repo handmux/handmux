@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   buildTencentSentenceRequest,
   recognizeTencentSentence,
+  TencentSentenceEmptyResultError,
   TencentSentenceError,
 } from '../src/asr/tencentSentence.js';
 import type { TencentAsrConfig } from '../src/asr/config.js';
@@ -42,6 +43,24 @@ describe('Tencent sentence ASR', () => {
       fetch: fetchMock as typeof fetch, timestamp: 1_700_000_000,
     })).resolves.toEqual({ text: '你好', requestId: 'req-1' });
     expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it.each(['', '  \n\t'])('rejects an empty recognition result (%j) with safe diagnostics', async (result) => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      Response: { Result: result, RequestId: 'req-empty' },
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    let caught: unknown;
+    try {
+      await recognizeTencentSentence(config, new Uint8Array(32_000), {
+        fetch: fetchMock as typeof fetch,
+      });
+    } catch (error) { caught = error; }
+    expect(caught).toBeInstanceOf(TencentSentenceEmptyResultError);
+    expect(caught).toMatchObject({
+      code: 'speech_not_recognized', requestId: 'req-empty',
+      audioByteLength: 32_000, audioDurationMs: 1_000,
+    });
+    expect(JSON.stringify(caught)).not.toContain(config.secretKey);
   });
 
   it('passes every Tencent filler-word filtering level as a number', () => {

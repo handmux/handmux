@@ -269,6 +269,7 @@ export default {
   'mic.error.secureContext': '当前地址不能使用麦克风，请改用 HTTPS 或 localhost 打开 Handmux。',
   'mic.error.tooLong': '录音过长，请缩短后重试。',
   'mic.error.notSelected': '当前语音模式未生效，请重启 Handmux 后重试。',
+  'mic.error.noSpeech': '未识别到语音，请重试。',
   'mic.error.network': '语音服务连接失败，请检查网络后重试。',
   'mic.error.provider': '语音服务拒绝了请求：{reason}',
   'mic.error.generic': '语音输入失败，请重试。',

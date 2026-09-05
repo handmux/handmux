@@ -270,6 +270,7 @@ export default {
   'mic.error.secureContext': 'This address cannot access the microphone. Open Handmux over HTTPS or localhost.',
   'mic.error.tooLong': 'The recording is too long. Record a shorter message and try again.',
   'mic.error.notSelected': 'The selected voice mode is not active. Restart Handmux and try again.',
+  'mic.error.noSpeech': 'No speech was recognized. Please try again.',
   'mic.error.network': 'Could not reach the speech service. Check the network and try again.',
   'mic.error.provider': 'The speech service rejected the request: {reason}',
   'mic.error.generic': 'Voice input failed. Please try again.',

@@ -18,6 +18,7 @@ import { scanOrphans, takeoverOrphan, defaultProjectsDir } from '../orphans.js';
 import { readCache, isNewer, shouldRefresh, refreshLatestAsync } from '../cli/updateCheck.js';
 import { normalizeShortcuts } from '../shortcutConfig.js';
 import { projectLegacyInboxStates } from '../agent-runtime/legacyInboxProjection.js';
+import { PublicApiError } from '../apiErrors.js';
 import type { AgentRuntime } from '../agent-runtime/runtime.js';
 import type { LivePane } from '../agent-runtime/adapter.js';
 import type { NextFunction, Request, RequestHandler, Response, Router } from 'express';
@@ -236,6 +237,13 @@ export function systemRoutes({
     } catch (error) {
       const publicError = adapter.publicError?.(error);
       if (publicError) {
+        if (publicError.logFields) {
+          return next(new PublicApiError(502, publicError.code, publicError.message, undefined, {
+            ...(publicError.providerRequestId
+              ? { providerRequestId: publicError.providerRequestId } : {}),
+            logFields: publicError.logFields,
+          }));
+        }
         return res.status(502).json({
           error: publicError.message,
           code: publicError.code,

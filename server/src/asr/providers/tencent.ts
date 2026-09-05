@@ -1,4 +1,8 @@
-import { recognizeTencentSentence, TencentSentenceError } from '../tencentSentence.js';
+import {
+  recognizeTencentSentence,
+  TencentSentenceEmptyResultError,
+  TencentSentenceError,
+} from '../tencentSentence.js';
 import { buildTencentAsrSignedUrl } from '../tencentSign.js';
 import {
   silentPcmProbe, verifyStreamingConnection, VoiceVerificationError,
@@ -69,6 +73,9 @@ export async function verifyTencentAsr(
     if (controller.signal.aborted) {
       throw new VoiceVerificationError('verification_timeout', 'provider verification timed out');
     }
+    // The verification probe is deliberately silent. An empty recognition proves the signed request,
+    // credentials, permission, and model were all accepted, so it is a successful configuration check.
+    if (error instanceof TencentSentenceEmptyResultError) return;
     throw error;
   } finally {
     clearTimeout(timeout);
@@ -128,5 +135,14 @@ export const tencentAdapter: VoiceProviderAdapter = {
     message: error.message,
     code: error.code,
     ...(error.requestId ? { providerRequestId: error.requestId } : {}),
+    ...(error instanceof TencentSentenceEmptyResultError ? {
+      logFields: {
+        provider: 'tencent',
+        mode: 'sentence',
+        ...(error.requestId ? { providerRequestId: error.requestId } : {}),
+        audioByteLength: error.audioByteLength,
+        audioDurationMs: error.audioDurationMs,
+      },
+    } : {}),
   } : null,
 };
