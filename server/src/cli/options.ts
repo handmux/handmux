@@ -351,9 +351,10 @@ export function explainConfig(
   // Integrations live only in the file (secrets); show presence, never the keys.
   rows.push({ key: 'push (vapid)', origin: fileCfg.vapid ? (cfgPath || 'file') : 'default', display: fileCfg.vapid ? 'on' : 'off' });
   const voice = parseVoice(fileCfg.voice, fileCfg.xfyun);
+  const voiceExplicitlyDisabled = isRecord(fileCfg.voice) && fileCfg.voice.enabled === false;
   rows.push({
     key: 'voice',
-    origin: voice ? (cfgPath || 'file') : 'default',
+    origin: voice || voiceExplicitlyDisabled ? (cfgPath || 'file') : 'default',
     display: voice ? voice.provider : 'off',
   });
   return rows;

@@ -243,6 +243,28 @@ describe('explainConfig', () => {
     expect(by['push (vapid)']).toMatchObject({ display: 'on', origin: '/c.json' });
     expect(by.voice?.display).toBe('off');
   });
+  it('attributes an explicitly disabled retained voice profile to its config file', () => {
+    const voice = {
+      enabled: false,
+      provider: 'tencent',
+      mode: 'sentence',
+      providers: {
+        xfyun: { appId: 'XFYUN_APP', apiKey: 'XFYUN_KEY', apiSecret: 'XFYUN_SECRET' },
+        tencent: {
+          appId: 'TENCENT_APP', secretId: 'TENCENT_ID', secretKey: 'TENCENT_SECRET',
+          engineModelType: '16k_zh',
+        },
+      },
+    };
+    const row = explainConfig({}, { voice }, '/c.json', {})
+      .find((candidate) => candidate.key === 'voice');
+    const fallbackOriginRow = explainConfig({}, { voice }, null, {})
+      .find((candidate) => candidate.key === 'voice');
+
+    expect(row).toEqual({ key: 'voice', display: 'off', origin: '/c.json' });
+    expect(fallbackOriginRow).toEqual({ key: 'voice', display: 'off', origin: 'file' });
+    expect(JSON.stringify(row)).not.toMatch(/XFYUN|TENCENT|SECRET/);
+  });
   it('shows tunnel-specific rows only for the live tunnel and applies the publicUrl guard', () => {
     const rows = explainConfig({ tunnel: 'cloudflare-named', cfHostname: 'h.x.com' }, { tunnel: 'ssh', publicUrl: 'https://my.ssh' }, '/c.json');
     const by = Object.fromEntries(rows.map((r) => [r.key, r]));

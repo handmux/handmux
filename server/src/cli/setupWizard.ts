@@ -459,7 +459,7 @@ async function editVoice(a: SetupAnswers): Promise<VoiceConfig | undefined> {
   if (!voice || voice.enabled === false) {
     let on;
     try { on = await ask(confirm({ message: withBack(t('setup.voiceSetup')), initialValue: false, ...yesno() })); }
-    catch (e) { if (e === CANCELLED) return undefined; throw e; }
+    catch (e) { if (e === CANCELLED) return voice; throw e; }
     if (!on) return voice;
     if (voice) {
       voice = await ensureVoiceProvider({ ...voice, enabled: true });
