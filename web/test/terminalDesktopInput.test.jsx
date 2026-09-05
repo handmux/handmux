@@ -19,7 +19,10 @@ const mocks = vi.hoisted(() => ({
         seed = frame;
         revision += 1;
       },
-      async data() {
+      async data(bytes) {
+        const data = String.fromCharCode(...bytes);
+        if (data.includes('\x1b[?1049h')) seed = { ...seed, alt: true };
+        if (data.includes('\x1b[?1049l')) seed = { ...seed, alt: false };
         revision += 1;
       },
       async ready(cur) {
@@ -193,7 +196,10 @@ vi.mock('@xterm/xterm', () => ({
 }));
 
 import RawTerminal from '../src/components/Terminal.jsx';
-import { useDesktopTerminalInput } from '../src/hooks/useDesktopTerminalInput.js';
+import {
+  useDesktopTerminalInput,
+  useTerminalInput,
+} from '../src/hooks/useDesktopTerminalInput.js';
 
 const Terminal = React.forwardRef(function QueuedTerminal(props, forwardedRef) {
   const terminalRef = React.useRef(null);
@@ -263,6 +269,29 @@ describe('desktop terminal input', () => {
     expect(term.options.disableStdin).toBe(true);
     expect(term.helper.readOnly).toBe(true);
     expect(term.helper.getAttribute('inputmode')).toBe('none');
+  });
+
+  it('serializes mobile ASCII, direction keys, and committed UTF-8 through raw input', async () => {
+    const events = [];
+    const send = vi.fn(async (_pane, hex) => { events.push(`input:${hex}`); });
+    const sendKeys = vi.fn(async (_pane, keys) => { events.push(`keys:${keys.join(',')}`); });
+    const terminalRef = { current: { wake: vi.fn() } };
+    let input;
+    function InputHarness() {
+      input = useTerminalInput({ enabled: true, currentPane: '%1', terminalRef, send, sendKeys });
+      return null;
+    }
+    render(<InputHarness />);
+
+    act(() => {
+      input.enqueueInput('%1', 'a');
+      input.enqueueKeys('%1', ['Left']);
+      input.enqueueInput('%1', '你');
+    });
+
+    await vi.waitFor(() => expect(events).toHaveLength(3));
+    expect(events).toEqual(['input:61', 'keys:Left', 'input:e4bda0']);
+    expect(terminalRef.current.wake).toHaveBeenCalledTimes(3);
   });
 
   it('enables desktop stdin, focuses on mount, and queues onData for the captured pane', async () => {
@@ -726,6 +755,149 @@ describe('desktop terminal input', () => {
 
     expect(term.write).not.toHaveBeenCalledWith(move, expect.any(Function));
   });
+
+  it('restores a live cursor only after content replay and viewport positioning finish', async () => {
+    vi.useFakeTimers();
+    let callbacks;
+    mocks.openTerminalStream.mockImplementation((options) => {
+      callbacks = options;
+      return {
+        pause: vi.fn(),
+        suspend: vi.fn(),
+        resync: vi.fn(),
+        close: vi.fn(() => Promise.resolve()),
+      };
+    });
+    render(<Terminal pane="%1" stream />);
+    await vi.waitFor(() => expect(callbacks).toBeDefined());
+    await revealStreamFrame(callbacks, 'cursor-order');
+
+    const term = mocks.instances[0];
+    let contentCallback;
+    term.write.mockClear();
+    term.write.mockImplementationOnce((_data, callback) => { contentCallback = callback; });
+    term.scrollToBottom.mockClear();
+    await act(async () => callbacks.onData(new Uint8Array([0x78])));
+    await act(async () => {
+      vi.advanceTimersByTime(40);
+      await Promise.resolve();
+    });
+
+    expect(term.write).toHaveBeenCalledTimes(1);
+    const [contentWrite] = term.write.mock.calls;
+    expect(contentWrite[0]).toContain('cursor-order');
+    expect(contentWrite[0]).toContain('\x1b[?25l');
+    expect(contentWrite[0]).not.toContain('\x1b[?25h');
+
+    expect(contentCallback).toBeTypeOf('function');
+    act(() => contentCallback());
+
+    expect(term.write).toHaveBeenCalledTimes(2);
+    const cursorWrite = term.write.mock.calls[1];
+    expect(cursorWrite[0]).toBe('\x1b[24;1H\x1b[?25h');
+    expect(term.write.mock.invocationCallOrder[0])
+      .toBeLessThan(term.scrollToBottom.mock.invocationCallOrder[0]);
+    expect(term.scrollToBottom.mock.invocationCallOrder[0])
+      .toBeLessThan(term.write.mock.invocationCallOrder[1]);
+  });
+
+  it('does not restore a live cursor into the stale layout when leaving alternate screen', async () => {
+    vi.useFakeTimers();
+    let callbacks;
+    const resync = vi.fn();
+    mocks.openTerminalStream.mockImplementation((options) => {
+      callbacks = options;
+      return {
+        pause: vi.fn(),
+        suspend: vi.fn(),
+        resync,
+        close: vi.fn(() => Promise.resolve()),
+      };
+    });
+    render(<Terminal pane="%1" stream />);
+    await vi.waitFor(() => expect(callbacks).toBeDefined());
+    await act(async () => callbacks.onSeed({
+      ansi: 'editor\n',
+      width: 80,
+      height: 24,
+      historyLines: 0,
+      alt: true,
+      mouseAware: false,
+    }));
+    await act(async () => callbacks.onReady({ cur: { row: 0, col: 0, vis: true } }));
+    await act(async () => {
+      vi.advanceTimersByTime(450);
+      await Promise.resolve();
+    });
+
+    const term = mocks.instances[0];
+    let contentCallback;
+    term.write.mockClear();
+    term.write.mockImplementationOnce((_data, callback) => { contentCallback = callback; });
+    await act(async () => callbacks.onData(new Uint8Array([
+      0x1b, 0x5b, 0x3f, 0x31, 0x30, 0x34, 0x39, 0x6c,
+    ])));
+    await act(async () => {
+      vi.advanceTimersByTime(40);
+      await Promise.resolve();
+    });
+    expect(contentCallback).toBeTypeOf('function');
+
+    act(() => contentCallback());
+
+    expect(term.write).toHaveBeenCalledTimes(1);
+    expect(resync).toHaveBeenCalledOnce();
+  });
+
+  it.each(['content', 'cursor'])(
+    'repaints the newest live frame after a stale %s callback releases',
+    async (heldStage) => {
+      vi.useFakeTimers();
+      let callbacks;
+      mocks.openTerminalStream.mockImplementation((options) => {
+        callbacks = options;
+        return {
+          pause: vi.fn(),
+          suspend: vi.fn(),
+          resync: vi.fn(),
+          close: vi.fn(() => Promise.resolve()),
+        };
+      });
+      render(<Terminal pane="%1" stream />);
+      await vi.waitFor(() => expect(callbacks).toBeDefined());
+      await revealStreamFrame(callbacks, 'stale-callback');
+
+      const term = mocks.instances[0];
+      let staleCallback;
+      term.write.mockClear();
+      if (heldStage === 'cursor') {
+        term.write.mockImplementationOnce((_data, callback) => callback?.());
+      }
+      term.write.mockImplementationOnce((_data, callback) => { staleCallback = callback; });
+      await act(async () => callbacks.onData(new Uint8Array([0x78])));
+      await act(async () => {
+        vi.advanceTimersByTime(40);
+        await Promise.resolve();
+      });
+      expect(staleCallback).toBeTypeOf('function');
+
+      act(() => window.dispatchEvent(new Event('resize')));
+      await act(async () => {
+        vi.advanceTimersByTime(100);
+        await Promise.resolve();
+      });
+      act(() => staleCallback());
+      await act(async () => {
+        vi.advanceTimersByTime(40);
+        await Promise.resolve();
+      });
+
+      const expectedWrites = heldStage === 'content' ? 3 : 4;
+      expect(term.write).toHaveBeenCalledTimes(expectedWrites);
+      expect(term.write.mock.calls.at(-2)[0]).toContain('stale-callback');
+      expect(term.write.mock.calls.at(-1)[0]).toBe('\x1b[24;1H\x1b[?25h');
+    },
+  );
 
   it('repaints a completed resync after the terminal is already visible', async () => {
     let callbacks;

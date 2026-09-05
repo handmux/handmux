@@ -47,6 +47,30 @@ describe('terminal input queue', () => {
     expect(send).toHaveBeenCalledWith('%1', '1b5bff00');
   });
 
+  it('preserves ASCII, named-key, and committed UTF-8 input order', async () => {
+    const events: string[] = [];
+    const send = vi.fn<Send>(async (_pane, hex) => {
+      events.push(`input:${hex}`);
+      return { ok: true };
+    });
+    const sendKeys = vi.fn(async (_pane: string, keys: readonly string[]) => {
+      events.push(`keys:${keys.join(',')}`);
+      return { ok: true };
+    });
+    const queue = createTerminalInputQueue({ send, sendKeys });
+
+    queue.enqueue('%1', 'a');
+    queue.enqueueKeys('%1', ['Left']);
+    queue.enqueue('%1', '你');
+
+    await vi.waitFor(() => expect(events).toHaveLength(3));
+    expect(events).toEqual([
+      'input:61',
+      'keys:Left',
+      'input:e4bda0',
+    ]);
+  });
+
   it('does not retry an ambiguous failed batch', async () => {
     const onError = vi.fn<(error: unknown, pane: string) => void>();
     const send = vi.fn<Send>().mockRejectedValue(new Error('network'));

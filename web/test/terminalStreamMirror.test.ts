@@ -83,6 +83,7 @@ describe('terminal stream mirror', () => {
 
     expect(frame.boundaryLine).toBe(2);
     expect(frame.cursorVisible).toBe(true);
+    expect(frame.cur).toEqual({ row: 0, col: 5, vis: true });
     expect(textAt(visible, 0)).toBe('');
     expect(textAt(visible, 1)).toBe('h0');
     expect(textAt(visible, 2)).toBe('h1');
@@ -197,7 +198,10 @@ describe('terminal stream mirror', () => {
     // itself had been trimmed, this would overwrite the wrong row instead of expanding the projection.
     await mirror.data(bytes('\x1b[60;1Hbottom'));
     const expanded = snapshot(mirror);
-    expect(expanded).toMatchObject({ bufferRows: 160, cur: null });
+    expect(expanded).toMatchObject({
+      bufferRows: 160,
+      cur: { row: 0, col: 6, vis: true },
+    });
     expect(expanded.ansi).toContain('bottom');
     visible.dispose();
     tallVisible.dispose();
@@ -245,8 +249,30 @@ describe('terminal stream mirror', () => {
     const frame = snapshot(mirror);
     expect(frame.alt).toBe(true);
     expect(frame.cursorVisible).toBe(false);
+    expect(frame.cur).toEqual({ row: 2, col: 3, vis: false });
     expect(frame.mouseAware).toBe(true);
     expect(frame.boundaryLine).toBeNull();
+    mirror.dispose();
+  });
+
+  it('publishes the normal-screen cursor from every immutable revision', async () => {
+    const mirror = create();
+    await mirror.seed({
+      ansi: 'shell\n',
+      width: 12,
+      height: 3,
+      alt: false,
+      mouseAware: false,
+    });
+    await mirror.ready({ row: 0, col: 0, vis: true });
+
+    const before = snapshot(mirror);
+    await mirror.data(bytes('\x1b[3;5H'));
+    const after = snapshot(mirror);
+
+    expect(before.cur).toEqual({ row: 0, col: 0, vis: true });
+    expect(after.revision).toBe(before.revision + 1);
+    expect(after.cur).toEqual({ row: 0, col: 4, vis: true });
     mirror.dispose();
   });
 

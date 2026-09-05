@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useRef, type RefObject } from 'react';
-import { sendInput, UnauthorizedError } from '../api.js';
+import { useCallback, useEffect, useMemo, useRef, type RefObject } from 'react';
+import { sendInput, sendKeys as sendKeyBatch, UnauthorizedError } from '../api.js';
 import {
   createTerminalInputQueue,
   type TerminalInputData,
@@ -18,6 +18,7 @@ export interface DesktopTerminalInputOptions {
   terminalRef: RefObject<DesktopTerminalHandle | null>;
   onAuthFail?: () => void;
   send?: TerminalInputQueueOptions['send'];
+  sendKeys?: TerminalInputQueueOptions['sendKeys'];
 }
 
 export type EnqueueDesktopTerminalInput = (
@@ -25,13 +26,19 @@ export type EnqueueDesktopTerminalInput = (
   data: TerminalInputData | null | undefined,
 ) => void;
 
-export function useDesktopTerminalInput({
+export interface TerminalInputDispatch {
+  enqueueInput: EnqueueDesktopTerminalInput;
+  enqueueKeys(pane: string | null | undefined, keys: readonly string[]): void;
+}
+
+export function useTerminalInput({
   enabled,
   currentPane,
   terminalRef,
   onAuthFail,
   send = sendInput,
-}: DesktopTerminalInputOptions): EnqueueDesktopTerminalInput {
+  sendKeys = sendKeyBatch,
+}: DesktopTerminalInputOptions): TerminalInputDispatch {
   const queueRef = useRef<TerminalInputQueue | null>(null);
   const currentPaneRef = useRef(currentPane);
   const onAuthFailRef = useRef(onAuthFail);
@@ -43,6 +50,7 @@ export function useDesktopTerminalInput({
     let disposed = false;
     const queue = createTerminalInputQueue({
       send,
+      sendKeys,
       onDelivered: (pane) => {
         if (!disposed && pane === currentPaneRef.current) terminalRef.current?.wake?.();
       },
@@ -61,9 +69,19 @@ export function useDesktopTerminalInput({
       queueRef.current = null;
       queue.dispose();
     };
-  }, [enabled, send, terminalRef]);
+  }, [enabled, send, sendKeys, terminalRef]);
 
-  return useCallback((pane, data) => {
+  const enqueueInput = useCallback<EnqueueDesktopTerminalInput>((pane, data) => {
     queueRef.current?.enqueue(pane, data);
   }, []);
+  const enqueueKeys = useCallback((pane: string | null | undefined, keys: readonly string[]) => {
+    queueRef.current?.enqueueKeys(pane, keys);
+  }, []);
+  return useMemo(() => ({ enqueueInput, enqueueKeys }), [enqueueInput, enqueueKeys]);
+}
+
+export function useDesktopTerminalInput(
+  options: DesktopTerminalInputOptions,
+): EnqueueDesktopTerminalInput {
+  return useTerminalInput(options).enqueueInput;
 }

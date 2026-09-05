@@ -985,6 +985,22 @@ const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Terminal({
       const frame = mirror.snapshot();
       if (!frame) return;
       const layoutGeneration = fitGeneration;
+      let paintFinished = false;
+      const finishStreamPaint = ({
+        aborted = false,
+        resync = false,
+        reschedule = true,
+      } = {}) => {
+        if (paintFinished) return;
+        paintFinished = true;
+        streamPaintBusy = false;
+        if (!disposed && streamMode && resync) streamClient?.resync();
+        if (!reschedule || disposed || !streamMode || historyMode || selActiveRef.current
+          || !streamLayoutSettled) return;
+        if (aborted || streamPaintQueued || mirror.revision > frame.revision) {
+          scheduleStreamRender();
+        }
+      };
       streamPaintBusy = true;
       streamPaintQueued = false;
       lastStreamPaintAt = Date.now();
@@ -996,19 +1012,21 @@ const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Terminal({
       }
       const pad = frame.alt ? 0 : Math.max(0, term.rows - frame.bufferRows);
       const padding = pad ? '\r\n'.repeat(pad) : '';
-      const showCursor = frame.cursorVisible || forceCursorRef.current;
-      const cursorMode = frame.cur
-        ? cursorSeq(frame.cur, term.rows, frame.bufferRows + pad, forceCursorRef.current)
-        : (showCursor ? '\x1b[?25h' : '\x1b[?25l');
+      const cursorMode = cursorSeq(
+        frame.cur,
+        term.rows,
+        frame.bufferRows + pad,
+        forceCursorRef.current,
+      );
       term.write(
-        `\x1b[?1049l\x1b[?25l\x1b[0m\x1b[2J\x1b[3J\x1b[H${padding}${frame.ansi}${cursorMode}`,
+        `\x1b[?1049l\x1b[?25l\x1b[0m\x1b[2J\x1b[3J\x1b[H${padding}${frame.ansi}`,
         () => {
           if (disposed || !streamMode) {
-            streamPaintBusy = false;
+            finishStreamPaint();
             return;
           }
           if (!streamLayoutSettled || layoutGeneration !== fitGeneration) {
-            streamPaintBusy = false;
+            finishStreamPaint({ aborted: true });
             return;
           }
           const leftAltScreen = applyStreamModes(frame);
@@ -1029,17 +1047,36 @@ const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Terminal({
           } else {
             term.scrollToBottom();
           }
-          seeded = true;
-          setPaused(false);
-          setConn(nextConnection(connState, 'ok'));
-          try { refreshDocDecorations(term); } catch { /* cosmetic */ }
-          drawHistoryBoundary();
-          placeCursor();
           followLiveCursor();
-          reveal();
-          streamPaintBusy = false;
-          if (leftAltScreen) streamClient?.resync();
-          if (streamPaintQueued || mirror.revision > frame.revision) scheduleStreamRender();
+          if (!streamLayoutSettled || layoutGeneration !== fitGeneration) {
+            finishStreamPaint({ aborted: true, resync: leftAltScreen });
+            return;
+          }
+          if (streamPaintQueued || mirror.revision > frame.revision) {
+            finishStreamPaint({ aborted: true, resync: leftAltScreen });
+            return;
+          }
+          // Keep the native cursor hidden while content is replayed and the viewport is restored,
+          // then place the cursor from the same immutable mirror revision in a second parser write.
+          term.write(cursorMode, () => {
+            if (disposed || !streamMode) {
+              finishStreamPaint();
+              return;
+            }
+            if (!streamLayoutSettled || layoutGeneration !== fitGeneration
+              || streamPaintQueued || mirror.revision > frame.revision) {
+              finishStreamPaint({ aborted: true, resync: leftAltScreen });
+              return;
+            }
+            seeded = true;
+            setPaused(false);
+            setConn(nextConnection(connState, 'ok'));
+            try { refreshDocDecorations(term); } catch { /* cosmetic */ }
+            drawHistoryBoundary();
+            placeCursor();
+            reveal();
+            finishStreamPaint({ resync: leftAltScreen });
+          });
         },
       );
     };

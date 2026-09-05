@@ -158,7 +158,11 @@ function normalProjection(
       ansi: serializer.serialize({ excludeModes: true, scrollback: renderScrollback }),
       bufferRows,
       start,
-      cur: null,
+      cur: {
+        row: buffer.length - 1 - cursorLine,
+        col: buffer.cursorX,
+        vis: cursorVisible,
+      },
     };
   }
 
@@ -271,7 +275,11 @@ export function createTerminalStreamMirror({
             ansi: currentSerializer.serialize({ excludeModes: true, scrollback: renderScrollback }),
             bufferRows: active.length,
             start: 0,
-            cur: null,
+            cur: {
+              row: active.length - 1 - (active.baseY + active.cursorY),
+              col: active.cursorX,
+              vis: cursor.visible,
+            },
           }
         : normalProjection(currentTerm, currentSerializer, renderScrollback, cursor.visible);
       const mouseMode = currentTerm.modes?.mouseTrackingMode;

@@ -17,7 +17,7 @@ import type { ChatTone, RootView } from './storage.js';
 import { LATEST_RELEASE } from './changelog.js';
 import {
   getSessions, getWindows, getPanes, resizeWindow, resizePane, getWindowLayout,
-  applyWindowLayout, restoreWindowSize, sendKeys, sendText, createWindow,
+  applyWindowLayout, restoreWindowSize, sendText, createWindow,
   renameSession, renameWindow, deleteWindow, swapWindows, fetchDoc, fetchImageUrl,
   getStates, getOrphans, takeoverOrphan, getAgentDiscovery, markAgentTerminalNotificationsRead,
   getServerVersion,
@@ -133,7 +133,7 @@ import {
   keyboardModeUsesDesktop,
   setKeyboardMode,
 } from './desktopInput.js';
-import { useDesktopTerminalInput } from './hooks/useDesktopTerminalInput.js';
+import { useTerminalInput } from './hooks/useDesktopTerminalInput.js';
 import ProjectRoot from './projectTask/ProjectRoot.js';
 import type { ShortcutItem } from './shortcutMerge.js';
 import type { BrowserMode } from './browserState.js';
@@ -445,8 +445,11 @@ export default function App() {
   const drawerMenuRef = useRef<HTMLButtonElement | null>(null);
 
   const onAuthFail = useCallback(() => setNeedToken(true), []);
-  const enqueueDesktopInput = useDesktopTerminalInput({
-    enabled: desktopInput,
+  const {
+    enqueueInput: enqueueTerminalInput,
+    enqueueKeys: enqueueTerminalKeys,
+  } = useTerminalInput({
+    enabled: true,
     currentPane: current?.paneId ?? null,
     terminalRef: termRef,
     onAuthFail,
@@ -681,19 +684,19 @@ export default function App() {
   // the moment it hides, the guard is re-armed and the next Back re-prompts (no separate display timer).
   useExitConfirm(!!current, setExitHint);
 
-  const sendKey = useCallback(async (name: string) => {
+  const sendKey = useCallback((name: string) => {
     const paneId = current?.paneId;
     if (!paneId) return;
-    try { await sendKeys(paneId, [name]); termRef.current?.wake?.(); } // input landed → poll for output now
-    catch (e) { handledAuth(e); }
-  }, [current, onAuthFail]);
+    enqueueTerminalKeys(paneId, [name]);
+  }, [current?.paneId, enqueueTerminalKeys]);
 
-  const sendChar = useCallback(async (ch: string) => {
+  // Live command-mode typing (including one committed IME word) is terminal input, not a paste.
+  // Keep it on the same queue as named keys so Left/Right cannot overtake adjacent text.
+  const sendLiveText = useCallback((text: string) => {
     const paneId = current?.paneId;
     if (!paneId) return;
-    try { await sendText(paneId, ch, false); termRef.current?.wake?.(); }
-    catch (e) { handledAuth(e); }
-  }, [current, onAuthFail]);
+    enqueueTerminalInput(paneId, text);
+  }, [current?.paneId, enqueueTerminalInput]);
 
   // Open a session: load its windows (prefer remembered → active → first), then that window's
   // panes (prefer remembered → active → first). Writes the session name into the URL hash so
@@ -2713,7 +2716,7 @@ export default function App() {
                 onAuthFail={onAuthFail}
                 onDocLinkTap={onDocLinkTap}
                 onInputFocusChange={setTerminalFocused}
-                onInputData={enqueueDesktopInput}
+                onInputData={enqueueTerminalInput}
                 onRequestDraft={focusDraft}
                 onKeepKeyboard={() => dockRef.current?.keepKeyboardForGesture?.() ?? false}
                 onTap={() => {
@@ -2783,7 +2786,7 @@ export default function App() {
               pane={current.paneId}
               onAuthFail={onAuthFail}
               onKey={sendKey}
-              onText={sendChar}
+              onText={sendLiveText}
               cwd={currentPaneCwd}
               agent={currentAgent ?? null}
               windowId={current.window?.id}

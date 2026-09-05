@@ -2,6 +2,7 @@ export type TerminalInputData = string | Uint8Array | ArrayBuffer | ArrayLike<nu
 
 export interface TerminalInputQueueOptions {
   send(pane: string, hex: string): Promise<unknown>;
+  sendKeys?(pane: string, keys: readonly string[]): Promise<unknown>;
   onDelivered?(pane: string): void;
   onError?(error: unknown, pane: string): void;
   encoder?: Pick<TextEncoder, 'encode'>;
@@ -9,14 +10,24 @@ export interface TerminalInputQueueOptions {
 
 export interface TerminalInputQueue {
   enqueue(pane: string | null | undefined, data: TerminalInputData | null | undefined): void;
+  enqueueKeys(pane: string | null | undefined, keys: readonly string[]): void;
   drop(pane: string): void;
   dispose(): void;
 }
 
-interface QueuedInput {
+interface QueuedBytes {
+  kind: 'input';
   pane: string;
   hex: string;
 }
+
+interface QueuedKeys {
+  kind: 'keys';
+  pane: string;
+  keys: readonly string[];
+}
+
+type QueuedInput = QueuedBytes | QueuedKeys;
 
 const toHex = (bytes: Uint8Array): string => (
   [...bytes].map((byte) => byte.toString(16).padStart(2, '0')).join('')
@@ -41,11 +52,12 @@ function callSafely<Args extends unknown[]>(callback: (...args: Args) => void, .
 
 export function createTerminalInputQueue({
   send,
+  sendKeys,
   onDelivered = () => {},
   onError = () => {},
   encoder = new TextEncoder(),
 }: TerminalInputQueueOptions): TerminalInputQueue {
-  let staged: QueuedInput[] = [];
+  let staged: QueuedBytes[] = [];
   let batches: QueuedInput[] = [];
   let scheduled = false;
   let running = false;
@@ -59,7 +71,8 @@ export function createTerminalInputQueue({
         const batch = batches.shift();
         if (!batch) continue;
         try {
-          await send(batch.pane, batch.hex);
+          if (batch.kind === 'input') await send(batch.pane, batch.hex);
+          else if (sendKeys) await sendKeys(batch.pane, batch.keys);
         } catch (error) {
           batches = batches.filter((item) => item.pane !== batch.pane);
           staged = staged.filter((item) => item.pane !== batch.pane);
@@ -81,12 +94,13 @@ export function createTerminalInputQueue({
       let hex = item.hex;
       while (hex) {
         const last = batches.at(-1);
-        if (last?.pane === item.pane && last.hex.length < MAX_BATCH_HEX_LENGTH) {
+        if (last?.kind === 'input' && last.pane === item.pane
+          && last.hex.length < MAX_BATCH_HEX_LENGTH) {
           const available = MAX_BATCH_HEX_LENGTH - last.hex.length;
           last.hex += hex.slice(0, available);
           hex = hex.slice(available);
         } else {
-          batches.push({ pane: item.pane, hex: hex.slice(0, MAX_BATCH_HEX_LENGTH) });
+          batches.push({ kind: 'input', pane: item.pane, hex: hex.slice(0, MAX_BATCH_HEX_LENGTH) });
           hex = hex.slice(MAX_BATCH_HEX_LENGTH);
         }
       }
@@ -97,11 +111,19 @@ export function createTerminalInputQueue({
   return {
     enqueue(pane, data) {
       if (disposed || !pane || !data) return;
-      staged.push({ pane, hex: toHex(inputBytes(data, encoder)) });
+      staged.push({ kind: 'input', pane, hex: toHex(inputBytes(data, encoder)) });
       if (!scheduled) {
         scheduled = true;
         queueMicrotask(flush);
       }
+    },
+    enqueueKeys(pane, keys) {
+      if (disposed || !pane || !sendKeys || keys.length === 0) return;
+      // A named key must not overtake text staged in this JavaScript turn. Flush those bytes first,
+      // then append the /keys operation to the same per-client queue.
+      if (scheduled) flush();
+      batches.push({ kind: 'keys', pane, keys: [...keys] });
+      void pump();
     },
     drop(pane) {
       staged = staged.filter((item) => item.pane !== pane);
