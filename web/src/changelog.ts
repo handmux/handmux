@@ -19,6 +19,30 @@ export interface ChangelogEntry {
 // `entryId`/`LATEST_RELEASE` use `version` when present, else `date`, as the stable unread-dot id.
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '0.27.0',
+    date: '2026-09-05',
+    highlight: {
+      zh: '腾讯语音输入 · 终端输入更准确',
+      en: 'Tencent voice input · more accurate terminal typing',
+    },
+    items: {
+      zh: [
+        '语音输入新增腾讯实时与一句话识别，同时保留讯飞实时识别；三种方案共享实时音量波形与录音动效，识别文字会插入起录时的光标位置，不会清空已有草稿。',
+        '语音配置会在首次设置、切换方案或修改字段后直接验证；设置页可调整腾讯语气词过滤级别，关闭语音会保留方案和凭据以便重新开启。',
+        '修复语音录制、网络或服务商识别失败时没有提示的问题；未识别出文字时也会明确提示重试。',
+        '修复实时终端连续输入英文、中文或使用方向键后偶发双光标或光标停在上一字符的问题；现在文字顺序正确，光标只在正确位置显示一次。',
+        '修复 Codex 上下文压缩期间内部摘要短暂闪入正文的问题；工具输入、输出和 Diff 被裁剪时也会在实际位置说明原因。',
+      ],
+      en: [
+        'Voice input adds Tencent real-time and sentence recognition alongside iFlytek real-time recognition. All three share the live level waveform and recording animation, and insert recognized text at the caret captured when recording started without clearing the draft.',
+        'Voice configuration is verified after initial setup, a profile switch, or a field edit. Settings can adjust Tencent filler-word filtering, while turning voice off keeps the selected profile and credentials ready for re-enabling.',
+        'Fixed voice capture, network, or provider recognition failures producing no visible feedback; an empty recognition result now clearly asks you to retry.',
+        'Fixed live terminal typing occasionally showing two cursors or leaving the cursor on the preceding character. English and Chinese typing now stays in order with arrow-key navigation, and the cursor appears only once at the correct position.',
+        'Fixed an internal summary briefly flashing into chat during Codex compaction. Truncated tool input, output, and diffs now also explain the limit at the actual cut point.',
+      ],
+    },
+  },
+  {
     version: '0.26.0',
     date: '2026-09-04',
     highlight: {
