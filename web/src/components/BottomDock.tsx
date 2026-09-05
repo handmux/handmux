@@ -656,7 +656,7 @@ function BottomDock({
 
   const anchorRef = useRef({ head: '', tail: '' }); // 起录时的光标两侧文本
   const caretRef = useRef<number | null>(null);                    // 程序化改 value 后要落的光标位置
-  const suppressVoiceRef = useRef(false);           // 录音中点了发送/填入 → 抑制后续 partial/定稿回写
+  const suppressVoiceRef = useRef(false);           // 录音中点发送/填入 → 抑制后续 partial/定稿回写
 
   // 定稿:把整段识别文字插在起录锚点处。录音中已发送过(suppress)则丢弃这次定稿,不再回写。
   const commitVoice = (text: string): void => {
@@ -761,9 +761,9 @@ function BottomDock({
     el.style.height = `${el.scrollHeight + 2}px`;
   };
 
-  // 录音中点发送/填入:先停掉语音并抑制后续回写——不再接着录,定稿也不往框里补字。
-  const stopVoiceIfRecording = () => {
-    if (recording) { suppressVoiceRef.current = true; voice.stop(); }
+  // 录音中点发送/填入:发送的是当前可见文字,所以停掉语音并抑制尾随定稿回写。
+  const stopVoiceForSubmit = () => {
+    if (recording) { suppressVoiceRef.current = true; void voice.stop(); }
   };
 
   // Type the draft, optionally followed by Enter. Lock synchronously before the request: /send waits
@@ -774,7 +774,7 @@ function BottomDock({
     const text = value;
     submitInFlightRef.current = true;
     setSubmitting(true);
-    stopVoiceIfRecording();
+    stopVoiceForSubmit();
     try {
       await sendText(pane, text, enter);
       onSent?.(text); // record the sent command (App pushes it into the session's recent list)
@@ -1208,14 +1208,12 @@ function BottomDock({
                   className="input-text"
                   rows={1}
                   value={value}
-                  // 录音中点输入框 = 立刻接管编辑:停语音 + 抑制回写(保留已识别文字,不让定稿覆盖你接着打
-                  // 的字),并在手势内同步 focus —— 你点这块就是要改字,这一下必须直接弹键盘、不用再点第二次。
-                  // iOS 只认「用户手势里同步调用的 focus」才立刻弹键盘;且 stop() 的重渲染可能打断原生那次聚
-                  // 焦,所以这里显式夺焦兜底。也绝不能用 readOnly:iOS 点 readOnly 的 textarea 根本不给焦点。
+                  // 录音中点输入框 = 点大号“停止”:正常结束录音并等待后台定稿。阻止这次原生聚焦，避免同
+                  // 一个手势又弹键盘；最终识别仍走 commitVoice 写回，不能像发送动作那样 suppress 掉。
                   onPointerDown={(e) => {
                     if (!recording) return; // 未录音:交给原生点击聚焦即可
-                    stopVoiceIfRecording();
-                    e.currentTarget.focus(); // 同步夺焦,确保这一下就弹出键盘
+                    if (e.cancelable) e.preventDefault();
+                    void voice.stop();
                   }}
                   aria-readonly={submitting}
                   onBeforeInput={(e) => {

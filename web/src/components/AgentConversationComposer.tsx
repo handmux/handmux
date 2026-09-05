@@ -88,7 +88,7 @@ export default function AgentConversationComposer({
   const [layout, setLayout] = useState(() => loadShortcutLayout('chat'));
   const ref = useRef<HTMLTextAreaElement>(null);
   const uploadRef = useRef<HTMLInputElement>(null);
-  const tapRef = useRef({ x: 0, y: 0, moved: false });
+  const tapRef = useRef({ x: 0, y: 0, moved: false, finishVoice: false });
   // iOS can dismiss the soft keyboard without blurring the textarea. Focus alone therefore cannot decide
   // whether a control tap should preserve the composer: keeping that stale focus through a sheet close can
   // reopen the keyboard. Track the last keyboard-down viewport height and preserve focus only while the
@@ -271,7 +271,12 @@ export default function AgentConversationComposer({
   useLayoutEffect(() => autoGrow(ref.current), [value]);
   const cardPointerDown = (event: ReactPointerEvent<HTMLDivElement>): void => {
     if (!isConversationComposerCardPointerTarget(event.currentTarget, event.target)) return;
-    tapRef.current = { x: event.clientX, y: event.clientY, moved: false };
+    const button = event.target instanceof Element && event.target.closest('button');
+    const finishVoice = recordingRef.current && !button;
+    tapRef.current = { x: event.clientX, y: event.clientY, moved: false, finishVoice };
+    // During voice input the card itself is the large stop target. Prevent the textarea's native focus
+    // so this gesture behaves exactly like the mic stop button instead of also opening the keyboard.
+    if (finishVoice && event.cancelable) event.preventDefault();
   };
   const cardPointerMove = (event: ReactPointerEvent<HTMLDivElement>): void => {
     if (!isConversationComposerCardPointerTarget(event.currentTarget, event.target)) return;
@@ -281,6 +286,11 @@ export default function AgentConversationComposer({
   };
   const cardPointerUp = (event: ReactPointerEvent<HTMLDivElement>): void => {
     if (!isConversationComposerCardPointerTarget(event.currentTarget, event.target)) return;
+    if (tapRef.current.finishVoice) {
+      if (!tapRef.current.moved && !(event.target instanceof Element
+        && event.target.closest('button'))) void voice.stop();
+      return;
+    }
     if (tapRef.current.moved || (event.target instanceof Element
       && event.target.closest('button, input, textarea, [contenteditable]'))) return;
     ref.current?.focus({ preventScroll: true });
@@ -313,9 +323,9 @@ export default function AgentConversationComposer({
           void uploadFiles(files);
         }} />
       {(voice.error || error) && <div className="cc-notice" role="alert">{voice.error || error}</div>}
+      {queueContent}
       <div className={`cc-card${capturing ? ' recording' : ''}${recognizing ? ' recognizing' : ''}`}
         onPointerDown={cardPointerDown} onPointerMove={cardPointerMove} onPointerUp={cardPointerUp}>
-        {queueContent}
         <textarea ref={ref} className="cc-text" rows={2} value={value}
           aria-readonly={draftLocked}
           onBeforeInput={(event) => { if (draftLocked) event.preventDefault(); }}

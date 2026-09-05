@@ -581,22 +581,22 @@ describe('BottomDock', () => {
     expect(container.querySelector('.input-text').readOnly).toBe(false);
   });
 
-  it('录音中点输入框:停语音 + 接管编辑,尾随定稿被抑制不覆盖', async () => {
-    await render({ pane: '%1', agent: 'claude', onSent: () => {} });
+  it('录音中点输入框:正常结束录音并保留后台识别定稿', async () => {
+    await render({ pane: '%1', agent: 'claude', voiceMode: 'sentence', onSent: () => {} });
     tap(container.querySelector('.input-mic'));
     voice.state = 'recording'; voice.partial = '在听';
-    await render({ pane: '%1', agent: 'claude', onSent: () => {} });
+    await render({ pane: '%1', agent: 'claude', voiceMode: 'sentence', onSent: () => {} });
     expect(container.querySelector('.input-text').value).toBe('在听');
     voice.stop.mockClear();
-    fire(container.querySelector('.input-text'), 'pointerdown');
-    expect(voice.stop).toHaveBeenCalledTimes(1);            // 停了语音
-    // 这一下点击就要进入编辑:同步夺焦(iOS 上即等于立刻弹键盘),无需再点第二次。
-    expect(document.activeElement).toBe(container.querySelector('.input-text'));
-    // 接管后:尾随定稿应被抑制,不把框里内容改写成定稿文本(否则会覆盖你接着打的字)。
+    const pointerDown = new MouseEvent('pointerdown', { bubbles: true, cancelable: true });
+    act(() => container.querySelector('.input-text').dispatchEvent(pointerDown));
+    expect(pointerDown.defaultPrevented).toBe(true);        // 与点“停止”一致，不顺带弹键盘
+    expect(voice.stop).toHaveBeenCalledTimes(1);            // 正常结束并送后台识别
+    expect(document.activeElement).not.toBe(container.querySelector('.input-text'));
     act(() => { voice.onText('在听最终版'); });
     voice.state = 'idle'; voice.partial = '';
-    await render({ pane: '%1', agent: 'claude', onSent: () => {} });
-    expect(container.querySelector('.input-text').value).toBe('在听');
+    await render({ pane: '%1', agent: 'claude', voiceMode: 'sentence', onSent: () => {} });
+    expect(container.querySelector('.input-text').value).toBe('在听最终版');
   });
 
   it('语音激活时申请屏幕常亮(wake lock),停录后释放', async () => {

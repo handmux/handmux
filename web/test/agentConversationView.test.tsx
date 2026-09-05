@@ -3234,6 +3234,19 @@ describe('generic Agent Conversation UI', () => {
     expect(conversation.send).not.toHaveBeenCalled();
   });
 
+  it('renders queued messages outside the conversation input card', () => {
+    const { container } = render(
+      <AgentConversationComposer agentId="pi" sessionId="queue-outside-card" busy={false}
+        conversation={controller()} queueContent={
+          <div data-testid="conversation-queue">queued message</div>
+        } />,
+    );
+    const card = container.querySelector('.cc-card')!;
+    const queue = screen.getByTestId('conversation-queue');
+    expect(card.contains(queue)).toBe(false);
+    expect(queue.compareDocumentPosition(card) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
+  });
+
   it('keeps v4 Pi send available while showing the reload notice', () => {
     const conversation = controller({ descriptor: {
       session: { agentId: 'pi', sessionId: 'stale-v4-session' },
@@ -3642,6 +3655,33 @@ describe('generic Agent Conversation UI', () => {
     expect(conversation.send).not.toHaveBeenCalled();
     act(() => voice.onText(' spoken'));
     expect(input.value).toBe('original body spoken');
+  });
+
+  it.each([
+    ['textarea', '.cc-text'],
+    ['card blank area', '.cc-actions-left'],
+  ])('finishes voice normally when tapping the conversation %s', (_label, selector) => {
+    const conversation = controller();
+    const props = {
+      agentId: 'pi', sessionId: `voice-card-stop-${selector}`, busy: false,
+      micAvailable: true, voiceMode: 'sentence' as const, conversation,
+    };
+    const view = render(<AgentConversationComposer {...props} />);
+    voice.state = 'recording';
+    voice.partial = '识别中';
+    view.rerender(<AgentConversationComposer {...props} />);
+
+    const target = view.container.querySelector(selector)!;
+    firePointer(target, 'pointerdown', { clientX: 20, clientY: 20 });
+    firePointer(target, 'pointerup', { clientX: 20, clientY: 20 });
+    expect(voice.stop).toHaveBeenCalledOnce();
+    expect(conversation.send).not.toHaveBeenCalled();
+
+    act(() => voice.onText('最终识别结果'));
+    voice.state = 'idle';
+    voice.partial = '';
+    view.rerender(<AgentConversationComposer {...props} />);
+    expect((screen.getByRole('textbox') as HTMLTextAreaElement).value).toBe('最终识别结果');
   });
 
   it('shows a voice failure in the existing composer notice', () => {
