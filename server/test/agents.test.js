@@ -81,7 +81,7 @@ describe('codex rollout parsing', () => {
       + `To continue this session, run codex resume ${titleId} (${sessionId})`,
     )).toBe(sessionId);
   });
-  it('reads a strict exit notice from fresh raw terminal output only', () => {
+  it('reads the strict exit notice regardless of the optional Codex 0.151 exit prelude', () => {
     const id = '01a03833-5b63-7d50-b090-5a97df670638';
     expect(codexExitOutputSessionId(
       `\x1b[27;1H\x1b[J\x1b[?25hToken usage: total=16,441 input=16,436 output=5\r\n`
@@ -89,15 +89,23 @@ describe('codex rollout parsing', () => {
       + `codex resume, then select title (aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa) (${id})`
       + '\x1b[39m\r\n',
     )).toBe(id);
+    expect(codexExitOutputSessionId(
+      '• You have 3 usage limit resets available. Run /usage to use one.\r\n'
+      + '⚠ Heads up, you have less than 10% of your weekly limit left. '
+      + 'Run /status for a breakdown.\r\n'
+      + 'To continue this session, run \x1b[36mcodex resume, then select DataAgent '
+      + `(01a03c7e-cc85-7721-808e-11b508c38378)\x1b[39m\r\n`,
+    )).toBe('01a03c7e-cc85-7721-808e-11b508c38378');
+  });
+  it('rejects non-resume ids and output with multiple different strict notices', () => {
+    const id = '01a03833-5b63-7d50-b090-5a97df670638';
     expect(codexExitOutputSessionId(`Session ID: ${id}\r\n`)).toBeNull();
     expect(codexExitOutputSessionId(
       `To continue this session, run codex resume, then select fake (${id})\r\n`
       + `shell output (aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa)\r\n`,
-    )).toBeNull();
+    )).toBe(id);
     expect(codexExitOutputSessionId(
-      `Token usage: total=10 input=9 output=1\r\n`
-      + `To continue this session, run codex resume ${id}\r\n`
-      + `Token usage: total=10 input=9 output=1\r\n`
+      `To continue this session, run codex resume ${id}\r\n`
       + 'To continue this session, run codex resume aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa\r\n',
     )).toBeNull();
   });

@@ -56,15 +56,13 @@ export function codexExitSessionId(text: unknown): string | null {
 
 const OSC_SEQUENCE = /\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g;
 const CSI_SEQUENCE = /\x1b\[[0-?]*[ -/]*[@-~]/g;
-const CODEX_TOKEN_USAGE = /^\s*Token usage:\s+total=[\d,]+\s+input=[\d,]+\s+output=[\d,]+\s*$/i;
 
 export function codexExitOutputSessionId(output: unknown): string | null {
   const plain = String(output || '').replace(OSC_SEQUENCE, '').replace(CSI_SEQUENCE, '');
   const lines = plain.split(/\r?\n/);
   const candidates = new Set<string>();
-  for (let index = 1; index < lines.length; index += 1) {
-    if (!CODEX_TOKEN_USAGE.test(lines[index - 1] ?? '')) continue;
-    const candidate = codexExitSessionId(lines[index]);
+  for (const line of lines) {
+    const candidate = codexExitSessionId(line);
     if (candidate) candidates.add(candidate);
   }
   return candidates.size === 1 ? [...candidates][0] ?? null : null;
