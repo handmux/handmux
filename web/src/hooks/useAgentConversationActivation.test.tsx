@@ -26,13 +26,39 @@ afterEach(() => {
 describe('useAgentConversationActivation', () => {
   it('confirms activation and waits until discovery publishes a managed session', async () => {
     vi.mocked(describeConversationActivation).mockResolvedValue({ effect: 'replace-process-preserve-session' });
-    vi.mocked(activateConversation).mockResolvedValue();
+    vi.mocked(activateConversation).mockResolvedValue(null);
     const discover = vi.fn(async () => ({ ...run, runId: 'run-2', sessionId: 'session-1' }));
     const { result } = renderHook(() => useAgentConversationActivation(run, true, discover));
     await waitFor(() => expect(result.current.status).toBe('ready'));
     await act(async () => { await result.current.activate(); });
     expect(activateConversation).toHaveBeenCalledWith(run, expect.any(AbortSignal));
     expect(discover).toHaveBeenCalledWith(run);
+  });
+
+  it('never exposes a ready descriptor as belonging to a replacement run or pane', async () => {
+    const runOne = { ...run, agentId: 'codex', paneId: '%1', runId: 'run-1' };
+    const runTwo = { ...runOne, runId: 'run-2' };
+    const runThree = { ...runOne, paneId: '%2', runId: 'run-3' };
+    let resolveSecond!: (value: { effect: 'replace-process-preserve-session' }) => void;
+    let resolveThird!: (value: { effect: 'replace-process-preserve-session' }) => void;
+    vi.mocked(describeConversationActivation)
+      .mockResolvedValueOnce({ effect: 'replace-process-preserve-session' })
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveSecond = resolve; }))
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveThird = resolve; }));
+    const { result, rerender } = renderHook(({ active }) => (
+      useAgentConversationActivation(active, true, vi.fn())
+    ), { initialProps: { active: runOne } });
+    await waitFor(() => expect(result.current).toMatchObject({ status: 'ready', owner: runOne }));
+
+    rerender({ active: runTwo });
+    expect(result.current).toMatchObject({ status: 'loading', descriptor: null, owner: null });
+    await act(async () => resolveSecond({ effect: 'replace-process-preserve-session' }));
+    await waitFor(() => expect(result.current).toMatchObject({ status: 'ready', owner: runTwo }));
+
+    rerender({ active: runThree });
+    expect(result.current).toMatchObject({ status: 'loading', descriptor: null, owner: null });
+    await act(async () => resolveThird({ effect: 'replace-process-preserve-session' }));
+    await waitFor(() => expect(result.current).toMatchObject({ status: 'ready', owner: runThree }));
   });
 
   it('maps a stale run to a retryable friendly state', async () => {
@@ -46,10 +72,26 @@ describe('useAgentConversationActivation', () => {
     expect(result.current).toMatchObject({ status: 'error', error: 'stale_run' });
   });
 
+  it('preserves a trusted recovery command returned by activation failure', async () => {
+    const recovery = {
+      kind: 'codex_resume' as const,
+      sessionId: '12345678-1234-1234-1234-123456789abc',
+      command: 'handmux codex resume 12345678-1234-1234-1234-123456789abc',
+    };
+    vi.mocked(describeConversationActivation).mockResolvedValue({ effect: 'replace-process-preserve-session' });
+    vi.mocked(activateConversation).mockRejectedValue(new ApiError(
+      'activation unavailable', 503, 'activation unavailable', 'unavailable', null, recovery,
+    ));
+    const { result } = renderHook(() => useAgentConversationActivation(run, true, vi.fn()));
+    await waitFor(() => expect(result.current.status).toBe('ready'));
+    await act(async () => { await result.current.activate(); });
+    expect(result.current).toMatchObject({ status: 'error', error: 'activation_failed', recovery });
+  });
+
   it('times out discovery without exposing a provider response', async () => {
     vi.useFakeTimers();
     vi.mocked(describeConversationActivation).mockResolvedValue({ effect: 'replace-process-preserve-session' });
-    vi.mocked(activateConversation).mockResolvedValue();
+    vi.mocked(activateConversation).mockResolvedValue(null);
     const discover = vi.fn(async () => null);
     const { result } = renderHook(() => useAgentConversationActivation(run, true, discover));
     await act(async () => { await Promise.resolve(); });
@@ -59,6 +101,23 @@ describe('useAgentConversationActivation', () => {
     await act(async () => { await vi.runAllTimersAsync(); await activation; });
     expect(result.current).toMatchObject({ status: 'error', error: 'discovery_timeout' });
     expect(discover).toHaveBeenCalledTimes(75);
+  });
+
+  it('keeps the verified recovery command when post-activation discovery times out', async () => {
+    vi.useFakeTimers();
+    const recovery = {
+      kind: 'codex_resume' as const,
+      sessionId: '12345678-1234-1234-1234-123456789abc',
+      command: 'handmux codex resume 12345678-1234-1234-1234-123456789abc',
+    };
+    vi.mocked(describeConversationActivation).mockResolvedValue({ effect: 'replace-process-preserve-session' });
+    vi.mocked(activateConversation).mockResolvedValue(recovery);
+    const { result } = renderHook(() => useAgentConversationActivation(run, true, vi.fn(async () => null)));
+    await act(async () => { await Promise.resolve(); });
+    let activation!: Promise<void>;
+    act(() => { activation = result.current.activate(); });
+    await act(async () => { await vi.runAllTimersAsync(); await activation; });
+    expect(result.current).toMatchObject({ status: 'error', error: 'discovery_timeout', recovery });
   });
 
   it('aborts an in-flight activation when the selected run is left', async () => {
@@ -71,6 +130,7 @@ describe('useAgentConversationActivation', () => {
       await new Promise<void>((_resolve, reject) => {
         nextSignal?.addEventListener('abort', () => reject(nextSignal.reason), { once: true });
       });
+      return null;
     });
     const { result, unmount } = renderHook(() => useAgentConversationActivation(run, true, vi.fn()));
     await waitFor(() => expect(result.current.status).toBe('ready'));
@@ -85,6 +145,7 @@ describe('CodexManagedGuide', () => {
   const readyController = () => ({
     status: 'ready' as const,
     descriptor: { effect: 'replace-process-preserve-session' as const },
+    owner: { ...run, agentId: 'codex' },
     error: null,
     activate: vi.fn(async () => {}),
     retry: vi.fn(),
@@ -181,6 +242,80 @@ describe('CodexManagedGuide', () => {
     await waitFor(() => expect(screen.queryByText('托管启动未能完成。你可以重试，或前往终端查看当前状态。'))
       .toBeNull());
   });
+
+  it('shows and copies a trusted recovery command on the failed page', async () => {
+    const originalClipboard = navigator.clipboard;
+    const originalSecureContext = window.isSecureContext;
+    const writeText = vi.fn(async () => {});
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
+    Object.defineProperty(window, 'isSecureContext', { configurable: true, value: true });
+    const recovery = {
+      kind: 'codex_resume' as const,
+      sessionId: '12345678-1234-1234-1234-123456789abc',
+      command: 'handmux codex resume 12345678-1234-1234-1234-123456789abc',
+    };
+    render(<CodexManagedGuide run={{ ...run, agentId: 'codex' }} controller={{
+      ...readyController(), status: 'error', error: 'activation_failed', recovery,
+    }} onActivationChange={() => {}} onTerminal={() => {}} />);
+    expect(screen.getByText(recovery.command)).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: '复制恢复命令' }));
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith(recovery.command));
+    expect(screen.getByRole('button', { name: '已复制' })).toBeTruthy();
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: originalClipboard });
+    Object.defineProperty(window, 'isSecureContext', { configurable: true, value: originalSecureContext });
+  });
+
+  it('copies the recovery command over LAN HTTP with the textarea fallback', async () => {
+    const originalClipboard = navigator.clipboard;
+    const originalSecureContext = window.isSecureContext;
+    const originalExecCommand = document.execCommand;
+    const execCommand = vi.fn(() => true);
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: undefined });
+    Object.defineProperty(window, 'isSecureContext', { configurable: true, value: false });
+    Object.defineProperty(document, 'execCommand', { configurable: true, value: execCommand });
+    const recovery = {
+      kind: 'codex_resume' as const,
+      sessionId: '12345678-1234-1234-1234-123456789abc',
+      command: 'handmux codex resume 12345678-1234-1234-1234-123456789abc',
+    };
+    render(<CodexManagedGuide run={{ ...run, agentId: 'codex' }} controller={{
+      ...readyController(), status: 'error', error: 'activation_failed', recovery,
+    }} onActivationChange={() => {}} onTerminal={() => {}} />);
+
+    fireEvent.click(screen.getByRole('button', { name: '复制恢复命令' }));
+    await waitFor(() => expect(execCommand).toHaveBeenCalledWith('copy'));
+    expect(screen.getByRole('button', { name: '已复制' })).toBeTruthy();
+    expect(document.querySelector('textarea[aria-hidden="true"]')).toBeNull();
+
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: originalClipboard });
+    Object.defineProperty(window, 'isSecureContext', { configurable: true, value: originalSecureContext });
+    Object.defineProperty(document, 'execCommand', { configurable: true, value: originalExecCommand });
+  });
+
+  it('does not claim the recovery command was copied when every clipboard path fails', async () => {
+    const originalClipboard = navigator.clipboard;
+    const originalSecureContext = window.isSecureContext;
+    const originalExecCommand = document.execCommand;
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: undefined });
+    Object.defineProperty(window, 'isSecureContext', { configurable: true, value: false });
+    Object.defineProperty(document, 'execCommand', { configurable: true, value: vi.fn(() => false) });
+    const recovery = {
+      kind: 'codex_resume' as const,
+      sessionId: '12345678-1234-1234-1234-123456789abc',
+      command: 'handmux codex resume 12345678-1234-1234-1234-123456789abc',
+    };
+    render(<CodexManagedGuide run={{ ...run, agentId: 'codex' }} controller={{
+      ...readyController(), status: 'error', error: 'activation_failed', recovery,
+    }} onActivationChange={() => {}} onTerminal={() => {}} />);
+
+    fireEvent.click(screen.getByRole('button', { name: '复制恢复命令' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: '复制恢复命令' })).toBeTruthy());
+    expect(screen.queryByRole('button', { name: '已复制' })).toBeNull();
+
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: originalClipboard });
+    Object.defineProperty(window, 'isSecureContext', { configurable: true, value: originalSecureContext });
+    Object.defineProperty(document, 'execCommand', { configurable: true, value: originalExecCommand });
+  });
 });
 
 describe('AgentConversationActivationGuide', () => {
@@ -189,6 +324,7 @@ describe('AgentConversationActivationGuide', () => {
     const onCancel = vi.fn();
     const controller = {
       status: 'ready' as const, descriptor: { effect: 'replace-process-preserve-session' as const },
+      owner: { ...run },
       error: null, activate, retry: vi.fn(),
     };
     const { rerender } = render(<AgentConversationActivationGuide controller={controller}
@@ -206,7 +342,8 @@ describe('AgentConversationActivationGuide', () => {
   it('offers retry after failure without rendering a private provider message', () => {
     const retry = vi.fn();
     const { container } = render(<AgentConversationActivationGuide controller={{
-      status: 'error', descriptor: null, error: 'activation_failed', activate: vi.fn(), retry,
+      status: 'error', descriptor: null, owner: null,
+      error: 'activation_failed', activate: vi.fn(), retry,
     }} onCancel={() => {}} />);
     expect(container.textContent).not.toContain('/Users/private');
     fireEvent.click(screen.getByRole('button', { name: '重试' }));

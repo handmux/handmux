@@ -107,6 +107,11 @@ export class TmuxPaneOutputCapture {
     return Buffer.concat(this.#chunks, this.#bytes);
   }
 
+  outputFrames(): readonly Buffer[] | null {
+    if (!this.#armed || this.#failed || this.#overflow) return null;
+    return this.#chunks.map((chunk) => Buffer.from(chunk));
+  }
+
   close(): void {
     if (this.#closed) return;
     this.#closed = true;

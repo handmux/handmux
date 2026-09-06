@@ -1,12 +1,14 @@
 import type { ReadonlyPaneSource, ProcessContext } from '../agent-runtime/adapter.js';
 import type { ForegroundProcessIdentity } from '../agent-runtime/adapter.js';
 import type { AgentConversationActivationControllerV1 } from '../agent-runtime/conversationActivation.js';
+import { ConversationActivationError } from '../agent-runtime/conversationActivation.js';
 import { serializePaneInput } from '../paneInput.js';
-import { codex, codexExitOutputSessionId } from './codex.js';
+import { codex, codexExitOutputFramesSessionId, codexExitOutputSessionId } from './codex.js';
 
 export interface CodexActivationOutputCapture {
   sendKey(key: string): Promise<void>;
   output(): Buffer | null;
+  outputFrames?(): readonly Buffer[] | null;
   close(): void;
 }
 
@@ -17,25 +19,36 @@ export interface CodexActivationCommands {
   runPaneCommand(pane: string, command: string): Promise<unknown>;
 }
 
+export interface CodexActivationApp {
+  discover(pane: string): Promise<{
+    managed: boolean | null;
+    threadId?: string | null;
+  } | null | undefined>;
+}
+
 const pause = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 const SHELLS = new Set(['sh', 'bash', 'zsh', 'fish', 'dash', 'ksh', 'tcsh']);
+const REMOTE_ARG_RE = /(?:^|\s)--remote(?:=|\s|$)/;
 
 function throwIfAborted(signal: AbortSignal): void {
   if (signal.aborted) throw signal.reason instanceof Error ? signal.reason : new Error('Activation cancelled');
 }
 
 export function createCodexConversationActivationController({
+  app,
   panes,
   process,
   commands,
   wait = pause,
 }: {
+  app: CodexActivationApp;
   panes: ReadonlyPaneSource;
   process: ProcessContext;
   commands: CodexActivationCommands;
   wait?: (ms: number) => Promise<void>;
 }): AgentConversationActivationControllerV1 {
-  if (!panes || !process || !commands || typeof commands.openOutputCapture !== 'function'
+  if (!app || typeof app.discover !== 'function' || !panes || !process || !commands
+    || typeof commands.openOutputCapture !== 'function'
     || typeof commands.paneCurrentPath !== 'function' || typeof commands.sessionCwd !== 'function'
     || typeof commands.runPaneCommand !== 'function') {
     throw new TypeError('Codex Conversation activation requires pane control');
@@ -58,6 +71,22 @@ export function createCodexConversationActivationController({
     return SHELLS.has(current.currentCommand.toLowerCase()) || (executable && SHELLS.has(executable))
       ? identity : null;
   };
+  const processAfterInterrupt = async (paneId: string): Promise<{
+    kind: 'codex' | 'shell' | 'other' | 'unknown';
+    identity: ForegroundProcessIdentity | null;
+  } | null> => {
+    const current = await pane(paneId);
+    if (!current) return null;
+    const identity = await process.inspectForeground(current);
+    if (!identity) return { kind: 'unknown', identity: null };
+    // During Codex shutdown, tmux/ps can briefly expose the old pane command without an executable.
+    // Only this bounded post-interrupt wait treats that incomplete snapshot as transient.
+    if (!identity.executable) return { kind: 'unknown', identity };
+    const executable = identity.executable.split('/').pop()?.toLowerCase();
+    if (executable && SHELLS.has(executable)) return { kind: 'shell', identity };
+    const isCodex = await codex.process.verify(current, { inspectForeground: async () => identity });
+    return { kind: isCodex ? 'codex' : 'other', identity };
+  };
   const sameProcess = (first: ForegroundProcessIdentity, second: ForegroundProcessIdentity): boolean => (
     first.pid === second.pid
     && (first.startedAt === undefined || second.startedAt === first.startedAt)
@@ -66,11 +95,21 @@ export function createCodexConversationActivationController({
   return {
     apiVersion: 1,
     async describe(run) {
-      if (run.ref.sessionId || run.signal.aborted || !await codexIdentity(run.ref.paneId)) return null;
+      if (run.ref.sessionId || run.signal.aborted) return null;
+      const processIdentity = await codexIdentity(run.ref.paneId);
+      if (!processIdentity) return null;
+      if (processIdentity.commandLine && REMOTE_ARG_RE.test(processIdentity.commandLine)) return null;
+      const ownership = await app.discover(run.ref.paneId);
+      if (ownership?.managed !== false) {
+        // A dead App Server can leave its socket file behind. A complete native Codex command line
+        // without --remote is authoritative unmanaged evidence; a managed/unknown command line stays
+        // fail-closed so a restarting Handmux App Server can never be replaced.
+        if (ownership?.managed !== null || !processIdentity.commandLine) return null;
+      }
       return { effect: 'replace-process-preserve-session' };
     },
-    async activate(run, signal) {
-      await serializePaneInput(run.ref.paneId, async () => {
+    async activate(run, signal, progress) {
+      return await serializePaneInput(run.ref.paneId, async () => {
         const paneId = run.ref.paneId;
         throwIfAborted(signal);
         const original = !run.ref.sessionId && !run.signal.aborted
@@ -99,21 +138,29 @@ export function createCodexConversationActivationController({
             // This exact control-mode connection sends C-c and arms collection synchronously at that
             // command's %end. Output rendered before the interrupt can never satisfy freshness.
             await outputCapture.sendKey('C-c');
+            let originalStillVerified = true;
             for (let attempt = 0; attempt < 10; attempt += 1) {
               await wait(500);
               throwIfAborted(signal);
-              if (!await pane(paneId)) throw new Error('The pane closed during Conversation activation');
-              const currentIdentity = await codexIdentity(paneId);
-              if (!currentIdentity) {
-                shell = await shellIdentity(paneId);
-                if (!shell) throw new Error('The pane did not return to the expected shell');
+              const current = await processAfterInterrupt(paneId);
+              if (!current) throw new Error('The pane closed during Conversation activation');
+              if (current.kind === 'unknown') {
+                originalStillVerified = false;
+                continue;
+              }
+              if (current.kind === 'shell') {
+                shell = current.identity;
                 exited = true;
                 break;
               }
-              if (!sameProcess(original, currentIdentity)) {
+              if (current.kind === 'other' || !current.identity
+                || !sameProcess(original, current.identity)) {
                 throw new Error('The Agent process changed during Conversation activation');
               }
+              originalStillVerified = true;
             }
+            // Never send another interrupt unless the last complete snapshot still proves the original Codex.
+            if (!originalStillVerified) break;
           }
           if (!exited || !shell) throw new Error('Codex did not exit; close any open panel in the terminal and try again');
           let sessionId: string | null = null;
@@ -123,8 +170,14 @@ export function createCodexConversationActivationController({
             if (!beforeRead || !sameProcess(shell, beforeRead)) {
               throw new Error('The pane shell changed during Conversation activation');
             }
-            const current = outputCapture.output();
-            const candidate = current === null ? null : codexExitOutputSessionId(current.toString('utf8'));
+            const frames = outputCapture.outputFrames?.();
+            let candidate: string | null = null;
+            if (frames === undefined) {
+              const current = outputCapture.output();
+              if (current !== null) candidate = codexExitOutputSessionId(current.toString('utf8'));
+            } else if (frames !== null) {
+              candidate = codexExitOutputFramesSessionId(frames);
+            }
             if (codex.sessions.isId(candidate)) { sessionId = candidate; break; }
             await wait(100);
           }
@@ -134,13 +187,25 @@ export function createCodexConversationActivationController({
           }
           const resume = codex.sessions.managedResumeCmd?.(sessionId);
           if (!resume) throw new Error('Managed Conversation activation is unavailable');
-          throwIfAborted(signal);
-          const beforeResume = await shellIdentity(paneId);
-          if (!beforeResume || !sameProcess(shell, beforeResume)) {
-            throw new Error('The pane shell changed before Conversation activation');
+          const recovery = { kind: 'codex_resume' as const, sessionId, command: resume };
+          progress.recovery(recovery);
+          try {
+            throwIfAborted(signal);
+            const beforeResume = await shellIdentity(paneId);
+            if (!beforeResume || !sameProcess(shell, beforeResume)) {
+              throw new Error('The pane shell changed before Conversation activation');
+            }
+            throwIfAborted(signal);
+            await commands.runPaneCommand(paneId, resume);
+          } catch (error) {
+            if (error instanceof ConversationActivationError) throw error;
+            throw new ConversationActivationError(
+              'Conversation activation could not finish; use the recovery command or continue in the terminal',
+              'unavailable',
+              recovery,
+            );
           }
-          throwIfAborted(signal);
-          await commands.runPaneCommand(paneId, resume);
+          return { recovery };
         } finally {
           signal.removeEventListener('abort', abortCapture);
           outputCapture.close();

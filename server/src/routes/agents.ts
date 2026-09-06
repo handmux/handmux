@@ -182,7 +182,11 @@ export function agentRoutes({ runtime }: { runtime: AgentFacadeRuntime }): expre
     const status = error.code === 'unsupported' ? 409
       : error.code === 'in_progress' ? 409
         : error.code === 'contract_violation' ? 502 : 503;
-    res.status(status).json({ error: error.message, code: error.code });
+    res.status(status).json({
+      error: error.message,
+      code: error.code,
+      ...(error.recovery === undefined ? {} : { recovery: error.recovery }),
+    });
     return true;
   };
 
@@ -217,8 +221,11 @@ export function agentRoutes({ runtime }: { runtime: AgentFacadeRuntime }): expre
       // resume is one bounded server operation: a mobile navigation or dropped HTTP connection must not
       // strand the pane at the intermediate shell. AgentConversationActivationService still owns its
       // hard timeout and the controller revalidates the process before every irreversible step.
-      await runtime.conversationActivation.activate(lease);
-      return res.status(202).json({ accepted: true });
+      const result = await runtime.conversationActivation.activate(lease);
+      return res.status(202).json({
+        accepted: true,
+        ...(result?.recovery === undefined ? {} : { recovery: result.recovery }),
+      });
     } catch (error) {
       if (activationError(error, res)) return;
       return next(error);

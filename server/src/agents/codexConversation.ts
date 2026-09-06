@@ -39,7 +39,7 @@ const MAX_DURABLE_CHECKPOINTS = 64;
 const HISTORY_HASH_SEED = createHash('sha256').update('codex-conversation-v1').digest('hex');
 
 interface CodexConversationApp {
-  discover(paneId: string): Promise<{ managed?: boolean; threadId?: string | null } | null | undefined>;
+  discover(paneId: string): Promise<{ managed?: boolean | null; threadId?: string | null } | null | undefined>;
   observeConversation(
     paneId: string,
     threadId: string,

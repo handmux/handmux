@@ -442,6 +442,24 @@ describe('Codex App Server projection', () => {
 });
 
 describe('Codex App Server client', () => {
+  it('distinguishes an unmanaged pane from a managed socket that is temporarily unavailable', async () => {
+    const unmanaged = createCodexAppServer({
+      home: '/home/test',
+      exists: () => false,
+      connect: vi.fn(() => { throw new Error('must not connect'); }),
+    });
+    await expect(unmanaged.discover('%1')).resolves.toEqual({ managed: false, threadId: null });
+
+    const unavailable = createCodexAppServer({
+      home: '/home/test',
+      exists: () => true,
+      connect: vi.fn(() => { throw new Error('socket is restarting'); }),
+    });
+    await expect(unavailable.discover('%1')).resolves.toEqual({ managed: null, threadId: null });
+    unmanaged.close();
+    unavailable.close();
+  });
+
   it('projects native Goal lifecycle notifications into status and the live stream', async () => {
     const initialGoal = {
       threadId: 'thread-1', objective: 'Finish the release', status: 'active',

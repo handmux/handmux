@@ -39,7 +39,7 @@ export interface TmuxCaptureAdapter {
   captureTopology(): Promise<CapturedTopology | { status: 'unknown'; error?: unknown }>;
 }
 export interface CodexDiscovery {
-  discover(paneId: string): Promise<{ managed?: boolean; threadId?: unknown } | null | undefined>;
+  discover(paneId: string): Promise<{ managed?: boolean | null; threadId?: unknown } | null | undefined>;
 }
 
 function agentMap(agents: readonly AgentDriver[]): Map<string, AgentDriver> {

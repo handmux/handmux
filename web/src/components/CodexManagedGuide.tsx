@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { AgentRunRef } from '../agentCatalog.js';
 import type { AgentConversationActivationController } from '../hooks/useAgentConversationActivation.js';
 import { t } from '../i18n';
+import { copyText } from '../clipboard.js';
 import { BotIcon } from './icons.jsx';
 
 const TERMINAL_HINT_MS = 10_000;
@@ -17,6 +18,7 @@ export default function CodexManagedGuide({
   run, controller, onTerminal, onActivationChange,
 }: CodexManagedGuideProps) {
   const [confirming, setConfirming] = useState(false);
+  const [copied, setCopied] = useState(false);
   const [showTerminalHint, setShowTerminalHint] = useState(false);
   const submittingRef = useRef(false);
   const runRef = useRef(run);
@@ -41,6 +43,13 @@ export default function CodexManagedGuide({
       onActivationChange(runRef.current, false);
     }
   }, [controller.status, onActivationChange, timedOut]);
+  useEffect(() => setCopied(false), [controller.recovery?.command]);
+
+  const copyRecovery = async (): Promise<void> => {
+    const command = controller.recovery?.command;
+    if (!command) return;
+    setCopied(await copyText(command));
+  };
 
   const start = async (): Promise<void> => {
     if (submittingRef.current || starting || !controller.descriptor) return;
@@ -55,13 +64,13 @@ export default function CodexManagedGuide({
   const paneGone = controller.error === 'stale_run';
   const title = starting ? t('chat.managedGuide.startingTitle')
     : timedOut ? t('chat.managedGuide.timeoutTitle')
-      : unbound ? t('chat.managedGuide.manualTitle')
+      : unbound ? t('chat.session.connectionTitle')
         : paneGone ? t('chat.managedGuide.goneTitle')
           : t('chat.managedGuide.title');
   const hint = starting
     ? (showTerminalHint ? t('chat.managedGuide.terminalHint') : t('chat.managedGuide.startingHint'))
     : timedOut ? t('chat.managedGuide.timeoutHint')
-      : unbound ? t('chat.managedGuide.manualHint')
+      : unbound ? t('chat.session.connectionHint')
         : paneGone ? t('chat.managedGuide.goneHint')
           : controller.error ? t('chat.managedGuide.failedHint')
             : t('chat.managedGuide.hint');
@@ -73,6 +82,16 @@ export default function CodexManagedGuide({
       </div>
       <h2>{title}</h2>
       <p>{hint}</p>
+      {(controller.error === 'activation_failed' || controller.error === 'discovery_timeout')
+        && controller.recovery && (
+        <div className="codex-managed-guide-recovery">
+          <span>{t('chat.managedGuide.recoveryHint')}</span>
+          <code>{controller.recovery.command}</code>
+          <button type="button" onClick={() => { void copyRecovery(); }}>
+            {copied ? t('chat.status.copied') : t('chat.managedGuide.copyRecovery')}
+          </button>
+        </div>
+      )}
       {!starting && !timedOut && !unbound && !paneGone && (
         <button type="button" className="codex-managed-guide-primary"
           disabled={controller.status === 'loading'}

@@ -483,6 +483,8 @@ export default {
 'chat.managedGuide.goneTitle': 'This Codex has changed',
 'chat.managedGuide.goneHint': 'Handmux stopped to avoid ending the wrong process. Open the terminal to check its current state.',
 'chat.managedGuide.failedHint': 'Managed startup could not finish. Try again or open the terminal to check its current state.',
+'chat.managedGuide.recoveryHint': 'The original session was verified. If automatic resume failed, run this in the terminal:',
+'chat.managedGuide.copyRecovery': 'Copy recovery command',
 'chat.approval.request': 'Codex needs confirmation',
 'chat.approval.file': 'Allow these file changes?',
 'chat.approval.command': 'Allow this command to run?',

@@ -224,6 +224,7 @@ export function createBuiltinAgentRuntime({
         }) : undefined;
       const conversationActivation = codexActivationCommands
         ? createCodexConversationActivationController({
+          app: codexApp,
           panes: context.panes, process: context.process, commands: codexActivationCommands,
         }) : undefined;
       const inbox = new NativeInboxCoordinator({

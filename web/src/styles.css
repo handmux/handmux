@@ -2686,6 +2686,9 @@ button.cmd-text { background: none; border: none; text-align: left; }
 @keyframes codex-managed-pulse { 50% { opacity: .48; transform: scale(.94); } }
 .codex-managed-guide h2 { margin: 0 0 8px; font-size: 20px; line-height: 1.25; }
 .codex-managed-guide p { max-width: 330px; margin: 0 0 18px; color: var(--ct-muted); font-size: 14px; line-height: 1.55; }
+.codex-managed-guide-recovery { width: min(100%, 360px); margin: 0 0 16px; color: var(--ct-muted); font-size: 13px; line-height: 1.45; }
+.codex-managed-guide-recovery code { display: block; margin: 8px 0; padding: 10px 12px; overflow-wrap: anywhere; user-select: text; border-radius: 10px; background: var(--ct-chip); color: var(--ct-ink); text-align: left; }
+.codex-managed-guide-recovery button { min-height: 44px; padding: 0 16px; border: 0; border-radius: 12px; background: var(--ct-chip); color: var(--ct-ink); font: inherit; }
 .codex-managed-guide-primary, .codex-managed-guide-secondary {
   width: min(100%, 330px); min-height: 48px; border: 0; border-radius: 13px;
   font-size: 16px; font-weight: 650; flex: 0 0 auto; touch-action: manipulation;

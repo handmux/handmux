@@ -131,6 +131,8 @@ import type { AgentConversationIdentity } from './hooks/useAgentConversation.js'
 import {
   activationRunFor,
   activationTargetMatches,
+  conversationIdentityForActivation,
+  invalidateRememberedConversationOnTakeover,
   useConversationActivationTarget,
 } from './conversationActivationTarget.js';
 import {
@@ -1769,6 +1771,16 @@ export default function App() {
   )) ?? null;
   const conversationEnabled = chatAgent
     ? isAgentConversationEnabled(chatAgent) : false;
+  // Probe sessionless Codex ownership even while a remembered managed conversation remains visible.
+  // Only an explicit activation descriptor proves that the current process is safe to replace.
+  const chatLens = lens === 'chat' && conversationEnabled;
+  const conversationActivation = useAgentConversationActivation(
+    chatLens && currentAgentDescriptor?.capabilities.conversationActivation === true
+      ? activationRun : null,
+    chatLens && currentAgentDescriptor?.capabilities.conversationActivation === true,
+    discoverActivatedRun,
+    onAuthFail,
+  );
   const conversationIdentityKey = current?.paneId && chatAgent
     ? `${current.paneId}\0${chatAgent}` : null;
   if (conversationIdentityKey && currentAgentRun?.sessionId) {
@@ -1778,15 +1790,31 @@ export default function App() {
       sessionId: currentAgentRun.sessionId,
     });
   }
-  // A current Runtime lease is authoritative: a newly started raw run must never inherit the previous
-  // managed session remembered for this pane. The remembered identity is only a discovery-gap fallback.
+  const activationOwner = conversationActivation.owner;
+  const takeoverAvailable = !!currentAgentRun && !!activationOwner
+    && conversationActivation.status === 'ready'
+    && conversationActivation.descriptor !== null
+    && activationOwner.agentId === currentAgentRun.agentId
+    && activationOwner.paneId === currentAgentRun.paneId
+    && activationOwner.runId === currentAgentRun.runId;
+  invalidateRememberedConversationOnTakeover(
+    conversationIdentityByPaneRef.current,
+    conversationIdentityKey,
+    currentAgentRun,
+    takeoverAvailable,
+  );
+  const rememberedConversationIdentity = conversationIdentityKey
+    ? conversationIdentityByPaneRef.current.get(conversationIdentityKey) ?? null : null;
+  // A sessionless process is only authoritatively native/unmanaged after its activation descriptor is
+  // available. While the managed App Server is restarting, keep the last conversation mounted and let
+  // its normal connection state report the outage instead of replacing it with a takeover screen.
   const currentConversationIdentity = activationPending && !currentAgentRun?.sessionId
     ? null
-    : currentAgentRun
-      ? currentAgentRun.sessionId
-        ? conversationIdentityByPaneRef.current.get(conversationIdentityKey!) ?? null : null
-      : conversationIdentityKey
-        ? conversationIdentityByPaneRef.current.get(conversationIdentityKey) ?? null : null;
+    : conversationIdentityForActivation(
+      currentAgentRun,
+      rememberedConversationIdentity,
+      takeoverAvailable,
+    );
   // Conversation capability owns one normalized Web Surface for every Agent. Provider identity stops at
   // Runtime discovery; Timeline and Composer never select a provider-specific implementation.
   const normalizedConversationRun = currentAgentDescriptor?.capabilities.conversation === true
@@ -1800,7 +1828,6 @@ export default function App() {
       || (currentAgentDescriptor.capabilities.conversationActivation === true && !!activationRun));
   // `lens` is the sole view owner. Availability controls only whether a terminal pane can opt into chat;
   // it must never evict an already selected chat view during a transient discovery or connection outage.
-  const chatLens = lens === 'chat' && conversationEnabled;
   useEffect(() => {
     if (lens !== 'chat' || conversationEnabled || !current?.paneId) return;
     setLens('terminal');
@@ -1828,15 +1855,6 @@ export default function App() {
     onAuthFail,
     refreshAgentRun,
     chatLens ? normalizedConversationIdentity : null,
-  );
-  const conversationActivation = useAgentConversationActivation(
-    chatLens && !normalizedConversationIdentity
-      && currentAgentDescriptor?.capabilities.conversationActivation === true
-      ? activationRun : null,
-    chatLens && !normalizedConversationIdentity
-      && currentAgentDescriptor?.capabilities.conversationActivation === true,
-    discoverActivatedRun,
-    onAuthFail,
   );
   const agentInteraction = useAgentInteraction(
     chatLens && normalizedConversationRun ? normalizedConversationRun : null,

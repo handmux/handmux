@@ -482,6 +482,8 @@ export default {
 'chat.managedGuide.goneTitle': '这个 Codex 已经变化',
 'chat.managedGuide.goneHint': '为避免结束错误的进程，Handmux 没有继续操作。请前往终端查看当前状态。',
 'chat.managedGuide.failedHint': '托管启动未能完成。你可以重试，或前往终端查看当前状态。',
+'chat.managedGuide.recoveryHint': '原会话已经确认；如果自动恢复失败，请在终端运行：',
+'chat.managedGuide.copyRecovery': '复制恢复命令',
 'chat.approval.request': 'Codex 请求确认',
 'chat.approval.file': '允许修改文件？',
 'chat.approval.command': '允许运行这条命令？',

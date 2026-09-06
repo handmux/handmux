@@ -167,12 +167,22 @@ describe('Agent app facade routes', () => {
     }).expect(409, { error: 'stale agent run', code: 'stale_run' });
     activate.mockRejectedValueOnce(new ConversationActivationError(
       'Conversation activation could not finish; continue in the terminal or try again', 'unavailable',
+      {
+        kind: 'codex_resume',
+        sessionId: '12345678-1234-1234-1234-123456789abc',
+        command: 'handmux codex resume 12345678-1234-1234-1234-123456789abc',
+      },
     ));
     const failure = await request(app(supported)).post('/agents/conversation-activation')
       .send({ run: h.lease.ref }).expect(503);
     expect(failure.body).toEqual({
       error: 'Conversation activation could not finish; continue in the terminal or try again',
       code: 'unavailable',
+      recovery: {
+        kind: 'codex_resume',
+        sessionId: '12345678-1234-1234-1234-123456789abc',
+        command: 'handmux codex resume 12345678-1234-1234-1234-123456789abc',
+      },
     });
     expect(JSON.stringify(failure.body)).not.toContain('/Users/private');
   });
@@ -236,6 +246,24 @@ describe('Agent app facade routes', () => {
         });
       }
     }
+  });
+
+  it('returns verified recovery metadata when activation succeeds before discovery catches up', async () => {
+    const h = runtime();
+    const recovery = {
+      kind: 'codex_resume' as const,
+      sessionId: '12345678-1234-1234-1234-123456789abc',
+      command: 'handmux codex resume 12345678-1234-1234-1234-123456789abc',
+    };
+    const supported = {
+      ...h.value,
+      conversationActivation: {
+        describe: vi.fn(),
+        activate: vi.fn(async () => ({ recovery })),
+      },
+    } as unknown as typeof h.value;
+    await request(app(supported)).post('/agents/conversation-activation').send({ run: h.lease.ref })
+      .expect(202, { accepted: true, recovery });
   });
 
   it('reads and updates model control only through a current run lease', async () => {

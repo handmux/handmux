@@ -76,6 +76,14 @@ describe('TmuxPaneOutputCapture', () => {
       'To continue this session, run codex resume, then select 标题 '
       + '(12345678-1234-1234-1234-123456789abc)\r\n',
     );
+    const frames = capture.outputFrames();
+    expect(frames?.map((frame) => frame.toString('utf8'))).toEqual([
+      'To continue this session, run codex res',
+      'ume, then select 标题 (12345678-1234-1234-1234-',
+      '123456789abc)\r\n',
+    ]);
+    if (frames?.[0]) frames[0][0] = 0x58;
+    expect(capture.output()?.toString('utf8')).toMatch(/^To continue/);
     capture.close();
   });
 
@@ -115,8 +123,10 @@ describe('TmuxPaneOutputCapture', () => {
     child.lines('%begin 2 2 1', '%end 2 2 1', '%output %9 12345');
     await interrupted;
     expect(capture.output()).toBeNull();
+    expect(capture.outputFrames()).toBeNull();
     child.emit('exit', 1);
     expect(capture.output()).toBeNull();
+    expect(capture.outputFrames()).toBeNull();
     capture.close();
   });
 

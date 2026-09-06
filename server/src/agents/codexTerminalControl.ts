@@ -1,5 +1,5 @@
 export interface CodexTerminalControlApp {
-  discover(pane: string): Promise<{ managed: boolean; threadId?: string | null } | null>;
+  discover(pane: string): Promise<{ managed: boolean | null; threadId?: string | null } | null>;
 }
 
 export interface CodexTerminalControlCommands {

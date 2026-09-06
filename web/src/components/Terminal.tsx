@@ -35,6 +35,7 @@ import type { ConnectionTelemetryState } from '../connectionTelemetry.js';
 import { streamPaintDelay } from '../streamPaintCadence.js';
 import { useBackButton } from '../hooks/useBackButton.js';
 import type { TerminalCursor } from '../terminalViewport.js';
+import { copyText } from '../clipboard.js';
 
 type TerminalTransportFallback = 'network' | 'unavailable';
 type TerminalInputFailure = 'pane-missing' | 'disconnected';
@@ -1675,22 +1676,7 @@ const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Terminal({
   const doCopy = async () => {
     const term = termRef.current;
     const text = trimCopy(term?.getSelection() ?? '');
-    if (text) {
-      let ok = false;
-      if (navigator.clipboard && window.isSecureContext) {
-        try { await navigator.clipboard.writeText(text); ok = true; } catch { /* fall through */ }
-      }
-      if (!ok) {
-        const ta = document.createElement('textarea');
-        ta.value = text;
-        ta.style.cssText = 'position:fixed;top:0;left:0;opacity:0';
-        document.body.appendChild(ta);
-        ta.focus();
-        ta.select();
-        try { document.execCommand('copy'); } catch { /* best effort */ }
-        document.body.removeChild(ta);
-      }
-    }
+    if (text) await copyText(text);
     clearSelectionUI();
   };
 

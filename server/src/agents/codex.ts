@@ -56,14 +56,50 @@ export function codexExitSessionId(text: unknown): string | null {
 
 const OSC_SEQUENCE = /\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g;
 const CSI_SEQUENCE = /\x1b\[[0-?]*[ -/]*[@-~]/g;
+const MAX_CODEX_EXIT_FRAMES = 4_096;
+const MAX_CODEX_EXIT_LINE_BYTES = 8 * 1_024;
 
-export function codexExitOutputSessionId(output: unknown): string | null {
+function collectCodexExitOutputCandidates(output: unknown, candidates: Set<string>): void {
   const plain = String(output || '').replace(OSC_SEQUENCE, '').replace(CSI_SEQUENCE, '');
-  const lines = plain.split(/\r?\n/);
-  const candidates = new Set<string>();
-  for (const line of lines) {
+  for (const line of plain.split(/\r?\n/)) {
     const candidate = codexExitSessionId(line);
     if (candidate) candidates.add(candidate);
+  }
+}
+
+export function codexExitOutputSessionId(output: unknown): string | null {
+  const candidates = new Set<string>();
+  collectCodexExitOutputCandidates(output, candidates);
+  return candidates.size === 1 ? [...candidates][0] ?? null : null;
+}
+
+// A tmux control-mode frame is also a trustworthy output boundary. Codex can emit its exit notice in a
+// fresh frame without first writing CR/LF after the preceding TUI status, and tmux can split that notice
+// across later frames. Test only the first bounded logical line from each real frame boundary, plus normal
+// CR/LF-delimited lines from the full stream; never scan for the prefix at an arbitrary text offset.
+export function codexExitOutputFramesSessionId(frames: readonly Buffer[]): string | null {
+  if (!frames.length || frames.length > MAX_CODEX_EXIT_FRAMES) return null;
+  const candidates = new Set<string>();
+  collectCodexExitOutputCandidates(Buffer.concat(frames), candidates);
+  for (let start = 0; start < frames.length; start += 1) {
+    const chunks: Buffer[] = [];
+    let bytes = 0;
+    let complete = false;
+    for (let index = start; index < frames.length && bytes < MAX_CODEX_EXIT_LINE_BYTES; index += 1) {
+      const frame = frames[index];
+      if (!frame) continue;
+      const newline = frame.indexOf(0x0a);
+      const available = newline < 0 ? frame.length : newline + 1;
+      const take = Math.min(available, MAX_CODEX_EXIT_LINE_BYTES - bytes);
+      if (take > 0) {
+        chunks.push(frame.subarray(0, take));
+        bytes += take;
+      }
+      if (newline >= 0 && take === available) { complete = true; break; }
+      if (take < available) break;
+      if (index === frames.length - 1) complete = true;
+    }
+    if (complete) collectCodexExitOutputCandidates(Buffer.concat(chunks, bytes), candidates);
   }
   return candidates.size === 1 ? [...candidates][0] ?? null : null;
 }

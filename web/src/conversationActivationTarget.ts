@@ -24,6 +24,28 @@ export function activationRunFor(
   return target?.paneId === paneId ? target.run : currentRun;
 }
 
+export function conversationIdentityForActivation<Identity extends {
+  agentId: string;
+  paneId: string;
+  sessionId: string;
+}>(
+  currentRun: AgentRunRef | null,
+  remembered: Identity | null,
+  takeoverAvailable: boolean,
+): Identity | null {
+  if (!currentRun || currentRun.sessionId) return remembered;
+  return takeoverAvailable ? null : remembered;
+}
+
+export function invalidateRememberedConversationOnTakeover<Identity>(
+  identities: Map<string, Identity>,
+  key: string | null,
+  currentRun: AgentRunRef | null,
+  takeoverAvailable: boolean,
+): void {
+  if (key && currentRun && !currentRun.sessionId && takeoverAvailable) identities.delete(key);
+}
+
 interface ActivationTargetContext {
   paneId: string | null;
   rootView: 'session' | 'project';

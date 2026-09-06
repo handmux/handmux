@@ -1,5 +1,7 @@
 import { requestJson } from './apiRequest.js';
 import type { AgentRunRef } from './agentCatalog.js';
+import { parseApiRecovery } from './apiErrors.js';
+import type { ApiRecovery } from './apiErrors.js';
 
 export interface ConversationActivationDescriptor {
   effect: 'replace-process-preserve-session';
@@ -35,7 +37,10 @@ export async function describeConversationActivation(
   return { effect: 'replace-process-preserve-session' };
 }
 
-export async function activateConversation(run: AgentRunRef, signal?: AbortSignal): Promise<void> {
+export async function activateConversation(
+  run: AgentRunRef,
+  signal?: AbortSignal,
+): Promise<ApiRecovery | null> {
   const response = record(await requestJson('/api/agents/conversation-activation', {
     method: 'POST',
     body: JSON.stringify({ run }),
@@ -43,4 +48,5 @@ export async function activateConversation(run: AgentRunRef, signal?: AbortSigna
     ...(signal ? { signal } : {}),
   }));
   if (response?.accepted !== true) throw new Error('Conversation activation was not accepted');
+  return parseApiRecovery(response.recovery);
 }

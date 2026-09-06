@@ -15,7 +15,7 @@ import type {
 import type { AgentRunLease } from '../agent-runtime/run.js';
 
 interface CodexInteractionApp {
-  discover(pane: string): Promise<{ managed: boolean; threadId?: string | null } | null>;
+  discover(pane: string): Promise<{ managed: boolean | null; threadId?: string | null } | null>;
   observeInteractions(
     pane: string,
     threadId: string,

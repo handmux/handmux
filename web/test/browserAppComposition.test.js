@@ -52,8 +52,10 @@ describe('built-in browser App composition', () => {
     expect(source).toContain("if (!enabled && agentId === chatAgent && current?.paneId)");
   });
 
-  it('treats a current raw run as authoritative over a remembered managed identity', () => {
-    expect(source).toMatch(/const currentConversationIdentity = activationPending[\s\S]*?currentAgentRun[\s\S]*?currentAgentRun\.sessionId[\s\S]*?: null/);
+  it('keeps a remembered managed identity until takeover is authoritatively available', () => {
+    expect(source).toContain('conversationIdentityForActivation(');
+    expect(source).toContain('invalidateRememberedConversationOnTakeover(');
+    expect(source).toContain("conversationActivation.status === 'ready'");
     expect(source).toContain('waiting={currentKind === \'permission\'}');
   });
 

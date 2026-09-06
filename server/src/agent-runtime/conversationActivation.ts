@@ -6,16 +6,47 @@ export interface ConversationActivationDescriptor {
   effect: ConversationActivationEffect;
 }
 
+export interface ConversationActivationRecovery {
+  kind: 'codex_resume';
+  sessionId: string;
+  command: string;
+}
+
+const CODEX_SESSION_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function validRecovery(value: unknown): value is ConversationActivationRecovery {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const recovery = value as Partial<ConversationActivationRecovery>;
+  return recovery.kind === 'codex_resume'
+    && typeof recovery.sessionId === 'string'
+    && CODEX_SESSION_ID_RE.test(recovery.sessionId)
+    && recovery.command === `handmux codex resume ${recovery.sessionId}`;
+}
+
+function sameRecovery(
+  first: ConversationActivationRecovery,
+  second: ConversationActivationRecovery,
+): boolean {
+  return first.kind === second.kind
+    && first.sessionId === second.sessionId
+    && first.command === second.command;
+}
+
 export interface AgentConversationActivationControllerV1 {
   apiVersion: 1;
   describe(run: AgentRunLease): Promise<ConversationActivationDescriptor | null>;
-  activate(run: AgentRunLease, signal: AbortSignal): Promise<void>;
+  activate(
+    run: AgentRunLease,
+    signal: AbortSignal,
+    progress: { recovery(value: ConversationActivationRecovery): void },
+  ): Promise<{ recovery?: ConversationActivationRecovery } | void>;
 }
 
 export class ConversationActivationError extends Error {
   constructor(
     message: string,
     readonly code: 'unsupported' | 'unavailable' | 'in_progress' | 'contract_violation',
+    readonly recovery?: ConversationActivationRecovery,
   ) {
     super(message);
     this.name = 'ConversationActivationError';
@@ -54,7 +85,10 @@ export class AgentConversationActivationService {
     return structuredClone(value);
   }
 
-  async activate(run: AgentRunLease, signal?: AbortSignal): Promise<void> {
+  async activate(
+    run: AgentRunLease,
+    signal?: AbortSignal,
+  ): Promise<{ recovery?: ConversationActivationRecovery } | undefined> {
     const controller = this.#controllers.get(run.ref.agentId);
     if (!controller) throw new ConversationActivationError('Conversation activation unsupported', 'unsupported');
     if (run.signal.aborted) {
@@ -65,6 +99,25 @@ export class AgentConversationActivationService {
       throw new ConversationActivationError('Conversation activation is already in progress', 'in_progress');
     }
     this.#active.add(key);
+    let reportedRecovery: ConversationActivationRecovery | undefined;
+    const progress = {
+      recovery: (value: ConversationActivationRecovery): void => {
+        if (!validRecovery(value)) {
+          throw new ConversationActivationError(
+            'Invalid Conversation activation recovery',
+            'contract_violation',
+          );
+        }
+        const next = structuredClone(value);
+        if (reportedRecovery && !sameRecovery(reportedRecovery, next)) {
+          throw new ConversationActivationError(
+            'Conversation activation recovery changed',
+            'contract_violation',
+          );
+        }
+        reportedRecovery = next;
+      },
+    };
     const operation = new AbortController();
     const cancel = (): void => operation.abort(signal?.reason ?? new Error('Activation request cancelled'));
     signal?.addEventListener('abort', cancel, { once: true });
@@ -75,12 +128,32 @@ export class AgentConversationActivationService {
       const aborted = new Promise<never>((_resolve, reject) => {
         operation.signal.addEventListener('abort', () => reject(operation.signal.reason), { once: true });
       });
-      await Promise.race([controller.activate(run, operation.signal), aborted]);
+      const result = await Promise.race([controller.activate(run, operation.signal, progress), aborted]);
+      if (!result) return reportedRecovery ? { recovery: reportedRecovery } : undefined;
+      if (!validRecovery(result.recovery)
+        || (reportedRecovery && !sameRecovery(reportedRecovery, result.recovery))) {
+        throw new ConversationActivationError(
+          'Invalid Conversation activation recovery',
+          'contract_violation',
+        );
+      }
+      return { recovery: structuredClone(result.recovery) };
     } catch (error) {
-      if (error instanceof ConversationActivationError) throw error;
+      if (error instanceof ConversationActivationError) {
+        if (error.recovery !== undefined && (!validRecovery(error.recovery)
+          || (reportedRecovery !== undefined && !sameRecovery(reportedRecovery, error.recovery)))) {
+          throw new ConversationActivationError(
+            'Invalid Conversation activation recovery',
+            'contract_violation',
+          );
+        }
+        if (error.recovery !== undefined || reportedRecovery === undefined) throw error;
+        throw new ConversationActivationError(error.message, error.code, reportedRecovery);
+      }
       throw new ConversationActivationError(
         'Conversation activation could not finish; continue in the terminal or try again',
         'unavailable',
+        reportedRecovery,
       );
     } finally {
       clearTimeout(timer);

@@ -745,6 +745,7 @@ describe('AgentRuntime composition root', () => {
           return {
             inbox: true,
             conversationActivation: createCodexConversationActivationController({
+              app: { discover: vi.fn(async () => ({ managed: false, threadId: null })) },
               panes,
               process: { inspectForeground: async () => identity },
               commands: {

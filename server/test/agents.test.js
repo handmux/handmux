@@ -7,7 +7,7 @@ import { resolveVersionedComms } from '../src/agents/claude.js';
 import { resolveCodexComms } from '../src/agents/codex.js';
 import {
   resolveCodexRollout, resolveCodexSession, rolloutSessionId, codexUserSnippet,
-  codexExitSessionId, codexExitOutputSessionId, codexSessionCwd,
+  codexExitSessionId, codexExitOutputSessionId, codexExitOutputFramesSessionId, codexSessionCwd,
 } from '../src/agents/codex.js';
 import { parseAgentProcs } from '../src/agents/scanUtils.js';
 import { scanOrphans, takeoverOrphan } from '../src/orphans.js';
@@ -96,6 +96,39 @@ describe('codex rollout parsing', () => {
       + 'To continue this session, run \x1b[36mcodex resume, then select DataAgent '
       + `(01a03c7e-cc85-7721-808e-11b508c38378)\x1b[39m\r\n`,
     )).toBe('01a03c7e-cc85-7721-808e-11b508c38378');
+  });
+  it('preserves tmux frame boundaries when TUI shutdown omits a line break before the exit notice', () => {
+    const id = '01a03c7e-cc85-7721-808e-11b508c38378';
+    const frames = [
+      Buffer.from('\x1b[2K\x1b[1GShutting down...'),
+      Buffer.from('\x1b[2K\x1b[1G'),
+      Buffer.from('\x1b[?25h'),
+      Buffer.from('To continue this session, run \x1b[36mcodex res'),
+      Buffer.from(`ume, then select DataAgent (${id})\x1b[39m\r\n`),
+      Buffer.from('$ '),
+    ];
+    expect(codexExitOutputSessionId(Buffer.concat(frames))).toBeNull();
+    expect(codexExitOutputFramesSessionId(frames)).toBe(id);
+  });
+  it('never treats visible text inside a frame as an exit boundary and rejects conflicting frame notices', () => {
+    const first = '01a03c7e-cc85-7721-808e-11b508c38378';
+    const second = '12345678-1234-1234-1234-123456789abc';
+    expect(codexExitOutputFramesSessionId([
+      Buffer.from('status: To continue this session, run codex res'),
+      Buffer.from(`ume ${first}\r\n`),
+    ])).toBeNull();
+    expect(codexExitOutputFramesSessionId([
+      Buffer.from(`To continue this session, run codex resume ${first}\r\n`),
+      Buffer.from(`To continue this session, run codex resume ${second}\r\n`),
+    ])).toBeNull();
+  });
+  it('rejects a frame-boundary line whose terminator falls beyond the parsing budget', () => {
+    const id = '01a03c7e-cc85-7721-808e-11b508c38378';
+    const start = 'To continue this session, run codex resume, then select ';
+    const end = ` (${id})`;
+    const notice = `${start}${'x'.repeat(8_192 - Buffer.byteLength(start) - Buffer.byteLength(end))}${end}`;
+    expect(Buffer.byteLength(notice)).toBe(8_192);
+    expect(codexExitOutputFramesSessionId([Buffer.from(`${notice}trailing\r\n`)])).toBeNull();
   });
   it('rejects non-resume ids and output with multiple different strict notices', () => {
     const id = '01a03833-5b63-7d50-b090-5a97df670638';

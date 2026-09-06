@@ -3390,9 +3390,18 @@ export function createCodexAppServer({
       return { client, thread: await client.readThread(threadId) };
     },
     async discover(pane: string) {
-      const observed = await observe(pane);
-      if (!observed) return { managed: false, threadId: null };
-      return { managed: true, threadId: observed.threadId };
+      // Absence of the pane-owned socket is the only authoritative unmanaged verdict. If the
+      // socket exists but its App Server is still starting or reconnecting, ownership is unknown;
+      // callers must not offer to replace that Codex process as though it were native/unmanaged.
+      if (!exists(codexAppSocketPath(pane, home))) return { managed: false, threadId: null };
+      try {
+        const observed = await observe(pane);
+        return observed
+          ? { managed: true, threadId: observed.threadId }
+          : { managed: null, threadId: null };
+      } catch {
+        return { managed: null, threadId: null };
+      }
     },
     async inboxStates(livePanes: LivePane[] = []) {
       const out: Record<string, UnknownRecord> = {};

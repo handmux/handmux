@@ -3,6 +3,8 @@ import { describe, expect, it } from 'vitest';
 import {
   activationRunFor,
   activationTargetMatches,
+  conversationIdentityForActivation,
+  invalidateRememberedConversationOnTakeover,
   useConversationActivationTarget,
 } from './conversationActivationTarget.js';
 
@@ -32,6 +34,20 @@ function activationTargetHook() {
 }
 
 describe('Conversation activation target', () => {
+  it('keeps a remembered managed conversation until takeover is authoritatively available', () => {
+    const remembered = { agentId: 'codex', paneId: '%1', sessionId: 'session-1' };
+    const sessionless = { agentId: 'codex', paneId: '%1', runId: 'run-2' };
+    expect(conversationIdentityForActivation(sessionless, remembered, false)).toEqual(remembered);
+    expect(conversationIdentityForActivation(sessionless, remembered, true)).toBeNull();
+    expect(conversationIdentityForActivation(sessionless, null, false)).toBeNull();
+
+    const identities = new Map([['%1\0codex', remembered]]);
+    invalidateRememberedConversationOnTakeover(identities, '%1\0codex', sessionless, true);
+    expect(identities.has('%1\0codex')).toBe(false);
+    expect(conversationIdentityForActivation(sessionless, identities.get('%1\0codex') ?? null, false))
+      .toBeNull();
+  });
+
   it('keeps the confirmed source run across the shell and a replacement sessionless run', () => {
     expect(activationTargetMatches(target, '%1', 'codex')).toBe(true);
     expect(activationTargetMatches(target, '%2', 'codex')).toBe(false);
