@@ -2,11 +2,18 @@ import type { ReadonlyPaneSource, ProcessContext } from '../agent-runtime/adapte
 import type { ForegroundProcessIdentity } from '../agent-runtime/adapter.js';
 import type { AgentConversationActivationControllerV1 } from '../agent-runtime/conversationActivation.js';
 import { serializePaneInput } from '../paneInput.js';
-import { codex, codexExitSessionId } from './codex.js';
+import { codex, codexExitOutputSessionId } from './codex.js';
+
+export interface CodexActivationOutputCapture {
+  sendKey(key: string): Promise<void>;
+  output(): Buffer | null;
+  close(): void;
+}
 
 export interface CodexActivationCommands {
-  sendKey(pane: string, key: string): Promise<unknown>;
-  capturePlainJoined(pane: string): Promise<string>;
+  openOutputCapture(pane: string): Promise<CodexActivationOutputCapture>;
+  paneCurrentPath(pane: string): Promise<string>;
+  sessionCwd(sessionId: string): Promise<string | null>;
   runPaneCommand(pane: string, command: string): Promise<unknown>;
 }
 
@@ -15,25 +22,6 @@ const SHELLS = new Set(['sh', 'bash', 'zsh', 'fish', 'dash', 'ksh', 'tcsh']);
 
 function throwIfAborted(signal: AbortSignal): void {
   if (signal.aborted) throw signal.reason instanceof Error ? signal.reason : new Error('Activation cancelled');
-}
-
-function logicalLines(capture: string): string[] {
-  const lines = capture.split(/\r?\n/);
-  while (lines.at(-1)?.trim() === '') lines.pop();
-  return lines;
-}
-
-export function joinedCaptureDelta(baseline: string, current: string): string | null {
-  const before = logicalLines(baseline);
-  const after = logicalLines(current);
-  for (let overlap = Math.min(before.length, after.length); overlap > 0; overlap -= 1) {
-    const suffix = before.slice(before.length - overlap);
-    if (!suffix.some((line) => line.trim())) continue;
-    if (suffix.every((line, index) => line === after[index])) {
-      return after.slice(overlap).join('\n');
-    }
-  }
-  return null;
 }
 
 export function createCodexConversationActivationController({
@@ -47,8 +35,8 @@ export function createCodexConversationActivationController({
   commands: CodexActivationCommands;
   wait?: (ms: number) => Promise<void>;
 }): AgentConversationActivationControllerV1 {
-  if (!panes || !process || !commands || typeof commands.sendKey !== 'function'
-    || typeof commands.capturePlainJoined !== 'function'
+  if (!panes || !process || !commands || typeof commands.openOutputCapture !== 'function'
+    || typeof commands.paneCurrentPath !== 'function' || typeof commands.sessionCwd !== 'function'
     || typeof commands.runPaneCommand !== 'function') {
     throw new TypeError('Codex Conversation activation requires pane control');
   }
@@ -89,61 +77,74 @@ export function createCodexConversationActivationController({
           ? await codexIdentity(paneId) : null;
         throwIfAborted(signal);
         if (!original) throw new Error('The Agent run changed before Conversation activation');
-        const baseline = await commands.capturePlainJoined(paneId);
-        // Authorization is bound to the verified run above. Exiting that exact process intentionally revokes
-        // its lease, so subsequent checks bind recovery to the shell that replaced it.
-        let exited = false;
-        let shell: ForegroundProcessIdentity | null = null;
-        for (let press = 0; press < 2 && !exited; press += 1) {
+        const originalCwd = await commands.paneCurrentPath(paneId);
+        throwIfAborted(signal);
+        if (!originalCwd) throw new Error('The Agent working directory is unavailable');
+        const outputCapture = await commands.openOutputCapture(paneId);
+        const abortCapture = (): void => outputCapture.close();
+        signal.addEventListener('abort', abortCapture, { once: true });
+        try {
           throwIfAborted(signal);
-          const beforePress = await codexIdentity(paneId);
-          if (!beforePress || !sameProcess(original, beforePress)) {
-            throw new Error('The Agent process changed before Conversation activation');
-          }
-          throwIfAborted(signal);
-          await commands.sendKey(paneId, 'C-c');
-          for (let attempt = 0; attempt < 10; attempt += 1) {
-            await wait(500);
+          // Authorization is bound to the verified run above. Exiting that exact process intentionally revokes
+          // its lease, so subsequent checks bind recovery to the shell that replaced it.
+          let exited = false;
+          let shell: ForegroundProcessIdentity | null = null;
+          for (let press = 0; press < 2 && !exited; press += 1) {
             throwIfAborted(signal);
-            if (!await pane(paneId)) throw new Error('The pane closed during Conversation activation');
-            const currentIdentity = await codexIdentity(paneId);
-            if (!currentIdentity) {
-              shell = await shellIdentity(paneId);
-              if (!shell) throw new Error('The pane did not return to the expected shell');
-              exited = true;
-              break;
+            const beforePress = await codexIdentity(paneId);
+            if (!beforePress || !sameProcess(original, beforePress)) {
+              throw new Error('The Agent process changed before Conversation activation');
             }
-            if (!sameProcess(original, currentIdentity)) {
-              throw new Error('The Agent process changed during Conversation activation');
+            throwIfAborted(signal);
+            // This exact control-mode connection sends C-c and arms collection synchronously at that
+            // command's %end. Output rendered before the interrupt can never satisfy freshness.
+            await outputCapture.sendKey('C-c');
+            for (let attempt = 0; attempt < 10; attempt += 1) {
+              await wait(500);
+              throwIfAborted(signal);
+              if (!await pane(paneId)) throw new Error('The pane closed during Conversation activation');
+              const currentIdentity = await codexIdentity(paneId);
+              if (!currentIdentity) {
+                shell = await shellIdentity(paneId);
+                if (!shell) throw new Error('The pane did not return to the expected shell');
+                exited = true;
+                break;
+              }
+              if (!sameProcess(original, currentIdentity)) {
+                throw new Error('The Agent process changed during Conversation activation');
+              }
             }
           }
-        }
-        if (!exited || !shell) throw new Error('Codex did not exit; close any open panel in the terminal and try again');
-        let sessionId: string | null = null;
-        for (let attempt = 0; attempt < 20; attempt += 1) {
-          throwIfAborted(signal);
-          const beforeCapture = await shellIdentity(paneId);
-          if (!beforeCapture || !sameProcess(shell, beforeCapture)) {
-            throw new Error('The pane shell changed during Conversation activation');
-          }
-          try {
-            const current = await commands.capturePlainJoined(paneId);
-            const delta = joinedCaptureDelta(baseline, current);
-            const candidate = delta === null ? null : codexExitSessionId(delta);
+          if (!exited || !shell) throw new Error('Codex did not exit; close any open panel in the terminal and try again');
+          let sessionId: string | null = null;
+          for (let attempt = 0; attempt < 20; attempt += 1) {
+            throwIfAborted(signal);
+            const beforeRead = await shellIdentity(paneId);
+            if (!beforeRead || !sameProcess(shell, beforeRead)) {
+              throw new Error('The pane shell changed during Conversation activation');
+            }
+            const current = outputCapture.output();
+            const candidate = current === null ? null : codexExitOutputSessionId(current.toString('utf8'));
             if (codex.sessions.isId(candidate)) { sessionId = candidate; break; }
-          } catch { throw new Error('The pane closed during Conversation activation'); }
-          await wait(100);
+            await wait(100);
+          }
+          if (!sessionId) throw new Error('Codex did not expose a resumable session; continue in the terminal');
+          if (await commands.sessionCwd(sessionId) !== originalCwd) {
+            throw new Error('Codex did not expose the current pane session; continue in the terminal');
+          }
+          const resume = codex.sessions.managedResumeCmd?.(sessionId);
+          if (!resume) throw new Error('Managed Conversation activation is unavailable');
+          throwIfAborted(signal);
+          const beforeResume = await shellIdentity(paneId);
+          if (!beforeResume || !sameProcess(shell, beforeResume)) {
+            throw new Error('The pane shell changed before Conversation activation');
+          }
+          throwIfAborted(signal);
+          await commands.runPaneCommand(paneId, resume);
+        } finally {
+          signal.removeEventListener('abort', abortCapture);
+          outputCapture.close();
         }
-        if (!sessionId) throw new Error('Codex did not expose a resumable session; continue in the terminal');
-        const resume = codex.sessions.managedResumeCmd?.(sessionId);
-        if (!resume) throw new Error('Managed Conversation activation is unavailable');
-        throwIfAborted(signal);
-        const beforeResume = await shellIdentity(paneId);
-        if (!beforeResume || !sameProcess(shell, beforeResume)) {
-          throw new Error('The pane shell changed before Conversation activation');
-        }
-        throwIfAborted(signal);
-        await commands.runPaneCommand(paneId, resume);
       });
     },
   };

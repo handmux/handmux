@@ -90,9 +90,9 @@ describe('Conversation activation', () => {
     const shell = { pid: 20, startedAt: 200, tty: 'ttys001', executable: '/bin/zsh' };
     let identity = original;
     let command = 'codex';
-    let captures = 0;
     const current = lease();
     const runPaneCommand = vi.fn(async () => {});
+    const close = vi.fn();
     const controller = createCodexConversationActivationController({
       panes: {
         list: vi.fn(async () => [{
@@ -102,18 +102,22 @@ describe('Conversation activation', () => {
       },
       process: { inspectForeground: vi.fn(async () => identity) },
       commands: {
-        sendKey: vi.fn(async () => {
-          identity = shell;
-          command = 'zsh';
-          current.abort.abort(new Error('original process exited'));
-        }),
-        capturePlainJoined: vi.fn(async () => {
-          captures += 1;
-          if (captures === 1) return 'scrolled line\nshared baseline line';
-          return 'shared baseline line\nTo continue this session, run codex resume, then select '
+        paneCurrentPath: vi.fn(async () => '/repo'),
+        sessionCwd: vi.fn(async () => '/repo'),
+        openOutputCapture: vi.fn(async () => ({
+          sendKey: vi.fn(async () => {
+            identity = shell;
+            command = 'zsh';
+            current.abort.abort(new Error('original process exited'));
+          }),
+          output: vi.fn(() => Buffer.from(
+            'Token usage: total=10 input=9 output=1\r\n'
+            + 'To continue this session, run codex resume, then select '
             + '调查标题 (aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa) '
-            + '(12345678-1234-1234-1234-123456789abc)';
-        }),
+            + '(12345678-1234-1234-1234-123456789abc)\r\n',
+          )),
+          close,
+        })),
         runPaneCommand,
       },
       wait: vi.fn(async () => {}),
@@ -124,16 +128,15 @@ describe('Conversation activation', () => {
     expect(runPaneCommand).toHaveBeenCalledWith(
       '%1', 'handmux codex resume 12345678-1234-1234-1234-123456789abc',
     );
+    expect(close).toHaveBeenCalledOnce();
   });
 
-  it('rejects a preexisting fake exit notice when no new notice was appended', async () => {
+  it('rejects activation when no fresh exit notice follows the interrupt boundary', async () => {
     const original = { pid: 10, startedAt: 100, tty: 'ttys001', executable: '/usr/bin/codex' };
     const shell = { pid: 20, startedAt: 200, tty: 'ttys001', executable: '/bin/zsh' };
     let identity = original;
     let command = 'codex';
     const current = lease();
-    const existing = 'conversation line\nTo continue this session, run codex resume '
-      + 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
     const runPaneCommand = vi.fn(async () => {});
     const controller = createCodexConversationActivationController({
       panes: {
@@ -144,12 +147,17 @@ describe('Conversation activation', () => {
       },
       process: { inspectForeground: vi.fn(async () => identity) },
       commands: {
-        sendKey: vi.fn(async () => {
-          identity = shell;
-          command = 'zsh';
-          current.abort.abort(new Error('original process exited'));
-        }),
-        capturePlainJoined: vi.fn(async () => existing),
+        paneCurrentPath: vi.fn(async () => '/repo'),
+        sessionCwd: vi.fn(async () => '/repo'),
+        openOutputCapture: vi.fn(async () => ({
+          sendKey: vi.fn(async () => {
+            identity = shell;
+            command = 'zsh';
+            current.abort.abort(new Error('original process exited'));
+          }),
+          output: vi.fn(() => Buffer.from('Session ID: aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa\r\n')),
+          close: vi.fn(),
+        })),
         runPaneCommand,
       },
       wait: vi.fn(async () => {}),
@@ -159,12 +167,11 @@ describe('Conversation activation', () => {
     expect(runPaneCommand).not.toHaveBeenCalled();
   });
 
-  it('fails closed when the joined captures have no trustworthy line overlap', async () => {
+  it('fails closed when fresh output contains only an unrelated UUID', async () => {
     const original = { pid: 10, startedAt: 100, tty: 'ttys001', executable: '/usr/bin/codex' };
     const shell = { pid: 20, startedAt: 200, tty: 'ttys001', executable: '/bin/zsh' };
     let identity = original;
     let command = 'codex';
-    let captures = 0;
     const current = lease();
     const runPaneCommand = vi.fn(async () => {});
     const controller = createCodexConversationActivationController({
@@ -176,22 +183,64 @@ describe('Conversation activation', () => {
       },
       process: { inspectForeground: vi.fn(async () => identity) },
       commands: {
-        sendKey: vi.fn(async () => {
-          identity = shell;
-          command = 'zsh';
-          current.abort.abort(new Error('original process exited'));
-        }),
-        capturePlainJoined: vi.fn(async () => {
-          captures += 1;
-          return captures === 1 ? 'baseline only' : 'unrelated line\nTo continue this session, run '
-            + 'codex resume 12345678-1234-1234-1234-123456789abc';
-        }),
+        paneCurrentPath: vi.fn(async () => '/repo'),
+        sessionCwd: vi.fn(async () => '/repo'),
+        openOutputCapture: vi.fn(async () => ({
+          sendKey: vi.fn(async () => {
+            identity = shell;
+            command = 'zsh';
+            current.abort.abort(new Error('original process exited'));
+          }),
+          output: vi.fn(() => Buffer.from(
+            'shell output (12345678-1234-1234-1234-123456789abc)\r\n',
+          )),
+          close: vi.fn(),
+        })),
         runPaneCommand,
       },
       wait: vi.fn(async () => {}),
     });
     await expect(controller.activate(current.value, new AbortController().signal))
       .rejects.toThrow(/did not expose a resumable session/);
+    expect(runPaneCommand).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['the matching rollout is missing', null],
+    ['the matching rollout belongs to another cwd', '/other-repo'],
+  ])('fails closed when %s', async (_label, resolvedCwd) => {
+    const original = { pid: 10, startedAt: 100, tty: 'ttys001', executable: '/usr/bin/codex' };
+    const shell = { pid: 20, startedAt: 200, tty: 'ttys001', executable: '/bin/zsh' };
+    let identity = original;
+    let command = 'codex';
+    const runPaneCommand = vi.fn(async () => {});
+    const controller = createCodexConversationActivationController({
+      panes: {
+        list: vi.fn(async () => [{
+          paneId: '%1', currentCommand: command, sessionName: 's', windowId: '@1', windowName: 'w',
+        }]),
+        subscribe: vi.fn(() => () => {}),
+      },
+      process: { inspectForeground: vi.fn(async () => identity) },
+      commands: {
+        paneCurrentPath: vi.fn(async () => '/repo'),
+        sessionCwd: vi.fn(async () => resolvedCwd),
+        openOutputCapture: vi.fn(async () => ({
+          sendKey: vi.fn(async () => { identity = shell; command = 'zsh'; }),
+          output: vi.fn(() => Buffer.from(
+            'Token usage: total=10 input=9 output=1\r\n'
+            + 'To continue this session, run codex resume '
+            + '12345678-1234-1234-1234-123456789abc\r\n',
+          )),
+          close: vi.fn(),
+        })),
+        runPaneCommand,
+      },
+      wait: vi.fn(async () => {}),
+    });
+
+    await expect(controller.activate(lease().value, new AbortController().signal))
+      .rejects.toThrow(/current pane session/);
     expect(runPaneCommand).not.toHaveBeenCalled();
   });
 
@@ -209,8 +258,13 @@ describe('Conversation activation', () => {
       },
       process: { inspectForeground: vi.fn(async () => identity) },
       commands: {
-        sendKey,
-        capturePlainJoined: vi.fn(async () => 'baseline'),
+        paneCurrentPath: vi.fn(async () => '/repo'),
+        sessionCwd: vi.fn(async () => '/repo'),
+        openOutputCapture: vi.fn(async () => ({
+          sendKey,
+          output: vi.fn(() => null),
+          close: vi.fn(),
+        })),
         runPaneCommand: vi.fn(async () => {}),
       },
       wait: vi.fn(async () => {}),
@@ -226,7 +280,6 @@ describe('Conversation activation', () => {
     const changedShell = { pid: 21, startedAt: 300, tty: 'ttys001', executable: '/bin/zsh' };
     let identity = original;
     let command = 'codex';
-    let captures = 0;
     const runPaneCommand = vi.fn(async () => {});
     const controller = createCodexConversationActivationController({
       panes: {
@@ -237,14 +290,18 @@ describe('Conversation activation', () => {
       },
       process: { inspectForeground: vi.fn(async () => identity) },
       commands: {
-        sendKey: vi.fn(async () => { identity = firstShell; command = 'zsh'; }),
-        capturePlainJoined: vi.fn(async () => {
-          captures += 1;
-          if (captures === 1) return 'baseline';
-          identity = changedShell;
-          return 'baseline\nTo continue this session, run codex resume '
-            + '12345678-1234-1234-1234-123456789abc';
-        }),
+        paneCurrentPath: vi.fn(async () => '/repo'),
+        sessionCwd: vi.fn(async () => '/repo'),
+        openOutputCapture: vi.fn(async () => ({
+          sendKey: vi.fn(async () => { identity = firstShell; command = 'zsh'; }),
+          output: vi.fn(() => {
+            identity = changedShell;
+            return Buffer.from('Token usage: total=10 input=9 output=1\r\n'
+              + 'To continue this session, run codex resume '
+              + '12345678-1234-1234-1234-123456789abc\r\n');
+          }),
+          close: vi.fn(),
+        })),
         runPaneCommand,
       },
       wait: vi.fn(async () => {}),
@@ -252,6 +309,53 @@ describe('Conversation activation', () => {
     await expect(controller.activate(lease().value, new AbortController().signal))
       .rejects.toThrow(/shell changed/);
     expect(runPaneCommand).not.toHaveBeenCalled();
+  });
+
+  it('closes a control capture when activation is aborted during an unacknowledged interrupt', async () => {
+    const original = { pid: 10, startedAt: 100, tty: 'ttys001', executable: '/usr/bin/codex' };
+    const shell = { pid: 20, startedAt: 200, tty: 'ttys001', executable: '/bin/zsh' };
+    let identity = original;
+    let command = 'codex';
+    let rejectSend!: (reason: Error) => void;
+    const sendKey = vi.fn(() => new Promise<void>((_resolve, reject) => { rejectSend = reject; }));
+    const close = vi.fn(() => rejectSend(new Error('capture closed')));
+    const openOutputCapture = vi.fn()
+      .mockResolvedValueOnce({ sendKey, output: vi.fn(() => null), close })
+      .mockResolvedValueOnce({
+        sendKey: vi.fn(async () => { identity = shell; command = 'zsh'; }),
+        output: vi.fn(() => Buffer.from(
+          'Token usage: total=10 input=9 output=1\r\n'
+          + 'To continue this session, run codex resume 12345678-1234-1234-1234-123456789abc\r\n',
+        )),
+        close: vi.fn(),
+      });
+    const controller = createCodexConversationActivationController({
+      panes: {
+        list: vi.fn(async () => [{
+          paneId: '%1', currentCommand: command, sessionName: 's', windowId: '@1', windowName: 'w',
+        }]),
+        subscribe: vi.fn(() => () => {}),
+      },
+      process: { inspectForeground: vi.fn(async () => identity) },
+      commands: {
+        paneCurrentPath: vi.fn(async () => '/repo'),
+        sessionCwd: vi.fn(async () => '/repo'),
+        openOutputCapture,
+        runPaneCommand: vi.fn(async () => {}),
+      },
+      wait: vi.fn(async () => {}),
+    });
+    const abort = new AbortController();
+    const activation = controller.activate(lease().value, abort.signal);
+    await vi.waitFor(() => expect(sendKey).toHaveBeenCalledOnce());
+
+    abort.abort(new Error('request timed out'));
+
+    await expect(activation).rejects.toThrow(/capture closed/);
+    expect(close).toHaveBeenCalled();
+
+    await expect(controller.activate(lease().value, new AbortController().signal)).resolves.toBeUndefined();
+    expect(openOutputCapture).toHaveBeenCalledTimes(2);
   });
 
   it('returns a stable unavailable error when descriptor discovery fails', async () => {

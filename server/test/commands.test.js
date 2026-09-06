@@ -3,12 +3,14 @@ import { execFile as _execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import {
   isPaneId, isWindowId, isSessionId, isValidSessionName,
-  listSessions, listWindows, listPanes, listPaneIds, capturePane, capturePlainJoined,
+  listSessions, listWindows, listPanes, listPaneIds, capturePane,
   paneInfo, paneLocation, sendText, sendHexInput, sendEnter,
+  openPaneOutputCapture,
   resizeWindow, restoreWindowSize, newSession, paneCurrentPath, newWindow,
   renameSession, renameWindow, sessionWindowCount, killWindow, swapWindows, wheelSeq,
   splitPane, windowPaneCount, killPane, runPaneCommand,
 } from '../src/tmux/commands.js';
+import { codexExitOutputSessionId } from '../src/agents/codex.js';
 
 const execFile = promisify(_execFile);
 const SES = `twtest_${process.pid}`;
@@ -33,20 +35,64 @@ describe('id validators', () => {
 });
 
 describe('tmux commands (integration)', () => {
-  it('joins terminal soft wraps for bounded Codex activation capture', async () => {
+  it('captures only post-interrupt output from non-current inline and alternate-screen windows', async () => {
     if (!hasTmux) return;
     const session = (await listSessions()).find((candidate) => candidate.name === SES);
-    const pane = (await listPanes((await listWindows(session.id))[0].id))[0].id;
-    const logicalLine = `TWJOIN_${'x'.repeat(100)}_END`;
-    await sendText(pane, `printf '%s\\n' '${logicalLine}'`);
-    await sendEnter(pane);
-    let capture = '';
-    for (let attempt = 0; attempt < 20 && !capture.includes(logicalLine); attempt += 1) {
-      await new Promise((resolve) => setTimeout(resolve, 50));
-      capture = await capturePlainJoined(pane);
+    const window = (await listWindows(session.id))[0];
+    const activePane = window.activePaneId;
+    for (const mode of ['inline', 'alternate']) {
+      const id = mode === 'inline'
+        ? '11111111-1111-1111-1111-111111111111'
+        : '22222222-2222-2222-2222-222222222222';
+      const { stdout } = await execFile('tmux', [
+        'new-window', '-d', '-P', '-F', '#{pane_id}', '-t', session.id,
+      ]);
+      const pane = stdout.trim();
+      const source = [
+        `const alt=${mode === 'alternate'};`,
+        "if(alt)process.stdout.write('\\x1b[?1049h');",
+        "process.stdout.write('CONTROL_READY\\n');",
+        'process.stdin.setRawMode(true);process.stdin.resume();',
+        "process.stdin.on('data',data=>{if(!data.includes(3))return;process.stdout.write((alt?'\\x1b[?1049l':'')",
+        `+'Token usage: total=10 input=9 output=1\\r\\nTo continue this session, run codex resume, then select Test (${id})\\r\\n');`,
+        'process.exit(0)});setInterval(()=>{},1000)',
+      ].join('');
+      const command = `node -e "eval(Buffer.from('${Buffer.from(source).toString('base64')}',`
+        + "'base64').toString())\"";
+      try {
+        await sendText(pane, command);
+        await sendEnter(pane);
+        let ready = false;
+        for (let attempt = 0; attempt < 50 && !ready; attempt += 1) {
+          await new Promise((resolve) => setTimeout(resolve, 50));
+          const info = await paneInfo(pane);
+          ready = info.altScreen === (mode === 'alternate');
+          if (mode === 'inline') {
+            ready = ready && (await capturePane(pane, 10)).includes('CONTROL_READY');
+          }
+        }
+        expect(ready).toBe(true);
+
+        const output = await openPaneOutputCapture(pane);
+        try {
+          await output.sendKey('C-c');
+          let sessionId = null;
+          for (let attempt = 0; attempt < 50 && !sessionId; attempt += 1) {
+            await new Promise((resolve) => setTimeout(resolve, 50));
+            sessionId = codexExitOutputSessionId(output.output()?.toString('utf8'));
+          }
+          expect(sessionId, output.output()?.toString('utf8') || 'no fresh output').toBe(id);
+        } finally {
+          output.close();
+        }
+        const currentWindow = (await listWindows(session.id)).find((item) => item.active);
+        expect(currentWindow?.id).toBe(window.id);
+        expect(currentWindow?.activePaneId).toBe(activePane);
+      } finally {
+        try { await execFile('tmux', ['kill-pane', '-t', pane]); } catch {}
+      }
     }
-    expect(capture).toContain(logicalLine);
-  });
+  }, 20_000);
 
   it('lists the test session, its window and pane', async () => {
     if (!hasTmux) return;

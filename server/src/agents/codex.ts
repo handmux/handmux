@@ -54,6 +54,22 @@ export function codexExitSessionId(text: unknown): string | null {
   return sessionId;
 }
 
+const OSC_SEQUENCE = /\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g;
+const CSI_SEQUENCE = /\x1b\[[0-?]*[ -/]*[@-~]/g;
+const CODEX_TOKEN_USAGE = /^\s*Token usage:\s+total=[\d,]+\s+input=[\d,]+\s+output=[\d,]+\s*$/i;
+
+export function codexExitOutputSessionId(output: unknown): string | null {
+  const plain = String(output || '').replace(OSC_SEQUENCE, '').replace(CSI_SEQUENCE, '');
+  const lines = plain.split(/\r?\n/);
+  const candidates = new Set<string>();
+  for (let index = 1; index < lines.length; index += 1) {
+    if (!CODEX_TOKEN_USAGE.test(lines[index - 1] ?? '')) continue;
+    const candidate = codexExitSessionId(lines[index]);
+    if (candidate) candidates.add(candidate);
+  }
+  return candidates.size === 1 ? [...candidates][0] ?? null : null;
+}
+
 // Last user turn out of a Codex rollout tail, for a recognizable one-line label. Codex records turns as
 // response_item messages: {payload:{type:'message',role:'user',content:[{type:'input_text',text}]}} (and a
 // flatter {type:'message',role:'user',...} in some versions). Skips the synthetic context turns Codex
@@ -179,6 +195,19 @@ export async function resolveCodexRollout(dir: string, sessionId: unknown): Prom
     rolloutPathCache.delete(oldest);
   }
   return found;
+}
+
+export async function codexSessionCwd(
+  sessionId: unknown,
+  dir = sessionsDir(),
+): Promise<string | null> {
+  const file = await resolveCodexRollout(dir, sessionId);
+  if (!file) return null;
+  try {
+    return firstCwd(await readHead(file)) || null;
+  } catch {
+    return null;
+  }
 }
 
 // Resolve a live orphan's cwd to its Codex session: the newest rollout whose recorded cwd matches. Same

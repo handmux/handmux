@@ -704,7 +704,6 @@ describe('AgentRuntime composition root', () => {
     let runSequence = 0;
     let first: AgentRunLease | null = null;
     let nativeSessionId: string | undefined;
-    let activationCaptures = 0;
     const runPaneCommand = vi.fn(async (_paneId: string, command: string) => {
       expect(command).toBe(`handmux codex resume ${sessionId}`);
       identity = {
@@ -749,20 +748,24 @@ describe('AgentRuntime composition root', () => {
               panes,
               process: { inspectForeground: async () => identity },
               commands: {
-                sendKey: vi.fn(async () => {
-                  identity = {
-                    pid: 150, startedAt: 1_500, tty: '/dev/ttys001', executable: '/bin/zsh',
-                  };
-                  livePane = { ...livePane, currentCommand: 'zsh', foregroundPid: 150 };
-                  panes.emit([livePane]);
-                  await vi.waitFor(() => expect(first?.signal.aborted).toBe(true));
-                }),
-                capturePlainJoined: vi.fn(async () => {
-                  activationCaptures += 1;
-                  if (activationCaptures === 1) return 'old line\nshared line';
-                  return 'shared line\nTo continue this session, run codex resume, then select '
-                    + `排查财务共享平台内存溢出 (${sessionId})`;
-                }),
+                paneCurrentPath: vi.fn(async () => '/repo'),
+                sessionCwd: vi.fn(async () => '/repo'),
+                openOutputCapture: vi.fn(async () => ({
+                  sendKey: vi.fn(async () => {
+                    identity = {
+                      pid: 150, startedAt: 1_500, tty: '/dev/ttys001', executable: '/bin/zsh',
+                    };
+                    livePane = { ...livePane, currentCommand: 'zsh', foregroundPid: 150 };
+                    panes.emit([livePane]);
+                    await vi.waitFor(() => expect(first?.signal.aborted).toBe(true));
+                  }),
+                  output: vi.fn(() => Buffer.from(
+                    'Token usage: total=10 input=9 output=1\r\n'
+                    + 'To continue this session, run codex resume, then select '
+                    + `排查财务共享平台内存溢出 (${sessionId})\r\n`,
+                  )),
+                  close: vi.fn(),
+                })),
                 runPaneCommand,
               },
               wait: vi.fn(async () => {}),

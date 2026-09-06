@@ -7,7 +7,7 @@ import { resolveVersionedComms } from '../src/agents/claude.js';
 import { resolveCodexComms } from '../src/agents/codex.js';
 import {
   resolveCodexRollout, resolveCodexSession, rolloutSessionId, codexUserSnippet,
-  codexExitSessionId,
+  codexExitSessionId, codexExitOutputSessionId, codexSessionCwd,
 } from '../src/agents/codex.js';
 import { parseAgentProcs } from '../src/agents/scanUtils.js';
 import { scanOrphans, takeoverOrphan } from '../src/orphans.js';
@@ -80,6 +80,26 @@ describe('codex rollout parsing', () => {
       `To continue this session, run codex resume, then select 调查 (${titleId}) `
       + `To continue this session, run codex resume ${titleId} (${sessionId})`,
     )).toBe(sessionId);
+  });
+  it('reads a strict exit notice from fresh raw terminal output only', () => {
+    const id = '01a03833-5b63-7d50-b090-5a97df670638';
+    expect(codexExitOutputSessionId(
+      `\x1b[27;1H\x1b[J\x1b[?25hToken usage: total=16,441 input=16,436 output=5\r\n`
+      + `To continue this session, run \x1b[36m`
+      + `codex resume, then select title (aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa) (${id})`
+      + '\x1b[39m\r\n',
+    )).toBe(id);
+    expect(codexExitOutputSessionId(`Session ID: ${id}\r\n`)).toBeNull();
+    expect(codexExitOutputSessionId(
+      `To continue this session, run codex resume, then select fake (${id})\r\n`
+      + `shell output (aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa)\r\n`,
+    )).toBeNull();
+    expect(codexExitOutputSessionId(
+      `Token usage: total=10 input=9 output=1\r\n`
+      + `To continue this session, run codex resume ${id}\r\n`
+      + `Token usage: total=10 input=9 output=1\r\n`
+      + 'To continue this session, run codex resume aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa\r\n',
+    )).toBeNull();
   });
   it('never crosses a hard logical-line boundary to complete a UUID', () => {
     const id = '01a03833-5b63-7d50-b090-5a97df670638';
@@ -156,6 +176,16 @@ describe('resolveCodexRollout', () => {
       expect(await resolveCodexRollout(root, id)).toBe(file);
       expect(await resolveCodexRollout(root, 'bbbbbbbb-0000-4000-8000-000000000002')).toBeNull();
       expect(await resolveCodexRollout(root, '../unsafe')).toBeNull();
+    } finally { fs.rmSync(root, { recursive: true, force: true }); }
+  });
+
+  it('reads cwd only from the exact candidate rollout metadata', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-rollout-cwd-'));
+    const id = 'cccccccc-0000-4000-8000-000000000003';
+    try {
+      seedRollout(root, { y: '2026', m: '08', d: '07', id, cwd: '/exact/repo' });
+      expect(await codexSessionCwd(id, root)).toBe('/exact/repo');
+      expect(await codexSessionCwd('dddddddd-0000-4000-8000-000000000004', root)).toBeNull();
     } finally { fs.rmSync(root, { recursive: true, force: true }); }
   });
 });

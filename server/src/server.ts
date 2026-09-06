@@ -46,6 +46,7 @@ import { InboxPushProjection } from './agent-runtime/inboxPushProjection.js';
 import { defaultGit } from './git.js';
 import { createProjectTaskRuntime } from './projectTask/runtime.js';
 import { clearCodexConversationThroughTui } from './agents/codexTerminalControl.js';
+import { codexSessionCwd } from './agents/codex.js';
 import { ApiAccountService, apiAccountsPath } from './apiAccounts.js';
 import { ClaudeHookBridgeConnector } from '../connectors/claude/index.js';
 
@@ -161,8 +162,9 @@ const agentRuntime = createBuiltinAgentRuntime({
   },
   codexApp,
   codexActivationCommands: {
-    sendKey: (pane, key) => commands.sendKey(pane, key),
-    capturePlainJoined: (pane) => commands.capturePlainJoined(pane),
+    openOutputCapture: (pane) => commands.openPaneOutputCapture(pane),
+    paneCurrentPath: (pane) => commands.paneCurrentPath(pane),
+    sessionCwd: (sessionId) => codexSessionCwd(sessionId),
     runPaneCommand: (pane, command) => commands.runPaneCommand(pane, command),
   },
   codexClear: async (pane, threadId) => {
