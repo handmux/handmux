@@ -90,6 +90,7 @@ describe('Conversation activation', () => {
     const shell = { pid: 20, startedAt: 200, tty: 'ttys001', executable: '/bin/zsh' };
     let identity = original;
     let command = 'codex';
+    let captures = 0;
     const current = lease();
     const runPaneCommand = vi.fn(async () => {});
     const controller = createCodexConversationActivationController({
@@ -106,10 +107,13 @@ describe('Conversation activation', () => {
           command = 'zsh';
           current.abort.abort(new Error('original process exited'));
         }),
-        capturePlain: vi.fn(async () => (
-          'To continue this session, run codex resume, then select '
-          + '排查财务共享平台内存溢出 (12345678-1234-12\n34-1234-123456789abc)'
-        )),
+        capturePlainJoined: vi.fn(async () => {
+          captures += 1;
+          if (captures === 1) return 'scrolled line\nshared baseline line';
+          return 'shared baseline line\nTo continue this session, run codex resume, then select '
+            + '调查标题 (aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa) '
+            + '(12345678-1234-1234-1234-123456789abc)';
+        }),
         runPaneCommand,
       },
       wait: vi.fn(async () => {}),
@@ -120,6 +124,75 @@ describe('Conversation activation', () => {
     expect(runPaneCommand).toHaveBeenCalledWith(
       '%1', 'handmux codex resume 12345678-1234-1234-1234-123456789abc',
     );
+  });
+
+  it('rejects a preexisting fake exit notice when no new notice was appended', async () => {
+    const original = { pid: 10, startedAt: 100, tty: 'ttys001', executable: '/usr/bin/codex' };
+    const shell = { pid: 20, startedAt: 200, tty: 'ttys001', executable: '/bin/zsh' };
+    let identity = original;
+    let command = 'codex';
+    const current = lease();
+    const existing = 'conversation line\nTo continue this session, run codex resume '
+      + 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
+    const runPaneCommand = vi.fn(async () => {});
+    const controller = createCodexConversationActivationController({
+      panes: {
+        list: vi.fn(async () => [{
+          paneId: '%1', currentCommand: command, sessionName: 's', windowId: '@1', windowName: 'w',
+        }]),
+        subscribe: vi.fn(() => () => {}),
+      },
+      process: { inspectForeground: vi.fn(async () => identity) },
+      commands: {
+        sendKey: vi.fn(async () => {
+          identity = shell;
+          command = 'zsh';
+          current.abort.abort(new Error('original process exited'));
+        }),
+        capturePlainJoined: vi.fn(async () => existing),
+        runPaneCommand,
+      },
+      wait: vi.fn(async () => {}),
+    });
+    await expect(controller.activate(current.value, new AbortController().signal))
+      .rejects.toThrow(/did not expose a resumable session/);
+    expect(runPaneCommand).not.toHaveBeenCalled();
+  });
+
+  it('fails closed when the joined captures have no trustworthy line overlap', async () => {
+    const original = { pid: 10, startedAt: 100, tty: 'ttys001', executable: '/usr/bin/codex' };
+    const shell = { pid: 20, startedAt: 200, tty: 'ttys001', executable: '/bin/zsh' };
+    let identity = original;
+    let command = 'codex';
+    let captures = 0;
+    const current = lease();
+    const runPaneCommand = vi.fn(async () => {});
+    const controller = createCodexConversationActivationController({
+      panes: {
+        list: vi.fn(async () => [{
+          paneId: '%1', currentCommand: command, sessionName: 's', windowId: '@1', windowName: 'w',
+        }]),
+        subscribe: vi.fn(() => () => {}),
+      },
+      process: { inspectForeground: vi.fn(async () => identity) },
+      commands: {
+        sendKey: vi.fn(async () => {
+          identity = shell;
+          command = 'zsh';
+          current.abort.abort(new Error('original process exited'));
+        }),
+        capturePlainJoined: vi.fn(async () => {
+          captures += 1;
+          return captures === 1 ? 'baseline only' : 'unrelated line\nTo continue this session, run '
+            + 'codex resume 12345678-1234-1234-1234-123456789abc';
+        }),
+        runPaneCommand,
+      },
+      wait: vi.fn(async () => {}),
+    });
+    await expect(controller.activate(current.value, new AbortController().signal))
+      .rejects.toThrow(/did not expose a resumable session/);
+    expect(runPaneCommand).not.toHaveBeenCalled();
   });
 
   it('never sends a second interrupt after the original Codex process was replaced', async () => {
@@ -137,7 +210,7 @@ describe('Conversation activation', () => {
       process: { inspectForeground: vi.fn(async () => identity) },
       commands: {
         sendKey,
-        capturePlain: vi.fn(async () => ''),
+        capturePlainJoined: vi.fn(async () => 'baseline'),
         runPaneCommand: vi.fn(async () => {}),
       },
       wait: vi.fn(async () => {}),
@@ -153,6 +226,7 @@ describe('Conversation activation', () => {
     const changedShell = { pid: 21, startedAt: 300, tty: 'ttys001', executable: '/bin/zsh' };
     let identity = original;
     let command = 'codex';
+    let captures = 0;
     const runPaneCommand = vi.fn(async () => {});
     const controller = createCodexConversationActivationController({
       panes: {
@@ -164,9 +238,12 @@ describe('Conversation activation', () => {
       process: { inspectForeground: vi.fn(async () => identity) },
       commands: {
         sendKey: vi.fn(async () => { identity = firstShell; command = 'zsh'; }),
-        capturePlain: vi.fn(async () => {
+        capturePlainJoined: vi.fn(async () => {
+          captures += 1;
+          if (captures === 1) return 'baseline';
           identity = changedShell;
-          return 'To continue this session, run codex resume 12345678-1234-1234-1234-123456789abc';
+          return 'baseline\nTo continue this session, run codex resume '
+            + '12345678-1234-1234-1234-123456789abc';
         }),
         runPaneCommand,
       },

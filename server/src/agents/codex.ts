@@ -35,34 +35,21 @@ export function rolloutSessionId(name: unknown): string | null {
 }
 
 const CODEX_EXIT_PREFIX = 'To continue this session, run\\s+codex\\s+resume';
-const softHex = (length: number): string => `[0-9a-f](?:\\s*[0-9a-f]){${length - 1}}`;
-const SOFT_UUID = [8, 4, 4, 4, 12].map(softHex).join('\\s*-\\s*');
-const PICKER_NOTICE_LIMIT = 512;
-
-function normalizedSessionId(candidate: string | undefined): string | null {
-  if (!candidate) return null;
-  const normalized = candidate.replace(/\s/g, '').toLowerCase();
-  return isSessionUuid(normalized) ? normalized : null;
-}
+const UUID_VALUE = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}';
+const CODEX_DIRECT_EXIT = new RegExp(`^\\s*${CODEX_EXIT_PREFIX}\\s+(${UUID_VALUE})\\s*$`, 'i');
+const CODEX_PICKER_EXIT = new RegExp(
+  `^\\s*${CODEX_EXIT_PREFIX}\\s*,\\s*then\\s+select\\s+.+\\(\\s*(${UUID_VALUE})\\s*\\)\\s*$`,
+  'i',
+);
 
 // A normal Codex exit prints the exact command for the session that just exited. Keep this deliberately
 // stricter than a generic `codex resume` search so conversation text or shell history is not mistaken for
 // the current exit notice.
 export function codexExitSessionId(text: unknown): string | null {
-  const source = String(text || '');
-  const prefixes = [...source.matchAll(new RegExp(CODEX_EXIT_PREFIX, 'gi'))];
-  const prefix = prefixes.at(-1);
-  if (!prefix || prefix.index === undefined) return null;
-  const remainder = source.slice(prefix.index + prefix[0].length);
-  const picker = remainder.match(/^\s*,\s*then\s+select\s+/i);
-  if (!picker) {
-    const direct = remainder.slice(0, 160).match(new RegExp(`^\\s+(${SOFT_UUID})(?![0-9a-f-])`, 'i'));
-    return normalizedSessionId(direct?.[1]);
-  }
-  const notice = remainder.slice(picker[0].length, picker[0].length + PICKER_NOTICE_LIMIT);
   let sessionId: string | null = null;
-  for (const candidate of notice.matchAll(/\(([^()]{1,128})\)/g)) {
-    sessionId = normalizedSessionId(candidate[1]) ?? sessionId;
+  for (const line of String(text || '').split(/\r?\n/)) {
+    const candidate = line.match(CODEX_DIRECT_EXIT)?.[1] ?? line.match(CODEX_PICKER_EXIT)?.[1];
+    if (candidate && isSessionUuid(candidate)) sessionId = candidate.toLowerCase();
   }
   return sessionId;
 }

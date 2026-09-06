@@ -6,7 +6,7 @@ import { codex, codexExitSessionId } from './codex.js';
 
 export interface CodexActivationCommands {
   sendKey(pane: string, key: string): Promise<unknown>;
-  capturePlain(pane: string): Promise<string>;
+  capturePlainJoined(pane: string): Promise<string>;
   runPaneCommand(pane: string, command: string): Promise<unknown>;
 }
 
@@ -15,6 +15,25 @@ const SHELLS = new Set(['sh', 'bash', 'zsh', 'fish', 'dash', 'ksh', 'tcsh']);
 
 function throwIfAborted(signal: AbortSignal): void {
   if (signal.aborted) throw signal.reason instanceof Error ? signal.reason : new Error('Activation cancelled');
+}
+
+function logicalLines(capture: string): string[] {
+  const lines = capture.split(/\r?\n/);
+  while (lines.at(-1)?.trim() === '') lines.pop();
+  return lines;
+}
+
+export function joinedCaptureDelta(baseline: string, current: string): string | null {
+  const before = logicalLines(baseline);
+  const after = logicalLines(current);
+  for (let overlap = Math.min(before.length, after.length); overlap > 0; overlap -= 1) {
+    const suffix = before.slice(before.length - overlap);
+    if (!suffix.some((line) => line.trim())) continue;
+    if (suffix.every((line, index) => line === after[index])) {
+      return after.slice(overlap).join('\n');
+    }
+  }
+  return null;
 }
 
 export function createCodexConversationActivationController({
@@ -29,7 +48,8 @@ export function createCodexConversationActivationController({
   wait?: (ms: number) => Promise<void>;
 }): AgentConversationActivationControllerV1 {
   if (!panes || !process || !commands || typeof commands.sendKey !== 'function'
-    || typeof commands.capturePlain !== 'function' || typeof commands.runPaneCommand !== 'function') {
+    || typeof commands.capturePlainJoined !== 'function'
+    || typeof commands.runPaneCommand !== 'function') {
     throw new TypeError('Codex Conversation activation requires pane control');
   }
   const pane = async (paneId: string) => (await panes.list()).find((item) => item.paneId === paneId) ?? null;
@@ -69,6 +89,7 @@ export function createCodexConversationActivationController({
           ? await codexIdentity(paneId) : null;
         throwIfAborted(signal);
         if (!original) throw new Error('The Agent run changed before Conversation activation');
+        const baseline = await commands.capturePlainJoined(paneId);
         // Authorization is bound to the verified run above. Exiting that exact process intentionally revokes
         // its lease, so subsequent checks bind recovery to the shell that replaced it.
         let exited = false;
@@ -106,7 +127,9 @@ export function createCodexConversationActivationController({
             throw new Error('The pane shell changed during Conversation activation');
           }
           try {
-            const candidate = codexExitSessionId(await commands.capturePlain(paneId));
+            const current = await commands.capturePlainJoined(paneId);
+            const delta = joinedCaptureDelta(baseline, current);
+            const candidate = delta === null ? null : codexExitSessionId(delta);
             if (codex.sessions.isId(candidate)) { sessionId = candidate; break; }
           } catch { throw new Error('The pane closed during Conversation activation'); }
           await wait(100);

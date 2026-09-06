@@ -58,13 +58,13 @@ describe('codex rollout parsing', () => {
   it('reads the exact current UUID only from Codex exit output', () => {
     const id = 'abcdef01-2345-6789-abcd-ef0123456789';
     expect(codexExitSessionId(`old codex resume deadbeef\nTo continue this session, run codex resume ${id}\n$`)).toBe(id);
-    expect(codexExitSessionId('To continue this session, run codex resume abcdef01-2345-6789-\nabcd-ef0123456789')).toBe(id);
+    expect(codexExitSessionId('To continue this session, run codex resume abcdef01-2345-6789-\nabcd-ef0123456789')).toBeNull();
     expect(codexExitSessionId(
       'To continue this session, run codex resume, then select 排查财务共享平台内存溢出 (01a03833-5b63-7d50-b090-5a97df670638)',
     )).toBe('01a03833-5b63-7d50-b090-5a97df670638');
     expect(codexExitSessionId(
       'To continue this session, run codex resume, then select 排查财务共享平\n台内存溢出 (01a03833-5b63-7d50-b090-5a97df670638)',
-    )).toBe('01a03833-5b63-7d50-b090-5a97df670638');
+    )).toBeNull();
     expect(codexExitSessionId(`user said codex resume ${id}`)).toBeNull();
     expect(codexExitSessionId(
       `codex resume, then select 排查财务共享平台内存溢出 (${id})`,
@@ -77,19 +77,20 @@ describe('codex rollout parsing', () => {
     const titleId = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
     const sessionId = '01a03833-5b63-7d50-b090-5a97df670638';
     expect(codexExitSessionId(
-      `To continue this session, run codex resume, then select 调查任务 (${titleId}) (${sessionId})`,
+      `To continue this session, run codex resume, then select 调查 (${titleId}) `
+      + `To continue this session, run codex resume ${titleId} (${sessionId})`,
     )).toBe(sessionId);
   });
-  it('accepts terminal soft wraps at every UUID character boundary in both exit formats', () => {
+  it('never crosses a hard logical-line boundary to complete a UUID', () => {
     const id = '01a03833-5b63-7d50-b090-5a97df670638';
     for (let split = 1; split < id.length; split += 1) {
       const wrapped = `${id.slice(0, split)}\n${id.slice(split)}`;
       expect(codexExitSessionId(
         `To continue this session, run codex resume ${wrapped}`,
-      )).toBe(id);
+      )).toBeNull();
       expect(codexExitSessionId(
         `To continue this session, run codex resume, then select 排查财务共享平台内存溢出 (${wrapped})`,
-      )).toBe(id);
+      )).toBeNull();
     }
   });
   it('picks the last real user turn, skipping synthetic environment/instructions', () => {

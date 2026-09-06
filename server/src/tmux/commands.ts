@@ -162,6 +162,12 @@ export async function capturePlain(paneId: string): Promise<string> {
   return runTmux(['capture-pane', '-p', '-t', paneId]);
 }
 
+// Codex prints its resume notice after leaving a TUI. Join only terminal soft wraps so the notice can be
+// parsed as one logical line; keep a bounded scrollback window so before/after captures can overlap safely.
+export async function capturePlainJoined(paneId: string): Promise<string> {
+  return runTmux(['capture-pane', '-p', '-J', '-S', '-200', '-t', paneId]);
+}
+
 // Size AND cursor in one display-message (capture-pane carries neither the cursor position nor its
 // visibility — it snapshots cells only — so we read them here for the client to re-place xterm's own
 // cursor onto Claude's input cell). cursor_x/cursor_y are 0-based, relative to the visible screen;

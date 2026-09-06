@@ -704,6 +704,7 @@ describe('AgentRuntime composition root', () => {
     let runSequence = 0;
     let first: AgentRunLease | null = null;
     let nativeSessionId: string | undefined;
+    let activationCaptures = 0;
     const runPaneCommand = vi.fn(async (_paneId: string, command: string) => {
       expect(command).toBe(`handmux codex resume ${sessionId}`);
       identity = {
@@ -756,10 +757,12 @@ describe('AgentRuntime composition root', () => {
                   panes.emit([livePane]);
                   await vi.waitFor(() => expect(first?.signal.aborted).toBe(true));
                 }),
-                capturePlain: vi.fn(async () => (
-                  'To continue this session, run codex resume, then select '
-                  + `排查财务共享平台内存溢出 (${sessionId.slice(0, 18)}\n${sessionId.slice(18)})`
-                )),
+                capturePlainJoined: vi.fn(async () => {
+                  activationCaptures += 1;
+                  if (activationCaptures === 1) return 'old line\nshared line';
+                  return 'shared line\nTo continue this session, run codex resume, then select '
+                    + `排查财务共享平台内存溢出 (${sessionId})`;
+                }),
                 runPaneCommand,
               },
               wait: vi.fn(async () => {}),

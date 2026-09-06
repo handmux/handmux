@@ -3,7 +3,8 @@ import { execFile as _execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import {
   isPaneId, isWindowId, isSessionId, isValidSessionName,
-  listSessions, listWindows, listPanes, listPaneIds, capturePane, paneInfo, paneLocation, sendText, sendHexInput, sendEnter,
+  listSessions, listWindows, listPanes, listPaneIds, capturePane, capturePlainJoined,
+  paneInfo, paneLocation, sendText, sendHexInput, sendEnter,
   resizeWindow, restoreWindowSize, newSession, paneCurrentPath, newWindow,
   renameSession, renameWindow, sessionWindowCount, killWindow, swapWindows, wheelSeq,
   splitPane, windowPaneCount, killPane, runPaneCommand,
@@ -32,6 +33,21 @@ describe('id validators', () => {
 });
 
 describe('tmux commands (integration)', () => {
+  it('joins terminal soft wraps for bounded Codex activation capture', async () => {
+    if (!hasTmux) return;
+    const session = (await listSessions()).find((candidate) => candidate.name === SES);
+    const pane = (await listPanes((await listWindows(session.id))[0].id))[0].id;
+    const logicalLine = `TWJOIN_${'x'.repeat(100)}_END`;
+    await sendText(pane, `printf '%s\\n' '${logicalLine}'`);
+    await sendEnter(pane);
+    let capture = '';
+    for (let attempt = 0; attempt < 20 && !capture.includes(logicalLine); attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      capture = await capturePlainJoined(pane);
+    }
+    expect(capture).toContain(logicalLine);
+  });
+
   it('lists the test session, its window and pane', async () => {
     if (!hasTmux) return;
     const sessions = await listSessions();

@@ -162,7 +162,7 @@ const agentRuntime = createBuiltinAgentRuntime({
   codexApp,
   codexActivationCommands: {
     sendKey: (pane, key) => commands.sendKey(pane, key),
-    capturePlain: (pane) => commands.capturePlain(pane),
+    capturePlainJoined: (pane) => commands.capturePlainJoined(pane),
     runPaneCommand: (pane, command) => commands.runPaneCommand(pane, command),
   },
   codexClear: async (pane, threadId) => {
