@@ -108,7 +108,7 @@ describe('Conversation activation', () => {
         }),
         capturePlain: vi.fn(async () => (
           'To continue this session, run codex resume, then select '
-          + '排查财务共享平台内存溢出 (12345678-1234-1234-1234-123456789abc)'
+          + '排查财务共享平台内存溢出 (12345678-1234-12\n34-1234-123456789abc)'
         )),
         runPaneCommand,
       },

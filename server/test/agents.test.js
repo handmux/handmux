@@ -73,6 +73,25 @@ describe('codex rollout parsing', () => {
       `To continue this session, run codex resume, then select 排查财务共享平台内存溢出\n$\nunrelated ${id}`,
     )).toBeNull();
   });
+  it('takes the final picker UUID instead of a UUID embedded in the session title', () => {
+    const titleId = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
+    const sessionId = '01a03833-5b63-7d50-b090-5a97df670638';
+    expect(codexExitSessionId(
+      `To continue this session, run codex resume, then select 调查任务 (${titleId}) (${sessionId})`,
+    )).toBe(sessionId);
+  });
+  it('accepts terminal soft wraps at every UUID character boundary in both exit formats', () => {
+    const id = '01a03833-5b63-7d50-b090-5a97df670638';
+    for (let split = 1; split < id.length; split += 1) {
+      const wrapped = `${id.slice(0, split)}\n${id.slice(split)}`;
+      expect(codexExitSessionId(
+        `To continue this session, run codex resume ${wrapped}`,
+      )).toBe(id);
+      expect(codexExitSessionId(
+        `To continue this session, run codex resume, then select 排查财务共享平台内存溢出 (${wrapped})`,
+      )).toBe(id);
+    }
+  });
   it('picks the last real user turn, skipping synthetic environment/instructions', () => {
     const tail = [
       JSON.stringify({ type: 'response_item', payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: '<environment_context>cwd=/x</environment_context>' }] } }),

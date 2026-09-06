@@ -758,7 +758,7 @@ describe('AgentRuntime composition root', () => {
                 }),
                 capturePlain: vi.fn(async () => (
                   'To continue this session, run codex resume, then select '
-                  + `排查财务共享平台内存溢出 (${sessionId})`
+                  + `排查财务共享平台内存溢出 (${sessionId.slice(0, 18)}\n${sessionId.slice(18)})`
                 )),
                 runPaneCommand,
               },
