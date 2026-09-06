@@ -757,7 +757,8 @@ describe('AgentRuntime composition root', () => {
                   await vi.waitFor(() => expect(first?.signal.aborted).toBe(true));
                 }),
                 capturePlain: vi.fn(async () => (
-                  `To continue this session, run codex resume ${sessionId}`
+                  'To continue this session, run codex resume, then select '
+                  + `排查财务共享平台内存溢出 (${sessionId})`
                 )),
                 runPaneCommand,
               },

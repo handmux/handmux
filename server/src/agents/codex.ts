@@ -34,21 +34,22 @@ export function rolloutSessionId(name: unknown): string | null {
   return m?.[1] || null;
 }
 
-const UUID_PARTS = '([0-9a-f]{8})\\s*-\\s*([0-9a-f]{4})\\s*-\\s*([0-9a-f]{4})\\s*-\\s*([0-9a-f]{4})\\s*-\\s*([0-9a-f]{12})';
-
-function lastUuidAfter(text: unknown, prefix: string): string | null {
-  const matches = [...String(text || '').matchAll(new RegExp(`${prefix}\\s*${UUID_PARTS}`, 'gi'))];
-  const match = matches.at(-1);
-  if (!match) return null;
-  const parts = match.slice(1, 6);
-  return parts.length === 5 && parts.every(Boolean) ? parts.join('-').toLowerCase() : null;
-}
+const UUID_VALUE = '[0-9a-f]{8}\\s*-\\s*[0-9a-f]{4}\\s*-\\s*[0-9a-f]{4}\\s*-\\s*[0-9a-f]{4}\\s*-\\s*[0-9a-f]{12}';
+const CODEX_EXIT_PREFIX = 'To continue this session, run\\s+codex\\s+resume';
 
 // A normal Codex exit prints the exact command for the session that just exited. Keep this deliberately
 // stricter than a generic `codex resume` search so conversation text or shell history is not mistaken for
 // the current exit notice.
 export function codexExitSessionId(text: unknown): string | null {
-  return lastUuidAfter(text, 'To continue this session, run\\s+codex\\s+resume');
+  const matches = [...String(text || '').matchAll(new RegExp(
+    `${CODEX_EXIT_PREFIX}(?:\\s+(${UUID_VALUE})|\\s*,\\s*then\\s+select\\s+[\\s\\S]{1,512}?\\(\\s*(${UUID_VALUE})\\s*\\))`,
+    'gi',
+  ))];
+  const match = matches.at(-1);
+  const candidate = match?.[1] || match?.[2];
+  if (!candidate) return null;
+  const normalized = candidate.replace(/\s/g, '').toLowerCase();
+  return isSessionUuid(normalized) ? normalized : null;
 }
 
 // Last user turn out of a Codex rollout tail, for a recognizable one-line label. Codex records turns as

@@ -107,7 +107,8 @@ describe('Conversation activation', () => {
           current.abort.abort(new Error('original process exited'));
         }),
         capturePlain: vi.fn(async () => (
-          'To continue this session, run codex resume 12345678-1234-1234-1234-123456789abc'
+          'To continue this session, run codex resume, then select '
+          + '排查财务共享平台内存溢出 (12345678-1234-1234-1234-123456789abc)'
         )),
         runPaneCommand,
       },
@@ -116,6 +117,9 @@ describe('Conversation activation', () => {
     const service = new AgentConversationActivationService({ codex: controller });
     await expect(service.activate(current.value)).resolves.toBeUndefined();
     expect(runPaneCommand).toHaveBeenCalledOnce();
+    expect(runPaneCommand).toHaveBeenCalledWith(
+      '%1', 'handmux codex resume 12345678-1234-1234-1234-123456789abc',
+    );
   });
 
   it('never sends a second interrupt after the original Codex process was replaced', async () => {
