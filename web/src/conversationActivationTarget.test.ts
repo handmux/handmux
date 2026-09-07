@@ -35,6 +35,24 @@ function activationTargetHook() {
 }
 
 describe('Conversation activation target', () => {
+  it('does not replace an explicitly different current Agent run with the old target', () => {
+    const claude = { agentId: 'claude', paneId: '%1', runId: 'claude-run' };
+    expect(activationRunFor(target, '%1', claude)).toBe(claude);
+  });
+
+  it.each([true, false])('releases a target on a different verified Agent, ownsPane=%s', async (pending) => {
+    const { result, rerender } = activationTargetHook();
+    act(() => result.current.setPending(original, true));
+    if (!pending) act(() => result.current.setPending(original, false));
+    rerender({ ...initial, runs: [] });
+    expect(result.current.displayTarget?.run).toBe(original);
+    rerender({ ...initial, runs: [{ agentId: 'claude', paneId: '%2', runId: 'other-pane' }] });
+    expect(result.current.displayTarget?.run).toBe(original);
+    rerender({ ...initial, runs: [{ agentId: 'claude', paneId: '%1', runId: 'new-agent' }] });
+    await waitFor(() => expect(result.current.displayTarget).toBeNull());
+    expect(result.current.ownershipPin).toBeNull();
+  });
+
   it('never lets a durable receipt replace an authoritatively discovered run', () => {
     const receipt = { operationId: 'receipt-1', state: 'current' as const };
     expect(conversationRecoveryForSessionlessPane(receipt, {

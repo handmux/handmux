@@ -5,6 +5,7 @@ import {
   recoverConversationActivation,
 } from '../agentConversationActivationApi.js';
 import { useConversationActivationRecovery } from './useConversationActivationRecovery.js';
+import { UnauthorizedError } from '../apiErrors.js';
 
 vi.mock('../agentConversationActivationApi.js', () => ({
   getConversationActivationRecovery: vi.fn(),
@@ -27,6 +28,104 @@ afterEach(() => {
 });
 
 describe('useConversationActivationRecovery', () => {
+  it('retries failed lookups with backoff, stops on success, and never auto-posts recovery', async () => {
+    vi.useFakeTimers();
+    vi.mocked(getConversationActivationRecovery)
+      .mockRejectedValueOnce(new Error('server restarting'))
+      .mockRejectedValueOnce(new Error('still restarting'))
+      .mockResolvedValue(receipt);
+    const { result } = renderHook(() => useConversationActivationRecovery('%1', true, vi.fn()));
+    await act(async () => { await Promise.resolve(); });
+    expect(result.current.status).toBe('unknown');
+    await act(async () => { await vi.advanceTimersByTimeAsync(799); });
+    expect(getConversationActivationRecovery).toHaveBeenCalledTimes(1);
+    await act(async () => { await vi.advanceTimersByTimeAsync(401); });
+    expect(getConversationActivationRecovery).toHaveBeenCalledTimes(2);
+    await act(async () => { await vi.advanceTimersByTimeAsync(2400); });
+    expect(result.current).toMatchObject({ status: 'ready', receipt });
+    await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
+    expect(getConversationActivationRecovery).toHaveBeenCalledTimes(3);
+    expect(recoverConversationActivation).not.toHaveBeenCalled();
+  });
+
+  it.each(['pane switch', 'disabled', 'unmount'] as const)('cleans failed-lookup retries on %s', async (change) => {
+    vi.useFakeTimers();
+    vi.mocked(getConversationActivationRecovery).mockRejectedValue(new Error('offline'));
+    const { rerender, unmount } = renderHook(({ paneId, enabled }) => (
+      useConversationActivationRecovery(paneId, enabled, vi.fn())
+    ), { initialProps: { paneId: '%1', enabled: true } });
+    await act(async () => { await Promise.resolve(); });
+    const signal = vi.mocked(getConversationActivationRecovery).mock.calls[0]?.[1];
+    if (change === 'unmount') unmount();
+    else if (change === 'disabled') rerender({ paneId: '%1', enabled: false });
+    else {
+      vi.mocked(getConversationActivationRecovery).mockResolvedValue(null);
+      rerender({ paneId: '%2', enabled: true });
+    }
+    await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
+    expect(signal?.aborted).toBe(true);
+    expect(vi.mocked(getConversationActivationRecovery).mock.calls.filter(([pane]) => pane === '%1'))
+      .toHaveLength(1);
+  });
+
+  it('stops retries on authentication failure', async () => {
+    vi.useFakeTimers();
+    vi.mocked(getConversationActivationRecovery).mockRejectedValue(new UnauthorizedError());
+    const onAuthFail = vi.fn();
+    const { result } = renderHook(() => useConversationActivationRecovery('%1', true, vi.fn(), onAuthFail));
+    await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
+    expect(result.current.status).toBe('unknown');
+    expect(onAuthFail).toHaveBeenCalledTimes(1);
+    expect(getConversationActivationRecovery).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(getConversationActivationRecovery).mock.calls[0]?.[1]?.aborted).toBe(true);
+  });
+
+  it('ignores a late old-pane retry result after navigation', async () => {
+    vi.useFakeTimers();
+    let resolveOld!: (value: typeof receipt) => void;
+    vi.mocked(getConversationActivationRecovery).mockRejectedValueOnce(new Error('offline'))
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveOld = resolve; }))
+      .mockResolvedValue(null);
+    const { result, rerender } = renderHook(({ paneId }) => (
+      useConversationActivationRecovery(paneId, true, vi.fn())
+    ), { initialProps: { paneId: '%1' } });
+    await act(async () => { await vi.advanceTimersByTimeAsync(1200); });
+    expect(getConversationActivationRecovery).toHaveBeenCalledTimes(2);
+    rerender({ paneId: '%2' });
+    await act(async () => { await Promise.resolve(); });
+    expect(result.current).toMatchObject({ status: 'ready', receipt: null });
+    await act(async () => { resolveOld(receipt); });
+    expect(result.current).toMatchObject({ status: 'ready', receipt: null });
+    expect(vi.mocked(getConversationActivationRecovery).mock.calls[1]?.[1]?.aborted).toBe(true);
+  });
+
+  it('cancels a pending lookup retry when the user explicitly recovers the retained receipt', async () => {
+    vi.useFakeTimers();
+    let rejectPost!: (error: Error) => void;
+    vi.mocked(getConversationActivationRecovery).mockResolvedValueOnce(receipt)
+      .mockRejectedValue(new Error('offline'));
+    vi.mocked(recoverConversationActivation).mockImplementation(() => new Promise((_resolve, reject) => {
+      rejectPost = reject;
+    }));
+    const { result, unmount } = renderHook(() => useConversationActivationRecovery('%1', true, vi.fn()));
+    await act(async () => { await Promise.resolve(); });
+    act(() => result.current.retry());
+    await act(async () => { await Promise.resolve(); });
+    expect(result.current.status).toBe('unknown');
+    let operation!: Promise<void>;
+    act(() => { operation = result.current.recover(); });
+    try {
+      await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
+      expect(result.current.status).toBe('recovering');
+      expect(getConversationActivationRecovery).toHaveBeenCalledTimes(2);
+      expect(recoverConversationActivation).toHaveBeenCalledTimes(1);
+    } finally {
+      unmount();
+      rejectPost(new Error('cancelled'));
+      await operation;
+    }
+  });
+
   it('does not query or preserve recovery UI when Codex Conversation is disabled', () => {
     const { result } = renderHook(() => useConversationActivationRecovery(
       '%1', false, vi.fn(),

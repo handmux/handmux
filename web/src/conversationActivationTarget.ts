@@ -21,6 +21,7 @@ export function activationRunFor(
   paneId: string | null,
   currentRun: AgentRunRef | null,
 ): AgentRunRef | null {
+  if (currentRun?.paneId === paneId && currentRun.agentId !== target?.agentId) return currentRun;
   return target?.paneId === paneId ? target.run : currentRun;
 }
 
@@ -79,8 +80,9 @@ export function useConversationActivationTarget({
     if (!target) return;
     const activated = runs.some((run) => run.agentId === target.agentId
       && run.paneId === target.paneId && !!run.sessionId);
+    const replaced = runs.some((run) => run.paneId === target.paneId && run.agentId !== target.agentId);
     if (paneId !== target.paneId || rootView !== 'session' || lens !== 'chat'
-      || !isConversationEnabled(target.agentId) || activated) clear();
+      || !isConversationEnabled(target.agentId) || activated || replaced) clear();
   }, [clear, isConversationEnabled, lens, paneId, rootView, runs, target]);
 
   const displayTarget = target?.paneId === paneId ? target : null;

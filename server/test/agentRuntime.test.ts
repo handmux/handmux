@@ -662,6 +662,85 @@ describe('AgentRuntime composition root', () => {
     expect(run).toBe(2);
   });
 
+  it('bounds an exact-command attachment probe during startup and discards its late result before retrying', async () => {
+    const blockedPane = pane('codex');
+    const healthyPane = { ...blockedPane, paneId: '%2' };
+    const panes = new TestPanes([blockedPane, healthyPane]);
+    const foreground: ForegroundProcessIdentity = {
+      pid: 101, startedAt: 1_000, tty: '/dev/ttys001', executable: '/opt/codex/bin/codex',
+    };
+    let release!: (value: ForegroundProcessIdentity) => void;
+    const blocked = new Promise<ForegroundProcessIdentity>((resolve) => { release = resolve; });
+    let retry = false;
+    const runtime = new AgentRuntime({
+      adapters: [{ ...adapter('codex'), process: { commands: ['codex'], runtimeAttach: true } }],
+      panes,
+      process: { inspectForeground: async (value) => (
+        value.paneId === '%1' && !retry ? blocked : foreground
+      ) },
+      stateDirectory: directory(), authToken: AUTH_TOKEN, verifyTimeoutMs: 20,
+    });
+    runtimes.push(runtime);
+    let started = false;
+    const starting = runtime.start().then(() => { started = true; });
+    try {
+      await vi.waitFor(() => expect(started).toBe(true), { timeout: 500 });
+      expect(runtime.runs.currentForPane('%1')).toBeNull();
+      expect(runtime.runs.currentForPane('%2')).not.toBeNull();
+
+      release(foreground);
+      await new Promise((resolve) => setTimeout(resolve, 40));
+      expect(runtime.runs.currentForPane('%1')).toBeNull();
+      retry = true;
+      panes.emit(panes.snapshot);
+      await vi.waitFor(() => expect(runtime.runs.currentForPane('%1')).not.toBeNull());
+    } finally {
+      release(foreground);
+      await starting;
+    }
+  });
+
+  it('continues coalesced reconciliation and closes while an exact-command attachment probe stays pending', async () => {
+    const blockedPane = pane('codex');
+    const healthyPane = { ...blockedPane, paneId: '%2' };
+    const panes = new TestPanes([]);
+    const foreground: ForegroundProcessIdentity = {
+      pid: 101, startedAt: 1_000, tty: '/dev/ttys001', executable: '/opt/codex/bin/codex',
+    };
+    let release!: (value: null) => void;
+    const blocked = new Promise<null>((resolve) => { release = resolve; });
+    let onBlockedProbe = (): void => {};
+    const inspectForeground = vi.fn(async (value: LivePane) => {
+      if (value.paneId !== '%1') return foreground;
+      onBlockedProbe();
+      return blocked;
+    });
+    const runtime = new AgentRuntime({
+      adapters: [{ ...adapter('codex'), process: { commands: ['codex'], runtimeAttach: true } }],
+      panes, process: { inspectForeground },
+      stateDirectory: directory(), authToken: AUTH_TOKEN, verifyTimeoutMs: 20,
+    });
+    runtimes.push(runtime);
+    await runtime.start();
+    try {
+      panes.emit([blockedPane]);
+      await vi.waitFor(() => expect(inspectForeground).toHaveBeenCalledWith(blockedPane));
+      panes.emit([healthyPane]);
+      await vi.waitFor(() => expect(runtime.runs.currentForPane('%2')).not.toBeNull(), { timeout: 500 });
+      expect(runtime.runs.currentForPane('%1')).toBeNull();
+
+      const probing = new Promise<void>((resolve) => { onBlockedProbe = resolve; });
+      panes.emit([blockedPane, healthyPane]);
+      await probing;
+      let closed = false;
+      const closing = runtime.close().then(() => { closed = true; });
+      await vi.waitFor(() => expect(closed).toBe(true), { timeout: 500 });
+      await closing;
+    } finally {
+      release(null);
+    }
+  });
+
   it('retries Runtime attachment after an incomplete process identity becomes complete', async () => {
     const codexPane: LivePane = { ...pane('codex') };
     delete codexPane.foregroundPid;

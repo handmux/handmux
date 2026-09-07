@@ -219,6 +219,9 @@ export function createCodexConversationActivationController({
           'unavailable',
           recovery,
         );
+        // The service can time out while either asynchronous recheck above is still pending.
+        // Revalidate cancellation at the side-effect boundary, not only before the rechecks.
+        throwIfAborted(signal);
         await commands.runPaneCommand(paneId, recovery.command);
         return { recovery };
       });

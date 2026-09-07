@@ -6,6 +6,7 @@ import {
 import type { ConversationActivationRecoveryReceipt } from '../agentConversationActivationApi.js';
 import type { AgentRunRef } from '../agentCatalog.js';
 import { UnauthorizedError } from '../apiErrors.js';
+import { backoffDelay } from '../backoff.js';
 
 const DISCOVERY_ATTEMPTS = 75;
 const DISCOVERY_INTERVAL_MS = 400;
@@ -42,6 +43,7 @@ export function useConversationActivationRecovery(
   const discoverRef = useRef(discover);
   const authRef = useRef(onAuthFail);
   const operationRef = useRef<AbortController | null>(null);
+  const lookupRef = useRef<AbortController | null>(null);
   receiptRef.current = receipt;
   inputPaneRef.current = enabled ? paneId : null;
   discoverRef.current = discover;
@@ -61,19 +63,36 @@ export function useConversationActivationRecovery(
       setReceipt(null);
     }
     const controller = new AbortController();
+    lookupRef.current = controller;
+    let retryTimer: number | undefined;
+    let failures = 0;
+    controller.signal.addEventListener('abort', () => window.clearTimeout(retryTimer), { once: true });
     setStatus('loading');
-    void getConversationActivationRecovery(paneId, controller.signal).then((next) => {
-      if (generation.current !== requestGeneration) return;
-      setReceipt(next);
-      setStatus('ready');
-    }).catch((cause) => {
+    const lookup = async (): Promise<void> => {
       if (controller.signal.aborted || generation.current !== requestGeneration) return;
-      if (cause instanceof UnauthorizedError) authRef.current?.();
-      // A transient Server/runtime/network gap is not authoritative absence. Keep the last safe page.
-      setStatus('unknown');
-    });
+      try {
+        const next = await getConversationActivationRecovery(paneId, controller.signal);
+        if (controller.signal.aborted || generation.current !== requestGeneration) return;
+        setReceipt(next);
+        setStatus('ready');
+      } catch (cause) {
+        if (controller.signal.aborted || generation.current !== requestGeneration) return;
+        // A transient Server/runtime/network gap is not authoritative absence. Keep the last safe page.
+        setStatus('unknown');
+        if (cause instanceof UnauthorizedError) {
+          controller.abort();
+          operationRef.current?.abort();
+          authRef.current?.();
+          return;
+        }
+        // Only repeat this read-only lookup. Recovery commands always require an explicit user action.
+        retryTimer = window.setTimeout(() => { void lookup(); }, backoffDelay(++failures));
+      }
+    };
+    void lookup();
     return () => {
       controller.abort();
+      if (lookupRef.current === controller) lookupRef.current = null;
       operationRef.current?.abort();
       operationRef.current = null;
       generation.current += 1;
@@ -88,6 +107,7 @@ export function useConversationActivationRecovery(
       || current.phase === 'resuming' || status === 'recovering' || status === 'waiting') return;
     const requestGeneration = generation.current;
     const controller = new AbortController();
+    lookupRef.current?.abort();
     operationRef.current?.abort();
     operationRef.current = controller;
     setReceipt({ ...current, phase: 'resuming', canResume: false });

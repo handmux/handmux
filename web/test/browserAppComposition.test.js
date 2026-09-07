@@ -49,7 +49,8 @@ describe('built-in browser App composition', () => {
     expect(source).toContain('activationPending && !currentAgentRun?.sessionId');
     expect(source).toContain('clearConversationActivation();');
     expect(source).toContain('&& !!currentAgentRun?.sessionId');
-    expect(source).toContain('conversationControlsEnabled && currentAgentRun?.sessionId');
+    expect(source).toContain('chatLens && conversationControlsEnabled ? normalizedConversationRun : null');
+    expect(source).toContain('chatLens && conversationControlsEnabled && !!normalizedConversationRun');
   });
 
   it('uses Catalog-driven Conversation preferences and never provider-specific Settings props', () => {

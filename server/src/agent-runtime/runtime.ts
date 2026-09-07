@@ -1181,7 +1181,13 @@ export class AgentRuntime {
       });
       if (identity.kind !== 'matched' || identity.adapter.process.runtimeAttach !== true) continue;
       let foreground: ForegroundProcessIdentity | null;
-      try { foreground = await context.inspectForeground(pane); } catch { continue; }
+      try {
+        // Exact command matches skip Adapter verification, so bound this probe at its own use site.
+        // A timed-out result must not attach later or block other panes and subsequent snapshots.
+        foreground = await lifecycleWithin(
+          context.inspectForeground(pane), this.#verifyTimeoutMs, 'Agent process discovery',
+        );
+      } catch { continue; }
       // A PID without its start time is not a process generation. Do not publish a lease that
       // destructive capabilities must permanently reject; the next pane poll retries the probe.
       if (!foreground || foreground.startedAt === undefined || !(foreground.tty ?? pane.tty)) continue;

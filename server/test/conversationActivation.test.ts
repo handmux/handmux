@@ -725,6 +725,66 @@ describe('Conversation activation', () => {
     expect(runPaneCommand).toHaveBeenCalledTimes(1);
   });
 
+  it.each(['discover', 'shell'] as const)('never executes recovery after service timeout during final %s recheck', async (slowStep) => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-recovery-'));
+    const store = new CodexActivationReceiptStore(path.join(directory, 'receipts.json'));
+    const prepared = store.prepare({
+      pane: {
+        paneId: '%1', sessionName: 's', windowId: '@1',
+        tmuxEpoch: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      },
+      process: { pid: 10, startedAt: 100, tty: 'ttys001', executable: '/usr/bin/codex' },
+      sessionId: openSession().sessionId,
+      command: openSession().command,
+    });
+    let release!: () => void;
+    const blocked = new Promise<void>((resolve) => { release = resolve; });
+    let entered!: () => void;
+    const recheckStarted = new Promise<void>((resolve) => { entered = resolve; });
+    const app = unmanagedApp();
+    if (slowStep === 'discover') app.discover.mockResolvedValueOnce({ managed: false, threadId: null })
+      .mockImplementationOnce(async () => {
+        entered();
+        await blocked;
+        return { managed: false, threadId: null };
+      });
+    const shell = { pid: 20, startedAt: 200, tty: 'ttys001', executable: '/bin/zsh' };
+    const inspectForeground = vi.fn(async () => shell);
+    if (slowStep === 'shell') inspectForeground.mockResolvedValueOnce(shell)
+      .mockImplementationOnce(async () => { entered(); await blocked; return shell; });
+    const runPaneCommand = vi.fn(async () => {});
+    const controller = createCodexConversationActivationController({
+      app,
+      panes: {
+        list: vi.fn(async () => [{
+          paneId: '%1', currentCommand: 'zsh', sessionName: 's', windowId: '@1', windowName: 'w',
+          tty: 'ttys001',
+        }]),
+        subscribe: vi.fn(() => () => {}),
+      },
+      process: { inspectForeground },
+      commands: {
+        paneEpoch: vi.fn(async () => 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'),
+        inspectOpenSession: vi.fn(async () => null), openOutputCapture: vi.fn(), runPaneCommand,
+      },
+      receipts: store,
+    });
+    const service = new AgentConversationActivationService({ codex: controller }, { timeoutMs: 20 });
+    const result = expect(service.recover('%1', prepared.operationId)).rejects.toMatchObject({
+      code: 'unavailable', recovery: { sessionId: openSession().sessionId },
+    });
+    await recheckStarted;
+    try {
+      await result;
+      expect(runPaneCommand).not.toHaveBeenCalled();
+    } finally {
+      release();
+      // Let the real controller finish after the service has already returned its timeout response.
+      await new Promise<void>((resolve) => setImmediate(resolve));
+    }
+    expect(runPaneCommand).not.toHaveBeenCalled();
+  });
+
   it('keeps recovery lookup read-only while the exact original Codex is still running', async () => {
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-recovery-'));
     const store = new CodexActivationReceiptStore(path.join(directory, 'receipts.json'));
