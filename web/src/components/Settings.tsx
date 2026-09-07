@@ -5,6 +5,7 @@ import { PushScriptContent } from './PushScriptSheet.jsx';
 import {
   CONVERSATION_FONT_SIZES, DEFAULT_CONVERSATION_FONT_SIZE,
   getDocHighlight, getVoiceFillerFilter, setDocHighlight, setVoiceFillerFilter,
+  getFont, setFont, clearFont,
   VOICE_FILLER_FILTER_LEVELS,
 } from '../storage.js';
 import { t, getLangCode, setLang, AVAILABLE } from '../i18n';
@@ -317,7 +318,8 @@ export default function Settings({ open, onClose, termRef, onOpenChangelog = () 
 
   useEffect(() => {
     if (open) {
-      setTerminalFont(termRef.current?.getFontSize?.() ?? null);
+      const storedSize = getFont();
+      setTerminalFont(termRef.current?.getFontSize?.() ?? { size: storedSize, auto: storedSize == null });
       setNotify(notifyEnabled());
       setVoiceFillerFilterState(getVoiceFillerFilter());
     } else {
@@ -345,11 +347,14 @@ export default function Settings({ open, onClose, termRef, onOpenChangelog = () 
 
   const stepFont = (delta: number): void => {
     const current = termRef.current?.getFontSize?.();
-    const applied = termRef.current?.setFontSize?.((current?.size ?? 14) + delta);
-    if (applied != null) setTerminalFont({ size: applied, auto: false });
+    const next = Math.max(8, Math.min(40, Math.round((current?.size ?? getFont() ?? 14) + delta)));
+    const applied = termRef.current?.setFontSize?.(next);
+    if (applied == null) setFont(next);
+    setTerminalFont({ size: applied ?? next, auto: false });
   };
   const autoFont = (): void => {
     termRef.current?.autoFont?.();
+    clearFont();
     setTerminalFont({ size: null, auto: true });
   };
   const stepConversationFont = (delta: -1 | 1): void => {

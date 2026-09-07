@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { TerminalProps } from './components/Terminal.jsx';
 import type { WindowBarProps, WorkspaceWindow } from './components/WindowBar.jsx';
 import type { WorkspaceRecoveryPlan, WorkspacePlanSession } from './workspaceRecovery.js';
+import type { AgentConversationController } from './hooks/useAgentConversation.js';
 
 type MockWindowBarProps = Omit<WindowBarProps,
   'onSelectWindow' | 'onManageWindow' | 'onManagePane' | 'onPaneMapOpenChange'> & {
@@ -38,6 +39,37 @@ const api = vi.hoisted(() => ({
   fetchDoc: vi.fn(),
 }));
 const storage = vi.hoisted(() => ({ applyWorkspaceRestoreMapping: vi.fn() }));
+const conversationApi = vi.hoisted(() => ({
+  discoverAgentConversation: vi.fn(), readAgentConversationPage: vi.fn(),
+  sendAgentConversationMessage: vi.fn(),
+}));
+const conversation = vi.hoisted(() => ({ controller: null as AgentConversationController | null }));
+const controlsInput = vi.hoisted(() => ({ run: null as unknown, enabled: false }));
+const recoveryApi = vi.hoisted(() => ({ getConversationActivationRecovery: vi.fn() }));
+vi.mock('./hooks/useAgentConversationControls.js', async (importOriginal) => {
+  const original = await importOriginal<typeof import('./hooks/useAgentConversationControls.js')>();
+  return { ...original, useAgentConversationControls: (...args: Parameters<typeof original.useAgentConversationControls>) => {
+    controlsInput.run = args[0];
+    controlsInput.enabled = args[1];
+    return original.useAgentConversationControls(...args);
+  } };
+});
+vi.mock('./agentConversationControlsApi.js', async (importOriginal) => ({
+  ...(await importOriginal()), readConversationControls: vi.fn(async () => ({})),
+}));
+vi.mock('./hooks/useAgentConversation.js', async (importOriginal) => {
+  const original = await importOriginal<typeof import('./hooks/useAgentConversation.js')>();
+  return { ...original, useAgentConversation: (...args: Parameters<typeof original.useAgentConversation>) => {
+    conversation.controller = original.useAgentConversation(...args);
+    return conversation.controller;
+  } };
+});
+vi.mock('./agentConversationApi.js', async (importOriginal) => ({
+  ...(await importOriginal()), ...conversationApi,
+}));
+vi.mock('./agentConversationActivationApi.js', async (importOriginal) => ({
+  ...(await importOriginal()), ...recoveryApi,
+}));
 const push = vi.hoisted(() => ({ getNotifications: vi.fn(), clearPaneNotification: vi.fn() }));
 const windowBar = vi.hoisted((): { props: WindowBarProps | null } => ({ props: null }));
 const terminal = vi.hoisted(() => ({
@@ -245,6 +277,8 @@ async function renderApp() {
 
 beforeEach(() => {
   vi.useFakeTimers();
+  Object.values(conversationApi).forEach((mock) => mock.mockReset());
+  recoveryApi.getConversationActivationRecovery.mockReset().mockResolvedValue(null);
   Object.values(api).forEach((mock) => mock.mockReset());
   storage.applyWorkspaceRestoreMapping.mockReset();
   push.getNotifications.mockReset();
@@ -308,6 +342,118 @@ describe('App hidden Project Task beta', () => {
     const view = await renderApp();
     expect(view.container.querySelector('.project-root')).toBeNull();
     expect(view.container.querySelector('.topbar')).toBeTruthy();
+  });
+});
+
+describe('App established conversation during server restart', () => {
+  const pane = { id: '%73', active: true, width: 80, height: 24, command: 'codex', cwd: '/work', agent: 'codex' };
+  const run = { agentId: 'codex', paneId: pane.id, runId: 'before-restart', sessionId: 'session-1' };
+  const descriptors = [{ id: 'codex', label: 'Codex', capabilities: { conversation: true } }];
+  async function openConversation() {
+    localStorage.setItem('tw_bound', JSON.stringify(['project']));
+    localStorage.setItem(`tw_lens_${pane.id}`, 'chat');
+    api.getSessions.mockResolvedValue([{ id: '$71', name: 'project' }]);
+    api.getWindows.mockResolvedValue([{ id: '@71', name: 'main', active: true, panes: 1 }]);
+    api.getPanes.mockResolvedValue([pane]);
+    api.getAgentDiscovery.mockResolvedValue({ descriptors, runs: [run], health: [] });
+    conversationApi.discoverAgentConversation.mockImplementation(async (activeRun) => ({
+      session: { agentId: activeRun.agentId, sessionId: activeRun.sessionId }, run: activeRun,
+      viewId: activeRun.sessionId, historyVersion: '1', capabilities: { history: true, live: 'poll', send: ['prompt'] },
+    }));
+    conversationApi.readAgentConversationPage.mockImplementation(async (activeRun) => ({
+      status: 'ok', page: { sessionId: activeRun.sessionId, viewId: activeRun.sessionId,
+        historyVersion: '1', hasMore: false, items: [{ id: 'message-1', kind: 'message',
+          role: 'assistant', content: [{ type: 'text', text: `Saved answer ${activeRun.sessionId}` }] }] },
+    }));
+    await renderApp();
+    expect(screen.getByText('Saved answer session-1')).toBeTruthy();
+    expect(controlsInput.enabled).toBe(true);
+  }
+
+  it.each(['request failure', 'empty discovery', 'missing descriptor', 'canonical null', 'null before discovery', 'sessionless run'])(
+    'retains content and chat selection through %s and resumes the same session', async (gap) => {
+      await openConversation();
+      const readPage = conversationApi.readAgentConversationPage.getMockImplementation()!;
+      if (gap === 'request failure') {
+        api.getAgentDiscovery.mockRejectedValue(new Error('server restarting'));
+        api.getPanes.mockRejectedValue(new Error('server restarting'));
+        conversationApi.readAgentConversationPage.mockRejectedValue(new Error('server restarting'));
+      } else {
+        api.getAgentDiscovery.mockResolvedValue({
+          descriptors: ['empty discovery', 'missing descriptor'].includes(gap) ? [] : descriptors,
+          runs: ['missing descriptor', 'null before discovery'].includes(gap) ? [run]
+            : gap === 'sessionless run' ? [{ agentId: 'codex', paneId: pane.id, runId: 'starting' }] : [],
+          health: [],
+        });
+        if (['canonical null', 'null before discovery'].includes(gap)) api.getPanes.mockResolvedValue([{ ...pane, agent: null }]);
+      }
+      await flush(5_000);
+      expect(screen.getByText('Saved answer session-1')).toBeTruthy();
+      expect(screen.queryByTestId('terminal-pane')).toBeNull();
+      expect(localStorage.getItem(`tw_lens_${pane.id}`)).toBe('chat');
+      if (gap !== 'request failure') {
+        expect(conversation.controller?.status).toBe('reconnecting');
+        await expect(conversation.controller!.send('must not reach an unverified process')).rejects.toThrow();
+        expect(conversationApi.sendAgentConversationMessage).not.toHaveBeenCalled();
+        expect(controlsInput.run).toBeNull();
+        expect(controlsInput.enabled).toBe(false);
+      }
+      api.getPanes.mockResolvedValue([pane]);
+      conversationApi.readAgentConversationPage.mockImplementation(readPage);
+      api.getAgentDiscovery.mockResolvedValue({ descriptors, runs: [{ ...run, runId: 'after-restart' }], health: [] });
+      await flush(10_000);
+      expect(conversationApi.discoverAgentConversation).toHaveBeenCalledWith(expect.objectContaining({ runId: 'after-restart' }));
+      expect(screen.getByText('Saved answer session-1')).toBeTruthy();
+      expect(conversation.controller?.status).toBe('ready');
+    },
+  );
+
+  it.each(['codex', 'pi'])('clears old content when discovery verifies a replacement %s session', async (agentId) => {
+    await openConversation();
+    api.getPanes.mockResolvedValue([{ ...pane, agent: agentId }]);
+    api.getAgentDiscovery.mockResolvedValue({
+      descriptors: [{ id: agentId, label: agentId, capabilities: { conversation: true } }],
+      runs: [{ ...run, agentId, runId: 'replacement', sessionId: 'session-2' }], health: [],
+    });
+    await flush(5_000);
+    expect(screen.queryByText('Saved answer session-1')).toBeNull();
+    expect(screen.getByText('Saved answer session-2')).toBeTruthy();
+    expect(localStorage.getItem(`tw_lens_${pane.id}`)).toBe('chat');
+  });
+
+  it('revokes the old lease when /panes identifies a different Agent before discovery catches up', async () => {
+    await openConversation();
+    api.getPanes.mockResolvedValue([{ ...pane, agent: 'pi' }]);
+    await flush(5_000);
+    expect(screen.queryByText('Saved answer session-1')).toBeNull();
+    await expect(conversation.controller!.send('must not reach Codex')).rejects.toThrow();
+    expect(conversation.controller?.items).toEqual([]);
+    expect(localStorage.getItem(`tw_lens_${pane.id}`)).toBe('chat');
+  });
+
+  it('does not replace established history with a durable takeover receipt during a discovery gap', async () => {
+    recoveryApi.getConversationActivationRecovery.mockResolvedValue({
+      operationId: 'a'.repeat(64), phase: 'interrupted', state: 'current', canResume: true,
+      recovery: { kind: 'codex_resume', sessionId: 'session-1', command: 'handmux codex resume session-1' },
+    });
+    await openConversation();
+    api.getPanes.mockResolvedValue([{ ...pane, agent: null }]);
+    api.getAgentDiscovery.mockResolvedValue({ descriptors, runs: [], health: [] });
+    await flush(5_000);
+    expect(screen.getByText('Saved answer session-1')).toBeTruthy();
+    expect(conversation.controller?.status).toBe('reconnecting');
+    expect(controlsInput.run).toBeNull();
+  });
+
+  it('does not resurrect remembered history after explicitly leaving chat for a shell', async () => {
+    await openConversation();
+    act(() => windowBarProps().onLensChange?.('terminal'));
+    api.getPanes.mockResolvedValue([{ ...pane, agent: null }]);
+    api.getAgentDiscovery.mockResolvedValue({ descriptors, runs: [], health: [] });
+    await flush(5_000);
+    expect(screen.getByTestId('terminal-pane')).toBeTruthy();
+    expect(localStorage.getItem(`tw_chat_agent_${pane.id}`)).toBeNull();
+    expect(conversation.controller?.items).toEqual([]);
   });
 });
 

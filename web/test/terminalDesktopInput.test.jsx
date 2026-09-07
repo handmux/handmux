@@ -196,6 +196,8 @@ vi.mock('@xterm/xterm', () => ({
 }));
 
 import RawTerminal from '../src/components/Terminal.jsx';
+import Settings from '../src/components/Settings.jsx';
+import { clearFont, getFont, setFont } from '../src/storage.js';
 import {
   useDesktopTerminalInput,
   useTerminalInput,
@@ -256,11 +258,38 @@ describe('desktop terminal input', () => {
 
   afterEach(() => {
     cleanup();
+    clearFont();
     if (vi.isFakeTimers()) vi.runOnlyPendingTimers();
     vi.useRealTimers();
     delete document.hidden;
     delete navigator.platform;
     delete window.visualViewport;
+  });
+
+  it('mounts with the font saved from Settings while the terminal was absent, including auto reset', () => {
+    localStorage.setItem('tw_lang', 'zh');
+    setFont(20);
+    const termRef = { current: null };
+    const { container, rerender } = render(<Settings open onClose={() => {}} termRef={termRef} />);
+    const openFontSettings = () => act(() => [...container.querySelectorAll('.settings-page-row')]
+      .find((row) => row.querySelector('.settings-page-row-label')?.textContent === '终端字体大小').click());
+    openFontSettings();
+    act(() => container.querySelector('[aria-label="增大终端字体"]').click());
+    expect(getFont()).toBe(21);
+
+    rerender(<Terminal pane="%1" desktop={false} ref={termRef} />);
+    expect(mocks.instances.at(-1).options.fontSize).toBe(21);
+    expect(termRef.current.getFontSize()).toEqual({ size: 21, auto: false });
+
+    rerender(<Settings open onClose={() => {}} termRef={termRef} />);
+    expect(termRef.current).toBeNull();
+    openFontSettings();
+    act(() => [...container.querySelectorAll('.settings-font-controls button')]
+      .find((button) => button.textContent === '自适应').click());
+    expect(getFont()).toBeNull();
+
+    rerender(<Terminal pane="%1" desktop={false} ref={termRef} />);
+    expect(termRef.current.getFontSize()).toEqual({ size: 14, auto: true });
   });
 
   it('keeps mobile xterm read-only and never exposes its helper textarea', () => {

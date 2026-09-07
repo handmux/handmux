@@ -1696,9 +1696,14 @@ export default function App() {
   const authoritativePaneRun = authoritativePaneSession ?? agentDiscovery?.runs.find((candidate) => (
     candidate.paneId === currentPaneId
   )) ?? null;
+  const chatAgentByPaneRef = useRef(new Map<string, string>());
+  const previousChatAgent = current?.paneId ? chatAgentByPaneRef.current.get(current.paneId) : null;
+  const retainSelectedConversation = lens === 'chat' && !!current?.paneId && !!previousChatAgent
+    && conversationIdentityByPaneRef.current.has(`${current.paneId}\0${previousChatAgent}`);
   // A receipt only bridges the shell gap where Runtime has no verified current run. Any discovered run,
-  // including a native sessionless Codex, wins without mutating the durable recovery record.
-  const durableConversationRecovery = conversationRecoveryForSessionlessPane(
+  // including a native sessionless Codex, wins without mutating the durable recovery record. An already
+  // selected, verified conversation likewise keeps its history when discovery temporarily loses the run.
+  const durableConversationRecovery = retainSelectedConversation ? null : conversationRecoveryForSessionlessPane(
     conversationRecovery.receipt,
     authoritativePaneRun,
   );
@@ -1713,16 +1718,17 @@ export default function App() {
   // The pane's last verified Agent owns an explicitly selected chat view until the user leaves it. Runtime
   // and tmux discovery are asynchronous health signals: a transient null must not replace the Conversation Surface with a
   // freshly mounted Terminal and then switch back on the next poll.
-  const chatAgentByPaneRef = useRef(new Map<string, string>());
   if (current?.paneId && currentAgent) {
     if (chatAgentByPaneRef.current.get(current.paneId) !== currentAgent) {
+      clearPaneConversationIdentities(conversationIdentityByPaneRef.current, current.paneId);
       rememberRecent(chatAgentByPaneRef.current, current.paneId, currentAgent);
       localStorage.setItem(`tw_chat_agent_${current.paneId}`, currentAgent);
     }
   } else if (current?.paneId && canonicalCurrentAgent
+    && !retainSelectedConversation
     && !(lens === 'chat' && (durableConversationRecovery || recoveryLookupUncertain))) {
-    // A canonical `agent:null` means the process exited to a shell; it is not a discovery gap. Forget the
-    // previous owner so this pane cannot resurrect a stale chat/run if a later legacy response is sparse.
+    // A shell must not resurrect an old conversation after the user leaves chat. While chat is selected,
+    // its verified identity owns the readable history, independently of the current process/run lease.
     chatAgentByPaneRef.current.delete(current.paneId);
     clearPaneConversationIdentities(conversationIdentityByPaneRef.current, current.paneId);
     localStorage.removeItem(`tw_chat_agent_${current.paneId}`);
@@ -1730,9 +1736,10 @@ export default function App() {
   const persistedChatAgent = current?.paneId
     ? localStorage.getItem(`tw_chat_agent_${current.paneId}`) : null;
   const chatAgent = current?.paneId
-    ? authoritativePaneSession?.agentId
+    ? currentAgent ?? authoritativePaneSession?.agentId
       ?? (durableConversationRecovery ? 'codex' : conversationActivationDisplayTarget?.agentId)
-      ?? currentAgent ?? (canonicalCurrentAgent && !(lens === 'chat' && recoveryLookupUncertain)
+      ?? (canonicalCurrentAgent && !retainSelectedConversation
+        && !(lens === 'chat' && recoveryLookupUncertain)
         ? null : chatAgentByPaneRef.current.get(current.paneId)
         ?? (persistedChatAgent && persistedChatAgent.length <= 64 ? persistedChatAgent : null))
     : null;
@@ -1799,7 +1806,7 @@ export default function App() {
   // Run leases are process-local and revoked authoritatively. Keeping the previous lease across a missing
   // discovery snapshot creates an infinite stale-run loop after exit/restart; the selected chat lens stays
   // mounted without it and reconnects as soon as Runtime publishes the replacement.
-  const currentAgentRun = discoveredAgentRun;
+  const currentAgentRun = canonicalCurrentAgent && !currentAgent ? null : discoveredAgentRun;
   const activationPending = activationTargetMatches(
     conversationActivationTarget, currentPaneId, chatAgent,
   );
@@ -1826,7 +1833,8 @@ export default function App() {
   );
   const conversationIdentityKey = current?.paneId && chatAgent
     ? `${current.paneId}\0${chatAgent}` : null;
-  if (conversationIdentityKey && currentAgentRun?.sessionId) {
+  if (conversationIdentityKey && currentAgentRun?.sessionId
+    && currentAgentDescriptor?.capabilities.conversation === true) {
     rememberRecent(conversationIdentityByPaneRef.current, conversationIdentityKey, {
       agentId: currentAgentRun.agentId,
       paneId: currentAgentRun.paneId,
@@ -1865,8 +1873,9 @@ export default function App() {
   const normalizedConversationRun = currentAgentDescriptor?.capabilities.conversation === true
     && currentAgentRun?.sessionId
     ? currentAgentRun : null;
-  const normalizedConversationIdentity = currentAgentDescriptor?.capabilities.conversation === true
-    ? currentConversationIdentity : null;
+  // Descriptor availability gates live operations, not the last verified history. Empty discovery during
+  // restart must leave the identity intact so useAgentConversation can retain its projection and reconnect.
+  const normalizedConversationIdentity = currentConversationIdentity;
   const chatLensAvailable = currentAgentDescriptor?.capabilities.conversation === true
     && conversationEnabled
     && (!!normalizedConversationRun || !!normalizedConversationIdentity
@@ -1923,8 +1932,8 @@ export default function App() {
     conversationControlCapabilities.conversationCommands,
   ].some(Boolean) || conversationSendable;
   const agentConversationControls = useAgentConversationControls(
-    chatLens && conversationControlsEnabled && currentAgentRun?.sessionId ? currentAgentRun : null,
-    chatLens && conversationControlsEnabled && !!currentAgentRun?.sessionId,
+    chatLens && conversationControlsEnabled ? normalizedConversationRun : null,
+    chatLens && conversationControlsEnabled && !!normalizedConversationRun,
     onAuthFail,
   );
   const serverConversationActivity = agentConversationControls.snapshot?.activity

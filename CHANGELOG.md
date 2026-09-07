@@ -10,6 +10,8 @@ All notable changes to handmux. Format follows [Keep a Changelog](https://keepac
 
 ### Fixed
 
+- 修复对话页中终端字号显示为空且无法调整的问题，保存的设置会在切回终端时生效。
+- 修复服务重启或会话发现暂时不完整时，已打开的 Agent 对话内容消失、自动切回终端的问题；保留对话内容与视图选择，暂停未确认的会话操作，并在原会话恢复后继续连接。
 - 修复 iOS 上 Agent 对话发送按钮只显示圆形背景、箭头图标不可见的问题。
 - 修复 `handmux codex resume` 默认列出所有目录会话的问题；托管模式现在继承启动目录，同时继续尊重显式 `-C/--cd`、`--all` 与 `--last`。
 - 修复直接运行或通过原生 `codex resume` 恢复的 Codex 只有终端、无法进入通用会话接管页的问题；包括最初由 Handmux 或编辑器集成创建的历史会话，Runtime 现在都从已验证的完整前台进程身份建立唯一 sessionless run，不再受系统语言影响，并由 App Server 在托管后关联 thread，不再与 Inbox attachment 竞争。

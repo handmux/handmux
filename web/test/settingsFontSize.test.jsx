@@ -12,6 +12,7 @@ vi.mock('../src/push.js', () => ({
 }));
 
 import Settings from '../src/components/Settings.jsx';
+import { getFont, setFont } from '../src/storage.js';
 
 let container;
 let root;
@@ -60,6 +61,71 @@ function ConversationFontHarness({ initial = 15, onChange = () => {} }) {
 }
 
 describe('Settings font organization', () => {
+  it('shows and persists terminal font controls without a mounted terminal', () => {
+    termRef.current = null;
+    act(() => root.render(<Settings open onClose={() => {}} termRef={termRef} />));
+    expect(row('终端字体大小').textContent).toContain('自适应');
+    expect(row('终端字体大小').textContent).not.toContain('—');
+    act(() => row('终端字体大小').click());
+    const increase = () => container.querySelector('[aria-label="增大终端字体"]');
+    const decrease = () => container.querySelector('[aria-label="减小终端字体"]');
+    act(() => increase().click());
+    expect(getFont()).toBe(15);
+    expect(container.querySelector('.settings-font-value').textContent).toBe('15px');
+    act(() => increase().click());
+    expect(getFont()).toBe(16);
+    act(() => decrease().click());
+    expect(getFont()).toBe(15);
+
+    act(() => root.render(<Settings open={false} onClose={() => {}} termRef={termRef} />));
+    act(() => root.render(<Settings open onClose={() => {}} termRef={termRef} />));
+    expect(row('终端字体大小').textContent).toContain('15px');
+    act(() => row('终端字体大小').click());
+    const auto = [...container.querySelectorAll('.settings-font-controls button')]
+      .find((button) => button.textContent === '自适应');
+    act(() => auto.click());
+    expect(getFont()).toBeNull();
+    expect(auto.getAttribute('aria-pressed')).toBe('true');
+    expect(container.querySelector('.settings-font-value').textContent).toBe('自适应');
+    act(() => decrease().click());
+    expect(getFont()).toBe(13);
+  });
+
+  it.each([[8, '减小终端字体'], [40, '增大终端字体']])(
+    'reads saved %ipx and clamps the stepper without a terminal', (size, label) => {
+      termRef.current = null;
+      setFont(size);
+      act(() => root.render(<Settings open onClose={() => {}} termRef={termRef} />));
+      expect(row('终端字体大小').textContent).toContain(`${size}px`);
+      act(() => row('终端字体大小').click());
+      act(() => container.querySelector(`[aria-label="${label}"]`).click());
+      expect(getFont()).toBe(size);
+      expect(container.querySelector('.settings-font-value').textContent).toBe(`${size}px`);
+    },
+  );
+
+  it('persists a saved size when the terminal handle is not ready', () => {
+    setFont(19);
+    termRef.current.getFontSize.mockReturnValue(null);
+    termRef.current.setFontSize.mockReturnValue(null);
+    act(() => root.render(<Settings open onClose={() => {}} termRef={termRef} />));
+    expect(row('终端字体大小').textContent).toContain('19px');
+    act(() => row('终端字体大小').click());
+    act(() => container.querySelector('[aria-label="增大终端字体"]').click());
+    expect(getFont()).toBe(20);
+  });
+
+  it('steps from the mounted terminal actual auto-fit size instead of the stored default', () => {
+    setFont(20);
+    termRef.current.getFontSize.mockReturnValue({ size: 11, auto: true });
+    act(() => root.render(<Settings open onClose={() => {}} termRef={termRef} />));
+    act(() => row('终端字体大小').click());
+    expect(container.querySelector('.settings-font-value').textContent).toBe('自适应');
+    act(() => container.querySelector('[aria-label="增大终端字体"]').click());
+    expect(termRef.current.setFontSize).toHaveBeenCalledWith(12);
+    expect(container.querySelector('.settings-font-value').textContent).toBe('12px');
+  });
+
   it('keeps general language-only and groups all terminal controls together', () => {
     act(() => root.render(<Settings open onClose={() => {}} termRef={termRef} />));
 
