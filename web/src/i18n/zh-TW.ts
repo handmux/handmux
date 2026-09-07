@@ -351,7 +351,7 @@ export default {
   'settings.conversation_font_decrease': '縮小對話字型',
   'settings.conversation_font_increase': '放大對話字型',
   'settings.conversation_font_default': '恢復預設',
-  'settings.conversation_font_hint': '僅調整對話訊息內文及其中的 Markdown 與程式碼。',
+  'settings.conversation_font_hint': '可在 10–20px 之間以 1px 為步進調整；僅影響對話訊息內文及其中的 Markdown 與程式碼。',
   'settings.keyboard_mode': '鍵盤模式',
   'settings.keyboard_mode_auto': '自動識別',
   'settings.keyboard_mode_mobile': '手機',

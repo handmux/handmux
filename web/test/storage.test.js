@@ -78,12 +78,12 @@ describe('ideas per window (tw_ideas)', () => {
 describe('storage', () => {
   it('keeps a valid discrete conversation font size and safely restores the 15px default', () => {
     expect(DEFAULT_CONVERSATION_FONT_SIZE).toBe(15);
-    expect(CONVERSATION_FONT_SIZES).toEqual([13, 14, 15, 16, 17, 18, 20]);
+    expect(CONVERSATION_FONT_SIZES).toEqual([10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]);
     expect(getConversationFontSize()).toBe(15);
 
-    setConversationFontSize(13);
-    expect(localStorage.getItem('tw_conversation_font_size')).toBe('13');
-    expect(getConversationFontSize()).toBe(13);
+    setConversationFontSize(10);
+    expect(localStorage.getItem('tw_conversation_font_size')).toBe('10');
+    expect(getConversationFontSize()).toBe(10);
     setConversationFontSize(20);
     expect(getConversationFontSize()).toBe(20);
 
@@ -94,14 +94,14 @@ describe('storage', () => {
 
   it('ignores out-of-range writes and falls back from corrupt conversation font storage', () => {
     setConversationFontSize(18);
-    setConversationFontSize(12);
+    setConversationFontSize(9);
     setConversationFontSize(21);
     setConversationFontSize(15.5);
     expect(getConversationFontSize()).toBe(18);
 
     localStorage.setItem('tw_conversation_font_size', 'huge');
     expect(getConversationFontSize()).toBe(15);
-    localStorage.setItem('tw_conversation_font_size', '19');
+    localStorage.setItem('tw_conversation_font_size', '9');
     expect(getConversationFontSize()).toBe(15);
   });
 

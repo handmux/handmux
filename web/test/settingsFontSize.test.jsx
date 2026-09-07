@@ -95,6 +95,13 @@ describe('Settings font organization', () => {
     expect(container.querySelector('.settings-font-value').textContent).toBe('14px');
     act(() => decrease().click());
     expect(onChange).toHaveBeenLastCalledWith(13);
+    expect(decrease().disabled).toBe(false);
+    act(() => decrease().click());
+    expect(onChange).toHaveBeenLastCalledWith(12);
+    act(() => decrease().click());
+    expect(onChange).toHaveBeenLastCalledWith(11);
+    act(() => decrease().click());
+    expect(onChange).toHaveBeenLastCalledWith(10);
     expect(decrease().disabled).toBe(true);
 
     const restore = [...container.querySelectorAll('.settings-font-controls button')]
@@ -104,15 +111,22 @@ describe('Settings font organization', () => {
     expect(container.querySelector('.settings-font-value').textContent).toBe('15px');
     expect(restore.getAttribute('aria-pressed')).toBe('true');
     expect(container.textContent).not.toContain('自适应');
+    expect(container.textContent).toContain('10–20px');
   });
 
   it('stops at the largest conversation size', () => {
     const onChange = vi.fn();
-    act(() => root.render(<ConversationFontHarness initial={20} onChange={onChange} />));
+    act(() => root.render(<ConversationFontHarness initial={18} onChange={onChange} />));
     act(() => row('对话字体大小').click());
-    const increase = container.querySelector('[aria-label="增大对话字体"]');
-    expect(increase.disabled).toBe(true);
-    act(() => increase.click());
-    expect(onChange).not.toHaveBeenCalled();
+    const increase = () => container.querySelector('[aria-label="增大对话字体"]');
+    act(() => increase().click());
+    expect(onChange).toHaveBeenLastCalledWith(19);
+    act(() => increase().click());
+    expect(onChange).toHaveBeenLastCalledWith(20);
+    expect(container.querySelector('.settings-font-value').textContent).toBe('20px');
+    expect(increase().disabled).toBe(true);
+    const callCount = onChange.mock.calls.length;
+    act(() => increase().click());
+    expect(onChange).toHaveBeenCalledTimes(callCount);
   });
 });

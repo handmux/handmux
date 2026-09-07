@@ -351,7 +351,7 @@ export default {
   'settings.conversation_font_decrease': '대화 글꼴 축소',
   'settings.conversation_font_increase': '대화 글꼴 확대',
   'settings.conversation_font_default': '기본값으로 복원',
-  'settings.conversation_font_hint': '대화 메시지 본문과 그 안의 Markdown 및 코드만 조정합니다.',
+  'settings.conversation_font_hint': '10–20px 사이를 1px 단위로 조정합니다. 대화 메시지 본문과 그 안의 Markdown 및 코드에만 영향을 줍니다.',
   'settings.keyboard_mode': '키보드 모드',
   'settings.keyboard_mode_auto': '자동 감지',
   'settings.keyboard_mode_mobile': '모바일',

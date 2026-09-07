@@ -179,12 +179,12 @@ function composerModelControl(
 }
 
 describe('generic Agent Conversation UI', () => {
-  it('applies the selected size only to message bodies while Markdown code inherits it', () => {
+  it('keeps the default message geometry identical to the original 15px conversation', () => {
     const stylesheet = document.createElement('style');
     stylesheet.dataset.conversationFontTestStyles = 'true';
     stylesheet.textContent = styles;
     document.head.append(stylesheet);
-    const { container } = render(<AgentConversationView conversationFontSize={18} conversation={controller({
+    const { container } = render(<AgentConversationView conversationFontSize={15} conversation={controller({
       items: [
         {
           key: 'user-font', provisional: false,
@@ -198,27 +198,113 @@ describe('generic Agent Conversation UI', () => {
           item: {
             id: 'assistant-font', sessionId: 'session-1', status: 'complete', kind: 'message',
             role: 'assistant', sourceCreatedAt: Date.now(),
-            content: [{ type: 'text', text: 'Assistant `code`' }],
+            content: [{ type: 'text', text: 'First paragraph.\n\nSecond with `code`.' }],
           },
         },
       ],
     })} />);
 
     const view = container.querySelector('.agent-conversation-view') as HTMLElement;
-    expect(view.style.getPropertyValue('--conversation-font-size')).toBe('18px');
+    expect(view.style.getPropertyValue('--conversation-font-size')).toBe('');
     expect(container.querySelectorAll('.chat-bubble')).toHaveLength(2);
-    const message = container.querySelector('.chat-bubble') as HTMLElement;
+    const user = container.querySelector('.chat-me') as HTMLElement;
+    const assistant = container.querySelector('.chat-them') as HTMLElement;
+    const paragraph = assistant.querySelector('p') as HTMLElement;
+    expect(user.style.fontSize).toBe('');
+    expect(assistant.style.fontSize).toBe('');
+    expect(getComputedStyle(assistant).fontSize).toBe('15px');
+    expect(getComputedStyle(assistant).padding).toBe('3px 2px');
+    expect(getComputedStyle(assistant).borderRadius).toBe('0');
+    expect(getComputedStyle(container.querySelector('.chat-scroll') as HTMLElement).gap).toBe('8px');
+    expect(getComputedStyle(container.querySelector('.chat-entry-row') as HTMLElement).gap).toBe('8px');
+    expect(getComputedStyle(paragraph).marginBottom).toBe('0.5333333333333333em');
+    expect(styles).toMatch(/^\.chat-bubble\s*\{[^}]*font-size:\s*15px;[^}]*line-height:\s*1\.4;/m);
+    expect(styles).not.toMatch(/\.agent-conversation-view \.chat-bubble/);
+    expect(styles).toMatch(/\.chat-them\s*\{[^}]*border-radius:\s*0;[^}]*padding:\s*3px 2px;/s);
+    expect(styles).toMatch(/\.chat-md p\s*\{[^}]*margin:\s*0 0 \.5333333333333333em;/s);
+    expect(styles).toMatch(/\.chat-scroll\s*\{[^}]*gap:\s*8px;/s);
+    expect(styles).toMatch(/\.chat-entry-row\s*\{[^}]*gap:\s*8px;/s);
+  });
+
+  it('scales only message bodies and leaves timestamps and tool details at fixed sizes', () => {
+    const stylesheet = document.createElement('style');
+    stylesheet.dataset.conversationFontTestStyles = 'true';
+    stylesheet.textContent = styles;
+    document.head.append(stylesheet);
+    const { container } = render(<AgentConversationView conversationFontSize={10} conversation={controller({
+      items: [
+        {
+          key: 'user-font', provisional: false,
+          item: {
+            id: 'user-font', sessionId: 'session-1', status: 'complete', kind: 'message',
+            role: 'user', sourceCreatedAt: Date.now(), content: [{ type: 'text', text: 'User body' }],
+          },
+        },
+        {
+          key: 'assistant-font', provisional: false,
+          item: {
+            id: 'assistant-font', sessionId: 'session-1', status: 'complete', kind: 'message',
+            role: 'assistant', sourceCreatedAt: Date.now(),
+            content: [{ type: 'text', text: 'First paragraph.\n\nSecond with `code`.' }],
+          },
+        },
+        {
+          key: 'edit-font', provisional: false,
+          item: {
+            id: 'edit-font', sessionId: 'session-1', status: 'complete',
+            kind: 'tool_call', callId: 'edit-font', name: 'apply_patch',
+            extensions: { 'conversation.tool': {
+              name: 'apply_patch', input: { file_path: '/work/file.ts' }, result: 'Done!',
+              isError: false, outcome: 'success',
+              diff: {
+                added: 1, removed: 1,
+                hunks: [{ oldStart: 1, newStart: 1, lines: ['-old', '+new'] }],
+              },
+            } },
+          },
+        },
+        {
+          key: 'command-font', provisional: false,
+          item: {
+            id: 'command-font', sessionId: 'session-1', status: 'complete',
+            kind: 'tool_call', callId: 'command-font', name: 'exec_command',
+            input: { cmd: 'pwd' },
+          },
+        },
+      ],
+    })} />);
+
+    const view = container.querySelector('.agent-conversation-view') as HTMLElement;
+    const user = container.querySelector('.chat-me') as HTMLElement;
+    const assistant = container.querySelector('.chat-them') as HTMLElement;
     const code = container.querySelector('.chat-md code') as HTMLElement;
+    const paragraph = assistant.querySelector('p') as HTMLElement;
     const timestamp = container.querySelector('.chat-ts') as HTMLElement;
-    expect(code.textContent).toBe('code');
-    expect(getComputedStyle(message).fontSize).toBe('var(--conversation-font-size, 15px)');
+    const tools = container.querySelectorAll('.chat-tool-head');
+    expect(view.style.getPropertyValue('--conversation-font-size')).toBe('');
+    expect(user.style.fontSize).toBe('10px');
+    expect(assistant.style.fontSize).toBe('10px');
     expect(getComputedStyle(code).fontSize).toBe('0.92em');
+    expect(getComputedStyle(paragraph).marginBottom).toBe('0.5333333333333333em');
     expect(getComputedStyle(timestamp).fontSize).toBe('10.5px');
-    expect(styles).toMatch(/\.agent-conversation-view \.chat-bubble\s*\{[^}]*font-size:\s*var\(--conversation-font-size, 15px\)/s);
+    expect(getComputedStyle(tools[0]!).fontSize).toBe('12px');
+
+    fireEvent.click(tools[0]!);
+    expect(getComputedStyle(container.querySelector('.dv') as HTMLElement).fontSize).toBe('12.5px');
+    expect(getComputedStyle(container.querySelector('.dv-row') as HTMLElement).fontSize).not.toBe('10px');
+    expect(getComputedStyle(container.querySelector('.dv-code') as HTMLElement).fontSize).not.toBe('10px');
+    fireEvent.click(container.querySelector('.tool-sheet-x')!);
+    fireEvent.click(tools[1]!);
+    expect(getComputedStyle(container.querySelector('.tool-sheet-cmd') as HTMLElement).fontSize).toBe('13px');
+
     expect(styles).toMatch(/\.chat-md code\s*\{[^}]*font-size:\s*\.92em/s);
     expect(styles).toMatch(/\.chat-ts\s*\{[^}]*font-size:\s*10\.5px/s);
     expect(styles).toMatch(/\.chat-optimistic-state\s*\{[^}]*font-size:\s*10px/s);
     expect(styles).toMatch(/\.chat-turn-notice\s*\{[^}]*font-size:\s*13px/s);
+    expect(styles).toMatch(/\.chat-tool-head\s*\{[^}]*font-size:\s*12px/s);
+    expect(styles).toMatch(/\.tool-sheet-cmd\s*\{[^}]*font-size:\s*13px/s);
+    expect(styles).toMatch(/\.dv\s*\{[^}]*font-size:\s*12\.5px/s);
+    expect(styles).not.toContain('--conversation-font-size');
     expect(styles).not.toMatch(/\.chat-ts\s*\{[^}]*conversation-font-size/s);
     expect(styles).not.toMatch(/\.chat-tool-head\s*\{[^}]*conversation-font-size/s);
   });

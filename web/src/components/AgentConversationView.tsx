@@ -8,7 +8,7 @@ import {
   conversationMessageIdentity as messageIdentity,
   type ConversationTimelineMessage,
 } from '../conversationTimelineTypes.js';
-import type { CSSProperties, MouseEvent as ReactMouseEvent } from 'react';
+import type { MouseEvent as ReactMouseEvent } from 'react';
 import type { AgentConversationController } from '../hooks/useAgentConversation.js';
 import type { ConversationActivity } from '../agentConversationControlsApi.js';
 import { projectConversationMessages } from '../conversationPresentation.js';
@@ -449,7 +449,6 @@ export default function AgentConversationView({
     || conversation.loadingOlder || !!pageError || reloadRequired) && !locatingCompletedEntry;
   return (
     <div className="chat-view agent-conversation-view" ref={viewRef} onClick={onOutputLinkClick}
-      style={{ '--conversation-font-size': `${conversationFontSize}px` } as CSSProperties}
       onPointerDown={copy.onPointerDown} onPointerMove={copy.onPointerMove}
       onPointerUp={(event) => {
         copy.onPointerUp(event);
@@ -554,6 +553,7 @@ export default function AgentConversationView({
           return (
             <div key={key} className="chat-entry-row" data-completed-entry-key={key}>
               <ConversationEntry message={message} running={running} copyId={key}
+                fontSize={conversationFontSize}
                 renderTool={(toolMessage, toolRunning) => toolMessage.tool && (
                   <ToolChip tool={toolMessage.tool} running={toolRunning}
                     copyId={key}

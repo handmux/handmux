@@ -75,10 +75,12 @@ export function AssistantMarkdown({
   text,
   streaming = false,
   copyId,
-}: { text: string; streaming?: boolean; copyId: string }) {
+  fontSize = 15,
+}: { text: string; streaming?: boolean; copyId: string; fontSize?: number }) {
   const html = useMemo(() => linkedAssistantHtml(text), [text]);
   return (
     <div className="chat-bubble chat-them chat-md"
+      style={fontSize === 15 ? undefined : { fontSize }}
       data-conversation-stream={streaming ? 'active' : undefined}
       data-conversation-copy-root data-conversation-copy-id={copyId}
       dangerouslySetInnerHTML={{ __html: html }} />
@@ -220,6 +222,7 @@ export function ConversationEntry({
   onOpenCompaction,
   downloadResource,
   copyId,
+  fontSize = 15,
 }: {
   message: TranscriptMessage;
   running: boolean;
@@ -228,6 +231,7 @@ export function ConversationEntry({
   onOpenCompaction: (message: TranscriptMessage) => void;
   downloadResource?: AgentConversationController['downloadResource'];
   copyId: string;
+  fontSize?: number;
 }): ReactNode {
   if (message.type === 'tool' && message.tool) return (
     <>
@@ -267,9 +271,10 @@ export function ConversationEntry({
   }
   const content = message.role !== 'user'
     ? <AssistantMarkdown text={message.text || ''} streaming={!!message.streaming}
-      copyId={`${copyId}:message`} />
+      copyId={`${copyId}:message`} fontSize={fontSize} />
     : <div className="chat-bubble chat-me" data-conversation-copy-root
-      data-conversation-copy-id={`${copyId}:message`}>{message.text}</div>;
+      data-conversation-copy-id={`${copyId}:message`}
+      style={fontSize === 15 ? undefined : { fontSize }}>{message.text}</div>;
   const attachments = (
     <ConversationResources message={message} copyId={copyId}
       {...(downloadResource ? { downloadResource } : {})} />

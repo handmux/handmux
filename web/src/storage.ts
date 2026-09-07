@@ -468,7 +468,7 @@ export const clearFont = () => localStorage.removeItem(FONT_KEY);
 
 // Conversation message text is browser-local and independent from xterm's height-fitting font size.
 // Keep the choices discrete so Settings can offer predictable steps without scaling surrounding UI chrome.
-export const CONVERSATION_FONT_SIZES = [13, 14, 15, 16, 17, 18, 20] as const;
+export const CONVERSATION_FONT_SIZES = [10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20] as const;
 export type ConversationFontSize = typeof CONVERSATION_FONT_SIZES[number];
 export const DEFAULT_CONVERSATION_FONT_SIZE: ConversationFontSize = 15;
 const isConversationFontSize = (value: unknown): value is ConversationFontSize => (

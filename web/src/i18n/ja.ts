@@ -351,7 +351,7 @@ export default {
   'settings.conversation_font_decrease': '会話のフォントを縮小',
   'settings.conversation_font_increase': '会話のフォントを拡大',
   'settings.conversation_font_default': 'デフォルトに戻す',
-  'settings.conversation_font_hint': '会話メッセージの本文と、その中の Markdown およびコードのみを調整します。',
+  'settings.conversation_font_hint': '10〜20px の間を 1px ずつ調整できます。会話メッセージの本文と、その中の Markdown およびコードのみに影響します。',
   'settings.keyboard_mode': 'キーボードモード',
   'settings.keyboard_mode_auto': '自動判定',
   'settings.keyboard_mode_mobile': 'モバイル',

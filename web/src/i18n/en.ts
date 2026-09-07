@@ -852,7 +852,7 @@ export default {
   'settings.conversation_font_decrease': 'Decrease conversation font size',
   'settings.conversation_font_increase': 'Increase conversation font size',
   'settings.conversation_font_default': 'Reset to default',
-  'settings.conversation_font_hint': 'Adjusts only conversation message text and its Markdown and code.',
+  'settings.conversation_font_hint': 'Adjust from 10–20px in 1px steps; affects only conversation message text and its Markdown and code.',
   'settings.keyboard_mode': 'Keyboard mode',
   'settings.keyboard_mode_auto': 'Auto detect',
   'settings.keyboard_mode_mobile': 'Mobile',

@@ -851,7 +851,7 @@ export default {
   'settings.conversation_font_decrease': '减小对话字体',
   'settings.conversation_font_increase': '增大对话字体',
   'settings.conversation_font_default': '恢复默认',
-  'settings.conversation_font_hint': '仅调整对话消息正文及其中的 Markdown 和代码。',
+  'settings.conversation_font_hint': '可在 10–20px 之间以 1px 为步进调整；仅影响对话消息正文及其中的 Markdown 和代码。',
   'settings.keyboard_mode': '键盘模式',
   'settings.keyboard_mode_auto': '自动识别',
   'settings.keyboard_mode_mobile': '手机',
