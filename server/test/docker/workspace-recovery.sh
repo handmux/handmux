@@ -408,7 +408,7 @@ async function phaseB() {
   const agentLines = (await fsp.readFile(AGENT_LOG, 'utf8')).trim().split('\n').sort();
   assert.deepEqual(agentLines, [
     `claude\t--resume\t${CLAUDE_ID}`,
-    `codex\tresume\t${CODEX_ID}`,
+    `codex\t--cd\t/workspace/docs\tresume\t${CODEX_ID}`,
   ].sort());
   assert.equal(await fsp.readFile(ORDINARY_LOG, 'utf8'), 'x', 'ordinary pane command must not replay');
 
