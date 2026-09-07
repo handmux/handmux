@@ -101,31 +101,22 @@ describe('useAgentConversationActivation', () => {
     expect(result.current).toMatchObject({ status: 'error', error: 'activation_failed', recovery });
   });
 
-  it('keeps waiting past 30 seconds, slows polling, and enters after late discovery', async () => {
+  it('times out discovery without exposing a provider response', async () => {
     vi.useFakeTimers();
     vi.mocked(describeConversationActivation).mockResolvedValue({ effect: 'replace-process-preserve-session' });
     vi.mocked(activateConversation).mockResolvedValue(null);
-    const discover = vi.fn()
-      .mockRejectedValueOnce(new Error('transient network failure'))
-      .mockImplementation(async () => (discover.mock.calls.length === 77
-        ? { ...run, runId: 'run-2', sessionId: 'session-1' }
-        : null));
+    const discover = vi.fn(async () => null);
     const { result } = renderHook(() => useAgentConversationActivation(run, true, discover));
     await act(async () => { await Promise.resolve(); });
     expect(result.current.status).toBe('ready');
     let activation!: Promise<void>;
     act(() => { activation = result.current.activate(); });
-    await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
-    expect(result.current).toMatchObject({ status: 'waiting', error: null });
-    expect(discover).toHaveBeenCalledTimes(76);
-
-    await act(async () => { await vi.advanceTimersByTimeAsync(1_999); });
-    expect(discover).toHaveBeenCalledTimes(76);
-    await act(async () => { await vi.advanceTimersByTimeAsync(1); await activation; });
-    expect(discover).toHaveBeenCalledTimes(77);
+    await act(async () => { await vi.runAllTimersAsync(); await activation; });
+    expect(result.current).toMatchObject({ status: 'error', error: 'discovery_timeout' });
+    expect(discover).toHaveBeenCalledTimes(75);
   });
 
-  it('stops post-activation discovery on unmount without losing the verified recovery command', async () => {
+  it('keeps the verified recovery command when post-activation discovery times out', async () => {
     vi.useFakeTimers();
     const recovery = {
       kind: 'codex_resume' as const,
@@ -134,17 +125,12 @@ describe('useAgentConversationActivation', () => {
     };
     vi.mocked(describeConversationActivation).mockResolvedValue({ effect: 'replace-process-preserve-session' });
     vi.mocked(activateConversation).mockResolvedValue(recovery);
-    const discover = vi.fn(async () => null);
-    const { result, unmount } = renderHook(() => useAgentConversationActivation(run, true, discover));
+    const { result } = renderHook(() => useAgentConversationActivation(run, true, vi.fn(async () => null)));
     await act(async () => { await Promise.resolve(); });
     let activation!: Promise<void>;
     act(() => { activation = result.current.activate(); });
-    await act(async () => { await vi.advanceTimersByTimeAsync(32_000); });
-    expect(result.current).toMatchObject({ status: 'waiting', error: null, recovery });
-    const calls = discover.mock.calls.length;
-    unmount();
-    await act(async () => { await activation; await vi.advanceTimersByTimeAsync(10_000); });
-    expect(discover).toHaveBeenCalledTimes(calls);
+    await act(async () => { await vi.runAllTimersAsync(); await activation; });
+    expect(result.current).toMatchObject({ status: 'error', error: 'discovery_timeout', recovery });
   });
 
   it('aborts an in-flight activation when the selected run is left', async () => {
@@ -205,28 +191,25 @@ describe('CodexManagedGuide', () => {
     expect(retry).toHaveBeenCalledOnce();
   });
 
-  it('reveals the Terminal escape only after ten seconds while starting', async () => {
+  it('reveals the Terminal escape only after thirty seconds while starting', async () => {
     vi.useFakeTimers();
     const controller = { ...readyController(), status: 'waiting' as const };
     render(<CodexManagedGuide run={{ ...run, agentId: 'codex' }} controller={controller}
       onActivationChange={() => {}} onTerminal={() => {}} />);
     expect(screen.getByRole('heading', { name: '正在启动托管' })).toBeTruthy();
     expect(screen.queryByRole('button', { name: '前往终端' })).toBeNull();
-    await act(async () => { await vi.advanceTimersByTimeAsync(9_999); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(29_999); });
     expect(screen.queryByRole('button', { name: '前往终端' })).toBeNull();
     await act(async () => { await vi.advanceTimersByTimeAsync(1); });
     expect(screen.getByRole('button', { name: '前往终端' })).toBeTruthy();
-    expect(screen.getByText(
-      '启动仍在继续。你可以前往终端处理信任或其他确认；当前页面会继续等待，成功后自动进入对话。',
-    )).toBeTruthy();
   });
 
-  it('keeps an accepted activation pinned while waiting but clears the pin on an authoritative failure', async () => {
+  it('keeps the timeout page pinned but clears the pin on activation failure', async () => {
     const onActivationChange = vi.fn();
     const { rerender } = render(<CodexManagedGuide run={{ ...run, agentId: 'codex' }} controller={{
-      ...readyController(), status: 'waiting',
+      ...readyController(), status: 'error', error: 'discovery_timeout',
     }} onActivationChange={onActivationChange} onTerminal={() => {}} />);
-    expect(screen.getByRole('heading', { name: '正在启动托管' })).toBeTruthy();
+    expect(screen.getByRole('heading', { name: '托管仍未就绪' })).toBeTruthy();
     expect(onActivationChange).not.toHaveBeenCalled();
     rerender(<CodexManagedGuide run={{ ...run, agentId: 'codex' }} controller={{
       ...readyController(), status: 'error', error: 'activation_failed',

@@ -5,7 +5,7 @@ import { t } from '../i18n';
 import { BotIcon } from './icons.jsx';
 import CodexRecoveryCommand from './CodexRecoveryCommand.js';
 
-const TERMINAL_HINT_MS = 10_000;
+const TERMINAL_HINT_MS = 30_000;
 
 interface CodexManagedGuideProps {
   run: AgentRunRef;
@@ -22,7 +22,8 @@ export default function CodexManagedGuide({
   const submittingRef = useRef(false);
   const runRef = useRef(run);
   runRef.current = run;
-  const starting = controller.status === 'activating' || controller.status === 'waiting';
+  const timedOut = controller.error === 'discovery_timeout';
+  const starting = (controller.status === 'activating' || controller.status === 'waiting') && !timedOut;
 
   useEffect(() => {
     setConfirming(false);
@@ -37,10 +38,10 @@ export default function CodexManagedGuide({
   }, [starting]);
 
   useEffect(() => {
-    if (controller.status === 'error') {
+    if (controller.status === 'error' && !timedOut) {
       onActivationChange(runRef.current, false);
     }
-  }, [controller.status, onActivationChange]);
+  }, [controller.status, onActivationChange, timedOut]);
   const start = async (): Promise<void> => {
     if (submittingRef.current || starting || !controller.descriptor) return;
     submittingRef.current = true;
@@ -53,15 +54,17 @@ export default function CodexManagedGuide({
   const unavailable = controller.status === 'unavailable';
   const paneGone = controller.error === 'stale_run';
   const title = starting ? t('chat.managedGuide.startingTitle')
-    : unavailable ? t('chat.managedGuide.unavailableTitle')
-      : paneGone ? t('chat.managedGuide.goneTitle')
-        : t('chat.managedGuide.title');
+    : timedOut ? t('chat.managedGuide.timeoutTitle')
+      : unavailable ? t('chat.managedGuide.unavailableTitle')
+        : paneGone ? t('chat.managedGuide.goneTitle')
+          : t('chat.managedGuide.title');
   const hint = starting
     ? (showTerminalHint ? t('chat.managedGuide.terminalHint') : t('chat.managedGuide.startingHint'))
-    : unavailable ? t('chat.managedGuide.unavailableHint')
-      : paneGone ? t('chat.managedGuide.goneHint')
-        : controller.error ? t('chat.managedGuide.failedHint')
-          : t('chat.managedGuide.hint');
+    : timedOut ? t('chat.managedGuide.timeoutHint')
+      : unavailable ? t('chat.managedGuide.unavailableHint')
+        : paneGone ? t('chat.managedGuide.goneHint')
+          : controller.error ? t('chat.managedGuide.failedHint')
+            : t('chat.managedGuide.hint');
 
   return (
     <div className="codex-managed-guide" aria-live="polite">
@@ -70,13 +73,14 @@ export default function CodexManagedGuide({
       </div>
       <h2>{title}</h2>
       <p>{hint}</p>
-      {controller.error === 'activation_failed' && controller.recovery && (
+      {(controller.error === 'activation_failed' || controller.error === 'discovery_timeout')
+        && controller.recovery && (
         <div className="codex-managed-guide-recovery">
           <span>{t('chat.managedGuide.recoveryHint')}</span>
           <CodexRecoveryCommand command={controller.recovery.command} />
         </div>
       )}
-      {!starting && !paneGone && (
+      {!starting && !timedOut && !paneGone && (
         <button type="button" className="codex-managed-guide-primary"
           disabled={controller.status === 'loading'}
           onClick={() => {

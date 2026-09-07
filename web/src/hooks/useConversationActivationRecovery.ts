@@ -6,7 +6,18 @@ import {
 import type { ConversationActivationRecoveryReceipt } from '../agentConversationActivationApi.js';
 import type { AgentRunRef } from '../agentCatalog.js';
 import { UnauthorizedError } from '../apiErrors.js';
-import { waitForConversationDiscovery } from './conversationDiscoveryPolling.js';
+
+const DISCOVERY_ATTEMPTS = 75;
+const DISCOVERY_INTERVAL_MS = 400;
+
+const delay = (ms: number, signal: AbortSignal): Promise<void> => new Promise((resolve, reject) => {
+  if (signal.aborted) { reject(signal.reason); return; }
+  const timer = window.setTimeout(resolve, ms);
+  signal.addEventListener('abort', () => {
+    window.clearTimeout(timer);
+    reject(signal.reason);
+  }, { once: true });
+});
 
 export interface ConversationActivationRecoveryController {
   status: 'idle' | 'loading' | 'ready' | 'recovering' | 'waiting' | 'error' | 'unknown';
@@ -91,16 +102,9 @@ export function useConversationActivationRecovery(
       }
       if (generation.current !== requestGeneration) return;
       setStatus('waiting');
-      const discoveryStartedAt = Date.now();
-      while (!controller.signal.aborted) {
+      for (let attempt = 0; attempt < DISCOVERY_ATTEMPTS; attempt += 1) {
         if (controller.signal.aborted) return;
-        let discovered: AgentRunRef | null = null;
-        try {
-          discovered = await discoverRef.current(activePane, current.recovery.sessionId);
-        } catch (cause) {
-          if (cause instanceof UnauthorizedError) throw cause;
-          // Recovery was already accepted. Discovery gaps are not authoritative recovery failures.
-        }
+        const discovered = await discoverRef.current(activePane, current.recovery.sessionId);
         if (generation.current !== requestGeneration) return;
         if (discovered?.agentId === 'codex' && discovered.paneId === activePane
           && discovered.sessionId === current.recovery.sessionId) {
@@ -109,8 +113,9 @@ export function useConversationActivationRecovery(
           void getConversationActivationRecovery(activePane).catch(() => {});
           return;
         }
-        await waitForConversationDiscovery(discoveryStartedAt, controller.signal);
+        await delay(DISCOVERY_INTERVAL_MS, controller.signal);
       }
+      if (!controller.signal.aborted && generation.current === requestGeneration) setStatus('error');
     } catch (cause) {
       if (controller.signal.aborted || generation.current !== requestGeneration) return;
       if (cause instanceof UnauthorizedError) authRef.current?.();
