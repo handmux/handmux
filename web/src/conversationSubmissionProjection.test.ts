@@ -33,6 +33,38 @@ const uncorrelated = (
 });
 
 describe('conversation submission projection', () => {
+  it('lets exact native item mappings preempt an old same-text occurrence claim in either order', () => {
+    const row = uncorrelated('new-user');
+    const old = {
+      clientRequestId: 'old-unknown', text: 'same text', owner: 'timeline' as const,
+      status: 'unknown' as const, createdAt: 1, baselineKeys: [], claimedCanonicalKey: row.key,
+    };
+    const accepted = {
+      clientRequestId: 'new-accepted', text: 'same text', owner: 'timeline' as const,
+      status: 'accepted' as const, createdAt: 2, baselineKeys: [], nativeId: 'item:new-user',
+    };
+    for (const local of [[old, accepted], [accepted, old]]) {
+      const claims = resolveConversationSubmissionClaims([row], local);
+      expect([...claims.submissionIds]).toEqual(['new-accepted']);
+      const reconciled = reconcileConversationSubmissionClaims([row], local);
+      const remaining = reconciled.local.find((entry) => entry.clientRequestId === 'old-unknown');
+      expect(remaining).toMatchObject({ status: 'unknown' });
+      expect(remaining).not.toHaveProperty('claimedCanonicalKey');
+      expect(projectConversationSubmissions([row], reconciled.local, []).timeline
+        .map((entry) => entry.clientRequestId)).toEqual(['old-unknown']);
+    }
+  });
+
+  it('does not treat a native turn id as an exact user-message id', () => {
+    const row = uncorrelated('native-user', 'another message');
+    row.item.groupingId = 'turn-1';
+    const local = [{
+      clientRequestId: 'steer-1', text: 'same text', owner: 'timeline' as const,
+      status: 'accepted' as const, createdAt: 1, baselineKeys: [], nativeId: 'turn-1',
+    }];
+    expect(resolveConversationSubmissionClaims([row], local).submissionIds.size).toBe(0);
+  });
+
   it('keeps one stable-id owner with canonical > Timeline outgoing > Queue priority', () => {
     const local = [{
       clientRequestId: 'submission-1', text: 'same text', owner: 'timeline' as const,

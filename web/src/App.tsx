@@ -1910,6 +1910,7 @@ export default function App() {
     onAuthFail,
     refreshAgentRun,
     chatLens ? normalizedConversationIdentity : null,
+    rootView === 'session',
   );
   const agentInteraction = useAgentInteraction(
     chatLens && normalizedConversationRun ? normalizedConversationRun : null,
@@ -1948,8 +1949,9 @@ export default function App() {
     canonicalConversationItems,
     genericConversation.localSubmissions ?? [],
     agentConversationControls.snapshot?.queue?.items ?? [],
+    genericConversation.submissionReceipts ?? [],
   ), [canonicalConversationItems, genericConversation.localSubmissions,
-    agentConversationControls.snapshot?.queue?.items]);
+    agentConversationControls.snapshot?.queue?.items, genericConversation.submissionReceipts]);
   const conversationActivity = projectConversationActivity(
     serverConversationActivity,
     conversationSubmissionProjection.timeline,

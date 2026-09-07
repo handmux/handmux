@@ -45,6 +45,7 @@ const conversationApi = vi.hoisted(() => ({
 }));
 const conversation = vi.hoisted(() => ({ controller: null as AgentConversationController | null }));
 const controlsInput = vi.hoisted(() => ({ run: null as unknown, enabled: false }));
+const controlsApi = vi.hoisted(() => ({ readConversationControls: vi.fn() }));
 const recoveryApi = vi.hoisted(() => ({ getConversationActivationRecovery: vi.fn() }));
 vi.mock('./hooks/useAgentConversationControls.js', async (importOriginal) => {
   const original = await importOriginal<typeof import('./hooks/useAgentConversationControls.js')>();
@@ -55,7 +56,7 @@ vi.mock('./hooks/useAgentConversationControls.js', async (importOriginal) => {
   } };
 });
 vi.mock('./agentConversationControlsApi.js', async (importOriginal) => ({
-  ...(await importOriginal()), readConversationControls: vi.fn(async () => ({})),
+  ...(await importOriginal()), ...controlsApi,
 }));
 vi.mock('./hooks/useAgentConversation.js', async (importOriginal) => {
   const original = await importOriginal<typeof import('./hooks/useAgentConversation.js')>();
@@ -278,6 +279,7 @@ async function renderApp() {
 beforeEach(() => {
   vi.useFakeTimers();
   Object.values(conversationApi).forEach((mock) => mock.mockReset());
+  controlsApi.readConversationControls.mockReset().mockResolvedValue({});
   recoveryApi.getConversationActivationRecovery.mockReset().mockResolvedValue(null);
   Object.values(api).forEach((mock) => mock.mockReset());
   storage.applyWorkspaceRestoreMapping.mockReset();
@@ -369,6 +371,44 @@ describe('App established conversation during server restart', () => {
     expect(screen.getByText('Saved answer session-1')).toBeTruthy();
     expect(controlsInput.enabled).toBe(true);
   }
+
+  it('discards a temporary unknown on actual window navigation and return while retaining formal history', async () => {
+    await openConversation();
+    conversationApi.sendAgentConversationMessage.mockResolvedValue({ status: 'unknown' });
+    await act(async () => { await conversation.controller!.send('temporary unknown').catch(() => {}); });
+    expect(screen.getByText('temporary unknown')).toBeTruthy();
+    const first = { id: '@71', name: 'main', active: true, panes: 1, activePaneId: pane.id };
+    const second = { id: '@72', name: 'other', active: false, panes: 1, activePaneId: '%74' };
+    api.getWindows.mockResolvedValue([first, second]);
+    api.getPanes.mockResolvedValue([{ ...pane, id: '%74', agent: null, command: 'zsh' }]);
+    await act(async () => { await windowBarProps().onSelectWindow(second); });
+    expect(screen.queryByText('temporary unknown')).toBeNull();
+    api.getPanes.mockResolvedValue([pane]);
+    await act(async () => { await windowBarProps().onSelectWindow(first); });
+    await flush();
+    expect(screen.getByText('Saved answer session-1')).toBeTruthy();
+    expect(screen.queryByText('temporary unknown')).toBeNull();
+    expect(conversation.controller?.localSubmissions).toEqual([]);
+  });
+
+  it('keeps nonempty settled controls idempotent through real App renders and accepted expiry', async () => {
+    controlsApi.readConversationControls.mockResolvedValue({
+      activity: 'idle', submissions: [],
+      queue: { items: [], settled: [{ id: 'historical', nativeId: 'historical-item' }],
+        canSteer: false, canEdit: true, canRemove: true },
+    });
+    await openConversation();
+    conversationApi.sendAgentConversationMessage.mockResolvedValue({ status: 'accepted' });
+    await act(async () => { await conversation.controller!.send('temporary accepted'); });
+    expect(screen.getByText('temporary accepted')).toBeTruthy();
+    await flush(10_000);
+    expect(screen.queryByText('temporary accepted')).toBeNull();
+    expect(screen.getByText('Saved answer session-1')).toBeTruthy();
+    expect(conversation.controller?.submissionReceipts).toEqual(expect.arrayContaining([
+      { id: 'historical', nativeId: 'historical-item' },
+    ]));
+    expect(controlsApi.readConversationControls.mock.calls.length).toBeLessThan(30);
+  });
 
   it.each(['request failure', 'empty discovery', 'missing descriptor', 'canonical null', 'null before discovery', 'sessionless run'])(
     'retains content and chat selection through %s and resumes the same session', async (gap) => {

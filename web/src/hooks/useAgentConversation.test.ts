@@ -745,7 +745,7 @@ describe('useAgentConversation', () => {
     unmount();
   });
 
-  it('restores only active Core submissions after a Web reconnect', async () => {
+  it('tracks current-page Queue to Timeline transitions without reviving older revisions', async () => {
     const run = { agentId: 'codex', paneId: '%1', runId: 'run-1', sessionId: 'session-1' };
     vi.mocked(discoverAgentConversation).mockResolvedValue({
       session: { agentId: 'codex', sessionId: 'session-1' }, run,
@@ -765,6 +765,7 @@ describe('useAgentConversation', () => {
       dispatchOrigin: 'steer' as const, createdAt: 1, updatedAt: revision,
     });
 
+    act(() => result.current.observeSubmissionSnapshot?.([snapshot('queued', 1)]));
     act(() => result.current.observeSubmissionSnapshot?.([snapshot('steering', 3)]));
     expect(result.current.items.filter((item) => item.outgoing)).toEqual([
       expect.objectContaining({ outgoing: expect.objectContaining({ status: 'sending' }) }),
@@ -1106,7 +1107,7 @@ describe('useAgentConversation', () => {
     unmount();
   });
 
-  it('queries a recovered unknown submission without invoking send again', async () => {
+  it('queries a current-page unknown submission without invoking send again', async () => {
     const run = { agentId: 'pi', paneId: '%1', runId: 'run-1', sessionId: 'session-1' };
     vi.mocked(discoverAgentConversation).mockResolvedValue({
       session: { agentId: 'pi', sessionId: 'session-1' }, run,
@@ -1117,25 +1118,28 @@ describe('useAgentConversation', () => {
       sessionId: 'session-1', viewId: 'view-1', historyVersion: 'history-1',
       items: [], hasMore: false,
     } });
-    vi.mocked(queryAgentConversationSubmission).mockResolvedValue({ status: 'unknown', submission: {
-      id: 'submission-unknown', text: 'do this once', state: 'unknown', revision: 4,
-      dispatchOrigin: 'direct', createdAt: 1, updatedAt: 2,
-    } });
+    vi.mocked(sendAgentConversationMessage).mockResolvedValue({ status: 'unknown' });
     const { result, unmount } = renderHook(() => useAgentConversation(run));
     await waitFor(() => expect(result.current.status).toBe('ready'));
+    await act(async () => { await result.current.send('do this once').catch(() => {}); });
+    const id = result.current.localSubmissions![0]!.clientRequestId;
+    vi.mocked(queryAgentConversationSubmission).mockResolvedValue({ status: 'unknown', submission: {
+      id, text: 'do this once', state: 'unknown', revision: 4,
+      dispatchOrigin: 'direct', createdAt: 1, updatedAt: 2,
+    } });
     act(() => result.current.observeSubmissionSnapshot?.([{
-      id: 'submission-unknown', text: 'do this once', state: 'unknown', revision: 3,
+      id, text: 'do this once', state: 'unknown', revision: 3,
       dispatchOrigin: 'direct', createdAt: 1, updatedAt: 1,
     }]));
 
     let remainsUnknown: boolean | void = false;
     await act(async () => {
-      remainsUnknown = await result.current.retryOutgoing?.('submission-unknown');
+      remainsUnknown = await result.current.retryOutgoing?.(id);
     });
     expect(queryAgentConversationSubmission).toHaveBeenCalledWith(run, {
-      submissionId: 'submission-unknown',
+      submissionId: id,
     });
-    expect(sendAgentConversationMessage).not.toHaveBeenCalled();
+    expect(sendAgentConversationMessage).toHaveBeenCalledTimes(1);
     expect(remainsUnknown).toBe(true);
     unmount();
   });
@@ -1222,7 +1226,7 @@ describe('useAgentConversation', () => {
     unmount();
   });
 
-  it('falls back to a submission-only query when a recovered steer action conflicts', async () => {
+  it('falls back to a submission-only query when a current-page steer action conflicts', async () => {
     const run = { agentId: 'codex', paneId: '%1', runId: 'run-1', sessionId: 'session-1' };
     vi.mocked(discoverAgentConversation).mockResolvedValue({
       session: { agentId: 'codex', sessionId: 'session-1' }, run,
@@ -1238,14 +1242,18 @@ describe('useAgentConversation', () => {
       .mockResolvedValueOnce({ status: 'accepted' });
     const { result, unmount } = renderHook(() => useAgentConversation(run));
     await waitFor(() => expect(result.current.status).toBe('ready'));
+    let pending!: ReturnType<NonNullable<typeof result.current.beginQueueSteer>>;
+    act(() => { pending = result.current.beginQueueSteer!({
+      id: 'queue-row', requestId: 'submission-steer', text: 'guide', createdAt: 1, revision: 7,
+    }); });
     act(() => result.current.observeSubmissionSnapshot?.([{
       id: 'submission-steer', text: 'guide', state: 'unknown', revision: 8,
-      dispatchOrigin: 'steer', steerActionId: 'stale-action', createdAt: 1, updatedAt: 2,
+      dispatchOrigin: 'steer', steerActionId: pending.actionId, createdAt: 1, updatedAt: 2,
     }]));
 
     await act(async () => { await result.current.retryOutgoing?.('submission-steer'); });
     expect(queryAgentConversationSubmission).toHaveBeenNthCalledWith(1, run, {
-      submissionId: 'submission-steer', actionId: 'stale-action',
+      submissionId: 'submission-steer', actionId: pending.actionId,
     });
     expect(queryAgentConversationSubmission).toHaveBeenNthCalledWith(2, run, {
       submissionId: 'submission-steer',

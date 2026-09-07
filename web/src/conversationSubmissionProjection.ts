@@ -1,6 +1,7 @@
 import type {
   ConversationActivity,
   ConversationQueueItem,
+  ConversationSettledReceipt,
 } from './agentConversationControlsApi.js';
 import type { AgentConversationViewItem } from './hooks/useAgentConversation.js';
 
@@ -19,6 +20,8 @@ export interface LocalConversationSubmission {
   baselineTailKey?: string;
   occurrenceNotBefore?: number;
   claimedCanonicalKey?: string;
+  nativeId?: string;
+  acceptedAt?: number;
   error?: string;
 }
 
@@ -40,6 +43,7 @@ function canonicalUserText(entry: AgentConversationViewItem): string | null {
 export function resolveConversationSubmissionClaims(
   canonical: readonly AgentConversationViewItem[],
   local: readonly LocalConversationSubmission[],
+  receipts: readonly ConversationSettledReceipt[] = [],
 ): { submissionIds: Set<string>; occurrenceKeys: Map<string, string> } {
   const claimedSubmissionIds = new Set<string>();
   const claimedCanonicalKeys = new Set<string>();
@@ -53,6 +57,23 @@ export function resolveConversationSubmissionClaims(
     if (!correlationId) continue;
     claimedSubmissionIds.add(correlationId);
     claimedCanonicalKeys.add(entry.key);
+  }
+
+  // Core may learn the exact native user item after the initial send returned only a turn id.
+  // Reserve exact item ids before both remembered text claims and new text fallback. A groupingId
+  // is deliberately not a match: several steer messages can share one native turn.
+  const nativeIds = new Map(local.flatMap((entry) => (
+    entry.nativeId ? [[entry.clientRequestId, entry.nativeId] as const] : []
+  )));
+  for (const receipt of receipts) if (receipt.nativeId) nativeIds.set(receipt.id, receipt.nativeId);
+  for (const [id, nativeId] of nativeIds) {
+    if (claimedSubmissionIds.has(id)) continue;
+    const entry = canonical.find((candidate) => 'id' in candidate.item && candidate.item.id === nativeId
+      && canonicalUserText(candidate) !== null);
+    if (!entry || claimedCanonicalKeys.has(entry.key)) continue;
+    claimedSubmissionIds.add(id);
+    claimedCanonicalKeys.add(entry.key);
+    occurrenceKeys.set(id, entry.key);
   }
 
   // Preserve an earlier one-to-one occurrence reservation while that exact canonical row remains
@@ -106,16 +127,18 @@ export function resolveConversationSubmissionClaims(
 export function claimConversationSubmissionIds(
   canonical: readonly AgentConversationViewItem[],
   local: readonly LocalConversationSubmission[],
+  receipts: readonly ConversationSettledReceipt[] = [],
 ): Set<string> {
-  return resolveConversationSubmissionClaims(canonical, local).submissionIds;
+  return resolveConversationSubmissionClaims(canonical, local, receipts).submissionIds;
 }
 
 /** Persist exact occurrence reservations and retire them once their canonical row leaves the window. */
 export function reconcileConversationSubmissionClaims<T extends LocalConversationSubmission>(
   canonical: readonly AgentConversationViewItem[],
   local: readonly T[],
+  receipts: readonly ConversationSettledReceipt[] = [],
 ): { local: T[]; claimedSubmissionIds: Set<string> } {
-  const claims = resolveConversationSubmissionClaims(canonical, local);
+  const claims = resolveConversationSubmissionClaims(canonical, local, receipts);
   const correlatedIds = new Set(canonical.flatMap((entry) => (
     canonicalUserText(entry) !== null && entry.item.correlationId
       ? [entry.item.correlationId] : []
@@ -126,6 +149,12 @@ export function reconcileConversationSubmissionClaims<T extends LocalConversatio
     const claimedKey = claims.occurrenceKeys.get(submission.clientRequestId);
     if (submission.claimedCanonicalKey && claimedKey !== submission.claimedCanonicalKey) {
       changed = true;
+      // A late exact receipt can correct a text-only guess. Restore that unknown attempt's UI;
+      // this differs from retiring a claim when its canonical row naturally leaves the window.
+      if (canonical.some((entry) => entry.key === submission.claimedCanonicalKey)) {
+        const { claimedCanonicalKey: _claim, ...unclaimed } = submission;
+        return [unclaimed as T];
+      }
       return [];
     }
     if (!submission.claimedCanonicalKey && claimedKey) {
@@ -142,11 +171,12 @@ export function projectConversationSubmissions(
   canonical: readonly AgentConversationViewItem[],
   local: readonly LocalConversationSubmission[],
   queue: readonly ConversationQueueItem[],
+  receipts: readonly ConversationSettledReceipt[] = [],
 ): {
   timeline: LocalConversationSubmission[];
   queue: ConversationQueueItem[];
 } {
-  const canonicalIds = claimConversationSubmissionIds(canonical, local);
+  const canonicalIds = claimConversationSubmissionIds(canonical, local, receipts);
   const timelineIds = new Set(local.flatMap((entry) => (
     entry.owner === 'timeline' && !canonicalIds.has(entry.clientRequestId)
       ? [entry.clientRequestId] : []

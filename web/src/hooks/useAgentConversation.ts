@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   discoverAgentConversation,
   downloadAgentConversationResource,
@@ -81,8 +81,11 @@ export interface AgentConversationController {
     occurrenceNotBefore?: number;
     claimedCanonicalKey?: string;
     settledObserved?: true;
+    nativeId?: string;
+    acceptedAt?: number;
     error?: string;
   }>;
+  submissionReceipts?: readonly ConversationSettledReceipt[];
   beginQueueSteer?(item: ConversationQueueItem): {
     submissionId: string;
     actionId: string;
@@ -116,6 +119,7 @@ export type AgentConversationIdentity = Pick<AgentRunRef, 'agentId' | 'paneId'> 
 export const MAX_AGENT_CONVERSATION_ITEMS = 1_000;
 const MAX_RETAINED_SEND_ATTEMPTS = 20;
 const MAX_LOCAL_SUBMISSIONS = 1_000;
+const ACCEPTED_OUTGOING_LIFETIME_MS = 10_000;
 
 function trimLatestProjection(state: AgentConversationProjection): AgentConversationProjection {
   return state.slots.length > MAX_AGENT_CONVERSATION_ITEMS
@@ -182,6 +186,8 @@ interface OutgoingAttempt extends SendAttempt {
   occurrenceNotBefore?: number;
   claimedCanonicalKey?: string;
   settledObserved?: true;
+  nativeId?: string;
+  acceptedAt?: number;
   snapshotObserved?: true;
   queueObserved?: true;
   revision?: number;
@@ -304,6 +310,7 @@ export function useAgentConversation(
   onAuthFail?: () => void,
   refreshRun?: RefreshAgentRun,
   identity?: AgentConversationIdentity | null,
+  pageActive = true,
 ): AgentConversationController {
   const activeIdentity = identity ?? (run?.sessionId ? {
     agentId: run.agentId, paneId: run.paneId, sessionId: run.sessionId,
@@ -323,6 +330,12 @@ export function useAgentConversation(
   const [sending, setSending] = useState(false);
   const [interrupting, setInterrupting] = useState(false);
   const [outgoing, setOutgoing] = useState<OutgoingAttempt[]>([]);
+  const [submissionReceipts, setSubmissionReceipts] = useState<ConversationSettledReceipt[]>([]);
+  const submissionPageKey = pageActive ? activeIdentityKey : null;
+  const submissionPage = useMemo(() => ({}), [submissionPageKey]);
+  const submissionPageRef = useRef<object | null>(submissionPage);
+  const [outgoingPage, setOutgoingPage] = useState(submissionPage);
+  submissionPageRef.current = submissionPage;
   const [foregroundEpoch, setForegroundEpoch] = useState(0);
   const projectionRef = useRef(emptyAgentConversationProjection());
   const pageRef = useRef<PageState | null>(null);
@@ -352,6 +365,58 @@ export function useAgentConversation(
   statusRef.current = status;
   authRef.current = onAuthFail;
   refreshRunRef.current = refreshRun;
+
+  useEffect(() => {
+    submissionPageRef.current = submissionPage;
+    setOutgoing([]);
+    setSubmissionReceipts([]);
+    setOutgoingPage(submissionPage);
+    sendAttemptsRef.current.clear();
+    submissionAbsenceRef.current.clear();
+    sendBusyRef.current.clear();
+    setSending(false);
+    return () => {
+      if (submissionPageRef.current === submissionPage) submissionPageRef.current = null;
+    };
+  }, [submissionPage]);
+
+  const rememberSubmissionReceipts = useCallback((
+    receipts: readonly ConversationSettledReceipt[], authoritative = false,
+  ): void => {
+    if (!pageActive || submissionPageRef.current !== submissionPage || !receipts.length) return;
+    setSubmissionReceipts((current) => {
+      const next = new Map(current.map((receipt) => [receipt.id, receipt]));
+      let changed = false;
+      for (const receipt of receipts) {
+        const previous = next.get(receipt.id);
+        if (!previous || (receipt.nativeId && previous.nativeId !== receipt.nativeId
+          && (authoritative || !previous.nativeId))) {
+          next.set(receipt.id, receipt);
+          changed = true;
+        }
+      }
+      return changed ? [...next.values()].slice(-MAX_LOCAL_SUBMISSIONS) : current;
+    });
+  }, [pageActive, submissionPage]);
+
+  useEffect(() => {
+    const deadlines = outgoing.flatMap((entry) => entry.owner === 'timeline'
+      && entry.status === 'accepted' && entry.acceptedAt !== undefined
+      ? [entry.acceptedAt + ACCEPTED_OUTGOING_LIFETIME_MS] : []);
+    if (!deadlines.length) return;
+    const timer = setTimeout(() => {
+      if (submissionPageRef.current !== submissionPage) return;
+      setOutgoing((items) => items.filter((entry) => {
+        if (entry.owner !== 'timeline' || entry.status !== 'accepted' || entry.acceptedAt === undefined
+          || entry.acceptedAt + ACCEPTED_OUTGOING_LIFETIME_MS > Date.now()) return true;
+        submissionAbsenceRef.current.set(`${entry.agentId}\0${entry.sessionId}\0${entry.clientRequestId}`,
+          { revision: entry.revision ?? 0, terminal: true });
+        forgetSendAttempt(sendAttemptsRef.current, entry.clientRequestId);
+        return false;
+      }));
+    }, Math.max(0, Math.min(...deadlines) - Date.now()));
+    return () => clearTimeout(timer);
+  }, [outgoing, submissionPage]);
 
   const recoverRun = useCallback(async (stale: AgentRunRef): Promise<AgentRunRef | null> => {
     try {
@@ -699,6 +764,7 @@ export function useAgentConversation(
   ): Promise<void> => {
     const value = text.trim();
     if (!value) return;
+    if (!pageActive || submissionPageRef.current !== submissionPage) return;
     if (!run?.sessionId || !activeDescriptor) throw new Error('Agent is reconnecting; try again shortly');
     const operationKey = sessionOperationKey(run.agentId, run.sessionId);
     if (sendBusyRef.current.has(operationKey)) throw new Error('A message is already being sent');
@@ -748,9 +814,11 @@ export function useAgentConversation(
       } catch (cause) {
         if (!staleRun(cause)) throw cause;
         const fresh = await recoverRun(run);
+        if (submissionPageRef.current !== submissionPage) return;
         if (!fresh) throw cause;
         receipt = await sendAgentConversationMessage(fresh, request);
       }
+      if (submissionPageRef.current !== submissionPage) return;
       if (receipt.status === 'rejected') {
         if (receipt.nativeMutation === false) {
           if (sendAttemptsRef.current.get(operationKey) === attempt) {
@@ -763,6 +831,7 @@ export function useAgentConversation(
       if (receipt.status === 'unknown') {
         const detail = 'Message delivery is unknown';
         setOutgoing((items) => items.map((item) => item.clientRequestId === attempt.clientRequestId
+          && item.acceptedAt === undefined
           ? {
             ...item,
             owner: receipt.submission?.dispatchOrigin === 'queue' ? 'queue' : item.owner,
@@ -775,34 +844,42 @@ export function useAgentConversation(
           && receipt.submission.state === 'dispatching');
       if (receipt.status === 'queued' || submissionQueueOwner) {
         setOutgoing((items) => items.map((item) => item.clientRequestId === attempt.clientRequestId
+          && item.acceptedAt === undefined
           ? { ...item, owner: 'queue', status: 'accepted' } : item));
         if (sendAttemptsRef.current.get(operationKey) === attempt) {
           sendAttemptsRef.current.delete(operationKey);
         }
         return;
       }
+      rememberSubmissionReceipts([{ id: attempt.clientRequestId,
+        ...(receipt.nativeId ? { nativeId: receipt.nativeId } : {}) }]);
       setOutgoing((items) => items.map((item) => {
         if (item.clientRequestId !== attempt.clientRequestId) return item;
         const { error: _error, ...accepted } = item;
-        return { ...accepted, owner: 'timeline', status: 'accepted' };
+        return { ...accepted, owner: 'timeline', status: 'accepted',
+          acceptedAt: item.acceptedAt ?? Date.now(),
+          ...(receipt.nativeId ? { nativeId: receipt.nativeId } : {}) };
       }));
       if (sendAttemptsRef.current.get(operationKey) === attempt) {
         sendAttemptsRef.current.delete(operationKey);
       }
     } catch (cause) {
+      if (submissionPageRef.current !== submissionPage) return;
       if (cause instanceof UnauthorizedError) authRef.current?.();
       const unknown = cause instanceof ConversationSendError ? cause.deliveryUnknown : true;
       setOutgoing((items) => unknown
-        ? items.map((item) => item.clientRequestId === attempt.clientRequestId
+        ? items.map((item) => item.clientRequestId === attempt.clientRequestId && item.acceptedAt === undefined
           ? { ...item, status: 'unknown', error: message(cause) } : item)
         : items.filter((item) => item.clientRequestId !== attempt.clientRequestId));
       throw cause instanceof ConversationSendError
         ? cause : new ConversationSendError(message(cause), unknown);
     } finally {
-      sendBusyRef.current.delete(operationKey);
-      if (activeOperationKeyRef.current === operationKey) setSending(false);
+      if (submissionPageRef.current === submissionPage) {
+        sendBusyRef.current.delete(operationKey);
+        if (activeOperationKeyRef.current === operationKey) setSending(false);
+      }
     }
-  }, [activeDescriptor, recoverRun, run]);
+  }, [activeDescriptor, recoverRun, run, pageActive, submissionPage, rememberSubmissionReceipts]);
 
   const beginQueueSteer = useCallback((item: ConversationQueueItem): {
     submissionId: string;
@@ -820,7 +897,9 @@ export function useAgentConversation(
       viewId: activeDescriptor?.viewId ?? 'current',
       ...(afterItemId === undefined ? {} : { afterItemId }),
     };
-    if (!activeIdentity) return { submissionId: clientRequestId, actionId, baseRevision, anchor };
+    if (!activeIdentity || !pageActive || submissionPageRef.current !== submissionPage) {
+      return { submissionId: clientRequestId, actionId, baseRevision, anchor };
+    }
     const baselineTailKey = baselineSlots.at(-1)?.key;
     setOutgoing((items) => {
       const next: OutgoingAttempt = {
@@ -843,19 +922,23 @@ export function useAgentConversation(
       return updated.length > MAX_LOCAL_SUBMISSIONS ? updated.slice(-MAX_LOCAL_SUBMISSIONS) : updated;
     });
     return { submissionId: clientRequestId, actionId, baseRevision, anchor };
-  }, [activeDescriptor?.viewId, activeIdentity]);
+  }, [activeDescriptor?.viewId, activeIdentity, pageActive, submissionPage]);
 
   const settleQueueSteer = useCallback((
     submissionId: string,
     result: ConversationSubmissionActionResult,
     detail?: string,
   ): void => {
+    if (submissionPageRef.current !== submissionPage || !pageActive) return;
+    if (result.status === 'accepted') rememberSubmissionReceipts([{ id: submissionId,
+      ...(result.submission?.nativeId ? { nativeId: result.submission.nativeId } : {}) }]);
     setOutgoing((items) => items.map((entry) => {
       if (entry.clientRequestId !== submissionId) return entry;
       if (result.actionId && entry.actionId && result.actionId !== entry.actionId) return entry;
       const revision = result.submission?.revision ?? result.revision;
       const floor = Math.max(entry.baseRevision ?? 0, entry.revision ?? 0);
       if (revision !== undefined && revision < floor) return entry;
+      if (entry.acceptedAt !== undefined) return entry;
       if (result.status === 'rejected' && result.nativeMutation === false) {
         const current = result.submission;
         const currentQueueOwner = !current || current.state === 'queued'
@@ -877,14 +960,17 @@ export function useAgentConversation(
         ...settled,
         owner: 'timeline' as const,
         status: unknown ? 'unknown' as const : 'accepted' as const,
+        ...(!unknown ? { acceptedAt: entry.acceptedAt ?? Date.now() } : {}),
+        ...(result.submission?.nativeId ? { nativeId: result.submission.nativeId } : {}),
         ...(revision === undefined ? {} : { revision }),
         ...(result.submission?.steerAnchor ? { anchor: result.submission.steerAnchor } : {}),
         ...(detail ? { error: detail } : {}),
       };
     }));
-  }, []);
+  }, [pageActive, submissionPage, rememberSubmissionReceipts]);
 
   const observeQueueSnapshot = useCallback((snapshot: readonly ConversationQueueItem[]): void => {
+    if (submissionPageRef.current !== submissionPage || !pageActive) return;
     setOutgoing((items) => {
       let changed = false;
       const next = items.map((entry) => {
@@ -904,7 +990,7 @@ export function useAgentConversation(
       });
       return changed ? next : items;
     });
-  }, []);
+  }, [pageActive, submissionPage]);
 
   const observeSubmissionSnapshot = useCallback((
     snapshot: readonly ConversationSubmissionSnapshot[],
@@ -914,13 +1000,14 @@ export function useAgentConversation(
       settled?: readonly ConversationSettledReceipt[];
     } = {},
   ): void => {
-    if (!activeIdentity) return;
+    if (!activeIdentity || !pageActive || submissionPageRef.current !== submissionPage) return;
     const scopedKey = (submissionId: string): string => (
       `${activeIdentity.agentId}\0${activeIdentity.sessionId}\0${submissionId}`
     );
     const snapshotIds = new Set(snapshot.map((submission) => submission.id));
     const queueIds = new Set((options.queue ?? []).map(queueSubmissionId));
     const settledIds = new Set((options.settled ?? []).map((receipt) => receipt.id));
+    rememberSubmissionReceipts(options.settled ?? [], true);
     setOutgoing((items) => {
       let next = items;
       let changed = false;
@@ -937,10 +1024,14 @@ export function useAgentConversation(
         const pendingSteer = existing?.owner === 'timeline' && existing.actionId !== undefined;
         if (pendingSteer && submission.state === 'queued'
           && submission.revision <= Math.max(existing.baseRevision ?? 0, existing.revision ?? 0)) continue;
-        const owner = submission.state === 'queued'
+        const owner = existing?.acceptedAt !== undefined ? 'timeline' as const : submission.state === 'queued'
           || (submission.dispatchOrigin === 'queue' && submission.state === 'dispatching')
           ? 'queue' as const : 'timeline' as const;
-        const status = submission.state === 'unknown' ? 'unknown' as const : 'sending' as const;
+        // A fresh page restores real Core queue state, not discarded direct/steer placeholders.
+        if (!existing && owner !== 'queue' && submission.dispatchOrigin !== 'queue') continue;
+        const status = existing?.acceptedAt !== undefined && owner === 'timeline' ? 'accepted' as const
+          : submission.state === 'unknown' ? 'unknown' as const : 'sending' as const;
+        const nativeId = submission.nativeId ?? existing?.nativeId;
         const currentSlots = projectionRef.current.slots;
         const currentPage = pageRef.current;
         const restoredBaseline: {
@@ -994,6 +1085,8 @@ export function useAgentConversation(
           ...(existing?.claimedCanonicalKey
             ? { claimedCanonicalKey: existing.claimedCanonicalKey } : {}),
           ...(existing?.settledObserved ? { settledObserved: true as const } : {}),
+          ...(existing?.acceptedAt !== undefined ? { acceptedAt: existing.acceptedAt } : {}),
+          ...(nativeId ? { nativeId } : {}),
           ...(existing?.queueObserved ? { queueObserved: true as const } : {}),
           snapshotObserved: true,
         };
@@ -1011,13 +1104,18 @@ export function useAgentConversation(
           if (entry.agentId !== activeIdentity.agentId || entry.sessionId !== activeIdentity.sessionId
             || !settledIds.has(entry.clientRequestId)) return entry;
           const { error: _error, ...settled } = entry;
-          if (entry.owner === 'timeline' && entry.status === 'accepted' && !entry.error) return entry;
+          const nativeId = options.settled?.find((receipt) => receipt.id === entry.clientRequestId)?.nativeId
+            ?? entry.nativeId;
+          if (entry.owner === 'timeline' && entry.status === 'accepted' && !entry.error
+            && entry.settledObserved && entry.nativeId === nativeId) return entry;
           changed = true;
           return {
             ...settled,
             owner: 'timeline' as const,
             status: 'accepted' as const,
             settledObserved: true as const,
+            acceptedAt: entry.acceptedAt ?? Date.now(),
+            ...(nativeId ? { nativeId } : {}),
           };
         });
       }
@@ -1039,9 +1137,10 @@ export function useAgentConversation(
       }
       return changed ? next : items;
     });
-  }, [activeIdentity]);
+  }, [activeIdentity, pageActive, submissionPage, rememberSubmissionReceipts]);
 
   const retryOutgoing = useCallback(async (clientRequestId: string): Promise<boolean> => {
+    if (submissionPageRef.current !== submissionPage || !pageActive) return false;
     const attempt = outgoing.find((item) => item.clientRequestId === clientRequestId);
     if (!attempt || attempt.status !== 'unknown' || !run?.sessionId) return false;
     if (attempt.owner === 'queue' && !attempt.actionId) {
@@ -1056,27 +1155,32 @@ export function useAgentConversation(
       } catch (cause) {
         if (!staleRun(cause)) throw cause;
         const fresh = await recoverRun(run);
+        if (submissionPageRef.current !== submissionPage) return false;
         if (!fresh) throw cause;
         receipt = await sendAgentConversationMessage(fresh, request);
       }
+      if (submissionPageRef.current !== submissionPage) return false;
+      if (receipt.status === 'accepted') rememberSubmissionReceipts([{ id: clientRequestId,
+        ...(receipt.nativeId ? { nativeId: receipt.nativeId } : {}) }]);
       if (receipt.submission) observeSubmissionSnapshot([receipt.submission]);
       if (receipt.status === 'queued' || receipt.submission?.state === 'queued'
         || (receipt.submission?.state === 'dispatching'
           && receipt.submission.dispatchOrigin === 'queue')) {
         setOutgoing((items) => items.map((entry) => {
           if (entry.clientRequestId !== clientRequestId) return entry;
+          if (entry.acceptedAt !== undefined) return entry;
           const { error: _error, ...accepted } = entry;
           return { ...accepted, owner: 'queue' as const, status: 'accepted' as const };
         }));
         forgetSendAttempt(sendAttemptsRef.current, clientRequestId);
-      } else if (receipt.status === 'accepted' && !receipt.submission) {
+      } else if (receipt.status === 'accepted') {
         setOutgoing((items) => items.map((entry) => {
           if (entry.clientRequestId !== clientRequestId) return entry;
           const { error: _error, ...accepted } = entry;
-          return { ...accepted, owner: 'timeline' as const, status: 'accepted' as const };
+          return { ...accepted, owner: 'timeline' as const, status: 'accepted' as const,
+            acceptedAt: entry.acceptedAt ?? Date.now(),
+            ...(receipt.nativeId ? { nativeId: receipt.nativeId } : {}) };
         }));
-        forgetSendAttempt(sendAttemptsRef.current, clientRequestId);
-      } else if (receipt.status === 'accepted') {
         forgetSendAttempt(sendAttemptsRef.current, clientRequestId);
       }
       return receipt.status === 'unknown' || receipt.status === 'rejected'
@@ -1089,29 +1193,38 @@ export function useAgentConversation(
     let receipt;
     try {
       receipt = await queryAgentConversationSubmission(run, request);
+      if (submissionPageRef.current !== submissionPage) return false;
       if (receipt.status === 'rejected' && receipt.reason === 'conflict' && attempt.actionId) {
         receipt = await queryAgentConversationSubmission(run, { submissionId: attempt.clientRequestId });
       }
     } catch (cause) {
       if (!staleRun(cause)) throw cause;
       const fresh = await recoverRun(run);
+      if (submissionPageRef.current !== submissionPage) return false;
       if (!fresh) throw cause;
       receipt = await queryAgentConversationSubmission(fresh, request);
+      if (submissionPageRef.current !== submissionPage) return false;
       if (receipt.status === 'rejected' && receipt.reason === 'conflict' && attempt.actionId) {
         receipt = await queryAgentConversationSubmission(fresh, { submissionId: attempt.clientRequestId });
       }
     }
+    if (submissionPageRef.current !== submissionPage) return false;
+    if (receipt.status === 'accepted') rememberSubmissionReceipts([{ id: clientRequestId,
+      ...(receipt.nativeId ? { nativeId: receipt.nativeId } : {}) }]);
     if (receipt.submission) observeSubmissionSnapshot([receipt.submission]);
-    else if (receipt.status === 'accepted') {
+    if (receipt.status === 'accepted' && receipt.submission?.state !== 'queued'
+      && !(receipt.submission?.state === 'dispatching' && receipt.submission.dispatchOrigin === 'queue')) {
       setOutgoing((items) => items.map((entry) => {
         if (entry.clientRequestId !== clientRequestId) return entry;
         const { error: _error, ...accepted } = entry;
-        return { ...accepted, owner: 'timeline' as const, status: 'accepted' as const };
+        return { ...accepted, owner: 'timeline' as const, status: 'accepted' as const,
+          acceptedAt: entry.acceptedAt ?? Date.now(),
+          ...(receipt.nativeId ? { nativeId: receipt.nativeId } : {}) };
       }));
     }
     return receipt.status === 'unknown' || receipt.status === 'rejected'
       || receipt.submission?.state === 'unknown';
-  }, [observeSubmissionSnapshot, outgoing, recoverRun, run]);
+  }, [observeSubmissionSnapshot, outgoing, recoverRun, run, pageActive, submissionPage, rememberSubmissionReceipts]);
 
   const resendOutgoing = useCallback(async (clientRequestId: string): Promise<void> => {
     const attempt = outgoing.find((item) => item.clientRequestId === clientRequestId);
@@ -1120,8 +1233,9 @@ export function useAgentConversation(
   }, [outgoing, send]);
 
   const removeQueueSubmission = useCallback((submissionId: string): void => {
+    if (submissionPageRef.current !== submissionPage || !pageActive) return;
     setOutgoing((items) => items.filter((entry) => entry.clientRequestId !== submissionId));
-  }, []);
+  }, [pageActive, submissionPage]);
 
   useEffect(() => {
     setOutgoing((items) => {
@@ -1131,7 +1245,7 @@ export function useAgentConversation(
           key: slot.key, item: slot.item, provisional: slot.provisional, live: slot.live,
         }] : []
       ));
-      const reconciled = reconcileConversationSubmissionClaims(canonical, items);
+      const reconciled = reconcileConversationSubmissionClaims(canonical, items, submissionReceipts);
       for (const id of reconciled.claimedSubmissionIds) {
         forgetSendAttempt(sendAttemptsRef.current, id);
         if (activeIdentity) {
@@ -1146,7 +1260,7 @@ export function useAgentConversation(
         && reconciled.local.every((entry, index) => entry === items[index])
         ? items : reconciled.local;
     });
-  }, [activeIdentity?.agentId, activeIdentity?.sessionId, projection]);
+  }, [activeIdentity?.agentId, activeIdentity?.sessionId, projection, submissionReceipts]);
 
   const interrupt = useCallback(async (): Promise<void> => {
     if (activeDescriptor?.capabilities.interrupt !== true) return;
@@ -1363,9 +1477,11 @@ export function useAgentConversation(
       live: slot.live,
     }] : []
   ));
-  const localSubmissions = stateMatchesIdentity ? outgoing.filter((item) => activeIdentity
+  const localSubmissions = stateMatchesIdentity && outgoingPage === submissionPage && pageActive
+    ? outgoing.filter((item) => activeIdentity
     && item.agentId === activeIdentity.agentId && item.sessionId === activeIdentity.sessionId) : [];
-  const outgoingProjection = projectConversationSubmissions(items, localSubmissions, []);
+  const currentSubmissionReceipts = outgoingPage === submissionPage && pageActive ? submissionReceipts : [];
+  const outgoingProjection = projectConversationSubmissions(items, localSubmissions, [], currentSubmissionReceipts);
   const projectedItems = projectConversationTimeline(items, outgoingProjection.timeline);
   const scopedStatus: AgentConversationController['status'] = stateMatchesIdentity
     ? status : run?.sessionId ? 'loading' : activeIdentity ? 'reconnecting' : 'idle';
@@ -1384,6 +1500,7 @@ export function useAgentConversation(
     interrupting: stateMatchesIdentity
       ? interrupting : activeOperationKey !== null && interruptBusyRef.current.has(activeOperationKey),
     localSubmissions,
+    submissionReceipts: currentSubmissionReceipts,
     beginQueueSteer,
     observeQueueSnapshot,
     observeSubmissionSnapshot,
