@@ -19,6 +19,40 @@ export interface ChangelogEntry {
 // `entryId`/`LATEST_RELEASE` use `version` when present, else `date`, as the stable unread-dot id.
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '0.27.1',
+    date: '2026-09-08',
+    highlight: {
+      zh: '腾讯语音 · 终端光标修复 · Codex 对话恢复',
+      en: 'Tencent voice · terminal cursor fixes · Codex chat recovery',
+    },
+    items: {
+      zh: [
+        '面向 0.26 升级用户的完整汇总：0.27.0 已公开 GitHub 源码和 Release，但未完成 npm / Homebrew 分发；本版承接这些更新并加入后续修复，保留 0.27.0 历史记录。',
+        '语音新增腾讯实时与一句话识别，保留讯飞实时识别；三种方案共享音量波形与录音动效，识别文字插入起录时的光标位置，不清空已有草稿。',
+        'handmux setup 会验证语音配置；设置页可调整腾讯语气词过滤级别，关闭语音保留方案和凭据。',
+        '修复语音录制、网络或识别失败没有提示，以及终端录音时点击输入框丢失最终文字的问题；终端聊天与对话输入卡片均可点击停止录音并完成识别。',
+        '修复实时终端输入后的双光标、光标停在上一字符及文件路径高亮闪烁问题。',
+        '工具输入、输出和 Diff 裁剪时在实际位置说明原因；修复 Codex 上下文压缩时内部摘要短暂闪入正文的问题。',
+        '终端与对话字体可分别调整，对话字号支持 10–20px；终端字号在两种视图下均可设置，消息正文字号不影响工具详情。',
+        '修复原生 Codex 无法进入对话接管页的问题；核实准确会话后接管，中断时提供安全恢复或可复制命令指引；handmux codex resume 默认与原生命令一样只列当前目录会话。',
+        '修复服务重启时对话消失并跳回终端，以及 compact 后重发成功仍残留“已发送”的问题；临时反馈离窗即丢弃，成功占位最多保留 10 秒，不影响真实队列和历史。',
+        '修复 iOS 对话发送箭头不可见的问题。',
+      ],
+      en: [
+        'A complete roundup for users upgrading from 0.26: 0.27.0 source and its GitHub Release were public, but npm / Homebrew distribution was not completed. This version carries those updates plus subsequent fixes; the 0.27.0 history is retained.',
+        'Voice input adds Tencent real-time and sentence recognition alongside iFlytek real-time recognition. All three share level waveforms and recording animation, inserting text at the recording-start caret without clearing the draft.',
+        'handmux setup verifies voice configuration. Settings can adjust Tencent filler-word filtering; turning voice off retains the profile and credentials.',
+        'Fixed silent voice capture, network, or recognition failures and lost final text when tapping the terminal input during recording. Both terminal chat and the chat input card can be tapped to stop recording and finish recognition.',
+        'Fixed duplicate live-terminal cursors, cursors left on the preceding character after typing, and flickering file-path highlights.',
+        'Truncated tool input, output, and diffs explain the limit at the actual cut point. Fixed an internal summary briefly flashing into chat during Codex compaction.',
+        'Terminal and chat font sizes can be set independently, with chat supporting 10–20px. Terminal font size remains adjustable in either view; message font size does not affect tool details.',
+        'Fixed native Codex sessions missing the chat takeover page. Takeover verifies the exact session and offers safe recovery or a copyable command after interruption. handmux codex resume now defaults to the current directory, matching the native command.',
+        'Fixed chat disappearing into terminal during Server restarts and sent placeholders lingering after a compact-time retry. Temporary feedback is discarded on leaving; accepted placeholders last at most 10 seconds without affecting real queues or history.',
+        'Fixed the invisible iOS chat send arrow.',
+      ],
+    },
+  },
+  {
     version: '0.27.0',
     date: '2026-09-05',
     highlight: {
