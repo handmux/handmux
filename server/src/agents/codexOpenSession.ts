@@ -91,7 +91,7 @@ function rootSessionMeta(line: string | null, sessionId: string): { cwd: string 
   const meta = value.payload;
   if (meta.id !== sessionId || meta.session_id !== sessionId
     || (meta.parent_thread_id !== undefined && meta.parent_thread_id !== null)
-    || meta.originator !== 'codex-tui' || meta.source !== 'cli' || meta.thread_source !== 'user'
+    || meta.thread_source !== 'user'
     || typeof meta.cwd !== 'string' || !meta.cwd) return null;
   return { cwd: meta.cwd };
 }

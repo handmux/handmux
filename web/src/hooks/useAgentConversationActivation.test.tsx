@@ -6,7 +6,6 @@ import {
   describeConversationActivation,
 } from '../agentConversationActivationApi.js';
 import AgentConversationActivationGuide from '../components/AgentConversationActivationGuide.js';
-import AgentConversationGuideTabs from '../components/AgentConversationGuideTabs.js';
 import CodexManagedGuide from '../components/CodexManagedGuide.js';
 import CodexActivationRecoveryGuide from '../components/CodexActivationRecoveryGuide.js';
 import { useConversationActivationTarget } from '../conversationActivationTarget.js';
@@ -72,6 +71,18 @@ describe('useAgentConversationActivation', () => {
     await waitFor(() => expect(result.current.status).toBe('ready'));
     await act(async () => { await result.current.activate(); });
     expect(result.current).toMatchObject({ status: 'error', error: 'stale_run' });
+  });
+
+  it('keeps an unverified native Codex session retryable without calling it an App Server outage', async () => {
+    vi.mocked(describeConversationActivation).mockResolvedValue(null);
+    const { result } = renderHook(() => useAgentConversationActivation(
+      { ...run, agentId: 'codex' }, true, vi.fn(),
+    ));
+    await waitFor(() => expect(result.current.status).toBe('unavailable'));
+
+    act(() => result.current.retry());
+    await waitFor(() => expect(describeConversationActivation).toHaveBeenCalledTimes(2));
+    expect(result.current.status).toBe('unavailable');
   });
 
   it('preserves a trusted recovery command returned by activation failure', async () => {
@@ -167,6 +178,19 @@ describe('CodexManagedGuide', () => {
     expect(onActivationChange).toHaveBeenCalledWith({ ...run, agentId: 'codex' }, true);
   });
 
+  it('shows an accurate retryable state when the native Codex session cannot be verified', () => {
+    const retry = vi.fn();
+    const { container } = render(<CodexManagedGuide run={{ ...run, agentId: 'codex' }} controller={{
+      ...readyController(), status: 'unavailable', descriptor: null, owner: null, retry,
+    }} onActivationChange={() => {}} onTerminal={() => {}} />);
+
+    expect(screen.getByRole('heading', { name: '无法安全确认当前 Codex 会话' })).toBeTruthy();
+    expect(screen.getByText('请重试，或前往终端继续。')).toBeTruthy();
+    expect(container.textContent).not.toContain('App Server');
+    fireEvent.click(screen.getByRole('button', { name: '重试' }));
+    expect(retry).toHaveBeenCalledOnce();
+  });
+
   it('reveals the Terminal escape only after ten seconds while starting', async () => {
     vi.useFakeTimers();
     const controller = { ...readyController(), status: 'waiting' as const };
@@ -260,9 +284,17 @@ describe('CodexManagedGuide', () => {
       ...readyController(), status: 'error', error: 'activation_failed', recovery,
     }} onActivationChange={() => {}} onTerminal={() => {}} />);
     expect(screen.getByText(recovery.command)).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: '复制恢复命令' }));
+    const copy = screen.getByRole('button', { name: '复制恢复命令' });
+    expect(copy.textContent).toBe('');
+    expect(copy.querySelector('svg')).toBeTruthy();
+    expect(copy.previousElementSibling?.tagName).toBe('CODE');
+    expect(copy.title).toBe('复制恢复命令');
+    fireEvent.click(copy);
     await waitFor(() => expect(writeText).toHaveBeenCalledWith(recovery.command));
-    expect(screen.getByRole('button', { name: '已复制' })).toBeTruthy();
+    const copied = screen.getByRole('button', { name: '已复制' });
+    expect(copied.textContent).toBe('');
+    expect(copied.querySelector('svg')).toBeTruthy();
+    expect(copied.title).toBe('已复制');
     Object.defineProperty(navigator, 'clipboard', { configurable: true, value: originalClipboard });
     Object.defineProperty(window, 'isSecureContext', { configurable: true, value: originalSecureContext });
   });
@@ -348,7 +380,10 @@ describe('CodexActivationRecoveryGuide', () => {
       receipt: { ...base.receipt, state: 'stale', canResume: false },
     }} onTerminal={() => {}} />);
     expect(screen.queryByRole('button', { name: '继续恢复' })).toBeNull();
-    expect(screen.getByRole('button', { name: '复制恢复命令' })).toBeTruthy();
+    const copy = screen.getByRole('button', { name: '复制恢复命令' });
+    expect(copy.textContent).toBe('');
+    expect(copy.querySelector('svg')).toBeTruthy();
+    expect(copy.previousElementSibling?.tagName).toBe('CODE');
     expect(screen.getByRole('button', { name: '前往终端' })).toBeTruthy();
   });
 });
@@ -383,26 +418,5 @@ describe('AgentConversationActivationGuide', () => {
     expect(container.textContent).not.toContain('/Users/private');
     fireEvent.click(screen.getByRole('button', { name: '重试' }));
     expect(retry).toHaveBeenCalledOnce();
-  });
-});
-
-describe('AgentConversationGuideTabs', () => {
-  it('uses only enabled reliable launchers and tells users to exit the current Agent first', () => {
-    render(<AgentConversationGuideTabs activeAgentId="codex" onTerminal={() => {}} agents={[
-      { id: 'codex', label: 'Codex', enabled: true },
-      { id: 'claude', label: 'Claude Code', enabled: true },
-      { id: 'pi', label: 'Pi', enabled: true },
-      { id: 'future', label: 'Future', enabled: true },
-      { id: 'disabled', label: 'Disabled', enabled: false },
-    ]}><span>current Codex guide</span></AgentConversationGuideTabs>);
-    expect(screen.getByText('current Codex guide')).toBeTruthy();
-    expect(screen.queryByRole('tab', { name: 'Future' })).toBeNull();
-    expect(screen.queryByRole('tab', { name: 'Disabled' })).toBeNull();
-
-    fireEvent.click(screen.getByRole('tab', { name: 'Claude Code' }));
-    expect(screen.getByText('claude')).toBeTruthy();
-    expect(screen.getByText(/先前往终端退出当前 Agent/)).toBeTruthy();
-    fireEvent.click(screen.getByRole('tab', { name: 'Pi' }));
-    expect(screen.getByText('handmux pi')).toBeTruthy();
   });
 });

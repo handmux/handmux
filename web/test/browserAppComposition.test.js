@@ -32,6 +32,9 @@ describe('built-in browser App composition', () => {
     expect(source).toContain("lens === 'chat' && isAgentConversationEnabled('codex')");
     expect(source).toContain('<CodexManagedGuide run={activationRun}');
     expect(source).toContain('<AgentConversationActivationGuide run={activationRun}');
+    expect(source).not.toContain('AgentConversationGuideTabs');
+    expect(styles).not.toContain('.conversation-guide-tabs');
+    expect(styles).toMatch(/\.codex-managed-guide-command code \{[^}]*white-space: nowrap/);
     expect(source).not.toContain('/api/codex/takeover');
     expect(source).not.toContain('codexChatReady');
     expect(source).not.toContain('codexChatLoading');

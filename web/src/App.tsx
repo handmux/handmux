@@ -68,7 +68,6 @@ import AgentInteractionLayer from './components/AgentInteractionLayer.jsx';
 import AgentConversationActivationGuide from './components/AgentConversationActivationGuide.jsx';
 import CodexManagedGuide from './components/CodexManagedGuide.jsx';
 import CodexActivationRecoveryGuide from './components/CodexActivationRecoveryGuide.jsx';
-import AgentConversationGuideTabs from './components/AgentConversationGuideTabs.jsx';
 import AgentModelControl from './components/AgentModelControl.jsx';
 import {
   AgentConversationActionControls,
@@ -2779,19 +2778,12 @@ export default function App() {
             primary={current.paneId && (
             chatLens ? (
               durableConversationRecovery ? (
-                <AgentConversationGuideTabs activeAgentId="codex" agents={conversationAgents}
+                <CodexActivationRecoveryGuide controller={conversationRecovery}
                   onTerminal={() => {
                     clearConversationActivation();
                     setLens('terminal');
                     localStorage.setItem(`tw_lens_${current.paneId}`, 'terminal');
-                  }}>
-                  <CodexActivationRecoveryGuide controller={conversationRecovery}
-                    onTerminal={() => {
-                      clearConversationActivation();
-                      setLens('terminal');
-                      localStorage.setItem(`tw_lens_${current.paneId}`, 'terminal');
-                    }} />
-                </AgentConversationGuideTabs>
+                  }} />
               ) : normalizedConversationIdentity ? (
                 <AgentConversationView
                   key={`conversation-view\0${normalizedConversationIdentity.agentId}\0${normalizedConversationIdentity.sessionId}`}
@@ -2805,33 +2797,25 @@ export default function App() {
                     ? chatFollowLatest.request : 0} />
               ) : activationRun
                 && currentAgentDescriptor?.capabilities.conversationActivation === true ? (
-                <AgentConversationGuideTabs activeAgentId={activationRun.agentId}
-                  agents={conversationAgents}
-                  onTerminal={() => {
-                    clearConversationActivation();
-                    setLens('terminal');
-                    localStorage.setItem(`tw_lens_${current.paneId}`, 'terminal');
-                  }}>
-                  {activationRun.agentId === 'codex' ? (
-                    <CodexManagedGuide run={activationRun}
-                      controller={conversationActivation}
-                      onActivationChange={setConversationActivationPending}
-                      onTerminal={() => {
-                        clearConversationActivation();
-                        setLens('terminal');
-                        localStorage.setItem(`tw_lens_${current.paneId}`, 'terminal');
-                      }} />
-                  ) : (
-                    <AgentConversationActivationGuide run={activationRun}
-                      controller={conversationActivation}
-                      onActivationChange={setConversationActivationPending}
-                      onCancel={() => {
-                        clearConversationActivation();
-                        setLens('terminal');
-                        localStorage.setItem(`tw_lens_${current.paneId}`, 'terminal');
-                      }} />
-                  )}
-                </AgentConversationGuideTabs>
+                activationRun.agentId === 'codex' ? (
+                  <CodexManagedGuide run={activationRun}
+                    controller={conversationActivation}
+                    onActivationChange={setConversationActivationPending}
+                    onTerminal={() => {
+                      clearConversationActivation();
+                      setLens('terminal');
+                      localStorage.setItem(`tw_lens_${current.paneId}`, 'terminal');
+                    }} />
+                ) : (
+                  <AgentConversationActivationGuide run={activationRun}
+                    controller={conversationActivation}
+                    onActivationChange={setConversationActivationPending}
+                    onCancel={() => {
+                      clearConversationActivation();
+                      setLens('terminal');
+                      localStorage.setItem(`tw_lens_${current.paneId}`, 'terminal');
+                    }} />
+                )
               ) : (
                 <AgentConversationErrorView message={t('chat.session.connectionTitle')}
                   resetKey={`${current.paneId}\0${chatAgent ?? ''}`} />

@@ -69,6 +69,23 @@ describe('Codex foreground open-session identity', () => {
       .resolves.toMatchObject({ sessionId: OTHER_ID });
   });
 
+  it('accepts a Handmux/editor-born root rollout held by a native codex resume process', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-open-'));
+    const resumed = rollout(root, ROOT_ID, sessionMeta(ROOT_ID, {
+      originator: 'handmux',
+      source: 'vscode',
+    }));
+
+    await expect(inspectCodexOpenRootSession(2048, root, {
+      platform: 'darwin', run: async () => lsof(resumed),
+    })).resolves.toMatchObject({
+      sessionId: ROOT_ID,
+      file: fs.realpathSync(resumed),
+      cwd: '/repo',
+      fd: '40',
+    });
+  });
+
   it('fails closed for zero roots, multiple roots, empty files, and lsof failure', async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-open-'));
     const first = rollout(root, ROOT_ID);

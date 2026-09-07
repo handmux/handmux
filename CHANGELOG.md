@@ -8,7 +8,7 @@ All notable changes to handmux. Format follows [Keep a Changelog](https://keepac
 
 - 修复 iOS 上 Agent 对话发送按钮只显示圆形背景、箭头图标不可见的问题。
 - 修复 `handmux codex resume` 默认列出所有目录会话的问题；托管模式现在继承启动目录，同时继续尊重显式 `-C/--cd`、`--all` 与 `--last`。
-- 修复直接运行的 Codex 只有终端、无法进入通用会话接管页的问题；Runtime 现在从已验证的前台进程建立唯一 sessionless run，并由 App Server 在托管后关联 thread，不再与 Inbox attachment 竞争。
+- 修复直接运行或通过原生 `codex resume` 恢复的 Codex 只有终端、无法进入通用会话接管页的问题；包括最初由 Handmux 或编辑器集成创建的历史会话，Runtime 现在都从已验证的前台进程建立唯一 sessionless run，并由 App Server 在托管后关联 thread，不再与 Inbox attachment 竞争。
 - 修复原生 Codex 接管依赖退出提示、页面或服务中断后可能停在 shell 的问题；现在会在退出前从前台进程锁定准确根会话并持久保存恢复凭据，刷新后仅在原窗格仍安全时允许继续，否则只提供复制命令和终端入口；已发现的真实托管会话始终优先。
 - 修复实时终端开启文件路径高亮后，高亮装饰会在内容与光标的两阶段绘制之间反复消失并闪烁的问题。
 - 修复终端聊天录音时点击输入框会丢弃最终识别结果的问题；Agent 对话输入卡片现在同样可点击停止录音并完成识别，排队消息移至输入卡片外。
