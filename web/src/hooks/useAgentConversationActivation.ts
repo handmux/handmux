@@ -7,28 +7,17 @@ import type { ConversationActivationDescriptor } from '../agentConversationActiv
 import type { AgentRunRef } from '../agentCatalog.js';
 import { ApiError, UnauthorizedError } from '../apiErrors.js';
 import type { ApiRecovery } from '../apiErrors.js';
+import { waitForConversationDiscovery } from './conversationDiscoveryPolling.js';
 
 export interface AgentConversationActivationController {
   status: 'idle' | 'loading' | 'ready' | 'activating' | 'waiting' | 'unavailable' | 'error';
   descriptor: ConversationActivationDescriptor | null;
   owner: AgentRunRef | null;
-  error: 'stale_run' | 'activation_failed' | 'discovery_timeout' | null;
+  error: 'stale_run' | 'activation_failed' | null;
   recovery?: ApiRecovery | null;
   activate(): Promise<void>;
   retry(): void;
 }
-
-const DISCOVERY_ATTEMPTS = 75;
-const DISCOVERY_INTERVAL_MS = 400;
-
-const delay = (ms: number, signal: AbortSignal): Promise<void> => new Promise((resolve, reject) => {
-  if (signal.aborted) { reject(signal.reason); return; }
-  const timer = window.setTimeout(resolve, ms);
-  signal.addEventListener('abort', () => {
-    window.clearTimeout(timer);
-    reject(signal.reason);
-  }, { once: true });
-});
 
 export function useAgentConversationActivation(
   run: AgentRunRef | null,
@@ -102,16 +91,21 @@ export function useAgentConversationActivation(
       if (generation.current !== requestGeneration) return;
       setRecovery(activationRecovery);
       setStatus('waiting');
-      for (let attempt = 0; attempt < DISCOVERY_ATTEMPTS; attempt += 1) {
+      const discoveryStartedAt = Date.now();
+      while (!controller.signal.aborted) {
         if (controller.signal.aborted) return;
-        const discovered = await discoverRef.current(active);
+        let discovered: AgentRunRef | null = null;
+        try {
+          discovered = await discoverRef.current(active);
+        } catch (cause) {
+          if (cause instanceof UnauthorizedError) throw cause;
+          // Activation was already accepted. A transient discovery/runtime/network failure says only
+          // that the managed run is not observable yet; keep waiting instead of reporting a false failure.
+        }
         if (generation.current !== requestGeneration) return;
         if (discovered?.sessionId) return;
-        await delay(DISCOVERY_INTERVAL_MS, controller.signal);
+        await waitForConversationDiscovery(discoveryStartedAt, controller.signal);
       }
-      if (controller.signal.aborted || generation.current !== requestGeneration) return;
-      setError('discovery_timeout');
-      setStatus('error');
     } catch (cause) {
       if (controller.signal.aborted || generation.current !== requestGeneration) return;
       if (cause instanceof UnauthorizedError) authRef.current?.();

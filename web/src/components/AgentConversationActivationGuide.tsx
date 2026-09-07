@@ -22,15 +22,13 @@ export default function AgentConversationActivationGuide({
   const failed = controller.status === 'error';
   const message = controller.error === 'stale_run'
     ? t('chat.activation.stale')
-    : controller.error === 'discovery_timeout'
-      ? t('chat.activation.timeout')
-      : failed ? t('chat.activation.failed')
-        : unavailable ? t('chat.activation.unavailable')
-          : pending ? t(controller.status === 'activating'
-            ? 'chat.activation.activating' : 'chat.activation.waiting')
-            : t('chat.activation.body');
+    : failed ? t('chat.activation.failed')
+      : unavailable ? t('chat.activation.unavailable')
+        : pending ? t(controller.status === 'activating'
+          ? 'chat.activation.activating' : 'chat.activation.waiting')
+          : t('chat.activation.body');
   useEffect(() => {
-    if (controller.status === 'error' && controller.error !== 'discovery_timeout' && runRef.current) {
+    if (controller.status === 'error' && runRef.current) {
       onActivationChange?.(runRef.current, false);
     }
   }, [controller.error, controller.status, onActivationChange]);

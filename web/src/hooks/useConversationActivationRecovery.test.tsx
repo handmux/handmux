@@ -91,6 +91,51 @@ describe('useConversationActivationRecovery', () => {
     expect(result.current).toMatchObject({ status: 'ready', receipt: null });
   });
 
+  it('keeps recovery waiting past 30 seconds, slows polling, and finishes after late discovery', async () => {
+    vi.useFakeTimers();
+    vi.mocked(getConversationActivationRecovery).mockResolvedValue(receipt);
+    vi.mocked(recoverConversationActivation).mockResolvedValue(recovery);
+    const discover = vi.fn()
+      .mockRejectedValueOnce(new Error('transient runtime gap'))
+      .mockImplementation(async () => (discover.mock.calls.length === 77 ? {
+        agentId: 'codex', paneId: '%1', runId: 'managed', sessionId: recovery.sessionId,
+      } : null));
+    const { result } = renderHook(() => useConversationActivationRecovery('%1', true, discover));
+    await act(async () => { await Promise.resolve(); });
+    expect(result.current.status).toBe('ready');
+    let operation!: Promise<void>;
+    act(() => { operation = result.current.recover(); });
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
+    expect(result.current.status).toBe('waiting');
+    expect(discover).toHaveBeenCalledTimes(76);
+    await act(async () => { await vi.advanceTimersByTimeAsync(1_999); });
+    expect(discover).toHaveBeenCalledTimes(76);
+    await act(async () => { await vi.advanceTimersByTimeAsync(1); await operation; });
+    expect(discover).toHaveBeenCalledTimes(77);
+    expect(result.current).toMatchObject({ status: 'ready', receipt: null });
+  });
+
+  it('stops recovery discovery when the page is left', async () => {
+    vi.useFakeTimers();
+    vi.mocked(getConversationActivationRecovery).mockResolvedValue(receipt);
+    vi.mocked(recoverConversationActivation).mockResolvedValue(recovery);
+    const discover = vi.fn(async () => null);
+    const { result, unmount } = renderHook(() => useConversationActivationRecovery(
+      '%1', true, discover,
+    ));
+    await act(async () => { await Promise.resolve(); });
+    let operation!: Promise<void>;
+    act(() => { operation = result.current.recover(); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(32_000); });
+    expect(result.current.status).toBe('waiting');
+    const calls = discover.mock.calls.length;
+
+    unmount();
+    await act(async () => { await operation; await vi.advanceTimersByTimeAsync(10_000); });
+    expect(discover).toHaveBeenCalledTimes(calls);
+  });
+
   it('preserves the last receipt through a transient recovery lookup failure', async () => {
     vi.mocked(getConversationActivationRecovery)
       .mockResolvedValueOnce(receipt)
