@@ -4,6 +4,8 @@ All notable changes to handmux. Format follows [Keep a Changelog](https://keepac
 
 ## [Unreleased]
 
+## [0.27.1] - 2026-09-08
+
 ### Changed
 
 - 设置中将终端字号、终端传输与键盘模式归入“终端”，终端字号在对话页也可调整；新增独立保存的“对话字体大小”，可在 10–20px 之间以 1px 为步进调整消息正文及其中的 Markdown 与代码，不影响工具详情与其他界面元素。
