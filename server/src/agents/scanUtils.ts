@@ -39,7 +39,13 @@ const isRecord = (value: unknown): value is JsonRecord => value !== null && type
 // Detection is best-effort and must never throw the whole request.
 export function defaultRun(cmd: string, args: string[]): Promise<string> {
   return new Promise<string>((resolve) => {
-    execFile(cmd, args, { maxBuffer: 8 * 1024 * 1024 }, (err, stdout) => {
+    // These commands are parsed as machine output. Inherited locales can translate fields such as
+    // macOS `ps lstart` (for example Chinese weekday/month names), making otherwise stable output
+    // unparsable and leaving safety-critical process identities incomplete.
+    execFile(cmd, args, {
+      maxBuffer: 8 * 1024 * 1024,
+      env: { ...process.env, LC_ALL: 'C' },
+    }, (err, stdout) => {
       resolve(err ? '' : String(stdout));
     });
   });

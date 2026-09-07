@@ -1138,6 +1138,11 @@ export class AgentRuntime {
         if (identity.kind !== 'matched' || identity.adapter.id !== adapter.id) return 'invalid';
         const foreground = await context.inspectForeground(pane);
         if (foreground === null) return 'unknown';
+        const observedTty = foreground.tty ?? pane.tty;
+        // A partial best-effort probe cannot prove that the process generation changed. Preserve the
+        // complete lease and retry; explicit PID/start-time/TTY disagreement still fails below.
+        if ((candidate.process.startedAt !== undefined && foreground.startedAt === undefined)
+          || (candidate.process.tty !== undefined && !observedTty)) return 'unknown';
         return sameProcess(candidate, pane, foreground) ? 'valid' : 'invalid';
       })(), this.#verifyTimeoutMs, 'Agent process verification');
     } catch { return 'unknown'; }
@@ -1174,7 +1179,9 @@ export class AgentRuntime {
       if (identity.kind !== 'matched' || identity.adapter.process.runtimeAttach !== true) continue;
       let foreground: ForegroundProcessIdentity | null;
       try { foreground = await context.inspectForeground(pane); } catch { continue; }
-      if (!foreground) continue;
+      // A PID without its start time is not a process generation. Do not publish a lease that
+      // destructive capabilities must permanently reject; the next pane poll retries the probe.
+      if (!foreground || foreground.startedAt === undefined || !(foreground.tty ?? pane.tty)) continue;
       try {
         await this.#controllers.get(identity.adapter.id)!.attach(
           processAttachmentCandidate(identity.adapter, pane, foreground),

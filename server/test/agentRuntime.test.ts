@@ -601,6 +601,7 @@ describe('AgentRuntime composition root', () => {
     let foreground: ForegroundProcessIdentity = {
       pid: 101, startedAt: 1_000, tty: '/dev/ttys001', executable: '/opt/codex/bin/codex',
     };
+    const inspectForeground = vi.fn(async () => foreground);
     let run = 0;
     const runtime = new AgentRuntime({
       adapters: [{
@@ -608,7 +609,7 @@ describe('AgentRuntime composition root', () => {
         process: { commands: ['codex'], runtimeAttach: true },
       }, adapter('pi')],
       panes,
-      process: { inspectForeground: async () => foreground },
+      process: { inspectForeground },
       stateDirectory: directory(),
       authToken: AUTH_TOKEN,
       newRunId: () => `process-run-${++run}`,
@@ -624,6 +625,17 @@ describe('AgentRuntime composition root', () => {
     panes.emit([codexPane]);
     await vi.waitFor(() => expect(runtime.activeRuns()[0]?.runId).toBe('process-run-1'));
     expect(run).toBe(1);
+
+    // One partial ps result is uncertainty, not proof that the complete process generation changed.
+    const callsBeforePartialProbe = inspectForeground.mock.calls.length;
+    const partialPane = { ...codexPane };
+    delete partialPane.tty;
+    foreground = { pid: 101, executable: '/opt/codex/bin/codex' };
+    panes.emit([partialPane]);
+    await vi.waitFor(() => expect(inspectForeground.mock.calls.length)
+      .toBeGreaterThan(callsBeforePartialProbe));
+    expect(runtime.activeRuns()[0]?.runId).toBe('process-run-1');
+    expect(first.signal.aborted).toBe(false);
 
     // Executable lookup is useful evidence at the destructive controller boundary, but it can
     // transiently fail. It must not churn the Runtime generation for the same stable process.
@@ -648,6 +660,39 @@ describe('AgentRuntime composition root', () => {
     panes.emit([pane('pi')]);
     await vi.waitFor(() => expect(runtime.activeRuns()).toEqual([]));
     expect(run).toBe(2);
+  });
+
+  it('retries Runtime attachment after an incomplete process identity becomes complete', async () => {
+    const codexPane: LivePane = { ...pane('codex') };
+    delete codexPane.foregroundPid;
+    const panes = new TestPanes([codexPane]);
+    let foreground: ForegroundProcessIdentity = {
+      pid: 101, tty: '/dev/ttys001', executable: '/opt/codex/bin/codex',
+    };
+    const runtime = new AgentRuntime({
+      adapters: [{
+        ...adapter('codex'),
+        process: { commands: ['codex'], runtimeAttach: true },
+      }],
+      panes,
+      process: { inspectForeground: async () => foreground },
+      stateDirectory: directory(),
+      authToken: AUTH_TOKEN,
+      newRunId: () => 'complete-process-run',
+    });
+    runtimes.push(runtime);
+    await runtime.start();
+
+    expect(runtime.runs.currentForPane('%1')).toBeNull();
+    foreground = { ...foreground, startedAt: 1_000 };
+    panes.emit([codexPane]);
+
+    await vi.waitFor(() => expect(runtime.activeRuns()).toEqual([{
+      agentId: 'codex', paneId: '%1', runId: 'complete-process-run',
+    }]));
+    expect(runtime.runs.currentForPane('%1')?.process).toEqual({
+      pid: 101, startedAt: 1_000, tty: '/dev/ttys001',
+    });
   });
 
   it('coalesces slow pane reconciliation to the first and latest snapshots and drops pending work on close', async () => {

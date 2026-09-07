@@ -3,6 +3,7 @@ import {
   createLocalAgentProcessContext,
   TmuxAgentPaneSource,
 } from '../src/agent-runtime/tmuxRuntime.js';
+import { defaultRun } from '../src/agents/scanUtils.js';
 
 function live(command = 'pi') {
   return {
@@ -12,6 +13,13 @@ function live(command = 'pi') {
 }
 
 describe('Tmux Agent Runtime context', () => {
+  it('runs parsed system commands with a stable machine locale', async () => {
+    await expect(defaultRun(process.execPath, [
+      '-e',
+      'process.stdout.write(`${process.env.LC_ALL ?? ""}/${process.env.LANG ?? ""}`)',
+    ])).resolves.toMatch(/^C\//);
+  });
+
   it('publishes every successful snapshot and retains the last truth across a failed poll', async () => {
     const listLivePanes = vi.fn()
       .mockResolvedValueOnce([live()])
