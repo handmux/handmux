@@ -1,7 +1,10 @@
+import { useEffect, useState } from 'react';
 import type { ConversationActivationRecoveryController } from '../hooks/useConversationActivationRecovery.js';
 import { t } from '../i18n';
 import { BotIcon } from './icons.jsx';
 import CodexRecoveryCommand from './CodexRecoveryCommand.js';
+
+const TERMINAL_HINT_MS = 30_000;
 
 export default function CodexActivationRecoveryGuide({
   controller,
@@ -12,6 +15,15 @@ export default function CodexActivationRecoveryGuide({
 }) {
   const receipt = controller.receipt;
   const pending = controller.status === 'recovering' || controller.status === 'waiting';
+  const pendingOperation = pending ? receipt?.operationId ?? null : null;
+  const [hintedOperation, setHintedOperation] = useState<string | null>(null);
+  useEffect(() => {
+    setHintedOperation(null);
+    if (!pendingOperation) return undefined;
+    const timer = window.setTimeout(() => setHintedOperation(pendingOperation), TERMINAL_HINT_MS);
+    return () => window.clearTimeout(timer);
+  }, [pendingOperation]);
+  const showTerminalHint = pendingOperation !== null && hintedOperation === pendingOperation;
   if (!receipt) return null;
 
   const stale = receipt.state === 'stale';
@@ -24,7 +36,7 @@ export default function CodexActivationRecoveryGuide({
       : stale ? t('chat.managedGuide.recoveryStaleTitle')
         : t('chat.managedGuide.recoveryTitle')}</h2>
     <p>{pending
-      ? t('chat.managedGuide.startingHint')
+      ? t(showTerminalHint ? 'chat.managedGuide.terminalHint' : 'chat.managedGuide.startingHint')
       : stale ? t('chat.managedGuide.recoveryStaleHint')
         : receipt.canResume ? t('chat.managedGuide.recoveryReadyHint')
           : t('chat.managedGuide.recoveryManualHint')}</p>
