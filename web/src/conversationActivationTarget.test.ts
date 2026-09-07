@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   activationRunFor,
   activationTargetMatches,
+  conversationRecoveryForSessionlessPane,
   conversationIdentityForActivation,
   invalidateRememberedConversationOnTakeover,
   useConversationActivationTarget,
@@ -34,6 +35,53 @@ function activationTargetHook() {
 }
 
 describe('Conversation activation target', () => {
+  it('never lets a durable receipt replace an authoritatively discovered run', () => {
+    const receipt = { operationId: 'receipt-1', state: 'current' as const };
+    expect(conversationRecoveryForSessionlessPane(receipt, {
+      agentId: 'codex', paneId: '%1', runId: 'managed', sessionId: 'session-1',
+    })).toBeNull();
+    expect(conversationRecoveryForSessionlessPane(receipt, {
+      agentId: 'codex', paneId: '%1', runId: 'native',
+    })).toBeNull();
+    expect(conversationRecoveryForSessionlessPane(receipt, null)).toBe(receipt);
+  });
+
+  it('lets the exact prepared native run win without consuming its receipt', () => {
+    const prepared = {
+      operationId: 'receipt-prepared', state: 'current' as const, phase: 'prepared' as const,
+    };
+    const nativeRun = { agentId: 'codex', paneId: '%1', runId: 'native' };
+
+    expect(conversationRecoveryForSessionlessPane(prepared, nativeRun)).toBeNull();
+    expect(conversationRecoveryForSessionlessPane(prepared, null)).toBe(prepared);
+  });
+
+  it('lets a different same-pane sessionless run replace current and stale receipts', () => {
+    const currentRun = { agentId: 'codex', paneId: '%1', runId: 'native' };
+    const current = { operationId: 'receipt-current', state: 'current' as const };
+    const stale = { operationId: 'receipt-stale', state: 'stale' as const };
+
+    expect(conversationRecoveryForSessionlessPane(current, currentRun)).toBeNull();
+    expect(conversationRecoveryForSessionlessPane(stale, currentRun)).toBeNull();
+  });
+
+  it('lets a current sessionless run win while recovery is already resuming', () => {
+    const resuming = {
+      operationId: 'receipt-resuming', state: 'current' as const, phase: 'resuming' as const,
+    };
+    expect(conversationRecoveryForSessionlessPane(resuming, {
+      agentId: 'codex', paneId: '%1', runId: 'native',
+    })).toBeNull();
+  });
+
+  it('keeps current and stale receipts only while Runtime has no current run', () => {
+    const current = { operationId: 'receipt-current', state: 'current' as const };
+    const stale = { operationId: 'receipt-stale', state: 'stale' as const };
+
+    expect(conversationRecoveryForSessionlessPane(current, null)).toBe(current);
+    expect(conversationRecoveryForSessionlessPane(stale, null)).toBe(stale);
+  });
+
   it('keeps a remembered managed conversation until takeover is authoritatively available', () => {
     const remembered = { agentId: 'codex', paneId: '%1', sessionId: 'session-1' };
     const sessionless = { agentId: 'codex', paneId: '%1', runId: 'run-2' };

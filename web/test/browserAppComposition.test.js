@@ -17,13 +17,19 @@ describe('built-in browser App composition', () => {
   });
 
   it('keeps the selected chat lens mounted through transient capability failures', () => {
-    expect(source).toContain("const chatLens = lens === 'chat' && conversationEnabled;");
+    expect(source).toMatch(/const chatLens = lens === 'chat'\s*&& \(conversationEnabled \|\| recoveryLookupUncertain/);
     expect(source).not.toMatch(/const chatLens\s*=\s*chatLensAvailable\s*&&/);
     expect(source).toContain('currentAgentDescriptor?.capabilities.conversation === true');
     expect(source).toContain('normalizedConversationIdentity');
     expect(source).not.toMatch(/chatAgent\s*===\s*['"](?:codex|claude|pi)['"]/);
     expect(source).toContain('chatLensEnabled={chatLensAvailable || chatLens}');
     expect(source).toContain('currentAgentDescriptor.capabilities.conversationActivation === true');
+    expect(source).toContain('conversationRecoveryForSessionlessPane(');
+    expect(source).toContain('authoritativePaneRun,');
+    expect(source).toContain('authoritativePaneSession?.agentId');
+    expect(source).toContain('<CodexActivationRecoveryGuide controller={conversationRecovery}');
+    expect(source).toContain('conversationEnabled || recoveryLookupUncertain');
+    expect(source).toContain("lens === 'chat' && isAgentConversationEnabled('codex')");
     expect(source).toContain('<CodexManagedGuide run={activationRun}');
     expect(source).toContain('<AgentConversationActivationGuide run={activationRun}');
     expect(source).not.toContain('/api/codex/takeover');

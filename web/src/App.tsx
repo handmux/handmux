@@ -67,6 +67,8 @@ import AgentConversationComposer from './components/AgentConversationComposer.js
 import AgentInteractionLayer from './components/AgentInteractionLayer.jsx';
 import AgentConversationActivationGuide from './components/AgentConversationActivationGuide.jsx';
 import CodexManagedGuide from './components/CodexManagedGuide.jsx';
+import CodexActivationRecoveryGuide from './components/CodexActivationRecoveryGuide.jsx';
+import AgentConversationGuideTabs from './components/AgentConversationGuideTabs.jsx';
 import AgentModelControl from './components/AgentModelControl.jsx';
 import {
   AgentConversationActionControls,
@@ -127,10 +129,12 @@ import {
   projectConversationTimeline,
 } from './conversationSubmissionProjection.js';
 import { useAgentConversationActivation } from './hooks/useAgentConversationActivation.js';
+import { useConversationActivationRecovery } from './hooks/useConversationActivationRecovery.js';
 import type { AgentConversationIdentity } from './hooks/useAgentConversation.js';
 import {
   activationRunFor,
   activationTargetMatches,
+  conversationRecoveryForSessionlessPane,
   conversationIdentityForActivation,
   invalidateRememberedConversationOnTakeover,
   useConversationActivationTarget,
@@ -1666,6 +1670,36 @@ export default function App() {
     return () => { alive = false; document.removeEventListener('visibilitychange', onVis); };
   }, [needToken, notifInboxOpen, notifRetrySeq, handledAuth]);
 
+  const discoverRecoveredRun = useCallback(async (
+    paneId: string,
+    sessionId: string,
+  ): Promise<AgentRunRef | null> => {
+    const next = await getAgentDiscovery();
+    setAgentDiscovery(next);
+    return next.runs.find((candidate) => candidate.agentId === 'codex'
+      && candidate.paneId === paneId && candidate.sessionId === sessionId) ?? null;
+  }, []);
+  const conversationRecovery = useConversationActivationRecovery(
+    currentPaneId,
+    lens === 'chat' && isAgentConversationEnabled('codex'),
+    discoverRecoveredRun,
+    onAuthFail,
+  );
+  const authoritativePaneSession = agentDiscovery?.runs.find((candidate) => (
+    candidate.paneId === currentPaneId && !!candidate.sessionId
+  )) ?? null;
+  const authoritativePaneRun = authoritativePaneSession ?? agentDiscovery?.runs.find((candidate) => (
+    candidate.paneId === currentPaneId
+  )) ?? null;
+  // A receipt only bridges the shell gap where Runtime has no verified current run. Any discovered run,
+  // including a native sessionless Codex, wins without mutating the durable recovery record.
+  const durableConversationRecovery = conversationRecoveryForSessionlessPane(
+    conversationRecovery.receipt,
+    authoritativePaneRun,
+  );
+  const recoveryLookupUncertain = conversationRecovery.status === 'loading'
+    || conversationRecovery.status === 'unknown';
+
   // A controlled takeover briefly replaces the old Codex with a shell before the managed Codex child is
   // visible. Pin that pane's identity through the gap so the chat page and its App Server poll do not
   // disappear halfway through startup.
@@ -1680,7 +1714,8 @@ export default function App() {
       rememberRecent(chatAgentByPaneRef.current, current.paneId, currentAgent);
       localStorage.setItem(`tw_chat_agent_${current.paneId}`, currentAgent);
     }
-  } else if (current?.paneId && canonicalCurrentAgent) {
+  } else if (current?.paneId && canonicalCurrentAgent
+    && !(lens === 'chat' && (durableConversationRecovery || recoveryLookupUncertain))) {
     // A canonical `agent:null` means the process exited to a shell; it is not a discovery gap. Forget the
     // previous owner so this pane cannot resurrect a stale chat/run if a later legacy response is sparse.
     chatAgentByPaneRef.current.delete(current.paneId);
@@ -1690,8 +1725,10 @@ export default function App() {
   const persistedChatAgent = current?.paneId
     ? localStorage.getItem(`tw_chat_agent_${current.paneId}`) : null;
   const chatAgent = current?.paneId
-    ? conversationActivationDisplayTarget?.agentId
-      ?? currentAgent ?? (canonicalCurrentAgent ? null : chatAgentByPaneRef.current.get(current.paneId)
+    ? authoritativePaneSession?.agentId
+      ?? (durableConversationRecovery ? 'codex' : conversationActivationDisplayTarget?.agentId)
+      ?? currentAgent ?? (canonicalCurrentAgent && !(lens === 'chat' && recoveryLookupUncertain)
+        ? null : chatAgentByPaneRef.current.get(current.paneId)
         ?? (persistedChatAgent && persistedChatAgent.length <= 64 ? persistedChatAgent : null))
     : null;
   const rawCurrentKind = current?.paneId ? states[current.paneId]?.kind : null;
@@ -1773,7 +1810,8 @@ export default function App() {
     ? isAgentConversationEnabled(chatAgent) : false;
   // Probe sessionless Codex ownership even while a remembered managed conversation remains visible.
   // Only an explicit activation descriptor proves that the current process is safe to replace.
-  const chatLens = lens === 'chat' && conversationEnabled;
+  const chatLens = lens === 'chat'
+    && (conversationEnabled || recoveryLookupUncertain || !!durableConversationRecovery);
   const conversationActivation = useAgentConversationActivation(
     chatLens && currentAgentDescriptor?.capabilities.conversationActivation === true
       ? activationRun : null,
@@ -1808,7 +1846,9 @@ export default function App() {
   // A sessionless process is only authoritatively native/unmanaged after its activation descriptor is
   // available. While the managed App Server is restarting, keep the last conversation mounted and let
   // its normal connection state report the outage instead of replacing it with a takeover screen.
-  const currentConversationIdentity = activationPending && !currentAgentRun?.sessionId
+  const currentConversationIdentity = durableConversationRecovery
+    ? null
+    : activationPending && !currentAgentRun?.sessionId
     ? null
     : conversationIdentityForActivation(
       currentAgentRun,
@@ -1825,14 +1865,15 @@ export default function App() {
   const chatLensAvailable = currentAgentDescriptor?.capabilities.conversation === true
     && conversationEnabled
     && (!!normalizedConversationRun || !!normalizedConversationIdentity
+      || !!durableConversationRecovery
       || (currentAgentDescriptor.capabilities.conversationActivation === true && !!activationRun));
   // `lens` is the sole view owner. Availability controls only whether a terminal pane can opt into chat;
   // it must never evict an already selected chat view during a transient discovery or connection outage.
   useEffect(() => {
-    if (lens !== 'chat' || conversationEnabled || !current?.paneId) return;
+    if (lens !== 'chat' || conversationEnabled || recoveryLookupUncertain || !current?.paneId) return;
     setLens('terminal');
     localStorage.setItem(`tw_lens_${current.paneId}`, 'terminal');
-  }, [conversationEnabled, current?.paneId, lens, setLens]);
+  }, [conversationEnabled, current?.paneId, lens, recoveryLookupUncertain, setLens]);
   const conversationAgents = (agentDiscovery?.descriptors ?? [])
     .filter((descriptor) => descriptor.capabilities.conversation)
     .map((descriptor) => ({
@@ -1966,7 +2007,9 @@ export default function App() {
     conversationRequestIdentity]);
   const paneSurfaceIdentity = !chatLens
     ? 'terminal'
-    : normalizedConversationIdentity
+    : durableConversationRecovery
+      ? `conversation-recovery\0${durableConversationRecovery.operationId}`
+      : normalizedConversationIdentity
       ? `conversation\0${normalizedConversationIdentity.agentId}\0${normalizedConversationIdentity.sessionId}`
       : activationRun && currentAgentDescriptor?.capabilities.conversationActivation === true
         ? `conversation-activation\0${activationRun.runId}` : 'chat-unavailable';
@@ -2735,7 +2778,21 @@ export default function App() {
             ownerKey={paneSurfaceOwnerKey}
             primary={current.paneId && (
             chatLens ? (
-              normalizedConversationIdentity ? (
+              durableConversationRecovery ? (
+                <AgentConversationGuideTabs activeAgentId="codex" agents={conversationAgents}
+                  onTerminal={() => {
+                    clearConversationActivation();
+                    setLens('terminal');
+                    localStorage.setItem(`tw_lens_${current.paneId}`, 'terminal');
+                  }}>
+                  <CodexActivationRecoveryGuide controller={conversationRecovery}
+                    onTerminal={() => {
+                      clearConversationActivation();
+                      setLens('terminal');
+                      localStorage.setItem(`tw_lens_${current.paneId}`, 'terminal');
+                    }} />
+                </AgentConversationGuideTabs>
+              ) : normalizedConversationIdentity ? (
                 <AgentConversationView
                   key={`conversation-view\0${normalizedConversationIdentity.agentId}\0${normalizedConversationIdentity.sessionId}`}
                   conversation={projectedConversation}
@@ -2748,25 +2805,33 @@ export default function App() {
                     ? chatFollowLatest.request : 0} />
               ) : activationRun
                 && currentAgentDescriptor?.capabilities.conversationActivation === true ? (
-                activationRun.agentId === 'codex' ? (
-                  <CodexManagedGuide run={activationRun}
-                    controller={conversationActivation}
-                    onActivationChange={setConversationActivationPending}
-                    onTerminal={() => {
-                      clearConversationActivation();
-                      setLens('terminal');
-                      localStorage.setItem(`tw_lens_${current.paneId}`, 'terminal');
-                    }} />
-                ) : (
-                  <AgentConversationActivationGuide run={activationRun}
-                    controller={conversationActivation}
-                    onActivationChange={setConversationActivationPending}
-                    onCancel={() => {
-                      clearConversationActivation();
-                      setLens('terminal');
-                      localStorage.setItem(`tw_lens_${current.paneId}`, 'terminal');
-                    }} />
-                )
+                <AgentConversationGuideTabs activeAgentId={activationRun.agentId}
+                  agents={conversationAgents}
+                  onTerminal={() => {
+                    clearConversationActivation();
+                    setLens('terminal');
+                    localStorage.setItem(`tw_lens_${current.paneId}`, 'terminal');
+                  }}>
+                  {activationRun.agentId === 'codex' ? (
+                    <CodexManagedGuide run={activationRun}
+                      controller={conversationActivation}
+                      onActivationChange={setConversationActivationPending}
+                      onTerminal={() => {
+                        clearConversationActivation();
+                        setLens('terminal');
+                        localStorage.setItem(`tw_lens_${current.paneId}`, 'terminal');
+                      }} />
+                  ) : (
+                    <AgentConversationActivationGuide run={activationRun}
+                      controller={conversationActivation}
+                      onActivationChange={setConversationActivationPending}
+                      onCancel={() => {
+                        clearConversationActivation();
+                        setLens('terminal');
+                        localStorage.setItem(`tw_lens_${current.paneId}`, 'terminal');
+                      }} />
+                  )}
+                </AgentConversationGuideTabs>
               ) : (
                 <AgentConversationErrorView message={t('chat.session.connectionTitle')}
                   resetKey={`${current.paneId}\0${chatAgent ?? ''}`} />

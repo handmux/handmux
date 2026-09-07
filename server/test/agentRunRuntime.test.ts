@@ -36,6 +36,9 @@ describe('AgentRunRuntime', () => {
 
     expect(verify).toHaveBeenCalledWith(input);
     expect(lease.ref).toEqual({ agentId: 'pi', paneId: '%1', runId: 'run-1' });
+    expect(lease.process).toEqual(input.process);
+    expect(lease.process).not.toBe(input.process);
+    expect(Object.isFrozen(lease.process)).toBe(true);
     expect(lease.signal.aborted).toBe(false);
     expect(runtime.resolve(lease.ref)).toBe(lease);
     expect(runtime.status(lease.ref)).toBe('current');

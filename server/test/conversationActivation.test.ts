@@ -1,15 +1,25 @@
 import { describe, expect, it, vi } from 'vitest';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import {
   AgentConversationActivationService,
   ConversationActivationError,
 } from '../src/agent-runtime/conversationActivation.js';
 import { createCodexConversationActivationController } from '../src/agents/codexConversationActivation.js';
+import { CodexActivationReceiptStore } from '../src/agents/codexActivationReceipt.js';
 
-const lease = () => {
+const lease = (process: { pid: number; startedAt?: number; tty?: string } = {
+  pid: 10, startedAt: 100, tty: 'ttys001',
+}) => {
   const abort = new AbortController();
   return {
     abort,
-    value: { ref: { agentId: 'codex', paneId: '%1', runId: 'run-1' }, signal: abort.signal },
+    value: {
+      ref: { agentId: 'codex', paneId: '%1', runId: 'run-1' },
+      signal: abort.signal,
+      process,
+    },
   };
 };
 
@@ -17,10 +27,20 @@ const unmanagedApp = () => ({
   discover: vi.fn(async () => ({ managed: false as const, threadId: null })),
 });
 const activationProgress = () => ({ recovery: vi.fn() });
+const openSession = (cwd = '/repo') => ({
+  sessionId: '12345678-1234-1234-1234-123456789abc',
+  file: '/home/test/.codex/sessions/2026/09/06/rollout-12345678-1234-1234-1234-123456789abc.jsonl',
+  cwd,
+  fd: '42',
+  device: '1',
+  inode: '2',
+  command: 'handmux codex resume 12345678-1234-1234-1234-123456789abc',
+});
 
 describe('Conversation activation', () => {
   it('only describes takeover after Codex ownership is authoritatively unmanaged', async () => {
     let commandLine: string | undefined;
+    let executable: string | undefined = '/usr/bin/codex';
     const base = {
       panes: {
         list: vi.fn(async () => [{
@@ -30,13 +50,13 @@ describe('Conversation activation', () => {
       },
       process: {
         inspectForeground: vi.fn(async () => ({
-          pid: 10, startedAt: 100, tty: 'ttys001', executable: '/usr/bin/codex',
+          pid: 10, startedAt: 100, tty: 'ttys001',
+          ...(executable ? { executable } : {}),
           ...(commandLine ? { commandLine } : {}),
         })),
       },
       commands: {
-        paneCurrentPath: vi.fn(async () => '/repo'),
-        sessionCwd: vi.fn(async () => '/repo'),
+        inspectOpenSession: vi.fn(async () => openSession()),
         openOutputCapture: vi.fn(),
         runPaneCommand: vi.fn(),
       },
@@ -68,6 +88,86 @@ describe('Conversation activation', () => {
     await expect(controller.describe(lease().value)).resolves.toEqual({
       effect: 'replace-process-preserve-session',
     });
+
+    await expect(controller.describe(lease({
+      pid: 11, startedAt: 200, tty: 'ttys001',
+    }).value)).resolves.toBeNull();
+    await expect(controller.describe(lease({ pid: 10 }).value)).resolves.toBeNull();
+    executable = undefined;
+    await expect(controller.describe(lease().value)).resolves.toBeNull();
+  });
+
+  it('activates a native Codex when only a stale App Server socket makes ownership unknown', async () => {
+    const original = {
+      pid: 10, startedAt: 100, tty: 'ttys001', executable: '/usr/bin/codex',
+      commandLine: '/usr/bin/codex resume 12345678-1234-1234-1234-123456789abc',
+    };
+    const shell = {
+      pid: 20, startedAt: 200, tty: 'ttys001', executable: '/bin/zsh', commandLine: '/bin/zsh',
+    };
+    let identity = original;
+    let currentCommand = 'codex';
+    const sendKey = vi.fn(async () => {
+      identity = shell;
+      currentCommand = 'zsh';
+    });
+    const runPaneCommand = vi.fn(async () => {});
+    const controller = createCodexConversationActivationController({
+      app: { discover: vi.fn(async () => ({ managed: null })) },
+      panes: {
+        list: vi.fn(async () => [{
+          paneId: '%1', currentCommand, sessionName: 's', windowId: '@1', windowName: 'w',
+          tty: 'ttys001',
+        }]),
+        subscribe: vi.fn(() => () => {}),
+      },
+      process: { inspectForeground: vi.fn(async () => identity) },
+      commands: {
+        inspectOpenSession: vi.fn(async () => openSession()),
+        openOutputCapture: vi.fn(async () => ({
+          sendKey, output: vi.fn(() => null), close: vi.fn(),
+        })),
+        runPaneCommand,
+      },
+      wait: vi.fn(async () => {}),
+    });
+
+    await expect(controller.describe(lease().value)).resolves.toEqual({
+      effect: 'replace-process-preserve-session',
+    });
+    await expect(controller.activate(
+      lease().value, new AbortController().signal, activationProgress(),
+    )).resolves.toMatchObject({ recovery: { sessionId: openSession().sessionId } });
+    expect(sendKey).toHaveBeenCalledOnce();
+    expect(runPaneCommand).toHaveBeenCalledWith('%1', openSession().command);
+  });
+
+  it('fails closed when Codex ownership discovery returns no result', async () => {
+    const original = {
+      pid: 10, startedAt: 100, tty: 'ttys001', executable: '/usr/bin/codex',
+      commandLine: '/usr/bin/codex resume 12345678-1234-1234-1234-123456789abc',
+    };
+    const inspectOpenSession = vi.fn(async () => openSession());
+    const openOutputCapture = vi.fn();
+    const controller = createCodexConversationActivationController({
+      app: { discover: vi.fn(async () => undefined) },
+      panes: {
+        list: vi.fn(async () => [{
+          paneId: '%1', currentCommand: 'codex', sessionName: 's', windowId: '@1', windowName: 'w',
+          tty: 'ttys001',
+        }]),
+        subscribe: vi.fn(() => () => {}),
+      },
+      process: { inspectForeground: vi.fn(async () => original) },
+      commands: { inspectOpenSession, openOutputCapture, runPaneCommand: vi.fn() },
+    });
+
+    await expect(controller.describe(lease().value)).resolves.toBeNull();
+    await expect(controller.activate(
+      lease().value, new AbortController().signal, activationProgress(),
+    )).rejects.toThrow(/run changed before/);
+    expect(inspectOpenSession).not.toHaveBeenCalled();
+    expect(openOutputCapture).not.toHaveBeenCalled();
   });
 
   it('bounds activation, aborts the controller operation, and releases the pane/run lock', async () => {
@@ -122,6 +222,65 @@ describe('Conversation activation', () => {
       }),
     } });
     await expect(service.activate(lease().value)).rejects.toMatchObject({
+      code: 'contract_violation', recovery: undefined,
+    });
+  });
+
+  it('validates recovery receipts and recover results returned by controllers', async () => {
+    const recovery = {
+      kind: 'codex_resume' as const,
+      sessionId: '12345678-1234-1234-1234-123456789abc',
+      command: 'handmux codex resume 12345678-1234-1234-1234-123456789abc',
+    };
+    const changed = {
+      kind: 'codex_resume' as const,
+      sessionId: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+      command: 'handmux codex resume aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+    };
+    const controller = {
+      apiVersion: 1 as const,
+      describe: vi.fn(async () => null),
+      activate: vi.fn(async () => {}),
+      recovery: vi.fn(async () => ({
+        operationId: 'bad', recovery, phase: 'prepared' as const,
+        state: 'current' as const, canResume: true,
+      })),
+      recover: vi.fn(async (_paneId: string, _operationId: string, _signal: AbortSignal,
+        progress: { recovery(value: typeof recovery): void }) => {
+        progress.recovery(recovery);
+        return { recovery: changed };
+      }),
+    };
+    const service = new AgentConversationActivationService({ codex: controller });
+
+    await expect(service.recovery('%1')).rejects.toMatchObject({ code: 'contract_violation' });
+    await expect(service.recover('%1', 'a'.repeat(64)))
+      .rejects.toMatchObject({ code: 'contract_violation' });
+  });
+
+  it('rejects recovery when controller progress changes after its first value', async () => {
+    const first = {
+      kind: 'codex_resume' as const,
+      sessionId: '12345678-1234-1234-1234-123456789abc',
+      command: 'handmux codex resume 12345678-1234-1234-1234-123456789abc',
+    };
+    const changed = {
+      kind: 'codex_resume' as const,
+      sessionId: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+      command: 'handmux codex resume aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+    };
+    const service = new AgentConversationActivationService({ codex: {
+      apiVersion: 1,
+      describe: vi.fn(async () => null),
+      activate: vi.fn(async () => {}),
+      recover: vi.fn(async (_paneId, _operationId, _signal, progress) => {
+        progress.recovery(first);
+        progress.recovery(changed);
+        return { recovery: changed };
+      }),
+    } });
+
+    await expect(service.recover('%1', 'a'.repeat(64))).rejects.toMatchObject({
       code: 'contract_violation', recovery: undefined,
     });
   });
@@ -219,8 +378,7 @@ describe('Conversation activation', () => {
       },
       process: { inspectForeground: vi.fn(async () => identity) },
       commands: {
-        paneCurrentPath: vi.fn(async () => '/repo'),
-        sessionCwd: vi.fn(async () => '/repo'),
+        inspectOpenSession: vi.fn(async () => openSession()),
         openOutputCapture: vi.fn(async () => ({
           sendKey: vi.fn(async () => {
             identity = shell;
@@ -278,8 +436,7 @@ describe('Conversation activation', () => {
       },
       process: { inspectForeground: vi.fn(async () => identity) },
       commands: {
-        paneCurrentPath: vi.fn(async () => '/repo'),
-        sessionCwd: vi.fn(async () => '/repo'),
+        inspectOpenSession: vi.fn(async () => openSession()),
         openOutputCapture: vi.fn(async () => ({
           sendKey: vi.fn(async () => { identity = incomplete; command = 'zsh'; }),
           output: vi.fn(() => Buffer.concat(outputFrames)),
@@ -323,8 +480,7 @@ describe('Conversation activation', () => {
       },
       process: { inspectForeground: vi.fn(async () => identity) },
       commands: {
-        paneCurrentPath: vi.fn(async () => '/repo'),
-        sessionCwd: vi.fn(async () => '/repo'),
+        inspectOpenSession: vi.fn(async () => openSession()),
         openOutputCapture: vi.fn(async () => ({ sendKey, output: vi.fn(() => null), close: vi.fn() })),
         runPaneCommand: vi.fn(async () => {}),
       },
@@ -353,8 +509,7 @@ describe('Conversation activation', () => {
       },
       process: { inspectForeground: vi.fn(async () => identity) },
       commands: {
-        paneCurrentPath: vi.fn(async () => '/repo'),
-        sessionCwd: vi.fn(async () => '/repo'),
+        inspectOpenSession: vi.fn(async () => openSession()),
         openOutputCapture: vi.fn(async () => ({
           sendKey: vi.fn(async () => { identity = shell; command = 'zsh'; }),
           output: vi.fn(() => Buffer.from(
@@ -379,7 +534,7 @@ describe('Conversation activation', () => {
     });
   });
 
-  it('rejects activation when no fresh exit notice follows the interrupt boundary', async () => {
+  it('does not depend on a human-readable exit notice after the session was locked before C-c', async () => {
     const original = { pid: 10, startedAt: 100, tty: 'ttys001', executable: '/usr/bin/codex' };
     const shell = { pid: 20, startedAt: 200, tty: 'ttys001', executable: '/bin/zsh' };
     let identity = original;
@@ -396,8 +551,7 @@ describe('Conversation activation', () => {
       },
       process: { inspectForeground: vi.fn(async () => identity) },
       commands: {
-        paneCurrentPath: vi.fn(async () => '/repo'),
-        sessionCwd: vi.fn(async () => '/repo'),
+        inspectOpenSession: vi.fn(async () => openSession()),
         openOutputCapture: vi.fn(async () => ({
           sendKey: vi.fn(async () => {
             identity = shell;
@@ -412,11 +566,352 @@ describe('Conversation activation', () => {
       wait: vi.fn(async () => {}),
     });
     await expect(controller.activate(current.value, new AbortController().signal, activationProgress()))
-      .rejects.toThrow(/did not expose a resumable session/);
+      .resolves.toMatchObject({ recovery: { sessionId: openSession().sessionId } });
+    expect(runPaneCommand).toHaveBeenCalledWith('%1', openSession().command);
+  });
+
+  it('persists recovery before C-c and advances its phase with compare-and-set', async () => {
+    const original = {
+      pid: 10, startedAt: 100, tty: 'ttys001', executable: '/usr/bin/codex',
+    };
+    const shell = { pid: 20, startedAt: 200, tty: 'ttys001', executable: '/bin/zsh' };
+    let identity = original;
+    let command = 'codex';
+    const order: string[] = [];
+    const durable = {
+      operationId: 'a'.repeat(64),
+      agentId: 'codex' as const,
+      pane: {
+        paneId: '%1', sessionName: 's', windowId: '@1',
+        tmuxEpoch: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      },
+      process: original,
+      sessionId: openSession().sessionId,
+      command: openSession().command,
+      phase: 'prepared' as const,
+      createdAt: 1,
+      updatedAt: 1,
+    };
+    const receipts = {
+      prepare: vi.fn(() => { order.push('prepare'); return durable; }),
+      transition: vi.fn((_id, _expected, phase) => {
+        order.push(phase);
+        return { ...durable, phase };
+      }),
+      clearManaged: vi.fn(() => false),
+      latestForPane: vi.fn(() => durable),
+      get: vi.fn(() => durable),
+    };
+    const controller = createCodexConversationActivationController({
+      app: unmanagedApp(),
+      panes: {
+        list: vi.fn(async () => [{
+          paneId: '%1', currentCommand: command, sessionName: 's', windowId: '@1', windowName: 'w',
+          tty: 'ttys001',
+        }]),
+        subscribe: vi.fn(() => () => {}),
+      },
+      process: { inspectForeground: vi.fn(async () => identity) },
+      commands: {
+        paneEpoch: vi.fn(async () => 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'),
+        inspectOpenSession: vi.fn(async () => openSession()),
+        openOutputCapture: vi.fn(async () => ({
+          sendKey: vi.fn(async () => {
+            order.push('C-c');
+            identity = shell;
+            command = 'zsh';
+          }),
+          output: vi.fn(() => null),
+          close: vi.fn(),
+        })),
+        runPaneCommand: vi.fn(async () => { order.push('resume'); }),
+      },
+      receipts,
+      wait: vi.fn(async () => {}),
+    });
+
+    await expect(controller.activate(
+      lease().value, new AbortController().signal, activationProgress(),
+    )).resolves.toMatchObject({ recovery: { sessionId: openSession().sessionId } });
+    expect(order).toEqual(['prepare', 'C-c', 'interrupted', 'resuming', 'resume']);
+    expect(receipts.prepare).toHaveBeenCalledWith(expect.objectContaining({
+      pane: expect.objectContaining({ tmuxEpoch: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' }),
+      process: original,
+      sessionId: openSession().sessionId,
+    }));
+  });
+
+  it('clears a durable receipt when discovery proves the same session is managed', async () => {
+    const receipts = {
+      prepare: vi.fn(), transition: vi.fn(), clearManaged: vi.fn(() => true),
+      latestForPane: vi.fn(() => null), get: vi.fn(() => null),
+    };
+    const controller = createCodexConversationActivationController({
+      app: { discover: vi.fn(async () => ({ managed: true, threadId: openSession().sessionId })) },
+      panes: {
+        list: vi.fn(async () => [{
+          paneId: '%1', currentCommand: 'codex', sessionName: 's', windowId: '@1', windowName: 'w',
+        }]),
+        subscribe: vi.fn(() => () => {}),
+      },
+      process: { inspectForeground: vi.fn(async () => ({
+        pid: 10, startedAt: 100, tty: 'ttys001', executable: '/usr/bin/codex',
+        commandLine: '/usr/bin/codex --remote unix:///tmp/codex.sock',
+      })) },
+      commands: {
+        inspectOpenSession: vi.fn(async () => null),
+        openOutputCapture: vi.fn(),
+        runPaneCommand: vi.fn(),
+      },
+      receipts,
+    });
+
+    await expect(controller.describe(lease().value)).resolves.toBeNull();
+    expect(receipts.clearManaged).toHaveBeenCalledWith('%1', openSession().sessionId);
+  });
+
+  it('reloads an interrupted receipt after restart and recovers it at most once', async () => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-recovery-'));
+    const file = path.join(directory, 'receipts.json');
+    const firstStore = new CodexActivationReceiptStore(file, { now: () => 1_000 });
+    const prepared = firstStore.prepare({
+      pane: {
+        paneId: '%1', sessionName: 's', windowId: '@1',
+        tmuxEpoch: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      },
+      process: {
+        pid: 10, startedAt: 100, tty: 'ttys001', executable: '/usr/bin/codex',
+      },
+      sessionId: openSession().sessionId,
+      command: openSession().command,
+    });
+    firstStore.transition(prepared.operationId, 'prepared', 'interrupted');
+    const restartedStore = new CodexActivationReceiptStore(file, { now: () => 2_000 });
+    const runPaneCommand = vi.fn(async () => {});
+    const controller = createCodexConversationActivationController({
+      app: unmanagedApp(),
+      panes: {
+        list: vi.fn(async () => [{
+          paneId: '%1', currentCommand: 'zsh', sessionName: 's', windowId: '@1', windowName: 'w',
+          tty: 'ttys001',
+        }]),
+        subscribe: vi.fn(() => () => {}),
+      },
+      process: { inspectForeground: vi.fn(async () => ({
+        pid: 20, startedAt: 200, tty: 'ttys001', executable: '/bin/zsh',
+      })) },
+      commands: {
+        paneEpoch: vi.fn(async () => 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'),
+        inspectOpenSession: vi.fn(async () => null),
+        openOutputCapture: vi.fn(),
+        runPaneCommand,
+      },
+      receipts: restartedStore,
+    });
+    const service = new AgentConversationActivationService({ codex: controller });
+
+    await expect(service.recovery('%1')).resolves.toMatchObject({
+      operationId: prepared.operationId,
+      state: 'current',
+      phase: 'interrupted',
+      canResume: true,
+    });
+    await expect(service.recover('%1', prepared.operationId)).resolves.toMatchObject({
+      recovery: { sessionId: openSession().sessionId },
+    });
+    await expect(service.recover('%1', prepared.operationId)).resolves.toMatchObject({
+      recovery: { sessionId: openSession().sessionId },
+    });
+    expect(runPaneCommand).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps recovery lookup read-only while the exact original Codex is still running', async () => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-recovery-'));
+    const store = new CodexActivationReceiptStore(path.join(directory, 'receipts.json'));
+    const receipt = store.prepare({
+      pane: {
+        paneId: '%1', sessionName: 's', windowId: '@1',
+        tmuxEpoch: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      },
+      process: {
+        pid: 10, startedAt: 100, tty: 'ttys001', executable: '/usr/bin/codex',
+      },
+      sessionId: openSession().sessionId,
+      command: openSession().command,
+    });
+    const runPaneCommand = vi.fn(async () => {});
+    const controller = createCodexConversationActivationController({
+      app: unmanagedApp(),
+      panes: {
+        list: vi.fn(async () => [{
+          paneId: '%1', currentCommand: 'codex', sessionName: 's', windowId: '@1', windowName: 'w',
+          tty: 'ttys001',
+        }]),
+        subscribe: vi.fn(() => () => {}),
+      },
+      process: { inspectForeground: vi.fn(async () => ({
+        pid: 10, startedAt: 100, tty: 'ttys001', executable: '/usr/bin/codex',
+      })) },
+      commands: {
+        paneEpoch: vi.fn(async () => 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'),
+        inspectOpenSession: vi.fn(async () => openSession()),
+        openOutputCapture: vi.fn(),
+        runPaneCommand,
+      },
+      receipts: store,
+    });
+    const service = new AgentConversationActivationService({ codex: controller });
+
+    await expect(service.recovery('%1')).resolves.toMatchObject({
+      operationId: receipt.operationId, state: 'current', phase: 'prepared', canResume: false,
+    });
+    expect(store.get(receipt.operationId)).not.toBeNull();
+    await expect(service.recover('%1', receipt.operationId)).rejects.toMatchObject({
+      code: 'unavailable', recovery: { command: openSession().command },
+    });
     expect(runPaneCommand).not.toHaveBeenCalled();
   });
 
-  it('fails closed when fresh output contains only an unrelated UUID', async () => {
+  it.each([
+    ['the shell already returned', {
+      pid: 20, startedAt: 200, tty: 'ttys001', executable: '/bin/zsh',
+    }, 'zsh', true],
+    ['a different Codex process replaced it', {
+      pid: 11, startedAt: 200, tty: 'ttys001', executable: '/usr/bin/codex',
+    }, 'codex', false],
+  ])('keeps a prepared receipt when %s', async (_label, identity, currentCommand, canResume) => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-recovery-'));
+    const store = new CodexActivationReceiptStore(path.join(directory, 'receipts.json'));
+    const receipt = store.prepare({
+      pane: {
+        paneId: '%1', sessionName: 's', windowId: '@1',
+        tmuxEpoch: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      },
+      process: {
+        pid: 10, startedAt: 100, tty: 'ttys001', executable: '/usr/bin/codex',
+      },
+      sessionId: openSession().sessionId,
+      command: openSession().command,
+    });
+    const controller = createCodexConversationActivationController({
+      app: unmanagedApp(),
+      panes: {
+        list: vi.fn(async () => [{
+          paneId: '%1', currentCommand, sessionName: 's', windowId: '@1', windowName: 'w',
+          tty: 'ttys001',
+        }]),
+        subscribe: vi.fn(() => () => {}),
+      },
+      process: { inspectForeground: vi.fn(async () => identity) },
+      commands: {
+        paneEpoch: vi.fn(async () => 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'),
+        inspectOpenSession: vi.fn(async () => null),
+        openOutputCapture: vi.fn(),
+        runPaneCommand: vi.fn(),
+      },
+      receipts: store,
+    });
+    const service = new AgentConversationActivationService({ codex: controller });
+
+    await expect(service.recovery('%1')).resolves.toMatchObject({
+      operationId: receipt.operationId, phase: 'prepared', canResume,
+    });
+    expect(store.get(receipt.operationId)).not.toBeNull();
+  });
+
+  it.each([
+    ['a non-shell executable', { pid: 20, startedAt: 200, tty: 'ttys001', executable: '/usr/bin/python' }],
+    ['a missing executable', { pid: 20, startedAt: 200, tty: 'ttys001' }],
+  ])('does not resume when tmux says zsh but foreground identity has %s', async (_label, identity) => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-recovery-'));
+    const store = new CodexActivationReceiptStore(path.join(directory, 'receipts.json'));
+    const receipt = store.prepare({
+      pane: {
+        paneId: '%1', sessionName: 's', windowId: '@1',
+        tmuxEpoch: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      },
+      process: {
+        pid: 10, startedAt: 100, tty: 'ttys001', executable: '/usr/bin/codex',
+      },
+      sessionId: openSession().sessionId,
+      command: openSession().command,
+    });
+    store.transition(receipt.operationId, 'prepared', 'interrupted');
+    const runPaneCommand = vi.fn();
+    const controller = createCodexConversationActivationController({
+      app: unmanagedApp(),
+      panes: {
+        list: vi.fn(async () => [{
+          paneId: '%1', currentCommand: 'zsh', sessionName: 's', windowId: '@1', windowName: 'w',
+          tty: 'ttys001',
+        }]),
+        subscribe: vi.fn(() => () => {}),
+      },
+      process: { inspectForeground: vi.fn(async () => identity) },
+      commands: {
+        paneEpoch: vi.fn(async () => 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'),
+        inspectOpenSession: vi.fn(async () => null),
+        openOutputCapture: vi.fn(),
+        runPaneCommand,
+      },
+      receipts: store,
+    });
+    const service = new AgentConversationActivationService({ codex: controller });
+
+    await expect(service.recovery('%1')).resolves.toMatchObject({ canResume: false });
+    await expect(service.recover('%1', receipt.operationId)).rejects.toMatchObject({
+      code: 'unavailable', recovery: { command: openSession().command },
+    });
+    expect(runPaneCommand).not.toHaveBeenCalled();
+  });
+
+  it('exposes a reused-pane receipt for copy only and never injects its command', async () => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-recovery-'));
+    const store = new CodexActivationReceiptStore(path.join(directory, 'receipts.json'));
+    const receipt = store.prepare({
+      pane: {
+        paneId: '%1', sessionName: 's', windowId: '@1',
+        tmuxEpoch: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      },
+      process: {
+        pid: 10, startedAt: 100, tty: 'ttys001', executable: '/usr/bin/codex',
+      },
+      sessionId: openSession().sessionId,
+      command: openSession().command,
+    });
+    const runPaneCommand = vi.fn(async () => {});
+    const controller = createCodexConversationActivationController({
+      app: unmanagedApp(),
+      panes: {
+        list: vi.fn(async () => [{
+          paneId: '%1', currentCommand: 'zsh', sessionName: 'new', windowId: '@9', windowName: 'w',
+          tty: 'ttys009',
+        }]),
+        subscribe: vi.fn(() => () => {}),
+      },
+      process: { inspectForeground: vi.fn(async () => ({
+        pid: 99, startedAt: 900, tty: 'ttys009', executable: '/bin/zsh',
+      })) },
+      commands: {
+        paneEpoch: vi.fn(async () => 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'),
+        inspectOpenSession: vi.fn(async () => null),
+        openOutputCapture: vi.fn(),
+        runPaneCommand,
+      },
+      receipts: store,
+    });
+    const service = new AgentConversationActivationService({ codex: controller });
+
+    await expect(service.recovery('%1')).resolves.toMatchObject({
+      state: 'stale', canResume: false, recovery: { command: openSession().command },
+    });
+    await expect(service.recover('%1', receipt.operationId)).rejects.toMatchObject({
+      code: 'unavailable', recovery: { command: openSession().command },
+    });
+    expect(runPaneCommand).not.toHaveBeenCalled();
+  });
+
+  it('ignores unrelated UUIDs printed after exit and resumes only the pre-C-c FD session', async () => {
     const original = { pid: 10, startedAt: 100, tty: 'ttys001', executable: '/usr/bin/codex' };
     const shell = { pid: 20, startedAt: 200, tty: 'ttys001', executable: '/bin/zsh' };
     let identity = original;
@@ -433,8 +928,7 @@ describe('Conversation activation', () => {
       },
       process: { inspectForeground: vi.fn(async () => identity) },
       commands: {
-        paneCurrentPath: vi.fn(async () => '/repo'),
-        sessionCwd: vi.fn(async () => '/repo'),
+        inspectOpenSession: vi.fn(async () => openSession()),
         openOutputCapture: vi.fn(async () => ({
           sendKey: vi.fn(async () => {
             identity = shell;
@@ -451,14 +945,11 @@ describe('Conversation activation', () => {
       wait: vi.fn(async () => {}),
     });
     await expect(controller.activate(current.value, new AbortController().signal, activationProgress()))
-      .rejects.toThrow(/did not expose a resumable session/);
-    expect(runPaneCommand).not.toHaveBeenCalled();
+      .resolves.toMatchObject({ recovery: { sessionId: openSession().sessionId } });
+    expect(runPaneCommand).toHaveBeenCalledWith('%1', openSession().command);
   });
 
-  it.each([
-    ['the matching rollout is missing', null],
-    ['the matching rollout belongs to another cwd', '/other-repo'],
-  ])('fails closed when %s', async (_label, resolvedCwd) => {
+  it('fails closed before C-c when the foreground PID has no unique root rollout', async () => {
     const original = { pid: 10, startedAt: 100, tty: 'ttys001', executable: '/usr/bin/codex' };
     const shell = { pid: 20, startedAt: 200, tty: 'ttys001', executable: '/bin/zsh' };
     let identity = original;
@@ -474,8 +965,7 @@ describe('Conversation activation', () => {
       },
       process: { inspectForeground: vi.fn(async () => identity) },
       commands: {
-        paneCurrentPath: vi.fn(async () => '/repo'),
-        sessionCwd: vi.fn(async () => resolvedCwd),
+        inspectOpenSession: vi.fn(async () => null),
         openOutputCapture: vi.fn(async () => ({
           sendKey: vi.fn(async () => { identity = shell; command = 'zsh'; }),
           output: vi.fn(() => Buffer.from(
@@ -491,8 +981,155 @@ describe('Conversation activation', () => {
     });
 
     await expect(controller.activate(lease().value, new AbortController().signal, activationProgress()))
-      .rejects.toThrow(/current pane session/);
+      .rejects.toThrow(/could not be identified safely/);
     expect(runPaneCommand).not.toHaveBeenCalled();
+  });
+
+  it('uses the lease fingerprint to reject a different unmanaged native Codex before C-c', async () => {
+    const replacement = {
+      pid: 11,
+      startedAt: 200,
+      tty: 'ttys001',
+      executable: '/usr/bin/codex',
+      commandLine: '/usr/bin/codex resume 12345678-1234-1234-1234-123456789abc',
+    };
+    const openOutputCapture = vi.fn();
+    const inspectOpenSession = vi.fn(async () => openSession());
+    const controller = createCodexConversationActivationController({
+      app: unmanagedApp(),
+      panes: {
+        list: vi.fn(async () => [{
+          paneId: '%1', currentCommand: 'codex', sessionName: 's', windowId: '@1', windowName: 'w',
+          tty: 'ttys001',
+        }]),
+        subscribe: vi.fn(() => () => {}),
+      },
+      process: { inspectForeground: vi.fn(async () => replacement) },
+      commands: {
+        inspectOpenSession,
+        openOutputCapture,
+        runPaneCommand: vi.fn(),
+      },
+    });
+
+    await expect(controller.activate(
+      lease().value, new AbortController().signal, activationProgress(),
+    )).rejects.toThrow(/run changed before/);
+    expect(inspectOpenSession).not.toHaveBeenCalled();
+    expect(openOutputCapture).not.toHaveBeenCalled();
+  });
+
+  it('never interrupts a managed replacement when an old sessionless lease is reused', async () => {
+    const original = {
+      pid: 10, startedAt: 100, tty: 'ttys001', executable: '/usr/bin/codex',
+      commandLine: '/usr/bin/codex resume 12345678-1234-1234-1234-123456789abc',
+    };
+    const shell = {
+      pid: 20, startedAt: 200, tty: 'ttys001', executable: '/bin/zsh', commandLine: '/bin/zsh',
+    };
+    const managed = {
+      pid: 30, startedAt: 300, tty: 'ttys001', executable: '/usr/bin/codex',
+      commandLine: '/usr/bin/codex --remote unix:///tmp/codex.sock',
+    };
+    let identity = original;
+    let currentCommand = 'codex';
+    let isManaged = false;
+    const sendKey = vi.fn(async () => {
+      identity = shell;
+      currentCommand = 'zsh';
+    });
+    const openOutputCapture = vi.fn(async () => ({
+      sendKey,
+      output: vi.fn(() => null),
+      close: vi.fn(),
+    }));
+    const controller = createCodexConversationActivationController({
+      app: { discover: vi.fn(async () => ({ managed: isManaged, threadId: null })) },
+      panes: {
+        list: vi.fn(async () => [{
+          paneId: '%1', currentCommand, sessionName: 's', windowId: '@1', windowName: 'w',
+          tty: 'ttys001',
+        }]),
+        subscribe: vi.fn(() => () => {}),
+      },
+      process: { inspectForeground: vi.fn(async () => identity) },
+      commands: {
+        inspectOpenSession: vi.fn(async () => openSession()),
+        openOutputCapture,
+        runPaneCommand: vi.fn(async () => {
+          identity = managed;
+          currentCommand = 'codex';
+          isManaged = true;
+        }),
+      },
+      wait: vi.fn(async () => {}),
+    });
+    const service = new AgentConversationActivationService({ codex: controller });
+    const oldLease = lease().value;
+
+    await expect(service.activate(oldLease)).resolves.toMatchObject({
+      recovery: { sessionId: openSession().sessionId },
+    });
+    await expect(service.activate(oldLease)).rejects.toMatchObject({ code: 'unavailable' });
+    expect(sendKey).toHaveBeenCalledOnce();
+    expect(openOutputCapture).toHaveBeenCalledOnce();
+  });
+
+  it('requires a complete stable process fingerprint on a destructive lease', async () => {
+    const openOutputCapture = vi.fn();
+    const controller = createCodexConversationActivationController({
+      app: unmanagedApp(),
+      panes: {
+        list: vi.fn(async () => [{
+          paneId: '%1', currentCommand: 'codex', sessionName: 's', windowId: '@1', windowName: 'w',
+        }]),
+        subscribe: vi.fn(() => () => {}),
+      },
+      process: { inspectForeground: vi.fn(async () => ({
+        pid: 10, startedAt: 100, tty: 'ttys001', executable: '/usr/bin/codex',
+      })) },
+      commands: {
+        inspectOpenSession: vi.fn(async () => openSession()),
+        openOutputCapture,
+        runPaneCommand: vi.fn(),
+      },
+    });
+
+    await expect(controller.activate(
+      lease({ pid: 10 }).value, new AbortController().signal, activationProgress(),
+    )).rejects.toThrow(/run identity is incomplete/);
+    expect(openOutputCapture).not.toHaveBeenCalled();
+  });
+
+  it('rechecks that the same rollout FD is still held immediately before C-c', async () => {
+    const original = {
+      pid: 10, startedAt: 100, tty: 'ttys001', executable: '/usr/bin/codex',
+    };
+    const sendKey = vi.fn(async () => {});
+    const inspectOpenSession = vi.fn()
+      .mockResolvedValueOnce(openSession())
+      .mockResolvedValueOnce({ ...openSession(), fd: '99' });
+    const controller = createCodexConversationActivationController({
+      app: unmanagedApp(),
+      panes: {
+        list: vi.fn(async () => [{
+          paneId: '%1', currentCommand: 'codex', sessionName: 's', windowId: '@1', windowName: 'w',
+        }]),
+        subscribe: vi.fn(() => () => {}),
+      },
+      process: { inspectForeground: vi.fn(async () => original) },
+      commands: {
+        inspectOpenSession,
+        openOutputCapture: vi.fn(async () => ({ sendKey, output: vi.fn(() => null), close: vi.fn() })),
+        runPaneCommand: vi.fn(async () => {}),
+      },
+      wait: vi.fn(async () => {}),
+    });
+
+    await expect(controller.activate(lease().value, new AbortController().signal, activationProgress()))
+      .rejects.toThrow(/session changed before/);
+    expect(inspectOpenSession).toHaveBeenCalledTimes(2);
+    expect(sendKey).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -518,8 +1155,7 @@ describe('Conversation activation', () => {
       },
       process: { inspectForeground: vi.fn(async () => identity) },
       commands: {
-        paneCurrentPath: vi.fn(async () => '/repo'),
-        sessionCwd: vi.fn(async () => '/repo'),
+        inspectOpenSession: vi.fn(async () => openSession()),
         openOutputCapture: vi.fn(async () => ({
           sendKey,
           output: vi.fn(() => null),
@@ -540,6 +1176,7 @@ describe('Conversation activation', () => {
     const changedShell = { pid: 21, startedAt: 300, tty: 'ttys001', executable: '/bin/zsh' };
     let identity = original;
     let command = 'codex';
+    let shellReads = 0;
     const runPaneCommand = vi.fn(async () => {});
     const controller = createCodexConversationActivationController({
       app: unmanagedApp(),
@@ -549,18 +1186,15 @@ describe('Conversation activation', () => {
         }]),
         subscribe: vi.fn(() => () => {}),
       },
-      process: { inspectForeground: vi.fn(async () => identity) },
+      process: { inspectForeground: vi.fn(async () => {
+        if (identity === firstShell && shellReads++ > 0) identity = changedShell;
+        return identity;
+      }) },
       commands: {
-        paneCurrentPath: vi.fn(async () => '/repo'),
-        sessionCwd: vi.fn(async () => '/repo'),
+        inspectOpenSession: vi.fn(async () => openSession()),
         openOutputCapture: vi.fn(async () => ({
           sendKey: vi.fn(async () => { identity = firstShell; command = 'zsh'; }),
-          output: vi.fn(() => {
-            identity = changedShell;
-            return Buffer.from('Token usage: total=10 input=9 output=1\r\n'
-              + 'To continue this session, run codex resume '
-              + '12345678-1234-1234-1234-123456789abc\r\n');
-          }),
+          output: vi.fn(() => Buffer.from('human-readable output is irrelevant\r\n')),
           close: vi.fn(),
         })),
         runPaneCommand,
@@ -605,8 +1239,7 @@ describe('Conversation activation', () => {
       },
       process: { inspectForeground: vi.fn(async () => identity) },
       commands: {
-        paneCurrentPath: vi.fn(async () => '/repo'),
-        sessionCwd: vi.fn(async () => '/repo'),
+        inspectOpenSession: vi.fn(async () => openSession()),
         openOutputCapture,
         runPaneCommand: vi.fn(async () => {}),
       },

@@ -6,7 +6,9 @@ import {
   describeConversationActivation,
 } from '../agentConversationActivationApi.js';
 import AgentConversationActivationGuide from '../components/AgentConversationActivationGuide.js';
+import AgentConversationGuideTabs from '../components/AgentConversationGuideTabs.js';
 import CodexManagedGuide from '../components/CodexManagedGuide.js';
+import CodexActivationRecoveryGuide from '../components/CodexActivationRecoveryGuide.js';
 import { useConversationActivationTarget } from '../conversationActivationTarget.js';
 import { useAgentConversationActivation } from './useAgentConversationActivation.js';
 
@@ -318,6 +320,39 @@ describe('CodexManagedGuide', () => {
   });
 });
 
+describe('CodexActivationRecoveryGuide', () => {
+  const recovery = {
+    kind: 'codex_resume' as const,
+    sessionId: '12345678-1234-1234-1234-123456789abc',
+    command: 'handmux codex resume 12345678-1234-1234-1234-123456789abc',
+  };
+
+  it('offers automatic recovery only for a current safe receipt', () => {
+    const recover = vi.fn(async () => {});
+    const base = {
+      status: 'ready' as const,
+      receipt: {
+        operationId: 'a'.repeat(64), recovery, phase: 'interrupted' as const,
+        state: 'current' as const, canResume: true,
+      },
+      recover,
+      retry: vi.fn(),
+    };
+    const { rerender } = render(<CodexActivationRecoveryGuide controller={base}
+      onTerminal={() => {}} />);
+    fireEvent.click(screen.getByRole('button', { name: '继续恢复' }));
+    expect(recover).toHaveBeenCalledOnce();
+
+    rerender(<CodexActivationRecoveryGuide controller={{
+      ...base,
+      receipt: { ...base.receipt, state: 'stale', canResume: false },
+    }} onTerminal={() => {}} />);
+    expect(screen.queryByRole('button', { name: '继续恢复' })).toBeNull();
+    expect(screen.getByRole('button', { name: '复制恢复命令' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: '前往终端' })).toBeTruthy();
+  });
+});
+
 describe('AgentConversationActivationGuide', () => {
   it('keeps Terminal escape available and requires explicit confirmation', () => {
     const activate = vi.fn(async () => {});
@@ -348,5 +383,26 @@ describe('AgentConversationActivationGuide', () => {
     expect(container.textContent).not.toContain('/Users/private');
     fireEvent.click(screen.getByRole('button', { name: '重试' }));
     expect(retry).toHaveBeenCalledOnce();
+  });
+});
+
+describe('AgentConversationGuideTabs', () => {
+  it('uses only enabled reliable launchers and tells users to exit the current Agent first', () => {
+    render(<AgentConversationGuideTabs activeAgentId="codex" onTerminal={() => {}} agents={[
+      { id: 'codex', label: 'Codex', enabled: true },
+      { id: 'claude', label: 'Claude Code', enabled: true },
+      { id: 'pi', label: 'Pi', enabled: true },
+      { id: 'future', label: 'Future', enabled: true },
+      { id: 'disabled', label: 'Disabled', enabled: false },
+    ]}><span>current Codex guide</span></AgentConversationGuideTabs>);
+    expect(screen.getByText('current Codex guide')).toBeTruthy();
+    expect(screen.queryByRole('tab', { name: 'Future' })).toBeNull();
+    expect(screen.queryByRole('tab', { name: 'Disabled' })).toBeNull();
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Claude Code' }));
+    expect(screen.getByText('claude')).toBeTruthy();
+    expect(screen.getByText(/先前往终端退出当前 Agent/)).toBeTruthy();
+    fireEvent.click(screen.getByRole('tab', { name: 'Pi' }));
+    expect(screen.getByText('handmux pi')).toBeTruthy();
   });
 });

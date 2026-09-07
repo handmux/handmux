@@ -266,6 +266,57 @@ describe('Agent app facade routes', () => {
       .expect(202, { accepted: true, recovery });
   });
 
+  it('serves durable Conversation recovery with strict HTTP contracts', async () => {
+    const h = runtime();
+    const recovery = {
+      kind: 'codex_resume' as const,
+      sessionId: '12345678-1234-1234-1234-123456789abc',
+      command: 'handmux codex resume 12345678-1234-1234-1234-123456789abc',
+    };
+    const current = {
+      operationId: 'a'.repeat(64), recovery, phase: 'interrupted' as const,
+      state: 'current' as const, canResume: true,
+    };
+    const stale = {
+      operationId: 'b'.repeat(64), recovery, phase: 'prepared' as const,
+      state: 'stale' as const, canResume: false,
+    };
+    const readRecovery = vi.fn()
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(current)
+      .mockResolvedValueOnce(stale)
+      .mockRejectedValueOnce(new ConversationActivationError(
+        'Conversation recovery is temporarily unavailable', 'unavailable',
+      ));
+    const recover = vi.fn(async () => ({ recovery }));
+    const supported = {
+      ...h.value,
+      conversationActivation: {
+        describe: vi.fn(), activate: vi.fn(), recovery: readRecovery, recover,
+      },
+    } as unknown as typeof h.value;
+
+    await request(app(supported)).get('/agents/conversation-activation-recovery')
+      .query({ paneId: '1' }).expect(400, { error: 'invalid conversation recovery pane' });
+    await request(app(supported)).post('/agents/conversation-activation-recovery')
+      .send({ paneId: '%1', operationId: 'bad' })
+      .expect(400, { error: 'invalid conversation recovery request' });
+    await request(app(supported)).get('/agents/conversation-activation-recovery')
+      .query({ paneId: '%1' }).expect(200, { receipt: null });
+    await request(app(supported)).get('/agents/conversation-activation-recovery')
+      .query({ paneId: '%1' }).expect(200, { receipt: current });
+    await request(app(supported)).get('/agents/conversation-activation-recovery')
+      .query({ paneId: '%1' }).expect(200, { receipt: stale });
+    await request(app(supported)).get('/agents/conversation-activation-recovery')
+      .query({ paneId: '%1' }).expect(503, {
+        error: 'Conversation recovery is temporarily unavailable', code: 'unavailable',
+      });
+    await request(app(supported)).post('/agents/conversation-activation-recovery')
+      .send({ paneId: '%1', operationId: current.operationId })
+      .expect(202, { accepted: true, recovery });
+    expect(recover).toHaveBeenCalledWith('%1', current.operationId);
+  });
+
   it('reads and updates model control only through a current run lease', async () => {
     const h = runtime();
     const control = {

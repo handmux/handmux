@@ -16,6 +16,9 @@ export interface AgentRunRef {
 export interface AgentRunLease {
   readonly ref: AgentRunRef;
   readonly signal: AbortSignal;
+  // Immutable process identity captured when Runtime created this generation. Optional only for
+  // compatibility with external/test lease implementations; destructive capabilities must require it.
+  readonly process?: Readonly<AgentAttachmentCandidate['process']>;
 }
 
 export interface AgentRunRegistry {
@@ -311,6 +314,7 @@ export class AgentRunRuntime implements AgentRunRegistry {
     record.lease = Object.freeze({
       get ref() { return record.ref; },
       signal: abort.signal,
+      process: record.process,
     });
     this.#records.set(record.lease, record);
     return record;

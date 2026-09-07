@@ -625,6 +625,13 @@ describe('AgentRuntime composition root', () => {
     await vi.waitFor(() => expect(runtime.activeRuns()[0]?.runId).toBe('process-run-1'));
     expect(run).toBe(1);
 
+    // Executable lookup is useful evidence at the destructive controller boundary, but it can
+    // transiently fail. It must not churn the Runtime generation for the same stable process.
+    foreground = { pid: 101, startedAt: 1_000, tty: '/dev/ttys001' };
+    panes.emit([codexPane]);
+    await vi.waitFor(() => expect(runtime.activeRuns()[0]?.runId).toBe('process-run-1'));
+    expect(run).toBe(1);
+
     foreground = {
       pid: 202, startedAt: 2_000, tty: '/dev/ttys001', executable: '/opt/codex/bin/codex',
     };
@@ -749,8 +756,11 @@ describe('AgentRuntime composition root', () => {
               panes,
               process: { inspectForeground: async () => identity },
               commands: {
-                paneCurrentPath: vi.fn(async () => '/repo'),
-                sessionCwd: vi.fn(async () => '/repo'),
+                inspectOpenSession: vi.fn(async () => ({
+                  sessionId,
+                  file: `/home/test/.codex/sessions/2026/09/06/rollout-${sessionId}.jsonl`,
+                  cwd: '/repo', fd: '42', device: '1', inode: '2',
+                })),
                 openOutputCapture: vi.fn(async () => ({
                   sendKey: vi.fn(async () => {
                     identity = {

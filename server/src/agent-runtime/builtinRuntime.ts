@@ -21,6 +21,7 @@ import { resolveCodexRollout, sessionsDir as codexSessionsDir } from '../agents/
 import { readLatestContextUsage } from '../codexUsageSnapshot.js';
 import { createCodexConversationActivationController } from '../agents/codexConversationActivation.js';
 import type { CodexActivationCommands } from '../agents/codexConversationActivation.js';
+import type { CodexActivationReceiptStore } from '../agents/codexActivationReceipt.js';
 import { createClaudeSubscriptionUsageAdapter } from '../agents/claudeSubscriptionUsage.js';
 import { createCodexSubscriptionUsageAdapter } from '../agents/codexSubscriptionUsage.js';
 import {
@@ -57,6 +58,7 @@ export interface BuiltinAgentRuntimeOptions
   codexApp?: CodexRuntimeApp;
   codexClear?: (pane: string, threadId: string) => Promise<void>;
   codexActivationCommands?: CodexActivationCommands;
+  codexActivationReceipts?: CodexActivationReceiptStore;
   codexSessionsRoot?: string;
   piSessionsRoot?: string;
 }
@@ -136,6 +138,7 @@ export function createBuiltinAgentRuntime({
   codexApp,
   codexClear,
   codexActivationCommands,
+  codexActivationReceipts,
   codexSessionsRoot,
   piSessionsRoot,
   ...runtimeOptions
@@ -226,6 +229,7 @@ export function createBuiltinAgentRuntime({
         ? createCodexConversationActivationController({
           app: codexApp,
           panes: context.panes, process: context.process, commands: codexActivationCommands,
+          ...(codexActivationReceipts === undefined ? {} : { receipts: codexActivationReceipts }),
         }) : undefined;
       const inbox = new NativeInboxCoordinator({
         agentId: 'codex', sourceId: 'codex.app-server', context,

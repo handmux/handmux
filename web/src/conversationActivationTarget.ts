@@ -24,6 +24,13 @@ export function activationRunFor(
   return target?.paneId === paneId ? target.run : currentRun;
 }
 
+export function conversationRecoveryForSessionlessPane<Receipt extends { state: 'current' | 'stale' }>(
+  receipt: Receipt | null,
+  authoritativeRun: AgentRunRef | null,
+): Receipt | null {
+  return authoritativeRun ? null : receipt;
+}
+
 export function conversationIdentityForActivation<Identity extends {
   agentId: string;
   paneId: string;

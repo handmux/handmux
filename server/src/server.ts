@@ -46,7 +46,9 @@ import { InboxPushProjection } from './agent-runtime/inboxPushProjection.js';
 import { defaultGit } from './git.js';
 import { createProjectTaskRuntime } from './projectTask/runtime.js';
 import { clearCodexConversationThroughTui } from './agents/codexTerminalControl.js';
-import { codexSessionCwd } from './agents/codex.js';
+import { sessionsDir as codexSessionsDir } from './agents/codex.js';
+import { inspectCodexOpenRootSession } from './agents/codexOpenSession.js';
+import { CodexActivationReceiptStore } from './agents/codexActivationReceipt.js';
 import { ApiAccountService, apiAccountsPath } from './apiAccounts.js';
 import { ClaudeHookBridgeConnector } from '../connectors/claude/index.js';
 
@@ -92,6 +94,9 @@ const observeEnvironment = createEnvironmentProvider({
 const stateFile = process.env.CLAUDE_STATE_FILE || claudeStatePath(home);
 let codexApp: ReturnType<typeof createCodexAppServer> | null = null;
 const agentRuntimeDirectory = agentRuntimeDirectoryPath(home);
+const codexActivationReceipts = new CodexActivationReceiptStore(
+  path.join(agentRuntimeDirectory, 'codex-activation-receipts.json'),
+);
 const legacyCodexOutbox = codexOutboxPath(home);
 let conversationStartupBlockReason: string | undefined;
 try {
@@ -161,10 +166,14 @@ const agentRuntime = createBuiltinAgentRuntime({
     pendingKind: (paneId) => events?.paneKind(paneId) ?? null,
   },
   codexApp,
+  codexActivationReceipts,
   codexActivationCommands: {
     openOutputCapture: (pane) => commands.openPaneOutputCapture(pane),
-    paneCurrentPath: (pane) => commands.paneCurrentPath(pane),
-    sessionCwd: (sessionId) => codexSessionCwd(sessionId),
+    paneEpoch: async () => {
+      const environment = await workspaceTmux.observeEnvironment();
+      return environment.status === 'present' ? environment.tmuxServerId : null;
+    },
+    inspectOpenSession: (pid) => inspectCodexOpenRootSession(pid, codexSessionsDir(home)),
     runPaneCommand: (pane, command) => commands.runPaneCommand(pane, command),
   },
   codexClear: async (pane, threadId) => {

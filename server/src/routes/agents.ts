@@ -232,6 +232,43 @@ export function agentRoutes({ runtime }: { runtime: AgentFacadeRuntime }): expre
     }
   });
 
+  router.get('/agents/conversation-activation-recovery', async (req, res, next) => {
+    try {
+      if (!runtime.conversationActivation) {
+        return res.status(409).json({ error: 'conversation recovery unsupported', code: 'unsupported' });
+      }
+      const paneId = typeof req.query.paneId === 'string' ? req.query.paneId : '';
+      if (!/^%\d+$/.test(paneId)) {
+        return res.status(400).json({ error: 'invalid conversation recovery pane' });
+      }
+      return res.json({ receipt: await runtime.conversationActivation.recovery(paneId) });
+    } catch (error) {
+      if (activationError(error, res)) return;
+      return next(error);
+    }
+  });
+
+  router.post('/agents/conversation-activation-recovery', async (req, res, next) => {
+    try {
+      if (!runtime.conversationActivation) {
+        return res.status(409).json({ error: 'conversation recovery unsupported', code: 'unsupported' });
+      }
+      const paneId = typeof req.body?.paneId === 'string' ? req.body.paneId : '';
+      const operationId = typeof req.body?.operationId === 'string' ? req.body.operationId : '';
+      if (!/^%\d+$/.test(paneId) || !/^[0-9a-f]{64}$/.test(operationId)) {
+        return res.status(400).json({ error: 'invalid conversation recovery request' });
+      }
+      const result = await runtime.conversationActivation.recover(paneId, operationId);
+      return res.status(202).json({
+        accepted: true,
+        ...(result?.recovery === undefined ? {} : { recovery: result.recovery }),
+      });
+    } catch (error) {
+      if (activationError(error, res)) return;
+      return next(error);
+    }
+  });
+
   router.get('/agents/conversation-controls', async (req, res, next) => {
     try {
       if (!runtime.conversationControls && !runtime.conversation) {
