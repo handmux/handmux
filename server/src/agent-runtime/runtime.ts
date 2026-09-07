@@ -221,17 +221,23 @@ export function validSubscriptionUsageAdapter(
     && typeof adapter.snapshot === 'function';
 }
 
-function sameProcess(
+function compareProcess(
   candidate: AgentAttachmentCandidate,
   pane: LivePane,
   foreground: ForegroundProcessIdentity,
-): boolean {
-  if (foreground.pid !== candidate.process.pid) return false;
-  if (pane.foregroundPid !== undefined && pane.foregroundPid !== candidate.process.pid) return false;
+): 'valid' | 'invalid' | 'unknown' {
+  if (foreground.pid !== candidate.process.pid) return 'invalid';
+  if (pane.foregroundPid !== undefined
+    && pane.foregroundPid !== candidate.process.pid) return 'invalid';
   if (candidate.process.startedAt !== undefined
-    && foreground.startedAt !== candidate.process.startedAt) return false;
+    && foreground.startedAt !== undefined
+    && foreground.startedAt !== candidate.process.startedAt) return 'invalid';
   const observedTty = foreground.tty ?? pane.tty;
-  return candidate.process.tty === undefined || observedTty === candidate.process.tty;
+  if (candidate.process.tty !== undefined && observedTty
+    && observedTty !== candidate.process.tty) return 'invalid';
+  if ((candidate.process.startedAt !== undefined && foreground.startedAt === undefined)
+    || (candidate.process.tty !== undefined && !observedTty)) return 'unknown';
+  return 'valid';
 }
 
 function processAttachmentCandidate(
@@ -1138,12 +1144,9 @@ export class AgentRuntime {
         if (identity.kind !== 'matched' || identity.adapter.id !== adapter.id) return 'invalid';
         const foreground = await context.inspectForeground(pane);
         if (foreground === null) return 'unknown';
-        const observedTty = foreground.tty ?? pane.tty;
         // A partial best-effort probe cannot prove that the process generation changed. Preserve the
-        // complete lease and retry; explicit PID/start-time/TTY disagreement still fails below.
-        if ((candidate.process.startedAt !== undefined && foreground.startedAt === undefined)
-          || (candidate.process.tty !== undefined && !observedTty)) return 'unknown';
-        return sameProcess(candidate, pane, foreground) ? 'valid' : 'invalid';
+        // complete lease and retry only when every field that is present still agrees.
+        return compareProcess(candidate, pane, foreground);
       })(), this.#verifyTimeoutMs, 'Agent process verification');
     } catch { return 'unknown'; }
   }

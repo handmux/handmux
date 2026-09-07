@@ -695,6 +695,42 @@ describe('AgentRuntime composition root', () => {
     });
   });
 
+  it.each([
+    ['PID', { pid: 202, executable: '/opt/codex/bin/codex' }],
+    ['TTY', { pid: 101, tty: '/dev/ttys999', executable: '/opt/codex/bin/codex' }],
+  ])('revokes a complete Runtime run on an explicit %s mismatch despite a missing start time', async (
+    _field,
+    changed: ForegroundProcessIdentity,
+  ) => {
+    const codexPane: LivePane = { ...pane('codex') };
+    delete codexPane.foregroundPid;
+    const panes = new TestPanes([codexPane]);
+    let foreground: ForegroundProcessIdentity = {
+      pid: 101, startedAt: 1_000, tty: '/dev/ttys001', executable: '/opt/codex/bin/codex',
+    };
+    const runtime = new AgentRuntime({
+      adapters: [{
+        ...adapter('codex'),
+        process: { commands: ['codex'], runtimeAttach: true },
+      }],
+      panes,
+      process: { inspectForeground: async () => foreground },
+      stateDirectory: directory(),
+      authToken: AUTH_TOKEN,
+      newRunId: () => 'original-process-run',
+    });
+    runtimes.push(runtime);
+    await runtime.start();
+    const original = runtime.runs.currentForPane('%1')!;
+
+    foreground = changed;
+    panes.emit([codexPane]);
+
+    await vi.waitFor(() => expect(original.signal.aborted).toBe(true));
+    expect(original.signal.reason).toBe('process_exit');
+    expect(runtime.runs.currentForPane('%1')).toBeNull();
+  });
+
   it('coalesces slow pane reconciliation to the first and latest snapshots and drops pending work on close', async () => {
     const base = pane('pi');
     const panes = new TestPanes([base]);
