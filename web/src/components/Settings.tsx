@@ -3,6 +3,7 @@ import type { ChangeEvent, ReactNode, RefObject } from 'react';
 import { notifyEnabled, enableNotifications, disableNotifications, pushSupported, getScriptPushKey } from '../push.js';
 import { PushScriptContent } from './PushScriptSheet.jsx';
 import {
+  CONVERSATION_FONT_SIZES, DEFAULT_CONVERSATION_FONT_SIZE,
   getDocHighlight, getVoiceFillerFilter, setDocHighlight, setVoiceFillerFilter,
   VOICE_FILLER_FILTER_LEVELS,
 } from '../storage.js';
@@ -12,14 +13,15 @@ import { useBackButton } from '../hooks/useBackButton.js';
 import { CheckIcon } from './icons.jsx';
 import type { TerminalHandle } from './Terminal.js';
 import type { SnapshotInterval, TerminalTransport } from '../terminalTransport.js';
-import type { VoiceFillerFilterLevel } from '../storage.js';
+import type { ConversationFontSize, VoiceFillerFilterLevel } from '../storage.js';
 import type { AgentIntegrationsController } from '../hooks/useAgentIntegrations.js';
 import type {
   AgentIntegrationName,
   AgentIntegrationSnapshot,
 } from '../agentIntegrationApi.js';
 
-type DetailPage = 'language' | 'font' | 'keyboard' | 'transport' | 'tone' | 'feedback' | 'script';
+type DetailPage = 'language' | 'terminalFont' | 'conversationFont'
+  | 'keyboard' | 'transport' | 'tone' | 'feedback' | 'script';
 type SettingsPage = 'root' | DetailPage;
 type ChatTone = 'dusk' | 'ink' | 'light';
 type KeyboardMode = 'auto' | 'mobile' | 'desktop';
@@ -59,6 +61,8 @@ export interface SettingsProps {
   onReloadApp?: () => void;
   chatTone?: ChatTone;
   onChatTone?: (tone: ChatTone) => void;
+  conversationFontSize?: ConversationFontSize;
+  onConversationFontSize?: (size: ConversationFontSize) => void;
   conversationAgents?: readonly { id: string; label: string; enabled: boolean; experimental: boolean }[];
   onConversationAgentEnabled?: (agentId: string, enabled: boolean) => void;
   keyboardMode?: KeyboardMode;
@@ -80,7 +84,8 @@ export interface SettingsProps {
 
 const DETAIL_TITLE: Record<DetailPage, string> = {
   language: 'settings.language',
-  font: 'settings.font_size',
+  terminalFont: 'settings.terminal_font_size',
+  conversationFont: 'settings.conversation_font_size',
   keyboard: 'settings.keyboard_mode',
   transport: 'settings.terminal_transport',
   tone: 'settings.chat_tone',
@@ -285,6 +290,7 @@ function UpdateNotice({ updateInfo }: { updateInfo: UpdateInfo | null | undefine
 export default function Settings({ open, onClose, termRef, onOpenChangelog = () => {}, changelogUnread = false,
   onReloadApp = () => window.location.reload(),
   chatTone = 'ink', onChatTone = () => {},
+  conversationFontSize = DEFAULT_CONVERSATION_FONT_SIZE, onConversationFontSize = () => {},
   conversationAgents = [], onConversationAgentEnabled = () => {},
   keyboardMode = 'auto', onKeyboardMode = () => {},
   terminalTransport = 'live', onTerminalTransport = () => {},
@@ -296,7 +302,7 @@ export default function Settings({ open, onClose, termRef, onOpenChangelog = () 
   voiceEnabled, voiceProvider = null, voiceMode = null,
   voiceFillerFilterSupported = false }: SettingsProps) {
   const [page, setPage] = useState<SettingsPage>('root');
-  const [font, setFont] = useState<{ size: number | null; auto: boolean } | null>(null);
+  const [terminalFont, setTerminalFont] = useState<{ size: number | null; auto: boolean } | null>(null);
   const [docHl, setDocHl] = useState(getDocHighlight());
   const [voiceFillerFilter, setVoiceFillerFilterState] = useState(getVoiceFillerFilter);
   const [notify, setNotify] = useState(notifyEnabled());
@@ -311,7 +317,7 @@ export default function Settings({ open, onClose, termRef, onOpenChangelog = () 
 
   useEffect(() => {
     if (open) {
-      setFont(termRef.current?.getFontSize?.() ?? null);
+      setTerminalFont(termRef.current?.getFontSize?.() ?? null);
       setNotify(notifyEnabled());
       setVoiceFillerFilterState(getVoiceFillerFilter());
     } else {
@@ -340,11 +346,16 @@ export default function Settings({ open, onClose, termRef, onOpenChangelog = () 
   const stepFont = (delta: number): void => {
     const current = termRef.current?.getFontSize?.();
     const applied = termRef.current?.setFontSize?.((current?.size ?? 14) + delta);
-    if (applied != null) setFont({ size: applied, auto: false });
+    if (applied != null) setTerminalFont({ size: applied, auto: false });
   };
   const autoFont = (): void => {
     termRef.current?.autoFont?.();
-    setFont({ size: null, auto: true });
+    setTerminalFont({ size: null, auto: true });
+  };
+  const stepConversationFont = (delta: -1 | 1): void => {
+    const current = CONVERSATION_FONT_SIZES.indexOf(conversationFontSize);
+    const next = CONVERSATION_FONT_SIZES[current + delta];
+    if (next !== undefined) onConversationFontSize(next);
   };
   const toggleDocHl = (on: boolean): void => {
     setDocHl(on);
@@ -395,7 +406,10 @@ export default function Settings({ open, onClose, termRef, onOpenChangelog = () 
     openPage('script');
   };
 
-  const fontLabel = font?.auto ? t('settings.font_auto') : font?.size ? `${font.size}px` : '—';
+  const terminalFontLabel = terminalFont?.auto
+    ? t('settings.terminal_font_auto') : terminalFont?.size ? `${terminalFont.size}px` : '—';
+  const conversationFontLabel = `${conversationFontSize}px`;
+  const conversationFontIndex = CONVERSATION_FONT_SIZES.indexOf(conversationFontSize);
   const languageLabel = AVAILABLE.find((language) => language.code === getLangCode())?.label || '—';
   const voiceEnabledLabel = voiceEnabled === undefined ? '—'
     : t(voiceEnabled ? 'settings.voice_on' : 'settings.voice_off');
@@ -467,19 +481,22 @@ export default function Settings({ open, onClose, termRef, onOpenChangelog = () 
 
       <SettingsGroup title={t('settings.group_general')}>
         <SettingsNavRow label={t('settings.language')} value={languageLabel} onClick={() => openPage('language')} />
-        <SettingsNavRow label={t('settings.font_size')} value={fontLabel} onClick={() => openPage('font')} />
-        <SettingsNavRow label={t('settings.keyboard_mode')} value={t(`settings.keyboard_mode_${keyboardMode}`)}
-          onClick={() => openPage('keyboard')} />
       </SettingsGroup>
 
       <SettingsGroup title={t('settings.group_terminal')} footer={t('settings.path_highlight_hint')}>
+        <SettingsNavRow label={t('settings.terminal_font_size')} value={terminalFontLabel}
+          onClick={() => openPage('terminalFont')} />
         <SettingsNavRow label={t('settings.terminal_transport')}
           value={t(`settings.terminal_transport_${terminalTransport}`)} onClick={() => openPage('transport')} />
+        <SettingsNavRow label={t('settings.keyboard_mode')} value={t(`settings.keyboard_mode_${keyboardMode}`)}
+          onClick={() => openPage('keyboard')} />
         <SettingsSwitchRow label={t('settings.path_highlight')} checked={docHl}
           onChange={(event) => toggleDocHl(event.target.checked)} />
       </SettingsGroup>
 
       <SettingsGroup title={t('settings.group_chat')}>
+        <SettingsNavRow label={t('settings.conversation_font_size')} value={conversationFontLabel}
+          onClick={() => openPage('conversationFont')} />
         {conversationAgents.map((agent) => (
           <SettingsSwitchRow key={agent.id}
             label={<span className="settings-conversation-agent-label">
@@ -554,16 +571,38 @@ export default function Settings({ open, onClose, termRef, onOpenChangelog = () 
       <SettingsChoiceGroup label={t('settings.language')} value={getLangCode()} onChange={setLang}
         options={AVAILABLE.map((language) => ({ value: language.code, label: language.label }))} />
     ),
-    font: (
+    terminalFont: (
       <section className="settings-detail-card settings-font-card">
-        <div className="settings-font-value">{fontLabel}</div>
-        <div className="settings-font-controls" role="group" aria-label={t('settings.font_size')}>
-          <button type="button" onClick={() => stepFont(-1)} aria-label={t('settings.font_decrease')}>A−</button>
-          <button type="button" onClick={() => stepFont(1)} aria-label={t('settings.font_increase')}>A+</button>
-          <button type="button" className={font?.auto ? 'selected' : ''} onClick={autoFont}
-            aria-pressed={!!font?.auto}>{t('settings.font_auto')}</button>
+        <div className="settings-font-value">{terminalFontLabel}</div>
+        <div className="settings-font-controls" role="group" aria-label={t('settings.terminal_font_size')}>
+          <button type="button" onClick={() => stepFont(-1)}
+            aria-label={t('settings.terminal_font_decrease')}>A−</button>
+          <button type="button" onClick={() => stepFont(1)}
+            aria-label={t('settings.terminal_font_increase')}>A+</button>
+          <button type="button" className={terminalFont?.auto ? 'selected' : ''} onClick={autoFont}
+            aria-pressed={!!terminalFont?.auto}>{t('settings.terminal_font_auto')}</button>
         </div>
-        <p>{t('settings.font_auto_title')}</p>
+        <p>{t('settings.terminal_font_auto_title')}</p>
+      </section>
+    ),
+    conversationFont: (
+      <section className="settings-detail-card settings-font-card">
+        <div className="settings-font-value">{conversationFontLabel}</div>
+        <div className="settings-font-controls" role="group" aria-label={t('settings.conversation_font_size')}>
+          <button type="button" onClick={() => stepConversationFont(-1)}
+            disabled={conversationFontIndex <= 0}
+            aria-label={t('settings.conversation_font_decrease')}>A−</button>
+          <button type="button" onClick={() => stepConversationFont(1)}
+            disabled={conversationFontIndex >= CONVERSATION_FONT_SIZES.length - 1}
+            aria-label={t('settings.conversation_font_increase')}>A+</button>
+          <button type="button"
+            className={conversationFontSize === DEFAULT_CONVERSATION_FONT_SIZE ? 'selected' : ''}
+            onClick={() => onConversationFontSize(DEFAULT_CONVERSATION_FONT_SIZE)}
+            aria-pressed={conversationFontSize === DEFAULT_CONVERSATION_FONT_SIZE}>
+            {t('settings.conversation_font_default')}
+          </button>
+        </div>
+        <p>{t('settings.conversation_font_hint')}</p>
       </section>
     ),
     keyboard: (

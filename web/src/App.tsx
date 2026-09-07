@@ -9,11 +9,12 @@ import {
   renameWindowIdeas, getChangelogSeen, setChangelogSeen,
   getVersionSeen, setVersionSeen,
   getReadInboxIds, addReadInboxId, pruneReadInboxIds, getNotifSeenTs, setNotifSeenTs,
-  getIdeas, getChatTone, setChatTone, getAgentConversationEnabled, setAgentConversationEnabled,
+  getIdeas, getChatTone, setChatTone, getConversationFontSize, setConversationFontSize,
+  getAgentConversationEnabled, setAgentConversationEnabled,
   getWorkspacePromptState, markWorkspaceAutoShown, ignoreWorkspaceCheckpoint,
   applyWorkspaceRestoreMapping, removeRestoredSessionBindings, setRootView,
 } from './storage.js';
-import type { ChatTone, RootView } from './storage.js';
+import type { ChatTone, ConversationFontSize, RootView } from './storage.js';
 import { LATEST_RELEASE } from './changelog.js';
 import {
   getSessions, getWindows, getPanes, resizeWindow, resizePane, getWindowLayout,
@@ -298,6 +299,11 @@ export default function App() {
   };
   const [chatTone, setChatToneState] = useState(getChatTone); // 对话-lens colour tone (persisted); default 深墨
   const pickChatTone = (tone: ChatTone) => { setChatTone(tone); setChatToneState(tone); };
+  const [conversationFontSize, setConversationFontSizeState] = useState(getConversationFontSize);
+  const pickConversationFontSize = (size: ConversationFontSize): void => {
+    setConversationFontSize(size);
+    setConversationFontSizeState(size);
+  };
   const [conversationEnabledByAgent, setConversationEnabledByAgent] = useState<Record<string, boolean>>({});
   const [usageOpen, setUsageOpen] = useState(false);
   const [bindOpen, setBindOpen] = useState(false);
@@ -2478,6 +2484,8 @@ export default function App() {
         workspaceProtection={workspaceProtection}
         chatTone={chatTone}
         onChatTone={pickChatTone}
+        conversationFontSize={conversationFontSize}
+        onConversationFontSize={pickConversationFontSize}
         conversationAgents={conversationAgents}
         onConversationAgentEnabled={toggleAgentConversation}
         keyboardMode={keyboardMode}
@@ -2794,7 +2802,8 @@ export default function App() {
                   completedEntryRequest={completedEntryRequest}
                   onCompletedEntryConsumed={consumeCompletedChatEntry}
                   followLatestRequest={chatFollowLatest.paneId === current.paneId
-                    ? chatFollowLatest.request : 0} />
+                    ? chatFollowLatest.request : 0}
+                  conversationFontSize={conversationFontSize} />
               ) : activationRun
                 && currentAgentDescriptor?.capabilities.conversationActivation === true ? (
                 activationRun.agentId === 'codex' ? (

@@ -4,6 +4,10 @@ All notable changes to handmux. Format follows [Keep a Changelog](https://keepac
 
 ## [Unreleased]
 
+### Changed
+
+- 设置中将终端字号、终端传输与键盘模式归入“终端”，并新增独立持久化的“对话字体大小”，只调整消息正文及其中的 Markdown 与代码。
+
 ### Fixed
 
 - 修复 iOS 上 Agent 对话发送按钮只显示圆形背景、箭头图标不可见的问题。

@@ -27,7 +27,7 @@ const integrationController = (items, overrides = {}) => ({
 });
 
 describe('Settings catalog-driven Conversation views', () => {
-  it('keeps Codex, Claude Code, Pi, and chat colour in one Conversation group', async () => {
+  it('keeps conversation font, Codex, Claude Code, Pi, and chat colour in one Conversation group', async () => {
     await render({ conversationAgents: [
       { id: 'codex', label: 'Codex', enabled: true, experimental: false },
       { id: 'claude', label: 'Claude Code', enabled: true, experimental: true },
@@ -41,8 +41,10 @@ describe('Settings catalog-driven Conversation views', () => {
     expect(chatGroup.textContent).toContain('Claude Code 对话视图');
     expect(chatGroup.textContent).toContain('Pi 对话视图');
     expect(chatGroup.textContent).toContain('对话配色');
+    expect(chatGroup.textContent).toContain('对话字体大小');
     const rowLabels = [...chatGroup.querySelectorAll('.settings-page-row-label')];
-    expect(rowLabels).toHaveLength(4);
+    expect(rowLabels).toHaveLength(5);
+    expect(rowLabels.at(0)?.textContent).toBe('对话字体大小');
     expect(rowLabels.at(-1)?.textContent).toBe('对话配色');
     expect(conversationRow('Codex').querySelector('.settings-conversation-experimental')).toBeNull();
     expect(conversationRow('Claude Code').querySelector('.settings-conversation-experimental')?.textContent)

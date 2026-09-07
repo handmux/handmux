@@ -53,6 +53,27 @@ describe('AVAILABLE', () => {
   });
 });
 
+describe('conversation and terminal font copy', () => {
+  it.each([
+    ['en', en], ['zh', zh], ['zh-TW', zhTW], ['ja', ja], ['ko', ko],
+  ])('%s includes distinct terminal and conversation font controls', (_code, dict) => {
+    for (const key of [
+      'settings.terminal_font_size',
+      'settings.terminal_font_decrease',
+      'settings.terminal_font_increase',
+      'settings.terminal_font_auto',
+      'settings.terminal_font_auto_title',
+      'settings.conversation_font_size',
+      'settings.conversation_font_decrease',
+      'settings.conversation_font_increase',
+      'settings.conversation_font_default',
+      'settings.conversation_font_hint',
+    ]) {
+      expect(dict[key], key).toBeTruthy();
+    }
+  });
+});
+
 describe('API account security copy', () => {
   it.each([['en', en], ['zh', zh]])('%s states encrypted storage and safe recovery ordering', (_code, dict) => {
     expect(dict['apiBalance.storageNote']).toMatch(/encrypted|加密/);

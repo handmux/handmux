@@ -65,6 +65,7 @@ const conversationLongPressSource = readFileSync(
 
 afterEach(() => {
   cleanup();
+  document.querySelector('[data-conversation-font-test-styles]')?.remove();
   voice.state = 'idle';
   voice.partial = '';
   voice.level = 0;
@@ -178,6 +179,50 @@ function composerModelControl(
 }
 
 describe('generic Agent Conversation UI', () => {
+  it('applies the selected size only to message bodies while Markdown code inherits it', () => {
+    const stylesheet = document.createElement('style');
+    stylesheet.dataset.conversationFontTestStyles = 'true';
+    stylesheet.textContent = styles;
+    document.head.append(stylesheet);
+    const { container } = render(<AgentConversationView conversationFontSize={18} conversation={controller({
+      items: [
+        {
+          key: 'user-font', provisional: false,
+          item: {
+            id: 'user-font', sessionId: 'session-1', status: 'complete', kind: 'message',
+            role: 'user', sourceCreatedAt: Date.now(), content: [{ type: 'text', text: 'User body' }],
+          },
+        },
+        {
+          key: 'assistant-font', provisional: false,
+          item: {
+            id: 'assistant-font', sessionId: 'session-1', status: 'complete', kind: 'message',
+            role: 'assistant', sourceCreatedAt: Date.now(),
+            content: [{ type: 'text', text: 'Assistant `code`' }],
+          },
+        },
+      ],
+    })} />);
+
+    const view = container.querySelector('.agent-conversation-view') as HTMLElement;
+    expect(view.style.getPropertyValue('--conversation-font-size')).toBe('18px');
+    expect(container.querySelectorAll('.chat-bubble')).toHaveLength(2);
+    const message = container.querySelector('.chat-bubble') as HTMLElement;
+    const code = container.querySelector('.chat-md code') as HTMLElement;
+    const timestamp = container.querySelector('.chat-ts') as HTMLElement;
+    expect(code.textContent).toBe('code');
+    expect(getComputedStyle(message).fontSize).toBe('var(--conversation-font-size, 15px)');
+    expect(getComputedStyle(code).fontSize).toBe('0.92em');
+    expect(getComputedStyle(timestamp).fontSize).toBe('10.5px');
+    expect(styles).toMatch(/\.agent-conversation-view \.chat-bubble\s*\{[^}]*font-size:\s*var\(--conversation-font-size, 15px\)/s);
+    expect(styles).toMatch(/\.chat-md code\s*\{[^}]*font-size:\s*\.92em/s);
+    expect(styles).toMatch(/\.chat-ts\s*\{[^}]*font-size:\s*10\.5px/s);
+    expect(styles).toMatch(/\.chat-optimistic-state\s*\{[^}]*font-size:\s*10px/s);
+    expect(styles).toMatch(/\.chat-turn-notice\s*\{[^}]*font-size:\s*13px/s);
+    expect(styles).not.toMatch(/\.chat-ts\s*\{[^}]*conversation-font-size/s);
+    expect(styles).not.toMatch(/\.chat-tool-head\s*\{[^}]*conversation-font-size/s);
+  });
+
   it('keeps narrow composer edge controls fixed while only the model label truncates', () => {
     const modelControl = composerModelControl({
       modelControl: {

@@ -39,6 +39,7 @@ const TOKEN_KEY = 'tw_token';
 const BROWSER_DEVICE_KEY = 'hm_browser_device1';
 const BROWSER_ACCESS_KEY = 'hm_browser_access1';
 const FONT_KEY = 'tw_font';
+const CONVERSATION_FONT_SIZE_KEY = 'tw_conversation_font_size';
 const BOUND_KEY = 'tw_bound';               // string[] of session NAMES the user has bound (client-only)
 const LAST_SESSION_KEY = 'tw_last_session'; // sessionId of the last-opened session (boot fallback)
 const WIN_BY_SESSION_KEY = 'tw_win';        // { [sessionId]: windowId }  — last window per session
@@ -464,6 +465,25 @@ export function getFont() {
 export const setFont = (n: number) => localStorage.setItem(FONT_KEY, String(n));
 // Drop the manual size so the terminal returns to height auto-fit.
 export const clearFont = () => localStorage.removeItem(FONT_KEY);
+
+// Conversation message text is browser-local and independent from xterm's height-fitting font size.
+// Keep the choices discrete so Settings can offer predictable steps without scaling surrounding UI chrome.
+export const CONVERSATION_FONT_SIZES = [13, 14, 15, 16, 17, 18, 20] as const;
+export type ConversationFontSize = typeof CONVERSATION_FONT_SIZES[number];
+export const DEFAULT_CONVERSATION_FONT_SIZE: ConversationFontSize = 15;
+const isConversationFontSize = (value: unknown): value is ConversationFontSize => (
+  typeof value === 'number' && (CONVERSATION_FONT_SIZES as readonly number[]).includes(value)
+);
+export const getConversationFontSize = (): ConversationFontSize => {
+  const raw = localStorage.getItem(CONVERSATION_FONT_SIZE_KEY);
+  const value = raw === null ? NaN : Number(raw);
+  return isConversationFontSize(value) ? value : DEFAULT_CONVERSATION_FONT_SIZE;
+};
+export const setConversationFontSize = (size: number): void => {
+  if (!isConversationFontSize(size)) return;
+  if (size === DEFAULT_CONVERSATION_FONT_SIZE) localStorage.removeItem(CONVERSATION_FONT_SIZE_KEY);
+  else localStorage.setItem(CONVERSATION_FONT_SIZE_KEY, String(size));
+};
 
 // 对话-lens colour tone — a user preference (default 暖夜/dusk). Applied as `data-chat-tone` on `.app`,
 // consumed by the `--ct-*` token blocks in styles.css. All three tones are warm (see styles.css). Unknown/

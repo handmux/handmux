@@ -8,7 +8,7 @@ import {
   conversationMessageIdentity as messageIdentity,
   type ConversationTimelineMessage,
 } from '../conversationTimelineTypes.js';
-import type { MouseEvent as ReactMouseEvent } from 'react';
+import type { CSSProperties, MouseEvent as ReactMouseEvent } from 'react';
 import type { AgentConversationController } from '../hooks/useAgentConversation.js';
 import type { ConversationActivity } from '../agentConversationControlsApi.js';
 import { projectConversationMessages } from '../conversationPresentation.js';
@@ -119,6 +119,7 @@ export default function AgentConversationView({
   completedEntryRequest = 0,
   onCompletedEntryConsumed,
   onDocLinkTap,
+  conversationFontSize = 15,
 }: {
   conversation: AgentConversationController;
   working?: boolean;
@@ -127,6 +128,7 @@ export default function AgentConversationView({
   completedEntryRequest?: number;
   onCompletedEntryConsumed?: (request: number) => void;
   onDocLinkTap?: (link: ConversationOutputLink, clientX: number, clientY: number) => void;
+  conversationFontSize?: number;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<HTMLDivElement>(null);
@@ -447,6 +449,7 @@ export default function AgentConversationView({
     || conversation.loadingOlder || !!pageError || reloadRequired) && !locatingCompletedEntry;
   return (
     <div className="chat-view agent-conversation-view" ref={viewRef} onClick={onOutputLinkClick}
+      style={{ '--conversation-font-size': `${conversationFontSize}px` } as CSSProperties}
       onPointerDown={copy.onPointerDown} onPointerMove={copy.onPointerMove}
       onPointerUp={(event) => {
         copy.onPointerUp(event);

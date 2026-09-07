@@ -7,6 +7,8 @@ import {
   getInboxSeen, markInboxSeen,
   getInboxReadTs, setInboxReadTs,
   getProjectTaskBeta, setProjectTaskBeta, getRootView, setRootView, getLastProject, setLastProject,
+  DEFAULT_CONVERSATION_FONT_SIZE, CONVERSATION_FONT_SIZES,
+  getConversationFontSize, setConversationFontSize,
   getVoiceFillerFilter, setVoiceFillerFilter,
 } from '../src/storage.js';
 import {
@@ -74,6 +76,35 @@ describe('ideas per window (tw_ideas)', () => {
 });
 
 describe('storage', () => {
+  it('keeps a valid discrete conversation font size and safely restores the 15px default', () => {
+    expect(DEFAULT_CONVERSATION_FONT_SIZE).toBe(15);
+    expect(CONVERSATION_FONT_SIZES).toEqual([13, 14, 15, 16, 17, 18, 20]);
+    expect(getConversationFontSize()).toBe(15);
+
+    setConversationFontSize(13);
+    expect(localStorage.getItem('tw_conversation_font_size')).toBe('13');
+    expect(getConversationFontSize()).toBe(13);
+    setConversationFontSize(20);
+    expect(getConversationFontSize()).toBe(20);
+
+    setConversationFontSize(15);
+    expect(localStorage.getItem('tw_conversation_font_size')).toBeNull();
+    expect(getConversationFontSize()).toBe(15);
+  });
+
+  it('ignores out-of-range writes and falls back from corrupt conversation font storage', () => {
+    setConversationFontSize(18);
+    setConversationFontSize(12);
+    setConversationFontSize(21);
+    setConversationFontSize(15.5);
+    expect(getConversationFontSize()).toBe(18);
+
+    localStorage.setItem('tw_conversation_font_size', 'huge');
+    expect(getConversationFontSize()).toBe(15);
+    localStorage.setItem('tw_conversation_font_size', '19');
+    expect(getConversationFontSize()).toBe(15);
+  });
+
   it('keeps the filler-word filtering level on this browser and defaults to medium', () => {
     expect(getVoiceFillerFilter()).toBe('medium');
     setVoiceFillerFilter('high');

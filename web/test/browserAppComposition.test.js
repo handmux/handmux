@@ -61,6 +61,15 @@ describe('built-in browser App composition', () => {
     expect(source).toContain("if (!enabled && agentId === chatAgent && current?.paneId)");
   });
 
+  it('loads, persists, and passes one conversation font size through Settings to the message view', () => {
+    expect(source).toContain('getConversationFontSize, setConversationFontSize');
+    expect(source).toContain('useState(getConversationFontSize)');
+    expect(source).toContain('setConversationFontSize(size);');
+    expect(source).toContain('conversationFontSize={conversationFontSize}');
+    expect(source).toContain('onConversationFontSize={pickConversationFontSize}');
+    expect(source.match(/conversationFontSize=\{conversationFontSize\}/g)).toHaveLength(2);
+  });
+
   it('keeps a remembered managed identity until takeover is authoritatively available', () => {
     expect(source).toContain('conversationIdentityForActivation(');
     expect(source).toContain('invalidateRememberedConversationOnTakeover(');

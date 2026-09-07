@@ -247,6 +247,7 @@ button.settings-page-row:disabled, .settings-page-row.disabled { color: rgba(235
   background: #33353a; color: #f2f2f7; font-size: 15px; touch-action: manipulation;
 }
 .settings-font-controls button:active { background: #414348; }
+.settings-font-controls button:disabled { opacity: .35; }
 .settings-font-controls button.selected { background: #2a4060; color: #7ab4f5; }
 .settings-font-card p { margin: -3px 0 0; color: rgba(235,235,245,.42); font-size: 12.5px; text-align: center; }
 .settings-detail-group { margin-top: 24px; }
@@ -2885,8 +2886,8 @@ button.cmd-text { background: none; border: none; text-align: left; }
   padding: 1px 2px; word-break: break-word;
 }
 
-.chat-bubble {
-  padding: 9px 13px; border-radius: 18px; font-size: 15px; line-height: 1.4;
+.agent-conversation-view .chat-bubble {
+  padding: 9px 13px; border-radius: 18px; font-size: var(--conversation-font-size, 15px); line-height: 1.4;
   white-space: pre-wrap; word-break: break-word;
 }
 .chat-optimistic.is-sending { opacity: .82; }
