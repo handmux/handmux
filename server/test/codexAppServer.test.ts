@@ -1,6 +1,7 @@
 import { EventEmitter } from 'node:events';
 import { describe, expect, it, vi } from 'vitest';
 import { createCodexAppServer, projectCodexThread } from '../src/codexAppServer.js';
+import { createCodexConversationActivityReader } from '../src/agent-runtime/builtinRuntime.js';
 import type { CodexInteractionSnapshot } from '../src/codexAppServer.js';
 import type WebSocket from 'ws';
 import type { CodexStreamEvent } from '../src/codexStreamProtocol.js';
@@ -4746,4 +4747,77 @@ describe('Codex App Server client', () => {
     });
     app.close();
   });
+});
+
+
+describe('idle Codex threads with unfinished historical review turns', () => {
+  const orphanThread = (): TestThread => ({
+    id: 'thread-1', status: { type: 'idle' },
+    turns: [
+      { id: 'review-outer', status: 'completed', items: [] },
+      { id: 'review-inner', status: 'inProgress', items: [] },
+    ],
+  });
+
+  it('uses authoritative idle on resume and read without rewriting historical turns', async () => {
+    const proxy = fakeProxy({ resumeThread: orphanThread, readThread: orphanThread });
+    const app = createCodexAppServer({ home: '/home/test', exists: () => true, connect: () => proxy.ws });
+    try {
+      expect(await app.status('%1', 'thread-1')).toMatchObject({ status: { type: 'idle' }, activeTurnId: null });
+      proxy.push({ method: 'thread/status/changed', params: { threadId: 'thread-1', status: { type: 'idle' } } });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      const snapshot = await app.read('%1', 'thread-1');
+      expect(proxy.sent.some((message) => message.method === 'thread/read')).toBe(true);
+      expect(snapshot?.thread?.turns).toContainEqual({ id: 'review-inner', status: 'inProgress', items: [] });
+      expect(await app.status('%1', 'thread-1')).toMatchObject({ activeTurnId: null });
+      expect(await createCodexConversationActivityReader(app).read({
+        ref: { agentId: 'codex', paneId: '%1', runId: 'test-run', sessionId: 'thread-1' },
+        signal: new AbortController().signal,
+      })).toEqual({
+        activity: 'idle', activeTurn: { state: 'none' },
+        completionToken: 'codex-completed:review-outer:completed',
+      });
+      proxy.push({ method: 'thread/goal/updated', params: {
+        threadId: 'thread-1', goal: {
+          threadId: 'thread-1', objective: 'Next task', status: 'active',
+          createdAt: 1, updatedAt: 1, tokensUsed: 0, timeUsedSeconds: 0, tokenBudget: null,
+        },
+      } });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(snapshot?.client.currentConversationGoal('thread-1')).toMatchObject({ type: 'goal', turnId: null });
+      expect(await app.interrupt('%1', 'thread-1')).toEqual({ interrupted: false });
+      expect(proxy.sent.filter((message) => message.method === 'turn/interrupt')).toEqual([]);
+      expect(await app.dispatchPrompt('%1', 'thread-1', 'continue', 'after-review')).toMatchObject({ busy: false });
+      expect(proxy.sent.filter((message) => message.method === 'turn/start')).toHaveLength(1);
+    } finally { app.close(); }
+  });
+
+  it('clears a remembered turn on idle and still recognizes the next genuine active turn', async () => {
+    const proxy = fakeProxy({ resumeThread: orphanThread, readThread: orphanThread });
+    const app = createCodexAppServer({ home: '/home/test', exists: () => true, connect: () => proxy.ws });
+    try {
+      await app.status('%1', 'thread-1');
+      proxy.push({ method: 'turn/started', params: { threadId: 'thread-1', turn: { id: 'real-active', status: 'inProgress', items: [] } } });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(await app.dispatchPrompt('%1', 'thread-1', 'wait', 'during-turn')).toEqual({ busy: true });
+      expect(await app.dispatchSteer('%1', 'thread-1', 'steer', 'steer-active', { kind: 'steer-active-turn', nativeTurnId: 'real-active' })).toMatchObject({ busy: false });
+      proxy.push({ method: 'thread/status/changed', params: { threadId: 'thread-1', status: { type: 'idle' } } });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(await app.status('%1', 'thread-1')).toMatchObject({ activeTurnId: null });
+      expect(await app.dispatchSteer('%1', 'thread-1', 'continue', 'idle-fallback', { kind: 'start-turn-fallback' })).toMatchObject({ busy: false });
+      expect(proxy.sent.filter((message) => message.method === 'turn/start')).toHaveLength(1);
+    } finally { app.close(); }
+  });
+});
+
+
+it.each(['active', 'reconnecting'])('does not treat %s native status as idle when history is unfinished', async (type) => {
+  const thread: TestThread = { id: 'thread-1', status: { type }, turns: [{ id: 'pending', status: 'inProgress', items: [] }] };
+  const proxy = fakeProxy({ resumeThread: () => thread, readThread: () => thread });
+  const app = createCodexAppServer({ home: '/home/test', exists: () => true, connect: () => proxy.ws });
+  try {
+    expect(await app.status('%1', 'thread-1')).toMatchObject({ activeTurnId: 'pending' });
+    expect(await app.dispatchPrompt('%1', 'thread-1', 'wait', 'not-idle')).toEqual({ busy: true });
+    expect(proxy.sent.filter((message) => message.method === 'turn/start')).toEqual([]);
+  } finally { app.close(); }
 });

@@ -841,12 +841,20 @@ function turnPrompt(turn: AppTurn | null | undefined): string {
   return '';
 }
 
+function currentTurnId(state: ThreadState | null | undefined, remembered = state?.activeTurnId): string | null {
+  // Native history can retain unfinished internal turns after the thread is idle (for example /review).
+  // Historical turn records must never override the authoritative current thread lifecycle.
+  if ((state?.status || state?.thread?.status)?.type === 'idle') return null;
+  return remembered || [...(state?.thread?.turns || [])].reverse()
+    .find((turn) => turn.status === 'inProgress')?.id || null;
+}
+
 function activeTurnPrompt(state: ThreadState | null | undefined): string {
+  if ((state?.status || state?.thread?.status)?.type === 'idle') return '';
+  const turnId = currentTurnId(state);
   if (state?.activePrompt) return state.activePrompt;
   const turns = Array.isArray(state?.thread?.turns) ? state.thread.turns : [];
-  const active = state?.activeTurnId
-    ? turns.find((turn) => turn.id === state.activeTurnId)
-    : [...turns].reverse().find((turn) => turn.status === 'inProgress');
+  const active = turns.find((turn) => turn.id === turnId);
   return turnPrompt(active);
 }
 
@@ -1245,6 +1253,10 @@ class CodexAppConnection {
     } else if (message.method === 'thread/status/changed') {
       const state = this.state(params.threadId);
       state.status = params.status ?? null;
+      if (state.status?.type === 'idle') {
+        state.activeTurnId = null;
+        state.activePrompt = '';
+      }
       const kind = activeKind(params.status);
       if (!this.isCurrentThread(params.threadId)) {
         /* retain the state for that thread, but never let a late background event rebind this pane */
@@ -1308,11 +1320,10 @@ class CodexAppConnection {
       // Native Goal notifications do not consistently carry turnId. Bind every live lifecycle transition
       // to the turn that is currently producing it so an active Goal set before the first item event cannot
       // later mistake that same turn for its next durable injection opportunity.
-      const state = this.state(params.threadId);
       const notifiedGoal = parseCodexGoal(params.goal);
       const pendingTurnId = this.pendingGoalTurn(params.threadId);
       const turnId = params.turnId
-        || (pendingTurnId !== undefined ? pendingTurnId : state.activeTurnId)
+        || (pendingTurnId !== undefined ? pendingTurnId : this.activeTurn(params.threadId))
         || null;
       this.applyGoalSnapshot(params.threadId, notifiedGoal, turnId, { emitClear: true });
     } else if (message.method === 'thread/goal/cleared') {
@@ -1734,9 +1745,7 @@ class CodexAppConnection {
 
   activeTurn(threadId: string): string | null {
     const state = this.state(threadId);
-    return state.activeTurnId
-      || [...(state.thread?.turns || [])].reverse().find((turn) => turn.status === 'inProgress')?.id
-      || null;
+    return currentTurnId(state);
   }
 
   beginGoalMutation(threadId: string): PendingGoalMutation {
@@ -2706,8 +2715,7 @@ class CodexAppConnection {
         state.status = resumedThread?.status || state.status;
         const previousActiveTurnId = state.activeTurnId;
         const previousActivePrompt = state.activePrompt;
-        state.activeTurnId = [...(resumedThread?.turns || [])].reverse()
-          .find((turn) => turn.status === 'inProgress')?.id || null;
+        state.activeTurnId = currentTurnId(state, null);
         const resumedPrompt = state.activeTurnId
           ? turnPrompt((resumedThread?.turns || []).find((turn) => turn.id === state.activeTurnId))
           : '';
@@ -2784,7 +2792,8 @@ class CodexAppConnection {
     // base snapshot still applies, and the cache now represents that current combined projection.
     state.readRevision = state.revision;
     state.status = fresh?.status || state.status;
-    const active = [...(state.thread?.turns || [])].reverse().find((turn) => turn.status === 'inProgress');
+    const activeId = currentTurnId(state, null);
+    const active = state.thread?.turns?.find((turn) => turn.id === activeId);
     const previousActiveTurnId = state.activeTurnId;
     const previousActivePrompt = state.activePrompt;
     state.activeTurnId = active?.id || null;
@@ -3766,12 +3775,12 @@ export function createCodexAppServer({
       const client = await connection(pane);
       if (!client) throw new Error('Codex session is not managed by Handmux');
       await client.assertCurrentThread(threadId);
-      const state = await client.ensureThread(threadId);
-      let turnId = state.activeTurnId;
+      await client.ensureThread(threadId);
+      let turnId = client.activeTurn(threadId);
       if (!turnId) {
-        const thread = await client.readThread(threadId);
+        await client.readThread(threadId);
         client.requireCurrentThread(threadId);
-        turnId = [...(thread?.turns || [])].reverse().find((turn) => turn.status === 'inProgress')?.id || null;
+        turnId = client.activeTurn(threadId);
       }
       if (!turnId) return { interrupted: false };
       client.requireCurrentThread(threadId);

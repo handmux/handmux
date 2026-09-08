@@ -4,6 +4,10 @@ All notable changes to handmux. Format follows [Keep a Changelog](https://keepac
 
 ## [Unreleased]
 
+### Fixed
+
+- 修复 Codex 在终端执行官方 `/review` 后，对话页发送消息持续排队的问题；以当前会话状态判断是否运行，保留原始回合历史。
+
 ## [0.27.2] - 2026-09-08
 
 ### Fixed
