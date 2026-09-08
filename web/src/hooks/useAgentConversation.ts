@@ -119,7 +119,7 @@ export type AgentConversationIdentity = Pick<AgentRunRef, 'agentId' | 'paneId'> 
 export const MAX_AGENT_CONVERSATION_ITEMS = 1_000;
 const MAX_RETAINED_SEND_ATTEMPTS = 20;
 const MAX_LOCAL_SUBMISSIONS = 1_000;
-const ACCEPTED_OUTGOING_LIFETIME_MS = 10_000;
+const ACCEPTED_OUTGOING_LIFETIME_MS = 120_000;
 
 function trimLatestProjection(state: AgentConversationProjection): AgentConversationProjection {
   return state.slots.length > MAX_AGENT_CONVERSATION_ITEMS

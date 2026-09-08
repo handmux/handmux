@@ -50,11 +50,11 @@ async function mount() {
 const tick = async (ms: number) => { await act(async () => { await vi.advanceTimersByTimeAsync(ms); }); };
 
 describe('page-local outgoing lifetime', () => {
-  it('expires accepted at first acceptance +10s without retransmission or deleting canonical history', async () => {
+  it('expires accepted at first acceptance +120s without retransmission or deleting canonical history', async () => {
     const { result } = await mount();
     await act(async () => { await result.current.send('repeat'); });
     const id = result.current.localSubmissions![0]!.clientRequestId;
-    await tick(9_000);
+    await tick(119_000);
     act(() => result.current.observeSubmissionSnapshot?.([], { settled: [{ id }] }));
     await tick(999);
     expect(result.current.items.filter((item) => item.outgoing)).toHaveLength(1);
@@ -66,15 +66,49 @@ describe('page-local outgoing lifetime', () => {
     expect(sendAgentConversationMessage).toHaveBeenCalledTimes(1);
   });
 
-  it('starts the 10s only when a queued local message is confirmed dispatched', async () => {
+  it.each(['formal at 30s', 'no formal before 120s'] as const)(
+    'keeps accepted Queue steer past 10s and hands off without retransmission: %s', async (scenario) => {
+      const { result } = await mount();
+      let pending!: ReturnType<NonNullable<typeof result.current.beginQueueSteer>>;
+      act(() => { pending = result.current.beginQueueSteer!({
+        id: 'queue-1', requestId: 'steer-1', text: 'guide now', createdAt: 1,
+      }); });
+      // Dispatch time is not acceptance time: the full lifetime starts with this reply.
+      await tick(5_000);
+      const accepted = { status: 'accepted' as const, actionId: pending.actionId, nativeMutation: true as const };
+      act(() => result.current.settleQueueSteer!(pending.submissionId, accepted));
+      await tick(10_000);
+      expect(result.current.items.filter((item) => item.outgoing)).toEqual([
+        expect.objectContaining({ outgoing: expect.objectContaining({ status: 'accepted', clientRequestId: pending.submissionId }) }),
+      ]);
+      await tick(20_000);
+      if (scenario === 'formal at 30s') {
+        history = [{ ...user('formal-steer', 'guide now'), correlationId: pending.submissionId }];
+        await act(async () => { await result.current.loadLatest?.({ force: true }); });
+        expect(result.current.items).toEqual([expect.objectContaining({ item: history[0] })]);
+      }
+      // Repeated receipt must not restart the first acceptance deadline.
+      act(() => result.current.settleQueueSteer!(pending.submissionId, accepted));
+      await tick(89_999);
+      expect(result.current.items.filter((item) => item.outgoing)).toHaveLength(scenario === 'formal at 30s' ? 0 : 1);
+      await tick(1);
+      expect(result.current.localSubmissions).toEqual([]);
+      expect(result.current.items).toEqual(scenario === 'formal at 30s'
+        ? [expect.objectContaining({ item: history[0] })] : []);
+      expect(sendAgentConversationMessage).not.toHaveBeenCalled();
+      expect(queryAgentConversationSubmission).not.toHaveBeenCalled();
+    },
+  );
+
+  it('starts the 120s only when a queued local message is confirmed dispatched', async () => {
     vi.mocked(sendAgentConversationMessage).mockResolvedValue({ status: 'queued' });
     const { result } = await mount();
     await act(async () => { await result.current.send('queued', { queueHint: true }); });
     const id = result.current.localSubmissions![0]!.clientRequestId;
-    await tick(30_000);
+    await tick(150_000);
     expect(result.current.localSubmissions).toEqual([expect.objectContaining({ owner: 'queue' })]);
     act(() => result.current.observeSubmissionSnapshot?.([], { settled: [{ id }] }));
-    await tick(9_999);
+    await tick(119_999);
     expect(result.current.localSubmissions).toEqual([expect.objectContaining({ owner: 'timeline' })]);
     await tick(1);
     expect(result.current.localSubmissions).toEqual([]);
@@ -88,7 +122,7 @@ describe('page-local outgoing lifetime', () => {
     await act(async () => { await result.current.send('accepted'); });
     await tick(5_000);
     rerender({ run: null, identity });
-    await tick(4_999);
+    await tick(114_999);
     expect(result.current.localSubmissions).toHaveLength(2);
     await tick(1);
     expect(result.current.localSubmissions).toEqual([expect.objectContaining({ status: 'unknown' })]);
@@ -102,7 +136,7 @@ describe('page-local outgoing lifetime', () => {
     const { result } = await mount();
     await act(async () => { await result.current.send('repeat'); });
     const id = result.current.localSubmissions![0]!.clientRequestId;
-    await tick(9_000);
+    await tick(119_000);
     act(() => result.current.observeSubmissionSnapshot?.([{ id, text: 'repeat', state: 'dispatching',
       revision: 1, dispatchOrigin, createdAt: 1, updatedAt: 1 }]));
     expect(result.current.localSubmissions).toEqual([expect.objectContaining({ status: 'accepted' })]);
@@ -123,7 +157,7 @@ describe('page-local outgoing lifetime', () => {
     act(() => result.current.observeSubmissionSnapshot?.([], { settled: [{ id: acceptedId, nativeId: 'formal' }] }));
     await tick(3_000);
     await act(async () => { resolveSend({ status: 'accepted', nativeId: 'turn-1' }); await sent; });
-    await tick(7_000);
+    await tick(117_000);
     expect(result.current.localSubmissions).toEqual([expect.objectContaining({ clientRequestId: unknownId })]);
     history = [user('formal')];
     await act(async () => { await result.current.loadLatest?.({ force: true }); });
