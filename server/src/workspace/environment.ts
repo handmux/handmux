@@ -22,9 +22,12 @@ export type EnvironmentChange =
 type ReadFile = (path: string, encoding: 'utf8') => Promise<string | Buffer>;
 type ExecFile = (file: string, args: string[]) => Promise<{ stdout: string | Buffer }>;
 
-function normalizeMacBootTime(value: unknown): string | null {
-  const seconds = String(value).match(/\bsec\s*=\s*(\d+)\b/)?.[1];
-  return seconds && seconds !== '0' ? seconds : null;
+const UUID_PATTERN = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}';
+const UUID = new RegExp(`^${UUID_PATTERN}$`, 'i');
+const MAC_BOOT_IDENTITY = new RegExp(`^darwin:${UUID_PATTERN}$`, 'i');
+
+export function isLegacyMacBootIdentity(value: unknown): value is string {
+  return typeof value === 'string' && /^[1-9][0-9]*$/.test(value);
 }
 
 function environmentId(bootIdentity: string, tmuxServerId: string | null): string {
@@ -40,7 +43,14 @@ export function detectEnvironmentChange(
 ): EnvironmentChange {
   if (!observed || observed.status === 'unknown') return { status: 'unknown' };
   if (!previous) return { status: 'initial', current: observed };
-  if (previous.bootIdentity !== observed.bootIdentity) return { status: 'changed', reason: 'boot-changed', current: observed };
+  // Old macOS checkpoints used a wall-clock boot timestamp, which can drift during the same boot.
+  // It cannot be compared with a boot session UUID. During migration the tmux generation is the
+  // available continuity evidence; a replaced/missing tmux still produces a recoverable change below.
+  const migratingMacIdentity = isLegacyMacBootIdentity(previous.bootIdentity)
+    && MAC_BOOT_IDENTITY.test(observed.bootIdentity);
+  if (!migratingMacIdentity && previous.bootIdentity !== observed.bootIdentity) {
+    return { status: 'changed', reason: 'boot-changed', current: observed };
+  }
   if (observed.status === 'absent') {
     return previous.tmuxServerId
       ? { status: 'changed', reason: 'tmux-changed', current: observed }
@@ -63,7 +73,8 @@ export function createBootIdentityProvider({
         return identity || null;
       }
       if (platform === 'darwin') {
-        return normalizeMacBootTime((await exec('sysctl', ['-n', 'kern.boottime'])).stdout);
+        const identity = String((await exec('sysctl', ['-n', 'kern.bootsessionuuid'])).stdout).trim();
+        return UUID.test(identity) ? `darwin:${identity.toLowerCase()}` : null;
       }
       return null;
     } catch {

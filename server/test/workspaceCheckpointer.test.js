@@ -369,3 +369,16 @@ describe('workspace graceful shutdown', () => {
     expect(order).toEqual(['events', 'workspace', 'browser', 'server']);
   });
 });
+
+
+it('migrates a legacy macOS boot identity by capturing live state without archiving the surviving tmux', async () => {
+  const previous = { id: 'legacy', bootIdentity: '1788200737', tmuxServerId: 'same-tmux' };
+  const observed = { status: 'present', id: 'stable', bootIdentity: 'darwin:54b3288f-f346-4849-b503-eb5a1d433dbb', tmuxServerId: 'same-tmux' };
+  const d = deps({ observeEnvironment: async () => observed });
+  d.store.readLive.mockResolvedValue({ status: 'ok', value: snapshot(previous) });
+  expect(await createCheckpointer(d).reconcile()).toMatchObject({ status: 'written' });
+  expect(d.store.archiveEnvironment).not.toHaveBeenCalled();
+  expect(d.store.writeLive).toHaveBeenCalledWith(expect.objectContaining({ environment: {
+    id: observed.id, bootIdentity: observed.bootIdentity, tmuxServerId: observed.tmuxServerId,
+  } }));
+});

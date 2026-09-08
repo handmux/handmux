@@ -64,14 +64,34 @@ describe('createBootIdentityProvider', () => {
     expect(readFile).toHaveBeenCalledWith('/proc/sys/kernel/random/boot_id', 'utf8');
   });
 
-  it('normalizes macOS kern.boottime output to stable whole seconds', async () => {
-    const exec = vi.fn(async () => ({
-      stdout: '{ sec = 1721234567, usec = 123456 } Mon Jul 17 12:34:56 2026\n',
-    }));
+  it('uses the macOS boot session UUID rather than the wall-clock boot time', async () => {
+    const exec = vi.fn(async () => ({ stdout: '  54B3288F-F346-4849-B503-EB5A1D433DBB\n' }));
     const provider = createBootIdentityProvider({ platform: 'darwin', exec });
+    await expect(provider()).resolves.toBe('darwin:54b3288f-f346-4849-b503-eb5a1d433dbb');
+    expect(exec).toHaveBeenCalledWith('sysctl', ['-n', 'kern.bootsessionuuid']);
+  });
 
-    await expect(provider()).resolves.toBe('1721234567');
-    expect(exec).toHaveBeenCalledWith('sysctl', ['-n', 'kern.boottime']);
+  it.each(['', '1788200735', '{ sec = 1788200735, usec = 0 }', 'not-a-uuid'])(
+    'does not fall back to boot time when the macOS UUID is invalid: %j', async (stdout) => {
+      const exec = vi.fn(async () => ({ stdout }));
+      const provider = createEnvironmentProvider({
+        bootIdentityProvider: createBootIdentityProvider({ platform: 'darwin', exec }),
+        tmuxServerIdProvider: async () => 'same-tmux',
+      });
+      await expect(provider()).resolves.toEqual({ status: 'unknown' });
+      expect(exec).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it('returns unknown without a boot-time fallback when macOS sysctl fails', async () => {
+    const exec = vi.fn(async () => { throw new Error('sysctl unavailable'); });
+    const provider = createEnvironmentProvider({
+      bootIdentityProvider: createBootIdentityProvider({ platform: 'darwin', exec }),
+      tmuxServerIdProvider: async () => 'same-tmux',
+    });
+    await expect(provider()).resolves.toEqual({ status: 'unknown' });
+    expect(exec).toHaveBeenCalledTimes(1);
+    expect(exec).toHaveBeenCalledWith('sysctl', ['-n', 'kern.bootsessionuuid']);
   });
 
   it('returns null for unsupported platforms, malformed macOS output, and provider errors', async () => {
@@ -109,3 +129,34 @@ describe('createEnvironmentProvider', () => {
     await expect(provider()).resolves.toEqual({ status: 'unknown' });
   });
 });
+
+
+describe('legacy macOS boot identity migration', () => {
+  const bootIdentity = 'darwin:54b3288f-f346-4849-b503-eb5a1d433dbb';
+  it.each([
+    ['present', 'same-tmux', 'same'],
+    ['present', 'new-tmux', 'tmux-changed'],
+    ['absent', null, 'tmux-changed'],
+  ])('uses tmux generation evidence during numeric-to-UUID migration: %s %s', (status, tmuxServerId, reason) => {
+    expect(detectEnvironmentChange({ bootIdentity: '1788200737', tmuxServerId: 'same-tmux' },
+      { status, id: 'current', bootIdentity, tmuxServerId }).reason).toBe(reason);
+  });
+  it('still detects a changed stable boot UUID', () => {
+    expect(detectEnvironmentChange({ bootIdentity, tmuxServerId: 'same-tmux' }, {
+      status: 'present', id: 'current', bootIdentity: 'darwin:64b3288f-f346-4849-b503-eb5a1d433dbb', tmuxServerId: 'same-tmux',
+    }).reason).toBe('boot-changed');
+  });
+  it('does not infer a lost generation from two empty environments during migration', () => {
+    expect(detectEnvironmentChange({ bootIdentity: '1788200737', tmuxServerId: null },
+      { status: 'absent', id: 'current', bootIdentity, tmuxServerId: null })).toEqual({ status: 'unknown' });
+  });
+});
+
+
+it.each(['54b3288f-f346-4849-b503-eb5a1d433dbb', 'darwin:not-a-uuid', '1788200735'])(
+  'does not treat a numeric-to-%s change as the macOS UUID migration', (bootIdentity) => {
+    expect(detectEnvironmentChange({ bootIdentity: '1788200737', tmuxServerId: 'same-tmux' }, {
+      status: 'present', id: 'current', bootIdentity, tmuxServerId: 'same-tmux',
+    }).reason).toBe('boot-changed');
+  },
+);
