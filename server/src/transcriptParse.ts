@@ -60,7 +60,6 @@ export interface TranscriptMessage {
   type: 'text' | 'thinking' | 'tool' | 'compact' | 'slash' | 'interrupt';
   ts: string | undefined;
   role?: 'user' | 'assistant';
-  source?: 'task-notification';
   text?: string;
   name?: string;
   args?: string;
@@ -226,10 +225,7 @@ export function createTranscriptParser(): TranscriptParser {
       // bubbles) — the pushed `it.text` below is the untrimmed original, so real text's internal/
       // leading/trailing whitespace is preserved verbatim.
       if (it.type === 'text' && typeof it.text === 'string' && it.text.trim()) {
-        msgs.push({ i, role, type: 'text', text: it.text, ts,
-          ...(o.type === 'user' && m.role === 'user' && o.promptSource === 'system'
-            && record(o.origin)?.kind === 'task-notification' ? { source: 'task-notification' as const } : {}),
-        });
+        msgs.push({ i, role, type: 'text', text: it.text, ts });
       } else if (it.type === 'thinking' && typeof it.thinking === 'string' && it.thinking) {
         msgs.push({ i, role: 'assistant', type: 'thinking', text: it.thinking, ts });
       } else if (it.type === 'tool_use') {

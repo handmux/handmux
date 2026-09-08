@@ -1,5 +1,6 @@
 import { createRoot } from 'react-dom/client';
 import App from './App.jsx';
+import AuthBootstrap from './components/AuthBootstrap.js';
 import { registerServiceWorker } from './sw-register.js';
 import './styles.css';
 
@@ -11,7 +12,7 @@ declare global {
 
 const root = document.getElementById('root');
 if (!root) throw new Error('Missing application root');
-createRoot(root).render(<App />);
+createRoot(root).render(<AuthBootstrap><App /></AuthBootstrap>);
 registerServiceWorker();
 
 // Fade out the inline boot splash once React has painted AND the app CSS is ready.

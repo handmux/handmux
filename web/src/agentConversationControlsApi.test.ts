@@ -7,14 +7,14 @@ import {
 afterEach(() => vi.unstubAllGlobals());
 
 describe('conversation controls parser', () => {
-  it.each(['provider_rejected', 'terminal_draft_conflict'])('accepts Core Activity and Queue recovery reason %s', (reason) => {
+  it('accepts Core Activity, Queue revisions, and active submission recovery snapshots', () => {
     expect(parseConversationControls({
       activity: 'compacting',
       queue: {
         items: [{
           id: 'submission-1', text: 'later', createdAt: 1,
           state: 'queued', revision: 2, dispatchOrigin: 'queue',
-          autoDispatchBlockedReason: reason,
+          autoDispatchBlockedReason: 'provider_rejected',
         }],
         settled: [{ id: 'submission-settled', nativeId: 'native-turn-1' }],
         canSteer: true, canEdit: true, canRemove: true,
@@ -23,18 +23,18 @@ describe('conversation controls parser', () => {
         id: 'submission-2', text: 'guide now', state: 'unknown', revision: 4,
         dispatchOrigin: 'steer', steerAnchor: { viewId: 'view-1', afterItemId: 'item-1' },
         baseline: { viewId: 'view-1', historyVersion: 'history-1', tailItemId: 'item-0' },
-        autoDispatchBlockedReason: reason,
+        autoDispatchBlockedReason: 'provider_rejected',
         createdAt: 2, updatedAt: 3,
       }],
     })).toMatchObject({
       activity: 'compacting',
       queue: { items: [{
         id: 'submission-1', state: 'queued', revision: 2,
-        autoDispatchBlockedReason: reason,
+        autoDispatchBlockedReason: 'provider_rejected',
       }], settled: [{ id: 'submission-settled', nativeId: 'native-turn-1' }] },
       submissions: [{
         id: 'submission-2', state: 'unknown', revision: 4,
-        autoDispatchBlockedReason: reason,
+        autoDispatchBlockedReason: 'provider_rejected',
         steerAnchor: { viewId: 'view-1', afterItemId: 'item-1' },
         baseline: { viewId: 'view-1', historyVersion: 'history-1', tailItemId: 'item-0' },
       }],

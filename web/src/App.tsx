@@ -77,6 +77,9 @@ import {
 } from './components/AgentConversationCapabilityControls.js';
 import PaneSurfaceHost from './components/PaneSurfaceHost.jsx';
 import TokenPrompt from './components/TokenPrompt.jsx';
+import DevicePairingPrompt from './components/DevicePairingPrompt.js';
+import DeviceLogoutDialog from './components/DeviceLogoutDialog.js';
+import { hasDeviceSession, isDeviceAuth, logoutDevice } from './authSession.js';
 import Settings from './components/Settings.jsx';
 import WorkspaceRestoreDialog from './components/WorkspaceRestoreDialog.jsx';
 import UsagePage from './components/UsagePage.jsx';
@@ -281,7 +284,10 @@ export default function App() {
   const [snapshotInterval, setSnapshotIntervalState] = useState(getSnapshotInterval);
   const terminalStream = typeof window !== 'undefined'
     && terminalStreamEnabled(window.location, terminalTransport);
-  const [needToken, setNeedToken] = useState(!getToken());
+  const [needToken, setNeedToken] = useState(isDeviceAuth() ? !hasDeviceSession() : !getToken());
+  const [logoutConfirm, setLogoutConfirm] = useState(false);
+  const [logoutBusy, setLogoutBusy] = useState(false);
+  const [logoutError, setLogoutError] = useState('');
   const serverConfig = useServerConfig({ enabled: !needToken });
   const serverShortcuts = serverConfig?.shortcuts || DEFAULT_SERVER_SHORTCUTS;
   const micAvailable = useAsrAvailable(serverConfig);
@@ -626,8 +632,16 @@ export default function App() {
     getServerVersion().then(setUpdateInfo).catch(() => { /* best-effort; no hint on failure */ });
   }, [needToken]);
 
-  // Drop the saved token and bounce back to the token prompt — handy for testing the login flow.
-  const logout = useCallback(() => {
+  // Device logout is an actual server revocation; a network failure must not look like unbinding.
+  const logout = useCallback(async () => {
+    if (isDeviceAuth()) {
+      setLogoutBusy(true);
+      setLogoutError('');
+      try { await logoutDevice(); }
+      catch { setLogoutError(t('auth.logoutError')); setLogoutBusy(false); return; }
+      setLogoutBusy(false);
+      setLogoutConfirm(false);
+    }
     clearToken();
     clearRecoveryOperation();
     setSettingsOpen(false);
@@ -1963,7 +1977,6 @@ export default function App() {
       conversationSubmissionProjection.timeline,
     ),
   }), [canonicalConversationItems, conversationSubmissionProjection.timeline, genericConversation]);
-  const conversationControlRequestSequence = useRef(0);
   const [conversationControlRequest, setConversationControlRequest] = useState({
     identity: '', goal: 0, goalEdit: 0, model: 0,
   });
@@ -1971,14 +1984,6 @@ export default function App() {
     ? `${normalizedConversationIdentity.agentId}\0${normalizedConversationIdentity.sessionId}` : '';
   const requestForCurrentConversation = conversationControlRequest.identity === conversationRequestIdentity
     ? conversationControlRequest : { identity: conversationRequestIdentity, goal: 0, goalEdit: 0, model: 0 };
-  const consumeModelOpenRequest = useCallback((requestId: number): void => {
-    setConversationControlRequest((current) => current.identity === conversationRequestIdentity
-      && current.model === requestId ? { ...current, model: 0 } : current);
-  }, [conversationRequestIdentity]);
-  const consumeGoalOpenRequest = useCallback((requestId: number): void => {
-    setConversationControlRequest((current) => current.identity === conversationRequestIdentity
-      && current.goal === requestId ? { ...current, goal: 0, goalEdit: 0 } : current);
-  }, [conversationRequestIdentity]);
   const handleConversationSlash = useCallback(async (text: string): Promise<boolean> => {
     const match = text.trim().match(/^\/(model|effort|goal|compact|clear)(?:\s+([\s\S]+))?$/i);
     if (!match) return false;
@@ -1987,11 +1992,8 @@ export default function App() {
     if (command === 'model' || command === 'effort') {
       if (!conversationControlCapabilities?.sessionControl) return false;
       if (!argument) {
-        const requestId = ++conversationControlRequestSequence.current;
         setConversationControlRequest((current) => ({
-          ...(current.identity === conversationRequestIdentity
-            ? current : { goal: 0, goalEdit: 0, model: 0 }),
-          identity: conversationRequestIdentity, model: requestId,
+          ...current, identity: conversationRequestIdentity, model: current.model + 1,
         }));
         return true;
       }
@@ -2002,12 +2004,10 @@ export default function App() {
       if (!conversationControlCapabilities?.conversationGoal) return false;
       const action = argument.toLowerCase();
       if (!argument || action === 'edit') {
-        const request = ++conversationControlRequestSequence.current;
         setConversationControlRequest((current) => {
+          const request = current.goal + 1;
           return {
-            ...(current.identity === conversationRequestIdentity
-              ? current : { goal: 0, goalEdit: 0, model: 0 }),
-            identity: conversationRequestIdentity, goal: request,
+            ...current, identity: conversationRequestIdentity, goal: request,
             goalEdit: action === 'edit' ? request : 0,
           };
         });
@@ -2385,6 +2385,7 @@ export default function App() {
   });
 
   if (needToken) {
+    if (isDeviceAuth()) return <DevicePairingPrompt onSaved={() => { setNeedToken(false); setBooting(true); }} />;
     return <TokenPrompt onSaved={() => { setNeedToken(false); setBooting(true); }} />;
   }
 
@@ -2555,7 +2556,7 @@ export default function App() {
         onUnbind={unbindSession}
         onBind={() => setBindOpen(true)}
         onClose={() => setDrawerOpen(false)}
-        onLogout={logout}
+        onLogout={() => { if (isDeviceAuth()) setLogoutConfirm(true); else void logout(); }}
         orphans={orphans}
         onTakeoverRequest={(orphan) => {
           if (orphan.sessionId) setTakeoverTarget({ ...orphan, sessionId: orphan.sessionId });
@@ -2566,6 +2567,9 @@ export default function App() {
         projectTaskBeta={projectTaskBeta}
         onSwitchProject={() => chooseRootView('project')}
       />}
+      {logoutConfirm && <DeviceLogoutDialog busy={logoutBusy} error={logoutError}
+        onClose={() => { setLogoutConfirm(false); setLogoutError(''); }}
+        onConfirm={() => { void logout(); }} />}
       <WorkspaceRestoreDialog
         open={recoveryDialogOpen}
         plan={recoveryPlan}
@@ -2821,7 +2825,6 @@ export default function App() {
                 <AgentConversationView
                   key={`conversation-view\0${normalizedConversationIdentity.agentId}\0${normalizedConversationIdentity.sessionId}`}
                   conversation={projectedConversation}
-                  onAuthFail={onAuthFail}
                   working={conversationActivity === 'working'}
                   activity={conversationActivity}
                   onDocLinkTap={onDocLinkTap}
@@ -2907,7 +2910,6 @@ export default function App() {
                     || conversationControlCapabilities?.conversationPlan)
                     ? <AgentConversationMilestoneControls controller={agentConversationControls}
                       goalOpenRequest={requestForCurrentConversation.goal}
-                      onGoalOpenRequestConsumed={consumeGoalOpenRequest}
                       goalEditRequest={requestForCurrentConversation.goalEdit}
                       chatTone={chatTone} keyboardInset={inset} /> : null}
                 </>}
@@ -2927,8 +2929,7 @@ export default function App() {
                   ? <AgentModelControl control={agentSessionControl} busy={currentKind === 'working'
                     || currentKind === 'permission' || currentKind === 'compacting'
                     || genericConversation.items.some((item) => item.provisional)}
-                    openRequest={requestForCurrentConversation.model}
-                    onOpenRequestConsumed={consumeModelOpenRequest} />
+                    openRequest={requestForCurrentConversation.model} />
                   : undefined}
                 chatTone={chatTone}
                 keyboardInset={inset}

@@ -112,6 +112,10 @@ export function browserRoutes({
     if (!siteVersion) return res.status(400).json({ error: 'bad browser site version' });
     try {
       const origin = wildcardOrigin(publicBase, new URL(url).origin);
+      // Ports do not isolate cookies. Proxy documents must never share the app hostname.
+      if (new URL(origin).hostname === new URL(browserRequestOrigin(req) || 'http://invalid').hostname) {
+        return res.status(400).json({ error: 'browser preview must use a different hostname from HandMux' });
+      }
       const lease = await browser.putLease({
         tabId: req.params.tabId,
         url,
@@ -136,6 +140,9 @@ export function browserRoutes({
     if (!siteVersion) return res.status(400).json({ error: 'bad browser site version' });
     try {
       const origin = wildcardOrigin(publicBase, new URL(url).origin);
+      if (new URL(origin).hostname === new URL(browserRequestOrigin(req) || 'http://invalid').hostname) {
+        return res.status(400).json({ error: 'browser preview must use a different hostname from HandMux' });
+      }
       const lease = await browser.navigateLease(
         req.params.tabId,
         url,

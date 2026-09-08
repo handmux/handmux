@@ -11,7 +11,7 @@ export interface ConversationQueueItem {
   state?: 'queued' | 'dispatching' | 'steering' | 'unknown';
   revision?: number;
   dispatchOrigin?: 'direct' | 'queue' | 'steer';
-  autoDispatchBlockedReason?: 'provider_rejected' | 'terminal_draft_conflict';
+  autoDispatchBlockedReason?: 'provider_rejected';
 }
 
 export interface ConversationSettledReceipt {
@@ -132,8 +132,7 @@ function parseSubmission(value: unknown): ConversationSubmissionSnapshot | null 
   const baselineTailItemId = rawBaseline?.tailItemId === undefined
     ? undefined : text(rawBaseline.tailItemId, 256);
   const autoDispatchBlockedReason = item?.autoDispatchBlockedReason === undefined ? undefined
-    : item.autoDispatchBlockedReason === 'provider_rejected' || item.autoDispatchBlockedReason === 'terminal_draft_conflict'
-      ? item.autoDispatchBlockedReason as NonNullable<ConversationQueueItem['autoDispatchBlockedReason']> : null;
+    : item.autoDispatchBlockedReason === 'provider_rejected' ? 'provider_rejected' as const : null;
   const steerActionId = item?.steerActionId === undefined ? undefined : text(item.steerActionId, 256);
   const rawSteerAnchor = item?.steerAnchor === undefined ? undefined : record(item.steerAnchor);
   const steerAnchorViewId = rawSteerAnchor === undefined ? undefined : text(rawSteerAnchor?.viewId, 1_024);
@@ -200,8 +199,7 @@ function parseQueue(value: unknown): ConversationQueueSnapshot | null {
     const dispatchOrigin = item?.dispatchOrigin === undefined ? undefined
       : ['direct', 'queue', 'steer'].find((candidate) => candidate === item.dispatchOrigin);
     const autoDispatchBlockedReason = item?.autoDispatchBlockedReason === undefined ? undefined
-      : item.autoDispatchBlockedReason === 'provider_rejected' || item.autoDispatchBlockedReason === 'terminal_draft_conflict'
-        ? item.autoDispatchBlockedReason as NonNullable<ConversationQueueItem['autoDispatchBlockedReason']> : null;
+      : item.autoDispatchBlockedReason === 'provider_rejected' ? 'provider_rejected' as const : null;
     if (!id || !content || createdAt === undefined || ids.has(id)
       || (item?.requestId !== undefined && requestId === undefined)
       || (item?.editing !== undefined && item.editing !== true)

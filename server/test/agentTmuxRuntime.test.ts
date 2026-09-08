@@ -1,14 +1,9 @@
-import { promises as fsp } from 'node:fs';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   createLocalAgentProcessContext,
   TmuxAgentPaneSource,
 } from '../src/agent-runtime/tmuxRuntime.js';
 import { defaultRun } from '../src/agents/scanUtils.js';
-
-// Fixture PIDs must never resolve against the host's live /proc.
-beforeEach(() => { vi.spyOn(fsp, 'readlink').mockRejectedValue(new Error('fixture proc unavailable')); });
-afterEach(() => vi.restoreAllMocks());
 
 function live(command = 'pi') {
   return {

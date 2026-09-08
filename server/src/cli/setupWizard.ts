@@ -92,6 +92,7 @@ export async function runSetup({
         a.lang = await editLanguage(a);
         note(t('setup.welcome'));
         a = await editConnection(a, { home, log });
+        a.authMode = await editAuth(a);
       } catch (e) { if (e !== CANCELLED) throw e; }
     }
     for (;;) {
@@ -102,7 +103,8 @@ export async function runSetup({
           { value: 'connection', label: t('setup.secConnection'), hint: summarizeConnection(a) },
           { value: 'name', label: t('setup.secName'), hint: a.name || t('setup.default') },
           { value: 'port', label: t('setup.secPort'), hint: String(a.port) },
-          { value: 'token', label: t('setup.secToken'), hint: a.token ? maskSecret(a.token) : t('setup.tokenAuto') },
+          { value: 'auth', label: t('auth.section'), hint: t(a.authMode === 'trusted-device' ? 'auth.trusted' : 'auth.token') },
+          ...(a.authMode !== 'trusted-device' ? [{ value: 'token', label: t('setup.secToken'), hint: a.token ? maskSecret(a.token) : t('setup.tokenAuto') }] : []),
           { value: 'browser', label: t('setup.secBrowser'), hint: a.previewDomain || t('setup.browserOff') },
           { value: 'push', label: t('setup.secPush'), hint: a.vapid ? (a.vapid.subject || t('setup.on')) : t('setup.off') },
           {
@@ -135,6 +137,7 @@ export async function runSetup({
         else if (choice === 'name') a.name = await editName(a);
         else if (choice === 'port') a.port = await editPort(a);
         else if (choice === 'token') a.token = await editToken(a);
+        else if (choice === 'auth') a.authMode = await editAuth(a);
         else if (choice === 'browser') a.previewDomain = await editBrowserDomain(a);
         else if (choice === 'language') a.lang = await editLanguage(a);
         else if (choice === 'push') {
@@ -157,6 +160,14 @@ export async function runSetup({
 // clack's footer only shows ↑/↓ + Enter, so append the Esc-backs-out hint to each section's entry prompt —
 // otherwise a user inside a section can't tell there's a way back to the hub.
 const withBack = (msg: string): string => `${msg}  ${t('setup.escBack')}`;
+
+async function editAuth(a: SetupAnswers): Promise<'token' | 'trusted-device'> {
+  note(t('auth.manageHint'));
+  return ask(select({ message: withBack(t('auth.section')), initialValue: a.authMode ?? 'trusted-device', options: [
+    { value: 'trusted-device' as const, label: t('auth.trusted') },
+    { value: 'token' as const, label: t('auth.token') },
+  ] }));
+}
 
 async function editLanguage(a: SetupAnswers): Promise<string> {
   const lang = await ask(select({

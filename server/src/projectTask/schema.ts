@@ -1,4 +1,4 @@
-export const PROJECT_TASK_SCHEMA_VERSION = 1;
+export const PROJECT_TASK_SCHEMA_VERSION = 2;
 
 export type ProjectAgent = 'codex' | 'claude';
 export type ProjectExecutionMode = 'project-root' | 'worktree';

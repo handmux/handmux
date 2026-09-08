@@ -112,9 +112,6 @@ function nativeTool(
   if (native.diff !== undefined && !diff) return null;
   return {
     name: native.name, input, result: native.result, isError: native.isError,
-    ...(native.imagePath === undefined ? {} : {
-      imagePath: typeof native.imagePath === 'string' ? native.imagePath : null,
-    }),
     ...(outcome ? { outcome } : {}), ...(diff ? { diff } : {}),
   };
 }

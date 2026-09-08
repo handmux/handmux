@@ -52,14 +52,12 @@ function goalStatus(status: string): string {
 export function AgentConversationMilestoneControls({
   controller,
   goalOpenRequest = 0,
-  onGoalOpenRequestConsumed,
   goalEditRequest = 0,
   chatTone = 'dusk',
   keyboardInset = 0,
 }: {
   controller: AgentConversationControlsController;
   goalOpenRequest?: number;
-  onGoalOpenRequestConsumed?: (requestId: number) => void;
   goalEditRequest?: number;
   chatTone?: string;
   keyboardInset?: number;
@@ -81,8 +79,7 @@ export function AgentConversationMilestoneControls({
     setDraft(goal?.objective ?? '');
     setEditing(!goal || goalEditRequest === goalOpenRequest);
     setGoalOpen(true);
-    onGoalOpenRequestConsumed?.(goalOpenRequest);
-  }, [goalEditRequest, goalOpenRequest, onGoalOpenRequestConsumed]); // goal is intentionally sampled when the command arrives
+  }, [goalEditRequest, goalOpenRequest]); // goal is intentionally sampled when the command arrives
   useEffect(() => {
     if (!goalOpen) return;
     setDraft(goal?.objective ?? '');
@@ -286,7 +283,6 @@ export function AgentConversationQueueControl({
     });
   }, [conversation?.observeSubmissionSnapshot, controller.snapshot]); // eslint-disable-line react-hooks/exhaustive-deps
   const [editor, setEditor] = useState<QueueEditorState | null>(null);
-  const [savingEdit, setSavingEdit] = useState(false);
   const [deleting, setDeleting] = useState<ConversationQueueItem | null>(null);
   const [actionError, setActionError] = useState('');
   const [deleteError, setDeleteError] = useState('');
@@ -432,10 +428,9 @@ export function AgentConversationQueueControl({
     const maximum = Math.min(360, Math.max(160, window.innerHeight * 0.42));
     textarea.style.height = `${Math.max(120, Math.min(textarea.scrollHeight, maximum))}px`;
   }, [editor?.draft]);
-  if (!displayItems.length && !editor && !deleting) return null;
+  if (!displayItems.length) return null;
   const save = async (): Promise<void> => {
-    if (!editor?.token || !editor.draft.trim() || editor.recovering || controller.busy || savingEdit) return;
-    setSavingEdit(true);
+    if (!editor?.token || !editor.draft.trim()) return;
     try {
       await controller.queueAction('commit_edit', editor.item.id, {
         token: editor.token, text: editor.draft.trim(),
@@ -453,10 +448,10 @@ export function AgentConversationQueueControl({
             ? t('chat.queue.editConflict') : t('chat.queue.actionFailed'),
         };
       });
-    } finally { setSavingEdit(false); }
+    }
   };
   return <>
-    {displayItems.length > 0 && <div className="cc-queue" aria-label={t('chat.queue.title')}>
+    <div className="cc-queue" aria-label={t('chat.queue.title')}>
       <div className="cc-queue-head"><span className="cc-queue-title">{t('chat.queue.title')}
         <span className="cc-queue-count">{displayItems.length}</span></span>
         <span>{t('chat.queue.hint')}</span></div>
@@ -465,11 +460,9 @@ export function AgentConversationQueueControl({
         const localStatus = localQueueStatuses.get(submissionId);
         const pending = localStatus === 'sending';
         const queued = item.state === undefined || item.state === 'queued';
-        const autoDispatchBlocked = queued && item.autoDispatchBlockedReason !== undefined;
+        const autoDispatchBlocked = queued && item.autoDispatchBlockedReason === 'provider_rejected';
         const unknownQueue = item.state === 'unknown' && item.dispatchOrigin === 'queue';
-        const statusLabel = autoDispatchBlocked
-          ? t(item.autoDispatchBlockedReason === 'terminal_draft_conflict'
-            ? 'chat.queue.terminalDraftConflict' : 'chat.queue.providerRejected')
+        const statusLabel = autoDispatchBlocked ? t('chat.queue.providerRejected')
           : unknownQueue ? t('chat.queue.unknownDelivery') : '';
         const showSteer = queued && !autoDispatchBlocked
           && queue?.canSteer === true && currentActivity !== 'unknown';
@@ -528,22 +521,19 @@ export function AgentConversationQueueControl({
         </div>
       );})}</div>
       {actionError && <div className="cc-queue-error" role="status">{actionError}</div>}
-    </div>}
+    </div>
     {editor && <OverlayPortal chatTone={chatTone} keyboardInset={keyboardInset}>
-      <div className="settings-confirm-backdrop cc-queue-dialog-backdrop"
-        onPointerDown={(event) => {
-          if (event.target === event.currentTarget) event.preventDefault();
-        }}>
+      <div className="settings-confirm-backdrop cc-queue-dialog-backdrop" onClick={closeEditor}>
         <div className="settings-confirm cc-queue-edit-dialog" role="dialog" aria-modal="true"
           onClick={(event) => event.stopPropagation()}>
           <h2>{t('chat.queue.editTitle')}</h2>
-          <textarea ref={editorTextareaRef} autoFocus value={editor.draft} readOnly={savingEdit}
+          <textarea ref={editorTextareaRef} autoFocus value={editor.draft} disabled={controller.busy}
             onChange={(event) => setEditor({ ...editor, draft: event.target.value, error: '' })} />
           {editor.error && <p className="cc-queue-dialog-error" role="status">{editor.error}</p>}
           <div className="settings-confirm-actions">
             <button type="button" onClick={closeEditor}>{t('common.cancel')}</button>
             <button type="button" disabled={!editor.token || editor.recovering
-              || !editor.draft.trim() || controller.busy || savingEdit}
+              || !editor.draft.trim() || controller.busy}
               onClick={() => { void save(); }}>{t('common.save')}</button>
           </div>
         </div>

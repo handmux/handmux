@@ -27,7 +27,7 @@ describe('Project Task API', () => {
     await request(app).get('/api/project-task/status').expect(401);
     await auth(request(app).get('/api/project-task/status')).expect(200, {
       status: 'ready',
-      schemaVersion: 1,
+      schemaVersion: 2,
     });
     const created = await auth(request(app).post('/api/projects'))
       .send({ name: 'HandMux', rootPath: root })

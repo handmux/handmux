@@ -998,6 +998,26 @@ div.workspace-restore-errors { padding-left: 10px; }
 .settings-protection-title { color: #ff918a; font-size: 13px; font-weight: 600; }
 .token-prompt { max-width: 360px; margin: 80px auto; display: flex; flex-direction: column; gap: 12px; padding: 0 16px; }
 .token-prompt input { padding: 10px; border-radius: 8px; border: 1px solid #444; background: #1a1b1e; color: #fff; }
+.token-prompt p { margin: 0; font-size: 14px; line-height: 1.55; }
+.token-prompt button { min-height: 44px; cursor: pointer; }
+.token-prompt button:disabled { opacity: .45; cursor: default; }
+.auth-warning { color: var(--muted, #aaa); font-size: 13px; }
+.auth-secondary { color: var(--muted, #aaa); }
+.pairing-prompt { max-width: 440px; margin: max(24px, env(safe-area-inset-top)) auto; padding-bottom: max(24px, env(safe-area-inset-bottom)); }
+.pairing-prompt h2, .pairing-prompt h3 { margin: 8px 0 0; }
+.pairing-prompt h3 { font-size: 15px; }
+.pairing-code-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.pairing-code { font: 600 clamp(28px, 8vw, 38px)/1.4 ui-monospace, monospace; letter-spacing: .1em; font-variant-numeric: tabular-nums; user-select: text; -webkit-user-select: text; }
+.pairing-countdown { font-variant-numeric: tabular-nums; }
+.pairing-command { display: block; padding: 14px 12px; border-radius: 10px; background: rgba(127,127,127,.12); font-size: 14px; white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; -webkit-user-select: text; }
+.token-prompt .pairing-cancel { background: rgba(127,127,127,.14); color: inherit; }
+.auth-logout-backdrop { position: fixed; inset: 0; z-index: 1000; background: rgba(0,0,0,.5); display: flex; align-items: center; justify-content: center; padding: 24px; }
+.auth-logout-dialog { width: 300px; max-width: 100%; border-radius: 14px; padding: 20px 16px 0; background: var(--panel, #252629); text-align: center; }
+.auth-logout-dialog h3 { margin: 0 0 10px; font-size: 17px; }
+.auth-logout-dialog p { font-size: 14px; line-height: 1.5; }
+.auth-logout-actions { display: flex; border-top: 1px solid rgba(127,127,127,.25); margin: 16px -16px 0; }
+.auth-logout-actions button { flex: 1; min-height: 48px; border: 0; background: none; color: var(--blue); font-size: 15px; }
+.auth-logout-actions button:last-child { color: #ff625b; border-left: 1px solid rgba(127,127,127,.25); }
 .loading { padding: 40px; text-align: center; color: #888; }
 /* First-run empty state: a tap target that opens the bind modal (there's nothing pinned yet). */
 .empty-cta { margin: auto; display: flex; flex-direction: column; gap: 6px; align-items: center; padding: 28px 32px; background: none; border: 1px dashed #44464c; border-radius: 12px; color: #aab; font-size: 15px; touch-action: manipulation; }
@@ -2156,9 +2176,8 @@ button.cmd-text { background: none; border: none; text-align: left; }
    pinch/drag gestures in ImageViewer; touch-action:none so those gestures aren't stolen by scroll, and
    the OS image-callout is suppressed (long-press is our own save gesture). */
 .doc-image-wrap {
-  flex: 0 1 auto; width: 100%; min-height: 120px; max-height: min(70vh, 420px);
-  overflow: hidden; position: relative;
-  display: flex; align-items: center; justify-content: center; padding: 8px 8px 52px;
+  flex: 1; min-height: 0; overflow: hidden; position: relative;
+  display: flex; align-items: center; justify-content: center; padding: 8px;
   background: #1b1d22; touch-action: none; user-select: none; -webkit-user-select: none;
 }
 .doc-image {
@@ -4117,6 +4136,3 @@ button.cmd-text { background: none; border: none; text-align: left; }
   .terminal .xterm-viewport { scrollbar-width: none; }
   .terminal .xterm-viewport::-webkit-scrollbar:vertical { width: 0; }
 }
-
-.tool-sheet-image { display: flex; width: 100%; max-height: min(70vh, 420px); min-height: 120px; align-self: center; justify-content: center; }
-.tool-sheet-image .doc-image-wrap { min-height: 120px; max-height: min(70vh, 420px); }

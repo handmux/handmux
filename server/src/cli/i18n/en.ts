@@ -1,6 +1,22 @@
 // English catalog (the fallback locale). Keys are grouped by command/area. `{var}` placeholders are filled
 // by translate(). Keep this in lockstep with zh.js — a missing zh key silently falls back to the line here.
 export default {
+  'auth.section': 'Authentication & devices',
+  'auth.trusted': 'Device authorization (recommended)',
+  'auth.token': 'Fixed Token (legacy; not recommended for long-term use)',
+  'auth.manageHint': 'Mode changes apply after restart. Manage devices with handmux auth add/list/edit/revoke. HTTP does not protect against interception.',
+  'auth.access': 'Device authorization: open the address, then run handmux auth add on this computer to approve your browser.',
+  'auth.warning': 'Fixed Token is not recommended for long-term use. Choose device authorization in handmux setup. HTTP can expose either credential.',
+  'auth.code': 'Enter the 6-digit code from your new browser',
+  'auth.claimed': 'Paired. Complete device settings within 5 minutes; access starts only after saving.',
+  'auth.name': 'Device name',
+  'auth.expire': 'Authorization duration',
+  'auth.custom': 'Custom',
+  'auth.never': 'No expiry',
+  'auth.duration': 'Duration: positive number + m/h/d, or never',
+  'auth.confirm': 'Complete authorization?',
+  'auth.canceled': 'Pairing canceled.',
+  'auth.safety': 'Only authorize a browser you are adding yourself. Never enter a code sent by someone else.',
   // generic
   'err.generic': '✗ {msg}',
   'err.configNotFound': '✗ --config {path}: not found',
@@ -378,6 +394,10 @@ export default {
   handmux stop | restart | status
   handmux logs [--follow] [--lines N]
   handmux push <title> <body>   notify your phone from a script (--session X · --device K · --tag T · --url U)
+  handmux auth add             authorize a browser (optional code, --name and --expire)
+  handmux auth list            list full device IDs, names, expiry and access times
+  handmux auth edit <id>       update --name and/or --expire without prompts
+  handmux auth revoke <id>     revoke a device immediately
   handmux codex [args...]       launch a Codex TUI synchronized with chat view
   handmux pi [args...]          launch Pi with its arguments unchanged
   handmux agent [list]          show supported Agent integrations

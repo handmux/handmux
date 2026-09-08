@@ -1,5 +1,21 @@
 // 中文字典。键与 en.js 一一对应;缺键会自动回退到英文。命令名、flag、隧道名等字面量保持英文(它们是要照抄输入的)。
 export default {
+  'auth.section': '认证与设备',
+  'auth.trusted': '设备授权（推荐）',
+  'auth.token': '固定 Token（兼容，不建议长期使用）',
+  'auth.manageHint': '认证方式重启后生效。日常管理使用 handmux auth add/list/edit/revoke。HTTP 不能防止网络窃听。',
+  'auth.access': '设备授权：打开访问地址，然后在这台电脑运行 handmux auth add 批准你的浏览器。',
+  'auth.warning': '固定 Token 不建议长期使用；可在 handmux setup 选择设备授权。HTTP 下两种凭据都存在被窃听风险。',
+  'auth.code': '输入新浏览器显示的 6 位校验码',
+  'auth.claimed': '配对成功。请在 5 分钟内完善设备信息，保存后才可登录。',
+  'auth.name': '设备名称',
+  'auth.expire': '授权有效期',
+  'auth.custom': '自定义',
+  'auth.never': '不限期',
+  'auth.duration': '有效期：正整数加 m/h/d，或 never',
+  'auth.confirm': '完成授权？',
+  'auth.canceled': '已取消配对。',
+  'auth.safety': '仅授权你本人正在添加的浏览器，不要输入他人发来的校验码。',
   // 通用
   'err.generic': '✗ {msg}',
   'err.configNotFound': '✗ --config {path}:找不到该文件',
@@ -377,6 +393,10 @@ export default {
   handmux stop | restart | status
   handmux logs [--follow] [--lines N]
   handmux push <标题> <正文>    从脚本推一条通知到手机（--session 会话 · --device 设备key · --tag · --url）
+  handmux auth add             授权浏览器（可提供校验码、--name 和 --expire）
+  handmux auth list            列出完整设备 ID、名称、有效期和访问时间
+  handmux auth edit <id>       非交互修改 --name 和/或 --expire
+  handmux auth revoke <id>     立即撤销指定设备
   handmux codex [参数...]      启动与对话视图同步的 Codex TUI
   handmux pi [参数...]         原样传递参数并启动 Pi
   handmux agent [list]         查看支持的 Agent 接入状态

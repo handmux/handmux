@@ -140,7 +140,6 @@ export type ConversationReason =
   | 'stale_run'
   | 'conflict'
   | 'provider_rejected'
-  | 'terminal_draft_conflict'
   | 'temporarily_unavailable'
   | 'delivery_unconfirmed';
 
@@ -152,7 +151,7 @@ export interface ConversationSubmissionSnapshot {
   dispatchOrigin?: 'direct' | 'queue' | 'steer';
   nativeId?: string;
   baseline?: { viewId: string; historyVersion: string; tailItemId?: string };
-  autoDispatchBlockedReason?: 'provider_rejected' | 'terminal_draft_conflict';
+  autoDispatchBlockedReason?: 'provider_rejected';
   steerActionId?: string;
   steerAnchor?: { viewId: string; afterItemId?: string };
   queueOrderKey?: string;

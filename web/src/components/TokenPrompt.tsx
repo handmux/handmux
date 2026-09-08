@@ -15,6 +15,8 @@ export default function TokenPrompt({ onSaved }: { onSaved: () => void }) {
   return (
     <form className="token-prompt" onSubmit={save}>
       <h2>{t('token.title')}</h2>
+      <p className="auth-warning">{t('auth.tokenWarning')}</p>
+      {window.location.protocol === 'http:' && <p className="auth-warning">{t('auth.httpWarning')}</p>}
       <input value={value} onChange={(event: ChangeEvent<HTMLInputElement>) => setValue(event.target.value)}
         placeholder={t('token.placeholder')} />
       <button type="submit">{t('common.save')}</button>

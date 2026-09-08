@@ -243,8 +243,7 @@ export default function AgentConversationComposer({
       definitiveFailure = !isConversationDeliveryUnknown(cause);
       if (mountedRef.current && identityRef.current === sentKey) {
         setError(cause instanceof ConversationSendError && cause.publicMessage
-          ? t(cause.publicMessage === 'terminalDraftConflict' ? 'chat.terminalDraftConflict'
-            : cause.publicMessage === 'sendUnknown' ? 'chat.sendUnknown' : 'chat.sendFailed')
+          ? t(cause.publicMessage === 'sendUnknown' ? 'chat.sendUnknown' : 'chat.sendFailed')
           : cause instanceof Error && cause.message ? cause.message : t('chat.sendFailed'));
       }
     } finally {

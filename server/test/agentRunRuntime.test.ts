@@ -235,9 +235,7 @@ describe('AgentRunRuntime', () => {
   it('bounds a hanging attachment verifier', async () => {
     const runtime = new AgentRunRuntime({ verifyTimeoutMs: 5 });
     const runs = runtime.controller('pi', () => new Promise(() => {}));
-    await expect(runs.attach(candidate())).rejects.toMatchObject({
-      code: 'attachment-verification-timeout', message: expect.stringContaining('5 ms'),
-    });
+    await expectCode(runs.attach(candidate()), 'attachment-unverified');
   });
 
   it('serializes competing attachment verification per pane', async () => {

@@ -35,7 +35,7 @@ export interface PersistedConversationSubmission {
   lastRunId?: string;
   nativeId?: string;
   queueOrderKey?: string;
-  autoDispatchBlockedReason?: 'provider_rejected' | 'terminal_draft_conflict';
+  autoDispatchBlockedReason?: 'provider_rejected';
   steerActionId?: string;
   steerBaseRevision?: number;
   steerAnchor?: { viewId: string; afterItemId?: string };
@@ -151,7 +151,7 @@ function validBaseline(value: unknown): boolean {
 
 const SEND_STATUSES = new Set(['accepted', 'queued', 'rejected', 'unknown']);
 const SEND_REASONS = new Set([
-  'invalid_request', 'unsupported', 'stale_run', 'conflict', 'provider_rejected', 'terminal_draft_conflict',
+  'invalid_request', 'unsupported', 'stale_run', 'conflict', 'provider_rejected',
   'temporarily_unavailable', 'delivery_unconfirmed',
 ]);
 
@@ -237,7 +237,7 @@ export function parseConversationState(value: unknown): PersistedConversationSta
       throw new Error('Corrupt Conversation queue order');
     }
     if (row.autoDispatchBlockedReason !== undefined
-      && row.autoDispatchBlockedReason !== 'provider_rejected' && row.autoDispatchBlockedReason !== 'terminal_draft_conflict') {
+      && row.autoDispatchBlockedReason !== 'provider_rejected') {
       throw new Error('Corrupt Conversation dispatch barrier');
     }
     if (row.autoDispatchBlockedReason !== undefined && state !== 'queued') {

@@ -51,6 +51,7 @@ import { probe } from '../src/cli/probe.js';
 import { notifyUpdate, runUpdateCheck, isBrewInstall, PKG_NAME } from '../src/cli/updateCheck.js';
 import { t, initLocale, setLocale } from '../src/cli/i18n/index.js';
 import { runPush } from '../src/cli/pushCmd.js';
+import { runAuthCommand } from '../src/cli/authCmd.js';
 import { runWorkspaceCommand } from '../src/cli/workspaceCmd.js';
 import { runManagedCodexProcess } from '../src/cli/codexManaged.js';
 import {
@@ -231,6 +232,7 @@ async function main(): Promise<unknown> {
     case 'status': await status(); process.exit(process.exitCode || 0);
     case 'logs': return logs();
     case 'push': process.exitCode = await pushCmd(); return;
+    case 'auth': process.exitCode = await runAuthCommand({ argv: process.argv.slice(3), home: HOME }); return;
     case 'restore': process.exitCode = await runWorkspaceCommand({ flags, positionals, unknownShortFlags, home: HOME }); return;
     case 'config': return configCmd();
     case 'setup': return setupCmd();
@@ -844,10 +846,11 @@ async function printAccess(st: StoredState | null): Promise<void> {
   console.log(t('access.open', { url: scan || t('access.pending') }));
   if (st.tunnel === 'none' && st.lanUrl) console.log(t('access.lan', { url: bareUrl(st.lanUrl) }));
   console.log(t('access.local', { url: bareUrl(localUrl) }));
-  console.log(t('access.token', { token }));
+  if (st.authMode === 'trusted-device') console.log(t('auth.access'));
+  else { console.log(t('access.token', { token })); console.log(t('auth.warning')); }
   // The QR carries the token so a phone scan signs in one-tap; the PRINTED links above stay token-free
   // (safe to screenshot/share — paste the token shown above to sign in there).
-  await maybeQr(publicUrl && token ? publicUrlWithToken(publicUrl, token) : scan, st);
+  await maybeQr(st.authMode === 'trusted-device' ? (scan || bareUrl(st.lanUrl ?? localUrl)) : publicUrl && token ? publicUrlWithToken(publicUrl, token) : scan, st);
   if (publicUrl && st.tunnel !== 'none') {
     const ok = await probe(publicUrl);
     if (ok) console.log(t('access.reachable'));

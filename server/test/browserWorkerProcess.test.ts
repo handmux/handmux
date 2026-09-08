@@ -1,5 +1,8 @@
 import { fork } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 const WORKER = fileURLToPath(new URL('../dist/src/browser/worker.js', import.meta.url));
@@ -13,8 +16,12 @@ function readyMessage(value: unknown): { type: string; port: number } {
 
 describe('browser worker process', () => {
   it('announces readiness and exits cleanly on SIGTERM', async () => {
+    const testHome = await mkdtemp(join(tmpdir(), 'handmux-browser-worker-test-'));
+    // Isolate homedir() in this test subprocess without changing the user's environment or product defaults.
+    const isolateHome = `import os from 'node:os'; import { syncBuiltinESMExports } from 'node:module'; os.homedir = () => ${JSON.stringify(testHome)}; syncBuiltinESMExports();`;
     const child = fork(WORKER, [], {
       env: { ...process.env, HANDMUX_BROWSER_INTERNAL_TOKEN: 'process-secret' },
+      execArgv: ['--import', `data:text/javascript,${encodeURIComponent(isolateHome)}`],
       stdio: ['ignore', 'ignore', 'inherit', 'ipc'],
     });
     try {
@@ -35,7 +42,12 @@ describe('browser worker process', () => {
       child.kill('SIGTERM');
       await expect(exited).resolves.toBe(0);
     } finally {
-      if (child.exitCode == null) child.kill('SIGKILL');
+      if (child.exitCode == null) {
+        const stopped = new Promise((resolve) => child.once('exit', resolve));
+        child.kill('SIGKILL');
+        await stopped;
+      }
+      await rm(testHome, { recursive: true, force: true });
     }
   }, 20_000);
 });

@@ -17,6 +17,14 @@ import {
 } from './cli/state.js';
 import * as commands from './tmux/commands.js';
 import * as push from './push.js';
+import * as notifications from './notifications.js';
+import { sendLocalPush } from './routes/push.js';
+import { DeviceAuthService } from './deviceAuth/service.js';
+import { createDeviceAuthRouter } from './deviceAuth/http.js';
+import { startDeviceAuthControl } from './deviceAuth/control.js';
+import { createAuthOriginResolver, createDeviceAccess } from './deviceAccess.js';
+import { readState } from './cli/state.js';
+import { normalizeShortcuts } from './shortcutConfig.js';
 import { cacheControlFor } from './staticCache.js';
 import { compressStaticAssets } from './staticCompression.js';
 import { applyAppName, applyManifestName } from './appName.js';
@@ -37,8 +45,7 @@ import { apiErrorBoundary, apiRequestContext } from './apiErrors.js';
 import { RuntimeHealth } from './healthProtocol.js';
 import { healthRoutes } from './routes/health.js';
 import { createBuiltinAgentRuntime } from './agent-runtime/builtinRuntime.js';
-import { interruptClaudePane, sendPaneChoice } from './paneInput.js';
-import { sendClaudePanePrompt } from './agents/claudePaneInput.js';
+import { interruptPane, sendPaneChoice, sendPanePrompt } from './paneInput.js';
 import {
   createLocalAgentProcessContext,
   TmuxAgentPaneSource,
@@ -61,7 +68,7 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 // only process.env here (no .env files, no NODE_ENV branching). Running this file directly is not a
 // supported entry point — go through the CLI.
 const cfg = loadConfig();
-const token = loadToken();
+const token = cfg.authMode === 'trusted-device' ? '' : loadToken();
 const uploadExts = loadUploadExts();
 const home = homedir();
 const apiAccounts = new ApiAccountService({ file: apiAccountsPath(home) });
@@ -77,8 +84,30 @@ const projectTask = await createProjectTaskRuntime({
   },
 });
 if (projectTask.status().status === 'unavailable') {
-  console.warn(`[handmux] Project Task unavailable: ${projectTask.status().error?.message ?? 'unknown error'}`);
+  throw new Error(`Authentication database unavailable: ${projectTask.status().error?.message ?? 'unknown error'}`);
 }
+const auth = new DeviceAuthService({ db: projectTask.requireDatabase(), mode: cfg.authMode,
+  onSuccessfulWrite: () => projectTask.successfulWrite() });
+const deviceMode = cfg.authMode === 'trusted-device';
+const resolveAuthOrigin = createAuthOriginResolver({ port: cfg.port, host: cfg.host,
+  ...(process.env.HANDMUX_PUBLIC_URL ? { publicUrl: process.env.HANDMUX_PUBLIC_URL } : {}),
+  runtimePublicUrl: () => {
+    const state = readState(home);
+    return state?.serverPid === process.pid && state.port === cfg.port ? state.publicUrl ?? null : null;
+  },
+});
+const deviceAccess = createDeviceAccess({ service: auth, resolveOrigin: resolveAuthOrigin });
+const authenticate = deviceMode ? deviceAccess.middleware : expressAuth(token);
+push.setDeviceAuthorization(deviceMode ? (id) => auth.isDeviceActive(id) : null);
+const shortcutState = { value: cfg.shortcuts };
+const authControl = await startDeviceAuthControl({ service: auth, home,
+  handlePush: (body) => sendLocalPush({ push, notifications }, body),
+  handleShortcuts: async (body: unknown) => {
+    if (!body || typeof body !== 'object' || !('shortcuts' in body)) throw new Error('shortcuts required');
+    shortcutState.value = normalizeShortcuts(body.shortcuts);
+    return { ok: true };
+  },
+});
 
 // One writer set is shared by background capture today and the restore runtime added on top of it. The
 // lock is filesystem-backed because the CLI may restore while this daemon is alive in another process.
@@ -158,8 +187,8 @@ const agentRuntime = createBuiltinAgentRuntime({
   ...(conversationStartupBlockReason === undefined ? {} : { conversationStartupBlockReason }),
   claudeEvents: events,
   claudeConversationControl: {
-    sendPrompt: (paneId, text, guard) => sendClaudePanePrompt(commands, paneId, text, () => events?.paneRestoredPrompt(paneId) ?? null, guard),
-    interrupt: (paneId) => interruptClaudePane(commands, paneId),
+    sendPrompt: (paneId, text, guard) => sendPanePrompt(commands, paneId, text, guard),
+    interrupt: (paneId) => interruptPane(commands, paneId),
   },
   claudeInteractionControl: {
     capturePlain: (paneId) => commands.capturePlain(paneId),
@@ -182,7 +211,6 @@ const agentRuntime = createBuiltinAgentRuntime({
   },
 });
 const claudeInboxBridge = new ClaudeHookBridgeConnector({
-  nativeTail: events.nativeTail,
   socketPath: agentRuntime.socketPath,
   credentialFile: path.join(agentRuntimeDirectory, 'bridge-credential.json'),
   stateDirectory: path.join(agentRuntimeDirectory, 'connectors', 'claude'),
@@ -230,7 +258,7 @@ try { removeLegacyCodexHooks(home); } catch { /* best effort — migration never
 
 // Static directory preview remains for folders without a web server. Arbitrary sites and local ports
 // use the built-in browser below; previewDomain may provide its dedicated public origin.
-const previews = createPreviews({ home });
+const previews = createPreviews({ home, ...(deviceMode ? { isDeviceActive: (id: string) => auth.isDeviceActive(id) } : {}) });
 const preview = createPreview({ previews });
 const handmuxOrigin = (() => {
   try {
@@ -239,8 +267,25 @@ const handmuxOrigin = (() => {
     return `http://127.0.0.1:${cfg.port}`;
   }
 })();
-const browserWorker = createBrowserWorkerClient({ appToken: token, previewDomain, handmuxOrigin });
+const browserWorker = createBrowserWorkerClient({ appToken: token, previewDomain, handmuxOrigin,
+  ...(deviceMode ? { deviceAuthorization: {
+    getDeviceId: (req: import('node:http').IncomingMessage) => deviceAccess.authenticate(req)?.deviceId ?? null,
+    isActive: (id: string) => auth.isDeviceActive(id),
+    isMainRequest: (req: import('node:http').IncomingMessage) => resolveAuthOrigin(req) !== null,
+  } } : {}),
+});
+auth.onRevoke((id) => { push.revokeDevice(id); });
+auth.onRevoke((id) => { previews.revokeDevice(id); });
+auth.onRevoke((id) => { browserWorker.revokeDevice(id); });
 const app = express();
+app.disable('x-powered-by');
+app.use((_req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('Referrer-Policy', 'no-referrer');
+  next();
+});
+app.use('/api/auth', (_req, res, next) => { res.setHeader('Cache-Control', 'no-store'); next(); },
+  express.json({ limit: '16kb' }), createDeviceAuthRouter({ service: auth, resolveOrigin: resolveAuthOrigin }));
 app.use(healthRoutes({
   health,
   refresh: async () => {
@@ -253,10 +298,10 @@ app.use(healthRoutes({
 // Browser proxy leases stay behind normal Handmux auth. Client-owned direct tabs never enter
 // server state; proxy operations and all claimed Hammerhead paths use the isolated worker.
 app.use(browserWorker.publicHandler);
-app.use('/api/browser-proxy', apiRequestContext(), expressAuth(token), express.json(), browserWorker.apiHandler);
+app.use('/api/browser-proxy', apiRequestContext(), authenticate, express.json(), browserWorker.apiHandler);
 app.use('/api', createApiRouter({
   token, events, uploadExts, previews, shortcuts: cfg.shortcuts, workspace, previewDomain,
-  agentRuntime, projectTask, apiAccounts,
+  agentRuntime, projectTask, apiAccounts, authentication: authenticate, deviceAuth: deviceMode, shortcutState,
 }));
 app.use('/preview', preview.router);
 app.use(preview.refererFallback);
@@ -285,6 +330,12 @@ if (appName) {
 
 // index:false so the renamed shell below owns "/" too (otherwise static would serve the generic one).
 app.use(compressStaticAssets);
+// Only the main app owns this policy. Browser proxy documents use a separate origin and must be
+// embeddable by HandMux; static previews already set their own opaque-origin sandbox policy above.
+app.use((_req, res, next) => {
+  res.setHeader('Content-Security-Policy', "base-uri 'self'; object-src 'none'; frame-ancestors 'self'");
+  next();
+});
 app.use(express.static(staticDir, {
   index: false,
   // Cache-Control policy lives in staticCache.js (unit-tested): index.html + sw.js are never cached
@@ -309,7 +360,9 @@ app.use(apiErrorBoundary());
 const server = app.listen(cfg.port, cfg.host, () => {
   console.log(`[handmux] listening on http://${cfg.host}:${cfg.port} (serving ${staticDir})`);
 });
-const terminalStream = createTerminalStream({ token, commands });
+const terminalStream = createTerminalStream({ token, commands,
+  ...(deviceMode ? { deviceAuth: { service: auth, resolveOrigin: resolveAuthOrigin } } : {}),
+});
 server.on('upgrade', (req, socket, head) => {
   if (terminalStream.onUpgrade(req, socket, head)) return;
   if (!browserWorker.onUpgrade(req, socket, head)) socket.destroy();
@@ -317,12 +370,13 @@ server.on('upgrade', (req, socket, head) => {
 
 const shutdown = createGracefulShutdown({ events, workspace, browser: browserWorker, server });
 const handleSignal = () => {
+  deviceAccess.close();
   terminalStream.close();
   codexApp.close();
   inboxPush.close();
   Promise.all([
     claudeInboxBridge.close(),
-    projectTask.close(),
+    authControl.close().then(() => { auth.close(); }).finally(() => projectTask.close()),
     agentRuntime.close(),
     shutdown(),
   ]).catch(() => {});

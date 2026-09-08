@@ -1,7 +1,13 @@
 import { EventEmitter } from 'node:events';
 import { describe, expect, it, vi } from 'vitest';
 import hammerhead from 'testcafe-hammerhead';
-import { createBrowserPreviewManager } from '../src/browser/manager.js';
+import { createBrowserPreviewManager as createManager } from '../src/browser/manager.js';
+
+// Unit tests must never initialize the real user's persistent website-cookie directory.
+const createBrowserPreviewManager = (options) => createManager({
+  profilePersistence: { read: async () => null, write: async () => {}, remove: async () => {}, close: async () => {} },
+  ...options,
+});
 
 const DEVICE = 'device-a';
 
@@ -53,6 +59,21 @@ function fakeHammerhead() {
 }
 
 describe('browser proxy leases', () => {
+  it('revokes one device and rejects queued creations without affecting other devices', async () => {
+    const fake = fakeHammerhead();
+    const manager = await createBrowserPreviewManager({ hammerhead: fake.api });
+    const input = { tabId: 'a', deviceId: DEVICE, url: 'https://app.example/a', origin: 'https://b-app.preview.example' };
+    await manager.putLease(input);
+    await manager.putLease({ ...input, deviceId: 'other-device' });
+    const pending = manager.putLease({ ...input, tabId: 'pending' });
+    manager.revokeDevice(DEVICE);
+    await expect(pending).rejects.toThrow('revoked');
+    expect(manager.getLease('a', DEVICE)).toBeNull();
+    expect(manager.getLease('a', 'other-device')).not.toBeNull();
+    expect(manager.hasDevice(DEVICE)).toBe(false);
+    await expect(manager.putLease(input)).rejects.toThrow('revoked');
+    await manager.close();
+  });
   it('is idempotent by device and client tab id while sibling tabs use separate sessions', async () => {
     const fake = fakeHammerhead();
     const manager = await createBrowserPreviewManager({

@@ -51,6 +51,7 @@ export interface VoiceConfig {
 }
 
 export interface ResolvedConfig {
+  authMode: 'token' | 'trusted-device';
   tunnel: Tunnel;
   port: number;
   name: string | null;
@@ -146,7 +147,10 @@ export function resolveConfig(
   const port = Number(pick('port', env.HANDMUX_PORT, 19999));
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error(`bad port: ${pick('port', env.HANDMUX_PORT, 19999)}`);
 
+  const authMode = pick('authMode', env.HANDMUX_AUTH_MODE, 'token');
+  if (authMode !== 'token' && authMode !== 'trusted-device') throw new Error('authMode must be token or trusted-device');
   const cfg: ResolvedConfig = {
+    authMode,
     tunnel,
     port,
     name: optionalString(pick('name', env.HANDMUX_APP_NAME), 'name'),
@@ -259,14 +263,9 @@ function resolvePublicUrl(flags: OptionRecord, fileCfg: OptionRecord, env: NodeJ
   return null;
 }
 
-// Default token: 8 chars from a typing-friendly alphabet (lowercase + digits, look-alikes 0/o/1/l dropped)
-// so it's quick to thumb in on a phone. A user-supplied token (flag/config/env) is used verbatim — any
-// length, never regenerated. 8 chars over a 32-char alphabet ≈ 40 bits, fine for a single secret URL.
-const TOKEN_ALPHABET = '23456789abcdefghijkmnpqrstuvwxyz';
+// 192 random bits for new credentials; configured legacy tokens remain unchanged.
 export function defaultGen(): string {
-  let s = '';
-  for (let i = 0; i < 8; i++) s += TOKEN_ALPHABET[crypto.randomInt(TOKEN_ALPHABET.length)];
-  return s;
+  return crypto.randomBytes(24).toString('base64url');
 }
 
 // Trace one key's value back to its source through the same flag > file > env > default precedence
@@ -308,6 +307,7 @@ export function explainConfig(
   add('tunnel', tunnel);
   add('port', trace(flags, fileCfg, env, cfgPath, 'port', 'HANDMUX_PORT', 19999));
   add('host', trace(flags, fileCfg, env, cfgPath, 'host', 'HANDMUX_HOST', '0.0.0.0'));
+  add('authMode', trace(flags, fileCfg, env, cfgPath, 'authMode', 'HANDMUX_AUTH_MODE', 'token'));
 
   const name = trace(flags, fileCfg, env, cfgPath, 'name', 'HANDMUX_APP_NAME', null);
   add('name', name, name.value == null ? '(default)' : String(name.value));

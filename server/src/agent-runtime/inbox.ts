@@ -923,9 +923,7 @@ export class InboxService {
   ): Promise<InboxCommitResult> {
     const receivedAt = this.#now();
     if (!isRecord(replay) || !validRunRef(replay.run) || replay.run.agentId !== agentId
-      || typeof replay.eventId !== 'string' || !EVENT_ID_RE.test(replay.eventId)
-      || (replay.historyOnly !== undefined && typeof replay.historyOnly !== 'boolean')
-      || this.#runs.status(replay.run) !== (replay.historyOnly ? 'current' : 'revoked')
+      || this.#runs.status(replay.run) !== 'revoked'
       || (replay.state !== 'done' && replay.state !== 'error')) {
       return this.#result(receivedAt, false, { reason: 'invalid_operation' });
     }
@@ -943,12 +941,7 @@ export class InboxService {
       return this.#result(receivedAt, false, { reason: 'invalid_operation' });
     }
     const operation = normalized.operation;
-    const currentLease = replay.historyOnly ? this.#runs.resolve(replay.run) : undefined;
     return this.#withWrite(async () => {
-      if (replay.historyOnly && (!currentLease || currentLease.signal.aborted
-        || this.#runs.resolve(replay.run) !== currentLease)) {
-        return this.#result(receivedAt, false, { reason: 'stale_lease' });
-      }
       const before = structuredClone(this.#state);
       const run = this.#ensureRun(replay.run);
       const sourceDuplicate = this.#sourceReceipt(run, operation.source);
@@ -992,12 +985,7 @@ export class InboxService {
       }
       try {
         const inboxSequence = this.#nextSequence(run);
-        const historicalEvents = replay.historyOnly ? this.#crossRunEventReceipts(replay.run, operation.eventId!) : [];
-        if (historicalEvents.some((receipt) => receipt.operationHash !== normalized.hash)) {
-          throw new InboxContractError('Historical terminal event payload changed');
-        }
-        const acceptedAt = historicalEvents.length
-          ? Math.min(...historicalEvents.map((receipt) => receipt.acceptedAt)) : receivedAt;
+        const acceptedAt = receivedAt;
         run.events.push({
           eventId: operation.eventId!,
           operationHash: normalized.hash,
@@ -1010,12 +998,6 @@ export class InboxService {
           acceptedAt,
           ...(operation.eventId === undefined ? {} : { eventId: operation.eventId }),
         });
-        if (replay.historyOnly || historicalEvents.length) {
-          this.#pruneExpired(receivedAt);
-          this.#save();
-          this.#revision += 1;
-          return this.#result(receivedAt, true, { inboxSequence, acceptedAt });
-        }
         const terminal = this.#terminalNotification(replay.run, {
           state: operation.state,
           ...(operation.eventId === undefined ? {} : { eventId: operation.eventId }),
