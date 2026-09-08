@@ -8,6 +8,8 @@ import {
 } from '../src/components/AgentConversationCapabilityControls.js';
 import type { AgentConversationControlsController } from '../src/hooks/useAgentConversationControls.js';
 import { ApiError } from '../src/apiErrors.js';
+import { useAgentConversationControls } from '../src/hooks/useAgentConversationControls.js';
+import * as controlsApi from '../src/agentConversationControlsApi.js';
 
 afterEach(() => cleanup());
 
@@ -314,6 +316,78 @@ describe('Agent Conversation controls UI', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('keeps the same focused editor enabled while the real controls hook renews its lease', async () => {
+    vi.useFakeTimers();
+    let finishRenew!: (value: controlsApi.ConversationQueueEditLease) => void;
+    let finishCommit!: () => void;
+    const snapshot = { queue: { items: [{ id: 'q1', text: 'queued', createdAt: 1 }],
+      canSteer: true, canEdit: true, canRemove: true } };
+    const read = vi.spyOn(controlsApi, 'readConversationControls').mockResolvedValue(snapshot);
+    const action = vi.spyOn(controlsApi, 'conversationQueueAction').mockImplementation(async (_run, request) => {
+      if (request.action === 'begin_edit') return { token: 'lease', text: 'queued', expiresAt: Date.now() + 30_000 };
+      if (request.action === 'renew_edit') return new Promise((resolve) => { finishRenew = resolve; });
+      if (request.action === 'commit_edit') return new Promise((resolve) => { finishCommit = () => resolve(null); });
+      return null;
+    });
+    function Harness() {
+      const controls = useAgentConversationControls({ agentId: 'codex', paneId: '%1', runId: 'r1', sessionId: 's1' }, true);
+      return <AgentConversationQueueControl controller={controls} />;
+    }
+    try {
+      render(<Harness />);
+      await act(async () => {});
+      fireEvent.keyDown(screen.getByRole('button', { name: 'queued' }), { key: 'Enter' });
+      await act(async () => {});
+      const input = screen.getByRole('textbox') as HTMLTextAreaElement;
+      fireEvent.change(input, { target: { value: 'unsaved draft' } });
+      input.focus();
+      await act(async () => { await vi.advanceTimersByTimeAsync(10_000); });
+      expect(action.mock.calls.some(([, request]) => request.action === 'renew_edit')).toBe(true);
+      expect(input.disabled).toBe(false);
+      expect(screen.getByRole('textbox')).toBe(input);
+      expect(document.activeElement).toBe(input);
+      fireEvent.change(input, { target: { value: 'typing during renewal' } });
+      await act(async () => { finishRenew({ token: 'lease', text: 'queued', expiresAt: Date.now() + 30_000 }); });
+      expect(input.value).toBe('typing during renewal');
+      expect(document.activeElement).toBe(input);
+      const save = screen.getByRole('button', { name: '保存' });
+      fireEvent.click(save);
+      expect(input.readOnly).toBe(true);
+      expect(input.disabled).toBe(false);
+      expect((save as HTMLButtonElement).disabled).toBe(true);
+      fireEvent.click(save);
+      expect(action.mock.calls.filter(([, request]) => request.action === 'commit_edit')).toHaveLength(1);
+      await act(async () => { finishCommit(); });
+      expect(screen.queryByRole('textbox')).toBeNull();
+    } finally { cleanup(); read.mockRestore(); action.mockRestore(); vi.useRealTimers(); }
+  });
+
+  it('keeps the draft open on outside presses and when the queue snapshot becomes empty', async () => {
+    const queueAction = vi.fn(async (action: string) => action === 'begin_edit'
+      ? { token: 'lease-1', text: 'queued' } : null);
+    const controls = controller({ queueAction: queueAction as AgentConversationControlsController['queueAction'],
+      snapshot: { queue: { items: [{ id: 'q1', text: 'queued', createdAt: 1 }],
+        canSteer: true, canEdit: true, canRemove: true } } });
+    const view = render(<AgentConversationQueueControl controller={controls} />);
+    fireEvent.keyDown(screen.getByRole('button', { name: 'queued' }), { key: 'Enter' });
+    await act(async () => {});
+    const input = screen.getByRole('textbox') as HTMLTextAreaElement;
+    fireEvent.change(input, { target: { value: 'keep my draft' } });
+    input.focus();
+    const backdrop = screen.getByRole('dialog').parentElement!;
+    expect(fireEvent.pointerDown(backdrop)).toBe(false);
+    fireEvent.click(backdrop);
+    expect(screen.getByRole('textbox')).toBe(input);
+    expect(document.activeElement).toBe(input);
+    expect(queueAction.mock.calls.some(([action]) => action === 'cancel_edit')).toBe(false);
+    view.rerender(<AgentConversationQueueControl controller={controls} items={[]} />);
+    expect(screen.getByRole('textbox')).toBe(input);
+    expect(input.value).toBe('keep my draft');
+    fireEvent.click(screen.getByRole('button', { name: '取消' }));
+    expect(screen.queryByRole('textbox')).toBeNull();
+    expect(queueAction).toHaveBeenCalledWith('cancel_edit', 'q1', { token: 'lease-1' });
   });
 
   it('grows the queue editor with content and leaves overflow to the textarea', async () => {
