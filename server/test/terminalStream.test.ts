@@ -115,7 +115,7 @@ describe('terminal stream probe', () => {
     vi.advanceTimersByTime(49);
     expect(ws.close).not.toHaveBeenCalled();
     vi.advanceTimersByTime(1);
-    expect(ws.close).toHaveBeenCalledWith(4001, 'authentication timeout');
+    expect(ws.close).toHaveBeenCalledWith(4000, 'subscribe timeout');
     cancel();
     vi.useRealTimers();
   });

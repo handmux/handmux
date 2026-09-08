@@ -86,7 +86,7 @@ export function echoTerminalProbe(ws: TerminalSocket, message: unknown): boolean
 
 export function startSubscribeDeadline(ws: TerminalSocket, timeoutMs = SUBSCRIBE_TIMEOUT_MS): () => void {
   const timer = setTimeout(() => {
-    if (ws.readyState < 2) ws.close(4001, 'authentication timeout');
+    if (ws.readyState < 2) ws.close(4000, 'subscribe timeout');
   }, timeoutMs);
   timer.unref?.();
   return () => clearTimeout(timer);
@@ -418,9 +418,11 @@ export function createTerminalStream({
         return;
       }
       if (authenticating) return;
-      if (message.type !== 'subscribe'
-        || !tokenEquals(message.token ?? '', token)
-        || !isPaneId(message.pane)) {
+      if (message.type !== 'subscribe' || !isPaneId(message.pane)) {
+        ws.close(1003, 'bad subscribe message');
+        return;
+      }
+      if (!tokenEquals(message.token ?? '', token)) {
         ws.close(4001, 'unauthorized');
         return;
       }

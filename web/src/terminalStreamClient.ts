@@ -361,7 +361,11 @@ export function openTerminalStream({
       clearReconnectTimer();
       clearConnectTimer();
       clearProbe();
-      send({ type: 'pause' });
+      // A background tab can pause before its handshake's open event delivers subscribe.
+      // Release that socket now: an unauthenticated pause violates the protocol, and keeping
+      // it idle races the server's five-second subscribe deadline.
+      if (socket && subscribedSocket === socket) send({ type: 'pause' });
+      else detachSocket();
       onStatus?.('paused');
     },
     suspend() {

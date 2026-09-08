@@ -219,6 +219,93 @@ describe('openTerminalStream', () => {
     vi.useRealTimers();
   });
 
+  it('closes an unsubscribed handshake when the tab pauses, then subscribes on resume', () => {
+    vi.useFakeTimers();
+    const onAuthFail = vi.fn();
+    const stream = openTerminalStream({ pane: '%7', token: 'secret', WebSocketCtor: FakeWebSocket, onAuthFail });
+    const first = latestSocket();
+    // The network can open before the browser dispatches its queued open event.
+    first.readyState = FakeWebSocket.OPEN;
+    stream.pause();
+    expect(first.sent).toEqual([]);
+    expect(first.readyState).toBe(3);
+    first.onopen?.(new Event('open'));
+    first.onclose?.(new CloseEvent('close', { code: 4001, reason: 'authentication timeout' }));
+    vi.advanceTimersByTime(10000);
+    expect(onAuthFail).not.toHaveBeenCalled();
+    expect(FakeWebSocket.instances).toHaveLength(1);
+    stream.resync();
+    latestSocket().open();
+    expect(latestSocket().sent).toEqual([{ type: 'subscribe', token: 'secret', pane: '%7' }]);
+    stream.close();
+    vi.useRealTimers();
+  });
+
+  it.each([[4000, 'subscribe timeout'], [1003, 'bad subscribe message'], [1011, 'stream setup failed'], [1006, ''], [1013, 'stream fell behind']] as const)(
+    'reconnects after non-authentication close %s without reporting bad credentials', (code, reason) => {
+      vi.useFakeTimers();
+      const onAuthFail = vi.fn();
+      const stream = openTerminalStream({ pane: '%7', token: 'secret', WebSocketCtor: FakeWebSocket, onAuthFail, reconnectMs: 10 });
+      latestSocket().open();
+      latestSocket().close(code, reason);
+      expect(onAuthFail).not.toHaveBeenCalled();
+      vi.advanceTimersByTime(10);
+      expect(FakeWebSocket.instances).toHaveLength(2);
+      stream.close();
+      vi.useRealTimers();
+    },
+  );
+
+  it.each(['unauthorized', 'authentication timeout', ''])('reports authentication code regardless of reason %j without reconnecting', (reason) => {
+    vi.useFakeTimers();
+    const onAuthFail = vi.fn();
+    const stream = openTerminalStream({ pane: '%7', token: 'wrong', WebSocketCtor: FakeWebSocket, onAuthFail });
+    latestSocket().open();
+    latestSocket().close(4001, reason);
+    expect(onAuthFail).toHaveBeenCalledOnce();
+    vi.advanceTimersByTime(10000);
+    expect(FakeWebSocket.instances).toHaveLength(1);
+    stream.close();
+    vi.useRealTimers();
+  });
+
+  it('isolates pause and reconnect between four tabs sharing a token with different panes', async () => {
+    vi.useFakeTimers();
+    const onAuthFail = vi.fn();
+    const received = Array.from({ length: 4 }, () => vi.fn());
+    const streams = received.map((onData, index) => openTerminalStream({
+      pane: `%${index + 1}`, token: 'secret', WebSocketCtor: FakeWebSocket,
+      onData, onAuthFail, reconnectMs: 10,
+    }));
+    const sockets = [...FakeWebSocket.instances];
+    for (const [index, ws] of sockets.entries()) {
+      ws.open();
+      expect(ws.sent[0]).toEqual({ type: 'subscribe', token: 'secret', pane: `%${index + 1}` });
+      ws.message(seedFrame());
+      ws.message(readyFrame());
+    }
+    for (let i = 0; i < 10; i += 1) await Promise.resolve();
+    streams[0]?.pause();
+    sockets[0]?.close(4000, 'subscribe timeout');
+    sockets[1]?.close(1011, 'stream setup failed');
+    vi.advanceTimersByTime(10);
+    expect(FakeWebSocket.instances).toHaveLength(5);
+    latestSocket().open();
+    expect(latestSocket().sent[0]).toEqual({ type: 'subscribe', token: 'secret', pane: '%2' });
+    for (const index of [2, 3]) sockets[index]?.message(new Uint8Array([index]).buffer);
+    for (let i = 0; i < 10; i += 1) await Promise.resolve();
+    for (const index of [2, 3]) {
+      expect(sockets[index]?.readyState).toBe(FakeWebSocket.OPEN);
+      expect(received[index]).toHaveBeenCalledWith(new Uint8Array([index]));
+    }
+    streams[0]?.resync();
+    latestSocket().open();
+    expect(latestSocket().sent[0]).toEqual({ type: 'subscribe', token: 'secret', pane: '%1' });
+    expect(onAuthFail).not.toHaveBeenCalled();
+    await Promise.all(streams.map((stream) => stream.close()));
+    vi.useRealTimers();
+  });
+
   it('suspends the socket and starts from a fresh connection when resumed', () => {
     const statuses: TerminalStreamStatus[] = [];
     const stream = openTerminalStream({
@@ -302,21 +389,34 @@ describe('openTerminalStream', () => {
     vi.useRealTimers();
   });
 
-  it('does not subscribe in the background when the socket opens after pausing', () => {
+  it('releases a connecting socket before the five-second subscribe deadline when paused', () => {
+    vi.useFakeTimers();
+    const onAuthFail = vi.fn();
     const stream = openTerminalStream({
       pane: '%7',
       token: 'secret',
       WebSocketCtor: FakeWebSocket,
+      onAuthFail,
     });
     const ws = socketAt(0);
 
     stream.pause();
-    ws.open();
+    expect(ws.readyState).toBe(3);
+    ws.onopen?.(new Event('open'));
     expect(ws.sent).toEqual([]);
+    // A delayed close from the old socket must not interrupt the page before its
+    // normal ten-second background suspension runs.
+    vi.advanceTimersByTime(5000);
+    ws.onclose?.(new CloseEvent('close', { code: 4001, reason: 'authentication timeout' }));
+    expect(onAuthFail).not.toHaveBeenCalled();
+    expect(FakeWebSocket.instances).toHaveLength(1);
 
     stream.resync();
-    expect(ws.sent).toEqual([{ type: 'subscribe', token: 'secret', pane: '%7' }]);
+    expect(FakeWebSocket.instances).toHaveLength(2);
+    latestSocket().open();
+    expect(latestSocket().sent).toEqual([{ type: 'subscribe', token: 'secret', pane: '%7' }]);
     stream.close();
+    vi.useRealTimers();
   });
 
   it('drops queued frames across a pause and resync boundary', async () => {
