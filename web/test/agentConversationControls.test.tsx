@@ -388,7 +388,7 @@ describe('Agent Conversation controls UI', () => {
       },
     })} />);
     fireEvent.click(screen.getByRole('button', { name: '权限模式' }));
-    fireEvent.click(screen.getByRole('radio', { name: /自动审批/ }));
+    fireEvent.click(screen.getByRole('radio', { name: /^自动/ }));
     await waitFor(() => expect(setPermission).toHaveBeenCalledWith('auto-review'));
   });
 
@@ -403,7 +403,7 @@ describe('Agent Conversation controls UI', () => {
     })} />);
 
     fireEvent.click(screen.getByRole('button', { name: '权限模式' }));
-    fireEvent.click(screen.getByRole('radio', { name: /自动审批/ }));
+    fireEvent.click(screen.getByRole('radio', { name: /^自动/ }));
     expect(setPermission).not.toHaveBeenCalled();
     expect(screen.queryByRole('dialog', { name: '权限模式' })).toBeNull();
   });

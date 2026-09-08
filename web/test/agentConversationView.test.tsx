@@ -3557,7 +3557,7 @@ describe('generic Agent Conversation UI', () => {
     const focusOwner = screen.getByTestId('focus-owner');
     focusOwner.focus();
     fireEvent.click(screen.getByRole('button', { name: '权限模式' }));
-    const option = screen.getByRole('radio', { name: /自动审批/ });
+    const option = screen.getByRole('radio', { name: /^自动/ });
     const pointerDown = new Event('pointerdown', { bubbles: true, cancelable: true });
     Object.assign(pointerDown, { clientX: 20, clientY: 20 });
     fireEvent(option, pointerDown);
