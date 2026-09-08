@@ -5,7 +5,11 @@ export default {
   'auth.token': '固定 Token（兼容，不建议长期使用）',
   'auth.manageHint': '认证方式重启后生效。日常管理使用 handmux auth add/list/edit/revoke。HTTP 不能防止网络窃听。',
   'auth.access': '设备授权：打开访问地址，然后在这台电脑运行 handmux auth add 批准你的浏览器。',
-  'auth.warning': '固定 Token 不建议长期使用；可在 handmux setup 选择设备授权。HTTP 下两种凭据都存在被窃听风险。',
+  'auth.warning': '⚠ 不安全：固定 Token 泄露后可被重复使用。推荐在 handmux setup 选择可信设备授权。HTTP 下两种凭据都存在被窃听风险。',
+  'auth.switchWarning': '⚠ 必须在运行 Handmux 的电脑上，以同一系统用户使用本机直连终端或独立 SSH 操作，不要使用 Handmux 内的终端。切换认证并重启后当前登录可能失效；若失去独立终端，你可能无法批准新设备。',
+  'auth.switchConfirm': '确认当前是非 Handmux 内的本机终端或独立 SSH，并保存认证方式变更？',
+  'auth.switchApplyConfirm': '确认当前是非 Handmux 内的本机终端或独立 SSH，并应用认证方式变更？',
+  'auth.switchNeedTty': '切换认证方式需要在本机直连终端或独立 SSH 中交互确认。本次未停止或重启服务。',
   'auth.code': '输入新浏览器显示的 6 位校验码',
   'auth.claimed': '配对成功。请在 5 分钟内完善设备信息，保存后才可登录。',
   'auth.name': '设备名称',
@@ -233,10 +237,10 @@ export default {
   'setup.browserOff': '未配置 · 仅手机直连',
   'setup.askBrowserDomain': '网页预览器代理域名（留空 = 仅手机直连）',
   'setup.browserAbout': '填写代理域名（如 preview.example.com），并将其通配子域以 HTTPS 路由到 Handmux；留空则仅使用手机直连。',
-  'setup.tokenAuto': '自动 · 每次启动新生成',
+  'setup.tokenAuto': '自动 · 复用已有 Token，首次生成',
   'setup.tokenCustom': '自定义令牌…',
   'setup.tokenRandom': '随机生成一个',
-  'setup.tokenReset': '恢复自动(每次启动新生成)',
+  'setup.tokenReset': '使用自动 Token（复用已有或首次生成）',
   'setup.askToken': '访问令牌 —— 会出现在手机打开的网址里',
   'setup.tokenGenerated': '新令牌:{token}',
   'setup.valToken': '请输入令牌',
@@ -424,7 +428,7 @@ start flag(括号内为对应环境变量):
   --tunnel none|cloudflare|cloudflare-named|ssh|natapp|cpolar   暴露方式(默认:none)
   --port N                      服务端口(HANDMUX_PORT,默认:19999)
   --host H                      绑定地址(HANDMUX_HOST,默认:0.0.0.0)
-  --token S                     鉴权令牌(HANDMUX_TOKEN,默认:每次启动自动生成)
+  --token S                     鉴权令牌(HANDMUX_TOKEN,默认:复用已有或首次生成)
   --name "My Box"               浏览器标签 + 主屏图标里的应用名(HANDMUX_APP_NAME)
   --public-url URL              对外公布的公网地址(HANDMUX_PUBLIC_URL;任意隧道均可,包括自建的 none;
                                 ssh 默认 http://host:remotePort;natapp/cpolar 填你的固定/保留域名 ——

@@ -6,7 +6,7 @@ All notable changes to handmux. Format follows [Keep a Changelog](https://keepac
 
 ### Added
 
-- 新增可信设备认证：通过 CLI 或已有可信设备认领浏览器的一次性校验码，设置名称和有效期后登录；CLI 与 Web 设置共用设备列表、编辑及撤销能力。认证方式由 CLI setup 选择，固定 Token 模式保留并提示风险，单个实例只启用一种。
+- 新增可信设备认证：通过 CLI 或已有可信设备认领浏览器的一次性校验码，设置名称和有效期后登录；CLI 与 Web 设置共用设备列表、编辑及撤销能力。新用户默认可信设备，老用户平滑保留配置；两种登录页统一设计并提供切换说明，CLI 切换需确认，固定 Token 模式以黄色警告提示风险，单个实例只启用一种。
 
 ### Fixed
 

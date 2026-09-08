@@ -151,10 +151,10 @@ export function mergeConfig(existing: unknown = {}, answers: SetupAnswers): Setu
 
 // Seed the working answers from an existing config so the hub shows current values and each edit starts
 // from what's already there. A brand-new config yields safe defaults (none/LAN, port 19999).
-export function answersFromConfig(config: unknown = {}): SetupAnswers {
+export function answersFromConfig(config: unknown = {}, defaultAuthMode: 'token' | 'trusted-device' = 'token'): SetupAnswers {
   const cfg = isRecord(config) ? config : {};
   const a: SetupAnswers = {
-    authMode: cfg.authMode === 'trusted-device' ? 'trusted-device' : Object.keys(cfg).length ? 'token' : 'trusted-device',
+    authMode: cfg.authMode === 'trusted-device' ? 'trusted-device' : cfg.authMode === 'token' ? 'token' : defaultAuthMode,
     lang: optionalString(cfg.lang) || getLocale(),
     name: optionalString(cfg.name) || '',
     token: optionalString(cfg.token) || '',   // '' = not pinned (auto each start); seeded so an untouched re-run rewrites it

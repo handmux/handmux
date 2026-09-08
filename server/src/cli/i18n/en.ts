@@ -6,7 +6,11 @@ export default {
   'auth.token': 'Fixed Token (legacy; not recommended for long-term use)',
   'auth.manageHint': 'Mode changes apply after restart. Manage devices with handmux auth add/list/edit/revoke. HTTP does not protect against interception.',
   'auth.access': 'Device authorization: open the address, then run handmux auth add on this computer to approve your browser.',
-  'auth.warning': 'Fixed Token is not recommended for long-term use. Choose device authorization in handmux setup. HTTP can expose either credential.',
+  'auth.warning': '⚠ Insecure: a leaked fixed Token can be reused. Trusted-device authorization in handmux setup is recommended. HTTP can expose either credential.',
+  'auth.switchWarning': '⚠ Use a direct local terminal or an independent SSH session on the Handmux host, as the same OS user — never a terminal inside Handmux. Switching authentication and restarting may end your current login. Without independent terminal access, you may be unable to approve new devices.',
+  'auth.switchConfirm': 'Confirm you are outside Handmux in a direct local terminal or independent SSH session, and save the authentication change?',
+  'auth.switchApplyConfirm': 'Confirm you are outside Handmux in a direct local terminal or independent SSH session, and apply the authentication change?',
+  'auth.switchNeedTty': 'Authentication mode changes require confirmation in a direct local terminal or independent SSH session. No service was stopped or restarted.',
   'auth.code': 'Enter the 6-digit code from your new browser',
   'auth.claimed': 'Paired. Complete device settings within 5 minutes; access starts only after saving.',
   'auth.name': 'Device name',
@@ -234,10 +238,10 @@ export default {
   'setup.browserOff': 'not configured · Direct mode only',
   'setup.askBrowserDomain': 'Web preview proxy domain (blank = Direct mode only)',
   'setup.browserAbout': 'Enter a proxy domain (for example, preview.example.com) and route its wildcard subdomains to Handmux over HTTPS; leave it blank for Direct mode only.',
-  'setup.tokenAuto': 'auto · new each start',
+  'setup.tokenAuto': 'auto · reuse existing or generate on first start',
   'setup.tokenCustom': 'Set a custom token…',
   'setup.tokenRandom': 'Generate a random one',
-  'setup.tokenReset': 'Reset to auto (new each start)',
+  'setup.tokenReset': 'Use automatic token (reuse existing or generate)',
   'setup.askToken': 'Access token — it appears in the URL you open on the phone',
   'setup.tokenGenerated': 'New token: {token}',
   'setup.valToken': 'enter a token',
@@ -425,7 +429,7 @@ start flags (matching env var in parens):
   --tunnel none|cloudflare|cloudflare-named|ssh|natapp|cpolar   expose method (default: none)
   --port N                      server port (HANDMUX_PORT, default: 19999)
   --host H                      bind host (HANDMUX_HOST, default: 0.0.0.0)
-  --token S                     auth token (HANDMUX_TOKEN, default: generated each start)
+  --token S                     auth token (HANDMUX_TOKEN, default: reuse existing or generate)
   --name "My Box"               app name in the browser tab + home-screen icon (HANDMUX_APP_NAME)
   --public-url URL              public url to advertise (HANDMUX_PUBLIC_URL; any tunnel, incl. none if
                                 you run your own; ssh defaults to http://host:remotePort; for

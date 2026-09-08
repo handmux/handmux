@@ -43,6 +43,10 @@ describe('device pairing with CLI and trusted-device methods', () => {
     const web = screen.getByRole('tab', { name: t('auth.webMethod') });
     expect(cli.getAttribute('aria-selected')).toBe('true');
     expect(screen.getByText(t('auth.cliInstructions'))).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: t('auth.switchLink') }));
+    expect(screen.getByRole('dialog')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: t('common.done') }));
+    expect(screen.getByText('038271')).toBeTruthy();
     fireEvent.click(web);
     expect(screen.getByRole('tabpanel').getAttribute('aria-labelledby')).toBe(web.id);
     expect(screen.getByText(t('auth.webInstructions'))).toBeTruthy();

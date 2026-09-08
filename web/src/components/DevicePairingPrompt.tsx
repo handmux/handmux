@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { applyAuthStatus, authRequest, AuthRequestError, type AuthStatus } from '../authSession.js';
 import { t } from '../i18n';
 import TokenPrompt from './TokenPrompt.js';
+import AuthFrame from './AuthFrame.js';
 
 const errorCopy = (error: unknown) => t(error instanceof AuthRequestError && error.status === 429
   ? 'auth.rateLimit' : 'auth.connectionError');
@@ -99,8 +100,8 @@ export default function DevicePairingPrompt({ onSaved }: { onSaved: () => void }
     }
   };
   if (status?.mode === 'token') return <TokenPrompt onSaved={onSaved} />;
-  return <section className="token-prompt pairing-prompt">
-    <h2>{t(configuring ? 'auth.paired' : waiting && remaining > 0 ? 'auth.waiting' : 'auth.title')}</h2>
+  return <AuthFrame mode="trusted-device" title={t(configuring ? 'auth.paired' : waiting && remaining > 0 ? 'auth.waiting' : 'auth.title')}>
+    <section className="token-prompt pairing-prompt">
     {window.location.protocol === 'http:' && <p className="auth-warning">{t('auth.httpWarning')}</p>}
     <div aria-live="polite">
       {configuring && <><p>{t('auth.pending')}</p><p>{t(pairing?.source === 'web' ? 'auth.finishWeb' : 'auth.finishCli')}</p>
@@ -136,7 +137,7 @@ export default function DevicePairingPrompt({ onSaved }: { onSaved: () => void }
     {error && <p role="alert">{error}</p>}
     {busy && <p role="status">{t('common.loading')}</p>}
     {(waiting || configuring) && <button className="pairing-cancel" disabled={busy} onClick={() => { void request('DELETE'); }}>{t('auth.cancelPairing')}</button>}
-    {(!pairing || pairing.state === 'expired' || pairing.state === 'canceled') && <button disabled={busy} onClick={() => { void request('POST'); }}>{t('auth.request')}</button>}
-    {waiting && remaining === 0 && <button disabled={busy} onClick={() => { void request('POST'); }}>{t('auth.request')}</button>}
-  </section>;
+    {(!pairing || pairing.state === 'expired' || pairing.state === 'canceled') && <button className="auth-primary" disabled={busy} onClick={() => { void request('POST'); }}>{t('auth.request')}</button>}
+    {waiting && remaining === 0 && <button className="auth-primary" disabled={busy} onClick={() => { void request('POST'); }}>{t('auth.request')}</button>}
+  </section></AuthFrame>;
 }

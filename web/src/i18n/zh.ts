@@ -1,5 +1,16 @@
 // 中文 strings. Missing keys fall back to English (see ./index.ts translate()).
 export default {
+  'auth.welcome': '连接你的终端工作空间',
+  'auth.login': '登录',
+  'auth.connecting': '正在连接',
+  'auth.switchLink': '如何切换认证方式？',
+  'auth.switchTitle': '切换认证方式',
+  'auth.switchWarning': '请在运行 HandMux 的电脑上，用同一 OS 用户打开本机终端或独立 SSH。不要在 HandMux 内的终端切换：切换并重启后可能失去访问，无法完成后续操作。',
+  'auth.switchSetup': '运行设置，选择认证方式，阅读风险提示并再次确认后保存。推荐使用可信设备。',
+  'auth.switchRestart': '选择“保存并重启”使新认证方式生效；如果仅保存，请执行下方命令。请保持直连终端可用。',
+  'auth.switchAfter': '重启后使用新方式登录。切换到可信设备时，可在直连终端完成首次配对；此页面只提供说明，不会切换配置。',
+  'auth.copySetup': '复制设置命令',
+  'auth.copyRestart': '复制重启命令',
   'devices.title': '认证与设备',
   'devices.trusted': '设备授权',
   'devices.token': '固定 Token',
@@ -73,7 +84,7 @@ export default {
   'auth.browserScope': '授权保存在当前浏览器中。清理浏览器数据或更换访问地址后，需要重新配对。',
   'auth.antiPhishing': '仅授权你本人正在添加的浏览器，不要输入他人发来的校验码。',
   'auth.httpWarning': '当前使用 HTTP，设备授权不能防止网络窃听或页面篡改。敏感访问请使用 HTTPS 或可信的加密网络。',
-  'auth.tokenWarning': '固定 Token 不建议长期使用，推荐在 CLI setup 中配置设备授权方式。',
+  'auth.tokenWarning': '固定 Token 安全性较低：泄露后可被重复使用，且不能按设备撤销。不建议长期使用，推荐切换为可信设备。',
   'auth.connectionError': '暂时无法确认授权状态，请检查网络和 HandMux 是否运行后重试；不会因此取消授权。',
   'auth.retry': '重试',
   'auth.rateLimit': '授权尝试过于频繁，请稍等一分钟后再申请校验码。',
@@ -198,7 +209,7 @@ export default {
   'settings.browserRetention': '代理登录保留',
   'settings.browserDisablePersistConfirm': '停止保存当前设备后续的代理登录变化？当前标签页和登录状态会继续保留。',
 
-  'token.title': '需要访问 token',
+  'token.title': '使用 Token 登录',
   'token.placeholder': '粘贴 HANDMUX_TOKEN',
 
   'settings.language': '语言 Language',

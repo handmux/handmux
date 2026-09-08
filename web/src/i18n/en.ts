@@ -1,6 +1,17 @@
 // English strings (the default + fallback locale). Keys are namespaced by area: common.*, token.*,
 // settings.*, … Keep this file complete; other locales may omit keys and fall back here.
 export default {
+  'auth.welcome': 'Connect to your terminal workspace',
+  'auth.login': 'Sign in',
+  'auth.connecting': 'Connecting',
+  'auth.switchLink': 'How do I switch authentication?',
+  'auth.switchTitle': 'Switch authentication',
+  'auth.switchWarning': 'On the computer running HandMux, use a local terminal or independent SSH as the same OS user. Do not switch inside a HandMux terminal: switching and restarting may disconnect you and prevent the remaining steps.',
+  'auth.switchSetup': 'Run setup, choose the authentication mode, review the warning and confirm again to save. Trusted devices are recommended.',
+  'auth.switchRestart': 'Choose Save & restart to apply the mode. If you only saved, run the command below. Keep your direct terminal connected.',
+  'auth.switchAfter': 'Sign in with the new mode after restart. For trusted devices, use the direct terminal for the first pairing. This page only explains the steps; it does not change configuration.',
+  'auth.copySetup': 'Copy setup command',
+  'auth.copyRestart': 'Copy restart command',
   'devices.title': 'Authentication & devices',
   'devices.trusted': 'Device authorization',
   'devices.token': 'Fixed Token',
@@ -74,7 +85,7 @@ export default {
   'auth.browserScope': 'Authorization is saved for this browser. Clearing browser data or changing the address requires pairing again.',
   'auth.antiPhishing': 'Only authorize a browser you are adding yourself. Never enter a code sent by someone else.',
   'auth.httpWarning': 'This connection uses HTTP. Device authorization cannot prevent network eavesdropping or page tampering. Use HTTPS or a trusted encrypted network for sensitive access.',
-  'auth.tokenWarning': 'Fixed tokens are not recommended for long-term use. Configure the recommended device authorization mode in the CLI setup.',
+  'auth.tokenWarning': 'Fixed tokens are less secure: a leaked token can be reused and cannot be revoked per device. For long-term use, switch to trusted devices.',
   'auth.connectionError': 'Unable to check authorization. Check your network and whether HandMux is running, then retry. Your authorization has not been canceled.',
   'auth.retry': 'Retry',
   'auth.rateLimit': 'Too many authorization attempts. Wait a minute before requesting another code.',
@@ -199,7 +210,7 @@ export default {
   'settings.browserRetention': 'Proxy login retention',
   'settings.browserDisablePersistConfirm': 'Stop saving future proxy login changes on the current device? Current tabs and login state stay available.',
 
-  'token.title': 'Access token required',
+  'token.title': 'Sign in with a token',
   'token.placeholder': 'Paste HANDMUX_TOKEN',
 
   'settings.language': 'Language',
