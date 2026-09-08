@@ -283,6 +283,7 @@ export function AgentConversationQueueControl({
     });
   }, [conversation?.observeSubmissionSnapshot, controller.snapshot]); // eslint-disable-line react-hooks/exhaustive-deps
   const [editor, setEditor] = useState<QueueEditorState | null>(null);
+  const [savingEdit, setSavingEdit] = useState(false);
   const [deleting, setDeleting] = useState<ConversationQueueItem | null>(null);
   const [actionError, setActionError] = useState('');
   const [deleteError, setDeleteError] = useState('');
@@ -428,9 +429,10 @@ export function AgentConversationQueueControl({
     const maximum = Math.min(360, Math.max(160, window.innerHeight * 0.42));
     textarea.style.height = `${Math.max(120, Math.min(textarea.scrollHeight, maximum))}px`;
   }, [editor?.draft]);
-  if (!displayItems.length) return null;
+  if (!displayItems.length && !editor && !deleting) return null;
   const save = async (): Promise<void> => {
-    if (!editor?.token || !editor.draft.trim()) return;
+    if (!editor?.token || !editor.draft.trim() || editor.recovering || controller.busy || savingEdit) return;
+    setSavingEdit(true);
     try {
       await controller.queueAction('commit_edit', editor.item.id, {
         token: editor.token, text: editor.draft.trim(),
@@ -448,10 +450,10 @@ export function AgentConversationQueueControl({
             ? t('chat.queue.editConflict') : t('chat.queue.actionFailed'),
         };
       });
-    }
+    } finally { setSavingEdit(false); }
   };
   return <>
-    <div className="cc-queue" aria-label={t('chat.queue.title')}>
+    {displayItems.length > 0 && <div className="cc-queue" aria-label={t('chat.queue.title')}>
       <div className="cc-queue-head"><span className="cc-queue-title">{t('chat.queue.title')}
         <span className="cc-queue-count">{displayItems.length}</span></span>
         <span>{t('chat.queue.hint')}</span></div>
@@ -521,19 +523,22 @@ export function AgentConversationQueueControl({
         </div>
       );})}</div>
       {actionError && <div className="cc-queue-error" role="status">{actionError}</div>}
-    </div>
+    </div>}
     {editor && <OverlayPortal chatTone={chatTone} keyboardInset={keyboardInset}>
-      <div className="settings-confirm-backdrop cc-queue-dialog-backdrop" onClick={closeEditor}>
+      <div className="settings-confirm-backdrop cc-queue-dialog-backdrop"
+        onPointerDown={(event) => {
+          if (event.target === event.currentTarget) event.preventDefault();
+        }}>
         <div className="settings-confirm cc-queue-edit-dialog" role="dialog" aria-modal="true"
           onClick={(event) => event.stopPropagation()}>
           <h2>{t('chat.queue.editTitle')}</h2>
-          <textarea ref={editorTextareaRef} autoFocus value={editor.draft} disabled={controller.busy}
+          <textarea ref={editorTextareaRef} autoFocus value={editor.draft} readOnly={savingEdit}
             onChange={(event) => setEditor({ ...editor, draft: event.target.value, error: '' })} />
           {editor.error && <p className="cc-queue-dialog-error" role="status">{editor.error}</p>}
           <div className="settings-confirm-actions">
             <button type="button" onClick={closeEditor}>{t('common.cancel')}</button>
             <button type="button" disabled={!editor.token || editor.recovering
-              || !editor.draft.trim() || controller.busy}
+              || !editor.draft.trim() || controller.busy || savingEdit}
               onClick={() => { void save(); }}>{t('common.save')}</button>
           </div>
         </div>
