@@ -843,3 +843,36 @@ describe('workspace runtime orchestration', () => {
     });
   });
 });
+
+
+describe('legacy false reboot recovery prompt', () => {
+  it.each([
+    ['1788200737', 'boot-changed', { status: 'present', tmuxServerId: 'same-tmux' }, false],
+    ['1788200737', 'boot-changed', { status: 'present', tmuxServerId: 'new-tmux' }, true],
+    ['1788200737', 'boot-changed', { status: 'absent', tmuxServerId: null }, true],
+    ['1788200737', 'boot-changed', { status: 'unknown' }, true],
+    ['1788200737', 'boot-changed', null, true],
+    ['darwin:54b3288f-f346-4849-b503-eb5a1d433dbb', 'boot-changed', { status: 'present', tmuxServerId: 'same-tmux' }, true],
+    ['1788200737', 'tmux-changed', { status: 'present', tmuxServerId: 'same-tmux' }, true],
+  ])('requires surviving tmux evidence to suppress %s %s (%j)', async (bootIdentity, endedReason, observed, promptEligible) => {
+    const { store, checkpoint, recovery } = workspaceFixture();
+    checkpoint.environment = { bootIdentity, endedReason, tmuxServerId: 'same-tmux' };
+    const before = structuredClone({ checkpoint, recovery });
+    const observeEnvironment = vi.fn(async () => {
+      if (!observed) throw new Error('query unavailable');
+      return observed;
+    });
+    const runtime = createWorkspaceRuntime({ store, lock: {}, checkpointer: {},
+      tmux: { captureTopology: async () => ({ status: 'ok', sessions: [], windows: [] }), observeEnvironment },
+      now: () => Date.parse('2026-07-20T02:30:00Z'),
+    });
+    expect(await runtime.getRestorePlan()).toMatchObject({ promptEligible });
+    expect({ checkpoint, recovery }).toEqual(before);
+    expect(store.resolveSessions).not.toHaveBeenCalled();
+    expect(store.archiveEnvironment).not.toHaveBeenCalled();
+    expect(await runtime.getRestorePlan({ historical: true })).toMatchObject({ checkpointId: 'cp-a' });
+    if (bootIdentity === '1788200737' && endedReason === 'boot-changed') {
+      expect(observeEnvironment).toHaveBeenCalledWith({ readOnly: true });
+    }
+  });
+});

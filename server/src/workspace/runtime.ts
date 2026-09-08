@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { isLegacyMacBootIdentity } from './environment.js';
 import { buildRestorePlan } from './planner.js';
 import { executeRestore, type RestoreResult } from './restore.js';
 import {
@@ -32,6 +33,7 @@ type LiveTopology = Pick<WorkspaceSnapshot, 'tmuxVersion' | 'active' | 'sessions
 };
 type RuntimeTmux = ExecutorOptions['tmux'] & {
   captureTopology(options?: { readOnly?: boolean }): Promise<LiveTopology | { status: string; error?: unknown }>;
+  observeEnvironment?(options: { readOnly: true }): Promise<{ status: string; tmuxServerId?: string | null }>;
 };
 interface RuntimeLock {
   tryAcquire(owner: { operationId: string }): Promise<{ release(): Promise<void> } | null>;
@@ -264,13 +266,25 @@ export function createWorkspaceRuntime({
     await start();
     const state = await planRestore(request);
     const serverNow = new Date(now()).toISOString();
-    const promptEligible = Boolean(
+    let promptEligible = Boolean(
       !state.request.historical
       && state.recovery
       && state.recovery.resolvedAt === null
       && state.recovery.pendingSessionIds.length > 0
       && Date.parse(state.recovery.expiresAt) > now(),
     );
+    // A numeric macOS boot timestamp could have archived this still-running tmux generation.
+    // Suppress only the automatic prompt when a fresh read proves that exact server survived.
+    // Keep both checkpoint and recovery records intact for explicit historical recovery.
+    if (promptEligible && state.plan.changeReason === 'boot-changed'
+      && isLegacyMacBootIdentity(state.checkpoint.environment.bootIdentity)
+      && state.checkpoint.environment.tmuxServerId) {
+      try {
+        const observed = await tmux.observeEnvironment?.({ readOnly: true });
+        if (observed?.status === 'present'
+          && observed.tmuxServerId === state.checkpoint.environment.tmuxServerId) promptEligible = false;
+      } catch { /* Without continuity evidence, retain the recovery prompt. */ }
+    }
     return Object.freeze({ ...state.plan, mapping: state.recovery?.mapping || null, serverNow, promptEligible });
   }
 

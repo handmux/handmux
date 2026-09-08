@@ -6,6 +6,8 @@ All notable changes to handmux. Format follows [Keep a Changelog](https://keepac
 
 ### Fixed
 
+- 修复 macOS 工作区保护把启动时间微调误判为电脑重启的问题；使用稳定的启动会话标识，兼容旧快照，并在确认原 tmux 仍运行时停止旧误报提示，保留历史恢复记录。
+
 - 修复排队消息编辑时后台续期会禁用输入框的问题；点击弹窗外部不再关闭编辑或丢弃草稿，队列暂时为空时也保留编辑窗口。
 
 - 将 Codex 权限模式的三个中文选项缩短为“默认、自动、完全”，保留完整权限说明。
