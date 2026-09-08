@@ -19,6 +19,18 @@ export interface ChangelogEntry {
 // `entryId`/`LATEST_RELEASE` use `version` when present, else `date`, as the stable unread-dot id.
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '0.27.2',
+    date: '2026-09-08',
+    highlight: {
+      zh: '修复多标签页偶发鉴权弹窗',
+      en: 'Fix intermittent authentication prompts across tabs',
+    },
+    items: {
+      zh: ['修复切换浏览器标签页或实时终端连接延迟时，偶发误弹鉴权页面的问题。'],
+      en: ['Fixed an intermittent authentication prompt when switching browser tabs or when a live terminal connection was delayed.'],
+    },
+  },
+  {
     version: '0.27.1',
     date: '2026-09-08',
     highlight: {
