@@ -4,6 +4,8 @@ All notable changes to handmux. Format follows [Keep a Changelog](https://keepac
 
 ## [Unreleased]
 
+## [0.27.2] - 2026-09-08
+
 ### Fixed
 
 - 修复多标签页切换或实时终端连接延迟时，未完成订阅的连接被误判为鉴权失败、弹出鉴权页面的问题。
