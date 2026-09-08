@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import type { Request, Response } from 'express';
 import { DeviceAuthError, DeviceAuthService, readSessionSecret, readPairingCookies, sessionCookieName, pairingCookieName } from './service.js';
+import type { DevicePrincipal } from './service.js';
 
 export function setSessionCookie(res: Response, origin: string, secret: string, expiresAt: number | null, now = Date.now()): void {
   const maxAge = Math.max(0, Math.min(expiresAt === null ? 34_560_000_000 : expiresAt - now, 34_560_000_000));
@@ -104,7 +105,7 @@ export function createDeviceAuthRouter({ service, resolveOrigin }: {
     const pairing = service.cancelPairing(candidate?.secret ?? null, origin, id);
     res.json({ mode: service.mode, authenticated: !!service.authenticateRequest(req, origin), pairing, serverTime: Date.now() });
   }));
-  router.post('/logout', safe((req, res) => {
+  const logout = (req: Request, res: Response): void => {
     const origin = String(res.locals.authOrigin); const principal = service.authenticateRequest(req, origin);
     if (principal) service.revoke(principal.deviceId);
     for (const c of candidates(req, origin)) {
@@ -114,6 +115,40 @@ export function createDeviceAuthRouter({ service, resolveOrigin }: {
       setPairingCookie(res, origin, c.name, '');
     }
     setSessionCookie(res, origin, '', 0); res.json({ ok: true, mode: service.mode, authenticated: false, serverTime: Date.now() });
+  };
+  router.post('/logout', safe(logout));
+  // Management never promotes a candidate credential. A formal primary session is required at the
+  // point of use, separately from the broader quota classification used by login recovery above.
+  const manage = (handler: (req: Request, res: Response, actor: DevicePrincipal) => void) => safe((req, res) => {
+    const actor = service.authenticateRequest(req, String(res.locals.authOrigin));
+    if (!actor) throw new DeviceAuthError('SESSION_INVALID', 'Sign in with an authorized device to manage devices', 401);
+    service.assertActive(actor);
+    const editingSelf = req.params.id === actor.deviceId && (req.method === 'PATCH' || req.method === 'DELETE');
+    const secret = readSessionSecret(req, actor.origin);
+    if (!editingSelf && secret) setSessionCookie(res, actor.origin, secret, actor.expiresAt);
+    handler(req, res, actor);
+  });
+  router.get('/devices', manage((_req, res, actor) => {
+    const devices = service.list().sort((a, b) => Number(b.id === actor.deviceId) - Number(a.id === actor.deviceId) || b.last_used_at - a.last_used_at || a.id.localeCompare(b.id));
+    res.json({ devices, currentDeviceId: actor.deviceId, serverTime: Date.now() });
   }));
+  router.patch('/devices/:id', manage((req, res, actor) => {
+    const device = service.edit(String(req.params.id), { name: req.body?.name, expire: req.body?.expire, version: req.body?.version }, actor);
+    if (device.id === actor.deviceId) {
+      const secret = readSessionSecret(req, actor.origin);
+      if (secret) setSessionCookie(res, actor.origin, secret, device.expires_at);
+    }
+    res.json({ device, serverTime: Date.now() });
+  }));
+  router.delete('/devices/:id', manage((req, res, actor) => {
+    if (req.params.id === actor.deviceId) { logout(req, res); return; }
+    const device = service.revoke(String(req.params.id), actor);
+    res.json({ device, serverTime: Date.now() });
+  }));
+  router.get('/approvals', manage((_req, res, actor) => res.json({ approvals: service.approvals(actor), serverTime: Date.now() })));
+  router.post('/approvals', manage((req, res, actor) => res.json({ approval: service.claimWeb(req.body?.code, actor), serverTime: Date.now() })));
+  router.get('/approvals/:id', manage((req, res, actor) => res.json({ approval: service.approval(actor, String(req.params.id)), serverTime: Date.now() })));
+  router.delete('/approvals/:id', manage((req, res, actor) => res.json({ approval: service.cancelApproval(actor, String(req.params.id)), serverTime: Date.now() })));
+  router.post('/approvals/:id/authorize', manage((req, res, actor) => res.json({ device: service.authorizeWeb(actor, String(req.params.id), { name: req.body?.name, expire: req.body?.expire }), serverTime: Date.now() })));
   return router;
 }

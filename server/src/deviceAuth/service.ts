@@ -5,7 +5,7 @@ import type { DatabaseSync } from 'node:sqlite';
 export type AuthMode = 'token' | 'trusted-device';
 export interface DevicePrincipal { deviceId: string; sessionId: string; expiresAt: number | null; origin: string }
 export interface AuthDevice {
-  id: string; name: string; browser_summary: string; authorized_at: number;
+  id: string; name: string; browser_summary: string; authorized_at: number; version: number;
   expires_at: number | null; last_used_at: number; revoked_at: number | null;
   status: 'active' | 'expired' | 'revoked';
 }
@@ -44,9 +44,11 @@ export function readPairingCookies(req: IncomingMessage, origin: string): Array<
 type PairState = 'waiting' | 'configuring' | 'authorized' | 'expired' | 'canceled';
 interface Pairing {
   id: string; secretHash: string; origin: string; code: string; state: PairState;
-  expiresAt: number; browserSummary: string; owner?: string; source?: 'cli'; deviceId?: string;
+  expiresAt: number; browserSummary: string; owner?: string; source?: 'cli' | 'web'; deviceId?: string;
+  approver?: DevicePrincipal;
 }
-export interface PairingStatus { id: string; state: PairState; code?: string; expiresAt: number; source?: 'cli' }
+export interface PairingStatus { id: string; state: PairState; code?: string; expiresAt: number; source?: 'cli' | 'web' }
+export interface ApprovalStatus { id: string; state: PairState; browserSummary: string; expiresAt: number; source: 'web'; device?: AuthDevice }
 
 export class DeviceAuthService {
   readonly mode: AuthMode;
@@ -61,7 +63,7 @@ export class DeviceAuthService {
   private observedDevices = new Set<string>();
   private timer: ReturnType<typeof setInterval>;
   private flushTimer: ReturnType<typeof setInterval>;
-  private claimFailures: number[] = [];
+  private claimFailures = new Map<string, number[]>();
   private closed = false;
   constructor({ db, mode, now = Date.now, onSuccessfulWrite = () => {} }: {
     db: DatabaseSync; mode: AuthMode; now?: () => number; onSuccessfulWrite?: () => void;
@@ -92,9 +94,12 @@ export class DeviceAuthService {
     if (this.closed || this.mode !== 'trusted-device') throw new DeviceAuthError('DEVICE_AUTH_DISABLED', 'Device authorization is not enabled; select it in handmux setup and restart', 409);
   }
   onRevoke(listener: (deviceId: string) => void): () => void { this.listeners.add(listener); return () => this.listeners.delete(listener); }
-  private notify(id: string): void { for (const listener of this.listeners) { try { listener(id); } catch { console.error('[auth] Capability cleanup failed'); } } }
+  private notify(id: string): void {
+    for (const p of this.pending.values()) if (p.approver?.deviceId === id && p.state === 'configuring') { p.state = 'canceled'; this.retire(p); }
+    for (const listener of this.listeners) { try { listener(id); } catch { console.error('[auth] Capability cleanup failed'); } }
+  }
   private device(id: string): AuthDevice {
-    const row = this.db.prepare('SELECT id,name,browser_summary,authorized_at,expires_at,last_used_at,revoked_at FROM auth_devices WHERE id=?').get(id) as unknown as Omit<AuthDevice, 'status'> | undefined;
+    const row = this.db.prepare('SELECT id,name,browser_summary,authorized_at,expires_at,last_used_at,revoked_at,version FROM auth_devices WHERE id=?').get(id) as unknown as Omit<AuthDevice, 'status'> | undefined;
     if (!row) throw new DeviceAuthError('DEVICE_NOT_FOUND', 'Device ID not found; use handmux auth list', 404);
     return { ...row, status: row.revoked_at !== null ? 'revoked' : row.expires_at !== null && row.expires_at <= this.now() ? 'expired' : 'active' };
   }
@@ -133,30 +138,39 @@ export class DeviceAuthService {
     const ids = this.db.prepare('SELECT id FROM auth_devices ORDER BY last_used_at DESC,id').all() as Array<{ id: string }>;
     return ids.map(({ id }) => { const d = this.device(id); for (const a of this.activity.values()) if (a.deviceId === id) d.last_used_at = Math.max(d.last_used_at, a.at); return d; });
   }
-  edit(id: string, values: { name?: unknown; expire?: unknown }): AuthDevice & { previousExpiresAt: number | null } {
+  assertActive(principal: DevicePrincipal): void {
+    if (!this.isActive(principal)) throw new DeviceAuthError('SESSION_INVALID', 'This device is no longer authorized; pair again', 401);
+  }
+  edit(id: string, values: { name?: unknown; expire?: unknown; version?: unknown }, actor?: DevicePrincipal): AuthDevice & { previousExpiresAt: number | null } {
     this.requireMode();
     if (values.name === undefined && values.expire === undefined) throw new DeviceAuthError('INVALID_EDIT', 'Provide --name or --expire');
     const name = values.name === undefined ? undefined : validateName(values.name);
     const duration = values.expire === undefined ? undefined : parseExpire(values.expire);
     return this.transaction(() => {
+      if (actor) this.assertActive(actor);
       const d = this.device(id);
+      if (actor && (!Number.isSafeInteger(values.version) || Number(values.version) < 1)) throw new DeviceAuthError('INVALID_VERSION', 'Refresh the device details before saving');
+      if (values.version !== undefined && values.version !== d.version) throw new DeviceAuthError('DEVICE_CONFLICT', 'Device changed elsewhere; refresh the details and try again', 409);
       if (d.status !== 'active') throw new DeviceAuthError('DEVICE_INACTIVE', 'Expired or revoked devices must pair again', 409);
       const expires = duration === undefined ? d.expires_at : duration === null ? null : this.now() + duration;
-      this.db.prepare('UPDATE auth_devices SET name=?,expires_at=? WHERE id=?').run(name ?? d.name, expires, id);
+      this.db.prepare('UPDATE auth_devices SET name=?,expires_at=?,version=version+1 WHERE id=?').run(name ?? d.name, expires, id);
       return { ...this.device(id), previousExpiresAt: d.expires_at };
     });
   }
-  revoke(id: string): AuthDevice {
+  revoke(id: string, actor?: DevicePrincipal): AuthDevice {
+    if (actor) this.assertActive(actor);
     this.requireMode(); const d = this.device(id);
     if (d.revoked_at === null) this.transaction(() => {
       const now = this.now();
-      this.db.prepare('UPDATE auth_devices SET revoked_at=? WHERE id=?').run(now, id);
+      if (actor) this.assertActive(actor);
+      this.db.prepare('UPDATE auth_devices SET revoked_at=?,version=version+1 WHERE id=?').run(now, id);
       this.db.prepare('UPDATE auth_sessions SET revoked_at=? WHERE device_id=? AND revoked_at IS NULL').run(now, id);
     });
     this.notify(id); return this.device(id);
   }
   private retire(p: Pairing): void { this.retired.set(p.code, this.now() + 600_000); }
   private updatePair(p: Pairing): void {
+    if (p.state === 'configuring' && p.approver && !this.isActive(p.approver)) { p.state = 'canceled'; this.retire(p); }
     if ((p.state === 'waiting' || p.state === 'configuring') && p.expiresAt <= this.now()) { p.state = 'expired'; this.retire(p); }
     if (p.state === 'authorized' && p.deviceId && !this.isDeviceActive(p.deviceId)) {
       p.state = this.device(p.deviceId).status === 'expired' ? 'expired' : 'canceled'; this.retire(p);
@@ -186,16 +200,53 @@ export class DeviceAuthService {
     if (p.state !== 'authorized') { p.state = 'canceled'; this.retire(p); }
     return this.view(p);
   }
-  claim(code: unknown, owner: string): { id: string; browserSummary: string; expiresAt: number } {
+  claim(code: unknown, owner: string, approver?: DevicePrincipal): { id: string; browserSummary: string; expiresAt: number } {
     this.requireMode(); this.sweep();
-    this.claimFailures = this.claimFailures.filter(at => at > this.now() - 60_000);
-    if (this.claimFailures.length >= 10) throw new DeviceAuthError('CLAIM_RATE_LIMIT', 'Too many invalid codes; wait one minute before trying again', 429);
+    if (approver) this.assertActive(approver);
+    for (const [key, failures] of this.claimFailures) {
+      const recent = failures.filter(at => at > this.now() - 60_000);
+      if (recent.length) this.claimFailures.set(key, recent); else this.claimFailures.delete(key);
+    }
+    const failureKey = approver ? `web:${approver.sessionId}` : 'cli';
+    const failures = this.claimFailures.get(failureKey) ?? [];
+    if (failures.length >= 10 || (!this.claimFailures.has(failureKey) && this.claimFailures.size >= 1024)) throw new DeviceAuthError('CLAIM_RATE_LIMIT', 'Too many invalid codes; wait one minute before trying again', 429);
     const p = typeof code === 'string' && /^\d{6}$/.test(code) ? [...this.pending.values()].find(p => p.code === code && p.state === 'waiting') : undefined;
-    if (!p) { this.claimFailures.push(this.now()); throw new DeviceAuthError('CODE_INVALID', 'Code is invalid, expired, or already used; request a fresh code', 409); }
-    p.state = 'configuring'; p.owner = owner; p.source = 'cli'; p.expiresAt = this.now() + 300_000; this.retire(p);
+    if (!p) { failures.push(this.now()); this.claimFailures.set(failureKey, failures); throw new DeviceAuthError('CODE_INVALID', 'Code is invalid, expired, or already used; request a fresh code', 409); }
+    p.state = 'configuring'; p.owner = owner; p.source = approver ? 'web' : 'cli'; if (approver) p.approver = approver; p.expiresAt = this.now() + 300_000; this.retire(p);
     return { id: p.id, browserSummary: p.browserSummary, expiresAt: p.expiresAt };
   }
   cancelOwner(owner: string): void { for (const p of this.pending.values()) if (p.owner === owner && p.state === 'configuring') { p.state = 'canceled'; this.retire(p); } }
+  private approvalView(p: Pairing): ApprovalStatus {
+    this.updatePair(p);
+    return { id: p.id, state: p.state, browserSummary: p.browserSummary, expiresAt: p.expiresAt, source: 'web', ...(p.state === 'authorized' && p.deviceId ? { device: this.device(p.deviceId) } : {}) };
+  }
+  approvals(actor: DevicePrincipal): ApprovalStatus[] {
+    this.assertActive(actor);
+    return [...this.pending.values()].filter(p => p.source === 'web' && p.owner === `web:${actor.sessionId}`).map(p => this.approvalView(p));
+  }
+  approval(actor: DevicePrincipal, id: string): ApprovalStatus {
+    const result = this.approvals(actor).find(p => p.id === id);
+    if (!result) throw new DeviceAuthError('PAIRING_NOT_FOUND', 'This request is unavailable or belongs to another device', 404);
+    return result;
+  }
+  claimWeb(code: unknown, actor: DevicePrincipal): ApprovalStatus {
+    this.assertActive(actor);
+    const owner = `web:${actor.sessionId}`;
+    const previous = [...this.pending.values()].find(p => p.owner === owner && p.code === code);
+    if (previous) { this.updatePair(previous); if (previous.state === 'configuring' || previous.state === 'authorized') return this.approvalView(previous); }
+    const claimed = this.claim(code, owner, actor);
+    return this.approval(actor, claimed.id);
+  }
+  cancelApproval(actor: DevicePrincipal, id: string): ApprovalStatus {
+    this.approval(actor, id);
+    const p = [...this.pending.values()].find(p => p.id === id)!;
+    if (p.state === 'configuring') { p.state = 'canceled'; this.retire(p); }
+    return this.approvalView(p);
+  }
+  authorizeWeb(actor: DevicePrincipal, id: string, values: { name: unknown; expire: unknown }): AuthDevice {
+    this.assertActive(actor);
+    return this.authorize(id, `web:${actor.sessionId}`, values);
+  }
   authorize(id: string, owner: string, values: { name: unknown; expire: unknown }): AuthDevice {
     this.requireMode(); const name = validateName(values.name); const duration = parseExpire(values.expire);
     const p = [...this.pending.values()].find(p => p.id === id && p.owner === owner);
@@ -205,6 +256,7 @@ export class DeviceAuthService {
     if (p.state !== 'configuring') throw new DeviceAuthError('PAIRING_INACTIVE', 'Pairing was canceled or expired; request a new code', 409);
     const deviceId = `dev_${randomUUID().replaceAll('-', '')}`; const now = this.now();
     this.transaction(() => {
+      if (p.approver) this.assertActive(p.approver);
       this.db.prepare('INSERT INTO auth_devices(id,pairing_request_id,name,browser_summary,authorized_at,expires_at,last_used_at) VALUES(?,?,?,?,?,?,?)').run(deviceId, p.id, name, p.browserSummary, now, duration === null ? null : now + duration, now);
       this.db.prepare('INSERT INTO auth_sessions(id,device_id,secret_hash,origin,transport,created_at,last_used_at) VALUES(?,?,?,?,?,?,?)').run(`ses_${randomUUID().replaceAll('-', '')}`, deviceId, p.secretHash, p.origin, p.origin.startsWith('https:') ? 'https' : 'http', now, now);
     });

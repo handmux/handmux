@@ -2507,6 +2507,7 @@ export default function App() {
       <Settings
         open={settingsOpen}
         onClose={() => setSettingsOpen(false)}
+        onDeviceLoggedOut={() => { setSettingsOpen(false); onAuthFail(); }}
         workspaceProtection={workspaceProtection}
         chatTone={chatTone}
         onChatTone={pickChatTone}

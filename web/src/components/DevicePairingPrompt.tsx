@@ -11,6 +11,8 @@ export default function DevicePairingPrompt({ onSaved }: { onSaved: () => void }
   const [busy, setBusy] = useState(true);
   const [error, setError] = useState('');
   const [copyHint, setCopyHint] = useState('');
+  const [method, setMethod] = useState<'cli' | 'web'>('cli');
+  const methodRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const [now, setNow] = useState(Date.now());
   const offset = useRef(0);
   const epoch = useRef(0);
@@ -110,11 +112,23 @@ export default function DevicePairingPrompt({ onSaved }: { onSaved: () => void }
       <div className="pairing-code-row"><strong className="pairing-code" ref={codeText}>{usableCode}</strong>
         <button onClick={() => { void copy(usableCode, codeText.current); }}>{t('auth.copyCode')}</button></div>
       <p className="auth-secondary pairing-countdown">{t('auth.codeRemaining', { seconds: remaining })}</p>
-      <h3>{t('auth.cliMethod')}</h3>
-      <p>{t('auth.cliInstructions')}</p>
-      <code className="pairing-command" ref={commandText}>handmux auth add {usableCode}</code>
-      <button onClick={() => { void copy(`handmux auth add ${usableCode}`, commandText.current); }}>{t('auth.copyCommand')}</button>
-      <p className="auth-secondary">{t('auth.cliNext')}</p>
+      <div className="pairing-methods" role="tablist" aria-label={t('auth.methodLabel')}>
+        {(['cli', 'web'] as const).map((value, index) => <button key={value} ref={node => { methodRefs.current[index] = node; }}
+          role="tab" id={`pairing-tab-${value}`} aria-controls={`pairing-panel-${value}`} aria-selected={method === value} tabIndex={method === value ? 0 : -1}
+          onClick={() => setMethod(value)} onKeyDown={event => {
+            if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+            event.preventDefault(); const next = event.key === 'Home' ? 0 : event.key === 'End' ? 1 : 1 - index;
+            setMethod(next === 0 ? 'cli' : 'web'); methodRefs.current[next]?.focus();
+          }}>{t(value === 'cli' ? 'auth.cliMethod' : 'auth.webMethod')}</button>)}
+      </div>
+      <div role="tabpanel" id={`pairing-panel-${method}`} aria-labelledby={`pairing-tab-${method}`}>
+        {method === 'cli' ? <><p>{t('auth.cliInstructions')}</p>
+          <code className="pairing-command" ref={commandText}>handmux auth add {usableCode}</code>
+          <button onClick={() => { void copy(`handmux auth add ${usableCode}`, commandText.current); }}>{t('auth.copyCommand')}</button>
+          <p className="auth-secondary">{t('auth.cliNext')}</p></>
+          : <><p>{t('auth.webInstructions')}</p><p className="pairing-web-path">{t('auth.webPath')}</p>
+            <p>{t('auth.webNext')}</p><p className="auth-secondary">{t('auth.webFallback')}</p></>}
+      </div>
     </>}
     {!waiting && !configuring && <p className="auth-secondary">{t('auth.browserScope')}</p>}
     <p className="auth-secondary">{t('auth.antiPhishing')}</p>

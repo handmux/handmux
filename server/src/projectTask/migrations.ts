@@ -103,6 +103,7 @@ export function migrateProjectDatabase(db: DatabaseSync): number {
   try {
     if (current === 0) db.exec(V1_SCHEMA);
     if (current < 2) db.exec(V2_AUTH_SCHEMA);
+    if (current < 3) db.exec('ALTER TABLE auth_devices ADD COLUMN version INTEGER NOT NULL DEFAULT 1 CHECK(version >= 1)');
     db.exec(`PRAGMA user_version = ${PROJECT_TASK_SCHEMA_VERSION}`);
     db.exec('COMMIT');
   } catch (error) {
