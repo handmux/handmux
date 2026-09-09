@@ -586,6 +586,8 @@ export default {
   'conversationTool.mode': '执行模式',
   'conversationTool.command': '执行的命令',
   'conversationTool.output': '输出结果',
+  'conversationTool.imagePathMissing': '未提供可确定的图片路径',
+  'conversationTool.imageUnavailable': '图片无法读取，请检查文件和读取权限。',
   'conversationTool.noOutput': '无输出',
   'conversationTool.truncation.input.sizeLimit': '输入较长，仅展示已安全保留的部分；工具执行时使用了完整输入。',
   'conversationTool.truncation.output.sizeLimit': '输出较长，仅展示已安全保留的部分；工具执行不受影响。',

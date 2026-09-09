@@ -1,5 +1,8 @@
-import { Fragment, type ReactNode } from 'react';
+import { Fragment, useEffect, useRef, useState, type ReactNode } from 'react';
 import { t } from '../i18n';
+import { fetchImageUrl } from '../api.js';
+import { UnauthorizedError } from '../apiErrors.js';
+import ImageViewer from './ImageViewer.js';
 import {
   BotIcon,
   CheckIcon,
@@ -71,7 +74,7 @@ function toolSummary(tool: ConversationToolProjection): string {
     return filename ? t('conversationTool.editValue', { value: filename }) : t('conversationTool.edit');
   }
   if (name === 'web__run') return t('conversationTool.web');
-  if (name === 'view_image') return t('conversationTool.imageValue', { value: input.path || '' }).trim();
+  if (isImageViewTool(name)) return t('conversationTool.imageValue', { value: input.path || '' }).trim();
   if (name === 'wait') return t('conversationTool.wait');
   if (name === 'write_stdin') return t('conversationTool.continue');
   if (name === 'Edit' || name === 'MultiEdit' || name === 'Write') {
@@ -97,7 +100,7 @@ function toolSummary(tool: ConversationToolProjection): string {
 function toolIcon(name: string): ReactNode {
   if (name === 'Bash' || name === 'exec_command' || name === 'write_stdin') return <CommandIcon />;
   if (['Edit', 'MultiEdit', 'Write', 'NotebookEdit', 'apply_patch'].includes(name)) return <FilePenIcon />;
-  if (name === 'Read' || name === 'view_image') return <FileIcon />;
+  if (name === 'Read' || isImageViewTool(name)) return <FileIcon />;
   if (name === 'Grep' || name === 'Glob') return <SearchIcon />;
   if (name === 'WebSearch' || name === 'WebFetch' || name === 'web__run') return <GlobeIcon />;
   if (name === 'TodoWrite') return <ListChecksIcon />;
@@ -160,6 +163,7 @@ export function ToolBody({
       </div>
     );
   }
+  if (isImageViewTool(tool.name)) return null;
   return tool.result != null ? <pre className="chat-tool-body"
     data-conversation-copy-root data-conversation-copy-id={copyId}>{tool.result}</pre> : null;
 }
@@ -228,7 +232,7 @@ function toolCommandText(tool: ConversationToolProjection): string {
   if (name === 'Bash') return displayCommand(input.command);
   if (name === 'exec_command') return displayCommand(input.cmd || input.script);
   if (name === 'apply_patch') return inputText(input, 'patch', 'script');
-  if (name === 'view_image') return inputText(input, 'path') || JSON.stringify(input, null, 2);
+  if (isImageViewTool(name)) return inputText(input, 'path') || JSON.stringify(input, null, 2);
   if (['Read', 'Edit', 'MultiEdit', 'Write'].includes(name)) return inputText(input, 'file_path');
   if (name === 'NotebookEdit') return inputText(input, 'notebook_path');
   if (name === 'Grep' || name === 'Glob') return inputText(input, 'pattern');
@@ -339,13 +343,61 @@ function EditSheetBody({
   );
 }
 
+const isImageViewTool = (name: string): boolean => name === 'view_image' || name === 'functions.view_image';
+
+function imagePath(tool: ConversationToolProjection): string | null {
+  const input = tool.input && typeof tool.input === 'object' ? tool.input as Record<string, unknown> : {};
+  const path = typeof input.path === 'string' ? input.path : '';
+  if (!path || path.includes('\0')) return null;
+  if (path.startsWith('/')) return path;
+  const cwd = typeof input.cwd === 'string' ? input.cwd : '';
+  return cwd.startsWith('/') && !cwd.includes('\0') ? `${cwd.replace(/\/$/, '')}/${path}` : null;
+}
+
+function ToolImagePreview({ path, onAuthFail }: { path: string | null; onAuthFail?: (() => void) | undefined }) {
+  const [url, setUrl] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
+  const [retry, setRetry] = useState(0);
+  const authRef = useRef(onAuthFail);
+  authRef.current = onAuthFail;
+  useEffect(() => {
+    if (!path) return;
+    let current = true;
+    let ownedUrl: string | null = null;
+    setUrl(null);
+    setFailed(false);
+    void fetchImageUrl(path).then((result) => {
+      if (!('url' in result) || !result.url) { if (current) setFailed(true); return; }
+      if (!current) { URL.revokeObjectURL(result.url); return; }
+      ownedUrl = result.url;
+      setUrl(result.url);
+    }).catch((error: unknown) => {
+      if (!current) return;
+      if (error instanceof UnauthorizedError) authRef.current?.();
+      setFailed(true);
+    });
+    return () => { current = false; if (ownedUrl) URL.revokeObjectURL(ownedUrl); };
+  }, [path, retry]);
+  if (!path) return <div className="tool-sheet-empty">{t('conversationTool.imagePathMissing')}</div>;
+  if (failed) return <div className="tool-sheet-empty" role="status">
+    {t('conversationTool.imageUnavailable')}
+    <button type="button" onClick={() => setRetry((value) => value + 1)}>{t('common.retry')}</button>
+  </div>;
+  if (!url) return <div className="tool-sheet-empty">{t('common.loading')}</div>;
+  return <div className="tool-sheet-image" onError={() => setFailed(true)}>
+    <ImageViewer url={url} name={path.split('/').pop() || 'image'} />
+  </div>;
+}
+
 export function ToolSheet({
   tool,
   running,
   onClose,
   copyId,
+  onAuthFail,
 }: {
   tool: ConversationToolProjection | null;
+  onAuthFail?: (() => void) | undefined;
   running: boolean;
   onClose: () => void;
   copyId: string;
@@ -387,7 +439,9 @@ export function ToolSheet({
               <section className="tool-sheet-sec tool-sheet-out">
                 <div className="tool-sheet-label"><span>{t(tool.diffTruncation
                   ? 'agentConversation.diff' : 'conversationTool.output')}</span></div>
-                {tool.result != null
+                {isImageViewTool(tool.name)
+                  ? <ToolImagePreview key={`${copyId}\0${imagePath(tool) ?? ''}`} path={imagePath(tool)} onAuthFail={onAuthFail} />
+                  : tool.result != null
                   ? <ToolBody tool={tool} copyId={`${copyId}:output`} />
                   : <div className="tool-sheet-empty">{running
                     ? t('conversationTool.runningEllipsis') : t('conversationTool.noOutput')}</div>}

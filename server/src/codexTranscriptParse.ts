@@ -387,6 +387,31 @@ function applyPatchCalls(patch: string): CustomCall[] {
   });
 }
 
+const isImageViewTool = (name: string): boolean => name === 'view_image' || name === 'functions.view_image';
+
+// Only literal path/cwd fields are evidence of a file location. The generic source parser deliberately
+// keeps unknown JavaScript expressions as strings, which must never become download paths.
+function imageToolInput(script: string, raw: string, before: number): CodexToolInput {
+  const input = asRecord(parseToolInput(script, raw, before));
+  delete input.path;
+  delete input.cwd;
+  const value = raw.trim();
+  if (!value.startsWith('{') || !value.endsWith('}')) return input;
+  for (const field of splitTopLevel(value.slice(1, -1), ',')) {
+    if (/^(\.\.\.|\[|get\s|set\s)/.test(field.trim())) {
+      delete input.path; delete input.cwd; continue;
+    }
+    const pieces = splitTopLevel(field, ':');
+    const key = pieces.shift()?.trim() || '';
+    const name = decodeJsString(key) ?? key;
+    if (name !== 'path' && name !== 'cwd') continue;
+    const expression = pieces.join(':').trim();
+    const literal = stringTokenAt(expression, 0) === expression ? decodeJsString(expression) : null;
+    if (literal !== null) input[name] = literal; else delete input[name];
+  }
+  return input;
+}
+
 function extractCustomCalls(script: string): CustomCall[] | null {
   const calls: CustomCall[] = [];
   const re = /tools\.([A-Za-z][\w]*)\s*\(/g;
@@ -402,7 +427,8 @@ function extractCustomCalls(script: string): CustomCall[] | null {
         ? [{ name: 'apply_patch', input: { script: arg.text } }]
         : applyPatchCalls(decoded)));
     } else {
-      calls.push({ name, input: parseToolInput(script, arg.text, match.index) });
+      calls.push({ name, input: isImageViewTool(name)
+        ? imageToolInput(script, arg.text, match.index) : parseToolInput(script, arg.text, match.index) });
     }
     re.lastIndex = arg.end;
   }

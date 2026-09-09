@@ -4116,3 +4116,5 @@ button.cmd-text { background: none; border: none; text-align: left; }
   .terminal .xterm-viewport { scrollbar-width: none; }
   .terminal .xterm-viewport::-webkit-scrollbar:vertical { width: 0; }
 }
+
+.tool-sheet-image { display: flex; height: min(50vh, 420px); min-height: 180px; }

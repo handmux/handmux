@@ -119,6 +119,7 @@ export default function AgentConversationView({
   completedEntryRequest = 0,
   onCompletedEntryConsumed,
   onDocLinkTap,
+  onAuthFail,
   conversationFontSize = 15,
 }: {
   conversation: AgentConversationController;
@@ -128,6 +129,7 @@ export default function AgentConversationView({
   completedEntryRequest?: number;
   onCompletedEntryConsumed?: (request: number) => void;
   onDocLinkTap?: (link: ConversationOutputLink, clientX: number, clientY: number) => void;
+  onAuthFail?: (() => void) | undefined;
   conversationFontSize?: number;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -650,7 +652,7 @@ export default function AgentConversationView({
         }} onClose={() => setCompactionDetail(null)} />
       )}
       {sheetMessage?.tool && (
-        <ToolSheet tool={sheetMessage.tool} running={sheetMessage.streaming === true
+        <ToolSheet onAuthFail={onAuthFail} tool={sheetMessage.tool} running={sheetMessage.streaming === true
           || (timelineWorking && sheetMessage === messages.at(-1) && sheetMessage.tool.result == null)}
           copyId={`tool-sheet:${sheetKey}`}
           onClose={() => setSheetKey(null)} />

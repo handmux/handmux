@@ -2807,6 +2807,7 @@ export default function App() {
                 <AgentConversationView
                   key={`conversation-view\0${normalizedConversationIdentity.agentId}\0${normalizedConversationIdentity.sessionId}`}
                   conversation={projectedConversation}
+                  onAuthFail={onAuthFail}
                   working={conversationActivity === 'working'}
                   activity={conversationActivity}
                   onDocLinkTap={onDocLinkTap}

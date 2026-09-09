@@ -4,6 +4,10 @@ All notable changes to handmux. Format follows [Keep a Changelog](https://keepac
 
 ## [Unreleased]
 
+### Added
+
+- 对话页的图片查看工具可按调用中的文件路径预览当前图片，复用缩放与保存交互；读取失败可重试，不展示原始 base64 输出。
+
 ### Fixed
 
 - 修复 macOS 工作区保护把启动时间微调误判为电脑重启的问题；使用稳定的启动会话标识，兼容旧快照，并在确认原 tmux 仍运行时停止旧误报提示，保留历史恢复记录。

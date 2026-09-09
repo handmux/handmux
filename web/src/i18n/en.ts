@@ -587,6 +587,8 @@ export default {
   'conversationTool.mode': 'Execution mode',
   'conversationTool.command': 'Command',
   'conversationTool.output': 'Output',
+  'conversationTool.imagePathMissing': 'No resolvable image path provided',
+  'conversationTool.imageUnavailable': 'Unable to read the image. Check the file and read permissions.',
   'conversationTool.noOutput': 'No output',
   'conversationTool.truncation.input.sizeLimit': 'This input was long, so only the safely retained portion is shown. The tool ran with the complete input.',
   'conversationTool.truncation.output.sizeLimit': 'This output was long, so only the safely retained portion is shown. Tool execution was not affected.',
