@@ -465,9 +465,11 @@ export function AgentConversationQueueControl({
         const localStatus = localQueueStatuses.get(submissionId);
         const pending = localStatus === 'sending';
         const queued = item.state === undefined || item.state === 'queued';
-        const autoDispatchBlocked = queued && item.autoDispatchBlockedReason === 'provider_rejected';
+        const autoDispatchBlocked = queued && item.autoDispatchBlockedReason !== undefined;
         const unknownQueue = item.state === 'unknown' && item.dispatchOrigin === 'queue';
-        const statusLabel = autoDispatchBlocked ? t('chat.queue.providerRejected')
+        const statusLabel = autoDispatchBlocked
+          ? t(item.autoDispatchBlockedReason === 'terminal_draft_conflict'
+            ? 'chat.queue.terminalDraftConflict' : 'chat.queue.providerRejected')
           : unknownQueue ? t('chat.queue.unknownDelivery') : '';
         const showSteer = queued && !autoDispatchBlocked
           && queue?.canSteer === true && currentActivity !== 'unknown';

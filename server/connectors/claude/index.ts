@@ -462,10 +462,17 @@ export class ClaudeHookBridgeConnector {
         sourceOccurredAt: row.ts,
         payload: row.payload,
       });
-      if (row.src !== 'end' && this.#nativeTail.read(row.payload, row.ts, Date.now()).settled) {
-        projection.snapshot = { availability: 'ready' };
+      if (row.src !== 'end') {
+        const native = this.#nativeTail.read(row.payload, row.ts, Date.now(), row.process, row.src);
+        if (native.settled) projection.snapshot = { availability: 'ready' };
+        else if (native.status === 'busy' || native.status === 'waiting') {
+          projection.snapshot = { availability: 'ready', current: {
+            state: native.status === 'busy' ? 'working' : 'waiting',
+            eventId: native.statusEventId,
+          } };
+        } else if (native.status === 'unknown') projection.snapshot = { availability: 'unavailable' };
       }
-      const snapshot = gaps.has(paneId) ? {
+      const snapshot = gaps.has(paneId) && projection.snapshot.availability !== 'unavailable' ? {
         ...projection.snapshot,
         availability: 'degraded',
         message: 'Claude Hook event history is incomplete',

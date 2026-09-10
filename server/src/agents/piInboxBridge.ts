@@ -443,9 +443,13 @@ export class BridgeInboxCoordinator {
         ? this.#sourceEventSequence(binding.baseline.current.eventId) : null);
     // An upgrade may expose a pre-existing durable event before any versioned snapshot. It must
     // progress without publishing an unproven old status or waiting for a snapshot behind itself.
+    // An explicit equal watermark with a different current identity also proves native state has
+    // superseded that Hook. Matching identities must still deliver their real terminal notification.
     return current == null || sequence < current
       || (binding.baseline?.sourceSequence === sequence
-        && binding.baseline.result.availability !== 'unavailable' && !binding.baseline.current);
+        && binding.baseline.result.availability !== 'unavailable'
+        && (!binding.baseline.current || (binding.baseline.current.eventId !== undefined
+          && binding.baseline.current.eventId !== operation.eventId)));
   }
 
   async #submitHistory(binding: RuntimeBinding, operation: InboxOperation): Promise<{

@@ -511,6 +511,8 @@ export default {
 'chat.input.submit': '提交回答',
 'chat.input.failed': '回答没有提交成功',
 'chat.sendFailed': '消息没有发送成功',
+'chat.terminalDraftConflict': '终端有未确认的草稿，请先在终端处理后重试',
+'chat.queue.terminalDraftConflict': '终端有未确认的草稿，请先在终端处理，再编辑此消息重试',
 'chat.sendUnknown': '无法确认消息是否送达，请检查对话后再重试',
 'chat.stopFailed': '没有停止成功，请稍后重试',
 'chat.queue.title': '排队消息',

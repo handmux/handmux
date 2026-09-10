@@ -457,6 +457,9 @@ export function createClaudeConversationAdapter({
             : control.sendPrompt(run.ref.paneId, request.text));
           if (result && typeof result === 'object'
             && (result as { nativeMutation?: unknown }).nativeMutation === false) {
+            if ((result as { reason?: unknown }).reason === 'terminal_draft_conflict') {
+              return { outcome: 'rejected', nativeMutation: false, reason: 'terminal_draft_conflict' };
+            }
             return { outcome: 'busy', nativeMutation: false };
           }
           return { outcome: 'accepted' };

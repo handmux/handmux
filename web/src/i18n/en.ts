@@ -512,6 +512,8 @@ export default {
 'chat.input.submit': 'Submit answer',
 'chat.input.failed': 'The answer could not be submitted',
 'chat.sendFailed': 'The message could not be sent',
+'chat.terminalDraftConflict': 'The terminal has an unconfirmed draft. Handle it in the terminal, then retry.',
+'chat.queue.terminalDraftConflict': 'The terminal has an unconfirmed draft. Handle it there, then edit this message to retry.',
 'chat.sendUnknown': 'Delivery could not be confirmed. Check the conversation before trying again.',
 'chat.stopFailed': 'Could not stop the turn. Try again.',
 'chat.queue.title': 'Queued messages',

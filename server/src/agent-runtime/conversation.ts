@@ -226,7 +226,7 @@ function normalizeInterrupt(raw: unknown): InterruptReceipt | null {
 
 const PUBLIC_REASONS = new Set<ConversationReason>([
   'invalid_request', 'unsupported', 'stale_run', 'conflict',
-  'provider_rejected', 'temporarily_unavailable', 'delivery_unconfirmed',
+  'provider_rejected', 'terminal_draft_conflict', 'temporarily_unavailable', 'delivery_unconfirmed',
 ]);
 
 const LEGACY_REASON_MAP: Readonly<Record<string, ConversationReason>> = Object.freeze({
@@ -1801,7 +1801,7 @@ export class ConversationService {
             delete detached.steerBaseRevision;
             delete detached.steerAnchor;
             delete detached.steerDispatchPlan;
-            if (receipt.outcome === 'rejected') detached.autoDispatchBlockedReason = 'provider_rejected';
+            if (receipt.outcome === 'rejected') detached.autoDispatchBlockedReason = receipt.reason === 'terminal_draft_conflict' ? 'terminal_draft_conflict' : 'provider_rejected';
             else delete detached.autoDispatchBlockedReason;
             detached.revision = ++this.#state.ledgerRevision;
             detached.updatedAt = now;
@@ -1884,7 +1884,7 @@ export class ConversationService {
         current.state = 'queued';
         delete current.dispatchOrigin;
         if (receipt.outcome === 'rejected') {
-          current.autoDispatchBlockedReason = 'provider_rejected';
+          current.autoDispatchBlockedReason = receipt.reason === 'terminal_draft_conflict' ? 'terminal_draft_conflict' : 'provider_rejected';
         } else delete current.autoDispatchBlockedReason;
         current.queueOrderKey ??= this.#queueOrderKey(now, ++this.#state.ledgerRevision);
         if (origin !== 'steer' || current.steerDispatchPlan?.kind === 'start-turn-fallback') {

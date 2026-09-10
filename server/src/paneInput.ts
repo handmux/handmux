@@ -1,11 +1,11 @@
-interface PaneInputCommands {
+export interface PaneInputCommands {
   exitCopyModeIfActive(paneId: string): Promise<unknown>;
   sendText(paneId: string, text: string): Promise<unknown>;
   sendEnter(paneId: string): Promise<unknown>;
   sendKey(paneId: string, key: string): Promise<unknown>;
 }
 
-interface PaneInputGuard {
+export interface PaneInputGuard {
   validate(): boolean | Promise<boolean>;
 }
 

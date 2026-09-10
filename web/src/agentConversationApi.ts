@@ -22,7 +22,7 @@ const ID_RE = /^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,1023}$/;
 const SEND_DELIVERIES = new Set(['prompt', 'steer', 'follow_up']);
 const CONVERSATION_REASONS = new Set<ConversationReason>([
   'invalid_request', 'unsupported', 'stale_run', 'conflict',
-  'provider_rejected', 'temporarily_unavailable', 'delivery_unconfirmed',
+  'provider_rejected', 'terminal_draft_conflict', 'temporarily_unavailable', 'delivery_unconfirmed',
 ]);
 const CONVERSATION_READY_TIMEOUT_MS = 20_000;
 // The Server sends an SSE comment every 20 seconds. Three missed keepalives means the fetch body is no
@@ -593,7 +593,8 @@ function sendReceipt(value: unknown): ConversationSendReceipt {
         || !bounded(baseline.viewId, 1024) || !bounded(baseline.historyVersion, 1024)
         || (baseline.tailItemId !== undefined && !bounded(baseline.tailItemId, 256))))
       || (submission.autoDispatchBlockedReason !== undefined
-        && submission.autoDispatchBlockedReason !== 'provider_rejected')
+        && submission.autoDispatchBlockedReason !== 'provider_rejected'
+        && submission.autoDispatchBlockedReason !== 'terminal_draft_conflict')
       || (submission.steerActionId !== undefined && !bounded(submission.steerActionId, 256))
       || (submission.steerAnchor !== undefined && (!steerAnchor
         || !bounded(steerAnchor.viewId, 1024)

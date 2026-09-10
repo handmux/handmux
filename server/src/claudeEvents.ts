@@ -27,6 +27,7 @@ export const classifyEvent = claude.classify;
 // that ever slips through. working / end / unclassifiable map to undefined → no push + re-arm the dedup.
 type PushView = 'needs' | 'done';
 interface HookRecord {
+  process?: { pid: number; startedAt?: number };
   ts: number;
   sequence?: number;
   src: string;
@@ -212,6 +213,11 @@ function readStateFile(file: string): Record<string, HookRecord> {
       };
       if (typeof row.sequence === 'number' && Number.isSafeInteger(row.sequence) && row.sequence > 0) {
         record.sequence = row.sequence;
+      }
+      const process = recordOf(row.process);
+      if (process && typeof process.pid === 'number' && Number.isSafeInteger(process.pid)
+        && typeof process.startedAt === 'number' && Number.isFinite(process.startedAt)) {
+        record.process = { pid: process.pid, startedAt: process.startedAt };
       }
       if (Object.hasOwn(row, 'agent')) {
         record.agent = typeof row.agent === 'string' && row.agent ? row.agent : null;
@@ -405,17 +411,19 @@ export function createClaudeEvents({
       const agent = rec.agent === undefined ? getAgent('claude') : getAgent(rec.agent);
       if (!agent) continue;
       let c = classifyRecord(rec);
-      const native = rec.src === 'end' ? null : nativeTail.read(rec.payload, rec.ts, now());
-      if (native?.settled) c = null;
+      const native = rec.src === 'end' ? null : nativeTail.read(rec.payload, rec.ts, now(), rec.process, rec.src);
+      if (native?.status === 'busy') c = { kind: 'working', msg: '' };
+      else if (native?.status === 'waiting') c = { kind: 'permission', msg: '' };
+      else if (native?.settled) c = null;
       // A 需要你 the user already resolved leaves no closing hook (see PERM_RESOLVED_GUARD_MS). statMtime
       // gates the cheap "still pending" path; only once the transcript has grown past the event do we pay the
       // bounded tail read to tell a RESUME (approve/deny → 进行中) from an INTERRUPT (ESC → neutral present).
-      if (c && c.kind === 'permission') {
+      if (!native?.status && c && c.kind === 'permission') {
         const tp = typeof rec.payload.transcript_path === 'string' ? rec.payload.transcript_path : null;
         if (tp && permissionResolved(rec, statMtime(tp))) {
           c = readTail ? resolvedPermissionKind(readTail(tp)) : { kind: 'working', msg: '' };
         }
-      } else if (c && c.kind === 'working') {
+      } else if (!native?.status && c && c.kind === 'working') {
         // ESC-interrupt during a turn leaves the last hook as the stale 'prompt' (working) — no Stop fires,
         // so working would otherwise stick until WORKING_TTL_MS (2h), pinning the composer's send→stop toggle.
         // Once the transcript has grown past the prompt event, a bounded tail read settles it: an interrupt
@@ -424,7 +432,7 @@ export function createClaudeEvents({
         const tp = typeof rec.payload.transcript_path === 'string' ? rec.payload.transcript_path : null;
         const mtime = tp ? statMtime(tp) : null;
         if (readTail && tp && typeof mtime === 'number' && mtime > rec.ts && isInterruptTail(readTail(tp))) c = null;
-      } else if (c && c.kind === 'compacting') {
+      } else if (!native?.status && c && c.kind === 'compacting') {
         // A no-op /compact fires no PostCompact; it writes its <local-command-stdout> at once. Once the
         // transcript has grown past the PreCompact event and its tail is that stdout, the /compact is done
         // (nothing to compact) → drop 压缩中. A real compaction stays silent until PostCompact, so it keeps
@@ -581,12 +589,19 @@ export function createClaudeEvents({
     return rec.agent === 'claude' ? 'claude' : null;
   }
 
-  function paneKind(pane: string): ClaudeEventKind | null {
+  function paneKind(pane: string, process?: { pid: number; startedAt?: number }): ClaudeEventKind | null {
     const rec = readStateFile(file)[pane];
     if (!rec || (rec.agent !== undefined && rec.agent !== 'claude')) return null;
+    if (process && rec.process && (process.pid !== rec.process.pid || process.startedAt !== rec.process.startedAt)) return null;
     if (rec.src === 'end') {
       if (typeof rec.payload.session_id === 'string') nativeTail.release(rec.payload.session_id);
-    } else if (nativeTail.read(rec.payload, rec.ts, now()).settled) return 'idle';
+    } else {
+      const native = nativeTail.read(rec.payload, rec.ts, now(), rec.process, rec.src);
+      if (native.status === 'unknown') return null;
+      if (native.status === 'busy') return 'working';
+      if (native.status === 'waiting') return 'permission';
+      if (native.settled) return 'idle';
+    }
     // Activity is not the Inbox roster: neutral lifecycle edges deliberately create no Inbox card,
     // but a completed manual /compact must release the conversation queue. Automatic compaction
     // continues the current turn, so it must not admit another prompt between compaction and generation.
@@ -603,10 +618,12 @@ export function createClaudeEvents({
     return classifyRecord(rec)?.kind ?? null;
   }
 
-  function paneCompletionToken(pane: string): string | null {
+  function paneCompletionToken(pane: string, process?: { pid: number; startedAt?: number }): string | null {
     const rec = readStateFile(file)[pane];
     if (!rec || (rec.agent !== undefined && rec.agent !== 'claude')) return null;
-    const native = rec.src === 'end' ? undefined : nativeTail.read(rec.payload, rec.ts, now());
+    if (process && rec.process && (process.pid !== rec.process.pid || process.startedAt !== rec.process.startedAt)) return null;
+    const native = rec.src === 'end' ? undefined : nativeTail.read(rec.payload, rec.ts, now(), rec.process, rec.src);
+    if (native?.status && native.status !== 'idle') return null;
     if (native?.settled) return native.settled;
     // An idle startup/resume/clear is the first dispatch baseline. Give it a stable token too:
     // the queue can then detect a fast completion even when no poll observed its busy phase.
@@ -624,5 +641,11 @@ export function createClaudeEvents({
   return {
     getStates, identifyPaneAgents, start, stop, paneSession, paneAgent,
     paneKind, paneCompletionToken, nativeTail,
+    paneRestoredPrompt(pane: string): string | null {
+      const rec = readStateFile(file)[pane];
+      if (!rec || rec.src === 'end' || (rec.agent !== undefined && rec.agent !== 'claude')) return null;
+      const native = nativeTail.read(rec.payload, rec.ts, now(), rec.process, rec.src);
+      return native.status === 'idle' ? native.restoredPrompt ?? null : null;
+    },
   };
 }

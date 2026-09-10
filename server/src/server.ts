@@ -37,7 +37,8 @@ import { apiErrorBoundary, apiRequestContext } from './apiErrors.js';
 import { RuntimeHealth } from './healthProtocol.js';
 import { healthRoutes } from './routes/health.js';
 import { createBuiltinAgentRuntime } from './agent-runtime/builtinRuntime.js';
-import { interruptClaudePane, sendPaneChoice, sendPanePrompt } from './paneInput.js';
+import { interruptClaudePane, sendPaneChoice } from './paneInput.js';
+import { sendClaudePanePrompt } from './agents/claudePaneInput.js';
 import {
   createLocalAgentProcessContext,
   TmuxAgentPaneSource,
@@ -157,7 +158,7 @@ const agentRuntime = createBuiltinAgentRuntime({
   ...(conversationStartupBlockReason === undefined ? {} : { conversationStartupBlockReason }),
   claudeEvents: events,
   claudeConversationControl: {
-    sendPrompt: (paneId, text, guard) => sendPanePrompt(commands, paneId, text, guard),
+    sendPrompt: (paneId, text, guard) => sendClaudePanePrompt(commands, paneId, text, () => events?.paneRestoredPrompt(paneId) ?? null, guard),
     interrupt: (paneId) => interruptClaudePane(commands, paneId),
   },
   claudeInteractionControl: {

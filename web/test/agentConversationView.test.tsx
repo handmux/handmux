@@ -3693,10 +3693,13 @@ describe('generic Agent Conversation UI', () => {
     expect(input.value).toBe('retry now');
   });
 
-  it('shows localized send copy instead of a stable receipt reason', async () => {
+  it.each([
+    ['provider_rejected', 'sendFailed', '消息没有发送成功'],
+    ['terminal_draft_conflict', 'terminalDraftConflict', '终端有未确认的草稿，请先在终端处理后重试'],
+  ] as const)('shows localized send copy for %s and preserves the draft', async (reason, publicMessage, expected) => {
     const conversation = controller({
       send: vi.fn(async () => {
-        throw new ConversationSendError('provider_rejected', false, 'sendFailed');
+        throw new ConversationSendError(reason, false, publicMessage);
       }),
     });
     const { container } = render(
@@ -3708,8 +3711,8 @@ describe('generic Agent Conversation UI', () => {
     fireEvent.click(container.querySelector('button.cc-send')!);
 
     const alert = await screen.findByRole('alert');
-    expect(alert.textContent).toBe('消息没有发送成功');
-    expect(document.body.textContent).not.toContain('provider_rejected');
+    expect(alert.textContent).toBe(expected);
+    expect(document.body.textContent).not.toContain(reason);
     expect(input.value).toBe('restore me');
   });
 

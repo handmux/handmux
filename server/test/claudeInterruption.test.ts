@@ -217,3 +217,122 @@ it.each(['prompt', 'permission', 'gap', 'restart'])('settles external interrupti
     expect(sendPrompt).toHaveBeenCalledTimes(2);
   }
 });
+
+function registryFixture() {
+  const h = nativeFixture();
+  const project = path.join(h.directory, 'projects', '-isolated');
+  fs.mkdirSync(project, { recursive: true });
+  const transcript = path.join(project, `${SESSION}.jsonl`);
+  const payload = { ...h.payload, transcript_path: transcript, prompt: 'old draft' };
+  const process = { pid: 101, startedAt: 1000 };
+  const user = { type: 'user', sessionId: SESSION, isSidechain: false, uuid: INTERRUPT,
+    promptId: PROMPT, promptSource: 'typed', timestamp: new Date(1900).toISOString(),
+    message: { role: 'user', content: 'old draft' } };
+  fs.writeFileSync(transcript, JSON.stringify(user) + '\n');
+  fs.mkdirSync(path.join(h.directory, 'sessions'));
+  const registry = path.join(h.directory, 'sessions', '101.json');
+  const status = { pid: 101, sessionId: SESSION, kind: 'interactive',
+    procStart: 'Thu Jan  1 00:00:01 1970', status: 'idle', statusUpdatedAt: 3000 };
+  const writeStatus = (overrides: Record<string, unknown> = {}) => fs.writeFileSync(registry, JSON.stringify({ ...status, ...overrides }));
+  writeStatus();
+  const read = (after = 2000) => h.reader.read(payload, after, 10000, process);
+  return { ...h, payload, process, transcript, registry, user, writeStatus, read };
+}
+
+it('settles a native no-visible-output cancellation without a JSONL interrupt marker', () => {
+  const h = registryFixture();
+  expect(h.read()).toMatchObject({ status: 'idle', restoredPrompt: 'old draft' });
+  expect(h.read().settled).toBeTruthy();
+  const token = h.read().settled;
+  h.writeStatus({ updatedAt: 9000 });
+  expect(h.read().settled).toBe(token);
+  expect(h.read(3000).settled).toBeFalsy();
+});
+
+it.each(['pid', 'session', 'start', 'kind', 'old', 'future', 'partial', 'new-user'])('rejects %s registry evidence', (mode) => {
+  const h = registryFixture();
+  if (mode === 'pid') h.writeStatus({ pid: 102 });
+  if (mode === 'session') h.writeStatus({ sessionId: PROMPT });
+  if (mode === 'start') h.writeStatus({ procStart: 'Thu Jan  1 00:00:02 1970' });
+  if (mode === 'kind') h.writeStatus({ kind: 'sdk' });
+  if (mode === 'old') h.writeStatus({ statusUpdatedAt: 2000 });
+  if (mode === 'future') h.writeStatus({ statusUpdatedAt: 10001 });
+  if (mode === 'partial') fs.writeFileSync(h.registry, '{');
+  if (mode === 'new-user') fs.appendFileSync(h.transcript, JSON.stringify({ ...h.user, timestamp: new Date(4000).toISOString() }) + '\n');
+  expect(h.read().settled).toBeFalsy();
+});
+
+it.each(['busy', 'waiting'])('native %s blocks an older interruption', (status) => {
+  const h = registryFixture();
+  fs.appendFileSync(h.transcript, JSON.stringify({ ...h.marker, timestamp: new Date(2500).toISOString() }) + '\n');
+  h.writeStatus({ status });
+  expect(h.read()).toMatchObject({ status, settled: null, localCommand: null });
+});
+
+it('keeps registry completion identity across later transcript markers and fails closed on partial status writes', () => {
+  const h = registryFixture();
+  const token = h.read().settled;
+  fs.appendFileSync(h.transcript, JSON.stringify({ ...h.marker, timestamp: new Date(2500).toISOString() }) + '\n');
+  expect(h.read().settled).toBe(token);
+  fs.writeFileSync(h.registry, '{');
+  expect(h.read().settled).toBeFalsy();
+  h.writeStatus();
+  expect(h.read().settled).toBe(token);
+});
+
+it.each(['busy', 'waiting', 'idle'])('preserves a newer explicit terminal Hook against an older native %s state', (status) => {
+  const h = registryFixture();
+  h.writeStatus({ status, statusUpdatedAt: 1500 });
+  const payload = { ...h.payload, source: 'clear' };
+  expect(h.reader.read(payload, 2000, 10000, h.process, 'start').status).toBeUndefined();
+  const stateFile = path.join(h.directory, 'hook.json');
+  fs.writeFileSync(stateFile, JSON.stringify({ '%1': { src: 'start', ts: 2000, sequence: 2, process: h.process, payload } }));
+  const events = createClaudeEvents({ file: stateFile, now: () => 10000 });
+  expect(events.paneKind('%1')).toBe('idle');
+  expect(events.paneCompletionToken('%1')).toBe('claude-baseline:2000:2');
+});
+
+it('keeps a Stop completion token stable when its delayed native idle effect arrives', () => {
+  const h = registryFixture();
+  const stateFile = path.join(h.directory, 'hook.json');
+  fs.writeFileSync(stateFile, JSON.stringify({ '%1': { src: 'stop', ts: 4000, sequence: 2, process: h.process, payload: h.payload } }));
+  const events = createClaudeEvents({ file: stateFile, now: () => 10000 });
+  const token = events.paneCompletionToken('%1');
+  h.writeStatus({ statusUpdatedAt: 5000 });
+  expect(events.paneCompletionToken('%1')).toBe(token);
+  h.writeStatus({ status: 'waiting', statusUpdatedAt: 6000 });
+  expect(events.paneKind('%1')).toBe('permission');
+  expect(events.paneCompletionToken('%1')).toBeNull();
+});
+
+it('retains busy while native output advances beyond the activity transition timestamp', () => {
+  const h = registryFixture();
+  h.writeStatus({ status: 'busy' });
+  fs.appendFileSync(h.transcript, JSON.stringify({ ...h.user, type: 'assistant', timestamp: new Date(4000).toISOString(),
+    message: { role: 'assistant', content: [{ type: 'text', text: 'working' }] } }) + '\n');
+  expect(h.read()).toMatchObject({ status: 'busy', settled: null });
+});
+
+it('does not interpret native shell mode or a disappeared registry as another completion', () => {
+  const h = registryFixture();
+  expect(h.read().settled).toBeTruthy();
+  h.writeStatus({ status: 'shell' });
+  expect(h.read()).toMatchObject({ status: 'unknown', settled: null });
+  fs.unlinkSync(h.registry);
+  expect(h.read()).toMatchObject({ status: 'unknown', settled: null });
+});
+
+it('does not emit a legacy completion during the very first partially written registry read', () => {
+  const h = registryFixture();
+  fs.appendFileSync(h.transcript, JSON.stringify({ ...h.marker, timestamp: new Date(2500).toISOString() }) + '\n');
+  fs.writeFileSync(h.registry, '{');
+  expect(h.read()).toMatchObject({ status: 'unknown', settled: null });
+  h.writeStatus();
+  expect(h.read().settled).toContain('claude-native-idle:');
+});
+
+it('does not accept an old native idle while a newer transcript record is half written', () => {
+  const h = registryFixture();
+  fs.appendFileSync(h.transcript, '{"type":"user"');
+  expect(h.read()).toMatchObject({ status: 'unknown', settled: null });
+});

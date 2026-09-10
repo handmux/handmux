@@ -161,6 +161,44 @@ describe('Pi Inbox Bridge vertical binding', () => {
     expect(h.inbox.read().terminalNotifications.some((row) => row.eventId === 'seq-2')).toBe(availability === 'unavailable');
   });
 
+  it.each([
+    ['ready', 'working'], ['ready', 'waiting'], ['degraded', 'working'], ['degraded', 'waiting'],
+  ])('keeps a newer native %s/%s snapshot over an equal Hook event', async (availability, state) => {
+    const store = new MemoryInboxStateStore();
+    const h = await setup({ inboxStore: store });
+    const channel = h.bridge.connect(h.lease).channel('inbox');
+    const binding = new PiInboxBridgeCoordinator({ host: h.bridge.hostFor('pi'), projector: h.projector,
+      sourceEventSequence: (id) => /^seq-[0-9]+$/.test(id) ? Number(id.slice(4)) : null,
+    });
+    coordinators.push(binding);
+    await channel.setSnapshot({ availability, sourceSequence: 2,
+      current: { state, eventId: 'native-status-2' } });
+    binding.start();
+    await binding.bind(h.lease);
+    await channel.publish({ eventId: 'seq-2', payload: { kind: 'set', state: 'done', eventId: 'seq-2' } }, { delivery: 'durable' });
+    await vi.waitFor(() => expect((store.load() as PersistedInboxState).runs.some((run) =>
+      run.events.some((event) => event.eventId === 'seq-2'))).toBe(true));
+    expect(h.inbox.read().records[0]?.state).toBe(state);
+    expect(h.inbox.read().terminalNotifications).toHaveLength(0);
+    await channel.publish({ eventId: 'seq-3', payload: { kind: 'set', state: 'done', eventId: 'seq-3' } }, { delivery: 'durable' });
+    await vi.waitFor(() => expect(h.inbox.read().terminalNotifications.some((row) => row.eventId === 'seq-3')).toBe(true));
+  });
+
+  it('still notifies an equal Hook event when its identity matches the current snapshot', async () => {
+    const h = await setup();
+    const channel = h.bridge.connect(h.lease).channel('inbox');
+    const binding = new PiInboxBridgeCoordinator({ host: h.bridge.hostFor('pi'), projector: h.projector,
+      sourceEventSequence: (id) => /^seq-[0-9]+$/.test(id) ? Number(id.slice(4)) : null,
+    });
+    coordinators.push(binding);
+    await channel.setSnapshot({ availability: 'ready', sourceSequence: 2,
+      current: { state: 'done', eventId: 'seq-2' } });
+    binding.start();
+    await binding.bind(h.lease);
+    await channel.publish({ eventId: 'seq-2', payload: { kind: 'set', state: 'done', eventId: 'seq-2' } }, { delivery: 'durable' });
+    await vi.waitFor(() => expect(h.inbox.read().terminalNotifications.some((row) => row.eventId === 'seq-2')).toBe(true));
+  });
+
   it('replays a durable terminal event captured while the Handmux Server was fully offline', async () => {
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'handmux-pi-offline-inbox-'));
     tempDirectories.push(directory);

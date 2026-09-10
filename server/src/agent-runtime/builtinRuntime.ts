@@ -49,8 +49,8 @@ export interface BuiltinAgentRuntimeOptions
   home?: string;
   claudeEvents?: Partial<NonNullable<Parameters<typeof createClaudeConversationAdapter>[0]>['sessions']>
     & {
-      paneKind?(paneId: string): 'done' | 'working' | 'permission' | 'compacting' | 'error' | 'end' | 'idle' | null;
-      paneCompletionToken?(paneId: string): string | null;
+      paneKind?(paneId: string, process?: { pid: number; startedAt?: number }): 'done' | 'working' | 'permission' | 'compacting' | 'error' | 'end' | 'idle' | null;
+      paneCompletionToken?(paneId: string, process?: { pid: number; startedAt?: number }): string | null;
     };
   claudeProjectsRoot?: string;
   claudeConversationControl?: ClaudeConversationControl;
@@ -71,13 +71,13 @@ export function createClaudeConversationActivityReader(
       if (events?.paneSession && events.paneSession(run.ref.paneId)?.sessionId !== run.ref.sessionId) {
         return { activity: 'unknown', activeTurn: { state: 'unknown' } };
       }
-      const kind = events?.paneKind?.(run.ref.paneId) ?? null;
+      const kind = events?.paneKind?.(run.ref.paneId, run.process) ?? null;
       const activity = kind === 'working' ? 'working'
         : kind === 'permission' ? 'waiting'
           : kind === 'compacting' ? 'compacting'
             : kind === 'done' || kind === 'idle' || kind === 'end' || kind === 'error'
               ? 'idle' : 'unknown';
-      const completionToken = events?.paneCompletionToken?.(run.ref.paneId) ?? null;
+      const completionToken = events?.paneCompletionToken?.(run.ref.paneId, run.process) ?? null;
       return {
         activity,
         activeTurn: activity === 'idle' ? { state: 'none' as const }

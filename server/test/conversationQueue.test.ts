@@ -83,7 +83,7 @@ async function harness(options: {
     newToken: () => `action-token-${++tokenSequence}`,
   });
   return {
-    service, lease, runs, store, dispatchPrompt, dispatchSteer,
+    service, lease, runs, store, dispatchPrompt, dispatchSteer, adapter,
     setActivity(next: ConversationActivitySnapshot) { activity = next; },
   };
 }
@@ -411,14 +411,14 @@ describe('Conversation Core public queue', () => {
     expect(h.dispatchPrompt).toHaveBeenCalledOnce();
   });
 
-  it('blocks automatic replay after a definitive Queue rejection', async () => {
+  it.each(['provider_rejected', 'terminal_draft_conflict'] as const)('persists %s queue rejection without replay and permits explicit edit recovery', async (reason) => {
     const h = await harness({
       activity: {
         activity: 'working', activeTurn: { state: 'active', nativeTurnId: 'turn-0' },
         revision: 1, epoch: 'run-1',
       },
       prompt: async () => ({
-        outcome: 'rejected', nativeMutation: false, reason: 'provider_rejected',
+        outcome: 'rejected', nativeMutation: false, reason,
       }),
     });
     await h.service.send(h.lease, {
@@ -430,8 +430,29 @@ describe('Conversation Core public queue', () => {
     await new Promise((resolve) => setTimeout(resolve, 400));
     expect(h.dispatchPrompt).toHaveBeenCalledOnce();
     expect(await h.service.queueSnapshot(h.lease)).toMatchObject({
-      items: [{ state: 'queued', autoDispatchBlockedReason: 'provider_rejected' }],
+      items: [{ state: 'queued', autoDispatchBlockedReason: reason }],
     });
+
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'hm-queue-rejection-'));
+    temporary.push(directory);
+    const file = path.join(directory, 'state.json');
+    new FileConversationStateStore(file).save(h.store.load()!);
+    const reloaded = new FileConversationStateStore(file);
+    const restarted = new ConversationService({
+      runs: h.runs, adapters: { test: h.adapter }, store: reloaded,
+      activitySource: { read: async () => ({ activity: 'idle', activeTurn: { state: 'none' }, revision: 2, epoch: 'run-1' }) },
+    });
+    expect(await restarted.queueSnapshot(h.lease)).toMatchObject({ items: [{ autoDispatchBlockedReason: reason }] });
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    expect(h.dispatchPrompt).toHaveBeenCalledOnce();
+    h.dispatchPrompt.mockResolvedValue({ outcome: 'accepted' });
+    const edit = await restarted.queueAction(h.lease, { action: 'begin_edit', itemId: 'request-1' }) as { lease: { token: string } };
+    expect(await restarted.queueAction(h.lease, {
+      action: 'commit_edit', itemId: 'request-1', token: edit.lease.token, text: 'try after resolving the draft',
+    })).toEqual({ ok: true });
+    await restarted.queueSnapshot(h.lease);
+    await vi.waitFor(() => expect(h.dispatchPrompt).toHaveBeenCalledTimes(2));
+    expect(h.dispatchPrompt.mock.calls[1]?.[1].text).toBe('try after resolving the draft');
   });
 
   it('keeps canonical observation authoritative when it arrives before a busy receipt', async () => {
