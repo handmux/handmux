@@ -59,8 +59,11 @@ export function sendPaneChoice(
   paneId: string,
   choice: string,
 ): Promise<void> {
+  if (!/^[1-9]$/.test(choice)) throw new TypeError('Pane choice requires a single option digit');
   return serializePaneInput(paneId, async () => {
     await commands.exitCopyModeIfActive(paneId);
-    await commands.sendText(paneId, choice);
+    // Menu shortcuts are key events. Bracketed paste goes to Claude's paste handler, not its
+    // selection handler; the digit itself submits the choice, so no trailing Enter is needed.
+    await commands.sendKey(paneId, choice);
   });
 }
