@@ -1,3 +1,4 @@
+import { StrictMode, type ComponentProps } from 'react';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { TerminalProps } from './components/Terminal.jsx';
@@ -47,6 +48,35 @@ const conversationApi = vi.hoisted(() => ({
 const conversation = vi.hoisted(() => ({ controller: null as AgentConversationController | null }));
 const controlsInput = vi.hoisted(() => ({ run: null as unknown, enabled: false }));
 const controlsApi = vi.hoisted(() => ({ readConversationControls: vi.fn() }));
+const controlRequestProbe = vi.hoisted(() => ({
+  holdConsumption: false,
+  model: null as { id: number; consume: ((id: number) => void) | undefined } | null,
+  goal: null as { id: number; consume: ((id: number) => void) | undefined } | null,
+}));
+vi.mock('./components/AgentModelControl.jsx', async (importOriginal) => {
+  const original = await importOriginal<typeof import('./components/AgentModelControl.js')>();
+  return { ...original, default: (props: ComponentProps<typeof original.default>) => {
+    controlRequestProbe.model = { id: props.openRequest ?? 0, consume: props.onOpenRequestConsumed };
+    return <original.default {...props} onOpenRequestConsumed={(id) => {
+      if (!controlRequestProbe.holdConsumption) props.onOpenRequestConsumed?.(id);
+    }} />;
+  } };
+});
+vi.mock('./components/AgentConversationCapabilityControls.jsx', async (importOriginal) => {
+  const original = await importOriginal<typeof import('./components/AgentConversationCapabilityControls.js')>();
+  return { ...original, AgentConversationMilestoneControls: (
+    props: ComponentProps<typeof original.AgentConversationMilestoneControls>,
+  ) => {
+    controlRequestProbe.goal = { id: props.goalOpenRequest ?? 0, consume: props.onGoalOpenRequestConsumed };
+    return <original.AgentConversationMilestoneControls {...props} onGoalOpenRequestConsumed={(id) => {
+      if (!controlRequestProbe.holdConsumption) props.onGoalOpenRequestConsumed?.(id);
+    }} />;
+  } };
+});
+vi.mock('./agentSessionControlApi.js', () => ({
+  readAgentModelControl: vi.fn(async () => ({ models: [], selected: { model: null, effort: null }, canUpdate: true })),
+  updateAgentModelControl: vi.fn(),
+}));
 const recoveryApi = vi.hoisted(() => ({ getConversationActivationRecovery: vi.fn() }));
 vi.mock('./hooks/useAgentConversationControls.js', async (importOriginal) => {
   const original = await importOriginal<typeof import('./hooks/useAgentConversationControls.js')>();
@@ -278,6 +308,9 @@ async function renderApp() {
 }
 
 beforeEach(() => {
+  controlRequestProbe.holdConsumption = false;
+  controlRequestProbe.model = null;
+  controlRequestProbe.goal = null;
   vi.useFakeTimers();
   Object.values(conversationApi).forEach((mock) => mock.mockReset());
   controlsApi.readConversationControls.mockReset().mockResolvedValue({});
@@ -1654,5 +1687,97 @@ describe('App workspace recovery', () => {
 
     await flush(15_000);
     expect(screen.queryByText('工作区未受保护')).toBeNull();
+  });
+});
+
+
+describe('App consumes conversation control commands', () => {
+  async function openControls() {
+    const pane = { id: '%73', active: true, width: 80, height: 24, command: 'codex', cwd: '/work', agent: 'codex' };
+    const otherPane = { ...pane, id: '%74', active: false };
+    const run = { agentId: 'codex', paneId: pane.id, runId: 'control-run', sessionId: 'control-session' };
+    const otherRun = { ...run, paneId: otherPane.id, runId: 'other-run', sessionId: 'other-session' };
+    localStorage.setItem(`tw_lens_${otherPane.id}`, 'chat');
+    localStorage.setItem('tw_bound', JSON.stringify(['project']));
+    localStorage.setItem(`tw_lens_${pane.id}`, 'chat');
+    api.getSessions.mockResolvedValue([{ id: '$71', name: 'project' }]);
+    api.getWindows.mockResolvedValue([{ id: '@71', name: 'main', active: true, panes: 2 }]);
+    api.getPanes.mockResolvedValue([pane, otherPane]);
+    api.getAgentDiscovery.mockResolvedValue({
+      descriptors: [{ id: 'codex', label: 'Codex', capabilities: {
+        conversation: true, sessionControl: true, conversationGoal: true,
+      } }], runs: [run, otherRun], health: [],
+    });
+    conversationApi.discoverAgentConversation.mockImplementation(async (run) => ({
+      session: { agentId: run.agentId, sessionId: run.sessionId }, run,
+      viewId: run.sessionId, historyVersion: '1', capabilities: { history: true, live: 'poll', send: ['prompt'] },
+    }));
+    conversationApi.readAgentConversationPage.mockImplementation(async (run) => ({
+      status: 'ok', page: { sessionId: run.sessionId, viewId: run.sessionId,
+        historyVersion: '1', hasMore: false, items: [] },
+    }));
+    const view = render(<StrictMode><App /></StrictMode>);
+    await flush(); await flush();
+    return view;
+  }
+  async function sendCommand(command: string) {
+    const input = requiredElement(document, '.cc-text');
+    fireEvent.change(input, { target: { value: command } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    await flush();
+  }
+  it.each(['/model', '/effort', '/goal', '/goal edit'])('does not replay %s after closing or remounting, but accepts a new command', async (command) => {
+    await openControls();
+    const model = !command.startsWith('/goal');
+    const selector = model ? '.agent-model-menu' : '.conversation-goal-menu';
+    const close = () => fireEvent.click(requiredElement(document,
+      model ? '.agent-model-backdrop' : '.conversation-goal-sheet-x'));
+    await sendCommand(command);
+    expect(document.querySelector(selector)).toBeTruthy();
+    close(); await flush();
+    expect(document.querySelector(selector)).toBeNull();
+    act(() => windowBarProps().onLensChange?.('terminal')); await flush();
+    act(() => windowBarProps().onLensChange?.('chat')); await flush();
+    expect(document.querySelector(selector)).toBeNull();
+    await sendCommand(command);
+    expect(document.querySelector(selector)).toBeTruthy();
+    close(); await flush();
+    if (model) {
+      fireEvent.click(screen.getByRole('button', { name: '设置模型、服务等级和思考强度' }));
+      expect(document.querySelector(selector)).toBeTruthy();
+    }
+  });
+
+  it.each(['model', 'goal'] as const)('isolates pending %s requests across sessions and ignores old consumption', async (kind) => {
+    controlRequestProbe.holdConsumption = true;
+    await openControls();
+    await sendCommand(`/${kind}`);
+    const old = controlRequestProbe[kind]!;
+    expect(old.id).toBeGreaterThan(0);
+    await act(async () => { await windowBarProps().onSelectPane('%74'); });
+    await flush();
+    expect(controlRequestProbe.model?.id).toBe(0);
+    expect(controlRequestProbe.goal?.id).toBe(0);
+    const other = kind === 'model' ? 'goal' : 'model';
+    await sendCommand(`/${other}`);
+    expect(controlRequestProbe[kind]?.id).toBe(0);
+    const otherPending = controlRequestProbe[other]!;
+    expect(otherPending.id).toBeGreaterThan(old.id);
+    await sendCommand(`/${kind}`);
+    const current = controlRequestProbe[kind]!;
+    expect(current.id).toBeGreaterThan(otherPending.id);
+    act(() => old.consume?.(old.id));
+    expect(controlRequestProbe[kind]?.id).toBe(current.id);
+    // Both command types may be pending; acknowledging one must preserve the other.
+    act(() => otherPending.consume?.(otherPending.id));
+    expect(controlRequestProbe[other]?.id).toBe(0);
+    expect(controlRequestProbe[kind]?.id).toBe(current.id);
+    await sendCommand(`/${kind}`);
+    const newer = controlRequestProbe[kind]!;
+    expect(newer.id).toBeGreaterThan(current.id);
+    act(() => current.consume?.(current.id));
+    expect(controlRequestProbe[kind]?.id).toBe(newer.id);
+    act(() => newer.consume?.(newer.id));
+    expect(controlRequestProbe[kind]?.id).toBe(0);
   });
 });

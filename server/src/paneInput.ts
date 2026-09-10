@@ -54,6 +54,13 @@ export function interruptPane(commands: PaneInputCommands, paneId: string): Prom
   });
 }
 
+export function interruptClaudePane(commands: PaneInputCommands, paneId: string): Promise<void> {
+  return serializePaneInput(paneId, async () => {
+    await commands.exitCopyModeIfActive(paneId);
+    await commands.sendKey(paneId, 'Escape');
+  });
+}
+
 export function sendPaneChoice(
   commands: PaneInputCommands,
   paneId: string,

@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { classifyClaude } from '../../src/agents/claude.js';
+import { ClaudeNativeTailReader } from '../../src/agents/claudeNativeTail.js';
 import type {
   ForegroundProcessIdentity,
   LivePane,
@@ -51,6 +52,7 @@ interface TrackedClient {
 }
 
 export interface ClaudeHookBridgeConnectorOptions {
+  nativeTail?: ClaudeNativeTailReader;
   socketPath: string;
   credentialFile: string;
   stateDirectory: string;
@@ -254,6 +256,7 @@ function looksLikeClaude(pane: LivePane, foreground: ForegroundProcessIdentity):
 // Bridges the existing async Claude Hooks without ever blocking Claude itself. Hook subprocesses only
 // commit files; this coordinator owns socket lifetime, per-session replacement and durable acknowledgements.
 export class ClaudeHookBridgeConnector {
+  readonly #nativeTail: ClaudeNativeTailReader;
   readonly #socketPath: string;
   readonly #credentialFile: string;
   readonly #stateDirectory: string;
@@ -280,6 +283,7 @@ export class ClaudeHookBridgeConnector {
   #closed = false;
 
   constructor({
+    nativeTail = new ClaudeNativeTailReader(),
     socketPath,
     credentialFile,
     stateDirectory,
@@ -300,6 +304,7 @@ export class ClaudeHookBridgeConnector {
       throw new TypeError('Claude Hook Bridge Connector requires private paths and Runtime identity sources');
     }
     this.#socketPath = socketPath;
+    this.#nativeTail = nativeTail;
     this.#credentialFile = credentialFile;
     this.#stateDirectory = stateDirectory;
     this.#hookStateFile = hookStateFile;
@@ -331,6 +336,7 @@ export class ClaudeHookBridgeConnector {
   async close(): Promise<void> {
     if (this.#closed) return;
     this.#closed = true;
+    this.#nativeTail.clear();
     if (this.#timer) clearTimeout(this.#timer);
     this.#timer = undefined;
     for (const tracked of this.#clients.values()) tracked.client.close();
@@ -435,6 +441,7 @@ export class ClaudeHookBridgeConnector {
     }
 
     const currentStatePanes = new Set<string>();
+    const currentNativeSessions = new Set<string>();
     const persistedSnapshots = new Map<string, boolean>();
     for (const [paneId, row] of state) {
       const pane = paneMap.get(paneId);
@@ -445,6 +452,7 @@ export class ClaudeHookBridgeConnector {
       currentStatePanes.add(paneId);
       // A cancelled old-session ACK settles asynchronously; switch clients once it has released the pane.
       const sessionId = optionalSession(row.payload);
+      if (sessionId && row.src !== 'end') currentNativeSessions.add(sessionId);
       const pending = this.#pendingAcks.get(paneId);
       if (pending && pending.sessionId !== sessionId) continue;
       const eventId = row.sequence === undefined ? undefined : `claude-hook-${row.sequence}`;
@@ -454,6 +462,9 @@ export class ClaudeHookBridgeConnector {
         sourceOccurredAt: row.ts,
         payload: row.payload,
       });
+      if (row.src !== 'end' && this.#nativeTail.read(row.payload, row.ts, Date.now()).settled) {
+        projection.snapshot = { availability: 'ready' };
+      }
       const snapshot = gaps.has(paneId) ? {
         ...projection.snapshot,
         availability: 'degraded',
@@ -467,6 +478,8 @@ export class ClaudeHookBridgeConnector {
         }),
       );
     }
+
+    this.#nativeTail.retain(currentNativeSessions);
 
     const liveClaudePanes = new Set(currentStatePanes);
     for (const pane of panes) {

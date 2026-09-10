@@ -143,6 +143,24 @@ describe('Pi Inbox Bridge vertical binding', () => {
     expect((store.load() as PersistedInboxState).runs[0]?.events).toHaveLength(1);
   });
 
+  it.each(['ready', 'degraded', 'unavailable'])('only available explicit empty watermarks supersede the equal event (%s)', async (availability) => {
+    const h = await setup();
+    const channel = h.bridge.connect(h.lease).channel('inbox');
+    const binding = new PiInboxBridgeCoordinator({ host: h.bridge.hostFor('pi'), projector: h.projector,
+      sourceEventSequence: (id) => /^seq-[0-9]+$/.test(id) ? Number(id.slice(4)) : null,
+    });
+    coordinators.push(binding);
+    await channel.setSnapshot({ availability: 'ready', sourceSequence: 1, current: { state: 'working' } });
+    binding.start();
+    await binding.bind(h.lease);
+    await channel.setSnapshot({ availability, sourceSequence: 2 });
+    await channel.publish({ eventId: 'seq-2', payload: { kind: 'set', state: 'done', eventId: 'seq-2' } }, { delivery: 'durable' });
+    await vi.waitFor(() => expect(h.inbox.read().availability.pi?.availability).toBe(availability));
+    await channel.publish({ eventId: 'seq-3', payload: { kind: 'set', state: 'done', eventId: 'seq-3' } }, { delivery: 'durable' });
+    await vi.waitFor(() => expect(h.inbox.read().terminalNotifications.some((row) => row.eventId === 'seq-3')).toBe(true));
+    expect(h.inbox.read().terminalNotifications.some((row) => row.eventId === 'seq-2')).toBe(availability === 'unavailable');
+  });
+
   it('replays a durable terminal event captured while the Handmux Server was fully offline', async () => {
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'handmux-pi-offline-inbox-'));
     tempDirectories.push(directory);

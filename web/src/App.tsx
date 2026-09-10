@@ -1963,6 +1963,7 @@ export default function App() {
       conversationSubmissionProjection.timeline,
     ),
   }), [canonicalConversationItems, conversationSubmissionProjection.timeline, genericConversation]);
+  const conversationControlRequestSequence = useRef(0);
   const [conversationControlRequest, setConversationControlRequest] = useState({
     identity: '', goal: 0, goalEdit: 0, model: 0,
   });
@@ -1970,6 +1971,14 @@ export default function App() {
     ? `${normalizedConversationIdentity.agentId}\0${normalizedConversationIdentity.sessionId}` : '';
   const requestForCurrentConversation = conversationControlRequest.identity === conversationRequestIdentity
     ? conversationControlRequest : { identity: conversationRequestIdentity, goal: 0, goalEdit: 0, model: 0 };
+  const consumeModelOpenRequest = useCallback((requestId: number): void => {
+    setConversationControlRequest((current) => current.identity === conversationRequestIdentity
+      && current.model === requestId ? { ...current, model: 0 } : current);
+  }, [conversationRequestIdentity]);
+  const consumeGoalOpenRequest = useCallback((requestId: number): void => {
+    setConversationControlRequest((current) => current.identity === conversationRequestIdentity
+      && current.goal === requestId ? { ...current, goal: 0, goalEdit: 0 } : current);
+  }, [conversationRequestIdentity]);
   const handleConversationSlash = useCallback(async (text: string): Promise<boolean> => {
     const match = text.trim().match(/^\/(model|effort|goal|compact|clear)(?:\s+([\s\S]+))?$/i);
     if (!match) return false;
@@ -1978,8 +1987,11 @@ export default function App() {
     if (command === 'model' || command === 'effort') {
       if (!conversationControlCapabilities?.sessionControl) return false;
       if (!argument) {
+        const requestId = ++conversationControlRequestSequence.current;
         setConversationControlRequest((current) => ({
-          ...current, identity: conversationRequestIdentity, model: current.model + 1,
+          ...(current.identity === conversationRequestIdentity
+            ? current : { goal: 0, goalEdit: 0, model: 0 }),
+          identity: conversationRequestIdentity, model: requestId,
         }));
         return true;
       }
@@ -1990,10 +2002,12 @@ export default function App() {
       if (!conversationControlCapabilities?.conversationGoal) return false;
       const action = argument.toLowerCase();
       if (!argument || action === 'edit') {
+        const request = ++conversationControlRequestSequence.current;
         setConversationControlRequest((current) => {
-          const request = current.goal + 1;
           return {
-            ...current, identity: conversationRequestIdentity, goal: request,
+            ...(current.identity === conversationRequestIdentity
+              ? current : { goal: 0, goalEdit: 0, model: 0 }),
+            identity: conversationRequestIdentity, goal: request,
             goalEdit: action === 'edit' ? request : 0,
           };
         });
@@ -2893,6 +2907,7 @@ export default function App() {
                     || conversationControlCapabilities?.conversationPlan)
                     ? <AgentConversationMilestoneControls controller={agentConversationControls}
                       goalOpenRequest={requestForCurrentConversation.goal}
+                      onGoalOpenRequestConsumed={consumeGoalOpenRequest}
                       goalEditRequest={requestForCurrentConversation.goalEdit}
                       chatTone={chatTone} keyboardInset={inset} /> : null}
                 </>}
@@ -2912,7 +2927,8 @@ export default function App() {
                   ? <AgentModelControl control={agentSessionControl} busy={currentKind === 'working'
                     || currentKind === 'permission' || currentKind === 'compacting'
                     || genericConversation.items.some((item) => item.provisional)}
-                    openRequest={requestForCurrentConversation.model} />
+                    openRequest={requestForCurrentConversation.model}
+                    onOpenRequestConsumed={consumeModelOpenRequest} />
                   : undefined}
                 chatTone={chatTone}
                 keyboardInset={inset}

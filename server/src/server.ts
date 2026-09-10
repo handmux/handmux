@@ -37,7 +37,7 @@ import { apiErrorBoundary, apiRequestContext } from './apiErrors.js';
 import { RuntimeHealth } from './healthProtocol.js';
 import { healthRoutes } from './routes/health.js';
 import { createBuiltinAgentRuntime } from './agent-runtime/builtinRuntime.js';
-import { interruptPane, sendPaneChoice, sendPanePrompt } from './paneInput.js';
+import { interruptClaudePane, sendPaneChoice, sendPanePrompt } from './paneInput.js';
 import {
   createLocalAgentProcessContext,
   TmuxAgentPaneSource,
@@ -158,7 +158,7 @@ const agentRuntime = createBuiltinAgentRuntime({
   claudeEvents: events,
   claudeConversationControl: {
     sendPrompt: (paneId, text, guard) => sendPanePrompt(commands, paneId, text, guard),
-    interrupt: (paneId) => interruptPane(commands, paneId),
+    interrupt: (paneId) => interruptClaudePane(commands, paneId),
   },
   claudeInteractionControl: {
     capturePlain: (paneId) => commands.capturePlain(paneId),
@@ -181,6 +181,7 @@ const agentRuntime = createBuiltinAgentRuntime({
   },
 });
 const claudeInboxBridge = new ClaudeHookBridgeConnector({
+  nativeTail: events.nativeTail,
   socketPath: agentRuntime.socketPath,
   credentialFile: path.join(agentRuntimeDirectory, 'bridge-credential.json'),
   stateDirectory: path.join(agentRuntimeDirectory, 'connectors', 'claude'),

@@ -1,4 +1,3 @@
-import fs from 'node:fs';
 import path from 'node:path';
 import { isSessionUuid } from './scanUtils.js';
 
@@ -12,30 +11,15 @@ const record = (value: unknown): Record<string, unknown> | null => (
 // while another user turn is being appended, which would look like an additional completion to Core.
 export function claudeLocalCommandCompletion(
   payload: Record<string, unknown>, after: number, now: number,
+  rows: readonly (Record<string, unknown> | null)[],
 ): string | null | undefined {
   const sessionId = payload.session_id;
   const file = payload.transcript_path;
   if (!isSessionUuid(sessionId) || typeof file !== 'string'
     || path.basename(file) !== `${sessionId}.jsonl`) return undefined;
-  let lines: string[];
-  try {
-    const fd = fs.openSync(file, 'r');
-    try {
-      const size = fs.fstatSync(fd).size;
-      const length = Math.min(size, 65536);
-      const buffer = Buffer.alloc(length);
-      const read = fs.readSync(fd, buffer, 0, length, size - length);
-      const text = buffer.subarray(0, read).toString('utf8');
-      if (text && !text.endsWith('\n')) return null;
-      lines = text.split('\n');
-      if (size > length) lines.shift();
-    } finally { fs.closeSync(fd); }
-  } catch { return null; }
   const native: Record<string, unknown>[] = [];
-  for (let index = lines.length - 1; index >= 0 && native.length < 2; index--) {
-    if (!lines[index]?.trim()) continue;
-    let item;
-    try { item = record(JSON.parse(lines[index]!)); } catch { return null; }
+  for (let index = rows.length - 1; index >= 0 && native.length < 2; index--) {
+    const item = rows[index];
     if (!item) return null;
     if (typeof item.type === 'string' && METADATA.has(item.type)) continue;
     const timestamp = typeof item.timestamp === 'string' ? Date.parse(item.timestamp) : NaN;

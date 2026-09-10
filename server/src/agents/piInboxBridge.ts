@@ -86,6 +86,7 @@ export class PiInboxBridgeError extends Error {
 }
 
 interface ParsedSnapshot {
+  cursor?: string;
   result: InboxRestoreResult;
   current: PiInboxBridgeItem | undefined;
   sourceSequence?: number;
@@ -204,6 +205,7 @@ function parseSnapshot(
     ...current,
   }] : [];
   return {
+    cursor: `bridge:${sequence}:empty`,
     current: current ?? undefined,
     ...(typeof value.sourceSequence === 'number' ? { sourceSequence: value.sourceSequence } : {}),
     result: {
@@ -441,7 +443,9 @@ export class BridgeInboxCoordinator {
         ? this.#sourceEventSequence(binding.baseline.current.eventId) : null);
     // An upgrade may expose a pre-existing durable event before any versioned snapshot. It must
     // progress without publishing an unproven old status or waiting for a snapshot behind itself.
-    return current == null || sequence < current;
+    return current == null || sequence < current
+      || (binding.baseline?.sourceSequence === sequence
+        && binding.baseline.result.availability !== 'unavailable' && !binding.baseline.current);
   }
 
   async #submitHistory(binding: RuntimeBinding, operation: InboxOperation): Promise<{
@@ -468,14 +472,14 @@ export class BridgeInboxCoordinator {
     return pending;
   }
 
-  #restore(result: () => InboxRestoreResult): Promise<void> {
-    const pending = this.#restoreTail.then(() => this.#projector.restore(result()).then(() => undefined));
+  #restore(result: () => InboxRestoreResult | Promise<InboxRestoreResult>): Promise<void> {
+    const pending = this.#restoreTail.then(async () => this.#projector.restore(await result()).then(() => undefined));
     this.#restoreTail = pending.catch(() => {});
     return pending;
   }
 
   #restoreBindings(): Promise<void> {
-    return this.#restore(() => {
+    return this.#restore(async () => {
       const bindings = [...this.#bindings.values()].filter((binding) => binding.phase !== 'closed');
       const available = bindings.filter((binding) => (
         binding.baselineReady && binding.baseline?.result.availability !== 'unavailable'
@@ -492,6 +496,16 @@ export class BridgeInboxCoordinator {
         };
       }
       const baselines = available.map((binding) => binding.baseline!);
+      // A partial restore preserves omitted runs. Claude's explicit versioned empty snapshot proves
+      // this particular pane is clear even when a different pane or its historical spool is degraded.
+      if (this.#sourceEventSequence) for (const binding of available) {
+        const baseline = binding.baseline!;
+        if (baseline.sourceSequence === undefined || baseline.current || !baseline.cursor) continue;
+        const cleared = await binding.projector.submit({ kind: 'clear', source: {
+          sourceId: this.#sourceId, cursor: baseline.cursor,
+        } });
+        if (!cleared.accepted) throw new PiInboxBridgeError(`${this.#label} Inbox empty snapshot could not be persisted`);
+      }
       const degraded = baselines.find((baseline) => baseline.result.availability === 'degraded');
       return {
         availability: degraded || pending.length || unavailable.length ? 'degraded' : 'ready',

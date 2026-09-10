@@ -15,10 +15,12 @@ export default function AgentModelControl({
   control,
   busy,
   openRequest = 0,
+  onOpenRequestConsumed,
 }: {
   control: AgentSessionControlController;
   busy: boolean;
   openRequest?: number;
+  onOpenRequestConsumed?: (requestId: number) => void;
 }) {
   const [open, setOpen] = useState(false);
   useBackButton(open, () => setOpen(false));
@@ -29,7 +31,11 @@ export default function AgentModelControl({
   useEffect(() => {
     if (control.status === 'unavailable') setOpen(false);
   }, [control.status]);
-  useEffect(() => { if (openRequest > 0) setOpen(true); }, [openRequest]);
+  useEffect(() => {
+    if (openRequest <= 0) return;
+    setOpen(true);
+    onOpenRequestConsumed?.(openRequest);
+  }, [openRequest, onOpenRequestConsumed]);
   if (control.status === 'unavailable') return null;
 
   const save = (patch: AgentModelControlPatch): void => {

@@ -6,7 +6,7 @@ import { resolveVersionedComms } from './agents/claude.js';
 import { resolveCodexComms } from './agents/codex.js';
 import { defaultRun } from './agents/scanUtils.js';
 import { claude } from './agents/claude.js';
-import { claudeLocalCommandCompletion } from './agents/claudeLocalCommand.js';
+import { ClaudeNativeTailReader } from './agents/claudeNativeTail.js';
 import type { ClaudeClassification, ClaudeEventKind } from './agents/claude.js';
 import type { ExecutableVerdict, ProcessPane } from './agents/processIdentity.js';
 import type { RunCommand } from './agents/scanUtils.js';
@@ -72,6 +72,7 @@ type Watch = (
 ) => Watcher;
 type TimerHandle = unknown;
 interface ClaudeEventsOptions {
+  nativeTail?: ClaudeNativeTailReader;
   commands?: EventCommands;
   push?: EventPush | null;
   codexApp?: CodexInbox | null;
@@ -143,23 +144,6 @@ const PERM_RESOLVED_GUARD_MS = 1500;
 
 // Read a transcript file's mtime in ms, or null if it's missing/unreadable (→ can't tell, keep 需要你).
 function defaultStatMtime(file: string): number | null { try { return fs.statSync(file).mtimeMs; } catch { return null; } }
-
-// Read the LAST complete JSON line of a (possibly multi-MB) transcript, or null if unreadable. Reads only a
-// bounded tail so cost is one small read regardless of transcript size; a last line longer than the window
-// won't parse cleanly, but the only line we care to recognise (the interrupt marker) is tiny.
-function defaultReadTail(file: string): string | null {
-  try {
-    const fd = fs.openSync(file, 'r');
-    try {
-      const size = fs.fstatSync(fd).size;
-      const len = Math.min(size, 65536);
-      const buf = Buffer.alloc(len);
-      fs.readSync(fd, buf, 0, len, size - len);
-      const lines = buf.toString('utf8').split('\n').filter((line) => line.trim());
-      return lines.at(-1) ?? null;
-    } finally { fs.closeSync(fd); }
-  } catch { return null; }
-}
 
 // Pure: has the user resolved the permission prompt recorded by `rec`, judged by its transcript mtime?
 // True only once the transcript has grown past the event ts by more than the guard. Exported for testing.
@@ -299,13 +283,14 @@ function managedStates(value: unknown): Record<string, ManagedCodexState> {
 // The hook is the sole writer; the server reads the file fresh on every getStates and on every file
 // change (the watcher, for push). No persisted state of our own — the file IS the persistence.
 export function createClaudeEvents({
+  nativeTail = new ClaudeNativeTailReader(),
   commands,
   push,
   codexApp = null,
   file = DEFAULT_STATE_FILE,
   now = () => Date.now(),
   statMtime = defaultStatMtime,
-  readTail = defaultReadTail,
+  readTail,
   run = defaultRun,
   onStateChange = () => {},
   watch = fs.watch,
@@ -420,12 +405,16 @@ export function createClaudeEvents({
       const agent = rec.agent === undefined ? getAgent('claude') : getAgent(rec.agent);
       if (!agent) continue;
       let c = classifyRecord(rec);
+      const native = rec.src === 'end' ? null : nativeTail.read(rec.payload, rec.ts, now());
+      if (native?.settled) c = null;
       // A 需要你 the user already resolved leaves no closing hook (see PERM_RESOLVED_GUARD_MS). statMtime
       // gates the cheap "still pending" path; only once the transcript has grown past the event do we pay the
       // bounded tail read to tell a RESUME (approve/deny → 进行中) from an INTERRUPT (ESC → neutral present).
       if (c && c.kind === 'permission') {
         const tp = typeof rec.payload.transcript_path === 'string' ? rec.payload.transcript_path : null;
-        if (tp && permissionResolved(rec, statMtime(tp))) c = resolvedPermissionKind(readTail(tp));
+        if (tp && permissionResolved(rec, statMtime(tp))) {
+          c = readTail ? resolvedPermissionKind(readTail(tp)) : { kind: 'working', msg: '' };
+        }
       } else if (c && c.kind === 'working') {
         // ESC-interrupt during a turn leaves the last hook as the stale 'prompt' (working) — no Stop fires,
         // so working would otherwise stick until WORKING_TTL_MS (2h), pinning the composer's send→stop toggle.
@@ -434,7 +423,7 @@ export function createClaudeEvents({
         // definitive so no guard window is needed; an unreadable stat/tail can't tell → keep working.
         const tp = typeof rec.payload.transcript_path === 'string' ? rec.payload.transcript_path : null;
         const mtime = tp ? statMtime(tp) : null;
-        if (tp && typeof mtime === 'number' && mtime > rec.ts && isInterruptTail(readTail(tp))) c = null;
+        if (readTail && tp && typeof mtime === 'number' && mtime > rec.ts && isInterruptTail(readTail(tp))) c = null;
       } else if (c && c.kind === 'compacting') {
         // A no-op /compact fires no PostCompact; it writes its <local-command-stdout> at once. Once the
         // transcript has grown past the PreCompact event and its tail is that stdout, the /compact is done
@@ -442,7 +431,14 @@ export function createClaudeEvents({
         // showing for its whole run. Unreadable stat/tail → can't tell → keep 压缩中 (the TTL is the backstop).
         const tp = typeof rec.payload.transcript_path === 'string' ? rec.payload.transcript_path : null;
         const mtime = tp ? statMtime(tp) : null;
-        if (tp && typeof mtime === 'number' && mtime > rec.ts && isLocalCommandStdout(readTail(tp))) c = null;
+        if (tp && typeof mtime === 'number' && mtime > rec.ts) {
+          const last = native?.lastRecord;
+          const content = recordOf(last?.message)?.content;
+          const stdout = last?.sessionId === rec.payload.session_id && last?.isSidechain !== true
+            && typeof last?.timestamp === 'string' && Date.parse(last.timestamp) > rec.ts
+            && typeof content === 'string' && /^\s*<local-command-stdout>[\s\S]*<\/local-command-stdout>\s*$/.test(content);
+          if (readTail ? isLocalCommandStdout(readTail(tp)) : stdout) c = null;
+        }
       }
       const lp = live ? live.get(pane) : null;
       // Dropped when tmux says the pane is gone or no longer running THIS agent (hard kill / crash /
@@ -545,6 +541,7 @@ export function createClaudeEvents({
     } catch { /* fs.watch unsupported → push falls back to evaluation on each /states poll */ }
   }
   function stop(): void {
+    nativeTail.clear();
     if (watcher) { watcher.close(); watcher = null; }
     if (deb !== null) clearTimer(deb);
     deb = null;
@@ -587,6 +584,9 @@ export function createClaudeEvents({
   function paneKind(pane: string): ClaudeEventKind | null {
     const rec = readStateFile(file)[pane];
     if (!rec || (rec.agent !== undefined && rec.agent !== 'claude')) return null;
+    if (rec.src === 'end') {
+      if (typeof rec.payload.session_id === 'string') nativeTail.release(rec.payload.session_id);
+    } else if (nativeTail.read(rec.payload, rec.ts, now()).settled) return 'idle';
     // Activity is not the Inbox roster: neutral lifecycle edges deliberately create no Inbox card,
     // but a completed manual /compact must release the conversation queue. Automatic compaction
     // continues the current turn, so it must not admit another prompt between compaction and generation.
@@ -606,13 +606,15 @@ export function createClaudeEvents({
   function paneCompletionToken(pane: string): string | null {
     const rec = readStateFile(file)[pane];
     if (!rec || (rec.agent !== undefined && rec.agent !== 'claude')) return null;
+    const native = rec.src === 'end' ? undefined : nativeTail.read(rec.payload, rec.ts, now());
+    if (native?.settled) return native.settled;
     // An idle startup/resume/clear is the first dispatch baseline. Give it a stable token too:
     // the queue can then detect a fast completion even when no poll observed its busy phase.
     const baseline = rec.src === 'start' && ['startup', 'clear', 'resume'].includes(String(rec.payload.source));
     const kind = (rec.src === 'compact' && rec.payload.trigger === 'manual') || baseline
       ? 'idle' : classifyRecord(rec)?.kind ?? null;
     if (kind !== 'done' && kind !== 'error' && kind !== 'end' && kind !== 'idle') return null;
-    const nativeCompletion = claudeLocalCommandCompletion(rec.payload, rec.ts, now());
+    const nativeCompletion = native?.localCommand;
     if (nativeCompletion !== undefined) return nativeCompletion;
     return Number.isFinite(rec.ts) && rec.ts >= 0
       ? `claude-${baseline ? 'baseline' : 'completed'}:${rec.ts}${rec.sequence === undefined ? '' : `:${rec.sequence}`}`
@@ -621,6 +623,6 @@ export function createClaudeEvents({
 
   return {
     getStates, identifyPaneAgents, start, stop, paneSession, paneAgent,
-    paneKind, paneCompletionToken,
+    paneKind, paneCompletionToken, nativeTail,
   };
 }
