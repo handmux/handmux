@@ -1,5 +1,7 @@
 import fs from 'node:fs';
 import net from 'node:net';
+import { promises as fsp } from 'node:fs';
+import { createLocalAgentProcessContext } from '../src/agent-runtime/tmuxRuntime.js';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -10,7 +12,7 @@ import {
 } from '../src/agent-runtime/bridgeTransport.js';
 import type { BridgeTransportServerOptions } from '../src/agent-runtime/bridgeTransport.js';
 import type { BridgeHostEvent } from '../src/agent-runtime/bridgeTypes.js';
-import { AgentRunRuntime } from '../src/agent-runtime/run.js';
+import { AgentRunError, AgentRunRuntime } from '../src/agent-runtime/run.js';
 
 const directories: string[] = [];
 const servers: LocalAgentBridgeTransportServer[] = [];
@@ -32,6 +34,7 @@ async function within<T>(promise: Promise<T>, label: string): Promise<T> {
 }
 
 afterEach(async () => {
+  vi.restoreAllMocks();
   await Promise.all(servers.splice(0).map((server) => server.close()));
   await Promise.all(bridges.splice(0).map((bridge) => bridge.close()));
   for (const directory of directories.splice(0)) {
@@ -42,17 +45,21 @@ afterEach(async () => {
 async function setup({
   handshakeTimeoutMs,
   authorizeDelayMs = 0,
+  verify = async () => true,
+  verifyTimeoutMs,
   connected,
 }: {
   handshakeTimeoutMs?: number;
   authorizeDelayMs?: number;
+  verify?: () => Promise<boolean>;
+  verifyTimeoutMs?: number;
   connected?: BridgeTransportServerOptions['connected'];
 } = {}) {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'handmux-bridge-transport-'));
   directories.push(directory);
   const socketPath = path.join(directory, 'bridge.sock');
-  const runtime = new AgentRunRuntime({ newRunId: () => 'run-1' });
-  const controller = runtime.controller('pi', async () => true);
+  const runtime = new AgentRunRuntime({ newRunId: () => 'run-1', ...(verifyTimeoutMs === undefined ? {} : { verifyTimeoutMs }) });
+  const controller = runtime.controller('pi', verify);
   const bridge = new LocalAgentBridge({
     runs: runtime, adapterIds: ['pi'], newConnectionId: () => `connection-${Date.now()}`,
   });
@@ -83,6 +90,49 @@ async function setup({
 }
 
 describe('LocalAgentBridge Unix transport', () => {
+  it('surfaces authenticated attachment rejection to the connecting client', async () => {
+    const h = await setup();
+    h.authorize.mockRejectedValueOnce(new AgentRunError(
+      'attachment-unverified', 'Agent attachment no longer matches the live process',
+    ));
+    await expect(connectBridgeTransport({
+      socketPath: h.socketPath, adapterId: 'pi', candidate: h.candidate, authToken: AUTH_TOKEN,
+    })).rejects.toMatchObject({ code: 'attachment-unverified', message: expect.stringContaining('live process') });
+  });
+
+  it('connects through Linux process verification without waiting for lsof', async () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('linux');
+    vi.spyOn(fsp, 'readlink').mockResolvedValue('/opt/pi');
+    const run = vi.fn(async (command: string, args: string[]) => {
+      if (command === 'lsof') return await new Promise<string>(() => {});
+      if (command === 'ps' && args.includes('lstart=')) return 'Thu Sep 10 10:00:00 2026';
+      return '101 1 S+ 01:00 ttys001 pi';
+    });
+    const context = createLocalAgentProcessContext({ run });
+    const h = await setup({ verifyTimeoutMs: 100, verify: async () => {
+      const identity = await context.inspectForeground({
+        paneId: '%1', sessionName: 'test', windowId: '@1', windowName: 'test',
+        currentCommand: 'pi', tty: '/dev/ttys001',
+      });
+      return identity?.pid === 101 && identity.executable === '/opt/pi';
+    } });
+    const client = await connectBridgeTransport({
+      socketPath: h.socketPath, adapterId: 'pi', candidate: h.candidate, authToken: AUTH_TOKEN,
+    });
+    expect(client.run.paneId).toBe('%1');
+    expect(run.mock.calls.some(([command]) => command === 'lsof')).toBe(false);
+    client.close();
+  });
+
+  it('reports a real verifier timeout distinctly from identity mismatch', async () => {
+    const h = await setup({ verifyTimeoutMs: 5, verify: () => new Promise(() => {}) });
+    await expect(connectBridgeTransport({
+      socketPath: h.socketPath, adapterId: 'pi', candidate: h.candidate, authToken: AUTH_TOKEN,
+    })).rejects.toMatchObject({
+      code: 'attachment-verification-timeout', message: expect.stringContaining('5 ms'),
+    });
+  });
+
   it('authenticates one run and multiplexes snapshot and event channels over a private socket', async () => {
     const h = await setup();
     expect(fs.statSync(h.socketPath).mode & 0o777).toBe(0o600);
@@ -196,6 +246,7 @@ describe('LocalAgentBridge Unix transport', () => {
     });
     await new Promise<void>((resolve) => socket.once('close', () => resolve()));
     expect(h.authorize).not.toHaveBeenCalled();
+    expect(buffer.trim().split('\n').map((line) => JSON.parse(line).type)).toEqual(['challenge']);
   });
 
   it('times out an incomplete handshake on both peers', async () => {
@@ -257,6 +308,26 @@ describe('LocalAgentBridge Unix transport', () => {
     }), 'connection activation timeout')).rejects.toThrow(/closed during handshake/i);
     expect(connectionSignal?.aborted).toBe(true);
     expect(h.runtime.currentForPane('%1')?.signal.aborted).toBe(false);
+  });
+
+  it('reports activation rejection and closes the connection while preserving the logical run', async () => {
+    let connectionSignal: AbortSignal | undefined;
+    const h = await setup({
+      connected: async (_lease, connection) => {
+        connectionSignal = connection.signal;
+        throw new Error('Connector activation could not read its session');
+      },
+    });
+    await expect(within(connectBridgeTransport({
+      socketPath: h.socketPath,
+      authToken: AUTH_TOKEN,
+      adapterId: 'pi',
+      candidate: h.candidate,
+    }), 'connection activation rejection')).rejects.toThrow('Connector activation could not read its session');
+    await vi.waitFor(() => expect(connectionSignal?.aborted).toBe(true));
+    const lease = h.runtime.currentForPane('%1');
+    expect(lease?.ref.runId).toBe('run-1');
+    expect(lease?.signal.aborted).toBe(false);
   });
 
   it('refuses a shared parent directory without changing its permissions', async () => {

@@ -1,7 +1,11 @@
-import { describe, it, expect } from 'vitest';
+import { afterEach, beforeEach, describe, it, expect, vi } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+
+// Process tables below contain fixture PIDs, never identities from the host running this suite.
+beforeEach(() => { vi.spyOn(fs.promises, 'readlink').mockRejectedValue(new Error('fixture proc unavailable')); });
+afterEach(() => vi.restoreAllMocks());
 import { AGENTS, getAgent, agentForProc } from '../src/agents/index.js';
 import { resolveVersionedComms } from '../src/agents/claude.js';
 import { resolveCodexComms } from '../src/agents/codex.js';
@@ -317,11 +321,11 @@ describe('resolveVersionedComms (native-install Claude: comm = bare version stri
     expect((await resolveVersionedComms(mk(), run, verdicts, { now: () => now }))[0].cmd).toBe('claude');
     expect(lsofCalls).toBe(2);
   });
-  it('Linux fallback: lsof empty → /proc readlink (best effort, never throws)', async () => {
+  it('keeps ambiguous identity when executable lookups are unavailable', async () => {
     const panes = [{ id: '%1', cmd: '2.1.196', tty: 'pts/3' }];
     const run = RUN(['pts/3 4242 S+'], {});
     await resolveVersionedComms(panes, run);
-    expect(['2.1.196', 'claude']).toContain(panes[0].cmd); // platform-dependent; never throws
+    expect(panes[0].cmd).toBe('2.1.196');
   });
 });
 

@@ -1,9 +1,13 @@
-import { describe, it, expect, vi } from 'vitest';
+import { afterEach, beforeEach, describe, it, expect, vi } from 'vitest';
 import { tmpHome } from './tmphome.js';
 import { classifyEvent, createClaudeEvents, permissionResolved, resolvedPermissionKind, isLocalCommandStdout } from '../src/claudeEvents.js';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+
+// Process tables below contain fixture PIDs, never identities from the host running this suite.
+beforeEach(() => { vi.spyOn(fs.promises, 'readlink').mockRejectedValue(new Error('fixture proc unavailable')); });
+afterEach(() => vi.restoreAllMocks());
 
 interface TestLivePane {
   id: string;

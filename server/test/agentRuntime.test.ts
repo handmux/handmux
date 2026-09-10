@@ -580,7 +580,7 @@ describe('AgentRuntime composition root', () => {
       authToken: AUTH_TOKEN,
       adapterId: 'pi',
       candidate: candidate({ process: { pid: 999, startedAt: 1_000, tty: '/dev/ttys001' } }),
-    })).rejects.toThrow(/closed during handshake/i);
+    })).rejects.toMatchObject({ code: 'attachment-unverified', message: expect.stringContaining('live process') });
 
     const client = await connectBridgeTransport({
       socketPath: runtime.socketPath,
