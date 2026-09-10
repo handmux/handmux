@@ -9,6 +9,7 @@ import {
   findClaudeSessionFile,
 } from '../src/agents/claudeConversation.js';
 import { sendPanePrompt, serializePaneInput } from '../src/paneInput.js';
+import { parseTranscript } from '../src/transcriptParse.js';
 import type { TranscriptMessage } from '../src/transcriptParse.js';
 import { createTranscriptReader } from '../src/transcriptReader.js';
 import type { TranscriptReader } from '../src/transcriptReader.js';
@@ -88,8 +89,8 @@ describe('Claude Conversation adapter', () => {
       sessions: { paneSession: () => ({ sessionId: SESSION, transcriptPath: file, agent: 'claude' }) },
     });
     const page = await adapter.readNativePage({ agentId: 'claude', sessionId: SESSION }, { limit: 10 });
-    expect(page.items.map((item) => item.kind)).toEqual(['notice', 'compaction']);
-    expect(page.items[0]).toMatchObject({ code: 'slash_command', message: '/compact' });
+    expect(page.items.map((item) => item.kind)).toEqual(['message', 'compaction']);
+    expect(page.items[0]).toMatchObject({ kind: 'message', role: 'user', content: [{ type: 'text', text: '/compact' }] });
     expect(page.items[1]).toMatchObject({ summary: 'retained summary' });
   });
 
@@ -117,7 +118,7 @@ describe('Claude Conversation adapter', () => {
     expect(refreshed.page.viewId).not.toBe(first.page.viewId);
     const command = await service.readPage(session, { limit: 1, before: refreshed.page.previousCursor });
     if (command.status !== 'ok' || !command.page.previousCursor) throw new Error('expected command page');
-    expect(command.page.items[0]).toMatchObject({ kind: 'notice', message: '/compact' });
+    expect(command.page.items[0]).toMatchObject({ kind: 'message', role: 'user', content: [{ type: 'text', text: '/compact' }] });
     const old = await service.readPage(session, { limit: 1, before: command.page.previousCursor });
     if (old.status !== 'ok') throw new Error('expected old turn');
     expect(old.page.items[0]).toMatchObject({ kind: 'message', content: [{ type: 'text', text: 'old turn' }] });
@@ -132,7 +133,7 @@ describe('Claude Conversation adapter', () => {
     const appended = await service.readPage(session, { limit: 10 });
     if (appended.status !== 'ok') throw new Error('expected append');
     expect(appended.page.viewId).toBe(refreshed.page.viewId);
-    expect(appended.page.items.map((item) => item.kind)).toEqual(['message', 'notice', 'compaction', 'message']);
+    expect(appended.page.items.map((item) => item.kind)).toEqual(['message', 'message', 'compaction', 'message']);
     expect(appended.page.items[1]!.id).toBe(command.page.items[0]!.id);
     expect(appended.page.items[2]!.id).toBe(summaryId);
     // A fresh adapter computes the same native view rather than relying on an in-memory revision counter.
@@ -154,7 +155,7 @@ describe('Claude Conversation adapter', () => {
     ]);
     const adapter = createClaudeConversationAdapter({ projectsRoot: root, reader });
     const page = await adapter.readNativePage({ agentId: 'claude', sessionId: SESSION }, { limit: 10 });
-    expect(page.items.map((item) => item.kind)).toEqual(['compaction', 'notice']);
+    expect(page.items.map((item) => item.kind)).toEqual(['compaction', name === '/compact' ? 'message' : 'notice']);
   });
 
   it('keeps the latest canonical frontier when older history is paged before send', async () => {
@@ -180,6 +181,35 @@ describe('Claude Conversation adapter', () => {
     expect(h.service.querySubmission(h.lease, 'request-new')).toEqual({
       status: 'accepted', nativeId: expect.any(String),
     });
+  });
+
+  it.each(['', 'focus on the API'])('projects one native user message for a submitted compact command (%s)', async (args) => {
+    const messages: TranscriptMessage[] = [];
+    const h = await controlledClaude(messages, 'run-compact-command');
+    const session = { agentId: 'claude', sessionId: SESSION };
+    const text = `/compact${args ? ` ${args}` : ''}`;
+    await h.service.readPage(session, { limit: 20 });
+    const receipt = await h.service.send(h.lease, {
+      clientRequestId: 'request-compact', text, delivery: 'prompt',
+    });
+    expect(receipt).toMatchObject({ status: 'accepted' });
+    messages.push(...parseTranscript([
+      JSON.stringify({ type: 'user', message: { role: 'user', content: text }, timestamp: '2026-09-10T12:59:40Z' }),
+      JSON.stringify({ type: 'user', isCompactSummary: true, message: { role: 'user', content: 'retained summary' }, timestamp: '2026-09-10T12:59:48Z' }),
+      JSON.stringify({ type: 'user', message: { role: 'user', content: `<command-name>/compact</command-name><command-args>${args}</command-args>` }, timestamp: '2026-09-10T12:59:40Z' }),
+    ]));
+    const page = await h.service.readPage(session, { limit: 20 });
+    if (page.status !== 'ok') throw new Error('expected compact history');
+    expect(page.page.items.map((item) => item.kind)).toEqual(['message', 'compaction']);
+    const command = page.page.items[0]!;
+    expect(command).toMatchObject({ role: 'user', content: [{ type: 'text', text }] });
+    // A changed history view intentionally prevents Core from inferring correlation by text.
+    expect(h.service.querySubmission(h.lease, 'request-compact')).toEqual({ status: 'accepted' });
+    expect((await h.service.queueSnapshot(h.lease)).settled).toEqual([{ id: 'request-compact' }]);
+    // Re-reading canonical history neither creates a second item nor changes the matched receipt.
+    const repeated = await h.service.readPage(session, { limit: 20 });
+    if (repeated.status !== 'ok') throw new Error('expected repeated page');
+    expect(repeated.page.items).toEqual(page.page.items);
   });
 
   it('does not claim a same-text user item from an older page', async () => {

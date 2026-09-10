@@ -245,6 +245,11 @@ function projectMessage(
   }
   if (message.type === 'slash') {
     const command = `${message.name ?? '/command'}${message.args ? ` ${message.args}` : ''}`;
+    // /compact starts as the user's submitted message. Keep that role when its canonical scaffold
+    // arrives so the canonical user occurrence replaces the local bubble; the result stays separate.
+    if (message.name?.toLowerCase() === '/compact') {
+      return [textItem(message, sessionId, id, 'user', command)];
+    }
     return [{
       ...itemBase(message, sessionId, id), kind: 'notice', level: 'info',
       code: 'slash_command', message: clipped(command, 4096).text,
