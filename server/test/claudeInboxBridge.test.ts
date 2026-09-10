@@ -42,6 +42,7 @@ function writeEvent({
   src,
   payload,
   sourceProcess,
+  paneId = '%1',
 }: {
   eventDirectory: string;
   sequence: number;
@@ -49,6 +50,7 @@ function writeEvent({
   src: string;
   payload: Record<string, unknown>;
   sourceProcess?: { pid: number; startedAt: number; tty: string };
+  paneId?: string;
 }): void {
   fs.mkdirSync(eventDirectory, { recursive: true });
   fs.writeFileSync(path.join(
@@ -59,7 +61,7 @@ function writeEvent({
     type: 'event',
     eventId: `claude-hook-${sequence}`,
     sequence,
-    paneId: '%1',
+    paneId,
     src,
     sessionId,
     sourceOccurredAt: sequence * 10,
@@ -116,6 +118,115 @@ function writeState(
 }
 
 describe('Claude Hook → LocalAgentBridge → Inbox vertical slice', () => {
+  it.each(['legacy-non-Claude', 'rejected-live-Claude'])('does not let a %s queue head block another pane or polling', async (mode) => {
+    const directory = root();
+    const runtimeDirectory = path.join(directory, 'runtime');
+    const hookStateFile = path.join(directory, 'state.json');
+    const eventDirectory = `${hookStateFile}.events`;
+    const panes = new TestPanes([1, 2].map((n) => ({
+      paneId: `%${n}`, sessionName: 'main', windowId: `@${n}`, windowName: 'agent',
+      currentCommand: n === 1 && mode === 'legacy-non-Claude' ? 'node' : 'claude',
+      tty: `/dev/ttys00${n}`, foregroundPid: n * 101,
+    })));
+    const foreground = (pane: LivePane): ForegroundProcessIdentity => ({
+      pid: pane.paneId === '%1' ? 101 : 202, startedAt: 1000, tty: pane.tty!,
+      executable: pane.currentCommand === 'node' ? '/opt/codex/bin/codex' : '/opt/claude/bin/claude',
+    });
+    const sourceProcess = { pid: 101, startedAt: 1000, tty: '/dev/ttys001' };
+    writeEvent({ eventDirectory, sequence: 1, sessionId: 'old-session', src: 'stop', payload: {},
+      ...(mode === 'legacy-non-Claude' ? {} : { sourceProcess }),
+    });
+    writeState(hookStateFile, 1, 'old-session', 'stop', {}, mode === 'legacy-non-Claude' ? undefined : sourceProcess);
+    writeEvent({ eventDirectory, sequence: 2, paneId: '%2', sessionId: 'live-session', src: 'stop',
+      payload: { last_assistant_message: 'current completed' },
+      sourceProcess: { pid: 202, startedAt: 1000, tty: '/dev/ttys002' },
+    });
+    let runNumber = 0;
+    const runtime = createBuiltinAgentRuntime({
+      panes, process: { inspectForeground: async (pane) => ({ ...foreground(pane),
+        ...(pane.paneId === '%1' ? { pid: 999 } : {}),
+      }) }, stateDirectory: runtimeDirectory, authToken: AUTH_TOKEN,
+      newRunId: () => `unblocked-${++runNumber}`, claudeEvents: { paneSession: () => null },
+    });
+    runtimes.push(runtime);
+    await runtime.start();
+    const candidates: string[] = [];
+    const connector = new ClaudeHookBridgeConnector({
+      socketPath: runtime.socketPath, credentialFile: path.join(runtimeDirectory, 'bridge-credential.json'),
+      stateDirectory: path.join(runtimeDirectory, 'connectors/claude'), hookStateFile, eventDirectory,
+      panes, process: { inspectForeground: async (pane) => foreground(pane) },
+      pollMs: 50, retryDelayMs: 5, maxRetryDelayMs: 10,
+      createClient: (options) => { candidates.push(options.candidate.paneId); return new LocalConnectorBridgeClient(options); },
+    });
+    connectors.push(connector);
+    connector.start();
+    await vi.waitFor(() => expect(runtime.inbox.read().terminalNotifications).toEqual([
+      expect.objectContaining({ paneId: '%2', eventId: 'claude-hook-2' }),
+    ]), { timeout: 2000 });
+    const files = () => fs.readdirSync(eventDirectory).filter((name) => name.startsWith('event-'));
+    await vi.waitFor(() => expect(files()).toHaveLength(1));
+    if (mode === 'legacy-non-Claude') expect(candidates).not.toContain('%1');
+    // The next poll must still run while pane 1 has no acknowledgement.
+    writeEvent({ eventDirectory, sequence: 3, paneId: '%2', sessionId: 'live-session', src: 'stop',
+      payload: { last_assistant_message: 'another completed' },
+      sourceProcess: { pid: 202, startedAt: 1000, tty: '/dev/ttys002' },
+    });
+    await vi.waitFor(() => expect(runtime.inbox.read().terminalNotifications).toHaveLength(2));
+    await vi.waitFor(() => expect(files()).toHaveLength(1));
+  });
+
+  it.each(['session', 'process'])('keeps pending ACKs safe across a %s replacement', async (replacement) => {
+    const directory = root();
+    const runtimeDirectory = path.join(directory, 'runtime');
+    const hookStateFile = path.join(directory, 'state.json');
+    const eventDirectory = `${hookStateFile}.events`;
+    const panes = new TestPanes({ paneId: '%1', sessionName: 'main', windowId: '@1', windowName: 'claude',
+      currentCommand: 'claude', tty: '/dev/ttys001' });
+    let current = { pid: 101, startedAt: 1000, tty: '/dev/ttys001', executable: '/opt/claude/bin/claude' };
+    const old = { pid: 101, startedAt: 1000, tty: '/dev/ttys001' };
+    writeState(hookStateFile, 1, 'old-session', 'stop', {}, old);
+    writeEvent({ eventDirectory, sequence: 1, sessionId: 'old-session', src: 'stop', payload: {}, sourceProcess: old });
+    let count = 0;
+    const runtime = createBuiltinAgentRuntime({
+      panes, process: { inspectForeground: async () => ({ ...current,
+        ...(replacement === 'process' && current.pid === 101 ? { pid: 999 } : {}),
+      }) }, stateDirectory: runtimeDirectory, authToken: AUTH_TOKEN,
+      newRunId: () => `replacement-${++count}`, claudeEvents: { paneSession: () => null },
+    });
+    runtimes.push(runtime);
+    await runtime.start();
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    const originalWait = LocalConnectorBridgeClient.prototype.waitForDurableAck;
+    const wait = vi.spyOn(LocalConnectorBridgeClient.prototype, 'waitForDurableAck').mockImplementation(async function (this: LocalConnectorBridgeClient, channel, eventId) {
+      if (replacement === 'session' && eventId === 'claude-hook-1') await held;
+      return originalWait.call(this, channel, eventId);
+    });
+    const sessions: Array<string | undefined> = [];
+    const connector = new ClaudeHookBridgeConnector({
+      socketPath: runtime.socketPath, credentialFile: path.join(runtimeDirectory, 'bridge-credential.json'),
+      stateDirectory: path.join(runtimeDirectory, 'connectors/claude'), hookStateFile, eventDirectory,
+      panes, process: { inspectForeground: async () => current }, pollMs: 50, retryDelayMs: 5, maxRetryDelayMs: 10,
+      createClient: (options) => { sessions.push(options.candidate.sessionId); return new LocalConnectorBridgeClient(options); },
+    });
+    connectors.push(connector);
+    connector.start();
+    try {
+      await vi.waitFor(() => expect(wait).toHaveBeenCalledWith('inbox', 'claude-hook-1'));
+      if (replacement === 'process') current = { ...current, pid: 202, startedAt: 2000 };
+      writeState(hookStateFile, 2, 'new-session', 'stop', {}, current);
+      writeEvent({ eventDirectory, sequence: 2, sessionId: 'new-session', src: 'stop', payload: {}, sourceProcess: current });
+      await connector.reconcile();
+      await connector.reconcile();
+      if (replacement === 'session') expect(sessions).toEqual(['old-session']);
+      release();
+      await vi.waitFor(() => expect(fs.readdirSync(eventDirectory).filter((name) => name.startsWith('event-'))).toEqual([]));
+      expect(runtime.inbox.read().terminalNotifications).toHaveLength(replacement === 'session' ? 2 : 1);
+      expect(runtime.inbox.read().terminalNotifications.at(-1)?.sessionId).toBe('new-session');
+      await connector.close();
+    } finally { release(); }
+  });
+
   it('attaches a neutral live Claude pane before its first Hook event', async () => {
     const directory = root();
     const runtimeDirectory = path.join(directory, 'runtime');

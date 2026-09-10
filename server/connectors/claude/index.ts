@@ -268,6 +268,11 @@ export class ClaudeHookBridgeConnector {
   readonly #createClient: NonNullable<ClaudeHookBridgeConnectorOptions['createClient']>;
   readonly #clients = new Map<string, TrackedClient>();
   readonly #confirmedGaps = new Set<string>();
+  readonly #pendingAcks = new Map<string, {
+    promise: Promise<void>;
+    client: LocalConnectorBridgeClient;
+    process: ForegroundProcessIdentity;
+  }>();
   #timer: NodeJS.Timeout | undefined;
   #tail: Promise<void> = Promise.resolve();
   #started = false;
@@ -330,6 +335,9 @@ export class ClaudeHookBridgeConnector {
     for (const tracked of this.#clients.values()) tracked.client.close();
     this.#clients.clear();
     await this.#tail.catch(() => {});
+    for (const tracked of this.#clients.values()) tracked.client.close();
+    this.#clients.clear();
+    await Promise.allSettled([...this.#pendingAcks.values()].map((pending) => pending.promise));
   }
 
   #poll(): void {
@@ -369,6 +377,16 @@ export class ClaudeHookBridgeConnector {
       return pending;
     };
 
+    for (const [paneId, pending] of this.#pendingAcks) {
+      const pane = paneMap.get(paneId);
+      const foreground = pane ? await identity(pane) : null;
+      if (!pane || (foreground && (foreground.pid !== pending.process.pid
+        || (foreground.startedAt !== undefined && pending.process.startedAt !== undefined
+          && foreground.startedAt !== pending.process.startedAt)
+        || (foreground.tty !== undefined && pending.process.tty !== undefined
+          && foreground.tty !== pending.process.tty)))) pending.client.close();
+    }
+
     const events: Array<{ file: string; event: ClaudeHookEvent }> = [];
     for (const eventFile of this.#eventFiles()) {
       let event: ClaudeHookEvent | null = null;
@@ -392,6 +410,7 @@ export class ClaudeHookBridgeConnector {
       const pane = paneMap.get(event.paneId);
       const foreground = pane ? await identity(pane) : null;
       if (!pane || !foreground) continue;
+      if (!event.process && !looksLikeClaude(pane, foreground)) continue;
       if (!matchesSourceProcess(event.process, foreground)) {
         this.#logger('Discarding stale Claude Hook event after pane process replacement', {
           eventId: event.eventId,
@@ -416,8 +435,11 @@ export class ClaudeHookBridgeConnector {
       const pane = paneMap.get(paneId);
       const foreground = pane ? await identity(pane) : null;
       if (!pane || !foreground) continue;
+      if (!row.process && !looksLikeClaude(pane, foreground)) continue;
       if (!matchesSourceProcess(row.process, foreground)) continue;
       currentStatePanes.add(paneId);
+      // Finish the old session's queued edge before switching this pane's client to its latest session.
+      if (this.#pendingAcks.has(paneId)) continue;
       const sessionId = optionalSession(row.payload);
       const eventId = row.sequence === undefined ? undefined : `claude-hook-${row.sequence}`;
       const projection = projectClaudeHookInbox({
@@ -443,6 +465,7 @@ export class ClaudeHookBridgeConnector {
       const foreground = await identity(pane);
       if (!foreground || !looksLikeClaude(pane, foreground)) continue;
       liveClaudePanes.add(pane.paneId);
+      if (this.#pendingAcks.has(pane.paneId)) continue;
       const gap = gaps.get(pane.paneId)?.event;
       const sessionId = gap ? optionalSession(gap.payload ?? {}, gap.sessionId) : undefined;
       persistedSnapshots.set(
@@ -460,6 +483,10 @@ export class ClaudeHookBridgeConnector {
       const pane = paneMap.get(event.paneId);
       const foreground = pane ? await identity(pane) : null;
       if (!pane || !foreground) continue;
+      if (!event.process && !looksLikeClaude(pane, foreground)) continue;
+      // A disconnected/rejected pane must not suspend the shared poller or another pane's events.
+      // Keep one acknowledgement in flight per pane to retain its lifecycle ordering.
+      if (this.#pendingAcks.has(event.paneId)) continue;
       if (!matchesSourceProcess(event.process, foreground)) {
         this.#logger('Discarding stale Claude Hook event after pane process replacement', {
           eventId: event.eventId,
@@ -502,14 +529,13 @@ export class ClaudeHookBridgeConnector {
         });
         continue;
       }
-      try {
-        await client.waitForDurableAck('inbox', event.eventId);
+      const pending = client.waitForDurableAck('inbox', event.eventId).then(() => {
         if (event.type === 'gap' && gap) this.#confirmedGaps.add(gap.key);
         else fs.unlinkSync(eventFile);
-      } catch (error) {
-        if (!this.#closed) throw error;
-        return;
-      }
+      }).catch((error: unknown) => {
+        if (!this.#closed) this.#logger('Claude Hook acknowledgement interrupted; source event remains queued', error);
+      }).finally(() => { this.#pendingAcks.delete(event.paneId); });
+      this.#pendingAcks.set(event.paneId, { promise: pending, client, process: foreground });
     }
 
     for (const [paneId, tracked] of [...this.#clients]) {

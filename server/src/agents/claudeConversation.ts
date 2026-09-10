@@ -214,6 +214,20 @@ function toolItems(
   return items;
 }
 
+// Read only the provider's human-facing scalar fields. This is not an XML document loader:
+// nested markup, output-file paths, internal IDs and external entities are never interpreted.
+function taskNotificationText(value: string): string {
+  const entities: Record<string, string> = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'" };
+  const field = (name: 'summary' | 'status' | 'event'): string => {
+    const text = new RegExp(`<${name}>([^<>]*)</${name}>`).exec(value)?.[1] ?? '';
+    return text.replace(/&(amp|lt|gt|quot|apos);/g, (_match, entity: string) => entities[entity]!)
+      .trim();
+  };
+  const summary = field('summary') || 'Background task update';
+  const details = [...new Set([field('status'), field('event')].filter(Boolean))];
+  return clipped(`${summary}${details.length ? ` (${details.join(', ')})` : ''}`, 4096).text;
+}
+
 function projectMessage(
   message: TranscriptMessage,
   sessionId: string,
@@ -222,6 +236,10 @@ function projectMessage(
   const id = `claude:${message.i}:${ordinal}:${message.type}`;
   if (message.type === 'thinking') return [];
   if (message.type === 'text' && message.role && typeof message.text === 'string' && message.text) {
+    if (message.source === 'task-notification') {
+      return [{ ...itemBase(message, sessionId, id), kind: 'notice', level: 'info',
+        code: 'background_task', message: taskNotificationText(message.text) }];
+    }
     return [textItem(message, sessionId, id, message.role, message.text)];
   }
   if (message.type === 'tool' && message.tool) return toolItems(message, sessionId, id, message.tool);

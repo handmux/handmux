@@ -75,6 +75,36 @@ afterEach(() => {
 });
 
 describe('Claude Conversation adapter', () => {
+  it('projects only source-marked task notifications as safe notices without altering ordinary XML quotes', async () => {
+    const root = directory();
+    const file = sessionFile(root);
+    const xml = '<task-notification><task-id>private-task-id</task-id><tool-use-id>private-tool-id</tool-use-id><output-file>/private/output.txt</output-file><status>completed</status><summary>Build &amp; checks completed</summary></task-notification>';
+    const notification = (content: string) => ({
+      type: 'user', origin: { kind: 'task-notification' }, promptSource: 'system',
+      message: { role: 'user', content },
+    });
+    const rows = [
+      notification(xml),
+      notification('<task-notification><task-id>private-task-id</task-id><summary>Background task finished</summary><event>task_complete</event></task-notification>'),
+      notification('<task-notification><output-file>/private/output.txt</output-file></task-notification>'),
+      { type: 'user', message: { role: 'user', content: xml } },
+      { ...notification(xml), type: 'assistant', message: { role: 'assistant', content: xml } },
+      { ...notification(xml), promptSource: 'user' },
+    ];
+    fs.writeFileSync(file, rows.map((row) => JSON.stringify(row)).join('\n') + '\n');
+    const adapter = createClaudeConversationAdapter({ projectsRoot: root });
+    const session = { agentId: 'claude', sessionId: SESSION };
+    const page = await adapter.readNativePage(session, { limit: 10 });
+    expect(page.items.map((item) => item.kind)).toEqual(['notice', 'notice', 'notice', 'message', 'message', 'message']);
+    expect(page.items[0]).toMatchObject({ code: 'background_task', message: 'Build & checks completed (completed)' });
+    expect(page.items[1]).toMatchObject({ message: 'Background task finished (task_complete)' });
+    expect(page.items[2]).toMatchObject({ message: 'Background task update' });
+    expect(JSON.stringify(page.items.slice(0, 3))).not.toMatch(/private-task-id|private-tool-id|output.txt|task-notification/);
+    for (const item of page.items.slice(3)) expect(item).toMatchObject({ content: [{ type: 'text', text: xml }] });
+    const older = await adapter.readNativePage(session, { limit: 1, beforeSourceCursor: '1' });
+    expect(older.items[0]).toEqual(page.items[0]);
+  });
+
   it('projects a late-recorded compact command before the completed summary from native JSONL', async () => {
     const root = directory();
     const file = sessionFile(root);
