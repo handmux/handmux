@@ -34,6 +34,7 @@ export interface PiInboxBridgeSnapshot {
   availability: InboxAvailability;
   current?: PiInboxBridgeItem;
   message?: string;
+  sourceSequence?: number;
 }
 
 export type PiInboxBridgeOperation =
@@ -69,6 +70,7 @@ export interface BridgeInboxCoordinatorOptions {
   agentId?: string;
   sourceId?: string;
   label?: string;
+  sourceEventSequence?: (eventId: string) => number | null;
 }
 
 export type PiInboxBridgeCoordinatorOptions = Omit<
@@ -86,6 +88,7 @@ export class PiInboxBridgeError extends Error {
 interface ParsedSnapshot {
   result: InboxRestoreResult;
   current: PiInboxBridgeItem | undefined;
+  sourceSequence?: number;
 }
 
 interface BridgeInboxControlOperation {
@@ -182,7 +185,9 @@ function parseSnapshot(
   }
   if (!isRecord(value) || typeof value.availability !== 'string'
     || !AVAILABILITIES.has(value.availability as InboxAvailability)
-    || !optionalText(value.message, 1024)) {
+    || !optionalText(value.message, 1024)
+    || (value.sourceSequence !== undefined && (!Number.isSafeInteger(value.sourceSequence)
+      || Number(value.sourceSequence) < 1))) {
     throw new PiInboxBridgeError(`${label} Inbox Bridge returned an invalid snapshot`);
   }
   const snapshotAvailability = value.availability as InboxAvailability;
@@ -200,6 +205,7 @@ function parseSnapshot(
   }] : [];
   return {
     current: current ?? undefined,
+    ...(typeof value.sourceSequence === 'number' ? { sourceSequence: value.sourceSequence } : {}),
     result: {
       availability: snapshotAvailability,
       ...(snapshotAvailability === 'unavailable' ? {} : { snapshot: baseline }),
@@ -254,6 +260,7 @@ export class BridgeInboxCoordinator {
   readonly #agentId: string;
   readonly #sourceId: string;
   readonly #label: string;
+  readonly #sourceEventSequence: ((eventId: string) => number | null) | undefined;
   readonly #bindings = new Map<string, RuntimeBinding>();
   #stopConsumer: (() => void) | undefined;
   #restoreTail: Promise<void> = Promise.resolve();
@@ -265,12 +272,14 @@ export class BridgeInboxCoordinator {
     agentId = 'pi',
     sourceId = 'pi.bridge.inbox',
     label = 'Pi',
+    sourceEventSequence,
   }: BridgeInboxCoordinatorOptions) {
     this.#host = host;
     this.#projector = projector;
     this.#agentId = agentId;
     this.#sourceId = sourceId;
     this.#label = label;
+    this.#sourceEventSequence = sourceEventSequence;
   }
 
   start(): void {
@@ -401,6 +410,10 @@ export class BridgeInboxCoordinator {
     const binding = this.#bindings.get(replay.run.runId);
     if (!binding || !sameRun(binding.lease.ref, replay.run) || binding.phase === 'opening'
       || binding.phase === 'closed') return 'retry';
+    if (this.#historical(binding, operation)) {
+      const result = await this.#submitHistory(binding, operation);
+      return this.#replayResult(result.accepted, result.reason);
+    }
     if (binding.phase === 'prebaseline') {
       if (replay.event.sequence > binding.baselineSequence) return 'retry';
       if (operation.kind === 'set' && operation.state === 'waiting'
@@ -417,6 +430,36 @@ export class BridgeInboxCoordinator {
     if (accepted) return 'accepted';
     if (reason === 'persistence_failed' || reason === 'stale_lease') return 'retry';
     return 'invalid';
+  }
+
+  #historical(binding: RuntimeBinding, operation: InboxOperation): boolean {
+    if (!this.#sourceEventSequence || !operation.eventId) return false;
+    const sequence = this.#sourceEventSequence(operation.eventId);
+    if (sequence === null) return false;
+    const current = binding.baseline?.sourceSequence
+      ?? (binding.baseline?.current?.eventId
+        ? this.#sourceEventSequence(binding.baseline.current.eventId) : null);
+    // An upgrade may expose a pre-existing durable event before any versioned snapshot. It must
+    // progress without publishing an unproven old status or waiting for a snapshot behind itself.
+    return current == null || sequence < current;
+  }
+
+  async #submitHistory(binding: RuntimeBinding, operation: InboxOperation): Promise<{
+    accepted: boolean; reason?: string;
+  }> {
+    if (operation.kind !== 'set' || (operation.state !== 'done' && operation.state !== 'error')
+      || !operation.eventId) return { accepted: true };
+    return this.#projector.submitTerminalReplay({
+      run: binding.lease.ref,
+      source: operation.source,
+      state: operation.state,
+      eventId: operation.eventId,
+      historyOnly: true,
+      ...(operation.message === undefined ? {} : { message: operation.message }),
+      ...(operation.reason === undefined ? {} : { reason: operation.reason }),
+      ...(operation.correlationId === undefined ? {} : { correlationId: operation.correlationId }),
+      ...(operation.sourceOccurredAt === undefined ? {} : { sourceOccurredAt: operation.sourceOccurredAt }),
+    });
   }
 
   #enqueue(binding: RuntimeBinding, operation: () => Promise<void>): Promise<void> {
@@ -486,7 +529,8 @@ export class BridgeInboxCoordinator {
     const operation = parseOperation(event.event, this.#sourceId);
     if (!operation) throw new PiInboxBridgeError(`${this.#label} Inbox Bridge returned an invalid live event`);
     if (isControlOperation(operation)) return;
-    const result = await binding.projector.submit(operation);
+    const result = this.#historical(binding, operation)
+      ? await this.#submitHistory(binding, operation) : await binding.projector.submit(operation);
     if (!result.accepted) {
       throw new PiInboxBridgeError(`${this.#label} Inbox live operation rejected: ${result.reason ?? 'unknown'}`);
     }

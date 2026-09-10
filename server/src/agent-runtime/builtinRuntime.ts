@@ -68,6 +68,9 @@ export function createClaudeConversationActivityReader(
 ): AgentConversationActivityReader {
   return {
     async read(run) {
+      if (events?.paneSession && events.paneSession(run.ref.paneId)?.sessionId !== run.ref.sessionId) {
+        return { activity: 'unknown', activeTurn: { state: 'unknown' } };
+      }
       const kind = events?.paneKind?.(run.ref.paneId) ?? null;
       const activity = kind === 'working' ? 'working'
         : kind === 'permission' ? 'waiting'
@@ -154,6 +157,11 @@ export function createBuiltinAgentRuntime({
         agentId: 'claude',
         sourceId: 'claude.hooks',
         label: 'Claude',
+        sourceEventSequence: (eventId) => {
+          const match = /^claude-hook-([1-9]\d*)$/.exec(eventId);
+          const sequence = match ? Number(match[1]) : NaN;
+          return Number.isSafeInteger(sequence) ? sequence : null;
+        },
       });
       const conversationSessions = claudeEvents && typeof claudeEvents.paneSession === 'function'
         ? claudeEvents as NonNullable<Parameters<typeof createClaudeConversationAdapter>[0]>['sessions']

@@ -141,6 +141,14 @@ describe('Claude Hook → LocalAgentBridge → Inbox vertical slice', () => {
       payload: { last_assistant_message: 'current completed' },
       sourceProcess: { pid: 202, startedAt: 1000, tty: '/dev/ttys002' },
     });
+    const latestPane2 = (sequence: number) => {
+      const state = JSON.parse(fs.readFileSync(hookStateFile, 'utf8'));
+      state['%2'] = { sequence, ts: sequence * 10, src: 'stop',
+        payload: { session_id: 'live-session' },
+        process: { pid: 202, startedAt: 1000, tty: '/dev/ttys002' } };
+      fs.writeFileSync(hookStateFile, JSON.stringify(state));
+    };
+    latestPane2(2);
     let runNumber = 0;
     const runtime = createBuiltinAgentRuntime({
       panes, process: { inspectForeground: async (pane) => ({ ...foreground(pane),
@@ -167,6 +175,7 @@ describe('Claude Hook → LocalAgentBridge → Inbox vertical slice', () => {
     await vi.waitFor(() => expect(files()).toHaveLength(1));
     if (mode === 'legacy-non-Claude') expect(candidates).not.toContain('%1');
     // The next poll must still run while pane 1 has no acknowledgement.
+    latestPane2(3);
     writeEvent({ eventDirectory, sequence: 3, paneId: '%2', sessionId: 'live-session', src: 'stop',
       payload: { last_assistant_message: 'another completed' },
       sourceProcess: { pid: 202, startedAt: 1000, tty: '/dev/ttys002' },
@@ -213,6 +222,9 @@ describe('Claude Hook → LocalAgentBridge → Inbox vertical slice', () => {
     connector.start();
     try {
       await vi.waitFor(() => expect(wait).toHaveBeenCalledWith('inbox', 'claude-hook-1'));
+      if (replacement === 'session') {
+        await vi.waitFor(() => expect(runtime.inbox.read().terminalNotifications).toHaveLength(1));
+      }
       if (replacement === 'process') current = { ...current, pid: 202, startedAt: 2000 };
       writeState(hookStateFile, 2, 'new-session', 'stop', {}, current);
       writeEvent({ eventDirectory, sequence: 2, sessionId: 'new-session', src: 'stop', payload: {}, sourceProcess: current });
@@ -220,9 +232,18 @@ describe('Claude Hook → LocalAgentBridge → Inbox vertical slice', () => {
       await connector.reconcile();
       if (replacement === 'session') expect(sessions).toEqual(['old-session']);
       release();
-      await vi.waitFor(() => expect(fs.readdirSync(eventDirectory).filter((name) => name.startsWith('event-'))).toEqual([]));
+      const sourceFiles = () => fs.readdirSync(eventDirectory).filter((name) => name.startsWith('event-'));
+      await vi.waitFor(() => expect(sourceFiles()).toHaveLength(replacement === 'session' ? 1 : 0));
+      await vi.waitFor(() => expect(runtime.inbox.read().terminalNotifications.at(-1)?.sessionId).toBe('new-session'));
       expect(runtime.inbox.read().terminalNotifications).toHaveLength(replacement === 'session' ? 2 : 1);
-      expect(runtime.inbox.read().terminalNotifications.at(-1)?.sessionId).toBe('new-session');
+      if (replacement === 'session') {
+        // The old completion was truly delivered before the switch. Keep it, then deduplicate its
+        // retained source only after that session legitimately resumes with a newer working state.
+        writeState(hookStateFile, 3, 'old-session', 'prompt', {}, current);
+        await connector.reconcile();
+        await vi.waitFor(() => expect(sourceFiles()).toEqual([]));
+        expect(runtime.inbox.read().terminalNotifications).toHaveLength(2);
+      }
       await connector.close();
     } finally { release(); }
   });
@@ -635,6 +656,10 @@ describe('Claude Hook → LocalAgentBridge → Inbox vertical slice', () => {
     expect(fs.existsSync(secondGap)).toBe(true);
     expect(gapPublishes()).toHaveLength(2);
 
+    await vi.waitFor(() => {
+      const files = fs.readdirSync(path.join(runtimeDirectory, 'connectors', 'claude'));
+      expect(files.every((name) => JSON.parse(fs.readFileSync(path.join(runtimeDirectory, 'connectors', 'claude', name), 'utf8')).durable.length === 0)).toBe(true);
+    });
     await firstConnector.close();
     const secondConnector = createConnector();
     connectors.push(secondConnector);

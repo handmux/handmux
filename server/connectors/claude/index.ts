@@ -272,6 +272,7 @@ export class ClaudeHookBridgeConnector {
     promise: Promise<void>;
     client: LocalConnectorBridgeClient;
     process: ForegroundProcessIdentity;
+    sessionId: string | undefined;
   }>();
   #timer: NodeJS.Timeout | undefined;
   #tail: Promise<void> = Promise.resolve();
@@ -377,16 +378,6 @@ export class ClaudeHookBridgeConnector {
       return pending;
     };
 
-    for (const [paneId, pending] of this.#pendingAcks) {
-      const pane = paneMap.get(paneId);
-      const foreground = pane ? await identity(pane) : null;
-      if (!pane || (foreground && (foreground.pid !== pending.process.pid
-        || (foreground.startedAt !== undefined && pending.process.startedAt !== undefined
-          && foreground.startedAt !== pending.process.startedAt)
-        || (foreground.tty !== undefined && pending.process.tty !== undefined
-          && foreground.tty !== pending.process.tty)))) pending.client.close();
-    }
-
     const events: Array<{ file: string; event: ClaudeHookEvent }> = [];
     for (const eventFile of this.#eventFiles()) {
       let event: ClaudeHookEvent | null = null;
@@ -398,6 +389,20 @@ export class ClaudeHookBridgeConnector {
     }
 
     const state = readHookState(this.#hookStateFile);
+    for (const [paneId, pending] of this.#pendingAcks) {
+      const pane = paneMap.get(paneId);
+      const foreground = pane ? await identity(pane) : null;
+      const latest = state.get(paneId);
+      const latestSession = latest ? optionalSession(latest.payload) : undefined;
+      const replacedSession = foreground && latest?.process && matchesSourceProcess(latest.process, foreground)
+        && latestSession && pending.sessionId && latestSession !== pending.sessionId;
+      if (replacedSession || !pane || (foreground && (foreground.pid !== pending.process.pid
+        || (foreground.startedAt !== undefined && pending.process.startedAt !== undefined
+          && foreground.startedAt !== pending.process.startedAt)
+        || (foreground.tty !== undefined && pending.process.tty !== undefined
+          && foreground.tty !== pending.process.tty)))) pending.client.close();
+    }
+
     const gaps = new Map<string, { event: ClaudeHookEvent; key: string }>();
     const activeGapKeys = new Set(events.flatMap(({ file, event }) => (
       event.type === 'gap' ? [gapKey(file, event)] : []
@@ -438,9 +443,10 @@ export class ClaudeHookBridgeConnector {
       if (!row.process && !looksLikeClaude(pane, foreground)) continue;
       if (!matchesSourceProcess(row.process, foreground)) continue;
       currentStatePanes.add(paneId);
-      // Finish the old session's queued edge before switching this pane's client to its latest session.
-      if (this.#pendingAcks.has(paneId)) continue;
+      // A cancelled old-session ACK settles asynchronously; switch clients once it has released the pane.
       const sessionId = optionalSession(row.payload);
+      const pending = this.#pendingAcks.get(paneId);
+      if (pending && pending.sessionId !== sessionId) continue;
       const eventId = row.sequence === undefined ? undefined : `claude-hook-${row.sequence}`;
       const projection = projectClaudeHookInbox({
         ...(eventId === undefined ? {} : { eventId }),
@@ -455,7 +461,10 @@ export class ClaudeHookBridgeConnector {
       } : projection.snapshot;
       persistedSnapshots.set(
         paneId,
-        this.#client(paneId, sessionId, foreground).setSnapshot('inbox', snapshot),
+        this.#client(paneId, sessionId, foreground).setSnapshot('inbox', {
+          ...snapshot,
+          ...(row.process && row.sequence !== undefined ? { sourceSequence: row.sequence } : {}),
+        }),
       );
     }
 
@@ -497,6 +506,12 @@ export class ClaudeHookBridgeConnector {
       }
       const payload = event.payload ?? {};
       const sessionId = optionalSession(payload, event.sessionId);
+      const latest = state.get(event.paneId);
+      const latestSession = latest ? optionalSession(latest.payload) : undefined;
+      // A current pane session must never be replaced just to replay another session's old queue.
+      // Retain that session's source and original durable payload for a legitimate future resume.
+      if (latest?.process && matchesSourceProcess(latest.process, foreground)
+        && latestSession && sessionId && latestSession !== sessionId) continue;
       const client = this.#client(event.paneId, sessionId, foreground);
       if (event.type === 'gap' && persistedSnapshots.get(event.paneId) !== true) continue;
       if (event.type === 'gap' && gap && this.#confirmedGaps.has(gap.key)) continue;
@@ -510,32 +525,22 @@ export class ClaudeHookBridgeConnector {
           }),
           payload,
         });
-      let operation: Record<string, unknown> = projection.operation;
-      const latest = state.get(event.paneId);
-      const latestSession = latest ? optionalSession(latest.payload) : undefined;
-      if (event.type === 'event' && operation.kind === 'set' && operation.state === 'waiting'
-        && event.sequence !== undefined && latest?.sequence !== undefined
-        && latest.sequence > event.sequence && latestSession === sessionId) {
-        operation = {
-          kind: 'superseded',
-          eventId: event.eventId,
-          ...(event.sourceOccurredAt === undefined ? {} : { sourceOccurredAt: event.sourceOccurredAt }),
-        };
-      }
-      if (!client.publishDurable('inbox', event.eventId, operation)) {
+      const operation: Record<string, unknown> = projection.operation;
+      const restoredAck = client.resumePersistedDurable('inbox', event.eventId);
+      if (!restoredAck && !client.publishDurable('inbox', event.eventId, operation)) {
         this.#logger('Claude Hook event remains queued because Connector durable state could not be persisted', {
           eventId: event.eventId,
           paneId: event.paneId,
         });
         continue;
       }
-      const pending = client.waitForDurableAck('inbox', event.eventId).then(() => {
+      const pending = (restoredAck ?? client.waitForDurableAck('inbox', event.eventId)).then(() => {
         if (event.type === 'gap' && gap) this.#confirmedGaps.add(gap.key);
         else fs.unlinkSync(eventFile);
       }).catch((error: unknown) => {
         if (!this.#closed) this.#logger('Claude Hook acknowledgement interrupted; source event remains queued', error);
       }).finally(() => { this.#pendingAcks.delete(event.paneId); });
-      this.#pendingAcks.set(event.paneId, { promise: pending, client, process: foreground });
+      this.#pendingAcks.set(event.paneId, { promise: pending, client, process: foreground, sessionId });
     }
 
     for (const [paneId, tracked] of [...this.#clients]) {
@@ -557,6 +562,7 @@ export class ClaudeHookBridgeConnector {
     const stateFile = path.join(this.#stateDirectory, `${digest(nextSignature)}.json`);
     const client = this.#createClient({
       adapterId: 'claude',
+      snapshotBeforeDurable: true,
       socketPath: this.#socketPath,
       credentialFile: this.#credentialFile,
       stateFile,

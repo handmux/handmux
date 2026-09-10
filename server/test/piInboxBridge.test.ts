@@ -83,6 +83,66 @@ function coordinator(
 }
 
 describe('Pi Inbox Bridge vertical binding', () => {
+  it.each([
+    ['durable', 'sequence'], ['live', 'sequence'], ['durable', 'legacy-event-id'],
+    ['durable', 'no-watermark'], ['live', 'future'],
+  ] as const)('applies source replay policy to %s with %s snapshot without changing default Agent behavior', async (delivery, watermark) => {
+    const store = new MemoryInboxStateStore();
+    const h = await setup({ inboxStore: store });
+    const channel = h.bridge.connect(h.lease).channel('inbox');
+    const sourceEventSequence = (id: string) => /^seq-[0-9]+$/.test(id) ? Number(id.slice(4)) : null;
+    const binding = new PiInboxBridgeCoordinator({ host: h.bridge.hostFor('pi'), projector: h.projector, sourceEventSequence });
+    coordinators.push(binding);
+    const snapshot = { availability: 'ready',
+      ...(watermark === 'sequence' || watermark === 'future' ? { sourceSequence: 2 } : {}),
+      current: { state: 'working', message: 'current',
+        ...(watermark === 'legacy-event-id' ? { eventId: 'seq-2' } : {}) },
+    };
+    const eventId = watermark === 'future' ? 'seq-3' : 'seq-1';
+    if (delivery === 'live') {
+      await channel.setSnapshot(snapshot);
+      binding.start();
+      await binding.bind(h.lease);
+    }
+    await channel.publish({ eventId, payload: { kind: 'set', state: 'done', eventId, message: 'result' } },
+      ...(delivery === 'durable' ? [{ delivery: 'durable' as const }] : []));
+    if (delivery === 'durable') {
+      await channel.setSnapshot(snapshot);
+      binding.start();
+      await binding.bind(h.lease);
+    }
+    await vi.waitFor(() => expect((store.load() as PersistedInboxState).runs.some((run) => run.events.some((event) => event.eventId === eventId))).toBe(true));
+    await vi.waitFor(() => expect(h.inbox.read().records[0]?.state).toBe(watermark === 'future' ? 'done' : 'working'));
+    expect(h.inbox.read().terminalNotifications).toHaveLength(watermark === 'future' ? 1 : 0);
+  });
+
+  it('retries silent historical receipts instead of acknowledging a persistence failure', async () => {
+    const store = new MemoryInboxStateStore();
+    const h = await setup({ inboxStore: store });
+    const channel = h.bridge.connect(h.lease).channel('inbox');
+    await channel.publish({ eventId: 'seq-1', payload: { kind: 'set', state: 'done', eventId: 'seq-1' } }, { delivery: 'durable' });
+    await channel.setSnapshot({ availability: 'ready', sourceSequence: 2, current: { state: 'working' } });
+    const original = store.save.bind(store);
+    let failing = true;
+    vi.spyOn(store, 'save').mockImplementation((state) => {
+      if (failing && state.runs.some((run) => run.events.some((event) => event.eventId === 'seq-1'))) throw new Error('disk full');
+      original(state);
+    });
+    const binding = new PiInboxBridgeCoordinator({ host: h.bridge.hostFor('pi'), projector: h.projector,
+      sourceEventSequence: (id) => Number(id.slice(4)),
+    });
+    coordinators.push(binding);
+    binding.start();
+    let settled = false;
+    const opened = binding.bind(h.lease).then(() => { settled = true; });
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(settled).toBe(false);
+    failing = false;
+    await opened;
+    expect(h.inbox.read().terminalNotifications).toEqual([]);
+    expect((store.load() as PersistedInboxState).runs[0]?.events).toHaveLength(1);
+  });
+
   it('replays a durable terminal event captured while the Handmux Server was fully offline', async () => {
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'handmux-pi-offline-inbox-'));
     tempDirectories.push(directory);

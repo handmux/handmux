@@ -6,6 +6,7 @@ import { resolveVersionedComms } from './agents/claude.js';
 import { resolveCodexComms } from './agents/codex.js';
 import { defaultRun } from './agents/scanUtils.js';
 import { claude } from './agents/claude.js';
+import { claudeLocalCommandCompletion } from './agents/claudeLocalCommand.js';
 import type { ClaudeClassification, ClaudeEventKind } from './agents/claude.js';
 import type { ExecutableVerdict, ProcessPane } from './agents/processIdentity.js';
 import type { RunCommand } from './agents/scanUtils.js';
@@ -611,6 +612,8 @@ export function createClaudeEvents({
     const kind = (rec.src === 'compact' && rec.payload.trigger === 'manual') || baseline
       ? 'idle' : classifyRecord(rec)?.kind ?? null;
     if (kind !== 'done' && kind !== 'error' && kind !== 'end' && kind !== 'idle') return null;
+    const nativeCompletion = claudeLocalCommandCompletion(rec.payload, rec.ts, now());
+    if (nativeCompletion !== undefined) return nativeCompletion;
     return Number.isFinite(rec.ts) && rec.ts >= 0
       ? `claude-${baseline ? 'baseline' : 'completed'}:${rec.ts}${rec.sequence === undefined ? '' : `:${rec.sequence}`}`
       : null;

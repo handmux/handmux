@@ -42,11 +42,13 @@ export interface InboxTerminalReplay {
   run: AgentRunRef;
   source: InboxSourceRef;
   state: 'done' | 'error';
-  message?: string;
-  reason?: string;
+  message?: string | null;
+  reason?: string | null;
   correlationId?: string;
   eventId: string;
   sourceOccurredAt?: number;
+  // Current-run historical completion: persist idempotency receipts only, never current/unread/push.
+  historyOnly?: boolean;
 }
 
 export interface InboxCommitResult {

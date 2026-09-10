@@ -7,6 +7,7 @@ import { installHooks, syncHooks } from '../src/cli/claudeHooks.js';
 import { ClaudeHookBridgeConnector } from '../connectors/claude/index.js';
 import { createBuiltinAgentRuntime } from '../src/agent-runtime/builtinRuntime.js';
 import { InboxPushProjection } from '../src/agent-runtime/inboxPushProjection.js';
+import { FileInboxStateStore } from '../src/agent-runtime/inboxStore.js';
 import type { ForegroundProcessIdentity, LivePane } from '../src/agent-runtime/adapter.js';
 
 const cleanup: Array<() => void | Promise<void>> = [];
@@ -81,10 +82,78 @@ esac
     cleanup.push(() => connector.close());
     return { runtime, connector, push };
   }
-  return { fire, pair, eventFiles, eventDirectory };
+  return { fire, pair, eventFiles, eventDirectory, connectorStateDirectory: path.join(directory, 'runtime/connectors/claude') };
 }
 
 describe('installed Claude hooks → writer → Bridge → Inbox → Push', () => {
+  it.each([false, true])('keeps latest state throughout backlog replay and only notifies a latest completion (%s)', async (latestDone) => {
+    const hooks = installedHooks();
+    hooks.fire('Stop', { last_assistant_message: 'old completion one' });
+    hooks.fire('UserPromptSubmit', { prompt: 'old working' });
+    hooks.fire('Stop', { last_assistant_message: 'old completion two' });
+    hooks.fire('UserPromptSubmit', { prompt: 'latest working' });
+    if (latestDone) hooks.fire('Stop', { last_assistant_message: 'latest completion' });
+    const savedLatest: Array<{ state: string; message?: string }> = [];
+    const original = FileInboxStateStore.prototype.save;
+    const save = vi.spyOn(FileInboxStateStore.prototype, 'save').mockImplementation(function (this: FileInboxStateStore, state) {
+      for (const run of state.runs) if (run.run.agentId === 'claude' && run.latest) {
+        savedLatest.push({ state: run.latest.state, ...(run.latest.message === undefined ? {} : { message: run.latest.message }) });
+      }
+      original.call(this, state);
+    });
+    cleanup.push(() => save.mockRestore());
+    const { runtime, connector, push } = hooks.pair();
+    await runtime.start();
+    connector.start();
+    await vi.waitFor(() => expect(hooks.eventFiles()).toEqual([]));
+    expect(savedLatest.length).toBeGreaterThan(0);
+    expect(savedLatest.every((current) => current.state === (latestDone ? 'done' : 'working')
+      && current.message === (latestDone ? 'latest completion' : 'latest working'))).toBe(true);
+    expect(push.sendToSession).toHaveBeenCalledTimes(latestDone ? 1 : 0);
+    expect(runtime.inbox.read().terminalNotifications).toHaveLength(latestDone ? 1 : 0);
+  });
+
+  it.each(['old-set', 'old-superseded', 'old-session', 'pending-old-session'])('resumes %s persisted by an earlier Connector without changing its wire payload', async (mode) => {
+    const hooks = installedHooks();
+    hooks.fire(mode === 'old-superseded' ? 'PermissionRequest' : 'Stop', { last_assistant_message: 'old completion', tool_name: 'Bash',
+      ...(mode.endsWith('old-session') ? { session_id: 'previous-session' } : {}),
+    });
+    const offline = hooks.pair();
+    offline.connector.start();
+    let stateFile = '';
+    await vi.waitFor(() => {
+      const names = fs.readdirSync(hooks.connectorStateDirectory);
+      expect(names).toHaveLength(1);
+      stateFile = path.join(hooks.connectorStateDirectory, names[0]!);
+      expect(JSON.parse(fs.readFileSync(stateFile, 'utf8')).durable).toHaveLength(1);
+    });
+    if (mode !== 'pending-old-session') await offline.connector.close();
+    if (mode === 'old-superseded') {
+      const state = JSON.parse(fs.readFileSync(stateFile, 'utf8'));
+      const item = state.durable[0];
+      item.payload = { kind: 'superseded', eventId: item.eventId, sourceOccurredAt: item.payload.sourceOccurredAt };
+      fs.writeFileSync(stateFile, JSON.stringify(state));
+    }
+    hooks.fire('UserPromptSubmit', { prompt: 'latest working' });
+    const active = mode === 'pending-old-session' ? offline : hooks.pair();
+    if (mode === 'pending-old-session') await active.connector.reconcile();
+    await active.runtime.start();
+    if (mode !== 'pending-old-session') active.connector.start();
+    await vi.waitFor(() => expect(hooks.eventFiles()).toHaveLength(mode.endsWith('old-session') ? 1 : 0));
+    expect(active.runtime.inbox.read().records[0]?.state).toBe('working');
+    expect(active.runtime.inbox.read().terminalNotifications).toEqual([]);
+    expect(active.push.sendToSession).not.toHaveBeenCalled();
+    if (mode.endsWith('old-session')) {
+      expect(active.runtime.inbox.read().records[0]?.run.sessionId).toBe('installed-session');
+      hooks.fire('UserPromptSubmit', { session_id: 'previous-session', prompt: 'legitimate resume' });
+      await vi.waitFor(() => expect(hooks.eventFiles()).toEqual([]));
+      expect(active.runtime.inbox.read().records[0]?.run.sessionId).toBe('previous-session');
+      expect(active.runtime.inbox.read().records[0]?.state).toBe('working');
+      expect(active.runtime.inbox.read().terminalNotifications).toEqual([]);
+      expect(active.push.sendToSession).not.toHaveBeenCalled();
+    }
+  });
+
   it.each(['Stop', 'PermissionRequest'])('notifies online %s after startup sync', async (event) => {
     const hooks = installedHooks(true);
     hooks.fire('UserPromptSubmit', { prompt: 'working' });
@@ -107,12 +176,18 @@ describe('installed Claude hooks → writer → Bridge → Inbox → Push', () =
     hooks.fire(event, { last_assistant_message: 'offline result', tool_name: 'Bash' });
     hooks.fire('UserPromptSubmit', { prompt: 'next task' });
     const { runtime, connector, push } = hooks.pair();
+    const currentAtNotification: Array<string | undefined> = [];
+    const unsubscribe = runtime.inbox.subscribeNotifications(() => {
+      currentAtNotification.push(runtime.inbox.read().records[0]?.state);
+    });
+    cleanup.push(unsubscribe);
     await runtime.start();
     connector.start();
     await vi.waitFor(() => expect(hooks.eventFiles()).toEqual([]));
     expect(runtime.inbox.read().records[0]?.state).toBe('working');
-    expect(runtime.inbox.read().terminalNotifications).toHaveLength(event === 'Stop' ? 1 : 0);
-    expect(push.sendToSession).toHaveBeenCalledTimes(event === 'Stop' ? 1 : 0);
+    expect(runtime.inbox.read().terminalNotifications).toHaveLength(0);
+    expect(push.sendToSession).not.toHaveBeenCalled();
+    expect(currentAtNotification).toEqual([]);
   });
 
   it('acknowledges an offline completion and deduplicates its file across a service restart', async () => {
