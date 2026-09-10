@@ -140,12 +140,44 @@ describe('createClaudeEvents paneSession', () => {
     expect(events.paneAgent('%4')).toBeNull();
   });
 
+  it.each([
+    ['compact', { trigger: 'manual' }, 'idle', 'claude-completed:1234'],
+    ['compact', { trigger: 'auto' }, 'working', null],
+    ['compact', {}, null, null],
+    ['compact', { trigger: 'future' }, null, null],
+    ['start', { source: 'startup' }, 'idle', 'claude-baseline:1234'],
+    ['start', { source: 'clear' }, 'idle', 'claude-baseline:1234'],
+    ['start', { source: 'resume' }, 'idle', 'claude-baseline:1234'],
+    ['start', { source: 'compact' }, 'compacting', null],
+    ['start', {}, null, null],
+    ['start', { source: 'future' }, null, null],
+  ])('separates neutral %s %j activity from Inbox visibility', (src, payload, kind, completion) => {
+    const file = stateFile({ '%1': rec(src as string, payload as Record<string, unknown>, 1234) });
+    const events = createClaudeEvents({ commands: {}, push: null, file });
+    expect(events.paneKind('%1')).toBe(kind);
+    expect(events.paneCompletionToken('%1')).toBe(completion);
+    expect(classifyEvent(src, payload)).toBeNull();
+    expect(events.paneKind('%missing')).toBeNull();
+  });
+
   it('exposes a stable token for terminal hook events and not for an active turn', () => {
     const file = stateFile({ '%1': rec('stop', {}, 1234) });
     const events = createClaudeEvents({ commands: {}, push: null, file });
     expect(events.paneCompletionToken('%1')).toBe('claude-completed:1234');
     fs.writeFileSync(file, JSON.stringify({ '%1': rec('prompt', {}, 2345) }));
     expect(events.paneCompletionToken('%1')).toBeNull();
+  });
+
+  it('distinguishes baseline and repeated completions even within the same clock millisecond', () => {
+    const file = stateFile({ '%1': { ...rec('start', { source: 'startup' }, 1234), sequence: 1 } });
+    const events = createClaudeEvents({ commands: {}, push: null, file });
+    const baseline = events.paneCompletionToken('%1');
+    expect(baseline).toBe(events.paneCompletionToken('%1'));
+    fs.writeFileSync(file, JSON.stringify({ '%1': { ...rec('compact', { trigger: 'manual' }, 1234), sequence: 2 } }));
+    const first = events.paneCompletionToken('%1');
+    expect(first).not.toBe(baseline);
+    fs.writeFileSync(file, JSON.stringify({ '%1': { ...rec('compact', { trigger: 'manual' }, 1234), sequence: 3 } }));
+    expect(events.paneCompletionToken('%1')).not.toBe(first);
   });
 });
 

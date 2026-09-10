@@ -4,6 +4,7 @@ import type { TerminalProps } from './components/Terminal.jsx';
 import type { WindowBarProps, WorkspaceWindow } from './components/WindowBar.jsx';
 import type { WorkspaceRecoveryPlan, WorkspacePlanSession } from './workspaceRecovery.js';
 import type { AgentConversationController } from './hooks/useAgentConversation.js';
+import { parseConversationControls } from './agentConversationControlsApi.js';
 
 type MockWindowBarProps = Omit<WindowBarProps,
   'onSelectWindow' | 'onManageWindow' | 'onManagePane' | 'onPaneMapOpenChange'> & {
@@ -347,6 +348,58 @@ describe('App hidden Project Task beta', () => {
   });
 });
 
+describe.each(['claude', 'codex', 'pi'])('App %s conversation activity', (agentId) => {
+  it.each([
+    { activity: 'working', legacy: null, queued: false },
+    { activity: 'compacting', legacy: null, queued: false },
+    { activity: 'idle', legacy: 'working', queued: false },
+    { activity: 'idle', legacy: null, queued: true },
+    { activity: 'unknown', legacy: 'working', queued: true },
+    { activity: 'waiting', legacy: 'working', queued: true },
+  ])('renders authoritative activity $activity over legacy $legacy with queued=$queued', async ({ activity, legacy, queued }) => {
+    const pane = { id: '%73', active: true, width: 80, height: 24, command: agentId, cwd: '/work', agent: agentId };
+    const run = { agentId, paneId: pane.id, runId: 'activity-run', sessionId: 'activity-session' };
+    localStorage.setItem('tw_bound', JSON.stringify(['project']));
+    localStorage.setItem(`tw_lens_${pane.id}`, 'chat');
+    api.getSessions.mockResolvedValue([{ id: '$71', name: 'project' }]);
+    api.getWindows.mockResolvedValue([{ id: '@71', name: 'main', active: true, panes: 1 }]);
+    api.getPanes.mockResolvedValue([pane]);
+    api.getStates.mockResolvedValue(legacy ? {
+      [pane.id]: { agent: agentId, kind: legacy, session: 'project', window: '@71' },
+    } : {});
+    api.getAgentDiscovery.mockResolvedValue({
+      descriptors: [{ id: agentId, label: agentId, capabilities: { conversation: true } }],
+      runs: [run], health: [],
+    });
+    conversationApi.discoverAgentConversation.mockResolvedValue({
+      session: { agentId: run.agentId, sessionId: run.sessionId }, run,
+      viewId: run.sessionId, historyVersion: '1', capabilities: { history: true, live: 'poll', send: ['prompt'] },
+    });
+    conversationApi.readAgentConversationPage.mockResolvedValue({
+      status: 'ok', page: { sessionId: run.sessionId, viewId: run.sessionId,
+        historyVersion: '1', hasMore: false, items: [{ id: 'answer', kind: 'message',
+          role: 'assistant', content: [{ type: 'text', text: 'Previous Claude answer' }] }] },
+    });
+    controlsApi.readConversationControls.mockImplementation(async () => parseConversationControls({
+      activity,
+      ...(agentId === 'claude' ? {} : { context: { activity: 'working' } }),
+      queue: {
+        activity,
+        items: queued ? [{ id: 'queued', text: 'Next task', createdAt: 1, state: 'queued' }] : [],
+        canSteer: false, canEdit: true, canRemove: true,
+      },
+      submissions: [],
+    }));
+    const view = await renderApp();
+    expect(screen.getByText('Previous Claude answer')).toBeTruthy();
+    expect(controlsInput.enabled).toBe(true);
+    expect(controlsApi.readConversationControls).toHaveBeenCalled();
+    expect(view.container.querySelector('.chat-typing') !== null).toBe(activity === 'working');
+    expect(view.container.querySelector('.chat-compacting') !== null).toBe(activity === 'compacting');
+    if (activity === 'compacting') expect(view.container.querySelector('.chat-compacting .chat-typing-dots')).toBeTruthy();
+  });
+});
+
 describe('App established conversation during server restart', () => {
   const pane = { id: '%73', active: true, width: 80, height: 24, command: 'codex', cwd: '/work', agent: 'codex' };
   const run = { agentId: 'codex', paneId: pane.id, runId: 'before-restart', sessionId: 'session-1' };
@@ -402,12 +455,16 @@ describe('App established conversation during server restart', () => {
     await act(async () => { await conversation.controller!.send('temporary accepted'); });
     expect(screen.getByText('temporary accepted')).toBeTruthy();
     await flush(10_000);
+    expect(screen.getByText('temporary accepted')).toBeTruthy();
+    expect(controlsApi.readConversationControls.mock.calls.length).toBeLessThan(30);
+    await flush(110_000);
     expect(screen.queryByText('temporary accepted')).toBeNull();
     expect(screen.getByText('Saved answer session-1')).toBeTruthy();
     expect(conversation.controller?.submissionReceipts).toEqual(expect.arrayContaining([
       { id: 'historical', nativeId: 'historical-item' },
     ]));
-    expect(controlsApi.readConversationControls.mock.calls.length).toBeLessThan(30);
+    // Normal 750ms polling across two minutes stays bounded despite settled-state rerenders.
+    expect(controlsApi.readConversationControls.mock.calls.length).toBeLessThan(180);
   });
 
   it.each(['request failure', 'empty discovery', 'missing descriptor', 'canonical null', 'null before discovery', 'sessionless run'])(

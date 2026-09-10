@@ -213,6 +213,17 @@ function update() {
     // stay latched at 进行中 forever; treat it as a soft end and clear the pane.
     if (prevSrc === 'prompt' || prevSrc === 'resume') { delete obj[pane]; }
     else applied = false;                                    // resting → drop without writing
+  } else if (src === 'start' && payload?.source === 'compact' && prevSrc === 'compact'
+    && typeof payload.prompt_id === 'string' && payload.prompt_id.length > 0
+    && payload.prompt_id === previous?.payload?.prompt_id
+    && typeof payload.session_id === 'string' && payload.session_id.length > 0
+    && payload.session_id === previous?.payload?.session_id
+    && sameSourceProcess(previous)
+    && Number(ts) > 0 && Number(ts) <= previous.ts) {
+    // Native Claude invokes SessionStart(compact) before PostCompact, but async Hook processes can
+    // finish out of order. Do not replace the completed state with an earlier-started Hook from that
+    // same prompt. Timestamp + prompt/session scope keeps later independent compactions intact.
+    applied = false;
   } else if (src === 'notify' && payload?.notification_type === 'permission_prompt'
     && prevSrc === 'permreq'
     && sameSourceProcess(previous)

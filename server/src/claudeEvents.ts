@@ -27,6 +27,7 @@ export const classifyEvent = claude.classify;
 type PushView = 'needs' | 'done';
 interface HookRecord {
   ts: number;
+  sequence?: number;
   src: string;
   payload: Record<string, unknown>;
   agent?: string | null;
@@ -224,6 +225,9 @@ function readStateFile(file: string): Record<string, HookRecord> {
         src: typeof row.src === 'string' ? row.src : '',
         payload,
       };
+      if (typeof row.sequence === 'number' && Number.isSafeInteger(row.sequence) && row.sequence > 0) {
+        record.sequence = row.sequence;
+      }
       if (Object.hasOwn(row, 'agent')) {
         record.agent = typeof row.agent === 'string' && row.agent ? row.agent : null;
       }
@@ -581,16 +585,35 @@ export function createClaudeEvents({
 
   function paneKind(pane: string): ClaudeEventKind | null {
     const rec = readStateFile(file)[pane];
-    if (!rec || rec.agent === 'codex') return null;
+    if (!rec || (rec.agent !== undefined && rec.agent !== 'claude')) return null;
+    // Activity is not the Inbox roster: neutral lifecycle edges deliberately create no Inbox card,
+    // but a completed manual /compact must release the conversation queue. Automatic compaction
+    // continues the current turn, so it must not admit another prompt between compaction and generation.
+    if (rec.src === 'compact') {
+      return rec.payload.trigger === 'manual' ? 'idle'
+        : rec.payload.trigger === 'auto' ? 'working' : null;
+    }
+    if (rec.src === 'start') {
+      // Native full/partial/reactive compaction calls SessionStart(compact) before PostCompact.
+      // It identifies neither an idle session nor specifically an automatic compaction.
+      return ['startup', 'clear', 'resume'].includes(String(rec.payload.source)) ? 'idle'
+        : rec.payload.source === 'compact' ? 'compacting' : null;
+    }
     return classifyRecord(rec)?.kind ?? null;
   }
 
   function paneCompletionToken(pane: string): string | null {
     const rec = readStateFile(file)[pane];
-    if (!rec || rec.agent === 'codex') return null;
-    const kind = classifyRecord(rec)?.kind ?? null;
+    if (!rec || (rec.agent !== undefined && rec.agent !== 'claude')) return null;
+    // An idle startup/resume/clear is the first dispatch baseline. Give it a stable token too:
+    // the queue can then detect a fast completion even when no poll observed its busy phase.
+    const baseline = rec.src === 'start' && ['startup', 'clear', 'resume'].includes(String(rec.payload.source));
+    const kind = (rec.src === 'compact' && rec.payload.trigger === 'manual') || baseline
+      ? 'idle' : classifyRecord(rec)?.kind ?? null;
     if (kind !== 'done' && kind !== 'error' && kind !== 'end' && kind !== 'idle') return null;
-    return Number.isFinite(rec.ts) && rec.ts >= 0 ? `claude-completed:${rec.ts}` : null;
+    return Number.isFinite(rec.ts) && rec.ts >= 0
+      ? `claude-${baseline ? 'baseline' : 'completed'}:${rec.ts}${rec.sequence === undefined ? '' : `:${rec.sequence}`}`
+      : null;
   }
 
   return {

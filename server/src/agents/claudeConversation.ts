@@ -110,8 +110,9 @@ export async function findClaudeSessionFile(root: string, sessionId: string): Pr
   return matches[0] ?? null;
 }
 
-function sourceViewId(sessionId: string): string {
-  return `claude-session:${sessionId}`;
+function sourceViewId(sessionId: string, reordered: readonly string[]): string {
+  const suffix = reordered.length ? `:${createHash('sha256').update(JSON.stringify(reordered)).digest('hex')}` : '';
+  return `claude-session:${sessionId}${suffix}`;
 }
 
 function sourceTime(value: unknown): number | undefined {
@@ -252,8 +253,35 @@ function projectMessage(
   return [];
 }
 
-function project(messages: readonly TranscriptMessage[], sessionId: string): ConversationItem[] {
-  return messages.flatMap((message, ordinal) => projectMessage(message, sessionId, ordinal));
+function normalizedOrder(messages: readonly TranscriptMessage[]) {
+  // Assign IDs in native append order, before normalizing display order. A late command must not
+  // rename a summary already shown to a client (or any of the following records).
+  const groups = messages.map((message, ordinal) => ({ message, ordinal }));
+  const reordered: string[] = [];
+  for (let index = 1; index < groups.length; index++) {
+    const current = groups[index]!;
+    const previous = groups[index - 1]!;
+    if (current.message.type !== 'slash' || current.message.name?.toLowerCase() !== '/compact'
+      || previous.message.type !== 'compact') continue;
+    const commandTime = sourceTime(current.message.ts);
+    const summaryTime = sourceTime(previous.message.ts);
+    if (commandTime === undefined || summaryTime === undefined || commandTime >= summaryTime) continue;
+    // Claude may append the command scaffold after its summary, retaining the earlier command time.
+    // Only this adjacent, proven inversion is normalized; ordinary history is never time-sorted.
+    groups[index - 1] = current;
+    groups[index] = previous;
+    reordered.push(`claude:${current.message.i}:${current.ordinal}:${current.message.type}`);
+    index++;
+  }
+  return { groups, reordered };
+}
+
+function project(messages: readonly TranscriptMessage[], sessionId: string) {
+  const { groups, reordered } = normalizedOrder(messages);
+  return {
+    items: groups.flatMap(({ message, ordinal }) => projectMessage(message, sessionId, ordinal)),
+    viewId: sourceViewId(sessionId, reordered),
+  };
 }
 
 export function createClaudeConversationAdapter({
@@ -298,7 +326,7 @@ export function createClaudeConversationAdapter({
   ): Promise<ConversationAdapterPage> {
     const file = await fileForSession(session.sessionId);
     const parsed = file ? await reader.read(file, createTranscriptParser) : [];
-    const all = project(parsed, session.sessionId);
+    const { items: all, viewId } = project(parsed, session.sessionId);
     let end = all.length;
     if (request.beforeSourceCursor !== undefined) {
       if (!/^\d+$/.test(request.beforeSourceCursor)) throw new Error('Invalid Claude source cursor');
@@ -309,7 +337,7 @@ export function createClaudeConversationAdapter({
     const start = Math.max(0, end - request.limit);
     return {
       sessionId: session.sessionId,
-      sourceViewId: sourceViewId(session.sessionId),
+      sourceViewId: viewId,
       sourceHistoryToken: createHash('sha256').update(JSON.stringify(all)).digest('hex'),
       items: all.slice(start, end),
       ...(start > 0 ? { previousSourceCursor: String(start) } : {}),
@@ -324,10 +352,13 @@ export function createClaudeConversationAdapter({
       const file = await discoverFile(target);
       if (!file) return null;
       boundFiles.set(target.sessionId, file);
+      // Discovery needs only the order epoch, not a second projection/hash of every tool result.
+      const parsed = await reader.read(file, createTranscriptParser);
+      const viewId = sourceViewId(target.sessionId, normalizedOrder(parsed).reordered);
       return {
         session: { agentId: 'claude', sessionId: target.sessionId },
         ...(isRun(target) ? { run: target } : {}),
-        sourceViewId: sourceViewId(target.sessionId),
+        sourceViewId: viewId,
         capabilities: isRun(target) && control ? {
           history: true, live: 'settled', sendable: true, send: ['prompt'], interrupt: true,
         } : { history: true, live: 'poll' },
@@ -356,6 +387,12 @@ export function createClaudeConversationAdapter({
             tail = tail.then(async () => {
               if (closed || run.signal.aborted) return;
               const next = await readPage(session, { limit: 1 });
+              if (next.sourceViewId !== baseline.sourceViewId) {
+                close();
+                await sink({ type: 'stream.gap', sourceSequence: ++sourceSequence,
+                  afterSourceSequence: sourceSequence - 1 });
+                return;
+              }
               if (next.sourceHistoryToken !== historyToken) {
                 historyToken = next.sourceHistoryToken;
                 await sink({

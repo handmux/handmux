@@ -242,6 +242,39 @@ describe('handmux-notify.sh → handmux-write.js', () => {
     expect(events(file)).toHaveLength(1);                              // old end cannot revoke the new run
   });
 
+  it.each(['manual', 'auto'])('preserves PostCompact(%s) when an older same-prompt SessionStart finishes late', (trigger) => {
+    const file = freshFile();
+    const write = (src, ts, payload) => execFileSync('node', [WRITER, file, '%1', src, String(ts), 'host', `${file}.events`], {
+      input: JSON.stringify(payload),
+    });
+    write('compact', 200, { trigger, session_id: 'session', prompt_id: 'prompt' });
+    write('start', 100, { source: 'compact', session_id: 'session', prompt_id: 'prompt' });
+    expect(JSON.parse(fs.readFileSync(file, 'utf8'))['%1'].src).toBe('compact');
+    expect(events(file).map((event) => event.src)).toEqual(['compact']);
+    // A later compaction in the same prompt is independent (auto can repeat within one turn).
+    write('start', 300, { source: 'compact', session_id: 'session', prompt_id: 'prompt' });
+    expect(JSON.parse(fs.readFileSync(file, 'utf8'))['%1'].src).toBe('start');
+    write('compact', 400, { trigger, session_id: 'session', prompt_id: 'prompt' });
+    expect(events(file).map((event) => event.src)).toEqual(['compact', 'start', 'compact']);
+  });
+
+  it.each([
+    { source: 'compact', session_id: 'session' },
+    { source: 'compact', session_id: 'session', prompt_id: 'new-prompt' },
+    { source: 'compact', session_id: 'new-session', prompt_id: 'prompt' },
+    { source: 'clear', session_id: 'session', prompt_id: 'prompt' },
+  ])('does not discard an uncorrelated SessionStart %j', (payload) => {
+    const file = freshFile();
+    for (const [src, ts, body] of [
+      ['compact', 200, { trigger: 'manual', session_id: 'session', prompt_id: 'prompt' }],
+      ['start', 100, payload],
+    ]) execFileSync('node', [WRITER, file, '%1', src, String(ts), 'host', `${file}.events`], {
+      input: JSON.stringify(body),
+    });
+    expect(JSON.parse(fs.readFileSync(file, 'utf8'))['%1'].src).toBe('start');
+    expect(events(file)).toHaveLength(2);
+  });
+
   it('SessionEnd for the SAME recorded session still drops the pane (clean exit / normal /clear order)', () => {
     const file = freshFile();
     run('prompt', { TMUX_PANE: '%42' }, '{"prompt":"x","session_id":"s1"}', file);
