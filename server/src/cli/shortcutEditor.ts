@@ -3,6 +3,7 @@ import { t } from './i18n/index.js';
 import * as prompts from './prompt.js';
 import { acquireLifecycleLock, isAlive, readState } from './state.js';
 import { PrivateStateStore } from '../privateStateStore.js';
+import { connectAuthControl } from '../deviceAuth/control.js';
 import type { KeyShortcut, Shortcut, ShortcutConfig } from '../shortcutConfig.js';
 
 const MODIFIERS = {
@@ -311,14 +312,25 @@ export async function runShortcutEditor({
 }
 
 export async function applyShortcutsLive({
-  state, shortcuts, fetchImpl = globalThis.fetch, timeoutMs = 8000,
+  state, shortcuts, home, fetchImpl = globalThis.fetch, timeoutMs = 8000,
 }: {
+  home?: string;
   state: unknown;
   shortcuts: ShortcutConfig;
   fetchImpl?: FetchImpl;
   timeoutMs?: number;
 }): Promise<void> {
   const stateRecord = recordOf(state);
+  if (stateRecord?.authMode === 'trusted-device') {
+    if (!home) throw new Error('HandMux home is required for the private control socket');
+    const control = await connectAuthControl(home);
+    const timer = setTimeout(() => control.close(), timeoutMs);
+    try {
+      const acknowledgment = await control.request({ op: 'shortcuts', body: { shortcuts } });
+      if (recordOf(acknowledgment)?.ok !== true) throw new Error('invalid server response');
+    } finally { clearTimeout(timer); control.close(); }
+    return;
+  }
   if (typeof stateRecord?.localUrl !== 'string' || !stateRecord.localUrl
     || typeof stateRecord.token !== 'string' || !stateRecord.token) {
     throw new Error('running server state is incomplete');
@@ -374,7 +386,7 @@ export async function commitShortcuts({
     const state = recordOf(readStateImpl(home));
     if (!state || !isAliveImpl(state.supervisorPid)) return { cfg, running: false, applied: false };
     try {
-      await applyShortcutsLive({ state, shortcuts: cfg.shortcuts, fetchImpl, timeoutMs });
+      await applyShortcutsLive({ state, shortcuts: cfg.shortcuts, home, fetchImpl, timeoutMs });
       return { cfg, running: true, applied: true };
     } catch (error) {
       return { cfg, running: true, applied: false, error };

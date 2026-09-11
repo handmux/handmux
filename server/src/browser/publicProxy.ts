@@ -5,6 +5,7 @@ import type { Duplex } from 'node:stream';
 import type { RequestHandler } from 'express';
 import { isBrowserBootstrapPath } from './bootstrap.js';
 import { classifyIp } from './targetPolicy.js';
+import { stripMainCookies, stripForgedCookies, createBrowserUpgradeFilter } from './credentials.js';
 
 const SERVICE_PATHS = new Set([
   '/hammerhead.js',
@@ -109,9 +110,11 @@ function expectsDocument(req: IncomingMessage): boolean {
 }
 
 function upstreamHeaders(headers: IncomingHttpHeaders, port: number, token?: string): IncomingHttpHeaders {
-  const out: IncomingHttpHeaders = { ...headers, host: `127.0.0.1:${port}` };
+  const out: IncomingHttpHeaders = { ...stripMainCookies(headers, true), host: `127.0.0.1:${port}` };
   if (token && out.authorization === `Bearer ${token}`) delete out.authorization;
   delete out['proxy-authorization'];
+  delete out['x-handmux-browser-device'];
+  delete out['x-handmux-browser-profile-device'];
   if (out.cookie) {
     out.cookie = filteredCookie(out.cookie);
     if (!out.cookie) delete out.cookie;
@@ -165,7 +168,7 @@ export function createBrowserPublicProxy({
       path: req.originalUrl || req.url,
       headers: upstreamHeaders(req.headers, port, token),
     }, (incoming) => {
-      res.writeHead(incoming.statusCode || 502, incoming.headers);
+      res.writeHead(incoming.statusCode || 502, stripForgedCookies(incoming.headers, true));
       incoming.pipe(res);
       res.once('close', () => { if (!res.writableEnded) incoming.destroy(); });
     });
@@ -195,7 +198,9 @@ export function createBrowserPublicProxy({
       }
       upstream.write(`${lines.join('\r\n')}\r\n\r\n`);
       if (head?.length) upstream.write(head);
-      socket.pipe(upstream).pipe(socket);
+      const filter = createBrowserUpgradeFilter();
+      filter.once('error', () => { socket.destroy(); upstream.destroy(); });
+      socket.pipe(upstream).pipe(filter).pipe(socket);
     });
     upstream.once('error', () => socket.destroy());
     socket.once('error', () => upstream.destroy());

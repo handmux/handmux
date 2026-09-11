@@ -28,6 +28,7 @@ const VERSION = typeof packageInfo === 'object' && packageInfo !== null && 'vers
   && typeof packageInfo.version === 'string' ? packageInfo.version : 'unknown';
 
 export interface SupervisorConfig extends TunnelConfig {
+  authMode?: 'token' | 'trusted-device';
   tunnel: TunnelName;
   port: number;
   host: string;
@@ -75,6 +76,7 @@ interface SuperviseOptions {
   processRef?: SupervisorProcess;
 }
 interface SupervisorState {
+  authMode?: 'token' | 'trusted-device';
   supervisorPid: number;
   version: string;
   startedAt: number;
@@ -155,7 +157,8 @@ export function supervise(cfg: SupervisorConfig, {
     tunnel: cfg.tunnel,
     port: cfg.port,
     host: cfg.host,
-    token: cfg.token,
+    authMode: cfg.authMode ?? 'token',
+    token: cfg.authMode === 'trusted-device' ? '' : cfg.token,
     localUrl: `http://localhost:${cfg.port}`,
     lanUrl: lanUrl(cfg.port),
     publicUrl: null,
@@ -206,6 +209,7 @@ export function supervise(cfg: SupervisorConfig, {
       HANDMUX_PORT: String(cfg.port),
       HANDMUX_HOST: cfg.host,
       HANDMUX_TOKEN: cfg.token,
+      HANDMUX_AUTH_MODE: cfg.authMode ?? 'token',
       CLAUDE_STATE_FILE: claudeStatePath(home),
       PUSH_STORE: pushStorePath(home),
       PREVIEW_STORE: previewStorePath(home),

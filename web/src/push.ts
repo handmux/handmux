@@ -1,9 +1,9 @@
 // Client side of Web Push (minimal slice): request permission, subscribe through the service
 // worker, hand the subscription to the server. The actual notification delivery is server →
 // FCM/APNs → SW (see public/sw.js); this module only manages the subscription lifecycle.
-import { getToken, getBoundSessions } from './storage.js';
+import { getBoundSessions } from './storage.js';
+import { authenticationHeaders, authenticationError } from './authSession.js';
 import { t } from './i18n';
-import { UnauthorizedError } from './api.js';
 
 export type DeliveryStatus = 'pending' | 'success' | 'failed';
 
@@ -115,7 +115,7 @@ export function isStandalone() {
 const isIOS = () => /iP(hone|ad|od)/.test(navigator.userAgent || '');
 
 function authHeaders(extra: Record<string, string> = {}): Record<string, string> {
-  return { Authorization: `Bearer ${getToken() ?? ''}`, ...extra };
+  return authenticationHeaders(extra);
 }
 
 function timeoutError(key: string): PushError {
@@ -145,7 +145,7 @@ async function fetchWithTimeout(url: string, options: RequestInit, key: string):
   let timedOut = false;
   try {
     return await Promise.race([
-      fetch(url, { ...options, signal: controller.signal }),
+      fetch(url, { credentials: 'same-origin', ...options, signal: controller.signal }),
       new Promise<never>((_, reject) => {
         timer = setTimeout(() => {
           timedOut = true;
@@ -336,7 +336,7 @@ async function resolveScriptPushKey(strict: boolean): Promise<string | null> {
       headers: authHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({ endpoint: sub.endpoint }),
     }, 'push.configTimeout');
-    if (r.status === 401) throw new UnauthorizedError();
+    if (r.status === 401) throw await authenticationError();
     if (!r.ok) {
       if (strict) {
         throw new PushHttpError('push key lookup failed', r.status);
@@ -380,7 +380,7 @@ export async function getNotifications(): Promise<PushInboxItem[]> {
     { headers: authHeaders(), cache: 'no-store' },
     'push.configTimeout',
   );
-  if (r.status === 401) throw new UnauthorizedError();
+  if (r.status === 401) throw await authenticationError();
   if (!r.ok) {
     throw new PushHttpError('notification inbox load failed', r.status);
   }
@@ -395,7 +395,7 @@ export async function deleteNotification(id: string): Promise<boolean> {
     { method: 'DELETE', headers: authHeaders() },
     'push.reportTimeout',
   );
-  if (r.status === 401) throw new UnauthorizedError();
+  if (r.status === 401) throw await authenticationError();
   if (!r.ok || recordOf(await r.json())?.ok !== true) throw new Error('notification delete failed');
   return true;
 }

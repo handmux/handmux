@@ -1,3 +1,5 @@
+import { assertRequestAuthority } from './requestAuthority.js';
+
 export interface PaneInputCommands {
   exitCopyModeIfActive(paneId: string): Promise<unknown>;
   sendText(paneId: string, text: string): Promise<unknown>;
@@ -21,7 +23,7 @@ const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout
 // text + submit in the same operation prevents two clients from interleaving `paste-buffer` and Enter.
 export async function serializePaneInput<T>(paneId: string, operation: () => Promise<T>): Promise<T> {
   const previous = paneInputTails.get(paneId) ?? Promise.resolve();
-  const current = previous.catch(() => {}).then(operation);
+  const current = previous.catch(() => {}).then(() => { assertRequestAuthority(); return operation(); });
   const tail = current.then(() => {}, () => {});
   paneInputTails.set(paneId, tail);
   try {
@@ -40,8 +42,10 @@ export function sendPanePrompt(
   return serializePaneInput(paneId, async () => {
     if (guard && !await guard.validate()) return { nativeMutation: false };
     await commands.exitCopyModeIfActive(paneId);
+    assertRequestAuthority();
     await commands.sendText(paneId, text);
     if (text) await delay(SUBMIT_GAP_MS);
+    assertRequestAuthority();
     await commands.sendEnter(paneId);
     return { nativeMutation: true };
   });
@@ -50,6 +54,7 @@ export function sendPanePrompt(
 export function interruptPane(commands: PaneInputCommands, paneId: string): Promise<void> {
   return serializePaneInput(paneId, async () => {
     await commands.exitCopyModeIfActive(paneId);
+    assertRequestAuthority();
     await commands.sendKey(paneId, 'C-c');
   });
 }
@@ -69,8 +74,8 @@ export function sendPaneChoice(
   if (!/^[1-9]$/.test(choice)) throw new TypeError('Pane choice requires a single option digit');
   return serializePaneInput(paneId, async () => {
     await commands.exitCopyModeIfActive(paneId);
-    // Menu shortcuts are key events. Bracketed paste goes to Claude's paste handler, not its
-    // selection handler; the digit itself submits the choice, so no trailing Enter is needed.
+    assertRequestAuthority();
+    // Menu shortcuts are key events; bracketed paste is not handled by Claude's selector.
     await commands.sendKey(paneId, choice);
   });
 }

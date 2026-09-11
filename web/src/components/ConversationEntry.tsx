@@ -267,7 +267,7 @@ export function ConversationEntry({
         data-conversation-copy-id={`${copyId}:notice`}>{message.text}</div>
       : <div className={`chat-turn-notice is-${message.noticeLevel === 'warning' ? 'warning' : 'info'}`}
         role="status" data-conversation-copy-root data-conversation-copy-id={`${copyId}:notice`}>
-        {message.noticeLevel === 'warning' && <span className="chat-turn-warning-icon" aria-hidden="true">!</span>}{message.text}</div>;
+        {message.text}</div>;
   }
   const content = message.role !== 'user'
     ? <AssistantMarkdown text={message.text || ''} streaming={!!message.streaming}

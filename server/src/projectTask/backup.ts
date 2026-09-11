@@ -189,6 +189,22 @@ export async function restoreProjectBackup({
   const temporary = `${databasePath}.restore`;
   await fs.copyFile(backupPath, temporary);
   await fs.chmod(temporary, 0o600);
+  // Revoke before publishing the restored file. A crash at any later point cannot resurrect access.
+  const restored = new sqlite.DatabaseSync(temporary, { allowExtension: false });
+  try {
+    const hasAuth = restored.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='auth_sessions'").get();
+    if (hasAuth) {
+      restored.exec('BEGIN IMMEDIATE');
+      try {
+        const now = Date.now();
+        restored.prepare('UPDATE auth_sessions SET revoked_at = ? WHERE revoked_at IS NULL').run(now);
+        restored.prepare('UPDATE auth_devices SET revoked_at = ? WHERE revoked_at IS NULL').run(now);
+        restored.exec('COMMIT');
+      } catch (error) { restored.exec('ROLLBACK'); throw error; }
+    }
+    restored.exec('PRAGMA wal_checkpoint(TRUNCATE)');
+    restored.exec('PRAGMA journal_mode = DELETE');
+  } finally { restored.close(); }
   await fs.rename(temporary, databasePath);
   await fs.rm(recoveryMarkerPath(databasePath), { force: true });
 }
