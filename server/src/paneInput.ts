@@ -1,10 +1,6 @@
-<<<<<<< HEAD
 import { assertRequestAuthority } from './requestAuthority.js';
 
-interface PaneInputCommands {
-=======
 export interface PaneInputCommands {
->>>>>>> master
   exitCopyModeIfActive(paneId: string): Promise<unknown>;
   sendText(paneId: string, text: string): Promise<unknown>;
   sendEnter(paneId: string): Promise<unknown>;
@@ -78,13 +74,8 @@ export function sendPaneChoice(
   if (!/^[1-9]$/.test(choice)) throw new TypeError('Pane choice requires a single option digit');
   return serializePaneInput(paneId, async () => {
     await commands.exitCopyModeIfActive(paneId);
-<<<<<<< HEAD
     assertRequestAuthority();
-    await commands.sendText(paneId, choice);
-=======
-    // Menu shortcuts are key events. Bracketed paste goes to Claude's paste handler, not its
-    // selection handler; the digit itself submits the choice, so no trailing Enter is needed.
+    // Menu shortcuts are key events; bracketed paste is not handled by Claude's selector.
     await commands.sendKey(paneId, choice);
->>>>>>> master
   });
 }

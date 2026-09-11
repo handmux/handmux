@@ -4,17 +4,15 @@ All notable changes to handmux. Format follows [Keep a Changelog](https://keepac
 
 ## [Unreleased]
 
-<<<<<<< HEAD
 ### Added
 
 - 新增可信设备认证：通过 CLI 或已有可信设备认领浏览器的一次性校验码，设置名称和有效期后登录；CLI 与 Web 设置共用设备列表、编辑及撤销能力。新用户默认可信设备，老用户平滑保留配置；两种登录页统一设计并提供切换说明，CLI 切换需确认，固定 Token 模式以黄色警告提示风险，单个实例只启用一种。
-=======
+
 ## [0.28.0] - 2026-09-11
 
 ### Added
 
 - 对话页的图片查看工具可按调用中的文件路径预览当前图片，复用缩放与保存交互；读取失败可重试，不展示原始 base64 输出。
->>>>>>> master
 
 ### Fixed
 
