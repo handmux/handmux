@@ -107,6 +107,7 @@ export async function runSetup({
         note(t('setup.welcome'));
         a = await editConnection(a, { home, log });
         a.authMode = await editAuth(a);
+        if (a.authMode === 'token') a.token = await editToken(a);
       } catch (e) { if (e !== CANCELLED) throw e; }
     }
     for (;;) {
@@ -157,6 +158,7 @@ export async function runSetup({
         else if (choice === 'name') a.name = await editName(a);
         else if (choice === 'port') a.port = await editPort(a);
         else if (choice === 'auth') a.authMode = await editAuth(a);
+        if (a.authMode === 'token') a.token = await editToken(a);
         else if (choice === 'browser') a.previewDomain = await editBrowserDomain(a);
         else if (choice === 'language') a.lang = await editLanguage(a);
         else if (choice === 'push') {
