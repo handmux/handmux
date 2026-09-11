@@ -4,6 +4,8 @@ All notable changes to handmux. Format follows [Keep a Changelog](https://keepac
 
 ## [Unreleased]
 
+## [0.28.0] - 2026-09-11
+
 ### Added
 
 - 对话页的图片查看工具可按调用中的文件路径预览当前图片，复用缩放与保存交互；读取失败可重试，不展示原始 base64 输出。
