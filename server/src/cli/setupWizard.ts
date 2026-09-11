@@ -138,13 +138,6 @@ export async function runSetup({
       }));
       if (choice === 'exit') { cancel(t('setup.exited')); return null; }
       if (choice === 'save' || choice === 'start') {
-        if (a.authMode !== originalAuthMode) {
-          note(tokenWarning(t('auth.switchWarning')), t('auth.section'));
-          if (!await ask(confirm({ message: t('auth.switchConfirm'), initialValue: false }))) {
-            cancel(t('setup.exited'));
-            return null;
-          }
-        }
         const cfg = mergeConfig(existing, a);
         new PrivateStateStore(target).write(cfg);
         outro(t('setup.wrote', { path: target }));
@@ -184,10 +177,15 @@ const withBack = (msg: string): string => `${msg}  ${t('setup.escBack')}`;
 
 async function editAuth(a: SetupAnswers): Promise<'token' | 'trusted-device'> {
   note(t('auth.manageHint'));
-  return ask(select({ message: withBack(t('auth.section')), initialValue: a.authMode ?? 'trusted-device', options: [
+  const next = await ask(select({ message: withBack(t('auth.section')), initialValue: a.authMode ?? 'trusted-device', options: [
     { value: 'trusted-device' as const, label: t('auth.trusted') },
     { value: 'token' as const, label: t('auth.token') },
   ] }));
+  if (next !== a.authMode) {
+    note(tokenWarning(t('auth.switchWarning')), t('auth.section'));
+    if (!await ask(confirm({ message: t('auth.switchConfirm'), initialValue: false }))) return a.authMode;
+  }
+  return next;
 }
 
 async function editLanguage(a: SetupAnswers): Promise<string> {
