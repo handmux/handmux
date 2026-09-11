@@ -118,7 +118,6 @@ export async function runSetup({
           { value: 'name', label: t('setup.secName'), hint: a.name || t('setup.default') },
           { value: 'port', label: t('setup.secPort'), hint: String(a.port) },
           { value: 'auth', label: t('auth.section'), hint: t(a.authMode === 'trusted-device' ? 'auth.trusted' : 'auth.token') },
-          ...(a.authMode !== 'trusted-device' ? [{ value: 'token', label: t('setup.secToken'), hint: a.token ? maskSecret(a.token) : t('setup.tokenAuto') }] : []),
           { value: 'browser', label: t('setup.secBrowser'), hint: a.previewDomain || t('setup.browserOff') },
           { value: 'push', label: t('setup.secPush'), hint: a.vapid ? (a.vapid.subject || t('setup.on')) : t('setup.off') },
           {
@@ -157,7 +156,6 @@ export async function runSetup({
         if (choice === 'connection') a = await editConnection(a, { home, log });
         else if (choice === 'name') a.name = await editName(a);
         else if (choice === 'port') a.port = await editPort(a);
-        else if (choice === 'token') a.token = await editToken(a);
         else if (choice === 'auth') a.authMode = await editAuth(a);
         else if (choice === 'browser') a.previewDomain = await editBrowserDomain(a);
         else if (choice === 'language') a.lang = await editLanguage(a);
