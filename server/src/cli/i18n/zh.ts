@@ -5,7 +5,7 @@ export default {
   'auth.token': '固定 Token（兼容，不建议长期使用）',
   'auth.manageHint': '认证方式重启后生效。日常管理使用 handmux auth add/list/edit/revoke。为更好地保护传输安全，尽可能使用 HTTPS。',
   'auth.access': '设备授权：打开访问地址，然后在这台电脑运行 handmux auth add 批准你的浏览器。',
-  'auth.warning': '⚠ 提醒：固定 Token 泄露后可被重复使用。推荐在 handmux setup 选择可信设备授权。为更好地保护凭据传输，尽可能使用 HTTPS。',
+  'auth.warning': '⚠ 提醒：固定 Token 泄露后可被重复使用。推荐在 handmux setup 启用可信设备登录。为更好地保护凭据传输，尽可能使用 HTTPS。',
   'auth.switchWarning': '⚠ 必须在运行 Handmux 的电脑上，以同一系统用户使用本机直连终端或独立 SSH 操作，不要使用 Handmux 内的终端。切换认证并重启后当前登录可能失效；若失去独立终端，你可能无法批准新设备。',
   'auth.switchConfirm': '确认当前是非 Handmux 内的本机终端或独立 SSH，并保存认证方式变更？',
   'auth.switchApplyConfirm': '确认当前是非 Handmux 内的本机终端或独立 SSH，并应用认证方式变更？',
