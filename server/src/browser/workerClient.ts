@@ -4,8 +4,6 @@ import { randomBytes } from 'node:crypto';
 import { fork } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { claimedBrowserRequest } from './publicProxy.js';
-import { isBrowserBootstrapPath } from './bootstrap.js';
-import { browserCookie, stripMainCookies, stripForgedCookies } from './credentials.js';
 import { BROWSER_INTERNAL_HEADER } from './protocol.js';
 import { createBrowserCoordinator } from './coordinator.js';
 import type { ChildProcess, ForkOptions } from 'node:child_process';
@@ -32,7 +30,7 @@ function forwardedHeaders(
   appToken: string | undefined,
   api: boolean,
 ): IncomingHttpHeaders {
-  const out: IncomingHttpHeaders = { ...stripMainCookies(headers), [BROWSER_INTERNAL_HEADER]: internalToken };
+  const out: IncomingHttpHeaders = { ...headers, [BROWSER_INTERNAL_HEADER]: internalToken };
   if (api || out.authorization === `Bearer ${appToken}`) delete out.authorization;
   delete out['proxy-authorization'];
   return out;
@@ -53,7 +51,6 @@ export function createBrowserWorkerClient({
   stableAfterMs = 30_000,
   requestTimeoutMs = 15_000,
   stopTimeoutMs = 3_000,
-  deviceAuthorization,
 }: {
   appToken?: string;
   previewDomain?: string | null;
@@ -69,11 +66,6 @@ export function createBrowserWorkerClient({
   stableAfterMs?: number;
   requestTimeoutMs?: number;
   stopTimeoutMs?: number;
-  deviceAuthorization?: {
-    getDeviceId(req: IncomingMessage): string | null;
-    isActive(deviceId: string): boolean;
-    isMainRequest?(req: IncomingMessage): boolean;
-  };
 } = {}) {
   const internalToken = randomToken();
   let child: WorkerChild | null = null;
@@ -85,41 +77,6 @@ export function createBrowserWorkerClient({
   let readyTimer: TimerHandle | null = null;
   let stableTimer: TimerHandle | null = null;
   const activeSockets = new Set<Duplex>();
-  // These are bearer capabilities, not user-supplied IDs. They die with this process/worker.
-  const browserDevices = new Map<string, string>();
-  const deviceBrowsers = new Map<string, string>();
-  const deviceConnections = new Map<string, Set<() => void>>();
-  const appHostnames = new Set([new URL(handmuxOrigin).hostname]);
-  const hostname = (req: IncomingMessage): string | null => {
-    try { return new URL(`http://${req.headers.host}`).hostname; } catch { return null; }
-  };
-  const ownerFor = (capability: string | null): string | null => {
-    const owner = capability ? browserDevices.get(capability) : undefined;
-    return owner && deviceAuthorization?.isActive(owner) ? owner : null;
-  };
-  const track = (owner: string | null, stop: () => void): (() => void) => {
-    if (!owner) return () => {};
-    let connections = deviceConnections.get(owner);
-    if (!connections) deviceConnections.set(owner, connections = new Set());
-    connections.add(stop);
-    return () => { connections!.delete(stop); if (!connections!.size) deviceConnections.delete(owner); };
-  };
-  const revokeDevice = (deviceId: string): void => {
-    const capability = deviceBrowsers.get(deviceId);
-    deviceBrowsers.delete(deviceId);
-    if (capability) browserDevices.delete(capability);
-    for (const stop of deviceConnections.get(deviceId) || []) stop();
-    deviceConnections.delete(deviceId);
-    if (capability && port) {
-      // The worker blocks pending async creations as well as disposing existing leases.
-      const revoke = request({ hostname: '127.0.0.1', port, method: 'POST',
-        path: `/_browser-worker/revoke/${encodeURIComponent(capability)}`,
-        headers: { [BROWSER_INTERNAL_HEADER]: internalToken } }, (incoming) => incoming.resume());
-      revoke.once('error', () => {});
-      revoke.setTimeout?.(requestTimeoutMs, () => revoke.destroy());
-      revoke.end();
-    }
-  };
   const workerEnv: NodeJS.ProcessEnv = {};
   for (const name of [
     'PATH', 'HOME', 'USER', 'LOGNAME', 'SHELL', 'TMPDIR', 'TMP', 'TEMP',
@@ -193,8 +150,6 @@ export function createBrowserWorkerClient({
       clearStableTimer();
       for (const socket of activeSockets) socket.destroy();
       activeSockets.clear();
-      browserDevices.clear();
-      deviceBrowsers.clear();
       scheduleRestart();
     };
     spawned.once('error', () => {
@@ -211,12 +166,6 @@ export function createBrowserWorkerClient({
     if (!api && !claimedBrowserRequest(req)) return next();
     const targetPort = port;
     if (!targetPort) return unavailable(res, api ? 503 : 502);
-    if (deviceAuthorization && (appHostnames.has(hostname(req) || '') || deviceAuthorization.isMainRequest?.(req))) {
-      return res.status(403).json({ error: 'browser preview must use a different hostname from HandMux' });
-    }
-    const bootstrap = isBrowserBootstrapPath((req.originalUrl || req.url).split('?')[0]);
-    let owner = ownerFor(browserCookie(req.headers.cookie));
-    if (deviceAuthorization && !api && !bootstrap && !owner) return res.status(403).json({ error: 'browser device authorization expired' });
     const upstream = request({
       hostname: '127.0.0.1',
       port: targetPort,
@@ -224,27 +173,12 @@ export function createBrowserWorkerClient({
       path: req.originalUrl || req.url,
       headers: forwardedHeaders(req.headers, internalToken, appToken, api),
     }, (incoming) => {
-      if (deviceAuthorization) {
-        if (bootstrap && incoming.statusCode && incoming.statusCode >= 300 && incoming.statusCode < 400) {
-          owner = ownerFor(browserCookie((incoming.headers['set-cookie'] || []).map((value) => value.split(';')[0]).join(';')));
-        }
-        if (!owner || !deviceAuthorization.isActive(owner)) {
-          incoming.destroy();
-          if (!res.headersSent) res.status(403).json({ error: 'browser device authorization expired' });
-          return;
-        }
-      }
-      const untrackResponse = track(owner, () => { incoming.destroy(); res.destroy(); });
-      res.once('close', untrackResponse);
-      res.writeHead(incoming.statusCode || 502, stripForgedCookies(incoming.headers));
+      res.writeHead(incoming.statusCode || 502, incoming.headers);
       incoming.pipe(res);
-      incoming.once('aborted', () => res.destroy());
       res.once('close', () => { if (!res.writableEnded) incoming.destroy(); });
     });
     if (api) upstream.setTimeout?.(requestTimeoutMs, () => upstream.destroy(new Error('browser worker request timeout')));
     const abort = (): void => { upstream.destroy(); };
-    const untrack = track(owner, () => { upstream.destroy(); res.destroy(); });
-    res.once('close', untrack);
     req.once('aborted', abort);
     res.once('close', () => { if (!res.writableEnded) abort(); });
     upstream.once('error', () => {
@@ -258,20 +192,14 @@ export function createBrowserWorkerClient({
     if (!claimedBrowserRequest(req)) return false;
     const targetPort = port;
     if (!targetPort) { socket.destroy(); return true; }
-    if (deviceAuthorization && (appHostnames.has(hostname(req) || '') || deviceAuthorization.isMainRequest?.(req))) { socket.destroy(); return true; }
-    const owner = ownerFor(browserCookie(req.headers.cookie));
-    if (deviceAuthorization && !owner) { socket.destroy(); return true; }
     const upstream = connect({ host: '127.0.0.1', port: targetPort });
     activeSockets.add(socket);
     activeSockets.add(upstream);
-    const untrack = track(owner, () => { socket.destroy(); upstream.destroy(); });
     const cleanup = (): void => {
       activeSockets.delete(socket);
       activeSockets.delete(upstream);
-      untrack();
     };
     upstream.once('connect', () => {
-      if (owner && !deviceAuthorization?.isActive(owner)) { socket.destroy(); upstream.destroy(); return; }
       const headers = forwardedHeaders(req.headers, internalToken, appToken, false);
       const lines = [`${req.method || 'GET'} ${req.url} HTTP/${req.httpVersion || '1.1'}`];
       for (const [name, value] of Object.entries(headers)) {
@@ -292,8 +220,6 @@ export function createBrowserWorkerClient({
   const proxyRequest = ({ req, method, path, body }: BrowserProxyRequest) => new Promise<BrowserProxyResponse | null>((resolve) => {
     const targetPort = port;
     if (!targetPort) return resolve(null);
-    const owner = deviceAuthorization ? ownerFor(String(req.headers['x-handmux-browser-device'] || '')) : null;
-    if (deviceAuthorization && !owner) return resolve({ status: 401, body: Buffer.from('{"error":"device authorization expired"}') });
     const payload = body === undefined ? null : Buffer.from(JSON.stringify(body));
     const headers = forwardedHeaders(req.headers, internalToken, appToken, true);
     if (payload) {
@@ -305,48 +231,23 @@ export function createBrowserWorkerClient({
     }
     const upstream = request({ hostname: '127.0.0.1', port: targetPort, method, path, headers }, (incoming) => {
       const chunks: Buffer[] = [];
-      incoming.once('aborted', () => resolve(null));
       incoming.on('data', (chunk: Buffer | string) => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
-      incoming.on('end', () => {
-        if (owner && !deviceAuthorization?.isActive(owner)) {
-          revokeDevice(owner);
-          return resolve({ status: 401, body: Buffer.from('{"error":"device authorization expired"}') });
-        }
-        resolve({ status: incoming.statusCode || 502, headers: stripForgedCookies(incoming.headers), body: Buffer.concat(chunks) });
-      });
+      incoming.on('end', () => resolve({
+        status: incoming.statusCode || 502,
+        headers: incoming.headers,
+        body: Buffer.concat(chunks),
+      }));
     });
     upstream.setTimeout?.(requestTimeoutMs, () => upstream.destroy(new Error('browser worker request timeout')));
     upstream.once('error', () => resolve(null));
-    const untrack = track(owner, () => { upstream.destroy(); resolve({ status: 401, body: Buffer.from('{"error":"device authorization expired"}') }); });
-    upstream.once('close', untrack);
     req.once('aborted', () => upstream.destroy());
     upstream.end(payload || undefined);
   });
 
-  const coordinator = createBrowserCoordinator({
+  const apiHandler = createBrowserCoordinator({
     proxyRequest,
     getStatus: () => ({ ready: port != null, generation }),
   });
-  const apiHandler: typeof coordinator = Object.assign(((req, res, next) => {
-    delete req.headers['x-handmux-browser-profile-device'];
-    if (deviceAuthorization) {
-      const principal: unknown = res.locals.deviceAuth;
-      const deviceId = principal && typeof principal === 'object' && 'deviceId' in principal && typeof principal.deviceId === 'string'
-        ? principal.deviceId : deviceAuthorization.getDeviceId(req);
-      if (!deviceId || !deviceAuthorization.isActive(deviceId)) return res.status(401).json({ error: 'device authorization expired' });
-      const appHostname = hostname(req);
-      if (appHostname) appHostnames.add(appHostname);
-      let capability = deviceBrowsers.get(deviceId);
-      if (!capability) {
-        capability = randomBytes(32).toString('base64url');
-        deviceBrowsers.set(deviceId, capability);
-        browserDevices.set(capability, deviceId);
-      }
-      req.headers['x-handmux-browser-device'] = capability;
-      req.headers['x-handmux-browser-profile-device'] = deviceId;
-    }
-    return coordinator(req, res, next);
-  }) as RequestHandler, { close: () => coordinator.close() });
 
   if (previewDomain) start();
   let closePromise: Promise<void> | null = null;
@@ -354,7 +255,6 @@ export function createBrowserWorkerClient({
     apiHandler,
     publicHandler: proxyHttp(false),
     onUpgrade,
-    revokeDevice,
     health(): BrowserWorkerHealth {
       if (!previewDomain) return { status: 'disabled', detail: null };
       if (stopping) return { status: 'degraded', detail: 'browser-stopping' };

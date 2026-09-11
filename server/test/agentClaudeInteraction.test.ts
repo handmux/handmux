@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createClaudeInteractionAdapter } from '../src/agents/claudeInteraction.js';
+import { sendPaneChoice, serializePaneInput } from '../src/paneInput.js';
 import { AgentRunRuntime } from '../src/agent-runtime/run.js';
 
 async function lease() {
@@ -40,6 +41,46 @@ describe('Claude Interaction adapter', () => {
     })).resolves.toEqual({ status: 'accepted' });
     expect(sendChoice).toHaveBeenCalledWith('%1', '1');
     await handle.close();
+  });
+
+  it('answers the model picker with a keypress, not a bracketed paste or trailing Enter', async () => {
+    const run = await lease();
+    const commands = {
+      exitCopyModeIfActive: vi.fn(async () => {}), sendText: vi.fn(async () => {}),
+      sendEnter: vi.fn(async () => {}), sendKey: vi.fn(async () => {}),
+    };
+    const adapter = createClaudeInteractionAdapter({
+      capturePlain: async () => 'Select model\n❯ 1. Default\n  2. Sonnet\nEnter to confirm · Esc to cancel',
+      sendChoice: (pane, choice) => sendPaneChoice(commands, pane, choice),
+    }, 1000);
+    const handle = await adapter.observeNative(run, () => {});
+    try {
+      const gate = deferred<void>();
+      const preceding = serializePaneInput('%1', () => gate.promise);
+      const response = adapter.dispatchResponse(run, {
+        interactionId: handle.checkpoint.pending[0]!.id,
+        value: { type: 'selection', optionIds: ['choice:2'] },
+      });
+      await Promise.resolve();
+      expect(commands.sendKey).not.toHaveBeenCalled();
+      gate.resolve(); await preceding;
+      expect(await response).toEqual({ status: 'accepted' });
+      expect(commands.exitCopyModeIfActive).toHaveBeenCalledWith('%1');
+      expect(commands.sendKey).toHaveBeenCalledTimes(1);
+      expect(commands.sendKey).toHaveBeenCalledWith('%1', '2');
+      expect(commands.sendText).not.toHaveBeenCalled();
+      expect(commands.sendEnter).not.toHaveBeenCalled();
+    } finally { await handle.close(); }
+  });
+
+  it.each(['10', 'Enter', '2\n'])('refuses invalid choice key sequences (%s)', (choice) => {
+    const commands = {
+      exitCopyModeIfActive: vi.fn(async () => {}), sendText: vi.fn(async () => {}),
+      sendEnter: vi.fn(async () => {}), sendKey: vi.fn(async () => {}),
+    };
+    expect(() => sendPaneChoice(commands, '%1', choice)).toThrow('single option digit');
+    expect(commands.exitCopyModeIfActive).not.toHaveBeenCalled();
+    expect(commands.sendKey).not.toHaveBeenCalled();
   });
 
   it('fails closed when provider permission state has no reliable native decisions', async () => {

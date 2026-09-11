@@ -37,7 +37,7 @@ describe('static-only preview replacement', () => {
   it('uses previewDomain only for the browser public origin, not the retired dynamic preview proxy', () => {
     const source = fs.readFileSync(new URL('../src/server.ts', import.meta.url), 'utf8');
     expect(source).toContain('const previewDomain = process.env.HANDMUX_PREVIEW_DOMAIN || null');
-    expect(source).toContain('createBrowserWorkerClient({ appToken: token, previewDomain, handmuxOrigin,');
+    expect(source).toContain('createBrowserWorkerClient({ appToken: token, previewDomain, handmuxOrigin })');
     expect(source).not.toContain('createApiRouter({ token, events, uploadExts, previews, previewDomain,');
     expect(source).not.toContain('dynamicProxy');
     expect(source).not.toContain('preview.onUpgrade');

@@ -463,3 +463,45 @@ describe('Codex rollout transcript', () => {
     expect(parsed[0].tool).toBeUndefined();
   });
 });
+
+describe('image-view tool paths and outputs', () => {
+  const image = [{type:'input_image', image_url:'data:image/png;base64,HIDDEN_IMAGE_DATA'}];
+  it('keeps classic functions.view_image path and outcome semantics', () => {
+    const parser = createCodexTranscriptParser();
+    parser.push([row({type:'function_call', name:'functions.view_image', call_id:'img', arguments:JSON.stringify({path:'/tmp/a.png'})})]);
+    parser.takeChangedFrom();
+    parser.push([row({type:'function_call_output', call_id:'img', output:image})]);
+    expect(parser.messages[0].tool.input).toEqual({path:'/tmp/a.png'});
+    expect(parser.takeChangedFrom()).toBe(0);
+  });
+  it('extracts literal path and cwd from an orchestrated call', () => {
+    const parsed = parseCodexTranscript([
+      row({type:'custom_tool_call', name:'exec', call_id:'img', input:'image((await tools.view_image({path: "a.png", cwd: "/tmp"})).output);'}),
+      row({type:'custom_tool_call_output', call_id:'img', output:image}),
+    ]);
+    expect(parsed[0].tool.input).toEqual({path:'a.png', cwd:'/tmp'});
+  });
+  it.each(['imagePath', '"a" + suffix', "'a' + suffix + 'b'", '`a${suffix}`'])('does not turn JS expression %s into a download path', (expression) => {
+    const parsed = parseCodexTranscript([row({type:'custom_tool_call', name:'exec', call_id:'img', input:`await tools.view_image({path: ${expression}, cwd: "/tmp"});`})]);
+    expect(parsed[0].tool.input.path).toBeUndefined();
+  });
+  it.each(['path: "/tmp/a.png", path: imagePath', 'path: "/tmp/a.png", ...options', 'path: "/tmp/a.png", [key]: value'])('does not keep a path overridden by unresolved input %s', (fields) => {
+    const parsed = parseCodexTranscript([row({type:'custom_tool_call', name:'exec', call_id:'img', input:`await tools.view_image({${fields}});`})]);
+    expect(parsed[0].tool.input.path).toBeUndefined();
+  });
+  it('does not discard unstructured mixed tool output', () => {
+    const parsed = parseCodexTranscript([
+      row({type:'custom_tool_call', name:'exec', call_id:'mixed', input:'await tools.view_image({path:"/tmp/a.png"}); text(await tools.exec_command({cmd:"pwd"}));'}),
+      row({type:'custom_tool_call_output', call_id:'mixed', output:'ordinary command output'}),
+    ]);
+    expect(parsed[1].tool.result).toBe('ordinary command output');
+  });
+  it('preserves structured mixed results', () => {
+    const parsed = parseCodexTranscript([
+      row({type:'custom_tool_call', name:'exec', call_id:'mixed', input:'await tools.view_image({path:"/tmp/a.png"}); await tools.exec_command({cmd:"pwd"});'}),
+      row({type:'custom_tool_call_output', call_id:'mixed', output:JSON.stringify({image, command:{output:'ordinary command output',exit_code:0}})}),
+    ]);
+    expect(parsed[1].tool.result).toContain('ordinary command output');
+    expect(JSON.stringify(parsed)).toContain('HIDDEN_IMAGE_DATA');
+  });
+});

@@ -1,7 +1,7 @@
-import { ApiError, parseApiErrorBody } from './apiErrors.js';
+import { ApiError, UnauthorizedError, parseApiErrorBody } from './apiErrors.js';
 import { requestJson } from './apiRequest.js';
 import { parseSseFrames } from './sse.js';
-import { authenticationHeaders, authenticationError } from './authSession.js';
+import { getToken } from './storage.js';
 import type { AgentRunRef } from './agentCatalog.js';
 import type {
   ConversationCapabilities,
@@ -22,7 +22,7 @@ const ID_RE = /^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,1023}$/;
 const SEND_DELIVERIES = new Set(['prompt', 'steer', 'follow_up']);
 const CONVERSATION_REASONS = new Set<ConversationReason>([
   'invalid_request', 'unsupported', 'stale_run', 'conflict',
-  'provider_rejected', 'temporarily_unavailable', 'delivery_unconfirmed',
+  'provider_rejected', 'terminal_draft_conflict', 'temporarily_unavailable', 'delivery_unconfirmed',
 ]);
 const CONVERSATION_READY_TIMEOUT_MS = 20_000;
 // The Server sends an SSE comment every 20 seconds. Three missed keepalives means the fetch body is no
@@ -491,11 +491,10 @@ export async function streamAgentConversation(
   try {
     const response = await withStreamDeadline(fetch(path, {
       cache: 'no-store', signal: requestController.signal,
-      headers: authenticationHeaders({ Accept: 'text/event-stream' }),
-      credentials: 'same-origin',
+      headers: { Authorization: `Bearer ${getToken() ?? ''}`, Accept: 'text/event-stream' },
     }), Math.max(0, readyDeadline - Date.now()), requestController.signal,
     'Agent Conversation live stream did not become ready', abortRequest);
-    if (response.status === 401) throw await authenticationError();
+    if (response.status === 401) throw new UnauthorizedError();
     if (!response.ok) {
       let body = null;
       try {
@@ -594,7 +593,8 @@ function sendReceipt(value: unknown): ConversationSendReceipt {
         || !bounded(baseline.viewId, 1024) || !bounded(baseline.historyVersion, 1024)
         || (baseline.tailItemId !== undefined && !bounded(baseline.tailItemId, 256))))
       || (submission.autoDispatchBlockedReason !== undefined
-        && submission.autoDispatchBlockedReason !== 'provider_rejected')
+        && submission.autoDispatchBlockedReason !== 'provider_rejected'
+        && submission.autoDispatchBlockedReason !== 'terminal_draft_conflict')
       || (submission.steerActionId !== undefined && !bounded(submission.steerActionId, 256))
       || (submission.steerAnchor !== undefined && (!steerAnchor
         || !bounded(steerAnchor.viewId, 1024)
@@ -646,10 +646,9 @@ export async function downloadAgentConversationResource(
   const path = `/api/agents/conversation/resource?${query}`;
   const response = await fetch(path, {
     cache: 'no-store',
-    headers: authenticationHeaders({ Accept: 'application/octet-stream' }),
-    credentials: 'same-origin',
+    headers: { Authorization: `Bearer ${getToken() ?? ''}`, Accept: 'application/octet-stream' },
   });
-  if (response.status === 401) throw await authenticationError();
+  if (response.status === 401) throw new UnauthorizedError();
   if (!response.ok) {
     let body = null;
     try { body = parseApiErrorBody(await response.json()); } catch { /* not json */ }

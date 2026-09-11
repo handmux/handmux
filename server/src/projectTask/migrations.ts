@@ -1,24 +1,6 @@
 import type { DatabaseSync } from 'node:sqlite';
 import { PROJECT_TASK_SCHEMA_VERSION, ProjectTaskError } from './schema.js';
 
-const V2_AUTH_SCHEMA = `
-CREATE TABLE auth_devices (
- id TEXT PRIMARY KEY, pairing_request_id TEXT NOT NULL UNIQUE,
- name TEXT NOT NULL CHECK(length(trim(name)) BETWEEN 1 AND 80),
- browser_summary TEXT NOT NULL, authorized_at INTEGER NOT NULL,
- expires_at INTEGER, last_used_at INTEGER NOT NULL, revoked_at INTEGER
-) STRICT;
-CREATE TABLE auth_sessions (
- id TEXT PRIMARY KEY, device_id TEXT NOT NULL REFERENCES auth_devices(id),
- secret_hash TEXT NOT NULL UNIQUE, origin TEXT NOT NULL,
- transport TEXT NOT NULL CHECK(transport IN ('http', 'https')),
- created_at INTEGER NOT NULL, last_used_at INTEGER NOT NULL, revoked_at INTEGER
-) STRICT;
-CREATE INDEX auth_sessions_device ON auth_sessions(device_id);
-CREATE INDEX auth_devices_expiry ON auth_devices(expires_at) WHERE revoked_at IS NULL;
-CREATE TABLE auth_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL) STRICT;
-`;
-
 const V1_SCHEMA = `
 CREATE TABLE projects (
   id TEXT PRIMARY KEY,
@@ -102,8 +84,6 @@ export function migrateProjectDatabase(db: DatabaseSync): number {
   db.exec('BEGIN IMMEDIATE');
   try {
     if (current === 0) db.exec(V1_SCHEMA);
-    if (current < 2) db.exec(V2_AUTH_SCHEMA);
-    if (current < 3) db.exec('ALTER TABLE auth_devices ADD COLUMN version INTEGER NOT NULL DEFAULT 1 CHECK(version >= 1)');
     db.exec(`PRAGMA user_version = ${PROJECT_TASK_SCHEMA_VERSION}`);
     db.exec('COMMIT');
   } catch (error) {

@@ -12,8 +12,6 @@ import { browserRoutes } from './routes.js';
 import { BROWSER_INTERNAL_HEADER } from './protocol.js';
 
 interface BrowserManager {
-  revokeDevice?(deviceId: string): void;
-  setProfileDevice?(capability: string, deviceId: string): void;
   close?(): unknown | Promise<unknown>;
   [key: string]: unknown;
 }
@@ -85,21 +83,9 @@ export async function createBrowserWorkerServer({
     return next();
   });
   app.get('/_browser-worker/health', (_req, res) => res.json({ ok: true }));
-  app.post('/_browser-worker/revoke/:deviceId', (req, res) => {
-    browserBootstrap.revokeDevice(req.params.deviceId);
-    browser.revokeDevice?.(req.params.deviceId);
-    res.status(204).end();
-  });
   app.use(
     '/api/browser-proxy',
     express.json(),
-    (req, _res, next) => {
-      const capability = req.headers['x-handmux-browser-device'];
-      const owner = req.headers['x-handmux-browser-profile-device'];
-      if (typeof capability === 'string' && typeof owner === 'string') browser.setProfileDevice?.(capability, owner);
-      delete req.headers['x-handmux-browser-profile-device'];
-      next();
-    },
     workerBrowserRoutes({ browser, previewDomain, browserBootstrap }),
   );
   app.use(browserPublic.handler);

@@ -12,6 +12,7 @@ import type {
 } from './bridgeTypes.js';
 import { DEFAULT_BRIDGE_LIMITS } from './bridgeTypes.js';
 import type { LocalAgentBridge } from './bridge.js';
+import { AgentRunError } from './run.js';
 import type { AgentAttachmentCandidate, AgentRunLease, AgentRunRef } from './run.js';
 
 const PROTOCOL_VERSION = 1;
@@ -33,6 +34,8 @@ interface WirePeer {
 
 interface ServerSession {
   peer: WirePeer;
+  authenticated?: boolean;
+  ready?: boolean;
   lease?: AgentRunLease;
   connection?: LocalAgentBridgeConnection;
   unregister: Map<string, () => void>;
@@ -91,7 +94,6 @@ function wirePeer(socket: net.Socket, maxBytes: number, onMessage: (value: unkno
       socket.write(encoded);
     },
     close() {
-      if (peer.closed) return;
       peer.closed = true;
       socket.destroy();
     },
@@ -289,8 +291,19 @@ export class LocalAgentBridgeTransportServer {
     const peer = wirePeer(socket, MAX_HANDSHAKE_BYTES, (value) => {
       const operation = session.tail.then(() => this.#message(session, nonce, value));
       session.tail = operation.catch((error) => {
+        if (!session.ready) {
+          if (!session.authenticated || peer.closed) { this.#closeSession(session); return; }
+          // Flush the rejection before closing so old clients still observe EOF and new clients get
+          // the actual cause. Only a validated, authenticated hello may receive diagnostics.
+          try {
+            peer.send({ type: 'handshake-error', error: errorMessage(error),
+              ...(error instanceof AgentRunError ? { code: error.code } : {}) });
+            peer.closed = true;
+            peer.socket.end(() => this.#closeSession(session));
+          } catch { this.#closeSession(session); }
+          return;
+        }
         try { failure(peer, record(value)?.id, error); } catch { /* closing */ }
-        if (!session.connection) this.#closeSession(session);
       });
     });
     const handshakeTimer = setTimeout(() => this.#closeSession(session), this.#handshakeTimeoutMs);
@@ -305,6 +318,7 @@ export class LocalAgentBridgeTransportServer {
   }
 
   async #message(session: ServerSession, nonce: string, raw: unknown): Promise<void> {
+    if (session.peer.closed) return;
     const value = record(raw);
     if (!value || typeof value.type !== 'string') throw new Error('Invalid Bridge transport frame');
     if (!session.connection) {
@@ -318,6 +332,7 @@ export class LocalAgentBridgeTransportServer {
         || (!replacing && value.generationId !== undefined)) {
         throw new Error('Invalid Bridge transport generation');
       }
+      session.authenticated = true;
       const lease = await this.#authorize(
         value.adapterId,
         structuredClone(value.candidate),
@@ -340,6 +355,7 @@ export class LocalAgentBridgeTransportServer {
         session.connection.limits.maxFrameBytes,
         session.connection.limits.maxSnapshotBytes,
       ) + WIRE_OVERHEAD_BYTES;
+      session.ready = true;
       session.peer.send({
         type: 'ready', protocolVersion: PROTOCOL_VERSION,
         connectionId: session.connection.connectionId,
@@ -539,6 +555,13 @@ export async function connectBridgeTransport({
             generationId: generation.id,
           }),
         });
+        return;
+      }
+      if (value.type === 'handshake-error' && !settled) {
+        const error = new Error(bounded(value.error, 4096) ? value.error : 'Bridge handshake rejected');
+        if (bounded(value.code, 128)) Object.assign(error, { code: value.code });
+        finish({ error });
+        peer.close();
         return;
       }
       if (value.type === 'ready') { finish({ value }); return; }

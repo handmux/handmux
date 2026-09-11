@@ -30,10 +30,16 @@ const FAILURE_TTL_MS = 3_000;
 // Real executable path of a pid. lsof resolves launch symlinks on macOS; /proc is the cheap Linux path.
 // A transient lsof failure is inconclusive, not a negative identity verdict that should escape the call.
 export async function executablePath(run: RunCommand, pid: string | number): Promise<string> {
+  if (process.platform === 'linux') {
+    try { return await fsp.readlink(`/proc/${pid}/exe`); } catch { /* fall back to lsof */ }
+  }
   let out = '';
-  try { out = await run('lsof', ['-a', '-p', String(pid), '-d', 'txt', '-Fn']); } catch { /* try /proc */ }
+  try { out = await run('lsof', ['-a', '-p', String(pid), '-d', 'txt', '-Fn']); } catch { /* unavailable or timed out */ }
   for (const line of String(out).split('\n')) if (line[0] === 'n') return line.slice(1).trim();
-  try { return await fsp.readlink(`/proc/${pid}/exe`); } catch { return ''; }
+  if (process.platform !== 'linux') {
+    try { return await fsp.readlink(`/proc/${pid}/exe`); } catch { /* unavailable */ }
+  }
+  return '';
 }
 
 function parseForegroundProcesses(out: unknown): ForegroundProcess[] {

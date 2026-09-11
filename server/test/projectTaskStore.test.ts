@@ -10,7 +10,7 @@ import {
   pragmaValue,
 } from '../src/projectTask/migrations.js';
 import { createProjectTaskRuntime } from '../src/projectTask/runtime.js';
-import { PROJECT_TASK_SCHEMA_VERSION, ProjectTaskError, projectStorageError } from '../src/projectTask/schema.js';
+import { ProjectTaskError, projectStorageError } from '../src/projectTask/schema.js';
 import {
   createProjectBackupManager,
   preserveCorruptProjectDatabase,
@@ -21,15 +21,15 @@ import {
 const { DatabaseSync } = createRequire(import.meta.url)('node:sqlite') as typeof import('node:sqlite');
 
 describe('Project Task schema', () => {
-  it('creates the shared schema once and applies the required SQLite pragmas', () => {
+  it('creates v1 once and applies the required SQLite pragmas', () => {
     const home = tmpHome('hm-project-schema-');
     const file = path.join(home, 'project.sqlite');
     const db = new DatabaseSync(file);
     try {
       configureProjectDatabase(db);
-      expect(migrateProjectDatabase(db)).toBe(PROJECT_TASK_SCHEMA_VERSION);
-      expect(migrateProjectDatabase(db)).toBe(PROJECT_TASK_SCHEMA_VERSION);
-      expect(pragmaValue(db, 'user_version')).toBe(PROJECT_TASK_SCHEMA_VERSION);
+      expect(migrateProjectDatabase(db)).toBe(1);
+      expect(migrateProjectDatabase(db)).toBe(1);
+      expect(pragmaValue(db, 'user_version')).toBe(1);
       expect(pragmaValue(db, 'journal_mode')).toBe('wal');
       expect(pragmaValue(db, 'foreign_keys')).toBe(1);
       expect(pragmaValue(db, 'busy_timeout')).toBe(5000);
@@ -37,7 +37,7 @@ describe('Project Task schema', () => {
       const tables = db.prepare(`
         SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name
       `).all() as Array<{ name: string }>;
-      expect(tables.map((row) => row.name)).toEqual(['auth_devices', 'auth_meta', 'auth_sessions', 'projects', 'task_events', 'tasks']);
+      expect(tables.map((row) => row.name)).toEqual(['projects', 'task_events', 'tasks']);
     } finally {
       db.close();
     }
@@ -46,9 +46,9 @@ describe('Project Task schema', () => {
   it('refuses a database from a newer schema without changing it', () => {
     const db = new DatabaseSync(':memory:');
     try {
-      db.exec(`PRAGMA user_version = ${PROJECT_TASK_SCHEMA_VERSION + 1}`);
+      db.exec('PRAGMA user_version = 2');
       expect(() => migrateProjectDatabase(db)).toThrowError(ProjectTaskError);
-      expect(pragmaValue(db, 'user_version')).toBe(PROJECT_TASK_SCHEMA_VERSION + 1);
+      expect(pragmaValue(db, 'user_version')).toBe(2);
     } finally {
       db.close();
     }
@@ -64,7 +64,7 @@ describe('Project Task runtime and Project store', () => {
       home,
       storeOptions: { resolveRepositoryRoot: async () => root },
     });
-    expect(first.status()).toEqual({ status: 'ready', schemaVersion: PROJECT_TASK_SCHEMA_VERSION });
+    expect(first.status()).toEqual({ status: 'ready', schemaVersion: 1 });
     const created = await first.requireStore().createProject({ name: ' HandMux ', rootPath: root });
     expect(created).toMatchObject({
       name: 'HandMux',
@@ -179,11 +179,11 @@ describe('Project Task runtime and Project store', () => {
     await fsp.mkdir(handmux);
     new DatabaseSync(database).close();
     const runtime = await createProjectTaskRuntime({ home });
-    expect(runtime.status()).toMatchObject({ status: 'ready', schemaVersion: PROJECT_TASK_SCHEMA_VERSION });
+    expect(runtime.status()).toMatchObject({ status: 'ready', schemaVersion: 1 });
     await runtime.close();
 
     const backupDir = path.join(handmux, 'backups', 'project-task');
-    const files = (await fsp.readdir(backupDir)).filter((name) => name.startsWith(`pre-v${PROJECT_TASK_SCHEMA_VERSION}-`));
+    const files = (await fsp.readdir(backupDir)).filter((name) => name.startsWith('pre-v1-'));
     expect(files).toHaveLength(1);
     expect(verifyProjectBackup(path.join(backupDir, files[0] ?? 'missing'))).toBe(true);
     expect(fs.statSync(backupDir).mode & 0o777).toBe(0o700);
@@ -241,7 +241,7 @@ describe('Project Task runtime and Project store', () => {
     const recovered = await createProjectTaskRuntime({ home });
     expect(recovered.status()).toMatchObject({
       status: 'ready',
-      schemaVersion: PROJECT_TASK_SCHEMA_VERSION,
+      schemaVersion: 1,
       recoveryNotice: expect.stringContaining('daily-'),
     });
     expect(await recovered.requireStore().getProject(project.id)).toMatchObject({ id: project.id, name: 'Project' });

@@ -44,29 +44,6 @@ beforeEach(async () => {
 });
 
 describe('push sendToAll and dead-endpoint pruning', () => {
-  it('binds push delivery to active auth devices, ignores old tokens, and does not revive after restart', async () => {
-    push.addSubscription({ endpoint: 'legacy', keys: {} });
-    const active = new Set(['device-a', 'device-b']);
-    push.setDeviceAuthorization(id => active.has(id));
-    expect(push.count()).toBe(0);
-    expect(push.addSubscription({ endpoint: 'unbound', keys: {} })).toBe(false);
-    const keyA = push.addSubscription({ endpoint: 'A', keys: {} }, [], null, 'device-a');
-    push.addSubscription({ endpoint: 'B', keys: {} }, [], keyA, 'device-b');
-    expect(push.getPushKey('B', 'device-b')).not.toBe(keyA);
-    expect(push.removeSubscription('A', 'device-b')).toBeNull();
-    expect(push.getPushKey('A', 'device-b')).toBeNull();
-    active.delete('device-a');
-    await push.sendToAll({ title: 'test' });
-    expect(sent).toEqual(['B']);
-    expect(push.count()).toBe(1);
-    vi.resetModules();
-    const reloaded = await import('../src/push.js');
-    reloaded.setDeviceAuthorization(id => active.has(id));
-    expect(reloaded.count()).toBe(1);
-    reloaded.revokeDevice('device-b');
-    expect(reloaded.count()).toBe(0);
-    expect(JSON.parse(fs.readFileSync(process.env.PUSH_STORE, 'utf8')).some(rec => rec.authDeviceId === 'device-b')).toBe(false);
-  });
   it('rejects a malformed browser subscription before persistence or delivery', () => {
     expect(push.parsePushSubscription({ endpoint: 'A', keys: {} })).toBeNull();
     expect(push.count()).toBe(0);

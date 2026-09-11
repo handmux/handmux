@@ -1,5 +1,4 @@
 import { promises as fs } from 'node:fs';
-import { assertRequestAuthority } from './requestAuthority.js';
 import { homedir } from 'node:os';
 import { join, basename } from 'node:path';
 import { TextDecoder } from 'node:util';
@@ -233,7 +232,6 @@ export function createDocs({ home, extraRoots = [], maxDownloadBytes = MAX_TRANS
   async function resolveStashDir(rawCwd: unknown): Promise<RealPathResult> {
     const rh = await realHomeP;
     const target = join(rh, '.handmux', 'uploads', encodeCwdKey(rawCwd));
-    assertRequestAuthority();
     try { await fs.mkdir(target, { recursive: true }); }
     catch { return { error: 'mkdir failed', status: 500 }; }
     let real;
@@ -286,7 +284,6 @@ export function createDocs({ home, extraRoots = [], maxDownloadBytes = MAX_TRANS
     const parent = await resolveBrowseDir(parentRaw); // realpath + under-a-root + isDirectory
     if ('error' in parent) return parent;
     const target = join(parent.real, nm);
-    assertRequestAuthority();
     try {
       await fs.mkdir(target);
     } catch (e) {

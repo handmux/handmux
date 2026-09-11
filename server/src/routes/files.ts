@@ -144,7 +144,6 @@ export function fileRoutes({ docs, uploadExts, maxUploadBytes }: FileRouteOption
         // Resolved up front for the response; re-resolved at link time if the race is lost (see below).
         const origName = name;
         let finalName = await freeUploadName(target.real, origName);
-        res.locals.assertDeviceActive?.();
         let dest = joinPath(target.real, finalName);
 
         const tempPath = joinPath(target.real, `.${finalName}.uploading-${randomBytes(6).toString('hex')}`);
@@ -163,7 +162,6 @@ export function fileRoutes({ docs, uploadExts, maxUploadBytes }: FileRouteOption
             // file, and a clash auto-suffixes rather than 409s.
             let linked = false;
             for (let attempt = 0; attempt < 6 && !linked; attempt++) {
-              res.locals.assertDeviceActive?.();
               try { await fsp.link(tempPath, dest); linked = true; }
               catch (e) {
                 if (errorCode(e) !== 'EEXIST') throw e;

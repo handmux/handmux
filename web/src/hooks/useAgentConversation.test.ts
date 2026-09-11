@@ -475,7 +475,7 @@ describe('useAgentConversation', () => {
         status: 'rejected', reason: 'provider_rejected', nativeMutation: false,
       })
       .mockResolvedValueOnce({
-        status: 'rejected', reason: 'provider_rejected', nativeMutation: false,
+        status: 'rejected', reason: 'terminal_draft_conflict', nativeMutation: false,
       })
       .mockResolvedValueOnce({ status: 'unknown', reason: 'delivery_unconfirmed' })
       .mockResolvedValueOnce({ status: 'accepted' });
@@ -499,7 +499,7 @@ describe('useAgentConversation', () => {
     }));
     expect(result.current.items.filter((item) => item.outgoing?.text === 'rejected')).toHaveLength(0);
     expect(await attempt('rejected')).toEqual(expect.objectContaining({
-      message: 'Agent rejected the message', deliveryUnknown: false,
+      message: 'Agent rejected the message', deliveryUnknown: false, publicMessage: 'terminalDraftConflict',
     }));
     expect(await attempt('unknown')).toEqual(expect.objectContaining({
       message: 'Message delivery is unknown', deliveryUnknown: true,

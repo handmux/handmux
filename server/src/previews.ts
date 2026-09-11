@@ -38,7 +38,6 @@ export interface PreviewError {
 }
 
 export interface ActivePreviewEntry {
-  deviceId?: string;
   name: string;
   kind: 'static';
   dir: string;
@@ -60,16 +59,13 @@ export type PreviewLookup =
   | { state: 'active'; entry: ActivePreviewEntry };
 
 export interface PreviewRegistry {
-  register(input: PreviewRegistrationInput, deviceId?: string): Promise<PreviewRegistration | PreviewError>;
-  get(name: string, accessToken?: string): PreviewLookup;
-  list(deviceId?: string): PreviewListEntry[];
-  remove(name: string, deviceId?: string): void;
-  revokeDevice(deviceId: string): void;
-  onRevoke?(listener: (deviceId: string) => void): () => void;
+  register(input: PreviewRegistrationInput): Promise<PreviewRegistration | PreviewError>;
+  get(name: string): PreviewLookup;
+  list(): PreviewListEntry[];
+  remove(name: string): void;
 }
 
 interface StaticPreviewEntry {
-  deviceId?: string;
   name: string;
   kind?: 'static';
   dir: string;
@@ -87,7 +83,6 @@ interface DynamicPreviewEntry {
 type PreviewEntry = StaticPreviewEntry | DynamicPreviewEntry;
 
 interface CreatePreviewsOptions {
-  isDeviceActive?: (deviceId: string) => boolean;
   home?: string;
   store?: string;
   now?: () => number;
@@ -112,7 +107,6 @@ function parsePreviewEntry(value: unknown, realHome: string): PreviewEntry | nul
   } catch { return null; }
   if (!isUnder(realDir, realHome)) return null;
   const entry: StaticPreviewEntry = { name, dir: value.dir, expiresAt: value.expiresAt };
-  if (typeof value.deviceId === 'string' && value.deviceId) entry.deviceId = value.deviceId;
   if (value.kind === 'static') entry.kind = 'static';
   if (typeof value.accessToken === 'string' && value.accessToken) entry.accessToken = value.accessToken;
   if (typeof value.createdAt === 'number' && Number.isFinite(value.createdAt)) entry.createdAt = value.createdAt;
@@ -125,7 +119,6 @@ export function createPreviews({
   now = () => Date.now(),
   ttlMs = 2 * 60 * 60_000,
   randomToken = () => randomBytes(24).toString('base64url'),
-  isDeviceActive,
 }: CreatePreviewsOptions = {}): PreviewRegistry {
   let realHome: string;
   try { realHome = fs.realpathSync(home); } catch { realHome = home; }
@@ -134,11 +127,6 @@ export function createPreviews({
   let entries: PreviewEntry[] = readJsonArray(store)
     .map((value) => parsePreviewEntry(value, realHome))
     .filter((entry): entry is PreviewEntry => entry !== null);
-  // Never inherit capabilities from a previous mode/process, even from legacy files containing tokens.
-  for (const entry of entries) if (entry.kind !== 'dynamic') delete entry.accessToken;
-  const authorized = (entry: StaticPreviewEntry): boolean => isDeviceActive
-    ? Boolean(entry.deviceId && isDeviceActive(entry.deviceId)) : !entry.deviceId;
-  const revokeListeners = new Set<(deviceId: string) => void>();
   let flushedExpiries = new Map(entries.map((entry) => [entry.name, entry.expiresAt]));
   const flush = () => {
     // Access tokens are runtime capabilities. Open device tabs re-register after a restart and receive
@@ -161,9 +149,9 @@ export function createPreviews({
   // Re-registering the same active directory is a lease renewal. Preserve its capability so a
   // foreground check does not change the iframe URL and reload an already-mounted page. A changed
   // directory, expired row, or process-restored row without a runtime token receives a fresh one.
-  const upsert = (fields: { name: string; kind: 'static'; dir: string; deviceId?: string }): PreviewRegistration => {
+  const upsert = (fields: { name: string; kind: 'static'; dir: string }): PreviewRegistration => {
     const ts = now();
-    const current = entries.find((entry) => entry.name === fields.name && entry.kind !== 'dynamic' && entry.deviceId === fields.deviceId);
+    const current = entries.find((entry) => entry.name === fields.name);
     if (current?.kind === fields.kind
       && current.dir === fields.dir
       && current.expiresAt > ts
@@ -173,7 +161,7 @@ export function createPreviews({
       flush();
       return resultFor(current as StaticPreviewEntry & { accessToken: string });
     }
-    entries = entries.filter((entry) => entry.name !== fields.name || (entry.kind !== 'dynamic' && entry.deviceId !== fields.deviceId));
+    entries = entries.filter((entry) => entry.name !== fields.name);
     const entry: StaticPreviewEntry & { accessToken: string } = {
       ...fields,
       accessToken: randomToken(),
@@ -185,7 +173,7 @@ export function createPreviews({
     return resultFor(entry);
   };
 
-  async function register({ name, dir, port }: PreviewRegistrationInput, deviceId?: string): Promise<PreviewRegistration | PreviewError> {
+  async function register({ name, dir, port }: PreviewRegistrationInput): Promise<PreviewRegistration | PreviewError> {
     const nm = safePreviewName(name);
     if (!nm) return { error: 'bad name', status: 400 };
     if (port !== undefined && port !== null && port !== '') return { error: 'bad request', status: 400 };
@@ -196,17 +184,14 @@ export function createPreviews({
     let st: fs.Stats;
     try { st = fs.statSync(real); } catch { return { error: 'not accessible', status: 404 }; }
     if (!st.isDirectory()) return { error: 'not a directory', status: 400 };
-    if (isDeviceActive && (!deviceId || !isDeviceActive(deviceId))) return { error: 'device authorization expired', status: 401 };
-    return upsert({ name: nm, kind: 'static', dir: real, ...(isDeviceActive && deviceId ? { deviceId } : {}) });
+    return upsert({ name: nm, kind: 'static', dir: real });
   }
 
-  function get(name: string, accessToken?: string): PreviewLookup {
-    const entry = entries.find((candidate) => candidate.name === name
-      && (!isDeviceActive || (candidate.kind !== 'dynamic' && candidate.accessToken === accessToken)));
+  function get(name: string): PreviewLookup {
+    const entry = entries.find((candidate) => candidate.name === name);
     if (!entry) return { state: 'missing' };
-    if (entry.kind !== 'dynamic' && !authorized(entry)) return { state: 'expired' };
     const ts = now();
-    if (entry.expiresAt <= ts) { entries = entries.filter((candidate) => candidate !== entry); flush(); return { state: 'expired' }; }
+    if (entry.expiresAt <= ts) { entries = entries.filter((candidate) => candidate.name !== name); flush(); return { state: 'expired' }; }
     if (entry.kind === 'dynamic') { entries = entries.filter((candidate) => candidate.name !== name); flush(); return { state: 'missing' }; }
     // Match proxy leases: actual page/resource traffic renews the lease. Throttle persistence so a page
     // with many assets does not rewrite the registry once per request.
@@ -216,23 +201,16 @@ export function createPreviews({
     return { state: 'active', entry: { ...entry, kind: 'static' } }; // legacy rows (no kind) → static
   }
 
-  function list(deviceId?: string): PreviewListEntry[] {
+  function list(): PreviewListEntry[] {
     const active = entries.filter((entry): entry is StaticPreviewEntry => entry.kind !== 'dynamic' && entry.expiresAt > now());
     if (active.length !== entries.length) { entries = active; flush(); }
-    return active.filter((entry) => authorized(entry) && (!isDeviceActive || entry.deviceId === deviceId))
-      .map((entry) => ({ name: entry.name, kind: 'static', dir: entry.dir, expiresAt: entry.expiresAt }));
+    return active.map((entry) => ({ name: entry.name, kind: 'static', dir: entry.dir, expiresAt: entry.expiresAt }));
   }
 
-  function remove(name: string, deviceId?: string): void {
-    const next = entries.filter((entry) => entry.name !== name || (isDeviceActive && (entry.kind === 'dynamic' || !deviceId || entry.deviceId !== deviceId)));
+  function remove(name: string): void {
+    const next = entries.filter((entry) => entry.name !== name);
     if (next.length !== entries.length) { entries = next; flush(); }
   }
 
-  function revokeDevice(deviceId: string): void {
-    for (const entry of entries) if (entry.kind !== 'dynamic' && entry.deviceId === deviceId) delete entry.accessToken;
-    for (const listener of revokeListeners) listener(deviceId);
-  }
-  return { register, get, list, remove, revokeDevice,
-    onRevoke(listener) { revokeListeners.add(listener); return () => { revokeListeners.delete(listener); }; },
-  };
+  return { register, get, list, remove };
 }

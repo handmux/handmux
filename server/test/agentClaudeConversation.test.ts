@@ -9,7 +9,9 @@ import {
   findClaudeSessionFile,
 } from '../src/agents/claudeConversation.js';
 import { sendPanePrompt, serializePaneInput } from '../src/paneInput.js';
+import { parseTranscript } from '../src/transcriptParse.js';
 import type { TranscriptMessage } from '../src/transcriptParse.js';
+import { createTranscriptReader } from '../src/transcriptReader.js';
 import type { TranscriptReader } from '../src/transcriptReader.js';
 
 const SESSION = '4442e3d0-8d46-4cce-9822-b86558f69922';
@@ -73,6 +75,119 @@ afterEach(() => {
 });
 
 describe('Claude Conversation adapter', () => {
+  it('projects only source-marked task notifications as safe notices without altering ordinary XML quotes', async () => {
+    const root = directory();
+    const file = sessionFile(root);
+    const xml = '<task-notification><task-id>private-task-id</task-id><tool-use-id>private-tool-id</tool-use-id><output-file>/private/output.txt</output-file><status>completed</status><summary>Build &amp; checks completed</summary></task-notification>';
+    const notification = (content: string) => ({
+      type: 'user', origin: { kind: 'task-notification' }, promptSource: 'system',
+      message: { role: 'user', content },
+    });
+    const rows = [
+      notification(xml),
+      notification('<task-notification><task-id>private-task-id</task-id><summary>Background task finished</summary><event>task_complete</event></task-notification>'),
+      notification('<task-notification><output-file>/private/output.txt</output-file></task-notification>'),
+      { type: 'user', message: { role: 'user', content: xml } },
+      { ...notification(xml), type: 'assistant', message: { role: 'assistant', content: xml } },
+      { ...notification(xml), promptSource: 'user' },
+    ];
+    fs.writeFileSync(file, rows.map((row) => JSON.stringify(row)).join('\n') + '\n');
+    const adapter = createClaudeConversationAdapter({ projectsRoot: root });
+    const session = { agentId: 'claude', sessionId: SESSION };
+    const page = await adapter.readNativePage(session, { limit: 10 });
+    expect(page.items.map((item) => item.kind)).toEqual(['notice', 'notice', 'notice', 'message', 'message', 'message']);
+    expect(page.items[0]).toMatchObject({ code: 'background_task', message: 'Build & checks completed (completed)' });
+    expect(page.items[1]).toMatchObject({ message: 'Background task finished (task_complete)' });
+    expect(page.items[2]).toMatchObject({ message: 'Background task update' });
+    expect(JSON.stringify(page.items.slice(0, 3))).not.toMatch(/private-task-id|private-tool-id|output.txt|task-notification/);
+    for (const item of page.items.slice(3)) expect(item).toMatchObject({ content: [{ type: 'text', text: xml }] });
+    const older = await adapter.readNativePage(session, { limit: 1, beforeSourceCursor: '1' });
+    expect(older.items[0]).toEqual(page.items[0]);
+  });
+
+  it('projects a late-recorded compact command before the completed summary from native JSONL', async () => {
+    const root = directory();
+    const file = sessionFile(root);
+    const rows = [
+      { type: 'user', isCompactSummary: true, message: { role: 'user', content: 'retained summary' }, timestamp: '2026-09-10T12:59:48.396Z' },
+      { type: 'user', message: { role: 'user', content: '<command-name>/compact</command-name>' }, timestamp: '2026-09-10T12:59:40.550Z' },
+      { type: 'user', message: { role: 'user', content: '<local-command-stdout>Compacted</local-command-stdout>' }, timestamp: '2026-09-10T12:59:48.661Z' },
+    ];
+    fs.writeFileSync(file, rows.map((row) => JSON.stringify(row)).join('\n') + '\n');
+    const adapter = createClaudeConversationAdapter({
+      projectsRoot: root,
+      sessions: { paneSession: () => ({ sessionId: SESSION, transcriptPath: file, agent: 'claude' }) },
+    });
+    const page = await adapter.readNativePage({ agentId: 'claude', sessionId: SESSION }, { limit: 10 });
+    expect(page.items.map((item) => item.kind)).toEqual(['message', 'compaction']);
+    expect(page.items[0]).toMatchObject({ kind: 'message', role: 'user', content: [{ type: 'text', text: '/compact' }] });
+    expect(page.items[1]).toMatchObject({ summary: 'retained summary' });
+  });
+
+  it('keeps summary IDs stable and invalidates old cursors when compact normalization moves history', async () => {
+    const root = directory();
+    const file = sessionFile(root);
+    const write = (rows: unknown[]) => fs.appendFileSync(file, rows.map((row) => JSON.stringify(row)).join('\n') + '\n');
+    write([
+      { type: 'user', message: { role: 'user', content: 'old turn' } },
+      { type: 'user', isCompactSummary: true, message: { role: 'user', content: 'retained summary' }, timestamp: '2026-09-10T12:59:48.396Z' },
+    ]);
+    const reader = createTranscriptReader();
+    const adapter = createClaudeConversationAdapter({ projectsRoot: root, reader });
+    const service = new ConversationService({ runs: new AgentRunRuntime(), adapters: { claude: adapter } });
+    const session = { agentId: 'claude', sessionId: SESSION };
+    const first = await service.readPage(session, { limit: 1 });
+    if (first.status !== 'ok' || !first.page.previousCursor) throw new Error('expected summary page');
+    const summaryId = first.page.items[0]!.id;
+    write([{ type: 'user', message: { role: 'user', content: '<command-name>/compact</command-name>' }, timestamp: '2026-09-10T12:59:40.550Z' }]);
+    const stale = await service.readPage(session, { limit: 1, before: first.page.previousCursor });
+    expect(stale.status).toBe('stale');
+    const refreshed = await service.readPage(session, { limit: 1 });
+    if (refreshed.status !== 'ok' || !refreshed.page.previousCursor) throw new Error('expected refreshed summary');
+    expect(refreshed.page.items[0]!.id).toBe(summaryId);
+    expect(refreshed.page.viewId).not.toBe(first.page.viewId);
+    const command = await service.readPage(session, { limit: 1, before: refreshed.page.previousCursor });
+    if (command.status !== 'ok' || !command.page.previousCursor) throw new Error('expected command page');
+    expect(command.page.items[0]).toMatchObject({ kind: 'message', role: 'user', content: [{ type: 'text', text: '/compact' }] });
+    const old = await service.readPage(session, { limit: 1, before: command.page.previousCursor });
+    if (old.status !== 'ok') throw new Error('expected old turn');
+    expect(old.page.items[0]).toMatchObject({ kind: 'message', content: [{ type: 'text', text: 'old turn' }] });
+    expect(old.page.hasMore).toBe(false);
+    write([
+      { type: 'user', message: { role: 'user', content: '<local-command-stdout>Compacted</local-command-stdout>' } },
+      { type: 'user', message: { role: 'user', content: 'next task' } },
+    ]);
+    const raw = await reader.read(file);
+    expect(raw.map((message) => message.type)).toEqual(['text', 'compact', 'slash', 'text']);
+    expect(raw[2]).toMatchObject({ name: '/compact', result: 'Compacted' });
+    const appended = await service.readPage(session, { limit: 10 });
+    if (appended.status !== 'ok') throw new Error('expected append');
+    expect(appended.page.viewId).toBe(refreshed.page.viewId);
+    expect(appended.page.items.map((item) => item.kind)).toEqual(['message', 'message', 'compaction', 'message']);
+    expect(appended.page.items[1]!.id).toBe(command.page.items[0]!.id);
+    expect(appended.page.items[2]!.id).toBe(summaryId);
+    // A fresh adapter computes the same native view rather than relying on an in-memory revision counter.
+    const restarted = createClaudeConversationAdapter({ projectsRoot: root });
+    const native = await adapter.readNativePage(session, { limit: 10 });
+    expect((await restarted.readNativePage(session, { limit: 10 })).sourceViewId).toBe(native.sourceViewId);
+  });
+
+  it.each([
+    ['/compact', '2026-09-10T13:00:00Z'],
+    ['/model', '2026-09-10T12:59:40Z'],
+    ['/compact', undefined],
+  ])('retains native order without proof that %s preceded the summary (%s)', async (name, ts) => {
+    const root = directory();
+    sessionFile(root);
+    const reader = fakeReader([
+      { i: 0, type: 'compact', summary: 'summary', ts: '2026-09-10T12:59:48Z' },
+      { i: 1, type: 'slash', name, ts },
+    ]);
+    const adapter = createClaudeConversationAdapter({ projectsRoot: root, reader });
+    const page = await adapter.readNativePage({ agentId: 'claude', sessionId: SESSION }, { limit: 10 });
+    expect(page.items.map((item) => item.kind)).toEqual(['compaction', name === '/compact' ? 'message' : 'notice']);
+  });
+
   it('keeps the latest canonical frontier when older history is paged before send', async () => {
     const messages: TranscriptMessage[] = [
       { i: 0, type: 'text', role: 'user', text: 'old', ts: '2026-08-12T00:00:00Z' },
@@ -96,6 +211,35 @@ describe('Claude Conversation adapter', () => {
     expect(h.service.querySubmission(h.lease, 'request-new')).toEqual({
       status: 'accepted', nativeId: expect.any(String),
     });
+  });
+
+  it.each(['', 'focus on the API'])('projects one native user message for a submitted compact command (%s)', async (args) => {
+    const messages: TranscriptMessage[] = [];
+    const h = await controlledClaude(messages, 'run-compact-command');
+    const session = { agentId: 'claude', sessionId: SESSION };
+    const text = `/compact${args ? ` ${args}` : ''}`;
+    await h.service.readPage(session, { limit: 20 });
+    const receipt = await h.service.send(h.lease, {
+      clientRequestId: 'request-compact', text, delivery: 'prompt',
+    });
+    expect(receipt).toMatchObject({ status: 'accepted' });
+    messages.push(...parseTranscript([
+      JSON.stringify({ type: 'user', message: { role: 'user', content: text }, timestamp: '2026-09-10T12:59:40Z' }),
+      JSON.stringify({ type: 'user', isCompactSummary: true, message: { role: 'user', content: 'retained summary' }, timestamp: '2026-09-10T12:59:48Z' }),
+      JSON.stringify({ type: 'user', message: { role: 'user', content: `<command-name>/compact</command-name><command-args>${args}</command-args>` }, timestamp: '2026-09-10T12:59:40Z' }),
+    ]));
+    const page = await h.service.readPage(session, { limit: 20 });
+    if (page.status !== 'ok') throw new Error('expected compact history');
+    expect(page.page.items.map((item) => item.kind)).toEqual(['message', 'compaction']);
+    const command = page.page.items[0]!;
+    expect(command).toMatchObject({ role: 'user', content: [{ type: 'text', text }] });
+    // A changed history view intentionally prevents Core from inferring correlation by text.
+    expect(h.service.querySubmission(h.lease, 'request-compact')).toEqual({ status: 'accepted' });
+    expect((await h.service.queueSnapshot(h.lease)).settled).toEqual([{ id: 'request-compact' }]);
+    // Re-reading canonical history neither creates a second item nor changes the matched receipt.
+    const repeated = await h.service.readPage(session, { limit: 20 });
+    if (repeated.status !== 'ok') throw new Error('expected repeated page');
+    expect(repeated.page.items).toEqual(page.page.items);
   });
 
   it('does not claim a same-text user item from an older page', async () => {
@@ -463,6 +607,41 @@ describe('Claude Conversation adapter', () => {
       type: 'history.committed', sourceSequence: 1,
     })]));
     await handle?.close();
+  });
+
+  it('requests a stream resync when a delayed compact command replaces the observed view', async () => {
+    const root = directory();
+    sessionFile(root);
+    const messages: TranscriptMessage[] = [
+      { i: 0, type: 'compact', summary: 'summary', ts: '2026-09-10T12:59:48Z' },
+    ];
+    const runtime = new AgentRunRuntime();
+    const lease = await runtime.controller('claude', async () => true).attach({
+      paneId: '%8', attachmentId: 'claude-hooks', sessionId: SESSION, process: { pid: 108 },
+    });
+    const adapter = createClaudeConversationAdapter({
+      projectsRoot: root, reader: fakeReader(messages), livePollMs: 5,
+      control: { sendPrompt: vi.fn(async () => {}), interrupt: vi.fn(async () => {}) },
+    });
+    const events: unknown[] = [];
+    const handle = await adapter.observeNative?.(lease, (event) => { events.push(event); });
+    try {
+      messages.push({ i: 1, type: 'slash', name: '/compact', ts: '2026-09-10T12:59:40Z' });
+      await vi.waitFor(() => expect(events).toEqual([
+        { type: 'stream.gap', sourceSequence: 1, afterSourceSequence: 0 },
+      ]));
+      const page = await adapter.readNativePage({ agentId: 'claude', sessionId: SESSION }, { limit: 10 });
+      expect(page.sourceViewId).not.toBe(handle?.checkpoint.sourceViewId);
+      const resumedEvents: unknown[] = [];
+      const resumed = await adapter.observeNative?.(lease, (event) => { resumedEvents.push(event); });
+      try {
+        expect(resumed?.checkpoint.sourceViewId).toBe(page.sourceViewId);
+        messages.push({ i: 2, type: 'text', role: 'user', text: 'next turn', ts: undefined });
+        await vi.waitFor(() => expect(resumedEvents).toEqual([expect.objectContaining({
+          type: 'history.committed', sourceViewId: page.sourceViewId,
+        })]));
+      } finally { await resumed?.close(); }
+    } finally { await handle?.close(); }
   });
 
   it('projects bounded useful tool input without raw thinking, secrets, or transcript paths', async () => {

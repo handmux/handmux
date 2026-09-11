@@ -52,12 +52,14 @@ function goalStatus(status: string): string {
 export function AgentConversationMilestoneControls({
   controller,
   goalOpenRequest = 0,
+  onGoalOpenRequestConsumed,
   goalEditRequest = 0,
   chatTone = 'dusk',
   keyboardInset = 0,
 }: {
   controller: AgentConversationControlsController;
   goalOpenRequest?: number;
+  onGoalOpenRequestConsumed?: (requestId: number) => void;
   goalEditRequest?: number;
   chatTone?: string;
   keyboardInset?: number;
@@ -79,7 +81,8 @@ export function AgentConversationMilestoneControls({
     setDraft(goal?.objective ?? '');
     setEditing(!goal || goalEditRequest === goalOpenRequest);
     setGoalOpen(true);
-  }, [goalEditRequest, goalOpenRequest]); // goal is intentionally sampled when the command arrives
+    onGoalOpenRequestConsumed?.(goalOpenRequest);
+  }, [goalEditRequest, goalOpenRequest, onGoalOpenRequestConsumed]); // goal is intentionally sampled when the command arrives
   useEffect(() => {
     if (!goalOpen) return;
     setDraft(goal?.objective ?? '');
@@ -462,9 +465,11 @@ export function AgentConversationQueueControl({
         const localStatus = localQueueStatuses.get(submissionId);
         const pending = localStatus === 'sending';
         const queued = item.state === undefined || item.state === 'queued';
-        const autoDispatchBlocked = queued && item.autoDispatchBlockedReason === 'provider_rejected';
+        const autoDispatchBlocked = queued && item.autoDispatchBlockedReason !== undefined;
         const unknownQueue = item.state === 'unknown' && item.dispatchOrigin === 'queue';
-        const statusLabel = autoDispatchBlocked ? t('chat.queue.providerRejected')
+        const statusLabel = autoDispatchBlocked
+          ? t(item.autoDispatchBlockedReason === 'terminal_draft_conflict'
+            ? 'chat.queue.terminalDraftConflict' : 'chat.queue.providerRejected')
           : unknownQueue ? t('chat.queue.unknownDelivery') : '';
         const showSteer = queued && !autoDispatchBlocked
           && queue?.canSteer === true && currentActivity !== 'unknown';

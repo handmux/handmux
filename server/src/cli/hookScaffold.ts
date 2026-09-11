@@ -5,6 +5,10 @@ import path from 'node:path';
 export const HOOK_SCRIPTS = ['handmux-notify.sh', 'handmux-write.cjs'] as const;
 const LEGACY_HOOK_SCRIPTS = ['handmux-codex-usage.cjs'];
 
+// Env files are sourced by /bin/sh; settings commands use the same shell word syntax.
+export const shellWord = (value: string): string => /^[a-zA-Z0-9_./-]+$/.test(value)
+  ? value : `'${value.replace(/'/g, `'"'"'`)}'`;
+
 // Atomic write (tmp + rename) so a crash can't leave a half-written config file. Text in, text out — callers
 // pass raw TOML for config.toml, or use writeJsonAtomic for pretty-printed settings.json.
 export function writeFileAtomic(file: string, text: string): void {
@@ -25,7 +29,8 @@ export function deployHookScripts(hooksDir: string, srcDir: string, stateFile: s
   }
   fs.chmodSync(path.join(hooksDir, 'handmux-notify.sh'), 0o755);
   fs.writeFileSync(path.join(hooksDir, 'handmux-notify.env'), [
-    `HANDMUX_STATE=${stateFile}`,
+    `HANDMUX_STATE=${shellWord(stateFile)}`,
+    `HANDMUX_CLAUDE_EVENTS=${shellWord(`${stateFile}.events`)}`,
     '',
   ].join('\n'), { mode: 0o600 });
 }

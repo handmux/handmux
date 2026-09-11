@@ -1,5 +1,4 @@
 import { getToken } from './storage.js';
-import { isDeviceAuth, confirmedSessionInvalid } from './authSession.js';
 import {
   parseTerminalStreamMessage,
   type TerminalReadyMessage,
@@ -20,7 +19,7 @@ export type TerminalProbeResult = { ok: true; rttMs: number } | { ok: false };
 
 type AsyncCallback<Result = void> = Result | Promise<Result>;
 type TerminalClientMessage =
-  | { type: 'subscribe'; token?: string; pane: string }
+  | { type: 'subscribe'; token: string; pane: string }
   | { type: 'resync' }
   | { type: 'pause' }
   | { type: 'probe'; id: number };
@@ -196,7 +195,7 @@ export function openTerminalStream({
       if (subscribedSocket === socket) send({ type: 'resync' });
       else {
         subscribedSocket = socket;
-        send({ type: 'subscribe', ...(!isDeviceAuth() ? { token } : {}), pane });
+        send({ type: 'subscribe', token, pane });
       }
     } else connect();
   };
@@ -222,7 +221,7 @@ export function openTerminalStream({
       if (socket !== nextSocket || closed || paused) return;
       subscribedSocket = nextSocket;
       armConnectTimer(nextSocket, readyTimeoutMs);
-      send({ type: 'subscribe', ...(!isDeviceAuth() ? { token } : {}), pane });
+      send({ type: 'subscribe', token, pane });
     };
     nextSocket.onmessage = (event: MessageEvent<unknown>) => {
       if (socket !== nextSocket) return;
@@ -332,16 +331,9 @@ export function openTerminalStream({
       clearConnectTimer();
       clearProbe();
       if (closed) return;
-      if (event.code === 4001 && !isDeviceAuth()) {
+      if (event.code === 4001) {
         onAuthFail?.();
         return;
-      }
-      if (isDeviceAuth()) {
-        // Storage failures also close protected sockets fail-closed. Even 4001 is not proof that
-        // this device was revoked; only a successful auth status response can send it to login.
-        void confirmedSessionInvalid().then((invalid) => {
-          if (!closed && invalid) { clearReconnectTimer(); onAuthFail?.(); }
-        });
       }
       // A cold app launch can lose its first stream while the tunnel and tmux control path warm up.
       // Complete one fresh connection attempt before telling Terminal to fall back to snapshots. Once a
@@ -400,7 +392,7 @@ export function openTerminalStream({
         if (subscribedSocket === socket) send({ type: 'resync' });
         else {
           subscribedSocket = socket;
-          send({ type: 'subscribe', ...(!isDeviceAuth() ? { token } : {}), pane });
+          send({ type: 'subscribe', token, pane });
         }
       } else connect();
     },

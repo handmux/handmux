@@ -1,8 +1,7 @@
-import { getBrowserDeviceId } from './storage.js';
-import { authenticationHeaders, authenticationError } from './authSession.js';
+import { getBrowserDeviceId, getToken } from './storage.js';
 import { mimeFromName } from './mime.js';
 import { t } from './i18n';
-import { SpeechNotRecognizedError } from './apiErrors.js';
+import { SpeechNotRecognizedError, UnauthorizedError } from './apiErrors.js';
 import { requestJson as req } from './apiRequest.js';
 import { parseAsrSession } from './voice/providerRegistry.js';
 import type {
@@ -687,14 +686,15 @@ export type TransferProgress = (fraction: number) => void;
 
 export function downloadFile(path: string, onProgress?: TransferProgress): Promise<void> {
   return new Promise<void>((resolve, reject) => {
+    const token = getToken();
     const xhr = new XMLHttpRequest();
     xhr.open('GET', `/api/download?path=${encodeURIComponent(path)}`);
-    for (const [name, value] of Object.entries(authenticationHeaders())) xhr.setRequestHeader(name, value);
+    xhr.setRequestHeader('Authorization', `Bearer ${token ?? ''}`);
     xhr.responseType = 'blob';
     xhr.onprogress = (e) => { if (onProgress && e.lengthComputable) onProgress(e.loaded / e.total); };
     xhr.onerror = () => reject(new Error('download failed'));
     xhr.onload = () => {
-      if (xhr.status === 401) { void authenticationError().then(reject); return; }
+      if (xhr.status === 401) return reject(new UnauthorizedError());
       if (xhr.status < 200 || xhr.status >= 300) return reject(new Error(`download -> ${xhr.status}`));
       const name = path.split('/').pop() || 'download';
       // Re-tag the blob from its extension when the server's type is generic/empty, so the OS records
@@ -737,15 +737,16 @@ export function fetchImageUrl(
   sinceMtime: number | null = null,
 ): Promise<ImageUrlResponse> {
   return new Promise<ImageUrlResponse>((resolve, reject) => {
+    const token = getToken();
     const xhr = new XMLHttpRequest();
     const q = sinceMtime != null ? `&mtime=${encodeURIComponent(sinceMtime)}` : '';
     xhr.open('GET', `/api/download?path=${encodeURIComponent(path)}${q}`);
-    for (const [name, value] of Object.entries(authenticationHeaders())) xhr.setRequestHeader(name, value);
+    xhr.setRequestHeader('Authorization', `Bearer ${token ?? ''}`);
     xhr.responseType = 'blob';
     xhr.onerror = () => reject(new Error(t('api.loadFailed')));
     xhr.onload = () => {
       if (xhr.status === 304) return resolve({ notModified: true });
-      if (xhr.status === 401) { void authenticationError().then(reject); return; }
+      if (xhr.status === 401) return reject(new UnauthorizedError());
       if (xhr.status < 200 || xhr.status >= 300) return reject(new Error(`image -> ${xhr.status}`));
       let blob = xhr.response as Blob;
       const mime = mimeFromName(path.split('/').pop() || '');
@@ -804,13 +805,14 @@ export function uploadFile(
 ): Promise<unknown> {
   return new Promise<unknown>((resolve, reject) => {
     if (signal?.aborted) return reject(new UploadAbort());
+    const token = getToken();
     const fd = new FormData();
     fd.append('dir', dir);
     if (stash) fd.append('stash', '1');
     fd.append('file', file, file.name);
     const xhr = new XMLHttpRequest();
     xhr.open('POST', '/api/upload');
-    for (const [name, value] of Object.entries(authenticationHeaders())) xhr.setRequestHeader(name, value);
+    xhr.setRequestHeader('Authorization', `Bearer ${token ?? ''}`);
     xhr.upload.onprogress = (e) => { if (onProgress && e.lengthComputable) onProgress(e.loaded / e.total, 'sending'); };
     // Body fully handed off — the browser is done sending; what's left is server-side and unreportable.
     xhr.upload.onload = () => { onProgress?.(1, 'processing'); };
@@ -821,7 +823,7 @@ export function uploadFile(
     xhr.onerror = () => { cleanup(); reject(new Error(t('api.uploadFailed'))); };
     xhr.onload = () => {
       cleanup();
-      if (xhr.status === 401) { void authenticationError().then(reject); return; }
+      if (xhr.status === 401) return reject(new UnauthorizedError());
       if (xhr.status >= 200 && xhr.status < 300) {
         try { return resolve(JSON.parse(xhr.responseText)); } catch { return resolve({}); }
       }

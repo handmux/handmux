@@ -10,7 +10,6 @@ import type {
 } from './options.js';
 
 export interface ConnectionAnswers {
-  authMode?: 'token' | 'trusted-device';
   tunnel: Tunnel;
   lang?: string;
   name?: string;
@@ -103,7 +102,7 @@ export function findTunnelId(listJsonOut: unknown, name: string): string | null 
 // preserved untouched. `token` IS owned so the Token row can pin one AND clear it back to auto — but it
 // round-trips through answersFromConfig, so a re-run that never touches the row still writes it back.
 const WIZARD_KEYS = [
-  'lang', 'name', 'port', 'tunnel', 'token', 'authMode', 'previewDomain',
+  'lang', 'name', 'port', 'tunnel', 'token', 'previewDomain',
   'sshHost', 'remotePort', 'sshJump', 'cfHostname', 'cfTunnelName', 'publicUrl',
   'authtoken', 'cpolarRegion',
   'vapid', 'voice', 'xfyun',
@@ -115,7 +114,6 @@ export const TUNNEL_KEYS = ['sshHost', 'remotePort', 'sshJump', 'cfHostname', 'c
 // Wizard answers → the config fragment the user actually set (omit empty optional fields).
 export function configFromAnswers(a: SetupAnswers): SetupConfig {
   const cfg: SetupConfig = { tunnel: a.tunnel, port: a.port };
-  if (a.authMode) cfg.authMode = a.authMode;
   if (a.lang) cfg.lang = a.lang;
   if (a.name) cfg.name = a.name;
   if (a.token) cfg.token = a.token;   // blank = don't pin one → the server mints a fresh token each start
@@ -151,10 +149,9 @@ export function mergeConfig(existing: unknown = {}, answers: SetupAnswers): Setu
 
 // Seed the working answers from an existing config so the hub shows current values and each edit starts
 // from what's already there. A brand-new config yields safe defaults (none/LAN, port 19999).
-export function answersFromConfig(config: unknown = {}, defaultAuthMode: 'token' | 'trusted-device' = 'token'): SetupAnswers {
+export function answersFromConfig(config: unknown = {}): SetupAnswers {
   const cfg = isRecord(config) ? config : {};
   const a: SetupAnswers = {
-    authMode: cfg.authMode === 'trusted-device' ? 'trusted-device' : cfg.authMode === 'token' ? 'token' : defaultAuthMode,
     lang: optionalString(cfg.lang) || getLocale(),
     name: optionalString(cfg.name) || '',
     token: optionalString(cfg.token) || '',   // '' = not pinned (auto each start); seeded so an untouched re-run rewrites it

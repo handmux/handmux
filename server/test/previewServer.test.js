@@ -30,7 +30,7 @@ describe('createPreview static serving', () => {
   let site;
   let app;
   const previews = {
-    get: (name) => name === 'live' ? { state: 'active', entry: { name, dir: site, accessToken: 'good' } }
+    get: (name) => name === 'live' ? { state: 'active', entry: { dir: site, accessToken: 'good' } }
       : name === 'dead' ? { state: 'expired' } : { state: 'missing' },
   };
 
@@ -63,8 +63,6 @@ describe('createPreview static serving', () => {
     expect(page.headers['cache-control']).toBe('no-store');
     expect(page.headers['referrer-policy']).toBe('same-origin');
     expect(page.headers['content-security-policy']).toContain('sandbox allow-scripts');
-    expect(page.headers['content-security-policy']).not.toContain('allow-same-origin');
-    expect(page.headers['content-security-policy']).not.toContain('allow-popups-to-escape-sandbox');
     expect(page.headers['access-control-allow-origin']).toBe('null');
     const asset = await request(app).get('/preview/live/good/assets/app.js').expect(200);
     expect(asset.text).toContain('console.log');

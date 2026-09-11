@@ -1,25 +1,5 @@
 // 中文字典。键与 en.js 一一对应;缺键会自动回退到英文。命令名、flag、隧道名等字面量保持英文(它们是要照抄输入的)。
 export default {
-  'auth.section': '认证与设备',
-  'auth.trusted': '设备授权（推荐）',
-  'auth.token': '固定 Token（兼容，不建议长期使用）',
-  'auth.manageHint': '认证方式重启后生效。日常管理使用 handmux auth add/list/edit/revoke。HTTP 不能防止网络窃听。',
-  'auth.access': '设备授权：打开访问地址，然后在这台电脑运行 handmux auth add 批准你的浏览器。',
-  'auth.warning': '⚠ 不安全：固定 Token 泄露后可被重复使用。推荐在 handmux setup 选择可信设备授权。HTTP 下两种凭据都存在被窃听风险。',
-  'auth.switchWarning': '⚠ 必须在运行 Handmux 的电脑上，以同一系统用户使用本机直连终端或独立 SSH 操作，不要使用 Handmux 内的终端。切换认证并重启后当前登录可能失效；若失去独立终端，你可能无法批准新设备。',
-  'auth.switchConfirm': '确认当前是非 Handmux 内的本机终端或独立 SSH，并保存认证方式变更？',
-  'auth.switchApplyConfirm': '确认当前是非 Handmux 内的本机终端或独立 SSH，并应用认证方式变更？',
-  'auth.switchNeedTty': '切换认证方式需要在本机直连终端或独立 SSH 中交互确认。本次未停止或重启服务。',
-  'auth.code': '输入新浏览器显示的 6 位校验码',
-  'auth.claimed': '配对成功。请在 5 分钟内完善设备信息，保存后才可登录。',
-  'auth.name': '设备名称',
-  'auth.expire': '授权有效期',
-  'auth.custom': '自定义',
-  'auth.never': '不限期',
-  'auth.duration': '有效期：正整数加 m/h/d，或 never',
-  'auth.confirm': '完成授权？',
-  'auth.canceled': '已取消配对。',
-  'auth.safety': '仅授权你本人正在添加的浏览器，不要输入他人发来的校验码。',
   // 通用
   'err.generic': '✗ {msg}',
   'err.configNotFound': '✗ --config {path}:找不到该文件',
@@ -237,10 +217,10 @@ export default {
   'setup.browserOff': '未配置 · 仅手机直连',
   'setup.askBrowserDomain': '网页预览器代理域名（留空 = 仅手机直连）',
   'setup.browserAbout': '填写代理域名（如 preview.example.com），并将其通配子域以 HTTPS 路由到 Handmux；留空则仅使用手机直连。',
-  'setup.tokenAuto': '自动 · 复用已有 Token，首次生成',
+  'setup.tokenAuto': '自动 · 每次启动新生成',
   'setup.tokenCustom': '自定义令牌…',
   'setup.tokenRandom': '随机生成一个',
-  'setup.tokenReset': '使用自动 Token（复用已有或首次生成）',
+  'setup.tokenReset': '恢复自动(每次启动新生成)',
   'setup.askToken': '访问令牌 —— 会出现在手机打开的网址里',
   'setup.tokenGenerated': '新令牌:{token}',
   'setup.valToken': '请输入令牌',
@@ -397,10 +377,6 @@ export default {
   handmux stop | restart | status
   handmux logs [--follow] [--lines N]
   handmux push <标题> <正文>    从脚本推一条通知到手机（--session 会话 · --device 设备key · --tag · --url）
-  handmux auth add             授权浏览器（可提供校验码、--name 和 --expire）
-  handmux auth list            列出完整设备 ID、名称、有效期和访问时间
-  handmux auth edit <id>       非交互修改 --name 和/或 --expire
-  handmux auth revoke <id>     立即撤销指定设备
   handmux codex [参数...]      启动与对话视图同步的 Codex TUI
   handmux pi [参数...]         原样传递参数并启动 Pi
   handmux agent [list]         查看支持的 Agent 接入状态
@@ -428,7 +404,7 @@ start flag(括号内为对应环境变量):
   --tunnel none|cloudflare|cloudflare-named|ssh|natapp|cpolar   暴露方式(默认:none)
   --port N                      服务端口(HANDMUX_PORT,默认:19999)
   --host H                      绑定地址(HANDMUX_HOST,默认:0.0.0.0)
-  --token S                     鉴权令牌(HANDMUX_TOKEN,默认:复用已有或首次生成)
+  --token S                     鉴权令牌(HANDMUX_TOKEN,默认:每次启动自动生成)
   --name "My Box"               浏览器标签 + 主屏图标里的应用名(HANDMUX_APP_NAME)
   --public-url URL              对外公布的公网地址(HANDMUX_PUBLIC_URL;任意隧道均可,包括自建的 none;
                                 ssh 默认 http://host:remotePort;natapp/cpolar 填你的固定/保留域名 ——

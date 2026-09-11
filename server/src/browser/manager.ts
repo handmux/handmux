@@ -330,13 +330,6 @@ export async function createBrowserPreviewManager({
   const pools = new Map<string, BrowserPool>();
   const pendingPools = new Map<string, Promise<BrowserPool>>();
   const leases = new Map<string, BrowserLease>();
-  const revokedDevices = new Set<string>();
-  // Runtime access tokens rotate on restart; encrypted website profiles retain stable auth ownership.
-  const profileDevices = new Map<string, string>();
-  const profileDevice = (deviceId: string): string => profileDevices.get(deviceId) || deviceId;
-  const assertDevice = (deviceId: string): void => {
-    if (revokedDevices.has(deviceId)) throw new Error('browser device authorization revoked');
-  };
   const leaseQueues = new Map<string, Promise<unknown>>();
   const publicOriginClaims = new Map<string, string>();
   let poolCount = 0;
@@ -444,7 +437,7 @@ export async function createBrowserPreviewManager({
   };
 
   const setDeviceActive = (deviceId: string): void => cookieProfiles.setActive?.(
-    profileDevice(deviceId),
+    deviceId,
     [...leases.values()].some((lease) => lease.deviceId === deviceId),
   );
   const release = (lease: BrowserLease | null | undefined): boolean => {
@@ -462,7 +455,6 @@ export async function createBrowserPreviewManager({
     tabId, deviceId, url, origin, channel, siteVersion, sourceUserAgent,
   }: LeaseInput & { channel: string; siteVersion: BrowserSiteVersion }): Promise<BrowserLease> => {
     if (closing) throw new Error('browser manager closing');
-    assertDevice(deviceId);
     const target = normalizedTarget(url);
     const publicOrigin = normalizedOrigin(origin);
     const targetOrigin = new URL(target).origin;
@@ -472,7 +464,6 @@ export async function createBrowserPreviewManager({
     let detachCookies: (() => void) | null = null;
     try {
       if (closing) throw new Error('browser manager closing');
-      assertDevice(deviceId);
       const identity = siteVersionIdentity(siteVersion, sourceUserAgent);
       const createdSession = new SessionClass(channel, identity);
       session = createdSession;
@@ -486,10 +477,6 @@ export async function createBrowserPreviewManager({
         onRequest: async (event: RequestEvent) => {
           if (await rehomeNavigation(event, createdSession)) return;
           const result = await policy.check(event._requestInfo.url);
-          if (revokedDevices.has(deviceId)) {
-            await event.setMock(new hammerhead.ResponseMock('browser device authorization revoked', 403, { 'content-type': 'text/plain' }));
-            return;
-          }
           if (result.allowed) {
             if (event.requestOptions?.headers) {
               applySiteVersionHeaders(event.requestOptions.headers, identity);
@@ -517,7 +504,7 @@ export async function createBrowserPreviewManager({
           ));
         },
       }, () => {});
-      detachCookies = cookieProfiles.attach(profileDevice(deviceId), createdSession.cookies);
+      detachCookies = cookieProfiles.attach(deviceId, createdSession.cookies);
       const publicUrl = pool.proxy.openSession(target, createdSession);
       return {
         key: leaseKey(deviceId, tabId),
@@ -548,7 +535,6 @@ export async function createBrowserPreviewManager({
     tabId, deviceId, url, origin, siteVersion, sourceUserAgent,
   }: LeaseInput, requireExisting = false): Promise<PublicLease | null> => {
     if (!deviceId || !tabId) throw new Error('browser lease identity required');
-    assertDevice(deviceId);
     const key = leaseKey(deviceId, tabId);
     const existing = leases.get(key);
     if (requireExisting && !existing) return null;
@@ -572,7 +558,6 @@ export async function createBrowserPreviewManager({
       siteVersion: requestedVersion,
       sourceUserAgent,
     });
-    if (revokedDevices.has(deviceId)) { disposeLease(next); assertDevice(deviceId); }
     leases.set(key, next);
     touch(next);
     if (existing) disposeLease(existing);
@@ -642,7 +627,6 @@ export async function createBrowserPreviewManager({
           307,
           hammerheadRebindHeaders(bootstrapUrl),
         ));
-        assertDevice(current.deviceId);
         leases.set(current.key, next);
         touch(next);
         disposeLease(current);
@@ -661,16 +645,6 @@ export async function createBrowserPreviewManager({
   };
 
   return {
-    setProfileDevice(capability: string, deviceId: string): void {
-      assertDevice(capability);
-      const existing = profileDevices.get(capability);
-      if (existing && existing !== deviceId) throw new Error('browser profile ownership cannot change');
-      profileDevices.set(capability, deviceId);
-    },
-    revokeDevice(deviceId: string): void {
-      revokedDevices.add(deviceId);
-      for (const lease of [...leases.values()]) if (lease.deviceId === deviceId) release(lease);
-    },
     putLease: (options: LeaseInput) => put(options),
     navigateLease(
       tabId: string,
@@ -712,15 +686,13 @@ export async function createBrowserPreviewManager({
       return { port: lease.pool.ports[0], origin: lease.publicOrigin };
     },
     configureDeviceProfile(deviceId: string, prefs: unknown) {
-      assertDevice(deviceId);
-      return cookieProfiles.configure(profileDevice(deviceId), prefs);
+      return cookieProfiles.configure(deviceId, prefs);
     },
     async clearDeviceProfile(deviceId: string, { origin }: { origin: string | null }) {
-      assertDevice(deviceId);
-      await cookieProfiles.clear(profileDevice(deviceId), origin === null
+      await cookieProfiles.clear(deviceId, origin === null
         ? {}
         : { hostname: new URL(origin).hostname });
-      await cookieProfiles.flush?.(profileDevice(deviceId));
+      await cookieProfiles.flush?.(deviceId);
       return { closedTabIds: [] };
     },
     async close(): Promise<void> {

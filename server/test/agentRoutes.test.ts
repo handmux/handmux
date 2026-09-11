@@ -435,6 +435,7 @@ describe('Agent app facade routes', () => {
       .query(h.lease.ref).expect(200);
     expect(response.body).toMatchObject({
       controls: {
+        activity: 'working',
         queue: {
           canSteer: false, canEdit: true, canRemove: true,
           items: [{ id: 'queued-1', requestId: 'queued-1', state: 'queued' }],
@@ -445,6 +446,34 @@ describe('Agent app facade routes', () => {
     });
     expect(read).toHaveBeenCalledWith(h.lease);
     expect(h.value.conversation!.queueSnapshot).toHaveBeenCalledWith(h.lease);
+  });
+
+  it.each(['idle', 'working', 'waiting', 'compacting', 'unknown'] as const)(
+    'forwards Runtime activity %s even when legacy context disagrees', async (activity) => {
+      const h = runtime();
+      const queue = { activity, canSteer: false, canEdit: true, canRemove: true,
+        items: [], submissions: [], settled: [] };
+      vi.mocked(h.value.conversation!.queueSnapshot).mockResolvedValueOnce(queue);
+      const mixed = { ...h.value, conversationControls: {
+        read: vi.fn(async () => ({ context: { activity: 'working', cwd: '/work' } })),
+      } } as unknown as typeof h.value;
+      const response = await request(app(mixed)).get('/agents/conversation-controls')
+        .query(h.lease.ref).expect(200);
+      expect(response.body.controls).toEqual({
+        activity, queue, submissions: [], context: { activity: 'working', cwd: '/work' },
+      });
+      expect(h.value.conversation!.queueSnapshot).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it('preserves optional controls when no public Queue snapshot is available', async () => {
+    const h = runtime();
+    const controls = { context: { activity: 'idle', cwd: '/work' } };
+    const legacy = { ...h.value, conversation: null,
+      conversationControls: { read: vi.fn(async () => controls) },
+    } as unknown as typeof h.value;
+    await request(app(legacy)).get('/agents/conversation-controls').query(h.lease.ref)
+      .expect(200, { controls });
   });
 
   it('keeps controls unsupported when neither optional controls nor public Queue is available', async () => {

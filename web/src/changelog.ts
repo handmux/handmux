@@ -19,6 +19,26 @@ export interface ChangelogEntry {
 // `entryId`/`LATEST_RELEASE` use `version` when present, else `date`, as the stable unread-dot id.
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '0.28.0',
+    date: '2026-09-11',
+    highlight: {
+      zh: 'Claude 对话更可靠 · 工具图片预览',
+      en: 'More reliable Claude chat · tool image previews',
+    },
+    items: {
+      zh: [
+        '对话页新增工具图片预览：图片按实际比例居中显示，支持缩放、保存、分享和失败重试。',
+        '修复 Claude 停止、compact、原生命令、选项选择和收件箱状态异常导致消息排队的问题。',
+        '修复模型和 Goal 弹窗切换会话后重复打开；队列编辑、Codex /review 和工作区状态更可靠。',
+      ],
+      en: [
+        'Added tool image previews in chat: images stay centered at their natural size, with zoom, save, share, and retry support.',
+        'Fixed Claude stop, compaction, native commands, option selection, and Inbox states leaving messages queued.',
+        'Fixed Model and Goal sheets reopening after session switches; queue editing, Codex /review, and workspace state are more reliable.',
+      ],
+    },
+  },
+  {
     version: '0.27.2',
     date: '2026-09-08',
     highlight: {

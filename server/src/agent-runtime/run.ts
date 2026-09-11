@@ -63,6 +63,7 @@ export type AgentAttachmentVerifier = (candidate: AgentAttachmentCandidate) => P
 export type AgentRunErrorCode =
   | 'invalid-candidate'
   | 'attachment-unverified'
+  | 'attachment-verification-timeout'
   | 'runtime-unavailable'
   | 'pane-owned-by-another-adapter'
   | 'attachment-already-attached'
@@ -266,16 +267,21 @@ export class AgentRunRuntime implements AgentRunRegistry {
     candidate: AgentAttachmentCandidate,
   ): Promise<void> {
     let accepted = false;
+    let timedOut = false;
     let timer: NodeJS.Timeout | undefined;
     try {
       accepted = await Promise.race([
         Promise.resolve(verify(candidate)).then(Boolean, () => false),
         new Promise<boolean>((resolve) => {
-          timer = setTimeout(() => resolve(false), this.#verifyTimeoutMs);
+          timer = setTimeout(() => { timedOut = true; resolve(false); }, this.#verifyTimeoutMs);
         }),
       ]);
     } catch { /* adapter probe failure is a rejection */ } finally {
       if (timer) clearTimeout(timer);
+    }
+    if (timedOut) {
+      throw new AgentRunError('attachment-verification-timeout',
+        `Agent process verification timed out after ${this.#verifyTimeoutMs} ms; check slow process queries and retry`);
     }
     if (!accepted) {
       throw new AgentRunError('attachment-unverified', 'Agent attachment no longer matches the live process');

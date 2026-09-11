@@ -214,7 +214,7 @@ describe('installHooks / uninstallHooks (IO)', () => {
     expect(fs.existsSync(path.join(hooksDir, 'handmux-codex-usage.cjs'))).toBe(false);
     const hookEnv = fs.readFileSync(path.join(hooksDir, 'handmux-notify.env'), 'utf8');
     expect(hookEnv).toContain(`HANDMUX_STATE=${stateFile}`);
-    expect(hookEnv).not.toContain('HANDMUX_CLAUDE_EVENTS');
+    expect(hookEnv).toContain(`HANDMUX_CLAUDE_EVENTS=${stateFile}.events`);
     expect(hooksStatus(home)).toBe('installed');
 
     // the registered command points at the COPIED script in ~/.claude/hooks

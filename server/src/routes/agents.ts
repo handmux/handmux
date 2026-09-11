@@ -289,7 +289,9 @@ export function agentRoutes({ runtime }: { runtime: AgentFacadeRuntime }): expre
         }
       }
       const queue = runtime.conversation ? await runtime.conversation.queueSnapshot(lease) : undefined;
-      return res.json({ controls: { ...controls, ...(queue ? { queue, submissions: queue.submissions } : {}) } });
+      // The page and dispatcher consume the same Runtime activity snapshot.
+      return res.json({ controls: { ...controls,
+        ...(queue ? { activity: queue.activity, queue, submissions: queue.submissions } : {}) } });
     } catch (error) {
       if (controlError(error, res)) return;
       return next(error);

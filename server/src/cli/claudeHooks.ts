@@ -8,7 +8,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { homedir } from 'node:os';
 import { spawnSync } from 'node:child_process';
-import { writeJsonAtomic, deployHookScripts, removeHookScripts } from './hookScaffold.js';
+import { writeJsonAtomic, deployHookScripts, removeHookScripts, shellWord } from './hookScaffold.js';
 
 export interface ClaudeVersion { major: number; minor: number; patch: number }
 export type ClaudeHookStatus = 'no-claude' | 'installed' | 'absent';
@@ -160,7 +160,7 @@ function addHook(hooks: Hooks, e: HookEvent, dest: string): void {
   dropOurHook(hooks, e.event);
   const existing = hooks[e.event];
   const groups: unknown[] = hooks[e.event] = Array.isArray(existing) ? [...existing] : [];
-  groups.push({ matcher: e.matcher || '', hooks: [{ type: 'command', command: `${dest} ${e.src}`, async: true, timeout: 5 }] });
+  groups.push({ matcher: e.matcher || '', hooks: [{ type: 'command', command: `${shellWord(dest)} ${e.src}`, async: true, timeout: 5 }] });
 }
 
 // Pure: return a NEW settings object with our six hooks merged into settings.hooks, idempotently, leaving
@@ -211,7 +211,7 @@ export function hooksStatus(home: string = homedir()): ClaudeHookStatus {
 
 function hasExpectedHook(hooks: Hooks, event: HookEvent, dest: string): boolean {
   const groups = hooks[event.event];
-  const command = `${dest} ${event.src}`;
+  const command = `${shellWord(dest)} ${event.src}`;
   return Array.isArray(groups) && groups.some((group) => (
     isRecord(group)
     && group.matcher === (event.matcher || '')

@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { InboxContractError, InboxService } from '../src/agent-runtime/inbox.js';
 import { MemoryInboxStateStore } from '../src/agent-runtime/inboxStore.js';
 import type { InboxStateStore, PersistedInboxState } from '../src/agent-runtime/inboxStore.js';
-import type { InboxOperation, InboxOrderedProjector } from '../src/agent-runtime/inboxTypes.js';
+import type { InboxOperation, InboxOrderedProjector, InboxTerminalReplay } from '../src/agent-runtime/inboxTypes.js';
 import { AgentRunRuntime } from '../src/agent-runtime/run.js';
 import type { AgentRunLease } from '../src/agent-runtime/run.js';
 
@@ -383,6 +383,75 @@ describe('Inbox restore and lifecycle', () => {
 });
 
 describe('Inbox terminal replay and persistence', () => {
+  it.each([undefined, null, '', 'invalid id'])('rejects historical replay with invalid eventId %s before persisting receipts', async (eventId) => {
+    const store = new MemoryInboxStateStore();
+    const h = await harness({ store });
+    const before = store.load();
+    expect(await h.projector.submitTerminalReplay({
+      run: h.lease.ref, source: source('old'), state: 'done', historyOnly: true, eventId,
+    } as unknown as InboxTerminalReplay)).toMatchObject({ accepted: false, reason: 'invalid_operation' });
+    expect(store.load()).toEqual(before);
+  });
+
+  it('silently receipts current historical completions without changing latest or inventing read state', async () => {
+    const store = new MemoryInboxStateStore();
+    const h = await harness({ store });
+    const delivered = vi.fn();
+    h.service.subscribeNotifications(delivered);
+    await h.projector.forRun(h.lease).submit({ kind: 'set', state: 'working', message: 'latest', source: source('latest') });
+    const before = h.service.read().records;
+    const replay = { run: h.lease.ref, source: source('old'), state: 'done' as const,
+      eventId: 'old-done', message: null, historyOnly: true };
+    expect(await h.projector.submitTerminalReplay(replay)).toMatchObject({ accepted: true });
+    expect(h.service.read().records).toEqual(before);
+    expect(h.service.read().terminalNotifications).toEqual([]);
+    expect((store.load() as PersistedInboxState).runs[0]?.events).toEqual([
+      expect.objectContaining({ eventId: 'old-done', acceptedAt: 10000 }),
+    ]);
+    expect(await h.projector.forRun(h.lease).submit({ kind: 'set', state: 'done',
+      eventId: 'old-done', message: null, source: source('retry') })).toMatchObject({ accepted: true, reason: 'duplicate_event' });
+    expect(h.service.read().records).toEqual(before);
+    expect(delivered).not.toHaveBeenCalled();
+    await h.runtime.revokePane('%1', 'process_exit');
+    expect(await h.projector.submitTerminalReplay(replay)).toMatchObject({ accepted: false });
+    expect(await h.projector.submitTerminalReplay({ ...replay,
+      run: { ...h.lease.ref, runId: 'unknown' } })).toMatchObject({ accepted: false });
+  });
+
+  it('inherits an accepted set receipt across restart without a second notification or changed readAt', async () => {
+    const store = new MemoryInboxStateStore();
+    const first = await harness({ store });
+    const operation = { kind: 'set' as const, state: 'done' as const,
+      eventId: 'old-done', message: 'original', source: source('old') };
+    await first.projector.forRun(first.lease).submit(operation);
+    const original = first.service.read().terminalNotifications;
+    await first.service.markTerminalRead([original[0]!.id]);
+    const read = first.service.read().terminalNotifications;
+    await first.runtime.revokePane('%1', 'process_exit');
+    const runtime = new AgentRunRuntime({ newRunId: () => 'run-after-restart' });
+    const second = await harness({ runtime, store, now: 20000 });
+    const delivered = vi.fn();
+    const before = second.service.read().records;
+    second.service.subscribeNotifications(delivered);
+    expect(await second.projector.submitTerminalReplay({ ...operation,
+      run: second.lease.ref, historyOnly: true })).toMatchObject({ accepted: true, acceptedAt: 10000 });
+    expect(second.service.read().terminalNotifications).toEqual(read);
+    expect(second.service.read().records).toEqual(before);
+    expect(delivered).not.toHaveBeenCalled();
+  });
+
+  it('retains silent history for retry when persistence fails', async () => {
+    const store = new MemoryInboxStateStore();
+    const h = await harness({ store });
+    const replay = { run: h.lease.ref, source: source('old'), state: 'done' as const,
+      eventId: 'old-done', historyOnly: true };
+    const save = vi.spyOn(store, 'save').mockImplementationOnce(() => { throw new Error('disk full'); });
+    expect(await h.projector.submitTerminalReplay(replay)).toMatchObject({ accepted: false, reason: 'persistence_failed' });
+    save.mockRestore();
+    expect(await h.projector.submitTerminalReplay(replay)).toMatchObject({ accepted: true });
+    expect(h.service.read().terminalNotifications).toEqual([]);
+  });
+
   it('records a revoked terminal replay without rewriting latest Inbox state', async () => {
     const h = await harness();
     const delivered: unknown[] = [];

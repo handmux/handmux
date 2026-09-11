@@ -124,30 +124,6 @@ describe('get / list / remove', () => {
 });
 
 describe('legacy registry migration', () => {
-  it('binds capabilities to current authorization and preserves separate ownership across restarts', async () => {
-    const active = new Set(['a', 'b']);
-    const options = { home, store, now: () => clock.t, isDeviceActive: (id) => active.has(id) };
-    const registry = createPreviews(options);
-    const input = { name: 'shared', dir: join(home, 'site') };
-    expect(await registry.register(input)).toMatchObject({ status: 401 });
-    const a = await registry.register(input, 'a');
-    const b = await registry.register(input, 'b');
-    expect(a.accessToken).not.toBe(b.accessToken);
-    expect(registry.get('shared', a.accessToken).state).toBe('active');
-    expect(registry.get('shared', b.accessToken).state).toBe('active');
-    registry.remove('shared', 'unknown');
-    expect(registry.list('b')).toHaveLength(1);
-    active.delete('a');
-    registry.revokeDevice('a');
-    expect(registry.get('shared', a.accessToken).state).not.toBe('active');
-    expect(registry.get('shared', b.accessToken).state).toBe('active');
-    const restored = createPreviews(options);
-    expect(restored.get('shared', b.accessToken).state).not.toBe('active');
-    expect(restored.list('b')).toHaveLength(1);
-    const fresh = await restored.register(input, 'b');
-    expect(fresh.accessToken).not.toBe(b.accessToken);
-    expect(JSON.parse(await fsp.readFile(store, 'utf8')).find((entry) => entry.deviceId === 'b')).not.toHaveProperty('accessToken');
-  });
   it('drops old dynamic entries and keeps rows without a kind as static', async () => {
     await fsp.writeFile(store, JSON.stringify([
       { name: 'old-port', kind: 'dynamic', port: 3000, expiresAt: clock.t + 1000 },

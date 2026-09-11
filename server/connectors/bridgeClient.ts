@@ -34,6 +34,7 @@ export interface LocalConnectorBridgeClientOptions {
   retryDelayMs?: number;
   maxRetryDelayMs?: number;
   maxEphemeralPerChannel?: number;
+  snapshotBeforeDurable?: boolean;
   logger?: (message: string, error?: unknown) => void;
 }
 
@@ -107,7 +108,9 @@ export class LocalConnectorBridgeClient {
   #retryTimer: NodeJS.Timeout | undefined;
   #retryAttempt = 0;
   #flushTail: Promise<void> = Promise.resolve();
+  readonly #snapshotBeforeDurable: boolean;
   #started = false;
+  readonly #restoredDurable = new Set<string>();
   #closed = false;
 
   constructor({
@@ -116,6 +119,7 @@ export class LocalConnectorBridgeClient {
     retryDelayMs = 250,
     maxRetryDelayMs = 5_000,
     maxEphemeralPerChannel = 256,
+    snapshotBeforeDurable = false,
     logger = () => {},
   }: LocalConnectorBridgeClientOptions) {
     if (!NAME_RE.test(adapterId) || !path.isAbsolute(socketPath)
@@ -135,8 +139,10 @@ export class LocalConnectorBridgeClient {
     this.#maxRetryDelayMs = maxRetryDelayMs;
     this.#maxEphemeralPerChannel = maxEphemeralPerChannel;
     this.#logger = logger;
+    this.#snapshotBeforeDurable = snapshotBeforeDurable;
     this.#store = new PrivateStateStore(stateFile);
     this.#state = parseState(this.#store.read());
+    for (const item of this.#state.durable) this.#restoredDurable.add(durableKey(item.channel, item.eventId));
     for (const [channel, value] of Object.entries(this.#state.snapshots)) {
       if (!NAME_RE.test(channel)) continue;
       this.#snapshots.set(channel, { revision: 1, value });
@@ -208,6 +214,13 @@ export class LocalConnectorBridgeClient {
       if (!this.#durableWaiters.has(key)) this.#durableWaiters.set(key, waiters);
       waiters.add({ resolve, reject });
     });
+  }
+
+  // Resume the exact payload loaded at startup, including one already ACKed during connection setup.
+  // Source adapters must not reinterpret an old durable ID into different wire bytes on upgrade.
+  resumePersistedDurable(channel: string, eventId: string): Promise<void> | null {
+    return this.#restoredDurable.has(durableKey(channel, eventId))
+      ? this.waitForDurableAck(channel, eventId) : null;
   }
 
   waitForDurableDrain(): Promise<void> {
@@ -365,6 +378,7 @@ export class LocalConnectorBridgeClient {
     const connection = this.#connection;
     if (!connection || connection.signal.aborted || this.#closed) return;
     while (this.#state.durable.length) {
+      if (this.#snapshotBeforeDurable) await this.#flushSnapshots(connection);
       const item = this.#state.durable[0]!;
       const receipt = await connection.channel(item.channel).publish({
         eventId: item.eventId, payload: item.payload,
@@ -379,14 +393,7 @@ export class LocalConnectorBridgeClient {
       }
       this.#resolveDurable(item.channel, item.eventId);
     }
-    for (const channel of [...this.#dirtySnapshots]) {
-      const entry = this.#snapshots.get(channel);
-      if (!entry) { this.#dirtySnapshots.delete(channel); continue; }
-      const revision = entry.revision;
-      const receipt = await connection.channel(channel).setSnapshot(entry.value);
-      if (!receipt.accepted) throw new Error(`Bridge snapshot rejected: ${receipt.reason ?? 'unknown'}`);
-      if (this.#snapshots.get(channel)?.revision === revision) this.#dirtySnapshots.delete(channel);
-    }
+    await this.#flushSnapshots(connection);
     for (const channel of [...this.#dropped]) {
       const receipt = await connection.channel(channel).publish({ payload: { type: 'stream.gap' } });
       if (!receipt.accepted) throw new Error(`Bridge gap rejected: ${receipt.reason ?? 'unknown'}`);
@@ -401,4 +408,15 @@ export class LocalConnectorBridgeClient {
       }
     }
   }
+  async #flushSnapshots(connection: BridgeTransportClientConnection): Promise<void> {
+    for (const channel of [...this.#dirtySnapshots]) {
+      const entry = this.#snapshots.get(channel);
+      if (!entry) { this.#dirtySnapshots.delete(channel); continue; }
+      const revision = entry.revision;
+      const receipt = await connection.channel(channel).setSnapshot(entry.value);
+      if (!receipt.accepted) throw new Error(`Bridge snapshot rejected: ${receipt.reason ?? 'unknown'}`);
+      if (this.#snapshots.get(channel)?.revision === revision) this.#dirtySnapshots.delete(channel);
+    }
+  }
+
 }

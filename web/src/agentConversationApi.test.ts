@@ -15,10 +15,10 @@ afterEach(() => {
 });
 
 describe('Agent Conversation app facade client', () => {
-  it('accepts only stable public send and interrupt reasons', async () => {
+  it.each(['provider_rejected', 'terminal_draft_conflict'])('accepts public send reason %s and rejects private details', async (reason) => {
     const fetch = vi.fn()
       .mockResolvedValueOnce({
-        status: 200, ok: true, json: async () => ({ status: 'rejected', reason: 'provider_rejected' }),
+        status: 200, ok: true, json: async () => ({ status: 'rejected', reason }),
       })
       .mockResolvedValueOnce({
         status: 200, ok: true, json: async () => ({
@@ -30,7 +30,7 @@ describe('Agent Conversation app facade client', () => {
 
     await expect(sendAgentConversationMessage(run, {
       clientRequestId: 'request-1', text: 'hello', delivery: 'prompt',
-    })).resolves.toEqual({ status: 'rejected', reason: 'provider_rejected' });
+    })).resolves.toEqual({ status: 'rejected', reason });
     await expect(interruptAgentConversation(run)).rejects.toThrow('invalid receipt');
   });
 

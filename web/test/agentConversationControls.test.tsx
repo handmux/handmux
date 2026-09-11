@@ -245,6 +245,20 @@ describe('Agent Conversation controls UI', () => {
     expect(screen.queryByRole('button', { name: '删除排队消息' })).toBeNull();
   });
 
+  it('explains a terminal draft conflict without dropping the queued message', () => {
+    render(<AgentConversationQueueControl activity="idle" controller={controller({
+      snapshot: { queue: {
+        items: [{ id: 'q1', text: 'keep queued', createdAt: 1, state: 'queued', revision: 3,
+          dispatchOrigin: 'queue', autoDispatchBlockedReason: 'terminal_draft_conflict' }],
+        canSteer: true, canEdit: true, canRemove: true,
+      } },
+    })} />);
+    expect(screen.getByText('keep queued')).toBeTruthy();
+    expect(screen.getByText('终端有未确认的草稿，请先在终端处理，再编辑此消息重试')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: '立刻引导' })).toBeNull();
+    expect(screen.getByRole('button', { name: '删除排队消息' })).toBeTruthy();
+  });
+
   it('shows neutral terminal guidance and retries an unknown Queue row', async () => {
     const retryOutgoing = vi.fn(async () => false);
     const view = render(<AgentConversationQueueControl activity="idle" controller={controller({

@@ -41,7 +41,6 @@ interface SystemRouteOptions {
   agentRuntime?: Pick<AgentRuntime, 'activeRuns' | 'inbox' | 'deprecatedSubscriptionUsage'> | null;
   asrEnv: NodeJS.ProcessEnv;
   shortcuts: unknown;
-  shortcutState?: { value: ShortcutConfig };
   home: string;
   stateFile: string;
   previewDomain?: string | null;
@@ -78,10 +77,10 @@ const PKG_VERSION = (() => {
 
 export function systemRoutes({
   commands, claudeEvents, agentRuntime, asrEnv, shortcuts, home, stateFile, previewDomain,
-  agentIntegrationContext, shortcutState,
+  agentIntegrationContext,
 }: SystemRouteOptions): Router {
   const r = express.Router();
-  const activeShortcuts = shortcutState ?? { value: normalizeShortcuts(shortcuts) };
+  let activeShortcuts: ShortcutConfig = normalizeShortcuts(shortcuts);
   const integrationContext = agentIntegrationContext ?? defaultAgentIntegrationContext({
     home,
     piEntryFile: PI_ENTRY,
@@ -105,7 +104,7 @@ export function systemRoutes({
       asrFillerFilter: voiceAdapter?.capabilities?.fillerFilter === true,
       claudeHooks: hooksStatus(home),
       managedCodex: true,
-      shortcuts: activeShortcuts.value,
+      shortcuts: activeShortcuts,
       browserProxy: !!previewDomain,
     });
   });
@@ -115,7 +114,7 @@ export function systemRoutes({
     if (!isRecord(body) || !Object.hasOwn(body, 'shortcuts')) {
       return res.status(400).json({ error: 'shortcuts required' });
     }
-    try { activeShortcuts.value = normalizeShortcuts(body.shortcuts); }
+    try { activeShortcuts = normalizeShortcuts(body.shortcuts); }
     catch (error) { return res.status(400).json({ error: errorMessage(error) }); }
     return res.json({ ok: true });
   });

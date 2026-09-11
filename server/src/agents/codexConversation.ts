@@ -1,4 +1,6 @@
 import { createHash } from 'node:crypto';
+import { homedir } from 'node:os';
+import { resolve } from 'node:path';
 import { stat } from 'node:fs/promises';
 import type { AgentRunLease, AgentRunRef, AgentSessionRef } from '../agent-runtime/run.js';
 import type {
@@ -30,6 +32,28 @@ import {
   sanitizeToolInputWithMetadata,
   sanitizeToolResultText,
 } from './conversationProjectionSafety.js';
+
+// Display labels deliberately erase the home-directory identity. Downloads must use the
+// original tool input instead; the existing file API still checks realpath and allowed roots.
+function toolImagePath(input: unknown): string | null {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return null;
+  const value = input as Record<string, unknown>;
+  const path = value.path;
+  if (typeof path !== 'string' || !path || path.includes('\0')) return null;
+  const absolute = (raw: unknown): string | null => {
+    if (typeof raw !== 'string' || raw.includes('\0')) return null;
+    if (raw.startsWith('/')) return raw;
+    if (raw === '~') return homedir();
+    if (raw.startsWith('~/')) return resolve(homedir(), raw.slice(2));
+    return null;
+  };
+  const direct = absolute(path);
+  if (direct) return direct;
+  // Other users' shell abbreviations, URLs and Windows paths are not POSIX relative paths.
+  if (path.startsWith('~') || /^[a-zA-Z][\w+.-]*:/.test(path)) return null;
+  const cwd = absolute(value.cwd);
+  return cwd ? resolve(cwd, path) : null;
+}
 
 const DURABLE_QUIET_MS = 100;
 const DEFAULT_DURABLE_SETTLE_TIMEOUT_MS = 15_000;
@@ -513,6 +537,8 @@ function projectDurableMessage(
       extensions: {
         'conversation.tool': {
           name, input: extensionInput, result: result?.text ?? null,
+          ...((name === 'view_image' || name === 'functions.view_image')
+            ? { imagePath: toolImagePath(message.tool.input) } : {}),
           isError: message.tool.isError === true,
           ...(outcome === undefined ? {} : { outcome }),
           ...(safeDiff === undefined ? {} : { diff: safeDiff }),
