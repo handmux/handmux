@@ -25,6 +25,7 @@ export interface CodexTranscriptMessage extends SourceIdentity {
   ts: string | undefined;
   role?: 'user' | 'assistant';
   text?: string;
+  noticeLevel?: 'info' | 'warning' | 'error';
   name?: string;
   args?: string;
   event?: string;
@@ -608,6 +609,14 @@ export function createCodexTranscriptParser(): CodexTranscriptParser {
 
       if (row.type === 'event_msg') {
         const payload = asRecord(row.payload);
+        const payloadError = asRecord(payload.error);
+        if (payload.type === 'task_complete' && typeof payloadError.message === 'string'
+          && payloadError.message.trim()) {
+          messages.push({
+            i, type: 'notice', noticeLevel: 'warning', text: payloadError.message.trim(), ts,
+            ...(typeof payload.turn_id === 'string' && payload.turn_id ? { turnId: payload.turn_id } : {}),
+          });
+        }
         adjacentUserClientId = payload.type === 'user_message'
           && typeof payload.client_id === 'string' && payload.client_id
           ? payload.client_id : undefined;

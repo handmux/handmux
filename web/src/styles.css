@@ -3302,14 +3302,22 @@ button.cmd-text { background: none; border: none; text-align: left; }
    assistant note — telling the user WHY the reply stopped instead of a silent, forever-spinning wave. */
 .chat-turn-error {
   align-self: flex-start; max-width: 85%; padding: 8px 12px; border-radius: 14px;
+  display: flex; align-items: flex-start; gap: 8px;
   font-size: 13px; line-height: 18px;
   color: #b3261e; background: rgba(179, 38, 30, 0.10);
+}
+.chat-turn-error::before {
+  content: '!';
+  flex: 0 0 18px; width: 18px; height: 18px; border-radius: 50%;
+  display: inline-flex; align-items: center; justify-content: center;
+  color: #fff; background: #d98900; font-size: 13px; font-weight: 800; line-height: 1;
 }
 .chat-turn-notice {
   align-self: flex-start; max-width: 85%; padding: 8px 12px; border-radius: 14px;
   font-size: 13px; line-height: 18px; color: var(--ct-muted); background: var(--ct-chip);
 }
 .chat-turn-notice.is-warning { color: #8a5700; background: rgba(179, 107, 0, 0.10); }
+.chat-turn-warning-icon { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; margin-right: 7px; border-radius: 50%; color: #fff; background: #d98900; font-size: 13px; font-weight: 800; }
 .chat-session-notice { display: flex; flex-direction: column; gap: 3px; }
 .chat-session-notice strong { font-size: 13px; font-weight: 650; }
 .chat-session-notice span { color: inherit; opacity: 0.82; }

@@ -4,6 +4,20 @@ import { createCodexTranscriptParser, parseCodexTranscript } from '../src/codexT
 const row = (payload) => JSON.stringify({ type: 'response_item', payload });
 
 describe('Codex rollout transcript', () => {
+  it('keeps provider capacity errors from task_complete events as warning notices', () => {
+    const parsed = parseCodexTranscript([JSON.stringify({
+      timestamp: '2026-09-11T07:44:43.289Z', type: 'event_msg',
+      payload: {
+        type: 'task_complete', turn_id: 'turn-1',
+        error: { message: 'Selected model is at capacity. Please try a different model.', codex_error_info: 'server_overloaded' },
+      },
+    })]);
+    expect(parsed).toEqual([expect.objectContaining({
+      type: 'notice', noticeLevel: 'warning',
+      text: 'Selected model is at capacity. Please try a different model.', turnId: 'turn-1',
+    })]);
+  });
+
   it('keeps only the public compacted message as detail data', () => {
     const parsed = parseCodexTranscript([JSON.stringify({
       type: 'compacted', timestamp: '2026-08-22T05:04:24.151Z',
