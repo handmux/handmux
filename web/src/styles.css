@@ -2156,7 +2156,8 @@ button.cmd-text { background: none; border: none; text-align: left; }
    pinch/drag gestures in ImageViewer; touch-action:none so those gestures aren't stolen by scroll, and
    the OS image-callout is suppressed (long-press is our own save gesture). */
 .doc-image-wrap {
-  flex: 1; min-height: 0; overflow: hidden; position: relative;
+  flex: 0 1 auto; width: 100%; min-height: 120px; max-height: min(70vh, 420px);
+  overflow: hidden; position: relative;
   display: flex; align-items: center; justify-content: center; padding: 8px;
   background: #1b1d22; touch-action: none; user-select: none; -webkit-user-select: none;
 }
@@ -4117,4 +4118,5 @@ button.cmd-text { background: none; border: none; text-align: left; }
   .terminal .xterm-viewport::-webkit-scrollbar:vertical { width: 0; }
 }
 
-.tool-sheet-image { display: flex; height: min(50vh, 420px); min-height: 180px; }
+.tool-sheet-image { display: flex; width: 100%; max-height: min(70vh, 420px); min-height: 120px; align-self: center; justify-content: center; }
+.tool-sheet-image .doc-image-wrap { min-height: 120px; max-height: min(70vh, 420px); }

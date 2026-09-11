@@ -32,7 +32,8 @@ const dist = (a: Point, b: Point): number => Math.hypot(a.x - b.x, a.y - b.y);
 // applied to the <img> (layout-size untouched), so offsetWidth/Height give the fitted size for pan
 // clamping. GIF animates on its own; SVG via <img> can't run scripts.
 export default function ImageViewer({ url, name }: ImageViewerProps) {
-  const [view, setView] = useState<ImageView>({ s: 1, x: 0, y: 0 }); // scale + pan (px)
+  const [view, setView] = useState<ImageView>({ s: 1, x: 0, y: 0 });
+  const [naturalSize, setNaturalSize] = useState<{ width: number; height: number } | null>(null); // scale + pan (px)
   const [note, setNote] = useState('');     // brief save feedback (a download is otherwise silent)
   const [menuOpen, setMenuOpen] = useState(false); // long-press → 保存图片 / 分享图片 sheet
   const viewRef = useRef(view); viewRef.current = view;
@@ -168,6 +169,7 @@ export default function ImageViewer({ url, name }: ImageViewerProps) {
     <div
       ref={wrapRef}
       className="doc-image-wrap"
+      style={naturalSize ? { aspectRatio: `${naturalSize.width} / ${naturalSize.height}` } : undefined}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={endPointer}
@@ -179,6 +181,7 @@ export default function ImageViewer({ url, name }: ImageViewerProps) {
         className="doc-image"
         src={url}
         alt={name}
+        onLoad={(event) => { const image = event.currentTarget; if (image.naturalWidth > 0 && image.naturalHeight > 0) setNaturalSize({ width: image.naturalWidth, height: image.naturalHeight }); }}
         draggable={false}
         style={{ transform: `translate(${view.x}px, ${view.y}px) scale(${view.s})` }}
       />
