@@ -8,6 +8,7 @@ import { migrateLegacyCodexOutbox } from '../src/agent-runtime/migrateLegacyCode
 import {
   FileConversationStateStore,
   MemoryConversationStateStore,
+  type AnyPersistedConversationState,
 } from '../src/agent-runtime/conversationStore.js';
 import type {
   AgentConversationAdapterV1,
@@ -436,7 +437,8 @@ describe('Conversation Core public queue', () => {
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'hm-queue-rejection-'));
     temporary.push(directory);
     const file = path.join(directory, 'state.json');
-    new FileConversationStateStore(file).save(h.store.load()!);
+    // The harness memory store contains the state just saved by ConversationService.
+    new FileConversationStateStore(file).save(h.store.load() as AnyPersistedConversationState);
     const reloaded = new FileConversationStateStore(file);
     const restarted = new ConversationService({
       runs: h.runs, adapters: { test: h.adapter }, store: reloaded,

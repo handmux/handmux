@@ -1,5 +1,6 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { projectConversationMessages } from '../src/conversationPresentation.js';
 import { ToolSheet } from '../src/components/ConversationTool.js';
 import { fetchImageUrl } from '../src/api.js';
 import { UnauthorizedError } from '../src/apiErrors.js';
@@ -15,6 +16,36 @@ beforeEach(() => { fetchImage.mockReset(); revoke.mockReset(); vi.stubGlobal('UR
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
 describe('path-based tool image preview', () => {
+  it('downloads the original image path through conversation presentation while showing the home label', async () => {
+    const [message] = projectConversationMessages([{
+      key: 'image', provisional: false,
+      item: {
+        id: 'image', sessionId: 'session', status: 'complete', kind: 'tool_call', callId: 'image', name: 'view_image',
+        input: { path: '~/assets/picture.png' },
+        extensions: { 'conversation.tool': {
+          name: 'view_image', input: { path: '~/assets/picture.png' }, result: '', isError: false,
+          imagePath: '/Users/alice/assets/picture.png',
+        } },
+      },
+    }]);
+    fetchImage.mockResolvedValue({ url: 'blob:original', mtimeMs: null });
+    render(<ToolSheet {...props} tool={message!.tool!} />);
+    await screen.findByRole('img');
+    expect(fetchImage).toHaveBeenCalledWith('/Users/alice/assets/picture.png');
+    expect(document.body.textContent).toContain('~/assets/picture.png');
+    expect(document.body.textContent).not.toContain('/Users/alice');
+  });
+  it.each([null, '~/assets/picture.png', '/tmp/bad\0.png', 'relative.png'])(
+    'does not fall back to display input when explicit image location is unavailable: %j', (imagePath) => {
+      render(<ToolSheet {...props} tool={{ ...makeTool(), imagePath }} />);
+      expect(fetchImage).not.toHaveBeenCalled();
+    },
+  );
+  it('does not interpret a home display label as a download location', () => {
+    render(<ToolSheet {...props} tool={makeTool({ path: '~/assets/picture.png' })} />);
+    expect(fetchImage).not.toHaveBeenCalled();
+  });
+
   it.each(['view_image', 'functions.view_image'])('loads %s by path and hides encoded output', async (name) => {
     fetchImage.mockResolvedValue({ url: 'blob:picture', mtimeMs: null });
     const view = render(<ToolSheet {...props} tool={makeTool(undefined, name)} />);

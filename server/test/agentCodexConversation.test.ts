@@ -1,4 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
+import { homedir } from 'node:os';
+import { resolve } from 'node:path';
 import { ConversationService } from '../src/agent-runtime/conversation.js';
 import type { ConversationEvent } from '../src/agent-runtime/conversationTypes.js';
 import { AgentRunRuntime } from '../src/agent-runtime/run.js';
@@ -82,6 +84,27 @@ async function setup(
 }
 
 describe('Codex Conversation adapter', () => {
+  it.each([
+    [{ path: '/Users/alice/assets/picture.png' }, '/Users/alice/assets/picture.png', '~/assets/picture.png'],
+    [{ path: '/home/bob/assets/picture.png' }, '/home/bob/assets/picture.png', '~/assets/picture.png'],
+    [{ path: 'picture.png', cwd: '/Users/alice/assets' }, '/Users/alice/assets/picture.png', 'picture.png'],
+    [{ path: 'picture.png' }, null, 'picture.png'],
+    [{ path: '~/assets/picture.png' }, resolve(homedir(), 'assets/picture.png'), '~/assets/picture.png'],
+    [{ path: 'picture.png', cwd: '~/assets' }, resolve(homedir(), 'assets/picture.png'), 'picture.png'],
+    [{ path: 'C:\\Users\\alice\\picture.png' }, null, '~/picture.png'],
+  ])('preserves image download identity separately from display input %j', async (input, imagePath, displayPath) => {
+    const { service } = await setup([{
+      i: 0, id: 'codex:turn-1:image', turnId: 'turn-1', type: 'tool', role: 'assistant', ts: undefined,
+      tool: { name: 'view_image', input, result: '', isError: false },
+    }]);
+    const result = await service.readPage({ agentId: 'codex', sessionId: 'thread-1' }, { limit: 20 });
+    if (result.status !== 'ok') throw new Error('expected history');
+    expect(result.page.items[0]).toMatchObject({
+      input: { path: displayPath },
+      extensions: { 'conversation.tool': { imagePath, input: { path: displayPath } } },
+    });
+  });
+
   it('projects only the changed durable suffix after an append', async () => {
     const first: CodexTranscriptMessage = {
       i: 0, id: 'codex:turn-1:user-1', type: 'text', role: 'user', text: 'first', ts: undefined,

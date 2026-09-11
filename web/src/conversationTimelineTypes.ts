@@ -21,6 +21,7 @@ export interface ConversationToolProjection {
   input: Record<string, unknown> | unknown[];
   result: string | null;
   isError: boolean;
+  imagePath?: string | null;
   outcome?: 'running' | 'success' | 'failed' | 'declined' | 'completed';
   diff?: ConversationDiff;
   inputTruncation?: ConversationTruncation;

@@ -346,6 +346,11 @@ function EditSheetBody({
 const isImageViewTool = (name: string): boolean => name === 'view_image' || name === 'functions.view_image';
 
 function imagePath(tool: ConversationToolProjection): string | null {
+  if (tool.imagePath !== undefined) {
+    return typeof tool.imagePath === 'string' && tool.imagePath.startsWith('/')
+      && !tool.imagePath.includes('\0') ? tool.imagePath : null;
+  }
+  // Legacy records can use an absolute path, but a home display label has lost its identity.
   const input = tool.input && typeof tool.input === 'object' ? tool.input as Record<string, unknown> : {};
   const path = typeof input.path === 'string' ? input.path : '';
   if (!path || path.includes('\0')) return null;
