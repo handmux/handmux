@@ -1,3 +1,4 @@
+import { applyAuthStatus } from './authSession.js';
 import { StrictMode, type ComponentProps } from 'react';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -308,6 +309,7 @@ async function renderApp() {
 }
 
 beforeEach(() => {
+  applyAuthStatus({ mode: 'trusted-device', authenticated: true, currentDeviceId: null, tokenEnabled: true, serverTime: Date.now() });
   controlRequestProbe.holdConsumption = false;
   controlRequestProbe.model = null;
   controlRequestProbe.goal = null;
@@ -1400,8 +1402,9 @@ describe('App workspace recovery', () => {
     await flush();
     start.resolve({ operationId: 'operation-stale', status: 'pending' });
     await flush();
+    fireEvent.click(screen.getByRole('button', { name: '使用固定 Token 登录' }));
     fireEvent.change(screen.getByPlaceholderText('粘贴 HANDMUX_TOKEN'), { target: { value: 'new-token' } });
-    fireEvent.click(screen.getByRole('button', { name: '保存' }));
+    fireEvent.click(screen.getByRole('button', { name: '登录' }));
     await flush();
 
     expect(api.getWorkspaceRestoreOperation).not.toHaveBeenCalled();

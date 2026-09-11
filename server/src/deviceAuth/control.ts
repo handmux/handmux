@@ -42,6 +42,9 @@ export async function startDeviceAuthControl({ service, home, handlePush, handle
             else if (args.op === 'list') result = service.list();
             else if (args.op === 'edit') result = service.edit(String(args.id ?? ''), { name: args.name, expire: args.expire });
             else if (args.op === 'revoke') result = service.revoke(String(args.id ?? ''));
+            else if (args.op === 'token-status') result = { enabled: service.tokenEnabled, devices: service.list() };
+            else if (args.op === 'token-enable') { service.setTokenEnabled(true); result = { enabled: true }; }
+            else if (args.op === 'token-disable') { service.setTokenEnabled(false, { allowEmpty: args.allowEmpty === true }); result = { enabled: false, devices: service.list() }; }
             else if (args.op === 'push' && handlePush) result = await handlePush(args.body);
             else if (args.op === 'shortcuts' && handleShortcuts) result = await handleShortcuts(args.body);
             else throw new DeviceAuthError('INVALID_COMMAND', 'Unknown control command');

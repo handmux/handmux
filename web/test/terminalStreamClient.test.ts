@@ -112,7 +112,7 @@ describe('openTerminalStream', () => {
   });
 
   it('uses the browser cookie with no subscribe token in device mode, including reconnect', async () => {
-    applyAuthStatus({ mode: 'trusted-device', authenticated: true, serverTime: Date.now() });
+    applyAuthStatus({ mode: 'trusted-device', authenticated: true, currentDeviceId: 'dev_test', serverTime: Date.now() });
     const stream = openTerminalStream({ pane: '%7', token: 'must-not-send', WebSocketCtor: FakeWebSocket });
     try {
       const ws = latestSocket();
@@ -126,7 +126,7 @@ describe('openTerminalStream', () => {
       expect(latestSocket().sent[0]).toEqual({ type: 'subscribe', pane: '%7' });
     } finally {
       await stream.close();
-      applyAuthStatus({ mode: 'token', authenticated: false, serverTime: Date.now() });
+      applyAuthStatus({ mode: 'trusted-device', tokenEnabled: true, currentDeviceId: null, authenticated: false, serverTime: Date.now() });
     }
   });
 
@@ -291,7 +291,7 @@ describe('openTerminalStream', () => {
 
   it.each([false, true])('confirms device invalidation after 4001 (storage unavailable: %s)', async (storageUnavailable) => {
     vi.useFakeTimers();
-    applyAuthStatus({ mode: 'trusted-device', authenticated: true, serverTime: Date.now() });
+    applyAuthStatus({ mode: 'trusted-device', authenticated: true, currentDeviceId: 'dev_test', serverTime: Date.now() });
     const onAuthFail = vi.fn();
     const fetcher = vi.fn(async () => ({
       ok: !storageUnavailable, status: storageUnavailable ? 503 : 200,
@@ -316,7 +316,7 @@ describe('openTerminalStream', () => {
       }
     } finally {
       await stream.close();
-      applyAuthStatus({ mode: 'token', authenticated: false, serverTime: Date.now() });
+      applyAuthStatus({ mode: 'trusted-device', tokenEnabled: true, currentDeviceId: null, authenticated: false, serverTime: Date.now() });
       vi.unstubAllGlobals();
       vi.useRealTimers();
     }

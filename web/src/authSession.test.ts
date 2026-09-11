@@ -3,19 +3,19 @@ import { applyAuthStatus, authenticationHeaders, authRequest, hasDeviceSession, 
 import { requestJson } from './apiRequest.js';
 import { UnauthorizedError } from './apiErrors.js';
 
-const status = (authenticated = true) => ({ mode: 'trusted-device' as const, authenticated, serverTime: Date.now() });
+const status = (authenticated = true) => ({ mode: 'trusted-device' as const, authenticated, currentDeviceId: authenticated ? 'dev_test' : null, tokenEnabled: false, serverTime: Date.now() });
 const json = (body: unknown, code = 200) => ({ status: code, ok: code === 200, json: async () => body });
 beforeEach(() => { localStorage.clear(); applyAuthStatus(status()); });
 afterEach(() => {
-  applyAuthStatus({ mode: 'token', authenticated: false, serverTime: Date.now() });
+  applyAuthStatus({ mode: 'trusted-device', tokenEnabled: true, currentDeviceId: null, authenticated: false, serverTime: Date.now() });
   vi.unstubAllGlobals();
 });
 
 describe('device authentication transport', () => {
-  it('clears legacy credentials and never sends a Bearer header in device mode', async () => {
+  it('prefers a confirmed device session over a saved fixed Token', async () => {
     localStorage.setItem('tw_token', 'old-shared-token');
     applyAuthStatus(status());
-    expect(localStorage.getItem('tw_token')).toBeNull();
+    expect(localStorage.getItem('tw_token')).toBe('old-shared-token');
     expect(authenticationHeaders()).toEqual({ 'X-Handmux-Request': '1' });
     const fetcher = vi.fn(async () => json({ ok: true }));
     vi.stubGlobal('fetch', fetcher);
@@ -25,10 +25,10 @@ describe('device authentication transport', () => {
     }));
   });
 
-  it('retains the original token protocol in token mode', () => {
-    applyAuthStatus({ mode: 'token', authenticated: false, serverTime: Date.now() });
+  it('sends Bearer with origin protection when only fixed Token login is available', () => {
+    applyAuthStatus({ mode: 'trusted-device', tokenEnabled: true, currentDeviceId: null, authenticated: false, serverTime: Date.now() });
     localStorage.setItem('tw_token', 'legacy');
-    expect(authenticationHeaders()).toEqual({ Authorization: 'Bearer legacy' });
+    expect(authenticationHeaders()).toEqual({ 'X-Handmux-Request': '1', Authorization: 'Bearer legacy' });
   });
 
   it('does not treat a proxy 401 as a revoked device', async () => {

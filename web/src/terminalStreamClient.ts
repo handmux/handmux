@@ -1,5 +1,5 @@
 import { getToken } from './storage.js';
-import { isDeviceAuth, confirmedSessionInvalid } from './authSession.js';
+import { hasDeviceSession, confirmedSessionInvalid } from './authSession.js';
 import {
   parseTerminalStreamMessage,
   type TerminalReadyMessage,
@@ -196,7 +196,7 @@ export function openTerminalStream({
       if (subscribedSocket === socket) send({ type: 'resync' });
       else {
         subscribedSocket = socket;
-        send({ type: 'subscribe', ...(!isDeviceAuth() ? { token } : {}), pane });
+        send({ type: 'subscribe', ...(!hasDeviceSession() ? { token } : {}), pane });
       }
     } else connect();
   };
@@ -222,7 +222,7 @@ export function openTerminalStream({
       if (socket !== nextSocket || closed || paused) return;
       subscribedSocket = nextSocket;
       armConnectTimer(nextSocket, readyTimeoutMs);
-      send({ type: 'subscribe', ...(!isDeviceAuth() ? { token } : {}), pane });
+      send({ type: 'subscribe', ...(!hasDeviceSession() ? { token } : {}), pane });
     };
     nextSocket.onmessage = (event: MessageEvent<unknown>) => {
       if (socket !== nextSocket) return;
@@ -332,11 +332,11 @@ export function openTerminalStream({
       clearConnectTimer();
       clearProbe();
       if (closed) return;
-      if (event.code === 4001 && !isDeviceAuth()) {
+      if (event.code === 4001 && !hasDeviceSession()) {
         onAuthFail?.();
         return;
       }
-      if (isDeviceAuth()) {
+      if (hasDeviceSession()) {
         // Storage failures also close protected sockets fail-closed. Even 4001 is not proof that
         // this device was revoked; only a successful auth status response can send it to login.
         void confirmedSessionInvalid().then((invalid) => {
@@ -400,7 +400,7 @@ export function openTerminalStream({
         if (subscribedSocket === socket) send({ type: 'resync' });
         else {
           subscribedSocket = socket;
-          send({ type: 'subscribe', ...(!isDeviceAuth() ? { token } : {}), pane });
+          send({ type: 'subscribe', ...(!hasDeviceSession() ? { token } : {}), pane });
         }
       } else connect();
     },

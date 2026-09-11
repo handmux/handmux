@@ -1,9 +1,10 @@
+import fs from 'node:fs';
 import { normalizeShortcuts, shortcutIdentity } from '../shortcutConfig.js';
 import { t } from './i18n/index.js';
 import * as prompts from './prompt.js';
 import { acquireLifecycleLock, isAlive, readState } from './state.js';
 import { PrivateStateStore } from '../privateStateStore.js';
-import { connectAuthControl } from '../deviceAuth/control.js';
+import { authSocketPath, connectAuthControl } from '../deviceAuth/control.js';
 import type { KeyShortcut, Shortcut, ShortcutConfig } from '../shortcutConfig.js';
 
 const MODIFIERS = {
@@ -321,7 +322,7 @@ export async function applyShortcutsLive({
   timeoutMs?: number;
 }): Promise<void> {
   const stateRecord = recordOf(state);
-  if (stateRecord?.authMode === 'trusted-device') {
+  if (stateRecord?.authMode === 'trusted-device' || home && fs.existsSync(authSocketPath(home))) {
     if (!home) throw new Error('HandMux home is required for the private control socket');
     const control = await connectAuthControl(home);
     const timer = setTimeout(() => control.close(), timeoutMs);

@@ -5,6 +5,7 @@ import type { DevicePrincipal } from './deviceAuth/service.js';
 import { readSessionSecret } from './deviceAuth/service.js';
 import { setSessionCookie } from './deviceAuth/http.js';
 import { withRequestAuthority } from './requestAuthority.js';
+import { bearerFrom } from './auth.js';
 export type { DevicePrincipal } from './deviceAuth/service.js';
 
 export interface DeviceAccessService {
@@ -12,6 +13,8 @@ export interface DeviceAccessService {
   isActive(principal: DevicePrincipal): boolean;
   touch(principal: DevicePrincipal): void;
   onRevoke(listener: (deviceId: string) => void): () => void;
+  readonly tokenEnabled?: boolean;
+  authenticateToken?(provided: unknown, origin: string): DevicePrincipal | null;
 }
 
 /** Host and forwarded headers select a known entry point; they never create a trusted origin. */
@@ -65,7 +68,8 @@ export function createDeviceAccess({ service, resolveOrigin }: {
   const authenticate = (req: IncomingMessage): DevicePrincipal | null => {
     const origin = resolveOrigin(req);
     if (!origin) return null;
-    return service.authenticateRequest(req, origin);
+    return service.authenticateRequest(req, origin)
+      ?? service.authenticateToken?.(bearerFrom(typeof req.headers.authorization === 'string' ? req.headers.authorization : undefined) ?? req.headers['x-handmux-token'], origin) ?? null;
   };
   const middleware: RequestHandler = (req, res, next) => {
     res.setHeader('Cache-Control', 'no-store');
@@ -76,7 +80,7 @@ export function createDeviceAccess({ service, resolveOrigin }: {
       return;
     }
     let principal: DevicePrincipal | null;
-    try { principal = service.authenticateRequest(req, origin); } catch {
+    try { principal = authenticate(req); } catch {
       res.status(503).json({ error: 'authentication storage unavailable', code: 'auth_unavailable' });
       return;
     }
@@ -96,7 +100,7 @@ export function createDeviceAccess({ service, resolveOrigin }: {
     res.once('finish', () => { if (res.statusCode >= 200 && res.statusCode < 300) accepted = true; });
     res.locals.assertDeviceActive = assertActive;
     const secret = readSessionSecret(req, origin);
-    if (secret) setSessionCookie(res, origin, secret, principal.expiresAt);
+    if (secret && !principal.deviceId.startsWith('token_')) setSessionCookie(res, origin, secret, principal.expiresAt);
     const group = responses.get(principal.deviceId) ?? new Set<Response>();
     group.add(res);
     responses.set(principal.deviceId, group);

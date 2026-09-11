@@ -1,6 +1,7 @@
 import { createHash, randomBytes, randomInt, randomUUID } from 'node:crypto';
 import type { IncomingMessage } from 'node:http';
 import type { DatabaseSync } from 'node:sqlite';
+import { tokenEquals } from '../auth.js';
 
 export type AuthMode = 'token' | 'trusted-device';
 export interface DevicePrincipal { deviceId: string; sessionId: string; expiresAt: number | null; origin: string }
@@ -51,7 +52,10 @@ export interface PairingStatus { id: string; state: PairState; code?: string; ex
 export interface ApprovalStatus { id: string; state: PairState; browserSummary: string; expiresAt: number; source: 'web'; device?: AuthDevice }
 
 export class DeviceAuthService {
-  readonly mode: AuthMode;
+  readonly mode = 'trusted-device' as const;
+  private tokenSecret: string;
+  private tokenGeneration: string;
+  private tokenEnabledState: boolean;
   private db: DatabaseSync;
   private now: () => number;
   private write: () => void;
@@ -65,20 +69,52 @@ export class DeviceAuthService {
   private flushTimer: ReturnType<typeof setInterval>;
   private claimFailures = new Map<string, number[]>();
   private closed = false;
-  constructor({ db, mode, now = Date.now, onSuccessfulWrite = () => {} }: {
-    db: DatabaseSync; mode: AuthMode; now?: () => number; onSuccessfulWrite?: () => void;
+  constructor({ db, mode, token = '', now = Date.now, onSuccessfulWrite = () => {} }: {
+    db: DatabaseSync; mode: AuthMode; token?: string; now?: () => number; onSuccessfulWrite?: () => void;
   }) {
-    this.db = db; this.mode = mode; this.now = now; this.write = onSuccessfulWrite;
-    const last = db.prepare("SELECT value FROM auth_meta WHERE key='mode'").get() as { value: string } | undefined;
+    this.db = db; this.tokenSecret = token; this.now = now; this.write = onSuccessfulWrite;
+    const tokenRow = db.prepare("SELECT value FROM auth_meta WHERE key='token_enabled'").get() as { value: string } | undefined;
+    this.tokenEnabledState = tokenRow ? tokenRow.value === '1' : mode === 'token';
+    const generation = db.prepare("SELECT value FROM auth_meta WHERE key='token_generation'").get() as { value: string } | undefined;
+    this.tokenGeneration = generation?.value ?? randomUUID();
     this.transaction(() => {
-      if (last?.value !== mode) {
-        db.prepare('UPDATE auth_devices SET revoked_at=? WHERE revoked_at IS NULL').run(now());
-        db.prepare('UPDATE auth_sessions SET revoked_at=? WHERE revoked_at IS NULL').run(now());
-      }
+      db.prepare("INSERT INTO auth_meta(key,value) VALUES('token_enabled',?) ON CONFLICT(key) DO NOTHING").run(this.tokenEnabledState ? '1' : '0');
+      db.prepare("INSERT INTO auth_meta(key,value) VALUES('token_generation',?) ON CONFLICT(key) DO NOTHING").run(this.tokenGeneration);
+      // Authentication mode is no longer a mutually-exclusive runtime mode. Preserve trusted
+      // devices and sessions across legacy token/trusted-device configuration upgrades.
       db.prepare("INSERT INTO auth_meta(key,value) VALUES('mode',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(mode);
     });
     this.timer = setInterval(() => this.sweep(), 1000); this.timer.unref();
     this.flushTimer = setInterval(() => { try { this.flush(); } catch { console.error('[auth] Activity flush failed; will retry'); } }, 30_000); this.flushTimer.unref();
+  }
+  /** Runtime fixed-token compatibility switch. Trusted-device authorization remains available regardless. */
+  get tokenEnabled(): boolean { return !this.closed && this.tokenEnabledState; }
+  authenticateToken(provided: unknown, origin: string): DevicePrincipal | null {
+    if (!this.tokenEnabled || !this.tokenSecret || typeof provided !== 'string' || !provided || !tokenEquals(provided, this.tokenSecret)) return null;
+    if (!this.isDeviceActive(`token_${this.tokenGeneration}`)) return null;
+    return { deviceId: `token_${this.tokenGeneration}`, sessionId: `token_${this.tokenGeneration}`, expiresAt: null, origin };
+  }
+  isTokenPrincipal(principal: DevicePrincipal): boolean { return principal.deviceId.startsWith('token_'); }
+  setTokenEnabled(enabled: boolean, options: { actor?: DevicePrincipal; allowEmpty?: boolean } = {}): void {
+    this.requireMode();
+    if (options.actor) {
+      if (this.isTokenPrincipal(options.actor)) throw new DeviceAuthError('SESSION_INVALID', 'Register this browser as a trusted device first', 401);
+      this.assertActive(options.actor);
+    }
+    if (this.tokenEnabledState === enabled) return;
+    const previousId = `token_${this.tokenGeneration}`;
+    const generation = randomUUID();
+    this.transaction(() => {
+      if (!enabled && !options.actor && options.allowEmpty !== true && !this.list().some(d => d.status === 'active')) {
+        throw new DeviceAuthError('NO_TRUSTED_DEVICES', 'No trusted devices remain; confirm DISABLE TOKEN before disabling fixed Token login', 409);
+      }
+      if (options.actor) this.assertActive(options.actor);
+      this.db.prepare("INSERT INTO auth_meta(key,value) VALUES('token_enabled',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(enabled ? '1' : '0');
+      this.db.prepare("INSERT INTO auth_meta(key,value) VALUES('token_generation',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(generation);
+    });
+    this.tokenEnabledState = enabled;
+    this.tokenGeneration = generation;
+    this.notify(previousId);
   }
   private transaction<T>(run: () => T): T {
     this.db.exec('BEGIN IMMEDIATE');
@@ -91,7 +127,7 @@ export class DeviceAuthService {
     return out;
   }
   private requireMode(): void {
-    if (this.closed || this.mode !== 'trusted-device') throw new DeviceAuthError('DEVICE_AUTH_DISABLED', 'Device authorization is not enabled; select it in handmux setup and restart', 409);
+    if (this.closed) throw new DeviceAuthError('DEVICE_AUTH_DISABLED', 'Device authorization is not enabled; select it in handmux setup and restart', 409);
   }
   onRevoke(listener: (deviceId: string) => void): () => void { this.listeners.add(listener); return () => this.listeners.delete(listener); }
   private notify(id: string): void {
@@ -104,11 +140,16 @@ export class DeviceAuthService {
     return { ...row, status: row.revoked_at !== null ? 'revoked' : row.expires_at !== null && row.expires_at <= this.now() ? 'expired' : 'active' };
   }
   isDeviceActive(id: string): boolean {
-    if (this.closed || this.mode !== 'trusted-device') return false;
+    if (this.closed) return false;
+    if (id.startsWith('token_')) {
+      const state = this.db.prepare("SELECT value FROM auth_meta WHERE key='token_enabled'").get() as { value: string } | undefined;
+      return this.tokenEnabled && state?.value === '1' && id === `token_${this.tokenGeneration}`;
+    }
     try { return this.device(id).status === 'active'; } catch (error) { if (error instanceof DeviceAuthError) return false; throw error; }
   }
   isActive(principal: DevicePrincipal): boolean {
     if (!this.isDeviceActive(principal.deviceId)) return false;
+    if (this.isTokenPrincipal(principal)) return principal.sessionId === principal.deviceId;
     return !!this.db.prepare('SELECT id FROM auth_sessions WHERE id=? AND device_id=? AND revoked_at IS NULL').get(principal.sessionId, principal.deviceId);
   }
   authenticateRequest(req: IncomingMessage, origin: string): DevicePrincipal | null {
@@ -116,14 +157,14 @@ export class DeviceAuthService {
     return secret ? this.authenticateSecret(secret, origin) : null;
   }
   authenticateSecret(secret: string, origin: string): DevicePrincipal | null {
-    if (this.closed || this.mode !== 'trusted-device') return null;
+    if (this.closed) return null;
     const row = this.db.prepare(`SELECT s.id AS sessionId,s.device_id AS deviceId,d.expires_at AS expiresAt,s.origin
       FROM auth_sessions s JOIN auth_devices d ON d.id=s.device_id WHERE s.secret_hash=? AND s.origin=?
       AND s.transport=? AND s.revoked_at IS NULL AND d.revoked_at IS NULL AND (d.expires_at IS NULL OR d.expires_at>?)`).get(hash(secret), origin, origin.startsWith('https:') ? 'https' : 'http', this.now()) as unknown as DevicePrincipal | undefined;
     if (!row) return null;
     this.observedDevices.add(row.deviceId); this.touch(row); return row;
   }
-  touch(principal: DevicePrincipal): void { if (this.isActive(principal)) this.activity.set(principal.sessionId, { deviceId: principal.deviceId, at: this.now() }); }
+  touch(principal: DevicePrincipal): void { if (!this.isTokenPrincipal(principal) && this.isActive(principal)) this.activity.set(principal.sessionId, { deviceId: principal.deviceId, at: this.now() }); }
   flush(): void {
     if (!this.activity.size) return;
     const entries = [...this.activity];
@@ -193,6 +234,19 @@ export class DeviceAuthService {
     const p: Pairing = { id: `pair_${randomUUID().replaceAll('-', '')}`, secretHash: hash(next), origin, code, state: 'waiting', expiresAt: this.now() + 60_000, browserSummary: browserSummary.replace(/[\x00-\x1f\x7f-\x9f]/g, '').slice(0, 160) || 'Browser' };
     if (existing) { existing.state = 'canceled'; this.retire(existing); this.pending.delete(existing.secretHash); }
     this.pending.set(p.secretHash, p); return { pairing: this.view(p), secret: next };
+  }
+  registerSelf(secret: string, origin: string, values: { name: unknown; expire: unknown }): AuthDevice {
+    this.requireMode();
+    const existing = this.authenticateSecret(secret, origin);
+    if (existing) return this.device(existing.deviceId);
+    if (!this.tokenEnabled) throw new DeviceAuthError('TOKEN_DISABLED', 'Fixed Token login is disabled', 401);
+    validateName(values.name); parseExpire(values.expire);
+    const pairing = this.pending.get(hash(secret));
+    if (!pairing || pairing.origin !== origin) throw new DeviceAuthError('PAIRING_NOT_FOUND', 'Prepare this browser for registration and retry', 409);
+    this.updatePair(pairing);
+    const owner = `self:${pairing.secretHash}`;
+    if (pairing.state === 'waiting') this.claim(pairing.code, owner);
+    return this.authorize(pairing.id, owner, values);
   }
   cancelPairing(secret: string | null, origin: string, id: string): PairingStatus | null {
     this.requireMode(); const p = secret ? this.pending.get(hash(secret)) : null;
@@ -266,13 +320,14 @@ export class DeviceAuthService {
     try {
       for (const [key, p] of this.pending) { this.updatePair(p); if (p.expiresAt + 600_000 < this.now()) this.pending.delete(key); }
       for (const [code, until] of this.retired) if (until <= this.now()) this.retired.delete(code);
-      if (this.closed || this.mode !== 'trusted-device') return;
+      if (this.closed) return;
       const expired = this.db.prepare('SELECT id FROM auth_devices WHERE revoked_at IS NULL AND expires_at IS NOT NULL AND expires_at<=?').all(this.now()) as Array<{id:string}>;
       for (const { id } of expired) if (!this.expireNotified.has(id)) { this.expireNotified.add(id); this.notify(id); }
     } catch {
       // A storage fault must stop already-authorized streams as well as fail new requests closed.
       for (const id of this.observedDevices) this.notify(id);
       this.observedDevices.clear();
+      if (this.tokenEnabled) this.notify(`token_${this.tokenGeneration}`);
       console.error('[auth] Expiry check unavailable; device connections closed');
     }
   }

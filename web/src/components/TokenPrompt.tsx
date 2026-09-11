@@ -4,7 +4,7 @@ import { setToken } from '../storage.js';
 import { t } from '../i18n';
 import AuthFrame from './AuthFrame.js';
 
-export default function TokenPrompt({ onSaved }: { onSaved: () => void }) {
+export default function TokenPrompt({ onSaved, onSwitch }: { onSaved: () => void; onSwitch?: () => void }) {
   const [value, setValue] = useState('');
   const save = (event: FormEvent<HTMLFormElement>): void => {
     event.preventDefault();
@@ -22,6 +22,7 @@ export default function TokenPrompt({ onSaved }: { onSaved: () => void }) {
       <input id="auth-token" type="password" autoComplete="current-password" autoCapitalize="none" autoCorrect="off" spellCheck={false}
         value={value} onChange={(event: ChangeEvent<HTMLInputElement>) => setValue(event.target.value)} placeholder={t('token.placeholder')} />
       <button className="auth-primary" type="submit" disabled={!value.trim()}>{t('auth.login')}</button>
+      {onSwitch && <button type="button" className="auth-secondary" onClick={onSwitch}>{t('auth.useDevice')}</button>}
     </form>
     </AuthFrame>
   );

@@ -19,6 +19,8 @@ import { t, setLocale } from './i18n/index.js';
 import { intro, outro, note, cancel, select, text, password, confirm, ask, CANCELLED } from './prompt.js';
 import { PrivateStateStore } from '../privateStateStore.js';
 import { installationAuthDefaults, tokenWarning } from './authDefaults.js';
+import { connectAuthControl } from '../deviceAuth/control.js';
+import { DeviceAuthService } from '../deviceAuth/service.js';
 import type { Tunnel, VapidConfig, VoiceConfig, VoiceProviderConfig } from './options.js';
 import type { SetupAnswers, SetupConfig } from './setupModel.js';
 
@@ -88,6 +90,13 @@ export async function runSetup({
     return null;
   }
   let a = answersFromConfig(existing, effectiveAuthMode);
+  // Runtime database state is authoritative while the server is running.
+  let runtimeTokenEnabled: boolean | undefined;
+  if (running || fs.existsSync(path.join(home, '.handmux', 'handmux.sqlite'))) {
+    try { const c = await setupAuthClient(home, running, effectiveAuthMode); try { const s = await c.request({ op: 'token-status' }) as { enabled?: boolean }; runtimeTokenEnabled = s.enabled; } finally { await c.close(); } }
+    catch { /* setup can still edit other settings when runtime control is unavailable */ }
+  }
+  if (runtimeTokenEnabled !== undefined) a.authMode = runtimeTokenEnabled ? 'token' : 'trusted-device';
   if (existing.token == null) a.token = process.env.HANDMUX_TOKEN ?? defaults.token ?? '';
   setLocale(a.lang);
 
@@ -105,7 +114,7 @@ export async function runSetup({
         a.lang = await editLanguage(a);
         note(t('setup.welcome'));
         a = await editConnection(a, { home, log });
-        a.authMode = await editAuth(a);
+        a.authMode = await editAuth(a, { home, running });
         if (a.authMode === 'token') a.token = await editToken(a);
       } catch (e) { if (e !== CANCELLED) throw e; }
     }
@@ -117,7 +126,7 @@ export async function runSetup({
           { value: 'connection', label: t('setup.secConnection'), hint: summarizeConnection(a) },
           { value: 'name', label: t('setup.secName'), hint: a.name || t('setup.default') },
           { value: 'port', label: t('setup.secPort'), hint: String(a.port) },
-          { value: 'auth', label: t('auth.section'), hint: t(a.authMode === 'trusted-device' ? 'auth.trusted' : 'auth.token') },
+          { value: 'auth', label: t('auth.section'), hint: a.authMode === 'token' ? '固定 Token 登录：启用（不推荐）' : '固定 Token 登录：禁用（推荐）' },
           { value: 'browser', label: t('setup.secBrowser'), hint: a.previewDomain || t('setup.browserOff') },
           { value: 'push', label: t('setup.secPush'), hint: a.vapid ? (a.vapid.subject || t('setup.on')) : t('setup.off') },
           {
@@ -149,8 +158,7 @@ export async function runSetup({
         if (choice === 'connection') a = await editConnection(a, { home, log });
         else if (choice === 'name') a.name = await editName(a);
         else if (choice === 'port') a.port = await editPort(a);
-        else if (choice === 'auth') a.authMode = await editAuth(a);
-        if (a.authMode === 'token') a.token = await editToken(a);
+        else if (choice === 'auth') { a.authMode = await editAuth(a, { home, running }); if (a.authMode === 'token') a.token = await editToken(a); }
         else if (choice === 'browser') a.previewDomain = await editBrowserDomain(a);
         else if (choice === 'language') a.lang = await editLanguage(a);
         else if (choice === 'push') {
@@ -174,15 +182,58 @@ export async function runSetup({
 // otherwise a user inside a section can't tell there's a way back to the hub.
 const withBack = (msg: string): string => `${msg}  ${t('setup.escBack')}`;
 
-async function editAuth(a: SetupAnswers): Promise<'token' | 'trusted-device'> {
+async function setupAuthClient(home: string, running: boolean, mode: 'token' | 'trusted-device') {
+  if (running) return connectAuthControl(home);
+  const { createProjectTaskRuntime } = await import('../projectTask/runtime.js');
+  const runtime = await createProjectTaskRuntime({ home });
+  let service: DeviceAuthService;
+  try { service = new DeviceAuthService({ db: runtime.requireDatabase(), mode }); }
+  catch (error) { await runtime.close(); throw error; }
+  return {
+    async request(args: Record<string, unknown>): Promise<unknown> {
+      if (args.op === 'token-status') return { enabled: service.tokenEnabled, devices: service.list() };
+      if (args.op === 'token-enable') service.setTokenEnabled(true);
+      else if (args.op === 'token-disable') service.setTokenEnabled(false, { allowEmpty: args.allowEmpty === true });
+      return { enabled: service.tokenEnabled };
+    },
+    async close() { try { service.close(); } finally { await runtime.close(); } },
+  };
+}
+
+async function editAuth(a: SetupAnswers, ctx?: { home?: string; running?: boolean; current?: boolean }): Promise<'token' | 'trusted-device'> {
   note(t('auth.manageHint'));
   const next = await ask(select({ message: withBack(t('auth.section')), initialValue: a.authMode ?? 'trusted-device', options: [
-    { value: 'trusted-device' as const, label: t('auth.trusted') },
-    { value: 'token' as const, label: t('auth.token') },
+    { value: 'trusted-device' as const, label: t('auth.tokenDisabled') },
+    { value: 'token' as const, label: t('auth.tokenEnabled') },
   ] }));
   if (next !== a.authMode) {
     note(tokenWarning(t('auth.switchWarning')), t('auth.section'));
+    if (next === 'token') note(tokenWarning(t('auth.warning')), t('auth.token'));
     if (!await ask(confirm({ message: t('auth.switchConfirm'), initialValue: false }))) return a.authMode ?? 'trusted-device';
+    if (ctx?.home) {
+      const c = await setupAuthClient(ctx.home, !!ctx.running, a.authMode ?? 'trusted-device');
+      try {
+        if (next === 'token') await c.request({ op: 'token-enable' });
+        else {
+          const status = await c.request({ op: 'token-status' }) as { devices?: unknown[] };
+          const devices = (Array.isArray(status.devices) ? status.devices : []).filter((d) => (d as Record<string, unknown>)?.status === 'active');
+          if (devices.length) {
+            note(`当前有 ${devices.length} 个可信设备；禁用后只有这些设备可以访问。`, t('auth.section'));
+            for (const device of devices) {
+              const d = device as Record<string, unknown>;
+              note(`ID: ${String(d.id ?? '')}\n名称: ${String(d.name ?? '')}\n浏览器: ${String(d.browser_summary ?? '')}\n有效期: ${d.expires_at == null ? '永久' : new Date(Number(d.expires_at)).toISOString()}`, t('auth.section'));
+            }
+            if (!await ask(confirm({ message: '确认禁用固定 Token 登录？', initialValue: false }))) return a.authMode ?? 'trusted-device';
+          } else {
+            note('当前没有可信设备；禁用后任何设备都无法访问，只能通过 CLI 恢复。', t('auth.section'));
+            const phrase = await ask(text({ message: '请输入 DISABLE TOKEN 以确认' }));
+            if (phrase !== 'DISABLE TOKEN') return a.authMode ?? 'trusted-device';
+          }
+          await c.request({ op: 'token-disable', allowEmpty: devices.length === 0 });
+        }
+      }
+      finally { await c.close(); }
+    }
   }
   return next;
 }

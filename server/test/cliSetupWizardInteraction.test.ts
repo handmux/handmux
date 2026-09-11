@@ -38,7 +38,11 @@ describe('setup wizard interaction cancellation', () => {
     root = fs.mkdtempSync(path.join(tmpdir(), 'handmux-setup-cancel-'));
     ttyDescriptor = Object.getOwnPropertyDescriptor(process.stdin, 'isTTY');
     Object.defineProperty(process.stdin, 'isTTY', { configurable: true, value: true });
-    vi.clearAllMocks();
+    vi.resetAllMocks();
+    // Exhausted scripts cancel the prompt, never spin a setup hub or silently save.
+    prompt.select.mockResolvedValue(prompt.cancelled);
+    prompt.confirm.mockResolvedValue(prompt.cancelled);
+    prompt.text.mockResolvedValue(prompt.cancelled);
     vi.stubEnv('HANDMUX_AUTH_MODE', undefined);
     vi.stubEnv('HANDMUX_TOKEN', undefined);
   });
@@ -72,7 +76,7 @@ describe('setup wizard interaction cancellation', () => {
     vi.stubEnv('HANDMUX_AUTH_MODE', 'token');
     const target = path.join(root, 'config.json');
     prompt.select.mockResolvedValueOnce('en').mockResolvedValueOnce('none')
-      .mockResolvedValueOnce('token').mockResolvedValueOnce('save');
+      .mockResolvedValueOnce('token').mockResolvedValueOnce(prompt.cancelled).mockResolvedValueOnce('save');
     expect((await runSetup({ target, home: root }))?.cfg.authMode).toBe('token');
     expect(prompt.select.mock.calls.find(([options]) => options.options?.some((row: { value: string }) => row.value === 'trusted-device'))?.[0].initialValue).toBe('token');
     expect(prompt.confirm).not.toHaveBeenCalled();
@@ -90,49 +94,50 @@ describe('setup wizard interaction cancellation', () => {
     else expect(fs.existsSync(target)).toBe(false);
   });
 
-  it.each(['token', 'trusted-device'])('requires confirmation when env overrides an existing %s installation during setup', async (mode) => {
-    const target = path.join(root, '.handmux', 'config.json');
-    if (mode === 'token') new PrivateStateStore(target).write({ token: 'legacy-token' });
-    else new PrivateStateStore(path.join(root, '.handmux', 'supervisor-config.json')).write({ authMode: mode });
-    vi.stubEnv('HANDMUX_AUTH_MODE', mode === 'token' ? 'trusted-device' : 'token');
-    prompt.select.mockResolvedValueOnce('start');
-    prompt.confirm.mockResolvedValueOnce(false);
-    expect(await runSetup({ target, home: root, running: true })).toBeNull();
-    expect(prompt.confirm).toHaveBeenCalledOnce();
-    if (mode === 'token') expect(new PrivateStateStore(target).readStrict()).toEqual({ token: 'legacy-token' });
-    else expect(fs.existsSync(target)).toBe(false);
+  it('reads persisted disable state instead of re-enabling from a stale config', async () => {
+    const target = path.join(root, 'config.json');
+    new PrivateStateStore(target).write({ authMode: 'token', token: 'legacy-token' });
+    prompt.select.mockResolvedValueOnce('auth').mockResolvedValueOnce('trusted-device').mockResolvedValueOnce('save');
+    prompt.confirm.mockResolvedValueOnce(true); prompt.text.mockResolvedValueOnce('DISABLE TOKEN');
+    expect((await runSetup({ target, home: root }))?.cfg.authMode).toBe('trusted-device');
+    new PrivateStateStore(target).write({ authMode: 'token', token: 'legacy-token' });
+    prompt.select.mockResolvedValueOnce('save');
+    expect((await runSetup({ target, home: root }))?.cfg.authMode).toBe('trusted-device');
   });
 
-  it.each([false, prompt.cancelled])('cancelling mode-switch confirmation never writes or restarts: %s', async (answer) => {
+  it.each([false, prompt.cancelled])('cancelling fixed Token disable never writes or restarts: %s', async (answer) => {
     const target = path.join(root, 'config.json');
     new PrivateStateStore(target).write({ authMode: 'token', token: 'legacy-token' });
     const before = fs.readFileSync(target, 'utf8');
-    prompt.select.mockResolvedValueOnce('auth').mockResolvedValueOnce('trusted-device').mockResolvedValueOnce('start');
+    prompt.select.mockResolvedValueOnce('auth').mockResolvedValueOnce('trusted-device').mockResolvedValueOnce(prompt.cancelled);
     prompt.confirm.mockResolvedValueOnce(answer);
-    expect(await runSetup({ target, home: root, running: true })).toBeNull();
+    expect(await runSetup({ target, home: root })).toBeNull();
     expect(fs.readFileSync(target, 'utf8')).toBe(before);
     expect(prompt.confirm.mock.calls[0]?.[0].initialValue).toBe(false);
   });
 
-  it('confirms a mode switch with independent-terminal warning and preserves the old token', async () => {
+  it('disables offline only after the empty-device phrase and preserves the credential', async () => {
     const target = path.join(root, 'config.json');
     new PrivateStateStore(target).write({ lang: 'en', token: 'legacy-token' });
-    prompt.select.mockResolvedValueOnce('auth').mockResolvedValueOnce('trusted-device').mockResolvedValueOnce('start');
-    prompt.confirm.mockResolvedValueOnce(true);
-    expect(await runSetup({ target, home: root, running: true })).toMatchObject({
-      cfg: { authMode: 'trusted-device', token: 'legacy-token' }, start: true,
-    });
-    expect(prompt.note.mock.calls.some(([message]) => message.includes('independent SSH') && message.includes('never a terminal inside Handmux'))).toBe(true);
-    expect(prompt.confirm).toHaveBeenCalledOnce();
+    prompt.select.mockResolvedValueOnce('auth').mockResolvedValueOnce('trusted-device').mockResolvedValueOnce('save');
+    prompt.confirm.mockResolvedValueOnce(true); prompt.text.mockResolvedValueOnce('DISABLE TOKEN');
+    expect(await runSetup({ target, home: root })).toMatchObject({ cfg: { authMode: 'trusted-device', token: 'legacy-token' }, start: false });
+    expect(prompt.note.mock.calls.some(([message]) => message.includes('independent SSH'))).toBe(true);
+    expect(prompt.text.mock.calls[0]?.[0].message).toContain('DISABLE TOKEN');
   });
 
-  it('does not ask to switch when the final mode is unchanged', async () => {
+  it('enables fixed Token offline after warning and keeps credential editing in the subpage', async () => {
     const target = path.join(root, 'config.json');
-    new PrivateStateStore(target).write({ authMode: 'token', token: 'legacy-token' });
-    prompt.select.mockResolvedValueOnce('auth').mockResolvedValueOnce('trusted-device')
-      .mockResolvedValueOnce('auth').mockResolvedValueOnce('token').mockResolvedValueOnce('save');
-    expect((await runSetup({ target, home: root }))?.cfg).toMatchObject({ authMode: 'token', token: 'legacy-token' });
-    expect(prompt.confirm).not.toHaveBeenCalled();
+    new PrivateStateStore(target).write({ authMode: 'trusted-device', token: 'legacy-token' });
+    prompt.select.mockResolvedValueOnce('auth').mockResolvedValueOnce('token')
+      .mockResolvedValueOnce('custom').mockResolvedValueOnce(prompt.cancelled).mockResolvedValueOnce('save');
+    prompt.confirm.mockResolvedValueOnce(true); prompt.text.mockResolvedValueOnce('new-fixed-token');
+    expect((await runSetup({ target, home: root }))?.cfg).toMatchObject({ authMode: 'token', token: 'new-fixed-token' });
+    expect(prompt.confirm.mock.calls[0]?.[0].initialValue).toBe(false);
+    // Database state overrides the old config on the next invocation.
+    new PrivateStateStore(target).write({ authMode: 'trusted-device', token: 'new-fixed-token' });
+    prompt.select.mockResolvedValueOnce('save');
+    expect((await runSetup({ target, home: root }))?.cfg.authMode).toBe('token');
   });
 
   it('refuses to overwrite a corrupt config as if it were a new installation', async () => {

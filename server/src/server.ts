@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadConfig } from './config.js';
-import { expressAuth, loadToken } from './auth.js';
+import { loadToken } from './auth.js';
 import { createApiRouter } from './httpApi.js';
 import { loadUploadExts } from './uploadTypes.js';
 import { createClaudeEvents } from './claudeEvents.js';
@@ -69,7 +69,7 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 // only process.env here (no .env files, no NODE_ENV branching). Running this file directly is not a
 // supported entry point — go through the CLI.
 const cfg = loadConfig();
-const token = cfg.authMode === 'trusted-device' ? '' : loadToken();
+const token = loadToken();
 const uploadExts = loadUploadExts();
 const home = homedir();
 const apiAccounts = new ApiAccountService({ file: apiAccountsPath(home) });
@@ -87,9 +87,8 @@ const projectTask = await createProjectTaskRuntime({
 if (projectTask.status().status === 'unavailable') {
   throw new Error(`Authentication database unavailable: ${projectTask.status().error?.message ?? 'unknown error'}`);
 }
-const auth = new DeviceAuthService({ db: projectTask.requireDatabase(), mode: cfg.authMode,
+const auth = new DeviceAuthService({ db: projectTask.requireDatabase(), mode: cfg.authMode, token,
   onSuccessfulWrite: () => projectTask.successfulWrite() });
-const deviceMode = cfg.authMode === 'trusted-device';
 const resolveAuthOrigin = createAuthOriginResolver({ port: cfg.port, host: cfg.host,
   ...(process.env.HANDMUX_PUBLIC_URL ? { publicUrl: process.env.HANDMUX_PUBLIC_URL } : {}),
   runtimePublicUrl: () => {
@@ -98,8 +97,8 @@ const resolveAuthOrigin = createAuthOriginResolver({ port: cfg.port, host: cfg.h
   },
 });
 const deviceAccess = createDeviceAccess({ service: auth, resolveOrigin: resolveAuthOrigin });
-const authenticate = deviceMode ? deviceAccess.middleware : expressAuth(token);
-push.setDeviceAuthorization(deviceMode ? (id) => auth.isDeviceActive(id) : null);
+const authenticate = deviceAccess.middleware;
+push.setDeviceAuthorization((id) => auth.isDeviceActive(id));
 const shortcutState = { value: cfg.shortcuts };
 const authControl = await startDeviceAuthControl({ service: auth, home,
   handlePush: (body) => sendLocalPush({ push, notifications }, body),
@@ -264,7 +263,7 @@ try { removeLegacyCodexHooks(home); } catch { /* best effort — migration never
 
 // Static directory preview remains for folders without a web server. Arbitrary sites and local ports
 // use the built-in browser below; previewDomain may provide its dedicated public origin.
-const previews = createPreviews({ home, ...(deviceMode ? { isDeviceActive: (id: string) => auth.isDeviceActive(id) } : {}) });
+const previews = createPreviews({ home, isDeviceActive: (id: string) => auth.isDeviceActive(id) });
 const preview = createPreview({ previews });
 const handmuxOrigin = (() => {
   try {
@@ -274,11 +273,11 @@ const handmuxOrigin = (() => {
   }
 })();
 const browserWorker = createBrowserWorkerClient({ appToken: token, previewDomain, handmuxOrigin,
-  ...(deviceMode ? { deviceAuthorization: {
+  deviceAuthorization: {
     getDeviceId: (req: import('node:http').IncomingMessage) => deviceAccess.authenticate(req)?.deviceId ?? null,
     isActive: (id: string) => auth.isDeviceActive(id),
     isMainRequest: (req: import('node:http').IncomingMessage) => resolveAuthOrigin(req) !== null,
-  } } : {}),
+  },
 });
 auth.onRevoke((id) => { push.revokeDevice(id); });
 auth.onRevoke((id) => { previews.revokeDevice(id); });
@@ -307,7 +306,7 @@ app.use(browserWorker.publicHandler);
 app.use('/api/browser-proxy', apiRequestContext(), authenticate, express.json(), browserWorker.apiHandler);
 app.use('/api', createApiRouter({
   token, events, uploadExts, previews, shortcuts: cfg.shortcuts, workspace, previewDomain,
-  agentRuntime, projectTask, apiAccounts, authentication: authenticate, deviceAuth: deviceMode, shortcutState,
+  agentRuntime, projectTask, apiAccounts, authentication: authenticate, deviceAuth: true, shortcutState,
 }));
 app.use('/preview', preview.router);
 app.use(preview.refererFallback);
@@ -367,7 +366,7 @@ const server = app.listen(cfg.port, cfg.host, () => {
   console.log(`[handmux] listening on http://${cfg.host}:${cfg.port} (serving ${staticDir})`);
 });
 const terminalStream = createTerminalStream({ token, commands,
-  ...(deviceMode ? { deviceAuth: { service: auth, resolveOrigin: resolveAuthOrigin } } : {}),
+  deviceAuth: { service: auth, resolveOrigin: resolveAuthOrigin },
 });
 server.on('upgrade', (req, socket, head) => {
   if (terminalStream.onUpgrade(req, socket, head)) return;

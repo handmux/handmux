@@ -12,7 +12,7 @@ describe('browser worker server composition', () => {
   });
 
   it('authenticates browser APIs before raw proxying and leaves normal APIs alone', () => {
-    expect(source).toContain('const authenticate = deviceMode ? deviceAccess.middleware : expressAuth(token)');
+    expect(source).toContain('const authenticate = deviceAccess.middleware');
     expect(source).toContain("app.use('/api/browser-proxy', apiRequestContext(), authenticate, express.json(), browserWorker.apiHandler)");
     expect(source.indexOf("app.use('/api/browser-proxy'")).toBeLessThan(source.indexOf("app.use('/api', createApiRouter"));
     expect(source).toContain('app.use(browserWorker.publicHandler)');

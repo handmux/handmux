@@ -7,7 +7,7 @@ import AuthFrame from './AuthFrame.js';
 const errorCopy = (error: unknown) => t(error instanceof AuthRequestError && error.status === 429
   ? 'auth.rateLimit' : 'auth.connectionError');
 
-export default function DevicePairingPrompt({ onSaved }: { onSaved: () => void }) {
+export default function DevicePairingPrompt({ onSaved, onSwitch }: { onSaved: () => void; onSwitch?: () => void }) {
   const [status, setStatus] = useState<AuthStatus | null>(null);
   const [busy, setBusy] = useState(true);
   const [error, setError] = useState('');
@@ -139,5 +139,6 @@ export default function DevicePairingPrompt({ onSaved }: { onSaved: () => void }
     {(waiting || configuring) && <button className="pairing-cancel" disabled={busy} onClick={() => { void request('DELETE'); }}>{t('auth.cancelPairing')}</button>}
     {(!pairing || pairing.state === 'expired' || pairing.state === 'canceled') && <button className="auth-primary" disabled={busy} onClick={() => { void request('POST'); }}>{t('auth.request')}</button>}
     {waiting && remaining === 0 && <button className="auth-primary" disabled={busy} onClick={() => { void request('POST'); }}>{t('auth.request')}</button>}
+    {onSwitch && <button type="button" className="auth-secondary" onClick={onSwitch}>{t('auth.useToken')}</button>}
   </section></AuthFrame>;
 }

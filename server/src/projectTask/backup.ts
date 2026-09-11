@@ -2,6 +2,7 @@ import { createRequire } from 'node:module';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
 import type { DatabaseSync as NodeDatabaseSync } from 'node:sqlite';
+import { migrateProjectDatabase } from './migrations.js';
 
 const sqlite = createRequire(import.meta.url)('node:sqlite') as typeof import('node:sqlite');
 
@@ -192,6 +193,9 @@ export async function restoreProjectBackup({
   // Revoke before publishing the restored file. A crash at any later point cannot resurrect access.
   const restored = new sqlite.DatabaseSync(temporary, { allowExtension: false });
   try {
+    // Pre-auth backups must also carry the explicit disabled state before publication;
+    // otherwise legacy startup configuration could reopen fixed Token login on recovery.
+    migrateProjectDatabase(restored);
     const hasAuth = restored.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='auth_sessions'").get();
     if (hasAuth) {
       restored.exec('BEGIN IMMEDIATE');
@@ -199,6 +203,8 @@ export async function restoreProjectBackup({
         const now = Date.now();
         restored.prepare('UPDATE auth_sessions SET revoked_at = ? WHERE revoked_at IS NULL').run(now);
         restored.prepare('UPDATE auth_devices SET revoked_at = ? WHERE revoked_at IS NULL').run(now);
+        restored.prepare("INSERT INTO auth_meta(key,value) VALUES('token_enabled','0') ON CONFLICT(key) DO UPDATE SET value='0'").run();
+        restored.prepare("DELETE FROM auth_meta WHERE key='token_generation'").run();
         restored.exec('COMMIT');
       } catch (error) { restored.exec('ROLLBACK'); throw error; }
     }

@@ -15,6 +15,7 @@
 // `cloudflare-named` (stable URL on your own Cloudflare domain) · `ssh` (reverse-forward to your own
 // server via `tunlite run`). `handmux setup` wires any of these up interactively.
 import fs from 'node:fs';
+import { connectAuthControl } from '../src/deviceAuth/control.js';
 import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { createInterface } from 'node:readline';
@@ -27,7 +28,7 @@ import type { AuthDefaults } from '../src/cli/authDefaults.js';
 import { ask, confirm as authConfirm, CANCELLED } from '../src/cli/prompt.js';
 import type { OptionRecord, ResolvedConfig } from '../src/cli/options.js';
 import { renderCompactQr } from '../src/cli/qr.js';
-import { supervise, bareUrl, publicUrlWithToken } from '../src/cli/supervisor.js';
+import { supervise, bareUrl } from '../src/cli/supervisor.js';
 import type { TunnelConfig } from '../src/cli/drivers.js';
 import { resolveCloudflared } from '../src/cli/cloudflared.js';
 import { resolveTunlite, checkSshAuth } from '../src/cli/tunlite.js';
@@ -875,18 +876,25 @@ async function printAccess(st: StoredState | null): Promise<void> {
   if (st.error) { console.error(t('access.error', { msg: st.error })); return; }
   const publicUrl = st.publicUrl ?? null;
   const localUrl = st.localUrl ?? null;
-  const token = st.token ?? '';
+  let tokenEnabled = false;
+  let devices: Array<{ status: string }> = [];
+  try {
+    const control = await connectAuthControl(HOME);
+    try { const status = await control.request({ op: 'token-status' }) as { enabled: boolean; devices: Array<{ status: string }> }; tokenEnabled = status.enabled; devices = status.devices; }
+    finally { control.close(); }
+  } catch { /* Never advertise fixed Token login unless the running authority confirms it. */ }
+  const token = tokenEnabled ? st.token ?? '' : '';
   const scan = bareUrl(publicUrl);
   console.log('');
   console.log(t('access.tunnel', { tunnel: st.tunnel, pid: st.supervisorPid }));
   console.log(t('access.open', { url: scan || t('access.pending') }));
   if (st.tunnel === 'none' && st.lanUrl) console.log(t('access.lan', { url: bareUrl(st.lanUrl) }));
   console.log(t('access.local', { url: bareUrl(localUrl) }));
-  if (st.authMode === 'trusted-device') console.log(t('auth.access'));
-  else { console.log(t('access.token', { token })); console.log(tokenWarning(t('auth.warning'))); }
-  // The QR carries the token so a phone scan signs in one-tap; the PRINTED links above stay token-free
-  // (safe to screenshot/share — paste the token shown above to sign in there).
-  await maybeQr(st.authMode === 'trusted-device' ? (scan || bareUrl(st.lanUrl ?? localUrl)) : publicUrl && token ? publicUrlWithToken(publicUrl, token) : scan, st);
+  console.log(t('auth.access'));
+  if (!tokenEnabled && !devices.some(d => d.status === 'active')) console.log(t('auth.noDevices'));
+  if (tokenEnabled) { console.log(t('access.token', { token })); console.log(tokenWarning(t('auth.warning'))); }
+  // Keep credentials out of QR URLs and navigation logs, including the compatibility login.
+  await maybeQr(scan || bareUrl(st.lanUrl ?? localUrl), st);
   if (publicUrl && st.tunnel !== 'none') {
     const ok = await probe(publicUrl);
     if (ok) console.log(t('access.reachable'));

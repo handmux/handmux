@@ -158,7 +158,9 @@ export function supervise(cfg: SupervisorConfig, {
     port: cfg.port,
     host: cfg.host,
     authMode: cfg.authMode ?? 'token',
-    token: cfg.authMode === 'trusted-device' ? '' : cfg.token,
+    // Keep the credential stable even while fixed Token login is disabled; runtime auth state
+    // controls whether it is accepted, and retaining it prevents regeneration on restart.
+    token: cfg.token,
     localUrl: `http://localhost:${cfg.port}`,
     lanUrl: lanUrl(cfg.port),
     publicUrl: null,

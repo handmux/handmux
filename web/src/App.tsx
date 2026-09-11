@@ -79,7 +79,7 @@ import PaneSurfaceHost from './components/PaneSurfaceHost.jsx';
 import TokenPrompt from './components/TokenPrompt.jsx';
 import DevicePairingPrompt from './components/DevicePairingPrompt.js';
 import DeviceLogoutDialog from './components/DeviceLogoutDialog.js';
-import { hasDeviceSession, isDeviceAuth, logoutDevice } from './authSession.js';
+import { hasAuthenticatedSession, hasDeviceSession, isDeviceAuth, isFixedTokenEnabled, logoutDevice } from './authSession.js';
 import Settings from './components/Settings.jsx';
 import WorkspaceRestoreDialog from './components/WorkspaceRestoreDialog.jsx';
 import UsagePage from './components/UsagePage.jsx';
@@ -284,7 +284,8 @@ export default function App() {
   const [snapshotInterval, setSnapshotIntervalState] = useState(getSnapshotInterval);
   const terminalStream = typeof window !== 'undefined'
     && terminalStreamEnabled(window.location, terminalTransport);
-  const [needToken, setNeedToken] = useState(isDeviceAuth() ? !hasDeviceSession() : !getToken());
+  const [needToken, setNeedToken] = useState(!hasAuthenticatedSession());
+  const [authPrompt, setAuthPrompt] = useState<'device' | 'token'>('device');
   const [logoutConfirm, setLogoutConfirm] = useState(false);
   const [logoutBusy, setLogoutBusy] = useState(false);
   const [logoutError, setLogoutError] = useState('');
@@ -634,7 +635,7 @@ export default function App() {
 
   // Device logout is an actual server revocation; a network failure must not look like unbinding.
   const logout = useCallback(async () => {
-    if (isDeviceAuth()) {
+    if (hasDeviceSession()) {
       setLogoutBusy(true);
       setLogoutError('');
       try { await logoutDevice(); }
@@ -2399,8 +2400,8 @@ export default function App() {
   });
 
   if (needToken) {
-    if (isDeviceAuth()) return <DevicePairingPrompt onSaved={() => { setNeedToken(false); setBooting(true); }} />;
-    return <TokenPrompt onSaved={() => { setNeedToken(false); setBooting(true); }} />;
+    if (authPrompt === 'token' && isFixedTokenEnabled()) return <TokenPrompt onSaved={() => { setNeedToken(false); setBooting(true); }} onSwitch={() => setAuthPrompt('device')} />;
+    return <DevicePairingPrompt onSaved={() => { setNeedToken(false); setBooting(true); }} {...(isFixedTokenEnabled() ? { onSwitch: () => setAuthPrompt('token') } : {})} />;
   }
 
   const inboxList = inboxRows(states, seen, readTs == null ? Infinity : readTs);
@@ -2571,7 +2572,7 @@ export default function App() {
         onUnbind={unbindSession}
         onBind={() => setBindOpen(true)}
         onClose={() => setDrawerOpen(false)}
-        onLogout={() => { if (isDeviceAuth()) setLogoutConfirm(true); else void logout(); }}
+        onLogout={() => { if (hasDeviceSession()) setLogoutConfirm(true); else void logout(); }}
         orphans={orphans}
         onTakeoverRequest={(orphan) => {
           if (orphan.sessionId) setTakeoverTarget({ ...orphan, sessionId: orphan.sessionId });

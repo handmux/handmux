@@ -1,4 +1,4 @@
-import { clearToken, getToken, setBrowserAccessEnabled } from './storage.js';
+import { getToken, setBrowserAccessEnabled } from './storage.js';
 import { UnauthorizedError } from './apiErrors.js';
 import { withAuthLock } from './authCoordination.js';
 
@@ -12,29 +12,37 @@ export interface PairingState {
 }
 export interface AuthStatus {
   mode: AuthMode;
+  tokenEnabled?: boolean;
+  currentDeviceId?: string | null;
   authenticated: boolean;
   serverTime: number;
   pairing?: PairingState;
 }
 
 // Public mode/state only. All device credentials remain in server-issued HttpOnly cookies.
-let mode: AuthMode = 'token';
 let authenticated = false;
-export const isDeviceAuth = (): boolean => mode === 'trusted-device';
-export const hasDeviceSession = (): boolean => isDeviceAuth() && authenticated;
+let currentDeviceId: string | null = null;
+let fixedTokenEnabled = false;
+export const isFixedTokenEnabled = (): boolean => fixedTokenEnabled;
+export const isDeviceAuth = (): boolean => true;
+export const hasAuthenticatedSession = (): boolean => authenticated;
+export const hasDeviceSession = (): boolean => authenticated && currentDeviceId !== null;
 export function applyAuthStatus(status: AuthStatus): void {
-  mode = status.mode;
   authenticated = status.authenticated;
+  currentDeviceId = status.currentDeviceId ?? null;
+  fixedTokenEnabled = status.tokenEnabled === true;
   if (isDeviceAuth()) {
-    try { clearToken(); } catch { /* device authentication never reads the legacy credential */ }
     // An old token-mode Browser opt-in must not silently re-create a device capability.
     if (!authenticated) { try { setBrowserAccessEnabled(false); } catch { /* storage may be disabled */ } }
   }
 }
 
+function savedToken(): string | null { try { return getToken(); } catch { return null; } }
+
 export function authenticationHeaders(extra: Record<string, string> = {}): Record<string, string> {
   return {
-    ...(isDeviceAuth() ? { 'X-Handmux-Request': '1' } : { Authorization: `Bearer ${getToken() ?? ''}` }),
+    'X-Handmux-Request': '1',
+    ...(!hasDeviceSession() && savedToken() ? { Authorization: `Bearer ${savedToken()}` } : {}),
     ...extra,
   };
 }
@@ -42,6 +50,9 @@ export function authenticationHeaders(extra: Record<string, string> = {}): Recor
 export async function authRequest(path = '/api/auth/status', method = 'GET', id?: string): Promise<AuthStatus> {
   return withAuthLock(async () => {
     const status = await performAuthRequest(path, method, id);
+    if (status.authenticated && !status.currentDeviceId && status.pairing?.state === 'authorized') {
+      return performAuthRequest('/api/auth/status', 'GET');
+    }
     // On HTTP, re-read the cookie that won across concurrent tabs instead of keeping a stale
     // initial POST candidate. An already-authorized primary cookie always wins on the server.
     return method === 'POST' && path === '/api/auth/pairing'
@@ -59,7 +70,7 @@ async function performAuthRequest(path: string, method: string, id?: string): Pr
   try {
     const response = await fetch(path, {
       method, credentials: 'same-origin', cache: 'no-store', signal: controller.signal,
-      headers: { 'X-Handmux-Request': '1', ...(id ? { 'Content-Type': 'application/json' } : {}) },
+      headers: { 'X-Handmux-Request': '1', ...(!hasDeviceSession() && savedToken() ? { Authorization: `Bearer ${savedToken()}` } : {}), ...(id ? { 'Content-Type': 'application/json' } : {}) },
       ...(id ? { body: JSON.stringify({ id }) } : {}),
     });
     if (!response.ok) {
@@ -68,7 +79,7 @@ async function performAuthRequest(path: string, method: string, id?: string): Pr
       throw new AuthRequestError(response.status, code);
     }
     const value = await response.json() as AuthStatus;
-    if (!value || !['token', 'trusted-device'].includes(value.mode)
+    if (!value || value.mode !== 'trusted-device'
       || typeof value.authenticated !== 'boolean' || !Number.isFinite(value.serverTime)) {
       throw new Error('Invalid authentication response');
     }
@@ -80,11 +91,12 @@ async function performAuthRequest(path: string, method: string, id?: string): Pr
 export async function confirmedSessionInvalid(): Promise<boolean> {
   try {
     const status = await authRequest();
+    applyAuthStatus(status);
     return status.mode !== 'trusted-device' || !status.authenticated;
   } catch { return false; }
 }
 export async function authenticationError(): Promise<Error> {
-  return !isDeviceAuth() || await confirmedSessionInvalid()
+  return !hasDeviceSession() || await confirmedSessionInvalid()
     ? new UnauthorizedError() : new Error('Request rejected; could not confirm session invalidation');
 }
 

@@ -388,6 +388,7 @@ export function createTerminalStream({
   const wss = new WebSocketServer({ noServer: true, maxPayload: MAX_CLIENT_MESSAGE_BYTES });
   const streams = new Set<PaneControlStream>();
   const principals = new WeakMap<WebSocket, DevicePrincipal>();
+  const origins = new WeakMap<WebSocket, string>();
   const socketStreams = new Map<WebSocket, PaneControlStream>();
   const unsubscribe = deviceAuth?.service.onRevoke((deviceId) => {
     for (const ws of wss.clients) {
@@ -415,7 +416,7 @@ export function createTerminalStream({
 
   wss.on('connection', (socket) => {
     const ws = socket as LiveWebSocket;
-    const principal = principals.get(ws);
+    let principal = principals.get(ws);
     const stillAuthorized = (): boolean => {
       if (!deviceAuth) return true;
       try { return Boolean(principal && deviceAuth.service.isActive(principal)); } catch { return false; }
@@ -430,7 +431,7 @@ export function createTerminalStream({
     let authenticating = false;
     let stream: PaneControlStream | null = null;
     ws.on('message', async (raw, binary) => {
-      if (!stillAuthorized()) { ws.close(4001, 'unauthorized'); return; }
+      if (principal && !stillAuthorized()) { ws.close(4001, 'unauthorized'); return; }
       if (principal) deviceAuth?.service.touch(principal);
       if (binary) return;
       let message: unknown;
@@ -451,7 +452,14 @@ export function createTerminalStream({
         ws.close(1003, 'bad subscribe message');
         return;
       }
-      if (deviceAuth ? 'token' in message : !tokenEquals(message.token ?? '', token)) {
+      if (deviceAuth && principal && !principal.deviceId.startsWith('token_') && 'token' in message) {
+        ws.close(4001, 'unauthorized'); return;
+      }
+      if (deviceAuth && !principal) {
+        principal = deviceAuth.service.authenticateToken?.(message.token, origins.get(ws) ?? '') ?? undefined;
+        if (principal) principals.set(ws, principal);
+      }
+      if (deviceAuth ? !stillAuthorized() : !tokenEquals(message.token ?? '', token)) {
         ws.close(4001, 'unauthorized');
         return;
       }
@@ -486,21 +494,26 @@ export function createTerminalStream({
     try { pathname = new URL(req.url ?? '', 'http://handmux.local').pathname; } catch { return false; }
     if (pathname !== '/api/terminal-stream') return false;
     let principal: DevicePrincipal | null = null;
+    let requestOrigin: string | null = null;
     if (deviceAuth) {
       try {
         const origin = deviceAuth.resolveOrigin(req);
-        if (origin && req.headers.origin === origin) principal = deviceAuth.service.authenticateRequest(req, origin);
+        if (origin && req.headers.origin === origin) {
+          requestOrigin = origin;
+          principal = deviceAuth.service.authenticateRequest(req, origin);
+        }
       } catch {
         socket.end('HTTP/1.1 503 Service Unavailable\r\nConnection: close\r\n\r\n');
         return true;
       }
-      if (!principal) {
+      if (!requestOrigin || (!principal && !deviceAuth.service.tokenEnabled)) {
         socket.end('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n');
         return true;
       }
     }
     wss.handleUpgrade(req, socket, head, (ws) => {
       if (principal) principals.set(ws, principal);
+      if (requestOrigin) origins.set(ws, requestOrigin);
       wss.emit('connection', ws, req);
     });
     return true;

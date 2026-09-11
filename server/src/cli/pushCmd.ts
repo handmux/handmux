@@ -1,10 +1,11 @@
+import fs from 'node:fs';
 // `handmux push <title> <body> [--session X]... [--device K]... [--tag T] [--url U]` — fire one
 // notification to the phone through the already-running server (loopback + the server's own token).
 // Scope is mutually exclusive: --device (by key) or --session, else all. Pure parse + injectable
 // runner so it unit-tests without spawning or real fetch.
 import { readState } from './state.js';
 import { sanitizeNotificationUrl } from '../urlPolicy.js';
-import { connectAuthControl } from '../deviceAuth/control.js';
+import { authSocketPath, connectAuthControl } from '../deviceAuth/control.js';
 
 const collect = (acc: string[], value: unknown): string[] =>
   acc.concat(String(value ?? '').split(',').map((item) => item.trim()).filter(Boolean));
@@ -101,7 +102,7 @@ export async function runPush({
   }
   try {
     let raw: unknown;
-    if (st.authMode === 'trusted-device') {
+    if (st.authMode === 'trusted-device' || fs.existsSync(authSocketPath(home))) {
       const control = await connectAuthControl(home);
       try { raw = await control.request({ op: 'push', body: parsed }); } finally { control.close(); }
     } else {

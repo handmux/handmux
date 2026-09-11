@@ -3,10 +3,12 @@ import { connectAuthControl } from '../deviceAuth/control.js';
 import { parseExpire, validateName } from '../deviceAuth/service.js';
 import { t } from './i18n/index.js';
 
-export interface AuthCommand { op: 'add' | 'list' | 'edit' | 'revoke'; id?: string; name?: string; expire?: string }
+export interface AuthCommand { op: 'add' | 'list' | 'edit' | 'revoke' | 'token-status' | 'token-enable' | 'token-disable'; id?: string; name?: string; expire?: string; allowEmpty?: boolean }
 export function parseAuthArgs(argv: readonly string[], interactive: boolean): AuthCommand {
-  const [op, ...rest] = argv;
-  if (op !== 'add' && op !== 'list' && op !== 'edit' && op !== 'revoke') throw new Error('Usage: handmux auth add [code] --name <name> --expire <1h|7d|never> | list | edit <id> [--name ...] [--expire ...] | revoke <id>');
+  let [op, ...rest] = argv;
+  if (op === 'token') { const sub = rest.shift(); op = sub ? `token-${sub}` : ''; }
+  if (op !== 'add' && op !== 'list' && op !== 'edit' && op !== 'revoke' && op !== 'token-status' && op !== 'token-enable' && op !== 'token-disable') throw new Error('Usage: handmux auth add ... | list | edit ... | revoke ... | token status|enable|disable');
+  if (op === 'token-status' || op === 'token-enable' || op === 'token-disable') return { op };
   const result: AuthCommand = { op };
   for (let i = 0; i < rest.length; i++) {
     const arg = rest[i]!;
@@ -43,6 +45,27 @@ export async function runAuthCommand({ argv, home, interactive = !!process.stdin
   let client: Awaited<ReturnType<typeof connectAuthControl>> | undefined;
   try {
     const args = parseAuthArgs(argv, interactive);
+    if (args.op === 'token-status' || args.op === 'token-enable' || args.op === 'token-disable') {
+      client = await connect(home);
+      const status = await client.request({ op: 'token-status' }) as { enabled: boolean; devices?: unknown[] };
+      if (args.op === 'token-status') { log(`固定 Token 登录: ${status.enabled ? '启用' : '禁用'}\n可信设备: ${Array.isArray(status.devices) ? status.devices.length : 0}`); return 0; }
+      log(t('auth.switchWarning'));
+      if (args.op === 'token-enable') {
+        log('启用固定 Token 登录会增加一个可复用的全局凭据入口，存在泄露风险。');
+        if (!interactive || !await ask(confirm({ message: '确认启用固定 Token 登录？', initialValue: false }))) throw canceled;
+        await client.request({ op: 'token-enable' }); log('固定 Token 登录已启用。'); return 0;
+      }
+      const devices = (Array.isArray(status.devices) ? status.devices : []).filter((d) => (d as Record<string, unknown>)?.status === 'active');
+      if (devices.length) {
+        log(`当前有 ${devices.length} 个可信设备；禁用后只有这些设备可以访问。`);
+        devices.forEach(d => log(outputDevice(d)));
+        if (!interactive || !await ask(confirm({ message: '确认禁用固定 Token 登录？', initialValue: false }))) throw canceled;
+      } else {
+        log('当前没有可信设备；禁用后任何设备都无法访问，只能通过 CLI 恢复。');
+        if (!interactive || (await ask(text({ message: '请输入 DISABLE TOKEN 以确认' }))) !== 'DISABLE TOKEN') throw canceled;
+      }
+      await client.request({ op: 'token-disable', allowEmpty: devices.length === 0 }); log('固定 Token 登录已禁用。'); return 0;
+    }
     if (args.op !== 'add') {
       client = await connect(home); const result = await client.request(args as unknown as Record<string, unknown>);
       log('ID\tNAME\tSTATUS\tEXPIRES\tADDED\tLAST ACCESS\tBROWSER');

@@ -36,3 +36,29 @@ describe('interactive auth add', () => {
     expect(prompts.text).not.toHaveBeenCalled(); expect(prompts.select).not.toHaveBeenCalled(); expect(prompts.confirm).not.toHaveBeenCalled();
   });
 });
+
+describe('fixed Token login controls', () => {
+  beforeEach(() => { vi.clearAllMocks(); });
+  it('requires explicit confirmation to enable', async () => {
+    const request = vi.fn(async (a: Record<string, unknown>) => a.op === 'token-status' ? { enabled: false, devices: [] } : { enabled: true });
+    const connect = vi.fn(async () => ({ request, close: vi.fn() }));
+    prompts.confirm.mockResolvedValueOnce(true);
+    expect(await runAuthCommand({ argv: ['token', 'enable'], home: '/unused', interactive: true, connect, log: vi.fn() })).toBe(0);
+    expect(request).toHaveBeenLastCalledWith({ op: 'token-enable' });
+  });
+  it('requires DISABLE TOKEN when disabling with no devices', async () => {
+    const request = vi.fn(async (a: Record<string, unknown>) => a.op === 'token-status' ? { enabled: true, devices: [] } : { enabled: false, devices: [] });
+    const connect = vi.fn(async () => ({ request, close: vi.fn() }));
+    prompts.text.mockResolvedValueOnce('DISABLE TOKEN');
+    expect(await runAuthCommand({ argv: ['token', 'disable'], home: '/unused', interactive: true, connect, log: vi.fn() })).toBe(0);
+    expect(request).toHaveBeenLastCalledWith({ op: 'token-disable', allowEmpty: true });
+  });
+  it('confirms with devices and sends allowEmpty false', async () => {
+    const devices = [{ id: 'd1', name: 'Mac', status: 'active', expires_at: null, authorized_at: 1, last_used_at: 1 }];
+    const request = vi.fn(async (a: Record<string, unknown>) => a.op === 'token-status' ? { enabled: true, devices } : { enabled: false, devices });
+    const connect = vi.fn(async () => ({ request, close: vi.fn() }));
+    prompts.confirm.mockResolvedValueOnce(true);
+    expect(await runAuthCommand({ argv: ['token', 'disable'], home: '/unused', interactive: true, connect, log: vi.fn() })).toBe(0);
+    expect(request).toHaveBeenLastCalledWith({ op: 'token-disable', allowEmpty: false });
+  });
+});

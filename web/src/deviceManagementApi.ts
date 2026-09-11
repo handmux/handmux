@@ -1,8 +1,9 @@
+import { authenticationHeaders } from './authSession.js';
 export interface ManagedDevice {
   id: string; name: string; browser_summary: string; authorized_at: number; expires_at: number | null;
   last_used_at: number; revoked_at: number | null; status: 'active' | 'expired' | 'revoked'; version: number;
 }
-export interface DeviceList { devices: ManagedDevice[]; currentDeviceId: string; serverTime: number }
+export interface DeviceList { devices: ManagedDevice[]; currentDeviceId: string | null; tokenEnabled?: boolean; serverTime: number }
 export interface DeviceApproval {
   id: string; state: 'configuring' | 'authorized' | 'expired' | 'canceled'; browserSummary: string;
   expiresAt: number; source: 'web'; device?: ManagedDevice;
@@ -15,7 +16,7 @@ async function request<T>(path: string, method = 'GET', body?: object): Promise<
   try {
     const response = await fetch(`/api/auth${path}`, {
       method, credentials: 'same-origin', cache: 'no-store', signal: controller.signal,
-      headers: { 'X-Handmux-Request': '1', ...(body ? { 'Content-Type': 'application/json' } : {}) },
+      headers: { ...authenticationHeaders(), ...(body ? { 'Content-Type': 'application/json' } : {}) },
       ...(body ? { body: JSON.stringify(body) } : {}),
     });
     const value = await response.json();
@@ -32,4 +33,6 @@ export const deviceManagementApi = {
   approval: (id: string) => request<{ approval: DeviceApproval; serverTime: number }>(`/approvals/${encodeURIComponent(id)}`),
   cancel: (id: string) => request<{ approval: DeviceApproval; serverTime: number }>(`/approvals/${encodeURIComponent(id)}`, 'DELETE'),
   authorize: (id: string, values: { name: string; expire: string }) => request<{ device: ManagedDevice; serverTime: number }>(`/approvals/${encodeURIComponent(id)}/authorize`, 'POST', values),
+  addSelf: (name: string, expire: string) => request<{ device: ManagedDevice; serverTime: number }>('/devices/self', 'POST', { name, expire }),
+  disableToken: () => request<{ mode: 'trusted-device'; tokenEnabled: false; authenticated: boolean; serverTime: number }>('/token/disable', 'POST'),
 };

@@ -169,17 +169,17 @@ describe('device pairing with CLI and trusted-device methods', () => {
 });
 
 describe('mode bootstrap', () => {
-  it('does not mount business UI or send an existing shared token before resolving the mode', async () => {
+  it('does not mount business UI before checking the saved fixed Token with the auth authority', async () => {
     localStorage.setItem('tw_token', 'old-token');
     let resolve!: (value: unknown) => void;
     fetcher.mockReturnValue(new Promise((done) => { resolve = done; }));
     render(<AuthBootstrap><div>Business UI</div></AuthBootstrap>);
     await flush();
     expect(screen.queryByText('Business UI')).toBeNull();
-    expect(fetcher.mock.calls[0]?.[1].headers.Authorization).toBeUndefined();
+    expect(fetcher.mock.calls[0]?.[1].headers.Authorization).toBe('Bearer old-token');
     resolve({ ok: true, status: 200, json: async () => server }); await flush();
     expect(screen.getByText('Business UI')).toBeTruthy();
-    expect(localStorage.getItem('tw_token')).toBeNull();
+    expect(localStorage.getItem('tw_token')).toBe('old-token');
   });
 
   it('stays closed on network failure, with a retry instead of falling back to token login', async () => {

@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { bearerFrom } from '../auth.js';
 import type { Request, Response } from 'express';
 import { DeviceAuthError, DeviceAuthService, readSessionSecret, readPairingCookies, sessionCookieName, pairingCookieName } from './service.js';
 import type { DevicePrincipal } from './service.js';
@@ -26,9 +27,6 @@ export function createDeviceAuthRouter({ service, resolveOrigin }: {
   const authenticatedBuckets = new Map<string, Bucket>();
   router.use((req, res, next) => {
     res.set('Cache-Control', 'no-store'); res.set('Pragma', 'no-cache');
-    if (service.mode === 'token' && req.method === 'GET' && req.path === '/status') {
-      res.json({ mode: 'token', authenticated: false, serverTime: Date.now() }); return;
-    }
     const origin = resolveOrigin(req);
     if (!origin || req.get('X-Handmux-Request') !== '1' || (req.get('Origin') && req.get('Origin') !== origin)
       || (!['GET', 'HEAD'].includes(req.method) && req.get('Origin') !== origin)) {
@@ -67,17 +65,19 @@ export function createDeviceAuthRouter({ service, resolveOrigin }: {
     const rank = (state?: string): number => state === 'authorized' ? 0 : state === 'configuring' ? 1 : state === 'waiting' ? 2 : 3;
     return candidates(req, origin).sort((a, b) => (a.principal ? 0 : rank(a.pairing?.state)) - (b.principal ? 0 : rank(b.pairing?.state)) || a.name.localeCompare(b.name))[0];
   };
+  const tokenPrincipal = (req: Request, origin: string) => service.authenticateToken(bearerFrom(req.get('authorization')) ?? req.get('X-Handmux-Token'), origin);
   const status = (req: Request, res: Response): void => {
     const origin = String(res.locals.authOrigin);
     let secret = readSessionSecret(req, origin);
     let principal = service.authenticateRequest(req, origin);
+    const formalPrincipal = principal;
     const candidate = selectCandidate(req, origin);
     // A late anonymous POST may overwrite only the candidate cookie, never a live session.
     // Existing primary sessions always win over another tab's pending/authorized candidate.
     if (!principal && candidate) { principal = service.authenticateSecret(candidate.secret, origin); if (principal) secret = candidate.secret; }
     if (principal && secret) setSessionCookie(res, origin, secret, principal.expiresAt);
     const pairing = candidate?.pairing;
-    res.json({ mode: service.mode, authenticated: !!principal, ...(pairing ? { pairing } : {}), serverTime: Date.now() });
+    res.json({ mode: service.mode, tokenEnabled: service.tokenEnabled, authenticated: !!principal || !!tokenPrincipal(req, origin), currentDeviceId: formalPrincipal?.deviceId ?? null, ...(pairing ? { pairing } : {}), serverTime: Date.now() });
   };
   const safe = (handler: (req: Request, res: Response) => void) => (req: Request, res: Response): void => {
     try { handler(req, res); } catch (error) {
@@ -96,14 +96,14 @@ export function createDeviceAuthRouter({ service, resolveOrigin }: {
     if (candidate && service.authenticateSecret(candidate.secret, origin)) { status(req, res); return; }
     const result = service.createPairing(candidate?.secret ?? null, origin, browserSummary(req.get('user-agent') ?? ''));
     if (result.secret) setPairingCookie(res, origin, `${pairingCookieName(origin)}_${result.pairing.id.slice(5)}`, result.secret);
-    res.json({ mode: service.mode, authenticated: false, pairing: result.pairing, serverTime: Date.now() });
+    res.json({ mode: service.mode, tokenEnabled: service.tokenEnabled, currentDeviceId: null, authenticated: false, pairing: result.pairing, serverTime: Date.now() });
   }));
   router.delete('/pairing', safe((req, res) => {
     const origin = String(res.locals.authOrigin);
     const id = typeof req.body?.id === 'string' ? req.body.id : '';
     const candidate = candidates(req, origin).find(c => c.pairing?.id === id);
     const pairing = service.cancelPairing(candidate?.secret ?? null, origin, id);
-    res.json({ mode: service.mode, authenticated: !!service.authenticateRequest(req, origin), pairing, serverTime: Date.now() });
+    res.json({ mode: service.mode, tokenEnabled: service.tokenEnabled, currentDeviceId: service.authenticateRequest(req, origin)?.deviceId ?? null, authenticated: !!service.authenticateRequest(req, origin), pairing, serverTime: Date.now() });
   }));
   const logout = (req: Request, res: Response): void => {
     const origin = String(res.locals.authOrigin); const principal = service.authenticateRequest(req, origin);
@@ -114,7 +114,7 @@ export function createDeviceAuthRouter({ service, resolveOrigin }: {
       else if (c.pairing) service.cancelPairing(c.secret, origin, c.pairing.id);
       setPairingCookie(res, origin, c.name, '');
     }
-    setSessionCookie(res, origin, '', 0); res.json({ ok: true, mode: service.mode, authenticated: false, serverTime: Date.now() });
+    setSessionCookie(res, origin, '', 0); res.json({ ok: true, mode: service.mode, tokenEnabled: service.tokenEnabled, currentDeviceId: null, authenticated: false, serverTime: Date.now() });
   };
   router.post('/logout', safe(logout));
   // Management never promotes a candidate credential. A formal primary session is required at the
@@ -128,9 +128,29 @@ export function createDeviceAuthRouter({ service, resolveOrigin }: {
     if (!editingSelf && secret) setSessionCookie(res, actor.origin, secret, actor.expiresAt);
     handler(req, res, actor);
   });
-  router.get('/devices', manage((_req, res, actor) => {
-    const devices = service.list().sort((a, b) => Number(b.id === actor.deviceId) - Number(a.id === actor.deviceId) || b.last_used_at - a.last_used_at || a.id.localeCompare(b.id));
-    res.json({ devices, currentDeviceId: actor.deviceId, serverTime: Date.now() });
+  router.get('/devices', safe((req, res) => {
+    const origin = String(res.locals.authOrigin);
+    const actor = service.authenticateRequest(req, origin);
+    if (!actor && !tokenPrincipal(req, origin)) throw new DeviceAuthError('SESSION_INVALID', 'Sign in to view trusted devices', 401);
+    const secret = readSessionSecret(req, origin);
+    if (actor && secret) setSessionCookie(res, origin, secret, actor.expiresAt);
+    const devices = service.list().sort((a, b) => Number(b.id === actor?.deviceId) - Number(a.id === actor?.deviceId) || b.last_used_at - a.last_used_at || a.id.localeCompare(b.id));
+    res.json({ devices, tokenEnabled: service.tokenEnabled, currentDeviceId: actor?.deviceId ?? null, serverTime: Date.now() });
+  }));
+  router.post('/devices/self', safe((req, res) => {
+    const origin = String(res.locals.authOrigin);
+    const actor = service.authenticateRequest(req, origin);
+    if (actor) { res.json({ device: service.list().find(d => d.id === actor.deviceId), serverTime: Date.now() }); return; }
+    if (!tokenPrincipal(req, origin)) throw new DeviceAuthError('SESSION_INVALID', 'Sign in with fixed Token login before adding this browser', 401);
+    const candidate = selectCandidate(req, origin);
+    if (!candidate) throw new DeviceAuthError('PAIRING_NOT_FOUND', 'Prepare this browser for registration and retry', 409);
+    const device = service.registerSelf(candidate.secret, origin, { name: req.body?.name, expire: req.body?.expire });
+    setSessionCookie(res, origin, candidate.secret, device.expires_at);
+    res.json({ device, serverTime: Date.now() });
+  }));
+  router.post('/token/disable', manage((_req, res, actor) => {
+    service.setTokenEnabled(false, { actor });
+    res.json({ tokenEnabled: false, serverTime: Date.now() });
   }));
   router.patch('/devices/:id', manage((req, res, actor) => {
     const device = service.edit(String(req.params.id), { name: req.body?.name, expire: req.body?.expire, version: req.body?.version }, actor);
