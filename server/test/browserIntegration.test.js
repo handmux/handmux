@@ -2,8 +2,13 @@ import http from 'node:http';
 import express from 'express';
 import { describe, expect, it } from 'vitest';
 import hammerhead from 'testcafe-hammerhead';
-import { createBrowserPreviewManager } from '../src/browser/manager.js';
+import { createBrowserPreviewManager as createManager } from '../src/browser/manager.js';
 import { createBrowserPublicProxy } from '../src/browser/publicProxy.js';
+
+const createBrowserPreviewManager = (options) => createManager({
+  profilePersistence: { read: async () => null, write: async () => {}, remove: async () => {}, close: async () => {} },
+  ...options,
+});
 
 function listen(server) {
   return new Promise((resolve) => server.listen(0, '127.0.0.1', () => resolve(server.address().port)));

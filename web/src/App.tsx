@@ -77,6 +77,9 @@ import {
 } from './components/AgentConversationCapabilityControls.js';
 import PaneSurfaceHost from './components/PaneSurfaceHost.jsx';
 import TokenPrompt from './components/TokenPrompt.jsx';
+import DevicePairingPrompt from './components/DevicePairingPrompt.js';
+import DeviceLogoutDialog from './components/DeviceLogoutDialog.js';
+import { hasDeviceSession, isDeviceAuth, logoutDevice } from './authSession.js';
 import Settings from './components/Settings.jsx';
 import WorkspaceRestoreDialog from './components/WorkspaceRestoreDialog.jsx';
 import UsagePage from './components/UsagePage.jsx';
@@ -281,7 +284,10 @@ export default function App() {
   const [snapshotInterval, setSnapshotIntervalState] = useState(getSnapshotInterval);
   const terminalStream = typeof window !== 'undefined'
     && terminalStreamEnabled(window.location, terminalTransport);
-  const [needToken, setNeedToken] = useState(!getToken());
+  const [needToken, setNeedToken] = useState(isDeviceAuth() ? !hasDeviceSession() : !getToken());
+  const [logoutConfirm, setLogoutConfirm] = useState(false);
+  const [logoutBusy, setLogoutBusy] = useState(false);
+  const [logoutError, setLogoutError] = useState('');
   const serverConfig = useServerConfig({ enabled: !needToken });
   const serverShortcuts = serverConfig?.shortcuts || DEFAULT_SERVER_SHORTCUTS;
   const micAvailable = useAsrAvailable(serverConfig);
@@ -626,8 +632,16 @@ export default function App() {
     getServerVersion().then(setUpdateInfo).catch(() => { /* best-effort; no hint on failure */ });
   }, [needToken]);
 
-  // Drop the saved token and bounce back to the token prompt — handy for testing the login flow.
-  const logout = useCallback(() => {
+  // Device logout is an actual server revocation; a network failure must not look like unbinding.
+  const logout = useCallback(async () => {
+    if (isDeviceAuth()) {
+      setLogoutBusy(true);
+      setLogoutError('');
+      try { await logoutDevice(); }
+      catch { setLogoutError(t('auth.logoutError')); setLogoutBusy(false); return; }
+      setLogoutBusy(false);
+      setLogoutConfirm(false);
+    }
     clearToken();
     clearRecoveryOperation();
     setSettingsOpen(false);
@@ -2385,6 +2399,7 @@ export default function App() {
   });
 
   if (needToken) {
+    if (isDeviceAuth()) return <DevicePairingPrompt onSaved={() => { setNeedToken(false); setBooting(true); }} />;
     return <TokenPrompt onSaved={() => { setNeedToken(false); setBooting(true); }} />;
   }
 
@@ -2506,6 +2521,7 @@ export default function App() {
       <Settings
         open={settingsOpen}
         onClose={() => setSettingsOpen(false)}
+        onDeviceLoggedOut={() => { setSettingsOpen(false); onAuthFail(); }}
         workspaceProtection={workspaceProtection}
         chatTone={chatTone}
         onChatTone={pickChatTone}
@@ -2555,7 +2571,7 @@ export default function App() {
         onUnbind={unbindSession}
         onBind={() => setBindOpen(true)}
         onClose={() => setDrawerOpen(false)}
-        onLogout={logout}
+        onLogout={() => { if (isDeviceAuth()) setLogoutConfirm(true); else void logout(); }}
         orphans={orphans}
         onTakeoverRequest={(orphan) => {
           if (orphan.sessionId) setTakeoverTarget({ ...orphan, sessionId: orphan.sessionId });
@@ -2566,6 +2582,9 @@ export default function App() {
         projectTaskBeta={projectTaskBeta}
         onSwitchProject={() => chooseRootView('project')}
       />}
+      {logoutConfirm && <DeviceLogoutDialog busy={logoutBusy} error={logoutError}
+        onClose={() => { setLogoutConfirm(false); setLogoutError(''); }}
+        onConfirm={() => { void logout(); }} />}
       <WorkspaceRestoreDialog
         open={recoveryDialogOpen}
         plan={recoveryPlan}

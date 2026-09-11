@@ -29,6 +29,18 @@ afterEach(async () => { await fs.rm(home, { recursive: true, force: true }); });
 const post = () => auth(request(app).post('/api/upload'));
 
 describe('POST /api/upload', () => {
+  it('rechecks device authority before committing a completed upload and cleans its temporary file', async () => {
+    const guarded = express();
+    let checks = 0;
+    guarded.use((_req, res, next) => {
+      res.locals.assertDeviceActive = () => { if (++checks > 1) throw new Error('device revoked'); };
+      next();
+    });
+    guarded.use('/api', createApiRouter({ token: 'good', commands: {}, docs: createDocs({ home }), uploadExts: new Set(['txt']) }));
+    await auth(request(guarded).post('/api/upload')).field('dir', join(home, 'sub')).attach('file', Buffer.from('hi'), 'revoked.txt').expect(500);
+    expect(checks).toBe(2);
+    expect(await fs.readdir(join(home, 'sub'))).toEqual(['exists.txt']);
+  });
   it('requires auth', async () => {
     await request(app).post('/api/upload').field('dir', join(home, 'sub')).attach('file', Buffer.from('hi'), 'a.txt').expect(401);
   });

@@ -1,7 +1,6 @@
 import { requestJson } from './apiRequest.js';
 import { parseSseFrames } from './sse.js';
-import { getToken } from './storage.js';
-import { UnauthorizedError } from './apiErrors.js';
+import { authenticationHeaders, authenticationError } from './authSession.js';
 import type { AgentRunRef } from './agentCatalog.js';
 import type {
   AgentInteractionEvent,
@@ -173,9 +172,10 @@ export async function streamAgentInteractions(
   });
   const response = await fetch(`/api/agents/interaction/live?${query}`, {
     cache: 'no-store', signal: options.signal,
-    headers: { Authorization: `Bearer ${getToken() ?? ''}`, Accept: 'text/event-stream' },
+    headers: authenticationHeaders({ Accept: 'text/event-stream' }),
+    credentials: 'same-origin',
   });
-  if (response.status === 401) throw new UnauthorizedError();
+  if (response.status === 401) throw await authenticationError();
   if (!response.ok || !response.body) throw new Error('Agent Interaction stream unavailable');
   const reader = response.body.getReader();
   const decoder = new TextDecoder();

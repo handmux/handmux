@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { openTerminalStream } from '../src/terminalStreamClient.js';
 import type { TerminalStreamStatus } from '../src/terminalStreamClient.js';
 import { terminalStreamEnabled } from '../src/terminalTransport.js';
+import { applyAuthStatus } from '../src/authSession.js';
 
 interface SentMessage {
   type: string;
@@ -108,6 +109,25 @@ describe('openTerminalStream', () => {
   beforeEach(() => {
     FakeWebSocket.instances = [];
     window.history.replaceState({}, '', '/');
+  });
+
+  it('uses the browser cookie with no subscribe token in device mode, including reconnect', async () => {
+    applyAuthStatus({ mode: 'trusted-device', authenticated: true, serverTime: Date.now() });
+    const stream = openTerminalStream({ pane: '%7', token: 'must-not-send', WebSocketCtor: FakeWebSocket });
+    try {
+      const ws = latestSocket();
+      ws.open();
+      expect(ws.sent[0]).toEqual({ type: 'subscribe', pane: '%7' });
+      expect(ws.url).toMatch(/\/api\/terminal-stream$/);
+      expect(ws.url).not.toContain('must-not-send');
+      await stream.suspend();
+      stream.resync();
+      latestSocket().open();
+      expect(latestSocket().sent[0]).toEqual({ type: 'subscribe', pane: '%7' });
+    } finally {
+      await stream.close();
+      applyAuthStatus({ mode: 'token', authenticated: false, serverTime: Date.now() });
+    }
   });
 
   it('subscribes, serializes seed/output/ready, and resyncs on the same socket', async () => {
@@ -267,6 +287,39 @@ describe('openTerminalStream', () => {
     expect(FakeWebSocket.instances).toHaveLength(1);
     stream.close();
     vi.useRealTimers();
+  });
+
+  it.each([false, true])('confirms device invalidation after 4001 (storage unavailable: %s)', async (storageUnavailable) => {
+    vi.useFakeTimers();
+    applyAuthStatus({ mode: 'trusted-device', authenticated: true, serverTime: Date.now() });
+    const onAuthFail = vi.fn();
+    const fetcher = vi.fn(async () => ({
+      ok: !storageUnavailable, status: storageUnavailable ? 503 : 200,
+      json: async () => storageUnavailable ? { code: 'AUTH_STORAGE_UNAVAILABLE' }
+        : { mode: 'trusted-device', authenticated: false, serverTime: Date.now() },
+    }));
+    vi.stubGlobal('fetch', fetcher);
+    const stream = openTerminalStream({ pane: '%7', WebSocketCtor: FakeWebSocket, onAuthFail, reconnectMs: 10 });
+    try {
+      latestSocket().open();
+      latestSocket().close(4001, 'unauthorized');
+      expect(onAuthFail).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(fetcher).toHaveBeenCalledWith('/api/auth/status', expect.anything());
+      await vi.advanceTimersByTimeAsync(10);
+      if (storageUnavailable) {
+        expect(onAuthFail).not.toHaveBeenCalled();
+        expect(FakeWebSocket.instances).toHaveLength(2);
+      } else {
+        expect(onAuthFail).toHaveBeenCalledOnce();
+        expect(FakeWebSocket.instances).toHaveLength(1);
+      }
+    } finally {
+      await stream.close();
+      applyAuthStatus({ mode: 'token', authenticated: false, serverTime: Date.now() });
+      vi.unstubAllGlobals();
+      vi.useRealTimers();
+    }
   });
 
   it('isolates pause and reconnect between four tabs sharing a token with different panes', async () => {

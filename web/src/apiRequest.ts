@@ -1,5 +1,5 @@
-import { getToken } from './storage.js';
-import { ApiError, UnauthorizedError, parseApiErrorBody } from './apiErrors.js';
+import { authenticationHeaders, authenticationError } from './authSession.js';
+import { ApiError, parseApiErrorBody } from './apiErrors.js';
 export type { AsrSessionResponse } from './voice/providerRegistry.js';
 
 export interface JsonRequestOptions extends Omit<RequestInit, 'headers'> {
@@ -32,12 +32,8 @@ export async function requestJson<T = unknown>(
   path: string,
   opts: JsonRequestOptions = {},
 ): Promise<T | UnchangedResponse> {
-  const token = getToken();
   const { timeoutMs, signal: externalSignal, ...rest } = opts;
-  const headers: Record<string, string> = {
-    Authorization: `Bearer ${token ?? ''}`,
-    ...(rest.headers || {}),
-  };
+  const headers = authenticationHeaders(rest.headers);
   if (rest.body && !Object.keys(headers).some((key) => key.toLowerCase() === 'content-type')) {
     headers['Content-Type'] = 'application/json';
   }
@@ -52,10 +48,10 @@ export async function requestJson<T = unknown>(
   }
   try {
     const response = await fetch(path, {
-      cache: 'no-store', ...rest, headers,
+      cache: 'no-store', credentials: 'same-origin', ...rest, headers,
       ...(controller ? { signal: controller.signal } : {}),
     });
-    if (response.status === 401) throw new UnauthorizedError();
+    if (response.status === 401) throw await authenticationError();
     if (!response.ok) {
       let errorBody = null;
       try { errorBody = parseApiErrorBody(await response.json()); } catch { /* not json */ }

@@ -23,7 +23,8 @@ export function previewRoutes({ previews }: PreviewRouteOptions): Router {
     const dir = isRecord(body) ? body.dir : undefined;
     if (typeof name !== 'string' || !name || typeof dir !== 'string' || !dir) return res.status(400).json({ error: 'bad request' });
     try {
-      const out = await previews.register({ name, dir });
+      const deviceId = res.locals.deviceAuth?.deviceId;
+      const out = await (deviceId ? previews.register({ name, dir }, deviceId) : previews.register({ name, dir }));
       if ('error' in out) return res.status(out.status).json({ error: out.error });
       const url = `/preview/${encodeURIComponent(out.name)}/${encodeURIComponent(out.accessToken)}/`;
       return res.json({ name: out.name, kind: out.kind, url, expiresAt: out.expiresAt });
@@ -32,14 +33,17 @@ export function previewRoutes({ previews }: PreviewRouteOptions): Router {
 
   r.get('/previews', (_req: Request, res: Response) => {
     if (!previews) return res.status(503).json({ error: 'previews disabled' });
-    return res.json({ previews: previews.list() });
+    const deviceId = res.locals.deviceAuth?.deviceId;
+    return res.json({ previews: deviceId ? previews.list(deviceId) : previews.list() });
   });
 
   r.delete('/previews/:name', (req: Request, res: Response) => {
     if (!previews) return res.status(503).json({ error: 'previews disabled' });
     const name = req.params.name;
     if (!name || !safePreviewName(name)) return res.status(400).json({ error: 'bad name' });
-    previews.remove(name);
+    const deviceId = res.locals.deviceAuth?.deviceId;
+    if (deviceId) previews.remove(name, deviceId);
+    else previews.remove(name);
     return res.status(204).end();
   });
 

@@ -81,7 +81,7 @@ export function rewritePreviewText(source: string, extension: string, prefix: st
 }
 
 interface CreatePreviewOptions {
-  previews: Pick<PreviewRegistry, 'get'>;
+  previews: Pick<PreviewRegistry, 'get' | 'onRevoke'>;
 }
 
 interface PreviewServer {
@@ -104,9 +104,22 @@ const errorCode = (error: unknown): string | null => {
 
 export function createPreview({ previews }: CreatePreviewOptions): PreviewServer {
   const router = express.Router();
+  const deviceResponses = new Map<string, Set<Response>>();
+  previews.onRevoke?.((deviceId) => {
+    for (const response of deviceResponses.get(deviceId) || []) response.destroy();
+    deviceResponses.delete(deviceId);
+  });
+  function track(entry: ActivePreviewEntry, res: Response): void {
+    if (!entry.deviceId) return;
+    const id = entry.deviceId;
+    let responses = deviceResponses.get(id);
+    if (!responses) deviceResponses.set(id, responses = new Set());
+    responses.add(res);
+    res.once('close', () => { responses!.delete(res); if (!responses!.size) deviceResponses.delete(id); });
+  }
 
   function resolveEntry(name: string, accessToken: string, res: Response): ActivePreviewEntry | null {
-    const lookup = previews.get(name);
+    const lookup = previews.get(name, accessToken);
     if (lookup.state === 'missing') {
       res.status(404).type('html').send('<!doctype html><meta charset="utf-8"><h1>预览不存在</h1>');
       return null;
@@ -123,6 +136,7 @@ export function createPreview({ previews }: CreatePreviewOptions): PreviewServer
   }
 
   async function serve(entry: ActivePreviewEntry, rest: string, prefix: string, res: Response): Promise<void> {
+    track(entry, res);
     previewHeaders(res);
     const requested = fileFor(rest);
     const segments = requested.split('/');
@@ -141,6 +155,9 @@ export function createPreview({ previews }: CreatePreviewOptions): PreviewServer
     if (['.html', '.htm', '.css', '.js', '.mjs'].includes(extension)) {
       try {
         const source = await fs.readFile(target, 'utf8');
+        if (res.destroyed) return;
+        // File reads yield: a device may have been revoked while the file was being loaded.
+        if (!resolveEntry(entry.name, entry.accessToken || '', res)) return;
         res.type(extension).send(rewritePreviewText(source, extension, prefix));
       } catch (error) {
         if (!res.headersSent) res.status(errorCode(error) === 'ENOENT' ? 404 : 500).end();
@@ -198,9 +215,10 @@ export function createPreview({ previews }: CreatePreviewOptions): PreviewServer
       name = decodeURIComponent(encodedName);
       accessToken = decodeURIComponent(encodedToken);
     } catch { return next(); }
-    const lookup = previews.get(name);
+    const lookup = previews.get(name, accessToken);
     if (lookup.state !== 'active') return next();
     if (!credentialOk(accessToken, lookup.entry.accessToken)) return next();
+    track(lookup.entry, res);
     previewHeaders(res);
     res.sendFile(req.path, { root: lookup.entry.dir, dotfiles: 'deny' }, (err) => {
       if (err && !res.headersSent) next();

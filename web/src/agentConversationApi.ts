@@ -1,7 +1,7 @@
-import { ApiError, UnauthorizedError, parseApiErrorBody } from './apiErrors.js';
+import { ApiError, parseApiErrorBody } from './apiErrors.js';
 import { requestJson } from './apiRequest.js';
 import { parseSseFrames } from './sse.js';
-import { getToken } from './storage.js';
+import { authenticationHeaders, authenticationError } from './authSession.js';
 import type { AgentRunRef } from './agentCatalog.js';
 import type {
   ConversationCapabilities,
@@ -491,10 +491,11 @@ export async function streamAgentConversation(
   try {
     const response = await withStreamDeadline(fetch(path, {
       cache: 'no-store', signal: requestController.signal,
-      headers: { Authorization: `Bearer ${getToken() ?? ''}`, Accept: 'text/event-stream' },
+      headers: authenticationHeaders({ Accept: 'text/event-stream' }),
+      credentials: 'same-origin',
     }), Math.max(0, readyDeadline - Date.now()), requestController.signal,
     'Agent Conversation live stream did not become ready', abortRequest);
-    if (response.status === 401) throw new UnauthorizedError();
+    if (response.status === 401) throw await authenticationError();
     if (!response.ok) {
       let body = null;
       try {
@@ -646,9 +647,10 @@ export async function downloadAgentConversationResource(
   const path = `/api/agents/conversation/resource?${query}`;
   const response = await fetch(path, {
     cache: 'no-store',
-    headers: { Authorization: `Bearer ${getToken() ?? ''}`, Accept: 'application/octet-stream' },
+    headers: authenticationHeaders({ Accept: 'application/octet-stream' }),
+    credentials: 'same-origin',
   });
-  if (response.status === 401) throw new UnauthorizedError();
+  if (response.status === 401) throw await authenticationError();
   if (!response.ok) {
     let body = null;
     try { body = parseApiErrorBody(await response.json()); } catch { /* not json */ }

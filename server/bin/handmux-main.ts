@@ -2,8 +2,8 @@
 // handmux CLI implementation — compiled before development, tests, packing and publishing.
 //
 // The whole config story is two doors:
-//   handmux start   — just run it. No config needed: defaults to `none` (LAN-only), auto-generates a
-//                     token, prints the (token-free) URL + a QR of it, and the token on its own line. Flags
+//   handmux start   — just run it. New users default to `none` (LAN-only) and trusted-device auth;
+//                     legacy users retain token auth and their credential. Prints the URL and QR. Flags
 //                     let you try variations for one run (e.g. --tunnel cloudflare).
 //   handmux setup   — the one place to configure persistently. Interactive; writes ~/.handmux/config.json
 //                     (name, tunnel, push, voice). Re-run it to change anything.
@@ -22,6 +22,9 @@ import { fileURLToPath } from 'node:url';
 import { homedir } from 'node:os';
 import { createRequire } from 'node:module';
 import { parseArgs, resolveConfig, explainConfig } from '../src/cli/options.js';
+import { authOverrideNeedsConfirmation, installationAuthDefaults, tokenWarning } from '../src/cli/authDefaults.js';
+import type { AuthDefaults } from '../src/cli/authDefaults.js';
+import { ask, confirm as authConfirm, CANCELLED } from '../src/cli/prompt.js';
 import type { OptionRecord, ResolvedConfig } from '../src/cli/options.js';
 import { renderCompactQr } from '../src/cli/qr.js';
 import { supervise, bareUrl, publicUrlWithToken } from '../src/cli/supervisor.js';
@@ -32,7 +35,7 @@ import { resolveNatapp, resolveCpolar } from '../src/cli/tunnelClients.js';
 import { installService, uninstallService, isServiceInstalled, stopService } from '../src/cli/service.js';
 import { checkTmux, MIN_TMUX, tmuxInstallHint } from '../src/cli/tmuxVersion.js';
 import {
-  readState, clearState, isAlive, acquireLifecycleLock, logPath, configPath,
+  readState, clearState, writeSupervisorConfig, isAlive, acquireLifecycleLock, logPath, configPath,
   claudeStatePath,
 } from '../src/cli/state.js';
 import type { StoredState } from '../src/cli/state.js';
@@ -51,6 +54,7 @@ import { probe } from '../src/cli/probe.js';
 import { notifyUpdate, runUpdateCheck, isBrewInstall, PKG_NAME } from '../src/cli/updateCheck.js';
 import { t, initLocale, setLocale } from '../src/cli/i18n/index.js';
 import { runPush } from '../src/cli/pushCmd.js';
+import { runAuthCommand } from '../src/cli/authCmd.js';
 import { runWorkspaceCommand } from '../src/cli/workspaceCmd.js';
 import { runManagedCodexProcess } from '../src/cli/codexManaged.js';
 import {
@@ -170,16 +174,16 @@ function describeConfig(p: string | null): string {
 }
 
 // Which user-visible settings THIS run would use differ from what's already running (from state.json)?
-// Kept to the two people actually re-run `start` to change — the tunnel and the port; each row is ready to
+// Compare connection and authentication settings people re-run `start` to change; each row is ready to
 // drop straight into the `start.running.changedRow` message ({key, from, to}). Only compares fields the
 // running state actually recorded, so an older state.json can't manufacture phantom diffs.
 function configChanges(
   cfg: ResolvedConfig,
   st: StoredState,
-): Array<{ key: 'tunnel' | 'port'; from: unknown; to: string | number }> {
-  const out: Array<{ key: 'tunnel' | 'port'; from: unknown; to: string | number }> = [];
-  for (const key of ['tunnel', 'port'] as const) {
-    const running = st[key];
+): Array<{ key: 'tunnel' | 'port' | 'authMode'; from: unknown; to: string | number }> {
+  const out: Array<{ key: 'tunnel' | 'port' | 'authMode'; from: unknown; to: string | number }> = [];
+  for (const key of ['tunnel', 'port', 'authMode'] as const) {
+    const running = key === 'authMode' ? st.authMode ?? 'token' : st[key];
     if (running != null && String(cfg[key]) !== String(running)) out.push({ key, from: running, to: cfg[key] });
   }
   return out;
@@ -224,26 +228,58 @@ async function preflightNgrok(cfg: RuntimeConfig): Promise<void> {
 
 async function main(): Promise<unknown> {
   switch (command) {
-    case 'start': return withLifecycleLock(start);
+    case 'start': return withLifecycleLock(async () => { if (await approveAuthOverride()) return start(); });
     case 'open': return openCmd();
     case 'stop': return withLifecycleLock(stopAndWait);
-    case 'restart': return withLifecycleLock(async () => { if (!await stopAndWait()) return; return start(); });
+    case 'restart': return withLifecycleLock(async () => {
+      if (!await approveAuthOverride()) return;
+      const { path: cfgPath } = resolveFileConfig();
+      const authDefaults = installationAuthDefaults(HOME, cfgPath ?? configPath(HOME), flags);
+      if (!await stopAndWait()) return;
+      return start(authDefaults);
+    });
     case 'status': await status(); process.exit(process.exitCode || 0);
     case 'logs': return logs();
     case 'push': process.exitCode = await pushCmd(); return;
+    case 'auth': process.exitCode = await runAuthCommand({ argv: process.argv.slice(3), home: HOME }); return;
     case 'restore': process.exitCode = await runWorkspaceCommand({ flags, positionals, unknownShortFlags, home: HOME }); return;
     case 'config': return configCmd();
     case 'setup': return setupCmd();
     case 'shortcuts': return shortcutsCmd();
     case 'hooks': return hooksCmd();
     case 'agent': return agentCmd();
-    case 'service': return withLifecycleLock(serviceCmd);
+    case 'service': return withLifecycleLock(async () => {
+      if (process.argv[3] === 'install' && !await approveAuthOverride()) return;
+      return serviceCmd();
+    });
     case 'update': case 'upgrade': return updateCmd();
     case '__supervise': return runSupervise();
     case '__update-check': return runUpdateCheck(HOME);
     case 'version': case '--version': case '-v': return version();
     default: return help();
   }
+}
+
+async function approveAuthOverride(): Promise<boolean> {
+  const { path: cfgPath, cfg: fileCfg } = resolveFileConfig();
+  const defaults = installationAuthDefaults(HOME, cfgPath ?? configPath(HOME), flags);
+  // Validate BEFORE stop too: invalid overrides must never tear down a working instance.
+  try { resolveConfig(flags, fileCfg, process.env, undefined, defaults); }
+  catch (error) { console.error(t('err.generic', { msg: errorMessage(error) })); process.exitCode = 2; return false; }
+  const state = readState(HOME);
+  const runningMode = state && isAlive(state.supervisorPid) ? String(state.authMode ?? 'token') : undefined;
+  if (!authOverrideNeedsConfirmation({ flags, fileCfg, env: process.env, defaults, runningMode })) return true;
+  console.warn(tokenWarning(t('auth.switchWarning')));
+  if (!process.stdin.isTTY) {
+    console.error(t('auth.switchNeedTty'));
+    process.exitCode = 2;
+    return false;
+  }
+  try {
+    if (await ask(authConfirm({ message: t('auth.switchApplyConfirm'), initialValue: false }))) return true;
+  } catch (error) { if (error !== CANCELLED) throw error; }
+  process.exitCode = 2;
+  return false;
 }
 
 async function withLifecycleLock(fn: () => unknown | Promise<unknown>): Promise<unknown> {
@@ -295,11 +331,11 @@ function maybeNotifyUpdate(): void {
   notifyUpdate(HOME, { version: currentVersion(), selfPath: SELF_REAL });
 }
 
-async function start(): Promise<void> {
+async function start(authDefaults?: AuthDefaults): Promise<void> {
   const { path: cfgPath, cfg: fileCfg } = resolveFileConfig();
   console.log(t('config.loaded', { path: describeConfig(cfgPath) }));
   let cfg: RuntimeConfig;
-  try { cfg = resolveConfig(flags, fileCfg); }
+  try { cfg = resolveConfig(flags, fileCfg, process.env, undefined, authDefaults ?? installationAuthDefaults(HOME, cfgPath ?? configPath(HOME), flags)); }
   catch (error) { console.error(t('err.generic', { msg: errorMessage(error) })); process.exit(2); }
 
   // tmux is the whole point — absent is fatal; an untested-old version only warns (rendering may drift).
@@ -348,7 +384,7 @@ async function start(): Promise<void> {
     for (const c of changed) console.log(t('start.running.changedRow', c));
     if (process.stdin.isTTY && await confirm(t('start.running.switchQ'))) {
       if (!await stopAndWait()) return;
-      return start();
+      return start({ authMode: cfg.authMode, token: cfg.token });
     }
     console.log(t('start.running.hint'));
     await printAccess(existing);
@@ -384,6 +420,8 @@ async function start(): Promise<void> {
   }
 
   if (cfg.foreground) {
+    // Match background launches: preserve the mode and token even when stop removes state.json.
+    writeSupervisorConfig(cfg, HOME);
     supervise(cfg, { home: HOME });
     console.log(t('start.foreground', { tunnel: cfg.tunnel, port: cfg.port }));
     await waitAndPrint(false);
@@ -532,7 +570,7 @@ async function serviceInstall(): Promise<void> {
   const { path: cfgPath, cfg: fileCfg } = resolveFileConfig();
   console.log(t('config.loaded', { path: describeConfig(cfgPath) }));
   let cfg: RuntimeConfig;
-  try { cfg = resolveConfig(flags, fileCfg); }
+  try { cfg = resolveConfig(flags, fileCfg, process.env, undefined, installationAuthDefaults(HOME, cfgPath ?? configPath(HOME), flags)); }
   catch (error) { console.error(t('err.generic', { msg: errorMessage(error) })); process.exit(2); }
   if (cfg.tunnel === 'cloudflare' || cfg.tunnel === 'cloudflare-named') {
     try { cfg.cloudflaredBin = await resolveCloudflared(HOME); }
@@ -804,7 +842,7 @@ async function maybeOfferPiExtension(): Promise<void> {
 function configCmd(): void {
   const { path: cfgPath, cfg: fileCfg } = resolveFileConfig();
   let rows;
-  try { rows = explainConfig(flags, fileCfg, cfgPath); }
+  try { rows = explainConfig(flags, fileCfg, cfgPath, process.env, installationAuthDefaults(HOME, cfgPath ?? configPath(HOME), flags)); }
   catch (error) { console.error(t('err.generic', { msg: errorMessage(error) })); process.exit(2); }
   console.log(t('configcmd.file', { path: cfgPath || t('configcmd.fileNone') }));
   console.log('');
@@ -844,10 +882,11 @@ async function printAccess(st: StoredState | null): Promise<void> {
   console.log(t('access.open', { url: scan || t('access.pending') }));
   if (st.tunnel === 'none' && st.lanUrl) console.log(t('access.lan', { url: bareUrl(st.lanUrl) }));
   console.log(t('access.local', { url: bareUrl(localUrl) }));
-  console.log(t('access.token', { token }));
+  if (st.authMode === 'trusted-device') console.log(t('auth.access'));
+  else { console.log(t('access.token', { token })); console.log(tokenWarning(t('auth.warning'))); }
   // The QR carries the token so a phone scan signs in one-tap; the PRINTED links above stay token-free
   // (safe to screenshot/share — paste the token shown above to sign in there).
-  await maybeQr(publicUrl && token ? publicUrlWithToken(publicUrl, token) : scan, st);
+  await maybeQr(st.authMode === 'trusted-device' ? (scan || bareUrl(st.lanUrl ?? localUrl)) : publicUrl && token ? publicUrlWithToken(publicUrl, token) : scan, st);
   if (publicUrl && st.tunnel !== 'none') {
     const ok = await probe(publicUrl);
     if (ok) console.log(t('access.reachable'));
