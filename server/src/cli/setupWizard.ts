@@ -18,7 +18,6 @@ import { resolveNatapp, resolveCpolar } from './tunnelClients.js';
 import { t, setLocale } from './i18n/index.js';
 import { intro, outro, note, cancel, select, text, password, confirm, ask, CANCELLED } from './prompt.js';
 import { PrivateStateStore } from '../privateStateStore.js';
-import { installationAuthDefaults, tokenWarning } from './authDefaults.js';
 import type { Tunnel, VapidConfig, VoiceConfig, VoiceProviderConfig } from './options.js';
 import type { SetupAnswers, SetupConfig } from './setupModel.js';
 
@@ -61,11 +60,8 @@ export {
   validatePort, validateHost, validatePreviewDomain, validateNonEmpty, validateContact, validateToken,
 } from './setupModel.js';
 
-function readExisting(file: string): SetupConfig {
-  if (!fs.existsSync(file)) return {};
-  const value = new PrivateStateStore<unknown>(file).readStrict();
-  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('expected a JSON object');
-  return value as SetupConfig;
+function readExisting(file: string): unknown {
+  try { return new PrivateStateStore(file).readStrict() || {}; } catch { return {}; }
 }
 
 // The hub. Pre-fills from the existing config so a re-run edits/switches rather than starts over; a brand-
@@ -77,19 +73,9 @@ export async function runSetup({
   home = homedir(), target = configPath(home), log = console, running = false,
 }: Partial<RunSetupOptions> = {}): Promise<{ cfg: SetupConfig; start: boolean } | null> {
   if (!process.stdin.isTTY) { log.error(t('setup.needTty')); return null; }
-  let existing: SetupConfig;
-  try { existing = readExisting(target); }
-  catch (error) { log.error(t('err.badConfig', { path: target, msg: errorMessage(error) })); return null; }
-  const defaults = installationAuthDefaults(home, target);
-  const { isNew } = defaults;
-  const effectiveAuthMode = existing.authMode ?? process.env.HANDMUX_AUTH_MODE ?? defaults.authMode;
-  if (effectiveAuthMode !== 'token' && effectiveAuthMode !== 'trusted-device') {
-    log.error(t('err.generic', { msg: 'authMode must be token or trusted-device' }));
-    return null;
-  }
-  let a = answersFromConfig(existing, effectiveAuthMode);
-  if (existing.token == null) a.token = process.env.HANDMUX_TOKEN ?? defaults.token ?? '';
-  const originalAuthMode = isNew ? a.authMode : existing.authMode ?? defaults.authMode;
+  const existing = readExisting(target);
+  const isNew = !existing || Object.keys(existing).length === 0;
+  let a = answersFromConfig(existing);
   setLocale(a.lang);
 
   intro('handmux setup');
@@ -106,7 +92,6 @@ export async function runSetup({
         a.lang = await editLanguage(a);
         note(t('setup.welcome'));
         a = await editConnection(a, { home, log });
-        a.authMode = await editAuth(a);
       } catch (e) { if (e !== CANCELLED) throw e; }
     }
     for (;;) {
@@ -117,8 +102,7 @@ export async function runSetup({
           { value: 'connection', label: t('setup.secConnection'), hint: summarizeConnection(a) },
           { value: 'name', label: t('setup.secName'), hint: a.name || t('setup.default') },
           { value: 'port', label: t('setup.secPort'), hint: String(a.port) },
-          { value: 'auth', label: t('auth.section'), hint: t(a.authMode === 'trusted-device' ? 'auth.trusted' : 'auth.token') },
-          ...(a.authMode !== 'trusted-device' ? [{ value: 'token', label: t('setup.secToken'), hint: a.token ? maskSecret(a.token) : t('setup.tokenAuto') }] : []),
+          { value: 'token', label: t('setup.secToken'), hint: a.token ? maskSecret(a.token) : t('setup.tokenAuto') },
           { value: 'browser', label: t('setup.secBrowser'), hint: a.previewDomain || t('setup.browserOff') },
           { value: 'push', label: t('setup.secPush'), hint: a.vapid ? (a.vapid.subject || t('setup.on')) : t('setup.off') },
           {
@@ -138,13 +122,6 @@ export async function runSetup({
       }));
       if (choice === 'exit') { cancel(t('setup.exited')); return null; }
       if (choice === 'save' || choice === 'start') {
-        if (a.authMode !== originalAuthMode) {
-          note(tokenWarning(t('auth.switchWarning')), t('auth.section'));
-          if (!await ask(confirm({ message: t('auth.switchConfirm'), initialValue: false }))) {
-            cancel(t('setup.exited'));
-            return null;
-          }
-        }
         const cfg = mergeConfig(existing, a);
         new PrivateStateStore(target).write(cfg);
         outro(t('setup.wrote', { path: target }));
@@ -158,7 +135,6 @@ export async function runSetup({
         else if (choice === 'name') a.name = await editName(a);
         else if (choice === 'port') a.port = await editPort(a);
         else if (choice === 'token') a.token = await editToken(a);
-        else if (choice === 'auth') a.authMode = await editAuth(a);
         else if (choice === 'browser') a.previewDomain = await editBrowserDomain(a);
         else if (choice === 'language') a.lang = await editLanguage(a);
         else if (choice === 'push') {
@@ -181,14 +157,6 @@ export async function runSetup({
 // clack's footer only shows ↑/↓ + Enter, so append the Esc-backs-out hint to each section's entry prompt —
 // otherwise a user inside a section can't tell there's a way back to the hub.
 const withBack = (msg: string): string => `${msg}  ${t('setup.escBack')}`;
-
-async function editAuth(a: SetupAnswers): Promise<'token' | 'trusted-device'> {
-  note(t('auth.manageHint'));
-  return ask(select({ message: withBack(t('auth.section')), initialValue: a.authMode ?? 'trusted-device', options: [
-    { value: 'trusted-device' as const, label: t('auth.trusted') },
-    { value: 'token' as const, label: t('auth.token') },
-  ] }));
-}
 
 async function editLanguage(a: SetupAnswers): Promise<string> {
   const lang = await ask(select({
@@ -222,8 +190,8 @@ async function editBrowserDomain(a: SetupAnswers): Promise<string> {
   return String(value || '').trim().toLowerCase();
 }
 
-// The access token — the one secret in the phone's URL. Unset reuses an existing runtime token, or
-// generates one at first start (printed + QR'd). A mini-hub (like
+// The access token — the one secret in the phone's URL. Unset = the server mints a fresh one each start
+// (printed + QR'd), so the link changes every restart; pinning one keeps the same URL. A mini-hub (like
 // push/voice): type your own, generate + pin a strong random one, or reset back to auto. Editing custom
 // pre-fills the current value (so you can read it off); the hub hint masks it. Esc returns to the main hub,
 // keeping the choice. Returns the token string ('' = auto).

@@ -22,13 +22,12 @@ import { systemRoutes } from './routes/system.js';
 import { previewRoutes } from './routes/previews.js';
 import { notificationRoutes } from './routes/notifications.js';
 import { DEFAULT_SHORTCUTS } from './shortcutConfig.js';
-import type { ShortcutConfig } from './shortcutConfig.js';
 import { workspaceRoutes } from './routes/workspace.js';
 import { browserRoutes } from './browser/routes.js';
 import { apiErrorBoundary, apiNotFound, apiRequestContext } from './apiErrors.js';
 import { agentRoutes } from './routes/agents.js';
 import type { AgentRuntime } from './agent-runtime/runtime.js';
-import type { Router, RequestHandler } from 'express';
+import type { Router } from 'express';
 import type { ApiErrorOptions } from './apiErrors.js';
 import { projectTaskRoutes } from './projectTask/routes.js';
 import type { ProjectTaskRuntime } from './projectTask/runtime.js';
@@ -49,8 +48,6 @@ type AgentIdentityPanes = Parameters<NonNullable<
 
 export interface CreateApiRouterOptions {
   token: string;
-  authentication?: RequestHandler;
-  deviceAuth?: boolean;
   commands?: typeof defaultCommands;
   docs?: typeof defaultDocs;
   git?: typeof defaultGit;
@@ -60,7 +57,6 @@ export interface CreateApiRouterOptions {
   asrEnv?: NodeJS.ProcessEnv;
   previews?: PreviewService;
   shortcuts?: unknown;
-  shortcutState?: { value: ShortcutConfig };
   browser?: BrowserOptions['browser'];
   browserBootstrap?: BrowserOptions['browserBootstrap'];
   previewDomain?: string | null;
@@ -79,11 +75,9 @@ export { isAllowedKey } from './routes/terminal.js';
 
 export function createApiRouter({
   token, commands = defaultCommands, docs = defaultDocs, git = defaultGit, events,
-  authentication, deviceAuth = false,
   uploadExts = DEFAULT_UPLOAD_EXTS, maxUploadBytes = MAX_TRANSFER_BYTES,
   asrEnv = process.env, previews,
   shortcuts = DEFAULT_SHORTCUTS,
-  shortcutState,
   browser,
   browserBootstrap,
   previewDomain,
@@ -102,7 +96,6 @@ export function createApiRouter({
   if (apiAccounts) {
     r.use('/api-accounts', (req, res, next) => {
       res.setHeader('Cache-Control', 'no-store');
-      if (authentication) { next(); return; }
       const provided = bearerFrom(req.get('authorization'));
       if (provided && tokenEquals(provided, token)) next();
       else res.status(401).json({
@@ -110,7 +103,7 @@ export function createApiRouter({
       });
     });
   }
-  r.use(authentication ?? expressAuth(token));
+  r.use(expressAuth(token));
   r.use(express.json());
   const eventOptions: Parameters<typeof createClaudeEvents>[0] & {
     commands: typeof defaultCommands;
@@ -128,7 +121,7 @@ export function createApiRouter({
     ),
   };
   const deps = {
-    token, commands, docs, git, push, notifications, claudeEvents, deviceAuth,
+    token, commands, docs, git, push, notifications, claudeEvents,
     agentIdentity: agentRuntime ?? legacyAgentIdentity,
     uploadExts, maxUploadBytes, asrEnv, shortcuts, home, stateFile,
     ...(agentRuntime !== undefined ? { agentRuntime } : {}),
@@ -138,7 +131,6 @@ export function createApiRouter({
     ...(browserBootstrap !== undefined ? { browserBootstrap } : {}),
     ...(previewDomain !== undefined ? { previewDomain } : {}),
     ...(agentIntegrationContext !== undefined ? { agentIntegrationContext } : {}),
-    ...(shortcutState ? { shortcutState } : {}),
   };
 
   r.use(sessionRoutes(deps));

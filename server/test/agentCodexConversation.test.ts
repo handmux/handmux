@@ -84,6 +84,16 @@ async function setup(
 }
 
 describe('Codex Conversation adapter', () => {
+  it('publishes provider stream errors as generic warning notices', async () => {
+    const { service, harness, lease } = await setup();
+    const events: ConversationEvent[] = [];
+    await service.open(lease, {}, (event) => { events.push(event); });
+    harness.emit({ type: 'error', message: '⚠ Selected model is at capacity. Please try a different model.' });
+    await vi.waitFor(() => expect(events.some((event) => event.type === 'item.settled')).toBe(true));
+    const settled = events.find((event) => event.type === 'item.settled');
+    expect(settled).toMatchObject({ item: { kind: 'notice', level: 'warning', message: expect.stringContaining('Selected model is at capacity') } });
+  });
+
   it.each([
     [{ path: '/Users/alice/assets/picture.png' }, '/Users/alice/assets/picture.png', '~/assets/picture.png'],
     [{ path: '/home/bob/assets/picture.png' }, '/home/bob/assets/picture.png', '~/assets/picture.png'],

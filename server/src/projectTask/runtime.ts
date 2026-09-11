@@ -36,8 +36,6 @@ export interface ProjectTaskRuntimeStatus {
 export interface ProjectTaskRuntime {
   status(): ProjectTaskRuntimeStatus;
   requireStore(): ProjectTaskStore;
-  requireDatabase(): NodeDatabaseSync;
-  successfulWrite(): void;
   close(): Promise<void>;
 }
 
@@ -206,11 +204,6 @@ export async function createProjectTaskRuntime({
 
   return {
     status: () => ({ ...state }),
-    requireDatabase(): NodeDatabaseSync {
-      if (closed || !db || state.status !== 'ready') throw new Error('Authentication database unavailable; restart HandMux');
-      return db;
-    },
-    successfulWrite(): void { backups?.successfulWrite(); },
     requireStore(): ProjectTaskStore {
       if (closed || !store || state.status !== 'ready') {
         const error = state.error ?? {

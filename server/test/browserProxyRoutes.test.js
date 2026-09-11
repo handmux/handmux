@@ -2,7 +2,6 @@ import express from 'express';
 import request from 'supertest';
 import { describe, expect, it, vi } from 'vitest';
 import { browserRoutes } from '../src/browser/routes.js';
-import { browserLabelForOrigin } from '../src/browser/originLabel.js';
 
 const DEVICE = 'device_abcdefghijklmnopqrstuvwxyz123456';
 const asDevice = (req) => req.set('X-Handmux-Browser-Device', DEVICE);
@@ -37,14 +36,6 @@ function browserFake() {
 }
 
 describe('browser proxy lease routes', () => {
-  it('rejects a proxy hostname equal to the main app even on a different port', async () => {
-    const browser = browserFake();
-    const app = appFor(browser);
-    await asDevice(request(app).put('/leases/a'))
-      .set('Host', `${browserLabelForOrigin('https://app.example')}.preview.example:8080`)
-      .send({ url: 'https://app.example/' }).expect(400);
-    expect(browser.putLease).not.toHaveBeenCalled();
-  });
   it('puts an idempotent client-owned lease and returns a bootstrap URL', async () => {
     const browser = browserFake();
     const response = await asDevice(request(appFor(browser)).put('/leases/client-a'))

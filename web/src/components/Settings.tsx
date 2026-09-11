@@ -12,8 +12,6 @@ import { t, getLangCode, setLang, AVAILABLE } from '../i18n';
 import { SNAPSHOT_INTERVALS } from '../terminalTransport.js';
 import { useBackButton } from '../hooks/useBackButton.js';
 import { CheckIcon } from './icons.jsx';
-import DeviceManagement from './DeviceManagement.js';
-import { isDeviceAuth } from '../authSession.js';
 import type { TerminalHandle } from './Terminal.js';
 import type { SnapshotInterval, TerminalTransport } from '../terminalTransport.js';
 import type { ConversationFontSize, VoiceFillerFilterLevel } from '../storage.js';
@@ -24,7 +22,7 @@ import type {
 } from '../agentIntegrationApi.js';
 
 type DetailPage = 'language' | 'terminalFont' | 'conversationFont'
-  | 'keyboard' | 'transport' | 'tone' | 'feedback' | 'script' | 'devices';
+  | 'keyboard' | 'transport' | 'tone' | 'feedback' | 'script';
 type SettingsPage = 'root' | DetailPage;
 type ChatTone = 'dusk' | 'ink' | 'light';
 type KeyboardMode = 'auto' | 'mobile' | 'desktop';
@@ -58,7 +56,6 @@ type SettingsTerminalHandle = Pick<
 export interface SettingsProps {
   open: boolean;
   onClose: () => void;
-  onDeviceLoggedOut?: () => void;
   termRef: RefObject<SettingsTerminalHandle | null>;
   onOpenChangelog?: () => void;
   changelogUnread?: boolean;
@@ -95,7 +92,6 @@ const DETAIL_TITLE: Record<DetailPage, string> = {
   tone: 'settings.chat_tone',
   feedback: 'settings.feedback',
   script: 'settings.script_push',
-  devices: 'devices.title',
 };
 
 function SettingsHeader({ title, onBack }: { title: string; onBack: () => void }) {
@@ -293,7 +289,6 @@ function UpdateNotice({ updateInfo }: { updateInfo: UpdateInfo | null | undefine
 // Full-screen, browser-local app preferences. Window/pane sizing stays with its concrete management
 // target, while web-preview settings remain in that tool's own menu.
 export default function Settings({ open, onClose, termRef, onOpenChangelog = () => {}, changelogUnread = false,
-  onDeviceLoggedOut = () => {},
   onReloadApp = () => window.location.reload(),
   chatTone = 'ink', onChatTone = () => {},
   conversationFontSize = DEFAULT_CONVERSATION_FONT_SIZE, onConversationFontSize = () => {},
@@ -491,7 +486,6 @@ export default function Settings({ open, onClose, termRef, onOpenChangelog = () 
 
       <SettingsGroup title={t('settings.group_general')}>
         <SettingsNavRow label={t('settings.language')} value={languageLabel} onClick={() => openPage('language')} />
-        <SettingsNavRow label={t('devices.title')} value={t(isDeviceAuth() ? 'devices.trusted' : 'devices.token')} onClick={() => openPage('devices')} />
       </SettingsGroup>
 
       <SettingsGroup title={t('settings.group_terminal')} footer={t('settings.path_highlight_hint')}>
@@ -666,7 +660,6 @@ export default function Settings({ open, onClose, termRef, onOpenChangelog = () 
       </>
     ),
     script: <PushScriptContent pushKey={scriptPushKey} notifyOn={notify} />,
-    devices: <DeviceManagement onLoggedOut={onDeviceLoggedOut} />,
   };
 
   return (

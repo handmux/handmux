@@ -2,7 +2,6 @@ import { execFile } from 'node:child_process';
 import os from 'node:os';
 import { parseTmuxRows, tmuxFormat } from './format.js';
 import { TmuxPaneOutputCapture } from './paneOutputCapture.js';
-import { assertRequestAuthority } from '../requestAuthority.js';
 
 export interface TmuxSession { id: string; name: string }
 export interface TmuxWindow {
@@ -71,7 +70,6 @@ export const isValidStartupCmd = (value: unknown): value is string =>
 
 export function runTmux(args: string[]): Promise<string> {
   return new Promise<string>((resolve, reject) => {
-    assertRequestAuthority();
     execFile('tmux', args, { maxBuffer: 32 * 1024 * 1024 }, (err, stdout, stderr) => {
       if (err) reject(new Error(stderr?.toString() || err.message));
       else resolve(stdout.toString());

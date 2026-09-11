@@ -8,7 +8,6 @@ import { capTrailingBlankRows } from '../trimCapture.js';
 import { isAllowedKey } from '../keyNames.js';
 import { restoreCaptureBackgrounds } from '../captureBackground.js';
 import { serializePaneInput } from '../paneInput.js';
-import { assertRequestAuthority } from '../requestAuthority.js';
 import type { NextFunction, Request, Response, Router } from 'express';
 
 type CommandsModule = typeof import('../tmux/commands.js');
@@ -122,11 +121,9 @@ export function terminalRoutes({ commands }: TerminalRouteOptions): Router {
     try {
       await serializePaneInput(pane, async () => {
         await commands.exitCopyModeIfActive(pane);
-        assertRequestAuthority();
         await commands.sendText(pane, body);
         if (enter) {
           if (body) await delay(SUBMIT_GAP_MS); // a bare Enter has nothing to settle — send at once
-          assertRequestAuthority();
           await commands.sendEnter(pane);
         }
       });
@@ -141,7 +138,6 @@ export function terminalRoutes({ commands }: TerminalRouteOptions): Router {
     try {
       await serializePaneInput(pane, async () => {
         await commands.exitCopyModeIfActive(pane);
-        assertRequestAuthority();
         await commands.sendHexInput(pane, hex);
       });
       return res.json({ ok: true });
@@ -180,7 +176,6 @@ export function terminalRoutes({ commands }: TerminalRouteOptions): Router {
         if (!isWindowId(window)) return res.status(400).json({ error: 'bad window id' });
         // restore the split arrangement (resizePane) then hand window sizing back (resizeWindow)
         if (typeof layout === 'string' && layout) await commands.applyWindowLayout(window, layout);
-        assertRequestAuthority();
         await commands.restoreWindowSize(window);
       } else if (isPaneId(pane)) {
         await commands.resizePane(pane, c); // a pane in a split — resize only it
@@ -203,7 +198,7 @@ export function terminalRoutes({ commands }: TerminalRouteOptions): Router {
     try {
       await serializePaneInput(pane, async () => {
         await commands.exitCopyModeIfActive(pane);
-        for (const k of keys) { assertRequestAuthority(); await commands.sendKey(pane, k); }
+        for (const k of keys) await commands.sendKey(pane, k);
       });
       return res.json({ ok: true });
     } catch (e) { return next(e); }
@@ -223,7 +218,6 @@ export function terminalRoutes({ commands }: TerminalRouteOptions): Router {
     try {
       const { altScreen, mouseAware, mouseSgr, width, height } = await commands.paneInfo(pane);
       if (!altScreen || !mouseAware) return res.json({ ok: false, reason: 'no-mouse' });
-      assertRequestAuthority();
       await commands.sendWheel(pane, dir, Number(lines), {
         sgr: mouseSgr,
         col: Math.max(1, Math.floor((width || 2) / 2)),

@@ -48,9 +48,6 @@ export function createBrowserBootstrapStore({
   };
 
   return {
-    revokeDevice(deviceId: string): void {
-      for (const [token, entry] of tickets) if (entry.deviceId === deviceId) tickets.delete(token);
-    },
     issue({
       url,
       origin,

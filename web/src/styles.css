@@ -255,32 +255,6 @@ button.settings-page-row:disabled, .settings-page-row.disabled { color: rgba(235
 .settings-page .settings-update { margin-top: 14px; }
 .settings-page-text-action { color: var(--blue); }
 .settings-page .push-script-content { width: 100%; }
-.device-row { gap: 12px; min-height: 64px; }
-.device-row-copy { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 5px; }
-.device-row-main, .device-row-secondary { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.device-row-main > span, .device-row-secondary > span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.device-row-main small, .device-row-secondary { color: rgba(235,235,245,.55); font-size: 12px; }
-.device-row-main small, .device-row-secondary > span:last-child { flex-shrink: 0; font-variant-numeric: tabular-nums; }
-.device-add-row, .device-inline { color: var(--blue); }
-.device-inline { background: none; border: none; min-height: 44px; padding: 10px 4px; font-size: 13px; }
-.device-sheet-layer .settings-backdrop { z-index: var(--z-overlay-nested-backdrop); }
-.device-sheet-layer .device-sheet { z-index: var(--z-overlay-nested); top: auto; bottom: 0; transform: translateX(-50%); width: min(100%, 540px); max-width: 540px; max-height: 85dvh; border-radius: 18px 18px 0 0; padding: 16px 20px max(20px, env(safe-area-inset-bottom)); }
-.device-sheet .settings-close { min-width: 44px; min-height: 44px; }
-.device-field, .device-expiry-picker { display: flex; flex-direction: column; gap: 10px; margin-bottom: 18px; font-size: 14px; }
-.device-sheet input { display: block; width: 100%; min-height: 44px; margin-top: 6px; border: 1px solid #48494d; border-radius: 9px; background: #18191b; padding: 10px; color: inherit; font-size: 16px; box-sizing: border-box; }
-.device-expiry-picker .fontbtn, .device-sheet button { min-height: 44px; }
-.device-expiry-picker .fontbtn[aria-pressed="true"] { background: var(--blue); color: white; }
-.device-save { width: 100%; margin: 10px 0 14px; }
-.device-metadata { font-size: 13px; margin: 20px 0 12px; }
-.device-metadata dt { color: rgba(235,235,245,.55); margin-top: 12px; }
-.device-metadata dd { margin: 5px 0; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
-.device-metadata button { display: block; margin-top: 5px; }
-.device-danger { width: 100%; border: none; background: transparent; color: var(--red); min-height: 44px; }
-.device-revoke-layer { z-index: var(--z-overlay-confirm); }
-.pairing-methods { display: flex; border-radius: 9px; padding: 3px; background: rgba(120,120,128,.2); margin: 16px 0 12px; }
-.pairing-methods button { flex: 1; min-height: 44px; margin: 0; border: 0; background: none; color: inherit; border-radius: 7px; }
-.pairing-methods button[aria-selected="true"] { background: #48494d; box-shadow: 0 1px 3px #0003; }
-.pairing-web-path { font-weight: 500; line-height: 1.6; }
 .settings-page .push-script-intro {
   margin: 0 0 12px; color: var(--muted, #8a8a8e); font-size: 13px; line-height: 1.5;
 }
@@ -1022,65 +996,8 @@ div.workspace-restore-errors { padding-left: 10px; }
 .workspace-restore-ignore:active { background: rgba(255,69,58,.08); }
 .settings-protection-warning { margin-top: 4px; }
 .settings-protection-title { color: #ff918a; font-size: 13px; font-weight: 600; }
-.auth-page { height: 100%; width: 100%; flex: 1; min-height: 0; overflow-y: auto; display: flex; padding: max(28px, env(safe-area-inset-top)) max(18px, env(safe-area-inset-right)) max(24px, env(safe-area-inset-bottom)) max(18px, env(safe-area-inset-left)); background: radial-gradient(ellipse at 50% 0, rgba(10,132,255,.09), transparent 60%), #17181b; }
-.auth-layout { width: 100%; max-width: 440px; margin: auto; flex-shrink: 0; }
-.auth-brand { display: flex; flex-direction: column; align-items: center; gap: 10px; margin-bottom: 24px; text-align: center; }
-.auth-brand img { border-radius: 14px; box-shadow: 0 6px 20px #0003; }
-.auth-brand > span { color: #f5f5f7; font-size: 23px; font-weight: 650; letter-spacing: -.6px; }
-.auth-brand p { margin: 0; color: #a1a1aa; font-size: 13px; line-height: 1.5; }
-.auth-card { padding: clamp(20px, 5vw, 28px); border: 1px solid #ffffff10; border-radius: 22px; background: #232428; box-shadow: 0 16px 50px #0002; }
-.auth-card h1 { margin: 12px 0 22px; font-size: 23px; font-weight: 650; letter-spacing: -.5px; line-height: 1.3; }
-.auth-mode { display: inline-flex; align-items: center; gap: 7px; color: #b0cdec; font-size: 12px; font-weight: 500; }
-.auth-mode::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: #79b7f7; }
-.auth-mode-token { color: #e6be70; }
-.auth-mode-token::before { background: #e6be70; }
-.auth-footer { text-align: center; margin-top: 14px; }
-.auth-footer button { min-height: 44px; padding: 8px 12px; background: none; border: 0; color: #a1a1aa; font-size: 12px; cursor: pointer; }
-.auth-footer button:hover { color: #e6e6eb; }
-.auth-page button:focus-visible, .auth-help-dialog button:focus-visible { outline: 2px solid #78b5ff; outline-offset: 3px; }
-.token-prompt { display: flex; flex-direction: column; gap: 14px; margin: 0; padding: 0; }
-.token-prompt input { min-height: 48px; width: 100%; padding: 12px 14px; border-radius: 11px; border: 1px solid #ffffff20; background: #191a1e; color: #fff; font-size: 16px; }
-.token-prompt input:focus { outline: 2px solid #0a84ff80; outline-offset: 1px; }
-.auth-input-label { font-size: 13px; color: #bcbcc4; margin-bottom: -6px; }
-.token-prompt p { margin: 0; font-size: 14px; line-height: 1.55; }
-.token-prompt button { min-height: 44px; cursor: pointer; }
-.token-prompt button:disabled { opacity: .45; cursor: default; }
-.auth-warning { color: #e6be70; font-size: 13px; }
-.auth-card .auth-warning, .auth-help-dialog .auth-warning { padding: 11px 13px; border-radius: 10px; background: #ffc1480c; border: 1px solid #ffc14822; font-size: 12px; line-height: 1.6; }
-.token-prompt .auth-primary { min-height: 48px; border-radius: 11px; font-size: 15px; font-weight: 600; margin-top: 4px; }
-.auth-secondary { color: var(--muted, #aaa); }
-.pairing-prompt { max-width: none; margin: 0; padding: 0; }
-.pairing-prompt h2, .pairing-prompt h3 { margin: 8px 0 0; }
-.pairing-prompt h3 { font-size: 15px; }
-.pairing-code-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; padding: 12px; background: #191a1e; border: 1px solid #ffffff0d; border-radius: 12px; }
-.pairing-code-row button { flex-shrink: 0; }
-.token-prompt .pairing-code-row button, .token-prompt [role="tabpanel"] button { color: #81baff; background: #0a84ff12; font-size: 12px; }
-.token-prompt .pairing-methods { margin: 0; }
-.token-prompt .pairing-methods button { background: none; color: #a1a1aa; font-size: 13px; padding: 8px; }
-.token-prompt .pairing-methods button[aria-selected="true"] { background: #48494d; color: #fff; }
-.token-prompt [role="tabpanel"] { display: flex; flex-direction: column; gap: 12px; }
-.token-prompt .auth-secondary { font-size: 12px; }
-.pairing-code { font: 600 clamp(28px, 8vw, 38px)/1.4 ui-monospace, monospace; letter-spacing: .1em; font-variant-numeric: tabular-nums; user-select: text; -webkit-user-select: text; }
-.pairing-countdown { font-variant-numeric: tabular-nums; }
-.pairing-command { display: block; padding: 14px 12px; border-radius: 10px; background: rgba(127,127,127,.12); font-size: 14px; white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; -webkit-user-select: text; }
-.token-prompt .pairing-cancel { background: rgba(127,127,127,.14); color: inherit; }
-.auth-help-backdrop { position: fixed; inset: 0; z-index: var(--z-overlay-confirm); display: flex; align-items: center; justify-content: center; padding: max(20px, env(safe-area-inset-top)) 20px max(20px, env(safe-area-inset-bottom)); background: #0009; }
-.auth-help-dialog { width: 100%; max-width: 380px; max-height: 100%; overflow-y: auto; padding: 24px; border: 1px solid #ffffff12; border-radius: 20px; background: #252629; color: #e6e6eb; box-shadow: 0 16px 60px #0005; }
-.auth-help-dialog h2 { margin: 0 0 16px; font-size: 19px; }
-.auth-help-dialog p { font-size: 13px; line-height: 1.6; }
-.auth-help-steps { padding-left: 20px; margin: 18px 0; font-size: 13px; }
-.auth-help-steps li + li { margin-top: 16px; }
-.auth-help-command { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; padding: 0 10px; border-radius: 9px; background: #191a1e; }
-.auth-help-command code { flex: 1; user-select: text; -webkit-user-select: text; overflow-wrap: anywhere; }
-.auth-help-command button { min-height: 44px; border: 0; color: #81baff; background: none; cursor: pointer; }
-.auth-help-close { width: 100%; min-height: 44px; border: 0; border-radius: 10px; color: #fff; background: var(--blue); margin-top: 12px; font-size: 15px; cursor: pointer; }
-.auth-logout-backdrop { position: fixed; inset: 0; z-index: 1000; background: rgba(0,0,0,.5); display: flex; align-items: center; justify-content: center; padding: 24px; }
-.auth-logout-dialog { width: 300px; max-width: 100%; border-radius: 14px; padding: 20px 16px 0; background: var(--panel, #252629); text-align: center; }
-.auth-logout-dialog h3 { margin: 0 0 10px; font-size: 17px; }
-.auth-logout-dialog p { font-size: 14px; line-height: 1.5; }
-.auth-logout-actions { display: flex; border-top: 1px solid rgba(127,127,127,.25); margin: 16px -16px 0; }
-.auth-logout-actions button { flex: 1; min-height: 48px; border: 0; background: none; color: var(--blue); font-size: 15px; }
-.auth-logout-actions button:last-child { color: #ff625b; border-left: 1px solid rgba(127,127,127,.25); }
+.token-prompt { max-width: 360px; margin: 80px auto; display: flex; flex-direction: column; gap: 12px; padding: 0 16px; }
+.token-prompt input { padding: 10px; border-radius: 8px; border: 1px solid #444; background: #1a1b1e; color: #fff; }
 .loading { padding: 40px; text-align: center; color: #888; }
 /* First-run empty state: a tap target that opens the bind modal (there's nothing pinned yet). */
 .empty-cta { margin: auto; display: flex; flex-direction: column; gap: 6px; align-items: center; padding: 28px 32px; background: none; border: 1px dashed #44464c; border-radius: 12px; color: #aab; font-size: 15px; touch-action: manipulation; }
@@ -3302,14 +3219,22 @@ button.cmd-text { background: none; border: none; text-align: left; }
    assistant note — telling the user WHY the reply stopped instead of a silent, forever-spinning wave. */
 .chat-turn-error {
   align-self: flex-start; max-width: 85%; padding: 8px 12px; border-radius: 14px;
+  display: flex; align-items: flex-start; gap: 8px;
   font-size: 13px; line-height: 18px;
   color: #b3261e; background: rgba(179, 38, 30, 0.10);
+}
+.chat-turn-error::before {
+  content: '!';
+  flex: 0 0 18px; width: 18px; height: 18px; border-radius: 50%;
+  display: inline-flex; align-items: center; justify-content: center;
+  color: #fff; background: #d98900; font-size: 13px; font-weight: 800; line-height: 1;
 }
 .chat-turn-notice {
   align-self: flex-start; max-width: 85%; padding: 8px 12px; border-radius: 14px;
   font-size: 13px; line-height: 18px; color: var(--ct-muted); background: var(--ct-chip);
 }
 .chat-turn-notice.is-warning { color: #8a5700; background: rgba(179, 107, 0, 0.10); }
+.chat-turn-warning-icon { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; margin-right: 7px; border-radius: 50%; color: #fff; background: #d98900; font-size: 13px; font-weight: 800; }
 .chat-session-notice { display: flex; flex-direction: column; gap: 3px; }
 .chat-session-notice strong { font-size: 13px; font-weight: 650; }
 .chat-session-notice span { color: inherit; opacity: 0.82; }

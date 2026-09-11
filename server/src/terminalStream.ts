@@ -7,7 +7,6 @@ import type { IncomingMessage } from 'node:http';
 import type { Duplex } from 'node:stream';
 import type WebSocket from 'ws';
 import { decodeControlData } from './tmux/controlProtocol.js';
-import type { DeviceAccessService, DevicePrincipal } from './deviceAccess.js';
 
 export { decodeControlData } from './tmux/controlProtocol.js';
 
@@ -69,10 +68,6 @@ interface TerminalStreamOptions {
   token: string;
   commands: TerminalCommands;
   spawnControl?: SpawnControl;
-  deviceAuth?: {
-    service: DeviceAccessService;
-    resolveOrigin(req: IncomingMessage): string | null;
-  };
 }
 type LiveWebSocket = WebSocket & { isAlive?: boolean };
 
@@ -380,25 +375,12 @@ export function createTerminalStream({
   token,
   commands,
   spawnControl,
-  deviceAuth,
 }: TerminalStreamOptions): {
   onUpgrade(req: IncomingMessage, socket: Duplex, head: Buffer): boolean;
   close(): void;
 } {
   const wss = new WebSocketServer({ noServer: true, maxPayload: MAX_CLIENT_MESSAGE_BYTES });
   const streams = new Set<PaneControlStream>();
-  const principals = new WeakMap<WebSocket, DevicePrincipal>();
-  const socketStreams = new Map<WebSocket, PaneControlStream>();
-  const unsubscribe = deviceAuth?.service.onRevoke((deviceId) => {
-    for (const ws of wss.clients) {
-      if (principals.get(ws)?.deviceId !== deviceId) continue;
-      const stream = socketStreams.get(ws);
-      stream?.close();
-      if (stream) streams.delete(stream);
-      socketStreams.delete(ws);
-      ws.close(4001, 'unauthorized');
-    }
-  });
   const heartbeat = setInterval(() => {
     for (const socket of wss.clients) {
       const ws = socket as LiveWebSocket;
@@ -415,23 +397,12 @@ export function createTerminalStream({
 
   wss.on('connection', (socket) => {
     const ws = socket as LiveWebSocket;
-    const principal = principals.get(ws);
-    const stillAuthorized = (): boolean => {
-      if (!deviceAuth) return true;
-      try { return Boolean(principal && deviceAuth.service.isActive(principal)); } catch { return false; }
-    };
     ws.isAlive = true;
-    ws.on('pong', () => {
-      if (!stillAuthorized()) { ws.close(4001, 'unauthorized'); return; }
-      ws.isAlive = true;
-      if (principal) deviceAuth?.service.touch(principal);
-    });
+    ws.on('pong', () => { ws.isAlive = true; });
     const cancelSubscribeDeadline = startSubscribeDeadline(ws);
     let authenticating = false;
     let stream: PaneControlStream | null = null;
     ws.on('message', async (raw, binary) => {
-      if (!stillAuthorized()) { ws.close(4001, 'unauthorized'); return; }
-      if (principal) deviceAuth?.service.touch(principal);
       if (binary) return;
       let message: unknown;
       try { message = JSON.parse(raw.toString()); } catch { ws.close(1003, 'bad message'); return; }
@@ -451,7 +422,7 @@ export function createTerminalStream({
         ws.close(1003, 'bad subscribe message');
         return;
       }
-      if (deviceAuth ? 'token' in message : !tokenEquals(message.token ?? '', token)) {
+      if (!tokenEquals(message.token ?? '', token)) {
         ws.close(4001, 'unauthorized');
         return;
       }
@@ -459,13 +430,12 @@ export function createTerminalStream({
       cancelSubscribeDeadline();
       try {
         const session = await commands.paneSession(message.pane);
-        if (ws.readyState !== 1 || !stillAuthorized()) return;
+        if (ws.readyState !== 1) return;
         stream = new PaneControlStream({
           ws, pane: message.pane, session,
           ...(spawnControl ? { spawnControl } : {}),
         });
         streams.add(stream);
-        socketStreams.set(ws, stream);
         await stream.start();
       } catch {
         if (ws.readyState < 2) ws.close(1011, 'stream setup failed');
@@ -473,7 +443,6 @@ export function createTerminalStream({
     });
     ws.on('close', () => {
       cancelSubscribeDeadline();
-      socketStreams.delete(ws);
       if (stream) {
         stream.close();
         streams.delete(stream);
@@ -485,30 +454,12 @@ export function createTerminalStream({
     let pathname: string;
     try { pathname = new URL(req.url ?? '', 'http://handmux.local').pathname; } catch { return false; }
     if (pathname !== '/api/terminal-stream') return false;
-    let principal: DevicePrincipal | null = null;
-    if (deviceAuth) {
-      try {
-        const origin = deviceAuth.resolveOrigin(req);
-        if (origin && req.headers.origin === origin) principal = deviceAuth.service.authenticateRequest(req, origin);
-      } catch {
-        socket.end('HTTP/1.1 503 Service Unavailable\r\nConnection: close\r\n\r\n');
-        return true;
-      }
-      if (!principal) {
-        socket.end('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n');
-        return true;
-      }
-    }
-    wss.handleUpgrade(req, socket, head, (ws) => {
-      if (principal) principals.set(ws, principal);
-      wss.emit('connection', ws, req);
-    });
+    wss.handleUpgrade(req, socket, head, (ws) => wss.emit('connection', ws, req));
     return true;
   };
 
   const close = (): void => {
     clearInterval(heartbeat);
-    unsubscribe?.();
     for (const stream of streams) stream.close();
     streams.clear();
     for (const ws of wss.clients) ws.close(1001, 'server shutting down');

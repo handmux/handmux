@@ -51,7 +51,6 @@ export interface VoiceConfig {
 }
 
 export interface ResolvedConfig {
-  authMode: 'token' | 'trusted-device';
   tunnel: Tunnel;
   port: number;
   name: string | null;
@@ -136,7 +135,6 @@ export function resolveConfig(
   fileCfg: OptionRecord = {},
   env: NodeJS.ProcessEnv = process.env,
   gen: () => string = defaultGen,
-  authDefaults: { authMode: 'token' | 'trusted-device'; token?: string } = { authMode: 'token' },
 ): ResolvedConfig {
   const pick = (key: string, ...fallbacks: unknown[]): unknown => {
     for (const v of [flags[key], fileCfg[key], ...fallbacks]) if (v !== undefined && v !== null) return v;
@@ -148,15 +146,12 @@ export function resolveConfig(
   const port = Number(pick('port', env.HANDMUX_PORT, 19999));
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error(`bad port: ${pick('port', env.HANDMUX_PORT, 19999)}`);
 
-  const authMode = pick('authMode', env.HANDMUX_AUTH_MODE, authDefaults.authMode);
-  if (authMode !== 'token' && authMode !== 'trusted-device') throw new Error('authMode must be token or trusted-device');
   const cfg: ResolvedConfig = {
-    authMode,
     tunnel,
     port,
     name: optionalString(pick('name', env.HANDMUX_APP_NAME), 'name'),
     host: optionalString(pick('host', env.HANDMUX_HOST, '0.0.0.0'), 'host') ?? '0.0.0.0',
-    token: optionalString(pick('token', env.HANDMUX_TOKEN, authDefaults.token), 'token') ?? gen(),
+    token: optionalString(pick('token', env.HANDMUX_TOKEN), 'token') ?? gen(),
     foreground: !!pick('foreground', false),
     qr: pick('qr', true) !== false,
     // Unified config — what used to live in .env. The supervisor injects these into the server child's
@@ -264,9 +259,14 @@ function resolvePublicUrl(flags: OptionRecord, fileCfg: OptionRecord, env: NodeJ
   return null;
 }
 
-// 192 random bits for new credentials; configured legacy tokens remain unchanged.
+// Default token: 8 chars from a typing-friendly alphabet (lowercase + digits, look-alikes 0/o/1/l dropped)
+// so it's quick to thumb in on a phone. A user-supplied token (flag/config/env) is used verbatim — any
+// length, never regenerated. 8 chars over a 32-char alphabet ≈ 40 bits, fine for a single secret URL.
+const TOKEN_ALPHABET = '23456789abcdefghijkmnpqrstuvwxyz';
 export function defaultGen(): string {
-  return crypto.randomBytes(24).toString('base64url');
+  let s = '';
+  for (let i = 0; i < 8; i++) s += TOKEN_ALPHABET[crypto.randomInt(TOKEN_ALPHABET.length)];
+  return s;
 }
 
 // Trace one key's value back to its source through the same flag > file > env > default precedence
@@ -297,7 +297,6 @@ export function explainConfig(
   fileCfg: OptionRecord = {},
   cfgPath: string | null = null,
   env: NodeJS.ProcessEnv = process.env,
-  authDefaults: { authMode: 'token' | 'trusted-device'; token?: string } = { authMode: 'token' },
 ): ConfigExplanationRow[] {
   const rows: ConfigExplanationRow[] = [];
   const mask = (value: unknown): string => (String(value).length <= 8 ? '••••' : `••••${String(value).slice(-4)}`);
@@ -309,7 +308,6 @@ export function explainConfig(
   add('tunnel', tunnel);
   add('port', trace(flags, fileCfg, env, cfgPath, 'port', 'HANDMUX_PORT', 19999));
   add('host', trace(flags, fileCfg, env, cfgPath, 'host', 'HANDMUX_HOST', '0.0.0.0'));
-  add('authMode', trace(flags, fileCfg, env, cfgPath, 'authMode', 'HANDMUX_AUTH_MODE', authDefaults.authMode));
 
   const name = trace(flags, fileCfg, env, cfgPath, 'name', 'HANDMUX_APP_NAME', null);
   add('name', name, name.value == null ? '(default)' : String(name.value));
@@ -317,8 +315,8 @@ export function explainConfig(
   const lang = trace(flags, fileCfg, env, cfgPath, 'lang', 'HANDMUX_LANG', null);
   add('lang', lang, lang.value == null ? '(auto — shell locale)' : String(lang.value));
 
-  const token = trace(flags, fileCfg, env, cfgPath, 'token', 'HANDMUX_TOKEN', authDefaults.token ?? null);
-  add('token', token, token.value == null ? '(generated on first start)' : mask(token.value));
+  const token = trace(flags, fileCfg, env, cfgPath, 'token', 'HANDMUX_TOKEN', null);
+  add('token', token, token.value == null ? '(generated each start)' : mask(token.value));
 
   // publicUrl honours the same cross-tunnel guard as resolveConfig (file value only when tunnel matches).
   const t = tunnel.value;

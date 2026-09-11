@@ -47,7 +47,6 @@ interface StoredSubscription {
   subscription: PushSubscription;
   boundSessions: string[];
   pushKey?: string;
-  authDeviceId?: string;
 }
 
 export interface PushPayload {
@@ -110,21 +109,10 @@ function parseStoredSubscription(value: unknown): StoredSubscription | null {
   if (wrapped && isRecord(value) && typeof value.pushKey === 'string' && VALID_PUSH_KEY.test(value.pushKey)) {
     record.pushKey = value.pushKey;
   }
-  if (wrapped && isRecord(value) && typeof value.authDeviceId === 'string') record.authDeviceId = value.authDeviceId;
   return record;
 }
 
 let subs: StoredSubscription[] = load();
-let deviceAuthorization: ((deviceId: string) => boolean) | null = null;
-const allowed = (rec: StoredSubscription): boolean => {
-  try { return deviceAuthorization ? Boolean(rec.authDeviceId && deviceAuthorization(rec.authDeviceId)) : !rec.authDeviceId; }
-  catch { return false; }
-};
-export function setDeviceAuthorization(check: ((deviceId: string) => boolean) | null): void { deviceAuthorization = check; }
-export function revokeDevice(deviceId: string): void {
-  const next = subs.filter(rec => rec.authDeviceId !== deviceId);
-  if (next.length !== subs.length) { subs = next; persist(); }
-}
 
 function load(): StoredSubscription[] {
   return readJsonArray(STORE)
@@ -135,45 +123,42 @@ function persist(): void { writeJsonAtomic(STORE, subs); }
 
 export function isConfigured(): boolean { ensureInit(); return configured; }
 export function publicKey(): string | null { ensureInit(); return process.env.VAPID_PUBLIC || null; }
-export function count(): number { return subs.filter(allowed).length; }
+export function count(): number { return subs.length; }
 
-export function addSubscription(sub: unknown, boundSessions: unknown = [], preferredPushKey: unknown = null, authDeviceId?: string): string | false {
+export function addSubscription(sub: unknown, boundSessions: unknown = [], preferredPushKey: unknown = null): string | false {
   const parsed = parsePushSubscription(sub);
   if (!parsed) return false;
-  if (deviceAuthorization && (!authDeviceId || !deviceAuthorization(authDeviceId))) return false;
   const sessions = strings(boundSessions);
   const endpointRecord = subs.find((s) => s.subscription.endpoint === parsed.endpoint);
-  if (endpointRecord && endpointRecord.authDeviceId !== authDeviceId && allowed(endpointRecord)) return false;
   const requestedKey = typeof preferredPushKey === 'string' && VALID_PUSH_KEY.test(preferredPushKey) ? preferredPushKey : null;
-  const keyRecord = requestedKey ? subs.find((s) => s.pushKey === requestedKey && s.authDeviceId === authDeviceId) : null;
-  const pushKey = authDeviceId ? keyRecord?.pushKey || (endpointRecord?.authDeviceId === authDeviceId ? endpointRecord?.pushKey : null) || genKey()
-    : keyRecord?.pushKey || endpointRecord?.pushKey || requestedKey || genKey();
+  const keyRecord = requestedKey ? subs.find((s) => s.pushKey === requestedKey) : null;
+  const pushKey = keyRecord?.pushKey || endpointRecord?.pushKey || requestedKey || genKey();
 
   // A browser PushSubscription is transport state, not device identity. Re-enabling push can produce a
   // different endpoint; replace the old endpoint that owns this stable key instead of creating a new
   // script-push target. Also collapse any legacy duplicate for the new endpoint.
   subs = subs.filter((s) => s.subscription.endpoint !== parsed.endpoint && s.pushKey !== pushKey);
-  subs.push({ subscription: parsed, boundSessions: sessions, pushKey, ...(authDeviceId ? { authDeviceId } : {}) });
+  subs.push({ subscription: parsed, boundSessions: sessions, pushKey });
   persist();
   return pushKey;
 }
 
-export function updateBound(endpoint: unknown, boundSessions: unknown = [], authDeviceId?: string): void {
-  const rec = subs.find((s) => s.subscription.endpoint === endpoint && s.authDeviceId === authDeviceId && allowed(s));
+export function updateBound(endpoint: unknown, boundSessions: unknown = []): void {
+  const rec = subs.find((s) => s.subscription.endpoint === endpoint);
   if (rec) { rec.boundSessions = strings(boundSessions); persist(); }
 }
 
-export function removeSubscription(endpoint: unknown, authDeviceId?: string): string | null {
-  const removed = subs.find((s) => s.subscription.endpoint === endpoint && s.authDeviceId === authDeviceId);
-  subs = subs.filter((s) => s !== removed);
+export function removeSubscription(endpoint: unknown): string | null {
+  const removed = subs.find((s) => s.subscription.endpoint === endpoint);
+  subs = subs.filter((s) => s.subscription.endpoint !== endpoint);
   if (removed) persist();
   return removed?.pushKey || null;
 }
 
 // The device-addressing id (NOT an auth credential — see /api/push/send-local). Lazy-generate for
 // records stored before the feature existed so an already-subscribed device still has one.
-export function getPushKey(endpoint: unknown, authDeviceId?: string): string | null {
-  const rec = subs.find((s) => s.subscription.endpoint === endpoint && s.authDeviceId === authDeviceId && allowed(s));
+export function getPushKey(endpoint: unknown): string | null {
+  const rec = subs.find((s) => s.subscription.endpoint === endpoint);
   if (!rec) return null;
   if (!rec.pushKey) { rec.pushKey = genKey(); persist(); }
   return rec.pushKey;
@@ -224,7 +209,6 @@ async function deliver(records: readonly StoredSubscription[], payload: PushPayl
   let sent = 0;
   let failed = 0;
   await Promise.all(records.map(async (rec) => {
-    if (!allowed(rec)) return;
     try {
       await webpush.sendNotification(rec.subscription, data, options(opts));
       sent += 1;
@@ -265,7 +249,7 @@ export const resolveTargetKeys = ({ devices, sessions }: PushScope = {}): string
     : (sessions && sessions.length)
       ? subs.filter((s) => s.boundSessions.some((x) => sessions.includes(x)))
       : subs;
-  return [...new Set(pick.filter(allowed).map((s) => s.pushKey).filter((key): key is string => typeof key === 'string'))];
+  return [...new Set(pick.map((s) => s.pushKey).filter((key): key is string => typeof key === 'string'))];
 };
 
 // Back-compat: the /push/subscribe welcome still pushes to a single just-added subscription.

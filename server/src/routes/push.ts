@@ -15,7 +15,6 @@ interface NotificationService {
 interface PushRouteOptions {
   push: PushService;
   notifications?: NotificationService | null;
-  deviceAuth?: boolean;
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -25,42 +24,7 @@ const strings = (value: unknown): string[] => Array.isArray(value)
   : [];
 const errorMessage = (error: unknown): string => error instanceof Error ? error.message : String(error);
 
-// Shared by the legacy route and private Unix control socket. Never grant general HTTP access to CLI.
-export async function sendLocalPush({ push, notifications }: PushRouteOptions, requestBody: unknown) {
-  const data = isRecord(requestBody) ? requestBody : {};
-  const { title, body, tag, url } = data;
-  const invalid = (message: string): never => { throw Object.assign(new Error(message), { status: 400 }); };
-  if (typeof title !== 'string' || !title.trim()) return invalid('title required');
-  if (typeof body !== 'string' || !body.trim()) return invalid('body required');
-  const safeUrl = url == null ? null : sanitizeNotificationUrl(url);
-  if (url != null && !safeUrl) return invalid('url must be http(s) or relative');
-  const sessions = strings(data.sessions);
-  const devices = strings(data.devices);
-  if (sessions.length && devices.length) return invalid('use --session or --device, not both');
-  const payload: PushPayload = { title, body };
-  if (typeof tag === 'string' && tag) payload.tag = tag;
-  const opts: PushOptions = { urgency: 'normal', ttl: 1800 };
-  if (typeof payload.tag === 'string') opts.topic = payload.tag;
-  let rec: StoredNotification | null = null;
-  if (notifications) {
-    const targetKeys = push.resolveTargetKeys({ devices: devices.length ? devices : null, sessions: sessions.length ? sessions : null });
-    rec = notifications.record(targetKeys, { title, body, tag: payload.tag, url: safeUrl, delivery: { status: 'pending' } });
-    payload.data = { inboxId: rec.id };
-  }
-  const out = devices.length ? await push.sendToDevices(devices, payload, opts)
-    : sessions.length ? await push.sendToSessions(sessions, payload, opts) : await push.sendToAll(payload, opts);
-  if (notifications && rec) {
-    for (const delivery of out.deliveries || []) {
-      if (!delivery.pushKey) continue;
-      try { notifications.updateDelivery(delivery.pushKey, rec.id, delivery); }
-      catch (error) { console.warn(`[handmux] notification delivery status update failed: ${errorMessage(error)}`); }
-    }
-  }
-  const { deliveries: _deliveries, ...summary } = out;
-  return summary;
-}
-
-export function pushRoutes({ push, notifications, deviceAuth = false }: PushRouteOptions): Router {
+export function pushRoutes({ push, notifications }: PushRouteOptions): Router {
   const r = express.Router();
 
   // The client needs the VAPID public key to subscribe; 503 if the server has no keys configured.
@@ -78,7 +42,7 @@ export function pushRoutes({ push, notifications, deviceAuth = false }: PushRout
     const boundSessions = strings(isRecord(body) ? body.boundSessions : undefined);
     if (!sub) return res.status(400).json({ error: 'bad subscription' });
     try {
-      const pushKey = push.addSubscription(sub, boundSessions, preferredPushKey, res.locals.deviceAuth?.deviceId);
+      const pushKey = push.addSubscription(sub, boundSessions, preferredPushKey);
       if (!pushKey) return res.status(400).json({ error: 'bad subscription' });
       const delivery = await push.sendToOne(sub, { title: '通知已开启 ✅', body: '会话「需要你」或「已完成」时提醒你', tag: 'handmux-welcome' }, { topic: 'handmux', urgency: 'high' });
       // `deliver` deliberately contains failures so an automatic pane push can never break the polling
@@ -97,7 +61,7 @@ export function pushRoutes({ push, notifications, deviceAuth = false }: PushRout
   r.post('/push/unsubscribe', (req: Request, res: Response) => {
     const body: unknown = req.body;
     const endpoint = isRecord(body) ? body.endpoint : undefined;
-    const pushKey = typeof endpoint === 'string' ? push.removeSubscription(endpoint, res.locals.deviceAuth?.deviceId) : null;
+    const pushKey = typeof endpoint === 'string' ? push.removeSubscription(endpoint) : null;
     return res.json({ ok: true, pushKey });
   });
 
@@ -118,20 +82,59 @@ export function pushRoutes({ push, notifications, deviceAuth = false }: PushRout
     const requestBody: unknown = req.body;
     const endpoint = isRecord(requestBody) ? requestBody.endpoint : undefined;
     const boundSessions = strings(isRecord(requestBody) ? requestBody.boundSessions : undefined);
-    if (typeof endpoint === 'string') push.updateBound(endpoint, boundSessions, res.locals.deviceAuth?.deviceId);
+    if (typeof endpoint === 'string') push.updateBound(endpoint, boundSessions);
     return res.json({ ok: true });
   });
 
   // Local script push (`handmux push`): loopback + server token. Scope is mutually exclusive —
   // devices (by pushKey) > sessions > all. This is the ONLY push-send entry; no public/remote variant.
   r.post('/push/send-local', async (req: Request, res: Response, next: NextFunction) => {
-    if (deviceAuth) return res.status(404).json({ error: 'use the local handmux push CLI' });
-    try {
-      return res.json(await sendLocalPush({ push, ...(notifications ? { notifications } : {}) }, req.body));
-    } catch (e) {
-      if (isRecord(e) && e.status === 400) return res.status(400).json({ error: errorMessage(e) });
-      return next(e);
+    const requestBody: unknown = req.body;
+    const data = isRecord(requestBody) ? requestBody : {};
+    const { title, body, tag, url } = data;
+    if (typeof title !== 'string' || !title.trim()) return res.status(400).json({ error: 'title required' });
+    if (typeof body !== 'string' || !body.trim()) return res.status(400).json({ error: 'body required' });
+    const safeUrl = url == null ? null : sanitizeNotificationUrl(url);
+    if (url != null && !safeUrl) return res.status(400).json({ error: 'url must be http(s) or relative' });
+    const sessions = strings(data.sessions);
+    const devices = strings(data.devices);
+    const hasSessions = sessions.length > 0;
+    const hasDevices = devices.length > 0;
+    if (hasSessions && hasDevices) return res.status(400).json({ error: 'use --session or --device, not both' });
+    const payload: PushPayload = { title, body };
+    if (typeof tag === 'string' && tag) payload.tag = tag;
+    const opts: PushOptions = { urgency: 'normal', ttl: 1800 };
+    if (typeof payload.tag === 'string') opts.topic = payload.tag;
+    // Record FIRST so the notification tap can deep-link to this exact message's detail page. `--url`
+    // is stored on the record (surfaced in the detail), NOT used as the tap target.
+    let targetKeys: string[] = [];
+    let rec: StoredNotification | null = null;
+    if (notifications) {
+      targetKeys = push.resolveTargetKeys({ devices: hasDevices ? devices : null, sessions: hasSessions ? sessions : null });
+      rec = notifications.record(targetKeys, {
+        title, body, tag: payload.tag, url: safeUrl, delivery: { status: 'pending' },
+      });
+      payload.data = { inboxId: rec.id };
     }
+    try {
+      const out = hasDevices ? await push.sendToDevices(devices, payload, opts)
+        : hasSessions ? await push.sendToSessions(sessions, payload, opts)
+        : await push.sendToAll(payload, opts);
+      if (notifications && rec) {
+        for (const delivery of out.deliveries || []) {
+          if (!delivery.pushKey) continue;
+          try { notifications.updateDelivery(delivery.pushKey, rec.id, delivery); }
+          catch (error) {
+            // Delivery already happened. Do not turn a status-metadata write failure into an HTTP error:
+            // CLI automation would retry and send the real notification twice. The pending record remains
+            // honest (unknown final state) and the server log retains the storage failure for diagnosis.
+            console.warn(`[handmux] notification delivery status update failed: ${errorMessage(error)}`);
+          }
+        }
+      }
+      const { deliveries: _deliveries, ...summary } = out;
+      return res.json(summary);
+    } catch (e) { return next(e); }
   });
 
   // This device's addressing key (server-token auth) — the script push sheet reads it to show `--device`.
@@ -139,7 +142,7 @@ export function pushRoutes({ push, notifications, deviceAuth = false }: PushRout
     const requestBody: unknown = req.body;
     const endpoint = isRecord(requestBody) ? requestBody.endpoint : undefined;
     if (typeof endpoint !== 'string') return res.status(400).json({ error: 'endpoint required' });
-    return res.json({ pushKey: push.getPushKey(endpoint, res.locals.deviceAuth?.deviceId) });
+    return res.json({ pushKey: push.getPushKey(endpoint) });
   });
 
   return r;

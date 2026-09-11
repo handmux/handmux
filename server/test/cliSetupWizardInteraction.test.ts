@@ -39,110 +39,12 @@ describe('setup wizard interaction cancellation', () => {
     ttyDescriptor = Object.getOwnPropertyDescriptor(process.stdin, 'isTTY');
     Object.defineProperty(process.stdin, 'isTTY', { configurable: true, value: true });
     vi.clearAllMocks();
-    vi.stubEnv('HANDMUX_AUTH_MODE', undefined);
-    vi.stubEnv('HANDMUX_TOKEN', undefined);
   });
 
   afterEach(() => {
-    vi.unstubAllEnvs();
     if (ttyDescriptor) Object.defineProperty(process.stdin, 'isTTY', ttyDescriptor);
     else Reflect.deleteProperty(process.stdin, 'isTTY');
     fs.rmSync(root, { recursive: true, force: true });
-  });
-
-  it('recommends trusted-device on genuinely new setup and saves that default', async () => {
-    const target = path.join(root, 'config.json');
-    prompt.select.mockResolvedValueOnce('en').mockResolvedValueOnce('none')
-      .mockResolvedValueOnce('trusted-device').mockResolvedValueOnce('save');
-    const result = await runSetup({ target, home: root });
-    expect(result?.cfg.authMode).toBe('trusted-device');
-    expect(prompt.select.mock.calls.find(([options]) => options.options?.some((row: { value: string }) => row.value === 'trusted-device'))?.[0].initialValue).toBe('trusted-device');
-    expect(prompt.confirm).not.toHaveBeenCalled();
-  });
-
-  it('does not treat an existing empty config as a new installation', async () => {
-    const target = path.join(root, 'config.json');
-    new PrivateStateStore(target).write({});
-    prompt.select.mockResolvedValueOnce('save');
-    expect((await runSetup({ target, home: root }))?.cfg.authMode).toBe('token');
-    expect(prompt.select).toHaveBeenCalledOnce();
-  });
-
-  it('respects explicit environment token mode on new setup', async () => {
-    vi.stubEnv('HANDMUX_AUTH_MODE', 'token');
-    const target = path.join(root, 'config.json');
-    prompt.select.mockResolvedValueOnce('en').mockResolvedValueOnce('none')
-      .mockResolvedValueOnce('token').mockResolvedValueOnce('save');
-    expect((await runSetup({ target, home: root }))?.cfg.authMode).toBe('token');
-    expect(prompt.select.mock.calls.find(([options]) => options.options?.some((row: { value: string }) => row.value === 'trusted-device'))?.[0].initialValue).toBe('token');
-    expect(prompt.confirm).not.toHaveBeenCalled();
-  });
-
-  it.each(['file', 'env'])('refuses invalid explicit authMode from %s without writing', async (source) => {
-    const target = path.join(root, 'config.json');
-    if (source === 'file') new PrivateStateStore(target).write({ authMode: 'invalid' });
-    else vi.stubEnv('HANDMUX_AUTH_MODE', 'invalid');
-    const log = { log: vi.fn(), error: vi.fn() };
-    expect(await runSetup({ target, home: root, log })).toBeNull();
-    expect(log.error).toHaveBeenCalledOnce();
-    expect(prompt.select).not.toHaveBeenCalled();
-    if (source === 'file') expect(new PrivateStateStore(target).readStrict()).toEqual({ authMode: 'invalid' });
-    else expect(fs.existsSync(target)).toBe(false);
-  });
-
-  it.each(['token', 'trusted-device'])('requires confirmation when env overrides an existing %s installation during setup', async (mode) => {
-    const target = path.join(root, '.handmux', 'config.json');
-    if (mode === 'token') new PrivateStateStore(target).write({ token: 'legacy-token' });
-    else new PrivateStateStore(path.join(root, '.handmux', 'supervisor-config.json')).write({ authMode: mode });
-    vi.stubEnv('HANDMUX_AUTH_MODE', mode === 'token' ? 'trusted-device' : 'token');
-    prompt.select.mockResolvedValueOnce('start');
-    prompt.confirm.mockResolvedValueOnce(false);
-    expect(await runSetup({ target, home: root, running: true })).toBeNull();
-    expect(prompt.confirm).toHaveBeenCalledOnce();
-    if (mode === 'token') expect(new PrivateStateStore(target).readStrict()).toEqual({ token: 'legacy-token' });
-    else expect(fs.existsSync(target)).toBe(false);
-  });
-
-  it.each([false, prompt.cancelled])('cancelling mode-switch confirmation never writes or restarts: %s', async (answer) => {
-    const target = path.join(root, 'config.json');
-    new PrivateStateStore(target).write({ authMode: 'token', token: 'legacy-token' });
-    const before = fs.readFileSync(target, 'utf8');
-    prompt.select.mockResolvedValueOnce('auth').mockResolvedValueOnce('trusted-device').mockResolvedValueOnce('start');
-    prompt.confirm.mockResolvedValueOnce(answer);
-    expect(await runSetup({ target, home: root, running: true })).toBeNull();
-    expect(fs.readFileSync(target, 'utf8')).toBe(before);
-    expect(prompt.confirm.mock.calls[0]?.[0].initialValue).toBe(false);
-  });
-
-  it('confirms a mode switch with independent-terminal warning and preserves the old token', async () => {
-    const target = path.join(root, 'config.json');
-    new PrivateStateStore(target).write({ lang: 'en', token: 'legacy-token' });
-    prompt.select.mockResolvedValueOnce('auth').mockResolvedValueOnce('trusted-device').mockResolvedValueOnce('start');
-    prompt.confirm.mockResolvedValueOnce(true);
-    expect(await runSetup({ target, home: root, running: true })).toMatchObject({
-      cfg: { authMode: 'trusted-device', token: 'legacy-token' }, start: true,
-    });
-    expect(prompt.note.mock.calls.some(([message]) => message.includes('independent SSH') && message.includes('never a terminal inside Handmux'))).toBe(true);
-    expect(prompt.confirm).toHaveBeenCalledOnce();
-  });
-
-  it('does not ask to switch when the final mode is unchanged', async () => {
-    const target = path.join(root, 'config.json');
-    new PrivateStateStore(target).write({ authMode: 'token', token: 'legacy-token' });
-    prompt.select.mockResolvedValueOnce('auth').mockResolvedValueOnce('trusted-device')
-      .mockResolvedValueOnce('auth').mockResolvedValueOnce('token').mockResolvedValueOnce('save');
-    expect((await runSetup({ target, home: root }))?.cfg).toMatchObject({ authMode: 'token', token: 'legacy-token' });
-    expect(prompt.confirm).not.toHaveBeenCalled();
-  });
-
-  it('refuses to overwrite a corrupt config as if it were a new installation', async () => {
-    const target = path.join(root, 'config.json');
-    fs.writeFileSync(target, '{broken');
-    const log = { log: vi.fn(), error: vi.fn() };
-    expect(await runSetup({ target, home: root, log })).toBeNull();
-    expect(fs.readFileSync(target, 'utf8')).toBe('{broken');
-    expect(log.error).toHaveBeenCalledOnce();
-    expect(prompt.select).not.toHaveBeenCalled();
   });
 
   it('keeps a disabled multi-provider voice config when Esc backs out of enable confirmation', async () => {
