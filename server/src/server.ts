@@ -234,7 +234,11 @@ const inboxPush = new InboxPushProjection({
 });
 inboxPush.start();
 agentRuntime.start().catch((error) => {
-  console.warn(`[handmux] Agent Runtime unavailable: ${error instanceof Error ? error.message : String(error)}`);
+  const detail = error instanceof Error ? error.stack ?? error.message : String(error);
+  console.warn(`[handmux] Agent Runtime unavailable\n${detail}`);
+  for (const entry of agentRuntime.health()) {
+    console.warn(`[handmux] Agent Runtime adapter ${entry.adapterId}: ${entry.availability}${entry.message ? ` — ${entry.message}` : ''}`);
+  }
 });
 claudeInboxBridge.start();
 workspace.start().catch(() => {});
