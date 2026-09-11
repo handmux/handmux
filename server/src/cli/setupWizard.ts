@@ -89,7 +89,6 @@ export async function runSetup({
   }
   let a = answersFromConfig(existing, effectiveAuthMode);
   if (existing.token == null) a.token = process.env.HANDMUX_TOKEN ?? defaults.token ?? '';
-  const originalAuthMode = isNew ? a.authMode : existing.authMode ?? defaults.authMode;
   setLocale(a.lang);
 
   intro('handmux setup');
@@ -183,7 +182,7 @@ async function editAuth(a: SetupAnswers): Promise<'token' | 'trusted-device'> {
   ] }));
   if (next !== a.authMode) {
     note(tokenWarning(t('auth.switchWarning')), t('auth.section'));
-    if (!await ask(confirm({ message: t('auth.switchConfirm'), initialValue: false }))) return a.authMode;
+    if (!await ask(confirm({ message: t('auth.switchConfirm'), initialValue: false }))) return a.authMode ?? 'trusted-device';
   }
   return next;
 }
