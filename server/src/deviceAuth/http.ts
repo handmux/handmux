@@ -189,6 +189,9 @@ export function createDeviceAuthRouter({ service, resolveOrigin, resolvePublicUr
     const trustedOrigins = service.removeTrustedOrigin(req.body?.origin);
     res.json({ trustedOrigins, serverTime: Date.now() });
   }));
+  router.post('/trusted-origins/inspect', manage((req, res) => {
+    res.json({ affectedDevices: service.inspectTrustedOriginRemoval(req.body?.origin), serverTime: Date.now() });
+  }));
   router.post('/token/disable', safe(() => {
     throw new DeviceAuthError('TOKEN_ALWAYS_REQUIRED', 'Fixed Token login is always required and cannot be disabled', 409);
   }));

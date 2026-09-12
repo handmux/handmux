@@ -55,15 +55,6 @@ function ExpiryPicker({ value, custom, onChange, onCustom, keep = false, disable
 }
 const validName = (name: string) => !!name.trim() && [...name.trim()].length <= 80 && !/[\x00-\x1f\x7f-\x9f]/.test(name);
 const validExpire = (expire: string) => expire === 'never' || /^[1-9]\d*[mhd]$/.test(expire);
-const validOriginPattern = (value: string): boolean => {
-  const input = value.trim();
-  if (!/^https?:\/\//i.test(input)) return false;
-  try {
-    const url = new URL(input);
-    return url.pathname === '/' && !url.search && !url.hash && !url.username && !url.password
-      && !!url.hostname && (!url.hostname.includes('*') || /^\*\.[^.]+(?:\.[^.]+)+$/.test(url.hostname));
-  } catch { return false; }
-};
 const APPROVAL_STORAGE_KEY = 'handmux.pendingApprovalId';
 function readApprovalId(): string | null {
   try { const id = sessionStorage.getItem(APPROVAL_STORAGE_KEY); return id && /^pair_[a-zA-Z0-9_]+$/.test(id) ? id : null; } catch { return null; }
@@ -273,9 +264,8 @@ export default function DeviceManagement({ onLoggedOut }: { onLoggedOut: () => v
     return os ? `${browser} · ${os}` : browser;
   }); const [selfExpire, setSelfExpire] = useState('30d');
   const [selfCustom, setSelfCustom] = useState(''); const [busy, setBusy] = useState(false);
-  const [originInput, setOriginInput] = useState(''); const [originBusy, setOriginBusy] = useState(false);
+  const [originBusy, setOriginBusy] = useState(false);
   const [originHelp, setOriginHelp] = useState<'public' | 'preview' | null>(null);
-  const [originSheet, setOriginSheet] = useState(false);
   const [now, setNow] = useState(Date.now()); const offset = useRef(0); const alive = useRef(true); const requestId = useRef(0);
   const load = useCallback(async () => {
     if (!isDeviceAuth()) return;
@@ -316,18 +306,10 @@ export default function DeviceManagement({ onLoggedOut }: { onLoggedOut: () => v
   // the old single-value field when talking to a pre-list server that omitted
   // the property altogether.
   const accessOrigin = data.publicUrl ?? null;
-  const addTrustedOrigin = async () => {
-    const value = originInput.trim();
-    if (!validOriginPattern(value)) { setError(t('devices.invalidOrigin')); return; }
-    setOriginBusy(true); setError('');
-    try { await api.addTrustedOrigin(value); setOriginInput(''); await load(); }
-    catch (e) { setError(deviceErrorCopy(e)); }
-    finally { setOriginBusy(false); }
-  };
   const removeTrustedOrigin = async (value: string) => {
     if (originBusy) return;
     setOriginBusy(true); setError('');
-    try { await api.removeTrustedOrigin(value); await load(); }
+    try { const impact = await api.inspectTrustedOriginRemoval(value); if (impact.affectedDevices.length > 0) { const names = impact.affectedDevices.map(d => d.name).join('、'); if (!window.confirm(`删除 ${value} 后，以下设备可能无法通过此地址访问：${names}\n\n确定继续删除吗？`)) return; } else if (!window.confirm(`确定删除 ${value} 吗？`)) return; await api.removeTrustedOrigin(value); await load(); }
     catch (e) { setError(deviceErrorCopy(e)); }
     finally { setOriginBusy(false); }
   };
@@ -360,7 +342,6 @@ export default function DeviceManagement({ onLoggedOut }: { onLoggedOut: () => v
             <button type="button" className="device-origin-remove" aria-label={`${t('common.delete')} ${origin}`} disabled={originBusy} onClick={() => { void removeTrustedOrigin(origin); }}>{t('common.delete')}</button>
           </div>)}
         </div>}
-        <button type="button" className="fontbtn device-origin-add-button" disabled={originBusy} onClick={() => setOriginSheet(true)}>{t('devices.extraOriginAdd')}</button>
       </div>
     </section>
     <section className="device-settings-group device-list-group" aria-labelledby="device-list-title">
@@ -388,6 +369,5 @@ export default function DeviceManagement({ onLoggedOut }: { onLoggedOut: () => v
     {adding && <AddDevice onClose={() => setAdding(false)} onAdded={() => { setAdding(false); void load(); }} />}
     {selfSheet && <DeviceSheet title={t('devices.addSelfTitle')} onClose={() => { if (!busy) setSelfSheet(false); }}><p className="device-sheet-note">{t('devices.addSelfOrigin', { origin: currentOrigin })}</p><label className="device-field">{t('devices.name')}<input disabled={busy} value={selfName} onChange={e => setSelfName(e.target.value)} /></label><ExpiryPicker value={selfExpire} custom={selfCustom} onChange={setSelfExpire} onCustom={setSelfCustom} disabled={busy} /><button className="fontbtn device-save" disabled={busy || !validName(selfName) || !validExpire(selfExpire === 'custom' ? selfCustom : selfExpire)} onClick={() => { void addSelf(); }}>{t(busy ? 'common.loading' : 'devices.addSelf')}</button>{error && <p role="alert">{error}</p>}</DeviceSheet>}
     {originHelp && <DeviceSheet title={originHelp === 'public' ? t('devices.publicUrlLabel') : t('devices.previewDomainLabel')} onClose={() => setOriginHelp(null)}><p className="device-sheet-note">{t(originHelp === 'public' ? 'devices.publicUrlInfo' : 'devices.previewDomainInfo')}</p></DeviceSheet>}
-    {originSheet && <DeviceSheet title={t('devices.extraOriginsTitle')} onClose={() => { if (!originBusy) setOriginSheet(false); }}><p className="device-sheet-note">{t('devices.extraOriginsHint')}</p><label className="device-field">{t('devices.extraOriginInput')}<input value={originInput} onChange={event => setOriginInput(event.target.value)} placeholder="https://*.example.com" disabled={originBusy} autoCapitalize="none" autoCorrect="off" /></label><button type="button" className="fontbtn device-save" disabled={originBusy || !validOriginPattern(originInput)} onClick={async () => { await addTrustedOrigin(); if (!error) setOriginSheet(false); }}>{t('devices.extraOriginAdd')}</button>{error && <p role="alert">{error}</p>}</DeviceSheet>}
   </section>;
 }

@@ -40,4 +40,5 @@ export const deviceManagementApi = {
   addSelf: (name: string, expire: string) => request<{ device: ManagedDevice; serverTime: number }>('/devices/self', 'POST', { name, expire }),
   addTrustedOrigin: (origin: string) => request<{ trustedOrigins: string[]; serverTime: number }>('/trusted-origins', 'POST', { origin }),
   removeTrustedOrigin: (origin: string) => request<{ trustedOrigins: string[]; serverTime: number }>('/trusted-origins', 'DELETE', { origin }),
+  inspectTrustedOriginRemoval: (origin: string) => request<{ affectedDevices: Array<{ id: string; name: string; browser_summary: string }> }>('/trusted-origins/inspect', 'POST', { origin }),
 };
