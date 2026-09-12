@@ -40,7 +40,10 @@ export function createAuthOriginResolver({
     const forwarded = req.headers['x-forwarded-proto'];
     const protocol = !encrypted && loopback && (forwarded === 'http' || forwarded === 'https')
       ? forwarded : encrypted ? 'https' : 'http';
-    const hostHeader = req.headers.host;
+    const forwardedHost = req.headers['x-forwarded-host'];
+    const hasForwardedHost = typeof forwardedHost === 'string' && forwardedHost.length > 0;
+    const hostHeader = hasForwardedHost
+      ? ((forwardedHost as string).split(',')[0] ?? '').trim() : req.headers.host;
     if (!hostHeader || /[\s,/@\\?#]/.test(hostHeader)) return null;
     let origin: string;
     try { origin = new URL(`${protocol}://${hostHeader}`).origin; } catch { return null; }
@@ -49,7 +52,9 @@ export function createAuthOriginResolver({
     // together with X-Forwarded-Proto. In that setup there is no HandMux tunnel
     // configuration or publicUrl to whitelist; trust the proxy's effective origin
     // only when the request actually arrived from loopback.
-    if ((remote === '127.0.0.1' || remote === '::ffff:127.0.0.1') && (forwarded === 'http' || forwarded === 'https')) return origin;
+    if ((hasForwardedHost
+      || remote === '127.0.0.1' || remote === '::ffff:127.0.0.1')
+      && (forwarded === 'http' || forwarded === 'https')) return origin;
     for (const known of [publicUrl, runtimePublicUrl()]) {
       if (!known) continue;
       try {
