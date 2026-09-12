@@ -105,7 +105,7 @@ export default {
   'auth.useDevice': 'Use trusted device login',
   'auth.tokenWarning': 'A fixed Token can be reused if it leaks. Add a trusted device and disable it soon.',
   'auth.connectionError': 'Unable to check authorization. Check your network and whether handmux is running, then retry. Your authorization has not been canceled.',
-  'auth.originRejected': 'This address is not a trusted handmux access address. Check Authentication & devices, then use the CLI if it needs fixing.',
+  'auth.originRejected': 'This address is not a trusted handmux access address. Run handmux auth trusted-origin status on the server, then use set if needed.',
   'auth.retry': 'Retry',
   'auth.rateLimit': 'Too many authorization attempts. Wait a minute before requesting another code.',
   'auth.logoutTitle': 'Unbind and sign out',

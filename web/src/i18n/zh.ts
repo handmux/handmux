@@ -104,7 +104,7 @@ export default {
   'auth.useDevice': '使用可信设备登录',
   'auth.tokenWarning': '固定 Token 可被重复使用。建议添加可信设备后尽快禁用。',
   'auth.connectionError': '暂时无法确认授权状态，请检查网络和 handmux 是否运行后重试；不会因此取消授权。',
-  'auth.originRejected': '当前地址不是 handmux 的可信访问地址。请到“认证与设备”查看，必要时使用 CLI 修复后重试。',
+  'auth.originRejected': '当前地址不是 handmux 的可信访问地址。请在服务器上运行 handmux auth trusted-origin status，必要时用 set 修复后重试。',
   'auth.retry': '重试',
   'auth.rateLimit': '授权尝试过于频繁，请稍等一分钟后再申请校验码。',
   'auth.logoutTitle': '解除绑定并退出',
