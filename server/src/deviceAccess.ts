@@ -45,6 +45,11 @@ export function createAuthOriginResolver({
     let origin: string;
     try { origin = new URL(`${protocol}://${hostHeader}`).origin; } catch { return null; }
     if (local.has(origin)) return origin;
+    // Self-managed reverse proxies commonly run locally and forward the public Host
+    // together with X-Forwarded-Proto. In that setup there is no HandMux tunnel
+    // configuration or publicUrl to whitelist; trust the proxy's effective origin
+    // only when the request actually arrived from loopback.
+    if ((remote === '127.0.0.1' || remote === '::ffff:127.0.0.1') && (forwarded === 'http' || forwarded === 'https')) return origin;
     for (const known of [publicUrl, runtimePublicUrl()]) {
       if (!known) continue;
       try {
