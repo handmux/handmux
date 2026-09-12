@@ -177,7 +177,7 @@ export class DeviceAuthService {
     const normalized = normalizeOriginPattern(value);
     if (!normalized) throw new DeviceAuthError('INVALID_ORIGIN', 'Trusted access domain must be an origin', 400);
     const now = Date.now();
-    const rows = this.db.prepare(`SELECT DISTINCT d.id, d.name, d.browser_summary FROM auth_sessions s JOIN auth_devices d ON d.id=s.device_id WHERE s.revoked_at IS NULL AND d.revoked_at IS NULL AND (d.expires_at IS NULL OR d.expires_at > ?) AND s.origin IS NOT NULL`).all(now) as Array<{id:string;name:string;browser_summary:string;origin:string}>;
+    const rows = this.db.prepare(`SELECT DISTINCT d.id, d.name, d.browser_summary, s.origin FROM auth_sessions s JOIN auth_devices d ON d.id=s.device_id WHERE s.revoked_at IS NULL AND d.revoked_at IS NULL AND (d.expires_at IS NULL OR d.expires_at > ?) AND s.origin IS NOT NULL`).all(now) as Array<{id:string;name:string;browser_summary:string;origin:string}>;
     return rows.filter(row => originPatternMatches(normalized, row.origin)).map(({id,name,browser_summary}) => ({id,name,browser_summary}));
   }
   setTrustedOrigin(origin: string): void {
