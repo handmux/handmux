@@ -52,6 +52,16 @@ describe('device authorization flow', () => {
     expect(fetcher).toHaveBeenCalledWith('/api/auth/pairing', expect.objectContaining({ method: 'POST' }));
   });
 
+  it('presents CLI and authorized-device approval as two alternative methods', async () => {
+    server.pairing = { id: 'pair_1', state: 'waiting', code: '038271', expiresAt: Date.now() + 60000 };
+    render(<DevicePairingPrompt onSaved={vi.fn()} />); await flush();
+    expect(screen.getByText(t('auth.chooseOneMethod'))).toBeTruthy();
+    expect(screen.getByText(t('auth.cliMethod'))).toBeTruthy();
+    expect(screen.getByText(t('auth.deviceMethodTitle'))).toBeTruthy();
+    expect(screen.queryByText(/^1$/)).toBeNull();
+    expect(screen.queryByText(/^2$/)).toBeNull();
+  });
+
   it('does not render the code until the initial status check completes', async () => {
     let resolve!: (value: unknown) => void;
     fetcher.mockReturnValueOnce(new Promise(done => { resolve = done; }));
@@ -108,7 +118,7 @@ describe('device authorization flow', () => {
     expect(fetcher.mock.calls.length).toBe(callsAfterExpiry);
   });
 
-  it('cancels by the actual request ID and hides the old code', async () => {
+  it('cancels by the actual request ID and returns to Token login', async () => {
     server.pairing = { id: 'pair_1', state: 'waiting', code: '038271', expiresAt: Date.now() + 60000 };
     render(<DevicePairingPrompt onSaved={vi.fn()} />); await flush();
     server.pairing = { ...server.pairing, state: 'canceled' };
@@ -116,8 +126,8 @@ describe('device authorization flow', () => {
     expect(fetcher).toHaveBeenLastCalledWith('/api/auth/pairing', expect.objectContaining({
       method: 'DELETE', body: '{"id":"pair_1"}',
     }));
-    expect(screen.queryByText('038271')).toBeNull();
-    expect(screen.getByText(t('auth.canceled'))).toBeTruthy();
+    expect(screen.getByLabelText('Token')).toBeTruthy();
+    expect(screen.queryByText(t('auth.canceled'))).toBeNull();
   });
 
   it('recovers another tab’s completed authorization on foreground without generating a new code', async () => {

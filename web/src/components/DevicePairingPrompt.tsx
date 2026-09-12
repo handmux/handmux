@@ -18,6 +18,7 @@ export default function DevicePairingPrompt({ onSaved }: { onSaved: () => void }
   const [status, setStatus] = useState<AuthStatus | null>(null);
   const [busy, setBusy] = useState(true);
   const [error, setError] = useState('');
+  const [reenterToken, setReenterToken] = useState(false);
   const [now, setNow] = useState(Date.now());
   const offset = useRef(0);
   const epoch = useRef(0);
@@ -26,7 +27,7 @@ export default function DevicePairingPrompt({ onSaved }: { onSaved: () => void }
   const pollingPaused = useRef(false);
   const saved = useRef(onSaved);
   saved.current = onSaved;
-  const requestRef = useRef<(method?: 'GET' | 'POST' | 'DELETE') => Promise<boolean>>(async () => false);
+  const requestRef = useRef<(method?: 'GET' | 'POST' | 'DELETE', applyStatus?: boolean, autoPairing?: boolean) => Promise<boolean>>(async () => false);
 
   const accept = useCallback((next: AuthStatus) => {
     offset.current = next.serverTime - Date.now();
@@ -36,7 +37,7 @@ export default function DevicePairingPrompt({ onSaved }: { onSaved: () => void }
     if (next.authenticated) saved.current();
   }, []);
 
-  const request = useCallback(async (method: 'GET' | 'POST' | 'DELETE' = 'GET'): Promise<boolean> => {
+  const request = useCallback(async (method: 'GET' | 'POST' | 'DELETE' = 'GET', applyStatus = true, autoPairing = true): Promise<boolean> => {
     const generation = ++epoch.current;
     changing.current = true;
     pollingPaused.current = false;
@@ -46,8 +47,10 @@ export default function DevicePairingPrompt({ onSaved }: { onSaved: () => void }
     try {
       const next = await authRequest('/api/auth/pairing', method, method === 'DELETE' ? status?.pairing?.id : undefined);
       if (active.current && generation === epoch.current) {
-        accept(next);
-        if (method === 'GET' && needsPairing(next)) void requestRef.current('POST');
+        if (applyStatus) {
+          accept(next);
+          if (autoPairing && method === 'GET' && needsPairing(next)) void requestRef.current('POST');
+        }
         succeeded = true;
       }
     } catch (requestError) {
@@ -108,8 +111,12 @@ export default function DevicePairingPrompt({ onSaved }: { onSaved: () => void }
   }, [expired, pairing?.state]);
   const refreshCode = async () => {
     if (busy) return;
-    if (pairing && !await request('DELETE')) return;
+    if (pairing && !await request('DELETE', false)) return;
     await request('POST');
+  };
+  const cancelPairing = async () => {
+    if (busy || !await request('DELETE', false)) return;
+    setReenterToken(true);
   };
 
   // The first status request decides whether this browser needs the Token factor and whether an
@@ -118,6 +125,11 @@ export default function DevicePairingPrompt({ onSaved }: { onSaved: () => void }
   if (!status) return <AuthFrame title={t('auth.connecting')} showHelp={false}>
     <section className="token-prompt pairing-prompt" aria-live="polite"><p>{error || t('common.loading')}</p></section>
   </AuthFrame>;
+  if (reenterToken) return <TokenPrompt busy={busy} {...(error ? { error } : {})} onSaved={() => {
+    void request('GET', true, false).then(async ok => {
+      if (ok && await request('POST')) setReenterToken(false);
+    });
+  }} />;
   if (status.mode === 'token') return <TokenPrompt onSaved={onSaved} />;
   // A missing or rejected Token never falls through to pairing. The user must complete the first
   // factor before the server creates a pairing request.
@@ -141,15 +153,22 @@ export default function DevicePairingPrompt({ onSaved }: { onSaved: () => void }
           {usableCode && <progress className={`pairing-progress pairing-progress-${countdownTone}`} max={60} value={Math.min(60, remaining)} aria-label={t('auth.codeRemaining', { seconds: remaining })} />}
         </div>
         <div className="pairing-method-list">
-          <p className="pairing-method-row"><span>1</span><span>{t('auth.authorizeWithCli')} <code>handmux auth add</code> {t('auth.cliAfterCode')}</span></p>
-          <p className="pairing-method-row"><span>2</span><span>{t('auth.authorizeWithDevice')}</span></p>
+          <p className="pairing-method-caption">{t('auth.chooseOneMethod')}</p>
+          <div className="pairing-method-card">
+            <span className="pairing-method-badge">CLI</span>
+            <div><strong>{t('auth.cliMethod')}</strong><p>{t('auth.authorizeWithCli')} <code>handmux auth add</code> {t('auth.cliAfterCode')}</p></div>
+          </div>
+          <div className="pairing-method-card">
+            <span className="pairing-method-badge pairing-method-badge-device">{t('auth.webMethod')}</span>
+            <div><strong>{t('auth.deviceMethodTitle')}</strong><p>{t('auth.authorizeWithDevice')}</p></div>
+          </div>
         </div>
       </>}
       {configuring && <div className="pairing-state"><p>{t('auth.pending')}</p><p className="auth-secondary">{t(pairing?.source === 'web' ? 'auth.finishWeb' : 'auth.finishCli')}</p></div>}
       {pairing?.state === 'canceled' && <div className="pairing-state"><p>{t('auth.canceled')}</p></div>}
       {error && <p className="auth-error" role="alert">{error}</p>}
       {busy && pairing && <p className="auth-secondary" role="status">{t('common.loading')}</p>}
-      {(waiting || configuring) && <button type="button" className="pairing-cancel" disabled={busy} onClick={() => { void request('DELETE'); }}>{t('auth.cancelPairing')}</button>}
+      {(waiting || configuring) && <button type="button" className="pairing-cancel" disabled={busy} onClick={() => { void cancelPairing(); }}>{t('auth.cancelPairing')}</button>}
       {!displayCode && !pairing && <button type="button" className="auth-primary pairing-new-code" disabled={busy} onClick={() => { void request('POST'); }}>{t('auth.requestNewCode')}</button>}
     </section>
   </AuthFrame>;
