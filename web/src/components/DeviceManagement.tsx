@@ -309,7 +309,7 @@ export default function DeviceManagement({ onLoggedOut }: { onLoggedOut: () => v
     {loading && !data && <p role="status">{t('common.loading')}</p>}
     {selected && <DeviceDetail key={selected.id} device={selected} current={selected.id === data?.currentDeviceId} now={now} onClose={() => setSelected(null)} onChanged={() => { void load(); }} onLoggedOut={onLoggedOut} />}
     {adding && <AddDevice onClose={() => setAdding(false)} onAdded={() => { setAdding(false); void load(); }} />}
-    {selfSheet && <DeviceSheet title={t('devices.addSelf')} onClose={() => { if (!busy) setSelfSheet(false); }}><label className="device-field">{t('devices.name')}<input disabled={busy} value={selfName} onChange={e => setSelfName(e.target.value)} /></label><ExpiryPicker value={selfExpire} custom={selfCustom} onChange={setSelfExpire} onCustom={setSelfCustom} disabled={busy} /><button className="fontbtn device-save" disabled={busy || !validName(selfName) || !validExpire(selfExpire === 'custom' ? selfCustom : selfExpire)} onClick={() => { void addSelf(); }}>{t(busy ? 'common.loading' : 'devices.addSelf')}</button>{error && <p role="alert">{error}</p>}</DeviceSheet>}
+    {selfSheet && <DeviceSheet title={t('devices.addSelf')} onClose={() => { if (!busy) setSelfSheet(false); }}> <p className="auth-secondary">添加后只有通过当前浏览器地址的已授权设备可以登录；如需修改，请在服务器上使用 handmux CLI。</p><label className="device-field">{t('devices.name')}<input disabled={busy} value={selfName} onChange={e => setSelfName(e.target.value)} /></label><ExpiryPicker value={selfExpire} custom={selfCustom} onChange={setSelfExpire} onCustom={setSelfCustom} disabled={busy} /><button className="fontbtn device-save" disabled={busy || !validName(selfName) || !validExpire(selfExpire === 'custom' ? selfCustom : selfExpire)} onClick={() => { void addSelf(); }}>{t(busy ? 'common.loading' : 'devices.addSelf')}</button>{error && <p role="alert">{error}</p>}</DeviceSheet>}
     {confirmToken && <TokenDisableConfirm busy={busy} error={error} onClose={() => { if (!busy) setConfirmToken(false); }} onConfirm={() => { void disableToken(); }} />}
   </section>;
 }
@@ -320,7 +320,7 @@ function TokenDisableConfirm({ busy, error, onClose, onConfirm }: { busy: boolea
   useBackButton(true, onClose);
   useModalFocusTrap({ active: true, dialogRef, initialFocusRef: cancelRef, returnFocusRef: returnRef, onClose });
   return <div className="auth-logout-backdrop device-revoke-layer"><section className="auth-logout-dialog" ref={dialogRef} role="alertdialog" aria-modal="true" aria-labelledby="token-disable-title" tabIndex={-1}>
-    <h3 id="token-disable-title">{t('devices.disableToken')}</h3><p>{t('devices.disableConfirm')}</p>
+    <h3 id="token-disable-title">{t('devices.disableToken')}</h3><p>{t('devices.disableConfirm')}</p><p className="auth-secondary">可信访问地址：{window.location.origin}。禁用后只有通过此地址的已授权设备可以登录；如需修改，请在服务器上使用 handmux CLI。</p>
     {error && <p role="alert">{error}</p>}
     <div className="auth-logout-actions"><button ref={cancelRef} disabled={busy} onClick={onClose}>{t('common.cancel')}</button><button disabled={busy} onClick={onConfirm}>{t(busy ? 'common.loading' : 'devices.disableToken')}</button></div>
   </section></div>;
