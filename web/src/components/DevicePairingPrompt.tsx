@@ -23,6 +23,7 @@ export default function DevicePairingPrompt({ onSaved }: { onSaved: () => void }
   const epoch = useRef(0);
   const active = useRef(true);
   const changing = useRef(false);
+  const pollingPaused = useRef(false);
   const saved = useRef(onSaved);
   saved.current = onSaved;
   const requestRef = useRef<(method?: 'GET' | 'POST' | 'DELETE') => Promise<boolean>>(async () => false);
@@ -38,6 +39,7 @@ export default function DevicePairingPrompt({ onSaved }: { onSaved: () => void }
   const request = useCallback(async (method: 'GET' | 'POST' | 'DELETE' = 'GET'): Promise<boolean> => {
     const generation = ++epoch.current;
     changing.current = true;
+    pollingPaused.current = false;
     setBusy(true);
     setError('');
     let succeeded = false;
@@ -62,7 +64,7 @@ export default function DevicePairingPrompt({ onSaved }: { onSaved: () => void }
     active.current = true;
     let polling = false;
     const poll = async () => {
-      if (document.hidden || polling || changing.current) return;
+      if (document.hidden || polling || changing.current || pollingPaused.current) return;
       polling = true;
       const generation = epoch.current;
       try {
@@ -101,6 +103,9 @@ export default function DevicePairingPrompt({ onSaved }: { onSaved: () => void }
   const codeVisible = Boolean(waiting || expired || pairing?.state === 'canceled');
   const displayCode = usableCode ?? (codeVisible ? '------' : null);
   const countdownTone = !usableCode ? 'expired' : remaining <= 10 ? 'danger' : remaining <= 20 ? 'warning' : 'normal';
+  useEffect(() => {
+    pollingPaused.current = Boolean(expired || pairing?.state === 'canceled');
+  }, [expired, pairing?.state]);
   const refreshCode = async () => {
     if (busy) return;
     if (pairing && !await request('DELETE')) return;

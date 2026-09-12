@@ -103,6 +103,9 @@ describe('device authorization flow', () => {
     expect(screen.getByText('------')).toBeTruthy();
     expect(screen.getByText(t('auth.codeExpired'))).toBeTruthy();
     expect(screen.getByRole('button', { name: t('auth.refreshCode') })).toBeTruthy();
+    const callsAfterExpiry = fetcher.mock.calls.length;
+    await tick(5000);
+    expect(fetcher.mock.calls.length).toBe(callsAfterExpiry);
   });
 
   it('cancels by the actual request ID and hides the old code', async () => {
