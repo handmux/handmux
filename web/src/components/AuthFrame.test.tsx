@@ -17,7 +17,7 @@ it.each(['token', 'trusted-device'] as const)('provides the same read-only switc
   trigger.focus(); fireEvent.click(trigger);
   expect(screen.getByRole('dialog')).toBeTruthy();
   expect(screen.getByText(t('auth.switchWarning'))).toBeTruthy();
-  expect(screen.getByText('handmux setup')).toBeTruthy();
+  expect(screen.getByText('handmux auth trusted-origin status')).toBeTruthy();
   expect(screen.getByText('handmux auth token enable')).toBeTruthy();
   const done = screen.getByRole('button', { name: t('common.done') });
   await waitFor(() => expect(document.activeElement).toBe(done));
@@ -35,11 +35,11 @@ it('copies exact setup/token-enable commands and allows manual copying on HTTP',
   await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('button', { name: t('common.done') })));
   fireEvent.click(screen.getByRole('button', { name: t('auth.copySetup') }));
   await screen.findByText(t('auth.manualCopy'));
-  expect(window.getSelection()?.toString()).toBe('handmux setup');
+  expect(window.getSelection()?.toString()).toBe('handmux auth trusted-origin status');
   const writeText = vi.fn(async () => {});
   Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
   fireEvent.click(screen.getByRole('button', { name: t('auth.copySetup') }));
-  await waitFor(() => expect(writeText).toHaveBeenLastCalledWith('handmux setup'));
+  await waitFor(() => expect(writeText).toHaveBeenLastCalledWith('handmux auth trusted-origin status'));
   fireEvent.click(screen.getByRole('button', { name: t('auth.copyRestart') }));
   await waitFor(() => expect(writeText).toHaveBeenLastCalledWith('handmux auth token enable'));
   expect(localStorage.getItem('tw_token')).toBeNull();
