@@ -97,6 +97,7 @@ export default {
   'auth.useDevice': 'Use trusted device login',
   'auth.tokenWarning': 'Fixed tokens are less secure: a leaked token can be reused and cannot be revoked per device. Add a trusted device and disable fixed Token login soon.',
   'auth.connectionError': 'Unable to check authorization. Check your network and whether HandMux is running, then retry. Your authorization has not been canceled.',
+  'auth.originRejected': 'This access domain is not configured as handmux’s public URL. Open Setup, enter the public URL (including for a self-managed reverse tunnel), save, and retry.',
   'auth.retry': 'Retry',
   'auth.rateLimit': 'Too many authorization attempts. Wait a minute before requesting another code.',
   'auth.logoutTitle': 'Unbind and sign out',

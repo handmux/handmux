@@ -96,6 +96,7 @@ export default {
   'auth.useDevice': '使用可信设备登录',
   'auth.tokenWarning': '固定 Token 安全性较低：泄露后可被重复使用，且不能按设备撤销。建议添加可信设备后尽快禁用固定 Token 登录。',
   'auth.connectionError': '暂时无法确认授权状态，请检查网络和 HandMux 是否运行后重试；不会因此取消授权。',
+  'auth.originRejected': '当前访问域名未配置为 handmux 的公网访问地址。请在 Setup 中填写 public URL（自建反向隧道也需要填写），保存后重试。',
   'auth.retry': '重试',
   'auth.rateLimit': '授权尝试过于频繁，请稍等一分钟后再申请校验码。',
   'auth.logoutTitle': '解除绑定并退出',
