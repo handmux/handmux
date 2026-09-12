@@ -308,7 +308,8 @@ button.settings-page-row:disabled, .settings-page-row.disabled { color: rgba(235
 .device-origin-row { min-height: 70px; align-items: flex-start; padding-top: 13px; padding-bottom: 13px; }
 .device-origin-copy { min-width: 0; display: grid; gap: 5px; }
 .device-origin-label { color: rgba(235,235,245,.62); font-size: 12px; line-height: 1.25; }
-.device-origin-help { display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; margin-left: 2px; border: 1px solid rgba(235,235,245,.42); border-radius: 50%; color: rgba(235,235,245,.68); font-size: 11px; line-height: 1; vertical-align: -2px; cursor: help; }
+.device-origin-help { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; margin: 0 0 0 4px; padding: 0; border: 1px solid rgba(235,235,245,.42); border-radius: 50%; background: transparent; color: rgba(235,235,245,.68); font: 12px/1 -apple-system,system-ui,sans-serif; vertical-align: middle; cursor: pointer; }
+.device-origin-help-text { margin: 0 16px 8px; padding: 9px 11px; border-radius: 10px; background: rgba(120,120,128,.12); color: rgba(235,235,245,.68); font-size: 12px; line-height: 1.4; }
 .device-origin-value { display: block; overflow-wrap: anywhere; color: #f2f2f7; font: 14px/1.35 ui-monospace, "SF Mono", Menlo, monospace; }
 .device-origin-state { color: rgba(235,235,245,.48); font-size: 12px; line-height: 1.25; }
 .device-origin-check { flex: none; margin: 3px 2px 0 12px; color: var(--blue); font-size: 17px; line-height: 1; }

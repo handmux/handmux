@@ -274,6 +274,7 @@ export default function DeviceManagement({ onLoggedOut }: { onLoggedOut: () => v
   }); const [selfExpire, setSelfExpire] = useState('30d');
   const [selfCustom, setSelfCustom] = useState(''); const [busy, setBusy] = useState(false);
   const [originInput, setOriginInput] = useState(''); const [originBusy, setOriginBusy] = useState(false);
+  const [originHelp, setOriginHelp] = useState<'public' | 'preview' | null>(null);
   const [now, setNow] = useState(Date.now()); const offset = useRef(0); const alive = useRef(true); const requestId = useRef(0);
   const load = useCallback(async () => {
     if (!isDeviceAuth()) return;
@@ -313,7 +314,6 @@ export default function DeviceManagement({ onLoggedOut }: { onLoggedOut: () => v
   // New servers return `publicUrl` even when it is explicitly blank. Only use
   // the old single-value field when talking to a pre-list server that omitted
   // the property altogether.
-  const hasPublicUrl = Object.prototype.hasOwnProperty.call(data, 'publicUrl');
   const accessOrigin = data.publicUrl ?? null;
   const addTrustedOrigin = async () => {
     const value = originInput.trim();
@@ -336,28 +336,25 @@ export default function DeviceManagement({ onLoggedOut }: { onLoggedOut: () => v
       <div className="settings-page-list">
         <div className="settings-page-row device-origin-row">
           <div className="device-origin-copy">
-            <span className="device-origin-label">{t('devices.publicUrlLabel')} <span className="device-origin-help" role="img" aria-label={t('devices.publicUrlInfo')} title={t('devices.publicUrlInfo')}>?</span></span>
+            <span className="device-origin-label">{t('devices.publicUrlLabel')} <button type="button" className="device-origin-help" aria-label={t('devices.publicUrlInfo')} onClick={() => setOriginHelp(originHelp === 'public' ? null : 'public')}>?</button></span>
             <code className="device-origin-value">{accessOrigin ?? t('devices.originUnset')}</code>
             <span className="device-origin-state">{data.publicUrl ? t('devices.originConfigured') : accessOrigin ? t('devices.originActive') : t('devices.originPending')}</span>
           </div>
+          {originHelp === 'public' && <p className="device-origin-help-text">{t('devices.publicUrlInfo')}</p>}
           {accessOrigin && <span className="device-origin-check" aria-label={t('devices.originActive')}>✓</span>}
         </div>
         <div className="settings-page-row device-origin-row">
           <div className="device-origin-copy">
-            <span className="device-origin-label">{t('devices.previewDomainLabel')} <span className="device-origin-help" role="img" aria-label={t('devices.previewDomainInfo')} title={t('devices.previewDomainInfo')}>?</span></span>
+            <span className="device-origin-label">{t('devices.previewDomainLabel')} <button type="button" className="device-origin-help" aria-label={t('devices.previewDomainInfo')} onClick={() => setOriginHelp(originHelp === 'preview' ? null : 'preview')}>?</button></span>
             <code className="device-origin-value">{data.previewDomain ?? t('devices.originUnset')}</code>
             <span className="device-origin-state">{data.previewDomain ? t('devices.originBuiltIn') : t('devices.originPending')}</span>
           </div>
+          {originHelp === 'preview' && <p className="device-origin-help-text">{t('devices.previewDomainInfo')}</p>}
           {data.previewDomain && <span className="device-origin-check" aria-label={t('devices.originActive')}>✓</span>}
         </div>
       </div>
-      <p className="settings-page-footer">{t('devices.originHint')}</p>
-      <div className="device-origin-commands" aria-label={t('devices.originCommands')}>
-        <div className="device-origin-command"><span>{t('devices.originSetupCommandLabel')}</span><code>handmux setup</code></div>
-      </div>
       <div className="device-origin-extra">
         <h3>{t('devices.extraOriginsTitle')}</h3>
-        <p>{t('devices.extraOriginsHint')}</p>
         {data.trustedOrigins && data.trustedOrigins.length > 0 && <div className="settings-page-list">
           {data.trustedOrigins.map(origin => <div className="settings-page-row device-origin-extra-row" key={origin}>
             <code className="device-origin-value">{origin}</code>
