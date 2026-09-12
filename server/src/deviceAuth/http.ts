@@ -153,7 +153,8 @@ export function createDeviceAuthRouter({ service, resolveOrigin }: {
     res.json({ tokenEnabled: false, serverTime: Date.now() });
   }));
   router.patch('/devices/:id', manage((req, res, actor) => {
-    const device = service.edit(String(req.params.id), { name: req.body?.name, expire: req.body?.expire, version: req.body?.version }, actor);
+    if (req.body?.expire !== undefined) throw new DeviceAuthError('DEVICE_EXPIRY_CLI_ONLY', 'Change device expiry with the handmux CLI on the server', 403);
+    const device = service.edit(String(req.params.id), { name: req.body?.name, version: req.body?.version }, actor);
     if (device.id === actor.deviceId) {
       const secret = readSessionSecret(req, actor.origin);
       if (secret) setSessionCookie(res, actor.origin, secret, device.expires_at);

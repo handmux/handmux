@@ -38,7 +38,9 @@ describe('compact device management', () => {
     fireEvent.click(screen.getByRole('button', { name: new RegExp(history.name) }));
     expect(screen.getByText(history.id)).toBeTruthy(); expect(screen.getAllByText(history.browser_summary)).toHaveLength(2);
     expect(screen.queryByText(t('devices.activeStatus'))).toBeNull(); expect(screen.getAllByText(t('devices.revoked')).length).toBeGreaterThan(0);
-    expect(screen.getByText(t('devices.detailInfo'))).toBeTruthy(); expect(screen.getByText(t('devices.added'))).toBeTruthy(); expect(screen.getByText(t('devices.lastAccess'))).toBeTruthy();
+    expect(screen.getByText(t('devices.detailInfo'))).toBeTruthy(); expect(screen.getByText(t('devices.name'))).toBeTruthy(); expect(screen.getByText(t('devices.deviceInfo'))).toBeTruthy();
+    expect(screen.getByText(t('devices.status'))).toBeTruthy(); expect(screen.getByText(t('devices.added'))).toBeTruthy(); expect(screen.getByText(t('devices.lastAccess'))).toBeTruthy(); expect(screen.getByText(t('devices.expiresAt'))).toBeTruthy();
+    expect(screen.queryByText(t('devices.expire'))).toBeNull();
     expect(screen.queryByRole('button', { name: t('devices.revoke') })).toBeNull(); expect(screen.queryByRole('button', { name: t('common.save') })).toBeNull();
   });
   it('renames using the exact version without sending expire, and copies IDs with HTTP manual fallback', async () => {

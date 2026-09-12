@@ -26,7 +26,7 @@ async function request<T>(path: string, method = 'GET', body?: object): Promise<
 }
 export const deviceManagementApi = {
   list: () => request<DeviceList>('/devices'),
-  edit: (id: string, values: { version: number; name?: string; expire?: string }) => request<{ device: ManagedDevice; serverTime: number }>(`/devices/${encodeURIComponent(id)}`, 'PATCH', values),
+  edit: (id: string, values: { version: number; name: string }) => request<{ device: ManagedDevice; serverTime: number }>(`/devices/${encodeURIComponent(id)}`, 'PATCH', values),
   revoke: (id: string) => request<{ device: ManagedDevice; serverTime: number }>(`/devices/${encodeURIComponent(id)}`, 'DELETE'),
   approvals: () => request<{ approvals: DeviceApproval[]; serverTime: number }>('/approvals'),
   claim: (code: string) => request<{ approval: DeviceApproval; serverTime: number }>('/approvals', 'POST', { code }),

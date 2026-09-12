@@ -84,15 +84,17 @@ describe('Web device management across real HTTP and WebSocket boundaries', () =
     await request(f.server).get('/api/private').set(f.headers).set('Cookie', approver.cookie).expect(200);
   });
 
-  it('rejects a stale Web edit after a CLI change without overwriting its name or expiry', async () => {
+  it('allows Web name edits but keeps expiry changes CLI-only', async () => {
     const f = await fixture();
     const actor = await f.enroll('actor');
     const target = await f.enroll('target');
     const list = await request(f.server).get('/api/auth/devices').set(f.headers).set('Cookie', actor.cookie).expect(200);
     const snapshot = list.body.devices.find((device: { id: string }) => device.id === target.device.id);
+    await request(f.server).patch(`/api/auth/devices/${target.device.id}`).set(f.headers).set('Cookie', actor.cookie)
+      .send({ version: snapshot.version, name: 'Web name' }).expect(200);
     const updated = f.service.edit(target.device.id, { name: 'CLI name', expire: '7d' });
     await request(f.server).patch(`/api/auth/devices/${target.device.id}`).set(f.headers).set('Cookie', actor.cookie)
-      .send({ version: snapshot.version, name: 'stale Web name', expire: 'never' }).expect(409);
+      .send({ version: snapshot.version + 1, name: 'stale Web name', expire: 'never' }).expect(403);
     const actual = f.service.list().find(device => device.id === target.device.id)!;
     expect(actual.name).toBe('CLI name');
     expect(actual.expires_at).toBe(updated.expires_at);

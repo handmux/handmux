@@ -7,7 +7,7 @@ import { t } from '../i18n';
 
 export const deviceErrorCopy = (error: unknown): string => {
   const codes: Record<string, string> = {
-    DEVICE_CONFLICT: 'devices.conflict', DEVICE_INACTIVE: 'devices.inactive', SESSION_INVALID: 'devices.sessionInvalid',
+    DEVICE_CONFLICT: 'devices.conflict', DEVICE_INACTIVE: 'devices.inactive', DEVICE_EXPIRY_CLI_ONLY: 'devices.expiryCliOnly', SESSION_INVALID: 'devices.sessionInvalid',
     CODE_INVALID: 'devices.invalidCode', CLAIM_RATE_LIMIT: 'auth.rateLimit', AUTH_RATE_LIMIT: 'auth.rateLimit',
     PAIRING_NOT_FOUND: 'devices.pairingGone', PAIRING_INACTIVE: 'devices.pairingGone',
     INVALID_NAME: 'devices.invalidName', INVALID_EXPIRE: 'devices.invalidExpire',
@@ -83,24 +83,23 @@ function DeviceDetail({ device: initial, current, now, onClose, onChanged, onLog
   device: ManagedDevice; current: boolean; now: number; onClose: () => void; onChanged: () => void; onLoggedOut: () => void;
 }) {
   const [device, setDevice] = useState(initial); const [name, setName] = useState(initial.name);
-  const [expire, setExpire] = useState('keep'); const [custom, setCustom] = useState('');
   const [busy, setBusy] = useState(false); const [error, setError] = useState(''); const [conflict, setConflict] = useState(false);
   const [copyHint, setCopyHint] = useState(''); const [confirming, setConfirming] = useState(false); const idRef = useRef<HTMLElement>(null);
-  const inactive = isInactive(device, now); const duration = expire === 'custom' ? custom : expire;
-  const changed = name.trim() !== device.name || expire !== 'keep';
+  const inactive = isInactive(device, now);
+  const changed = name.trim() !== device.name;
   const close = () => { if (!busy) onClose(); };
   const save = async () => {
-    if (!validName(name) || !validExpire(duration) && expire !== 'keep') { setError(t(!validName(name) ? 'devices.invalidName' : 'devices.invalidExpire')); return; }
+    if (!validName(name)) { setError(t('devices.invalidName')); return; }
     setBusy(true); setError('');
     try {
-      const result = await api.edit(device.id, { version: device.version, ...(name.trim() !== device.name ? { name: name.trim() } : {}), ...(expire !== 'keep' ? { expire: duration } : {}) });
-      setDevice(result.device); setName(result.device.name); setExpire('keep'); setConflict(false); onChanged();
+      const result = await api.edit(device.id, { version: device.version, name: name.trim() });
+      setDevice(result.device); setName(result.device.name); setConflict(false); onChanged();
     } catch (e) { setError(deviceErrorCopy(e)); setConflict(e instanceof DeviceManagementError && e.code === 'DEVICE_CONFLICT'); }
     finally { setBusy(false); }
   };
   const refresh = async () => {
     setBusy(true);
-    try { const result = await api.list(); const d = result.devices.find(d => d.id === device.id); if (!d) throw new Error('Device missing'); setDevice(d); setName(d.name); setExpire('keep'); setConflict(false); setError(''); onChanged(); }
+    try { const result = await api.list(); const d = result.devices.find(d => d.id === device.id); if (!d) throw new Error('Device missing'); setDevice(d); setName(d.name); setConflict(false); setError(''); onChanged(); }
     catch (e) { setError(deviceErrorCopy(e)); } finally { setBusy(false); }
   };
   const revoke = async () => {
@@ -113,27 +112,26 @@ function DeviceDetail({ device: initial, current, now, onClose, onChanged, onLog
     catch { if (idRef.current) { const range = document.createRange(); range.selectNodeContents(idRef.current); const selection = window.getSelection(); selection?.removeAllRanges(); selection?.addRange(range); } setCopyHint(t('auth.manualCopy')); }
   };
   const statusText = device.revoked_at !== null ? t('devices.revoked') : device.expires_at !== null && device.expires_at <= now ? t('devices.expired') : t('devices.activeStatus');
-  const statusSummary = inactive ? statusText : `${statusText} · ${remainingExpiry(device, now)}`;
   return <>
-    <DeviceSheet title={device.name} onClose={close} trapped={!confirming}>
-      <div className="device-detail-identity">
-        <span className="device-detail-avatar" aria-hidden="true">{[...device.name.trim()][0]?.toUpperCase() ?? '?'}</span>
-        <div className="device-detail-identity-copy"><strong>{device.browser_summary}</strong><span className={inactive ? 'device-status device-status-muted' : 'device-status'}>{statusSummary}</span></div>
+    <DeviceSheet title={t('devices.detailInfo')} onClose={close} trapped={!confirming}>
+      <div className="device-edit-layout">
+        {inactive ? <div className="device-readonly-field"><span className="device-field-label">{t('devices.name')}</span><strong>{device.name}</strong></div>
+          : <label className="device-field"><span className="device-field-label">{t('devices.name')}</span><input value={name} onChange={event => setName(event.target.value)} maxLength={160} disabled={busy} /></label>}
+        <div className="device-readonly-field"><span className="device-field-label">{t('devices.deviceInfo')}</span><strong>{device.browser_summary}</strong></div>
+        <div className="device-readonly-field device-id-field"><span className="device-field-label">{t('devices.id')}</span><div className="device-id-value"><code ref={idRef}>{device.id}</code><button type="button" className="device-copy-button" onClick={() => { void copyId(); }}>{t('devices.copyId')}</button></div></div>
+        <dl className="device-readonly-metadata">
+          <dt>{t('devices.status')}</dt><dd>{statusText}</dd>
+          <dt>{t('devices.added')}</dt><dd>{date(device.authorized_at)}</dd>
+          <dt>{t('devices.lastAccess')}</dt><dd>{date(device.last_used_at)}</dd>
+          <dt>{t('devices.expiresAt')}</dt><dd>{date(device.expires_at)}</dd>
+        </dl>
+        {inactive && <p className="device-inactive-note">{t('devices.inactive')}</p>}
+        {!inactive && <button className="fontbtn device-save" disabled={busy || !changed || conflict} onClick={() => { void save(); }}>{t('common.save')}</button>}
       </div>
-      <h3 className="device-detail-section-title">{t('devices.detailInfo')}</h3>
-      {inactive ? <p className="device-inactive-note">{t('devices.inactive')}</p> : <>
-        <label className="device-field">{t('devices.name')}<input value={name} onChange={event => setName(event.target.value)} maxLength={160} disabled={busy} /></label>
-        <ExpiryPicker value={expire} custom={custom} onChange={setExpire} onCustom={setCustom} keep disabled={busy} />
-        <p className="auth-secondary">{expire === 'keep' ? t('devices.keepHint') : t('devices.expireFromSave')}</p>
-        <button className="fontbtn device-save" disabled={busy || !changed || conflict} onClick={() => { void save(); }}>{t('common.save')}</button>
-      </>}
-      <dl className="device-metadata"><dt>{t('devices.id')}</dt><dd><code ref={idRef}>{device.id}</code><button type="button" className="device-copy-button" onClick={() => { void copyId(); }}>{t('devices.copyId')}</button></dd>
-        <dt>{t('devices.added')}</dt><dd>{date(device.authorized_at)}</dd><dt>{t('devices.lastAccess')}</dt><dd>{date(device.last_used_at)}</dd>
-        <dt>{t('devices.expiresAt')}</dt><dd>{date(device.expires_at)}</dd></dl>
       {copyHint && <p role="status">{copyHint}</p>}
       {!confirming && error && <p role="alert">{error}</p>}
       {conflict && <button disabled={busy} onClick={() => { void refresh(); }}>{t('devices.refreshDetails')}</button>}
-      {!inactive && <><h3 className="device-detail-section-title device-detail-actions-title">{t('devices.detailActions')}</h3><button className="device-danger" disabled={busy} onClick={() => { setError(''); setConfirming(true); }}>{t(current ? 'devices.logout' : 'devices.revoke')}</button></>}
+      {!inactive && <div className="device-detail-actions"><button className="device-danger" disabled={busy} onClick={() => { setError(''); setConfirming(true); }}>{t(current ? 'devices.logout' : 'devices.revoke')}</button></div>}
     </DeviceSheet>
     {confirming && <RevokeConfirm device={device} current={current} busy={busy} error={error} onClose={() => setConfirming(false)} onConfirm={() => { void revoke(); }} />}
   </>;
