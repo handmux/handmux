@@ -1201,9 +1201,8 @@ div.workspace-restore-errors { padding-left: 10px; }
 .pairing-cli-hint code { color: #b9d8ff; font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; }
 .pairing-method-list { display: flex; flex-direction: column; gap: 8px; }
 .pairing-method-caption { margin: 0 0 2px !important; color: #8e8e98; font-size: 12px !important; }
-.pairing-method-card { display: flex; align-items: flex-start; gap: 10px; padding: 11px 12px; border: 1px solid rgba(255,255,255,.07); border-radius: 12px; background: rgba(25,26,30,.62); }
-.pairing-method-card strong { display: block; color: #d4d4da; font-size: 13px; font-weight: 600; line-height: 1.4; }
-.pairing-method-card p { margin: 2px 0 0; color: #a1a1aa; font-size: 12px !important; line-height: 1.45 !important; }
+.pairing-method-card { width: 100%; box-sizing: border-box; display: flex; align-items: flex-start; gap: 10px; padding: 11px 12px; border: 1px solid rgba(255,255,255,.07); border-radius: 12px; background: rgba(25,26,30,.62); }
+.pairing-method-card p { flex: 1; min-width: 0; margin: 2px 0 0; color: #a1a1aa; font-size: 12px !important; line-height: 1.45 !important; }
 .pairing-method-card code { color: #b9d8ff; font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; }
 .pairing-method-badge { flex: 0 0 auto; min-width: 32px; padding: 4px 6px; border-radius: 6px; background: rgba(10,132,255,.14); color: #81baff; font-size: 10px; font-weight: 700; letter-spacing: .3px; line-height: 1.2; text-align: center; }
 .pairing-method-badge-device { min-width: 44px; }

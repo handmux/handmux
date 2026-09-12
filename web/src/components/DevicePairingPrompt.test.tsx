@@ -56,8 +56,8 @@ describe('device authorization flow', () => {
     server.pairing = { id: 'pair_1', state: 'waiting', code: '038271', expiresAt: Date.now() + 60000 };
     render(<DevicePairingPrompt onSaved={vi.fn()} />); await flush();
     expect(screen.getByText(t('auth.chooseOneMethod'))).toBeTruthy();
-    expect(screen.getByText(t('auth.cliMethod'))).toBeTruthy();
-    expect(screen.getByText(t('auth.deviceMethodTitle'))).toBeTruthy();
+    expect(screen.getByText('CLI')).toBeTruthy();
+    expect(screen.getByText(t('auth.webMethod'))).toBeTruthy();
     expect(screen.queryByText(/^1$/)).toBeNull();
     expect(screen.queryByText(/^2$/)).toBeNull();
   });
