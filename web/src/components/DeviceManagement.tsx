@@ -356,8 +356,8 @@ export default function DeviceManagement({ onLoggedOut }: { onLoggedOut: () => v
         <h3>{t('devices.extraOriginsTitle')}</h3>
         {data.trustedOrigins && data.trustedOrigins.length > 0 && <div className="settings-page-list">
           {data.trustedOrigins.map(origin => <div className="settings-page-row device-origin-extra-row" key={origin}>
-            <code className="device-origin-value">{origin}</code>
-            <button type="button" className="device-origin-remove" disabled={originBusy} onClick={() => { void removeTrustedOrigin(origin); }}>{t('common.delete')}</button>
+            <div className="device-origin-copy"><span className="device-origin-label"><b>{t('devices.extraOriginsTitle')}</b></span><code className="device-origin-value">{origin}</code><span className="device-origin-state">{t('devices.originActive')}</span></div>
+            <button type="button" className="device-origin-remove" aria-label={`${t('common.delete')} ${origin}`} disabled={originBusy} onClick={() => { void removeTrustedOrigin(origin); }}>{t('common.delete')}</button>
           </div>)}
         </div>}
         <button type="button" className="fontbtn device-origin-add-button" disabled={originBusy} onClick={() => setOriginSheet(true)}>{t('devices.extraOriginAdd')}</button>

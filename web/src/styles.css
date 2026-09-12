@@ -305,7 +305,8 @@ button.settings-page-row:disabled, .settings-page-row.disabled { color: rgba(235
 .device-feedback button { justify-self: start; min-height: 40px; padding: 0 12px; border: 0; border-radius: 9px; background: rgba(var(--blue-rgb),.12); color: #8fc5ff; font: 14px/1.2 -apple-system, system-ui, sans-serif; }
 .device-settings-group { margin: 0; }
 .device-settings-group > h2 { margin: 0; padding: 0 16px 7px; color: rgba(235,235,245,.52); font-size: 12px; line-height: 1.2; font-weight: 500; letter-spacing: .25px; }
-.device-origin-row { min-height: 70px; align-items: flex-start; padding-top: 13px; padding-bottom: 13px; }
+.device-origin-list, .device-origin-extra .settings-page-list { overflow: hidden; border-radius: 13px; background: #232427; }
+.device-origin-row { min-height: 78px; align-items: flex-start; padding: 14px 16px; background: transparent; }
 .device-origin-copy { min-width: 0; display: grid; gap: 5px; }
 .device-origin-label { color: rgba(235,235,245,.62); font-size: 12px; line-height: 1.25; }
 .device-origin-help { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; margin: 0 0 0 4px; padding: 0; border: 1px solid rgba(235,235,245,.42); border-radius: 50%; background: transparent; color: rgba(235,235,245,.68); font: 12px/1 -apple-system,system-ui,sans-serif; vertical-align: middle; cursor: pointer; }
@@ -321,10 +322,10 @@ button.settings-page-row:disabled, .settings-page-row.disabled { color: rgba(235
 .device-origin-command > span { padding-top: 7px; color: rgba(235,235,245,.48); font-size: 12px; line-height: 1.25; }
 .device-origin-command code { min-width: 0; padding: 7px 8px; border-radius: 8px; background: #1a1b1e; color: #b9d8ff; font: 12px/1.35 ui-monospace, "SF Mono", Menlo, monospace; overflow-wrap: anywhere; }
 .device-origin-mismatch { margin: 7px 16px 0; color: #e6be70; font-size: 12.5px; line-height: 1.45; }
-.device-origin-extra { display: grid; gap: 8px; margin-top: 14px; }
-.device-origin-extra h3 { margin: 0 16px; color: rgba(235,235,245,.72); font-size: 13px; font-weight: 600; }
+.device-origin-extra { display: grid; gap: 9px; margin-top: 14px; }
+.device-origin-extra h3 { margin: 0 16px; color: rgba(235,235,245,.52); font-size: 12px; font-weight: 500; letter-spacing: .25px; }
 .device-origin-extra > p { margin: 0 16px 2px; color: rgba(235,235,245,.52); font-size: 12px; line-height: 1.45; }
-.device-origin-extra-row { min-height: 52px; gap: 10px; }
+.device-origin-extra-row { min-height: 78px; gap: 10px; background: transparent; }
 .device-origin-extra-row .device-origin-value { flex: 1; min-width: 0; font-size: 12px; }
 .device-origin-remove { flex: none; min-height: 36px; padding: 0 8px; border: 0; border-radius: 8px; background: transparent; color: #ff6961; font: 13px/1.2 -apple-system, system-ui, sans-serif; }
 .device-origin-remove:disabled { opacity: .45; }
