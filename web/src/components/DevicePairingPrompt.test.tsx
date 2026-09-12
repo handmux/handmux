@@ -17,8 +17,9 @@ beforeEach(() => {
   applyAuthStatus(server);
   fetcher = vi.fn(async (_path: string, init?: RequestInit) => {
     const method = init?.method ?? 'GET';
+    if (method === 'DELETE' && server.pairing) server.pairing = { ...server.pairing, state: 'canceled' };
     if (method === 'POST') {
-      server.pairing = { id: 'pair_1', state: 'waiting', code: '038271', expiresAt: Date.now() + 60000 };
+      server.pairing = { id: 'pair_1', state: 'waiting', code: server.pairing?.code === '038271' ? '492610' : '038271', expiresAt: Date.now() + 60000 };
     }
     return { ok: true, status: 200, json: async () => ({ ...server, serverTime: Date.now() }) };
   });
@@ -62,17 +63,23 @@ describe('device authorization flow', () => {
     expect(screen.getByText('038271')).toBeTruthy();
   });
 
-  it('keeps the code visible while the countdown runs and supports copy', async () => {
+  it('refreshes the code from the small action beside its label', async () => {
     server.pairing = { id: 'pair_1', state: 'waiting', code: '038271', expiresAt: Date.now() + 60000 };
-    const writeText = vi.fn(async () => {});
-    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
     render(<DevicePairingPrompt onSaved={vi.fn()} />); await flush();
-    fireEvent.click(screen.getByRole('button', { name: t('auth.copyCode') }));
+    fireEvent.click(screen.getByRole('button', { name: t('auth.refreshCode') }));
     await flush();
-    expect(writeText).toHaveBeenLastCalledWith('038271');
+    expect(screen.getByText('492610')).toBeTruthy();
+    expect(fetcher).toHaveBeenCalledWith('/api/auth/pairing', expect.objectContaining({ method: 'POST' }));
+  });
+
+  it('changes the countdown from blue to orange and then red', async () => {
+    server.pairing = { id: 'pair_1', state: 'waiting', code: '038271', expiresAt: Date.now() + 21000 };
+    render(<DevicePairingPrompt onSaved={vi.fn()} />); await flush();
+    expect(screen.getByText(t('auth.codeRemaining', { seconds: 21 })).classList.contains('pairing-countdown-normal')).toBe(true);
     await tick(1000);
-    expect(screen.getByText('038271')).toBeTruthy();
-    expect(screen.getByText(t('auth.codeRemaining', { seconds: 59 }))).toBeTruthy();
+    expect(screen.getByText(t('auth.codeRemaining', { seconds: 20 })).classList.contains('pairing-countdown-warning')).toBe(true);
+    await tick(10000);
+    expect(screen.getByText(t('auth.codeRemaining', { seconds: 10 })).classList.contains('pairing-countdown-danger')).toBe(true);
   });
 
   it('shows a short completion state and signs in only after device setup is saved', async () => {
@@ -93,9 +100,9 @@ describe('device authorization flow', () => {
     server.pairing = { id: 'pair_1', state: 'waiting', code: '038271', expiresAt: Date.now() + 1000 };
     render(<DevicePairingPrompt onSaved={vi.fn()} />); await flush();
     await tick(1100);
-    expect(screen.queryByText('038271')).toBeNull();
-    expect(screen.getByText(t('auth.expired'))).toBeTruthy();
-    expect(screen.getByRole('button', { name: t('auth.requestNewCode') })).toBeTruthy();
+    expect(screen.getByText('------')).toBeTruthy();
+    expect(screen.getByText(t('auth.codeExpired'))).toBeTruthy();
+    expect(screen.getByRole('button', { name: t('auth.refreshCode') })).toBeTruthy();
   });
 
   it('cancels by the actual request ID and hides the old code', async () => {

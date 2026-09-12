@@ -1179,17 +1179,30 @@ div.workspace-restore-errors { padding-left: 10px; }
 .pairing-loading, .pairing-help, .pairing-cli-hint, .pairing-state { text-align: center; }
 .pairing-loading, .pairing-state { color: #bcbcc4; }
 .pairing-code-card { display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 22px 16px 16px; border: 1px solid rgba(255,255,255,.08); border-radius: 18px; background: #191a1e; box-shadow: inset 0 1px 0 rgba(255,255,255,.03); }
+.pairing-code-heading { width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .pairing-code-label { color: #8e8e98; font-size: 12px; }
+.pairing-refresh { min-height: 32px !important; padding: 5px 9px !important; border: 0 !important; border-radius: 7px !important; color: #81baff !important; background: rgba(10,132,255,.1) !important; font-size: 12px !important; }
 .pairing-code { color: #f5f5f7; font: 650 clamp(38px, 12vw, 52px)/1 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .16em; font-variant-numeric: tabular-nums; user-select: text; -webkit-user-select: text; }
+.pairing-code-placeholder { color: #777983; letter-spacing: .12em; }
 .pairing-code-meta { width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .pairing-countdown { color: #a1a1aa; font-size: 12px; font-variant-numeric: tabular-nums; }
-.pairing-copy { min-height: 36px !important; padding: 6px 10px !important; border: 0 !important; border-radius: 8px !important; color: #81baff !important; background: rgba(10,132,255,.1) !important; font-size: 12px !important; }
+.pairing-countdown-warning { color: #ffb340; }
+.pairing-countdown-danger { color: #ff625b; }
+.pairing-countdown-expired { color: #ff625b; }
 .pairing-progress { width: 100%; height: 4px; border: 0; border-radius: 999px; overflow: hidden; accent-color: var(--blue); }
 .pairing-progress::-webkit-progress-bar { background: rgba(120,120,128,.2); border-radius: 999px; }
 .pairing-progress::-webkit-progress-value { background: var(--blue); border-radius: 999px; transition: width .25s linear; }
+.pairing-progress-warning { accent-color: #ffb340; }
+.pairing-progress-warning::-webkit-progress-value { background: #ffb340; }
+.pairing-progress-danger { accent-color: #ff625b; }
+.pairing-progress-danger::-webkit-progress-value { background: #ff625b; }
 .pairing-help { color: #d4d4da; }
 .pairing-cli-hint { color: #8e8e98; font-size: 12px !important; }
 .pairing-cli-hint code { color: #b9d8ff; font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; }
+.pairing-method-list { display: flex; flex-direction: column; gap: 10px; }
+.pairing-method-row { display: flex; align-items: flex-start; gap: 10px; color: #bcbcc4; font-size: 13px !important; line-height: 1.45 !important; }
+.pairing-method-row > span:first-child { flex: 0 0 20px; width: 20px; height: 20px; border-radius: 50%; background: rgba(10,132,255,.14); color: #81baff; font-size: 12px; line-height: 20px; text-align: center; }
+.pairing-method-row code { color: #b9d8ff; font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; }
 .pairing-state p + p { margin-top: -4px; }
 .pairing-new-code { margin-top: 2px; }
 .pairing-prompt h2, .pairing-prompt h3 { margin: 8px 0 0; }
