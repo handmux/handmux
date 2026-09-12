@@ -5,7 +5,7 @@ import request from 'supertest';
 import WebSocket from 'ws';
 import { afterEach, describe, expect, it } from 'vitest';
 import { migrateProjectDatabase } from '../src/projectTask/migrations.js';
-import { DeviceAuthService } from '../src/deviceAuth/service.js';
+import { DeviceAuthService, sessionCookieName } from '../src/deviceAuth/service.js';
 import { createDeviceAuthRouter } from '../src/deviceAuth/http.js';
 import { createAuthOriginResolver, createDeviceAccess } from '../src/deviceAccess.js';
 import { createTerminalStream } from '../src/terminalStream.js';
@@ -45,7 +45,7 @@ async function fixture() {
   const promote = async (candidate: string) => {
     const result = await request(server).get('/api/auth/status').set(headers).set('Cookie', candidate).expect(200);
     expect(result.body.authenticated).toBe(true);
-    return (result.headers['set-cookie'] as unknown as string[]).find(value => value.startsWith('handmux_session_http='))!.split(';')[0]!;
+    return (result.headers['set-cookie'] as unknown as string[]).find(value => value.startsWith(`${sessionCookieName(origin)}=`))!.split(';')[0]!;
   };
   const enroll = async (name: string, expire = '1h') => {
     const pending = await begin();
@@ -151,7 +151,7 @@ describe('Web device management across real HTTP and WebSocket boundaries', () =
       .set('Cookie', `${actor.cookie}; ${leftover.cookie}`).expect(200);
     expect(result.body).toMatchObject({ ok: true, authenticated: false });
     const cleared = result.headers['set-cookie'] as unknown as string[];
-    expect(cleared.some(value => value.startsWith('handmux_session_http=;'))).toBe(true);
+    expect(cleared.some(value => value.startsWith(`${sessionCookieName(f.origin)}=;`))).toBe(true);
     expect(f.service.isDeviceActive(actor.device.id)).toBe(false);
     expect(f.service.isDeviceActive(extra.id)).toBe(false);
     const status = await request(f.server).get('/api/auth/status').set(f.headers).set('Cookie', leftover.cookie).expect(200);

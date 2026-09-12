@@ -8,7 +8,7 @@ import request from 'supertest';
 import WebSocket from 'ws';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { migrateProjectDatabase } from '../src/projectTask/migrations.js';
-import { DeviceAuthService } from '../src/deviceAuth/service.js';
+import { DeviceAuthService, sessionCookieName } from '../src/deviceAuth/service.js';
 import { createDeviceAuthRouter } from '../src/deviceAuth/http.js';
 import { connectAuthControl, startDeviceAuthControl } from '../src/deviceAuth/control.js';
 import { createAuthOriginResolver, createDeviceAccess } from '../src/deviceAccess.js';
@@ -84,7 +84,7 @@ describe('browser → CLI socket → protected HTTP / WebSocket', () => {
     const claim = service.claim(pair.pairing.code, 'cli');
     const device = service.authorize(claim.id, 'cli', { name: 'background', expire: '1h' });
     await request(app).post('/api/background').set({ Host: 'localhost:4000', Origin: origin,
-      'X-Handmux-Request': '1', Cookie: `handmux_session_http=${pair.secret}`,
+      'X-Handmux-Request': '1', Cookie: `${sessionCookieName(origin)}=${pair.secret}`,
     }).send({}).expect(202);
     service.revoke(device.id); release();
     expect(await completed).toBe('completed');
@@ -101,7 +101,7 @@ describe('browser → CLI socket → protected HTTP / WebSocket', () => {
     let release!: () => void;
     const blocked = serializePaneInput('%99001', () => new Promise<void>(resolve => { release = resolve; }));
     const pending = request(app).post('/api/send').set({ Host: 'localhost:4000', Origin: origin,
-      'X-Handmux-Request': '1', Cookie: `handmux_session_http=${pair.secret}`,
+      'X-Handmux-Request': '1', Cookie: `${sessionCookieName(origin)}=${pair.secret}`,
     }).send({ pane: '%99001', text: 'must not type', enter: false }).then(value => value, error => error);
     await vi.waitFor(() => expect(received).toBe(true));
     service.revoke(device.id);
@@ -117,7 +117,7 @@ describe('browser → CLI socket → protected HTTP / WebSocket', () => {
     const claim = service.claim(pair.pairing.code, 'cli');
     const device = service.authorize(claim.id, 'cli', { name: 'delayed', expire: '1h' });
     const pending = request(app).post('/api/send').set({ Host: 'localhost:4000', Origin: origin,
-      'X-Handmux-Request': '1', Cookie: `handmux_session_http=${pair.secret}`,
+      'X-Handmux-Request': '1', Cookie: `${sessionCookieName(origin)}=${pair.secret}`,
     }).send({ pane: '%99002', text: 'already typed', enter: true }).then(value => value, error => error);
     await vi.waitFor(() => expect(sent).toHaveBeenCalledOnce(), { interval: 1 });
     service.revoke(device.id); await pending;
@@ -136,7 +136,7 @@ describe('browser → CLI socket → protected HTTP / WebSocket', () => {
     const address = server.address(); if (!address || typeof address === 'string') throw new Error('no test port');
     const incoming = await new Promise<http.IncomingMessage>((resolve, reject) => {
       http.get({ host: '127.0.0.1', port: address.port, path: '/api/events', headers: {
-        Host: 'localhost:4000', Origin: origin, 'X-Handmux-Request': '1', Cookie: `handmux_session_http=${pair.secret}`,
+        Host: 'localhost:4000', Origin: origin, 'X-Handmux-Request': '1', Cookie: `${sessionCookieName(origin)}=${pair.secret}`,
       } }, resolve).once('error', reject);
     });
     expect(incoming.statusCode).toBe(200);
@@ -182,7 +182,7 @@ describe('browser → CLI socket → protected HTTP / WebSocket', () => {
     const claim = service.claim(pair.pairing.code, 'cli');
     const device = service.authorize(claim.id, 'cli', { name: 'test', expire: '1h' });
     const url = `ws://127.0.0.1:${address.port}/api/terminal-stream`;
-    const cookie = `handmux_session_http=${pair.secret}`;
+    const cookie = `${sessionCookieName(origin)}=${pair.secret}`;
     const missingOrigin = new WebSocket(url, { headers: { Cookie: cookie } }); missingOrigin.on('error', () => {});
     const status = await new Promise<number | undefined>(resolve => missingOrigin.on('unexpected-response', (_req, res) => { resolve(res.statusCode); res.resume(); missingOrigin.terminate(); }));
     expect(status).toBe(401);
