@@ -263,6 +263,7 @@ button.settings-page-row:disabled, .settings-page-row.disabled { color: rgba(235
 .device-origin-badge { color: var(--blue); font-size: 13px; }
 .device-origin-value { display: block; margin-top: 8px; overflow-wrap: anywhere; color: #f2f2f7; font-size: 14px; line-height: 1.4; }
 .device-origin-card p, .device-token-heading p { margin: 7px 0 0; color: rgba(235,235,245,.52); font-size: 12.5px; line-height: 1.45; }
+.device-origin-card .device-origin-mismatch { color: #e6be70; }
 .device-token-card { padding-bottom: 0; }
 .device-token-heading h2 { margin: 0; font-size: 15px; font-weight: 600; }
 .device-token-status { flex: none; color: #e6be70; font-size: 12px; }

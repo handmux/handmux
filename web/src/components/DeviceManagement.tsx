@@ -11,6 +11,7 @@ export const deviceErrorCopy = (error: unknown): string => {
     CODE_INVALID: 'devices.invalidCode', CLAIM_RATE_LIMIT: 'auth.rateLimit', AUTH_RATE_LIMIT: 'auth.rateLimit',
     PAIRING_NOT_FOUND: 'devices.pairingGone', PAIRING_INACTIVE: 'devices.pairingGone',
     INVALID_NAME: 'devices.invalidName', INVALID_EXPIRE: 'devices.invalidExpire',
+    TRUSTED_ORIGIN_MISMATCH: 'devices.originMismatch',
   };
   return t(error instanceof DeviceManagementError ? codes[error.code] ?? 'devices.requestError' : 'devices.requestError');
 };
@@ -293,11 +294,13 @@ export default function DeviceManagement({ onLoggedOut }: { onLoggedOut: () => v
   };
   const inactiveCount = (data?.devices ?? []).filter(d => isInactive(d, now)).length;
   const currentOrigin = window.location.origin;
+  const originMismatch = Boolean(data?.trustedOrigin && data.trustedOrigin !== currentOrigin);
   return <section className="device-management">
     <div className="device-origin-card">
       <div className="device-origin-heading"><span className="device-section-kicker">{t('devices.trustedOrigin')}</span><span className="device-origin-badge">{data?.trustedOrigin ? '●' : '○'}</span></div>
       <code className="device-origin-value">{data?.trustedOrigin ?? t('devices.originUnset')}</code>
       <p>{t('devices.originHint')}</p>
+      {originMismatch && <p className="device-origin-mismatch">{t('devices.originMismatch')}</p>}
     </div>
     {data?.tokenEnabled && <section className="device-token-card" aria-labelledby="device-token-title"><div className="device-token-heading"><div><h2 id="device-token-title">{t('devices.fixedToken')}</h2><p>{t(data.currentDeviceId ? 'devices.disableRecommendation' : 'devices.registerFirst')}</p></div><span className="device-token-status">{t('devices.enabled')}</span></div><button className="device-token-action" aria-label={t('devices.disableToken')} disabled={!data.currentDeviceId || busy} onClick={() => setConfirmToken(true)}>{t('devices.disableToken')}<span aria-hidden="true">›</span></button></section>}
     {history && <button className="device-inline" onClick={() => setHistory(false)}>{t('devices.activeDevices')}</button>}
@@ -306,7 +309,7 @@ export default function DeviceManagement({ onLoggedOut }: { onLoggedOut: () => v
         <span className="device-row-copy"><span className="device-row-main"><span>{d.name}</span>{d.id === data?.currentDeviceId && <small>{t('devices.current')}</small>}</span>
           <span className="device-row-secondary"><span>{d.browser_summary}</span><span>{remainingExpiry(d, now)}</span></span></span><span className="settings-page-chevron" aria-hidden="true">›</span>
       </button>)}
-      {!history && <><button className="settings-page-row device-add-row" aria-label={t('devices.addSelf')} disabled={!!data?.currentDeviceId || busy || !data?.tokenEnabled} onClick={() => setSelfSheet(true)}><span className="device-action-copy"><strong>{t(data?.currentDeviceId ? 'devices.selfRegistered' : 'devices.addSelf')}</strong><small>{currentOrigin}</small></span><span className="settings-page-chevron" aria-hidden="true">›</span></button><button className="settings-page-row device-add-row" aria-label={t('devices.add')} disabled={!data?.currentDeviceId} onClick={() => setAdding(true)}><span>{t('devices.add')}</span><span className="settings-page-chevron" aria-hidden="true">›</span></button></>}
+      {!history && <><button className="settings-page-row device-add-row" aria-label={t('devices.addSelf')} disabled={!!data?.currentDeviceId || busy || !data?.tokenEnabled || originMismatch} onClick={() => setSelfSheet(true)}><span className="device-action-copy"><strong>{t(data?.currentDeviceId ? 'devices.selfRegistered' : 'devices.addSelf')}</strong><small>{currentOrigin}</small></span><span className="settings-page-chevron" aria-hidden="true">›</span></button><button className="settings-page-row device-add-row" aria-label={t('devices.add')} disabled={!data?.currentDeviceId} onClick={() => setAdding(true)}><span>{t('devices.add')}</span><span className="settings-page-chevron" aria-hidden="true">›</span></button></>}
     </div>
     {history && devices.length === 0 && !loading && <p className="auth-secondary">{t('devices.noHistory')}</p>}
     {!history && inactiveCount > 0 && <button className="device-inline" onClick={() => setHistory(true)}>{t('devices.history', { n: inactiveCount })}</button>}

@@ -27,6 +27,7 @@ export default {
   "devices.trustedOrigin": "Trusted access address",
   "devices.originUnset": "Not set; the current address will be used when this browser is added",
   "devices.originHint": "Trusted devices can sign in only through this address. Change it with the handmux CLI on the server.",
+  "devices.originMismatch": "This address is different from the trusted access address. Open the configured address to add this browser.",
   "devices.addSelfOrigin": "Set {origin} as the trusted access address and add this browser. Only authorized devices using this address can sign in afterward.",
   "devices.disableOrigin": "Current trusted access address: {origin}. After disabling, only authorized devices using this address can sign in.",
   "devices.cliOnly": "Change the trusted access address with the handmux CLI on the server.",

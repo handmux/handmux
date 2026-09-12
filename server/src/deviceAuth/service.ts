@@ -95,8 +95,13 @@ export class DeviceAuthService {
     return row?.value || null;
   }
   setTrustedOrigin(origin: string): void {
-    if (!/^https?:\/\/[^/]+$/.test(origin)) throw new DeviceAuthError('INVALID_ORIGIN', 'Trusted access address must be a complete origin', 400);
-    this.transaction(() => this.db.prepare("INSERT INTO auth_meta(key,value) VALUES('trusted_origin',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(origin));
+    let normalized: string;
+    try {
+      const url = new URL(origin);
+      if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.pathname !== '/' || url.search || url.hash || url.origin !== origin) throw new Error('invalid');
+      normalized = url.origin;
+    } catch { throw new DeviceAuthError('INVALID_ORIGIN', 'Trusted access address must be a complete origin', 400); }
+    this.transaction(() => this.db.prepare("INSERT INTO auth_meta(key,value) VALUES('trusted_origin',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(normalized));
   }
   authenticateToken(provided: unknown, origin: string): DevicePrincipal | null {
     if (!this.tokenEnabled || !this.tokenSecret || typeof provided !== 'string' || !provided || !tokenEquals(provided, this.tokenSecret)) return null;
@@ -250,6 +255,7 @@ export class DeviceAuthService {
     const existing = this.authenticateSecret(secret, origin);
     if (existing) return this.device(existing.deviceId);
     if (!this.tokenEnabled) throw new DeviceAuthError('TOKEN_DISABLED', 'Fixed Token login is disabled', 401);
+    if (this.trustedOrigin && this.trustedOrigin !== origin) throw new DeviceAuthError('TRUSTED_ORIGIN_MISMATCH', 'Open this address through the configured trusted access address', 409);
     validateName(values.name); parseExpire(values.expire);
     const pairing = this.pending.get(hash(secret));
     if (!pairing || pairing.origin !== origin) throw new DeviceAuthError('PAIRING_NOT_FOUND', 'Prepare this browser for registration and retry', 409);

@@ -26,6 +26,7 @@ export default {
   "devices.trustedOrigin": "可信访问地址",
   "devices.originUnset": "尚未设置；添加本机时自动使用当前地址",
   "devices.originHint": "可信设备只能通过这个地址登录。地址需要修改时，请在服务器上使用 handmux CLI。",
+  "devices.originMismatch": "当前地址与可信访问地址不同，请切换到已配置的地址。",
   "devices.addSelfOrigin": "将当前地址 {origin} 设为可信访问地址，并添加本机。之后只有通过这个地址的已授权设备可以登录。",
   "devices.disableOrigin": "当前可信访问地址：{origin}。禁用后只有通过这个地址的已授权设备可以登录。",
   "devices.cliOnly": "如需修改可信访问地址，请在服务器上使用 handmux CLI。",
