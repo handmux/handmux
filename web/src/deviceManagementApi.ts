@@ -3,7 +3,7 @@ export interface ManagedDevice {
   id: string; name: string; browser_summary: string; authorized_at: number; expires_at: number | null;
   last_used_at: number; revoked_at: number | null; status: 'active' | 'expired' | 'revoked'; version: number;
 }
-export interface DeviceList { devices: ManagedDevice[]; currentDeviceId: string | null; tokenEnabled?: boolean; serverTime: number }
+export interface DeviceList { devices: ManagedDevice[]; currentDeviceId: string | null; tokenEnabled?: boolean; trustedOrigin?: string | null; serverTime: number }
 export interface DeviceApproval {
   id: string; state: 'configuring' | 'authorized' | 'expired' | 'canceled'; browserSummary: string;
   expiresAt: number; source: 'web'; device?: ManagedDevice;

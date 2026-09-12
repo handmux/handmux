@@ -89,6 +89,15 @@ export class DeviceAuthService {
   }
   /** Runtime fixed-token compatibility switch. Trusted-device authorization remains available regardless. */
   get tokenEnabled(): boolean { return !this.closed && this.tokenEnabledState; }
+  /** Origin selected when the first browser is registered as a trusted device. */
+  get trustedOrigin(): string | null {
+    const row = this.db.prepare("SELECT value FROM auth_meta WHERE key='trusted_origin'").get() as { value: string } | undefined;
+    return row?.value || null;
+  }
+  setTrustedOrigin(origin: string): void {
+    if (!/^https?:\/\/[^/]+$/.test(origin)) throw new DeviceAuthError('INVALID_ORIGIN', 'Trusted access address must be a complete origin', 400);
+    this.transaction(() => this.db.prepare("INSERT INTO auth_meta(key,value) VALUES('trusted_origin',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(origin));
+  }
   authenticateToken(provided: unknown, origin: string): DevicePrincipal | null {
     if (!this.tokenEnabled || !this.tokenSecret || typeof provided !== 'string' || !provided || !tokenEquals(provided, this.tokenSecret)) return null;
     if (!this.isDeviceActive(`token_${this.tokenGeneration}`)) return null;
@@ -100,6 +109,7 @@ export class DeviceAuthService {
     if (options.actor) {
       if (this.isTokenPrincipal(options.actor)) throw new DeviceAuthError('SESSION_INVALID', 'Register this browser as a trusted device first', 401);
       this.assertActive(options.actor);
+      if (!enabled && (!this.trustedOrigin || this.trustedOrigin !== options.actor.origin)) throw new DeviceAuthError('TRUSTED_ORIGIN_REQUIRED', 'Add this browser as a trusted device at its current access address before disabling fixed Token login', 409);
     }
     if (this.tokenEnabledState === enabled) return;
     const previousId = `token_${this.tokenGeneration}`;
@@ -246,7 +256,9 @@ export class DeviceAuthService {
     this.updatePair(pairing);
     const owner = `self:${pairing.secretHash}`;
     if (pairing.state === 'waiting') this.claim(pairing.code, owner);
-    return this.authorize(pairing.id, owner, values);
+    const device = this.authorize(pairing.id, owner, values);
+    if (!this.trustedOrigin) this.setTrustedOrigin(origin);
+    return device;
   }
   cancelPairing(secret: string | null, origin: string, id: string): PairingStatus | null {
     this.requireMode(); const p = secret ? this.pending.get(hash(secret)) : null;

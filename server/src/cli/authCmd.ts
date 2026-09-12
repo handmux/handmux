@@ -3,11 +3,14 @@ import { connectAuthControl } from '../deviceAuth/control.js';
 import { parseExpire, validateName } from '../deviceAuth/service.js';
 import { t } from './i18n/index.js';
 
-export interface AuthCommand { op: 'add' | 'list' | 'edit' | 'revoke' | 'token-status' | 'token-enable' | 'token-disable'; id?: string; name?: string; expire?: string; allowEmpty?: boolean }
+export interface AuthCommand { op: 'add' | 'list' | 'edit' | 'revoke' | 'token-status' | 'token-enable' | 'token-disable' | 'trusted-origin-status' | 'trusted-origin-set'; id?: string; name?: string; expire?: string; origin?: string; allowEmpty?: boolean }
 export function parseAuthArgs(argv: readonly string[], interactive: boolean): AuthCommand {
   let [op, ...rest] = argv;
   if (op === 'token') { const sub = rest.shift(); op = sub ? `token-${sub}` : ''; }
-  if (op !== 'add' && op !== 'list' && op !== 'edit' && op !== 'revoke' && op !== 'token-status' && op !== 'token-enable' && op !== 'token-disable') throw new Error('Usage: handmux auth add ... | list | edit ... | revoke ... | token status|enable|disable');
+  if (op === 'trusted-origin') { const sub = rest.shift(); op = sub ? `trusted-origin-${sub}` : ''; }
+  if (op !== 'add' && op !== 'list' && op !== 'edit' && op !== 'revoke' && op !== 'token-status' && op !== 'token-enable' && op !== 'token-disable' && op !== 'trusted-origin-status' && op !== 'trusted-origin-set') throw new Error('Usage: handmux auth add ... | list | edit ... | revoke ... | token status|enable|disable | trusted-origin status|set <origin>');
+  if (op === 'trusted-origin-status') return { op };
+  if (op === 'trusted-origin-set') { if (rest.length !== 1 || !rest[0]) throw new Error('Provide an origin, for example https://handmux.example.com'); return { op, origin: rest[0] }; }
   if (op === 'token-status' || op === 'token-enable' || op === 'token-disable') return { op };
   const result: AuthCommand = { op };
   for (let i = 0; i < rest.length; i++) {
@@ -45,6 +48,10 @@ export async function runAuthCommand({ argv, home, interactive = !!process.stdin
   let client: Awaited<ReturnType<typeof connectAuthControl>> | undefined;
   try {
     const args = parseAuthArgs(argv, interactive);
+    if (args.op === 'trusted-origin-status' || args.op === 'trusted-origin-set') {
+      client = await connect(home); const result = await client.request({ op: args.op, origin: args.origin });
+      log(`可信访问地址: ${safeText((result as { origin?: string | null }).origin) || '未配置'}`); return 0;
+    }
     if (args.op === 'token-status' || args.op === 'token-enable' || args.op === 'token-disable') {
       client = await connect(home);
       const status = await client.request({ op: 'token-status' }) as { enabled: boolean; devices?: unknown[] };

@@ -293,6 +293,7 @@ export default function DeviceManagement({ onLoggedOut }: { onLoggedOut: () => v
   };
   const inactiveCount = (data?.devices ?? []).filter(d => isInactive(d, now)).length;
   return <section className="device-management">
+    <p className="auth-secondary">可信访问地址：{data?.trustedOrigin ?? '未设置（添加本机时自动使用当前浏览器地址）'}</p>
     {data?.tokenEnabled && <div className="settings-page-list"><div className="settings-page-row"><span>{t('devices.fixedToken')}</span><button className="fontbtn" disabled={!data.currentDeviceId || busy} onClick={() => setConfirmToken(true)}>{t('devices.disableToken')}</button></div><p className="auth-secondary">{t(data.currentDeviceId ? 'devices.disableRecommendation' : 'devices.registerFirst')}</p></div>}
     {history && <button className="device-inline" onClick={() => setHistory(false)}>{t('devices.activeDevices')}</button>}
     <div className="settings-page-list">

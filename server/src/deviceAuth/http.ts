@@ -28,7 +28,7 @@ export function createDeviceAuthRouter({ service, resolveOrigin }: {
   router.use((req, res, next) => {
     res.set('Cache-Control', 'no-store'); res.set('Pragma', 'no-cache');
     const origin = resolveOrigin(req);
-    if (!origin || (req.get('Origin') && req.get('Origin') !== origin)
+    if (!origin || req.get('X-Handmux-Request') !== '1' || (req.get('Origin') && req.get('Origin') !== origin)
       || (!['GET', 'HEAD'].includes(req.method) && req.get('Origin') !== origin)) {
       res.status(403).json({ error: 'AUTH_ORIGIN_REJECTED', message: 'Open HandMux from its advertised address and retry' }); return;
     }
@@ -77,7 +77,7 @@ export function createDeviceAuthRouter({ service, resolveOrigin }: {
     if (!principal && candidate) { principal = service.authenticateSecret(candidate.secret, origin); if (principal) secret = candidate.secret; }
     if (principal && secret) setSessionCookie(res, origin, secret, principal.expiresAt);
     const pairing = candidate?.pairing;
-    res.json({ mode: service.mode, tokenEnabled: service.tokenEnabled, authenticated: !!principal || !!tokenPrincipal(req, origin), currentDeviceId: formalPrincipal?.deviceId ?? null, ...(pairing ? { pairing } : {}), serverTime: Date.now() });
+    res.json({ mode: service.mode, tokenEnabled: service.tokenEnabled, trustedOrigin: service.trustedOrigin, authenticated: !!principal || !!tokenPrincipal(req, origin), currentDeviceId: formalPrincipal?.deviceId ?? null, ...(pairing ? { pairing } : {}), serverTime: Date.now() });
   };
   const safe = (handler: (req: Request, res: Response) => void) => (req: Request, res: Response): void => {
     try { handler(req, res); } catch (error) {
@@ -135,7 +135,7 @@ export function createDeviceAuthRouter({ service, resolveOrigin }: {
     const secret = readSessionSecret(req, origin);
     if (actor && secret) setSessionCookie(res, origin, secret, actor.expiresAt);
     const devices = service.list().sort((a, b) => Number(b.id === actor?.deviceId) - Number(a.id === actor?.deviceId) || b.last_used_at - a.last_used_at || a.id.localeCompare(b.id));
-    res.json({ devices, tokenEnabled: service.tokenEnabled, currentDeviceId: actor?.deviceId ?? null, serverTime: Date.now() });
+    res.json({ devices, tokenEnabled: service.tokenEnabled, trustedOrigin: service.trustedOrigin, currentDeviceId: actor?.deviceId ?? null, serverTime: Date.now() });
   }));
   router.post('/devices/self', safe((req, res) => {
     const origin = String(res.locals.authOrigin);
