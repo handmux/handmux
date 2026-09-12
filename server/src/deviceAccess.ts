@@ -84,8 +84,7 @@ export function createDeviceAccess({ service, resolveOrigin }: {
   const middleware: RequestHandler = (req, res, next) => {
     res.setHeader('Cache-Control', 'no-store');
     const origin = resolveOrigin(req);
-    if (!origin || (req.headers.origin !== undefined && req.headers.origin !== origin)
-      || req.get('X-Handmux-Request') !== '1') {
+    if (!origin || (req.headers.origin !== undefined && req.headers.origin !== origin)) {
       res.status(403).json({ error: 'untrusted request origin', code: 'origin_rejected' });
       return;
     }
