@@ -101,7 +101,6 @@ export default {
   'auth.browserScope': '授权保存在当前浏览器和当前访问地址中。更换地址后，需要重新配对。',
   'auth.antiPhishing': '仅授权你本人正在添加的浏览器，不要输入他人发来的校验码。',
   'auth.httpWarning': '当前使用 HTTP。为更好地保护敏感访问，尽可能使用 HTTPS 或可信的加密网络。',
-  'auth.useToken': '使用固定 Token 登录',
   'auth.tokenWarning': '访问 handmux 需要同时提供固定 Token 和可信设备。固定 Token 不能单独进入业务。',
   'auth.dualRequirement': '访问 handmux 需要同时提供固定 Token 和可信设备。固定 Token 不能单独进入业务。',
   'auth.migrationRequired': '这是一次认证升级。请先用固定 Token 申请配对，再在服务器本机终端或独立 SSH 执行 handmux auth add；完成后本浏览器才能继续访问。',

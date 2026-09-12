@@ -79,7 +79,7 @@ import PaneSurfaceHost from './components/PaneSurfaceHost.jsx';
 import TokenPrompt from './components/TokenPrompt.jsx';
 import DevicePairingPrompt from './components/DevicePairingPrompt.js';
 import DeviceLogoutDialog from './components/DeviceLogoutDialog.js';
-import { hasAuthenticatedSession, hasDeviceSession, isDeviceAuth, isFixedTokenEnabled, logoutDevice } from './authSession.js';
+import { applyAuthStatus, authRequest, AuthRequestError, hasAuthenticatedSession, hasDeviceSession, isDeviceAuth, isFixedTokenEnabled, logoutDevice } from './authSession.js';
 import Settings from './components/Settings.jsx';
 import WorkspaceRestoreDialog from './components/WorkspaceRestoreDialog.jsx';
 import UsagePage from './components/UsagePage.jsx';
@@ -289,6 +289,8 @@ export default function App() {
   // presented to the auth authority before the trusted-device check; never
   // let the pairing screen become an implicit Token-only login path.
   const [authPrompt, setAuthPrompt] = useState<'device' | 'token'>('token');
+  const [tokenCheckBusy, setTokenCheckBusy] = useState(false);
+  const [tokenCheckError, setTokenCheckError] = useState('');
   const [logoutConfirm, setLogoutConfirm] = useState(false);
   const [logoutBusy, setLogoutBusy] = useState(false);
   const [logoutError, setLogoutError] = useState('');
@@ -488,6 +490,18 @@ export default function App() {
   const drawerMenuRef = useRef<HTMLButtonElement | null>(null);
 
   const onAuthFail = useCallback(() => setNeedToken(true), []);
+  const validateToken = useCallback(() => {
+    setTokenCheckBusy(true);
+    setTokenCheckError('');
+    void authRequest().then((status) => {
+      applyAuthStatus(status);
+      if (status.tokenAuthenticated === true || status.mode === 'token') setAuthPrompt('device');
+      else setTokenCheckError(t('auth.tokenInvalid'));
+    }).catch((error: unknown) => {
+      setTokenCheckError(error instanceof AuthRequestError && error.code === 'AUTH_ORIGIN_REJECTED'
+        ? t('auth.originRejected') : t('auth.connectionError'));
+    }).finally(() => setTokenCheckBusy(false));
+  }, []);
   const {
     enqueueInput: enqueueTerminalInput,
     enqueueKeys: enqueueTerminalKeys,
@@ -2403,8 +2417,10 @@ export default function App() {
   });
 
   if (needToken) {
-    if (authPrompt === 'token' && isFixedTokenEnabled()) return <TokenPrompt onSaved={() => setAuthPrompt('device')} />;
-    return <DevicePairingPrompt onSaved={() => { setNeedToken(false); setBooting(true); }} onSwitch={() => setAuthPrompt('token')} />;
+    if (authPrompt === 'token' && isFixedTokenEnabled()) {
+      return <TokenPrompt onSaved={validateToken} error={tokenCheckError} busy={tokenCheckBusy} />;
+    }
+    return <DevicePairingPrompt onSaved={() => { setNeedToken(false); setBooting(true); }} />;
   }
 
   const inboxList = inboxRows(states, seen, readTs == null ? Infinity : readTs);

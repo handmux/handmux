@@ -9,7 +9,7 @@ const errorCopy = (error: unknown) => t(error instanceof AuthRequestError && err
     ? 'auth.tokenRequired' : error instanceof AuthRequestError && error.code === 'AUTH_ORIGIN_REJECTED'
       ? 'auth.originRejected' : 'auth.connectionError');
 
-export default function DevicePairingPrompt({ onSaved, onSwitch }: { onSaved: () => void; onSwitch?: () => void }) {
+export default function DevicePairingPrompt({ onSaved }: { onSaved: () => void }) {
   const [status, setStatus] = useState<AuthStatus | null>(null);
   const [busy, setBusy] = useState(true);
   const [error, setError] = useState('');
@@ -99,6 +99,14 @@ export default function DevicePairingPrompt({ onSaved, onSwitch }: { onSaved: ()
       setCopyHint(t('auth.manualCopy'));
     }
   };
+  // The first status request decides whether this browser needs the Token factor and whether an
+  // existing pairing can be resumed. Rendering pairing controls before that decision creates a
+  // misleading second login path and lets a fast tap send a Token-less POST (401 TOKEN_REQUIRED).
+  if (!status) return <AuthFrame title={t('auth.connecting')}>
+    <section className="token-prompt pairing-prompt" aria-live="polite">
+      {error ? <p role="alert">{error}</p> : <p>{t('common.loading')}</p>}
+    </section>
+  </AuthFrame>;
   if (status?.mode === 'token') return <TokenPrompt onSaved={onSaved} />;
   // A missing or rejected Token never falls through to pairing. The user must
   // complete the first factor before we create or consume a pairing request.
@@ -145,6 +153,5 @@ export default function DevicePairingPrompt({ onSaved, onSwitch }: { onSaved: ()
     {(waiting || configuring) && <button className="pairing-cancel" disabled={busy} onClick={() => { void request('DELETE'); }}>{t('auth.cancelPairing')}</button>}
     {(!pairing || pairing.state === 'expired' || pairing.state === 'canceled') && <button className="auth-primary" disabled={busy} onClick={() => { void request('POST'); }}>{t('auth.request')}</button>}
     {waiting && remaining === 0 && <button className="auth-primary" disabled={busy} onClick={() => { void request('POST'); }}>{t('auth.request')}</button>}
-    {onSwitch && <button type="button" className="auth-secondary" onClick={onSwitch}>{t('auth.useToken')}</button>}
   </section></AuthFrame>;
 }

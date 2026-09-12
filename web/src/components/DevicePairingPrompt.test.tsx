@@ -37,6 +37,23 @@ describe('device pairing with CLI and trusted-device methods', () => {
     expect(fetcher).toHaveBeenLastCalledWith('/api/auth/pairing', expect.objectContaining({ method: 'GET' }));
   });
 
+  it('does not offer a second parallel fixed Token login on the pairing page', async () => {
+    server = { mode: 'trusted-device', tokenEnabled: true, tokenAuthenticated: true, authenticated: false, serverTime: Date.now() };
+    render(<DevicePairingPrompt onSaved={vi.fn()} />); await flush();
+    expect(screen.queryByRole('button', { name: /(?:使用固定 Token 登录|Use fixed Token login)/ })).toBeNull();
+  });
+
+  it('keeps pairing controls hidden until the first authorization status arrives', async () => {
+    let resolve!: (value: unknown) => void;
+    fetcher.mockReturnValue(new Promise(done => { resolve = done; }));
+    render(<DevicePairingPrompt onSaved={vi.fn()} />);
+    expect(screen.queryByRole('button', { name: t('auth.request') })).toBeNull();
+    expect(screen.getByText(t('common.loading'))).toBeTruthy();
+    resolve({ ok: true, status: 200, json: async () => ({ mode: 'trusted-device', tokenEnabled: true, tokenAuthenticated: true, authenticated: false, serverTime: Date.now() }) });
+    await flush();
+    expect(screen.getByRole('button', { name: t('auth.request') })).toBeTruthy();
+  });
+
   it('starts with an explicit request and does not show method tabs before a code exists', async () => {
     render(<DevicePairingPrompt onSaved={vi.fn()} />);
     await flush();

@@ -102,7 +102,6 @@ export default {
   'auth.browserScope': 'Authorization is saved for this browser and access address. Changing the address requires pairing again.',
   'auth.antiPhishing': 'Only authorize a browser you are adding yourself. Never enter a code sent by someone else.',
   'auth.httpWarning': 'This connection uses HTTP. For better protection of sensitive access, use HTTPS or a trusted encrypted network whenever possible.',
-  'auth.useToken': 'Use fixed Token login',
   'auth.tokenWarning': 'Access to handmux requires both the fixed Token and a trusted device. The Token alone cannot open the workspace.',
   'auth.dualRequirement': 'Access to handmux requires both the fixed Token and a trusted device. The Token alone cannot open the workspace.',
   'auth.migrationRequired': 'This is a security upgrade. Enter the fixed Token, request pairing, then run handmux auth add in a local terminal or separate SSH session; this browser can continue only after enrollment.',
