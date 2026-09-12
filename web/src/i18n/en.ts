@@ -6,7 +6,7 @@ export default {
   'auth.connecting': 'Connecting',
   "auth.switchLink": "How do I manage login methods?",
   "auth.switchTitle": "Manage login methods",
-  "auth.switchWarning": "Access to handmux requires both the fixed Token and a trusted device. Trusted-device protection cannot be disabled.",
+  "auth.switchWarning": "Sign in with the fixed Token, then authorize this device.",
   "auth.switchSetup": "To change Public URL, run handmux setup on the server. In Direct mode, open Connection → Direct → Public URL and enter your own reverse-tunnel address.",
   "auth.switchRestart": "For first enrollment or recovery after losing every device, run the command below on the handmux computer.",
   "auth.switchAfter": "Trusted devices are managed through pairing, the CLI, and per-device revocation.",

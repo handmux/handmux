@@ -88,7 +88,6 @@ if (projectTask.status().status === 'unavailable') {
   throw new Error(`Authentication database unavailable: ${projectTask.status().error?.message ?? 'unknown error'}`);
 }
 const auth = new DeviceAuthService({ db: projectTask.requireDatabase(), mode: cfg.authMode, token,
-  trustedOrigin: process.env.HANDMUX_PUBLIC_URL || null,
   onSuccessfulWrite: () => projectTask.successfulWrite() });
 const configuredPublicUrl = process.env.HANDMUX_PUBLIC_URL || null;
 const runtimeAdvertisedUrl = (): string | null => {
@@ -102,7 +101,6 @@ const runtimeAdvertisedUrl = (): string | null => {
 const resolveAuthOrigin = createAuthOriginResolver({ port: cfg.port, host: cfg.host,
   ...(configuredPublicUrl ? { publicUrl: configuredPublicUrl } : {}),
   ...(previewDomain ? { previewDomain } : {}),
-  trustedOrigin: () => auth.trustedOrigin,
   trustedOrigins: () => auth.trustedOrigins,
   runtimePublicUrl: runtimeAdvertisedUrl,
 });

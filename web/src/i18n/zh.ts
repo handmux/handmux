@@ -5,7 +5,7 @@ export default {
   'auth.connecting': '正在连接',
   "auth.switchLink": "如何管理登录方式？",
   "auth.switchTitle": "管理登录方式",
-  "auth.switchWarning": "访问 handmux 需要固定 Token 和可信设备同时通过。可信设备不能关闭。",
+  "auth.switchWarning": "登录需要输入固定 Token，并完成设备授权。",
   "auth.switchSetup": "要修改 Public URL，请在服务器上运行 handmux setup。直连模式可在“连接 → 直连 → 公网地址”填写自建反向隧道地址。",
   "auth.switchRestart": "首次授权或丢失全部设备时，请在运行 handmux 的电脑上执行下方 CLI 命令。",
   "auth.switchAfter": "可信设备只能通过配对、CLI 和设备撤销来管理。",

@@ -21,11 +21,9 @@ export interface DeviceAccessService {
 
 /** Host and forwarded headers select a known entry point; they never create a trusted origin. */
 export function createAuthOriginResolver({
-  port, host, publicUrl, previewDomain, trustedOrigin = () => null, trustedOrigins = () => [], runtimePublicUrl = () => null,
+  port, host, publicUrl, previewDomain, trustedOrigins = () => [], runtimePublicUrl = () => null,
 }: {
   port: number; host: string; publicUrl?: string; previewDomain?: string;
-  /** Persisted single-origin value retained for databases created before the list existed. */
-  trustedOrigin?: () => string | null;
   trustedOrigins?: () => readonly string[];
   runtimePublicUrl?: () => string | null;
 }): (req: IncomingMessage) => string | null {
@@ -56,7 +54,7 @@ export function createAuthOriginResolver({
         if (!url.username && !url.password && ['http:', 'https:'].includes(url.protocol) && url.origin === origin) return origin;
       } catch {}
     }
-    for (const pattern of [trustedOrigin(), ...configuredPatterns, ...trustedOrigins()]) {
+    for (const pattern of [...configuredPatterns, ...trustedOrigins()]) {
       if (!pattern) continue;
       if (originPatternMatches(pattern, origin)) return origin;
     }

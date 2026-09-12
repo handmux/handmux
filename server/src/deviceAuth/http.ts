@@ -105,7 +105,7 @@ export function createDeviceAuthRouter({ service, resolveOrigin, resolvePublicUr
     if (principal && secret) setSessionCookie(res, origin, secret, principal.expiresAt);
     const pairing = candidate?.pairing;
     res.json({ mode: service.mode, tokenEnabled: true, tokenAuthenticated: !!token, migrationRequired: service.migrationRequired,
-      requiresTrustedDevice: !principal, trustedOrigin: service.trustedOrigin, publicUrl: advertisedOrigin(), previewDomain: previewOrigin(), trustedOrigins: service.trustedOrigins, authenticated: !!principal,
+      requiresTrustedDevice: !principal, publicUrl: advertisedOrigin(), previewDomain: previewOrigin(), trustedOrigins: service.trustedOrigins, authenticated: !!principal,
       currentDeviceId: principal?.deviceId ?? null, ...(pairing ? { pairing } : {}), serverTime: Date.now() });
   };
   const safe = (handler: (req: Request, res: Response) => void) => (req: Request, res: Response): void => {
@@ -168,7 +168,7 @@ export function createDeviceAuthRouter({ service, resolveOrigin, resolvePublicUr
     const secret = readSessionSecret(req, origin);
     if (actor && secret) setSessionCookie(res, origin, secret, actor.expiresAt);
     const devices = service.list().sort((a, b) => Number(b.id === actor?.deviceId) - Number(a.id === actor?.deviceId) || b.last_used_at - a.last_used_at || a.id.localeCompare(b.id));
-    res.json({ devices, tokenEnabled: true, trustedOrigin: service.trustedOrigin, publicUrl: advertisedOrigin(), previewDomain: previewOrigin(), trustedOrigins: service.trustedOrigins, currentDeviceId: actor.deviceId, serverTime: Date.now() });
+    res.json({ devices, tokenEnabled: true, publicUrl: advertisedOrigin(), previewDomain: previewOrigin(), trustedOrigins: service.trustedOrigins, currentDeviceId: actor.deviceId, serverTime: Date.now() });
   }));
   router.post('/devices/self', safe((req, res) => {
     const origin = String(res.locals.authOrigin);

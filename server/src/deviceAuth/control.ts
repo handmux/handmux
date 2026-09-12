@@ -43,8 +43,6 @@ export async function startDeviceAuthControl({ service, home, handlePush, handle
             else if (args.op === 'edit') result = service.edit(String(args.id ?? ''), { name: args.name, expire: args.expire });
             else if (args.op === 'revoke') result = service.revoke(String(args.id ?? ''));
             else if (args.op === 'token-status') result = { enabled: true, devices: service.list() };
-            else if (args.op === 'trusted-origin-status') result = { origin: service.trustedOrigin };
-            else if (args.op === 'trusted-origin-set') { service.setTrustedOrigin(String(args.origin ?? '')); result = { origin: service.trustedOrigin }; }
             else if (args.op === 'token-enable') { result = { enabled: true }; }
             else if (args.op === 'token-disable') { service.setTokenEnabled(false, { allowEmpty: args.allowEmpty === true }); result = { enabled: true, devices: service.list() }; }
             else if (args.op === 'push' && handlePush) result = await handlePush(args.body);

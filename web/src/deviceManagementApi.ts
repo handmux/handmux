@@ -5,8 +5,7 @@ export interface ManagedDevice {
 }
 export interface DeviceList {
   devices: ManagedDevice[]; currentDeviceId: string | null; tokenEnabled?: boolean;
-  /** Effective HandMux entry point. `trustedOrigin` is retained for old servers. */
-  publicUrl?: string | null; previewDomain?: string | null; trustedOrigin?: string | null;
+  publicUrl?: string | null; previewDomain?: string | null;
   trustedOrigins?: string[]; serverTime: number;
 }
 export interface DeviceApproval {

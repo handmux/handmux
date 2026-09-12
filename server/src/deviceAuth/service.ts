@@ -90,10 +90,6 @@ export class DeviceAuthService {
   private tokenGeneration: string;
   private tokenEnabledState: boolean;
   private enrollmentState: 'enrollment' | 'migration' | 'ready';
-  // A configured publicUrl is the canonical entry point. The persisted
-  // trusted_origin value remains a fallback for older installs that had no
-  // publicUrl and enrolled their first browser before this setting existed.
-  private configuredTrustedOrigin: string | null;
   private db: DatabaseSync;
   private now: () => number;
   private write: () => void;
@@ -107,12 +103,10 @@ export class DeviceAuthService {
   private flushTimer: ReturnType<typeof setInterval>;
   private claimFailures = new Map<string, number[]>();
   private closed = false;
-  constructor({ db, mode, token = '', now = Date.now, onSuccessfulWrite = () => {}, trustedOrigin }: {
+  constructor({ db, mode, token = '', now = Date.now, onSuccessfulWrite = () => {} }: {
     db: DatabaseSync; mode: AuthMode; token?: string; now?: () => number; onSuccessfulWrite?: () => void;
-    trustedOrigin?: string | null;
   }) {
     this.db = db; this.tokenSecret = token; this.now = now; this.write = onSuccessfulWrite;
-    this.configuredTrustedOrigin = normalizeOrigin(trustedOrigin);
     const tokenRow = db.prepare("SELECT value FROM auth_meta WHERE key='token_enabled'").get() as { value: string } | undefined;
     const modeRow = db.prepare("SELECT value FROM auth_meta WHERE key='mode'").get() as { value: string } | undefined;
     const enrollmentRow = db.prepare("SELECT value FROM auth_meta WHERE key='enrollment_state'").get() as { value: string } | undefined;
@@ -143,12 +137,6 @@ export class DeviceAuthService {
     return !this.closed && this.enrollmentState === 'migration' && this.activeDeviceCount() === 0;
   }
   get requiresTrustedDevice(): boolean { return !this.closed && this.activeDeviceCount() === 0; }
-  /** Origin selected when the first browser is registered as a trusted device. */
-  get trustedOrigin(): string | null {
-    if (this.configuredTrustedOrigin) return this.configuredTrustedOrigin;
-    const row = this.db.prepare("SELECT value FROM auth_meta WHERE key='trusted_origin'").get() as { value: string } | undefined;
-    return row?.value || null;
-  }
   get trustedOrigins(): string[] {
     const row = this.db.prepare("SELECT value FROM auth_meta WHERE key='trusted_origins'").get() as { value: string } | undefined;
     if (!row?.value) return [];
@@ -179,9 +167,6 @@ export class DeviceAuthService {
       // the legacy single-value key. Removing that entry must remove the
       // fallback too, otherwise the UI would appear to remove an address
       // while the resolver continued to accept it.
-      if (!this.configuredTrustedOrigin && this.trustedOrigin === normalized) {
-        this.db.prepare("DELETE FROM auth_meta WHERE key='trusted_origin'").run();
-      }
     });
     return origins;
   }
@@ -198,7 +183,6 @@ export class DeviceAuthService {
       origins.push(normalized);
     }
     this.transaction(() => {
-      this.db.prepare("INSERT INTO auth_meta(key,value) VALUES('trusted_origin',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(normalized);
       this.db.prepare("INSERT INTO auth_meta(key,value) VALUES('trusted_origins',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(JSON.stringify(origins));
     });
   }
@@ -414,7 +398,6 @@ export class DeviceAuthService {
     if (p.state === 'authorized' && p.deviceId) return this.device(p.deviceId);
     if (p.state !== 'configuring') throw new DeviceAuthError('PAIRING_INACTIVE', 'Pairing was canceled or expired; request a new code', 409);
     const deviceId = `dev_${randomUUID().replaceAll('-', '')}`; const now = this.now();
-    const primaryOrigin = this.trustedOrigin;
     const pairingOrigin = normalizeOriginPattern(p.origin);
     const currentOrigins = this.trustedOrigins;
     const originAlreadyListed = pairingOrigin
@@ -427,10 +410,7 @@ export class DeviceAuthService {
       // Record an entry only after the pairing has been approved. The legacy
       // single-value key is retained for old databases; the list is now the
       // source used by origin resolution and the settings page.
-      if (!primaryOrigin) {
-        this.db.prepare("INSERT INTO auth_meta(key,value) VALUES('trusted_origin',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(p.origin);
-      }
-      if (pairingOrigin && !originAlreadyListed && pairingOrigin !== primaryOrigin) {
+      if (pairingOrigin && !originAlreadyListed) {
         if (currentOrigins.length >= 64) throw new DeviceAuthError('ORIGIN_LIMIT', 'Too many trusted access domains; remove one before adding another', 409);
         currentOrigins.push(pairingOrigin);
         this.db.prepare("INSERT INTO auth_meta(key,value) VALUES('trusted_origins',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(JSON.stringify(currentOrigins));

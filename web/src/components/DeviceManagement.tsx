@@ -314,7 +314,7 @@ export default function DeviceManagement({ onLoggedOut }: { onLoggedOut: () => v
   // the old single-value field when talking to a pre-list server that omitted
   // the property altogether.
   const hasPublicUrl = Object.prototype.hasOwnProperty.call(data, 'publicUrl');
-  const accessOrigin = hasPublicUrl ? data.publicUrl ?? null : data.trustedOrigin ?? null;
+  const accessOrigin = data.publicUrl ?? null;
   const addTrustedOrigin = async () => {
     const value = originInput.trim();
     if (!validOriginPattern(value)) { setError(t('devices.invalidOrigin')); return; }
