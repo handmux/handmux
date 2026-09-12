@@ -14,16 +14,14 @@ export default function TokenPrompt({ onSaved, error, busy = false }: { onSaved:
     onSaved();
   };
   return (
-    <AuthFrame title={t('token.title')} mode="token">
-    <form className="token-prompt" onSubmit={save}>
-      <p className="auth-warning">{t('auth.dualRequirement')}</p>
-      {window.location.protocol === 'http:' && <p className="auth-warning">{t('auth.httpWarning')}</p>}
-      <label className="auth-input-label" htmlFor="auth-token">Token</label>
-      <input id="auth-token" type="password" autoComplete="current-password" autoCapitalize="none" autoCorrect="off" spellCheck={false}
-        value={value} onChange={(event: ChangeEvent<HTMLInputElement>) => setValue(event.target.value)} placeholder={t('token.placeholder')} />
-      <button className="auth-primary" type="submit" disabled={busy || !value.trim()}>{busy ? t('common.loading') : t('auth.login')}</button>
-      {error && <p className="auth-error" role="alert">{error}</p>}
-    </form>
+    <AuthFrame title={t('token.title')} showHelp={false}>
+      <form className="token-prompt token-login" onSubmit={save}>
+        <label className="auth-input-label" htmlFor="auth-token">Token</label>
+        <input id="auth-token" type="password" autoComplete="current-password" autoCapitalize="none" autoCorrect="off" spellCheck={false}
+          value={value} onChange={(event: ChangeEvent<HTMLInputElement>) => setValue(event.target.value)} placeholder={t('token.placeholder')} />
+        {error && <p className="auth-error" role="alert">{error}</p>}
+        <button className="auth-primary" type="submit" disabled={busy || !value.trim()}>{busy ? t('common.loading') : t('auth.login')}</button>
+      </form>
     </AuthFrame>
   );
 }

@@ -29,20 +29,12 @@ it.each(['token', 'trusted-device'] as const)('provides the same read-only switc
   expect(fetcher).not.toHaveBeenCalled();
 });
 
-it('copies exact setup/recovery commands and allows manual copying on HTTP', async () => {
+it('keeps the Token page focused on one login action', () => {
   render(<TokenPrompt onSaved={vi.fn()} />);
-  fireEvent.click(screen.getByRole('button', { name: t('auth.switchLink') }));
-  await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('button', { name: t('common.done') })));
-  fireEvent.click(screen.getByRole('button', { name: t('auth.copySetup') }));
-  await screen.findByText(t('auth.manualCopy'));
-  expect(window.getSelection()?.toString()).toBe('handmux auth trusted-origin status');
-  const writeText = vi.fn(async () => {});
-  Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
-  fireEvent.click(screen.getByRole('button', { name: t('auth.copySetup') }));
-  await waitFor(() => expect(writeText).toHaveBeenLastCalledWith('handmux auth trusted-origin status'));
-  fireEvent.click(screen.getByRole('button', { name: t('auth.copyRestart') }));
-  await waitFor(() => expect(writeText).toHaveBeenLastCalledWith('handmux auth add'));
-  expect(localStorage.getItem('tw_token')).toBeNull();
+  expect(screen.getByRole('heading', { name: t('token.title') })).toBeTruthy();
+  expect(screen.getByLabelText('Token')).toBeTruthy();
+  expect(screen.queryByText(t('auth.dualRequirement'))).toBeNull();
+  expect(screen.queryByRole('button', { name: t('auth.switchLink') })).toBeNull();
 });
 
 it('keeps token submission explicit and obscures its value', () => {
@@ -53,8 +45,7 @@ it('keeps token submission explicit and obscures its value', () => {
   expect(input.type).toBe('password');
   expect(submit.disabled).toBe(true);
   fireEvent.change(input, { target: { value: '  test-token  ' } });
-  fireEvent.click(screen.getByRole('button', { name: t('auth.switchLink') }));
-  fireEvent.click(screen.getByRole('button', { name: t('common.done') }));
+  expect(screen.queryByRole('button', { name: t('auth.switchLink') })).toBeNull();
   expect(saved).not.toHaveBeenCalled();
   fireEvent.click(submit);
   expect(saved).toHaveBeenCalledTimes(1);

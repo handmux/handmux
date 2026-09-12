@@ -43,8 +43,8 @@ function SwitchAuthHelp({ onClose }: { onClose: () => void }) {
 }
 
 /** One presentation for both authentication modes; the active mode remains server-controlled. */
-export default function AuthFrame({ title, mode, children }: {
-  title: string; mode?: 'token' | 'trusted-device'; children: ReactNode;
+export default function AuthFrame({ title, mode, showHelp = true, children }: {
+  title: string; mode?: 'token' | 'trusted-device'; showHelp?: boolean; children: ReactNode;
 }) {
   const [help, setHelp] = useState(false);
   return <main className="auth-page">
@@ -57,7 +57,7 @@ export default function AuthFrame({ title, mode, children }: {
         <h1 id="auth-heading">{title}</h1>
         {children}
       </section>
-      <footer className="auth-footer"><button type="button" onClick={() => setHelp(true)}>{t('auth.switchLink')}</button></footer>
+      {showHelp && <footer className="auth-footer"><button type="button" onClick={() => setHelp(true)}>{t('auth.switchLink')}</button></footer>}
     </div>
     {help && <SwitchAuthHelp onClose={() => setHelp(false)} />}
   </main>;

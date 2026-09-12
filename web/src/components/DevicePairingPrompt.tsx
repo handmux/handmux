@@ -9,13 +9,16 @@ const errorCopy = (error: unknown) => t(error instanceof AuthRequestError && err
     ? 'auth.tokenRequired' : error instanceof AuthRequestError && error.code === 'AUTH_ORIGIN_REJECTED'
       ? 'auth.originRejected' : 'auth.connectionError');
 
+const needsPairing = (status: AuthStatus): boolean => status.mode === 'trusted-device'
+  && !status.authenticated
+  && (status.tokenEnabled !== true || status.tokenAuthenticated === true)
+  && !status.pairing;
+
 export default function DevicePairingPrompt({ onSaved }: { onSaved: () => void }) {
   const [status, setStatus] = useState<AuthStatus | null>(null);
   const [busy, setBusy] = useState(true);
   const [error, setError] = useState('');
   const [copyHint, setCopyHint] = useState('');
-  const [method, setMethod] = useState<'web' | 'cli'>('web');
-  const methodRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const [now, setNow] = useState(Date.now());
   const offset = useRef(0);
   const epoch = useRef(0);
@@ -24,8 +27,9 @@ export default function DevicePairingPrompt({ onSaved }: { onSaved: () => void }
   const saved = useRef(onSaved);
   saved.current = onSaved;
   const codeText = useRef<HTMLElement>(null);
-  const commandText = useRef<HTMLElement>(null);
   const copyScope = useRef('');
+  const requestRef = useRef<(method?: 'GET' | 'POST' | 'DELETE') => Promise<void>>(async () => {});
+
   const accept = useCallback((next: AuthStatus) => {
     offset.current = next.serverTime - Date.now();
     setNow(next.serverTime);
@@ -35,21 +39,26 @@ export default function DevicePairingPrompt({ onSaved }: { onSaved: () => void }
     applyAuthStatus(next);
     if (next.authenticated) saved.current();
   }, []);
-  const request = useCallback(async (method = 'GET') => {
+
+  const request = useCallback(async (method: 'GET' | 'POST' | 'DELETE' = 'GET'): Promise<void> => {
     const generation = ++epoch.current;
     changing.current = true;
     setBusy(true);
     setError('');
     try {
       const next = await authRequest('/api/auth/pairing', method, method === 'DELETE' ? status?.pairing?.id : undefined);
-      if (active.current && generation === epoch.current) accept(next);
-    } catch (error) {
-      if (active.current && generation === epoch.current) setError(errorCopy(error));
+      if (active.current && generation === epoch.current) {
+        accept(next);
+        if (method === 'GET' && needsPairing(next)) void requestRef.current('POST');
+      }
+    } catch (requestError) {
+      if (active.current && generation === epoch.current) setError(errorCopy(requestError));
     } finally {
       if (active.current && generation === epoch.current) setBusy(false);
       changing.current = false;
     }
   }, [accept, status?.pairing?.id]);
+  requestRef.current = request;
 
   useEffect(() => {
     active.current = true;
@@ -60,9 +69,14 @@ export default function DevicePairingPrompt({ onSaved }: { onSaved: () => void }
       const generation = epoch.current;
       try {
         const next = await authRequest('/api/auth/pairing');
-        if (active.current && generation === epoch.current) { accept(next); setError(''); setBusy(false); }
-      } catch (error) {
-        if (active.current && generation === epoch.current) { setError(errorCopy(error)); setBusy(false); }
+        if (active.current && generation === epoch.current) {
+          accept(next);
+          setError('');
+          setBusy(false);
+          if (needsPairing(next)) void requestRef.current('POST');
+        }
+      } catch (requestError) {
+        if (active.current && generation === epoch.current) { setError(errorCopy(requestError)); setBusy(false); }
       } finally { polling = false; }
     };
     void poll();
@@ -85,13 +99,16 @@ export default function DevicePairingPrompt({ onSaved }: { onSaved: () => void }
   const configuring = pairing?.state === 'configuring';
   const remaining = Math.max(0, Math.ceil(((pairing?.expiresAt ?? now) - now) / 1000));
   const usableCode = waiting && remaining > 0 && /^\d{6}$/.test(pairing?.code ?? '') ? pairing?.code : null;
-  const copy = async (text: string, element: HTMLElement | null) => {
+  const expired = pairing?.state === 'expired' || waiting && remaining === 0;
+
+  const copyCode = async () => {
     if (!usableCode) return;
     try {
       if (!navigator.clipboard?.writeText) throw new Error('Clipboard unavailable');
-      await navigator.clipboard.writeText(text);
+      await navigator.clipboard.writeText(usableCode);
       setCopyHint(t('auth.copied'));
     } catch {
+      const element = codeText.current;
       if (element) {
         const range = document.createRange(); range.selectNodeContents(element);
         const selection = window.getSelection(); selection?.removeAllRanges(); selection?.addRange(range);
@@ -99,59 +116,44 @@ export default function DevicePairingPrompt({ onSaved }: { onSaved: () => void }
       setCopyHint(t('auth.manualCopy'));
     }
   };
+
   // The first status request decides whether this browser needs the Token factor and whether an
   // existing pairing can be resumed. Rendering pairing controls before that decision creates a
   // misleading second login path and lets a fast tap send a Token-less POST (401 TOKEN_REQUIRED).
-  if (!status) return <AuthFrame title={t('auth.connecting')}>
-    <section className="token-prompt pairing-prompt" aria-live="polite">
-      {error ? <p role="alert">{error}</p> : <p>{t('common.loading')}</p>}
-    </section>
+  if (!status) return <AuthFrame title={t('auth.connecting')} showHelp={false}>
+    <section className="token-prompt pairing-prompt" aria-live="polite"><p>{error || t('common.loading')}</p></section>
   </AuthFrame>;
-  if (status?.mode === 'token') return <TokenPrompt onSaved={onSaved} />;
-  // A missing or rejected Token never falls through to pairing. The user must
-  // complete the first factor before we create or consume a pairing request.
-  if (status?.tokenEnabled && !status.tokenAuthenticated) {
+  if (status.mode === 'token') return <TokenPrompt onSaved={onSaved} />;
+  // A missing or rejected Token never falls through to pairing. The user must complete the first
+  // factor before the server creates a pairing request.
+  if (status.tokenEnabled && !status.tokenAuthenticated) {
     return <TokenPrompt onSaved={() => { void request('GET'); }} error={t('auth.tokenInvalid')} />;
   }
-  return <AuthFrame mode="trusted-device" title={t(configuring ? 'auth.paired' : waiting && remaining > 0 ? 'auth.waiting' : 'auth.title')}>
-    <section className="token-prompt pairing-prompt">
-    {status?.tokenEnabled && <p className="auth-warning">{t(status.migrationRequired ? 'auth.migrationRequired' : 'auth.dualRequirement')}</p>}
-    {window.location.protocol === 'http:' && <p className="auth-warning">{t('auth.httpWarning')}</p>}
-    <div aria-live="polite">
-      {configuring && <><p>{t('auth.pending')}</p><p>{t(pairing?.source === 'web' ? 'auth.finishWeb' : 'auth.finishCli')}</p>
-        <p className="auth-secondary">{t('auth.setupRemaining', { seconds: remaining })}</p></>}
-      {(pairing?.state === 'expired' || waiting && remaining === 0) && <p>{t('auth.expired')}</p>}
-      {pairing?.state === 'canceled' && <p>{t('auth.canceled')}</p>}
-    </div>
-    {usableCode && <>
-      <div className="pairing-code-row"><strong className="pairing-code" ref={codeText}>{usableCode}</strong>
-        <button onClick={() => { void copy(usableCode, codeText.current); }}>{t('auth.copyCode')}</button></div>
-      <p className="auth-secondary pairing-countdown">{t('auth.codeRemaining', { seconds: remaining })}</p>
-      <div className="pairing-methods" role="tablist" aria-label={t('auth.methodLabel')}>
-        {(['web', 'cli'] as const).map((value, index) => <button key={value} ref={node => { methodRefs.current[index] = node; }}
-          role="tab" id={`pairing-tab-${value}`} aria-controls={`pairing-panel-${value}`} aria-selected={method === value} tabIndex={method === value ? 0 : -1}
-          onClick={() => setMethod(value)} onKeyDown={event => {
-            if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
-            event.preventDefault(); const next = event.key === 'Home' ? 0 : event.key === 'End' ? 1 : 1 - index;
-            setMethod(next === 0 ? 'web' : 'cli'); methodRefs.current[next]?.focus();
-          }}>{t(value === 'cli' ? 'auth.cliMethod' : 'auth.webMethod')}</button>)}
-      </div>
-      <div className="pairing-method-panel" role="tabpanel" id={`pairing-panel-${method}`} aria-labelledby={`pairing-tab-${method}`}>
-        {method === 'cli' ? <><p>{t('auth.cliInstructions')}</p>
-          <code className="pairing-command" ref={commandText}>handmux auth add</code>
-          <button onClick={() => { void copy('handmux auth add', commandText.current); }}>{t('auth.copyCommand')}</button>
-          <p className="auth-secondary">{t('auth.cliNext')}</p></>
-          : <><p>{t('auth.webInstructions')}</p><p className="pairing-web-path">{t('auth.webPath')}</p>
-            <p>{t('auth.webNext')}</p><p className="auth-secondary">{t('auth.webFallback')}</p></>}
-      </div>
-    </>}
-    {!waiting && !configuring && <p className="auth-secondary">{t('auth.browserScope')}</p>}
-    <p className="auth-secondary">{t('auth.antiPhishing')}</p>
-    {usableCode && copyHint && <p role="status">{copyHint}</p>}
-    {error && <p role="alert">{error}</p>}
-    {busy && <p role="status">{t('common.loading')}</p>}
-    {(waiting || configuring) && <button className="pairing-cancel" disabled={busy} onClick={() => { void request('DELETE'); }}>{t('auth.cancelPairing')}</button>}
-    {(!pairing || pairing.state === 'expired' || pairing.state === 'canceled') && <button className="auth-primary" disabled={busy} onClick={() => { void request('POST'); }}>{t('auth.request')}</button>}
-    {waiting && remaining === 0 && <button className="auth-primary" disabled={busy} onClick={() => { void request('POST'); }}>{t('auth.request')}</button>}
-  </section></AuthFrame>;
+
+  return <AuthFrame title={t('auth.deviceRequired')} showHelp={false}>
+    <section className="token-prompt pairing-prompt" aria-live="polite">
+      {!pairing && busy && <p className="pairing-loading">{t('auth.preparingCode')}</p>}
+      {usableCode && <>
+        <div className="pairing-code-card">
+          <span className="pairing-code-label">{t('auth.verificationCode')}</span>
+          <strong className="pairing-code" ref={codeText}>{usableCode}</strong>
+          <div className="pairing-code-meta">
+            <span className="pairing-countdown">{t('auth.codeRemaining', { seconds: remaining })}</span>
+            <button type="button" className="pairing-copy" onClick={() => { void copyCode(); }}>{t('auth.copyCode')}</button>
+          </div>
+          <progress className="pairing-progress" max={60} value={Math.min(60, remaining)} aria-label={t('auth.codeRemaining', { seconds: remaining })} />
+        </div>
+        <p className="pairing-help">{t('auth.authorizeWithDevice')}</p>
+        <p className="pairing-cli-hint">{t('auth.authorizeWithCli')} <code>handmux auth add</code></p>
+        {copyHint && <p className="auth-secondary" role="status">{copyHint}</p>}
+      </>}
+      {configuring && <div className="pairing-state"><p>{t('auth.pending')}</p><p className="auth-secondary">{t(pairing?.source === 'web' ? 'auth.finishWeb' : 'auth.finishCli')}</p></div>}
+      {expired && <div className="pairing-state"><p>{t('auth.expired')}</p></div>}
+      {pairing?.state === 'canceled' && <div className="pairing-state"><p>{t('auth.canceled')}</p></div>}
+      {error && <p className="auth-error" role="alert">{error}</p>}
+      {busy && pairing && <p className="auth-secondary" role="status">{t('common.loading')}</p>}
+      {(waiting || configuring) && <button type="button" className="pairing-cancel" disabled={busy} onClick={() => { void request('DELETE'); }}>{t('auth.cancelPairing')}</button>}
+      {(!pairing || expired || pairing.state === 'canceled') && <button type="button" className="auth-primary pairing-new-code" disabled={busy} onClick={() => { void request('POST'); }}>{t('auth.requestNewCode')}</button>}
+    </section>
+  </AuthFrame>;
 }
