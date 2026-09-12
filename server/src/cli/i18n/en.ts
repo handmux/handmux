@@ -3,16 +3,16 @@
 export default {
   'auth.section': 'Authentication & devices',
   'auth.trusted': 'Trusted devices (always available)',
-  'auth.tokenDisabled': 'Fixed Token login: disabled (recommended)',
-  'auth.tokenEnabled': 'Fixed Token login: enabled (not recommended)',
+  'auth.tokenDisabled': 'Fixed Token login (always required)',
+  'auth.tokenEnabled': 'Fixed Token login (always required)',
   'auth.token': 'Fixed Token login',
-  'auth.manageHint': 'Trusted device login is always available. Fixed Token login is an optional compatibility entry. Manage devices with handmux auth add/list/edit/revoke. For better transport protection, use HTTPS whenever possible.',
+  'auth.manageHint': 'The fixed Token and trusted-device credential are always required together. Manage devices with handmux auth add/list/edit/revoke. Use HTTPS whenever possible for better transport protection.',
   'auth.noDevices': 'No active trusted devices. Use handmux auth add to authorize a browser for access.',
   'auth.access': 'Device authorization: open the address, then run handmux auth add on this computer to approve your browser.',
-  'auth.warning': '⚠ Note: a leaked fixed Token can be reused. Consider disabling Fixed Token login after adding a trusted device. For better credential protection, use HTTPS whenever possible.',
-  'auth.switchWarning': '⚠ Use a direct local terminal or an independent SSH session on the Handmux host, as the same OS user — never a terminal inside Handmux. Disabling fixed Token login immediately disconnects untrusted browsers without restarting. Add a trusted device through the CLI to restore access.',
-  'auth.switchConfirm': 'Confirm you are outside Handmux in a direct local terminal or independent SSH session, and apply the fixed Token login change?',
-  'auth.switchApplyConfirm': 'Confirm you are outside Handmux in a direct local terminal or independent SSH session, and apply the authentication change?',
+  'auth.warning': "⚠ The fixed Token and trusted-device credential are always required together. Use the CLI to add a device for first enrollment or recovery. Use HTTPS whenever possible.",
+  'auth.switchWarning': "⚠ For first enrollment or recovery after losing every device, use a direct local terminal or independent SSH session as the same OS user on the computer running handmux.",
+  'auth.switchConfirm': "Confirm you are outside handmux in a direct local terminal or independent SSH session?",
+  'auth.switchApplyConfirm': "Confirm you are outside handmux in a direct local terminal or independent SSH session, and continue?",
   'auth.switchNeedTty': 'Authentication mode changes require confirmation in a direct local terminal or independent SSH session. No service was stopped or restarted.',
   'auth.code': 'Enter the 6-digit code from your new browser',
   'auth.claimed': 'Paired. Complete device settings within 5 minutes; access starts only after saving.',
@@ -241,11 +241,11 @@ export default {
   'setup.browserOff': 'not configured · Direct mode only',
   'setup.askBrowserDomain': 'Web preview proxy domain (blank = Direct mode only)',
   'setup.browserAbout': 'Enter a proxy domain (for example, preview.example.com) and route its wildcard subdomains to Handmux over HTTPS; leave it blank for Direct mode only.',
-  'setup.tokenAuto': 'auto · reuse existing or generate on first start',
-  'setup.tokenCustom': 'Set a custom token…',
-  'setup.tokenRandom': 'Generate a random one',
-  'setup.tokenReset': 'Use automatic token (reuse existing or generate)',
-  'setup.askToken': 'Access token — it appears in the URL you open on the phone',
+  'setup.tokenAuto': 'saved (the fixed Token does not rotate automatically)',
+  'setup.tokenCustom': 'Change the fixed Token…',
+  'setup.tokenRandom': 'Generate and save a new random Token',
+  'setup.tokenReset': 'The fixed Token does not rotate automatically',
+  'setup.askToken': 'Fixed Token — required together with a trusted device',
   'setup.tokenGenerated': 'New token: {token}',
   'setup.valToken': 'enter a token',
   'setup.valTokenSpace': 'no spaces — the token goes in a URL',
@@ -401,7 +401,7 @@ export default {
   handmux stop | restart | status
   handmux logs [--follow] [--lines N]
   handmux push <title> <body>   notify your phone from a script (--session X · --device K · --tag T · --url U)
-  handmux auth add             authorize a browser (optional code, --name and --expire)
+  handmux auth add             interactively authorize a browser (automation uses --code, --name and --expire)
   handmux auth list            list full device IDs, names, expiry and access times
   handmux auth edit <id>       update --name and/or --expire without prompts
   handmux auth revoke <id>     revoke a device immediately

@@ -1402,7 +1402,6 @@ describe('App workspace recovery', () => {
     await flush();
     start.resolve({ operationId: 'operation-stale', status: 'pending' });
     await flush();
-    fireEvent.click(screen.getByRole('button', { name: '使用固定 Token 登录' }));
     fireEvent.change(screen.getByPlaceholderText('粘贴 HANDMUX_TOKEN'), { target: { value: 'new-token' } });
     fireEvent.click(screen.getByRole('button', { name: '登录' }));
     await flush();

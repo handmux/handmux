@@ -12,16 +12,16 @@ afterEach(() => {
 });
 
 describe('device authentication transport', () => {
-  it('prefers a confirmed device session over a saved fixed Token', async () => {
+  it('sends the fixed Token together with a confirmed device session', async () => {
     localStorage.setItem('tw_token', 'old-shared-token');
     applyAuthStatus(status());
     expect(localStorage.getItem('tw_token')).toBe('old-shared-token');
-    expect(authenticationHeaders()).toEqual({});
+    expect(authenticationHeaders()).toEqual({ Authorization: 'Bearer old-shared-token' });
     const fetcher = vi.fn(async () => json({ ok: true }));
     vi.stubGlobal('fetch', fetcher);
     await requestJson('/api/sessions');
     expect(fetcher).toHaveBeenCalledWith('/api/sessions', expect.objectContaining({
-      credentials: 'same-origin', cache: 'no-store', headers: {},
+      credentials: 'same-origin', cache: 'no-store', headers: { Authorization: 'Bearer old-shared-token' },
     }));
   });
 

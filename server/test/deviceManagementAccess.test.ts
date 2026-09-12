@@ -18,7 +18,7 @@ async function fixture() {
   const db = new DatabaseSync(':memory:');
   migrateProjectDatabase(db);
   let now = Date.now();
-  const service = new DeviceAuthService({ db, mode: 'trusted-device', now: () => now });
+  const service = new DeviceAuthService({ db, mode: 'trusted-device', token: 'secret', now: () => now });
   const app = express();
   const server = http.createServer(app);
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
@@ -36,7 +36,7 @@ async function fixture() {
     stream.close(); access.close(); service.close(); db.close();
     await new Promise<void>(resolve => { server.close(() => resolve()); server.closeAllConnections(); });
   });
-  const headers = { Origin: origin, 'X-Handmux-Request': '1' };
+  const headers = { Origin: origin, Authorization: 'Bearer secret', 'X-Handmux-Request': '1' };
   const begin = async () => {
     const result = await request(server).post('/api/auth/pairing').set(headers).send({}).expect(200);
     return { code: result.body.pairing.code as string, id: result.body.pairing.id as string,

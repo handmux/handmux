@@ -78,8 +78,12 @@ export function createDeviceAccess({ service, resolveOrigin }: {
   const authenticate = (req: IncomingMessage): DevicePrincipal | null => {
     const origin = resolveOrigin(req);
     if (!origin) return null;
-    return service.authenticateRequest(req, origin)
-      ?? service.authenticateToken?.(bearerFrom(typeof req.headers.authorization === 'string' ? req.headers.authorization : undefined) ?? req.headers['x-handmux-token'], origin) ?? null;
+    const device = service.authenticateRequest(req, origin);
+    const token = service.authenticateToken?.(
+      bearerFrom(typeof req.headers.authorization === 'string' ? req.headers.authorization : undefined)
+        ?? req.headers['x-handmux-token'], origin,
+    ) ?? null;
+    return device && token ? device : null;
   };
   const middleware: RequestHandler = (req, res, next) => {
     res.setHeader('Cache-Control', 'no-store');

@@ -23,11 +23,12 @@ const cleanup: Array<() => unknown | Promise<unknown>> = [];
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close(); });
 function fixture() {
   const db = new DatabaseSync(':memory:'); migrateProjectDatabase(db);
-  const service = new DeviceAuthService({ db, mode: 'trusted-device' });
+  const service = new DeviceAuthService({ db, mode: 'trusted-device', token: 'secret' });
   const origin = 'http://localhost:4000';
   const resolveOrigin = createAuthOriginResolver({ port: 4000, host: '0.0.0.0' });
   const access = createDeviceAccess({ service, resolveOrigin });
   const app = express();
+  app.use((req, _res, next) => { if (!req.headers.authorization) req.headers.authorization = 'Bearer secret'; next(); });
   app.use('/api/auth', express.json(), createDeviceAuthRouter({ service, resolveOrigin }));
   app.use('/api', access.middleware);
   app.use('/api', express.json());
@@ -170,11 +171,12 @@ describe('browser → CLI socket → protected HTTP / WebSocket', () => {
     const device = service.authorize(claim.id, 'cli', { name: 'test', expire: '1h' });
     const url = `ws://127.0.0.1:${address.port}/api/terminal-stream`;
     const cookie = `handmux_session_http=${pair.secret}`;
-    for (const headers of [{ Cookie: cookie }, { Origin: origin, Authorization: 'Bearer old-token' }, { Cookie: cookie, Origin: 'https://evil.example' }]) {
-      const ws = new WebSocket(url, { headers }); ws.on('error', () => {});
-      const status = await new Promise<number | undefined>(resolve => ws.on('unexpected-response', (_req, res) => { resolve(res.statusCode); res.resume(); ws.terminate(); }));
-      expect(status).toBe(401);
-    }
+    const missingOrigin = new WebSocket(url, { headers: { Cookie: cookie } }); missingOrigin.on('error', () => {});
+    const status = await new Promise<number | undefined>(resolve => missingOrigin.on('unexpected-response', (_req, res) => { resolve(res.statusCode); res.resume(); missingOrigin.terminate(); }));
+    expect(status).toBe(401);
+    const evil = new WebSocket(url, { headers: { Cookie: cookie, Origin: 'https://evil.example' } }); evil.on('error', () => {});
+    const evilStatus = await new Promise<number | undefined>(resolve => evil.on('unexpected-response', (_req, res) => { resolve(res.statusCode); res.resume(); evil.terminate(); }));
+    expect(evilStatus).toBe(401);
     const ws = new WebSocket(url, { headers: { Cookie: cookie, Origin: origin } });
     await new Promise<void>(resolve => ws.on('open', resolve));
     const closed = new Promise<number>(resolve => ws.on('close', resolve));

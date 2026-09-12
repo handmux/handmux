@@ -400,9 +400,9 @@ button.settings-page-row:disabled, .settings-page-row.disabled { color: rgba(235
 .device-danger { width: 100%; border: none; background: transparent; color: var(--red); min-height: 44px; }
 .device-empty { margin: 0; padding: 16px; color: rgba(235,235,245,.42); font-size: 13px; line-height: 1.45; text-align: center; }
 .device-revoke-layer { z-index: var(--z-overlay-confirm); }
-.pairing-methods { display: flex; border-radius: 9px; padding: 3px; background: rgba(120,120,128,.2); margin: 16px 0 12px; }
-.pairing-methods button { flex: 1; min-height: 44px; margin: 0; border: 0; background: none; color: inherit; border-radius: 7px; }
-.pairing-methods button[aria-selected="true"] { background: #48494d; box-shadow: 0 1px 3px #0003; }
+.pairing-methods { display: flex; gap: 3px; border-radius: 11px; padding: 3px; background: rgba(120,120,128,.16); border: 1px solid rgba(255,255,255,.06); margin: 16px 0 12px; }
+.pairing-methods button { flex: 1; min-height: 44px; margin: 0; border: 0; background: transparent; color: #a1a1aa; border-radius: 8px; font-size: 13px; font-weight: 550; transition: background .15s ease, color .15s ease, box-shadow .15s ease; }
+.pairing-methods button[aria-selected="true"] { background: linear-gradient(180deg, rgba(62,145,238,.96), rgba(30,106,205,.96)); color: #fff; box-shadow: 0 2px 6px rgba(0,0,0,.22), inset 0 0 0 .5px rgba(255,255,255,.24); }
 .pairing-web-path { font-weight: 500; line-height: 1.6; }
 .settings-page .push-script-intro {
   margin: 0 0 12px; color: var(--muted, #8a8a8e); font-size: 13px; line-height: 1.5;
@@ -1172,6 +1172,7 @@ div.workspace-restore-errors { padding-left: 10px; }
 .auth-card .auth-warning, .auth-help-dialog .auth-warning { padding: 11px 13px; border-radius: 10px; background: #ffc1480c; border: 1px solid #ffc14822; font-size: 12px; line-height: 1.6; }
 .token-prompt .auth-primary { min-height: 48px; border-radius: 11px; font-size: 15px; font-weight: 600; margin-top: 4px; }
 .auth-secondary { color: var(--muted, #aaa); }
+.auth-error { color: #ff9b95; }
 .pairing-prompt { max-width: none; margin: 0; padding: 0; }
 .pairing-prompt h2, .pairing-prompt h3 { margin: 8px 0 0; }
 .pairing-prompt h3 { font-size: 15px; }
@@ -1180,12 +1181,14 @@ div.workspace-restore-errors { padding-left: 10px; }
 .token-prompt .pairing-code-row button, .token-prompt [role="tabpanel"] button { color: #81baff; background: #0a84ff12; font-size: 12px; }
 .token-prompt .pairing-methods { margin: 0; }
 .token-prompt .pairing-methods button { background: none; color: #a1a1aa; font-size: 13px; padding: 8px; }
-.token-prompt .pairing-methods button[aria-selected="true"] { background: #48494d; color: #fff; }
+.token-prompt .pairing-methods button[aria-selected="true"] { background: linear-gradient(180deg, rgba(62,145,238,.96), rgba(30,106,205,.96)); color: #fff; }
 .token-prompt [role="tabpanel"] { display: flex; flex-direction: column; gap: 12px; }
+.pairing-method-panel { padding: 14px; border: 1px solid rgba(255,255,255,.07); border-radius: 13px; background: rgba(25,26,30,.72); }
+.pairing-method-panel p { margin: 0; }
 .token-prompt .auth-secondary { font-size: 12px; }
 .pairing-code { font: 600 clamp(28px, 8vw, 38px)/1.4 ui-monospace, monospace; letter-spacing: .1em; font-variant-numeric: tabular-nums; user-select: text; -webkit-user-select: text; }
 .pairing-countdown { font-variant-numeric: tabular-nums; }
-.pairing-command { display: block; padding: 14px 12px; border-radius: 10px; background: rgba(127,127,127,.12); font-size: 14px; white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; -webkit-user-select: text; }
+.pairing-command { display: block; padding: 14px 12px; border-radius: 10px; background: rgba(10,132,255,.10); border: 1px solid rgba(10,132,255,.16); color: #cfe4ff; font-size: 14px; white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; -webkit-user-select: text; }
 .token-prompt .pairing-cancel { background: rgba(127,127,127,.14); color: inherit; }
 .auth-help-backdrop { position: fixed; inset: 0; z-index: var(--z-overlay-confirm); display: flex; align-items: center; justify-content: center; padding: max(20px, env(safe-area-inset-top)) 20px max(20px, env(safe-area-inset-bottom)); background: #0009; }
 .auth-help-dialog { width: 100%; max-width: 380px; max-height: 100%; overflow-y: auto; padding: 24px; border: 1px solid #ffffff12; border-radius: 20px; background: #252629; color: #e6e6eb; box-shadow: 0 16px 60px #0005; }

@@ -18,7 +18,7 @@ it.each(['token', 'trusted-device'] as const)('provides the same read-only switc
   expect(screen.getByRole('dialog')).toBeTruthy();
   expect(screen.getByText(t('auth.switchWarning'))).toBeTruthy();
   expect(screen.getByText('handmux auth trusted-origin status')).toBeTruthy();
-  expect(screen.getByText('handmux auth token enable')).toBeTruthy();
+  expect(screen.getByText('handmux auth add')).toBeTruthy();
   const done = screen.getByRole('button', { name: t('common.done') });
   await waitFor(() => expect(document.activeElement).toBe(done));
   fireEvent.keyDown(done, { key: 'Tab' });
@@ -29,7 +29,7 @@ it.each(['token', 'trusted-device'] as const)('provides the same read-only switc
   expect(fetcher).not.toHaveBeenCalled();
 });
 
-it('copies exact setup/token-enable commands and allows manual copying on HTTP', async () => {
+it('copies exact setup/recovery commands and allows manual copying on HTTP', async () => {
   render(<TokenPrompt onSaved={vi.fn()} />);
   fireEvent.click(screen.getByRole('button', { name: t('auth.switchLink') }));
   await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('button', { name: t('common.done') })));
@@ -41,7 +41,7 @@ it('copies exact setup/token-enable commands and allows manual copying on HTTP',
   fireEvent.click(screen.getByRole('button', { name: t('auth.copySetup') }));
   await waitFor(() => expect(writeText).toHaveBeenLastCalledWith('handmux auth trusted-origin status'));
   fireEvent.click(screen.getByRole('button', { name: t('auth.copyRestart') }));
-  await waitFor(() => expect(writeText).toHaveBeenLastCalledWith('handmux auth token enable'));
+  await waitFor(() => expect(writeText).toHaveBeenLastCalledWith('handmux auth add'));
   expect(localStorage.getItem('tw_token')).toBeNull();
 });
 

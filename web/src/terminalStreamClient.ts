@@ -196,7 +196,7 @@ export function openTerminalStream({
       if (subscribedSocket === socket) send({ type: 'resync' });
       else {
         subscribedSocket = socket;
-        send({ type: 'subscribe', ...(!hasDeviceSession() ? { token } : {}), pane });
+        send({ type: 'subscribe', token, pane });
       }
     } else connect();
   };
@@ -222,7 +222,7 @@ export function openTerminalStream({
       if (socket !== nextSocket || closed || paused) return;
       subscribedSocket = nextSocket;
       armConnectTimer(nextSocket, readyTimeoutMs);
-      send({ type: 'subscribe', ...(!hasDeviceSession() ? { token } : {}), pane });
+      send({ type: 'subscribe', token, pane });
     };
     nextSocket.onmessage = (event: MessageEvent<unknown>) => {
       if (socket !== nextSocket) return;
@@ -400,7 +400,7 @@ export function openTerminalStream({
         if (subscribedSocket === socket) send({ type: 'resync' });
         else {
           subscribedSocket = socket;
-          send({ type: 'subscribe', ...(!hasDeviceSession() ? { token } : {}), pane });
+          send({ type: 'subscribe', token, pane });
         }
       } else connect();
     },

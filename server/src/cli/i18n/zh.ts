@@ -2,16 +2,16 @@
 export default {
   'auth.section': '认证与设备',
   'auth.trusted': '可信设备登录（始终可用）',
-  'auth.tokenDisabled': '固定 Token 登录：禁用（推荐）',
-  'auth.tokenEnabled': '固定 Token 登录：启用（不推荐）',
+  'auth.tokenDisabled': '固定 Token 登录（始终启用）',
+  'auth.tokenEnabled': '固定 Token 登录（始终启用）',
   'auth.token': '固定 Token 登录',
-  'auth.manageHint': '可信设备登录始终可用。固定 Token 登录只是兼容入口。日常管理使用 handmux auth add/list/edit/revoke。为更好地保护传输安全，尽可能使用 HTTPS。',
+  'auth.manageHint': '固定 Token 和可信设备始终同时参与认证。日常管理使用 handmux auth add/list/edit/revoke；尽可能使用 HTTPS，更好地保护传输安全。',
   'auth.noDevices': '尚无有效可信设备；请通过 handmux auth add 添加设备后访问业务。',
   'auth.access': '设备授权：打开访问地址，然后在这台电脑运行 handmux auth add 批准你的浏览器。',
-  'auth.warning': '⚠ 提醒：固定 Token 泄露后可被重复使用。建议添加可信设备后禁用固定 Token 登录。为更好地保护凭据传输，尽可能使用 HTTPS。',
-  'auth.switchWarning': '⚠ 必须在运行 Handmux 的电脑上，以同一系统用户使用本机直连终端或独立 SSH 操作，不要使用 Handmux 内的终端。禁用固定 Token 登录会立即使尚未授权的浏览器失去访问，无需重启；可通过 CLI 添加可信设备恢复。',
-  'auth.switchConfirm': '确认当前是非 Handmux 内的本机终端或独立 SSH，并确认固定 Token 登录变更？',
-  'auth.switchApplyConfirm': '确认当前是非 Handmux 内的本机终端或独立 SSH，并应用认证方式变更？',
+  'auth.warning': "⚠ 固定 Token 和可信设备始终同时参与认证。首次登录或迁移请通过 CLI 添加可信设备；尽可能使用 HTTPS。",
+  'auth.switchWarning': "⚠ 首次授权或丢失全部设备时，必须在运行 handmux 的电脑上，以同一系统用户使用本机终端或独立 SSH 执行 handmux auth add。",
+  'auth.switchConfirm': "确认当前是非 handmux 内的本机终端或独立 SSH？",
+  'auth.switchApplyConfirm': "确认当前是非 handmux 内的本机终端或独立 SSH，并继续？",
   'auth.switchNeedTty': '切换认证方式需要在本机直连终端或独立 SSH 中交互确认。本次未停止或重启服务。',
   'auth.code': '输入新浏览器显示的 6 位校验码',
   'auth.claimed': '配对成功。请在 5 分钟内完善设备信息，保存后才可登录。',
@@ -240,11 +240,11 @@ export default {
   'setup.browserOff': '未配置 · 仅手机直连',
   'setup.askBrowserDomain': '网页预览器代理域名（留空 = 仅手机直连）',
   'setup.browserAbout': '填写代理域名（如 preview.example.com），并将其通配子域以 HTTPS 路由到 Handmux；留空则仅使用手机直连。',
-  'setup.tokenAuto': '自动 · 复用已有 Token，首次生成',
-  'setup.tokenCustom': '自定义令牌…',
-  'setup.tokenRandom': '随机生成一个',
-  'setup.tokenReset': '使用自动 Token（复用已有或首次生成）',
-  'setup.askToken': '访问令牌 —— 会出现在手机打开的网址里',
+  'setup.tokenAuto': '已保存（固定 Token 不会自动更换）',
+  'setup.tokenCustom': '修改固定 Token…',
+  'setup.tokenRandom': '生成并保存新的随机 Token',
+  'setup.tokenReset': '固定 Token 不会自动更换',
+  'setup.askToken': '固定 Token —— 与可信设备同时用于登录',
   'setup.tokenGenerated': '新令牌:{token}',
   'setup.valToken': '请输入令牌',
   'setup.valTokenSpace': '不能有空格 —— 令牌会放进网址',
@@ -400,7 +400,7 @@ export default {
   handmux stop | restart | status
   handmux logs [--follow] [--lines N]
   handmux push <标题> <正文>    从脚本推一条通知到手机（--session 会话 · --device 设备key · --tag · --url）
-  handmux auth add             授权浏览器（可提供校验码、--name 和 --expire）
+  handmux auth add             交互式授权浏览器（自动化使用 --code、--name 和 --expire）
   handmux auth list            列出完整设备 ID、名称、有效期和访问时间
   handmux auth edit <id>       非交互修改 --name 和/或 --expire
   handmux auth revoke <id>     立即撤销指定设备

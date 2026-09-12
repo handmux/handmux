@@ -34,5 +34,4 @@ export const deviceManagementApi = {
   cancel: (id: string) => request<{ approval: DeviceApproval; serverTime: number }>(`/approvals/${encodeURIComponent(id)}`, 'DELETE'),
   authorize: (id: string, values: { name: string; expire: string }) => request<{ device: ManagedDevice; serverTime: number }>(`/approvals/${encodeURIComponent(id)}/authorize`, 'POST', values),
   addSelf: (name: string, expire: string) => request<{ device: ManagedDevice; serverTime: number }>('/devices/self', 'POST', { name, expire }),
-  disableToken: () => request<{ mode: 'trusted-device'; tokenEnabled: false; authenticated: boolean; serverTime: number }>('/token/disable', 'POST'),
 };

@@ -100,8 +100,8 @@ export function findTunnelId(listJsonOut: unknown, name: string): string | null 
 // The config keys the wizard owns: everything it can set. mergeConfig wipes these from the existing config
 // before re-applying the answers, so switching a tunnel (or clearing an optional field) cleanly drops the
 // old value instead of leaving a stale field behind. Anything NOT here (staticDir, uploadExts…) is
-// preserved untouched. `token` IS owned so the Token row can pin one AND clear it back to auto — but it
-// round-trips through answersFromConfig, so a re-run that never touches the row still writes it back.
+// preserved untouched. `token` IS owned so the fixed Token can be changed from
+// its sub-page and round-trips through answersFromConfig on every setup run.
 const WIZARD_KEYS = [
   'lang', 'name', 'port', 'tunnel', 'token', 'authMode', 'previewDomain',
   'sshHost', 'remotePort', 'sshJump', 'cfHostname', 'cfTunnelName', 'publicUrl',
@@ -118,7 +118,7 @@ export function configFromAnswers(a: SetupAnswers): SetupConfig {
   if (a.authMode) cfg.authMode = a.authMode;
   if (a.lang) cfg.lang = a.lang;
   if (a.name) cfg.name = a.name;
-  if (a.token) cfg.token = a.token;   // blank = don't pin one → the server mints a fresh token each start
+  if (a.token) cfg.token = a.token;
   if (a.previewDomain) cfg.previewDomain = a.previewDomain;
   if (a.tunnel === 'ssh') {
     cfg.sshHost = a.sshHost;
@@ -157,7 +157,7 @@ export function answersFromConfig(config: unknown = {}, defaultAuthMode: 'token'
     authMode: cfg.authMode === 'trusted-device' ? 'trusted-device' : cfg.authMode === 'token' ? 'token' : defaultAuthMode,
     lang: optionalString(cfg.lang) || getLocale(),
     name: optionalString(cfg.name) || '',
-    token: optionalString(cfg.token) || '',   // '' = not pinned (auto each start); seeded so an untouched re-run rewrites it
+    token: optionalString(cfg.token) || '',
     previewDomain: optionalString(cfg.previewDomain) || '',
     tunnel: isTunnel(cfg.tunnel) ? cfg.tunnel : 'none',
     port: Number(cfg.port) || 19999,

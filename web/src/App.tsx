@@ -285,7 +285,10 @@ export default function App() {
   const terminalStream = typeof window !== 'undefined'
     && terminalStreamEnabled(window.location, terminalTransport);
   const [needToken, setNeedToken] = useState(!hasAuthenticatedSession());
-  const [authPrompt, setAuthPrompt] = useState<'device' | 'token'>('device');
+  // The fixed Token is always the first factor. A saved value still has to be
+  // presented to the auth authority before the trusted-device check; never
+  // let the pairing screen become an implicit Token-only login path.
+  const [authPrompt, setAuthPrompt] = useState<'device' | 'token'>('token');
   const [logoutConfirm, setLogoutConfirm] = useState(false);
   const [logoutBusy, setLogoutBusy] = useState(false);
   const [logoutError, setLogoutError] = useState('');
@@ -2400,8 +2403,8 @@ export default function App() {
   });
 
   if (needToken) {
-    if (authPrompt === 'token' && isFixedTokenEnabled()) return <TokenPrompt onSaved={() => { setNeedToken(false); setBooting(true); }} onSwitch={() => setAuthPrompt('device')} />;
-    return <DevicePairingPrompt onSaved={() => { setNeedToken(false); setBooting(true); }} {...(isFixedTokenEnabled() ? { onSwitch: () => setAuthPrompt('token') } : {})} />;
+    if (authPrompt === 'token' && isFixedTokenEnabled()) return <TokenPrompt onSaved={() => setAuthPrompt('device')} />;
+    return <DevicePairingPrompt onSaved={() => { setNeedToken(false); setBooting(true); }} onSwitch={() => setAuthPrompt('token')} />;
   }
 
   const inboxList = inboxRows(states, seen, readTs == null ? Infinity : readTs);

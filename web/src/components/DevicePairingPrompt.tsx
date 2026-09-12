@@ -5,14 +5,16 @@ import TokenPrompt from './TokenPrompt.js';
 import AuthFrame from './AuthFrame.js';
 
 const errorCopy = (error: unknown) => t(error instanceof AuthRequestError && error.status === 429
-  ? 'auth.rateLimit' : 'auth.connectionError');
+  ? 'auth.rateLimit' : error instanceof AuthRequestError && error.code === 'TOKEN_REQUIRED'
+    ? 'auth.tokenRequired' : error instanceof AuthRequestError && error.code === 'AUTH_ORIGIN_REJECTED'
+      ? 'auth.originRejected' : 'auth.connectionError');
 
 export default function DevicePairingPrompt({ onSaved, onSwitch }: { onSaved: () => void; onSwitch?: () => void }) {
   const [status, setStatus] = useState<AuthStatus | null>(null);
   const [busy, setBusy] = useState(true);
   const [error, setError] = useState('');
   const [copyHint, setCopyHint] = useState('');
-  const [method, setMethod] = useState<'cli' | 'web'>('cli');
+  const [method, setMethod] = useState<'web' | 'cli'>('web');
   const methodRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const [now, setNow] = useState(Date.now());
   const offset = useRef(0);
@@ -30,10 +32,8 @@ export default function DevicePairingPrompt({ onSaved, onSwitch }: { onSaved: ()
     setStatus(next);
     const nextScope = `${next.pairing?.id}:${next.pairing?.state}:${next.pairing?.code}`;
     if (copyScope.current !== nextScope) { copyScope.current = nextScope; setCopyHint(''); }
-    if (next.mode === 'token' || next.authenticated) {
-      applyAuthStatus(next);
-      if (next.authenticated) saved.current();
-    }
+    applyAuthStatus(next);
+    if (next.authenticated) saved.current();
   }, []);
   const request = useCallback(async (method = 'GET') => {
     const generation = ++epoch.current;
@@ -100,8 +100,14 @@ export default function DevicePairingPrompt({ onSaved, onSwitch }: { onSaved: ()
     }
   };
   if (status?.mode === 'token') return <TokenPrompt onSaved={onSaved} />;
+  // A missing or rejected Token never falls through to pairing. The user must
+  // complete the first factor before we create or consume a pairing request.
+  if (status?.tokenEnabled && !status.tokenAuthenticated) {
+    return <TokenPrompt onSaved={() => { void request('GET'); }} error={t('auth.tokenInvalid')} />;
+  }
   return <AuthFrame mode="trusted-device" title={t(configuring ? 'auth.paired' : waiting && remaining > 0 ? 'auth.waiting' : 'auth.title')}>
     <section className="token-prompt pairing-prompt">
+    {status?.tokenEnabled && <p className="auth-warning">{t(status.migrationRequired ? 'auth.migrationRequired' : 'auth.dualRequirement')}</p>}
     {window.location.protocol === 'http:' && <p className="auth-warning">{t('auth.httpWarning')}</p>}
     <div aria-live="polite">
       {configuring && <><p>{t('auth.pending')}</p><p>{t(pairing?.source === 'web' ? 'auth.finishWeb' : 'auth.finishCli')}</p>
@@ -114,18 +120,18 @@ export default function DevicePairingPrompt({ onSaved, onSwitch }: { onSaved: ()
         <button onClick={() => { void copy(usableCode, codeText.current); }}>{t('auth.copyCode')}</button></div>
       <p className="auth-secondary pairing-countdown">{t('auth.codeRemaining', { seconds: remaining })}</p>
       <div className="pairing-methods" role="tablist" aria-label={t('auth.methodLabel')}>
-        {(['cli', 'web'] as const).map((value, index) => <button key={value} ref={node => { methodRefs.current[index] = node; }}
+        {(['web', 'cli'] as const).map((value, index) => <button key={value} ref={node => { methodRefs.current[index] = node; }}
           role="tab" id={`pairing-tab-${value}`} aria-controls={`pairing-panel-${value}`} aria-selected={method === value} tabIndex={method === value ? 0 : -1}
           onClick={() => setMethod(value)} onKeyDown={event => {
             if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
             event.preventDefault(); const next = event.key === 'Home' ? 0 : event.key === 'End' ? 1 : 1 - index;
-            setMethod(next === 0 ? 'cli' : 'web'); methodRefs.current[next]?.focus();
+            setMethod(next === 0 ? 'web' : 'cli'); methodRefs.current[next]?.focus();
           }}>{t(value === 'cli' ? 'auth.cliMethod' : 'auth.webMethod')}</button>)}
       </div>
-      <div role="tabpanel" id={`pairing-panel-${method}`} aria-labelledby={`pairing-tab-${method}`}>
+      <div className="pairing-method-panel" role="tabpanel" id={`pairing-panel-${method}`} aria-labelledby={`pairing-tab-${method}`}>
         {method === 'cli' ? <><p>{t('auth.cliInstructions')}</p>
-          <code className="pairing-command" ref={commandText}>handmux auth add {usableCode}</code>
-          <button onClick={() => { void copy(`handmux auth add ${usableCode}`, commandText.current); }}>{t('auth.copyCommand')}</button>
+          <code className="pairing-command" ref={commandText}>handmux auth add</code>
+          <button onClick={() => { void copy('handmux auth add', commandText.current); }}>{t('auth.copyCommand')}</button>
           <p className="auth-secondary">{t('auth.cliNext')}</p></>
           : <><p>{t('auth.webInstructions')}</p><p className="pairing-web-path">{t('auth.webPath')}</p>
             <p>{t('auth.webNext')}</p><p className="auth-secondary">{t('auth.webFallback')}</p></>}

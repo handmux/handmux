@@ -135,25 +135,12 @@ describe('compact device management', () => {
 });
 
 describe('fixed Token login retirement', () => {
-  it('shows the list but requires this browser, even if other devices are trusted', async () => {
+  it('keeps the device list available while the fixed Token remains a second factor', async () => {
     vi.mocked(api.list).mockResolvedValue({ devices: [other], currentDeviceId: null, tokenEnabled: true, serverTime: now });
     render(<DeviceManagement onLoggedOut={vi.fn()} />); await flush();
     expect(screen.getByText(other.name)).toBeTruthy();
-    expect((screen.getByRole('button', { name: t('devices.disableToken') }) as HTMLButtonElement).disabled).toBe(true);
-    expect((screen.getByRole('button', { name: t('devices.addSelf') }) as HTMLButtonElement).disabled).toBe(false);
-  });
-  it('confirms before disabling and removes the entire Token module after success', async () => {
-    vi.mocked(api.list).mockResolvedValue({ devices: [current], currentDeviceId: current.id, tokenEnabled: true, serverTime: now });
-    const disable = vi.spyOn(api, 'disableToken').mockResolvedValue({ mode: 'trusted-device', tokenEnabled: false, authenticated: true, serverTime: now });
-    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ mode: 'trusted-device', authenticated: true, currentDeviceId: current.id, tokenEnabled: false, serverTime: now }) })));
-    render(<DeviceManagement onLoggedOut={vi.fn()} />); await flush();
-    fireEvent.click(screen.getByRole('button', { name: t('devices.disableToken') }));
-    expect(disable).not.toHaveBeenCalled();
-    const dialog = screen.getByRole('alertdialog'); expect(dialog.textContent).toContain('handmux auth token enable');
-    vi.mocked(api.list).mockResolvedValue({ devices: [current], currentDeviceId: current.id, tokenEnabled: false, serverTime: now });
-    fireEvent.click(within(dialog).getByRole('button', { name: t('devices.disableToken') })); await flush();
-    expect(disable).toHaveBeenCalledOnce(); expect(screen.queryByText(t('devices.fixedToken'))).toBeNull();
-    expect(screen.getByText(current.name)).toBeTruthy();
+    expect(screen.queryByText(t('devices.fixedToken'))).toBeNull();
+    expect(screen.getByRole('button', { name: t('devices.addSelf') })).toBeTruthy();
   });
   it('does not report successful self-registration when the formal Cookie did not arrive', async () => {
     vi.mocked(api.list).mockResolvedValue({ devices: [], currentDeviceId: null, tokenEnabled: true, serverTime: now });
@@ -164,6 +151,6 @@ describe('fixed Token login retirement', () => {
     const sheet = screen.getByRole('dialog');
     fireEvent.click(within(sheet).getByRole('button', { name: t('devices.addSelf') })); await flush(); await flush();
     expect(within(sheet).getByRole('alert').textContent).toBe(t('devices.cookieRequired'));
-    expect((screen.getByRole('button', { name: t('devices.disableToken') }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.queryByRole('button', { name: t('devices.disableToken') })).toBeNull();
   });
 });

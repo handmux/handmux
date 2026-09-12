@@ -14,11 +14,11 @@ const cleanup: Array<() => void> = [];
 afterEach(() => { cleanup.splice(0).reverse().forEach(close => close()); });
 function fixture() {
   const db = new DatabaseSync(':memory:'); migrateProjectDatabase(db);
-  const service = new DeviceAuthService({ db, mode: 'trusted-device' }); cleanup.push(() => { service.close(); db.close(); });
+  const service = new DeviceAuthService({ db, mode: 'trusted-device', token: 'secret' }); cleanup.push(() => { service.close(); db.close(); });
   const p = service.createPairing(null, origin, 'Chrome'); const c = service.claim(p.pairing.code, 'cli'); const device = service.authorize(c.id, 'cli', { name: 'Existing browser', expire: '1h' });
   const actor = service.authenticateSecret(p.secret!, origin)!;
   const app = express(); app.use(express.json()); app.use('/api/auth', createDeviceAuthRouter({ service, resolveOrigin: () => origin }));
-  const auth = (r: request.Test) => r.set('Origin', origin).set('X-Handmux-Request', '1').set('Cookie', `handmux_session_http=${p.secret}`);
+  const auth = (r: request.Test) => r.set('Origin', origin).set('Authorization', 'Bearer secret').set('X-Handmux-Request', '1').set('Cookie', `handmux_session_http=${p.secret}`);
   return { service, actor, db, app, auth, device, secret: p.secret! };
 }
 describe('phase two shared device management', () => {
@@ -30,14 +30,14 @@ describe('phase two shared device management', () => {
     }
     await request(app).patch(`/api/auth/devices/${device.id}`).set('X-Handmux-Request', '1').set('Origin', 'https://evil.example').set('Cookie', `handmux_session_http=${secret}`).send({ name: 'Bad', version: 1 }).expect(403);
   });
-  it('renews primary management Cookies, extends self expiry only explicitly, and clears self logout Cookies last', async () => {
+  it('renews primary management Cookies, keeps expiry changes CLI-only, and clears self logout Cookies last', async () => {
     const { app, auth, device, service } = fixture();
     const listed = await auth(request(app).get('/api/auth/devices')).expect(200); expect(listed.headers['set-cookie']?.[0]).toContain('handmux_session_http=');
     const rename = await auth(request(app).patch(`/api/auth/devices/${device.id}`)).send({ version: device.version, name: 'Renamed' }).expect(200);
     expect(rename.body.device.expires_at).toBe(device.expires_at); expect(rename.body.device.version).toBe(device.version + 1);
-    const extend = await auth(request(app).patch(`/api/auth/devices/${device.id}`)).send({ version: rename.body.device.version, expire: '7d' }).expect(200);
-    expect(extend.body.device.expires_at).toBeGreaterThan(device.expires_at! + 6 * 86400_000);
-    expect(extend.headers['set-cookie']?.[0]).toMatch(/Max-Age=60479\d|Max-Age=604800/);
+    await auth(request(app).patch(`/api/auth/devices/${device.id}`)).send({ version: rename.body.device.version, expire: '7d' }).expect(403);
+    const extend = service.edit(device.id, { expire: '7d' });
+    expect(extend.expires_at).toBeGreaterThan(device.expires_at! + 6 * 86400_000);
     await auth(request(app).delete(`/api/auth/devices/${device.id}`)).expect(200).then(res => expect(res.headers['set-cookie']?.at(-1)).toContain('Max-Age=0'));
     expect(service.isDeviceActive(device.id)).toBe(false);
   });
