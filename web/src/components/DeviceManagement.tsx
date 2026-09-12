@@ -112,21 +112,28 @@ function DeviceDetail({ device: initial, current, now, onClose, onChanged, onLog
     try { if (!navigator.clipboard?.writeText) throw new Error('Clipboard unavailable'); await navigator.clipboard.writeText(device.id); setCopyHint(t('auth.copied')); }
     catch { if (idRef.current) { const range = document.createRange(); range.selectNodeContents(idRef.current); const selection = window.getSelection(); selection?.removeAllRanges(); selection?.addRange(range); } setCopyHint(t('auth.manualCopy')); }
   };
+  const statusText = device.revoked_at !== null ? t('devices.revoked') : device.expires_at !== null && device.expires_at <= now ? t('devices.expired') : t('devices.activeStatus');
+  const statusSummary = inactive ? statusText : `${statusText} · ${remainingExpiry(device, now)}`;
   return <>
     <DeviceSheet title={device.name} onClose={close} trapped={!confirming}>
-      {inactive ? <p>{remainingExpiry(device, now)}</p> : <>
+      <div className="device-detail-identity">
+        <span className="device-detail-avatar" aria-hidden="true">{[...device.name.trim()][0]?.toUpperCase() ?? '?'}</span>
+        <div className="device-detail-identity-copy"><strong>{device.browser_summary}</strong><span className={inactive ? 'device-status device-status-muted' : 'device-status'}>{statusSummary}</span></div>
+      </div>
+      <h3 className="device-detail-section-title">{t('devices.detailInfo')}</h3>
+      {inactive ? <p className="device-inactive-note">{t('devices.inactive')}</p> : <>
         <label className="device-field">{t('devices.name')}<input value={name} onChange={event => setName(event.target.value)} maxLength={160} disabled={busy} /></label>
         <ExpiryPicker value={expire} custom={custom} onChange={setExpire} onCustom={setCustom} keep disabled={busy} />
         <p className="auth-secondary">{expire === 'keep' ? t('devices.keepHint') : t('devices.expireFromSave')}</p>
         <button className="fontbtn device-save" disabled={busy || !changed || conflict} onClick={() => { void save(); }}>{t('common.save')}</button>
       </>}
-      <dl className="device-metadata"><dt>{t('devices.id')}</dt><dd><code ref={idRef}>{device.id}</code><button onClick={() => { void copyId(); }}>{t('devices.copyId')}</button></dd>
-        <dt>{t('devices.browser')}</dt><dd>{device.browser_summary}</dd><dt>{t('devices.added')}</dt><dd>{date(device.authorized_at)}</dd>
-        <dt>{t('devices.lastAccess')}</dt><dd>{date(device.last_used_at)}</dd><dt>{t('devices.expiresAt')}</dt><dd>{date(device.expires_at)}</dd></dl>
+      <dl className="device-metadata"><dt>{t('devices.id')}</dt><dd><code ref={idRef}>{device.id}</code><button className="device-copy-button" onClick={() => { void copyId(); }}>{t('devices.copyId')}</button></dd>
+        <dt>{t('devices.added')}</dt><dd>{date(device.authorized_at)}</dd><dt>{t('devices.lastAccess')}</dt><dd>{date(device.last_used_at)}</dd>
+        <dt>{t('devices.expiresAt')}</dt><dd>{date(device.expires_at)}</dd></dl>
       {copyHint && <p role="status">{copyHint}</p>}
       {!confirming && error && <p role="alert">{error}</p>}
       {conflict && <button disabled={busy} onClick={() => { void refresh(); }}>{t('devices.refreshDetails')}</button>}
-      {!inactive && <button className="device-danger" disabled={busy} onClick={() => { setError(''); setConfirming(true); }}>{t(current ? 'devices.logout' : 'devices.revoke')}</button>}
+      {!inactive && <><h3 className="device-detail-section-title device-detail-actions-title">{t('devices.detailActions')}</h3><button className="device-danger" disabled={busy} onClick={() => { setError(''); setConfirming(true); }}>{t(current ? 'devices.logout' : 'devices.revoke')}</button></>}
     </DeviceSheet>
     {confirming && <RevokeConfirm device={device} current={current} busy={busy} error={error} onClose={() => setConfirming(false)} onConfirm={() => { void revoke(); }} />}
   </>;
@@ -250,7 +257,7 @@ function AddDevice({ onClose, onAdded }: { onClose: () => void; onAdded: () => v
 
 export default function DeviceManagement({ onLoggedOut }: { onLoggedOut: () => void }) {
   const [data, setData] = useState<DeviceList | null>(null); const [error, setError] = useState(''); const [loading, setLoading] = useState(false);
-  const [history, setHistory] = useState(false); const [selected, setSelected] = useState<ManagedDevice | null>(null); const [adding, setAdding] = useState(false);
+  const [deviceTab, setDeviceTab] = useState<'active' | 'history'>('active'); const [selected, setSelected] = useState<ManagedDevice | null>(null); const [adding, setAdding] = useState(false);
   const [selfSheet, setSelfSheet] = useState(false); const [selfName, setSelfName] = useState(() => {
     const ua = navigator.userAgent;
     const browser = /Edg\//.test(ua) ? 'Edge' : /Firefox\//.test(ua) ? 'Firefox' : /Chrome|CriOS/.test(ua) ? 'Chrome' : /Safari/.test(ua) ? 'Safari' : 'Browser';
@@ -273,9 +280,9 @@ export default function DeviceManagement({ onLoggedOut }: { onLoggedOut: () => v
     document.addEventListener('visibilitychange', refresh); window.addEventListener('focus', refresh);
     return () => { alive.current = false; requestId.current++; clearInterval(timer); clearInterval(clock); document.removeEventListener('visibilitychange', refresh); window.removeEventListener('focus', refresh); };
   }, [load]);
-  useBackButton(history, () => setHistory(false));
   if (!isDeviceAuth()) return <p className="settings-detail-note">{t('auth.tokenWarning')}</p>;
-  const devices = (data?.devices ?? []).filter(d => isInactive(d, now) === history).sort((a, b) => Number(b.id === data?.currentDeviceId) - Number(a.id === data?.currentDeviceId) || b.last_used_at - a.last_used_at);
+  const showingHistory = deviceTab === 'history';
+  const devices = (data?.devices ?? []).filter(d => isInactive(d, now) === showingHistory).sort((a, b) => Number(b.id === data?.currentDeviceId) - Number(a.id === data?.currentDeviceId) || b.last_used_at - a.last_used_at);
   const addSelf = async () => {
     if (busy) return;
     setBusy(true); setError('');
@@ -303,16 +310,18 @@ export default function DeviceManagement({ onLoggedOut }: { onLoggedOut: () => v
       {originMismatch && <p className="device-origin-mismatch">{t('devices.originMismatch')}</p>}
     </div>
     {data?.tokenEnabled && <section className="device-token-card" aria-labelledby="device-token-title"><div className="device-token-heading"><div><h2 id="device-token-title">{t('devices.fixedToken')}</h2><p>{t(data.currentDeviceId ? 'devices.disableRecommendation' : 'devices.registerFirst')}</p></div><span className="device-token-status">{t('devices.enabled')}</span></div><button className="device-token-action" aria-label={t('devices.disableToken')} disabled={!data.currentDeviceId || busy} onClick={() => setConfirmToken(true)}>{t('devices.disableToken')}<span aria-hidden="true">›</span></button></section>}
-    {history && <button className="device-inline" onClick={() => setHistory(false)}>{t('devices.activeDevices')}</button>}
+    <div className="device-tabs" role="tablist" aria-label={t('devices.title')}>
+      <button role="tab" aria-selected={!showingHistory} className="device-tab" onClick={() => setDeviceTab('active')}>{t('devices.activeTab')}<span>{(data?.devices ?? []).filter(d => !isInactive(d, now)).length}</span></button>
+      <button role="tab" aria-selected={showingHistory} className="device-tab" onClick={() => setDeviceTab('history')}>{t('devices.historyTab')}<span>{inactiveCount}</span></button>
+    </div>
     <div className="settings-page-list">
       {devices.map(d => <button className="settings-page-row device-row" key={d.id} onClick={() => setSelected(d)}>
         <span className="device-row-copy"><span className="device-row-main"><span>{d.name}</span>{d.id === data?.currentDeviceId && <small>{t('devices.current')}</small>}</span>
           <span className="device-row-secondary"><span>{d.browser_summary}</span><span>{remainingExpiry(d, now)}</span></span></span><span className="settings-page-chevron" aria-hidden="true">›</span>
       </button>)}
-      {!history && <><button className="settings-page-row device-add-row" aria-label={t('devices.addSelf')} disabled={!!data?.currentDeviceId || busy || !data?.tokenEnabled || originMismatch} onClick={() => setSelfSheet(true)}><span className="device-action-copy"><strong>{t(data?.currentDeviceId ? 'devices.selfRegistered' : 'devices.addSelf')}</strong><small>{currentOrigin}</small></span><span className="settings-page-chevron" aria-hidden="true">›</span></button><button className="settings-page-row device-add-row" aria-label={t('devices.add')} disabled={!data?.currentDeviceId} onClick={() => setAdding(true)}><span>{t('devices.add')}</span><span className="settings-page-chevron" aria-hidden="true">›</span></button></>}
+      {!showingHistory && <><button className="settings-page-row device-add-row" aria-label={t('devices.addSelf')} disabled={!!data?.currentDeviceId || busy || !data?.tokenEnabled || originMismatch} onClick={() => setSelfSheet(true)}><span className="device-action-copy"><strong>{t(data?.currentDeviceId ? 'devices.selfRegistered' : 'devices.addSelf')}</strong><small>{currentOrigin}</small></span><span className="settings-page-chevron" aria-hidden="true">›</span></button><button className="settings-page-row device-add-row" aria-label={t('devices.add')} disabled={!data?.currentDeviceId} onClick={() => setAdding(true)}><span>{t('devices.add')}</span><span className="settings-page-chevron" aria-hidden="true">›</span></button></>}
     </div>
-    {history && devices.length === 0 && !loading && <p className="auth-secondary">{t('devices.noHistory')}</p>}
-    {!history && inactiveCount > 0 && <button className="device-inline" onClick={() => setHistory(true)}>{t('devices.history', { n: inactiveCount })}</button>}
+    {devices.length === 0 && !loading && <p className="device-empty">{t(showingHistory ? 'devices.noHistory' : 'devices.noActive')}</p>}
     {error && <><p role="alert">{error}</p><button disabled={loading} onClick={() => { void load(); }}>{t('common.retry')}</button></>}
     {loading && !data && <p role="status">{t('common.loading')}</p>}
     {selected && <DeviceDetail key={selected.id} device={selected} current={selected.id === data?.currentDeviceId} now={now} onClose={() => setSelected(null)} onChanged={() => { void load(); }} onLoggedOut={onLoggedOut} />}

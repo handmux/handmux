@@ -26,9 +26,16 @@ describe('compact device management', () => {
     render(<DeviceManagement onLoggedOut={vi.fn()} />); await flush();
     const rows = document.querySelectorAll('.device-row'); expect(rows[0]?.textContent).toContain(current.name); expect(rows).toHaveLength(2);
     expect(screen.queryByText(current.id)).toBeNull(); expect(screen.queryByText(history.name)).toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: t('devices.history', { n: 1 }) }));
+    const activeTab = screen.getByRole('tab', { name: new RegExp(t('devices.activeTab')) });
+    const historyTab = screen.getByRole('tab', { name: new RegExp(t('devices.historyTab')) });
+    expect(activeTab.getAttribute('aria-selected')).toBe('true'); expect(activeTab.textContent).toContain('2');
+    expect(historyTab.getAttribute('aria-selected')).toBe('false'); expect(historyTab.textContent).toContain('1');
+    fireEvent.click(historyTab);
+    expect(activeTab.getAttribute('aria-selected')).toBe('false'); expect(historyTab.getAttribute('aria-selected')).toBe('true');
     fireEvent.click(screen.getByRole('button', { name: new RegExp(history.name) }));
-    expect(screen.getByText(history.id)).toBeTruthy(); expect(screen.getByText(t('devices.added'))).toBeTruthy(); expect(screen.getByText(t('devices.lastAccess'))).toBeTruthy();
+    expect(screen.getByText(history.id)).toBeTruthy(); expect(screen.getAllByText(history.browser_summary)).toHaveLength(2);
+    expect(screen.queryByText(t('devices.activeStatus'))).toBeNull(); expect(screen.getAllByText(t('devices.revoked')).length).toBeGreaterThan(0);
+    expect(screen.getByText(t('devices.detailInfo'))).toBeTruthy(); expect(screen.getByText(t('devices.added'))).toBeTruthy(); expect(screen.getByText(t('devices.lastAccess'))).toBeTruthy();
     expect(screen.queryByRole('button', { name: t('devices.revoke') })).toBeNull(); expect(screen.queryByRole('button', { name: t('common.save') })).toBeNull();
   });
   it('renames using the exact version without sending expire, and copies IDs with HTTP manual fallback', async () => {
