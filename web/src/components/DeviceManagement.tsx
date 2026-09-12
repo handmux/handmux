@@ -342,14 +342,14 @@ export default function DeviceManagement({ onLoggedOut }: { onLoggedOut: () => v
           </div>
           {accessOrigin && <span className="device-origin-check" aria-label={t('devices.originActive')}>✓</span>}
         </div>
-        {data.previewDomain && <div className="settings-page-row device-origin-row">
+        <div className="settings-page-row device-origin-row">
           <div className="device-origin-copy">
             <span className="device-origin-label">{t('devices.previewDomainLabel')} <span className="device-origin-help" role="img" aria-label={t('devices.previewDomainInfo')} title={t('devices.previewDomainInfo')}>?</span></span>
-            <code className="device-origin-value">{data.previewDomain}</code>
-            <span className="device-origin-state">{t('devices.originBuiltIn')}</span>
+            <code className="device-origin-value">{data.previewDomain ?? t('devices.originUnset')}</code>
+            <span className="device-origin-state">{data.previewDomain ? t('devices.originBuiltIn') : t('devices.originPending')}</span>
           </div>
-          <span className="device-origin-check" aria-label={t('devices.originActive')}>✓</span>
-        </div>}
+          {data.previewDomain && <span className="device-origin-check" aria-label={t('devices.originActive')}>✓</span>}
+        </div>
       </div>
       <p className="settings-page-footer">{t('devices.originHint')}</p>
       <div className="device-origin-commands" aria-label={t('devices.originCommands')}>
