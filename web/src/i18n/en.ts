@@ -90,6 +90,8 @@ export default {
   'auth.authorizeWithCli': 'On the computer running handmux, run',
   'auth.cliAfterCode': 'then enter this code when prompted.',
   'auth.chooseOneMethod': 'Choose one way to authorize this browser',
+  'auth.cliMethodTitle': 'Computer CLI authorization',
+  'auth.deviceMethodTitle': 'Authorize from another device',
   'auth.paired': 'Paired successfully',
   'auth.pending': 'Confirmed. Finishing authorization…',
   'auth.finishCli': 'Finish device setup in the terminal.',

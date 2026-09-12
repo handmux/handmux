@@ -89,6 +89,8 @@ export default {
   'auth.authorizeWithCli': '在运行 handmux 的电脑上执行',
   'auth.cliAfterCode': '按提示输入这个验证码。',
   'auth.chooseOneMethod': '任选一种方式完成授权',
+  'auth.cliMethodTitle': '电脑 CLI 授权',
+  'auth.deviceMethodTitle': '其他设备授权',
   'auth.paired': '配对成功',
   'auth.pending': '已确认，正在完成授权…',
   'auth.finishCli': '请在终端完成设备设置。',
