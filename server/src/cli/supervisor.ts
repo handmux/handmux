@@ -112,10 +112,11 @@ export function lanUrl(
   return null;
 }
 
-// The token rides in the query string so the first navigation (or a QR scan) authenticates in one shot.
-export function publicUrlWithToken(base: string | null, token: string): string | null {
-  if (!base) return base;
-  return `${base.replace(/\/$/, '')}/?token=${encodeURIComponent(token)}`;
+// Kept as a source-compatible helper for integrations that imported the old
+// name. Credentials are deliberately never put in a URL; QR and CLI output
+// carry only the address and the browser asks for the Token separately.
+export function publicUrlWithToken(base: string | null, _token: string): string | null {
+  return bareUrl(base);
 }
 
 // Bare address with no token in it — printed/QR-encoded so a link can be shared or screenshotted without

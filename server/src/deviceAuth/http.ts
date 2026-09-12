@@ -3,6 +3,7 @@ import { bearerFrom } from '../auth.js';
 import type { Request, Response } from 'express';
 import { DeviceAuthError, DeviceAuthService, readSessionSecret, readPairingCookies, sessionCookieName, pairingCookieName } from './service.js';
 import type { DevicePrincipal } from './service.js';
+import { requestOrigin } from '../requestOrigin.js';
 
 export function setSessionCookie(res: Response, origin: string, secret: string, expiresAt: number | null, now = Date.now()): void {
   const maxAge = Math.max(0, Math.min(expiresAt === null ? 34_560_000_000 : expiresAt - now, 34_560_000_000));
@@ -16,10 +17,26 @@ function browserSummary(ua: string): string {
   const os = /(?:iPhone|iPad|iPod)/.test(ua) ? 'iOS' : /Android/.test(ua) ? 'Android' : /Windows/.test(ua) ? 'Windows' : /Macintosh|Mac OS X/.test(ua) ? 'macOS' : /Linux/.test(ua) ? 'Linux' : '';
   return os ? `${browser} · ${os}` : browser;
 }
-export function createDeviceAuthRouter({ service, resolveOrigin }: {
+export function createDeviceAuthRouter({ service, resolveOrigin, resolvePublicUrl, previewDomain }: {
   service: DeviceAuthService; resolveOrigin: (req: Request) => string | null;
+  /** The effective advertised entry point (config publicUrl or a runtime tunnel URL). */
+  resolvePublicUrl?: () => string | null;
+  /** Built-in browser proxy base; every lease uses an HTTPS subdomain below it. */
+  previewDomain?: string | null;
 }): Router {
   const router = Router();
+  const advertisedOrigin = (): string | null => {
+    const value = resolvePublicUrl?.();
+    if (!value) return null;
+    try { return new URL(value).origin; } catch { return null; }
+  };
+  const previewOrigin = (): string | null => {
+    if (!previewDomain) return null;
+    try {
+      const url = new URL(/^https?:\/\//i.test(previewDomain) ? previewDomain : `https://${previewDomain}`);
+      return `https://*.${url.hostname}`;
+    } catch { return null; }
+  };
   // A tunnel can put every browser behind one loopback IP. Anonymous traffic must not spend an
   // authorized device's status/logout quota, including recovery before its primary cookie arrives.
   type Bucket = { at: number; requests: number; creates: number };
@@ -27,8 +44,14 @@ export function createDeviceAuthRouter({ service, resolveOrigin }: {
   const authenticatedBuckets = new Map<string, Bucket>();
   router.use((req, res, next) => {
     res.set('Cache-Control', 'no-store'); res.set('Pragma', 'no-cache');
-    const origin = resolveOrigin(req);
-    if (!origin || (req.get('Origin') && req.get('Origin') !== origin)
+    const resolvedOrigin = resolveOrigin(req);
+    // An unlisted host may only reach the status/pairing bootstrap. It still
+    // needs the fixed Token to create a pairing and can never touch business
+    // or device-management routes before an approved device is enrolled.
+    const origin = resolvedOrigin ?? requestOrigin(req);
+    const pairingBootstrap = !resolvedOrigin && origin && (req.path === '/status' || req.path === '/pairing');
+    if (!origin || (!pairingBootstrap && !resolvedOrigin)
+      || (req.get('Origin') && req.get('Origin') !== origin)
       || (!['GET', 'HEAD'].includes(req.method) && req.get('Origin') !== origin)) {
       res.status(403).json({ error: 'AUTH_ORIGIN_REJECTED', message: 'Open handmux from its trusted access address and retry' }); return;
     }
@@ -43,7 +66,7 @@ export function createDeviceAuthRouter({ service, resolveOrigin }: {
         }
       }
     } catch {
-      res.status(503).json({ error: 'AUTH_UNAVAILABLE', message: 'Authentication storage is unavailable; restart HandMux and retry' }); return;
+      res.status(503).json({ error: 'AUTH_UNAVAILABLE', message: 'Authentication storage is unavailable; restart handmux and retry' }); return;
     }
     const now = Date.now();
     // Separate bounded maps reserve capacity for authenticated sessions even under anonymous floods.
@@ -82,13 +105,13 @@ export function createDeviceAuthRouter({ service, resolveOrigin }: {
     if (principal && secret) setSessionCookie(res, origin, secret, principal.expiresAt);
     const pairing = candidate?.pairing;
     res.json({ mode: service.mode, tokenEnabled: true, tokenAuthenticated: !!token, migrationRequired: service.migrationRequired,
-      requiresTrustedDevice: !principal, trustedOrigin: service.trustedOrigin, authenticated: !!principal,
+      requiresTrustedDevice: !principal, trustedOrigin: service.trustedOrigin, publicUrl: advertisedOrigin(), previewDomain: previewOrigin(), trustedOrigins: service.trustedOrigins, authenticated: !!principal,
       currentDeviceId: principal?.deviceId ?? null, ...(pairing ? { pairing } : {}), serverTime: Date.now() });
   };
   const safe = (handler: (req: Request, res: Response) => void) => (req: Request, res: Response): void => {
     try { handler(req, res); } catch (error) {
       if (error instanceof DeviceAuthError) res.status(error.status).json({ error: error.code, message: error.message });
-      else res.status(503).json({ error: 'AUTH_UNAVAILABLE', message: 'Authentication storage is unavailable; restart HandMux and retry' });
+      else res.status(503).json({ error: 'AUTH_UNAVAILABLE', message: 'Authentication storage is unavailable; restart handmux and retry' });
     }
   };
   router.get('/status', safe(status));
@@ -145,7 +168,7 @@ export function createDeviceAuthRouter({ service, resolveOrigin }: {
     const secret = readSessionSecret(req, origin);
     if (actor && secret) setSessionCookie(res, origin, secret, actor.expiresAt);
     const devices = service.list().sort((a, b) => Number(b.id === actor?.deviceId) - Number(a.id === actor?.deviceId) || b.last_used_at - a.last_used_at || a.id.localeCompare(b.id));
-    res.json({ devices, tokenEnabled: true, trustedOrigin: service.trustedOrigin, currentDeviceId: actor.deviceId, serverTime: Date.now() });
+    res.json({ devices, tokenEnabled: true, trustedOrigin: service.trustedOrigin, publicUrl: advertisedOrigin(), previewDomain: previewOrigin(), trustedOrigins: service.trustedOrigins, currentDeviceId: actor.deviceId, serverTime: Date.now() });
   }));
   router.post('/devices/self', safe((req, res) => {
     const origin = String(res.locals.authOrigin);
@@ -157,6 +180,14 @@ export function createDeviceAuthRouter({ service, resolveOrigin }: {
     const device = service.registerSelf(candidate.secret, origin, { name: req.body?.name, expire: req.body?.expire });
     setSessionCookie(res, origin, candidate.secret, device.expires_at);
     res.json({ device, serverTime: Date.now() });
+  }));
+  router.post('/trusted-origins', manage((req, res) => {
+    const trustedOrigins = service.addTrustedOrigin(req.body?.origin);
+    res.json({ trustedOrigins, serverTime: Date.now() });
+  }));
+  router.delete('/trusted-origins', manage((req, res) => {
+    const trustedOrigins = service.removeTrustedOrigin(req.body?.origin);
+    res.json({ trustedOrigins, serverTime: Date.now() });
   }));
   router.post('/token/disable', safe(() => {
     throw new DeviceAuthError('TOKEN_ALWAYS_REQUIRED', 'Fixed Token login is always required and cannot be disabled', 409);

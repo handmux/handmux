@@ -51,14 +51,14 @@ import {
   cfConfigYaml, parseTunnelCreate, findTunnelId,
   mergeConfig, answersFromConfig, summarizeConnection,
   normalizeVoiceConfig,
-  validatePort, validateHost, validatePreviewDomain, validateNonEmpty, validateContact, validateToken,
+  validatePort, validateHost, validatePreviewDomain, validatePublicUrl, validateNonEmpty, validateContact, validateToken,
   TUNNEL_KEYS,
 } from './setupModel.js';
 export {
   cfConfigYaml, parseTunnelCreate, findTunnelId,
   configFromAnswers, mergeConfig, answersFromConfig, summarizeConnection,
   normalizeVoiceConfig,
-  validatePort, validateHost, validatePreviewDomain, validateNonEmpty, validateContact, validateToken,
+  validatePort, validateHost, validatePreviewDomain, validatePublicUrl, validateNonEmpty, validateContact, validateToken,
 } from './setupModel.js';
 
 function readExisting(file: string): SetupConfig {
@@ -254,15 +254,20 @@ function tunnelOptions() {
   ];
 }
 
-// Which tunnels have config fields to edit a level deeper (none/cloudflare-quick have nothing to configure).
+// Which tunnels have config fields to edit a level deeper. Direct mode has an
+// optional public URL for a user-managed reverse tunnel; leaving it blank is
+// still the ordinary LAN/local direct connection.
 const hasConnFields = (tunnel: Tunnel): boolean => (
-  ['cloudflare-named', 'ssh', 'natapp', 'cpolar'] as Tunnel[]
+  ['none', 'cloudflare-named', 'ssh', 'natapp', 'cpolar'] as Tunnel[]
 ).includes(tunnel);
 
 // The editable field rows for the CURRENT tunnel — the type/mode is chosen a level up (the picker), so this
 // lists ONLY that tunnel's config, values shown and secrets masked. Empty for none / cloudflare-quick.
 function connectionFieldRows(a: SetupAnswers): ConnectionFieldRow[] {
   const none = t('setup.connNone');
+  if (a.tunnel === 'none') return [
+    { value: 'publicUrl', label: t('setup.connPublicUrl'), hint: a.publicUrl || t('setup.connDirectAuto') },
+  ];
   if (a.tunnel === 'cloudflare-named') return [
     { value: 'cfHostname', label: t('setup.connHostname'), hint: a.cfHostname || none },
     { value: 'cfTunnelName', label: t('setup.connTunnelName'), hint: a.cfTunnelName || 'handmux' },
@@ -344,7 +349,11 @@ async function editConnField(a: SetupAnswers, field: ConnectionField): Promise<S
     case 'cfTunnelName': n.cfTunnelName = (await ask(text({ message: t('setup.askTunnelName'), initialValue: a.cfTunnelName || 'handmux' }))) || 'handmux'; break;
     case 'sshHost': n.sshHost = await ask(text({ message: t('setup.askSshHost'), initialValue: a.sshHost || '', validate: validateNonEmpty('ssh host') })); break;
     case 'remotePort': n.remotePort = Number(await ask(text({ message: t('setup.askRemotePort'), initialValue: String(a.remotePort || a.port), validate: validatePort }))); break;
-    case 'publicUrl': setOpt('publicUrl', await ask(text({ message: t('setup.askPublicUrl'), initialValue: a.publicUrl || '' }))); break;
+    case 'publicUrl': setOpt('publicUrl', await ask(text({
+      message: t(a.tunnel === 'none' ? 'setup.askDirectPublicUrl' : 'setup.askPublicUrl'),
+      initialValue: a.publicUrl || '',
+      validate: validatePublicUrl,
+    }))); break;
     case 'sshJump': setOpt('sshJump', await ask(text({ message: t('setup.askSshJump'), initialValue: a.sshJump || '' }))); break;
     case 'authtoken': n.authtoken = await ask(password({ message: t('setup.askAuthtoken'), validate: validateNonEmpty('authtoken') })); break;
     case 'cpolarRegion': setOpt('cpolarRegion', await ask(text({ message: t('setup.askCpolarRegion'), initialValue: a.cpolarRegion || '' }))); break;

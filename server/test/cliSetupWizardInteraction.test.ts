@@ -32,6 +32,9 @@ describe('setup wizard authentication migration', () => {
   it('saves trusted-device mode and a durable Token on a new setup', async () => {
     const target = path.join(root, 'config.json');
     prompt.select.mockResolvedValueOnce('en').mockResolvedValueOnce('none')
+      // Direct mode exposes an optional public URL field; leave it blank and
+      // return to the hub before editing the fixed Token.
+      .mockResolvedValueOnce(prompt.cancelled)
       .mockResolvedValueOnce('custom').mockResolvedValueOnce(prompt.cancelled).mockResolvedValueOnce('save');
     prompt.text.mockResolvedValueOnce('fixed-token');
     const result = await runSetup({ target, home: root });

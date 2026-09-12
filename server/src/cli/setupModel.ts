@@ -120,6 +120,11 @@ export function configFromAnswers(a: SetupAnswers): SetupConfig {
   if (a.name) cfg.name = a.name;
   if (a.token) cfg.token = a.token;
   if (a.previewDomain) cfg.previewDomain = a.previewDomain;
+  // Direct mode can sit behind a user-managed reverse tunnel or proxy.  Keep
+  // its public entry point in the same `publicUrl` field used by the built-in
+  // tunnel drivers so origin validation and the URL shown by `handmux start`
+  // use one source of truth.
+  if (a.tunnel === 'none' && a.publicUrl) cfg.publicUrl = a.publicUrl;
   if (a.tunnel === 'ssh') {
     cfg.sshHost = a.sshHost;
     cfg.remotePort = a.remotePort;
@@ -231,6 +236,16 @@ export function validatePreviewDomain(v: unknown): string | undefined {
   if (!s) return undefined;
   return /^[a-z0-9-]+(\.[a-z0-9-]+)+$/i.test(s) ? undefined : t('setup.valPreviewDomain');
 }
+export function validatePublicUrl(v: unknown): string | undefined {
+  const s = String(v || '').trim();
+  if (!s) return undefined;
+  try {
+    const url = new URL(s);
+    if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password
+      || url.pathname !== '/' || url.search || url.hash) return t('setup.valPublicUrl');
+    return undefined;
+  } catch { return t('setup.valPublicUrl'); }
+}
 // VAPID subject: Apple (APNs) rejects a fake/.local domain with BadJwtToken, so require a real-looking
 // mailto:you@host.tld or an https:// URL and reject the known-bad .local. Keeps push from silently
 // failing on iOS. (Can't fully validate "real" client-side — this just catches the obvious footguns.)
@@ -241,8 +256,9 @@ export function validateContact(v: unknown): string | undefined {
   if (!wellFormed || /\.local(?:[:/]|$)/i.test(s)) return t('setup.valContact');
   return undefined;
 }
-// Access token: it rides in the phone's URL as ?token=…, so require something and reject whitespace (a space
-// would break the link). Length/charset are otherwise up to the user — a pinned token is used verbatim.
+// The fixed Token is entered separately on the login page and is never put in
+// an address or QR code. Keep the value non-empty and whitespace-free so it
+// can be copied without ambiguity.
 export function validateToken(v: unknown): string | undefined {
   const s = String(v || '').trim();
   if (!s) return t('setup.valToken');

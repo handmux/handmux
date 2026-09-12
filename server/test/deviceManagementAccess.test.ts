@@ -25,7 +25,7 @@ async function fixture() {
   const address = server.address();
   if (!address || typeof address === 'string') throw new Error('missing test port');
   const origin = `http://127.0.0.1:${address.port}`;
-  const resolveOrigin = createAuthOriginResolver({ port: address.port, host: '127.0.0.1' });
+  const resolveOrigin = createAuthOriginResolver({ port: address.port, host: '127.0.0.1', trustedOrigins: () => service.trustedOrigins, trustedOrigin: () => service.trustedOrigin });
   const access = createDeviceAccess({ service, resolveOrigin });
   app.use('/api/auth', express.json(), createDeviceAuthRouter({ service, resolveOrigin }));
   app.use('/api', access.middleware);
@@ -98,6 +98,25 @@ describe('Web device management across real HTTP and WebSocket boundaries', () =
     const actual = f.service.list().find(device => device.id === target.device.id)!;
     expect(actual.name).toBe('CLI name');
     expect(actual.expires_at).toBe(updated.expires_at);
+  });
+
+  it('lets an unlisted host request pairing with Token, then records it only after approval', async () => {
+    const f = await fixture();
+    const approver = await f.enroll('approver');
+    const extraOrigin = 'https://phone.example.com';
+    const candidate = await request(f.server).post('/api/auth/pairing')
+      .set({ Host: 'phone.example.com', Origin: extraOrigin, 'X-Forwarded-Proto': 'https', Authorization: 'Bearer secret', 'X-Handmux-Request': '1' }).send({}).expect(200);
+    expect(f.service.trustedOrigins).toEqual([f.origin]);
+    const approval = await request(f.server).post('/api/auth/approvals').set(f.headers).set('Cookie', approver.cookie)
+      .send({ code: candidate.body.pairing.code }).expect(200);
+    await request(f.server).post(`/api/auth/approvals/${approval.body.approval.id}/authorize`).set(f.headers)
+      .set('Cookie', approver.cookie).send({ name: 'phone', expire: '7d' }).expect(200);
+    expect(f.service.trustedOrigins).toEqual([f.origin, extraOrigin]);
+    const candidateCookie = String(candidate.headers['set-cookie']?.[0]).split(';')[0]!;
+    const status = await request(f.server).get('/api/auth/status').set({ Host: 'phone.example.com', Origin: extraOrigin, 'X-Forwarded-Proto': 'https', Authorization: 'Bearer secret', 'X-Handmux-Request': '1' }).set('Cookie', candidateCookie).expect(200);
+    expect(status.body.authenticated).toBe(true);
+    const primary = String(status.headers['set-cookie']?.find((value: string) => value.startsWith('__Host-handmux_session='))).split(';')[0]!;
+    await request(f.server).get('/api/private').set({ Host: 'phone.example.com', Origin: extraOrigin, 'X-Forwarded-Proto': 'https', 'X-Handmux-Request': '1' }).set('Cookie', primary).set('Authorization', 'Bearer secret').expect(200);
   });
 
   it('preserves the full setup window after a late claim but rejects an expired approver', async () => {

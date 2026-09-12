@@ -307,6 +307,8 @@ button.settings-page-row:disabled, .settings-page-row.disabled { color: rgba(235
 .device-settings-group > h2 { margin: 0; padding: 0 16px 7px; color: rgba(235,235,245,.52); font-size: 12px; line-height: 1.2; font-weight: 500; letter-spacing: .25px; }
 .device-origin-row { min-height: 70px; align-items: flex-start; padding-top: 13px; padding-bottom: 13px; }
 .device-origin-copy { min-width: 0; display: grid; gap: 5px; }
+.device-origin-label { color: rgba(235,235,245,.62); font-size: 12px; line-height: 1.25; }
+.device-origin-help { display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; margin-left: 2px; border: 1px solid rgba(235,235,245,.42); border-radius: 50%; color: rgba(235,235,245,.68); font-size: 11px; line-height: 1; vertical-align: -2px; cursor: help; }
 .device-origin-value { display: block; overflow-wrap: anywhere; color: #f2f2f7; font: 14px/1.35 ui-monospace, "SF Mono", Menlo, monospace; }
 .device-origin-state { color: rgba(235,235,245,.48); font-size: 12px; line-height: 1.25; }
 .device-origin-check { flex: none; margin: 3px 2px 0 12px; color: var(--blue); font-size: 17px; line-height: 1; }
@@ -315,6 +317,17 @@ button.settings-page-row:disabled, .settings-page-row.disabled { color: rgba(235
 .device-origin-command > span { padding-top: 7px; color: rgba(235,235,245,.48); font-size: 12px; line-height: 1.25; }
 .device-origin-command code { min-width: 0; padding: 7px 8px; border-radius: 8px; background: #1a1b1e; color: #b9d8ff; font: 12px/1.35 ui-monospace, "SF Mono", Menlo, monospace; overflow-wrap: anywhere; }
 .device-origin-mismatch { margin: 7px 16px 0; color: #e6be70; font-size: 12.5px; line-height: 1.45; }
+.device-origin-extra { display: grid; gap: 8px; margin-top: 14px; }
+.device-origin-extra h3 { margin: 0 16px; color: rgba(235,235,245,.72); font-size: 13px; font-weight: 600; }
+.device-origin-extra > p { margin: 0 16px 2px; color: rgba(235,235,245,.52); font-size: 12px; line-height: 1.45; }
+.device-origin-extra-row { min-height: 52px; gap: 10px; }
+.device-origin-extra-row .device-origin-value { flex: 1; min-width: 0; font-size: 12px; }
+.device-origin-remove { flex: none; min-height: 36px; padding: 0 8px; border: 0; border-radius: 8px; background: transparent; color: #ff6961; font: 13px/1.2 -apple-system, system-ui, sans-serif; }
+.device-origin-remove:disabled { opacity: .45; }
+.device-origin-add { display: flex; align-items: center; gap: 8px; margin: 2px 16px 0; }
+.device-origin-add input { flex: 1; min-width: 0; min-height: 42px; padding: 0 11px; border: 1px solid rgba(235,235,245,.16); border-radius: 10px; background: rgba(120,120,128,.1); color: #f2f2f7; font: 13px/1.2 ui-monospace, "SF Mono", Menlo, monospace; }
+.device-origin-add input::placeholder { color: rgba(235,235,245,.35); }
+.device-origin-add .fontbtn { flex: none; min-height: 42px; padding-inline: 12px; }
 .device-list-group { display: flex; flex-direction: column; gap: 8px; }
 .device-list-group > h2 { padding-bottom: 0; }
 .device-row { gap: 12px; min-height: 64px; }
@@ -323,6 +336,8 @@ button.settings-page-row:disabled, .settings-page-row.disabled { color: rgba(235
 .device-action-copy strong { font-weight: 500; }
 .device-action-copy small { max-width: 100%; overflow-wrap: anywhere; color: rgba(235,235,245,.48); font-size: 12px; line-height: 1.35; }
 .device-sheet-note { margin: 0 0 18px; padding: 11px 12px; border-radius: 11px; background: rgba(10,132,255,.1); color: #b9d8ff; font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
+.device-approval-origin { display: flex; align-items: baseline; gap: 8px; margin: 8px 0 14px; color: rgba(235,235,245,.55); font-size: 12px; }
+.device-approval-origin code { min-width: 0; overflow-wrap: anywhere; color: #d8e7ff; font: 12px/1.35 ui-monospace, "SF Mono", Menlo, monospace; }
 .device-row-copy { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 5px; }
 .device-row-main, .device-row-secondary { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .device-row-main > span, .device-row-secondary > span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

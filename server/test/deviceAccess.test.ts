@@ -44,6 +44,7 @@ describe('known auth entry points', () => {
     const resolve = createAuthOriginResolver({ port: 4000, host: '0.0.0.0', publicUrl: 'https://mux.example' });
     expect(resolve(reqMock('localhost:4000'))).toBe('http://localhost:4000');
     expect(resolve(reqMock('evil.example:4000'))).toBeNull();
+    expect(resolve(reqMock('evil.example', '127.0.0.1', 'https'))).toBeNull();
     expect(resolve(reqMock('mux.example', '127.0.0.1', 'https'))).toBe('https://mux.example');
     expect(resolve(reqMock('mux.example', '192.0.2.2', 'https'))).toBe('https://mux.example');
     expect(resolve(reqMock('localhost:4000@evil.example'))).toBeNull();
@@ -56,6 +57,17 @@ describe('known auth entry points', () => {
     expect(resolve(reqMock('mux.example', '::1', 'https'))).toBe(url);
     url = null;
     expect(resolve(reqMock('mux.example', '::1', 'https'))).toBeNull();
+  });
+
+  it('accepts the dynamic preview wildcard and user-managed trusted wildcards', () => {
+    const resolve = createAuthOriginResolver({
+      port: 4000, host: '0.0.0.0', previewDomain: 'preview.example.com',
+      trustedOrigins: () => ['https://*.extra.example.com'],
+    });
+    expect(resolve(reqMock('one.preview.example.com', '203.0.113.4', 'https'))).toBe('https://one.preview.example.com');
+    expect(resolve(reqMock('a.extra.example.com', '203.0.113.4', 'https'))).toBe('https://a.extra.example.com');
+    expect(resolve(reqMock('extra.example.com', '203.0.113.4', 'https'))).toBeNull();
+    expect(resolve(reqMock('a.extra.example.com', '203.0.113.4', 'http'))).toBeNull();
   });
 });
 describe('browser → CLI socket → protected HTTP / WebSocket', () => {

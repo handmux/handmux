@@ -2,10 +2,12 @@ import { networkInterfaces } from 'node:os';
 import type { IncomingMessage } from 'node:http';
 import type { RequestHandler, Response } from 'express';
 import type { DevicePrincipal } from './deviceAuth/service.js';
+import { originPatternMatches } from './deviceAuth/service.js';
 import { readSessionSecret } from './deviceAuth/service.js';
 import { setSessionCookie } from './deviceAuth/http.js';
 import { withRequestAuthority } from './requestAuthority.js';
 import { bearerFrom } from './auth.js';
+import { requestOrigin } from './requestOrigin.js';
 export type { DevicePrincipal } from './deviceAuth/service.js';
 
 export interface DeviceAccessService {
@@ -19,9 +21,12 @@ export interface DeviceAccessService {
 
 /** Host and forwarded headers select a known entry point; they never create a trusted origin. */
 export function createAuthOriginResolver({
-  port, host, publicUrl, runtimePublicUrl = () => null,
+  port, host, publicUrl, previewDomain, trustedOrigin = () => null, trustedOrigins = () => [], runtimePublicUrl = () => null,
 }: {
-  port: number; host: string; publicUrl?: string;
+  port: number; host: string; publicUrl?: string; previewDomain?: string;
+  /** Persisted single-origin value retained for databases created before the list existed. */
+  trustedOrigin?: () => string | null;
+  trustedOrigins?: () => readonly string[];
   runtimePublicUrl?: () => string | null;
 }): (req: IncomingMessage) => string | null {
   const local = new Set<string>();
@@ -30,37 +35,30 @@ export function createAuthOriginResolver({
     try { local.add(new URL(`http://${hostname.includes(':') ? `[${hostname}]` : hostname}:${port}`).origin); } catch {}
   };
   for (const hostname of ['localhost', '127.0.0.1', '::1', host]) add(hostname);
+  const configuredPatterns: string[] = [];
+  if (previewDomain) {
+    try {
+      const url = new URL(/^https?:\/\//i.test(previewDomain) ? previewDomain : `https://${previewDomain}`);
+      if (url.hostname && !url.hostname.includes('*')) configuredPatterns.push(`https://*.${url.hostname}`);
+    } catch { /* an invalid preview domain is rejected by its own setup validation */ }
+  }
   for (const entries of Object.values(networkInterfaces())) {
     for (const entry of entries ?? []) if (!entry.address.includes('%')) add(entry.address);
   }
   return (req) => {
-    const encrypted = 'encrypted' in req.socket && Boolean(req.socket.encrypted);
-    const remote = req.socket.remoteAddress;
-    const loopback = remote === '127.0.0.1' || remote === '::1' || remote === '::ffff:127.0.0.1';
-    const forwarded = req.headers['x-forwarded-proto'];
-    const protocol = !encrypted && (forwarded === 'http' || forwarded === 'https')
-      ? forwarded : encrypted ? 'https' : 'http';
-    const forwardedHost = req.headers['x-forwarded-host'];
-    const hasForwardedHost = typeof forwardedHost === 'string' && forwardedHost.length > 0;
-    const hostHeader = hasForwardedHost
-      ? ((forwardedHost as string).split(',')[0] ?? '').trim() : req.headers.host;
-    if (!hostHeader || /[\s,/@\\?#]/.test(hostHeader)) return null;
-    let origin: string;
-    try { origin = new URL(`${protocol}://${hostHeader}`).origin; } catch { return null; }
+    const origin = requestOrigin(req);
+    if (!origin) return null;
     if (local.has(origin)) return origin;
-    // Self-managed reverse proxies commonly run locally and forward the public Host
-    // together with X-Forwarded-Proto. In that setup there is no HandMux tunnel
-    // configuration or publicUrl to whitelist; trust the proxy's effective origin
-    // only when the request actually arrived from loopback.
-    if ((hasForwardedHost
-      || remote === '127.0.0.1' || remote === '::ffff:127.0.0.1')
-      && (forwarded === 'http' || forwarded === 'https')) return origin;
     for (const known of [publicUrl, runtimePublicUrl()]) {
       if (!known) continue;
       try {
         const url = new URL(known);
         if (!url.username && !url.password && ['http:', 'https:'].includes(url.protocol) && url.origin === origin) return origin;
       } catch {}
+    }
+    for (const pattern of [trustedOrigin(), ...configuredPatterns, ...trustedOrigins()]) {
+      if (!pattern) continue;
+      if (originPatternMatches(pattern, origin)) return origin;
     }
     return null;
   };

@@ -26,6 +26,39 @@ export function validateName(value: unknown): string {
   return value.trim();
 }
 const hash = (secret: string): string => createHash('sha256').update(secret).digest('hex');
+function normalizeOrigin(value: unknown): string | null {
+  if (typeof value !== 'string' || !value) return null;
+  try {
+    const url = new URL(value);
+    if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password
+      || url.pathname !== '/' || url.search || url.hash) return null;
+    return url.origin;
+  } catch { return null; }
+}
+/** Normalize an additional trusted entry point. Wildcards are host-only and
+ * must be the left-most label (for example https://*.example.com). */
+export function normalizeOriginPattern(value: unknown): string | null {
+  if (typeof value !== 'string' || !value.trim()) return null;
+  try {
+    const url = new URL(value.trim());
+    const host = url.hostname.toLowerCase();
+    const wildcard = host.startsWith('*.');
+    if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password
+      || url.pathname !== '/' || url.search || url.hash || !host
+      || (host.includes('*') && !wildcard) || (wildcard && !/^\*\.[^.]+(?:\.[^.]+)+$/.test(host))) return null;
+    return url.origin;
+  } catch { return null; }
+}
+export function originPatternMatches(pattern: string, origin: string): boolean {
+  try {
+    const expected = new URL(pattern); const actual = new URL(origin);
+    if (expected.protocol !== actual.protocol || expected.port !== actual.port) return false;
+    const host = expected.hostname.toLowerCase(); const candidate = actual.hostname.toLowerCase();
+    return host.startsWith('*.')
+      ? candidate !== host.slice(2) && candidate.endsWith(`.${host.slice(2)}`)
+      : candidate === host;
+  } catch { return false; }
+}
 export const sessionCookieName = (origin: string): string => origin.startsWith('https:') ? '__Host-handmux_session' : 'handmux_session_http';
 export const pairingCookieName = (origin: string): string => origin.startsWith('https:') ? '__Host-handmux_pairing' : 'handmux_pairing_http';
 function readCookieSecret(req: IncomingMessage, name: string): string | null {
@@ -48,8 +81,8 @@ interface Pairing {
   expiresAt: number; browserSummary: string; owner?: string; source?: 'cli' | 'web'; deviceId?: string;
   approver?: DevicePrincipal;
 }
-export interface PairingStatus { id: string; state: PairState; code?: string; expiresAt: number; source?: 'cli' | 'web' }
-export interface ApprovalStatus { id: string; state: PairState; browserSummary: string; expiresAt: number; source: 'web'; device?: AuthDevice }
+export interface PairingStatus { id: string; state: PairState; code?: string; expiresAt: number; source?: 'cli' | 'web'; origin?: string }
+export interface ApprovalStatus { id: string; state: PairState; browserSummary: string; expiresAt: number; source: 'web'; origin?: string; device?: AuthDevice }
 
 export class DeviceAuthService {
   readonly mode = 'trusted-device' as const;
@@ -57,6 +90,10 @@ export class DeviceAuthService {
   private tokenGeneration: string;
   private tokenEnabledState: boolean;
   private enrollmentState: 'enrollment' | 'migration' | 'ready';
+  // A configured publicUrl is the canonical entry point. The persisted
+  // trusted_origin value remains a fallback for older installs that had no
+  // publicUrl and enrolled their first browser before this setting existed.
+  private configuredTrustedOrigin: string | null;
   private db: DatabaseSync;
   private now: () => number;
   private write: () => void;
@@ -70,10 +107,12 @@ export class DeviceAuthService {
   private flushTimer: ReturnType<typeof setInterval>;
   private claimFailures = new Map<string, number[]>();
   private closed = false;
-  constructor({ db, mode, token = '', now = Date.now, onSuccessfulWrite = () => {} }: {
+  constructor({ db, mode, token = '', now = Date.now, onSuccessfulWrite = () => {}, trustedOrigin }: {
     db: DatabaseSync; mode: AuthMode; token?: string; now?: () => number; onSuccessfulWrite?: () => void;
+    trustedOrigin?: string | null;
   }) {
     this.db = db; this.tokenSecret = token; this.now = now; this.write = onSuccessfulWrite;
+    this.configuredTrustedOrigin = normalizeOrigin(trustedOrigin);
     const tokenRow = db.prepare("SELECT value FROM auth_meta WHERE key='token_enabled'").get() as { value: string } | undefined;
     const modeRow = db.prepare("SELECT value FROM auth_meta WHERE key='mode'").get() as { value: string } | undefined;
     const enrollmentRow = db.prepare("SELECT value FROM auth_meta WHERE key='enrollment_state'").get() as { value: string } | undefined;
@@ -106,17 +145,62 @@ export class DeviceAuthService {
   get requiresTrustedDevice(): boolean { return !this.closed && this.activeDeviceCount() === 0; }
   /** Origin selected when the first browser is registered as a trusted device. */
   get trustedOrigin(): string | null {
+    if (this.configuredTrustedOrigin) return this.configuredTrustedOrigin;
     const row = this.db.prepare("SELECT value FROM auth_meta WHERE key='trusted_origin'").get() as { value: string } | undefined;
     return row?.value || null;
+  }
+  get trustedOrigins(): string[] {
+    const row = this.db.prepare("SELECT value FROM auth_meta WHERE key='trusted_origins'").get() as { value: string } | undefined;
+    if (!row?.value) return [];
+    try {
+      const parsed: unknown = JSON.parse(row.value);
+      if (!Array.isArray(parsed)) return [];
+      return [...new Set(parsed.map(normalizeOriginPattern).filter((v): v is string => !!v))];
+    } catch { return []; }
+  }
+  addTrustedOrigin(value: unknown): string[] {
+    const normalized = normalizeOriginPattern(value);
+    if (!normalized) throw new DeviceAuthError('INVALID_ORIGIN', 'Trusted access domain must be an origin such as https://*.example.com', 400);
+    const origins = this.trustedOrigins;
+    if (!origins.includes(normalized)) {
+      if (origins.length >= 64) throw new DeviceAuthError('ORIGIN_LIMIT', 'Too many trusted access domains; remove one before adding another', 409);
+      origins.push(normalized);
+      this.transaction(() => this.db.prepare("INSERT INTO auth_meta(key,value) VALUES('trusted_origins',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(JSON.stringify(origins)));
+    }
+    return origins;
+  }
+  removeTrustedOrigin(value: unknown): string[] {
+    const normalized = normalizeOriginPattern(value);
+    if (!normalized) throw new DeviceAuthError('INVALID_ORIGIN', 'Trusted access domain must be an origin such as https://*.example.com', 400);
+    const origins = this.trustedOrigins.filter(origin => origin !== normalized);
+    this.transaction(() => {
+      this.db.prepare("INSERT INTO auth_meta(key,value) VALUES('trusted_origins',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(JSON.stringify(origins));
+      // A first enrollment on an install without Public URL is mirrored in
+      // the legacy single-value key. Removing that entry must remove the
+      // fallback too, otherwise the UI would appear to remove an address
+      // while the resolver continued to accept it.
+      if (!this.configuredTrustedOrigin && this.trustedOrigin === normalized) {
+        this.db.prepare("DELETE FROM auth_meta WHERE key='trusted_origin'").run();
+      }
+    });
+    return origins;
   }
   setTrustedOrigin(origin: string): void {
     let normalized: string;
     try {
       const url = new URL(origin);
-      if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.pathname !== '/' || url.search || url.hash || url.origin !== origin) throw new Error('invalid');
+      if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.pathname !== '/' || url.search || url.hash) throw new Error('invalid');
       normalized = url.origin;
     } catch { throw new DeviceAuthError('INVALID_ORIGIN', 'Trusted access address must be a complete origin', 400); }
-    this.transaction(() => this.db.prepare("INSERT INTO auth_meta(key,value) VALUES('trusted_origin',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(normalized));
+    const origins = this.trustedOrigins;
+    if (!origins.some(pattern => originPatternMatches(pattern, normalized))) {
+      if (origins.length >= 64) throw new DeviceAuthError('ORIGIN_LIMIT', 'Too many trusted access domains; remove one before adding another', 409);
+      origins.push(normalized);
+    }
+    this.transaction(() => {
+      this.db.prepare("INSERT INTO auth_meta(key,value) VALUES('trusted_origin',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(normalized);
+      this.db.prepare("INSERT INTO auth_meta(key,value) VALUES('trusted_origins',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(JSON.stringify(origins));
+    });
   }
   authenticateToken(provided: unknown, origin: string): DevicePrincipal | null {
     if (!this.tokenEnabled || !this.tokenSecret || typeof provided !== 'string' || !provided || !tokenEquals(provided, this.tokenSecret)) return null;
@@ -238,7 +322,7 @@ export class DeviceAuthService {
       p.state = this.device(p.deviceId).status === 'expired' ? 'expired' : 'canceled'; this.retire(p);
     }
   }
-  private view(p: Pairing): PairingStatus { this.updatePair(p); return { id: p.id, state: p.state, ...(p.state === 'waiting' ? { code: p.code } : {}), expiresAt: p.expiresAt, ...(p.source ? { source: p.source } : {}) }; }
+  private view(p: Pairing): PairingStatus { this.updatePair(p); return { id: p.id, state: p.state, ...(p.state === 'waiting' ? { code: p.code } : {}), expiresAt: p.expiresAt, origin: p.origin, ...(p.source ? { source: p.source } : {}) }; }
   pairing(secret: string | null, origin: string): PairingStatus | null {
     if (!secret) return null;
     const p = this.pending.get(hash(secret));
@@ -260,7 +344,6 @@ export class DeviceAuthService {
     this.requireMode();
     const existing = this.authenticateSecret(secret, origin);
     if (existing) return this.device(existing.deviceId);
-    if (this.trustedOrigin && this.trustedOrigin !== origin) throw new DeviceAuthError('TRUSTED_ORIGIN_MISMATCH', 'Open this address through the configured trusted access address', 409);
     validateName(values.name); parseExpire(values.expire);
     const pairing = this.pending.get(hash(secret));
     if (!pairing || pairing.origin !== origin) throw new DeviceAuthError('PAIRING_NOT_FOUND', 'Prepare this browser for registration and retry', 409);
@@ -268,7 +351,6 @@ export class DeviceAuthService {
     const owner = `self:${pairing.secretHash}`;
     if (pairing.state === 'waiting') this.claim(pairing.code, owner);
     const device = this.authorize(pairing.id, owner, values);
-    if (!this.trustedOrigin) this.setTrustedOrigin(origin);
     return device;
   }
   cancelPairing(secret: string | null, origin: string, id: string): PairingStatus | null {
@@ -277,7 +359,7 @@ export class DeviceAuthService {
     if (p.state !== 'authorized') { p.state = 'canceled'; this.retire(p); }
     return this.view(p);
   }
-  claim(code: unknown, owner: string, approver?: DevicePrincipal): { id: string; browserSummary: string; expiresAt: number } {
+  claim(code: unknown, owner: string, approver?: DevicePrincipal): { id: string; browserSummary: string; expiresAt: number; origin: string } {
     this.requireMode(); this.sweep();
     if (approver) this.assertActive(approver);
     for (const [key, failures] of this.claimFailures) {
@@ -290,12 +372,12 @@ export class DeviceAuthService {
     const p = typeof code === 'string' && /^\d{6}$/.test(code) ? [...this.pending.values()].find(p => p.code === code && p.state === 'waiting') : undefined;
     if (!p) { failures.push(this.now()); this.claimFailures.set(failureKey, failures); throw new DeviceAuthError('CODE_INVALID', 'Code is invalid, expired, or already used; request a fresh code', 409); }
     p.state = 'configuring'; p.owner = owner; p.source = approver ? 'web' : 'cli'; if (approver) p.approver = approver; p.expiresAt = this.now() + 300_000; this.retire(p);
-    return { id: p.id, browserSummary: p.browserSummary, expiresAt: p.expiresAt };
+    return { id: p.id, browserSummary: p.browserSummary, expiresAt: p.expiresAt, origin: p.origin };
   }
   cancelOwner(owner: string): void { for (const p of this.pending.values()) if (p.owner === owner && p.state === 'configuring') { p.state = 'canceled'; this.retire(p); } }
   private approvalView(p: Pairing): ApprovalStatus {
     this.updatePair(p);
-    return { id: p.id, state: p.state, browserSummary: p.browserSummary, expiresAt: p.expiresAt, source: 'web', ...(p.state === 'authorized' && p.deviceId ? { device: this.device(p.deviceId) } : {}) };
+    return { id: p.id, state: p.state, browserSummary: p.browserSummary, expiresAt: p.expiresAt, source: 'web', origin: p.origin, ...(p.state === 'authorized' && p.deviceId ? { device: this.device(p.deviceId) } : {}) };
   }
   approvals(actor: DevicePrincipal): ApprovalStatus[] {
     this.assertActive(actor);
@@ -332,10 +414,27 @@ export class DeviceAuthService {
     if (p.state === 'authorized' && p.deviceId) return this.device(p.deviceId);
     if (p.state !== 'configuring') throw new DeviceAuthError('PAIRING_INACTIVE', 'Pairing was canceled or expired; request a new code', 409);
     const deviceId = `dev_${randomUUID().replaceAll('-', '')}`; const now = this.now();
+    const primaryOrigin = this.trustedOrigin;
+    const pairingOrigin = normalizeOriginPattern(p.origin);
+    const currentOrigins = this.trustedOrigins;
+    const originAlreadyListed = pairingOrigin
+      ? currentOrigins.some(pattern => originPatternMatches(pattern, pairingOrigin))
+      : false;
     this.transaction(() => {
       if (p.approver) this.assertActive(p.approver);
       this.db.prepare('INSERT INTO auth_devices(id,pairing_request_id,name,browser_summary,authorized_at,expires_at,last_used_at) VALUES(?,?,?,?,?,?,?)').run(deviceId, p.id, name, p.browserSummary, now, duration === null ? null : now + duration, now);
       this.db.prepare('INSERT INTO auth_sessions(id,device_id,secret_hash,origin,transport,created_at,last_used_at) VALUES(?,?,?,?,?,?,?)').run(`ses_${randomUUID().replaceAll('-', '')}`, deviceId, p.secretHash, p.origin, p.origin.startsWith('https:') ? 'https' : 'http', now, now);
+      // Record an entry only after the pairing has been approved. The legacy
+      // single-value key is retained for old databases; the list is now the
+      // source used by origin resolution and the settings page.
+      if (!primaryOrigin) {
+        this.db.prepare("INSERT INTO auth_meta(key,value) VALUES('trusted_origin',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(p.origin);
+      }
+      if (pairingOrigin && !originAlreadyListed && pairingOrigin !== primaryOrigin) {
+        if (currentOrigins.length >= 64) throw new DeviceAuthError('ORIGIN_LIMIT', 'Too many trusted access domains; remove one before adding another', 409);
+        currentOrigins.push(pairingOrigin);
+        this.db.prepare("INSERT INTO auth_meta(key,value) VALUES('trusted_origins',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(JSON.stringify(currentOrigins));
+      }
       this.db.prepare("INSERT INTO auth_meta(key,value) VALUES('enrollment_state','ready') ON CONFLICT(key) DO UPDATE SET value='ready'").run();
     });
     p.state = 'authorized'; p.deviceId = deviceId; this.enrollmentState = 'ready'; return this.device(deviceId);

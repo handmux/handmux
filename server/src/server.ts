@@ -88,13 +88,23 @@ if (projectTask.status().status === 'unavailable') {
   throw new Error(`Authentication database unavailable: ${projectTask.status().error?.message ?? 'unknown error'}`);
 }
 const auth = new DeviceAuthService({ db: projectTask.requireDatabase(), mode: cfg.authMode, token,
+  trustedOrigin: process.env.HANDMUX_PUBLIC_URL || null,
   onSuccessfulWrite: () => projectTask.successfulWrite() });
+const configuredPublicUrl = process.env.HANDMUX_PUBLIC_URL || null;
+const runtimeAdvertisedUrl = (): string | null => {
+  const state = readState(home);
+  if (!state || state.serverPid !== process.pid || state.port !== cfg.port) return configuredPublicUrl;
+  // In Direct mode the supervisor's LAN/local fallback is a display URL, not
+  // a configured Public URL. Keep the setting explicitly blank so the web
+  // page can distinguish it from a user-managed reverse-tunnel address.
+  return state.tunnel === 'none' && !configuredPublicUrl ? null : state.publicUrl ?? configuredPublicUrl;
+};
 const resolveAuthOrigin = createAuthOriginResolver({ port: cfg.port, host: cfg.host,
-  ...(process.env.HANDMUX_PUBLIC_URL ? { publicUrl: process.env.HANDMUX_PUBLIC_URL } : {}),
-  runtimePublicUrl: () => {
-    const state = readState(home);
-    return state?.serverPid === process.pid && state.port === cfg.port ? state.publicUrl ?? null : null;
-  },
+  ...(configuredPublicUrl ? { publicUrl: configuredPublicUrl } : {}),
+  ...(previewDomain ? { previewDomain } : {}),
+  trustedOrigin: () => auth.trustedOrigin,
+  trustedOrigins: () => auth.trustedOrigins,
+  runtimePublicUrl: runtimeAdvertisedUrl,
 });
 const deviceAccess = createDeviceAccess({ service: auth, resolveOrigin: resolveAuthOrigin });
 const authenticate = deviceAccess.middleware;
@@ -290,7 +300,12 @@ app.use((_req, res, next) => {
   next();
 });
 app.use('/api/auth', (_req, res, next) => { res.setHeader('Cache-Control', 'no-store'); next(); },
-  express.json({ limit: '16kb' }), createDeviceAuthRouter({ service: auth, resolveOrigin: resolveAuthOrigin }));
+  express.json({ limit: '16kb' }), createDeviceAuthRouter({
+    service: auth,
+    resolveOrigin: resolveAuthOrigin,
+    previewDomain,
+    resolvePublicUrl: runtimeAdvertisedUrl,
+  }));
 app.use(healthRoutes({
   health,
   refresh: async () => {

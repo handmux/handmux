@@ -30,8 +30,8 @@ function SwitchAuthHelp({ onClose }: { onClose: () => void }) {
       <h2 id="auth-help-title">{t('auth.switchTitle')}</h2>
       <p id="auth-help-warning" className="auth-warning">{t('auth.switchWarning')}</p>
       <ol className="auth-help-steps">
-        <li><p>{t('auth.switchSetup')}</p><div className="auth-help-command"><code ref={node => { commands.current[0] = node; }}>handmux auth trusted-origin status</code>
-          <button type="button" onClick={() => { void copy('handmux auth trusted-origin status', 0); }} aria-label={t('auth.copySetup')}>{t('common.copy')}</button></div></li>
+        <li><p>{t('auth.switchSetup')}</p><div className="auth-help-command"><code ref={node => { commands.current[0] = node; }}>handmux setup</code>
+          <button type="button" onClick={() => { void copy('handmux setup', 0); }} aria-label={t('auth.copySetup')}>{t('common.copy')}</button></div></li>
         <li><p>{t('auth.switchRestart')}</p><div className="auth-help-command"><code ref={node => { commands.current[1] = node; }}>handmux auth add</code>
           <button type="button" onClick={() => { void copy('handmux auth add', 1); }} aria-label={t('auth.copyRestart')}>{t('common.copy')}</button></div></li>
       </ol>

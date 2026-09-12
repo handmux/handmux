@@ -71,9 +71,10 @@ export async function runAuthCommand({ argv, home, interactive = !!process.stdin
     log(t('auth.safety'));
     if (!args.code) args.code = await ask(text({ message: t('auth.code'), validate: v => /^\d{6}$/.test(v ?? '') ? undefined : 'Enter exactly 6 digits' }));
     client = await connect(home);
-    const claimed = await client.request({ op: 'claim', code: args.code }) as { id: string; browserSummary: string };
+    const claimed = await client.request({ op: 'claim', code: args.code }) as { id: string; browserSummary: string; origin?: string };
     const needsPrompt = args.name === undefined || args.expire === undefined;
     log(t('auth.claimed')); log(safeText(claimed.browserSummary));
+    if (claimed.origin) log(`${t('auth.origin')}: ${safeText(claimed.origin)}`);
     if (args.name === undefined) {
       const fallback = safeText(claimed.browserSummary).slice(0, 80) || 'Browser';
       args.name = await ask(text({ message: t('auth.name'), defaultValue: fallback, placeholder: fallback, validate: v => { try { validateName(v || fallback); } catch (e) { return (e as Error).message; } return undefined; } }));
