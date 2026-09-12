@@ -59,8 +59,11 @@ export function originPatternMatches(pattern: string, origin: string): boolean {
       : candidate === host;
   } catch { return false; }
 }
-export const sessionCookieName = (origin: string): string => origin.startsWith('https:') ? '__Host-handmux_session' : 'handmux_session_http';
-export const pairingCookieName = (origin: string): string => origin.startsWith('https:') ? '__Host-handmux_pairing' : 'handmux_pairing_http';
+function originPortSuffix(origin: string): string {
+  try { const port = new URL(origin).port; return port ? `_${port}` : ''; } catch { return ''; }
+}
+export const sessionCookieName = (origin: string): string => origin.startsWith('https:') ? `__Host-handmux_session${originPortSuffix(origin)}` : `handmux_session_http${originPortSuffix(origin)}`;
+export const pairingCookieName = (origin: string): string => origin.startsWith('https:') ? `__Host-handmux_pairing${originPortSuffix(origin)}` : `handmux_pairing_http${originPortSuffix(origin)}`;
 function readCookieSecret(req: IncomingMessage, name: string): string | null {
   const matches = (req.headers.cookie ?? '').split(';').map(v => v.trim()).filter(v => v.startsWith(`${name}=`));
   if (matches.length !== 1) return null;
