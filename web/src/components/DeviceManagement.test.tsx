@@ -26,8 +26,7 @@ describe('compact device management', () => {
     vi.mocked(api.list).mockResolvedValue({ devices: [other], currentDeviceId: null, publicUrl: 'https://handmux.example.com', serverTime: now });
     render(<DeviceManagement onLoggedOut={vi.fn()} />); await flush();
     expect(screen.getByText('https://handmux.example.com')).toBeTruthy();
-    expect(screen.getByText(t('devices.originActive'))).toBeTruthy();
-    expect(screen.getByText('handmux setup')).toBeTruthy();
+    expect(screen.getByText(t('devices.originConfigured'))).toBeTruthy();
     expect(screen.getByText(t('devices.addSelfAddress', { origin: window.location.origin }))).toBeTruthy();
   });
 

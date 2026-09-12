@@ -80,6 +80,32 @@ function RevokeConfirm({ device, current, busy, error, onClose, onConfirm }: {
   </section></div>;
 }
 
+function OriginRemoveConfirm({ origin, devices, busy, error, onClose, onConfirm }: {
+  origin: string;
+  devices: Array<{ id: string; name: string; browser_summary: string }>;
+  busy: boolean;
+  error: string;
+  onClose: () => void;
+  onConfirm: () => void;
+}) {
+  const dialogRef = useRef<HTMLElement>(null); const cancelRef = useRef<HTMLButtonElement>(null);
+  const returnRef = useRef(document.activeElement instanceof HTMLElement ? document.activeElement : null);
+  useBackButton(true, () => { if (!busy) onClose(); });
+  useModalFocusTrap({ active: true, dialogRef, initialFocusRef: cancelRef, returnFocusRef: returnRef, onClose: () => { if (!busy) onClose(); } });
+  return <div className="auth-logout-backdrop device-revoke-layer">
+    <section className="auth-logout-dialog origin-remove-dialog" ref={dialogRef} role="alertdialog" aria-modal="true" aria-labelledby="origin-remove-title" aria-describedby="origin-remove-copy" tabIndex={-1}>
+      <h3 id="origin-remove-title">{t('devices.removeOriginTitle')}</h3>
+      <p id="origin-remove-copy"><code className="origin-remove-value">{origin}</code></p>
+      {devices.length > 0
+        ? <><p>{t('devices.removeOriginImpact')}</p><ul className="origin-remove-devices">{devices.map(device => <li key={device.id}><strong>{device.name}</strong><span>{device.browser_summary}</span></li>)}</ul></>
+        : <p>{t('devices.removeOriginNoImpact')}</p>}
+      {error && <p role="alert">{error}</p>}
+      <div className="auth-logout-actions"><button ref={cancelRef} disabled={busy} onClick={onClose}>{t('common.cancel')}</button>
+        <button className="device-danger" disabled={busy} onClick={onConfirm}>{t(busy ? 'common.loading' : 'devices.removeOriginConfirm')}</button></div>
+    </section>
+  </div>;
+}
+
 function DeviceDetail({ device: initial, current, now, onClose, onChanged, onLoggedOut }: {
   device: ManagedDevice; current: boolean; now: number; onClose: () => void; onChanged: () => void; onLoggedOut: () => void;
 }) {
@@ -266,6 +292,7 @@ export default function DeviceManagement({ onLoggedOut }: { onLoggedOut: () => v
   const [selfCustom, setSelfCustom] = useState(''); const [busy, setBusy] = useState(false);
   const [originBusy, setOriginBusy] = useState(false);
   const [originHelp, setOriginHelp] = useState<'public' | 'preview' | null>(null);
+  const [originRemoval, setOriginRemoval] = useState<{ origin: string; devices: Array<{ id: string; name: string; browser_summary: string }> } | null>(null);
   const [now, setNow] = useState(Date.now()); const offset = useRef(0); const alive = useRef(true); const requestId = useRef(0);
   const load = useCallback(async () => {
     if (!isDeviceAuth()) return;
@@ -309,7 +336,14 @@ export default function DeviceManagement({ onLoggedOut }: { onLoggedOut: () => v
   const removeTrustedOrigin = async (value: string) => {
     if (originBusy) return;
     setOriginBusy(true); setError('');
-    try { const impact = await api.inspectTrustedOriginRemoval(value); if (impact.affectedDevices.length > 0) { const names = impact.affectedDevices.map(d => d.name).join('、'); if (!window.confirm(`删除 ${value} 后，以下设备可能无法通过此地址访问：${names}\n\n确定继续删除吗？`)) return; } else if (!window.confirm(`确定删除 ${value} 吗？`)) return; await api.removeTrustedOrigin(value); await load(); }
+    try { const impact = await api.inspectTrustedOriginRemoval(value); setOriginRemoval({ origin: value, devices: impact.affectedDevices }); }
+    catch (e) { setError(deviceErrorCopy(e)); }
+    finally { setOriginBusy(false); }
+  };
+  const confirmRemoveTrustedOrigin = async () => {
+    if (!originRemoval || originBusy) return;
+    setOriginBusy(true); setError('');
+    try { await api.removeTrustedOrigin(originRemoval.origin); setOriginRemoval(null); await load(); }
     catch (e) { setError(deviceErrorCopy(e)); }
     finally { setOriginBusy(false); }
   };
@@ -369,5 +403,6 @@ export default function DeviceManagement({ onLoggedOut }: { onLoggedOut: () => v
     {adding && <AddDevice onClose={() => setAdding(false)} onAdded={() => { setAdding(false); void load(); }} />}
     {selfSheet && <DeviceSheet title={t('devices.addSelfTitle')} onClose={() => { if (!busy) setSelfSheet(false); }}><p className="device-sheet-note">{t('devices.addSelfOrigin', { origin: currentOrigin })}</p><label className="device-field">{t('devices.name')}<input disabled={busy} value={selfName} onChange={e => setSelfName(e.target.value)} /></label><ExpiryPicker value={selfExpire} custom={selfCustom} onChange={setSelfExpire} onCustom={setSelfCustom} disabled={busy} /><button className="fontbtn device-save" disabled={busy || !validName(selfName) || !validExpire(selfExpire === 'custom' ? selfCustom : selfExpire)} onClick={() => { void addSelf(); }}>{t(busy ? 'common.loading' : 'devices.addSelf')}</button>{error && <p role="alert">{error}</p>}</DeviceSheet>}
     {originHelp && <DeviceSheet title={originHelp === 'public' ? t('devices.publicUrlLabel') : t('devices.previewDomainLabel')} onClose={() => setOriginHelp(null)}><p className="device-sheet-note">{t(originHelp === 'public' ? 'devices.publicUrlInfo' : 'devices.previewDomainInfo')}</p></DeviceSheet>}
+    {originRemoval && <OriginRemoveConfirm origin={originRemoval.origin} devices={originRemoval.devices} busy={originBusy} error={error} onClose={() => { if (!originBusy) { setOriginRemoval(null); setError(''); } }} onConfirm={() => { void confirmRemoveTrustedOrigin(); }} />}
   </section>;
 }

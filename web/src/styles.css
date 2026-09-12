@@ -427,6 +427,12 @@ button.settings-page-row:disabled, .settings-page-row.disabled { color: rgba(235
 .device-danger { width: 100%; border: none; background: transparent; color: var(--red); min-height: 44px; }
 .device-empty { margin: 0; padding: 16px; color: rgba(235,235,245,.42); font-size: 13px; line-height: 1.45; text-align: center; }
 .device-revoke-layer { z-index: var(--z-overlay-confirm); }
+.origin-remove-dialog { max-width: min(420px, calc(100vw - 32px)); }
+.origin-remove-value { display: block; margin: 10px 0 14px; overflow-wrap: anywhere; color: #d8e7ff; font: 13px/1.4 ui-monospace, "SF Mono", Menlo, monospace; }
+.origin-remove-devices { display: grid; gap: 8px; margin: 10px 0 14px; padding: 0; list-style: none; text-align: left; }
+.origin-remove-devices li { display: grid; gap: 2px; padding: 9px 11px; border-radius: 10px; background: rgba(120,120,128,.14); }
+.origin-remove-devices li strong { color: #f2f2f7; font-size: 14px; font-weight: 600; }
+.origin-remove-devices li span { color: rgba(235,235,245,.56); font-size: 12px; }
 .pairing-methods { display: flex; gap: 3px; border-radius: 11px; padding: 3px; background: rgba(120,120,128,.16); border: 1px solid rgba(255,255,255,.06); margin: 16px 0 12px; }
 .pairing-methods button { flex: 1; min-height: 44px; margin: 0; border: 0; background: transparent; color: #a1a1aa; border-radius: 8px; font-size: 13px; font-weight: 550; transition: background .15s ease, color .15s ease, box-shadow .15s ease; }
 .pairing-methods button[aria-selected="true"] { background: linear-gradient(180deg, rgba(62,145,238,.96), rgba(30,106,205,.96)); color: #fff; box-shadow: 0 2px 6px rgba(0,0,0,.22), inset 0 0 0 .5px rgba(255,255,255,.24); }

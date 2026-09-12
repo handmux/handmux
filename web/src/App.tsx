@@ -495,7 +495,13 @@ export default function App() {
     setTokenCheckError('');
     void authRequest().then((status) => {
       applyAuthStatus(status);
-      if (status.tokenAuthenticated === true || status.mode === 'token') setAuthPrompt('device');
+      // A valid Token may complete both factors when this browser already has a
+      // live device cookie. Skip mounting the pairing screen in that case; doing
+      // so avoids a transient auth view while the business requests resume.
+      if (status.authenticated) {
+        setNeedToken(false);
+        setBooting(true);
+      } else if (status.tokenAuthenticated === true || status.mode === 'token') setAuthPrompt('device');
       else setTokenCheckError(t('auth.tokenInvalid'));
     }).catch((error: unknown) => {
       setTokenCheckError(error instanceof AuthRequestError && error.code === 'AUTH_ORIGIN_REJECTED'
