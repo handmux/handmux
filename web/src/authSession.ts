@@ -78,7 +78,7 @@ async function performAuthRequest(path: string, method: string, id?: string): Pr
     });
     if (!response.ok) {
       let code: string | null = null;
-      try { const body = await response.json() as { code?: unknown }; if (typeof body.code === 'string') code = body.code; } catch { /* proxy non-JSON */ }
+      try { const body = await response.json() as { code?: unknown; error?: unknown }; const value = typeof body.code === 'string' ? body.code : body.error; if (typeof value === 'string') code = value; } catch { /* proxy non-JSON */ }
       throw new AuthRequestError(response.status, code);
     }
     const value = await response.json() as AuthStatus;
