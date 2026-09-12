@@ -30,8 +30,8 @@ function SwitchAuthHelp({ onClose }: { onClose: () => void }) {
       <h2 id="auth-help-title">{t('auth.switchTitle')}</h2>
       <p id="auth-help-warning" className="auth-warning">{t('auth.switchWarning')}</p>
       <ol className="auth-help-steps">
-        <li><p>{t('auth.switchSetup')}</p><div className="auth-help-command"><code ref={node => { commands.current[0] = node; }}>handmux setup</code>
-          <button type="button" onClick={() => { void copy('handmux setup', 0); }} aria-label={t('auth.copySetup')}>{t('common.copy')}</button></div></li>
+        <li><p>{t('auth.switchSetup')}</p><div className="auth-help-command"><code ref={node => { commands.current[0] = node; }}>handmux auth trusted-origin status</code>
+          <button type="button" onClick={() => { void copy('handmux auth trusted-origin status', 0); }} aria-label={t('auth.copySetup')}>{t('common.copy')}</button></div></li>
         <li><p>{t('auth.switchRestart')}</p><div className="auth-help-command"><code ref={node => { commands.current[1] = node; }}>handmux auth token enable</code>
           <button type="button" onClick={() => { void copy('handmux auth token enable', 1); }} aria-label={t('auth.copyRestart')}>{t('common.copy')}</button></div></li>
       </ol>
@@ -50,7 +50,7 @@ export default function AuthFrame({ title, mode, children }: {
   return <main className="auth-page">
     <div className="auth-layout">
       <header className="auth-brand"><img src="/icons/icon-192.png" alt="" width="52" height="52" />
-        <span>HandMux</span><p>{t('auth.welcome')}</p>
+        <span>handmux</span><p>{t('auth.welcome')}</p>
       </header>
       <section className="auth-card" aria-labelledby="auth-heading">
         {mode && <span className={`auth-mode auth-mode-${mode}`}>{t(mode === 'token' ? 'devices.token' : 'devices.trusted')}</span>}

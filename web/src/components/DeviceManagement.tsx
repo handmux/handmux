@@ -292,16 +292,21 @@ export default function DeviceManagement({ onLoggedOut }: { onLoggedOut: () => v
     try { await api.disableToken(); applyAuthStatus(await authRequest()); await load(); setConfirmToken(false); } catch (e) { setError(deviceErrorCopy(e)); } finally { setBusy(false); }
   };
   const inactiveCount = (data?.devices ?? []).filter(d => isInactive(d, now)).length;
+  const currentOrigin = window.location.origin;
   return <section className="device-management">
-    <p className="auth-secondary">可信访问地址：{data?.trustedOrigin ?? '未设置（添加本机时自动使用当前浏览器地址）'}</p>
-    {data?.tokenEnabled && <div className="settings-page-list"><div className="settings-page-row"><span>{t('devices.fixedToken')}</span><button className="fontbtn" disabled={!data.currentDeviceId || busy} onClick={() => setConfirmToken(true)}>{t('devices.disableToken')}</button></div><p className="auth-secondary">{t(data.currentDeviceId ? 'devices.disableRecommendation' : 'devices.registerFirst')}</p></div>}
+    <div className="device-origin-card">
+      <div className="device-origin-heading"><span className="device-section-kicker">{t('devices.trustedOrigin')}</span><span className="device-origin-badge">{data?.trustedOrigin ? '●' : '○'}</span></div>
+      <code className="device-origin-value">{data?.trustedOrigin ?? t('devices.originUnset')}</code>
+      <p>{t('devices.originHint')}</p>
+    </div>
+    {data?.tokenEnabled && <section className="device-token-card" aria-labelledby="device-token-title"><div className="device-token-heading"><div><h2 id="device-token-title">{t('devices.fixedToken')}</h2><p>{t(data.currentDeviceId ? 'devices.disableRecommendation' : 'devices.registerFirst')}</p></div><span className="device-token-status">{t('devices.enabled')}</span></div><button className="device-token-action" aria-label={t('devices.disableToken')} disabled={!data.currentDeviceId || busy} onClick={() => setConfirmToken(true)}>{t('devices.disableToken')}<span aria-hidden="true">›</span></button></section>}
     {history && <button className="device-inline" onClick={() => setHistory(false)}>{t('devices.activeDevices')}</button>}
     <div className="settings-page-list">
       {devices.map(d => <button className="settings-page-row device-row" key={d.id} onClick={() => setSelected(d)}>
         <span className="device-row-copy"><span className="device-row-main"><span>{d.name}</span>{d.id === data?.currentDeviceId && <small>{t('devices.current')}</small>}</span>
           <span className="device-row-secondary"><span>{d.browser_summary}</span><span>{remainingExpiry(d, now)}</span></span></span><span className="settings-page-chevron" aria-hidden="true">›</span>
       </button>)}
-      {!history && <><button className="settings-page-row device-add-row" disabled={!!data?.currentDeviceId || busy || !data?.tokenEnabled} onClick={() => setSelfSheet(true)}>{t(data?.currentDeviceId ? 'devices.selfRegistered' : 'devices.addSelf')}</button><button className="settings-page-row device-add-row" disabled={!data?.currentDeviceId} onClick={() => setAdding(true)}>＋ {t('devices.add')}</button></>}
+      {!history && <><button className="settings-page-row device-add-row" aria-label={t('devices.addSelf')} disabled={!!data?.currentDeviceId || busy || !data?.tokenEnabled} onClick={() => setSelfSheet(true)}><span className="device-action-copy"><strong>{t(data?.currentDeviceId ? 'devices.selfRegistered' : 'devices.addSelf')}</strong><small>{currentOrigin}</small></span><span className="settings-page-chevron" aria-hidden="true">›</span></button><button className="settings-page-row device-add-row" aria-label={t('devices.add')} disabled={!data?.currentDeviceId} onClick={() => setAdding(true)}><span>{t('devices.add')}</span><span className="settings-page-chevron" aria-hidden="true">›</span></button></>}
     </div>
     {history && devices.length === 0 && !loading && <p className="auth-secondary">{t('devices.noHistory')}</p>}
     {!history && inactiveCount > 0 && <button className="device-inline" onClick={() => setHistory(true)}>{t('devices.history', { n: inactiveCount })}</button>}
@@ -309,7 +314,7 @@ export default function DeviceManagement({ onLoggedOut }: { onLoggedOut: () => v
     {loading && !data && <p role="status">{t('common.loading')}</p>}
     {selected && <DeviceDetail key={selected.id} device={selected} current={selected.id === data?.currentDeviceId} now={now} onClose={() => setSelected(null)} onChanged={() => { void load(); }} onLoggedOut={onLoggedOut} />}
     {adding && <AddDevice onClose={() => setAdding(false)} onAdded={() => { setAdding(false); void load(); }} />}
-    {selfSheet && <DeviceSheet title={t('devices.addSelf')} onClose={() => { if (!busy) setSelfSheet(false); }}> <p className="auth-secondary">添加后只有通过当前浏览器地址的已授权设备可以登录；如需修改，请在服务器上使用 handmux CLI。</p><label className="device-field">{t('devices.name')}<input disabled={busy} value={selfName} onChange={e => setSelfName(e.target.value)} /></label><ExpiryPicker value={selfExpire} custom={selfCustom} onChange={setSelfExpire} onCustom={setSelfCustom} disabled={busy} /><button className="fontbtn device-save" disabled={busy || !validName(selfName) || !validExpire(selfExpire === 'custom' ? selfCustom : selfExpire)} onClick={() => { void addSelf(); }}>{t(busy ? 'common.loading' : 'devices.addSelf')}</button>{error && <p role="alert">{error}</p>}</DeviceSheet>}
+    {selfSheet && <DeviceSheet title={t('devices.addSelf')} onClose={() => { if (!busy) setSelfSheet(false); }}><p className="device-sheet-note">{t('devices.addSelfOrigin', { origin: currentOrigin })}</p><label className="device-field">{t('devices.name')}<input disabled={busy} value={selfName} onChange={e => setSelfName(e.target.value)} /></label><ExpiryPicker value={selfExpire} custom={selfCustom} onChange={setSelfExpire} onCustom={setSelfCustom} disabled={busy} /><button className="fontbtn device-save" disabled={busy || !validName(selfName) || !validExpire(selfExpire === 'custom' ? selfCustom : selfExpire)} onClick={() => { void addSelf(); }}>{t(busy ? 'common.loading' : 'devices.addSelf')}</button>{error && <p role="alert">{error}</p>}</DeviceSheet>}
     {confirmToken && <TokenDisableConfirm busy={busy} error={error} onClose={() => { if (!busy) setConfirmToken(false); }} onConfirm={() => { void disableToken(); }} />}
   </section>;
 }
@@ -320,7 +325,7 @@ function TokenDisableConfirm({ busy, error, onClose, onConfirm }: { busy: boolea
   useBackButton(true, onClose);
   useModalFocusTrap({ active: true, dialogRef, initialFocusRef: cancelRef, returnFocusRef: returnRef, onClose });
   return <div className="auth-logout-backdrop device-revoke-layer"><section className="auth-logout-dialog" ref={dialogRef} role="alertdialog" aria-modal="true" aria-labelledby="token-disable-title" tabIndex={-1}>
-    <h3 id="token-disable-title">{t('devices.disableToken')}</h3><p>{t('devices.disableConfirm')}</p><p className="auth-secondary">可信访问地址：{window.location.origin}。禁用后只有通过此地址的已授权设备可以登录；如需修改，请在服务器上使用 handmux CLI。</p>
+    <h3 id="token-disable-title">{t('devices.disableToken')}</h3><p>{t('devices.disableConfirm')}</p><p className="device-dialog-origin">{t('devices.disableOrigin', { origin: window.location.origin })}</p><p className="auth-secondary">{t('devices.cliOnly')}</p>
     {error && <p role="alert">{error}</p>}
     <div className="auth-logout-actions"><button ref={cancelRef} disabled={busy} onClick={onClose}>{t('common.cancel')}</button><button disabled={busy} onClick={onConfirm}>{t(busy ? 'common.loading' : 'devices.disableToken')}</button></div>
   </section></div>;
