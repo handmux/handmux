@@ -21,7 +21,7 @@ export default function AuthBootstrap({ children }: { children: ReactNode }) {
     return () => { active = false; };
   }, [retry]);
   if (ready) return children;
-  return <AuthFrame title={t('auth.connecting')}><section className="token-prompt" aria-live="polite">
+  return <AuthFrame title={t('auth.connecting')} showHelp={false}><section className="token-prompt" aria-live="polite">
     <p>{t(failed && errorCode === 'AUTH_ORIGIN_REJECTED' ? 'auth.originRejected' : failed ? 'auth.connectionError' : 'common.loading')}</p>
     {failed && <button onClick={() => setRetry((value) => value + 1)}>{t('auth.retry')}</button>}
   </section></AuthFrame>;
