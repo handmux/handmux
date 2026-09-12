@@ -38,7 +38,7 @@ export function createAuthOriginResolver({
     const remote = req.socket.remoteAddress;
     const loopback = remote === '127.0.0.1' || remote === '::1' || remote === '::ffff:127.0.0.1';
     const forwarded = req.headers['x-forwarded-proto'];
-    const protocol = !encrypted && loopback && (forwarded === 'http' || forwarded === 'https')
+    const protocol = !encrypted && (forwarded === 'http' || forwarded === 'https')
       ? forwarded : encrypted ? 'https' : 'http';
     const forwardedHost = req.headers['x-forwarded-host'];
     const hasForwardedHost = typeof forwardedHost === 'string' && forwardedHost.length > 0;
