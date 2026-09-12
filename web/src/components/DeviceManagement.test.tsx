@@ -22,6 +22,14 @@ beforeEach(() => {
 });
 afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); applyAuthStatus({ mode: 'token', authenticated: false, serverTime: now }); });
 describe('compact device management', () => {
+  it('presents the trusted address as a compact read-only setting and shows it on self-enrollment', async () => {
+    vi.mocked(api.list).mockResolvedValue({ devices: [other], currentDeviceId: null, trustedOrigin: 'https://handmux.example.com', serverTime: now });
+    render(<DeviceManagement onLoggedOut={vi.fn()} />); await flush();
+    expect(screen.getByText('https://handmux.example.com')).toBeTruthy();
+    expect(screen.getByText(t('devices.originActive'))).toBeTruthy();
+    expect(screen.getByText(t('devices.addSelfAddress', { origin: window.location.origin }))).toBeTruthy();
+  });
+
   it('uses compact current-first rows, hides full IDs/times until details, and keeps history read-only', async () => {
     render(<DeviceManagement onLoggedOut={vi.fn()} />); await flush();
     const rows = document.querySelectorAll('.device-row'); expect(rows[0]?.textContent).toContain(current.name); expect(rows).toHaveLength(2);
