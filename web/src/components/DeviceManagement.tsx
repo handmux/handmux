@@ -313,6 +313,10 @@ export default function DeviceManagement({ onLoggedOut }: { onLoggedOut: () => v
         </div>
       </div>
       <p className="settings-page-footer">{t('devices.originHint')}</p>
+      <div className="device-origin-commands" aria-label={t('devices.originCommands')}>
+        <div className="device-origin-command"><span>{t('devices.originStatusCommandLabel')}</span><code>handmux auth trusted-origin status</code></div>
+        <div className="device-origin-command"><span>{t('devices.originSetCommandLabel')}</span><code>handmux auth trusted-origin set {currentOrigin}</code></div>
+      </div>
       {originMismatch && <p className="device-origin-mismatch">{t('devices.originMismatch')}</p>}
     </section>
     <section className="device-settings-group device-list-group" aria-labelledby="device-list-title">

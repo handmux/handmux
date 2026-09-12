@@ -27,6 +27,8 @@ describe('compact device management', () => {
     render(<DeviceManagement onLoggedOut={vi.fn()} />); await flush();
     expect(screen.getByText('https://handmux.example.com')).toBeTruthy();
     expect(screen.getByText(t('devices.originActive'))).toBeTruthy();
+    expect(screen.getByText('handmux auth trusted-origin status')).toBeTruthy();
+    expect(screen.getByText(`handmux auth trusted-origin set ${window.location.origin}`)).toBeTruthy();
     expect(screen.getByText(t('devices.addSelfAddress', { origin: window.location.origin }))).toBeTruthy();
   });
 

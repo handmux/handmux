@@ -310,6 +310,10 @@ button.settings-page-row:disabled, .settings-page-row.disabled { color: rgba(235
 .device-origin-value { display: block; overflow-wrap: anywhere; color: #f2f2f7; font: 14px/1.35 ui-monospace, "SF Mono", Menlo, monospace; }
 .device-origin-state { color: rgba(235,235,245,.48); font-size: 12px; line-height: 1.25; }
 .device-origin-check { flex: none; margin: 3px 2px 0 12px; color: var(--blue); font-size: 17px; line-height: 1; }
+.device-origin-commands { display: grid; gap: 6px; margin: 8px 16px 0; }
+.device-origin-command { min-width: 0; display: grid; grid-template-columns: 32px minmax(0, 1fr); align-items: start; gap: 8px; }
+.device-origin-command > span { padding-top: 7px; color: rgba(235,235,245,.48); font-size: 12px; line-height: 1.25; }
+.device-origin-command code { min-width: 0; padding: 7px 8px; border-radius: 8px; background: #1a1b1e; color: #b9d8ff; font: 12px/1.35 ui-monospace, "SF Mono", Menlo, monospace; overflow-wrap: anywhere; }
 .device-origin-mismatch { margin: 7px 16px 0; color: #e6be70; font-size: 12.5px; line-height: 1.45; }
 .device-list-group { display: flex; flex-direction: column; gap: 8px; }
 .device-list-group > h2 { padding-bottom: 0; }
