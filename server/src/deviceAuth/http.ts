@@ -28,9 +28,9 @@ export function createDeviceAuthRouter({ service, resolveOrigin }: {
   router.use((req, res, next) => {
     res.set('Cache-Control', 'no-store'); res.set('Pragma', 'no-cache');
     const origin = resolveOrigin(req);
-    if (!origin || req.get('X-Handmux-Request') !== '1' || (req.get('Origin') && req.get('Origin') !== origin)
+    if (!origin || (req.get('Origin') && req.get('Origin') !== origin)
       || (!['GET', 'HEAD'].includes(req.method) && req.get('Origin') !== origin)) {
-      res.status(403).json({ error: 'AUTH_ORIGIN_REJECTED', message: 'Open HandMux from its advertised address and retry' }); return;
+      res.status(403).json({ error: 'AUTH_ORIGIN_REJECTED', message: 'Open handmux from its trusted access address and retry' }); return;
     }
     res.locals.authOrigin = origin;
     let principal;

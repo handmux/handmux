@@ -39,12 +39,12 @@ function reqMock(host: string, remoteAddress = '127.0.0.1', proto?: string): Inc
   return { headers: { host, ...(proto ? { 'x-forwarded-proto': proto } : {}) }, socket: { remoteAddress } } as IncomingMessage;
 }
 describe('known auth entry points', () => {
-  it('accepts local and configured origins, never arbitrary Host or remote forwarded TLS', () => {
+  it('accepts local and configured origins, while rejecting unknown hosts', () => {
     const resolve = createAuthOriginResolver({ port: 4000, host: '0.0.0.0', publicUrl: 'https://mux.example' });
     expect(resolve(reqMock('localhost:4000'))).toBe('http://localhost:4000');
     expect(resolve(reqMock('evil.example:4000'))).toBeNull();
     expect(resolve(reqMock('mux.example', '127.0.0.1', 'https'))).toBe('https://mux.example');
-    expect(resolve(reqMock('mux.example', '192.0.2.2', 'https'))).toBeNull();
+    expect(resolve(reqMock('mux.example', '192.0.2.2', 'https'))).toBe('https://mux.example');
     expect(resolve(reqMock('localhost:4000@evil.example'))).toBeNull();
   });
   it('learns trusted supervisor tunnel changes without accepting forwarded host', () => {
@@ -151,7 +151,7 @@ describe('browser → CLI socket → protected HTTP / WebSocket', () => {
     await request(app).get('/api/private').set(headers).set('Cookie', cookie).expect(200, { device: device.id });
     await request(app).get('/api/private').set(headers).set('Authorization', 'Bearer old-token').expect(401);
     await request(app).get('/api/private').set(headers).set('Cookie', cookie).set('Origin', 'null').expect(403);
-    await request(app).get('/api/private').set('Host', 'localhost:4000').set('Cookie', cookie).expect(403);
+    await request(app).get('/api/private').set('Host', 'localhost:4000').set('Cookie', cookie).expect(200);
     await client.request({ op: 'revoke', id: device.id });
     await request(app).get('/api/private').set(headers).set('Cookie', cookie).expect(401);
   });

@@ -41,7 +41,6 @@ function savedToken(): string | null { try { return getToken(); } catch { return
 
 export function authenticationHeaders(extra: Record<string, string> = {}): Record<string, string> {
   return {
-    'X-Handmux-Request': '1',
     ...(!hasDeviceSession() && savedToken() ? { Authorization: `Bearer ${savedToken()}` } : {}),
     ...extra,
   };
@@ -70,7 +69,7 @@ async function performAuthRequest(path: string, method: string, id?: string): Pr
   try {
     const response = await fetch(path, {
       method, credentials: 'same-origin', cache: 'no-store', signal: controller.signal,
-      headers: { 'X-Handmux-Request': '1', ...(!hasDeviceSession() && savedToken() ? { Authorization: `Bearer ${savedToken()}` } : {}), ...(id ? { 'Content-Type': 'application/json' } : {}) },
+      headers: { ...(!hasDeviceSession() && savedToken() ? { Authorization: `Bearer ${savedToken()}` } : {}), ...(id ? { 'Content-Type': 'application/json' } : {}) },
       ...(id ? { body: JSON.stringify({ id }) } : {}),
     });
     if (!response.ok) {
