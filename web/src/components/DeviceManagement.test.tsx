@@ -30,6 +30,24 @@ describe('compact device management', () => {
     expect(screen.getByText(t('devices.addSelfAddress', { origin: window.location.origin }))).toBeTruthy();
   });
 
+  it('checks active devices and confirms before deleting an extra trusted domain', async () => {
+    const origin = 'https://phone.example.com';
+    vi.mocked(api.list).mockResolvedValue({ devices: [other], currentDeviceId: current.id, trustedOrigins: [origin], serverTime: now });
+    const inspect = vi.spyOn(api, 'inspectTrustedOriginRemoval').mockResolvedValue({ affectedDevices: [{ id: other.id, name: other.name, browser_summary: other.browser_summary }] });
+    const remove = vi.spyOn(api, 'removeTrustedOrigin').mockResolvedValue({ trustedOrigins: [], serverTime: now });
+    render(<DeviceManagement onLoggedOut={vi.fn()} />); await flush();
+    fireEvent.click(screen.getByRole('button', { name: `${t('common.delete')} ${origin}` })); await flush();
+    expect(inspect).toHaveBeenCalledWith(origin);
+    const dialog = screen.getByRole('alertdialog');
+    expect(within(dialog).getByText(t('devices.removeOriginImpact'))).toBeTruthy();
+    expect(within(dialog).getByText(other.name)).toBeTruthy();
+    fireEvent.click(within(dialog).getByRole('button', { name: t('common.cancel') }));
+    expect(remove).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: `${t('common.delete')} ${origin}` })); await flush();
+    fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: t('devices.removeOriginConfirm') })); await flush();
+    expect(remove).toHaveBeenCalledWith(origin);
+  });
+
   it('uses compact current-first rows, hides full IDs/times until details, and keeps history read-only', async () => {
     render(<DeviceManagement onLoggedOut={vi.fn()} />); await flush();
     const rows = document.querySelectorAll('.device-row'); expect(rows[0]?.textContent).toContain(current.name); expect(rows).toHaveLength(2);
