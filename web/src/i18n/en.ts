@@ -34,6 +34,7 @@ export default {
   'devices.modeReadOnly': 'Device authorization · Authentication mode is configured in the CLI',
   'devices.current': 'This device',
   'devices.add': 'Add a device with a one-time code',
+  'devices.authorizeOther': 'Authorize another device',
   'devices.history': 'Device history ({n})',
   'devices.activeTab': 'Active',
   'devices.historyTab': 'History',

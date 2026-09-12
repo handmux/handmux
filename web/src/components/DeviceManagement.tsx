@@ -127,7 +127,7 @@ function DeviceDetail({ device: initial, current, now, onClose, onChanged, onLog
         <p className="auth-secondary">{expire === 'keep' ? t('devices.keepHint') : t('devices.expireFromSave')}</p>
         <button className="fontbtn device-save" disabled={busy || !changed || conflict} onClick={() => { void save(); }}>{t('common.save')}</button>
       </>}
-      <dl className="device-metadata"><dt>{t('devices.id')}</dt><dd><code ref={idRef}>{device.id}</code><button className="device-copy-button" onClick={() => { void copyId(); }}>{t('devices.copyId')}</button></dd>
+      <dl className="device-metadata"><dt>{t('devices.id')}</dt><dd><code ref={idRef}>{device.id}</code><button type="button" className="device-copy-button" onClick={() => { void copyId(); }}>{t('devices.copyId')}</button></dd>
         <dt>{t('devices.added')}</dt><dd>{date(device.authorized_at)}</dd><dt>{t('devices.lastAccess')}</dt><dd>{date(device.last_used_at)}</dd>
         <dt>{t('devices.expiresAt')}</dt><dd>{date(device.expires_at)}</dd></dl>
       {copyHint && <p role="status">{copyHint}</p>}
@@ -316,11 +316,12 @@ export default function DeviceManagement({ onLoggedOut }: { onLoggedOut: () => v
     </div>
     <div className="settings-page-list">
       {devices.map(d => <button className="settings-page-row device-row" key={d.id} onClick={() => setSelected(d)}>
-        <span className="device-row-copy"><span className="device-row-main"><span>{d.name}</span>{d.id === data?.currentDeviceId && <small>{t('devices.current')}</small>}</span>
+        <span className="device-row-copy"><span className="device-row-main"><span>{d.name}</span>{d.id === data?.currentDeviceId && <small className="device-current-badge">{t('devices.current')}</small>}</span>
           <span className="device-row-secondary"><span>{d.browser_summary}</span><span>{remainingExpiry(d, now)}</span></span></span><span className="settings-page-chevron" aria-hidden="true">›</span>
       </button>)}
-      {!showingHistory && <><button className="settings-page-row device-add-row" aria-label={t('devices.addSelf')} disabled={!!data?.currentDeviceId || busy || !data?.tokenEnabled || originMismatch} onClick={() => setSelfSheet(true)}><span className="device-action-copy"><strong>{t(data?.currentDeviceId ? 'devices.selfRegistered' : 'devices.addSelf')}</strong><small>{currentOrigin}</small></span><span className="settings-page-chevron" aria-hidden="true">›</span></button><button className="settings-page-row device-add-row" aria-label={t('devices.add')} disabled={!data?.currentDeviceId} onClick={() => setAdding(true)}><span>{t('devices.add')}</span><span className="settings-page-chevron" aria-hidden="true">›</span></button></>}
+      {!showingHistory && !data?.currentDeviceId && <button type="button" className="settings-page-row device-add-row" aria-label={t('devices.addSelf')} disabled={busy || !data?.tokenEnabled || originMismatch} onClick={() => setSelfSheet(true)}><span className="device-action-copy"><strong>{t('devices.addSelf')}</strong><small>{currentOrigin}</small></span><span className="settings-page-chevron" aria-hidden="true">›</span></button>}
     </div>
+    {!showingHistory && data?.currentDeviceId && <button type="button" className="device-authorize-other" aria-label={t('devices.authorizeOther')} disabled={busy} onClick={() => setAdding(true)}>{t('devices.authorizeOther')}</button>}
     {devices.length === 0 && !loading && <p className="device-empty">{t(showingHistory ? 'devices.noHistory' : 'devices.noActive')}</p>}
     {error && <><p role="alert">{error}</p><button disabled={loading} onClick={() => { void load(); }}>{t('common.retry')}</button></>}
     {loading && !data && <p role="status">{t('common.loading')}</p>}

@@ -26,6 +26,9 @@ describe('compact device management', () => {
     render(<DeviceManagement onLoggedOut={vi.fn()} />); await flush();
     const rows = document.querySelectorAll('.device-row'); expect(rows[0]?.textContent).toContain(current.name); expect(rows).toHaveLength(2);
     expect(screen.queryByText(current.id)).toBeNull(); expect(screen.queryByText(history.name)).toBeNull();
+    expect(screen.getByText(t('devices.current'))).toBeTruthy();
+    expect(screen.queryByRole('button', { name: t('devices.selfRegistered') })).toBeNull();
+    expect(screen.getByRole('button', { name: t('devices.authorizeOther') })).toBeTruthy();
     const activeTab = screen.getByRole('tab', { name: new RegExp(t('devices.activeTab')) });
     const historyTab = screen.getByRole('tab', { name: new RegExp(t('devices.historyTab')) });
     expect(activeTab.getAttribute('aria-selected')).toBe('true'); expect(activeTab.textContent).toContain('2');
@@ -58,7 +61,7 @@ describe('compact device management', () => {
   it('claims a leading-zero code first, then authorizes only after name/expiry are completed', async () => {
     const claim = vi.spyOn(api, 'claim').mockResolvedValue({ approval, serverTime: now });
     const authorize = vi.spyOn(api, 'authorize').mockResolvedValue({ device: other, serverTime: now });
-    render(<DeviceManagement onLoggedOut={vi.fn()} />); await flush(); fireEvent.click(screen.getByRole('button', { name: new RegExp(t('devices.add')) })); await flush();
+    render(<DeviceManagement onLoggedOut={vi.fn()} />); await flush(); fireEvent.click(screen.getByRole('button', { name: t('devices.authorizeOther') })); await flush();
     fireEvent.change(screen.getByLabelText(t('devices.code')), { target: { value: '038271' } }); fireEvent.click(screen.getByRole('button', { name: t('devices.claim') })); await flush();
     expect(claim).toHaveBeenCalledWith('038271'); expect(authorize).not.toHaveBeenCalled(); expect(screen.getByText(t('auth.pending'))).toBeTruthy();
     fireEvent.change(screen.getByLabelText(t('devices.name')), { target: { value: 'Linux computer' } }); fireEvent.click(screen.getByRole('button', { name: '7d' }));
@@ -67,7 +70,7 @@ describe('compact device management', () => {
   it('resumes its claimed request after remount and cancellation must be confirmed by the server', async () => {
     sessionStorage.setItem('handmux.pendingApprovalId', approval.id);
     const cancel = vi.spyOn(api, 'cancel').mockRejectedValueOnce(new Error('offline')).mockResolvedValue({ approval: { ...approval, state: 'canceled' }, serverTime: now });
-    render(<DeviceManagement onLoggedOut={vi.fn()} />); await flush(); fireEvent.click(screen.getByRole('button', { name: new RegExp(t('devices.add')) })); await flush();
+    render(<DeviceManagement onLoggedOut={vi.fn()} />); await flush(); fireEvent.click(screen.getByRole('button', { name: t('devices.authorizeOther') })); await flush();
     expect(screen.queryByLabelText(t('devices.code'))).toBeNull(); expect((screen.getByLabelText(t('devices.name')) as HTMLInputElement).value).toBe(approval.browserSummary);
     expect(api.approval).toHaveBeenCalledWith(approval.id); expect(api.approvals).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('button', { name: t('common.cancel') })); await flush(); expect(screen.getByRole('alert')).toBeTruthy(); expect(screen.getByRole('dialog')).toBeTruthy();
@@ -76,7 +79,7 @@ describe('compact device management', () => {
   it('recovers a claim whose response was lost before confirming cancellation on close', async () => {
     const claim = vi.spyOn(api, 'claim').mockRejectedValueOnce(new Error('response lost')).mockResolvedValue({ approval, serverTime: now });
     const cancel = vi.spyOn(api, 'cancel').mockResolvedValue({ approval: { ...approval, state: 'canceled' }, serverTime: now });
-    render(<DeviceManagement onLoggedOut={vi.fn()} />); await flush(); fireEvent.click(screen.getByRole('button', { name: new RegExp(t('devices.add')) })); await flush();
+    render(<DeviceManagement onLoggedOut={vi.fn()} />); await flush(); fireEvent.click(screen.getByRole('button', { name: t('devices.authorizeOther') })); await flush();
     fireEvent.change(screen.getByLabelText(t('devices.code')), { target: { value: '038271' } }); fireEvent.click(screen.getByRole('button', { name: t('devices.claim') })); await flush();
     expect(screen.getByRole('alert')).toBeTruthy(); fireEvent.click(screen.getByRole('button', { name: t('common.cancel') })); await flush();
     expect(claim).toHaveBeenNthCalledWith(2, '038271'); expect(cancel).toHaveBeenCalledWith(approval.id); expect(screen.queryByRole('dialog')).toBeNull();
@@ -84,13 +87,13 @@ describe('compact device management', () => {
   it('never picks another tab’s pending request when this tab has no request ID or storage is unavailable', async () => {
     vi.mocked(api.approvals).mockResolvedValue({ approvals: [approval], serverTime: now });
     vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => { throw new Error('Storage denied'); });
-    render(<DeviceManagement onLoggedOut={vi.fn()} />); await flush(); fireEvent.click(screen.getByRole('button', { name: new RegExp(t('devices.add')) })); await flush();
+    render(<DeviceManagement onLoggedOut={vi.fn()} />); await flush(); fireEvent.click(screen.getByRole('button', { name: t('devices.authorizeOther') })); await flush();
     expect(screen.getByLabelText(t('devices.code'))).toBeTruthy(); expect(screen.queryByLabelText(t('devices.name'))).toBeNull();
     expect(api.approvals).not.toHaveBeenCalled(); expect(api.approval).not.toHaveBeenCalled();
   });
   it('does not overwrite an unknown claim with a new code while retrying', async () => {
     const claim = vi.spyOn(api, 'claim').mockRejectedValueOnce(new Error('response lost')).mockResolvedValue({ approval, serverTime: now });
-    render(<DeviceManagement onLoggedOut={vi.fn()} />); await flush(); fireEvent.click(screen.getByRole('button', { name: new RegExp(t('devices.add')) })); await flush();
+    render(<DeviceManagement onLoggedOut={vi.fn()} />); await flush(); fireEvent.click(screen.getByRole('button', { name: t('devices.authorizeOther') })); await flush();
     fireEvent.change(screen.getByLabelText(t('devices.code')), { target: { value: '038271' } }); fireEvent.click(screen.getByRole('button', { name: t('devices.claim') })); await flush();
     expect((screen.getByLabelText(t('devices.code')) as HTMLInputElement).disabled).toBe(true);
     fireEvent.change(screen.getByLabelText(t('devices.code')), { target: { value: '999999' } }); fireEvent.click(screen.getByRole('button', { name: t('common.retry') })); await flush();
@@ -100,7 +103,7 @@ describe('compact device management', () => {
     sessionStorage.setItem('handmux.pendingApprovalId', approval.id);
     vi.mocked(api.approval).mockRejectedValueOnce(new Error('offline')).mockResolvedValue({ approval, serverTime: now });
     const claim = vi.spyOn(api, 'claim');
-    render(<DeviceManagement onLoggedOut={vi.fn()} />); await flush(); fireEvent.click(screen.getByRole('button', { name: new RegExp(t('devices.add')) })); await flush();
+    render(<DeviceManagement onLoggedOut={vi.fn()} />); await flush(); fireEvent.click(screen.getByRole('button', { name: t('devices.authorizeOther') })); await flush();
     expect((screen.getByLabelText(t('devices.code')) as HTMLInputElement).disabled).toBe(true); expect(screen.queryByRole('button', { name: t('devices.claim') })).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: t('common.retry') })); await flush();
     expect(api.approval).toHaveBeenNthCalledWith(2, approval.id); expect(claim).not.toHaveBeenCalled(); expect(screen.getByLabelText(t('devices.name'))).toBeTruthy();
@@ -109,7 +112,7 @@ describe('compact device management', () => {
     sessionStorage.setItem('handmux.pendingApprovalId', 'pair_previous');
     vi.mocked(api.approval).mockRejectedValue(new DeviceManagementError('PAIRING_NOT_FOUND', 404));
     vi.mocked(api.approvals).mockResolvedValue({ approvals: [approval], serverTime: now });
-    render(<DeviceManagement onLoggedOut={vi.fn()} />); await flush(); fireEvent.click(screen.getByRole('button', { name: new RegExp(t('devices.add')) })); await flush();
+    render(<DeviceManagement onLoggedOut={vi.fn()} />); await flush(); fireEvent.click(screen.getByRole('button', { name: t('devices.authorizeOther') })); await flush();
     expect(screen.getByLabelText(t('devices.code'))).toBeTruthy(); expect(api.approval).toHaveBeenCalledWith('pair_previous');
     expect(api.approvals).not.toHaveBeenCalled(); expect(sessionStorage.getItem('handmux.pendingApprovalId')).toBeNull();
   });

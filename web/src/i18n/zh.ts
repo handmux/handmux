@@ -33,6 +33,7 @@ export default {
   'devices.modeReadOnly': '设备授权 · 认证方式由 CLI 配置',
   'devices.current': '当前设备',
   'devices.add': '通过一次性校验码添加设备',
+  'devices.authorizeOther': '为其他设备授权',
   'devices.history': '历史设备（{n}）',
   'devices.activeTab': '有效设备',
   'devices.historyTab': '历史设备',
