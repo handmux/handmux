@@ -2,9 +2,8 @@
 // handmux CLI implementation — compiled before development, tests, packing and publishing.
 //
 // The whole config story is two doors:
-//   handmux start   — just run it. New users default to `none` (LAN-only) and trusted-device auth;
-//                     legacy users retain token auth and their credential. Prints the URL and QR. Flags
-//                     let you try variations for one run (e.g. --tunnel cloudflare).
+//   handmux start   — just run it. New users default to `none` (LAN-only) with Token + trusted-device
+//                     authentication. Prints the URL and QR. Flags let you try variations for one run.
 //   handmux setup   — the one place to configure persistently. Interactive; writes ~/.handmux/config.json
 //                     (name, tunnel, push, voice). Re-run it to change anything.
 // `start` reads that file; with no file it uses defaults. Precedence: flag > file > env (HANDMUX_*) >
@@ -23,9 +22,7 @@ import { fileURLToPath } from 'node:url';
 import { homedir } from 'node:os';
 import { createRequire } from 'node:module';
 import { parseArgs, resolveConfig, explainConfig } from '../src/cli/options.js';
-import { authOverrideNeedsConfirmation, installationAuthDefaults, tokenWarning } from '../src/cli/authDefaults.js';
-import type { AuthDefaults } from '../src/cli/authDefaults.js';
-import { ask, confirm as authConfirm, CANCELLED } from '../src/cli/prompt.js';
+import { installationAuthDefaults, tokenWarning } from '../src/cli/authDefaults.js';
 import type { OptionRecord, ResolvedConfig } from '../src/cli/options.js';
 import { renderCompactQr } from '../src/cli/qr.js';
 import { supervise, bareUrl } from '../src/cli/supervisor.js';
@@ -174,17 +171,14 @@ function describeConfig(p: string | null): string {
   return p || t('config.none');
 }
 
-// Which user-visible settings THIS run would use differ from what's already running (from state.json)?
-// Compare connection and authentication settings people re-run `start` to change; each row is ready to
-// drop straight into the `start.running.changedRow` message ({key, from, to}). Only compares fields the
-// running state actually recorded, so an older state.json can't manufacture phantom diffs.
+// Which user-visible connection settings THIS run would use differ from what's already running (from state.json)?
 function configChanges(
   cfg: ResolvedConfig,
   st: StoredState,
-): Array<{ key: 'tunnel' | 'port' | 'authMode'; from: unknown; to: string | number }> {
-  const out: Array<{ key: 'tunnel' | 'port' | 'authMode'; from: unknown; to: string | number }> = [];
-  for (const key of ['tunnel', 'port', 'authMode'] as const) {
-    const running = key === 'authMode' ? st.authMode ?? 'token' : st[key];
+): Array<{ key: 'tunnel' | 'port'; from: unknown; to: string | number }> {
+  const out: Array<{ key: 'tunnel' | 'port'; from: unknown; to: string | number }> = [];
+  for (const key of ['tunnel', 'port'] as const) {
+    const running = st[key];
     if (running != null && String(cfg[key]) !== String(running)) out.push({ key, from: running, to: cfg[key] });
   }
   return out;
@@ -229,11 +223,10 @@ async function preflightNgrok(cfg: RuntimeConfig): Promise<void> {
 
 async function main(): Promise<unknown> {
   switch (command) {
-    case 'start': return withLifecycleLock(async () => { if (await approveAuthOverride()) return start(); });
+    case 'start': return withLifecycleLock(() => start());
     case 'open': return openCmd();
     case 'stop': return withLifecycleLock(stopAndWait);
     case 'restart': return withLifecycleLock(async () => {
-      if (!await approveAuthOverride()) return;
       const { path: cfgPath } = resolveFileConfig();
       const authDefaults = installationAuthDefaults(HOME, cfgPath ?? configPath(HOME), flags);
       if (!await stopAndWait()) return;
@@ -250,7 +243,6 @@ async function main(): Promise<unknown> {
     case 'hooks': return hooksCmd();
     case 'agent': return agentCmd();
     case 'service': return withLifecycleLock(async () => {
-      if (process.argv[3] === 'install' && !await approveAuthOverride()) return;
       return serviceCmd();
     });
     case 'update': case 'upgrade': return updateCmd();
@@ -259,28 +251,6 @@ async function main(): Promise<unknown> {
     case 'version': case '--version': case '-v': return version();
     default: return help();
   }
-}
-
-async function approveAuthOverride(): Promise<boolean> {
-  const { path: cfgPath, cfg: fileCfg } = resolveFileConfig();
-  const defaults = installationAuthDefaults(HOME, cfgPath ?? configPath(HOME), flags);
-  // Validate BEFORE stop too: invalid overrides must never tear down a working instance.
-  try { resolveConfig(flags, fileCfg, process.env, undefined, defaults); }
-  catch (error) { console.error(t('err.generic', { msg: errorMessage(error) })); process.exitCode = 2; return false; }
-  const state = readState(HOME);
-  const runningMode = state && isAlive(state.supervisorPid) ? String(state.authMode ?? 'token') : undefined;
-  if (!authOverrideNeedsConfirmation({ flags, fileCfg, env: process.env, defaults, runningMode })) return true;
-  console.warn(tokenWarning(t('auth.switchWarning')));
-  if (!process.stdin.isTTY) {
-    console.error(t('auth.switchNeedTty'));
-    process.exitCode = 2;
-    return false;
-  }
-  try {
-    if (await ask(authConfirm({ message: t('auth.switchApplyConfirm'), initialValue: false }))) return true;
-  } catch (error) { if (error !== CANCELLED) throw error; }
-  process.exitCode = 2;
-  return false;
 }
 
 async function withLifecycleLock(fn: () => unknown | Promise<unknown>): Promise<unknown> {
@@ -332,7 +302,7 @@ function maybeNotifyUpdate(): void {
   notifyUpdate(HOME, { version: currentVersion(), selfPath: SELF_REAL });
 }
 
-async function start(authDefaults?: AuthDefaults): Promise<void> {
+async function start(authDefaults?: { token?: string }): Promise<void> {
   const { path: cfgPath, cfg: fileCfg } = resolveFileConfig();
   console.log(t('config.loaded', { path: describeConfig(cfgPath) }));
   let cfg: RuntimeConfig;
@@ -385,7 +355,7 @@ async function start(authDefaults?: AuthDefaults): Promise<void> {
     for (const c of changed) console.log(t('start.running.changedRow', c));
     if (process.stdin.isTTY && await confirm(t('start.running.switchQ'))) {
       if (!await stopAndWait()) return;
-      return start({ authMode: cfg.authMode, token: cfg.token });
+      return start({ token: cfg.token });
     }
     console.log(t('start.running.hint'));
     await printAccess(existing);
@@ -876,14 +846,13 @@ async function printAccess(st: StoredState | null): Promise<void> {
   if (st.error) { console.error(t('access.error', { msg: st.error })); return; }
   const publicUrl = st.publicUrl ?? null;
   const localUrl = st.localUrl ?? null;
-  let tokenEnabled = false;
   let devices: Array<{ status: string }> = [];
   try {
     const control = await connectAuthControl(HOME);
-    try { const status = await control.request({ op: 'token-status' }) as { enabled: boolean; devices: Array<{ status: string }> }; tokenEnabled = status.enabled; devices = status.devices; }
+    try { const status = await control.request({ op: 'device-status' }) as { devices: Array<{ status: string }> }; devices = status.devices; }
     finally { control.close(); }
-  } catch { /* Never advertise fixed Token login unless the running authority confirms it. */ }
-  const token = tokenEnabled ? st.token ?? '' : '';
+  } catch { /* The server may still be starting; the token is printed from the resolved state below. */ }
+  const token = st.token ?? '';
   const scan = bareUrl(publicUrl);
   console.log('');
   console.log(t('access.tunnel', { tunnel: st.tunnel, pid: st.supervisorPid }));
@@ -891,9 +860,8 @@ async function printAccess(st: StoredState | null): Promise<void> {
   if (st.tunnel === 'none' && st.lanUrl) console.log(t('access.lan', { url: bareUrl(st.lanUrl) }));
   console.log(t('access.local', { url: bareUrl(localUrl) }));
   console.log(t('auth.access'));
-  if (!tokenEnabled && !devices.some(d => d.status === 'active')) console.log(t('auth.noDevices'));
-  if (tokenEnabled) { console.log(t('access.token', { token })); console.log(tokenWarning(t('auth.warning'))); }
-  // Keep credentials out of QR URLs and navigation logs, including the compatibility login.
+  if (!devices.some(d => d.status === 'active')) console.log(t('auth.noDevices'));
+  console.log(t('access.token', { token })); console.log(tokenWarning(t('auth.warning')));
   await maybeQr(scan || bareUrl(st.lanUrl ?? localUrl), st);
   if (publicUrl && st.tunnel !== 'none') {
     const ok = await probe(publicUrl);

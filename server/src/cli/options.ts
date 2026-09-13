@@ -51,7 +51,6 @@ export interface VoiceConfig {
 }
 
 export interface ResolvedConfig {
-  authMode: 'token' | 'trusted-device';
   tunnel: Tunnel;
   port: number;
   name: string | null;
@@ -136,7 +135,7 @@ export function resolveConfig(
   fileCfg: OptionRecord = {},
   env: NodeJS.ProcessEnv = process.env,
   gen: () => string = defaultGen,
-  authDefaults: { authMode: 'token' | 'trusted-device'; token?: string } = { authMode: 'token' },
+  authDefaults: { token?: string } = {},
 ): ResolvedConfig {
   const pick = (key: string, ...fallbacks: unknown[]): unknown => {
     for (const v of [flags[key], fileCfg[key], ...fallbacks]) if (v !== undefined && v !== null) return v;
@@ -148,10 +147,7 @@ export function resolveConfig(
   const port = Number(pick('port', env.HANDMUX_PORT, 19999));
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error(`bad port: ${pick('port', env.HANDMUX_PORT, 19999)}`);
 
-  const authMode = pick('authMode', env.HANDMUX_AUTH_MODE, authDefaults.authMode);
-  if (authMode !== 'token' && authMode !== 'trusted-device') throw new Error('authMode must be token or trusted-device');
   const cfg: ResolvedConfig = {
-    authMode,
     tunnel,
     port,
     name: optionalString(pick('name', env.HANDMUX_APP_NAME), 'name'),
@@ -297,7 +293,7 @@ export function explainConfig(
   fileCfg: OptionRecord = {},
   cfgPath: string | null = null,
   env: NodeJS.ProcessEnv = process.env,
-  authDefaults: { authMode: 'token' | 'trusted-device'; token?: string } = { authMode: 'token' },
+  authDefaults: { token?: string } = {},
 ): ConfigExplanationRow[] {
   const rows: ConfigExplanationRow[] = [];
   const mask = (value: unknown): string => (String(value).length <= 8 ? '••••' : `••••${String(value).slice(-4)}`);
@@ -309,8 +305,6 @@ export function explainConfig(
   add('tunnel', tunnel);
   add('port', trace(flags, fileCfg, env, cfgPath, 'port', 'HANDMUX_PORT', 19999));
   add('host', trace(flags, fileCfg, env, cfgPath, 'host', 'HANDMUX_HOST', '0.0.0.0'));
-  add('authMode', trace(flags, fileCfg, env, cfgPath, 'authMode', 'HANDMUX_AUTH_MODE', authDefaults.authMode));
-
   const name = trace(flags, fileCfg, env, cfgPath, 'name', 'HANDMUX_APP_NAME', null);
   add('name', name, name.value == null ? '(default)' : String(name.value));
 

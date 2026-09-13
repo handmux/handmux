@@ -9,7 +9,7 @@ describe('OriginRejectedPrompt', () => {
     render(<OriginRejectedPrompt onRetry={onRetry} />);
     expect(screen.getByRole('heading', { name: t('auth.originRejectedTitle') })).toBeTruthy();
     expect(screen.getByText(t('auth.originRejected'))).toBeTruthy();
-    expect(document.querySelector('.auth-origin-command')?.textContent).toContain('handmux auth trusted-origin set');
+    expect(document.querySelector('.auth-origin-command')?.textContent).toContain('handmux auth address add');
     expect(screen.queryByLabelText('Token')).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: t('auth.retry') }));
     expect(onRetry).toHaveBeenCalledOnce();

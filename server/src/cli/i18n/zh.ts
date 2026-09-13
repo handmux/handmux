@@ -1,18 +1,14 @@
 // 中文字典。键与 en.js 一一对应;缺键会自动回退到英文。命令名、flag、隧道名等字面量保持英文(它们是要照抄输入的)。
 export default {
-  'auth.section': '认证与设备',
-  'auth.trusted': '可信设备登录（始终可用）',
-  'auth.tokenDisabled': 'Token 登录（始终启用）',
-  'auth.tokenEnabled': 'Token 登录（始终启用）',
+  'auth.section': '认证与安全',
+  'auth.trusted': '可信设备保护',
   'auth.token': 'Token 登录',
-  'auth.manageHint': 'Token 和可信设备始终同时参与认证。日常管理使用 handmux auth add/list/edit/revoke；尽可能使用 HTTPS，更好地保护传输安全。',
-  'auth.noDevices': '尚无有效可信设备；请通过 handmux auth add 添加设备后访问业务。',
-  'auth.access': '设备授权：打开访问地址，然后在这台电脑运行 handmux auth add 批准你的浏览器。',
-  'auth.warning': "⚠ Token 和可信设备始终同时参与认证。首次登录或迁移请通过 CLI 添加可信设备；尽可能使用 HTTPS。",
-  'auth.switchWarning': "⚠ 首次授权或丢失全部设备时，必须在运行 handmux 的电脑上，以同一系统用户使用本机终端或独立 SSH 执行 handmux auth add。",
-  'auth.switchConfirm': "确认当前是非 handmux 内的本机终端或独立 SSH？",
-  'auth.switchApplyConfirm': "确认当前是非 handmux 内的本机终端或独立 SSH，并继续？",
-  'auth.switchNeedTty': '切换认证方式需要在本机直连终端或独立 SSH 中交互确认。本次未停止或重启服务。',
+  'auth.manageHint': 'Token 始终参与认证。设备保护和访问地址限制通过 CLI 开关，设备和地址列表也可在 Web 设置中管理。',
+  'auth.noDevices': '尚无有效设备；请通过 handmux auth device add 添加设备。',
+  'auth.access': '设备授权：打开访问地址，然后在这台电脑运行 handmux auth device add 批准你的浏览器。',
+  'auth.warning': "⚠ Token 始终参与认证。需要设备保护时，请使用 handmux auth device on。",
+  'auth.deviceDisableConfirm': '关闭可信设备保护后，Token 将可以单独访问。继续？',
+  'auth.addressDisableConfirm': '关闭访问地址限制后，任意地址都可以尝试访问。继续？',
   'auth.code': '输入新浏览器显示的 6 位校验码',
   'auth.claimed': '配对成功。请在 5 分钟内完善设备信息，保存后才可登录。',
   'auth.origin': '访问地址',
@@ -404,10 +400,16 @@ export default {
   handmux stop | restart | status
   handmux logs [--follow] [--lines N]
   handmux push <标题> <正文>    从脚本推一条通知到手机（--session 会话 · --device 设备key · --tag · --url）
-  handmux auth add             交互式授权浏览器（自动化使用 --code、--name 和 --expire）
-  handmux auth list            列出完整设备 ID、名称、有效期和访问时间
-  handmux auth edit <id>       非交互修改 --name 和/或 --expire
-  handmux auth revoke <id>     立即撤销指定设备
+  handmux auth device status   查看设备保护状态和设备列表
+  handmux auth device on|off   开启或关闭设备保护
+  handmux auth device add      交互式授权浏览器（自动化使用 --code、--name 和 --expire）
+  handmux auth device list     列出完整设备 ID、名称、有效期和访问时间
+  handmux auth device edit <id>   修改设备名称或有效期
+  handmux auth device revoke <id>  立即撤销指定设备
+  handmux auth address status  查看访问地址限制状态和地址列表
+  handmux auth address on|off  开启或关闭访问地址限制
+  handmux auth address add <origin>     添加访问地址
+  handmux auth address remove <origin>  删除访问地址
   handmux codex [参数...]      启动与对话视图同步的 Codex TUI
   handmux pi [参数...]         原样传递参数并启动 Pi
   handmux agent [list]         查看支持的 Agent 接入状态

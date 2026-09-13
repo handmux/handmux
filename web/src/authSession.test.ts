@@ -12,7 +12,7 @@ afterEach(() => {
 });
 
 describe('device authentication transport', () => {
-  it('sends the fixed Token together with a confirmed device session', async () => {
+  it('sends the Token together with a confirmed device session', async () => {
     localStorage.setItem('tw_token', 'old-shared-token');
     applyAuthStatus(status());
     expect(localStorage.getItem('tw_token')).toBe('old-shared-token');
@@ -25,7 +25,7 @@ describe('device authentication transport', () => {
     }));
   });
 
-  it('sends Bearer with origin protection when only fixed Token login is available', () => {
+  it('sends Bearer with origin protection when only Token login is available', () => {
     applyAuthStatus({ mode: 'trusted-device', tokenEnabled: true, currentDeviceId: null, authenticated: false, serverTime: Date.now() });
     localStorage.setItem('tw_token', 'legacy');
     expect(authenticationHeaders()).toEqual({ Authorization: 'Bearer legacy' });

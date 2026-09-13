@@ -10,7 +10,6 @@ import type {
 } from './options.js';
 
 export interface ConnectionAnswers {
-  authMode?: 'token' | 'trusted-device';
   tunnel: Tunnel;
   lang?: string;
   name?: string;
@@ -100,10 +99,10 @@ export function findTunnelId(listJsonOut: unknown, name: string): string | null 
 // The config keys the wizard owns: everything it can set. mergeConfig wipes these from the existing config
 // before re-applying the answers, so switching a tunnel (or clearing an optional field) cleanly drops the
 // old value instead of leaving a stale field behind. Anything NOT here (staticDir, uploadExts…) is
-// preserved untouched. `token` IS owned so the fixed Token can be changed from
+// preserved untouched. `token` IS owned so the Token can be changed from
 // its sub-page and round-trips through answersFromConfig on every setup run.
 const WIZARD_KEYS = [
-  'lang', 'name', 'port', 'tunnel', 'token', 'authMode', 'previewDomain',
+  'lang', 'name', 'port', 'tunnel', 'token', 'previewDomain',
   'sshHost', 'remotePort', 'sshJump', 'cfHostname', 'cfTunnelName', 'publicUrl',
   'authtoken', 'cpolarRegion',
   'vapid', 'voice', 'xfyun',
@@ -115,7 +114,6 @@ export const TUNNEL_KEYS = ['sshHost', 'remotePort', 'sshJump', 'cfHostname', 'c
 // Wizard answers → the config fragment the user actually set (omit empty optional fields).
 export function configFromAnswers(a: SetupAnswers): SetupConfig {
   const cfg: SetupConfig = { tunnel: a.tunnel, port: a.port };
-  if (a.authMode) cfg.authMode = a.authMode;
   if (a.lang) cfg.lang = a.lang;
   if (a.name) cfg.name = a.name;
   if (a.token) cfg.token = a.token;
@@ -156,10 +154,9 @@ export function mergeConfig(existing: unknown = {}, answers: SetupAnswers): Setu
 
 // Seed the working answers from an existing config so the hub shows current values and each edit starts
 // from what's already there. A brand-new config yields safe defaults (none/LAN, port 19999).
-export function answersFromConfig(config: unknown = {}, defaultAuthMode: 'token' | 'trusted-device' = 'token'): SetupAnswers {
+export function answersFromConfig(config: unknown = {}): SetupAnswers {
   const cfg = isRecord(config) ? config : {};
   const a: SetupAnswers = {
-    authMode: cfg.authMode === 'trusted-device' ? 'trusted-device' : cfg.authMode === 'token' ? 'token' : defaultAuthMode,
     lang: optionalString(cfg.lang) || getLocale(),
     name: optionalString(cfg.name) || '',
     token: optionalString(cfg.token) || '',
@@ -256,7 +253,7 @@ export function validateContact(v: unknown): string | undefined {
   if (!wellFormed || /\.local(?:[:/]|$)/i.test(s)) return t('setup.valContact');
   return undefined;
 }
-// The fixed Token is entered separately on the login page and is never put in
+// The Token is entered separately on the login page and is never put in
 // an address or QR code. Keep the value non-empty and whitespace-free so it
 // can be copied without ambiguity.
 export function validateToken(v: unknown): string | undefined {

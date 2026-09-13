@@ -23,7 +23,7 @@ const cleanup: Array<() => unknown | Promise<unknown>> = [];
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close(); });
 function fixture() {
   const db = new DatabaseSync(':memory:'); migrateProjectDatabase(db);
-  const service = new DeviceAuthService({ db, mode: 'trusted-device', token: 'secret' });
+  const service = new DeviceAuthService({ db, token: 'secret' });
   const origin = 'http://localhost:4000';
   const resolveOrigin = createAuthOriginResolver({ port: 4000, host: '0.0.0.0' });
   const access = createDeviceAccess({ service, resolveOrigin });
@@ -68,6 +68,19 @@ describe('known auth entry points', () => {
     expect(resolve(reqMock('a.extra.example.com', '203.0.113.4', 'https'))).toBe('https://a.extra.example.com');
     expect(resolve(reqMock('extra.example.com', '203.0.113.4', 'https'))).toBeNull();
     expect(resolve(reqMock('a.extra.example.com', '203.0.113.4', 'http'))).toBeNull();
+  });
+
+  it('allows a valid Token from an unknown host when both protections are off', async () => {
+    const db = new DatabaseSync(':memory:'); migrateProjectDatabase(db);
+    const service = new DeviceAuthService({ db, token: 'secret' });
+    service.setTrustedDeviceEnabled(false);
+    service.setTrustedOriginEnabled(false);
+    const resolveOrigin = createAuthOriginResolver({ port: 4000, host: '0.0.0.0', trustedOriginEnabled: () => service.trustedOriginEnabled });
+    const access = createDeviceAccess({ service, resolveOrigin });
+    const app = express(); app.use(express.json()); app.use('/api/auth', createDeviceAuthRouter({ service, resolveOrigin })); app.use('/api', access.middleware);
+    app.get('/api/private', (_req, res) => res.json({ ok: true }));
+    cleanup.push(() => { access.close(); service.close(); db.close(); });
+    await request(app).get('/api/private').set({ Host: 'custom.example', Origin: 'http://custom.example', Authorization: 'Bearer secret' }).expect(200, { ok: true });
   });
 });
 describe('browser → CLI socket → protected HTTP / WebSocket', () => {
@@ -165,10 +178,10 @@ describe('browser → CLI socket → protected HTTP / WebSocket', () => {
     await request(app).get('/api/private').set(headers).set('Authorization', 'Bearer old-token').expect(401);
     await request(app).get('/api/private').set(headers).set('Cookie', cookie).set('Origin', 'null').expect(403);
     await request(app).get('/api/private').set('Host', 'localhost:4000').set('Cookie', cookie).expect(200);
-    await client.request({ op: 'revoke', id: device.id });
+    await client.request({ op: 'device-revoke', id: device.id });
     await request(app).get('/api/private').set(headers).set('Cookie', cookie).expect(401);
   });
-  it('authenticates Upgrade with Cookie + Origin, rejects legacy first-frame token, closes on revoke', async () => {
+  it('authenticates Upgrade with Cookie + Origin and closes on revoke', async () => {
     const { service } = fixture();
     const server = http.createServer();
     await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));

@@ -1,19 +1,15 @@
 // English catalog (the fallback locale). Keys are grouped by command/area. `{var}` placeholders are filled
 // by translate(). Keep this in lockstep with zh.js — a missing zh key silently falls back to the line here.
 export default {
-  'auth.section': 'Authentication & devices',
-  'auth.trusted': 'Trusted devices (always available)',
-  'auth.tokenDisabled': 'Token login (always required)',
-  'auth.tokenEnabled': 'Token login (always required)',
+  'auth.section': 'Authentication & security',
+  'auth.trusted': 'Device protection',
   'auth.token': 'Token login',
-  'auth.manageHint': 'The Token and trusted-device credential are always required together. Manage devices with handmux auth add/list/edit/revoke. Use HTTPS whenever possible for better transport protection.',
-  'auth.noDevices': 'No active trusted devices. Use handmux auth add to authorize a browser for access.',
-  'auth.access': 'Device authorization: open the address, then run handmux auth add on this computer to approve your browser.',
-  'auth.warning': "⚠ The Token and trusted-device credential are always required together. Use the CLI to add a device for first enrollment or recovery. Use HTTPS whenever possible.",
-  'auth.switchWarning': "⚠ For first enrollment or recovery after losing every device, use a direct local terminal or independent SSH session as the same OS user on the computer running handmux.",
-  'auth.switchConfirm': "Confirm you are outside handmux in a direct local terminal or independent SSH session?",
-  'auth.switchApplyConfirm': "Confirm you are outside handmux in a direct local terminal or independent SSH session, and continue?",
-  'auth.switchNeedTty': 'Authentication mode changes require confirmation in a direct local terminal or independent SSH session. No service was stopped or restarted.',
+  'auth.manageHint': 'The Token is always part of authentication. Use the CLI to switch device protection and address restrictions; manage device and address lists here.',
+  'auth.noDevices': 'No active devices. Use handmux auth device add to authorize a browser for access.',
+  'auth.access': 'Device authorization: open the address, then run handmux auth device add on this computer to approve your browser.',
+  'auth.warning': "⚠ The Token is always part of authentication. To require an authorized device, run handmux auth device on.",
+  'auth.deviceDisableConfirm': 'With device protection off, the Token can be used by itself. Continue?',
+  'auth.addressDisableConfirm': 'With address restrictions off, any address can attempt access. Continue?',
   'auth.code': 'Enter the 6-digit code from your new browser',
   'auth.claimed': 'Paired. Complete device settings within 5 minutes; access starts only after saving.',
   'auth.origin': 'Origin',
@@ -405,10 +401,16 @@ export default {
   handmux stop | restart | status
   handmux logs [--follow] [--lines N]
   handmux push <title> <body>   notify your phone from a script (--session X · --device K · --tag T · --url U)
-  handmux auth add             interactively authorize a browser (automation uses --code, --name and --expire)
-  handmux auth list            list full device IDs, names, expiry and access times
-  handmux auth edit <id>       update --name and/or --expire without prompts
-  handmux auth revoke <id>     revoke a device immediately
+  handmux auth device status   show device protection status and devices
+  handmux auth device on|off   turn device protection on or off
+  handmux auth device add      interactively authorize a browser (automation uses --code, --name and --expire)
+  handmux auth device list     list full device IDs, names, expiry and access times
+  handmux auth device edit <id>   update the device name or expiry
+  handmux auth device revoke <id>  revoke a device immediately
+  handmux auth address status  show address restriction status and addresses
+  handmux auth address on|off  turn address restrictions on or off
+  handmux auth address add <origin>     add an access address
+  handmux auth address remove <origin>  remove an access address
   handmux codex [args...]       launch a Codex TUI synchronized with chat view
   handmux pi [args...]          launch Pi with its arguments unchanged
   handmux agent [list]          show supported Agent integrations

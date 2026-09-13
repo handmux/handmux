@@ -87,7 +87,7 @@ const projectTask = await createProjectTaskRuntime({
 if (projectTask.status().status === 'unavailable') {
   throw new Error(`Authentication database unavailable: ${projectTask.status().error?.message ?? 'unknown error'}`);
 }
-const auth = new DeviceAuthService({ db: projectTask.requireDatabase(), mode: cfg.authMode, token,
+const auth = new DeviceAuthService({ db: projectTask.requireDatabase(), token,
   onSuccessfulWrite: () => projectTask.successfulWrite() });
 const configuredPublicUrl = process.env.HANDMUX_PUBLIC_URL || null;
 const runtimeAdvertisedUrl = (): string | null => {
@@ -102,6 +102,7 @@ const resolveAuthOrigin = createAuthOriginResolver({ port: cfg.port, host: cfg.h
   ...(configuredPublicUrl ? { publicUrl: configuredPublicUrl } : {}),
   ...(previewDomain ? { previewDomain } : {}),
   trustedOrigins: () => auth.trustedOrigins,
+  trustedOriginEnabled: () => auth.trustedOriginEnabled,
   runtimePublicUrl: runtimeAdvertisedUrl,
 });
 const deviceAccess = createDeviceAccess({ service: auth, resolveOrigin: resolveAuthOrigin });

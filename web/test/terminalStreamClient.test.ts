@@ -111,7 +111,7 @@ describe('openTerminalStream', () => {
     window.history.replaceState({}, '', '/');
   });
 
-  it('uses the browser cookie and fixed Token in device mode, including reconnect', async () => {
+  it('uses the browser cookie and Token in device mode, including reconnect', async () => {
     applyAuthStatus({ mode: 'trusted-device', authenticated: true, currentDeviceId: 'dev_test', serverTime: Date.now() });
     const stream = openTerminalStream({ pane: '%7', token: 'must-not-send', WebSocketCtor: FakeWebSocket });
     try {

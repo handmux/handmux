@@ -39,12 +39,15 @@ export async function startDeviceAuthControl({ service, home, handlePush, handle
             if (args.op === 'claim') result = service.claim(args.code, owner);
             else if (args.op === 'authorize') result = service.authorize(String(args.id ?? ''), owner, { name: args.name, expire: args.expire });
             else if (args.op === 'cancel') { service.cancelOwner(owner); result = { ok: true }; }
-            else if (args.op === 'list') result = service.list();
-            else if (args.op === 'edit') result = service.edit(String(args.id ?? ''), { name: args.name, expire: args.expire });
-            else if (args.op === 'revoke') result = service.revoke(String(args.id ?? ''));
-            else if (args.op === 'token-status') result = { enabled: true, devices: service.list() };
-            else if (args.op === 'token-enable') { result = { enabled: true }; }
-            else if (args.op === 'token-disable') { service.setTokenEnabled(false, { allowEmpty: args.allowEmpty === true }); result = { enabled: true, devices: service.list() }; }
+            else if (args.op === 'device-status') result = { enabled: service.trustedDeviceEnabled, devices: service.list() };
+            else if (args.op === 'device-policy') { service.setTrustedDeviceEnabled(args.enabled === true); result = { enabled: service.trustedDeviceEnabled }; }
+            else if (args.op === 'device-list') result = service.list();
+            else if (args.op === 'device-edit') result = service.edit(String(args.id ?? ''), { name: args.name, expire: args.expire });
+            else if (args.op === 'device-revoke') result = service.revoke(String(args.id ?? ''));
+            else if (args.op === 'address-status') result = { enabled: service.trustedOriginEnabled, origins: service.trustedOrigins };
+            else if (args.op === 'address-policy') { service.setTrustedOriginEnabled(args.enabled === true); result = { enabled: service.trustedOriginEnabled }; }
+            else if (args.op === 'address-add') result = { origins: service.addTrustedOrigin(args.origin) };
+            else if (args.op === 'address-remove') result = { origins: service.removeTrustedOrigin(args.origin) };
             else if (args.op === 'push' && handlePush) result = await handlePush(args.body);
             else if (args.op === 'shortcuts' && handleShortcuts) result = await handleShortcuts(args.body);
             else throw new DeviceAuthError('INVALID_COMMAND', 'Unknown control command');

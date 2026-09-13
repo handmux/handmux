@@ -82,15 +82,8 @@ export async function runSetup({
   catch (error) { log.error(t('err.badConfig', { path: target, msg: errorMessage(error) })); return null; }
   const defaults = installationAuthDefaults(home, target);
   const { isNew } = defaults;
-  const effectiveAuthMode = existing.authMode ?? process.env.HANDMUX_AUTH_MODE ?? defaults.authMode;
-  if (effectiveAuthMode !== 'token' && effectiveAuthMode !== 'trusted-device') {
-    log.error(t('err.generic', { msg: 'authMode must be token or trusted-device' }));
-    return null;
-  }
-  let a = answersFromConfig(existing, effectiveAuthMode);
-  // A fixed Token is a durable factor.  Never leave setup with the old
-  // "auto" sentinel: if no token exists yet, mint it once and persist it in
-  // config.json so a later restart cannot silently replace it.
+  let a = answersFromConfig(existing);
+  // Token is a durable factor. If no token exists yet, mint it once and persist it in config.json.
   if (!a.token) a.token = process.env.HANDMUX_TOKEN ?? defaults.token ?? genToken();
   setLocale(a.lang);
 
@@ -108,7 +101,7 @@ export async function runSetup({
         a.lang = await editLanguage(a);
         note(t('setup.welcome'));
         a = await editConnection(a, { home, log });
-        a.authMode = await editAuth(a);
+        await editAuth(a);
       } catch (e) { if (e !== CANCELLED) throw e; }
     }
     for (;;) {
@@ -151,7 +144,7 @@ export async function runSetup({
         if (choice === 'connection') a = await editConnection(a, { home, log });
         else if (choice === 'name') a.name = await editName(a);
         else if (choice === 'port') a.port = await editPort(a);
-        else if (choice === 'auth') a.authMode = await editAuth(a);
+        else if (choice === 'auth') await editAuth(a);
         else if (choice === 'browser') a.previewDomain = await editBrowserDomain(a);
         else if (choice === 'language') a.lang = await editLanguage(a);
         else if (choice === 'push') {
@@ -175,12 +168,9 @@ export async function runSetup({
 // otherwise a user inside a section can't tell there's a way back to the hub.
 const withBack = (msg: string): string => `${msg}  ${t('setup.escBack')}`;
 
-async function editAuth(a: SetupAnswers): Promise<'token' | 'trusted-device'> {
+async function editAuth(a: SetupAnswers): Promise<void> {
   note(t('auth.manageHint'));
   a.token = await editToken(a);
-  // Keep the legacy config field for old supervisors, but authentication no
-  // longer has a selectable runtime mode.
-  return 'trusted-device';
 }
 
 async function editLanguage(a: SetupAnswers): Promise<string> {
@@ -215,7 +205,7 @@ async function editBrowserDomain(a: SetupAnswers): Promise<string> {
   return String(value || '').trim().toLowerCase();
 }
 
-// The fixed Token is a durable factor. A mini-hub lets the user keep the
+// Token is a durable factor. A mini-hub lets the user keep the
 // current value, replace it with a custom value, or generate a new one. The
 // hub hint masks it and Esc returns without changing it.
 async function editToken(a: SetupAnswers): Promise<string> {

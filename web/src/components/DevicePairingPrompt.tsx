@@ -156,7 +156,7 @@ export default function DevicePairingPrompt({ onSaved }: { onSaved: () => void }
           <p className="pairing-method-caption">{t('auth.chooseOneMethod')}</p>
           <div className="pairing-method-card">
             <strong className="pairing-method-title">{t('auth.cliMethodTitle')}</strong>
-            <p>{t('auth.authorizeWithCli')} <code>handmux auth add</code> {t('auth.cliAfterCode')}</p>
+            <p>{t('auth.authorizeWithCli')} <code>handmux auth device add</code> {t('auth.cliAfterCode')}</p>
           </div>
           <div className="pairing-method-card">
             <strong className="pairing-method-title">{t('auth.deviceMethodTitle')}</strong>

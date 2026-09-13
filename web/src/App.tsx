@@ -80,7 +80,7 @@ import TokenPrompt from './components/TokenPrompt.jsx';
 import DevicePairingPrompt from './components/DevicePairingPrompt.js';
 import OriginRejectedPrompt from './components/OriginRejectedPrompt.js';
 import DeviceLogoutDialog from './components/DeviceLogoutDialog.js';
-import { applyAuthStatus, authRequest, AuthRequestError, hasAuthenticatedSession, hasDeviceSession, isDeviceAuth, isFixedTokenEnabled, logoutDevice } from './authSession.js';
+import { applyAuthStatus, authRequest, AuthRequestError, hasAuthenticatedSession, hasDeviceSession, isDeviceAuth, isTokenEnabled, logoutDevice } from './authSession.js';
 import Settings from './components/Settings.jsx';
 import WorkspaceRestoreDialog from './components/WorkspaceRestoreDialog.jsx';
 import UsagePage from './components/UsagePage.jsx';
@@ -286,7 +286,7 @@ export default function App() {
   const terminalStream = typeof window !== 'undefined'
     && terminalStreamEnabled(window.location, terminalTransport);
   const [needToken, setNeedToken] = useState(!hasAuthenticatedSession());
-  // The fixed Token is always the first factor. A saved value still has to be
+  // Token is always the first factor. A saved value still has to be
   // presented to the auth authority before the trusted-device check; never
   // let the pairing screen become an implicit Token-only login path.
   const [authPrompt, setAuthPrompt] = useState<'device' | 'token' | 'origin'>('token');
@@ -2433,7 +2433,7 @@ export default function App() {
 
   if (needToken) {
     if (authPrompt === 'origin') return <OriginRejectedPrompt onRetry={retryOrigin} />;
-    if (authPrompt === 'token' && isFixedTokenEnabled()) {
+    if (authPrompt === 'token' && isTokenEnabled()) {
       return <TokenPrompt onSaved={validateToken} error={tokenCheckError} busy={tokenCheckBusy} />;
     }
     return <DevicePairingPrompt onSaved={() => { setNeedToken(false); setBooting(true); }} />;

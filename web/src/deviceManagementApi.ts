@@ -5,6 +5,7 @@ export interface ManagedDevice {
 }
 export interface DeviceList {
   devices: ManagedDevice[]; currentDeviceId: string | null; tokenEnabled?: boolean;
+  trustedDeviceEnabled?: boolean; trustedOriginEnabled?: boolean;
   publicUrl?: string | null; previewDomain?: string | null;
   trustedOrigins?: string[]; serverTime: number;
 }

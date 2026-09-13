@@ -18,7 +18,7 @@ it.each(['token', 'trusted-device'] as const)('provides the same read-only switc
   expect(screen.getByRole('dialog')).toBeTruthy();
   expect(screen.getByText(t('auth.switchWarning'))).toBeTruthy();
   expect(screen.getByText('handmux setup')).toBeTruthy();
-  expect(screen.getByText('handmux auth add')).toBeTruthy();
+  expect(screen.getByText('handmux auth device add')).toBeTruthy();
   const done = screen.getByRole('button', { name: t('common.done') });
   await waitFor(() => expect(document.activeElement).toBe(done));
   fireEvent.keyDown(done, { key: 'Tab' });

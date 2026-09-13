@@ -14,7 +14,7 @@ const cleanup: Array<() => void> = [];
 afterEach(() => { cleanup.splice(0).reverse().forEach(close => close()); });
 function fixture() {
   const db = new DatabaseSync(':memory:'); migrateProjectDatabase(db);
-  const service = new DeviceAuthService({ db, mode: 'trusted-device', token: 'secret' }); cleanup.push(() => { service.close(); db.close(); });
+  const service = new DeviceAuthService({ db, token: 'secret' }); cleanup.push(() => { service.close(); db.close(); });
   const p = service.createPairing(null, origin, 'Chrome'); const c = service.claim(p.pairing.code, 'cli'); const device = service.authorize(c.id, 'cli', { name: 'Existing browser', expire: '1h' });
   const actor = service.authenticateSecret(p.secret!, origin)!;
   const app = express(); app.use(express.json()); app.use('/api/auth', createDeviceAuthRouter({ service, resolveOrigin: () => origin }));
@@ -55,13 +55,13 @@ describe('phase two shared device management', () => {
   });
   it('a real schema2 database upgrades without changing old device identity, expiry or session hashes', async () => {
     const home = tmpHome('hm-device-v2-upgrade-'); let runtime = await createProjectTaskRuntime({ home });
-    let service = new DeviceAuthService({ db: runtime.requireDatabase(), mode: 'trusted-device' });
+    let service = new DeviceAuthService({ db: runtime.requireDatabase() });
     const p = service.createPairing(null, origin, 'Safari'); const c = service.claim(p.pairing.code, 'cli'); const oldDevice = service.authorize(c.id, 'cli', { name: 'First phase phone', expire: '30d' });
     const oldSession = runtime.requireDatabase().prepare('SELECT * FROM auth_sessions').get(); service.close(); await runtime.close();
     const v2 = new DatabaseSync(path.join(home, '.handmux', 'handmux.sqlite'));
     v2.exec('ALTER TABLE auth_devices DROP COLUMN version; PRAGMA user_version = 2'); v2.close();
     runtime = await createProjectTaskRuntime({ home });
-    service = new DeviceAuthService({ db: runtime.requireDatabase(), mode: 'trusted-device' });
+    service = new DeviceAuthService({ db: runtime.requireDatabase() });
     expect(runtime.status().schemaVersion).toBe(3);
     expect(service.list()[0]).toEqual(oldDevice); expect(runtime.requireDatabase().prepare('SELECT * FROM auth_sessions').get()).toEqual(oldSession);
     expect(service.authenticateSecret(p.secret!, origin)?.deviceId).toBe(oldDevice.id);

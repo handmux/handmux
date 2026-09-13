@@ -165,18 +165,18 @@ describe('compact device management', () => {
     fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: t('devices.logout') })); await flush();
     expect(fetcher).toHaveBeenCalledWith('/api/auth/logout', expect.objectContaining({ method: 'POST' })); expect(loggedOut).toHaveBeenCalledOnce();
   });
-  it('trusted-device mode remains available when fixed token is disabled', async () => {
+  it('device management remains available when device protection is disabled', async () => {
     applyAuthStatus({ mode: 'trusted-device', authenticated: true, tokenEnabled: false, serverTime: now }); render(<DeviceManagement onLoggedOut={vi.fn()} />); await flush();
-    expect(api.list).toHaveBeenCalled(); expect(screen.queryByText('固定 Token 登录')).toBeNull();
+    expect(api.list).toHaveBeenCalled(); expect(screen.queryByText('Token 登录')).toBeNull();
   });
 });
 
-describe('fixed Token login retirement', () => {
-  it('keeps the device list available while the fixed Token remains a second factor', async () => {
+describe('Token remains the first factor', () => {
+  it('keeps the device list available while Token remains a first factor', async () => {
     vi.mocked(api.list).mockResolvedValue({ devices: [other], currentDeviceId: null, tokenEnabled: true, serverTime: now });
     render(<DeviceManagement onLoggedOut={vi.fn()} />); await flush();
     expect(screen.getByText(other.name)).toBeTruthy();
-    expect(screen.queryByText(t('devices.fixedToken'))).toBeNull();
+    expect(screen.queryByText('Token 登录')).toBeNull();
     expect(screen.getByRole('button', { name: t('devices.addSelf') })).toBeTruthy();
   });
   it('does not report successful self-registration when the formal Cookie did not arrive', async () => {

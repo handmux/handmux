@@ -14,7 +14,8 @@ export interface AuthStatus {
   mode: AuthMode;
   tokenEnabled?: boolean;
   tokenAuthenticated?: boolean;
-  migrationRequired?: boolean;
+  trustedDeviceEnabled?: boolean;
+  trustedOriginEnabled?: boolean;
   requiresTrustedDevice?: boolean;
   currentDeviceId?: string | null;
   authenticated: boolean;
@@ -25,17 +26,16 @@ export interface AuthStatus {
 // Public mode/state only. All device credentials remain in server-issued HttpOnly cookies.
 let authenticated = false;
 let currentDeviceId: string | null = null;
-let fixedTokenEnabled = false;
-export const isFixedTokenEnabled = (): boolean => fixedTokenEnabled;
+let tokenEnabled = false;
+export const isTokenEnabled = (): boolean => tokenEnabled;
 export const isDeviceAuth = (): boolean => true;
 export const hasAuthenticatedSession = (): boolean => authenticated;
 export const hasDeviceSession = (): boolean => authenticated && currentDeviceId !== null;
 export function applyAuthStatus(status: AuthStatus): void {
   authenticated = status.authenticated;
   currentDeviceId = status.currentDeviceId ?? null;
-  fixedTokenEnabled = status.tokenEnabled === true;
+  tokenEnabled = status.tokenEnabled === true;
   if (isDeviceAuth()) {
-    // An old token-mode Browser opt-in must not silently re-create a device capability.
     if (!authenticated) { try { setBrowserAccessEnabled(false); } catch { /* storage may be disabled */ } }
   }
 }
@@ -82,7 +82,7 @@ async function performAuthRequest(path: string, method: string, id?: string): Pr
       throw new AuthRequestError(response.status, code);
     }
     const value = await response.json() as AuthStatus;
-    if (!value || value.mode !== 'trusted-device'
+    if (!value || (value.mode !== 'trusted-device' && value.mode !== 'token')
       || typeof value.authenticated !== 'boolean' || !Number.isFinite(value.serverTime)) {
       throw new Error('Invalid authentication response');
     }
@@ -95,7 +95,7 @@ export async function confirmedSessionInvalid(): Promise<boolean> {
   try {
     const status = await authRequest();
     applyAuthStatus(status);
-    return status.mode !== 'trusted-device' || !status.authenticated;
+    return !status.authenticated;
   } catch { return false; }
 }
 export async function authenticationError(): Promise<Error> {

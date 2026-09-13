@@ -335,6 +335,15 @@ button.settings-page-row:disabled, .settings-page-row.disabled { color: rgba(235
 .device-origin-add .fontbtn { flex: none; min-height: 42px; padding-inline: 12px; }
 .device-list-group { display: flex; flex-direction: column; gap: 8px; }
 .device-list-group > h2 { padding-bottom: 0; }
+.device-list-group > h3 { margin: 12px 16px 0; color: rgba(235,235,245,.52); font-size: 12px; font-weight: 500; letter-spacing: .25px; }
+.device-policy-list { overflow: hidden; border-radius: 13px; background: #232427; }
+.device-policy-row { min-height: 64px; gap: 12px; padding: 12px 16px; background: transparent; }
+.device-policy-copy { min-width: 0; display: grid; gap: 4px; }
+.device-policy-copy strong { color: #f2f2f7; font-size: 15px; font-weight: 500; }
+.device-policy-enabled, .device-policy-disabled { font-size: 12px; }
+.device-policy-enabled { color: var(--green, #65d38b); }
+.device-policy-disabled { color: #e6be70; }
+.device-policy-command { margin-left: auto; max-width: 52%; overflow-wrap: anywhere; color: #b9d8ff; font: 11px/1.35 ui-monospace, "SF Mono", Menlo, monospace; text-align: right; }
 .device-row { gap: 12px; min-height: 64px; }
 .device-action-list { margin-top: 8px; }
 .device-action-copy { min-width: 0; display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }

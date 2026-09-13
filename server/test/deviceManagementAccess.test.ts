@@ -18,14 +18,14 @@ async function fixture() {
   const db = new DatabaseSync(':memory:');
   migrateProjectDatabase(db);
   let now = Date.now();
-  const service = new DeviceAuthService({ db, mode: 'trusted-device', token: 'secret', now: () => now });
+  const service = new DeviceAuthService({ db, token: 'secret', now: () => now });
   const app = express();
   const server = http.createServer(app);
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
   const address = server.address();
   if (!address || typeof address === 'string') throw new Error('missing test port');
   const origin = `http://127.0.0.1:${address.port}`;
-  const resolveOrigin = createAuthOriginResolver({ port: address.port, host: '127.0.0.1', trustedOrigins: () => service.trustedOrigins, trustedOrigin: () => service.trustedOrigin });
+  const resolveOrigin = createAuthOriginResolver({ port: address.port, host: '127.0.0.1', trustedOrigins: () => service.trustedOrigins });
   const access = createDeviceAccess({ service, resolveOrigin });
   app.use('/api/auth', express.json(), createDeviceAuthRouter({ service, resolveOrigin }));
   app.use('/api', access.middleware);
@@ -115,7 +115,7 @@ describe('Web device management across real HTTP and WebSocket boundaries', () =
     const candidateCookie = String(candidate.headers['set-cookie']?.[0]).split(';')[0]!;
     const status = await request(f.server).get('/api/auth/status').set({ Host: 'phone.example.com', Origin: extraOrigin, 'X-Forwarded-Proto': 'https', Authorization: 'Bearer secret', 'X-Handmux-Request': '1' }).set('Cookie', candidateCookie).expect(200);
     expect(status.body.authenticated).toBe(true);
-    const primary = String(status.headers['set-cookie']?.find((value: string) => value.startsWith('__Host-handmux_session='))).split(';')[0]!;
+    const primary = String((status.headers['set-cookie'] as unknown as string[] | undefined)?.find(value => value.startsWith('__Host-handmux_session='))).split(';')[0]!;
     await request(f.server).get('/api/private').set({ Host: 'phone.example.com', Origin: extraOrigin, 'X-Forwarded-Proto': 'https', 'X-Handmux-Request': '1' }).set('Cookie', primary).set('Authorization', 'Bearer secret').expect(200);
   });
 

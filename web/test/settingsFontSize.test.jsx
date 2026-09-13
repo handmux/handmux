@@ -129,7 +129,7 @@ describe('Settings font organization', () => {
   it('keeps language and authentication in general and groups all terminal controls together', () => {
     act(() => root.render(<Settings open onClose={() => {}} termRef={termRef} />));
 
-    expect(groupLabels('通用')).toEqual(['语言 Language', '认证与设备']);
+    expect(groupLabels('通用')).toEqual(['语言 Language', '认证与安全']);
     expect(groupLabels('终端')).toEqual([
       '终端字体大小', '终端传输模式', '键盘模式', '高亮文件路径',
     ]);

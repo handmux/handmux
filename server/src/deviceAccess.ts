@@ -16,16 +16,19 @@ export interface DeviceAccessService {
   touch(principal: DevicePrincipal): void;
   onRevoke(listener: (deviceId: string) => void): () => void;
   readonly tokenEnabled?: boolean;
+  readonly trustedDeviceEnabled?: boolean;
   authenticateToken?(provided: unknown, origin: string): DevicePrincipal | null;
 }
 
 /** Host and forwarded headers select a known entry point; they never create a trusted origin. */
 export function createAuthOriginResolver({
   port, host, publicUrl, previewDomain, trustedOrigins = () => [], runtimePublicUrl = () => null,
+  trustedOriginEnabled = () => true,
 }: {
   port: number; host: string; publicUrl?: string; previewDomain?: string;
   trustedOrigins?: () => readonly string[];
   runtimePublicUrl?: () => string | null;
+  trustedOriginEnabled?: () => boolean;
 }): (req: IncomingMessage) => string | null {
   const local = new Set<string>();
   const add = (hostname: string): void => {
@@ -46,6 +49,10 @@ export function createAuthOriginResolver({
   return (req) => {
     const origin = requestOrigin(req);
     if (!origin) return null;
+    // Origin restriction is an independent policy. Even when disabled, return the
+    // syntactically valid request origin so authentication can proceed with Token
+    // (and, when enabled, a trusted-device cookie).
+    if (!trustedOriginEnabled()) return origin;
     if (local.has(origin)) return origin;
     for (const known of [publicUrl, runtimePublicUrl()]) {
       if (!known) continue;
@@ -79,7 +86,8 @@ export function createDeviceAccess({ service, resolveOrigin }: {
       bearerFrom(typeof req.headers.authorization === 'string' ? req.headers.authorization : undefined)
         ?? req.headers['x-handmux-token'], origin,
     ) ?? null;
-    return device && token ? device : null;
+    if (!token) return null;
+    return service.trustedDeviceEnabled === false ? token : device && token ? device : null;
   };
   const middleware: RequestHandler = (req, res, next) => {
     res.setHeader('Cache-Control', 'no-store');

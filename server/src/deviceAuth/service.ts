@@ -88,11 +88,11 @@ export interface PairingStatus { id: string; state: PairState; code?: string; ex
 export interface ApprovalStatus { id: string; state: PairState; browserSummary: string; expiresAt: number; source: 'web'; origin?: string; device?: AuthDevice }
 
 export class DeviceAuthService {
-  readonly mode = 'trusted-device' as const;
+  get mode(): AuthMode { return this.trustedDeviceEnabled ? 'trusted-device' : 'token'; }
   private tokenSecret: string;
   private tokenGeneration: string;
-  private tokenEnabledState: boolean;
-  private enrollmentState: 'enrollment' | 'migration' | 'ready';
+  private trustedDeviceEnabledState: boolean;
+  private trustedOriginEnabledState: boolean;
   private db: DatabaseSync;
   private now: () => number;
   private write: () => void;
@@ -106,40 +106,37 @@ export class DeviceAuthService {
   private flushTimer: ReturnType<typeof setInterval>;
   private claimFailures = new Map<string, number[]>();
   private closed = false;
-  constructor({ db, mode, token = '', now = Date.now, onSuccessfulWrite = () => {} }: {
-    db: DatabaseSync; mode: AuthMode; token?: string; now?: () => number; onSuccessfulWrite?: () => void;
+  constructor({ db, token = '', now = Date.now, onSuccessfulWrite = () => {} }: {
+    db: DatabaseSync; token?: string; now?: () => number; onSuccessfulWrite?: () => void;
   }) {
     this.db = db; this.tokenSecret = token; this.now = now; this.write = onSuccessfulWrite;
-    const tokenRow = db.prepare("SELECT value FROM auth_meta WHERE key='token_enabled'").get() as { value: string } | undefined;
-    const modeRow = db.prepare("SELECT value FROM auth_meta WHERE key='mode'").get() as { value: string } | undefined;
-    const enrollmentRow = db.prepare("SELECT value FROM auth_meta WHERE key='enrollment_state'").get() as { value: string } | undefined;
-    const hasLegacyAuthState = !!tokenRow || !!modeRow || mode === 'token';
-    const activeDevices = Number((db.prepare('SELECT COUNT(*) AS count FROM auth_devices WHERE revoked_at IS NULL AND (expires_at IS NULL OR expires_at>?)').get(this.now()) as { count?: number } | undefined)?.count ?? 0);
-    this.tokenEnabledState = true;
-    this.enrollmentState = enrollmentRow?.value === 'ready' || enrollmentRow?.value === 'migration' || enrollmentRow?.value === 'enrollment'
-      ? enrollmentRow.value : hasLegacyAuthState ? 'migration' : activeDevices > 0 ? 'ready' : 'enrollment';
+    const devicePolicyRow = db.prepare("SELECT value FROM auth_meta WHERE key='trusted_device_enabled'").get() as { value: string } | undefined;
+    const originPolicyRow = db.prepare("SELECT value FROM auth_meta WHERE key='trusted_origin_enabled'").get() as { value: string } | undefined;
+    const parseBoolean = (value: string | undefined): boolean | undefined => value === '1' ? true : value === '0' ? false : undefined;
+    const storedDevicePolicy = parseBoolean(devicePolicyRow?.value);
+    const storedOriginPolicy = parseBoolean(originPolicyRow?.value);
+    // New installations start with both protections enabled. Explicit policy values
+    // are persisted so a CLI change survives a restart.
+    this.trustedDeviceEnabledState = storedDevicePolicy ?? true;
+    this.trustedOriginEnabledState = storedOriginPolicy ?? true;
     const generation = db.prepare("SELECT value FROM auth_meta WHERE key='token_generation'").get() as { value: string } | undefined;
     this.tokenGeneration = generation?.value ?? randomUUID();
     this.transaction(() => {
-      // Fixed Token is a permanent authentication factor. Older databases may
-      // contain token_enabled=0 from the removed toggle; normalize it while
-      // retaining the rest of the authorization state for migration.
-      db.prepare("INSERT INTO auth_meta(key,value) VALUES('token_enabled','1') ON CONFLICT(key) DO UPDATE SET value='1'").run();
       db.prepare("INSERT INTO auth_meta(key,value) VALUES('token_generation',?) ON CONFLICT(key) DO NOTHING").run(this.tokenGeneration);
-      db.prepare("INSERT INTO auth_meta(key,value) VALUES('enrollment_state',?) ON CONFLICT(key) DO NOTHING").run(this.enrollmentState);
-      // Authentication mode is no longer a mutually-exclusive runtime mode. Preserve trusted
-      // devices and sessions across legacy token/trusted-device configuration upgrades.
-      db.prepare("INSERT INTO auth_meta(key,value) VALUES('mode',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(mode);
+      db.prepare("INSERT INTO auth_meta(key,value) VALUES('trusted_device_enabled',?) ON CONFLICT(key) DO NOTHING").run(this.trustedDeviceEnabledState ? '1' : '0');
+      db.prepare("INSERT INTO auth_meta(key,value) VALUES('trusted_origin_enabled',?) ON CONFLICT(key) DO NOTHING").run(this.trustedOriginEnabledState ? '1' : '0');
     });
     this.timer = setInterval(() => this.sweep(), 1000); this.timer.unref();
     this.flushTimer = setInterval(() => { try { this.flush(); } catch { console.error('[auth] Activity flush failed; will retry'); } }, 30_000); this.flushTimer.unref();
   }
-  /** Runtime fixed-token compatibility switch. Trusted-device authorization remains available regardless. */
-  get tokenEnabled(): boolean { return !this.closed && this.tokenEnabledState; }
-  get migrationRequired(): boolean {
-    return !this.closed && this.enrollmentState === 'migration' && this.activeDeviceCount() === 0;
+  /** Token is always the first authentication factor. */
+  get tokenEnabled(): boolean { return !this.closed; }
+  get trustedDeviceEnabled(): boolean { return !this.closed && this.trustedDeviceEnabledState; }
+  get trustedOriginEnabled(): boolean { return !this.closed && this.trustedOriginEnabledState; }
+  policy(): { trustedDeviceEnabled: boolean; trustedOriginEnabled: boolean } {
+    return { trustedDeviceEnabled: this.trustedDeviceEnabled, trustedOriginEnabled: this.trustedOriginEnabled };
   }
-  get requiresTrustedDevice(): boolean { return !this.closed && this.activeDeviceCount() === 0; }
+  get requiresTrustedDevice(): boolean { return this.trustedDeviceEnabled && this.activeDeviceCount() === 0; }
   get trustedOrigins(): string[] {
     const row = this.db.prepare("SELECT value FROM auth_meta WHERE key='trusted_origins'").get() as { value: string } | undefined;
     if (!row?.value) return [];
@@ -166,10 +163,6 @@ export class DeviceAuthService {
     const origins = this.trustedOrigins.filter(origin => origin !== normalized);
     this.transaction(() => {
       this.db.prepare("INSERT INTO auth_meta(key,value) VALUES('trusted_origins',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(JSON.stringify(origins));
-      // A first enrollment on an install without Public URL is mirrored in
-      // the legacy single-value key. Removing that entry must remove the
-      // fallback too, otherwise the UI would appear to remove an address
-      // while the resolver continued to accept it.
     });
     return origins;
   }
@@ -202,12 +195,15 @@ export class DeviceAuthService {
     return { deviceId: `token_${this.tokenGeneration}`, sessionId: `token_${this.tokenGeneration}`, expiresAt: null, origin };
   }
   isTokenPrincipal(principal: DevicePrincipal): boolean { return principal.deviceId.startsWith('token_'); }
-  setTokenEnabled(enabled: boolean, _options: { actor?: DevicePrincipal; allowEmpty?: boolean } = {}): void {
+  setTrustedDeviceEnabled(enabled: boolean): void {
     this.requireMode();
-    if (!enabled) throw new DeviceAuthError('TOKEN_ALWAYS_REQUIRED', 'Fixed Token login is always required and cannot be disabled', 409);
-    // Keep the legacy method as an idempotent compatibility shim for callers
-    // that only ever requested the already-required state.
-    this.tokenEnabledState = true;
+    this.transaction(() => this.db.prepare("INSERT INTO auth_meta(key,value) VALUES('trusted_device_enabled',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(enabled ? '1' : '0'));
+    this.trustedDeviceEnabledState = enabled;
+  }
+  setTrustedOriginEnabled(enabled: boolean): void {
+    this.requireMode();
+    this.transaction(() => this.db.prepare("INSERT INTO auth_meta(key,value) VALUES('trusted_origin_enabled',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(enabled ? '1' : '0'));
+    this.trustedOriginEnabledState = enabled;
   }
   private transaction<T>(run: () => T): T {
     this.db.exec('BEGIN IMMEDIATE');
@@ -220,7 +216,7 @@ export class DeviceAuthService {
     return out;
   }
   private requireMode(): void {
-    if (this.closed) throw new DeviceAuthError('DEVICE_AUTH_DISABLED', 'Device authorization is not enabled; select it in handmux setup and restart', 409);
+    if (this.closed) throw new DeviceAuthError('DEVICE_AUTH_DISABLED', 'Authentication is unavailable; restart handmux and retry', 409);
   }
   onRevoke(listener: (deviceId: string) => void): () => void { this.listeners.add(listener); return () => this.listeners.delete(listener); }
   private notify(id: string): void {
@@ -229,17 +225,14 @@ export class DeviceAuthService {
   }
   private device(id: string): AuthDevice {
     const row = this.db.prepare('SELECT id,name,browser_summary,authorized_at,expires_at,last_used_at,revoked_at,version FROM auth_devices WHERE id=?').get(id) as unknown as Omit<AuthDevice, 'status'> | undefined;
-    if (!row) throw new DeviceAuthError('DEVICE_NOT_FOUND', 'Device ID not found; use handmux auth list', 404);
+    if (!row) throw new DeviceAuthError('DEVICE_NOT_FOUND', 'Device ID not found; use handmux auth device list', 404);
     return { ...row, status: row.revoked_at !== null ? 'revoked' : row.expires_at !== null && row.expires_at <= this.now() ? 'expired' : 'active' };
   }
   isDeviceActive(id: string): boolean {
     if (this.closed) return false;
     if (id.startsWith('token_')) {
-      const state = this.db.prepare("SELECT value FROM auth_meta WHERE key='token_enabled'").get() as { value: string } | undefined;
-      // The fixed Token is an authentication factor, not a row in auth_devices.
-      // Requiring a synthetic device row here made every valid Token look
-      // unauthorized after the dual-factor migration.
-      return this.tokenEnabled && state?.value === '1' && id === `token_${this.tokenGeneration}`;
+      // The Token is an authentication factor, not a row in auth_devices.
+      return this.tokenEnabled && id === `token_${this.tokenGeneration}`;
     }
     try { return this.device(id).status === 'active'; } catch (error) { if (error instanceof DeviceAuthError) return false; throw error; }
   }
@@ -417,17 +410,14 @@ export class DeviceAuthService {
       if (p.approver) this.assertActive(p.approver);
       this.db.prepare('INSERT INTO auth_devices(id,pairing_request_id,name,browser_summary,authorized_at,expires_at,last_used_at) VALUES(?,?,?,?,?,?,?)').run(deviceId, p.id, name, p.browserSummary, now, duration === null ? null : now + duration, now);
       this.db.prepare('INSERT INTO auth_sessions(id,device_id,secret_hash,origin,transport,created_at,last_used_at) VALUES(?,?,?,?,?,?,?)').run(`ses_${randomUUID().replaceAll('-', '')}`, deviceId, p.secretHash, p.origin, p.origin.startsWith('https:') ? 'https' : 'http', now, now);
-      // Record an entry only after the pairing has been approved. The legacy
-      // single-value key is retained for old databases; the list is now the
-      // source used by origin resolution and the settings page.
+      // Record the current access origin only after the pairing has been approved.
       if (pairingOrigin && !originAlreadyListed) {
         if (currentOrigins.length >= 64) throw new DeviceAuthError('ORIGIN_LIMIT', 'Too many trusted access domains; remove one before adding another', 409);
         currentOrigins.push(pairingOrigin);
         this.db.prepare("INSERT INTO auth_meta(key,value) VALUES('trusted_origins',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(JSON.stringify(currentOrigins));
       }
-      this.db.prepare("INSERT INTO auth_meta(key,value) VALUES('enrollment_state','ready') ON CONFLICT(key) DO UPDATE SET value='ready'").run();
     });
-    p.state = 'authorized'; p.deviceId = deviceId; this.enrollmentState = 'ready'; return this.device(deviceId);
+    p.state = 'authorized'; p.deviceId = deviceId; return this.device(deviceId);
   }
   private sweep(): void {
     try {
@@ -440,7 +430,7 @@ export class DeviceAuthService {
       // A storage fault must stop already-authorized streams as well as fail new requests closed.
       for (const id of this.observedDevices) this.notify(id);
       this.observedDevices.clear();
-      if (this.tokenEnabled) this.notify(`token_${this.tokenGeneration}`);
+      this.notify(`token_${this.tokenGeneration}`);
       console.error('[auth] Expiry check unavailable; device connections closed');
     }
   }
