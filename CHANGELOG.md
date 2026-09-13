@@ -8,6 +8,10 @@ All notable changes to handmux. Format follows [Keep a Changelog](https://keepac
 
 - 新增可信设备登录：通过 CLI 或已有可信设备授权浏览器，按设备设置名称、有效期并单独撤销。可信设备登录始终可用；固定 Token 登录作为兼容入口，新安装默认禁用，旧安装保留原有状态。Web 可添加本机为可信设备并即时禁用固定 Token 登录，重新启用仅支持 CLI。
 
+### Fixed
+
+- 修复删除可信访问域名后仍反复回到 Token 输入页的问题；现在会显示不受信任的来源地址和处理命令，并在删除确认中标明受影响的本机设备。
+
 ## [0.28.0] - 2026-09-11
 
 ### Added

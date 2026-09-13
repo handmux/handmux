@@ -48,6 +48,17 @@ describe('compact device management', () => {
     expect(remove).toHaveBeenCalledWith(origin);
   });
 
+  it('labels the current device and warns that removing its origin requires re-authorization', async () => {
+    const origin = 'https://phone.example.com';
+    vi.mocked(api.list).mockResolvedValue({ devices: [current, other], currentDeviceId: current.id, trustedOrigins: [origin], serverTime: now });
+    vi.spyOn(api, 'inspectTrustedOriginRemoval').mockResolvedValue({ affectedDevices: [{ id: current.id, name: current.name, browser_summary: current.browser_summary }] });
+    render(<DeviceManagement onLoggedOut={vi.fn()} />); await flush();
+    fireEvent.click(screen.getByRole('button', { name: `${t('common.delete')} ${origin}` })); await flush();
+    const dialog = screen.getByRole('alertdialog');
+    expect(within(dialog).getByText(t('devices.removeOriginCurrentImpact'))).toBeTruthy();
+    expect(within(dialog).getByText(t('devices.current'))).toBeTruthy();
+  });
+
   it('uses compact current-first rows, hides full IDs/times until details, and keeps history read-only', async () => {
     render(<DeviceManagement onLoggedOut={vi.fn()} />); await flush();
     const rows = document.querySelectorAll('.device-row'); expect(rows[0]?.textContent).toContain(current.name); expect(rows).toHaveLength(2);

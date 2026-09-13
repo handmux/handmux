@@ -42,7 +42,7 @@ import { useBrowser } from './hooks/useBrowser.js';
 import { browserEntryStatus } from './browserState.js';
 import { usePollingLoop } from './hooks/usePollingLoop.js';
 import { useServerConfig } from './hooks/useServerConfig.js';
-import { authHandled } from './authGuard.js';
+import { authHandled, isOriginRejectedError } from './authGuard.js';
 import {
   clearPaneConversationIdentities,
   currentPaneAgent,
@@ -78,6 +78,7 @@ import {
 import PaneSurfaceHost from './components/PaneSurfaceHost.jsx';
 import TokenPrompt from './components/TokenPrompt.jsx';
 import DevicePairingPrompt from './components/DevicePairingPrompt.js';
+import OriginRejectedPrompt from './components/OriginRejectedPrompt.js';
 import DeviceLogoutDialog from './components/DeviceLogoutDialog.js';
 import { applyAuthStatus, authRequest, AuthRequestError, hasAuthenticatedSession, hasDeviceSession, isDeviceAuth, isFixedTokenEnabled, logoutDevice } from './authSession.js';
 import Settings from './components/Settings.jsx';
@@ -288,7 +289,7 @@ export default function App() {
   // The fixed Token is always the first factor. A saved value still has to be
   // presented to the auth authority before the trusted-device check; never
   // let the pairing screen become an implicit Token-only login path.
-  const [authPrompt, setAuthPrompt] = useState<'device' | 'token'>('token');
+  const [authPrompt, setAuthPrompt] = useState<'device' | 'token' | 'origin'>('token');
   const [tokenCheckBusy, setTokenCheckBusy] = useState(false);
   const [tokenCheckError, setTokenCheckError] = useState('');
   const [logoutConfirm, setLogoutConfirm] = useState(false);
@@ -489,7 +490,15 @@ export default function App() {
   const recoveryContextRef = useRef<RecoveryContext | null>(null);
   const drawerMenuRef = useRef<HTMLButtonElement | null>(null);
 
-  const onAuthFail = useCallback(() => setNeedToken(true), []);
+  const onAuthFail = useCallback((error?: unknown) => {
+    setNeedToken(true);
+    setAuthPrompt((current) => isOriginRejectedError(error) || current === 'origin' ? 'origin' : 'token');
+  }, []);
+  const retryOrigin = useCallback(() => {
+    // /api/auth/status is intentionally available as a bootstrap endpoint even for an untrusted
+    // origin. Reload so the first business request re-checks the origin after the user registers it.
+    window.location.reload();
+  }, []);
   const validateToken = useCallback(() => {
     setTokenCheckBusy(true);
     setTokenCheckError('');
@@ -2423,6 +2432,7 @@ export default function App() {
   });
 
   if (needToken) {
+    if (authPrompt === 'origin') return <OriginRejectedPrompt onRetry={retryOrigin} />;
     if (authPrompt === 'token' && isFixedTokenEnabled()) {
       return <TokenPrompt onSaved={validateToken} error={tokenCheckError} busy={tokenCheckBusy} />;
     }
