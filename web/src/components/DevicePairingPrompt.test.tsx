@@ -169,6 +169,15 @@ describe('mode bootstrap', () => {
     expect(fetcher).toHaveBeenCalledWith('/api/auth/pairing', expect.objectContaining({ method: 'POST' }));
   });
 
+  it('shows address guidance before mounting business UI when status marks the origin untrusted', async () => {
+    fetcher.mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({
+      ...server, originTrusted: false, serverTime: Date.now(),
+    }) });
+    render(<AuthBootstrap><div>Business UI</div></AuthBootstrap>); await flush();
+    expect(screen.getByRole('heading', { name: t('auth.originRejectedTitle') })).toBeTruthy();
+    expect(screen.queryByText('Business UI')).toBeNull();
+  });
+
   it('can resolve device auth even when localStorage is unavailable', async () => {
     vi.spyOn(Storage.prototype, 'removeItem').mockImplementation(() => { throw new Error('blocked'); });
     vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('blocked'); });

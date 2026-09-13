@@ -119,6 +119,30 @@ describe('Web device management across real HTTP and WebSocket boundaries', () =
     await request(f.server).get('/api/private').set({ Host: 'phone.example.com', Origin: extraOrigin, 'X-Forwarded-Proto': 'https', 'X-Handmux-Request': '1' }).set('Cookie', primary).set('Authorization', 'Bearer secret').expect(200);
   });
 
+  it('does not treat an existing session as authenticated after its origin is removed', async () => {
+    const f = await fixture();
+    const extraOrigin = 'https://phone.example.com';
+    const candidate = await request(f.server).post('/api/auth/pairing')
+      .set({ Host: 'phone.example.com', Origin: extraOrigin, 'X-Forwarded-Proto': 'https', Authorization: 'Bearer secret' }).send({}).expect(200);
+    const pendingCookie = String(candidate.headers['set-cookie']?.[0]).split(';')[0]!;
+    const claim = f.service.claim(candidate.body.pairing.code, 'test-cli');
+    const device = f.service.authorize(claim.id, 'test-cli', { name: 'removed origin', expire: '1h' });
+    const before = await request(f.server).get('/api/auth/status')
+      .set({ Host: 'phone.example.com', Origin: extraOrigin, 'X-Forwarded-Proto': 'https', Authorization: 'Bearer secret' })
+      .set('Cookie', pendingCookie).expect(200);
+    expect(before.body).toMatchObject({ authenticated: true, originTrusted: true, currentDeviceId: device.id });
+    const primaryCookie = (before.headers['set-cookie'] as unknown as string[]).find(value => value.startsWith('__Host-handmux_session='))!.split(';')[0]!;
+
+    f.service.removeTrustedOrigin(extraOrigin);
+    const after = await request(f.server).get('/api/auth/status')
+      .set({ Host: 'phone.example.com', Origin: extraOrigin, 'X-Forwarded-Proto': 'https', Authorization: 'Bearer secret' })
+      .set('Cookie', primaryCookie).expect(200);
+    expect(after.body).toMatchObject({ authenticated: false, originTrusted: false, tokenAuthenticated: true });
+    expect(after.body.currentDeviceId).toBeNull();
+
+    f.service.revoke(device.id);
+  });
+
   it('preserves the full setup window after a late claim but rejects an expired approver', async () => {
     const f = await fixture();
     const actor = await f.enroll('short-lived approver', '1m');

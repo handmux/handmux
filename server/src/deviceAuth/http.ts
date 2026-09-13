@@ -56,6 +56,11 @@ export function createDeviceAuthRouter({ service, resolveOrigin, resolvePublicUr
       res.status(403).json({ error: 'AUTH_ORIGIN_REJECTED', message: 'Open handmux from its trusted access address and retry' }); return;
     }
     res.locals.authOrigin = origin;
+    // Status and pairing are the only bootstrap endpoints on an unlisted origin. A
+    // session cookie from a previously trusted address must not make that origin
+    // look authenticated; otherwise the app mounts business UI, receives origin
+    // rejections, and can loop back into the pairing screen.
+    res.locals.authOriginTrusted = Boolean(resolvedOrigin);
     let principal;
     try {
       principal = service.authenticateRequest(req, origin);
@@ -99,7 +104,7 @@ export function createDeviceAuthRouter({ service, resolveOrigin, resolvePublicUr
     const origin = String(res.locals.authOrigin);
     let secret = readSessionSecret(req, origin);
     const token = tokenPrincipal(req, origin);
-    let principal = accessPrincipal(req, origin);
+    let principal = res.locals.authOriginTrusted === false ? null : accessPrincipal(req, origin);
     const candidate = selectCandidate(req, origin);
     // A late anonymous POST may overwrite only the candidate cookie, never a live session.
     // Existing primary sessions always win over another tab's pending/authorized candidate.
@@ -108,6 +113,7 @@ export function createDeviceAuthRouter({ service, resolveOrigin, resolvePublicUr
     const pairing = candidate?.pairing;
     res.json({ mode: service.mode, tokenEnabled: true, tokenAuthenticated: !!token,
       trustedDeviceEnabled: service.trustedDeviceEnabled, trustedOriginEnabled: service.trustedOriginEnabled,
+      originTrusted: res.locals.authOriginTrusted !== false,
       requiresTrustedDevice: service.requiresTrustedDevice && !principal, publicUrl: advertisedOrigin(), previewDomain: previewOrigin(), trustedOrigins: service.trustedOrigins, authenticated: !!principal,
       currentDeviceId: principal && !service.isTokenPrincipal(principal) ? principal.deviceId : null, ...(pairing ? { pairing } : {}), serverTime: Date.now() });
   };
@@ -122,7 +128,7 @@ export function createDeviceAuthRouter({ service, resolveOrigin, resolvePublicUr
   router.post('/pairing', safe((req, res) => {
     const origin = String(res.locals.authOrigin);
     const token = tokenPrincipal(req, origin);
-    const access = accessPrincipal(req, origin);
+    const access = res.locals.authOriginTrusted === false ? null : accessPrincipal(req, origin);
     if (access && service.trustedDeviceEnabled) { status(req, res); return; }
     if (!token) throw new DeviceAuthError('TOKEN_REQUIRED', 'Enter the Token before requesting device authorization', 401);
     const all = candidates(req, origin);
@@ -131,16 +137,17 @@ export function createDeviceAuthRouter({ service, resolveOrigin, resolvePublicUr
     if (candidate && service.authenticateSecret(candidate.secret, origin)) { status(req, res); return; }
     const result = service.createPairing(candidate?.secret ?? null, origin, browserSummary(req.get('user-agent') ?? ''));
     if (result.secret) setPairingCookie(res, origin, `${pairingCookieName(origin)}_${result.pairing.id.slice(5)}`, result.secret);
-    res.json({ mode: service.mode, tokenEnabled: true, tokenAuthenticated: true, trustedDeviceEnabled: service.trustedDeviceEnabled, trustedOriginEnabled: service.trustedOriginEnabled, requiresTrustedDevice: true, currentDeviceId: null, authenticated: false, pairing: result.pairing, serverTime: Date.now() });
+    res.json({ mode: service.mode, tokenEnabled: true, tokenAuthenticated: true, trustedDeviceEnabled: service.trustedDeviceEnabled, trustedOriginEnabled: service.trustedOriginEnabled, originTrusted: res.locals.authOriginTrusted !== false, requiresTrustedDevice: true, currentDeviceId: null, authenticated: false, pairing: result.pairing, serverTime: Date.now() });
   }));
   router.delete('/pairing', safe((req, res) => {
     const origin = String(res.locals.authOrigin);
     const id = typeof req.body?.id === 'string' ? req.body.id : '';
     const candidate = candidates(req, origin).find(c => c.pairing?.id === id);
     const pairing = service.cancelPairing(candidate?.secret ?? null, origin, id);
-    const principal = accessPrincipal(req, origin);
+    const principal = res.locals.authOriginTrusted === false ? null : accessPrincipal(req, origin);
     res.json({ mode: service.mode, tokenEnabled: true, tokenAuthenticated: !!tokenPrincipal(req, origin),
       trustedDeviceEnabled: service.trustedDeviceEnabled, trustedOriginEnabled: service.trustedOriginEnabled,
+      originTrusted: res.locals.authOriginTrusted !== false,
       requiresTrustedDevice: service.requiresTrustedDevice && !principal, currentDeviceId: principal && !service.isTokenPrincipal(principal) ? principal.deviceId : null, authenticated: !!principal, pairing, serverTime: Date.now() });
   }));
   const logout = (req: Request, res: Response): void => {

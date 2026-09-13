@@ -16,6 +16,7 @@ export interface AuthStatus {
   tokenAuthenticated?: boolean;
   trustedDeviceEnabled?: boolean;
   trustedOriginEnabled?: boolean;
+  originTrusted?: boolean;
   requiresTrustedDevice?: boolean;
   currentDeviceId?: string | null;
   authenticated: boolean;
