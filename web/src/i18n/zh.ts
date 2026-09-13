@@ -164,7 +164,7 @@ export default {
   'auth.originRejectedOpenHint': '使用主访问地址、动态域名或已授权的访问域名打开此页面',
   'auth.originRejectedAuthorizeLabel': '重新授权',
   'auth.originRejectedAuthorizeHint': '使用另一台可信设备或电脑 CLI 授权当前访问地址',
-  'auth.originRejectedAuthorizeButton': '去授权',
+  'auth.originRejectedAuthorizeButton': '申请访问权限',
   'auth.originRejectedRetry': '重新检查',
   'auth.retry': '重试',
   'auth.rateLimit': '授权尝试过于频繁，请稍等一分钟后再申请校验码。',

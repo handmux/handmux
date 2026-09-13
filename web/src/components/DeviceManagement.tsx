@@ -307,10 +307,13 @@ function AddDevice({ onClose, onAdded }: { onClose: () => void; onAdded: () => v
       : approval.state === 'configuring' ? <><p role="status">{t('auth.pending')}</p><p className="auth-secondary">{approval.browserSummary} · {t('auth.setupRemaining', { seconds: remaining })}</p>{approval.origin && <p className="device-approval-origin"><span>{t('devices.approvalOrigin')}</span><code>{approval.origin}</code></p>}
         <label className="device-field">{t('devices.name')}<input ref={nameInputRef} value={name} onChange={e => setName(e.target.value)} disabled={busy} maxLength={160} /></label>
         <ExpiryPicker value={expire} custom={custom} onChange={setExpire} onCustom={setCustom} disabled={busy} />
-        <button className="fontbtn device-save" disabled={busy || remaining === 0} onClick={() => { void authorize(); }}>{t('devices.complete')}</button></>
+        <div className="device-form-actions">
+          <button className="fontbtn device-save device-form-confirm" disabled={busy || remaining === 0} onClick={() => { void authorize(); }}>{t('devices.complete')}</button>
+          <button className="fontbtn device-sheet-cancel" disabled={busy} onClick={() => { void close(); }}>{t('common.cancel')}</button>
+        </div></>
       : <><p role="status">{t('devices.pairingGone')}</p><button className="fontbtn" disabled={busy} onClick={() => { setApproval(null); approvalRef.current = null; setError(''); }}>{t('devices.newCode')}</button></>}
     {approval && error && <p role="alert">{error}</p>}{busy && <p role="status">{claimingCode ? t('devices.verifyingCode') : t('common.loading')}</p>}
-    <button className="fontbtn sheet-cancel device-sheet-cancel" onClick={() => { void close(); }}>{t('common.cancel')}</button>
+    {approval?.state !== 'configuring' && <button className="fontbtn sheet-cancel device-sheet-cancel" onClick={() => { void close(); }}>{t('common.cancel')}</button>}
   </DeviceSheet>;
 }
 

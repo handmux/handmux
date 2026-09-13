@@ -165,7 +165,7 @@ export default {
   'auth.originRejectedOpenHint': 'Use the primary URL, dynamic domain, or an authorized access domain to open this page',
   'auth.originRejectedAuthorizeLabel': 'Authorize again',
   'auth.originRejectedAuthorizeHint': 'Use another trusted device or the handmux CLI to authorize this access address',
-  'auth.originRejectedAuthorizeButton': 'Authorize',
+  'auth.originRejectedAuthorizeButton': 'Request access',
   'auth.originRejectedRetry': 'Check again',
   'auth.retry': 'Retry',
   'auth.rateLimit': 'Too many authorization attempts. Wait a minute before requesting another code.',

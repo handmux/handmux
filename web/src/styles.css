@@ -413,6 +413,10 @@ button.settings-page-row:disabled, .settings-page-row.disabled { color: rgba(235
 .device-expiry-picker .fontbtn, .device-sheet button { min-height: 44px; }
 .device-expiry-picker .fontbtn[aria-pressed="true"] { background: var(--blue); color: white; }
 .device-save { width: 100%; margin: 10px 0 14px; }
+.device-form-actions { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px; margin: 10px 0 14px; }
+.device-form-actions .device-save, .device-form-actions .device-sheet-cancel { width: 100%; min-width: 0; margin: 0; }
+.device-form-confirm { background: var(--blue); color: #fff; font-weight: 600; }
+.device-form-confirm:active { background: var(--blue-press); }
 .device-copy-button {
   flex: none;
   min-height: 32px;
