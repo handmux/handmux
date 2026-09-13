@@ -145,6 +145,8 @@ describe('Web device management across real HTTP and WebSocket boundaries', () =
       .set('Cookie', `${primaryCookie}; ${pendingCookie}`).expect(200);
     expect(withLeftoverPairingCookie.body).toMatchObject({ authenticated: false, originTrusted: false, tokenAuthenticated: true });
     expect(withLeftoverPairingCookie.body.currentDeviceId).toBeNull();
+    expect(withLeftoverPairingCookie.body.pairing).toBeUndefined();
+    expect((withLeftoverPairingCookie.headers['set-cookie'] as unknown as string[] | undefined ?? []).some(value => value.startsWith(`${pendingCookie.split('=')[0]}=`))).toBe(true);
 
     f.service.revoke(device.id);
   });

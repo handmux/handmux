@@ -113,7 +113,12 @@ export function createDeviceAuthRouter({ service, resolveOrigin, resolvePublicUr
       if (principal) secret = candidate.secret;
     }
     if (principal && secret) setSessionCookie(res, origin, secret, principal.expiresAt);
-    const pairing = candidate?.pairing;
+    // An authorized pairing cookie is a leftover candidate, not a usable session. On an
+    // untrusted origin clear it so the recovery screen can start a fresh pairing request
+    // instead of rendering an empty "already authorized" state.
+    const staleAuthorizedPairing = res.locals.authOriginTrusted === false && candidate?.pairing?.state === 'authorized';
+    if (staleAuthorizedPairing) setPairingCookie(res, origin, candidate!.name, '');
+    const pairing = staleAuthorizedPairing ? undefined : candidate?.pairing;
     res.json({ mode: service.mode, tokenEnabled: true, tokenAuthenticated: !!token,
       trustedDeviceEnabled: service.trustedDeviceEnabled, trustedOriginEnabled: service.trustedOriginEnabled,
       originTrusted: res.locals.authOriginTrusted !== false,
