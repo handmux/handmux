@@ -102,10 +102,12 @@ describe('compact device management', () => {
     const authorize = vi.spyOn(api, 'authorize').mockResolvedValue({ device: other, serverTime: now });
     render(<DeviceManagement onLoggedOut={vi.fn()} />); await flush(); fireEvent.click(screen.getByRole('button', { name: t('devices.authorizeOther') })); await flush();
     const codeInput = screen.getByLabelText(t('devices.code')) as HTMLInputElement;
+    expect(screen.getByRole('dialog').classList.contains('device-dialog')).toBe(true);
     expect(document.querySelectorAll('.device-code-slot')).toHaveLength(6);
     expect(screen.queryByRole('button', { name: t('devices.claim') })).toBeNull();
     fireEvent.change(codeInput, { target: { value: '038271' } }); await flush();
     expect(claim).toHaveBeenCalledWith('038271'); expect(authorize).not.toHaveBeenCalled(); expect(screen.getByText(t('auth.pending'))).toBeTruthy();
+    expect(screen.getByRole('heading', { name: t('devices.configureTitle') })).toBeTruthy();
     fireEvent.change(screen.getByLabelText(t('devices.name')), { target: { value: 'Linux computer' } }); fireEvent.click(screen.getByRole('button', { name: '7d' }));
     fireEvent.click(screen.getByRole('button', { name: t('devices.complete') })); await flush(); expect(authorize).toHaveBeenCalledWith(approval.id, { name: 'Linux computer', expire: '7d' });
   });

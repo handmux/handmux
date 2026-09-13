@@ -28,14 +28,14 @@ export function remainingExpiry(d: ManagedDevice, now: number): string {
     ? t('devices.hoursRemaining', { n: Math.ceil(seconds / 3600) }) : t('devices.minutesRemaining', { n: Math.ceil(seconds / 60) });
 }
 
-function DeviceSheet({ title, onClose, children, trapped = true }: { title: string; onClose: () => void; children: ReactNode; trapped?: boolean }) {
+function DeviceSheet({ title, onClose, children, trapped = true, variant = 'sheet' }: { title: string; onClose: () => void; children: ReactNode; trapped?: boolean; variant?: 'sheet' | 'dialog' }) {
   const dialogRef = useRef<HTMLElement>(null); const closeRef = useRef<HTMLButtonElement>(null);
   const returnRef = useRef(document.activeElement instanceof HTMLElement ? document.activeElement : null);
   useBackButton(true, onClose);
   useModalFocusTrap({ active: trapped, dialogRef, initialFocusRef: closeRef, returnFocusRef: returnRef, onClose });
-  return <div className="device-sheet-layer">
+  return <div className={`device-sheet-layer${variant === 'dialog' ? ' device-dialog-layer' : ''}`}>
     <div className="settings-backdrop" onClick={onClose} />
-    <section className="settings-card device-sheet" role="dialog" aria-modal="true" aria-label={title} ref={dialogRef} tabIndex={-1}>
+    <section className={`settings-card device-sheet${variant === 'dialog' ? ' device-dialog' : ''}`} role="dialog" aria-modal="true" aria-label={title} ref={dialogRef} tabIndex={-1}>
       <div className="settings-head"><h2 className="settings-title">{title}</h2><button className="settings-close" ref={closeRef} onClick={onClose} aria-label={t('common.close')}>×</button></div>
       <div className="settings-body">{children}</div>
     </section>
@@ -171,7 +171,7 @@ function AddDevice({ onClose, onAdded }: { onClose: () => void; onAdded: () => v
   const [name, setName] = useState(''); const [expire, setExpire] = useState('30d'); const [custom, setCustom] = useState('');
   const [busy, setBusy] = useState(true); const [claimingCode, setClaimingCode] = useState(false); const [error, setError] = useState(''); const [now, setNow] = useState(Date.now());
   const offset = useRef(0); const mounted = useRef(true); const changing = useRef(true); const closeRequested = useRef(false); const approvalRef = useRef(approval); approvalRef.current = approval;
-  const codeInputRef = useRef<HTMLInputElement>(null);
+  const codeInputRef = useRef<HTMLInputElement>(null); const nameInputRef = useRef<HTMLInputElement>(null);
   const unknownClaim = useRef<string | null>(null); const initialized = useRef(false);
   const restoredId = useRef(readApprovalId());
   const complete = useRef(onAdded); complete.current = onAdded;
@@ -269,7 +269,8 @@ function AddDevice({ onClose, onAdded }: { onClose: () => void; onAdded: () => v
   const remaining = Math.max(0, Math.ceil(((approval?.expiresAt ?? now) - now) / 1000));
   const restoreUnknown = !initialized.current && restoredId.current !== null;
   useEffect(() => {
-    if (!approval && !busy && !restoreUnknown && !unknownClaim.current) codeInputRef.current?.focus();
+    if (approval?.state === 'configuring' && !busy) nameInputRef.current?.focus();
+    else if (!approval && !busy && !restoreUnknown && !unknownClaim.current) codeInputRef.current?.focus();
   }, [approval, busy, restoreUnknown]);
   const updateCode = (raw: string) => {
     if (unknownClaim.current || restoreUnknown || busy) return;
@@ -278,16 +279,17 @@ function AddDevice({ onClose, onAdded }: { onClose: () => void; onAdded: () => v
     setError('');
     if (next.length === 6) void claim(next);
   };
-  return <DeviceSheet title={t('devices.authorizeOther')} onClose={() => { void close(); }}>
+  return <DeviceSheet title={approval?.state === 'configuring' ? t('devices.configureTitle') : t('devices.authorizeOther')} variant="dialog" onClose={() => { void close(); }}>
     {!approval ? <><div className={`device-code-entry${busy || restoreUnknown || !!unknownClaim.current ? ' is-disabled' : ''}`}>
         <label className="device-code-label" htmlFor="device-approval-code">{t('devices.code')}</label>
-        <div className="device-code-shell">
+        <div className={`device-code-shell${error ? ' has-error' : ''}`}>
           <div className="device-code-slots" aria-hidden="true">
             {Array.from({ length: 6 }, (_, index) => <span key={index} className={`device-code-slot${index === code.length && !busy ? ' is-current' : ''}`}>{code[index] ?? ''}</span>)}
           </div>
-          <input ref={codeInputRef} id="device-approval-code" className="device-code-input" value={code} inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]{6}" maxLength={6} aria-describedby="device-code-hint" onChange={e => updateCode(e.target.value)} disabled={busy || !!unknownClaim.current || restoreUnknown} />
+          <input ref={codeInputRef} id="device-approval-code" className="device-code-input" value={code} inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]{6}" maxLength={6} aria-describedby="device-code-hint" aria-invalid={Boolean(error)} onChange={e => updateCode(e.target.value)} disabled={busy || !!unknownClaim.current || restoreUnknown} />
         </div>
         <p id="device-code-hint" className="device-code-hint">{t('devices.codeHint')}</p>
+        {error && <p className="device-code-error" role="alert">{error}</p>}
       </div>
       {restoreUnknown
         ? <button className="fontbtn" disabled={busy} onClick={() => { void retryRestore(); }}>{t('common.retry')}</button>
@@ -295,11 +297,11 @@ function AddDevice({ onClose, onAdded }: { onClose: () => void; onAdded: () => v
           ? <button className="fontbtn" disabled={busy} onClick={() => { void claim(); }}>{t('common.retry')}</button>
           : null}</>
       : approval.state === 'configuring' ? <><p role="status">{t('auth.pending')}</p><p className="auth-secondary">{approval.browserSummary} · {t('auth.setupRemaining', { seconds: remaining })}</p>{approval.origin && <p className="device-approval-origin"><span>{t('devices.approvalOrigin')}</span><code>{approval.origin}</code></p>}
-        <label className="device-field">{t('devices.name')}<input value={name} onChange={e => setName(e.target.value)} disabled={busy} maxLength={160} /></label>
+        <label className="device-field">{t('devices.name')}<input ref={nameInputRef} value={name} onChange={e => setName(e.target.value)} disabled={busy} maxLength={160} /></label>
         <ExpiryPicker value={expire} custom={custom} onChange={setExpire} onCustom={setCustom} disabled={busy} />
         <button className="fontbtn device-save" disabled={busy || remaining === 0} onClick={() => { void authorize(); }}>{t('devices.complete')}</button></>
       : <><p role="status">{t('devices.pairingGone')}</p><button className="fontbtn" disabled={busy} onClick={() => { setApproval(null); approvalRef.current = null; setError(''); }}>{t('devices.newCode')}</button></>}
-    {error && <p role="alert">{error}</p>}{busy && <p role="status">{claimingCode ? t('devices.verifyingCode') : t('common.loading')}</p>}
+    {approval && error && <p role="alert">{error}</p>}{busy && <p role="status">{claimingCode ? t('devices.verifyingCode') : t('common.loading')}</p>}
     <button className="fontbtn sheet-cancel" onClick={() => { void close(); }}>{t('common.cancel')}</button>
   </DeviceSheet>;
 }

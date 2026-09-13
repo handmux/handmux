@@ -104,6 +104,7 @@ export default {
   'devices.code': 'One-time code',
   'devices.codeHint': 'Enter the 6-digit code shown on the new device. Verification starts automatically.',
   'devices.verifyingCode': 'Verifying…',
+  'devices.configureTitle': 'Set up new device',
   'devices.approvalOrigin': 'Access address',
   'devices.claim': 'Confirm pairing',
   'devices.complete': 'Complete adding',

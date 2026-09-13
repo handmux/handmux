@@ -103,6 +103,7 @@ export default {
   'devices.code': '一次性校验码',
   'devices.codeHint': '输入新设备显示的 6 位验证码，输入完成后会自动验证。',
   'devices.verifyingCode': '正在验证…',
+  'devices.configureTitle': '设置新设备',
   'devices.approvalOrigin': '访问地址',
   'devices.claim': '确认配对',
   'devices.complete': '完成添加',

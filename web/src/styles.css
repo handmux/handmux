@@ -355,12 +355,14 @@ button.settings-page-row:disabled, .settings-page-row.disabled { color: rgba(235
 .device-code-label { color: rgba(235,235,245,.62); font-size: 13px; line-height: 1.25; }
 .device-code-shell { position: relative; padding: 16px 12px; border: 1px solid rgba(235,235,245,.14); border-radius: 16px; background: #191a1e; transition: border-color .15s ease, box-shadow .15s ease; }
 .device-code-shell:focus-within { border-color: rgba(var(--blue-rgb),.85); box-shadow: 0 0 0 3px rgba(var(--blue-rgb),.18); }
+.device-code-shell.has-error { border-color: rgba(255,69,58,.78); box-shadow: 0 0 0 3px rgba(255,69,58,.12); }
 .device-code-slots { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 6px; }
 .device-code-slot { min-width: 0; height: 56px; display: grid; place-items: center; border-radius: 10px; background: rgba(120,120,128,.13); color: #f5f5f7; font: 650 30px/1 ui-monospace, "SF Mono", Menlo, monospace; font-variant-numeric: tabular-nums; }
 .device-code-slot:not(:empty) { background: rgba(var(--blue-rgb),.16); }
 .device-code-slot.is-current { box-shadow: inset 0 0 0 1px rgba(var(--blue-rgb),.9); }
 .device-code-input { position: absolute !important; inset: 0; z-index: 1; width: 100% !important; height: 100% !important; min-height: 0 !important; margin: 0 !important; padding: 0 !important; border: 0 !important; border-radius: 16px !important; outline: 0 !important; background: transparent !important; color: transparent !important; caret-color: transparent; opacity: 0; cursor: text; }
 .device-code-hint { margin: 0; color: rgba(235,235,245,.52); font-size: 12px; line-height: 1.4; }
+.device-code-error { margin: 0; padding: 9px 11px; border-radius: 10px; background: rgba(255,69,58,.1); color: #ffb0a9; font-size: 12px; line-height: 1.4; }
 .device-approval-origin { display: flex; align-items: baseline; gap: 8px; margin: 8px 0 14px; color: rgba(235,235,245,.55); font-size: 12px; }
 .device-approval-origin code { min-width: 0; overflow-wrap: anywhere; color: #d8e7ff; font: 12px/1.35 ui-monospace, "SF Mono", Menlo, monospace; }
 .device-row-copy { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 5px; }
@@ -390,6 +392,8 @@ button.settings-page-row:disabled, .settings-page-row.disabled { color: rgba(235
 .device-authorize-other:disabled { opacity: .45; }
 .device-sheet-layer .settings-backdrop { z-index: var(--z-overlay-nested-backdrop); }
 .device-sheet-layer .device-sheet { z-index: var(--z-overlay-nested); top: auto; bottom: 0; transform: translateX(-50%); width: min(100%, 540px); max-width: 540px; max-height: 85dvh; border-radius: 18px 18px 0 0; padding: 16px 20px max(20px, env(safe-area-inset-bottom)); }
+.device-sheet-layer .device-dialog { top: 50%; bottom: auto; transform: translate(-50%, -50%); width: calc(100% - 32px); max-width: 420px; max-height: min(85dvh, 680px); border-radius: 22px; padding: 20px 20px max(20px, env(safe-area-inset-bottom)); box-shadow: 0 18px 60px rgba(0,0,0,.42); }
+.device-dialog-layer .settings-backdrop { background: rgba(0,0,0,.58); }
 .device-sheet .settings-close { min-width: 44px; min-height: 44px; }
 .device-edit-layout { display: grid; gap: 14px; }
 .device-field, .device-expiry-picker { display: flex; flex-direction: column; gap: 10px; margin-bottom: 18px; font-size: 14px; }
