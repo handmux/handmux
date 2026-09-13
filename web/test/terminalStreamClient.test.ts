@@ -111,19 +111,19 @@ describe('openTerminalStream', () => {
     window.history.replaceState({}, '', '/');
   });
 
-  it('uses the browser cookie with no subscribe token in device mode, including reconnect', async () => {
+  it('uses the browser cookie and fixed Token in device mode, including reconnect', async () => {
     applyAuthStatus({ mode: 'trusted-device', authenticated: true, currentDeviceId: 'dev_test', serverTime: Date.now() });
     const stream = openTerminalStream({ pane: '%7', token: 'must-not-send', WebSocketCtor: FakeWebSocket });
     try {
       const ws = latestSocket();
       ws.open();
-      expect(ws.sent[0]).toEqual({ type: 'subscribe', pane: '%7' });
+      expect(ws.sent[0]).toEqual({ type: 'subscribe', token: 'must-not-send', pane: '%7' });
       expect(ws.url).toMatch(/\/api\/terminal-stream$/);
       expect(ws.url).not.toContain('must-not-send');
       await stream.suspend();
       stream.resync();
       latestSocket().open();
-      expect(latestSocket().sent[0]).toEqual({ type: 'subscribe', pane: '%7' });
+      expect(latestSocket().sent[0]).toEqual({ type: 'subscribe', token: 'must-not-send', pane: '%7' });
     } finally {
       await stream.close();
       applyAuthStatus({ mode: 'trusted-device', tokenEnabled: true, currentDeviceId: null, authenticated: false, serverTime: Date.now() });

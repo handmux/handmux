@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   cfConfigYaml, parseTunnelCreate, findTunnelId, configFromAnswers, mergeConfig,
   answersFromConfig, summarizeConnection, validatePort, validateHost, validateNonEmpty, validateContact,
-  validateToken, validatePreviewDomain,
+  validateToken, validatePreviewDomain, validatePublicUrl,
 } from '../src/cli/setupWizard.js';
 
 describe('cfConfigYaml', () => {
@@ -55,6 +55,8 @@ describe('findTunnelId', () => {
 describe('configFromAnswers', () => {
   it('maps none/cloudflare answers straight to a config object', () => {
     expect(configFromAnswers({ tunnel: 'cloudflare', port: 19999 })).toEqual({ tunnel: 'cloudflare', port: 19999 });
+    expect(configFromAnswers({ tunnel: 'none', port: 19999, publicUrl: 'https://handmux.example.com' }))
+      .toEqual({ tunnel: 'none', port: 19999, publicUrl: 'https://handmux.example.com' });
   });
   it('maps ssh answers and drops empty optionals', () => {
     expect(configFromAnswers({ tunnel: 'ssh', port: 19999, sshHost: 'me@h', remotePort: 19999, publicUrl: '' }))
@@ -225,10 +227,16 @@ describe('validators', () => {
     expect(validateContact('http://insecure.example.com')).toBeTruthy(); // https only
     expect(validateContact('')).toBeTruthy();
   });
-  it('validateToken accepts a non-empty token, rejects blank / whitespace (it rides in a URL)', () => {
+  it('validateToken accepts a non-empty token and rejects blank / whitespace', () => {
     expect(validateToken('abc123')).toBeUndefined();
     expect(validateToken('')).toBeTruthy();
     expect(validateToken('   ')).toBeTruthy();
     expect(validateToken('has space')).toBeTruthy();
+  });
+  it('validatePublicUrl accepts an origin and rejects paths or credentials', () => {
+    expect(validatePublicUrl('https://handmux.example.com/')).toBeUndefined();
+    expect(validatePublicUrl('https://handmux.example.com/path')).toBeTruthy();
+    expect(validatePublicUrl('https://user:pass@handmux.example.com')).toBeTruthy();
+    expect(validatePublicUrl('')).toBeUndefined();
   });
 });
