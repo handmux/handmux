@@ -97,11 +97,14 @@ describe('compact device management', () => {
     expect(edit).toHaveBeenCalledTimes(1); fireEvent.click(screen.getByRole('button', { name: t('devices.refreshDetails') })); await flush();
     expect((screen.getByLabelText(t('devices.name')) as HTMLInputElement).value).toBe(other.name);
   });
-  it('claims a leading-zero code first, then authorizes only after name/expiry are completed', async () => {
+  it('shows a large six-digit code entry and claims a leading-zero code automatically', async () => {
     const claim = vi.spyOn(api, 'claim').mockResolvedValue({ approval, serverTime: now });
     const authorize = vi.spyOn(api, 'authorize').mockResolvedValue({ device: other, serverTime: now });
     render(<DeviceManagement onLoggedOut={vi.fn()} />); await flush(); fireEvent.click(screen.getByRole('button', { name: t('devices.authorizeOther') })); await flush();
-    fireEvent.change(screen.getByLabelText(t('devices.code')), { target: { value: '038271' } }); fireEvent.click(screen.getByRole('button', { name: t('devices.claim') })); await flush();
+    const codeInput = screen.getByLabelText(t('devices.code')) as HTMLInputElement;
+    expect(document.querySelectorAll('.device-code-slot')).toHaveLength(6);
+    expect(screen.queryByRole('button', { name: t('devices.claim') })).toBeNull();
+    fireEvent.change(codeInput, { target: { value: '038271' } }); await flush();
     expect(claim).toHaveBeenCalledWith('038271'); expect(authorize).not.toHaveBeenCalled(); expect(screen.getByText(t('auth.pending'))).toBeTruthy();
     fireEvent.change(screen.getByLabelText(t('devices.name')), { target: { value: 'Linux computer' } }); fireEvent.click(screen.getByRole('button', { name: '7d' }));
     fireEvent.click(screen.getByRole('button', { name: t('devices.complete') })); await flush(); expect(authorize).toHaveBeenCalledWith(approval.id, { name: 'Linux computer', expire: '7d' });
@@ -119,7 +122,7 @@ describe('compact device management', () => {
     const claim = vi.spyOn(api, 'claim').mockRejectedValueOnce(new Error('response lost')).mockResolvedValue({ approval, serverTime: now });
     const cancel = vi.spyOn(api, 'cancel').mockResolvedValue({ approval: { ...approval, state: 'canceled' }, serverTime: now });
     render(<DeviceManagement onLoggedOut={vi.fn()} />); await flush(); fireEvent.click(screen.getByRole('button', { name: t('devices.authorizeOther') })); await flush();
-    fireEvent.change(screen.getByLabelText(t('devices.code')), { target: { value: '038271' } }); fireEvent.click(screen.getByRole('button', { name: t('devices.claim') })); await flush();
+    fireEvent.change(screen.getByLabelText(t('devices.code')), { target: { value: '038271' } }); await flush();
     expect(screen.getByRole('alert')).toBeTruthy(); fireEvent.click(screen.getByRole('button', { name: t('common.cancel') })); await flush();
     expect(claim).toHaveBeenNthCalledWith(2, '038271'); expect(cancel).toHaveBeenCalledWith(approval.id); expect(screen.queryByRole('dialog')).toBeNull();
   });
@@ -133,7 +136,7 @@ describe('compact device management', () => {
   it('does not overwrite an unknown claim with a new code while retrying', async () => {
     const claim = vi.spyOn(api, 'claim').mockRejectedValueOnce(new Error('response lost')).mockResolvedValue({ approval, serverTime: now });
     render(<DeviceManagement onLoggedOut={vi.fn()} />); await flush(); fireEvent.click(screen.getByRole('button', { name: t('devices.authorizeOther') })); await flush();
-    fireEvent.change(screen.getByLabelText(t('devices.code')), { target: { value: '038271' } }); fireEvent.click(screen.getByRole('button', { name: t('devices.claim') })); await flush();
+    fireEvent.change(screen.getByLabelText(t('devices.code')), { target: { value: '038271' } }); await flush();
     expect((screen.getByLabelText(t('devices.code')) as HTMLInputElement).disabled).toBe(true);
     fireEvent.change(screen.getByLabelText(t('devices.code')), { target: { value: '999999' } }); fireEvent.click(screen.getByRole('button', { name: t('common.retry') })); await flush();
     expect(claim.mock.calls.map(call => call[0])).toEqual(['038271', '038271']); expect((screen.getByLabelText(t('devices.name')) as HTMLInputElement).value).toBe(approval.browserSummary);

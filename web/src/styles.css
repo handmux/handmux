@@ -350,6 +350,17 @@ button.settings-page-row:disabled, .settings-page-row.disabled { color: rgba(235
 .device-action-copy strong { font-weight: 500; }
 .device-action-copy small { max-width: 100%; overflow-wrap: anywhere; color: rgba(235,235,245,.48); font-size: 12px; line-height: 1.35; }
 .device-sheet-note { margin: 0 0 18px; padding: 11px 12px; border-radius: 11px; background: rgba(10,132,255,.1); color: #b9d8ff; font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
+.device-code-entry { display: grid; gap: 10px; margin: 0 0 18px; }
+.device-code-entry.is-disabled { opacity: .72; }
+.device-code-label { color: rgba(235,235,245,.62); font-size: 13px; line-height: 1.25; }
+.device-code-shell { position: relative; padding: 16px 12px; border: 1px solid rgba(235,235,245,.14); border-radius: 16px; background: #191a1e; transition: border-color .15s ease, box-shadow .15s ease; }
+.device-code-shell:focus-within { border-color: rgba(var(--blue-rgb),.85); box-shadow: 0 0 0 3px rgba(var(--blue-rgb),.18); }
+.device-code-slots { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 6px; }
+.device-code-slot { min-width: 0; height: 56px; display: grid; place-items: center; border-radius: 10px; background: rgba(120,120,128,.13); color: #f5f5f7; font: 650 30px/1 ui-monospace, "SF Mono", Menlo, monospace; font-variant-numeric: tabular-nums; }
+.device-code-slot:not(:empty) { background: rgba(var(--blue-rgb),.16); }
+.device-code-slot.is-current { box-shadow: inset 0 0 0 1px rgba(var(--blue-rgb),.9); }
+.device-code-input { position: absolute !important; inset: 0; z-index: 1; width: 100% !important; height: 100% !important; min-height: 0 !important; margin: 0 !important; padding: 0 !important; border: 0 !important; border-radius: 16px !important; outline: 0 !important; background: transparent !important; color: transparent !important; caret-color: transparent; opacity: 0; cursor: text; }
+.device-code-hint { margin: 0; color: rgba(235,235,245,.52); font-size: 12px; line-height: 1.4; }
 .device-approval-origin { display: flex; align-items: baseline; gap: 8px; margin: 8px 0 14px; color: rgba(235,235,245,.55); font-size: 12px; }
 .device-approval-origin code { min-width: 0; overflow-wrap: anywhere; color: #d8e7ff; font: 12px/1.35 ui-monospace, "SF Mono", Menlo, monospace; }
 .device-row-copy { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 5px; }

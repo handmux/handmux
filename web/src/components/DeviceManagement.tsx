@@ -169,8 +169,9 @@ function DeviceDetail({ device: initial, current, now, onClose, onChanged, onLog
 function AddDevice({ onClose, onAdded }: { onClose: () => void; onAdded: () => void }) {
   const [approval, setApproval] = useState<DeviceApproval | null>(null); const [code, setCode] = useState('');
   const [name, setName] = useState(''); const [expire, setExpire] = useState('30d'); const [custom, setCustom] = useState('');
-  const [busy, setBusy] = useState(true); const [error, setError] = useState(''); const [now, setNow] = useState(Date.now());
+  const [busy, setBusy] = useState(true); const [claimingCode, setClaimingCode] = useState(false); const [error, setError] = useState(''); const [now, setNow] = useState(Date.now());
   const offset = useRef(0); const mounted = useRef(true); const changing = useRef(true); const closeRequested = useRef(false); const approvalRef = useRef(approval); approvalRef.current = approval;
+  const codeInputRef = useRef<HTMLInputElement>(null);
   const unknownClaim = useRef<string | null>(null); const initialized = useRef(false);
   const restoredId = useRef(readApprovalId());
   const complete = useRef(onAdded); complete.current = onAdded;
@@ -246,15 +247,16 @@ function AddDevice({ onClose, onAdded }: { onClose: () => void; onAdded: () => v
       setError(deviceErrorCopy(e));
     } finally { changing.current = false; setBusy(false); if (closeRequested.current) void close(); }
   };
-  const claim = async () => {
+  const claim = async (value = code) => {
     if (!initialized.current && restoredId.current) return;
-    const submittedCode = unknownClaim.current ?? code;
+    const submittedCode = unknownClaim.current ?? value;
     if (!/^\d{6}$/.test(submittedCode)) { setError(t('devices.invalidCode')); return; }
-    changing.current = true; setBusy(true); setError('');
+    if (changing.current || busy) return;
+    changing.current = true; setBusy(true); setClaimingCode(true); setError('');
     unknownClaim.current = submittedCode;
     try { const result = await api.claim(submittedCode); unknownClaim.current = null; accept(result.approval, result.serverTime); setName(result.approval.browserSummary); setCode(''); }
     catch (e) { if (e instanceof DeviceManagementError && e.code === 'CODE_INVALID') unknownClaim.current = null; setError(deviceErrorCopy(e)); }
-    finally { changing.current = false; setBusy(false); if (closeRequested.current) void close(); }
+    finally { changing.current = false; setBusy(false); setClaimingCode(false); if (closeRequested.current) void close(); }
   };
   const authorize = async () => {
     const duration = expire === 'custom' ? custom : expire;
@@ -266,18 +268,38 @@ function AddDevice({ onClose, onAdded }: { onClose: () => void; onAdded: () => v
   };
   const remaining = Math.max(0, Math.ceil(((approval?.expiresAt ?? now) - now) / 1000));
   const restoreUnknown = !initialized.current && restoredId.current !== null;
+  useEffect(() => {
+    if (!approval && !busy && !restoreUnknown && !unknownClaim.current) codeInputRef.current?.focus();
+  }, [approval, busy, restoreUnknown]);
+  const updateCode = (raw: string) => {
+    if (unknownClaim.current || restoreUnknown || busy) return;
+    const next = raw.replace(/\D/g, '').slice(0, 6);
+    setCode(next);
+    setError('');
+    if (next.length === 6) void claim(next);
+  };
   return <DeviceSheet title={t('devices.authorizeOther')} onClose={() => { void close(); }}>
-    <p className="device-sheet-note">{t('auth.antiPhishing')}</p>
-    {!approval ? <><label className="device-field">{t('devices.code')}<input value={code} inputMode="numeric" autoComplete="off" pattern="[0-9]{6}" maxLength={6} onChange={e => { if (!unknownClaim.current && !restoreUnknown) setCode(e.target.value.replace(/\D/g, '')); }} disabled={busy || !!unknownClaim.current || restoreUnknown} /></label>
-      <p className="auth-secondary">{t('devices.codeHint')}</p>
-      {restoreUnknown ? <button className="fontbtn" disabled={busy} onClick={() => { void retryRestore(); }}>{t('common.retry')}</button>
-        : <button className="fontbtn" disabled={busy || code.length !== 6} onClick={() => { void claim(); }}>{t(unknownClaim.current ? 'common.retry' : 'devices.claim')}</button>}</>
+    {!approval ? <><div className={`device-code-entry${busy || restoreUnknown || !!unknownClaim.current ? ' is-disabled' : ''}`}>
+        <label className="device-code-label" htmlFor="device-approval-code">{t('devices.code')}</label>
+        <div className="device-code-shell">
+          <div className="device-code-slots" aria-hidden="true">
+            {Array.from({ length: 6 }, (_, index) => <span key={index} className={`device-code-slot${index === code.length && !busy ? ' is-current' : ''}`}>{code[index] ?? ''}</span>)}
+          </div>
+          <input ref={codeInputRef} id="device-approval-code" className="device-code-input" value={code} inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]{6}" maxLength={6} aria-describedby="device-code-hint" onChange={e => updateCode(e.target.value)} disabled={busy || !!unknownClaim.current || restoreUnknown} />
+        </div>
+        <p id="device-code-hint" className="device-code-hint">{t('devices.codeHint')}</p>
+      </div>
+      {restoreUnknown
+        ? <button className="fontbtn" disabled={busy} onClick={() => { void retryRestore(); }}>{t('common.retry')}</button>
+        : unknownClaim.current
+          ? <button className="fontbtn" disabled={busy} onClick={() => { void claim(); }}>{t('common.retry')}</button>
+          : null}</>
       : approval.state === 'configuring' ? <><p role="status">{t('auth.pending')}</p><p className="auth-secondary">{approval.browserSummary} · {t('auth.setupRemaining', { seconds: remaining })}</p>{approval.origin && <p className="device-approval-origin"><span>{t('devices.approvalOrigin')}</span><code>{approval.origin}</code></p>}
         <label className="device-field">{t('devices.name')}<input value={name} onChange={e => setName(e.target.value)} disabled={busy} maxLength={160} /></label>
         <ExpiryPicker value={expire} custom={custom} onChange={setExpire} onCustom={setCustom} disabled={busy} />
         <button className="fontbtn device-save" disabled={busy || remaining === 0} onClick={() => { void authorize(); }}>{t('devices.complete')}</button></>
       : <><p role="status">{t('devices.pairingGone')}</p><button className="fontbtn" disabled={busy} onClick={() => { setApproval(null); approvalRef.current = null; setError(''); }}>{t('devices.newCode')}</button></>}
-    {error && <p role="alert">{error}</p>}{busy && <p role="status">{t('common.loading')}</p>}
+    {error && <p role="alert">{error}</p>}{busy && <p role="status">{claimingCode ? t('devices.verifyingCode') : t('common.loading')}</p>}
     <button className="fontbtn sheet-cancel" onClick={() => { void close(); }}>{t('common.cancel')}</button>
   </DeviceSheet>;
 }
