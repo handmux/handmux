@@ -26,7 +26,9 @@ describe('compact device management', () => {
     vi.mocked(api.list).mockResolvedValue({ devices: [other], currentDeviceId: null, publicUrl: 'https://handmux.example.com', serverTime: now });
     render(<DeviceManagement onLoggedOut={vi.fn()} />); await flush();
     expect(screen.getByText('https://handmux.example.com')).toBeTruthy();
-    expect(screen.getByText(t('devices.originConfigured'))).toBeTruthy();
+    expect(screen.getByText(t('devices.publicUrlLabel'))).toBeTruthy();
+    expect(screen.getByText(t('devices.previewDomainLabel'))).toBeTruthy();
+    expect(screen.queryByText(t('devices.originConfigured'))).toBeNull();
     expect(screen.getByText(t('devices.addSelfAddress', { origin: window.location.origin }))).toBeTruthy();
   });
 
@@ -36,6 +38,8 @@ describe('compact device management', () => {
     const inspect = vi.spyOn(api, 'inspectTrustedOriginRemoval').mockResolvedValue({ affectedDevices: [{ id: other.id, name: other.name, browser_summary: other.browser_summary }] });
     const remove = vi.spyOn(api, 'removeTrustedOrigin').mockResolvedValue({ trustedOrigins: [], serverTime: now });
     render(<DeviceManagement onLoggedOut={vi.fn()} />); await flush();
+    expect(document.querySelectorAll('.device-origin-list > .device-origin-row')).toHaveLength(3);
+    expect(screen.getByText(t('devices.trustedOriginLabel', { n: 1 }))).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: `${t('common.delete')} ${origin}` })); await flush();
     expect(inspect).toHaveBeenCalledWith(origin);
     const dialog = screen.getByRole('alertdialog');
@@ -46,6 +50,14 @@ describe('compact device management', () => {
     fireEvent.click(screen.getByRole('button', { name: `${t('common.delete')} ${origin}` })); await flush();
     fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: t('devices.removeOriginConfirm') })); await flush();
     expect(remove).toHaveBeenCalledWith(origin);
+  });
+
+  it('keeps policy commands behind compact help buttons', async () => {
+    render(<DeviceManagement onLoggedOut={vi.fn()} />); await flush();
+    expect(screen.queryByText(/handmux auth device/)).toBeNull();
+    expect(screen.queryByText(/handmux auth address/)).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: t('devices.deviceProtectionInfo') }));
+    expect(within(screen.getByRole('dialog')).getByText(t('devices.deviceProtectionInfo'))).toBeTruthy();
   });
 
   it('labels the current device and warns that removing its origin requires re-authorization', async () => {

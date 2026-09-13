@@ -319,6 +319,7 @@ export default function DeviceManagement({ onLoggedOut }: { onLoggedOut: () => v
   }); const [selfExpire, setSelfExpire] = useState('30d');
   const [selfCustom, setSelfCustom] = useState(''); const [busy, setBusy] = useState(false);
   const [originBusy, setOriginBusy] = useState(false);
+  const [policyHelp, setPolicyHelp] = useState<'device' | 'origin' | null>(null);
   const [originHelp, setOriginHelp] = useState<'public' | 'preview' | null>(null);
   const [originRemoval, setOriginRemoval] = useState<{ origin: string; devices: Array<{ id: string; name: string; browser_summary: string }> } | null>(null);
   const [now, setNow] = useState(Date.now()); const offset = useRef(0); const alive = useRef(true); const requestId = useRef(0);
@@ -357,7 +358,8 @@ export default function DeviceManagement({ onLoggedOut }: { onLoggedOut: () => v
   const inactiveCount = data.devices.filter(d => isInactive(d, now)).length;
   const activeCount = data.devices.length - inactiveCount;
   const currentOrigin = window.location.origin;
-  const accessOrigin = data.publicUrl ?? null;
+  const accessOrigin = data.publicUrl?.trim() || null;
+  const previewOrigin = data.previewDomain?.trim() || null;
   const trustedDeviceEnabled = data.trustedDeviceEnabled !== false;
   const trustedOriginEnabled = data.trustedOriginEnabled !== false;
   const removeTrustedOrigin = async (value: string) => {
@@ -380,7 +382,7 @@ export default function DeviceManagement({ onLoggedOut }: { onLoggedOut: () => v
       <div className="settings-page-list device-policy-list">
         <div className="settings-page-row device-policy-row">
           <div className="device-policy-copy"><strong>{t('devices.deviceProtectionStatus')}</strong><span className={trustedDeviceEnabled ? 'device-policy-enabled' : 'device-policy-disabled'}>{t(trustedDeviceEnabled ? 'devices.policyEnabled' : 'devices.policyDisabled')}</span></div>
-          <code className="device-policy-command">handmux auth device {trustedDeviceEnabled ? 'off' : 'on'}</code>
+          <button type="button" className="device-policy-help" aria-label={t('devices.deviceProtectionInfo')} onClick={() => setPolicyHelp('device')}>?</button>
         </div>
       </div>
       {!trustedDeviceEnabled && <p className="settings-detail-note">{t('devices.deviceProtectionDisabledHint')}</p>}
@@ -408,34 +410,24 @@ export default function DeviceManagement({ onLoggedOut }: { onLoggedOut: () => v
       <div className="settings-page-list device-policy-list">
         <div className="settings-page-row device-policy-row">
           <div className="device-policy-copy"><strong>{t('devices.originProtectionStatus')}</strong><span className={trustedOriginEnabled ? 'device-policy-enabled' : 'device-policy-disabled'}>{t(trustedOriginEnabled ? 'devices.policyEnabled' : 'devices.policyDisabled')}</span></div>
-          <code className="device-policy-command">handmux auth address {trustedOriginEnabled ? 'off' : 'on'}</code>
+          <button type="button" className="device-policy-help" aria-label={t('devices.originProtectionInfo')} onClick={() => setPolicyHelp('origin')}>?</button>
         </div>
       </div>
       {!trustedOriginEnabled && <p className="settings-detail-note">{t('devices.originProtectionDisabledHint')}</p>}
       <div className="settings-page-list device-origin-list">
         <div className="settings-page-row device-origin-row">
-          <div className="device-origin-copy">
-            <span className="device-origin-meta"><span className="device-origin-label"><b>{t('devices.publicUrlLabel')}</b> <button type="button" className="device-origin-help" aria-label={t('devices.publicUrlInfo')} onClick={() => setOriginHelp('public')}>?</button></span><span className="device-origin-state">{data.publicUrl ? t('devices.originConfigured') : accessOrigin ? t('devices.originActive') : t('devices.originPending')}</span></span>
-            <code className="device-origin-value">{accessOrigin ?? t('devices.originUnset')}</code>
-          </div>
-          {accessOrigin && <span className="device-origin-check" aria-label={t('devices.originActive')}>✓</span>}
+          <span className="device-origin-label"><b>{t('devices.publicUrlLabel')}</b> <button type="button" className="device-origin-help" aria-label={t('devices.publicUrlInfo')} onClick={() => setOriginHelp('public')}>?</button></span>
+          <code className={`device-origin-value${accessOrigin ? '' : ' is-empty'}`}>{accessOrigin ?? t('devices.originUnset')}</code>
         </div>
         <div className="settings-page-row device-origin-row">
-          <div className="device-origin-copy">
-            <span className="device-origin-meta"><span className="device-origin-label"><b>{t('devices.previewDomainLabel')}</b> <button type="button" className="device-origin-help" aria-label={t('devices.previewDomainInfo')} onClick={() => setOriginHelp('preview')}>?</button></span><span className="device-origin-state">{data.previewDomain ? t('devices.originBuiltIn') : t('devices.originPending')}</span></span>
-            <code className="device-origin-value">{data.previewDomain ?? t('devices.originUnset')}</code>
-          </div>
-          {data.previewDomain && <span className="device-origin-check" aria-label={t('devices.originActive')}>✓</span>}
+          <span className="device-origin-label"><b>{t('devices.previewDomainLabel')}</b> <button type="button" className="device-origin-help" aria-label={t('devices.previewDomainInfo')} onClick={() => setOriginHelp('preview')}>?</button></span>
+          <code className={`device-origin-value${previewOrigin ? '' : ' is-empty'}`}>{previewOrigin ?? t('devices.originUnset')}</code>
         </div>
-      </div>
-      <div className="device-origin-extra">
-        <h3>{t('devices.extraOriginsTitle')}</h3>
-        {data.trustedOrigins && data.trustedOrigins.length > 0 && <div className="settings-page-list">
-          {data.trustedOrigins.map(origin => <div className="settings-page-row device-origin-extra-row" key={origin}>
-            <div className="device-origin-copy"><span className="device-origin-meta"><span className="device-origin-label"><b>{t('devices.extraOriginsTitle')}</b></span><span className="device-origin-state">{t('devices.originActive')}</span></span><code className="device-origin-value">{origin}</code></div>
+        {data.trustedOrigins?.map((origin, index) => <div className="settings-page-row device-origin-row device-origin-custom-row" key={origin}>
+            <span className="device-origin-label"><b>{t('devices.trustedOriginLabel', { n: index + 1 })}</b></span>
+            <code className="device-origin-value">{origin}</code>
             <button type="button" className="device-origin-remove" aria-label={`${t('common.delete')} ${origin}`} disabled={originBusy} onClick={() => { void removeTrustedOrigin(origin); }}>{t('common.delete')}</button>
-          </div>)}
-        </div>}
+        </div>)}
       </div>
     </section>
     {error && <div className="device-feedback"><p role="alert">{error}</p><button type="button" disabled={loading} onClick={() => { void load(); }}>{t('common.retry')}</button></div>}
@@ -443,6 +435,7 @@ export default function DeviceManagement({ onLoggedOut }: { onLoggedOut: () => v
     {adding && <AddDevice onClose={() => setAdding(false)} onAdded={() => { setAdding(false); void load(); }} />}
     {selfSheet && <DeviceSheet title={t('devices.addSelfTitle')} onClose={() => { if (!busy) setSelfSheet(false); }}><p className="device-sheet-note">{t('devices.addSelfOrigin', { origin: currentOrigin })}</p><label className="device-field">{t('devices.name')}<input disabled={busy} value={selfName} onChange={e => setSelfName(e.target.value)} /></label><ExpiryPicker value={selfExpire} custom={selfCustom} onChange={setSelfExpire} onCustom={setSelfCustom} disabled={busy} /><button className="fontbtn device-save" disabled={busy || !validName(selfName) || !validExpire(selfExpire === 'custom' ? selfCustom : selfExpire)} onClick={() => { void addSelf(); }}>{t(busy ? 'common.loading' : 'devices.addSelf')}</button>{error && <p role="alert">{error}</p>}</DeviceSheet>}
     {originHelp && <DeviceSheet title={originHelp === 'public' ? t('devices.publicUrlLabel') : t('devices.previewDomainLabel')} onClose={() => setOriginHelp(null)}><p className="device-sheet-note">{t(originHelp === 'public' ? 'devices.publicUrlInfo' : 'devices.previewDomainInfo')}</p></DeviceSheet>}
+    {policyHelp && <DeviceSheet title={policyHelp === 'device' ? t('devices.deviceProtectionSection') : t('devices.accessSection')} variant="dialog" onClose={() => setPolicyHelp(null)}><p className="device-sheet-note">{t(policyHelp === 'device' ? 'devices.deviceProtectionInfo' : 'devices.originProtectionInfo')}</p></DeviceSheet>}
     {originRemoval && <OriginRemoveConfirm origin={originRemoval.origin} devices={originRemoval.devices} currentDeviceId={data.currentDeviceId} busy={originBusy} error={error} onClose={() => { if (!originBusy) { setOriginRemoval(null); setError(''); } }} onConfirm={() => { void confirmRemoveTrustedOrigin(); }} />}
   </section>;
 }

@@ -305,46 +305,26 @@ button.settings-page-row:disabled, .settings-page-row.disabled { color: rgba(235
 .device-feedback button { justify-self: start; min-height: 40px; padding: 0 12px; border: 0; border-radius: 9px; background: rgba(var(--blue-rgb),.12); color: #8fc5ff; font: 14px/1.2 -apple-system, system-ui, sans-serif; }
 .device-settings-group { margin: 0; }
 .device-settings-group > h2 { margin: 0; padding: 0 16px 7px; color: rgba(235,235,245,.52); font-size: 12px; line-height: 1.2; font-weight: 500; letter-spacing: .25px; }
-.device-origin-list, .device-origin-extra .settings-page-list { overflow: hidden; border-radius: 13px; background: #232427; }
-.device-origin-row { min-height: 64px; align-items: flex-start; padding: 10px 16px; background: transparent; }
-.device-origin-copy { min-width: 0; display: grid; gap: 3px; }
-.device-origin-meta { min-width: 0; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.device-origin-label { color: rgba(235,235,245,.62); font-size: 12px; line-height: 1.25; }
+.device-origin-list { overflow: hidden; border-radius: 13px; background: #232427; }
+.device-origin-row { min-height: 52px; display: grid; align-items: center; justify-content: initial; grid-template-columns: minmax(90px, max-content) minmax(0, 1fr) auto; padding: 9px 14px 9px 16px; background: transparent; }
+.device-origin-label { min-width: 0; display: flex; align-items: center; gap: 4px; overflow: hidden; color: rgba(235,235,245,.72); font-size: 14px; line-height: 1.25; white-space: nowrap; }
+.device-origin-label b { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
 .device-origin-help { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; margin: 0 0 0 4px; padding: 0; border: 1px solid rgba(235,235,245,.42); border-radius: 50%; background: transparent; color: rgba(235,235,245,.68); font: 12px/1 -apple-system,system-ui,sans-serif; vertical-align: middle; cursor: pointer; }
-.device-origin-help-text { margin: 0 16px 8px; padding: 9px 11px; border-radius: 10px; background: rgba(120,120,128,.12); color: rgba(235,235,245,.68); font-size: 12px; line-height: 1.4; }
-.device-origin-label { display: flex; align-items: center; gap: 4px; }
-.device-origin-label b { font-weight: 600; }
-.device-origin-add-button { display: block; width: calc(100% - 32px); margin: 10px 16px 2px; }
-.device-origin-value { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #f2f2f7; font: 14px/1.35 ui-monospace, "SF Mono", Menlo, monospace; }
-.device-origin-state { color: rgba(235,235,245,.48); font-size: 12px; line-height: 1.25; }
-.device-origin-check { flex: none; margin: 3px 2px 0 12px; color: var(--blue); font-size: 17px; line-height: 1; }
-.device-origin-commands { display: grid; gap: 6px; margin: 8px 16px 0; }
-.device-origin-command { min-width: 0; display: grid; grid-template-columns: 32px minmax(0, 1fr); align-items: start; gap: 8px; }
-.device-origin-command > span { padding-top: 7px; color: rgba(235,235,245,.48); font-size: 12px; line-height: 1.25; }
-.device-origin-command code { min-width: 0; padding: 7px 8px; border-radius: 8px; background: #1a1b1e; color: #b9d8ff; font: 12px/1.35 ui-monospace, "SF Mono", Menlo, monospace; overflow-wrap: anywhere; }
-.device-origin-mismatch { margin: 7px 16px 0; color: #e6be70; font-size: 12.5px; line-height: 1.45; }
-.device-origin-extra { display: grid; gap: 9px; margin-top: 14px; }
-.device-origin-extra h3 { margin: 0 16px; color: rgba(235,235,245,.52); font-size: 12px; font-weight: 500; letter-spacing: .25px; }
-.device-origin-extra > p { margin: 0 16px 2px; color: rgba(235,235,245,.52); font-size: 12px; line-height: 1.45; }
-.device-origin-extra-row { min-height: 64px; gap: 10px; background: transparent; }
-.device-origin-extra-row .device-origin-value { flex: 1; min-width: 0; font-size: 12px; }
-.device-origin-remove { flex: none; min-height: 36px; padding: 0 8px; border: 0; border-radius: 8px; background: transparent; color: #ff6961; font: 13px/1.2 -apple-system, system-ui, sans-serif; }
+.device-origin-value { min-width: 0; max-width: 100%; justify-self: end; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #f2f2f7; font: 14px/1.35 ui-monospace, "SF Mono", Menlo, monospace; text-align: right; }
+.device-origin-value.is-empty { color: rgba(235,235,245,.46); font-family: -apple-system, system-ui, sans-serif; }
+.device-origin-remove { min-height: 36px; margin: -1px -6px -1px 4px; padding: 0 8px; border: 0; border-radius: 8px; background: transparent; color: #ff6961; font: 13px/1.2 -apple-system, system-ui, sans-serif; }
 .device-origin-remove:disabled { opacity: .45; }
-.device-origin-add { display: flex; align-items: center; gap: 8px; margin: 2px 16px 0; }
-.device-origin-add input { flex: 1; min-width: 0; min-height: 42px; padding: 0 11px; border: 1px solid rgba(235,235,245,.16); border-radius: 10px; background: rgba(120,120,128,.1); color: #f2f2f7; font: 13px/1.2 ui-monospace, "SF Mono", Menlo, monospace; }
-.device-origin-add input::placeholder { color: rgba(235,235,245,.35); }
-.device-origin-add .fontbtn { flex: none; min-height: 42px; padding-inline: 12px; }
 .device-list-group { display: flex; flex-direction: column; gap: 8px; }
 .device-list-group > h2 { padding-bottom: 0; }
 .device-list-group > h3 { margin: 12px 16px 0; color: rgba(235,235,245,.52); font-size: 12px; font-weight: 500; letter-spacing: .25px; }
 .device-policy-list { overflow: hidden; border-radius: 13px; background: #232427; }
-.device-policy-row { min-height: 64px; gap: 12px; padding: 12px 16px; background: transparent; }
+.device-policy-row { min-height: 56px; gap: 12px; padding: 9px 12px 9px 16px; background: transparent; }
 .device-policy-copy { min-width: 0; display: grid; gap: 4px; }
 .device-policy-copy strong { color: #f2f2f7; font-size: 15px; font-weight: 500; }
 .device-policy-enabled, .device-policy-disabled { font-size: 12px; }
 .device-policy-enabled { color: var(--green, #65d38b); }
 .device-policy-disabled { color: #e6be70; }
-.device-policy-command { margin-left: auto; max-width: 52%; overflow-wrap: anywhere; color: #b9d8ff; font: 11px/1.35 ui-monospace, "SF Mono", Menlo, monospace; text-align: right; }
+.device-policy-help { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; padding: 0; border: 1px solid rgba(235,235,245,.36); border-radius: 50%; background: transparent; color: rgba(235,235,245,.62); font: 13px/1 -apple-system, system-ui, sans-serif; }
 .device-row { gap: 12px; min-height: 64px; }
 .device-action-list { margin-top: 8px; }
 .device-action-copy { min-width: 0; display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
@@ -354,13 +334,14 @@ button.settings-page-row:disabled, .settings-page-row.disabled { color: rgba(235
 .device-code-entry { display: grid; gap: 10px; margin: 0 0 18px; }
 .device-code-entry.is-disabled { opacity: .72; }
 .device-code-label { color: rgba(235,235,245,.62); font-size: 13px; line-height: 1.25; }
-.device-code-shell { position: relative; padding: 16px 12px; border: 1px solid rgba(235,235,245,.14); border-radius: 16px; background: #191a1e; transition: border-color .15s ease, box-shadow .15s ease; }
-.device-code-shell:focus-within { border-color: rgba(var(--blue-rgb),.85); box-shadow: 0 0 0 3px rgba(var(--blue-rgb),.18); }
-.device-code-shell.has-error { border-color: rgba(255,69,58,.78); box-shadow: 0 0 0 3px rgba(255,69,58,.12); }
+.device-code-shell { position: relative; padding: 0; border: 0; background: transparent; }
+.device-code-shell:focus-within, .device-code-shell.has-error { border-color: transparent; box-shadow: none; }
 .device-code-slots { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 6px; }
-.device-code-slot { min-width: 0; height: 56px; display: grid; place-items: center; border-radius: 10px; background: rgba(120,120,128,.13); color: #f5f5f7; font: 650 30px/1 ui-monospace, "SF Mono", Menlo, monospace; font-variant-numeric: tabular-nums; }
-.device-code-slot:not(:empty) { background: rgba(var(--blue-rgb),.16); }
+.device-code-slot { min-width: 0; height: 56px; display: grid; place-items: center; border-radius: 10px; background: rgba(120,120,128,.13); box-shadow: inset 0 0 0 1px rgba(235,235,245,.12); color: #f5f5f7; font: 650 30px/1 ui-monospace, "SF Mono", Menlo, monospace; font-variant-numeric: tabular-nums; }
+.device-code-slot:not(:empty) { background: rgba(var(--blue-rgb),.16); box-shadow: inset 0 0 0 1px rgba(var(--blue-rgb),.5); }
 .device-code-slot.is-current { box-shadow: inset 0 0 0 1px rgba(var(--blue-rgb),.9); }
+.device-code-shell.has-error .device-code-slot { box-shadow: inset 0 0 0 1px rgba(255,69,58,.72); }
+.device-code-shell.has-error .device-code-slot:not(:empty) { background: rgba(255,69,58,.14); }
 .device-code-input { position: absolute !important; inset: 0; z-index: 1; width: 100% !important; height: 100% !important; min-height: 0 !important; margin: 0 !important; padding: 0 !important; border: 0 !important; border-radius: 16px !important; outline: 0 !important; background: transparent !important; color: transparent !important; caret-color: transparent; opacity: 0; cursor: text; }
 .device-code-hint { margin: 0; color: rgba(235,235,245,.52); font-size: 12px; line-height: 1.4; }
 .device-code-error { margin: 0; padding: 9px 11px; border-radius: 10px; background: rgba(255,69,58,.1); color: #ffb0a9; font-size: 12px; line-height: 1.4; }
