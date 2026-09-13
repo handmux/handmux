@@ -95,23 +95,24 @@ export async function runPush({
   const parsed = parsePushArgs(argv);
   if (parsed.error) { err(parsed.error); return 1; }
   const st = readState(home);
-  if (!st || typeof st.localUrl !== 'string' || !st.localUrl || typeof st.token !== 'string' || !st.token) {
+  if (!st || typeof st.localUrl !== 'string' || !st.localUrl
+    || (st.authMode !== 'trusted-device' && (typeof st.token !== 'string' || !st.token))) {
     err('handmux is not running — run `handmux start` first.');
     return 1;
   }
   try {
     let raw: unknown;
-    if (fs.existsSync(authSocketPath(home))) {
+    if (st.authMode === 'trusted-device' || fs.existsSync(authSocketPath(home))) {
       const control = await connectAuthControl(home);
       try { raw = await control.request({ op: 'push', body: parsed }); } finally { control.close(); }
     } else {
-      const res = await fetchImpl(`${st.localUrl}/api/push/send-local`, {
+    const res = await fetchImpl(`${st.localUrl}/api/push/send-local`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${st.token}`, 'Content-Type': 'application/json' },
       body: JSON.stringify(parsed),
     });
     if (!res.ok) { err(`push failed: ${res.status ?? 'unknown'}`); return 1; }
-      raw = await res.json();
+    raw = await res.json();
     }
     const out = isRecord(raw) ? raw : {};
     if (out.configured === false) { err('push is not configured (no VAPID keys) — run `handmux setup`.'); return 1; }

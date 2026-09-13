@@ -38,26 +38,6 @@ function forwardedHeaders(
   return out;
 }
 
-function previewHostnameFor(raw: string | null | undefined): string | null {
-  if (!raw) return null;
-  try {
-    const value = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
-    return new URL(value).hostname.toLowerCase().replace(/\.$/, '');
-  } catch {
-    return null;
-  }
-}
-
-function isGeneratedPreviewHostname(hostname: string | null, previewHostname: string | null): boolean {
-  if (!hostname || !previewHostname) return false;
-  const suffix = `.${previewHostname}`;
-  if (!hostname.endsWith(suffix)) return false;
-  const label = hostname.slice(0, -suffix.length);
-  // browserLabelForOrigin() emits exactly this opaque, lower-case label. Keep
-  // arbitrary subdomains on the main-host path so they cannot bypass the guard.
-  return /^b-[0-9a-z]{13}$/i.test(label);
-}
-
 export function createBrowserWorkerClient({
   appToken,
   previewDomain = null,
@@ -110,7 +90,6 @@ export function createBrowserWorkerClient({
   const deviceBrowsers = new Map<string, string>();
   const deviceConnections = new Map<string, Set<() => void>>();
   const appHostnames = new Set([new URL(handmuxOrigin).hostname]);
-  const previewHostname = previewHostnameFor(previewDomain);
   const hostname = (req: IncomingMessage): string | null => {
     try { return new URL(`http://${req.headers.host}`).hostname; } catch { return null; }
   };
@@ -228,22 +207,17 @@ export function createBrowserWorkerClient({
   };
 
   const unavailable = (res: Response, status: number) => res.status(status).json({ error: 'browser unavailable' });
-  const isMainRequest = (req: IncomingMessage): boolean => {
-    const requestHostname = hostname(req);
-    // The auth-origin resolver also accepts generated preview origins. Those
-    // requests belong to the isolated browser worker and must not be treated
-    // as requests to the handmux app itself.
-    if (isGeneratedPreviewHostname(requestHostname, previewHostname)) return false;
-    return Boolean(deviceAuthorization && (
-      appHostnames.has(requestHostname || '') || deviceAuthorization.isMainRequest?.(req)
-    ));
-  };
   const proxyHttp = (api: boolean): RequestHandler => (req, res, next) => {
     if (!api && !claimedBrowserRequest(req)) return next();
     const targetPort = port;
     if (!targetPort) return unavailable(res, api ? 503 : 502);
-    if (isMainRequest(req)) {
-      return res.status(403).json({ error: 'browser preview must use a different hostname from handmux' });
+    // Hammerhead's /task.js endpoint identifies the active session from the
+    // proxied document's Referer. The parent HandMux response policy is
+    // `no-referrer`, which otherwise strips that session URL and leaves the
+    // embedded page blank after the first HTML response.
+    if (!api) res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+    if (deviceAuthorization && (appHostnames.has(hostname(req) || '') || deviceAuthorization.isMainRequest?.(req))) {
+      return res.status(403).json({ error: 'browser preview must use a different hostname from HandMux' });
     }
     const bootstrap = isBrowserBootstrapPath((req.originalUrl || req.url).split('?')[0]);
     let owner = ownerFor(browserCookie(req.headers.cookie));
@@ -289,7 +263,7 @@ export function createBrowserWorkerClient({
     if (!claimedBrowserRequest(req)) return false;
     const targetPort = port;
     if (!targetPort) { socket.destroy(); return true; }
-    if (isMainRequest(req)) { socket.destroy(); return true; }
+    if (deviceAuthorization && (appHostnames.has(hostname(req) || '') || deviceAuthorization.isMainRequest?.(req))) { socket.destroy(); return true; }
     const owner = ownerFor(browserCookie(req.headers.cookie));
     if (deviceAuthorization && !owner) { socket.destroy(); return true; }
     const upstream = connect({ host: '127.0.0.1', port: targetPort });

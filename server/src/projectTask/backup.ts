@@ -193,8 +193,8 @@ export async function restoreProjectBackup({
   // Revoke before publishing the restored file. A crash at any later point cannot resurrect access.
   const restored = new sqlite.DatabaseSync(temporary, { allowExtension: false });
   try {
-    // Revoke credentials before publishing the restored file so a crash at any later point cannot
-    // resurrect access from a backup snapshot.
+    // Pre-auth backups must also carry the explicit disabled state before publication;
+    // otherwise legacy startup configuration could reopen fixed Token login on recovery.
     migrateProjectDatabase(restored);
     const hasAuth = restored.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='auth_sessions'").get();
     if (hasAuth) {
@@ -203,6 +203,7 @@ export async function restoreProjectBackup({
         const now = Date.now();
         restored.prepare('UPDATE auth_sessions SET revoked_at = ? WHERE revoked_at IS NULL').run(now);
         restored.prepare('UPDATE auth_devices SET revoked_at = ? WHERE revoked_at IS NULL').run(now);
+        restored.prepare("INSERT INTO auth_meta(key,value) VALUES('token_enabled','0') ON CONFLICT(key) DO UPDATE SET value='0'").run();
         restored.prepare("DELETE FROM auth_meta WHERE key='token_generation'").run();
         restored.exec('COMMIT');
       } catch (error) { restored.exec('ROLLBACK'); throw error; }

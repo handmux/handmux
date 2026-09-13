@@ -142,9 +142,14 @@ export function createBrowserPublicProxy({
       const origin = browserRequestOrigin(req);
       const bootstrap = browserBootstrap?.consume(pathname, origin);
       if (!bootstrap) return res.status(403).json({ error: 'browser bootstrap unavailable' });
-      const secure = origin?.startsWith('https://') ? '; Secure' : '';
+      // The generated preview origin is embedded in the HandMux page. Strict cookies are
+      // withheld from that cross-site iframe, so the redirected session loses its capability
+      // before the first document request. HTTPS is required for SameSite=None by browsers;
+      // keep the local HTTP fallback strict because it cannot safely opt into cross-site cookies.
+      const crossSite = origin?.startsWith('https://') === true;
+      const cookiePolicy = crossSite ? 'SameSite=None; Secure' : 'SameSite=Strict';
       res.setHeader('Cache-Control', 'no-store');
-      res.setHeader('Set-Cookie', `${DEVICE_COOKIE}=${bootstrap.deviceId}; Path=/; HttpOnly; SameSite=Strict${secure}`);
+      res.setHeader('Set-Cookie', `${DEVICE_COOKIE}=${bootstrap.deviceId}; Path=/; HttpOnly; ${cookiePolicy}`);
       return res.redirect(
         bootstrap.preserveMethod ? (bootstrap.redirectStatus || 307) : 302,
         bootstrap.url,

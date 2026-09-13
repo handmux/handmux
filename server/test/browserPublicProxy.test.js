@@ -175,7 +175,7 @@ describe('browser public proxy', () => {
     expect(resolvePublicRequest).toHaveBeenCalledWith(expect.any(String), DEVICE, 'https://one.example');
   });
 
-  it('consumes a one-time preview-origin bootstrap into a host-only device cookie', async () => {
+  it('consumes a one-time preview-origin bootstrap into a cross-site iframe cookie', async () => {
     const browserBootstrap = {
       consume: vi.fn(() => ({
         deviceId: DEVICE,
@@ -195,6 +195,7 @@ describe('browser public proxy', () => {
     expect(res.headers['set-cookie'][0]).toContain(`tw_browser_device=${DEVICE}`);
     expect(res.headers['set-cookie'][0]).not.toContain('Domain=');
     expect(res.headers['set-cookie'][0]).toContain('HttpOnly');
+    expect(res.headers['set-cookie'][0]).toContain('SameSite=None');
     expect(res.headers['set-cookie'][0]).toContain('Secure');
     expect(browserBootstrap.consume).toHaveBeenCalledWith('/_browser-bootstrap/ticket', 'https://handmux.example.com:30443');
   });

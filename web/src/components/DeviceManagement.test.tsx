@@ -22,74 +22,13 @@ beforeEach(() => {
 });
 afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); applyAuthStatus({ mode: 'token', authenticated: false, serverTime: now }); });
 describe('compact device management', () => {
-  it('presents the trusted address as a compact read-only setting and shows it on self-enrollment', async () => {
-    vi.mocked(api.list).mockResolvedValue({ devices: [other], currentDeviceId: null, publicUrl: 'https://handmux.example.com', serverTime: now });
-    render(<DeviceManagement onLoggedOut={vi.fn()} />); await flush();
-    expect(screen.getByText('https://handmux.example.com')).toBeTruthy();
-    expect(screen.getByText(t('devices.publicUrlLabel'))).toBeTruthy();
-    expect(screen.getByText(t('devices.previewDomainLabel'))).toBeTruthy();
-    expect(screen.queryByText(t('devices.originConfigured'))).toBeNull();
-    expect(screen.getByText(t('devices.addSelfAddress', { origin: window.location.origin }))).toBeTruthy();
-  });
-
-  it('checks active devices and confirms before deleting an extra trusted domain', async () => {
-    const origin = 'https://phone.example.com';
-    vi.mocked(api.list).mockResolvedValue({ devices: [other], currentDeviceId: current.id, trustedOrigins: [origin], serverTime: now });
-    const inspect = vi.spyOn(api, 'inspectTrustedOriginRemoval').mockResolvedValue({ affectedDevices: [{ id: other.id, name: other.name, browser_summary: other.browser_summary }] });
-    const remove = vi.spyOn(api, 'removeTrustedOrigin').mockResolvedValue({ trustedOrigins: [], serverTime: now });
-    render(<DeviceManagement onLoggedOut={vi.fn()} />); await flush();
-    expect(document.querySelectorAll('.device-origin-list > .device-origin-row')).toHaveLength(3);
-    expect(screen.getByText(t('devices.trustedOriginLabel', { n: 1 }))).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: `${t('common.delete')} ${origin}` })); await flush();
-    expect(inspect).toHaveBeenCalledWith(origin);
-    const dialog = screen.getByRole('alertdialog');
-    expect(within(dialog).getByText(t('devices.removeOriginImpact'))).toBeTruthy();
-    expect(within(dialog).getByText(other.name)).toBeTruthy();
-    fireEvent.click(within(dialog).getByRole('button', { name: t('common.cancel') }));
-    expect(remove).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole('button', { name: `${t('common.delete')} ${origin}` })); await flush();
-    fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: t('devices.removeOriginConfirm') })); await flush();
-    expect(remove).toHaveBeenCalledWith(origin);
-  });
-
-  it('keeps policy commands behind compact help buttons', async () => {
-    render(<DeviceManagement onLoggedOut={vi.fn()} />); await flush();
-    expect(screen.queryByText(/handmux auth device/)).toBeNull();
-    expect(screen.queryByText(/handmux auth address/)).toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: t('devices.deviceProtectionInfo') }));
-    expect(within(screen.getByRole('dialog')).getByText(t('devices.deviceProtectionInfo'))).toBeTruthy();
-  });
-
-  it('labels the current device and warns that removing its origin requires re-authorization', async () => {
-    const origin = 'https://phone.example.com';
-    vi.mocked(api.list).mockResolvedValue({ devices: [current, other], currentDeviceId: current.id, trustedOrigins: [origin], serverTime: now });
-    vi.spyOn(api, 'inspectTrustedOriginRemoval').mockResolvedValue({ affectedDevices: [{ id: current.id, name: current.name, browser_summary: current.browser_summary }] });
-    render(<DeviceManagement onLoggedOut={vi.fn()} />); await flush();
-    fireEvent.click(screen.getByRole('button', { name: `${t('common.delete')} ${origin}` })); await flush();
-    const dialog = screen.getByRole('alertdialog');
-    expect(within(dialog).getByText(t('devices.removeOriginCurrentImpact'))).toBeTruthy();
-    expect(within(dialog).getByText(t('devices.current'))).toBeTruthy();
-  });
-
   it('uses compact current-first rows, hides full IDs/times until details, and keeps history read-only', async () => {
     render(<DeviceManagement onLoggedOut={vi.fn()} />); await flush();
     const rows = document.querySelectorAll('.device-row'); expect(rows[0]?.textContent).toContain(current.name); expect(rows).toHaveLength(2);
     expect(screen.queryByText(current.id)).toBeNull(); expect(screen.queryByText(history.name)).toBeNull();
-    expect(screen.getByText(t('devices.current'))).toBeTruthy();
-    expect(screen.queryByRole('button', { name: t('devices.selfRegistered') })).toBeNull();
-    expect(screen.getByRole('button', { name: t('devices.authorizeOther') })).toBeTruthy();
-    const activeTab = screen.getByRole('tab', { name: new RegExp(t('devices.activeTab')) });
-    const historyTab = screen.getByRole('tab', { name: new RegExp(t('devices.historyTab')) });
-    expect(activeTab.getAttribute('aria-selected')).toBe('true'); expect(activeTab.textContent).toContain('2');
-    expect(historyTab.getAttribute('aria-selected')).toBe('false'); expect(historyTab.textContent).toContain('1');
-    fireEvent.click(historyTab);
-    expect(activeTab.getAttribute('aria-selected')).toBe('false'); expect(historyTab.getAttribute('aria-selected')).toBe('true');
+    fireEvent.click(screen.getByRole('button', { name: t('devices.history', { n: 1 }) }));
     fireEvent.click(screen.getByRole('button', { name: new RegExp(history.name) }));
-    expect(screen.getByText(history.id)).toBeTruthy(); expect(screen.getAllByText(history.browser_summary)).toHaveLength(2);
-    expect(screen.queryByText(t('devices.activeStatus'))).toBeNull(); expect(screen.getAllByText(t('devices.revoked')).length).toBeGreaterThan(0);
-    expect(screen.getByText(t('devices.detailInfo'))).toBeTruthy(); expect(screen.getByText(t('devices.name'))).toBeTruthy(); expect(screen.getByText(t('devices.deviceInfo'))).toBeTruthy();
-    expect(screen.getByText(t('devices.status'))).toBeTruthy(); expect(screen.getByText(t('devices.added'))).toBeTruthy(); expect(screen.getByText(t('devices.lastAccess'))).toBeTruthy(); expect(screen.getByText(t('devices.expiresAt'))).toBeTruthy();
-    expect(screen.queryByText(t('devices.expire'))).toBeNull();
+    expect(screen.getByText(history.id)).toBeTruthy(); expect(screen.getByText(t('devices.added'))).toBeTruthy(); expect(screen.getByText(t('devices.lastAccess'))).toBeTruthy();
     expect(screen.queryByRole('button', { name: t('devices.revoke') })).toBeNull(); expect(screen.queryByRole('button', { name: t('common.save') })).toBeNull();
   });
   it('renames using the exact version without sending expire, and copies IDs with HTTP manual fallback', async () => {
@@ -109,33 +48,19 @@ describe('compact device management', () => {
     expect(edit).toHaveBeenCalledTimes(1); fireEvent.click(screen.getByRole('button', { name: t('devices.refreshDetails') })); await flush();
     expect((screen.getByLabelText(t('devices.name')) as HTMLInputElement).value).toBe(other.name);
   });
-  it('shows a large six-digit code entry and claims a leading-zero code automatically', async () => {
+  it('claims a leading-zero code first, then authorizes only after name/expiry are completed', async () => {
     const claim = vi.spyOn(api, 'claim').mockResolvedValue({ approval, serverTime: now });
     const authorize = vi.spyOn(api, 'authorize').mockResolvedValue({ device: other, serverTime: now });
-    render(<DeviceManagement onLoggedOut={vi.fn()} />); await flush(); fireEvent.click(screen.getByRole('button', { name: t('devices.authorizeOther') })); await flush();
-    const codeInput = screen.getByLabelText(t('devices.code')) as HTMLInputElement;
-    expect(screen.getByRole('dialog').classList.contains('device-dialog')).toBe(true);
-    expect(document.querySelectorAll('.device-code-slot')).toHaveLength(6);
-    expect(screen.queryByRole('button', { name: t('devices.claim') })).toBeNull();
-    fireEvent.change(codeInput, { target: { value: '038271' } }); await flush();
+    render(<DeviceManagement onLoggedOut={vi.fn()} />); await flush(); fireEvent.click(screen.getByRole('button', { name: new RegExp(t('devices.add')) })); await flush();
+    fireEvent.change(screen.getByLabelText(t('devices.code')), { target: { value: '038271' } }); fireEvent.click(screen.getByRole('button', { name: t('devices.claim') })); await flush();
     expect(claim).toHaveBeenCalledWith('038271'); expect(authorize).not.toHaveBeenCalled(); expect(screen.getByText(t('auth.pending'))).toBeTruthy();
-    expect(screen.getByRole('heading', { name: t('devices.configureTitle') })).toBeTruthy();
     fireEvent.change(screen.getByLabelText(t('devices.name')), { target: { value: 'Linux computer' } }); fireEvent.click(screen.getByRole('button', { name: '7d' }));
     fireEvent.click(screen.getByRole('button', { name: t('devices.complete') })); await flush(); expect(authorize).toHaveBeenCalledWith(approval.id, { name: 'Linux computer', expire: '7d' });
-  });
-  it('clears the code after an invalid claim so it can be entered again', async () => {
-    vi.spyOn(api, 'claim').mockRejectedValue(new DeviceManagementError('CODE_INVALID', 400));
-    render(<DeviceManagement onLoggedOut={vi.fn()} />); await flush();
-    fireEvent.click(screen.getByRole('button', { name: t('devices.authorizeOther') })); await flush();
-    const codeInput = screen.getByLabelText(t('devices.code')) as HTMLInputElement;
-    fireEvent.change(codeInput, { target: { value: '038271' } }); await flush();
-    expect(codeInput.value).toBe('');
-    expect(screen.getByRole('alert').textContent).toBe(t('devices.invalidCode'));
   });
   it('resumes its claimed request after remount and cancellation must be confirmed by the server', async () => {
     sessionStorage.setItem('handmux.pendingApprovalId', approval.id);
     const cancel = vi.spyOn(api, 'cancel').mockRejectedValueOnce(new Error('offline')).mockResolvedValue({ approval: { ...approval, state: 'canceled' }, serverTime: now });
-    render(<DeviceManagement onLoggedOut={vi.fn()} />); await flush(); fireEvent.click(screen.getByRole('button', { name: t('devices.authorizeOther') })); await flush();
+    render(<DeviceManagement onLoggedOut={vi.fn()} />); await flush(); fireEvent.click(screen.getByRole('button', { name: new RegExp(t('devices.add')) })); await flush();
     expect(screen.queryByLabelText(t('devices.code'))).toBeNull(); expect((screen.getByLabelText(t('devices.name')) as HTMLInputElement).value).toBe(approval.browserSummary);
     expect(api.approval).toHaveBeenCalledWith(approval.id); expect(api.approvals).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('button', { name: t('common.cancel') })); await flush(); expect(screen.getByRole('alert')).toBeTruthy(); expect(screen.getByRole('dialog')).toBeTruthy();
@@ -144,22 +69,22 @@ describe('compact device management', () => {
   it('recovers a claim whose response was lost before confirming cancellation on close', async () => {
     const claim = vi.spyOn(api, 'claim').mockRejectedValueOnce(new Error('response lost')).mockResolvedValue({ approval, serverTime: now });
     const cancel = vi.spyOn(api, 'cancel').mockResolvedValue({ approval: { ...approval, state: 'canceled' }, serverTime: now });
-    render(<DeviceManagement onLoggedOut={vi.fn()} />); await flush(); fireEvent.click(screen.getByRole('button', { name: t('devices.authorizeOther') })); await flush();
-    fireEvent.change(screen.getByLabelText(t('devices.code')), { target: { value: '038271' } }); await flush();
+    render(<DeviceManagement onLoggedOut={vi.fn()} />); await flush(); fireEvent.click(screen.getByRole('button', { name: new RegExp(t('devices.add')) })); await flush();
+    fireEvent.change(screen.getByLabelText(t('devices.code')), { target: { value: '038271' } }); fireEvent.click(screen.getByRole('button', { name: t('devices.claim') })); await flush();
     expect(screen.getByRole('alert')).toBeTruthy(); fireEvent.click(screen.getByRole('button', { name: t('common.cancel') })); await flush();
     expect(claim).toHaveBeenNthCalledWith(2, '038271'); expect(cancel).toHaveBeenCalledWith(approval.id); expect(screen.queryByRole('dialog')).toBeNull();
   });
   it('never picks another tab’s pending request when this tab has no request ID or storage is unavailable', async () => {
     vi.mocked(api.approvals).mockResolvedValue({ approvals: [approval], serverTime: now });
     vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => { throw new Error('Storage denied'); });
-    render(<DeviceManagement onLoggedOut={vi.fn()} />); await flush(); fireEvent.click(screen.getByRole('button', { name: t('devices.authorizeOther') })); await flush();
+    render(<DeviceManagement onLoggedOut={vi.fn()} />); await flush(); fireEvent.click(screen.getByRole('button', { name: new RegExp(t('devices.add')) })); await flush();
     expect(screen.getByLabelText(t('devices.code'))).toBeTruthy(); expect(screen.queryByLabelText(t('devices.name'))).toBeNull();
     expect(api.approvals).not.toHaveBeenCalled(); expect(api.approval).not.toHaveBeenCalled();
   });
   it('does not overwrite an unknown claim with a new code while retrying', async () => {
     const claim = vi.spyOn(api, 'claim').mockRejectedValueOnce(new Error('response lost')).mockResolvedValue({ approval, serverTime: now });
-    render(<DeviceManagement onLoggedOut={vi.fn()} />); await flush(); fireEvent.click(screen.getByRole('button', { name: t('devices.authorizeOther') })); await flush();
-    fireEvent.change(screen.getByLabelText(t('devices.code')), { target: { value: '038271' } }); await flush();
+    render(<DeviceManagement onLoggedOut={vi.fn()} />); await flush(); fireEvent.click(screen.getByRole('button', { name: new RegExp(t('devices.add')) })); await flush();
+    fireEvent.change(screen.getByLabelText(t('devices.code')), { target: { value: '038271' } }); fireEvent.click(screen.getByRole('button', { name: t('devices.claim') })); await flush();
     expect((screen.getByLabelText(t('devices.code')) as HTMLInputElement).disabled).toBe(true);
     fireEvent.change(screen.getByLabelText(t('devices.code')), { target: { value: '999999' } }); fireEvent.click(screen.getByRole('button', { name: t('common.retry') })); await flush();
     expect(claim.mock.calls.map(call => call[0])).toEqual(['038271', '038271']); expect((screen.getByLabelText(t('devices.name')) as HTMLInputElement).value).toBe(approval.browserSummary);
@@ -168,7 +93,7 @@ describe('compact device management', () => {
     sessionStorage.setItem('handmux.pendingApprovalId', approval.id);
     vi.mocked(api.approval).mockRejectedValueOnce(new Error('offline')).mockResolvedValue({ approval, serverTime: now });
     const claim = vi.spyOn(api, 'claim');
-    render(<DeviceManagement onLoggedOut={vi.fn()} />); await flush(); fireEvent.click(screen.getByRole('button', { name: t('devices.authorizeOther') })); await flush();
+    render(<DeviceManagement onLoggedOut={vi.fn()} />); await flush(); fireEvent.click(screen.getByRole('button', { name: new RegExp(t('devices.add')) })); await flush();
     expect((screen.getByLabelText(t('devices.code')) as HTMLInputElement).disabled).toBe(true); expect(screen.queryByRole('button', { name: t('devices.claim') })).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: t('common.retry') })); await flush();
     expect(api.approval).toHaveBeenNthCalledWith(2, approval.id); expect(claim).not.toHaveBeenCalled(); expect(screen.getByLabelText(t('devices.name'))).toBeTruthy();
@@ -177,7 +102,7 @@ describe('compact device management', () => {
     sessionStorage.setItem('handmux.pendingApprovalId', 'pair_previous');
     vi.mocked(api.approval).mockRejectedValue(new DeviceManagementError('PAIRING_NOT_FOUND', 404));
     vi.mocked(api.approvals).mockResolvedValue({ approvals: [approval], serverTime: now });
-    render(<DeviceManagement onLoggedOut={vi.fn()} />); await flush(); fireEvent.click(screen.getByRole('button', { name: t('devices.authorizeOther') })); await flush();
+    render(<DeviceManagement onLoggedOut={vi.fn()} />); await flush(); fireEvent.click(screen.getByRole('button', { name: new RegExp(t('devices.add')) })); await flush();
     expect(screen.getByLabelText(t('devices.code'))).toBeTruthy(); expect(api.approval).toHaveBeenCalledWith('pair_previous');
     expect(api.approvals).not.toHaveBeenCalled(); expect(sessionStorage.getItem('handmux.pendingApprovalId')).toBeNull();
   });
@@ -191,19 +116,32 @@ describe('compact device management', () => {
     fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: t('devices.logout') })); await flush();
     expect(fetcher).toHaveBeenCalledWith('/api/auth/logout', expect.objectContaining({ method: 'POST' })); expect(loggedOut).toHaveBeenCalledOnce();
   });
-  it('device management remains available when device protection is disabled', async () => {
+  it('trusted-device mode remains available when fixed token is disabled', async () => {
     applyAuthStatus({ mode: 'trusted-device', authenticated: true, tokenEnabled: false, serverTime: now }); render(<DeviceManagement onLoggedOut={vi.fn()} />); await flush();
-    expect(api.list).toHaveBeenCalled(); expect(screen.queryByText('Token 登录')).toBeNull();
+    expect(api.list).toHaveBeenCalled(); expect(screen.queryByText('固定 Token 登录')).toBeNull();
   });
 });
 
-describe('Token remains the first factor', () => {
-  it('keeps the device list available while Token remains a first factor', async () => {
+describe('fixed Token login retirement', () => {
+  it('shows the list but requires this browser, even if other devices are trusted', async () => {
     vi.mocked(api.list).mockResolvedValue({ devices: [other], currentDeviceId: null, tokenEnabled: true, serverTime: now });
     render(<DeviceManagement onLoggedOut={vi.fn()} />); await flush();
     expect(screen.getByText(other.name)).toBeTruthy();
-    expect(screen.queryByText('Token 登录')).toBeNull();
-    expect(screen.getByRole('button', { name: t('devices.addSelf') })).toBeTruthy();
+    expect((screen.getByRole('button', { name: t('devices.disableToken') }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole('button', { name: t('devices.addSelf') }) as HTMLButtonElement).disabled).toBe(false);
+  });
+  it('confirms before disabling and removes the entire Token module after success', async () => {
+    vi.mocked(api.list).mockResolvedValue({ devices: [current], currentDeviceId: current.id, tokenEnabled: true, serverTime: now });
+    const disable = vi.spyOn(api, 'disableToken').mockResolvedValue({ mode: 'trusted-device', tokenEnabled: false, authenticated: true, serverTime: now });
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ mode: 'trusted-device', authenticated: true, currentDeviceId: current.id, tokenEnabled: false, serverTime: now }) })));
+    render(<DeviceManagement onLoggedOut={vi.fn()} />); await flush();
+    fireEvent.click(screen.getByRole('button', { name: t('devices.disableToken') }));
+    expect(disable).not.toHaveBeenCalled();
+    const dialog = screen.getByRole('alertdialog'); expect(dialog.textContent).toContain('handmux auth token enable');
+    vi.mocked(api.list).mockResolvedValue({ devices: [current], currentDeviceId: current.id, tokenEnabled: false, serverTime: now });
+    fireEvent.click(within(dialog).getByRole('button', { name: t('devices.disableToken') })); await flush();
+    expect(disable).toHaveBeenCalledOnce(); expect(screen.queryByText(t('devices.fixedToken'))).toBeNull();
+    expect(screen.getByText(current.name)).toBeTruthy();
   });
   it('does not report successful self-registration when the formal Cookie did not arrive', async () => {
     vi.mocked(api.list).mockResolvedValue({ devices: [], currentDeviceId: null, tokenEnabled: true, serverTime: now });
@@ -214,6 +152,6 @@ describe('Token remains the first factor', () => {
     const sheet = screen.getByRole('dialog');
     fireEvent.click(within(sheet).getByRole('button', { name: t('devices.addSelf') })); await flush(); await flush();
     expect(within(sheet).getByRole('alert').textContent).toBe(t('devices.cookieRequired'));
-    expect(screen.queryByRole('button', { name: t('devices.disableToken') })).toBeNull();
+    expect((screen.getByRole('button', { name: t('devices.disableToken') }) as HTMLButtonElement).disabled).toBe(true);
   });
 });

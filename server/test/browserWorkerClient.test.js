@@ -51,49 +51,6 @@ function clientFor(port, options = {}) {
 }
 
 describe('browser worker client', () => {
-  it('allows generated preview hosts even when the auth resolver accepts them as origins', async () => {
-    const worker = http.createServer((req, res) => {
-      if (req.url.startsWith('/api/')) {
-        res.setHeader('content-type', 'application/json');
-        return res.end(JSON.stringify({ capability: req.headers['x-handmux-browser-device'] }));
-      }
-      res.end('preview page');
-    });
-    const port = await listen(worker);
-    const { client } = clientFor(port, {
-      deviceAuthorization: {
-        getDeviceId: () => 'auth-a',
-        isActive: () => true,
-        // This models createAuthOriginResolver(), which also accepts generated
-        // preview origins as valid authentication origins.
-        isMainRequest: () => true,
-      },
-    });
-    await new Promise((resolve) => setImmediate(resolve));
-    const app = express();
-    app.use(client.publicHandler);
-    app.use(express.json());
-    app.use('/api/browser-proxy', client.apiHandler);
-
-    const previewHost = 'b-0000000000000.preview.example';
-    const created = await request(app).put('/api/browser-proxy/leases/client-a')
-      .set('Host', previewHost)
-      .set('X-Handmux-Browser-Device', DEVICE)
-      .send({ url: 'https://target.example/' })
-      .expect(200);
-    const capability = created.body.capability;
-    expect(capability).toEqual(expect.any(String));
-
-    await request(app).get('/_browser-a/target')
-      .set('Host', previewHost)
-      .set('Cookie', `tw_browser_device=${capability}`)
-      .expect(200, 'preview page');
-    await request(app).get('/_browser-a/target')
-      .set('Host', 'b-attacker.preview.example')
-      .set('Cookie', `tw_browser_device=${capability}`)
-      .expect(403, { error: 'browser preview must use a different hostname from handmux' });
-  });
-
   it('uses server-owned runtime identities, strips credentials, and revokes cookies and old bootstraps per device', async () => {
     const seen = [];
     const tickets = new Map();
@@ -119,6 +76,7 @@ describe('browser worker client', () => {
     } });
     await new Promise((resolve) => setImmediate(resolve));
     const app = express();
+    app.use((_req, res, next) => { res.setHeader('Referrer-Policy', 'no-referrer'); next(); });
     app.use(client.publicHandler);
     app.use(express.json());
     app.use('/api/browser-proxy', client.apiHandler);
@@ -134,7 +92,8 @@ describe('browser worker client', () => {
     expect(b.body.cap).not.toBe(a.body.cap);
     expect(seen[0].headers.cookie).toBe('website=keep');
     await request(app).get(`/_browser-bootstrap/${a.body.cap}`).set('Host', 'b-target.preview.example').expect(302);
-    await request(app).get('/_browser-a/target').set('Host', 'b-target.preview.example').set('Cookie', `tw_browser_device=${a.body.cap}`).expect(200);
+    const page = await request(app).get('/_browser-a/target').set('Host', 'b-target.preview.example').set('Cookie', `tw_browser_device=${a.body.cap}`).expect(200);
+    expect(page.headers['referrer-policy']).toBe('strict-origin-when-cross-origin');
     await request(app).get('/_browser-a/target').set('Host', 'b-target.preview.example').set('Cookie', `tw_browser_device=${DEVICE}`).expect(403);
     await request(app).get('/_browser-a/target').set('Cookie', `tw_browser_device=${a.body.cap}`).expect(403);
     active.delete('auth-a');

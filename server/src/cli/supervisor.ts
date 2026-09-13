@@ -28,6 +28,7 @@ const VERSION = typeof packageInfo === 'object' && packageInfo !== null && 'vers
   && typeof packageInfo.version === 'string' ? packageInfo.version : 'unknown';
 
 export interface SupervisorConfig extends TunnelConfig {
+  authMode?: 'token' | 'trusted-device';
   tunnel: TunnelName;
   port: number;
   host: string;
@@ -75,6 +76,7 @@ interface SuperviseOptions {
   processRef?: SupervisorProcess;
 }
 interface SupervisorState {
+  authMode?: 'token' | 'trusted-device';
   supervisorPid: number;
   version: string;
   startedAt: number;
@@ -110,11 +112,10 @@ export function lanUrl(
   return null;
 }
 
-// Kept as a source-compatible helper for integrations that imported the old
-// name. Credentials are deliberately never put in a URL; QR and CLI output
-// carry only the address and the browser asks for the Token separately.
-export function publicUrlWithToken(base: string | null, _token: string): string | null {
-  return bareUrl(base);
+// The token rides in the query string so the first navigation (or a QR scan) authenticates in one shot.
+export function publicUrlWithToken(base: string | null, token: string): string | null {
+  if (!base) return base;
+  return `${base.replace(/\/$/, '')}/?token=${encodeURIComponent(token)}`;
 }
 
 // Bare address with no token in it — printed/QR-encoded so a link can be shared or screenshotted without
@@ -156,6 +157,9 @@ export function supervise(cfg: SupervisorConfig, {
     tunnel: cfg.tunnel,
     port: cfg.port,
     host: cfg.host,
+    authMode: cfg.authMode ?? 'token',
+    // Keep the credential stable even while fixed Token login is disabled; runtime auth state
+    // controls whether it is accepted, and retaining it prevents regeneration on restart.
     token: cfg.token,
     localUrl: `http://localhost:${cfg.port}`,
     lanUrl: lanUrl(cfg.port),
@@ -167,6 +171,8 @@ export function supervise(cfg: SupervisorConfig, {
     error: null,
   };
   const persist = (): void => {
+    // Keep the legacy top-level fields during migration, but derive them from the explicit component
+    // machines so `ready` can never outlive the Server process that earned it.
     state.serverPid = components.server.pid;
     state.tunnelPid = components.tunnel.pid;
     state.ready = components.server.phase === 'ready';
@@ -205,6 +211,7 @@ export function supervise(cfg: SupervisorConfig, {
       HANDMUX_PORT: String(cfg.port),
       HANDMUX_HOST: cfg.host,
       HANDMUX_TOKEN: cfg.token,
+      HANDMUX_AUTH_MODE: cfg.authMode ?? 'token',
       CLAUDE_STATE_FILE: claudeStatePath(home),
       PUSH_STORE: pushStorePath(home),
       PREVIEW_STORE: previewStorePath(home),
