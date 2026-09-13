@@ -114,8 +114,8 @@ describe('url helpers', () => {
     };
     expect(lanUrl(8080, ifaces)).toBe('http://192.168.1.42:8080');
   });
-  it('keeps credentials out of generated URLs', () => {
+  it('embeds the token in the query string', () => {
     expect(publicUrlWithToken('https://x.trycloudflare.com', 'a b'))
-      .toBe('https://x.trycloudflare.com/');
+      .toBe('https://x.trycloudflare.com/?token=a%20b');
   });
 });

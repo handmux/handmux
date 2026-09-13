@@ -452,15 +452,16 @@ export function createTerminalStream({
         ws.close(1003, 'bad subscribe message');
         return;
       }
-      if (deviceAuth) {
-        const origin = origins.get(ws) ?? '';
-        const tokenPrincipal = deviceAuth.service.authenticateToken?.(message.token, origin);
-        // The fixed Token is a permanent second factor. A token-only socket is
-        // allowed to finish the WebSocket handshake so the client can receive
-        // the normal auth failure, but it can never start a terminal stream.
-        if (!principal || !tokenPrincipal || !stillAuthorized()) { ws.close(4001, 'unauthorized'); return; }
-      } else if (!tokenEquals(message.token ?? '', token)) {
+      if (deviceAuth && principal && !principal.deviceId.startsWith('token_') && 'token' in message) {
         ws.close(4001, 'unauthorized'); return;
+      }
+      if (deviceAuth && !principal) {
+        principal = deviceAuth.service.authenticateToken?.(message.token, origins.get(ws) ?? '') ?? undefined;
+        if (principal) principals.set(ws, principal);
+      }
+      if (deviceAuth ? !stillAuthorized() : !tokenEquals(message.token ?? '', token)) {
+        ws.close(4001, 'unauthorized');
+        return;
       }
       authenticating = true;
       cancelSubscribeDeadline();

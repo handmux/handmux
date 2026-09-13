@@ -42,7 +42,7 @@ import { useBrowser } from './hooks/useBrowser.js';
 import { browserEntryStatus } from './browserState.js';
 import { usePollingLoop } from './hooks/usePollingLoop.js';
 import { useServerConfig } from './hooks/useServerConfig.js';
-import { authHandled, isOriginRejectedError } from './authGuard.js';
+import { authHandled } from './authGuard.js';
 import {
   clearPaneConversationIdentities,
   currentPaneAgent,
@@ -78,9 +78,8 @@ import {
 import PaneSurfaceHost from './components/PaneSurfaceHost.jsx';
 import TokenPrompt from './components/TokenPrompt.jsx';
 import DevicePairingPrompt from './components/DevicePairingPrompt.js';
-import OriginRejectedPrompt from './components/OriginRejectedPrompt.js';
 import DeviceLogoutDialog from './components/DeviceLogoutDialog.js';
-import { applyAuthStatus, authRequest, AuthRequestError, hasAuthenticatedSession, hasDeviceSession, isDeviceAuth, isFixedTokenEnabled, logoutDevice } from './authSession.js';
+import { hasAuthenticatedSession, hasDeviceSession, isDeviceAuth, isFixedTokenEnabled, logoutDevice } from './authSession.js';
 import Settings from './components/Settings.jsx';
 import WorkspaceRestoreDialog from './components/WorkspaceRestoreDialog.jsx';
 import UsagePage from './components/UsagePage.jsx';
@@ -286,12 +285,7 @@ export default function App() {
   const terminalStream = typeof window !== 'undefined'
     && terminalStreamEnabled(window.location, terminalTransport);
   const [needToken, setNeedToken] = useState(!hasAuthenticatedSession());
-  // The fixed Token is always the first factor. A saved value still has to be
-  // presented to the auth authority before the trusted-device check; never
-  // let the pairing screen become an implicit Token-only login path.
-  const [authPrompt, setAuthPrompt] = useState<'device' | 'token' | 'origin'>('token');
-  const [tokenCheckBusy, setTokenCheckBusy] = useState(false);
-  const [tokenCheckError, setTokenCheckError] = useState('');
+  const [authPrompt, setAuthPrompt] = useState<'device' | 'token'>('device');
   const [logoutConfirm, setLogoutConfirm] = useState(false);
   const [logoutBusy, setLogoutBusy] = useState(false);
   const [logoutError, setLogoutError] = useState('');
@@ -490,33 +484,7 @@ export default function App() {
   const recoveryContextRef = useRef<RecoveryContext | null>(null);
   const drawerMenuRef = useRef<HTMLButtonElement | null>(null);
 
-  const onAuthFail = useCallback((error?: unknown) => {
-    setNeedToken(true);
-    setAuthPrompt((current) => isOriginRejectedError(error) || current === 'origin' ? 'origin' : 'token');
-  }, []);
-  const retryOrigin = useCallback(() => {
-    // /api/auth/status is intentionally available as a bootstrap endpoint even for an untrusted
-    // origin. Reload so the first business request re-checks the origin after the user registers it.
-    window.location.reload();
-  }, []);
-  const validateToken = useCallback(() => {
-    setTokenCheckBusy(true);
-    setTokenCheckError('');
-    void authRequest().then((status) => {
-      applyAuthStatus(status);
-      // A valid Token may complete both factors when this browser already has a
-      // live device cookie. Skip mounting the pairing screen in that case; doing
-      // so avoids a transient auth view while the business requests resume.
-      if (status.authenticated) {
-        setNeedToken(false);
-        setBooting(true);
-      } else if (status.tokenAuthenticated === true || status.mode === 'token') setAuthPrompt('device');
-      else setTokenCheckError(t('auth.tokenInvalid'));
-    }).catch((error: unknown) => {
-      setTokenCheckError(error instanceof AuthRequestError && error.code === 'AUTH_ORIGIN_REJECTED'
-        ? t('auth.originRejected') : t('auth.connectionError'));
-    }).finally(() => setTokenCheckBusy(false));
-  }, []);
+  const onAuthFail = useCallback(() => setNeedToken(true), []);
   const {
     enqueueInput: enqueueTerminalInput,
     enqueueKeys: enqueueTerminalKeys,
@@ -2432,11 +2400,8 @@ export default function App() {
   });
 
   if (needToken) {
-    if (authPrompt === 'origin') return <OriginRejectedPrompt onRetry={retryOrigin} />;
-    if (authPrompt === 'token' && isFixedTokenEnabled()) {
-      return <TokenPrompt onSaved={validateToken} error={tokenCheckError} busy={tokenCheckBusy} />;
-    }
-    return <DevicePairingPrompt onSaved={() => { setNeedToken(false); setBooting(true); }} />;
+    if (authPrompt === 'token' && isFixedTokenEnabled()) return <TokenPrompt onSaved={() => { setNeedToken(false); setBooting(true); }} onSwitch={() => setAuthPrompt('device')} />;
+    return <DevicePairingPrompt onSaved={() => { setNeedToken(false); setBooting(true); }} {...(isFixedTokenEnabled() ? { onSwitch: () => setAuthPrompt('token') } : {})} />;
   }
 
   const inboxList = inboxRows(states, seen, readTs == null ? Infinity : readTs);

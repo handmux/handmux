@@ -24,33 +24,41 @@ describe('interactive auth add', () => {
   });
   it('asks only missing fields, uses summary for blank name, and closes control on cancel', async () => {
     const c = control(); prompts.text.mockResolvedValueOnce(''); prompts.confirm.mockResolvedValueOnce(true);
-    expect(await runAuthCommand({ argv: ['add', '--code', '038271', '--expire', 'never'], home: '/unused', interactive: true, connect: c.connect, log: vi.fn() })).toBe(0);
+    expect(await runAuthCommand({ argv: ['add', '038271', '--expire', 'never'], home: '/unused', interactive: true, connect: c.connect, log: vi.fn() })).toBe(0);
     expect(prompts.select).not.toHaveBeenCalled(); expect(c.request).toHaveBeenLastCalledWith({ op: 'authorize', id: 'pair_1', name: 'Safari', expire: 'never' });
     const c2 = control(); prompts.text.mockResolvedValueOnce(prompts.canceled);
-    expect(await runAuthCommand({ argv: ['add', '--code', '038271'], home: '/unused', interactive: true, connect: c2.connect, log: vi.fn(), err: vi.fn() })).toBe(1);
+    expect(await runAuthCommand({ argv: ['add', '038271'], home: '/unused', interactive: true, connect: c2.connect, log: vi.fn(), err: vi.fn() })).toBe(1);
     expect(c2.request).toHaveBeenCalledOnce(); expect(c2.close).toHaveBeenCalledOnce();
   });
   it('complete parameters never prompt even in a TTY', async () => {
     const c = control();
-    expect(await runAuthCommand({ argv: ['add', '--code', '038271', '--name', 'A', '--expire', '1h'], home: '/unused', interactive: true, connect: c.connect, log: vi.fn() })).toBe(0);
+    expect(await runAuthCommand({ argv: ['add', '038271', '--name', 'A', '--expire', '1h'], home: '/unused', interactive: true, connect: c.connect, log: vi.fn() })).toBe(0);
     expect(prompts.text).not.toHaveBeenCalled(); expect(prompts.select).not.toHaveBeenCalled(); expect(prompts.confirm).not.toHaveBeenCalled();
   });
 });
 
 describe('fixed Token login controls', () => {
   beforeEach(() => { vi.clearAllMocks(); });
-  it('reports that the fixed Token is always enabled', async () => {
-    const request = vi.fn(async () => ({ enabled: true, devices: [] }));
+  it('requires explicit confirmation to enable', async () => {
+    const request = vi.fn(async (a: Record<string, unknown>) => a.op === 'token-status' ? { enabled: false, devices: [] } : { enabled: true });
     const connect = vi.fn(async () => ({ request, close: vi.fn() }));
+    prompts.confirm.mockResolvedValueOnce(true);
     expect(await runAuthCommand({ argv: ['token', 'enable'], home: '/unused', interactive: true, connect, log: vi.fn() })).toBe(0);
-    expect(request).toHaveBeenLastCalledWith({ op: 'token-status' });
-    expect(prompts.confirm).not.toHaveBeenCalled();
+    expect(request).toHaveBeenLastCalledWith({ op: 'token-enable' });
   });
-  it('rejects the removed disable operation without prompting', async () => {
-    const request = vi.fn(async () => ({ enabled: true, devices: [] }));
+  it('requires DISABLE TOKEN when disabling with no devices', async () => {
+    const request = vi.fn(async (a: Record<string, unknown>) => a.op === 'token-status' ? { enabled: true, devices: [] } : { enabled: false, devices: [] });
     const connect = vi.fn(async () => ({ request, close: vi.fn() }));
-    expect(await runAuthCommand({ argv: ['token', 'disable'], home: '/unused', interactive: true, connect, log: vi.fn(), err: vi.fn() })).toBe(1);
-    expect(request).toHaveBeenLastCalledWith({ op: 'token-status' });
-    expect(prompts.text).not.toHaveBeenCalled(); expect(prompts.confirm).not.toHaveBeenCalled();
+    prompts.text.mockResolvedValueOnce('DISABLE TOKEN');
+    expect(await runAuthCommand({ argv: ['token', 'disable'], home: '/unused', interactive: true, connect, log: vi.fn() })).toBe(0);
+    expect(request).toHaveBeenLastCalledWith({ op: 'token-disable', allowEmpty: true });
+  });
+  it('confirms with devices and sends allowEmpty false', async () => {
+    const devices = [{ id: 'd1', name: 'Mac', status: 'active', expires_at: null, authorized_at: 1, last_used_at: 1 }];
+    const request = vi.fn(async (a: Record<string, unknown>) => a.op === 'token-status' ? { enabled: true, devices } : { enabled: false, devices });
+    const connect = vi.fn(async () => ({ request, close: vi.fn() }));
+    prompts.confirm.mockResolvedValueOnce(true);
+    expect(await runAuthCommand({ argv: ['token', 'disable'], home: '/unused', interactive: true, connect, log: vi.fn() })).toBe(0);
+    expect(request).toHaveBeenLastCalledWith({ op: 'token-disable', allowEmpty: false });
   });
 });

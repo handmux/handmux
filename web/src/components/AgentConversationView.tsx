@@ -141,6 +141,9 @@ export default function AgentConversationView({
   const lastScrollTopRef = useRef(0);
   const lastScrollGestureAtRef = useRef(0);
   const requestInFlightRef = useRef(false);
+  const olderRequestVisibleCountRef = useRef<number | null>(null);
+  const olderRequestFirstKeyRef = useRef<string | null>(null);
+  const visibleMessageCountRef = useRef(0);
   const pageAnchorRef = useRef<PageAnchor | null>(null);
   const [settledRequest, setSettledRequest] = useState(0);
   const [pageError, setPageError] = useState<string | null>(null);
@@ -199,6 +202,10 @@ export default function AgentConversationView({
     () => projectConversationMessages(conversation.items),
     [conversation.items],
   );
+  const visibleMessageCount = messages.filter((message) => (
+    message.type !== 'thinking' && message.type !== 'plan'
+  )).length;
+  visibleMessageCountRef.current = visibleMessageCount;
   const historicalPlans = useMemo(() => {
     const latest = new Map<string, TranscriptMessage>();
     const lastAnswerIndex = new Map<string, number>();
@@ -313,6 +320,8 @@ export default function AgentConversationView({
       scrollHeight: element.scrollHeight,
     };
     requestInFlightRef.current = true;
+    olderRequestVisibleCountRef.current = visibleMessageCountRef.current;
+    olderRequestFirstKeyRef.current = firstKey;
     setPageError(null);
     void conversation.loadOlder().catch(() => {
       pageAnchorRef.current = null;
@@ -383,6 +392,32 @@ export default function AgentConversationView({
       && conversation.items[0]?.key === anchor.firstKey) pageAnchorRef.current = null;
   }, [conversation.items, conversation.loadingOlder, settledRequest]);
   useEffect(() => {
+    // Pagination counts normalized items, while tool results are intentionally latent in the
+    // transcript. If a page adds only those hidden rows, there is no new DOM height to generate
+    // another top-edge scroll event; keep walking the cursor while the reader is still at the top.
+    const before = olderRequestVisibleCountRef.current;
+    const beforeFirstKey = olderRequestFirstKeyRef.current;
+    if (before === null || beforeFirstKey === null || conversation.loadingOlder || requestInFlightRef.current) return;
+    if (conversation.items[0]?.key === beforeFirstKey) {
+      if (pageError || !conversation.hasMore) {
+        olderRequestVisibleCountRef.current = null;
+        olderRequestFirstKeyRef.current = null;
+      }
+      return;
+    }
+    const element = scrollRef.current;
+    if (!element || pageError || !conversation.hasMore
+      || element.scrollTop > HISTORY_TOP_TRIGGER_PX) {
+      olderRequestVisibleCountRef.current = null;
+      olderRequestFirstKeyRef.current = null;
+      return;
+    }
+    olderRequestVisibleCountRef.current = null;
+    olderRequestFirstKeyRef.current = null;
+    if (visibleMessageCount <= before) requestOlder();
+  }, [conversation.hasMore, conversation.items, conversation.loadingOlder, pageError,
+    requestOlder, settledRequest, visibleMessageCount]);
+  useEffect(() => {
     if (followLatestRequest > 0) scrollToBottom();
   }, [followLatestRequest, scrollToBottom]);
   useEffect(() => {
@@ -432,9 +467,6 @@ export default function AgentConversationView({
       || (timelineWorking && !activeAssistant)
   );
 
-  const visibleMessageCount = messages.filter((message) => (
-    message.type !== 'thinking' && message.type !== 'plan'
-  )).length;
   const canonicalReady = conversation.canonicalReady
     ?? (conversation.status !== 'loading' && conversation.status !== 'reconnecting');
   const loading = !canonicalReady && conversation.status !== 'error';

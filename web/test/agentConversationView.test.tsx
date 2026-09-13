@@ -2874,6 +2874,40 @@ describe('generic Agent Conversation UI', () => {
     expect(loadOlder).toHaveBeenCalledOnce();
   });
 
+  it('continues across an older page made only of hidden tool results', async () => {
+    const loadOlder = vi.fn(async () => {});
+    const visible = {
+      key: 'visible-tool', provisional: false,
+      item: {
+        id: 'visible-tool', sessionId: 'session-1', status: 'complete' as const,
+        kind: 'tool_call' as const, callId: 'visible-call', name: 'exec_command', input: { cmd: 'pwd' },
+      },
+    };
+    const initial = controller({ hasMore: true, loadOlder, items: [visible] });
+    const { container, rerender } = render(<AgentConversationView conversation={initial} />);
+    const scroll = container.querySelector('.chat-scroll') as HTMLDivElement;
+
+    await act(async () => {
+      fireEvent.wheel(scroll, { deltaY: -20 });
+      await Promise.resolve();
+    });
+    expect(loadOlder).toHaveBeenCalledOnce();
+
+    const hiddenResult = {
+      key: 'hidden-result', provisional: false,
+      item: {
+        id: 'hidden-result', sessionId: 'session-1', status: 'complete' as const,
+        kind: 'tool_result' as const, callId: 'older-call',
+        content: [{ type: 'text' as const, text: 'older output' }],
+      },
+    };
+    rerender(<AgentConversationView conversation={controller({
+      hasMore: true, loadOlder, items: [hiddenResult, visible],
+    })} />);
+
+    await waitFor(() => expect(loadOlder).toHaveBeenCalledTimes(2));
+  });
+
   it('uses the shared working state when no provider provisional item exists', () => {
     const createdAt = new Date(2026, 7, 29, 9, 7).getTime();
     const message = (key: string, role: 'user' | 'assistant', text: string) => ({

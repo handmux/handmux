@@ -32,8 +32,8 @@ function SwitchAuthHelp({ onClose }: { onClose: () => void }) {
       <ol className="auth-help-steps">
         <li><p>{t('auth.switchSetup')}</p><div className="auth-help-command"><code ref={node => { commands.current[0] = node; }}>handmux setup</code>
           <button type="button" onClick={() => { void copy('handmux setup', 0); }} aria-label={t('auth.copySetup')}>{t('common.copy')}</button></div></li>
-        <li><p>{t('auth.switchRestart')}</p><div className="auth-help-command"><code ref={node => { commands.current[1] = node; }}>handmux auth add</code>
-          <button type="button" onClick={() => { void copy('handmux auth add', 1); }} aria-label={t('auth.copyRestart')}>{t('common.copy')}</button></div></li>
+        <li><p>{t('auth.switchRestart')}</p><div className="auth-help-command"><code ref={node => { commands.current[1] = node; }}>handmux auth token enable</code>
+          <button type="button" onClick={() => { void copy('handmux auth token enable', 1); }} aria-label={t('auth.copyRestart')}>{t('common.copy')}</button></div></li>
       </ol>
       <p className="auth-secondary">{t('auth.switchAfter')}</p>
       {copyHint && <p role="status">{copyHint}</p>}
@@ -43,21 +43,21 @@ function SwitchAuthHelp({ onClose }: { onClose: () => void }) {
 }
 
 /** One presentation for both authentication modes; the active mode remains server-controlled. */
-export default function AuthFrame({ title, mode, showHelp = true, children }: {
-  title: string; mode?: 'token' | 'trusted-device'; showHelp?: boolean; children: ReactNode;
+export default function AuthFrame({ title, mode, children }: {
+  title: string; mode?: 'token' | 'trusted-device'; children: ReactNode;
 }) {
   const [help, setHelp] = useState(false);
   return <main className="auth-page">
     <div className="auth-layout">
       <header className="auth-brand"><img src="/icons/icon-192.png" alt="" width="52" height="52" />
-        <span>handmux</span><p>{t('auth.welcome')}</p>
+        <span>HandMux</span><p>{t('auth.welcome')}</p>
       </header>
       <section className="auth-card" aria-labelledby="auth-heading">
         {mode && <span className={`auth-mode auth-mode-${mode}`}>{t(mode === 'token' ? 'devices.token' : 'devices.trusted')}</span>}
         <h1 id="auth-heading">{title}</h1>
         {children}
       </section>
-      {showHelp && <footer className="auth-footer"><button type="button" onClick={() => setHelp(true)}>{t('auth.switchLink')}</button></footer>}
+      <footer className="auth-footer"><button type="button" onClick={() => setHelp(true)}>{t('auth.switchLink')}</button></footer>
     </div>
     {help && <SwitchAuthHelp onClose={() => setHelp(false)} />}
   </main>;

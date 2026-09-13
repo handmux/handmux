@@ -2,12 +2,10 @@ import { networkInterfaces } from 'node:os';
 import type { IncomingMessage } from 'node:http';
 import type { RequestHandler, Response } from 'express';
 import type { DevicePrincipal } from './deviceAuth/service.js';
-import { originPatternMatches } from './deviceAuth/service.js';
 import { readSessionSecret } from './deviceAuth/service.js';
 import { setSessionCookie } from './deviceAuth/http.js';
 import { withRequestAuthority } from './requestAuthority.js';
 import { bearerFrom } from './auth.js';
-import { requestOrigin } from './requestOrigin.js';
 export type { DevicePrincipal } from './deviceAuth/service.js';
 
 export interface DeviceAccessService {
@@ -21,10 +19,9 @@ export interface DeviceAccessService {
 
 /** Host and forwarded headers select a known entry point; they never create a trusted origin. */
 export function createAuthOriginResolver({
-  port, host, publicUrl, previewDomain, trustedOrigins = () => [], runtimePublicUrl = () => null,
+  port, host, publicUrl, runtimePublicUrl = () => null,
 }: {
-  port: number; host: string; publicUrl?: string; previewDomain?: string;
-  trustedOrigins?: () => readonly string[];
+  port: number; host: string; publicUrl?: string;
   runtimePublicUrl?: () => string | null;
 }): (req: IncomingMessage) => string | null {
   const local = new Set<string>();
@@ -33,19 +30,20 @@ export function createAuthOriginResolver({
     try { local.add(new URL(`http://${hostname.includes(':') ? `[${hostname}]` : hostname}:${port}`).origin); } catch {}
   };
   for (const hostname of ['localhost', '127.0.0.1', '::1', host]) add(hostname);
-  const configuredPatterns: string[] = [];
-  if (previewDomain) {
-    try {
-      const url = new URL(/^https?:\/\//i.test(previewDomain) ? previewDomain : `https://${previewDomain}`);
-      if (url.hostname && !url.hostname.includes('*')) configuredPatterns.push(`https://*.${url.hostname}`);
-    } catch { /* an invalid preview domain is rejected by its own setup validation */ }
-  }
   for (const entries of Object.values(networkInterfaces())) {
     for (const entry of entries ?? []) if (!entry.address.includes('%')) add(entry.address);
   }
   return (req) => {
-    const origin = requestOrigin(req);
-    if (!origin) return null;
+    const encrypted = 'encrypted' in req.socket && Boolean(req.socket.encrypted);
+    const remote = req.socket.remoteAddress;
+    const loopback = remote === '127.0.0.1' || remote === '::1' || remote === '::ffff:127.0.0.1';
+    const forwarded = req.headers['x-forwarded-proto'];
+    const protocol = !encrypted && loopback && (forwarded === 'http' || forwarded === 'https')
+      ? forwarded : encrypted ? 'https' : 'http';
+    const hostHeader = req.headers.host;
+    if (!hostHeader || /[\s,/@\\?#]/.test(hostHeader)) return null;
+    let origin: string;
+    try { origin = new URL(`${protocol}://${hostHeader}`).origin; } catch { return null; }
     if (local.has(origin)) return origin;
     for (const known of [publicUrl, runtimePublicUrl()]) {
       if (!known) continue;
@@ -53,10 +51,6 @@ export function createAuthOriginResolver({
         const url = new URL(known);
         if (!url.username && !url.password && ['http:', 'https:'].includes(url.protocol) && url.origin === origin) return origin;
       } catch {}
-    }
-    for (const pattern of [...configuredPatterns, ...trustedOrigins()]) {
-      if (!pattern) continue;
-      if (originPatternMatches(pattern, origin)) return origin;
     }
     return null;
   };
@@ -74,17 +68,14 @@ export function createDeviceAccess({ service, resolveOrigin }: {
   const authenticate = (req: IncomingMessage): DevicePrincipal | null => {
     const origin = resolveOrigin(req);
     if (!origin) return null;
-    const device = service.authenticateRequest(req, origin);
-    const token = service.authenticateToken?.(
-      bearerFrom(typeof req.headers.authorization === 'string' ? req.headers.authorization : undefined)
-        ?? req.headers['x-handmux-token'], origin,
-    ) ?? null;
-    return device && token ? device : null;
+    return service.authenticateRequest(req, origin)
+      ?? service.authenticateToken?.(bearerFrom(typeof req.headers.authorization === 'string' ? req.headers.authorization : undefined) ?? req.headers['x-handmux-token'], origin) ?? null;
   };
   const middleware: RequestHandler = (req, res, next) => {
     res.setHeader('Cache-Control', 'no-store');
     const origin = resolveOrigin(req);
-    if (!origin || (req.headers.origin !== undefined && req.headers.origin !== origin)) {
+    if (!origin || (req.headers.origin !== undefined && req.headers.origin !== origin)
+      || req.get('X-Handmux-Request') !== '1') {
       res.status(403).json({ error: 'untrusted request origin', code: 'origin_rejected' });
       return;
     }

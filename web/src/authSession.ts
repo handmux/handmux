@@ -13,9 +13,6 @@ export interface PairingState {
 export interface AuthStatus {
   mode: AuthMode;
   tokenEnabled?: boolean;
-  tokenAuthenticated?: boolean;
-  migrationRequired?: boolean;
-  requiresTrustedDevice?: boolean;
   currentDeviceId?: string | null;
   authenticated: boolean;
   serverTime: number;
@@ -43,9 +40,9 @@ export function applyAuthStatus(status: AuthStatus): void {
 function savedToken(): string | null { try { return getToken(); } catch { return null; } }
 
 export function authenticationHeaders(extra: Record<string, string> = {}): Record<string, string> {
-  const token = savedToken();
   return {
-    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    'X-Handmux-Request': '1',
+    ...(!hasDeviceSession() && savedToken() ? { Authorization: `Bearer ${savedToken()}` } : {}),
     ...extra,
   };
 }
@@ -73,12 +70,12 @@ async function performAuthRequest(path: string, method: string, id?: string): Pr
   try {
     const response = await fetch(path, {
       method, credentials: 'same-origin', cache: 'no-store', signal: controller.signal,
-      headers: { ...authenticationHeaders(), ...(id ? { 'Content-Type': 'application/json' } : {}) },
+      headers: { 'X-Handmux-Request': '1', ...(!hasDeviceSession() && savedToken() ? { Authorization: `Bearer ${savedToken()}` } : {}), ...(id ? { 'Content-Type': 'application/json' } : {}) },
       ...(id ? { body: JSON.stringify({ id }) } : {}),
     });
     if (!response.ok) {
       let code: string | null = null;
-      try { const body = await response.json() as { code?: unknown; error?: unknown }; const value = typeof body.code === 'string' ? body.code : body.error; if (typeof value === 'string') code = value; } catch { /* proxy non-JSON */ }
+      try { const body = await response.json() as { code?: unknown }; if (typeof body.code === 'string') code = body.code; } catch { /* proxy non-JSON */ }
       throw new AuthRequestError(response.status, code);
     }
     const value = await response.json() as AuthStatus;

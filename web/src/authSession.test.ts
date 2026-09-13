@@ -12,23 +12,23 @@ afterEach(() => {
 });
 
 describe('device authentication transport', () => {
-  it('sends the fixed Token together with a confirmed device session', async () => {
+  it('prefers a confirmed device session over a saved fixed Token', async () => {
     localStorage.setItem('tw_token', 'old-shared-token');
     applyAuthStatus(status());
     expect(localStorage.getItem('tw_token')).toBe('old-shared-token');
-    expect(authenticationHeaders()).toEqual({ Authorization: 'Bearer old-shared-token' });
+    expect(authenticationHeaders()).toEqual({ 'X-Handmux-Request': '1' });
     const fetcher = vi.fn(async () => json({ ok: true }));
     vi.stubGlobal('fetch', fetcher);
     await requestJson('/api/sessions');
     expect(fetcher).toHaveBeenCalledWith('/api/sessions', expect.objectContaining({
-      credentials: 'same-origin', cache: 'no-store', headers: { Authorization: 'Bearer old-shared-token' },
+      credentials: 'same-origin', cache: 'no-store', headers: { 'X-Handmux-Request': '1' },
     }));
   });
 
   it('sends Bearer with origin protection when only fixed Token login is available', () => {
     applyAuthStatus({ mode: 'trusted-device', tokenEnabled: true, currentDeviceId: null, authenticated: false, serverTime: Date.now() });
     localStorage.setItem('tw_token', 'legacy');
-    expect(authenticationHeaders()).toEqual({ Authorization: 'Bearer legacy' });
+    expect(authenticationHeaders()).toEqual({ 'X-Handmux-Request': '1', Authorization: 'Bearer legacy' });
   });
 
   it('does not treat a proxy 401 as a revoked device', async () => {

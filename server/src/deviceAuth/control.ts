@@ -42,15 +42,15 @@ export async function startDeviceAuthControl({ service, home, handlePush, handle
             else if (args.op === 'list') result = service.list();
             else if (args.op === 'edit') result = service.edit(String(args.id ?? ''), { name: args.name, expire: args.expire });
             else if (args.op === 'revoke') result = service.revoke(String(args.id ?? ''));
-            else if (args.op === 'token-status') result = { enabled: true, devices: service.list() };
-            else if (args.op === 'token-enable') { result = { enabled: true }; }
-            else if (args.op === 'token-disable') { service.setTokenEnabled(false, { allowEmpty: args.allowEmpty === true }); result = { enabled: true, devices: service.list() }; }
+            else if (args.op === 'token-status') result = { enabled: service.tokenEnabled, devices: service.list() };
+            else if (args.op === 'token-enable') { service.setTokenEnabled(true); result = { enabled: true }; }
+            else if (args.op === 'token-disable') { service.setTokenEnabled(false, { allowEmpty: args.allowEmpty === true }); result = { enabled: false, devices: service.list() }; }
             else if (args.op === 'push' && handlePush) result = await handlePush(args.body);
             else if (args.op === 'shortcuts' && handleShortcuts) result = await handleShortcuts(args.body);
             else throw new DeviceAuthError('INVALID_COMMAND', 'Unknown control command');
             if (!socket.destroyed) socket.write(`${JSON.stringify({ ok: true, result })}\n`);
           } catch (error) {
-            if (!socket.destroyed) socket.write(`${JSON.stringify({ ok: false, error: error instanceof DeviceAuthError ? error.code : 'AUTH_UNAVAILABLE', message: error instanceof DeviceAuthError ? error.message : 'Authentication operation unavailable; retry or restart handmux' })}\n`);
+            if (!socket.destroyed) socket.write(`${JSON.stringify({ ok: false, error: error instanceof DeviceAuthError ? error.code : 'AUTH_UNAVAILABLE', message: error instanceof DeviceAuthError ? error.message : 'Authentication operation unavailable; retry or restart HandMux' })}\n`);
           }
         });
       }
@@ -66,7 +66,7 @@ export async function connectAuthControl(home: string): Promise<{ request(args: 
   let terminalError: Error | undefined;
   let pending: { resolve(value: unknown): void; reject(error: Error): void } | undefined;
   const fail = (error: Error): void => { terminalError = error; pending?.reject(error); pending = undefined; };
-  socket.on('error', fail); socket.on('close', () => fail(new Error('handmux control connection closed; start handmux and retry')));
+  socket.on('error', fail); socket.on('close', () => fail(new Error('HandMux control connection closed; start HandMux and retry')));
   socket.setTimeout(360_000, () => socket.destroy(new Error('Device setup timed out; pair again')));
   socket.on('data', bytes => {
     buffer += bytes.toString('utf8');
@@ -77,12 +77,12 @@ export async function connectAuthControl(home: string): Promise<{ request(args: 
       const out = JSON.parse(line) as { ok: boolean; result?: unknown; message?: string };
       const p = pending; pending = undefined;
       if (out.ok) p?.resolve(out.result); else p?.reject(new Error(out.message ?? 'Authentication command failed'));
-    } catch { fail(new Error('Invalid handmux control response')); }
+    } catch { fail(new Error('Invalid HandMux control response')); }
   });
   await new Promise<void>((resolve, reject) => { socket.once('connect', resolve); socket.once('error', reject); });
   return {
     request(args) {
-      if (terminalError || socket.destroyed || !socket.writable) return Promise.reject(terminalError ?? new Error('handmux control connection closed; start handmux and pair again'));
+      if (terminalError || socket.destroyed || !socket.writable) return Promise.reject(terminalError ?? new Error('HandMux control connection closed; start HandMux and pair again'));
       if (pending) return Promise.reject(new Error('Control command already pending'));
       return new Promise((resolve, reject) => { pending = { resolve, reject }; socket.write(`${JSON.stringify(args)}\n`); });
     },

@@ -100,8 +100,8 @@ export function findTunnelId(listJsonOut: unknown, name: string): string | null 
 // The config keys the wizard owns: everything it can set. mergeConfig wipes these from the existing config
 // before re-applying the answers, so switching a tunnel (or clearing an optional field) cleanly drops the
 // old value instead of leaving a stale field behind. Anything NOT here (staticDir, uploadExts…) is
-// preserved untouched. `token` IS owned so the fixed Token can be changed from
-// its sub-page and round-trips through answersFromConfig on every setup run.
+// preserved untouched. `token` IS owned so the Token row can pin one AND clear it back to auto — but it
+// round-trips through answersFromConfig, so a re-run that never touches the row still writes it back.
 const WIZARD_KEYS = [
   'lang', 'name', 'port', 'tunnel', 'token', 'authMode', 'previewDomain',
   'sshHost', 'remotePort', 'sshJump', 'cfHostname', 'cfTunnelName', 'publicUrl',
@@ -118,13 +118,8 @@ export function configFromAnswers(a: SetupAnswers): SetupConfig {
   if (a.authMode) cfg.authMode = a.authMode;
   if (a.lang) cfg.lang = a.lang;
   if (a.name) cfg.name = a.name;
-  if (a.token) cfg.token = a.token;
+  if (a.token) cfg.token = a.token;   // blank = don't pin one → the server mints a fresh token each start
   if (a.previewDomain) cfg.previewDomain = a.previewDomain;
-  // Direct mode can sit behind a user-managed reverse tunnel or proxy.  Keep
-  // its public entry point in the same `publicUrl` field used by the built-in
-  // tunnel drivers so origin validation and the URL shown by `handmux start`
-  // use one source of truth.
-  if (a.tunnel === 'none' && a.publicUrl) cfg.publicUrl = a.publicUrl;
   if (a.tunnel === 'ssh') {
     cfg.sshHost = a.sshHost;
     cfg.remotePort = a.remotePort;
@@ -162,7 +157,7 @@ export function answersFromConfig(config: unknown = {}, defaultAuthMode: 'token'
     authMode: cfg.authMode === 'trusted-device' ? 'trusted-device' : cfg.authMode === 'token' ? 'token' : defaultAuthMode,
     lang: optionalString(cfg.lang) || getLocale(),
     name: optionalString(cfg.name) || '',
-    token: optionalString(cfg.token) || '',
+    token: optionalString(cfg.token) || '',   // '' = not pinned (auto each start); seeded so an untouched re-run rewrites it
     previewDomain: optionalString(cfg.previewDomain) || '',
     tunnel: isTunnel(cfg.tunnel) ? cfg.tunnel : 'none',
     port: Number(cfg.port) || 19999,
@@ -236,16 +231,6 @@ export function validatePreviewDomain(v: unknown): string | undefined {
   if (!s) return undefined;
   return /^[a-z0-9-]+(\.[a-z0-9-]+)+$/i.test(s) ? undefined : t('setup.valPreviewDomain');
 }
-export function validatePublicUrl(v: unknown): string | undefined {
-  const s = String(v || '').trim();
-  if (!s) return undefined;
-  try {
-    const url = new URL(s);
-    if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password
-      || url.pathname !== '/' || url.search || url.hash) return t('setup.valPublicUrl');
-    return undefined;
-  } catch { return t('setup.valPublicUrl'); }
-}
 // VAPID subject: Apple (APNs) rejects a fake/.local domain with BadJwtToken, so require a real-looking
 // mailto:you@host.tld or an https:// URL and reject the known-bad .local. Keeps push from silently
 // failing on iOS. (Can't fully validate "real" client-side — this just catches the obvious footguns.)
@@ -256,9 +241,8 @@ export function validateContact(v: unknown): string | undefined {
   if (!wellFormed || /\.local(?:[:/]|$)/i.test(s)) return t('setup.valContact');
   return undefined;
 }
-// The fixed Token is entered separately on the login page and is never put in
-// an address or QR code. Keep the value non-empty and whitespace-free so it
-// can be copied without ambiguity.
+// Access token: it rides in the phone's URL as ?token=…, so require something and reject whitespace (a space
+// would break the link). Length/charset are otherwise up to the user — a pinned token is used verbatim.
 export function validateToken(v: unknown): string | undefined {
   const s = String(v || '').trim();
   if (!s) return t('setup.valToken');
