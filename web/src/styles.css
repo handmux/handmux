@@ -310,7 +310,7 @@ button.settings-page-row:disabled, .settings-page-row.disabled { color: rgba(235
 .device-origin-label { min-width: 0; display: flex; align-items: center; gap: 4px; overflow: hidden; color: rgba(235,235,245,.72); font-size: 14px; line-height: 1.25; white-space: nowrap; }
 .device-origin-label b { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
 .device-origin-help { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; margin: 0 0 0 4px; padding: 0; border: 1px solid rgba(235,235,245,.42); border-radius: 50%; background: transparent; color: rgba(235,235,245,.68); font: 12px/1 -apple-system,system-ui,sans-serif; vertical-align: middle; cursor: pointer; }
-.device-origin-value { min-width: 0; max-width: 100%; justify-self: end; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #f2f2f7; font: 14px/1.35 ui-monospace, "SF Mono", Menlo, monospace; text-align: right; }
+.device-origin-value { min-width: 0; max-width: 100%; justify-self: stretch; display: block; overflow-wrap: anywhere; word-break: break-word; color: #f2f2f7; font: 12px/1.4 ui-monospace, "SF Mono", Menlo, monospace; text-align: right; }
 .device-origin-value.is-empty { color: rgba(235,235,245,.46); font-family: -apple-system, system-ui, sans-serif; }
 .device-origin-remove { min-height: 36px; margin: -1px -6px -1px 4px; padding: 0 8px; border: 0; border-radius: 8px; background: transparent; color: #ff6961; font: 13px/1.2 -apple-system, system-ui, sans-serif; }
 .device-origin-remove:disabled { opacity: .45; }
