@@ -123,6 +123,15 @@ describe('compact device management', () => {
     fireEvent.change(screen.getByLabelText(t('devices.name')), { target: { value: 'Linux computer' } }); fireEvent.click(screen.getByRole('button', { name: '7d' }));
     fireEvent.click(screen.getByRole('button', { name: t('devices.complete') })); await flush(); expect(authorize).toHaveBeenCalledWith(approval.id, { name: 'Linux computer', expire: '7d' });
   });
+  it('clears the code after an invalid claim so it can be entered again', async () => {
+    vi.spyOn(api, 'claim').mockRejectedValue(new DeviceManagementError('CODE_INVALID', 400));
+    render(<DeviceManagement onLoggedOut={vi.fn()} />); await flush();
+    fireEvent.click(screen.getByRole('button', { name: t('devices.authorizeOther') })); await flush();
+    const codeInput = screen.getByLabelText(t('devices.code')) as HTMLInputElement;
+    fireEvent.change(codeInput, { target: { value: '038271' } }); await flush();
+    expect(codeInput.value).toBe('');
+    expect(screen.getByRole('alert').textContent).toBe(t('devices.invalidCode'));
+  });
   it('resumes its claimed request after remount and cancellation must be confirmed by the server', async () => {
     sessionStorage.setItem('handmux.pendingApprovalId', approval.id);
     const cancel = vi.spyOn(api, 'cancel').mockRejectedValueOnce(new Error('offline')).mockResolvedValue({ approval: { ...approval, state: 'canceled' }, serverTime: now });

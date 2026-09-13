@@ -257,7 +257,13 @@ function AddDevice({ onClose, onAdded }: { onClose: () => void; onAdded: () => v
     changing.current = true; setBusy(true); setClaimingCode(true); setError('');
     unknownClaim.current = submittedCode;
     try { const result = await api.claim(submittedCode); unknownClaim.current = null; accept(result.approval, result.serverTime); setName(result.approval.browserSummary); setCode(''); }
-    catch (e) { if (e instanceof DeviceManagementError && e.code === 'CODE_INVALID') unknownClaim.current = null; setError(deviceErrorCopy(e)); }
+    catch (e) {
+      if (e instanceof DeviceManagementError && e.code === 'CODE_INVALID') {
+        unknownClaim.current = null;
+        setCode('');
+      }
+      setError(deviceErrorCopy(e));
+    }
     finally { changing.current = false; setBusy(false); setClaimingCode(false); if (closeRequested.current) void close(); }
   };
   const authorize = async () => {
@@ -304,7 +310,7 @@ function AddDevice({ onClose, onAdded }: { onClose: () => void; onAdded: () => v
         <button className="fontbtn device-save" disabled={busy || remaining === 0} onClick={() => { void authorize(); }}>{t('devices.complete')}</button></>
       : <><p role="status">{t('devices.pairingGone')}</p><button className="fontbtn" disabled={busy} onClick={() => { setApproval(null); approvalRef.current = null; setError(''); }}>{t('devices.newCode')}</button></>}
     {approval && error && <p role="alert">{error}</p>}{busy && <p role="status">{claimingCode ? t('devices.verifyingCode') : t('common.loading')}</p>}
-    <button className="fontbtn sheet-cancel" onClick={() => { void close(); }}>{t('common.cancel')}</button>
+    <button className="fontbtn sheet-cancel device-sheet-cancel" onClick={() => { void close(); }}>{t('common.cancel')}</button>
   </DeviceSheet>;
 }
 
