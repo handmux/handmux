@@ -13,6 +13,11 @@ export interface PairingState {
 export interface AuthStatus {
   mode: AuthMode;
   tokenEnabled?: boolean;
+  tokenAuthenticated?: boolean;
+  trustedDeviceEnabled?: boolean;
+  trustedOriginEnabled?: boolean;
+  originTrusted?: boolean;
+  requiresTrustedDevice?: boolean;
   currentDeviceId?: string | null;
   authenticated: boolean;
   serverTime: number;
@@ -22,17 +27,16 @@ export interface AuthStatus {
 // Public mode/state only. All device credentials remain in server-issued HttpOnly cookies.
 let authenticated = false;
 let currentDeviceId: string | null = null;
-let fixedTokenEnabled = false;
-export const isFixedTokenEnabled = (): boolean => fixedTokenEnabled;
+let tokenEnabled = false;
+export const isTokenEnabled = (): boolean => tokenEnabled;
 export const isDeviceAuth = (): boolean => true;
 export const hasAuthenticatedSession = (): boolean => authenticated;
 export const hasDeviceSession = (): boolean => authenticated && currentDeviceId !== null;
 export function applyAuthStatus(status: AuthStatus): void {
   authenticated = status.authenticated;
   currentDeviceId = status.currentDeviceId ?? null;
-  fixedTokenEnabled = status.tokenEnabled === true;
+  tokenEnabled = status.tokenEnabled === true;
   if (isDeviceAuth()) {
-    // An old token-mode Browser opt-in must not silently re-create a device capability.
     if (!authenticated) { try { setBrowserAccessEnabled(false); } catch { /* storage may be disabled */ } }
   }
 }
@@ -40,9 +44,9 @@ export function applyAuthStatus(status: AuthStatus): void {
 function savedToken(): string | null { try { return getToken(); } catch { return null; } }
 
 export function authenticationHeaders(extra: Record<string, string> = {}): Record<string, string> {
+  const token = savedToken();
   return {
-    'X-Handmux-Request': '1',
-    ...(!hasDeviceSession() && savedToken() ? { Authorization: `Bearer ${savedToken()}` } : {}),
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
     ...extra,
   };
 }
@@ -70,16 +74,16 @@ async function performAuthRequest(path: string, method: string, id?: string): Pr
   try {
     const response = await fetch(path, {
       method, credentials: 'same-origin', cache: 'no-store', signal: controller.signal,
-      headers: { 'X-Handmux-Request': '1', ...(!hasDeviceSession() && savedToken() ? { Authorization: `Bearer ${savedToken()}` } : {}), ...(id ? { 'Content-Type': 'application/json' } : {}) },
+      headers: { ...authenticationHeaders(), ...(id ? { 'Content-Type': 'application/json' } : {}) },
       ...(id ? { body: JSON.stringify({ id }) } : {}),
     });
     if (!response.ok) {
       let code: string | null = null;
-      try { const body = await response.json() as { code?: unknown }; if (typeof body.code === 'string') code = body.code; } catch { /* proxy non-JSON */ }
+      try { const body = await response.json() as { code?: unknown; error?: unknown }; const value = typeof body.code === 'string' ? body.code : body.error; if (typeof value === 'string') code = value; } catch { /* proxy non-JSON */ }
       throw new AuthRequestError(response.status, code);
     }
     const value = await response.json() as AuthStatus;
-    if (!value || value.mode !== 'trusted-device'
+    if (!value || (value.mode !== 'trusted-device' && value.mode !== 'token')
       || typeof value.authenticated !== 'boolean' || !Number.isFinite(value.serverTime)) {
       throw new Error('Invalid authentication response');
     }
@@ -92,7 +96,7 @@ export async function confirmedSessionInvalid(): Promise<boolean> {
   try {
     const status = await authRequest();
     applyAuthStatus(status);
-    return status.mode !== 'trusted-device' || !status.authenticated;
+    return !status.authenticated;
   } catch { return false; }
 }
 export async function authenticationError(): Promise<Error> {

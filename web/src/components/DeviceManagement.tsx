@@ -3,14 +3,17 @@ import { deviceManagementApi as api, DeviceManagementError, type DeviceApproval,
 import { isDeviceAuth, logoutDevice, authRequest, applyAuthStatus } from '../authSession.js';
 import { useBackButton } from '../hooks/useBackButton.js';
 import { useModalFocusTrap } from '../hooks/useModalFocusTrap.js';
+import { OverlayPortal } from '../overlays/OverlayHost.js';
 import { t } from '../i18n';
 
 export const deviceErrorCopy = (error: unknown): string => {
   const codes: Record<string, string> = {
-    DEVICE_CONFLICT: 'devices.conflict', DEVICE_INACTIVE: 'devices.inactive', SESSION_INVALID: 'devices.sessionInvalid',
+    DEVICE_CONFLICT: 'devices.conflict', DEVICE_INACTIVE: 'devices.inactive', DEVICE_EXPIRY_CLI_ONLY: 'devices.expiryCliOnly', SESSION_INVALID: 'devices.sessionInvalid',
     CODE_INVALID: 'devices.invalidCode', CLAIM_RATE_LIMIT: 'auth.rateLimit', AUTH_RATE_LIMIT: 'auth.rateLimit',
     PAIRING_NOT_FOUND: 'devices.pairingGone', PAIRING_INACTIVE: 'devices.pairingGone',
     INVALID_NAME: 'devices.invalidName', INVALID_EXPIRE: 'devices.invalidExpire',
+    TRUSTED_ORIGIN_MISMATCH: 'devices.originMismatch', AUTH_ORIGIN_REJECTED: 'devices.originMismatch', origin_rejected: 'devices.originMismatch',
+    INVALID_ORIGIN: 'devices.invalidOrigin', ORIGIN_LIMIT: 'devices.originLimit',
   };
   return t(error instanceof DeviceManagementError ? codes[error.code] ?? 'devices.requestError' : 'devices.requestError');
 };
@@ -26,18 +29,19 @@ export function remainingExpiry(d: ManagedDevice, now: number): string {
     ? t('devices.hoursRemaining', { n: Math.ceil(seconds / 3600) }) : t('devices.minutesRemaining', { n: Math.ceil(seconds / 60) });
 }
 
-function DeviceSheet({ title, onClose, children, trapped = true }: { title: string; onClose: () => void; children: ReactNode; trapped?: boolean }) {
+function DeviceSheet({ title, onClose, children, trapped = true, variant = 'sheet' }: { title: string; onClose: () => void; children: ReactNode; trapped?: boolean; variant?: 'sheet' | 'dialog' }) {
   const dialogRef = useRef<HTMLElement>(null); const closeRef = useRef<HTMLButtonElement>(null);
   const returnRef = useRef(document.activeElement instanceof HTMLElement ? document.activeElement : null);
   useBackButton(true, onClose);
   useModalFocusTrap({ active: trapped, dialogRef, initialFocusRef: closeRef, returnFocusRef: returnRef, onClose });
-  return <div className="device-sheet-layer">
+  const layer = <div className={`device-sheet-layer${variant === 'dialog' ? ' device-dialog-layer' : ''}`}>
     <div className="settings-backdrop" onClick={onClose} />
-    <section className="settings-card device-sheet" role="dialog" aria-modal="true" aria-label={title} ref={dialogRef} tabIndex={-1}>
+    <section className={`settings-card device-sheet${variant === 'dialog' ? ' device-dialog' : ''}`} role="dialog" aria-modal="true" aria-label={title} ref={dialogRef} tabIndex={-1}>
       <div className="settings-head"><h2 className="settings-title">{title}</h2><button className="settings-close" ref={closeRef} onClick={onClose} aria-label={t('common.close')}>×</button></div>
       <div className="settings-body">{children}</div>
     </section>
   </div>;
+  return variant === 'dialog' ? <OverlayPortal>{layer}</OverlayPortal> : layer;
 }
 function ExpiryPicker({ value, custom, onChange, onCustom, keep = false, disabled = false }: {
   value: string; custom: string; onChange: (value: string) => void; onCustom: (value: string) => void; keep?: boolean; disabled?: boolean;
@@ -78,28 +82,55 @@ function RevokeConfirm({ device, current, busy, error, onClose, onConfirm }: {
   </section></div>;
 }
 
+function OriginRemoveConfirm({ origin, devices, currentDeviceId, busy, error, onClose, onConfirm }: {
+  origin: string;
+  devices: Array<{ id: string; name: string; browser_summary: string }>;
+  currentDeviceId: string | null;
+  busy: boolean;
+  error: string;
+  onClose: () => void;
+  onConfirm: () => void;
+}) {
+  const dialogRef = useRef<HTMLElement>(null); const cancelRef = useRef<HTMLButtonElement>(null);
+  const returnRef = useRef(document.activeElement instanceof HTMLElement ? document.activeElement : null);
+  const currentImpact = devices.some(device => device.id === currentDeviceId);
+  useBackButton(true, () => { if (!busy) onClose(); });
+  useModalFocusTrap({ active: true, dialogRef, initialFocusRef: cancelRef, returnFocusRef: returnRef, onClose: () => { if (!busy) onClose(); } });
+  return <div className="auth-logout-backdrop device-revoke-layer">
+    <section className="auth-logout-dialog origin-remove-dialog" ref={dialogRef} role="alertdialog" aria-modal="true" aria-labelledby="origin-remove-title" aria-describedby={`origin-remove-copy${currentImpact ? ' origin-remove-current-impact' : ''}`} tabIndex={-1}>
+      <h3 id="origin-remove-title">{t('devices.removeOriginTitle')}</h3>
+      <p id="origin-remove-copy"><code className="origin-remove-value">{origin}</code></p>
+      {devices.length > 0
+        ? <><p>{t('devices.removeOriginImpact')}</p>{currentImpact && <p id="origin-remove-current-impact" className="origin-remove-current-warning" role="alert">{t('devices.removeOriginCurrentImpact')}</p>}<ul className="origin-remove-devices">{devices.map(device => <li key={device.id}><span className="origin-remove-device-name"><strong>{device.name}</strong>{device.id === currentDeviceId && <small className="device-current-badge">{t('devices.current')}</small>}</span><span>{device.browser_summary}</span></li>)}</ul></>
+        : <p>{t('devices.removeOriginNoImpact')}</p>}
+      {error && <p role="alert">{error}</p>}
+      <div className="auth-logout-actions"><button ref={cancelRef} disabled={busy} onClick={onClose}>{t('common.cancel')}</button>
+        <button className="device-danger" disabled={busy} onClick={onConfirm}>{t(busy ? 'common.loading' : 'devices.removeOriginConfirm')}</button></div>
+    </section>
+  </div>;
+}
+
 function DeviceDetail({ device: initial, current, now, onClose, onChanged, onLoggedOut }: {
   device: ManagedDevice; current: boolean; now: number; onClose: () => void; onChanged: () => void; onLoggedOut: () => void;
 }) {
   const [device, setDevice] = useState(initial); const [name, setName] = useState(initial.name);
-  const [expire, setExpire] = useState('keep'); const [custom, setCustom] = useState('');
   const [busy, setBusy] = useState(false); const [error, setError] = useState(''); const [conflict, setConflict] = useState(false);
   const [copyHint, setCopyHint] = useState(''); const [confirming, setConfirming] = useState(false); const idRef = useRef<HTMLElement>(null);
-  const inactive = isInactive(device, now); const duration = expire === 'custom' ? custom : expire;
-  const changed = name.trim() !== device.name || expire !== 'keep';
+  const inactive = isInactive(device, now);
+  const changed = name.trim() !== device.name;
   const close = () => { if (!busy) onClose(); };
   const save = async () => {
-    if (!validName(name) || !validExpire(duration) && expire !== 'keep') { setError(t(!validName(name) ? 'devices.invalidName' : 'devices.invalidExpire')); return; }
+    if (!validName(name)) { setError(t('devices.invalidName')); return; }
     setBusy(true); setError('');
     try {
-      const result = await api.edit(device.id, { version: device.version, ...(name.trim() !== device.name ? { name: name.trim() } : {}), ...(expire !== 'keep' ? { expire: duration } : {}) });
-      setDevice(result.device); setName(result.device.name); setExpire('keep'); setConflict(false); onChanged();
+      const result = await api.edit(device.id, { version: device.version, name: name.trim() });
+      setDevice(result.device); setName(result.device.name); setConflict(false); onChanged();
     } catch (e) { setError(deviceErrorCopy(e)); setConflict(e instanceof DeviceManagementError && e.code === 'DEVICE_CONFLICT'); }
     finally { setBusy(false); }
   };
   const refresh = async () => {
     setBusy(true);
-    try { const result = await api.list(); const d = result.devices.find(d => d.id === device.id); if (!d) throw new Error('Device missing'); setDevice(d); setName(d.name); setExpire('keep'); setConflict(false); setError(''); onChanged(); }
+    try { const result = await api.list(); const d = result.devices.find(d => d.id === device.id); if (!d) throw new Error('Device missing'); setDevice(d); setName(d.name); setConflict(false); setError(''); onChanged(); }
     catch (e) { setError(deviceErrorCopy(e)); } finally { setBusy(false); }
   };
   const revoke = async () => {
@@ -111,21 +142,27 @@ function DeviceDetail({ device: initial, current, now, onClose, onChanged, onLog
     try { if (!navigator.clipboard?.writeText) throw new Error('Clipboard unavailable'); await navigator.clipboard.writeText(device.id); setCopyHint(t('auth.copied')); }
     catch { if (idRef.current) { const range = document.createRange(); range.selectNodeContents(idRef.current); const selection = window.getSelection(); selection?.removeAllRanges(); selection?.addRange(range); } setCopyHint(t('auth.manualCopy')); }
   };
+  const statusText = device.revoked_at !== null ? t('devices.revoked') : device.expires_at !== null && device.expires_at <= now ? t('devices.expired') : t('devices.activeStatus');
   return <>
-    <DeviceSheet title={device.name} onClose={close} trapped={!confirming}>
-      {inactive ? <p>{remainingExpiry(device, now)}</p> : <>
-        <label className="device-field">{t('devices.name')}<input value={name} onChange={event => setName(event.target.value)} maxLength={160} disabled={busy} /></label>
-        <ExpiryPicker value={expire} custom={custom} onChange={setExpire} onCustom={setCustom} keep disabled={busy} />
-        <p className="auth-secondary">{expire === 'keep' ? t('devices.keepHint') : t('devices.expireFromSave')}</p>
-        <button className="fontbtn device-save" disabled={busy || !changed || conflict} onClick={() => { void save(); }}>{t('common.save')}</button>
-      </>}
-      <dl className="device-metadata"><dt>{t('devices.id')}</dt><dd><code ref={idRef}>{device.id}</code><button onClick={() => { void copyId(); }}>{t('devices.copyId')}</button></dd>
-        <dt>{t('devices.browser')}</dt><dd>{device.browser_summary}</dd><dt>{t('devices.added')}</dt><dd>{date(device.authorized_at)}</dd>
-        <dt>{t('devices.lastAccess')}</dt><dd>{date(device.last_used_at)}</dd><dt>{t('devices.expiresAt')}</dt><dd>{date(device.expires_at)}</dd></dl>
+    <DeviceSheet title={t('devices.detailInfo')} onClose={close} trapped={!confirming}>
+      <div className="device-edit-layout">
+        {inactive ? <div className="device-readonly-field"><span className="device-field-label">{t('devices.name')}</span><strong>{device.name}</strong></div>
+          : <label className="device-field"><span className="device-field-label">{t('devices.name')}</span><input value={name} onChange={event => setName(event.target.value)} maxLength={160} disabled={busy} /></label>}
+        <dl className="device-readonly-metadata">
+          <dt>{t('devices.deviceInfo')}</dt><dd>{device.browser_summary}</dd>
+          <dt>{t('devices.status')}</dt><dd>{statusText}</dd>
+          <dt>{t('devices.added')}</dt><dd>{date(device.authorized_at)}</dd>
+          <dt>{t('devices.lastAccess')}</dt><dd>{date(device.last_used_at)}</dd>
+          <dt>{t('devices.expiresAt')}</dt><dd>{date(device.expires_at)}</dd>
+          <dt>{t('devices.id')}</dt><dd className="device-id-value"><code ref={idRef}>{device.id}</code><button type="button" className="device-copy-button" onClick={() => { void copyId(); }}>{t('devices.copyId')}</button></dd>
+        </dl>
+        {inactive && <p className="device-inactive-note">{t('devices.inactive')}</p>}
+        {!inactive && <button className="fontbtn device-save" disabled={busy || !changed || conflict} onClick={() => { void save(); }}>{t('common.save')}</button>}
+      </div>
       {copyHint && <p role="status">{copyHint}</p>}
       {!confirming && error && <p role="alert">{error}</p>}
       {conflict && <button disabled={busy} onClick={() => { void refresh(); }}>{t('devices.refreshDetails')}</button>}
-      {!inactive && <button className="device-danger" disabled={busy} onClick={() => { setError(''); setConfirming(true); }}>{t(current ? 'devices.logout' : 'devices.revoke')}</button>}
+      {!inactive && <div className="device-detail-actions"><button className="device-danger" disabled={busy} onClick={() => { setError(''); setConfirming(true); }}>{t(current ? 'devices.logout' : 'devices.revoke')}</button></div>}
     </DeviceSheet>
     {confirming && <RevokeConfirm device={device} current={current} busy={busy} error={error} onClose={() => setConfirming(false)} onConfirm={() => { void revoke(); }} />}
   </>;
@@ -134,8 +171,9 @@ function DeviceDetail({ device: initial, current, now, onClose, onChanged, onLog
 function AddDevice({ onClose, onAdded }: { onClose: () => void; onAdded: () => void }) {
   const [approval, setApproval] = useState<DeviceApproval | null>(null); const [code, setCode] = useState('');
   const [name, setName] = useState(''); const [expire, setExpire] = useState('30d'); const [custom, setCustom] = useState('');
-  const [busy, setBusy] = useState(true); const [error, setError] = useState(''); const [now, setNow] = useState(Date.now());
+  const [busy, setBusy] = useState(true); const [claimingCode, setClaimingCode] = useState(false); const [error, setError] = useState(''); const [now, setNow] = useState(Date.now());
   const offset = useRef(0); const mounted = useRef(true); const changing = useRef(true); const closeRequested = useRef(false); const approvalRef = useRef(approval); approvalRef.current = approval;
+  const codeInputRef = useRef<HTMLInputElement>(null); const nameInputRef = useRef<HTMLInputElement>(null);
   const unknownClaim = useRef<string | null>(null); const initialized = useRef(false);
   const restoredId = useRef(readApprovalId());
   const complete = useRef(onAdded); complete.current = onAdded;
@@ -211,15 +249,22 @@ function AddDevice({ onClose, onAdded }: { onClose: () => void; onAdded: () => v
       setError(deviceErrorCopy(e));
     } finally { changing.current = false; setBusy(false); if (closeRequested.current) void close(); }
   };
-  const claim = async () => {
+  const claim = async (value = code) => {
     if (!initialized.current && restoredId.current) return;
-    const submittedCode = unknownClaim.current ?? code;
+    const submittedCode = unknownClaim.current ?? value;
     if (!/^\d{6}$/.test(submittedCode)) { setError(t('devices.invalidCode')); return; }
-    changing.current = true; setBusy(true); setError('');
+    if (changing.current || busy) return;
+    changing.current = true; setBusy(true); setClaimingCode(true); setError('');
     unknownClaim.current = submittedCode;
     try { const result = await api.claim(submittedCode); unknownClaim.current = null; accept(result.approval, result.serverTime); setName(result.approval.browserSummary); setCode(''); }
-    catch (e) { if (e instanceof DeviceManagementError && e.code === 'CODE_INVALID') unknownClaim.current = null; setError(deviceErrorCopy(e)); }
-    finally { changing.current = false; setBusy(false); if (closeRequested.current) void close(); }
+    catch (e) {
+      if (e instanceof DeviceManagementError && e.code === 'CODE_INVALID') {
+        unknownClaim.current = null;
+        setCode('');
+      }
+      setError(deviceErrorCopy(e));
+    }
+    finally { changing.current = false; setBusy(false); setClaimingCode(false); if (closeRequested.current) void close(); }
   };
   const authorize = async () => {
     const duration = expire === 'custom' ? custom : expire;
@@ -231,32 +276,61 @@ function AddDevice({ onClose, onAdded }: { onClose: () => void; onAdded: () => v
   };
   const remaining = Math.max(0, Math.ceil(((approval?.expiresAt ?? now) - now) / 1000));
   const restoreUnknown = !initialized.current && restoredId.current !== null;
-  return <DeviceSheet title={t('devices.add')} onClose={() => { void close(); }}>
-    <p className="auth-secondary">{t('auth.antiPhishing')}</p>
-    {!approval ? <><label className="device-field">{t('devices.code')}<input value={code} inputMode="numeric" autoComplete="off" pattern="[0-9]{6}" maxLength={6} onChange={e => { if (!unknownClaim.current && !restoreUnknown) setCode(e.target.value.replace(/\D/g, '')); }} disabled={busy || !!unknownClaim.current || restoreUnknown} /></label>
-      <p className="auth-secondary">{t('devices.codeHint')}</p>
-      {restoreUnknown ? <button className="fontbtn" disabled={busy} onClick={() => { void retryRestore(); }}>{t('common.retry')}</button>
-        : <button className="fontbtn" disabled={busy || code.length !== 6} onClick={() => { void claim(); }}>{t(unknownClaim.current ? 'common.retry' : 'devices.claim')}</button>}</>
-      : approval.state === 'configuring' ? <><p role="status">{t('auth.pending')}</p><p className="auth-secondary">{approval.browserSummary} · {t('auth.setupRemaining', { seconds: remaining })}</p>
-        <label className="device-field">{t('devices.name')}<input value={name} onChange={e => setName(e.target.value)} disabled={busy} maxLength={160} /></label>
+  useEffect(() => {
+    if (approval?.state === 'configuring' && !busy) nameInputRef.current?.focus();
+    else if (!approval && !busy && !restoreUnknown && !unknownClaim.current) codeInputRef.current?.focus();
+  }, [approval, busy, restoreUnknown]);
+  const updateCode = (raw: string) => {
+    if (unknownClaim.current || restoreUnknown || busy) return;
+    const next = raw.replace(/\D/g, '').slice(0, 6);
+    setCode(next);
+    setError('');
+    if (next.length === 6) void claim(next);
+  };
+  return <DeviceSheet title={approval?.state === 'configuring' ? t('devices.configureTitle') : t('devices.authorizeOther')} variant="dialog" onClose={() => { void close(); }}>
+    {!approval ? <><div className={`device-code-entry${busy || restoreUnknown || !!unknownClaim.current ? ' is-disabled' : ''}`}>
+        <label className="device-code-label" htmlFor="device-approval-code">{t('devices.code')}</label>
+        <div className={`device-code-shell${error ? ' has-error' : ''}`}>
+          <div className="device-code-slots" aria-hidden="true">
+            {Array.from({ length: 6 }, (_, index) => <span key={index} className={`device-code-slot${index === code.length && !busy ? ' is-current' : ''}`}>{code[index] ?? ''}</span>)}
+          </div>
+          <input ref={codeInputRef} id="device-approval-code" className="device-code-input" value={code} inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]{6}" maxLength={6} aria-describedby="device-code-hint" aria-invalid={Boolean(error)} onChange={e => updateCode(e.target.value)} disabled={busy || !!unknownClaim.current || restoreUnknown} />
+        </div>
+        <p id="device-code-hint" className="device-code-hint">{t('devices.codeHint')}</p>
+        {error && <p className="device-code-error" role="alert">{error}</p>}
+      </div>
+      {restoreUnknown
+        ? <button className="fontbtn" disabled={busy} onClick={() => { void retryRestore(); }}>{t('common.retry')}</button>
+        : unknownClaim.current
+          ? <button className="fontbtn" disabled={busy} onClick={() => { void claim(); }}>{t('common.retry')}</button>
+          : null}</>
+      : approval.state === 'configuring' ? <><p role="status">{t('auth.pending')}</p><p className="auth-secondary">{approval.browserSummary} · {t('auth.setupRemaining', { seconds: remaining })}</p>{approval.origin && <p className="device-approval-origin"><span>{t('devices.approvalOrigin')}</span><code>{approval.origin}</code></p>}
+        <label className="device-field">{t('devices.name')}<input ref={nameInputRef} value={name} onChange={e => setName(e.target.value)} disabled={busy} maxLength={160} /></label>
         <ExpiryPicker value={expire} custom={custom} onChange={setExpire} onCustom={setCustom} disabled={busy} />
-        <button className="fontbtn device-save" disabled={busy || remaining === 0} onClick={() => { void authorize(); }}>{t('devices.complete')}</button></>
+        <div className="device-form-actions">
+          <button className="fontbtn device-save device-form-confirm" disabled={busy || remaining === 0} onClick={() => { void authorize(); }}>{t('devices.complete')}</button>
+          <button className="fontbtn device-sheet-cancel" disabled={busy} onClick={() => { void close(); }}>{t('common.cancel')}</button>
+        </div></>
       : <><p role="status">{t('devices.pairingGone')}</p><button className="fontbtn" disabled={busy} onClick={() => { setApproval(null); approvalRef.current = null; setError(''); }}>{t('devices.newCode')}</button></>}
-    {error && <p role="alert">{error}</p>}{busy && <p role="status">{t('common.loading')}</p>}
-    <button className="fontbtn sheet-cancel" onClick={() => { void close(); }}>{t('common.cancel')}</button>
+    {approval && error && <p role="alert">{error}</p>}{busy && <p role="status">{claimingCode ? t('devices.verifyingCode') : t('common.loading')}</p>}
+    {approval?.state !== 'configuring' && <button className="fontbtn sheet-cancel device-sheet-cancel" onClick={() => { void close(); }}>{t('common.cancel')}</button>}
   </DeviceSheet>;
 }
 
 export default function DeviceManagement({ onLoggedOut }: { onLoggedOut: () => void }) {
   const [data, setData] = useState<DeviceList | null>(null); const [error, setError] = useState(''); const [loading, setLoading] = useState(false);
-  const [history, setHistory] = useState(false); const [selected, setSelected] = useState<ManagedDevice | null>(null); const [adding, setAdding] = useState(false);
+  const [deviceTab, setDeviceTab] = useState<'active' | 'history'>('active'); const [selected, setSelected] = useState<ManagedDevice | null>(null); const [adding, setAdding] = useState(false);
   const [selfSheet, setSelfSheet] = useState(false); const [selfName, setSelfName] = useState(() => {
     const ua = navigator.userAgent;
     const browser = /Edg\//.test(ua) ? 'Edge' : /Firefox\//.test(ua) ? 'Firefox' : /Chrome|CriOS/.test(ua) ? 'Chrome' : /Safari/.test(ua) ? 'Safari' : 'Browser';
     const os = /iPhone|iPad|iPod/.test(ua) ? 'iOS' : /Android/.test(ua) ? 'Android' : /Windows/.test(ua) ? 'Windows' : /Macintosh|Mac OS X/.test(ua) ? 'macOS' : /Linux/.test(ua) ? 'Linux' : '';
     return os ? `${browser} · ${os}` : browser;
   }); const [selfExpire, setSelfExpire] = useState('30d');
-  const [selfCustom, setSelfCustom] = useState(''); const [busy, setBusy] = useState(false); const [confirmToken, setConfirmToken] = useState(false);
+  const [selfCustom, setSelfCustom] = useState(''); const [busy, setBusy] = useState(false);
+  const [originBusy, setOriginBusy] = useState(false);
+  const [policyHelp, setPolicyHelp] = useState<'device' | 'origin' | null>(null);
+  const [originHelp, setOriginHelp] = useState<'public' | 'preview' | null>(null);
+  const [originRemoval, setOriginRemoval] = useState<{ origin: string; devices: Array<{ id: string; name: string; browser_summary: string }> } | null>(null);
   const [now, setNow] = useState(Date.now()); const offset = useRef(0); const alive = useRef(true); const requestId = useRef(0);
   const load = useCallback(async () => {
     if (!isDeviceAuth()) return;
@@ -272,9 +346,13 @@ export default function DeviceManagement({ onLoggedOut }: { onLoggedOut: () => v
     document.addEventListener('visibilitychange', refresh); window.addEventListener('focus', refresh);
     return () => { alive.current = false; requestId.current++; clearInterval(timer); clearInterval(clock); document.removeEventListener('visibilitychange', refresh); window.removeEventListener('focus', refresh); };
   }, [load]);
-  useBackButton(history, () => setHistory(false));
   if (!isDeviceAuth()) return <p className="settings-detail-note">{t('auth.tokenWarning')}</p>;
-  const devices = (data?.devices ?? []).filter(d => isInactive(d, now) === history).sort((a, b) => Number(b.id === data?.currentDeviceId) - Number(a.id === data?.currentDeviceId) || b.last_used_at - a.last_used_at);
+  if (!data) return <section className="device-management device-management-state" aria-busy="true">
+    {error ? <div className="device-feedback"><p role="alert">{error}</p><button type="button" disabled={loading} onClick={() => { void load(); }}>{t('common.retry')}</button></div>
+      : <p className="device-loading" role="status">{t('common.loading')}</p>}
+  </section>;
+  const showingHistory = deviceTab === 'history';
+  const devices = data.devices.filter(d => isInactive(d, now) === showingHistory).sort((a, b) => Number(b.id === data.currentDeviceId) - Number(a.id === data.currentDeviceId) || b.last_used_at - a.last_used_at);
   const addSelf = async () => {
     if (busy) return;
     setBusy(true); setError('');
@@ -286,41 +364,87 @@ export default function DeviceManagement({ onLoggedOut }: { onLoggedOut: () => v
       setSelfSheet(false); await load();
     } catch (e) { setError(deviceErrorCopy(e)); } finally { setBusy(false); }
   };
-  const disableToken = async () => {
-    if (!data?.currentDeviceId || busy) return;
-    setBusy(true); setError('');
-    try { await api.disableToken(); applyAuthStatus(await authRequest()); await load(); setConfirmToken(false); } catch (e) { setError(deviceErrorCopy(e)); } finally { setBusy(false); }
+  const inactiveCount = data.devices.filter(d => isInactive(d, now)).length;
+  const activeCount = data.devices.length - inactiveCount;
+  const currentOrigin = window.location.origin;
+  const accessOrigin = data.publicUrl?.trim() || null;
+  const previewOrigin = data.previewDomain?.trim() || null;
+  const trustedDeviceEnabled = data.trustedDeviceEnabled !== false;
+  const trustedOriginEnabled = data.trustedOriginEnabled !== false;
+  const removeTrustedOrigin = async (value: string) => {
+    if (originBusy) return;
+    setOriginBusy(true); setError('');
+    try { const impact = await api.inspectTrustedOriginRemoval(value); setOriginRemoval({ origin: value, devices: impact.affectedDevices }); }
+    catch (e) { setError(deviceErrorCopy(e)); }
+    finally { setOriginBusy(false); }
   };
-  const inactiveCount = (data?.devices ?? []).filter(d => isInactive(d, now)).length;
+  const confirmRemoveTrustedOrigin = async () => {
+    if (!originRemoval || originBusy) return;
+    setOriginBusy(true); setError('');
+    try { await api.removeTrustedOrigin(originRemoval.origin); setOriginRemoval(null); await load(); }
+    catch (e) { setError(deviceErrorCopy(e)); }
+    finally { setOriginBusy(false); }
+  };
   return <section className="device-management">
-    {data?.tokenEnabled && <div className="settings-page-list"><div className="settings-page-row"><span>{t('devices.fixedToken')}</span><button className="fontbtn" disabled={!data.currentDeviceId || busy} onClick={() => setConfirmToken(true)}>{t('devices.disableToken')}</button></div><p className="auth-secondary">{t(data.currentDeviceId ? 'devices.disableRecommendation' : 'devices.registerFirst')}</p></div>}
-    {history && <button className="device-inline" onClick={() => setHistory(false)}>{t('devices.activeDevices')}</button>}
-    <div className="settings-page-list">
-      {devices.map(d => <button className="settings-page-row device-row" key={d.id} onClick={() => setSelected(d)}>
-        <span className="device-row-copy"><span className="device-row-main"><span>{d.name}</span>{d.id === data?.currentDeviceId && <small>{t('devices.current')}</small>}</span>
-          <span className="device-row-secondary"><span>{d.browser_summary}</span><span>{remainingExpiry(d, now)}</span></span></span><span className="settings-page-chevron" aria-hidden="true">›</span>
-      </button>)}
-      {!history && <><button className="settings-page-row device-add-row" disabled={!!data?.currentDeviceId || busy || !data?.tokenEnabled} onClick={() => setSelfSheet(true)}>{t(data?.currentDeviceId ? 'devices.selfRegistered' : 'devices.addSelf')}</button><button className="settings-page-row device-add-row" disabled={!data?.currentDeviceId} onClick={() => setAdding(true)}>＋ {t('devices.add')}</button></>}
-    </div>
-    {history && devices.length === 0 && !loading && <p className="auth-secondary">{t('devices.noHistory')}</p>}
-    {!history && inactiveCount > 0 && <button className="device-inline" onClick={() => setHistory(true)}>{t('devices.history', { n: inactiveCount })}</button>}
-    {error && <><p role="alert">{error}</p><button disabled={loading} onClick={() => { void load(); }}>{t('common.retry')}</button></>}
-    {loading && !data && <p role="status">{t('common.loading')}</p>}
+    <section className="device-settings-group device-list-group" aria-labelledby="device-protection-title">
+      <h2 id="device-protection-title">{t('devices.deviceProtectionSection')}</h2>
+      <div className="settings-page-list device-policy-list">
+        <div className="settings-page-row device-policy-row">
+          <div className="device-policy-copy"><strong>{t('devices.deviceProtectionStatus')}</strong><span className={trustedDeviceEnabled ? 'device-policy-enabled' : 'device-policy-disabled'}>{t(trustedDeviceEnabled ? 'devices.policyEnabled' : 'devices.policyDisabled')}</span></div>
+          <button type="button" className="device-policy-help" aria-label={t('devices.deviceProtectionInfo')} onClick={() => setPolicyHelp('device')}>?</button>
+        </div>
+      </div>
+      {!trustedDeviceEnabled && <p className="settings-detail-note">{t('devices.deviceProtectionDisabledHint')}</p>}
+      {!showingHistory && data.currentDeviceId && <button type="button" className="device-authorize-other" aria-label={t('devices.authorizeOther')} disabled={busy} onClick={() => setAdding(true)}>{t('devices.authorizeOther')}</button>}
+      <h3 id="device-list-title">{t('devices.listTitle')}</h3>
+      <div className="device-tabs" role="tablist" aria-label={t('devices.title')}>
+        <button id="device-active-tab" role="tab" aria-selected={!showingHistory} aria-controls="device-list-panel" className="device-tab" onClick={() => setDeviceTab('active')}>{t('devices.activeTab')}<span>{activeCount}</span></button>
+        <button id="device-history-tab" role="tab" aria-selected={showingHistory} aria-controls="device-list-panel" className="device-tab" onClick={() => setDeviceTab('history')}>{t('devices.historyTab')}<span>{inactiveCount}</span></button>
+      </div>
+      <div id="device-list-panel" role="tabpanel" aria-labelledby={showingHistory ? 'device-history-tab' : 'device-active-tab'}>
+        {devices.length > 0 && <div className="settings-page-list">
+          {devices.map(d => <button className="settings-page-row device-row" key={d.id} onClick={() => setSelected(d)}>
+            <span className="device-row-copy"><span className="device-row-main"><span>{d.name}</span>{d.id === data.currentDeviceId && <small className="device-current-badge">{t('devices.current')}</small>}</span>
+              <span className="device-row-secondary"><span>{d.browser_summary}</span><span>{remainingExpiry(d, now)}</span></span></span><span className="settings-page-chevron" aria-hidden="true">›</span>
+          </button>)}
+        </div>}
+        {devices.length === 0 && <p className="device-empty" role="status">{t(showingHistory ? 'devices.noHistory' : 'devices.noActive')}</p>}
+        {!showingHistory && !data.currentDeviceId && <div className="settings-page-list device-action-list">
+          <button type="button" className="settings-page-row device-add-row" aria-label={t('devices.addSelf')} disabled={busy} onClick={() => setSelfSheet(true)}><span className="device-action-copy"><strong>{t('devices.addSelf')}</strong><small>{t('devices.addSelfAddress', { origin: currentOrigin })}</small></span><span className="settings-page-chevron" aria-hidden="true">›</span></button>
+        </div>}
+      </div>
+    </section>
+    <section className="device-settings-group" aria-labelledby="device-origin-title">
+      <h2 id="device-origin-title">{t('devices.accessSection')}</h2>
+      <div className="settings-page-list device-policy-list">
+        <div className="settings-page-row device-policy-row">
+          <div className="device-policy-copy"><strong>{t('devices.originProtectionStatus')}</strong><span className={trustedOriginEnabled ? 'device-policy-enabled' : 'device-policy-disabled'}>{t(trustedOriginEnabled ? 'devices.policyEnabled' : 'devices.policyDisabled')}</span></div>
+          <button type="button" className="device-policy-help" aria-label={t('devices.originProtectionInfo')} onClick={() => setPolicyHelp('origin')}>?</button>
+        </div>
+      </div>
+      {!trustedOriginEnabled && <p className="settings-detail-note">{t('devices.originProtectionDisabledHint')}</p>}
+      <div className="settings-page-list device-origin-list">
+        <div className="settings-page-row device-origin-row">
+          <span className="device-origin-label"><b>{t('devices.publicUrlLabel')}</b> <button type="button" className="device-origin-help" aria-label={t('devices.publicUrlInfo')} onClick={() => setOriginHelp('public')}>?</button></span>
+          <code className={`device-origin-value${accessOrigin ? '' : ' is-empty'}`}>{accessOrigin ?? t('devices.originUnset')}</code>
+        </div>
+        <div className="settings-page-row device-origin-row">
+          <span className="device-origin-label"><b>{t('devices.previewDomainLabel')}</b> <button type="button" className="device-origin-help" aria-label={t('devices.previewDomainInfo')} onClick={() => setOriginHelp('preview')}>?</button></span>
+          <code className={`device-origin-value${previewOrigin ? '' : ' is-empty'}`}>{previewOrigin ?? t('devices.originUnset')}</code>
+        </div>
+        {data.trustedOrigins?.map((origin, index) => <div className="settings-page-row device-origin-row device-origin-custom-row" key={origin}>
+            <span className="device-origin-label"><b>{t('devices.trustedOriginLabel', { n: index + 1 })}</b></span>
+            <code className="device-origin-value">{origin}</code>
+            <button type="button" className="device-origin-remove" aria-label={`${t('common.delete')} ${origin}`} disabled={originBusy} onClick={() => { void removeTrustedOrigin(origin); }}>{t('common.delete')}</button>
+        </div>)}
+      </div>
+    </section>
+    {error && <div className="device-feedback"><p role="alert">{error}</p><button type="button" disabled={loading} onClick={() => { void load(); }}>{t('common.retry')}</button></div>}
     {selected && <DeviceDetail key={selected.id} device={selected} current={selected.id === data?.currentDeviceId} now={now} onClose={() => setSelected(null)} onChanged={() => { void load(); }} onLoggedOut={onLoggedOut} />}
     {adding && <AddDevice onClose={() => setAdding(false)} onAdded={() => { setAdding(false); void load(); }} />}
-    {selfSheet && <DeviceSheet title={t('devices.addSelf')} onClose={() => { if (!busy) setSelfSheet(false); }}><label className="device-field">{t('devices.name')}<input disabled={busy} value={selfName} onChange={e => setSelfName(e.target.value)} /></label><ExpiryPicker value={selfExpire} custom={selfCustom} onChange={setSelfExpire} onCustom={setSelfCustom} disabled={busy} /><button className="fontbtn device-save" disabled={busy || !validName(selfName) || !validExpire(selfExpire === 'custom' ? selfCustom : selfExpire)} onClick={() => { void addSelf(); }}>{t(busy ? 'common.loading' : 'devices.addSelf')}</button>{error && <p role="alert">{error}</p>}</DeviceSheet>}
-    {confirmToken && <TokenDisableConfirm busy={busy} error={error} onClose={() => { if (!busy) setConfirmToken(false); }} onConfirm={() => { void disableToken(); }} />}
+    {selfSheet && <DeviceSheet title={t('devices.addSelfTitle')} onClose={() => { if (!busy) setSelfSheet(false); }}><p className="device-sheet-note">{t('devices.addSelfOrigin', { origin: currentOrigin })}</p><label className="device-field">{t('devices.name')}<input disabled={busy} value={selfName} onChange={e => setSelfName(e.target.value)} /></label><ExpiryPicker value={selfExpire} custom={selfCustom} onChange={setSelfExpire} onCustom={setSelfCustom} disabled={busy} /><button className="fontbtn device-save" disabled={busy || !validName(selfName) || !validExpire(selfExpire === 'custom' ? selfCustom : selfExpire)} onClick={() => { void addSelf(); }}>{t(busy ? 'common.loading' : 'devices.addSelf')}</button>{error && <p role="alert">{error}</p>}</DeviceSheet>}
+    {originHelp && <DeviceSheet title={originHelp === 'public' ? t('devices.publicUrlLabel') : t('devices.previewDomainLabel')} onClose={() => setOriginHelp(null)}><p className="device-sheet-note">{t(originHelp === 'public' ? 'devices.publicUrlInfo' : 'devices.previewDomainInfo')}</p></DeviceSheet>}
+    {policyHelp && <DeviceSheet title={policyHelp === 'device' ? t('devices.deviceProtectionSection') : t('devices.accessSection')} variant="dialog" onClose={() => setPolicyHelp(null)}><p className="device-sheet-note">{t(policyHelp === 'device' ? 'devices.deviceProtectionInfo' : 'devices.originProtectionInfo')}</p></DeviceSheet>}
+    {originRemoval && <OriginRemoveConfirm origin={originRemoval.origin} devices={originRemoval.devices} currentDeviceId={data.currentDeviceId} busy={originBusy} error={error} onClose={() => { if (!originBusy) { setOriginRemoval(null); setError(''); } }} onConfirm={() => { void confirmRemoveTrustedOrigin(); }} />}
   </section>;
-}
-
-function TokenDisableConfirm({ busy, error, onClose, onConfirm }: { busy: boolean; error: string; onClose: () => void; onConfirm: () => void }) {
-  const dialogRef = useRef<HTMLElement>(null); const cancelRef = useRef<HTMLButtonElement>(null);
-  const returnRef = useRef(document.activeElement instanceof HTMLElement ? document.activeElement : null);
-  useBackButton(true, onClose);
-  useModalFocusTrap({ active: true, dialogRef, initialFocusRef: cancelRef, returnFocusRef: returnRef, onClose });
-  return <div className="auth-logout-backdrop device-revoke-layer"><section className="auth-logout-dialog" ref={dialogRef} role="alertdialog" aria-modal="true" aria-labelledby="token-disable-title" tabIndex={-1}>
-    <h3 id="token-disable-title">{t('devices.disableToken')}</h3><p>{t('devices.disableConfirm')}</p>
-    {error && <p role="alert">{error}</p>}
-    <div className="auth-logout-actions"><button ref={cancelRef} disabled={busy} onClick={onClose}>{t('common.cancel')}</button><button disabled={busy} onClick={onConfirm}>{t(busy ? 'common.loading' : 'devices.disableToken')}</button></div>
-  </section></div>;
 }

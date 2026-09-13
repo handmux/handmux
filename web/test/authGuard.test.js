@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
-import { authHandled } from '../src/authGuard.js';
-import { UnauthorizedError } from '../src/api.js';
+import { authHandled, authPromptAfterFailure } from '../src/authGuard.js';
+import { ApiError, UnauthorizedError } from '../src/api.js';
 
 describe('authHandled', () => {
   it('an UnauthorizedError fires onAuthFail and reports true', () => {
@@ -19,5 +19,18 @@ describe('authHandled', () => {
   it('tolerates a missing callback', () => {
     expect(authHandled(new UnauthorizedError())).toBe(true);
     expect(authHandled(new Error('x'))).toBe(false);
+  });
+
+  it('passes origin rejection through so the caller can show address guidance', () => {
+    const onAuthFail = vi.fn();
+    const error = new ApiError('untrusted request origin', 403, 'untrusted request origin', 'origin_rejected');
+    expect(authHandled(error, onAuthFail)).toBe(true);
+    expect(onAuthFail).toHaveBeenCalledWith(error);
+  });
+
+  it('keeps the explicit device authorization page when a stale request fails', () => {
+    const error = new ApiError('untrusted request origin', 403, 'untrusted request origin', 'origin_rejected');
+    expect(authPromptAfterFailure('device', error)).toBe('device');
+    expect(authPromptAfterFailure('token', error)).toBe('origin');
   });
 });

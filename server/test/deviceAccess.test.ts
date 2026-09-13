@@ -8,10 +8,11 @@ import request from 'supertest';
 import WebSocket from 'ws';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { migrateProjectDatabase } from '../src/projectTask/migrations.js';
-import { DeviceAuthService } from '../src/deviceAuth/service.js';
+import { DeviceAuthService, sessionCookieName } from '../src/deviceAuth/service.js';
 import { createDeviceAuthRouter } from '../src/deviceAuth/http.js';
 import { connectAuthControl, startDeviceAuthControl } from '../src/deviceAuth/control.js';
 import { createAuthOriginResolver, createDeviceAccess } from '../src/deviceAccess.js';
+import { requestOrigin } from '../src/requestOrigin.js';
 import { createTerminalStream } from '../src/terminalStream.js';
 import { terminalRoutes } from '../src/routes/terminal.js';
 import * as commands from '../src/tmux/commands.js';
@@ -23,11 +24,12 @@ const cleanup: Array<() => unknown | Promise<unknown>> = [];
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close(); });
 function fixture() {
   const db = new DatabaseSync(':memory:'); migrateProjectDatabase(db);
-  const service = new DeviceAuthService({ db, mode: 'trusted-device' });
+  const service = new DeviceAuthService({ db, token: 'secret' });
   const origin = 'http://localhost:4000';
   const resolveOrigin = createAuthOriginResolver({ port: 4000, host: '0.0.0.0' });
   const access = createDeviceAccess({ service, resolveOrigin });
   const app = express();
+  app.use((req, _res, next) => { if (!req.headers.authorization) req.headers.authorization = 'Bearer secret'; next(); });
   app.use('/api/auth', express.json(), createDeviceAuthRouter({ service, resolveOrigin }));
   app.use('/api', access.middleware);
   app.use('/api', express.json());
@@ -35,16 +37,17 @@ function fixture() {
   cleanup.push(() => { access.close(); service.close(); db.close(); });
   return { app, service, origin, resolveOrigin };
 }
-function reqMock(host: string, remoteAddress = '127.0.0.1', proto?: string): IncomingMessage {
-  return { headers: { host, ...(proto ? { 'x-forwarded-proto': proto } : {}) }, socket: { remoteAddress } } as IncomingMessage;
+function reqMock(host: string, remoteAddress = '127.0.0.1', proto?: string, extra: Record<string, string> = {}): IncomingMessage {
+  return { headers: { host, ...(proto ? { 'x-forwarded-proto': proto } : {}), ...extra }, socket: { remoteAddress } } as IncomingMessage;
 }
 describe('known auth entry points', () => {
-  it('accepts local and configured origins, never arbitrary Host or remote forwarded TLS', () => {
+  it('accepts local and configured origins, while rejecting unknown hosts', () => {
     const resolve = createAuthOriginResolver({ port: 4000, host: '0.0.0.0', publicUrl: 'https://mux.example' });
     expect(resolve(reqMock('localhost:4000'))).toBe('http://localhost:4000');
     expect(resolve(reqMock('evil.example:4000'))).toBeNull();
+    expect(resolve(reqMock('evil.example', '127.0.0.1', 'https'))).toBeNull();
     expect(resolve(reqMock('mux.example', '127.0.0.1', 'https'))).toBe('https://mux.example');
-    expect(resolve(reqMock('mux.example', '192.0.2.2', 'https'))).toBeNull();
+    expect(resolve(reqMock('mux.example', '192.0.2.2', 'https'))).toBe('https://mux.example');
     expect(resolve(reqMock('localhost:4000@evil.example'))).toBeNull();
   });
   it('learns trusted supervisor tunnel changes without accepting forwarded host', () => {
@@ -55,6 +58,40 @@ describe('known auth entry points', () => {
     expect(resolve(reqMock('mux.example', '::1', 'https'))).toBe(url);
     url = null;
     expect(resolve(reqMock('mux.example', '::1', 'https'))).toBeNull();
+  });
+
+  it('accepts the dynamic preview wildcard and user-managed trusted wildcards', () => {
+    const resolve = createAuthOriginResolver({
+      port: 4000, host: '0.0.0.0', previewDomain: 'preview.example.com',
+      trustedOrigins: () => ['https://*.extra.example.com'],
+    });
+    expect(resolve(reqMock('one.preview.example.com', '203.0.113.4', 'https'))).toBe('https://one.preview.example.com');
+    expect(resolve(reqMock('a.extra.example.com', '203.0.113.4', 'https'))).toBe('https://a.extra.example.com');
+    expect(resolve(reqMock('extra.example.com', '203.0.113.4', 'https'))).toBeNull();
+    expect(resolve(reqMock('a.extra.example.com', '203.0.113.4', 'http'))).toBeNull();
+  });
+
+  it('keeps a TLS-terminated custom tunnel on HTTPS without forwarded protocol', () => {
+    const resolve = createAuthOriginResolver({ port: 4000, host: '0.0.0.0', trustedOrigins: () => ['https://mux.example'] });
+    expect(requestOrigin(reqMock('mux.example', '127.0.0.1', undefined, { origin: 'https://mux.example' }))).toBe('https://mux.example');
+    expect(resolve(reqMock('mux.example', '127.0.0.1', undefined, { origin: 'https://mux.example' }))).toBe('https://mux.example');
+    expect(requestOrigin(reqMock('mux.example:443', '127.0.0.1', undefined, { origin: 'https://mux.example' }))).toBe('https://mux.example');
+    expect(requestOrigin(reqMock('mux.example:80', '127.0.0.1', undefined, { origin: 'https://mux.example' }))).toBe('http://mux.example');
+    expect(requestOrigin(reqMock('mux.example', '127.0.0.1', undefined, { cookie: '__Host-handmux_pairing_abc=secret' }))).toBe('https://mux.example');
+    expect(requestOrigin(reqMock('mux.example', '203.0.113.4', undefined, { origin: 'https://mux.example' }))).toBe('http://mux.example');
+  });
+
+  it('allows a valid Token from an unknown host when both protections are off', async () => {
+    const db = new DatabaseSync(':memory:'); migrateProjectDatabase(db);
+    const service = new DeviceAuthService({ db, token: 'secret' });
+    service.setTrustedDeviceEnabled(false);
+    service.setTrustedOriginEnabled(false);
+    const resolveOrigin = createAuthOriginResolver({ port: 4000, host: '0.0.0.0', trustedOriginEnabled: () => service.trustedOriginEnabled });
+    const access = createDeviceAccess({ service, resolveOrigin });
+    const app = express(); app.use(express.json()); app.use('/api/auth', createDeviceAuthRouter({ service, resolveOrigin })); app.use('/api', access.middleware);
+    app.get('/api/private', (_req, res) => res.json({ ok: true }));
+    cleanup.push(() => { access.close(); service.close(); db.close(); });
+    await request(app).get('/api/private').set({ Host: 'custom.example', Origin: 'http://custom.example', Authorization: 'Bearer secret' }).expect(200, { ok: true });
   });
 });
 describe('browser → CLI socket → protected HTTP / WebSocket', () => {
@@ -71,7 +108,7 @@ describe('browser → CLI socket → protected HTTP / WebSocket', () => {
     const claim = service.claim(pair.pairing.code, 'cli');
     const device = service.authorize(claim.id, 'cli', { name: 'background', expire: '1h' });
     await request(app).post('/api/background').set({ Host: 'localhost:4000', Origin: origin,
-      'X-Handmux-Request': '1', Cookie: `handmux_session_http=${pair.secret}`,
+      'X-Handmux-Request': '1', Cookie: `${sessionCookieName(origin)}=${pair.secret}`,
     }).send({}).expect(202);
     service.revoke(device.id); release();
     expect(await completed).toBe('completed');
@@ -88,7 +125,7 @@ describe('browser → CLI socket → protected HTTP / WebSocket', () => {
     let release!: () => void;
     const blocked = serializePaneInput('%99001', () => new Promise<void>(resolve => { release = resolve; }));
     const pending = request(app).post('/api/send').set({ Host: 'localhost:4000', Origin: origin,
-      'X-Handmux-Request': '1', Cookie: `handmux_session_http=${pair.secret}`,
+      'X-Handmux-Request': '1', Cookie: `${sessionCookieName(origin)}=${pair.secret}`,
     }).send({ pane: '%99001', text: 'must not type', enter: false }).then(value => value, error => error);
     await vi.waitFor(() => expect(received).toBe(true));
     service.revoke(device.id);
@@ -104,7 +141,7 @@ describe('browser → CLI socket → protected HTTP / WebSocket', () => {
     const claim = service.claim(pair.pairing.code, 'cli');
     const device = service.authorize(claim.id, 'cli', { name: 'delayed', expire: '1h' });
     const pending = request(app).post('/api/send').set({ Host: 'localhost:4000', Origin: origin,
-      'X-Handmux-Request': '1', Cookie: `handmux_session_http=${pair.secret}`,
+      'X-Handmux-Request': '1', Cookie: `${sessionCookieName(origin)}=${pair.secret}`,
     }).send({ pane: '%99002', text: 'already typed', enter: true }).then(value => value, error => error);
     await vi.waitFor(() => expect(sent).toHaveBeenCalledOnce(), { interval: 1 });
     service.revoke(device.id); await pending;
@@ -123,7 +160,7 @@ describe('browser → CLI socket → protected HTTP / WebSocket', () => {
     const address = server.address(); if (!address || typeof address === 'string') throw new Error('no test port');
     const incoming = await new Promise<http.IncomingMessage>((resolve, reject) => {
       http.get({ host: '127.0.0.1', port: address.port, path: '/api/events', headers: {
-        Host: 'localhost:4000', Origin: origin, 'X-Handmux-Request': '1', Cookie: `handmux_session_http=${pair.secret}`,
+        Host: 'localhost:4000', Origin: origin, 'X-Handmux-Request': '1', Cookie: `${sessionCookieName(origin)}=${pair.secret}`,
       } }, resolve).once('error', reject);
     });
     expect(incoming.statusCode).toBe(200);
@@ -151,11 +188,11 @@ describe('browser → CLI socket → protected HTTP / WebSocket', () => {
     await request(app).get('/api/private').set(headers).set('Cookie', cookie).expect(200, { device: device.id });
     await request(app).get('/api/private').set(headers).set('Authorization', 'Bearer old-token').expect(401);
     await request(app).get('/api/private').set(headers).set('Cookie', cookie).set('Origin', 'null').expect(403);
-    await request(app).get('/api/private').set('Host', 'localhost:4000').set('Cookie', cookie).expect(403);
-    await client.request({ op: 'revoke', id: device.id });
+    await request(app).get('/api/private').set('Host', 'localhost:4000').set('Cookie', cookie).expect(200);
+    await client.request({ op: 'device-revoke', id: device.id });
     await request(app).get('/api/private').set(headers).set('Cookie', cookie).expect(401);
   });
-  it('authenticates Upgrade with Cookie + Origin, rejects legacy first-frame token, closes on revoke', async () => {
+  it('authenticates Upgrade with Cookie + Origin and closes on revoke', async () => {
     const { service } = fixture();
     const server = http.createServer();
     await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
@@ -169,12 +206,13 @@ describe('browser → CLI socket → protected HTTP / WebSocket', () => {
     const claim = service.claim(pair.pairing.code, 'cli');
     const device = service.authorize(claim.id, 'cli', { name: 'test', expire: '1h' });
     const url = `ws://127.0.0.1:${address.port}/api/terminal-stream`;
-    const cookie = `handmux_session_http=${pair.secret}`;
-    for (const headers of [{ Cookie: cookie }, { Origin: origin, Authorization: 'Bearer old-token' }, { Cookie: cookie, Origin: 'https://evil.example' }]) {
-      const ws = new WebSocket(url, { headers }); ws.on('error', () => {});
-      const status = await new Promise<number | undefined>(resolve => ws.on('unexpected-response', (_req, res) => { resolve(res.statusCode); res.resume(); ws.terminate(); }));
-      expect(status).toBe(401);
-    }
+    const cookie = `${sessionCookieName(origin)}=${pair.secret}`;
+    const missingOrigin = new WebSocket(url, { headers: { Cookie: cookie } }); missingOrigin.on('error', () => {});
+    const status = await new Promise<number | undefined>(resolve => missingOrigin.on('unexpected-response', (_req, res) => { resolve(res.statusCode); res.resume(); missingOrigin.terminate(); }));
+    expect(status).toBe(401);
+    const evil = new WebSocket(url, { headers: { Cookie: cookie, Origin: 'https://evil.example' } }); evil.on('error', () => {});
+    const evilStatus = await new Promise<number | undefined>(resolve => evil.on('unexpected-response', (_req, res) => { resolve(res.statusCode); res.resume(); evil.terminate(); }));
+    expect(evilStatus).toBe(401);
     const ws = new WebSocket(url, { headers: { Cookie: cookie, Origin: origin } });
     await new Promise<void>(resolve => ws.on('open', resolve));
     const closed = new Promise<number>(resolve => ws.on('close', resolve));
