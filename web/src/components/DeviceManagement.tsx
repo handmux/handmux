@@ -3,6 +3,7 @@ import { deviceManagementApi as api, DeviceManagementError, type DeviceApproval,
 import { isDeviceAuth, logoutDevice, authRequest, applyAuthStatus } from '../authSession.js';
 import { useBackButton } from '../hooks/useBackButton.js';
 import { useModalFocusTrap } from '../hooks/useModalFocusTrap.js';
+import { OverlayPortal } from '../overlays/OverlayHost.js';
 import { t } from '../i18n';
 
 export const deviceErrorCopy = (error: unknown): string => {
@@ -33,13 +34,14 @@ function DeviceSheet({ title, onClose, children, trapped = true, variant = 'shee
   const returnRef = useRef(document.activeElement instanceof HTMLElement ? document.activeElement : null);
   useBackButton(true, onClose);
   useModalFocusTrap({ active: trapped, dialogRef, initialFocusRef: closeRef, returnFocusRef: returnRef, onClose });
-  return <div className={`device-sheet-layer${variant === 'dialog' ? ' device-dialog-layer' : ''}`}>
+  const layer = <div className={`device-sheet-layer${variant === 'dialog' ? ' device-dialog-layer' : ''}`}>
     <div className="settings-backdrop" onClick={onClose} />
     <section className={`settings-card device-sheet${variant === 'dialog' ? ' device-dialog' : ''}`} role="dialog" aria-modal="true" aria-label={title} ref={dialogRef} tabIndex={-1}>
       <div className="settings-head"><h2 className="settings-title">{title}</h2><button className="settings-close" ref={closeRef} onClick={onClose} aria-label={t('common.close')}>×</button></div>
       <div className="settings-body">{children}</div>
     </section>
   </div>;
+  return variant === 'dialog' ? <OverlayPortal>{layer}</OverlayPortal> : layer;
 }
 function ExpiryPicker({ value, custom, onChange, onCustom, keep = false, disabled = false }: {
   value: string; custom: string; onChange: (value: string) => void; onCustom: (value: string) => void; keep?: boolean; disabled?: boolean;
@@ -382,6 +384,7 @@ export default function DeviceManagement({ onLoggedOut }: { onLoggedOut: () => v
         </div>
       </div>
       {!trustedDeviceEnabled && <p className="settings-detail-note">{t('devices.deviceProtectionDisabledHint')}</p>}
+      {!showingHistory && data.currentDeviceId && <button type="button" className="device-authorize-other" aria-label={t('devices.authorizeOther')} disabled={busy} onClick={() => setAdding(true)}>{t('devices.authorizeOther')}</button>}
       <h3 id="device-list-title">{t('devices.listTitle')}</h3>
       <div className="device-tabs" role="tablist" aria-label={t('devices.title')}>
         <button id="device-active-tab" role="tab" aria-selected={!showingHistory} aria-controls="device-list-panel" className="device-tab" onClick={() => setDeviceTab('active')}>{t('devices.activeTab')}<span>{activeCount}</span></button>
@@ -399,7 +402,6 @@ export default function DeviceManagement({ onLoggedOut }: { onLoggedOut: () => v
           <button type="button" className="settings-page-row device-add-row" aria-label={t('devices.addSelf')} disabled={busy} onClick={() => setSelfSheet(true)}><span className="device-action-copy"><strong>{t('devices.addSelf')}</strong><small>{t('devices.addSelfAddress', { origin: currentOrigin })}</small></span><span className="settings-page-chevron" aria-hidden="true">›</span></button>
         </div>}
       </div>
-      {!showingHistory && data.currentDeviceId && <button type="button" className="device-authorize-other" aria-label={t('devices.authorizeOther')} disabled={busy} onClick={() => setAdding(true)}>{t('devices.authorizeOther')}</button>}
     </section>
     <section className="device-settings-group" aria-labelledby="device-origin-title">
       <h2 id="device-origin-title">{t('devices.accessSection')}</h2>
@@ -413,17 +415,15 @@ export default function DeviceManagement({ onLoggedOut }: { onLoggedOut: () => v
       <div className="settings-page-list device-origin-list">
         <div className="settings-page-row device-origin-row">
           <div className="device-origin-copy">
-            <span className="device-origin-label"><b>{t('devices.publicUrlLabel')}</b> <button type="button" className="device-origin-help" aria-label={t('devices.publicUrlInfo')} onClick={() => setOriginHelp('public')}>?</button></span>
+            <span className="device-origin-meta"><span className="device-origin-label"><b>{t('devices.publicUrlLabel')}</b> <button type="button" className="device-origin-help" aria-label={t('devices.publicUrlInfo')} onClick={() => setOriginHelp('public')}>?</button></span><span className="device-origin-state">{data.publicUrl ? t('devices.originConfigured') : accessOrigin ? t('devices.originActive') : t('devices.originPending')}</span></span>
             <code className="device-origin-value">{accessOrigin ?? t('devices.originUnset')}</code>
-            <span className="device-origin-state">{data.publicUrl ? t('devices.originConfigured') : accessOrigin ? t('devices.originActive') : t('devices.originPending')}</span>
           </div>
           {accessOrigin && <span className="device-origin-check" aria-label={t('devices.originActive')}>✓</span>}
         </div>
         <div className="settings-page-row device-origin-row">
           <div className="device-origin-copy">
-            <span className="device-origin-label"><b>{t('devices.previewDomainLabel')}</b> <button type="button" className="device-origin-help" aria-label={t('devices.previewDomainInfo')} onClick={() => setOriginHelp('preview')}>?</button></span>
+            <span className="device-origin-meta"><span className="device-origin-label"><b>{t('devices.previewDomainLabel')}</b> <button type="button" className="device-origin-help" aria-label={t('devices.previewDomainInfo')} onClick={() => setOriginHelp('preview')}>?</button></span><span className="device-origin-state">{data.previewDomain ? t('devices.originBuiltIn') : t('devices.originPending')}</span></span>
             <code className="device-origin-value">{data.previewDomain ?? t('devices.originUnset')}</code>
-            <span className="device-origin-state">{data.previewDomain ? t('devices.originBuiltIn') : t('devices.originPending')}</span>
           </div>
           {data.previewDomain && <span className="device-origin-check" aria-label={t('devices.originActive')}>✓</span>}
         </div>
@@ -432,7 +432,7 @@ export default function DeviceManagement({ onLoggedOut }: { onLoggedOut: () => v
         <h3>{t('devices.extraOriginsTitle')}</h3>
         {data.trustedOrigins && data.trustedOrigins.length > 0 && <div className="settings-page-list">
           {data.trustedOrigins.map(origin => <div className="settings-page-row device-origin-extra-row" key={origin}>
-            <div className="device-origin-copy"><span className="device-origin-label"><b>{t('devices.extraOriginsTitle')}</b></span><code className="device-origin-value">{origin}</code><span className="device-origin-state">{t('devices.originActive')}</span></div>
+            <div className="device-origin-copy"><span className="device-origin-meta"><span className="device-origin-label"><b>{t('devices.extraOriginsTitle')}</b></span><span className="device-origin-state">{t('devices.originActive')}</span></span><code className="device-origin-value">{origin}</code></div>
             <button type="button" className="device-origin-remove" aria-label={`${t('common.delete')} ${origin}`} disabled={originBusy} onClick={() => { void removeTrustedOrigin(origin); }}>{t('common.delete')}</button>
           </div>)}
         </div>}
