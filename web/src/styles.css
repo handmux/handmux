@@ -1210,7 +1210,11 @@ div.workspace-restore-errors { padding-left: 10px; }
 .auth-card .auth-warning, .auth-help-dialog .auth-warning { padding: 11px 13px; border-radius: 10px; background: #ffc1480c; border: 1px solid #ffc14822; font-size: 12px; line-height: 1.6; }
 .token-prompt .auth-primary { min-height: 48px; border-radius: 11px; font-size: 15px; font-weight: 600; margin-top: 4px; }
 .auth-origin-prompt { gap: 16px; }
-.auth-origin-prompt .auth-warning { margin: 0; }
+.auth-origin-summary { margin: 0; color: #d8d8df; font-size: 15px !important; font-weight: 600; }
+.auth-origin-options { display: flex; flex-direction: column; gap: 8px; }
+.auth-origin-option { display: flex; flex-direction: column; gap: 4px; padding: 11px 12px; border-radius: 11px; background: rgba(120,120,128,.12); }
+.auth-origin-option strong { color: #f2f2f7; font-size: 13px; font-weight: 600; }
+.auth-origin-option span { color: #a1a1aa; font-size: 12px; line-height: 1.4; }
 .auth-origin-command { display: block; padding: 12px; border-radius: 10px; background: rgba(10,132,255,.1); border: 1px solid rgba(10,132,255,.16); color: #cfe4ff; font: 13px/1.45 ui-monospace, "SF Mono", Menlo, monospace; overflow-wrap: anywhere; user-select: text; -webkit-user-select: text; }
 .auth-origin-prompt .auth-primary { width: 100%; }
 .auth-secondary { color: var(--muted, #aaa); }

@@ -2,6 +2,7 @@ import { useEffect, useState, type ReactNode } from 'react';
 import { applyAuthStatus, authRequest, AuthRequestError } from '../authSession.js';
 import { t } from '../i18n';
 import AuthFrame from './AuthFrame.js';
+import OriginRejectedPrompt from './OriginRejectedPrompt.js';
 
 // Resolve the server's fixed mode before mounting anything that can send a saved legacy token.
 export default function AuthBootstrap({ children }: { children: ReactNode }) {
@@ -21,6 +22,7 @@ export default function AuthBootstrap({ children }: { children: ReactNode }) {
     return () => { active = false; };
   }, [retry]);
   if (ready) return children;
+  if (failed && errorCode === 'AUTH_ORIGIN_REJECTED') return <OriginRejectedPrompt onRetry={() => setRetry((value) => value + 1)} />;
   return <AuthFrame title={t('auth.connecting')} showHelp={false}><section className="token-prompt" aria-live="polite">
     <p>{t(failed && errorCode === 'AUTH_ORIGIN_REJECTED' ? 'auth.originRejected' : failed ? 'auth.connectionError' : 'common.loading')}</p>
     {failed && <button onClick={() => setRetry((value) => value + 1)}>{t('auth.retry')}</button>}

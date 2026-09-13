@@ -11,6 +11,7 @@ All notable changes to handmux. Format follows [Keep a Changelog](https://keepac
 ### Fixed
 
 - 修复删除可信访问域名后仍反复回到 Token 输入页的问题；现在会显示不受信任的来源地址和处理命令，并在删除确认中标明受影响的本机设备。
+- 精简不受信任地址提示，按打开可信入口或登记当前地址分段展示处理方式。
 
 ## [0.28.0] - 2026-09-11
 
