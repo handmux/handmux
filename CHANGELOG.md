@@ -10,6 +10,7 @@ All notable changes to handmux. Format follows [Keep a Changelog](https://keepac
 
 ### Fixed
 
+- 修复启用可信设备认证后动态网页预览被误判为主站、无法打开的问题；相关错误文案统一使用 `handmux`。
 - 修复删除可信访问域名后业务页与授权页反复切换的问题；现在会显示不受信任的来源地址和处理命令，并在删除确认中标明受影响的本机设备。
 - 精简不受信任地址提示，按打开可信入口或登记当前地址分段展示处理方式。
 
