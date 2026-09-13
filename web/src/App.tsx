@@ -42,7 +42,7 @@ import { useBrowser } from './hooks/useBrowser.js';
 import { browserEntryStatus } from './browserState.js';
 import { usePollingLoop } from './hooks/usePollingLoop.js';
 import { useServerConfig } from './hooks/useServerConfig.js';
-import { authHandled, isOriginRejectedError } from './authGuard.js';
+import { authHandled, authPromptAfterFailure } from './authGuard.js';
 import {
   clearPaneConversationIdentities,
   currentPaneAgent,
@@ -492,7 +492,7 @@ export default function App() {
 
   const onAuthFail = useCallback((error?: unknown) => {
     setNeedToken(true);
-    setAuthPrompt((current) => isOriginRejectedError(error) || current === 'origin' ? 'origin' : 'token');
+    setAuthPrompt((current) => authPromptAfterFailure(current, error));
   }, []);
   const retryOrigin = useCallback(() => {
     // /api/auth/status is intentionally available as a bootstrap endpoint even for an untrusted

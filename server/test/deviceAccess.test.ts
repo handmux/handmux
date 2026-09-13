@@ -12,6 +12,7 @@ import { DeviceAuthService, sessionCookieName } from '../src/deviceAuth/service.
 import { createDeviceAuthRouter } from '../src/deviceAuth/http.js';
 import { connectAuthControl, startDeviceAuthControl } from '../src/deviceAuth/control.js';
 import { createAuthOriginResolver, createDeviceAccess } from '../src/deviceAccess.js';
+import { requestOrigin } from '../src/requestOrigin.js';
 import { createTerminalStream } from '../src/terminalStream.js';
 import { terminalRoutes } from '../src/routes/terminal.js';
 import * as commands from '../src/tmux/commands.js';
@@ -36,8 +37,8 @@ function fixture() {
   cleanup.push(() => { access.close(); service.close(); db.close(); });
   return { app, service, origin, resolveOrigin };
 }
-function reqMock(host: string, remoteAddress = '127.0.0.1', proto?: string): IncomingMessage {
-  return { headers: { host, ...(proto ? { 'x-forwarded-proto': proto } : {}) }, socket: { remoteAddress } } as IncomingMessage;
+function reqMock(host: string, remoteAddress = '127.0.0.1', proto?: string, extra: Record<string, string> = {}): IncomingMessage {
+  return { headers: { host, ...(proto ? { 'x-forwarded-proto': proto } : {}), ...extra }, socket: { remoteAddress } } as IncomingMessage;
 }
 describe('known auth entry points', () => {
   it('accepts local and configured origins, while rejecting unknown hosts', () => {
@@ -68,6 +69,16 @@ describe('known auth entry points', () => {
     expect(resolve(reqMock('a.extra.example.com', '203.0.113.4', 'https'))).toBe('https://a.extra.example.com');
     expect(resolve(reqMock('extra.example.com', '203.0.113.4', 'https'))).toBeNull();
     expect(resolve(reqMock('a.extra.example.com', '203.0.113.4', 'http'))).toBeNull();
+  });
+
+  it('keeps a TLS-terminated custom tunnel on HTTPS without forwarded protocol', () => {
+    const resolve = createAuthOriginResolver({ port: 4000, host: '0.0.0.0', trustedOrigins: () => ['https://mux.example'] });
+    expect(requestOrigin(reqMock('mux.example', '127.0.0.1', undefined, { origin: 'https://mux.example' }))).toBe('https://mux.example');
+    expect(resolve(reqMock('mux.example', '127.0.0.1', undefined, { origin: 'https://mux.example' }))).toBe('https://mux.example');
+    expect(requestOrigin(reqMock('mux.example:443', '127.0.0.1', undefined, { origin: 'https://mux.example' }))).toBe('https://mux.example');
+    expect(requestOrigin(reqMock('mux.example:80', '127.0.0.1', undefined, { origin: 'https://mux.example' }))).toBe('http://mux.example');
+    expect(requestOrigin(reqMock('mux.example', '127.0.0.1', undefined, { cookie: '__Host-handmux_pairing_abc=secret' }))).toBe('https://mux.example');
+    expect(requestOrigin(reqMock('mux.example', '203.0.113.4', undefined, { origin: 'https://mux.example' }))).toBe('http://mux.example');
   });
 
   it('allows a valid Token from an unknown host when both protections are off', async () => {

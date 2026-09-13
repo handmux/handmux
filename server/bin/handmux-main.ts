@@ -847,9 +847,13 @@ async function printAccess(st: StoredState | null): Promise<void> {
   const publicUrl = st.publicUrl ?? null;
   const localUrl = st.localUrl ?? null;
   let devices: Array<{ status: string }> = [];
+  let deviceProtection: boolean | null = null;
   try {
     const control = await connectAuthControl(HOME);
-    try { const status = await control.request({ op: 'device-status' }) as { devices: Array<{ status: string }> }; devices = status.devices; }
+    try {
+      const status = await control.request({ op: 'device-status' }) as { enabled: boolean; devices: Array<{ status: string }> };
+      devices = status.devices; deviceProtection = status.enabled === true;
+    }
     finally { control.close(); }
   } catch { /* The server may still be starting; the token is printed from the resolved state below. */ }
   const token = st.token ?? '';
@@ -859,9 +863,12 @@ async function printAccess(st: StoredState | null): Promise<void> {
   console.log(t('access.open', { url: scan || t('access.pending') }));
   if (st.tunnel === 'none' && st.lanUrl) console.log(t('access.lan', { url: bareUrl(st.lanUrl) }));
   console.log(t('access.local', { url: bareUrl(localUrl) }));
-  console.log(t('auth.access'));
-  if (!devices.some(d => d.status === 'active')) console.log(t('auth.noDevices'));
-  console.log(t('access.token', { token })); console.log(tokenWarning(t('auth.warning')));
+  if (deviceProtection === true) {
+    console.log(t('auth.access'));
+    if (!devices.some(d => d.status === 'active')) console.log(t('auth.noDevices'));
+  }
+  console.log(t('access.token', { token }));
+  if (deviceProtection === false) console.log(tokenWarning(t('auth.warning')));
   await maybeQr(scan || bareUrl(st.lanUrl ?? localUrl), st);
   if (publicUrl && st.tunnel !== 'none') {
     const ok = await probe(publicUrl);

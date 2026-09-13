@@ -12,6 +12,14 @@ export function isOriginRejectedError(error: unknown): boolean {
     && (error.code === 'origin_rejected' || error.code === 'AUTH_ORIGIN_REJECTED');
 }
 
+export type AuthPrompt = 'device' | 'token' | 'origin';
+
+/** Keep an explicit device-authorization flow stable while stale requests finish. */
+export function authPromptAfterFailure(current: AuthPrompt, error: unknown): AuthPrompt {
+  if (current === 'device') return current;
+  return isOriginRejectedError(error) || current === 'origin' ? 'origin' : 'token';
+}
+
 export function authHandled(error: unknown, onAuthFail?: (error: unknown) => void): boolean {
   if (error instanceof UnauthorizedError || isOriginRejectedError(error)) { onAuthFail?.(error); return true; }
   return false;
