@@ -2432,7 +2432,7 @@ export default function App() {
   });
 
   if (needToken) {
-    if (authPrompt === 'origin') return <OriginRejectedPrompt onRetry={retryOrigin} />;
+    if (authPrompt === 'origin') return <OriginRejectedPrompt onRetry={retryOrigin} onAuthorize={() => setAuthPrompt('device')} />;
     if (authPrompt === 'token' && isTokenEnabled()) {
       return <TokenPrompt onSaved={validateToken} error={tokenCheckError} busy={tokenCheckBusy} />;
     }

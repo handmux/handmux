@@ -1224,8 +1224,9 @@ div.workspace-restore-errors { padding-left: 10px; }
 .auth-origin-option { display: flex; flex-direction: column; gap: 4px; padding: 11px 12px; border-radius: 11px; background: rgba(120,120,128,.12); }
 .auth-origin-option strong { color: #f2f2f7; font-size: 13px; font-weight: 600; }
 .auth-origin-option span { color: #a1a1aa; font-size: 12px; line-height: 1.4; }
-.auth-origin-command { display: block; padding: 12px; border-radius: 10px; background: rgba(10,132,255,.1); border: 1px solid rgba(10,132,255,.16); color: #cfe4ff; font: 13px/1.45 ui-monospace, "SF Mono", Menlo, monospace; overflow-wrap: anywhere; user-select: text; -webkit-user-select: text; }
-.auth-origin-prompt .auth-primary { width: 100%; }
+.auth-origin-authorize { gap: 8px; }
+.auth-origin-authorize .auth-primary { width: 100%; margin-top: 3px; }
+.auth-origin-retry { align-self: center; padding: 4px 10px !important; border: 0; background: transparent !important; color: #8e8e98 !important; font-size: 12px !important; }
 .auth-secondary { color: var(--muted, #aaa); }
 .auth-error { margin: -2px 0 0; color: #ff9b95; font-size: 12px !important; line-height: 1.4 !important; }
 .pairing-prompt { max-width: none; margin: 0; padding: 0; gap: 16px; }

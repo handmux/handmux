@@ -160,6 +160,15 @@ describe('mode bootstrap', () => {
     expect(screen.getByRole('button', { name: t('auth.retry') })).toBeTruthy();
   });
 
+  it('opens the current-address authorization flow from an origin rejection', async () => {
+    fetcher.mockResolvedValueOnce({ ok: false, status: 403, json: async () => ({ code: 'AUTH_ORIGIN_REJECTED' }) });
+    render(<AuthBootstrap><div>Business UI</div></AuthBootstrap>); await flush();
+    expect(screen.getByRole('heading', { name: t('auth.originRejectedTitle') })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: t('auth.originRejectedAuthorizeButton') })); await flush();
+    expect(screen.getByText(t('auth.deviceRequired'))).toBeTruthy();
+    expect(fetcher).toHaveBeenCalledWith('/api/auth/pairing', expect.objectContaining({ method: 'POST' }));
+  });
+
   it('can resolve device auth even when localStorage is unavailable', async () => {
     vi.spyOn(Storage.prototype, 'removeItem').mockImplementation(() => { throw new Error('blocked'); });
     vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('blocked'); });

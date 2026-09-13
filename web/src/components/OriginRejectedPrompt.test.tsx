@@ -6,12 +6,17 @@ import { t } from '../i18n';
 describe('OriginRejectedPrompt', () => {
   it('explains the rejected address and offers a retry without a Token input', () => {
     const onRetry = vi.fn();
-    render(<OriginRejectedPrompt onRetry={onRetry} />);
+    const onAuthorize = vi.fn();
+    render(<OriginRejectedPrompt onRetry={onRetry} onAuthorize={onAuthorize} />);
     expect(screen.getByRole('heading', { name: t('auth.originRejectedTitle') })).toBeTruthy();
-    expect(screen.getByText(t('auth.originRejected'))).toBeTruthy();
-    expect(document.querySelector('.auth-origin-command')?.textContent).toContain('handmux auth address add');
+    expect(screen.getByText(t('auth.originRejectedAddress', { origin: window.location.origin }))).toBeTruthy();
+    expect(screen.getByText(t('auth.originRejectedOpenHint'))).toBeTruthy();
+    expect(screen.getByText(t('auth.originRejectedAuthorizeHint'))).toBeTruthy();
+    expect(document.querySelector('.auth-origin-command')).toBeNull();
     expect(screen.queryByLabelText('Token')).toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: t('auth.retry') }));
+    fireEvent.click(screen.getByRole('button', { name: t('auth.originRejectedAuthorizeButton') }));
+    expect(onAuthorize).toHaveBeenCalledOnce();
+    fireEvent.click(screen.getByRole('button', { name: t('auth.originRejectedRetry') }));
     expect(onRetry).toHaveBeenCalledOnce();
   });
 });
