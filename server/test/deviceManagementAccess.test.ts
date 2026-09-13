@@ -140,6 +140,12 @@ describe('Web device management across real HTTP and WebSocket boundaries', () =
     expect(after.body).toMatchObject({ authenticated: false, originTrusted: false, tokenAuthenticated: true });
     expect(after.body.currentDeviceId).toBeNull();
 
+    const withLeftoverPairingCookie = await request(f.server).get('/api/auth/status')
+      .set({ Host: 'phone.example.com', Origin: extraOrigin, 'X-Forwarded-Proto': 'https', Authorization: 'Bearer secret' })
+      .set('Cookie', `${primaryCookie}; ${pendingCookie}`).expect(200);
+    expect(withLeftoverPairingCookie.body).toMatchObject({ authenticated: false, originTrusted: false, tokenAuthenticated: true });
+    expect(withLeftoverPairingCookie.body.currentDeviceId).toBeNull();
+
     f.service.revoke(device.id);
   });
 

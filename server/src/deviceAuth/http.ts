@@ -108,7 +108,10 @@ export function createDeviceAuthRouter({ service, resolveOrigin, resolvePublicUr
     const candidate = selectCandidate(req, origin);
     // A late anonymous POST may overwrite only the candidate cookie, never a live session.
     // Existing primary sessions always win over another tab's pending/authorized candidate.
-    if (!principal && candidate && token) { principal = service.authenticateSecret(candidate.secret, origin); if (principal) secret = candidate.secret; }
+    if (res.locals.authOriginTrusted !== false && !principal && candidate && token) {
+      principal = service.authenticateSecret(candidate.secret, origin);
+      if (principal) secret = candidate.secret;
+    }
     if (principal && secret) setSessionCookie(res, origin, secret, principal.expiresAt);
     const pairing = candidate?.pairing;
     res.json({ mode: service.mode, tokenEnabled: true, tokenAuthenticated: !!token,
