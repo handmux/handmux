@@ -508,6 +508,10 @@ export default function App() {
       // live device cookie. Skip mounting the pairing screen in that case; doing
       // so avoids a transient auth view while the business requests resume.
       if (status.authenticated) {
+        // The explicit pairing flow is complete. Future auth failures must start at the
+        // Token factor; reopening DevicePairingPrompt here would see this same live session
+        // and immediately sign back in, causing a business-page ↔ auth-page loop.
+        setAuthPrompt('token');
         setNeedToken(false);
         setBooting(true);
       } else if (status.tokenAuthenticated === true || status.mode === 'token') setAuthPrompt('device');
@@ -2436,7 +2440,12 @@ export default function App() {
     if (authPrompt === 'token' && isTokenEnabled()) {
       return <TokenPrompt onSaved={validateToken} error={tokenCheckError} busy={tokenCheckBusy} />;
     }
-    return <DevicePairingPrompt onSaved={() => { setNeedToken(false); setBooting(true); }} />;
+    return <DevicePairingPrompt onSaved={() => {
+      // The explicit pairing flow is complete. Keep future recovery on the Token-first entry point.
+      setAuthPrompt('token');
+      setNeedToken(false);
+      setBooting(true);
+    }} />;
   }
 
   const inboxList = inboxRows(states, seen, readTs == null ? Infinity : readTs);
