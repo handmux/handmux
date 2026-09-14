@@ -414,7 +414,7 @@ export default function DeviceManagement({ onLoggedOut }: { onLoggedOut: () => v
             : <button type="button" className="fontbtn device-policy-enable" disabled={busy} onClick={() => setConfirmEnable('device')}>{t(busy ? 'common.loading' : 'devices.enableProtection')}</button>}
         </div>
       </div>
-      {!trustedDeviceEnabled && <p className="settings-detail-note device-policy-warning">{t('devices.deviceProtectionEnableWarning')}</p>}
+      {trustedDeviceEnabled && <p className="settings-detail-note device-policy-enabled-note">{t('devices.deviceProtectionEnabledHint')}</p>}
       {trustedDeviceEnabled && <>
       {!showingHistory && data.currentDeviceId && <button type="button" className="device-authorize-other" aria-label={t('devices.authorizeOther')} disabled={busy} onClick={() => setAdding(true)}>{t('devices.authorizeOther')}</button>}
       <h3 id="device-list-title">{t('devices.listTitle')}</h3>
@@ -446,7 +446,7 @@ export default function DeviceManagement({ onLoggedOut }: { onLoggedOut: () => v
             : <button type="button" className="fontbtn device-policy-enable" disabled={busy} onClick={() => setConfirmEnable('origin')}>{t(busy ? 'common.loading' : 'devices.enableOriginProtection')}</button>}
         </div>
       </div>
-      {!trustedOriginEnabled && <p className="settings-detail-note device-policy-warning">{t('devices.originProtectionEnableWarning')}</p>}
+      {trustedOriginEnabled && <p className="settings-detail-note device-policy-enabled-note">{t('devices.originProtectionEnabledHint')}</p>}
       {trustedOriginEnabled && <>
       <div className="settings-page-list device-origin-list">
         <div className="settings-page-row device-origin-row">
@@ -472,12 +472,15 @@ export default function DeviceManagement({ onLoggedOut }: { onLoggedOut: () => v
     {originHelp && <DeviceSheet title={originHelp === 'public' ? t('devices.publicUrlLabel') : t('devices.previewDomainLabel')} onClose={() => setOriginHelp(null)}><p className="device-sheet-note">{t(originHelp === 'public' ? 'devices.publicUrlInfo' : 'devices.previewDomainInfo')}</p></DeviceSheet>}
     {policyHelp && <DeviceSheet title={policyHelp === 'device' ? t('devices.deviceProtectionSection') : t('devices.accessSection')} variant="dialog" onClose={() => setPolicyHelp(null)}><p className="device-sheet-note">{t(policyHelp === 'device' ? 'devices.deviceProtectionInfo' : 'devices.originProtectionInfo')}</p></DeviceSheet>}
     {originRemoval && <OriginRemoveConfirm origin={originRemoval.origin} devices={originRemoval.devices} currentDeviceId={data.currentDeviceId} busy={originBusy} error={error} onClose={() => { if (!originBusy) { setOriginRemoval(null); setError(''); } }} onConfirm={() => { void confirmRemoveTrustedOrigin(); }} />}
-    {confirmEnable && <DeviceSheet title={t('devices.enableConfirmTitle')} variant="dialog" onClose={() => { if (!busy) setConfirmEnable(null); }}>
-      <p className="device-sheet-note">{t(confirmEnable === 'device' ? 'devices.enableDeviceConfirm' : 'devices.enableOriginConfirm')}</p>
-      <div className="device-form-actions">
-        <button className="fontbtn device-save device-form-confirm" disabled={busy} onClick={() => { const kind = confirmEnable; setConfirmEnable(null); void (kind === 'device' ? enableDeviceProtection() : enableOriginProtection()); }}>{t(busy ? 'common.loading' : 'devices.enableConfirm')}</button>
-        <button className="fontbtn device-sheet-cancel" disabled={busy} onClick={() => setConfirmEnable(null)}>{t('common.cancel')}</button>
+    {confirmEnable && <div className="settings-confirm-backdrop" onClick={() => { if (!busy) setConfirmEnable(null); }}>
+      <div className="settings-confirm" role="alertdialog" aria-modal="true" aria-labelledby="device-enable-confirm-title" onClick={event => event.stopPropagation()}>
+        <h2 id="device-enable-confirm-title">{t('devices.enableConfirmTitle')}</h2>
+        <p>{t(confirmEnable === 'device' ? 'devices.enableDeviceConfirm' : 'devices.enableOriginConfirm')}</p>
+        <div className="settings-confirm-actions">
+          <button type="button" disabled={busy} onClick={() => setConfirmEnable(null)}>{t('common.cancel')}</button>
+          <button type="button" disabled={busy} onClick={() => { const kind = confirmEnable; setConfirmEnable(null); void (kind === 'device' ? enableDeviceProtection() : enableOriginProtection()); }}>{t(busy ? 'common.loading' : 'devices.enableConfirm')}</button>
+        </div>
       </div>
-    </DeviceSheet>}
+    </div>}
   </section>;
 }

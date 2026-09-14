@@ -122,9 +122,10 @@ function SettingsGroup({ title, children, footer }: {
   );
 }
 
-function SettingsNavRow({ label, value, onClick, dot = false, disabled = false }: {
+function SettingsNavRow({ label, value, valueTone, onClick, dot = false, disabled = false }: {
   label: string;
   value?: string;
+  valueTone?: 'good' | 'warn' | 'bad';
   onClick: () => void;
   dot?: boolean;
   disabled?: boolean;
@@ -133,7 +134,7 @@ function SettingsNavRow({ label, value, onClick, dot = false, disabled = false }
     <button type="button" className="settings-page-row" onClick={onClick} disabled={disabled}>
       <span className="settings-page-row-label">{label}</span>
       <span className="settings-page-row-trailing">
-        {value && <span className="settings-page-row-value">{value}</span>}
+        {value && <span className={`settings-page-row-value${valueTone ? ` settings-page-row-value-${valueTone}` : ''}`}>{value}</span>}
         {dot && <span className="settings-page-dot" aria-hidden="true" />}
         <span className="settings-page-chevron" aria-hidden="true">›</span>
       </span>
@@ -498,7 +499,7 @@ export default function Settings({ open, onClose, termRef, onOpenChangelog = () 
 
       <SettingsGroup title={t('settings.group_general')}>
         <SettingsNavRow label={t('settings.language')} value={languageLabel} onClick={() => openPage('language')} />
-        <SettingsNavRow label={t('devices.title')} value={t(isTrustedDeviceEnabled() && isTrustedOriginEnabled() ? 'devices.protectionEnabled' : isTrustedDeviceEnabled() || isTrustedOriginEnabled() ? 'devices.protectionPartial' : 'devices.protectionDisabled')} dot={!isTrustedDeviceEnabled() || !isTrustedOriginEnabled()} onClick={() => openPage('devices')} />
+        <SettingsNavRow label={t('devices.title')} value={t(isTrustedDeviceEnabled() && isTrustedOriginEnabled() ? 'devices.protectionEnabled' : isTrustedDeviceEnabled() || isTrustedOriginEnabled() ? 'devices.protectionPartial' : 'devices.protectionDisabled')} valueTone={isTrustedDeviceEnabled() && isTrustedOriginEnabled() ? 'good' : isTrustedDeviceEnabled() || isTrustedOriginEnabled() ? 'warn' : 'bad'} onClick={() => openPage('devices')} />
       </SettingsGroup>
 
       <SettingsGroup title={t('settings.group_terminal')} footer={t('settings.path_highlight_hint')}>

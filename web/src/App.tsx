@@ -80,7 +80,7 @@ import TokenPrompt from './components/TokenPrompt.jsx';
 import DevicePairingPrompt from './components/DevicePairingPrompt.js';
 import OriginRejectedPrompt from './components/OriginRejectedPrompt.js';
 import DeviceLogoutDialog from './components/DeviceLogoutDialog.js';
-import { applyAuthStatus, authRequest, AuthRequestError, hasAuthenticatedSession, hasDeviceSession, isDeviceAuth, isTokenEnabled, logoutDevice } from './authSession.js';
+import { applyAuthStatus, authRequest, AuthRequestError, hasAuthenticatedSession, hasDeviceSession, isDeviceAuth, isTokenEnabled, isTrustedDeviceEnabled, isTrustedOriginEnabled, logoutDevice } from './authSession.js';
 import Settings from './components/Settings.jsx';
 import WorkspaceRestoreDialog from './components/WorkspaceRestoreDialog.jsx';
 import UsagePage from './components/UsagePage.jsx';
@@ -2469,7 +2469,7 @@ export default function App() {
   // one you've SEEN (by opening the page) exists. Opening the page clears it even if messages inside are
   // still unread; a newer push relights it. (Per-message unread lives on the rows / the count, not here.)
   const hasNewNotif = (notifItems[0]?.ts ?? -Infinity) > notifSeenTs; // items are newest-first
-  const gearDot = changelogUnread || updateDot || hasNewNotif;
+  const gearDot = changelogUnread || updateDot || hasNewNotif || !isTrustedDeviceEnabled() || !isTrustedOriginEnabled();
   const openSettings = () => {
     setSettingsOpen(true);
     if (updateInfo?.latest) { setVersionSeen(updateInfo.latest); setVerSeen(updateInfo.latest); } // acknowledge → clears updateDot

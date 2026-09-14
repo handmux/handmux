@@ -42,8 +42,6 @@ describe('compact device management', () => {
     expect(screen.getAllByText(t('devices.policyDisabled'))).toHaveLength(2);
     expect(screen.getByRole('button', { name: t('devices.enableProtection') })).toBeTruthy();
     expect(screen.getByRole('button', { name: t('devices.enableOriginProtection') })).toBeTruthy();
-    expect(screen.getByText(t('devices.deviceProtectionEnableWarning'))).toBeTruthy();
-    expect(screen.getByText(t('devices.originProtectionEnableWarning'))).toBeTruthy();
     expect(screen.queryByRole('button', { name: t('devices.deviceProtectionInfo') })).toBeNull();
     expect(screen.queryByRole('tab')).toBeNull();
     expect(screen.queryByText(t('devices.publicUrlLabel'))).toBeNull();
@@ -75,8 +73,8 @@ describe('compact device management', () => {
 
   it('keeps policy commands behind compact help buttons', async () => {
     render(<DeviceManagement onLoggedOut={vi.fn()} />); await flush();
-    expect(screen.queryByText(/handmux auth device/)).toBeNull();
-    expect(screen.queryByText(/handmux auth address/)).toBeNull();
+    expect(screen.getByText(t('devices.deviceProtectionEnabledHint'))).toBeTruthy();
+    expect(screen.getByText(t('devices.originProtectionEnabledHint'))).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: t('devices.deviceProtectionInfo') }));
     expect(within(screen.getByRole('dialog')).getByText(t('devices.deviceProtectionInfo'))).toBeTruthy();
   });

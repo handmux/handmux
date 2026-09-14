@@ -183,6 +183,9 @@ button.settings-page-row:disabled, .settings-page-row.disabled { color: rgba(235
   max-width: 190px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   color: rgba(235,235,245,.46); font-size: 14.5px; font-variant-numeric: tabular-nums;
 }
+.settings-page-row-value-good { color: var(--green, #65d38b); }
+.settings-page-row-value-warn { color: #e6be70; }
+.settings-page-row-value-bad { color: #ff6961; }
 .settings-agent-integration-row { padding-right: 8px; }
 .settings-agent-integration-action {
   min-width: 52px; min-height: 44px; margin: -5px 0; padding: 0 8px;
@@ -331,6 +334,7 @@ button.settings-page-row:disabled, .settings-page-row.disabled { color: rgba(235
 .device-policy-disabled { color: #e6be70; }
 .device-policy-enable { flex: none; min-height: 40px; padding: 0 12px; }
 .device-policy-warning { margin: 0 4px; color: rgba(235,235,245,.62); }
+.device-policy-enabled-note { margin-top: 0; }
 .device-policy-help { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; padding: 0; border: 1px solid rgba(235,235,245,.36); border-radius: 50%; background: transparent; color: rgba(235,235,245,.62); font: 13px/1 -apple-system, system-ui, sans-serif; }
 .device-row { gap: 12px; min-height: 64px; }
 .device-action-list { margin-top: 8px; }
