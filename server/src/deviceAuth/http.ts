@@ -25,7 +25,6 @@ export function createDeviceAuthRouter({ service, resolveOrigin }: {
   type Bucket = { at: number; requests: number; creates: number };
   const anonymousBuckets = new Map<string, Bucket>();
   const authenticatedBuckets = new Map<string, Bucket>();
-  const tokenBuckets = new Map<string, Bucket>();
   const tokenPrincipal = (req: Request, origin: string) => service.authenticateToken(bearerFrom(req.get('authorization')) ?? req.get('X-Handmux-Token'), origin);
   router.use((req, res, next) => {
     res.set('Cache-Control', 'no-store'); res.set('Pragma', 'no-cache');
@@ -52,16 +51,9 @@ export function createDeviceAuthRouter({ service, resolveOrigin }: {
     }
     const now = Date.now();
     // Separate bounded maps reserve capacity for authenticated sessions even under anonymous floods.
-    const token = principal && service.isTokenPrincipal(principal);
-    const buckets = !principal ? anonymousBuckets : token ? tokenBuckets : authenticatedBuckets;
+    const buckets = principal ? authenticatedBuckets : anonymousBuckets;
     for (const [key, value] of buckets) if (now - value.at >= 60_000) buckets.delete(key);
-    const key = !principal
-      ? req.socket.remoteAddress ?? 'unknown'
-      // A fixed Token identifies a credential, not a browser. Include the source tuple so
-      // separate Token browsers cannot consume each other's quota through one generation ID.
-      : token
-        ? `${principal.sessionId}:${req.socket.remoteAddress ?? 'unknown'}:${(req.get('user-agent') ?? '').slice(0, 200)}`
-        : principal.sessionId;
+    const key = principal ? principal.sessionId : req.socket.remoteAddress ?? 'unknown';
     let bucket = buckets.get(key);
     if (!bucket) {
       if (buckets.size >= 1024) { res.status(429).json({ error: 'AUTH_RATE_LIMIT', message: 'Wait one minute and try again' }); return; }
@@ -82,18 +74,13 @@ export function createDeviceAuthRouter({ service, resolveOrigin }: {
     let secret = readSessionSecret(req, origin);
     let principal = service.authenticateRequest(req, origin);
     const formalPrincipal = principal;
-    const token = tokenPrincipal(req, origin);
     const candidate = selectCandidate(req, origin);
     // A late anonymous POST may overwrite only the candidate cookie, never a live session.
     // Existing primary sessions always win over another tab's pending/authorized candidate.
     if (!principal && candidate) { principal = service.authenticateSecret(candidate.secret, origin); if (principal) secret = candidate.secret; }
     if (principal && secret) setSessionCookie(res, origin, secret, principal.expiresAt);
     const pairing = candidate?.pairing;
-    // A candidate cookie may already be a durable session after a server restart, so it can
-    // receive a formal Cookie here. It is not a confirmed primary session until a later
-    // request arrives with that formal Cookie (the browser may reject Set-Cookie).
-    const currentDeviceId = formalPrincipal?.deviceId ?? null;
-    res.json({ mode: service.mode, tokenEnabled: service.tokenEnabled, authenticated: !!principal || !!token, tokenAuthenticated: !!token, currentDeviceId, ...(pairing ? { pairing } : {}), serverTime: Date.now() });
+    res.json({ mode: service.mode, tokenEnabled: service.tokenEnabled, authenticated: !!principal || !!tokenPrincipal(req, origin), currentDeviceId: formalPrincipal?.deviceId ?? null, ...(pairing ? { pairing } : {}), serverTime: Date.now() });
   };
   const safe = (handler: (req: Request, res: Response) => void) => (req: Request, res: Response): void => {
     try { handler(req, res); } catch (error) {
