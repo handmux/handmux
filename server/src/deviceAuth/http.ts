@@ -80,7 +80,10 @@ export function createDeviceAuthRouter({ service, resolveOrigin }: {
     if (!principal && candidate) { principal = service.authenticateSecret(candidate.secret, origin); if (principal) secret = candidate.secret; }
     if (principal && secret) setSessionCookie(res, origin, secret, principal.expiresAt);
     const pairing = candidate?.pairing;
-    res.json({ mode: service.mode, tokenEnabled: service.tokenEnabled, authenticated: !!principal || !!tokenPrincipal(req, origin), currentDeviceId: formalPrincipal?.deviceId ?? null, ...(pairing ? { pairing } : {}), serverTime: Date.now() });
+    // A candidate cookie may already be a durable session after a server restart;
+    // promote it to the reported current device once its hash authenticates.
+    const currentDeviceId = formalPrincipal?.deviceId ?? (principal && !service.isTokenPrincipal(principal) ? principal.deviceId : null);
+    res.json({ mode: service.mode, tokenEnabled: service.tokenEnabled, authenticated: !!principal || !!tokenPrincipal(req, origin), currentDeviceId, ...(pairing ? { pairing } : {}), serverTime: Date.now() });
   };
   const safe = (handler: (req: Request, res: Response) => void) => (req: Request, res: Response): void => {
     try { handler(req, res); } catch (error) {
