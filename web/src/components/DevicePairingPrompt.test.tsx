@@ -2,7 +2,7 @@ import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import DevicePairingPrompt from './DevicePairingPrompt.js';
 import AuthBootstrap from './AuthBootstrap.js';
-import { applyAuthStatus, type AuthStatus } from '../authSession.js';
+import { applyAuthStatus, hasAuthenticatedSession, type AuthStatus } from '../authSession.js';
 import { t } from '../i18n';
 
 let server: AuthStatus;
@@ -12,7 +12,7 @@ const tick = async (ms: number) => { await act(async () => { await vi.advanceTim
 beforeEach(() => {
   vi.useFakeTimers();
   vi.setSystemTime(100000);
-  server = { mode: 'trusted-device', authenticated: false, serverTime: Date.now() };
+  server = { mode: 'trusted-device', authenticated: false, tokenAuthenticated: false, serverTime: Date.now() };
   applyAuthStatus(server);
   fetcher = vi.fn(async () => ({ ok: true, status: 200, json: async () => ({ ...server, serverTime: Date.now() }) }));
   vi.stubGlobal('fetch', fetcher);
@@ -190,6 +190,29 @@ describe('mode bootstrap', () => {
     render(<AuthBootstrap><div>Business UI</div></AuthBootstrap>); await flush();
     expect(screen.queryByText('Business UI')).toBeNull();
     expect(screen.getByRole('button', { name: t('auth.retry') })).toBeTruthy();
+  });
+
+  it('does not treat a candidate-only cookie as an authenticated app session', async () => {
+    server.authenticated = true;
+    server.currentDeviceId = null;
+    server.tokenAuthenticated = false;
+    const Gate = () => hasAuthenticatedSession() ? <div>Business UI</div> : <div>Pairing UI</div>;
+    render(<AuthBootstrap><Gate /></AuthBootstrap>);
+    await flush();
+    expect(screen.queryByText('Business UI')).toBeNull();
+    expect(screen.getByText('Pairing UI')).toBeTruthy();
+    expect(hasAuthenticatedSession()).toBe(false);
+  });
+
+  it('keeps a valid fixed Token session authenticated without a device id', async () => {
+    server.authenticated = true;
+    server.currentDeviceId = null;
+    server.tokenAuthenticated = true;
+    const Gate = () => hasAuthenticatedSession() ? <div>Business UI</div> : <div>Pairing UI</div>;
+    render(<AuthBootstrap><Gate /></AuthBootstrap>);
+    await flush();
+    expect(screen.getByText('Business UI')).toBeTruthy();
+    expect(hasAuthenticatedSession()).toBe(true);
   });
 
   it('can resolve device auth even when localStorage is unavailable', async () => {

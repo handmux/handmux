@@ -8,6 +8,12 @@ All notable changes to handmux. Format follows [Keep a Changelog](https://keepac
 
 - 新增可信设备登录：通过 CLI 或已有可信设备授权浏览器，按设备设置名称、有效期并单独撤销。可信设备登录始终可用；固定 Token 登录作为兼容入口，新安装默认禁用，旧安装保留原有状态。Web 可添加本机为可信设备并即时禁用固定 Token 登录，重新启用仅支持 CLI。
 
+### Fixed
+
+- 修复正式设备 Cookie 未落地时浏览器被错误放行到业务界面、后续请求全部失败的问题。
+- 修复 `handmux pi` 与 `handmux codex` 的 raw Agent 输出被 Node SQLite warning 污染的问题。
+- 修复禁用 `localStorage` 时已有可信设备 Cookie 无法打开实时终端的问题，并让设备登出确认支持返回键与点击遮罩取消。
+
 ## [0.28.0] - 2026-09-11
 
 ### Added

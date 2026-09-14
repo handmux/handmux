@@ -36,7 +36,7 @@ type ConnectionField =
   | 'sshJump' | 'authtoken' | 'cpolarRegion' | 'domain';
 interface ConnectionFieldRow { value: ConnectionField; label: string; hint: string }
 type OptionalConnectionStringKey = 'publicUrl' | 'sshJump' | 'cpolarRegion';
-const { DatabaseSync } = createRequire(import.meta.url)('node:sqlite') as typeof import('node:sqlite');
+type NodeDatabaseSync = import('node:sqlite').DatabaseSync;
 const errorMessage = (error: unknown): string => {
   if (error instanceof Error) return error.message;
   if (error && typeof error === 'object' && 'message' in error && typeof error.message === 'string') {
@@ -79,8 +79,11 @@ interface AuthSnapshot { enabled?: boolean; devices: Array<Record<string, unknow
 function readAuthSnapshot(home: string): AuthSnapshot | undefined {
   const databasePath = path.join(home, '.handmux', 'handmux.sqlite');
   if (!fs.existsSync(databasePath)) return undefined;
-  let db: InstanceType<typeof DatabaseSync> | undefined;
+  let db: NodeDatabaseSync | undefined;
   try {
+    // Keep SQLite out of the module-import path. The raw Agent launcher in handmux-main must be able
+    // to hand argv/stdout/stderr through byte-for-byte, even when this CLI module is imported first.
+    const { DatabaseSync } = createRequire(import.meta.url)('node:sqlite') as typeof import('node:sqlite');
     db = new DatabaseSync(databasePath, { readOnly: true });
     const tokenRow = db.prepare("SELECT value FROM auth_meta WHERE key='token_enabled'").get() as { value?: string } | undefined;
     const rows = db.prepare('SELECT id,name,browser_summary,authorized_at,expires_at,last_used_at,revoked_at,version FROM auth_devices').all() as Array<Record<string, unknown>>;

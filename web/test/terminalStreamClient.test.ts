@@ -130,6 +130,21 @@ describe('openTerminalStream', () => {
     }
   });
 
+  it('still opens a trusted-device stream when localStorage is unavailable', async () => {
+    applyAuthStatus({ mode: 'trusted-device', authenticated: true, currentDeviceId: 'dev_test', serverTime: Date.now() });
+    vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => { throw new Error('Storage denied'); });
+    const stream = openTerminalStream({ pane: '%7', WebSocketCtor: FakeWebSocket });
+    try {
+      const ws = latestSocket();
+      ws.open();
+      expect(ws.sent).toEqual([{ type: 'subscribe', pane: '%7' }]);
+    } finally {
+      await stream.close();
+      vi.restoreAllMocks();
+      applyAuthStatus({ mode: 'trusted-device', tokenEnabled: true, currentDeviceId: null, authenticated: false, serverTime: Date.now() });
+    }
+  });
+
   it('subscribes, serializes seed/output/ready, and resyncs on the same socket', async () => {
     const events: string[] = [];
     const stream = openTerminalStream({

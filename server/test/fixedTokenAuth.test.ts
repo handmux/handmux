@@ -62,7 +62,7 @@ describe('fixed Token and trusted devices together', () => {
     await request(app).get('/api/private?token=secret').set(headers).expect(401);
     await request(app).get('/api/private').set(bearer).expect(200);
     const before = await request(app).get('/api/auth/status').set(bearer).expect(200);
-    expect(before.body).toMatchObject({ authenticated: true, currentDeviceId: null, tokenEnabled: true });
+    expect(before.body).toMatchObject({ authenticated: true, tokenAuthenticated: true, currentDeviceId: null, tokenEnabled: true });
     await request(app).get('/api/auth/devices').set(bearer).expect(200);
     await request(app).post('/api/auth/token/disable').set(bearer).send({}).expect(401);
     const { primary, candidate, device } = await register(app);

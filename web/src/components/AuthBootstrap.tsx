@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react';
-import { applyAuthStatus, authRequest } from '../authSession.js';
+import { applyAuthStatus, authRequest, normalizeAuthStatus } from '../authSession.js';
 import { t } from '../i18n';
 import AuthFrame from './AuthFrame.js';
 
@@ -13,7 +13,9 @@ export default function AuthBootstrap({ children }: { children: ReactNode }) {
     setFailed(false);
     void authRequest().then((status) => {
       if (!active) return;
-      applyAuthStatus(status);
+      // `authenticated` also covers a pairing candidate for compatibility. Do not mount the app as
+      // logged in until a formal device cookie or an explicitly accepted fixed Token is present.
+      applyAuthStatus(normalizeAuthStatus(status));
       setReady(true);
     }).catch(() => { if (active) setFailed(true); });
     return () => { active = false; };

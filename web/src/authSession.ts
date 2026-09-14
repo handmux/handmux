@@ -13,6 +13,10 @@ export interface PairingState {
 export interface AuthStatus {
   mode: AuthMode;
   tokenEnabled?: boolean;
+  // `authenticated` intentionally includes a pending pairing candidate for server-side compatibility.
+  // This separate bit says whether a fixed Token was actually accepted, so the UI can distinguish a
+  // candidate cookie from a credential that is valid for ordinary API requests.
+  tokenAuthenticated?: boolean;
   currentDeviceId?: string | null;
   authenticated: boolean;
   serverTime: number;
@@ -37,6 +41,19 @@ export function applyAuthStatus(status: AuthStatus): void {
   }
 }
 
+/**
+ * Keep the server's broad `authenticated` compatibility field out of the client login gate. A pairing
+ * candidate can be recognized by `/api/auth/status` before the browser accepts the formal session cookie;
+ * it is not yet a credential that can authorize the rest of the application.
+ */
+export function normalizeAuthStatus(status: AuthStatus): AuthStatus {
+  if (status.mode === 'trusted-device' && status.authenticated
+    && status.currentDeviceId == null && status.tokenAuthenticated !== true) {
+    return { ...status, authenticated: false, currentDeviceId: null };
+  }
+  return status;
+}
+
 function savedToken(): string | null { try { return getToken(); } catch { return null; } }
 
 export function authenticationHeaders(extra: Record<string, string> = {}): Record<string, string> {
@@ -54,11 +71,11 @@ export async function authRequest(path = '/api/auth/status', method = 'GET', id?
     // the formal session cookie. Re-read once so callers only see a device session after
     // the formal cookie is actually sent back by the browser; this also covers recovery
     // after a server restart when the in-memory pairing record is gone.
-    if (status.authenticated && !status.currentDeviceId) return performAuthRequest('/api/auth/status', 'GET');
+    if (status.authenticated && !status.currentDeviceId) return normalizeAuthStatus(await performAuthRequest('/api/auth/status', 'GET'));
     // On HTTP, re-read the cookie that won across concurrent tabs instead of keeping a stale
     // initial POST candidate. An already-authorized primary cookie always wins on the server.
-    return method === 'POST' && path === '/api/auth/pairing'
-      ? performAuthRequest(path, 'GET') : status;
+    return normalizeAuthStatus(method === 'POST' && path === '/api/auth/pairing'
+      ? await performAuthRequest(path, 'GET') : status);
   });
 }
 
@@ -83,6 +100,9 @@ async function performAuthRequest(path: string, method: string, id?: string): Pr
     const value = await response.json() as AuthStatus;
     if (!value || value.mode !== 'trusted-device'
       || typeof value.authenticated !== 'boolean' || !Number.isFinite(value.serverTime)) {
+      throw new Error('Invalid authentication response');
+    }
+    if (value.tokenAuthenticated !== undefined && typeof value.tokenAuthenticated !== 'boolean') {
       throw new Error('Invalid authentication response');
     }
     return value;
