@@ -46,6 +46,17 @@ describe('fixed Token and trusted devices together', () => {
     expect(restarted.tokenEnabled).toBe(false);
     expect(restarted.authenticateToken('secret', origin)).toBeNull();
   });
+  it('keeps fixed Token rate limits independent for separate browser sources', async () => {
+    const { app } = fixture();
+    const first = { ...bearer, 'User-Agent': 'Browser-A' };
+    const second = { ...bearer, 'User-Agent': 'Browser-B' };
+    for (let i = 0; i < 600; i += 1) {
+      const response = await request(app).get('/api/auth/status').set(first);
+      if (response.status !== 200) throw new Error(`iteration ${i}: ${response.status} ${JSON.stringify(response.body)}`);
+    }
+    await request(app).get('/api/auth/status').set(first).expect(429);
+    await request(app).get('/api/auth/status').set(second).expect(200);
+  }, 20_000);
   it('registers this browser, confirms Cookie, disables without restart, and keeps device access', async () => {
     const { app, service } = fixture();
     await request(app).get('/api/private?token=secret').set(headers).expect(401);

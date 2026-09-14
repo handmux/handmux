@@ -116,6 +116,17 @@ describe('setup wizard interaction cancellation', () => {
     expect(prompt.confirm.mock.calls[0]?.[0].initialValue).toBe(false);
   });
 
+  it('does not create or mutate the auth database when enabling is canceled', async () => {
+    const target = path.join(root, 'config.json');
+    new PrivateStateStore(target).write({ authMode: 'trusted-device', token: 'legacy-token' });
+    const databasePath = path.join(root, '.handmux', 'handmux.sqlite');
+    prompt.select.mockResolvedValueOnce('auth').mockResolvedValueOnce('token')
+      .mockResolvedValueOnce(prompt.cancelled).mockResolvedValueOnce(prompt.cancelled);
+    prompt.confirm.mockResolvedValueOnce(true);
+    expect(await runSetup({ target, home: root })).toBeNull();
+    expect(fs.existsSync(databasePath)).toBe(false);
+  });
+
   it('disables offline only after the empty-device phrase and preserves the credential', async () => {
     const target = path.join(root, 'config.json');
     new PrivateStateStore(target).write({ lang: 'en', token: 'legacy-token' });
