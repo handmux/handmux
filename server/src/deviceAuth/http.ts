@@ -25,6 +25,7 @@ export function createDeviceAuthRouter({ service, resolveOrigin }: {
   type Bucket = { at: number; requests: number; creates: number };
   const anonymousBuckets = new Map<string, Bucket>();
   const authenticatedBuckets = new Map<string, Bucket>();
+  const tokenPrincipal = (req: Request, origin: string) => service.authenticateToken(bearerFrom(req.get('authorization')) ?? req.get('X-Handmux-Token'), origin);
   router.use((req, res, next) => {
     res.set('Cache-Control', 'no-store'); res.set('Pragma', 'no-cache');
     const origin = resolveOrigin(req);
@@ -42,6 +43,9 @@ export function createDeviceAuthRouter({ service, resolveOrigin }: {
           if (principal) break;
         }
       }
+      // Fixed Token is an authenticated credential even though it does not use a
+      // browser cookie. Classify it before applying the shared-IP anonymous quota.
+      if (!principal) principal = tokenPrincipal(req, origin);
     } catch {
       res.status(503).json({ error: 'AUTH_UNAVAILABLE', message: 'Authentication storage is unavailable; restart HandMux and retry' }); return;
     }
@@ -65,7 +69,6 @@ export function createDeviceAuthRouter({ service, resolveOrigin }: {
     const rank = (state?: string): number => state === 'authorized' ? 0 : state === 'configuring' ? 1 : state === 'waiting' ? 2 : 3;
     return candidates(req, origin).sort((a, b) => (a.principal ? 0 : rank(a.pairing?.state)) - (b.principal ? 0 : rank(b.pairing?.state)) || a.name.localeCompare(b.name))[0];
   };
-  const tokenPrincipal = (req: Request, origin: string) => service.authenticateToken(bearerFrom(req.get('authorization')) ?? req.get('X-Handmux-Token'), origin);
   const status = (req: Request, res: Response): void => {
     const origin = String(res.locals.authOrigin);
     let secret = readSessionSecret(req, origin);
