@@ -413,7 +413,7 @@ export default function DeviceManagement({ onLoggedOut }: { onLoggedOut: () => v
       </div>
       {trustedDeviceEnabled && <p className="settings-detail-note device-policy-enabled-note">{t('devices.deviceProtectionEnabledHint')}</p>}
       {trustedDeviceEnabled && <>
-      {!showingHistory && data.currentDeviceId && <button type="button" className="device-authorize-other" aria-label={t('devices.authorizeOther')} disabled={busy} onClick={() => setAdding(true)}>{t('devices.authorizeOther')}</button>}
+      {data.currentDeviceId && <button type="button" className="device-authorize-other" aria-label={t('devices.authorizeOther')} disabled={busy} onClick={() => setAdding(true)}>{t('devices.authorizeOther')}</button>}
       <h3 id="device-list-title">{t('devices.listTitle')}</h3>
       <div className="device-tabs" role="tablist" aria-label={t('devices.title')}>
         <button id="device-active-tab" role="tab" aria-selected={!showingHistory} aria-controls="device-list-panel" className="device-tab" onClick={() => setDeviceTab('active')}>{t('devices.activeTab')}<span>{activeCount}</span></button>

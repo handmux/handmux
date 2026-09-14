@@ -103,6 +103,7 @@ describe('compact device management', () => {
     expect(historyTab.getAttribute('aria-selected')).toBe('false'); expect(historyTab.textContent).toContain('1');
     fireEvent.click(historyTab);
     expect(activeTab.getAttribute('aria-selected')).toBe('false'); expect(historyTab.getAttribute('aria-selected')).toBe('true');
+    expect(screen.getByRole('button', { name: t('devices.authorizeOther') })).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: new RegExp(history.name) }));
     expect(screen.getByText(history.id)).toBeTruthy(); expect(screen.getAllByText(history.browser_summary)).toHaveLength(2);
     expect(screen.queryByText(t('devices.activeStatus'))).toBeNull(); expect(screen.getAllByText(t('devices.revoked')).length).toBeGreaterThan(0);
