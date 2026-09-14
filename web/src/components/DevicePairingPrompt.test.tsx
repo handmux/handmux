@@ -102,6 +102,7 @@ describe('device authorization flow', () => {
     expect(screen.getByText(t('auth.finishCli'))).toBeTruthy();
     expect(screen.queryByText('038271')).toBeNull();
     server.authenticated = true;
+    server.currentDeviceId = 'dev_test';
     await tick(1500);
     expect(onSaved).toHaveBeenCalledTimes(1);
   });

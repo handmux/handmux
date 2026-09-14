@@ -8,7 +8,6 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { homedir } from 'node:os';
 import { spawnSync } from 'node:child_process';
-import { createRequire } from 'node:module';
 import webpush from 'web-push';
 import { providerMode, voiceProviderRegistry } from '../asr/providerRegistry.js';
 import { configPath, pocketHome } from './state.js';
@@ -36,7 +35,6 @@ type ConnectionField =
   | 'sshJump' | 'authtoken' | 'cpolarRegion' | 'domain';
 interface ConnectionFieldRow { value: ConnectionField; label: string; hint: string }
 type OptionalConnectionStringKey = 'publicUrl' | 'sshJump' | 'cpolarRegion';
-type NodeDatabaseSync = import('node:sqlite').DatabaseSync;
 const errorMessage = (error: unknown): string => {
   if (error instanceof Error) return error.message;
   if (error && typeof error === 'object' && 'message' in error && typeof error.message === 'string') {
@@ -72,31 +70,6 @@ function readExisting(file: string): SetupConfig {
   return value as SetupConfig;
 }
 
-interface AuthSnapshot { enabled?: boolean; devices: Array<Record<string, unknown>> }
-
-// Setup must be cancellable without opening the project runtime (which runs migrations and writes
-// auth_meta). When the server is stopped, inspect the existing database read-only instead.
-function readAuthSnapshot(home: string): AuthSnapshot | undefined {
-  const databasePath = path.join(home, '.handmux', 'handmux.sqlite');
-  if (!fs.existsSync(databasePath)) return undefined;
-  let db: NodeDatabaseSync | undefined;
-  try {
-    // Keep SQLite out of the module-import path. The raw Agent launcher in handmux-main must be able
-    // to hand argv/stdout/stderr through byte-for-byte, even when this CLI module is imported first.
-    const { DatabaseSync } = createRequire(import.meta.url)('node:sqlite') as typeof import('node:sqlite');
-    db = new DatabaseSync(databasePath, { readOnly: true });
-    const tokenRow = db.prepare("SELECT value FROM auth_meta WHERE key='token_enabled'").get() as { value?: string } | undefined;
-    const rows = db.prepare('SELECT id,name,browser_summary,authorized_at,expires_at,last_used_at,revoked_at,version FROM auth_devices').all() as Array<Record<string, unknown>>;
-    const now = Date.now();
-    const devices = rows.map((row) => ({ ...row, status: row.revoked_at !== null ? 'revoked' : row.expires_at !== null && Number(row.expires_at) <= now ? 'expired' : 'active' }));
-    return { ...(tokenRow ? { enabled: tokenRow.value === '1' } : {}), devices };
-  } catch {
-    return undefined;
-  } finally {
-    try { db?.close(); } catch { /* read-only inspection is best effort */ }
-  }
-}
-
 // The hub. Pre-fills from the existing config so a re-run edits/switches rather than starts over; a brand-
 // new config first walks Connection, then everyone lands on the hub (edit any section, then Save/Start/Exit).
 // Returns { cfg, start } (start = the user chose the save-and-run action), or null on cancel/exit. When an
@@ -119,14 +92,20 @@ export async function runSetup({
   let a = answersFromConfig(existing, effectiveAuthMode);
   // Runtime database state is authoritative while the server is running.
   let runtimeTokenEnabled: boolean | undefined;
-  if (running) {
-    try { const c = await setupAuthClient(home, true, effectiveAuthMode); try { const s = await c.request({ op: 'token-status' }) as { enabled?: boolean }; runtimeTokenEnabled = s.enabled; } finally { await c.close(); } }
+  if (running || fs.existsSync(path.join(home, '.handmux', 'handmux.sqlite'))) {
+    try { const c = await setupAuthClient(home, running, effectiveAuthMode); try { const s = await c.request({ op: 'token-status' }) as { enabled?: boolean }; runtimeTokenEnabled = s.enabled; } finally { await c.close(); } }
     catch { /* setup can still edit other settings when runtime control is unavailable */ }
-  } else {
-    runtimeTokenEnabled = readAuthSnapshot(home)?.enabled;
   }
   if (runtimeTokenEnabled !== undefined) a.authMode = runtimeTokenEnabled ? 'token' : 'trusted-device';
-  let emptyDisableConfirmed = false;
+  const initialRuntimeTokenEnabled = runtimeTokenEnabled;
+  const rollbackAuth = async (): Promise<void> => {
+    if (initialRuntimeTokenEnabled === undefined || initialRuntimeTokenEnabled === (a.authMode === 'token')) return;
+    try {
+      const c = await setupAuthClient(home, !!running, a.authMode ?? 'trusted-device');
+      try { await c.request({ op: initialRuntimeTokenEnabled ? 'token-enable' : 'token-disable', allowEmpty: true }); }
+      finally { await c.close(); }
+    } catch { /* preserve the original cancellation result; next startup re-reads durable state */ }
+  };
   if (existing.token == null) a.token = process.env.HANDMUX_TOKEN ?? defaults.token ?? '';
   setLocale(a.lang);
 
@@ -144,7 +123,7 @@ export async function runSetup({
         a.lang = await editLanguage(a);
         note(t('setup.welcome'));
         a = await editConnection(a, { home, log });
-        a.authMode = await editAuth(a, { home, running, onEmptyDisableConfirmed: () => { emptyDisableConfirmed = true; } });
+        a.authMode = await editAuth(a, { home, running });
         if (a.authMode === 'token') a.token = await editToken(a);
       } catch (e) { if (e !== CANCELLED) throw e; }
     }
@@ -174,50 +153,10 @@ export async function runSetup({
         ],
         initialValue: cursor,
       }));
-      if (choice === 'exit') { cancel(t('setup.exited')); return null; }
+      if (choice === 'exit') { await rollbackAuth(); cancel(t('setup.exited')); return null; }
       if (choice === 'save' || choice === 'start') {
-        const currentTokenEnabled = runtimeTokenEnabled ?? (effectiveAuthMode === 'token');
         const cfg = mergeConfig(existing, a);
-        const desiredTokenEnabled = a.authMode === 'token';
-        const authChanged = desiredTokenEnabled !== currentTokenEnabled;
-        let authClient: Awaited<ReturnType<typeof setupAuthClient>> | undefined;
-        let allowEmptyDisable = false;
-        if (authChanged && !desiredTokenEnabled) {
-          let devices: Array<Record<string, unknown>> = [];
-          if (running) {
-            try {
-              authClient = await setupAuthClient(home, true, a.authMode ?? 'token');
-              const status = await authClient.request({ op: 'token-status' }) as { devices?: unknown[] };
-              devices = (Array.isArray(status.devices) ? status.devices : []).filter((d) => (d as Record<string, unknown>)?.status === 'active') as Array<Record<string, unknown>>;
-            } catch (error) {
-              await authClient?.close();
-              throw error;
-            }
-          } else {
-            devices = (readAuthSnapshot(home)?.devices ?? []).filter((d) => d.status === 'active');
-          }
-          allowEmptyDisable = devices.length === 0;
-          if (allowEmptyDisable && !emptyDisableConfirmed) {
-            const phrase = await ask(text({ message: '请输入 DISABLE TOKEN 以确认' }));
-            if (phrase !== 'DISABLE TOKEN') { await authClient?.close(); cancel(t('setup.exited')); return null; }
-          }
-        }
-        const hadConfig = fs.existsSync(target);
-        try {
-          new PrivateStateStore(target).write(cfg);
-          if (authChanged) {
-            authClient ??= await setupAuthClient(home, !!running, a.authMode ?? 'trusted-device');
-            await authClient.request(desiredTokenEnabled ? { op: 'token-enable' } : { op: 'token-disable', allowEmpty: allowEmptyDisable });
-          }
-        } catch (error) {
-          try {
-            if (hadConfig) new PrivateStateStore(target).write(existing);
-            else new PrivateStateStore(target).remove();
-          } catch { /* preserve the original failure; the config may need manual recovery */ }
-          throw error;
-        } finally {
-          await authClient?.close();
-        }
+        new PrivateStateStore(target).write(cfg);
         outro(t('setup.wrote', { path: target }));
         if (a.tunnel === 'ssh') printSshServerHelp(a, log);
         return { cfg, start: choice === 'start' };
@@ -228,7 +167,7 @@ export async function runSetup({
         if (choice === 'connection') a = await editConnection(a, { home, log });
         else if (choice === 'name') a.name = await editName(a);
         else if (choice === 'port') a.port = await editPort(a);
-        else if (choice === 'auth') { a.authMode = await editAuth(a, { home, running, onEmptyDisableConfirmed: () => { emptyDisableConfirmed = true; } }); if (a.authMode === 'token') a.token = await editToken(a); }
+        else if (choice === 'auth') { a.authMode = await editAuth(a, { home, running }); if (a.authMode === 'token') a.token = await editToken(a); }
         else if (choice === 'browser') a.previewDomain = await editBrowserDomain(a);
         else if (choice === 'language') a.lang = await editLanguage(a);
         else if (choice === 'push') {
@@ -243,7 +182,7 @@ export async function runSetup({
       }
     }
   } catch (e) {
-    if (e === CANCELLED) { cancel(t('setup.exited')); return null; }
+    if (e === CANCELLED) { await rollbackAuth(); cancel(t('setup.exited')); return null; }
     throw e;
   }
 }
@@ -270,7 +209,7 @@ async function setupAuthClient(home: string, running: boolean, mode: 'token' | '
   };
 }
 
-async function editAuth(a: SetupAnswers, ctx?: { home?: string; running?: boolean; current?: boolean; onEmptyDisableConfirmed?: () => void }): Promise<'token' | 'trusted-device'> {
+async function editAuth(a: SetupAnswers, ctx?: { home?: string; running?: boolean; current?: boolean }): Promise<'token' | 'trusted-device'> {
   note(t('auth.manageHint'));
   const next = await ask(select({ message: withBack(t('auth.section')), initialValue: a.authMode ?? 'trusted-device', options: [
     { value: 'trusted-device' as const, label: t('auth.tokenDisabled') },
@@ -280,31 +219,29 @@ async function editAuth(a: SetupAnswers, ctx?: { home?: string; running?: boolea
     note(tokenWarning(t('auth.switchWarning')), t('auth.section'));
     if (next === 'token') note(tokenWarning(t('auth.warning')), t('auth.token'));
     if (!await ask(confirm({ message: t('auth.switchConfirm'), initialValue: false }))) return a.authMode ?? 'trusted-device';
-    if (next === 'trusted-device') {
-      let devices: Array<Record<string, unknown>> = [];
-      if (ctx?.home) {
-        if (ctx.running) {
-          const c = await setupAuthClient(ctx.home, true, a.authMode ?? 'token');
-          try {
-            const status = await c.request({ op: 'token-status' }) as { devices?: unknown[] };
-            devices = (Array.isArray(status.devices) ? status.devices : []).filter((d) => (d as Record<string, unknown>)?.status === 'active') as Array<Record<string, unknown>>;
-          } finally { await c.close(); }
-        } else {
-          devices = (readAuthSnapshot(ctx.home)?.devices ?? []).filter((d) => d.status === 'active');
+    if (ctx?.home) {
+      const c = await setupAuthClient(ctx.home, !!ctx.running, a.authMode ?? 'trusted-device');
+      try {
+        if (next === 'token') await c.request({ op: 'token-enable' });
+        else {
+          const status = await c.request({ op: 'token-status' }) as { devices?: unknown[] };
+          const devices = (Array.isArray(status.devices) ? status.devices : []).filter((d) => (d as Record<string, unknown>)?.status === 'active');
+          if (devices.length) {
+            note(`当前有 ${devices.length} 个可信设备；禁用后只有这些设备可以访问。`, t('auth.section'));
+            for (const device of devices) {
+              const d = device as Record<string, unknown>;
+              note(`ID: ${String(d.id ?? '')}\n名称: ${String(d.name ?? '')}\n浏览器: ${String(d.browser_summary ?? '')}\n有效期: ${d.expires_at == null ? '永久' : new Date(Number(d.expires_at)).toISOString()}`, t('auth.section'));
+            }
+            if (!await ask(confirm({ message: '确认禁用固定 Token 登录？', initialValue: false }))) return a.authMode ?? 'trusted-device';
+          } else {
+            note('当前没有可信设备；禁用后任何设备都无法访问，只能通过 CLI 恢复。', t('auth.section'));
+            const phrase = await ask(text({ message: '请输入 DISABLE TOKEN 以确认' }));
+            if (phrase !== 'DISABLE TOKEN') return a.authMode ?? 'trusted-device';
+          }
+          await c.request({ op: 'token-disable', allowEmpty: devices.length === 0 });
         }
       }
-      if (devices.length) {
-        note(`当前有 ${devices.length} 个可信设备；禁用后只有这些设备可以访问。`, t('auth.section'));
-        for (const d of devices) {
-          note(`ID: ${String(d.id ?? '')}\n名称: ${String(d.name ?? '')}\n浏览器: ${String(d.browser_summary ?? '')}\n有效期: ${d.expires_at == null ? '永久' : new Date(Number(d.expires_at)).toISOString()}`, t('auth.section'));
-        }
-        if (!await ask(confirm({ message: '确认禁用固定 Token 登录？', initialValue: false }))) return a.authMode ?? 'trusted-device';
-      } else {
-        note('当前没有可信设备；禁用后任何设备都无法访问，只能通过 CLI 恢复。', t('auth.section'));
-        const phrase = await ask(text({ message: '请输入 DISABLE TOKEN 以确认' }));
-        if (phrase !== 'DISABLE TOKEN') return a.authMode ?? 'trusted-device';
-        ctx?.onEmptyDisableConfirmed?.();
-      }
+      finally { await c.close(); }
     }
   }
   return next;
