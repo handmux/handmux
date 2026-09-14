@@ -50,9 +50,11 @@ export function authenticationHeaders(extra: Record<string, string> = {}): Recor
 export async function authRequest(path = '/api/auth/status', method = 'GET', id?: string): Promise<AuthStatus> {
   return withAuthLock(async () => {
     const status = await performAuthRequest(path, method, id);
-    if (status.authenticated && !status.currentDeviceId && status.pairing?.state === 'authorized') {
-      return performAuthRequest('/api/auth/status', 'GET');
-    }
+    // Candidate cookies can authenticate the status endpoint before the browser accepts
+    // the formal session cookie. Re-read once so callers only see a device session after
+    // the formal cookie is actually sent back by the browser; this also covers recovery
+    // after a server restart when the in-memory pairing record is gone.
+    if (status.authenticated && !status.currentDeviceId) return performAuthRequest('/api/auth/status', 'GET');
     // On HTTP, re-read the cookie that won across concurrent tabs instead of keeping a stale
     // initial POST candidate. An already-authorized primary cookie always wins on the server.
     return method === 'POST' && path === '/api/auth/pairing'

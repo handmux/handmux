@@ -162,10 +162,12 @@ describe('device pairing with CLI and trusted-device methods', () => {
   });
 
   it('recovers another tab\'s completed authorization on foreground without generating a new code', async () => {
-    render(<DevicePairingPrompt onSaved={vi.fn()} />); await flush();
+    const onSaved = vi.fn();
+    render(<DevicePairingPrompt onSaved={onSaved} />); await flush();
     server.authenticated = true;
     fireEvent(window, new Event('focus')); await flush();
     expect(fetcher.mock.calls.every((call: unknown[]) => (call[1] as RequestInit).method === 'GET')).toBe(true);
+    expect(onSaved).not.toHaveBeenCalled();
   });
 });
 

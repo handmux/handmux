@@ -72,4 +72,13 @@ describe('device authentication transport', () => {
       method: 'DELETE', body: '{"id":"pair_123"}', credentials: 'same-origin',
     }));
   });
+
+  it('rechecks a candidate-authenticated status before exposing a device session', async () => {
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(json({ mode: 'trusted-device', authenticated: true, currentDeviceId: null, tokenEnabled: true, serverTime: Date.now() }))
+      .mockResolvedValueOnce(json(status()));
+    vi.stubGlobal('fetch', fetcher);
+    await expect(authRequest()).resolves.toMatchObject({ currentDeviceId: 'dev_test' });
+    expect(fetcher).toHaveBeenCalledTimes(2);
+  });
 });
