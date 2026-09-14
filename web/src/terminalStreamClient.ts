@@ -1,5 +1,5 @@
 import { getToken } from './storage.js';
-import { hasDeviceSession, confirmedSessionInvalid } from './authSession.js';
+import { confirmedSessionInvalid } from './authSession.js';
 import {
   parseTerminalStreamMessage,
   type TerminalReadyMessage,
@@ -332,13 +332,11 @@ export function openTerminalStream({
       clearConnectTimer();
       clearProbe();
       if (closed) return;
-      if (event.code === 4001 && !hasDeviceSession()) {
-        onAuthFail?.();
-        return;
-      }
-      if (hasDeviceSession()) {
-        // Storage failures also close protected sockets fail-closed. Even 4001 is not proof that
-        // this device was revoked; only a successful auth status response can send it to login.
+      if (event.code === 4001) {
+        // A restart/proxy handoff can close every socket with 4001, including
+        // Token-authenticated browsers that intentionally have no device id.
+        // Confirm with the auth authority before leaving the current page;
+        // unavailable status keeps the normal reconnect path alive.
         void confirmedSessionInvalid().then((invalid) => {
           if (!closed && invalid) { clearReconnectTimer(); onAuthFail?.(); }
         });

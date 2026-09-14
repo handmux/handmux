@@ -106,7 +106,13 @@ export async function confirmedSessionInvalid(): Promise<boolean> {
   } catch { return false; }
 }
 export async function authenticationError(): Promise<Error> {
-  return !hasDeviceSession() || await confirmedSessionInvalid()
+  // A transient 401 can be emitted by a reverse proxy while the server is
+  // restarting. Never treat the absence of an in-memory device state as proof
+  // of logout: Token-authenticated browsers intentionally have no device id,
+  // and a freshly loaded app has not populated auth state yet. Only the auth
+  // authority's explicit `authenticated: false` response can invalidate the
+  // session; unavailable/failed status checks keep the current page mounted.
+  return await confirmedSessionInvalid()
     ? new UnauthorizedError() : new Error('Request rejected; could not confirm session invalidation');
 }
 

@@ -39,6 +39,19 @@ describe('device authentication transport', () => {
     expect(fetcher).toHaveBeenLastCalledWith('/api/auth/status', expect.anything());
   });
 
+  it('does not treat a proxy 401 as logout for a Token-authenticated browser', async () => {
+    // Token auth has no currentDeviceId by design. It still must go through
+    // the status authority before a restart-time 401 can clear the page.
+    applyAuthStatus({ mode: 'trusted-device', tokenEnabled: true, tokenAuthenticated: true,
+      currentDeviceId: null, authenticated: true, serverTime: Date.now() });
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(json({}, 401))
+      .mockResolvedValueOnce(json({ mode: 'trusted-device', tokenEnabled: true, tokenAuthenticated: true,
+        currentDeviceId: null, authenticated: true, serverTime: Date.now() }));
+    vi.stubGlobal('fetch', fetcher);
+    await expect(requestJson('/api/sessions')).rejects.not.toBeInstanceOf(UnauthorizedError);
+  });
+
   it('only emits UnauthorizedError after the auth authority confirms invalidation', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(json({}, 401)).mockResolvedValueOnce(json(status(false))));
     await expect(requestJson('/api/sessions')).rejects.toBeInstanceOf(UnauthorizedError);

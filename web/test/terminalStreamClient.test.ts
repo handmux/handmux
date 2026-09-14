@@ -276,16 +276,23 @@ describe('openTerminalStream', () => {
     },
   );
 
-  it.each(['unauthorized', 'authentication timeout', ''])('reports authentication code regardless of reason %j without reconnecting', (reason) => {
+  it.each(['unauthorized', 'authentication timeout', ''])('reports authentication code after confirmed invalidation for reason %j', async (reason) => {
     vi.useFakeTimers();
     const onAuthFail = vi.fn();
+    vi.stubGlobal('fetch', vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ mode: 'trusted-device', authenticated: false, serverTime: Date.now() }),
+    })));
     const stream = openTerminalStream({ pane: '%7', token: 'wrong', WebSocketCtor: FakeWebSocket, onAuthFail });
     latestSocket().open();
     latestSocket().close(4001, reason);
+    await vi.advanceTimersByTimeAsync(0);
     expect(onAuthFail).toHaveBeenCalledOnce();
     vi.advanceTimersByTime(10000);
     expect(FakeWebSocket.instances).toHaveLength(1);
     stream.close();
+    vi.unstubAllGlobals();
     vi.useRealTimers();
   });
 
@@ -314,6 +321,32 @@ describe('openTerminalStream', () => {
         expect(onAuthFail).toHaveBeenCalledOnce();
         expect(FakeWebSocket.instances).toHaveLength(1);
       }
+    } finally {
+      await stream.close();
+      applyAuthStatus({ mode: 'trusted-device', tokenEnabled: true, currentDeviceId: null, authenticated: false, serverTime: Date.now() });
+      vi.unstubAllGlobals();
+      vi.useRealTimers();
+    }
+  });
+
+  it('keeps a Token/no-device stream on the current page when auth status is unavailable', async () => {
+    vi.useFakeTimers();
+    applyAuthStatus({ mode: 'trusted-device', tokenEnabled: true, tokenAuthenticated: true,
+      authenticated: true, currentDeviceId: null, serverTime: Date.now() });
+    const onAuthFail = vi.fn();
+    vi.stubGlobal('fetch', vi.fn(async () => ({
+      ok: false,
+      status: 503,
+      json: async () => ({ code: 'AUTH_UNAVAILABLE' }),
+    })));
+    const stream = openTerminalStream({ pane: '%7', token: 'secret', WebSocketCtor: FakeWebSocket,
+      onAuthFail, reconnectMs: 10 });
+    try {
+      latestSocket().open();
+      latestSocket().close(4001, 'authentication timeout');
+      await vi.advanceTimersByTimeAsync(10);
+      expect(onAuthFail).not.toHaveBeenCalled();
+      expect(FakeWebSocket.instances).toHaveLength(2);
     } finally {
       await stream.close();
       applyAuthStatus({ mode: 'trusted-device', tokenEnabled: true, currentDeviceId: null, authenticated: false, serverTime: Date.now() });
