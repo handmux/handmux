@@ -231,6 +231,7 @@ describe('Token remains the first factor', () => {
     render(<DeviceManagement onLoggedOut={vi.fn()} />); await flush();
     fireEvent.click(screen.getByRole('button', { name: t('devices.addSelf') }));
     const sheet = screen.getByRole('dialog');
+    expect(within(sheet).getByRole('button', { name: t('devices.never') }).getAttribute('aria-pressed')).toBe('true');
     fireEvent.click(within(sheet).getByRole('button', { name: t('devices.addSelf') })); await flush(); await flush();
     expect(within(sheet).getByRole('alert').textContent).toBe(t('devices.cookieRequired'));
     expect(screen.queryByRole('button', { name: t('devices.disableToken') })).toBeNull();

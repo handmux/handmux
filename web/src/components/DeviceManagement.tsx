@@ -325,7 +325,7 @@ export default function DeviceManagement({ onLoggedOut }: { onLoggedOut: () => v
     const browser = /Edg\//.test(ua) ? 'Edge' : /Firefox\//.test(ua) ? 'Firefox' : /Chrome|CriOS/.test(ua) ? 'Chrome' : /Safari/.test(ua) ? 'Safari' : 'Browser';
     const os = /iPhone|iPad|iPod/.test(ua) ? 'iOS' : /Android/.test(ua) ? 'Android' : /Windows/.test(ua) ? 'Windows' : /Macintosh|Mac OS X/.test(ua) ? 'macOS' : /Linux/.test(ua) ? 'Linux' : '';
     return os ? `${browser} · ${os}` : browser;
-  }); const [selfExpire, setSelfExpire] = useState('30d');
+  }); const [selfExpire, setSelfExpire] = useState('never');
   const [selfCustom, setSelfCustom] = useState(''); const [busy, setBusy] = useState(false);
   const [originBusy, setOriginBusy] = useState(false);
   const [confirmEnable, setConfirmEnable] = useState<'device' | 'origin' | null>(null);
