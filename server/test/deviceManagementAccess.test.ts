@@ -5,7 +5,7 @@ import request from 'supertest';
 import WebSocket from 'ws';
 import { afterEach, describe, expect, it } from 'vitest';
 import { migrateProjectDatabase } from '../src/projectTask/migrations.js';
-import { DeviceAuthService, sessionCookieName } from '../src/deviceAuth/service.js';
+import { DeviceAuthService } from '../src/deviceAuth/service.js';
 import { createDeviceAuthRouter } from '../src/deviceAuth/http.js';
 import { createAuthOriginResolver, createDeviceAccess } from '../src/deviceAccess.js';
 import { createTerminalStream } from '../src/terminalStream.js';
@@ -18,14 +18,14 @@ async function fixture() {
   const db = new DatabaseSync(':memory:');
   migrateProjectDatabase(db);
   let now = Date.now();
-  const service = new DeviceAuthService({ db, token: 'secret', now: () => now });
+  const service = new DeviceAuthService({ db, mode: 'trusted-device', now: () => now });
   const app = express();
   const server = http.createServer(app);
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
   const address = server.address();
   if (!address || typeof address === 'string') throw new Error('missing test port');
   const origin = `http://127.0.0.1:${address.port}`;
-  const resolveOrigin = createAuthOriginResolver({ port: address.port, host: '127.0.0.1', trustedOrigins: () => service.trustedOrigins });
+  const resolveOrigin = createAuthOriginResolver({ port: address.port, host: '127.0.0.1' });
   const access = createDeviceAccess({ service, resolveOrigin });
   app.use('/api/auth', express.json(), createDeviceAuthRouter({ service, resolveOrigin }));
   app.use('/api', access.middleware);
@@ -36,7 +36,7 @@ async function fixture() {
     stream.close(); access.close(); service.close(); db.close();
     await new Promise<void>(resolve => { server.close(() => resolve()); server.closeAllConnections(); });
   });
-  const headers = { Origin: origin, Authorization: 'Bearer secret', 'X-Handmux-Request': '1' };
+  const headers = { Origin: origin, 'X-Handmux-Request': '1' };
   const begin = async () => {
     const result = await request(server).post('/api/auth/pairing').set(headers).send({}).expect(200);
     return { code: result.body.pairing.code as string, id: result.body.pairing.id as string,
@@ -45,7 +45,7 @@ async function fixture() {
   const promote = async (candidate: string) => {
     const result = await request(server).get('/api/auth/status').set(headers).set('Cookie', candidate).expect(200);
     expect(result.body.authenticated).toBe(true);
-    return (result.headers['set-cookie'] as unknown as string[]).find(value => value.startsWith(`${sessionCookieName(origin)}=`))!.split(';')[0]!;
+    return (result.headers['set-cookie'] as unknown as string[]).find(value => value.startsWith('handmux_session_http='))!.split(';')[0]!;
   };
   const enroll = async (name: string, expire = '1h') => {
     const pending = await begin();
@@ -84,71 +84,18 @@ describe('Web device management across real HTTP and WebSocket boundaries', () =
     await request(f.server).get('/api/private').set(f.headers).set('Cookie', approver.cookie).expect(200);
   });
 
-  it('allows Web name edits but keeps expiry changes CLI-only', async () => {
+  it('rejects a stale Web edit after a CLI change without overwriting its name or expiry', async () => {
     const f = await fixture();
     const actor = await f.enroll('actor');
     const target = await f.enroll('target');
     const list = await request(f.server).get('/api/auth/devices').set(f.headers).set('Cookie', actor.cookie).expect(200);
     const snapshot = list.body.devices.find((device: { id: string }) => device.id === target.device.id);
-    await request(f.server).patch(`/api/auth/devices/${target.device.id}`).set(f.headers).set('Cookie', actor.cookie)
-      .send({ version: snapshot.version, name: 'Web name' }).expect(200);
     const updated = f.service.edit(target.device.id, { name: 'CLI name', expire: '7d' });
     await request(f.server).patch(`/api/auth/devices/${target.device.id}`).set(f.headers).set('Cookie', actor.cookie)
-      .send({ version: snapshot.version + 1, name: 'stale Web name', expire: 'never' }).expect(403);
+      .send({ version: snapshot.version, name: 'stale Web name', expire: 'never' }).expect(409);
     const actual = f.service.list().find(device => device.id === target.device.id)!;
     expect(actual.name).toBe('CLI name');
     expect(actual.expires_at).toBe(updated.expires_at);
-  });
-
-  it('lets an unlisted host request pairing with Token, then records it only after approval', async () => {
-    const f = await fixture();
-    const approver = await f.enroll('approver');
-    const extraOrigin = 'https://phone.example.com';
-    const candidate = await request(f.server).post('/api/auth/pairing')
-      .set({ Host: 'phone.example.com', Origin: extraOrigin, 'X-Forwarded-Proto': 'https', Authorization: 'Bearer secret', 'X-Handmux-Request': '1' }).send({}).expect(200);
-    expect(f.service.trustedOrigins).toEqual([f.origin]);
-    const approval = await request(f.server).post('/api/auth/approvals').set(f.headers).set('Cookie', approver.cookie)
-      .send({ code: candidate.body.pairing.code }).expect(200);
-    await request(f.server).post(`/api/auth/approvals/${approval.body.approval.id}/authorize`).set(f.headers)
-      .set('Cookie', approver.cookie).send({ name: 'phone', expire: '7d' }).expect(200);
-    expect(f.service.trustedOrigins).toEqual([f.origin, extraOrigin]);
-    const candidateCookie = String(candidate.headers['set-cookie']?.[0]).split(';')[0]!;
-    const status = await request(f.server).get('/api/auth/status').set({ Host: 'phone.example.com', Origin: extraOrigin, 'X-Forwarded-Proto': 'https', Authorization: 'Bearer secret', 'X-Handmux-Request': '1' }).set('Cookie', candidateCookie).expect(200);
-    expect(status.body.authenticated).toBe(true);
-    const primary = String((status.headers['set-cookie'] as unknown as string[] | undefined)?.find(value => value.startsWith('__Host-handmux_session='))).split(';')[0]!;
-    await request(f.server).get('/api/private').set({ Host: 'phone.example.com', Origin: extraOrigin, 'X-Forwarded-Proto': 'https', 'X-Handmux-Request': '1' }).set('Cookie', primary).set('Authorization', 'Bearer secret').expect(200);
-  });
-
-  it('does not treat an existing session as authenticated after its origin is removed', async () => {
-    const f = await fixture();
-    const extraOrigin = 'https://phone.example.com';
-    const candidate = await request(f.server).post('/api/auth/pairing')
-      .set({ Host: 'phone.example.com', Origin: extraOrigin, 'X-Forwarded-Proto': 'https', Authorization: 'Bearer secret' }).send({}).expect(200);
-    const pendingCookie = String(candidate.headers['set-cookie']?.[0]).split(';')[0]!;
-    const claim = f.service.claim(candidate.body.pairing.code, 'test-cli');
-    const device = f.service.authorize(claim.id, 'test-cli', { name: 'removed origin', expire: '1h' });
-    const before = await request(f.server).get('/api/auth/status')
-      .set({ Host: 'phone.example.com', Origin: extraOrigin, 'X-Forwarded-Proto': 'https', Authorization: 'Bearer secret' })
-      .set('Cookie', pendingCookie).expect(200);
-    expect(before.body).toMatchObject({ authenticated: true, originTrusted: true, currentDeviceId: device.id });
-    const primaryCookie = (before.headers['set-cookie'] as unknown as string[]).find(value => value.startsWith('__Host-handmux_session='))!.split(';')[0]!;
-
-    f.service.removeTrustedOrigin(extraOrigin);
-    const after = await request(f.server).get('/api/auth/status')
-      .set({ Host: 'phone.example.com', Origin: extraOrigin, 'X-Forwarded-Proto': 'https', Authorization: 'Bearer secret' })
-      .set('Cookie', primaryCookie).expect(200);
-    expect(after.body).toMatchObject({ authenticated: false, originTrusted: false, tokenAuthenticated: true });
-    expect(after.body.currentDeviceId).toBeNull();
-
-    const withLeftoverPairingCookie = await request(f.server).get('/api/auth/status')
-      .set({ Host: 'phone.example.com', Origin: extraOrigin, 'X-Forwarded-Proto': 'https', Authorization: 'Bearer secret' })
-      .set('Cookie', `${primaryCookie}; ${pendingCookie}`).expect(200);
-    expect(withLeftoverPairingCookie.body).toMatchObject({ authenticated: false, originTrusted: false, tokenAuthenticated: true });
-    expect(withLeftoverPairingCookie.body.currentDeviceId).toBeNull();
-    expect(withLeftoverPairingCookie.body.pairing).toBeUndefined();
-    expect((withLeftoverPairingCookie.headers['set-cookie'] as unknown as string[] | undefined ?? []).some(value => value.startsWith(`${pendingCookie.split('=')[0]}=`))).toBe(true);
-
-    f.service.revoke(device.id);
   });
 
   it('preserves the full setup window after a late claim but rejects an expired approver', async () => {
@@ -183,7 +130,7 @@ describe('Web device management across real HTTP and WebSocket boundaries', () =
       .set('Cookie', `${actor.cookie}; ${leftover.cookie}`).expect(200);
     expect(result.body).toMatchObject({ ok: true, authenticated: false });
     const cleared = result.headers['set-cookie'] as unknown as string[];
-    expect(cleared.some(value => value.startsWith(`${sessionCookieName(f.origin)}=;`))).toBe(true);
+    expect(cleared.some(value => value.startsWith('handmux_session_http=;'))).toBe(true);
     expect(f.service.isDeviceActive(actor.device.id)).toBe(false);
     expect(f.service.isDeviceActive(extra.id)).toBe(false);
     const status = await request(f.server).get('/api/auth/status').set(f.headers).set('Cookie', leftover.cookie).expect(200);

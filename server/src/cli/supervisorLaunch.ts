@@ -110,6 +110,8 @@ export function parseSupervisorConfig(value: unknown): SupervisorConfig {
     token: record.token,
     shortcuts: normalizeShortcuts(record.shortcuts),
   };
+  if (record.authMode !== undefined && record.authMode !== 'token' && record.authMode !== 'trusted-device') throw new Error('invalid supervisor authMode');
+  config.authMode = record.authMode === 'trusted-device' ? 'trusted-device' : 'token';
   const name = optionalString(record.name, 'name');
   const staticDir = optionalString(record.staticDir, 'staticDir');
   const uploadExts = optionalString(record.uploadExts, 'uploadExts');

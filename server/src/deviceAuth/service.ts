@@ -26,44 +26,8 @@ export function validateName(value: unknown): string {
   return value.trim();
 }
 const hash = (secret: string): string => createHash('sha256').update(secret).digest('hex');
-function normalizeOrigin(value: unknown): string | null {
-  if (typeof value !== 'string' || !value) return null;
-  try {
-    const url = new URL(value);
-    if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password
-      || url.pathname !== '/' || url.search || url.hash) return null;
-    return url.origin;
-  } catch { return null; }
-}
-/** Normalize an additional trusted entry point. Wildcards are host-only and
- * must be the left-most label (for example https://*.example.com). */
-export function normalizeOriginPattern(value: unknown): string | null {
-  if (typeof value !== 'string' || !value.trim()) return null;
-  try {
-    const url = new URL(value.trim());
-    const host = url.hostname.toLowerCase();
-    const wildcard = host.startsWith('*.');
-    if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password
-      || url.pathname !== '/' || url.search || url.hash || !host
-      || (host.includes('*') && !wildcard) || (wildcard && !/^\*\.[^.]+(?:\.[^.]+)+$/.test(host))) return null;
-    return url.origin;
-  } catch { return null; }
-}
-export function originPatternMatches(pattern: string, origin: string): boolean {
-  try {
-    const expected = new URL(pattern); const actual = new URL(origin);
-    if (expected.protocol !== actual.protocol || expected.port !== actual.port) return false;
-    const host = expected.hostname.toLowerCase(); const candidate = actual.hostname.toLowerCase();
-    return host.startsWith('*.')
-      ? candidate !== host.slice(2) && candidate.endsWith(`.${host.slice(2)}`)
-      : candidate === host;
-  } catch { return false; }
-}
-function originPortSuffix(origin: string): string {
-  try { const port = new URL(origin).port; return port ? `_${port}` : ''; } catch { return ''; }
-}
-export const sessionCookieName = (origin: string): string => origin.startsWith('https:') ? `__Host-handmux_session${originPortSuffix(origin)}` : `handmux_session_http${originPortSuffix(origin)}`;
-export const pairingCookieName = (origin: string): string => origin.startsWith('https:') ? `__Host-handmux_pairing${originPortSuffix(origin)}` : `handmux_pairing_http${originPortSuffix(origin)}`;
+export const sessionCookieName = (origin: string): string => origin.startsWith('https:') ? '__Host-handmux_session' : 'handmux_session_http';
+export const pairingCookieName = (origin: string): string => origin.startsWith('https:') ? '__Host-handmux_pairing' : 'handmux_pairing_http';
 function readCookieSecret(req: IncomingMessage, name: string): string | null {
   const matches = (req.headers.cookie ?? '').split(';').map(v => v.trim()).filter(v => v.startsWith(`${name}=`));
   if (matches.length !== 1) return null;
@@ -84,15 +48,14 @@ interface Pairing {
   expiresAt: number; browserSummary: string; owner?: string; source?: 'cli' | 'web'; deviceId?: string;
   approver?: DevicePrincipal;
 }
-export interface PairingStatus { id: string; state: PairState; code?: string; expiresAt: number; source?: 'cli' | 'web'; origin?: string }
-export interface ApprovalStatus { id: string; state: PairState; browserSummary: string; expiresAt: number; source: 'web'; origin?: string; device?: AuthDevice }
+export interface PairingStatus { id: string; state: PairState; code?: string; expiresAt: number; source?: 'cli' | 'web' }
+export interface ApprovalStatus { id: string; state: PairState; browserSummary: string; expiresAt: number; source: 'web'; device?: AuthDevice }
 
 export class DeviceAuthService {
-  get mode(): AuthMode { return this.trustedDeviceEnabled ? 'trusted-device' : 'token'; }
+  readonly mode = 'trusted-device' as const;
   private tokenSecret: string;
   private tokenGeneration: string;
-  private trustedDeviceEnabledState: boolean;
-  private trustedOriginEnabledState: boolean;
+  private tokenEnabledState: boolean;
   private db: DatabaseSync;
   private now: () => number;
   private write: () => void;
@@ -106,104 +69,52 @@ export class DeviceAuthService {
   private flushTimer: ReturnType<typeof setInterval>;
   private claimFailures = new Map<string, number[]>();
   private closed = false;
-  constructor({ db, token = '', now = Date.now, onSuccessfulWrite = () => {} }: {
-    db: DatabaseSync; token?: string; now?: () => number; onSuccessfulWrite?: () => void;
+  constructor({ db, mode, token = '', now = Date.now, onSuccessfulWrite = () => {} }: {
+    db: DatabaseSync; mode: AuthMode; token?: string; now?: () => number; onSuccessfulWrite?: () => void;
   }) {
     this.db = db; this.tokenSecret = token; this.now = now; this.write = onSuccessfulWrite;
-    const devicePolicyRow = db.prepare("SELECT value FROM auth_meta WHERE key='trusted_device_enabled'").get() as { value: string } | undefined;
-    const originPolicyRow = db.prepare("SELECT value FROM auth_meta WHERE key='trusted_origin_enabled'").get() as { value: string } | undefined;
-    const parseBoolean = (value: string | undefined): boolean | undefined => value === '1' ? true : value === '0' ? false : undefined;
-    const storedDevicePolicy = parseBoolean(devicePolicyRow?.value);
-    const storedOriginPolicy = parseBoolean(originPolicyRow?.value);
-    // New installations start with both protections enabled. Explicit policy values
-    // are persisted so a CLI change survives a restart.
-    this.trustedDeviceEnabledState = storedDevicePolicy ?? true;
-    this.trustedOriginEnabledState = storedOriginPolicy ?? true;
+    const tokenRow = db.prepare("SELECT value FROM auth_meta WHERE key='token_enabled'").get() as { value: string } | undefined;
+    this.tokenEnabledState = tokenRow ? tokenRow.value === '1' : mode === 'token';
     const generation = db.prepare("SELECT value FROM auth_meta WHERE key='token_generation'").get() as { value: string } | undefined;
     this.tokenGeneration = generation?.value ?? randomUUID();
     this.transaction(() => {
+      db.prepare("INSERT INTO auth_meta(key,value) VALUES('token_enabled',?) ON CONFLICT(key) DO NOTHING").run(this.tokenEnabledState ? '1' : '0');
       db.prepare("INSERT INTO auth_meta(key,value) VALUES('token_generation',?) ON CONFLICT(key) DO NOTHING").run(this.tokenGeneration);
-      db.prepare("INSERT INTO auth_meta(key,value) VALUES('trusted_device_enabled',?) ON CONFLICT(key) DO NOTHING").run(this.trustedDeviceEnabledState ? '1' : '0');
-      db.prepare("INSERT INTO auth_meta(key,value) VALUES('trusted_origin_enabled',?) ON CONFLICT(key) DO NOTHING").run(this.trustedOriginEnabledState ? '1' : '0');
+      // Authentication mode is no longer a mutually-exclusive runtime mode. Preserve trusted
+      // devices and sessions across legacy token/trusted-device configuration upgrades.
+      db.prepare("INSERT INTO auth_meta(key,value) VALUES('mode',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(mode);
     });
     this.timer = setInterval(() => this.sweep(), 1000); this.timer.unref();
     this.flushTimer = setInterval(() => { try { this.flush(); } catch { console.error('[auth] Activity flush failed; will retry'); } }, 30_000); this.flushTimer.unref();
   }
-  /** Token is always the first authentication factor. */
-  get tokenEnabled(): boolean { return !this.closed; }
-  get trustedDeviceEnabled(): boolean { return !this.closed && this.trustedDeviceEnabledState; }
-  get trustedOriginEnabled(): boolean { return !this.closed && this.trustedOriginEnabledState; }
-  policy(): { trustedDeviceEnabled: boolean; trustedOriginEnabled: boolean } {
-    return { trustedDeviceEnabled: this.trustedDeviceEnabled, trustedOriginEnabled: this.trustedOriginEnabled };
-  }
-  get requiresTrustedDevice(): boolean { return this.trustedDeviceEnabled && this.activeDeviceCount() === 0; }
-  get trustedOrigins(): string[] {
-    const row = this.db.prepare("SELECT value FROM auth_meta WHERE key='trusted_origins'").get() as { value: string } | undefined;
-    if (!row?.value) return [];
-    try {
-      const parsed: unknown = JSON.parse(row.value);
-      if (!Array.isArray(parsed)) return [];
-      return [...new Set(parsed.map(normalizeOriginPattern).filter((v): v is string => !!v))];
-    } catch { return []; }
-  }
-  addTrustedOrigin(value: unknown): string[] {
-    const normalized = normalizeOriginPattern(value);
-    if (!normalized) throw new DeviceAuthError('INVALID_ORIGIN', 'Trusted access domain must be an origin such as https://*.example.com', 400);
-    const origins = this.trustedOrigins;
-    if (!origins.includes(normalized)) {
-      if (origins.length >= 64) throw new DeviceAuthError('ORIGIN_LIMIT', 'Too many trusted access domains; remove one before adding another', 409);
-      origins.push(normalized);
-      this.transaction(() => this.db.prepare("INSERT INTO auth_meta(key,value) VALUES('trusted_origins',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(JSON.stringify(origins)));
-    }
-    return origins;
-  }
-  removeTrustedOrigin(value: unknown): string[] {
-    const normalized = normalizeOriginPattern(value);
-    if (!normalized) throw new DeviceAuthError('INVALID_ORIGIN', 'Trusted access domain must be an origin such as https://*.example.com', 400);
-    const origins = this.trustedOrigins.filter(origin => origin !== normalized);
-    this.transaction(() => {
-      this.db.prepare("INSERT INTO auth_meta(key,value) VALUES('trusted_origins',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(JSON.stringify(origins));
-    });
-    return origins;
-  }
-  inspectTrustedOriginRemoval(value: unknown): Array<{ id: string; name: string; browser_summary: string }> {
-    const normalized = normalizeOriginPattern(value);
-    if (!normalized) throw new DeviceAuthError('INVALID_ORIGIN', 'Trusted access domain must be an origin', 400);
-    const now = Date.now();
-    const rows = this.db.prepare(`SELECT DISTINCT d.id, d.name, d.browser_summary, s.origin FROM auth_sessions s JOIN auth_devices d ON d.id=s.device_id WHERE s.revoked_at IS NULL AND d.revoked_at IS NULL AND (d.expires_at IS NULL OR d.expires_at > ?) AND s.origin IS NOT NULL`).all(now) as Array<{id:string;name:string;browser_summary:string;origin:string}>;
-    return rows.filter(row => originPatternMatches(normalized, row.origin)).map(({id,name,browser_summary}) => ({id,name,browser_summary}));
-  }
-  setTrustedOrigin(origin: string): void {
-    let normalized: string;
-    try {
-      const url = new URL(origin);
-      if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.pathname !== '/' || url.search || url.hash) throw new Error('invalid');
-      normalized = url.origin;
-    } catch { throw new DeviceAuthError('INVALID_ORIGIN', 'Trusted access address must be a complete origin', 400); }
-    const origins = this.trustedOrigins;
-    if (!origins.some(pattern => originPatternMatches(pattern, normalized))) {
-      if (origins.length >= 64) throw new DeviceAuthError('ORIGIN_LIMIT', 'Too many trusted access domains; remove one before adding another', 409);
-      origins.push(normalized);
-    }
-    this.transaction(() => {
-      this.db.prepare("INSERT INTO auth_meta(key,value) VALUES('trusted_origins',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(JSON.stringify(origins));
-    });
-  }
+  /** Runtime fixed-token compatibility switch. Trusted-device authorization remains available regardless. */
+  get tokenEnabled(): boolean { return !this.closed && this.tokenEnabledState; }
   authenticateToken(provided: unknown, origin: string): DevicePrincipal | null {
     if (!this.tokenEnabled || !this.tokenSecret || typeof provided !== 'string' || !provided || !tokenEquals(provided, this.tokenSecret)) return null;
     if (!this.isDeviceActive(`token_${this.tokenGeneration}`)) return null;
     return { deviceId: `token_${this.tokenGeneration}`, sessionId: `token_${this.tokenGeneration}`, expiresAt: null, origin };
   }
   isTokenPrincipal(principal: DevicePrincipal): boolean { return principal.deviceId.startsWith('token_'); }
-  setTrustedDeviceEnabled(enabled: boolean): void {
+  setTokenEnabled(enabled: boolean, options: { actor?: DevicePrincipal; allowEmpty?: boolean } = {}): void {
     this.requireMode();
-    this.transaction(() => this.db.prepare("INSERT INTO auth_meta(key,value) VALUES('trusted_device_enabled',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(enabled ? '1' : '0'));
-    this.trustedDeviceEnabledState = enabled;
-  }
-  setTrustedOriginEnabled(enabled: boolean): void {
-    this.requireMode();
-    this.transaction(() => this.db.prepare("INSERT INTO auth_meta(key,value) VALUES('trusted_origin_enabled',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(enabled ? '1' : '0'));
-    this.trustedOriginEnabledState = enabled;
+    if (options.actor) {
+      if (this.isTokenPrincipal(options.actor)) throw new DeviceAuthError('SESSION_INVALID', 'Register this browser as a trusted device first', 401);
+      this.assertActive(options.actor);
+    }
+    if (this.tokenEnabledState === enabled) return;
+    const previousId = `token_${this.tokenGeneration}`;
+    const generation = randomUUID();
+    this.transaction(() => {
+      if (!enabled && !options.actor && options.allowEmpty !== true && !this.list().some(d => d.status === 'active')) {
+        throw new DeviceAuthError('NO_TRUSTED_DEVICES', 'No trusted devices remain; confirm DISABLE TOKEN before disabling fixed Token login', 409);
+      }
+      if (options.actor) this.assertActive(options.actor);
+      this.db.prepare("INSERT INTO auth_meta(key,value) VALUES('token_enabled',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(enabled ? '1' : '0');
+      this.db.prepare("INSERT INTO auth_meta(key,value) VALUES('token_generation',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(generation);
+    });
+    this.tokenEnabledState = enabled;
+    this.tokenGeneration = generation;
+    this.notify(previousId);
   }
   private transaction<T>(run: () => T): T {
     this.db.exec('BEGIN IMMEDIATE');
@@ -216,7 +127,7 @@ export class DeviceAuthService {
     return out;
   }
   private requireMode(): void {
-    if (this.closed) throw new DeviceAuthError('DEVICE_AUTH_DISABLED', 'Authentication is unavailable; restart handmux and retry', 409);
+    if (this.closed) throw new DeviceAuthError('DEVICE_AUTH_DISABLED', 'Device authorization is not enabled; select it in handmux setup and restart', 409);
   }
   onRevoke(listener: (deviceId: string) => void): () => void { this.listeners.add(listener); return () => this.listeners.delete(listener); }
   private notify(id: string): void {
@@ -225,19 +136,16 @@ export class DeviceAuthService {
   }
   private device(id: string): AuthDevice {
     const row = this.db.prepare('SELECT id,name,browser_summary,authorized_at,expires_at,last_used_at,revoked_at,version FROM auth_devices WHERE id=?').get(id) as unknown as Omit<AuthDevice, 'status'> | undefined;
-    if (!row) throw new DeviceAuthError('DEVICE_NOT_FOUND', 'Device ID not found; use handmux auth device list', 404);
+    if (!row) throw new DeviceAuthError('DEVICE_NOT_FOUND', 'Device ID not found; use handmux auth list', 404);
     return { ...row, status: row.revoked_at !== null ? 'revoked' : row.expires_at !== null && row.expires_at <= this.now() ? 'expired' : 'active' };
   }
   isDeviceActive(id: string): boolean {
     if (this.closed) return false;
     if (id.startsWith('token_')) {
-      // The Token is an authentication factor, not a row in auth_devices.
-      return this.tokenEnabled && id === `token_${this.tokenGeneration}`;
+      const state = this.db.prepare("SELECT value FROM auth_meta WHERE key='token_enabled'").get() as { value: string } | undefined;
+      return this.tokenEnabled && state?.value === '1' && id === `token_${this.tokenGeneration}`;
     }
     try { return this.device(id).status === 'active'; } catch (error) { if (error instanceof DeviceAuthError) return false; throw error; }
-  }
-  private activeDeviceCount(): number {
-    return Number((this.db.prepare('SELECT COUNT(*) AS count FROM auth_devices WHERE revoked_at IS NULL AND (expires_at IS NULL OR expires_at>?)').get(this.now()) as { count?: number } | undefined)?.count ?? 0);
   }
   isActive(principal: DevicePrincipal): boolean {
     if (!this.isDeviceActive(principal.deviceId)) return false;
@@ -309,7 +217,7 @@ export class DeviceAuthService {
       p.state = this.device(p.deviceId).status === 'expired' ? 'expired' : 'canceled'; this.retire(p);
     }
   }
-  private view(p: Pairing): PairingStatus { this.updatePair(p); return { id: p.id, state: p.state, ...(p.state === 'waiting' ? { code: p.code } : {}), expiresAt: p.expiresAt, origin: p.origin, ...(p.source ? { source: p.source } : {}) }; }
+  private view(p: Pairing): PairingStatus { this.updatePair(p); return { id: p.id, state: p.state, ...(p.state === 'waiting' ? { code: p.code } : {}), expiresAt: p.expiresAt, ...(p.source ? { source: p.source } : {}) }; }
   pairing(secret: string | null, origin: string): PairingStatus | null {
     if (!secret) return null;
     const p = this.pending.get(hash(secret));
@@ -331,14 +239,14 @@ export class DeviceAuthService {
     this.requireMode();
     const existing = this.authenticateSecret(secret, origin);
     if (existing) return this.device(existing.deviceId);
+    if (!this.tokenEnabled) throw new DeviceAuthError('TOKEN_DISABLED', 'Fixed Token login is disabled', 401);
     validateName(values.name); parseExpire(values.expire);
     const pairing = this.pending.get(hash(secret));
     if (!pairing || pairing.origin !== origin) throw new DeviceAuthError('PAIRING_NOT_FOUND', 'Prepare this browser for registration and retry', 409);
     this.updatePair(pairing);
     const owner = `self:${pairing.secretHash}`;
     if (pairing.state === 'waiting') this.claim(pairing.code, owner);
-    const device = this.authorize(pairing.id, owner, values);
-    return device;
+    return this.authorize(pairing.id, owner, values);
   }
   cancelPairing(secret: string | null, origin: string, id: string): PairingStatus | null {
     this.requireMode(); const p = secret ? this.pending.get(hash(secret)) : null;
@@ -346,7 +254,7 @@ export class DeviceAuthService {
     if (p.state !== 'authorized') { p.state = 'canceled'; this.retire(p); }
     return this.view(p);
   }
-  claim(code: unknown, owner: string, approver?: DevicePrincipal): { id: string; browserSummary: string; expiresAt: number; origin: string } {
+  claim(code: unknown, owner: string, approver?: DevicePrincipal): { id: string; browserSummary: string; expiresAt: number } {
     this.requireMode(); this.sweep();
     if (approver) this.assertActive(approver);
     for (const [key, failures] of this.claimFailures) {
@@ -359,12 +267,12 @@ export class DeviceAuthService {
     const p = typeof code === 'string' && /^\d{6}$/.test(code) ? [...this.pending.values()].find(p => p.code === code && p.state === 'waiting') : undefined;
     if (!p) { failures.push(this.now()); this.claimFailures.set(failureKey, failures); throw new DeviceAuthError('CODE_INVALID', 'Code is invalid, expired, or already used; request a fresh code', 409); }
     p.state = 'configuring'; p.owner = owner; p.source = approver ? 'web' : 'cli'; if (approver) p.approver = approver; p.expiresAt = this.now() + 300_000; this.retire(p);
-    return { id: p.id, browserSummary: p.browserSummary, expiresAt: p.expiresAt, origin: p.origin };
+    return { id: p.id, browserSummary: p.browserSummary, expiresAt: p.expiresAt };
   }
   cancelOwner(owner: string): void { for (const p of this.pending.values()) if (p.owner === owner && p.state === 'configuring') { p.state = 'canceled'; this.retire(p); } }
   private approvalView(p: Pairing): ApprovalStatus {
     this.updatePair(p);
-    return { id: p.id, state: p.state, browserSummary: p.browserSummary, expiresAt: p.expiresAt, source: 'web', origin: p.origin, ...(p.state === 'authorized' && p.deviceId ? { device: this.device(p.deviceId) } : {}) };
+    return { id: p.id, state: p.state, browserSummary: p.browserSummary, expiresAt: p.expiresAt, source: 'web', ...(p.state === 'authorized' && p.deviceId ? { device: this.device(p.deviceId) } : {}) };
   }
   approvals(actor: DevicePrincipal): ApprovalStatus[] {
     this.assertActive(actor);
@@ -401,21 +309,10 @@ export class DeviceAuthService {
     if (p.state === 'authorized' && p.deviceId) return this.device(p.deviceId);
     if (p.state !== 'configuring') throw new DeviceAuthError('PAIRING_INACTIVE', 'Pairing was canceled or expired; request a new code', 409);
     const deviceId = `dev_${randomUUID().replaceAll('-', '')}`; const now = this.now();
-    const pairingOrigin = normalizeOriginPattern(p.origin);
-    const currentOrigins = this.trustedOrigins;
-    const originAlreadyListed = pairingOrigin
-      ? currentOrigins.some(pattern => originPatternMatches(pattern, pairingOrigin))
-      : false;
     this.transaction(() => {
       if (p.approver) this.assertActive(p.approver);
       this.db.prepare('INSERT INTO auth_devices(id,pairing_request_id,name,browser_summary,authorized_at,expires_at,last_used_at) VALUES(?,?,?,?,?,?,?)').run(deviceId, p.id, name, p.browserSummary, now, duration === null ? null : now + duration, now);
       this.db.prepare('INSERT INTO auth_sessions(id,device_id,secret_hash,origin,transport,created_at,last_used_at) VALUES(?,?,?,?,?,?,?)').run(`ses_${randomUUID().replaceAll('-', '')}`, deviceId, p.secretHash, p.origin, p.origin.startsWith('https:') ? 'https' : 'http', now, now);
-      // Record the current access origin only after the pairing has been approved.
-      if (pairingOrigin && !originAlreadyListed) {
-        if (currentOrigins.length >= 64) throw new DeviceAuthError('ORIGIN_LIMIT', 'Too many trusted access domains; remove one before adding another', 409);
-        currentOrigins.push(pairingOrigin);
-        this.db.prepare("INSERT INTO auth_meta(key,value) VALUES('trusted_origins',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(JSON.stringify(currentOrigins));
-      }
     });
     p.state = 'authorized'; p.deviceId = deviceId; return this.device(deviceId);
   }
@@ -430,7 +327,7 @@ export class DeviceAuthService {
       // A storage fault must stop already-authorized streams as well as fail new requests closed.
       for (const id of this.observedDevices) this.notify(id);
       this.observedDevices.clear();
-      this.notify(`token_${this.tokenGeneration}`);
+      if (this.tokenEnabled) this.notify(`token_${this.tokenGeneration}`);
       console.error('[auth] Expiry check unavailable; device connections closed');
     }
   }

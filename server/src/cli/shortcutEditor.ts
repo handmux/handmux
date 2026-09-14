@@ -322,7 +322,7 @@ export async function applyShortcutsLive({
   timeoutMs?: number;
 }): Promise<void> {
   const stateRecord = recordOf(state);
-  if (home && fs.existsSync(authSocketPath(home))) {
+  if (stateRecord?.authMode === 'trusted-device' || home && fs.existsSync(authSocketPath(home))) {
     if (!home) throw new Error('HandMux home is required for the private control socket');
     const control = await connectAuthControl(home);
     const timer = setTimeout(() => control.close(), timeoutMs);

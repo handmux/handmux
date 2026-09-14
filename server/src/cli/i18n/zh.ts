@@ -1,17 +1,20 @@
 // 中文字典。键与 en.js 一一对应;缺键会自动回退到英文。命令名、flag、隧道名等字面量保持英文(它们是要照抄输入的)。
 export default {
-  'auth.section': '认证与安全',
-  'auth.trusted': '可信设备保护',
-  'auth.token': 'Token 登录',
-  'auth.manageHint': '设备保护和访问地址限制通过 CLI 管理；设备和地址列表可在 Web 设置中管理。',
-  'auth.noDevices': '尚无有效设备；请通过 handmux auth device add 添加设备。',
-  'auth.access': '设备授权：打开访问地址，然后在这台电脑运行 handmux auth device add 批准你的浏览器。',
-  'auth.warning': '⚠ 可信设备保护未开启；当前仅需 Token 登录。运行 handmux auth device on 可开启。',
-  'auth.deviceDisableConfirm': '关闭可信设备保护后，Token 将可以单独访问。继续？',
-  'auth.addressDisableConfirm': '关闭访问地址限制后，任意地址都可以尝试访问。继续？',
+  'auth.section': '认证与设备',
+  'auth.trusted': '可信设备登录（始终可用）',
+  'auth.tokenDisabled': '固定 Token 登录：禁用（推荐）',
+  'auth.tokenEnabled': '固定 Token 登录：启用（不推荐）',
+  'auth.token': '固定 Token 登录',
+  'auth.manageHint': '可信设备登录始终可用。固定 Token 登录只是兼容入口。日常管理使用 handmux auth add/list/edit/revoke。为更好地保护传输安全，尽可能使用 HTTPS。',
+  'auth.noDevices': '尚无有效可信设备；请通过 handmux auth add 添加设备后访问业务。',
+  'auth.access': '设备授权：打开访问地址，然后在这台电脑运行 handmux auth add 批准你的浏览器。',
+  'auth.warning': '⚠ 提醒：固定 Token 泄露后可被重复使用。建议添加可信设备后禁用固定 Token 登录。为更好地保护凭据传输，尽可能使用 HTTPS。',
+  'auth.switchWarning': '⚠ 必须在运行 Handmux 的电脑上，以同一系统用户使用本机直连终端或独立 SSH 操作，不要使用 Handmux 内的终端。禁用固定 Token 登录会立即使尚未授权的浏览器失去访问，无需重启；可通过 CLI 添加可信设备恢复。',
+  'auth.switchConfirm': '确认当前是非 Handmux 内的本机终端或独立 SSH，并确认固定 Token 登录变更？',
+  'auth.switchApplyConfirm': '确认当前是非 Handmux 内的本机终端或独立 SSH，并应用认证方式变更？',
+  'auth.switchNeedTty': '切换认证方式需要在本机直连终端或独立 SSH 中交互确认。本次未停止或重启服务。',
   'auth.code': '输入新浏览器显示的 6 位校验码',
   'auth.claimed': '配对成功。请在 5 分钟内完善设备信息，保存后才可登录。',
-  'auth.origin': '访问地址',
   'auth.name': '设备名称',
   'auth.expire': '授权有效期',
   'auth.custom': '自定义',
@@ -139,7 +142,7 @@ export default {
   'access.pending': '(等待中…)',
   'access.lan': '  📶 局域网 {url}',
   'access.local': '  💻 本机   {url}',
-  'access.token': '  🔑 Token 登录   {token}',
+  'access.token': '  🔑 令牌   {token}',
   'access.reachable': '  ✓ 可访问',
   'access.unreachable': '  ⚠ 隧道已起,但 {url} 没有响应 —— 检查服务端的反向代理 / DNS',
   'access.hint': '  handmux status | stop',
@@ -217,7 +220,6 @@ export default {
   'setup.askSshHost': 'ssh 主机(user@host[:port])',
   'setup.askRemotePort': 'ssh 主机上的远程端口',
   'setup.askPublicUrl': '公网地址,http(s):// 按情况填(留空 = http://host:remotePort)',
-  'setup.askDirectPublicUrl': '自定义访问地址(填你自己的反向隧道或代理地址;留空 = 仅本机 / 局域网直连)',
   'setup.natappGuide': '去哪拿 authtoken:到 https://natapp.cn 免费注册 → 新建一条隧道 → 复制它的 authtoken(免费额度够上手)。',
   'setup.cpolarGuide': '去哪拿 authtoken:到 https://cpolar.com 免费注册 → 打开后台 → 验证/Verify → 复制你的 authtoken。',
   'setup.askAuthtoken': 'authtoken',
@@ -233,19 +235,19 @@ export default {
   'setup.secConnection': '连接',
   'setup.secName': '名称',
   'setup.secPort': '端口',
-  'setup.secToken': 'Token 登录',
+  'setup.secToken': '令牌',
   'setup.secBrowser': '网页预览器',
   'setup.browserOff': '未配置 · 仅手机直连',
   'setup.askBrowserDomain': '网页预览器代理域名（留空 = 仅手机直连）',
   'setup.browserAbout': '填写代理域名（如 preview.example.com），并将其通配子域以 HTTPS 路由到 Handmux；留空则仅使用手机直连。',
-  'setup.tokenAuto': '已保存（Token 不会自动更换）',
-  'setup.tokenCustom': '修改Token…',
-  'setup.tokenRandom': '生成并保存新的随机 Token',
-  'setup.tokenReset': 'Token 不会自动更换',
-  'setup.askToken': 'Token —— 与可信设备同时用于登录',
-  'setup.tokenGenerated': '新的Token:{token}',
-  'setup.valToken': '请输入Token',
-  'setup.valTokenSpace': '不能有空格 —— 请在登录页单独输入 Token',
+  'setup.tokenAuto': '自动 · 复用已有 Token，首次生成',
+  'setup.tokenCustom': '自定义令牌…',
+  'setup.tokenRandom': '随机生成一个',
+  'setup.tokenReset': '使用自动 Token（复用已有或首次生成）',
+  'setup.askToken': '访问令牌 —— 会出现在手机打开的网址里',
+  'setup.tokenGenerated': '新令牌:{token}',
+  'setup.valToken': '请输入令牌',
+  'setup.valTokenSpace': '不能有空格 —— 令牌会放进网址',
   'setup.secLanguage': '命令行语言 / CLI language',
   'setup.secPush': '推送',
   'setup.secVoice': '语音',
@@ -275,7 +277,6 @@ export default {
   'setup.valRequired': '{label} 不能为空',
   'setup.valHost': '请输入有效域名(如 myapp.example.com)',
   'setup.valPreviewDomain': '只填域名，如 preview.example.com；不要填 http://、https://、端口或 *.',
-  'setup.valPublicUrl': '请输入完整的 http(s) 地址，例如 https://handmux.example.com（不要带路径或凭据）',
   'setup.valContact': '请填 mailto:you@example.com 或 https://你的站点(要真实域名 —— 苹果会拒收假域名)',
   'setup.sumTemp': '临时',
   'setup.sumFixed': '固定',
@@ -288,7 +289,6 @@ export default {
   'setup.connSshHost': 'SSH 主机',
   'setup.connRemotePort': '远程端口',
   'setup.connPublicUrl': '公网地址',
-  'setup.connDirectAuto': '(留空 = 本机 / 局域网直连)',
   'setup.connJump': '跳板机',
   'setup.connDomain': '域名',
   'setup.connRegion': '区域',
@@ -400,16 +400,10 @@ export default {
   handmux stop | restart | status
   handmux logs [--follow] [--lines N]
   handmux push <标题> <正文>    从脚本推一条通知到手机（--session 会话 · --device 设备key · --tag · --url）
-  handmux auth device status   查看设备保护状态和设备列表
-  handmux auth device on|off   开启或关闭设备保护
-  handmux auth device add      交互式授权浏览器（自动化使用 --code、--name 和 --expire）
-  handmux auth device list     列出完整设备 ID、名称、有效期和访问时间
-  handmux auth device edit <id>   修改设备名称或有效期
-  handmux auth device revoke <id>  立即撤销指定设备
-  handmux auth address status  查看访问地址限制状态和地址列表
-  handmux auth address on|off  开启或关闭访问地址限制
-  handmux auth address add <origin>     添加访问地址
-  handmux auth address remove <origin>  删除访问地址
+  handmux auth add             授权浏览器（可提供校验码、--name 和 --expire）
+  handmux auth list            列出完整设备 ID、名称、有效期和访问时间
+  handmux auth edit <id>       非交互修改 --name 和/或 --expire
+  handmux auth revoke <id>     立即撤销指定设备
   handmux codex [参数...]      启动与对话视图同步的 Codex TUI
   handmux pi [参数...]         原样传递参数并启动 Pi
   handmux agent [list]         查看支持的 Agent 接入状态
