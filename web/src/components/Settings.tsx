@@ -13,7 +13,7 @@ import { SNAPSHOT_INTERVALS } from '../terminalTransport.js';
 import { useBackButton } from '../hooks/useBackButton.js';
 import { CheckIcon } from './icons.jsx';
 import DeviceManagement from './DeviceManagement.js';
-import { isDeviceAuth, isTrustedDeviceEnabled, isTrustedOriginEnabled } from '../authSession.js';
+import { isTrustedDeviceEnabled, isTrustedOriginEnabled } from '../authSession.js';
 import type { TerminalHandle } from './Terminal.js';
 import type { SnapshotInterval, TerminalTransport } from '../terminalTransport.js';
 import type { ConversationFontSize, VoiceFillerFilterLevel } from '../storage.js';
@@ -498,7 +498,7 @@ export default function Settings({ open, onClose, termRef, onOpenChangelog = () 
 
       <SettingsGroup title={t('settings.group_general')}>
         <SettingsNavRow label={t('settings.language')} value={languageLabel} onClick={() => openPage('language')} />
-        <SettingsNavRow label={t('devices.title')} value={t(isDeviceAuth() ? 'devices.trusted' : 'devices.token')} onClick={() => openPage('devices')} />
+        <SettingsNavRow label={t('devices.title')} value={t(isTrustedDeviceEnabled() && isTrustedOriginEnabled() ? 'devices.protectionEnabled' : isTrustedDeviceEnabled() || isTrustedOriginEnabled() ? 'devices.protectionPartial' : 'devices.protectionDisabled')} dot={!isTrustedDeviceEnabled() || !isTrustedOriginEnabled()} onClick={() => openPage('devices')} />
       </SettingsGroup>
 
       <SettingsGroup title={t('settings.group_terminal')} footer={t('settings.path_highlight_hint')}>

@@ -48,6 +48,8 @@ describe('compact device management', () => {
     expect(screen.queryByRole('tab')).toBeNull();
     expect(screen.queryByText(t('devices.publicUrlLabel'))).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: t('devices.enableProtection') })); await flush();
+    expect(screen.getByText(t('devices.enableDeviceConfirm'))).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: t('devices.enableConfirm') })); await flush();
     expect(enable).toHaveBeenCalled();
   });
 
