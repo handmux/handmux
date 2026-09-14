@@ -327,7 +327,7 @@ button.settings-page-row:disabled, .settings-page-row.disabled { color: rgba(235
 .device-list-group > h3 { margin: 12px 16px 0; color: rgba(235,235,245,.52); font-size: 12px; font-weight: 500; letter-spacing: .25px; }
 .device-policy-list { overflow: hidden; border-radius: 13px; background: #232427; }
 .device-policy-row { min-height: 56px; gap: 12px; padding: 9px 12px 9px 16px; background: transparent; }
-.device-policy-copy { min-width: 0; display: grid; gap: 4px; }
+.device-policy-copy { min-width: 0; display: inline-flex; align-items: baseline; gap: 8px; }
 .device-policy-copy strong { color: #f2f2f7; font-size: 15px; font-weight: 500; }
 .device-policy-enabled, .device-policy-disabled { font-size: 12px; }
 .device-policy-enabled { color: var(--green, #65d38b); }
@@ -335,7 +335,6 @@ button.settings-page-row:disabled, .settings-page-row.disabled { color: rgba(235
 .device-policy-enable { flex: none; min-height: 40px; padding: 0 12px; }
 .device-policy-warning { margin: 0 4px; color: rgba(235,235,245,.62); }
 .device-policy-enabled-note { margin-top: 0; }
-.device-policy-help { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; padding: 0; border: 1px solid rgba(235,235,245,.36); border-radius: 50%; background: transparent; color: rgba(235,235,245,.62); font: 13px/1 -apple-system, system-ui, sans-serif; }
 .device-row { gap: 12px; min-height: 64px; }
 .device-action-list { margin-top: 8px; }
 .device-action-copy { min-width: 0; display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }

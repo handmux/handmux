@@ -71,12 +71,12 @@ describe('compact device management', () => {
     expect(remove).toHaveBeenCalledWith(origin);
   });
 
-  it('keeps policy commands behind compact help buttons', async () => {
+  it('shows the CLI-only disable guidance inline when protection is enabled', async () => {
     render(<DeviceManagement onLoggedOut={vi.fn()} />); await flush();
     expect(screen.getByText(t('devices.deviceProtectionEnabledHint'))).toBeTruthy();
     expect(screen.getByText(t('devices.originProtectionEnabledHint'))).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: t('devices.deviceProtectionInfo') }));
-    expect(within(screen.getByRole('dialog')).getByText(t('devices.deviceProtectionInfo'))).toBeTruthy();
+    expect(screen.queryByRole('button', { name: t('devices.deviceProtectionInfo') })).toBeNull();
+    expect(screen.queryByRole('button', { name: t('devices.originProtectionInfo') })).toBeNull();
   });
 
   it('labels the current device and warns that removing its origin requires re-authorization', async () => {

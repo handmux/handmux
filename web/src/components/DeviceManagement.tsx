@@ -329,7 +329,6 @@ export default function DeviceManagement({ onLoggedOut }: { onLoggedOut: () => v
   const [selfCustom, setSelfCustom] = useState(''); const [busy, setBusy] = useState(false);
   const [originBusy, setOriginBusy] = useState(false);
   const [confirmEnable, setConfirmEnable] = useState<'device' | 'origin' | null>(null);
-  const [policyHelp, setPolicyHelp] = useState<'device' | 'origin' | null>(null);
   const [originHelp, setOriginHelp] = useState<'public' | 'preview' | null>(null);
   const [originRemoval, setOriginRemoval] = useState<{ origin: string; devices: Array<{ id: string; name: string; browser_summary: string }> } | null>(null);
   const [now, setNow] = useState(Date.now()); const offset = useRef(0); const alive = useRef(true); const requestId = useRef(0);
@@ -409,9 +408,7 @@ export default function DeviceManagement({ onLoggedOut }: { onLoggedOut: () => v
       <div className="settings-page-list device-policy-list">
         <div className="settings-page-row device-policy-row">
           <div className="device-policy-copy"><strong>{t('devices.deviceProtectionStatus')}</strong><span className={trustedDeviceEnabled ? 'device-policy-enabled' : 'device-policy-disabled'}>{t(trustedDeviceEnabled ? 'devices.policyEnabled' : 'devices.policyDisabled')}</span></div>
-          {trustedDeviceEnabled
-            ? <button type="button" className="device-policy-help" aria-label={t('devices.deviceProtectionInfo')} onClick={() => setPolicyHelp('device')}>?</button>
-            : <button type="button" className="fontbtn device-policy-enable" disabled={busy} onClick={() => setConfirmEnable('device')}>{t(busy ? 'common.loading' : 'devices.enableProtection')}</button>}
+          {!trustedDeviceEnabled && <button type="button" className="fontbtn device-policy-enable" disabled={busy} onClick={() => setConfirmEnable('device')}>{t(busy ? 'common.loading' : 'devices.enableProtection')}</button>}
         </div>
       </div>
       {trustedDeviceEnabled && <p className="settings-detail-note device-policy-enabled-note">{t('devices.deviceProtectionEnabledHint')}</p>}
@@ -441,9 +438,7 @@ export default function DeviceManagement({ onLoggedOut }: { onLoggedOut: () => v
       <div className="settings-page-list device-policy-list">
         <div className="settings-page-row device-policy-row">
           <div className="device-policy-copy"><strong>{t('devices.originProtectionStatus')}</strong><span className={trustedOriginEnabled ? 'device-policy-enabled' : 'device-policy-disabled'}>{t(trustedOriginEnabled ? 'devices.policyEnabled' : 'devices.policyDisabled')}</span></div>
-          {trustedOriginEnabled
-            ? <button type="button" className="device-policy-help" aria-label={t('devices.originProtectionInfo')} onClick={() => setPolicyHelp('origin')}>?</button>
-            : <button type="button" className="fontbtn device-policy-enable" disabled={busy} onClick={() => setConfirmEnable('origin')}>{t(busy ? 'common.loading' : 'devices.enableOriginProtection')}</button>}
+          {!trustedOriginEnabled && <button type="button" className="fontbtn device-policy-enable" disabled={busy} onClick={() => setConfirmEnable('origin')}>{t(busy ? 'common.loading' : 'devices.enableOriginProtection')}</button>}
         </div>
       </div>
       {trustedOriginEnabled && <p className="settings-detail-note device-policy-enabled-note">{t('devices.originProtectionEnabledHint')}</p>}
@@ -470,7 +465,6 @@ export default function DeviceManagement({ onLoggedOut }: { onLoggedOut: () => v
     {adding && <AddDevice onClose={() => setAdding(false)} onAdded={() => { setAdding(false); void load(); }} />}
     {selfSheet && <DeviceSheet title={t('devices.addSelfTitle')} onClose={() => { if (!busy) setSelfSheet(false); }}><p className="device-sheet-note">{t('devices.addSelfOrigin', { origin: currentOrigin })}</p><label className="device-field">{t('devices.name')}<input disabled={busy} value={selfName} onChange={e => setSelfName(e.target.value)} /></label><ExpiryPicker value={selfExpire} custom={selfCustom} onChange={setSelfExpire} onCustom={setSelfCustom} disabled={busy} /><button className="fontbtn device-save" disabled={busy || !validName(selfName) || !validExpire(selfExpire === 'custom' ? selfCustom : selfExpire)} onClick={() => { void addSelf(); }}>{t(busy ? 'common.loading' : 'devices.addSelf')}</button>{error && <p role="alert">{error}</p>}</DeviceSheet>}
     {originHelp && <DeviceSheet title={originHelp === 'public' ? t('devices.publicUrlLabel') : t('devices.previewDomainLabel')} onClose={() => setOriginHelp(null)}><p className="device-sheet-note">{t(originHelp === 'public' ? 'devices.publicUrlInfo' : 'devices.previewDomainInfo')}</p></DeviceSheet>}
-    {policyHelp && <DeviceSheet title={policyHelp === 'device' ? t('devices.deviceProtectionSection') : t('devices.accessSection')} variant="dialog" onClose={() => setPolicyHelp(null)}><p className="device-sheet-note">{t(policyHelp === 'device' ? 'devices.deviceProtectionInfo' : 'devices.originProtectionInfo')}</p></DeviceSheet>}
     {originRemoval && <OriginRemoveConfirm origin={originRemoval.origin} devices={originRemoval.devices} currentDeviceId={data.currentDeviceId} busy={originBusy} error={error} onClose={() => { if (!originBusy) { setOriginRemoval(null); setError(''); } }} onConfirm={() => { void confirmRemoveTrustedOrigin(); }} />}
     {confirmEnable && <div className="settings-confirm-backdrop" onClick={() => { if (!busy) setConfirmEnable(null); }}>
       <div className="settings-confirm" role="alertdialog" aria-modal="true" aria-labelledby="device-enable-confirm-title" onClick={event => event.stopPropagation()}>
