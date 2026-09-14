@@ -17,7 +17,7 @@ export default {
   'devices.protectionPartial': 'Protection partly on',
   'devices.protectionDisabled': 'Protection off',
   'devices.insecureTitle': 'Security protections are not fully enabled',
-  'devices.insecureHint': 'Some security protections are off. Open Authentication & security to review and enable them. Enabling device protection adds this browser as a trusted device; other devices must be authorized by a trusted device or the computer CLI.',
+  'devices.insecureHint': 'Device protection or trusted-address restrictions are off.',
   'devices.openSecurity': 'Open Authentication & security',
   'devices.listTitle': 'Authorized devices',
   'devices.trusted': 'Device protection',

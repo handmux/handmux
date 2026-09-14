@@ -16,7 +16,7 @@ export default {
   'devices.protectionPartial': '部分开启保护',
   'devices.protectionDisabled': '未开启保护',
   'devices.insecureTitle': '安全保护未全部开启',
-  'devices.insecureHint': '当前有安全保护未开启，请前往认证与安全查看并开启。开启设备保护会将本机加入可信设备；其他设备访问需通过可信设备或电脑 CLI 授权。',
+  'devices.insecureHint': '设备保护或可信地址限制未开启。',
   'devices.openSecurity': '去认证与安全',
   'devices.listTitle': '已授权设备',
   'devices.trusted': '设备保护',
