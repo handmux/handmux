@@ -157,6 +157,12 @@ export function createDeviceAuthRouter({ service, resolveOrigin, resolvePublicUr
     service.setTrustedDeviceEnabled(true);
     res.json({ mode: service.mode, tokenEnabled: true, trustedDeviceEnabled: service.trustedDeviceEnabled, trustedOriginEnabled: service.trustedOriginEnabled, currentDeviceId: device.deviceId, authenticated: true, serverTime: Date.now() });
   }));
+  router.post('/origin-protection/enable', safe((req, res) => {
+    const origin = String(res.locals.authOrigin);
+    if (!tokenPrincipal(req, origin)) throw new DeviceAuthError('TOKEN_REQUIRED', 'Enter the Token before enabling access-address restrictions', 401);
+    service.setTrustedOriginEnabled(true);
+    res.json({ mode: service.mode, tokenEnabled: true, trustedDeviceEnabled: service.trustedDeviceEnabled, trustedOriginEnabled: service.trustedOriginEnabled, currentDeviceId: null, authenticated: true, serverTime: Date.now() });
+  }));
   router.delete('/pairing', safe((req, res) => {
     const origin = String(res.locals.authOrigin);
     const id = typeof req.body?.id === 'string' ? req.body.id : '';

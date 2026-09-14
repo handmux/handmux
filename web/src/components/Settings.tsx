@@ -13,7 +13,7 @@ import { SNAPSHOT_INTERVALS } from '../terminalTransport.js';
 import { useBackButton } from '../hooks/useBackButton.js';
 import { CheckIcon } from './icons.jsx';
 import DeviceManagement from './DeviceManagement.js';
-import { isDeviceAuth } from '../authSession.js';
+import { isDeviceAuth, isTrustedDeviceEnabled, isTrustedOriginEnabled } from '../authSession.js';
 import type { TerminalHandle } from './Terminal.js';
 import type { SnapshotInterval, TerminalTransport } from '../terminalTransport.js';
 import type { ConversationFontSize, VoiceFillerFilterLevel } from '../storage.js';
@@ -488,7 +488,7 @@ export default function Settings({ open, onClose, termRef, onOpenChangelog = () 
           <span>{t(`workspace.protection.${protectionReason}`)}</span>
         </div>
       )}
-      {!isDeviceAuth() && (
+      {(!isTrustedDeviceEnabled() || !isTrustedOriginEnabled()) && (
         <div className="settings-page-alert device-security-banner" role="status">
           <strong>{t('devices.insecureTitle')}</strong>
           <span>{t('devices.insecureHint')}</span>

@@ -40,6 +40,7 @@ export const deviceManagementApi = {
   authorize: (id: string, values: { name: string; expire: string }) => request<{ device: ManagedDevice; serverTime: number }>(`/approvals/${encodeURIComponent(id)}/authorize`, 'POST', values),
   addSelf: (name: string, expire: string) => request<{ device: ManagedDevice; serverTime: number }>('/devices/self', 'POST', { name, expire }),
   enableTrustedDevice: () => request<{ trustedDeviceEnabled: boolean; currentDeviceId: string | null; serverTime: number }>('/device-protection/enable', 'POST', {}),
+  enableTrustedOrigin: () => request<{ trustedOriginEnabled: boolean; serverTime: number }>('/origin-protection/enable', 'POST', {}),
   addTrustedOrigin: (origin: string) => request<{ trustedOrigins: string[]; serverTime: number }>('/trusted-origins', 'POST', { origin }),
   removeTrustedOrigin: (origin: string) => request<{ trustedOrigins: string[]; serverTime: number }>('/trusted-origins', 'DELETE', { origin }),
   inspectTrustedOriginRemoval: (origin: string) => request<{ affectedDevices: Array<{ id: string; name: string; browser_summary: string }> }>('/trusted-origins/inspect', 'POST', { origin }),

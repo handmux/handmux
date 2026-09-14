@@ -33,15 +33,20 @@ describe('compact device management', () => {
   });
 
   it('shows a single enable action and the access warning when device protection is off', async () => {
-    vi.mocked(api.list).mockResolvedValue({ devices: [], currentDeviceId: null, trustedDeviceEnabled: false, serverTime: now });
+    vi.mocked(api.list).mockResolvedValue({ devices: [current], currentDeviceId: null, trustedDeviceEnabled: false, trustedOriginEnabled: false, publicUrl: 'https://handmux.example.com', serverTime: now });
     vi.spyOn(api, 'addSelf').mockResolvedValue({ device: current, serverTime: now });
     const enable = vi.spyOn(api, 'enableTrustedDevice').mockResolvedValue({ trustedDeviceEnabled: true, currentDeviceId: current.id, serverTime: now });
+    vi.spyOn(api, 'enableTrustedOrigin').mockResolvedValue({ trustedOriginEnabled: true, serverTime: now });
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({ mode: 'trusted-device', authenticated: true, currentDeviceId: current.id, serverTime: now }) }));
     render(<DeviceManagement onLoggedOut={vi.fn()} />); await flush();
-    expect(screen.getByText(t('devices.policyDisabled'))).toBeTruthy();
+    expect(screen.getAllByText(t('devices.policyDisabled'))).toHaveLength(2);
     expect(screen.getByRole('button', { name: t('devices.enableProtection') })).toBeTruthy();
+    expect(screen.getByRole('button', { name: t('devices.enableOriginProtection') })).toBeTruthy();
     expect(screen.getByText(t('devices.deviceProtectionEnableWarning'))).toBeTruthy();
+    expect(screen.getByText(t('devices.originProtectionEnableWarning'))).toBeTruthy();
     expect(screen.queryByRole('button', { name: t('devices.deviceProtectionInfo') })).toBeNull();
+    expect(screen.queryByRole('tab')).toBeNull();
+    expect(screen.queryByText(t('devices.publicUrlLabel'))).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: t('devices.enableProtection') })); await flush();
     expect(enable).toHaveBeenCalled();
   });

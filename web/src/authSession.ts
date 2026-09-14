@@ -28,14 +28,20 @@ export interface AuthStatus {
 let authenticated = false;
 let currentDeviceId: string | null = null;
 let tokenEnabled = false;
+let trustedDeviceEnabled = true;
+let trustedOriginEnabled = true;
 export const isTokenEnabled = (): boolean => tokenEnabled;
 export const isDeviceAuth = (): boolean => true;
+export const isTrustedDeviceEnabled = (): boolean => trustedDeviceEnabled;
+export const isTrustedOriginEnabled = (): boolean => trustedOriginEnabled;
 export const hasAuthenticatedSession = (): boolean => authenticated;
 export const hasDeviceSession = (): boolean => authenticated && currentDeviceId !== null;
 export function applyAuthStatus(status: AuthStatus): void {
   authenticated = status.authenticated;
   currentDeviceId = status.currentDeviceId ?? null;
   tokenEnabled = status.tokenEnabled === true;
+  trustedDeviceEnabled = status.trustedDeviceEnabled !== false;
+  trustedOriginEnabled = status.trustedOriginEnabled !== false;
   if (isDeviceAuth()) {
     if (!authenticated) { try { setBrowserAccessEnabled(false); } catch { /* storage may be disabled */ } }
   }

@@ -382,6 +382,12 @@ export default function DeviceManagement({ onLoggedOut }: { onLoggedOut: () => v
       await load();
     } catch (e) { setError(deviceErrorCopy(e)); } finally { setBusy(false); }
   };
+  const enableOriginProtection = async () => {
+    if (busy) return;
+    setBusy(true); setError('');
+    try { await api.enableTrustedOrigin(); const status = await authRequest(); applyAuthStatus(status); await load(); }
+    catch (e) { setError(deviceErrorCopy(e)); } finally { setBusy(false); }
+  };
   const removeTrustedOrigin = async (value: string) => {
     if (originBusy) return;
     setOriginBusy(true); setError('');
@@ -408,6 +414,7 @@ export default function DeviceManagement({ onLoggedOut }: { onLoggedOut: () => v
         </div>
       </div>
       {!trustedDeviceEnabled && <p className="settings-detail-note device-policy-warning">{t('devices.deviceProtectionEnableWarning')}</p>}
+      {trustedDeviceEnabled && <>
       {!showingHistory && data.currentDeviceId && <button type="button" className="device-authorize-other" aria-label={t('devices.authorizeOther')} disabled={busy} onClick={() => setAdding(true)}>{t('devices.authorizeOther')}</button>}
       <h3 id="device-list-title">{t('devices.listTitle')}</h3>
       <div className="device-tabs" role="tablist" aria-label={t('devices.title')}>
@@ -426,16 +433,20 @@ export default function DeviceManagement({ onLoggedOut }: { onLoggedOut: () => v
           <button type="button" className="settings-page-row device-add-row" aria-label={t('devices.addSelf')} disabled={busy} onClick={() => setSelfSheet(true)}><span className="device-action-copy"><strong>{t('devices.addSelf')}</strong><small>{t('devices.addSelfAddress', { origin: currentOrigin })}</small></span><span className="settings-page-chevron" aria-hidden="true">›</span></button>
         </div>}
       </div>
+      </>}
     </section>
     <section className="device-settings-group" aria-labelledby="device-origin-title">
       <h2 id="device-origin-title">{t('devices.accessSection')}</h2>
       <div className="settings-page-list device-policy-list">
         <div className="settings-page-row device-policy-row">
           <div className="device-policy-copy"><strong>{t('devices.originProtectionStatus')}</strong><span className={trustedOriginEnabled ? 'device-policy-enabled' : 'device-policy-disabled'}>{t(trustedOriginEnabled ? 'devices.policyEnabled' : 'devices.policyDisabled')}</span></div>
-          <button type="button" className="device-policy-help" aria-label={t('devices.originProtectionInfo')} onClick={() => setPolicyHelp('origin')}>?</button>
+          {trustedOriginEnabled
+            ? <button type="button" className="device-policy-help" aria-label={t('devices.originProtectionInfo')} onClick={() => setPolicyHelp('origin')}>?</button>
+            : <button type="button" className="fontbtn device-policy-enable" disabled={busy} onClick={() => { void enableOriginProtection(); }}>{t(busy ? 'common.loading' : 'devices.enableOriginProtection')}</button>}
         </div>
       </div>
-      {!trustedOriginEnabled && <p className="settings-detail-note">{t('devices.originProtectionDisabledHint')}</p>}
+      {!trustedOriginEnabled && <p className="settings-detail-note device-policy-warning">{t('devices.originProtectionEnableWarning')}</p>}
+      {trustedOriginEnabled && <>
       <div className="settings-page-list device-origin-list">
         <div className="settings-page-row device-origin-row">
           <span className="device-origin-label"><b>{t('devices.publicUrlLabel')}</b> <button type="button" className="device-origin-help" aria-label={t('devices.publicUrlInfo')} onClick={() => setOriginHelp('public')}>?</button></span>
@@ -451,6 +462,7 @@ export default function DeviceManagement({ onLoggedOut }: { onLoggedOut: () => v
             <button type="button" className="device-origin-remove" aria-label={`${t('common.delete')} ${origin}`} disabled={originBusy} onClick={() => { void removeTrustedOrigin(origin); }}>{t('common.delete')}</button>
         </div>)}
       </div>
+      </>}
     </section>
     {error && <div className="device-feedback"><p role="alert">{error}</p><button type="button" disabled={loading} onClick={() => { void load(); }}>{t('common.retry')}</button></div>}
     {selected && <DeviceDetail key={selected.id} device={selected} current={selected.id === data?.currentDeviceId} now={now} onClose={() => setSelected(null)} onChanged={() => { void load(); }} onLoggedOut={onLoggedOut} />}
