@@ -42,7 +42,7 @@ import { useBrowser } from './hooks/useBrowser.js';
 import { browserEntryStatus } from './browserState.js';
 import { usePollingLoop } from './hooks/usePollingLoop.js';
 import { useServerConfig } from './hooks/useServerConfig.js';
-import { authHandled } from './authGuard.js';
+import { authHandled, authPromptAfterFailure } from './authGuard.js';
 import {
   clearPaneConversationIdentities,
   currentPaneAgent,
@@ -78,8 +78,9 @@ import {
 import PaneSurfaceHost from './components/PaneSurfaceHost.jsx';
 import TokenPrompt from './components/TokenPrompt.jsx';
 import DevicePairingPrompt from './components/DevicePairingPrompt.js';
+import OriginRejectedPrompt from './components/OriginRejectedPrompt.js';
 import DeviceLogoutDialog from './components/DeviceLogoutDialog.js';
-import { hasAuthenticatedSession, hasDeviceSession, isDeviceAuth, isFixedTokenEnabled, logoutDevice } from './authSession.js';
+import { applyAuthStatus, authRequest, AuthRequestError, hasAuthenticatedSession, hasDeviceSession, isDeviceAuth, isTokenEnabled, logoutDevice } from './authSession.js';
 import Settings from './components/Settings.jsx';
 import WorkspaceRestoreDialog from './components/WorkspaceRestoreDialog.jsx';
 import UsagePage from './components/UsagePage.jsx';
@@ -285,7 +286,12 @@ export default function App() {
   const terminalStream = typeof window !== 'undefined'
     && terminalStreamEnabled(window.location, terminalTransport);
   const [needToken, setNeedToken] = useState(!hasAuthenticatedSession());
-  const [authPrompt, setAuthPrompt] = useState<'device' | 'token'>('device');
+  // Token is always the first factor. A saved value still has to be
+  // presented to the auth authority before the trusted-device check; never
+  // let the pairing screen become an implicit Token-only login path.
+  const [authPrompt, setAuthPrompt] = useState<'device' | 'token' | 'origin'>('token');
+  const [tokenCheckBusy, setTokenCheckBusy] = useState(false);
+  const [tokenCheckError, setTokenCheckError] = useState('');
   const [logoutConfirm, setLogoutConfirm] = useState(false);
   const [logoutBusy, setLogoutBusy] = useState(false);
   const [logoutError, setLogoutError] = useState('');
@@ -484,7 +490,37 @@ export default function App() {
   const recoveryContextRef = useRef<RecoveryContext | null>(null);
   const drawerMenuRef = useRef<HTMLButtonElement | null>(null);
 
-  const onAuthFail = useCallback(() => setNeedToken(true), []);
+  const onAuthFail = useCallback((error?: unknown) => {
+    setNeedToken(true);
+    setAuthPrompt((current) => authPromptAfterFailure(current, error));
+  }, []);
+  const retryOrigin = useCallback(() => {
+    // /api/auth/status is intentionally available as a bootstrap endpoint even for an untrusted
+    // origin. Reload so the first business request re-checks the origin after the user registers it.
+    window.location.reload();
+  }, []);
+  const validateToken = useCallback(() => {
+    setTokenCheckBusy(true);
+    setTokenCheckError('');
+    void authRequest().then((status) => {
+      applyAuthStatus(status);
+      // A valid Token may complete both factors when this browser already has a
+      // live device cookie. Skip mounting the pairing screen in that case; doing
+      // so avoids a transient auth view while the business requests resume.
+      if (status.authenticated) {
+        // The explicit pairing flow is complete. Future auth failures must start at the
+        // Token factor; reopening DevicePairingPrompt here would see this same live session
+        // and immediately sign back in, causing a business-page ↔ auth-page loop.
+        setAuthPrompt('token');
+        setNeedToken(false);
+        setBooting(true);
+      } else if (status.tokenAuthenticated === true || status.mode === 'token') setAuthPrompt('device');
+      else setTokenCheckError(t('auth.tokenInvalid'));
+    }).catch((error: unknown) => {
+      setTokenCheckError(error instanceof AuthRequestError && error.code === 'AUTH_ORIGIN_REJECTED'
+        ? t('auth.originRejected') : t('auth.connectionError'));
+    }).finally(() => setTokenCheckBusy(false));
+  }, []);
   const {
     enqueueInput: enqueueTerminalInput,
     enqueueKeys: enqueueTerminalKeys,
@@ -1137,9 +1173,8 @@ export default function App() {
     }
   }, [manageWindow, current, onAuthFail]);
 
-  // Short-tap the topbar session name → open the drawer; long-press still renames it. The shared
-  // gesture helper swallows the synthetic click after a long-press so the two actions cannot chain.
-  const sessionNameLongPress = useLongPress<HTMLButtonElement>(() => {
+  // Long-press the topbar session name → rename it (a plain tap is inert, as before).
+  const sessionNameLongPress = useLongPress(() => {
     if (current?.session) setRenameTarget({ kind: 'session', id: current.session.id, name: current.session.name });
   });
 
@@ -2401,8 +2436,16 @@ export default function App() {
   });
 
   if (needToken) {
-    if (authPrompt === 'token' && isFixedTokenEnabled()) return <TokenPrompt onSaved={() => { setNeedToken(false); setBooting(true); }} onSwitch={() => setAuthPrompt('device')} />;
-    return <DevicePairingPrompt onSaved={() => { setNeedToken(false); setBooting(true); }} {...(isFixedTokenEnabled() ? { onSwitch: () => setAuthPrompt('token') } : {})} />;
+    if (authPrompt === 'origin') return <OriginRejectedPrompt onRetry={retryOrigin} onAuthorize={() => setAuthPrompt('device')} />;
+    if (authPrompt === 'token' && isTokenEnabled()) {
+      return <TokenPrompt onSaved={validateToken} error={tokenCheckError} busy={tokenCheckBusy} />;
+    }
+    return <DevicePairingPrompt onSaved={() => {
+      // The explicit pairing flow is complete. Keep future recovery on the Token-first entry point.
+      setAuthPrompt('token');
+      setNeedToken(false);
+      setBooting(true);
+    }} />;
   }
 
   const inboxList = inboxRows(states, seen, readTs == null ? Infinity : readTs);
@@ -2494,16 +2537,8 @@ export default function App() {
         onPointerDownCapture={captureTerminalOwner}
         style={inset ? { transform: `translateY(-${inset}px)` } : undefined}>
       {rootView === 'session' && <header className="topbar">
-        <button ref={drawerMenuRef} className="hamburger" onClick={() => setDrawerOpen(true)}
-          aria-label={t('drawer.title')} aria-expanded={drawerOpen} aria-controls="session-drawer">☰</button>
-        <button type="button" className="session-name" {...sessionNameLongPress}
-          onClick={(event) => {
-            sessionNameLongPress.onClick(event);
-            if (!event.defaultPrevented) setDrawerOpen(true);
-          }}
-          aria-label={current?.session?.name ?? t('drawer.title')} aria-expanded={drawerOpen} aria-controls="session-drawer">
-          {current?.session?.name ?? '—'}
-        </button>
+        <button ref={drawerMenuRef} className="hamburger" onClick={() => setDrawerOpen(true)}>☰</button>
+        <span className="session-name" {...sessionNameLongPress}>{current?.session?.name ?? '—'}</span>
         {/* Always render so it doesn't pop in late once `current` loads — just disable until ready. */}
         <button className="topbar-icon" onClick={() => setIdeaOpen(true)} aria-label={t('app.ideas')} title={t('app.ideas')}
           disabled={!current}>

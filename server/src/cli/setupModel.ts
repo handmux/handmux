@@ -10,7 +10,6 @@ import type {
 } from './options.js';
 
 export interface ConnectionAnswers {
-  authMode?: 'token' | 'trusted-device';
   tunnel: Tunnel;
   lang?: string;
   name?: string;
@@ -100,10 +99,10 @@ export function findTunnelId(listJsonOut: unknown, name: string): string | null 
 // The config keys the wizard owns: everything it can set. mergeConfig wipes these from the existing config
 // before re-applying the answers, so switching a tunnel (or clearing an optional field) cleanly drops the
 // old value instead of leaving a stale field behind. Anything NOT here (staticDir, uploadExts…) is
-// preserved untouched. `token` IS owned so the Token row can pin one AND clear it back to auto — but it
-// round-trips through answersFromConfig, so a re-run that never touches the row still writes it back.
+// preserved untouched. `token` IS owned so the Token can be changed from
+// its sub-page and round-trips through answersFromConfig on every setup run.
 const WIZARD_KEYS = [
-  'lang', 'name', 'port', 'tunnel', 'token', 'authMode', 'previewDomain',
+  'lang', 'name', 'port', 'tunnel', 'token', 'previewDomain',
   'sshHost', 'remotePort', 'sshJump', 'cfHostname', 'cfTunnelName', 'publicUrl',
   'authtoken', 'cpolarRegion',
   'vapid', 'voice', 'xfyun',
@@ -115,11 +114,15 @@ export const TUNNEL_KEYS = ['sshHost', 'remotePort', 'sshJump', 'cfHostname', 'c
 // Wizard answers → the config fragment the user actually set (omit empty optional fields).
 export function configFromAnswers(a: SetupAnswers): SetupConfig {
   const cfg: SetupConfig = { tunnel: a.tunnel, port: a.port };
-  if (a.authMode) cfg.authMode = a.authMode;
   if (a.lang) cfg.lang = a.lang;
   if (a.name) cfg.name = a.name;
-  if (a.token) cfg.token = a.token;   // blank = don't pin one → the server mints a fresh token each start
+  if (a.token) cfg.token = a.token;
   if (a.previewDomain) cfg.previewDomain = a.previewDomain;
+  // Direct mode can sit behind a user-managed reverse tunnel or proxy.  Keep
+  // its public entry point in the same `publicUrl` field used by the built-in
+  // tunnel drivers so origin validation and the URL shown by `handmux start`
+  // use one source of truth.
+  if (a.tunnel === 'none' && a.publicUrl) cfg.publicUrl = a.publicUrl;
   if (a.tunnel === 'ssh') {
     cfg.sshHost = a.sshHost;
     cfg.remotePort = a.remotePort;
@@ -151,13 +154,12 @@ export function mergeConfig(existing: unknown = {}, answers: SetupAnswers): Setu
 
 // Seed the working answers from an existing config so the hub shows current values and each edit starts
 // from what's already there. A brand-new config yields safe defaults (none/LAN, port 19999).
-export function answersFromConfig(config: unknown = {}, defaultAuthMode: 'token' | 'trusted-device' = 'token'): SetupAnswers {
+export function answersFromConfig(config: unknown = {}): SetupAnswers {
   const cfg = isRecord(config) ? config : {};
   const a: SetupAnswers = {
-    authMode: cfg.authMode === 'trusted-device' ? 'trusted-device' : cfg.authMode === 'token' ? 'token' : defaultAuthMode,
     lang: optionalString(cfg.lang) || getLocale(),
     name: optionalString(cfg.name) || '',
-    token: optionalString(cfg.token) || '',   // '' = not pinned (auto each start); seeded so an untouched re-run rewrites it
+    token: optionalString(cfg.token) || '',
     previewDomain: optionalString(cfg.previewDomain) || '',
     tunnel: isTunnel(cfg.tunnel) ? cfg.tunnel : 'none',
     port: Number(cfg.port) || 19999,
@@ -231,6 +233,16 @@ export function validatePreviewDomain(v: unknown): string | undefined {
   if (!s) return undefined;
   return /^[a-z0-9-]+(\.[a-z0-9-]+)+$/i.test(s) ? undefined : t('setup.valPreviewDomain');
 }
+export function validatePublicUrl(v: unknown): string | undefined {
+  const s = String(v || '').trim();
+  if (!s) return undefined;
+  try {
+    const url = new URL(s);
+    if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password
+      || url.pathname !== '/' || url.search || url.hash) return t('setup.valPublicUrl');
+    return undefined;
+  } catch { return t('setup.valPublicUrl'); }
+}
 // VAPID subject: Apple (APNs) rejects a fake/.local domain with BadJwtToken, so require a real-looking
 // mailto:you@host.tld or an https:// URL and reject the known-bad .local. Keeps push from silently
 // failing on iOS. (Can't fully validate "real" client-side — this just catches the obvious footguns.)
@@ -241,8 +253,9 @@ export function validateContact(v: unknown): string | undefined {
   if (!wellFormed || /\.local(?:[:/]|$)/i.test(s)) return t('setup.valContact');
   return undefined;
 }
-// Access token: it rides in the phone's URL as ?token=…, so require something and reject whitespace (a space
-// would break the link). Length/charset are otherwise up to the user — a pinned token is used verbatim.
+// The Token is entered separately on the login page and is never put in
+// an address or QR code. Keep the value non-empty and whitespace-free so it
+// can be copied without ambiguity.
 export function validateToken(v: unknown): string | undefined {
   const s = String(v || '').trim();
   if (!s) return t('setup.valToken');

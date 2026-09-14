@@ -102,7 +102,16 @@ export function migrateProjectDatabase(db: DatabaseSync): number {
   db.exec('BEGIN IMMEDIATE');
   try {
     if (current === 0) db.exec(V1_SCHEMA);
-    if (current < 2) db.exec(V2_AUTH_SCHEMA);
+    if (current < 2) {
+      db.exec(V2_AUTH_SCHEMA);
+      // Public releases before trusted-device/auth-origin protection used schema 1 and
+      // allowed a valid Token from every known entry point. Preserve that behavior when
+      // upgrading an existing schema-1 database; a brand-new database (version 0) keeps
+      // the secure defaults applied by DeviceAuthService.
+      if (current === 1) {
+        db.exec("INSERT INTO auth_meta(key,value) VALUES('trusted_device_enabled','0'),('trusted_origin_enabled','0')");
+      }
+    }
     if (current < 3) db.exec('ALTER TABLE auth_devices ADD COLUMN version INTEGER NOT NULL DEFAULT 1 CHECK(version >= 1)');
     db.exec(`PRAGMA user_version = ${PROJECT_TASK_SCHEMA_VERSION}`);
     db.exec('COMMIT');

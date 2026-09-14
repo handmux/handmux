@@ -42,7 +42,8 @@ describe('browser proxy lease routes', () => {
     const app = appFor(browser);
     await asDevice(request(app).put('/leases/a'))
       .set('Host', `${browserLabelForOrigin('https://app.example')}.preview.example:8080`)
-      .send({ url: 'https://app.example/' }).expect(400);
+      .send({ url: 'https://app.example/' })
+      .expect(400, { error: 'browser preview must use a different hostname from handmux' });
     expect(browser.putLease).not.toHaveBeenCalled();
   });
   it('puts an idempotent client-owned lease and returns a bootstrap URL', async () => {

@@ -1,21 +1,18 @@
 // English catalog (the fallback locale). Keys are grouped by command/area. `{var}` placeholders are filled
 // by translate(). Keep this in lockstep with zh.js — a missing zh key silently falls back to the line here.
 export default {
-  'auth.section': 'Authentication & devices',
-  'auth.trusted': 'Trusted devices (always available)',
-  'auth.tokenDisabled': 'Fixed Token login: disabled (recommended)',
-  'auth.tokenEnabled': 'Fixed Token login: enabled (not recommended)',
-  'auth.token': 'Fixed Token login',
-  'auth.manageHint': 'Trusted device login is always available. Fixed Token login is an optional compatibility entry. Manage devices with handmux auth add/list/edit/revoke. For better transport protection, use HTTPS whenever possible.',
-  'auth.noDevices': 'No active trusted devices. Use handmux auth add to authorize a browser for access.',
-  'auth.access': 'Device authorization: open the address, then run handmux auth add on this computer to approve your browser.',
-  'auth.warning': '⚠ Note: a leaked fixed Token can be reused. Consider disabling Fixed Token login after adding a trusted device. For better credential protection, use HTTPS whenever possible.',
-  'auth.switchWarning': '⚠ Use a direct local terminal or an independent SSH session on the Handmux host, as the same OS user — never a terminal inside Handmux. Disabling fixed Token login immediately disconnects untrusted browsers without restarting. Add a trusted device through the CLI to restore access.',
-  'auth.switchConfirm': 'Confirm you are outside Handmux in a direct local terminal or independent SSH session, and apply the fixed Token login change?',
-  'auth.switchApplyConfirm': 'Confirm you are outside Handmux in a direct local terminal or independent SSH session, and apply the authentication change?',
-  'auth.switchNeedTty': 'Authentication mode changes require confirmation in a direct local terminal or independent SSH session. No service was stopped or restarted.',
+  'auth.section': 'Authentication & security',
+  'auth.trusted': 'Device protection',
+  'auth.token': 'Token login',
+  'auth.manageHint': 'Use the CLI to manage device protection and address restrictions; manage device and address lists in Web settings.',
+  'auth.noDevices': 'No active devices. Use handmux auth device add to authorize a browser for access.',
+  'auth.access': 'Device authorization: open the address, then run handmux auth device add on this computer to approve your browser.',
+  'auth.warning': '⚠ Device protection is off; Token login is currently sufficient. Run handmux auth device on to enable it.',
+  'auth.deviceDisableConfirm': 'With device protection off, the Token can be used by itself. Continue?',
+  'auth.addressDisableConfirm': 'With address restrictions off, any address can attempt access. Continue?',
   'auth.code': 'Enter the 6-digit code from your new browser',
   'auth.claimed': 'Paired. Complete device settings within 5 minutes; access starts only after saving.',
+  'auth.origin': 'Origin',
   'auth.name': 'Device name',
   'auth.expire': 'Authorization duration',
   'auth.custom': 'Custom',
@@ -143,7 +140,7 @@ export default {
   'access.pending': '(pending…)',
   'access.lan': '  📶 lan    {url}',
   'access.local': '  💻 local  {url}',
-  'access.token': '  🔑 token  {token}',
+  'access.token': '  🔑 Token login  {token}',
   'access.reachable': '  ✓ reachable',
   'access.unreachable': '  ⚠ tunnel up but {url} did not answer — check the server-side reverse proxy / DNS',
   'access.hint': '  handmux status | stop',
@@ -221,6 +218,7 @@ export default {
   'setup.askSshHost': 'ssh host (user@host[:port])',
   'setup.askRemotePort': 'remote port on the ssh host',
   'setup.askPublicUrl': 'public url — http(s):// as appropriate (blank = http://host:remotePort)',
+  'setup.askDirectPublicUrl': 'custom access URL (your own reverse tunnel or proxy; blank = local/LAN direct only)',
   'setup.natappGuide': 'Where to get the authtoken: register free at https://natapp.cn → create a tunnel → copy its authtoken (the free tier is enough to start).',
   'setup.cpolarGuide': 'Where to get the authtoken: register free at https://cpolar.com → open the dashboard → Verify → copy your authtoken.',
   'setup.askAuthtoken': 'authtoken',
@@ -236,19 +234,19 @@ export default {
   'setup.secConnection': 'Connection',
   'setup.secName': 'Name',
   'setup.secPort': 'Port',
-  'setup.secToken': 'Token',
+  'setup.secToken': 'Token login',
   'setup.secBrowser': 'Web preview',
   'setup.browserOff': 'not configured · Direct mode only',
   'setup.askBrowserDomain': 'Web preview proxy domain (blank = Direct mode only)',
   'setup.browserAbout': 'Enter a proxy domain (for example, preview.example.com) and route its wildcard subdomains to Handmux over HTTPS; leave it blank for Direct mode only.',
-  'setup.tokenAuto': 'auto · reuse existing or generate on first start',
-  'setup.tokenCustom': 'Set a custom token…',
-  'setup.tokenRandom': 'Generate a random one',
-  'setup.tokenReset': 'Use automatic token (reuse existing or generate)',
-  'setup.askToken': 'Access token — it appears in the URL you open on the phone',
-  'setup.tokenGenerated': 'New token: {token}',
-  'setup.valToken': 'enter a token',
-  'setup.valTokenSpace': 'no spaces — the token goes in a URL',
+  'setup.tokenAuto': 'saved (the Token does not rotate automatically)',
+  'setup.tokenCustom': 'Change the Token…',
+  'setup.tokenRandom': 'Generate and save a new random Token',
+  'setup.tokenReset': 'The Token does not rotate automatically',
+  'setup.askToken': 'Token — required together with a trusted device',
+  'setup.tokenGenerated': 'New Token: {token}',
+  'setup.valToken': 'enter the Token',
+  'setup.valTokenSpace': 'no spaces — enter the Token separately on the login page',
   'setup.secLanguage': 'CLI language / 命令行语言',
   'setup.secPush': 'Push',
   'setup.secVoice': 'Voice',
@@ -278,6 +276,7 @@ export default {
   'setup.valRequired': '{label} is required',
   'setup.valHost': 'enter a valid domain (e.g. myapp.example.com)',
   'setup.valPreviewDomain': 'enter only a domain, e.g. preview.example.com; do not include http://, https://, a port, or *.',
+  'setup.valPublicUrl': 'enter a complete http(s) origin such as https://handmux.example.com (no path or credentials)',
   'setup.valContact': 'use mailto:you@example.com or https://your.site (a real domain — Apple rejects fake ones)',
   'setup.sumTemp': 'temporary',
   'setup.sumFixed': 'fixed',
@@ -290,6 +289,7 @@ export default {
   'setup.connSshHost': 'SSH host',
   'setup.connRemotePort': 'Remote port',
   'setup.connPublicUrl': 'Public URL',
+  'setup.connDirectAuto': '(blank = local / LAN direct)',
   'setup.connJump': 'Jump host',
   'setup.connDomain': 'Domain',
   'setup.connRegion': 'Region',
@@ -401,10 +401,16 @@ export default {
   handmux stop | restart | status
   handmux logs [--follow] [--lines N]
   handmux push <title> <body>   notify your phone from a script (--session X · --device K · --tag T · --url U)
-  handmux auth add             authorize a browser (optional code, --name and --expire)
-  handmux auth list            list full device IDs, names, expiry and access times
-  handmux auth edit <id>       update --name and/or --expire without prompts
-  handmux auth revoke <id>     revoke a device immediately
+  handmux auth device status   show device protection status and devices
+  handmux auth device on|off   turn device protection on or off
+  handmux auth device add      interactively authorize a browser (automation uses --code, --name and --expire)
+  handmux auth device list     list full device IDs, names, expiry and access times
+  handmux auth device edit <id>   update the device name or expiry
+  handmux auth device revoke <id>  revoke a device immediately
+  handmux auth address status  show address restriction status and addresses
+  handmux auth address on|off  turn address restrictions on or off
+  handmux auth address add <origin>     add an access address
+  handmux auth address remove <origin>  remove an access address
   handmux codex [args...]       launch a Codex TUI synchronized with chat view
   handmux pi [args...]          launch Pi with its arguments unchanged
   handmux agent [list]          show supported Agent integrations

@@ -452,16 +452,18 @@ export function createTerminalStream({
         ws.close(1003, 'bad subscribe message');
         return;
       }
-      if (deviceAuth && principal && !principal.deviceId.startsWith('token_') && 'token' in message) {
+      if (deviceAuth) {
+        const origin = origins.get(ws) ?? '';
+        const tokenPrincipal = deviceAuth.service.authenticateToken?.(message.token, origin);
+        if (!tokenPrincipal) { ws.close(4001, 'unauthorized'); return; }
+        // Trusted-device protection is an independent policy. When it is off,
+        // the Token principal is sufficient and becomes the socket principal.
+        if (!principal && deviceAuth.service.trustedDeviceEnabled === false) {
+          principal = tokenPrincipal;
+        }
+        if (!principal || !stillAuthorized()) { ws.close(4001, 'unauthorized'); return; }
+      } else if (!tokenEquals(message.token ?? '', token)) {
         ws.close(4001, 'unauthorized'); return;
-      }
-      if (deviceAuth && !principal) {
-        principal = deviceAuth.service.authenticateToken?.(message.token, origins.get(ws) ?? '') ?? undefined;
-        if (principal) principals.set(ws, principal);
-      }
-      if (deviceAuth ? !stillAuthorized() : !tokenEquals(message.token ?? '', token)) {
-        ws.close(4001, 'unauthorized');
-        return;
       }
       authenticating = true;
       cancelSubscribeDeadline();
