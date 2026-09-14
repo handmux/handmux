@@ -371,6 +371,17 @@ export default function DeviceManagement({ onLoggedOut }: { onLoggedOut: () => v
   const previewOrigin = data.previewDomain?.trim() || null;
   const trustedDeviceEnabled = data.trustedDeviceEnabled !== false;
   const trustedOriginEnabled = data.trustedOriginEnabled !== false;
+  const enableDeviceProtection = async () => {
+    if (busy) return;
+    setBusy(true); setError('');
+    try {
+      await authRequest('/api/auth/pairing', 'POST');
+      await api.addSelf(selfName, selfExpire === 'custom' ? selfCustom : selfExpire);
+      await api.enableTrustedDevice();
+      const status = await authRequest(); applyAuthStatus(status);
+      await load();
+    } catch (e) { setError(deviceErrorCopy(e)); } finally { setBusy(false); }
+  };
   const removeTrustedOrigin = async (value: string) => {
     if (originBusy) return;
     setOriginBusy(true); setError('');
@@ -391,10 +402,12 @@ export default function DeviceManagement({ onLoggedOut }: { onLoggedOut: () => v
       <div className="settings-page-list device-policy-list">
         <div className="settings-page-row device-policy-row">
           <div className="device-policy-copy"><strong>{t('devices.deviceProtectionStatus')}</strong><span className={trustedDeviceEnabled ? 'device-policy-enabled' : 'device-policy-disabled'}>{t(trustedDeviceEnabled ? 'devices.policyEnabled' : 'devices.policyDisabled')}</span></div>
-          <button type="button" className="device-policy-help" aria-label={t('devices.deviceProtectionInfo')} onClick={() => setPolicyHelp('device')}>?</button>
+          {trustedDeviceEnabled
+            ? <button type="button" className="device-policy-help" aria-label={t('devices.deviceProtectionInfo')} onClick={() => setPolicyHelp('device')}>?</button>
+            : <button type="button" className="fontbtn device-policy-enable" disabled={busy} onClick={() => { void enableDeviceProtection(); }}>{t(busy ? 'common.loading' : 'devices.enableProtection')}</button>}
         </div>
       </div>
-      {!trustedDeviceEnabled && <p className="settings-detail-note">{t('devices.deviceProtectionDisabledHint')}</p>}
+      {!trustedDeviceEnabled && <p className="settings-detail-note device-policy-warning">{t('devices.deviceProtectionEnableWarning')}</p>}
       {!showingHistory && data.currentDeviceId && <button type="button" className="device-authorize-other" aria-label={t('devices.authorizeOther')} disabled={busy} onClick={() => setAdding(true)}>{t('devices.authorizeOther')}</button>}
       <h3 id="device-list-title">{t('devices.listTitle')}</h3>
       <div className="device-tabs" role="tablist" aria-label={t('devices.title')}>

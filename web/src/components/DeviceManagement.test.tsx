@@ -32,6 +32,20 @@ describe('compact device management', () => {
     expect(screen.getByText(t('devices.addSelfAddress', { origin: window.location.origin }))).toBeTruthy();
   });
 
+  it('shows a single enable action and the access warning when device protection is off', async () => {
+    vi.mocked(api.list).mockResolvedValue({ devices: [], currentDeviceId: null, trustedDeviceEnabled: false, serverTime: now });
+    vi.spyOn(api, 'addSelf').mockResolvedValue({ device: current, serverTime: now });
+    const enable = vi.spyOn(api, 'enableTrustedDevice').mockResolvedValue({ trustedDeviceEnabled: true, currentDeviceId: current.id, serverTime: now });
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({ mode: 'trusted-device', authenticated: true, currentDeviceId: current.id, serverTime: now }) }));
+    render(<DeviceManagement onLoggedOut={vi.fn()} />); await flush();
+    expect(screen.getByText(t('devices.policyDisabled'))).toBeTruthy();
+    expect(screen.getByRole('button', { name: t('devices.enableProtection') })).toBeTruthy();
+    expect(screen.getByText(t('devices.deviceProtectionEnableWarning'))).toBeTruthy();
+    expect(screen.queryByRole('button', { name: t('devices.deviceProtectionInfo') })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: t('devices.enableProtection') })); await flush();
+    expect(enable).toHaveBeenCalled();
+  });
+
   it('checks active devices and confirms before deleting an extra trusted domain', async () => {
     const origin = 'https://phone.example.com';
     vi.mocked(api.list).mockResolvedValue({ devices: [other], currentDeviceId: current.id, trustedOrigins: [origin], serverTime: now });

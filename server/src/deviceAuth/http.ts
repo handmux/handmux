@@ -147,6 +147,16 @@ export function createDeviceAuthRouter({ service, resolveOrigin, resolvePublicUr
     if (result.secret) setPairingCookie(res, origin, `${pairingCookieName(origin)}_${result.pairing.id.slice(5)}`, result.secret);
     res.json({ mode: service.mode, tokenEnabled: true, tokenAuthenticated: true, trustedDeviceEnabled: service.trustedDeviceEnabled, trustedOriginEnabled: service.trustedOriginEnabled, originTrusted: res.locals.authOriginTrusted !== false, requiresTrustedDevice: true, currentDeviceId: null, authenticated: false, pairing: result.pairing, serverTime: Date.now() });
   }));
+  // Enabling protection is safe to offer in the Web UI only after the current browser
+  // has been registered as a device. Disabling remains a CLI-only operation.
+  router.post('/device-protection/enable', safe((req, res) => {
+    const origin = String(res.locals.authOrigin);
+    if (!tokenPrincipal(req, origin)) throw new DeviceAuthError('TOKEN_REQUIRED', 'Enter the Token before enabling device protection', 401);
+    const device = service.authenticateRequest(req, origin);
+    if (!device || service.isTokenPrincipal(device)) throw new DeviceAuthError('DEVICE_REQUIRED', 'Register this browser before enabling device protection', 409);
+    service.setTrustedDeviceEnabled(true);
+    res.json({ mode: service.mode, tokenEnabled: true, trustedDeviceEnabled: service.trustedDeviceEnabled, trustedOriginEnabled: service.trustedOriginEnabled, currentDeviceId: device.deviceId, authenticated: true, serverTime: Date.now() });
+  }));
   router.delete('/pairing', safe((req, res) => {
     const origin = String(res.locals.authOrigin);
     const id = typeof req.body?.id === 'string' ? req.body.id : '';

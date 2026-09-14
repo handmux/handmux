@@ -325,6 +325,8 @@ button.settings-page-row:disabled, .settings-page-row.disabled { color: rgba(235
 .device-policy-enabled, .device-policy-disabled { font-size: 12px; }
 .device-policy-enabled { color: var(--green, #65d38b); }
 .device-policy-disabled { color: #e6be70; }
+.device-policy-enable { flex: none; min-height: 40px; padding: 0 12px; }
+.device-policy-warning { margin: 0 4px; color: rgba(235,235,245,.62); }
 .device-policy-help { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; padding: 0; border: 1px solid rgba(235,235,245,.36); border-radius: 50%; background: transparent; color: rgba(235,235,245,.62); font: 13px/1 -apple-system, system-ui, sans-serif; }
 .device-row { gap: 12px; min-height: 64px; }
 .device-action-list { margin-top: 8px; }
