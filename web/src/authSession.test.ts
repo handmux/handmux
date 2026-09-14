@@ -81,4 +81,11 @@ describe('device authentication transport', () => {
     await expect(authRequest()).resolves.toMatchObject({ currentDeviceId: 'dev_test' });
     expect(fetcher).toHaveBeenCalledTimes(2);
   });
+
+  it('normalizes a candidate-only status when the formal cookie is still absent', async () => {
+    const candidate = { mode: 'trusted-device' as const, authenticated: true, tokenAuthenticated: false, currentDeviceId: null, tokenEnabled: true, serverTime: Date.now() };
+    const fetcher = vi.fn().mockResolvedValueOnce(json(candidate)).mockResolvedValueOnce(json(candidate));
+    vi.stubGlobal('fetch', fetcher);
+    await expect(authRequest()).resolves.toMatchObject({ authenticated: false, currentDeviceId: null, tokenAuthenticated: false });
+  });
 });

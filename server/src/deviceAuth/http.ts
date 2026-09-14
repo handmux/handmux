@@ -82,6 +82,7 @@ export function createDeviceAuthRouter({ service, resolveOrigin }: {
     let secret = readSessionSecret(req, origin);
     let principal = service.authenticateRequest(req, origin);
     const formalPrincipal = principal;
+    const token = tokenPrincipal(req, origin);
     const candidate = selectCandidate(req, origin);
     // A late anonymous POST may overwrite only the candidate cookie, never a live session.
     // Existing primary sessions always win over another tab's pending/authorized candidate.
@@ -92,7 +93,7 @@ export function createDeviceAuthRouter({ service, resolveOrigin }: {
     // receive a formal Cookie here. It is not a confirmed primary session until a later
     // request arrives with that formal Cookie (the browser may reject Set-Cookie).
     const currentDeviceId = formalPrincipal?.deviceId ?? null;
-    res.json({ mode: service.mode, tokenEnabled: service.tokenEnabled, authenticated: !!principal || !!tokenPrincipal(req, origin), currentDeviceId, ...(pairing ? { pairing } : {}), serverTime: Date.now() });
+    res.json({ mode: service.mode, tokenEnabled: service.tokenEnabled, authenticated: !!principal || !!token, tokenAuthenticated: !!token, currentDeviceId, ...(pairing ? { pairing } : {}), serverTime: Date.now() });
   };
   const safe = (handler: (req: Request, res: Response) => void) => (req: Request, res: Response): void => {
     try { handler(req, res); } catch (error) {

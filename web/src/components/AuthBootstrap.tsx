@@ -1,37 +1,28 @@
 import { useEffect, useState, type ReactNode } from 'react';
-import { applyAuthStatus, authRequest, AuthRequestError } from '../authSession.js';
+import { applyAuthStatus, authRequest, normalizeAuthStatus } from '../authSession.js';
 import { t } from '../i18n';
 import AuthFrame from './AuthFrame.js';
-import OriginRejectedPrompt from './OriginRejectedPrompt.js';
-import DevicePairingPrompt from './DevicePairingPrompt.js';
 
-// Resolve the server's current authentication policy before mounting protected content.
+// Resolve the server's fixed mode before mounting anything that can send a saved legacy token.
 export default function AuthBootstrap({ children }: { children: ReactNode }) {
   const [ready, setReady] = useState(false);
   const [failed, setFailed] = useState(false);
-  const [errorCode, setErrorCode] = useState<string | null>(null);
   const [retry, setRetry] = useState(0);
-  const [authorizeOrigin, setAuthorizeOrigin] = useState(false);
-  const [originRejected, setOriginRejected] = useState(false);
   useEffect(() => {
     let active = true;
     setFailed(false);
-    setErrorCode(null);
-    setOriginRejected(false);
     void authRequest().then((status) => {
       if (!active) return;
-      applyAuthStatus(status);
-      if (status.originTrusted === false) { setOriginRejected(true); return; }
+      // `authenticated` also covers a pairing candidate for compatibility. Do not mount the app as
+      // logged in until a formal device cookie or an explicitly accepted fixed Token is present.
+      applyAuthStatus(normalizeAuthStatus(status));
       setReady(true);
-    }).catch((error) => { if (active) { setErrorCode(error instanceof AuthRequestError ? error.code : null); setFailed(true); } });
+    }).catch(() => { if (active) setFailed(true); });
     return () => { active = false; };
   }, [retry]);
   if (ready) return children;
-  if (authorizeOrigin) return <DevicePairingPrompt onSaved={() => { setAuthorizeOrigin(false); setReady(true); }} />;
-  if (originRejected) return <OriginRejectedPrompt onRetry={() => setRetry((value) => value + 1)} onAuthorize={() => setAuthorizeOrigin(true)} />;
-  if (failed && errorCode === 'AUTH_ORIGIN_REJECTED') return <OriginRejectedPrompt onRetry={() => setRetry((value) => value + 1)} onAuthorize={() => setAuthorizeOrigin(true)} />;
-  return <AuthFrame title={t('auth.connecting')} showHelp={false}><section className="token-prompt" aria-live="polite">
-    <p>{t(failed && errorCode === 'AUTH_ORIGIN_REJECTED' ? 'auth.originRejected' : failed ? 'auth.connectionError' : 'common.loading')}</p>
+  return <AuthFrame title={t('auth.connecting')}><section className="token-prompt" aria-live="polite">
+    <p>{t(failed ? 'auth.connectionError' : 'common.loading')}</p>
     {failed && <button onClick={() => setRetry((value) => value + 1)}>{t('auth.retry')}</button>}
   </section></AuthFrame>;
 }

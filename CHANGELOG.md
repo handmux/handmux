@@ -30,6 +30,12 @@ All notable changes to handmux. Format follows [Keep a Changelog](https://keepac
 - 修复 `handmux pi` 与 `handmux codex` 的 raw Agent 输出被 Node SQLite warning 污染的问题。
 - 修复禁用 `localStorage` 时已有可信设备 Cookie 无法打开实时终端的问题，并让设备登出确认支持返回键与点击遮罩取消。
 
+### Fixed
+
+- 修复正式设备 Cookie 未落地时浏览器被错误放行到业务界面、后续请求全部失败的问题。
+- 修复 `handmux pi` 与 `handmux codex` 的 raw Agent 输出被 Node SQLite warning 污染的问题。
+- 修复禁用 `localStorage` 时已有可信设备 Cookie 无法打开实时终端的问题，并让设备登出确认支持返回键与点击遮罩取消。
+
 ## [0.28.0] - 2026-09-11
 
 ### Added
