@@ -178,29 +178,40 @@ export async function runSetup({
         const desiredTokenEnabled = a.authMode === 'token';
         const authChanged = desiredTokenEnabled !== currentTokenEnabled;
         let authClient: Awaited<ReturnType<typeof setupAuthClient>> | undefined;
-        try {
-          if (authChanged) {
-            authClient = await setupAuthClient(home, !!running, a.authMode ?? 'trusted-device');
-            if (desiredTokenEnabled) await authClient.request({ op: 'token-enable' });
-            else {
+        let allowEmptyDisable = false;
+        if (authChanged && !desiredTokenEnabled) {
+          let devices: Array<Record<string, unknown>> = [];
+          if (running) {
+            try {
+              authClient = await setupAuthClient(home, true, a.authMode ?? 'token');
               const status = await authClient.request({ op: 'token-status' }) as { devices?: unknown[] };
-              const devices = (Array.isArray(status.devices) ? status.devices : []).filter((d) => (d as Record<string, unknown>)?.status === 'active');
-              if (!devices.length && !emptyDisableConfirmed) {
-                const phrase = await ask(text({ message: '请输入 DISABLE TOKEN 以确认' }));
-                if (phrase !== 'DISABLE TOKEN') { cancel(t('setup.exited')); return null; }
-              }
-              await authClient.request({ op: 'token-disable', allowEmpty: devices.length === 0 });
+              devices = (Array.isArray(status.devices) ? status.devices : []).filter((d) => (d as Record<string, unknown>)?.status === 'active') as Array<Record<string, unknown>>;
+            } catch (error) {
+              await authClient?.close();
+              throw error;
             }
+          } else {
+            devices = (readAuthSnapshot(home)?.devices ?? []).filter((d) => d.status === 'active');
           }
+          allowEmptyDisable = devices.length === 0;
+          if (allowEmptyDisable && !emptyDisableConfirmed) {
+            const phrase = await ask(text({ message: '请输入 DISABLE TOKEN 以确认' }));
+            if (phrase !== 'DISABLE TOKEN') { await authClient?.close(); cancel(t('setup.exited')); return null; }
+          }
+        }
+        const hadConfig = fs.existsSync(target);
+        try {
+          new PrivateStateStore(target).write(cfg);
+          if (authChanged) {
+            authClient ??= await setupAuthClient(home, !!running, a.authMode ?? 'trusted-device');
+            await authClient.request(desiredTokenEnabled ? { op: 'token-enable' } : { op: 'token-disable', allowEmpty: allowEmptyDisable });
+          }
+        } catch (error) {
           try {
-            new PrivateStateStore(target).write(cfg);
-          } catch (error) {
-            if (authClient) {
-              try { await authClient.request(currentTokenEnabled ? { op: 'token-enable' } : { op: 'token-disable', allowEmpty: true }); }
-              catch { /* preserve the write error; startup will re-read the durable auth state */ }
-            }
-            throw error;
-          }
+            if (hadConfig) new PrivateStateStore(target).write(existing);
+            else new PrivateStateStore(target).remove();
+          } catch { /* preserve the original failure; the config may need manual recovery */ }
+          throw error;
         } finally {
           await authClient?.close();
         }
