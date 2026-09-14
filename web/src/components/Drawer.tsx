@@ -49,7 +49,7 @@ export default function Drawer({
   const [orphOpen, setOrphOpen] = useState(false);
   return (
     <>
-      <div className={`drawer ${open ? 'open' : ''}`}>
+      <div id="session-drawer" className={`drawer ${open ? 'open' : ''}`}>
         <div className="drawer-list">
           {projectTaskBeta && (
             <div className="project-root-switch" role="group">
@@ -57,7 +57,7 @@ export default function Drawer({
               <button type="button" aria-pressed="true">{t('project.root.sessions')}</button>
             </div>
           )}
-          <div className="drawer-title">SESSIONS</div>
+          <div className="drawer-title">{t('drawer.title').toUpperCase()}</div>
           {bound.length === 0 && <div className="drawer-empty">{t('drawer.empty')}</div>}
           {bound.map((name) => (
             <div

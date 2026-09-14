@@ -4,6 +4,10 @@ All notable changes to handmux. Format follows [Keep a Changelog](https://keepac
 
 ## [Unreleased]
 
+### Changed
+
+- 增大左上角会话菜单的触控区域；点击当前会话标题也可打开 session 列表，长按标题仍用于重命名。
+
 ### Added
 
 - 新增可信设备登录：通过 CLI 或已有可信设备授权浏览器，按设备设置名称、有效期并单独撤销。可信设备登录始终可用；固定 Token 登录作为兼容入口，新安装默认禁用，旧安装保留原有状态。Web 可添加本机为可信设备并即时禁用固定 Token 登录，重新启用仅支持 CLI。

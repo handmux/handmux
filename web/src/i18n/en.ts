@@ -233,6 +233,7 @@ export default {
   'home.empty': 'No files opened yet',
   'home.emptyHint': 'Switch to "New" to pick one',
   'home.remove': 'Remove',
+  'drawer.title': 'Sessions',
   'drawer.empty': 'No sessions bound yet',
   'drawer.unbind': 'Unbind',
   'drawer.bind': 'Bind session',

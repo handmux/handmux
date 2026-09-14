@@ -178,7 +178,7 @@ vi.mock('./hooks/useOverlayActivity.js', async () => {
   };
 });
 vi.mock('./hooks/usePageScrollLock.js', () => ({ usePageScrollLock: () => {} }));
-vi.mock('./hooks/useLongPress.js', () => ({ useLongPress: () => ({}) }));
+vi.mock('./hooks/useLongPress.js', () => ({ useLongPress: () => ({ onClick: () => {} }) }));
 vi.mock('./desktopInput.js', () => ({
   desktopInputEnvironment: () => true,
   getKeyboardMode: () => 'auto',
@@ -1085,6 +1085,31 @@ describe('App window switching', () => {
 });
 
 describe('App workspace recovery', () => {
+  it('opens the session drawer from either the hamburger or the session title', async () => {
+    localStorage.setItem('tw_bound', JSON.stringify(['current']));
+    api.getSessions.mockResolvedValue([{ id: '$7', name: 'current' }]);
+    api.getWindows.mockResolvedValue([{ id: '@7', name: 'main', active: true, panes: 1 }]);
+    api.getPanes.mockResolvedValue([{ id: '%7', active: true, width: 80, height: 24, command: 'bash', cwd: '/' }]);
+    const { container } = await renderApp();
+    const menu = requiredElement<HTMLButtonElement>(container, '.hamburger');
+    const title = requiredElement<HTMLButtonElement>(container, '.session-name');
+
+    expect(title.getAttribute('aria-expanded')).toBe('false');
+    fireEvent.pointerDown(title, { clientX: 10, clientY: 10 });
+    fireEvent.pointerUp(title);
+    fireEvent.click(title);
+    await flush();
+    expect(requiredElement(container, '.drawer').classList.contains('open')).toBe(true);
+    expect(title.getAttribute('aria-expanded')).toBe('true');
+
+    fireEvent.click(container.querySelector('.drawer-backdrop')!);
+    await flush();
+    expect(requiredElement(container, '.drawer').classList.contains('open')).toBe(false);
+    fireEvent.click(menu);
+    await flush();
+    expect(requiredElement(container, '.drawer').classList.contains('open')).toBe(true);
+  });
+
   it('shows only a Drawer card when tmux already has a live session', async () => {
     api.getSessions.mockResolvedValue([{ id: '$7', name: 'current' }]);
     api.getWorkspaceRestorePlan.mockResolvedValue(activePlan());
