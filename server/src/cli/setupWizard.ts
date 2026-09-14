@@ -123,7 +123,7 @@ export async function runSetup({
         a.lang = await editLanguage(a);
         note(t('setup.welcome'));
         a = await editConnection(a, { home, log });
-        a.authMode = await editAuth(a, { home, running });
+        a.authMode = await editAuth(a, { home, running, deferRuntime: running });
         if (a.authMode === 'token') a.token = await editToken(a);
       } catch (e) { if (e !== CANCELLED) throw e; }
     }
@@ -155,6 +155,12 @@ export async function runSetup({
       }));
       if (choice === 'exit') { await rollbackAuth(); cancel(t('setup.exited')); return null; }
       if (choice === 'save' || choice === 'start') {
+        if (runtimeTokenEnabled !== undefined && (a.authMode === 'token') !== runtimeTokenEnabled) {
+          const c = await setupAuthClient(home, !!running, a.authMode ?? 'trusted-device');
+          try {
+            await c.request(a.authMode === 'token' ? { op: 'token-enable' } : { op: 'token-disable', allowEmpty: true });
+          } finally { await c.close(); }
+        }
         const cfg = mergeConfig(existing, a);
         new PrivateStateStore(target).write(cfg);
         outro(t('setup.wrote', { path: target }));
@@ -167,7 +173,7 @@ export async function runSetup({
         if (choice === 'connection') a = await editConnection(a, { home, log });
         else if (choice === 'name') a.name = await editName(a);
         else if (choice === 'port') a.port = await editPort(a);
-        else if (choice === 'auth') { a.authMode = await editAuth(a, { home, running }); if (a.authMode === 'token') a.token = await editToken(a); }
+        else if (choice === 'auth') { a.authMode = await editAuth(a, { home, running, deferRuntime: running }); if (a.authMode === 'token') a.token = await editToken(a); }
         else if (choice === 'browser') a.previewDomain = await editBrowserDomain(a);
         else if (choice === 'language') a.lang = await editLanguage(a);
         else if (choice === 'push') {
@@ -209,7 +215,7 @@ async function setupAuthClient(home: string, running: boolean, mode: 'token' | '
   };
 }
 
-async function editAuth(a: SetupAnswers, ctx?: { home?: string; running?: boolean; current?: boolean }): Promise<'token' | 'trusted-device'> {
+async function editAuth(a: SetupAnswers, ctx?: { home?: string; running?: boolean; current?: boolean; deferRuntime?: boolean }): Promise<'token' | 'trusted-device'> {
   note(t('auth.manageHint'));
   const next = await ask(select({ message: withBack(t('auth.section')), initialValue: a.authMode ?? 'trusted-device', options: [
     { value: 'trusted-device' as const, label: t('auth.tokenDisabled') },
@@ -219,7 +225,7 @@ async function editAuth(a: SetupAnswers, ctx?: { home?: string; running?: boolea
     note(tokenWarning(t('auth.switchWarning')), t('auth.section'));
     if (next === 'token') note(tokenWarning(t('auth.warning')), t('auth.token'));
     if (!await ask(confirm({ message: t('auth.switchConfirm'), initialValue: false }))) return a.authMode ?? 'trusted-device';
-    if (ctx?.home) {
+    if (ctx?.home && !ctx.deferRuntime) {
       const c = await setupAuthClient(ctx.home, !!ctx.running, a.authMode ?? 'trusted-device');
       try {
         if (next === 'token') await c.request({ op: 'token-enable' });
