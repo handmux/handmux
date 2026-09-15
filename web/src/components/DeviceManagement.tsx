@@ -317,9 +317,9 @@ function AddDevice({ onClose, onAdded }: { onClose: () => void; onAdded: () => v
   </DeviceSheet>;
 }
 
-export default function DeviceManagement({ onLoggedOut }: { onLoggedOut: () => void }) {
+export default function DeviceManagement({ onLoggedOut, historyPage = false, onOpenHistory }: { onLoggedOut: () => void; historyPage?: boolean; onOpenHistory?: () => void }) {
   const [data, setData] = useState<DeviceList | null>(null); const [error, setError] = useState(''); const [loading, setLoading] = useState(false);
-  const [showHistory, setShowHistory] = useState(false); const [selected, setSelected] = useState<ManagedDevice | null>(null); const [adding, setAdding] = useState(false);
+  const [selected, setSelected] = useState<ManagedDevice | null>(null); const [adding, setAdding] = useState(false);
   const [selfSheet, setSelfSheet] = useState(false); const [selfName, setSelfName] = useState(() => {
     const ua = navigator.userAgent;
     const browser = /Edg\//.test(ua) ? 'Edge' : /Firefox\//.test(ua) ? 'Firefox' : /Chrome|CriOS/.test(ua) ? 'Chrome' : /Safari/.test(ua) ? 'Safari' : 'Browser';
@@ -351,7 +351,7 @@ export default function DeviceManagement({ onLoggedOut }: { onLoggedOut: () => v
     {error ? <div className="device-feedback"><p role="alert">{error}</p><button type="button" disabled={loading} onClick={() => { void load(); }}>{t('common.retry')}</button></div>
       : <p className="device-loading" role="status">{t('common.loading')}</p>}
   </section>;
-  const devices = data.devices.filter(d => isInactive(d, now) === showHistory).sort((a, b) => Number(b.id === data.currentDeviceId) - Number(a.id === data.currentDeviceId) || b.last_used_at - a.last_used_at);
+  const devices = data.devices.filter(d => isInactive(d, now) === historyPage).sort((a, b) => Number(b.id === data.currentDeviceId) - Number(a.id === data.currentDeviceId) || b.last_used_at - a.last_used_at);
   const addSelf = async () => {
     if (busy) return;
     setBusy(true); setError('');
@@ -369,11 +369,10 @@ export default function DeviceManagement({ onLoggedOut }: { onLoggedOut: () => v
   const previewOrigin = data.previewDomain?.trim() || null;
   const trustedDeviceEnabled = data.trustedDeviceEnabled !== false;
   const trustedOriginEnabled = data.trustedOriginEnabled !== false;
-  if (showHistory) return <section className="device-history-page" aria-labelledby="device-history-page-title">
-    <header className="device-history-page-head"><button type="button" className="settings-page-back" onClick={() => setShowHistory(false)} aria-label={t('common.back')}>‹</button><h2 id="device-history-page-title">{t('devices.historyTitle')}</h2><span /></header>
-    <div className="settings-page-content detail"><div className="settings-page-list">
+  if (historyPage) return <section className="device-history-page" aria-labelledby="device-history-page-title">
+    <div className="settings-page-list">
       {devices.length ? devices.map(d => <button className="settings-page-row device-row" key={d.id} onClick={() => setSelected(d)}><span className="device-row-copy"><span className="device-row-main"><span>{d.name}</span></span><span className="device-row-secondary"><span>{d.browser_summary}</span><span>{remainingExpiry(d, now)}</span></span></span><span className="settings-page-chevron" aria-hidden="true">›</span></button>) : <p className="device-empty" role="status">{t('devices.noHistory')}</p>}
-    </div></div>
+    </div>
     {selected && <DeviceDetail key={selected.id} device={selected} current={false} now={now} onClose={() => setSelected(null)} onChanged={() => { void load(); }} onLoggedOut={onLoggedOut} />}
   </section>;
   const enableDeviceProtection = async () => {
@@ -418,7 +417,7 @@ export default function DeviceManagement({ onLoggedOut }: { onLoggedOut: () => v
       </div>
       {trustedDeviceEnabled && <p className="settings-detail-note device-policy-enabled-note">{t('devices.deviceProtectionEnabledHint')}</p>}
       {trustedDeviceEnabled && <>
-      <div className="device-list-heading"><h3 id="device-list-title">{showHistory ? t('devices.historyTitle') : t('devices.listTitle')}</h3>{!showHistory ? <button type="button" className="device-history-link" onClick={() => setShowHistory(true)}>{t('devices.historyLink', { n: inactiveCount })}</button> : <button type="button" className="device-history-link" onClick={() => setShowHistory(false)}>{t('devices.backToActive')}</button>}</div>
+      <div className="device-list-heading"><h3 id="device-list-title">{t('devices.listTitle')}</h3>{onOpenHistory && <button type="button" className="device-history-link" onClick={onOpenHistory}>{t('devices.historyLink', { n: inactiveCount })}</button>}</div>
       <div id="device-list-panel">
         {devices.length > 0 && <div className="settings-page-list">
           {devices.map(d => <button className="settings-page-row device-row" key={d.id} onClick={() => setSelected(d)}>
@@ -426,11 +425,11 @@ export default function DeviceManagement({ onLoggedOut }: { onLoggedOut: () => v
               <span className="device-row-secondary"><span>{d.browser_summary}</span><span>{remainingExpiry(d, now)}</span></span></span><span className="settings-page-chevron" aria-hidden="true">›</span>
           </button>)}
         </div>}
-        {devices.length === 0 && <p className="device-empty" role="status">{t(showHistory ? 'devices.noHistory' : 'devices.noActive')}</p>}
-        {!showHistory && !data.currentDeviceId && <div className="settings-page-list device-action-list">
+        {devices.length === 0 && <p className="device-empty" role="status">{t('devices.noActive')}</p>}
+        {!historyPage && !data.currentDeviceId && <div className="settings-page-list device-action-list">
           <button type="button" className="settings-page-row device-add-row" aria-label={t('devices.addSelf')} disabled={busy} onClick={() => setSelfSheet(true)}><span className="device-action-copy"><strong>{t('devices.addSelf')}</strong><small>{t('devices.addSelfAddress', { origin: currentOrigin })}</small></span><span className="settings-page-chevron" aria-hidden="true">›</span></button>
         </div>}
-        {!showHistory && data.currentDeviceId && <button type="button" className="device-authorize-other" aria-label={t('devices.authorizeOther')} disabled={busy} onClick={() => setAdding(true)}>{t('devices.authorizeOther')}</button>}
+        {!historyPage && data.currentDeviceId && <button type="button" className="device-authorize-other" aria-label={t('devices.authorizeOther')} disabled={busy} onClick={() => setAdding(true)}>{t('devices.authorizeOther')}</button>}
       </div>
       </>}
     </section>

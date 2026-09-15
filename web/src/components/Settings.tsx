@@ -24,7 +24,7 @@ import type {
 } from '../agentIntegrationApi.js';
 
 type DetailPage = 'language' | 'terminalFont' | 'conversationFont'
-  | 'keyboard' | 'transport' | 'tone' | 'feedback' | 'script' | 'devices';
+  | 'keyboard' | 'transport' | 'tone' | 'feedback' | 'script' | 'devices' | 'deviceHistory';
 type SettingsPage = 'root' | DetailPage;
 type ChatTone = 'dusk' | 'ink' | 'light';
 type KeyboardMode = 'auto' | 'mobile' | 'desktop';
@@ -96,6 +96,7 @@ const DETAIL_TITLE: Record<DetailPage, string> = {
   feedback: 'settings.feedback',
   script: 'settings.script_push',
   devices: 'devices.title',
+  deviceHistory: 'devices.historyTitle',
 };
 
 function SettingsHeader({ title, onBack }: { title: string; onBack: () => void }) {
@@ -674,7 +675,8 @@ export default function Settings({ open, onClose, termRef, onOpenChangelog = () 
       </>
     ),
     script: <PushScriptContent pushKey={scriptPushKey} notifyOn={notify} />,
-    devices: <DeviceManagement onLoggedOut={onDeviceLoggedOut} />,
+    devices: <DeviceManagement onLoggedOut={onDeviceLoggedOut} onOpenHistory={() => openPage('deviceHistory')} />,
+    deviceHistory: <DeviceManagement onLoggedOut={onDeviceLoggedOut} historyPage />,
   };
 
   return (
