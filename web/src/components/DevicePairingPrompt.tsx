@@ -9,7 +9,7 @@ const errorCopy = (error: unknown) => t(error instanceof AuthRequestError && err
     ? 'auth.tokenRequired' : error instanceof AuthRequestError && error.code === 'AUTH_ORIGIN_REJECTED'
       ? 'auth.originRejected' : 'auth.connectionError');
 
-const needsPairing = (status: AuthStatus): boolean => (status.requiresTrustedDevice === true
+const needsPairing = (status: AuthStatus): boolean => (status.mode === 'trusted-device' || status.requiresTrustedDevice === true
   || (status.trustedOriginEnabled === true && status.originTrusted === false && status.tokenAuthenticated === true))
   && !status.authenticated
   && !status.sessionPending
