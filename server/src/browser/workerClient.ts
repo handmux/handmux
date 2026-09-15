@@ -126,15 +126,16 @@ export function createBrowserWorkerClient({
     return () => { connections!.delete(stop); if (!connections!.size) deviceConnections.delete(owner); };
   };
   const revokeDevice = (deviceId: string): void => {
-    const capability = deviceBrowsers.get(deviceId);
-    deviceBrowsers.delete(deviceId);
-    if (capability) browserDevices.delete(capability);
+    const capabilities: string[] = [];
+    for (const [key, capability] of deviceBrowsers) {
+      if (key === deviceId || key.startsWith(`${deviceId}:`)) { capabilities.push(capability); deviceBrowsers.delete(key); browserDevices.delete(capability); }
+    }
     for (const stop of deviceConnections.get(deviceId) || []) stop();
     deviceConnections.delete(deviceId);
-    if (capability && port) {
+    if (capabilities.length && port) {
       // The worker blocks pending async creations as well as disposing existing leases.
       const revoke = request({ hostname: '127.0.0.1', port, method: 'POST',
-        path: `/_browser-worker/revoke/${encodeURIComponent(capability)}`,
+        path: `/_browser-worker/revoke/${encodeURIComponent(deviceId)}`,
         headers: { [BROWSER_INTERNAL_HEADER]: internalToken } }, (incoming) => incoming.resume());
       revoke.once('error', () => {});
       revoke.setTimeout?.(requestTimeoutMs, () => revoke.destroy());
@@ -372,10 +373,14 @@ export function createBrowserWorkerClient({
       if (!deviceId || !deviceAuthorization.isActive(deviceId)) return res.status(401).json({ error: 'device authorization expired' });
       const appHostname = hostname(req);
       if (appHostname) appHostnames.add(appHostname);
-      let capability = deviceBrowsers.get(deviceId);
+      // Token-only principals are shared by all browsers.  Include the browser's
+      // auth/session cookie in the profile key so separate browsers never share
+      // a website cookie jar while retaining a stable key across requests.
+      const sessionKey = `${deviceId}:${typeof req.headers.cookie === 'string' ? req.headers.cookie : ''}`;
+      let capability = deviceBrowsers.get(sessionKey);
       if (!capability) {
         capability = randomBytes(32).toString('base64url');
-        deviceBrowsers.set(deviceId, capability);
+        deviceBrowsers.set(sessionKey, capability);
         browserDevices.set(capability, deviceId);
       }
       req.headers['x-handmux-browser-device'] = capability;

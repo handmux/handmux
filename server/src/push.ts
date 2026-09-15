@@ -117,7 +117,7 @@ function parseStoredSubscription(value: unknown): StoredSubscription | null {
 let subs: StoredSubscription[] = load();
 let deviceAuthorization: ((deviceId: string) => boolean) | null = null;
 const allowed = (rec: StoredSubscription): boolean => {
-  try { return deviceAuthorization ? Boolean(rec.authDeviceId && deviceAuthorization(rec.authDeviceId)) : !rec.authDeviceId; }
+  try { return deviceAuthorization ? (!rec.authDeviceId || deviceAuthorization(rec.authDeviceId)) : !rec.authDeviceId; }
   catch { return false; }
 };
 export function setDeviceAuthorization(check: ((deviceId: string) => boolean) | null): void { deviceAuthorization = check; }
@@ -143,7 +143,7 @@ export function addSubscription(sub: unknown, boundSessions: unknown = [], prefe
   if (deviceAuthorization && (!authDeviceId || !deviceAuthorization(authDeviceId))) return false;
   const sessions = strings(boundSessions);
   const endpointRecord = subs.find((s) => s.subscription.endpoint === parsed.endpoint);
-  if (endpointRecord && endpointRecord.authDeviceId !== authDeviceId && allowed(endpointRecord)) return false;
+  if (endpointRecord && endpointRecord.authDeviceId !== authDeviceId && endpointRecord.authDeviceId && allowed(endpointRecord)) return false;
   const requestedKey = typeof preferredPushKey === 'string' && VALID_PUSH_KEY.test(preferredPushKey) ? preferredPushKey : null;
   const keyRecord = requestedKey ? subs.find((s) => s.pushKey === requestedKey && s.authDeviceId === authDeviceId) : null;
   const pushKey = authDeviceId ? keyRecord?.pushKey || (endpointRecord?.authDeviceId === authDeviceId ? endpointRecord?.pushKey : null) || genKey()
@@ -173,8 +173,10 @@ export function removeSubscription(endpoint: unknown, authDeviceId?: string): st
 // The device-addressing id (NOT an auth credential — see /api/push/send-local). Lazy-generate for
 // records stored before the feature existed so an already-subscribed device still has one.
 export function getPushKey(endpoint: unknown, authDeviceId?: string): string | null {
-  const rec = subs.find((s) => s.subscription.endpoint === endpoint && s.authDeviceId === authDeviceId && allowed(s));
+  const rec = subs.find((s) => s.subscription.endpoint === endpoint && (s.authDeviceId === authDeviceId || (!s.authDeviceId && Boolean(authDeviceId))) && allowed(s));
   if (!rec) return null;
+  // Migrate subscriptions written by 0.28 on first authenticated use.
+  if (!rec.authDeviceId && authDeviceId) { rec.authDeviceId = authDeviceId; persist(); }
   if (!rec.pushKey) { rec.pushKey = genKey(); persist(); }
   return rec.pushKey;
 }
