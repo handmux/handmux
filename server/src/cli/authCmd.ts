@@ -1,6 +1,6 @@
 import { text, select, confirm, isCancel } from '@clack/prompts';
 import { connectAuthControl } from '../deviceAuth/control.js';
-import { parseExpire, validateName } from '../deviceAuth/service.js';
+import { DeviceAuthError, parseExpire, validateName } from '../deviceAuth/service.js';
 import { t } from './i18n/index.js';
 
 type DeviceAction = 'status' | 'on' | 'off' | 'add' | 'list' | 'edit' | 'revoke';
@@ -109,14 +109,14 @@ export async function runAuthCommand({ argv, home, interactive = !!process.stdin
       log('ID\tNAME\tSTATUS\tEXPIRES\tADDED\tLAST ACCESS\tBROWSER'); log(outputDevice(result)); return 0;
     }
     log(t('auth.safety'));
-    if (!args.code) args.code = await ask(text({ message: t('auth.code'), validate: v => /^\d{6}$/.test(v ?? '') ? undefined : 'Enter exactly 6 digits' }));
+    if (!args.code) args.code = await ask(text({ message: t('auth.code'), validate: v => /^\d{6}$/.test(v ?? '') ? undefined : t('auth.codeInvalid') }));
     const claimed = await client.request({ op: 'claim', code: args.code }) as { id: string; browserSummary: string; origin?: string };
     const needsPrompt = args.name === undefined || args.expire === undefined;
     log(t('auth.claimed')); log(safeText(claimed.browserSummary));
     if (claimed.origin) log(`${t('auth.origin')}: ${safeText(claimed.origin)}`);
     if (args.name === undefined) {
       const fallback = safeText(claimed.browserSummary).slice(0, 80) || 'Browser';
-      args.name = await ask(text({ message: t('auth.name'), defaultValue: fallback, placeholder: fallback, validate: v => { try { validateName(v || fallback); } catch (e) { return (e as Error).message; } return undefined; } }));
+      args.name = await ask(text({ message: t('auth.name'), defaultValue: fallback, placeholder: fallback, validate: v => { try { validateName(v || fallback); } catch (e) { return e instanceof DeviceAuthError && e.code === 'INVALID_NAME' ? t('auth.invalidName') : (e as Error).message; } return undefined; } }));
       args.name = args.name || fallback;
     }
     if (args.expire === undefined) {
@@ -124,7 +124,7 @@ export async function runAuthCommand({ argv, home, interactive = !!process.stdin
         ...['1h', '1d', '7d', '30d'].map(value => ({ value, label: value })),
         { value: 'custom', label: t('auth.custom') }, { value: 'never', label: t('auth.never') },
       ] }));
-      args.expire = expire === 'custom' ? await ask(text({ message: t('auth.duration'), validate: v => { try { parseExpire(v); } catch (e) { return (e as Error).message; } return undefined; } })) : expire;
+      args.expire = expire === 'custom' ? await ask(text({ message: t('auth.duration'), validate: v => { try { parseExpire(v); } catch (e) { return e instanceof DeviceAuthError && e.code === 'INVALID_EXPIRE' ? t('auth.invalidDuration') : (e as Error).message; } return undefined; } })) : expire;
     }
     if (needsPrompt && !await ask(confirm({ message: t('auth.confirm'), initialValue: true }))) throw canceled;
     const result = await client.request({ op: 'authorize', id: claimed.id, name: args.name, expire: args.expire });

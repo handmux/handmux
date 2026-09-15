@@ -19,6 +19,7 @@ All notable changes to handmux. Format follows [Keep a Changelog](https://keepac
 - 修复查看历史设备时授权其他设备入口被隐藏的问题。
 - 修复 DeepSeek 欠费时负数余额被误报为不支持数据的问题，并显示厂家返回的欠费金额。
 - API 余额加载骨架屏默认只显示一个账户占位。
+- 优化可信设备 CLI 授权提示，明确目标浏览器、确认步骤和保护开关的影响。
 
 ## [0.28.0] - 2026-09-11
 
