@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const prompts = vi.hoisted(() => ({ canceled: Symbol('cancel'), text: vi.fn(), select: vi.fn(), confirm: vi.fn() }));
 vi.mock('@clack/prompts', () => ({ ...prompts, isCancel: (value: unknown) => value === prompts.canceled }));
 import { runAuthCommand } from '../src/cli/authCmd.js';
+import { AuthControlError } from '../src/deviceAuth/control.js';
 
 describe('interactive device add', () => {
   beforeEach(() => { vi.clearAllMocks(); });
@@ -58,5 +59,18 @@ describe('auth policy controls', () => {
     prompts.confirm.mockResolvedValueOnce(true);
     expect(await runAuthCommand({ argv: ['address', 'off'], home: '/unused', interactive: true, connect, log: vi.fn() })).toBe(0);
     expect(request).toHaveBeenLastCalledWith({ op: 'address-policy', enabled: false });
+  });
+});
+
+describe('authorization error copy', () => {
+  beforeEach(() => { vi.clearAllMocks(); });
+  it('localizes control-socket error codes instead of exposing internal messages', async () => {
+    const err = vi.fn();
+    const connect = vi.fn(async () => ({
+      request: vi.fn(async () => { throw new AuthControlError('CODE_INVALID', 'Code is invalid, expired, or already used'); }),
+      close: vi.fn(),
+    }));
+    expect(await runAuthCommand({ argv: ['device', 'add', '--code', '038271', '--name', 'Office', '--expire', '7d'], home: '/unused', interactive: false, connect, log: vi.fn(), err })).toBe(1);
+    expect(err).toHaveBeenCalledWith('The code is invalid, expired, or already used. Request a new code in the browser.');
   });
 });

@@ -1,5 +1,5 @@
 import { text, select, confirm, isCancel } from '@clack/prompts';
-import { connectAuthControl } from '../deviceAuth/control.js';
+import { AuthControlError, connectAuthControl } from '../deviceAuth/control.js';
 import { DeviceAuthError, parseExpire, validateName } from '../deviceAuth/service.js';
 import { t } from './i18n/index.js';
 
@@ -63,6 +63,19 @@ export function parseAuthArgs(argv: readonly string[], interactive: boolean): Au
 }
 
 const safeText = (value: unknown): string => String(value ?? '').replace(/[\x00-\x1f\x7f-\x9f]/g, '');
+const controlErrorCopy: Record<string, string> = {
+  AUTH_UNAVAILABLE: 'auth.error.unavailable', INVALID_COMMAND: 'auth.error.invalidCommand',
+  CODE_INVALID: 'auth.error.codeInvalid', CLAIM_RATE_LIMIT: 'auth.error.rateLimit',
+  PAIRING_NOT_FOUND: 'auth.error.pairingGone', PAIRING_INACTIVE: 'auth.error.pairingGone',
+  DEVICE_NOT_FOUND: 'auth.error.deviceNotFound', DEVICE_INACTIVE: 'auth.error.deviceInactive',
+  DEVICE_CONFLICT: 'auth.error.conflict', INVALID_EDIT: 'auth.error.invalidEdit',
+  INVALID_VERSION: 'auth.error.invalidVersion', PAIRING_CAPACITY: 'auth.error.pairingCapacity',
+  TOKEN_REQUIRED: 'auth.error.tokenRequired', DEVICE_REQUIRED: 'auth.error.deviceRequired',
+  DEVICE_EXPIRY_CLI_ONLY: 'auth.error.expiryCliOnly',
+  INVALID_EXPIRE: 'auth.invalidDuration', INVALID_NAME: 'auth.invalidName',
+  INVALID_ORIGIN: 'auth.error.invalidOrigin', ORIGIN_LIMIT: 'auth.error.originLimit',
+  SESSION_INVALID: 'auth.error.sessionInvalid', DEVICE_AUTH_DISABLED: 'auth.error.unavailable',
+};
 const iso = (value: unknown): string => typeof value === 'number' ? new Date(value).toISOString() : 'never';
 function outputDevice(value: unknown): string {
   const d = value as Record<string, unknown>;
@@ -131,7 +144,10 @@ export async function runAuthCommand({ argv, home, interactive = !!process.stdin
     log('ID\tNAME\tSTATUS\tEXPIRES\tADDED\tLAST ACCESS\tBROWSER'); log(outputDevice(result)); return 0;
   } catch (error) {
     if (error === canceled) err(t('auth.canceled'));
-    else err(error instanceof Error ? safeText(error.message) : 'Authentication command failed');
+    else if (error instanceof AuthControlError || error instanceof DeviceAuthError) {
+      err(t(controlErrorCopy[error.code] ?? 'auth.error.controlFailed'));
+    }
+    else err(error instanceof Error ? safeText(error.message) : t('auth.error.controlFailed'));
     return 1;
   } finally { client?.close(); }
 }

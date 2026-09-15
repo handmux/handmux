@@ -5,6 +5,9 @@ import { randomUUID } from 'node:crypto';
 import { DeviceAuthError, DeviceAuthService } from './service.js';
 
 export const authSocketPath = (home: string): string => path.join(home, '.handmux', 'auth.sock');
+export class AuthControlError extends Error {
+  constructor(readonly code: string, message: string) { super(message); this.name = 'AuthControlError'; }
+}
 export async function startDeviceAuthControl({ service, home, handlePush, handleShortcuts }: {
   service: DeviceAuthService; home: string; handlePush?: (body: unknown) => Promise<unknown>;
   handleShortcuts?: (body: unknown) => Promise<unknown> | unknown;
@@ -77,9 +80,10 @@ export async function connectAuthControl(home: string): Promise<{ request(args: 
     const newline = buffer.indexOf('\n'); if (newline < 0) return;
     const line = buffer.slice(0, newline); buffer = buffer.slice(newline + 1);
     try {
-      const out = JSON.parse(line) as { ok: boolean; result?: unknown; message?: string };
+      const out = JSON.parse(line) as { ok: boolean; result?: unknown; error?: string; message?: string };
       const p = pending; pending = undefined;
-      if (out.ok) p?.resolve(out.result); else p?.reject(new Error(out.message ?? 'Authentication command failed'));
+      if (out.ok) p?.resolve(out.result);
+      else p?.reject(new AuthControlError(out.error ?? 'AUTH_UNAVAILABLE', out.message ?? 'Authentication command unavailable; retry or restart handmux'));
     } catch { fail(new Error('Invalid handmux control response')); }
   });
   await new Promise<void>((resolve, reject) => { socket.once('connect', resolve); socket.once('error', reject); });
