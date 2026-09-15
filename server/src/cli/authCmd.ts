@@ -95,14 +95,14 @@ export async function runAuthCommand({ argv, home, interactive = !!process.stdin
     if (args.target === 'address') {
       if (args.action === 'status' || args.action === 'list') {
         const result = await client.request({ op: 'address-status' }) as { enabled: boolean; origins: string[] };
-        log(`访问地址限制: ${result.enabled ? '已开启' : '未开启'}`);
+        log(`可信地址保护: ${result.enabled ? '已开启' : '未开启'}`);
         if (!result.enabled) log(tokenWarning(t('auth.addressWarning')));
         result.origins.forEach(origin => log(origin)); return 0;
       }
       if (args.action === 'on' || args.action === 'off') {
         if (args.action === 'off' && interactive && !await ask(confirm({ message: t('auth.addressDisableConfirm'), initialValue: false }))) throw canceled;
         const result = await client.request({ op: 'address-policy', enabled: args.action === 'on' }) as { enabled: boolean };
-        log(`访问地址限制: ${result.enabled ? '已开启' : '未开启'}`); return 0;
+        log(`可信地址保护: ${result.enabled ? '已开启' : '未开启'}`); return 0;
       }
       const result = await client.request({ op: args.action === 'add' ? 'address-add' : 'address-remove', origin: args.origin }) as { origins: string[] };
       log(`访问地址: ${args.action === 'add' ? '已添加' : '已删除'}`); result.origins.forEach(origin => log(origin)); return 0;

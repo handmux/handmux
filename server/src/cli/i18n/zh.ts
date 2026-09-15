@@ -7,9 +7,9 @@ export default {
   'auth.noDevices': '还没有已授权设备。请在目标浏览器打开 Handmux，再在这台电脑运行 handmux auth device add。',
   'auth.access': '设备授权：先在目标浏览器打开 Handmux，再在这台电脑运行 handmux auth device add，并按提示确认。',
   'auth.warning': '⚠ 可信设备保护未开启：当前只凭 Token 即可访问，建议运行 handmux auth device on 开启。',
-  'auth.addressWarning': '⚠ 可信地址限制未开启：任何地址都可以尝试连接，建议运行 handmux auth address on 开启。',
+  'auth.addressWarning': '⚠ 可信地址保护未开启：任何地址都可以尝试连接，建议运行 handmux auth address on 开启。',
   'auth.deviceDisableConfirm': '⚠ 关闭可信设备保护会增加安全风险：之后只需 Token 即可访问。确认要关闭吗？',
-  'auth.addressDisableConfirm': '⚠ 关闭可信地址限制会增加安全风险：任何地址都可以尝试连接。确认要关闭吗？',
+  'auth.addressDisableConfirm': '⚠ 关闭可信地址保护会增加安全风险：任何地址都可以尝试连接。确认要关闭吗？',
   'auth.code': '请输入目标浏览器显示的 6 位验证码',
   'auth.codeInvalid': '请输入正好 6 位数字。',
   'auth.claimed': '已找到这次授权申请。请在 5 分钟内设置设备名称和有效期，确认后浏览器才能登录。',
@@ -428,8 +428,8 @@ export default {
   handmux auth device list     列出完整设备 ID、名称、有效期和访问时间
   handmux auth device edit <id>   修改设备名称或有效期
   handmux auth device revoke <id>  立即撤销指定设备
-  handmux auth address status  查看访问地址限制状态和地址列表
-  handmux auth address on|off  开启或关闭访问地址限制
+  handmux auth address status  查看可信地址保护状态和地址列表
+  handmux auth address on|off  开启或关闭可信地址保护
   handmux auth address add <origin>     添加访问地址
   handmux auth address remove <origin>  删除访问地址
   handmux codex [参数...]      启动与对话视图同步的 Codex TUI

@@ -8,9 +8,9 @@ export default {
   'auth.noDevices': 'No devices are authorized yet. Open Handmux in the target browser, then run handmux auth device add on this computer.',
   'auth.access': 'Device authorization: open Handmux in the target browser, then run handmux auth device add here and follow the prompts.',
   'auth.warning': '⚠ Trusted device protection is off: a Token alone is enough to access Handmux. We recommend running handmux auth device on to enable it.',
-  'auth.addressWarning': '⚠ Trusted access-address restriction is off: any address can attempt to connect. We recommend running handmux auth address on to enable it.',
+  'auth.addressWarning': '⚠ Trusted address protection is off: any address can attempt to connect. We recommend running handmux auth address on to enable it.',
   'auth.deviceDisableConfirm': '⚠ Turning off trusted device protection increases security risk: a Token alone will grant access. Confirm you want to turn it off?',
-  'auth.addressDisableConfirm': '⚠ Turning off trusted access-address restriction increases security risk: any address can attempt to connect. Confirm you want to turn it off?',
+  'auth.addressDisableConfirm': '⚠ Turning off trusted address protection increases security risk: any address can attempt to connect. Confirm you want to turn it off?',
   'auth.code': 'Enter the 6-digit code shown in the target browser',
   'auth.codeInvalid': 'Enter exactly 6 digits.',
   'auth.claimed': 'The authorization request was found. Set a device name and duration within 5 minutes; the browser can sign in after you confirm.',
@@ -429,8 +429,8 @@ export default {
   handmux auth device list     list full device IDs, names, expiry and access times
   handmux auth device edit <id>   update the device name or expiry
   handmux auth device revoke <id>  revoke a device immediately
-  handmux auth address status  show address restriction status and addresses
-  handmux auth address on|off  turn address restrictions on or off
+  handmux auth address status  show trusted address protection status and addresses
+  handmux auth address on|off  turn trusted address protection on or off
   handmux auth address add <origin>     add an access address
   handmux auth address remove <origin>  remove an access address
   handmux codex [args...]       launch a Codex TUI synchronized with chat view
