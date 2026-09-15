@@ -369,6 +369,13 @@ export default function DeviceManagement({ onLoggedOut }: { onLoggedOut: () => v
   const previewOrigin = data.previewDomain?.trim() || null;
   const trustedDeviceEnabled = data.trustedDeviceEnabled !== false;
   const trustedOriginEnabled = data.trustedOriginEnabled !== false;
+  if (showHistory) return <section className="device-history-page" aria-labelledby="device-history-page-title">
+    <header className="device-history-page-head"><button type="button" className="settings-page-back" onClick={() => setShowHistory(false)} aria-label={t('common.back')}>‹</button><h2 id="device-history-page-title">{t('devices.historyTitle')}</h2><span /></header>
+    <div className="settings-page-content detail"><div className="settings-page-list">
+      {devices.length ? devices.map(d => <button className="settings-page-row device-row" key={d.id} onClick={() => setSelected(d)}><span className="device-row-copy"><span className="device-row-main"><span>{d.name}</span></span><span className="device-row-secondary"><span>{d.browser_summary}</span><span>{remainingExpiry(d, now)}</span></span></span><span className="settings-page-chevron" aria-hidden="true">›</span></button>) : <p className="device-empty" role="status">{t('devices.noHistory')}</p>}
+    </div></div>
+    {selected && <DeviceDetail key={selected.id} device={selected} current={false} now={now} onClose={() => setSelected(null)} onChanged={() => { void load(); }} onLoggedOut={onLoggedOut} />}
+  </section>;
   const enableDeviceProtection = async () => {
     if (busy) return;
     setBusy(true); setError('');
