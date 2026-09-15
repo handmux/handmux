@@ -660,6 +660,17 @@ describe('UsagePage', () => {
     expect(parseApiAccounts([{ ...view, credentialConfigured: false }])).toBeNull();
   });
 
+  it('accepts a negative DeepSeek total balance so overdue amount remains visible', () => {
+    const view = {
+      id: 'account-overdue', name: 'Overdue', providerType: 'deepseek', credentialConfigured: true,
+      createdAt: 1, updatedAt: 1, lastSuccessAt: 1, lastAttemptAt: 1, lastErrorCode: null,
+      latestSuccess: { providerType: 'deepseek', isAvailable: false, balances: [{
+        currency: 'CNY', totalBalance: '-0.01', toppedUpBalance: '0.00', grantedBalance: '0.00',
+      }] },
+    };
+    expect(parseApiAccounts([view])).toEqual([view]);
+  });
+
   it('accepts the explicit Kimi result union only for its matching provider', () => {
     const common = {
       id: 'account-provider', credentialConfigured: true, createdAt: 1, updatedAt: 1,
@@ -783,7 +794,7 @@ describe('UsagePage', () => {
     await act(async () => [...container.querySelectorAll('[role="tab"]')][1]
       .dispatchEvent(new MouseEvent('click', { bubbles: true })));
     await settle();
-    expect(container.querySelectorAll('.api-balance-skeleton')).toHaveLength(2);
+    expect(container.querySelectorAll('.api-balance-skeleton')).toHaveLength(1);
     expect(container.querySelector('.api-balance-skeletons')?.getAttribute('role')).toBe('status');
     for (const skeleton of container.querySelectorAll('.api-balance-skeleton')) {
       const menuPlaceholder = skeleton.querySelector('.api-balance-primary-row > .api-balance-menu-placeholder');

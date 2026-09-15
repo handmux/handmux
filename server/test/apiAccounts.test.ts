@@ -62,6 +62,18 @@ describe('DeepSeek balance provider', () => {
     }));
   });
 
+  it('accepts and preserves a negative total balance when the account is overdue', async () => {
+    const fetchImpl = vi.fn(async () => new Response(JSON.stringify({
+      is_available: false,
+      balance_infos: [{ currency: 'CNY', total_balance: '-0.01', topped_up_balance: '0.00', granted_balance: '0.00' }],
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    await expect(createDeepSeekProvider(fetchImpl as typeof fetch)
+      .queryBalance({ kind: 'apiKey', value: 'overdue-key' }, new AbortController().signal))
+      .resolves.toEqual({ providerType: 'deepseek', isAvailable: false, balances: [{
+        currency: 'CNY', totalBalance: '-0.01', toppedUpBalance: '0.00', grantedBalance: '0.00',
+      }] });
+  });
+
   it('turns provider status/body failures into controlled errors without provider text', async () => {
     const unauthorized = createDeepSeekProvider(async () => new Response('secret provider body', { status: 401 }) as never);
     await expect(unauthorized.queryBalance({ kind: 'apiKey', value: 'secret' }, new AbortController().signal))

@@ -186,8 +186,12 @@ const deepSeekBalanceOf = (value: unknown): DeepSeekBalanceResult | null => {
     || !Array.isArray(result.balances)) return null;
   const balances = result.balances.flatMap((value): DeepSeekBalanceResult['balances'] => {
     const balance = recordOf(value);
-    return balance && ['currency', 'totalBalance', 'toppedUpBalance', 'grantedBalance']
-      .every((key) => typeof balance[key] === 'string') ? [{
+    const decimal = (candidate: unknown, allowNegative = false): candidate is string => (
+      typeof candidate === 'string' && (allowNegative ? /^-?\d{1,128}(?:\.\d{1,128})?$/ : /^\d{1,128}(?:\.\d{1,128})?$/).test(candidate)
+    );
+    return balance && typeof balance.currency === 'string'
+      && decimal(balance.totalBalance, true) && decimal(balance.toppedUpBalance)
+      && decimal(balance.grantedBalance) ? [{
         currency: balance.currency as string, totalBalance: balance.totalBalance as string,
         toppedUpBalance: balance.toppedUpBalance as string, grantedBalance: balance.grantedBalance as string,
       }] : [];
@@ -814,7 +818,7 @@ function ApiBalanceTab({ active, onAuthFail }: {
   return <div className="api-balance-tab">
     {error && <div className="api-balance-error api-balance-global-error">{error}</div>}
     {accounts === null && !error ? <div className="api-balance-skeletons" role="status" aria-label={t('common.loading')}>
-      <ApiAccountSkeleton /><ApiAccountSkeleton />
+      <ApiAccountSkeleton />
     </div> : accounts?.length === 0 ? <div className="api-balance-empty">
       <strong>{t('apiBalance.empty')}</strong><span>{t('apiBalance.emptyHint')}</span>
     </div> : accounts?.map((account) => <ApiAccountCard key={account.id} account={account}

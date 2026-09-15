@@ -47,6 +47,7 @@ export interface ProviderDefinition<T extends ProviderType = ProviderType> {
 }
 
 const DECIMAL = /^\d{1,128}(?:\.\d{1,128})?$/;
+const SIGNED_DECIMAL = /^-?\d{1,128}(?:\.\d{1,128})?$/;
 const MAX_RESPONSE_BYTES = 64 * 1024;
 const MAX_MOONSHOT_BALANCE = 1_000_000_000_000_000;
 
@@ -83,8 +84,8 @@ async function boundedResponseText(response: Response): Promise<string> {
   return new TextDecoder().decode(bytes);
 }
 
-function decimalString(value: unknown): value is string {
-  return typeof value === 'string' && DECIMAL.test(value);
+function decimalString(value: unknown, allowNegative = false): value is string {
+  return typeof value === 'string' && (allowNegative ? SIGNED_DECIMAL : DECIMAL).test(value);
 }
 
 function boundedAmount(value: unknown, allowNegative = false): value is number {
@@ -102,7 +103,7 @@ function parseDeepSeekBalance(value: unknown): DeepSeekBalanceResult {
       || !hasExactKeys(candidate, ['currency', 'total_balance', 'topped_up_balance', 'granted_balance'])
       || typeof candidate.currency !== 'string'
       || candidate.currency.length < 1 || candidate.currency.length > 32
-      || !decimalString(candidate.total_balance)
+      || !decimalString(candidate.total_balance, true)
       || !decimalString(candidate.topped_up_balance)
       || !decimalString(candidate.granted_balance)) {
       throw new ProviderQueryError('unsupported_response');
@@ -199,7 +200,7 @@ function validDeepSeekResult(value: Record<string, unknown>): boolean {
     && value.balances.every((balance) => isRecord(balance)
       && hasExactKeys(balance, ['currency', 'totalBalance', 'toppedUpBalance', 'grantedBalance'])
       && typeof balance.currency === 'string' && balance.currency.length >= 1 && balance.currency.length <= 32
-      && decimalString(balance.totalBalance) && decimalString(balance.toppedUpBalance)
+      && decimalString(balance.totalBalance, true) && decimalString(balance.toppedUpBalance)
       && decimalString(balance.grantedBalance));
 }
 
