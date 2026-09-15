@@ -337,7 +337,7 @@ export default function Settings({ open, onClose, termRef, onOpenChangelog = () 
     }
   }, [open, termRef]);
 
-  useBackButton(open && page !== 'root', () => setPage('root'));
+  useBackButton(open && page !== 'root', () => setPage(page === 'deviceHistory' ? 'devices' : 'root'));
   useBackButton(open && notifyDisableConfirm, () => setNotifyDisableConfirm(false));
 
   useLayoutEffect(() => {
@@ -682,7 +682,7 @@ export default function Settings({ open, onClose, termRef, onOpenChangelog = () 
   return (
     <div className="settings-page" role="dialog" aria-label={t('settings.title')} aria-modal="true">
       <SettingsHeader title={page === 'root' ? t('settings.title') : t(DETAIL_TITLE[page])}
-        onBack={page === 'root' ? onClose : backToRoot} />
+        onBack={page === 'root' ? onClose : page === 'deviceHistory' ? () => setPage('devices') : backToRoot} />
       <div ref={bodyRef} className="settings-page-body">
         <main className={`settings-page-content${page === 'root' ? '' : ' detail'}`}>
           {page === 'root' ? rootContent : detailContent[page]}
