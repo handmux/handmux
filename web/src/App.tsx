@@ -301,6 +301,7 @@ export default function App() {
   const micAvailable = useAsrAvailable(serverConfig);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [securitySeen, setSecuritySeenState] = useState(() => getSecuritySeen());
   // Keep the unfinished Project Task control plane dormant until it can actually run and advance work.
   // In particular, ignore any development-only browser flag left behind by an earlier local build.
   const projectTaskBeta = false;
@@ -2471,7 +2472,6 @@ export default function App() {
   // one you've SEEN (by opening the page) exists. Opening the page clears it even if messages inside are
   // still unread; a newer push relights it. (Per-message unread lives on the rows / the count, not here.)
   const hasNewNotif = (notifItems[0]?.ts ?? -Infinity) > notifSeenTs; // items are newest-first
-  const [securitySeen, setSecuritySeenState] = useState(() => getSecuritySeen());
   const gearDot = changelogUnread || updateDot || hasNewNotif || !securitySeen;
   const openSettings = () => {
     setSettingsOpen(true);
