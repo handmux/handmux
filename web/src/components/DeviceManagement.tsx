@@ -415,7 +415,7 @@ export default function DeviceManagement({ onLoggedOut, historyPage = false, onO
           {!trustedDeviceEnabled && <button type="button" className="fontbtn device-policy-enable" disabled={busy} onClick={() => setConfirmEnable('device')}>{t(busy ? 'common.loading' : 'devices.enableProtection')}</button>}
         </div>
       </div>
-      {trustedDeviceEnabled && <p className="settings-detail-note device-policy-enabled-note">{t('devices.deviceProtectionEnabledHint')}</p>}
+      <p className="settings-detail-note device-policy-enabled-note">{t(trustedDeviceEnabled ? 'devices.deviceProtectionEnabledHint' : 'devices.deviceProtectionDisabledHint')}</p>
       {trustedDeviceEnabled && <>
       <div className="device-list-heading"><h3 id="device-list-title">{t('devices.listTitle')}</h3>{onOpenHistory && <button type="button" className="device-history-link" onClick={onOpenHistory}>{t('devices.historyLink', { n: inactiveCount })}</button>}</div>
       <div id="device-list-panel">
@@ -441,7 +441,7 @@ export default function DeviceManagement({ onLoggedOut, historyPage = false, onO
           {!trustedOriginEnabled && <button type="button" className="fontbtn device-policy-enable" disabled={busy} onClick={() => setConfirmEnable('origin')}>{t(busy ? 'common.loading' : 'devices.enableOriginProtection')}</button>}
         </div>
       </div>
-      {trustedOriginEnabled && <p className="settings-detail-note device-policy-enabled-note">{t('devices.originProtectionEnabledHint')}</p>}
+      <p className="settings-detail-note device-policy-enabled-note">{t(trustedOriginEnabled ? 'devices.originProtectionEnabledHint' : 'devices.originProtectionDisabledHint')}</p>
       {trustedOriginEnabled && <>
       <div className="settings-page-list device-origin-list">
         <div className="settings-page-row device-origin-row">
