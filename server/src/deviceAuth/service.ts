@@ -232,7 +232,10 @@ export class DeviceAuthService {
     if (this.closed) return false;
     if (id.startsWith('token_')) {
       // The Token is an authentication factor, not a row in auth_devices.
-      return this.tokenEnabled && id === `token_${this.tokenGeneration}`;
+      // Once trusted-device protection is enabled, a Token alone must no
+      // longer authorize an existing session or stream.  The Token remains
+      // the first authentication factor for obtaining trusted-device access.
+      return this.tokenEnabled && !this.trustedDeviceEnabledState && id === `token_${this.tokenGeneration}`;
     }
     try { return this.device(id).status === 'active'; } catch (error) { if (error instanceof DeviceAuthError) return false; throw error; }
   }

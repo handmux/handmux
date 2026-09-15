@@ -169,6 +169,10 @@ export function createDeviceAuthRouter({ service, resolveOrigin, resolvePublicUr
   router.post('/origin-protection/enable', safe((req, res) => {
     const origin = String(res.locals.authOrigin);
     if (!tokenPrincipal(req, origin)) throw new DeviceAuthError('TOKEN_REQUIRED', 'Enter the Token before enabling access-address restrictions', 401);
+    // Keep the browser that enables protection reachable.  The enable request is
+    // made from the current origin, so register it atomically before enforcing
+    // the new restriction.
+    service.setTrustedOrigin(origin);
     service.setTrustedOriginEnabled(true);
     res.json({ mode: service.mode, tokenEnabled: true, trustedDeviceEnabled: service.trustedDeviceEnabled, trustedOriginEnabled: service.trustedOriginEnabled, currentDeviceId: null, authenticated: true, serverTime: Date.now() });
   }));
@@ -220,6 +224,7 @@ export function createDeviceAuthRouter({ service, resolveOrigin, resolvePublicUr
     const actor = service.authenticateRequest(req, origin);
     if (actor && tokenPrincipal(req, origin)) { res.json({ device: service.list().find(d => d.id === actor.deviceId), serverTime: Date.now() }); return; }
     if (!tokenPrincipal(req, origin)) throw new DeviceAuthError('SESSION_INVALID', 'Sign in with the Token before adding this browser', 401);
+    if (service.trustedDeviceEnabled) throw new DeviceAuthError('DEVICE_REQUIRED', 'Authorize this browser from a trusted device or the handmux CLI', 409);
     const candidate = selectCandidate(req, origin);
     if (!candidate) throw new DeviceAuthError('PAIRING_NOT_FOUND', 'Prepare this browser for registration and retry', 409);
     const device = service.registerSelf(candidate.secret, origin, { name: req.body?.name, expire: req.body?.expire });
