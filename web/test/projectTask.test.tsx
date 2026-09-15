@@ -44,7 +44,7 @@ import ProjectRoot from '../src/projectTask/ProjectRoot.js';
 import type { Project, Task, TaskDraftInput } from '../src/projectTask/contracts.js';
 
 const project: Project = {
-  id: 'project-1', name: 'HandMux', rootPath: '/repo', repositoryRoot: '/repo',
+  id: 'project-1', name: 'handmux', rootPath: '/repo', repositoryRoot: '/repo',
   defaultAgent: null, executionMode: 'project-root', version: 1, archivedAt: null,
   createdAt: '2026-08-16T00:00:00.000Z', updatedAt: '2026-08-16T00:00:00.000Z',
 };
@@ -115,12 +115,12 @@ describe('Project Task root', () => {
     expect(await screen.findByText('已取消（0）')).toBeTruthy();
     const page = document.querySelector<HTMLElement>('.project-page');
     expect(page?.style.top).toBe('312px');
-    expect(screen.getByDisplayValue('HandMux')).toBeTruthy();
+    expect(screen.getByDisplayValue('handmux')).toBeTruthy();
   });
 
   it('creates a ready task from one natural-language request', async () => {
     render(root());
-    expect(await screen.findByRole('heading', { name: 'HandMux' })).toBeTruthy();
+    expect(await screen.findByRole('heading', { name: 'handmux' })).toBeTruthy();
 
     fireEvent.click(screen.getByRole('button', { name: '新建任务' }));
     expect(screen.queryByLabelText('标题')).toBeNull();
@@ -144,7 +144,7 @@ describe('Project Task root', () => {
 
   it('keeps one Task from an incomplete draft through edit and promotion', async () => {
     render(root());
-    expect(await screen.findByRole('heading', { name: 'HandMux' })).toBeTruthy();
+    expect(await screen.findByRole('heading', { name: 'handmux' })).toBeTruthy();
 
     fireEvent.click(screen.getByRole('tab', { name: '草稿' }));
     fireEvent.click(screen.getByRole('button', { name: '记录草稿' }));
@@ -212,13 +212,13 @@ describe('Project Task root', () => {
     const onSwitchSession = vi.fn();
     api.getProjectTaskStatus.mockResolvedValue({
       status: 'unavailable', schemaVersion: 1,
-      error: { code: 'PROJECT_STORE_LOCKED', message: '关闭重复 HandMux 实例后重试' },
+      error: { code: 'PROJECT_STORE_LOCKED', message: '关闭重复 handmux 实例后重试' },
     });
     api.listProjects.mockResolvedValue([]);
     render(<ProjectRoot drawerOpen={false} inbox={null} onOpenDrawer={() => {}} onCloseDrawer={() => {}}
       onSwitchSession={onSwitchSession} onOpenUsage={() => {}} onOpenSettings={() => {}} />);
 
-    expect(await screen.findByText('关闭重复 HandMux 实例后重试')).toBeTruthy();
+    expect(await screen.findByText('关闭重复 handmux 实例后重试')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: '会话' }));
     expect(onSwitchSession).toHaveBeenCalledOnce();
   });
@@ -226,11 +226,11 @@ describe('Project Task root', () => {
   it('keeps Add Project usable from the store-unavailable Drawer', async () => {
     api.getProjectTaskStatus.mockResolvedValue({
       status: 'unavailable', schemaVersion: 1,
-      error: { code: 'PROJECT_STORE_LOCKED', message: '关闭重复 HandMux 实例后重试' },
+      error: { code: 'PROJECT_STORE_LOCKED', message: '关闭重复 handmux 实例后重试' },
     });
     const { container } = render(<ProjectRoot drawerOpen inbox={null} onOpenDrawer={() => {}}
       onCloseDrawer={() => {}} onSwitchSession={() => {}} onOpenUsage={() => {}} onOpenSettings={() => {}} />);
-    expect(await screen.findByText('关闭重复 HandMux 实例后重试')).toBeTruthy();
+    expect(await screen.findByText('关闭重复 handmux 实例后重试')).toBeTruthy();
 
     fireEvent.click(screen.getByRole('button', { name: /添加项目/ }));
     expect(screen.getByRole('dialog', { name: '测试目录选择器' })).toBeTruthy();
@@ -387,7 +387,7 @@ describe('Project Task root', () => {
     render(root());
     fireEvent.click(await screen.findByRole('button', { name: /项目管理/ }));
     expect(await screen.findByText('已取消（0）')).toBeTruthy();
-    fireEvent.change(screen.getByDisplayValue('HandMux'), { target: { value: '新项目名' } });
+    fireEvent.change(screen.getByDisplayValue('handmux'), { target: { value: '新项目名' } });
 
     const save = screen.getByRole('button', { name: '保存' });
     fireEvent.click(save);
@@ -407,7 +407,7 @@ describe('Project Task root', () => {
     api.getProject.mockResolvedValueOnce(latest);
     render(root());
     fireEvent.click(await screen.findByRole('button', { name: /项目管理/ }));
-    fireEvent.change(screen.getByDisplayValue('HandMux'), { target: { value: '我准备的新名字' } });
+    fireEvent.change(screen.getByDisplayValue('handmux'), { target: { value: '我准备的新名字' } });
 
     fireEvent.click(screen.getByRole('button', { name: '保存' }));
     expect(await screen.findByText(/项目信息已在其他页面更新/)).toBeTruthy();
@@ -461,7 +461,7 @@ describe('Project Task root', () => {
     });
     render(root());
     fireEvent.click(await screen.findByRole('button', { name: /项目管理/ }));
-    fireEvent.change(screen.getByDisplayValue('HandMux'), { target: { value: '新名字' } });
+    fireEvent.change(screen.getByDisplayValue('handmux'), { target: { value: '新名字' } });
     fireEvent.click(screen.getByRole('button', { name: '保存' }));
 
     expect(await screen.findByText('还没有项目')).toBeTruthy();
@@ -551,7 +551,7 @@ describe('Project Task root', () => {
     const reads = api.listTasks.mock.calls.length;
 
     rerender(view(true));
-    fireEvent.click(screen.getByRole('button', { name: /^HandMux$/ }));
+    fireEvent.click(screen.getByRole('button', { name: /^handmux$/ }));
     rerender(view(false));
 
     expect(onCloseDrawer).toHaveBeenCalledOnce();

@@ -142,7 +142,7 @@ export function createBrowserPublicProxy({
       const origin = browserRequestOrigin(req);
       const bootstrap = browserBootstrap?.consume(pathname, origin);
       if (!bootstrap) return res.status(403).json({ error: 'browser bootstrap unavailable' });
-      // The generated preview origin is embedded in the HandMux page. Strict cookies are
+      // The generated preview origin is embedded in the handmux page. Strict cookies are
       // withheld from that cross-site iframe, so the redirected session loses its capability
       // before the first document request. HTTPS is required for SameSite=None by browsers;
       // keep the local HTTP fallback strict because it cannot safely opt into cross-site cookies.

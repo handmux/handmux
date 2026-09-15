@@ -30,15 +30,15 @@ describe('Project Task API', () => {
       schemaVersion: 3,
     });
     const created = await auth(request(app).post('/api/projects'))
-      .send({ name: 'HandMux', rootPath: root })
+      .send({ name: 'handmux', rootPath: root })
       .expect(201);
-    expect(created.body).toMatchObject({ name: 'HandMux', rootPath: await fsp.realpath(root), version: 1 });
+    expect(created.body).toMatchObject({ name: 'handmux', rootPath: await fsp.realpath(root), version: 1 });
     await auth(request(app).get('/api/projects')).expect(200, [created.body]);
 
     const renamed = await auth(request(app).patch(`/api/projects/${created.body.id}`))
-      .send({ name: 'HandMux Next', expectedVersion: 1 })
+      .send({ name: 'handmux Next', expectedVersion: 1 })
       .expect(200);
-    expect(renamed.body).toMatchObject({ name: 'HandMux Next', version: 2 });
+    expect(renamed.body).toMatchObject({ name: 'handmux Next', version: 2 });
     const stale = await auth(request(app).patch(`/api/projects/${created.body.id}`))
       .send({ name: 'Old page', expectedVersion: 1 })
       .expect(409);

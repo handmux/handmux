@@ -32,7 +32,7 @@ function browserProtocol(req: IncomingMessage, hostHeader: string): 'http' | 'ht
       }
     } catch { /* fall through to the transport and cookie hints */ }
   }
-  // TLS-terminating reverse proxies may omit X-Forwarded-Proto. A Secure HandMux
+  // TLS-terminating reverse proxies may omit X-Forwarded-Proto. A Secure handmux
   // cookie is only sent by an HTTPS browser, so it provides a stable hint for the
   // follow-up GET that usually omits Origin.
   const cookie = req.headers.cookie;

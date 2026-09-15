@@ -94,7 +94,7 @@ export function migrateProjectDatabase(db: DatabaseSync): number {
     throw new ProjectTaskError(
       'PROJECT_STORE_TOO_NEW',
       503,
-      `Project data requires a newer HandMux version (schema ${current})`,
+      `Project data requires a newer handmux version (schema ${current})`,
     );
   }
   if (current === PROJECT_TASK_SCHEMA_VERSION) return current;

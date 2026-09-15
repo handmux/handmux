@@ -65,9 +65,9 @@ describe('Project Task runtime and Project store', () => {
       storeOptions: { resolveRepositoryRoot: async () => root },
     });
     expect(first.status()).toEqual({ status: 'ready', schemaVersion: PROJECT_TASK_SCHEMA_VERSION });
-    const created = await first.requireStore().createProject({ name: ' HandMux ', rootPath: root });
+    const created = await first.requireStore().createProject({ name: ' handmux ', rootPath: root });
     expect(created).toMatchObject({
-      name: 'HandMux',
+      name: 'handmux',
       rootPath: await fsp.realpath(root),
       repositoryRoot: root,
       version: 1,
@@ -77,7 +77,7 @@ describe('Project Task runtime and Project store', () => {
 
     const second = await createProjectTaskRuntime({ home });
     expect(await second.requireStore().listProjects()).toEqual([
-      expect.objectContaining({ id: created.id, name: 'HandMux', rootPath: await fsp.realpath(root) }),
+      expect.objectContaining({ id: created.id, name: 'handmux', rootPath: await fsp.realpath(root) }),
     ]);
     expect(fs.statSync(path.join(home, '.handmux')).mode & 0o777).toBe(0o700);
     expect(fs.statSync(path.join(home, '.handmux', 'handmux.sqlite')).mode & 0o777).toBe(0o600);

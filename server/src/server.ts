@@ -350,7 +350,7 @@ if (appName) {
 // index:false so the renamed shell below owns "/" too (otherwise static would serve the generic one).
 app.use(compressStaticAssets);
 // Only the main app owns this policy. Browser proxy documents use a separate origin and must be
-// embeddable by HandMux; static previews already set their own opaque-origin sandbox policy above.
+// embeddable by handmux; static previews already set their own opaque-origin sandbox policy above.
 app.use((_req, res, next) => {
   res.setHeader('Content-Security-Policy', "base-uri 'self'; object-src 'none'; frame-ancestors 'self'");
   next();

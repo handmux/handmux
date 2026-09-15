@@ -147,7 +147,7 @@ All notable changes to handmux. Format follows [Keep a Changelog](https://keepac
 - 设置页现在统一管理 Claude Code 和 Pi 接入，可直接启用或修复，并保留用户启动 Handmux 时的 `PATH`，避免后台服务误报 Agent 未安装。
 - Agent 对话收敛为唯一 capability-driven 页面：Conversation、Interaction、Queue/Goal/Plan、Context、Permission、模型控制和原生会话接管按独立能力组合；设置页将全部 Conversation Agent 合并在“对话”组，实验性能力仅在对应行轻量标记；新增 Agent 不再需要复制页面或在公共 UI 中按 Agent 分支，stable/experimental 仍由 Catalog 元数据决定。
 - Conversation Queue 收归公共 Core：所有可发送 Agent 默认获得排队、查看、编辑、删除和自动发送；只有“立刻引导”取决于 Adapter 是否实现 `dispatchSteer`。
-- HandMux 的最低 Node.js 版本提高到 `22.16.0`；稳定启动器会在加载产品代码前拦截低版本环境并给出明确升级提示，Homebrew 继续自动管理所需 Node。
+- handmux 的最低 Node.js 版本提高到 `22.16.0`；稳定启动器会在加载产品代码前拦截低版本环境并给出明确升级提示，Homebrew 继续自动管理所需 Node。
 - 等待 Agent 回复时只显示三点波浪动画，不再绘制空的气泡背景；等待行与工具调用行等高，避免内容切换时回收跳动。
 - 对话自然到达顶部时才加载更早消息；历史使用 1000 条有界滑动窗口持续向前分页，慢请求显示 iOS 风格活动指示器，现有内容始终保持可读。
 

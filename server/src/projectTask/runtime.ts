@@ -207,7 +207,7 @@ export async function createProjectTaskRuntime({
   return {
     status: () => ({ ...state }),
     requireDatabase(): NodeDatabaseSync {
-      if (closed || !db || state.status !== 'ready') throw new Error('Authentication database unavailable; restart HandMux');
+      if (closed || !db || state.status !== 'ready') throw new Error('Authentication database unavailable; restart handmux');
       return db;
     },
     successfulWrite(): void { backups?.successfulWrite(); },
@@ -215,7 +215,7 @@ export async function createProjectTaskRuntime({
       if (closed || !store || state.status !== 'ready') {
         const error = state.error ?? {
           code: 'PROJECT_STORE_CORRUPT' as const,
-          message: 'Project data is unavailable; restart HandMux and try again',
+          message: 'Project data is unavailable; restart handmux and try again',
         };
         throw new ProjectTaskError(error.code, error.code === 'PROJECT_STORE_FULL' ? 507 : 503, error.message);
       }

@@ -117,7 +117,7 @@ export function createProjectStoreLock({
         throw new ProjectTaskError(
           'PROJECT_STORE_LOCKED',
           503,
-          `Project data is open in another HandMux instance${pidLabel}; close it and try again`,
+          `Project data is open in another handmux instance${pidLabel}; close it and try again`,
         );
       }
     }

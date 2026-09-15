@@ -111,7 +111,7 @@ export function projectStorageError(error: unknown): ProjectTaskError | null {
     return new ProjectTaskError(
       'PROJECT_STORE_PERMISSION',
       503,
-      'HandMux cannot access Project data; fix ~/.handmux permissions and restart',
+      'handmux cannot access Project data; fix ~/.handmux permissions and restart',
     );
   }
   if (code === 'ENOSPC' || code === 'SQLITE_FULL' || primary === 13

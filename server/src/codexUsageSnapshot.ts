@@ -82,7 +82,7 @@ function normalize(record: unknown): CodexUsage | null {
   const rawLimits = isRecord(payload.rate_limits) ? payload.rate_limits : {};
   // A rollout may carry a model-specific limit (for example GPT-5.3-Codex-Spark's
   // `codex_bengalfox`) instead of the account's main Codex limit. Keep its token/context data, but never
-  // project that independent percentage as the generic Codex quota shown by HandMux.
+  // project that independent percentage as the generic Codex quota shown by handmux.
   const limitId = typeof rawLimits.limit_id === 'string' ? rawLimits.limit_id : null;
   const limits = limitId === null || limitId === 'codex' ? rawLimits : {};
   return {
