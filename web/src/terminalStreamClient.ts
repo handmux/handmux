@@ -14,6 +14,10 @@ const MAX_PENDING_DATA_BYTES = 256 * 1024;
 const PROBE_INTERVAL_MS = 10000;
 const PROBE_TIMEOUT_MS = 5000;
 
+function safeSavedToken(): string {
+  try { return getToken() ?? ''; } catch { return ''; }
+}
+
 export type TerminalStreamStatus = 'connecting' | 'live' | 'paused' | 'reconnecting' | 'error';
 export type TerminalProbeResult = { ok: true; rttMs: number } | { ok: false };
 
@@ -88,7 +92,7 @@ export function openTerminalStream({
   onProbe,
   onAuthFail,
   WebSocketCtor = window.WebSocket,
-  token = getToken() ?? '',
+  token = safeSavedToken(),
   reconnectMs = RECONNECT_MS,
   connectTimeoutMs = CONNECT_TIMEOUT_MS,
   readyTimeoutMs = READY_TIMEOUT_MS,

@@ -135,6 +135,7 @@ export default {
   'home.empty': '열린 파일이 없습니다',
   'home.emptyHint': '「새로 만들기」 탭에서 파일을 선택하세요',
   'home.remove': '제거',
+  'drawer.title': '세션',
   'drawer.empty': '연결된 세션이 없습니다',
   'drawer.unbind': '연결 해제',
   'drawer.bind': '세션 연결',

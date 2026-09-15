@@ -1173,8 +1173,9 @@ export default function App() {
     }
   }, [manageWindow, current, onAuthFail]);
 
-  // Long-press the topbar session name → rename it (a plain tap is inert, as before).
-  const sessionNameLongPress = useLongPress(() => {
+  // Short-tap the topbar session name → open the drawer; long-press still renames it. The shared
+  // gesture helper swallows the synthetic click after a long-press so the two actions cannot chain.
+  const sessionNameLongPress = useLongPress<HTMLButtonElement>(() => {
     if (current?.session) setRenameTarget({ kind: 'session', id: current.session.id, name: current.session.name });
   });
 
@@ -2537,8 +2538,16 @@ export default function App() {
         onPointerDownCapture={captureTerminalOwner}
         style={inset ? { transform: `translateY(-${inset}px)` } : undefined}>
       {rootView === 'session' && <header className="topbar">
-        <button ref={drawerMenuRef} className="hamburger" onClick={() => setDrawerOpen(true)}>☰</button>
-        <span className="session-name" {...sessionNameLongPress}>{current?.session?.name ?? '—'}</span>
+        <button ref={drawerMenuRef} className="hamburger" onClick={() => setDrawerOpen(true)}
+          aria-label={t('drawer.title')} aria-expanded={drawerOpen} aria-controls="session-drawer">☰</button>
+        <button type="button" className="session-name" {...sessionNameLongPress}
+          onClick={(event) => {
+            sessionNameLongPress.onClick(event);
+            if (!event.defaultPrevented) setDrawerOpen(true);
+          }}
+          aria-label={current?.session?.name ?? t('drawer.title')} aria-expanded={drawerOpen} aria-controls="session-drawer">
+          {current?.session?.name ?? '—'}
+        </button>
         {/* Always render so it doesn't pop in late once `current` loads — just disable until ready. */}
         <button className="topbar-icon" onClick={() => setIdeaOpen(true)} aria-label={t('app.ideas')} title={t('app.ideas')}
           disabled={!current}>

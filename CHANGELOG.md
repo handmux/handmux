@@ -4,6 +4,10 @@ All notable changes to handmux. Format follows [Keep a Changelog](https://keepac
 
 ## [Unreleased]
 
+### Changed
+
+- 增大左上角会话菜单的触控区域；点击当前会话标题也可打开 session 列表，长按标题仍用于重命名。
+
 ### Added
 
 - 新增 Token + 可信设备认证：通过 CLI 或已有可信设备授权浏览器，按设备设置名称、有效期并单独撤销。可信设备保护和访问地址限制默认开启，可通过 CLI 分别调整；Web 可查看和管理设备、访问地址。
@@ -19,6 +23,12 @@ All notable changes to handmux. Format follows [Keep a Changelog](https://keepac
 - 修复 DeepSeek 欠费时负数余额被误报为不支持数据的问题，并显示厂家返回的欠费金额。
 - API 余额加载骨架屏默认只显示一个账户占位。
 - 优化可信设备 CLI 授权提示，明确目标浏览器、确认步骤和保护开关的影响。
+
+### Fixed
+
+- 修复正式设备 Cookie 未落地时浏览器被错误放行到业务界面、后续请求全部失败的问题。
+- 修复 `handmux pi` 与 `handmux codex` 的 raw Agent 输出被 Node SQLite warning 污染的问题。
+- 修复禁用 `localStorage` 时已有可信设备 Cookie 无法打开实时终端的问题，并让设备登出确认支持返回键与点击遮罩取消。
 
 ## [0.28.0] - 2026-09-11
 

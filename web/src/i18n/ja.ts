@@ -135,6 +135,7 @@ export default {
   'home.empty': 'ファイルが開かれていません',
   'home.emptyHint': '「新規」タブでファイルを選択してください',
   'home.remove': '削除',
+  'drawer.title': 'セッション',
   'drawer.empty': 'セッションが紐付けられていません',
   'drawer.unbind': '紐付け解除',
   'drawer.bind': 'セッションを紐付け',

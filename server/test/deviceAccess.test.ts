@@ -184,6 +184,9 @@ describe('browser → CLI socket → protected HTTP / WebSocket', () => {
     await request(app).get('/api/private').set(headers).set('Cookie', candidate).expect(401);
     const device = await client.request({ op: 'authorize', id: claim.id, name: '电脑', expire: '7d' }) as { id: string };
     const status = await request(app).get('/api/auth/status').set(headers).set('Cookie', candidate).expect(200);
+    // The candidate may authenticate the recovery lookup, but it is not a confirmed
+    // primary session until the formal Cookie is sent back on a later request.
+    expect(status.body.currentDeviceId).toBeNull();
     const cookie = String(status.headers['set-cookie']?.[0]).split(';')[0]!;
     await request(app).get('/api/private').set(headers).set('Cookie', cookie).expect(200, { device: device.id });
     await request(app).get('/api/private').set(headers).set('Authorization', 'Bearer old-token').expect(401);

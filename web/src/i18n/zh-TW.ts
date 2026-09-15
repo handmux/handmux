@@ -135,6 +135,7 @@ export default {
   'home.empty': '尚未開啟任何檔案',
   'home.emptyHint': '切換到「新增」挑選一個',
   'home.remove': '移除',
+  'drawer.title': '工作階段',
   'drawer.empty': '尚未綁定工作階段',
   'drawer.unbind': '解除綁定',
   'drawer.bind': '綁定工作階段',

@@ -68,9 +68,12 @@ html, body, #root { height: 100%; margin: 0; overscroll-behavior: none; }
 body { font-family: -apple-system, system-ui, sans-serif; background: #1a1b1e; color: #e6e6e6; }
 .app { display: flex; flex-direction: column; height: 100%; overflow: hidden; }
 .topbar { display: flex; align-items: center; gap: 6px; padding: 4px 8px; background: #2a2b2e; }
-.hamburger { font-size: 20px; background: none; border: none; color: #e6e6e6;
-  width: 34px; height: 34px; display: inline-flex; align-items: center; justify-content: center; padding: 0; margin-left: -4px; touch-action: manipulation; }
-.session-name { font-weight: 600; margin-right: auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hamburger { flex: none; font-size: 20px; background: none; border: none; color: #e6e6e6;
+  width: 44px; height: 44px; display: inline-flex; align-items: center; justify-content: center; padding: 0;
+  margin: -5px -5px -5px -9px; touch-action: manipulation; }
+.session-name { flex: 1; min-width: 0; min-height: 44px; display: flex; align-items: center; justify-content: flex-start;
+  padding: 0; border: none; background: none; color: inherit; font: inherit; font-weight: 600; text-align: left;
+  margin-right: auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; touch-action: manipulation; }
 .fontbtn { min-width: 36px; padding: 4px 10px; border: none; border-radius: 8px; background: #33353a; color: #e6e6e6; font-size: 14px; touch-action: manipulation; }
 .fontbtn[aria-pressed="true"] { background: #2a4060; color: #7ab4f5; }
 /* An <a> wearing the fontbtn skin (Settings feedback links): kill anchor styling so it reads as a button. */

@@ -319,6 +319,7 @@ export default {
   'home.empty': '还没有打开过文件',
   'home.emptyHint': '切到「新增」去挑一个',
   'home.remove': '移除',
+  'drawer.title': '会话',
   'drawer.empty': '还没有绑定会话',
   'drawer.unbind': '解绑',
   'drawer.bind': '绑定会话',

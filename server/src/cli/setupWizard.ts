@@ -8,6 +8,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { homedir } from 'node:os';
 import { spawnSync } from 'node:child_process';
+import { createRequire } from 'node:module';
 import webpush from 'web-push';
 import { providerMode, voiceProviderRegistry } from '../asr/providerRegistry.js';
 import { configPath, pocketHome } from './state.js';
@@ -18,7 +19,9 @@ import { resolveNatapp, resolveCpolar } from './tunnelClients.js';
 import { t, setLocale } from './i18n/index.js';
 import { intro, outro, note, cancel, select, text, password, confirm, ask, CANCELLED } from './prompt.js';
 import { PrivateStateStore } from '../privateStateStore.js';
-import { installationAuthDefaults } from './authDefaults.js';
+import { installationAuthDefaults, tokenWarning } from './authDefaults.js';
+import { connectAuthControl } from '../deviceAuth/control.js';
+import { DeviceAuthService } from '../deviceAuth/service.js';
 import type { Tunnel, VapidConfig, VoiceConfig, VoiceProviderConfig } from './options.js';
 import type { SetupAnswers, SetupConfig } from './setupModel.js';
 
@@ -33,6 +36,7 @@ type ConnectionField =
   | 'sshJump' | 'authtoken' | 'cpolarRegion' | 'domain';
 interface ConnectionFieldRow { value: ConnectionField; label: string; hint: string }
 type OptionalConnectionStringKey = 'publicUrl' | 'sshJump' | 'cpolarRegion';
+type NodeDatabaseSync = import('node:sqlite').DatabaseSync;
 const errorMessage = (error: unknown): string => {
   if (error instanceof Error) return error.message;
   if (error && typeof error === 'object' && 'message' in error && typeof error.message === 'string') {
@@ -51,14 +55,14 @@ import {
   cfConfigYaml, parseTunnelCreate, findTunnelId,
   mergeConfig, answersFromConfig, summarizeConnection,
   normalizeVoiceConfig,
-  validatePort, validateHost, validatePreviewDomain, validatePublicUrl, validateNonEmpty, validateContact, validateToken,
+  validatePort, validateHost, validatePreviewDomain, validateNonEmpty, validateContact, validateToken,
   TUNNEL_KEYS,
 } from './setupModel.js';
 export {
   cfConfigYaml, parseTunnelCreate, findTunnelId,
   configFromAnswers, mergeConfig, answersFromConfig, summarizeConnection,
   normalizeVoiceConfig,
-  validatePort, validateHost, validatePreviewDomain, validatePublicUrl, validateNonEmpty, validateContact, validateToken,
+  validatePort, validateHost, validatePreviewDomain, validateNonEmpty, validateContact, validateToken,
 } from './setupModel.js';
 
 function readExisting(file: string): SetupConfig {
@@ -66,6 +70,31 @@ function readExisting(file: string): SetupConfig {
   const value = new PrivateStateStore<unknown>(file).readStrict();
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('expected a JSON object');
   return value as SetupConfig;
+}
+
+interface AuthSnapshot { enabled?: boolean; devices: Array<Record<string, unknown>> }
+
+// Setup must be cancellable without opening the project runtime (which runs migrations and writes
+// auth_meta). When the server is stopped, inspect the existing database read-only instead.
+function readAuthSnapshot(home: string): AuthSnapshot | undefined {
+  const databasePath = path.join(home, '.handmux', 'handmux.sqlite');
+  if (!fs.existsSync(databasePath)) return undefined;
+  let db: NodeDatabaseSync | undefined;
+  try {
+    // Keep SQLite out of the module-import path. The raw Agent launcher in handmux-main must be able
+    // to hand argv/stdout/stderr through byte-for-byte, even when this CLI module is imported first.
+    const { DatabaseSync } = createRequire(import.meta.url)('node:sqlite') as typeof import('node:sqlite');
+    db = new DatabaseSync(databasePath, { readOnly: true });
+    const tokenRow = db.prepare("SELECT value FROM auth_meta WHERE key='token_enabled'").get() as { value?: string } | undefined;
+    const rows = db.prepare('SELECT id,name,browser_summary,authorized_at,expires_at,last_used_at,revoked_at,version FROM auth_devices').all() as Array<Record<string, unknown>>;
+    const now = Date.now();
+    const devices = rows.map((row) => ({ ...row, status: row.revoked_at !== null ? 'revoked' : row.expires_at !== null && Number(row.expires_at) <= now ? 'expired' : 'active' }));
+    return { ...(tokenRow ? { enabled: tokenRow.value === '1' } : {}), devices };
+  } catch {
+    return undefined;
+  } finally {
+    try { db?.close(); } catch { /* read-only inspection is best effort */ }
+  }
 }
 
 // The hub. Pre-fills from the existing config so a re-run edits/switches rather than starts over; a brand-
@@ -82,9 +111,23 @@ export async function runSetup({
   catch (error) { log.error(t('err.badConfig', { path: target, msg: errorMessage(error) })); return null; }
   const defaults = installationAuthDefaults(home, target);
   const { isNew } = defaults;
-  let a = answersFromConfig(existing);
-  // Token is a durable factor. If no token exists yet, mint it once and persist it in config.json.
-  if (!a.token) a.token = process.env.HANDMUX_TOKEN ?? defaults.token ?? genToken();
+  const effectiveAuthMode = existing.authMode ?? process.env.HANDMUX_AUTH_MODE ?? defaults.authMode;
+  if (effectiveAuthMode !== 'token' && effectiveAuthMode !== 'trusted-device') {
+    log.error(t('err.generic', { msg: 'authMode must be token or trusted-device' }));
+    return null;
+  }
+  let a = answersFromConfig(existing, effectiveAuthMode);
+  // Runtime database state is authoritative while the server is running.
+  let runtimeTokenEnabled: boolean | undefined;
+  if (running) {
+    try { const c = await setupAuthClient(home, true, effectiveAuthMode); try { const s = await c.request({ op: 'token-status' }) as { enabled?: boolean }; runtimeTokenEnabled = s.enabled; } finally { await c.close(); } }
+    catch { /* setup can still edit other settings when runtime control is unavailable */ }
+  } else {
+    runtimeTokenEnabled = readAuthSnapshot(home)?.enabled;
+  }
+  if (runtimeTokenEnabled !== undefined) a.authMode = runtimeTokenEnabled ? 'token' : 'trusted-device';
+  let emptyDisableConfirmed = false;
+  if (existing.token == null) a.token = process.env.HANDMUX_TOKEN ?? defaults.token ?? '';
   setLocale(a.lang);
 
   intro('handmux setup');
@@ -101,7 +144,8 @@ export async function runSetup({
         a.lang = await editLanguage(a);
         note(t('setup.welcome'));
         a = await editConnection(a, { home, log });
-        await editAuth(a);
+        a.authMode = await editAuth(a, { home, running, onEmptyDisableConfirmed: () => { emptyDisableConfirmed = true; } });
+        if (a.authMode === 'token') a.token = await editToken(a);
       } catch (e) { if (e !== CANCELLED) throw e; }
     }
     for (;;) {
@@ -112,7 +156,7 @@ export async function runSetup({
           { value: 'connection', label: t('setup.secConnection'), hint: summarizeConnection(a) },
           { value: 'name', label: t('setup.secName'), hint: a.name || t('setup.default') },
           { value: 'port', label: t('setup.secPort'), hint: String(a.port) },
-          { value: 'auth', label: t('auth.section'), hint: a.token ? maskSecret(a.token) : t('setup.tokenAuto') },
+          { value: 'auth', label: t('auth.section'), hint: a.authMode === 'token' ? '固定 Token 登录：启用（不推荐）' : '固定 Token 登录：禁用（推荐）' },
           { value: 'browser', label: t('setup.secBrowser'), hint: a.previewDomain || t('setup.browserOff') },
           { value: 'push', label: t('setup.secPush'), hint: a.vapid ? (a.vapid.subject || t('setup.on')) : t('setup.off') },
           {
@@ -132,8 +176,48 @@ export async function runSetup({
       }));
       if (choice === 'exit') { cancel(t('setup.exited')); return null; }
       if (choice === 'save' || choice === 'start') {
+        const currentTokenEnabled = runtimeTokenEnabled ?? (effectiveAuthMode === 'token');
         const cfg = mergeConfig(existing, a);
-        new PrivateStateStore(target).write(cfg);
+        const desiredTokenEnabled = a.authMode === 'token';
+        const authChanged = desiredTokenEnabled !== currentTokenEnabled;
+        let authClient: Awaited<ReturnType<typeof setupAuthClient>> | undefined;
+        let allowEmptyDisable = false;
+        if (authChanged && !desiredTokenEnabled) {
+          let devices: Array<Record<string, unknown>> = [];
+          if (running) {
+            try {
+              authClient = await setupAuthClient(home, true, a.authMode ?? 'token');
+              const status = await authClient.request({ op: 'token-status' }) as { devices?: unknown[] };
+              devices = (Array.isArray(status.devices) ? status.devices : []).filter((d) => (d as Record<string, unknown>)?.status === 'active') as Array<Record<string, unknown>>;
+            } catch (error) {
+              await authClient?.close();
+              throw error;
+            }
+          } else {
+            devices = (readAuthSnapshot(home)?.devices ?? []).filter((d) => d.status === 'active');
+          }
+          allowEmptyDisable = devices.length === 0;
+          if (allowEmptyDisable && !emptyDisableConfirmed) {
+            const phrase = await ask(text({ message: '请输入 DISABLE TOKEN 以确认' }));
+            if (phrase !== 'DISABLE TOKEN') { await authClient?.close(); cancel(t('setup.exited')); return null; }
+          }
+        }
+        const hadConfig = fs.existsSync(target);
+        try {
+          new PrivateStateStore(target).write(cfg);
+          if (authChanged) {
+            authClient ??= await setupAuthClient(home, !!running, a.authMode ?? 'trusted-device');
+            await authClient.request(desiredTokenEnabled ? { op: 'token-enable' } : { op: 'token-disable', allowEmpty: allowEmptyDisable });
+          }
+        } catch (error) {
+          try {
+            if (hadConfig) new PrivateStateStore(target).write(existing);
+            else new PrivateStateStore(target).remove();
+          } catch { /* preserve the original failure; the config may need manual recovery */ }
+          throw error;
+        } finally {
+          await authClient?.close();
+        }
         outro(t('setup.wrote', { path: target }));
         if (a.tunnel === 'ssh') printSshServerHelp(a, log);
         return { cfg, start: choice === 'start' };
@@ -144,7 +228,7 @@ export async function runSetup({
         if (choice === 'connection') a = await editConnection(a, { home, log });
         else if (choice === 'name') a.name = await editName(a);
         else if (choice === 'port') a.port = await editPort(a);
-        else if (choice === 'auth') await editAuth(a);
+        else if (choice === 'auth') { a.authMode = await editAuth(a, { home, running, onEmptyDisableConfirmed: () => { emptyDisableConfirmed = true; } }); if (a.authMode === 'token') a.token = await editToken(a); }
         else if (choice === 'browser') a.previewDomain = await editBrowserDomain(a);
         else if (choice === 'language') a.lang = await editLanguage(a);
         else if (choice === 'push') {
@@ -168,9 +252,62 @@ export async function runSetup({
 // otherwise a user inside a section can't tell there's a way back to the hub.
 const withBack = (msg: string): string => `${msg}  ${t('setup.escBack')}`;
 
-async function editAuth(a: SetupAnswers): Promise<void> {
+async function setupAuthClient(home: string, running: boolean, mode: 'token' | 'trusted-device') {
+  if (running) return connectAuthControl(home);
+  const { createProjectTaskRuntime } = await import('../projectTask/runtime.js');
+  const runtime = await createProjectTaskRuntime({ home });
+  let service: DeviceAuthService;
+  try { service = new DeviceAuthService({ db: runtime.requireDatabase(), mode }); }
+  catch (error) { await runtime.close(); throw error; }
+  return {
+    async request(args: Record<string, unknown>): Promise<unknown> {
+      if (args.op === 'token-status') return { enabled: service.tokenEnabled, devices: service.list() };
+      if (args.op === 'token-enable') service.setTokenEnabled(true);
+      else if (args.op === 'token-disable') service.setTokenEnabled(false, { allowEmpty: args.allowEmpty === true });
+      return { enabled: service.tokenEnabled };
+    },
+    async close() { try { service.close(); } finally { await runtime.close(); } },
+  };
+}
+
+async function editAuth(a: SetupAnswers, ctx?: { home?: string; running?: boolean; current?: boolean; onEmptyDisableConfirmed?: () => void }): Promise<'token' | 'trusted-device'> {
   note(t('auth.manageHint'));
-  a.token = await editToken(a);
+  const next = await ask(select({ message: withBack(t('auth.section')), initialValue: a.authMode ?? 'trusted-device', options: [
+    { value: 'trusted-device' as const, label: t('auth.tokenDisabled') },
+    { value: 'token' as const, label: t('auth.tokenEnabled') },
+  ] }));
+  if (next !== a.authMode) {
+    note(tokenWarning(t('auth.switchWarning')), t('auth.section'));
+    if (next === 'token') note(tokenWarning(t('auth.warning')), t('auth.token'));
+    if (!await ask(confirm({ message: t('auth.switchConfirm'), initialValue: false }))) return a.authMode ?? 'trusted-device';
+    if (next === 'trusted-device') {
+      let devices: Array<Record<string, unknown>> = [];
+      if (ctx?.home) {
+        if (ctx.running) {
+          const c = await setupAuthClient(ctx.home, true, a.authMode ?? 'token');
+          try {
+            const status = await c.request({ op: 'token-status' }) as { devices?: unknown[] };
+            devices = (Array.isArray(status.devices) ? status.devices : []).filter((d) => (d as Record<string, unknown>)?.status === 'active') as Array<Record<string, unknown>>;
+          } finally { await c.close(); }
+        } else {
+          devices = (readAuthSnapshot(ctx.home)?.devices ?? []).filter((d) => d.status === 'active');
+        }
+      }
+      if (devices.length) {
+        note(`当前有 ${devices.length} 个可信设备；禁用后只有这些设备可以访问。`, t('auth.section'));
+        for (const d of devices) {
+          note(`ID: ${String(d.id ?? '')}\n名称: ${String(d.name ?? '')}\n浏览器: ${String(d.browser_summary ?? '')}\n有效期: ${d.expires_at == null ? '永久' : new Date(Number(d.expires_at)).toISOString()}`, t('auth.section'));
+        }
+        if (!await ask(confirm({ message: '确认禁用固定 Token 登录？', initialValue: false }))) return a.authMode ?? 'trusted-device';
+      } else {
+        note('当前没有可信设备；禁用后任何设备都无法访问，只能通过 CLI 恢复。', t('auth.section'));
+        const phrase = await ask(text({ message: '请输入 DISABLE TOKEN 以确认' }));
+        if (phrase !== 'DISABLE TOKEN') return a.authMode ?? 'trusted-device';
+        ctx?.onEmptyDisableConfirmed?.();
+      }
+    }
+  }
+  return next;
 }
 
 async function editLanguage(a: SetupAnswers): Promise<string> {
@@ -205,19 +342,22 @@ async function editBrowserDomain(a: SetupAnswers): Promise<string> {
   return String(value || '').trim().toLowerCase();
 }
 
-// Token is a durable factor. A mini-hub lets the user keep the
-// current value, replace it with a custom value, or generate a new one. The
-// hub hint masks it and Esc returns without changing it.
+// The access token — the one secret in the phone's URL. Unset reuses an existing runtime token, or
+// generates one at first start (printed + QR'd). A mini-hub (like
+// push/voice): type your own, generate + pin a strong random one, or reset back to auto. Editing custom
+// pre-fills the current value (so you can read it off); the hub hint masks it. Esc returns to the main hub,
+// keeping the choice. Returns the token string ('' = auto).
 async function editToken(a: SetupAnswers): Promise<string> {
-  let token = a.token || genToken();
+  let token = a.token || '';
   for (;;) {
     let pick;
     try {
       pick = await ask(select({
         message: withBack(t('setup.secToken')),
         options: [
-          { value: 'custom', label: t('setup.tokenCustom'), hint: maskSecret(token) },
+          { value: 'custom', label: t('setup.tokenCustom'), hint: token ? maskSecret(token) : t('setup.tokenAuto') },
           { value: 'random', label: t('setup.tokenRandom') },
+          { value: 'auto', label: t('setup.tokenReset'), hint: t('setup.tokenAuto') },
         ],
         initialValue: 'custom',
       }));
@@ -225,6 +365,7 @@ async function editToken(a: SetupAnswers): Promise<string> {
     try {
       if (pick === 'custom') token = (await ask(text({ message: t('setup.askToken'), initialValue: token, validate: validateToken }))).trim();
       else if (pick === 'random') { token = genToken(); note(t('setup.tokenGenerated', { token })); }
+      else if (pick === 'auto') token = '';
     } catch (e) { if (e !== CANCELLED) throw e; }                 // Esc in a sub-edit → back to the mini-hub
   }
 }
@@ -244,20 +385,15 @@ function tunnelOptions() {
   ];
 }
 
-// Which tunnels have config fields to edit a level deeper. Direct mode has an
-// optional public URL for a user-managed reverse tunnel; leaving it blank is
-// still the ordinary LAN/local direct connection.
+// Which tunnels have config fields to edit a level deeper (none/cloudflare-quick have nothing to configure).
 const hasConnFields = (tunnel: Tunnel): boolean => (
-  ['none', 'cloudflare-named', 'ssh', 'natapp', 'cpolar'] as Tunnel[]
+  ['cloudflare-named', 'ssh', 'natapp', 'cpolar'] as Tunnel[]
 ).includes(tunnel);
 
 // The editable field rows for the CURRENT tunnel — the type/mode is chosen a level up (the picker), so this
 // lists ONLY that tunnel's config, values shown and secrets masked. Empty for none / cloudflare-quick.
 function connectionFieldRows(a: SetupAnswers): ConnectionFieldRow[] {
   const none = t('setup.connNone');
-  if (a.tunnel === 'none') return [
-    { value: 'publicUrl', label: t('setup.connPublicUrl'), hint: a.publicUrl || t('setup.connDirectAuto') },
-  ];
   if (a.tunnel === 'cloudflare-named') return [
     { value: 'cfHostname', label: t('setup.connHostname'), hint: a.cfHostname || none },
     { value: 'cfTunnelName', label: t('setup.connTunnelName'), hint: a.cfTunnelName || 'handmux' },
@@ -339,11 +475,7 @@ async function editConnField(a: SetupAnswers, field: ConnectionField): Promise<S
     case 'cfTunnelName': n.cfTunnelName = (await ask(text({ message: t('setup.askTunnelName'), initialValue: a.cfTunnelName || 'handmux' }))) || 'handmux'; break;
     case 'sshHost': n.sshHost = await ask(text({ message: t('setup.askSshHost'), initialValue: a.sshHost || '', validate: validateNonEmpty('ssh host') })); break;
     case 'remotePort': n.remotePort = Number(await ask(text({ message: t('setup.askRemotePort'), initialValue: String(a.remotePort || a.port), validate: validatePort }))); break;
-    case 'publicUrl': setOpt('publicUrl', await ask(text({
-      message: t(a.tunnel === 'none' ? 'setup.askDirectPublicUrl' : 'setup.askPublicUrl'),
-      initialValue: a.publicUrl || '',
-      validate: validatePublicUrl,
-    }))); break;
+    case 'publicUrl': setOpt('publicUrl', await ask(text({ message: t('setup.askPublicUrl'), initialValue: a.publicUrl || '' }))); break;
     case 'sshJump': setOpt('sshJump', await ask(text({ message: t('setup.askSshJump'), initialValue: a.sshJump || '' }))); break;
     case 'authtoken': n.authtoken = await ask(password({ message: t('setup.askAuthtoken'), validate: validateNonEmpty('authtoken') })); break;
     case 'cpolarRegion': setOpt('cpolarRegion', await ask(text({ message: t('setup.askCpolarRegion'), initialValue: a.cpolarRegion || '' }))); break;
