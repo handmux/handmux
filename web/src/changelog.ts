@@ -19,6 +19,26 @@ export interface ChangelogEntry {
 // `entryId`/`LATEST_RELEASE` use `version` when present, else `date`, as the stable unread-dot id.
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '0.29.0',
+    date: '2026-09-16',
+    highlight: {
+      zh: '可信设备与可信地址保护',
+      en: 'Trusted device and address protection',
+    },
+    items: {
+      zh: [
+        '新增 Token + 可信设备双层认证，以及可信地址保护；支持网页和 CLI 管理设备、授权、有效期与撤销。',
+        '新增清晰的认证控制：可查看并开启两层保护，明确授权范围和关闭风险。',
+        '修复 DeepSeek 欠费金额显示错误。',
+      ],
+      en: [
+        'Added layered Token + trusted-device authentication and trusted address protection, with Web and CLI management for devices, authorization, expiry, and revocation.',
+        'Added clear authentication controls for viewing and enabling both protection layers, with explicit authorization scope and disable-risk guidance.',
+        'Fixed incorrect DeepSeek overdue balances.',
+      ],
+    },
+  },
+  {
     version: '0.28.0',
     date: '2026-09-11',
     highlight: {
