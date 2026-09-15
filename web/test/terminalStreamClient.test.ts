@@ -137,7 +137,7 @@ describe('openTerminalStream', () => {
     try {
       const ws = latestSocket();
       ws.open();
-      expect(ws.sent).toEqual([{ type: 'subscribe', pane: '%7' }]);
+      expect(ws.sent).toEqual([{ type: 'subscribe', pane: '%7', token: '' }]);
     } finally {
       await stream.close();
       vi.restoreAllMocks();
