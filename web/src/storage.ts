@@ -60,6 +60,7 @@ const AGENT_USAGE_ENABLED_KEY = 'tw_agent_usage_enabled_v1';
 const IDEAS_KEY = 'tw_ideas';               // { [sessionName]: { [windowName]: Idea[] } } — per-window todo list
 const CHANGELOG_SEEN_KEY = 'tw_changelog_seen'; // the latest changelog entry id (v) the user has opened
 const VERSION_SEEN_KEY = 'tw_version_seen';     // the npm "latest" version already acknowledged in Settings
+const SECURITY_SEEN_KEY = 'tw_security_seen';
 const GIT_REPOS_KEY = 'tw_git_repos';          // { [windowId]: absPath[] } —
 const GIT_DIRS_KEY = 'tw_git_dirs';            // { [windowId]: absPath[] } — dirs the user picked repos from (history, newest first) bound git repos per window absolute paths (order = tab order)
 const WORKSPACE_PROMPT_KEY = 'tw_workspace_prompt';
@@ -719,6 +720,8 @@ export const setChangelogSeen = (v: string): void => { if (v) localStorage.setIt
 // stays off for this version even if they never upgrade — it only relights when npm publishes a newer one.
 export const getVersionSeen = () => localStorage.getItem(VERSION_SEEN_KEY);
 export const setVersionSeen = (v: string): void => { if (v) localStorage.setItem(VERSION_SEEN_KEY, v); };
+export const getSecuritySeen = () => localStorage.getItem(SECURITY_SEEN_KEY) === '1';
+export const setSecuritySeen = (): void => { localStorage.setItem(SECURITY_SEEN_KEY, '1'); };
 
 // Window rename: tmux keeps the window id but the name (our key) changes, so move the ideas across.
 export function renameWindowIdeas(session: string, oldWindow: string, newWindow: string): void {

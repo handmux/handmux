@@ -9,7 +9,8 @@ const errorCopy = (error: unknown) => t(error instanceof AuthRequestError && err
     ? 'auth.tokenRequired' : error instanceof AuthRequestError && error.code === 'AUTH_ORIGIN_REJECTED'
       ? 'auth.originRejected' : 'auth.connectionError');
 
-const needsPairing = (status: AuthStatus): boolean => status.mode === 'trusted-device'
+const needsPairing = (status: AuthStatus): boolean => (status.requiresTrustedDevice === true
+  || (status.trustedOriginEnabled === true && status.originTrusted === false && status.tokenAuthenticated === true))
   && !status.authenticated
   && !status.sessionPending
   && (status.tokenEnabled !== true || status.tokenAuthenticated === true)
@@ -131,7 +132,12 @@ export default function DevicePairingPrompt({ onSaved }: { onSaved: () => void }
       if (ok && await request('POST')) setReenterToken(false);
     });
   }} />;
-  if (status.mode === 'token') return <TokenPrompt onSaved={onSaved} />;
+  // Token is the first factor; an untrusted origin may still require the pairing
+  // flow after the token has been accepted. Do not let the legacy mode field
+  // bypass the origin-only recovery path.
+  if (status.mode === 'token' && !(status.trustedOriginEnabled === true && status.originTrusted === false)) {
+    return <TokenPrompt onSaved={onSaved} />;
+  }
   // A missing or rejected Token never falls through to pairing. The user must complete the first
   // factor before the server creates a pairing request.
   if (status.tokenEnabled && !status.tokenAuthenticated) {

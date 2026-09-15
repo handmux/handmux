@@ -8,6 +8,7 @@ import {
   getInboxSeen, markInboxSeen, getInboxReadTs, setInboxReadTs,
   renameWindowIdeas, getChangelogSeen, setChangelogSeen,
   getVersionSeen, setVersionSeen,
+  getSecuritySeen, setSecuritySeen,
   getReadInboxIds, addReadInboxId, pruneReadInboxIds, getNotifSeenTs, setNotifSeenTs,
   getIdeas, getChatTone, setChatTone, getConversationFontSize, setConversationFontSize,
   getAgentConversationEnabled, setAgentConversationEnabled,
@@ -2470,9 +2471,11 @@ export default function App() {
   // one you've SEEN (by opening the page) exists. Opening the page clears it even if messages inside are
   // still unread; a newer push relights it. (Per-message unread lives on the rows / the count, not here.)
   const hasNewNotif = (notifItems[0]?.ts ?? -Infinity) > notifSeenTs; // items are newest-first
-  const gearDot = changelogUnread || updateDot || hasNewNotif || !isTrustedDeviceEnabled() || !isTrustedOriginEnabled();
+  const [securitySeen, setSecuritySeenState] = useState(() => getSecuritySeen());
+  const gearDot = changelogUnread || updateDot || hasNewNotif || !securitySeen;
   const openSettings = () => {
     setSettingsOpen(true);
+    if (!securitySeen) { setSecuritySeen(); setSecuritySeenState(true); }
     if (updateInfo?.latest) { setVersionSeen(updateInfo.latest); setVerSeen(updateInfo.latest); } // acknowledge → clears updateDot
   };
   const openChangelog = () => {
