@@ -319,7 +319,7 @@ function AddDevice({ onClose, onAdded }: { onClose: () => void; onAdded: () => v
 
 export default function DeviceManagement({ onLoggedOut }: { onLoggedOut: () => void }) {
   const [data, setData] = useState<DeviceList | null>(null); const [error, setError] = useState(''); const [loading, setLoading] = useState(false);
-  const [deviceTab, setDeviceTab] = useState<'active' | 'history'>('active'); const [selected, setSelected] = useState<ManagedDevice | null>(null); const [adding, setAdding] = useState(false);
+  const [showHistory, setShowHistory] = useState(false); const [selected, setSelected] = useState<ManagedDevice | null>(null); const [adding, setAdding] = useState(false);
   const [selfSheet, setSelfSheet] = useState(false); const [selfName, setSelfName] = useState(() => {
     const ua = navigator.userAgent;
     const browser = /Edg\//.test(ua) ? 'Edge' : /Firefox\//.test(ua) ? 'Firefox' : /Chrome|CriOS/.test(ua) ? 'Chrome' : /Safari/.test(ua) ? 'Safari' : 'Browser';
@@ -351,8 +351,7 @@ export default function DeviceManagement({ onLoggedOut }: { onLoggedOut: () => v
     {error ? <div className="device-feedback"><p role="alert">{error}</p><button type="button" disabled={loading} onClick={() => { void load(); }}>{t('common.retry')}</button></div>
       : <p className="device-loading" role="status">{t('common.loading')}</p>}
   </section>;
-  const showingHistory = deviceTab === 'history';
-  const devices = data.devices.filter(d => isInactive(d, now) === showingHistory).sort((a, b) => Number(b.id === data.currentDeviceId) - Number(a.id === data.currentDeviceId) || b.last_used_at - a.last_used_at);
+  const devices = data.devices.filter(d => isInactive(d, now) === showHistory).sort((a, b) => Number(b.id === data.currentDeviceId) - Number(a.id === data.currentDeviceId) || b.last_used_at - a.last_used_at);
   const addSelf = async () => {
     if (busy) return;
     setBusy(true); setError('');
@@ -365,7 +364,6 @@ export default function DeviceManagement({ onLoggedOut }: { onLoggedOut: () => v
     } catch (e) { setError(deviceErrorCopy(e)); } finally { setBusy(false); }
   };
   const inactiveCount = data.devices.filter(d => isInactive(d, now)).length;
-  const activeCount = data.devices.length - inactiveCount;
   const currentOrigin = window.location.origin;
   const accessOrigin = data.publicUrl?.trim() || null;
   const previewOrigin = data.previewDomain?.trim() || null;
@@ -413,23 +411,19 @@ export default function DeviceManagement({ onLoggedOut }: { onLoggedOut: () => v
       </div>
       {trustedDeviceEnabled && <p className="settings-detail-note device-policy-enabled-note">{t('devices.deviceProtectionEnabledHint')}</p>}
       {trustedDeviceEnabled && <>
-      {data.currentDeviceId && <button type="button" className="device-authorize-other" aria-label={t('devices.authorizeOther')} disabled={busy} onClick={() => setAdding(true)}>{t('devices.authorizeOther')}</button>}
-      <h3 id="device-list-title">{t('devices.listTitle')}</h3>
-      <div className="device-tabs" role="tablist" aria-label={t('devices.title')}>
-        <button id="device-active-tab" role="tab" aria-selected={!showingHistory} aria-controls="device-list-panel" className="device-tab" onClick={() => setDeviceTab('active')}>{t('devices.activeTab')}<span>{activeCount}</span></button>
-        <button id="device-history-tab" role="tab" aria-selected={showingHistory} aria-controls="device-list-panel" className="device-tab" onClick={() => setDeviceTab('history')}>{t('devices.historyTab')}<span>{inactiveCount}</span></button>
-      </div>
-      <div id="device-list-panel" role="tabpanel" aria-labelledby={showingHistory ? 'device-history-tab' : 'device-active-tab'}>
+      <div className="device-list-heading"><h3 id="device-list-title">{showHistory ? t('devices.historyTitle') : t('devices.listTitle')}</h3>{!showHistory ? <button type="button" className="device-history-link" onClick={() => setShowHistory(true)}>{t('devices.historyLink', { n: inactiveCount })}</button> : <button type="button" className="device-history-link" onClick={() => setShowHistory(false)}>{t('devices.backToActive')}</button>}</div>
+      <div id="device-list-panel">
         {devices.length > 0 && <div className="settings-page-list">
           {devices.map(d => <button className="settings-page-row device-row" key={d.id} onClick={() => setSelected(d)}>
             <span className="device-row-copy"><span className="device-row-main"><span>{d.name}</span>{d.id === data.currentDeviceId && <small className="device-current-badge">{t('devices.current')}</small>}</span>
               <span className="device-row-secondary"><span>{d.browser_summary}</span><span>{remainingExpiry(d, now)}</span></span></span><span className="settings-page-chevron" aria-hidden="true">›</span>
           </button>)}
         </div>}
-        {devices.length === 0 && <p className="device-empty" role="status">{t(showingHistory ? 'devices.noHistory' : 'devices.noActive')}</p>}
-        {!showingHistory && !data.currentDeviceId && <div className="settings-page-list device-action-list">
+        {devices.length === 0 && <p className="device-empty" role="status">{t(showHistory ? 'devices.noHistory' : 'devices.noActive')}</p>}
+        {!showHistory && !data.currentDeviceId && <div className="settings-page-list device-action-list">
           <button type="button" className="settings-page-row device-add-row" aria-label={t('devices.addSelf')} disabled={busy} onClick={() => setSelfSheet(true)}><span className="device-action-copy"><strong>{t('devices.addSelf')}</strong><small>{t('devices.addSelfAddress', { origin: currentOrigin })}</small></span><span className="settings-page-chevron" aria-hidden="true">›</span></button>
         </div>}
+        {!showHistory && data.currentDeviceId && <button type="button" className="device-authorize-other" aria-label={t('devices.authorizeOther')} disabled={busy} onClick={() => setAdding(true)}>{t('devices.authorizeOther')}</button>}
       </div>
       </>}
     </section>

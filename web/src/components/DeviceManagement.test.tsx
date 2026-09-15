@@ -97,13 +97,9 @@ describe('compact device management', () => {
     expect(screen.getByText(t('devices.current'))).toBeTruthy();
     expect(screen.queryByRole('button', { name: t('devices.selfRegistered') })).toBeNull();
     expect(screen.getByRole('button', { name: t('devices.authorizeOther') })).toBeTruthy();
-    const activeTab = screen.getByRole('tab', { name: new RegExp(t('devices.activeTab')) });
-    const historyTab = screen.getByRole('tab', { name: new RegExp(t('devices.historyTab')) });
-    expect(activeTab.getAttribute('aria-selected')).toBe('true'); expect(activeTab.textContent).toContain('2');
-    expect(historyTab.getAttribute('aria-selected')).toBe('false'); expect(historyTab.textContent).toContain('1');
-    fireEvent.click(historyTab);
-    expect(activeTab.getAttribute('aria-selected')).toBe('false'); expect(historyTab.getAttribute('aria-selected')).toBe('true');
-    expect(screen.getByRole('button', { name: t('devices.authorizeOther') })).toBeTruthy();
+    const historyLink = screen.getByRole('button', { name: new RegExp(t('devices.historyLink', { n: 1 }).replace(/[()（）]/g, '\\$&')) });
+    fireEvent.click(historyLink);
+    expect(screen.getByRole('heading', { name: t('devices.historyTitle') })).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: new RegExp(history.name) }));
     expect(screen.getByText(history.id)).toBeTruthy(); expect(screen.getAllByText(history.browser_summary)).toHaveLength(2);
     expect(screen.queryByText(t('devices.activeStatus'))).toBeNull(); expect(screen.getAllByText(t('devices.revoked')).length).toBeGreaterThan(0);
