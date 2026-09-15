@@ -369,9 +369,10 @@ button.settings-page-row:disabled, .settings-page-row.disabled { color: rgba(235
 .device-add-row, .device-inline { color: var(--blue); }
 .device-inline { background: none; border: none; min-height: 44px; padding: 10px 4px; font-size: 13px; }
 .device-authorize-other {
+  display: block;
   width: min(100%, 340px);
   min-height: 52px;
-  margin: 0 auto;
+  margin: 12px auto 0;
   padding: 0 20px;
   border: 0;
   border-radius: 14px;
