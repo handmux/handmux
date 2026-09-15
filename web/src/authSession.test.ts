@@ -12,41 +12,74 @@ afterEach(() => {
 });
 
 describe('device authentication transport', () => {
-  it('prefers a confirmed device session over a saved fixed Token', async () => {
+  it('confirms a recovered candidate using the formal cookie before exposing a session', async () => {
+    const candidate = { ...status(false), tokenAuthenticated: true, currentDeviceId: null, sessionPending: true };
+    const fetcher = vi.fn().mockResolvedValueOnce(json(candidate)).mockResolvedValueOnce(json(status()));
+    vi.stubGlobal('fetch', fetcher);
+    await expect(authRequest()).resolves.toMatchObject({ authenticated: true, currentDeviceId: 'dev_test' });
+    expect(fetcher).toHaveBeenCalledTimes(2);
+  });
+
+  it('stays unauthenticated when the browser rejects the recovered formal cookie', async () => {
+    const candidate = { ...status(false), tokenAuthenticated: true, currentDeviceId: null, sessionPending: true };
+    const fetcher = vi.fn().mockResolvedValue(json(candidate));
+    vi.stubGlobal('fetch', fetcher);
+    await expect(authRequest()).resolves.toMatchObject({ authenticated: false, currentDeviceId: null });
+    expect(fetcher).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not recheck a Token-only session without a recovered candidate', async () => {
+    const fetcher = vi.fn().mockResolvedValue(json({ ...status(), mode: 'token', tokenAuthenticated: true, currentDeviceId: null }));
+    vi.stubGlobal('fetch', fetcher);
+    await expect(authRequest()).resolves.toMatchObject({ authenticated: true });
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+  it('sends the Token together with a confirmed device session', async () => {
     localStorage.setItem('tw_token', 'old-shared-token');
     applyAuthStatus(status());
     expect(localStorage.getItem('tw_token')).toBe('old-shared-token');
-    expect(authenticationHeaders()).toEqual({ 'X-Handmux-Request': '1' });
+    expect(authenticationHeaders()).toEqual({ Authorization: 'Bearer old-shared-token' });
     const fetcher = vi.fn(async () => json({ ok: true }));
     vi.stubGlobal('fetch', fetcher);
     await requestJson('/api/sessions');
     expect(fetcher).toHaveBeenCalledWith('/api/sessions', expect.objectContaining({
-      credentials: 'same-origin', cache: 'no-store', headers: { 'X-Handmux-Request': '1' },
+      credentials: 'same-origin', cache: 'no-store', headers: { Authorization: 'Bearer old-shared-token' },
     }));
   });
 
-  it('sends Bearer with origin protection when only fixed Token login is available', () => {
+  it('sends Bearer with origin protection when only Token login is available', () => {
     applyAuthStatus({ mode: 'trusted-device', tokenEnabled: true, currentDeviceId: null, authenticated: false, serverTime: Date.now() });
     localStorage.setItem('tw_token', 'legacy');
-    expect(authenticationHeaders()).toEqual({ 'X-Handmux-Request': '1', Authorization: 'Bearer legacy' });
+    expect(authenticationHeaders()).toEqual({ Authorization: 'Bearer legacy' });
   });
 
-  it('does not treat a proxy 401 as a revoked device', async () => {
-    const fetcher = vi.fn().mockResolvedValueOnce(json({}, 401)).mockResolvedValueOnce(json(status()));
+  it('maps a direct 401 to UnauthorizedError without rechecking auth status', async () => {
+    const fetcher = vi.fn().mockResolvedValueOnce(json({}, 401));
     vi.stubGlobal('fetch', fetcher);
     const result = requestJson('/api/sessions');
-    await expect(result).rejects.not.toBeInstanceOf(UnauthorizedError);
-    expect(fetcher).toHaveBeenLastCalledWith('/api/auth/status', expect.anything());
+    await expect(result).rejects.toBeInstanceOf(UnauthorizedError);
+    expect(fetcher).toHaveBeenCalledTimes(1);
   });
 
-  it('only emits UnauthorizedError after the auth authority confirms invalidation', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(json({}, 401)).mockResolvedValueOnce(json(status(false))));
+  it('maps a direct 401 for a Token-authenticated browser', async () => {
+    applyAuthStatus({ mode: 'trusted-device', tokenEnabled: true, tokenAuthenticated: true,
+      currentDeviceId: null, authenticated: true, serverTime: Date.now() });
+    const fetcher = vi.fn().mockResolvedValueOnce(json({}, 401));
+    vi.stubGlobal('fetch', fetcher);
     await expect(requestJson('/api/sessions')).rejects.toBeInstanceOf(UnauthorizedError);
+    expect(fetcher).toHaveBeenCalledTimes(1);
   });
 
-  it('preserves authorization on proxy failures or an unavailable status endpoint', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(json({}, 401)).mockRejectedValueOnce(new Error('offline')));
-    await expect(requestJson('/api/sessions')).rejects.not.toBeInstanceOf(UnauthorizedError);
+  it('does not recheck auth status after a 401', async () => {
+    const fetcher = vi.fn().mockResolvedValueOnce(json({}, 401));
+    vi.stubGlobal('fetch', fetcher);
+    await expect(requestJson('/api/sessions')).rejects.toBeInstanceOf(UnauthorizedError);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
+  it('preserves network errors when no HTTP response is available', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('offline')));
+    await expect(requestJson('/api/sessions')).rejects.toThrow('offline');
     expect(hasDeviceSession()).toBe(true);
   });
 
@@ -71,21 +104,5 @@ describe('device authentication transport', () => {
     expect(fetcher).toHaveBeenCalledWith('/api/auth/pairing', expect.objectContaining({
       method: 'DELETE', body: '{"id":"pair_123"}', credentials: 'same-origin',
     }));
-  });
-
-  it('rechecks a candidate-authenticated status before exposing a device session', async () => {
-    const fetcher = vi.fn()
-      .mockResolvedValueOnce(json({ mode: 'trusted-device', authenticated: true, currentDeviceId: null, tokenEnabled: true, serverTime: Date.now() }))
-      .mockResolvedValueOnce(json(status()));
-    vi.stubGlobal('fetch', fetcher);
-    await expect(authRequest()).resolves.toMatchObject({ currentDeviceId: 'dev_test' });
-    expect(fetcher).toHaveBeenCalledTimes(2);
-  });
-
-  it('normalizes a candidate-only status when the formal cookie is still absent', async () => {
-    const candidate = { mode: 'trusted-device' as const, authenticated: true, tokenAuthenticated: false, currentDeviceId: null, tokenEnabled: true, serverTime: Date.now() };
-    const fetcher = vi.fn().mockResolvedValueOnce(json(candidate)).mockResolvedValueOnce(json(candidate));
-    vi.stubGlobal('fetch', fetcher);
-    await expect(authRequest()).resolves.toMatchObject({ authenticated: false, currentDeviceId: null, tokenAuthenticated: false });
   });
 });

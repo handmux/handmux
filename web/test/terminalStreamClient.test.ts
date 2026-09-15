@@ -130,7 +130,7 @@ describe('openTerminalStream', () => {
     }
   });
 
-  it('still opens a trusted-device stream when localStorage is unavailable', async () => {
+  it('does not throw when reading the saved Token fails', async () => {
     applyAuthStatus({ mode: 'trusted-device', authenticated: true, currentDeviceId: 'dev_test', serverTime: Date.now() });
     vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => { throw new Error('Storage denied'); });
     const stream = openTerminalStream({ pane: '%7', WebSocketCtor: FakeWebSocket });

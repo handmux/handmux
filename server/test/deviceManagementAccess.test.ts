@@ -44,8 +44,11 @@ async function fixture() {
   };
   const promote = async (candidate: string) => {
     const result = await request(server).get('/api/auth/status').set(headers).set('Cookie', candidate).expect(200);
-    expect(result.body.authenticated).toBe(true);
-    return (result.headers['set-cookie'] as unknown as string[]).find(value => value.startsWith(`${sessionCookieName(origin)}=`))!.split(';')[0]!;
+    expect(result.body).toMatchObject({ authenticated: false, sessionPending: true, currentDeviceId: null });
+    const cookie = (result.headers['set-cookie'] as unknown as string[]).find(value => value.startsWith(`${sessionCookieName(origin)}=`))!.split(';')[0]!;
+    const confirmed = await request(server).get('/api/auth/status').set(headers).set('Cookie', cookie).expect(200);
+    expect(confirmed.body).toMatchObject({ authenticated: true, sessionPending: false });
+    return cookie;
   };
   const enroll = async (name: string, expire = '1h') => {
     const pending = await begin();
@@ -114,8 +117,10 @@ describe('Web device management across real HTTP and WebSocket boundaries', () =
     expect(f.service.trustedOrigins).toEqual([f.origin, extraOrigin]);
     const candidateCookie = String(candidate.headers['set-cookie']?.[0]).split(';')[0]!;
     const status = await request(f.server).get('/api/auth/status').set({ Host: 'phone.example.com', Origin: extraOrigin, 'X-Forwarded-Proto': 'https', Authorization: 'Bearer secret', 'X-Handmux-Request': '1' }).set('Cookie', candidateCookie).expect(200);
-    expect(status.body.authenticated).toBe(true);
+    expect(status.body).toMatchObject({ authenticated: false, sessionPending: true, currentDeviceId: null });
     const primary = String((status.headers['set-cookie'] as unknown as string[] | undefined)?.find(value => value.startsWith('__Host-handmux_session='))).split(';')[0]!;
+    const confirmed = await request(f.server).get('/api/auth/status').set({ Host: 'phone.example.com', Origin: extraOrigin, 'X-Forwarded-Proto': 'https', Authorization: 'Bearer secret' }).set('Cookie', primary).expect(200);
+    expect(confirmed.body).toMatchObject({ authenticated: true, sessionPending: false });
     await request(f.server).get('/api/private').set({ Host: 'phone.example.com', Origin: extraOrigin, 'X-Forwarded-Proto': 'https', 'X-Handmux-Request': '1' }).set('Cookie', primary).set('Authorization', 'Bearer secret').expect(200);
   });
 
@@ -130,8 +135,12 @@ describe('Web device management across real HTTP and WebSocket boundaries', () =
     const before = await request(f.server).get('/api/auth/status')
       .set({ Host: 'phone.example.com', Origin: extraOrigin, 'X-Forwarded-Proto': 'https', Authorization: 'Bearer secret' })
       .set('Cookie', pendingCookie).expect(200);
-    expect(before.body).toMatchObject({ authenticated: true, originTrusted: true, currentDeviceId: device.id });
+    expect(before.body).toMatchObject({ authenticated: false, sessionPending: true, originTrusted: true, currentDeviceId: null });
     const primaryCookie = (before.headers['set-cookie'] as unknown as string[]).find(value => value.startsWith('__Host-handmux_session='))!.split(';')[0]!;
+    const confirmed = await request(f.server).get('/api/auth/status')
+      .set({ Host: 'phone.example.com', Origin: extraOrigin, 'X-Forwarded-Proto': 'https', Authorization: 'Bearer secret' })
+      .set('Cookie', primaryCookie).expect(200);
+    expect(confirmed.body).toMatchObject({ authenticated: true, sessionPending: false, originTrusted: true, currentDeviceId: device.id });
 
     f.service.removeTrustedOrigin(extraOrigin);
     const after = await request(f.server).get('/api/auth/status')
