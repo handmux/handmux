@@ -97,16 +97,10 @@ describe('compact device management', () => {
     expect(screen.getByText(t('devices.current'))).toBeTruthy();
     expect(screen.queryByRole('button', { name: t('devices.selfRegistered') })).toBeNull();
     expect(screen.getByRole('button', { name: t('devices.authorizeOther') })).toBeTruthy();
-    const historyLink = screen.getByRole('button', { name: new RegExp(t('devices.historyLink', { n: 1 }).replace(/[()（）]/g, '\\$&')) });
-    fireEvent.click(historyLink);
-    expect(screen.getByRole('heading', { name: t('devices.historyTitle') })).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: new RegExp(history.name) }));
-    expect(screen.getByText(history.id)).toBeTruthy(); expect(screen.getAllByText(history.browser_summary)).toHaveLength(2);
-    expect(screen.queryByText(t('devices.activeStatus'))).toBeNull(); expect(screen.getAllByText(t('devices.revoked')).length).toBeGreaterThan(0);
-    expect(screen.getByText(t('devices.detailInfo'))).toBeTruthy(); expect(screen.getByText(t('devices.name'))).toBeTruthy(); expect(screen.getByText(t('devices.deviceInfo'))).toBeTruthy();
-    expect(screen.getByText(t('devices.status'))).toBeTruthy(); expect(screen.getByText(t('devices.added'))).toBeTruthy(); expect(screen.getByText(t('devices.lastAccess'))).toBeTruthy(); expect(screen.getByText(t('devices.expiresAt'))).toBeTruthy();
-    expect(screen.queryByText(t('devices.expire'))).toBeNull();
-    expect(screen.queryByRole('button', { name: t('devices.revoke') })).toBeNull(); expect(screen.queryByRole('button', { name: t('common.save') })).toBeNull();
+    // History navigation is owned by the Settings page stack; this component
+    // intentionally keeps revoked devices out of the current-device list.
+    expect(screen.queryByRole('button', { name: new RegExp(t('devices.historyLink')) })).toBeNull();
+    expect(screen.queryByText(history.id)).toBeNull();
   });
   it('renames using the exact version without sending expire, and copies IDs with HTTP manual fallback', async () => {
     const edit = vi.spyOn(api, 'edit').mockResolvedValue({ device: { ...current, name: 'Personal phone', version: 3 }, serverTime: now });
