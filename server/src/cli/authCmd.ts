@@ -1,6 +1,7 @@
 import { text, select, confirm, isCancel } from '@clack/prompts';
 import { AuthControlError, connectAuthControl } from '../deviceAuth/control.js';
 import { DeviceAuthError, parseExpire, validateName } from '../deviceAuth/service.js';
+import { tokenWarning } from './authDefaults.js';
 import { t } from './i18n/index.js';
 
 type DeviceAction = 'status' | 'on' | 'off' | 'add' | 'list' | 'edit' | 'revoke';
@@ -94,7 +95,9 @@ export async function runAuthCommand({ argv, home, interactive = !!process.stdin
     if (args.target === 'address') {
       if (args.action === 'status' || args.action === 'list') {
         const result = await client.request({ op: 'address-status' }) as { enabled: boolean; origins: string[] };
-        log(`访问地址限制: ${result.enabled ? '已开启' : '未开启'}`); result.origins.forEach(origin => log(origin)); return 0;
+        log(`访问地址限制: ${result.enabled ? '已开启' : '未开启'}`);
+        if (!result.enabled) log(tokenWarning(t('auth.addressWarning')));
+        result.origins.forEach(origin => log(origin)); return 0;
       }
       if (args.action === 'on' || args.action === 'off') {
         if (args.action === 'off' && interactive && !await ask(confirm({ message: t('auth.addressDisableConfirm'), initialValue: false }))) throw canceled;
@@ -106,7 +109,9 @@ export async function runAuthCommand({ argv, home, interactive = !!process.stdin
     }
     if (args.action === 'status') {
       const result = await client.request({ op: 'device-status' }) as { enabled: boolean; devices: unknown[] };
-      log(`可信设备保护: ${result.enabled ? '已开启' : '未开启'}`); log('ID\tNAME\tSTATUS\tEXPIRES\tADDED\tLAST ACCESS\tBROWSER'); result.devices.forEach(d => log(outputDevice(d))); return 0;
+      log(`可信设备保护: ${result.enabled ? '已开启' : '未开启'}`);
+      if (!result.enabled) log(tokenWarning(t('auth.warning')));
+      log('ID\tNAME\tSTATUS\tEXPIRES\tADDED\tLAST ACCESS\tBROWSER'); result.devices.forEach(d => log(outputDevice(d))); return 0;
     }
     if (args.action === 'on' || args.action === 'off') {
       if (args.action === 'off' && interactive && !await ask(confirm({ message: t('auth.deviceDisableConfirm'), initialValue: false }))) throw canceled;

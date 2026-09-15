@@ -46,7 +46,9 @@ describe('auth policy controls', () => {
     const connect = vi.fn(async () => ({ request, close: vi.fn() }));
     expect(await runAuthCommand({ argv: ['device', 'status'], home: '/unused', interactive: true, connect, log: vi.fn() })).toBe(0);
     expect(request).toHaveBeenLastCalledWith({ op: 'device-status' });
-    prompts.confirm.mockResolvedValueOnce(true);
+    prompts.confirm.mockImplementationOnce(async ({ message }: { message: string }) => {
+      expect(message).toContain('increases security risk'); expect(message).toContain('Confirm you want to turn it off?'); return true;
+    });
     expect(await runAuthCommand({ argv: ['device', 'off'], home: '/unused', interactive: true, connect, log: vi.fn() })).toBe(0);
     expect(request).toHaveBeenLastCalledWith({ op: 'device-policy', enabled: false });
   });
@@ -56,9 +58,22 @@ describe('auth policy controls', () => {
     const connect = vi.fn(async () => ({ request, close: vi.fn() }));
     expect(await runAuthCommand({ argv: ['address', 'status'], home: '/unused', interactive: true, connect, log: vi.fn() })).toBe(0);
     expect(request).toHaveBeenLastCalledWith({ op: 'address-status' });
-    prompts.confirm.mockResolvedValueOnce(true);
+    prompts.confirm.mockImplementationOnce(async ({ message }: { message: string }) => {
+      expect(message).toContain('increases security risk'); expect(message).toContain('Confirm you want to turn it off?'); return true;
+    });
     expect(await runAuthCommand({ argv: ['address', 'off'], home: '/unused', interactive: true, connect, log: vi.fn() })).toBe(0);
     expect(request).toHaveBeenLastCalledWith({ op: 'address-policy', enabled: false });
+  });
+  it('prints a yellow-ready warning copy when either protection is off', async () => {
+    const request = vi.fn(async (args: Record<string, unknown>) => args.op === 'device-status'
+      ? { enabled: false, devices: [] } : { enabled: false, origins: [] });
+    const connect = vi.fn(async () => ({ request, close: vi.fn() }));
+    const deviceLog = vi.fn();
+    await runAuthCommand({ argv: ['device', 'status'], home: '/unused', interactive: false, connect, log: deviceLog });
+    expect(deviceLog).toHaveBeenCalledWith(expect.stringContaining('handmux auth device on'));
+    const addressLog = vi.fn();
+    await runAuthCommand({ argv: ['address', 'status'], home: '/unused', interactive: false, connect, log: addressLog });
+    expect(addressLog).toHaveBeenCalledWith(expect.stringContaining('handmux auth address on'));
   });
 });
 
