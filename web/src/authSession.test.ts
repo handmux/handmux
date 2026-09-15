@@ -31,35 +31,33 @@ describe('device authentication transport', () => {
     expect(authenticationHeaders()).toEqual({ Authorization: 'Bearer legacy' });
   });
 
-  it('does not treat a proxy 401 as a revoked device', async () => {
-    const fetcher = vi.fn().mockResolvedValueOnce(json({}, 401)).mockResolvedValueOnce(json(status()));
+  it('maps a direct 401 to UnauthorizedError without rechecking auth status', async () => {
+    const fetcher = vi.fn().mockResolvedValueOnce(json({}, 401));
     vi.stubGlobal('fetch', fetcher);
     const result = requestJson('/api/sessions');
-    await expect(result).rejects.not.toBeInstanceOf(UnauthorizedError);
-    expect(fetcher).toHaveBeenLastCalledWith('/api/auth/status', expect.anything());
+    await expect(result).rejects.toBeInstanceOf(UnauthorizedError);
+    expect(fetcher).toHaveBeenCalledTimes(1);
   });
 
-  it('does not treat a proxy 401 as logout for a Token-authenticated browser', async () => {
-    // Token auth has no currentDeviceId by design. It still must go through
-    // the status authority before a restart-time 401 can clear the page.
+  it('maps a direct 401 for a Token-authenticated browser', async () => {
     applyAuthStatus({ mode: 'trusted-device', tokenEnabled: true, tokenAuthenticated: true,
       currentDeviceId: null, authenticated: true, serverTime: Date.now() });
-    const fetcher = vi.fn()
-      .mockResolvedValueOnce(json({}, 401))
-      .mockResolvedValueOnce(json({ mode: 'trusted-device', tokenEnabled: true, tokenAuthenticated: true,
-        currentDeviceId: null, authenticated: true, serverTime: Date.now() }));
+    const fetcher = vi.fn().mockResolvedValueOnce(json({}, 401));
     vi.stubGlobal('fetch', fetcher);
-    await expect(requestJson('/api/sessions')).rejects.not.toBeInstanceOf(UnauthorizedError);
-  });
-
-  it('only emits UnauthorizedError after the auth authority confirms invalidation', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(json({}, 401)).mockResolvedValueOnce(json(status(false))));
     await expect(requestJson('/api/sessions')).rejects.toBeInstanceOf(UnauthorizedError);
+    expect(fetcher).toHaveBeenCalledTimes(1);
   });
 
-  it('preserves authorization on proxy failures or an unavailable status endpoint', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(json({}, 401)).mockRejectedValueOnce(new Error('offline')));
-    await expect(requestJson('/api/sessions')).rejects.not.toBeInstanceOf(UnauthorizedError);
+  it('does not recheck auth status after a 401', async () => {
+    const fetcher = vi.fn().mockResolvedValueOnce(json({}, 401));
+    vi.stubGlobal('fetch', fetcher);
+    await expect(requestJson('/api/sessions')).rejects.toBeInstanceOf(UnauthorizedError);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
+  it('preserves network errors when no HTTP response is available', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('offline')));
+    await expect(requestJson('/api/sessions')).rejects.toThrow('offline');
     expect(hasDeviceSession()).toBe(true);
   });
 

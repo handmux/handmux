@@ -1,5 +1,4 @@
 import { getToken } from './storage.js';
-import { confirmedSessionInvalid } from './authSession.js';
 import {
   parseTerminalStreamMessage,
   type TerminalReadyMessage,
@@ -333,13 +332,12 @@ export function openTerminalStream({
       clearProbe();
       if (closed) return;
       if (event.code === 4001) {
-        // A restart/proxy handoff can close every socket with 4001, including
-        // Token-authenticated browsers that intentionally have no device id.
-        // Confirm with the auth authority before leaving the current page;
-        // unavailable status keeps the normal reconnect path alive.
-        void confirmedSessionInvalid().then((invalid) => {
-          if (!closed && invalid) { clearReconnectTimer(); onAuthFail?.(); }
-        });
+        // 4001 is the server's explicit authentication-failure close code.
+        // Handle it directly; transient restarts that produce no response stay
+        // on the normal network-error/reconnect path instead.
+        clearReconnectTimer();
+        onAuthFail?.();
+        return;
       }
       // A cold app launch can lose its first stream while the tunnel and tmux control path warm up.
       // Complete one fresh connection attempt before telling Terminal to fall back to snapshots. Once a

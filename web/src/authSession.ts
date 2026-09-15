@@ -98,22 +98,8 @@ async function performAuthRequest(path: string, method: string, id?: string): Pr
 }
 
 // A reverse proxy can return 401 too. In cookie mode, only the auth authority may log the user out.
-export async function confirmedSessionInvalid(): Promise<boolean> {
-  try {
-    const status = await authRequest();
-    applyAuthStatus(status);
-    return !status.authenticated;
-  } catch { return false; }
-}
 export async function authenticationError(): Promise<Error> {
-  // A transient 401 can be emitted by a reverse proxy while the server is
-  // restarting. Never treat the absence of an in-memory device state as proof
-  // of logout: Token-authenticated browsers intentionally have no device id,
-  // and a freshly loaded app has not populated auth state yet. Only the auth
-  // authority's explicit `authenticated: false` response can invalidate the
-  // session; unavailable/failed status checks keep the current page mounted.
-  return await confirmedSessionInvalid()
-    ? new UnauthorizedError() : new Error('Request rejected; could not confirm session invalidation');
+  return new UnauthorizedError();
 }
 
 export async function logoutDevice(): Promise<void> {

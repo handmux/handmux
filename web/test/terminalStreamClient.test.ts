@@ -276,19 +276,17 @@ describe('openTerminalStream', () => {
     },
   );
 
-  it.each(['unauthorized', 'authentication timeout', ''])('reports authentication code after confirmed invalidation for reason %j', async (reason) => {
+  it.each(['unauthorized', 'authentication timeout', ''])('reports authentication code immediately for reason %j', async (reason) => {
     vi.useFakeTimers();
     const onAuthFail = vi.fn();
-    vi.stubGlobal('fetch', vi.fn(async () => ({
-      ok: true,
-      status: 200,
-      json: async () => ({ mode: 'trusted-device', authenticated: false, serverTime: Date.now() }),
-    })));
+    const fetcher = vi.fn();
+    vi.stubGlobal('fetch', fetcher);
     const stream = openTerminalStream({ pane: '%7', token: 'wrong', WebSocketCtor: FakeWebSocket, onAuthFail });
     latestSocket().open();
     latestSocket().close(4001, reason);
     await vi.advanceTimersByTimeAsync(0);
     expect(onAuthFail).toHaveBeenCalledOnce();
+    expect(fetcher).not.toHaveBeenCalled();
     vi.advanceTimersByTime(10000);
     expect(FakeWebSocket.instances).toHaveLength(1);
     stream.close();
@@ -296,7 +294,7 @@ describe('openTerminalStream', () => {
     vi.useRealTimers();
   });
 
-  it.each([false, true])('confirms device invalidation after 4001 (storage unavailable: %s)', async (storageUnavailable) => {
+  it.each([false, true])('reports 4001 directly (storage unavailable: %s)', async (storageUnavailable) => {
     vi.useFakeTimers();
     applyAuthStatus({ mode: 'trusted-device', authenticated: true, currentDeviceId: 'dev_test', serverTime: Date.now() });
     const onAuthFail = vi.fn();
@@ -310,17 +308,10 @@ describe('openTerminalStream', () => {
     try {
       latestSocket().open();
       latestSocket().close(4001, 'unauthorized');
-      expect(onAuthFail).not.toHaveBeenCalled();
-      await vi.advanceTimersByTimeAsync(0);
-      expect(fetcher).toHaveBeenCalledWith('/api/auth/status', expect.anything());
+      expect(onAuthFail).toHaveBeenCalledOnce();
+      expect(fetcher).not.toHaveBeenCalled();
       await vi.advanceTimersByTimeAsync(10);
-      if (storageUnavailable) {
-        expect(onAuthFail).not.toHaveBeenCalled();
-        expect(FakeWebSocket.instances).toHaveLength(2);
-      } else {
-        expect(onAuthFail).toHaveBeenCalledOnce();
-        expect(FakeWebSocket.instances).toHaveLength(1);
-      }
+      expect(FakeWebSocket.instances).toHaveLength(1);
     } finally {
       await stream.close();
       applyAuthStatus({ mode: 'trusted-device', tokenEnabled: true, currentDeviceId: null, authenticated: false, serverTime: Date.now() });
@@ -329,7 +320,7 @@ describe('openTerminalStream', () => {
     }
   });
 
-  it('keeps a Token/no-device stream on the current page when auth status is unavailable', async () => {
+  it('reports authentication failure without checking auth status for a Token stream', async () => {
     vi.useFakeTimers();
     applyAuthStatus({ mode: 'trusted-device', tokenEnabled: true, tokenAuthenticated: true,
       authenticated: true, currentDeviceId: null, serverTime: Date.now() });
@@ -345,8 +336,8 @@ describe('openTerminalStream', () => {
       latestSocket().open();
       latestSocket().close(4001, 'authentication timeout');
       await vi.advanceTimersByTimeAsync(10);
-      expect(onAuthFail).not.toHaveBeenCalled();
-      expect(FakeWebSocket.instances).toHaveLength(2);
+      expect(onAuthFail).toHaveBeenCalledOnce();
+      expect(FakeWebSocket.instances).toHaveLength(1);
     } finally {
       await stream.close();
       applyAuthStatus({ mode: 'trusted-device', tokenEnabled: true, currentDeviceId: null, authenticated: false, serverTime: Date.now() });
