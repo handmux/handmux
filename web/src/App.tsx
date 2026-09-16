@@ -2962,7 +2962,6 @@ export default function App() {
                 localStorage.setItem(`tw_lens_${current.paneId}`, 'terminal');
               }} />
               <AgentConversationComposer
-                key={`conversation-controls\0${normalizedConversationIdentity.agentId}\0${normalizedConversationIdentity.sessionId}`}
                 agentId={normalizedConversationIdentity.agentId}
                 sessionId={normalizedConversationIdentity.sessionId}
                 desktop={desktopInput}
