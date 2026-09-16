@@ -2882,8 +2882,8 @@ export default function App() {
           />
           {/* The host replaces the primary Surface and its matching controls as one keyed bundle. */}
           <PaneSurfaceHost
-            key={paneSurfaceOwnerKey}
             ownerKey={paneSurfaceOwnerKey}
+            controlsKey={currentPaneId ?? 'none'}
             primary={current.paneId && (
             chatLens ? (
               durableConversationRecovery ? (
