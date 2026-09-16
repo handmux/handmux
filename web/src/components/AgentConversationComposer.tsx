@@ -215,7 +215,7 @@ export default function AgentConversationComposer({
     void voice.start();
   };
 
-  const send = async (requestedText = value): Promise<void> => {
+  const send = async (requestedText = value, preserveDraft = false): Promise<void> => {
     const text = requestedText.trim();
     if (!text || draftLockedRef.current || recordingRef.current) return;
     const sentAgentId = agentId;
@@ -228,16 +228,12 @@ export default function AgentConversationComposer({
     let definitiveFailure = false;
     try {
       if (onSlashCommand && await onSlashCommand(text)) {
-        saveDraft('');
-        setValue('');
-        autoGrow(ref.current);
+        if (!preserveDraft) { saveDraft(''); setValue(''); autoGrow(ref.current); }
         return;
       }
       if (!canSend) throw new Error(conversation.error || t('agentConversation.unavailable'));
       onSendStart?.();
-      saveDraft('');
-      setValue('');
-      autoGrow(ref.current);
+      if (!preserveDraft) { saveDraft(''); setValue(''); autoGrow(ref.current); }
       await conversation.send(text, { queueHint: currentActivity !== 'idle' });
     } catch (cause) {
       definitiveFailure = !isConversationDeliveryUnknown(cause);
@@ -252,11 +248,11 @@ export default function AgentConversationComposer({
       deferredDraftRef.current = '';
       const persisted = getConversationDraft(sentAgentId, sentSessionId);
       const nextDraft = appendConversationDraft(persisted, deferred);
-      const restored = definitiveFailure
-        ? mergeConversationDraftAfterFailure(text, nextDraft) : nextDraft;
-      saveConversationDraft(sentAgentId, sentSessionId, restored);
+      const restored = preserveDraft ? persisted : (definitiveFailure
+        ? mergeConversationDraftAfterFailure(text, nextDraft) : nextDraft);
+      if (!preserveDraft) saveConversationDraft(sentAgentId, sentSessionId, restored);
       if (mountedRef.current && identityRef.current === sentKey) {
-        setValue(restored);
+        if (!preserveDraft) setValue(restored);
         draftLockedRef.current = false;
         setSubmitting(false);
       }
@@ -306,7 +302,7 @@ export default function AgentConversationComposer({
             disabled={draftLocked || recording || (item.enter === true && sendUnavailable)} onClick={() => {
               if (draftLockedRef.current || recordingRef.current
                 || (item.enter === true && sendUnavailable)) return;
-              if (item.enter) { void send(item.text); return; }
+            if (item.enter) { void send(item.text, true); return; }
               setValue(item.text);
               saveDraft(item.text);
               requestAnimationFrame(() => ref.current?.focus());
