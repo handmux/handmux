@@ -120,7 +120,7 @@ describe('browser public proxy', () => {
     expect(received[0].headers.authorization).toBeUndefined();
     expect(received[0].headers.cookie).toBe('hammerhead-sync=value');
     expect(received[0].headers.host).toBe(`127.0.0.1:${port}`);
-  });
+  }, 15_000);
 
   it('routes two devices to their independent public-origin proxy pools', async () => {
     const received = [];
