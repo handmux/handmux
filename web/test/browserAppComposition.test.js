@@ -3,6 +3,7 @@ import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 const source = readFileSync(path.resolve(process.cwd(), 'src/App.tsx'), 'utf8');
+const surfaceHost = readFileSync(path.resolve(process.cwd(), 'src/components/PaneSurfaceHost.tsx'), 'utf8');
 const styles = readFileSync(path.resolve(process.cwd(), 'src/styles.css'), 'utf8');
 
 describe('built-in browser App composition', () => {
@@ -13,7 +14,7 @@ describe('built-in browser App composition', () => {
     expect(source).toContain('primary={current.paneId && (');
     expect(source).toContain('controls={chatLens ? (');
     expect(source).toContain('key={`conversation-view\\0');
-    expect(source).toContain('key={`conversation-controls\\0');
+    expect(surfaceHost).toContain('key={`controls\\0${controlsKey}`}');
   });
 
   it('keeps the selected chat lens mounted through transient capability failures', () => {
