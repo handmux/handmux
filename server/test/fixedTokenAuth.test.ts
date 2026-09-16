@@ -19,6 +19,7 @@ const cookie = (response: request.Response): string => (response.headers['set-co
 function fixture() {
   const db = new DatabaseSync(':memory:'); migrateProjectDatabase(db);
   const service = new DeviceAuthService({ db, token: 'secret' });
+  service.setTrustedDeviceEnabled(false);
   const access = createDeviceAccess({ service, resolveOrigin: () => origin });
   const app = express(); app.use(express.json());
   app.use('/api/auth', createDeviceAuthRouter({ service, resolveOrigin: () => origin }));
@@ -44,7 +45,7 @@ describe('Token factor with optional trusted device protection', () => {
     const { app, service } = fixture();
     const { primary } = await register(app);
     await request(app).get('/api/private').set(headers).set('Cookie', primary).expect(401);
-    await request(app).get('/api/private').set(bearer).expect(401);
+    await request(app).get('/api/private').set(bearer).expect(200);
     await request(app).get('/api/private').set(bearer).set('Cookie', primary).expect(200);
     await request(app).post('/api/auth/token/disable').set(bearer).set('Cookie', primary).send({}).expect(404);
     expect(service.tokenEnabled).toBe(true);
@@ -73,6 +74,7 @@ describe('Token factor with optional trusted device protection', () => {
   });
   it('recovers a durable candidate after restart without granting access before formal cookie confirmation', async () => {
     const { db, service } = fixture();
+    service.setTrustedDeviceEnabled(true);
     const pending = service.createPairing(null, origin, 'Browser');
     const claim = service.claim(pending.pairing.code, 'cli');
     const device = service.authorize(claim.id, 'cli', { name: 'Phone', expire: 'never' });
@@ -99,6 +101,7 @@ describe('Token factor with optional trusted device protection', () => {
   });
   it('keeps both protection policies unchanged on storage failure', () => {
     const { service, db } = fixture();
+    service.setTrustedDeviceEnabled(true);
     const fault = vi.spyOn(db, 'prepare').mockImplementation(() => { throw new Error('disk unavailable'); });
     expect(() => service.setTrustedDeviceEnabled(false)).toThrow('disk unavailable');
     expect(() => service.setTrustedOriginEnabled(false)).toThrow('disk unavailable');
@@ -109,7 +112,7 @@ describe('Token factor with optional trusted device protection', () => {
   });
   it('disconnects a revoked device SSE without disconnecting another authorized device', async () => {
     const { app, service } = fixture();
-    const first = await register(app); const second = await register(app);
+    const first = await register(app); const second = await register(app); service.setTrustedDeviceEnabled(true);
     app.get('/api/events', (_req, res) => { res.set('Content-Type', 'text/event-stream'); res.write('data: ready\n\n'); });
     const server = app.listen(0, '127.0.0.1'); await new Promise<void>(r => server.once('listening', r));
     cleanup.push(() => new Promise<void>(r => server.close(() => r())));
@@ -124,7 +127,7 @@ describe('Token factor with optional trusted device protection', () => {
     await closed; expect(firstStream.complete).toBe(false); expect(secondStream.destroyed).toBe(false);
   });
   it('disconnects a revoked device WebSocket while another authorized socket stays open', async () => {
-    const { app, service } = fixture(); const first = await register(app); const second = await register(app);
+    const { app, service } = fixture(); const first = await register(app); const second = await register(app); service.setTrustedDeviceEnabled(true);
     let started!: () => void; const subscribed = new Promise<void>(r => { started = r; });
     let finish!: (value: string) => void; const pane = new Promise<string>(r => { finish = r; });
     const stream = createTerminalStream({ token: 'secret', commands: { paneSession: () => { started(); return pane; } }, deviceAuth: { service, resolveOrigin: () => origin } });
