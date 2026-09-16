@@ -117,7 +117,13 @@ function parseStoredSubscription(value: unknown): StoredSubscription | null {
 let subs: StoredSubscription[] = load();
 let deviceAuthorization: ((deviceId: string) => boolean) | null = null;
 const allowed = (rec: StoredSubscription): boolean => {
-  try { return deviceAuthorization ? (!rec.authDeviceId || deviceAuthorization(rec.authDeviceId)) : !rec.authDeviceId; }
+  try {
+    // Once device authorization is active, legacy unbound subscriptions are no
+    // longer eligible. They have no device identity that can be authorized.
+    return deviceAuthorization
+      ? Boolean(rec.authDeviceId && deviceAuthorization(rec.authDeviceId))
+      : !rec.authDeviceId;
+  }
   catch { return false; }
 };
 export function setDeviceAuthorization(check: ((deviceId: string) => boolean) | null): void { deviceAuthorization = check; }

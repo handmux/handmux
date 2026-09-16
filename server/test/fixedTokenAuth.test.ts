@@ -28,10 +28,10 @@ function fixture() {
   cleanup.push(() => { access.close(); service.close(); db.close(); });
   return { db, service, app };
 }
-async function register(app: express.Express) {
+async function register(app: express.Express, name = 'This browser') {
   const pairing = await request(app).post('/api/auth/pairing').set(bearer).send({}).expect(200);
   const candidate = cookie(pairing);
-  const added = await request(app).post('/api/auth/devices/self').set(bearer).set('Cookie', candidate).send({ name: 'This browser', expire: 'never' }).expect(200);
+  const added = await request(app).post('/api/auth/devices/self').set(bearer).set('Cookie', candidate).send({ name, expire: 'never' }).expect(200);
   return { device: added.body.device, primary: cookie(added), candidate };
 }
 it('recognizes the Token factor while trusted-device protection is enabled', () => {
@@ -112,7 +112,7 @@ describe('Token factor with optional trusted device protection', () => {
   });
   it('disconnects a revoked device SSE without disconnecting another authorized device', async () => {
     const { app, service } = fixture();
-    const first = await register(app); const second = await register(app); service.setTrustedDeviceEnabled(true);
+    const first = await register(app, 'Browser A'); const second = await register(app, 'Browser B'); service.setTrustedDeviceEnabled(true);
     app.get('/api/events', (_req, res) => { res.set('Content-Type', 'text/event-stream'); res.write('data: ready\n\n'); });
     const server = app.listen(0, '127.0.0.1'); await new Promise<void>(r => server.once('listening', r));
     cleanup.push(() => new Promise<void>(r => server.close(() => r())));
@@ -127,7 +127,7 @@ describe('Token factor with optional trusted device protection', () => {
     await closed; expect(firstStream.complete).toBe(false); expect(secondStream.destroyed).toBe(false);
   });
   it('disconnects a revoked device WebSocket while another authorized socket stays open', async () => {
-    const { app, service } = fixture(); const first = await register(app); const second = await register(app); service.setTrustedDeviceEnabled(true);
+    const { app, service } = fixture(); const first = await register(app, 'Browser A'); const second = await register(app, 'Browser B'); service.setTrustedDeviceEnabled(true);
     let started!: () => void; const subscribed = new Promise<void>(r => { started = r; });
     let finish!: (value: string) => void; const pane = new Promise<string>(r => { finish = r; });
     const stream = createTerminalStream({ token: 'secret', commands: { paneSession: () => { started(); return pane; } }, deviceAuth: { service, resolveOrigin: () => origin } });
