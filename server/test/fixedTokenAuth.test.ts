@@ -35,6 +35,7 @@ async function register(app: express.Express) {
 }
 it('recognizes the Token factor while trusted-device protection is enabled', () => {
   const { service } = fixture();
+  service.setTrustedDeviceEnabled(true);
   expect(service.authenticateToken('secret', origin)).not.toBeNull();
   expect(service.isActive(service.authenticateToken('secret', origin)!)).toBe(false);
 });
