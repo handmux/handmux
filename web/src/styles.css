@@ -73,7 +73,7 @@ body { font-family: -apple-system, system-ui, sans-serif; background: #1a1b1e; c
   margin: 0 -5px 0 -9px; touch-action: manipulation; }
 .hamburger-glyph { width: 20px; height: 16px; display: flex; flex-direction: column; justify-content: space-between; }
 .hamburger-glyph i { display: block; width: 20px; height: 2px; border-radius: 1px; background: currentColor; }
-.session-name { flex: 1; min-width: 0; min-height: 44px; display: flex; align-items: center; justify-content: flex-start;
+.session-name { flex: 1; min-width: 0; min-height: 34px; display: flex; align-items: center; justify-content: flex-start;
   padding: 0; border: none; background: none; color: inherit; font: inherit; font-weight: 600; text-align: left;
   margin-right: auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; touch-action: manipulation; }
 .fontbtn { min-width: 36px; padding: 4px 10px; border: none; border-radius: 8px; background: #33353a; color: #e6e6e6; font-size: 14px; touch-action: manipulation; }
