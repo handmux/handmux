@@ -47,10 +47,21 @@ export async function requestJson<T = unknown>(
     if (timeoutMs) timer = setTimeout(() => controller?.abort(), timeoutMs);
   }
   try {
-    const response = await fetch(path, {
+    let response = await fetch(path, {
       cache: 'no-store', credentials: 'same-origin', ...rest, headers,
       ...(controller ? { signal: controller.signal } : {}),
     });
+    // During a service restart the proxy can briefly answer 401 while adjacent
+    // requests are returning 502. Do not turn that transient response into a
+    // full-page Token prompt; retry once, while a persistent 401 remains a real
+    // authentication failure.
+    if (response.status === 401 && headers.Authorization && !path.startsWith('/api/auth/')) {
+      await new Promise<void>((resolve) => setTimeout(resolve, 500));
+      response = await fetch(path, {
+        cache: 'no-store', credentials: 'same-origin', ...rest, headers,
+        ...(controller ? { signal: controller.signal } : {}),
+      });
+    }
     if (response.status === 401) throw await authenticationError();
     if (!response.ok) {
       let errorBody = null;
