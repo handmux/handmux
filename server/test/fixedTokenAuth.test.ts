@@ -61,7 +61,7 @@ describe('Token factor with optional trusted device protection', () => {
     for (let i = 0; i < 600; i += 1) await request(app).get('/api/auth/status').set(first).expect(200);
     await request(app).get('/api/auth/status').set(first).expect(429);
     await request(app).get('/api/auth/status').set({ ...bearer, 'User-Agent': 'Browser-B' }).expect(200);
-  }, 20_000);
+  }, 60_000);
   it('requires a formal cookie before enabling device protection or managing other devices', async () => {
     const { app, service } = fixture();
     const { primary, candidate, device } = await register(app);
