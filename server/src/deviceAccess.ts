@@ -91,6 +91,10 @@ export function createDeviceAccess({ service, resolveOrigin }: {
   };
   const middleware: RequestHandler = (req, res, next) => {
     res.setHeader('Cache-Control', 'no-store');
+    if (!service.available) {
+      res.status(503).json({ error: 'authentication service unavailable', code: 'auth_unavailable' });
+      return;
+    }
     const origin = resolveOrigin(req);
     if (!origin || (req.headers.origin !== undefined && req.headers.origin !== origin)) {
       res.status(403).json({ error: 'untrusted request origin', code: 'origin_rejected' });

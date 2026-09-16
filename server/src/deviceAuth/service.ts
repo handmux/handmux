@@ -89,6 +89,7 @@ export interface ApprovalStatus { id: string; state: PairState; browserSummary: 
 
 export class DeviceAuthService {
   get mode(): AuthMode { return this.trustedDeviceEnabled ? 'trusted-device' : 'token'; }
+  get available(): boolean { return !this.closed; }
   private tokenSecret: string;
   private tokenGeneration: string;
   private trustedDeviceEnabledState: boolean;
