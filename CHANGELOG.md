@@ -6,6 +6,8 @@ All notable changes to handmux. Format follows [Keep a Changelog](https://keepac
 
 ## [0.29.0] - 2026-09-16
 
+## [0.29.0] - 2026-09-16
+
 ### Added
 
 - 新增 Token + 可信设备认证：通过 CLI 或已有可信设备授权浏览器，按设备设置名称、有效期并单独撤销。可信设备保护和访问地址限制默认开启，可通过 CLI 分别调整；Web 可查看和管理设备、访问地址。
