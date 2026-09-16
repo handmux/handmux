@@ -33,6 +33,11 @@ async function register(app: express.Express) {
   const added = await request(app).post('/api/auth/devices/self').set(bearer).set('Cookie', candidate).send({ name: 'This browser', expire: 'never' }).expect(200);
   return { device: added.body.device, primary: cookie(added), candidate };
 }
+it('recognizes the Token factor while trusted-device protection is enabled', () => {
+  const { service } = fixture();
+  expect(service.authenticateToken('secret', origin)).not.toBeNull();
+  expect(service.isActive(service.authenticateToken('secret', origin)!)).toBe(false);
+});
 describe('Token factor with optional trusted device protection', () => {
   it('requires Token even for a valid formal device cookie', async () => {
     const { app, service } = fixture();

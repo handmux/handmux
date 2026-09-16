@@ -191,7 +191,6 @@ export class DeviceAuthService {
   }
   authenticateToken(provided: unknown, origin: string): DevicePrincipal | null {
     if (!this.tokenEnabled || !this.tokenSecret || typeof provided !== 'string' || !provided || !tokenEquals(provided, this.tokenSecret)) return null;
-    if (!this.isDeviceActive(`token_${this.tokenGeneration}`)) return null;
     return { deviceId: `token_${this.tokenGeneration}`, sessionId: `token_${this.tokenGeneration}`, expiresAt: null, origin };
   }
   isTokenPrincipal(principal: DevicePrincipal): boolean { return principal.deviceId.startsWith('token_'); }
