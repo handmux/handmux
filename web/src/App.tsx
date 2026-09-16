@@ -1930,6 +1930,11 @@ export default function App() {
   // Descriptor availability gates live operations, not the last verified history. Empty discovery during
   // restart must leave the identity intact so useAgentConversation can retain its projection and reconnect.
   const normalizedConversationIdentity = currentConversationIdentity;
+  // Keep the composer mounted while a selected conversation is temporarily
+  // unresolved (for example during the first content fetch). Replacing it with
+  // null would destroy the focused textarea and dismiss the soft keyboard.
+  const composerIdentity = normalizedConversationIdentity ?? (chatLens && recoveryLookupUncertain
+    ? rememberedConversationIdentity : null);
   const chatLensAvailable = currentAgentDescriptor?.capabilities.conversation === true
     && conversationEnabled
     && (!!normalizedConversationRun || !!normalizedConversationIdentity
@@ -2955,15 +2960,15 @@ export default function App() {
             )
           )}
             controls={chatLens ? (
-            normalizedConversationIdentity ? (<>
+            composerIdentity ? (<>
               <AgentInteractionLayer controller={agentInteraction} waiting={currentKind === 'permission'}
                 onOpenTerminal={() => {
                 setLens('terminal');
                 localStorage.setItem(`tw_lens_${current.paneId}`, 'terminal');
               }} />
               <AgentConversationComposer
-                agentId={normalizedConversationIdentity.agentId}
-                sessionId={normalizedConversationIdentity.sessionId}
+                agentId={composerIdentity.agentId}
+                sessionId={composerIdentity.sessionId}
                 desktop={desktopInput}
                 busy={currentKind === 'working' || currentKind === 'permission'
                   || currentKind === 'compacting'
@@ -2995,7 +3000,7 @@ export default function App() {
                 actionContent={(conversationControlCapabilities?.conversationContext
                   || conversationControlCapabilities?.conversationPermission)
                   ? <AgentConversationActionControls controller={agentConversationControls}
-                    sessionId={normalizedConversationIdentity.sessionId}
+                    sessionId={composerIdentity.sessionId}
                     showPermission={conversationControlCapabilities.conversationPermission === true}
                     showContext={conversationControlCapabilities.conversationContext === true} /> : undefined}
                 sessionControl={currentAgentDescriptor?.capabilities.sessionControl === true
