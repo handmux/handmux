@@ -2542,7 +2542,7 @@ export default function App() {
         style={inset ? { transform: `translateY(-${inset}px)` } : undefined}>
       {rootView === 'session' && <header className="topbar">
         <button ref={drawerMenuRef} className="hamburger" onClick={() => setDrawerOpen(true)}
-          aria-label={t('drawer.title')} aria-expanded={drawerOpen} aria-controls="session-drawer">☰</button>
+          aria-label={t('drawer.title')} aria-expanded={drawerOpen} aria-controls="session-drawer"><span className="hamburger-glyph" aria-hidden="true"><i /><i /><i /></span></button>
         <button type="button" className="session-name" {...sessionNameLongPress}
           onClick={(event) => {
             sessionNameLongPress.onClick(event);
