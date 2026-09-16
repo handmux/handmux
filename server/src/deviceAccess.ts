@@ -17,6 +17,7 @@ export interface DeviceAccessService {
   onRevoke(listener: (deviceId: string) => void): () => void;
   readonly tokenEnabled?: boolean;
   readonly trustedDeviceEnabled?: boolean;
+  readonly available?: boolean;
   authenticateToken?(provided: unknown, origin: string): DevicePrincipal | null;
 }
 
@@ -91,7 +92,7 @@ export function createDeviceAccess({ service, resolveOrigin }: {
   };
   const middleware: RequestHandler = (req, res, next) => {
     res.setHeader('Cache-Control', 'no-store');
-    if (!service.available) {
+    if (service.available === false) {
       res.status(503).json({ error: 'authentication service unavailable', code: 'auth_unavailable' });
       return;
     }
