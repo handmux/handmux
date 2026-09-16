@@ -11,7 +11,7 @@ export const deviceErrorCopy = (error: unknown): string => {
     DEVICE_CONFLICT: 'devices.conflict', DEVICE_INACTIVE: 'devices.inactive', DEVICE_EXPIRY_CLI_ONLY: 'devices.expiryCliOnly', SESSION_INVALID: 'devices.sessionInvalid',
     CODE_INVALID: 'devices.invalidCode', CLAIM_RATE_LIMIT: 'auth.rateLimit', AUTH_RATE_LIMIT: 'auth.rateLimit',
     PAIRING_NOT_FOUND: 'devices.pairingGone', PAIRING_INACTIVE: 'devices.pairingGone',
-    INVALID_NAME: 'devices.invalidName', INVALID_EXPIRE: 'devices.invalidExpire',
+    INVALID_NAME: 'devices.invalidName', INVALID_EXPIRE: 'devices.invalidExpire', DEVICE_NAME_TAKEN: 'devices.nameTaken',
     TRUSTED_ORIGIN_MISMATCH: 'devices.originMismatch', AUTH_ORIGIN_REJECTED: 'devices.originMismatch', origin_rejected: 'devices.originMismatch',
     INVALID_ORIGIN: 'devices.invalidOrigin', ORIGIN_LIMIT: 'devices.originLimit',
   };
@@ -115,16 +115,16 @@ function DeviceDetail({ device: initial, current, now, onClose, onChanged, onLog
 }) {
   const [device, setDevice] = useState(initial); const [name, setName] = useState(initial.name);
   const [busy, setBusy] = useState(false); const [error, setError] = useState(''); const [conflict, setConflict] = useState(false);
-  const [copyHint, setCopyHint] = useState(''); const [confirming, setConfirming] = useState(false); const idRef = useRef<HTMLElement>(null);
+  const [copyHint, setCopyHint] = useState(''); const [confirming, setConfirming] = useState(false); const [saved, setSaved] = useState(false); const idRef = useRef<HTMLElement>(null);
   const inactive = isInactive(device, now);
   const changed = name.trim() !== device.name;
   const close = () => { if (!busy) onClose(); };
   const save = async () => {
     if (!validName(name)) { setError(t('devices.invalidName')); return; }
-    setBusy(true); setError('');
+    setBusy(true); setError(''); setSaved(false);
     try {
       const result = await api.edit(device.id, { version: device.version, name: name.trim() });
-      setDevice(result.device); setName(result.device.name); setConflict(false); onChanged();
+      setDevice(result.device); setName(result.device.name); setConflict(false); setSaved(true); onChanged();
     } catch (e) { setError(deviceErrorCopy(e)); setConflict(e instanceof DeviceManagementError && e.code === 'DEVICE_CONFLICT'); }
     finally { setBusy(false); }
   };
@@ -160,6 +160,7 @@ function DeviceDetail({ device: initial, current, now, onClose, onChanged, onLog
         {!inactive && <button className="fontbtn device-save" disabled={busy || !changed || conflict} onClick={() => { void save(); }}>{t('common.save')}</button>}
       </div>
       {copyHint && <p role="status">{copyHint}</p>}
+      {saved && <p role="status">{t('devices.saved')}</p>}
       {!confirming && error && <p role="alert">{error}</p>}
       {conflict && <button disabled={busy} onClick={() => { void refresh(); }}>{t('devices.refreshDetails')}</button>}
       {!inactive && <div className="device-detail-actions"><button className="device-danger" disabled={busy} onClick={() => { setError(''); setConfirming(true); }}>{t(current ? 'devices.logout' : 'devices.revoke')}</button></div>}

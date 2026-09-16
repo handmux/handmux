@@ -116,6 +116,8 @@ export default {
   'devices.inactive': 'This device has expired or been removed. Pair it again to restore access.',
   'devices.sessionInvalid': 'This browser is no longer authorized. Reload handmux and pair again.',
   'devices.invalidName': 'Use a device name with 1–80 characters and no control characters.',
+  'devices.nameTaken': 'That device name is already in use. Choose another name.',
+  'devices.saved': 'Saved.',
   'devices.invalidExpire': 'Use a positive duration such as 1h, 7d, or never.',
   'devices.expiryCliOnly': 'Change the authorization duration with the handmux CLI on the server.',
   'devices.invalidCode': 'Enter the new browser’s current 6-digit code. Expired or used codes cannot be reused.',

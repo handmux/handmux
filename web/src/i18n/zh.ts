@@ -115,6 +115,8 @@ export default {
   'devices.inactive': '设备已过期或解除绑定，请重新配对恢复访问。',
   'devices.sessionInvalid': '当前浏览器授权已失效，请刷新 handmux 后重新配对。',
   'devices.invalidName': '设备名称需要 1–80 个字符，不能包含控制字符。',
+  'devices.nameTaken': '设备名称已被使用，请换一个名称。',
+  'devices.saved': '已保存。',
   'devices.invalidExpire': '请输入正整数时长，例如 1h、7d，或 never。',
   'devices.expiryCliOnly': '授权有效期只能在运行 handmux 的服务器上使用 CLI 修改。',
   'devices.invalidCode': '请输入新浏览器当前显示的 6 位校验码，过期或已使用的校验码不能重复使用。',

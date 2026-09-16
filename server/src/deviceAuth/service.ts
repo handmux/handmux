@@ -280,6 +280,7 @@ export class DeviceAuthService {
     this.requireMode();
     if (values.name === undefined && values.expire === undefined) throw new DeviceAuthError('INVALID_EDIT', 'Provide --name or --expire');
     const name = values.name === undefined ? undefined : validateName(values.name);
+    if (name !== undefined && this.db.prepare('SELECT id FROM auth_devices WHERE name=? AND id<>? AND revoked_at IS NULL').get(name, id)) throw new DeviceAuthError('DEVICE_NAME_TAKEN', 'Device name is already in use', 409);
     const duration = values.expire === undefined ? undefined : parseExpire(values.expire);
     return this.transaction(() => {
       if (actor) this.assertActive(actor);
@@ -397,6 +398,7 @@ export class DeviceAuthService {
   }
   authorize(id: string, owner: string, values: { name: unknown; expire: unknown }): AuthDevice {
     this.requireMode(); const name = validateName(values.name); const duration = parseExpire(values.expire);
+    if (this.db.prepare('SELECT id FROM auth_devices WHERE name=? AND revoked_at IS NULL').get(name)) throw new DeviceAuthError('DEVICE_NAME_TAKEN', 'Device name is already in use', 409);
     const p = [...this.pending.values()].find(p => p.id === id && p.owner === owner);
     if (!p) throw new DeviceAuthError('PAIRING_NOT_FOUND', 'Pairing is no longer owned by this operation', 409);
     this.updatePair(p);
