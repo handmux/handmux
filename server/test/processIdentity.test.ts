@@ -21,6 +21,15 @@ describe('executablePath', () => {
     expect(readlink).not.toHaveBeenCalled();
   });
 
+  it('strips the Linux " (deleted)" marker so a pruned-but-running binary keeps its identity', async () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('linux');
+    const readlink = vi.spyOn(fsp, 'readlink')
+      .mockResolvedValue('/home/u/.local/share/claude/versions/2.1.270 (deleted)');
+    const run = vi.fn(async () => { throw new Error('lsof unavailable'); });
+    expect(await executablePath(run, 101)).toBe('/home/u/.local/share/claude/versions/2.1.270');
+    expect(readlink).toHaveBeenCalledWith('/proc/101/exe');
+  });
+
   it('falls back to lsof when Linux proc is inaccessible and fails closed when both fail', async () => {
     vi.spyOn(process, 'platform', 'get').mockReturnValue('linux');
     const readlink = vi.spyOn(fsp, 'readlink').mockRejectedValue(new Error('EACCES'));

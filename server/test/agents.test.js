@@ -278,6 +278,16 @@ describe('resolveVersionedComms (native-install Claude: comm = bare version stri
     expect(called).toBe(false);
     expect(panes[0].cmd).toBe('claude');
   });
+  it('still ties a Linux pane whose version file was pruned by an in-place auto-update', async () => {
+    // Linux reports the unlinked image as "<path> (deleted)"; the session keeps running, so the comm is
+    // still the version string and the pane must stay recognized instead of silently dropping until restart.
+    const panes = [{ id: '%1', cmd: '2_1_270', tty: '/dev/ttys030' }];
+    const run = RUN(['ttys030 4242 S+'], {
+      4242: '/home/u/.local/share/claude/versions/2.1.270 (deleted)',
+    });
+    await resolveVersionedComms(panes, run);
+    expect(panes[0].cmd).toBe('claude');
+  });
   it('a semver comm without a tty is ignored (and ps never runs)', async () => {
     const panes = [{ id: '%1', cmd: '2_1_196' }];
     let called = false;

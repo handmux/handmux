@@ -7,6 +7,7 @@ All notable changes to handmux. Format follows [Keep a Changelog](https://keepac
 ### Fixed
 
 - 修复会话切换短暂过渡时显示红色"无法连接 Codex 会话"的问题；过渡期间现在复用统一的加载中状态。
+- 修复 Linux 上长驻 Claude 会话在终端自动更新删掉旧版本文件后被识别不到的问题；进程仍在运行时应保持识别。
 
 ## [0.29.0] - 2026-09-16
 

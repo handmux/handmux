@@ -29,7 +29,14 @@ const FAILURE_TTL_MS = 3_000;
 
 // Real executable path of a pid. lsof resolves launch symlinks on macOS; /proc is the cheap Linux path.
 // A transient lsof failure is inconclusive, not a negative identity verdict that should escape the call.
-export async function executablePath(run: RunCommand, pid: string | number): Promise<string> {
+// Linux appends " (deleted)" once the file is unlinked while the image stays mapped: Claude's auto-updater
+// prunes the old version file under a running session, and that session keeps working. The marker must not
+// reach a basename comparison — it would turn an unambiguous identity into a mismatch and silently drop
+// the pane until Claude restarts. Every consumer reads the path through here, so normalize at the exit.
+const DELETED_MARKER_RE = / \(deleted\)$/;
+export const stripDeletedMarker = (file: string): string => file.replace(DELETED_MARKER_RE, '');
+
+async function rawExecutablePath(run: RunCommand, pid: string | number): Promise<string> {
   if (process.platform === 'linux') {
     try { return await fsp.readlink(`/proc/${pid}/exe`); } catch { /* fall back to lsof */ }
   }
@@ -40,6 +47,10 @@ export async function executablePath(run: RunCommand, pid: string | number): Pro
     try { return await fsp.readlink(`/proc/${pid}/exe`); } catch { /* unavailable */ }
   }
   return '';
+}
+
+export async function executablePath(run: RunCommand, pid: string | number): Promise<string> {
+  return stripDeletedMarker(await rawExecutablePath(run, pid));
 }
 
 function parseForegroundProcesses(out: unknown): ForegroundProcess[] {
