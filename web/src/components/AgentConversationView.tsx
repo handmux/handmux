@@ -76,13 +76,9 @@ function visiblePageAnchor(element: HTMLElement): { element: HTMLElement | null;
 export function AgentConversationErrorView({
   message,
   resetKey,
-  muted = false,
 }: {
   message: string;
   resetKey: string | null;
-  // Transient "still resolving" presentation: grey notice instead of red error, so a short-lived
-  // identity-resolution gap doesn't read as a connection failure.
-  muted?: boolean;
 }) {
   const viewRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -101,7 +97,7 @@ export function AgentConversationErrorView({
       onScrollCapture={copy.onScroll}
       onClickCapture={copy.onClickCapture}>
       <div className="chat-scroll" ref={scrollRef}>
-        <div className={muted ? 'chat-turn-notice' : 'chat-turn-error'} role="status" data-conversation-copy-root
+        <div className="chat-turn-error" role="status" data-conversation-copy-root
           data-conversation-copy-id="standalone:error">{message}</div>
       </div>
       {copy.ui && (

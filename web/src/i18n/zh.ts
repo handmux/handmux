@@ -654,7 +654,6 @@ export default {
 'chat.session.notManaged': '请先在终端以托管模式重新启动 Codex',
 'chat.session.unmanagedTitle': '此 Codex 会话未托管',
 'chat.session.unmanagedHint': '请在终端以托管模式重新启动后再打开对话。',
-'chat.session.connectionTitle': '正在连接会话…',
 'chat.session.connectionHint': 'Codex App Server 暂时不可用，请确认 Codex 仍在运行后重试。',
 'chat.managedGuide.title': '接入 Codex 对话',
 'chat.managedGuide.hint': 'Handmux 可以在当前窗格恢复原会话，并切换为可靠的托管对话。',

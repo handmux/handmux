@@ -64,7 +64,8 @@ import BottomDock from './components/BottomDock.jsx';
 import type { BottomDockHandle } from './components/BottomDock.jsx';
 import LensSwitch from './components/LensSwitch.jsx';
 import type { WorkspaceLens } from './components/LensSwitch.jsx';
-import AgentConversationView, { AgentConversationErrorView } from './components/AgentConversationView.jsx';
+import AgentConversationView from './components/AgentConversationView.jsx';
+import LensBoot from './components/LensBoot.jsx';
 import AgentConversationComposer from './components/AgentConversationComposer.jsx';
 import AgentInteractionLayer from './components/AgentInteractionLayer.jsx';
 import AgentConversationActivationGuide from './components/AgentConversationActivationGuide.jsx';
@@ -2933,8 +2934,11 @@ export default function App() {
                     }} />
                 )
               ) : (
-                <AgentConversationErrorView message={t('chat.session.connectionTitle')} muted
-                  resetKey={`${current.paneId}\0${chatAgent ?? ''}`} />
+                <div className="chat-view">
+                  <div className="agent-conversation-state">
+                    <LensBoot hint={t('common.loading')} />
+                  </div>
+                </div>
               )
             ) : (
               <Terminal

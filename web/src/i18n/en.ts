@@ -655,7 +655,6 @@ export default {
 'chat.session.notManaged': 'Restart Codex in managed mode from the terminal first',
 'chat.session.unmanagedTitle': 'This Codex session is not managed',
 'chat.session.unmanagedHint': 'Restart it in managed mode from the terminal before opening chat.',
-'chat.session.connectionTitle': 'Connecting to the session…',
 'chat.session.connectionHint': 'Codex App Server is unavailable. Check that Codex is still running, then try again.',
 'chat.managedGuide.title': 'Connect this Codex chat',
 'chat.managedGuide.hint': 'Handmux can resume the original session in this pane and switch it to reliable managed chat.',
