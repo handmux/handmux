@@ -4,6 +4,10 @@ All notable changes to handmux. Format follows [Keep a Changelog](https://keepac
 
 ## [Unreleased]
 
+### Fixed
+
+- 修复会话切换短暂过渡时显示红色"无法连接 Codex 会话"的问题；现在显示中性的"正在连接会话…"提示，且不再误标 Agent 名称。
+
 ## [0.29.0] - 2026-09-16
 
 ## [0.29.0] - 2026-09-16

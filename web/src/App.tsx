@@ -2933,7 +2933,7 @@ export default function App() {
                     }} />
                 )
               ) : (
-                <AgentConversationErrorView message={t('chat.session.connectionTitle')}
+                <AgentConversationErrorView message={t('chat.session.connectionTitle')} muted
                   resetKey={`${current.paneId}\0${chatAgent ?? ''}`} />
               )
             ) : (
