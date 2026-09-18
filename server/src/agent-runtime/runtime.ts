@@ -418,6 +418,7 @@ export class AgentRuntime {
         runs: this.runs,
         adapterIds,
         store: new FileBridgeStateStore(bridgeStateFile),
+        onReclaim: (result) => logger.info('Reclaimed Bridge channels for Agent runs that are no longer live', result),
         ...(newBridgeConnectionId === undefined ? {} : { newConnectionId: newBridgeConnectionId }),
       }),
     });

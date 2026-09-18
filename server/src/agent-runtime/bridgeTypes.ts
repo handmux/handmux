@@ -12,6 +12,13 @@ export interface BridgeLimits {
   maxRequestTimeoutMs: number;
   sustainedEventsPerSecond: number;
   burstEvents: number;
+  // Retention for channels whose run no longer exists. Without it a channel is kept forever: every
+  // reconnect that mints a new run leaves its channels (and their undelivered events) behind, so a
+  // flapping attachment grows the state file without bound. Drained channels for a dead run are
+  // reclaimable immediately; a channel still holding undelivered events is kept until this window
+  // passes, and then only when its run can never be consumed again.
+  maxChannels: number;
+  channelRetentionMs: number;
 }
 
 export const DEFAULT_BRIDGE_LIMITS: Readonly<BridgeLimits> = Object.freeze({
@@ -26,6 +33,8 @@ export const DEFAULT_BRIDGE_LIMITS: Readonly<BridgeLimits> = Object.freeze({
   maxRequestTimeoutMs: 5 * 60_000,
   sustainedEventsPerSecond: 200,
   burstEvents: 500,
+  maxChannels: 2_000,
+  channelRetentionMs: 24 * 60 * 60_000,
 });
 
 export interface BridgePublishRequest {

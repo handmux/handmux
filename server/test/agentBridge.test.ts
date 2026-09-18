@@ -11,7 +11,7 @@ import {
   FileBridgeStateStore,
   MemoryBridgeStateStore,
 } from '../src/agent-runtime/bridgeStore.js';
-import type { BridgeStateStore, PersistedBridgeState } from '../src/agent-runtime/bridgeStore.js';
+import type { BridgeStateStore, PersistedBridgeChannel, PersistedBridgeState } from '../src/agent-runtime/bridgeStore.js';
 import type { BridgeDurableReplay, BridgeHostEvent } from '../src/agent-runtime/bridgeTypes.js';
 import { AgentRunRuntime } from '../src/agent-runtime/run.js';
 import type { AgentRunLease } from '../src/agent-runtime/run.js';
@@ -601,5 +601,95 @@ describe('LocalAgentBridge persistence and boundaries', () => {
     await expect(host.openChannel(lease, 'inbox', () => {})).rejects.toBeInstanceOf(BridgeContractError);
     expect(() => host.consumeDurableReplays('inbox', async () => 'accepted'))
       .toThrow(BridgeContractError);
+  });
+});
+
+describe('Bridge channel retention', () => {
+  const deadRuns = { resolve: () => null, status: () => 'unknown' as const };
+
+  const drained = (runId: string): PersistedBridgeState => ({
+    version: 1,
+    channels: [{
+      agentId: 'pi',
+      run: { agentId: 'pi', paneId: '%1', runId },
+      name: 'inbox',
+      highWatermark: 0,
+      lastEphemeralSequence: 0,
+      durable: [],
+      receipts: [],
+    }],
+  });
+
+  const savedChannels = (store: MemoryBridgeStateStore): PersistedBridgeChannel[] =>
+    (store.load() as PersistedBridgeState).channels;
+
+  // Real publish path: a durable event that is never acknowledged stays spooled in the store, which is
+  // exactly what a run that dies before delivery leaves behind.
+  async function publishUndelivered(runId: string, store: BridgeStateStore): Promise<void> {
+    const runtime = new AgentRunRuntime({ newRunId: () => runId });
+    const lease = await runtime.controller('pi', async () => true).attach({
+      paneId: '%1', attachmentId: `${runId}-attachment`,
+      process: { pid: 101, startedAt: 1_000, tty: '/dev/ttys001' },
+    });
+    const bridge = new LocalAgentBridge({ runs: runtime, adapterIds: ['pi'], store });
+    expect(await bridge.connect(lease).channel('inbox')
+      .publish({ eventId: `event-${runId}`, payload: { runId } }, { delivery: 'durable' }))
+      .toEqual({ accepted: true, sequence: 1 });
+    await bridge.close();
+  }
+
+  it('reclaims a drained channel whose run can never be consumed again', () => {
+    const store = new MemoryBridgeStateStore();
+    store.save(drained('dead-run'));
+
+    const bridge = new LocalAgentBridge({ runs: deadRuns, adapterIds: ['pi'], store });
+    bridges.push(bridge);
+
+    expect(savedChannels(store)).toEqual([]);
+  });
+
+  it('holds undelivered events for a dead run only until the retention window passes', async () => {
+    let clock = 1_000_000;
+    const store = new MemoryBridgeStateStore();
+    await publishUndelivered('dead-run', store);
+
+    const bridge = new LocalAgentBridge({
+      runs: deadRuns, adapterIds: ['pi'], store, now: () => clock,
+      limits: { channelRetentionMs: 60_000 },
+    });
+    bridges.push(bridge);
+
+    // A run can vanish from the registry before its events are delivered; hold them for the window so a
+    // transient bookkeeping gap cannot lose a notification that is still reachable.
+    expect(savedChannels(store)).toHaveLength(1);
+    clock += 59_000;
+    expect(bridge.reclaimChannels()).toEqual({ channels: 0, droppedEvents: 0 });
+
+    clock += 2_000;
+    expect(bridge.reclaimChannels()).toEqual({ channels: 1, droppedEvents: 1 });
+    expect(savedChannels(store)).toEqual([]);
+  });
+
+  it('never reclaims a live run and bounds the retained set by maxChannels', async () => {
+    const store = new MemoryBridgeStateStore();
+    for (const runId of ['live-run', 'dead-1', 'dead-2', 'dead-3']) {
+      await publishUndelivered(runId, store);
+    }
+    const runs = {
+      resolve: (ref: { runId: string }) => (ref.runId === 'live-run' ? ({} as AgentRunLease) : null),
+      status: () => 'unknown' as const,
+    };
+
+    const bridge = new LocalAgentBridge({
+      runs, adapterIds: ['pi'], store, now: () => 5_000_000,
+      limits: { channelRetentionMs: 60_000, maxChannels: 2 },
+    });
+    bridges.push(bridge);
+
+    const remaining = savedChannels(store);
+    expect(remaining).toHaveLength(2);
+    expect(remaining.map((channel) => channel.run.runId)).toContain('live-run');
+    // Nothing further is eligible: the live run must keep its undelivered event.
+    expect(bridge.reclaimChannels()).toEqual({ channels: 0, droppedEvents: 0 });
   });
 });

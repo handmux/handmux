@@ -9,6 +9,7 @@ import type {
   BridgeTransportClientOptions,
 } from '../src/agent-runtime/bridgeTransport.js';
 import type { BridgeRequestHandler } from '../src/agent-runtime/bridgeTypes.js';
+import { DEFAULT_BRIDGE_LIMITS } from '../src/agent-runtime/bridgeTypes.js';
 
 const directories: string[] = [];
 
@@ -33,12 +34,7 @@ function connection(operations: string[]) {
     run: { agentId: 'pi', paneId: '%1', runId: 'run-1', sessionId: 'session-1' },
     connectionId: crypto.randomUUID(),
     limits: {
-      maxFrameBytes: 256 * 1024, maxSnapshotBytes: 1024 * 1024,
-      maxQueuedEventsPerChannel: 256, maxQueuedBytesPerChannel: 4 * 1024 * 1024,
-      maxDurableSpoolBytesPerAdapter: 16 * 1024 * 1024,
-      maxRequestsPerRun: 32, maxRequestsPerAdapter: 128,
-      defaultRequestTimeoutMs: 30_000, maxRequestTimeoutMs: 300_000,
-      sustainedEventsPerSecond: 200, burstEvents: 500,
+      ...DEFAULT_BRIDGE_LIMITS,
     },
     signal: abort.signal,
     channel(name) {

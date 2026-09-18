@@ -84,6 +84,9 @@ interface RuntimeChannel {
   pumping: boolean;
   pumpAgain: boolean;
   retryTimer: NodeJS.Timeout | undefined;
+  // Last time this channel was used, for oldest-first retention. In-memory only: a restored channel's
+  // age restarts at startup, which only ever delays a reclaim by one window.
+  touchedAt: number;
   durableWaiters: Array<{
     throughSequence: number;
     resolve: () => void;
@@ -185,6 +188,10 @@ function channelKey(agentId: string, runId: string, name: string): string {
 function consumerKey(agentId: string, name: string): string {
   return `${agentId}\0${name}`;
 }
+
+// Retention sweep cadence. Reclaims are also attempted at construction (a restart is when the largest
+// dead set is present), so this only bounds growth during a long-lived server.
+const RECLAIM_INTERVAL_MS = 5 * 60_000;
 
 function mergeLimits(overrides: Partial<BridgeLimits> | undefined): Readonly<BridgeLimits> {
   const limits = { ...DEFAULT_BRIDGE_LIMITS, ...overrides };
@@ -297,6 +304,9 @@ export interface LocalAgentBridgeOptions {
   newRequestId?: () => string;
   now?: () => number;
   retryDelayMs?: number;
+  // Retention can drop undelivered events for a run that is permanently gone; surface that to the
+  // caller's logger so a silent shrink of the durable spool is never invisible.
+  onReclaim?: (result: { channels: number; droppedEvents: number }) => void;
 }
 
 // Reliable Bridge semantics independent of the private transport codec. A future Unix-socket layer calls
@@ -315,7 +325,9 @@ export class LocalAgentBridge {
   readonly #newRequestId: () => string;
   readonly #now: () => number;
   readonly #retryDelayMs: number;
+  readonly #onReclaim: ((result: { channels: number; droppedEvents: number }) => void) | undefined;
   #writeTail: Promise<void> = Promise.resolve();
+  #reclaimTimer: NodeJS.Timeout | undefined;
   #closed = false;
 
   constructor({
@@ -327,6 +339,7 @@ export class LocalAgentBridge {
     newRequestId = randomUUID,
     now = Date.now,
     retryDelayMs = 250,
+    onReclaim,
   }: LocalAgentBridgeOptions) {
     if (!runs || !Array.isArray(adapterIds) || adapterIds.length === 0) {
       throw new TypeError('LocalAgentBridge requires a run registry and static adapter ids');
@@ -343,6 +356,7 @@ export class LocalAgentBridge {
     this.#newRequestId = newRequestId;
     this.#now = now;
     this.#retryDelayMs = Math.max(1, retryDelayMs);
+    this.#onReclaim = onReclaim;
 
     const persisted = parsePersistedState(this.#store.load());
     const spoolBytes = new Map<string, number>();
@@ -372,9 +386,15 @@ export class LocalAgentBridge {
         pumping: false,
         pumpAgain: false,
         retryTimer: undefined,
+        touchedAt: this.#now(),
         durableWaiters: [],
       });
     }
+    // A restart is the natural point to drop channels whose runs died before it: nothing can attach to
+    // that run again, so their undelivered events are unreachable either way.
+    this.reclaimChannels();
+    this.#reclaimTimer = setInterval(() => this.reclaimChannels(), RECLAIM_INTERVAL_MS);
+    this.#reclaimTimer.unref?.();
   }
 
   connect(run: AgentRunLease): LocalAgentBridgeConnection {
@@ -503,6 +523,7 @@ export class LocalAgentBridge {
   async close(): Promise<void> {
     if (this.#closed) return;
     this.#closed = true;
+    if (this.#reclaimTimer) { clearInterval(this.#reclaimTimer); this.#reclaimTimer = undefined; }
     for (const connection of this.#connections.values()) connection.close();
     this.#connections.clear();
     for (const consumer of this.#consumers.values()) consumer.active = false;
@@ -563,10 +584,12 @@ export class LocalAgentBridge {
         pumping: false,
         pumpAgain: false,
         retryTimer: undefined,
+        touchedAt: this.#now(),
         durableWaiters: [],
       };
       this.#channels.set(key, state);
     }
+    state.touchedAt = this.#now();
     return state;
   }
 
@@ -587,6 +610,50 @@ export class LocalAgentBridge {
       version: 1,
       channels: [...this.#channels.values()].map((state) => structuredClone(state.persisted)),
     });
+  }
+
+  // Drops channels that can never be consumed again, so a reconnecting or flapping attachment cannot grow
+  // the bridge state without bound. A channel of a live run is never touched — it may reconnect and its
+  // undelivered events are still reachable. Returns what was dropped so a caller can log it.
+  reclaimChannels(): { channels: number; droppedEvents: number } {
+    const now = this.#now();
+    const dead = (state: RuntimeChannel): boolean => !state.subscription
+      && state.durableWaiters.length === 0 && state.live.length === 0
+      // The registry contract returns null for a run it no longer holds; treat any falsy result the same
+      // so a registry that omits the value cannot silently disable retention.
+      && !this.#runs.resolve(state.persisted.run);
+    let channels = 0;
+    let droppedEvents = 0;
+    const drop = (key: string, state: RuntimeChannel): void => {
+      if (state.retryTimer) clearTimeout(state.retryTimer);
+      droppedEvents += state.persisted.durable.length;
+      this.#channels.delete(key);
+      channels += 1;
+    };
+
+    for (const [key, state] of [...this.#channels]) {
+      if (!dead(state)) continue;
+      // Drained ⇒ nothing can be lost. Still holding events ⇒ wait out the retention window first, so a
+      // transient gap in run bookkeeping cannot drop a notification that is still deliverable.
+      if (state.persisted.durable.length > 0 && now - state.touchedAt < this.limits.channelRetentionMs) continue;
+      drop(key, state);
+    }
+
+    // Hard ceiling: retention must bound memory even while every dead channel is inside its window.
+    if (this.#channels.size > this.limits.maxChannels) {
+      const oldest = [...this.#channels].filter(([, state]) => dead(state))
+        .sort((left, right) => left[1].touchedAt - right[1].touchedAt);
+      for (const [key, state] of oldest) {
+        if (this.#channels.size <= this.limits.maxChannels) break;
+        drop(key, state);
+      }
+    }
+
+    if (channels > 0) {
+      this.#save();
+      this.#onReclaim?.({ channels, droppedEvents });
+    }
+    return { channels, droppedEvents };
   }
 
   #nextSequence(state: RuntimeChannel): number {
