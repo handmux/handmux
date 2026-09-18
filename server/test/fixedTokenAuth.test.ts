@@ -16,13 +16,15 @@ const origin = 'http://localhost:4000';
 const headers = { Origin: origin };
 const bearer = { ...headers, Authorization: 'Bearer secret' };
 const cookie = (response: request.Response): string => (response.headers['set-cookie'] as unknown as string[]).map(c => c.split(';')[0]).join('; ');
-function fixture() {
+function fixture(buckets?: { maxRequests?: number; maxCreates?: number; windowMs?: number }) {
   const db = new DatabaseSync(':memory:'); migrateProjectDatabase(db);
   const service = new DeviceAuthService({ db, token: 'secret' });
   service.setTrustedDeviceEnabled(false);
   const access = createDeviceAccess({ service, resolveOrigin: () => origin });
   const app = express(); app.use(express.json());
-  app.use('/api/auth', createDeviceAuthRouter({ service, resolveOrigin: () => origin }));
+  app.use('/api/auth', createDeviceAuthRouter({
+    service, resolveOrigin: () => origin, ...(buckets ? { buckets } : {}),
+  }));
   app.use('/api', access.middleware);
   app.get('/api/private', (_req, res) => res.json({ deviceId: res.locals.deviceAuth.deviceId }));
   cleanup.push(() => { access.close(); service.close(); db.close(); });
@@ -54,14 +56,17 @@ describe('Token factor with optional trusted device protection', () => {
     await request(app).get('/api/private').set(headers).set('Cookie', primary).expect(401);
   });
   it('keeps Token rate limits separate from anonymous traffic and other browser sources', async () => {
-    const { app } = fixture();
+    // A tiny quota keeps this assertion about separation rather than about making hundreds of
+    // round-trips, which used to exceed the test timeout whenever the machine was loaded.
+    const maxRequests = 3;
+    const { app } = fixture({ maxRequests });
     const first = { ...bearer, 'User-Agent': 'Browser-A' };
-    for (let i = 0; i < 600; i += 1) await request(app).get('/api/auth/status').set(headers).expect(200);
+    for (let i = 0; i < maxRequests; i += 1) await request(app).get('/api/auth/status').set(headers).expect(200);
     await request(app).get('/api/auth/status').set(headers).expect(429);
-    for (let i = 0; i < 600; i += 1) await request(app).get('/api/auth/status').set(first).expect(200);
+    for (let i = 0; i < maxRequests; i += 1) await request(app).get('/api/auth/status').set(first).expect(200);
     await request(app).get('/api/auth/status').set(first).expect(429);
     await request(app).get('/api/auth/status').set({ ...bearer, 'User-Agent': 'Browser-B' }).expect(200);
-  }, 60_000);
+  });
   it('requires a formal cookie before enabling device protection or managing other devices', async () => {
     const { app, service } = fixture();
     const { primary, candidate, device } = await register(app);
@@ -93,11 +98,13 @@ describe('Token factor with optional trusted device protection', () => {
     const status = await request(app).get('/api/auth/status').set(bearer).set('Cookie', candidate).expect(200);
     expect(status.body).toMatchObject({ authenticated: false, sessionPending: true, currentDeviceId: null });
     expect(status.body.pairing).toBeUndefined();
-    await request(app).get('/api/private').set(bearer).set('Cookie', candidate).expect(401);
+    const rejected = await request(app).get('/api/private').set(bearer).set('Cookie', candidate);
+    expect(rejected.status, JSON.stringify(rejected.body)).toBe(401);
     const primary = cookie(status);
     const confirmed = await request(app).get('/api/auth/status').set(bearer).set('Cookie', primary).expect(200);
     expect(confirmed.body).toMatchObject({ authenticated: true, sessionPending: false, currentDeviceId: device.id });
-    await request(app).get('/api/private').set(bearer).set('Cookie', primary).expect(200);
+    const admitted = await request(app).get('/api/private').set(bearer).set('Cookie', primary);
+    expect(admitted.status, JSON.stringify(admitted.body)).toBe(200);
   });
   it('keeps both protection policies unchanged on storage failure', () => {
     const { service, db } = fixture();

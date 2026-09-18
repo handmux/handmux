@@ -17,13 +17,25 @@ function browserSummary(ua: string): string {
   const os = /(?:iPhone|iPad|iPod)/.test(ua) ? 'iOS' : /Android/.test(ua) ? 'Android' : /Windows/.test(ua) ? 'Windows' : /Macintosh|Mac OS X/.test(ua) ? 'macOS' : /Linux/.test(ua) ? 'Linux' : '';
   return os ? `${browser} · ${os}` : browser;
 }
-export function createDeviceAuthRouter({ service, resolveOrigin, resolvePublicUrl, previewDomain }: {
+export function createDeviceAuthRouter({ service, resolveOrigin, resolvePublicUrl, previewDomain, buckets: bucketOptions }: {
   service: DeviceAuthService; resolveOrigin: (req: Request) => string | null;
   /** The effective advertised entry point (config publicUrl or a runtime tunnel URL). */
   resolvePublicUrl?: () => string | null;
   /** Built-in browser proxy base; every lease uses an HTTPS subdomain below it. */
   previewDomain?: string | null;
+  /**
+   * Bootstrap request quota per source. Defaults are the production policy; tests lower them so exercising
+   * the limit does not depend on making hundreds of round-trips (which turns into a wall-clock flake
+   * whenever the machine is loaded).
+   */
+  buckets?: { maxRequests?: number; maxCreates?: number; windowMs?: number };
 }): Router {
+  const maxRequests = bucketOptions?.maxRequests ?? 600;
+  const maxCreates = bucketOptions?.maxCreates ?? 20;
+  const windowMs = bucketOptions?.windowMs ?? 60_000;
+  if (![maxRequests, maxCreates, windowMs].every((value) => Number.isSafeInteger(value) && value > 0)) {
+    throw new TypeError('Device auth bucket limits must be positive integers');
+  }
   const router = Router();
   const advertisedOrigin = (): string | null => {
     const value = resolvePublicUrl?.();
@@ -79,7 +91,7 @@ export function createDeviceAuthRouter({ service, resolveOrigin, resolvePublicUr
     // Separate bounded maps reserve capacity for authenticated sessions even under anonymous floods.
     const token = principal && service.isTokenPrincipal(principal);
     const buckets = !principal ? anonymousBuckets : token ? tokenBuckets : authenticatedBuckets;
-    for (const [key, value] of buckets) if (now - value.at >= 60_000) buckets.delete(key);
+    for (const [key, value] of buckets) if (now - value.at >= windowMs) buckets.delete(key);
     const key = !principal ? req.socket.remoteAddress ?? 'unknown'
       : token ? `${principal.sessionId}:${req.socket.remoteAddress ?? 'unknown'}:${(req.get('user-agent') ?? '').slice(0, 200)}`
         : principal.sessionId;
@@ -90,7 +102,7 @@ export function createDeviceAuthRouter({ service, resolveOrigin, resolvePublicUr
     }
     bucket.requests++;
     if (req.method === 'POST' && req.path === '/pairing') bucket.creates++;
-    if (bucket.requests > 600 || bucket.creates > 20) { res.set('Retry-After', '60').status(429).json({ error: 'AUTH_RATE_LIMIT', message: 'Wait one minute and try again' }); return; }
+    if (bucket.requests > maxRequests || bucket.creates > maxCreates) { res.set('Retry-After', '60').status(429).json({ error: 'AUTH_RATE_LIMIT', message: 'Wait one minute and try again' }); return; }
     next();
   });
   const candidates = (req: Request, origin: string) => readPairingCookies(req, origin).map(c => ({ ...c, pairing: service.pairing(c.secret, origin), principal: service.authenticateSecret(c.secret, origin) }));
