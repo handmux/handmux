@@ -53,8 +53,20 @@ if [ -z "$CLAUDE_PID" ]; then
   done
 fi
 if [ -n "$CLAUDE_PID" ]; then
-  # `lstart` follows the process locale on macOS; force C so standalone Node can parse it consistently.
-  CLAUDE_STARTED_AT=$(LC_ALL=C ps -p "$CLAUDE_PID" -o lstart= 2>/dev/null || printf '')
+  # Start time in the same form the server reads (processStartedAt in tmuxRuntime.ts): on Linux the raw
+  # procfs start tick, on macOS the `lstart` string. A wall-clock `lstart` moves whenever the host steps
+  # the guest clock (WSL2), which makes one live process look like several.
+  case "$(uname -s)" in
+    Linux)
+      # comm may contain spaces/parentheses: drop "pid (comm) " first, then starttime is field 20.
+      CLAUDE_STARTED_AT=$(sed 's/.*) //' "/proc/$CLAUDE_PID/stat" 2>/dev/null \
+        | awk '{ print $20 }' 2>/dev/null || printf '')
+      ;;
+    *)
+      # `lstart` follows the process locale on macOS; force C so standalone Node can parse it consistently.
+      CLAUDE_STARTED_AT=$(LC_ALL=C ps -p "$CLAUDE_PID" -o lstart= 2>/dev/null || printf '')
+      ;;
+  esac
   CLAUDE_TTY=$(ps -p "$CLAUDE_PID" -o tty= 2>/dev/null || printf '')
 fi
 # payload 经 stdin 原样流给 node(不在 shell 里转义,避免坏数据);pane 含 '%' 直接进 JSON 字段,

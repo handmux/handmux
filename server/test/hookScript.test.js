@@ -34,6 +34,18 @@ function events(file) {
   } catch { return []; }
 }
 
+describe('handmux-write.cjs process fingerprint', () => {
+  it('keeps a Linux start tick numeric instead of parsing it as a date', () => {
+    const file = freshFile();
+    // Args: file pane src ts host events claudePid claudeStartedAt claudeTty
+    execFileSync('node', [
+      WRITER, file, '%1', 'stop', '1000', 'host', `${file}.events`, '101', '473349', '/dev/ttys001',
+    ], { input: '{}' });
+    const state = JSON.parse(fs.readFileSync(file, 'utf8'));
+    expect(state['%1'].process).toEqual({ pid: 101, startedAt: 473349, tty: '/dev/ttys001' });
+  });
+});
+
 describe('handmux-notify.sh → handmux-write.js', () => {
   it('records the pane keyed by its id, with src + full payload (no network, just a file)', () => {
     const file = freshFile();

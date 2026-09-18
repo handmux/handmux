@@ -27,7 +27,10 @@ if (!file || !pane || !src) process.exit(0);
 
 function processFingerprint() {
   const pid = Number(String(claudePid).trim());
-  const startedAt = Date.parse(String(claudeStartedAt).trim());
+  // The Hook reports the platform's start value (see handmux-notify.sh): a raw procfs tick on Linux, an
+  // lstart string on macOS. A digit-only value stays numeric — Date.parse would make it NaN.
+  const rawStartedAt = String(claudeStartedAt).trim();
+  const startedAt = /^\d+$/.test(rawStartedAt) ? Number(rawStartedAt) : Date.parse(rawStartedAt);
   const rawTty = String(claudeTty).trim();
   if (!Number.isSafeInteger(pid) || pid <= 0 || !Number.isFinite(startedAt)
     || !rawTty || rawTty === '?' || rawTty === '??') return undefined;

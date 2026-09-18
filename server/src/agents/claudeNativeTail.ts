@@ -8,6 +8,16 @@ const record = (value: unknown): Row | null => value !== null && typeof value ==
 const METADATA = new Set(['last-prompt', 'ai-title', 'mode', 'permission-mode', 'file-history-snapshot']);
 const MAX_BYTES = 65536;
 const MAX_SESSIONS = 128;
+
+// Claude's registry records the process start in the same platform-shaped form we read: a raw procfs tick
+// on Linux, an lstart string on macOS (see processStartedAt in tmuxRuntime.ts). Compare like with like —
+// assuming a date string made Linux native status permanently unknown (`Date.parse('473349 UTC')` is NaN).
+function sameProcessStart(recorded: unknown, observed: number | undefined): boolean {
+  if (typeof recorded !== 'string' || observed === undefined) return false;
+  return /^\d+$/.test(recorded)
+    ? Number(recorded) === observed
+    : Date.parse(`${recorded} UTC`) === observed;
+}
 export interface ClaudeNativeCompletion {
   interruption: string | null;
   settled?: string | null;
@@ -97,8 +107,8 @@ export class ClaudeNativeTailReader {
         while (this.#statuses.size > MAX_SESSIONS) this.#statuses.delete(this.#statuses.keys().next().value!);
       }
     } catch { this.#statuses.delete(registry); return unknown(); }
-    if (!row || row.pid !== process.pid || row.sessionId !== payload.session_id || row.kind !== 'interactive'
-      || typeof row.procStart !== 'string' || Date.parse(`${row.procStart} UTC`) !== process.startedAt) return unknown();
+    if (!row || row.pid !== process.pid || row.sessionId !== payload.session_id
+      || row.kind !== 'interactive' || !sameProcessStart(row.procStart, process.startedAt)) return unknown();
     this.#nativeProcesses.add(identity);
     while (this.#nativeProcesses.size > MAX_SESSIONS) this.#nativeProcesses.delete(this.#nativeProcesses.values().next().value!);
     const hookSettled = src === 'stop' || src === 'stopfail'
@@ -111,7 +121,13 @@ export class ClaudeNativeTailReader {
     if (typeof row.statusUpdatedAt === 'number' && row.statusUpdatedAt <= after) {
       return { ...native, settled: null, localCommand: null };
     }
-    if (typeof row.statusUpdatedAt !== 'number' || row.statusUpdatedAt < process.startedAt! || row.statusUpdatedAt > now
+    // The status is only bounded from above here. A "newer than the process start" lower bound would need
+    // both sides in the same clock domain, which only holds where the start value is epoch-shaped (macOS);
+    // on Linux it is a raw tick. pid + session + start token already identify the row.
+    const startedEpoch = typeof process.startedAt === 'number' && process.startedAt > 1e12
+      ? process.startedAt : undefined;
+    if (typeof row.statusUpdatedAt !== 'number' || row.statusUpdatedAt > now
+      || (startedEpoch !== undefined && row.statusUpdatedAt < startedEpoch)
       || (row.status === 'idle' && (!native.transcriptComplete || row.statusUpdatedAt <= after || row.statusUpdatedAt < (native.latestNativeAt ?? 0)))
       || !['idle', 'busy', 'waiting'].includes(String(row.status))) return unknown();
     const status = row.status as 'idle' | 'busy' | 'waiting';

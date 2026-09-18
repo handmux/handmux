@@ -2,6 +2,7 @@ import { promises as fsp } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   createLocalAgentProcessContext,
+  processStartedAt,
   TmuxAgentPaneSource,
 } from '../src/agent-runtime/tmuxRuntime.js';
 import { defaultRun } from '../src/agents/scanUtils.js';
@@ -137,5 +138,27 @@ describe('Tmux Agent Runtime context', () => {
       paneId: '%1', sessionName: 'main', windowId: '@1', windowName: 'agent',
       currentCommand: 'claude', tty: '/dev/ttys001',
     })).resolves.toMatchObject({ pid: 200, executable: '/opt/claude/bin/claude' });
+  });
+});
+
+describe('process start value', () => {
+  it('reads the raw start tick on Linux, so a stepped boot time cannot move it', async () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('linux');
+    // /proc/<pid>/stat: pid (comm) state ppid ... — comm contains spaces on purpose, and starttime is the
+    // 22nd field overall (20th after comm).
+    const stat = '101 (claude code) S 1 101 101 0 -1 4194304 1 0 0 0 1 2 3 4 20 0 1 0 473349 123 456\n';
+    const readFile = vi.spyOn(fsp, 'readFile').mockResolvedValue(stat as never);
+    const run = vi.fn(async () => { throw new Error('ps must not be consulted on Linux'); });
+
+    await expect(processStartedAt(run, 101)).resolves.toBe(473349);
+    expect(readFile).toHaveBeenCalledWith('/proc/101/stat', 'utf8');
+    expect(run).not.toHaveBeenCalled();
+  });
+
+  it('keeps parsing lstart where procfs does not exist', async () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('darwin');
+    const run = vi.fn(async () => 'Thu Jan  1 00:00:01 1970\n');
+    await expect(processStartedAt(run, 101)).resolves.toBe(Date.parse('Thu Jan  1 00:00:01 1970'));
+    expect(run).toHaveBeenCalledWith('ps', ['-p', '101', '-o', 'lstart=']);
   });
 });

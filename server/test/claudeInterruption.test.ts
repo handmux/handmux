@@ -239,6 +239,14 @@ function registryFixture() {
   return { ...h, payload, process, transcript, registry, user, writeStatus, read };
 }
 
+it('reads a Linux-style numeric procStart against a numeric start value', () => {
+  const h = registryFixture();
+  // On Linux both sides are the raw procfs start tick; the lstart string form is macOS-only.
+  h.writeStatus({ procStart: '473349' });
+  expect(h.reader.read(h.payload, 2000, 10_000, { pid: 101, startedAt: 473349 }))
+    .toMatchObject({ status: 'idle' });
+});
+
 it('settles a native no-visible-output cancellation without a JSONL interrupt marker', () => {
   const h = registryFixture();
   expect(h.read()).toMatchObject({ status: 'idle', restoredPrompt: 'old draft' });

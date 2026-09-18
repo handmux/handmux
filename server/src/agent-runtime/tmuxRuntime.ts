@@ -1,3 +1,4 @@
+import { promises as fsp } from 'node:fs';
 import { executablePath } from '../agents/processIdentity.js';
 import { defaultRun, etimeToMs, normTty } from '../agents/scanUtils.js';
 import type { RunCommand } from '../agents/scanUtils.js';
@@ -161,6 +162,29 @@ function foregroundLeaf(
       || depth(first) - depth(second) || second.pid - first.pid)[0] ?? null;
 }
 
+// Process start time, in a form that only depends on the process itself.
+//
+// `ps -o lstart` is a wall-clock derivation (boot time + start ticks). A host that steps the guest clock
+// (WSL2 syncs from Hyper-V, moving the guest forward every few tens of seconds) therefore makes the same
+// live process report a *different* start time after every step, which every identity comparison reads as
+// "the process was replaced". Linux exposes the raw start tick instead, and macOS does not step its clock
+// this way, so it keeps lstart. The Hook records the same value per platform — keep the two in step
+// (server/hooks/handmux-notify.sh).
+// Exported so the platform split can be unit-tested; callers use inspectForeground.
+export async function processStartedAt(run: RunCommand, pid: number): Promise<number | undefined> {
+  if (process.platform === 'linux') {
+    try {
+      const stat = await fsp.readFile(`/proc/${pid}/stat`, 'utf8');
+      // comm may contain spaces and parentheses: start from the last ')' to reach field 3 (state).
+      const fields = stat.slice(stat.lastIndexOf(')') + 2).trim().split(/\s+/);
+      const startTicks = Number(fields[19]); // field 22 of /proc/<pid>/stat
+      if (Number.isSafeInteger(startTicks) && startTicks >= 0) return startTicks;
+    } catch { /* fall back to the portable lstart read */ }
+  }
+  const parsed = Date.parse(String(await run('ps', ['-p', String(pid), '-o', 'lstart='])).trim());
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
 export function createLocalAgentProcessContext({
   run = defaultRun,
 }: {
@@ -176,12 +200,11 @@ export function createLocalAgentProcessContext({
       }
       const row = foregroundLeaf(foregroundRows(output), tty, pane.currentCommand);
       if (!row) return null;
-      const rawStartedAt = String(await run('ps', ['-p', String(row.pid), '-o', 'lstart='])).trim();
-      const parsedStartedAt = Date.parse(rawStartedAt);
+      const startedAt = await processStartedAt(run, row.pid);
       const executable = await executablePath(run, row.pid);
       return {
         pid: row.pid,
-        ...(Number.isFinite(parsedStartedAt) ? { startedAt: parsedStartedAt } : {}),
+        ...(startedAt === undefined ? {} : { startedAt }),
         tty: pane.tty ?? `/dev/${tty}`,
         ...(executable ? { executable } : {}),
         ...(row.command ? { commandLine: row.command } : {}),
