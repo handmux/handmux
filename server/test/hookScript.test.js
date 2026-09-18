@@ -106,14 +106,20 @@ describe('handmux-notify.sh → handmux-write.js', () => {
       '',
     ].join('\n'), { mode: 0o755 });
 
+    const procRoot = path.join(tmpHome('hook-process-proc-'), 'proc');
+    fs.mkdirSync(path.join(procRoot, '4242'), { recursive: true });
+    fs.writeFileSync(path.join(procRoot, '4242/stat'),
+      '4242 (claude) S 1 4242 4242 0 -1 4194304 1 0 0 0 1 2 3 4 20 0 1 0 473349 123 456\n');
+
     const obj = run('start', {
       TMUX_PANE: '%1',
       PATH: `${fakeBin}:${process.env.PATH}`,
+      HANDMUX_PROC_ROOT: procRoot,
     }, '{"session_id":"real-session"}', file);
 
     expect(obj['%1'].process).toEqual({
       pid: 4242,
-      startedAt: Date.parse('Tue Aug 12 04:00:00 2026'),
+      startedAt: 473349,
       tty: '/dev/ttys007',
     });
     expect(events(file)[0].process).toEqual(obj['%1'].process);

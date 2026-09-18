@@ -25,6 +25,12 @@ function installedHooks(sync = false) {
   const bin = path.join(directory, 'bin');
   fs.mkdirSync(bin);
   fs.mkdirSync(path.join(home, '.claude'), { recursive: true });
+  // The Hook reads the process start tick from procfs where it exists; supply a fixture so the value is
+  // deterministic on every platform instead of depending on the host's live process table.
+  const procRoot = path.join(directory, 'proc');
+  fs.mkdirSync(path.join(procRoot, '4242'), { recursive: true });
+  fs.writeFileSync(path.join(procRoot, '4242/stat'),
+    '4242 (claude) S 1 4242 4242 0 -1 4194304 1 0 0 0 1 2 3 4 20 0 1 0 473349 123 456\n');
   fs.writeFileSync(path.join(bin, 'tmux'), '#!/bin/sh\nprintf "/dev/ttys007\\n"\n', { mode: 0o755 });
   fs.writeFileSync(path.join(bin, 'ps'), `#!/bin/sh
 case "$*" in
@@ -41,11 +47,14 @@ esac
     expect(syncHooks(home, options).status).toBe('installed');
   }
   const settings = JSON.parse(fs.readFileSync(path.join(home, '.claude/settings.json'), 'utf8'));
-  const env: NodeJS.ProcessEnv = { ...process.env, PATH: `${bin}:${process.env.PATH}`, TMUX_PANE: '%1', CLAUDE_PANE: '%1' };
+  const env: NodeJS.ProcessEnv = {
+    ...process.env, PATH: `${bin}:${process.env.PATH}`, TMUX_PANE: '%1', CLAUDE_PANE: '%1',
+    HANDMUX_PROC_ROOT: procRoot,
+  };
   delete env.HANDMUX_CLAUDE_EVENTS;
   delete env.HANDMUX_STATE;
   const foreground: ForegroundProcessIdentity = {
-    pid: 4242, startedAt: Date.parse('Wed Sep 09 10:00:00 2026'),
+    pid: 4242, startedAt: 473349,
     tty: '/dev/ttys007', executable: '/opt/claude/bin/claude',
   };
   function fire(event: string, payload: Record<string, unknown>) {
