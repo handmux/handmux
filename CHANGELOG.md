@@ -4,6 +4,8 @@ All notable changes to handmux. Format follows [Keep a Changelog](https://keepac
 
 ## [Unreleased]
 
+## [0.29.1] - 2026-09-18
+
 ### Fixed
 
 - 修复会话切换短暂过渡时显示红色"无法连接 Codex 会话"的问题；过渡期间现在复用统一的加载中状态。
