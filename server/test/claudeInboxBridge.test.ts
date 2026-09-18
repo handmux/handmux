@@ -1002,3 +1002,52 @@ describe('Claude Hook → LocalAgentBridge → Inbox vertical slice', () => {
     expect(runtime.inbox.read().terminalNotifications).toEqual([]);
   });
 });
+
+describe('Claude Hook source retention', () => {
+  function sourceFile(eventDirectory: string, name: string): string {
+    fs.mkdirSync(eventDirectory, { recursive: true });
+    const file = path.join(eventDirectory, name);
+    fs.writeFileSync(file, '{}');
+    return file;
+  }
+
+  it('drops undeliverable Hook sources by age and count without touching gap markers', async () => {
+    const directory = root();
+    const hookStateFile = path.join(directory, 'state.json');
+    const eventDirectory = `${hookStateFile}.events`;
+    const gapName = `gap-${'a'.repeat(64)}.json`;
+    const stale = sourceFile(eventDirectory, 'event-0000000000000001-100.json');
+    const second = sourceFile(eventDirectory, 'event-0000000000000002-100.json');
+    sourceFile(eventDirectory, 'event-0000000000000003-100.json');
+    const gap = sourceFile(eventDirectory, gapName);
+    // Two files are undeliverable for different reasons: the oldest is past the age window, the next only
+    // exceeds the retained count.
+    const longAgo = new Date(Date.now() - 48 * 60 * 60_000);
+    fs.utimesSync(stale, longAgo, longAgo);
+    fs.utimesSync(gap, longAgo, longAgo);
+    const logger = vi.fn();
+
+    const connector = new ClaudeHookBridgeConnector({
+      socketPath: path.join(directory, 'missing.sock'),
+      credentialFile: path.join(directory, 'bridge-credential.json'),
+      stateDirectory: path.join(directory, 'connectors/claude'),
+      hookStateFile, eventDirectory,
+      panes: new TestPanes([]), process: { inspectForeground: async () => null },
+      pollMs: 50, retryDelayMs: 5, maxRetryDelayMs: 10, logger,
+      spoolMaxFiles: 1, spoolRetentionMs: 60 * 60_000,
+    });
+    connectors.push(connector);
+    await connector.reconcile().catch(() => {});
+
+    expect(fs.readdirSync(eventDirectory).sort()).toEqual([
+      'event-0000000000000003-100.json',
+      gapName,
+    ]);
+    expect(fs.existsSync(second)).toBe(false);
+    expect(logger).toHaveBeenCalledWith(
+      'Dropped Claude Hook source files that could not be delivered',
+      { dropped: 2, remaining: 1 },
+    );
+    await connector.close();
+  });
+});

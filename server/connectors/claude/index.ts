@@ -63,9 +63,15 @@ export interface ClaudeHookBridgeConnectorOptions {
   pollMs?: number;
   retryDelayMs?: number;
   maxRetryDelayMs?: number;
+  // Retention for Hook source files that never get acknowledged (see #pruneSpool).
+  spoolMaxFiles?: number;
+  spoolRetentionMs?: number;
   logger?: (message: string, error?: unknown) => void;
   createClient?: (options: ConstructorParameters<typeof LocalConnectorBridgeClient>[0]) => LocalConnectorBridgeClient;
 }
+
+const DEFAULT_SPOOL_MAX_FILES = 2_000;
+const DEFAULT_SPOOL_RETENTION_MS = 24 * 60 * 60_000;
 
 const EVENT_ID_RE = /^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,255}$/;
 
@@ -265,6 +271,8 @@ export class ClaudeHookBridgeConnector {
   readonly #panes: ReadonlyPaneSource;
   readonly #process: ProcessContext;
   readonly #pollMs: number;
+  readonly #spoolMaxFiles: number;
+  readonly #spoolRetentionMs: number;
   readonly #retryDelayMs: number;
   readonly #maxRetryDelayMs: number;
   readonly #logger: NonNullable<ClaudeHookBridgeConnectorOptions['logger']>;
@@ -296,11 +304,15 @@ export class ClaudeHookBridgeConnector {
     maxRetryDelayMs = 5_000,
     logger = () => {},
     createClient = (options) => new LocalConnectorBridgeClient(options),
+    spoolMaxFiles = DEFAULT_SPOOL_MAX_FILES,
+    spoolRetentionMs = DEFAULT_SPOOL_RETENTION_MS,
   }: ClaudeHookBridgeConnectorOptions) {
     if (![socketPath, credentialFile, stateDirectory, hookStateFile, eventDirectory].every(path.isAbsolute)
       || !panes || !process || !Number.isSafeInteger(pollMs) || pollMs < 50
       || !Number.isSafeInteger(retryDelayMs) || retryDelayMs <= 0
-      || !Number.isSafeInteger(maxRetryDelayMs) || maxRetryDelayMs < retryDelayMs) {
+      || !Number.isSafeInteger(maxRetryDelayMs) || maxRetryDelayMs < retryDelayMs
+      || !Number.isSafeInteger(spoolMaxFiles) || spoolMaxFiles <= 0
+      || !Number.isSafeInteger(spoolRetentionMs) || spoolRetentionMs <= 0) {
       throw new TypeError('Claude Hook Bridge Connector requires private paths and Runtime identity sources');
     }
     this.#socketPath = socketPath;
@@ -314,6 +326,8 @@ export class ClaudeHookBridgeConnector {
     this.#pollMs = pollMs;
     this.#retryDelayMs = retryDelayMs;
     this.#maxRetryDelayMs = maxRetryDelayMs;
+    this.#spoolMaxFiles = spoolMaxFiles;
+    this.#spoolRetentionMs = spoolRetentionMs;
     this.#logger = logger;
     this.#createClient = createClient;
   }
@@ -369,6 +383,30 @@ export class ClaudeHookBridgeConnector {
     } catch { return []; }
   }
 
+  // Retention for Hook source files that never reach an acknowledgement: a pane that is gone, a client
+  // that never drains, or a durable publish that keeps failing leaves its file behind, and every poll
+  // re-reads it — an observed 170k files over nine days. Files are listed oldest-first, so a cap drops
+  // the stuck ones and an age window only ever expires files no one is waiting on. `gap-*` markers are
+  // not touched: they are bounded by pane/session and carry a degradation signal until confirmed.
+  #pruneSpool(files: string[]): string[] {
+    const events = files.filter((file) => path.basename(file).startsWith('event-'));
+    if (events.length === 0) return files;
+    const now = Date.now();
+    const dropped = new Set<string>();
+    for (const [index, file] of events.entries()) {
+      const beyondCap = this.#spoolMaxFiles > 0 && index < events.length - this.#spoolMaxFiles;
+      let expired = false;
+      try { expired = now - fs.statSync(file).mtimeMs > this.#spoolRetentionMs; } catch { /* removed */ }
+      if (beyondCap || expired) dropped.add(file);
+    }
+    if (dropped.size === 0) return files;
+    for (const file of dropped) { try { fs.unlinkSync(file); } catch { /* concurrently removed */ } }
+    this.#logger?.('Dropped Claude Hook source files that could not be delivered', {
+      dropped: dropped.size, remaining: events.length - dropped.size,
+    });
+    return files.filter((file) => !dropped.has(file));
+  }
+
   async #reconcile(): Promise<void> {
     if (this.#closed) return;
     let panes: readonly LivePane[];
@@ -385,7 +423,7 @@ export class ClaudeHookBridgeConnector {
     };
 
     const events: Array<{ file: string; event: ClaudeHookEvent }> = [];
-    for (const eventFile of this.#eventFiles()) {
+    for (const eventFile of this.#pruneSpool(this.#eventFiles())) {
       let event: ClaudeHookEvent | null = null;
       try {
         const stat = fs.lstatSync(eventFile);
