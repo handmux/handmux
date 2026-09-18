@@ -25,7 +25,7 @@ export interface DocViewProps {
   content?: string | null;
 }
 
-type SheetKind = 'type' | 'more';
+type SheetKind = 'more';
 
 const collectSentences = markSentences;
 const rawFontSizes: unknown = DOC_FONT_SIZES;
@@ -179,33 +179,37 @@ export default function DocView({ type, name, path = null, content = '' }: DocVi
       <div className="doc-toolbar">
         {speech.playing ? (
           <div className="doc-player">
-            <button className="doc-tb-btn" onClick={speech.prev} disabled={speech.idx <= 0}
+            <button className="doc-zoom-btn doc-zoom-icon" onClick={speech.prev} disabled={speech.idx <= 0}
               aria-label={t('doc.prevSentence')}><SkipBackIcon /></button>
-            <button className="doc-tb-btn doc-tb-main" onClick={onPlayToggle}
+            <button className="doc-zoom-btn doc-zoom-icon" onClick={onPlayToggle}
               aria-label={reading ? t('doc.pauseRead') : t('doc.resumeRead')}>
               {reading ? <PauseIcon /> : <PlayIcon />}
             </button>
-            <button className="doc-tb-btn" onClick={speech.next}
+            <button className="doc-zoom-btn doc-zoom-icon" onClick={speech.next}
               aria-label={t('doc.nextSentence')}><SkipForwardIcon /></button>
             <div className="doc-progress" role="progressbar" aria-label={t('doc.progress')}
               aria-valuemin={0} aria-valuemax={total || 1} aria-valuenow={shownIdx}>
               <span className="doc-progress-fill" style={{ width: progress }} />
             </div>
             <span className="doc-progress-num" aria-hidden="true">{shownIdx}/{total || '–'}</span>
-            <button className="doc-tb-btn doc-tb-rate" onClick={speech.cycleRate}
+            <button className="doc-zoom-btn" onClick={speech.cycleRate}
               aria-label={t('doc.rate')}>{speech.rate}×</button>
-            <button className="doc-tb-btn" onClick={speech.stop}
+            <button className="doc-zoom-btn doc-zoom-icon" onClick={speech.stop}
               aria-label={t('doc.stopRead')}><StopIcon /></button>
           </div>
         ) : (
           <div className="doc-tools">
             {canRead && (
-              <button className="doc-tb-btn doc-tb-main" onClick={onPlayToggle}
+              <button className="doc-zoom-btn doc-zoom-icon" onClick={onPlayToggle}
                 aria-label={t('doc.read')}><PlayIcon /></button>
             )}
-            <button className="doc-tb-btn doc-tb-text" onClick={() => setSheet('type')}
-              aria-label={t('doc.typeSettings')}>Aa</button>
-            <button className="doc-tb-btn" onClick={() => setSheet('more')}
+            <div className="doc-fonts">
+              <button className="doc-zoom-btn" onClick={() => bump(-1)} disabled={fontIdx <= 0}
+                aria-label={t('doc.fontSmaller')}>A−</button>
+              <button className="doc-zoom-btn" onClick={() => bump(1)} disabled={fontIdx >= LAST}
+                aria-label={t('doc.fontLarger')}>A+</button>
+            </div>
+            <button className="doc-zoom-btn doc-zoom-icon" onClick={() => setSheet('more')}
               aria-label={t('doc.more')}><MoreHorizontalIcon /></button>
           </div>
         )}
@@ -233,16 +237,6 @@ export default function DocView({ type, name, path = null, content = '' }: DocVi
           <ImageViewer url={imageView.url} name={imageView.name} />
         </div>
       )}
-
-      <ActionSheet open={sheet === 'type'} title={t('doc.typeSettings')} onClose={() => setSheet(null)}>
-        <div className="doc-font-row">
-          <button className="doc-zoom-btn" onClick={() => bump(-1)} disabled={fontIdx <= 0}
-            aria-label={t('doc.fontSmaller')}>A−</button>
-          <span className="doc-font-val" aria-live="polite">{FONT_SIZES[fontIdx]}px</span>
-          <button className="doc-zoom-btn" onClick={() => bump(1)} disabled={fontIdx >= LAST}
-            aria-label={t('doc.fontLarger')}>A+</button>
-        </div>
-      </ActionSheet>
 
       <ActionSheet open={sheet === 'more'} title={t('doc.more')} onClose={() => setSheet(null)}
         actions={[

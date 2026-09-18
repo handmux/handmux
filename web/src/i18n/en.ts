@@ -1221,7 +1221,6 @@ export default {
   'doc.rate': 'Speed',
   'doc.fontSmaller': 'Smaller font',
   'doc.fontLarger': 'Larger font',
-  'doc.typeSettings': 'Typography',
   'doc.more': 'More',
   'doc.prevSentence': 'Previous sentence',
   'doc.nextSentence': 'Next sentence',

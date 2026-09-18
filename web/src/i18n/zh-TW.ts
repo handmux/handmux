@@ -530,7 +530,6 @@ export default {
   'doc.rate': '語速',
   'doc.fontSmaller': '縮小字型',
   'doc.fontLarger': '放大字型',
-  'doc.typeSettings': '排版',
   'doc.more': '更多',
   'doc.prevSentence': '上一句',
   'doc.nextSentence': '下一句',

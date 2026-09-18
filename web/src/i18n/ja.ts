@@ -518,7 +518,6 @@ export default {
   'doc.rate': '読み上げ速度',
   'doc.fontSmaller': 'フォントを縮小',
   'doc.fontLarger': 'フォントを拡大',
-  'doc.typeSettings': '文字設定',
   'doc.more': 'その他',
   'doc.prevSentence': '前の文',
   'doc.nextSentence': '次の文',

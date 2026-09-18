@@ -1220,7 +1220,6 @@ export default {
   'doc.rate': '语速',
   'doc.fontSmaller': '缩小字体',
   'doc.fontLarger': '放大字体',
-  'doc.typeSettings': '排版',
   'doc.more': '更多',
   'doc.prevSentence': '上一句',
   'doc.nextSentence': '下一句',

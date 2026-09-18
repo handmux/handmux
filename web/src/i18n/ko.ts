@@ -518,7 +518,6 @@ export default {
   'doc.rate': '읽기 속도',
   'doc.fontSmaller': '글꼴 축소',
   'doc.fontLarger': '글꼴 확대',
-  'doc.typeSettings': '글자 설정',
   'doc.more': '더 보기',
   'doc.prevSentence': '이전 문장',
   'doc.nextSentence': '다음 문장',

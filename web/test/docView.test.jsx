@@ -67,12 +67,10 @@ describe('DocView', () => {
     expect(a?.getAttribute('href') ?? '').not.toContain('javascript:');
   });
 
-  it('A+/A− live in the typography sheet, step the font level and persist it', async () => {
+  it('A+/A− stay on the bar and step the font level (persisted)', async () => {
     await render({ type: 'markdown', name: 'a.md', content: '# Title' });
     const md = () => container.querySelector('.doc-md');
     expect(md().style.fontSize).toBe('14px'); // default = level index 4
-    expect(container.querySelector('[aria-label="放大字体"]')).toBeNull(); // not in the toolbar
-    await click(container.querySelector('[aria-label="排版"]'));
     await click(container.querySelector('[aria-label="放大字体"]'));
     expect(md().style.fontSize).toBe('16px'); // index 5
     expect(localStorage.getItem('tw_doc_font')).toBe('5');
@@ -83,20 +81,18 @@ describe('DocView', () => {
     localStorage.setItem('tw_doc_font', '8'); // last index → 22px
     await render({ type: 'markdown', name: 'a.md', content: '# Title' });
     expect(container.querySelector('.doc-md').style.fontSize).toBe('22px');
-    await click(container.querySelector('[aria-label="排版"]'));
     expect(container.querySelector('[aria-label="放大字体"]').disabled).toBe(true);
   });
   it('disables A− at the smallest level', async () => {
     localStorage.setItem('tw_doc_font', '0'); // first index → 10px
     await render({ type: 'markdown', name: 'a.md', content: '# Title' });
     expect(container.querySelector('.doc-md').style.fontSize).toBe('10px');
-    await click(container.querySelector('[aria-label="排版"]'));
     expect(container.querySelector('[aria-label="缩小字体"]').disabled).toBe(true);
   });
-  it('text docs get the toolbar too (Aa / ⋯, no read-aloud)', async () => {
+  it('text docs get the toolbar too (font size, no read-aloud)', async () => {
     await render({ type: 'text', name: 'a.log', content: 'line' });
     expect(container.querySelector('.doc-toolbar')).not.toBeNull();
-    expect(container.querySelector('[aria-label="排版"]')).not.toBeNull();
+    expect(container.querySelector('[aria-label="放大字体"]')).not.toBeNull();
     expect(container.querySelector('[aria-label="朗读"]')).toBeNull();
   });
   it('has no toolbar for an html doc', async () => {
