@@ -234,25 +234,6 @@ export function StopIcon() {
   );
 }
 
-// ⏮ 上一句(竖线 + 左三角),⏭ 下一句(左三角 + 竖线)——朗读工具栏的句级步进。
-export function SkipBackIcon() {
-  return (
-    <svg {...base}>
-      <line x1="6" y1="5" x2="6" y2="19" />
-      <path d="M18 5l-9 7 9 7z" />
-    </svg>
-  );
-}
-
-export function SkipForwardIcon() {
-  return (
-    <svg {...base}>
-      <path d="M6 5l9 7-9 7z" />
-      <line x1="18" y1="5" x2="18" y2="19" />
-    </svg>
-  );
-}
-
 // 🎙 麦克风(微信风:圆头话筒 + 弧形托 + 立杆)。描边图标,尺寸由 CSS 控制。
 export function MicIcon() {
   return (

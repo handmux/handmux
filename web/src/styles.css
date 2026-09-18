@@ -2443,29 +2443,17 @@ button.cmd-text { background: none; border: none; text-align: left; }
 .doc-md-wrap { position: relative; flex: 1; min-width: 0; overflow-y: auto; overflow-x: hidden;
   -webkit-overflow-scrolling: touch; }
 
-/* Reading toolbar — iOS toolbar: a fixed-height translucent bar (blur + hairline, no drawn border)
-   holding borderless 44pt controls, leading cluster on the left and 更多 at the trailing edge.
-   Every control the bar had before is still ON the bar (朗读 / A− / A+ / 语速 / 停止).
-   Idle:    ▶  A− A+           ⋯
-   Reading: ⏮ ⏯ ⏭  ━━●━━ 3/48  1.5× ⏹ */
-.doc-toolbar { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; gap: 2px;
-  min-height: 48px; padding: 0 6px; background: rgba(17,22,29,0.8);
-  backdrop-filter: blur(20px) saturate(180%); -webkit-backdrop-filter: blur(20px) saturate(180%);
-  box-shadow: inset 0 -0.5px 0 rgba(255,255,255,0.09); }
-.doc-tools, .doc-player { display: flex; align-items: center; gap: 2px; flex: 1; min-width: 0; }
-.doc-fonts { display: flex; align-items: center; gap: 2px; margin-left: auto; }
-.doc-zoom-btn { display: inline-flex; align-items: center; justify-content: center; min-width: 44px;
-  min-height: 44px; padding: 0 10px; background: none; border: 0; border-radius: 10px; color: #9fb0c0;
-  font-size: 15px; touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
-.doc-zoom-btn svg { width: 19px; height: 19px; display: block; }
-.doc-zoom-btn:active { background: rgba(255,255,255,0.08); }
-.doc-zoom-btn:disabled { opacity: .35; }
-.doc-zoom-icon { padding: 0; }
-/* Read-aloud progress: display only (tap a sentence in the text to jump there instead). */
-.doc-progress { flex: 1; min-width: 40px; height: 4px; margin: 0 10px; border-radius: 2px;
-  background: rgba(255,255,255,0.12); overflow: hidden; }
-.doc-progress-fill { display: block; height: 100%; background: var(--blue); transition: width .2s linear; }
-.doc-progress-num { font-size: 12px; color: #8b97a3; font-variant-numeric: tabular-nums; }
+/* Reading toolbar — the bar as it always was (same buttons, sizes, spacing, look), just with the
+   read-aloud controls it already had: 开始/暂停 · 停止 · 倍速 on the left, A−/A+ pinned right.
+   Read-aloud adds nothing to the bar itself: tapping a sentence in the text is how you jump. */
+.doc-toolbar { position: sticky; top: 0; z-index: 2; display: flex; gap: 6px; align-items: center;
+  padding: 8px 12px 0; }
+.doc-player { display: flex; gap: 6px; align-items: center; }
+.doc-fonts { display: flex; gap: 6px; margin-left: auto; } /* fonts stay pinned right; TTS sits left */
+.doc-zoom-btn { display: inline-flex; align-items: center; justify-content: center; background: #11161d; border: 1px solid #1d2630; color: #9fb0c0; border-radius: 8px; padding: 4px 12px; font-size: 14px; touch-action: manipulation; }
+.doc-zoom-btn:disabled { opacity: .4; }
+.doc-zoom-icon { padding: 4px 9px; }
+.doc-zoom-icon svg { width: 17px; height: 17px; display: block; }
 /* "Back to what is being read" — height:0 sticky anchor keeps it pinned to the bottom of the reading
    area without adding layout height at the end of the document. */
 .doc-follow-anchor { position: sticky; bottom: 0; height: 0; display: flex; justify-content: center;

@@ -18,15 +18,9 @@ export interface DocSpeechController {
   playing: boolean;
   paused: boolean;
   idx: number;
-  /** Sentence count of the loaded document (0 before the first play) — drives the progress readout. */
-  total: number;
   rate: number;
   /** Start reading. `from` (sentence index) lets the caller begin anywhere — tapping a sentence. */
   play: (sentences: readonly string[], from?: number) => void;
-  /** Jump to sentence `i` at any time; starts playback if idle but sentences are already loaded. */
-  speakFrom: (i: number) => void;
-  next: () => void;
-  prev: () => void;
   pause: () => void;
   resume: () => void;
   stop: () => void;
@@ -48,7 +42,6 @@ export function useDocSpeech(): DocSpeechController {
   const synth = (typeof window !== 'undefined' && window.speechSynthesis) || null;
   const [state, setState] = useState<SpeechState>({ playing: false, paused: false, idx: -1 });
   const [rate, setRate] = useState(getRate);
-  const [total, setTotal] = useState(0);
   const ref = useRef<SpeechRuntime>({
     sentences: [], idx: -1, playing: false, paused: false, rate: getRate(),
   });
@@ -82,23 +75,13 @@ export function useDocSpeech(): DocSpeechController {
     synth.speak(utterance);
   };
 
-  // Jump to a sentence at ANY time (tapping a sentence, ⏮/⏭). An in-flight utterance can't be
-  // re-targeted, so cancel first and re-speak from the new index — the same reason cycleRate
-  // re-speaks the current sentence.
-  const speakFrom = (i: number): void => {
-    const c = ref.current;
-    if (!synth || !c.sentences.length) return;
-    synth.cancel();
-    c.playing = true; c.paused = false;
-    speakAt(Math.max(0, Math.min(c.sentences.length - 1, i)));
-  };
-
+  // `from` starts the read at any sentence — tapping a sentence in the document jumps there. An
+  // in-flight utterance can't be re-targeted, so cancel first (the same reason cycleRate re-speaks).
   const play = (sentences: readonly string[], from = 0): void => {
     if (!synth || !sentences || !sentences.length) return;
     synth.cancel(); // clear any queued utterances from a prior run
     const c = ref.current;
     c.sentences = sentences; c.playing = true; c.idx = -1;
-    setTotal(sentences.length);
     setState({ playing: true, paused: false, idx: -1 });
     const startAt = Math.max(0, Math.min(sentences.length - 1, from));
     // Voices can load lazily on first use; wait for them so the zh voice gets picked.
@@ -118,9 +101,6 @@ export function useDocSpeech(): DocSpeechController {
     if (synth && ref.current.playing) { synth.resume(); setState((s) => ({ ...s, paused: false })); }
   };
 
-  const next = (): void => { if (ref.current.idx >= 0) speakFrom(ref.current.idx + 1); };
-  const prev = (): void => { if (ref.current.idx >= 0) speakFrom(ref.current.idx - 1); };
-
   // Cycle 1x→1.25x→1.5x→1x, persist, and (if mid-read) re-speak the current sentence so the new
   // rate takes effect immediately (rate can't change on an in-flight utterance).
   const cycleRate = (): void => {
@@ -137,7 +117,7 @@ export function useDocSpeech(): DocSpeechController {
 
   return {
     supported: !!synth,
-    playing: state.playing, paused: state.paused, idx: state.idx, total, rate,
-    play, speakFrom, next, prev, pause, resume, stop, cycleRate,
+    playing: state.playing, paused: state.paused, idx: state.idx, rate,
+    play, pause, resume, stop, cycleRate,
   };
 }

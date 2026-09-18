@@ -135,21 +135,17 @@ describe('DocView read-aloud toolbar', () => {
     expect(container.querySelector('.doc-player')).toBeNull();
   });
 
-  it('switches from the idle toolbar to the reading toolbar while playing', async () => {
+  it('starts reading from the beginning on ▶, and the button becomes pause', async () => {
     const spoken = installSpeechMock();
     await render({ type: 'markdown', name: 'a.md', content: DOC });
     await flush();
     await click(container.querySelector('[aria-label="朗读"]'));
     expect(spoken[0]).toBe('第一句话。');
-    const player = container.querySelector('.doc-player');
-    expect(player).not.toBeNull();
-    expect(container.querySelector('[aria-label="上一句"]')).not.toBeNull();
-    expect(container.querySelector('[aria-label="下一句"]')).not.toBeNull();
-    expect(container.querySelector('[aria-label="停止朗读"]')).not.toBeNull();
-    expect(container.querySelector('.doc-progress-num').textContent).toBe('1/3');
+    expect(container.querySelector('[aria-label="暂停朗读"]')).not.toBeNull();
+    expect(container.querySelector('[aria-label="停止朗读"]').disabled).toBe(false);
   });
 
-  it('tapping a sentence reads on from that sentence (no scrubber needed)', async () => {
+  it('tapping a sentence reads on from that sentence', async () => {
     const spoken = installSpeechMock();
     await render({ type: 'markdown', name: 'a.md', content: DOC });
     await flush(); // sentence spans are laid down for the tap target
@@ -157,39 +153,39 @@ describe('DocView read-aloud toolbar', () => {
     expect(third?.textContent).toBe('第三句话。');
     await click(third);
     expect(spoken[0]).toBe('第三句话。'); // starts exactly there, not from the top
-    expect(container.querySelector('.doc-progress-num').textContent).toBe('3/3');
   });
 
-  it('⏮/⏭ step one sentence at a time', async () => {
+  it('tapping a sentence mid-read jumps there too', async () => {
     const spoken = installSpeechMock();
     await render({ type: 'markdown', name: 'a.md', content: DOC });
     await flush();
-    await click(container.querySelector('.tts-sent[data-tts="1"]'));
-    expect(spoken.at(-1)).toBe('第二句话。');
-    await click(container.querySelector('[aria-label="下一句"]'));
+    await click(container.querySelector('[aria-label="朗读"]'));
+    await click(container.querySelector('.tts-sent[data-tts="2"]'));
     expect(spoken.at(-1)).toBe('第三句话。');
-    await click(container.querySelector('[aria-label="上一句"]'));
-    expect(spoken.at(-1)).toBe('第二句话。');
-    expect(container.querySelector('.doc-progress-num').textContent).toBe('2/3');
   });
 
-  it('⏮ is disabled on the first sentence', async () => {
+  it('⏹ stops the read and returns the bar to ▶', async () => {
     installSpeechMock();
+    const synth = window.speechSynthesis;
     await render({ type: 'markdown', name: 'a.md', content: DOC });
     await flush();
     await click(container.querySelector('[aria-label="朗读"]'));
-    expect(container.querySelector('[aria-label="上一句"]').disabled).toBe(true);
+    await click(container.querySelector('[aria-label="停止朗读"]'));
+    expect(synth.cancel).toHaveBeenCalled();
+    expect(container.querySelector('[aria-label="朗读"]')).not.toBeNull();
+    expect(container.querySelector('[aria-label="暂停朗读"]')).toBeNull();
   });
 
-  it('auto-follow preference lives in the ⋯ sheet and persists', async () => {
+  it('倍速 cycles 1× → 1.25× → 1.5× and persists', async () => {
     installSpeechMock();
     await render({ type: 'markdown', name: 'a.md', content: DOC });
-    await click(container.querySelector('[aria-label="更多"]'));
-    const follow = [...container.querySelectorAll('.sheet-action')]
-      .find((b) => b.textContent.includes('自动滚动到朗读位置'));
-    expect(follow?.textContent).toContain('开'); // default on
-    await click(follow);
-    expect(localStorage.getItem('tw_doc_follow')).toBe('0');
+    const rate = () => container.querySelector('[aria-label="语速"]').textContent;
+    expect(rate()).toBe('1×');
+    await click(container.querySelector('[aria-label="语速"]'));
+    expect(rate()).toBe('1.25×');
+    await click(container.querySelector('[aria-label="语速"]'));
+    expect(rate()).toBe('1.5×');
+    expect(localStorage.getItem('tw_doc_rate')).toBe('1.5');
   });
 
   it('a manual scroll pauses following, and the pill comes back to the spoken sentence', async () => {
@@ -205,18 +201,6 @@ describe('DocView read-aloud toolbar', () => {
     expect(pill).not.toBeNull();
     await click(pill);
     expect(container.querySelector('.doc-follow-pill')).toBeNull(); // following resumed
-    vi.restoreAllMocks();
-  });
-
-  it('the pill never appears when auto-follow is off', async () => {
-    localStorage.setItem('tw_doc_follow', '0');
-    installSpeechMock();
-    await render({ type: 'markdown', name: 'a.md', content: DOC });
-    await flush();
-    await click(container.querySelector('[aria-label="朗读"]'));
-    vi.spyOn(Date, 'now').mockReturnValue(Date.now() + 5000);
-    await act(() => { container.querySelector('.doc-md-wrap').dispatchEvent(new Event('scroll')); });
-    expect(container.querySelector('.doc-follow-pill')).toBeNull();
     vi.restoreAllMocks();
   });
 });
