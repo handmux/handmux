@@ -4,6 +4,10 @@ All notable changes to handmux. Format follows [Keep a Changelog](https://keepac
 
 ## [Unreleased]
 
+### Fixed
+
+- 修复 Hook 在 procfs 不可读的 Linux 环境（如加固容器）取不到进程启动时间的问题；现在会自动回退到通用取值，Claude 事件上报不受影响。
+
 ## [0.29.1] - 2026-09-18
 
 ### Fixed
