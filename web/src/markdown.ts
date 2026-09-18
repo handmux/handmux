@@ -1,0 +1,146 @@
+// Shared Markdown → HTML pipeline for BOTH the file preview (DocView) and assistant bubbles
+// (ConversationEntry): strip frontmatter → marked → DOMPurify → one DOM pass. The DOM pass runs
+// AFTER sanitization on purpose — everything it writes (data-handmux-src, classes, notes) is
+// authored by us, so there is no injection surface, and it covers <img>s from BOTH markdown image
+// syntax and raw inline HTML (a marked renderer hook would miss the latter).
+//
+// Inline images are the special part: <img> can never carry the Authorization header /api/download
+// requires (and the token must not leak into a URL), so the render pass NEVER emits a usable local
+// src. In doc mode (baseDir set) local images become <img data-handmux-src="<abs path>"> placeholders
+// that useMarkdownImages fills with an authenticated blob URL. In bubble mode images are stripped
+// entirely (terminal agents don't inline local images) — alt text survives, nothing else.
+import { marked } from 'marked';
+import DOMPurify from 'dompurify';
+import { findOutputLinks } from './docDecorations.js';
+import { isAbsolute, joinPath } from './docPath.js';
+import { t } from './i18n';
+
+export interface ConversationOutputLink {
+  kind: 'url' | 'doc';
+  path?: string;
+  protocol?: 'http' | 'https';
+  port?: number;
+  urlPath?: string;
+  raw?: string;
+}
+
+export function outputLinkFromAnchor(anchor: HTMLAnchorElement): ConversationOutputLink | null {
+  const explicitKind = anchor.dataset.handmuxOutputLink;
+  const raw = anchor.dataset.handmuxOutputValue || anchor.getAttribute('href') || '';
+  const links = findOutputLinks(raw);
+  const match = explicitKind ? links.find((link) => link.kind === explicitKind) : links[0];
+  if (!match) return null;
+  if (match.kind === 'url') {
+    return {
+      kind: 'url', protocol: match.protocol, port: match.port,
+      urlPath: match.urlPath, raw: match.raw,
+    };
+  }
+  const path = match.path || raw.slice(match.start, match.end);
+  if (explicitKind) return { kind: 'doc', path };
+  try { return { kind: 'doc', path: decodeURIComponent(path) }; }
+  catch { return { kind: 'doc', path }; }
+}
+
+// Strip a YAML frontmatter block (opening `---` line … closing `---` or `...` line). Line-based on
+// purpose: a lazy multiline regex can run past an invalid closer and swallow real document content.
+// No valid closer → not frontmatter → source returned untouched.
+function stripFrontmatter(source: string): string {
+  if (!source.startsWith('---\n') && !source.startsWith('---\r\n')) return source;
+  const lines = source.split('\n');
+  for (let i = 1; i < lines.length; i++) {
+    const line = lines[i].replace(/\r$/, '');
+    if (line === '---' || line === '...') return lines.slice(i + 1).join('\n');
+  }
+  return source;
+}
+
+const SCHEME_RE = /^[a-zA-Z][a-zA-Z0-9+.-]*:/;
+
+function keepAltTextOnly(img: Element): void {
+  const alt = img.getAttribute('alt') || '';
+  if (alt) img.replaceWith(document.createTextNode(alt));
+  else img.remove();
+}
+
+function noteInstead(img: Element, reason: string): void {
+  const alt = img.getAttribute('alt') || '';
+  const note = document.createElement('span');
+  note.className = 'md-img-note';
+  note.textContent = alt ? `${alt} — ${reason}` : reason;
+  img.replaceWith(note);
+}
+
+function rewriteImages(root: HTMLElement, baseDir: string | null): void {
+  for (const img of Array.from(root.querySelectorAll('img'))) {
+    const raw = img.getAttribute('src') || '';
+    if (!baseDir) { keepAltTextOnly(img); continue; }             // bubble mode: no images
+    if (!raw) { keepAltTextOnly(img); continue; }                 // DOMPurify dropped the URI
+    if (/^https:\/\//i.test(raw)) continue;                       // direct load is fine
+    if (/^http:\/\//i.test(raw)) {
+      // On an https site the browser silently blocks http images (mixed content) — say so instead
+      // of showing a broken image. A plain-http page (LAN direct connect) loads them fine.
+      if (typeof location !== 'undefined' && location.protocol === 'https:') {
+        noteInstead(img, t('doc.imageInsecure'));
+      }
+      continue;
+    }
+    if (raw.startsWith('//') || SCHEME_RE.test(raw)) { keepAltTextOnly(img); continue; }
+    // Local image (relative to the doc, absolute, or ~/): hand the ABSOLUTE path to the loader.
+    const clean = raw.split(/[?#]/)[0];
+    const abs = (isAbsolute(clean) ? clean : joinPath(baseDir, clean)).replace(/\/+$/, '');
+    img.removeAttribute('src');
+    img.setAttribute('data-handmux-src', abs);
+    img.classList.add('md-img-loading');
+  }
+}
+
+// Wrap bare URLs and doc paths (terminal output artifacts) in tappable anchors — assistant-bubble
+// mode only. Anchors that marked already produced but that don't resolve to a known output link are
+// unwrapped so only real targets stay tappable.
+function linkify(root: HTMLElement): void {
+  for (const anchor of Array.from(root.querySelectorAll('a'))) {
+    if (!outputLinkFromAnchor(anchor)) anchor.replaceWith(...Array.from(anchor.childNodes));
+  }
+  const walker = document.createTreeWalker(root, 4);
+  const nodes: Text[] = [];
+  while (walker.nextNode()) nodes.push(walker.currentNode as Text);
+  for (const node of nodes) {
+    if (node.parentElement?.closest('a')) continue;
+    const links = findOutputLinks(node.data);
+    if (!links.length) continue;
+    const fragment = document.createDocumentFragment();
+    let offset = 0;
+    for (const link of links) {
+      fragment.append(node.data.slice(offset, link.start));
+      const anchor = document.createElement('a');
+      const value = link.kind === 'url' ? link.raw : link.path;
+      anchor.href = value;
+      anchor.dataset.handmuxOutputLink = link.kind;
+      anchor.dataset.handmuxOutputValue = value;
+      anchor.textContent = node.data.slice(link.start, link.end);
+      fragment.append(anchor);
+      offset = link.end;
+    }
+    fragment.append(node.data.slice(offset));
+    node.replaceWith(fragment);
+  }
+}
+
+export interface RenderMarkdownOptions {
+  /** Directory of the markdown FILE — resolves relative image srcs and switches on the
+   *  authenticated inline-image pipeline. Omit for bubble mode (images stripped). */
+  baseDir?: string | null;
+  /** Wrap bare URLs / doc paths in tap anchors (assistant bubbles). */
+  links?: boolean;
+}
+
+export function renderMarkdown(source: string, options: RenderMarkdownOptions = {}): string {
+  const root = document.createElement('div');
+  root.innerHTML = DOMPurify.sanitize(
+    marked.parse(stripFrontmatter(source || ''), { async: false }) as string,
+  );
+  rewriteImages(root, options.baseDir ?? null);
+  if (options.links) linkify(root);
+  return root.innerHTML;
+}

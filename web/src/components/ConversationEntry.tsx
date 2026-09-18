@@ -1,7 +1,5 @@
 import { Fragment, useMemo, useState } from 'react';
-import { marked } from 'marked';
-import DOMPurify from 'dompurify';
-import { findOutputLinks } from '../docDecorations.js';
+import { renderMarkdown } from '../markdown.js';
 import { t } from '../i18n';
 import { getLangCode } from '../i18n';
 import type { ConversationTimelineMessage } from '../conversationTimelineTypes.js';
@@ -12,63 +10,10 @@ import CompactionDetail, { CompactionBanner } from './CompactionDetail.js';
 
 type TranscriptMessage = ConversationTimelineMessage;
 
-export interface ConversationOutputLink {
-  kind: 'url' | 'doc';
-  path?: string;
-  protocol?: 'http' | 'https';
-  port?: number;
-  urlPath?: string;
-  raw?: string;
-}
-
-export function outputLinkFromAnchor(anchor: HTMLAnchorElement): ConversationOutputLink | null {
-  const explicitKind = anchor.dataset.handmuxOutputLink;
-  const raw = anchor.dataset.handmuxOutputValue || anchor.getAttribute('href') || '';
-  const links = findOutputLinks(raw);
-  const match = explicitKind ? links.find((link) => link.kind === explicitKind) : links[0];
-  if (!match) return null;
-  if (match.kind === 'url') {
-    return {
-      kind: 'url', protocol: match.protocol, port: match.port,
-      urlPath: match.urlPath, raw: match.raw,
-    };
-  }
-  const path = match.path || raw.slice(match.start, match.end);
-  if (explicitKind) return { kind: 'doc', path };
-  try { return { kind: 'doc', path: decodeURIComponent(path) }; }
-  catch { return { kind: 'doc', path }; }
-}
-
 export function linkedAssistantHtml(text: string): string {
-  const root = document.createElement('div');
-  root.innerHTML = DOMPurify.sanitize(marked.parse(text || '') as string);
-  for (const anchor of root.querySelectorAll('a')) {
-    if (!outputLinkFromAnchor(anchor)) anchor.replaceWith(...Array.from(anchor.childNodes));
-  }
-  const walker = document.createTreeWalker(root, 4);
-  const nodes: Text[] = [];
-  while (walker.nextNode()) nodes.push(walker.currentNode as Text);
-  for (const node of nodes) {
-    if (node.parentElement?.closest('a')) continue;
-    const links = findOutputLinks(node.data);
-    if (!links.length) continue;
-    const fragment = document.createDocumentFragment();
-    let offset = 0;
-    for (const link of links) {
-      fragment.append(node.data.slice(offset, link.start));
-      const anchor = document.createElement('a');
-      const value = link.kind === 'url' ? link.raw : link.path;
-      anchor.href = value;
-      anchor.dataset.handmuxOutputLink = link.kind;
-      anchor.dataset.handmuxOutputValue = value;
-      anchor.textContent = node.data.slice(link.start, link.end);
-      fragment.append(anchor);
-      offset = link.end;
-    }
-    fragment.append(node.data.slice(offset));
-    node.replaceWith(fragment);
-  }
-  return root.innerHTML;
+  // Bubble mode: no baseDir → inline images are stripped (alt text only), bare URLs / doc paths
+  // become tappable anchors. See markdown.ts for the shared pipeline.
+  return renderMarkdown(text, { links: true });
 }
 
 export function AssistantMarkdown({

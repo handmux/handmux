@@ -516,6 +516,11 @@ export default {
   'doc.rate': '読み上げ速度',
   'doc.fontSmaller': 'フォントを縮小',
   'doc.fontLarger': 'フォントを拡大',
+  'doc.imageLoadFailed': '画像を読み込めませんでした',
+  'doc.imageNotFound': '画像ファイルが見つかりません',
+  'doc.imageTooLarge': '画像が50MBの上限を超えています',
+  'doc.imageNotImage': 'ファイルは表示可能な画像ではありません',
+  'doc.imageInsecure': 'https ページでは安全でない http 画像がブロックされます',
 
   // inbox.view / push / api / time
   'inbox.view.working': '進行中',

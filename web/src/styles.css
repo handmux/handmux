@@ -2460,8 +2460,27 @@ button.cmd-text { background: none; border: none; text-align: left; }
 .doc-md code { background: #11161d; padding: 1px 4px; border-radius: 4px; }
 .doc-md a { color: var(--blue); }
 .doc-md img { max-width: 100%; }
+.doc-md blockquote { margin: 8px 0; padding: 2px 12px; border-left: 3px solid #2c3947; color: #9fb0c0; }
+.doc-md blockquote p { margin: 6px 0; }
+.doc-md input[type="checkbox"] { margin-right: 6px; vertical-align: middle; }
 /* wide tables scroll inside themselves instead of widening the doc (overflow-x is hidden there) */
 .doc-md table { display: block; max-width: 100%; overflow-x: auto; border-collapse: collapse; }
+.doc-md th, .doc-md td { border: 1px solid #1d2630; padding: 6px 10px; text-align: left; }
+.doc-md th { background: #11161d; }
+
+/* Inline markdown images (authenticated blob loads — see markdown.ts / useMarkdownImages):
+   loading keeps a fixed-height slot so the doc doesn't reflow when bytes land; failure/insecure
+   links degrade to a grey note naming the cause, never a bare broken image. */
+.doc-md img.md-img-loading { min-height: 120px; background: #11161d; border-radius: 8px; }
+.doc-md img[data-handmux-src] { cursor: zoom-in; border-radius: 8px; }
+.md-img-note { display: block; margin: 8px 0; padding: 10px 12px; border-radius: 8px;
+  background: #11161d; color: #9fb0c0; font-size: 0.9em; }
+/* Fullscreen inline-image viewer overlay (tap an inline image). */
+.md-img-viewer { position: fixed; inset: 0; z-index: var(--z-overlay-sheet); background: #000; }
+.md-img-viewer .doc-image-wrap { max-height: none; height: 100%; }
+.md-img-viewer-close { position: absolute; top: max(12px, env(safe-area-inset-top)); right: 12px;
+  z-index: 2; width: 36px; height: 36px; border-radius: 50%; border: 0; background: rgba(255,255,255,.15);
+  color: #fff; font-size: 16px; }
 /* Plain-text / log / script preview: verbatim monospace, wraps long lines so nothing runs off-screen
    on a phone (the wrap keeps overflow-x:hidden of doc-md-wrap from clipping). */
 .doc-text { margin: 0; padding: 16px; color: #e6edf3; line-height: 1.5; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; white-space: pre-wrap; word-break: break-word; overflow-wrap: anywhere; }
@@ -3316,7 +3335,10 @@ button.cmd-text { background: none; border: none; text-align: left; }
 .chat-md h1, .chat-md h2, .chat-md h3 { font-size: 1em; margin: .6666666666666667em 0 .4em; border-bottom: 1px solid var(--ct-line); padding-bottom: .2em; }
 .chat-md ul, .chat-md ol { margin: 0 0 .5333333333333333em; padding-left: 1.3em; }
 .chat-md a { color: var(--ct-accent); }
-.chat-md img { max-width: 100%; border-radius: 6px; }
+/* Bubbles strip images (alt text survives — see markdown.ts); no img rules needed. */
+.chat-md blockquote { margin: 0 0 .5333333333333333em; padding: 2px 10px; border-left: 3px solid var(--ct-line); color: var(--ct-dim, #9fb0c0); }
+.chat-md blockquote p { margin: .4em 0; }
+.chat-md input[type="checkbox"] { margin-right: 6px; vertical-align: middle; }
 .chat-md code { background: var(--ct-code-bg); padding: 1px 4px; border-radius: 4px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: .92em; }
 .chat-md pre { background: var(--ct-code-bg); padding: 10px; border-radius: 8px; margin: 0 0 .5333333333333333em; overflow-x: auto; -webkit-overflow-scrolling: touch; max-width: 100%; }
 .chat-md pre code { background: none; padding: 0; }

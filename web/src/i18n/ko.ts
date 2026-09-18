@@ -516,6 +516,11 @@ export default {
   'doc.rate': '읽기 속도',
   'doc.fontSmaller': '글꼴 축소',
   'doc.fontLarger': '글꼴 확대',
+  'doc.imageLoadFailed': '이미지를 불러오지 못했습니다',
+  'doc.imageNotFound': '이미지 파일이 없습니다',
+  'doc.imageTooLarge': '이미지가 50MB 제한을 초과합니다',
+  'doc.imageNotImage': '파일이 표시 가능한 이미지가 아닙니다',
+  'doc.imageInsecure': 'https 페이지에서 안전하지 않은 http 이미지가 차단되었습니다',
 
   // inbox.view / push / api / time
   'inbox.view.working': '진행 중',

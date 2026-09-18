@@ -18,10 +18,10 @@ import {
   MessageTime,
   TypingDots,
   TypingIndicator,
-  outputLinkFromAnchor,
   timeStampedIndices,
-  type ConversationOutputLink,
 } from './ConversationEntry.js';
+import { outputLinkFromAnchor } from '../markdown.js';
+import type { ConversationOutputLink } from '../markdown.js';
 import {
   resolveConversationCopyBlock,
   ToolChip,

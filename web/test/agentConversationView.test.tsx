@@ -2798,7 +2798,9 @@ describe('generic Agent Conversation UI', () => {
     const assistant = container.querySelector('.chat-them')!;
     const link = assistant.querySelector('a')!;
     expect(link.textContent).toBe('Docs');
-    expect(assistant.querySelector('img')?.getAttribute('src')).toBe('https://example.com/plot.png');
+    // Bubbles strip inline images (terminal agents don't emit them) — alt text survives instead.
+    expect(assistant.querySelector('img')).toBeNull();
+    expect(assistant.textContent).toContain('Plot');
     fireEvent.click(link, { clientX: 12, clientY: 18 });
     expect(onDocLinkTap).toHaveBeenCalledWith(expect.objectContaining({
       kind: 'url', raw: 'https://example.com/guide',
@@ -2823,7 +2825,9 @@ describe('generic Agent Conversation UI', () => {
     const { container } = render(<AgentConversationView conversation={conversation} />);
     const assistant = container.querySelector('.chat-them')!;
     expect(assistant.querySelector('script, a')).toBeNull();
-    expect(assistant.querySelector('img')?.getAttribute('src')).toBe('https://example.com/x.png');
+    // Images are stripped in bubbles entirely (alt text survives) — no src to load at all.
+    expect(assistant.querySelector('img')).toBeNull();
+    expect(assistant.textContent).toContain('Safe alt');
     expect(assistant.innerHTML).not.toContain('onerror');
     expect(assistant.innerHTML).not.toContain('href=');
     expect(assistant.textContent).toContain('Unsafe');

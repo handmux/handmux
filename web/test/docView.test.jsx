@@ -22,6 +22,17 @@ describe('DocView', () => {
     await render({ type: 'markdown', name: 'x.md', content: '<img src=x onerror=alert(1)>ok' });
     expect(container.querySelector('.doc-md').innerHTML).not.toContain('onerror');
   });
+  it('rewrites a relative markdown image into an authenticated placeholder (no src)', async () => {
+    await render({ type: 'markdown', name: 'a.md', path: '/docs/a.md', content: '![pic](pic.png)' });
+    const img = container.querySelector('.doc-md img');
+    expect(img?.getAttribute('src')).toBeNull();
+    expect(img?.getAttribute('data-handmux-src')).toBe('/docs/pic.png');
+  });
+  it('without a path, relative images degrade to alt text (no broken image)', async () => {
+    await render({ type: 'markdown', name: 'a.md', content: '![pic](pic.png)' });
+    expect(container.querySelector('.doc-md img')).toBeNull();
+    expect(container.querySelector('.doc-md').textContent).toContain('pic');
+  });
   it('strips javascript: links from markdown', async () => {
     await render({ type: 'markdown', name: 'x.md', content: '[click](javascript:alert(1))' });
     const a = container.querySelector('.doc-md a');

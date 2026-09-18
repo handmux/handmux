@@ -1219,6 +1219,11 @@ export default {
   'doc.rate': 'Speed',
   'doc.fontSmaller': 'Smaller font',
   'doc.fontLarger': 'Larger font',
+  'doc.imageLoadFailed': 'Image could not be loaded',
+  'doc.imageNotFound': 'Image file not found',
+  'doc.imageTooLarge': 'Image is over the 50MB limit',
+  'doc.imageNotImage': 'File is not a viewable image',
+  'doc.imageInsecure': 'Insecure http image blocked on an https page',
 
   // inbox.view / push / api / time
   'inbox.view.working': 'Running',

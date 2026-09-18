@@ -1,11 +1,12 @@
 // web/src/components/DocView.jsx
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { marked } from 'marked';
-import DOMPurify from 'dompurify';
 import { getDocFontIndex, setDocFontIndex, DOC_FONT_SIZES } from '../storage.js';
 import { markSentences } from '../voice/docSpeech.js';
 import { useDocSpeech } from '../voice/useDocSpeech.js';
 import { useScreenWakeLock } from '../hooks/useScreenWakeLock.js';
+import { useMarkdownImages } from '../hooks/useMarkdownImages.js';
+import { useBackButton } from '../hooks/useBackButton.js';
+import { renderMarkdown } from '../markdown.js';
 import { PlayIcon, PauseIcon, StopIcon } from './icons.jsx';
 import ImageViewer from './ImageViewer.jsx';
 import { t } from '../i18n';
@@ -13,6 +14,8 @@ import { t } from '../i18n';
 export interface DocViewProps {
   type: string;
   name: string;
+  /** Absolute path of the doc file — resolves relative image srcs inside markdown. */
+  path?: string | null;
   content?: string | null;
 }
 
@@ -32,30 +35,34 @@ const readFontIndex = (): number => {
     : Math.min(4, LAST);
 };
 
-const renderMarkdown = (source: string): string => {
-  const rendered = marked.parse(source, { async: false });
-  if (typeof rendered !== 'string') throw new Error('Synchronous Markdown rendering returned a Promise');
-  return DOMPurify.sanitize(rendered);
+const dirnameOf = (path: string): string => {
+  const i = path.lastIndexOf('/');
+  return i <= 0 ? '/' : path.slice(0, i);
 };
 
-// Render one doc. markdown → marked → DOMPurify → injected HTML, with A−/A+ font stepping over a
-// discrete 9-level ladder (persisted, shared across docs). Single-file html → sandboxed iframe with
-// allow-scripts but NOT allow-same-origin, so report JS runs yet can't reach our token or the
+// Render one doc. markdown → shared pipeline (markdown.ts) → injected HTML, with A−/A+ font stepping
+// over a discrete 9-level ladder (persisted, shared across docs). Single-file html → sandboxed iframe
+// with allow-scripts but NOT allow-same-origin, so report JS runs yet can't reach our token or the
 // parent page. `content` is already fetched (the tab carries it).
 //
 // Markdown docs also get read-aloud (TTS): the play button wraps each sentence in a span (markSentences)
 // the first time, then useDocSpeech speaks them one at a time; the current sentence is highlighted and
 // scrolled into view. HTML docs (iframe, cross-origin) can't be read, so they show no controls.
-export default function DocView({ type, name, content = '' }: DocViewProps) {
+export default function DocView({ type, name, path = null, content = '' }: DocViewProps) {
   const [fontIdx, setFontIdx] = useState<number>(readFontIndex);
   const mdRef = useRef<HTMLDivElement | null>(null);
   const speech = useDocSpeech();
   useScreenWakeLock(speech.playing && !speech.paused); // screen sleep kills TTS — hold it awake while reading
 
   const html = useMemo(
-    () => (type === 'markdown' ? renderMarkdown(content || '') : ''),
-    [type, content],
+    () => (type === 'markdown'
+      ? renderMarkdown(content || '', { baseDir: path ? dirnameOf(path) : null })
+      : ''),
+    [type, content, path],
   );
+  // Authenticated inline images: placeholders → blob URLs; tap → fullscreen viewer.
+  const [imageView, closeImageView] = useMarkdownImages(mdRef, html, type === 'markdown');
+  useBackButton(!!imageView, closeImageView);
 
   // Content swapped (different doc) → stop any in-flight reading (React rebuilds innerHTML, so the
   // old sentence spans are gone anyway).
@@ -130,6 +137,12 @@ export default function DocView({ type, name, content = '' }: DocViewProps) {
       </div>
       <div ref={mdRef} className="doc-md" style={{ fontSize: `${FONT_SIZES[fontIdx]}px` }}
         dangerouslySetInnerHTML={{ __html: html }} />
+      {imageView && (
+        <div className="md-img-viewer">
+          <button className="md-img-viewer-close" onClick={closeImageView} aria-label={t('common.close')}>✕</button>
+          <ImageViewer url={imageView.url} name={imageView.name} />
+        </div>
+      )}
     </div>
   );
 }

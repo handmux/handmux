@@ -1218,6 +1218,11 @@ export default {
   'doc.rate': '语速',
   'doc.fontSmaller': '缩小字体',
   'doc.fontLarger': '放大字体',
+  'doc.imageLoadFailed': '图片加载失败',
+  'doc.imageNotFound': '图片文件不存在',
+  'doc.imageTooLarge': '图片超过 50MB 上限',
+  'doc.imageNotImage': '文件不是可显示的图片',
+  'doc.imageInsecure': 'https 页面已拦截不安全的 http 图片',
 
   // inbox.view / push / api / time
   'inbox.view.working': '进行中',

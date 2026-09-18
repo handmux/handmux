@@ -528,6 +528,11 @@ export default {
   'doc.rate': '語速',
   'doc.fontSmaller': '縮小字型',
   'doc.fontLarger': '放大字型',
+  'doc.imageLoadFailed': '圖片載入失敗',
+  'doc.imageNotFound': '圖片檔案不存在',
+  'doc.imageTooLarge': '圖片超過 50MB 上限',
+  'doc.imageNotImage': '檔案不是可顯示的圖片',
+  'doc.imageInsecure': 'https 頁面已封鎖不安全的 http 圖片',
 
   // inbox.view / push / api / time
   'inbox.view.working': '進行中',
