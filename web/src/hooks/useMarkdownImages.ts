@@ -37,6 +37,7 @@ export function useMarkdownImages(
     const failNote = (img: HTMLImageElement, cause: unknown, decodeFailure = false): void => {
       const note = document.createElement('span');
       note.className = 'md-img-note';
+      note.setAttribute('data-tts-skip', ''); // interface chrome — never read aloud
       const alt = img.getAttribute('alt') || '';
       const reason = reasonFor(cause, decodeFailure);
       note.textContent = alt ? `${alt} — ${reason}` : reason;

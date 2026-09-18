@@ -49,7 +49,7 @@ function stripFrontmatter(source: string): string {
   if (!source.startsWith('---\n') && !source.startsWith('---\r\n')) return source;
   const lines = source.split('\n');
   for (let i = 1; i < lines.length; i++) {
-    const line = lines[i].replace(/\r$/, '');
+    const line = (lines[i] ?? '').replace(/\r$/, '');
     if (line === '---' || line === '...') return lines.slice(i + 1).join('\n');
   }
   return source;
@@ -67,6 +67,7 @@ function noteInstead(img: Element, reason: string): void {
   const alt = img.getAttribute('alt') || '';
   const note = document.createElement('span');
   note.className = 'md-img-note';
+  note.setAttribute('data-tts-skip', ''); // interface chrome — never read aloud
   note.textContent = alt ? `${alt} — ${reason}` : reason;
   img.replaceWith(note);
 }
@@ -87,7 +88,7 @@ function rewriteImages(root: HTMLElement, baseDir: string | null): void {
     }
     if (raw.startsWith('//') || SCHEME_RE.test(raw)) { keepAltTextOnly(img); continue; }
     // Local image (relative to the doc, absolute, or ~/): hand the ABSOLUTE path to the loader.
-    const clean = raw.split(/[?#]/)[0];
+    const clean = raw.split(/[?#]/)[0] ?? '';
     const abs = (isAbsolute(clean) ? clean : joinPath(baseDir, clean)).replace(/\/+$/, '');
     img.removeAttribute('src');
     img.setAttribute('data-handmux-src', abs);
@@ -114,7 +115,7 @@ function linkify(root: HTMLElement): void {
     for (const link of links) {
       fragment.append(node.data.slice(offset, link.start));
       const anchor = document.createElement('a');
-      const value = link.kind === 'url' ? link.raw : link.path;
+      const value = (link.kind === 'url' ? link.raw : link.path) ?? '';
       anchor.href = value;
       anchor.dataset.handmuxOutputLink = link.kind;
       anchor.dataset.handmuxOutputValue = value;

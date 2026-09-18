@@ -2439,25 +2439,67 @@ button.cmd-text { background: none; border: none; text-align: left; }
 /* Doc render. The wrap is the doc's SCROLL CONTAINER (since .file-body went overflow:hidden for the
    home pane): flex:1 + min-width:0 pin its width to the sheet so big fonts can't inflate it via
    min-content (an unbreakable path token at max font once pushed the flex-end zoom buttons
-   off-screen), and overflow-y is what .doc-zoom's position:sticky sticks to. */
+   off-screen), and overflow-y is what .doc-toolbar's position:sticky sticks to. */
 .doc-md-wrap { position: relative; flex: 1; min-width: 0; overflow-y: auto; overflow-x: hidden;
   -webkit-overflow-scrolling: touch; }
-/* A−/A+ font zoom — sticky to the top-right so it stays reachable while scrolling a long doc */
-.doc-zoom { position: sticky; top: 0; z-index: 1; display: flex; gap: 6px; align-items: center; padding: 8px 12px 0; }
-.doc-tts { display: flex; gap: 6px; }
-.doc-fonts { display: flex; gap: 6px; margin-left: auto; } /* fonts stay pinned right; TTS sits left */
-.doc-zoom-btn { display: inline-flex; align-items: center; justify-content: center; background: #11161d; border: 1px solid #1d2630; color: #9fb0c0; border-radius: 8px; padding: 4px 12px; font-size: 14px; touch-action: manipulation; }
+
+/* Reading toolbar — sticky so it stays reachable while scrolling a long doc. Two states: idle
+   (朗读 / Aa / ⋯) and reading (⏮ ⏯ ⏭ + progress + 语速 + 停止). Translucent + blurred so content
+   scrolling under it reads as depth rather than a hard band. */
+.doc-toolbar { position: sticky; top: 0; z-index: 2; padding: 8px 12px 6px;
+  background: rgba(13,17,23,0.86); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+  border-bottom: 1px solid #1d2630; }
+.doc-tools { display: flex; gap: 6px; align-items: center; }
+.doc-tools .doc-tb-text { margin-left: auto; }  /* Aa/⋯ stay pinned right, 朗读 sits left */
+.doc-player { display: flex; gap: 6px; align-items: center; }
+.doc-tb-btn { display: inline-flex; align-items: center; justify-content: center; min-width: 44px;
+  min-height: 44px; padding: 4px 10px; background: #11161d; border: 1px solid #1d2630; color: #9fb0c0;
+  border-radius: 8px; font-size: 14px; touch-action: manipulation; }
+.doc-tb-btn svg { width: 17px; height: 17px; display: block; }
+.doc-tb-btn:disabled { opacity: .4; }
+.doc-tb-main { color: var(--blue); border-color: #24405f; }
+.doc-tb-text { font-weight: 600; letter-spacing: .2px; }
+.doc-tb-rate { min-width: 46px; font-variant-numeric: tabular-nums; }
+/* Read-aloud progress: display only (tap a sentence in the text to jump there instead). */
+.doc-progress { flex: 1; min-width: 40px; height: 4px; border-radius: 2px; background: #1d2630; overflow: hidden; }
+.doc-progress-fill { display: block; height: 100%; background: var(--blue); transition: width .2s linear; }
+.doc-progress-num { font-size: 12px; color: #8b97a3; font-variant-numeric: tabular-nums; }
+/* "Back to what is being read" — height:0 sticky anchor keeps it pinned to the bottom of the reading
+   area without adding layout height at the end of the document. */
+.doc-follow-anchor { position: sticky; bottom: 0; height: 0; display: flex; justify-content: center;
+  pointer-events: none; }
+.doc-follow-pill { pointer-events: auto; transform: translateY(-14px); padding: 8px 14px; border-radius: 999px;
+  border: 1px solid #24405f; background: rgba(23,33,48,0.95); color: #cfe3ff; font-size: 13px;
+  box-shadow: 0 4px 14px rgba(0,0,0,.4); }
+/* Typography sheet: font-size stepper row (A− 14px A+). */
+.doc-font-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 4px; }
+.doc-font-val { color: #9fb0c0; font-size: 13px; font-variant-numeric: tabular-nums; }
+.doc-zoom-btn { display: inline-flex; align-items: center; justify-content: center; background: #11161d; border: 1px solid #1d2630; color: #9fb0c0; border-radius: 8px; padding: 10px 18px; font-size: 15px; min-height: 44px; touch-action: manipulation; }
 .doc-zoom-btn:disabled { opacity: .4; }
-.doc-zoom-icon { padding: 4px 9px; }
-.doc-zoom-icon svg { width: 17px; height: 17px; display: block; }
+
 /* Currently-spoken sentence: a soft highlight that follows the read-aloud. box-decoration-break so a
    sentence wrapping across lines tints every line, not just the first. */
 .tts-active { background: rgba(var(--blue-rgb),0.30); border-radius: 3px;
   box-decoration-break: clone; -webkit-box-decoration-break: clone; }
-.doc-md { padding: 16px; color: #e6edf3; line-height: 1.6; word-wrap: break-word; }
+.doc-md { padding: 16px; color: #e6edf3; line-height: 1.65; word-wrap: break-word;
+  max-width: 78ch; margin: 0 auto; }  /* wide screens: keep prose at a readable measure */
 .doc-md h1, .doc-md h2, .doc-md h3 { border-bottom: 1px solid #1d2630; padding-bottom: 4px; }
+.doc-md h1 { font-size: 1.7em; margin: 0 0 .6em; }
+.doc-md h2 { font-size: 1.35em; margin: 1.6em 0 .5em; }
+.doc-md h3 { font-size: 1.15em; margin: 1.4em 0 .4em; }
+.doc-md h4, .doc-md h5, .doc-md h6 { font-size: 1em; margin: 1.2em 0 .35em; }
+.doc-md h6 { color: #9fb0c0; }
+.doc-md p { margin: 0 0 .9em; }
+.doc-md ul, .doc-md ol { margin: 0 0 .9em; padding-left: 1.4em; }
+.doc-md li { margin: .25em 0; }
+.doc-md li > ul, .doc-md li > ol { margin: .25em 0; }
+.doc-md > *:first-child { margin-top: 0; }
+.doc-md > *:last-child { margin-bottom: 0; }  /* no trailing gap before the scroll end */
+.doc-md hr { border: 0; border-top: 1px solid #1d2630; margin: 1.4em 0; }
 .doc-md pre { background: #11161d; padding: 12px; border-radius: 8px; overflow: auto; }
-.doc-md code { background: #11161d; padding: 1px 4px; border-radius: 4px; }
+.doc-md pre code { background: none; padding: 0; }
+.doc-md code { background: #11161d; padding: 1px 4px; border-radius: 4px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: .92em; }
 .doc-md a { color: var(--blue); }
 .doc-md img { max-width: 100%; }
 .doc-md blockquote { margin: 8px 0; padding: 2px 12px; border-left: 3px solid #2c3947; color: #9fb0c0; }

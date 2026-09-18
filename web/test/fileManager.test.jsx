@@ -20,6 +20,7 @@ vi.mock('../src/storage.js', () => ({
   getBrowseDir: vi.fn(() => null), setBrowseDir: vi.fn(),
   // DocView (rendered for the active doc tab) reads these; provide them so the mock is complete.
   getDocFontIndex: vi.fn(() => 4), setDocFontIndex: vi.fn(), DOC_FONT_SIZES: [10, 11, 12, 13, 14, 16, 18, 20, 22],
+  getDocAutoFollow: vi.fn(() => true), setDocAutoFollow: vi.fn(),
 }));
 
 import FileManager from '../src/components/FileManager.jsx';

@@ -58,20 +58,20 @@ export function loadImage(path: string): Promise<CacheEntry> {
   const load = (async (): Promise<CacheEntry> => {
     const hit = cache.get(path);
     const response = await fetchImageUrl(path, hit ? hit.mtimeMs : null);
-    if (!('notModified' in response) || !response.notModified) {
-      const entry: CacheEntry = { url: response.url, mtimeMs: response.mtimeMs, refs: 0 };
-      const old = cache.get(path);
-      cache.delete(path);
-      makeRoom();
-      cache.set(path, entry);
-      // The old blob may still be displayed elsewhere (file changed mid-view) — leak that one URL
-      // rather than break a visible <img>; a stale entry is at most one image.
-      if (old && old.url !== entry.url && old.refs === 0) URL.revokeObjectURL(old.url);
-      return entry;
+    if (!('url' in response)) {
+      // 304: the cached blob is still current (hit must exist — we passed its mtime).
+      if (hit) return hit;
+      throw new Error('image not modified but not cached');
     }
-    // 304: the cached blob is still current (hit must exist — we passed its mtime).
-    if (hit) return hit;
-    throw new Error('image not modified but not cached');
+    const entry: CacheEntry = { url: response.url, mtimeMs: response.mtimeMs, refs: 0 };
+    const old = cache.get(path);
+    cache.delete(path);
+    makeRoom();
+    cache.set(path, entry);
+    // The old blob may still be displayed elsewhere (file changed mid-view) — leak that one URL
+    // rather than break a visible <img>; a stale entry is at most one image.
+    if (old && old.url !== entry.url && old.refs === 0) URL.revokeObjectURL(old.url);
+    return entry;
   })().finally(() => { pending.delete(path); });
   pending.set(path, load);
   return load;

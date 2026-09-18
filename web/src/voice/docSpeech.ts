@@ -24,11 +24,14 @@ export function splitSentences(text: string | null | undefined): string[] {
   return out;
 }
 
-// True if any ancestor up to (not including) root is a tag whose text we must NOT read/wrap.
+// True if any ancestor up to (not including) root is a tag whose text we must NOT read/wrap — code
+// blocks, or anything explicitly opted out with [data-tts-skip] (e.g. an image failure note, which is
+// interface chrome, not document prose).
 function inSkippedBlock(node: Node, root: HTMLElement): boolean {
   for (let p = node.parentNode; p && p !== root; p = p.parentNode) {
     const t = p.nodeName;
     if (t === 'PRE' || t === 'SCRIPT' || t === 'STYLE' || t === 'CODE') return true;
+    if (p instanceof HTMLElement && p.hasAttribute('data-tts-skip')) return true;
   }
   return false;
 }

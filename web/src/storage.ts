@@ -690,6 +690,17 @@ export function getDocFontIndex() {
 export const setDocFontIndex = (i: number) =>
   localStorage.setItem(DOC_FONT_KEY, String(Math.min(DOC_FONT_SIZES.length - 1, Math.max(0, i))));
 
+// Read-aloud auto-scroll: keep the spoken sentence in view. Default ON — following is what a reader
+// expects; a manual scroll pauses it for that reading session (see DocView's follow pill). Persisted
+// because it is a reading preference, not per-document state.
+const DOC_FOLLOW_KEY = 'tw_doc_follow';
+export function getDocAutoFollow(): boolean {
+  const raw = localStorage.getItem(DOC_FOLLOW_KEY);
+  return raw === null ? true : raw === '1'; // unset → on
+}
+export const setDocAutoFollow = (on: boolean) =>
+  localStorage.setItem(DOC_FOLLOW_KEY, on ? '1' : '0');
+
 // Git diff font — same ladder as docs, its own persisted level. Default 12px (index 2) matches the
 // original fixed .git-diff size, so the view is unchanged until the user steps A−/A+.
 export const DIFF_FONT_DEFAULT_INDEX = 2; // 12px
