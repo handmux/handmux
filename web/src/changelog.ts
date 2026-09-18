@@ -19,6 +19,30 @@ export interface ChangelogEntry {
 // `entryId`/`LATEST_RELEASE` use `version` when present, else `date`, as the stable unread-dot id.
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '0.29.1',
+    date: '2026-09-18',
+    highlight: {
+      zh: '修复 Claude 对话入口丢失 · 长时间运行不再变卡',
+      en: 'Fix lost Claude chat entries · no slowdown after long runs',
+    },
+    items: {
+      zh: [
+        '修复 WSL2 上 Claude 对话入口反复消失、收件箱状态中断的问题；进程识别不再受系统时间调整影响。',
+        '修复 Linux 上 Claude 的活动状态（进行中/空闲/等待）一直显示不出来的问题。',
+        '修复 Linux 上 Claude 自动更新删掉旧版本文件后被识别不到的问题。',
+        '修复长时间运行或反复重连后变卡、占磁盘的问题：不再可达的内部状态会被回收。',
+        '修复切换会话时短暂显示"无法连接 Codex 会话"的问题；过渡期间改为显示加载中。',
+      ],
+      en: [
+        'Fixed Claude chat entries and Inbox state repeatedly dropping on WSL2; process identity no longer follows system clock adjustments.',
+        'Fixed Claude activity (working / idle / waiting) never showing on Linux.',
+        'Fixed Claude not being recognized on Linux after its own auto-update removed the older binary file.',
+        'Fixed the service slowing down and growing on disk after long runs or repeated reconnects; unreachable internal state is now reclaimed.',
+        'Fixed a misleading "Could not connect to the Codex session" flash while a conversation switches; it shows the shared loading state instead.',
+      ],
+    },
+  },
+  {
     version: '0.29.0',
     date: '2026-09-16',
     highlight: {
