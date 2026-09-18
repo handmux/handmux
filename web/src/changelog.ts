@@ -19,6 +19,22 @@ export interface ChangelogEntry {
 // `entryId`/`LATEST_RELEASE` use `version` when present, else `date`, as the stable unread-dot id.
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '0.29.2',
+    date: '2026-09-18',
+    highlight: {
+      zh: '修复 Linux 下 Claude 事件上报的兼容问题',
+      en: 'Compatibility fix for Claude event reporting on Linux',
+    },
+    items: {
+      zh: [
+        '修复个别 Linux 环境下 Hook 读取进程信息失败的问题：进程表不可读时回退到兼容取值，Claude 的收件箱与完成事件不受影响。',
+      ],
+      en: [
+        'Fixed Hook process lookup failing in some Linux environments: it now falls back to the compatible value when procfs is unreadable, so Claude Inbox and completion events are unaffected.',
+      ],
+    },
+  },
+  {
     version: '0.29.1',
     date: '2026-09-18',
     highlight: {
