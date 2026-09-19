@@ -77,4 +77,40 @@ describe('navigation Agent logos', () => {
     expect(maps.paneAgents['%1']).toBe('claude');
     expect(maps.windowAgents['@1']).toBe('claude');
   });
+
+  it('marks an unselected multi-pane window with its ACTIVE pane, not the last one listed', () => {
+    // Selecting @2 lands on %5. Listing %4 last must not decide the closed tab's logo — that is what made
+    // the badge change the moment the window was selected.
+    const maps = navigationAgentMaps({
+      window: { id: '@1' },
+      windows: [{ id: '@1', activePaneId: '%1' }, { id: '@2', activePaneId: '%5' }],
+      panes: [{ id: '%1', agent: 'claude' }],
+    }, {
+      '%1': { window: '@1', agent: 'claude' },
+      '%5': { window: '@2', agent: 'codebuddy' },
+      '%4': { window: '@2', agent: 'claude' },
+    });
+    expect(maps.windowAgents['@2']).toBe('codebuddy');
+  });
+
+  it('shows no mark when the active pane has none, matching what selecting the window shows', () => {
+    const maps = navigationAgentMaps({
+      window: { id: '@1' },
+      windows: [{ id: '@1', activePaneId: '%1' }, { id: '@2', activePaneId: '%5' }],
+      panes: [{ id: '%1', agent: 'claude' }],
+    }, {
+      '%1': { window: '@1', agent: 'claude' },
+      '%4': { window: '@2', agent: 'claude' },
+    });
+    expect(maps.windowAgents['@2']).toBeNull();
+  });
+
+  it('leaves a window alone when its active pane is not known', () => {
+    const maps = navigationAgentMaps({
+      window: { id: '@1' },
+      windows: [{ id: '@2' }],
+      panes: [{ id: '%1', agent: 'claude' }],
+    }, { '%4': { window: '@2', agent: 'claude' } });
+    expect(maps.windowAgents['@2']).toBe('claude');
+  });
 });

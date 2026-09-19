@@ -8,6 +8,7 @@ type PaneStates = Record<string, { agent?: string | null; window?: string | null
 interface PaneWorkspace {
   window?: { id?: string | null } | null;
   panes?: PaneAgentItem[];
+  windows?: readonly { id?: string | null; activePaneId?: string | null }[] | null;
 }
 
 export interface PaneAgentPin {
@@ -73,5 +74,15 @@ export function navigationAgentMaps(
     if (pane.agent) canonicalWindowAgent = pane.agent;
   }
   if (windowId && hasCanonicalWindowIdentity) windowAgents[windowId] = canonicalWindowAgent;
+  // A window you have NOT selected has to carry the mark of the pane you would land on — its ACTIVE pane —
+  // because the selected tab renders the current pane's agent. Taking whichever pane happened to be listed
+  // last made the badge change the instant you selected the window. The selected window is left alone: its
+  // value came from the canonical /panes identity above, which outranks the /states roster this reads.
+  for (const win of current?.windows ?? []) {
+    if (!win?.id || win.id === windowId) continue;
+    const activePaneId = win.activePaneId;
+    if (typeof activePaneId !== 'string' || !activePaneId) continue;
+    windowAgents[win.id] = paneAgents[activePaneId] ?? null;
+  }
   return { windowAgents, paneAgents };
 }
