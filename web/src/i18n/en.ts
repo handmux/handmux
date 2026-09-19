@@ -356,6 +356,7 @@ export default {
   'startup.preset_claude': 'claude (launch Claude Code)',
   'startup.preset_claude_continue': 'claude -c (resume last session)',
   'startup.preset_codex': 'codex (launch Codex CLI)',
+  'startup.preset_codebuddy': 'codebuddy (launch CodeBuddy)',
   'startup.custom': 'Custom…',
   'startup.custom_placeholder': 'e.g. claude "fix login bug"',
 

@@ -169,6 +169,7 @@ export default {
   'startup.preset_claude': 'claude（Claude Code 시작）',
   'startup.preset_claude_continue': 'claude -c（이전 세션 이어서）',
   'startup.preset_codex': 'codex（Codex CLI 시작）',
+  'startup.preset_codebuddy': 'codebuddy（CodeBuddy 시작）',
   'startup.custom': '사용자 정의…',
   'startup.custom_placeholder': '예：claude "로그인 버그 수정"',
 

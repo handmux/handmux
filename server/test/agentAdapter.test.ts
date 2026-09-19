@@ -44,15 +44,21 @@ function testAdapter(id: string, process: AgentProcessIdentity): AgentAdapter {
 }
 
 describe('built-in AgentAdapter registry', () => {
-  it('loads Claude, Codex and Pi from one valid static registry', () => {
+  it('loads Claude, Codex, Pi and CodeBuddy from one valid static registry', () => {
     expect(BUILTIN_AGENT_ADAPTER_VALIDATION.issues).toEqual([]);
-    expect(BUILTIN_AGENT_ADAPTERS.map((adapter) => adapter.id)).toEqual(['claude', 'codex', 'pi']);
+    expect(BUILTIN_AGENT_ADAPTERS.map((adapter) => adapter.id))
+      .toEqual(['claude', 'codex', 'pi', 'codebuddy']);
     expect(BUILTIN_AGENT_ADAPTER_VALIDATION.available).toEqual(BUILTIN_AGENT_ADAPTERS);
     expect(getAgentAdapter('pi')).toMatchObject({
       label: 'Pi',
       process: { commands: ['pi'], ambiguousCommands: ['node'] },
       capabilities: {},
       presentation: { iconId: 'pi' },
+    });
+    expect(getAgentAdapter('codebuddy')).toMatchObject({
+      label: 'CodeBuddy',
+      process: { commands: ['codebuddy', 'codebuddy-code', 'cbc'], ambiguousCommands: ['node'] },
+      capabilities: {},
     });
   });
 

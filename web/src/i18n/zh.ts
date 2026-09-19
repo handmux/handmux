@@ -355,6 +355,7 @@ export default {
   'startup.preset_claude': 'claude(启动 Claude Code)',
   'startup.preset_claude_continue': 'claude -c(接着上次会话)',
   'startup.preset_codex': 'codex(启动 Codex CLI)',
+  'startup.preset_codebuddy': 'codebuddy(启动 CodeBuddy)',
   'startup.custom': '自定义…',
   'startup.custom_placeholder': '例如 claude "修复登录bug"',
 

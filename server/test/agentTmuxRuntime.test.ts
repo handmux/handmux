@@ -139,6 +139,48 @@ describe('Tmux Agent Runtime context', () => {
       currentCommand: 'claude', tty: '/dev/ttys001',
     })).resolves.toMatchObject({ pid: 200, executable: '/opt/claude/bin/claude' });
   });
+
+  // An Agent that runs INSIDE an ambiguous launcher (a Node CLI with no native child binary) is exactly the
+  // case the single-leaf view cannot serve: it deliberately prefers the non-launcher descendant, so the leaf
+  // is a transient tool child, not the Agent. The group is that adapter's only way to see its own process.
+  it('reports the whole foreground group for an Agent running inside an ambiguous launcher', async () => {
+    const run = vi.fn(async (command: string, args: string[]) => {
+      if (command === 'ps') {
+        if (args[0] === '-p') return 'Tue Aug 12 04:00:00 2026\n';
+        expect(args).toEqual(['-t', 'ttys001', '-o', 'pid=,ppid=,stat=,etime=,tty=,command=']);
+        return [
+          ' 400 90 Ss+ 00:20 ttys001 node /usr/local/bin/codebuddy --no-session-persistence',
+          ' 401 400 R+  00:00 ttys001 npm list',
+        ].join('\n');
+      }
+      if (command === 'lsof') return 'p401\nftxt\nn/usr/local/bin/node\n';
+      return '';
+    });
+    const context = createLocalAgentProcessContext({ run });
+    const pane = {
+      paneId: '%1', sessionName: 'main', windowId: '@1', windowName: 'agent',
+      currentCommand: 'node', tty: '/dev/ttys001',
+    };
+    await expect(context.inspectForeground(pane)).resolves.toMatchObject({
+      pid: 401, commandLine: 'npm list',
+    });
+    await expect(context.inspectForegroundGroup!(pane)).resolves.toEqual([
+      {
+        pid: 400, ppid: 90, tty: '/dev/ttys001',
+        commandLine: 'node /usr/local/bin/codebuddy --no-session-persistence',
+      },
+      { pid: 401, ppid: 400, tty: '/dev/ttys001', commandLine: 'npm list' },
+    ]);
+  });
+
+  it('reports no foreground group for a pane without a tty', async () => {
+    const run = vi.fn(async () => '');
+    const context = createLocalAgentProcessContext({ run });
+    await expect(context.inspectForegroundGroup!({
+      paneId: '%1', sessionName: 'main', windowId: '@1', windowName: 'agent', currentCommand: 'node',
+    })).resolves.toEqual([]);
+    expect(run).not.toHaveBeenCalled();
+  });
 });
 
 describe('process start value', () => {

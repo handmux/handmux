@@ -10,6 +10,7 @@ const PRESETS = [
   { value: 'claude', label: t('startup.preset_claude') },
   { value: 'claude --continue', label: t('startup.preset_claude_continue') },
   { value: 'handmux codex', label: t('startup.preset_codex') },
+  { value: 'codebuddy', label: t('startup.preset_codebuddy') },
 ];
 const CUSTOM = '__custom__';
 const OPTIONS = [...PRESETS, { value: CUSTOM, label: t('startup.custom') }];

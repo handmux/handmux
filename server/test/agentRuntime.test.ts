@@ -1366,3 +1366,68 @@ describe('AgentRuntime composition root', () => {
     retry.close();
   });
 });
+
+describe('per-pane process evidence', () => {
+  // The evidence a verifier receives is assembled per pane by the Runtime, so a new probe method is only
+  // usable by adapters once it is forwarded there. This asserts the forwarding, not just the probe itself.
+  it('forwards the foreground group to a verifier that asks for it', async () => {
+    const observed: string[] = [];
+    const probe: AgentAdapter = {
+      adapterApiVersion: 1,
+      id: 'probe',
+      label: 'Probe',
+      process: {
+        commands: ['probe'],
+        ambiguousCommands: ['node'],
+        verify: async (current, context) => {
+          const group = await context.inspectForegroundGroup?.(current) ?? [];
+          observed.push(...group.map((entry) => entry.commandLine ?? ''));
+          return group.some((entry) => (entry.commandLine ?? '').endsWith('/probe-agent'));
+        },
+      },
+      capabilities: {},
+    };
+    const runtime = new AgentRuntime({
+      adapters: [probe],
+      panes: new TestPanes([]),
+      process: {
+        inspectForeground: async () => null,
+        inspectForegroundGroup: async () => [{ pid: 500, commandLine: 'node /opt/bin/probe-agent' }],
+      },
+      stateDirectory: directory(),
+      authToken: AUTH_TOKEN,
+    });
+    runtimes.push(runtime);
+
+    await expect(runtime.identifyPanes([pane('node')])).resolves.toEqual({ '%1': 'probe' });
+    expect(observed).toEqual(['node /opt/bin/probe-agent']);
+  });
+
+  it('degrades a group-only verifier to unknown when the host cannot supply the group', async () => {
+    const probe: AgentAdapter = {
+      adapterApiVersion: 1,
+      id: 'probe',
+      label: 'Probe',
+      process: {
+        commands: ['probe'],
+        ambiguousCommands: ['node'],
+        verify: async (current, context) => {
+          if (!context.inspectForegroundGroup) throw new Error('foreground group is unavailable');
+          return false;
+        },
+      },
+      capabilities: {},
+    };
+    const runtime = new AgentRuntime({
+      adapters: [probe],
+      panes: new TestPanes([]),
+      process: { inspectForeground: async () => null },
+      stateDirectory: directory(),
+      authToken: AUTH_TOKEN,
+    });
+    runtimes.push(runtime);
+
+    // An inconclusive probe must omit the pane (preserving the last confirmed owner), never revoke it.
+    await expect(runtime.identifyPanes([pane('node')])).resolves.toEqual({});
+  });
+});

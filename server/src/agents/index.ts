@@ -1,6 +1,7 @@
 // The single built-in Agent registry. Runtime consumes the root AgentAdapter contract; legacy
 // orphan/transcript code sees a filtered projection of the same objects until those services migrate.
 import { claude } from './claude.js';
+import { codebuddy } from './codebuddy.js';
 import { codex } from './codex.js';
 import { piAgentAdapter } from './pi.js';
 import { validateAgentAdapters } from '../agent-runtime/adapter.js';
@@ -33,7 +34,7 @@ export interface AgentDriver extends AgentAdapter {
   };
 }
 
-export const BUILTIN_AGENT_ADAPTERS: readonly AgentAdapter[] = [claude, codex, piAgentAdapter];
+export const BUILTIN_AGENT_ADAPTERS: readonly AgentAdapter[] = [claude, codex, piAgentAdapter, codebuddy];
 
 export const BUILTIN_AGENT_ADAPTER_VALIDATION = validateAgentAdapters(BUILTIN_AGENT_ADAPTERS);
 

@@ -190,15 +190,22 @@ export function createLocalAgentProcessContext({
 }: {
   run?: RunCommand;
 } = {}): ProcessContext {
+  const PS_FORMAT = 'pid=,ppid=,stat=,etime=,tty=,command=';
+  // One `ps` read, shared by both evidence methods below. The full-system scan is only the fallback for a
+  // platform whose targeted query returns nothing; rows are always re-filtered to the pane's own tty.
+  const foregroundGroup = async (pane: LivePane): Promise<{ tty: string; rows: ForegroundRow[] }> => {
+    const tty = normTty(pane.tty);
+    if (!tty) return { tty: '', rows: [] };
+    let output = await run('ps', ['-t', tty, '-o', PS_FORMAT]);
+    if (!String(output).trim()) output = await run('ps', ['-Ao', PS_FORMAT]);
+    return { tty, rows: foregroundRows(output).filter((row) => row.tty === tty) };
+  };
+
   return {
     async inspectForeground(pane: LivePane): Promise<ForegroundProcessIdentity | null> {
-      const tty = normTty(pane.tty);
+      const { tty, rows } = await foregroundGroup(pane);
       if (!tty) return null;
-      let output = await run('ps', ['-t', tty, '-o', 'pid=,ppid=,stat=,etime=,tty=,command=']);
-      if (!String(output).trim()) {
-        output = await run('ps', ['-Ao', 'pid=,ppid=,stat=,etime=,tty=,command=']);
-      }
-      const row = foregroundLeaf(foregroundRows(output), tty, pane.currentCommand);
+      const row = foregroundLeaf(rows, tty, pane.currentCommand);
       if (!row) return null;
       const startedAt = await processStartedAt(run, row.pid);
       const executable = await executablePath(run, row.pid);
@@ -209,6 +216,15 @@ export function createLocalAgentProcessContext({
         ...(executable ? { executable } : {}),
         ...(row.command ? { commandLine: row.command } : {}),
       };
+    },
+    async inspectForegroundGroup(pane: LivePane): Promise<readonly ForegroundProcessIdentity[]> {
+      const { rows } = await foregroundGroup(pane);
+      return rows.map((row) => ({
+        pid: row.pid,
+        ppid: row.ppid,
+        tty: pane.tty ?? `/dev/${row.tty}`,
+        ...(row.command ? { commandLine: row.command } : {}),
+      }));
     },
   };
 }

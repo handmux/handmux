@@ -169,6 +169,7 @@ export default {
   'startup.preset_claude': 'claude（啟動 Claude Code）',
   'startup.preset_claude_continue': 'claude -c（繼續上次工作階段）',
   'startup.preset_codex': 'codex（啟動 Codex CLI）',
+  'startup.preset_codebuddy': 'codebuddy（啟動 CodeBuddy）',
   'startup.custom': '自訂…',
   'startup.custom_placeholder': '例如 claude "修復登入 bug"',
 

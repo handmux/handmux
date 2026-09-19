@@ -19,6 +19,9 @@ export interface LivePane {
 
 export interface ForegroundProcessIdentity {
   pid: number;
+  // Parent pid, when the probe provides the process tree. Only the group variant below fills it; it lets a
+  // verifier reason about which candidate is the ancestor of the others instead of trusting row order.
+  ppid?: number;
   startedAt?: number;
   tty?: string;
   executable?: string;
@@ -30,6 +33,13 @@ export interface ForegroundProcessIdentity {
 
 export interface ProcessContext {
   inspectForeground(pane: LivePane): Promise<ForegroundProcessIdentity | null>;
+  // Every process in the pane tty's foreground group, as evidence for adapters whose Agent runs INSIDE an
+  // ambiguous launcher rather than as a native-binary descendant (e.g. a Node CLI that never spawns a child
+  // binary). inspectForeground deliberately prefers a non-launcher descendant for such panes, so those
+  // adapters would otherwise see a transient tool child and lose their own process. Entries carry the group's
+  // command lines and parent links but no per-pid executable/start-time resolution, so this stays one `ps`
+  // read. Optional: a runtime without it leaves such adapters degrading to `unknown` instead of guessing.
+  inspectForegroundGroup?(pane: LivePane): Promise<readonly ForegroundProcessIdentity[]>;
 }
 
 export interface ReadonlyPaneSource {

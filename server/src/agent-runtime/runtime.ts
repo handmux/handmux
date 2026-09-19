@@ -735,6 +735,27 @@ export class AgentRuntime {
       || first.agentId.localeCompare(second.agentId));
   }
 
+  // Per-pane process evidence for a single identity decision. Both probes are lazily memoized so a decision
+  // that only needs one of them costs one `ps` read, and every evidence method the host offers must be
+  // forwarded here or adapters silently lose it.
+  #processContext(pane: LivePane): ProcessContext {
+    const source = this.#process;
+    let inspected: Promise<ForegroundProcessIdentity | null> | undefined;
+    let group: Promise<readonly ForegroundProcessIdentity[]> | undefined;
+    return {
+      inspectForeground: () => {
+        inspected ??= source.inspectForeground(pane);
+        return inspected;
+      },
+      ...(source.inspectForegroundGroup === undefined ? {} : {
+        inspectForegroundGroup: (): Promise<readonly ForegroundProcessIdentity[]> => {
+          group ??= source.inspectForegroundGroup!(pane);
+          return group;
+        },
+      }),
+    };
+  }
+
   async identifyPanes(panes: readonly LivePane[]): Promise<Record<string, string | null>> {
     const activeAdapters = this.adapters.filter((adapter) => (
       !this.#lifecycles.get(adapter.id)?.abort.signal.aborted
@@ -742,13 +763,7 @@ export class AgentRuntime {
     const resolved = await Promise.all(panes.map(async (
       pane,
     ): Promise<[string, string | null] | null> => {
-      let inspected: Promise<ForegroundProcessIdentity | null> | undefined;
-      const context: ProcessContext = {
-        inspectForeground: () => {
-          inspected ??= this.#process.inspectForeground(pane);
-          return inspected;
-        },
-      };
+      const context = this.#processContext(pane);
       const identity = await resolveAgentIdentity(pane, activeAdapters, context, {
         verifyTimeoutMs: this.#verifyTimeoutMs,
       });
@@ -1129,13 +1144,7 @@ export class AgentRuntime {
     candidate: AgentAttachmentCandidate,
     pane: LivePane,
   ): Promise<'valid' | 'invalid' | 'unknown'> {
-    let inspected: Promise<ForegroundProcessIdentity | null> | undefined;
-    const context: ProcessContext = {
-      inspectForeground: () => {
-        inspected ??= this.#process.inspectForeground(pane);
-        return inspected;
-      },
-    };
+    const context = this.#processContext(pane);
     try {
       return await lifecycleWithin((async (): Promise<'valid' | 'invalid' | 'unknown'> => {
         const identity = await resolveAgentIdentity(pane, this.adapters, context, {
@@ -1170,13 +1179,7 @@ export class AgentRuntime {
     ));
     for (const pane of panes.values()) {
       if (this.#closed || this.runs.currentForPane(pane.paneId)) continue;
-      let inspected: Promise<ForegroundProcessIdentity | null> | undefined;
-      const context: ProcessContext = {
-        inspectForeground: () => {
-          inspected ??= this.#process.inspectForeground(pane);
-          return inspected;
-        },
-      };
+      const context = this.#processContext(pane);
       const identity = await resolveAgentIdentity(pane, activeAdapters, context, {
         verifyTimeoutMs: this.#verifyTimeoutMs,
       });

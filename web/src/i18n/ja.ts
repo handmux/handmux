@@ -169,6 +169,7 @@ export default {
   'startup.preset_claude': 'claude（Claude Code を起動）',
   'startup.preset_claude_continue': 'claude -c（前回のセッションを継続）',
   'startup.preset_codex': 'codex（Codex CLI を起動）',
+  'startup.preset_codebuddy': 'codebuddy（CodeBuddy を起動）',
   'startup.custom': 'カスタム…',
   'startup.custom_placeholder': '例：claude "ログインバグを修正"',
 
