@@ -271,7 +271,7 @@ describe('DocView read-aloud toolbar', () => {
     expect(container.querySelector('[aria-label="朗读"]')).not.toBeNull(); // recovered to idle
   });
 
-  it('reads a REALISTIC document: prose is read, code blocks are skipped', async () => {
+  it('reads a REALISTIC document: prose AND code are read, frontmatter is not', async () => {
     const spoken = installSpeechMock();
     const markdown = [
       '---',
@@ -285,7 +285,7 @@ describe('DocView read-aloud toolbar', () => {
       '## 小节',
       '',
       '```js',
-      'const shouldNotBeRead = 1;',
+      'const shouldBeRead = 1;',
       '```',
       '',
       '- 列表项一',
@@ -305,13 +305,26 @@ describe('DocView read-aloud toolbar', () => {
     expect(spoken.length).toBeGreaterThan(0); // the tap must produce speech, not a silent no-op
     expect(spoken[0]).toContain('一级标题');
     expect(spoken.join(' ')).toContain('开头的一句话。');
-    expect(spoken.join(' ')).not.toContain('shouldNotBeRead');
-    expect(spoken.join(' ')).not.toContain('title:'); // frontmatter is not read aloud either
+    // The chain advances on each utterance's end, which the mock never fires — so assert the marked
+    // sentence list instead: code is part of what will be read.
+    const sentences = [...container.querySelectorAll('.doc-md .tts-sent[data-tts]')]
+      .map((span) => span.textContent);
+    expect(sentences.join(' ')).toContain('const shouldBeRead = 1;');
+    expect(sentences.join(' ')).toContain('结尾的话。');
+    expect(sentences.join(' ')).not.toContain('title:'); // frontmatter is not read aloud
   });
 
-  it('a document with no readable prose says so instead of a dead tap', async () => {
+  it('a document with NO readable content still says so instead of a dead tap', async () => {
     installSpeechMock();
-    await render({ type: 'markdown', name: 'a.md', content: '```js\nconst onlyCode = 1;\n```' });
+    await render({ type: 'markdown', name: 'a.md', content: '![](missing.png)' });
+    await flush();
+    await click(container.querySelector('[aria-label="朗读"]'));
+    expect(container.querySelector('.doc-speak-error')?.textContent).toContain('没有可朗读的正文');
+  });
+
+  it('a document with NO readable content still says so instead of a dead tap', async () => {
+    installSpeechMock();
+    await render({ type: 'markdown', name: 'a.md', content: '![](missing.png)' });
     await flush();
     await click(container.querySelector('[aria-label="朗读"]'));
     expect(container.querySelector('.doc-speak-error')?.textContent).toContain('没有可朗读的正文');

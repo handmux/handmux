@@ -2443,11 +2443,10 @@ button.cmd-text { background: none; border: none; text-align: left; }
 .doc-md-wrap { position: relative; flex: 1; min-width: 0; overflow-y: auto; overflow-x: hidden;
   -webkit-overflow-scrolling: touch; }
 
-/* Reading toolbar — the bar as it always was (same buttons, sizes, spacing, look), just with the
-   read-aloud controls it already had: 开始/暂停 · 停止 · 倍速 on the left, A−/A+ pinned right.
-   Read-aloud adds nothing to the bar itself: tapping a sentence in the text is how you jump. */
+/* Reading toolbar — pinned to the top of the reading area and OPAQUE: content scrolls underneath it,
+   never through it. Buttons/sizes/spacing are unchanged. */
 .doc-toolbar { position: sticky; top: 0; z-index: 2; display: flex; gap: 6px; align-items: center;
-  padding: 8px 12px 0; }
+  padding: 8px 12px; background: #0b0f14; }
 .doc-player { display: flex; gap: 6px; align-items: center; }
 .doc-fonts { display: flex; gap: 6px; margin-left: auto; } /* fonts stay pinned right; TTS sits left */
 .doc-zoom-btn { display: inline-flex; align-items: center; justify-content: center; background: #11161d; border: 1px solid #1d2630; color: #9fb0c0; border-radius: 8px; padding: 4px 12px; font-size: 14px; touch-action: manipulation; }

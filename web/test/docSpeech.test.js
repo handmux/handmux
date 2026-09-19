@@ -41,10 +41,20 @@ describe('markSentences', () => {
     expect(el.querySelector('strong')).not.toBeNull();
   });
 
-  it('skips code blocks (does not read or wrap <pre>)', () => {
-    const el = root('<p>看代码。</p><pre><code>rm -rf /</code></pre>');
-    expect(markSentences(el)).toEqual(['看代码。']);
-    expect(el.querySelector('pre .tts-sent')).toBeNull();
+  it('reads code blocks too, one line at a time', () => {
+    const el = root('<p>看代码。</p><pre><code>rm -rf /\necho done\n</code></pre>');
+    expect(markSentences(el)).toEqual(['看代码。', 'rm -rf /', 'echo done']);
+    expect(el.querySelector('pre .tts-sent')).not.toBeNull();
+  });
+
+  it('keeps inline code inside its sentence instead of splitting the prose', () => {
+    const el = root('<p>运行 <code>npm test</code> 即可。</p>');
+    expect(markSentences(el)).toEqual(['运行 npm test 即可。']);
+  });
+
+  it('never reads our own chrome ([data-tts-skip])', () => {
+    const el = root('<p>正文。</p><span class="md-img-note" data-tts-skip>图片不存在</span>');
+    expect(markSentences(el)).toEqual(['正文。']);
   });
 
   it('is idempotent — a second call returns the same list without double-wrapping', () => {

@@ -12,6 +12,9 @@
 const SEG_RE = /[^\n]*?(?:[。！？…]+|[.!?]+(?=\s|$)|\n+|$)/gu;
 // Does a segment already end at a sentence terminator (vs. just running out of text node)?
 const ENDS_SENTENCE = /[。！？…]$|[.!?]$/;
+// Inside code, a LINE END is the boundary: code has no prose punctuation, so without this a whole
+// block would be one enormous utterance (which mobile Safari truncates).
+const ENDS_CODE_LINE = /[。！？…]$|[.!?]$|\n$/;
 
 // Split prose into sentences. Terminators stay attached; whitespace is collapsed; blanks dropped.
 export function splitSentences(text: string | null | undefined): string[] {
@@ -24,14 +27,22 @@ export function splitSentences(text: string | null | undefined): string[] {
   return out;
 }
 
-// True if any ancestor up to (not including) root is a tag whose text we must NOT read/wrap — code
-// blocks, or anything explicitly opted out with [data-tts-skip] (e.g. an image failure note, which is
-// interface chrome, not document prose).
+// True if any ancestor up to (not including) root is a tag we must NOT read/wrap — script/style, or
+// anything explicitly opted out with [data-tts-skip] (our own interface chrome, e.g. an image failure
+// note is NOT document prose).
 function inSkippedBlock(node: Node, root: HTMLElement): boolean {
   for (let p = node.parentNode; p && p !== root; p = p.parentNode) {
     const t = p.nodeName;
-    if (t === 'PRE' || t === 'SCRIPT' || t === 'STYLE' || t === 'CODE') return true;
+    if (t === 'SCRIPT' || t === 'STYLE') return true;
     if (p instanceof HTMLElement && p.hasAttribute('data-tts-skip')) return true;
+  }
+  return false;
+}
+
+// True when the text sits inside a code block / inline code — it is still read, but line by line.
+function inCodeBlock(node: Node, root: HTMLElement): boolean {
+  for (let p = node.parentNode; p && p !== root; p = p.parentNode) {
+    if (p.nodeName === 'PRE' || p.nodeName === 'CODE') return true;
   }
   return false;
 }
@@ -62,6 +73,7 @@ export function markSentences(root: HTMLElement | null): string[] {
   for (const node of nodes) {
     const frag = node.ownerDocument.createDocumentFragment();
     const nodeValue = node.nodeValue || '';
+    const endsSentence = inCodeBlock(node, root) ? ENDS_CODE_LINE : ENDS_SENTENCE;
     for (const m of nodeValue.matchAll(SEG_RE)) {
       const text = m[0];
       if (text === '') continue;
@@ -71,7 +83,7 @@ export function markSentences(root: HTMLElement | null): string[] {
       frag.appendChild(span);
       (spansByIdx[cur] ||= []).push(span);
       provisional[cur] = (provisional[cur] || '') + text;
-      if (ENDS_SENTENCE.test(text)) cur++;
+      if (endsSentence.test(text)) cur++;
     }
     node.parentNode?.replaceChild(frag, node);
   }
