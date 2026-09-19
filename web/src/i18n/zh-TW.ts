@@ -39,6 +39,11 @@ export default {
   'common.back': '返回',
   'common.open': '開啟',
   'common.loading': '載入中…',
+  'crash.title': '這個介面發生錯誤',
+  'crash.hint': '你的工作階段仍在執行。返回即可繼續使用；若反覆發生，可以重新載入。',
+  'crash.retry': '返回',
+  'crash.reload': '重新載入',
+  'crash.close': '關閉預覽',
   'common.done': '完成',
   'common.retry': '重試',
 

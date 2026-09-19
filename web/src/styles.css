@@ -2617,6 +2617,22 @@ button.cmd-text { background: none; border: none; text-align: left; }
    on a phone (the wrap keeps overflow-x:hidden of doc-md-wrap from clipping). */
 .doc-text { margin: 0; padding: 16px; color: #e6edf3; line-height: 1.5; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; white-space: pre-wrap; word-break: break-word; overflow-wrap: anywhere; }
 .doc-iframe { width: 100%; height: 100%; border: 0; background: #fff; }
+/* Crash containment (ErrorBoundary). Never a blank page with no way out: the message is shown
+   (selectable, so it can be reported) and there is always an action to leave. */
+.crash-card { display: flex; flex-direction: column; gap: 10px; padding: 18px 16px;
+  background: #1b222b; color: #e6edf3; }
+.crash-card.is-page { position: fixed; inset: 0; z-index: var(--z-overlay-toast);
+  align-items: center; justify-content: center; text-align: center; background: #0b0f14; }
+.crash-card.is-panel { flex: 1; border-radius: 8px; overflow-y: auto; }
+.crash-title { font-size: 15px; font-weight: 600; }
+.crash-detail { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px; color: #f0a9a9; background: #2a1f22; border-radius: 8px; padding: 10px 12px;
+  max-width: 90vw; word-break: break-word; -webkit-user-select: text; user-select: text; }
+.crash-hint { font-size: 12px; color: #9fb0c0; max-width: 90vw; }
+.crash-actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
+.crash-btn { min-height: 44px; padding: 0 16px; border: 1px solid #2a3440; border-radius: 8px;
+  background: #11161d; color: #cfe3ff; font-size: 14px; touch-action: manipulation; }
+.crash-btn.is-primary { background: #1d4ed8; border-color: #1d4ed8; color: #fff; }
 /* Loading page for the doc viewer: used while a file is being opened AND while it reloads, so both
    paths give the same visible feedback. Plain CSS spinner; static under reduced motion. */
 .doc-loading { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;

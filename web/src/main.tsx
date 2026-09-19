@@ -1,6 +1,7 @@
 import { createRoot } from 'react-dom/client';
 import App from './App.jsx';
 import AuthBootstrap from './components/AuthBootstrap.js';
+import ErrorBoundary from './components/ErrorBoundary.js';
 import { registerServiceWorker } from './sw-register.js';
 import './styles.css';
 
@@ -12,7 +13,12 @@ declare global {
 
 const root = document.getElementById('root');
 if (!root) throw new Error('Missing application root');
-createRoot(root).render(<AuthBootstrap><App /></AuthBootstrap>);
+// A crash anywhere below must not leave a blank page the user can only escape by restarting the app.
+createRoot(root).render(
+  <ErrorBoundary scope="page">
+    <AuthBootstrap><App /></AuthBootstrap>
+  </ErrorBoundary>,
+);
 registerServiceWorker();
 
 // Fade out the inline boot splash once React has painted AND the app CSS is ready.

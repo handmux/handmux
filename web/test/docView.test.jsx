@@ -272,6 +272,19 @@ describe('DocView P1 document features', () => {
 
   const openMore = () => click(container.querySelector('[aria-label="文件信息"]'));
 
+  it('survives a TYPE change after mount (the viewer paints a guess, then the server answers)', async () => {
+    // This is the crash class that blanked the whole app: the html/image early returns used to sit
+    // ABOVE two effects, so a `type` change between renders changed the hook count. It must re-render.
+    await render({ type: 'html', name: 'a.html', path: '/a.html', content: '<h1>hi</h1>' });
+    expect(container.querySelector('.doc-iframe')).not.toBeNull();
+    await render({ type: 'markdown', name: 'a.md', path: '/a.md', content: '# 标题' });
+    expect(container.querySelector('.doc-md h1')?.textContent).toBe('标题');
+    await render({ type: 'text', name: 'a.log', path: '/a.log', content: 'line' });
+    expect(container.querySelector('.doc-text')?.textContent).toBe('line');
+    await render({ type: 'image', name: 'a.png', path: '/a.png', content: 'blob:fake' });
+    expect(container.querySelector('img.doc-image')).not.toBeNull();
+  });
+
   it('shows the loading page while the bytes are on their way (a fresh open)', async () => {
     await render({ type: 'markdown', name: 'a.md', path: '/a.md', content: '', loading: true });
     expect(container.querySelector('.doc-loading')).not.toBeNull();

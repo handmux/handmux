@@ -39,6 +39,11 @@ export default {
   'common.back': '戻る',
   'common.open': '開く',
   'common.loading': '読み込み中…',
+  'crash.title': 'この画面でエラーが発生しました',
+  'crash.hint': 'セッションは動作しています。戻ればそのまま使えます。繰り返す場合は再読み込みしてください。',
+  'crash.retry': '戻る',
+  'crash.reload': '再読み込み',
+  'crash.close': 'プレビューを閉じる',
   'common.done': '完了',
   'common.retry': '再試行',
 

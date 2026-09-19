@@ -4,6 +4,7 @@ import { getBrowseDir, setBrowseDir } from '../storage.js';
 import HomeView from './HomeView.jsx';
 import FileBrowser from './FileBrowser.jsx';
 import DocView from './DocView.jsx';
+import ErrorBoundary from './ErrorBoundary.js';
 import { FolderIcon, ClockIcon, ChevronDownIcon } from './icons.jsx';
 import { t as tr } from '../i18n';
 import { useHistoryLayer, unwindHistory } from '../hooks/useBackButton.js';
@@ -225,13 +226,15 @@ export default function FileManager({
                   pendingFile={pendingShare ?? null} overlayActive={open}
                   {...(onPendingConsumed ? { onPendingConsumed } : {})} />}
           </div>
-        ) : <DocView type={cur.type} name={cur.name} path={cur.path ?? null}
+        ) : <ErrorBoundary scope="panel" onReset={() => onActivate('home')}>
+          <DocView type={cur.type} name={cur.name} path={cur.path ?? null}
             size={cur.size ?? null} mtimeMs={cur.mtime ?? null} birthtimeMs={cur.birthtimeMs ?? null}
             anchorRequest={cur.anchorRequest ?? null}
             loading={cur.loading ?? false}
             {...(onReloadDoc ? { onReload: () => onReloadDoc(cur.key) } : {})}
             {...(onOpenUrl ? { onOpenUrl } : {})}
-            content={typeof cur.content === 'string' ? cur.content : ''} />}
+            content={typeof cur.content === 'string' ? cur.content : ''} />
+        </ErrorBoundary>}
       </div>
     </div>
     </OverlayPortal>

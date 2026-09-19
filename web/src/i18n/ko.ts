@@ -39,6 +39,11 @@ export default {
   'common.back': '뒤로',
   'common.open': '열기',
   'common.loading': '로드 중…',
+  'crash.title': '이 화면에서 오류가 발생했습니다',
+  'crash.hint': '세션은 계속 실행 중입니다. 돌아가면 계속 사용할 수 있고, 반복되면 새로 고침하세요.',
+  'crash.retry': '돌아가기',
+  'crash.reload': '새로 고침',
+  'crash.close': '미리보기 닫기',
   'common.done': '완료',
   'common.retry': '다시 시도',
 

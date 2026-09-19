@@ -79,6 +79,12 @@ const readFontIndex = (): number => {
     : Math.min(4, LAST);
 };
 
+// A malformed percent sequence in a link fragment (`#100%`) makes decodeURIComponent throw; an uncaught
+// throw in an effect/render unmounts the entire app, so decode leniently.
+const safeDecode = (value: string): string => {
+  try { return decodeURIComponent(value); } catch { return value; }
+};
+
 const dirnameOf = (path: string): string => {
   const i = path.lastIndexOf('/');
   return i <= 0 ? '/' : path.slice(0, i);
@@ -163,6 +169,9 @@ export default function DocView({
   // pans the `position: fixed` file sheet (and therefore this pinned toolbar, search row and all) out of
   // the visual viewport, so the top of the panel disappears. Computed here instead so only
   // `.doc-md-wrap` moves; `topOffset` places the target that many px below the container's top edge.
+  // The search root is whichever container holds the document text — markdown or the verbatim <pre>.
+  const findRoot = (): HTMLElement | null => mdRef.current ?? textRef.current;
+
   const scrollToElement = (el: Element | null | undefined, topOffset: number, smooth = true): void => {
     const wrap = wrapRef.current;
     if (!el || !wrap) return;
@@ -267,13 +276,30 @@ export default function DocView({
     return () => wrap.removeEventListener('scroll', onScroll);
   }, [speech.playing]);
 
+  // Re-scan on every keystroke (and when the document itself changes). Bounded by MAX_MATCHES inside
+  // runFind, so a short query on a large file cannot wrap an unbounded number of nodes.
+  useEffect(() => {
+    if (!findOpen) return;
+    const root = findRoot();
+    const total = runFind(root, query);
+    setMatchCount(total);
+    const first = total ? 0 : -1;
+    setMatchIndex(first);
+    if (first >= 0) scrollToElement(focusMatch(root, first), FIND_TOP_OFFSET);
+  }, [query, findOpen, html]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // The row turns into a search field → put the caret in it.
+  useEffect(() => {
+    if (findOpen) searchRef.current?.focus();
+  }, [findOpen]);
+
   // A tapped terminal/chat link can name a heading (`docs/notes.md#小节-a`): land on it once the
   // document is rendered AND the heading ids exist (they are assigned by the outline effect above), so
   // this depends on `toc` to re-run after that pass. The request object is new per tap, so tapping the
   // same link twice jumps twice, and it deliberately overrides the remembered reading position.
   useEffect(() => {
     if (!anchorRequest || loading) return; // no content yet — the heading cannot exist
-    const el = document.getElementById(decodeURIComponent(anchorRequest.anchor));
+    const el = document.getElementById(safeDecode(anchorRequest.anchor));
     if (!el) {
       // A link that points nowhere must SAY so: silence looks like a broken feature.
       setAnchorNotice(t('doc.anchorMissing', { anchor: anchorRequest.anchor }));
@@ -297,7 +323,7 @@ export default function DocView({
       const href = anchor.getAttribute('href') || '';
       if (href.startsWith('#')) {
         event.preventDefault();
-        const id = decodeURIComponent(href.slice(1));
+        const id = safeDecode(href.slice(1));
         if (id) scrollToElement(document.getElementById(id), TOC_TOP_OFFSET);
         return;
       }
@@ -322,23 +348,11 @@ export default function DocView({
     speech.play(sentences, index);
   };
 
-  if (type === 'image') {
-    return <ImageViewer url={content} name={name} />;
-  }
-
-  if (type === 'html') {
-    return <iframe className="doc-iframe" sandbox="allow-scripts" srcDoc={content || ''} title={name} />;
-  }
-
   const bump = (delta: number): void => {
     const next = Math.min(LAST, Math.max(0, fontIdx + delta));
     setFontIdx(next);
     setDocFontIndex(next);
   };
-
-  // ── Find in document (single file, no indexing: a plain case-insensitive substring scan) ────────
-  // The search root is whichever container holds the document text — markdown or the verbatim <pre>.
-  const findRoot = (): HTMLElement | null => mdRef.current ?? textRef.current;
 
   const closeFind = (): void => {
     clearFind(findRoot());
@@ -347,23 +361,6 @@ export default function DocView({
     setMatchCount(0);
     setMatchIndex(-1);
   };
-
-  // Re-scan on every keystroke (and when the document itself changes). Bounded by MAX_MATCHES inside
-  // runFind, so a short query on a large file cannot wrap an unbounded number of nodes.
-  useEffect(() => {
-    if (!findOpen) return;
-    const root = findRoot();
-    const total = runFind(root, query);
-    setMatchCount(total);
-    const first = total ? 0 : -1;
-    setMatchIndex(first);
-    if (first >= 0) scrollToElement(focusMatch(root, first), FIND_TOP_OFFSET);
-  }, [query, findOpen, html]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // The row turns into a search field → put the caret in it.
-  useEffect(() => {
-    if (findOpen) searchRef.current?.focus();
-  }, [findOpen]);
 
   const stepMatch = (delta: number): void => {
     if (matchCount <= 0) return;
@@ -421,10 +418,19 @@ export default function DocView({
     });
   };
 
-  // Every hook has run by now — the loading page is decided at render time, never by an early return
-  // above a hook (that would change the hook count between renders).
+  // Every hook has run by now: the returns below are decided at render time. Nothing above may be an
+  // early return — a `type` that changes after mount (the viewer paints a guessed type, then the
+  // server's answer replaces it) would otherwise change the hook count and unmount the whole app.
   if (loading || reloading) {
     return <DocLoading name={name} />;
+  }
+
+  if (type === 'image') {
+    return <ImageViewer url={content} name={name} />;
+  }
+
+  if (type === 'html') {
+    return <iframe className="doc-iframe" sandbox="allow-scripts" srcDoc={content || ''} title={name} />;
   }
 
   return (
