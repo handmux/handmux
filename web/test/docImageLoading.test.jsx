@@ -19,7 +19,8 @@ vi.mock('../src/api.js', async (importOriginal) => ({
   })),
 }));
 
-const { loadImage, __resetImageCacheForTest } = await import('../src/markdownImageCache.js');
+const { loadImage, __resetImageCacheForTest, __imageCacheEntriesForTest } =
+  await import('../src/markdownImageCache.js');
 const DocView = (await import('../src/components/DocView.jsx')).default;
 
 let container, root;
@@ -61,6 +62,18 @@ describe('inline image loading state', () => {
     await settlePending(loadImage('/repo/pic.png'));
     await render('![x](pic.png)');
     expect(img().getAttribute('src')).toBe('blob:/repo/pic.png'); // src in the first commit
+  });
+
+  it('releases every reference it took — cache hits and duplicates included', async () => {
+    await settlePending(loadImage('/repo/pic.png')); // prime, as a previous view would
+    const refs = (path) => __imageCacheEntriesForTest().find(([p]) => p === path)?.[1].refs ?? 0;
+
+    // the same image twice in one document: two acquires, and both must come back on cleanup
+    await render('![a](pic.png)\n\n![b](pic.png)');
+    expect(refs('/repo/pic.png')).toBe(2);
+    await act(() => root.unmount());
+    root = createRoot(container);
+    expect(refs('/repo/pic.png')).toBe(0);
   });
 
   it('degrades to a note with the reason when the file is gone', async () => {

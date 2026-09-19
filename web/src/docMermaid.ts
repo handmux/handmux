@@ -47,7 +47,7 @@ function revealSource(block: HTMLElement, reason: string): void {
   const note = document.createElement('div');
   note.className = 'md-mermaid-error';
   note.setAttribute('data-tts-skip', '');
-  note.textContent = `${t('doc.mermaidFailed')}（${reason}）`;
+  note.textContent = t('doc.mermaidFailedDetails', { reason }); // full-width parens only in CJK
   pre.after(note);
 }
 
@@ -115,6 +115,10 @@ export function useDocMermaid(
           const { svg } = await mermaid.render(`handmux-mermaid-${diagramSeq}-${seq.current}`, source);
           if (cancelled) return;
           block.classList.remove('is-loading');
+          // The SVG is produced by mermaid's own renderer and, with securityLevel 'strict', mermaid
+          // sanitises label HTML and drops click handlers. Wrapping it in DOMPurify's svg profile was
+          // considered and rejected: it strips the diagram's own <style> and <foreignObject> labels,
+          // which breaks rendering outright.
           block.innerHTML = svg;
         } catch (error) {
           if (cancelled) return;

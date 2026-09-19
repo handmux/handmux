@@ -31,8 +31,10 @@ const flush = () => act(async () => { await new Promise((resolve) => setTimeout(
 let lastSynth = null;
 function installSpeechMock() {
   const spoken = [];
+  const utterances = []; // the utterance objects, so a test can fire their callbacks itself
   const synth = {
-    speak: (utterance) => { spoken.push(utterance.text); },
+    utterances,
+    speak: (utterance) => { spoken.push(utterance.text); utterances.push(utterance); },
     cancel: vi.fn(), pause: vi.fn(), resume: vi.fn(),
     getVoices: () => [{ lang: 'zh-CN', name: 'Fake', default: true }],
     addEventListener: vi.fn(), removeEventListener: vi.fn(),
@@ -554,6 +556,26 @@ describe('DocView read-aloud toolbar', () => {
     expect(spoken.at(-1)).toBe('第三句话。');
   });
 
+  it('a mid-read rate change never leaves two advance chains running', async () => {
+    const spoken = installSpeechMock();
+    await render({ type: 'markdown', name: 'a.md', content: DOC });
+    await flush();
+    await click(container.querySelector('[aria-label="朗读"]'));
+    expect(spoken).toEqual(['第一句话。']);
+    const first = installedSynth().utterances[0];
+
+    await click(container.querySelector('[aria-label="语速"]')); // cancels, re-speaks the same sentence
+    expect(spoken).toEqual(['第一句话。', '第一句话。']);
+
+    // The cancelled utterance reports an error; it belongs to a dead run and must not advance anything.
+    await act(() => { first.onerror?.({ error: 'interrupted' }); });
+    expect(spoken).toHaveLength(2);
+
+    // The live utterance still chains normally.
+    await act(() => { installedSynth().utterances.at(-1).onend?.(); });
+    expect(spoken.at(-1)).toBe('第二句话。');
+  });
+
   it('⏹ stops the read and returns the bar to ▶', async () => {
     installSpeechMock();
     const synth = window.speechSynthesis;
@@ -691,14 +713,6 @@ describe('DocView read-aloud toolbar', () => {
     expect(sentences.join(' ')).toContain('const shouldBeRead = 1;');
     expect(sentences.join(' ')).toContain('结尾的话。');
     expect(sentences.join(' ')).not.toContain('title:'); // frontmatter is not read aloud
-  });
-
-  it('a document with NO readable content still says so instead of a dead tap', async () => {
-    installSpeechMock();
-    await render({ type: 'markdown', name: 'a.md', content: '![](missing.png)' });
-    await flush();
-    await click(container.querySelector('[aria-label="朗读"]'));
-    expect(container.querySelector('.doc-speak-error')?.textContent).toContain('没有可朗读的正文');
   });
 
   it('a document with NO readable content still says so instead of a dead tap', async () => {

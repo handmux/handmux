@@ -90,6 +90,15 @@ const safeDecode = (value: string): string => {
   try { return decodeURIComponent(value); } catch { return value; }
 };
 
+// Resolve an in-document target by SCANNING the rendered document rather than by document.getElementById:
+// ids like `#root` / `#overlay-root` live in the app chrome, so a global lookup would silently "jump" to
+// the top instead of reporting a missing anchor. Scanning also sidesteps CSS escaping for ids that start
+// with a digit (our heading slugs can: `1-中文标题`).
+const findDocTarget = (root: HTMLElement | null, id: string): HTMLElement | null => {
+  if (!root) return null;
+  return Array.from(root.querySelectorAll<HTMLElement>('[id]')).find((el) => el.id === id) ?? null;
+};
+
 const dirnameOf = (path: string): string => {
   const i = path.lastIndexOf('/');
   return i <= 0 ? '/' : path.slice(0, i);
@@ -333,7 +342,7 @@ export default function DocView({
   // same link twice jumps twice, and it deliberately overrides the remembered reading position.
   useEffect(() => {
     if (!anchorRequest || loading) return; // no content yet — the heading cannot exist
-    const el = document.getElementById(safeDecode(anchorRequest.anchor));
+    const el = findDocTarget(mdRef.current ?? textRef.current, safeDecode(anchorRequest.anchor));
     if (!el) {
       // A link that points nowhere must SAY so: silence looks like a broken feature.
       setAnchorNotice(t('doc.anchorMissing', { anchor: anchorRequest.anchor }));
@@ -358,7 +367,7 @@ export default function DocView({
       if (href.startsWith('#')) {
         event.preventDefault();
         const id = safeDecode(href.slice(1));
-        if (id) scrollToElement(document.getElementById(id), TOC_TOP_OFFSET);
+        if (id) scrollToElement(findDocTarget(mdRef.current ?? textRef.current, id), TOC_TOP_OFFSET);
         return;
       }
       if (/^https?:\/\//i.test(href)) {

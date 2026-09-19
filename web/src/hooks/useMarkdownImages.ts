@@ -39,7 +39,13 @@ export function useMarkdownImages(
     const root = rootRef.current;
     if (!root) return undefined;
     let cancelled = false;
-    const acquired = new Set<string>();
+    // Ref accounting must be per-ACQUISITION, not per-path: the same image can appear twice in one
+    // document, and every acquire needs exactly one release. A Set would collapse the duplicates and
+    // leak a ref forever (entries with refs > 0 are never evicted, so the cache cap stops working).
+    const acquired = new Map<string, number>();
+    const holdRef = (path: string): void => {
+      acquired.set(path, (acquired.get(path) ?? 0) + 1);
+    };
 
     const failNote = (img: HTMLImageElement, cause: unknown, decodeFailure = false): void => {
       const note = document.createElement('span');
@@ -61,14 +67,15 @@ export function useMarkdownImages(
       if (hit) {
         // Cached (or 304): assign straight away — an image without `src` is what the CSS paints as
         // "loading", so this removes the placeholder in the same commit (no flash).
+        holdRef(path); // the ref we just took is ours to release on cleanup
         img.src = hit.url;
         continue;
       }
       loadImage(path).then(() => {
+        const entry = acquireImage(path); // acquire first, so the cancelled path has nothing to undo
+        if (!entry) { if (!cancelled) failNote(img, null); return; }
         if (cancelled) { releaseImage(path); return; }
-        const entry = acquireImage(path);
-        if (!entry) { failNote(img, null); return; }
-        acquired.add(path);
+        holdRef(path);
         img.src = entry.url;
       }).catch((cause: unknown) => {
         if (!cancelled) failNote(img, cause);
@@ -84,7 +91,9 @@ export function useMarkdownImages(
     return () => {
       cancelled = true;
       root.removeEventListener('click', onClick);
-      for (const path of acquired) releaseImage(path);
+      for (const [path, count] of acquired) {
+        for (let i = 0; i < count; i += 1) releaseImage(path);
+      }
     };
   }, [html, enabled, rootRef]);
 

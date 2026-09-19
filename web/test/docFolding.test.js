@@ -4,7 +4,7 @@
 // or higher level, so folding an h1 takes its h2/h3 with it. Folded content must also stay out of
 // read-aloud and find.
 import { describe, it, expect, beforeEach } from 'vitest';
-import { installHeadingFolding, insideHiddenSection } from '../src/docFolding.js';
+import { installHeadingFolding } from '../src/docFolding.js';
 import { renderMarkdown } from '../src/markdown.js';
 import { markSentences } from '../src/voice/docSpeech.js';
 import { runFind } from '../src/docFind.js';
@@ -93,8 +93,8 @@ describe('heading folding', () => {
     expect(sentences.join(' ')).toContain('二级正文 A');
     // find
     expect(runFind(root, '二级正文')).toBe(1); // only the visible one
-    // and the helper agrees about where the hidden node is
+    // and the folded paragraph really is the hidden one
     const hiddenNode = [...root.querySelectorAll('p')].find((p) => p.textContent.includes('B'));
-    expect(insideHiddenSection(hiddenNode.firstChild, root)).toBe(true);
+    expect(hiddenNode.classList.contains('md-section-hidden')).toBe(true);
   });
 });

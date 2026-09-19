@@ -41,6 +41,10 @@ interface SpeechState {
 interface SpeechRuntime extends SpeechState {
   sentences: readonly string[];
   rate: number;
+  /** Incremented every time a new speaking run starts; an utterance may only advance the chain it
+   *  belongs to. Without this, cancelling (rate change, jump) left the OLD utterance's onerror callback
+   *  passing the `idx === i` guard — speakAt re-sets idx to the same i — so two chains advanced at once. */
+  run: number;
 }
 
 // Errors that mean "the utterance never started". iOS reports not-allowed when speak() did not run
@@ -62,7 +66,7 @@ export function useDocSpeech(): DocSpeechController {
   const [rate, setRate] = useState(getRate);
   const voicesRef = useRef<SpeechSynthesisVoice[]>([]);
   const ref = useRef<SpeechRuntime>({
-    sentences: [], idx: -1, playing: false, paused: false, rate: getRate(), failure: null,
+    sentences: [], idx: -1, playing: false, paused: false, rate: getRate(), failure: null, run: 0,
   });
   ref.current.rate = rate;
 
@@ -107,13 +111,15 @@ export function useDocSpeech(): DocSpeechController {
     if (!synth) { fail('no speech synthesis'); return; }
     if (i < 0 || i >= c.sentences.length) { stop(); return; }
     c.idx = i;
+    c.run += 1;              // a new utterance: any callback from a previous run is now stale
+    const run = c.run;
     setState({ playing: true, paused: false, idx: i, failure: null });
     try {
       const utterance = new SpeechSynthesisUtterance(c.sentences[i]);
       utterance.rate = c.rate;
       const voice = pickZhVoice();
       if (voice) { utterance.voice = voice; utterance.lang = voice.lang; } else utterance.lang = 'zh-CN';
-      const next = () => { if (c.playing && c.idx === i) speakAt(i + 1); };
+      const next = () => { if (c.playing && c.run === run) speakAt(i + 1); };
       utterance.onend = next;
       utterance.onerror = (event) => {
         const code = (event as SpeechSynthesisErrorEvent).error;

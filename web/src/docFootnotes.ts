@@ -1,3 +1,4 @@
+import { t } from './i18n';
 // GFM footnotes, minimally.
 //
 // marked 12 has no footnote support and its link-reference handling makes `[^1]` worse than unsupported:
@@ -88,7 +89,7 @@ export function applyFootnotes(root: HTMLElement, notes: readonly FootnoteDef[])
   section.className = 'md-footnotes';
   const heading = document.createElement('div');
   heading.className = 'md-footnotes-title';
-  heading.textContent = '注';
+  heading.textContent = t('doc.footnotes');
   section.append(heading);
   const ol = document.createElement('ol');
   for (const note of list) {

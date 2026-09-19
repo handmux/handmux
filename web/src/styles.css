@@ -2512,6 +2512,7 @@ button.cmd-text { background: none; border: none; text-align: left; }
   border-right: 1px solid #1d2630; padding: 12px 8px calc(12px + env(safe-area-inset-bottom, 0px));
   animation: doc-toc-in .18s ease; }
 @keyframes doc-toc-in { from { transform: translateX(-100%); } to { transform: none; } }
+@media (prefers-reduced-motion: reduce) { .doc-toc { animation: none; } }
 .doc-toc-head { display: flex; align-items: center; gap: 8px; padding: 0 4px 8px; }
 .doc-toc-title { flex: 1; font-size: 12px; color: #8a8f98; letter-spacing: .5px; }
 .doc-toc-close { flex: none; display: inline-flex; align-items: center; justify-content: center;

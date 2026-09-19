@@ -80,11 +80,3 @@ export function installHeadingFolding(root: HTMLElement): () => void {
     root.removeEventListener('keydown', onKeyDown);
   };
 }
-
-/** True when the node sits inside a collapsed section (keeps folded content unread and unsearched). */
-export function insideHiddenSection(node: Node, root: HTMLElement): boolean {
-  for (let p = node.parentNode; p && p !== root; p = p.parentNode) {
-    if (p instanceof HTMLElement && p.classList.contains(HIDDEN_CLASS)) return true;
-  }
-  return false;
-}
