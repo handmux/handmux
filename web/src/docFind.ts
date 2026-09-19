@@ -1,8 +1,12 @@
-// In-document find (single document only). Every match is wrapped in its own <mark class="doc-find">
+// In-document find (single document only). Every match is wrapped in its own <mark class="doc-find-hit">
 // — DOM wrapping rather than the CSS Custom Highlight API, so the current match can carry extra UI and
 // so the behaviour is testable; it also nests safely inside the read-aloud's <span.tts-sent> markers
 // (those own the data-tts indices, so clearing find ONLY unwraps our own marks and never touches them).
-const MARK_CLASS = 'doc-find';
+//
+// The mark class must never collide with the toolbar's search-row class (`.doc-find`): each mark is an
+// INLINE element, and a class shared with a flex row blockified every match — each hit landed on its own
+// full-width line (a device-only symptom, since jsdom has no layout).
+const MARK_CLASS = 'doc-find-hit';
 const CURRENT_CLASS = 'is-current';
 // A pathological query ("a") on a big document would otherwise wrap tens of thousands of nodes.
 const MAX_MATCHES = 500;

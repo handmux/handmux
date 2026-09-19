@@ -207,7 +207,7 @@ describe('DocView 查找', () => {
     await render({ type: 'markdown', name: 'a.md', content: DOC });
     await click(container.querySelector('[aria-label="在本文中查找"]'));
     await type(container.querySelector('.doc-find-input'), 'alpha');
-    const marks = () => [...container.querySelectorAll('.doc-md mark.doc-find')];
+    const marks = () => [...container.querySelectorAll('.doc-md mark.doc-find-hit')];
     expect(marks().length).toBe(3); // two in the prose + one in the code block
     expect(container.querySelector('.doc-find-count').textContent).toBe('1/3');
     expect(marks()[0].classList.contains('is-current')).toBe(true);
@@ -242,7 +242,7 @@ describe('DocView 查找', () => {
     expect(container.querySelector('.doc-find-count').textContent).toBe('没有匹配');
     await click(container.querySelector('.doc-find [aria-label="关闭"]'));
     expect(container.querySelector('.doc-find')).toBeNull();
-    expect(container.querySelectorAll('.doc-md mark.doc-find').length).toBe(0);
+    expect(container.querySelectorAll('.doc-md mark.doc-find-hit').length).toBe(0);
     expect(container.querySelector('.doc-md h1').textContent).toBe('标题'); // text put back together
   });
 
@@ -250,7 +250,7 @@ describe('DocView 查找', () => {
     await render({ type: 'text', name: 'a.log', content: 'line one\nline two\nline one again' });
     await click(container.querySelector('[aria-label="在本文中查找"]'));
     await type(container.querySelector('.doc-find-input'), 'line one');
-    expect(container.querySelectorAll('.doc-text mark.doc-find').length).toBe(2);
+    expect(container.querySelectorAll('.doc-text mark.doc-find-hit').length).toBe(2);
   });
 
   it('does not damage read-aloud sentence markers', async () => {
