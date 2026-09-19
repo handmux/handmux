@@ -33,6 +33,7 @@ All notable changes to handmux. Format follows [Keep a Changelog](https://keepac
 - 修复 Markdown 文档以 YAML frontmatter 开头时（如 README）被渲染成乱码段落的问题。
 - 修复表格没有单元格边框、引用块/四级以下标题/分隔线没有任何样式的问题。
 - 语音朗读不再把图片加载失败的提示文字读出来。
+- 修复终端实时渲染在应用隐藏光标时可能与 tmux 光标错位、导致手机端把同一段内容重复显示（旧内容不被覆盖）的问题；解析器现在始终对齐 tmux 光标，隐藏时光标仍会定位、只是不显示。
 
 ## [0.29.2] - 2026-09-18
 

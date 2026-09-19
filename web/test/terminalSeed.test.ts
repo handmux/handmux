@@ -122,8 +122,11 @@ describe('cursorSeq', () => {
   it('puts the cursor on the bottom row when row is 0', () => {
     expect(cursorSeq({ row: 0, col: 0, vis: true }, 24)).toBe('\x1b[24;1H\x1b[?25h');
   });
-  it('keeps the cursor hidden when tmux reports it hidden', () => {
-    expect(cursorSeq({ row: 4, col: 2, vis: false }, 24)).toBe('\x1b[?25l');
+  it('addresses the cell AND stays hidden when tmux reports the cursor hidden', () => {
+    // Hiding is not the same as un-positioned: the live mirror replays the pane's raw %output, whose
+    // relative redraws ("\x1b[<n>A" + rewrite) are measured from this cell — parked at the seed's last
+    // row instead, they land N rows off and leave the old copy on screen (duplicated content).
+    expect(cursorSeq({ row: 4, col: 2, vis: false }, 24)).toBe('\x1b[20;3H\x1b[?25l');
   });
   it('hides the cursor when the server sent nothing (graceful fallback, never the stray box)', () => {
     expect(cursorSeq(undefined, 24)).toBe('\x1b[?25l');

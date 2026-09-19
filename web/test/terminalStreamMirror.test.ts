@@ -276,6 +276,43 @@ describe('terminal stream mirror', () => {
     mirror.dispose();
   });
 
+  it('keeps the parser cursor on tmux\'s cell while DECTCEM is off, so relative redraws land in place', async () => {
+    // Claude/Codex hide the hardware cursor while a turn runs. The seed fills the grid, so unless the
+    // hidden case is ALSO CUP-addressed the parser parks on the seed's last row — and the pane's next
+    // redraw, which is RELATIVE (Ink: "\x1b[<n>A" + "\x1b[K" + rewrite), lands N rows down from it.
+    // The old copy then stays on screen: the phone shows the same block twice.
+    const mirror = create();
+    await mirror.seed({
+      ansi: 'aaa\nbbb\nccc\nwaiting\n',
+      width: 40,
+      height: 12,
+      alt: false,
+      mouseAware: false,
+    });
+    // Cursor hidden, parked on the last content row (pane row 3 of 12).
+    await mirror.ready({ row: 8, col: 0, vis: false });
+    // The app redraws its block: up 3 from its cursor, erase each line, rewrite in place.
+    await mirror.data(bytes('\x1b[3A\rxxx\x1b[K\r\nyyy\x1b[K\r\nzzz\x1b[K'));
+
+    const frame = snapshot(mirror);
+    expect(frame.ansi).toContain('xxx');
+    expect(frame.ansi).not.toContain('bbb'); // the replaced copy must not survive
+    // Content 4 rows + the capped trailing-blank run (3) — the cap measures from the real cursor row,
+    // so a hidden cursor no longer pins it to the grid bottom.
+    expect(frame.bufferRows).toBe(7);
+
+    const visible = new Terminal({ cols: 40, rows: 12, allowProposedApi: true, scrollback: 100 });
+    const pad = Math.max(0, visible.rows - frame.bufferRows);
+    await write(visible, `\x1b[2J\x1b[3J\x1b[H${'\r\n'.repeat(pad)}${frame.ansi}`);
+    visible.scrollToBottom();
+    expect(visibleText(visible).slice(-7)).toEqual(['xxx', 'yyy', 'zzz', 'waiting', '', '', '']);
+    // Still hidden: the position is synced without ever showing a second cursor. 4 rows above the
+    // projection's bottom = the 'zzz' row the app's redraw left it on.
+    expect(frame.cur).toEqual({ row: 4, col: 3, vis: false });
+    visible.dispose();
+    mirror.dispose();
+  });
+
   it('preserves Codex bottom shading through serialization into a taller visible grid', async () => {
     const mirror = create();
     await mirror.seed({

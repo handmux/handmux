@@ -160,15 +160,22 @@ export function prepareLiveSeed(ansi: string, rows: number): string {
 // `cur.vis` is tmux's DECTCEM state and remains authoritative. Some TUIs hide the hardware cursor and
 // paint an inverse-video cell into the captured content instead; showing xterm's cursor in that state
 // would render two cursors.
+//
+// HIDDEN is not the same as UNPOSITIONED: the escape always CUP-addresses the cell when a position is
+// known, and only the DECTCEM flag follows `vis`. The hidden mirror under the live renderer replays the
+// pane's raw %output, and a TUI redraws with RELATIVE moves (Ink/Claude: "\x1b[<n>A" + "\x1b[K" +
+// rewrite). Left parked at the seed's last row instead, those writes land N rows off — the old copy
+// stays behind and the phone shows the content twice. Parking it on tmux's real cell keeps both parsers
+// on the same cursor, which is also what the trailing-blank cap measures from (`lastRequiredLine`).
 export function cursorSeq(
   cur: TerminalCursor | null | undefined,
   rows: number,
   seedRows = 0,
 ): string {
-  if (!cur?.vis) return '\x1b[?25l';
+  if (!cur) return '\x1b[?25l';
   const base = seedRows ? Math.min(rows | 0, seedRows | 0) : (rows | 0);
   const row = Math.max(1, base - Math.max(0, cur.row | 0)); // 1-based, from the content's bottom row
   const col = Math.max(0, (cur.col ?? 0) | 0) + 1; // CUP is 1-based
-  return `\x1b[${row};${col}H\x1b[?25h`;
+  return `\x1b[${row};${col}H${cur.vis ? '\x1b[?25h' : '\x1b[?25l'}`;
 }
 import type { TerminalCursor } from './terminalViewport.js';

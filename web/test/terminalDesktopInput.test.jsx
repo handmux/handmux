@@ -919,7 +919,9 @@ describe('desktop terminal input', () => {
 
     expect(term.write).toHaveBeenCalled();
     expect(term.write.mock.calls.some(([data]) => data.includes('\x1b[?25h'))).toBe(false);
-    expect(term.write.mock.calls.at(-1)[0]).toBe('\x1b[?25l');
+    // Positioned on the pane's cell but never shown — the mirror needs the position for the pane's own
+    // relative redraws, while the TUI's inverse cell stays the only visible cursor.
+    expect(term.write.mock.calls.at(-1)[0]).toMatch(/^\x1b\[\d+;\d+H\x1b\[\?25l$/);
     expect(term.registerDecoration).not.toHaveBeenCalled();
   });
 

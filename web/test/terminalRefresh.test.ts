@@ -146,7 +146,11 @@ describe('prepareSeed alignment', () => {
 
     const softwareCursor = t.buffer.active.getLine(0)?.getCell(3);
     expect(softwareCursor?.isInverse()).toBeTruthy();
-    expect(cursorSeq({ row: 0, col: 3, vis: false }, t.rows, 1)).toBe('\x1b[?25l');
+    // Still positioned on the cell, just hidden — the mirror needs the position for the pane's own
+    // relative redraws; only the DECTCEM flag follows `vis`.
+    expect(cursorSeq({ row: 0, col: 3, vis: false }, t.rows, 1)).toBe('\x1b[1;4H\x1b[?25l');
+    expect(t.buffer.active.cursorY).toBe(0);
+    expect(t.buffer.active.cursorX).toBe(3);
     t.dispose();
   });
 
