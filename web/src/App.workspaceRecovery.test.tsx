@@ -757,11 +757,14 @@ describe('App management dimensions', () => {
   it('refreshes the window dimensions from tmux before opening window management', async () => {
     await renderManagedSession();
     api.getWindows.mockResolvedValueOnce([{ ...staleWindow, width: 160, height: 48 }]);
+    // The window list also refreshes on the panes tick now, so the assertion is about this action causing
+    // a read — not about the total number of reads.
+    const readsBefore = api.getWindows.mock.calls.length;
 
     await act(async () => { await windowBarProps().onManageWindow(staleWindow); });
 
     expect(screen.getByRole('dialog', { name: '窗口管理，work · 160×48' })).toBeTruthy();
-    expect(api.getWindows).toHaveBeenCalledTimes(2);
+    expect(api.getWindows.mock.calls.length).toBeGreaterThan(readsBefore);
   });
 
   it('resizes a lone-pane window from Window Management', async () => {

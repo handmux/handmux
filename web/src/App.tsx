@@ -1308,6 +1308,13 @@ export default function App() {
     });
   }, []);
 
+  // tmux rewrites a window's NAME the moment an app starts or stops in it (automatic-rename; measured at
+  // ~0.5s), but only a window action re-read the window list, so a tab kept the old name until something
+  // unrelated happened. The panes poll carries it along now, so a rename lands on that tick.
+  const refreshWindows = useCallback((sessionId: string, windows: HostWindow[]) => {
+    setCurrent((c) => (c && c.session.id === sessionId ? { ...c, windows } : c));
+  }, []);
+
   // Persist automatic pane replacement as well as explicit navigation. Without this, a reload after an
   // externally closed pane would briefly retry the same stale id before the topology poll corrected it.
   useEffect(() => {
@@ -2457,16 +2464,25 @@ export default function App() {
 
   // Pane identity belongs to Runtime's /panes projection, not the Inbox compatibility roster. Refresh only
   // the open window so process exits/switches clear or replace its logo without probing every host pane.
+  // The window list rides the same tick: it is where tmux's renamed window names reach the tab strip, and
+  // nothing else re-read it.
   usePollingLoop({
-    fetch: () => getPanes(current?.window?.id || ''),
-    apply: (panes) => {
+    fetch: async () => {
       const windowId = current?.window?.id;
-      if (windowId) refreshPanes(windowId, panes);
+      const sessionId = current?.session?.id;
+      if (!windowId || !sessionId) return null;
+      const [panes, windows] = await Promise.all([getPanes(windowId), getWindows(sessionId)]);
+      return { windowId, sessionId, panes, windows };
+    },
+    apply: (fresh) => {
+      if (!fresh) return;
+      refreshPanes(fresh.windowId, fresh.panes);
+      refreshWindows(fresh.sessionId, fresh.windows);
     },
     onError: recoverCurrentTopology,
     intervalMs: 5_000,
     enabled: !needToken && !!current?.window?.id,
-    deps: [current?.window?.id],
+    deps: [current?.window?.id, current?.session?.id],
   });
 
   usePollingLoop({
