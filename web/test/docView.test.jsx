@@ -363,7 +363,7 @@ describe('DocView P1 document features', () => {
     }
   });
 
-  it('ignores an anchorRequest that matches no heading', async () => {
+  it('says so when the requested anchor matches no heading (instead of doing nothing)', async () => {
     const calls = [];
     const original = Element.prototype.scrollTo;
     Element.prototype.scrollTo = function scrollTo(opts) { calls.push(opts); };
@@ -373,6 +373,7 @@ describe('DocView P1 document features', () => {
         anchorRequest: { anchor: '不存在的标题', at: 1 },
       });
       expect(calls).toEqual([]);
+      expect(container.querySelector('.doc-info-note')?.textContent).toContain('不存在的标题');
     } finally {
       Element.prototype.scrollTo = original;
     }

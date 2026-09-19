@@ -537,6 +537,7 @@ export default {
   'doc.reload': '再読み込み',
   'doc.words': '語数',
   'doc.chars': '文字数',
+  'doc.anchorMissing': '見出し #{anchor} が見つかりません（ファイルは開きました）',
   'doc.imageLoadFailed': '画像を読み込めませんでした',
   'doc.imageNotFound': '画像ファイルが見つかりません',
   'doc.imageTooLarge': '画像が50MBの上限を超えています',

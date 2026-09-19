@@ -549,6 +549,7 @@ export default {
   'doc.reload': '重新載入',
   'doc.words': '字數',
   'doc.chars': '字元數',
+  'doc.anchorMissing': '找不到標題 #{anchor}，檔案已開啟',
   'doc.imageLoadFailed': '圖片載入失敗',
   'doc.imageNotFound': '圖片檔案不存在',
   'doc.imageTooLarge': '圖片超過 50MB 上限',

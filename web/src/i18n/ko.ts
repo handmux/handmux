@@ -537,6 +537,7 @@ export default {
   'doc.reload': '새로 고침',
   'doc.words': '단어 수',
   'doc.chars': '문자 수',
+  'doc.anchorMissing': '제목 #{anchor}을(를) 찾지 못했습니다(파일은 열었습니다)',
   'doc.imageLoadFailed': '이미지를 불러오지 못했습니다',
   'doc.imageNotFound': '이미지 파일이 없습니다',
   'doc.imageTooLarge': '이미지가 50MB 제한을 초과합니다',

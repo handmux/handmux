@@ -1240,6 +1240,7 @@ export default {
   'doc.reload': 'Reload',
   'doc.words': 'Words',
   'doc.chars': 'Characters',
+  'doc.anchorMissing': 'No heading named #{anchor} — the file was still opened.',
   'doc.imageLoadFailed': 'Image could not be loaded',
   'doc.imageNotFound': 'Image file not found',
   'doc.imageTooLarge': 'Image is over the 50MB limit',

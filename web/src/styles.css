@@ -2495,6 +2495,9 @@ button.cmd-text { background: none; border: none; text-align: left; }
 /* Read-aloud could not start (the engine refused) — say so instead of leaving a dead tap. */
 .doc-speak-error { margin: 8px 12px 0; padding: 8px 10px; border-radius: 8px; background: #2a1f22;
   color: #f0a9a9; font-size: 13px; }
+/* A link asked for a heading this document does not have — informative, not an error (grey). */
+.doc-info-note { margin: 8px 12px 0; padding: 8px 10px; border-radius: 8px; background: #1b222b;
+  color: #9fb0c0; font-size: 13px; }
 /* 目录 — the outline slides in from the LEFT. Lives in the file sheet's own stacking context (a
    portal would land under the sheet at --z-overlay-workspace: 50), so a small z-index is enough. */
 .doc-toc-backdrop { position: fixed; inset: 0; z-index: 4; background: rgba(0,0,0,.45); }

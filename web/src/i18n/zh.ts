@@ -1239,6 +1239,7 @@ export default {
   'doc.reload': '重新加载',
   'doc.words': '字数',
   'doc.chars': '字符数',
+  'doc.anchorMissing': '没有找到标题 #{anchor}，文件已打开',
   'doc.imageLoadFailed': '图片加载失败',
   'doc.imageNotFound': '图片文件不存在',
   'doc.imageTooLarge': '图片超过 50MB 上限',

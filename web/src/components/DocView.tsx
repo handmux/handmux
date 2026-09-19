@@ -130,6 +130,7 @@ export default function DocView({
   const keyboardInset = useKeyboardInset();
   const [copied, setCopied] = useState(false);
   const [readNotice, setReadNotice] = useState<string | null>(null);
+  const [anchorNotice, setAnchorNotice] = useState<string | null>(null);
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const mdRef = useRef<HTMLDivElement | null>(null);
   const textRef = useRef<HTMLPreElement | null>(null);
@@ -255,7 +256,12 @@ export default function DocView({
   useEffect(() => {
     if (!anchorRequest) return;
     const el = document.getElementById(decodeURIComponent(anchorRequest.anchor));
-    if (!el) return;
+    if (!el) {
+      // A link that points nowhere must SAY so: silence looks like a broken feature.
+      setAnchorNotice(t('doc.anchorMissing', { anchor: anchorRequest.anchor }));
+      return;
+    }
+    setAnchorNotice(null);
     scrollToElement(el, TOC_TOP_OFFSET, false); // instant: this is the arrival position, not a follow
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [anchorRequest, toc]);
@@ -490,6 +496,8 @@ export default function DocView({
           </>
         )}
       </div>
+
+      {anchorNotice && <div className="doc-info-note" role="status">{anchorNotice}</div>}
 
       {(speech.failure || readNotice) && (
         <div className="doc-speak-error" role="status">
