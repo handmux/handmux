@@ -262,9 +262,9 @@ export default function DocView({
         </div>
       </div>
 
-      {(speech.failed || readNotice) && (
+      {(speech.failure || readNotice) && (
         <div className="doc-speak-error" role="status">
-          {speech.failed ? t('doc.speakFailed') : readNotice}
+          {speech.failure ? `${t('doc.speakFailed')} (${speech.failure})` : readNotice}
         </div>
       )}
 

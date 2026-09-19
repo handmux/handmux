@@ -248,6 +248,29 @@ describe('DocView read-aloud toolbar', () => {
     expect(container.querySelector('[aria-label="朗读"]')).not.toBeNull(); // back to idle, not stuck
   });
 
+  it('a cancel() that throws still lets the tap respond (UI flips before the engine is touched)', async () => {
+    installSpeechMock();
+    // WebKit builds that throw synchronously out of speechSynthesis.cancel() used to leave the button
+    // looking untouched, because the engine call ran before the state change.
+    installedSynth().cancel = () => { throw new DOMException('The operation is insecure.', 'SecurityError'); };
+    await render({ type: 'markdown', name: 'a.md', content: DOC });
+    await flush();
+    await click(container.querySelector('[aria-label="朗读"]'));
+    expect(container.querySelector('[aria-label="暂停朗读"]')).not.toBeNull();
+  });
+
+  it('a speak() that throws reports the engine error instead of failing silently', async () => {
+    installSpeechMock();
+    installedSynth().speak = () => { throw new DOMException('The operation is insecure.', 'SecurityError'); };
+    await render({ type: 'markdown', name: 'a.md', content: DOC });
+    await flush();
+    await click(container.querySelector('[aria-label="朗读"]'));
+    const notice = container.querySelector('.doc-speak-error');
+    expect(notice).not.toBeNull();
+    expect(notice.textContent).toContain('SecurityError');
+    expect(container.querySelector('[aria-label="朗读"]')).not.toBeNull(); // recovered to idle
+  });
+
   it('reads a REALISTIC document: prose is read, code blocks are skipped', async () => {
     const spoken = installSpeechMock();
     const markdown = [
