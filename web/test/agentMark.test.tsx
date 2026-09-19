@@ -6,9 +6,14 @@ import { AgentCatalogProvider } from '../src/agentCatalog.js';
 describe('AgentMark', () => {
   it('uses bundled brand assets only for known icon ids', () => {
     const { container, rerender } = render(<AgentMark agent="claude" />);
-    expect(container.querySelector('[data-agent-icon="claude"]')).not.toBeNull();
-    expect(container.querySelector('[data-agent-icon="claude"] svg')?.getAttribute('viewBox'))
-      .toBe('0 0 24 24');
+    const claude = container.querySelector('[data-agent-icon="claude"]');
+    expect(claude).not.toBeNull();
+    // Claude's mark is the pixel robot its CLI prints on startup: block art, so it is drawn as rects in the
+    // terminal's own two colours rather than as a single-colour glyph.
+    const claudeSvg = claude?.querySelector('svg');
+    expect(claudeSvg?.getAttribute('viewBox')).toBe('0 0 24 24');
+    expect(new Set(Array.from(claudeSvg?.querySelectorAll('rect') ?? [])
+      .map((rect) => rect.getAttribute('fill')))).toEqual(new Set(['#000000', '#d7af87']));
 
     rerender(<AgentMark agent="codex" />);
     expect(container.querySelector('[data-agent-icon="codex"]')).not.toBeNull();
