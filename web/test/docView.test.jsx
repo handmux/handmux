@@ -16,6 +16,13 @@ beforeEach(() => { container = document.createElement('div'); document.body.appe
 afterEach(() => { act(() => root.unmount()); container.remove(); });
 const render = (props) => act(() => root.render(<DocView {...props} />));
 const click = (node) => act(() => node.dispatchEvent(new MouseEvent('click', { bubbles: true })));
+// The diagram library is mocked here: this file only checks the WIRING (when the warm-up fires), while
+// the real import path is covered by test/docMermaid.test.jsx.
+vi.mock('../src/docMermaid.js', async (importOriginal) => ({
+  ...(await importOriginal()),
+  warmMermaid: vi.fn(() => Promise.resolve({ default: {} })), // only the fetch is observed
+}));
+
 // Let the idle-scheduled sentence marking (setTimeout 0) run inside act().
 const flush = () => act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
 
@@ -298,6 +305,17 @@ describe('DocView P1 document features', () => {
     expect(container.querySelector('.doc-text')?.textContent).toBe('line');
     await render({ type: 'image', name: 'a.png', path: '/a.png', content: 'blob:fake' });
     expect(container.querySelector('img.doc-image')).not.toBeNull();
+  });
+
+  it('warms the diagram library shortly after a markdown doc opens, and never for other kinds', async () => {
+    const { warmMermaid } = await import('../src/docMermaid.js');
+    await render({ type: 'markdown', name: 'a.md', path: '/a.md', content: '# 标题' });
+    expect(warmMermaid).not.toHaveBeenCalled(); // not while the document itself is still fetching
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 1700)); });
+    expect(warmMermaid).toHaveBeenCalledTimes(1);
+    await render({ type: 'html', name: 'a.html', path: '/a.html', content: '<h1>x</h1>' });
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 1700)); });
+    expect(warmMermaid).toHaveBeenCalledTimes(1); // an html doc never warms it
   });
 
   it('offers back-to-top only once the reader is well into the document', async () => {

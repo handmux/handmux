@@ -11,7 +11,7 @@ const render = vi.fn(async (id, source) => ({ svg: `<svg data-id="${id}">${sourc
 const initialize = vi.fn();
 vi.mock('mermaid', () => ({ default: { render, initialize } }));
 
-const { useDocMermaid } = await import('../src/docMermaid.js');
+const { useDocMermaid, warmMermaid } = await import('../src/docMermaid.js');
 const { act } = await import('react');
 const { createRoot } = await import('react-dom/client');
 
@@ -37,6 +37,16 @@ describe('mermaid fences in the pipeline', () => {
   it('does not prepare diagrams in bubble mode', () => {
     const html = renderMarkdown(FENCE, { links: true });
     expect(html).not.toContain('md-mermaid');
+  });
+});
+
+describe('warm-up', () => {
+  it('imports the library once per page load (the promise is shared)', async () => {
+    const first = warmMermaid();
+    const second = warmMermaid();
+    expect(second).toBe(first); // memoised: repeated doc opens cost nothing
+    const mod = await first;
+    expect(typeof mod.default.render).toBe('function');
   });
 });
 

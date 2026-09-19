@@ -12,7 +12,7 @@ import { copyText } from '../clipboard.js';
 import { renderMarkdown } from '../markdown.js';
 import { clearFind, focusMatch, runFind } from '../docFind.js';
 import { installHeadingFolding } from '../docFolding.js';
-import { useDocMermaid } from '../docMermaid.js';
+import { useDocMermaid, warmMermaid } from '../docMermaid.js';
 import { useKeyboardInset } from '../hooks/useKeyboardInset.js';
 import {
   CheckIcon, CopyIcon, MoreHorizontalIcon, PauseIcon, PlayIcon, RefreshIcon, SearchIcon, StopIcon, TocIcon,
@@ -71,6 +71,9 @@ const FOLLOW_SCROLL_GUARD_MS = 800;
 // find match in the upper half where the soft keyboard cannot cover it.
 const TOC_TOP_OFFSET = 62;
 const FIND_TOP_OFFSET = 70;
+// Give the document's own fetch a head start before pulling the diagram library in the background.
+const MERMAID_WARM_DELAY_MS = 1500;
+
 // A reload must be perceptible even when the file is unchanged and the fetch is instant.
 const MIN_RELOAD_MS = 260;
 
@@ -197,6 +200,14 @@ export default function DocView({
   useDocCodeCopy(mdRef, html, type === 'markdown');
   // Mermaid diagrams: mermaid itself is imported lazily, only for a document that has one.
   useDocMermaid(mdRef, html, type === 'markdown');
+  // Reading a document is the signal to fetch the diagram library in the background, so the first
+  // diagram does not wait for it. Delayed a beat to leave the document's own fetch the bandwidth;
+  // warmMermaid memoises, so repeated doc opens in one session cost nothing.
+  useEffect(() => {
+    if (type !== 'markdown') return undefined;
+    const id = setTimeout(() => { void warmMermaid().catch(() => { /* offline */ }); }, MERMAID_WARM_DELAY_MS);
+    return () => clearTimeout(id);
+  }, [type]);
   // Body folding: heading carets collapse that heading's content (doc mode only — a chat bubble has
   // no sections to fold). Re-installed whenever the rendered document changes.
   useEffect(() => {

@@ -52,6 +52,30 @@ function revealSource(block: HTMLElement, reason: string): void {
 }
 
 let diagramSeq = 0;
+let warmModule: Promise<typeof import('mermaid')> | null = null;
+
+/**
+ * Fetch the diagram library in the background, once per page load.
+ *
+ * A diagram cannot render until the library arrives, so the first one in a session would otherwise wait
+ * behind ~155 kB (gz). Bundling the library into the main chunk instead was measured at +156 kB (gz) on
+ * EVERY cold start (581 → 737 kB) — the wrong trade for a terminal-first app where most sessions never
+ * open a document. Warming when a document is actually being read spends that one-time download on the
+ * people who read documents; `/assets/*` is served `immutable` with hashed names, so it happens once per
+ * release per device. (Decision: chosen by the user over "bundle it" and "do nothing".)
+ *
+ * The promise is memoised so the renderer shares one module instance; a failed import is NOT memoised,
+ * so a later attempt can retry.
+ */
+export function warmMermaid(): Promise<typeof import('mermaid')> {
+  if (!warmModule) {
+    warmModule = import('mermaid').catch((error: unknown) => {
+      warmModule = null;
+      throw error;
+    });
+  }
+  return warmModule;
+}
 
 export function useDocMermaid(
   rootRef: RefObject<HTMLElement | null>,
@@ -70,7 +94,7 @@ export function useDocMermaid(
     void (async () => {
       let mermaid: typeof import('mermaid').default;
       try {
-        mermaid = (await import('mermaid')).default;
+        mermaid = (await warmMermaid()).default;
       } catch {
         if (!cancelled) blocks.forEach((block) => revealSource(block, t('doc.mermaidLoadFailed')));
         return;
