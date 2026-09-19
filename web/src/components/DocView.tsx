@@ -153,10 +153,12 @@ export default function DocView({
     return () => wrap.removeEventListener('scroll', onScroll);
   }, [speech.playing]);
 
-  // Tap a sentence → read on from there. Works whether idle, paused or playing (markSentences is
-  // idempotent, so the sentence list is re-read from the existing spans).
+  // Tap a sentence → read on from there — but ONLY while read-aloud is already running (playing or
+  // paused). Tapping the text of an idle document must stay a normal reading gesture (selection,
+  // scrolling), never a surprise start. markSentences is idempotent, so the list is re-read from the
+  // existing spans.
   const onMarkdownClick = (event: ReactMouseEvent<HTMLDivElement>): void => {
-    if (!speech.supported) return;
+    if (!speech.supported || !speech.playing) return;
     const target = event.target instanceof Element ? event.target : null;
     const span = target?.closest<HTMLElement>('.tts-sent[data-tts]');
     if (!span) return;

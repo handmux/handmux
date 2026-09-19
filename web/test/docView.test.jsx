@@ -156,17 +156,16 @@ describe('DocView read-aloud toolbar', () => {
     expect(container.querySelector('[aria-label="停止朗读"]').disabled).toBe(false);
   });
 
-  it('tapping a sentence reads on from that sentence', async () => {
+  it('tapping a sentence does NOT start reading while idle', async () => {
     const spoken = installSpeechMock();
     await render({ type: 'markdown', name: 'a.md', content: DOC });
-    await flush(); // sentence spans are laid down for the tap target
-    const third = container.querySelector('.tts-sent[data-tts="2"]');
-    expect(third?.textContent).toBe('第三句话。');
-    await click(third);
-    expect(spoken[0]).toBe('第三句话。'); // starts exactly there, not from the top
+    await flush();
+    await click(container.querySelector('.tts-sent[data-tts="2"]'));
+    expect(spoken).toEqual([]); // a tap on idle text must not start playback
+    expect(container.querySelector('[aria-label="朗读"]')).not.toBeNull();
   });
 
-  it('tapping a sentence mid-read jumps there too', async () => {
+  it('tapping a sentence mid-read jumps there', async () => {
     const spoken = installSpeechMock();
     await render({ type: 'markdown', name: 'a.md', content: DOC });
     await flush();
