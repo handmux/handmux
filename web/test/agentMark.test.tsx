@@ -18,9 +18,17 @@ describe('AgentMark', () => {
       .map((path) => path.getAttribute('fill')))).toEqual(new Set(['#000000', '#d7af87']));
 
     rerender(<AgentMark agent="codex" />);
-    expect(container.querySelector('[data-agent-icon="codex"]')).not.toBeNull();
-    expect(container.querySelector('[data-agent-icon="codex"] svg')?.getAttribute('viewBox'))
-      .toBe('0 0 24 24');
+    const codex = container.querySelector('[data-agent-icon="codex"]');
+    expect(codex).not.toBeNull();
+    // The prompt glyph the CLI ships, with the circle it draws around it dropped: geometry and stroke
+    // weight are the CLI's own, and the stroke is currentColor so the badge follows the tab's text.
+    const codexSvg = codex?.querySelector('svg');
+    expect(codexSvg?.getAttribute('viewBox')).toBe('8.420 11.048 15.178 9.991');
+    const glyph = codexSvg?.querySelector('path');
+    expect(glyph?.getAttribute('d')).toMatch(/^M22\.356 19\.797H17\.17/);
+    expect(glyph?.getAttribute('stroke')).toBe('currentColor');
+    expect(glyph?.getAttribute('stroke-width')).toBe('2.484');
+    expect(codexSvg?.querySelector('mask')).toBeNull();
 
     rerender(<AgentMark agent="pi" />);
     const pi = container.querySelector('[data-agent-icon="pi"]');
