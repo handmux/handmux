@@ -44,6 +44,11 @@ describe('WindowBar', () => {
     expect(styles).toMatch(/\.win-tab\s*\{[^}]*display:\s*inline-flex[^}]*align-items:\s*center/);
     expect(styles).toMatch(/\.win-title\s*\{[^}]*display:\s*inline-flex[^}]*gap:\s*4px/);
     expect(styles).toMatch(/\.win-tab \.agent-mark\s*\{\s*margin:\s*0/);
+    // The tab's own padding is the gap between the logo and the tab frame.
+    expect(styles).toMatch(/\.win-tab\s*\{[^}]*padding:\s*2px 5px/);
+    // A mark wider than it is tall may use the height, but only up to the cap — beyond that it would
+    // dominate the tab.
+    expect(styles).toMatch(/\.agent-mark\s*\{[^}]*height:\s*15px[^}]*max-width:\s*20px/);
 
     render({
       ...base,

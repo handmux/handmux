@@ -629,7 +629,9 @@ button.settings-page-row:disabled, .settings-page-row.disabled { color: rgba(235
 }
 .lens-toggle:active { background: #262b33; }
 .lens-toggle svg { opacity: .82; }
-.win-tab { display: inline-flex; align-items: center; white-space: nowrap; padding: 4px 10px; border: none; border-radius: 8px; background: #33353a; color: #bbb; font-size: 13px; touch-action: manipulation; }
+/* Padding is the gap between an Agent's logo and the tab's own frame — halve it from the original 4/10 so
+   the logo sits closer to the edge. */
+.win-tab { display: inline-flex; align-items: center; white-space: nowrap; padding: 2px 5px; border: none; border-radius: 8px; background: #33353a; color: #bbb; font-size: 13px; touch-action: manipulation; }
 .win-tab.active { background: var(--blue); color: #fff; }
 .win-new { border: 1px dashed #555; color: #8aa; font-weight: 700; background: transparent; }
 .win-panes { margin-left: 5px; font-size: 11px; color: #889; }
@@ -2875,12 +2877,14 @@ button.cmd-text { background: none; border: none; text-align: left; }
 .inbox-row:active { background: #2f3034; }
 .inbox-row-head { display: flex; align-items: center; gap: 6px; min-width: 0; }
 /* Agent brand logo (Claude / Codex) — flush in the inbox row and on a single-pane window tab. */
-/* Sizing is by HEIGHT, width follows the artwork. A mark that is wider than it is tall — both robots the
-   CLIs print on startup are — would otherwise letterbox inside a square box and read as much smaller than a
-   square mark. Each asset's viewBox is its own artwork box, so height-driven sizing gives every Agent's logo
-   the same optical weight. Where space is tight (the pane map), the width is pinned instead. */
-.agent-mark { height: 15px; width: auto; flex: none; display: inline-block; }
-.agent-mark svg { display: block; height: 100%; width: auto; }
+/* Sizing is by HEIGHT, width follows the artwork, and a wide mark may not run past the cap. A mark wider
+   than it is tall — both robots the CLIs print on startup are — would letterbox inside a square box and read
+   as much smaller than a square mark; letting it use its full artwork width, though, makes it dominate the
+   tab. The cap is the middle: Claude's ends up ~11.8px tall, between the 8.8px it letterboxed at and the
+   15px it would take at full width. Square marks are unaffected. Where space is tight (the pane map), the
+   width is pinned instead. */
+.agent-mark { height: 15px; width: auto; max-width: 20px; flex: none; display: inline-block; }
+.agent-mark svg { display: block; height: 100%; width: auto; max-width: 100%; }
 .win-tab .agent-mark { margin: 0; }
 .inbox-chip { font-size: 11px; padding: 1px 6px; border-radius: 4px; flex: none; }
 .inbox-chip.needs { background: #e0a020; color: #111; }
