@@ -41,14 +41,16 @@ describe('AgentMark', () => {
     const mark = container.querySelector('[data-agent-icon="codebuddy"]');
     expect(mark).not.toBeNull();
     expect(container.querySelector('[data-agent-icon="generic"]')).toBeNull();
-    // The official mark ships on its own 40×40 canvas; it is scaled into the shared one so every badge
-    // stays the same rendered size without per-location overrides.
+    // The mark ships on its own wider canvas; it is fitted into the shared one so every badge stays the
+    // same rendered size without per-location overrides.
     const svg = mark?.querySelector('svg');
     expect(svg?.getAttribute('viewBox')).toBe('0 0 24 24');
     expect(svg?.getAttribute('aria-hidden')).toBe('true');
-    // Its gradient/clip ids are namespaced, because these logos are inlined into one shared document.
-    expect(Array.from(svg?.querySelectorAll('[id]') ?? []).map((node) => node.getAttribute('id')))
-      .toContain('clip0_hmcb');
+    // Brand colour kept as shipped, and no defs ids: these logos are inlined into one shared document.
+    const paths = Array.from(svg?.querySelectorAll('path') ?? []);
+    expect(paths).toHaveLength(3);
+    expect(new Set(paths.map((path) => path.getAttribute('fill')))).toEqual(new Set(['#00BC90']));
+    expect(svg?.querySelectorAll('[id]').length).toBe(0);
   });
 
   it('uses a neutral mark for unknown and missing ids', () => {
