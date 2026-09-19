@@ -57,6 +57,9 @@ export interface DocRead {
   type: DocType;
   content: string;
   mtimeMs: number;
+  /** Byte size and creation time — shown by the viewer's file-info popover. */
+  size: number;
+  birthtimeMs: number | null;
   notModified?: never;
 }
 
@@ -143,10 +146,13 @@ export function createDocs({ home, extraRoots = [], maxDownloadBytes = MAX_TRANS
     if (!st.isFile()) return { error: 'not a file', status: 400 };
     if (st.size > MAX_READ_BYTES) return { error: 'too large', status: 413 };
     const mtimeMs = st.mtimeMs;
+    // Filesystems without a birth time report 0 (or NaN on some platforms) — the popover shows
+    // 创建时间 only when it is a real value.
+    const birthtimeMs = Number.isFinite(st.birthtimeMs) && st.birthtimeMs > 0 ? st.birthtimeMs : null;
     if (knownMtime != null && mtimeMs === knownMtime) return { name: basename(real), type, mtimeMs, notModified: true };
     const content = decodeText(await fs.readFile(real));
     if (content == null) return { error: 'not text', status: 415 };
-    return { name: basename(real), type, content, mtimeMs };
+    return { name: basename(real), type, content, mtimeMs, size: st.size, birthtimeMs };
   }
 
   async function listDir(rawPath: string): Promise<DocsError | DirectoryListing> {

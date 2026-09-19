@@ -21,6 +21,7 @@ const flush = () => act(async () => { await new Promise((resolve) => setTimeout(
 
 // jsdom has no Web Speech API. Install a minimal fake so the TTS paths (which only exist when
 // speechSynthesis is present) become testable: `spoken` records every utterance in order.
+let lastSynth = null;
 function installSpeechMock() {
   const spoken = [];
   const synth = {
@@ -29,11 +30,21 @@ function installSpeechMock() {
     getVoices: () => [{ lang: 'zh-CN', name: 'Fake', default: true }],
     addEventListener: vi.fn(), removeEventListener: vi.fn(),
   };
+  lastSynth = synth;
   window.speechSynthesis = synth;
   window.SpeechSynthesisUtterance = class {
     constructor(text) { this.text = text; this.onend = null; this.onerror = null; }
   };
   return spoken;
+}
+const installedSynth = () => lastSynth;
+
+function installClipboard(written) {
+  Object.defineProperty(window, 'isSecureContext', { value: true, configurable: true });
+  Object.defineProperty(navigator, 'clipboard', {
+    value: { writeText: async (value) => { written.push(value); } },
+    configurable: true,
+  });
 }
 
 describe('DocView', () => {
@@ -186,6 +197,54 @@ describe('DocView read-aloud toolbar', () => {
     await click(container.querySelector('[aria-label="语速"]'));
     expect(rate()).toBe('1.5×');
     expect(localStorage.getItem('tw_doc_rate')).toBe('1.5');
+  });
+
+  it('更多 opens a small popover with the file info and copies the path', async () => {
+    const written = [];
+    installClipboard(written);
+    await render({
+      type: 'markdown', name: 'a.md', path: '/docs/notes/a.md',
+      size: 2048, mtimeMs: Date.UTC(2026, 0, 2, 3, 4), birthtimeMs: Date.UTC(2025, 11, 31, 1, 2),
+      content: '# Title',
+    });
+    expect(container.querySelector('.doc-info-pop')).toBeNull();
+    await click(container.querySelector('[aria-label="文件信息"]'));
+    const pop = container.querySelector('.doc-info-pop');
+    expect(pop).not.toBeNull();
+    expect(pop.textContent).toContain('/docs/notes/a.md');
+    expect(pop.textContent).toContain('2.0 KB');
+    expect(pop.textContent).toContain('复制路径');
+    await click(pop.querySelector('.doc-info-copy'));
+    expect(written).toEqual(['/docs/notes/a.md']);
+    expect(container.querySelector('.doc-info-copy').textContent).toContain('已复制');
+  });
+
+  it('更多 shows 修改时间/创建时间 rows', async () => {
+    await render({
+      type: 'markdown', name: 'a.md', path: '/a.md', size: 512,
+      mtimeMs: Date.UTC(2026, 0, 2, 3, 4), birthtimeMs: Date.UTC(2025, 11, 31, 1, 2),
+      content: '# Title',
+    });
+    await click(container.querySelector('[aria-label="文件信息"]'));
+    const pop = container.querySelector('.doc-info-pop');
+    expect(pop.textContent).toContain('修改时间');
+    expect(pop.textContent).toContain('创建时间');
+    // every row resolved to a real value — the "—" placeholder means a field went missing
+    expect(pop.textContent.match(/—/g) ?? []).toHaveLength(0);
+    expect(pop.textContent).toContain('512 B');
+  });
+
+  it('a failed read-aloud says so instead of looking like a dead tap', async () => {
+    installSpeechMock();
+    installedSynth().speak = (utterance) => {
+      // iOS reports not-allowed when speak() wasn't allowed to start.
+      if (utterance.onerror) utterance.onerror({ error: 'not-allowed' });
+    };
+    await render({ type: 'markdown', name: 'a.md', content: DOC });
+    await flush();
+    await click(container.querySelector('[aria-label="朗读"]'));
+    expect(container.querySelector('.doc-speak-error')).not.toBeNull();
+    expect(container.querySelector('[aria-label="朗读"]')).not.toBeNull(); // back to idle, not stuck
   });
 
   it('a manual scroll pauses following, and the pill comes back to the spoken sentence', async () => {

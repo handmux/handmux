@@ -2142,6 +2142,8 @@ export default function App() {
       name: res.name,
       content: res.content,
       ...(res.mtimeMs !== undefined ? { mtime: res.mtimeMs } : {}),
+      ...(res.size !== undefined ? { size: res.size } : {}),
+      ...(res.birthtimeMs !== undefined ? { birthtimeMs: res.birthtimeMs } : {}),
     });
     pushRecentDoc({ path: abs, name: res.name, type: res.type, ts: Date.now() });
     setFileManagerOpen(true);
@@ -2185,6 +2187,8 @@ export default function App() {
           name: res.name,
           content: res.content,
           ...(res.mtimeMs !== undefined ? { mtime: res.mtimeMs } : {}),
+          ...(res.size !== undefined ? { size: res.size } : {}),
+          ...(res.birthtimeMs !== undefined ? { birthtimeMs: res.birthtimeMs } : {}),
         });
       })
       .catch(() => { /* keep the last-good content */ });

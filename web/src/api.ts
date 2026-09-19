@@ -387,6 +387,9 @@ export type DocumentResponse = { notModified: true } | {
   name: string;
   content: unknown;
   mtimeMs?: number | null;
+  /** File-info fields for the viewer's info popover. */
+  size?: number;
+  birthtimeMs?: number | null;
 };
 export const fetchDoc = async (path: string, sinceMtime: number | null = null): Promise<DocumentResponse> => {
   const value = recordOf(await req(
@@ -403,6 +406,10 @@ export const fetchDoc = async (path: string, sinceMtime: number | null = null): 
     content: value.content,
     ...(value.mtimeMs === null ? { mtimeMs: null }
       : typeof value.mtimeMs === 'number' && Number.isFinite(value.mtimeMs) ? { mtimeMs: value.mtimeMs } : {}),
+    ...(typeof value.size === 'number' && Number.isFinite(value.size) ? { size: value.size } : {}),
+    ...(value.birthtimeMs === null ? { birthtimeMs: null }
+      : typeof value.birthtimeMs === 'number' && Number.isFinite(value.birthtimeMs)
+        ? { birthtimeMs: value.birthtimeMs } : {}),
   };
 };
 export const fetchDir = (path?: string): Promise<unknown> =>

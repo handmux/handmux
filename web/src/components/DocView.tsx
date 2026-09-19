@@ -6,10 +6,11 @@ import { useDocSpeech } from '../voice/useDocSpeech.js';
 import { useScreenWakeLock } from '../hooks/useScreenWakeLock.js';
 import { useMarkdownImages } from '../hooks/useMarkdownImages.js';
 import { useBackButton } from '../hooks/useBackButton.js';
+import { copyText } from '../clipboard.js';
 import { renderMarkdown } from '../markdown.js';
-import { PauseIcon, PlayIcon, StopIcon } from './icons.jsx';
+import { CopyIcon, MoreHorizontalIcon, PauseIcon, PlayIcon, StopIcon } from './icons.jsx';
 import ImageViewer from './ImageViewer.jsx';
-import { t } from '../i18n';
+import { t, getLangCode } from '../i18n';
 import type { MouseEvent as ReactMouseEvent } from 'react';
 
 export interface DocViewProps {
@@ -18,6 +19,10 @@ export interface DocViewProps {
   /** Absolute path of the doc file — resolves relative image srcs inside markdown. */
   path?: string | null;
   content?: string | null;
+  /** File info for the 更多 popover (from /api/file). */
+  size?: number | null;
+  mtimeMs?: number | null;
+  birthtimeMs?: number | null;
 }
 
 const collectSentences = markSentences;
@@ -44,6 +49,23 @@ const dirnameOf = (path: string): string => {
   return i <= 0 ? '/' : path.slice(0, i);
 };
 
+// File-info popover formatting. Times use the active UI locale (the app is bilingual/multi-locale).
+const formatBytes = (bytes: number | null | undefined): string => {
+  if (typeof bytes !== 'number' || !Number.isFinite(bytes) || bytes < 0) return '—';
+  if (bytes < 1024) return `${bytes} B`;
+  const units = ['KB', 'MB', 'GB'];
+  let value = bytes / 1024;
+  let unit = 0;
+  while (value >= 1024 && unit < units.length - 1) { value /= 1024; unit += 1; }
+  return `${value < 10 ? value.toFixed(1) : Math.round(value)} ${units[unit]}`;
+};
+
+const formatStamp = (ms: number | null | undefined): string => {
+  if (typeof ms !== 'number' || !Number.isFinite(ms) || ms <= 0) return '—';
+  return new Intl.DateTimeFormat(getLangCode(), { dateStyle: 'medium', timeStyle: 'short' })
+    .format(new Date(ms));
+};
+
 // Render one doc behind the bar it always had: 开始/暂停 · 停止 · 倍速 on the left, A−/A+ pinned right.
 // markdown → shared pipeline (markdown.ts) → injected HTML; single-file html → sandboxed iframe
 // (allow-scripts, NOT allow-same-origin, so report JS can't reach our token or the parent page);
@@ -53,11 +75,17 @@ const dirnameOf = (path: string): string => {
 // docSpeech.markSentences make every position addressable: tapping a sentence reads on from there —
 // that gesture is the only "jump" control, so the bar needs no progress or skip buttons. Following
 // keeps the spoken sentence in view until the reader scrolls away, then a pill offers to come back.
-export default function DocView({ type, name, path = null, content = '' }: DocViewProps) {
+export default function DocView({
+  type, name, path = null, content = '', size = null, mtimeMs = null, birthtimeMs = null,
+}: DocViewProps) {
   const [fontIdx, setFontIdx] = useState<number>(readFontIndex);
   const [followPaused, setFollowPaused] = useState(false);
+  const [infoOpen, setInfoOpen] = useState(false);
+  const [copied, setCopied] = useState(false);
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const mdRef = useRef<HTMLDivElement | null>(null);
+  const infoRef = useRef<HTMLDivElement | null>(null);
+  const copiedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const scrollGuardUntil = useRef(0); // timestamp until which scroll events are treated as our own
   const speech = useDocSpeech();
   useScreenWakeLock(speech.playing && !speech.paused); // screen sleep kills TTS — hold it awake while reading
@@ -71,6 +99,20 @@ export default function DocView({ type, name, path = null, content = '' }: DocVi
   // Authenticated inline images: placeholders → blob URLs; tap → fullscreen viewer.
   const [imageView, closeImageView] = useMarkdownImages(mdRef, html, type === 'markdown');
   useBackButton(!!imageView, closeImageView);
+  useBackButton(infoOpen, () => setInfoOpen(false));
+
+  // The 更多 popover closes on a tap anywhere outside it (capture phase, so it beats other handlers —
+  // same mechanics as Dropdown), on Back, or on the ✕.
+  useEffect(() => {
+    if (!infoOpen) return undefined;
+    const onPointerDown = (event: PointerEvent): void => {
+      if (!(event.target instanceof Node) || !infoRef.current?.contains(event.target)) setInfoOpen(false);
+    };
+    document.addEventListener('pointerdown', onPointerDown, true);
+    return () => document.removeEventListener('pointerdown', onPointerDown, true);
+  }, [infoOpen]);
+
+  useEffect(() => () => { if (copiedTimer.current !== null) clearTimeout(copiedTimer.current); }, []);
 
   // Content swapped (different doc) → stop any in-flight reading (React rebuilds innerHTML, so the
   // old sentence spans are gone anyway).
@@ -148,6 +190,16 @@ export default function DocView({ type, name, path = null, content = '' }: DocVi
 
   const reading = speech.playing && !speech.paused;
   const canRead = type === 'markdown' && speech.supported;
+  const fullPath = path || name;
+
+  const onCopyPath = (): void => {
+    void copyText(fullPath).then((ok) => {
+      if (!ok) return;
+      setCopied(true);
+      if (copiedTimer.current !== null) clearTimeout(copiedTimer.current);
+      copiedTimer.current = setTimeout(() => setCopied(false), 1600);
+    });
+  };
 
   return (
     <div className="doc-md-wrap" ref={wrapRef}>
@@ -170,7 +222,41 @@ export default function DocView({ type, name, path = null, content = '' }: DocVi
           <button className="doc-zoom-btn" onClick={() => bump(1)} disabled={fontIdx >= LAST}
             aria-label={t('doc.fontLarger')}>A+</button>
         </div>
+        <div className="doc-info" ref={infoRef}>
+          <button className="doc-zoom-btn doc-zoom-icon" onClick={() => setInfoOpen((open) => !open)}
+            aria-label={t('doc.fileInfo')} aria-expanded={infoOpen} aria-haspopup="dialog">
+            <MoreHorizontalIcon />
+          </button>
+          {infoOpen && (
+            <div className="doc-info-pop" role="dialog" aria-label={t('doc.fileInfo')}>
+              <div className="doc-info-title">{t('doc.fileInfo')}</div>
+              <div className="doc-info-row">
+                <span className="doc-info-key">{t('doc.filePath')}</span>
+                <span className="doc-info-val doc-info-path">{fullPath}</span>
+              </div>
+              <button className="doc-info-copy" onClick={onCopyPath}>
+                <CopyIcon />{copied ? t('common.copied') : t('doc.copyPath')}
+              </button>
+              <div className="doc-info-row">
+                <span className="doc-info-key">{t('doc.fileSize')}</span>
+                <span className="doc-info-val">{formatBytes(size)}</span>
+              </div>
+              <div className="doc-info-row">
+                <span className="doc-info-key">{t('doc.fileModified')}</span>
+                <span className="doc-info-val">{formatStamp(mtimeMs)}</span>
+              </div>
+              <div className="doc-info-row">
+                <span className="doc-info-key">{t('doc.fileCreated')}</span>
+                <span className="doc-info-val">{formatStamp(birthtimeMs)}</span>
+              </div>
+            </div>
+          )}
+        </div>
       </div>
+
+      {speech.failed && (
+        <div className="doc-speak-error" role="status">{t('doc.speakFailed')}</div>
+      )}
 
       {type === 'text' ? (
         <pre className="doc-text" style={{ fontSize: `${FONT_SIZES[fontIdx]}px` }}>{content || ''}</pre>

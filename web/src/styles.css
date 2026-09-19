@@ -2454,6 +2454,25 @@ button.cmd-text { background: none; border: none; text-align: left; }
 .doc-zoom-btn:disabled { opacity: .4; }
 .doc-zoom-icon { padding: 4px 9px; }
 .doc-zoom-icon svg { width: 17px; height: 17px; display: block; }
+/* 更多 — a small floating popover anchored under its button (not a full sheet): file info + copy path.
+   Same mechanics as Dropdown (outside-tap close) so it never becomes a modal for a glance. */
+.doc-info { position: relative; display: flex; }
+.doc-info-pop { position: absolute; top: calc(100% + 8px); right: 0; z-index: var(--z-overlay-nested-content);
+  width: min(84vw, 340px); padding: 12px; border-radius: 12px; background: #26282c;
+  border: 1px solid #3a3c42; box-shadow: 0 14px 36px rgba(0,0,0,.6); transform-origin: top right;
+  animation: dd-pop .12s ease; }
+.doc-info-title { font-size: 12px; color: #8a8f98; margin-bottom: 8px; }
+.doc-info-row { display: flex; gap: 10px; padding: 6px 0; font-size: 13px; }
+.doc-info-key { flex: none; width: 4.6em; color: #8a8f98; }
+.doc-info-val { flex: 1; min-width: 0; color: #e6edf3; text-align: right; }
+.doc-info-path { word-break: break-all; -webkit-user-select: text; user-select: text; }
+.doc-info-copy { display: inline-flex; align-items: center; gap: 6px; width: 100%; margin: 4px 0 8px;
+  padding: 9px 12px; border: 0; border-radius: 8px; background: #34363c; color: #cfe3ff; font-size: 13px;
+  touch-action: manipulation; }
+.doc-info-copy svg { width: 15px; height: 15px; }
+/* Read-aloud could not start (the engine refused) — say so instead of leaving a dead tap. */
+.doc-speak-error { margin: 8px 12px 0; padding: 8px 10px; border-radius: 8px; background: #2a1f22;
+  color: #f0a9a9; font-size: 13px; }
 /* "Back to what is being read" — height:0 sticky anchor keeps it pinned to the bottom of the reading
    area without adding layout height at the end of the document. */
 .doc-follow-anchor { position: sticky; bottom: 0; height: 0; display: flex; justify-content: center;

@@ -40,6 +40,12 @@ describe('readDoc', () => {
     const out = await docs.readDoc(join(home, 'a.md'));
     expect(out).toMatchObject({ name: 'a.md', type: 'markdown', content: '# hello' });
   });
+  it('reports size and creation time for the viewer file-info popover', async () => {
+    const out = await docs.readDoc(join(home, 'a.md'));
+    expect(out.size).toBe(Buffer.byteLength('# hello'));
+    // birthtime is real on this host; when a filesystem lacks it the field is null (never 0/NaN)
+    expect(out.birthtimeMs === null || out.birthtimeMs > 0).toBe(true);
+  });
   it('expands a home-abbreviated document path', async () => {
     const out = await docs.readDoc('~/a.md');
     expect(out).toMatchObject({ name: 'a.md', type: 'markdown', content: '# hello' });

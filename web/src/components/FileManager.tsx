@@ -217,7 +217,9 @@ export default function FileManager({
                   pendingFile={pendingShare ?? null} overlayActive={open}
                   {...(onPendingConsumed ? { onPendingConsumed } : {})} />}
           </div>
-        ) : <DocView type={cur.type} name={cur.name} path={cur.path ?? null} content={typeof cur.content === 'string' ? cur.content : ''} />}
+        ) : <DocView type={cur.type} name={cur.name} path={cur.path ?? null}
+            size={cur.size ?? null} mtimeMs={cur.mtime ?? null} birthtimeMs={cur.birthtimeMs ?? null}
+            content={typeof cur.content === 'string' ? cur.content : ''} />}
       </div>
     </div>
     </OverlayPortal>

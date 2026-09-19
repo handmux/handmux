@@ -43,7 +43,10 @@ export function fileRoutes({ docs, uploadExts, maxUploadBytes }: FileRouteOption
       const out = await docs.readDoc(typeof req.query.path === 'string' ? req.query.path : '', knownMtime);
       if ('error' in out) return res.status(out.status).json({ error: out.error });
       if (out.notModified) return res.json({ name: out.name, type: out.type, mtimeMs: out.mtimeMs, notModified: true });
-      return res.json({ name: out.name, type: out.type, content: out.content, mtimeMs: out.mtimeMs });
+      return res.json({
+        name: out.name, type: out.type, content: out.content, mtimeMs: out.mtimeMs,
+        size: out.size, birthtimeMs: out.birthtimeMs,
+      });
     } catch (e) { return next(e); }
   });
 

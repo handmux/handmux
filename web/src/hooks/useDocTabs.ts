@@ -6,6 +6,9 @@ export interface DocTabMeta {
   name?: string;
   content?: unknown;
   mtime?: number | null;
+  /** File-info fields (viewer's info popover): byte size + creation time. */
+  size?: number;
+  birthtimeMs?: number | null;
 }
 
 export interface OpenDocMeta extends DocTabMeta {
@@ -31,7 +34,7 @@ export const HOME_TAB: DocTab = {
   name: t('doc.home'),
 };
 
-// Undefined content/mtime means "reuse the existing value" (not "clear it").
+// Undefined content/mtime/size/birthtime means "reuse the existing value" (not "clear it").
 const mergeMeta = (tab: DocTab, meta: DocTabMeta): DocTab => {
   const merged: DocTab = {
     ...tab,
@@ -40,10 +43,16 @@ const mergeMeta = (tab: DocTab, meta: DocTabMeta): DocTab => {
   };
   const content = meta.content !== undefined ? meta.content : tab.content;
   const mtime = meta.mtime !== undefined ? meta.mtime : tab.mtime;
+  const size = meta.size !== undefined ? meta.size : tab.size;
+  const birthtimeMs = meta.birthtimeMs !== undefined ? meta.birthtimeMs : tab.birthtimeMs;
   if (content !== undefined) merged.content = content;
   else delete merged.content;
   if (mtime !== undefined) merged.mtime = mtime;
   else delete merged.mtime;
+  if (size !== undefined) merged.size = size;
+  else delete merged.size;
+  if (birthtimeMs !== undefined) merged.birthtimeMs = birthtimeMs;
+  else delete merged.birthtimeMs;
   return merged;
 };
 
@@ -60,6 +69,8 @@ export function openDocState(state: DocTabsState, path: string, meta: OpenDocMet
     name: meta.name,
     ...(meta.content !== undefined ? { content: meta.content } : {}),
     ...(meta.mtime !== undefined ? { mtime: meta.mtime } : {}),
+    ...(meta.size !== undefined ? { size: meta.size } : {}),
+    ...(meta.birthtimeMs !== undefined ? { birthtimeMs: meta.birthtimeMs } : {}),
     path,
   };
   return { tabs: [...state.tabs, tab], active: path };
