@@ -268,3 +268,48 @@ describe('deterministic Agent identity', () => {
       .toEqual({ kind: 'unknown', candidateIds: ['accepted', 'unavailable'] });
   });
 });
+
+// A verifier may hand back the process it proved, which then becomes the lease anchor for an Agent that is
+// not the pane's foreground leaf. That value is adapter-supplied, so it is validated like any other input.
+describe('verifier-named process', () => {
+  const nodePane: LivePane = { ...pane, currentCommand: 'node' };
+
+  const verifier = (verify: NonNullable<AgentProcessIdentity['verify']>): AgentAdapter =>
+    testAdapter('probe', { commands: ['probe'], ambiguousCommands: ['node'], verify });
+
+  it('carries the named process through resolution', async () => {
+    const resolved = {
+      pid: 400, startedAt: 1_000, tty: '/dev/ttys001', commandLine: 'node /opt/bin/probe',
+    };
+    await expect(
+      resolveAgentIdentity(nodePane, [verifier(async () => resolved)], context),
+    ).resolves.toEqual({
+      kind: 'matched',
+      adapter: expect.objectContaining({ id: 'probe' }),
+      process: resolved,
+    });
+  });
+
+  it('keeps the bare-true verdict meaning "the foreground leaf is the Agent"', async () => {
+    await expect(resolveAgentIdentity(nodePane, [verifier(async () => true)], context))
+      .resolves.toEqual({ kind: 'matched', adapter: expect.objectContaining({ id: 'probe' }) });
+  });
+
+  it('refuses a malformed identity instead of anchoring on it', async () => {
+    for (const malformed of [
+      { pid: 0 },
+      { pid: -1 },
+      { pid: 1.5 },
+      { pid: '400' },
+      { pid: 400, startedAt: 'now' },
+      { pid: 400, ppid: -2 },
+      { pid: 400, tty: 42 },
+      {},
+    ]) {
+      await expect(
+        resolveAgentIdentity(nodePane, [verifier(async () => malformed as never)], context),
+        JSON.stringify(malformed),
+      ).resolves.toEqual({ kind: 'none' });
+    }
+  });
+});

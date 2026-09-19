@@ -59,16 +59,25 @@ describe('CodeBuddy launch shapes', () => {
 
 describe('CodeBuddy process verification', () => {
   it('matches from the foreground group even when a transient tool child holds the leaf', async () => {
-    // Live on 2.154.0 the CLI spawns `npm list` / `ruby` update checks in its own foreground group, and the
-    // single-leaf view prefers that non-launcher descendant — so the group is the only way to see CodeBuddy.
+    // Live on 2.154.0 the CLI spawns `npm list` / `ruby` / `brew list` update checks in its own foreground
+    // group, and the single-leaf view prefers that non-launcher descendant — so the group is the only way to
+    // see CodeBuddy, and the row it finds is what the Runtime must anchor the lease on.
     const live = context([
-      { pid: 400, ppid: 90, commandLine: 'node /usr/local/bin/codebuddy --no-session-persistence' },
-      { pid: 401, ppid: 400, commandLine: 'npm list' },
+      {
+        pid: 400, ppid: 90, startedAt: 1_000, tty: '/dev/ttys001',
+        commandLine: 'node /usr/local/bin/codebuddy --no-session-persistence',
+      },
+      { pid: 401, ppid: 400, startedAt: 1_001, tty: '/dev/ttys001', commandLine: 'npm list' },
     ], { pid: 401, commandLine: 'npm list', executable: '/usr/local/bin/node' });
 
-    await expect(verifyCodeBuddyProcess(pane, live)).resolves.toBe(true);
-    await expect(resolveAgentIdentity(pane, BUILTIN_AGENT_ADAPTERS, live))
-      .resolves.toMatchObject({ kind: 'matched', adapter: { id: 'codebuddy' } });
+    await expect(verifyCodeBuddyProcess(pane, live)).resolves.toMatchObject({
+      pid: 400, commandLine: 'node /usr/local/bin/codebuddy --no-session-persistence',
+    });
+
+    const identity = await resolveAgentIdentity(pane, BUILTIN_AGENT_ADAPTERS, live);
+    expect(identity).toMatchObject({ kind: 'matched', adapter: { id: 'codebuddy' } });
+    // The verifier's own process must survive resolution: it is the anchor, not the leaf (pid 401).
+    expect(identity.kind === 'matched' ? identity.process?.pid : null).toBe(400);
   });
 
   it('never claims a plain Node pane, whatever the leaf looks like', async () => {

@@ -15,7 +15,7 @@
 // published launch entry points. We only ever answer "yes" from positive evidence, and we stay inconclusive
 // rather than negative when the group was not actually read.
 import type { AgentAdapter } from '../agent-runtime/adapter.js';
-import type { LivePane, ProcessContext } from '../agent-runtime/adapter.js';
+import type { ForegroundProcessIdentity, LivePane, ProcessContext } from '../agent-runtime/adapter.js';
 
 // The three entries the CodeBuddy CLI installs, plus the package that owns the npm layout.
 const LAUNCH_NAMES = new Set(['codebuddy', 'codebuddy-code', 'cbc']);
@@ -48,7 +48,14 @@ export function isCodeBuddyCommandLine(value: string): boolean {
   return entry.includes(NPM_PACKAGE_MARKER) || /(?:^|\/)(?:\.bin|bin)\//.test(entry);
 }
 
-export async function verifyCodeBuddyProcess(pane: LivePane, context: ProcessContext): Promise<boolean> {
+// Returns the matched row rather than a bare `true`: that row is CodeBuddy's process, and the Runtime needs
+// it as the lease anchor precisely because the pane's foreground leaf is NOT CodeBuddy. A row whose start time
+// could not be resolved is still returned — the Runtime then declines to publish a lease until it can name a
+// process generation, which is the same rule it applies to every other Agent.
+export async function verifyCodeBuddyProcess(
+  pane: LivePane,
+  context: ProcessContext,
+): Promise<boolean | ForegroundProcessIdentity> {
   const group = await context.inspectForegroundGroup?.(pane);
   // A host that cannot supply the group cannot confirm a CodeBuddy pane (the single-leaf view may return a
   // transient tool child), so CodeBuddy goes unidentified there. That is deliberately a plain `false` and not
@@ -56,7 +63,7 @@ export async function verifyCodeBuddyProcess(pane: LivePane, context: ProcessCon
   // `unknown` when any ambiguous candidate is unresolved, which would poison Codex/Pi on those hosts. Every
   // production host builds its ProcessContext from createLocalAgentProcessContext, which does supply the group.
   if (!group) return false;
-  return group.some((entry) => isCodeBuddyCommandLine(entry.commandLine ?? ''));
+  return group.find((entry) => isCodeBuddyCommandLine(entry.commandLine ?? '')) ?? false;
 }
 
 export const codebuddy: AgentAdapter = {

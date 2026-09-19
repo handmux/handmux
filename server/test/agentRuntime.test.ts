@@ -1430,4 +1430,59 @@ describe('per-pane process evidence', () => {
     // An inconclusive probe must omit the pane (preserving the last confirmed owner), never revoke it.
     await expect(runtime.identifyPanes([pane('node')])).resolves.toEqual({});
   });
+
+  // CodeBuddy's shape: the Agent is not the foreground leaf, so a verifier hands back the process it proved.
+  // Everything downstream must then track that process, not the leaf that keeps moving under it.
+  it('anchors the run lease on the process a verifier names instead of the leaf', async () => {
+    const agentPane: LivePane = { ...pane('node') };
+    delete agentPane.foregroundPid;
+    const panes = new TestPanes([agentPane]);
+    const inspectForeground = vi.fn(async () => ({
+      pid: 401, startedAt: 1_001, tty: '/dev/ttys001', commandLine: 'npm list',
+    }));
+    const inspectForegroundGroup = vi.fn(async () => [
+      {
+        pid: 400, ppid: 90, startedAt: 1_000, tty: '/dev/ttys001',
+        commandLine: 'node /usr/local/bin/codebuddy',
+      },
+      { pid: 401, ppid: 400, startedAt: 1_001, tty: '/dev/ttys001', commandLine: 'npm list' },
+    ]);
+    let run = 0;
+    const runtime = new AgentRuntime({
+      adapters: [{
+        ...adapter('codebuddy'),
+        process: {
+          commands: ['codebuddy'], ambiguousCommands: ['node'], runtimeAttach: true,
+          verify: async (current, context) => {
+            const group = await context.inspectForegroundGroup?.(current) ?? [];
+            return group.find((entry) => (entry.commandLine ?? '').endsWith('/codebuddy')) ?? false;
+          },
+        },
+      }],
+      panes,
+      process: { inspectForeground, inspectForegroundGroup },
+      stateDirectory: directory(),
+      authToken: AUTH_TOKEN,
+      newRunId: () => `anchor-run-${++run}`,
+    });
+    runtimes.push(runtime);
+    await runtime.start();
+
+    expect(runtime.activeRuns()).toEqual([
+      { agentId: 'codebuddy', paneId: '%1', runId: 'anchor-run-1' },
+    ]);
+
+    // The leaf is a different process on every probe; the named anchor is stable, so the lease must not churn.
+    const lease = runtime.runs.currentForPane('%1')!;
+    panes.emit([agentPane]);
+    await vi.waitFor(() => expect(inspectForegroundGroup.mock.calls.length).toBeGreaterThan(1));
+    expect(runtime.activeRuns()[0]?.runId).toBe('anchor-run-1');
+    expect(run).toBe(1);
+    expect(lease.signal.aborted).toBe(false);
+
+    // The Agent really exiting still revokes: the pane falls back to a shell and nothing claims it.
+    panes.emit([{ ...agentPane, currentCommand: 'zsh' }]);
+    await vi.waitFor(() => expect(runtime.activeRuns()).toEqual([]));
+    expect(lease.signal.aborted).toBe(true);
+  });
 });

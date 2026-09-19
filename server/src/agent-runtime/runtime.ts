@@ -1152,7 +1152,9 @@ export class AgentRuntime {
         });
         if (identity.kind === 'unknown') return 'unknown';
         if (identity.kind !== 'matched' || identity.adapter.id !== adapter.id) return 'invalid';
-        const foreground = await context.inspectForeground(pane);
+        // An adapter that names its own process anchors the lease on it. The foreground leaf is only the
+        // default, for the Agents that are themselves the pane's foreground process.
+        const foreground = identity.process ?? await context.inspectForeground(pane);
         if (foreground === null) return 'unknown';
         // A partial best-effort probe cannot prove that the process generation changed. Preserve the
         // complete lease and retry only when every field that is present still agrees.
@@ -1188,7 +1190,8 @@ export class AgentRuntime {
       try {
         // Exact command matches skip Adapter verification, so bound this probe at its own use site.
         // A timed-out result must not attach later or block other panes and subsequent snapshots.
-        foreground = await lifecycleWithin(
+        // A verifier-named process was already resolved inside the verification budget.
+        foreground = identity.process ?? await lifecycleWithin(
           context.inspectForeground(pane), this.#verifyTimeoutMs, 'Agent process discovery',
         );
       } catch { continue; }

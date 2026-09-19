@@ -144,6 +144,7 @@ describe('Tmux Agent Runtime context', () => {
   // case the single-leaf view cannot serve: it deliberately prefers the non-launcher descendant, so the leaf
   // is a transient tool child, not the Agent. The group is that adapter's only way to see its own process.
   it('reports the whole foreground group for an Agent running inside an ambiguous launcher', async () => {
+    const startedAt = Date.parse('Tue Aug 12 04:00:00 2026');
     const run = vi.fn(async (command: string, args: string[]) => {
       if (command === 'ps') {
         if (args[0] === '-p') return 'Tue Aug 12 04:00:00 2026\n';
@@ -164,12 +165,13 @@ describe('Tmux Agent Runtime context', () => {
     await expect(context.inspectForeground(pane)).resolves.toMatchObject({
       pid: 401, commandLine: 'npm list',
     });
+    // Every row carries a process generation, because any of them can become a lease anchor.
     await expect(context.inspectForegroundGroup!(pane)).resolves.toEqual([
       {
-        pid: 400, ppid: 90, tty: '/dev/ttys001',
+        pid: 400, ppid: 90, tty: '/dev/ttys001', startedAt,
         commandLine: 'node /usr/local/bin/codebuddy --no-session-persistence',
       },
-      { pid: 401, ppid: 400, tty: '/dev/ttys001', commandLine: 'npm list' },
+      { pid: 401, ppid: 400, tty: '/dev/ttys001', startedAt, commandLine: 'npm list' },
     ]);
   });
 

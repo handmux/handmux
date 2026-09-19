@@ -219,11 +219,18 @@ export function createLocalAgentProcessContext({
     },
     async inspectForegroundGroup(pane: LivePane): Promise<readonly ForegroundProcessIdentity[]> {
       const { rows } = await foregroundGroup(pane);
-      return rows.map((row) => ({
-        pid: row.pid,
-        ppid: row.ppid,
-        tty: pane.tty ?? `/dev/${row.tty}`,
-        ...(row.command ? { commandLine: row.command } : {}),
+      // Start time is resolved per row: a returned row can become a lease anchor, and a pid without a
+      // process generation is not an identity. Executable is deliberately NOT resolved — one lsof per row
+      // is expensive, and the adapters that need the group match on the command line.
+      return Promise.all(rows.map(async (row) => {
+        const startedAt = await processStartedAt(run, row.pid);
+        return {
+          pid: row.pid,
+          ppid: row.ppid,
+          tty: pane.tty ?? `/dev/${row.tty}`,
+          ...(startedAt === undefined ? {} : { startedAt }),
+          ...(row.command ? { commandLine: row.command } : {}),
+        };
       }));
     },
   };

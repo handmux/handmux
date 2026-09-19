@@ -92,7 +92,12 @@ export interface AgentProcessIdentity {
   // predicate may only nominate a command for the same executable-backed verification used below;
   // it can never identify an Agent by itself.
   ambiguousCommand?(command: string): boolean;
-  verify?(pane: LivePane, context: ProcessContext): Promise<boolean>;
+  // `true` — verified; the pane's foreground leaf is the Agent, as for every Agent that appears as its own
+  // process (Claude, Codex, Pi). An identity — verified, AND this is the Agent's process, which then becomes
+  // the anchor for attachment and every later recheck. Return the identity only when the Agent is NOT the
+  // foreground leaf (e.g. it runs inside an ambiguous launcher and never spawns a native child binary); it
+  // must be the very process the verifier just proved, because the lease is tied to exactly that pid.
+  verify?(pane: LivePane, context: ProcessContext): Promise<boolean | ForegroundProcessIdentity>;
 }
 
 export interface VersionedCapabilityAdapter {
@@ -276,32 +281,67 @@ export function validateAgentAdapters(values: readonly unknown[]): ValidatedAgen
 }
 
 export type AgentIdentityResolution =
-  | { kind: 'matched'; adapter: AgentAdapter }
+  | { kind: 'matched'; adapter: AgentAdapter; process?: ForegroundProcessIdentity }
   | { kind: 'none' }
   | { kind: 'unknown'; candidateIds: string[] }
   | { kind: 'conflict'; candidateIds: string[] };
 
-type VerificationResult = 'verified' | 'rejected' | 'unknown';
+interface VerificationOutcome {
+  verdict: 'verified' | 'rejected' | 'unknown';
+  process?: ForegroundProcessIdentity;
+}
+
+// A verifier may hand back its own process instead of a bare `true`. Only the evidence fields the anchor is
+// built from are accepted, and a pid that cannot name a process generation (non-integer, non-positive) is
+// rejected outright rather than trusted — a malformed identity must not become a lease anchor.
+function resolvedProcess(value: unknown): ForegroundProcessIdentity | null {
+  if (!isRecord(value)) return null;
+  const { pid, ppid, startedAt, tty, executable, commandLine, argv } = value;
+  if (!Number.isSafeInteger(pid) || (pid as number) <= 0) return null;
+  if (ppid !== undefined && (!Number.isSafeInteger(ppid) || (ppid as number) < 0)) return null;
+  if (startedAt !== undefined
+    && (typeof startedAt !== 'number' || !Number.isFinite(startedAt))) return null;
+  for (const field of [tty, executable, commandLine]) {
+    if (field !== undefined && typeof field !== 'string') return null;
+  }
+  if (argv !== undefined && (!Array.isArray(argv) || argv.some((item) => typeof item !== 'string'))) {
+    return null;
+  }
+  return {
+    pid: pid as number,
+    ...(ppid === undefined ? {} : { ppid: ppid as number }),
+    ...(startedAt === undefined ? {} : { startedAt: startedAt as number }),
+    ...(tty === undefined ? {} : { tty: tty as string }),
+    ...(executable === undefined ? {} : { executable: executable as string }),
+    ...(commandLine === undefined ? {} : { commandLine: commandLine as string }),
+    ...(argv === undefined ? {} : { argv: argv as string[] }),
+  };
+}
 
 async function verifiedWithin(
   adapter: AgentAdapter,
   pane: LivePane,
   context: ProcessContext,
   timeoutMs: number,
-): Promise<VerificationResult> {
-  if (!adapter.process.verify) return 'rejected';
+): Promise<VerificationOutcome> {
+  if (!adapter.process.verify) return { verdict: 'rejected' };
   let timer: NodeJS.Timeout | undefined;
   try {
     const verification = Promise.resolve()
       .then(() => adapter.process.verify!(pane, context))
       .then(
-        (value): VerificationResult => value ? 'verified' : 'rejected',
-        (): VerificationResult => 'unknown',
+        (value): VerificationOutcome => {
+          if (value === true) return { verdict: 'verified' };
+          if (value === false) return { verdict: 'rejected' };
+          const process = resolvedProcess(value);
+          return process ? { verdict: 'verified', process } : { verdict: 'rejected' };
+        },
+        (): VerificationOutcome => ({ verdict: 'unknown' }),
       );
     return await Promise.race([
       verification,
-      new Promise<VerificationResult>((resolve) => {
-        timer = setTimeout(() => resolve('unknown'), timeoutMs);
+      new Promise<VerificationOutcome>((resolve) => {
+        timer = setTimeout(() => resolve({ verdict: 'unknown' }), timeoutMs);
       }),
     ]);
   } finally {
@@ -342,21 +382,28 @@ export async function resolveAgentIdentity(
     adapter,
     result: await verifiedWithin(adapter, pane, context, Math.max(1, verifyTimeoutMs)),
   })));
-  const matched = verdicts.filter((verdict) => verdict.result === 'verified')
-    .map((verdict) => verdict.adapter);
+  const matched = verdicts.filter((verdict) => verdict.result.verdict === 'verified');
   if (matched.length > 1) {
-    return { kind: 'conflict', candidateIds: matched.map((adapter) => adapter.id).sort() };
+    return { kind: 'conflict', candidateIds: matched.map((verdict) => verdict.adapter.id).sort() };
   }
   const unknown = [
     ...predicateFailures,
-    ...verdicts.filter((verdict) => verdict.result === 'unknown').map((verdict) => verdict.adapter.id),
+    ...verdicts.filter((verdict) => verdict.result.verdict === 'unknown')
+      .map((verdict) => verdict.adapter.id),
   ];
   if (unknown.length) {
     return {
       kind: 'unknown',
-      candidateIds: [...new Set([...matched.map((adapter) => adapter.id), ...unknown])].sort(),
+      candidateIds: [...new Set([...matched.map((verdict) => verdict.adapter.id), ...unknown])].sort(),
     };
   }
-  if (matched.length === 1) return { kind: 'matched', adapter: matched[0]! };
+  const winner = matched[0];
+  if (winner) {
+    return {
+      kind: 'matched',
+      adapter: winner.adapter,
+      ...(winner.result.process === undefined ? {} : { process: winner.result.process }),
+    };
+  }
   return { kind: 'none' };
 }
