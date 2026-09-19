@@ -23,7 +23,7 @@ describe('AgentMark', () => {
     // The prompt glyph the CLI ships, with the circle it draws around it dropped: geometry and stroke
     // weight are the CLI's own, and the stroke is currentColor so the badge follows the tab's text.
     const codexSvg = codex?.querySelector('svg');
-    expect(codexSvg?.getAttribute('viewBox')).toBe('8.420 11.048 15.178 9.991');
+    expect(codexSvg?.getAttribute('viewBox')).toBe('7.661 10.548 16.696 10.990');
     const glyph = codexSvg?.querySelector('path');
     expect(glyph?.getAttribute('d')).toMatch(/^M22\.356 19\.797H17\.17/);
     expect(glyph?.getAttribute('stroke')).toBe('currentColor');
@@ -52,15 +52,15 @@ describe('AgentMark', () => {
     expect(Math.max(...piCoordinates)).toBe(23);
   });
 
-  it('bundles the CodeBuddy brand logo on the shared 24×24 canvas', () => {
+  it('bundles the CodeBuddy brand logo on its own artwork box', () => {
     const { container } = render(<AgentMark agent="codebuddy" />);
     const mark = container.querySelector('[data-agent-icon="codebuddy"]');
     expect(mark).not.toBeNull();
     expect(container.querySelector('[data-agent-icon="generic"]')).toBeNull();
-    // The mark is the block-art robot the CLI prints on startup, on its own artwork box (40:28) so a badge
-    // sized by height shows it at full height.
+    // The mark is the block-art robot the CLI prints on startup, on its own box (10% padded so it reads the
+    // same weight as the other marks) so a badge sized by height shows it at full height.
     const svg = mark?.querySelector('svg');
-    expect(svg?.getAttribute('viewBox')).toBe('0 0 40 28');
+    expect(svg?.getAttribute('viewBox')).toBe('-2.000 -1.400 44.000 30.800');
     expect(svg?.getAttribute('aria-hidden')).toBe('true');
     // One path in the colour the CLI emits for the banner, and no defs ids: these logos are inlined into
     // one shared document, and neighbouring cells must not show a seam.
