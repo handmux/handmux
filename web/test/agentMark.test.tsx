@@ -23,7 +23,7 @@ describe('AgentMark', () => {
     // The prompt glyph the CLI ships, with the circle it draws around it dropped: geometry and stroke
     // weight are the CLI's own, and the stroke is currentColor so the badge follows the tab's text.
     const codexSvg = codex?.querySelector('svg');
-    expect(codexSvg?.getAttribute('viewBox')).toBe('7.661 10.548 16.696 10.990');
+    expect(codexSvg?.getAttribute('viewBox')).toBe('6.826 9.998 18.366 12.089');
     const glyph = codexSvg?.querySelector('path');
     expect(glyph?.getAttribute('d')).toMatch(/^M22\.356 19\.797H17\.17/);
     expect(glyph?.getAttribute('stroke')).toBe('currentColor');
@@ -38,7 +38,7 @@ describe('AgentMark', () => {
     // A square mark keeps the full 24×24 canvas, so shared .agent-mark sizing stays visually consistent in
     // tabs, the pane map, and Usage without per-location Pi overrides. (The two robots declare their own
     // wider boxes; .agent-mark sizes every mark by height.)
-    expect(svg?.getAttribute('viewBox')).toBe('0 0 24 24');
+    expect(svg?.getAttribute('viewBox')).toBe('-1.200 -1.200 26.400 26.400');
     expect(svg?.querySelectorAll('path')).toHaveLength(2);
     expect(Array.from(svg?.querySelectorAll('path') ?? []).map((path) => path.getAttribute('fill')))
       .toEqual(['currentColor', 'currentColor']);
