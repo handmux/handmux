@@ -2505,10 +2505,14 @@ button.cmd-text { background: none; border: none; text-align: left; }
 .doc-find-input::-webkit-search-cancel-button { display: none; }
 .doc-find-count { flex: none; font-size: 12px; color: #8a93a0; font-variant-numeric: tabular-nums;
   white-space: nowrap; }
-/* Match highlighting: the current one is the loud one, the rest stay readable underneath. */
+/* Match highlighting: the current one is the loud one, the rest stay readable underneath.
+   LAYOUT-NEUTRAL on purpose — background/border-radius/box-shadow only. Any padding or border here
+   adds inline width, and pre-wrapped code lines sit exactly at the container edge, so 1-2px is enough
+   to push the highlighted run onto the next line (reported from a real device). */
 .doc-md mark.doc-find, .doc-text mark.doc-find { background: rgba(var(--blue-rgb),0.28); color: inherit;
-  border-radius: 3px; padding: 0 1px; }
-.doc-md mark.doc-find.is-current, .doc-text mark.doc-find.is-current { background: #f0b132; color: #1b1d22; }
+  border-radius: 2px; }
+.doc-md mark.doc-find.is-current, .doc-text mark.doc-find.is-current { background: #f0b132; color: #1b1d22;
+  box-shadow: 0 0 0 1px rgba(240,177,50,.55); }
 /* "Back to what is being read" — height:0 sticky anchor keeps it pinned to the bottom of the reading
    area without adding layout height at the end of the document. */
 .doc-follow-anchor { position: sticky; bottom: 0; height: 0; display: flex; justify-content: center;
