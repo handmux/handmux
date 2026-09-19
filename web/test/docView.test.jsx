@@ -134,6 +134,55 @@ describe('DocView', () => {
   });
 });
 
+describe('DocView 目录 drawer', () => {
+  beforeEach(() => { localStorage.clear(); });
+  afterEach(() => { delete window.speechSynthesis; delete window.SpeechSynthesisUtterance; });
+
+  const DOC = '# 一级\n\n正文。\n\n## 二级\n\n更多。\n\n### 三级\n\n结束。';
+
+  it('lists the headings, indented by level, and is hidden when the doc has none', async () => {
+    await render({ type: 'markdown', name: 'a.md', content: DOC });
+    const button = container.querySelector('[aria-label="目录"]');
+    expect(button).not.toBeNull();
+    expect(button.classList.contains('doc-zoom-icon')).toBe(true); // a small icon control
+    await click(button);
+    const items = [...container.querySelectorAll('.doc-toc-item')];
+    expect(items.map((item) => item.textContent)).toEqual(['一级', '二级', '三级']);
+    expect(items[1].style.paddingLeft).toBe('26px'); // level 2 → 12 + 14
+    expect(items[2].style.paddingLeft).toBe('40px'); // level 3 → 12 + 28
+  });
+
+  it('has no 目录 button for a document without headings', async () => {
+    await render({ type: 'markdown', name: 'a.md', content: '只有正文。' });
+    expect(container.querySelector('[aria-label="目录"]')).toBeNull();
+    await render({ type: 'text', name: 'a.log', content: 'line' });
+    expect(container.querySelector('[aria-label="目录"]')).toBeNull();
+  });
+
+  it('jumps to the heading and closes the drawer', async () => {
+    const scrolls = [];
+    const original = Element.prototype.scrollIntoView;
+    Element.prototype.scrollIntoView = function scrollIntoView(arg) { scrolls.push({ id: this.id, arg }); };
+    try {
+      await render({ type: 'markdown', name: 'a.md', content: DOC });
+      await click(container.querySelector('[aria-label="目录"]'));
+      await click([...container.querySelectorAll('.doc-toc-item')][2]);
+      expect(scrolls.at(-1)?.id).toBe('doc-h-2');
+      expect(container.querySelector('.doc-toc')).toBeNull(); // closed after jumping
+    } finally {
+      Element.prototype.scrollIntoView = original; // leave the shared stub as we found it
+    }
+  });
+
+  it('closes on the backdrop', async () => {
+    await render({ type: 'markdown', name: 'a.md', content: DOC });
+    await click(container.querySelector('[aria-label="目录"]'));
+    expect(container.querySelector('.doc-toc')).not.toBeNull();
+    await click(container.querySelector('.doc-toc-backdrop'));
+    expect(container.querySelector('.doc-toc')).toBeNull();
+  });
+});
+
 describe('DocView read-aloud toolbar', () => {
   beforeEach(() => { localStorage.clear(); });
   afterEach(() => { delete window.speechSynthesis; delete window.SpeechSynthesisUtterance; });

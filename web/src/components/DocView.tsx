@@ -8,8 +8,10 @@ import { useMarkdownImages } from '../hooks/useMarkdownImages.js';
 import { useBackButton } from '../hooks/useBackButton.js';
 import { copyText } from '../clipboard.js';
 import { renderMarkdown } from '../markdown.js';
-import { CheckIcon, CopyIcon, MoreHorizontalIcon, PauseIcon, PlayIcon, StopIcon } from './icons.jsx';
+import { CheckIcon, CopyIcon, MoreHorizontalIcon, PauseIcon, PlayIcon, StopIcon, TocIcon } from './icons.jsx';
 import ImageViewer from './ImageViewer.jsx';
+import DocToc from './DocToc.jsx';
+import type { DocTocItem } from './DocToc.jsx';
 import { t, getLangCode } from '../i18n';
 import type { MouseEvent as ReactMouseEvent } from 'react';
 
@@ -81,6 +83,8 @@ export default function DocView({
   const [fontIdx, setFontIdx] = useState<number>(readFontIndex);
   const [followPaused, setFollowPaused] = useState(false);
   const [infoOpen, setInfoOpen] = useState(false);
+  const [tocOpen, setTocOpen] = useState(false);
+  const [toc, setToc] = useState<DocTocItem[]>([]);
   const [copied, setCopied] = useState(false);
   const [readNotice, setReadNotice] = useState<string | null>(null);
   const wrapRef = useRef<HTMLDivElement | null>(null);
@@ -101,6 +105,25 @@ export default function DocView({
   const [imageView, closeImageView] = useMarkdownImages(mdRef, html, type === 'markdown');
   useBackButton(!!imageView, closeImageView);
   useBackButton(infoOpen, () => setInfoOpen(false));
+  useBackButton(tocOpen, () => setTocOpen(false));
+
+  // Outline for the 目录 drawer. Heading ids are assigned here (the rendered HTML carries none) so a
+  // tap can scroll to the exact node; `scroll-margin-top` on headings keeps them clear of the pinned
+  // toolbar. Runs whenever the document content changes.
+  useEffect(() => {
+    const root = mdRef.current;
+    if (!root) { setToc([]); return; }
+    const headings = Array.from(root.querySelectorAll<HTMLElement>('h1, h2, h3, h4, h5, h6'));
+    const items: DocTocItem[] = [];
+    headings.forEach((heading, index) => {
+      const text = (heading.textContent || '').trim();
+      if (!text) return;
+      const id = `doc-h-${index}`;
+      heading.id = id;
+      items.push({ id, level: Number(heading.tagName.slice(1)) || 1, text });
+    });
+    setToc(items);
+  }, [html]);
 
   // The 更多 popover closes on a tap anywhere outside it (capture phase, so it beats other handlers —
   // same mechanics as Dropdown), on Back, or on the ✕.
@@ -212,6 +235,12 @@ export default function DocView({
   return (
     <div className="doc-md-wrap" ref={wrapRef}>
       <div className="doc-toolbar">
+        {toc.length > 0 && (
+          <button className="doc-zoom-btn doc-zoom-icon" onClick={() => setTocOpen(true)}
+            aria-label={t('doc.toc')} aria-haspopup="dialog">
+            <TocIcon />
+          </button>
+        )}
         {canRead && (
           <div className="doc-player">
             <button className="doc-zoom-btn doc-zoom-icon" onClick={onPlayToggle}
@@ -292,6 +321,14 @@ export default function DocView({
           <ImageViewer url={imageView.url} name={imageView.name} />
         </div>
       )}
+
+      <DocToc open={tocOpen} items={toc} onClose={() => setTocOpen(false)}
+        onSelect={(id) => {
+          const heading = document.getElementById(id);
+          if (!heading) return;
+          scrollGuardUntil.current = Date.now() + FOLLOW_SCROLL_GUARD_MS; // not a reader scroll
+          heading.scrollIntoView({ block: 'start', behavior: 'smooth' });
+        }} />
     </div>
   );
 }

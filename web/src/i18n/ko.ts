@@ -520,6 +520,7 @@ export default {
   'doc.backToReading': '읽는 위치로 돌아가기',
   'doc.speakFailed': '읽기를 시작하지 못했습니다. 재생을 다시 눌러 주세요.',
   'doc.nothingToRead': '이 문서에는 읽을 본문이 없습니다.',
+  'doc.toc': '목차',
   'doc.fileInfo': '파일 정보',
   'doc.filePath': '경로',
   'doc.fileSize': '크기',

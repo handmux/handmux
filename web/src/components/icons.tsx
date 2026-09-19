@@ -234,6 +234,17 @@ export function StopIcon() {
   );
 }
 
+// ☰ 目录(缩进的三条线:最上一条最长,读作"大纲/层级")。朗读工具栏最左侧的目录入口。
+export function TocIcon() {
+  return (
+    <svg {...base}>
+      <line x1="3" y1="6" x2="21" y2="6" />
+      <line x1="7" y1="12" x2="21" y2="12" />
+      <line x1="11" y1="18" x2="21" y2="18" />
+    </svg>
+  );
+}
+
 // 🎙 麦克风(微信风:圆头话筒 + 弧形托 + 立杆)。描边图标,尺寸由 CSS 控制。
 export function MicIcon() {
   return (

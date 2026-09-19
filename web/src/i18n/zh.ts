@@ -1222,6 +1222,7 @@ export default {
   'doc.backToReading': '回到朗读位置',
   'doc.speakFailed': '朗读没能启动，请再点一次播放',
   'doc.nothingToRead': '这篇文档里没有可朗读的正文',
+  'doc.toc': '目录',
   'doc.fileInfo': '文件信息',
   'doc.filePath': '路径',
   'doc.fileSize': '大小',

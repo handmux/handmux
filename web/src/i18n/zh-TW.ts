@@ -532,6 +532,7 @@ export default {
   'doc.backToReading': '回到朗讀位置',
   'doc.speakFailed': '朗讀沒能啟動，請再點一次播放',
   'doc.nothingToRead': '這篇文件裡沒有可朗讀的正文',
+  'doc.toc': '目錄',
   'doc.fileInfo': '檔案資訊',
   'doc.filePath': '路徑',
   'doc.fileSize': '大小',

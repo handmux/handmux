@@ -520,6 +520,7 @@ export default {
   'doc.backToReading': '読み上げ位置に戻る',
   'doc.speakFailed': '読み上げを開始できませんでした。もう一度再生をタップしてください。',
   'doc.nothingToRead': 'この文書には読み上げられる本文がありません。',
+  'doc.toc': '目次',
   'doc.fileInfo': 'ファイル情報',
   'doc.filePath': 'パス',
   'doc.fileSize': 'サイズ',

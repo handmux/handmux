@@ -2478,6 +2478,24 @@ button.cmd-text { background: none; border: none; text-align: left; }
 /* Read-aloud could not start (the engine refused) — say so instead of leaving a dead tap. */
 .doc-speak-error { margin: 8px 12px 0; padding: 8px 10px; border-radius: 8px; background: #2a1f22;
   color: #f0a9a9; font-size: 13px; }
+/* 目录 — the outline slides in from the LEFT. Lives in the file sheet's own stacking context (a
+   portal would land under the sheet at --z-overlay-workspace: 50), so a small z-index is enough. */
+.doc-toc-backdrop { position: fixed; inset: 0; z-index: 4; background: rgba(0,0,0,.45); }
+.doc-toc { position: fixed; top: 0; left: 0; z-index: 5; width: 78%; max-width: 320px; height: 100%;
+  display: flex; flex-direction: column; overflow: hidden; background: #171b21;
+  border-right: 1px solid #1d2630; padding: 12px 8px calc(12px + env(safe-area-inset-bottom, 0px));
+  animation: doc-toc-in .18s ease; }
+@keyframes doc-toc-in { from { transform: translateX(-100%); } to { transform: none; } }
+.doc-toc-head { display: flex; align-items: center; gap: 8px; padding: 0 4px 8px; }
+.doc-toc-title { flex: 1; font-size: 12px; color: #8a8f98; letter-spacing: .5px; }
+.doc-toc-close { flex: none; display: inline-flex; align-items: center; justify-content: center;
+  min-width: 40px; min-height: 44px; background: none; border: 0; color: #8a93a0; font-size: 15px;
+  touch-action: manipulation; }
+.doc-toc-list { flex: 1; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+.doc-toc-item { display: block; width: 100%; padding: 10px 12px; background: none; border: 0;
+  border-radius: 8px; color: #dfe6ee; font-size: 14px; line-height: 1.35; text-align: left;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; touch-action: manipulation; }
+.doc-toc-item:active { background: rgba(255,255,255,.08); }
 /* "Back to what is being read" — height:0 sticky anchor keeps it pinned to the bottom of the reading
    area without adding layout height at the end of the document. */
 .doc-follow-anchor { position: sticky; bottom: 0; height: 0; display: flex; justify-content: center;
@@ -2494,6 +2512,8 @@ button.cmd-text { background: none; border: none; text-align: left; }
 .doc-md { padding: 16px; color: #e6edf3; line-height: 1.65; word-wrap: break-word;
   max-width: 78ch; margin: 0 auto; }  /* wide screens: keep prose at a readable measure */
 .doc-md h1, .doc-md h2, .doc-md h3 { border-bottom: 1px solid #1d2630; padding-bottom: 4px; }
+/* Jumping from the outline must not land the heading UNDER the pinned toolbar. */
+.doc-md h1, .doc-md h2, .doc-md h3, .doc-md h4, .doc-md h5, .doc-md h6 { scroll-margin-top: 60px; }
 .doc-md h1 { font-size: 1.7em; margin: 0 0 .6em; }
 .doc-md h2 { font-size: 1.35em; margin: 1.6em 0 .5em; }
 .doc-md h3 { font-size: 1.15em; margin: 1.4em 0 .4em; }
