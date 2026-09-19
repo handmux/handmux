@@ -243,23 +243,71 @@ describe('FileBrowser', () => {
     expect(rowFor('stale.md').querySelector('.browse-entry-size').textContent).toBe('12 B');
   });
 
-  it('toggles between name order and newest-first from the sort chip', async () => {
+  const sortTrigger = () => container.querySelector('.browse-sort .dd-trigger');
+  const pickSort = async (label) => {
+    await click(sortTrigger());
+    await click([...container.querySelectorAll('.dd-option')].find((b) => b.textContent.includes(label)));
+  };
+
+  it('offers the sort modes in a dropdown, marks the active one, and applies the pick', async () => {
     await render({ path: null });
     await settle();
-    expect(rowNames()).toEqual(['docs', 'data.bin', 'photo.gif', 'readme.md', 'report.md']);
-    const chip = container.querySelector('.browse-chip-sort');
-    expect(chip.textContent).toContain('名称排序');
-    await click(chip);
-    // Directories stay first (navigation stability); files go newest-first.
-    expect(rowNames()).toEqual(['docs', 'photo.gif', 'data.bin', 'report.md', 'readme.md']);
-    expect(chip.textContent).toContain('修改时间');
-    expect(localStorage.getItem('tw_browse_sort')).toBe('modified');
+    expect(sortTrigger().textContent).toContain('默认');
+    expect(sortTrigger().getAttribute('aria-expanded')).toBe('false');
+    expect(container.querySelector('.dd-menu')).toBeNull(); // nothing until it is opened
+    await click(sortTrigger());
+    expect(sortTrigger().getAttribute('aria-expanded')).toBe('true');
+    expect([...container.querySelectorAll('.dd-option-label')].map((b) => b.textContent))
+      .toEqual(['默认', '名称 ↑', '名称 ↓', '修改时间 ↓', '修改时间 ↑', '大小 ↓', '大小 ↑']);
+    // the active mode carries the check mark, and only it
+    expect([...container.querySelectorAll('.dd-option.is-selected')].map((b) => b.textContent.trim()))
+      .toEqual(['默认✓']);
+    // a pick applies without a second tap and closes the menu
+    await click([...container.querySelectorAll('.dd-option')].find((b) => b.textContent.includes('名称 ↓')));
+    expect(container.querySelector('.dd-menu')).toBeNull();
+    expect(sortTrigger().textContent).toContain('名称 ↓');
   });
 
-  it('keeps both sort labels the same length, so the chip holds its width when tapped', () => {
-    // 名称排序 / 修改时间 — four characters each; a two-character "名称" made the control jump.
-    expect(zh['filebrowser.sortName'].length).toBe(4);
-    expect(zh['filebrowser.sortModified'].length).toBe(4);
+  it('closes the sort dropdown when a tap lands outside it', async () => {
+    await render({ path: null });
+    await settle();
+    await click(sortTrigger());
+    expect(container.querySelector('.dd-menu')).not.toBeNull();
+    await act(async () => {
+      document.body.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true }));
+    });
+    expect(container.querySelector('.dd-menu')).toBeNull();
+  });
+
+  it.each([
+    ['名称 ↑', ['docs', 'data.bin', 'photo.gif', 'readme.md', 'report.md']],
+    ['名称 ↓', ['docs', 'report.md', 'readme.md', 'photo.gif', 'data.bin']],
+    ['修改时间 ↓', ['docs', 'photo.gif', 'data.bin', 'report.md', 'readme.md']],
+    ['修改时间 ↑', ['docs', 'readme.md', 'report.md', 'data.bin', 'photo.gif']],
+    ['大小 ↓', ['docs', 'data.bin', 'photo.gif', 'readme.md', 'report.md']],
+    ['大小 ↑', ['docs', 'report.md', 'readme.md', 'photo.gif', 'data.bin']],
+  ])('%s orders the rows, with directories still first', async (label, expected) => {
+    await render({ path: null });
+    await settle();
+    await pickSort(label);
+    expect(rowNames()).toEqual(expected);
+    // the trigger reports the mode and it persists for the next folder
+    expect(sortTrigger().textContent).toContain(label);
+    expect(localStorage.getItem('tw_browse_sort')).toBe(
+      { '名称 ↑': 'name-asc', '名称 ↓': 'name-desc', '修改时间 ↓': 'mtime-desc', '修改时间 ↑': 'mtime-asc', '大小 ↓': 'size-desc', '大小 ↑': 'size-asc' }[label],
+    );
+  });
+
+  it('maps the sort value written by the earlier two-state control', async () => {
+    localStorage.setItem('tw_browse_sort', 'modified'); // what the old chip persisted
+    await render({ path: null });
+    await settle();
+    expect(sortTrigger().textContent).toContain('修改时间 ↓');
+  });
+
+  it('names the time modes 修改时间 in full, never an abbreviation', () => {
+    expect(zh['filebrowser.sortTimeDesc']).toBe('修改时间 ↓');
+    expect(zh['filebrowser.sortTimeAsc']).toBe('修改时间 ↑');
   });
 
   it('lists the folder as it is, and the 收起隐藏项 switch tucks the dotfiles away', async () => {

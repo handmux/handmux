@@ -116,9 +116,20 @@ export const setLastProject = (id: string): void => {
 // File browser view preferences, global rather than per-directory: a user who wants "newest first"
 // or "keep the dotfiles tucked away" wants it in every folder, and a per-dir map would silently reset
 // on each navigation.
-export type BrowserSort = 'name' | 'modified';
-export const getBrowserSort = (): BrowserSort => (localStorage.getItem(BROWSER_SORT_KEY) === 'modified' ? 'modified' : 'name');
-export const setBrowserSort = (sort: BrowserSort): void => { localStorage.setItem(BROWSER_SORT_KEY, sort); };
+//
+// `default` means what the listing API returned, untouched — it read the same as `name-asc` while the
+// server orders by name, but it is a different intent ("don't rearrange anything") and the two only
+// converge by coincidence. The two pre-v0.30.1 values are mapped so an existing choice survives.
+export type SortMode = 'default' | 'name-asc' | 'name-desc' | 'mtime-desc' | 'mtime-asc' | 'size-desc' | 'size-asc';
+const SORT_MODES: readonly SortMode[] = ['default', 'name-asc', 'name-desc', 'mtime-desc', 'mtime-asc', 'size-desc', 'size-asc'];
+const LEGACY_SORT: Record<string, SortMode> = { name: 'name-asc', modified: 'mtime-desc' };
+
+export const getBrowserSort = (): SortMode => {
+  const raw = localStorage.getItem(BROWSER_SORT_KEY);
+  if (raw && raw in LEGACY_SORT) return LEGACY_SORT[raw] as SortMode;
+  return SORT_MODES.includes(raw as SortMode) ? (raw as SortMode) : 'default';
+};
+export const setBrowserSort = (sort: SortMode): void => { localStorage.setItem(BROWSER_SORT_KEY, sort); };
 // Whether the noise entries (dotfiles, node_modules) are COLLAPSED. Default is off: the listing shows
 // the folder as it is, and collapsing is the deliberate act.
 export const getBrowserCollapseHidden = (): boolean => localStorage.getItem(BROWSER_COLLAPSE_KEY) === '1';

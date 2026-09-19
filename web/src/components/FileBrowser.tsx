@@ -5,9 +5,10 @@ import { startUpload, updateUpload, finishUpload } from '../uploadJob.js';
 import { UPLOAD_ACCEPT, splitUploadable } from '../uploadTypes.js';
 import { joinPath } from '../docPath.js';
 import { formatBytes, formatRelativeTime } from '../format.js';
-import { getBrowserSort, setBrowserSort, getBrowserCollapseHidden, setBrowserCollapseHidden, type BrowserSort } from '../storage.js';
-import { FolderIcon, FileIcon, FileTextIcon, ImageIcon, ArrowUpIcon, ArrowUpDownIcon, DownloadIcon, LocateIcon, FolderPlusIcon, UploadIcon, CopyIcon, MoreHorizontalIcon } from './icons.jsx';
+import { getBrowserSort, setBrowserSort, getBrowserCollapseHidden, setBrowserCollapseHidden, type SortMode } from '../storage.js';
+import { FolderIcon, FileIcon, FileTextIcon, ImageIcon, ArrowUpIcon, DownloadIcon, LocateIcon, FolderPlusIcon, UploadIcon, CopyIcon, MoreHorizontalIcon } from './icons.jsx';
 import ActionSheet from './ActionSheet.jsx';
+import Dropdown from './Dropdown.jsx';
 import type { ActionSheetItem } from './ActionSheet.jsx';
 import { t } from '../i18n';
 import { useBackButton } from '../hooks/useBackButton.js';
@@ -143,15 +144,51 @@ const rootOf = (
   return best || home || null;
 };
 
-// Row order. Directories always come first in both modes — that is the file-browser convention and
-// it keeps navigation stable; within a group, "name" is A→Z and "modified" is newest-first. Entries
-// whose stat failed have no mtime and sort last rather than jumping to the top under a 1970 date.
-const sortEntries = (list: readonly DirectoryEntry[], mode: BrowserSort): DirectoryEntry[] => (
-  [...list].sort((a, b) => (a.type === 'dir' ? 0 : 1) - (b.type === 'dir' ? 0 : 1)
-    || (mode === 'modified'
-      ? (b.mtimeMs ?? 0) - (a.mtimeMs ?? 0)
-      : a.name.localeCompare(b.name)))
-);
+// Row order. Directories always come first in every mode — that is the file-browser convention and it
+// keeps navigation stable, so a "descending" choice reverses the order WITHIN each group rather than
+// moving folders to the bottom. Ties fall back to the name, which is what orders the directories in
+// the time and size modes (they have neither a timestamp we show nor a size). `default` leaves the
+// listing exactly as the API returned it.
+const byName = (a: DirectoryEntry, b: DirectoryEntry): number => a.name.localeCompare(b.name);
+
+// Entries whose stat failed mid-list have no timestamp; they go last either way rather than passing
+// for 1970 in one direction.
+const byTime = (direction: 1 | -1) => (a: DirectoryEntry, b: DirectoryEntry): number => {
+  const x = a.mtimeMs;
+  const y = b.mtimeMs;
+  if (x === undefined || y === undefined) return x === y ? 0 : x === undefined ? 1 : -1;
+  return (x - y) * direction;
+};
+
+const SORT_MODES: Record<Exclude<SortMode, 'default'>, (a: DirectoryEntry, b: DirectoryEntry) => number> = {
+  'name-asc': byName,
+  'name-desc': (a, b) => byName(b, a),
+  'mtime-desc': byTime(-1), // newest first
+  'mtime-asc': byTime(1),
+  // Directory entries carry no size; they tie at 0 and the name tiebreak orders them.
+  'size-desc': (a, b) => (b.size ?? 0) - (a.size ?? 0) || byName(a, b),
+  'size-asc': (a, b) => (a.size ?? 0) - (b.size ?? 0) || byName(a, b),
+};
+
+const sortEntries = (list: readonly DirectoryEntry[], mode: SortMode): DirectoryEntry[] => {
+  if (mode === 'default') return [...list];
+  const within = SORT_MODES[mode];
+  return [...list].sort((a, b) => (a.type === 'dir' ? 0 : 1) - (b.type === 'dir' ? 0 : 1) || within(a, b));
+};
+
+// The sort control's copy. The chip shows the short form and must fit one width for all seven modes,
+// so these stay within four glyphs (an arrow included) — the sheet it opens carries the same labels
+// under a "排序" title, where the context is enough.
+const SORT_ORDER: readonly SortMode[] = ['default', 'name-asc', 'name-desc', 'mtime-desc', 'mtime-asc', 'size-desc', 'size-asc'];
+const SORT_LABEL: Record<SortMode, string> = {
+  'default': 'filebrowser.sortDefault',
+  'name-asc': 'filebrowser.sortNameAsc',
+  'name-desc': 'filebrowser.sortNameDesc',
+  'mtime-desc': 'filebrowser.sortTimeDesc',
+  'mtime-asc': 'filebrowser.sortTimeAsc',
+  'size-desc': 'filebrowser.sortSizeDesc',
+  'size-asc': 'filebrowser.sortSizeAsc',
+};
 
 // The path browser. CONTROLLED on the current directory: `path` is the dir to show (null → $HOME),
 // and `onNavigate(absPath)` reports every directory change up to the parent, which persists it. That
@@ -179,7 +216,7 @@ export default function FileBrowser({
 }: FileBrowserProps) {
   const [input, setInput] = useState('');   // the path text box — relative to the current root
   const [dir, setDir] = useState<DirectoryListing | null>(null); // loaded { path, parent, entries }
-  const [sort, setSort] = useState<BrowserSort>(getBrowserSort); // row order (persisted): name | modified
+  const [sort, setSort] = useState<SortMode>(getBrowserSort); // row order (persisted): see SortMode
   const [collapseHidden, setCollapseHidden] = useState<boolean>(getBrowserCollapseHidden); // see isHiddenEntry: off by default
   const [, setClock] = useState(0); // bumped every minute so the relative "3 分钟前" columns stay true
   const [rootMenuOpen, setRootMenuOpen] = useState(false); // the root-prefix dropdown (~ / tmp / TMPDIR)
@@ -450,10 +487,9 @@ export default function FileBrowser({
     : visible.length === 0 ? t('filebrowser.onlyHidden')
       : t('filebrowser.noMatches');
 
-  const toggleSort = (): void => {
-    const next: BrowserSort = sort === 'name' ? 'modified' : 'name';
-    setSort(next);
-    setBrowserSort(next);
+  const pickSort = (mode: SortMode): void => {
+    setSort(mode);
+    setBrowserSort(mode);
   };
   const toggleCollapseHidden = (): void => {
     const next = !collapseHidden;
@@ -591,10 +627,16 @@ export default function FileBrowser({
               {t('filebrowser.collapseHidden')}
             </button>
             {visible.length > 1 && (
-              <button className="browse-chip browse-chip-sort" onClick={toggleSort}>
-                <ArrowUpDownIcon />
-                {t(sort === 'name' ? 'filebrowser.sortName' : 'filebrowser.sortModified')}
-              </button>
+              /* A dropdown, not a chip that toggles: there are seven states, so the trigger shows the
+                 current one and the menu is where you change it (same chrome as the root selector). */
+              <span className="browse-sort">
+                <Dropdown
+                  value={sort}
+                  ariaLabel={t('filebrowser.sort')}
+                  onChange={(value) => pickSort(value as SortMode)}
+                  options={SORT_ORDER.map((mode) => ({ value: mode, label: t(SORT_LABEL[mode]) }))}
+                />
+              </span>
             )}
           </span>
         </div>
