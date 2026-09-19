@@ -2475,6 +2475,23 @@ button.cmd-text { background: none; border: none; text-align: left; }
   border: 0; color: #8a93a0; touch-action: manipulation; }
 .doc-info-copy svg { width: 15px; height: 15px; display: block; }
 .doc-info-copy:active { color: #9db8ff; }
+/* Popover actions (重新加载 / 复制原文) — full-width rows with a leading icon, the app's usual
+   action-list shape (.sheet-action family). */
+.doc-info-actions { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+.doc-info-action { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 44px;
+  padding: 0 12px; border: 0; border-radius: 8px; background: #34363c; color: #cfe3ff; font-size: 14px;
+  text-align: left; touch-action: manipulation; }
+.doc-info-action:active { background: #3d4047; }
+.doc-info-action svg { width: 15px; height: 15px; flex: none; }
+/* Per-code-block copy — pinned top-right, absolutely positioned so the code text cannot reflow
+   (the pre is the positioning context). */
+.doc-code-copy { position: absolute; top: 6px; right: 6px; z-index: 1; display: inline-flex;
+  align-items: center; justify-content: center; width: 34px; height: 34px; padding: 0; border: 0;
+  border-radius: 8px; background: rgba(255,255,255,.07); color: #9fb0c0; touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent; }
+.doc-code-copy svg { width: 15px; height: 15px; display: block; }
+.doc-code-copy:active { background: rgba(255,255,255,.14); }
+.doc-code-copy.is-copied { color: #6ee7a8; }
 /* Read-aloud could not start (the engine refused) — say so instead of leaving a dead tap. */
 .doc-speak-error { margin: 8px 12px 0; padding: 8px 10px; border-radius: 8px; background: #2a1f22;
   color: #f0a9a9; font-size: 13px; }
@@ -2544,7 +2561,7 @@ button.cmd-text { background: none; border: none; text-align: left; }
 .doc-md > *:first-child { margin-top: 0; }
 .doc-md > *:last-child { margin-bottom: 0; }  /* no trailing gap before the scroll end */
 .doc-md hr { border: 0; border-top: 1px solid #1d2630; margin: 1.4em 0; }
-.doc-md pre { background: #11161d; padding: 12px; border-radius: 8px; overflow: auto; }
+.doc-md pre { background: #11161d; padding: 12px; border-radius: 8px; overflow: auto; position: relative; }
 .doc-md pre code { background: none; padding: 0; }
 .doc-md code { background: #11161d; padding: 1px 4px; border-radius: 4px;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: .92em; }

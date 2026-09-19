@@ -2795,6 +2795,8 @@ export default function App() {
         onCloseTab={closeDocTab}
         onMinimize={() => setFileManagerOpen(false)}
         onOpenDoc={onOpenDoc}
+        onReloadDoc={refreshDocTab}
+        onOpenUrl={(url, point) => setLocalUrlPrompt({ raw: url, x: point.x, y: point.y })}
         pendingShare={pendingShare}
         onPendingConsumed={() => setPendingShare(null)}
       />

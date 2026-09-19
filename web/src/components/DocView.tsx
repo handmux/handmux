@@ -5,13 +5,15 @@ import { markSentences } from '../voice/docSpeech.js';
 import { useDocSpeech } from '../voice/useDocSpeech.js';
 import { useScreenWakeLock } from '../hooks/useScreenWakeLock.js';
 import { useMarkdownImages } from '../hooks/useMarkdownImages.js';
+import { useDocCodeCopy } from '../hooks/useDocCodeCopy.js';
+import { useDocScrollMemory } from '../hooks/useDocScrollMemory.js';
 import { useBackButton } from '../hooks/useBackButton.js';
 import { copyText } from '../clipboard.js';
 import { renderMarkdown } from '../markdown.js';
 import { clearFind, focusMatch, runFind } from '../docFind.js';
 import { useKeyboardInset } from '../hooks/useKeyboardInset.js';
 import {
-  CheckIcon, CopyIcon, MoreHorizontalIcon, PauseIcon, PlayIcon, SearchIcon, StopIcon, TocIcon,
+  CheckIcon, CopyIcon, MoreHorizontalIcon, PauseIcon, PlayIcon, RefreshIcon, SearchIcon, StopIcon, TocIcon,
 } from './icons.jsx';
 import ImageViewer from './ImageViewer.jsx';
 import DocToc from './DocToc.jsx';
@@ -29,6 +31,10 @@ export interface DocViewProps {
   size?: number | null;
   mtimeMs?: number | null;
   birthtimeMs?: number | null;
+  /** Re-read the file from disk (App's conditional GET) — the agent may have rewritten it. */
+  onReload?: () => void;
+  /** Open a tapped http(s) link in the app's built-in browser instead of leaving the page. */
+  onOpenUrl?: (url: string, point: { x: number; y: number }) => void;
 }
 
 const collectSentences = markSentences;
@@ -76,6 +82,24 @@ const formatStamp = (ms: number | null | undefined): string => {
     .format(new Date(ms));
 };
 
+// Word count for a mixed CJK/Latin document: CJK ideographs count one each, runs of Latin/digits count
+// as one word. Character count is the raw length without whitespace.
+const countWords = (text: string): number => {
+  const cjk = text.match(/[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\u3040-\u30ff\uac00-\ud7af]/g)?.length ?? 0;
+  const latin = text.replace(/[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\u3040-\u30ff\uac00-\ud7af]/g, ' ')
+    .match(/[A-Za-z0-9_'’-]+/g)?.length ?? 0;
+  return cjk + latin;
+};
+
+// Heading anchors: a stable slug from the heading text, so in-document links ([见第 2 节](#第-2-节))
+// resolve — the same slug the 目录 drawer uses for its jump targets. Duplicates get a numeric suffix.
+const slugifyHeading = (text: string): string => (
+  text.trim().toLowerCase()
+    .replace(/[\s]+/g, '-')
+    .replace(/[^\p{L}\p{N}_-]+/gu, '')
+    .replace(/^-+|-+$/g, '')
+) || 'section';
+
 // Render one doc behind the bar it always had: 开始/暂停 · 停止 · 倍速 on the left, A−/A+ pinned right.
 // markdown → shared pipeline (markdown.ts) → injected HTML; single-file html → sandboxed iframe
 // (allow-scripts, NOT allow-same-origin, so report JS can't reach our token or the parent page);
@@ -87,12 +111,15 @@ const formatStamp = (ms: number | null | undefined): string => {
 // keeps the spoken sentence in view until the reader scrolls away, then a pill offers to come back.
 export default function DocView({
   type, name, path = null, content = '', size = null, mtimeMs = null, birthtimeMs = null,
+  onReload, onOpenUrl,
 }: DocViewProps) {
   const [fontIdx, setFontIdx] = useState<number>(readFontIndex);
   const [followPaused, setFollowPaused] = useState(false);
   const [infoOpen, setInfoOpen] = useState(false);
   const [tocOpen, setTocOpen] = useState(false);
   const [toc, setToc] = useState<DocTocItem[]>([]);
+  const [sourceCopied, setSourceCopied] = useState(false);
+  const sourceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [findOpen, setFindOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [matchCount, setMatchCount] = useState(0);
@@ -133,25 +160,34 @@ export default function DocView({
   );
   // Authenticated inline images: placeholders → blob URLs; tap → fullscreen viewer.
   const [imageView, closeImageView] = useMarkdownImages(mdRef, html, type === 'markdown');
+  // One-tap copy on every code block (markdown and plain-text docs alike).
+  useDocCodeCopy(mdRef, html, type === 'markdown');
+  // Return the reader to where they left off in THIS document.
+  useDocScrollMemory(path, wrapRef, html);
   useBackButton(!!imageView, closeImageView);
   useBackButton(infoOpen, () => setInfoOpen(false));
   useBackButton(tocOpen, () => setTocOpen(false));
   useBackButton(findOpen, () => closeFind());
 
-  // Outline for the 目录 drawer. Heading ids are assigned here (the rendered HTML carries none) so a
-  // tap can scroll to the exact node; `scroll-margin-top` on headings keeps them clear of the pinned
-  // toolbar. Runs whenever the document content changes.
+  // Outline for the 目录 drawer, and the anchor targets for in-document links. Heading ids are assigned
+  // here (the rendered HTML carries none) from the heading TEXT, so `[见第 2 节](#第-2-节)` resolves to
+  // the same node the drawer jumps to; duplicates get a -1/-2 suffix.
   useEffect(() => {
     const root = mdRef.current;
     if (!root) { setToc([]); return; }
     const headings = Array.from(root.querySelectorAll<HTMLElement>('h1, h2, h3, h4, h5, h6'));
     const items: DocTocItem[] = [];
-    headings.forEach((heading, index) => {
-      const text = (heading.textContent || '').trim();
-      if (!text) return;
-      const id = `doc-h-${index}`;
+    const used = new Set<string>();
+    headings.forEach((heading) => {
+      const label = (heading.textContent || '').trim();
+      if (!label) return;
+      const base = slugifyHeading(label);
+      let id = base;
+      let suffix = 1;
+      while (used.has(id)) { id = `${base}-${suffix}`; suffix += 1; }
+      used.add(id);
       heading.id = id;
-      items.push({ id, level: Number(heading.tagName.slice(1)) || 1, text });
+      items.push({ id, level: Number(heading.tagName.slice(1)) || 1, text: label });
     });
     setToc(items);
   }, [html]);
@@ -167,7 +203,10 @@ export default function DocView({
     return () => document.removeEventListener('pointerdown', onPointerDown, true);
   }, [infoOpen]);
 
-  useEffect(() => () => { if (copiedTimer.current !== null) clearTimeout(copiedTimer.current); }, []);
+  useEffect(() => () => {
+    if (copiedTimer.current !== null) clearTimeout(copiedTimer.current);
+    if (sourceTimer.current !== null) clearTimeout(sourceTimer.current);
+  }, []);
 
   // Content swapped (different doc) → stop any in-flight reading (React rebuilds innerHTML, so the
   // old sentence spans are gone anyway).
@@ -207,13 +246,33 @@ export default function DocView({
     return () => wrap.removeEventListener('scroll', onScroll);
   }, [speech.playing]);
 
-  // Tap a sentence → read on from there — but ONLY while read-aloud is already running (playing or
-  // paused). Tapping the text of an idle document must stay a normal reading gesture (selection,
-  // scrolling), never a surprise start. markSentences is idempotent, so the list is re-read from the
-  // existing spans.
+  // Clicks inside the document, in priority order:
+  //   1. a tapped link — `#anchor` jumps within the doc, http(s) opens in the built-in browser (leaving
+  //      the page would throw away the reader's place), anything else is left to the browser;
+  //   2. while read-aloud is running, a tapped sentence restarts the read from there. Tapping an idle
+  //      document must stay a normal reading gesture (selection, scrolling), never a surprise start.
   const onMarkdownClick = (event: ReactMouseEvent<HTMLDivElement>): void => {
-    if (!speech.supported || !speech.playing) return;
     const target = event.target instanceof Element ? event.target : null;
+
+    const anchor = target?.closest<HTMLAnchorElement>('a[href]');
+    if (anchor) {
+      const href = anchor.getAttribute('href') || '';
+      if (href.startsWith('#')) {
+        event.preventDefault();
+        const id = decodeURIComponent(href.slice(1));
+        if (id) scrollToElement(document.getElementById(id), TOC_TOP_OFFSET);
+        return;
+      }
+      if (/^https?:\/\//i.test(href)) {
+        if (!onOpenUrl) return; // no in-app browser available → let the platform handle it
+        event.preventDefault();
+        onOpenUrl(href, { x: event.clientX, y: event.clientY });
+        return;
+      }
+      return;
+    }
+
+    if (!speech.supported || !speech.playing) return;
     const span = target?.closest<HTMLElement>('.tts-sent[data-tts]');
     if (!span) return;
     const index = Number(span.dataset.tts);
@@ -301,6 +360,17 @@ export default function DocView({
     });
   };
 
+  // Copy the file's Markdown SOURCE (not the rendered text) — what you would paste into another agent
+  // or editor.
+  const onCopySource = (): void => {
+    void copyText(content || '').then((ok) => {
+      if (!ok) return;
+      setSourceCopied(true);
+      if (sourceTimer.current !== null) clearTimeout(sourceTimer.current);
+      sourceTimer.current = setTimeout(() => setSourceCopied(false), 1600);
+    });
+  };
+
   return (
     <div className="doc-md-wrap" ref={wrapRef}
       style={findOpen && keyboardInset > 0 ? { paddingBottom: `${keyboardInset}px` } : undefined}>
@@ -378,6 +448,27 @@ export default function DocView({
                   <div className="doc-info-row">
                     <span className="doc-info-key">{t('doc.fileCreated')}</span>
                     <span className="doc-info-val">{formatStamp(birthtimeMs)}</span>
+                  </div>
+                  <div className="doc-info-row">
+                    <span className="doc-info-key">{t('doc.words')}</span>
+                    <span className="doc-info-val">{countWords(content || '').toLocaleString(getLangCode())}</span>
+                  </div>
+                  <div className="doc-info-row">
+                    <span className="doc-info-key">{t('doc.chars')}</span>
+                    <span className="doc-info-val">
+                      {(content || '').replace(/\s+/g, '').length.toLocaleString(getLangCode())}
+                    </span>
+                  </div>
+                  <div className="doc-info-actions">
+                    {onReload && (
+                      <button className="doc-info-action" onClick={onReload}>
+                        <RefreshIcon />{t('doc.reload')}
+                      </button>
+                    )}
+                    <button className="doc-info-action" onClick={onCopySource}>
+                      {sourceCopied ? <CheckIcon /> : <CopyIcon />}
+                      {sourceCopied ? t('common.copied') : t('doc.copySource')}
+                    </button>
                   </div>
                 </div>
               )}

@@ -27,6 +27,10 @@ export interface FileManagerProps {
   onCloseTab: (key: string) => void;
   onMinimize: () => void;
   onOpenDoc: (path: string) => void | Promise<void>;
+  /** Re-read the active doc from disk (App's conditional GET) — the file may have been rewritten. */
+  onReloadDoc?: (key: string) => void;
+  /** Open a tapped http(s) link in the app's built-in browser. */
+  onOpenUrl?: (url: string, point: { x: number; y: number }) => void;
   pendingShare?: File | null;
   onPendingConsumed?: () => void;
 }
@@ -60,6 +64,8 @@ export default function FileManager({
   onCloseTab,
   onMinimize,
   onOpenDoc,
+  onReloadDoc,
+  onOpenUrl,
   pendingShare,
   onPendingConsumed,
 }: FileManagerProps) {
@@ -219,6 +225,8 @@ export default function FileManager({
           </div>
         ) : <DocView type={cur.type} name={cur.name} path={cur.path ?? null}
             size={cur.size ?? null} mtimeMs={cur.mtime ?? null} birthtimeMs={cur.birthtimeMs ?? null}
+            {...(onReloadDoc ? { onReload: () => onReloadDoc(cur.key) } : {})}
+            {...(onOpenUrl ? { onOpenUrl } : {})}
             content={typeof cur.content === 'string' ? cur.content : ''} />}
       </div>
     </div>

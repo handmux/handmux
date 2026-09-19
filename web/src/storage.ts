@@ -690,6 +690,45 @@ export function getDocFontIndex() {
 export const setDocFontIndex = (i: number) =>
   localStorage.setItem(DOC_FONT_KEY, String(Math.min(DOC_FONT_SIZES.length - 1, Math.max(0, i))));
 
+// Reading position per document, stored as a scroll RATIO (0..1) so it survives the file being edited
+// under the reader. Capped: only the most recent reads are worth remembering, and an unbounded map in
+// localStorage would grow forever.
+const DOC_SCROLL_KEY = 'tw_doc_scroll';
+const DOC_SCROLL_MAX = 200;
+type DocScrollMap = Record<string, number>;
+
+function readDocScroll(): DocScrollMap {
+  try {
+    const raw = localStorage.getItem(DOC_SCROLL_KEY);
+    if (!raw) return {};
+    const parsed: unknown = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+    const out: DocScrollMap = {};
+    for (const [key, value] of Object.entries(parsed as Record<string, unknown>)) {
+      if (typeof value === 'number' && Number.isFinite(value) && value > 0 && value <= 1) out[key] = value;
+    }
+    return out;
+  } catch { return {}; }
+}
+
+export function getDocScrollRatio(path: string | null | undefined): number {
+  if (!path) return 0;
+  return readDocScroll()[path] ?? 0;
+}
+
+export function setDocScrollRatio(path: string | null | undefined, ratio: number): void {
+  if (!path || !Number.isFinite(ratio)) return;
+  const map = readDocScroll();
+  // ~0 means "at the top" — forget it instead of storing noise for every document ever opened.
+  if (ratio <= 0.01) delete map[path];
+  else map[path] = Math.min(1, Math.max(0, ratio));
+  const keys = Object.keys(map);
+  if (keys.length > DOC_SCROLL_MAX) {
+    for (const stale of keys.slice(0, keys.length - DOC_SCROLL_MAX)) delete map[stale];
+  }
+  try { localStorage.setItem(DOC_SCROLL_KEY, JSON.stringify(map)); } catch { /* quota — position is best-effort */ }
+}
+
 // Git diff font — same ladder as docs, its own persisted level. Default 12px (index 2) matches the
 // original fixed .git-diff size, so the view is unchanged until the user steps A−/A+.
 export const DIFF_FONT_DEFAULT_INDEX = 2; // 12px

@@ -170,8 +170,8 @@ describe('DocView 目录 drawer', () => {
       expect(calls.length).toBe(1); // one scroll, on the doc container — never the page
       expect(typeof calls[0].top).toBe('number');
       expect(container.querySelector('.doc-toc')).toBeNull(); // closed after jumping
-      // the heading carries an id so the jump has a target
-      expect(container.querySelector('.doc-md h3').id).toBe('doc-h-2');
+      // the heading carries a slug id so the jump has a target (same ids the 目录 lists)
+      expect(container.querySelector('.doc-md h3').id).toBe('三级');
     } finally {
       Element.prototype.scrollTo = original;
     }
@@ -264,6 +264,121 @@ describe('DocView 查找', () => {
     expect(container.querySelectorAll('.doc-md .tts-sent[data-tts]').length).toBeGreaterThan(0);
     delete window.speechSynthesis;
     delete window.SpeechSynthesisUtterance;
+  });
+});
+
+describe('DocView P1 document features', () => {
+  beforeEach(() => { localStorage.clear(); });
+
+  const openMore = () => click(container.querySelector('[aria-label="文件信息"]'));
+
+  it('重新加载 calls back to re-read the file from disk', async () => {
+    const reloads = [];
+    await render({ type: 'markdown', name: 'a.md', path: '/a.md', content: 'x', onReload: () => reloads.push(1) });
+    await openMore();
+    const button = [...container.querySelectorAll('.doc-info-action')]
+      .find((b) => b.textContent.includes('重新加载'));
+    expect(button).not.toBeUndefined();
+    await click(button);
+    expect(reloads).toHaveLength(1);
+  });
+
+  it('shows 字数/字符数 and copies the Markdown source', async () => {
+    const written = [];
+    installClipboard(written);
+    const source = '# 标题\n\nhello world 中文。';
+    await render({ type: 'markdown', name: 'a.md', path: '/a.md', content: source });
+    await openMore();
+    const rows = [...container.querySelectorAll('.doc-info-row')].map((row) => row.textContent);
+    expect(rows.some((row) => row.includes('字数'))).toBe(true);
+    expect(rows.some((row) => row.includes('字符数'))).toBe(true);
+    const copySource = [...container.querySelectorAll('.doc-info-action')]
+      .find((b) => b.textContent.includes('复制原文'));
+    await click(copySource);
+    expect(written).toEqual([source]); // the RAW source, not the rendered text
+    expect(copySource.textContent).toContain('已复制');
+  });
+
+  it('gives every code block a one-tap copy that never starts read-aloud', async () => {
+    const written = [];
+    installClipboard(written);
+    installSpeechMock();
+    await render({
+      type: 'markdown', name: 'a.md', path: '/a.md',
+      content: '说明。\n\n```bash\necho hello\n```\n\n```js\nconst x = 1;\n```',
+    });
+    await flush();
+    const buttons = [...container.querySelectorAll('.doc-code-copy')];
+    expect(buttons).toHaveLength(2);
+    await click(buttons[0]);
+    expect(written).toEqual(['echo hello\n']);
+    expect(container.querySelector('[aria-label="朗读"]')).not.toBeNull(); // never entered read-aloud
+    delete window.speechSynthesis;
+    delete window.SpeechSynthesisUtterance;
+  });
+
+  it('jumps to an in-document #anchor, using the same heading ids as the 目录', async () => {
+    const calls = [];
+    const original = Element.prototype.scrollTo;
+    Element.prototype.scrollTo = function scrollTo(opts) { calls.push(opts); };
+    try {
+      await render({
+        type: 'markdown', name: 'a.md', path: '/a.md',
+        content: '# 第一章\n\n正文。\n\n## 小节 A\n\n内容。\n\n[跳转](#小节-a)',
+      });
+      const heading = [...container.querySelectorAll('.doc-md h2')].find((h) => h.textContent === '小节 A');
+      expect(heading.id).toBe('小节-a'); // slug ids, so in-doc links resolve
+      // marked percent-encodes a CJK fragment href; the handler decodes it back to the slug.
+      const anchor = container.querySelector('.doc-md a[href^="#"]');
+      expect(anchor.getAttribute('href')).toContain('%E5%B0%8F%E8%8A%82-a');
+      await click(anchor);
+      expect(calls.length).toBeGreaterThan(0);
+      expect(calls.at(-1).top).toBeGreaterThanOrEqual(0);
+    } finally {
+      Element.prototype.scrollTo = original;
+    }
+  });
+
+  it('opens an http link in the app instead of navigating away', async () => {
+    const opened = [];
+    await render({
+      type: 'markdown', name: 'a.md', path: '/a.md',
+      content: '[站点](https://example.com/x)',
+      onOpenUrl: (url) => opened.push(url),
+    });
+    const link = container.querySelector('.doc-md a');
+    await act(() => {
+      link.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, clientX: 12, clientY: 34 }));
+    });
+    expect(opened).toEqual(['https://example.com/x']);
+  });
+
+  it('restores the remembered reading position for a document', async () => {
+    localStorage.setItem('tw_doc_scroll', JSON.stringify({ '/a.md': 0.5 }));
+    // jsdom has no layout, so give the container a scrollable size BEFORE the restore effect runs.
+    const proto = Object.getPrototypeOf(document.createElement('div'));
+    const sh = Object.getOwnPropertyDescriptor(proto, 'scrollHeight');
+    const ch = Object.getOwnPropertyDescriptor(proto, 'clientHeight');
+    Object.defineProperty(proto, 'scrollHeight', { get: () => 1000, configurable: true });
+    Object.defineProperty(proto, 'clientHeight', { get: () => 100, configurable: true });
+    try {
+      await render({ type: 'markdown', name: 'a.md', path: '/a.md', content: '# 标题\n\n正文。' });
+      expect(container.querySelector('.doc-md-wrap').scrollTop).toBe(450); // 0.5 × (1000 − 100)
+    } finally {
+      if (sh) Object.defineProperty(proto, 'scrollHeight', sh);
+      if (ch) Object.defineProperty(proto, 'clientHeight', ch);
+    }
+  });
+
+  it('remembers the position when leaving the document', async () => {
+    await render({ type: 'markdown', name: 'a.md', path: '/a.md', content: '# 标题\n\n正文。' });
+    const wrap = container.querySelector('.doc-md-wrap');
+    Object.defineProperty(wrap, 'scrollHeight', { value: 1000, configurable: true });
+    Object.defineProperty(wrap, 'clientHeight', { value: 100, configurable: true });
+    wrap.scrollTop = 450;
+    await act(() => root.unmount()); // leaving the tab flushes the position
+    root = createRoot(container);
+    expect(JSON.parse(localStorage.getItem('tw_doc_scroll'))['/a.md']).toBeCloseTo(0.5);
   });
 });
 
