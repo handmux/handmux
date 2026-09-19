@@ -2169,11 +2169,14 @@ export default function App() {
   // unchanged); a changed image swaps in a fresh object URL and revokes the old blob. Uses refreshDoc,
   // not openDoc, so an async result landing after the user has switched away doesn't steal focus back.
   // Best-effort: a since-deleted/moved/unreadable file keeps its last-good content.
-  const refreshDocTab = (key: string) => {
+  // `force` (the viewer's 重新加载 button): drop the conditional mtime so the file is really re-read
+  // and re-rendered, even when the server would have answered 304. An explicit reload that silently
+  // does nothing reads as a broken button.
+  const refreshDocTab = (key: string, force = false) => {
     const tab = docTabs.tabs.find((t) => t.key === key);
     if (!tab || tab.type === 'home') return;
     if (tab.type === 'image') {
-      fetchImageUrl(key, tab.mtime ?? null)
+      fetchImageUrl(key, force ? null : tab.mtime ?? null)
         .then((res) => {
           if ('notModified' in res) return; // unchanged → keep the same object URL (no re-download, no flash)
           const old = tab.content;
@@ -2183,7 +2186,7 @@ export default function App() {
         .catch(() => { /* keep the last-good image */ });
       return;
     }
-    fetchDoc(key, tab.mtime ?? null)
+    fetchDoc(key, force ? null : tab.mtime ?? null)
       .then((res) => {
         if ('notModified' in res) return; // unchanged on disk → leave the tab (and its scroll/TTS) alone
         docTabs.refreshDoc(key, {
@@ -2810,7 +2813,7 @@ export default function App() {
         onCloseTab={closeDocTab}
         onMinimize={() => setFileManagerOpen(false)}
         onOpenDoc={onOpenDoc}
-        onReloadDoc={refreshDocTab}
+        onReloadDoc={(key) => refreshDocTab(key, true)}
         onOpenUrl={(url, point) => setLocalUrlPrompt({ raw: url, x: point.x, y: point.y })}
         pendingShare={pendingShare}
         onPendingConsumed={() => setPendingShare(null)}

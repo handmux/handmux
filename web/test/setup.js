@@ -13,6 +13,12 @@ try { localStorage.setItem('tw_lang', 'zh'); } catch { /* no localStorage in thi
 // and updates from the shared startup config are covered separately by test/useAsrAvailable.test.jsx.
 try { localStorage.setItem('tw_asr', '1'); } catch { /* no localStorage in this env */ }
 
+// jsdom has no object-URL store either; the image pipeline hands blob URLs around and revokes them.
+if (typeof URL !== 'undefined') {
+  if (typeof URL.createObjectURL !== 'function') URL.createObjectURL = () => `blob:jsdom-${Math.random()}`;
+  if (typeof URL.revokeObjectURL !== 'function') URL.revokeObjectURL = () => { /* no-op in tests */ };
+}
+
 // jsdom has no layout engine, so scrollIntoView/scrollTo are not implemented at all — but the doc reader
 // scrolls within its own container (deliberately, to avoid scrolling ancestors). Stub both as no-ops so
 // those paths can run; the real behaviour is device-only and is verified on a real device, never here.

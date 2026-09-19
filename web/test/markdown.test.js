@@ -51,6 +51,31 @@ describe('renderMarkdown — doc mode images (baseDir set)', () => {
     const out = renderMarkdown('<img src="pic.png" alt="p">', { baseDir: '/d' });
     expect(out).toContain('data-handmux-src="/d/pic.png"');
   });
+
+  it('decodes percent-encoded non-ASCII and space destinations (marked encodes them)', () => {
+    // `![x](assets/图片示例.png)` reaches us as `assets/%E5%9B%BE...png`; handing that to the loader
+    // double-encodes it and the server looks for a file literally named `%E5%9B%BE...`.
+    expect(renderMarkdown('![x](assets/图片示例.png)', { baseDir: '/repo' }))
+      .toContain('data-handmux-src="/repo/assets/图片示例.png"');
+    expect(renderMarkdown('![x](<assets/图片 示例.png>)', { baseDir: '/repo' }))
+      .toContain('data-handmux-src="/repo/assets/图片 示例.png"');
+    expect(renderMarkdown('![x](assets/图片%20示例.png)', { baseDir: '/repo' }))
+      .toContain('data-handmux-src="/repo/assets/图片 示例.png"');
+  });
+
+  it('keeps an encoded #/% as part of the filename and survives a malformed escape', () => {
+    expect(renderMarkdown('![x](a%23b.png)', { baseDir: '/r' }))
+      .toContain('data-handmux-src="/r/a#b.png"'); // %23 is a filename char, not a fragment
+    expect(renderMarkdown('![x](100%.png)', { baseDir: '/r' }))
+      .toContain('data-handmux-src="/r/100%.png"'); // never throws mid-render
+  });
+
+  it('emits the image without a src, which is what the CSS paints as the loading skeleton', () => {
+    const out = renderMarkdown('![x](a.png)', { baseDir: '/r' });
+    expect(out).toContain('data-handmux-src="/r/a.png"');
+    expect(out).not.toMatch(/<img[^>]*\ssrc=/); // no src until the loader assigns a blob URL
+    expect(out).not.toContain('md-img-loading'); // no JS-toggled class to flash on a cache hit
+  });
 });
 
 describe('renderMarkdown — bubble mode images (no baseDir)', () => {

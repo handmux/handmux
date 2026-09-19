@@ -61,6 +61,23 @@ function stripFrontmatter(source: string): string {
 
 const SCHEME_RE = /^[a-zA-Z][a-zA-Z0-9+.-]*:/;
 
+// Turn a Markdown image destination into a REAL filesystem path. marked percent-encodes destinations:
+// `assets/图片示例.png` (and the `<assets/图 片.png>` / `assets/%E5%9B%BE...png` spellings) arrive as
+// `assets/%E5%9B%BE%E7%89%87%E7%A4%BA%E4%BE%8B.png`. Handing that to fetchImageUrl unchanged
+// double-encodes it (`%` → `%25`) and the server looks for a file whose name literally contains `%E5%9B%BE…`.
+//
+// Order matters: `#`/`?` are stripped FIRST (they are URL syntax), and that is safe for a filename that
+// genuinely contains them — those are spelled `%23`/`%3F` and survive the split. Only then decode, once.
+// A malformed escape (`100%.png`) falls back to the raw text rather than throwing mid-render.
+function decodeImagePath(raw: string): string {
+  const clean = raw.split(/[?#]/)[0] ?? '';
+  try {
+    return decodeURIComponent(clean);
+  } catch {
+    return clean;
+  }
+}
+
 function keepAltTextOnly(img: Element): void {
   const alt = img.getAttribute('alt') || '';
   if (alt) img.replaceWith(document.createTextNode(alt));
@@ -92,11 +109,12 @@ function rewriteImages(root: HTMLElement, baseDir: string | null): void {
     }
     if (raw.startsWith('//') || SCHEME_RE.test(raw)) { keepAltTextOnly(img); continue; }
     // Local image (relative to the doc, absolute, or ~/): hand the ABSOLUTE path to the loader.
-    const clean = raw.split(/[?#]/)[0] ?? '';
+    const clean = decodeImagePath(raw);
     const abs = (isAbsolute(clean) ? clean : joinPath(baseDir, clean)).replace(/\/+$/, '');
     img.removeAttribute('src');
     img.setAttribute('data-handmux-src', abs);
-    img.classList.add('md-img-loading');
+    // No loading class here: the loader adds it only when it actually has to fetch, so a cached or
+    // 304 image never flashes a placeholder first.
   }
 }
 

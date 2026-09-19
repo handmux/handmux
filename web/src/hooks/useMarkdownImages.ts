@@ -20,6 +20,13 @@ const reasonFor = (cause: unknown, decodeFailure: boolean): string => {
   return t('doc.imageLoadFailed');
 };
 
+// The loader works with REAL paths, so a name is already plain text — but a file may legitimately
+// contain a `%` (e.g. `100%.png`), where a second decode would throw or mangle it. Decode leniently.
+const fileName = (path: string): string => {
+  const base = path.split('/').pop() || path;
+  try { return decodeURIComponent(base); } catch { return base; }
+};
+
 export function useMarkdownImages(
   rootRef: RefObject<HTMLElement | null>,
   html: string,
@@ -47,12 +54,13 @@ export function useMarkdownImages(
     for (const img of Array.from(root.querySelectorAll<HTMLImageElement>('img[data-handmux-src]'))) {
       const path = img.getAttribute('data-handmux-src') || '';
       if (!path) continue;
-      const name = decodeURIComponent(path.split('/').pop() || path);
+      const name = fileName(path);
       // A blob that decodes fine but then fails was revoked or isn't an image at all.
       img.addEventListener('error', () => { if (!cancelled) failNote(img, null, true); });
-      img.addEventListener('load', () => img.classList.remove('md-img-loading'));
       const hit = acquireImage(path);
       if (hit) {
+        // Cached (or 304): assign straight away — an image without `src` is what the CSS paints as
+        // "loading", so this removes the placeholder in the same commit (no flash).
         img.src = hit.url;
         continue;
       }
@@ -70,13 +78,7 @@ export function useMarkdownImages(
     const onClick = (event: Event): void => {
       const target = event.target instanceof Element ? event.target : null;
       const img = target?.closest?.('img[data-handmux-src]') as HTMLImageElement | null;
-      if (img?.src) {
-        const path = img.getAttribute('data-handmux-src') || '';
-        setView({
-          url: img.src,
-          name: decodeURIComponent(path.split('/').pop() || path),
-        });
-      }
+      if (img?.src) setView({ url: img.src, name: fileName(img.getAttribute('data-handmux-src') || '') });
     };
     root.addEventListener('click', onClick);
     return () => {

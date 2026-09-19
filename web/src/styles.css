@@ -2578,10 +2578,25 @@ button.cmd-text { background: none; border: none; text-align: left; }
 .doc-md th, .doc-md td { border: 1px solid #1d2630; padding: 6px 10px; text-align: left; }
 .doc-md th { background: #11161d; }
 
-/* Inline markdown images (authenticated blob loads — see markdown.ts / useMarkdownImages):
-   loading keeps a fixed-height slot so the doc doesn't reflow when bytes land; failure/insecure
-   links degrade to a grey note naming the cause, never a bare broken image. */
-.doc-md img.md-img-loading { min-height: 120px; background: #11161d; border-radius: 8px; }
+/* Inline markdown images (authenticated blob loads — see markdown.ts / useMarkdownImages).
+   An image that has not been given its blob `src` YET is the loading state: `:not([src])` covers both
+   the first paint (before the loader's effect runs) and the actual fetch, and stops matching the
+   instant a cached/304 blob is assigned — so there is no placeholder flash and no window where the
+   browser paints its broken-image icon.
+   The placeholder is a thin skeleton line, not a 120px dark block: a big placeholder reads as a broken
+   image and made the page jump when the real image replaced it. `color: transparent` + `font-size: 0`
+   keep alt text from rendering — alt belongs to the failure state.
+   Failure/insecure links degrade to a grey note naming the cause, never a bare broken image. */
+.doc-md img[data-handmux-src]:not([src]) { display: block; width: 100%; height: 3px; min-height: 0;
+  border-radius: 2px; color: transparent; font-size: 0; background: #1b2430; }
+@media (prefers-reduced-motion: no-preference) {
+  .doc-md img[data-handmux-src]:not([src]) {
+    background: linear-gradient(90deg, #1b2430 0%, #263442 50%, #1b2430 100%);
+    background-size: 200% 100%;
+    animation: doc-img-loading 1.6s linear infinite;
+  }
+}
+@keyframes doc-img-loading { from { background-position: 100% 0; } to { background-position: -100% 0; } }
 .doc-md img[data-handmux-src] { cursor: zoom-in; border-radius: 8px; }
 .md-img-note { display: block; margin: 8px 0; padding: 10px 12px; border-radius: 8px;
   background: #11161d; color: #9fb0c0; font-size: 0.9em; }
