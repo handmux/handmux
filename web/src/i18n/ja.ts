@@ -482,7 +482,6 @@ export default {
   'filebrowser.rowActions': '{name} の操作',
   'filebrowser.emptyDir': 'このフォルダは空です',
   'filebrowser.onlyHidden': 'ここには隠し項目しかありません',
-  'filebrowser.sortBy': '並び順：{mode}',
   'filebrowser.sortName': '名前',
   'filebrowser.sortModified': '更新日時',
   'filemanager.files': 'ファイル',

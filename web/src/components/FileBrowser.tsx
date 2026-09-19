@@ -586,18 +586,17 @@ export default function FileBrowser({
               ? t('filebrowser.tooMany', { shown: entries.length, total: sorted.length })
               : t('filebrowser.itemCount', { count: sorted.length })}
           </span>
-          <button className="browse-chip" aria-pressed={collapseHidden} onClick={toggleCollapseHidden}>
-            {t('filebrowser.collapseHidden')}
-          </button>
-          {visible.length > 1 && (
-            <button
-              className="browse-chip browse-chip-end" aria-label={t('filebrowser.sortBy', { mode: t(sort === 'name' ? 'filebrowser.sortName' : 'filebrowser.sortModified') })}
-              onClick={toggleSort}
-            >
-              <ArrowUpDownIcon />
-              {t(sort === 'name' ? 'filebrowser.sortName' : 'filebrowser.sortModified')}
+          <span className="browse-actions">
+            <button className="browse-chip" aria-pressed={collapseHidden} onClick={toggleCollapseHidden}>
+              {t('filebrowser.collapseHidden')}
             </button>
-          )}
+            {visible.length > 1 && (
+              <button className="browse-chip browse-chip-sort" onClick={toggleSort}>
+                <ArrowUpDownIcon />
+                {t(sort === 'name' ? 'filebrowser.sortName' : 'filebrowser.sortModified')}
+              </button>
+            )}
+          </span>
         </div>
       )}
       <div className="browse-list" aria-busy={!dir && !err}>

@@ -482,7 +482,6 @@ export default {
   'filebrowser.rowActions': '{name} 작업',
   'filebrowser.emptyDir': '이 폴더는 비어 있습니다',
   'filebrowser.onlyHidden': '여기에는 숨김 항목만 있습니다',
-  'filebrowser.sortBy': '정렬: {mode}',
   'filebrowser.sortName': '이름',
   'filebrowser.sortModified': '수정 시간',
   'filemanager.files': '파일',

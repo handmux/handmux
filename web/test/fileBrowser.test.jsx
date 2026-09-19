@@ -247,13 +247,19 @@ describe('FileBrowser', () => {
     await render({ path: null });
     await settle();
     expect(rowNames()).toEqual(['docs', 'data.bin', 'photo.gif', 'readme.md', 'report.md']);
-    const chip = container.querySelector('.browse-chip-end'); // the sort control, right of the collapse switch
-    expect(chip.textContent).toContain('名称');
+    const chip = container.querySelector('.browse-chip-sort');
+    expect(chip.textContent).toContain('名称排序');
     await click(chip);
     // Directories stay first (navigation stability); files go newest-first.
     expect(rowNames()).toEqual(['docs', 'photo.gif', 'data.bin', 'report.md', 'readme.md']);
     expect(chip.textContent).toContain('修改时间');
     expect(localStorage.getItem('tw_browse_sort')).toBe('modified');
+  });
+
+  it('keeps both sort labels the same length, so the chip holds its width when tapped', () => {
+    // 名称排序 / 修改时间 — four characters each; a two-character "名称" made the control jump.
+    expect(zh['filebrowser.sortName'].length).toBe(4);
+    expect(zh['filebrowser.sortModified'].length).toBe(4);
   });
 
   it('lists the folder as it is, and the 收起隐藏项 switch tucks the dotfiles away', async () => {

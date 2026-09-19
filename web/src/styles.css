@@ -2383,19 +2383,21 @@ button.cmd-text { background: none; border: none; text-align: left; }
 .browse-pending-hint { color: #8aa0b6; font-style: normal; font-size: 12px; }
 .browse-pending-btn { flex: 0 0 auto; height: 32px; padding: 0 14px; border: none; border-radius: 8px; background: #2f5fa0; color: #fff; font-size: 13px; }
 .browse-pending-btn:disabled { opacity: .4; }
-/* List bar: "42 项" and the 收起隐藏项 switch on the left, the sort control parked at the right end.
+/* List bar: the count on the left, the switches grouped at the right end.
    Padded off the path bar above it and off the first row below — it is a row of controls, not part of
    the listing, and with the chips flush against both it read as squeezed. */
 .browse-listbar { display: flex; align-items: center; gap: 6px; padding: 10px 12px 2px; }
-/* Hugs its text instead of stretching, so the switch stays next to the count on the left and only the
-   sort control is pushed to the right end. A long capped-listing note may shrink and wrap instead. */
+/* Hugs its text instead of stretching; a long capped-listing note may shrink and wrap instead. */
 .browse-count { flex: 0 1 auto; min-width: 0; color: #6b7a89; font-size: 12px; font-variant-numeric: tabular-nums; line-height: 1.35; }
-.browse-chip { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 4px; height: 26px; padding: 0 9px; border: 1px solid #1d2630;
+.browse-actions { flex: 0 0 auto; margin-left: auto; display: inline-flex; align-items: center; gap: 6px; }
+.browse-chip { flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center; gap: 4px; height: 26px; padding: 0 9px; border: 1px solid #1d2630;
   border-radius: 13px; background: #11161d; color: #8aa0b6; font-size: 12px; white-space: nowrap; }
 .browse-chip:active { color: #cfe0f0; }
 .browse-chip[aria-pressed="true"] { border-color: #3a5a7e; background: #16222f; color: #cfe0f0; }
 .browse-chip svg { width: 13px; height: 13px; }
-.browse-chip-end { margin-left: auto; }
+/* The sort chip's label changes with the mode ("名称排序" / "修改时间", Name / Modified) and a control
+   that resizes when tapped is exactly the jump this bar was meant to avoid, so it holds one width. */
+.browse-chip-sort { min-width: 5.6em; }
 .browse-list { flex: 1; overflow: auto; -webkit-overflow-scrolling: touch; padding: 4px 12px 16px; }
 .browse-empty { color: #6b7a89; font-size: 13px; padding: 16px 4px; }
 /* First-load placeholder. The listing had nothing to show yet and rendered the "no match" line,

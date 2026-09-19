@@ -1186,7 +1186,6 @@ export default {
   'filebrowser.rowActions': 'Actions for {name}',
   'filebrowser.emptyDir': 'This folder is empty',
   'filebrowser.onlyHidden': 'Only hidden items here',
-  'filebrowser.sortBy': 'Sort: {mode}',
   'filebrowser.sortName': 'Name',
   'filebrowser.sortModified': 'Modified',
   'filemanager.files': 'Files',
