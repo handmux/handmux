@@ -136,4 +136,15 @@ describe('built-in browser App composition', () => {
     expect(rule).toContain('pointer-events: none');
     expect(rule).not.toContain('touch-action: none');
   });
+
+  // App is too heavy to mount here, so these are source-shape assertions like the rest of this file. The
+  // contract: openAbsDoc reveals the sheet to show the loading page, and a failed open must undo that
+  // reveal — closing only the tab stranded the user on a file listing with the recovery prompt on top.
+  it('takes a failed doc open back out of the viewer sheet it revealed', () => {
+    const attempt = source.match(/const sheetWasOpen = fileManagerOpen;[\s\S]*?\n  \};/)?.at(0);
+    expect(attempt).toBeTruthy();
+    expect(attempt).toContain('setFileManagerOpen(true)'); // the reveal the loading page needs
+    expect(attempt).toContain('docTabs.closeTab(abs)'); // the dead tab goes either way
+    expect(attempt).toMatch(/if \(!sheetWasOpen\) setFileManagerOpen\(false\)/);
+  });
 });

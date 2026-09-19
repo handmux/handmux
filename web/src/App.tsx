@@ -2137,6 +2137,11 @@ export default function App() {
       // if the file changed on disk); a first open fetches the bytes and records the mtime for later.
       if (docTabs.tabs.some((t) => t.key === abs)) { docTabs.activate(abs); void refreshDocTab(abs); setFileManagerOpen(true); return; }
     }
+    // Revealing the sheet is what shows the viewer's loading page, so it happens before the bytes arrive.
+    // Remember whether it was ALREADY open: a failed open has to put the user back where they were, and
+    // closing only the tab left them on a file listing they never asked for, with the recovery prompt
+    // (base-dir picker / error toast) stacked on top of it.
+    const sheetWasOpen = fileManagerOpen;
     docTabs.openDoc(abs, {
       type: image ? 'image' : guessDocType(abs),
       name,
@@ -2166,6 +2171,7 @@ export default function App() {
       pushRecentDoc({ path: abs, name: res.name, type: res.type, ts: Date.now() });
     } catch (error) {
       docTabs.closeTab(abs); // never leave a dead loading tab behind
+      if (!sheetWasOpen) setFileManagerOpen(false); // and never leave the sheet open on a doc that failed
       throw error;
     }
   };
