@@ -19,6 +19,38 @@ export interface ChangelogEntry {
 // `entryId`/`LATEST_RELEASE` use `version` when present, else `date`, as the stable unread-dot id.
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '0.30.0',
+    date: '2026-09-19',
+    highlight: {
+      zh: '文档预览全面升级：朗读、目录、查找、图表',
+      en: 'A full document reader: read-aloud, outline, search, diagrams',
+    },
+    items: {
+      zh: [
+        '新增朗读：点正文任意一句即从该句接着读，支持倍速，朗读时自动跟随当前句；代码块按行读。',
+        '新增目录：左侧滑出的大纲可按节收起；正文里的标题左侧也能折叠该节内容（标题行始终可见）。',
+        '新增文档内查找：命中高亮并显示「第几/共几」，可上一个/下一个循环跳转。',
+        '新增「更多」浮窗：文件路径、大小、修改与创建时间（路径可复制），并支持复制 Markdown 原文、字数与字符数、重新加载。',
+        '支持 Mermaid 图表与脚注；每个代码块右上角可一键复制。',
+        '文档内锚点、以及 Agent 打印的 file.md#小节 链接都能直接跳到对应标题；网址改为在应用内置浏览器打开。',
+        '每份文档记住阅读位置；长文滚动后可一键「回到顶部」。',
+        '打开文件与重新加载都会先显示「加载中」，大文件不再点了没反应；出错不再整屏变黑。',
+        '修复终端在应用隐藏光标时可能与 tmux 光标错位、导致同一段内容重复显示的问题。',
+      ],
+      en: [
+        'Read aloud: tap any sentence to continue reading from there, with speed control and auto-follow; code blocks are read line by line.',
+        'Outline: the left drawer lists every heading and folds by section; headings in the document fold their own content too.',
+        'Search inside the document: matches are highlighted with a count and next/previous.',
+        'File info panel: path, size, modified and created times (path copies in one tap), plus copy the Markdown source, word counts and reload.',
+        'Mermaid diagrams and GFM footnotes; one-tap copy on every code block.',
+        'In-document anchors and the file.md#section links an agent prints now jump to the right heading; links open in the built-in browser.',
+        'Each document remembers your reading position, and long documents get a back-to-top button.',
+        'Opening and reloading show a loading page first, so large files no longer freeze; a failure no longer blanks the app.',
+        'Fixed the terminal repeating the same content when the app hides the cursor and the parser drifts from tmux.',
+      ],
+    },
+  },
+  {
     version: '0.29.2',
     date: '2026-09-18',
     highlight: {
