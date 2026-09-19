@@ -45,8 +45,9 @@ describe('WindowBar', () => {
     expect(styles).toMatch(/\.win-title\s*\{[^}]*display:\s*inline-flex[^}]*gap:\s*4px/);
     expect(styles).toMatch(/\.win-tab \.agent-mark\s*\{\s*margin:\s*0/);
     // A mark wider than it is tall may use the height, but only up to the cap — beyond that it would
-    // dominate the tab.
-    expect(styles).toMatch(/\.agent-mark\s*\{[^}]*height:\s*15px[^}]*max-width:\s*20px/);
+    // dominate the tab. The width is explicit px from the mark's own aspect, never the inline SVG's
+    // intrinsic size (iOS WebKit does not resolve that reliably).
+    expect(styles).toMatch(/\.agent-mark\s*\{[^}]*height:\s*15px[^}]*min\(calc\(15px \* var\(--agent-aspect, 1\)\), 20px\)/);
 
     render({
       ...base,

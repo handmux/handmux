@@ -717,8 +717,6 @@ button.settings-page-row:disabled, .settings-page-row.disabled { color: rgba(235
   font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 11.5px; line-height: 1.25; color: var(--ink, #e6e6e6); }
 .pane-map-cell.is-current .pmc-cmd { color: #fff; }
 .pane-map-cell .pmc-row .agent-mark { width: 13px; height: 13px; margin: 0; }
-/* Tiles are too tight for a wide mark to run: keep the square box here and let the artwork letterbox. */
-.pane-map-cell .pmc-row .agent-mark svg { width: 100%; }
 /* Adaptive content by rendered tile size (classes from paneLayout.js cellFit): */
 .pane-map-cell.is-flat   .pmc-surf { flex-direction: row; align-items: center; gap: 6px; padding: 0 8px; }
 .pane-map-cell.is-narrow .pmc-surf { align-items: center; justify-content: center; padding: 4px 2px; }
@@ -2875,14 +2873,18 @@ button.cmd-text { background: none; border: none; text-align: left; }
 .inbox-row:active { background: #2f3034; }
 .inbox-row-head { display: flex; align-items: center; gap: 6px; min-width: 0; }
 /* Agent brand logo (Claude / Codex) — flush in the inbox row and on a single-pane window tab. */
-/* Sizing is by HEIGHT, width follows the artwork, and a wide mark may not run past the cap. A mark wider
-   than it is tall — both robots the CLIs print on startup are — would letterbox inside a square box and read
-   as much smaller than a square mark; letting it use its full artwork width, though, makes it dominate the
-   tab. The cap is the middle: Claude's ends up ~11.8px tall, between the 8.8px it letterboxed at and the
-   15px it would take at full width. Square marks are unaffected. Where space is tight (the pane map), the
-   width is pinned instead. */
-.agent-mark { height: 15px; width: auto; max-width: 20px; flex: none; display: inline-block; }
-.agent-mark svg { display: block; height: 100%; width: auto; max-width: 100%; }
+/* Sizing is by HEIGHT; the width is the mark's own aspect (published per mark as --agent-aspect by
+   AgentMark), capped. A mark wider than it is tall — both robots the CLIs print on startup are — would
+   letterbox inside a square box and read as much smaller than a square mark; letting it run its full artwork
+   width, though, makes it dominate the tab. The cap is the middle. Widths are explicit px, never derived
+   from the inline SVG's intrinsic size, which iOS WebKit does not resolve reliably. Where space is tight
+   (the pane map) the box is pinned square instead. */
+.agent-mark {
+  height: 15px;
+  width: min(calc(15px * var(--agent-aspect, 1)), 20px);
+  flex: none; display: inline-block;
+}
+.agent-mark svg { display: block; height: 100%; width: 100%; }
 .win-tab .agent-mark { margin: 0; }
 .inbox-chip { font-size: 11px; padding: 1px 6px; border-radius: 4px; flex: none; }
 .inbox-chip.needs { background: #e0a020; color: #111; }
@@ -3105,7 +3107,7 @@ button.cmd-text { background: none; border: none; text-align: left; }
 .usage-agent-head { min-width: 0; min-height: 52px; display: grid;
   grid-template-columns: 18px minmax(0, 1fr) minmax(0, auto) 44px; align-items: center; column-gap: 8px;
   padding-left: 12px; font-weight: 600; font-size: 15px; }
-.usage-agent-head .agent-mark { height: 18px; width: auto; }
+.usage-agent-head .agent-mark { height: 18px; width: min(calc(18px * var(--agent-aspect, 1)), 24px); }
 .usage-agent-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .usage-agent-menu { grid-column: 4; flex: none; }
 .usage-agent-menu:disabled { opacity: .38; }

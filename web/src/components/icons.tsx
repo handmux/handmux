@@ -5,7 +5,7 @@ import claudeLogo from '../assets/agent-claude.svg?raw';
 import codebuddyLogo from '../assets/agent-codebuddy.svg?raw';
 import codexLogo from '../assets/agent-codex.svg?raw';
 import piLogo from '../assets/agent-pi.svg?raw';
-import type { SVGProps } from 'react';
+import type { CSSProperties, SVGProps } from 'react';
 import { useAgentCatalogDescriptor } from '../agentCatalog.js';
 
 const base: SVGProps<SVGSVGElement> = {
@@ -525,6 +525,17 @@ const AGENT_LOGO: Readonly<Record<string, string>> = {
   pi: piLogo,
 };
 
+// A mark's width comes from its OWN box, published to CSS as a custom property. Letting the browser derive
+// it from the inline SVG instead ("width: auto" on the span) works in Chrome but not reliably in iOS
+// WebKit, where an SVG with no intrinsic width can collapse its parent — and the layout then measures the
+// badge wrong, which pushed the tab's label out of its own background.
+function logoAspect(logo: string): number {
+  const box = /viewBox="[\d.+-]*\s+[\d.+-]*\s+([\d.]+)\s+([\d.]+)"/.exec(logo);
+  const w = Number(box?.[1]);
+  const h = Number(box?.[2]);
+  return Number.isFinite(w) && Number.isFinite(h) && w > 0 && h > 0 ? w / h : 1;
+}
+
 // Unknown and not-yet-branded adapters must stay visually neutral; never mislabel them as another Agent.
 export function AgentMark({ agent }: { agent?: string | null }) {
   const id = agent || 'agent';
@@ -533,8 +544,9 @@ export function AgentMark({ agent }: { agent?: string | null }) {
   const label = catalog.descriptor?.label ?? id;
   const logo = iconId ? AGENT_LOGO[iconId] : undefined;
   if (logo) {
+    const aspect = { '--agent-aspect': String(logoAspect(logo)) } as CSSProperties;
     return <span className="agent-mark" role="img" aria-label={label} data-agent-icon={iconId}
-      dangerouslySetInnerHTML={{ __html: logo }} />;
+      style={aspect} dangerouslySetInnerHTML={{ __html: logo }} />;
   }
   return (
     <span className="agent-mark" role="img" aria-label={label} data-agent-icon="generic">
