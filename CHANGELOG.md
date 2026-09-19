@@ -4,6 +4,8 @@ All notable changes to handmux. Format follows [Keep a Changelog](https://keepac
 
 ## [Unreleased]
 
+## [0.30.0] - 2026-09-19
+
 ### Added
 
 - 文档预览新增朗读：可从正文任意一句开始读、倍速、朗读中自动跟随当前句；代码块按行读，图片加载提示这类界面文字不会被读出来。
