@@ -92,6 +92,19 @@ describe('renderMarkdown — bubble mode images (no baseDir)', () => {
   });
 });
 
+describe('renderMarkdown — table scroll hint', () => {
+  it('wraps a table in its own scroll box (the box carries the edge fade)', () => {
+    const out = renderMarkdown('| a | b |\n| --- | --- |\n| 1 | 2 |', { baseDir: '/d' });
+    expect(out).toContain('<div class="md-table-scroll"><table>');
+  });
+
+  it('wraps tables in bubble mode too, exactly once', () => {
+    const out = renderMarkdown('| a |\n| --- |\n| 1 |', { links: true });
+    expect(out.match(/md-table-scroll/g)).toHaveLength(1);
+    expect(out).not.toContain('md-table-scroll"><div');
+  });
+});
+
 describe('renderMarkdown — sanitization still holds', () => {
   it('drops event handlers', () => {
     const out = renderMarkdown('<img src=x onerror=alert(1)>ok', { baseDir: '/d' });

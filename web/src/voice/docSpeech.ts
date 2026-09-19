@@ -35,6 +35,8 @@ function inSkippedBlock(node: Node, root: HTMLElement): boolean {
     const t = p.nodeName;
     if (t === 'SCRIPT' || t === 'STYLE') return true;
     if (p instanceof HTMLElement && p.hasAttribute('data-tts-skip')) return true;
+    // A section the reader folded away is not part of what they are looking at — do not read it.
+    if (p instanceof HTMLElement && p.classList.contains('md-section-hidden')) return true;
   }
   return false;
 }

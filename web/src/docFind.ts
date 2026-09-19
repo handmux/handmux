@@ -16,7 +16,12 @@ function isFindable(node: Text): boolean {
   if (!parent) return false;
   const tag = parent.nodeName;
   if (tag === 'SCRIPT' || tag === 'STYLE') return false;
-  return !!node.nodeValue && node.nodeValue.length > 0;
+  if (!node.nodeValue || node.nodeValue.length === 0) return false;
+  // Folded-away sections are not searchable: the reader cannot see the match to act on it.
+  for (let p: Element | null = parent; p; p = p.parentElement) {
+    if (p.classList.contains('md-section-hidden')) return false;
+  }
+  return true;
 }
 
 function textNodes(root: HTMLElement): Text[] {

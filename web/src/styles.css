@@ -2487,13 +2487,15 @@ button.cmd-text { background: none; border: none; text-align: left; }
   text-align: left; touch-action: manipulation; }
 .doc-info-action:active { background: #3d4047; }
 .doc-info-action svg { width: 15px; height: 15px; flex: none; }
-/* Per-code-block copy — pinned top-right, absolutely positioned so the code text cannot reflow
-   (the pre is the positioning context). */
-.doc-code-copy { position: absolute; top: 6px; right: 6px; z-index: 1; display: inline-flex;
-  align-items: center; justify-content: center; width: 34px; height: 34px; padding: 0; border: 0;
-  border-radius: 8px; background: rgba(255,255,255,.07); color: #9fb0c0; touch-action: manipulation;
+/* Per-code-block copy — pinned to the top-right corner, absolutely positioned so the code text cannot
+   reflow (the pre is the positioning context). Visually small on purpose: the tap area is widened by a
+   transparent ::after instead of a big visible box. */
+.doc-code-copy { position: absolute; top: 4px; right: 4px; z-index: 1; display: inline-flex;
+  align-items: center; justify-content: center; width: 26px; height: 26px; padding: 0; border: 0;
+  border-radius: 6px; background: rgba(255,255,255,.06); color: #9fb0c0; touch-action: manipulation;
   -webkit-tap-highlight-color: transparent; }
-.doc-code-copy svg { width: 15px; height: 15px; display: block; }
+.doc-code-copy::after { content: ''; position: absolute; inset: -10px; } /* ~46px hit area, no bulk */
+.doc-code-copy svg { width: 13px; height: 13px; display: block; }
 .doc-code-copy:active { background: rgba(255,255,255,.14); }
 .doc-code-copy.is-copied { color: #6ee7a8; }
 /* Read-aloud could not start (the engine refused) — say so instead of leaving a dead tap. */
@@ -2594,6 +2596,19 @@ button.cmd-text { background: none; border: none; text-align: left; }
 .doc-md blockquote { margin: 8px 0; padding: 2px 12px; border-left: 3px solid #2c3947; color: #9fb0c0; }
 .doc-md blockquote p { margin: 6px 0; }
 .doc-md input[type="checkbox"] { margin-right: 6px; vertical-align: middle; }
+/* Body folding (docFolding.ts): a caret inside each heading collapses that section. The caret is drawn
+   with CSS (no text), so heading text — and therefore slugs, find and read-aloud — stay untouched. */
+.doc-md .md-fold { display: inline-block; width: 20px; height: 20px; margin: 0 4px 0 -24px;
+  vertical-align: middle; cursor: pointer; touch-action: manipulation; }
+.doc-md .md-fold::before { content: ''; display: block; width: 7px; height: 7px; margin: 4px auto 0;
+  border-right: 2px solid #6f7c8a; border-bottom: 2px solid #6f7c8a;
+  transform: rotate(45deg); transition: transform .15s ease; }
+.doc-md h1.is-folded .md-fold::before, .doc-md h2.is-folded .md-fold::before,
+.doc-md h3.is-folded .md-fold::before, .doc-md h4.is-folded .md-fold::before,
+.doc-md h5.is-folded .md-fold::before, .doc-md h6.is-folded .md-fold::before { transform: rotate(-45deg); }
+.doc-md h1, .doc-md h2, .doc-md h3, .doc-md h4, .doc-md h5, .doc-md h6 { padding-left: 24px; }
+.doc-md .md-section-hidden { display: none; }
+
 /* GFM footnotes (docFootnotes.ts): a superscript reference and a notes list at the end. */
 .doc-md sup.md-fn-ref { font-size: .75em; line-height: 0; vertical-align: super; }
 .doc-md sup.md-fn-ref a { text-decoration: none; padding: 0 1px; }
@@ -2603,8 +2618,22 @@ button.cmd-text { background: none; border: none; text-align: left; }
 .doc-md .md-footnotes ol { margin: 0; padding-left: 1.4em; }
 .doc-md .md-footnotes li { margin: .2em 0; }
 .doc-md .md-fn-back { text-decoration: none; }
-/* wide tables scroll inside themselves instead of widening the doc (overflow-x is hidden there) */
-.doc-md table { display: block; max-width: 100%; overflow-x: auto; border-collapse: collapse; }
+/* Wide tables scroll inside their own box (see markdown.ts wrapTables) instead of widening the doc, and
+   the box fades its edge while there is more table beyond it. Kept subtle on purpose: a 14px hint, not a
+   scrim. `th` keeps its own solid background, so the header edge stays crisp. */
+.md-table-scroll {
+  max-width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch;
+  background:
+    linear-gradient(to right, #0b0f14 30%, rgba(11,15,20,0)),
+    linear-gradient(to left, #0b0f14 30%, rgba(11,15,20,0)),
+    radial-gradient(farthest-side at 0 50%, rgba(0,0,0,.82), rgba(0,0,0,0)),
+    radial-gradient(farthest-side at 100% 50%, rgba(0,0,0,.82), rgba(0,0,0,0));
+  background-repeat: no-repeat;
+  background-size: 30px 100%, 30px 100%, 22px 100%, 22px 100%;
+  background-attachment: local, local, scroll, scroll;
+  background-position: 0 0, 100% 0, 0 0, 100% 0;
+}
+.doc-md table { border-collapse: collapse; }
 .doc-md th, .doc-md td { border: 1px solid #1d2630; padding: 6px 10px; text-align: left; }
 .doc-md th { background: #11161d; }
 
@@ -3525,7 +3554,7 @@ button.cmd-text { background: none; border: none; text-align: left; }
 .chat-md code { background: var(--ct-code-bg); padding: 1px 4px; border-radius: 4px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: .92em; }
 .chat-md pre { background: var(--ct-code-bg); padding: 10px; border-radius: 8px; margin: 0 0 .5333333333333333em; overflow-x: auto; -webkit-overflow-scrolling: touch; max-width: 100%; }
 .chat-md pre code { background: none; padding: 0; }
-.chat-md table { display: block; max-width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; border-collapse: collapse; margin: 0 0 .5333333333333333em; }
+.chat-md table { border-collapse: collapse; margin: 0 0 .5333333333333333em; }
 .chat-md th, .chat-md td { border: 1px solid var(--ct-line); padding: 4px 8px; text-align: left; white-space: nowrap; }
 
 /* Tool chip — collapsed by default; tap expands the raw result inline. Muted so it reads as machinery,

@@ -64,3 +64,14 @@ describe('find highlight CSS contract', () => {
     expect(current?.body).toMatch(/box-shadow\s*:|outline\s*:/);
   });
 });
+
+describe('table edge fade', () => {
+  it('is position-aware: local layers over scroll layers, so it only shows where content remains', () => {
+    const rule = /\.md-table-scroll\s*\{([^}]*)\}/.exec(styles)?.[1] ?? '';
+    expect(rule).toMatch(/overflow-x:\s*auto/);
+    expect(rule).toMatch(/background-attachment:\s*local,\s*local,\s*scroll,\s*scroll/);
+    // and the table itself no longer scrolls (the wrapper owns it)
+    const table = /\.doc-md table\s*\{([^}]*)\}/.exec(styles)?.[1] ?? '';
+    expect(table).not.toMatch(/overflow-x:\s*auto/);
+  });
+});

@@ -94,6 +94,21 @@ function noteInstead(img: Element, reason: string): void {
   img.replaceWith(note);
 }
 
+// Wide tables scroll sideways, but nothing said so. Wrapping each table in its own scroll box lets the
+// CSS fade the edge that still has content beyond it — pure CSS, position-aware, no scroll listeners:
+// the page-coloured layers are `background-attachment: local` (they move with the content) and cover the
+// shadow layers (`scroll`, pinned to the box) exactly while the table is scrolled to that edge.
+function wrapTables(root: HTMLElement): void {
+  for (const table of Array.from(root.querySelectorAll('table'))) {
+    const parent = table.parentElement;
+    if (!parent || parent.classList.contains('md-table-scroll')) continue;
+    const box = document.createElement('div');
+    box.className = 'md-table-scroll';
+    parent.insertBefore(box, table);
+    box.appendChild(table);
+  }
+}
+
 function rewriteImages(root: HTMLElement, baseDir: string | null): void {
   for (const img of Array.from(root.querySelectorAll('img'))) {
     const raw = img.getAttribute('src') || '';
@@ -166,6 +181,7 @@ export function renderMarkdown(source: string, options: RenderMarkdownOptions = 
   const { source: body, notes } = stripFootnoteDefs(stripFrontmatter(source || ''));
   root.innerHTML = DOMPurify.sanitize(marked.parse(body, { async: false }) as string);
   applyFootnotes(root, notes);
+  wrapTables(root);
   rewriteImages(root, options.baseDir ?? null);
   if (options.links) linkify(root);
   return root.innerHTML;
