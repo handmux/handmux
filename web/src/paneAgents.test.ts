@@ -113,6 +113,21 @@ describe('navigation Agent logos', () => {  it('lets canonical current-window pa
     }, { '%4': { window: '@2', agent: 'claude' } });
     expect(maps.windowAgents['@2']).toBe('claude');
   });
+
+  it("the selected window's badge is its active pane's Agent too", () => {
+    // The same rule as any other window: the client's own current pane must not decide the badge, or it
+    // changes the moment the window is selected. Here the active pane (%1) is claude while the pane listed
+    // last (%2) is codex.
+    const maps = navigationAgentMaps({
+      window: { id: '@1' },
+      windows: [{ id: '@1', activePaneId: '%1' }],
+      panes: [{ id: '%1', agent: 'claude' }, { id: '%2', agent: 'codex' }],
+    }, {
+      '%1': { window: '@1', agent: 'codex' },
+      '%2': { window: '@1', agent: 'codex' },
+    });
+    expect(maps.windowAgents['@1']).toBe('claude');
+  });
 });
 
 describe('merging a fresh /panes response', () => {

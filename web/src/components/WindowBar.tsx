@@ -382,7 +382,9 @@ export default function WindowBar({
                 panes={panes}
                 paneAgents={paneAgents}
                 currentPaneId={currentPaneId}
-                agent={currentAgent ?? null}
+                agent={Object.hasOwn(windowAgents, w.id)
+                  ? windowAgents[w.id] ?? null
+                  : currentAgent ?? null}
                 onManage={onManageWindow}
                 {...(onManagePane ? { onManagePane } : {})}
                 onSelectPane={onSelectPane}

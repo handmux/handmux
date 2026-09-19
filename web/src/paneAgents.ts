@@ -92,12 +92,12 @@ export function navigationAgentMaps(
     if (pane.agent) canonicalWindowAgent = pane.agent;
   }
   if (windowId && hasCanonicalWindowIdentity) windowAgents[windowId] = canonicalWindowAgent;
-  // A window you have NOT selected has to carry the mark of the pane you would land on — its ACTIVE pane —
-  // because the selected tab renders the current pane's agent. Taking whichever pane happened to be listed
-  // last made the badge change the instant you selected the window. The selected window is left alone: its
-  // value came from the canonical /panes identity above, which outranks the /states roster this reads.
+  // A window's badge is its ACTIVE pane's Agent — whether or not that window is the selected one. Deriving
+  // it from whichever pane was listed last (or, for the selected window, from the pane this client happens
+  // to have open) meant the badge changed the moment you selected the window, and could flash on the way.
+  // The selected window keeps the canonical value above whenever /windows does not report an active pane.
   for (const win of current?.windows ?? []) {
-    if (!win?.id || win.id === windowId) continue;
+    if (!win?.id) continue;
     const activePaneId = win.activePaneId;
     if (typeof activePaneId !== 'string' || !activePaneId) continue;
     windowAgents[win.id] = paneAgents[activePaneId] ?? null;

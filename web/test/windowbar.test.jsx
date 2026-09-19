@@ -136,11 +136,17 @@ describe('WindowBar', () => {
     expect(opts[1].querySelector('.agent-mark')).toBeNull();     // %2 = shell → no logo
   });
 
-  it("the active multi-pane tab's logo follows the CURRENT pane, not the window aggregate", () => {
-    // Current pane (%1) has no agent, but the window aggregate says claude (from the other pane). The tab
-    // must stay logo-less — so exiting the agent in the pane you're on clears it, instead of a sibling
-    // pane's agent keeping it lit.
-    render({ ...base, currentAgent: undefined, windowAgents: { '@1': 'claude' } });
+  it("a multi-pane window's logo is its ACTIVE pane's, whether or not the window is selected", () => {
+    // Both tabs read windowAgents, which is the window's active pane. The selected tab used to read the
+    // client's current pane instead, so the logo changed the moment you selected the window — and could
+    // flash while the two disagreed.
+    render({ ...base, currentAgent: 'codex', windowAgents: { '@1': 'claude', '@2': 'codex' } });
+    expect(container.querySelector('.wt-trigger .agent-mark')?.getAttribute('aria-label')).toBe('claude');
+  });
+
+  it('an active pane with no Agent leaves the selected multi-pane tab logo-less', () => {
+    // An explicit null is the window's answer, not a missing value to fall back from.
+    render({ ...base, currentAgent: 'claude', windowAgents: { '@1': null } });
     expect(container.querySelector('.wt-trigger .agent-mark')).toBeNull();
   });
 
