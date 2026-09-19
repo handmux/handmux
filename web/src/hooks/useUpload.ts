@@ -57,7 +57,7 @@ export function useUpload({ cwd, onAuthFail, onPaths }: UseUploadOptions): Uploa
     if (!list.length) {
       if (rejected.length) {
         clearUploadTimer();
-        setUpload({ label: t('dock.upload.rejected', { names: rejected.join('、') }), error: true });
+        setUpload({ label: t('dock.upload.rejected', { names: rejected.join(t('common.listSeparator')) }), error: true });
         upTimerRef.current = setTimeout(() => setUpload(null), 3500);
       }
       return;
@@ -72,13 +72,13 @@ export function useUpload({ cwd, onAuthFail, onPaths }: UseUploadOptions): Uploa
     const ac = new AbortController();
     const firstFile = list[0];
     if (!firstFile) return;
-    startUpload(ac, t('dock.upload.progress', { name: firstFile.name, tag: total > 1 ? `（1/${total}）` : '' }));
+    startUpload(ac, t('dock.upload.progress', { name: firstFile.name, tag: total > 1 ? t('common.batchProgress', { done: 1, total }) : '' }));
     try {
       for (let i = 0; i < total; i++) {
         if (ac.signal.aborted) break;
         const f = list[i];
         if (!f) continue;
-        const tag = total > 1 ? `（${i + 1}/${total}）` : '';
+        const tag = total > 1 ? t('common.batchProgress', { done: i + 1, total }) : '';
         updateUpload({ label: t('dock.upload.progress', { name: f.name, tag }), phase: 'sending', pct: 0 });
         try {
           const response: unknown = await uploadFile(
@@ -105,10 +105,10 @@ export function useUpload({ cwd, onAuthFail, onPaths }: UseUploadOptions): Uploa
     }
     if (paths.length) onPaths(paths);
     if (failed.length || rejected.length) {
-      // Each failure carries its own reason (name：why); rejected types keep their one-line note.
-      const parts = failed.map((x) => `${x.name}：${x.reason}`);
-      if (rejected.length) parts.push(t('dock.upload.rejected', { names: rejected.join('、') }));
-      setUpload({ label: parts.join('；'), error: true });
+      // Each failure carries its own reason (which file, and why); rejected types keep their one-line note.
+      const parts = failed.map((x) => t('common.nameWithReason', { name: x.name, reason: x.reason }));
+      if (rejected.length) parts.push(t('dock.upload.rejected', { names: rejected.join(t('common.listSeparator')) }));
+      setUpload({ label: parts.join(t('common.messageSeparator')), error: true });
       upTimerRef.current = setTimeout(() => setUpload(null), 5000);
     } else {
       setUpload(null);

@@ -39,6 +39,7 @@ const MIXED_ENTRIES = [
 
 import FileBrowser, { splitPath } from '../src/components/FileBrowser.jsx';
 import { fetchDir, downloadFile, uploadFile, createDir } from '../src/api.js';
+import zh from '../src/i18n/zh.js';
 
 let container, root;
 beforeEach(() => {
@@ -390,6 +391,31 @@ describe('FileBrowser', () => {
     await settle();
     expect(uploadFile).toHaveBeenCalledWith('/home/u/docs', file, expect.any(Function), false, { signal: expect.any(Object) });
     expect(fetchDir).toHaveBeenLastCalledWith('/home/u/docs'); // reloaded after success
+  });
+
+  it('assembles the rejected-type note from the locale punctuation rather than a hardcoded one', async () => {
+    await render({ path: '/home/u/docs' });
+    await settle();
+    // .exe is not an allowed upload extension, and a name with no extension is refused too.
+    const files = [new File(['x'], 'a.exe'), new File(['x'], 'README')];
+    const fileInput = container.querySelector('.browse-file-input');
+    Object.defineProperty(fileInput, 'files', { value: files, configurable: true });
+    await act(async () => { fileInput.dispatchEvent(new Event('change', { bubbles: true })); });
+    await settle();
+    const expected = zh['filebrowser.uploadRejected']
+      .replace('{names}', ['a.exe', 'README'].join(zh['common.listSeparator']));
+    expect(container.querySelector('.browse-err').textContent).toBe(expected);
+    expect(uploadFile).not.toHaveBeenCalled();
+  });
+
+  it('gives each kind of entry its own icon, so a document reads differently from a plain file', async () => {
+    await render({ path: null });
+    await settle();
+    const iconOf = (name) => rowFor(name).querySelector('.browse-entry-icon').innerHTML;
+    const markup = ['docs', 'photo.gif', 'report.md', 'data.bin'].map(iconOf);
+    // directory / image / openable document / downloadable file — four distinct glyphs, not three
+    // with docs and binaries sharing the generic page.
+    expect(new Set(markup).size).toBe(4);
   });
 });
 

@@ -211,6 +211,13 @@ export default {
   'terminal.connection_poor': 'Poor',
   'common.save': 'Save',
   'common.cancel': 'Cancel',
+  // Locale punctuation for the few places that ASSEMBLE a sentence out of parts (a list of file
+  // names, a "which file: why" failure note, a batch counter). Hardcoding these in the code showed
+  // Chinese punctuation to English/Korean users.
+  'common.listSeparator': ', ',
+  'common.messageSeparator': '; ',
+  'common.nameWithReason': '{name}: {reason}',
+  'common.batchProgress': ' ({done}/{total})',
   'common.confirm': 'Confirm',
   'common.ok': 'OK',
   'common.close': 'Close',
@@ -1151,7 +1158,6 @@ export default {
   'filebrowser.downloadFailed': 'Download failed',
   'filebrowser.uploading': 'Uploading {name}{tag}',
   'filebrowser.uploadFailed': 'Upload failed',
-  'filebrowser.uploadPartialFailed': 'These files failed to upload: {names}',
   'filebrowser.uploadRejected': 'Unsupported file type: {names}',
   'filebrowser.sessionDir': 'Session directory',
   'filebrowser.jumpToSessionDir': 'Jump to current session directory',

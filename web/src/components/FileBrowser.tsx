@@ -6,7 +6,7 @@ import { UPLOAD_ACCEPT, splitUploadable } from '../uploadTypes.js';
 import { joinPath } from '../docPath.js';
 import { formatBytes, formatRelativeTime } from '../format.js';
 import { getBrowserSort, setBrowserSort, getBrowserShowHidden, setBrowserShowHidden, type BrowserSort } from '../storage.js';
-import { FolderIcon, FileIcon, ImageIcon, ArrowUpIcon, ArrowUpDownIcon, DownloadIcon, LocateIcon, FolderPlusIcon, UploadIcon, CopyIcon } from './icons.jsx';
+import { FolderIcon, FileIcon, FileTextIcon, ImageIcon, ArrowUpIcon, ArrowUpDownIcon, DownloadIcon, LocateIcon, FolderPlusIcon, UploadIcon, CopyIcon } from './icons.jsx';
 import ActionSheet from './ActionSheet.jsx';
 import { t } from '../i18n';
 import { useBackButton } from '../hooks/useBackButton.js';
@@ -368,7 +368,7 @@ export default function FileBrowser({
   const doUpload = async (files: File | readonly File[] | FileList): Promise<string[]> => {
     const { allowed: list, rejected } = splitUploadable(files);
     if (!list.length) {
-      if (rejected.length) setErr(t('filebrowser.uploadRejected', { names: rejected.join('、') }));
+      if (rejected.length) setErr(t('filebrowser.uploadRejected', { names: rejected.join(t('common.listSeparator')) }));
       return rejected;
     }
     if (!dir) return [...list.map((file) => file.name), ...rejected];
@@ -382,13 +382,13 @@ export default function FileBrowser({
     // AbortController for the batch so Cancel aborts the in-flight file and breaks the loop. Download
     // keeps its own inline `progress` bar — only uploads move to the overlay.
     const ac = new AbortController();
-    startUpload(ac, t('filebrowser.uploading', { name: firstFile.name, tag: total > 1 ? `（1/${total}）` : '' }));
+    startUpload(ac, t('filebrowser.uploading', { name: firstFile.name, tag: total > 1 ? t('common.batchProgress', { done: 1, total }) : '' }));
     try {
       for (let i = 0; i < total; i++) {
         if (ac.signal.aborted) break;
         const file = list[i];
         if (!file) continue;
-        const tag = total > 1 ? `（${i + 1}/${total}）` : '';
+        const tag = total > 1 ? t('common.batchProgress', { done: i + 1, total }) : '';
         updateUpload({ label: t('filebrowser.uploading', { name: file.name, tag }), phase: 'sending', pct: 0 });
         try {
           await uploadFile(dir.path, file, (pct, phase) => updateUpload({ pct, phase }), false, { signal: ac.signal });
@@ -403,8 +403,8 @@ export default function FileBrowser({
     }
     await load(dir.path, {}); // refresh listing so the new files show
     setUploading(false);
-    if (failed.length) setErr(failed.map((x) => `${x.name}：${x.reason}`).join('；'));
-    else if (rejected.length) setErr(t('filebrowser.uploadRejected', { names: rejected.join('、') }));
+    if (failed.length) setErr(failed.map((x) => t('common.nameWithReason', { name: x.name, reason: x.reason })).join(t('common.messageSeparator')));
+    else if (rejected.length) setErr(t('filebrowser.uploadRejected', { names: rejected.join(t('common.listSeparator')) }));
     return [...failed.map((x) => x.name), ...rejected];
   };
   // A file shared in via the system share sheet (Web Share Target) → upload it to the CURRENT dir,
@@ -602,7 +602,7 @@ export default function FileBrowser({
                       : showNotice(t('filebrowser.previewUnsupported'))
                 )}
               >
-                <span className="browse-entry-icon">{e.type === 'dir' ? <FolderIcon /> : e.type === 'image' ? <ImageIcon /> : <FileIcon />}</span>
+                <span className="browse-entry-icon">{e.type === 'dir' ? <FolderIcon /> : e.type === 'image' ? <ImageIcon /> : e.type === 'doc' ? <FileTextIcon /> : <FileIcon />}</span>
                 <span className="browse-entry-name">{e.name}</span>
                 {(time || size) && (
                   <span className="browse-entry-meta">

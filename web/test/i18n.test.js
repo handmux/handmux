@@ -161,3 +161,23 @@ describe('browser dual-mode copy', () => {
     }
   });
 });
+
+// A few messages are ASSEMBLED at runtime out of parts: a list of file names, a "which file: why"
+// upload failure, a "(1/3)" batch counter. Those connectors are punctuation, and punctuation is
+// locale-owned — hardcoding them in the component showed Chinese 、；：（）to English and Korean users.
+describe('assembly punctuation belongs to the locale', () => {
+  it.each([
+    ['en', en, ', ', '; ', ': ', ' ('],
+    ['zh', zh, '、', '；', '：', '（'],
+    ['zh-TW', zhTW, '、', '；', '：', '（'],
+    ['ja', ja, '、', '；', '：', '（'],
+    ['ko', ko, ', ', '; ', ': ', ' ('],
+  ])('%s joins names, notes, a name+reason and a batch counter its own way',
+    (_code, dict, listSep, noteSep, nameColon, progressOpen) => {
+      expect(dict['common.listSeparator']).toBe(listSep);
+      expect(dict['common.messageSeparator']).toBe(noteSep);
+      expect(dict['common.nameWithReason']).toBe(`{name}${nameColon}{reason}`);
+      expect(dict['common.batchProgress']).toContain(progressOpen);
+      expect(dict['common.batchProgress']).toContain('{done}/{total}');
+    });
+});

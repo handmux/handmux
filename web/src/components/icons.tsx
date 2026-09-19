@@ -49,6 +49,19 @@ export function FileIcon() {
   );
 }
 
+// The same page with text lines — a file the app can open as a document, as opposed to a plain
+// FileIcon for the ones it can only download. Without the distinction every non-image file looked
+// identical in the browser, so you could not tell a .md from a .bin at a glance.
+export function FileTextIcon() {
+  return (
+    <svg {...base}>
+      <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" />
+      <path d="M14 3v5h5" />
+      <path d="M9 13h6M9 17h6" />
+    </svg>
+  );
+}
+
 // Image file — a framed picture with a sun + mountain (Lucide "image").
 export function ImageIcon() {
   return (
