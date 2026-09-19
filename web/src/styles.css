@@ -2611,17 +2611,19 @@ button.cmd-text { background: none; border: none; text-align: left; }
 .doc-md .md-mermaid-error { margin: 8px 0; padding: 10px 12px; border-radius: 8px; background: #1b222b;
   color: #9fb0c0; font-size: 13px; }
 
-/* Body folding (docFolding.ts): a caret inside each heading collapses that section. The caret is drawn
-   with CSS (no text), so heading text — and therefore slugs, find and read-aloud — stay untouched. */
-.doc-md .md-fold { display: inline-block; width: 20px; height: 20px; margin: 0 4px 0 -24px;
-  vertical-align: middle; cursor: pointer; touch-action: manipulation; }
-.doc-md .md-fold::before { content: ''; display: block; width: 7px; height: 7px; margin: 4px auto 0;
-  border-right: 2px solid #6f7c8a; border-bottom: 2px solid #6f7c8a;
+/* Body folding (docFolding.ts): a caret inside each heading collapses that section's CONTENT (headings
+   stay visible). The caret is drawn with CSS (no text), so heading text — and therefore slugs, find and
+   read-aloud — stay untouched. Everything here is in `em`, so the control scales with each heading's own
+   font size instead of being one fixed box for h1 through h6. */
+.doc-md .md-fold { display: inline-block; width: 1.1em; height: 1.1em; margin: 0 .25em 0 -1.35em;
+  vertical-align: baseline; cursor: pointer; touch-action: manipulation; }
+.doc-md .md-fold::before { content: ''; display: block; width: .42em; height: .42em; margin: .34em auto 0;
+  border-right: .14em solid #6f7c8a; border-bottom: .14em solid #6f7c8a;
   transform: rotate(45deg); transition: transform .15s ease; }
 .doc-md h1.is-folded .md-fold::before, .doc-md h2.is-folded .md-fold::before,
 .doc-md h3.is-folded .md-fold::before, .doc-md h4.is-folded .md-fold::before,
 .doc-md h5.is-folded .md-fold::before, .doc-md h6.is-folded .md-fold::before { transform: rotate(-45deg); }
-.doc-md h1, .doc-md h2, .doc-md h3, .doc-md h4, .doc-md h5, .doc-md h6 { padding-left: 24px; }
+.doc-md h1, .doc-md h2, .doc-md h3, .doc-md h4, .doc-md h5, .doc-md h6 { padding-left: 1.35em; }
 .doc-md .md-section-hidden { display: none; }
 
 /* GFM footnotes (docFootnotes.ts): a superscript reference and a notes list at the end. */

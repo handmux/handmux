@@ -24,14 +24,19 @@ const levelOf = (el: Element): number => (
 );
 const isHeading = (el: Element): boolean => levelOf(el) > 0;
 
-/** Recompute which blocks are hidden from the headings' folded flags. */
+/**
+ * Recompute which blocks are hidden from the headings' folded flags.
+ *
+ * Headings are NEVER hidden: folding a section hides its content, and the sub-headings inside it stay on
+ * screen as the structure you are folding around (each keeps its own caret and its own folded state).
+ */
 function applyFolding(root: HTMLElement): void {
   const folded: number[] = []; // levels of the headings currently folded, outermost first
   for (const el of Array.from(root.children)) {
     if (isHeading(el)) {
       const level = levelOf(el);
       while (folded.length && (folded[folded.length - 1] ?? 0) >= level) folded.pop();
-      el.classList.toggle(HIDDEN_CLASS, folded.length > 0);
+      el.classList.remove(HIDDEN_CLASS); // a heading line is always visible
       if (el.classList.contains(FOLDED_CLASS)) folded.push(level);
     } else {
       el.classList.toggle(HIDDEN_CLASS, folded.length > 0);

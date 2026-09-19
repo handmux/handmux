@@ -50,11 +50,13 @@ describe('heading folding', () => {
     expect(h1.textContent.trim()).toBe('一级'); // the caret contributes no text (slugs/find/TTS unaffected)
   });
 
-  it('hides the whole section — nested headings included — and restores it', () => {
+  it('hides the section content but never a heading', () => {
     const { root } = mount();
     const caret = caretOf(root, '一级');
     caret.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    expect(hidden(root)).toEqual(['一级正文。', '二级 A', '二级正文 A。', '三级', '三级正文。', '二级 B', '二级正文 B。']);
+    // every paragraph goes, every heading stays (they are what you fold around)
+    expect(hidden(root)).toEqual(['一级正文。', '二级正文 A。', '三级正文。', '二级正文 B。']);
+    expect(root.querySelectorAll('h1, h2, h3').length).toBe(4);
     caret.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     expect(hidden(root)).toEqual([]);
   });
@@ -62,7 +64,7 @@ describe('heading folding', () => {
   it('stops at the next heading of the same level', () => {
     const { root } = mount();
     caretOf(root, '二级 A').dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    expect(hidden(root)).toEqual(['二级正文 A。', '三级', '三级正文。']);
+    expect(hidden(root)).toEqual(['二级正文 A。', '三级正文。']);
   });
 
   it('keeps a nested fold folded when its parent is folded and unfolded again', () => {
@@ -71,7 +73,7 @@ describe('heading folding', () => {
     const parent = caretOf(root, '一级');
     parent.dispatchEvent(new MouseEvent('click', { bubbles: true }));  // fold the parent
     parent.dispatchEvent(new MouseEvent('click', { bubbles: true }));  // and unfold it
-    expect(hidden(root)).toEqual(['二级正文 A。', '三级', '三级正文。']); // the child is still folded
+    expect(hidden(root)).toEqual(['二级正文 A。', '三级正文。']); // the child is still folded
   });
 
   it('drives the caret aria state', () => {
