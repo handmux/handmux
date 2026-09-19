@@ -72,9 +72,12 @@ export interface DocNotModified {
 }
 
 export type ReadDocResult = DocsError | DocRead | DocNotModified;
+// `mtimeMs` is what the listing shows as "3 hours ago"; it is omitted when the entry's stat failed
+// (removed between readdir and stat), so a client can leave that column blank rather than print a
+// bogus time. Files always carry a size; dirs never do (sizing a directory means walking it).
 export type DirectoryEntry =
-  | { name: string; type: 'dir' }
-  | { name: string; type: 'doc' | 'image' | 'file'; size: number };
+  | { name: string; type: 'dir'; mtimeMs?: number }
+  | { name: string; type: 'doc' | 'image' | 'file'; size: number; mtimeMs?: number };
 
 export interface DirectoryListing {
   path: string;
@@ -176,14 +179,23 @@ export function createDocs({ home, extraRoots = [], maxDownloadBytes = MAX_TRANS
       else if (d.isFile()) fileDirents.push(d);
     }
     // stat every file IN PARALLEL — a big dir is thousands of files, and one awaited stat each
-    // (serial) is what made listing hang for seconds. Promise.all lets the OS pipeline them.
+    // (serial) is what made listing hang for seconds. Promise.all lets the OS pipeline them. The same
+    // stat carries the mtime the listing shows, so the timestamp costs no extra syscall. Dirs get one
+    // stat each (there are few) for the same timestamp; a failure just omits the field.
     const fileEntries = await Promise.all(fileDirents.map(async (d) => {
       const type: 'doc' | 'image' | 'file' = docTypeFor(d.name) ? 'doc' : imageTypeFor(d.name) ? 'image' : 'file';
-      let size = 0;
-      try { size = (await fs.stat(join(real, d.name))).size; } catch { /* gone mid-list → size 0 */ }
-      return { name: d.name, type, size };
+      try {
+        const st = await fs.stat(join(real, d.name));
+        return { name: d.name, type, size: st.size, mtimeMs: st.mtimeMs };
+      } catch {
+        return { name: d.name, type, size: 0 }; // gone mid-list → keep the row, no size/time
+      }
     }));
-    const entries = [...dirEntries, ...fileEntries];
+    const dirStats = await Promise.all(dirEntries.map(async (entry) => {
+      try { return { ...entry, mtimeMs: (await fs.stat(join(real, entry.name))).mtimeMs }; }
+      catch { return entry; }
+    }));
+    const entries = [...dirStats, ...fileEntries];
     // dirs first; files (doc+file) interleaved alphabetically
     entries.sort((a, b) =>
       (a.type === 'dir' ? 0 : 1) - (b.type === 'dir' ? 0 : 1) || a.name.localeCompare(b.name));

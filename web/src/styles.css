@@ -2383,9 +2383,28 @@ button.cmd-text { background: none; border: none; text-align: left; }
 .browse-pending-hint { color: #8aa0b6; font-style: normal; font-size: 12px; }
 .browse-pending-btn { flex: 0 0 auto; height: 32px; padding: 0 14px; border: none; border-radius: 8px; background: #2f5fa0; color: #fff; font-size: 13px; }
 .browse-pending-btn:disabled { opacity: .4; }
+/* List controls above the rows: how they're ordered, and whether the noise entries (dotfiles,
+   node_modules) show. Chips rather than 44px square buttons — they're secondary to navigation. */
+.browse-listbar { display: flex; align-items: center; gap: 6px; padding: 2px 12px 0; }
+.browse-chip { display: inline-flex; align-items: center; gap: 4px; height: 26px; padding: 0 9px; border: 1px solid #1d2630;
+  border-radius: 13px; background: #11161d; color: #8aa0b6; font-size: 12px; white-space: nowrap; }
+.browse-chip:active { color: #cfe0f0; }
+.browse-chip[aria-pressed="true"] { border-color: #3a5a7e; background: #16222f; color: #cfe0f0; }
+.browse-chip svg { width: 13px; height: 13px; }
+.browse-chip-end { margin-left: auto; }
 .browse-list { flex: 1; overflow: auto; -webkit-overflow-scrolling: touch; padding: 4px 12px 16px; }
 .browse-empty { color: #6b7a89; font-size: 13px; padding: 16px 4px; }
 .browse-overflow { color: #6b7a89; font-size: 12px; padding: 12px 4px 16px; text-align: center; }
+/* First-load placeholder. The listing had nothing to show yet and rendered the "no match" line,
+   which read as an empty folder; a few shimmer rows say "loading" instead. */
+.browse-skeleton { padding: 2px 0; }
+.browse-skeleton-row { display: block; height: 15px; margin: 14px 0; border-radius: 4px;
+  background: linear-gradient(90deg, #151d26 0%, #1d2a37 50%, #151d26 100%); background-size: 200% 100%;
+  animation: browse-shimmer 1.4s linear infinite; }
+.browse-skeleton-row:nth-child(2n) { width: 78%; }
+.browse-skeleton-row:nth-child(3n) { width: 88%; }
+@keyframes browse-shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+@media (prefers-reduced-motion: reduce) { .browse-skeleton-row { animation: none; } }
 .browse-entry { display: flex; align-items: center; gap: 9px; width: 100%; background: transparent; border: none;
   border-bottom: 1px solid #161d26; color: #e6edf3; padding: 11px 4px; text-align: left; }
 .browse-entry-icon { flex: 0 0 auto; display: inline-flex; color: #6b86a3; }
@@ -2416,11 +2435,24 @@ button.cmd-text { background: none; border: none; text-align: left; }
 .browse-progress-label { display: block; color: #9fb6d0; font-size: 12px; margin-bottom: 4px; font-variant-numeric: tabular-nums; }
 .browse-progress-track { display: block; height: 4px; border-radius: 2px; background: #1c2b3a; overflow: hidden; }
 .browse-progress-fill { display: block; height: 100%; background: #3a5a7e; transition: width .1s linear; }
-/* Each list row: the entry button flexes, the download button sits at the trailing edge. */
+/* Each list row: the entry button flexes, the download button sits at the trailing edge. The row is
+   one line like a desktop file manager — name (truncating) then modified-time and size pushed right. */
 .browse-entry-row { display: flex; align-items: center; }
 .browse-entry-row .browse-entry { flex: 1; min-width: 0; }
-.browse-entry-size { flex: 0 0 auto; margin-left: auto; padding-left: 8px; color: #6b7a89; font-size: 12px; font-variant-numeric: tabular-nums; }
+.browse-entry-meta { flex: 0 0 auto; margin-left: auto; display: inline-flex; align-items: baseline; gap: 8px;
+  padding-left: 8px; color: #6b7a89; font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+/* Right-aligned columns, like a desktop list: a two-column grid so the time ("前天") and the size
+   ("620 B") each reserve their column's width. Without the reservation a directory row (time only)
+   and a short size would shift the columns row by row. The columns are empty — not absent — for a
+   directory's size, which is what keeps every row's columns at the same x. */
+.browse-entry-meta { flex: 0 0 auto; margin-left: auto; display: inline-grid; grid-template-columns: 5em 3.6em; column-gap: 8px;
+  padding-left: 8px; color: #6b7a89; font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.browse-entry-time { grid-column: 1; text-align: right; color: #6b86a3; }
+.browse-entry-size { grid-column: 2; text-align: right; color: #6b7a89; }
 .browse-dl, .browse-copy { flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center; width: 40px; height: 44px; border: none; background: none; color: #6b86a3; margin-left: 4px; }
+/* Keeps a directory row's time/size columns at the same x as a file row's, which has two 40px
+   buttons (plus their 4px margins) eating that space. */
+.browse-actions-spacer { flex: 0 0 auto; width: 88px; }
 .browse-dl svg, .browse-copy svg { width: 17px; height: 17px; }
 .browse-copy:active { color: #9db8ff; }
 /* pickMode: sticky confirm bar at the bottom of the directory list. */

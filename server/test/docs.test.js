@@ -116,19 +116,23 @@ describe('readDoc', () => {
 });
 
 describe('listDir', () => {
-  it('lists dirs first, then all files (doc + non-doc) with size', async () => {
+  it('lists dirs first, then all files (doc + non-doc) with size and mtime', async () => {
     const out = await docs.listDir(home);
     expect(out.parent).toBeNull();
+    // Every entry carries the mtime the browser renders as "3 小时前" — dirs included, and for files it
+    // rides along the stat that already had to happen for the size.
+    const mtime = async (name) => (await fs.stat(join(home, name))).mtimeMs;
+    const size = async (name) => (await fs.stat(join(home, name))).size;
     expect(out.entries).toEqual([
-      { name: '.config', type: 'dir' },
-      { name: '.hidden', type: 'dir' },
-      { name: 'docs', type: 'dir' },
-      { name: 'proj', type: 'dir' },
-      { name: 'projects', type: 'dir' },
-      { name: 'a.md', type: 'doc', size: (await fs.stat(join(home, 'a.md'))).size },
-      { name: 'big.md', type: 'doc', size: (await fs.stat(join(home, 'big.md'))).size },
-      { name: 'note.txt', type: 'doc', size: (await fs.stat(join(home, 'note.txt'))).size },
-      { name: 'page.html', type: 'doc', size: (await fs.stat(join(home, 'page.html'))).size },
+      { name: '.config', type: 'dir', mtimeMs: await mtime('.config') },
+      { name: '.hidden', type: 'dir', mtimeMs: await mtime('.hidden') },
+      { name: 'docs', type: 'dir', mtimeMs: await mtime('docs') },
+      { name: 'proj', type: 'dir', mtimeMs: await mtime('proj') },
+      { name: 'projects', type: 'dir', mtimeMs: await mtime('projects') },
+      { name: 'a.md', type: 'doc', size: await size('a.md'), mtimeMs: await mtime('a.md') },
+      { name: 'big.md', type: 'doc', size: await size('big.md'), mtimeMs: await mtime('big.md') },
+      { name: 'note.txt', type: 'doc', size: await size('note.txt'), mtimeMs: await mtime('note.txt') },
+      { name: 'page.html', type: 'doc', size: await size('page.html'), mtimeMs: await mtime('page.html') },
     ]);
   });
   it('classifies image files as type:image (openable inline)', async () => {
@@ -349,7 +353,9 @@ describe('extra roots (multi-root browse outside $HOME)', () => {
   it('lists a dir under the extra root and reports the root set (home dropped duplicates)', async () => {
     const out = await docsX.listDir(join(outside, 'sub'));
     expect(out.path).toBe(join(extraReal, 'sub'));
-    expect(out.entries).toEqual([{ name: 'a.png', type: 'image', size: 1 }]);
+    expect(out.entries).toEqual([
+      { name: 'a.png', type: 'image', size: 1, mtimeMs: (await fs.stat(join(outside, 'sub', 'a.png'))).mtimeMs },
+    ]);
     expect(out.roots).toEqual([await fs.realpath(home), extraReal]); // the under-home + missing extras are dropped
     expect(out.home).toBe(await fs.realpath(home));
   });

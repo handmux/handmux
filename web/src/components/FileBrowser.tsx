@@ -4,7 +4,9 @@ import { fetchDir, downloadFile, uploadFile, createDir, UploadAbort } from '../a
 import { startUpload, updateUpload, finishUpload } from '../uploadJob.js';
 import { UPLOAD_ACCEPT, splitUploadable } from '../uploadTypes.js';
 import { joinPath } from '../docPath.js';
-import { FolderIcon, FileIcon, ImageIcon, ArrowUpIcon, DownloadIcon, LocateIcon, FolderPlusIcon, UploadIcon, CopyIcon } from './icons.jsx';
+import { formatBytes, formatRelativeTime } from '../format.js';
+import { getBrowserSort, setBrowserSort, getBrowserShowHidden, setBrowserShowHidden, type BrowserSort } from '../storage.js';
+import { FolderIcon, FileIcon, ImageIcon, ArrowUpIcon, ArrowUpDownIcon, DownloadIcon, LocateIcon, FolderPlusIcon, UploadIcon, CopyIcon } from './icons.jsx';
 import ActionSheet from './ActionSheet.jsx';
 import { t } from '../i18n';
 import { useBackButton } from '../hooks/useBackButton.js';
@@ -22,7 +24,13 @@ interface DirectoryEntry {
   name: string;
   type: DirectoryEntryType;
   size?: number;
+  mtimeMs?: number;
 }
+
+// Entries the browser keeps out of the way unless the user asks for them: dotfiles (`.git`,
+// `.DS_Store`, `.env`) and the one heavy generated dir that is never dot-prefixed. Only well-known
+// noise — a name like `dist` or `build` is often something the user actually wants to open.
+const isHiddenEntry = (name: string): boolean => name.startsWith('.') || name === 'node_modules';
 
 interface DirectoryListing {
   path: string;
@@ -84,13 +92,15 @@ function parseDirectoryListing(value: unknown): DirectoryListing {
     if (!entry
       || typeof entry.name !== 'string'
       || !isEntryType(entry.type)
-      || !(entry.size === undefined || (typeof entry.size === 'number' && Number.isFinite(entry.size)))) {
+      || !(entry.size === undefined || (typeof entry.size === 'number' && Number.isFinite(entry.size)))
+      || !(entry.mtimeMs === undefined || (typeof entry.mtimeMs === 'number' && Number.isFinite(entry.mtimeMs)))) {
       throw new Error('Directory API returned an invalid entry');
     }
     return {
       name: entry.name,
       type: entry.type,
       ...(typeof entry.size === 'number' ? { size: entry.size } : {}),
+      ...(typeof entry.mtimeMs === 'number' ? { mtimeMs: entry.mtimeMs } : {}),
     };
   });
   return {
@@ -132,9 +142,14 @@ const rootOf = (
   return best || home || null;
 };
 
-// Bytes → short human string. <1KB shows bytes; KB rounded; MB to 1 decimal.
-const fmtSize = (size: number | null | undefined): string => (
-  size == null ? '' : size < 1024 ? `${size} B` : size < 1024 * 1024 ? `${Math.round(size / 1024)} KB` : `${(size / 1024 / 1024).toFixed(1)} MB`
+// Row order. Directories always come first in both modes — that is the file-browser convention and
+// it keeps navigation stable; within a group, "name" is A→Z and "modified" is newest-first. Entries
+// whose stat failed have no mtime and sort last rather than jumping to the top under a 1970 date.
+const sortEntries = (list: readonly DirectoryEntry[], mode: BrowserSort): DirectoryEntry[] => (
+  [...list].sort((a, b) => (a.type === 'dir' ? 0 : 1) - (b.type === 'dir' ? 0 : 1)
+    || (mode === 'modified'
+      ? (b.mtimeMs ?? 0) - (a.mtimeMs ?? 0)
+      : a.name.localeCompare(b.name)))
 );
 
 // The path browser. CONTROLLED on the current directory: `path` is the dir to show (null → $HOME),
@@ -163,6 +178,9 @@ export default function FileBrowser({
 }: FileBrowserProps) {
   const [input, setInput] = useState('');   // the path text box — relative to the current root
   const [dir, setDir] = useState<DirectoryListing | null>(null); // loaded { path, parent, entries }
+  const [sort, setSort] = useState<BrowserSort>(getBrowserSort); // row order (persisted): name | modified
+  const [showHidden, setShowHidden] = useState<boolean>(getBrowserShowHidden); // also list dotfiles / node_modules
+  const [, setClock] = useState(0); // bumped every minute so the relative "3 分钟前" columns stay true
   const [rootMenuOpen, setRootMenuOpen] = useState(false); // the root-prefix dropdown (~ / tmp / TMPDIR)
   const [err, setErr] = useState('');
   const [notice, setNotice] = useState('');     // transient, friendly hint (not an error) — fades on its own
@@ -222,6 +240,13 @@ export default function FileBrowser({
     load(path, { sync: true, fallbackHome: pickMode });
   }, [path, refreshKey]);
   useEffect(() => () => { clearTimer(debounceRef); clearTimer(noticeTimerRef); }, []);
+  // A relative timestamp only stays honest if something re-renders: the sheet stays mounted while
+  // minimized, so without this a row opened at 09:00 still says "刚刚" at 09:30. Once a minute is
+  // plenty for minute-granularity text.
+  useEffect(() => {
+    const timer = setInterval(() => setClock((n) => n + 1), 60_000);
+    return () => clearInterval(timer);
+  }, []);
   // Close the root dropdown when a tap lands outside it (capture phase, like Dropdown.jsx).
   useEffect(() => {
     if (!rootMenuOpen) return undefined;
@@ -395,11 +420,33 @@ export default function FileBrowser({
     if (v && DOC_EXT_RE.test(v) && dir?.home) onOpenDoc(joinPath(dir.home, v));
   };
 
+  const all = dir?.entries || [];
+  const hiddenCount = all.filter((e) => isHiddenEntry(e.name)).length;
+  const visible = showHidden ? all : all.filter((e) => !isHiddenEntry(e.name));
   const frag = splitPath(input).frag.toLowerCase();
-  const matched = (dir?.entries || []).filter(
+  const matched = visible.filter(
     (e) => (!pickMode || e.type === 'dir') && (!frag || e.name.toLowerCase().includes(frag)));
-  const entries = matched.length > MAX_ROWS ? matched.slice(0, MAX_ROWS) : matched;
-  const overflow = matched.length - entries.length; // >0 when the listing was capped
+  // Sort BEFORE capping: with up to MAX_ROWS rows rendered, capping the server's order would hide the
+  // very entries the chosen order puts first.
+  const sorted = sortEntries(matched, sort);
+  const entries = sorted.length > MAX_ROWS ? sorted.slice(0, MAX_ROWS) : sorted;
+  const overflow = sorted.length - entries.length; // >0 when the listing was capped
+  // Three different nothings: an empty directory, everything filtered as noise, nothing matching the
+  // typed fragment. Saying "没有匹配" for an empty folder is what the old listing did.
+  const emptyText = all.length === 0 ? t('filebrowser.emptyDir')
+    : visible.length === 0 ? t('filebrowser.onlyHidden')
+      : t('filebrowser.noMatches');
+
+  const toggleSort = (): void => {
+    const next: BrowserSort = sort === 'name' ? 'modified' : 'name';
+    setSort(next);
+    setBrowserSort(next);
+  };
+  const toggleHidden = (): void => {
+    const next = !showHidden;
+    setShowHidden(next);
+    setBrowserShowHidden(next);
+  };
 
   return (
     <div className="browse-view">
@@ -517,36 +564,72 @@ export default function FileBrowser({
           </span>
         </div>
       )}
-      <div className="browse-list">
-        {entries.length === 0 && !err && <div className="browse-empty">{t('filebrowser.noMatches')}</div>}
-        {entries.map((e) => (
-          <div key={e.name} className="browse-entry-row">
-            <button
-              className="browse-entry"
-              onClick={() => (
-                e.type === 'dir' ? enter(e.name)
-                  : (e.type === 'doc' || e.type === 'image') ? open(e.name)
-                    : showNotice(t('filebrowser.previewUnsupported'))
-              )}
-            >
-              <span className="browse-entry-icon">{e.type === 'dir' ? <FolderIcon /> : e.type === 'image' ? <ImageIcon /> : <FileIcon />}</span>
-              <span className="browse-entry-name">{e.name}</span>
-              {e.type !== 'dir' && <span className="browse-entry-size">{fmtSize(e.size)}</span>}
+      {/* List controls: how rows are ordered, and whether the noise entries show. Kept out of the
+          path bar (which is already tight on a phone) and shown only when there is a choice to make. */}
+      {(visible.length > 1 || hiddenCount > 0) && (
+        <div className="browse-listbar">
+          <button
+            className="browse-chip" aria-label={t('filebrowser.sortBy', { mode: t(sort === 'name' ? 'filebrowser.sortName' : 'filebrowser.sortModified') })}
+            onClick={toggleSort}
+          >
+            <ArrowUpDownIcon />
+            {t(sort === 'name' ? 'filebrowser.sortName' : 'filebrowser.sortModified')}
+          </button>
+          {hiddenCount > 0 && (
+            <button className="browse-chip browse-chip-end" aria-pressed={showHidden} onClick={toggleHidden}>
+              {showHidden ? t('filebrowser.hideHidden') : t('filebrowser.showHidden', { count: hiddenCount })}
             </button>
-            {e.type !== 'dir' && (
-              <button className="browse-copy" aria-label={t('filebrowser.copyAbsPath')} title={t('filebrowser.copyAbsPath')} onClick={() => copyPath(e.name)}>
-                <CopyIcon />
-              </button>
-            )}
-            {e.type !== 'dir' && (
-              <button className="browse-dl" aria-label={t('filebrowser.download')} onClick={() => setConfirmName(e.name)}>
-                <DownloadIcon />
-              </button>
-            )}
+          )}
+        </div>
+      )}
+      <div className="browse-list" aria-busy={!dir && !err}>
+        {!dir && !err && (
+          <div className="browse-skeleton" aria-hidden="true">
+            {[0, 1, 2, 3, 4, 5].map((i) => <span key={i} className="browse-skeleton-row" />)}
           </div>
-        ))}
+        )}
+        {dir && entries.length === 0 && !err && <div className="browse-empty">{emptyText}</div>}
+        {entries.map((e) => {
+          const time = formatRelativeTime(e.mtimeMs);
+          const size = e.type === 'dir' ? '' : formatBytes(e.size, '');
+          return (
+            <div key={e.name} className="browse-entry-row">
+              <button
+                className="browse-entry"
+                onClick={() => (
+                  e.type === 'dir' ? enter(e.name)
+                    : (e.type === 'doc' || e.type === 'image') ? open(e.name)
+                      : showNotice(t('filebrowser.previewUnsupported'))
+                )}
+              >
+                <span className="browse-entry-icon">{e.type === 'dir' ? <FolderIcon /> : e.type === 'image' ? <ImageIcon /> : <FileIcon />}</span>
+                <span className="browse-entry-name">{e.name}</span>
+                {(time || size) && (
+                  <span className="browse-entry-meta">
+                    {time && <span className="browse-entry-time">{time}</span>}
+                    {size && <span className="browse-entry-size">{size}</span>}
+                  </span>
+                )}
+              </button>
+              {/* Directories have no copy/download buttons, so reserve their width: otherwise a dir's
+                  time sits at the very edge while a file's stops short of its buttons, and the time
+                  and size columns stop lining up the way a desktop file list lines them up. */}
+              {e.type === 'dir' && <span className="browse-actions-spacer" aria-hidden="true" />}
+              {e.type !== 'dir' && (
+                <button className="browse-copy" aria-label={t('filebrowser.copyAbsPath')} title={t('filebrowser.copyAbsPath')} onClick={() => copyPath(e.name)}>
+                  <CopyIcon />
+                </button>
+              )}
+              {e.type !== 'dir' && (
+                <button className="browse-dl" aria-label={t('filebrowser.download')} onClick={() => setConfirmName(e.name)}>
+                  <DownloadIcon />
+                </button>
+              )}
+            </div>
+          );
+        })}
         {overflow > 0 && (
-          <div className="browse-overflow">{t('filebrowser.tooMany', { shown: entries.length, total: matched.length })}</div>
+          <div className="browse-overflow">{t('filebrowser.tooMany', { shown: entries.length, total: sorted.length })}</div>
         )}
       </div>
       {pickMode && dir && (

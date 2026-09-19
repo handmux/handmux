@@ -1,6 +1,7 @@
 // web/src/components/DocView.jsx
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { getDocFontIndex, setDocFontIndex, DOC_FONT_SIZES } from '../storage.js';
+import { formatBytes } from '../format.js';
 import { markSentences } from '../voice/docSpeech.js';
 import { useDocSpeech } from '../voice/useDocSpeech.js';
 import { useScreenWakeLock } from '../hooks/useScreenWakeLock.js';
@@ -104,17 +105,8 @@ const dirnameOf = (path: string): string => {
   return i <= 0 ? '/' : path.slice(0, i);
 };
 
-// File-info popover formatting. Times use the active UI locale (the app is bilingual/multi-locale).
-const formatBytes = (bytes: number | null | undefined): string => {
-  if (typeof bytes !== 'number' || !Number.isFinite(bytes) || bytes < 0) return '—';
-  if (bytes < 1024) return `${bytes} B`;
-  const units = ['KB', 'MB', 'GB'];
-  let value = bytes / 1024;
-  let unit = 0;
-  while (value >= 1024 && unit < units.length - 1) { value /= 1024; unit += 1; }
-  return `${value < 10 ? value.toFixed(1) : Math.round(value)} ${units[unit]}`;
-};
-
+// File-info popover formatting. Times use the active UI locale (the app is bilingual/multi-locale),
+// and sizes come from the shared formatter so the popover and the file listing never disagree.
 const formatStamp = (ms: number | null | undefined): string => {
   if (typeof ms !== 'number' || !Number.isFinite(ms) || ms <= 0) return '—';
   return new Intl.DateTimeFormat(getLangCode(), { dateStyle: 'medium', timeStyle: 'short' })

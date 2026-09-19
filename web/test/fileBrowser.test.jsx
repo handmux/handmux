@@ -4,20 +4,24 @@ import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 
 // fetchDir returns the dir's real (absolute, no trailing slash) path + entries. Entries vary by path
-// so navigation is observable.
+// so navigation is observable. Each entry carries an mtime a comfortable distance inside its
+// relative-time bucket, so the "3小时前" column is deterministic whenever the test runs.
 vi.mock('../src/api.js', () => ({
   UnauthorizedError: class extends Error {},
   fetchDir: vi.fn(async (p) => {
     const path = p || '/home/u';
+    const HOUR = 3_600_000;
+    const DAY = 24 * HOUR;
+    const ago = (ms) => Date.now() - ms;
     const entries = path === '/home/u'
       ? [
-          { name: 'docs', type: 'dir' },
-          { name: 'report.md', type: 'doc', size: 100 },
-          { name: 'readme.md', type: 'doc', size: 200 },
-          { name: 'data.bin', type: 'file', size: 2048 },
-          { name: 'photo.gif', type: 'image', size: 999 },
+          { name: 'docs', type: 'dir', mtimeMs: ago(3 * HOUR) },
+          { name: 'report.md', type: 'doc', size: 100, mtimeMs: ago(2 * DAY) },
+          { name: 'readme.md', type: 'doc', size: 200, mtimeMs: ago(40 * DAY) },
+          { name: 'data.bin', type: 'file', size: 2048, mtimeMs: ago(30 * 60_000) },
+          { name: 'photo.gif', type: 'image', size: 999, mtimeMs: ago(10 * 60_000) },
         ]
-      : [{ name: 'nested.md', type: 'doc', size: 10 }];
+      : [{ name: 'nested.md', type: 'doc', size: 10, mtimeMs: ago(5 * 60_000) }];
     return { path, home: '/home/u', parent: path === '/home/u' ? null : '/home/u', entries };
   }),
   downloadFile: vi.fn(async () => {}),
@@ -37,7 +41,16 @@ import FileBrowser, { splitPath } from '../src/components/FileBrowser.jsx';
 import { fetchDir, downloadFile, uploadFile, createDir } from '../src/api.js';
 
 let container, root;
-beforeEach(() => { vi.useFakeTimers(); container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container); });
+beforeEach(() => {
+  vi.useFakeTimers();
+  // The sort order and hidden toggle are persisted app-wide, so a test that flips one must not leak
+  // into the next.
+  localStorage.removeItem('tw_browse_sort');
+  localStorage.removeItem('tw_browse_hidden');
+  container = document.createElement('div');
+  document.body.appendChild(container);
+  root = createRoot(container);
+});
 afterEach(() => { act(() => root.unmount()); container.remove(); vi.clearAllMocks(); vi.useRealTimers(); });
 const render = (props) => act(async () => root.render(<FileBrowser onOpenDoc={vi.fn()} onNavigate={vi.fn()} {...props} />));
 const settle = async () => { await act(async () => {}); await act(async () => {}); };
@@ -200,9 +213,105 @@ describe('FileBrowser', () => {
     await render({ path: null });
     await settle();
     expect(container.textContent).toContain('data.bin');
-    expect(container.textContent).toContain('2 KB');
+    expect(container.textContent).toContain('2.0 KB');
     const row = [...container.querySelectorAll('.browse-entry-row')].find((r) => r.textContent.includes('data.bin'));
     expect(row.querySelector('.browse-dl')).toBeTruthy();
+  });
+
+  const rowFor = (name) => [...container.querySelectorAll('.browse-entry-row')].find((r) => r.textContent.includes(name));
+  const rowNames = () => [...container.querySelectorAll('.browse-entry-name')].map((n) => n.textContent);
+
+  it('shows when each entry was last modified, directories included', async () => {
+    await render({ path: null });
+    await settle();
+    expect(rowFor('docs').querySelector('.browse-entry-time').textContent).toBe('3小时前');
+    expect(rowFor('report.md').querySelector('.browse-entry-time').textContent).toBe('前天');
+    expect(rowFor('readme.md').querySelector('.browse-entry-time').textContent).toBe('上个月');
+    expect(rowFor('data.bin').querySelector('.browse-entry-time').textContent).toBe('30分钟前');
+    // one line, like a desktop file manager: name … time, size
+    expect(rowFor('data.bin').querySelector('.browse-entry-size').textContent).toBe('2.0 KB');
+    expect(rowFor('docs').querySelector('.browse-entry-size')).toBeNull(); // sizing a dir means walking it
+  });
+
+  it('leaves the time column blank when the server had no mtime for an entry', async () => {
+    fetchDir.mockResolvedValueOnce({
+      path: '/home/u', home: '/home/u', parent: null,
+      entries: [{ name: 'stale.md', type: 'doc', size: 12 }],
+    });
+    await render({ path: null });
+    await settle();
+    expect(container.textContent).toContain('stale.md');
+    expect(container.querySelector('.browse-entry-time')).toBeNull();
+    expect(rowFor('stale.md').querySelector('.browse-entry-size').textContent).toBe('12 B');
+  });
+
+  it('toggles between name order and newest-first from the sort chip', async () => {
+    await render({ path: null });
+    await settle();
+    expect(rowNames()).toEqual(['docs', 'data.bin', 'photo.gif', 'readme.md', 'report.md']);
+    const chip = container.querySelector('.browse-chip');
+    expect(chip.textContent).toContain('名称');
+    await click(chip);
+    // Directories stay first (navigation stability); files go newest-first.
+    expect(rowNames()).toEqual(['docs', 'photo.gif', 'data.bin', 'report.md', 'readme.md']);
+    expect(chip.textContent).toContain('修改时间');
+    expect(localStorage.getItem('tw_browse_sort')).toBe('modified');
+  });
+
+  it('keeps dotfiles and node_modules out of the way until asked for them', async () => {
+    fetchDir.mockResolvedValueOnce({
+      path: '/home/u', home: '/home/u', parent: null,
+      entries: [
+        { name: '.git', type: 'dir', mtimeMs: Date.now() - 60_000 },
+        { name: 'node_modules', type: 'dir', mtimeMs: Date.now() - 60_000 },
+        { name: 'src', type: 'dir', mtimeMs: Date.now() - 60_000 },
+        { name: 'notes.md', type: 'doc', size: 10, mtimeMs: Date.now() - 60_000 },
+      ],
+    });
+    await render({ path: null });
+    await settle();
+    expect(container.textContent).not.toContain('node_modules');
+    expect(rowNames()).toEqual(['src', 'notes.md']);
+    const chip = container.querySelector('.browse-chip-end');
+    expect(chip.textContent).toContain('显示隐藏项（2）');
+    expect(chip.getAttribute('aria-pressed')).toBe('false');
+    await click(chip);
+    expect(rowNames()).toHaveLength(4);
+    expect(rowNames()).toContain('.git');
+    expect(rowNames()).toContain('node_modules');
+    expect(chip.getAttribute('aria-pressed')).toBe('true');
+    expect(chip.textContent).toContain('收起隐藏项');
+    expect(localStorage.getItem('tw_browse_hidden')).toBe('1');
+  });
+
+  it('says the folder is empty (and "only hidden" when it is) instead of "no match"', async () => {
+    fetchDir.mockResolvedValueOnce({ path: '/home/u/empty', home: '/home/u', parent: '/home/u', entries: [] });
+    await render({ path: '/home/u/empty' });
+    await settle();
+    expect(container.textContent).toContain('这个文件夹是空的');
+    expect(container.querySelector('.browse-listbar')).toBeNull(); // nothing to sort or reveal
+
+    fetchDir.mockResolvedValueOnce({
+      path: '/home/u/dot', home: '/home/u', parent: '/home/u',
+      entries: [{ name: '.env', type: 'file', size: 4, mtimeMs: Date.now() }],
+    });
+    await render({ path: '/home/u/dot' });
+    await settle();
+    expect(container.textContent).toContain('这里只有隐藏项');
+    expect(container.querySelector('.browse-chip-end')).toBeTruthy(); // the way out
+  });
+
+  it('shows a loading skeleton instead of an empty-state line until the listing arrives', async () => {
+    let release;
+    fetchDir.mockImplementationOnce(() => new Promise((resolve) => { release = resolve; }));
+    await render({ path: null });
+    expect(container.querySelectorAll('.browse-skeleton-row').length).toBeGreaterThan(0);
+    expect(container.querySelector('.browse-empty')).toBeNull();
+    expect(container.querySelector('.browse-list').getAttribute('aria-busy')).toBe('true');
+    await act(async () => { release({ path: '/home/u', home: '/home/u', parent: null, entries: [] }); });
+    await settle();
+    expect(container.querySelector('.browse-skeleton-row')).toBeNull();
+    expect(container.textContent).toContain('这个文件夹是空的');
   });
 
   it('tapping a non-doc file shows a no-preview notice, not a download or onOpenDoc', async () => {
