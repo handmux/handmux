@@ -12,8 +12,8 @@ describe('AgentMark', () => {
     // terminal's own two colours rather than as a single-colour glyph.
     const claudeSvg = claude?.querySelector('svg');
     expect(claudeSvg?.getAttribute('viewBox')).toBe('0 0 24 24');
-    expect(new Set(Array.from(claudeSvg?.querySelectorAll('rect') ?? [])
-      .map((rect) => rect.getAttribute('fill')))).toEqual(new Set(['#000000', '#d7af87']));
+    expect(new Set(Array.from(claudeSvg?.querySelectorAll('path') ?? [])
+      .map((path) => path.getAttribute('fill')))).toEqual(new Set(['#000000', '#d7af87']));
 
     rerender(<AgentMark agent="codex" />);
     expect(container.querySelector('[data-agent-icon="codex"]')).not.toBeNull();
@@ -46,15 +46,16 @@ describe('AgentMark', () => {
     const mark = container.querySelector('[data-agent-icon="codebuddy"]');
     expect(mark).not.toBeNull();
     expect(container.querySelector('[data-agent-icon="generic"]')).toBeNull();
-    // The mark ships on its own wider canvas; it is fitted into the shared one so every badge stays the
-    // same rendered size without per-location overrides.
+    // The mark is the block-art robot the CLI prints on startup, fitted into the shared canvas so every
+    // badge stays the same rendered size without per-location overrides.
     const svg = mark?.querySelector('svg');
     expect(svg?.getAttribute('viewBox')).toBe('0 0 24 24');
     expect(svg?.getAttribute('aria-hidden')).toBe('true');
-    // Brand colour kept as shipped, and no defs ids: these logos are inlined into one shared document.
+    // One path in the colour the CLI emits for the banner, and no defs ids: these logos are inlined into
+    // one shared document, and neighbouring cells must not show a seam.
     const paths = Array.from(svg?.querySelectorAll('path') ?? []);
-    expect(paths).toHaveLength(3);
-    expect(new Set(paths.map((path) => path.getAttribute('fill')))).toEqual(new Set(['#00BC90']));
+    expect(paths).toHaveLength(1);
+    expect(paths[0]?.getAttribute('fill')).toBe('#5fd7af');
     expect(svg?.querySelectorAll('[id]').length).toBe(0);
   });
 
