@@ -1181,6 +1181,8 @@ export default {
   'filebrowser.download': 'Download',
   'filebrowser.pickThisDir': 'Select this directory {path}',
   'filebrowser.downloadConfirm': 'Download {name}?',
+  'filebrowser.itemCount': '{count} items',
+  'filebrowser.rowActions': 'Actions for {name}',
   'filebrowser.emptyDir': 'This folder is empty',
   'filebrowser.onlyHidden': 'Only hidden items here',
   'filebrowser.showHidden': 'Show hidden ({count})',

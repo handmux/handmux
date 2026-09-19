@@ -477,6 +477,8 @@ export default {
   'filebrowser.download': '다운로드',
   'filebrowser.pickThisDir': '이 디렉토리 선택 {path}',
   'filebrowser.downloadConfirm': '{name}을 다운로드하시겠습니까？',
+  'filebrowser.itemCount': '항목 {count}개',
+  'filebrowser.rowActions': '{name} 작업',
   'filebrowser.emptyDir': '이 폴더는 비어 있습니다',
   'filebrowser.onlyHidden': '여기에는 숨김 항목만 있습니다',
   'filebrowser.showHidden': '숨김 항목 표시({count})',

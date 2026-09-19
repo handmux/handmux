@@ -489,6 +489,8 @@ export default {
   'filebrowser.download': '下載',
   'filebrowser.pickThisDir': '選定此目錄 {path}',
   'filebrowser.downloadConfirm': '下載 {name}？',
+  'filebrowser.itemCount': '{count} 項',
+  'filebrowser.rowActions': '{name} 的操作',
   'filebrowser.emptyDir': '這個資料夾是空的',
   'filebrowser.onlyHidden': '這裡只有隱藏項目',
   'filebrowser.showHidden': '顯示隱藏項目（{count}）',

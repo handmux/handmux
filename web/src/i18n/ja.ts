@@ -477,6 +477,8 @@ export default {
   'filebrowser.download': 'ダウンロード',
   'filebrowser.pickThisDir': 'このディレクトリを選択 {path}',
   'filebrowser.downloadConfirm': '{name} をダウンロードしますか？',
+  'filebrowser.itemCount': '{count} 件',
+  'filebrowser.rowActions': '{name} の操作',
   'filebrowser.emptyDir': 'このフォルダは空です',
   'filebrowser.onlyHidden': 'ここには隠し項目しかありません',
   'filebrowser.showHidden': '隠し項目を表示（{count}）',

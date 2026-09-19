@@ -205,18 +205,15 @@ describe('FileBrowser', () => {
     await click([...container.querySelectorAll('.browse-entry')].find((b) => b.textContent.includes('photo.gif')));
     expect(onOpenDoc).toHaveBeenCalledWith('/home/u/photo.gif');
     expect(container.querySelector('.browse-notice')).toBeNull(); // not the no-preview path
-    // image rows still keep a download button alongside the inline-open tap
-    const row = [...container.querySelectorAll('.browse-entry-row')].find((r) => r.textContent.includes('photo.gif'));
-    expect(row.querySelector('.browse-dl')).toBeTruthy();
+    // image rows keep their ⋯ actions alongside the inline-open tap
+    expect(rowFor('photo.gif').querySelector('.browse-more')).toBeTruthy();
   });
 
-  it('shows non-doc files with a human size and a download button', async () => {
+  it('shows non-doc files with a human size', async () => {
     await render({ path: null });
     await settle();
     expect(container.textContent).toContain('data.bin');
     expect(container.textContent).toContain('2.0 KB');
-    const row = [...container.querySelectorAll('.browse-entry-row')].find((r) => r.textContent.includes('data.bin'));
-    expect(row.querySelector('.browse-dl')).toBeTruthy();
   });
 
   const rowFor = (name) => [...container.querySelectorAll('.browse-entry-row')].find((r) => r.textContent.includes(name));
@@ -273,7 +270,8 @@ describe('FileBrowser', () => {
     await settle();
     expect(container.textContent).not.toContain('node_modules');
     expect(rowNames()).toEqual(['src', 'notes.md']);
-    const chip = container.querySelector('.browse-chip-end');
+    expect(container.querySelector('.browse-count').textContent).toBe('2 项'); // the count follows the filter
+    const chip = container.querySelector('.browse-chip'); // left of the sort chip, which carries -end
     expect(chip.textContent).toContain('显示隐藏项（2）');
     expect(chip.getAttribute('aria-pressed')).toBe('false');
     await click(chip);
@@ -282,6 +280,7 @@ describe('FileBrowser', () => {
     expect(rowNames()).toContain('node_modules');
     expect(chip.getAttribute('aria-pressed')).toBe('true');
     expect(chip.textContent).toContain('收起隐藏项');
+    expect(container.querySelector('.browse-count').textContent).toBe('4 项');
     expect(localStorage.getItem('tw_browse_hidden')).toBe('1');
   });
 
@@ -299,7 +298,7 @@ describe('FileBrowser', () => {
     await render({ path: '/home/u/dot' });
     await settle();
     expect(container.textContent).toContain('这里只有隐藏项');
-    expect(container.querySelector('.browse-chip-end')).toBeTruthy(); // the way out
+    expect(container.querySelector('.browse-chip')).toBeTruthy(); // the way out
   });
 
   it('shows a loading skeleton instead of an empty-state line until the listing arrives', async () => {
@@ -325,25 +324,40 @@ describe('FileBrowser', () => {
     expect(onOpenDoc).not.toHaveBeenCalled();
   });
 
-  it('the download button asks for confirmation, then downloads on confirm', async () => {
+  it('a file\'s ⋯ menu offers copy + download, and the download needs a second tap', async () => {
     await render({ path: null });
     await settle();
-    const row = [...container.querySelectorAll('.browse-entry-row')].find((r) => r.textContent.includes('data.bin'));
-    await click(row.querySelector('.browse-dl'));
-    // confirmation sheet shows the file name; nothing downloaded yet
-    expect(container.textContent).toContain('下载 data.bin');
+    await click(rowFor('data.bin').querySelector('.browse-more'));
+    // the sheet is titled with the entry it belongs to, and nothing has been pulled yet
+    expect(container.querySelector('.settings-title').textContent).toBe('data.bin');
+    expect([...container.querySelectorAll('.sheet-action')].map((b) => b.textContent.trim()))
+      .toEqual(['复制绝对路径', '下载']);
     expect(downloadFile).not.toHaveBeenCalled();
-    // confirm
-    await click([...container.querySelectorAll('.sheet-action')].find((b) => b.textContent.trim() === '下载'));
+    // first tap arms the destructive-ish action and relabels it with the file it will fetch
+    const download = () => [...container.querySelectorAll('.sheet-action')].find((b) => b.textContent.includes('下载'));
+    await click(download());
+    expect(container.textContent).toContain('下载 data.bin？');
+    expect(downloadFile).not.toHaveBeenCalled();
+    // second tap on the armed action downloads
+    await click(download());
     expect(downloadFile).toHaveBeenCalledWith('/home/u/data.bin', expect.any(Function));
+    expect(container.querySelector('.sheet-action')).toBeNull(); // sheet closed so the progress bar shows
     await settle(); // let the transfer-progress state settle (doDownload's finally) inside act
   });
 
-  it('cancelling the download confirmation downloads nothing', async () => {
+  it('a directory\'s ⋯ menu has no download — there is nothing to pull', async () => {
     await render({ path: null });
     await settle();
-    const row = [...container.querySelectorAll('.browse-entry-row')].find((r) => r.textContent.includes('report.md'));
-    await click(row.querySelector('.browse-dl'));
+    await click(rowFor('docs').querySelector('.browse-more'));
+    expect(container.querySelector('.settings-title').textContent).toBe('docs');
+    expect([...container.querySelectorAll('.sheet-action')].map((b) => b.textContent.trim()))
+      .toEqual(['复制绝对路径']);
+  });
+
+  it('cancelling the ⋯ menu downloads nothing', async () => {
+    await render({ path: null });
+    await settle();
+    await click(rowFor('report.md').querySelector('.browse-more'));
     await click(container.querySelector('.sheet-cancel'));
     expect(downloadFile).not.toHaveBeenCalled();
     expect(container.querySelector('.sheet-action')).toBeNull(); // sheet closed
@@ -435,7 +449,8 @@ describe('pickMode', () => {
     expect(container.querySelector('.browse-upload')).toBeNull();
     const names = [...container.querySelectorAll('.browse-entry-name')].map((n) => n.textContent);
     expect(names).toEqual(['sub']);  // doc + file rows filtered out
-    expect(container.querySelector('.browse-dl')).toBeNull();
+    // picking a directory is a one-tap job: no per-row ⋯ here
+    expect(container.querySelector('.browse-more')).toBeNull();
   });
 
   it('confirm button reports the current dir via onPick', async () => {
@@ -502,7 +517,7 @@ describe('button order + new folder', () => {
     expect(container.querySelector('.browse-newfolder')).toBeNull(); // closed after success
   });
 
-  it('caps a huge listing at 300 rows and shows the overflow hint; typing filters it away', async () => {
+  it('caps a huge listing at 300 rows and says so in the count; typing filters it away', async () => {
     const orig = fetchDir.getMockImplementation();
     const many = Array.from({ length: 1000 }, (_, i) => ({ name: `f${String(i).padStart(4, '0')}.bin`, type: 'file', size: 1 }));
     fetchDir.mockImplementation(async () => ({ path: '/home/u', home: '/home/u', parent: null, entries: many }));
@@ -510,15 +525,14 @@ describe('button order + new folder', () => {
       await render({ path: null });
       await settle();
       expect(container.querySelectorAll('.browse-entry').length).toBe(300); // capped
-      const hint = container.querySelector('.browse-overflow');
-      expect(hint).not.toBeNull();
-      expect(hint.textContent).toContain('1000'); // total
-      expect(hint.textContent).toContain('300');  // shown
+      const count = container.querySelector('.browse-count');
+      expect(count.textContent).toContain('1000'); // total
+      expect(count.textContent).toContain('300');  // shown
 
       type(input(), 'f0001'); // a unique fragment → one match, no overflow
       await settle();
       expect(container.querySelectorAll('.browse-entry').length).toBe(1);
-      expect(container.querySelector('.browse-overflow')).toBeNull();
+      expect(container.querySelector('.browse-count').textContent).toBe('1 项');
     } finally { fetchDir.mockImplementation(orig); }
   });
 });

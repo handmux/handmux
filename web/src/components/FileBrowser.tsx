@@ -6,8 +6,9 @@ import { UPLOAD_ACCEPT, splitUploadable } from '../uploadTypes.js';
 import { joinPath } from '../docPath.js';
 import { formatBytes, formatRelativeTime } from '../format.js';
 import { getBrowserSort, setBrowserSort, getBrowserShowHidden, setBrowserShowHidden, type BrowserSort } from '../storage.js';
-import { FolderIcon, FileIcon, FileTextIcon, ImageIcon, ArrowUpIcon, ArrowUpDownIcon, DownloadIcon, LocateIcon, FolderPlusIcon, UploadIcon, CopyIcon } from './icons.jsx';
+import { FolderIcon, FileIcon, FileTextIcon, ImageIcon, ArrowUpIcon, ArrowUpDownIcon, DownloadIcon, LocateIcon, FolderPlusIcon, UploadIcon, CopyIcon, MoreHorizontalIcon } from './icons.jsx';
 import ActionSheet from './ActionSheet.jsx';
+import type { ActionSheetItem } from './ActionSheet.jsx';
 import { t } from '../i18n';
 import { useBackButton } from '../hooks/useBackButton.js';
 
@@ -185,7 +186,7 @@ export default function FileBrowser({
   const [err, setErr] = useState('');
   const [notice, setNotice] = useState('');     // transient, friendly hint (not an error) — fades on its own
   const [saved, setSaved] = useState('');        // last downloaded filename — persistent box w/ "打开下载目录" (null/'' = none)
-  const [confirmName, setConfirmName] = useState<string | null>(null); // file awaiting download confirmation (null = no sheet)
+  const [menuFor, setMenuFor] = useState<{ name: string; type: DirectoryEntryType } | null>(null); // row awaiting its ⋯ menu
   const [uploading, setUploading] = useState(false);
   const [mkdirOpen, setMkdirOpen] = useState(false);
   const [mkdirName, setMkdirName] = useState('');
@@ -257,7 +258,7 @@ export default function FileBrowser({
     return () => document.removeEventListener('pointerdown', onDown, true);
   }, [rootMenuOpen]);
   useBackButton(overlayActive && rootMenuOpen, () => setRootMenuOpen(false));
-  useBackButton(overlayActive && !!confirmName, () => setConfirmName(null));
+  useBackButton(overlayActive && !!menuFor, () => setMenuFor(null));
   useBackButton(overlayActive && mkdirOpen, () => { setMkdirOpen(false); setMkdirName(''); });
 
   // Friendly transient hint (e.g. unsupported preview) — distinct from the red error, fades on its own.
@@ -316,8 +317,8 @@ export default function FileBrowser({
       setMkdirOpen(false); setMkdirName('');
     } catch { setErr(t('filebrowser.mkdirFailed')); }
   };
-  // Actual download — only reached after the user confirms in the ActionSheet (never directly from a
-  // row tap), so an accidental tap can't pull a file.
+  // Actual download — only reached from the row's ⋯ menu, and only after the download action has been
+  // armed with a second tap there, so an accidental tap can't pull a file.
   const doDownload = async (name: string): Promise<void> => {
     if (!dir) return;
     setErr('');
@@ -328,11 +329,24 @@ export default function FileBrowser({
     } catch { setErr(t('filebrowser.downloadFailed')); }
     finally { setProgress(null); }
   };
-  const confirmDownload = (): void => {
-    const name = confirmName;
-    setConfirmName(null);
-    if (name) void doDownload(name);
-  };
+  // The per-row ⋯ menu: every entry can copy its path, and everything but a directory can download.
+  // The sheet closes first so the transfer's progress bar isn't hidden behind it.
+  const rowActions = (entry: { name: string; type: DirectoryEntryType }): ActionSheetItem[] => [
+    {
+      key: 'copy',
+      label: t('filebrowser.copyAbsPath'),
+      icon: <CopyIcon />,
+      onClick: () => { setMenuFor(null); return copyPath(entry.name); },
+    },
+    ...(entry.type === 'dir' ? [] : [{
+      key: 'download',
+      label: t('filebrowser.download'),
+      icon: <DownloadIcon />,
+      confirm: true,
+      confirmLabel: t('filebrowser.downloadConfirm', { name: entry.name }),
+      onClick: () => { setMenuFor(null); return doDownload(entry.name); },
+    }]),
+  ];
   // The allowed roots the server reported (home + any extra roots like /tmp, $TMPDIR), and which one
   // the loaded dir currently sits in. Older servers omit `roots` → just home.
   const home = dir?.home;
@@ -564,20 +578,27 @@ export default function FileBrowser({
           </span>
         </div>
       )}
-      {/* List controls: how rows are ordered, and whether the noise entries show. Kept out of the
-          path bar (which is already tight on a phone) and shown only when there is a choice to make. */}
-      {(visible.length > 1 || hiddenCount > 0) && (
+      {/* List bar: how much is here (and, when a listing is capped, how much of it you are seeing),
+          then what is hidden — with the sort control parked on the right. */}
+      {all.length > 0 && (
         <div className="browse-listbar">
-          <button
-            className="browse-chip" aria-label={t('filebrowser.sortBy', { mode: t(sort === 'name' ? 'filebrowser.sortName' : 'filebrowser.sortModified') })}
-            onClick={toggleSort}
-          >
-            <ArrowUpDownIcon />
-            {t(sort === 'name' ? 'filebrowser.sortName' : 'filebrowser.sortModified')}
-          </button>
+          <span className="browse-count">
+            {overflow > 0
+              ? t('filebrowser.tooMany', { shown: entries.length, total: sorted.length })
+              : t('filebrowser.itemCount', { count: sorted.length })}
+          </span>
           {hiddenCount > 0 && (
-            <button className="browse-chip browse-chip-end" aria-pressed={showHidden} onClick={toggleHidden}>
+            <button className="browse-chip" aria-pressed={showHidden} onClick={toggleHidden}>
               {showHidden ? t('filebrowser.hideHidden') : t('filebrowser.showHidden', { count: hiddenCount })}
+            </button>
+          )}
+          {visible.length > 1 && (
+            <button
+              className="browse-chip browse-chip-end" aria-label={t('filebrowser.sortBy', { mode: t(sort === 'name' ? 'filebrowser.sortName' : 'filebrowser.sortModified') })}
+              onClick={toggleSort}
+            >
+              <ArrowUpDownIcon />
+              {t(sort === 'name' ? 'filebrowser.sortName' : 'filebrowser.sortModified')}
             </button>
           )}
         </div>
@@ -611,26 +632,20 @@ export default function FileBrowser({
                   </span>
                 )}
               </button>
-              {/* Directories have no copy/download buttons, so reserve their width: otherwise a dir's
-                  time sits at the very edge while a file's stops short of its buttons, and the time
-                  and size columns stop lining up the way a desktop file list lines them up. */}
-              {e.type === 'dir' && <span className="browse-actions-spacer" aria-hidden="true" />}
-              {e.type !== 'dir' && (
-                <button className="browse-copy" aria-label={t('filebrowser.copyAbsPath')} title={t('filebrowser.copyAbsPath')} onClick={() => copyPath(e.name)}>
-                  <CopyIcon />
-                </button>
-              )}
-              {e.type !== 'dir' && (
-                <button className="browse-dl" aria-label={t('filebrowser.download')} onClick={() => setConfirmName(e.name)}>
-                  <DownloadIcon />
+              {/* One ⋯ per row, whatever the kind: it keeps the row's right edge identical for a
+                  directory and a file (so the time/size columns line up) and holds the actions that
+                  differ by kind — copy path for anything, download as well for a file. */}
+              {!pickMode && (
+                <button
+                  className="browse-more" aria-label={t('filebrowser.rowActions', { name: e.name })}
+                  aria-haspopup="dialog" onClick={() => setMenuFor({ name: e.name, type: e.type })}
+                >
+                  <MoreHorizontalIcon />
                 </button>
               )}
             </div>
           );
         })}
-        {overflow > 0 && (
-          <div className="browse-overflow">{t('filebrowser.tooMany', { shown: entries.length, total: sorted.length })}</div>
-        )}
       </div>
       {pickMode && dir && (
         <div className="browse-pick-bar">
@@ -641,10 +656,10 @@ export default function FileBrowser({
         </div>
       )}
       <ActionSheet
-        open={!!confirmName}
-        title={confirmName ? t('filebrowser.downloadConfirm', { name: confirmName }) : ''}
-        actions={[{ key: 'dl', label: t('filebrowser.download'), onClick: confirmDownload }]}
-        onClose={() => setConfirmName(null)}
+        open={!!menuFor}
+        title={menuFor?.name ?? ''}
+        actions={menuFor ? rowActions(menuFor) : []}
+        onClose={() => setMenuFor(null)}
       />
     </div>
   );

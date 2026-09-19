@@ -2383,10 +2383,11 @@ button.cmd-text { background: none; border: none; text-align: left; }
 .browse-pending-hint { color: #8aa0b6; font-style: normal; font-size: 12px; }
 .browse-pending-btn { flex: 0 0 auto; height: 32px; padding: 0 14px; border: none; border-radius: 8px; background: #2f5fa0; color: #fff; font-size: 13px; }
 .browse-pending-btn:disabled { opacity: .4; }
-/* List controls above the rows: how they're ordered, and whether the noise entries (dotfiles,
-   node_modules) show. Chips rather than 44px square buttons — they're secondary to navigation. */
+/* List bar: "42 项" (or the capped note) and the hidden-items toggle on the left, the sort control
+   parked at the right end. */
 .browse-listbar { display: flex; align-items: center; gap: 6px; padding: 2px 12px 0; }
-.browse-chip { display: inline-flex; align-items: center; gap: 4px; height: 26px; padding: 0 9px; border: 1px solid #1d2630;
+.browse-count { flex: 1 1 auto; min-width: 0; color: #6b7a89; font-size: 12px; font-variant-numeric: tabular-nums; line-height: 1.35; }
+.browse-chip { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 4px; height: 26px; padding: 0 9px; border: 1px solid #1d2630;
   border-radius: 13px; background: #11161d; color: #8aa0b6; font-size: 12px; white-space: nowrap; }
 .browse-chip:active { color: #cfe0f0; }
 .browse-chip[aria-pressed="true"] { border-color: #3a5a7e; background: #16222f; color: #cfe0f0; }
@@ -2394,7 +2395,6 @@ button.cmd-text { background: none; border: none; text-align: left; }
 .browse-chip-end { margin-left: auto; }
 .browse-list { flex: 1; overflow: auto; -webkit-overflow-scrolling: touch; padding: 4px 12px 16px; }
 .browse-empty { color: #6b7a89; font-size: 13px; padding: 16px 4px; }
-.browse-overflow { color: #6b7a89; font-size: 12px; padding: 12px 4px 16px; text-align: center; }
 /* First-load placeholder. The listing had nothing to show yet and rendered the "no match" line,
    which read as an empty folder; a few shimmer rows say "loading" instead. */
 .browse-skeleton { padding: 2px 0; }
@@ -2449,12 +2449,11 @@ button.cmd-text { background: none; border: none; text-align: left; }
   padding-left: 8px; color: #6b7a89; font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .browse-entry-time { grid-column: 1; text-align: right; color: #6b86a3; }
 .browse-entry-size { grid-column: 2; text-align: right; color: #6b7a89; }
-.browse-dl, .browse-copy { flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center; width: 40px; height: 44px; border: none; background: none; color: #6b86a3; margin-left: 4px; }
-/* Keeps a directory row's time/size columns at the same x as a file row's, which has two 40px
-   buttons (plus their 4px margins) eating that space. */
-.browse-actions-spacer { flex: 0 0 auto; width: 88px; }
-.browse-dl svg, .browse-copy svg { width: 17px; height: 17px; }
-.browse-copy:active { color: #9db8ff; }
+/* One trailing ⋯ per row (every kind, so the row's right edge is the same for a folder and a file). */
+.browse-more { flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center; width: 40px; height: 44px;
+  border: none; background: none; color: #6b86a3; margin-left: 2px; }
+.browse-more svg { width: 17px; height: 17px; }
+.browse-more:active { color: #9db8ff; }
 /* pickMode: sticky confirm bar at the bottom of the directory list. */
 .browse-pick-bar { padding: 8px; border-top: 1px solid #1d2630; }
 .browse-pick-confirm { width: 100%; padding: 10px; border: none; border-radius: 8px; background: var(--blue); color: #fff; font-size: 14px; }

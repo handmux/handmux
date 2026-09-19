@@ -1178,6 +1178,8 @@ export default {
   'filebrowser.download': '下载',
   'filebrowser.pickThisDir': '选定此目录 {path}',
   'filebrowser.downloadConfirm': '下载 {name}？',
+  'filebrowser.itemCount': '{count} 项',
+  'filebrowser.rowActions': '{name} 的操作',
   'filebrowser.emptyDir': '这个文件夹是空的',
   'filebrowser.onlyHidden': '这里只有隐藏项',
   'filebrowser.showHidden': '显示隐藏项（{count}）',
