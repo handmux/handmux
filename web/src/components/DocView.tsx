@@ -155,6 +155,7 @@ export default function DocView({
   const [readNotice, setReadNotice] = useState<string | null>(null);
   const [anchorNotice, setAnchorNotice] = useState<string | null>(null);
   const [reloading, setReloading] = useState(false);
+  const [showTop, setShowTop] = useState(false);
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const mdRef = useRef<HTMLDivElement | null>(null);
   const textRef = useRef<HTMLPreElement | null>(null);
@@ -263,6 +264,17 @@ export default function DocView({
     const wrap = wrapRef.current;
     scrollToElement(els[0], wrap ? Math.max(0, wrap.clientHeight / 2 - 20) : 0);
   }, [speech.idx, followPaused]);
+
+  // Back-to-top appears once the reader is well into a long document. Independent of read-aloud: it is
+  // about position, not playback, so it tracks the container at all times.
+  useEffect(() => {
+    const wrap = wrapRef.current;
+    if (!wrap) return undefined;
+    const update = (): void => { setShowTop(wrap.scrollTop > wrap.clientHeight * 1.5); };
+    wrap.addEventListener('scroll', update, { passive: true });
+    update();
+    return () => wrap.removeEventListener('scroll', update);
+  }, [html]);
 
   // A manual scroll means the reader is looking elsewhere: pause following and offer to come back.
   useEffect(() => {
@@ -561,6 +573,16 @@ export default function DocView({
             {t('doc.backToReading')}
           </button>
         </div>
+      )}
+
+      {showTop && !loading && (
+        <button className="doc-top-btn" aria-label={t('doc.backToTop')} title={t('doc.backToTop')}
+          onClick={() => {
+            const wrap = wrapRef.current;
+            if (!wrap) return;
+            scrollGuardUntil.current = Date.now() + FOLLOW_SCROLL_GUARD_MS;
+            wrap.scrollTo({ top: 0, behavior: 'smooth' });
+          }}>↑</button>
       )}
 
       {imageView && (

@@ -2520,6 +2520,20 @@ button.cmd-text { background: none; border: none; text-align: left; }
   border-radius: 8px; color: #dfe6ee; font-size: 14px; line-height: 1.35; text-align: left;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; touch-action: manipulation; }
 .doc-toc-item:active { background: rgba(255,255,255,.08); }
+/* One outline row = a fold control + the heading label (see DocToc). */
+.doc-toc-row { display: flex; align-items: center; border-radius: 8px; }
+.doc-toc-row:active { background: rgba(255,255,255,.06); }
+.doc-toc-fold { flex: none; width: 28px; height: 34px; padding: 0; border: 0; background: none;
+  color: #6f7c8a; font-size: 11px; touch-action: manipulation; border-radius: 6px; }
+.doc-toc-fold.is-empty { visibility: hidden; }
+.doc-toc-row .doc-toc-item { padding-left: 0; flex: 1; min-width: 0; }
+.doc-toc-row .doc-toc-item:active { background: none; }
+/* Back-to-top: appears once the reader is a screen or so down, bottom-right so it never collides with
+   the centered read-aloud pill. */
+.doc-top-btn { position: fixed; right: 14px; bottom: calc(18px + env(safe-area-inset-bottom, 0px));
+  z-index: 3; width: 42px; height: 42px; border-radius: 50%; border: 1px solid #2a3440;
+  background: rgba(23,33,48,.94); color: #cfe3ff; font-size: 17px; line-height: 1;
+  box-shadow: 0 6px 18px rgba(0,0,0,.45); touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
 /* 查找 — the toolbar row becomes a search field; when idle it is just another icon button.
    The field deliberately carries NO fixed height: it shares the buttons' padding/font/border metrics,
    so the row is exactly as tall in both states and the document below never shifts by a few pixels
@@ -2580,6 +2594,15 @@ button.cmd-text { background: none; border: none; text-align: left; }
 .doc-md blockquote { margin: 8px 0; padding: 2px 12px; border-left: 3px solid #2c3947; color: #9fb0c0; }
 .doc-md blockquote p { margin: 6px 0; }
 .doc-md input[type="checkbox"] { margin-right: 6px; vertical-align: middle; }
+/* GFM footnotes (docFootnotes.ts): a superscript reference and a notes list at the end. */
+.doc-md sup.md-fn-ref { font-size: .75em; line-height: 0; vertical-align: super; }
+.doc-md sup.md-fn-ref a { text-decoration: none; padding: 0 1px; }
+.doc-md .md-footnotes { margin-top: 1.6em; border-top: 1px solid #1d2630; padding-top: .8em;
+  font-size: .9em; color: #9fb0c0; }
+.doc-md .md-footnotes-title { font-size: .85em; letter-spacing: .5px; color: #6f7c8a; margin-bottom: .3em; }
+.doc-md .md-footnotes ol { margin: 0; padding-left: 1.4em; }
+.doc-md .md-footnotes li { margin: .2em 0; }
+.doc-md .md-fn-back { text-decoration: none; }
 /* wide tables scroll inside themselves instead of widening the doc (overflow-x is hidden there) */
 .doc-md table { display: block; max-width: 100%; overflow-x: auto; border-collapse: collapse; }
 .doc-md th, .doc-md td { border: 1px solid #1d2630; padding: 6px 10px; text-align: left; }

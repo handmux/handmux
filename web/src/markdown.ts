@@ -13,6 +13,7 @@ import { marked } from 'marked';
 import DOMPurify from 'dompurify';
 import { findOutputLinks } from './docDecorations.js';
 import { isAbsolute, joinPath } from './docPath.js';
+import { applyFootnotes, stripFootnoteDefs } from './docFootnotes.js';
 import { t } from './i18n';
 
 export interface ConversationOutputLink {
@@ -160,9 +161,11 @@ export interface RenderMarkdownOptions {
 
 export function renderMarkdown(source: string, options: RenderMarkdownOptions = {}): string {
   const root = document.createElement('div');
-  root.innerHTML = DOMPurify.sanitize(
-    marked.parse(stripFrontmatter(source || ''), { async: false }) as string,
-  );
+  // Footnote definitions are lifted BEFORE parsing: left in place, marked renders `[^1]` as a link to
+  // the definition text and swallows the definition line (see docFootnotes.ts).
+  const { source: body, notes } = stripFootnoteDefs(stripFrontmatter(source || ''));
+  root.innerHTML = DOMPurify.sanitize(marked.parse(body, { async: false }) as string);
+  applyFootnotes(root, notes);
   rewriteImages(root, options.baseDir ?? null);
   if (options.links) linkify(root);
   return root.innerHTML;

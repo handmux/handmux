@@ -148,8 +148,10 @@ describe('DocView 目录 drawer', () => {
     await click(button);
     const items = [...container.querySelectorAll('.doc-toc-item')];
     expect(items.map((item) => item.textContent)).toEqual(['一级', '二级', '三级']);
-    expect(items[1].style.paddingLeft).toBe('26px'); // level 2 → 12 + 14
-    expect(items[2].style.paddingLeft).toBe('40px'); // level 3 → 12 + 28
+    // indentation lives on the row (which also holds the fold control), one step per level
+    const rows = [...container.querySelectorAll('.doc-toc-row')];
+    expect(rows[1].style.paddingLeft).toBe('20px'); // level 2 → 6 + 14
+    expect(rows[2].style.paddingLeft).toBe('34px'); // level 3 → 6 + 28
   });
 
   it('has no 目录 button for a document without headings', async () => {
@@ -157,6 +159,19 @@ describe('DocView 目录 drawer', () => {
     expect(container.querySelector('[aria-label="目录"]')).toBeNull();
     await render({ type: 'text', name: 'a.log', content: 'line' });
     expect(container.querySelector('[aria-label="目录"]')).toBeNull();
+  });
+
+  it('folds a section away and back', async () => {
+    await render({ type: 'markdown', name: 'a.md', content: DOC });
+    await click(container.querySelector('[aria-label="目录"]'));
+    const labels = () => [...container.querySelectorAll('.doc-toc-item')].map((i) => i.textContent);
+    expect(labels()).toEqual(['一级', '二级', '三级']);
+    const folds = [...container.querySelectorAll('.doc-toc-fold:not(.is-empty)')];
+    expect(folds).toHaveLength(2); // 一级 has children, 三级 does not
+    await click(folds[0]); // collapse 一级 → its descendants disappear
+    expect(labels()).toEqual(['一级']);
+    await click(folds[0]);
+    expect(labels()).toEqual(['一级', '二级', '三级']);
   });
 
   it('jumps to the heading by scrolling ONLY our container, and closes the drawer', async () => {
@@ -283,6 +298,19 @@ describe('DocView P1 document features', () => {
     expect(container.querySelector('.doc-text')?.textContent).toBe('line');
     await render({ type: 'image', name: 'a.png', path: '/a.png', content: 'blob:fake' });
     expect(container.querySelector('img.doc-image')).not.toBeNull();
+  });
+
+  it('offers back-to-top only once the reader is well into the document', async () => {
+    await render({ type: 'markdown', name: 'a.md', path: '/a.md', content: '# 标题\n\n正文。' });
+    const wrap = container.querySelector('.doc-md-wrap');
+    Object.defineProperty(wrap, 'clientHeight', { value: 400, configurable: true });
+    expect(container.querySelector('.doc-top-btn')).toBeNull();
+    wrap.scrollTop = 900; // > 1.5 × 400
+    await act(() => { wrap.dispatchEvent(new Event('scroll')); });
+    const button = container.querySelector('.doc-top-btn');
+    expect(button).not.toBeNull();
+    await click(button); // smooth-scrolls the container back to the top
+    expect(container.querySelector('.doc-top-btn')).not.toBeNull(); // state clears on the next scroll event
   });
 
   it('shows the loading page while the bytes are on their way (a fresh open)', async () => {
