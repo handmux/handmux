@@ -629,9 +629,7 @@ button.settings-page-row:disabled, .settings-page-row.disabled { color: rgba(235
 }
 .lens-toggle:active { background: #262b33; }
 .lens-toggle svg { opacity: .82; }
-/* Padding is the gap between an Agent's logo and the tab's own frame — halve it from the original 4/10 so
-   the logo sits closer to the edge. */
-.win-tab { display: inline-flex; align-items: center; white-space: nowrap; padding: 2px 5px; border: none; border-radius: 8px; background: #33353a; color: #bbb; font-size: 13px; touch-action: manipulation; }
+.win-tab { display: inline-flex; align-items: center; white-space: nowrap; padding: 4px 10px; border: none; border-radius: 8px; background: #33353a; color: #bbb; font-size: 13px; touch-action: manipulation; }
 .win-tab.active { background: var(--blue); color: #fff; }
 .win-new { border: 1px dashed #555; color: #8aa; font-weight: 700; background: transparent; }
 .win-panes { margin-left: 5px; font-size: 11px; color: #889; }
