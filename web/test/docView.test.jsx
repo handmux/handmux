@@ -272,15 +272,19 @@ describe('DocView P1 document features', () => {
 
   const openMore = () => click(container.querySelector('[aria-label="文件信息"]'));
 
-  it('重新加载 calls back to re-read the file from disk', async () => {
+  it('重新加载 re-reads the file and gets the popover out of the way', async () => {
     const reloads = [];
-    await render({ type: 'markdown', name: 'a.md', path: '/a.md', content: 'x', onReload: () => reloads.push(1) });
+    await render({
+      type: 'markdown', name: 'a.md', path: '/a.md', content: 'x',
+      mtimeMs: Date.UTC(2026, 0, 2, 3, 4), onReload: () => reloads.push(1),
+    });
     await openMore();
     const button = [...container.querySelectorAll('.doc-info-action')]
       .find((b) => b.textContent.includes('重新加载'));
     expect(button).not.toBeUndefined();
     await click(button);
     expect(reloads).toHaveLength(1);
+    expect(container.querySelector('.doc-info-pop')).toBeNull(); // document visible again
   });
 
   it('shows 字数/字符数 and copies the Markdown source', async () => {

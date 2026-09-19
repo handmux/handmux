@@ -371,6 +371,13 @@ export default function DocView({
   const canRead = type === 'markdown' && speech.supported;
   const fullPath = path || name;
 
+  // The outcome is reported by App (it knows whether the bytes on disk differed) as a toast; all this
+  // side does is get the popover out of the way so the refreshed document is visible.
+  const onReloadFromDisk = (): void => {
+    setInfoOpen(false);
+    onReload?.();
+  };
+
   const onCopyPath = (): void => {
     void copyText(fullPath).then((ok) => {
       if (!ok) return;
@@ -481,7 +488,7 @@ export default function DocView({
                   </div>
                   <div className="doc-info-actions">
                     {onReload && (
-                      <button className="doc-info-action" onClick={onReload}>
+                      <button className="doc-info-action" onClick={onReloadFromDisk}>
                         <RefreshIcon />{t('doc.reload')}
                       </button>
                     )}

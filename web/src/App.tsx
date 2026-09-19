@@ -341,7 +341,10 @@ export default function App() {
   const [completedChatEntry, setCompletedChatEntry] = useState<CompletedChatEntryRequest | null>(null);
   const completedChatEntrySeqRef = useRef(0);
   const conversationIdentityByPaneRef = useRef(new Map<string, AgentConversationIdentity>());
-  const [docToast, setDocToast] = useState<string | null>(null); // transient error toast for absolute-path doc failures
+  // Transient toast for the file viewer: 'error' red for failures, 'info' neutral for outcomes the
+  // user explicitly asked for (e.g. a forced reload).
+  const [docToast, setDocToast] = useState<{ text: string; tone: 'error' | 'info' } | null>(null);
+  const showDocToast = (text: string, tone: 'error' | 'info' = 'error'): void => setDocToast({ text, tone });
   const [exitHint, setExitHint] = useState(false); // "press Back again to exit" hint (double-back guard)
   const [docLinkPrompt, setDocLinkPrompt] = useState<DocLinkPrompt | null>(null); // { path, x, y } confirm popover for a tapped terminal path
   const [docLinkOpening, setDocLinkOpening] = useState(false);
@@ -2182,6 +2185,7 @@ export default function App() {
           const old = tab.content;
           docTabs.refreshDoc(key, { content: res.url, mtime: res.mtimeMs });
           if (typeof old === 'string') URL.revokeObjectURL(old); // free the superseded blob (the <img> is already re-pointed)
+          if (force) showDocToast(t('doc.reloadUpdated'), 'info');
         })
         .catch(() => { /* keep the last-good image */ });
       return;
@@ -2197,6 +2201,13 @@ export default function App() {
           ...(res.size !== undefined ? { size: res.size } : {}),
           ...(res.birthtimeMs !== undefined ? { birthtimeMs: res.birthtimeMs } : {}),
         });
+        // An explicit reload must be acknowledged, and saying WHICH outcome it was is the useful part.
+        if (force) {
+          showDocToast(
+            res.content === tab.content ? t('doc.reloadUnchanged') : t('doc.reloadUpdated'),
+            'info',
+          );
+        }
       })
       .catch(() => { /* keep the last-good content */ });
   };
@@ -2223,7 +2234,7 @@ export default function App() {
   const onOpenDoc = async (rawPath: string, anchor?: string): Promise<void> => {
     if (isAbsolute(rawPath)) {
       // No base to fill for an absolute path → surface the reason as a transient toast.
-      try { await openAbsDoc(rawPath, anchor); } catch (e) { setDocToast(friendlyDocError(e)); }
+      try { await openAbsDoc(rawPath, anchor); } catch (e) { showDocToast(friendlyDocError(e)); }
       return;
     }
     const base = current?.paneId ? getPaneBase(current.paneId) ?? currentPaneCwd : currentPaneCwd;
@@ -2256,7 +2267,7 @@ export default function App() {
     try {
       await openAbsDoc(joinPath(baseDir, basePrompt.rawPath), basePrompt.anchor);
     } catch (e) {
-      setDocToast(friendlyDocError(e));
+      showDocToast(friendlyDocError(e));
       return;
     }
     if (current?.paneId) setPaneBase(current.paneId, baseDir);
@@ -2343,7 +2354,7 @@ export default function App() {
   // Auto-dismiss the doc toast after a few seconds (also dismissible by tap).
   useEffect(() => {
     if (!docToast) return;
-    const id = setTimeout(() => setDocToast(null), 4000);
+    const id = setTimeout(() => setDocToast(null), docToast.tone === 'info' ? 2600 : 4000);
     return () => clearTimeout(id);
   }, [docToast]);
 
@@ -2827,7 +2838,9 @@ export default function App() {
       <AddToHome />
       <BrowserSheet browser={browser} staticPreview={staticPreview} />
       {docToast && (
-        <div className="doc-toast" role="alert" onClick={() => setDocToast(null)}>{docToast}</div>
+        <div className={`doc-toast${docToast.tone === 'info' ? ' is-info' : ''}`}
+          role={docToast.tone === 'info' ? 'status' : 'alert'}
+          onClick={() => setDocToast(null)}>{docToast.text}</div>
       )}
       {exitHint && (
         <div className="exit-toast" role="status">{t('app.backToExit')}</div>

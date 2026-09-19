@@ -2516,11 +2516,14 @@ button.cmd-text { background: none; border: none; text-align: left; }
   border-radius: 8px; color: #dfe6ee; font-size: 14px; line-height: 1.35; text-align: left;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; touch-action: manipulation; }
 .doc-toc-item:active { background: rgba(255,255,255,.08); }
-/* 查找 — the toolbar row becomes a search field; when idle it is just another icon button. */
+/* 查找 — the toolbar row becomes a search field; when idle it is just another icon button.
+   The field deliberately carries NO fixed height: it shares the buttons' padding/font/border metrics,
+   so the row is exactly as tall in both states and the document below never shifts by a few pixels
+   when the search row opens. */
 .doc-find { display: flex; align-items: center; gap: 6px; flex: 1; min-width: 0; }
 .doc-find > svg { width: 17px; height: 17px; flex: none; color: #8a93a0; }
-.doc-find-input { flex: 1; min-width: 0; height: 32px; padding: 0 8px; border: 1px solid #1d2630;
-  border-radius: 8px; background: #11161d; color: #e6edf3; font-size: 15px; }
+.doc-find-input { flex: 1; min-width: 0; padding: 4px 8px; border: 1px solid #1d2630;
+  border-radius: 8px; background: #11161d; color: #e6edf3; font-size: 14px; line-height: inherit; }
 .doc-find-input:focus { outline: none; border-color: #2f4a6d; }
 .doc-find-input::-webkit-search-cancel-button { display: none; }
 .doc-find-count { flex: none; font-size: 12px; color: #8a93a0; font-variant-numeric: tabular-nums;
@@ -2680,6 +2683,9 @@ button.cmd-text { background: none; border: none; text-align: left; }
   padding: 10px 14px; border-radius: 10px; font-size: 13px;
   box-shadow: 0 6px 20px rgba(0,0,0,.4);
 }
+/* Neutral tone: the outcome of something the user explicitly asked for (a forced reload) is
+   information, not a failure — same shape, grey instead of red. */
+.doc-toast.is-info { background: rgba(30,32,36,.96); color: #e6e9ee; border-color: #3a3d44; }
 /* Neutral hint toast (double-back-to-exit): same shape as .doc-toast but grey, not the error red — this is
    an expected prompt, not a failure. Sits above the dock, clear of the safe-area inset. */
 .exit-toast {

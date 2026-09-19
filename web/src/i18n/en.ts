@@ -1238,6 +1238,8 @@ export default {
   'doc.copySource': 'Copy source',
   'doc.copyCode': 'Copy code',
   'doc.reload': 'Reload',
+  'doc.reloadUpdated': 'Reloaded — content updated',
+  'doc.reloadUnchanged': 'Reloaded — no changes on disk',
   'doc.words': 'Words',
   'doc.chars': 'Characters',
   'doc.anchorMissing': 'No heading named #{anchor} — the file was still opened.',

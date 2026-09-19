@@ -46,6 +46,18 @@ describe('find highlight CSS contract', () => {
     expect(styles).not.toMatch(/mark\.doc-find(?!-hit)/);           // …and no rule targets marks as the row
   });
 
+  it('does not let the search field change the toolbar height', () => {
+    // Real-device report: opening the search row shifted the heading down a few pixels, because the
+    // input carried a fixed height (32px) that differed from the buttons' natural height. Sharing the
+    // button metrics keeps every toolbar state the same height — verified in Chromium at 0px delta.
+    const input = /\.doc-find-input\s*\{([^}]*)\}/.exec(styles)?.[1] ?? '';
+    const button = /\.doc-zoom-btn\s*\{([^}]*)\}/.exec(styles)?.[1] ?? '';
+    expect(input).not.toMatch(/(^|[;{\s])height\s*:/); // no fixed height
+    const verticalPadding = (body) => /padding:\s*([^;]+);/.exec(body)?.[1]?.trim().split(/\s+/)[0];
+    expect(verticalPadding(input)).toBe(verticalPadding(button));
+    expect(/font-size:\s*([^;]+);/.exec(input)?.[1]).toBe(/font-size:\s*([^;]+);/.exec(button)?.[1]);
+  });
+
   it('still marks the current match visually (background + a layout-neutral emphasis)', () => {
     const current = findMarkBlocks().find((block) => block.selector.includes('is-current'));
     expect(current?.body).toMatch(/background\s*:/);
