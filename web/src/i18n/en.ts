@@ -1229,6 +1229,8 @@ export default {
   'doc.speakFailed': 'Read-aloud could not start — tap play again.',
   'doc.nothingToRead': 'Nothing to read aloud in this document.',
   'doc.toc': 'Contents',
+  'doc.mermaidFailed': 'Diagram could not be rendered',
+  'doc.mermaidLoadFailed': 'diagram support failed to load',
   'doc.tocCollapse': 'Collapse section',
   'doc.tocExpand': 'Expand section',
   'doc.backToTop': 'Back to top',

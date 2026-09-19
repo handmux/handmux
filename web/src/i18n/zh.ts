@@ -1228,6 +1228,8 @@ export default {
   'doc.speakFailed': '朗读没能启动，请再点一次播放',
   'doc.nothingToRead': '这篇文档里没有可朗读的正文',
   'doc.toc': '目录',
+  'doc.mermaidFailed': '图表渲染失败，已显示源码',
+  'doc.mermaidLoadFailed': '图表组件加载失败',
   'doc.tocCollapse': '收起这一节',
   'doc.tocExpand': '展开这一节',
   'doc.backToTop': '回到顶部',

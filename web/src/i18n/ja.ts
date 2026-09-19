@@ -526,6 +526,8 @@ export default {
   'doc.speakFailed': '読み上げを開始できませんでした。もう一度再生をタップしてください。',
   'doc.nothingToRead': 'この文書には読み上げられる本文がありません。',
   'doc.toc': '目次',
+  'doc.mermaidFailed': '図を描画できませんでした（ソースを表示）',
+  'doc.mermaidLoadFailed': '図の機能を読み込めませんでした',
   'doc.tocCollapse': 'この節を折りたたむ',
   'doc.tocExpand': 'この節を展開',
   'doc.backToTop': '先頭へ戻る',

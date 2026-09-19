@@ -20,6 +20,7 @@ function isFindable(node: Text): boolean {
   // Folded-away sections are not searchable: the reader cannot see the match to act on it.
   for (let p: Element | null = parent; p; p = p.parentElement) {
     if (p.classList.contains('md-section-hidden')) return false;
+    if (p.classList.contains('md-mermaid') || p.classList.contains('md-mermaid-source')) return false;
   }
   return true;
 }

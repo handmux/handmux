@@ -2596,6 +2596,21 @@ button.cmd-text { background: none; border: none; text-align: left; }
 .doc-md blockquote { margin: 8px 0; padding: 2px 12px; border-left: 3px solid #2c3947; color: #9fb0c0; }
 .doc-md blockquote p { margin: 6px 0; }
 .doc-md input[type="checkbox"] { margin-right: 6px; vertical-align: middle; }
+/* Mermaid diagrams (docMermaid.ts). The source <pre> is hidden while the diagram is shown, and comes
+   back with a reason if rendering fails. */
+.doc-md pre.md-mermaid-source { display: none; }
+.doc-md .md-mermaid { display: flex; justify-content: center; margin: 10px 0; overflow-x: auto;
+  -webkit-overflow-scrolling: touch; }
+.doc-md .md-mermaid.is-loading { min-height: 96px; align-items: center; }
+.doc-md .md-mermaid.is-loading::after { content: ''; width: 100%; height: 3px; border-radius: 2px;
+  background: linear-gradient(90deg, #1b2430 0%, #263442 50%, #1b2430 100%); background-size: 200% 100%; }
+@media (prefers-reduced-motion: no-preference) {
+  .doc-md .md-mermaid.is-loading::after { animation: doc-img-loading 1.6s linear infinite; }
+}
+.doc-md .md-mermaid svg { max-width: 100%; height: auto; }
+.doc-md .md-mermaid-error { margin: 8px 0; padding: 10px 12px; border-radius: 8px; background: #1b222b;
+  color: #9fb0c0; font-size: 13px; }
+
 /* Body folding (docFolding.ts): a caret inside each heading collapses that section. The caret is drawn
    with CSS (no text), so heading text — and therefore slugs, find and read-aloud — stay untouched. */
 .doc-md .md-fold { display: inline-block; width: 20px; height: 20px; margin: 0 4px 0 -24px;

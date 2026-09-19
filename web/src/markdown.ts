@@ -14,6 +14,7 @@ import DOMPurify from 'dompurify';
 import { findOutputLinks } from './docDecorations.js';
 import { isAbsolute, joinPath } from './docPath.js';
 import { applyFootnotes, stripFootnoteDefs } from './docFootnotes.js';
+import { prepareMermaid } from './docMermaid.js';
 import { t } from './i18n';
 
 export interface ConversationOutputLink {
@@ -182,6 +183,7 @@ export function renderMarkdown(source: string, options: RenderMarkdownOptions = 
   root.innerHTML = DOMPurify.sanitize(marked.parse(body, { async: false }) as string);
   applyFootnotes(root, notes);
   wrapTables(root);
+  if (options.baseDir) prepareMermaid(root); // doc mode only: a chat bubble renders no diagrams
   rewriteImages(root, options.baseDir ?? null);
   if (options.links) linkify(root);
   return root.innerHTML;

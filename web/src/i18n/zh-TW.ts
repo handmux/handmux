@@ -538,6 +538,8 @@ export default {
   'doc.speakFailed': '朗讀沒能啟動，請再點一次播放',
   'doc.nothingToRead': '這篇文件裡沒有可朗讀的正文',
   'doc.toc': '目錄',
+  'doc.mermaidFailed': '圖表渲染失敗，已顯示原始碼',
+  'doc.mermaidLoadFailed': '圖表元件載入失敗',
   'doc.tocCollapse': '收合這一節',
   'doc.tocExpand': '展開這一節',
   'doc.backToTop': '回到頂部',

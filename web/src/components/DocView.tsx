@@ -12,6 +12,7 @@ import { copyText } from '../clipboard.js';
 import { renderMarkdown } from '../markdown.js';
 import { clearFind, focusMatch, runFind } from '../docFind.js';
 import { installHeadingFolding } from '../docFolding.js';
+import { useDocMermaid } from '../docMermaid.js';
 import { useKeyboardInset } from '../hooks/useKeyboardInset.js';
 import {
   CheckIcon, CopyIcon, MoreHorizontalIcon, PauseIcon, PlayIcon, RefreshIcon, SearchIcon, StopIcon, TocIcon,
@@ -194,6 +195,8 @@ export default function DocView({
   const [imageView, closeImageView] = useMarkdownImages(mdRef, html, type === 'markdown');
   // One-tap copy on every code block (markdown and plain-text docs alike).
   useDocCodeCopy(mdRef, html, type === 'markdown');
+  // Mermaid diagrams: mermaid itself is imported lazily, only for a document that has one.
+  useDocMermaid(mdRef, html, type === 'markdown');
   // Body folding: heading carets collapse that heading's content (doc mode only — a chat bubble has
   // no sections to fold). Re-installed whenever the rendered document changes.
   useEffect(() => {

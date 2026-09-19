@@ -37,6 +37,9 @@ function inSkippedBlock(node: Node, root: HTMLElement): boolean {
     if (p instanceof HTMLElement && p.hasAttribute('data-tts-skip')) return true;
     // A section the reader folded away is not part of what they are looking at — do not read it.
     if (p instanceof HTMLElement && p.classList.contains('md-section-hidden')) return true;
+    // A diagram is a picture, and its hidden source is not prose either.
+    if (p instanceof HTMLElement && (p.classList.contains('md-mermaid')
+      || p.classList.contains('md-mermaid-source'))) return true;
   }
   return false;
 }

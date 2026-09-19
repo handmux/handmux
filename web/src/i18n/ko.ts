@@ -526,6 +526,8 @@ export default {
   'doc.speakFailed': '읽기를 시작하지 못했습니다. 재생을 다시 눌러 주세요.',
   'doc.nothingToRead': '이 문서에는 읽을 본문이 없습니다.',
   'doc.toc': '목차',
+  'doc.mermaidFailed': '다이어그램을 그리지 못했습니다(원본 표시)',
+  'doc.mermaidLoadFailed': '다이어그램 기능을 불러오지 못했습니다',
   'doc.tocCollapse': '이 절 접기',
   'doc.tocExpand': '이 절 펼치기',
   'doc.backToTop': '맨 위로',
