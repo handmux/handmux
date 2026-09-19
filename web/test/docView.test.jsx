@@ -159,18 +159,21 @@ describe('DocView 目录 drawer', () => {
     expect(container.querySelector('[aria-label="目录"]')).toBeNull();
   });
 
-  it('jumps to the heading and closes the drawer', async () => {
-    const scrolls = [];
-    const original = Element.prototype.scrollIntoView;
-    Element.prototype.scrollIntoView = function scrollIntoView(arg) { scrolls.push({ id: this.id, arg }); };
+  it('jumps to the heading by scrolling ONLY our container, and closes the drawer', async () => {
+    const calls = [];
+    const original = Element.prototype.scrollTo;
+    Element.prototype.scrollTo = function scrollTo(opts) { calls.push(opts); };
     try {
       await render({ type: 'markdown', name: 'a.md', content: DOC });
       await click(container.querySelector('[aria-label="目录"]'));
       await click([...container.querySelectorAll('.doc-toc-item')][2]);
-      expect(scrolls.at(-1)?.id).toBe('doc-h-2');
+      expect(calls.length).toBe(1); // one scroll, on the doc container — never the page
+      expect(typeof calls[0].top).toBe('number');
       expect(container.querySelector('.doc-toc')).toBeNull(); // closed after jumping
+      // the heading carries an id so the jump has a target
+      expect(container.querySelector('.doc-md h3').id).toBe('doc-h-2');
     } finally {
-      Element.prototype.scrollIntoView = original; // leave the shared stub as we found it
+      Element.prototype.scrollTo = original;
     }
   });
 
@@ -213,6 +216,23 @@ describe('DocView 查找', () => {
     expect(marks()[1].classList.contains('is-current')).toBe(true);
     await click(container.querySelector('[aria-label="上一个匹配"]')); // wraps back from 2 → 1? no: 1 → 0
     expect(container.querySelector('.doc-find-count').textContent).toBe('1/3');
+  });
+
+  it('scrolls only the document container when stepping matches (never the page)', async () => {
+    const calls = [];
+    const original = Element.prototype.scrollTo;
+    Element.prototype.scrollTo = function scrollTo(opts) { calls.push(opts); };
+    try {
+      await render({ type: 'markdown', name: 'a.md', content: DOC });
+      await click(container.querySelector('[aria-label="在本文中查找"]'));
+      await type(container.querySelector('.doc-find-input'), 'alpha');
+      expect(calls.length).toBeGreaterThan(0);
+      const before = calls.length;
+      await click(container.querySelector('[aria-label="下一个匹配"]'));
+      expect(calls.length).toBe(before + 1);
+    } finally {
+      Element.prototype.scrollTo = original;
+    }
   });
 
   it('says so when nothing matches, and clears its marks when closed', async () => {

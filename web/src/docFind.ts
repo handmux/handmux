@@ -72,13 +72,15 @@ export function runFind(root: HTMLElement | null, query: string): number {
   return count;
 }
 
-/** Highlight match `index` as the current one and bring it into view. */
-export function focusMatch(root: HTMLElement | null, index: number): void {
-  if (!root) return;
+/** Highlight match `index` as the current one. Returns it so the caller can scroll its OWN container
+ *  (see DocView.scrollToElement — scrollIntoView would also scroll ancestor scrollers, which pans the
+ *  fixed file sheet away and takes the toolbar with it). */
+export function focusMatch(root: HTMLElement | null, index: number): HTMLElement | null {
+  if (!root) return null;
   const marks = Array.from(root.querySelectorAll<HTMLElement>(`mark.${MARK_CLASS}`));
   marks.forEach((mark) => mark.classList.remove(CURRENT_CLASS));
   const target = marks[index];
-  if (!target) return;
+  if (!target) return null;
   target.classList.add(CURRENT_CLASS);
-  target.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  return target;
 }

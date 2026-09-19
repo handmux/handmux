@@ -42,6 +42,10 @@ const LAST = FONT_SIZES.length - 1;
 // Our own smooth scrollIntoView fires scroll events too; ignore them for this long so following
 // doesn't switch itself off the instant it scrolls.
 const FOLLOW_SCROLL_GUARD_MS = 800;
+// How far below the container's top edge a jump target lands — clears the pinned toolbar, and keeps a
+// find match in the upper half where the soft keyboard cannot cover it.
+const TOC_TOP_OFFSET = 62;
+const FIND_TOP_OFFSET = 70;
 
 const readFontIndex = (): number => {
   const value: unknown = getDocFontIndex();
@@ -104,6 +108,21 @@ export default function DocView({
   const copiedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const scrollGuardUntil = useRef(0); // timestamp until which scroll events are treated as our own
   const speech = useDocSpeech();
+
+  // Scroll ONE element inside OUR scroll container, by hand.
+  //
+  // `el.scrollIntoView(...)` also scrolls every scrollable ancestor — including the page — which on iOS
+  // pans the `position: fixed` file sheet (and therefore this pinned toolbar, search row and all) out of
+  // the visual viewport, so the top of the panel disappears. Computed here instead so only
+  // `.doc-md-wrap` moves; `topOffset` places the target that many px below the container's top edge.
+  const scrollToElement = (el: Element | null | undefined, topOffset: number, smooth = true): void => {
+    const wrap = wrapRef.current;
+    if (!el || !wrap) return;
+    const top = el.getBoundingClientRect().top - wrap.getBoundingClientRect().top + wrap.scrollTop - topOffset;
+    const next = Math.max(0, top);
+    scrollGuardUntil.current = Date.now() + FOLLOW_SCROLL_GUARD_MS;
+    wrap.scrollTo({ top: next, behavior: smooth ? 'smooth' : 'auto' });
+  };
   useScreenWakeLock(speech.playing && !speech.paused); // screen sleep kills TTS — hold it awake while reading
 
   const html = useMemo(
@@ -172,8 +191,8 @@ export default function DocView({
     const els = root.querySelectorAll(`.tts-sent[data-tts="${speech.idx}"]`);
     els.forEach((el) => el.classList.add('tts-active'));
     if (followPaused) return;
-    scrollGuardUntil.current = Date.now() + FOLLOW_SCROLL_GUARD_MS;
-    els[0]?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    const wrap = wrapRef.current;
+    scrollToElement(els[0], wrap ? Math.max(0, wrap.clientHeight / 2 - 20) : 0);
   }, [speech.idx, followPaused]);
 
   // A manual scroll means the reader is looking elsewhere: pause following and offer to come back.
@@ -241,7 +260,7 @@ export default function DocView({
     setMatchCount(total);
     const first = total ? 0 : -1;
     setMatchIndex(first);
-    if (first >= 0) focusMatch(root, first);
+    if (first >= 0) scrollToElement(focusMatch(root, first), FIND_TOP_OFFSET);
   }, [query, findOpen, html]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // The row turns into a search field → put the caret in it.
@@ -253,7 +272,9 @@ export default function DocView({
     if (matchCount <= 0) return;
     const next = (matchIndex + delta + matchCount) % matchCount; // wraps both ways
     setMatchIndex(next);
-    focusMatch(findRoot(), next);
+    // Keep the match near the TOP of the visible area: with the soft keyboard up the lower half of the
+    // screen is gone, so a centred match would sit behind it.
+    scrollToElement(focusMatch(findRoot(), next), FIND_TOP_OFFSET);
   };
 
   const onPlayToggle = (): void => {
@@ -395,12 +416,7 @@ export default function DocView({
       )}
 
       <DocToc open={tocOpen} items={toc} onClose={() => setTocOpen(false)}
-        onSelect={(id) => {
-          const heading = document.getElementById(id);
-          if (!heading) return;
-          scrollGuardUntil.current = Date.now() + FOLLOW_SCROLL_GUARD_MS; // not a reader scroll
-          heading.scrollIntoView({ block: 'start', behavior: 'smooth' });
-        }} />
+        onSelect={(id) => { scrollToElement(document.getElementById(id), TOC_TOP_OFFSET); }} />
     </div>
   );
 }

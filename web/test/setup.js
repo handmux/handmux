@@ -13,10 +13,14 @@ try { localStorage.setItem('tw_lang', 'zh'); } catch { /* no localStorage in thi
 // and updates from the shared startup config are covered separately by test/useAsrAvailable.test.jsx.
 try { localStorage.setItem('tw_asr', '1'); } catch { /* no localStorage in this env */ }
 
-// jsdom has no layout engine, so scrollIntoView is not implemented at all — but the doc reader scrolls
-// the spoken sentence into view. Stub it as a no-op so those paths can run (the real behavior is
-// device-only and is verified on a real device, never here). Guarded: plain-logic suites run without a
-// DOM, where Element does not exist.
-if (typeof Element !== 'undefined' && typeof Element.prototype.scrollIntoView !== 'function') {
-  Element.prototype.scrollIntoView = function scrollIntoView() { /* no-op in tests */ };
+// jsdom has no layout engine, so scrollIntoView/scrollTo are not implemented at all — but the doc reader
+// scrolls within its own container (deliberately, to avoid scrolling ancestors). Stub both as no-ops so
+// those paths can run; the real behaviour is device-only and is verified on a real device, never here.
+if (typeof Element !== 'undefined') {
+  if (typeof Element.prototype.scrollIntoView !== 'function') {
+    Element.prototype.scrollIntoView = function scrollIntoView() { /* no-op in tests */ };
+  }
+  if (typeof Element.prototype.scrollTo !== 'function') {
+    Element.prototype.scrollTo = function scrollTo() { /* no-op in tests */ };
+  }
 }
