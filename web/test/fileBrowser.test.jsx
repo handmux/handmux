@@ -328,7 +328,7 @@ describe('FileBrowser', () => {
     expect(names).toEqual(expect.arrayContaining(['.git', 'node_modules', 'src', 'notes.md']));
     expect(container.querySelector('.browse-count').textContent).toBe('4 项');
     // The switch is always there, whatever the folder holds, and reads the same either way.
-    const chip = container.querySelector('.browse-chip'); // left of the sort chip, which carries -end
+    const chip = container.querySelector('.browse-chip'); // the collapse switch, right of the sort control
     expect(chip.textContent).toBe('收起隐藏项');
     expect(chip.getAttribute('aria-pressed')).toBe('false');
     await click(chip);

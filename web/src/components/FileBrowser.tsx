@@ -614,7 +614,8 @@ export default function FileBrowser({
         </div>
       )}
       {/* List bar: how much is here (and, when a listing is capped, how much of it you are seeing),
-          then what is hidden — with the sort control parked on the right. */}
+          then the controls at the right end. The sort control comes first and sizes to its label; the
+          collapse switch, whose label never changes, anchors the right edge. */}
       {all.length > 0 && (
         <div className="browse-listbar">
           <span className="browse-count">
@@ -623,9 +624,6 @@ export default function FileBrowser({
               : t('filebrowser.itemCount', { count: sorted.length })}
           </span>
           <span className="browse-actions">
-            <button className="browse-chip" aria-pressed={collapseHidden} onClick={toggleCollapseHidden}>
-              {t('filebrowser.collapseHidden')}
-            </button>
             {visible.length > 1 && (
               /* A dropdown, not a chip that toggles: there are seven states, so the trigger shows the
                  current one and the menu is where you change it (same chrome as the root selector). */
@@ -638,6 +636,9 @@ export default function FileBrowser({
                 />
               </span>
             )}
+            <button className="browse-chip" aria-pressed={collapseHidden} onClick={toggleCollapseHidden}>
+              {t('filebrowser.collapseHidden')}
+            </button>
           </span>
         </div>
       )}

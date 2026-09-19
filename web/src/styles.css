@@ -2397,10 +2397,11 @@ button.cmd-text { background: none; border: none; text-align: left; }
 .browse-chip svg { width: 13px; height: 13px; }
 /* The sort control is a dropdown, not a chip that toggles: seven states are too many to cycle, so the
    trigger carries the current one and a caret, and the menu (the same chrome as the root selector in
-   the path bar) is where you switch. It holds one width — sized for the longest label, 修改时间 ↓. */
+   the path bar) is where you switch. It hugs its label — the label changes with the mode, and it is
+   the collapse switch to its right, whose label never changes, that holds the bar's right edge. */
 .browse-sort { flex: 0 0 auto; }
 .browse-sort .dd-trigger { display: inline-flex; align-items: center; justify-content: center; gap: 4px; width: 100%;
-  min-width: 7.9em; height: 26px; padding: 0 9px; border: 1px solid #1d2630; border-radius: 13px;
+  height: 26px; padding: 0 9px; border: 1px solid #1d2630; border-radius: 13px;
   background: #11161d; color: #8aa0b6; font-size: 12px; white-space: nowrap; }
 .browse-sort .dd-trigger:active { color: #cfe0f0; }
 .browse-sort .dd-value { flex: 0 1 auto; min-width: 0; overflow: visible; }
