@@ -73,6 +73,11 @@ export const codebuddy: AgentAdapter = {
   process: {
     commands: ['codebuddy', 'codebuddy-code', 'cbc'],
     ambiguousCommands: ['node'],
+    // Process presence alone establishes the sessionless run. Beyond being the base every later capability
+    // builds on, this is what puts CodeBuddy on the pane roster the phone reads: the per-window Agent badge
+    // for windows you are NOT looking at comes from the Runtime's active runs (`/states`), not from pane
+    // identity — the pane you have selected is the only one resolved by `identifyPanes`.
+    runtimeAttach: true as const,
     verify: verifyCodeBuddyProcess,
   },
   presentation: { iconId: 'codebuddy' },

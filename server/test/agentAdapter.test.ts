@@ -57,7 +57,11 @@ describe('built-in AgentAdapter registry', () => {
     });
     expect(getAgentAdapter('codebuddy')).toMatchObject({
       label: 'CodeBuddy',
-      process: { commands: ['codebuddy', 'codebuddy-code', 'cbc'], ambiguousCommands: ['node'] },
+      process: {
+        commands: ['codebuddy', 'codebuddy-code', 'cbc'],
+        ambiguousCommands: ['node'],
+        runtimeAttach: true,
+      },
       capabilities: {},
       presentation: { iconId: 'codebuddy' },
     });
