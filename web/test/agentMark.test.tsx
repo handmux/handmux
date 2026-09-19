@@ -11,7 +11,9 @@ describe('AgentMark', () => {
     // Claude's mark is the pixel robot its CLI prints on startup: block art, so it is drawn as rects in the
     // terminal's own two colours rather than as a single-colour glyph.
     const claudeSvg = claude?.querySelector('svg');
-    expect(claudeSvg?.getAttribute('viewBox')).toBe('0 0 24 24');
+    // Each artwork carries its OWN box — Claude's robot is 17:10 — so a badge sized by height can show it
+    // at full height instead of letterboxing it inside the shared square.
+    expect(claudeSvg?.getAttribute('viewBox')).toBe('0 0 17 10');
     expect(new Set(Array.from(claudeSvg?.querySelectorAll('path') ?? [])
       .map((path) => path.getAttribute('fill')))).toEqual(new Set(['#000000', '#d7af87']));
 
@@ -25,8 +27,9 @@ describe('AgentMark', () => {
     const svg = pi?.querySelector('svg');
     expect(pi).not.toBeNull();
     expect(container.querySelector('[data-agent-icon="generic"]')).toBeNull();
-    // Every bundled logo uses the same full 24×24 canvas; shared .agent-mark sizing then stays visually
-    // consistent in tabs, the pane map, and Usage without per-location Pi overrides.
+    // A square mark keeps the full 24×24 canvas, so shared .agent-mark sizing stays visually consistent in
+    // tabs, the pane map, and Usage without per-location Pi overrides. (The two robots declare their own
+    // wider boxes; .agent-mark sizes every mark by height.)
     expect(svg?.getAttribute('viewBox')).toBe('0 0 24 24');
     expect(svg?.querySelectorAll('path')).toHaveLength(2);
     expect(Array.from(svg?.querySelectorAll('path') ?? []).map((path) => path.getAttribute('fill')))
@@ -46,10 +49,10 @@ describe('AgentMark', () => {
     const mark = container.querySelector('[data-agent-icon="codebuddy"]');
     expect(mark).not.toBeNull();
     expect(container.querySelector('[data-agent-icon="generic"]')).toBeNull();
-    // The mark is the block-art robot the CLI prints on startup, fitted into the shared canvas so every
-    // badge stays the same rendered size without per-location overrides.
+    // The mark is the block-art robot the CLI prints on startup, on its own artwork box (40:28) so a badge
+    // sized by height shows it at full height.
     const svg = mark?.querySelector('svg');
-    expect(svg?.getAttribute('viewBox')).toBe('0 0 24 24');
+    expect(svg?.getAttribute('viewBox')).toBe('0 0 40 28');
     expect(svg?.getAttribute('aria-hidden')).toBe('true');
     // One path in the colour the CLI emits for the banner, and no defs ids: these logos are inlined into
     // one shared document, and neighbouring cells must not show a seam.
