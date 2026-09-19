@@ -234,13 +234,19 @@ export function StopIcon() {
   );
 }
 
-// ☰ 目录(缩进的三条线:最上一条最长,读作"大纲/层级")。朗读工具栏最左侧的目录入口。
+// ☰ 目录(项目符号列表)。This is the glyph editors use for an outline/TOC (VS Code's Outline, Typora and
+// Obsidian's outline buttons): a bullet with a text line per row. A plain list reads unambiguously as
+// "contents" in a read-only viewer's toolbar, where the alternative — progressively indented lines —
+// looked like align/sort, and a bullet-plus-connector tree turned to noise below 20px.
 export function TocIcon() {
   return (
     <svg {...base}>
-      <line x1="3" y1="6" x2="21" y2="6" />
-      <line x1="7" y1="12" x2="21" y2="12" />
-      <line x1="11" y1="18" x2="21" y2="18" />
+      <circle cx="4" cy="6" r="1.3" />
+      <circle cx="4" cy="12" r="1.3" />
+      <circle cx="4" cy="18" r="1.3" />
+      <line x1="9" y1="6" x2="21" y2="6" />
+      <line x1="9" y1="12" x2="21" y2="12" />
+      <line x1="9" y1="18" x2="21" y2="18" />
     </svg>
   );
 }
