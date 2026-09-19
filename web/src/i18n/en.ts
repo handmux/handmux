@@ -1222,6 +1222,7 @@ export default {
   'doc.fontLarger': 'Larger font',
   'doc.backToReading': 'Back to what is being read',
   'doc.speakFailed': 'Read-aloud could not start — tap play again.',
+  'doc.nothingToRead': 'Nothing to read aloud in this document.',
   'doc.fileInfo': 'File info',
   'doc.filePath': 'Path',
   'doc.fileSize': 'Size',

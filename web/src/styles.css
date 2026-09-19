@@ -2462,14 +2462,20 @@ button.cmd-text { background: none; border: none; text-align: left; }
   border: 1px solid #3a3c42; box-shadow: 0 14px 36px rgba(0,0,0,.6); transform-origin: top right;
   animation: dd-pop .12s ease; }
 .doc-info-title { font-size: 12px; color: #8a8f98; margin-bottom: 8px; }
-.doc-info-row { display: flex; gap: 10px; padding: 6px 0; font-size: 13px; }
+.doc-info-row { display: flex; align-items: center; gap: 10px; padding: 6px 0; font-size: 13px; }
 .doc-info-key { flex: none; width: 4.6em; color: #8a8f98; }
 .doc-info-val { flex: 1; min-width: 0; color: #e6edf3; text-align: right; }
-.doc-info-path { word-break: break-all; -webkit-user-select: text; user-select: text; }
-.doc-info-copy { display: inline-flex; align-items: center; gap: 6px; width: 100%; margin: 4px 0 8px;
-  padding: 9px 12px; border: 0; border-radius: 8px; background: #34363c; color: #cfe3ff; font-size: 13px;
-  touch-action: manipulation; }
-.doc-info-copy svg { width: 15px; height: 15px; }
+/* A long path scrolls sideways instead of wrapping the row into a paragraph. */
+.doc-info-path { text-align: left; white-space: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch;
+  -webkit-user-select: text; user-select: text; scrollbar-width: none; }
+.doc-info-path::-webkit-scrollbar { display: none; }
+/* Copy is an icon-only control at the END of the path row — the app's usual small-copy convention
+   (see .cmd-copy): borderless, 40×44 hit area, swaps to a check mark once copied. */
+.doc-info-copy { flex: none; display: inline-flex; align-items: center; justify-content: center;
+  min-width: 40px; min-height: 44px; padding: 6px 8px; margin: -6px -8px -6px 0; background: none;
+  border: 0; color: #8a93a0; touch-action: manipulation; }
+.doc-info-copy svg { width: 15px; height: 15px; display: block; }
+.doc-info-copy:active { color: #9db8ff; }
 /* Read-aloud could not start (the engine refused) — say so instead of leaving a dead tap. */
 .doc-speak-error { margin: 8px 12px 0; padding: 8px 10px; border-radius: 8px; background: #2a1f22;
   color: #f0a9a9; font-size: 13px; }

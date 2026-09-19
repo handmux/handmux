@@ -8,7 +8,7 @@ import { useMarkdownImages } from '../hooks/useMarkdownImages.js';
 import { useBackButton } from '../hooks/useBackButton.js';
 import { copyText } from '../clipboard.js';
 import { renderMarkdown } from '../markdown.js';
-import { CopyIcon, MoreHorizontalIcon, PauseIcon, PlayIcon, StopIcon } from './icons.jsx';
+import { CheckIcon, CopyIcon, MoreHorizontalIcon, PauseIcon, PlayIcon, StopIcon } from './icons.jsx';
 import ImageViewer from './ImageViewer.jsx';
 import { t, getLangCode } from '../i18n';
 import type { MouseEvent as ReactMouseEvent } from 'react';
@@ -82,6 +82,7 @@ export default function DocView({
   const [followPaused, setFollowPaused] = useState(false);
   const [infoOpen, setInfoOpen] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [readNotice, setReadNotice] = useState<string | null>(null);
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const mdRef = useRef<HTMLDivElement | null>(null);
   const infoRef = useRef<HTMLDivElement | null>(null);
@@ -162,7 +163,8 @@ export default function DocView({
     const index = Number(span.dataset.tts);
     if (!Number.isInteger(index)) return;
     const sentences = collectSentences(mdRef.current);
-    if (!sentences.length) return;
+    if (!sentences.length) { setReadNotice(t('doc.nothingToRead')); return; }
+    setReadNotice(null);
     setFollowPaused(false);
     speech.play(sentences, index);
   };
@@ -185,7 +187,11 @@ export default function DocView({
     if (speech.playing) { speech.paused ? speech.resume() : speech.pause(); return; }
     setFollowPaused(false); // a fresh read always follows
     const sentences = collectSentences(mdRef.current);
-    if (sentences.length) speech.play(sentences);
+    // Nothing readable (an all-code document, or marking found no prose) must SAY so — a silent
+    // return here is indistinguishable from a broken button.
+    if (!sentences.length) { setReadNotice(t('doc.nothingToRead')); return; }
+    setReadNotice(null);
+    speech.play(sentences);
   };
 
   const reading = speech.playing && !speech.paused;
@@ -233,10 +239,12 @@ export default function DocView({
               <div className="doc-info-row">
                 <span className="doc-info-key">{t('doc.filePath')}</span>
                 <span className="doc-info-val doc-info-path">{fullPath}</span>
+                <button className="doc-info-copy" onClick={onCopyPath}
+                  aria-label={copied ? t('common.copied') : t('doc.copyPath')}
+                  title={t('doc.copyPath')}>
+                  {copied ? <CheckIcon /> : <CopyIcon />}
+                </button>
               </div>
-              <button className="doc-info-copy" onClick={onCopyPath}>
-                <CopyIcon />{copied ? t('common.copied') : t('doc.copyPath')}
-              </button>
               <div className="doc-info-row">
                 <span className="doc-info-key">{t('doc.fileSize')}</span>
                 <span className="doc-info-val">{formatBytes(size)}</span>
@@ -254,8 +262,10 @@ export default function DocView({
         </div>
       </div>
 
-      {speech.failed && (
-        <div className="doc-speak-error" role="status">{t('doc.speakFailed')}</div>
+      {(speech.failed || readNotice) && (
+        <div className="doc-speak-error" role="status">
+          {speech.failed ? t('doc.speakFailed') : readNotice}
+        </div>
       )}
 
       {type === 'text' ? (

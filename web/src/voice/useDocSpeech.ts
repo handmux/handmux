@@ -67,9 +67,12 @@ export function useDocSpeech(): DocSpeechController {
     return () => synth.removeEventListener('voiceschanged', refresh);
   }, [synth]);
 
-  const pickZhVoice = (): SpeechSynthesisVoice | null => (
-    voicesRef.current.find((voice) => /^zh/i.test(voice.lang)) || null
-  );
+  // Prefer a Chinese voice, but never let the list become a gate: iOS in a standalone PWA can leave
+  // `voiceschanged` unfired, so re-read the list on demand when the cache is still empty.
+  const pickZhVoice = (): SpeechSynthesisVoice | null => {
+    if (!voicesRef.current.length) voicesRef.current = synth?.getVoices() || [];
+    return voicesRef.current.find((voice) => /^zh/i.test(voice.lang)) || null;
+  };
 
   const stop = (): void => {
     const current = ref.current;

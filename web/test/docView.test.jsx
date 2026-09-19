@@ -213,10 +213,11 @@ describe('DocView read-aloud toolbar', () => {
     expect(pop).not.toBeNull();
     expect(pop.textContent).toContain('/docs/notes/a.md');
     expect(pop.textContent).toContain('2.0 KB');
-    expect(pop.textContent).toContain('复制路径');
-    await click(pop.querySelector('.doc-info-copy'));
+    const copy = pop.querySelector('.doc-info-copy');
+    expect(copy.getAttribute('aria-label')).toBe('复制路径');
+    await click(copy);
     expect(written).toEqual(['/docs/notes/a.md']);
-    expect(container.querySelector('.doc-info-copy').textContent).toContain('已复制');
+    expect(pop.querySelector('[aria-label="已复制"]')).not.toBeNull(); // icon swaps to a check mark
   });
 
   it('更多 shows 修改时间/创建时间 rows', async () => {
@@ -245,6 +246,52 @@ describe('DocView read-aloud toolbar', () => {
     await click(container.querySelector('[aria-label="朗读"]'));
     expect(container.querySelector('.doc-speak-error')).not.toBeNull();
     expect(container.querySelector('[aria-label="朗读"]')).not.toBeNull(); // back to idle, not stuck
+  });
+
+  it('reads a REALISTIC document: prose is read, code blocks are skipped', async () => {
+    const spoken = installSpeechMock();
+    const markdown = [
+      '---',
+      'title: 测试文档',
+      '---',
+      '',
+      '# 一级标题',
+      '',
+      '开头的一句话。',
+      '',
+      '## 小节',
+      '',
+      '```js',
+      'const shouldNotBeRead = 1;',
+      '```',
+      '',
+      '- 列表项一',
+      '- 列表项二',
+      '',
+      '| 列 | 值 |',
+      '| --- | --- |',
+      '| a | b |',
+      '',
+      '参考 [链接](https://example.com) 与 `inline`。',
+      '',
+      '结尾的话。',
+    ].join('\n');
+    await render({ type: 'markdown', name: 'a.md', path: '/docs/a.md', content: markdown });
+    await flush();
+    await click(container.querySelector('[aria-label="朗读"]'));
+    expect(spoken.length).toBeGreaterThan(0); // the tap must produce speech, not a silent no-op
+    expect(spoken[0]).toContain('一级标题');
+    expect(spoken.join(' ')).toContain('开头的一句话。');
+    expect(spoken.join(' ')).not.toContain('shouldNotBeRead');
+    expect(spoken.join(' ')).not.toContain('title:'); // frontmatter is not read aloud either
+  });
+
+  it('a document with no readable prose says so instead of a dead tap', async () => {
+    installSpeechMock();
+    await render({ type: 'markdown', name: 'a.md', content: '```js\nconst onlyCode = 1;\n```' });
+    await flush();
+    await click(container.querySelector('[aria-label="朗读"]'));
+    expect(container.querySelector('.doc-speak-error')?.textContent).toContain('没有可朗读的正文');
   });
 
   it('a manual scroll pauses following, and the pill comes back to the spoken sentence', async () => {
