@@ -253,15 +253,15 @@ describe('REST API', () => {
 
   it('GET /history accounts for capped trailing blank rows when placing the cursor', async () => {
     // A fresh-shell shape: prompt at top, a wall of blank rows below. capTrailingBlankRows keeps only
-    // 3 of them, so the cursor's distance-from-bottom shrinks by however many were dropped.
+    // MAX_TRAILING_BLANK of them, so the cursor's distance-from-bottom shrinks by however many were dropped.
     const cmds = {
       ...baseCommands,
       capturePane: vi.fn(async () => `prompt${'\n'.repeat(10)}`), // 'prompt' row + 9 blank rows = 10 rows
       paneInfo: vi.fn(async () => ({ width: 80, height: 10, cursorX: 8, cursorY: 0, cursorVisible: true })),
     };
     const res = await auth(request(appWith(cmds)).get('/api/history?pane=%1&lines=100')).expect(200);
-    // raw: 10 rows, cursor 10-1-0 = 9 up. Trim drops 9-3 = 6 trailing blanks → 9-6 = 3 up.
-    expect(res.body.cur).toEqual({ row: 3, col: 8, vis: true });
+    // raw: 10 rows, cursor 10-1-0 = 9 up. Trim drops 9-1 = 8 trailing blanks → 9-8 = 1 up.
+    expect(res.body.cur).toEqual({ row: 1, col: 8, vis: true });
   });
 
   it('GET /history captures an ALT-screen pane as the exact visible screen — no scrollback, no blank-trim', async () => {
@@ -309,7 +309,7 @@ describe('REST API', () => {
     // capture-pane of a fresh shell: a prompt at the top, then a wall of blank rows down to the pane bottom.
     const cmds = { ...baseCommands, capturePane: vi.fn(async () => 'admin@host %\n\n\n\n\n\n') };
     const res = await auth(request(appWith(cmds)).get('/api/history?pane=%1&lines=100')).expect(200);
-    expect(res.body.ansi).toBe('admin@host %\n\n\n\n'); // 5 trailing blanks → capped to MAX_TRAILING_BLANK (3)
+    expect(res.body.ansi).toBe('admin@host %\n\n'); // 5 trailing blanks → capped to MAX_TRAILING_BLANK (1)
   });
 
   it('POST /send sends text then Enter', async () => {

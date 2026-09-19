@@ -11,7 +11,7 @@
 // A row counts as blank only if it has no glyph AND no SGR escape. captureBackground normalizes
 // ambiguous blank rows before this step, so genuinely shaded padding carries its explicit SGR while
 // a default-background blank may be trimmed normally.
-export const MAX_TRAILING_BLANK = 3;
+export const MAX_TRAILING_BLANK = 1;
 
 const isBlank = (row: string): boolean => row === '' || (/^[ \t]*$/.test(row) && !row.includes('\x1b'));
 

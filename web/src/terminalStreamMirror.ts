@@ -4,7 +4,7 @@ import { cursorSeq, prepareLiveSeed } from './terminalSeed.js';
 import type { TerminalCursor } from './terminalViewport.js';
 
 const DEFAULT_RENDER_SCROLLBACK = 100;
-const MAX_TRAILING_BLANK_ROWS = 3;
+const MAX_TRAILING_BLANK_ROWS = 1;
 
 interface MirrorBufferCell {
   getChars(): string;

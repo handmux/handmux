@@ -175,24 +175,24 @@ describe('terminal stream mirror', () => {
 
     const frame = snapshot(mirror);
     expect(frame).toMatchObject({
-      bufferRows: 104,
+      bufferRows: 102,
       boundaryLine: 100,
-      cur: { row: 3, col: 6, vis: true },
+      cur: { row: 1, col: 6, vis: true },
     });
     const visible = new Terminal({ cols: 20, rows: 20, allowProposedApi: true, scrollback: 500 });
     const pad = Math.max(0, visible.rows - frame.bufferRows);
     await write(visible, `\x1b[2J\x1b[3J\x1b[H${'\r\n'.repeat(pad)}${frame.ansi}${cursorSeq(frame.cur, visible.rows, frame.bufferRows + pad)}`);
     visible.scrollToBottom();
-    expect(visibleText(visible).slice(-4)).toEqual(['prompt', '', '', '']);
-    expect(visible.buffer.active.cursorY).toBe(16);
+    expect(visibleText(visible).slice(-2)).toEqual(['prompt', '']);
+    expect(visible.buffer.active.cursorY).toBe(18);
     expect(visible.buffer.active.cursorX).toBe(6);
 
     const tallVisible = new Terminal({ cols: 20, rows: 120, allowProposedApi: true, scrollback: 500 });
     const tallPad = tallVisible.rows - frame.bufferRows;
     await write(tallVisible, `\x1b[2J\x1b[3J\x1b[H${'\r\n'.repeat(tallPad)}${frame.ansi}${cursorSeq(frame.cur, tallVisible.rows, frame.bufferRows + tallPad)}`);
     tallVisible.scrollToBottom();
-    expect(visibleText(tallVisible).slice(-4)).toEqual(['prompt', '', '', '']);
-    expect(tallVisible.buffer.active.cursorY).toBe(116);
+    expect(visibleText(tallVisible).slice(-2)).toEqual(['prompt', '']);
+    expect(tallVisible.buffer.active.cursorY).toBe(118);
 
     // A later pane-addressed write still targets row 60 in the untouched hidden parser. If the seed
     // itself had been trimmed, this would overwrite the wrong row instead of expanding the projection.
@@ -226,7 +226,9 @@ describe('terminal stream mirror', () => {
     await mirror.ready({ row: 59, col: 6, vis: true });
 
     const frame = snapshot(mirror);
-    expect(frame).toMatchObject({ bufferRows: 58, cur: { row: 57, col: 6, vis: true } });
+    // The shaded row (buffer row 54) is the last REQUIRED row — the trailing run below it caps to the
+    // one blank row, so the shaded padding keeps its real background instead of being trimmed away.
+    expect(frame).toMatchObject({ bufferRows: 56, cur: { row: 55, col: 6, vis: true } });
     const visible = new Terminal({ cols: 10, rows: 60, allowProposedApi: true, scrollback: 100 });
     await write(visible, frame.ansi);
     expect(shadedAt(visible, 54, 0)).toBe(true);
@@ -297,18 +299,18 @@ describe('terminal stream mirror', () => {
     const frame = snapshot(mirror);
     expect(frame.ansi).toContain('xxx');
     expect(frame.ansi).not.toContain('bbb'); // the replaced copy must not survive
-    // Content 4 rows + the capped trailing-blank run (3) — the cap measures from the real cursor row,
+    // Content 4 rows + the capped trailing-blank run (1) — the cap measures from the real cursor row,
     // so a hidden cursor no longer pins it to the grid bottom.
-    expect(frame.bufferRows).toBe(7);
+    expect(frame.bufferRows).toBe(5);
 
     const visible = new Terminal({ cols: 40, rows: 12, allowProposedApi: true, scrollback: 100 });
     const pad = Math.max(0, visible.rows - frame.bufferRows);
     await write(visible, `\x1b[2J\x1b[3J\x1b[H${'\r\n'.repeat(pad)}${frame.ansi}`);
     visible.scrollToBottom();
-    expect(visibleText(visible).slice(-7)).toEqual(['xxx', 'yyy', 'zzz', 'waiting', '', '', '']);
-    // Still hidden: the position is synced without ever showing a second cursor. 4 rows above the
+    expect(visibleText(visible).slice(-5)).toEqual(['xxx', 'yyy', 'zzz', 'waiting', '']);
+    // Still hidden: the position is synced without ever showing a second cursor. 2 rows above the
     // projection's bottom = the 'zzz' row the app's redraw left it on.
-    expect(frame.cur).toEqual({ row: 4, col: 3, vis: false });
+    expect(frame.cur).toEqual({ row: 2, col: 3, vis: false });
     visible.dispose();
     mirror.dispose();
   });
