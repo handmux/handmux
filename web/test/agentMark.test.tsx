@@ -36,6 +36,21 @@ describe('AgentMark', () => {
     expect(Math.max(...piCoordinates)).toBe(23);
   });
 
+  it('bundles the CodeBuddy brand logo on the shared 24×24 canvas', () => {
+    const { container } = render(<AgentMark agent="codebuddy" />);
+    const mark = container.querySelector('[data-agent-icon="codebuddy"]');
+    expect(mark).not.toBeNull();
+    expect(container.querySelector('[data-agent-icon="generic"]')).toBeNull();
+    // The official mark ships on its own 40×40 canvas; it is scaled into the shared one so every badge
+    // stays the same rendered size without per-location overrides.
+    const svg = mark?.querySelector('svg');
+    expect(svg?.getAttribute('viewBox')).toBe('0 0 24 24');
+    expect(svg?.getAttribute('aria-hidden')).toBe('true');
+    // Its gradient/clip ids are namespaced, because these logos are inlined into one shared document.
+    expect(Array.from(svg?.querySelectorAll('[id]') ?? []).map((node) => node.getAttribute('id')))
+      .toContain('clip0_hmcb');
+  });
+
   it('uses a neutral mark for unknown and missing ids', () => {
     const { container, rerender } = render(<AgentMark agent="third-party" />);
     expect(container.querySelector('[data-agent-icon="generic"]')).not.toBeNull();

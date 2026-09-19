@@ -2,6 +2,7 @@
 // grey and sit flush with the ☰ glyph — no colour emoji clashing with the flat dark UI. Size comes
 // from CSS (.topbar-icon svg); 1.75 stroke matches the hairline feel of the rest of the chrome.
 import claudeLogo from '../assets/agent-claude.svg?raw';
+import codebuddyLogo from '../assets/agent-codebuddy.svg?raw';
 import codexLogo from '../assets/agent-codex.svg?raw';
 import piLogo from '../assets/agent-pi.svg?raw';
 import type { SVGProps } from 'react';
@@ -519,6 +520,7 @@ export function WrenchIcon() {
 // Inlining still rides the content-hashed JS, so a changed logo busts the cache. Sized via CSS (.agent-mark).
 const AGENT_LOGO: Readonly<Record<string, string>> = {
   claude: claudeLogo,
+  codebuddy: codebuddyLogo,
   codex: codexLogo,
   pi: piLogo,
 };

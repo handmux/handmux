@@ -59,6 +59,7 @@ describe('built-in AgentAdapter registry', () => {
       label: 'CodeBuddy',
       process: { commands: ['codebuddy', 'codebuddy-code', 'cbc'], ambiguousCommands: ['node'] },
       capabilities: {},
+      presentation: { iconId: 'codebuddy' },
     });
   });
 

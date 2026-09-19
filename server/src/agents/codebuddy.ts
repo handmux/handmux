@@ -75,6 +75,7 @@ export const codebuddy: AgentAdapter = {
     ambiguousCommands: ['node'],
     verify: verifyCodeBuddyProcess,
   },
+  presentation: { iconId: 'codebuddy' },
   // Only what is actually implemented. Inbox/Conversation/Interaction are added as each one lands.
   capabilities: {},
 };
