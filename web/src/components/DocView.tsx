@@ -8,7 +8,11 @@ import { useMarkdownImages } from '../hooks/useMarkdownImages.js';
 import { useBackButton } from '../hooks/useBackButton.js';
 import { copyText } from '../clipboard.js';
 import { renderMarkdown } from '../markdown.js';
-import { CheckIcon, CopyIcon, MoreHorizontalIcon, PauseIcon, PlayIcon, StopIcon, TocIcon } from './icons.jsx';
+import { clearFind, focusMatch, runFind } from '../docFind.js';
+import { useKeyboardInset } from '../hooks/useKeyboardInset.js';
+import {
+  CheckIcon, CopyIcon, MoreHorizontalIcon, PauseIcon, PlayIcon, SearchIcon, StopIcon, TocIcon,
+} from './icons.jsx';
 import ImageViewer from './ImageViewer.jsx';
 import DocToc from './DocToc.jsx';
 import type { DocTocItem } from './DocToc.jsx';
@@ -85,10 +89,17 @@ export default function DocView({
   const [infoOpen, setInfoOpen] = useState(false);
   const [tocOpen, setTocOpen] = useState(false);
   const [toc, setToc] = useState<DocTocItem[]>([]);
+  const [findOpen, setFindOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  const [matchCount, setMatchCount] = useState(0);
+  const [matchIndex, setMatchIndex] = useState(-1);
+  const searchRef = useRef<HTMLInputElement | null>(null);
+  const keyboardInset = useKeyboardInset();
   const [copied, setCopied] = useState(false);
   const [readNotice, setReadNotice] = useState<string | null>(null);
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const mdRef = useRef<HTMLDivElement | null>(null);
+  const textRef = useRef<HTMLPreElement | null>(null);
   const infoRef = useRef<HTMLDivElement | null>(null);
   const copiedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const scrollGuardUntil = useRef(0); // timestamp until which scroll events are treated as our own
@@ -106,6 +117,7 @@ export default function DocView({
   useBackButton(!!imageView, closeImageView);
   useBackButton(infoOpen, () => setInfoOpen(false));
   useBackButton(tocOpen, () => setTocOpen(false));
+  useBackButton(findOpen, () => closeFind());
 
   // Outline for the 目录 drawer. Heading ids are assigned here (the rendered HTML carries none) so a
   // tap can scroll to the exact node; `scroll-margin-top` on headings keeps them clear of the pinned
@@ -208,6 +220,42 @@ export default function DocView({
     setDocFontIndex(next);
   };
 
+  // ── Find in document (single file, no indexing: a plain case-insensitive substring scan) ────────
+  // The search root is whichever container holds the document text — markdown or the verbatim <pre>.
+  const findRoot = (): HTMLElement | null => mdRef.current ?? textRef.current;
+
+  const closeFind = (): void => {
+    clearFind(findRoot());
+    setFindOpen(false);
+    setQuery('');
+    setMatchCount(0);
+    setMatchIndex(-1);
+  };
+
+  // Re-scan on every keystroke (and when the document itself changes). Bounded by MAX_MATCHES inside
+  // runFind, so a short query on a large file cannot wrap an unbounded number of nodes.
+  useEffect(() => {
+    if (!findOpen) return;
+    const root = findRoot();
+    const total = runFind(root, query);
+    setMatchCount(total);
+    const first = total ? 0 : -1;
+    setMatchIndex(first);
+    if (first >= 0) focusMatch(root, first);
+  }, [query, findOpen, html]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // The row turns into a search field → put the caret in it.
+  useEffect(() => {
+    if (findOpen) searchRef.current?.focus();
+  }, [findOpen]);
+
+  const stepMatch = (delta: number): void => {
+    if (matchCount <= 0) return;
+    const next = (matchIndex + delta + matchCount) % matchCount; // wraps both ways
+    setMatchIndex(next);
+    focusMatch(findRoot(), next);
+  };
+
   const onPlayToggle = (): void => {
     if (speech.playing) { speech.paused ? speech.resume() : speech.pause(); return; }
     setFollowPaused(false); // a fresh read always follows
@@ -233,64 +281,88 @@ export default function DocView({
   };
 
   return (
-    <div className="doc-md-wrap" ref={wrapRef}>
+    <div className="doc-md-wrap" ref={wrapRef}
+      style={findOpen && keyboardInset > 0 ? { paddingBottom: `${keyboardInset}px` } : undefined}>
       <div className="doc-toolbar">
-        {toc.length > 0 && (
-          <button className="doc-zoom-btn doc-zoom-icon" onClick={() => setTocOpen(true)}
-            aria-label={t('doc.toc')} aria-haspopup="dialog">
-            <TocIcon />
-          </button>
-        )}
-        {canRead && (
-          <div className="doc-player">
-            <button className="doc-zoom-btn doc-zoom-icon" onClick={onPlayToggle}
-              aria-label={reading ? t('doc.pauseRead') : speech.paused ? t('doc.resumeRead') : t('doc.read')}>
-              {reading ? <PauseIcon /> : <PlayIcon />}
-            </button>
-            <button className="doc-zoom-btn doc-zoom-icon" onClick={speech.stop} disabled={!speech.playing}
-              aria-label={t('doc.stopRead')}><StopIcon /></button>
-            <button className="doc-zoom-btn" onClick={speech.cycleRate}
-              aria-label={t('doc.rate')}>{speech.rate}×</button>
+        {findOpen ? (
+          <div className="doc-find">
+            <SearchIcon />
+            <input ref={searchRef} className="doc-find-input" type="search" value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder={t('doc.findPlaceholder')} aria-label={t('doc.find')}
+              enterKeyHint="search" autoComplete="off" autoCorrect="off" autoCapitalize="none" spellCheck={false} />
+            <span className="doc-find-count" aria-live="polite">
+              {matchCount ? `${matchIndex + 1}/${matchCount}` : (query ? t('doc.findNoMatch') : '')}
+            </span>
+            <button className="doc-zoom-btn doc-zoom-icon" onClick={() => stepMatch(-1)}
+              disabled={!matchCount} aria-label={t('doc.findPrev')}>↑</button>
+            <button className="doc-zoom-btn doc-zoom-icon" onClick={() => stepMatch(1)}
+              disabled={!matchCount} aria-label={t('doc.findNext')}>↓</button>
+            <button className="doc-zoom-btn doc-zoom-icon" onClick={closeFind}
+              aria-label={t('common.close')}>✕</button>
           </div>
-        )}
-        <div className="doc-fonts">
-          <button className="doc-zoom-btn" onClick={() => bump(-1)} disabled={fontIdx <= 0}
-            aria-label={t('doc.fontSmaller')}>A−</button>
-          <button className="doc-zoom-btn" onClick={() => bump(1)} disabled={fontIdx >= LAST}
-            aria-label={t('doc.fontLarger')}>A+</button>
-        </div>
-        <div className="doc-info" ref={infoRef}>
-          <button className="doc-zoom-btn doc-zoom-icon" onClick={() => setInfoOpen((open) => !open)}
-            aria-label={t('doc.fileInfo')} aria-expanded={infoOpen} aria-haspopup="dialog">
-            <MoreHorizontalIcon />
-          </button>
-          {infoOpen && (
-            <div className="doc-info-pop" role="dialog" aria-label={t('doc.fileInfo')}>
-              <div className="doc-info-title">{t('doc.fileInfo')}</div>
-              <div className="doc-info-row">
-                <span className="doc-info-key">{t('doc.filePath')}</span>
-                <span className="doc-info-val doc-info-path">{fullPath}</span>
-                <button className="doc-info-copy" onClick={onCopyPath}
-                  aria-label={copied ? t('common.copied') : t('doc.copyPath')}
-                  title={t('doc.copyPath')}>
-                  {copied ? <CheckIcon /> : <CopyIcon />}
+        ) : (
+          <>
+            {toc.length > 0 && (
+              <button className="doc-zoom-btn doc-zoom-icon" onClick={() => setTocOpen(true)}
+                aria-label={t('doc.toc')} aria-haspopup="dialog">
+                <TocIcon />
+              </button>
+            )}
+            {canRead && (
+              <div className="doc-player">
+                <button className="doc-zoom-btn doc-zoom-icon" onClick={onPlayToggle}
+                  aria-label={reading ? t('doc.pauseRead') : speech.paused ? t('doc.resumeRead') : t('doc.read')}>
+                  {reading ? <PauseIcon /> : <PlayIcon />}
                 </button>
+                <button className="doc-zoom-btn doc-zoom-icon" onClick={speech.stop} disabled={!speech.playing}
+                  aria-label={t('doc.stopRead')}><StopIcon /></button>
+                <button className="doc-zoom-btn" onClick={speech.cycleRate}
+                  aria-label={t('doc.rate')}>{speech.rate}×</button>
               </div>
-              <div className="doc-info-row">
-                <span className="doc-info-key">{t('doc.fileSize')}</span>
-                <span className="doc-info-val">{formatBytes(size)}</span>
-              </div>
-              <div className="doc-info-row">
-                <span className="doc-info-key">{t('doc.fileModified')}</span>
-                <span className="doc-info-val">{formatStamp(mtimeMs)}</span>
-              </div>
-              <div className="doc-info-row">
-                <span className="doc-info-key">{t('doc.fileCreated')}</span>
-                <span className="doc-info-val">{formatStamp(birthtimeMs)}</span>
-              </div>
+            )}
+            <div className="doc-fonts">
+              <button className="doc-zoom-btn" onClick={() => bump(-1)} disabled={fontIdx <= 0}
+                aria-label={t('doc.fontSmaller')}>A−</button>
+              <button className="doc-zoom-btn" onClick={() => bump(1)} disabled={fontIdx >= LAST}
+                aria-label={t('doc.fontLarger')}>A+</button>
             </div>
-          )}
-        </div>
+            <button className="doc-zoom-btn doc-zoom-icon" onClick={() => setFindOpen(true)}
+              aria-label={t('doc.find')}><SearchIcon /></button>
+            <div className="doc-info" ref={infoRef}>
+              <button className="doc-zoom-btn doc-zoom-icon" onClick={() => setInfoOpen((open) => !open)}
+                aria-label={t('doc.fileInfo')} aria-expanded={infoOpen} aria-haspopup="dialog">
+                <MoreHorizontalIcon />
+              </button>
+              {infoOpen && (
+                <div className="doc-info-pop" role="dialog" aria-label={t('doc.fileInfo')}>
+                  <div className="doc-info-title">{t('doc.fileInfo')}</div>
+                  <div className="doc-info-row">
+                    <span className="doc-info-key">{t('doc.filePath')}</span>
+                    <span className="doc-info-val doc-info-path">{fullPath}</span>
+                    <button className="doc-info-copy" onClick={onCopyPath}
+                      aria-label={copied ? t('common.copied') : t('doc.copyPath')}
+                      title={t('doc.copyPath')}>
+                      {copied ? <CheckIcon /> : <CopyIcon />}
+                    </button>
+                  </div>
+                  <div className="doc-info-row">
+                    <span className="doc-info-key">{t('doc.fileSize')}</span>
+                    <span className="doc-info-val">{formatBytes(size)}</span>
+                  </div>
+                  <div className="doc-info-row">
+                    <span className="doc-info-key">{t('doc.fileModified')}</span>
+                    <span className="doc-info-val">{formatStamp(mtimeMs)}</span>
+                  </div>
+                  <div className="doc-info-row">
+                    <span className="doc-info-key">{t('doc.fileCreated')}</span>
+                    <span className="doc-info-val">{formatStamp(birthtimeMs)}</span>
+                  </div>
+                </div>
+              )}
+            </div>
+          </>
+        )}
       </div>
 
       {(speech.failure || readNotice) && (
@@ -300,7 +372,7 @@ export default function DocView({
       )}
 
       {type === 'text' ? (
-        <pre className="doc-text" style={{ fontSize: `${FONT_SIZES[fontIdx]}px` }}>{content || ''}</pre>
+        <pre ref={textRef} className="doc-text" style={{ fontSize: `${FONT_SIZES[fontIdx]}px` }}>{content || ''}</pre>
       ) : (
         <div ref={mdRef} className="doc-md" style={{ fontSize: `${FONT_SIZES[fontIdx]}px` }}
           onClick={onMarkdownClick} dangerouslySetInnerHTML={{ __html: html }} />

@@ -183,6 +183,70 @@ describe('DocView 目录 drawer', () => {
   });
 });
 
+describe('DocView 查找', () => {
+  beforeEach(() => { localStorage.clear(); });
+  const DOC = '# 标题\n\nalpha beta alpha。\n\n```js\nalpha();\n```';
+  const type = (input, value) => act(() => {
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+    setter.call(input, value);
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+
+  it('is just an icon until it is tapped, then becomes a search row', async () => {
+    await render({ type: 'markdown', name: 'a.md', content: DOC });
+    expect(container.querySelector('.doc-find')).toBeNull();
+    await click(container.querySelector('[aria-label="在本文中查找"]'));
+    expect(container.querySelector('.doc-find-input')).not.toBeNull();
+    expect(container.querySelector('.doc-find-input').getAttribute('placeholder')).toBe('在本文中查找');
+  });
+
+  it('highlights every match, counts them, and steps through with ↑/↓', async () => {
+    await render({ type: 'markdown', name: 'a.md', content: DOC });
+    await click(container.querySelector('[aria-label="在本文中查找"]'));
+    await type(container.querySelector('.doc-find-input'), 'alpha');
+    const marks = () => [...container.querySelectorAll('.doc-md mark.doc-find')];
+    expect(marks().length).toBe(3); // two in the prose + one in the code block
+    expect(container.querySelector('.doc-find-count').textContent).toBe('1/3');
+    expect(marks()[0].classList.contains('is-current')).toBe(true);
+    await click(container.querySelector('[aria-label="下一个匹配"]'));
+    expect(container.querySelector('.doc-find-count').textContent).toBe('2/3');
+    expect(marks()[1].classList.contains('is-current')).toBe(true);
+    await click(container.querySelector('[aria-label="上一个匹配"]')); // wraps back from 2 → 1? no: 1 → 0
+    expect(container.querySelector('.doc-find-count').textContent).toBe('1/3');
+  });
+
+  it('says so when nothing matches, and clears its marks when closed', async () => {
+    await render({ type: 'markdown', name: 'a.md', content: DOC });
+    await click(container.querySelector('[aria-label="在本文中查找"]'));
+    await type(container.querySelector('.doc-find-input'), 'zzzz');
+    expect(container.querySelector('.doc-find-count').textContent).toBe('没有匹配');
+    await click(container.querySelector('.doc-find [aria-label="关闭"]'));
+    expect(container.querySelector('.doc-find')).toBeNull();
+    expect(container.querySelectorAll('.doc-md mark.doc-find').length).toBe(0);
+    expect(container.querySelector('.doc-md h1').textContent).toBe('标题'); // text put back together
+  });
+
+  it('searches plain-text docs too', async () => {
+    await render({ type: 'text', name: 'a.log', content: 'line one\nline two\nline one again' });
+    await click(container.querySelector('[aria-label="在本文中查找"]'));
+    await type(container.querySelector('.doc-find-input'), 'line one');
+    expect(container.querySelectorAll('.doc-text mark.doc-find').length).toBe(2);
+  });
+
+  it('does not damage read-aloud sentence markers', async () => {
+    installSpeechMock();
+    await render({ type: 'markdown', name: 'a.md', content: DOC });
+    await flush(); // sentence spans exist
+    await click(container.querySelector('[aria-label="在本文中查找"]'));
+    await type(container.querySelector('.doc-find-input'), 'alpha');
+    await click(container.querySelector('.doc-find [aria-label="关闭"]'));
+    // The spans that carry data-tts (the read-aloud position) must survive a search untouched.
+    expect(container.querySelectorAll('.doc-md .tts-sent[data-tts]').length).toBeGreaterThan(0);
+    delete window.speechSynthesis;
+    delete window.SpeechSynthesisUtterance;
+  });
+});
+
 describe('DocView read-aloud toolbar', () => {
   beforeEach(() => { localStorage.clear(); });
   afterEach(() => { delete window.speechSynthesis; delete window.SpeechSynthesisUtterance; });

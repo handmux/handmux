@@ -2496,6 +2496,19 @@ button.cmd-text { background: none; border: none; text-align: left; }
   border-radius: 8px; color: #dfe6ee; font-size: 14px; line-height: 1.35; text-align: left;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; touch-action: manipulation; }
 .doc-toc-item:active { background: rgba(255,255,255,.08); }
+/* 查找 — the toolbar row becomes a search field; when idle it is just another icon button. */
+.doc-find { display: flex; align-items: center; gap: 6px; flex: 1; min-width: 0; }
+.doc-find > svg { width: 17px; height: 17px; flex: none; color: #8a93a0; }
+.doc-find-input { flex: 1; min-width: 0; height: 32px; padding: 0 8px; border: 1px solid #1d2630;
+  border-radius: 8px; background: #11161d; color: #e6edf3; font-size: 15px; }
+.doc-find-input:focus { outline: none; border-color: #2f4a6d; }
+.doc-find-input::-webkit-search-cancel-button { display: none; }
+.doc-find-count { flex: none; font-size: 12px; color: #8a93a0; font-variant-numeric: tabular-nums;
+  white-space: nowrap; }
+/* Match highlighting: the current one is the loud one, the rest stay readable underneath. */
+.doc-md mark.doc-find, .doc-text mark.doc-find { background: rgba(var(--blue-rgb),0.28); color: inherit;
+  border-radius: 3px; padding: 0 1px; }
+.doc-md mark.doc-find.is-current, .doc-text mark.doc-find.is-current { background: #f0b132; color: #1b1d22; }
 /* "Back to what is being read" — height:0 sticky anchor keeps it pinned to the bottom of the reading
    area without adding layout height at the end of the document. */
 .doc-follow-anchor { position: sticky; bottom: 0; height: 0; display: flex; justify-content: center;
