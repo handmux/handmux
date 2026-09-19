@@ -51,7 +51,7 @@ const INBOX_SEEN_KEY = 'tw_inbox_seen';     // { [pane]: ts } — last inbox ts 
 const INBOX_READ_TS_KEY = 'tw_inbox_read_ts'; // server-ts high-water mark: done with ts <= this is history
 const BROWSE_DIR_KEY = 'tw_browse_dir';     // { [windowId]: absPath } — last browsed dir per window (file sheet)
 const BROWSER_SORT_KEY = 'tw_browse_sort';  // 'name' | 'modified' — file browser row order (global)
-const BROWSER_HIDDEN_KEY = 'tw_browse_hidden'; // '1' = the listing also shows dotfiles / node_modules
+const BROWSER_COLLAPSE_KEY = 'tw_browse_collapse'; // '1' = the listing collapses dotfiles / node_modules
 const PREVIEW_DIR_KEY = 'tw_preview_dir';   // { [windowId]: absPath } — last static-preview dir per window
 const STARTUP_CMD_KEY = 'tw_startup_cmd';   // last startup command chosen in new window/session (e.g. "claude")
 const CHAT_DRAFT_KEY = 'tw_chat_draft';     // the chat composer's unsent text — survives an app exit/kill
@@ -113,16 +113,18 @@ export const setLastProject = (id: string): void => {
   else localStorage.removeItem(LAST_PROJECT_KEY);
 };
 
-// File browser view preferences — how the listing is ordered and whether the hidden-noise entries
-// (dotfiles, node_modules) are shown. Global rather than per-directory: a user who wants "newest
-// first" or "-git, please" wants it everywhere, and a per-dir map would silently reset on navigation.
+// File browser view preferences, global rather than per-directory: a user who wants "newest first"
+// or "keep the dotfiles tucked away" wants it in every folder, and a per-dir map would silently reset
+// on each navigation.
 export type BrowserSort = 'name' | 'modified';
 export const getBrowserSort = (): BrowserSort => (localStorage.getItem(BROWSER_SORT_KEY) === 'modified' ? 'modified' : 'name');
 export const setBrowserSort = (sort: BrowserSort): void => { localStorage.setItem(BROWSER_SORT_KEY, sort); };
-export const getBrowserShowHidden = (): boolean => localStorage.getItem(BROWSER_HIDDEN_KEY) === '1';
-export const setBrowserShowHidden = (show: boolean): void => {
-  if (show) localStorage.setItem(BROWSER_HIDDEN_KEY, '1');
-  else localStorage.removeItem(BROWSER_HIDDEN_KEY);
+// Whether the noise entries (dotfiles, node_modules) are COLLAPSED. Default is off: the listing shows
+// the folder as it is, and collapsing is the deliberate act.
+export const getBrowserCollapseHidden = (): boolean => localStorage.getItem(BROWSER_COLLAPSE_KEY) === '1';
+export const setBrowserCollapseHidden = (collapse: boolean): void => {
+  if (collapse) localStorage.setItem(BROWSER_COLLAPSE_KEY, '1');
+  else localStorage.removeItem(BROWSER_COLLAPSE_KEY);
 };
 
 // Opaque per-install identity for isolating authenticated Browser sessions between phones. It is not an

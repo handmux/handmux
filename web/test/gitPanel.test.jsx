@@ -26,7 +26,7 @@ vi.mock('../src/storage.js', () => ({
   // FileBrowser (inside DirPicker) touches these.
   getBrowseDir: vi.fn(() => null), setBrowseDir: vi.fn(),
   getBrowserSort: vi.fn(() => 'name'), setBrowserSort: vi.fn(),
-  getBrowserShowHidden: vi.fn(() => false), setBrowserShowHidden: vi.fn(),
+  getBrowserCollapseHidden: vi.fn(() => false), setBrowserCollapseHidden: vi.fn(),
   // DiffView's font-size stepper. DOC_FONT_SIZES is read at module-eval time, so it must be a real array.
   getDiffFontIndex: vi.fn(() => 4), setDiffFontIndex: vi.fn(),
   DOC_FONT_SIZES: [10, 11, 12, 13, 14, 16, 18, 20, 22],

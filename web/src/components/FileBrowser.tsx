@@ -5,7 +5,7 @@ import { startUpload, updateUpload, finishUpload } from '../uploadJob.js';
 import { UPLOAD_ACCEPT, splitUploadable } from '../uploadTypes.js';
 import { joinPath } from '../docPath.js';
 import { formatBytes, formatRelativeTime } from '../format.js';
-import { getBrowserSort, setBrowserSort, getBrowserShowHidden, setBrowserShowHidden, type BrowserSort } from '../storage.js';
+import { getBrowserSort, setBrowserSort, getBrowserCollapseHidden, setBrowserCollapseHidden, type BrowserSort } from '../storage.js';
 import { FolderIcon, FileIcon, FileTextIcon, ImageIcon, ArrowUpIcon, ArrowUpDownIcon, DownloadIcon, LocateIcon, FolderPlusIcon, UploadIcon, CopyIcon, MoreHorizontalIcon } from './icons.jsx';
 import ActionSheet from './ActionSheet.jsx';
 import type { ActionSheetItem } from './ActionSheet.jsx';
@@ -28,9 +28,9 @@ interface DirectoryEntry {
   mtimeMs?: number;
 }
 
-// Entries the browser keeps out of the way unless the user asks for them: dotfiles (`.git`,
-// `.DS_Store`, `.env`) and the one heavy generated dir that is never dot-prefixed. Only well-known
-// noise — a name like `dist` or `build` is often something the user actually wants to open.
+// Entries the "收起隐藏项" switch tucks away: dotfiles (`.git`, `.DS_Store`, `.env`) and the one heavy
+// generated dir that is never dot-prefixed. Only well-known noise — a name like `dist` or `build` is
+// often something the user actually wants to open. Default is OFF, so a folder lists as it is.
 const isHiddenEntry = (name: string): boolean => name.startsWith('.') || name === 'node_modules';
 
 interface DirectoryListing {
@@ -180,7 +180,7 @@ export default function FileBrowser({
   const [input, setInput] = useState('');   // the path text box — relative to the current root
   const [dir, setDir] = useState<DirectoryListing | null>(null); // loaded { path, parent, entries }
   const [sort, setSort] = useState<BrowserSort>(getBrowserSort); // row order (persisted): name | modified
-  const [showHidden, setShowHidden] = useState<boolean>(getBrowserShowHidden); // also list dotfiles / node_modules
+  const [collapseHidden, setCollapseHidden] = useState<boolean>(getBrowserCollapseHidden); // see isHiddenEntry: off by default
   const [, setClock] = useState(0); // bumped every minute so the relative "3 分钟前" columns stay true
   const [rootMenuOpen, setRootMenuOpen] = useState(false); // the root-prefix dropdown (~ / tmp / TMPDIR)
   const [err, setErr] = useState('');
@@ -435,8 +435,7 @@ export default function FileBrowser({
   };
 
   const all = dir?.entries || [];
-  const hiddenCount = all.filter((e) => isHiddenEntry(e.name)).length;
-  const visible = showHidden ? all : all.filter((e) => !isHiddenEntry(e.name));
+  const visible = collapseHidden ? all.filter((e) => !isHiddenEntry(e.name)) : all;
   const frag = splitPath(input).frag.toLowerCase();
   const matched = visible.filter(
     (e) => (!pickMode || e.type === 'dir') && (!frag || e.name.toLowerCase().includes(frag)));
@@ -456,10 +455,10 @@ export default function FileBrowser({
     setSort(next);
     setBrowserSort(next);
   };
-  const toggleHidden = (): void => {
-    const next = !showHidden;
-    setShowHidden(next);
-    setBrowserShowHidden(next);
+  const toggleCollapseHidden = (): void => {
+    const next = !collapseHidden;
+    setCollapseHidden(next);
+    setBrowserCollapseHidden(next);
   };
 
   return (
@@ -587,11 +586,9 @@ export default function FileBrowser({
               ? t('filebrowser.tooMany', { shown: entries.length, total: sorted.length })
               : t('filebrowser.itemCount', { count: sorted.length })}
           </span>
-          {hiddenCount > 0 && (
-            <button className="browse-chip" aria-pressed={showHidden} onClick={toggleHidden}>
-              {showHidden ? t('filebrowser.hideHidden') : t('filebrowser.showHidden', { count: hiddenCount })}
-            </button>
-          )}
+          <button className="browse-chip" aria-pressed={collapseHidden} onClick={toggleCollapseHidden}>
+            {t('filebrowser.collapseHidden')}
+          </button>
           {visible.length > 1 && (
             <button
               className="browse-chip browse-chip-end" aria-label={t('filebrowser.sortBy', { mode: t(sort === 'name' ? 'filebrowser.sortName' : 'filebrowser.sortModified') })}
@@ -627,8 +624,8 @@ export default function FileBrowser({
                 <span className="browse-entry-name">{e.name}</span>
                 {(time || size) && (
                   <span className="browse-entry-meta">
-                    {time && <span className="browse-entry-time">{time}</span>}
                     {size && <span className="browse-entry-size">{size}</span>}
+                    {time && <span className="browse-entry-time">{time}</span>}
                   </span>
                 )}
               </button>

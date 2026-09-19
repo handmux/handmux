@@ -44,10 +44,10 @@ import zh from '../src/i18n/zh.js';
 let container, root;
 beforeEach(() => {
   vi.useFakeTimers();
-  // The sort order and hidden toggle are persisted app-wide, so a test that flips one must not leak
-  // into the next.
+  // The sort order and the collapse switch are persisted app-wide, so a test that flips one must not
+  // leak into the next.
   localStorage.removeItem('tw_browse_sort');
-  localStorage.removeItem('tw_browse_hidden');
+  localStorage.removeItem('tw_browse_collapse');
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
@@ -247,7 +247,7 @@ describe('FileBrowser', () => {
     await render({ path: null });
     await settle();
     expect(rowNames()).toEqual(['docs', 'data.bin', 'photo.gif', 'readme.md', 'report.md']);
-    const chip = container.querySelector('.browse-chip');
+    const chip = container.querySelector('.browse-chip-end'); // the sort control, right of the collapse switch
     expect(chip.textContent).toContain('名称');
     await click(chip);
     // Directories stay first (navigation stability); files go newest-first.
@@ -256,7 +256,7 @@ describe('FileBrowser', () => {
     expect(localStorage.getItem('tw_browse_sort')).toBe('modified');
   });
 
-  it('keeps dotfiles and node_modules out of the way until asked for them', async () => {
+  it('lists the folder as it is, and the 收起隐藏项 switch tucks the dotfiles away', async () => {
     fetchDir.mockResolvedValueOnce({
       path: '/home/u', home: '/home/u', parent: null,
       entries: [
@@ -268,28 +268,28 @@ describe('FileBrowser', () => {
     });
     await render({ path: null });
     await settle();
-    expect(container.textContent).not.toContain('node_modules');
-    expect(rowNames()).toEqual(['src', 'notes.md']);
-    expect(container.querySelector('.browse-count').textContent).toBe('2 项'); // the count follows the filter
+    // Default is off, so the count is the folder's real contents.
+    const names = rowNames();
+    expect(names).toHaveLength(4);
+    expect(names).toEqual(expect.arrayContaining(['.git', 'node_modules', 'src', 'notes.md']));
+    expect(container.querySelector('.browse-count').textContent).toBe('4 项');
+    // The switch is always there, whatever the folder holds, and reads the same either way.
     const chip = container.querySelector('.browse-chip'); // left of the sort chip, which carries -end
-    expect(chip.textContent).toContain('显示隐藏项（2）');
+    expect(chip.textContent).toBe('收起隐藏项');
     expect(chip.getAttribute('aria-pressed')).toBe('false');
     await click(chip);
-    expect(rowNames()).toHaveLength(4);
-    expect(rowNames()).toContain('.git');
-    expect(rowNames()).toContain('node_modules');
+    expect(rowNames()).toEqual(['src', 'notes.md']);
+    expect(container.querySelector('.browse-count').textContent).toBe('2 项');
     expect(chip.getAttribute('aria-pressed')).toBe('true');
-    expect(chip.textContent).toContain('收起隐藏项');
-    expect(container.querySelector('.browse-count').textContent).toBe('4 项');
-    expect(localStorage.getItem('tw_browse_hidden')).toBe('1');
+    expect(localStorage.getItem('tw_browse_collapse')).toBe('1');
   });
 
-  it('says the folder is empty (and "only hidden" when it is) instead of "no match"', async () => {
+  it('says the folder is empty (and "only hidden" once they are collapsed) instead of "no match"', async () => {
     fetchDir.mockResolvedValueOnce({ path: '/home/u/empty', home: '/home/u', parent: '/home/u', entries: [] });
     await render({ path: '/home/u/empty' });
     await settle();
     expect(container.textContent).toContain('这个文件夹是空的');
-    expect(container.querySelector('.browse-listbar')).toBeNull(); // nothing to sort or reveal
+    expect(container.querySelector('.browse-listbar')).toBeNull(); // no count and no switches for nothing
 
     fetchDir.mockResolvedValueOnce({
       path: '/home/u/dot', home: '/home/u', parent: '/home/u',
@@ -297,8 +297,10 @@ describe('FileBrowser', () => {
     });
     await render({ path: '/home/u/dot' });
     await settle();
+    expect(rowNames()).toEqual(['.env']); // shown by default
+    await click(container.querySelector('.browse-chip'));
     expect(container.textContent).toContain('这里只有隐藏项');
-    expect(container.querySelector('.browse-chip')).toBeTruthy(); // the way out
+    expect(container.querySelector('.browse-chip')).toBeTruthy(); // and the way back
   });
 
   it('shows a loading skeleton instead of an empty-state line until the listing arrives', async () => {

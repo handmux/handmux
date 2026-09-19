@@ -2383,10 +2383,13 @@ button.cmd-text { background: none; border: none; text-align: left; }
 .browse-pending-hint { color: #8aa0b6; font-style: normal; font-size: 12px; }
 .browse-pending-btn { flex: 0 0 auto; height: 32px; padding: 0 14px; border: none; border-radius: 8px; background: #2f5fa0; color: #fff; font-size: 13px; }
 .browse-pending-btn:disabled { opacity: .4; }
-/* List bar: "42 项" (or the capped note) and the hidden-items toggle on the left, the sort control
-   parked at the right end. */
-.browse-listbar { display: flex; align-items: center; gap: 6px; padding: 2px 12px 0; }
-.browse-count { flex: 1 1 auto; min-width: 0; color: #6b7a89; font-size: 12px; font-variant-numeric: tabular-nums; line-height: 1.35; }
+/* List bar: "42 项" and the 收起隐藏项 switch on the left, the sort control parked at the right end.
+   Padded off the path bar above it and off the first row below — it is a row of controls, not part of
+   the listing, and with the chips flush against both it read as squeezed. */
+.browse-listbar { display: flex; align-items: center; gap: 6px; padding: 10px 12px 2px; }
+/* Hugs its text instead of stretching, so the switch stays next to the count on the left and only the
+   sort control is pushed to the right end. A long capped-listing note may shrink and wrap instead. */
+.browse-count { flex: 0 1 auto; min-width: 0; color: #6b7a89; font-size: 12px; font-variant-numeric: tabular-nums; line-height: 1.35; }
 .browse-chip { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 4px; height: 26px; padding: 0 9px; border: 1px solid #1d2630;
   border-radius: 13px; background: #11161d; color: #8aa0b6; font-size: 12px; white-space: nowrap; }
 .browse-chip:active { color: #cfe0f0; }
@@ -2441,14 +2444,15 @@ button.cmd-text { background: none; border: none; text-align: left; }
 .browse-entry-row .browse-entry { flex: 1; min-width: 0; }
 .browse-entry-meta { flex: 0 0 auto; margin-left: auto; display: inline-flex; align-items: baseline; gap: 8px;
   padding-left: 8px; color: #6b7a89; font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
-/* Right-aligned columns, like a desktop list: a two-column grid so the time ("前天") and the size
-   ("620 B") each reserve their column's width. Without the reservation a directory row (time only)
-   and a short size would shift the columns row by row. The columns are empty — not absent — for a
-   directory's size, which is what keeps every row's columns at the same x. */
-.browse-entry-meta { flex: 0 0 auto; margin-left: auto; display: inline-grid; grid-template-columns: 5em 3.6em; column-gap: 8px;
+/* Right-aligned columns, like a desktop list: a two-column grid so the size ("620 B") and the time
+   ("前天") each reserve their column's width. The TIME is the last column on purpose — every entry has
+   one, so the row's right edge always ends on text and never on the empty cell a directory's size
+   would otherwise leave there. The grid-column assignments keep a directory (time only) in the time
+   column instead of letting it drift into the size column. */
+.browse-entry-meta { flex: 0 0 auto; margin-left: auto; display: inline-grid; grid-template-columns: 3.6em 5em; column-gap: 8px;
   padding-left: 8px; color: #6b7a89; font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
-.browse-entry-time { grid-column: 1; text-align: right; color: #6b86a3; }
-.browse-entry-size { grid-column: 2; text-align: right; color: #6b7a89; }
+.browse-entry-size { grid-column: 1; text-align: right; color: #6b7a89; }
+.browse-entry-time { grid-column: 2; text-align: right; color: #6b86a3; }
 /* One trailing ⋯ per row (every kind, so the row's right edge is the same for a folder and a file). */
 .browse-more { flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center; width: 40px; height: 44px;
   border: none; background: none; color: #6b86a3; margin-left: 2px; }

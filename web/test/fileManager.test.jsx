@@ -19,7 +19,7 @@ vi.mock('../src/storage.js', () => ({
   getRecentDocs: vi.fn(() => []), removeRecentDoc: vi.fn(),
   getBrowseDir: vi.fn(() => null), setBrowseDir: vi.fn(),
   getBrowserSort: vi.fn(() => 'name'), setBrowserSort: vi.fn(),
-  getBrowserShowHidden: vi.fn(() => false), setBrowserShowHidden: vi.fn(),
+  getBrowserCollapseHidden: vi.fn(() => false), setBrowserCollapseHidden: vi.fn(),
   // DocView (rendered for the active doc tab) reads these; provide them so the mock is complete.
   getDocFontIndex: vi.fn(() => 4), setDocFontIndex: vi.fn(), DOC_FONT_SIZES: [10, 11, 12, 13, 14, 16, 18, 20, 22],
   getDocScrollRatio: vi.fn(() => 0), setDocScrollRatio: vi.fn(),
