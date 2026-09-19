@@ -35,7 +35,7 @@ import { moveTarget } from './windowOrder.js';
 import { reportBound, clearPaneNotification, getNotifications, deleteNotification } from './push.js';
 import type { PushInboxItem } from './push.js';
 import InboxPage from './components/InboxPage.jsx';
-import { isAbsolute, joinPath } from './docPath.js';
+import { guessDocType, isAbsolute, joinPath } from './docPath.js';
 import { isImageName } from './mime.js';
 import { useDocTabs } from './hooks/useDocTabs.js';
 import { usePreviews } from './hooks/usePreviews.js';
@@ -341,10 +341,7 @@ export default function App() {
   const [completedChatEntry, setCompletedChatEntry] = useState<CompletedChatEntryRequest | null>(null);
   const completedChatEntrySeqRef = useRef(0);
   const conversationIdentityByPaneRef = useRef(new Map<string, AgentConversationIdentity>());
-  // Transient toast for the file viewer: 'error' red for failures, 'info' neutral for outcomes the
-  // user explicitly asked for (e.g. a forced reload).
-  const [docToast, setDocToast] = useState<{ text: string; tone: 'error' | 'info' } | null>(null);
-  const showDocToast = (text: string, tone: 'error' | 'info' = 'error'): void => setDocToast({ text, tone });
+  const [docToast, setDocToast] = useState<string | null>(null); // transient error toast for absolute-path doc failures
   const [exitHint, setExitHint] = useState(false); // "press Back again to exit" hint (double-back guard)
   const [docLinkPrompt, setDocLinkPrompt] = useState<DocLinkPrompt | null>(null); // { path, x, y } confirm popover for a tapped terminal path
   const [docLinkOpening, setDocLinkOpening] = useState(false);
@@ -2119,8 +2116,12 @@ export default function App() {
       || completedChatEntry.session !== current.session.name) setCompletedChatEntry(null);
   }, [completedChatEntry, current]);
 
-  // Fetch + open a doc by ABSOLUTE path: dedupe into a tab, record the recent, reveal the sheet.
-  // Throws on fetch failure so callers can decide (prompt for a base dir, or surface inline).
+  // Open a doc by ABSOLUTE path: dedupe into a tab, record the recent, reveal the sheet.
+  //
+  // The tab opens BEFORE the bytes arrive and shows the viewer's loading page: awaiting the fetch first
+  // meant a big file left the screen frozen on the file list with no feedback at all. The type is
+  // guessed from the extension for that first paint and corrected by the server's answer.
+  // On failure the tab is closed again so callers can recover exactly as before (throws to them).
   const openAbsDoc = async (abs: string, anchor?: string): Promise<void> => {
     // A requested `#heading` rides on the tab as { anchor, at }: a NEW object every time, so re-tapping
     // the same terminal link (same path, same anchor) still triggers a fresh jump in DocView.
@@ -2129,31 +2130,44 @@ export default function App() {
     // just like fetchDoc does — that way a relative/ambiguous tap falls into the same "pick the base
     // dir" recovery below, instead of opening a dead tab. The object URL rides on the tab as content;
     // DocView revokes it on unmount. Re-tapping an already-open image just re-activates (no refetch).
-    if (isImageName(abs)) {
-      const name = abs.split('/').pop() || abs;
+    const name = abs.split('/').pop() || abs;
+    const image = isImageName(abs);
+    if (image) {
       // Re-tapping an already-open image re-activates it and refreshes (conditional — re-downloads only
       // if the file changed on disk); a first open fetches the bytes and records the mtime for later.
-      if (docTabs.tabs.some((t) => t.key === abs)) { docTabs.activate(abs); refreshDocTab(abs); setFileManagerOpen(true); return; }
-      const image = await fetchImageUrl(abs); // throws on 404/401 → caller's recovery (toast / base prompt)
-      if ('notModified' in image) return;
-      docTabs.openDoc(abs, { type: 'image', name, content: image.url, mtime: image.mtimeMs });
-      pushRecentDoc({ path: abs, name, type: 'image', ts: Date.now() });
-      setFileManagerOpen(true);
-      return;
+      if (docTabs.tabs.some((t) => t.key === abs)) { docTabs.activate(abs); void refreshDocTab(abs); setFileManagerOpen(true); return; }
     }
-    const res = await fetchDoc(abs); // throws on non-2xx (404/400/…)
-    if ('notModified' in res) return;
     docTabs.openDoc(abs, {
-      type: res.type,
-      name: res.name,
-      content: res.content,
-      ...(res.mtimeMs !== undefined ? { mtime: res.mtimeMs } : {}),
-      ...(res.size !== undefined ? { size: res.size } : {}),
-      ...(res.birthtimeMs !== undefined ? { birthtimeMs: res.birthtimeMs } : {}),
+      type: image ? 'image' : guessDocType(abs),
+      name,
+      loading: true,
       anchorRequest,
     });
-    pushRecentDoc({ path: abs, name: res.name, type: res.type, ts: Date.now() });
     setFileManagerOpen(true);
+    try {
+      if (image) {
+        const fetched = await fetchImageUrl(abs); // throws on 404/401 → caller's recovery
+        if ('notModified' in fetched) { docTabs.refreshDoc(abs, { loading: false }); return; }
+        docTabs.refreshDoc(abs, { content: fetched.url, mtime: fetched.mtimeMs, loading: false });
+        pushRecentDoc({ path: abs, name, type: 'image', ts: Date.now() });
+        return;
+      }
+      const res = await fetchDoc(abs); // throws on non-2xx (404/400/…)
+      if ('notModified' in res) { docTabs.refreshDoc(abs, { loading: false }); return; }
+      docTabs.refreshDoc(abs, {
+        type: res.type,
+        name: res.name,
+        content: res.content,
+        loading: false,
+        ...(res.mtimeMs !== undefined ? { mtime: res.mtimeMs } : {}),
+        ...(res.size !== undefined ? { size: res.size } : {}),
+        ...(res.birthtimeMs !== undefined ? { birthtimeMs: res.birthtimeMs } : {}),
+      });
+      pushRecentDoc({ path: abs, name: res.name, type: res.type, ts: Date.now() });
+    } catch (error) {
+      docTabs.closeTab(abs); // never leave a dead loading tab behind
+      throw error;
+    }
   };
 
   // Closing an image tab frees its object URL (created in openAbsDoc). The URL must outlive tab
@@ -2175,48 +2189,44 @@ export default function App() {
   // `force` (the viewer's 重新加载 button): drop the conditional mtime so the file is really re-read
   // and re-rendered, even when the server would have answered 304. An explicit reload that silently
   // does nothing reads as a broken button.
-  const refreshDocTab = (key: string, force = false) => {
+  const refreshDocTab = async (key: string, force = false): Promise<void> => {
     const tab = docTabs.tabs.find((t) => t.key === key);
     if (!tab || tab.type === 'home') return;
-    if (tab.type === 'image') {
-      fetchImageUrl(key, force ? null : tab.mtime ?? null)
-        .then((res) => {
-          if ('notModified' in res) return; // unchanged → keep the same object URL (no re-download, no flash)
-          const old = tab.content;
-          docTabs.refreshDoc(key, { content: res.url, mtime: res.mtimeMs });
-          if (typeof old === 'string') URL.revokeObjectURL(old); // free the superseded blob (the <img> is already re-pointed)
-          if (force) showDocToast(t('doc.reloadUpdated'), 'info');
-        })
-        .catch(() => { /* keep the last-good image */ });
-      return;
+    try {
+      if (tab.type === 'image') {
+        const res = await fetchImageUrl(key, force ? null : tab.mtime ?? null);
+        // A tab that is still loading must stop showing the loading page even on a 304 (it has no
+        // content of its own to fall back on yet).
+        if ('notModified' in res) { docTabs.refreshDoc(key, { loading: false }); return; }
+        const old = tab.content;
+        docTabs.refreshDoc(key, { content: res.url, mtime: res.mtimeMs, loading: false });
+        if (typeof old === 'string') URL.revokeObjectURL(old); // free the superseded blob (the <img> is already re-pointed)
+        return;
+      }
+      const res = await fetchDoc(key, force ? null : tab.mtime ?? null);
+      if ('notModified' in res) { // unchanged on disk → leave the content (and its scroll/TTS) alone
+        if (tab.loading) docTabs.refreshDoc(key, { loading: false });
+        return;
+      }
+      docTabs.refreshDoc(key, {
+        type: res.type,
+        name: res.name,
+        content: res.content,
+        loading: false,
+        ...(res.mtimeMs !== undefined ? { mtime: res.mtimeMs } : {}),
+        ...(res.size !== undefined ? { size: res.size } : {}),
+        ...(res.birthtimeMs !== undefined ? { birthtimeMs: res.birthtimeMs } : {}),
+      });
+    } catch {
+      /* keep the last-good content (and, for a still-loading tab, the caller's error path closes it) */
     }
-    fetchDoc(key, force ? null : tab.mtime ?? null)
-      .then((res) => {
-        if ('notModified' in res) return; // unchanged on disk → leave the tab (and its scroll/TTS) alone
-        docTabs.refreshDoc(key, {
-          type: res.type,
-          name: res.name,
-          content: res.content,
-          ...(res.mtimeMs !== undefined ? { mtime: res.mtimeMs } : {}),
-          ...(res.size !== undefined ? { size: res.size } : {}),
-          ...(res.birthtimeMs !== undefined ? { birthtimeMs: res.birthtimeMs } : {}),
-        });
-        // An explicit reload must be acknowledged, and saying WHICH outcome it was is the useful part.
-        if (force) {
-          showDocToast(
-            res.content === tab.content ? t('doc.reloadUnchanged') : t('doc.reloadUpdated'),
-            'info',
-          );
-        }
-      })
-      .catch(() => { /* keep the last-good content */ });
   };
 
   // Switching to a doc tab is instant (activate), then its content refreshes in the background.
-  const activateDocTab = (key: string) => { docTabs.activate(key); refreshDocTab(key); };
+  const activateDocTab = (key: string) => { docTabs.activate(key); void refreshDocTab(key); };
 
   // Topbar file button: reveal the sheet and refresh whatever doc it lands on ("switch away & back").
-  const reopenFiles = () => { setFileManagerOpen(true); refreshDocTab(docTabs.active); };
+  const reopenFiles = () => { setFileManagerOpen(true); void refreshDocTab(docTabs.active); };
 
   // req() throws Error("/api/... -> 404"); map the trailing status to a readable reason.
   const friendlyDocError = (error: unknown): string => {
@@ -2234,7 +2244,7 @@ export default function App() {
   const onOpenDoc = async (rawPath: string, anchor?: string): Promise<void> => {
     if (isAbsolute(rawPath)) {
       // No base to fill for an absolute path → surface the reason as a transient toast.
-      try { await openAbsDoc(rawPath, anchor); } catch (e) { showDocToast(friendlyDocError(e)); }
+      try { await openAbsDoc(rawPath, anchor); } catch (e) { setDocToast(friendlyDocError(e)); }
       return;
     }
     const base = current?.paneId ? getPaneBase(current.paneId) ?? currentPaneCwd : currentPaneCwd;
@@ -2267,7 +2277,7 @@ export default function App() {
     try {
       await openAbsDoc(joinPath(baseDir, basePrompt.rawPath), basePrompt.anchor);
     } catch (e) {
-      showDocToast(friendlyDocError(e));
+      setDocToast(friendlyDocError(e));
       return;
     }
     if (current?.paneId) setPaneBase(current.paneId, baseDir);
@@ -2354,7 +2364,7 @@ export default function App() {
   // Auto-dismiss the doc toast after a few seconds (also dismissible by tap).
   useEffect(() => {
     if (!docToast) return;
-    const id = setTimeout(() => setDocToast(null), docToast.tone === 'info' ? 2600 : 4000);
+    const id = setTimeout(() => setDocToast(null), 4000);
     return () => clearTimeout(id);
   }, [docToast]);
 
@@ -2838,9 +2848,7 @@ export default function App() {
       <AddToHome />
       <BrowserSheet browser={browser} staticPreview={staticPreview} />
       {docToast && (
-        <div className={`doc-toast${docToast.tone === 'info' ? ' is-info' : ''}`}
-          role={docToast.tone === 'info' ? 'status' : 'alert'}
-          onClick={() => setDocToast(null)}>{docToast.text}</div>
+        <div className="doc-toast" role="alert" onClick={() => setDocToast(null)}>{docToast}</div>
       )}
       {exitHint && (
         <div className="exit-toast" role="status">{t('app.backToExit')}</div>

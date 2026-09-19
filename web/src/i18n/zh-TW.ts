@@ -547,8 +547,6 @@ export default {
   'doc.copySource': '複製原文',
   'doc.copyCode': '複製程式碼',
   'doc.reload': '重新載入',
-  'doc.reloadUpdated': '已重新載入 · 內容已更新',
-  'doc.reloadUnchanged': '已重新載入 · 內容無變化',
   'doc.words': '字數',
   'doc.chars': '字元數',
   'doc.anchorMissing': '找不到標題 #{anchor}，檔案已開啟',

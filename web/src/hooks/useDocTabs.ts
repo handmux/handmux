@@ -9,6 +9,8 @@ export interface DocTabMeta {
   /** File-info fields (viewer's info popover): byte size + creation time. */
   size?: number;
   birthtimeMs?: number | null;
+  /** The bytes are still being fetched: the tab is already open and the viewer shows its loading page. */
+  loading?: boolean;
   /** A one-shot "jump to this heading" request from the opener (terminal/chat `file.md#heading` links).
    *  `at` makes every request a distinct object, so re-tapping the same link jumps again; null clears. */
   anchorRequest?: { anchor: string; at: number } | null;
@@ -57,6 +59,8 @@ const mergeMeta = (tab: DocTab, meta: DocTabMeta): DocTab => {
   if (birthtimeMs !== undefined) merged.birthtimeMs = birthtimeMs;
   else delete merged.birthtimeMs;
   // anchorRequest: undefined reuses, null clears, an object replaces (a new request).
+  if (meta.loading !== undefined) merged.loading = meta.loading;
+  else if (tab.loading !== undefined) merged.loading = tab.loading;
   if (meta.anchorRequest === null) delete merged.anchorRequest;
   else if (meta.anchorRequest !== undefined) merged.anchorRequest = meta.anchorRequest;
   else if (tab.anchorRequest !== undefined) merged.anchorRequest = tab.anchorRequest;
@@ -78,6 +82,7 @@ export function openDocState(state: DocTabsState, path: string, meta: OpenDocMet
     ...(meta.mtime !== undefined ? { mtime: meta.mtime } : {}),
     ...(meta.size !== undefined ? { size: meta.size } : {}),
     ...(meta.birthtimeMs !== undefined ? { birthtimeMs: meta.birthtimeMs } : {}),
+    ...(meta.loading !== undefined ? { loading: meta.loading } : {}),
     ...(meta.anchorRequest ? { anchorRequest: meta.anchorRequest } : {}),
     path,
   };

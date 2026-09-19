@@ -72,6 +72,19 @@ function looksLikeFilePath(value: string): boolean {
 }
 
 // Find every doc-path link in one line of text → [{ start, end, path }] (end exclusive).
+// The doc type implied by the extension, used ONLY to pick a renderer for the first paint while the
+// bytes are still in flight. The server content-checks every file and its answer replaces this.
+export function guessDocType(name: string | null | undefined): 'image' | 'markdown' | 'html' | 'text' {
+  const value = (name || '').toLowerCase();
+  const m = /\.([a-z0-9]+)$/.exec(value);
+  const ext = m?.[1];
+  if (!ext) return 'text';
+  if (IMAGE_LINK_EXTS.includes(ext)) return 'image';
+  if (ext === 'md' || ext === 'markdown') return 'markdown';
+  if (ext === 'html' || ext === 'htm') return 'html';
+  return 'text';
+}
+
 export function findDocLinks(line: string): DocumentPathLink[] {
   const out: DocumentPathLink[] = [];
   if (!line) return out;

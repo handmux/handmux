@@ -1237,8 +1237,6 @@ export default {
   'doc.copySource': '复制原文',
   'doc.copyCode': '复制代码',
   'doc.reload': '重新加载',
-  'doc.reloadUpdated': '已重新加载 · 内容已更新',
-  'doc.reloadUnchanged': '已重新加载 · 内容无变化',
   'doc.words': '字数',
   'doc.chars': '字符数',
   'doc.anchorMissing': '没有找到标题 #{anchor}，文件已打开',

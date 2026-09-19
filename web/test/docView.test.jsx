@@ -272,6 +272,35 @@ describe('DocView P1 document features', () => {
 
   const openMore = () => click(container.querySelector('[aria-label="文件信息"]'));
 
+  it('shows the loading page while the bytes are on their way (a fresh open)', async () => {
+    await render({ type: 'markdown', name: 'a.md', path: '/a.md', content: '', loading: true });
+    expect(container.querySelector('.doc-loading')).not.toBeNull();
+    expect(container.querySelector('.doc-md')).toBeNull(); // no half-rendered document
+    expect(container.querySelector('.doc-loading-name')?.textContent).toBe('a.md');
+  });
+
+  it('reloading shows the same loading page until the refresh settles', async () => {
+    let finish;
+    const gate = new Promise((resolve) => { finish = resolve; });
+    await render({
+      type: 'markdown', name: 'a.md', path: '/a.md', content: '# 标题',
+      onReload: () => gate,
+    });
+    expect(container.querySelector('.doc-loading')).toBeNull();
+    await openMore();
+    await click([...container.querySelectorAll('.doc-info-action')]
+      .find((b) => b.textContent.includes('重新加载')));
+    // the feedback IS the loading page — no toast, and it must be visible even for an instant reload
+    expect(container.querySelector('.doc-loading')).not.toBeNull();
+    expect(container.querySelector('.doc-md')).toBeNull();
+    await act(async () => {
+      finish();
+      await new Promise((resolve) => setTimeout(resolve, 320)); // ≥ MIN_RELOAD_MS
+    });
+    expect(container.querySelector('.doc-loading')).toBeNull();
+    expect(container.querySelector('.doc-md')).not.toBeNull();
+  });
+
   it('重新加载 re-reads the file and gets the popover out of the way', async () => {
     const reloads = [];
     await render({

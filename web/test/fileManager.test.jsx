@@ -53,6 +53,25 @@ describe('FileManager', () => {
     expect(q('.file-sheet').classList.contains('open')).toBe(true);
     expect(qa('.file-tab').length).toBe(2);
   });
+  it('renders the loading page for a tab whose bytes are still on their way', async () => {
+    const loadingTab = { key: '/home/u/big.md', type: 'markdown', name: 'big.md', path: '/home/u/big.md', loading: true };
+    await render({ ...base, tabs: [HOME_TAB, loadingTab], active: '/home/u/big.md' });
+    await settle();
+    expect(q('.doc-loading')).not.toBeNull();
+    expect(q('.doc-md')).toBeNull(); // nothing half-rendered while the fetch is in flight
+    expect(q('.doc-loading-name')?.textContent).toBe('big.md');
+  });
+
+  it('caps the tab label so a long file name cannot take over the strip', async () => {
+    const longTab = {
+      key: '/home/u/very-long-name.md', type: 'markdown', name: 'a-very-long-file-name-that-would-stretch.md',
+      content: '# a', path: '/home/u/very-long-name.md',
+    };
+    await render({ ...base, tabs: [HOME_TAB, longTab], active: '/home/u/very-long-name.md' });
+    // the name lives in its own element, which is what the max-width/ellipsis rule targets
+    expect(q('.file-tab-name')?.textContent).toBe('a-very-long-file-name-that-would-stretch.md');
+  });
+
   it('drops the .open class when minimized', async () => {
     await render({ ...base, open: false });
     expect(q('.file-sheet').classList.contains('open')).toBe(false);

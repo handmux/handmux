@@ -28,7 +28,7 @@ export interface FileManagerProps {
   onMinimize: () => void;
   onOpenDoc: (path: string) => void | Promise<void>;
   /** Re-read the active doc from disk (App's conditional GET) — the file may have been rewritten. */
-  onReloadDoc?: (key: string) => void;
+  onReloadDoc?: (key: string) => void | Promise<void>;
   /** Open a tapped http(s) link in the app's built-in browser. */
   onOpenUrl?: (url: string, point: { x: number; y: number }) => void;
   pendingShare?: File | null;
@@ -193,7 +193,9 @@ export default function FileManager({
           {tabs.map((t) => (
             <div key={t.key} className={`file-tab ${t.key === active ? 'active' : ''}`}>
               <button className="file-tab-label" onClick={() => onActivate(t.key)}>
-                {t.key === 'home' ? <><FolderIcon />{tr('filemanager.files')}</> : t.name}
+                {t.key === 'home'
+                  ? <><FolderIcon />{tr('filemanager.files')}</>
+                  : <span className="file-tab-name">{t.name}</span>}
               </button>
               {t.key !== 'home' && (
                 <button className="file-tab-x" aria-label={tr('filemanager.closeTab')} onClick={() => onCloseTab(t.key)}>✕</button>
@@ -226,6 +228,7 @@ export default function FileManager({
         ) : <DocView type={cur.type} name={cur.name} path={cur.path ?? null}
             size={cur.size ?? null} mtimeMs={cur.mtime ?? null} birthtimeMs={cur.birthtimeMs ?? null}
             anchorRequest={cur.anchorRequest ?? null}
+            loading={cur.loading ?? false}
             {...(onReloadDoc ? { onReload: () => onReloadDoc(cur.key) } : {})}
             {...(onOpenUrl ? { onOpenUrl } : {})}
             content={typeof cur.content === 'string' ? cur.content : ''} />}

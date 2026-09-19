@@ -535,8 +535,6 @@ export default {
   'doc.copySource': '원문 복사',
   'doc.copyCode': '코드 복사',
   'doc.reload': '새로 고침',
-  'doc.reloadUpdated': '새로 고침됨 · 내용이 갱신되었습니다',
-  'doc.reloadUnchanged': '새로 고침됨 · 변경 사항 없음',
   'doc.words': '단어 수',
   'doc.chars': '문자 수',
   'doc.anchorMissing': '제목 #{anchor}을(를) 찾지 못했습니다(파일은 열었습니다)',

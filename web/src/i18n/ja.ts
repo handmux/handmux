@@ -535,8 +535,6 @@ export default {
   'doc.copySource': '原文をコピー',
   'doc.copyCode': 'コードをコピー',
   'doc.reload': '再読み込み',
-  'doc.reloadUpdated': '再読み込みしました · 内容が更新されました',
-  'doc.reloadUnchanged': '再読み込みしました · 変更はありません',
   'doc.words': '語数',
   'doc.chars': '文字数',
   'doc.anchorMissing': '見出し #{anchor} が見つかりません（ファイルは開きました）',

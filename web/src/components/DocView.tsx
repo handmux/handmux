@@ -31,12 +31,27 @@ export interface DocViewProps {
   size?: number | null;
   mtimeMs?: number | null;
   birthtimeMs?: number | null;
-  /** Re-read the file from disk (App's conditional GET) — the agent may have rewritten it. */
-  onReload?: () => void;
+  /** Re-read the file from disk. Resolves when the refresh has settled, so the viewer can hold the
+   *  loading state for the whole round-trip. */
+  onReload?: () => void | Promise<void>;
+  /** The file's bytes are still on their way (the tab is open, content not here yet). */
+  loading?: boolean;
   /** Open a tapped http(s) link in the app's built-in browser instead of leaving the page. */
   onOpenUrl?: (url: string, point: { x: number; y: number }) => void;
   /** A `file.md#heading` open request (terminal/chat link): jump to that heading once rendered. */
   anchorRequest?: { anchor: string; at: number } | null;
+}
+
+// Shown while the file's bytes are on their way — for a fresh open AND for a reload. One component so
+// both paths look identical, and a plain CSS spinner (no dependency, no JS animation loop).
+function DocLoading({ name }: { name: string }) {
+  return (
+    <div className="doc-loading" role="status" aria-live="polite">
+      <span className="doc-loading-spinner" aria-hidden="true" />
+      <span className="doc-loading-text">{t('common.loading')}</span>
+      {name ? <span className="doc-loading-name">{name}</span> : null}
+    </div>
+  );
 }
 
 const collectSentences = markSentences;
@@ -54,6 +69,8 @@ const FOLLOW_SCROLL_GUARD_MS = 800;
 // find match in the upper half where the soft keyboard cannot cover it.
 const TOC_TOP_OFFSET = 62;
 const FIND_TOP_OFFSET = 70;
+// A reload must be perceptible even when the file is unchanged and the fetch is instant.
+const MIN_RELOAD_MS = 260;
 
 const readFontIndex = (): number => {
   const value: unknown = getDocFontIndex();
@@ -113,7 +130,7 @@ const slugifyHeading = (text: string): string => (
 // keeps the spoken sentence in view until the reader scrolls away, then a pill offers to come back.
 export default function DocView({
   type, name, path = null, content = '', size = null, mtimeMs = null, birthtimeMs = null,
-  onReload, onOpenUrl, anchorRequest = null,
+  onReload, onOpenUrl, anchorRequest = null, loading = false,
 }: DocViewProps) {
   const [fontIdx, setFontIdx] = useState<number>(readFontIndex);
   const [followPaused, setFollowPaused] = useState(false);
@@ -131,6 +148,7 @@ export default function DocView({
   const [copied, setCopied] = useState(false);
   const [readNotice, setReadNotice] = useState<string | null>(null);
   const [anchorNotice, setAnchorNotice] = useState<string | null>(null);
+  const [reloading, setReloading] = useState(false);
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const mdRef = useRef<HTMLDivElement | null>(null);
   const textRef = useRef<HTMLPreElement | null>(null);
@@ -254,7 +272,7 @@ export default function DocView({
   // this depends on `toc` to re-run after that pass. The request object is new per tap, so tapping the
   // same link twice jumps twice, and it deliberately overrides the remembered reading position.
   useEffect(() => {
-    if (!anchorRequest) return;
+    if (!anchorRequest || loading) return; // no content yet — the heading cannot exist
     const el = document.getElementById(decodeURIComponent(anchorRequest.anchor));
     if (!el) {
       // A link that points nowhere must SAY so: silence looks like a broken feature.
@@ -264,7 +282,7 @@ export default function DocView({
     setAnchorNotice(null);
     scrollToElement(el, TOC_TOP_OFFSET, false); // instant: this is the arrival position, not a follow
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [anchorRequest, toc]);
+  }, [anchorRequest, toc, loading]);
 
   // Clicks inside the document, in priority order:
   //   1. a tapped link — `#anchor` jumps within the doc, http(s) opens in the built-in browser (leaving
@@ -371,11 +389,16 @@ export default function DocView({
   const canRead = type === 'markdown' && speech.supported;
   const fullPath = path || name;
 
-  // The outcome is reported by App (it knows whether the bytes on disk differed) as a toast; all this
-  // side does is get the popover out of the way so the refreshed document is visible.
+  // Reloading shows the SAME loading page a fresh open shows, for at least one visible beat: the
+  // feedback IS the loading state (no toast), and an unchanged file must still look like it did
+  // something. The popover closes so the loading page is what the user sees.
   const onReloadFromDisk = (): void => {
     setInfoOpen(false);
-    onReload?.();
+    setReloading(true);
+    const minimum = new Promise((resolve) => setTimeout(resolve, MIN_RELOAD_MS));
+    void Promise.all([Promise.resolve(onReload?.()), minimum])
+      .then(() => setReloading(false))
+      .catch(() => setReloading(false));
   };
 
   const onCopyPath = (): void => {
@@ -397,6 +420,12 @@ export default function DocView({
       sourceTimer.current = setTimeout(() => setSourceCopied(false), 1600);
     });
   };
+
+  // Every hook has run by now — the loading page is decided at render time, never by an early return
+  // above a hook (that would change the hook count between renders).
+  if (loading || reloading) {
+    return <DocLoading name={name} />;
+  }
 
   return (
     <div className="doc-md-wrap" ref={wrapRef}
