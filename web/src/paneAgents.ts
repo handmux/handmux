@@ -16,6 +16,24 @@ export interface PaneAgentPin {
   agentId: string;
 }
 
+// Carry each pane's last confirmed Agent forward when a fresh /panes response does not carry the field for it.
+// The server omits `agent` when its process probe was inconclusive — its own comment documents that as
+// "preserve the last confirmed owner in consumers" — but this response replaces the pane list wholesale, so
+// without this the value is lost: the badge blanks for a beat and then flips to whatever the compatibility
+// roster happens to say, which is the flicker users see on the pane they are actually looking at. An explicit
+// `null` still clears, because that is the server saying there is no Agent on this pane.
+export function mergePaneAgents<T extends PaneAgentItem>(
+  previous: readonly T[] | null | undefined,
+  next: readonly T[],
+): T[] {
+  const before = new Map((previous ?? []).map((pane) => [pane.id, pane]));
+  return next.map((pane) => {
+    if (Object.hasOwn(pane, 'agent')) return pane;
+    const kept = before.get(pane.id);
+    return kept && Object.hasOwn(kept, 'agent') ? { ...pane, agent: kept.agent } : pane;
+  });
+}
+
 export function currentPaneAgent(
   current: { paneId?: string | null; panes?: PaneAgentItem[] } | null | undefined,
   states: PaneStates = {},

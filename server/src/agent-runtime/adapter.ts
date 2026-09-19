@@ -40,6 +40,11 @@ export interface ProcessContext {
   // command lines and parent links but no per-pid executable/start-time resolution, so this stays one `ps`
   // read. Optional: a runtime without it leaves such adapters degrading to `unknown` instead of guessing.
   inspectForegroundGroup?(pane: LivePane): Promise<readonly ForegroundProcessIdentity[]>;
+  // One known process, by pid. This is the cheap "is this still the same process generation?" probe a lease
+  // needs on every tick: only the fields a generation check uses are resolved (never the executable, whose
+  // lsof costs ~70ms on a Node process). Null means the probe could not confirm that process — callers must
+  // treat it as inconclusive, not as proof the process exited.
+  inspectProcess?(pid: number): Promise<ForegroundProcessIdentity | null>;
 }
 
 export interface ReadonlyPaneSource {

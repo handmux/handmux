@@ -233,5 +233,11 @@ export function createLocalAgentProcessContext({
         };
       }));
     },
+    // One `ps -p`, and deliberately no executable lookup: a lease only needs to know that the pid it was
+    // attached to is still the same process generation.
+    async inspectProcess(pid: number): Promise<ForegroundProcessIdentity | null> {
+      const startedAt = await processStartedAt(run, pid);
+      return startedAt === undefined ? null : { pid, startedAt };
+    },
   };
 }

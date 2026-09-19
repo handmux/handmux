@@ -3,6 +3,7 @@ import {
   clearPaneConversationIdentities,
   currentPaneAgent,
   hasCanonicalCurrentPaneAgent,
+  mergePaneAgents,
   navigationAgentMaps,
 } from './paneAgents.js';
 
@@ -56,8 +57,7 @@ describe('pane agent identity', () => {
 
 });
 
-describe('navigation Agent logos', () => {
-  it('lets canonical current-window panes clear stale /states logos', () => {
+describe('navigation Agent logos', () => {  it('lets canonical current-window panes clear stale /states logos', () => {
     const maps = navigationAgentMaps({
       window: { id: '@1' },
       panes: [{ id: '%1', agent: null }, { id: '%2', agent: 'codex' }],
@@ -112,5 +112,28 @@ describe('navigation Agent logos', () => {
       panes: [{ id: '%1', agent: 'claude' }],
     }, { '%4': { window: '@2', agent: 'claude' } });
     expect(maps.windowAgents['@2']).toBe('claude');
+  });
+});
+
+describe('merging a fresh /panes response', () => {
+  it('keeps the last confirmed Agent when the server omits the field for a pane', () => {
+    // The server omits `agent` when its probe was inconclusive. Losing the value there is what made the
+    // selected pane's badge blank and then flip to the compatibility roster.
+    const merged = mergePaneAgents(
+      [{ id: '%1', agent: 'codebuddy' }, { id: '%2', agent: 'claude' }],
+      [{ id: '%1' }, { id: '%2', agent: 'claude' }],
+    );
+    expect(merged[0]).toEqual({ id: '%1', agent: 'codebuddy' });
+    expect(merged[1]).toEqual({ id: '%2', agent: 'claude' });
+  });
+
+  it('takes an explicit null as the server saying the Agent is gone', () => {
+    expect(mergePaneAgents([{ id: '%1', agent: 'claude' }], [{ id: '%1', agent: null }]))
+      .toEqual([{ id: '%1', agent: null }]);
+  });
+
+  it('leaves a pane it has never seen alone, and does not invent one', () => {
+    expect(mergePaneAgents([], [{ id: '%1' }])).toEqual([{ id: '%1' }]);
+    expect(mergePaneAgents(undefined, [{ id: '%1', agent: 'pi' }])).toEqual([{ id: '%1', agent: 'pi' }]);
   });
 });

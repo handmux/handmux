@@ -175,6 +175,18 @@ describe('Tmux Agent Runtime context', () => {
     ]);
   });
 
+  it('probes one known process by pid for the lease anchor check', async () => {
+    const startedAt = Date.parse('Tue Aug 12 04:00:00 2026');
+    const run = vi.fn(async (command: string, args: string[]) => (
+      command === 'ps' && args[0] === '-p' && args[1] === '400' ? 'Tue Aug 12 04:00:00 2026\n' : ''
+    ));
+    const context = createLocalAgentProcessContext({ run });
+    await expect(context.inspectProcess!(400)).resolves.toEqual({ pid: 400, startedAt });
+    await expect(context.inspectProcess!(999)).resolves.toBeNull();
+    // Never an executable lookup: avoiding that lsof is the whole point of the anchor check.
+    expect(run.mock.calls.filter(([, args]) => args[0] === 'lsof')).toEqual([]);
+  });
+
   it('reports no foreground group for a pane without a tty', async () => {
     const run = vi.fn(async () => '');
     const context = createLocalAgentProcessContext({ run });

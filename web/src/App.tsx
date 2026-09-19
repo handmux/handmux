@@ -48,6 +48,7 @@ import {
   clearPaneConversationIdentities,
   currentPaneAgent,
   hasCanonicalCurrentPaneAgent,
+  mergePaneAgents,
   navigationAgentMaps,
 } from './paneAgents.js';
 import { OverlayProvider } from './overlays/OverlayHost.js';
@@ -1303,7 +1304,7 @@ export default function App() {
       const paneId = panes.some((pane) => pane.id === c.paneId) || !panes.length
         ? c.paneId
         : pickId(panes, getLastPane(windowId));
-      return { ...c, windows, panes, paneId };
+      return { ...c, windows, panes: mergePaneAgents(c.panes, panes), paneId };
     });
   }, []);
 

@@ -1433,6 +1433,57 @@ describe('per-pane process evidence', () => {
 
   // CodeBuddy's shape: the Agent is not the foreground leaf, so a verifier hands back the process it proved.
   // Everything downstream must then track that process, not the leaf that keeps moving under it.
+  // A lease already carries its process generation, so rechecking it every tick must not re-probe the pane:
+  // that probe (a `ps -t` plus the lsof for an executable) is the expensive half of reconciliation.
+  it('revalidates an existing lease from its anchor without re-probing the pane', async () => {
+    const agentPane: LivePane = { ...pane('node') };
+    delete agentPane.foregroundPid;
+    const panes = new TestPanes([agentPane]);
+    type Foreground = { pid: number; startedAt: number; tty: string; commandLine: string };
+    const inspectForeground = vi.fn(
+      async (): Promise<Foreground | null> => ({
+        pid: 400, startedAt: 1_000, tty: '/dev/ttys001', commandLine: 'node /opt/bin/probe',
+      }),
+    );
+    const inspectProcess = vi.fn(
+      async (pid: number): Promise<{ pid: number; startedAt: number } | null> => ({ pid, startedAt: 1_000 }),
+    );
+    const runtime = new AgentRuntime({
+      adapters: [{
+        ...adapter('probe'),
+        process: {
+          commands: ['probe'], ambiguousCommands: ['node'], runtimeAttach: true,
+          verify: async (current, context) => {
+            const foreground = await context.inspectForeground(current);
+            return foreground?.commandLine === 'node /opt/bin/probe' ? foreground : false;
+          },
+        },
+      }],
+      panes,
+      process: { inspectForeground, inspectProcess },
+      stateDirectory: directory(),
+      authToken: AUTH_TOKEN,
+      newRunId: () => 'anchor-run-1',
+    });
+    runtimes.push(runtime);
+    await runtime.start();
+    expect(runtime.activeRuns()).toHaveLength(1);
+    const probesAfterAttach = inspectForeground.mock.calls.length;
+
+    // Steady state: the anchor still matches, so the pane is not probed again and the lease holds.
+    panes.emit([{ ...agentPane }]);
+    await vi.waitFor(() => expect(inspectProcess.mock.calls.length).toBeGreaterThan(0));
+    expect(runtime.activeRuns()).toHaveLength(1);
+    expect(inspectForeground.mock.calls.length).toBe(probesAfterAttach);
+
+    // The anchor can no longer be confirmed, so the full verification runs — and finds the Agent gone.
+    inspectProcess.mockResolvedValue(null);
+    inspectForeground.mockResolvedValue(null);
+    panes.emit([{ ...agentPane }]);
+    await vi.waitFor(() => expect(runtime.activeRuns()).toEqual([]));
+    expect(inspectForeground.mock.calls.length).toBeGreaterThan(probesAfterAttach);
+  });
+
   it('anchors the run lease on the process a verifier names instead of the leaf', async () => {
     const agentPane: LivePane = { ...pane('node') };
     delete agentPane.foregroundPid;

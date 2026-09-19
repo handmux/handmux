@@ -186,7 +186,11 @@ try {
 } catch {
   health.set('codex', 'degraded', 'codex-start-failed');
 }
-const agentPanes = new TmuxAgentPaneSource({ commands });
+// This snapshot drives Runtime reconciliation, and every reconciliation re-probes each pane it tracks: the
+// tmux read is ~13ms, but a `node` pane costs 100ms+ once ps/lsof run, so a 1s cadence burned 1-2.5
+// core-seconds per second on a 35-pane host. Nothing the UI needs comes from that frequency, so the snapshot
+// runs at 3s: an Agent starting or exiting is noticed within that window.
+const agentPanes = new TmuxAgentPaneSource({ commands, pollMs: 3_000 });
 const agentProcess = createLocalAgentProcessContext();
 const agentRuntime = createBuiltinAgentRuntime({
   home,

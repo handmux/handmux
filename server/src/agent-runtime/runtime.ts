@@ -1139,6 +1139,27 @@ export class AgentRuntime {
     return pane ? (await this.#verifyAgainst(adapter, candidate, pane)) === 'valid' : false;
   }
 
+  // Steady-state recheck for a lease that already exists. The lease carries the process generation it was
+  // attached to — pid AND start time — and while that exact generation is alive the pane cannot have changed
+  // under it, so the full identity probe (a `ps -t` plus the lsof that resolves an executable, ~100ms for a
+  // Node pane) would only re-derive what the anchor already proves. Confirm the anchor with the one cheap
+  // probe instead. Anything else — the pid gone, a different start time, no probe on this host, a probe that
+  // threw — falls through to the full verification, so this can only ever skip work, never revoke on doubt.
+  async #verifyTracked(
+    tracked: TrackedRun,
+    pane: LivePane,
+  ): Promise<'valid' | 'invalid' | 'unknown'> {
+    const anchor = tracked.candidate.process;
+    const inspectProcess = this.#process.inspectProcess;
+    if (inspectProcess && anchor.startedAt !== undefined) {
+      try {
+        const alive = await inspectProcess(anchor.pid);
+        if (alive !== null && alive.startedAt === anchor.startedAt) return 'valid';
+      } catch { /* fall through to the full verification */ }
+    }
+    return this.#verifyAgainst(tracked.adapter, tracked.candidate, pane);
+  }
+
   async #verifyAgainst(
     adapter: AgentAdapter,
     candidate: AgentAttachmentCandidate,
@@ -1169,9 +1190,7 @@ export class AgentRuntime {
       if (this.#closed) return;
       if (tracked.lease.signal.aborted || this.runs.resolve(tracked.lease.ref) !== tracked.lease) continue;
       const pane = panes.get(tracked.lease.ref.paneId);
-      const verdict = pane
-        ? await this.#verifyAgainst(tracked.adapter, tracked.candidate, pane)
-        : 'invalid';
+      const verdict = pane ? await this.#verifyTracked(tracked, pane) : 'invalid';
       if (verdict === 'invalid' && this.runs.resolve(tracked.lease.ref) === tracked.lease) {
         await this.runs.revokePane(tracked.lease.ref.paneId, pane ? 'process_exit' : 'pane_detached');
       }
