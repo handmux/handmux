@@ -225,6 +225,7 @@ export default function FileManager({
           </div>
         ) : <DocView type={cur.type} name={cur.name} path={cur.path ?? null}
             size={cur.size ?? null} mtimeMs={cur.mtime ?? null} birthtimeMs={cur.birthtimeMs ?? null}
+            anchorRequest={cur.anchorRequest ?? null}
             {...(onReloadDoc ? { onReload: () => onReloadDoc(cur.key) } : {})}
             {...(onOpenUrl ? { onOpenUrl } : {})}
             content={typeof cur.content === 'string' ? cur.content : ''} />}

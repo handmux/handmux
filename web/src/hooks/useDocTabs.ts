@@ -9,6 +9,9 @@ export interface DocTabMeta {
   /** File-info fields (viewer's info popover): byte size + creation time. */
   size?: number;
   birthtimeMs?: number | null;
+  /** A one-shot "jump to this heading" request from the opener (terminal/chat `file.md#heading` links).
+   *  `at` makes every request a distinct object, so re-tapping the same link jumps again; null clears. */
+  anchorRequest?: { anchor: string; at: number } | null;
 }
 
 export interface OpenDocMeta extends DocTabMeta {
@@ -53,6 +56,10 @@ const mergeMeta = (tab: DocTab, meta: DocTabMeta): DocTab => {
   else delete merged.size;
   if (birthtimeMs !== undefined) merged.birthtimeMs = birthtimeMs;
   else delete merged.birthtimeMs;
+  // anchorRequest: undefined reuses, null clears, an object replaces (a new request).
+  if (meta.anchorRequest === null) delete merged.anchorRequest;
+  else if (meta.anchorRequest !== undefined) merged.anchorRequest = meta.anchorRequest;
+  else if (tab.anchorRequest !== undefined) merged.anchorRequest = tab.anchorRequest;
   return merged;
 };
 
@@ -71,6 +78,7 @@ export function openDocState(state: DocTabsState, path: string, meta: OpenDocMet
     ...(meta.mtime !== undefined ? { mtime: meta.mtime } : {}),
     ...(meta.size !== undefined ? { size: meta.size } : {}),
     ...(meta.birthtimeMs !== undefined ? { birthtimeMs: meta.birthtimeMs } : {}),
+    ...(meta.anchorRequest ? { anchorRequest: meta.anchorRequest } : {}),
     path,
   };
   return { tabs: [...state.tabs, tab], active: path };

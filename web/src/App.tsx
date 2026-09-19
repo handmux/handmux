@@ -234,7 +234,7 @@ interface OpenSessionOptions {
   isCancelled?: () => boolean;
 }
 
-interface DocLinkPrompt { path: string; x: number; y: number }
+interface DocLinkPrompt { path: string; anchor?: string; x: number; y: number }
 interface LocalUrlPrompt { raw: string; x: number; y: number }
 interface OutputLink {
   kind: 'url' | 'doc';
@@ -244,7 +244,7 @@ interface OutputLink {
   port?: string | number;
   urlPath?: string;
 }
-interface BasePrompt { rawPath: string }
+interface BasePrompt { rawPath: string; anchor?: string }
 type FocusOwner = 'terminal' | 'composer';
 
 const recordOf = (value: unknown): Record<string, unknown> | null => (
@@ -345,7 +345,7 @@ export default function App() {
   const [exitHint, setExitHint] = useState(false); // "press Back again to exit" hint (double-back guard)
   const [docLinkPrompt, setDocLinkPrompt] = useState<DocLinkPrompt | null>(null); // { path, x, y } confirm popover for a tapped terminal path
   const [docLinkOpening, setDocLinkOpening] = useState(false);
-  const pendingDocLinkRef = useRef<string | null>(null);
+  const pendingDocLinkRef = useRef<{ path: string; anchor?: string } | null>(null);
   const [localUrlPrompt, setLocalUrlPrompt] = useState<LocalUrlPrompt | null>(null); // { raw, x, y } for a tapped web URL
   const docTabs = useDocTabs(); // file-viewer tab state, kept across sheet open/close
   const browser = useBrowser({ enabled: !needToken, browserProxy: !!serverConfig?.browserProxy });
@@ -2118,7 +2118,10 @@ export default function App() {
 
   // Fetch + open a doc by ABSOLUTE path: dedupe into a tab, record the recent, reveal the sheet.
   // Throws on fetch failure so callers can decide (prompt for a base dir, or surface inline).
-  const openAbsDoc = async (abs: string): Promise<void> => {
+  const openAbsDoc = async (abs: string, anchor?: string): Promise<void> => {
+    // A requested `#heading` rides on the tab as { anchor, at }: a NEW object every time, so re-tapping
+    // the same terminal link (same path, same anchor) still triggers a fresh jump in DocView.
+    const anchorRequest = anchor ? { anchor, at: Date.now() } : null;
     // Images open in the inline viewer. Fetch the bytes HERE (not in DocView) so a bad path THROWS
     // just like fetchDoc does — that way a relative/ambiguous tap falls into the same "pick the base
     // dir" recovery below, instead of opening a dead tab. The object URL rides on the tab as content;
@@ -2144,6 +2147,7 @@ export default function App() {
       ...(res.mtimeMs !== undefined ? { mtime: res.mtimeMs } : {}),
       ...(res.size !== undefined ? { size: res.size } : {}),
       ...(res.birthtimeMs !== undefined ? { birthtimeMs: res.birthtimeMs } : {}),
+      anchorRequest,
     });
     pushRecentDoc({ path: abs, name: res.name, type: res.type, ts: Date.now() });
     setFileManagerOpen(true);
@@ -2213,18 +2217,18 @@ export default function App() {
 
   // Entry from a terminal tap or the home path box. Absolute → open directly. Relative → resolve
   // against the pane's stored base (or its cwd); if that doesn't open, prompt for the base dir.
-  const onOpenDoc = async (rawPath: string): Promise<void> => {
+  const onOpenDoc = async (rawPath: string, anchor?: string): Promise<void> => {
     if (isAbsolute(rawPath)) {
       // No base to fill for an absolute path → surface the reason as a transient toast.
-      try { await openAbsDoc(rawPath); } catch (e) { setDocToast(friendlyDocError(e)); }
+      try { await openAbsDoc(rawPath, anchor); } catch (e) { setDocToast(friendlyDocError(e)); }
       return;
     }
     const base = current?.paneId ? getPaneBase(current.paneId) ?? currentPaneCwd : currentPaneCwd;
     if (base) {
-      try { await openAbsDoc(joinPath(base, rawPath)); return; }
+      try { await openAbsDoc(joinPath(base, rawPath), anchor); return; }
       catch { /* fall through to prompt */ }
     }
-    setBasePrompt({ rawPath });
+    setBasePrompt({ rawPath, ...(anchor ? { anchor } : {}) });
   };
 
   // Opening a confirmed link is a history transition, not two independent overlay changes. First let
@@ -2233,10 +2237,10 @@ export default function App() {
   // newly opened layer, producing the visible "flash and disappear" failure.
   useEffect(() => {
     if (docLinkPrompt || !pendingDocLinkRef.current) return undefined;
-    const path = pendingDocLinkRef.current;
+    const pending = pendingDocLinkRef.current;
     pendingDocLinkRef.current = null;
     const timer = window.setTimeout(() => {
-      void onOpenDoc(path).finally(() => setDocLinkOpening(false));
+      void onOpenDoc(pending.path, pending.anchor).finally(() => setDocLinkOpening(false));
     }, 0);
     return () => window.clearTimeout(timer);
   }, [docLinkPrompt]); // eslint-disable-line react-hooks/exhaustive-deps -- run once after this prompt's history pop
@@ -2247,7 +2251,7 @@ export default function App() {
   const pickBaseDir = async (baseDir: string): Promise<void> => {
     if (!basePrompt) return;
     try {
-      await openAbsDoc(joinPath(baseDir, basePrompt.rawPath));
+      await openAbsDoc(joinPath(baseDir, basePrompt.rawPath), basePrompt.anchor);
     } catch (e) {
       setDocToast(friendlyDocError(e));
       return;
@@ -2270,11 +2274,22 @@ export default function App() {
     if (link.kind === 'url') {
       const raw = link.raw || link.path;
       if (raw) setLocalUrlPrompt({ raw, x: cx, y: cy });
-    } else if (link.path) setDocLinkPrompt({ path: link.path, x: cx, y: cy });
+      return;
+    }
+    if (!link.path) return;
+    setDocLinkPrompt({
+      path: link.path,
+      ...('anchor' in link && link.anchor ? { anchor: link.anchor } : {}),
+      x: cx,
+      y: cy,
+    });
   };
-  const confirmDocLink = (path: string) => {
-    if (docLinkOpening) return;
-    pendingDocLinkRef.current = path;
+  const confirmDocLink = (): void => {
+    if (docLinkOpening || !docLinkPrompt) return;
+    pendingDocLinkRef.current = {
+      path: docLinkPrompt.path,
+      ...(docLinkPrompt.anchor ? { anchor: docLinkPrompt.anchor } : {}),
+    };
     setDocLinkOpening(true);
     window.history.back();
   };
@@ -2816,7 +2831,7 @@ export default function App() {
       )}
       {docLinkPrompt && (
         <DocLinkPopover
-          path={docLinkPrompt.path}
+          path={docLinkPrompt.anchor ? `${docLinkPrompt.path}#${docLinkPrompt.anchor}` : docLinkPrompt.path}
           x={docLinkPrompt.x}
           y={docLinkPrompt.y}
           busy={docLinkOpening}

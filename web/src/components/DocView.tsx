@@ -35,6 +35,8 @@ export interface DocViewProps {
   onReload?: () => void;
   /** Open a tapped http(s) link in the app's built-in browser instead of leaving the page. */
   onOpenUrl?: (url: string, point: { x: number; y: number }) => void;
+  /** A `file.md#heading` open request (terminal/chat link): jump to that heading once rendered. */
+  anchorRequest?: { anchor: string; at: number } | null;
 }
 
 const collectSentences = markSentences;
@@ -111,7 +113,7 @@ const slugifyHeading = (text: string): string => (
 // keeps the spoken sentence in view until the reader scrolls away, then a pill offers to come back.
 export default function DocView({
   type, name, path = null, content = '', size = null, mtimeMs = null, birthtimeMs = null,
-  onReload, onOpenUrl,
+  onReload, onOpenUrl, anchorRequest = null,
 }: DocViewProps) {
   const [fontIdx, setFontIdx] = useState<number>(readFontIndex);
   const [followPaused, setFollowPaused] = useState(false);
@@ -245,6 +247,18 @@ export default function DocView({
     wrap.addEventListener('scroll', onScroll, { passive: true });
     return () => wrap.removeEventListener('scroll', onScroll);
   }, [speech.playing]);
+
+  // A tapped terminal/chat link can name a heading (`docs/notes.md#小节-a`): land on it once the
+  // document is rendered AND the heading ids exist (they are assigned by the outline effect above), so
+  // this depends on `toc` to re-run after that pass. The request object is new per tap, so tapping the
+  // same link twice jumps twice, and it deliberately overrides the remembered reading position.
+  useEffect(() => {
+    if (!anchorRequest) return;
+    const el = document.getElementById(decodeURIComponent(anchorRequest.anchor));
+    if (!el) return;
+    scrollToElement(el, TOC_TOP_OFFSET, false); // instant: this is the arrival position, not a follow
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [anchorRequest, toc]);
 
   // Clicks inside the document, in priority order:
   //   1. a tapped link — `#anchor` jumps within the doc, http(s) opens in the built-in browser (leaving

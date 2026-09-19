@@ -30,6 +30,21 @@ export interface DocumentPathLink {
   start: number;
   end: number;
   path: string;
+  /** A trailing `#fragment` (e.g. `docs/notes.md#小节-a`): open the file AND jump to that heading.
+   *  `end` still covers the whole token so the highlighted span includes the anchor. */
+  anchor?: string;
+}
+
+// `path#anchor` — the fragment must look like a slug (letters/digits/`-`/`_`/`.`/percent), so a genuine
+// filename containing `#` is left alone instead of being silently truncated.
+const ANCHOR_RE = /^[\p{L}\p{N}_.\-%]+$/u;
+
+function splitAnchor(raw: string): { path: string; anchor?: string } {
+  const hash = raw.indexOf('#');
+  if (hash <= 0) return { path: raw };
+  const anchor = raw.slice(hash + 1);
+  if (!anchor || !ANCHOR_RE.test(anchor)) return { path: raw };
+  return { path: raw.slice(0, hash), anchor };
 }
 
 function looksLikeFilePath(value: string): boolean {
@@ -71,8 +86,15 @@ export function findDocLinks(line: string): DocumentPathLink[] {
     // `@` in a genuine path (`node_modules/@types/x.md`) is kept — `@` can't be a plain delimiter.
     const lead = /^@+/.exec(path);
     if (lead) { start += lead[0].length; path = path.slice(lead[0].length); }
-    if (!looksLikeFilePath(path)) continue;
-    out.push({ start, end: start + path.length, path });
+    // `file.md#heading` → the file to open + the heading to jump to (the highlight keeps both).
+    const target = splitAnchor(path);
+    if (!looksLikeFilePath(target.path)) continue;
+    out.push({
+      start,
+      end: start + path.length, // the whole token, anchor included, so the underline covers it
+      path: target.path,
+      ...(target.anchor ? { anchor: target.anchor } : {}),
+    });
   }
   return out;
 }

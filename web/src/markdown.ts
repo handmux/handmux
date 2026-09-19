@@ -18,6 +18,8 @@ import { t } from './i18n';
 export interface ConversationOutputLink {
   kind: 'url' | 'doc';
   path?: string;
+  /** Doc links: `file.md#heading` — the heading to jump to after opening. */
+  anchor?: string;
   protocol?: 'http' | 'https';
   port?: number;
   urlPath?: string;
@@ -37,9 +39,11 @@ export function outputLinkFromAnchor(anchor: HTMLAnchorElement): ConversationOut
     };
   }
   const path = match.path || raw.slice(match.start, match.end);
-  if (explicitKind) return { kind: 'doc', path };
-  try { return { kind: 'doc', path: decodeURIComponent(path) }; }
-  catch { return { kind: 'doc', path }; }
+  const decoded = (() => {
+    try { return decodeURIComponent(path); } catch { return path; }
+  })();
+  if (explicitKind) return { kind: 'doc', path, ...(match.anchor ? { anchor: match.anchor } : {}) };
+  return { kind: 'doc', path: decoded, ...(match.anchor ? { anchor: match.anchor } : {}) };
 }
 
 // Strip a YAML frontmatter block (opening `---` line … closing `---` or `...` line). Line-based on

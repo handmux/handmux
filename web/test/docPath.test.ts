@@ -41,6 +41,24 @@ describe('findDocLinks', () => {
   it('does not turn version numbers or bare email addresses into file links', () => {
     expect(findDocLinks('released v1.2.3; mail test@example.com')).toEqual([]);
   });
+  it('splits a trailing #anchor off a path, keeping the whole token in the span', () => {
+    const line = 'see docs/notes.md#小节-a for details';
+    const [link] = findDocLinks(line);
+    expect(link.path).toBe('docs/notes.md');
+    expect(link.anchor).toBe('小节-a');
+    expect(line.slice(link.start, link.end)).toBe('docs/notes.md#小节-a'); // highlight covers both
+  });
+  it('handles an anchor on an extensionless named file, and leaves real # filenames alone', () => {
+    expect(findDocLinks('open /work/README#install').map((l) => [l.path, l.anchor]))
+      .toEqual([['/work/README', 'install']]);
+    // `#` followed by something that is not slug-shaped stays part of the path (never truncated)
+    const [odd] = findDocLinks('open docs/a.md#has+plus');
+    expect(odd.anchor).toBeUndefined();
+    expect(odd.path).toBe('docs/a.md#has+plus');
+    const [empty] = findDocLinks('open docs/a.md#');
+    expect(empty.anchor).toBeUndefined();
+    expect(empty.path).toBe('docs/a.md#');
+  });
   it('finds plain-text paths (txt/log/sh) so they are tappable', () => {
     expect(findDocLinks('tail app.log and ./run.sh, notes.txt').map((l) => l.path))
       .toEqual(['app.log', './run.sh', 'notes.txt']);

@@ -22,6 +22,8 @@ export interface TerminalLineLink {
   };
   kind: OutputLink['kind'];
   path: string;
+  /** For a doc link: the `#heading` to jump to after opening the file. */
+  anchor?: string;
   protocol?: 'http' | 'https';
   port?: number;
   urlPath?: string;
@@ -72,7 +74,13 @@ export function findOutputLinks(text: string): OutputLink[] {
   }));
   for (const d of findDocLinks(text)) {
     if (urls.some((u) => d.start < u.end && d.end > u.start)) continue; // inside a URL → not a doc path
-    links.push({ start: d.start, end: d.end, kind: 'doc', path: d.path });
+    links.push({
+      start: d.start,
+      end: d.end,
+      kind: 'doc',
+      path: d.path,
+      ...(d.anchor ? { anchor: d.anchor } : {}),
+    });
   }
   links.sort((a, b) => a.start - b.start);
   return links;
@@ -230,19 +238,25 @@ export function docLinksOnLine(
       start: { x: s.col + 1, y: s.row + 1 },
       end: { x: e.col + e.w, y: e.row + 1 },
     };
-    out.push(link.kind === 'url' ? {
-      range,
-      kind,
-      path: text.slice(start, end),
-      protocol: link.protocol,
-      port: link.port,
-      urlPath: link.urlPath,
-      raw: link.raw,
-    } : {
-      range,
-      kind,
-      path: text.slice(start, end),
-    });
+    if (link.kind === 'url') {
+      out.push({
+        range,
+        kind,
+        path: text.slice(start, end),
+        protocol: link.protocol,
+        port: link.port,
+        urlPath: link.urlPath,
+        raw: link.raw,
+      });
+    } else {
+      // A doc link carries the path WITHOUT its `#anchor` (the range still covers the whole token).
+      out.push({
+        range,
+        kind,
+        path: link.path,
+        ...(link.anchor ? { anchor: link.anchor } : {}),
+      });
+    }
   }
   return out;
 }

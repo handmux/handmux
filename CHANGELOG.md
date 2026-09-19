@@ -19,6 +19,7 @@ All notable changes to handmux. Format follows [Keep a Changelog](https://keepac
 - 每个代码块右上角新增一键复制按钮。
 - 「更多」里新增复制 Markdown 原文、字数与字符数。
 - 文档内的 `#锚点` 链接现在可以跳转；正文里的网址改为在应用内置浏览器打开，不再跳出预览。
+- 终端输出（以及会话气泡）里的文件链接支持带锚点：`docs/notes.md#小节` 会打开该文件并直接跳到对应标题。
 
 ### Fixed
 

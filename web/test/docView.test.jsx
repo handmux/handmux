@@ -339,6 +339,45 @@ describe('DocView P1 document features', () => {
     }
   });
 
+  it('jumps to the heading named by an anchorRequest from a terminal link', async () => {
+    const calls = [];
+    const original = Element.prototype.scrollTo;
+    Element.prototype.scrollTo = function scrollTo(opts) { calls.push(opts); };
+    try {
+      await render({
+        type: 'markdown', name: 'notes.md', path: '/docs/notes.md',
+        content: '# 开头\n\n正文。\n\n## 小节 A\n\n内容。\n\n## 结尾\n\n完。',
+        anchorRequest: { anchor: '小节-a', at: 1234 },
+      });
+      expect(calls.length).toBeGreaterThan(0); // jumped on open
+      const first = calls.length;
+      // the same LINK tapped again issues a new request object → jumps again
+      await render({
+        type: 'markdown', name: 'notes.md', path: '/docs/notes.md',
+        content: '# 开头\n\n正文。\n\n## 小节 A\n\n内容。\n\n## 结尾\n\n完。',
+        anchorRequest: { anchor: '小节-a', at: 9999 },
+      });
+      expect(calls.length).toBeGreaterThan(first);
+    } finally {
+      Element.prototype.scrollTo = original;
+    }
+  });
+
+  it('ignores an anchorRequest that matches no heading', async () => {
+    const calls = [];
+    const original = Element.prototype.scrollTo;
+    Element.prototype.scrollTo = function scrollTo(opts) { calls.push(opts); };
+    try {
+      await render({
+        type: 'markdown', name: 'a.md', path: '/a.md', content: '# 标题\n\n正文。',
+        anchorRequest: { anchor: '不存在的标题', at: 1 },
+      });
+      expect(calls).toEqual([]);
+    } finally {
+      Element.prototype.scrollTo = original;
+    }
+  });
+
   it('opens an http link in the app instead of navigating away', async () => {
     const opened = [];
     await render({

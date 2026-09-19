@@ -19,6 +19,8 @@ export interface TerminalOutputLink {
   protocol?: string;
   port?: string | number;
   urlPath?: string;
+  /** Doc links: the `#heading` in `file.md#heading`, jumped to after the file opens. */
+  anchor?: string;
   range?: {
     start: { x: number; y: number };
     end: { x: number; y: number };
