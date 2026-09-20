@@ -1094,6 +1094,28 @@ describe('AgentRuntime composition root', () => {
       .rejects.toMatchObject({ code: 'runtime-unavailable' });
   });
 
+  it('mounts the CodeBuddy conversation capability it declares, experimental flag included', async () => {
+    // The frontend keys the 对话 lens off exactly this: a declared capability is only usable once the
+    // Runtime has mounted its adapter, and the experimental flag is what marks it as such there.
+    const runtime = createBuiltinAgentRuntime({
+      panes: new TestPanes([pane()]),
+      process: { inspectForeground: async () => ({
+        pid: 101, startedAt: 1_000, tty: '/dev/ttys001', executable: '/usr/local/bin/node',
+      }) },
+      stateDirectory: directory(),
+      authToken: AUTH_TOKEN,
+      newRunId: () => 'codebuddy-run',
+    });
+    runtimes.push(runtime);
+    expect(runtime.capabilities().find((value) => value.id === 'codebuddy')).toMatchObject({
+      iconId: 'codebuddy',
+      capabilities: {
+        inbox: true, conversation: true, interaction: false, subscriptionUsage: false,
+      },
+      capabilityMetadata: { conversation: { experimental: true } },
+    });
+  });
+
   it('wires proven Pi Inbox and Conversation capabilities without an external plugin loader', async () => {
     const panes = new TestPanes([pane()]);
     const runtime = createBuiltinAgentRuntime({
