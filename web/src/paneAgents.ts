@@ -96,21 +96,18 @@ export function navigationAgentMaps(
     if (pane.agent) canonicalWindowAgent = pane.agent;
   }
   if (windowId && hasCanonicalWindowIdentity) windowAgents[windowId] = canonicalWindowAgent;
-  // A window's badge is the Agent of the pane the user chose for it — that is the pane they see when they
-  // open the window, and it is why the badge does not change the moment the window is selected. tmux's
-  // active pane is only the fallback for a window this client has never opened; when it disagrees (the
-  // client is on the Agent's pane while tmux sits on a shell) tmux must not decide.
-  //
-  // Only an Agent the chosen pane actually HAS replaces the window's answer: a shell pane is not evidence
-  // that the window has no Agent, and writing `null` there is what left a window full of Claude with no
-  // logo while its pane map drew one.
+  // A window's badge is the Agent of the pane the user selected — nothing else. Which pane that is comes from
+  // this client (the pane it is on, or the one it chose for that window last), never from tmux: the two
+  // disagree whenever nothing has selected the pane in tmux, and tmux naming a shell is what hid the logo on a
+  // window the user was looking at Claude in. A selected pane that runs no Agent shows no badge, including a
+  // shell pane of a window that runs one somewhere else — the badge answers what the user is on, and the pane
+  // map is what shows the rest. tmux's active pane is used only for a window this client has never opened.
   for (const win of current?.windows ?? []) {
     if (!win?.id) continue;
     const chosen = win.id === windowId ? current?.paneId || null : chosenPane(win.id);
     const paneId = chosen || (typeof win.activePaneId === 'string' ? win.activePaneId : null);
     if (!paneId) continue;
-    const paneAgent = paneAgents[paneId];
-    if (paneAgent) windowAgents[win.id] = paneAgent;
+    windowAgents[win.id] = paneAgents[paneId] ?? null;
   }
   return { windowAgents, paneAgents };
 }

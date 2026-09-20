@@ -119,10 +119,9 @@ describe('navigation Agent logos', () => {  it('lets canonical current-window pa
     expect(maps.windowAgents['@2']).toBe('claude');
   });
 
-  it('keeps a window\'s Agent when its active pane is a shell this client knows nothing about', () => {
-    // A window can run Claude in one pane and sit on a shell in another. The shell pane has no Agent, but it
-    // is not evidence that the window has none either — writing `null` there left a window full of Claude
-    // with no logo at all, while its pane map drew one.
+  it('shows no badge for a window whose selected pane runs no Agent', () => {
+    // A window can run Claude in one pane and sit on a shell in another. The badge answers which Agent the
+    // user is on, so the shell pane it last opened shows none — the pane map is what shows the rest.
     const maps = navigationAgentMaps({
       window: { id: '@1' },
       windows: [{ id: '@1', activePaneId: '%1' }, { id: '@2', activePaneId: '%5' }],
@@ -131,7 +130,7 @@ describe('navigation Agent logos', () => {  it('lets canonical current-window pa
       '%1': { window: '@1', agent: 'claude' },
       '%4': { window: '@2', agent: 'claude' },
     });
-    expect(maps.windowAgents['@2']).toBe('claude');
+    expect(maps.windowAgents['@2']).toBeNull();
   });
 
   it('prefers the active pane of a window that runs more than one Agent', () => {
@@ -148,18 +147,20 @@ describe('navigation Agent logos', () => {  it('lets canonical current-window pa
     expect(maps.windowAgents['@2']).toBe('codebuddy');
   });
 
-  it('falls back to the Agent the window does run when its own active pane has none', () => {
-    // The open window: its active pane (%2) is a shell with an explicit "no Agent", so the window's own list
-    // decides — and that list has Claude in %1.
+  it('clears the badge when the pane the user selected has no Agent', () => {
+    // Same window, same list: the user moved from the Claude pane (%1) to the shell pane (%2). The badge
+    // follows the pane they are on, so it goes away — the window still running Claude elsewhere is not what
+    // it reports.
     const maps = navigationAgentMaps({
       window: { id: '@1' },
+      paneId: '%2',
       windows: [{ id: '@1', activePaneId: '%2' }],
       panes: [{ id: '%1', agent: 'claude' }, { id: '%2', agent: null }],
     }, {});
-    expect(maps.windowAgents['@1']).toBe('claude');
+    expect(maps.windowAgents['@1']).toBeNull();
   });
 
-  it('leaves a window alone when its active pane is not known', () => {
+  it('keeps the roster answer for a window whose selected pane is unknown entirely', () => {
     const maps = navigationAgentMaps({
       window: { id: '@1' },
       windows: [{ id: '@2' }],
