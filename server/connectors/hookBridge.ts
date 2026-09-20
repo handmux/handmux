@@ -3,6 +3,7 @@
 // ONCE here and the provider supplies only a profile:
 //
 //   - agentId / label / attachmentPrefix       identity of the records this connector publishes
+//   - eventPrefix                              the prefix the shared writer stamps on the spool it reads
 //   - acceptsAgent(agent)                      which provider marking a row or spool event may carry
 //   - resolvePaneProcess(pane, context)        the pane's provider process (the lease anchor)
 //   - matchesAgentPane(pane, foreground)       the legacy-record fallback when no fingerprint was recorded
@@ -172,14 +173,16 @@ function optionalSession(payload: Record<string, unknown>, explicit?: string): s
   return typeof value === 'string' && value.length > 0 && value.length <= 1024 ? value : undefined;
 }
 
+// The per-connection identity: a new session, or a new process generation on the same pane, is a different
+// bridge client (and a different local state file). The Agent is deliberately absent — each Connector owns
+// its own state directory, so including it would only rename every existing Claude client's file.
 function signature(
-  agentId: string,
   paneId: string,
   sessionId: string | undefined,
   process: ForegroundProcessIdentity,
 ): string {
   return JSON.stringify({
-    agentId, paneId, sessionId, pid: process.pid, startedAt: process.startedAt, tty: process.tty,
+    paneId, sessionId, pid: process.pid, startedAt: process.startedAt, tty: process.tty,
   });
 }
 
@@ -189,7 +192,7 @@ function digest(value: string): string {
 
 // A gap marker is per pane+session+process generation: confirming it must not swallow the next session's
 // gap on the same reused pane.
-function gapKey(profile: HookBridgeProfile, file: string, event: {
+function gapKey(file: string, event: {
   paneId: string; sessionId?: string; eventId: string;
   process?: { pid: number; startedAt: number; tty: string };
 }): string {
@@ -199,7 +202,6 @@ function gapKey(profile: HookBridgeProfile, file: string, event: {
     sessionId: event.sessionId ?? null,
     process: event.process ?? null,
     eventId: event.eventId,
-    agent: profile.agentId,
   });
 }
 
@@ -426,7 +428,7 @@ export class HookBridgeConnector {
 
     const gaps = new Map<string, { event: HookBridgeEvent; key: string }>();
     const activeGapKeys = new Set(events.flatMap(({ file, event }) => (
-      event.type === 'gap' ? [gapKey(profile, file, event)] : []
+      event.type === 'gap' ? [gapKey(file, event)] : []
     )));
     for (const key of this.#confirmedGaps) {
       if (!activeGapKeys.has(key)) this.#confirmedGaps.delete(key);
@@ -452,7 +454,7 @@ export class HookBridgeConnector {
         try { fs.unlinkSync(eventFile); } catch { /* replaced session already retired the gap */ }
         continue;
       }
-      gaps.set(event.paneId, { event, key: gapKey(profile, eventFile, event) });
+      gaps.set(event.paneId, { event, key: gapKey(eventFile, event) });
     }
 
     const currentStatePanes = new Set<string>();
@@ -593,7 +595,7 @@ export class HookBridgeConnector {
     foreground: ForegroundProcessIdentity,
   ): LocalConnectorBridgeClient {
     const profile = this.#profile;
-    const nextSignature = signature(profile.agentId, paneId, sessionId, foreground);
+    const nextSignature = signature(paneId, sessionId, foreground);
     const current = this.#clients.get(paneId);
     if (current?.signature === nextSignature) return current.client;
     current?.client.close();
