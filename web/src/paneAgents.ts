@@ -7,6 +7,7 @@ type PaneStates = Record<string, { agent?: string | null; window?: string | null
 
 interface PaneWorkspace {
   window?: { id?: string | null } | null;
+  paneId?: string | null;
   panes?: PaneAgentItem[];
   windows?: readonly { id?: string | null; activePaneId?: string | null }[] | null;
 }
@@ -70,6 +71,9 @@ export function clearPaneConversationIdentities<V>(cache: Map<string, V>, paneId
 export function navigationAgentMaps(
   current: PaneWorkspace | null | undefined,
   states: PaneStates = {},
+  // The pane this client last chose for a window — the one selecting it opens. Only a fallback: tmux's own
+  // active pane decides nothing here while we know which pane the user picked.
+  chosenPane: (windowId: string) => string | null = () => null,
 ): {
   windowAgents: Record<string, string | null>;
   paneAgents: Record<string, string | null>;
@@ -92,18 +96,21 @@ export function navigationAgentMaps(
     if (pane.agent) canonicalWindowAgent = pane.agent;
   }
   if (windowId && hasCanonicalWindowIdentity) windowAgents[windowId] = canonicalWindowAgent;
-  // A window's badge is its ACTIVE pane's Agent — whether or not that window is the selected one. Deriving
-  // it from whichever pane was listed last (or, for the selected window, from the pane this client happens
-  // to have open) meant the badge changed the moment you selected the window, and could flash on the way.
-  // Only an Agent the active pane actually HAS replaces the window's answer: an active pane that is a shell,
-  // or one this client has no identity for at all, is not evidence that the window has no Agent — writing
-  // `null` there is what made a window full of Claude draw no logo while its pane map showed one.
+  // A window's badge is the Agent of the pane the user chose for it — that is the pane they see when they
+  // open the window, and it is why the badge does not change the moment the window is selected. tmux's
+  // active pane is only the fallback for a window this client has never opened; when it disagrees (the
+  // client is on the Agent's pane while tmux sits on a shell) tmux must not decide.
+  //
+  // Only an Agent the chosen pane actually HAS replaces the window's answer: a shell pane is not evidence
+  // that the window has no Agent, and writing `null` there is what left a window full of Claude with no
+  // logo while its pane map drew one.
   for (const win of current?.windows ?? []) {
     if (!win?.id) continue;
-    const activePaneId = win.activePaneId;
-    if (typeof activePaneId !== 'string' || !activePaneId) continue;
-    const activeAgent = paneAgents[activePaneId];
-    if (activeAgent) windowAgents[win.id] = activeAgent;
+    const chosen = win.id === windowId ? current?.paneId || null : chosenPane(win.id);
+    const paneId = chosen || (typeof win.activePaneId === 'string' ? win.activePaneId : null);
+    if (!paneId) continue;
+    const paneAgent = paneAgents[paneId];
+    if (paneAgent) windowAgents[win.id] = paneAgent;
   }
   return { windowAgents, paneAgents };
 }

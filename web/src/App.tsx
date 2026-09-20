@@ -2531,7 +2531,9 @@ export default function App() {
   // inactive multi-pane one where we only have this aggregate). The active multi-pane window renders per-pane
   // instead (paneAgents below), so it doesn't rely on this squash. A state entry exists only for a pane
   // actually running an agent, so this is its agent.
-  const { windowAgents, paneAgents } = navigationAgentMaps(current, states);
+  // The pane the user chose for a window decides its badge; tmux's active pane is only the fallback for a
+  // window this client has never opened.
+  const { windowAgents, paneAgents } = navigationAgentMaps(current, states, getLastPane);
   // paneId → agent id, for the per-pane agent logo inside the active window's pane menu (states is keyed by
   // pane, so this is the live truth for each one; a pane not running an agent simply has no entry → no logo).
   const changelogUnread = !!LATEST_RELEASE && clSeen !== LATEST_RELEASE;

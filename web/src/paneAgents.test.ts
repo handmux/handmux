@@ -93,6 +93,32 @@ describe('navigation Agent logos', () => {  it('lets canonical current-window pa
     expect(maps.windowAgents['@2']).toBe('codebuddy');
   });
 
+  it('takes the pane this client chose over the one tmux has active', () => {
+    // The user is on Claude (%1); tmux still has the shell (%9) active because nothing selected it there.
+    // The pane they chose decides — that is the pane opening the window shows.
+    const maps = navigationAgentMaps({
+      window: { id: '@1' },
+      paneId: '%1',
+      windows: [{ id: '@1', activePaneId: '%9' }],
+      panes: [{ id: '%1', agent: 'claude' }, { id: '%9', agent: null }],
+    }, {});
+    expect(maps.windowAgents['@1']).toBe('claude');
+  });
+
+  it('uses the pane it remembers for a window this client has not opened', () => {
+    const maps = navigationAgentMaps({
+      window: { id: '@1' },
+      paneId: '%1',
+      windows: [{ id: '@1', activePaneId: '%1' }, { id: '@2', activePaneId: '%5' }],
+      panes: [{ id: '%1', agent: 'claude' }],
+    }, {
+      '%1': { window: '@1', agent: 'claude' },
+      '%4': { window: '@2', agent: 'claude' },
+      '%5': { window: '@2', agent: 'codebuddy' },
+    }, (windowId) => (windowId === '@2' ? '%4' : null));
+    expect(maps.windowAgents['@2']).toBe('claude');
+  });
+
   it('keeps a window\'s Agent when its active pane is a shell this client knows nothing about', () => {
     // A window can run Claude in one pane and sit on a shell in another. The shell pane has no Agent, but it
     // is not evidence that the window has none either — writing `null` there left a window full of Claude
