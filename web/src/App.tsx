@@ -366,7 +366,16 @@ export default function App() {
   const [workspaceProtection, setWorkspaceProtection] = useState<WorkspaceProtection | null>(null);
   const [states, setStates] = useState<Record<string, PaneInboxState>>({}); // pane → {session,window,kind,…} from /api/states
   const [activityTick, setActivityTick] = useState(0);
-  const noteActivity = useCallback(() => setActivityTick((tick) => tick + 1), []);
+  const lastActivityRef = useRef(0);
+  // A burst of quick roster polls right after the user does something. Throttled on the leading edge so typing
+  // cannot restart the loop on every keystroke, while a submission always counts. Without this the answer to a
+  // "需要你" prompt only showed up on the next five-second poll — and, on a slow fetch, the one after that.
+  const noteActivity = useCallback((force = false) => {
+    const now = Date.now();
+    if (!force && now - lastActivityRef.current < 1_000) return;
+    lastActivityRef.current = now;
+    setActivityTick((tick) => tick + 1);
+  }, []);
   // Bumped whenever the user does something that is about to change pane state — sending a command, or
   // submitting from the key bar. It drives a short burst of quick polls so the roster (the inbox card and
   // the pane status) catches up in about a second, instead of waiting out the five-second cadence: a poll
@@ -783,7 +792,7 @@ export default function App() {
   const sendKey = useCallback((name: string) => {
     const paneId = current?.paneId;
     if (!paneId) return;
-    if (name === 'Enter') noteActivity(); // submitting from the key bar changes pane state too
+    noteActivity(name === 'Enter'); // any key is activity; submitting always counts
     enqueueTerminalKeys(paneId, [name]);
   }, [current?.paneId, enqueueTerminalKeys, noteActivity]);
 
@@ -792,8 +801,11 @@ export default function App() {
   const sendLiveText = useCallback((text: string) => {
     const paneId = current?.paneId;
     if (!paneId) return;
+    // Typed input counts as activity too: the software keyboard's return arrives here as text, not as a
+    // named key, and that is how an answer to a "需要你" prompt is usually submitted.
+    noteActivity(text.includes('\r') || text.includes('\n'));
     enqueueTerminalInput(paneId, text);
-  }, [current?.paneId, enqueueTerminalInput]);
+  }, [current?.paneId, enqueueTerminalInput, noteActivity]);
 
   // Open a session: load its windows (prefer remembered → active → first), then that window's
   // panes (prefer remembered → active → first). Writes the session name into the URL hash so
@@ -1835,7 +1847,7 @@ export default function App() {
   // Record a just-sent command into this WINDOW's recent history (deduped + capped in storage).
   const onCommandSent = useCallback((cmd: string) => {
     termRef.current?.wake?.(); // a dock send/fill landed → wake the poll loop (covers BottomDock too)
-    noteActivity(); // and poll the roster quickly until the new state lands
+    noteActivity(true); // and poll the roster quickly until the new state lands
     const paneId = current?.paneId;
     const name = current?.session?.name;
     const win = current?.window?.id; // stable window ID, not the auto-renamed window.name
@@ -2461,13 +2473,19 @@ export default function App() {
   // Poll pane states for the inbox. Light cadence; paused while the tab is hidden. This is
   // separate from the terminal's own poll — it only feeds the inbox roster / unread count. Re-polls
   // immediately when `bound` changes (the deps) so a bind/unbind updates the filtered roster at once.
+  // While the pane in front of the user is mid-flight, poll it on a tighter cadence: a state the AGENT
+  // changes (a permission prompt appearing, a turn ending) has no user action to burst off, so the cadence
+  // is the only bound on how late it can show. Idle panes keep the light cadence.
+  const currentPaneKind = current?.paneId ? states[current.paneId]?.kind : null;
+  const paneInFlight = currentPaneKind === 'working' || currentPaneKind === 'compacting'
+    || currentPaneKind === 'permission';
   usePollingLoop({
     fetch: () => getStates(bound),
     apply: (s) => {
       const next = s || {};
       setStates(next);
     },
-    intervalMs: 5000,
+    intervalMs: paneInFlight ? 2_000 : 5_000,
     // An action just changed (or is about to change) this roster: poll now, then a few quick follow-ups,
     // then fall back to the cadence. Bounded on purpose — this is not a busy loop.
     burstKey: activityTick,
