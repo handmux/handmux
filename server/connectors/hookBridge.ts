@@ -20,10 +20,15 @@ import {
   HOOK_EVENT_ID_RE,
   canonicalInboxState,
   matchesHookProcess,
+  normalizedTty,
   parseHookBridgeEvent,
   readHookStateRows,
 } from '../src/agents/hookEvents.js';
-import type { AgentHookClassification, HookBridgeEvent } from '../src/agents/hookEvents.js';
+import type {
+  AgentHookClassification,
+  HookBridgeEvent,
+  HookProcessFingerprint,
+} from '../src/agents/hookEvents.js';
 import type {
   ForegroundProcessIdentity,
   LivePane,
@@ -224,6 +229,43 @@ function candidate(
   };
 }
 
+// A record's OWN process fingerprint is the only identity a Hook record carries: the notify script read it off
+// the pane's tty when the record was written. Deciding whether the record still belongs to this pane therefore
+// does not start from the pane's foreground GROUP — while the Agent runs a tool, that group's foreground owner
+// IS the tool, so a scan names a different process (or none) from one attempt to the next. The attachment is
+// keyed by the process, so a changing answer mints a new attachment — and so a new run — on every retry, which
+// is what makes an Agent's row blink in and out of the roster, and what discarded events that carried a real
+// state change.
+//
+// The ladder is deliberately conservative: every rung rejects only on positive evidence, and a rung that
+// cannot answer hands the question to the next one.
+//   1. No fingerprint — a record from an older writer. Accept; the legacy pane check owns it.
+//   2. A tty that positively belongs to a different pane — reject. A pane's tty is its stable identity.
+//   3. A liveness probe (every production host supplies one) confirms the record's own pid: alive with the
+//      recorded start time is this generation, and the same pid with a different start time is a recycled pid
+//      — reject. The foreground group is not consulted at all, which is what removes the churn.
+//   4. No probe, or a probe that could not confirm the process (gone, or unreadable — the probe reports both
+//      the same way): compare against the pane's foreground group, exactly as before. This rung has to stay:
+//      without it a record from a dead generation could never retire, and since only one acknowledgement is
+//      ever in flight per pane it would starve that pane's live events forever.
+async function recordStillOwnsPane(
+  fingerprint: HookProcessFingerprint | undefined,
+  pane: LivePane,
+  inspectProcess: ProcessContext['inspectProcess'],
+  foreground: () => Promise<ForegroundProcessIdentity | null>,
+): Promise<boolean> {
+  if (!fingerprint) return true;
+  if (fingerprint.tty && pane.tty
+    && normalizedTty(fingerprint.tty) !== normalizedTty(pane.tty)) return false;
+  if (inspectProcess) {
+    let alive: ForegroundProcessIdentity | null = null;
+    try { alive = await inspectProcess(fingerprint.pid); } catch { alive = null; }
+    if (alive) return alive.startedAt === undefined || alive.startedAt === fingerprint.startedAt;
+  }
+  const current = await foreground();
+  return !current || matchesHookProcess(fingerprint, current);
+}
+
 export class HookBridgeConnector {
   readonly #profile: HookBridgeProfile;
   readonly #socketPath: string;
@@ -414,16 +456,15 @@ export class HookBridgeConnector {
     const state = readHookStateRows(this.#hookStateFile, (agent) => profile.acceptsAgent(agent));
     for (const [paneId, pending] of this.#pendingAcks) {
       const pane = paneMap.get(paneId);
-      const foreground = pane ? await identity(pane) : null;
       const latest = state.get(paneId);
       const latestSession = latest ? optionalSession(latest.payload) : undefined;
-      const replacedSession = foreground && latest?.process && matchesHookProcess(latest.process, foreground)
-        && latestSession && pending.sessionId && latestSession !== pending.sessionId;
-      if (replacedSession || !pane || (foreground && (foreground.pid !== pending.process.pid
-        || (foreground.startedAt !== undefined && pending.process.startedAt !== undefined
-          && foreground.startedAt !== pending.process.startedAt)
-        || (foreground.tty !== undefined && pending.process.tty !== undefined
-          && foreground.tty !== pending.process.tty)))) pending.client.close();
+      const anchor = latest?.process;
+      const replacedSession = anchor && latestSession && pending.sessionId && latestSession !== pending.sessionId;
+      const generationMoved = !!anchor && !matchesHookProcess(anchor, pending.process);
+      if (replacedSession || !pane || generationMoved
+        || !await recordStillOwnsPane(anchor, pane, this.#process.inspectProcess, () => identity(pane))) {
+        pending.client.close();
+      }
     }
 
     const gaps = new Map<string, { event: HookBridgeEvent; key: string }>();
@@ -436,10 +477,8 @@ export class HookBridgeConnector {
     for (const { file: eventFile, event } of events) {
       if (event.type !== 'gap') continue;
       const pane = paneMap.get(event.paneId);
-      const foreground = pane ? await identity(pane) : null;
-      if (!pane || !foreground) continue;
-      if (!event.process && !profile.matchesAgentPane(pane, foreground)) continue;
-      if (!matchesHookProcess(event.process, foreground)) {
+      if (!pane) continue;
+      if (!await recordStillOwnsPane(event.process, pane, this.#process.inspectProcess, () => identity(pane))) {
         this.#logger(`Discarding stale ${profile.label} Hook event after pane process replacement`, {
           eventId: event.eventId,
           paneId: event.paneId,
@@ -447,6 +486,9 @@ export class HookBridgeConnector {
         try { fs.unlinkSync(eventFile); } catch { /* concurrently removed */ }
         continue;
       }
+      const foreground = event.process ?? (await identity(pane));
+      if (!foreground) continue;
+      if (!event.process && !profile.matchesAgentPane(pane, foreground)) continue;
       const latest = state.get(event.paneId);
       const latestSession = latest ? optionalSession(latest.payload) : undefined;
       const gapSession = optionalSession(event.payload ?? {}, event.sessionId);
@@ -462,10 +504,14 @@ export class HookBridgeConnector {
     const persistedSnapshots = new Map<string, boolean>();
     for (const [paneId, row] of state) {
       const pane = paneMap.get(paneId);
-      const foreground = pane ? await identity(pane) : null;
-      if (!pane || !foreground) continue;
+      if (!pane) continue;
+      // Same rule as the published events: the row's own fingerprint decides, and a row is only skipped when
+      // that fingerprint is positively a different process generation. Skipping it because a foreground scan
+      // disagreed is what made a live pane's state vanish.
+      if (!await recordStillOwnsPane(row.process, pane, this.#process.inspectProcess, () => identity(pane))) continue;
+      const foreground = row.process ?? (await identity(pane));
+      if (!foreground) continue;
       if (!row.process && !profile.matchesAgentPane(pane, foreground)) continue;
-      if (!matchesHookProcess(row.process, foreground)) continue;
       currentStatePanes.add(paneId);
       // A cancelled old-session ACK settles asynchronously; switch clients once it has released the pane.
       const sessionId = optionalSession(row.payload);
@@ -527,13 +573,17 @@ export class HookBridgeConnector {
       const gap = event.type === 'gap' ? gaps.get(event.paneId) : undefined;
       if (event.type === 'gap' && gap?.event !== event) continue;
       const pane = paneMap.get(event.paneId);
-      const foreground = pane ? await identity(pane) : null;
-      if (!pane || !foreground) continue;
+      if (!pane) continue;
+      // The event names its own process: the notify script captured it from this pane's tty when the event
+      // fired, and the Runtime verifies that exact generation — alive, same start time, same tty — before it
+      // authorizes a run.
+      const foreground = event.process ?? (await identity(pane));
+      if (!foreground) continue;
       if (!event.process && !profile.matchesAgentPane(pane, foreground)) continue;
       // A disconnected/rejected pane must not suspend the shared poller or another pane's events.
       // Keep one acknowledgement in flight per pane to retain its lifecycle ordering.
       if (this.#pendingAcks.has(event.paneId)) continue;
-      if (!matchesHookProcess(event.process, foreground)) {
+      if (!await recordStillOwnsPane(event.process, pane, this.#process.inspectProcess, () => identity(pane))) {
         this.#logger(`Discarding stale ${profile.label} Hook event after pane process replacement`, {
           eventId: event.eventId,
           paneId: event.paneId,

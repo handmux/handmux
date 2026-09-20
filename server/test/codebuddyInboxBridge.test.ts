@@ -50,16 +50,35 @@ function codebuddyPane(): LivePane {
   };
 }
 
-function codebuddyProcess(): ProcessContext {
+// The transient tool child that shares the pane's foreground group, e.g. the npm/ruby update check a
+// CodeBuddy turn spawns. While it runs it OWNS the pane's foreground process group, so a real `ps -t` read
+// (which keeps only rows whose stat carries `+`) no longer lists the launcher at all.
+const TOOL_CHILD = {
+  pid: 401, ppid: 400, startedAt: 1_001, tty: '/dev/ttys001',
+  commandLine: 'npm list', executable: '/usr/local/bin/node',
+};
+
+// `launcherVisible()` reproduces that alternation: the launcher row is only in the pane's foreground group
+// while no tool owns it. inspectProcess is the liveness probe every production host supplies — a pid that is
+// gone reports null, exactly like a pid whose start time could not be read.
+function codebuddyProcess(
+  launcherVisible: () => boolean = () => true,
+): ProcessContext {
   return {
-    inspectForeground: async (): Promise<ForegroundProcessIdentity> => ({
-      pid: 401, startedAt: 1_001, tty: '/dev/ttys001',
-      commandLine: 'npm list', executable: '/usr/local/bin/node',
-    }),
-    inspectForegroundGroup: async (): Promise<readonly ForegroundProcessIdentity[]> => [
-      { ...CODEBUDDY_PROCESS, ppid: 90, commandLine: 'node /usr/local/bin/codebuddy --no-session-persistence' },
-      { pid: 401, ppid: 400, startedAt: 1_001, tty: '/dev/ttys001', commandLine: 'npm list' },
-    ],
+    inspectForeground: async (): Promise<ForegroundProcessIdentity> => (
+      launcherVisible() ? { ...CODEBUDDY_PROCESS, commandLine: 'node /usr/local/bin/codebuddy' } : { ...TOOL_CHILD }
+    ),
+    inspectForegroundGroup: async (): Promise<readonly ForegroundProcessIdentity[]> => (
+      launcherVisible()
+        ? [
+          { ...CODEBUDDY_PROCESS, ppid: 90, commandLine: 'node /usr/local/bin/codebuddy --no-session-persistence' },
+          { ...TOOL_CHILD },
+        ]
+        : [{ ...TOOL_CHILD }]
+    ),
+    inspectProcess: async (pid: number): Promise<ForegroundProcessIdentity | null> => (
+      pid === CODEBUDDY_PROCESS.pid ? { pid, startedAt: CODEBUDDY_PROCESS.startedAt } : null
+    ),
   };
 }
 
@@ -120,13 +139,13 @@ function eventFiles(eventDirectory: string): string[] {
   } catch { return []; }
 }
 
-async function harness() {
+async function harness(launcherVisible: () => boolean = () => true) {
   const directory = root();
   const runtimeDirectory = path.join(directory, 'runtime');
   const hookStateFile = path.join(directory, 'codebuddy-state.json');
   const eventDirectory = `${hookStateFile}.events`;
   const panes = new TestPanes(codebuddyPane());
-  const process = codebuddyProcess();
+  const process = codebuddyProcess(launcherVisible);
   const runtime = createBuiltinAgentRuntime({
     panes,
     process,
@@ -183,6 +202,48 @@ describe('CodeBuddy Hook → LocalAgentBridge → Inbox vertical slice', () => {
     ]), { timeout: 2_000 });
     // Each acknowledged edge releases its Hook source file; a stuck one would be re-read on every poll.
     await vi.waitFor(() => expect(eventFiles(eventDirectory)).toEqual([]), { timeout: 2_000 });
+  });
+
+  it('keeps one run and delivers its state while a tool owns the pane foreground', async () => {
+    // Reproduces the roster blink: a CodeBuddy turn spawns a tool, that tool owns the pane's foreground
+    // process group, and the launcher stops appearing in the pane's group read entirely. Anything that
+    // re-derives the pane's identity from that read loses the pane for as long as the tool runs — the row
+    // vanishes from the roster, and an edge that arrives meanwhile is queued behind it until the tool exits.
+    let launcherVisible = true;
+    const { runtime, hookStateFile, eventDirectory } = await harness(() => launcherVisible);
+    writeStateRow(hookStateFile, 'prompt', 1, { session_id: SESSION, prompt: '改一下入口' });
+    writeSpoolEvent(eventDirectory, 1, 'prompt', { session_id: SESSION, prompt: '改一下入口' });
+    await vi.waitFor(() => expect(runtime.activeRuns()).toEqual([
+      expect.objectContaining({ agentId: 'codebuddy', paneId: PANE_ID, sessionId: SESSION }),
+    ]), { timeout: 2_000 });
+    const run = runtime.activeRuns()[0]?.runId;
+
+    launcherVisible = false;
+    // The user answers the question the Agent asked (PostToolUse on the interaction tools → `resume`).
+    writeStateRow(hookStateFile, 'resume', 2, { session_id: SESSION, tool_response: '用 A 方案' });
+    writeSpoolEvent(eventDirectory, 2, 'resume', { session_id: SESSION, tool_response: '用 A 方案' });
+
+    await vi.waitFor(() => expect(runtime.inbox.read().records).toEqual([
+      expect.objectContaining({ state: 'working', message: '用 A 方案' }),
+    ]), { timeout: 2_000 });
+    await vi.waitFor(() => expect(eventFiles(eventDirectory)).toEqual([]), { timeout: 2_000 });
+
+    // Several more polls with the tool still foreground: the run must not be revoked and re-created — that
+    // churn is what made the roster row flash in and out of every window.
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    expect(runtime.activeRuns()).toEqual([
+      expect.objectContaining({ agentId: 'codebuddy', paneId: PANE_ID, runId: run }),
+    ]);
+
+    // The closing edge still lands, with the tool still in the foreground.
+    writeStateRow(hookStateFile, 'stop', 3, { session_id: SESSION, last_assistant_message: '改好了' });
+    writeSpoolEvent(eventDirectory, 3, 'stop', { session_id: SESSION, last_assistant_message: '改好了' });
+    await vi.waitFor(() => expect(runtime.inbox.read().terminalNotifications).toEqual([
+      expect.objectContaining({ agentId: 'codebuddy', state: 'done', message: '改好了' }),
+    ]), { timeout: 2_000 });
+    expect(runtime.activeRuns()).toEqual([
+      expect.objectContaining({ agentId: 'codebuddy', paneId: PANE_ID, runId: run }),
+    ]);
   });
 
   it('closes a running turn as an error on StopFailure', async () => {

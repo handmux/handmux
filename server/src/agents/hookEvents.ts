@@ -89,7 +89,7 @@ export function parseHookProcessFingerprint(value: unknown): HookProcessFingerpr
   return { pid: Number(value.pid), startedAt: value.startedAt, tty: value.tty };
 }
 
-function normalizedTty(value: string | undefined): string | undefined {
+export function normalizedTty(value: string | undefined): string | undefined {
   if (!value) return undefined;
   return value.startsWith('/dev/') ? value : `/dev/${value}`;
 }
