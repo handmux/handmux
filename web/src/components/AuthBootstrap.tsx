@@ -1,9 +1,21 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { applyAuthStatus, authRequest, AuthRequestError } from '../authSession.js';
 import { t } from '../i18n';
-import AuthFrame from './AuthFrame.js';
 import OriginRejectedPrompt from './OriginRejectedPrompt.js';
 import DevicePairingPrompt from './DevicePairingPrompt.js';
+
+// Shown only while the server has not yet said whether this origin needs authentication (and when that
+// question could not be asked at all). It deliberately carries NO authentication chrome — no brand, no card,
+// no mode: rendering the auth frame here made a slow first paint look like a login screen flashing by, with
+// its brand image still in flight (an empty logo). The auth screens belong to a decided state.
+function AuthPending({ failed, onRetry }: { failed: boolean; onRetry: () => void }) {
+  return <main className="auth-pending">
+    {failed ? <>
+      <p>{t('auth.connectionError')}</p>
+      <button type="button" onClick={onRetry}>{t('auth.retry')}</button>
+    </> : <span className="spinner" role="status" aria-label={t('common.loading')} />}
+  </main>;
+}
 
 // Resolve the server's current authentication policy before mounting protected content.
 export default function AuthBootstrap({ children }: { children: ReactNode }) {
@@ -30,8 +42,5 @@ export default function AuthBootstrap({ children }: { children: ReactNode }) {
   if (authorizeOrigin) return <DevicePairingPrompt onSaved={() => { setAuthorizeOrigin(false); setReady(true); }} />;
   if (originRejected) return <OriginRejectedPrompt onRetry={() => setRetry((value) => value + 1)} onAuthorize={() => setAuthorizeOrigin(true)} />;
   if (failed && errorCode === 'AUTH_ORIGIN_REJECTED') return <OriginRejectedPrompt onRetry={() => setRetry((value) => value + 1)} onAuthorize={() => setAuthorizeOrigin(true)} />;
-  return <AuthFrame title={t('auth.connecting')} showHelp={false}><section className="token-prompt" aria-live="polite">
-    <p>{t(failed && errorCode === 'AUTH_ORIGIN_REJECTED' ? 'auth.originRejected' : failed ? 'auth.connectionError' : 'common.loading')}</p>
-    {failed && <button onClick={() => setRetry((value) => value + 1)}>{t('auth.retry')}</button>}
-  </section></AuthFrame>;
+  return <AuthPending failed={failed} onRetry={() => setRetry((value) => value + 1)} />;
 }

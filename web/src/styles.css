@@ -1217,6 +1217,14 @@ div.workspace-restore-errors { padding-left: 10px; }
 .workspace-restore-ignore:active { background: rgba(255,69,58,.08); }
 .settings-protection-warning { margin-top: 4px; }
 .settings-protection-title { color: #ff918a; font-size: 13px; font-weight: 600; }
+/* The pre-decision placeholder (see AuthBootstrap): the server has not yet said whether this origin needs
+   authentication, so this shows the page background and nothing else. It must NOT look like the auth screen:
+   on a slow network that screen used to flash by, its brand image still loading. */
+.auth-pending { height: 100%; width: 100%; flex: 1; min-height: 0; display: flex; flex-direction: column;
+  align-items: center; justify-content: center; gap: 14px; color: #9aa0a6; }
+.auth-pending p { margin: 0; font-size: 14px; }
+.auth-pending button { font: inherit; font-size: 14px; color: #e6e6e6; background: #232428;
+  border: 1px solid #ffffff1a; border-radius: 10px; padding: 9px 18px; touch-action: manipulation; }
 .auth-page { height: 100%; width: 100%; flex: 1; min-height: 0; overflow-y: auto; display: flex; padding: max(28px, env(safe-area-inset-top)) max(18px, env(safe-area-inset-right)) max(24px, env(safe-area-inset-bottom)) max(18px, env(safe-area-inset-left)); background: radial-gradient(ellipse at 50% 0, rgba(10,132,255,.09), transparent 60%), #17181b; }
 .auth-layout { width: 100%; max-width: 440px; margin: auto; flex-shrink: 0; }
 .auth-brand { display: flex; flex-direction: column; align-items: center; gap: 10px; margin-bottom: 24px; text-align: center; }
