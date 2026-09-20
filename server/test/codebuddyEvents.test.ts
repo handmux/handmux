@@ -35,9 +35,10 @@ function fixtureRoot(): string {
 }
 
 const PROCESS = { pid: 400, startedAt: 1_000, tty: '/dev/ttys001' };
-// What the SHARED writer actually stamps: its Claude literal, for every Agent it serves. The fixtures must
-// not "improve" this — a CodeBuddy-only record shape would hide the mismatch that decides notification.
-const WRITER_AGENT = 'claude';
+// What the SHARED writer stamps for CodeBuddy: the agent name its notify script exports. The fixtures must
+// not "improve" this — a record shape that is not byte-for-byte what the writer produces would hide the
+// mismatch that decides whether a completion notifies.
+const WRITER_AGENT = 'codebuddy';
 
 function writeStateFile(file: string, rows: Record<string, unknown>): void {
   fs.writeFileSync(file, JSON.stringify(rows));
@@ -49,7 +50,7 @@ function stateRow(src: string, payload: Record<string, unknown>, extra: Record<s
 
 function spoolEvent(src: string, payload: Record<string, unknown>, extra: Record<string, unknown> = {}) {
   return {
-    version: 1, type: 'event', agent: WRITER_AGENT, eventId: 'claude-hook-1', sequence: 1,
+    version: 1, type: 'event', agent: WRITER_AGENT, eventId: `${WRITER_AGENT}-hook-1`, sequence: 1,
     paneId: '%1', src, sourceOccurredAt: 10, sessionId: 'codebuddy-session-1',
     process: PROCESS, payload, ...extra,
   };
@@ -116,10 +117,10 @@ describe('classifyCodeBuddy', () => {
 });
 
 describe('CodeBuddy hook record parsing', () => {
-  it('reads the state file the shared writer maintains, including legacy and Claude markings', () => {
-    // The writer is a SHARED script and its `agent` literal is not this reader's contract: the connector
-    // reads CodeBuddy's OWN file, so it accepts CodeBuddy's id, an absent marking, and the Claude literal the
-    // shared writer still emits. Anything else must fail closed.
+  it('reads the state file the shared writer maintains, including an absent marking', () => {
+    // The writer is a SHARED script, so the marking is data rather than a contract of this reader: CodeBuddy's
+    // own id and an absent marking (a row written before the marking existed) are both valid, and any other
+    // provider's id must fail closed.
     const file = path.join(fixtureRoot(), 'codebuddy-state.json');
     writeStateFile(file, {
       '%1': stateRow('prompt', { session_id: 'codebuddy-session-1', prompt: 'hi' }),
@@ -133,7 +134,7 @@ describe('CodeBuddy hook record parsing', () => {
     const rows = readHookStateRows(file, acceptsCodeBuddyAgent);
     expect([...rows.keys()]).toEqual(['%1', '%2', '%3']);
     expect(rows.get('%1')).toEqual({
-      ts: 10, src: 'prompt', agent: 'claude',
+      ts: 10, src: 'prompt', agent: 'codebuddy',
       payload: { session_id: 'codebuddy-session-1', prompt: 'hi' },
       sequence: 1, process: PROCESS,
     });
@@ -143,15 +144,11 @@ describe('CodeBuddy hook record parsing', () => {
   it('reads the spool event the writer appends, mapping the shared session/key fields', () => {
     const parse = (value: unknown) => parseHookBridgeEvent(value, acceptsCodeBuddyAgent);
     expect(parse(spoolEvent('stop', { last_assistant_message: 'done' }))).toMatchObject({
-      type: 'event', agent: 'claude', eventId: 'claude-hook-1', sequence: 1,
+      type: 'event', agent: 'codebuddy', eventId: 'codebuddy-hook-1', sequence: 1,
       paneId: '%1', src: 'stop', sessionId: 'codebuddy-session-1', process: PROCESS,
     });
-    // A CodeBuddy-marked record is equally valid: the writer stamps the agent it serves once it can.
-    expect(parse(spoolEvent('stop', {}, { agent: 'codebuddy', eventId: 'codebuddy-hook-1' }))).toMatchObject({
-      agent: 'codebuddy', eventId: 'codebuddy-hook-1',
-    });
     // A gap marker carries no src/payload but must survive so the snapshot can degrade honestly.
-    expect(parse({ version: 1, type: 'gap', agent: 'claude', eventId: 'claude-gap-1', paneId: '%1' }))
+    expect(parse({ version: 1, type: 'gap', agent: 'codebuddy', eventId: 'codebuddy-gap-1', paneId: '%1' }))
       .toMatchObject({ type: 'gap', paneId: '%1' });
   });
 
@@ -167,9 +164,9 @@ describe('CodeBuddy hook record parsing', () => {
     expect(parse(spoolEvent('stop', {}, { payload: [] }))).toBeNull();
   });
 
-  it('interprets the durable source sequence whatever prefix the shared writer stamps', () => {
+  it('interprets the durable source sequence from the id the shared writer stamps', () => {
     expect(hookEventSequence('codebuddy-hook-7')).toBe(7);
-    // The writer is shared, so a not-yet-parameterized release can still stamp Claude's prefix.
+    // Only the numeric tail matters to the reader; the agent in front of it is the writer's business.
     expect(hookEventSequence('claude-hook-7')).toBe(7);
     expect(hookEventSequence('codebuddy-hook-0')).toBeNull();
     expect(hookEventSequence('codebuddy-hook-')).toBeNull();

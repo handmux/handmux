@@ -375,6 +375,7 @@ export default {
   'settings.experimental': '실험적',
   'settings.agent_integration_claude': 'Claude Code',
   'settings.agent_integration_pi': 'Pi',
+  'settings.agent_integration_codebuddy': 'CodeBuddy',
   'settings.agent_integration_processing': '처리 중…',
   'settings.agent_integration_load_error': 'Agent 상태를 확인할 수 없습니다.',
   'settings.agent_integration_action_error': '설정을 완료하지 못했습니다. 컴퓨터에서 다음을 실행하세요:',

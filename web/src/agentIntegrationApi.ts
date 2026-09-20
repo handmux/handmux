@@ -1,6 +1,6 @@
 import { requestJson } from './apiRequest.js';
 
-export type AgentIntegrationName = 'claude' | 'pi';
+export type AgentIntegrationName = 'claude' | 'pi' | 'codebuddy';
 export type AgentIntegrationStatus =
   | 'ready'
   | 'not-installed'
@@ -18,7 +18,7 @@ export interface AgentIntegrationEnableResult extends AgentIntegrationSnapshot {
   changed: boolean;
 }
 
-const NAMES = new Set<AgentIntegrationName>(['claude', 'pi']);
+const NAMES = new Set<AgentIntegrationName>(['claude', 'pi', 'codebuddy']);
 const STATUSES = new Set<AgentIntegrationStatus>([
   'ready', 'not-installed', 'not-enabled', 'needs-repair', 'conflict',
 ]);

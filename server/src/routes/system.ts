@@ -57,7 +57,7 @@ const errorMessage = (error: unknown): string => error instanceof Error ? error.
 const here = dirname(fileURLToPath(import.meta.url));
 const HOOKS_SRC = resolvePath(here, '../../hooks'); // server/hooks (bundled scripts)
 const PI_ENTRY = resolvePath(here, '../../connectors/pi/index.js');
-const WEB_AGENT_INTEGRATIONS = ['claude', 'pi'] as const satisfies readonly AgentName[];
+const WEB_AGENT_INTEGRATIONS = ['claude', 'pi', 'codebuddy'] as const satisfies readonly AgentName[];
 const FILLER_FILTER_LEVELS = ['low', 'medium', 'high'] as const satisfies readonly FillerFilterLevel[];
 
 const requestFillerFilter = (value: unknown): FillerFilterLevel | null => {

@@ -24,7 +24,7 @@ import type {
 // fails closed: a leftover row in this directory must never be projected as CodeBuddy state.
 // Exported for the contract tests that freeze which record marks this Connector may read.
 export function acceptsCodeBuddyAgent(agent: unknown): boolean {
-  return agent === 'codebuddy' || agent === 'claude';
+  return agent === 'codebuddy';
 }
 
 export function projectCodeBuddyHookInbox(input: HookBridgeProjectionInput): HookInboxProjection {
@@ -67,12 +67,7 @@ export class CodeBuddyHookBridgeConnector extends HookBridgeConnector {
         agentId: 'codebuddy',
         label: 'CodeBuddy',
         attachmentPrefix: 'codebuddy-hook',
-        // The shared writer still stamps the Claude literal on the spool it appends for CodeBuddy (see the
-        // field's contract in connectors/hookBridge.ts), so the state-derived identity must use the same
-        // prefix or a live completion would be mistaken for history and lose its notification. Flip this to
-        // 'codebuddy-hook' — and the fixtures in test/codebuddyInboxBridge.test.ts with it — the moment the
-        // writer stamps the agent it serves.
-        eventPrefix: 'claude-hook',
+        eventPrefix: 'codebuddy-hook',
         acceptsAgent: acceptsCodeBuddyAgent,
         matchesAgentPane: looksLikeCodeBuddy,
         project: projectCodeBuddyHookInbox,

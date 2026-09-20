@@ -1076,6 +1076,7 @@ export default {
   'settings.group_agent_integration': 'Agent 集成',
   'settings.agent_integration_claude': 'Claude Code',
   'settings.agent_integration_pi': 'Pi',
+  'settings.agent_integration_codebuddy': 'CodeBuddy',
   'settings.agent_integration_processing': '处理中…',
   'settings.agent_integration_load_error': '无法检查 Agent 状态。',
   'settings.agent_integration_action_error': '接入失败，请在电脑上运行：',

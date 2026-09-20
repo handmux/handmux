@@ -1077,6 +1077,7 @@ export default {
   'settings.group_agent_integration': 'Agent Integration',
   'settings.agent_integration_claude': 'Claude Code',
   'settings.agent_integration_pi': 'Pi',
+  'settings.agent_integration_codebuddy': 'CodeBuddy',
   'settings.agent_integration_processing': 'Working…',
   'settings.agent_integration_load_error': 'Could not check Agent status.',
   'settings.agent_integration_action_error': 'Could not complete setup. Run this on your computer:',

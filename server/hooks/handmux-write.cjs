@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 // handmux hook writer. Updates one JSON latest-state file keyed by tmux pane and, when configured,
+// reports the Agent named by HANDMUX_AGENT (its notify script sets it) — defaulting to claude so an
+// already-deployed script keeps writing exactly what it wrote before.
 // appends the same effective lifecycle edge to a bounded durable Connector spool. Invoked by notify.sh:
 //   node handmux-write.cjs <file> <pane> <src> <ts> <host> <event-dir>
 //     [claude-pid] [claude-lstart] [claude-tty]
@@ -15,6 +17,10 @@
 // or corrupt the file. Best-effort throughout and silent — the hook is fire-and-forget and must never
 // fail Claude (the shell wrapper swallows errors and always exits 0).
 const fs = require('node:fs');
+
+// Which Agent this state and spool belong to. This writer is shared by every Agent's notify script, so the
+// marking comes from the caller instead of a literal here.
+const AGENT = String(process.env.HANDMUX_AGENT || '').trim() || 'claude';
 const path = require('node:path');
 
 const crypto = require('node:crypto');
@@ -129,8 +135,8 @@ function writeGapMarker(value) {
   fs.writeFileSync(temporary, JSON.stringify({
     version: 1,
     type: 'gap',
-    agent: 'claude',
-    eventId: `claude-gap-${Date.now()}-${process.pid}`,
+    agent: AGENT,
+    eventId: `${AGENT}-gap-${Date.now()}-${process.pid}`,
     paneId: value.paneId,
     sessionId: typeof value.sessionId === 'string' ? value.sessionId : undefined,
     ...(value.process ? { process: value.process } : {}),
@@ -172,8 +178,8 @@ function writeBridgeEvent(sequence, rawTs, payload) {
   const event = {
     version: 1,
     type: 'event',
-    agent: 'claude',
-    eventId: `claude-hook-${sequence}`,
+    agent: AGENT,
+    eventId: `${AGENT}-hook-${sequence}`,
     sequence,
     paneId: pane,
     src,
@@ -249,7 +255,7 @@ function update() {
     // one durable source order. Existing readers ignore the additive field.
     const sequence = safeSequence(sequenceFloor);
     obj[pane] = {
-      ts: Number(ts) || 0, src, host, payload, agent: 'claude',
+      ts: Number(ts) || 0, src, host, payload, agent: AGENT,
       ...(sourceProcess ? { process: sourceProcess } : {}),
       ...(sequence === null ? {} : { sequence }),
     };

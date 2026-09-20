@@ -1391,9 +1391,14 @@ describe('claude hooks API', () => {
 });
 
 describe('Agent integration API', () => {
-  function integrationFixture(available = new Set(['claude', 'pi']), initializeClaude = true) {
+  function integrationFixture(
+    available = new Set(['claude', 'pi', 'codebuddy']), initializeClaude = true, initializeCodeBuddy = false,
+  ) {
     const home = tmpHome('hm-agent-web-');
     if (initializeClaude) fs.mkdirSync(path.join(home, '.claude'), { recursive: true });
+    // CodeBuddy's installer treats its own config directory as "this product is present", exactly as Claude
+    // does — it never creates it for a user who has not run that CLI.
+    if (initializeCodeBuddy) fs.mkdirSync(path.join(home, '.codebuddy'), { recursive: true });
     const piEntryFile = path.join(home, 'bundled-pi-entry.js');
     fs.writeFileSync(piEntryFile, 'export default function handmuxPi() {}\n');
     const context = {
@@ -1411,12 +1416,13 @@ describe('Agent integration API', () => {
     return { app, context, home, piEntryFile };
   }
 
-  it('lists only Claude Code and Pi and enables both through the shared integration service', async () => {
-    const { app, home } = integrationFixture();
+  it('lists every Web-manageable Agent and enables all of them through the shared integration service', async () => {
+    const { app, home } = integrationFixture(new Set(['claude', 'pi', 'codebuddy']), true, true);
     const initial = await auth(request(app).get('/api/agent-integrations')).expect(200);
     expect(initial.body.integrations).toEqual([
       { name: 'claude', status: 'not-enabled' },
       { name: 'pi', status: 'not-enabled' },
+      { name: 'codebuddy', status: 'not-enabled' },
     ]);
     expect(JSON.stringify(initial.body)).not.toContain('codex');
 
@@ -1426,8 +1432,15 @@ describe('Agent integration API', () => {
     await auth(request(app).post('/api/agent-integrations/pi/enable')).expect(200, {
       name: 'pi', status: 'ready', changed: true,
     });
+    await auth(request(app).post('/api/agent-integrations/codebuddy/enable')).expect(200, {
+      name: 'codebuddy', status: 'ready', changed: true,
+    });
     expect(fs.existsSync(path.join(home, '.claude', 'settings.json'))).toBe(true);
     expect(fs.readFileSync(piExtensionFile(home), 'utf8')).toContain('handmux-managed-pi-extension');
+    // Each Agent keeps its own settings file and its own marker: enabling CodeBuddy must not touch Claude's.
+    const codebuddySettings = fs.readFileSync(path.join(home, '.codebuddy', 'settings.json'), 'utf8');
+    expect(codebuddySettings).toContain('handmux-codebuddy-notify.sh');
+    expect(fs.existsSync(path.join(home, '.codebuddy', 'hooks', 'handmux-codebuddy-notify.sh'))).toBe(true);
   });
 
   it('repairs a stale Pi wrapper without exposing the installer mechanism', async () => {
@@ -1463,6 +1476,7 @@ describe('Agent integration API', () => {
     expect(unavailable.body.integrations).toEqual([
       { name: 'claude', status: 'not-installed' },
       { name: 'pi', status: 'not-installed' },
+      { name: 'codebuddy', status: 'not-installed' },
     ]);
 
     const conflict = integrationFixture();

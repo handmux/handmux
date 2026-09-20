@@ -375,6 +375,7 @@ export default {
   'settings.experimental': '試験機能',
   'settings.agent_integration_claude': 'Claude Code',
   'settings.agent_integration_pi': 'Pi',
+  'settings.agent_integration_codebuddy': 'CodeBuddy',
   'settings.agent_integration_processing': '処理中…',
   'settings.agent_integration_load_error': 'Agent の状態を確認できません。',
   'settings.agent_integration_action_error': '設定できませんでした。パソコンで次を実行してください:',

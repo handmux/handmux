@@ -375,6 +375,7 @@ export default {
   'settings.experimental': '實驗性',
   'settings.agent_integration_claude': 'Claude Code',
   'settings.agent_integration_pi': 'Pi',
+  'settings.agent_integration_codebuddy': 'CodeBuddy',
   'settings.agent_integration_processing': '處理中…',
   'settings.agent_integration_load_error': '無法檢查 Agent 狀態。',
   'settings.agent_integration_action_error': '整合失敗，請在電腦上執行：',

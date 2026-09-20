@@ -446,11 +446,10 @@ export default function Settings({ open, onClose, termRef, onOpenChangelog = () 
     name: AgentIntegrationName;
     status: null;
   })[] = agentIntegrations?.items.length ? agentIntegrations.items : [
-    { name: 'claude', status: null }, { name: 'pi', status: null },
+    { name: 'claude', status: null }, { name: 'pi', status: null }, { name: 'codebuddy', status: null },
   ];
-  const integrationLabel = (name: AgentIntegrationName): string => t(
-    name === 'claude' ? 'settings.agent_integration_claude' : 'settings.agent_integration_pi',
-  );
+  const integrationLabel = (name: AgentIntegrationName): string =>
+    t(`settings.agent_integration_${name}`);
   const integrationFooter = agentIntegrations ? (
     <>
       {agentIntegrations.error?.kind === 'load' && <div>

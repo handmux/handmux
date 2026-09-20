@@ -7,6 +7,8 @@
 # 只做本地落盘:更新 JSON latest state,并在启用时追加有界 Bridge event spool。不联网、
 # 不依赖服务进程是否在跑 → 永不阻塞 Claude(始终 exit 0)。服务端/Connector 稍后消费这些文件。
 # 真正的读-改-写交给同目录的 handmux-write.js(node:真 JSON 解析 + 文件锁,多 pane 并发 hook 不丢更新)。
+HANDMUX_AGENT=claude
+export HANDMUX_AGENT
 CFG="$(dirname "$0")/handmux-notify.env"
 [ -f "$CFG" ] && . "$CFG"
 PANE="${CLAUDE_PANE:-$TMUX_PANE}"

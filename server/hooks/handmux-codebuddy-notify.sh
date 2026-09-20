@@ -8,6 +8,8 @@
 # 是否在跑 → 永不阻塞 CodeBuddy(始终 exit 0)。服务端/Connector 稍后消费这些文件。
 # 真正的读-改-写交给同目录的 handmux-write.cjs(node:真 JSON 解析 + 文件锁,多 pane 并发 hook 不丢更新)。
 # 与 Claude 版(handmux-notify.sh)的差别只有三处:配置目录、事件名表、进程身份判定 —— 详见各自注释。
+HANDMUX_AGENT=codebuddy
+export HANDMUX_AGENT
 CFG="$(dirname "$0")/handmux-codebuddy-notify.env"
 [ -f "$CFG" ] && . "$CFG"
 PANE="$TMUX_PANE"

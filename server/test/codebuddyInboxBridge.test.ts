@@ -64,11 +64,11 @@ function codebuddyProcess(): ProcessContext {
 }
 
 // The shared writer updates the pane's latest row under a lock and (on SessionEnd) deletes it. These helpers
-// reproduce its output BYTE-FOR-BYTE, including the `agent` and `eventId` literals it still stamps for every
-// Agent it serves — a fixture that "improved" those would hide exactly the identity mismatch that decides
+// reproduce its output BYTE-FOR-BYTE, including the `agent` and `eventId` marking it stamps from
+// HANDMUX_AGENT — a fixture that "improved" those would hide exactly the identity mismatch that decides
 // whether a completion notifies. Everything stays in a temp directory; the real ~/.codebuddy is never touched.
-const WRITER_AGENT = 'claude';
-const WRITER_EVENT_PREFIX = 'claude-hook';
+const WRITER_AGENT = 'codebuddy';
+const WRITER_EVENT_PREFIX = 'codebuddy-hook';
 
 function writeStateRow(
   file: string,
