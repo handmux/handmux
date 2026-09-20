@@ -83,18 +83,52 @@ export function createWorkspaceLock({
     }
   }
 
+  async function reclaimUnreadableOwner(record: OwnerRecord): Promise<boolean> {
+    // The record is missing, truncated, or malformed — the shape a holder leaves when it dies between
+    // creating the directory and writing its record. Age is the directory's own, which is when it appeared.
+    // `rmdir` only removes an EMPTY directory, so this can never take the lock from a holder that has
+    // already written its record; an empty directory is by definition nobody's. The worst a contender can
+    // do to a holder is hit the microseconds before that holder's own record exists, and that holder then
+    // fails loudly instead of silently sharing the lock.
+    try {
+      await fs.rmdir(dir);
+      return true;
+    } catch (error) {
+      if (errorCode(error) === 'ENOENT') return true;
+      if (errorCode(error) !== 'ENOTEMPTY') return false;
+    }
+    // Not empty after all: a record exists but cannot be read. Move the whole directory aside. The
+    // destination comes from the observed mtime, never from the unvalidated record, so no path is built
+    // from content we could not verify — and because the directory is not empty, the tombstone it leaves
+    // cannot be replaced by a lock taken after this look.
+    const staleDir = `${dir}.stale.unreadable-${Math.round(record.mtimeMs)}`;
+    try {
+      await fs.rename(dir, staleDir);
+    } catch (error) {
+      if (errorCode(error) === 'ENOENT') return true;
+      return false;
+    }
+    return true;
+  }
+
   async function reclaimIfStale(record: OwnerRecord | null): Promise<boolean> {
     if (!record) return true;
     const owner = asRecord(record.value);
-    if (!owner || typeof owner.token !== 'string' || !SAFE_TOKEN.test(owner.token)) return false;
-    const startedAt = typeof owner.startedAt === 'string' ? Date.parse(owner.startedAt) : Number.NaN;
+    const candidate = owner?.token;
+    const token = typeof candidate === 'string' && SAFE_TOKEN.test(candidate) ? candidate : null;
+    // An unusable record carries no trustworthy clock, so its age comes from the directory itself.
+    const startedAt = token && owner && typeof owner.startedAt === 'string' ? Date.parse(owner.startedAt) : Number.NaN;
     const age = now() - (Number.isFinite(startedAt) ? startedAt : record.mtimeMs);
+    // The grace period is what keeps a contender out of the window between a holder's `mkdir` and the
+    // record it is about to write.
     if (age < staleGraceMs) return false;
-    if (typeof owner.pid === 'number' && Number.isInteger(owner.pid) && await isProcessAlive(owner.pid)) return false;
+    const pid = owner && typeof owner.pid === 'number' && Number.isInteger(owner.pid) ? owner.pid : null;
+    if (pid !== null && await isProcessAlive(pid)) return false;
+    if (!token) return reclaimUnreadableOwner(record);
 
     // Every contender that observed this owner uses the SAME destination. The winner leaves the renamed
     // directory as a tombstone, so a loser cannot later rename a newly-created lock out of the way.
-    const staleDir = `${dir}.stale.${owner.token}`;
+    const staleDir = `${dir}.stale.${token}`;
     try {
       await fs.rename(dir, staleDir);
     } catch (error) {

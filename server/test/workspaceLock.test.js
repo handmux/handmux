@@ -127,16 +127,58 @@ describe('workspace filesystem lock', () => {
       startedAt: '2026-07-20T00:00:00.000Z',
       operationId: 'corrupt-owner',
       token: '../../escape',
-    });
+    }, 60_000);
+    const aged = await fs.stat(dir);
     const lock = createWorkspaceLock({
       dir,
-      now: () => Date.parse('2026-07-20T00:01:00.000Z'),
       staleGraceMs: 1_000,
       isProcessAlive: () => false,
     });
 
-    expect(await lock.tryAcquire({ operationId: 'capture' })).toBeNull();
-    expect(JSON.parse(await fs.readFile(path.join(dir, 'owner.json'), 'utf8')).operationId).toBe('corrupt-owner');
+    // An unusable token makes the record unusable, so the directory is reclaimed — but the destination is
+    // derived from the observation, never from the token, so no path can be built out of it.
+    const handle = await lock.tryAcquire({ operationId: 'capture' });
+    expect(handle).toBeTruthy();
+    expect(await fs.readFile(path.join(dir, 'owner.json'), 'utf8').then(() => 'present', () => 'missing'))
+      .toBe('present');
+    expect(JSON.parse(await fs.readFile(path.join(dir, 'owner.json'), 'utf8')).operationId).toBe('capture');
+    const tombstone = `${dir}.stale.unreadable-${Math.round(aged.mtimeMs)}`;
+    expect(await fs.readdir(tombstone)).toEqual(['owner.json']);
+    await expect(fs.stat(path.resolve(dir, '../../escape'))).rejects.toThrow();
+    await handle.release();
+  });
+
+  it('reclaims a lock directory left behind without an owner record', async () => {
+    // A holder that dies between `mkdir` and writing its record leaves exactly this: a directory with
+    // nothing in it. Refusing to reclaim it blocked every capture and every restore on the host for good.
+    const dir = await lockPath();
+    await fs.mkdir(dir, { recursive: true });
+    const fresh = createWorkspaceLock({ dir, staleGraceMs: 60_000, isProcessAlive: () => false });
+    expect(await fresh.tryAcquire({ operationId: 'capture' })).toBeNull();
+
+    const at = new Date(Date.now() - 60_000);
+    await fs.utimes(dir, at, at);
+    const lock = createWorkspaceLock({ dir, staleGraceMs: 1_000, isProcessAlive: () => false });
+
+    const handle = await lock.tryAcquire({ operationId: 'capture' });
+    expect(handle).toBeTruthy();
+    expect(JSON.parse(await fs.readFile(path.join(dir, 'owner.json'), 'utf8')).operationId).toBe('capture');
+    await handle.release();
+  });
+
+  it('reclaims a lock whose owner record cannot be read or parsed', async () => {
+    const dir = await lockPath();
+    await fs.mkdir(dir, { recursive: true });
+    await fs.writeFile(path.join(dir, 'owner.json'), '{"pid":');
+    const at = new Date(Date.now() - 60_000);
+    await fs.utimes(dir, at, at);
+    const aged = await fs.stat(dir);
+    const lock = createWorkspaceLock({ dir, staleGraceMs: 1_000, isProcessAlive: () => false });
+
+    const handle = await lock.tryAcquire({ operationId: 'capture' });
+    expect(handle).toBeTruthy();
+    expect(await fs.readdir(`${dir}.stale.unreadable-${Math.round(aged.mtimeMs)}`)).toEqual(['owner.json']);
+    await handle.release();
   });
 
   it('times out with the current owner details instead of hiding the contention', async () => {
