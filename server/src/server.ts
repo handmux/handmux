@@ -252,6 +252,9 @@ const codebuddyInboxBridge = new CodeBuddyHookBridgeConnector({
   eventDirectory: `${codebuddyStateFile}.events`,
   panes: agentPanes,
   process: agentProcess,
+  // Only CodeBuddy's profile asks for a screen: no Hook closes its permission gate, so the Connector reads
+  // the pane to see whether the user has answered it. Consulted only while such a gate is open.
+  paneScreen: (paneId) => commands.capturePlain(paneId),
   logger: (message, error) => {
     const detail = error === undefined
       ? '' : `: ${error instanceof Error ? error.message : String(error)}`;

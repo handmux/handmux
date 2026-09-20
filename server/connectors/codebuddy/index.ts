@@ -52,6 +52,25 @@ function looksLikeCodeBuddy(pane: LivePane, foreground: ForegroundProcessIdentit
     || isCodeBuddyCommandLine(pane.currentCommand);
 }
 
+// CodeBuddy fires NO Hook when the user answers a PermissionRequest, so a granted tool leaves the pane
+// latched at 需要你 until whatever Hook comes next — for a tool outside the PostToolUse matcher, that is the
+// turn's end. Its prompt is a Claude-shaped chooser drawn in the pane, so the SCREEN is the only proof the
+// user answered, and the generic Connector asks this one question about it: is the prompt still there?
+//
+// The signature is the chooser's own shape — the `Enter to select · …` footer under a numbered option
+// list — rather than any particular wording, so a reworded question keeps matching. Observed live on
+// 2.155.0, both shapes in use: the permission gate
+//     `Do you want to proceed?` / `> 1. Yes` / `2. Yes, and don't ask again for session (shift + tab)` /
+//     `3. No, and tell CodeBuddy what to do differently (escape)` / `Enter to select · Tab/Arrow keys…`
+// and the AskUserQuestion picker
+//     `请选择一个选项：` / `❯ 1. 选项 A` / `Enter to select · ↑/↓ to navigate · Esc to cancel`
+//
+// A screen this cannot recognize (an older/newer shape, a clipped dialog) only means the Connector keeps
+// waiting for a Hook, so the check can close a gate but never open one on its own.
+export function codeBuddyBlockingPromptVisible(screen: string): boolean {
+  return /Enter to select/.test(screen) && /^\s*(?:[>❯])?\s*\d+\.\s+\S/m.test(screen);
+}
+
 // No nativeTail: Claude's transcript/registry reconciler exists to close gates no Hook closes (ESC
 // interrupts, no-op /compact, resolved permission prompts) by reading the session transcript. CodeBuddy has
 // no equivalent reader in this slice, and inventing a weaker one would report unverified state — the
@@ -72,6 +91,10 @@ export class CodeBuddyHookBridgeConnector extends HookBridgeConnector {
         matchesAgentPane: looksLikeCodeBuddy,
         project: projectCodeBuddyHookInbox,
         resolvePaneProcess: resolveCodeBuddyPaneProcess,
+        // No Hook closes a permission gate, and CodeBuddy keeps no status file to read it from (its live
+        // state lives in its own Centrifugo channel), so the pane's screen is the one source: see
+        // codeBuddyBlockingPromptVisible.
+        blockingPromptVisible: codeBuddyBlockingPromptVisible,
       },
     });
   }

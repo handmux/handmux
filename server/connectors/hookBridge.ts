@@ -87,6 +87,14 @@ export interface HookBridgeProfile {
     context: ProcessContext,
   ): Promise<ForegroundProcessIdentity | null>;
   nativeTail?: HookBridgeNativeTail;
+  // A provider whose blocking prompt is closed by NO Hook names that prompt here. CodeBuddy fires nothing
+  // when the user answers a PermissionRequest, so a pane latches at 需要你 until whatever Hook comes next —
+  // for a tool outside the PostToolUse matcher, that is the turn's end. The pane's own screen is then the
+  // only proof the user answered: while the provider's prompt is still on it the wait stands, and once it
+  // is gone the user has answered. Consulted ONLY while such a wait is open, and only to close it, so a
+  // profile that omits it (Claude, whose session registry reports the same transition) keeps Hook-only
+  // behavior, and a screen this predicate cannot read leaves the wait exactly as the Hook left it.
+  blockingPromptVisible?(screen: string): boolean;
 }
 
 export interface HookBridgeConnectorOptions {
@@ -98,6 +106,8 @@ export interface HookBridgeConnectorOptions {
   eventDirectory: string;
   panes: ReadonlyPaneSource;
   process: ProcessContext;
+  // Read a pane's visible screen. Required only by a profile that declares `blockingPromptVisible`.
+  paneScreen?: (paneId: string) => Promise<string | null>;
   pollMs?: number;
   retryDelayMs?: number;
   maxRetryDelayMs?: number;
@@ -110,6 +120,9 @@ export interface HookBridgeConnectorOptions {
 
 const DEFAULT_SPOOL_MAX_FILES = 2_000;
 const DEFAULT_SPOOL_RETENTION_MS = 24 * 60 * 60_000;
+// How often a pane sitting at a blocking prompt may have its screen read. The screen only changes when the
+// user answers, and a pane can sit at a gate for minutes, so a capture per poll would be pure waste.
+const SCREEN_PROBE_MS = 2_000;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -248,6 +261,12 @@ function candidate(
 //      the same way): compare against the pane's foreground group, exactly as before. This rung has to stay:
 //      without it a record from a dead generation could never retire, and since only one acknowledgement is
 //      ever in flight per pane it would starve that pane's live events forever.
+// The Inbox state a projected snapshot carries, when it carries one.
+function projectedState(snapshot: Record<string, unknown>): unknown {
+  const current = snapshot.current;
+  return isRecord(current) ? current.state : undefined;
+}
+
 async function recordStillOwnsPane(
   fingerprint: HookProcessFingerprint | undefined,
   pane: LivePane,
@@ -282,7 +301,9 @@ export class HookBridgeConnector {
   readonly #maxRetryDelayMs: number;
   readonly #logger: NonNullable<HookBridgeConnectorOptions['logger']>;
   readonly #createClient: NonNullable<HookBridgeConnectorOptions['createClient']>;
+  readonly #paneScreen: HookBridgeConnectorOptions['paneScreen'];
   readonly #clients = new Map<string, TrackedClient>();
+  readonly #screenProbes = new Map<string, number>();
   readonly #confirmedGaps = new Set<string>();
   readonly #pendingAcks = new Map<string, {
     promise: Promise<void>;
@@ -304,6 +325,7 @@ export class HookBridgeConnector {
     eventDirectory,
     panes,
     process,
+    paneScreen,
     pollMs = 250,
     retryDelayMs = 100,
     maxRetryDelayMs = 5_000,
@@ -315,6 +337,7 @@ export class HookBridgeConnector {
     if (!profile || !profile.agentId || !profile.attachmentPrefix
       || ![socketPath, credentialFile, stateDirectory, hookStateFile, eventDirectory].every(path.isAbsolute)
       || !panes || !process || !Number.isSafeInteger(pollMs) || pollMs < 50
+      || (paneScreen !== undefined && typeof paneScreen !== 'function')
       || !Number.isSafeInteger(retryDelayMs) || retryDelayMs <= 0
       || !Number.isSafeInteger(maxRetryDelayMs) || maxRetryDelayMs < retryDelayMs
       || !Number.isSafeInteger(spoolMaxFiles) || spoolMaxFiles <= 0
@@ -329,6 +352,7 @@ export class HookBridgeConnector {
     this.#eventDirectory = eventDirectory;
     this.#panes = panes;
     this.#process = process;
+    this.#paneScreen = paneScreen;
     this.#pollMs = pollMs;
     this.#retryDelayMs = retryDelayMs;
     this.#maxRetryDelayMs = maxRetryDelayMs;
@@ -420,6 +444,14 @@ export class HookBridgeConnector {
     return this.#profile.resolvePaneProcess
       ? this.#profile.resolvePaneProcess(pane, this.#process)
       : this.#process.inspectForeground(pane);
+  }
+
+  #mayProbeScreen(paneId: string): boolean {
+    const now = Date.now();
+    const last = this.#screenProbes.get(paneId);
+    if (last !== undefined && now - last < SCREEN_PROBE_MS) return false;
+    this.#screenProbes.set(paneId, now);
+    return true;
   }
 
   async #reconcile(): Promise<void> {
@@ -535,6 +567,25 @@ export class HookBridgeConnector {
           } };
         } else if (native?.status === 'unknown') projection.snapshot = { availability: 'unavailable' };
       }
+      // A provider that names its blocking prompt can answer "has the user cleared this gate?" from the
+      // pane's own screen, because no Hook reports a permission decision: without this a granted tool
+      // leaves the pane at 需要你 until the next Hook arrives — on a tool outside the matcher, the turn's
+      // end. Only a waiting state is checked, only while such a wait is open (and at most once per probe
+      // interval), and only ever to close it: an unreadable screen, or a prompt still on it, leaves the
+      // wait exactly as the Hook left it.
+      if (profile.blockingPromptVisible && this.#paneScreen
+        && projectedState(projection.snapshot) === 'waiting'
+        && this.#mayProbeScreen(paneId)) {
+        let screen: string | null = null;
+        try { screen = await this.#paneScreen(paneId); } catch { screen = null; }
+        // An empty screen proves nothing (a capture that raced the pane's redraw): only a screen that was
+        // actually read and no longer shows the prompt closes the wait. The user answered, so the turn
+        // continues — which is 进行中, and the provider's next Hook states it precisely either way.
+        if (screen !== null && screen.trim().length > 0
+          && !profile.blockingPromptVisible(screen)) {
+          projection.snapshot = { availability: 'ready', current: { state: 'working' } };
+        }
+      }
       const snapshot = gaps.has(paneId) && projection.snapshot.availability !== 'unavailable' ? {
         ...projection.snapshot,
         availability: 'degraded',
@@ -636,6 +687,7 @@ export class HookBridgeConnector {
       if (liveAgentPanes.has(paneId)) continue;
       tracked.client.close();
       this.#clients.delete(paneId);
+      this.#screenProbes.delete(paneId); // a pane with no client can't be waiting on a prompt
     }
   }
 
