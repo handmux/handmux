@@ -7,6 +7,7 @@ All notable changes to handmux. Format follows [Keep a Changelog](https://keepac
 ### Added
 
 - 识别 CodeBuddy 会话：终端里运行 `codebuddy` / `codebuddy-code` / `cbc` 的窗口会被标为 CodeBuddy，普通 Node 程序不会被误认。
+- CodeBuddy 接入收件箱：启用 hook 后，它的运行中 / 等你授权 / 已完成 / 出错会像 Claude 一样出现在收件箱并推送通知，会话也能绑定到对应窗口。
 
 ## [0.30.0] - 2026-09-19
 
