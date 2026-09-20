@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { classifyCodeBuddy } from '../src/codebuddyEvents.js';
-import { acceptsCodeBuddyAgent, codeBuddyBlockingPromptVisible } from '../connectors/codebuddy/index.js';
+import { acceptsCodeBuddyAgent } from '../connectors/codebuddy/index.js';
 import {
   canonicalInboxState,
   hookEventSequence,
@@ -147,49 +147,6 @@ describe('CodeBuddy hook record parsing', () => {
     expect(classifyCodeBuddy('resume', { tool_name: 'AskUserQuestion', tool_response: '· 接下来怎么做？ → 继续' }))
       .toEqual({ kind: 'working', msg: '· 接下来怎么做？ → 继续' });
     expect(classifyCodeBuddy('permreq', { tool_name: 'Bash' })).toMatchObject({ kind: 'permission' });
-  });
-
-  it('reads the permission gate off the pane screen, because no Hook reports the answer', () => {
-    // Captured live from CodeBuddy 2.155.0. The permission gate and the AskUserQuestion picker are both
-    // choosers — a numbered option list under an `Enter to select · …` footer — so one shape test covers
-    // both, and a reworded question still matches.
-    const permissionGate = [
-      ' Do you want to proceed?',
-      '',
-      ' > 1. Yes',
-      "   2. Yes, and don't ask again for session (shift + tab)",
-      '   3. No, and tell CodeBuddy what to do differently (escape)',
-      '',
-      ' Enter to select · Tab/Arrow keys to navigate',
-    ].join('\n');
-    const picker = [
-      '请选择一个选项：',
-      '',
-      '❯ 1. 选项 A',
-      '  2. 选项 B',
-      '  3. Type something',
-      '',
-      'Enter to select · ↑/↓ to navigate · Esc to cancel',
-    ].join('\n');
-    expect(codeBuddyBlockingPromptVisible(permissionGate)).toBe(true);
-    expect(codeBuddyBlockingPromptVisible(picker)).toBe(true);
-
-    // Once the user answers, the chooser is gone from the pane: that absence is what closes the wait.
-    const answered = [
-      '> 请用 AskUserQuestion 问我一个二选一的问题，不要做别的',
-      '',
-      '● 你选择了：选项 B',
-      '',
-      '╭───────────── CodeBuddy ─────────────╮',
-      '│ /private/tmp/cb-sim                   │',
-      '╰──────────────────────────────────────╯',
-    ].join('\n');
-    expect(codeBuddyBlockingPromptVisible(answered)).toBe(false);
-    // A blank or unreadable screen must never read as "answered": only a positive "no chooser" closes.
-    expect(codeBuddyBlockingPromptVisible('')).toBe(false);
-    // Options without the select footer (a plain transcript listing) are not a chooser either — and the
-    // Connector guards the empty case separately, so this only pins the shape.
-    expect(codeBuddyBlockingPromptVisible('1. Yes\n2. No')).toBe(false);
   });
 
   it('reads the spool event the writer appends, mapping the shared session/key fields', () => {

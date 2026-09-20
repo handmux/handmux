@@ -139,10 +139,7 @@ function eventFiles(eventDirectory: string): string[] {
   } catch { return []; }
 }
 
-async function harness(
-  launcherVisible: () => boolean = () => true,
-  paneScreen?: (paneId: string) => Promise<string | null>,
-) {
+async function harness(launcherVisible: () => boolean = () => true) {
   const directory = root();
   const runtimeDirectory = path.join(directory, 'runtime');
   const hookStateFile = path.join(directory, 'codebuddy-state.json');
@@ -166,7 +163,6 @@ async function harness(
     eventDirectory,
     panes,
     process,
-    ...(paneScreen ? { paneScreen } : {}),
     pollMs: 50,
     retryDelayMs: 5,
     maxRetryDelayMs: 10,
@@ -248,56 +244,6 @@ describe('CodeBuddy Hook → LocalAgentBridge → Inbox vertical slice', () => {
     expect(runtime.activeRuns()).toEqual([
       expect.objectContaining({ agentId: 'codebuddy', paneId: PANE_ID, runId: run }),
     ]);
-  });
-
-  it('closes a permission gate from the pane screen, since no Hook reports the answer', async () => {
-    // CodeBuddy fires nothing when the user answers a PermissionRequest, so without the screen the pane
-    // stayed at 需要你 until the granted tool finished — on a tool outside the PostToolUse matcher, until the
-    // turn ended. Captured live from 2.155.0: the gate is a chooser, and answering it clears the chooser.
-    const gate = [
-      ' Do you want to proceed?',
-      '',
-      ' > 1. Yes',
-      "   2. Yes, and don't ask again for session (shift + tab)",
-      '   3. No, and tell CodeBuddy what to do differently (escape)',
-      '',
-      ' Enter to select · Tab/Arrow keys to navigate',
-    ].join('\n');
-    const answered = '> touch /private/tmp/perm-probe.txt\n\n● Bash ran\n';
-    let screen = gate;
-    const probes: string[] = [];
-    const { runtime, hookStateFile, eventDirectory } = await harness(() => true, async (paneId) => {
-      probes.push(paneId);
-      return screen;
-    });
-    writeStateRow(hookStateFile, 'permreq', 1, { session_id: SESSION, tool_name: 'Bash' });
-    writeSpoolEvent(eventDirectory, 1, 'permreq', { session_id: SESSION, tool_name: 'Bash' });
-
-    await vi.waitFor(() => expect(runtime.inbox.read().records).toEqual([
-      expect.objectContaining({ state: 'waiting', message: '需要你授权：Bash' }),
-    ]), { timeout: 2_000 });
-    // While the gate is on screen the wait stands — the screen is only ever allowed to CLOSE a gate.
-    expect(probes).toContain(PANE_ID);
-
-    screen = answered;
-    await vi.waitFor(() => expect(runtime.inbox.read().records).toEqual([
-      expect.objectContaining({ state: 'working' }),
-    ]), { timeout: 6_000 });
-
-    // The capture is on a probe interval: a pane that keeps sitting at the same gate must not spawn a
-    // `tmux capture-pane` on every 50 ms poll.
-    const settled = probes.length;
-    await new Promise((resolve) => setTimeout(resolve, 600));
-    expect(probes.length - settled).toBeLessThanOrEqual(2);
-
-    // A pane with no wait is never probed at all: the screen is not a steady-state input.
-    const readOnly = probes.length;
-    writeStateRow(hookStateFile, 'stop', 2, { session_id: SESSION, last_assistant_message: '跑完了' });
-    await vi.waitFor(() => expect(runtime.inbox.read().records).toEqual([
-      expect.objectContaining({ state: 'done' }),
-    ]), { timeout: 2_000 });
-    await new Promise((resolve) => setTimeout(resolve, 300));
-    expect(probes.length).toBe(readOnly);
   });
 
   it('closes a running turn as an error on StopFailure', async () => {
