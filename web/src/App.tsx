@@ -365,6 +365,13 @@ export default function App() {
   const [recoverySubmitting, setRecoverySubmitting] = useState(false);
   const [workspaceProtection, setWorkspaceProtection] = useState<WorkspaceProtection | null>(null);
   const [states, setStates] = useState<Record<string, PaneInboxState>>({}); // pane → {session,window,kind,…} from /api/states
+  const [activityTick, setActivityTick] = useState(0);
+  const noteActivity = useCallback(() => setActivityTick((tick) => tick + 1), []);
+  // Bumped whenever the user does something that is about to change pane state — sending a command, or
+  // submitting from the key bar. It drives a short burst of quick polls so the roster (the inbox card and
+  // the pane status) catches up in about a second, instead of waiting out the five-second cadence: a poll
+  // in flight when the state changes costs a whole extra period, which on a slow mobile fetch reads as
+  // "the status took ten seconds to appear".
   const [agentDiscovery, setAgentDiscovery] = useState<AgentDiscoverySnapshot | null>(null);
   const currentPaneId = current?.paneId ?? null;
   const [lensSelection, setLensSelection] = useState<{
@@ -776,8 +783,9 @@ export default function App() {
   const sendKey = useCallback((name: string) => {
     const paneId = current?.paneId;
     if (!paneId) return;
+    if (name === 'Enter') noteActivity(); // submitting from the key bar changes pane state too
     enqueueTerminalKeys(paneId, [name]);
-  }, [current?.paneId, enqueueTerminalKeys]);
+  }, [current?.paneId, enqueueTerminalKeys, noteActivity]);
 
   // Live command-mode typing (including one committed IME word) is terminal input, not a paste.
   // Keep it on the same queue as named keys so Left/Right cannot overtake adjacent text.
@@ -1827,11 +1835,12 @@ export default function App() {
   // Record a just-sent command into this WINDOW's recent history (deduped + capped in storage).
   const onCommandSent = useCallback((cmd: string) => {
     termRef.current?.wake?.(); // a dock send/fill landed → wake the poll loop (covers BottomDock too)
+    noteActivity(); // and poll the roster quickly until the new state lands
     const paneId = current?.paneId;
     const name = current?.session?.name;
     const win = current?.window?.id; // stable window ID, not the auto-renamed window.name
     if (name && win) setRecent(pushRecent(name, win, cmd));
-  }, [current]);
+  }, [current, noteActivity]);
 
   // ★/☆ on a panel row: toggle membership of the global favorites list.
   const toggleFavorite = useCallback((cmd: string) => {
@@ -2459,6 +2468,11 @@ export default function App() {
       setStates(next);
     },
     intervalMs: 5000,
+    // An action just changed (or is about to change) this roster: poll now, then a few quick follow-ups,
+    // then fall back to the cadence. Bounded on purpose — this is not a busy loop.
+    burstKey: activityTick,
+    burstIntervalMs: 800,
+    burstCount: 4,
     enabled: !needToken,
     deps: [bound],
   });
@@ -2491,6 +2505,9 @@ export default function App() {
     apply: setAgentDiscovery,
     onError: handledAuth,
     intervalMs: 5_000,
+    burstKey: activityTick,
+    burstIntervalMs: 800,
+    burstCount: 4,
     enabled: !needToken,
   });
 
