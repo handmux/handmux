@@ -1136,7 +1136,30 @@ export class AgentRuntime {
     let panes: readonly LivePane[];
     try { panes = await this.#panes.list(); } catch { return false; }
     const pane = panes.find((value) => value.paneId === candidate.paneId);
-    return pane ? (await this.#verifyAgainst(adapter, candidate, pane)) === 'valid' : false;
+    if (!pane) return false;
+    if (await this.#anchorStillOwnsPane(candidate, pane)) return true;
+    return (await this.#verifyAgainst(adapter, candidate, pane)) === 'valid';
+  }
+
+  // The hook that produced this candidate already named the process that owns the pane (pid, start time and
+  // tty). While that exact generation is alive on the pane's own tty the pane cannot have changed under it, and
+  // re-deriving the identity by scanning the pane's foreground group is both slower and flakier: while the
+  // Agent runs a tool, the group's foreground owner is that tool, so the scan intermittently finds no Agent and
+  // the attachment is refused — which is what makes an Agent's row blink in and out of the roster, each
+  // refusal revoking the run and the next attempt creating a new one. Anything else — the pid gone, a
+  // different start time, a tty we cannot tie to this pane, no probe on this host, a probe that threw — falls
+  // through to the full verification, so this only ever skips work.
+  async #anchorStillOwnsPane(candidate: AgentAttachmentCandidate, pane: LivePane): Promise<boolean> {
+    const anchor = candidate.process;
+    const inspectProcess = this.#process.inspectProcess;
+    if (!inspectProcess || !anchor || anchor.startedAt === undefined) return false;
+    try {
+      const alive = await inspectProcess(anchor.pid);
+      if (alive === null || alive.startedAt !== anchor.startedAt) return false;
+      // A recycled pid on another pane is not this attachment.
+      const tty = alive.tty ?? anchor.tty;
+      return !!tty && !!pane.tty && tty === pane.tty;
+    } catch { return false; }
   }
 
   // Steady-state recheck for a lease that already exists. The lease carries the process generation it was
@@ -1151,10 +1174,16 @@ export class AgentRuntime {
   ): Promise<'valid' | 'invalid' | 'unknown'> {
     const anchor = tracked.candidate.process;
     const inspectProcess = this.#process.inspectProcess;
-    if (inspectProcess && anchor.startedAt !== undefined) {
+    if (inspectProcess) {
       try {
         const alive = await inspectProcess(anchor.pid);
-        if (alive !== null && alive.startedAt === anchor.startedAt) return 'valid';
+        // Alive with the start time we anchored on — or alive with no start time to compare, which the hook
+        // sometimes cannot read: a live anchor is not doubt. Falling through to the full verification would
+        // scan the pane's foreground group, find the TOOL the Agent is running rather than the Agent, and
+        // revoke a run that is plainly still there.
+        if (alive !== null && (anchor.startedAt === undefined || alive.startedAt === anchor.startedAt)) {
+          return 'valid';
+        }
       } catch { /* fall through to the full verification */ }
     }
     return this.#verifyAgainst(tracked.adapter, tracked.candidate, pane);

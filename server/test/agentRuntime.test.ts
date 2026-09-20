@@ -1435,6 +1435,42 @@ describe('per-pane process evidence', () => {
   // Everything downstream must then track that process, not the leaf that keeps moving under it.
   // A lease already carries its process generation, so rechecking it every tick must not re-probe the pane:
   // that probe (a `ps -t` plus the lsof for an executable) is the expensive half of reconciliation.
+  it("attaches from the hook's process anchor without scanning the pane's process group", async () => {
+    // A hook-supplied candidate already names the process that owns the pane. While that generation is alive on
+    // the pane's own tty, the group scan must not be consulted: it looks for the pane's FOREGROUND owner, which
+    // during a tool call is the tool, so the scan refuses an Agent that is plainly still there and the run gets
+    // revoked and recreated — an Agent row blinking in and out of the roster.
+    const agentPane: LivePane = { ...pane('node'), tty: '/dev/ttys001' };
+    const panes = new TestPanes([agentPane]);
+    const inspectForegroundGroup = vi.fn(async () => { throw new Error('the group must not be scanned'); });
+    const inspectProcess = vi.fn(async (pid: number) => ({ pid, startedAt: 5_000, tty: '/dev/ttys001' }));
+    const runtime = new AgentRuntime({
+      adapters: [{
+        ...adapter('probe'),
+        process: {
+          commands: ['probe'], ambiguousCommands: ['node'], runtimeAttach: true,
+          verify: async () => false, // the slow path would refuse this candidate
+        },
+      }],
+      panes,
+      process: { inspectForeground: async () => null, inspectForegroundGroup, inspectProcess },
+      stateDirectory: directory(),
+      authToken: AUTH_TOKEN,
+      newRunId: () => 'anchor-attach-run',
+    });
+    runtimes.push(runtime);
+    await runtime.start();
+
+    const lease = await runtime.runControlFor('probe').attach(candidate({
+      paneId: '%1', attachmentId: 'hook-attachment', sessionId: 'hook-session',
+      process: { pid: 4_001, startedAt: 5_000, tty: '/dev/ttys001' },
+    }));
+
+    expect(lease.ref.paneId).toBe('%1');
+    expect(inspectProcess).toHaveBeenCalledWith(4_001);
+    expect(inspectForegroundGroup).not.toHaveBeenCalled();
+  });
+
   it('revalidates an existing lease from its anchor without re-probing the pane', async () => {
     const agentPane: LivePane = { ...pane('node') };
     delete agentPane.foregroundPid;
