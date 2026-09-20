@@ -8,14 +8,17 @@ describe('AgentMark', () => {
     const { container, rerender } = render(<AgentMark agent="claude" />);
     const claude = container.querySelector('[data-agent-icon="claude"]');
     expect(claude).not.toBeNull();
-    // Claude's mark is the pixel robot its CLI prints on startup: block art, so it is drawn as rects in the
-    // terminal's own two colours rather than as a single-colour glyph.
+    // Claude's mark is the pixel robot its CLI prints on startup, drawn in the tab's own text colour like
+    // every other Agent mark. Its eyes are cut out of the one path rather than painted: the CLI's black
+    // plate behind them cannot work on a light background.
     const claudeSvg = claude?.querySelector('svg');
     // Each artwork carries its OWN box — Claude's robot is 17:10, inset 7.5% horizontally so it renders 7%
     // narrower than the cap — so a badge sized by height can show it without letterboxing it into a square.
     expect(claudeSvg?.getAttribute('viewBox')).toBe('-0.637 0 18.275 10');
-    expect(new Set(Array.from(claudeSvg?.querySelectorAll('path') ?? [])
-      .map((path) => path.getAttribute('fill')))).toEqual(new Set(['#000000', '#d7af87']));
+    const claudePaths = Array.from(claudeSvg?.querySelectorAll('path') ?? []);
+    expect(claudePaths.map((path) => path.getAttribute('fill'))).toEqual(['currentColor']);
+    // The eyes are holes: nothing is filled black anywhere in the mark.
+    expect(claudeSvg?.querySelector('[fill="#000000"]')).toBeNull();
 
     rerender(<AgentMark agent="codex" />);
     const codex = container.querySelector('[data-agent-icon="codex"]');
@@ -62,11 +65,11 @@ describe('AgentMark', () => {
     const svg = mark?.querySelector('svg');
     expect(svg?.getAttribute('viewBox')).toBe('-2.000 -1.400 44.000 30.800');
     expect(svg?.getAttribute('aria-hidden')).toBe('true');
-    // One path in the colour the CLI emits for the banner, and no defs ids: these logos are inlined into
-    // one shared document, and neighbouring cells must not show a seam.
+    // One path in the tab's own text colour, and no defs ids: these logos are inlined into one shared
+    // document, and neighbouring cells must not show a seam.
     const paths = Array.from(svg?.querySelectorAll('path') ?? []);
     expect(paths).toHaveLength(1);
-    expect(paths[0]?.getAttribute('fill')).toBe('#5fd7af');
+    expect(paths.map((path) => path.getAttribute('fill'))).toEqual(['currentColor']);
     expect(svg?.querySelectorAll('[id]').length).toBe(0);
   });
 
