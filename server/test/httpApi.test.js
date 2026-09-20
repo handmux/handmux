@@ -1423,8 +1423,10 @@ describe('Agent integration API', () => {
       { name: 'claude', status: 'not-enabled' },
       { name: 'pi', status: 'not-enabled' },
       { name: 'codebuddy', status: 'not-enabled' },
+      // Codex is listed to be SEEN, not enabled: it has nothing to install (Handmux drives it through its
+      // own App Server), so its row is whatever PATH says and carries no action.
+      { name: 'codex', status: 'not-installed' },
     ]);
-    expect(JSON.stringify(initial.body)).not.toContain('codex');
 
     await auth(request(app).post('/api/agent-integrations/claude/enable')).expect(200, {
       name: 'claude', status: 'ready', changed: true,
@@ -1441,6 +1443,16 @@ describe('Agent integration API', () => {
     const codebuddySettings = fs.readFileSync(path.join(home, '.codebuddy', 'settings.json'), 'utf8');
     expect(codebuddySettings).toContain('handmux-codebuddy-notify.sh');
     expect(fs.existsSync(path.join(home, '.codebuddy', 'hooks', 'handmux-codebuddy-notify.sh'))).toBe(true);
+  });
+
+  it('shows Codex read-only: PATH decides its row, and it stays unmanageable', async () => {
+    const { app, home } = integrationFixture(new Set(['claude', 'pi', 'codebuddy', 'codex']), true, true);
+    const listed = await auth(request(app).get('/api/agent-integrations')).expect(200);
+    expect(listed.body.integrations).toContainEqual({ name: 'codex', status: 'ready' });
+
+    // Listed to be SEEN, not managed: no installer runs, no ~/.codex is created or touched.
+    await auth(request(app).post('/api/agent-integrations/codex/enable')).expect(404);
+    expect(fs.existsSync(path.join(home, '.codex'))).toBe(false);
   });
 
   it('repairs a stale Pi wrapper without exposing the installer mechanism', async () => {
@@ -1477,6 +1489,7 @@ describe('Agent integration API', () => {
       { name: 'claude', status: 'not-installed' },
       { name: 'pi', status: 'not-installed' },
       { name: 'codebuddy', status: 'not-installed' },
+      { name: 'codex', status: 'not-installed' },
     ]);
 
     const conflict = integrationFixture();

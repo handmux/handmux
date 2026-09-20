@@ -376,6 +376,8 @@ export default {
   'settings.agent_integration_claude': 'Claude Code',
   'settings.agent_integration_pi': 'Pi',
   'settings.agent_integration_codebuddy': 'CodeBuddy',
+  'settings.agent_integration_codex': 'Codex',
+  'settings.agent_integration_codex_builtin_hint': 'Codex 由 Handmux 透過 App Server 直接驅動，無需安裝。',
   'settings.agent_integration_processing': '處理中…',
   'settings.agent_integration_load_error': '無法檢查 Agent 狀態。',
   'settings.agent_integration_action_error': '整合失敗，請在電腦上執行：',

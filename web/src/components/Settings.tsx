@@ -447,6 +447,7 @@ export default function Settings({ open, onClose, termRef, onOpenChangelog = () 
     status: null;
   })[] = agentIntegrations?.items.length ? agentIntegrations.items : [
     { name: 'claude', status: null }, { name: 'pi', status: null }, { name: 'codebuddy', status: null },
+    { name: 'codex', status: null },
   ];
   const integrationLabel = (name: AgentIntegrationName): string =>
     t(`settings.agent_integration_${name}`);
@@ -472,6 +473,11 @@ export default function Settings({ open, onClose, termRef, onOpenChangelog = () 
         <div key={`missing:${item.name}`}>{t('settings.agent_integration_not_installed_hint', {
           agent: integrationLabel(item.name),
         })}</div>
+      ))}
+      {/* Codex is the one row with nothing to install, so it has no action — say why, but only once it is
+          actually there to be used (an uninstalled Codex already has its own hint above). */}
+      {agentIntegrations.items.filter((item) => item.name === 'codex' && item.status === 'ready').map(() => (
+        <div key="codex:builtin">{t('settings.agent_integration_codex_builtin_hint')}</div>
       ))}
       {agentIntegrations.items.filter((item) => item.reason === 'initialize-first').map((item) => (
         <div key={`initialize:${item.name}`}>

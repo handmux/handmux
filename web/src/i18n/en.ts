@@ -1078,6 +1078,8 @@ export default {
   'settings.agent_integration_claude': 'Claude Code',
   'settings.agent_integration_pi': 'Pi',
   'settings.agent_integration_codebuddy': 'CodeBuddy',
+  'settings.agent_integration_codex': 'Codex',
+  'settings.agent_integration_codex_builtin_hint': 'Codex is driven directly through its own App Server — there is nothing to install.',
   'settings.agent_integration_processing': 'Working…',
   'settings.agent_integration_load_error': 'Could not check Agent status.',
   'settings.agent_integration_action_error': 'Could not complete setup. Run this on your computer:',

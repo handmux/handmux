@@ -62,7 +62,12 @@ const PI_ENTRY = resolvePath(here, '../../connectors/pi/index.js');
 // user in the best case, and a client that insists on a FIXED set breaks its whole panel in the worst — it
 // must tolerate whatever subset this list reports. Keep the two in step, and keep the client's check
 // "whatever known rows are present", never a count.
-const WEB_AGENT_INTEGRATIONS = ['claude', 'pi', 'codebuddy'] as const satisfies readonly AgentName[];
+// `codex` is listed to be SHOWN, not managed: it has nothing to install (Handmux drives it through its own
+// App Server), so its row is read-only — 已接入 / 未安装 and no action. It therefore stays out of the
+// enableable set below, and this endpoint never becomes the thing that writes ~/.codex.
+const WEB_AGENT_INTEGRATIONS = ['claude', 'pi', 'codebuddy', 'codex'] as const satisfies readonly AgentName[];
+// Which listed Agents the Web surface may actually install/repair. Codex is absent on purpose.
+const WEB_ENABLEABLE_INTEGRATIONS = ['claude', 'pi', 'codebuddy'] as const;
 const FILLER_FILTER_LEVELS = ['low', 'medium', 'high'] as const satisfies readonly FillerFilterLevel[];
 
 const requestFillerFilter = (value: unknown): FillerFilterLevel | null => {
@@ -173,7 +178,7 @@ export function systemRoutes({
   });
 
   r.post('/agent-integrations/:name/enable', (req: Request, res: Response, next: NextFunction) => {
-    const name = WEB_AGENT_INTEGRATIONS.find((candidate) => candidate === req.params.name);
+    const name = WEB_ENABLEABLE_INTEGRATIONS.find((candidate) => candidate === req.params.name);
     if (!name) return res.status(404).json({ error: 'agent integration not found' });
     try { return res.json(enableAgentIntegration(name, integrationContext)); }
     catch (error) { return next(error); }

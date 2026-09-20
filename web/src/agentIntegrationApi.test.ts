@@ -28,12 +28,24 @@ describe('parseAgentIntegrations', () => {
       { name: 'claude', status: 'not-enabled', reason: 'initialize-first' },
       { name: 'pi', status: 'conflict' },
     ]);
+    // Codex is reported like the rest and shown read-only: PATH decides 已接入 / 未安装.
+    expect(parseAgentIntegrations({ integrations: [
+      { name: 'claude', status: 'ready' },
+      { name: 'pi', status: 'ready' },
+      { name: 'codebuddy', status: 'not-enabled' },
+      { name: 'codex', status: 'ready' },
+    ] })).toEqual([
+      { name: 'claude', status: 'ready' },
+      { name: 'pi', status: 'ready' },
+      { name: 'codebuddy', status: 'not-enabled' },
+      { name: 'codex', status: 'ready' },
+    ]);
     // A subset is managed as-is rather than rejected: the panel shows what the Server actually reports.
     expect(parseAgentIntegrations({ integrations: [{ name: 'claude', status: 'ready' }] }))
       .toEqual([{ name: 'claude', status: 'ready' }]);
   });
 
-  it('ignores future Agents while keeping the known rows available', () => {
+  it('ignores Agents it does not know while keeping every known row', () => {
     expect(parseAgentIntegrations({ integrations: [
       { name: 'claude', status: 'ready' },
       { name: 'codex', status: 'ready' },
@@ -41,6 +53,7 @@ describe('parseAgentIntegrations', () => {
       { name: 'pi', status: 'not-enabled' },
     ] })).toEqual([
       { name: 'claude', status: 'ready' },
+      { name: 'codex', status: 'ready' },
       { name: 'pi', status: 'not-enabled' },
     ]);
   });
