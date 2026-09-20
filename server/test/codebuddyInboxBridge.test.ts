@@ -3,6 +3,12 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { CodeBuddyHookBridgeConnector } from '../connectors/codebuddy/index.js';
+import type { HookBridgeNativeTail } from '../connectors/hookBridge.js';
+import {
+  CodeBuddyNativeTailReader,
+  codebuddyProjectsDir,
+  codebuddySessionsDir,
+} from '../src/agents/codebuddyNativeTail.js';
 import { createBuiltinAgentRuntime } from '../src/agent-runtime/builtinRuntime.js';
 import type { ForegroundProcessIdentity, LivePane, ProcessContext, ReadonlyPaneSource } from '../src/agent-runtime/adapter.js';
 import type { AgentRuntime } from '../src/agent-runtime/runtime.js';
@@ -139,7 +145,10 @@ function eventFiles(eventDirectory: string): string[] {
   } catch { return []; }
 }
 
-async function harness(launcherVisible: () => boolean = () => true) {
+async function harness(
+  launcherVisible: () => boolean = () => true,
+  nativeTail?: HookBridgeNativeTail,
+) {
   const directory = root();
   const runtimeDirectory = path.join(directory, 'runtime');
   const hookStateFile = path.join(directory, 'codebuddy-state.json');
@@ -163,6 +172,7 @@ async function harness(launcherVisible: () => boolean = () => true) {
     eventDirectory,
     panes,
     process,
+    ...(nativeTail ? { nativeTail } : {}),
     pollMs: 50,
     retryDelayMs: 5,
     maxRetryDelayMs: 10,
@@ -244,6 +254,43 @@ describe('CodeBuddy Hook → LocalAgentBridge → Inbox vertical slice', () => {
     expect(runtime.activeRuns()).toEqual([
       expect.objectContaining({ agentId: 'codebuddy', paneId: PANE_ID, runId: run }),
     ]);
+  });
+
+  it('closes a permission gate from the transcript, since no Hook reports the answer', async () => {
+    // CodeBuddy fires nothing when the user answers a PermissionRequest, so without the transcript the pane
+    // stayed at 需要你 until the granted tool finished — on a tool outside the PostToolUse matcher, until the
+    // turn ended. The tool's own result record is the proof; nothing else about the pane is consulted.
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'hm-cb-gate-'));
+    directories.push(home);
+    const transcript = path.join(codebuddyProjectsDir(home), 'private-tmp-cb-sim', `${SESSION}.jsonl`);
+    fs.mkdirSync(path.dirname(transcript), { recursive: true });
+    fs.writeFileSync(transcript, `${JSON.stringify({ type: 'function_call', timestamp: 1_000, id: 'call-1' })}\n`);
+    fs.mkdirSync(codebuddySessionsDir(home), { recursive: true });
+    fs.writeFileSync(path.join(codebuddySessionsDir(home), `${CODEBUDDY_PROCESS.pid}.json`),
+      JSON.stringify({ pid: CODEBUDDY_PROCESS.pid, sessionId: SESSION, cwd: '/private/tmp/cb-sim' }));
+
+    const { runtime, hookStateFile, eventDirectory } = await harness(
+      () => true,
+      new CodeBuddyNativeTailReader({ home }),
+    );
+    writeStateRow(hookStateFile, 'permreq', 1, { session_id: SESSION, tool_name: 'Bash' });
+    writeSpoolEvent(eventDirectory, 1, 'permreq', { session_id: SESSION, tool_name: 'Bash' });
+    await vi.waitFor(() => expect(runtime.inbox.read().records).toEqual([
+      expect.objectContaining({ state: 'waiting', message: '需要你授权：Bash' }),
+    ]), { timeout: 2_000 });
+
+    // The user answers in the pane and the granted tool runs: CodeBuddy sends no Hook, and the only trace is
+    // the result record it appends.
+    fs.appendFileSync(transcript, `${JSON.stringify({ type: 'function_call_result', timestamp: 2_000, id: 'result-1' })}\n`);
+    await vi.waitFor(() => expect(runtime.inbox.read().records).toEqual([
+      expect.objectContaining({ state: 'working' }),
+    ]), { timeout: 2_000 });
+
+    // The provider's own next Hook still has the last word, exactly as before.
+    writeStateRow(hookStateFile, 'stop', 2, { session_id: SESSION, last_assistant_message: '跑完了' });
+    await vi.waitFor(() => expect(runtime.inbox.read().records).toEqual([
+      expect.objectContaining({ state: 'done', message: '跑完了' }),
+    ]), { timeout: 2_000 });
   });
 
   it('closes a running turn as an error on StopFailure', async () => {

@@ -5,9 +5,11 @@
 // `src`+payload classification (src/codebuddyEvents.ts).
 import { classifyCodeBuddy } from '../../src/codebuddyEvents.js';
 import { isCodeBuddyCommandLine, verifyCodeBuddyProcess } from '../../src/agents/codebuddy.js';
+import { CodeBuddyNativeTailReader } from '../../src/agents/codebuddyNativeTail.js';
 import { HookBridgeConnector, projectHookInbox } from '../hookBridge.js';
 import type {
   HookBridgeConnectorOptions,
+  HookBridgeNativeTail,
   HookBridgeProjectionInput,
   HookInboxProjection,
 } from '../hookBridge.js';
@@ -52,15 +54,19 @@ function looksLikeCodeBuddy(pane: LivePane, foreground: ForegroundProcessIdentit
     || isCodeBuddyCommandLine(pane.currentCommand);
 }
 
-// No nativeTail: Claude's transcript/registry reconciler exists to close gates no Hook closes (ESC
-// interrupts, no-op /compact, resolved permission prompts) by reading the session transcript. CodeBuddy has
-// no equivalent reader in this slice, and inventing a weaker one would report unverified state — the
-// Connector therefore trusts the Hook edges alone, and a missing closing edge is handled by the shared
-// Inbox/lease lifecycle rather than guessed at.
-export type CodeBuddyHookBridgeConnectorOptions = Omit<HookBridgeConnectorOptions, 'profile'>;
+// The out-of-band reconciler. Claude's exists to close gates no Hook closes (ESC interrupts, no-op
+// /compact, resolved permission prompts) by reading the session transcript; CodeBuddy's does the narrower
+// job its own gaps require — a permission gate the user has answered never gets a Hook, so the granted
+// tool's result record is the only proof the pane moved on. See src/agents/codebuddyNativeTail.ts.
+export type CodeBuddyHookBridgeConnectorOptions = Omit<HookBridgeConnectorOptions, 'profile'> & {
+  nativeTail?: HookBridgeNativeTail;
+};
 
 export class CodeBuddyHookBridgeConnector extends HookBridgeConnector {
-  constructor(options: CodeBuddyHookBridgeConnectorOptions) {
+  constructor({
+    nativeTail = new CodeBuddyNativeTailReader(),
+    ...options
+  }: CodeBuddyHookBridgeConnectorOptions) {
     super({
       ...options,
       profile: {
@@ -72,6 +78,7 @@ export class CodeBuddyHookBridgeConnector extends HookBridgeConnector {
         matchesAgentPane: looksLikeCodeBuddy,
         project: projectCodeBuddyHookInbox,
         resolvePaneProcess: resolveCodeBuddyPaneProcess,
+        nativeTail,
       },
     });
   }
