@@ -199,11 +199,15 @@ describe('CodeBuddy capability gating', () => {
     return built;
   };
 
-  it('declares the Inbox capability it actually implements', () => {
+  it('declares exactly the capabilities it implements', () => {
     const adapter = BUILTIN_AGENT_ADAPTERS.find((entry) => entry.id === 'codebuddy');
     expect(adapter?.capabilities.inbox).toEqual({ apiVersion: 1 });
-    // Inbox only: Conversation/Interaction are not implemented for CodeBuddy yet.
-    expect(Object.keys(adapter?.capabilities ?? {})).toEqual(['inbox']);
+    // Conversation ships with a composer and an interrupt, like Claude's — it is marked experimental there
+    // for the same reason (the provider's own UI can change under it).
+    expect(adapter?.capabilities.conversation).toEqual({ apiVersion: 1, experimental: true });
+    // Interaction is deliberately absent: an approval's wording is unverified per gate. Subscription usage
+    // is absent because CodeBuddy exposes no quota source at all.
+    expect(Object.keys(adapter?.capabilities ?? {})).toEqual(['inbox', 'conversation']);
     expect(agentName('codebuddy')).toBe('codebuddy');
   });
 

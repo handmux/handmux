@@ -13,6 +13,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { codebuddyProjectsDir, codebuddySessionsDir } from './codebuddy.js';
 import type { HookBridgeNativeTail } from '../../connectors/hookBridge.js';
 
 type Row = Record<string, unknown>;
@@ -24,11 +25,6 @@ const record = (value: unknown): Row | null => (
 // last chunk. A chunk with no result at all (a very large tool output ahead of it) closes nothing.
 const MAX_TAIL_BYTES = 262_144;
 const MAX_CACHED_TRANSCRIPTS = 64;
-
-export const codebuddyProjectsDir = (home = os.homedir()): string =>
-  path.join(home, '.codebuddy', 'projects');
-export const codebuddySessionsDir = (home = os.homedir()): string =>
-  path.join(home, '.codebuddy', 'sessions');
 
 // The rows that can latch a gate. Only they are worth reading a transcript for, which keeps this reader at
 // zero cost on a pane that is simply working.

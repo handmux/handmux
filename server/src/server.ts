@@ -7,6 +7,7 @@ import { loadToken } from './auth.js';
 import { createApiRouter } from './httpApi.js';
 import { loadUploadExts } from './uploadTypes.js';
 import { createClaudeEvents } from './claudeEvents.js';
+import { createCodebuddyEvents } from './codebuddyEvents.js';
 import { syncHooks } from './cli/claudeHooks.js';
 import { syncHooks as syncCodebuddyHooks } from './cli/codebuddyHooks.js';
 import { syncPiExtension } from './cli/piExtension.js';
@@ -49,6 +50,10 @@ import { healthRoutes } from './routes/health.js';
 import { createBuiltinAgentRuntime } from './agent-runtime/builtinRuntime.js';
 import { interruptClaudePane, sendPaneChoice } from './paneInput.js';
 import { sendClaudePanePrompt } from './agents/claudePaneInput.js';
+import {
+  interruptCodeBuddyPane,
+  sendCodeBuddyPanePrompt,
+} from './agents/codebuddyPaneInput.js';
 import {
   createLocalAgentProcessContext,
   TmuxAgentPaneSource,
@@ -194,6 +199,10 @@ try {
 // core-seconds per second on a 35-pane host. Nothing the UI needs comes from that frequency, so the snapshot
 // runs at 3s: an Agent starting or exiting is noticed within that window.
 const agentPanes = new TmuxAgentPaneSource({ commands, pollMs: 3_000 });
+// CodeBuddy's state file is read by the Inbox Connector below AND by the conversation lens's pane → session
+// bind, so it is resolved once here, above both.
+const codebuddyStateFile = process.env.CODEBUDDY_STATE_FILE || codebuddyStatePath(home);
+const codebuddyEvents = createCodebuddyEvents({ stateFile: codebuddyStateFile });
 const agentProcess = createLocalAgentProcessContext();
 const agentRuntime = createBuiltinAgentRuntime({
   home,
@@ -202,6 +211,15 @@ const agentRuntime = createBuiltinAgentRuntime({
   stateDirectory: agentRuntimeDirectory,
   ...(conversationStartupBlockReason === undefined ? {} : { conversationStartupBlockReason }),
   claudeEvents: events,
+  codebuddyEvents,
+  codebuddyConversationControl: {
+    sendPrompt: (paneId, text, guard) => sendCodeBuddyPanePrompt(
+      commands, paneId, text, () => codebuddyEvents.paneSubmittedPrompt(paneId), guard,
+    ),
+    // CodeBuddy's published keybindings bind ctrl+c to app:interrupt (ctrl+d exits), so the composer's
+    // interrupt is the generic one.
+    interrupt: (paneId) => interruptCodeBuddyPane(commands, paneId),
+  },
   claudeConversationControl: {
     sendPrompt: (paneId, text, guard) => sendClaudePanePrompt(commands, paneId, text, () => events?.paneRestoredPrompt(paneId) ?? null, guard),
     interrupt: (paneId) => interruptClaudePane(commands, paneId),
@@ -243,7 +261,6 @@ const claudeInboxBridge = new ClaudeHookBridgeConnector({
 });
 // CodeBuddy drives the same Hook pipeline into its own state file. No native tail: this slice trusts the
 // Hook lifecycle edges alone (see connectors/codebuddy).
-const codebuddyStateFile = process.env.CODEBUDDY_STATE_FILE || codebuddyStatePath(home);
 const codebuddyInboxBridge = new CodeBuddyHookBridgeConnector({
   socketPath: agentRuntime.socketPath,
   credentialFile: path.join(agentRuntimeDirectory, 'bridge-credential.json'),

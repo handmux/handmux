@@ -7,6 +7,8 @@ import { NativeInboxCoordinator } from '../agents/nativeInbox.js';
 import {
   createCodexNativeInboxSource,
 } from '../agents/nativeInboxSources.js';
+import { createCodeBuddyConversationAdapter } from '../agents/codebuddyConversation.js';
+import type { CodeBuddyConversationControl } from '../agents/codebuddyConversation.js';
 import { createCodexConversationAdapter } from '../agents/codexConversation.js';
 import { createCodexInteractionAdapter } from '../agents/codexInteraction.js';
 import {
@@ -48,6 +50,11 @@ export type CodexRuntimeApp =
 export interface BuiltinAgentRuntimeOptions
   extends Omit<AgentRuntimeOptions, 'adapters' | 'adapterFactories'> {
   home?: string;
+  codebuddyEvents?: Partial<NonNullable<Parameters<typeof createCodeBuddyConversationAdapter>[0]>['sessions']>
+    & {
+      paneKind?(paneId: string, process?: { pid: number; startedAt?: number }): string | null;
+    };
+  codebuddyConversationControl?: CodeBuddyConversationControl;
   claudeEvents?: Partial<NonNullable<Parameters<typeof createClaudeConversationAdapter>[0]>['sessions']>
     & {
       paneKind?(paneId: string, process?: { pid: number; startedAt?: number }): 'done' | 'working' | 'permission' | 'compacting' | 'error' | 'end' | 'idle' | null;
@@ -85,6 +92,32 @@ export function createClaudeConversationActivityReader(
           : activity === 'unknown' ? { state: 'unknown' as const }
             : { state: 'active' as const, nativeTurnId: `claude-run:${run.ref.runId}` },
         ...(completionToken ? { completionToken } : {}),
+      };
+    },
+  };
+}
+
+// The same table Claude's reader uses, from CodeBuddy's own classification: the wave the 对话 lens draws
+// and the roster row come from one source, so they cannot disagree about what the pane is doing.
+export function createCodebuddyConversationActivityReader(
+  events: NonNullable<BuiltinAgentRuntimeOptions['codebuddyEvents']> | undefined,
+): AgentConversationActivityReader {
+  return {
+    async read(run) {
+      if (events?.paneSession && events.paneSession(run.ref.paneId)?.sessionId !== run.ref.sessionId) {
+        return { activity: 'unknown', activeTurn: { state: 'unknown' } };
+      }
+      const kind = events?.paneKind?.(run.ref.paneId, run.process) ?? null;
+      const activity = kind === 'working' ? 'working'
+        : kind === 'permission' ? 'waiting'
+          : kind === 'compacting' ? 'compacting'
+            : kind === 'done' || kind === 'idle' || kind === 'end' || kind === 'error'
+              ? 'idle' : 'unknown';
+      return {
+        activity,
+        activeTurn: activity === 'idle' ? { state: 'none' as const }
+          : activity === 'unknown' ? { state: 'unknown' as const }
+            : { state: 'active' as const, nativeTurnId: `codebuddy-run:${run.ref.runId}` },
       };
     },
   };
@@ -135,6 +168,8 @@ export function createCodexConversationActivityReader(
 // still comes only from BUILTIN_AGENT_ADAPTERS, while factories close over local provider clients/Bridge.
 export function createBuiltinAgentRuntime({
   home,
+  codebuddyEvents,
+  codebuddyConversationControl,
   claudeEvents,
   claudeProjectsRoot,
   claudeConversationControl,
@@ -227,8 +262,16 @@ export function createBuiltinAgentRuntime({
         label: 'CodeBuddy',
         sourceEventSequence: hookEventSequence,
       });
+      const conversationSessions = codebuddyEvents && typeof codebuddyEvents.paneSession === 'function'
+        ? codebuddyEvents as NonNullable<Parameters<typeof createCodeBuddyConversationAdapter>[0]>['sessions']
+        : undefined;
       return {
         inbox: true,
+        conversation: createCodeBuddyConversationAdapter({
+          ...(conversationSessions === undefined ? {} : { sessions: conversationSessions }),
+          ...(codebuddyConversationControl === undefined ? {} : { control: codebuddyConversationControl }),
+        }),
+        conversationActivity: createCodebuddyConversationActivityReader(codebuddyEvents),
         start: () => {
           inbox.start();
           return () => inbox.close();

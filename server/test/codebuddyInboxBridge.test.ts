@@ -4,11 +4,8 @@ import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { CodeBuddyHookBridgeConnector } from '../connectors/codebuddy/index.js';
 import type { HookBridgeNativeTail } from '../connectors/hookBridge.js';
-import {
-  CodeBuddyNativeTailReader,
-  codebuddyProjectsDir,
-  codebuddySessionsDir,
-} from '../src/agents/codebuddyNativeTail.js';
+import { codebuddyProjectsDir, codebuddySessionsDir } from '../src/agents/codebuddy.js';
+import { CodeBuddyNativeTailReader } from '../src/agents/codebuddyNativeTail.js';
 import { createBuiltinAgentRuntime } from '../src/agent-runtime/builtinRuntime.js';
 import type { ForegroundProcessIdentity, LivePane, ProcessContext, ReadonlyPaneSource } from '../src/agent-runtime/adapter.js';
 import type { AgentRuntime } from '../src/agent-runtime/runtime.js';

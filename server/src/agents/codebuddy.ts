@@ -14,6 +14,8 @@
 // Identity therefore comes from the pane's whole foreground group, matched at a path boundary against the
 // published launch entry points. We only ever answer "yes" from positive evidence, and we stay inconclusive
 // rather than negative when the group was not actually read.
+import os from 'node:os';
+import path from 'node:path';
 import type { AgentAdapter } from '../agent-runtime/adapter.js';
 import type { ForegroundProcessIdentity, LivePane, ProcessContext } from '../agent-runtime/adapter.js';
 
@@ -23,6 +25,16 @@ const NPM_PACKAGE_MARKER = '/@tencent-ai/codebuddy-code/';
 const NODE_PROGRAM_RE = /^(\S*\/)?node$/;
 
 const basename = (value: string): string => value.split('/').at(-1) ?? '';
+
+// CodeBuddy's own on-disk layout, in one place because three readers need the same answer: the conversation
+// adapter reads a session's JSONL, the native tail resolves a pane's session from its registry row, and the
+// session binding reads the hook state file. A session log is
+// `<projects>/<cwd with its slashes replaced by dashes>/<session-id>.jsonl`; a running session publishes
+// `~/.codebuddy/sessions/<pid>.json` (pid, sessionId, cwd, heartbeat — never a status).
+export const codebuddyProjectsDir = (home = os.homedir()): string =>
+  path.join(home, '.codebuddy', 'projects');
+export const codebuddySessionsDir = (home = os.homedir()): string =>
+  path.join(home, '.codebuddy', 'sessions');
 
 // Node's entry argument is the first non-flag token after the program. Nothing beyond it may be searched:
 // the agent's own arguments (a prompt, a file path, a session id) are free to contain any word, and matching
@@ -82,10 +94,13 @@ export const codebuddy: AgentAdapter = {
   },
   presentation: { iconId: 'codebuddy' },
   // Only what is actually implemented. Inbox is delivered by CodeBuddy's Claude-compatible Hooks through
-  // its own Connector (connectors/codebuddy) + the Bridge durable lane; Conversation/Interaction follow.
+  // its own Connector (connectors/codebuddy) + the Bridge durable lane; Conversation (with composer and
+  // interrupt, like Claude's) reads the session JSONL through ../../agents/codebuddyConversation.ts.
+  // Interaction is not declared yet: its approval wording is still unverified per gate.
   // The classification of its `src`→kind events lives in ../../codebuddyEvents.ts, next to the shared
   // Hook vocabulary, because that is the module the Connector consumes.
   capabilities: {
     inbox: { apiVersion: 1 as const },
+    conversation: { apiVersion: 1 as const, experimental: true },
   },
 };

@@ -33,6 +33,30 @@ export async function serializePaneInput<T>(paneId: string, operation: () => Pro
   }
 }
 
+// One-line native editor, as every Claude-lineage TUI draws it: `<prompt> value` on the cursor's line with
+// a rule above and below. Wrapped input, attachments, selection menus and unknown layouts fail closed
+// (null) — the caller must never delete content it could not read. Callers send End first: placeholder text
+// is painted after the cursor but is not part of the editor, while real text leaves the cursor at its end.
+// `hint` strips a right-aligned footer the editor paints inside that same line (e.g. CodeBuddy's "↵ send").
+export function singleLineDraft(
+  screen: string,
+  cursor: { cursorX: number; cursorY: number },
+  prompt = '\u276f',
+  hint?: RegExp,
+): string | null {
+  const lines = screen.split('\n');
+  const line = lines[cursor.cursorY];
+  const start = prompt.length + 1;
+  if (!line || !/^\u2500{3,}$/.test(lines[cursor.cursorY - 1]?.trim() ?? '')
+    || !/^\u2500{3,}$/.test(lines[cursor.cursorY + 1]?.trim() ?? '')
+    || !line.startsWith(`${prompt} `) && !line.startsWith(`${prompt}\u00a0`)) return null;
+  let value = hint ? line.slice(start).replace(hint, '') : line.slice(start);
+  value = value.trimEnd();
+  if (cursor.cursorX === start) return ''; // Native suggestions are painted here but End does not enter them.
+  if (!value || /[\x00-\x1f\x7f]/.test(value) || cursor.cursorX <= start) return null;
+  return value;
+}
+
 export function sendPanePrompt(
   commands: PaneInputCommands,
   paneId: string,

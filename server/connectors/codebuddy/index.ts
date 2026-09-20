@@ -3,7 +3,7 @@
 // answer. It is deliberately thin: CodeBuddy drives the same file Hooks and the same shared writer as
 // Claude, so the only CodeBuddy-specific pieces are the record marking, the pane-process anchor, and the
 // `src`+payload classification (src/codebuddyEvents.ts).
-import { classifyCodeBuddy } from '../../src/codebuddyEvents.js';
+import { acceptsCodeBuddyAgent, classifyCodeBuddy } from '../../src/codebuddyEvents.js';
 import { isCodeBuddyCommandLine, verifyCodeBuddyProcess } from '../../src/agents/codebuddy.js';
 import { CodeBuddyNativeTailReader } from '../../src/agents/codebuddyNativeTail.js';
 import { HookBridgeConnector, projectHookInbox } from '../hookBridge.js';
@@ -19,15 +19,9 @@ import type {
   ProcessContext,
 } from '../../src/agent-runtime/adapter.js';
 
-// Which record markings this Connector may read. It only ever reads CodeBuddy's OWN state file and spool
-// directory, so the mark is provenance rather than routing — but the writer is a SHARED script that stamps
-// its own literal on every Agent's spool (today: the Claude one), so both the agent id CodeBuddy will carry
-// once the writer is parameterized and that literal must be admitted. An explicit foreign provider still
-// fails closed: a leftover row in this directory must never be projected as CodeBuddy state.
-// Exported for the contract tests that freeze which record marks this Connector may read.
-export function acceptsCodeBuddyAgent(agent: unknown): boolean {
-  return agent === 'codebuddy';
-}
+// The marking rule and its reasoning live in src/codebuddyEvents.ts — the conversation lens's pane binding
+// has to answer it identically, so there is exactly one definition rather than two that can drift.
+export { acceptsCodeBuddyAgent };
 
 export function projectCodeBuddyHookInbox(input: HookBridgeProjectionInput): HookInboxProjection {
   return projectHookInbox({ classify: classifyCodeBuddy, ...input });

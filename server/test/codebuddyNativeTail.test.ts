@@ -2,11 +2,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import {
-  CodeBuddyNativeTailReader,
-  codebuddyProjectsDir,
-  codebuddySessionsDir,
-} from '../src/agents/codebuddyNativeTail.js';
+import { codebuddyProjectsDir, codebuddySessionsDir } from '../src/agents/codebuddy.js';
+import { CodeBuddyNativeTailReader } from '../src/agents/codebuddyNativeTail.js';
 
 // Every fixture lives under its own temp home, so nothing here can read the host's real ~/.codebuddy.
 const directories: string[] = [];

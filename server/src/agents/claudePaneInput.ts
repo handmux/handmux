@@ -1,4 +1,4 @@
-import { serializePaneInput } from '../paneInput.js';
+import { serializePaneInput, singleLineDraft } from '../paneInput.js';
 import type { PaneInputCommands, PaneInputGuard, PanePromptResult } from '../paneInput.js';
 
 const SUBMIT_GAP_MS = 120;
@@ -9,19 +9,9 @@ interface ClaudePaneInputCommands extends PaneInputCommands {
   paneInfo(paneId: string): Promise<{ cursorX: number; cursorY: number }>;
 }
 
-// Read the entire one-line native editor, bounded by its two rules. Wrapped input, attachments,
-// selection menus and unknown layouts fail closed. End is sent first: placeholder text is painted
-// after the cursor but isn't part of the editor; actual text places the cursor at its end.
+// Claude's editor is the shared one-line shape, with `❯` as its prompt.
 export function claudeSingleLineDraft(screen: string, cursor: { cursorX: number; cursorY: number }): string | null {
-  const lines = screen.split('\n');
-  const line = lines[cursor.cursorY];
-  if (!line || !/^─{3,}$/.test(lines[cursor.cursorY - 1]?.trim() ?? '')
-    || !/^─{3,}$/.test(lines[cursor.cursorY + 1]?.trim() ?? '')
-    || !/^❯[ \u00a0]/.test(line)) return null;
-  const value = line.slice(2).trimEnd();
-  if (cursor.cursorX === 2) return ''; // Native suggestions are painted here but End does not enter them.
-  if (!value || /[\x00-\x1f\x7f]/.test(value) || cursor.cursorX <= 2) return null;
-  return value;
+  return singleLineDraft(screen, cursor);
 }
 
 export function sendClaudePanePrompt(

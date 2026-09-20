@@ -14,8 +14,8 @@
 // serves the conversation lens (pane → session binding, activity) is added by that slice, not this one.
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { hookErrorMessage } from './agents/hookEvents.js';
-import type { AgentHookClassification } from './agents/hookEvents.js';
+import { hookErrorMessage, readHookStateRows } from './agents/hookEvents.js';
+import type { AgentHookClassification, AgentHookKind } from './agents/hookEvents.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 // The hook-maintained state file: ONE JSON object keyed by tmux pane id, each value the pane's latest
@@ -81,4 +81,63 @@ export function classifyCodeBuddy(src: unknown, rawBody: unknown = {}): AgentHoo
     if (body.notification_type === 'idle_prompt') return { kind: 'idle', msg: text(body.message) };
   }
   return null;
+}
+
+// Which record markings are CodeBuddy's self same pipeline may read. The shared writer stamps the Agent's
+// own id on every spool file and state row, so a row carrying another provider's mark must fail closed
+// rather than be projected as CodeBuddy state. Exported here, next to the event vocabulary, because both
+// the Inbox Connector and the conversation lens's pane binding must answer it the same way.
+export function acceptsCodeBuddyAgent(agent: unknown): boolean {
+  return agent === 'codebuddy';
+}
+
+// The conversation lens's pane → session bind. The hook state file records THIS pane's own session id (and
+// its transcript path, when the payload carried one), which is authoritative over any cwd→newest-file
+// guess. Returns null when hooks are off, the pane is not CodeBuddy's, or the row carries no session to
+// bind — so a lens can never open onto a session the pane was not actually running.
+export function createCodebuddyEvents({ stateFile = DEFAULT_STATE_FILE }: { stateFile?: string } = {}): {
+  paneSession(paneId: string): {
+    sessionId: string | null;
+    transcriptPath: string | null;
+    cwd: string | null;
+    agent: string | null;
+  } | null;
+  paneKind(paneId: string, process?: { pid: number; startedAt?: number }): AgentHookKind | null;
+  paneSubmittedPrompt(paneId: string): string | null;
+} {
+  const read = () => readHookStateRows(stateFile, acceptsCodeBuddyAgent);
+  return {
+    paneSession(paneId) {
+      const row = read().get(paneId);
+      const payload = row?.payload;
+      if (!payload) return null;
+      const sessionId = typeof payload.session_id === 'string' ? payload.session_id : null;
+      const transcriptPath = typeof payload.transcript_path === 'string' ? payload.transcript_path : null;
+      if (!sessionId && !transcriptPath) return null;
+      return {
+        sessionId,
+        transcriptPath,
+        cwd: typeof payload.cwd === 'string' ? payload.cwd : null,
+        agent: row?.agent ?? null,
+      };
+    },
+    // The activity the 对话 lens shows while a turn runs: the SAME classification the Inbox projects, so the
+    // typing wave and the roster row can never disagree about what the pane is doing. A caller holding a
+    // process generation gets the row only when it is still that generation's.
+    paneKind(paneId: string, process?: { pid: number; startedAt?: number }): AgentHookKind | null {
+      const row = read().get(paneId);
+      if (!row) return null;
+      if (process && row.process
+        && (process.pid !== row.process.pid || process.startedAt !== row.process.startedAt)) return null;
+      return classifyCodeBuddy(row.src, row.payload)?.kind ?? null;
+    },
+    // The prompt this pane last submitted, used only to recognize OUR OWN leftover in the native editor:
+    // the composer may replace that, never a draft a human typed.
+    paneSubmittedPrompt(paneId: string): string | null {
+      const row = read().get(paneId);
+      if (!row || row.src !== 'prompt') return null;
+      const prompt = row.payload.prompt;
+      return typeof prompt === 'string' && prompt ? prompt : null;
+    },
+  };
 }
