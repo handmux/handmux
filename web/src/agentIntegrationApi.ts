@@ -52,9 +52,12 @@ export function parseAgentIntegrations(value: unknown): AgentIntegrationSnapshot
   const items = known.map(snapshotOf);
   if (items.some((item) => item === null)) return null;
   const snapshots = items as AgentIntegrationSnapshot[];
-  if (snapshots.length !== 2 || new Set(snapshots.map((item) => item.name)).size !== 2
-    || !snapshots.some((item) => item.name === 'claude')
-    || !snapshots.some((item) => item.name === 'pi')) return null;
+  // Keep whichever known rows the Server reports, as long as they are well formed and unique. A fixed
+  // count/set here is what made the whole panel unreadable the day the product grew a third Agent: the
+  // Server answered perfectly well and the client rejected the response. Manage what is reported; a row
+  // the Server does not send is simply not shown.
+  if (snapshots.length === 0) return null;
+  if (new Set(snapshots.map((item) => item.name)).size !== snapshots.length) return null;
   return snapshots;
 }
 

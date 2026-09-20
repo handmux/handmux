@@ -57,6 +57,11 @@ const errorMessage = (error: unknown): string => error instanceof Error ? error.
 const here = dirname(fileURLToPath(import.meta.url));
 const HOOKS_SRC = resolvePath(here, '../../hooks'); // server/hooks (bundled scripts)
 const PI_ENTRY = resolvePath(here, '../../connectors/pi/index.js');
+// Every Agent the phone may manage here. The Web client keeps its own mirrored name list
+// (web/src/agentIntegrationApi.ts `NAMES`): adding one here without adding it there is invisible to the
+// user in the best case, and a client that insists on a FIXED set breaks its whole panel in the worst — it
+// must tolerate whatever subset this list reports. Keep the two in step, and keep the client's check
+// "whatever known rows are present", never a count.
 const WEB_AGENT_INTEGRATIONS = ['claude', 'pi', 'codebuddy'] as const satisfies readonly AgentName[];
 const FILLER_FILTER_LEVELS = ['low', 'medium', 'high'] as const satisfies readonly FillerFilterLevel[];
 
