@@ -11,9 +11,9 @@ describe('AgentMark', () => {
     // Claude's mark is the pixel robot its CLI prints on startup: block art, so it is drawn as rects in the
     // terminal's own two colours rather than as a single-colour glyph.
     const claudeSvg = claude?.querySelector('svg');
-    // Each artwork carries its OWN box — Claude's robot is 17:10 — so a badge sized by height can show it
-    // at full height instead of letterboxing it inside the shared square.
-    expect(claudeSvg?.getAttribute('viewBox')).toBe('0 0 17 10');
+    // Each artwork carries its OWN box — Claude's robot is 17:10, inset 7.5% horizontally so it renders 7%
+    // narrower than the cap — so a badge sized by height can show it without letterboxing it into a square.
+    expect(claudeSvg?.getAttribute('viewBox')).toBe('-0.637 0 18.275 10');
     expect(new Set(Array.from(claudeSvg?.querySelectorAll('path') ?? [])
       .map((path) => path.getAttribute('fill')))).toEqual(new Set(['#000000', '#d7af87']));
 
