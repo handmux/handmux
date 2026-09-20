@@ -1,5 +1,6 @@
 import { captureWorkspace } from './capture.js';
 import { detectEnvironmentChange } from './environment.js';
+import { lockOwnerLabel } from './lock.js';
 import { fingerprintSnapshot } from './schema.js';
 import type { CodexDiscovery, TmuxCaptureAdapter, WorkspaceCaptureResult } from './capture.js';
 import type { EnvironmentIdentity, ObservedEnvironment } from './environment.js';
@@ -8,7 +9,10 @@ import type { WorkspaceSnapshot } from './schema.js';
 type ReconcileCause = 'timer' | 'start' | 'event' | 'confirmed-empty' | 'shutdown' | string;
 type ReconcileResult = { status: string; snapshot?: WorkspaceSnapshot; [key: string]: unknown };
 interface LockHandle { release(): Promise<void> }
-interface WriterLock { tryAcquire(options: { operationId: string }): Promise<LockHandle | null> }
+interface WriterLock {
+  tryAcquire(options: { operationId: string }): Promise<LockHandle | null>;
+  readOwner?(): Promise<unknown>;
+}
 type LiveReadResult =
   | { status: 'ok'; value: WorkspaceSnapshot }
   | { status: 'empty' }
@@ -45,6 +49,13 @@ function sameSnapshot(left: WorkspaceSnapshot, right: WorkspaceSnapshot): boolea
   return fingerprintSnapshot(left) === fingerprintSnapshot(right);
 }
 
+function formatDuration(ms: number): string {
+  const seconds = Math.max(0, Math.round(ms / 1000));
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.round(seconds / 60);
+  return minutes < 60 ? `${minutes}m` : `${Math.round(minutes / 60)}h`;
+}
+
 function snapshotEnvironment(observed: Exclude<ObservedEnvironment, { status: 'unknown' }>): EnvironmentIdentity {
   return {
     id: observed.id,
@@ -58,7 +69,13 @@ async function reconcileOnce(
   cause: ReconcileCause,
 ): Promise<ReconcileResult> {
   const handle = await deps.lock.tryAcquire({ operationId: `checkpointer:${cause}` });
-  if (!handle) return { status: 'locked' };
+  if (!handle) {
+    // Report who is holding it: "locked" on its own is indistinguishable from a stuck lock, which is
+    // exactly how a blocked checkpointer stayed invisible.
+    let owner: unknown = null;
+    try { owner = await deps.lock.readOwner?.() ?? null; } catch { /* the holder may be unreadable */ }
+    return { status: 'locked', owner };
+  }
   try {
     const observed = await deps.observeEnvironment();
     if (!observed || observed.status === 'unknown') return { status: 'unknown' };
@@ -127,6 +144,19 @@ export function createCheckpointer({
   let stopPromise: Promise<void> | null = null;
   let lastResult: ReconcileResult | null = null;
   let lastError: string | null = null;
+  let blockedSince: number | null = null;
+  let blockedOwner: string | null = null;
+
+  function recordResult(result: ReconcileResult): void {
+    lastResult = result;
+    if (result.status !== 'locked') {
+      blockedSince = null;
+      blockedOwner = null;
+      return;
+    }
+    if (blockedSince === null) blockedSince = now();
+    blockedOwner = lockOwnerLabel(result.owner);
+  }
 
   function launch(cause: ReconcileCause): Promise<ReconcileResult> {
     const current = reconcileOnce(deps, cause);
@@ -141,7 +171,7 @@ export function createCheckpointer({
       }
     };
     current.then((result) => {
-      lastResult = result;
+      recordResult(result);
       lastError = null;
       settled();
     }, () => {
@@ -184,6 +214,12 @@ export function createCheckpointer({
 
   return {
     reconcile,
+    // How long the writer lock has been unavailable, with whoever holds it. Null while reconciliation is
+    // free to run. Readiness cannot answer this — a restore holding the lock is legitimately "locked" and
+    // the launcher must still see the server as up — so the protection status consumes this instead.
+    blocked(): { since: number; owner: string | null } | null {
+      return blockedSince === null ? null : { since: blockedSince, owner: blockedOwner };
+    },
     health(): WorkspaceCheckpointerHealth {
       if (stopping || stopped) return { status: 'degraded', detail: 'workspace-stopped' };
       if (lastError) return { status: 'degraded', detail: lastError };
@@ -192,7 +228,16 @@ export function createCheckpointer({
         return { status: 'ready', detail: null };
       }
       if (lastResult.status === 'locked') {
-        return { status: 'ready', detail: 'workspace-writer-locked' };
+        // Still "ready": a restore holds this lock on purpose, and the launcher must not read that as the
+        // server being down. The detail carries the holder and the duration so a lock that never clears is
+        // diagnosable from the outside.
+        const held = blockedSince === null ? null : formatDuration(now() - blockedSince);
+        return {
+          status: 'ready',
+          detail: 'workspace-writer-locked'
+            + (blockedOwner ? `: ${blockedOwner}` : '')
+            + (held ? ` for ${held}` : ''),
+        };
       }
       return { status: 'degraded', detail: `workspace-${lastResult.status || 'unknown'}` };
     },

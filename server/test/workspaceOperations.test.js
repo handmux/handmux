@@ -651,6 +651,57 @@ describe('workspace runtime orchestration', () => {
     expect(JSON.stringify(result)).not.toMatch(/Users|secret|EACCES/);
   });
 
+  it('reports a workspace whose writer lock stayed out of reach as degraded, not protected', async () => {
+    // A healthy live copy is not protection: if capture has been blocked on the lock long enough, that copy
+    // is simply the last one ever written. This is the state that stayed invisible for weeks.
+    const now = Date.parse('2026-07-20T12:00:00.000Z');
+    const runtime = createWorkspaceRuntime({
+      store: { readLive: async () => ({ status: 'ok', value: { capturedAt: '2026-07-20T01:23:00.000Z' } }) },
+      tmux: {},
+      lock: {},
+      checkpointer: { blocked: () => ({ since: now - 5 * 60_000, owner: 'restore-abc (pid 123)' }) },
+      now: () => now,
+    });
+
+    await expect(runtime.getProtectionStatus()).resolves.toEqual({
+      status: 'degraded',
+      lastSuccessfulCaptureAt: '2026-07-20T01:23:00.000Z',
+      errorCode: 'writer-locked',
+      blockedBy: 'restore-abc (pid 123)',
+    });
+  });
+
+  it('keeps reporting protection while a lock is merely contested', async () => {
+    // A restore holds this lock on purpose for as long as it runs, and that is not a failure.
+    const now = Date.parse('2026-07-20T12:00:00.000Z');
+    const runtime = createWorkspaceRuntime({
+      store: { readLive: async () => ({ status: 'ok', value: { capturedAt: '2026-07-20T01:23:00.000Z' } }) },
+      tmux: {},
+      lock: {},
+      checkpointer: { blocked: () => ({ since: now - 60_000, owner: 'restore-abc (pid 123)' }) },
+      now: () => now,
+    });
+
+    await expect(runtime.getProtectionStatus()).resolves.toEqual({
+      status: 'protected',
+      lastSuccessfulCaptureAt: '2026-07-20T01:23:00.000Z',
+      errorCode: null,
+    });
+  });
+
+  it('keeps an unreadable live copy ahead of a blocked writer in the protection status', async () => {
+    const now = Date.parse('2026-07-20T12:00:00.000Z');
+    const runtime = createWorkspaceRuntime({
+      store: { readLive: async () => ({ status: 'corrupt', errors: ['bad json'] }) },
+      tmux: {},
+      lock: {},
+      checkpointer: { blocked: () => ({ since: now - 60 * 60_000, owner: 'restore-abc (pid 123)' }) },
+      now: () => now,
+    });
+
+    await expect(runtime.getProtectionStatus()).resolves.toMatchObject({ errorCode: 'live-corrupt' });
+  });
+
   it('resolves latest to the actual checkpoint before operation persistence and deduplication', async () => {
     const operations = operationStore();
     let latestId = 'cp-a';

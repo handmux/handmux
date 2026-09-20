@@ -1391,6 +1391,7 @@ export default {
   'workspace.protectionTitle': 'Workspace is not protected',
   'workspace.protection.live-corrupt': 'Workspace state copies are damaged. Check disk health and ~/.handmux permissions, then restart handmux.',
   'workspace.protection.live-unavailable': 'Workspace state cannot be read or written. Check free disk space and ~/.handmux permissions, then restart handmux.',
+  'workspace.protection.writer-locked': 'Background snapshots are blocked: another operation has held the workspace write lock too long, so backups are not being updated.',
   'workspace.protection.unknown': 'Background snapshots are unavailable. Check the handmux log on your computer.',
   'workspace.error.restore-interrupted': 'restore was interrupted; retry this backup',
   'workspace.error.checkpoint-not-found': 'this backup is no longer available; refresh and choose another backup',

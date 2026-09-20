@@ -656,6 +656,7 @@ export default {
   'workspace.protectionTitle': '작업 공간이 보호되지 않음',
   'workspace.protection.live-corrupt': '작업 공간 상태 사본이 손상되었습니다. 디스크와 ~/.handmux 권한을 확인한 뒤 handmux를 재시작하세요.',
   'workspace.protection.live-unavailable': '작업 공간 상태를 읽거나 쓸 수 없습니다. 디스크 여유 공간과 ~/.handmux 권한을 확인한 뒤 handmux를 재시작하세요.',
+  'workspace.protection.writer-locked': '백그라운드 스냅샷이 차단되었습니다. 쓰기 잠금을 다른 작업이 오래 점유하고 있어 백업이 갱신되지 않습니다.',
   'workspace.protection.unknown': '백그라운드 스냅샷을 사용할 수 없습니다. 컴퓨터의 handmux 로그를 확인하세요.',
   'workspace.error.restore-interrupted': '복원이 중단되었습니다. 이 백업을 다시 시도하세요',
   'workspace.error.checkpoint-not-found': '이 백업을 더 이상 사용할 수 없습니다. 새로 고친 뒤 다른 백업을 선택하세요',

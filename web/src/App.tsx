@@ -214,6 +214,7 @@ interface UpdateInfo {
 interface WorkspaceProtection {
   status?: string;
   errorCode?: string | null;
+  blockedBy?: string | null;
 }
 
 interface RecoveryOperationState extends WorkspaceRestoreOperation {

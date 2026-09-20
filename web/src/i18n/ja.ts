@@ -656,6 +656,7 @@ export default {
   'workspace.protectionTitle': 'ワークスペースは保護されていません',
   'workspace.protection.live-corrupt': 'ワークスペース状態のコピーが破損しています。ディスクと ~/.handmux の権限を確認し、handmux を再起動してください。',
   'workspace.protection.live-unavailable': 'ワークスペース状態を読み書きできません。空き容量と ~/.handmux の権限を確認し、handmux を再起動してください。',
+  'workspace.protection.writer-locked': 'バックグラウンドスナップショットがブロックされています。書き込みロックが他の操作に長時間占有されており、バックアップは更新されません。',
   'workspace.protection.unknown': 'バックグラウンドスナップショットを利用できません。コンピュータの handmux ログを確認してください。',
   'workspace.error.restore-interrupted': '復元が中断されました；このバックアップを再試行してください',
   'workspace.error.checkpoint-not-found': 'このバックアップは利用できません；更新して別のバックアップを選んでください',

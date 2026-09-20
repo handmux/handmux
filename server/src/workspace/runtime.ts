@@ -43,6 +43,7 @@ interface ReconcileResult { status: string; [key: string]: unknown }
 interface RuntimeCheckpointer {
   start?(): unknown | Promise<unknown>;
   health?(): RuntimeHealth;
+  blocked?(): { since: number; owner: string | null } | null;
   stop(): unknown;
   requestReconcile(): unknown;
   confirmEmpty(): unknown;
@@ -69,6 +70,11 @@ const recordOf = (value: unknown): Record<string, unknown> | null => (
     ? value as Record<string, unknown> : null
 );
 const errorMessage = (error: unknown): string => error instanceof Error ? error.message : String(error);
+
+// A restore holds the writer lock for as long as it runs, and that is normal — so a lock somebody else is
+// holding only means the workspace stopped being captured once it has been held far longer than a restore
+// takes. Nothing here steals the lock; it changes what the status reports.
+const WRITER_BLOCK_THRESHOLD_MS = 5 * 60_000;
 
 function unwrapCheckpoint(result: unknown): { checkpoint: WorkspaceCheckpoint; warnings: string[] } {
   const record = recordOf(result);
@@ -292,6 +298,7 @@ export function createWorkspaceRuntime({
     status: 'protected' | 'unprotected' | 'degraded';
     lastSuccessfulCaptureAt: string | null;
     errorCode: string | null;
+    blockedBy?: string | null;
   }> {
     let live: Awaited<ReturnType<WorkspaceStore['readLive']>>;
     try {
@@ -299,17 +306,28 @@ export function createWorkspaceRuntime({
     } catch {
       return { status: 'degraded', lastSuccessfulCaptureAt: null, errorCode: 'live-unavailable' };
     }
+    if (live.status !== 'ok' && live.status !== 'empty') {
+      return {
+        status: 'degraded',
+        lastSuccessfulCaptureAt: null,
+        errorCode: live.status === 'corrupt' ? 'live-corrupt' : 'live-unavailable',
+      };
+    }
+    // A healthy live copy is not protection: if the writer lock has been out of reach for long enough, the
+    // copy is simply the last one that was ever written, and capture is what has stopped.
+    const blocked = checkpointer.blocked?.();
+    if (blocked && Number.isFinite(blocked.since) && now() - blocked.since >= WRITER_BLOCK_THRESHOLD_MS) {
+      return {
+        status: 'degraded',
+        lastSuccessfulCaptureAt: live.status === 'ok' ? live.value.capturedAt || null : null,
+        errorCode: 'writer-locked',
+        blockedBy: blocked.owner,
+      };
+    }
     if (live.status === 'ok') {
       return { status: 'protected', lastSuccessfulCaptureAt: live.value.capturedAt || null, errorCode: null };
     }
-    if (live.status === 'empty') {
-      return { status: 'unprotected', lastSuccessfulCaptureAt: null, errorCode: null };
-    }
-    return {
-      status: 'degraded',
-      lastSuccessfulCaptureAt: null,
-      errorCode: live.status === 'corrupt' ? 'live-corrupt' : 'live-unavailable',
-    };
+    return { status: 'unprotected', lastSuccessfulCaptureAt: null, errorCode: null };
   }
 
   async function performRestore(

@@ -1388,6 +1388,7 @@ export default {
   'workspace.protectionTitle': '工作区未受保护',
   'workspace.protection.live-corrupt': '工作区状态副本已损坏；请检查磁盘和 ~/.handmux 权限，然后重启 handmux。',
   'workspace.protection.live-unavailable': '无法读写工作区状态；请检查磁盘空间和 ~/.handmux 权限，然后重启 handmux。',
+  'workspace.protection.writer-locked': '后台快照被阻塞：写锁被其他操作长期占用，备份不会更新。',
   'workspace.protection.unknown': '后台快照暂时不可用；请检查电脑上的 handmux 日志。',
   'workspace.error.restore-interrupted': '恢复已中断；请重试此备份',
   'workspace.error.checkpoint-not-found': '此备份已不可用；请刷新后选择其它备份',

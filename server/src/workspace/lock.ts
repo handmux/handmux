@@ -36,12 +36,18 @@ function defaultProcessAlive(pid: number): boolean {
 
 const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
-function ownerLabel(value: unknown): string {
+/** Who a lock record says is holding it, or null when the record says nothing usable. */
+export function lockOwnerLabel(value: unknown): string | null {
   const owner = asRecord(value);
-  if (!owner) return 'unknown owner';
-  const operation = typeof owner.operationId === 'string' && owner.operationId ? owner.operationId : 'unknown operation';
-  const pid = Number.isInteger(owner.pid) ? owner.pid : 'unknown';
-  return `${operation} (pid ${pid})`;
+  if (!owner) return null;
+  const operation = typeof owner.operationId === 'string' && owner.operationId ? owner.operationId : null;
+  const pid = Number.isInteger(owner.pid) ? owner.pid as number : null;
+  if (!operation && pid === null) return null;
+  return `${operation || 'unknown operation'} (pid ${pid ?? 'unknown'})`;
+}
+
+function ownerLabel(value: unknown): string {
+  return lockOwnerLabel(value) ?? 'unknown owner';
 }
 
 export function createWorkspaceLock({

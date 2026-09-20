@@ -326,10 +326,57 @@ describe('workspace checkpointer', () => {
 
   it('skips immediately when restore owns the writer lock', async () => {
     const d = deps({ lock: { tryAcquire: vi.fn(async () => null) } });
+    const checkpointer = createCheckpointer(d);
 
-    await expect(createCheckpointer(d).reconcile('timer')).resolves.toEqual({ status: 'locked' });
+    await expect(checkpointer.reconcile('timer')).resolves.toEqual({ status: 'locked', owner: null });
     expect(d.observeEnvironment).not.toHaveBeenCalled();
     expect(d.capture).not.toHaveBeenCalled();
+  });
+
+  it('names who holds the writer lock, and for how long, while it cannot reconcile', async () => {
+    let clock = Date.parse('2026-07-20T12:00:00.000Z');
+    const d = deps({
+      now: () => clock,
+      lock: {
+        tryAcquire: vi.fn(async () => null),
+        readOwner: vi.fn(async () => ({ operationId: 'restore-abc', pid: 123 })),
+      },
+    });
+    const checkpointer = createCheckpointer(d);
+
+    await checkpointer.reconcile('timer');
+    const since = checkpointer.blocked();
+    expect(since).toEqual({ since: clock, owner: 'restore-abc (pid 123)' });
+    // Ready, because a restore is allowed to hold this lock — but the detail says who and how long, which is
+    // what makes a lock that never clears diagnosable from the outside.
+    expect(checkpointer.health()).toEqual({
+      status: 'ready',
+      detail: 'workspace-writer-locked: restore-abc (pid 123) for 0s',
+    });
+
+    clock += 42_000;
+    await checkpointer.reconcile('timer');
+    expect(checkpointer.blocked()).toEqual({ since: since.since, owner: 'restore-abc (pid 123)' });
+    expect(checkpointer.health().detail).toBe('workspace-writer-locked: restore-abc (pid 123) for 42s');
+  });
+
+  it('forgets the blocked writer as soon as reconciliation can run again', async () => {
+    const release = vi.fn(async () => {});
+    const d = deps({
+      lock: {
+        tryAcquire: vi.fn()
+          .mockResolvedValueOnce(null)
+          .mockResolvedValue({ owner: {}, release }),
+      },
+    });
+    const checkpointer = createCheckpointer(d);
+
+    await checkpointer.reconcile('timer');
+    expect(checkpointer.blocked()).not.toBeNull();
+
+    await checkpointer.reconcile('timer');
+    expect(checkpointer.blocked()).toBeNull();
+    expect(checkpointer.health()).toEqual({ status: 'ready', detail: null });
   });
 
   it('reports the latest reconciliation result as a stable health state', async () => {

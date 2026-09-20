@@ -698,6 +698,7 @@ export default {
   'workspace.protectionTitle': '工作區未受保護',
   'workspace.protection.live-corrupt': '工作區狀態副本已損壞；請檢查磁碟與 ~/.handmux 權限，然後重新啟動 handmux。',
   'workspace.protection.live-unavailable': '無法讀寫工作區狀態；請檢查磁碟空間與 ~/.handmux 權限，然後重新啟動 handmux。',
+  'workspace.protection.writer-locked': '背景快照被封鎖：寫鎖被其他操作長期佔用，備份不會更新。',
   'workspace.protection.unknown': '背景快照暫時無法使用；請檢查電腦上的 handmux 日誌。',
   'workspace.error.restore-interrupted': '還原已中斷；請重試此備份',
   'workspace.error.checkpoint-not-found': '此備份已無法使用；請重新整理後選擇其他備份',

@@ -74,6 +74,14 @@ describe('conversation and terminal font copy', () => {
   });
 });
 
+describe('workspace protection copy', () => {
+  it.each([
+    ['en', en], ['zh', zh], ['zh-TW', zhTW], ['ja', ja], ['ko', ko],
+  ])('%s explains a blocked writer lock', (_code, dict) => {
+    expect(dict['workspace.protection.writer-locked']).toBeTruthy();
+  });
+});
+
 describe('API account security copy', () => {
   it.each([['en', en], ['zh', zh]])('%s states encrypted storage and safe recovery ordering', (_code, dict) => {
     expect(dict['apiBalance.storageNote']).toMatch(/encrypted|加密/);

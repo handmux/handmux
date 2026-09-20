@@ -23,6 +23,8 @@ export interface WorkspaceProtectionStatus {
   status?: WorkspaceProtectionStatusName;
   lastSuccessfulCaptureAt?: string | null;
   errorCode?: string | null;
+  /** Who holds the writer lock, when capture is blocked on it. */
+  blockedBy?: string | null;
 }
 
 export interface WorkspaceRestoreStart {
@@ -156,6 +158,7 @@ export function parseWorkspaceProtectionStatus(value: unknown): WorkspaceProtect
     ...optionalField('status', memberOf(PROTECTION_STATUSES, status.status)),
     ...optionalField('lastSuccessfulCaptureAt', optionalString(status.lastSuccessfulCaptureAt)),
     ...optionalField('errorCode', optionalString(status.errorCode)),
+    ...optionalField('blockedBy', optionalString(status.blockedBy)),
   };
 }
 

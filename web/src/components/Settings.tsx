@@ -48,6 +48,7 @@ interface UpdateInfo {
 interface WorkspaceProtection {
   status?: string;
   errorCode?: string | null;
+  blockedBy?: string | null;
 }
 
 type SettingsTerminalHandle = Pick<
@@ -439,6 +440,7 @@ export default function Settings({ open, onClose, termRef, onOpenChangelog = () 
   };
   const protectionCode = workspaceProtection?.errorCode;
   const protectionReason = protectionCode === 'live-corrupt' || protectionCode === 'live-unavailable'
+    || protectionCode === 'writer-locked'
     ? protectionCode : 'unknown';
   const integrationItems: readonly (AgentIntegrationSnapshot | {
     name: AgentIntegrationName;
@@ -488,6 +490,7 @@ export default function Settings({ open, onClose, termRef, onOpenChangelog = () 
         <div className="settings-page-alert" role="status">
           <strong>{t('workspace.protectionTitle')}</strong>
           <span>{t(`workspace.protection.${protectionReason}`)}</span>
+          {workspaceProtection.blockedBy && <span><code>{workspaceProtection.blockedBy}</code></span>}
         </div>
       )}
       {(!isTrustedDeviceEnabled() || !isTrustedOriginEnabled()) && (
