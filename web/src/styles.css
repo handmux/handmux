@@ -616,20 +616,23 @@ button.settings-page-row:disabled, .settings-page-row.disabled { color: rgba(235
 .bind-confirm { background: var(--blue); color: #fff; }
 .bind-confirm:disabled { opacity: .6; }
 /* Nav strip: windows scroll horizontally; the active multi-pane window's tab carries an inline pane menu. */
-.windowbar { display: flex; gap: 8px; align-items: center; padding: 6px 8px; background: #222; }
+/* --win-row-h is the height of every control in this row. The lens switch takes the same height as a tab
+   so turning it on cannot resize the row and shift the tabs sitting next to it. */
+.windowbar { --win-row-h: 23px; display: flex; gap: 8px; align-items: center; padding: 6px 8px; background: #222; }
 .windowbar-scroll { flex: 1; min-width: 0; display: flex; gap: 4px; overflow-x: auto; overflow-y: hidden; -webkit-overflow-scrolling: touch; touch-action: pan-x; }
 /* 终端⇄对话 lens toggle — a single one-tap button, right-aligned in the windowbar row, only rendered for
-   agent panes (its slot claims no space when absent, so the row never reflows). The swap glyph + faint
-   accent border read "this flips the view"; the label shows the current mode. Sized to sit with .win-tab. */
+   agent panes. It takes the row's own height (and, with its 1px border, the same padding a tab uses) so
+   appearing and disappearing never resizes the row: the tabs beside it used to slide down 2px the moment it
+   showed up. The swap glyph + faint accent border read "this flips the view"; the label shows the mode. */
 .lens-toggle {
   flex: none; display: inline-flex; align-items: center; gap: 5px;
-  padding: 6px 10px; border: 1px solid #3a4a63; border-radius: 8px;
+  height: var(--win-row-h); padding: 0 9px; border: 1px solid #3a4a63; border-radius: 8px;
   background: #1e2228; color: #cdd6e3; font-size: 12.5px; line-height: 1;
   touch-action: manipulation; -webkit-tap-highlight-color: transparent;
 }
 .lens-toggle:active { background: #262b33; }
 .lens-toggle svg { opacity: .82; }
-.win-tab { display: inline-flex; align-items: center; white-space: nowrap; padding: 4px 10px; border: none; border-radius: 8px; background: #33353a; color: #bbb; font-size: 13px; touch-action: manipulation; }
+.win-tab { display: inline-flex; align-items: center; white-space: nowrap; padding: 4px 10px; min-height: var(--win-row-h); border: none; border-radius: 8px; background: #33353a; color: #bbb; font-size: 13px; touch-action: manipulation; }
 .win-tab.active { background: var(--blue); color: #fff; }
 .win-new { border: 1px dashed #555; color: #8aa; font-weight: 700; background: transparent; }
 .win-panes { margin-left: 5px; font-size: 11px; color: #889; }

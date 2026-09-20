@@ -162,6 +162,14 @@ describe('WindowBar', () => {
     expect(container.querySelector('.lens-toggle')).toBeTruthy();
   });
 
+  it('sizes the lens switch and the tabs from one shared height so the row cannot reflow', () => {
+    // The switch is taller than a tab on its own (its 1px border plus a 13px glyph against the tab's line
+    // box), which made the row 4px taller and slid every tab down 2px the moment it appeared.
+    expect(styles).toMatch(/\.windowbar\s*\{[^}]*--win-row-h:\s*23px/);
+    expect(styles).toMatch(/\.win-tab\s*\{[^}]*min-height:\s*var\(--win-row-h\)/);
+    expect(styles).toMatch(/\.lens-toggle\s*\{[^}]*height:\s*var\(--win-row-h\)/);
+  });
+
   it('offers the enabled chat lens on a Codex pane', () => {
     render({ ...base, currentAgent: 'codex', chatLensEnabled: true });
     expect(container.querySelector('.lens-toggle')).toBeTruthy();
