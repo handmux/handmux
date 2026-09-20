@@ -141,6 +141,14 @@ describe('CodeBuddy hook record parsing', () => {
     expect(rows.get('%3')?.agent).toBe('codebuddy');
   });
 
+  it('clears a pending prompt when the user answers the interaction tool', () => {
+    // PostToolUse on AskUserQuestion/ExitPlanMode is the only signal that the user replied; without it the
+    // 需要你 state stayed lit until the turn happened to end.
+    expect(classifyCodeBuddy('resume', { tool_name: 'AskUserQuestion', tool_response: '· 接下来怎么做？ → 继续' }))
+      .toEqual({ kind: 'working', msg: '· 接下来怎么做？ → 继续' });
+    expect(classifyCodeBuddy('permreq', { tool_name: 'Bash' })).toMatchObject({ kind: 'permission' });
+  });
+
   it('reads the spool event the writer appends, mapping the shared session/key fields', () => {
     const parse = (value: unknown) => parseHookBridgeEvent(value, acceptsCodeBuddyAgent);
     expect(parse(spoolEvent('stop', { last_assistant_message: 'done' }))).toMatchObject({

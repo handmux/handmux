@@ -5,6 +5,7 @@
 //
 // Iron rule: only ever touch ~/.handmux/ and — after explicit opt-in — ~/.codebuddy/. If ~/.codebuddy is
 // absent (no CodeBuddy), skip and report 'no-codebuddy'; never create it.
+import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { homedir } from 'node:os';
@@ -21,9 +22,23 @@ export type CodeBuddyHookHealth = CodeBuddyHookStatus | 'stale';
 interface HookEvent {
   event: string;
   src: string;
+  // Only the interaction tools should wake this one: every other Read/Bash/Edit must NOT, or the hook fires
+  // on every tool call in a turn.
+  matcher?: string;
+  // Version-gated extension events: written only for a CodeBuddy new enough to EMIT them, and pruned when the
+  // gate fails, so a downgrade can never leave an event name the CLI does not recognise.
+  minVersion?: string;
+  pairWith?: string;
 }
+
+export interface CodeBuddyVersion { major: number; minor: number; patch: number }
+type CodeBuddyVersionExec = (
+  command: string, args: readonly string[], options: { encoding: 'utf8'; timeout: number },
+) => { status: number | null; stdout?: string | null };
 export interface CodeBuddyHookInstallOptions {
   srcDir?: string;
+  // Injected in tests; production detects it from `codebuddy --version`.
+  codebuddyVersion?: CodeBuddyVersion | null;
   stateFile?: string;
 }
 type Settings = Record<string, unknown>;
@@ -52,7 +67,63 @@ export const HOOK_EVENTS: readonly HookEvent[] = [
   { event: 'UserPromptSubmit', src: 'prompt' },
   { event: 'SessionStart', src: 'start' },
   { event: 'SessionEnd', src: 'end' },
+  // The pair that owns "需要你": PermissionRequest lights it the moment the dialog appears, and PostToolUse on
+  // the two interaction tools clears it the moment the user answers — the same events Claude installs. Without
+  // them the state stays lit after the user replies, until the turn happens to end.
+  { event: 'PostToolUse', src: 'resume', matcher: 'AskUserQuestion|ExitPlanMode' },
+  { event: 'PermissionRequest', src: 'permreq' },
 ];
+
+// Version-gated events, mirroring Claude's: written only for a CLI new enough to emit them, pruned otherwise
+// (fail-closed when the version cannot be read). Each closes a state we would otherwise light and never turn
+// off:
+//   PreCompact  → 压缩中 while compaction runs.
+//   PostCompact → clears it the instant compaction finishes.
+//   StopFailure → a turn that died on an API error (rate limit / overload / …) fires NO Stop, so without this
+//                 the pane sticks at 进行中 forever; maps to an 'error' state.
+// `pairWith` welds the invariant "never light a state you cannot turn off": PreCompact installs only together
+// with its clearer PostCompact. minVersion is the version these were verified to exist in (2.155.0); lower it
+// only after test-firing an older build.
+const COMPACT_MIN = '2.155.0';
+export const HOOK_EVENTS_EXT: readonly HookEvent[] = [
+  { event: 'PostCompact', src: 'compact', minVersion: COMPACT_MIN },
+  { event: 'PreCompact', src: 'compacting', minVersion: COMPACT_MIN, pairWith: 'PostCompact' },
+  { event: 'StopFailure', src: 'stopfail', minVersion: COMPACT_MIN },
+];
+
+const defaultVersionExec: CodeBuddyVersionExec = (command, args, options) => {
+  const r = spawnSync(command, [...args], options);
+  return { status: r.status, stdout: r.stdout };
+};
+
+// Parse `codebuddy --version` output ("2.155.0") → { major, minor, patch } | null.
+export function parseCodeBuddyVersion(out: unknown): CodeBuddyVersion | null {
+  const m = /(\d+)\.(\d+)\.(\d+)/.exec(String(out || ''));
+  return m ? { major: Number(m[1] ?? 0), minor: Number(m[2] ?? 0), patch: Number(m[3] ?? 0) } : null;
+}
+
+// v >= min ("X.Y.Z"); an unknown version is always below → the gate fails closed.
+export function codeBuddyVersionAtLeast(v: CodeBuddyVersion | null | undefined, minStr: string): boolean {
+  if (!v) return false;
+  const [a = 0, b = 0, c = 0] = String(minStr).split('.').map(Number);
+  if (v.major !== a) return v.major > a;
+  if (v.minor !== b) return v.minor > b;
+  return v.patch >= c;
+}
+
+// Detect the installed CodeBuddy version, or null when it cannot be run/parsed (→ ext events are skipped).
+export function detectCodeBuddyVersion(exec: CodeBuddyVersionExec = defaultVersionExec): CodeBuddyVersion | null {
+  try {
+    for (const command of ['codebuddy', 'cbc']) {
+      const r = exec(command, ['--version'], { encoding: 'utf8', timeout: 4000 });
+      if (r && r.status === 0 && r.stdout) {
+        const parsed = parseCodeBuddyVersion(r.stdout);
+        if (parsed) return parsed;
+      }
+    }
+    return null;
+  } catch { return null; }
+}
 
 // Identifies OUR hooks among the user's own. Distinct from Claude's marker, so neither installer can mistake
 // the other's entries for its own even if a config directory is ever shared.
@@ -97,7 +168,7 @@ function hasExpectedHook(hooks: Hooks, event: HookEvent, dest: string): boolean 
   const command = `${shellWord(dest)} ${event.src}`;
   return Array.isArray(groups) && groups.some((group) => (
     isRecord(group)
-    && group.matcher === ''
+    && group.matcher === (event.matcher ?? '')
     && Array.isArray(group.hooks)
     && group.hooks.some((hook) => (
       isRecord(hook)
@@ -118,17 +189,25 @@ function addHook(hooks: Hooks, e: HookEvent, dest: string): void {
   const existing = hooks[e.event];
   const groups: unknown[] = hooks[e.event] = Array.isArray(existing) ? [...existing] : [];
   groups.push({
-    matcher: '',
+    matcher: e.matcher ?? '',
     hooks: [{ type: 'command', command: `${shellWord(dest)} ${e.src}`, async: true, timeout: 5 }],
   });
 }
 
-// Pure: return a NEW settings object with our five hooks merged into settings.hooks, idempotently, leaving
+// Pure: return a NEW settings object with our hooks merged into settings.hooks, idempotently, leaving
 // the user's own hooks and other keys untouched. `dest` is the absolute path to the copied notify script.
-export function mergeHooks(settings: unknown, dest: string): Settings {
+export function mergeHooks(settings: unknown, dest: string, codebuddyVersion: CodeBuddyVersion | null = null): Settings {
   const s = settingsOf(settings);
   const hooks: Hooks = isRecord(s.hooks) ? { ...s.hooks } : {};
   for (const e of HOOK_EVENTS) addHook(hooks, e, dest);
+  // Extension events: only for a CLI that emits them, and only with their clearer installed too.
+  const enabled = new Set<string>();
+  for (const e of HOOK_EVENTS_EXT) {
+    const ok = !!e.minVersion
+      && codeBuddyVersionAtLeast(codebuddyVersion, e.minVersion)
+      && (!e.pairWith || enabled.has(e.pairWith));
+    if (ok) { enabled.add(e.event); addHook(hooks, e, dest); } else dropOurHook(hooks, e.event);
+  }
   s.hooks = hooks;
   return s;
 }
@@ -188,19 +267,20 @@ export function hooksHealthStatus(home: string = homedir()): CodeBuddyHookHealth
 }
 
 // Install (opt-in): copy the bundled hook scripts to ~/.codebuddy/hooks/, write the env pointing at the state
-// file, and merge our five hooks into settings.json. NEVER creates ~/.codebuddy — if it's absent the user
+// file, and merge our hooks into settings.json. NEVER creates ~/.codebuddy — if it's absent the user
 // doesn't run CodeBuddy, so we report 'no-codebuddy' and do nothing.
 //   srcDir    = the bundled hooks dir (server/hooks)
 //   stateFile = the unified ~/.handmux/codebuddy-state.json path the hook writes and the server reads
 export function installHooks(
   home: string = homedir(),
-  { srcDir, stateFile }: CodeBuddyHookInstallOptions = {},
+  { srcDir, stateFile, codebuddyVersion }: CodeBuddyHookInstallOptions = {},
 ): { status: 'no-codebuddy' | 'installed' } {
   if (!fs.existsSync(codebuddyDir(home))) return { status: 'no-codebuddy' };
   if (!srcDir || !stateFile) throw new Error('hook srcDir and stateFile are required');
   deployHookScripts(path.join(codebuddyDir(home), 'hooks'), srcDir, stateFile, CODEBUDDY_HOOK_SET);
   const settings = readSettings(home);
-  writeJsonAtomic(settingsPath(home), mergeHooks(settings, notifyDest(home)));
+  const version = codebuddyVersion !== undefined ? codebuddyVersion : detectCodeBuddyVersion();
+  writeJsonAtomic(settingsPath(home), mergeHooks(settings, notifyDest(home), version));
   return { status: 'installed' };
 }
 

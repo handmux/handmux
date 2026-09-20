@@ -4,8 +4,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  HOOK_EVENTS, mergeHooks, stripHooks, hooksStatus, hooksHealthStatus,
+  HOOK_EVENTS, HOOK_EVENTS_EXT, mergeHooks, stripHooks, hooksStatus, hooksHealthStatus,
   installHooks, uninstallHooks, syncHooks,
+  parseCodeBuddyVersion, codeBuddyVersionAtLeast, detectCodeBuddyVersion,
 } from '../src/cli/codebuddyHooks.js';
 
 const SRC_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../hooks');
@@ -24,31 +25,98 @@ function hasHook(settings, event, mark = MARK) {
 }
 
 describe('CodeBuddy HOOK_EVENTS', () => {
-  it('declares the five verified events with the agreed src names and no matcher', () => {
+  it('declares every event the Agent needs, with the agreed src names', () => {
     const byEvent = Object.fromEntries(HOOK_EVENTS.map((e) => [e.event, e]));
     expect(HOOK_EVENTS.map((e) => e.event)).toEqual([
       'Stop', 'Notification', 'UserPromptSubmit', 'SessionStart', 'SessionEnd',
+      'PostToolUse', 'PermissionRequest',
     ]);
     expect(byEvent.Stop.src).toBe('stop');
     expect(byEvent.Notification.src).toBe('notify');
     expect(byEvent.UserPromptSubmit.src).toBe('prompt');
     expect(byEvent.SessionStart.src).toBe('start');
     expect(byEvent.SessionEnd.src).toBe('end');
+    // The pair that owns 需要你: the request lights it, answering the question clears it. Same two events
+    // Claude installs — without them a pending prompt stays lit after the user replies.
+    expect(byEvent.PermissionRequest.src).toBe('permreq');
+    expect(byEvent.PostToolUse.src).toBe('resume');
+    // Only the interaction tools may wake PostToolUse; every other tool call in a turn must not.
+    expect(byEvent.PostToolUse.matcher).toBe('AskUserQuestion|ExitPlanMode');
+    expect(byEvent.PermissionRequest.matcher).toBeUndefined();
+  });
+});
+
+describe('version-gated events', () => {
+  const at = (major, minor, patch) => ({ major, minor, patch });
+
+  it('writes the extension events only for a CodeBuddy new enough to emit them', () => {
+    // Same policy as Claude's: never write an event the CLI might not recognise. Undetectable fails closed.
+    for (const version of [null, undefined, at(2, 154, 9)]) {
+      const out = mergeHooks({}, DEST, version);
+      for (const e of HOOK_EVENTS_EXT) expect(hasHook(out, e.event), e.event).toBe(false);
+    }
+    const out = mergeHooks({}, DEST, at(2, 155, 0));
+    for (const e of HOOK_EVENTS_EXT) expect(hasHook(out, e.event), e.event).toBe(true);
+    expect(out.hooks.StopFailure[0].hooks[0].command).toBe(`${DEST} stopfail`);
+    expect(out.hooks.PreCompact[0].hooks[0].command).toBe(`${DEST} compacting`);
+    expect(out.hooks.PostCompact[0].hooks[0].command).toBe(`${DEST} compact`);
+  });
+
+  it('prunes our extension events when the version no longer passes the gate', () => {
+    // A downgrade must not leave an event name behind that this CLI cannot handle; the user's own hooks and
+    // the base events stay exactly where they are.
+    const installed = mergeHooks({ hooks: { Custom: [{ matcher: '', hooks: [{ type: 'command', command: 'user-own' }] }] } },
+      DEST, at(2, 155, 0));
+    const downgraded = mergeHooks(installed, DEST, at(2, 154, 0));
+    for (const e of HOOK_EVENTS_EXT) expect(hasHook(downgraded, e.event), e.event).toBe(false);
+    for (const e of HOOK_EVENTS) expect(hasHook(downgraded, e.event), e.event).toBe(true);
+    expect(downgraded.hooks.Custom[0].hooks[0].command).toBe('user-own');
+  });
+
+  it('parses and compares versions the way the gate needs', () => {
+    expect(parseCodeBuddyVersion('2.155.0\n')).toEqual(at(2, 155, 0));
+    expect(parseCodeBuddyVersion('codebuddy 3.0.1')).toEqual(at(3, 0, 1));
+    expect(parseCodeBuddyVersion('nonsense')).toBeNull();
+    expect(codeBuddyVersionAtLeast(at(2, 155, 0), '2.155.0')).toBe(true);
+    expect(codeBuddyVersionAtLeast(at(2, 154, 99), '2.155.0')).toBe(false);
+    expect(codeBuddyVersionAtLeast(at(3, 0, 0), '2.155.0')).toBe(true);
+    expect(codeBuddyVersionAtLeast(null, '2.155.0')).toBe(false);
+  });
+
+  it('detects the CLI version, and reports nothing when it cannot be read', () => {
+    expect(detectCodeBuddyVersion(() => ({ status: 0, stdout: '2.155.0\n' }))).toEqual(at(2, 155, 0));
+    expect(detectCodeBuddyVersion(() => ({ status: 1, stdout: '' }))).toBeNull();
+    expect(detectCodeBuddyVersion(() => { throw new Error('ENOENT'); })).toBeNull();
+  });
+
+  it('installs the extension events through installHooks when the detected version allows them', () => {
+    const home = mk();
+    installHooks(home, { ...opts(home), codebuddyVersion: at(2, 155, 0) });
+    const settings = readSettings(home);
+    for (const e of [...HOOK_EVENTS, ...HOOK_EVENTS_EXT]) expect(hasHook(settings, e.event), e.event).toBe(true);
+    // A partial registration is still repairable-but-not-ready only for BASE events; extension events stay
+    // optional, exactly like Claude's.
+    expect(hooksHealthStatus(home)).toBe('installed');
   });
 });
 
 describe('mergeHooks', () => {
-  it('registers all five events pointing at the dest script with src args', () => {
+  it('registers every event pointing at the dest script with src args', () => {
     const out = mergeHooks({}, DEST);
-    for (const ev of ['Stop', 'Notification', 'UserPromptSubmit', 'SessionStart', 'SessionEnd']) {
+    for (const ev of ['Stop', 'Notification', 'UserPromptSubmit', 'SessionStart', 'SessionEnd',
+      'PostToolUse', 'PermissionRequest']) {
       expect(hasHook(out, ev), ev).toBe(true);
     }
     const cmd = (ev) => out.hooks[ev].flatMap((g) => g.hooks).map((h) => h.command).join(' ');
     expect(cmd('UserPromptSubmit')).toBe(`${DEST} prompt`);
     expect(cmd('SessionStart')).toBe(`${DEST} start`);
     expect(cmd('SessionEnd')).toBe(`${DEST} end`);
+    expect(cmd('PostToolUse')).toBe(`${DEST} resume`);
+    expect(cmd('PermissionRequest')).toBe(`${DEST} permreq`);
     expect(out.hooks.Stop[0].hooks[0]).toMatchObject({ type: 'command', async: true, timeout: 5 });
     expect(out.hooks.Stop[0].matcher).toBe('');
+    // The matcher has to reach settings.json, or the hook would fire on every tool call.
+    expect(out.hooks.PostToolUse[0].matcher).toBe('AskUserQuestion|ExitPlanMode');
   });
 
   it('is idempotent — merging twice does not duplicate groups', () => {

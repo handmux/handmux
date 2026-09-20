@@ -68,6 +68,8 @@ export function classifyCodeBuddy(src: unknown, rawBody: unknown = {}): AgentHoo
   if (src === 'stop') return { kind: 'done', msg: text(body.last_assistant_message) };
   if (src === 'prompt') return { kind: 'working', msg: text(body.prompt) };
   if (src === 'permreq') return { kind: 'permission', msg: permissionMessage(body) };
+  // Answered or approved: back to working, carrying what the user picked so the card stops asking.
+  if (src === 'resume') return { kind: 'working', msg: text(body.tool_response) };
   if (src === 'permdenied') return { kind: 'working', msg: '' };
   if (src === 'compacting') return { kind: 'compacting', msg: '' };
   if (src === 'compact') return null;

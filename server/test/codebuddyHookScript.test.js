@@ -93,7 +93,7 @@ function events(file) {
   } catch { return []; }
 }
 
-// The five payloads verified against CodeBuddy 2.155.0. Only the fields the Connector reads are kept.
+// The payloads verified against CodeBuddy 2.155.0. Only the fields the Connector reads are kept.
 const PAYLOADS = [
   ['start', 'SessionStart', {
     session_id: 'cb-s1',
@@ -134,6 +134,16 @@ const PAYLOADS = [
     message: 'Signed in',
     notification_type: 'auth_success',
     title: 'CodeBuddy',
+  }],
+  // Answering a question (or approving a plan) completes the interaction tool: this is what clears 需要你.
+  ['resume', 'PostToolUse', {
+    session_id: 'cb-s1',
+    transcript_path: '/Users/x/.codebuddy/projects/-Users-x/abc.jsonl',
+    cwd: '/Users/x',
+    tool_name: 'AskUserQuestion',
+    tool_response: '· 接下来怎么做？ → 继续',
+    generation_id: 'gen-1',
+    model: 'claude-sonnet-4',
   }],
 ];
 

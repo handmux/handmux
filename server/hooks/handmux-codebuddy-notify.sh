@@ -1,7 +1,7 @@
 #!/bin/sh
 # handmux 上报 hook(CodeBuddy Code). $1 = 事件 src 名:
 #   start(SessionStart) | prompt(UserPromptSubmit) | stop(Stop) | end(SessionEnd) | notify(Notification)
-#   | permreq(PermissionRequest) | permdenied(PermissionDenied) | compacting(PreCompact)
+#   | resume(PostToolUse on the interaction tools) | permreq(PermissionRequest) | permdenied(PermissionDenied) | compacting(PreCompact)
 #   | compact(PostCompact) | stopfail(StopFailure)
 # stdin = CodeBuddy 原始 payload(JSON).
 # 只做本地落盘:更新 JSON latest state,并在启用时追加有界 Bridge event spool。不联网、不依赖服务进程
@@ -18,12 +18,15 @@ PANE="$TMUX_PANE"
 # a hand-written or project-level settings.json can then point straight at `<script> <EventName>`, and both
 # spellings collapse into the one vocabulary the Connector reads. Anything else is not ours → touch nothing.
 case "$1" in
-  start|prompt|stop|end|notify|permreq|permdenied|compacting|compact|stopfail) SRC="$1" ;;
+  start|prompt|stop|end|notify|resume|permreq|permdenied|compacting|compact|stopfail) SRC="$1" ;;
   SessionStart) SRC='start' ;;
   UserPromptSubmit) SRC='prompt' ;;
   Stop) SRC='stop' ;;
   SessionEnd) SRC='end' ;;
   Notification) SRC='notify' ;;
+  # The user answered a question or approved a plan: the wait is over and the turn continues. Registered with
+  # a matcher, so this only ever fires for those two tools.
+  PostToolUse) SRC='resume' ;;
   PermissionRequest) SRC='permreq' ;;
   PermissionDenied) SRC='permdenied' ;;
   PreCompact) SRC='compacting' ;;
