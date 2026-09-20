@@ -95,12 +95,15 @@ export function navigationAgentMaps(
   // A window's badge is its ACTIVE pane's Agent — whether or not that window is the selected one. Deriving
   // it from whichever pane was listed last (or, for the selected window, from the pane this client happens
   // to have open) meant the badge changed the moment you selected the window, and could flash on the way.
-  // The selected window keeps the canonical value above whenever /windows does not report an active pane.
+  // Only an Agent the active pane actually HAS replaces the window's answer: an active pane that is a shell,
+  // or one this client has no identity for at all, is not evidence that the window has no Agent — writing
+  // `null` there is what made a window full of Claude draw no logo while its pane map showed one.
   for (const win of current?.windows ?? []) {
     if (!win?.id) continue;
     const activePaneId = win.activePaneId;
     if (typeof activePaneId !== 'string' || !activePaneId) continue;
-    windowAgents[win.id] = paneAgents[activePaneId] ?? null;
+    const activeAgent = paneAgents[activePaneId];
+    if (activeAgent) windowAgents[win.id] = activeAgent;
   }
   return { windowAgents, paneAgents };
 }
