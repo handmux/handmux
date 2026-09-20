@@ -194,7 +194,7 @@ export default {
   'agent.codexBuiltIn': '= Codex integration is built in and already ready.',
   'agent.codexDisable': 'Codex integration is built in and cannot be disabled. Run native `codex` directly to bypass Handmux.',
   'agent.unknown': 'unknown Agent: {name}',
-  'agent.usage': 'usage: handmux agent [list] | handmux agent status|enable|disable <codex|pi|claude>',
+  'agent.usage': 'usage: handmux agent [list] | handmux agent status|enable|disable <codex|pi|claude|codebuddy>',
 
   // Pi Extension
   'piExtension.confirmEnable': 'Enable the Pi integration with Handmux?',

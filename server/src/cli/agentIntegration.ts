@@ -8,9 +8,16 @@ import {
   uninstallPiExtension,
 } from './piExtension.js';
 import { hooksHealthStatus, hooksStatus, installHooks, uninstallHooks } from './claudeHooks.js';
+import { codebuddyStatePath } from './state.js';
+import {
+  hooksHealthStatus as codebuddyHooksHealthStatus,
+  hooksStatus as codebuddyHooksStatus,
+  installHooks as installCodebuddyHooks,
+  uninstallHooks as uninstallCodebuddyHooks,
+} from './codebuddyHooks.js';
 import { statusLineStatus, uninstallStatusLine } from './statusLine.js';
 
-export const AGENT_NAMES = ['codex', 'pi', 'claude'] as const;
+export const AGENT_NAMES = ['codex', 'pi', 'claude', 'codebuddy'] as const;
 export type AgentName = typeof AGENT_NAMES[number];
 export type AgentIntegrationStatus =
   | 'ready'
@@ -24,6 +31,9 @@ export interface AgentIntegrationContext {
   piEntryFile: string;
   hooksSrcDir: string;
   claudeStateFile: string;
+  // CodeBuddy's Hook state file, on the same stable per-user path as Claude's. Optional only so callers
+  // built before CodeBuddy existed keep compiling; the default is derived from `home`.
+  codebuddyStateFile?: string;
   executableAvailable: (command: string) => boolean;
 }
 
@@ -73,12 +83,15 @@ export function defaultAgentIntegrationContext({
   piEntryFile,
   hooksSrcDir,
   claudeStateFile,
-}: Omit<AgentIntegrationContext, 'home' | 'executableAvailable'> & { home?: string }): AgentIntegrationContext {
+  codebuddyStateFile,
+}: Omit<AgentIntegrationContext, 'home' | 'executableAvailable' | 'codebuddyStateFile'>
+  & { home?: string; codebuddyStateFile?: string }): AgentIntegrationContext {
   return {
     home,
     piEntryFile,
     hooksSrcDir,
     claudeStateFile,
+    codebuddyStateFile: codebuddyStateFile ?? codebuddyStatePath(home),
     executableAvailable: (command) => executableOnPath(command),
   };
 }
@@ -94,6 +107,14 @@ export function agentIntegrationStatus(
     // the Agent exists but the integration is not enableable, and installHooks must still never create it.
     const status = hooksHealthStatus(context.home);
     if (status === 'no-claude') return 'not-enabled';
+    if (status === 'stale') return 'needs-repair';
+    return status === 'installed' ? 'ready' : 'not-enabled';
+  }
+  if (name === 'codebuddy') {
+    // Same rule as Claude: PATH decides whether CodeBuddy exists, but its first run creates ~/.codebuddy.
+    // Until that directory exists the integration is not enableable, and installHooks must never create it.
+    const status = codebuddyHooksHealthStatus(context.home);
+    if (status === 'no-codebuddy') return 'not-enabled';
     if (status === 'stale') return 'needs-repair';
     return status === 'installed' ? 'ready' : 'not-enabled';
   }
@@ -130,6 +151,15 @@ export function enableAgentIntegration(
     const status = agentIntegrationStatus(name, context);
     return { name, status, changed: installed.status === 'installed' && before !== 'ready' };
   }
+  if (name === 'codebuddy') {
+    // The same script bundle and the same state-file contract as Claude, deployed into ~/.codebuddy/hooks.
+    const installed = installCodebuddyHooks(context.home, {
+      srcDir: context.hooksSrcDir,
+      stateFile: context.codebuddyStateFile ?? codebuddyStatePath(context.home),
+    });
+    const status = agentIntegrationStatus(name, context);
+    return { name, status, changed: installed.status === 'installed' && before !== 'ready' };
+  }
   try {
     const result = installPiExtension(context.home, { entryFile: context.piEntryFile });
     return { name, status: 'ready', changed: result.changed };
@@ -151,6 +181,13 @@ export function disableAgentIntegration(
       || statusLineStatus(context.home) === 'ours';
     uninstallHooks(context.home);
     uninstallStatusLine(context.home);
+    return { name, status: 'not-enabled', changed };
+  }
+  if (name === 'codebuddy') {
+    // CodeBuddy has no statusLine equivalent, so only its own hooks are removed — never another product's
+    // config, and never ~/.codebuddy itself.
+    const changed = codebuddyHooksStatus(context.home) === 'installed';
+    uninstallCodebuddyHooks(context.home);
     return { name, status: 'not-enabled', changed };
   }
   try {

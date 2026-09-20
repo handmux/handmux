@@ -45,6 +45,11 @@ export function agentRuntimeDirectoryPath(home: string): string {
 // and writes the same path into the hook's env, so both ends read/write one file.
 export function claudeStatePath(home: string): string { return path.join(pocketHome(home), 'claude-state.json'); }
 
+// The same contract for CodeBuddy, which drives an identical Hook (state file + bounded spool) through the
+// same writer. Its own file, on the same stable per-user path: the CLI sets CODEBUDDY_STATE_FILE for the
+// server child and writes the same path into the CodeBuddy hook env, so both ends agree.
+export function codebuddyStatePath(home: string): string { return path.join(pocketHome(home), 'codebuddy-state.json'); }
+
 // Push subscriptions and the dynamic-preview registry are mutable runtime data too, so they belong on the
 // same stable per-user path — NOT the package-internal server/data default, which a `npm i -g handmux`
 // reinstall replaces (silently dropping every saved subscription). The CLI injects these as PUSH_STORE /

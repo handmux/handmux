@@ -193,7 +193,7 @@ export default {
   'agent.codexBuiltIn': '= Codex 接入已内置，当前已经 ready。',
   'agent.codexDisable': 'Codex 接入已内置，不能停用。若要绕过 Handmux，请直接运行原生 `codex`。',
   'agent.unknown': '未知 Agent：{name}',
-  'agent.usage': '用法:handmux agent [list] | handmux agent status|enable|disable <codex|pi|claude>',
+  'agent.usage': '用法:handmux agent [list] | handmux agent status|enable|disable <codex|pi|claude|codebuddy>',
 
   // Pi Extension
   'piExtension.confirmEnable': '启用 Pi 与 Handmux 的接入能力?',

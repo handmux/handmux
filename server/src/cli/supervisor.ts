@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { providerMode, voiceProviderRegistry } from '../asr/providerRegistry.js';
 import { getDriver } from './drivers.js';
-import { writeState, clearState, claudeStatePath, pushStorePath, previewStorePath, notificationsDirPath } from './state.js';
+import { writeState, clearState, claudeStatePath, codebuddyStatePath, pushStorePath, previewStorePath, notificationsDirPath } from './state.js';
 import {
   initialSupervisorComponentState, reduceSupervisorComponent,
 } from './supervisorState.js';
@@ -206,6 +206,7 @@ export function supervise(cfg: SupervisorConfig, {
       HANDMUX_HOST: cfg.host,
       HANDMUX_TOKEN: cfg.token,
       CLAUDE_STATE_FILE: claudeStatePath(home),
+      CODEBUDDY_STATE_FILE: codebuddyStatePath(home),
       PUSH_STORE: pushStorePath(home),
       PREVIEW_STORE: previewStorePath(home),
       NOTIF_DIR: notificationsDirPath(home),

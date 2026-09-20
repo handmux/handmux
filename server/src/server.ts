@@ -8,11 +8,13 @@ import { createApiRouter } from './httpApi.js';
 import { loadUploadExts } from './uploadTypes.js';
 import { createClaudeEvents } from './claudeEvents.js';
 import { syncHooks } from './cli/claudeHooks.js';
+import { syncHooks as syncCodebuddyHooks } from './cli/codebuddyHooks.js';
 import { syncPiExtension } from './cli/piExtension.js';
 import { removeLegacyCodexHooks } from './cli/legacyCodexHooks.js';
 import {
   agentRuntimeDirectoryPath,
   claudeStatePath,
+  codebuddyStatePath,
   codexOutboxPath,
 } from './cli/state.js';
 import * as commands from './tmux/commands.js';
@@ -60,6 +62,7 @@ import { inspectCodexOpenRootSession } from './agents/codexOpenSession.js';
 import { CodexActivationReceiptStore } from './agents/codexActivationReceipt.js';
 import { ApiAccountService, apiAccountsPath } from './apiAccounts.js';
 import { ClaudeHookBridgeConnector } from '../connectors/claude/index.js';
+import { CodeBuddyHookBridgeConnector } from '../connectors/codebuddy/index.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
@@ -238,6 +241,23 @@ const claudeInboxBridge = new ClaudeHookBridgeConnector({
     console.warn(`[handmux] ${message}${detail}`);
   },
 });
+// CodeBuddy drives the same Hook pipeline into its own state file. No native tail: this slice trusts the
+// Hook lifecycle edges alone (see connectors/codebuddy).
+const codebuddyStateFile = process.env.CODEBUDDY_STATE_FILE || codebuddyStatePath(home);
+const codebuddyInboxBridge = new CodeBuddyHookBridgeConnector({
+  socketPath: agentRuntime.socketPath,
+  credentialFile: path.join(agentRuntimeDirectory, 'bridge-credential.json'),
+  stateDirectory: path.join(agentRuntimeDirectory, 'connectors', 'codebuddy'),
+  hookStateFile: codebuddyStateFile,
+  eventDirectory: `${codebuddyStateFile}.events`,
+  panes: agentPanes,
+  process: agentProcess,
+  logger: (message, error) => {
+    const detail = error === undefined
+      ? '' : `: ${error instanceof Error ? error.message : String(error)}`;
+    console.warn(`[handmux] ${message}${detail}`);
+  },
+});
 const inboxPush = new InboxPushProjection({
   inbox: agentRuntime.inbox,
   runs: agentRuntime.runs,
@@ -253,6 +273,7 @@ agentRuntime.start().catch((error) => {
   }
 });
 claudeInboxBridge.start();
+codebuddyInboxBridge.start();
 workspace.start().catch(() => {});
 
 // Keep an already-opted-in user's Claude hooks in step with this handmux version on restart: newly-added
@@ -263,6 +284,14 @@ try {
   syncHooks(home, {
     srcDir: path.resolve(here, '../hooks'),
     stateFile,
+  });
+} catch { /* best effort — hook sync never fails startup */ }
+// The same roll-forward for an already-opted-in CodeBuddy: newly-added lifecycle events and a refreshed
+// notify script land via a plain restart. A strict no-op unless its hooks are installed.
+try {
+  syncCodebuddyHooks(home, {
+    srcDir: path.resolve(here, '../hooks'),
+    stateFile: codebuddyStateFile,
   });
 } catch { /* best effort — hook sync never fails startup */ }
 // Keep an explicitly installed Pi wrapper pointed at this package version (notably across Homebrew

@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { getAgent, agentForProc } from './agents/index.js';
+import { hookEventKind } from './agents/hookEvents.js';
 import { resolveVersionedComms } from './agents/claude.js';
 import { resolveCodexComms } from './agents/codex.js';
 import { defaultRun } from './agents/scanUtils.js';
@@ -95,16 +96,13 @@ interface ManagedCodexState {
   suppressPush: boolean;
 }
 
-const EVENT_KINDS = new Set<ClaudeEventKind>([
-  'done', 'working', 'permission', 'compacting', 'error', 'end', 'idle',
-]);
 const VIEW_LABEL: Record<PushView, string> = { needs: '需要你', done: '已完成' };
 const recordOf = (value: unknown): Record<string, unknown> | null =>
   value && typeof value === 'object' && !Array.isArray(value)
     ? value as Record<string, unknown> : null;
-const eventKind = (value: unknown): ClaudeEventKind | null =>
-  typeof value === 'string' && EVENT_KINDS.has(value as ClaudeEventKind)
-    ? value as ClaudeEventKind : null;
+// The kind vocabulary itself is shared with every other Hook-driven provider; only Claude's own
+// classification decisions live in agents/claude.ts.
+const eventKind = hookEventKind;
 const pushView = (kind: ClaudeEventKind | null): PushView | null =>
   kind === 'permission' ? 'needs' : kind === 'done' ? 'done' : null;
 

@@ -81,6 +81,11 @@ export const codebuddy: AgentAdapter = {
     verify: verifyCodeBuddyProcess,
   },
   presentation: { iconId: 'codebuddy' },
-  // Only what is actually implemented. Inbox/Conversation/Interaction are added as each one lands.
-  capabilities: {},
+  // Only what is actually implemented. Inbox is delivered by CodeBuddy's Claude-compatible Hooks through
+  // its own Connector (connectors/codebuddy) + the Bridge durable lane; Conversation/Interaction follow.
+  // The classification of its `src`→kind events lives in ../../codebuddyEvents.ts, next to the shared
+  // Hook vocabulary, because that is the module the Connector consumes.
+  capabilities: {
+    inbox: { apiVersion: 1 as const },
+  },
 };

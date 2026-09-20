@@ -28,6 +28,7 @@ import {
   BridgeInboxCoordinator,
   PiInboxBridgeCoordinator,
 } from '../agents/piInboxBridge.js';
+import { hookEventSequence } from '../agents/hookEvents.js';
 import {
   AgentRuntime,
 } from './runtime.js';
@@ -157,11 +158,9 @@ export function createBuiltinAgentRuntime({
         agentId: 'claude',
         sourceId: 'claude.hooks',
         label: 'Claude',
-        sourceEventSequence: (eventId) => {
-          const match = /^claude-hook-([1-9]\d*)$/.exec(eventId);
-          const sequence = match ? Number(match[1]) : NaN;
-          return Number.isSafeInteger(sequence) ? sequence : null;
-        },
+        // The Hook spool's event ID carries its durable source sequence; the interpreter is the SHARED one
+        // because CodeBuddy's spool is written by the same script with the same ID shape.
+        sourceEventSequence: hookEventSequence,
       });
       const conversationSessions = claudeEvents && typeof claudeEvents.paneSession === 'function'
         ? claudeEvents as NonNullable<Parameters<typeof createClaudeConversationAdapter>[0]>['sessions']
@@ -208,6 +207,28 @@ export function createBuiltinAgentRuntime({
         conversationActivity: createPiConversationActivityReader(context.bridge),
         conversationContext: createPiConversationContextAdapter({ host: context.bridge }),
         sessionControl: createPiSessionControlAdapter({ host: context.bridge }),
+        start: () => {
+          inbox.start();
+          return () => inbox.close();
+        },
+        onBridgeConnected: (lease) => inbox.bind(lease).then(() => undefined),
+      };
+    },
+    // CodeBuddy is Claude's twin on this path: the same file Hooks, the same shared writer, the same Bridge
+    // durable lane, so it reuses the same coordinator. There is deliberately no native/legacy source — the
+    // Connector publishes both the neutral pane baseline and every lifecycle edge, and the ordered projector
+    // is the only authority for CodeBuddy state from day one.
+    codebuddy: (context) => {
+      const inbox = new BridgeInboxCoordinator({
+        host: context.bridge,
+        projector: context.inbox,
+        agentId: 'codebuddy',
+        sourceId: 'codebuddy.hooks',
+        label: 'CodeBuddy',
+        sourceEventSequence: hookEventSequence,
+      });
+      return {
+        inbox: true,
         start: () => {
           inbox.start();
           return () => inbox.close();

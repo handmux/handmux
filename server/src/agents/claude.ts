@@ -13,6 +13,8 @@ import os from 'node:os';
 import { resolveEncodedDirSession, isSessionUuid } from './scanUtils.js';
 import { resolveByExecutable, executableBasename } from './processIdentity.js';
 import { createTranscriptParser, parseTranscript } from '../transcriptParse.js';
+import { hookErrorMessage } from './hookEvents.js';
+import type { AgentHookClassification, AgentHookKind } from './hookEvents.js';
 import type { RunCommand } from './scanUtils.js';
 import type {
   ExecutableVerdict,
@@ -23,8 +25,10 @@ import type { LivePane, ProcessContext } from '../agent-runtime/adapter.js';
 
 type IdentityOptions = Partial<Omit<ResolveExecutableOptions, 'candidate' | 'normalized' | 'matches'>>;
 type ClaudeBody = Record<string, unknown>;
-export type ClaudeEventKind = 'done' | 'working' | 'permission' | 'compacting' | 'error' | 'end' | 'idle';
-export interface ClaudeClassification { kind: ClaudeEventKind; msg?: string }
+// The kind language is shared with every other Hook-driven provider (see agents/hookEvents.ts); these
+// aliases stay exported because the Claude readers and their callers are written against them.
+export type ClaudeEventKind = AgentHookKind;
+export type ClaudeClassification = AgentHookClassification;
 
 const record = (value: unknown): ClaudeBody | null => (
   value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -82,24 +86,6 @@ function permMsg(body: ClaudeBody): string {
   return t ? `需要你授权：${t}` : '需要你';
 }
 
-// Friendly Chinese for the StopFailure error type (matcher values, see the hooks doc). The payload shape
-// isn't verified against a live rate-limit yet, so read the type defensively from several likely fields and
-// always fall back to a bare 本轮出错 — a wrong field name degrades to the generic label, never throws.
-const STOPFAIL_LABEL: Record<string, string> = {
-  rate_limit: '触发限流', overloaded: '服务过载', authentication_failed: '认证失败',
-  oauth_org_not_allowed: '组织未授权', billing_error: '额度/账单问题', invalid_request: '请求无效',
-  model_not_found: '模型不可用', server_error: '服务端错误', max_output_tokens: '输出超长', unknown: '未知错误',
-};
-function stopFailMsg(body: ClaudeBody): string {
-  const error = record(body.error);
-  const type = text(body.error_type) || text(body.reason) || text(body.type)
-    || text(body.error) || text(error?.type);
-  const label = STOPFAIL_LABEL[type];
-  if (label) return label;
-  const raw = text(body.error) || text(body.message);
-  return raw ? String(raw).replace(/\s+/g, ' ').trim().slice(0, 80) : '';
-}
-
 // Build the 进行中 one-liner for a resume (PostToolUse after the user answered/approved), surfacing the
 // choice they just made — AskUserQuestion stores it in tool_input.answers, keyed by question.
 function resumeMsg(body: ClaudeBody): string {
@@ -151,7 +137,7 @@ export function classifyClaude(src: unknown, rawBody: unknown = {}): ClaudeClass
   if (src === 'permreq') return { kind: 'permission', msg: permMsg(body) };
   if (src === 'compacting') return { kind: 'compacting', msg: '' };   // PreCompact: 压缩上下文进行中
   if (src === 'compact') return null;                                 // PostCompact: done → clear 压缩中/进行中
-  if (src === 'stopfail') return { kind: 'error', msg: stopFailMsg(body) }; // turn died on an API error
+  if (src === 'stopfail') return { kind: 'error', msg: hookErrorMessage(body) }; // turn died on an API error
   if (src === 'end') return { kind: 'end' };
   if (src === 'start') return null;                                   // SessionStart: only (re)binds pane→session
   if (src === 'notify') {
