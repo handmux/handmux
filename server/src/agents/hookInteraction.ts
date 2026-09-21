@@ -61,6 +61,12 @@ function normalizedPrompt(
   // "resolved" while its gate was still on screen — so an answer could be swallowed AND its card taken away
   // (measured: a user's answer to a live question was accepted by the server and never reached the pane).
   // Identify the gate by what IS the gate: the menu kind, its own question line, and the options offered.
+  //
+  // The price of a shape-named id is that two DIFFERENT gates of the same shape carry the same id — every
+  // review screen, for one. That is Core's problem to tell apart, and it does: a shape that comes back after
+  // its card was settled is published as a new interaction with a new id and token, never silently dropped.
+  // So this id must stay shape-stable within one occurrence and must NOT try to encode an instance number,
+  // which this adapter cannot know (a fresh observation has no memory of what it saw before).
   const signature = JSON.stringify({
     kind: prompt.kind,
     question: prompt.title.split(' — ').at(-1) ?? prompt.title,

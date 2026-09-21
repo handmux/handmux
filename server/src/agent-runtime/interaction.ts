@@ -393,15 +393,15 @@ export class InteractionService {
           }
         }
         for (const item of baseline as InteractionAdapterPending[]) {
-          let record = this.#recordBySource(run.ref, item.id);
+          let record = this.#pendingRecordBySource(run.ref, item.id);
           if (!record) {
             record = this.#createRecord(run.ref, item);
             this.#state.interactions.push(record);
-          } else if (record.state === 'pending') {
+          } else {
             record.pending = item;
             record.updatedAt = this.#now();
           }
-          if (record.state === 'pending') state.pendingBySource.set(item.id, record);
+          state.pendingBySource.set(item.id, record);
         }
         this.#save();
       });
@@ -542,8 +542,16 @@ export class InteractionService {
     ));
   }
 
-  #recordBySource(run: AgentRunRef, sourceId: string): PersistedInteraction | undefined {
-    return this.#recordsFor(run).find((record) => record.sourceInteractionId === sourceId);
+  // A native id names the SHAPE of the gate its adapter reads off the screen (see hookInteraction), so the
+  // same id legitimately comes back for a new occurrence: every AskUserQuestion review screen parses to
+  // "Ready to submit your answers?" with the same two options. Only a still-pending record IS that item —
+  // a resolved one belongs to an occurrence that is over, and re-publishing must mint a new public identity
+  // for the new one instead of silently dropping it (a dropped re-appearance left the phone with no card at
+  // all while the pane sat on the review screen).
+  #pendingRecordBySource(run: AgentRunRef, sourceId: string): PersistedInteraction | undefined {
+    return this.#recordsFor(run).find((record) => (
+      record.sourceInteractionId === sourceId && record.state === 'pending'
+    ));
   }
 
   #accept(state: LiveState, event: InteractionAdapterEvent): Promise<void> {
@@ -606,10 +614,7 @@ export class InteractionService {
     if (event.type === 'opened') {
       const item = pending(event.interaction);
       if (!item) throw new InteractionContractError('Interaction opened payload is invalid');
-      let record = this.#recordBySource(state.run.ref, item.id);
-      if (record && record.state !== 'pending') {
-        throw new InteractionContractError('Resolved native interaction id was reused');
-      }
+      let record = this.#pendingRecordBySource(state.run.ref, item.id);
       await this.#withWrite(() => {
         if (!record) {
           record = this.#createRecord(state.run.ref, item);
@@ -634,7 +639,17 @@ export class InteractionService {
       throw new InteractionContractError('Interaction terminal payload is invalid');
     }
     const record = state.pendingBySource.get(event.interactionId);
-    if (!record) throw new InteractionContractError('Interaction terminal event targets unknown pending item');
+    if (!record) {
+      // A dispatched answer already retired this item, so the adapter reporting that the gate left the screen
+      // is the same fact arriving a second time — and an adapter only stops reporting it once its next poll
+      // sees a different screen. Failing the observation closed here killed every later card with it: the
+      // phone was left with no card while the pane sat on the next gate (the review screen after a question).
+      const settled = this.#recordsFor(state.run.ref).some((candidate) => (
+        candidate.sourceInteractionId === event.interactionId && candidate.state !== 'pending'
+      ));
+      if (settled) return;
+      throw new InteractionContractError('Interaction terminal event targets unknown pending item');
+    }
     await this.#withWrite(() => {
       record.state = 'resolved';
       record.receipt = event.type === 'resolved'
@@ -690,7 +705,11 @@ export class InteractionService {
         finalized = true;
       });
       if (!finalized || !live || !live.exposed || live.phase === 'closed') return;
-      live.pendingBySource.delete(record.sourceInteractionId);
+      // The index is keyed by native id, and a new occurrence of the same gate may already have taken that
+      // key over — only retire the entry this response actually answered.
+      if (live.pendingBySource.get(record.sourceInteractionId) === record) {
+        live.pendingBySource.delete(record.sourceInteractionId);
+      }
       if (result.status === 'accepted' || result.status === 'already_resolved') {
         await this.#emit(live, {
           type: 'resolved', revision: ++live.revision, interactionId: record.publicInteractionId,

@@ -2,6 +2,8 @@ import { describe, expect, it, vi } from 'vitest';
 import { createCodeBuddyInteractionAdapter } from '../src/agents/codebuddyInteraction.js';
 import { serializePaneInput } from '../src/paneInput.js';
 import { sendPaneMenuChoice } from '../src/paneInput.js';
+import { InteractionService } from '../src/agent-runtime/interaction.js';
+import type { InteractionEvent } from '../src/agent-runtime/interactionTypes.js';
 import { AgentRunRuntime } from '../src/agent-runtime/run.js';
 
 // CodeBuddy's gates are read with the SAME parser Claude's are (src/pendingPrompt.ts): the cursor-marked
@@ -284,5 +286,50 @@ describe('CodeBuddy Interaction adapter', () => {
     })).resolves.toEqual({ status: 'rejected', reason: 'invalid_value' });
     expect(sendChoice).not.toHaveBeenCalled();
     await handle.close();
+  });
+
+  // The live sequence that left pane %5 stuck on its review screen (2026-09-21): the review card was up, the
+  // phone left, and by the time it reconnected the pane was back on the question menu — which retired the
+  // review card as "already answered, off screen". Answering that question advanced the pane to the SAME
+  // review screen, and because that screen's shape is identical every time it carried the id of the card the
+  // service had just retired. The service refused the re-opened id and failed the whole observation closed, so
+  // the phone was left with no card at all while the pane waited for a Submit nobody could press.
+  it('surfaces the review screen again after answering, though its shape was just retired', async () => {
+    const runtime = new AgentRunRuntime({ newRunId: () => 'run-codebuddy' });
+    const run = await runtime.controller('codebuddy', async () => true).attach({
+      paneId: '%5', attachmentId: 'codebuddy-hooks', sessionId: 'session-1', process: { pid: 401 },
+    });
+    let screen = realReviewScreen;
+    const adapter = createCodeBuddyInteractionAdapter({
+      capturePlain: async () => screen, sendChoice: async () => {},
+    }, 20);
+    const service = new InteractionService({ runs: runtime, adapters: { codebuddy: adapter } });
+
+    const first = await service.open(run, () => {});
+    expect(first.pending.map((item) => item.prompt)).toEqual([
+      expect.stringContaining('Ready to submit your answers?'),
+    ]);
+    await first.close();
+
+    screen = realQuestionScreen;
+    const events: InteractionEvent[] = [];
+    const second = await service.open(run, (event) => { events.push(event); });
+    const question = second.pending[0]!;
+    expect(question.prompt).toContain('喜欢红色还是蓝色？');
+
+    // Answering the question is what advances this pane to its review screen.
+    expect(await service.respond(run, {
+      interactionId: question.id, resolutionToken: question.resolutionToken,
+      value: { type: 'selection', optionIds: ['choice:1'] },
+    })).toEqual({ status: 'accepted' });
+    screen = realReviewScreen;
+
+    await vi.waitFor(() => expect(events).toContainEqual(expect.objectContaining({
+      type: 'opened',
+      interaction: expect.objectContaining({
+        prompt: expect.stringContaining('Ready to submit your answers?'),
+      }),
+    })), { timeout: 2_000 });
+    await second.close();
   });
 });

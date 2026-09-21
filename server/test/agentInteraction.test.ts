@@ -510,6 +510,31 @@ describe('InteractionService responses and lifecycle', () => {
     }]);
   });
 
+  // A Hook-driven Agent's native id names the SHAPE of the gate on screen, not one occurrence of it
+  // (hookInteraction hashes kind/question/options). Two gates with the same shape therefore carry the same
+  // native id — and every AskUserQuestion review screen has the same shape ("Ready to submit your answers?" /
+  // "Submit answers" / "Cancel"). Keying records by that id and skipping a resolved one meant the second
+  // occurrence was never published again: the phone's card list stayed empty while the pane sat on the review
+  // screen waiting for Enter (measured on pane %5, 2026-09-21).
+  it('publishes a native pending item again when the same gate comes back in the same run', async () => {
+    const h = await runHarness();
+    const first = await h.service.open(h.lease, () => {});
+    const pending = first.pending[0]!;
+    expect(await h.service.respond(h.lease, {
+      interactionId: pending.id, resolutionToken: pending.resolutionToken,
+      value: { type: 'approval', optionId: 'allow' },
+    })).toEqual({ status: 'accepted' });
+    await first.close();
+
+    // The same gate is on screen again. It is a NEW occurrence and must be answerable.
+    const second = await h.service.open(h.lease, () => {});
+    expect(second.pending).toHaveLength(1);
+    expect(second.pending[0]).toMatchObject({ type: 'approval' });
+    expect(second.pending[0]!.id).not.toBe(pending.id);
+    expect(second.pending[0]!.resolutionToken).not.toBe(pending.resolutionToken);
+    await second.close();
+  });
+
   it('does not emit a second terminal event when revoke wins an in-flight response', async () => {
     const h = await runHarness();
     const { events, pending } = await opened(h);
