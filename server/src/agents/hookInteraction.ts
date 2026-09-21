@@ -5,9 +5,11 @@
 // control (each sender documents its own measurement):
 //
 //   Claude     its menus take the option's own digit.
-//   CodeBuddy  its menus do NOT. Measured on 2.156.0: `1` on the AskUserQuestion picker does nothing, while
-//              `↓` moves the cursor and Enter selects; the digit works only on the review screen, which needs
-//              no navigation. Its control therefore steps the cursor and presses Enter.
+//   CodeBuddy  it depends on the screen. Measured on 2.156.0, one screen at a time: the AskUserQuestion
+//              picker IGNORES the digit while `↓` moves the cursor and Enter selects; the review screen and
+//              the permission gate DO take the digit (on the gate, `1` approved a command and it really ran).
+//              Its control therefore uses the digit where it names the row and walks the cursor where it
+//              cannot — see sendCodeBuddyPaneChoice.
 //
 // A provider supplies its own naming (the ids the phone stores and the fallback wording a user reads);
 // everything else is the shared contract. Where a provider's wording is NOT verifiable — a permission gate

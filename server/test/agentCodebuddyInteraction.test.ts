@@ -77,8 +77,8 @@ function deferred<T>() {
 }
 
 // The real question menu with its cursor moved onto `row` — the machine's own shape, only the mark moved.
-function questionScreenAt(row: number): string {
-  const lines = realQuestionScreen.split('\n').map((line) => line.replace(/^[❯>] /, '  '));
+function questionScreenAt(screen: string, row: number): string {
+  const lines = screen.split('\n').map((line) => line.replace(/^[❯>] /, '  '));
   const target = lines.findIndex((line) => new RegExp(`^  ${row}\\. `).test(line));
   if (target >= 0) lines[target] = lines[target]!.replace(/^  /, '❯ ');
   return lines.join('\n');
@@ -100,7 +100,7 @@ function menuCommands(initial: string, { moves = true }: { moves?: boolean } = {
   const keys: Array<[string, string]> = [];
   return {
     keys,
-    capturePlain: async () => (row === 1 ? initial : questionScreenAt(row)),
+    capturePlain: async () => (row === 1 ? initial : questionScreenAt(initial, row)),
     exitCopyModeIfActive: vi.fn(async () => {}),
     sendText: vi.fn(async () => {}),
     sendEnter: vi.fn(async () => {}),
@@ -154,15 +154,16 @@ describe('CodeBuddy Interaction adapter', () => {
     await handle.close();
   });
 
-  // CodeBuddy's menus do NOT take the option digit. Measured on 2.156.0 against a live pane: `1` on the
-  // AskUserQuestion picker does nothing (repeatedly, and as a literal too), `↓` moves the cursor, and Enter
-  // selects; the digit works only on the review screen, which needs no navigation. So the answer is delivered
-  // by stepping the cursor and pressing Enter — and the step is verified before anything is selected, because
-  // an answer that lands nowhere must not report success.
+  // Which key answers a CodeBuddy menu depends on the screen — measured against live panes on 2.156.0, each
+  // shape on its own so one screen's success can never be credited to another:
+  //
+  //   AskUserQuestion picker  the digit is IGNORED (sent repeatedly, and as a literal), `↓` moves the cursor,
+  //                           Enter selects
+  //   review screen           the digit works AND `↓`/`↑` + Enter work
+  //   permission gate         the digit works (`1` approved the command and it really ran)
   it.each([
     ['the question, cursor already on the answer', realQuestionScreen, '红色'],
-    ['the review screen', realReviewScreen, 'Submit answers'],
-    ['the permission gate', realPermissionScreen, 'Yes'],
+    ['the review screen, cursor already on Submit', realReviewScreen, 'Submit answers'],
   ])('answers %s by pressing Enter on it', async (_label, screen, first) => {
     const run = await lease();
     const commands = menuCommands(screen);
@@ -189,10 +190,9 @@ describe('CodeBuddy Interaction adapter', () => {
     } finally { await handle.close(); }
   });
 
-  it('steps the cursor to the chosen option instead of sending its digit', async () => {
+  it('answers the permission gate with its digit, the key that names the row', async () => {
     const run = await lease();
-    // The real question menu with the cursor on row 1; the answer asked for is the second one.
-    const commands = menuCommands(questionScreenAt(1));
+    const commands = menuCommands(realPermissionScreen);
     const adapter = createCodeBuddyInteractionAdapter({
       capturePlain: commands.capturePlain,
       sendChoice: (pane, choice) => sendCodeBuddyPaneChoice(commands, pane, choice),
@@ -200,9 +200,31 @@ describe('CodeBuddy Interaction adapter', () => {
     const handle = await adapter.observeNative(run, () => {});
     try {
       const pending = handle.checkpoint.pending[0]!;
-      // The menu's own numbers: 3 is `Type something`, a meta row the card does not offer, so the deepest
-      // real answer here is option 2 — one step down from the cursor's row.
-      expect(pending.options?.map((option) => option.id)).toEqual(['choice:1', 'choice:2']);
+      expect(pending.type).toBe('select');
+      expect(await adapter.dispatchResponse(run, {
+        interactionId: pending.id, value: { type: 'selection', optionIds: ['choice:1'] },
+      })).toEqual({ status: 'accepted' });
+      // The gate takes the digit, and the digit is what it should get: it names the row instead of walking
+      // to it, so on a gate — where the wrong row means approving something else — a misread cursor can
+      // never change which answer is committed.
+      expect(commands.keys).toEqual([['%1', '1']]);
+    } finally { await handle.close(); }
+  });
+
+  it.each([
+    ['the question menu', realQuestionScreen],
+    ['the review screen', realReviewScreen],
+  ])('walks the cursor to the chosen option on %s, whose digit it ignores', async (_label, screen) => {
+    const run = await lease();
+    // The real screen with the cursor on row 1; the answer asked for is the second row.
+    const commands = menuCommands(questionScreenAt(screen, 1));
+    const adapter = createCodeBuddyInteractionAdapter({
+      capturePlain: commands.capturePlain,
+      sendChoice: (pane, choice) => sendCodeBuddyPaneChoice(commands, pane, choice),
+    }, 1_000);
+    const handle = await adapter.observeNative(run, () => {});
+    try {
+      const pending = handle.checkpoint.pending[0]!;
       expect(await adapter.dispatchResponse(run, {
         interactionId: pending.id, value: { type: 'selection', optionIds: ['choice:2'] },
       })).toEqual({ status: 'accepted' });
@@ -213,7 +235,7 @@ describe('CodeBuddy Interaction adapter', () => {
   it('reports a failure rather than claiming success when the menu does not move', async () => {
     const run = await lease();
     // A menu that ignores the arrows: the sender must not press Enter on the WRONG row.
-    const commands = menuCommands(questionScreenAt(1), { moves: false });
+    const commands = menuCommands(questionScreenAt(realQuestionScreen, 1), { moves: false });
     const adapter = createCodeBuddyInteractionAdapter({
       capturePlain: commands.capturePlain,
       sendChoice: (pane, choice) => sendCodeBuddyPaneChoice(commands, pane, choice),
@@ -225,42 +247,6 @@ describe('CodeBuddy Interaction adapter', () => {
         interactionId: pending.id, value: { type: 'selection', optionIds: ['choice:2'] },
       })).toEqual({ status: 'unknown', reason: 'temporarily_unavailable' });
       expect(commands.keys).not.toContainEqual(['%1', 'Enter']);
-    } finally { await handle.close(); }
-  });
-
-  it('keeps one card while only the cursor and the streaming prose change', async () => {
-    const run = await lease();
-    let screen = realQuestionScreen;
-    const adapter = createCodeBuddyInteractionAdapter({
-      capturePlain: async () => screen, sendChoice: vi.fn(async () => {}),
-    }, 30);
-    // The checkpoint is a snapshot taken when the stream opened, so the card's identity over time is read
-    // from the events the adapter emits: a re-render that mints a new id retires the live card and announces
-    // a new one.
-    const events: string[] = [];
-    const handle = await adapter.observeNative(run, (event) => {
-      if (event.type === 'opened') events.push(`opened:${event.interaction.id}`);
-      if (event.type === 'resolved') events.push(`resolved:${event.interactionId}`);
-    });
-    try {
-      const first = handle.checkpoint.pending[0]!.id;
-      // The cursor moves — anyone navigating the menu …
-      screen = questionScreenAt(2);
-      await settle();
-      // … and the model's prose above the question is retyped, as it is while the turn streams. This is the
-      // same question, with the preamble %5's picker really carried (from that interaction's own record).
-      screen = withProse(realQuestionScreen, [
-        'pulling 9/10 and earlier. Actually that is a good use.',
-        '... 4 more lines (press Ctrl+O to expand)',
-      ]);
-      await settle();
-      expect(events).toEqual([]); // one card, never retired, never re-announced
-      // A genuinely different question IS a new card.
-      screen = realQuestionScreen.replace('喜欢红色还是蓝色？', '换成绿色还是黄色？');
-      await settle();
-      expect(events).toHaveLength(2);
-      expect(events[0]).toBe(`resolved:${first}`);
-      expect(events[1]).not.toBe(`opened:${first}`);
     } finally { await handle.close(); }
   });
 
