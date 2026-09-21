@@ -62,6 +62,35 @@ const REVIEW = [
   '  2. Cancel',
 ].join('\n');
 
+// The Write gate whose file the box above it previews. Captured verbatim from a live CodeBuddy pane
+// (%5, 2026-09-22) — border, rows and trailing spaces included, because the parse turns on them.
+const PREVIEW_BOX_GATE = [
+  " │ | 9/13 | 监督失效 | 端到端一致性 45%、评审翻转 62–91%、RubyGems 被 Agent 打 |                  │",
+  " │ | 9/14 | 降本与减速 | `PyroDash` 降 96%；问诊噪声下诊断准确率掉 15–25 点 |                     │",
+  " │ | 9/15 | 入口与底座 | Siri 开放模型入口；**CI 脚手架才是 RCE 风险** |                          │",
+  " │ | 9/16 | 模型能力升级 | Gemini 3.8 Live；`AGENTQ` 量化后门 100% |                              │",
+  " │ | 9/17 | 工程落地 | 微软给 Bash 平反；ImpossibleBench：**同伴诱发越界** |                      │",
+  " │ | 9/18 | Agent 接管研发 | Claude 主导 26% 研发；**失控会传染（0–5% → 40–95%）** |              │",
+  " │ | 9/19 | 信任危机 | **ZCode 静默上传整个仓库** |                                               │",
+  " │ | 9/20 | 范式之争 | Jev；Step 5；**Gemini 误打真公司** |                                       │",
+  " │                                                                                                │",
+  " │ ---                                                                                            │",
+  " │                                                                                                │",
+  " │ ## 待续                                                                                        │",
+  " │                                                                                                │",
+  " │ 2026-09-10 及更早未归档。查法：`https://hex2077.dev/docs/YYYY-MM/YYYY-MM-DD/` 按日期拼 URL；   │",
+  " │ 当日热度看 `https://aihot.today/ai-news`。                                                     │",
+  " │                                                                                                │",
+  " ╰────────────────────────────────────────────────────────────────────────────────────────────────╯",
+  "──────────────────────────────────────────────────────────────────────────────────────────────────────",
+  "",
+  " Do you want to create ai-news-2026-09.md?",
+  "",
+  " > 1. Yes",
+  "   2. Yes, and don't ask again this session (shift + tab)",
+  "   3. No, and tell CodeBuddy what to do differently (escape)",
+].join('\n');
+
 describe('parsePendingPrompt', () => {
   it('returns null when there is no menu (no ❯ cursor option) on screen', () => {
     expect(parsePendingPrompt('just some\nterminal output\n$ ')).toBeNull();
@@ -186,5 +215,24 @@ describe('parsePendingPrompt', () => {
   it('no leadIn when nothing precedes the menu', () => {
     expect(parsePendingPrompt(ASK_MENU).leadIn).toBeUndefined();
     expect(parsePendingPrompt(PERM_MENU).leadIn).toBeUndefined(); // tool-call lines above a permission are not prose
+  });
+
+  // Real capture from a live CodeBuddy pane (%5, 2026-09-22): the Write gate asking to create the file the
+  // box above it previews. The box's own rows and its bottom border are chrome — scraping them as context put
+  // "│  │ ╰────…────╯" in front of the question on the phone.
+  it('leadIn ignores a tool preview box: its border and its rows are not prose', () => {
+    const g = parsePendingPrompt(PREVIEW_BOX_GATE);
+    expect(g.title).toBe('Do you want to create ai-news-2026-09.md?');
+    expect(g.leadIn).toBeUndefined();
+    expect(g.options.map((option) => option.label)).toEqual([
+      'Yes',
+      "Yes, and don't ask again this session (shift + tab)",
+      'No, and tell CodeBuddy what to do differently (escape)',
+    ]);
+  });
+
+  it('leadIn still finds the prose above a preview box', () => {
+    const g = parsePendingPrompt(['⏺ 日报已经按你的要求整理成三部分。', '', ...PREVIEW_BOX_GATE.split('\n')].join('\n'));
+    expect(g.leadIn).toBe('日报已经按你的要求整理成三部分。');
   });
 });

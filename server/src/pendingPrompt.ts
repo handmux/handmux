@@ -22,6 +22,11 @@
 // re-polling — each screen (Q1 → Q2 → review) is itself a parseable menu. Escape cancels.
 //
 // The parser ANCHORS on the ❯ cursor line, NOT a footer: the review screen has options but no footer.
+//
+// CodeBuddy's gates parse with this same reader (hookInteraction binds both providers to it). It frames a
+// tool's input in a drawn box — "│ … │" rows closed by a "╰───╯" border — so a captured gate usually has that
+// box directly above the question. The border and the rows are chrome: they are never taken as the question
+// and never scraped as the lead-in prose.
 
 // Cursor-selected option line: ❯ (or ›»>) then "N.".
 const CURSOR_RE = /^\s*[❯›»>]\s*\d+\.\s/;
@@ -44,8 +49,18 @@ const FOOTER_RE = /enter to select|esc to (cancel|reject)/i;
 const ACTIVITY_RE = /^\s*[✻✳✶✽⏺]\s|worked for|cogitated|crafting|cooked for|crunched for|esc to interrupt/i;
 // The input cursor ❯ leading the user's echoed prompt (above the card).
 const PROMPT_ECHO_RE = /^\s*[❯›»>]\s*\D/; // ❯ NOT followed by a digit (that would be an option)
+// A drawn box. CodeBuddy frames a tool's input in one (Write/Edit previews, diffs) and draws its own rows as
+// "│ … │", so its border and its interior are chrome rather than text — the lead-in walk used to descend into
+// one and surface an empty row plus the bottom border as the gate's context (measured on pane %5's
+// "Do you want to create ai-news-2026-09.md?" card, 2026-09-22).
+const BOX_CHARS_RE = /[\u2500-\u257F\u2580-\u259F]/;
+const BOX_ONLY_RE = /^[\s\u2500-\u257F\u2580-\u259F]+$/;
+const BOX_EDGE_RE = /^\s*[\u2502\u2503]/; // │ ┃ — the vertical edge of a drawn box
+const isBoxFrame = (line: string): boolean => BOX_CHARS_RE.test(line) && BOX_ONLY_RE.test(line);
+const isBoxChrome = (line: string): boolean => isBoxFrame(line) || BOX_EDGE_RE.test(line);
 const isTitleBoundary = (line: string): boolean =>
-  ACTIVITY_RE.test(line) || RULE_RE.test(line) || TAB_BAR_RE.test(line) || FOOTER_RE.test(line) || PROMPT_ECHO_RE.test(line);
+  ACTIVITY_RE.test(line) || RULE_RE.test(line) || TAB_BAR_RE.test(line) || FOOTER_RE.test(line)
+  || PROMPT_ECHO_RE.test(line) || isBoxFrame(line);
 
 const stripRight = (value: unknown): string => String(value == null ? '' : value).replace(/\s+$/, '');
 // Strip ANSI/OSC escapes so a capture taken WITH `-e` (SGR) still parses — belt-and-suspenders even though
@@ -65,18 +80,19 @@ function extractLeadIn(lines: string[], fromIdx: number): string | null {
   const block: string[] = [];
   let i = fromIdx;
   // Skip the chrome between the menu and the preceding text (spinner / rules / tab bar / stale footer /
-  // blanks) — but never past a ❯ prompt echo (above it is the PREVIOUS exchange, stale context) nor past a
-  // ⏺ message head (it IS the text's first line — the collect loop includes it).
+  // blanks / a tool preview box) — but never past a ❯ prompt echo (above it is the PREVIOUS exchange, stale
+  // context) nor past a ⏺ message head (it IS the text's first line — the collect loop includes it).
   while (i >= 0) {
     const line = lines[i] ?? '';
-    if (line.trim() && (!isTitleBoundary(line) || PROMPT_ECHO_RE.test(line) || MSG_MARK_RE.test(line))) break;
+    if (line.trim() && !isBoxChrome(line)
+      && (!isTitleBoundary(line) || PROMPT_ECHO_RE.test(line) || MSG_MARK_RE.test(line))) break;
     i--;
   }
   for (; i >= 0 && block.length < 12; i--) {
     const line = lines[i] ?? '';
     if (!line.trim()) break;                                               // blank = the block's top (last paragraph)
     if (MSG_MARK_RE.test(line)) { block.unshift(line.trim()); break; }     // the ⏺ message head: include & stop
-    if (isTitleBoundary(line)) break;                                      // hard chrome (incl. ❯ echo): stop
+    if (isTitleBoundary(line) || isBoxChrome(line)) break;                  // hard chrome (incl. ❯ echo): stop
     block.unshift(line.trim());
   }
   const tail = block.slice(-LEADIN_MAX).map((line) => line.replace(/^⏺\s*/, '').trim()).filter(Boolean);
