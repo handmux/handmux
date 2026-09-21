@@ -267,6 +267,28 @@ describe('CodeBuddy Interaction adapter', () => {
     await handle.close();
   });
 
+  // Measured on pane %211 (2026-09-22): `sleep 90` was approved through the gate, the tool ran for a minute —
+  // and the row still said 需要你授权, because CodeBuddy fires no Hook when a gate is answered. The fallback must
+  // not turn that into a 去终端 card: the screen itself says the pane is mid-turn, which a blocked gate cannot.
+  it('stays quiet while the pane is mid-turn, however stale its permission row is', async () => {
+    const run = await lease();
+    const busyScreen = [
+      '● Bash(sleep 90)',
+      '  ⎿  ...running 49s ago(ctrl+b to background execution)',
+      '✹ Mimicking… (esc to interrupt)',
+      '────────────────────────────────────────────────────────────────────────────────────────────────────────',
+      '>',
+      '────────────────────────────────────────────────────────────────────────────────────────────────────────',
+      '? for shortcuts  ← for agents',
+    ].join('\n');
+    const adapter = createCodeBuddyInteractionAdapter({
+      capturePlain: async () => busyScreen, pendingKind: () => 'permission', sendChoice: vi.fn(async () => {}),
+    }, 1_000);
+    const handle = await adapter.observeNative(run, () => {});
+    expect(handle.checkpoint.pending).toEqual([]);
+    await handle.close();
+  });
+
   it('names its own provider when a gate has no readable decisions', async () => {
     const run = await lease();
     const sendChoice = vi.fn(async () => {});

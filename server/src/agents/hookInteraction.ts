@@ -40,6 +40,15 @@ export interface HookInteractionProvider {
   label: string;
 }
 
+// A pane that is mid-turn says so on its own screen: both providers print the interrupt hint while the model
+// or a tool is running — `✹ Buzzing… (esc to interrupt)`, measured on CodeBuddy 2.156.0, and Claude prints the
+// same hint. A gate that is really up cannot be mid-turn; the pane is blocked ON the gate. So this is what
+// keeps the no-options fallback quiet in the one window where its `permreq` row is stale by construction:
+// CodeBuddy fires no Hook when a gate is answered, so an approved tool keeps its row (and the roster at 需要你)
+// until the turn's next Hook — measured on pane %211, where an approved `sleep 90` said 需要你授权：Bash for the
+// whole minute while the tool ran, and the fallback turned that into a 去终端 card nothing was waiting for.
+const INTERRUPT_HINT_RE = /esc to interrupt/i;
+
 function normalizedPrompt(
   text: string,
   provider: HookInteractionProvider,
@@ -47,7 +56,7 @@ function normalizedPrompt(
 ): InteractionAdapterPending | null {
   const prompt = parsePendingPrompt(text);
   if (!prompt) {
-    if (pendingKind !== 'permission') return null;
+    if (pendingKind !== 'permission' || INTERRUPT_HINT_RE.test(text)) return null;
     const tail = text.split('\n').map((line) => line.trim()).filter(Boolean).slice(-3).join('\n');
     const promptText = tail.slice(0, 2_000) || `${provider.label} is waiting for permission in the terminal.`;
     const id = `${provider.id}-permission:${createHash('sha256').update(promptText).digest('hex').slice(0, 24)}`;
