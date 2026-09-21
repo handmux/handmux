@@ -1964,8 +1964,27 @@ export default function App() {
   // Keep the composer mounted while a selected conversation is temporarily
   // unresolved (for example during the first content fetch). Replacing it with
   // null would destroy the focused textarea and dismiss the soft keyboard.
-  const composerIdentity = normalizedConversationIdentity ?? (chatLens && recoveryLookupUncertain
-    ? rememberedConversationIdentity : null);
+  //
+  // The pane's Agent (probed from /panes) and Runtime's run are published on separate cadences, so a
+  // re-identification leaves a window where the two disagree and this pane has no resolved identity — while
+  // the composer the user is typing in is still on screen. That window must not tear the composer down
+  // either: unmounting the focused textarea dismisses the phone's keyboard mid-typing (measured: the pane
+  // probe settles on another Agent one poll before its run is published, and the composer vanishes). Holding
+  // it costs nothing — with the identity gone the descriptor is gone too, so the send button is already
+  // disabled and the draft cannot reach the wrong conversation. A takeover/activation guide is the one case
+  // that owns the page instead, so the composer still stands down for it.
+  const lastComposerIdentityRef = useRef<{ paneId: string; identity: AgentConversationIdentity } | null>(null);
+  if (current?.paneId && normalizedConversationIdentity) {
+    lastComposerIdentityRef.current = { paneId: current.paneId, identity: normalizedConversationIdentity };
+  }
+  const heldByGuide = !!durableConversationRecovery || activationPending
+    || (!!activationRun && currentAgentDescriptor?.capabilities.conversationActivation === true);
+  const retainedComposerIdentity = !heldByGuide
+    && lastComposerIdentityRef.current?.paneId === currentPaneId
+    ? lastComposerIdentityRef.current.identity : null;
+  const composerIdentity = normalizedConversationIdentity ?? (chatLens
+    ? (recoveryLookupUncertain ? rememberedConversationIdentity : null) ?? retainedComposerIdentity
+    : null);
   const chatLensAvailable = currentAgentDescriptor?.capabilities.conversation === true
     && conversationEnabled
     && (!!normalizedConversationRun || !!normalizedConversationIdentity

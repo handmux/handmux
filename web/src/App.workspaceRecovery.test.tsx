@@ -1811,3 +1811,98 @@ describe('App consumes conversation control commands', () => {
     expect(controlRequestProbe[kind]?.id).toBe(0);
   });
 });
+
+// The user's report: open the conversation page, tap the composer while its first page is still in
+// flight, and the keyboard goes away the moment the content arrives. The composer is mounted before the
+// content (its identity comes from Runtime discovery, not from the page), so a focus that survives means
+// the textarea must be the SAME element across the loading → ready switch.
+describe.each(['claude', 'codebuddy'])('App %s chat composer focus across the first page load', (agentId) => {
+  const pane = { id: '%73', active: true, width: 80, height: 24, command: agentId, cwd: '/work', agent: agentId };
+  const run = { agentId, paneId: pane.id, runId: 'load-run', sessionId: 'load-session' };
+
+  async function openLoadingConversation(): Promise<{ view: ReturnType<typeof render>; deliverPage: () => void }> {
+    localStorage.setItem('tw_bound', JSON.stringify(['project']));
+    localStorage.setItem(`tw_lens_${pane.id}`, 'chat');
+    api.getSessions.mockResolvedValue([{ id: '$71', name: 'project' }]);
+    api.getWindows.mockResolvedValue([{ id: '@71', name: 'main', active: true, panes: 1 }]);
+    api.getPanes.mockResolvedValue([pane]);
+    api.getAgentDiscovery.mockResolvedValue({
+      descriptors: [{ id: agentId, label: agentId, capabilities: { conversation: true } }],
+      runs: [run], health: [],
+    });
+    conversationApi.discoverAgentConversation.mockResolvedValue({
+      session: { agentId: run.agentId, sessionId: run.sessionId }, run,
+      viewId: run.sessionId, historyVersion: '1',
+      capabilities: { history: true, live: 'poll', send: ['prompt'] },
+    });
+    let deliverPage!: () => void;
+    conversationApi.readAgentConversationPage.mockImplementation(() => new Promise((resolve) => {
+      deliverPage = () => resolve({
+        status: 'ok', page: { sessionId: run.sessionId, viewId: run.sessionId,
+          historyVersion: '1', hasMore: false, items: [{ id: 'saved', kind: 'message',
+            role: 'assistant', content: [{ type: 'text', text: 'Saved answer' }] }] },
+      });
+    }));
+    const view = await renderApp();
+    return { view, deliverPage };
+  }
+
+  it('keeps the SAME focused composer element when the first page arrives', async () => {
+    const { view, deliverPage } = await openLoadingConversation();
+    const input = requiredElement<HTMLTextAreaElement>(view.container, '.cc-text');
+    input.focus();
+    expect(document.activeElement).toBe(input);
+
+    await act(async () => { deliverPage(); });
+    await flush();
+
+    expect(screen.getByText('Saved answer')).toBeTruthy();
+    expect(view.container.querySelector('.cc-text')).toBe(input);
+    expect(document.activeElement).toBe(input);
+  });
+
+  it('keeps the focused composer while the pane is re-identified as another Agent', async () => {
+    localStorage.setItem('tw_bound', JSON.stringify(['project']));
+    localStorage.setItem(`tw_lens_${pane.id}`, 'chat');
+    api.getSessions.mockResolvedValue([{ id: '$71', name: 'project' }]);
+    api.getWindows.mockResolvedValue([{ id: '@71', name: 'main', active: true, panes: 1 }]);
+    api.getPanes.mockResolvedValue([{ ...pane, command: 'claude', agent: 'claude' }]);
+    const claudeRun = { agentId: 'claude', paneId: pane.id, runId: 'run-claude', sessionId: 'session-claude' };
+    api.getAgentDiscovery.mockResolvedValue({
+      descriptors: [
+        { id: 'claude', label: 'Claude', capabilities: { conversation: true } },
+        { id: 'codebuddy', label: 'CodeBuddy', capabilities: { conversation: true } },
+      ],
+      runs: [claudeRun], health: [],
+    });
+    conversationApi.discoverAgentConversation.mockImplementation(async (activeRun: { agentId: string; sessionId: string }) => ({
+      session: { agentId: activeRun.agentId, sessionId: activeRun.sessionId }, run: activeRun,
+      viewId: activeRun.sessionId, historyVersion: '1',
+      capabilities: { history: true, live: 'poll', send: ['prompt'] },
+    }));
+    conversationApi.readAgentConversationPage.mockImplementation(async (activeRun: { agentId: string; sessionId: string }) => ({
+      status: 'ok', page: { sessionId: activeRun.sessionId, viewId: activeRun.sessionId,
+        historyVersion: '1', hasMore: false, items: [{ id: 'saved', kind: 'message',
+          role: 'assistant', content: [{ type: 'text', text: 'Claude answer' }] }] },
+    }));
+    const view = await renderApp();
+    const input = requiredElement<HTMLTextAreaElement>(view.container, '.cc-text');
+    input.focus();
+    expect(document.activeElement).toBe(input);
+
+    // The pane probe now names CodeBuddy, one poll before Runtime publishes its run.
+    api.getPanes.mockResolvedValue([{ ...pane, command: 'codebuddy', agent: 'codebuddy' }]);
+    api.getAgentDiscovery.mockResolvedValue({
+      descriptors: [
+        { id: 'claude', label: 'Claude', capabilities: { conversation: true } },
+        { id: 'codebuddy', label: 'CodeBuddy', capabilities: { conversation: true } },
+      ],
+      runs: [], health: [],
+    });
+    await flush(5_000);
+
+    expect(view.container.querySelector('.cc-text')).toBe(input);
+    expect(document.activeElement).toBe(input);
+  });
+
+});
