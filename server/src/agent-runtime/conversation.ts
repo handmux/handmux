@@ -308,12 +308,14 @@ function capabilities(raw: unknown): ConversationCapabilities | null {
   if (raw.interrupt !== undefined && raw.interrupt !== true) return null;
   if (raw.sendable !== undefined && raw.sendable !== true) return null;
   if (raw.steer !== undefined && raw.steer !== true) return null;
+  if (raw.promptWhileActive !== undefined && raw.promptWhileActive !== true) return null;
   if (raw.branching !== undefined && raw.branching !== true) return null;
   return {
     history: true,
     live: raw.live as ConversationCapabilities['live'],
     ...(raw.sendable === true ? { sendable: true } : {}),
     ...(raw.steer === true ? { steer: true } : {}),
+    ...(raw.promptWhileActive === true ? { promptWhileActive: true } : {}),
     ...(raw.send === undefined ? {} : {
       send: [...raw.send] as NonNullable<ConversationCapabilities['send']>,
     }),
@@ -735,6 +737,9 @@ export class ConversationService {
       };
     }
     const activity = await this.#activitySource.read(run);
+    // Probed before the transaction: whether this provider's own input takes a prompt while a turn runs is
+    // a provider capability (the descriptor), while the decision below is state.
+    const promptWhileActive = await this.#promptWhileActive(adapter, run);
     const begin = await this.#withWrite(() => {
       const existing = this.#submission(session.agentId, session.sessionId, request.clientRequestId);
       if (existing) {
@@ -758,8 +763,15 @@ export class ConversationService {
       }
       const hasQueue = this.#state.submissions.some((item) => item.agentId === session.agentId
         && item.sessionId === session.sessionId && item.state === 'queued');
-      const direct = activity.activity === 'idle' && activity.activeTurn.state === 'none'
-        && cycle.state === 'closed' && !hasQueue;
+      // A provider whose TUI queues the text natively can be written to WHILE its turn runs, so a phone
+      // send does not have to wait for idle — the user's message joins the turn in progress, exactly as if
+      // they had typed it in the terminal. Only a running turn qualifies: a permission gate, a compaction
+      // or an unknown state is not an input the pane will take (see ConversationCapabilities).
+      const inTurn = promptWhileActive && !hasQueue
+        && activity.activity === 'working' && activity.activeTurn.state === 'active'
+        && cycle.state !== 'closed';
+      const direct = inTurn || (activity.activity === 'idle' && activity.activeTurn.state === 'none'
+        && cycle.state === 'closed' && !hasQueue);
       const revision = ++this.#state.ledgerRevision;
       const submission: PersistedConversationSubmission = {
         agentId: session.agentId, sessionId: session.sessionId,
@@ -772,7 +784,9 @@ export class ConversationService {
         ...this.#currentBaseline(session.agentId, session.sessionId),
       };
       this.#state.submissions.push(submission);
-      if (direct) this.#claimCycle(cycle, submission, activity);
+      // An in-turn send joins a turn that is ALREADY claimed: claiming (or reopening) the cycle here would
+      // tell the Core a new turn started, and the running turn's completion would then never be observed.
+      if (direct && !inTurn) this.#claimCycle(cycle, submission, activity);
       try { this.#save(); } catch {
         this.#state = before;
         return { kind: 'receipt' as const, value: {
@@ -780,14 +794,14 @@ export class ConversationService {
         } as ConversationSubmitReceipt };
       }
       return direct
-        ? { kind: 'dispatch' as const, id: submission.clientRequestId }
+        ? { kind: 'dispatch' as const, id: submission.clientRequestId, inTurn }
         : { kind: 'receipt' as const, value: this.#submitReceipt(submission) };
     });
     if (begin.kind === 'receipt') {
       if (begin.value.status === 'queued') this.#wake(owner);
       return begin.value;
     }
-    return this.#dispatchClaim(run, begin.id, 'direct');
+    return this.#dispatchClaim(run, begin.id, 'direct', undefined, begin.inTurn);
   }
 
   async queueSnapshot(run: AgentRunLease): Promise<{
@@ -1665,6 +1679,10 @@ export class ConversationService {
     submissionId: string,
     origin: 'direct' | 'queue' | 'steer',
     detached?: PersistedConversationSubmission,
+    // This dispatch was admitted knowing a turn is running, because the provider's own input takes a prompt
+    // while it works (ConversationCapabilities.promptWhileActive). Only send() passes it: a queued delivery
+    // still waits for idle, and that is what keeps the queue's ordering promise intact.
+    promptWhileActive = false,
   ): Promise<ConversationSubmitReceipt> {
     const runRef = copyRun(run.ref);
     if (!runRef.sessionId) {
@@ -1687,8 +1705,9 @@ export class ConversationService {
         && (preDispatchActivity.activity !== 'idle'
           || preDispatchActivity.activeTurn.state !== 'none')))) {
       receipt = { outcome: 'rejected', nativeMutation: false, reason: 'conflict' };
-    } else if (origin !== 'steer' && (preDispatchActivity.activity !== 'idle'
+    } else if (!promptWhileActive && origin !== 'steer' && (preDispatchActivity.activity !== 'idle'
       || preDispatchActivity.activeTurn.state !== 'none')) {
+      // A busy provider that has NOT declared in-turn input gets the message queued, never written to.
       receipt = { outcome: 'busy', nativeMutation: false };
     } else try {
       const operation = origin === 'steer'
@@ -1708,8 +1727,12 @@ export class ConversationService {
               return !run.signal.aborted && this.#runs.resolve(runRef) === run
                 && current.epoch === preDispatchActivity.epoch
                 && current.revision === preDispatchActivity.revision
-                && current.activity === 'idle'
-                && current.activeTurn.state === 'none';
+                // Every dispatch requires the world it was decided in. The idle path additionally requires
+                // the pane to STILL be idle; the in-turn path was decided knowing a turn is running, so it
+                // requires only that nothing has moved — if it has, the adapter writes nothing and the
+                // message falls back to the queue.
+                && (promptWhileActive
+                  || (current.activity === 'idle' && current.activeTurn.state === 'none'));
             },
           },
         );
@@ -2168,6 +2191,23 @@ export class ConversationService {
       }
     });
     if (changed) this.#wake(owner);
+  }
+
+  // Provider capability: does its own input accept a prompt while a turn is running? Read from the
+  // descriptor, the same place every other provider capability comes from, and never fatal — an
+  // unavailable or mismatched probe simply means "no", leaving the ordinary queue path in charge.
+  async #promptWhileActive(
+    adapter: AgentConversationAdapterV1,
+    run: AgentRunLease,
+  ): Promise<boolean> {
+    try {
+      const raw = await adapter.discoverNative(run.ref);
+      if (raw === null) return false;
+      const descriptor = this.#descriptor(raw, run.ref.agentId);
+      if (process.env.HANDMUX_DEBUG_INTRY) console.error('[itry]', run.ref.agentId, descriptor.session.sessionId, run.ref.sessionId, JSON.stringify(descriptor.capabilities));
+      return descriptor.session.sessionId === run.ref.sessionId
+        && descriptor.capabilities.promptWhileActive === true;
+    } catch { return false; }
   }
 
   #wake(owner: string): void {

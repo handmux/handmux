@@ -26,6 +26,8 @@ afterEach(() => {
 
 async function harness(options: {
   activity?: ConversationActivitySnapshot;
+  /** The provider's own input accepts a prompt while a turn runs (see ConversationCapabilities). */
+  promptWhileActive?: boolean;
   prompt?: () => Promise<ConversationDispatchReceipt>;
   steer?: () => Promise<ConversationDispatchReceipt>;
   pageItems?: ConversationItem[];
@@ -63,6 +65,7 @@ async function harness(options: {
         capabilities: {
           history: true, live: 'poll', ...('runId' in target ? {
             sendable: true as const, ...(dispatchSteer ? { steer: true as const } : {}),
+            ...(options.promptWhileActive ? { promptWhileActive: true as const } : {}),
           } : {}),
         },
       };
@@ -1530,5 +1533,81 @@ describe('legacy Codex outbox migration', () => {
 
     expect(() => migrateLegacyCodexOutbox(legacy, core)).toThrow(/marker conflicts/);
     expect(fs.existsSync(legacy)).toBe(true);
+  });
+});
+
+describe('Conversation Core in-turn send', () => {
+  // The user's own words for this: they are holding a terminal, the provider's input takes the text while it
+  // works and queues it natively, so a phone send does not have to wait for idle.
+  const working = {
+    activity: 'working', activeTurn: { state: 'active', nativeTurnId: 'turn-1' },
+    revision: 5, epoch: 'run-1',
+  } as ConversationActivitySnapshot;
+  const cycles = (h: { store: unknown }): Array<Record<string, unknown>> =>
+    ((h.store as { load(): unknown }).load() as { cycles?: Array<Record<string, unknown>> }).cycles ?? [];
+
+  it('writes into the running turn when the provider accepts it, instead of queueing', async () => {
+    const h = await harness({ activity: working, promptWhileActive: true });
+    const receipt = await h.service.send(h.lease, {
+      clientRequestId: 'in-turn-1', text: 'just send it', delivery: 'prompt',
+    });
+    expect(receipt.status).toBe('accepted');
+    expect(h.dispatchPrompt).toHaveBeenCalledOnce();
+    expect(h.dispatchPrompt.mock.calls[0]?.[1]).toMatchObject({ text: 'just send it' });
+    // Nothing is left waiting: the message did not become a queue item.
+    expect((await h.service.queueSnapshot(h.lease)).items).toEqual([]);
+    // The running turn keeps its owner — an in-turn send must not claim (or reopen) the cycle, or the
+    // completion of the turn it joined would never be observed.
+    const [cycle] = cycles(h);
+    expect(cycle?.ownerSubmissionId).toBeUndefined();
+    expect(cycle?.state).not.toBe('dispatching');
+  });
+
+  it.each([
+    ['the provider does not accept it', { activity: working }],
+    ['a permission gate is up', {
+      activity: {
+        activity: 'waiting', activeTurn: { state: 'active', nativeTurnId: 'turn-1' },
+        revision: 5, epoch: 'run-1',
+      } as ConversationActivitySnapshot,
+      promptWhileActive: true,
+    }],
+    ['the provider is compacting', {
+      activity: {
+        activity: 'compacting', activeTurn: { state: 'none' },
+        revision: 5, epoch: 'run-1',
+      } as ConversationActivitySnapshot,
+      promptWhileActive: true,
+    }],
+  ])('still queues the message when %s', async (_name, options) => {
+    const h = await harness(options);
+    const receipt = await h.service.send(h.lease, {
+      clientRequestId: 'queued-1', text: 'wait your turn', delivery: 'prompt',
+    });
+    expect(receipt.status).toBe('queued');
+    expect(h.dispatchPrompt).not.toHaveBeenCalled();
+    expect((await h.service.queueSnapshot(h.lease)).items).toHaveLength(1);
+  });
+
+  it('keeps FIFO: a message behind an existing queue item does not jump it', async () => {
+    const h = await harness({ activity: working, promptWhileActive: true });
+    // The first message arrives while a gate is up, so even this provider queues it.
+    h.setActivity({
+      activity: 'waiting', activeTurn: { state: 'active', nativeTurnId: 'turn-1' },
+      revision: 4, epoch: 'run-1',
+    });
+    expect((await h.service.send(h.lease, {
+      clientRequestId: 'queued-first', text: 'first', delivery: 'prompt',
+    })).status).toBe('queued');
+    expect(h.dispatchPrompt).not.toHaveBeenCalled();
+    // The gate is answered and the turn runs again — but the second message must NOT overtake the first:
+    // writing it in-turn would deliver it before the one already waiting.
+    h.setActivity(working);
+    expect((await h.service.send(h.lease, {
+      clientRequestId: 'in-turn-2', text: 'second', delivery: 'prompt',
+    })).status).toBe('queued');
+    expect(h.dispatchPrompt).not.toHaveBeenCalled();
+    const snapshot = await h.service.queueSnapshot(h.lease);
+    expect(snapshot.items.map((item) => item.requestId)).toEqual(['queued-first', 'in-turn-2']);
   });
 });

@@ -365,6 +365,10 @@ export function createCodeBuddyConversationAdapter({
         sourceViewId: sourceViewId(target.sessionId),
         capabilities: isRun(target) && control ? {
           history: true, live: 'settled', sendable: true, send: ['prompt'], interrupt: true,
+          // Verified live on 2.156.0: a prompt typed while a tool is running is accepted by the editor and
+          // the TUI reports "Messages to be submitted after next tool call", then submits it into the same
+          // turn. So an ordinary send does not have to wait for idle.
+          promptWhileActive: true,
         } : { history: true, live: 'poll' },
       };
     },
