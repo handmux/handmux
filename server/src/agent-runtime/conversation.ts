@@ -2204,7 +2204,6 @@ export class ConversationService {
       const raw = await adapter.discoverNative(run.ref);
       if (raw === null) return false;
       const descriptor = this.#descriptor(raw, run.ref.agentId);
-      if (process.env.HANDMUX_DEBUG_INTRY) console.error('[itry]', run.ref.agentId, descriptor.session.sessionId, run.ref.sessionId, JSON.stringify(descriptor.capabilities));
       return descriptor.session.sessionId === run.ref.sessionId
         && descriptor.capabilities.promptWhileActive === true;
     } catch { return false; }

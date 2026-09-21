@@ -128,11 +128,12 @@ const PAYLOADS = [
     cwd: '/Users/x',
     reason: 'prompt_input_exit',
   }],
-  // Notification carries NO session_id — the row must still land (its src drives 需要你, not a session).
+  // The state-bearing Notification, and the only kind besides idle_prompt that any reader maps: this is what
+  // 需要你 is made of. It carries NO session_id and the row must still land.
   ['notify', 'Notification', {
     cwd: '/Users/x',
-    message: 'Signed in',
-    notification_type: 'auth_success',
+    message: 'needs permission',
+    notification_type: 'permission_prompt',
     title: 'CodeBuddy',
   }],
   // Answering a question (or approving a plan) completes the interaction tool: this is what clears 需要你.
@@ -181,6 +182,25 @@ describe('handmux-codebuddy-notify.sh → shared handmux-write.cjs', () => {
     expect(obj['%263']).toBeUndefined();
   });
 
+  // A Notification that reports nothing about the turn must not become the pane's row. Reported live:
+  // CodeBuddy fires `auth_success` for every running instance on a token refresh, and the row it wrote
+  // ("notify", no state) left the pane with no resolvable state at all — the roster card cleared, and a
+  // message queued for that pane waited for `idle` for seventeen hours, because the Core dispatches a queue
+  // only when the session reads idle. The pane must keep the last event that said something.
+  it('keeps the pane state when a Notification reports no turn state', () => {
+    const file = freshFile();
+    run('prompt', { file, stdin: '{"session_id":"cb-s1","prompt":"do it"}' });
+    const done = run('stop', { file, stdin: '{"session_id":"cb-s1","last_assistant_message":"done"}' });
+    expect(done['%263'].src).toBe('stop');
+
+    const after = run('notify', { file, stdin: '{"notification_type":"auth_success","message":"Signed in"}' });
+    // The pane still says what it was doing …
+    expect(after['%263'].src).toBe('stop');
+    expect(after['%263'].payload.last_assistant_message).toBe('done');
+    // … and the noise produced no event for the Connector to act on either.
+    expect(events(file)).toHaveLength(2);
+  });
+
   // A pane's session is a property of the PANE, and this row is the only place everything downstream reads
   // it from — the Connector derives the run's session from it and the phone's 对话 entry depends on it.
   // Reported live: CodeBuddy fires `auth_success` (a Notification, and one that carries no session_id) for
@@ -195,10 +215,10 @@ describe('handmux-codebuddy-notify.sh → shared handmux-write.cjs', () => {
     });
     const obj = run('notify', {
       file, mode: 'ancestor', procRoot: procFixture(['4242']),
-      stdin: '{"notification_type":"auth_success","message":"Signed in"}',
+      stdin: '{"notification_type":"permission_prompt","message":"needs permission"}',
     });
     expect(obj['%263'].src).toBe('notify'); // the event is recorded as it happened…
-    expect(obj['%263'].payload.notification_type).toBe('auth_success');
+    expect(obj['%263'].payload.notification_type).toBe('permission_prompt');
     expect(obj['%263'].payload.session_id).toBe('cb-s1'); // …and the pane's identity survives it
     expect(obj['%263'].payload.transcript_path).toBe('/p/abc.jsonl');
   });
@@ -213,7 +233,7 @@ describe('handmux-codebuddy-notify.sh → shared handmux-write.cjs', () => {
     // the dead session, or the phone would open a conversation the pane is not running.
     const obj = run('notify', {
       file, mode: 'tty', procRoot: procFixture(['4243']),
-      stdin: '{"notification_type":"auth_success"}',
+      stdin: '{"notification_type":"permission_prompt"}',
     });
     expect(obj['%263'].payload.session_id).toBeUndefined();
     expect(obj['%263'].payload.transcript_path).toBeUndefined();
@@ -222,7 +242,7 @@ describe('handmux-codebuddy-notify.sh → shared handmux-write.cjs', () => {
   it('does not carry it when the process could not be identified at all', () => {
     const file = freshFile();
     run('start', { file, stdin: '{"session_id":"cb-s1","transcript_path":"/p/abc.jsonl"}' });
-    const obj = run('notify', { file, stdin: '{"notification_type":"auth_success","message":"Signed in"}' });
+    const obj = run('notify', { file, stdin: '{"notification_type":"permission_prompt","message":"gate"}' });
     expect(obj['%263'].src).toBe('notify');
     // Nothing ties the two rows together, so no claim is made either way.
     expect(obj['%263'].payload.session_id).toBeUndefined();

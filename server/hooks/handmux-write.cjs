@@ -83,6 +83,10 @@ function sameKnownProcess(previous) {
 // replacement process can never inherit the session of a dead one. `cwd` is deliberately not carried: it can
 // legitimately change between events, and the transcript is already identified by session (or by the pid
 // registry, which knows the pane's own cwd).
+// The only Notifications that say anything about the pane's turn — everything else is noise that must not
+// overwrite the row (see the branch in update()). Both kinds are the same two the readers classify.
+const PANE_STATE_NOTIFICATIONS = new Set(['permission_prompt', 'idle_prompt']);
+
 const PANE_IDENTITY_FIELDS = ['session_id', 'transcript_path'];
 function withPaneIdentity(payload, previous) {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return payload;
@@ -281,6 +285,22 @@ function update() {
       || previous.payload.session_id === payload.session_id)) {
     // PermissionRequest is the authoritative opening edge. Claude later emits a generic Notification for
     // the same blocked gate; retaining the earlier detailed row also prevents a second canonical unread.
+    applied = false;
+  } else if (src === 'notify' && !PANE_STATE_NOTIFICATIONS.has(payload?.notification_type)) {
+    // A Notification this pipeline does not act on — measured live: `auth_success`, which CodeBuddy fires
+    // for every running instance when its token refreshes (CodeBuddy's vocabulary also has
+    // `elicitation_dialog`, which no reader maps either). It reports nothing about the pane's turn, yet
+    // recording it as the pane's `src` REPLACED what the pane was actually doing — and this row is the only
+    // place the Connector, the roster and the conversation Core read that from. The pane's state then
+    // resolved to nothing at all: measured on this machine, two panes sat at an unresolvable state for
+    // hours, and a message queued for one of them waited for `idle` for seventeen hours without ever being
+    // sent (the Core only dispatches a queue when the session reads idle). It also cleared a live card —
+    // including 需要你, when a token refresh happened while a gate was open — and erased the pane's session
+    // binding on the way, which is the other half of what this function guards.
+    //
+    // So ignore the noise rather than let it ratchet the pane's record to "nothing known". The pane keeps
+    // the last event that actually said something, exactly as the two branches above keep a richer or a
+    // resting row.
     applied = false;
   } else if (src === 'end') {
     // SessionEnd drops the pane on a clean exit. But /clear (and /resume) END the old session AND START a
