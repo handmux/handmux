@@ -57,6 +57,38 @@ export async function serializePaneInput<T>(paneId: string, operation: () => Pro
 const RULE_RE = /^\u2500{3,}$/;
 const TITLED_RULE_RE = /^\u2500{3,}(?:\s*\S.*\s*\u2500{1,})?$/;
 
+// Why a send was refused has to be diagnosable from the log alone. The editor is judged by exact geometry,
+// and when a TUI changes its decoration the reader fails closed: the phone tells the user to "handle the
+// draft in the terminal" while they look at an empty composer they cannot do anything about. That happened
+// twice in one day (an empty CodeBuddy editor arriving as the bare prompt, a Claude composer whose top rule
+// carries the session title), and both times the shape had to come from the reporter's own screen capture.
+//
+// So when — and ONLY when — the editor could not be read at all, the rows around the cursor are recorded.
+// A draft we CAN read is somebody's text and is never logged: a readable-but-foreign draft is a normal
+// refusal with a known cause and no diagnostic value.
+const DETAIL_ROWS = 3;
+const DETAIL_ROW_MAX = 120;
+const DETAIL_MAX = 600;
+
+export function describeEditorArea(
+  screen: string,
+  cursor: { cursorX: number; cursorY: number; },
+  rows = DETAIL_ROWS,
+): string {
+  const lines = screen.split('\n');
+  const from = Math.max(0, cursor.cursorY - rows);
+  const to = Math.min(lines.length - 1, cursor.cursorY + rows);
+  const parts = [`cursor=(${cursor.cursorX},${cursor.cursorY})`];
+  for (let i = from; i <= to; i++) {
+    const line = lines[i] ?? '';
+    const clamped = line.length > DETAIL_ROW_MAX ? `${line.slice(0, DETAIL_ROW_MAX)}…` : line;
+    // JSON so escapes of control characters cannot break the surrounding log line.
+    parts.push(`${i}${i === cursor.cursorY ? '*' : ''}=${JSON.stringify(clamped)}`);
+  }
+  const detail = parts.join(' ');
+  return detail.length > DETAIL_MAX ? `${detail.slice(0, DETAIL_MAX)}…` : detail;
+}
+
 export function singleLineDraft(
   screen: string,
   cursor: { cursorX: number; cursorY: number },

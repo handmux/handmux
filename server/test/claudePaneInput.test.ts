@@ -92,3 +92,24 @@ it('does not send if a remapped clear key did not clear the exact recovered draf
 it('ignores a native AI suggested follow-up when End still leaves the real input cursor at column two', () => {
   expect(claudeSingleLineDraft(screen('继续写出剩下的内容'), cursor(2))).toBe('');
 });
+
+it('records the shape when the composer cannot be read, and never a draft it could read', async () => {
+  // Unreadable layout: a refusal the user cannot act on, so the rows around the cursor are recorded —
+  // this is the only trace of what the pane looked like at that moment.
+  const unreadable = fixture('');
+  const report = vi.fn();
+  unreadable.commands.capturePlain.mockImplementation(async () => 'history\n<<a layout the reader does not know>>\n');
+  expect(await sendClaudePanePrompt(unreadable.commands, '%1', 'next', () => null, undefined, report))
+    .toEqual({ nativeMutation: false, reason: 'terminal_draft_conflict' });
+  expect(report).toHaveBeenCalledTimes(1);
+  expect(report.mock.calls[0]?.[0]).toContain('cursor=(');
+  expect(unreadable.commands.sendText).not.toHaveBeenCalled();
+
+  // A draft the reader CAN read, belonging to somebody else: refusal is the correct outcome and its text
+  // must never reach the log.
+  const foreign = fixture('handwritten draft');
+  const quiet = vi.fn();
+  expect(await sendClaudePanePrompt(foreign.commands, '%1', 'next', () => 'old draft', undefined, quiet))
+    .toEqual({ nativeMutation: false, reason: 'terminal_draft_conflict' });
+  expect(quiet).not.toHaveBeenCalled();
+});

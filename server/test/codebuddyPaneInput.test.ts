@@ -101,3 +101,20 @@ it('does not send when the clear key failed to clear the restored prompt', async
   expect(h.commands.sendText).not.toHaveBeenCalled();
   expect(h.draft()).toBe('历史草稿');
 });
+
+it('records the shape when the composer cannot be read, and never a draft it could read', async () => {
+  const unreadable = fixture('');
+  const report = vi.fn();
+  unreadable.commands.capturePlain.mockImplementation(async () => 'history\n<<a layout the reader does not know>>\n');
+  expect(await sendCodeBuddyPanePrompt(unreadable.commands, '%1', 'next', () => null, undefined, report))
+    .toEqual({ nativeMutation: false, reason: 'terminal_draft_conflict' });
+  expect(report).toHaveBeenCalledTimes(1);
+  expect(report.mock.calls[0]?.[0]).toContain('cursor=(');
+  expect(unreadable.commands.sendText).not.toHaveBeenCalled();
+
+  const foreign = fixture('handwritten draft');
+  const quiet = vi.fn();
+  expect(await sendCodeBuddyPanePrompt(foreign.commands, '%1', 'next', () => '历史草稿', undefined, quiet))
+    .toEqual({ nativeMutation: false, reason: 'terminal_draft_conflict' });
+  expect(quiet).not.toHaveBeenCalled();
+});

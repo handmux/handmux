@@ -202,6 +202,18 @@ try {
 const agentPanes = new TmuxAgentPaneSource({ commands, pollMs: 3_000 });
 // CodeBuddy's state file is read by the Inbox Connector below AND by the conversation lens's pane → session
 // bind, so it is resolved once here, above both.
+// A refused send is the hardest report to act on: the user sees "终端有未确认的草稿" over an editor they
+// cannot do anything about, and the shape that confused the reader exists only on that pane, in that moment.
+// Record it (bounded, and only when the editor could not be read at all — a draft we CAN read is somebody's
+// text and never reaches the log). Claude's composer carrying its session title in the top rule and an
+// empty CodeBuddy editor arriving as the bare prompt both needed a user's own capture to diagnose.
+// The wording stays factual: a refused send delivers no prompt, but the reader may still have pressed End,
+// and on the path that clears a stale prompt it deliberately sent C-u.
+function reportUnreadableEditor(label: string, paneId: string, detail: string): void {
+  console.warn(`[handmux] Cannot read the ${label} composer, so the message was not delivered,`
+    + ` ${paneId}: ${detail}`);
+}
+
 const codebuddyStateFile = process.env.CODEBUDDY_STATE_FILE || codebuddyStatePath(home);
 const codebuddyEvents = createCodebuddyEvents({ stateFile: codebuddyStateFile });
 const agentProcess = createLocalAgentProcessContext();
@@ -216,6 +228,7 @@ const agentRuntime = createBuiltinAgentRuntime({
   codebuddyConversationControl: {
     sendPrompt: (paneId, text, guard) => sendCodeBuddyPanePrompt(
       commands, paneId, text, () => codebuddyEvents.paneSubmittedPrompt(paneId), guard,
+      (detail) => reportUnreadableEditor('CodeBuddy', paneId, detail),
     ),
     // CodeBuddy's published keybindings bind ctrl+c to app:interrupt (ctrl+d exits), so the composer's
     // interrupt is the generic one.
@@ -229,7 +242,10 @@ const agentRuntime = createBuiltinAgentRuntime({
     pendingKind: (paneId) => codebuddyEvents.paneKind(paneId) ?? null,
   },
   claudeConversationControl: {
-    sendPrompt: (paneId, text, guard) => sendClaudePanePrompt(commands, paneId, text, () => events?.paneRestoredPrompt(paneId) ?? null, guard),
+    sendPrompt: (paneId, text, guard) => sendClaudePanePrompt(
+      commands, paneId, text, () => events?.paneRestoredPrompt(paneId) ?? null, guard,
+      (detail) => reportUnreadableEditor('Claude', paneId, detail),
+    ),
     interrupt: (paneId) => interruptClaudePane(commands, paneId),
   },
   claudeInteractionControl: {

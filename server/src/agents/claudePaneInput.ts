@@ -1,4 +1,4 @@
-import { serializePaneInput, singleLineDraft } from '../paneInput.js';
+import { describeEditorArea, serializePaneInput, singleLineDraft } from '../paneInput.js';
 import type { PaneInputCommands, PaneInputGuard, PanePromptResult } from '../paneInput.js';
 
 const SUBMIT_GAP_MS = 120;
@@ -20,22 +20,36 @@ export function sendClaudePanePrompt(
   text: string,
   restoredPrompt: () => string | null,
   guard?: PaneInputGuard,
+  reportUnreadable?: (detail: string) => void,
 ): Promise<PanePromptResult & { reason?: 'terminal_draft_conflict' }> {
   return serializePaneInput(paneId, async () => {
     if (guard && !await guard.validate()) return { nativeMutation: false };
     await commands.exitCopyModeIfActive(paneId);
     await commands.sendKey(paneId, 'End');
     await delay(SUBMIT_GAP_MS);
-    const readDraft = async () => claudeSingleLineDraft(await commands.capturePlain(paneId), await commands.paneInfo(paneId));
-    const draft = await readDraft();
-    if (draft === null || (draft !== '' && draft !== restoredPrompt())) {
+    const readEditor = async () => {
+      const screen = await commands.capturePlain(paneId);
+      const cursor = await commands.paneInfo(paneId);
+      return { screen, cursor, draft: claudeSingleLineDraft(screen, cursor) };
+    };
+    const draft = await readEditor();
+    if (draft.draft === null) {
+      // Unreadable: record the shape, never the text we could not read (see describeEditorArea).
+      reportUnreadable?.(describeEditorArea(draft.screen, draft.cursor));
+      return { nativeMutation: false, reason: 'terminal_draft_conflict' };
+    }
+    if (draft.draft !== '' && draft.draft !== restoredPrompt()) {
       return { nativeMutation: false, reason: 'terminal_draft_conflict' };
     }
     if (guard && !await guard.validate()) return { nativeMutation: false };
-    if (draft) {
+    if (draft.draft) {
       await commands.sendKey(paneId, 'C-u');
       await delay(SUBMIT_GAP_MS);
-      if (await readDraft() !== '') return { nativeMutation: false, reason: 'terminal_draft_conflict' };
+      const cleared = await readEditor();
+      if (cleared.draft !== '') {
+        if (cleared.draft === null) reportUnreadable?.(describeEditorArea(cleared.screen, cleared.cursor));
+        return { nativeMutation: false, reason: 'terminal_draft_conflict' };
+      }
     }
     await commands.sendText(paneId, text);
     if (text) await delay(SUBMIT_GAP_MS);
