@@ -3754,6 +3754,32 @@ describe('generic Agent Conversation UI', () => {
     expect(input.value).toBe('restore me');
   });
 
+  it('automatically dismisses a send error without waiting for another request', async () => {
+    vi.useFakeTimers();
+    try {
+      const conversation = controller({
+        send: vi.fn(async () => { throw new Error('temporary send failure'); }),
+      });
+      const { container } = render(
+        <AgentConversationComposer agentId="pi" sessionId="auto-dismiss-error" busy={false}
+          conversation={conversation} />,
+      );
+      fireEvent.change(screen.getByRole('textbox'), { target: { value: 'retry me' } });
+      await act(async () => {
+        fireEvent.click(container.querySelector('button.cc-send')!);
+        await Promise.resolve();
+      });
+      expect(screen.getByRole('alert').textContent).toBe('temporary send failure');
+
+      await act(async () => { vi.advanceTimersByTime(3_999); });
+      expect(screen.getByRole('alert')).toBeTruthy();
+      await act(async () => { vi.advanceTimersByTime(1); });
+      expect(screen.queryByRole('alert')).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('freezes every draft mutation entry while a send is pending and restores on definitive failure', async () => {
     let reject!: (error: Error) => void;
     const pending = new Promise<void>((_resolve, nextReject) => { reject = nextReject; });

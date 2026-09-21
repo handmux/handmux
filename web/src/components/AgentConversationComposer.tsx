@@ -30,6 +30,8 @@ import {
 } from '../conversationDraftStore.js';
 import type { AsrMode } from '../voice/usePushToTalk.js';
 
+const COMPOSER_ERROR_DISMISS_MS = 4_000;
+
 function autoGrow(element: HTMLTextAreaElement | null): void {
   if (!element) return;
   element.style.height = 'auto';
@@ -131,6 +133,11 @@ export default function AgentConversationComposer({
     mountedRef.current = true;
     return () => { mountedRef.current = false; };
   }, []);
+  useEffect(() => {
+    if (!error) return undefined;
+    const timer = window.setTimeout(() => setError(null), COMPOSER_ERROR_DISMISS_MS);
+    return () => window.clearTimeout(timer);
+  }, [error]);
   // Runtime discovery can briefly omit a live run. App must not cache that stale lease, so this component
   // unmounts; keep only its unsent text under the stable Agent session identity and restore it on remount.
   useEffect(() => {
