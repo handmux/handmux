@@ -16,6 +16,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { hookErrorMessage, readHookStateRows } from './agents/hookEvents.js';
 import type { AgentHookClassification, AgentHookKind } from './agents/hookEvents.js';
+import { CodeBuddyNativeTailReader } from './agents/codebuddyNativeTail.js';
+import type { HookBridgeNativeTail } from '../connectors/hookBridge.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 // The hook-maintained state file: ONE JSON object keyed by tmux pane id, each value the pane's latest
@@ -95,7 +97,10 @@ export function acceptsCodeBuddyAgent(agent: unknown): boolean {
 // its transcript path, when the payload carried one), which is authoritative over any cwd→newest-file
 // guess. Returns null when hooks are off, the pane is not CodeBuddy's, or the row carries no session to
 // bind — so a lens can never open onto a session the pane was not actually running.
-export function createCodebuddyEvents({ stateFile = DEFAULT_STATE_FILE }: { stateFile?: string } = {}): {
+export function createCodebuddyEvents({
+  stateFile = DEFAULT_STATE_FILE,
+  nativeTail = new CodeBuddyNativeTailReader(),
+}: { stateFile?: string; nativeTail?: HookBridgeNativeTail } = {}): {
   paneSession(paneId: string): {
     sessionId: string | null;
     transcriptPath: string | null;
@@ -124,11 +129,21 @@ export function createCodebuddyEvents({ stateFile = DEFAULT_STATE_FILE }: { stat
     // The activity the 对话 lens shows while a turn runs: the SAME classification the Inbox projects, so the
     // typing wave and the roster row can never disagree about what the pane is doing. A caller holding a
     // process generation gets the row only when it is still that generation's.
+    //
+    // This MUST consult the transcript reconciler, not just the row. CodeBuddy fires no Hook when the user
+    // answers a gate, so a `permreq` row keeps answering 需要你 long after the pane moved on — and the
+    // Interaction adapter's fallback turns that stale answer into a card reading 这个操作需要在终端中完成 on a
+    // pane that is simply working (measured on %5, 2026-09-21: gate answered, Bash results landing at
+    // 00:17:38/42/50/54, a card raised at each of those same seconds with the idle editor as its body).
+    // Claude cannot drift this way because its own paneKind reads the native status first.
     paneKind(paneId: string, process?: { pid: number; startedAt?: number }): AgentHookKind | null {
       const row = read().get(paneId);
       if (!row) return null;
       if (process && row.process
         && (process.pid !== row.process.pid || process.startedAt !== row.process.startedAt)) return null;
+      if (nativeTail.read(row.payload, row.ts, Date.now(), row.process, row.src).status === 'busy') {
+        return 'working';
+      }
       return classifyCodeBuddy(row.src, row.payload)?.kind ?? null;
     },
     // The prompt this pane last submitted, used only to recognize OUR OWN leftover in the native editor:

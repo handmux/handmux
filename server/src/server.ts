@@ -282,8 +282,9 @@ const claudeInboxBridge = new ClaudeHookBridgeConnector({
     console.warn(`[handmux] ${message}${detail}`);
   },
 });
-// CodeBuddy drives the same Hook pipeline into its own state file. No native tail: this slice trusts the
-// Hook lifecycle edges alone (see connectors/codebuddy).
+// CodeBuddy drives the same Hook pipeline into its own state file. Its out-of-band reconciliation — the
+// transcript read that closes a gate no Hook closes — is CodeBuddy's own (see connectors/codebuddy and
+// agents/codebuddyNativeTail.ts); the connector supplies it, so nothing is configured here.
 const codebuddyInboxBridge = new CodeBuddyHookBridgeConnector({
   socketPath: agentRuntime.socketPath,
   credentialFile: path.join(agentRuntimeDirectory, 'bridge-credential.json'),

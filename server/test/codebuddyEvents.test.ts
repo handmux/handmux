@@ -2,8 +2,10 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { classifyCodeBuddy } from '../src/codebuddyEvents.js';
+import { classifyCodeBuddy, createCodebuddyEvents } from '../src/codebuddyEvents.js';
 import { acceptsCodeBuddyAgent } from '../connectors/codebuddy/index.js';
+import { codebuddyProjectsDir } from '../src/agents/codebuddy.js';
+import { CodeBuddyNativeTailReader } from '../src/agents/codebuddyNativeTail.js';
 import {
   canonicalInboxState,
   hookEventSequence,
@@ -183,6 +185,55 @@ describe('CodeBuddy hook record parsing', () => {
 
   it('keeps the CodeBuddy state file on the same stable per-user path as Claude', () => {
     expect(codebuddyStatePath('/home/x')).toBe('/home/x/.handmux/codebuddy-state.json');
+  });
+});
+
+describe('CodeBuddy pane activity against an answered permission gate', () => {
+  // The measured case (pane %5, 2026-09-21): the user answered a Bash gate, the tool ran and landed results
+  // at 00:17:38/42/50/54 — and the `permreq` row that had raised the gate never moved, because CodeBuddy
+  // fires no Hook when a gate is answered. Anything that reads the row alone keeps answering 需要你. The
+  // Interaction adapter's fallback is one such reader, and it turned that stale answer into a card reading
+  // 这个操作需要在终端中完成 on a pane that was simply working, with the idle editor as the card's body.
+  const SESSION = '01a0beb0-7203-787d-b52e-56d334508053';
+  const GATE_AT = 1_790_007_498_181;
+
+  function transcript(home: string, slug: string, name: string, resultAt: number): string {
+    const file = path.join(codebuddyProjectsDir(home), slug, `${name}.jsonl`);
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, [
+      { type: 'function_call', timestamp: GATE_AT - 60_000, id: 'call-1', name: 'Bash' },
+      { type: 'function_call_result', timestamp: resultAt, id: 'result-1', name: 'Bash' },
+    ].map((record) => JSON.stringify(record)).join('\n') + '\n');
+    return file;
+  }
+
+  it('answers working only when the transcript proves it, and leaves every other row alone', () => {
+    const home = fixtureRoot();
+    // Two panes, two sessions: one whose granted tool has already produced a result, one whose tool has not.
+    const answered = transcript(home, 'Users-admin-jly_gh-handmux_private', 'answered', GATE_AT + 500);
+    const stillPending = transcript(home, 'private-tmp-cb-sim', 'pending', GATE_AT - 1_000);
+    const stateFile = path.join(home, 'codebuddy-state.json');
+    writeStateFile(stateFile, {
+      '%5': stateRow('permreq', {
+        session_id: SESSION, transcript_path: answered, tool_name: 'Write',
+      }, { ts: GATE_AT }),
+      '%6': stateRow('permreq', {
+        session_id: SESSION, transcript_path: stillPending, tool_name: 'Write',
+      }, { ts: GATE_AT }),
+      '%7': stateRow('stop', { session_id: SESSION, last_assistant_message: 'done' }, { ts: GATE_AT }),
+    });
+    const events = createCodebuddyEvents({
+      stateFile, nativeTail: new CodeBuddyNativeTailReader({ home }),
+    });
+
+    // The row's own answer is 需要你 for both — the transcript is the only thing that can tell them apart,
+    // and it is what the Inbox Connector has always consulted for its own snapshot.
+    expect(classifyCodeBuddy('permreq', { tool_name: 'Write' })?.kind).toBe('permission');
+    expect(events.paneKind('%5')).toBe('working');
+    // No proof the gate is over ⇒ the row stands exactly as it was. This reader can only ever close a gate.
+    expect(events.paneKind('%6')).toBe('permission');
+    // A row that is not a gate never pays for a transcript read and keeps its own classification.
+    expect(events.paneKind('%7')).toBe('done');
   });
 });
 
