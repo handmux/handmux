@@ -38,6 +38,15 @@ export async function serializePaneInput<T>(paneId: string, operation: () => Pro
 // (null) — the caller must never delete content it could not read. Callers send End first: placeholder text
 // is painted after the cursor but is not part of the editor, while real text leaves the cursor at its end.
 // `hint` strips a right-aligned footer the editor paints inside that same line (e.g. CodeBuddy's "↵ send").
+//
+// Trailing blanks are removed before the line is judged, because how the EMPTY editor looks is not stable:
+// Claude writes a non-breaking space after its prompt (which a capture keeps), CodeBuddy a plain one (which
+// a capture trims as a trailing blank), so a genuinely empty editor arrives as the bare prompt. Reading
+// that as unrecognizable — rather than as empty — refused every send to an idle CodeBuddy pane, and even
+// refused the step that verifies our own stale prompt had been cleared, since clearing it produces exactly
+// that line. Nothing is lost by trimming: a line that carries only the prompt cannot be hiding text, and
+// the rules above and below are what prove this line is the editor rather than a prompt character that
+// happens to sit somewhere in the transcript.
 export function singleLineDraft(
   screen: string,
   cursor: { cursorX: number; cursorY: number },
@@ -46,11 +55,15 @@ export function singleLineDraft(
 ): string | null {
   const lines = screen.split('\n');
   const line = lines[cursor.cursorY];
-  const start = prompt.length + 1;
   if (!line || !/^\u2500{3,}$/.test(lines[cursor.cursorY - 1]?.trim() ?? '')
-    || !/^\u2500{3,}$/.test(lines[cursor.cursorY + 1]?.trim() ?? '')
-    || !line.startsWith(`${prompt} `) && !line.startsWith(`${prompt}\u00a0`)) return null;
-  let value = hint ? line.slice(start).replace(hint, '') : line.slice(start);
+    || !/^\u2500{3,}$/.test(lines[cursor.cursorY + 1]?.trim() ?? '')) return null;
+  const body = line.trimEnd();
+  if (!body.startsWith(prompt)) return null;
+  const rest = body.slice(prompt.length);
+  if (!rest) return ''; // The prompt and nothing else: the editor is empty.
+  if (rest[0] !== ' ' && rest[0] !== '\u00a0') return null;
+  const start = prompt.length + 1;
+  let value = hint ? rest.slice(1).replace(hint, '') : rest.slice(1);
   value = value.trimEnd();
   if (cursor.cursorX === start) return ''; // Native suggestions are painted here but End does not enter them.
   if (!value || /[\x00-\x1f\x7f]/.test(value) || cursor.cursorX <= start) return null;

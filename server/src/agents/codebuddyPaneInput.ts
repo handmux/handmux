@@ -2,13 +2,19 @@
 // (paneInput.ts owns the per-pane critical section, the text+submit gap and the one-line editor reader);
 // what is CodeBuddy's is the editor's own shape and the keys its keybindings document.
 //
-// Measured on 2.155.0, its editor is the same one-line box Claude draws, with `>` as the prompt and a
-// right-aligned `↵ send` footer painted inside the same line:
+// Measured on 2.156.0, its editor is the same one-line box Claude draws, with `>` as the prompt and a
+// right-aligned `↵ send` footer painted inside the same line once there is draft text:
 //
 //     ────────────────────────────────────────────────
 //     > 检查文件是否创建成功                            ↵ send
 //     ────────────────────────────────────────────────
 //     ? for shortcuts  ← for agents
+//
+// With no draft text the capture arrives as the bare `>`: the plain space CodeBuddy paints after its prompt
+// is a trailing blank, which `capture-pane` drops (Claude's non-breaking space survives). The reader treats
+// that as the empty editor it is — see `singleLineDraft`. The distinction matters downstream: the same line
+// is what a cleared editor looks like, so reading it as unrecognizable refused both the send itself and the
+// check that our own stale prompt had been cleared.
 //
 // Interrupt is `ctrl+c`: CodeBuddy's own published keybindings list `ctrl+c → app:interrupt` (ctrl+d is
 // exit), which is the same key the generic `interruptPane` sends.

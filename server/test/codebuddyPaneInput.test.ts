@@ -4,17 +4,30 @@ import {
   sendCodeBuddyPanePrompt,
 } from '../src/agents/codebuddyPaneInput.js';
 
-// CodeBuddy 2.155.0 draws the same one-line editor as Claude, with `>` as the prompt and a right-aligned
-// `↵ send` footer painted inside that same line:
+// CodeBuddy draws the same one-line editor as Claude, with `>` as the prompt and a right-aligned `↵ send`
+// footer painted inside that same line once there is draft text:
 //     ────────────────────────────────────────
 //     > 检查文件是否创建成功                    ↵ send
 //     ────────────────────────────────────────
+//
+// An EMPTY editor is the prompt ALONE — captured from a live 2.156.0 pane, character for character. The
+// plain space CodeBuddy paints after its prompt is trimmed by `capture-pane` as a trailing blank, so none
+// of it reaches us (unlike Claude's non-breaking space, which survives). Modelling the empty editor as a
+// placeholder line is what let this reader look correct while refusing every real send.
 const screen = (draft: string) => [
   'history',
   '────────────────────────────────────────',
-  draft
-    ? `> ${draft}${' '.repeat(20)}↵ send`
-    : '> Press / to use commands, @ to mention files.',
+  draft ? `> ${draft}${' '.repeat(20)}↵ send` : '>',
+  '────────────────────────────────────────',
+  '? for shortcuts  ← for agents',
+  '',
+].join('\n');
+// A native suggestion is painted after the prompt while the editor is still empty, which in code points is
+// the placeholder an empty editor used to be modelled as. The cursor sits at the start, so it is not text.
+const suggestionScreen = (text: string) => [
+  'history',
+  '────────────────────────────────────────',
+  `> ${text}`,
   '────────────────────────────────────────',
   '? for shortcuts  ← for agents',
   '',
@@ -37,8 +50,13 @@ function fixture(initial: string) {
 it('reads the draft and ignores the editor footer the app paints inside that line', () => {
   expect(codebuddySingleLineDraft(screen('检查文件是否创建成功'), cursor(12)))
     .toBe('检查文件是否创建成功');
-  // An empty editor shows its placeholder after the cursor: nothing was typed.
+  // The empty editor as the machine really draws it: the prompt and nothing after it, because the blank
+  // CodeBuddy paints was trimmed by the capture. Reading this as unrecognizable (rather than as empty) is
+  // what refused every send — and every post-clear verification — on an idle CodeBuddy pane.
   expect(codebuddySingleLineDraft(screen(''), cursor(2))).toBe('');
+  expect(codebuddySingleLineDraft(screen(''), cursor(2))).not.toBeNull();
+  // A native suggestion is painted after the cursor, not typed: still an empty editor.
+  expect(codebuddySingleLineDraft(suggestionScreen('Press / to use commands'), cursor(2))).toBe('');
 });
 
 it('refuses an editor it cannot recognize instead of deleting unseen text', () => {

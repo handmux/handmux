@@ -29,6 +29,17 @@ it('accepts a genuinely empty editor containing a native placeholder', async () 
   expect(h.commands.sendKey.mock.calls).toEqual([['%1', 'End']]);
 });
 
+it('reads the empty editor whether the capture kept the blank after the prompt or trimmed it', () => {
+  // Claude paints a non-breaking space, which a capture keeps …
+  expect(claudeSingleLineDraft(screen(''), cursor(2))).toBe('');
+  // … while a provider painting a plain one reaches us as the bare prompt, since the capture trims that
+  // blank. Same empty editor, and the reader is shared, so both spellings must answer the same way.
+  expect(claudeSingleLineDraft('history\n────────────\n❯\n────────────\nfooter\n', cursor(2))).toBe('');
+  // Trailing blanks only: content after the prompt is read exactly as before.
+  expect(claudeSingleLineDraft('history\n────────────\n❯ old draft   \n────────────\nfooter\n', cursor(11)))
+    .toBe('old draft');
+});
+
 it.each(['handwritten draft', 'old draft edited'])('preserves %s and returns a recoverable rejection', async (draft) => {
   const h = fixture(draft);
   expect(await sendClaudePanePrompt(h.commands, '%1', 'next', () => 'old draft'))
