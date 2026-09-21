@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createClaudeInteractionAdapter } from '../src/agents/claudeInteraction.js';
-import { sendPaneChoice, serializePaneInput } from '../src/paneInput.js';
+import { sendPaneMenuChoice, serializePaneInput } from '../src/paneInput.js';
 import { AgentRunRuntime } from '../src/agent-runtime/run.js';
 
 async function lease() {
@@ -20,6 +20,31 @@ function deferred<T>() {
     reject = nextReject;
   });
   return { promise, resolve, reject };
+}
+
+// The model picker the way the pane draws it, with the cursor on `row`; the fake follows the keys it is sent
+// so a walk can be verified the way a real menu verifies it.
+function modelMenuAt(row: number): string {
+  return ['Select model', ...['1. Default', '2. Sonnet'].map((line, index) => (
+    index + 1 === row ? `❯ ${line}` : `  ${line}`
+  )), 'Enter to confirm · Esc to cancel'].join('\n');
+}
+
+function modelMenuCommands() {
+  let row = 1;
+  const keys: Array<[string, string]> = [];
+  return {
+    keys,
+    capturePlain: async () => modelMenuAt(row),
+    exitCopyModeIfActive: vi.fn(async () => {}),
+    sendText: vi.fn(async () => {}),
+    sendEnter: vi.fn(async () => {}),
+    sendKey: vi.fn(async (pane: string, key: string) => {
+      keys.push([pane, key]);
+      if (key === 'Down') row += 1;
+      if (key === 'Up') row = Math.max(1, row - 1);
+    }),
+  };
 }
 
 describe('Claude Interaction adapter', () => {
@@ -43,15 +68,16 @@ describe('Claude Interaction adapter', () => {
     await handle.close();
   });
 
-  it('answers the model picker with a keypress, not a bracketed paste or trailing Enter', async () => {
+  // Claude's own picker takes a digit, but only to MOVE the highlight — its bundle (2.1.278) sends `1`-`9`
+  // through the same `nme` that ↑/↓ use, and commits only on `return`. So the answer is delivered the way its
+  // footer advertises: walk to the option, then Enter. (Measured live on CodeBuddy, whose picker ignores the
+  // digit outright; the shared sender is the same code for both.)
+  it('walks the model picker to the answer and presses Enter, not a digit or a paste', async () => {
     const run = await lease();
-    const commands = {
-      exitCopyModeIfActive: vi.fn(async () => {}), sendText: vi.fn(async () => {}),
-      sendEnter: vi.fn(async () => {}), sendKey: vi.fn(async () => {}),
-    };
+    const commands = modelMenuCommands();
     const adapter = createClaudeInteractionAdapter({
-      capturePlain: async () => 'Select model\n❯ 1. Default\n  2. Sonnet\nEnter to confirm · Esc to cancel',
-      sendChoice: (pane, choice) => sendPaneChoice(commands, pane, choice),
+      capturePlain: commands.capturePlain,
+      sendChoice: (pane, choice) => sendPaneMenuChoice(commands, pane, choice),
     }, 1000);
     const handle = await adapter.observeNative(run, () => {});
     try {
@@ -62,25 +88,21 @@ describe('Claude Interaction adapter', () => {
         value: { type: 'selection', optionIds: ['choice:2'] },
       });
       await Promise.resolve();
-      expect(commands.sendKey).not.toHaveBeenCalled();
+      expect(commands.keys).toEqual([]); // waits for the shared pane critical section
       gate.resolve(); await preceding;
       expect(await response).toEqual({ status: 'accepted' });
       expect(commands.exitCopyModeIfActive).toHaveBeenCalledWith('%1');
-      expect(commands.sendKey).toHaveBeenCalledTimes(1);
-      expect(commands.sendKey).toHaveBeenCalledWith('%1', '2');
+      expect(commands.keys).toEqual([['%1', 'Down'], ['%1', 'Enter']]);
       expect(commands.sendText).not.toHaveBeenCalled();
       expect(commands.sendEnter).not.toHaveBeenCalled();
     } finally { await handle.close(); }
   });
 
   it.each(['10', 'Enter', '2\n'])('refuses invalid choice key sequences (%s)', (choice) => {
-    const commands = {
-      exitCopyModeIfActive: vi.fn(async () => {}), sendText: vi.fn(async () => {}),
-      sendEnter: vi.fn(async () => {}), sendKey: vi.fn(async () => {}),
-    };
-    expect(() => sendPaneChoice(commands, '%1', choice)).toThrow('single option digit');
+    const commands = modelMenuCommands();
+    expect(() => sendPaneMenuChoice(commands, '%1', choice)).toThrow('single option digit');
     expect(commands.exitCopyModeIfActive).not.toHaveBeenCalled();
-    expect(commands.sendKey).not.toHaveBeenCalled();
+    expect(commands.keys).toEqual([]);
   });
 
   it('fails closed when provider permission state has no reliable native decisions', async () => {

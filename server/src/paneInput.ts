@@ -1,4 +1,5 @@
 import { assertRequestAuthority } from './requestAuthority.js';
+import { parsePendingPrompt } from './pendingPrompt.js';
 
 export interface PaneInputCommands {
   exitCopyModeIfActive(paneId: string): Promise<unknown>;
@@ -145,8 +146,34 @@ export function interruptClaudePane(commands: PaneInputCommands, paneId: string)
   });
 }
 
-export function sendPaneChoice(
-  commands: PaneInputCommands,
+// Answer a menu that is on the pane. Which key does it depends on the SCREEN, not on the provider — every
+// combination below was measured against live panes (CodeBuddy 2.156.0, 2026-09-21), one screen at a time:
+//
+//   model question menu   `❯ 1. … / 2. … / 3. Type something`   digit ignored; ↓ moves; Enter selects
+//   review screen         `❯ 1. Submit answers / 2. Cancel`     digit commits; ↓/↑ + Enter commit
+//   permission gate       ` > 1. Yes / 2. … / 3. No, …`         digit commits
+//
+// And Claude Code's own picker, read out of its bundle (2.1.278) because no live Claude turn could be run:
+//
+//   if (key.length === 1 && key >= "1" && key <= "9") { … nme(Number(key) - 1) }  // nme = the SAME move
+//   else if (key === "return") { … l8(Wm) }                                       // …that ↑/↓ call; THIS commits
+//
+// So on Claude's question menu a digit moves the highlight and never commits by itself, and on CodeBuddy's it
+// is not handled at all. Question menus are therefore answered by walking the cursor and pressing Enter on
+// BOTH providers; the digit is used only on a permission gate, where it is measured to commit AND is the
+// safer key — it names the row instead of stepping to it, so a misread cursor cannot commit a different
+// answer than the user tapped, which on a gate would mean approving something else.
+//
+// The walk verifies the cursor arrived before pressing Enter. That check is the point of the split: a
+// swallowed arrow means nothing happens until Enter turns it into the WRONG row, while a swallowed digit
+// simply does nothing and is safe to retry. Either way the caller is told the answer did not land instead of
+// being handed a success the pane never saw.
+export interface PaneMenuCommands extends PaneInputCommands {
+  capturePlain(paneId: string): Promise<string>;
+}
+
+export function sendPaneMenuChoice(
+  commands: PaneMenuCommands,
   paneId: string,
   choice: string,
 ): Promise<void> {
@@ -154,7 +181,27 @@ export function sendPaneChoice(
   return serializePaneInput(paneId, async () => {
     await commands.exitCopyModeIfActive(paneId);
     assertRequestAuthority();
-    // Menu shortcuts are key events; bracketed paste is not handled by Claude's selector.
-    await commands.sendKey(paneId, choice);
+    const target = Number(choice);
+    const readMenu = async () => parsePendingPrompt(await commands.capturePlain(paneId));
+    const menu = await readMenu();
+    if (!menu) throw new Error('No menu is on the pane to answer');
+    if (!menu.options.some((option) => option.n === target)) {
+      throw new Error(`The menu does not offer option ${target}`);
+    }
+    if (menu.kind === 'permission') {
+      await commands.sendKey(paneId, choice);
+      return;
+    }
+    // The cursor is reported as the option NUMBER it sits on and every numbered row is selectable, so the
+    // distance to travel is just the difference.
+    const from = menu.cursor ?? target;
+    if (from !== target) {
+      const key = target > from ? 'Down' : 'Up';
+      for (let step = 0; step < Math.abs(target - from); step++) await commands.sendKey(paneId, key);
+      if ((await readMenu())?.cursor !== target) {
+        throw new Error('The menu did not move to the chosen option');
+      }
+    }
+    await commands.sendKey(paneId, 'Enter');
   });
 }

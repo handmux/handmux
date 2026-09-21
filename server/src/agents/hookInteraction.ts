@@ -1,15 +1,17 @@
 // The pending-interaction adapter shared by the Hook-driven Agents (Claude, CodeBuddy). Their TUIs are the
 // same one-line-editor lineage, so the prompts they put on screen have the same shape — a cursor-marked
 // numbered option list with a description row under an option — and they parse with the SAME
-// `parsePendingPrompt`. What differs is the KEYSTROKE that picks an option, so it belongs to the provider's
-// control (each sender documents its own measurement):
+// `parsePendingPrompt`. What differs is the KEYSTROKE that picks an option, and that turns out to depend on
+// the SCREEN rather than on the provider — so both bind one shared sender (paneInput.sendPaneMenuChoice):
 //
-//   Claude     its menus take the option's own digit.
-//   CodeBuddy  it depends on the screen. Measured on 2.156.0, one screen at a time: the AskUserQuestion
-//              picker IGNORES the digit while `↓` moves the cursor and Enter selects; the review screen and
-//              the permission gate DO take the digit (on the gate, `1` approved a command and it really ran).
-//              Its control therefore uses the digit where it names the row and walks the cursor where it
-//              cannot — see sendCodeBuddyPaneChoice.
+//   question menu    a digit only MOVES the highlight. Measured live on CodeBuddy 2.156.0, whose picker
+//                    ignores the digit outright (the highlight does not budge); and read out of Claude
+//                    Code's own bundle (2.1.278), where `1`–`9` go through the same `nme` that ↑/↓ call
+//                    while only the `return` branch commits. Answering therefore means walking to the
+//                    option and pressing Enter — on both providers.
+//   permission gate  the digit commits: measured on CodeBuddy, where a `1` approved a command that really
+//                    ran. It is also the safer key there — it names the row instead of stepping to it, so a
+//                    misread cursor cannot commit a different answer than the user tapped.
 //
 // A provider supplies its own naming (the ids the phone stores and the fallback wording a user reads);
 // everything else is the shared contract. Where a provider's wording is NOT verifiable — a permission gate

@@ -20,7 +20,6 @@
 // exit), which is the same key the generic `interruptPane` sends.
 import { describeEditorArea, interruptPane, serializePaneInput, singleLineDraft } from '../paneInput.js';
 import type { PaneInputCommands, PaneInputGuard, PanePromptResult } from '../paneInput.js';
-import { parsePendingPrompt } from '../pendingPrompt.js';
 
 const SUBMIT_GAP_MS = 120;
 const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
@@ -88,56 +87,6 @@ export function sendCodeBuddyPanePrompt(
     if (text) await delay(SUBMIT_GAP_MS);
     await commands.sendEnter(paneId);
     return { nativeMutation: true };
-  });
-}
-
-// Answer a CodeBuddy menu. Which key does it depends on the screen — all four combinations were measured
-// on 2.156.0 (2026-09-21) against live panes, not assumed:
-//
-//   AskUserQuestion picker   `❯ 1. …` / `  2. …` / `  3. Type something`
-//        the option DIGIT is ignored outright (sent repeatedly, and as a literal too), while `↓` moves the
-//        cursor and Enter selects. A menu offering free text swallows the digit.
-//   review screen            `❯ 1. Submit answers` / `  2. Cancel`
-//        the digit works AND `↓`/`↑` + Enter work.
-//   permission gate          ` > 1. Yes` / `  2. Yes, and don't ask again…` / `  3. No, …`
-//        the digit works — `1` approved the command and it really ran.
-//
-// So the gate is answered with its digit and everything else by walking the cursor, and the digit is the
-// safer key precisely where it works: it NAMES the row instead of stepping to it, so a misread cursor can
-// never select a different answer than the one the user tapped — which on a permission gate would mean
-// approving something else. The walking path verifies the step before pressing Enter (a swallowed arrow only
-// means nothing happens; a swallowed arrow followed by Enter would select the WRONG row), while a swallowed
-// digit simply does nothing and is safe to retry.
-export function sendCodeBuddyPaneChoice(
-  commands: CodeBuddyPaneInputCommands,
-  paneId: string,
-  choice: string,
-): Promise<void> {
-  if (!/^[1-9]$/.test(choice)) throw new TypeError('Pane choice requires a single option digit');
-  return serializePaneInput(paneId, async () => {
-    await commands.exitCopyModeIfActive(paneId);
-    const target = Number(choice);
-    const readMenu = async () => parsePendingPrompt(await commands.capturePlain(paneId));
-    const menu = await readMenu();
-    if (!menu) throw new Error('CodeBuddy menu is not on screen');
-    if (!menu.options.some((option) => option.n === target)) {
-      throw new Error(`CodeBuddy menu does not offer option ${target}`);
-    }
-    if (menu.kind === 'permission') {
-      await commands.sendKey(paneId, choice);
-      return;
-    }
-    // The cursor is reported as the option NUMBER it sits on, and every numbered row is selectable, so the
-    // distance to travel is just the difference.
-    const from = menu.cursor ?? target;
-    if (from !== target) {
-      const key = target > from ? 'Down' : 'Up';
-      for (let step = 0; step < Math.abs(target - from); step++) await commands.sendKey(paneId, key);
-      if ((await readMenu())?.cursor !== target) {
-        throw new Error('CodeBuddy menu did not move to the chosen option');
-      }
-    }
-    await commands.sendKey(paneId, 'Enter');
   });
 }
 

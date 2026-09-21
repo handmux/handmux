@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createCodeBuddyInteractionAdapter } from '../src/agents/codebuddyInteraction.js';
 import { serializePaneInput } from '../src/paneInput.js';
-import { sendCodeBuddyPaneChoice } from '../src/agents/codebuddyPaneInput.js';
+import { sendPaneMenuChoice } from '../src/paneInput.js';
 import { AgentRunRuntime } from '../src/agent-runtime/run.js';
 
 // CodeBuddy's gates are read with the SAME parser Claude's are (src/pendingPrompt.ts): the cursor-marked
@@ -169,7 +169,7 @@ describe('CodeBuddy Interaction adapter', () => {
     const commands = menuCommands(screen);
     const adapter = createCodeBuddyInteractionAdapter({
       capturePlain: commands.capturePlain,
-      sendChoice: (pane, choice) => sendCodeBuddyPaneChoice(commands, pane, choice),
+      sendChoice: (pane, choice) => sendPaneMenuChoice(commands, pane, choice),
     }, 1_000);
     const handle = await adapter.observeNative(run, () => {});
     try {
@@ -195,7 +195,7 @@ describe('CodeBuddy Interaction adapter', () => {
     const commands = menuCommands(realPermissionScreen);
     const adapter = createCodeBuddyInteractionAdapter({
       capturePlain: commands.capturePlain,
-      sendChoice: (pane, choice) => sendCodeBuddyPaneChoice(commands, pane, choice),
+      sendChoice: (pane, choice) => sendPaneMenuChoice(commands, pane, choice),
     }, 1_000);
     const handle = await adapter.observeNative(run, () => {});
     try {
@@ -220,7 +220,7 @@ describe('CodeBuddy Interaction adapter', () => {
     const commands = menuCommands(questionScreenAt(screen, 1));
     const adapter = createCodeBuddyInteractionAdapter({
       capturePlain: commands.capturePlain,
-      sendChoice: (pane, choice) => sendCodeBuddyPaneChoice(commands, pane, choice),
+      sendChoice: (pane, choice) => sendPaneMenuChoice(commands, pane, choice),
     }, 1_000);
     const handle = await adapter.observeNative(run, () => {});
     try {
@@ -238,7 +238,7 @@ describe('CodeBuddy Interaction adapter', () => {
     const commands = menuCommands(questionScreenAt(realQuestionScreen, 1), { moves: false });
     const adapter = createCodeBuddyInteractionAdapter({
       capturePlain: commands.capturePlain,
-      sendChoice: (pane, choice) => sendCodeBuddyPaneChoice(commands, pane, choice),
+      sendChoice: (pane, choice) => sendPaneMenuChoice(commands, pane, choice),
     }, 1_000);
     const handle = await adapter.observeNative(run, () => {});
     try {
