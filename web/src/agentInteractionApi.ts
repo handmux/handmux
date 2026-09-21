@@ -162,7 +162,9 @@ export async function streamAgentInteractions(
   run: AgentRunRef,
   options: {
     signal: AbortSignal;
-    onReady(checkpoint: { revision: number; pending: PendingAgentInteraction[] }): void;
+    onReady(checkpoint: {
+      epoch: string; revision: number; pending: PendingAgentInteraction[];
+    }): void;
     onEvent(event: AgentInteractionEvent): void;
   },
 ): Promise<void> {
@@ -192,9 +194,11 @@ export async function streamAgentInteractions(
           const checkpoint = record(envelope.checkpoint);
           const values = Array.isArray(checkpoint?.pending)
             ? checkpoint.pending.map(parsePendingAgentInteraction) : [];
-          if (!checkpoint || !Number.isSafeInteger(checkpoint.revision)
+          if (!checkpoint || typeof checkpoint.epoch !== 'string' || !checkpoint.epoch
+            || !Number.isSafeInteger(checkpoint.revision)
             || values.some((item) => item === null)) throw new Error('Invalid Interaction checkpoint');
           options.onReady({
+            epoch: checkpoint.epoch,
             revision: Number(checkpoint.revision), pending: values as PendingAgentInteraction[],
           });
         } else if (envelope?.type === 'event') {

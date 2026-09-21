@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import type { InteractionService } from './interaction.js';
 import type {
   InteractionEvent,
@@ -10,6 +11,15 @@ const DEFAULT_MAX_BUFFERED_EVENTS = 256;
 const DEFAULT_IDLE_GRACE_MS = 5_000;
 
 export interface InteractionLiveCheckpoint {
+  /**
+   * Identifies ONE observation of the run. `revision` only counts events inside that observation and starts
+   * at 0 again whenever a new one is opened — which happens whenever the last subscriber detaches and the
+   * idle grace expires, and after every server restart. A consumer that treats `revision` as a watermark for
+   * the run (the phone does, to drop stale events) must therefore also see the epoch: without it, a checkpoint
+   * from a NEW observation looks older than the revisions the consumer already saw, gets ignored, and every
+   * later event is dropped with it — the card list freezes while the server keeps a pending card.
+   */
+  epoch: string;
   revision: number;
   pending: PendingInteraction[];
 }
@@ -37,6 +47,7 @@ export class InteractionLiveHubError extends Error {
 
 interface SharedObservation {
   run: AgentRunLease;
+  epoch: string;
   ready: Promise<void>;
   handle?: InteractionLiveHandle;
   checkpoint?: InteractionLiveCheckpoint;
@@ -175,6 +186,7 @@ export class InteractionLiveHub {
   #create(run: AgentRunLease): SharedObservation {
     const shared: SharedObservation = {
       run,
+      epoch: randomUUID(),
       ready: Promise.resolve(),
       subscribers: new Set(),
       idleTimer: undefined,
@@ -188,6 +200,7 @@ export class InteractionLiveHub {
       }
       shared.handle = handle;
       shared.checkpoint = {
+        epoch: shared.epoch,
         revision: handle.revision,
         pending: structuredClone(handle.pending),
       };
@@ -224,6 +237,7 @@ export class InteractionLiveHub {
       throw new InteractionLiveHubError('unavailable', 'Interaction terminal event is invalid');
     }
     shared.checkpoint = {
+      epoch: shared.epoch,
       revision: event.revision,
       pending: [...pending.values()],
     };

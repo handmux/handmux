@@ -26,6 +26,12 @@ export function useAgentInteraction(
   const [respondingId, setRespondingId] = useState<string | null>(null);
   const runRef = useRef(run);
   const revisionRef = useRef(-1);
+  // The server counts revisions per OBSERVATION, not per run: the counter restarts at 0 whenever the
+  // observation is reopened (the last subscriber leaving past the idle grace, or a server restart). So the
+  // watermark is only meaningful inside one epoch — a checkpoint carrying a new one is not "older" than what
+  // this client has already seen, and comparing revisions across epochs dropped the checkpoint AND every
+  // event after it, freezing the card list while the server kept a pending card.
+  const epochRef = useRef<string | null>(null);
   const revisionRunRef = useRef<string | null>(null);
   runRef.current = run;
 
@@ -41,6 +47,7 @@ export function useAgentInteraction(
     if (revisionRunRef.current !== runKey) {
       revisionRunRef.current = runKey;
       revisionRef.current = -1;
+      epochRef.current = null;
     }
     let current = true;
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -60,6 +67,10 @@ export function useAgentInteraction(
           signal: controller.signal,
           onReady: (checkpoint) => {
             if (!current) return;
+            if (checkpoint.epoch !== epochRef.current) {
+              epochRef.current = checkpoint.epoch;
+              revisionRef.current = -1;
+            }
             if (checkpoint.revision < revisionRef.current) return;
             revisionRef.current = checkpoint.revision;
             setPending(checkpoint.pending);

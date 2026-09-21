@@ -53,6 +53,7 @@ describe('InteractionLiveHub', () => {
     const second = await hub.subscribe(h.lease);
     expect(h.open).toHaveBeenCalledOnce();
     expect(first.checkpoint).toEqual({
+      epoch: expect.any(String),
       revision: 4,
       pending: [expect.objectContaining({ id: 'interaction-1', resolutionToken: 'resolution-1' })],
     });
@@ -81,7 +82,7 @@ describe('InteractionLiveHub', () => {
     first.close();
 
     const second = await hub.subscribe(h.lease);
-    expect(second.checkpoint).toEqual({ revision: 5, pending: [] });
+    expect(second.checkpoint).toEqual({ epoch: expect.any(String), revision: 5, pending: [] });
     expect(h.open).toHaveBeenCalledOnce();
     second.close();
     hub.close();
@@ -103,6 +104,7 @@ describe('InteractionLiveHub', () => {
     expect(await first[Symbol.asyncIterator]().next()).toEqual({ value: updated, done: false });
     const late = await hub.subscribe(h.lease);
     expect(late.checkpoint).toEqual({
+      epoch: expect.any(String),
       revision: 5,
       pending: [expect.objectContaining({
         id: 'interaction-1', prompt: 'Allow updated command?', resolutionToken: 'resolution-1',
@@ -188,5 +190,22 @@ describe('InteractionLiveHub', () => {
       value: undefined, done: true,
     });
     expect(nativeClose).toHaveBeenCalledOnce();
+  });
+
+  it('gives a NEW observation a new epoch, so a restarted revision counter is not read as stale', async () => {
+    // Revisions restart at 0 whenever an observation is reopened (the last subscriber leaving past the idle
+    // grace, or a server restart) — measured live: the phone froze its card list and kept answering
+    // `already_resolved`, because a fresh checkpoint's small revision looked older than the watermark it
+    // still held for the same run. The checkpoint now carries an epoch, and a consumer resets its watermark
+    // when that changes.
+    const h = harness();
+    const hub = new InteractionLiveHub({ interaction: { open: h.open }, idleGraceMs: 0 });
+    const first = await hub.subscribe(h.lease);
+    expect(typeof first.checkpoint.epoch).toBe('string');
+    first.close(); // idleGraceMs 0 → the observation is terminated immediately
+    const second = await hub.subscribe(h.lease);
+    expect(h.open).toHaveBeenCalledTimes(2);
+    expect(second.checkpoint.epoch).not.toBe(first.checkpoint.epoch);
+    second.close();
   });
 });
