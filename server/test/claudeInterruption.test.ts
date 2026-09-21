@@ -6,7 +6,7 @@ import { createClaudeEvents } from '../src/claudeEvents.js';
 import { createBuiltinAgentRuntime } from '../src/agent-runtime/builtinRuntime.js';
 import { FileInboxStateStore } from '../src/agent-runtime/inboxStore.js';
 import { ClaudeNativeTailReader } from '../src/agents/claudeNativeTail.js';
-import { interruptClaudePane, interruptPane } from '../src/paneInput.js';
+import { interruptAgentPane } from '../src/paneInput.js';
 import { ClaudeHookBridgeConnector } from '../connectors/claude/index.js';
 
 const SESSION = '4442e3d0-8d46-4cce-9822-b86558f69922';
@@ -108,12 +108,15 @@ it('caches parsed tails and invalidates replacement, truncation, and explicit se
   expect(read).toHaveBeenCalledTimes(6);
 });
 
-it('uses Escape only for the Claude stop path', async () => {
+it('stops a turn with Escape for every Agent that has a stop path', async () => {
+  // One key for both, because it is the only one measured to work on both: Escape stops a Claude turn, and on
+  // CodeBuddy 2.156.0 it printed `⎿ Interrupted by user` and killed a running `sleep 90` — while `ctrl+c`,
+  // which CodeBuddy's own keybindings advertise for app:interrupt, did nothing at all mid-tool.
   const commands = { exitCopyModeIfActive: vi.fn(async () => {}), sendKey: vi.fn(async () => {}),
     sendText: vi.fn(async () => {}), sendEnter: vi.fn(async () => {}) };
-  await interruptClaudePane(commands, '%1');
-  await interruptPane(commands, '%2');
-  expect(commands.sendKey.mock.calls).toEqual([['%1', 'Escape'], ['%2', 'C-c']]);
+  await interruptAgentPane(commands, '%1');
+  await interruptAgentPane(commands, '%2');
+  expect(commands.sendKey.mock.calls).toEqual([['%1', 'Escape'], ['%2', 'Escape']]);
 });
 
 it('treats a short native tail read as unknown instead of restoring an older Hook completion', () => {

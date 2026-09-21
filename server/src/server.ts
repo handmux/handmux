@@ -49,12 +49,9 @@ import { apiErrorBoundary, apiRequestContext } from './apiErrors.js';
 import { RuntimeHealth } from './healthProtocol.js';
 import { healthRoutes } from './routes/health.js';
 import { createBuiltinAgentRuntime } from './agent-runtime/builtinRuntime.js';
-import { interruptClaudePane, sendPaneMenuChoice } from './paneInput.js';
+import { interruptAgentPane, sendPaneMenuChoice } from './paneInput.js';
 import { sendClaudePanePrompt } from './agents/claudePaneInput.js';
-import {
-  interruptCodeBuddyPane,
-  sendCodeBuddyPanePrompt,
-} from './agents/codebuddyPaneInput.js';
+import { sendCodeBuddyPanePrompt } from './agents/codebuddyPaneInput.js';
 import {
   createLocalAgentProcessContext,
   TmuxAgentPaneSource,
@@ -230,9 +227,7 @@ const agentRuntime = createBuiltinAgentRuntime({
       commands, paneId, text, () => codebuddyEvents.paneSubmittedPrompt(paneId), guard,
       (detail) => reportUnreadableEditor('CodeBuddy', paneId, detail),
     ),
-    // CodeBuddy's published keybindings bind ctrl+c to app:interrupt (ctrl+d exits), so the composer's
-    // interrupt is the generic one.
-    interrupt: (paneId) => interruptCodeBuddyPane(commands, paneId),
+    interrupt: (paneId) => interruptAgentPane(commands, paneId),
   },
   codebuddyInteractionControl: {
     capturePlain: (paneId) => commands.capturePlain(paneId),
@@ -246,7 +241,7 @@ const agentRuntime = createBuiltinAgentRuntime({
       commands, paneId, text, () => events?.paneRestoredPrompt(paneId) ?? null, guard,
       (detail) => reportUnreadableEditor('Claude', paneId, detail),
     ),
-    interrupt: (paneId) => interruptClaudePane(commands, paneId),
+    interrupt: (paneId) => interruptAgentPane(commands, paneId),
   },
   claudeInteractionControl: {
     capturePlain: (paneId) => commands.capturePlain(paneId),

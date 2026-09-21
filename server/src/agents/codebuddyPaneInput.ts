@@ -16,9 +16,10 @@
 // is what a cleared editor looks like, so reading it as unrecognizable refused both the send itself and the
 // check that our own stale prompt had been cleared.
 //
-// Interrupt is `ctrl+c`: CodeBuddy's own published keybindings list `ctrl+c → app:interrupt` (ctrl+d is
-// exit), which is the same key the generic `interruptPane` sends.
-import { describeEditorArea, interruptPane, serializePaneInput, singleLineDraft } from '../paneInput.js';
+// Interrupt is `esc`: the pane's own footer says so (`✹ Buzzing… (esc to interrupt)`) and Escape really does
+// stop it — measured, see `interruptAgentPane` in paneInput.ts. CodeBuddy's published keybindings list
+// `ctrl+c → app:interrupt` (ctrl+d is exit); sending that one mid-tool did nothing at all.
+import { describeEditorArea, serializePaneInput, singleLineDraft } from '../paneInput.js';
 import type { PaneInputCommands, PaneInputGuard, PanePromptResult } from '../paneInput.js';
 
 const SUBMIT_GAP_MS = 120;
@@ -88,8 +89,4 @@ export function sendCodeBuddyPanePrompt(
     await commands.sendEnter(paneId);
     return { nativeMutation: true };
   });
-}
-
-export function interruptCodeBuddyPane(commands: PaneInputCommands, paneId: string): Promise<void> {
-  return interruptPane(commands, paneId);
 }

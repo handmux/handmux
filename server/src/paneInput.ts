@@ -131,17 +131,18 @@ export function sendPanePrompt(
   });
 }
 
-export function interruptPane(commands: PaneInputCommands, paneId: string): Promise<void> {
+// Stop the pane's turn. Escape is the key BOTH providers answer to, measured one screen at a time:
+//
+//   Claude                Escape stops the turn (its TUI prints `esc to interrupt` while it is running)
+//   CodeBuddy 2.156.0     Escape stops it — `⎿ Interrupted by user`, and the running `sleep 90` was gone;
+//                         `ctrl+c` did NOT: sent mid-tool, the sleep kept running and the turn kept going.
+//                         Its published keybindings list `ctrl+c → app:interrupt`, which is what this used to
+//                         send; whatever that binding belongs to, it is not the interrupt the pane's own
+//                         footer advertises. One key for both, so there is one place to be wrong.
+export function interruptAgentPane(commands: PaneInputCommands, paneId: string): Promise<void> {
   return serializePaneInput(paneId, async () => {
     await commands.exitCopyModeIfActive(paneId);
     assertRequestAuthority();
-    await commands.sendKey(paneId, 'C-c');
-  });
-}
-
-export function interruptClaudePane(commands: PaneInputCommands, paneId: string): Promise<void> {
-  return serializePaneInput(paneId, async () => {
-    await commands.exitCopyModeIfActive(paneId);
     await commands.sendKey(paneId, 'Escape');
   });
 }
