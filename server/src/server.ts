@@ -53,6 +53,7 @@ import { interruptClaudePane, sendPaneChoice } from './paneInput.js';
 import { sendClaudePanePrompt } from './agents/claudePaneInput.js';
 import {
   interruptCodeBuddyPane,
+  sendCodeBuddyPaneChoice,
   sendCodeBuddyPanePrompt,
 } from './agents/codebuddyPaneInput.js';
 import {
@@ -236,7 +237,10 @@ const agentRuntime = createBuiltinAgentRuntime({
   },
   codebuddyInteractionControl: {
     capturePlain: (paneId) => commands.capturePlain(paneId),
-    sendChoice: (paneId, choice) => sendPaneChoice(commands, paneId, choice),
+    // CodeBuddy's menus do not honour the option digit — its own footer says "Enter to select · ↑/↓ to
+    // navigate", and measured on 2.156.0 the digit is ignored while the arrows work. Claude's menus do take
+    // the digit, so the two providers answer their menus differently on purpose; see each sender's header.
+    sendChoice: (paneId, choice) => sendCodeBuddyPaneChoice(commands, paneId, choice),
     // A Hook `permreq` row is what lets a gate whose screen the parser cannot read still surface as a
     // prompt with a reason instead of silence (same role it plays for Claude).
     pendingKind: (paneId) => codebuddyEvents.paneKind(paneId) ?? null,

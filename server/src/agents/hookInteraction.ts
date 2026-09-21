@@ -1,15 +1,13 @@
 // The pending-interaction adapter shared by the Hook-driven Agents (Claude, CodeBuddy). Their TUIs are the
 // same one-line-editor lineage, so the prompts they put on screen have the same shape — a cursor-marked
-// numbered option list with a description row under an option — and picking one is the same keystroke: the
-// option's own DIGIT.
+// numbered option list with a description row under an option — and they parse with the SAME
+// `parsePendingPrompt`. What differs is the KEYSTROKE that picks an option, so it belongs to the provider's
+// control (each sender documents its own measurement):
 //
-// Verified live against CodeBuddy 2.156.0 (2026-09-21), where all three screens parse with the SAME
-// `parsePendingPrompt` Claude uses and the digit really drives them:
-//
-//   question   ❯ 1. 红色 / 2. 蓝色 / 3. Type something      → sending 1 selects AND advances
-//   review     ❯ 1. Submit answers / 2. Cancel              → sending 1 submits the answers
-//   permission  > 1. Yes / 2. Yes, and don't ask again…      → sending 1 ran the tool (file created)
-//               3. No, and tell CodeBuddy what to do…
+//   Claude     its menus take the option's own digit.
+//   CodeBuddy  its menus do NOT. Measured on 2.156.0: `1` on the AskUserQuestion picker does nothing, while
+//              `↓` moves the cursor and Enter selects; the digit works only on the review screen, which needs
+//              no navigation. Its control therefore steps the cursor and presses Enter.
 //
 // A provider supplies its own naming (the ids the phone stores and the fallback wording a user reads);
 // everything else is the shared contract. Where a provider's wording is NOT verifiable — a permission gate
@@ -53,7 +51,18 @@ function normalizedPrompt(
       id, type: 'local_only', prompt: promptText,
     };
   }
-  const signature = JSON.stringify(prompt);
+  // The card must survive a re-render. The parse carries two volatile pieces: `cursor`, which moves whenever
+  // anyone navigates the menu, and the lead-in prose above the question, which the turn retypes as it streams.
+  // Hashing the whole parse therefore minted a NEW card whenever either changed, retiring the live one as
+  // "resolved" while its gate was still on screen — so an answer could be swallowed AND its card taken away
+  // (measured: a user's answer to a live question was accepted by the server and never reached the pane).
+  // Identify the gate by what IS the gate: the menu kind, its own question line, and the options offered.
+  const signature = JSON.stringify({
+    kind: prompt.kind,
+    question: prompt.title.split(' — ').at(-1) ?? prompt.title,
+    options: prompt.options.map((option) => option.label),
+    submit: prompt.submit === true,
+  });
   const id = `${provider.id}-prompt:${createHash('sha256').update(signature).digest('hex').slice(0, 24)}`;
   return {
     id,

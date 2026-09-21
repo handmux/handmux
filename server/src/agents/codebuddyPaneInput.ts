@@ -20,6 +20,7 @@
 // exit), which is the same key the generic `interruptPane` sends.
 import { describeEditorArea, interruptPane, serializePaneInput, singleLineDraft } from '../paneInput.js';
 import type { PaneInputCommands, PaneInputGuard, PanePromptResult } from '../paneInput.js';
+import { parsePendingPrompt } from '../pendingPrompt.js';
 
 const SUBMIT_GAP_MS = 120;
 const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
@@ -87,6 +88,44 @@ export function sendCodeBuddyPanePrompt(
     if (text) await delay(SUBMIT_GAP_MS);
     await commands.sendEnter(paneId);
     return { nativeMutation: true };
+  });
+}
+
+// Answer a CodeBuddy menu. Its menus do NOT honour the option digit: measured on 2.156.0, sending `1` to the
+// AskUserQuestion picker does nothing (repeatedly, and as a literal too) while `↓` moves the cursor and Enter
+// selects — the digit only works on the review screen, which needs no navigation at all. So drive the menu the
+// way its own footer advertises ("Enter to select · ↑/↓ to navigate"): read where the cursor is and step to the
+// wanted option, then select. The same code drives the review and permission screens unchanged (their cursor
+// starts on the first row, so nothing moves).
+//
+// The step is verified before the selection is committed. Without that check an answer that never landed still
+// reported success to the phone, and the card then retired as "resolved" — so the user could not retry.
+export function sendCodeBuddyPaneChoice(
+  commands: CodeBuddyPaneInputCommands,
+  paneId: string,
+  choice: string,
+): Promise<void> {
+  if (!/^[1-9]$/.test(choice)) throw new TypeError('Pane choice requires a single option digit');
+  return serializePaneInput(paneId, async () => {
+    await commands.exitCopyModeIfActive(paneId);
+    const target = Number(choice);
+    const readMenu = async () => parsePendingPrompt(await commands.capturePlain(paneId));
+    const menu = await readMenu();
+    if (!menu) throw new Error('CodeBuddy menu is not on screen');
+    if (!menu.options.some((option) => option.n === target)) {
+      throw new Error(`CodeBuddy menu does not offer option ${target}`);
+    }
+    // The cursor is reported as the option NUMBER it sits on, and every numbered row is selectable, so the
+    // distance to travel is just the difference.
+    const from = menu.cursor ?? target;
+    if (from !== target) {
+      const key = target > from ? 'Down' : 'Up';
+      for (let step = 0; step < Math.abs(target - from); step++) await commands.sendKey(paneId, key);
+      if ((await readMenu())?.cursor !== target) {
+        throw new Error('CodeBuddy menu did not move to the chosen option');
+      }
+    }
+    await commands.sendKey(paneId, 'Enter');
   });
 }
 
