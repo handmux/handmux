@@ -741,7 +741,7 @@ describe('Agent app facade routes', () => {
       return pending.promise;
     });
     const subscription: InteractionLiveSubscription = {
-      checkpoint: { revision: 0, pending: [] },
+      checkpoint: { epoch: 'epoch-1', revision: 0, pending: [] },
       close,
       async *[Symbol.asyncIterator]() {},
     };
