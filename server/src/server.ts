@@ -8,6 +8,7 @@ import { createApiRouter } from './httpApi.js';
 import { loadUploadExts } from './uploadTypes.js';
 import { createClaudeEvents } from './claudeEvents.js';
 import { createCodebuddyEvents } from './codebuddyEvents.js';
+import { logDetail } from './logDetail.js';
 import { syncHooks } from './cli/claudeHooks.js';
 import { syncHooks as syncCodebuddyHooks } from './cli/codebuddyHooks.js';
 import { syncPiExtension } from './cli/piExtension.js';
@@ -261,8 +262,7 @@ const claudeInboxBridge = new ClaudeHookBridgeConnector({
   panes: agentPanes,
   process: agentProcess,
   logger: (message, error) => {
-    const detail = error === undefined
-      ? '' : `: ${error instanceof Error ? error.message : String(error)}`;
+    const detail = logDetail(error);
     console.warn(`[handmux] ${message}${detail}`);
   },
 });
@@ -277,8 +277,7 @@ const codebuddyInboxBridge = new CodeBuddyHookBridgeConnector({
   panes: agentPanes,
   process: agentProcess,
   logger: (message, error) => {
-    const detail = error === undefined
-      ? '' : `: ${error instanceof Error ? error.message : String(error)}`;
+    const detail = logDetail(error);
     console.warn(`[handmux] ${message}${detail}`);
   },
 });
