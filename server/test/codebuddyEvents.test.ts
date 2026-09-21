@@ -205,9 +205,11 @@ describe('CodeBuddy capability gating', () => {
     // Conversation ships with a composer and an interrupt, like Claude's — it is marked experimental there
     // for the same reason (the provider's own UI can change under it).
     expect(adapter?.capabilities.conversation).toEqual({ apiVersion: 1, experimental: true });
-    // Interaction is deliberately absent: an approval's wording is unverified per gate. Subscription usage
-    // is absent because CodeBuddy exposes no quota source at all.
-    expect(Object.keys(adapter?.capabilities ?? {})).toEqual(['inbox', 'conversation']);
+    // Interaction ships too: the question, review and permission screens were captured from a live pane and
+    // all three parse with the shared parser, with the option digit as the key that drives them.
+    expect(adapter?.capabilities.interaction).toEqual({ apiVersion: 1 });
+    // Subscription usage stays absent: CodeBuddy exposes no quota source at all.
+    expect(Object.keys(adapter?.capabilities ?? {})).toEqual(['inbox', 'conversation', 'interaction']);
     expect(agentName('codebuddy')).toBe('codebuddy');
   });
 

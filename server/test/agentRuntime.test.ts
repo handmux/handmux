@@ -1094,9 +1094,10 @@ describe('AgentRuntime composition root', () => {
       .rejects.toMatchObject({ code: 'runtime-unavailable' });
   });
 
-  it('mounts the CodeBuddy conversation capability it declares, experimental flag included', async () => {
-    // The frontend keys the 对话 lens off exactly this: a declared capability is only usable once the
-    // Runtime has mounted its adapter, and the experimental flag is what marks it as such there.
+  it('mounts the CodeBuddy capabilities it declares, experimental flag included', async () => {
+    // The frontend keys the 对话 lens and the approval card off exactly this: a declared capability is only
+    // usable once the Runtime has mounted its adapter, and the experimental flag is what marks it as such
+    // there. Interaction is mounted only when the pane control is supplied, so the test supplies it.
     const runtime = createBuiltinAgentRuntime({
       panes: new TestPanes([pane()]),
       process: { inspectForeground: async () => ({
@@ -1105,12 +1106,13 @@ describe('AgentRuntime composition root', () => {
       stateDirectory: directory(),
       authToken: AUTH_TOKEN,
       newRunId: () => 'codebuddy-run',
+      codebuddyInteractionControl: { capturePlain: async () => '', sendChoice: async () => {} },
     });
     runtimes.push(runtime);
     expect(runtime.capabilities().find((value) => value.id === 'codebuddy')).toMatchObject({
       iconId: 'codebuddy',
       capabilities: {
-        inbox: true, conversation: true, interaction: false, subscriptionUsage: false,
+        inbox: true, conversation: true, interaction: true, subscriptionUsage: false,
       },
       capabilityMetadata: { conversation: { experimental: true } },
     });

@@ -95,12 +95,15 @@ export const codebuddy: AgentAdapter = {
   presentation: { iconId: 'codebuddy' },
   // Only what is actually implemented. Inbox is delivered by CodeBuddy's Claude-compatible Hooks through
   // its own Connector (connectors/codebuddy) + the Bridge durable lane; Conversation (with composer and
-  // interrupt, like Claude's) reads the session JSONL through ../../agents/codebuddyConversation.ts.
-  // Interaction is not declared yet: its approval wording is still unverified per gate.
+  // interrupt, like Claude's) reads the session JSONL through ../../agents/codebuddyConversation.ts;
+  // Interaction reads the pending menu off the pane through ../../agents/codebuddyInteraction.ts — its
+  // question, review and permission screens were captured from a live 2.156.0 pane and all three parse with
+  // the shared parser, with the option digit as the key that drives them.
   // The classification of its `src`→kind events lives in ../../codebuddyEvents.ts, next to the shared
   // Hook vocabulary, because that is the module the Connector consumes.
   capabilities: {
     inbox: { apiVersion: 1 as const },
     conversation: { apiVersion: 1 as const, experimental: true },
+    interaction: { apiVersion: 1 as const },
   },
 };

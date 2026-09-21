@@ -8,6 +8,8 @@ import {
   createCodexNativeInboxSource,
 } from '../agents/nativeInboxSources.js';
 import { createCodeBuddyConversationAdapter } from '../agents/codebuddyConversation.js';
+import { createCodeBuddyInteractionAdapter } from '../agents/codebuddyInteraction.js';
+import type { CodeBuddyInteractionControl } from '../agents/codebuddyInteraction.js';
 import type { CodeBuddyConversationControl } from '../agents/codebuddyConversation.js';
 import { createCodexConversationAdapter } from '../agents/codexConversation.js';
 import { createCodexInteractionAdapter } from '../agents/codexInteraction.js';
@@ -55,6 +57,7 @@ export interface BuiltinAgentRuntimeOptions
       paneKind?(paneId: string, process?: { pid: number; startedAt?: number }): string | null;
     };
   codebuddyConversationControl?: CodeBuddyConversationControl;
+  codebuddyInteractionControl?: CodeBuddyInteractionControl;
   claudeEvents?: Partial<NonNullable<Parameters<typeof createClaudeConversationAdapter>[0]>['sessions']>
     & {
       paneKind?(paneId: string, process?: { pid: number; startedAt?: number }): 'done' | 'working' | 'permission' | 'compacting' | 'error' | 'end' | 'idle' | null;
@@ -170,6 +173,7 @@ export function createBuiltinAgentRuntime({
   home,
   codebuddyEvents,
   codebuddyConversationControl,
+  codebuddyInteractionControl,
   claudeEvents,
   claudeProjectsRoot,
   claudeConversationControl,
@@ -272,6 +276,17 @@ export function createBuiltinAgentRuntime({
           ...(codebuddyConversationControl === undefined ? {} : { control: codebuddyConversationControl }),
         }),
         conversationActivity: createCodebuddyConversationActivityReader(codebuddyEvents),
+        ...(codebuddyInteractionControl === undefined ? {} : {
+          interaction: createCodeBuddyInteractionAdapter(
+            codebuddyInteractionControl,
+            750,
+            (availability, message) => context.health.report({
+              capability: 'interaction', availability,
+              ...(message ? { message } : {}),
+              ...(availability === 'ready' ? { lastSuccessAt: Date.now() } : {}),
+            }),
+          ),
+        }),
         start: () => {
           inbox.start();
           return () => inbox.close();

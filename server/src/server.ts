@@ -220,6 +220,13 @@ const agentRuntime = createBuiltinAgentRuntime({
     // interrupt is the generic one.
     interrupt: (paneId) => interruptCodeBuddyPane(commands, paneId),
   },
+  codebuddyInteractionControl: {
+    capturePlain: (paneId) => commands.capturePlain(paneId),
+    sendChoice: (paneId, choice) => sendPaneChoice(commands, paneId, choice),
+    // A Hook `permreq` row is what lets a gate whose screen the parser cannot read still surface as a
+    // prompt with a reason instead of silence (same role it plays for Claude).
+    pendingKind: (paneId) => codebuddyEvents.paneKind(paneId) ?? null,
+  },
   claudeConversationControl: {
     sendPrompt: (paneId, text, guard) => sendClaudePanePrompt(commands, paneId, text, () => events?.paneRestoredPrompt(paneId) ?? null, guard),
     interrupt: (paneId) => interruptClaudePane(commands, paneId),
