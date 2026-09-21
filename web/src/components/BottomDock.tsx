@@ -17,7 +17,8 @@ import CmdFavEditor from './CmdFavEditor.jsx';
 import MicButton from './MicButton.jsx';
 import { loadFavs, cmdScope } from '../favStore.js';
 import { keyboardSwipeAction, rubberBand, composerAbsorbsScroll } from '../dockKeyboard.js';
-import { getChatDraft, setChatDraft } from '../storage.js';
+import { getChatDraft, getDockMode, setChatDraft, setDockMode } from '../storage.js';
+import type { DockMode } from '../storage.js';
 import { UPLOAD_ACCEPT } from '../uploadTypes.js';
 import { ArrowUpIcon, UploadIcon, ClockIcon, KeyboardIcon, GearIcon } from './icons.jsx';
 import { useUpload } from '../hooks/useUpload.js';
@@ -33,7 +34,6 @@ import { DEFAULT_SERVER_SHORTCUTS, mergeShortcuts, shortcutIdentity } from '../s
 import type { ServerShortcuts, ShortcutItem } from '../shortcutMerge.js';
 import { applyShortcutLayout, loadShortcutLayout } from '../shortcutLayout.js';
 
-type DockMode = 'command' | 'agent';
 type OverlayOwner = 'terminal' | 'composer';
 type GhostTarget = 'send' | 'mic';
 
@@ -236,8 +236,11 @@ function BottomDock({
   const visibleGlobalCommandIds = new Set(commandShortcuts.map(shortcutIdentity));
   const windowShortcuts: ShortcutItem[] = mergeShortcuts([], winFavs, 'command')
     .filter((item) => !visibleGlobalCommandIds.has(shortcutIdentity(item)));
+  // The two terminal pages are an explicit user choice. Agent discovery can lag, disappear during a
+  // re-identification, or recover after reconnecting; it must never take the user's keyboard page away.
+  // A pane with no saved choice starts on the command page, which is valid for every pane type.
   const [modeOverride, setModeOverride] = useState<Record<string, DockMode>>({}); // pane → 'command' | 'agent'
-  const mode = desktopUnified ? 'agent' : modeOverride[pane] || (agent ? 'agent' : 'command');
+  const mode = desktopUnified ? 'agent' : modeOverride[pane] || getDockMode(pane) || 'command';
   // Remember the keyboard-DOWN viewport height. Some mobile browsers resize window.innerHeight together
   // with visualViewport.height, so comparing their current values reads zero even while the keyboard is up.
   // The baseline only grows in one orientation; a real width/orientation change starts a fresh baseline.
@@ -269,6 +272,7 @@ function BottomDock({
       || document.activeElement === cmdRef.current
       || document.activeElement === ref.current;
     setModeOverride((m) => ({ ...m, [pane]: next }));
+    setDockMode(pane, next);
     // preventScroll: the field is already lifted above the keyboard by translateY(-inset), so DON'T let
     // iOS scroll the page to reveal it — that programmatic scroll-to-focus is the transient "jumps taller
     // then settles" on switch (and what shoved the debug bar off-screen), and its timing race is why the

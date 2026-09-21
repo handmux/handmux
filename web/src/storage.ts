@@ -55,6 +55,7 @@ const BROWSER_COLLAPSE_KEY = 'tw_browse_collapse'; // '1' = the listing collapse
 const PREVIEW_DIR_KEY = 'tw_preview_dir';   // { [windowId]: absPath } — last static-preview dir per window
 const STARTUP_CMD_KEY = 'tw_startup_cmd';   // last startup command chosen in new window/session (e.g. "claude")
 const CHAT_DRAFT_KEY = 'tw_chat_draft';     // the chat composer's unsent text — survives an app exit/kill
+const DOCK_MODE_KEY = 'tw_dock_mode_v1';    // { [paneId]: 'command' | 'agent' } — explicit terminal dock page per pane
 const CHAT_TONE_KEY = 'tw_chat_tone';       // the 对话-lens colour tone the user picked (ink | light | dusk)
 const VOICE_FILLER_FILTER_KEY = 'tw_voice_filler_filter'; // browser-local low / medium / high preference
 const AGENT_CONVERSATION_ENABLED_KEY = 'tw_agent_conversation_enabled_v1';
@@ -607,6 +608,29 @@ export const getChatDraft = () => localStorage.getItem(CHAT_DRAFT_KEY) || '';
 export const setChatDraft = (v: string): void => {
   if (v) localStorage.setItem(CHAT_DRAFT_KEY, v);
   else localStorage.removeItem(CHAT_DRAFT_KEY);
+};
+
+export type DockMode = 'command' | 'agent';
+
+export const getDockMode = (pane: string): DockMode | null => {
+  if (!pane) return null;
+  try {
+    const raw = JSON.parse(localStorage.getItem(DOCK_MODE_KEY) || '{}') as unknown;
+    if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) return null;
+    const value = (raw as Record<string, unknown>)[pane];
+    return value === 'command' || value === 'agent' ? value : null;
+  } catch { return null; }
+};
+
+export const setDockMode = (pane: string, mode: DockMode): void => {
+  if (!pane) return;
+  try {
+    const raw = JSON.parse(localStorage.getItem(DOCK_MODE_KEY) || '{}') as unknown;
+    const values = raw !== null && typeof raw === 'object' && !Array.isArray(raw)
+      ? { ...(raw as Record<string, unknown>) } : {};
+    values[pane] = mode;
+    localStorage.setItem(DOCK_MODE_KEY, JSON.stringify(values));
+  } catch { /* storage unavailable */ }
 };
 
 // Favorite commands — a global, user-curated list (no session scoping), stored as a plain array

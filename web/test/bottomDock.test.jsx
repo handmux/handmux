@@ -1021,11 +1021,24 @@ describe('BottomDock', () => {
       expect(container.querySelector('.keybar-grid')).not.toBeNull(); // command keyboard present
     });
 
-    it('defaults to the chat page when a coding agent is live in the pane', () => {
+    it('does not auto-switch when Agent discovery changes', () => {
       render({ pane: '%1', agent: 'claude', onAuthFail: vi.fn(), onKey: vi.fn(), onText: vi.fn() });
-      expect(dot('agent').classList.contains('on')).toBe(true);
+      expect(dot('command').classList.contains('on')).toBe(true);
+      expect(activePage('command')).toBe(true);
+      render({ pane: '%1', agent: null, onAuthFail: vi.fn(), onKey: vi.fn(), onText: vi.fn() });
+      expect(activePage('command')).toBe(true);
+      render({ pane: '%1', agent: 'claude', onAuthFail: vi.fn(), onKey: vi.fn(), onText: vi.fn() });
+      expect(activePage('command')).toBe(true);
+    });
+
+    it('remembers the manually selected page for each pane', () => {
+      render({ pane: '%1', agent: 'claude', onAuthFail: vi.fn(), onKey: vi.fn(), onText: vi.fn() });
+      fire(container.querySelector('.dock-dots'), 'click');
       expect(activePage('chat')).toBe(true);
-      expect(activePage('command')).toBe(false); // both pages mounted (carousel), only chat is active
+      render({ pane: '%2', agent: 'claude', onAuthFail: vi.fn(), onKey: vi.fn(), onText: vi.fn() });
+      expect(activePage('command')).toBe(true);
+      render({ pane: '%1', agent: null, onAuthFail: vi.fn(), onKey: vi.fn(), onText: vi.fn() });
+      expect(activePage('chat')).toBe(true);
     });
 
     it('swiping the pager past the threshold snaps to the other page', () => {
@@ -1118,14 +1131,16 @@ describe('BottomDock', () => {
     });
 
     it('at the strip left edge, a right-drag on it carries over to the command page', () => {
-      render({ pane: '%1', agent: 'claude', onAuthFail: vi.fn(), onKey: vi.fn(), onText: vi.fn() }); // chat
+      render({ pane: '%1', agent: 'claude', onAuthFail: vi.fn(), onKey: vi.fn(), onText: vi.fn() });
+      fire(container.querySelector('.dock-dots'), 'click'); // explicitly choose chat
       expect(activePage('chat')).toBe(true);
       stripDrag(100, 0); // right-drag past the threshold, strip at left edge → page swipe to command
       expect(activePage('command')).toBe(true);
     });
 
     it('when the strip can still scroll (not at left edge), a drag on it does NOT switch pages', () => {
-      render({ pane: '%1', agent: 'claude', onAuthFail: vi.fn(), onKey: vi.fn(), onText: vi.fn() }); // chat
+      render({ pane: '%1', agent: 'claude', onAuthFail: vi.fn(), onKey: vi.fn(), onText: vi.fn() });
+      fire(container.querySelector('.dock-dots'), 'click'); // explicitly choose chat
       stripDrag(80, 40); // scrollLeft>0 → native strip scroll, not a page swipe
       expect(activePage('chat')).toBe(true); // stayed on chat
     });
@@ -1146,6 +1161,7 @@ describe('BottomDock', () => {
 
     it('self-heals a transform left stuck between pages (a missed touchend) on the next render', () => {
       render({ pane: '%1', agent: 'claude', onAuthFail: vi.fn(), onKey: vi.fn(), onText: vi.fn() });
+      fire(container.querySelector('.dock-dots'), 'click'); // explicitly choose chat
       const track = container.querySelector('.dock-track');
       track.style.transform = 'translate3d(-137px, 0, 0)'; // pretend a swipe was interrupted mid-way
       render({ pane: '%1', agent: 'claude', onAuthFail: vi.fn(), onKey: vi.fn(), onText: vi.fn(), recent: ['x'] });
@@ -1168,7 +1184,8 @@ describe('BottomDock', () => {
     // Switching chat → command blurs the composer so its off-screen textarea can't keep focus (and pull the
     // pager sideways). Focus the composer, flip to command, and it must no longer be the active element.
     it('blurs the chat composer when leaving chat for command', () => {
-      render({ pane: '%1', agent: 'claude', onAuthFail: vi.fn(), onKey: vi.fn(), onText: vi.fn() }); // chat
+      render({ pane: '%1', agent: 'claude', onAuthFail: vi.fn(), onKey: vi.fn(), onText: vi.fn() });
+      fire(container.querySelector('.dock-dots'), 'click'); // explicitly choose chat
       const composer = container.querySelector('.input-text');
       act(() => composer.focus());
       expect(document.activeElement).toBe(composer);
