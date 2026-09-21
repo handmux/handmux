@@ -181,11 +181,50 @@ describe('handmux-codebuddy-notify.sh → shared handmux-write.cjs', () => {
     expect(obj['%263']).toBeUndefined();
   });
 
-  it('keeps Notification (no session_id) separate from a bound session', () => {
+  // A pane's session is a property of the PANE, and this row is the only place everything downstream reads
+  // it from — the Connector derives the run's session from it and the phone's 对话 entry depends on it.
+  // Reported live: CodeBuddy fires `auth_success` (a Notification, and one that carries no session_id) for
+  // every running instance when its token refreshes, and two panes lost their binding in the same second,
+  // because the writer replaced the row wholesale. The identity is carried forward instead — but only on
+  // proven sameness, never on a guess.
+  it('carries the pane session through an event that has none, when the process is the same', () => {
+    const file = freshFile();
+    run('start', {
+      file, mode: 'ancestor', procRoot: procFixture(['4242']),
+      stdin: '{"session_id":"cb-s1","transcript_path":"/p/abc.jsonl"}',
+    });
+    const obj = run('notify', {
+      file, mode: 'ancestor', procRoot: procFixture(['4242']),
+      stdin: '{"notification_type":"auth_success","message":"Signed in"}',
+    });
+    expect(obj['%263'].src).toBe('notify'); // the event is recorded as it happened…
+    expect(obj['%263'].payload.notification_type).toBe('auth_success');
+    expect(obj['%263'].payload.session_id).toBe('cb-s1'); // …and the pane's identity survives it
+    expect(obj['%263'].payload.transcript_path).toBe('/p/abc.jsonl');
+  });
+
+  it('does not carry it onto a different process', () => {
+    const file = freshFile();
+    run('start', {
+      file, mode: 'ancestor', procRoot: procFixture(['4242']),
+      stdin: '{"session_id":"dead-session","transcript_path":"/p/abc.jsonl"}',
+    });
+    // `tty` mode resolves a DIFFERENT pid (4243) for the same pane: a replacement owner must never inherit
+    // the dead session, or the phone would open a conversation the pane is not running.
+    const obj = run('notify', {
+      file, mode: 'tty', procRoot: procFixture(['4243']),
+      stdin: '{"notification_type":"auth_success"}',
+    });
+    expect(obj['%263'].payload.session_id).toBeUndefined();
+    expect(obj['%263'].payload.transcript_path).toBeUndefined();
+  });
+
+  it('does not carry it when the process could not be identified at all', () => {
     const file = freshFile();
     run('start', { file, stdin: '{"session_id":"cb-s1","transcript_path":"/p/abc.jsonl"}' });
     const obj = run('notify', { file, stdin: '{"notification_type":"auth_success","message":"Signed in"}' });
     expect(obj['%263'].src).toBe('notify');
+    // Nothing ties the two rows together, so no claim is made either way.
     expect(obj['%263'].payload.session_id).toBeUndefined();
   });
 

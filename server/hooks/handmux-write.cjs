@@ -57,6 +57,47 @@ function sameSourceProcess(previous) {
     && prior.tty === sourceProcess.tty;
 }
 
+// Same generation, but only on positive evidence. sameSourceProcess above answers "may I REVOKE what this row
+// says?", and there an absent fingerprint is deliberately permissive — the Runtime independently verifies the
+// process before anything is published. Carrying a pane's session forward is the opposite kind of claim: it
+// ASSERTS "this pane is running that session", so an unproven match must not license it. Without that
+// distinction a fingerprint that could not be determined (measured: a pane TTY carrying two rows) would let a
+// brand-new process inherit a dead session's binding, and the phone's 对话 entry would open onto a stranger's
+// transcript.
+function sameKnownProcess(previous) {
+  const prior = previous?.process;
+  if (!sourceProcess || !prior) return false;
+  return prior.pid === sourceProcess.pid
+    && prior.startedAt === sourceProcess.startedAt
+    && prior.tty === sourceProcess.tty;
+}
+
+// A pane's SESSION is a property of the pane, not of whichever event happens to arrive next. Some
+// Notifications carry no session_id at all — measured live: CodeBuddy fires `auth_success` for every running
+// instance when its token refreshes, and two panes lost their binding in the same second — and this row is
+// exactly where everything downstream reads that binding from: the Connector derives the run's session from
+// it, and the phone's 对话 entry depends on it. Replacing the row wholesale with a session-less event erased
+// the binding until that pane's next prompt, which for an idle pane can be a long time.
+//
+// Carry the identity forward when the event has none — but only while the same process owns the pane, so a
+// replacement process can never inherit the session of a dead one. `cwd` is deliberately not carried: it can
+// legitimately change between events, and the transcript is already identified by session (or by the pid
+// registry, which knows the pane's own cwd).
+const PANE_IDENTITY_FIELDS = ['session_id', 'transcript_path'];
+function withPaneIdentity(payload, previous) {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return payload;
+  const prior = previous && previous.payload;
+  if (!prior || typeof prior !== 'object' || Array.isArray(prior) || !sameKnownProcess(previous)) return payload;
+  const missing = PANE_IDENTITY_FIELDS.filter((field) => (
+    payload[field] === undefined && prior[field] !== undefined
+  ));
+  if (missing.length === 0) return payload;
+  return Object.fromEntries([
+    ...Object.entries(payload),
+    ...missing.map((field) => [field, prior[field]]),
+  ]);
+}
+
 let payload = {};
 try { payload = JSON.parse(fs.readFileSync(0, 'utf8') || '{}'); } catch { /* unreadable stdin → {} */ }
 
@@ -255,7 +296,7 @@ function update() {
     // one durable source order. Existing readers ignore the additive field.
     const sequence = safeSequence(sequenceFloor);
     obj[pane] = {
-      ts: Number(ts) || 0, src, host, payload, agent: AGENT,
+      ts: Number(ts) || 0, src, host, payload: withPaneIdentity(payload, previous), agent: AGENT,
       ...(sourceProcess ? { process: sourceProcess } : {}),
       ...(sequence === null ? {} : { sequence }),
     };
