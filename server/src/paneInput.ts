@@ -47,6 +47,16 @@ export async function serializePaneInput<T>(paneId: string, operation: () => Pro
 // that line. Nothing is lost by trimming: a line that carries only the prompt cannot be hiding text, and
 // the rules above and below are what prove this line is the editor rather than a prompt character that
 // happens to sit somewhere in the transcript.
+//
+// The rule ABOVE the editor is not always bare either: Claude Code paints the session title inside it
+// (`──── my session title ─`), so a pure run of dashes rejected every send in a titled session — reported
+// from the field with per-pane captures, all of them empty editors waiting for input. It therefore accepts
+// a dash run that opens the line and closes it with the title painted between; the line BELOW stays bare,
+// which is what the same captures show (and what keeps an unrelated decorated line from pairing with the
+// prompt into a false editor box).
+const RULE_RE = /^\u2500{3,}$/;
+const TITLED_RULE_RE = /^\u2500{3,}(?:\s*\S.*\s*\u2500{1,})?$/;
+
 export function singleLineDraft(
   screen: string,
   cursor: { cursorX: number; cursorY: number },
@@ -55,8 +65,8 @@ export function singleLineDraft(
 ): string | null {
   const lines = screen.split('\n');
   const line = lines[cursor.cursorY];
-  if (!line || !/^\u2500{3,}$/.test(lines[cursor.cursorY - 1]?.trim() ?? '')
-    || !/^\u2500{3,}$/.test(lines[cursor.cursorY + 1]?.trim() ?? '')) return null;
+  if (!line || !TITLED_RULE_RE.test(lines[cursor.cursorY - 1]?.trim() ?? '')
+    || !RULE_RE.test(lines[cursor.cursorY + 1]?.trim() ?? '')) return null;
   const body = line.trimEnd();
   if (!body.startsWith(prompt)) return null;
   const rest = body.slice(prompt.length);

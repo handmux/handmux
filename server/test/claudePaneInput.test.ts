@@ -40,6 +40,32 @@ it('reads the empty editor whether the capture kept the blank after the prompt o
     .toBe('old draft');
 });
 
+// Reported from the field (issue #7): Claude Code paints the session title INSIDE the composer's top rule,
+// which the pure-dash requirement rejected — so a session with a title could never be sent to from the
+// phone, while untitled sessions in the same tmux server were fine. These screens are that report's own
+// captures (`──── 会话标题 ─` above the prompt, a bare rule below).
+// (the excerpt starts one row above so the prompt sits where the shared fixture's cursor already is)
+const titledScreen = (draft: string) => ['history', '──── 会话标题 ─', `❯ ${draft}`, '─'.repeat(60), ''].join('\n');
+
+it('reads a titled session, whose top rule carries its title', () => {
+  expect(claudeSingleLineDraft(titledScreen(''), { cursorY: 2, cursorX: 2 })).toBe('');
+  expect(claudeSingleLineDraft(titledScreen('hello'), { cursorY: 2, cursorX: 7 })).toBe('hello');
+});
+
+it('sends into a titled session instead of reporting a draft conflict', async () => {
+  const h = fixture('');
+  h.commands.capturePlain.mockImplementation(async () => titledScreen(''));
+  expect(await sendClaudePanePrompt(h.commands, '%1', 'next', () => null)).toEqual({ nativeMutation: true });
+  expect(h.commands.sendEnter).toHaveBeenCalledOnce();
+});
+
+it('still requires the rule BELOW the editor to be bare', () => {
+  // The same captures show the bottom rule carrying nothing, and keeping it strict is what stops an
+  // unrelated decorated line from pairing with a prompt into a false editor box.
+  expect(claudeSingleLineDraft(['─'.repeat(60), '❯ hello', '──── 会话标题 ─'].join('\n'),
+    { cursorY: 1, cursorX: 7 })).toBeNull();
+});
+
 it.each(['handwritten draft', 'old draft edited'])('preserves %s and returns a recoverable rejection', async (draft) => {
   const h = fixture(draft);
   expect(await sendClaudePanePrompt(h.commands, '%1', 'next', () => 'old draft'))
