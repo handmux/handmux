@@ -3897,6 +3897,12 @@ button.cmd-text { background: none; border: none; text-align: left; }
   position: fixed; left: 0; right: 0; bottom: 0; z-index: var(--z-overlay-nested-content);
   padding: 12px 14px calc(12px + env(safe-area-inset-bottom, 0px));
   border-radius: 14px 14px 0 0;
+  /* The card has to say where it starts on its own. --ct-bar sits within a step of --ct-body in every
+     tone (dusk #1b150c vs #1b150d, light #ece3d0 vs #efe6d2), so a fill-only card read as part of the
+     chat behind it and the shadow was the only edge there was. The border is mixed from the tone's own
+     ink, so all three tones separate without another colour to keep in sync. No bottom edge: the sheet
+     is flush with the viewport there. */
+  border: 1px solid color-mix(in srgb, var(--ct-ink) 26%, transparent); border-bottom: 0;
   background: var(--ct-bar); box-shadow: 0 -4px 18px rgba(0,0,0,.35);
 }
 /* Lead-in context: the assistant's last line(s) before the question (scraped — the jsonl turn isn't flushed
