@@ -7,8 +7,14 @@ import {
 } from '../src/agent-runtime/tmuxRuntime.js';
 import { defaultRun } from '../src/agents/scanUtils.js';
 
-// Fixture PIDs must never resolve against the host's live /proc.
-beforeEach(() => { vi.spyOn(fsp, 'readlink').mockRejectedValue(new Error('fixture proc unavailable')); });
+// Fixture PIDs must never resolve against the host's live /proc. That needs BOTH lookups stubbed:
+// `readlink` is the executable path, and `processStartedAt` reads /proc/<pid>/stat *before* it consults
+// the injected `run` — so on a Linux runner, where the fixture pid 999 really is a live process, the
+// stat read answers for a pid the `run` mock was told does not exist.
+beforeEach(() => {
+  vi.spyOn(fsp, 'readFile').mockRejectedValue(new Error('fixture proc unavailable'));
+  vi.spyOn(fsp, 'readlink').mockRejectedValue(new Error('fixture proc unavailable'));
+});
 afterEach(() => vi.restoreAllMocks());
 
 function live(command = 'pi') {
