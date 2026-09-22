@@ -13,6 +13,7 @@ import { getSessions, getWindows } from '../api.js';
 import type { TmuxWindow } from '../api.js';
 import type { MouseEvent } from 'react';
 import type { WorkspaceRecoveryPlan, WorkspaceRestoreOperation } from '../workspaceRecovery.js';
+import { FolderIcon, GaugeIcon, GearIcon, MonitorIcon } from './icons.jsx';
 
 export interface DrawerOrphan {
   pid: number;
@@ -35,7 +36,6 @@ interface DrawerProps {
   onUnbind: (name: string) => void;
   onBind: () => void;
   onClose: () => void;
-  onLogout: () => void;
   orphans?: DrawerOrphan[];
   onTakeoverRequest?: (orphan: DrawerOrphan) => void;
   recoveryPlan?: WorkspaceRecoveryPlan | null;
@@ -52,7 +52,7 @@ interface DrawerProps {
 }
 
 export default function Drawer({
-  open, currentSessionName, currentWindowId = null, bound, onSelectSession, onUnbind, onBind, onClose, onLogout,
+  open, currentSessionName, currentWindowId = null, bound, onSelectSession, onUnbind, onBind, onClose,
   orphans = [], onTakeoverRequest,
   recoveryPlan = null, recoveryOperation = null, onOpenRecovery = () => {},
   projectTaskBeta = false, onSwitchProject = () => {}, onSwitchSession = () => {}, onOpenUsage = () => {}, onOpenSettings = () => {}, rootView = 'session', currentProjectId = null,
@@ -115,14 +115,18 @@ export default function Drawer({
     <>
       <div id="session-drawer" className={`drawer${rootView === 'project' ? ' project-drawer' : ''} ${open ? 'open' : ''}`}>
         <div className="drawer-list">
+          <div className="drawer-brand">
+            <img src="/icons/logo.svg" alt="" aria-hidden="true" />
+            <div><strong>handmux</strong><span>{rootView === 'project' ? t('project.root.projects') : t('project.root.sessions')}</span></div>
+          </div>
           {projectTaskBeta && (
-            <div className="project-root-switch" role="group">
+            <div className="project-root-switch" role="group" aria-label={t('project.root.projects')}>
               <button type="button" aria-pressed={rootView === 'project'} onClick={onSwitchProject}>{t('project.root.projects')}</button>
               <button type="button" aria-pressed={rootView === 'session'} onClick={onSwitchSession}>{t('project.root.sessions')}</button>
             </div>
           )}
           {rootView === 'project' ? <>
-            <div className="drawer-title">{t('project.root.projects').toUpperCase()}</div>
+            <div className="drawer-title"><FolderIcon />{t('project.root.projects')}</div>
             {projectsLoading && <div className="drawer-empty">{t('common.loading')}</div>}
             {!projectsLoading && projectsError && <div className="drawer-empty" role="alert">{projectsError}</div>}
             {!projectsLoading && !projectsError && projects.length === 0 && <div className="drawer-empty">{t('project.empty')}</div>}
@@ -130,12 +134,8 @@ export default function Drawer({
               <button key={project.id} type="button" className={`drawer-row drawer-name${project.id === currentProjectId ? ' active' : ''}`}
                 onClick={() => { onSelectProject(project.id); onClose(); }}>{project.name}</button>
             ))}
-            <div className="project-drawer-tools">
-              <button type="button" onClick={onOpenUsage}>{t('usage.title')}</button>
-              <button type="button" onClick={onOpenSettings}>{t('app.settings')}</button>
-            </div>
           </> : <>
-          <div className="drawer-title">{t('drawer.title').toUpperCase()}</div>
+          <div className="drawer-title"><MonitorIcon />{t('drawer.title')}</div>
           {bound.length === 0 && <div className="drawer-empty">{t('drawer.empty')}</div>}
           {bound.map((name) => (
             <div key={name} className="drawer-session-tree">
@@ -214,7 +214,10 @@ export default function Drawer({
           )}
           </>}
         </div>
-        <button className="drawer-logout" onClick={onLogout}>{t('drawer.logout')}</button>
+        <div className="drawer-footer">
+          <button type="button" onClick={onOpenUsage}><GaugeIcon /><span>{t('usage.title')}</span></button>
+          <button type="button" onClick={onOpenSettings}><GearIcon /><span>{t('app.settings')}</span></button>
+        </div>
       </div>
       {open && <div className="drawer-backdrop" onClick={onClose} />}
     </>

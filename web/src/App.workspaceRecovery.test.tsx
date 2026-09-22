@@ -308,6 +308,12 @@ async function renderApp() {
   return view;
 }
 
+async function triggerLogout() {
+  fireEvent.click(requiredElement(document, '.drawer-footer button:last-child'));
+  await flush();
+  fireEvent.click(screen.getByRole('button', { name: '退出登录' }));
+}
+
 beforeEach(() => {
   applyAuthStatus({ mode: 'trusted-device', authenticated: true, currentDeviceId: null, tokenEnabled: true, serverTime: Date.now() });
   controlRequestProbe.holdConsumption = false;
@@ -1153,7 +1159,7 @@ describe('App workspace recovery', () => {
     fireEvent.click(menu);
     await flush();
     expect(requiredElement(container, '.drawer').classList.contains('open')).toBe(true);
-    const hiddenFocusTarget = requiredElement<HTMLElement>(container, '.drawer-logout');
+    const hiddenFocusTarget = requiredElement<HTMLElement>(container, '.drawer-footer button:last-child');
     hiddenFocusTarget.focus();
 
     nextPlan.resolve(activePlan({ checkpointId: 'checkpoint-b' }));
@@ -1426,7 +1432,7 @@ describe('App workspace recovery', () => {
     fireEvent.click(screen.getByRole('button', { name: '恢复' }));
     await flush();
 
-    fireEvent.click(requiredElement(document, '.drawer-logout'));
+    await triggerLogout();
     await flush();
     start.resolve({ operationId: 'operation-stale', status: 'pending' });
     await flush();
@@ -1501,7 +1507,7 @@ describe('App workspace recovery', () => {
     await flush();
     expect(api.getWorkspaceRestoreOperation).toHaveBeenCalledTimes(1);
 
-    fireEvent.click(requiredElement(document, '.drawer-logout'));
+    await triggerLogout();
     await flush();
     pending.resolve({
       id: 'operation-a', status: 'succeeded', progress: { completed: 1, total: 1 },
@@ -1564,7 +1570,7 @@ describe('App workspace recovery', () => {
     fireEvent.click(screen.getByRole('button', { name: '恢复' }));
     await flush();
     expect(api.getWorkspaceRestorePlan).toHaveBeenCalledTimes(2);
-    fireEvent.click(requiredElement(document, '.drawer-logout'));
+    await triggerLogout();
     await flush();
     planStatus.resolve(resolvedPlan({ mapping: { id: 'late-plan-mapping' } }));
     protectionStatus.resolve({ status: 'degraded', errorCode: 'live-corrupt' });
@@ -1710,7 +1716,7 @@ describe('App workspace recovery', () => {
       .mockResolvedValueOnce({ status: 'degraded', lastSuccessfulCaptureAt: null, errorCode: 'live-corrupt' })
       .mockResolvedValueOnce({ status: 'protected', lastSuccessfulCaptureAt: '2026-07-20T02:00:00.000Z', errorCode: null });
     await renderApp();
-    fireEvent.click(screen.getByRole('button', { name: '设置' }));
+    fireEvent.click(requiredElement(document, '.topbar .topbar-icon[aria-label="设置"]'));
     await flush();
     expect(screen.getByText('工作区未受保护')).toBeTruthy();
     expect(screen.getByText(/工作区状态副本已损坏/)).toBeTruthy();

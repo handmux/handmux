@@ -2708,6 +2708,7 @@ export default function App() {
         open={settingsOpen}
         onClose={() => setSettingsOpen(false)}
         onDeviceLoggedOut={() => { setSettingsOpen(false); onAuthFail(); }}
+        onLogout={() => { if (hasDeviceSession()) setLogoutConfirm(true); else void logout(); }}
         workspaceProtection={workspaceProtection}
         chatTone={chatTone}
         onChatTone={pickChatTone}
@@ -2758,7 +2759,6 @@ export default function App() {
         onUnbind={unbindSession}
         onBind={() => setBindOpen(true)}
         onClose={() => setDrawerOpen(false)}
-        onLogout={() => { if (hasDeviceSession()) setLogoutConfirm(true); else void logout(); }}
         orphans={orphans}
         onTakeoverRequest={(orphan) => {
           if (orphan.sessionId) setTakeoverTarget({ ...orphan, sessionId: orphan.sessionId });

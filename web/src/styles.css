@@ -191,6 +191,8 @@ button.settings-page-row:disabled, .settings-page-row.disabled { color: rgba(235
 .settings-page-row-value-good { color: var(--green, #65d38b); }
 .settings-page-row-value-warn { color: #e6be70; }
 .settings-page-row-value-bad { color: #ff6961; }
+.settings-page-danger-action { color: var(--red); }
+.settings-account-group { margin-top: 4px; }
 .settings-agent-integration-row { padding-right: 8px; }
 .settings-agent-integration-action {
   min-width: 52px; min-height: 44px; margin: -5px 0; padding: 0 8px;
@@ -951,21 +953,28 @@ button.settings-page-row:disabled, .settings-page-row.disabled { color: rgba(235
 .input-text:focus { outline: none; }
 .input-text::placeholder { color: #6b7280; }
 .token-prompt button { padding: 8px 14px; border: none; border-radius: 8px; background: var(--blue); color: #fff; }
-.drawer { position: fixed; top: 0; left: 0; width: 78%; max-width: 320px; height: 100%; background: #232427; transform: translateX(-100%); transition: transform .2s; z-index: var(--z-overlay-drawer); padding: 12px 12px calc(12px + env(safe-area-inset-bottom, 0px)); display: flex; flex-direction: column; overflow: hidden; }
+.drawer { position: fixed; top: 0; left: 0; width: min(86vw, 360px); max-width: 360px; height: 100%; background: rgba(35,36,39,.96); -webkit-backdrop-filter: blur(24px) saturate(1.25); backdrop-filter: blur(24px) saturate(1.25); transform: translateX(-100%); transition: transform .24s cubic-bezier(.22,.8,.25,1); z-index: var(--z-overlay-drawer); padding: calc(12px + env(safe-area-inset-top, 0px)) 12px calc(12px + env(safe-area-inset-bottom, 0px)); display: flex; flex-direction: column; overflow: hidden; box-shadow: 18px 0 50px rgba(0,0,0,.22); }
 .drawer.open { transform: translateX(0); }
 .drawer-list { flex: 1; min-height: 0; overflow-y: auto; }
-/* Logout pinned at the drawer's bottom — a low-traffic action kept out of the way. */
-.drawer-logout { flex: none; margin-top: 8px; padding: 10px; border: none; border-radius: 8px; background: #2e2a2c; color: var(--red); font-size: 14px; touch-action: manipulation; }
-.drawer-logout:active { background: #4a2f33; }
+.drawer-brand { display: flex; align-items: center; gap: 10px; min-height: 52px; padding: 2px 8px 14px; }
+.drawer-brand img { width: 30px; height: 30px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,.22); }
+.drawer-brand div { min-width: 0; display: grid; gap: 2px; }
+.drawer-brand strong { font-size: 17px; letter-spacing: -.2px; }
+.drawer-brand span { color: rgba(235,235,245,.46); font-size: 12px; }
+.drawer-footer { flex: none; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding-top: 10px; border-top: .5px solid rgba(84,84,88,.45); }
+.drawer-footer button { min-height: 46px; display: inline-flex; align-items: center; justify-content: center; gap: 8px; border: none; border-radius: 12px; background: rgba(118,118,128,.16); color: rgba(235,235,245,.78); font: 14px/1 -apple-system,system-ui,sans-serif; touch-action: manipulation; }
+.drawer-footer button:active { background: rgba(118,118,128,.28); }
+.drawer-footer svg { width: 18px; height: 18px; }
 .drawer-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,.4); z-index: var(--z-overlay-drawer-backdrop); }
-.drawer-title { font-size: 12px; color: #888; letter-spacing: 1px; margin-bottom: 8px; }
+.drawer-title { display: flex; align-items: center; gap: 7px; font-size: 12px; color: rgba(235,235,245,.5); letter-spacing: .4px; margin: 14px 8px 7px; }
+.drawer-title svg { width: 15px; height: 15px; }
 .drawer-row { display: flex; align-items: center; gap: 6px; border-radius: 8px; }
 .drawer-name { flex: 1; min-width: 0; padding: 8px 4px; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.drawer-session.active { background: var(--blue); color: #fff; }
+.drawer-session.active { background: rgba(10,132,255,.22); color: #fff; box-shadow: inset 2px 0 0 var(--blue); }
 .drawer-tree-toggle { flex: none; width: 32px; min-height: 44px; padding: 0; border: none; background: transparent; color: #9ca0aa; font-size: 20px; line-height: 1; touch-action: manipulation; }
 .drawer-session .drawer-name { min-height: 44px; padding: 0 4px; border: none; background: transparent; color: inherit; text-align: left; font: inherit; }
-.drawer-window { display: block; width: calc(100% - 32px); min-height: 40px; margin-left: 32px; padding: 8px 12px; border: none; border-left: 1px solid #3a3b42; background: transparent; color: #b9bdc8; text-align: left; font-size: 13px; line-height: 24px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; touch-action: manipulation; }
-.drawer-window.active { border-left-color: #8db4ff; background: rgba(68, 113, 194, .35); color: #fff; }
+.drawer-window { display: block; width: calc(100% - 34px); min-height: 40px; margin-left: 34px; padding: 8px 12px; border: none; border-left: 1px solid rgba(118,118,128,.35); border-radius: 0 9px 9px 0; background: transparent; color: #b9bdc8; text-align: left; font-size: 13px; line-height: 24px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; touch-action: manipulation; }
+.drawer-window.active { border-left-color: var(--blue); background: rgba(10,132,255,.16); color: #fff; }
 .drawer-window:active { background: rgba(118, 118, 128, .2); }
 .drawer-unbind { flex: none; background: none; border: none; color: #888; font-size: 14px; padding: 6px 8px; touch-action: manipulation; display: inline-flex; align-items: center; justify-content: center; min-width: 40px; min-height: 44px; }
 .drawer-session.active .drawer-unbind { color: #d6e4ff; }
@@ -1059,8 +1068,10 @@ button.settings-page-row:disabled, .settings-page-row.disabled { color: rgba(235
   min-height: 44px; padding: 0 16px; border: none; border-radius: 10px; background: #33353a; color: var(--blue); font-size: 15px;
 }
 .project-drawer .drawer-name { width: 100%; min-height: 44px; border: none; background: transparent; color: #e6e6e6; text-align: left; }
-.project-drawer .drawer-name.active { background: var(--blue); color: #fff; padding-left: 10px; }
-.project-root-switch { margin: 0 0 18px; }
+.project-drawer .drawer-name { min-height: 46px; padding: 0 12px; border-radius: 11px; }
+.project-drawer .drawer-name.active { background: rgba(10,132,255,.2); color: #fff; box-shadow: inset 2px 0 0 var(--blue); }
+.project-root-switch { margin: 0 4px 12px; padding: 3px; border-radius: 12px; background: rgba(118,118,128,.2); }
+.project-root-switch button { min-height: 36px; border-radius: 9px; font-size: 13px; }
 .project-drawer-tools { flex: none; display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px; margin-top: 8px; }
 .project-drawer-tools button {
   min-height: 44px; padding: 6px; border: none; border-radius: 9px; background: #303136; color: rgba(235,235,245,.72);

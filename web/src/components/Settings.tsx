@@ -60,6 +60,7 @@ export interface SettingsProps {
   open: boolean;
   onClose: () => void;
   onDeviceLoggedOut?: () => void;
+  onLogout?: () => void;
   termRef: RefObject<SettingsTerminalHandle | null>;
   onOpenChangelog?: () => void;
   changelogUnread?: boolean;
@@ -297,6 +298,7 @@ function UpdateNotice({ updateInfo }: { updateInfo: UpdateInfo | null | undefine
 // target, while web-preview settings remain in that tool's own menu.
 export default function Settings({ open, onClose, termRef, onOpenChangelog = () => {}, changelogUnread = false,
   onDeviceLoggedOut = () => {},
+  onLogout = () => {},
   onReloadApp = () => window.location.reload(),
   chatTone = 'ink', onChatTone = () => {},
   conversationFontSize = DEFAULT_CONVERSATION_FONT_SIZE, onConversationFontSize = () => {},
@@ -591,6 +593,13 @@ export default function Settings({ open, onClose, termRef, onOpenChangelog = () 
           <span className="settings-page-row-label">{t('settings.reload_app')}</span>
         </button>
       </SettingsGroup>
+      <section className="settings-page-group settings-account-group">
+        <div className="settings-page-list">
+        <button type="button" className="settings-page-row settings-page-danger-action" onClick={onLogout}>
+          <span className="settings-page-row-label">{t('drawer.logout')}</span>
+        </button>
+        </div>
+      </section>
     </>
   );
 
