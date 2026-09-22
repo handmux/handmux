@@ -3912,12 +3912,6 @@ button.cmd-text { background: none; border: none; text-align: left; }
   font-size: 13px; color: var(--ct-muted); line-height: 1.4;
   display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
 }
-/* Modal backdrop behind the gate sheet: dims the chat lens and covers the composer completely, so a SHORT
-   gate (提交/取消 review card) can't leave the composer's chips visible/tappable above the card. Scoped to
-   the lens by an inline top/height measured from .chat-view — the topbar and window/lens
-   tabs above stay visible and tappable. inset:0 is the pre-measurement fallback. Tap-through is blocked
-   (the sheet demands an explicit choice — 取消 is the only way out). */
-.chat-gate-backdrop { position: fixed; inset: 0; z-index: var(--z-overlay-nested); background: rgba(0,0,0,.28); }
 /* "第 i/N 题" progress for a multi-question AskUserQuestion, above the question. */
 .chat-gate-step { font-size: 11px; font-weight: 600; color: var(--ct-muted); margin-bottom: 6px; letter-spacing: .02em; }
 .chat-gate-prompt { font-size: 14px; color: var(--ct-ink); line-height: 1.4; margin-bottom: 10px; }
