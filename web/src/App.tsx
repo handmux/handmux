@@ -5,7 +5,7 @@ import {
   getBoundSessions, addBoundSession, removeBoundSession, renameBoundSession,
   getFavorites, addFavorite, removeFavorite, getRecent, pushRecent, removeRecent,
   pushRecentDoc, getPaneBase, setPaneBase,
-  getInboxSeen, markInboxSeen, getInboxReadTs, setInboxReadTs,
+  getInboxSeen, markInboxSeen, getInboxReadTs, setInboxReadTs, getLastProject, setLastProject,
   renameWindowIdeas, getChangelogSeen, setChangelogSeen,
   getVersionSeen, setVersionSeen,
   getSecuritySeen, setSecuritySeen,
@@ -13,7 +13,7 @@ import {
   getIdeas, getChatTone, setChatTone, getConversationFontSize, setConversationFontSize,
   getAgentConversationEnabled, setAgentConversationEnabled,
   getWorkspacePromptState, markWorkspaceAutoShown, ignoreWorkspaceCheckpoint,
-  applyWorkspaceRestoreMapping, removeRestoredSessionBindings, setRootView,
+  applyWorkspaceRestoreMapping, removeRestoredSessionBindings, getRootView, setRootView,
 } from './storage.js';
 import type { ChatTone, ConversationFontSize, RootView } from './storage.js';
 import { LATEST_RELEASE } from './changelog.js';
@@ -305,10 +305,11 @@ export default function App() {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [securitySeen, setSecuritySeenState] = useState(() => getSecuritySeen());
-  // Keep the unfinished Project Task control plane dormant until it can actually run and advance work.
-  // In particular, ignore any development-only browser flag left behind by an earlier local build.
-  const projectTaskBeta = false;
-  const [rootView, setRootViewState] = useState<RootView>('session');
+  // The first Project root slice is read-only: it organizes real Project/Task records without
+  // starting Agent runtime. Keep the root choice persistent so returning users land where they left off.
+  const projectTaskBeta = true;
+  const [rootView, setRootViewState] = useState<RootView>(getRootView);
+  const [projectId, setProjectId] = useState<string | null>(getLastProject);
   const chooseRootView = (view: RootView): void => {
     if (view === 'project' && !projectTaskBeta) return;
     setRootView(view);
@@ -2749,7 +2750,7 @@ export default function App() {
         onMarkAllRead={markAllNotifRead}
         unreadCount={notifUnreadCount}
       />
-      {rootView === 'session' && <Drawer
+      <Drawer
         open={drawerOpen}
         currentSessionName={current?.session?.name ?? null}
         bound={bound}
@@ -2767,7 +2768,13 @@ export default function App() {
         onOpenRecovery={openRecoveryFromDrawer}
         projectTaskBeta={projectTaskBeta}
         onSwitchProject={() => chooseRootView('project')}
-      />}
+        onSwitchSession={() => chooseRootView('session')}
+        onOpenUsage={() => setUsageOpen(true)}
+        onOpenSettings={openSettings}
+        rootView={rootView}
+        currentProjectId={projectId}
+        onSelectProject={(id) => { setProjectId(id); setLastProject(id); chooseRootView('project'); }}
+      />
       {logoutConfirm && <DeviceLogoutDialog busy={logoutBusy} error={logoutError}
         onClose={() => { setLogoutConfirm(false); setLogoutError(''); }}
         onConfirm={() => { void logout(); }} />}
@@ -2983,6 +2990,7 @@ export default function App() {
       {rootView === 'project' ? (
         <ProjectRoot drawerOpen={drawerOpen} inbox={projectInboxControl} inset={inset}
           onOpenDrawer={() => setDrawerOpen(true)} onCloseDrawer={() => setDrawerOpen(false)}
+        projectId={projectId} onProjectSelect={setProjectId}
           onSwitchSession={() => chooseRootView('session')}
           onOpenUsage={() => setUsageOpen(true)}
           onOpenSettings={openSettings} />

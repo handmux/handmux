@@ -368,18 +368,18 @@ afterEach(() => {
   history.replaceState(history.state, '', '#');
 });
 
-describe('App hidden Project Task beta', () => {
+describe('App Project root navigation', () => {
   it('marks a detected desktop so conversation text keeps native selection', async () => {
     const view = await renderApp();
     expect(view.container.querySelector('.app')?.getAttribute('data-desktop-input')).toBe('true');
   });
 
-  it('ignores an old development flag and keeps the unfinished surface unreachable', async () => {
+  it('restores the project root and keeps the session topbar out of it', async () => {
     localStorage.setItem('hm_project_task_beta', '1');
     localStorage.setItem('hm_root_view', 'project');
     const view = await renderApp();
-    expect(view.container.querySelector('.project-root')).toBeNull();
-    expect(view.container.querySelector('.topbar')).toBeTruthy();
+    expect(view.container.querySelector('.project-root')).toBeTruthy();
+    expect(view.container.querySelector('.topbar')).toBeNull();
   });
 });
 

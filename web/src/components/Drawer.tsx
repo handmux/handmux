@@ -3,10 +3,12 @@
 // pinned names, let the user open or unbind one, and open the bind modal. Below that, a collapsible
 // "未接管会话" section surfaces coding-agent sessions running outside tmux (orphans) — tap 接管 to resume
 // one into tmux (the takeover sheet, handled in App); see server/src/orphans.js.
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { t } from '../i18n';
 import { relTime } from '../inbox.js';
 import WorkspaceRecoveryCard from './WorkspaceRecoveryCard.jsx';
+import { listProjects } from '../projectTask/api.js';
+import type { Project } from '../projectTask/contracts.js';
 import type { MouseEvent } from 'react';
 import type { WorkspaceRecoveryPlan, WorkspaceRestoreOperation } from '../workspaceRecovery.js';
 
@@ -38,25 +40,54 @@ interface DrawerProps {
   onOpenRecovery?: () => void;
   projectTaskBeta?: boolean;
   onSwitchProject?: () => void;
+  onSwitchSession?: () => void;
+  onOpenUsage?: () => void;
+  onOpenSettings?: () => void;
+  rootView?: 'session' | 'project';
+  currentProjectId?: string | null;
+  onSelectProject?: (id: string) => void;
 }
 
 export default function Drawer({
   open, currentSessionName, bound, onSelectSession, onUnbind, onBind, onClose, onLogout,
   orphans = [], onTakeoverRequest,
   recoveryPlan = null, recoveryOperation = null, onOpenRecovery = () => {},
-  projectTaskBeta = false, onSwitchProject = () => {},
+  projectTaskBeta = false, onSwitchProject = () => {}, onSwitchSession = () => {}, onOpenUsage = () => {}, onOpenSettings = () => {}, rootView = 'session', currentProjectId = null,
+  onSelectProject = () => {},
 }: DrawerProps) {
   const [orphOpen, setOrphOpen] = useState(false);
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [projectsError, setProjectsError] = useState<string | null>(null);
+  useEffect(() => {
+    if (rootView !== 'project') return;
+    let alive = true;
+    void listProjects().then((rows) => { if (alive) setProjects(rows); })
+      .catch((error: unknown) => { if (alive) setProjectsError(error instanceof Error ? error.message : 'Project list unavailable'); });
+    return () => { alive = false; };
+  }, [rootView]);
   return (
     <>
       <div id="session-drawer" className={`drawer ${open ? 'open' : ''}`}>
         <div className="drawer-list">
           {projectTaskBeta && (
             <div className="project-root-switch" role="group">
-              <button type="button" aria-pressed="false" onClick={onSwitchProject}>{t('project.root.projects')}</button>
-              <button type="button" aria-pressed="true">{t('project.root.sessions')}</button>
+              <button type="button" aria-pressed={rootView === 'project'} onClick={onSwitchProject}>{t('project.root.projects')}</button>
+              <button type="button" aria-pressed={rootView === 'session'} onClick={onSwitchSession}>{t('project.root.sessions')}</button>
             </div>
           )}
+          {rootView === 'project' ? <>
+            <div className="drawer-title">{t('project.root.projects').toUpperCase()}</div>
+            {projectsError && <div className="drawer-empty" role="alert">{projectsError}</div>}
+            {!projectsError && projects.length === 0 && <div className="drawer-empty">{t('project.empty')}</div>}
+            {projects.map((project) => (
+              <button key={project.id} type="button" className={`drawer-row drawer-name${project.id === currentProjectId ? ' active' : ''}`}
+                onClick={() => { onSelectProject(project.id); onClose(); }}>{project.name}</button>
+            ))}
+            <div className="project-drawer-tools">
+              <button type="button" onClick={onOpenUsage}>{t('usage.title')}</button>
+              <button type="button" onClick={onOpenSettings}>{t('app.settings')}</button>
+            </div>
+          </> : <>
           <div className="drawer-title">{t('drawer.title').toUpperCase()}</div>
           {bound.length === 0 && <div className="drawer-empty">{t('drawer.empty')}</div>}
           {bound.map((name) => (
@@ -120,6 +151,7 @@ export default function Drawer({
           {recoveryPlan && (
             <WorkspaceRecoveryCard plan={recoveryPlan} operation={recoveryOperation} onOpen={onOpenRecovery} />
           )}
+          </>}
         </div>
         <button className="drawer-logout" onClick={onLogout}>{t('drawer.logout')}</button>
       </div>

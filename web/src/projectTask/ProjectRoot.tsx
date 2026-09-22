@@ -48,19 +48,25 @@ function taskBelongsToBucket(task: Task, bucket: ProjectBucket): boolean {
 }
 
 export default function ProjectRoot({ drawerOpen, inbox, inset, onOpenDrawer, onCloseDrawer,
+  projectId: controlledProjectId, onProjectSelect,
   onSwitchSession, onOpenUsage, onOpenSettings }: {
   drawerOpen: boolean;
   inbox: ReactNode;
   inset?: number;
   onOpenDrawer: () => void;
   onCloseDrawer: () => void;
+  projectId?: string | null;
+  onProjectSelect?: (id: string) => void;
   onSwitchSession: () => void;
   onOpenUsage: () => void;
   onOpenSettings: () => void;
 }) {
+  // This first navigation slice is intentionally read-only. Maintenance actions remain
+  // available in the existing data/API layer for the later Project/Task management slice.
+  const readOnly = true;
   const [projects, setProjects] = useState<Project[]>([]);
   const [archivedProjects, setArchivedProjects] = useState<Project[]>([]);
-  const [currentId, setCurrentId] = useState<string | null>(getLastProject);
+  const [currentId, setCurrentId] = useState<string | null>(controlledProjectId ?? getLastProject);
   const [bucket, setBucket] = useState<ProjectBucket>('tasks');
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(true);
@@ -78,10 +84,15 @@ export default function ProjectRoot({ drawerOpen, inbox, inset, onOpenDrawer, on
   const currentIdRef = useRef(currentId);
   currentIdRef.current = currentId;
 
+  useEffect(() => {
+    if (controlledProjectId === undefined || controlledProjectId === currentIdRef.current) return;
+    currentIdRef.current = controlledProjectId;
+    setCurrentId(controlledProjectId);
+  }, [controlledProjectId]);
+
   const current = projects.find((project) => project.id === currentId) ?? null;
   const secondaryOpen = Boolean(editor || selectedTask || managementOpen);
   const surfaceObscured = drawerOpen || addingProject || secondaryOpen;
-  const drawerInteractive = drawerOpen && !addingProject && !secondaryOpen;
 
   const reloadProjects = useCallback(async (): Promise<void> => {
     setLoading(true);
@@ -101,6 +112,7 @@ export default function ProjectRoot({ drawerOpen, inbox, inset, onOpenDrawer, on
         setSelectedTask(null);
         currentIdRef.current = next;
         setCurrentId(next);
+        if (next) onProjectSelect?.(next);
       }
       setLastProject(next ?? '');
     } catch (cause) {
@@ -161,6 +173,7 @@ export default function ProjectRoot({ drawerOpen, inbox, inset, onOpenDrawer, on
     currentIdRef.current = id;
     setCurrentId(id);
     setLastProject(id);
+    onProjectSelect?.(id);
     setSelectedTask(null);
     setManagementOpen(false);
     setArchivedManagement(null);
@@ -358,48 +371,8 @@ export default function ProjectRoot({ drawerOpen, inbox, inset, onOpenDrawer, on
     finally { setMutationBusy(false); }
   };
 
-  const drawer = (
-    <>
-      <div className={`drawer project-drawer ${drawerOpen ? 'open' : ''}`} aria-hidden={!drawerInteractive}
-        {...(!drawerInteractive ? { inert: '' as const } : {})}>
-        <div className="drawer-list">
-          <div className="project-root-switch" role="group">
-            <button type="button" aria-pressed="true">{t('project.root.projects')}</button>
-            <button type="button" aria-pressed="false" onClick={onSwitchSession}>{t('project.root.sessions')}</button>
-          </div>
-          <div className="drawer-title">{t('project.root.projects').toUpperCase()}</div>
-          {projects.map((project) => (
-            <button key={project.id} type="button" className={`drawer-row drawer-name${project.id === currentId ? ' active' : ''}`}
-              onClick={() => selectProject(project.id)}>{project.name}</button>
-          ))}
-          <button type="button" className="drawer-bind" onClick={openAddProject}>＋ {t('project.add')}</button>
-          {archivedProjects.length > 0 && (
-            <details className="project-archived-projects">
-              <summary>{t('project.archivedProjects', { n: archivedProjects.length })}</summary>
-              {archivedProjects.map((project) => (
-                <button key={project.id} type="button" onClick={() => {
-                  setMutationError(null);
-                  setMutationConflict(false);
-                  setArchivedManagement(project);
-                  setManagementOpen(true);
-                  onCloseDrawer();
-                }}>{project.name}</button>
-              ))}
-            </details>
-          )}
-        </div>
-        <div className="project-drawer-tools">
-          <button type="button" onClick={onOpenUsage}>{t('usage.title')}</button>
-          <button type="button" onClick={onOpenSettings}>{t('app.settings')}</button>
-        </div>
-      </div>
-      {drawerInteractive && <div className="drawer-backdrop" onClick={onCloseDrawer} />}
-    </>
-  );
-
   return (
     <>
-      {drawer}
       {error && !current ? (
         <div className="project-root" aria-hidden={surfaceObscured}
           {...(surfaceObscured ? { inert: '' as const } : {})}>
@@ -416,18 +389,18 @@ export default function ProjectRoot({ drawerOpen, inbox, inset, onOpenDrawer, on
           error={error}
           inbox={inbox} obscured={surfaceObscured}
           onMenu={onOpenDrawer} onBucket={selectBucket}
-          onCreate={() => { setMutationError(null); setMutationConflict(false); setEditor({ task: null }); }}
+          {...(!readOnly ? { onCreate: () => { setMutationError(null); setMutationConflict(false); setEditor({ task: null }); } } : {})}
           onRetry={() => void reloadTasks()}
-          onManage={() => { setMutationError(null); setMutationConflict(false); setManagementOpen(true); }}
-          onOpenTask={(task) => { setMutationError(null); setMutationConflict(false); setSelectedTask(task); }} />
+          {...(!readOnly ? { onManage: () => { setMutationError(null); setMutationConflict(false); setManagementOpen(true); } } : {})}
+          {...(!readOnly ? { onOpenTask: (task: Task) => { setMutationError(null); setMutationConflict(false); setSelectedTask(task); } } : {})} />
       ) : (
         <div className="project-root" aria-hidden={surfaceObscured}
           {...(surfaceObscured ? { inert: '' as const } : {})}>
           <header className="project-topbar"><button type="button" className="hamburger" onClick={onOpenDrawer}>☰</button>
             <span className="project-topbar-spacer" />{inbox}
-            <button type="button" className="project-add-button" onClick={openAddProject}>＋</button></header>
+            {!readOnly && <button type="button" className="project-add-button" onClick={openAddProject}>＋</button>}</header>
           <main className="project-fatal"><strong>{loading ? t('common.loading') : t('project.empty')}</strong>
-            {!loading && <><p>{t('project.emptyHint')}</p><button type="button" onClick={openAddProject}>{t('project.add')}</button></>}</main>
+            {!loading && <p>{t('project.emptyHint')}</p>}</main>
         </div>
       )}
       <DirPicker open={addingProject} seedCwd={current?.rootPath ?? null} pane={null}
