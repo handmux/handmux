@@ -75,6 +75,9 @@ export default function Drawer({
   useEffect(() => {
     if (rootView !== 'session' || !open) return;
     let alive = true;
+    // A new open/selection starts a fresh topology read; never carry a previous
+    // window list across a refresh that may fail.
+    setSessionWindows({});
     void (async () => {
       try {
         const sessions = await getSessions();
@@ -120,7 +123,7 @@ export default function Drawer({
             <div><strong>handmux</strong><span>{rootView === 'project' ? t('project.root.projects') : t('project.root.sessions')}</span></div>
           </div>
           {projectTaskBeta && (
-            <div className="project-root-switch" role="group" aria-label={t('project.root.projects')}>
+            <div className="project-root-switch" role="group" aria-label={`${t('project.root.projects')} / ${t('project.root.sessions')}`}>
               <button type="button" aria-pressed={rootView === 'project'} onClick={onSwitchProject}>{t('project.root.projects')}</button>
               <button type="button" aria-pressed={rootView === 'session'} onClick={onSwitchSession}>{t('project.root.sessions')}</button>
             </div>
@@ -144,7 +147,7 @@ export default function Drawer({
                   type="button"
                   className="drawer-tree-toggle"
                   aria-expanded={expandedSessions.has(name)}
-                  aria-label={name}
+                  aria-label={`${name} — ${t(expandedSessions.has(name) ? 'doc.tocCollapse' : 'doc.tocExpand')}`}
                   onClick={() => toggleSession(name)}
                 >{expandedSessions.has(name) ? '⌄' : '›'}</button>
                 <button type="button" className="drawer-name" onClick={() => onSelectSession(name)}>{name}</button>

@@ -2769,8 +2769,8 @@ export default function App() {
         projectTaskBeta={projectTaskBeta}
         onSwitchProject={() => chooseRootView('project')}
         onSwitchSession={() => chooseRootView('session')}
-        onOpenUsage={() => setUsageOpen(true)}
-        onOpenSettings={openSettings}
+        onOpenUsage={() => { setDrawerOpen(false); setUsageOpen(true); }}
+        onOpenSettings={() => { setDrawerOpen(false); openSettings(); }}
         rootView={rootView}
         currentProjectId={projectId}
         onSelectProject={(id) => { setProjectId(id); setLastProject(id); chooseRootView('project'); }}
