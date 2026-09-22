@@ -257,7 +257,7 @@ describe('Agent Conversation controls UI', () => {
     } } });
     render(<AgentConversationQueueControl activity="idle" controller={control} />);
     expect(screen.getByText('keep queued')).toBeTruthy();
-    expect(screen.getByText('终端有未确认的草稿，请先在终端处理，再编辑此消息重试')).toBeTruthy();
+    expect(screen.getByText('终端有未确认的草稿，请先在终端处理，然后点「重新发送」')).toBeTruthy();
     expect(screen.queryByRole('button', { name: '立刻引导' })).toBeNull();
     expect(screen.getByRole('button', { name: '删除排队消息' })).toBeTruthy();
     // A refused row is never replayed on its own, so it carries its own way back. Tapping it hands the
@@ -277,7 +277,7 @@ describe('Agent Conversation controls UI', () => {
         canSteer: true, canEdit: true, canRemove: true,
       } },
     })} />);
-    expect(screen.getByText('未发送，可编辑后重试或删除')).toBeTruthy();
+    expect(screen.getByText('未发送，可点「重新发送」，或编辑后再发')).toBeTruthy();
     expect(screen.queryByRole('button', { name: '立刻引导' })).toBeNull();
     expect(screen.getByRole('button', { name: '删除排队消息' })).toBeTruthy();
 

@@ -503,6 +503,7 @@ export function AgentConversationQueueControl({
                   the row that was refused needs its own way to be sent again — the same as tapping edit,
                   without having to open and re-save it. */}
               {autoDispatchBlocked && !pending && <button type="button" className="cc-queue-action"
+                disabled={controller.busy}
                 onClick={() => {
                   setActionError('');
                   void controller.queueAction('retry', item.id).catch(() => {
