@@ -4,6 +4,8 @@ All notable changes to handmux. Format follows [Keep a Changelog](https://keepac
 
 ## [Unreleased]
 
+## [0.31.1] - 2026-09-22
+
 ### Changed
 
 - 对话页：正在跑回合时发送的消息改为**排队**（回合结束后发出），想插进当前回合用「立刻引导」。
