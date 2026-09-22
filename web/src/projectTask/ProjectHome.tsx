@@ -25,6 +25,7 @@ export default function ProjectHome({ project, bucket, tasks, loading, error, in
       {...(obscured ? { inert: '' as const } : {})}>
       <header className="project-topbar">
         <button type="button" className="hamburger" onClick={onMenu}>☰</button>
+        <span className="topbar-wordmark" aria-hidden="true">hand<span>mux</span></span>
         <span className="project-topbar-spacer" />
         {inbox}
         {onCreate && <button type="button" className="project-add-button" onClick={onCreate} aria-label={bucket === 'tasks'

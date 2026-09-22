@@ -443,6 +443,10 @@ export async function killWindow(id: string): Promise<void> {
   await runTmux(['kill-window', '-t', id]);
 }
 
+export async function killSession(id: string): Promise<void> {
+  await runTmux(['kill-session', '-t', id]);
+}
+
 // Swap two windows' positions (indices) within a session. -d keeps the active window unchanged so
 // reordering from the phone doesn't yank the PC's focus to the swapped window. The window ids are
 // unchanged — only their order in list-windows flips.

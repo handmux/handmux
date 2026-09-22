@@ -14,6 +14,7 @@ interface SessionCommands {
   newWindow(sessionId: string, cwd?: string | null, name?: string | null, command?: string | null): Promise<string>;
   paneCurrentPath(paneId: string): Promise<string>;
   renameSession(sessionId: string, name: string): Promise<unknown>;
+  killSession(sessionId: string): Promise<unknown>;
   renameWindow(windowId: string, name: string): Promise<unknown>;
   swapWindows(firstWindowId: string, secondWindowId: string): Promise<unknown>;
   killWindow(windowId: string): Promise<unknown>;
@@ -126,6 +127,15 @@ export function sessionRoutes({ commands, docs, workspace, agentIdentity }: Sess
       await commands.renameSession(id, name);
       notify('requestReconcile');
       return res.json({ id, name });
+    } catch (e) { return next(e); }
+  });
+
+  r.delete('/sessions', async (req: Request, res: Response, next: NextFunction) => {
+    if (!isSessionId(req.query.session)) return res.status(400).json({ error: 'bad session id' });
+    try {
+      await commands.killSession(req.query.session);
+      notify('confirmEmpty');
+      return res.status(204).end();
     } catch (e) { return next(e); }
   });
 

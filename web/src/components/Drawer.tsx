@@ -3,7 +3,7 @@
 // pinned names, let the user open or unbind one, and open the bind modal. Below that, a collapsible
 // "未接管会话" section surfaces coding-agent sessions running outside tmux (orphans) — tap 接管 to resume
 // one into tmux (the takeover sheet, handled in App); see server/src/orphans.js.
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { t } from '../i18n';
 import { relTime } from '../inbox.js';
 import WorkspaceRecoveryCard from './WorkspaceRecoveryCard.jsx';
@@ -13,7 +13,23 @@ import { getSessions, getWindows } from '../api.js';
 import type { TmuxWindow } from '../api.js';
 import type { MouseEvent } from 'react';
 import type { WorkspaceRecoveryPlan, WorkspaceRestoreOperation } from '../workspaceRecovery.js';
-import { FolderIcon, GaugeIcon, GearIcon, MonitorIcon } from './icons.jsx';
+import ActionSheet from './ActionSheet.jsx';
+import { FolderIcon, GearIcon, MonitorIcon, MoreHorizontalIcon, PencilIcon, PlusIcon, XIcon } from './icons.jsx';
+
+const EXPANDED_SESSIONS_KEY = 'handmux.drawer.expanded-sessions';
+
+function readExpandedSessions(bound: string[]): Record<string, boolean> {
+  try {
+    const raw = localStorage.getItem(EXPANDED_SESSIONS_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw) as unknown;
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        return Object.fromEntries(Object.entries(parsed).filter((entry): entry is [string, boolean] => typeof entry[1] === 'boolean'));
+      }
+    }
+  } catch { /* use the default below */ }
+  return Object.fromEntries(bound.map((name) => [name, true]));
+}
 
 export interface DrawerOrphan {
   pid: number;
@@ -29,6 +45,7 @@ export interface DrawerOrphan {
 
 interface DrawerProps {
   open: boolean;
+  onOpen?: () => void;
   currentSessionName?: string | null;
   currentWindowId?: string | null;
   bound: string[];
@@ -44,18 +61,20 @@ interface DrawerProps {
   projectTaskBeta?: boolean;
   onSwitchProject?: () => void;
   onSwitchSession?: () => void;
-  onOpenUsage?: () => void;
   onOpenSettings?: () => void;
+  onNewWindow?: (sessionName: string) => void;
+  onRenameSession?: (sessionName: string) => void;
+  onDeleteSession?: (sessionName: string) => void;
   rootView?: 'session' | 'project';
   currentProjectId?: string | null;
   onSelectProject?: (id: string) => void;
 }
 
 export default function Drawer({
-  open, currentSessionName, currentWindowId = null, bound, onSelectSession, onUnbind, onBind, onClose,
+  open, onOpen = () => {}, currentSessionName, currentWindowId = null, bound, onSelectSession, onUnbind, onBind, onClose,
   orphans = [], onTakeoverRequest,
   recoveryPlan = null, recoveryOperation = null, onOpenRecovery = () => {},
-  projectTaskBeta = false, onSwitchProject = () => {}, onSwitchSession = () => {}, onOpenUsage = () => {}, onOpenSettings = () => {}, rootView = 'session', currentProjectId = null,
+  projectTaskBeta = false, onSwitchProject = () => {}, onSwitchSession = () => {}, onOpenSettings = () => {}, onNewWindow = () => {}, onRenameSession = () => {}, onDeleteSession = () => {}, rootView = 'session', currentProjectId = null,
   onSelectProject = () => {},
 }: DrawerProps) {
   const [orphOpen, setOrphOpen] = useState(false);
@@ -63,14 +82,69 @@ export default function Drawer({
   const [projectsLoading, setProjectsLoading] = useState(false);
   const [projectsError, setProjectsError] = useState<string | null>(null);
   const [sessionWindows, setSessionWindows] = useState<Record<string, TmuxWindow[]>>({});
-  const [expandedSessions, setExpandedSessions] = useState<Set<string>>(() => new Set());
+  const [expandedPreferences, setExpandedPreferences] = useState<Record<string, boolean>>(() => readExpandedSessions(bound));
+  const expandedSessions = new Set(bound.filter((name) => expandedPreferences[name] !== false));
+  const [menuSession, setMenuSession] = useState<string | null>(null);
+  const drawerRef = useRef<HTMLDivElement>(null);
+  const swipeRef = useRef<{ startX: number | null; startY: number; active: boolean; baseOpen: boolean }>({ startX: null, startY: 0, active: false, baseOpen: open });
+  const swipeOffsetRef = useRef(0);
+  const [swipeOffset, setSwipeOffset] = useState<number | null>(null);
 
   useEffect(() => {
-    if (currentSessionName) {
-      setExpandedSessions((current) => current.has(currentSessionName)
-        ? current : new Set(current).add(currentSessionName));
-    }
-  }, [currentSessionName]);
+    const onTouchStart = (event: TouchEvent): void => {
+      const touch = event.touches[0];
+      if (!touch) return;
+      const target = event.target;
+      const insideDrawer = target instanceof Node && drawerRef.current?.contains(target) === true;
+      // Opening starts at the viewport edge. Closing starts inside the drawer so a swipe on the
+      // backdrop remains its normal tap-to-dismiss interaction.
+      if (open ? !insideDrawer : touch.clientX > 28) return;
+      swipeRef.current = { startX: touch.clientX, startY: touch.clientY, active: false, baseOpen: open };
+    };
+    const onTouchMove = (event: TouchEvent): void => {
+      const touch = event.touches[0];
+      const gesture = swipeRef.current;
+      if (!touch || gesture.startX === null) return;
+      const dx = touch.clientX - gesture.startX;
+      const dy = touch.clientY - gesture.startY;
+      if (!gesture.active) {
+        if (Math.abs(dy) > 12 && Math.abs(dy) > Math.abs(dx)) { swipeRef.current.startX = null; return; }
+        if (Math.abs(dx) < 12) return;
+        if ((!gesture.baseOpen && dx < 0) || (gesture.baseOpen && dx > 0)) { swipeRef.current.startX = null; return; }
+        gesture.active = true;
+      }
+      event.preventDefault();
+      const width = drawerRef.current?.getBoundingClientRect().width || 360;
+      const offset = gesture.baseOpen ? Math.max(-width, Math.min(0, dx)) : Math.min(width, Math.max(0, dx));
+      swipeOffsetRef.current = offset;
+      setSwipeOffset(offset);
+    };
+    const onTouchEnd = (): void => {
+      const gesture = swipeRef.current;
+      if (!gesture.active) { swipeRef.current.startX = null; return; }
+      const width = drawerRef.current?.getBoundingClientRect().width || 360;
+      const offset = swipeOffsetRef.current;
+      swipeOffsetRef.current = 0;
+      setSwipeOffset(null);
+      swipeRef.current.startX = null;
+      if (gesture.baseOpen && offset < -width * .28) onClose();
+      else if (!gesture.baseOpen && offset > width * .22) onOpen();
+    };
+    window.addEventListener('touchstart', onTouchStart, { passive: true });
+    window.addEventListener('touchmove', onTouchMove, { passive: false });
+    window.addEventListener('touchend', onTouchEnd, { passive: true });
+    window.addEventListener('touchcancel', onTouchEnd, { passive: true });
+    return () => {
+      window.removeEventListener('touchstart', onTouchStart);
+      window.removeEventListener('touchmove', onTouchMove);
+      window.removeEventListener('touchend', onTouchEnd);
+      window.removeEventListener('touchcancel', onTouchEnd);
+    };
+  }, [open, onClose, onOpen]);
+
+  useEffect(() => {
+    try { localStorage.setItem(EXPANDED_SESSIONS_KEY, JSON.stringify(expandedPreferences)); } catch { /* best effort */ }
+  }, [expandedPreferences]);
 
   useEffect(() => {
     if (rootView !== 'session' || !open) return;
@@ -95,11 +169,7 @@ export default function Drawer({
   }, [rootView, open, bound]);
 
   const toggleSession = (name: string): void => {
-    setExpandedSessions((current) => {
-      const next = new Set(current);
-      if (next.has(name)) next.delete(name); else next.add(name);
-      return next;
-    });
+    setExpandedPreferences((current) => ({ ...current, [name]: !expandedSessions.has(name) }));
   };
   useEffect(() => {
     if (rootView !== 'project') {
@@ -116,7 +186,7 @@ export default function Drawer({
   }, [rootView]);
   return (
     <>
-      <div id="session-drawer" className={`drawer${rootView === 'project' ? ' project-drawer' : ''} ${open ? 'open' : ''}`}>
+      <div id="session-drawer" ref={drawerRef} className={`drawer${rootView === 'project' ? ' project-drawer' : ''} ${open ? 'open' : ''}${swipeOffset !== null ? ' is-dragging' : ''}`} style={swipeOffset === null ? undefined : { transform: `translateX(calc(${open ? '0px' : '-100%'} + ${swipeOffset}px))` }}>
         <div className="drawer-list">
           <div className="drawer-brand">
             <img src="/icons/logo.svg" alt="" aria-hidden="true" />
@@ -152,17 +222,18 @@ export default function Drawer({
                   aria-label={`${name} — ${t(expandedSessions.has(name) ? 'doc.tocCollapse' : 'doc.tocExpand')}`}
                   onClick={() => toggleSession(name)}
                 >{expandedSessions.has(name) ? '⌄' : '›'}</button>
-                <button type="button" aria-current={name === currentSessionName ? 'page' : undefined} className="drawer-name" onClick={() => onSelectSession(name)}>
+                <button type="button" aria-current={name === currentSessionName ? 'page' : undefined} className="drawer-name" onClick={() => toggleSession(name)}>
                   <MonitorIcon /><span>{name}</span>{name === currentSessionName && <i aria-hidden="true" />}
                 </button>
               <button
-                className="drawer-unbind"
+                type="button"
+                className="drawer-more"
                 onClick={(event: MouseEvent<HTMLButtonElement>) => {
-                  event.stopPropagation(); onUnbind(name);
+                  event.stopPropagation(); setMenuSession(name);
                 }}
-                aria-label={t('drawer.unbind')}
-                title={t('drawer.unbind')}
-              >✕</button>
+                aria-label={`${name} ${t('common.more')}`}
+                title={t('common.more')}
+              ><MoreHorizontalIcon /></button>
               </div>
               {expandedSessions.has(name) && (
                 <div className="drawer-window-list">
@@ -227,11 +298,21 @@ export default function Drawer({
           </>}
         </div>
         <div className="drawer-footer">
-          <button type="button" onClick={onOpenUsage}><GaugeIcon /><span>{t('usage.title')}</span></button>
           <button type="button" onClick={onOpenSettings}><GearIcon /><span>{t('app.settings')}</span></button>
         </div>
       </div>
       {open && <div className="drawer-backdrop" onClick={onClose} />}
+      <ActionSheet
+        open={!!menuSession}
+        title={menuSession || ''}
+        onClose={() => setMenuSession(null)}
+        actions={menuSession ? [
+          { key: 'new-window', icon: <PlusIcon />, label: t('windowbar.newWindow'), onClick: () => { onNewWindow(menuSession); setMenuSession(null); } },
+          { key: 'rename', icon: <PencilIcon />, label: t('common.rename'), onClick: () => { onRenameSession(menuSession); setMenuSession(null); } },
+          { key: 'unbind', icon: <XIcon />, label: t('drawer.unbind'), onClick: () => { onUnbind(menuSession); setMenuSession(null); } },
+          { key: 'delete', icon: <XIcon />, label: t('app.deleteSession'), danger: true, confirm: true, confirmLabel: t('app.deleteSessionConfirm'), onClick: () => { onDeleteSession(menuSession); setMenuSession(null); } },
+        ] : []}
+      />
     </>
   );
 }

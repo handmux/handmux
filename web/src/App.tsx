@@ -20,7 +20,7 @@ import { LATEST_RELEASE } from './changelog.js';
 import {
   getSessions, getWindows, getPanes, resizeWindow, resizePane, getWindowLayout,
   applyWindowLayout, restoreWindowSize, sendText, createWindow,
-  renameSession, renameWindow, deleteWindow, swapWindows, fetchDoc, fetchImageUrl,
+  renameSession, deleteSession, renameWindow, deleteWindow, swapWindows, fetchDoc, fetchImageUrl,
   getStates, getOrphans, takeoverOrphan, getAgentDiscovery, markAgentTerminalNotificationsRead,
   getServerVersion,
   getWorkspaceProtectionStatus, getWorkspaceRestorePlan, startWorkspaceRestore, getWorkspaceRestoreOperation,
@@ -104,7 +104,7 @@ import DirPicker from './components/DirPicker.jsx';
 import DocLinkPopover from './components/DocLinkPopover.jsx';
 import IdeaPanel from './components/IdeaPanel.jsx';
 import Changelog from './components/Changelog.jsx';
-import { FolderIcon, GearIcon, BulbIcon, MonitorIcon, GlobeIcon, GitIcon, GaugeIcon, SplitHIcon, SplitVIcon, PaneMapIcon, XIcon } from './components/icons.jsx';
+import { FolderIcon, BulbIcon, MonitorIcon, GlobeIcon, GitIcon, GaugeIcon, SplitHIcon, SplitVIcon, PaneMapIcon, XIcon } from './components/icons.jsx';
 import { useKeyboardInset } from './hooks/useKeyboardInset.js';
 import { useAsrAvailable } from './voice/useAsrAvailable.js';
 import { usePageScrollLock } from './hooks/usePageScrollLock.js';
@@ -1206,15 +1206,53 @@ export default function App() {
 
   // Drawer rows carry a bound NAME — resolve it to the live session before opening, since the
   // tmux id can have changed (or the session may be gone) since it was pinned.
-  const selectSession = useCallback(async (name: string, windowId?: string) => {
+  const selectSession = useCallback(async (name: string, windowId?: string): Promise<boolean> => {
     try {
       const session = (await getSessions()).find((s) => s.name === name);
-      if (!session) { window.alert(t('app.sessionGone', { name })); return; }
-      if (await openSession(session, windowId ? { window: windowId } : null)) setDrawerOpen(false);
+      if (!session) { window.alert(t('app.sessionGone', { name })); return false; }
+      const opened = await openSession(session, windowId ? { window: windowId } : null);
+      if (opened) setDrawerOpen(false);
+      return opened;
     } catch (e) {
       handledAuth(e);
+      return false;
     }
   }, [openSession, onAuthFail]);
+
+  const openNewWindowForSession = useCallback(async (name: string): Promise<void> => {
+    if (current?.session.name !== name && !(await selectSession(name))) return;
+    setDrawerOpen(false);
+    setNewWinOpen(true);
+  }, [current?.session.name, selectSession]);
+
+  const renameSessionFromDrawer = useCallback(async (name: string): Promise<void> => {
+    try {
+      const session = current?.session.name === name
+        ? current.session
+        : (await getSessions()).find((candidate) => candidate.name === name);
+      if (!session) return;
+      setDrawerOpen(false);
+      setRenameTarget({ kind: 'session', id: session.id, name: session.name });
+    } catch (error) {
+      handledAuth(error);
+    }
+  }, [current, handledAuth]);
+
+  const deleteSessionFromDrawer = useCallback(async (name: string): Promise<void> => {
+    try {
+      const session = current?.session.name === name
+        ? current.session
+        : (await getSessions()).find((candidate) => candidate.name === name);
+      if (!session) return;
+      await deleteSession(session.id);
+      setBound(removeBoundSession(name));
+      reportBound();
+      setCurrent((existing) => (existing?.session.id === session.id ? null : existing));
+      setDrawerOpen(false);
+    } catch (error) {
+      if (!handledAuth(error)) window.alert(t('app.deleteFailed'));
+    }
+  }, [current, onAuthFail]);
 
   const markCanonicalTerminalRead = useCallback(async (notificationIds: readonly string[]) => {
     if (!notificationIds.length) return;
@@ -2591,17 +2629,14 @@ export default function App() {
   // paneId → agent id, for the per-pane agent logo inside the active window's pane menu (states is keyed by
   // pane, so this is the live truth for each one; a pane not running an agent simply has no entry → no logo).
   const changelogUnread = !!LATEST_RELEASE && clSeen !== LATEST_RELEASE;
-  // The gear's dot fuses two phases of "there's something new": an available npm update (before you upgrade)
-  // and, after upgrading+reloading, the unread changelog it brought. `updateDot` stays off once the user has
-  // opened Settings for this `latest` (verSeen), even if they don't upgrade — it relights only on a newer release.
-  const updateDot = !!updateInfo?.updateAvailable && updateInfo.latest !== verSeen;
+  // Opening Settings acknowledges the latest release after an upgrade and keeps the update notice quiet
+  // until a newer release arrives.
   const readSet = new Set(readIds);
   const notifUnreadCount = notifItems.filter((n) => !readSet.has(n.id)).length; // per-message → in-page count
   // Top red dot follows the LATEST-time high-water: it shows only while a notification newer than the last
   // one you've SEEN (by opening the page) exists. Opening the page clears it even if messages inside are
   // still unread; a newer push relights it. (Per-message unread lives on the rows / the count, not here.)
   const hasNewNotif = (notifItems[0]?.ts ?? -Infinity) > notifSeenTs; // items are newest-first
-  const gearDot = changelogUnread || updateDot || hasNewNotif || !securitySeen;
   const openSettings = () => {
     setSettingsOpen(true);
     if (!securitySeen) { setSecuritySeen(); setSecuritySeenState(true); }
@@ -2678,7 +2713,7 @@ export default function App() {
             if (!event.defaultPrevented) setDrawerOpen(true);
           }}
           aria-label={current?.session?.name ?? t('drawer.title')} aria-expanded={drawerOpen} aria-controls="session-drawer">
-          {current?.session?.name ?? '—'}
+          <span className="topbar-wordmark" aria-hidden="true">hand<span>mux</span></span>
         </button>
         {/* Always render so it doesn't pop in late once `current` loads — just disable until ready. */}
         <button className="topbar-icon" onClick={() => setIdeaOpen(true)} aria-label={t('app.ideas')} title={t('app.ideas')}
@@ -2694,10 +2729,6 @@ export default function App() {
         </button>
         <button className="topbar-icon" onClick={reopenFiles} aria-label={t('app.files')} title={t('app.files')}><FolderIcon /></button>
         <button className="topbar-icon" onClick={() => setGitOpen(true)} aria-label="Git" title="Git"><GitIcon /></button>
-        <button className="topbar-icon" onClick={openSettings} aria-label={t('app.settings')} title={t('app.settings')}>
-          <GearIcon />
-          {gearDot && <span className="topbar-dot" aria-hidden="true" />}
-        </button>
       </header>}
       <UsagePage
         open={usageOpen}
@@ -2752,6 +2783,7 @@ export default function App() {
       />
       <Drawer
         open={drawerOpen}
+        onOpen={() => setDrawerOpen(true)}
         currentSessionName={current?.session?.name ?? null}
         currentWindowId={current?.window?.id ?? null}
         bound={bound}
@@ -2769,8 +2801,10 @@ export default function App() {
         projectTaskBeta={projectTaskBeta}
         onSwitchProject={() => chooseRootView('project')}
         onSwitchSession={() => chooseRootView('session')}
-        onOpenUsage={() => { setDrawerOpen(false); setUsageOpen(true); }}
         onOpenSettings={() => { setDrawerOpen(false); openSettings(); }}
+        onNewWindow={openNewWindowForSession}
+        onRenameSession={renameSessionFromDrawer}
+        onDeleteSession={deleteSessionFromDrawer}
         rootView={rootView}
         currentProjectId={projectId}
         onSelectProject={(id) => { setProjectId(id); setLastProject(id); chooseRootView('project'); }}

@@ -367,6 +367,8 @@ export const createWindow = async (
 ));
 export const renameSession = (id: string, name: string): Promise<unknown> =>
   req('/api/sessions', { method: 'PATCH', body: JSON.stringify({ id, name }) });
+export const deleteSession = (id: string): Promise<unknown> =>
+  req(`/api/sessions?session=${encodeURIComponent(id)}`, { method: 'DELETE' });
 export const renameWindow = (id: string, name: string): Promise<unknown> =>
   req('/api/windows', { method: 'PATCH', body: JSON.stringify({ id, name }) });
 export const deleteWindow = (id: string): Promise<unknown> =>

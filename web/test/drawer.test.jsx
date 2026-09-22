@@ -11,6 +11,7 @@ beforeEach(() => {
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
+  localStorage.removeItem('handmux.drawer.expanded-sessions');
 });
 
 afterEach(() => {
@@ -30,6 +31,14 @@ const base = {
 
 const render = async (props) => {
   await act(async () => { root.render(<Drawer {...base} {...props} />); });
+};
+
+const dispatchTouch = (target, type, x, y) => {
+  const event = new Event(type, { bubbles: true, cancelable: true });
+  if (type !== 'touchend' && type !== 'touchcancel') {
+    Object.defineProperty(event, 'touches', { value: [{ clientX: x, clientY: y }] });
+  }
+  target.dispatchEvent(event);
 };
 
 describe('Drawer (bound sessions)', () => {
@@ -54,22 +63,57 @@ describe('Drawer (bound sessions)', () => {
     expect(main.className).not.toContain('active');
   });
 
-  it('clicking a name calls onSelectSession with that name', async () => {
-    const onSelectSession = vi.fn();
-    await render({ onSelectSession });
+  it('clicking a name toggles its Window list', async () => {
+    await render();
     const server = [...container.querySelectorAll('.drawer-name')].find((n) => n.textContent === 'server');
+    const before = container.querySelectorAll('.drawer-window-list').length;
     await act(async () => { server.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
-    expect(onSelectSession).toHaveBeenCalledWith('server');
+    expect(container.querySelectorAll('.drawer-window-list')).toHaveLength(before - 1);
   });
 
-  it('clicking ✕ unbinds without selecting', async () => {
+  it('opens from an edge right swipe and closes from an in-drawer left swipe', async () => {
+    const onOpen = vi.fn();
+    const onClose = vi.fn();
+    await render({ open: false, onOpen, onClose });
+    await act(async () => {
+      dispatchTouch(window, 'touchstart', 12, 180);
+      dispatchTouch(window, 'touchmove', 150, 182);
+      dispatchTouch(window, 'touchend');
+    });
+    expect(onOpen).toHaveBeenCalledTimes(1);
+
+    await render({ open: true, onOpen, onClose });
+    const drawer = container.querySelector('.drawer');
+    await act(async () => {
+      dispatchTouch(drawer, 'touchstart', 180, 180);
+      dispatchTouch(window, 'touchmove', 40, 182);
+      dispatchTouch(window, 'touchend');
+    });
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not turn a vertical drawer scroll into a close gesture', async () => {
+    const onClose = vi.fn();
+    await render({ open: true, onClose });
+    const drawer = container.querySelector('.drawer');
+    await act(async () => {
+      dispatchTouch(drawer, 'touchstart', 180, 180);
+      dispatchTouch(window, 'touchmove', 184, 260);
+      dispatchTouch(window, 'touchend');
+    });
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('opens Session actions from the overflow menu and unbinds without selecting', async () => {
     const onUnbind = vi.fn();
     const onSelectSession = vi.fn();
     await render({ onUnbind, onSelectSession });
     const row = [...container.querySelectorAll('.drawer-row')].find((r) => r.textContent.includes('main'));
     await act(async () => {
-      row.querySelector('.drawer-unbind').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      row.querySelector('.drawer-more').dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
+    const unbind = [...container.querySelectorAll('.sheet-action')].find((button) => button.textContent.includes('解绑'));
+    await act(async () => { unbind.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     expect(onUnbind).toHaveBeenCalledWith('main');
     expect(onSelectSession).not.toHaveBeenCalled();
   });

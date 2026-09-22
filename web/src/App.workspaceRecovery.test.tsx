@@ -1716,7 +1716,9 @@ describe('App workspace recovery', () => {
       .mockResolvedValueOnce({ status: 'degraded', lastSuccessfulCaptureAt: null, errorCode: 'live-corrupt' })
       .mockResolvedValueOnce({ status: 'protected', lastSuccessfulCaptureAt: '2026-07-20T02:00:00.000Z', errorCode: null });
     await renderApp();
-    fireEvent.click(requiredElement(document, '.topbar .topbar-icon[aria-label="设置"]'));
+    fireEvent.click(requiredElement(document, '.hamburger'));
+    await flush();
+    fireEvent.click(requiredElement(document, '.drawer-footer button'));
     await flush();
     expect(screen.getByText('工作区未受保护')).toBeTruthy();
     expect(screen.getByText(/工作区状态副本已损坏/)).toBeTruthy();
