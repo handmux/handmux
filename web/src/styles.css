@@ -969,16 +969,31 @@ button.settings-page-row:disabled, .settings-page-row.disabled { color: rgba(235
 .drawer-title { display: flex; align-items: center; gap: 7px; font-size: 12px; color: rgba(235,235,245,.5); letter-spacing: .4px; margin: 14px 8px 7px; }
 .drawer-title svg { width: 15px; height: 15px; }
 .drawer-row { display: flex; align-items: center; gap: 6px; border-radius: 8px; }
+.drawer-session-tree { margin: 0 4px 4px; border-radius: 13px; background: rgba(118,118,128,.09); overflow: hidden; }
 .drawer-name { flex: 1; min-width: 0; padding: 8px 4px; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .drawer-session.active { background: rgba(10,132,255,.22); color: #fff; box-shadow: inset 2px 0 0 var(--blue); }
 .drawer-tree-toggle { flex: none; width: 32px; min-height: 44px; padding: 0; border: none; background: transparent; color: #9ca0aa; font-size: 20px; line-height: 1; touch-action: manipulation; }
-.drawer-session .drawer-name { min-height: 44px; padding: 0 4px; border: none; background: transparent; color: inherit; text-align: left; font: inherit; }
-.drawer-window { display: block; width: calc(100% - 34px); min-height: 40px; margin-left: 34px; padding: 8px 12px; border: none; border-left: 1px solid rgba(118,118,128,.35); border-radius: 0 9px 9px 0; background: transparent; color: #b9bdc8; text-align: left; font-size: 13px; line-height: 24px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; touch-action: manipulation; }
+.drawer-session .drawer-name { min-height: 48px; padding: 0 4px; border: none; background: transparent; color: inherit; text-align: left; font: inherit; display: flex; align-items: center; gap: 8px; }
+.drawer-session .drawer-name svg { width: 17px; height: 17px; flex: none; opacity: .72; }
+.drawer-session .drawer-name span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.drawer-session .drawer-name i, .drawer-project-row i, .drawer-window i { width: 7px; height: 7px; flex: none; border-radius: 50%; background: var(--blue); box-shadow: 0 0 0 3px rgba(10,132,255,.16); }
+.drawer-window-list { overflow: hidden; animation: drawer-window-reveal .18s ease-out both; }
+@keyframes drawer-window-reveal { from { max-height: 0; opacity: .35; } to { max-height: 420px; opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .drawer, .drawer-window-list { transition: none; animation: none; } }
+.drawer-window { display: flex; align-items: center; gap: 9px; width: calc(100% - 34px); min-height: 40px; margin-left: 34px; padding: 8px 12px; border: none; border-left: 1px solid rgba(118,118,128,.35); border-radius: 0 9px 9px 0; background: transparent; color: #b9bdc8; text-align: left; font-size: 13px; line-height: 24px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; touch-action: manipulation; }
+.drawer-window-mark { width: 6px; height: 6px; flex: none; border: 1px solid currentColor; border-radius: 2px; opacity: .45; }
+.drawer-window > i { margin-left: auto; }
 .drawer-window.active { border-left-color: var(--blue); background: rgba(10,132,255,.16); color: #fff; }
 .drawer-window:active { background: rgba(118, 118, 128, .2); }
 .drawer-unbind { flex: none; background: none; border: none; color: #888; font-size: 14px; padding: 6px 8px; touch-action: manipulation; display: inline-flex; align-items: center; justify-content: center; min-width: 40px; min-height: 44px; }
 .drawer-session.active .drawer-unbind { color: #d6e4ff; }
 .drawer-empty { padding: 12px 4px; color: #888; font-size: 13px; }
+.drawer-empty { margin: 6px 4px 10px; padding: 18px 14px; border-radius: 12px; background: rgba(118,118,128,.1); text-align: center; line-height: 1.45; }
+.drawer-project-row { width: calc(100% - 8px); min-height: 48px; margin: 2px 4px; padding: 0 12px; display: flex; align-items: center; gap: 10px; border: none; border-radius: 12px; background: transparent; color: #e6e6e6; text-align: left; font: 15px/1.2 -apple-system,system-ui,sans-serif; touch-action: manipulation; }
+.drawer-project-row svg { width: 18px; height: 18px; flex: none; color: rgba(235,235,245,.6); }
+.drawer-project-row span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.drawer-project-row.active { background: rgba(10,132,255,.2); box-shadow: inset 2px 0 0 var(--blue); }
+.drawer-project-row:active { background: rgba(118,118,128,.2); }
 /* Open the bind modal — the only way to add a session, since the list is user-curated. */
 .drawer-bind { width: 100%; margin-top: 8px; padding: 10px; border: none; border-radius: 8px; background: #2b3550; color: #cdddff; font-size: 14px; touch-action: manipulation; }
 .drawer-bind:active { background: #344168; }

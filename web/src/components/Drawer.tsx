@@ -134,8 +134,10 @@ export default function Drawer({
             {!projectsLoading && projectsError && <div className="drawer-empty" role="alert">{projectsError}</div>}
             {!projectsLoading && !projectsError && projects.length === 0 && <div className="drawer-empty">{t('project.empty')}</div>}
             {projects.map((project) => (
-              <button key={project.id} type="button" className={`drawer-row drawer-name${project.id === currentProjectId ? ' active' : ''}`}
-                onClick={() => { onSelectProject(project.id); onClose(); }}>{project.name}</button>
+              <button key={project.id} type="button" className={`drawer-project-row${project.id === currentProjectId ? ' active' : ''}`}
+                onClick={() => { onSelectProject(project.id); onClose(); }}>
+                <FolderIcon /><span>{project.name}</span>{project.id === currentProjectId && <i aria-hidden="true" />}
+              </button>
             ))}
           </> : <>
           <div className="drawer-title"><MonitorIcon />{t('drawer.title')}</div>
@@ -150,7 +152,9 @@ export default function Drawer({
                   aria-label={`${name} — ${t(expandedSessions.has(name) ? 'doc.tocCollapse' : 'doc.tocExpand')}`}
                   onClick={() => toggleSession(name)}
                 >{expandedSessions.has(name) ? '⌄' : '›'}</button>
-                <button type="button" className="drawer-name" onClick={() => onSelectSession(name)}>{name}</button>
+                <button type="button" className="drawer-name" onClick={() => onSelectSession(name)}>
+                  <MonitorIcon /><span>{name}</span>{name === currentSessionName && <i aria-hidden="true" />}
+                </button>
               <button
                 className="drawer-unbind"
                 onClick={(event: MouseEvent<HTMLButtonElement>) => {
@@ -160,14 +164,18 @@ export default function Drawer({
                 title={t('drawer.unbind')}
               >✕</button>
               </div>
-              {expandedSessions.has(name) && (sessionWindows[name] || []).map((window) => (
-                <button
-                  key={window.id}
-                  type="button"
-                  className={`drawer-window ${name === currentSessionName && window.id === currentWindowId ? 'active' : ''}`}
-                  onClick={() => onSelectSession(name, window.id)}
-                >{window.name || window.id}</button>
-              ))}
+              {expandedSessions.has(name) && (
+                <div className="drawer-window-list">
+                  {(sessionWindows[name] || []).map((window) => (
+                    <button
+                      key={window.id}
+                      type="button"
+                      className={`drawer-window ${name === currentSessionName && window.id === currentWindowId ? 'active' : ''}`}
+                      onClick={() => onSelectSession(name, window.id)}
+                    ><span className="drawer-window-mark" aria-hidden="true" />{window.name || window.id}{name === currentSessionName && window.id === currentWindowId && <i aria-hidden="true" />}</button>
+                  ))}
+                </div>
+              )}
             </div>
           ))}
           <button className="drawer-bind" onClick={onBind}>＋ {t('drawer.bind')}</button>
