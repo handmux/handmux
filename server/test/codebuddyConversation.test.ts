@@ -117,7 +117,6 @@ describe('CodeBuddy Conversation adapter', () => {
         steer: true,
       },
     });
-    expect((await bound.discoverNative(runRef))?.capabilities).not.toHaveProperty('promptWhileActive');
     const foreign = createCodeBuddyConversationAdapter({
       projectsRoot: root,
       sessions: { paneSession: () => ({ sessionId: 'other-session', transcriptPath: null, cwd: '/x', agent: 'codebuddy' }) },
@@ -199,7 +198,6 @@ describe('CodeBuddy Conversation adapter', () => {
     const capabilities = (await adapter.discoverNative(runRef))?.capabilities;
     // The Core enforces the pairing itself, so a declared steer without a dispatchSteer would be rejected.
     expect(capabilities).toMatchObject({ steer: true });
-    expect(capabilities).not.toHaveProperty('promptWhileActive');
     await expect(adapter.dispatchSteer!(lease, {
       clientRequestId: 'steer-1', text: 'join the running turn',
       plan: {

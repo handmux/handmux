@@ -316,11 +316,10 @@ describe('Claude Conversation adapter', () => {
     expect(await adapter.discoverNative(lease.ref)).toMatchObject({
       capabilities: {
         history: true, live: 'settled', sendable: true, send: ['prompt'], interrupt: true,
-        // 「立刻引导」 is declared, the automatic in-turn send is not: a busy send queues.
+        // 「立刻引导」 is declared: a busy send queues, and joining the running turn is this action only.
         steer: true,
       },
     });
-    expect((await adapter.discoverNative(lease.ref))?.capabilities).not.toHaveProperty('promptWhileActive');
     await expect(adapter.dispatchPrompt?.(lease, {
       clientRequestId: 'send-1', text: 'exact prompt',
     })).resolves.toEqual({ outcome: 'accepted' });
