@@ -962,6 +962,11 @@ button.settings-page-row:disabled, .settings-page-row.disabled { color: rgba(235
 .drawer-row { display: flex; align-items: center; gap: 6px; border-radius: 8px; }
 .drawer-name { flex: 1; min-width: 0; padding: 8px 4px; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .drawer-session.active { background: var(--blue); color: #fff; }
+.drawer-tree-toggle { flex: none; width: 32px; min-height: 44px; padding: 0; border: none; background: transparent; color: #9ca0aa; font-size: 20px; line-height: 1; touch-action: manipulation; }
+.drawer-session .drawer-name { min-height: 44px; padding: 0 4px; border: none; background: transparent; color: inherit; text-align: left; font: inherit; }
+.drawer-window { display: block; width: calc(100% - 32px); min-height: 40px; margin-left: 32px; padding: 8px 12px; border: none; border-left: 1px solid #3a3b42; background: transparent; color: #b9bdc8; text-align: left; font-size: 13px; line-height: 24px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; touch-action: manipulation; }
+.drawer-window.active { border-left-color: #8db4ff; background: rgba(68, 113, 194, .35); color: #fff; }
+.drawer-window:active { background: rgba(118, 118, 128, .2); }
 .drawer-unbind { flex: none; background: none; border: none; color: #888; font-size: 14px; padding: 6px 8px; touch-action: manipulation; display: inline-flex; align-items: center; justify-content: center; min-width: 40px; min-height: 44px; }
 .drawer-session.active .drawer-unbind { color: #d6e4ff; }
 .drawer-empty { padding: 12px 4px; color: #888; font-size: 13px; }

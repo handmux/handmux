@@ -9,6 +9,8 @@ import { relTime } from '../inbox.js';
 import WorkspaceRecoveryCard from './WorkspaceRecoveryCard.jsx';
 import { listProjects } from '../projectTask/api.js';
 import type { Project } from '../projectTask/contracts.js';
+import { getSessions, getWindows } from '../api.js';
+import type { TmuxWindow } from '../api.js';
 import type { MouseEvent } from 'react';
 import type { WorkspaceRecoveryPlan, WorkspaceRestoreOperation } from '../workspaceRecovery.js';
 
@@ -27,8 +29,9 @@ export interface DrawerOrphan {
 interface DrawerProps {
   open: boolean;
   currentSessionName?: string | null;
+  currentWindowId?: string | null;
   bound: string[];
-  onSelectSession: (name: string) => void;
+  onSelectSession: (name: string, windowId?: string) => void;
   onUnbind: (name: string) => void;
   onBind: () => void;
   onClose: () => void;
@@ -49,7 +52,7 @@ interface DrawerProps {
 }
 
 export default function Drawer({
-  open, currentSessionName, bound, onSelectSession, onUnbind, onBind, onClose, onLogout,
+  open, currentSessionName, currentWindowId = null, bound, onSelectSession, onUnbind, onBind, onClose, onLogout,
   orphans = [], onTakeoverRequest,
   recoveryPlan = null, recoveryOperation = null, onOpenRecovery = () => {},
   projectTaskBeta = false, onSwitchProject = () => {}, onSwitchSession = () => {}, onOpenUsage = () => {}, onOpenSettings = () => {}, rootView = 'session', currentProjectId = null,
@@ -59,6 +62,42 @@ export default function Drawer({
   const [projects, setProjects] = useState<Project[]>([]);
   const [projectsLoading, setProjectsLoading] = useState(false);
   const [projectsError, setProjectsError] = useState<string | null>(null);
+  const [sessionWindows, setSessionWindows] = useState<Record<string, TmuxWindow[]>>({});
+  const [expandedSessions, setExpandedSessions] = useState<Set<string>>(() => new Set());
+
+  useEffect(() => {
+    if (currentSessionName) {
+      setExpandedSessions((current) => current.has(currentSessionName)
+        ? current : new Set(current).add(currentSessionName));
+    }
+  }, [currentSessionName]);
+
+  useEffect(() => {
+    if (rootView !== 'session' || !open) return;
+    let alive = true;
+    void (async () => {
+      try {
+        const sessions = await getSessions();
+        const names = new Set(bound);
+        const rows = await Promise.all(sessions
+          .filter((session) => names.has(session.name))
+          .map(async (session) => [session.name, await getWindows(session.id)] as const));
+        if (!alive) return;
+        setSessionWindows(Object.fromEntries(rows));
+      } catch {
+        // Keep the pinned Session names usable if a topology refresh is temporarily unavailable.
+      }
+    })();
+    return () => { alive = false; };
+  }, [rootView, open, bound]);
+
+  const toggleSession = (name: string): void => {
+    setExpandedSessions((current) => {
+      const next = new Set(current);
+      if (next.has(name)) next.delete(name); else next.add(name);
+      return next;
+    });
+  };
   useEffect(() => {
     if (rootView !== 'project') {
       setProjectsLoading(false);
@@ -99,11 +138,16 @@ export default function Drawer({
           <div className="drawer-title">{t('drawer.title').toUpperCase()}</div>
           {bound.length === 0 && <div className="drawer-empty">{t('drawer.empty')}</div>}
           {bound.map((name) => (
-            <div
-              key={name}
-              className={`drawer-row drawer-session ${name === currentSessionName ? 'active' : ''}`}
-            >
-              <span className="drawer-name" onClick={() => onSelectSession(name)}>{name}</span>
+            <div key={name} className="drawer-session-tree">
+              <div className={`drawer-row drawer-session ${name === currentSessionName ? 'active' : ''}`}>
+                <button
+                  type="button"
+                  className="drawer-tree-toggle"
+                  aria-expanded={expandedSessions.has(name)}
+                  aria-label={name}
+                  onClick={() => toggleSession(name)}
+                >{expandedSessions.has(name) ? '⌄' : '›'}</button>
+                <button type="button" className="drawer-name" onClick={() => onSelectSession(name)}>{name}</button>
               <button
                 className="drawer-unbind"
                 onClick={(event: MouseEvent<HTMLButtonElement>) => {
@@ -112,6 +156,15 @@ export default function Drawer({
                 aria-label={t('drawer.unbind')}
                 title={t('drawer.unbind')}
               >✕</button>
+              </div>
+              {expandedSessions.has(name) && (sessionWindows[name] || []).map((window) => (
+                <button
+                  key={window.id}
+                  type="button"
+                  className={`drawer-window ${name === currentSessionName && window.id === currentWindowId ? 'active' : ''}`}
+                  onClick={() => onSelectSession(name, window.id)}
+                >{window.name || window.id}</button>
+              ))}
             </div>
           ))}
           <button className="drawer-bind" onClick={onBind}>＋ {t('drawer.bind')}</button>

@@ -314,7 +314,6 @@ export default function App() {
     if (view === 'project' && !projectTaskBeta) return;
     setRootView(view);
     setRootViewState(view);
-    setDrawerOpen(false);
   };
   const [chatTone, setChatToneState] = useState(getChatTone); // 对话-lens colour tone (persisted); default 深墨
   const pickChatTone = (tone: ChatTone) => { setChatTone(tone); setChatToneState(tone); };
@@ -1207,11 +1206,11 @@ export default function App() {
 
   // Drawer rows carry a bound NAME — resolve it to the live session before opening, since the
   // tmux id can have changed (or the session may be gone) since it was pinned.
-  const selectSession = useCallback(async (name: string) => {
+  const selectSession = useCallback(async (name: string, windowId?: string) => {
     try {
       const session = (await getSessions()).find((s) => s.name === name);
       if (!session) { window.alert(t('app.sessionGone', { name })); return; }
-      if (await openSession(session)) setDrawerOpen(false);
+      if (await openSession(session, windowId ? { window: windowId } : null)) setDrawerOpen(false);
     } catch (e) {
       handledAuth(e);
     }
@@ -2753,6 +2752,7 @@ export default function App() {
       <Drawer
         open={drawerOpen}
         currentSessionName={current?.session?.name ?? null}
+        currentWindowId={current?.window?.id ?? null}
         bound={bound}
         onSelectSession={selectSession}
         onUnbind={unbindSession}
