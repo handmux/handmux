@@ -493,6 +493,40 @@ describe('Conversation Core public queue', () => {
     expect((await h.service.queueSnapshot(h.lease)).items).toEqual([]);
   });
 
+  it('only retries a row that is still queued', async () => {
+    const h = await harness({});
+    await expect(h.service.queueAction(h.lease, { action: 'retry', itemId: 'never-queued' }))
+      .rejects.toThrow('Queued message is no longer pending');
+  });
+
+  // A steer the pane could not take (its screen was an approval menu, not an editor) must not be recorded as
+  // if the user had a draft to resolve: that label never auto-dispatches again, so a transient screen would
+  // have wedged the row for good. The pane answers "busy", and the row goes back to the queue.
+  it('returns a steer the pane could not take to the queue, without blocking it', async () => {
+    const h = await harness({
+      activity: {
+        activity: 'waiting', activeTurn: { state: 'active', nativeTurnId: 'turn-1' },
+        revision: 3, epoch: 'run-1',
+      },
+      steer: async () => ({ outcome: 'busy', nativeMutation: false }),
+    });
+    await h.service.send(h.lease, {
+      clientRequestId: 'request-1', text: 'guide me', delivery: 'prompt',
+    });
+    const revision = h.service.querySubmission(h.lease, 'request-1').submission?.revision;
+    expect(revision).toBeTypeOf('number');
+    await h.service.queueAction(h.lease, {
+      action: 'steer', itemId: 'request-1', actionId: 'steer-1',
+      baseRevision: revision as number, anchor: { viewId: 'view-1' },
+    });
+    await vi.waitFor(() => expect(h.dispatchSteer).toHaveBeenCalledOnce());
+    await vi.waitFor(() => {
+      const view = h.service.querySubmission(h.lease, 'request-1');
+      expect(view.status).toBe('queued');
+      expect(view.submission).not.toHaveProperty('autoDispatchBlockedReason');
+    });
+  });
+
   it('keeps canonical observation authoritative when it arrives before a busy receipt', async () => {
     let settle!: (receipt: ConversationDispatchReceipt) => void;
     const h = await harness({
@@ -1589,12 +1623,15 @@ describe('Conversation Core busy send', () => {
       revision: 5, epoch: 'run-1',
     } as ConversationActivitySnapshot],
   ])('queues the message while the pane is in %s', async (_name, activity) => {
-    const h = await harness({ activity });
+    const h = await harness({ activity, steer: async () => ({ outcome: 'accepted' }) });
     const receipt = await h.service.send(h.lease, {
       clientRequestId: 'queued-1', text: 'wait your turn', delivery: 'prompt',
     });
     expect(receipt.status).toBe('queued');
     expect(h.dispatchPrompt).not.toHaveBeenCalled();
+    // A provider that CAN be steered still queues an ordinary send — joining the running turn is the
+    // user's choice, made through the queue action, never a side effect of pressing send.
+    expect(h.dispatchSteer).not.toHaveBeenCalled();
     expect((await h.service.queueSnapshot(h.lease)).items).toHaveLength(1);
   });
 

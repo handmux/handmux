@@ -43,7 +43,9 @@ export function codebuddySingleLineDraft(
 
 // Send a prompt the way the composer means it: replace only a draft this pane is KNOWN to own (the prompt
 // we restored from the run's own submission) and never a draft a human typed — that is a refusal the caller
-// can surface, not a silent deletion. Anything the reader cannot recognize refuses too.
+// can surface, not a silent deletion. A screen the reader cannot recognize is a different thing: there may
+// be an approval menu where the editor should be, so it refuses WITHOUT a reason and the message stays
+// queued for the next attempt instead of being blocked as if something were wrong with it.
 export function sendCodeBuddyPanePrompt(
   commands: CodeBuddyPaneInputCommands,
   paneId: string,
@@ -64,9 +66,10 @@ export function sendCodeBuddyPanePrompt(
     };
     const draft = await readEditor();
     if (draft.draft === null) {
-      // Unreadable: record the shape, never the text we could not read (see describeEditorArea).
+      // Not an editor right now (an approval menu is the usual reason): a plain refusal, no reason, so the
+      // message stays queued instead of being blocked. The shape is recorded; the text never is.
       reportUnreadable?.(describeEditorArea(draft.screen, draft.cursor));
-      return { nativeMutation: false, reason: 'terminal_draft_conflict' };
+      return { nativeMutation: false };
     }
     if (draft.draft !== '' && draft.draft !== restoredPrompt()) {
       return { nativeMutation: false, reason: 'terminal_draft_conflict' };
@@ -79,8 +82,11 @@ export function sendCodeBuddyPanePrompt(
       await commands.sendKey(paneId, 'C-u');
       await delay(SUBMIT_GAP_MS);
       const cleared = await readEditor();
+      if (cleared.draft === null) {
+        reportUnreadable?.(describeEditorArea(cleared.screen, cleared.cursor));
+        return { nativeMutation: false };
+      }
       if (cleared.draft !== '') {
-        if (cleared.draft === null) reportUnreadable?.(describeEditorArea(cleared.screen, cleared.cursor));
         return { nativeMutation: false, reason: 'terminal_draft_conflict' };
       }
     }

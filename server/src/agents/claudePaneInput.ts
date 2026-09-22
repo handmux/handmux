@@ -34,11 +34,17 @@ export function sendClaudePanePrompt(
     };
     const draft = await readEditor();
     if (draft.draft === null) {
-      // Unreadable: record the shape, never the text we could not read (see describeEditorArea).
+      // Unreadable is NOT a conflict with a draft: the screen is simply not an editor right now — an
+      // approval menu is the usual reason — so nothing is wrong with the message. Return a plain refusal
+      // with no reason, which the Conversation layer reads as "busy": the message stays queued and the next
+      // attempt goes through once the pane is showing its editor again. Recording the shape never records
+      // text we could not read (see describeEditorArea).
       reportUnreadable?.(describeEditorArea(draft.screen, draft.cursor));
-      return { nativeMutation: false, reason: 'terminal_draft_conflict' };
+      return { nativeMutation: false };
     }
     if (draft.draft !== '' && draft.draft !== restoredPrompt()) {
+      // A draft this pane cannot call its own. Refusing is the point — the alternative is deleting text a
+      // human typed — and it needs the user, so it carries the reason the caller blocks on.
       return { nativeMutation: false, reason: 'terminal_draft_conflict' };
     }
     if (guard && !await guard.validate()) return { nativeMutation: false };
@@ -46,8 +52,12 @@ export function sendClaudePanePrompt(
       await commands.sendKey(paneId, 'C-u');
       await delay(SUBMIT_GAP_MS);
       const cleared = await readEditor();
+      if (cleared.draft === null) {
+        reportUnreadable?.(describeEditorArea(cleared.screen, cleared.cursor));
+        return { nativeMutation: false };
+      }
       if (cleared.draft !== '') {
-        if (cleared.draft === null) reportUnreadable?.(describeEditorArea(cleared.screen, cleared.cursor));
+        // The clear did not take: what is in there now is not ours to overwrite.
         return { nativeMutation: false, reason: 'terminal_draft_conflict' };
       }
     }

@@ -103,15 +103,18 @@ it('does not send when the clear key failed to clear the restored prompt', async
 });
 
 it('records the shape when the composer cannot be read, and never a draft it could read', async () => {
+  // Unreadable: not an editor on screen right now, which says nothing about the message. No reason, so the
+  // row stays queued for the next attempt rather than being blocked.
   const unreadable = fixture('');
   const report = vi.fn();
   unreadable.commands.capturePlain.mockImplementation(async () => 'history\n<<a layout the reader does not know>>\n');
   expect(await sendCodeBuddyPanePrompt(unreadable.commands, '%1', 'next', () => null, undefined, report))
-    .toEqual({ nativeMutation: false, reason: 'terminal_draft_conflict' });
+    .toEqual({ nativeMutation: false });
   expect(report).toHaveBeenCalledTimes(1);
   expect(report.mock.calls[0]?.[0]).toContain('cursor=(');
   expect(unreadable.commands.sendText).not.toHaveBeenCalled();
 
+  // A draft it CAN read, belonging to somebody else: refusal that needs the user, so it carries the reason.
   const foreign = fixture('handwritten draft');
   const quiet = vi.fn();
   expect(await sendCodeBuddyPanePrompt(foreign.commands, '%1', 'next', () => '历史草稿', undefined, quiet))

@@ -94,19 +94,21 @@ it('ignores a native AI suggested follow-up when End still leaves the real input
 });
 
 it('records the shape when the composer cannot be read, and never a draft it could read', async () => {
-  // Unreadable layout: a refusal the user cannot act on, so the rows around the cursor are recorded —
-  // this is the only trace of what the pane looked like at that moment.
+  // Unreadable layout: the screen is not an editor at all (an approval menu, say), which says nothing about
+  // the message — so the refusal carries NO reason, and the Conversation layer leaves the row queued for the
+  // next attempt instead of blocking it. The rows around the cursor are recorded, because that shape is the
+  // only trace of what the pane looked like at that moment.
   const unreadable = fixture('');
   const report = vi.fn();
   unreadable.commands.capturePlain.mockImplementation(async () => 'history\n<<a layout the reader does not know>>\n');
   expect(await sendClaudePanePrompt(unreadable.commands, '%1', 'next', () => null, undefined, report))
-    .toEqual({ nativeMutation: false, reason: 'terminal_draft_conflict' });
+    .toEqual({ nativeMutation: false });
   expect(report).toHaveBeenCalledTimes(1);
   expect(report.mock.calls[0]?.[0]).toContain('cursor=(');
   expect(unreadable.commands.sendText).not.toHaveBeenCalled();
 
-  // A draft the reader CAN read, belonging to somebody else: refusal is the correct outcome and its text
-  // must never reach the log.
+  // A draft the reader CAN read, belonging to somebody else: refusal is the correct outcome, it needs the
+  // user to resolve it, and its text must never reach the log.
   const foreign = fixture('handwritten draft');
   const quiet = vi.fn();
   expect(await sendClaudePanePrompt(foreign.commands, '%1', 'next', () => 'old draft', undefined, quiet))
