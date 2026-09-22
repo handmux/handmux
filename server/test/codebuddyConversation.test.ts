@@ -111,8 +111,13 @@ describe('CodeBuddy Conversation adapter', () => {
     });
     expect(await bound.discoverNative(runRef)).toMatchObject({
       run: runRef,
-      capabilities: { history: true, live: 'settled', sendable: true, send: ['prompt'], interrupt: true },
+      capabilities: {
+        history: true, live: 'settled', sendable: true, send: ['prompt'], interrupt: true,
+        // 「立刻引导」 is declared, the automatic in-turn send is not: a busy send queues.
+        steer: true,
+      },
     });
+    expect((await bound.discoverNative(runRef))?.capabilities).not.toHaveProperty('promptWhileActive');
     const foreign = createCodeBuddyConversationAdapter({
       projectsRoot: root,
       sessions: { paneSession: () => ({ sessionId: 'other-session', transcriptPath: null, cwd: '/x', agent: 'codebuddy' }) },
@@ -180,6 +185,30 @@ describe('CodeBuddy Conversation adapter', () => {
     expect(await adapter.dispatchPrompt!(lease, { text: 'hi', clientRequestId: 'req-1' }))
       .toEqual({ outcome: 'unknown', nativeMutation: 'unknown', reason: 'delivery_unconfirmed' });
     expect(await adapter.dispatchInterrupt!(lease)).toEqual({ status: 'accepted' });
+  });
+
+  // The whole point of the split: a busy send queues, and only 「立刻引导」 writes into the running turn.
+  it('reaches the running turn through 「立刻引导」, and only that way', async () => {
+    const { root } = projectFile();
+    const sendPrompt = vi.fn(async () => ({ nativeMutation: true }));
+    const adapter = createCodeBuddyConversationAdapter({
+      projectsRoot: root,
+      sessions: { paneSession: () => ({ sessionId: SESSION, transcriptPath: null, cwd: '/x', agent: 'codebuddy' }) },
+      control: { sendPrompt, interrupt: vi.fn(async () => {}) },
+    });
+    const capabilities = (await adapter.discoverNative(runRef))?.capabilities;
+    // The Core enforces the pairing itself, so a declared steer without a dispatchSteer would be rejected.
+    expect(capabilities).toMatchObject({ steer: true });
+    expect(capabilities).not.toHaveProperty('promptWhileActive');
+    await expect(adapter.dispatchSteer!(lease, {
+      clientRequestId: 'steer-1', text: 'join the running turn',
+      plan: {
+        kind: 'steer-active-turn', activityEpoch: 'run-1', activityRevision: 3,
+        nativeTurnId: `codebuddy-run:${runRef.runId}`,
+      },
+      anchor: { viewId: 'view' },
+    })).resolves.toEqual({ outcome: 'accepted' });
+    expect(sendPrompt).toHaveBeenCalledWith(PANE, 'join the running turn');
   });
 
   it('reads activity from the same classification the roster uses', async () => {

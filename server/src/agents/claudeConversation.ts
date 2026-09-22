@@ -10,6 +10,7 @@ import type {
   ConversationDispatchGuard,
   ConversationItem,
   ConversationPromptRequest,
+  ConversationSteerRequest,
   InterruptReceipt,
 } from '../agent-runtime/conversationTypes.js';
 import { createTranscriptParser } from '../transcriptParse.js';
@@ -47,6 +48,30 @@ export interface ClaudeConversationAdapterOptions {
 export interface ClaudeConversationControl {
   sendPrompt(paneId: string, text: string, guard?: ConversationDispatchGuard): Promise<unknown>;
   interrupt(paneId: string): Promise<unknown>;
+}
+
+// The pane write both deliveries share. 「立刻引导」 is not a different operation: the Core has already
+// re-checked that the turn it planned against is still the running one, so the only difference from a
+// plain send is that the user asked for it explicitly.
+async function writePanePrompt(
+  control: ClaudeConversationControl,
+  paneId: string,
+  text: string,
+  guard?: ConversationDispatchGuard,
+): Promise<ConversationDispatchReceipt> {
+  try {
+    const result = await (guard ? control.sendPrompt(paneId, text, guard) : control.sendPrompt(paneId, text));
+    if (result && typeof result === 'object'
+      && (result as { nativeMutation?: unknown }).nativeMutation === false) {
+      if ((result as { reason?: unknown }).reason === 'terminal_draft_conflict') {
+        return { outcome: 'rejected', nativeMutation: false, reason: 'terminal_draft_conflict' };
+      }
+      return { outcome: 'busy', nativeMutation: false };
+    }
+    return { outcome: 'accepted' };
+  } catch {
+    return { outcome: 'unknown', nativeMutation: 'unknown', reason: 'delivery_unconfirmed' };
+  }
 }
 
 function isRun(target: AgentSessionRef | AgentRunRef): target is AgentRunRef {
@@ -384,6 +409,11 @@ export function createClaudeConversationAdapter({
         sourceViewId: viewId,
         capabilities: isRun(target) && control ? {
           history: true, live: 'settled', sendable: true, send: ['prompt'], interrupt: true,
+          // 「立刻引导」 only, never a busy send: a plain send queues, and the user says explicitly when
+          // they want the text to join the turn that is already running. Same editor write as CodeBuddy's,
+          // through the pane; NOT yet verified against a live Claude turn on this machine, so the button is
+          // the experiment — if Claude's editor swallows a mid-turn write, drop this back to a queued send.
+          steer: true,
         } : { history: true, live: 'poll' },
       };
     },
@@ -451,21 +481,13 @@ export function createClaudeConversationAdapter({
         request: ConversationPromptRequest,
         guard,
       ): Promise<ConversationDispatchReceipt> {
-        try {
-          const result = await (guard
-            ? control.sendPrompt(run.ref.paneId, request.text, guard)
-            : control.sendPrompt(run.ref.paneId, request.text));
-          if (result && typeof result === 'object'
-            && (result as { nativeMutation?: unknown }).nativeMutation === false) {
-            if ((result as { reason?: unknown }).reason === 'terminal_draft_conflict') {
-              return { outcome: 'rejected', nativeMutation: false, reason: 'terminal_draft_conflict' };
-            }
-            return { outcome: 'busy', nativeMutation: false };
-          }
-          return { outcome: 'accepted' };
-        } catch {
-          return { outcome: 'unknown', nativeMutation: 'unknown', reason: 'delivery_unconfirmed' };
-        }
+        return writePanePrompt(control, run.ref.paneId, request.text, guard);
+      },
+      // 「立刻引导」. A plain send never lands in a running turn — that is what makes the queue mean
+      // something — so joining the turn in progress is an explicit action the user takes, and the Core
+      // re-checks the turn's epoch/revision/nativeTurnId before it arrives here.
+      async dispatchSteer(run, request: ConversationSteerRequest): Promise<ConversationDispatchReceipt> {
+        return writePanePrompt(control, run.ref.paneId, request.text);
       },
       async dispatchInterrupt(run): Promise<InterruptReceipt> {
         await control.interrupt(run.ref.paneId);

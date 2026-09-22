@@ -314,13 +314,28 @@ describe('Claude Conversation adapter', () => {
     });
 
     expect(await adapter.discoverNative(lease.ref)).toMatchObject({
-      capabilities: { history: true, live: 'settled', sendable: true, send: ['prompt'], interrupt: true },
+      capabilities: {
+        history: true, live: 'settled', sendable: true, send: ['prompt'], interrupt: true,
+        // 「立刻引导」 is declared, the automatic in-turn send is not: a busy send queues.
+        steer: true,
+      },
     });
+    expect((await adapter.discoverNative(lease.ref))?.capabilities).not.toHaveProperty('promptWhileActive');
     await expect(adapter.dispatchPrompt?.(lease, {
       clientRequestId: 'send-1', text: 'exact prompt',
     })).resolves.toEqual({ outcome: 'accepted' });
+    // 「立刻引导」 is the same pane write, reached from an explicit action instead of by default.
+    await expect(adapter.dispatchSteer?.(lease, {
+      clientRequestId: 'steer-1', text: 'join the running turn',
+      plan: {
+        kind: 'steer-active-turn', activityEpoch: 'epoch-1', activityRevision: 5,
+        nativeTurnId: 'claude-run:run-control',
+      },
+      anchor: { viewId: 'view' },
+    })).resolves.toEqual({ outcome: 'accepted' });
     await expect(adapter.dispatchInterrupt?.(lease)).resolves.toEqual({ status: 'accepted' });
     expect(control.sendPrompt).toHaveBeenCalledWith('%7', 'exact prompt');
+    expect(control.sendPrompt).toHaveBeenCalledWith('%7', 'join the running turn');
     expect(control.interrupt).toHaveBeenCalledWith('%7');
   });
 

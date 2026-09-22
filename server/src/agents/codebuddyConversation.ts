@@ -24,6 +24,7 @@ import type {
   ConversationDispatchReceipt,
   ConversationItem,
   ConversationPromptRequest,
+  ConversationSteerRequest,
   InterruptReceipt,
 } from '../agent-runtime/conversationTypes.js';
 import { createCodeBuddyTranscriptParser } from './codebuddyTranscriptParse.js';
@@ -53,6 +54,30 @@ export interface CodeBuddyConversationSessionSource {
 export interface CodeBuddyConversationControl {
   sendPrompt(paneId: string, text: string, guard?: ConversationDispatchGuard): Promise<unknown>;
   interrupt(paneId: string): Promise<unknown>;
+}
+
+// The pane write both deliveries share. 「立刻引导」 is not a different operation: the Core has already
+// re-checked that the turn it planned against is still the running one, so the only difference from a
+// plain send is that the user asked for it explicitly.
+async function writePanePrompt(
+  control: CodeBuddyConversationControl,
+  paneId: string,
+  text: string,
+  guard?: ConversationDispatchGuard,
+): Promise<ConversationDispatchReceipt> {
+  try {
+    const result = await (guard ? control.sendPrompt(paneId, text, guard) : control.sendPrompt(paneId, text));
+    if (result && typeof result === 'object'
+      && (result as { nativeMutation?: unknown }).nativeMutation === false) {
+      if ((result as { reason?: unknown }).reason === 'terminal_draft_conflict') {
+        return { outcome: 'rejected', nativeMutation: false, reason: 'terminal_draft_conflict' };
+      }
+      return { outcome: 'busy', nativeMutation: false };
+    }
+    return { outcome: 'accepted' };
+  } catch {
+    return { outcome: 'unknown', nativeMutation: 'unknown', reason: 'delivery_unconfirmed' };
+  }
 }
 
 export interface CodeBuddyConversationAdapterOptions {
@@ -367,8 +392,9 @@ export function createCodeBuddyConversationAdapter({
           history: true, live: 'settled', sendable: true, send: ['prompt'], interrupt: true,
           // Verified live on 2.156.0: a prompt typed while a tool is running is accepted by the editor and
           // the TUI reports "Messages to be submitted after next tool call", then submits it into the same
-          // turn. So an ordinary send does not have to wait for idle.
-          promptWhileActive: true,
+          // turn. That is the 「立刻引导」 action, not the default: a plain send queues, so the user always
+          // knows whether they joined the running turn or are waiting for the next one.
+          steer: true,
         } : { history: true, live: 'poll' },
       };
     },
@@ -438,21 +464,13 @@ export function createCodeBuddyConversationAdapter({
         request: ConversationPromptRequest,
         guard,
       ): Promise<ConversationDispatchReceipt> {
-        try {
-          const result = await (guard
-            ? control.sendPrompt(run.ref.paneId, request.text, guard)
-            : control.sendPrompt(run.ref.paneId, request.text));
-          if (result && typeof result === 'object'
-            && (result as { nativeMutation?: unknown }).nativeMutation === false) {
-            if ((result as { reason?: unknown }).reason === 'terminal_draft_conflict') {
-              return { outcome: 'rejected', nativeMutation: false, reason: 'terminal_draft_conflict' };
-            }
-            return { outcome: 'busy', nativeMutation: false };
-          }
-          return { outcome: 'accepted' };
-        } catch {
-          return { outcome: 'unknown', nativeMutation: 'unknown', reason: 'delivery_unconfirmed' };
-        }
+        return writePanePrompt(control, run.ref.paneId, request.text, guard);
+      },
+      // 「立刻引导」. A plain send never lands in a running turn — that is what makes the queue mean
+      // something — so joining the turn in progress is an explicit action the user takes, and the Core
+      // re-checks the turn's epoch/revision/nativeTurnId before it arrives here.
+      async dispatchSteer(run, request: ConversationSteerRequest): Promise<ConversationDispatchReceipt> {
+        return writePanePrompt(control, run.ref.paneId, request.text);
       },
       async dispatchInterrupt(run): Promise<InterruptReceipt> {
         await control.interrupt(run.ref.paneId);

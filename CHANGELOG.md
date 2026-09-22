@@ -4,6 +4,10 @@ All notable changes to handmux. Format follows [Keep a Changelog](https://keepac
 
 ## [Unreleased]
 
+### Changed
+
+- 对话页的 CodeBuddy 和 Claude：正在跑回合时发送的消息**默认排队**（回合结束后逐条发出），不再自动插进当前回合；要立刻送进正在跑的回合，用排队消息上的「立刻引导」。
+
 ## [0.31.0] - 2026-09-22
 
 ### Added
