@@ -19,6 +19,28 @@ export interface ChangelogEntry {
 // `entryId`/`LATEST_RELEASE` use `version` when present, else `date`, as the stable unread-dot id.
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '0.31.1',
+    date: '2026-09-22',
+    highlight: {
+      zh: '忙时默认排队 · 被拒可重发',
+      en: 'Queue by default · refusals can be sent again',
+    },
+    items: {
+      zh: [
+        'Agent 正在跑回合时发送的消息改为排队，回合结束后自动发出；想插进当前回合，用排队消息上的「立刻引导」。',
+        '消息被拒绝后可以点「重新发送」重新投递，不用再靠打开编辑绕过；被拒的消息本来就不会自动重试。',
+        '屏幕上开着授权或确认卡片时不再提供「立刻引导」。',
+        '授权、提问和复核卡片加了描边，浅色与暗色下都能看清边界。',
+      ],
+      en: [
+        'A message sent while the Agent is running now queues and goes out when the turn ends; use "Guide now" on a queued message to join the running turn instead.',
+        'A refused message can be sent again with one tap, instead of only through editing; a single refusal used to block everything sent after it.',
+        '"Guide now" is no longer offered while an approval or confirmation card is on screen.',
+        'Approval, question, and review cards now have a border, so they read as their own surface in both the light and dark themes.',
+      ],
+    },
+  },
+  {
     version: '0.31.0',
     date: '2026-09-22',
     highlight: {
