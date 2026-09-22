@@ -99,6 +99,10 @@ describe('Agent Conversation controls UI', () => {
     const compacting = render(<AgentConversationQueueControl activity="compacting"
       controller={controller()} />);
     expect((screen.getByRole('button', { name: '立刻引导' }) as HTMLButtonElement).disabled).toBe(true);
+    // A gate is the other state a steer must not fire in: the pane's screen is the permission menu, so the
+    // write would land in that menu instead of an editor.
+    compacting.rerender(<AgentConversationQueueControl activity="waiting" controller={controller()} />);
+    expect((screen.getByRole('button', { name: '立刻引导' }) as HTMLButtonElement).disabled).toBe(true);
     compacting.rerender(<AgentConversationQueueControl activity="unknown" controller={controller()} />);
     expect(screen.queryByRole('button', { name: '立刻引导' })).toBeNull();
     compacting.rerender(<AgentConversationQueueControl activity="working" controller={controller({

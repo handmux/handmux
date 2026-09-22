@@ -473,7 +473,12 @@ export function AgentConversationQueueControl({
           : unknownQueue ? t('chat.queue.unknownDelivery') : '';
         const showSteer = queued && !autoDispatchBlocked
           && queue?.canSteer === true && currentActivity !== 'unknown';
-        const steerDisabled = controller.busy || currentActivity === 'compacting' || pending;
+        // A gate (`waiting`) is not an input the pane will take: a steer write goes into the editor, and the
+        // screen at that moment is the permission menu — the text would land in the wrong place. A compaction
+        // has no editor either. Both keep the button visible but inert, so the row still reads as steerable
+        // once the pane is past that state.
+        const steerDisabled = controller.busy || currentActivity === 'compacting'
+          || currentActivity === 'waiting' || pending;
         return (
         <div className={`cc-queue-item${pending ? ' is-pending' : ''}`} key={item.id} onClick={(event) => {
           if (event.target instanceof Element && event.target.closest('.cc-queue-action')) return;
