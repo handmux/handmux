@@ -45,16 +45,25 @@ export default function ProjectHome({ project, bucket, tasks, loading, error, in
           <button type="button" onClick={onRetry}>{t('project.tryAgain')}</button>
         </div>}
         {loading ? <div className="loading">{t('common.loading')}</div> : !error && tasks.length === 0 ? (
-          <div className="project-empty">
+          onCreate ? <button type="button" className="project-empty" onClick={onCreate}>
+            <strong>{t(bucket === 'tasks' ? 'project.noTasks' : 'project.noDrafts')}</strong>
+            <span>{t(bucket === 'tasks' ? 'project.newTask' : 'project.newDraft')}</span>
+          </button> : <div className="project-empty">
             <strong>{t(bucket === 'tasks' ? 'project.noTasks' : 'project.noDrafts')}</strong>
           </div>
-        ) : tasks.map((task) => (
-          <div key={task.id} className="project-task-row">
+        ) : tasks.map((task) => {
+          const row = <>
             <span className="project-task-row-main"><strong>{task.title}</strong>
               {task.objective && <small>{task.objective}</small>}</span>
-            <span className="project-task-row-meta"><time>{new Date(task.updatedAt).toLocaleDateString()}</time><b>›</b></span>
-          </div>
-        ))}
+            <span className="project-task-row-meta"><time>{new Date(task.updatedAt).toLocaleDateString()}</time>
+              {onOpenTask && <b>›</b>}</span>
+          </>;
+          return onOpenTask ? (
+            <button key={task.id} type="button" className="project-task-row" onClick={() => onOpenTask(task)}>{row}</button>
+          ) : (
+            <div key={task.id} className="project-task-row">{row}</div>
+          );
+        })}
       </main>
     </div>
   );

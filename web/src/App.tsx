@@ -2990,7 +2990,7 @@ export default function App() {
       {rootView === 'project' ? (
         <ProjectRoot drawerOpen={drawerOpen} inbox={projectInboxControl} inset={inset}
           onOpenDrawer={() => setDrawerOpen(true)} onCloseDrawer={() => setDrawerOpen(false)}
-        projectId={projectId} onProjectSelect={setProjectId}
+          projectId={projectId} onProjectSelect={setProjectId} readOnly={true}
           onSwitchSession={() => chooseRootView('session')}
           onOpenUsage={() => setUsageOpen(true)}
           onOpenSettings={openSettings} />

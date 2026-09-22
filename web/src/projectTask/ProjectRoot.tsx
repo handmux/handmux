@@ -49,7 +49,7 @@ function taskBelongsToBucket(task: Task, bucket: ProjectBucket): boolean {
 
 export default function ProjectRoot({ drawerOpen, inbox, inset, onOpenDrawer, onCloseDrawer,
   projectId: controlledProjectId, onProjectSelect,
-  onSwitchSession, onOpenUsage, onOpenSettings }: {
+  onSwitchSession, onOpenUsage, onOpenSettings, readOnly = false }: {
   drawerOpen: boolean;
   inbox: ReactNode;
   inset?: number;
@@ -60,10 +60,10 @@ export default function ProjectRoot({ drawerOpen, inbox, inset, onOpenDrawer, on
   onSwitchSession: () => void;
   onOpenUsage: () => void;
   onOpenSettings: () => void;
+  readOnly?: boolean;
 }) {
   // This first navigation slice is intentionally read-only. Maintenance actions remain
   // available in the existing data/API layer for the later Project/Task management slice.
-  const readOnly = true;
   const [projects, setProjects] = useState<Project[]>([]);
   const [archivedProjects, setArchivedProjects] = useState<Project[]>([]);
   const [currentId, setCurrentId] = useState<string | null>(controlledProjectId ?? getLastProject);
@@ -93,6 +93,7 @@ export default function ProjectRoot({ drawerOpen, inbox, inset, onOpenDrawer, on
   const current = projects.find((project) => project.id === currentId) ?? null;
   const secondaryOpen = Boolean(editor || selectedTask || managementOpen);
   const surfaceObscured = drawerOpen || addingProject || secondaryOpen;
+  const drawerInteractive = drawerOpen && !addingProject && !secondaryOpen;
 
   const reloadProjects = useCallback(async (): Promise<void> => {
     setLoading(true);
@@ -371,8 +372,50 @@ export default function ProjectRoot({ drawerOpen, inbox, inset, onOpenDrawer, on
     finally { setMutationBusy(false); }
   };
 
+  // Kept only for the standalone ProjectRoot harness and the pre-shell maintenance surface.
+  // App passes readOnly=true and renders the shared Root Drawer instead.
+  const legacyDrawer = !readOnly ? (
+    <>
+      <div className={`drawer project-drawer ${drawerOpen ? 'open' : ''}`} aria-hidden={!drawerInteractive}
+        {...(!drawerInteractive ? { inert: '' as const } : {})}>
+        <div className="drawer-list">
+          <div className="project-root-switch" role="group">
+            <button type="button" aria-pressed="true">{t('project.root.projects')}</button>
+            <button type="button" aria-pressed="false" onClick={onSwitchSession}>{t('project.root.sessions')}</button>
+          </div>
+          <div className="drawer-title">{t('project.root.projects').toUpperCase()}</div>
+          {projects.map((project) => (
+            <button key={project.id} type="button" className={`drawer-row drawer-name${project.id === currentId ? ' active' : ''}`}
+              onClick={() => selectProject(project.id)}>{project.name}</button>
+          ))}
+          <button type="button" className="drawer-bind" onClick={openAddProject}>＋ {t('project.add')}</button>
+          {archivedProjects.length > 0 && (
+            <details className="project-archived-projects">
+              <summary>{t('project.archivedProjects', { n: archivedProjects.length })}</summary>
+              {archivedProjects.map((project) => (
+                <button key={project.id} type="button" onClick={() => {
+                  setMutationError(null);
+                  setMutationConflict(false);
+                  setArchivedManagement(project);
+                  setManagementOpen(true);
+                  onCloseDrawer();
+                }}>{project.name}</button>
+              ))}
+            </details>
+          )}
+        </div>
+        <div className="project-drawer-tools">
+          <button type="button" onClick={onOpenUsage}>{t('usage.title')}</button>
+          <button type="button" onClick={onOpenSettings}>{t('app.settings')}</button>
+        </div>
+      </div>
+      {drawerInteractive && <div className="drawer-backdrop" onClick={onCloseDrawer} />}
+    </>
+  ) : null;
+
   return (
     <>
+      {legacyDrawer}
       {error && !current ? (
         <div className="project-root" aria-hidden={surfaceObscured}
           {...(surfaceObscured ? { inert: '' as const } : {})}>

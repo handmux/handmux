@@ -57,17 +57,24 @@ export default function Drawer({
 }: DrawerProps) {
   const [orphOpen, setOrphOpen] = useState(false);
   const [projects, setProjects] = useState<Project[]>([]);
+  const [projectsLoading, setProjectsLoading] = useState(false);
   const [projectsError, setProjectsError] = useState<string | null>(null);
   useEffect(() => {
-    if (rootView !== 'project') return;
+    if (rootView !== 'project') {
+      setProjectsLoading(false);
+      return;
+    }
     let alive = true;
+    setProjectsLoading(true);
+    setProjectsError(null);
     void listProjects().then((rows) => { if (alive) setProjects(rows); })
-      .catch((error: unknown) => { if (alive) setProjectsError(error instanceof Error ? error.message : 'Project list unavailable'); });
+      .catch((error: unknown) => { if (alive) setProjectsError(error instanceof Error ? error.message : 'Project list unavailable'); })
+      .finally(() => { if (alive) setProjectsLoading(false); });
     return () => { alive = false; };
   }, [rootView]);
   return (
     <>
-      <div id="session-drawer" className={`drawer ${open ? 'open' : ''}`}>
+      <div id="session-drawer" className={`drawer${rootView === 'project' ? ' project-drawer' : ''} ${open ? 'open' : ''}`}>
         <div className="drawer-list">
           {projectTaskBeta && (
             <div className="project-root-switch" role="group">
@@ -77,8 +84,9 @@ export default function Drawer({
           )}
           {rootView === 'project' ? <>
             <div className="drawer-title">{t('project.root.projects').toUpperCase()}</div>
-            {projectsError && <div className="drawer-empty" role="alert">{projectsError}</div>}
-            {!projectsError && projects.length === 0 && <div className="drawer-empty">{t('project.empty')}</div>}
+            {projectsLoading && <div className="drawer-empty">{t('common.loading')}</div>}
+            {!projectsLoading && projectsError && <div className="drawer-empty" role="alert">{projectsError}</div>}
+            {!projectsLoading && !projectsError && projects.length === 0 && <div className="drawer-empty">{t('project.empty')}</div>}
             {projects.map((project) => (
               <button key={project.id} type="button" className={`drawer-row drawer-name${project.id === currentProjectId ? ' active' : ''}`}
                 onClick={() => { onSelectProject(project.id); onClose(); }}>{project.name}</button>
