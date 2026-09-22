@@ -4,6 +4,8 @@ All notable changes to handmux. Format follows [Keep a Changelog](https://keepac
 
 ## [Unreleased]
 
+## [0.31.0] - 2026-09-22
+
 ### Added
 
 - 识别 CodeBuddy 会话：终端里运行 `codebuddy` / `codebuddy-code` / `cbc` 的窗口会被标为 CodeBuddy，普通 Node 程序不会被误认。

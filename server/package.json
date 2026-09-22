@@ -1,6 +1,6 @@
 {
   "name": "handmux",
-  "version": "0.30.0",
+  "version": "0.31.0",
   "description": "A mobile vibe-coding cockpit — built on tmux: drive your live session, Claude Code / Codex — anything a terminal can run — from your phone.",
   "type": "module",
   "license": "AGPL-3.0-only",
@@ -75,13 +75,13 @@
     "vitest": "^2.0.0"
   },
   "whatsNew": [
+    {"version":"0.31.0","date":"2026-09-22","zh":"CodeBuddy 对话接入 · Agent 状态更可靠","en":"CodeBuddy chat support · more reliable Agent state"},
     {"version":"0.30.0","date":"2026-09-19","zh":"文档预览全面升级：朗读、目录、查找、图表","en":"A full document reader: read-aloud, outline, search, diagrams"},
     {"version":"0.29.2","date":"2026-09-18","zh":"修复 Linux 下 Claude 事件上报的兼容问题","en":"Compatibility fix for Claude event reporting on Linux"},
     {"version":"0.29.1","date":"2026-09-18","zh":"修复 Claude 对话入口丢失 · 长时间运行不再变卡","en":"Fix lost Claude chat entries · no slowdown after long runs"},
     {"version":"0.29.0","date":"2026-09-16","zh":"可信设备与可信地址保护","en":"Trusted device and address protection"},
     {"version":"0.28.0","date":"2026-09-11","zh":"Claude 对话更可靠 · 工具图片预览","en":"More reliable Claude chat · tool image previews"},
     {"version":"0.27.2","date":"2026-09-08","zh":"修复多标签页偶发鉴权弹窗","en":"Fix intermittent authentication prompts across tabs"},
-    {"version":"0.27.1","date":"2026-09-08","zh":"腾讯语音 · 终端光标修复 · Codex 对话恢复","en":"Tencent voice · terminal cursor fixes · Codex chat recovery"},
-    {"version":"0.27.0","date":"2026-09-05","zh":"腾讯语音输入 · 终端输入更准确","en":"Tencent voice input · more accurate terminal typing"}
+    {"version":"0.27.1","date":"2026-09-08","zh":"腾讯语音 · 终端光标修复 · Codex 对话恢复","en":"Tencent voice · terminal cursor fixes · Codex chat recovery"}
   ]
 }
