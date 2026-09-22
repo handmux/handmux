@@ -8,6 +8,20 @@ All notable changes to handmux. Format follows [Keep a Changelog](https://keepac
 
 - 识别 CodeBuddy 会话：终端里运行 `codebuddy` / `codebuddy-code` / `cbc` 的窗口会被标为 CodeBuddy，普通 Node 程序不会被误认。
 - CodeBuddy 接入收件箱：启用 hook 后，它的运行中 / 等你授权 / 已完成 / 出错会像 Claude 一样出现在收件箱并推送通知，会话也能绑定到对应窗口。
+- CodeBuddy 支持完整对话页：可查看历史、发送消息、中断运行，并处理授权与问题卡片。
+- Agent 管理改为跟随服务端声明，设置页可查看 Codex、Claude、Pi、CodeBuddy 等已接入 Agent。
+
+### Changed
+
+- Agent 标识、窗口徽标和会话绑定统一按当前窗口与活动 pane 计算，切换与重识别更稳定。
+- 文件浏览器支持按名称、时间、大小等方式排序，并显示文件修改时间。
+
+### Fixed
+
+- 修复对话页在切换 pane、停止运行、原生命令和交互卡片变化时状态错乱、消息排队或误跳终端的问题。
+- 修复终端键盘与聊天键盘被 Agent 自动切换的问题；每个 pane 记住用户选择。
+- 修复对话发送失败提示常驻到底部的问题；提示会自动消失，草稿仍会保留。
+- 修复 Agent 识别、Hook 事件、收件箱状态与重连期间的多项竞态和状态丢失问题。
 
 ## [0.30.0] - 2026-09-19
 

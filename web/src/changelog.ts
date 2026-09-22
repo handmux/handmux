@@ -19,6 +19,34 @@ export interface ChangelogEntry {
 // `entryId`/`LATEST_RELEASE` use `version` when present, else `date`, as the stable unread-dot id.
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '0.31.0',
+    date: '2026-09-22',
+    highlight: {
+      zh: 'CodeBuddy 对话接入 · Agent 状态更可靠',
+      en: 'CodeBuddy chat support · more reliable Agent state',
+    },
+    items: {
+      zh: [
+        '新增 CodeBuddy 对话页：支持历史消息、发送、中断，以及授权和问题卡片。',
+        '收件箱接入 CodeBuddy 的运行中、等待授权、已完成和出错状态，并支持绑定到对应窗口。',
+        'Agent 管理跟随服务端声明，设置页可查看已接入的 Codex、Claude、Pi 和 CodeBuddy。',
+        '修复对话切换、停止运行、原生命令和交互卡片变化时的状态错乱、消息排队与误跳终端问题。',
+        '修复终端键盘与聊天键盘被自动切换的问题；每个 pane 会记住用户选择。',
+        '修复发送失败提示常驻的问题；提示会自动消失，草稿仍会保留。',
+        '文件浏览器支持按名称、时间、大小等方式排序，并显示文件修改时间。',
+      ],
+      en: [
+        'Added CodeBuddy chat with history, sending, interruption, approval gates, and question cards.',
+        'CodeBuddy now appears in Inbox with working, approval, completed, and error states, and can bind to its window.',
+        'Agent management follows the server declaration; Settings can show connected Codex, Claude, Pi, and CodeBuddy integrations.',
+        'Fixed stale state, queued messages, and unwanted terminal fallbacks during conversation switches, stops, native commands, and interaction cards.',
+        'Fixed terminal and chat keyboards switching automatically; each pane remembers the user choice.',
+        'Fixed send errors staying below the composer forever; the notice now dismisses itself while the draft remains.',
+        'File browsing now supports sorting by name, time, and size, and shows modification times.',
+      ],
+    },
+  },
+  {
     version: '0.30.0',
     date: '2026-09-19',
     highlight: {
