@@ -977,8 +977,8 @@ button.settings-page-row:disabled, .settings-page-row.disabled { color: rgba(235
 .drawer-session .drawer-name svg { width: 17px; height: 17px; flex: none; opacity: .72; }
 .drawer-session .drawer-name span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .drawer-session .drawer-name i, .drawer-project-row i, .drawer-window i { width: 7px; height: 7px; flex: none; border-radius: 50%; background: var(--blue); box-shadow: 0 0 0 3px rgba(10,132,255,.16); }
-.drawer-window-list { overflow: hidden; animation: drawer-window-reveal .18s ease-out both; }
-@keyframes drawer-window-reveal { from { max-height: 0; opacity: .35; } to { max-height: 420px; opacity: 1; } }
+.drawer-window-list { animation: drawer-window-reveal .18s ease-out both; }
+@keyframes drawer-window-reveal { from { opacity: .35; transform: translateY(-3px); } to { opacity: 1; transform: translateY(0); } }
 @media (prefers-reduced-motion: reduce) { .drawer, .drawer-window-list { transition: none; animation: none; } }
 .drawer-window { display: flex; align-items: center; gap: 9px; width: calc(100% - 34px); min-height: 40px; margin-left: 34px; padding: 8px 12px; border: none; border-left: 1px solid rgba(118,118,128,.35); border-radius: 0 9px 9px 0; background: transparent; color: #b9bdc8; text-align: left; font-size: 13px; line-height: 24px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; touch-action: manipulation; }
 .drawer-window-mark { width: 6px; height: 6px; flex: none; border: 1px solid currentColor; border-radius: 2px; opacity: .45; }

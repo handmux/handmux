@@ -134,7 +134,7 @@ export default function Drawer({
             {!projectsLoading && projectsError && <div className="drawer-empty" role="alert">{projectsError}</div>}
             {!projectsLoading && !projectsError && projects.length === 0 && <div className="drawer-empty">{t('project.empty')}</div>}
             {projects.map((project) => (
-              <button key={project.id} type="button" className={`drawer-project-row${project.id === currentProjectId ? ' active' : ''}`}
+              <button key={project.id} type="button" aria-current={project.id === currentProjectId ? 'page' : undefined} className={`drawer-project-row${project.id === currentProjectId ? ' active' : ''}`}
                 onClick={() => { onSelectProject(project.id); onClose(); }}>
                 <FolderIcon /><span>{project.name}</span>{project.id === currentProjectId && <i aria-hidden="true" />}
               </button>
@@ -152,7 +152,7 @@ export default function Drawer({
                   aria-label={`${name} — ${t(expandedSessions.has(name) ? 'doc.tocCollapse' : 'doc.tocExpand')}`}
                   onClick={() => toggleSession(name)}
                 >{expandedSessions.has(name) ? '⌄' : '›'}</button>
-                <button type="button" className="drawer-name" onClick={() => onSelectSession(name)}>
+                <button type="button" aria-current={name === currentSessionName ? 'page' : undefined} className="drawer-name" onClick={() => onSelectSession(name)}>
                   <MonitorIcon /><span>{name}</span>{name === currentSessionName && <i aria-hidden="true" />}
                 </button>
               <button
@@ -170,6 +170,7 @@ export default function Drawer({
                     <button
                       key={window.id}
                       type="button"
+                      aria-current={name === currentSessionName && window.id === currentWindowId ? 'page' : undefined}
                       className={`drawer-window ${name === currentSessionName && window.id === currentWindowId ? 'active' : ''}`}
                       onClick={() => onSelectSession(name, window.id)}
                     ><span className="drawer-window-mark" aria-hidden="true" />{window.name || window.id}{name === currentSessionName && window.id === currentWindowId && <i aria-hidden="true" />}</button>
