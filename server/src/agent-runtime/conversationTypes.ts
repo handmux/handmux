@@ -15,14 +15,6 @@ export interface ConversationCapabilities {
   sendable?: true;
   /** Optional guide-now support; ordinary sends never select this path. */
   steer?: true;
-  /**
-   * The provider's OWN input accepts a prompt while a turn is running and delivers it into that turn (its
-   * TUI holds the text until the current tool finishes). An ordinary send may then be written straight to
-   * the pane instead of waiting in the queue for idle — which is what a phone user means by "just send it".
-   * Declared only where that is verified against a live pane, and only a RUNNING turn qualifies: a provider
-   * that is showing a permission gate or compacting is not an input the pane will accept.
-   */
-  promptWhileActive?: true;
   send?: Array<'prompt' | 'steer' | 'follow_up'>;
   interrupt?: true;
   branching?: true;
