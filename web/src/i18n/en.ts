@@ -723,6 +723,7 @@ export default {
 'chat.queue.title': 'Queued messages',
 'chat.queue.hint': 'Sent one by one after the current turn',
 'chat.queue.steer': 'Guide now',
+'chat.queue.retry': 'Send again',
 'chat.queue.edit': 'Edit queued message',
 'chat.queue.editTitle': 'Edit queued message',
 'chat.queue.editPlaceholder': 'Enter queued message',

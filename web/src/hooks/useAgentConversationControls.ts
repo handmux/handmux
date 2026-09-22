@@ -25,7 +25,7 @@ export interface AgentConversationControlsController {
   busy: boolean;
   refresh(): Promise<void>;
   queueAction(
-    action: 'steer' | 'remove' | 'begin_edit' | 'renew_edit' | 'commit_edit' | 'cancel_edit',
+    action: 'steer' | 'retry' | 'remove' | 'begin_edit' | 'renew_edit' | 'commit_edit' | 'cancel_edit',
     itemId: string,
     options?: {
       token?: string;

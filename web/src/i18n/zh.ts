@@ -720,6 +720,7 @@ export default {
 'chat.queue.title': '排队消息',
 'chat.queue.hint': '当前回合结束后自动逐条发送',
 'chat.queue.steer': '立刻引导',
+'chat.queue.retry': '重新发送',
 'chat.queue.edit': '编辑排队消息',
 'chat.queue.editTitle': '编辑排队消息',
 'chat.queue.editPlaceholder': '输入排队消息',

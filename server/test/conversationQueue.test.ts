@@ -457,6 +457,42 @@ describe('Conversation Core public queue', () => {
     expect(h.dispatchPrompt.mock.calls[1]?.[1].text).toBe('try after resolving the draft');
   });
 
+  // The row is not replayed on its own, so 「重新发送」 has to be a real send, not just a badge: the user's
+  // retry must clear the block AND put the message back in the dispatcher's hands, all the way to accepted.
+  it.each(['provider_rejected', 'terminal_draft_conflict'] as const)('really sends again when the user retries a %s rejection', async (reason) => {
+    let calls = 0;
+    const h = await harness({
+      activity: {
+        activity: 'working', activeTurn: { state: 'active', nativeTurnId: 'turn-0' },
+        revision: 1, epoch: 'run-1',
+      },
+      prompt: async () => {
+        calls += 1;
+        return calls === 1
+          ? { outcome: 'rejected', nativeMutation: false, reason }
+          : { outcome: 'accepted', nativeId: 'turn-2' };
+      },
+    });
+    await h.service.send(h.lease, {
+      clientRequestId: 'request-1', text: 'do once', delivery: 'prompt',
+    });
+    h.setActivity({ activity: 'idle', activeTurn: { state: 'none' }, revision: 2, epoch: 'run-1' });
+    await h.service.queueSnapshot(h.lease);
+    await vi.waitFor(() => expect(h.dispatchPrompt).toHaveBeenCalledOnce());
+    await vi.waitFor(() => expect(h.service.querySubmission(h.lease, 'request-1'))
+      .toMatchObject({ submission: { autoDispatchBlockedReason: reason } }));
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    expect(h.dispatchPrompt).toHaveBeenCalledOnce();
+
+    expect(await h.service.queueAction(h.lease, { action: 'retry', itemId: 'request-1' }))
+      .toEqual({ ok: true });
+    await vi.waitFor(() => expect(h.dispatchPrompt).toHaveBeenCalledTimes(2));
+    expect(h.dispatchPrompt.mock.calls[1]?.[1]).toMatchObject({ text: 'do once' });
+    await vi.waitFor(() => expect(h.service.querySubmission(h.lease, 'request-1'))
+      .toMatchObject({ status: 'accepted' }));
+    expect((await h.service.queueSnapshot(h.lease)).items).toEqual([]);
+  });
+
   it('keeps canonical observation authoritative when it arrives before a busy receipt', async () => {
     let settle!: (receipt: ConversationDispatchReceipt) => void;
     const h = await harness({

@@ -896,6 +896,17 @@ export class ConversationService {
       this.#editLeases.delete(sessionKey(run.ref.agentId, run.ref.sessionId));
       return { ok: true };
     }
+    if (request.action === 'retry') {
+      // The user's own "send it again". Clearing the block hands the row back to the queue's dispatcher,
+      // which asks the pane again; the pane decides whether it can take the text now. Nothing is written
+      // here — the same attempt path runs, so an unsafe overwrite is still impossible.
+      await this.#mutateQueued(run, itemId, (item) => {
+        delete item.autoDispatchBlockedReason;
+        item.revision = ++this.#state.ledgerRevision;
+        item.updatedAt = this.#now();
+      });
+      return { ok: true };
+    }
     if (request.action === 'steer') return this.#steer(run, itemId, request);
     throw new ConversationContractError('Invalid queue action', 'invalid_request');
   }

@@ -499,6 +499,16 @@ export function AgentConversationQueueControl({
                 className="cc-queue-action" onClick={() => {
                   void conversation.retryOutgoing?.(submissionId).catch(() => {});
                 }}>{t('common.retry')}</button>}
+              {/* A refused delivery waits here by design (nothing is replayed behind the user's back), so
+                  the row that was refused needs its own way to be sent again — the same as tapping edit,
+                  without having to open and re-save it. */}
+              {autoDispatchBlocked && !pending && <button type="button" className="cc-queue-action"
+                onClick={() => {
+                  setActionError('');
+                  void controller.queueAction('retry', item.id).catch(() => {
+                    setActionError(t('chat.queue.actionFailed'));
+                  });
+                }}>{t('chat.queue.retry')}</button>}
             </span>}
           </span>
           <span className="cc-queue-actions">
