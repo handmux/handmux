@@ -47,4 +47,19 @@ describe('BindSession bottom sheet', () => {
     expect(screen.getByLabelText('会话名称')).toBeTruthy();
     expect(screen.getByRole('button', { name: '返回' })).toBeTruthy();
   });
+
+  it('shows a friendly empty state and animates between picker and create pages', async () => {
+    mocks.getSessions.mockResolvedValue([]);
+    render(<BindSession open onClose={vi.fn()} onBound={mocks.onBound} bound={[]} />);
+
+    await waitFor(() => expect(screen.getByRole('status')).toBeTruthy());
+    expect(screen.getByRole('status').querySelector('svg')).toBeTruthy();
+    expect(screen.getByText('暂无可绑定的会话')).toBeTruthy();
+    expect(screen.getByText('已绑定到此设备的会话不会重复显示。')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: '新建会话' }));
+    expect(document.querySelector('.bind-sheet-page-new')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: '返回' }));
+    expect(document.querySelector('.bind-sheet-page-picker')).toBeTruthy();
+  });
 });

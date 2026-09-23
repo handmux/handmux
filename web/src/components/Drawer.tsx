@@ -285,7 +285,7 @@ export default function Drawer({
               <button type="button" aria-pressed={rootView === 'session'} onClick={onSwitchSession}>{t('project.root.sessions')}</button>
             </div>
           )}
-          <div className="drawer-section-heading"><span>{t(rootView === 'project' ? 'project.root.projects' : 'drawer.title')}</span><small>{rootView === 'project' ? projects.length : bound.length}</small></div>
+          <div className="drawer-section-heading"><span>{t(rootView === 'project' ? 'project.root.projects' : 'drawer.sessionWindowTitle')}</span><small>{rootView === 'project' ? projects.length : bound.length}</small></div>
         </div>
         <div className="drawer-scroll">
           {rootView === 'project' ? <>
@@ -311,7 +311,7 @@ export default function Drawer({
             <span>{topologyError}</span><button type="button" onClick={() => { topologyCache.current.sessionsAt = 0; setRetry((value) => value + 1); }}>{t('common.retry')}</button>
           </div>}
           {bound.length === 0 && <div className="drawer-empty">{t('drawer.empty')}</div>}
-          {sessionsReady && <div className="session-sections" role="tree" aria-label={t('drawer.title')}>
+          {sessionsReady && <div className="session-sections" role="tree" aria-label={t('drawer.sessionWindowTitle')}>
           {bound.map((name) => (
             <section key={name} className={`session-section${name === currentSessionName ? ' is-current' : ''}`}>
               <div className="session-section-header" role="treeitem" aria-expanded={expandedSessions.has(name)} onClick={() => toggleSession(name)}>

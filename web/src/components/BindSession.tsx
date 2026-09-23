@@ -148,7 +148,7 @@ export default function BindSession({ open, onClose, onBound, bound, onAuthFail,
           <button type="button" className="settings-close" onClick={onClose} aria-label={t('common.close')}><XIcon /></button>
         </div>
         {view === 'pick' ? (
-          <div className="bind-sheet-body">
+          <div key="picker" className="bind-sheet-body bind-sheet-page bind-sheet-page-picker">
             <div className="bind-sheet-section">
               <div className="settings-label">{t('bind.modeExisting')}</div>
               {sessionsLoading ? (
@@ -173,11 +173,17 @@ export default function BindSession({ open, onClose, onBound, bound, onAuthFail,
                   ))}
                 </ul>
               ) : (
-                <p className="bind-session-empty">{t('bind.noAvailable')}</p>
+                <div className="bind-session-empty" role="status">
+                  <CommandIcon />
+                  <div>
+                    <strong>{t('bind.noAvailable')}</strong>
+                    <span>{t('bind.noAvailableHint')}</span>
+                  </div>
+                </div>
               )}
             </div>
             <div className="bind-sheet-section bind-sheet-create-section">
-              <div className="settings-label">{t('bind.modeNew')}</div>
+              <div className="settings-label">{t('bind.newHeading')}</div>
               <button type="button" className="bind-session-row bind-session-create" onClick={() => { setView('new'); setError(''); }}>
                 <PlusIcon />
                 <span>{t('bind.modeNew')}</span>
@@ -187,7 +193,7 @@ export default function BindSession({ open, onClose, onBound, bound, onAuthFail,
             {error && <div className="bind-error" role="alert">{error}</div>}
           </div>
         ) : (
-          <div className="bind-sheet-body bind-sheet-form-body">
+          <div key="new" className="bind-sheet-body bind-sheet-page bind-sheet-page-new bind-sheet-form-body">
               <div className="opt">
                 <div className="settings-label">{t('bind.sessionName')}</div>
                 <input

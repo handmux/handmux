@@ -1040,6 +1040,11 @@ button.settings-page-row:disabled, .settings-page-row.disabled { color: rgba(235
 .bind-session-sheet .settings-close { justify-self: end; width: 44px; height: 44px; margin: 0; border-radius: 22px; background: transparent; color: rgba(235,235,245,.58); }
 .bind-session-sheet .settings-close:active { background: rgba(118,118,128,.16); }
 .bind-sheet-body { flex: 1; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; margin: 0 -20px; padding: 0 20px; }
+.bind-sheet-page { animation-duration: .22s; animation-timing-function: cubic-bezier(.22,.8,.25,1); animation-fill-mode: both; }
+.bind-sheet-page-picker { animation-name: bind-sheet-page-back; }
+.bind-sheet-page-new { animation-name: bind-sheet-page-forward; }
+@keyframes bind-sheet-page-forward { from { opacity: 0; transform: translateX(18px); } to { opacity: 1; transform: translateX(0); } }
+@keyframes bind-sheet-page-back { from { opacity: 0; transform: translateX(-18px); } to { opacity: 1; transform: translateX(0); } }
 .bind-sheet-section { padding: 8px 0 12px; }
 .bind-sheet-section + .bind-sheet-section { border-top: .5px solid rgba(84,84,88,.48); }
 .bind-sheet-section .settings-label { margin: 0 0 4px; color: rgba(235,235,245,.46); font-size: 12px; letter-spacing: .2px; }
@@ -1053,7 +1058,11 @@ button.settings-page-row:disabled, .settings-page-row.disabled { color: rgba(235
 .bind-session-row:disabled { opacity: .58; }
 .bind-session-create { border-radius: 11px; background: rgba(120,118,128,.1); }
 .bind-session-create > svg:first-child { color: var(--green); }
-.bind-session-empty { margin: 0; padding: 15px 12px; border-radius: 11px; background: rgba(120,118,128,.1); color: rgba(235,235,245,.5); font-size: 14px; line-height: 1.4; }
+.bind-session-empty { min-height: 76px; margin: 0; padding: 13px 12px; display: flex; align-items: center; gap: 11px; border-radius: 11px; background: rgba(120,118,128,.1); color: rgba(235,235,245,.5); }
+.bind-session-empty > svg { flex: none; width: 21px; height: 21px; color: rgba(235,235,245,.46); }
+.bind-session-empty > div { min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.bind-session-empty strong { color: rgba(235,235,245,.78); font-size: 14px; font-weight: 600; line-height: 1.25; }
+.bind-session-empty span { color: rgba(235,235,245,.46); font-size: 12px; line-height: 1.35; }
 .bind-sheet-form-body { padding-top: 4px; padding-bottom: 4px; }
 .bind-session-skeleton { overflow: hidden; border-radius: 11px; background: rgba(120,118,128,.1); }
 .bind-session-skeleton-row { min-height: 50px; padding: 0 12px; display: flex; align-items: center; gap: 10px; border-bottom: .5px solid rgba(84,84,88,.35); }
@@ -1062,7 +1071,7 @@ button.settings-page-row:disabled, .settings-page-row.disabled { color: rgba(235
 .bind-session-skeleton-row i:first-child { width: 19px; height: 19px; border-radius: 6px; }
 .bind-session-skeleton-row i:nth-child(2) { width: 42%; }
 .bind-session-skeleton-row i:last-child { width: 12px; margin-left: auto; }
-@media (prefers-reduced-motion: reduce) { .bind-session-backdrop, .bind-session-sheet { animation: none; } .bind-session-skeleton-row i { animation: none; } }
+@media (prefers-reduced-motion: reduce) { .bind-session-backdrop, .bind-session-sheet, .bind-sheet-page { animation: none; } .bind-session-skeleton-row i { animation: none; } }
 
 /* Session browser: a quiet group caption followed by full-width, compact Window rows. */
 .session-sections { width:100%; margin:0; padding:4px 0 20px; }
@@ -1079,24 +1088,31 @@ button.settings-page-row:disabled, .settings-page-row.disabled { color: rgba(235
 .session-section-title { flex:0 1 auto; min-width:0; max-width:calc(100% - 60px); height:26px; display:flex; align-items:center; gap:0; padding:0; border:0; background:transparent !important; box-shadow:none !important; color:rgba(255,255,255,.94); text-align:left; font:14px/1 -apple-system,BlinkMacSystemFont,sans-serif; font-weight:700; touch-action:manipulation; -webkit-tap-highlight-color:transparent; }
 .session-section-icon { flex:none; display:inline-flex; align-items:center; justify-content:center; width:16px; height:16px; margin-right:7px; color:rgba(235,235,245,.62); }
 .session-section-icon svg { width:16px; height:16px; }
-.session-section.is-current .session-section-icon { color:#82e6c2; }
-.session-section.is-current .session-section-title { color:#82e6c2; }
-.session-section.is-current .session-section-toggle { color:#82e6c2; }
+.session-section.is-current .session-section-icon,
+.session-section-title[aria-current="page"] .session-section-icon { color:#34c759; }
+.session-section.is-current .session-section-title,
+.session-section-title[aria-current="page"] { color:#34c759; }
+.session-section.is-current .session-section-toggle,
+.session-section-title[aria-current="page"] ~ .session-section-toggle { color:#34c759; }
 .session-section-label { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; letter-spacing:-.01em; }
 .session-section-body { display:grid; grid-template-rows:0fr; transition:grid-template-rows .24s cubic-bezier(.22,.8,.25,1); }
 .session-section-body.is-open { grid-template-rows:1fr; }
 .session-window-list { min-height:0; overflow:hidden; padding:2px 0 0; background:rgba(255,255,255,.045); opacity:0; transform:translateY(-4px); transition:opacity .18s ease,transform .24s cubic-bezier(.22,.8,.25,1); }
 .session-section-body.is-open .session-window-list { opacity:1; transform:none; }
-.session-window-row { width:100%; min-height:38px; margin:0; padding:3px 12px 3px 2em; display:flex; align-items:center; gap:10px; border:0; border-radius:0; background:transparent; color:rgba(235,235,245,.58); text-align:left; font:13.5px/21px -apple-system,BlinkMacSystemFont,sans-serif; touch-action:manipulation; -webkit-tap-highlight-color:transparent; }
-.session-window-row.is-current { background:rgba(88,126,172,.48); box-shadow:none; border:0; border-radius:0; color:#fff; font-weight:500; }
+.session-window-row { width:100%; min-height:38px; margin:0; padding:3px 12px 3px 2em; display:flex; align-items:center; gap:10px; border:0; border-radius:0; background:transparent; color:rgba(235,235,245,.80); text-align:left; font:14px/21px -apple-system,BlinkMacSystemFont,sans-serif; font-weight:450; touch-action:manipulation; -webkit-tap-highlight-color:transparent; }
+.session-window-row.is-current,
+.session-window-row[aria-current="page"] { background:rgba(88,126,172,.48); box-shadow:none; border:0; border-radius:0; color:#fff; font-weight:500; }
 .session-window-label { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .session-window-count { flex:none; min-width:20px; margin-left:auto; color:rgba(235,235,245,.34); font:12px/20px ui-monospace,SFMono-Regular,Menlo,monospace; text-align:right; font-variant-numeric:tabular-nums; }
-.session-window-row.is-current .session-window-count { color:rgba(255,255,255,.66); }
+.session-window-row.is-current .session-window-count,
+.session-window-row[aria-current="page"] .session-window-count { color:rgba(255,255,255,.66); }
 .session-window-menu { flex:none; width:38px; height:32px; margin-left:6px; padding:0; display:grid; place-items:center; border:0; border-radius:0; background:transparent !important; box-shadow:none !important; color:rgba(235,235,245,.88); -webkit-tap-highlight-color:transparent; }
 .session-window-menu svg { width:20px; height:20px; }
 .session-window-menu:active { background:transparent !important; color:#fff; }
 .session-window-row:has(.session-window-menu:active) { background:transparent; }
 .session-window-row:active { background:rgba(118,118,128,.10); }
+.session-window-row.is-current:active,
+.session-window-row[aria-current="page"]:active { background:rgba(88,126,172,.48); }
 .session-section-header:active, .session-section-header:focus, .session-section-header:focus-within { background:transparent; box-shadow:none; outline:none; }
 .session-section-title:focus, .session-section-title:focus-visible, .session-section-toggle:focus, .session-section-toggle:focus-visible, .session-section-menu:focus, .session-section-menu:focus-visible { outline:none; box-shadow:none; }
 .session-window-row:focus { outline:none; }
