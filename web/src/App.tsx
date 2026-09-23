@@ -55,7 +55,7 @@ import { OverlayProvider } from './overlays/OverlayHost.js';
 import { useOverlayActivity } from './hooks/useOverlayActivity.js';
 
 import Drawer from './components/Drawer.jsx';
-import type { DrawerOrphan } from './components/Drawer.jsx';
+import type { DrawerOrphan, DrawerSelection } from './components/Drawer.jsx';
 import WindowBar from './components/WindowBar.jsx';
 import type { WorkspacePane, WorkspaceWindow } from './components/WindowBar.jsx';
 import Terminal from './components/Terminal.jsx';
@@ -254,7 +254,9 @@ const recordOf = (value: unknown): Record<string, unknown> | null => (
     ? value as Record<string, unknown> : null
 );
 
-const hostWindow = (window: WorkspaceWindow): HostWindow => ({
+const hostWindow = (
+  window: WorkspaceWindow & Partial<Pick<HostWindow, 'width' | 'activePaneId'>>,
+): HostWindow => ({
   ...window,
   name: window.name || window.id,
 });
@@ -365,6 +367,7 @@ export default function App() {
   const currentRef = useRef<CurrentWorkspace | null>(null); currentRef.current = current;
   const windowSwitchRef = useRef(0); // only the newest async pane lookup may finish a window switch
   const sessionSelectionRef = useRef(0);
+  const topologyPollKeyRef = useRef<string | null>(null);
   const topologyRecoveryRef = useRef<Promise<void> | null>(null);
   const [booting, setBooting] = useState(true);
   const [recoveryPlan, setRecoveryPlan] = useState<WorkspaceRecoveryPlan | null>(null);
@@ -1213,15 +1216,54 @@ export default function App() {
     if (current?.session) setRenameTarget({ kind: 'session', id: current.session.id, name: current.session.name });
   });
 
-  // Drawer rows carry a bound NAME — resolve it to the live session before opening, since the
-  // tmux id can have changed (or the session may be gone) since it was pinned.
+  // Drawer rows carry a complete session/window outline. Use that outline directly so a tap can
+  // move the visible session/window highlight immediately; only pane metadata needs a follow-up call.
+  const selectCachedSession = useCallback((selection: DrawerSelection): boolean => {
+    const session = selection.session;
+    const windows = selection.windows.map(hostWindow);
+    const selectedWindow = windows.find((candidate) => candidate.id === selection.window.id);
+    if (!selectedWindow || !windows.length) return false;
+    // Invalidate a slower name-only selection that may still be resolving getSessions. Its
+    // openSession call observes this epoch and must not overwrite the row the user just chose.
+    ++sessionSelectionRef.current;
+
+    const existing = currentRef.current;
+    if (existing?.session.id === session.id
+      && existing.window.id === selectedWindow.id
+      && existing.panes.length > 0) {
+      // Re-tapping the visible Window is a no-op. Keep its mounted terminal and avoid a needless
+      // pane refresh that would briefly clear the content.
+      setSessionLoading(false);
+      return true;
+    }
+
+    // A cached pane id can be stale after tmux recreates a window. Only the server's activePaneId
+    // is safe to mount immediately; when it is absent, keep the new WindowBar visible with a
+    // lightweight pane-less surface until the background lookup returns.
+    const paneIdHint = selectedWindow.activePaneId || '';
+    ++windowSwitchRef.current;
+    // Commit the new session and window before asking the server for panes. This transfers the
+    // Drawer highlight and updates the title/window bar while the pane surface catches up.
+    setCurrent({ session, windows, window: selectedWindow, panes: [], paneId: paneIdHint });
+    setSessionLoading(false);
+    writeSessionHash(session.name);
+    if (paneIdHint) remember({ sessionId: session.id, windowId: selectedWindow.id, paneId: paneIdHint });
+    // The topology polling loop sees this new key and performs the single background getPanes call.
+    // Keeping that responsibility in one place avoids two concurrent pane requests on every switch.
+    return true;
+  }, []);
+
+  // Non-drawer entry points only have a bound session name, so they still resolve the live session
+  // and use the full open path below.
   const selectSession = useCallback(async (name: string, windowId?: string): Promise<boolean> => {
     const selection = ++sessionSelectionRef.current;
     setSessionLoading(true);
     try {
       const session = (await getSessions()).find((s) => s.name === name);
       if (!session) { window.alert(t('app.sessionGone', { name })); return false; }
-      const opened = await openSession(session, windowId ? { window: windowId } : null);
+      const opened = await openSession(session, windowId ? { window: windowId } : null, {
+        isCancelled: () => selection !== sessionSelectionRef.current,
+      });
       if (opened) setDrawerOpen(false);
       return opened;
     } catch (e) {
@@ -2569,20 +2611,29 @@ export default function App() {
 
   // Pane identity belongs to Runtime's /panes projection, not the Inbox compatibility roster. Refresh only
   // the open window so process exits/switches clear or replace its logo without probing every host pane.
-  // The window list rides the same tick: it is where tmux's renamed window names reach the tab strip, and
-  // nothing else re-read it.
+  // The drawer already supplied the complete Session/Window outline when a row was tapped. The first
+  // poll for a newly selected target therefore only fills in Pane metadata; subsequent polls refresh the
+  // Window list for external renames/reordering. This keeps a cached drawer switch free of a duplicate
+  // getWindows request while retaining live updates after the first tick.
+  useEffect(() => {
+    topologyPollKeyRef.current = null;
+  }, [current?.window?.id, current?.session?.id]);
   usePollingLoop({
     fetch: async () => {
       const windowId = current?.window?.id;
       const sessionId = current?.session?.id;
       if (!windowId || !sessionId) return null;
-      const [panes, windows] = await Promise.all([getPanes(windowId), getWindows(sessionId)]);
+      const panes = await getPanes(windowId);
+      const pollKey = `${sessionId}\0${windowId}`;
+      const firstPoll = topologyPollKeyRef.current !== pollKey;
+      if (firstPoll) topologyPollKeyRef.current = pollKey;
+      const windows = firstPoll ? null : await getWindows(sessionId);
       return { windowId, sessionId, panes, windows };
     },
     apply: (fresh) => {
       if (!fresh) return;
       refreshPanes(fresh.windowId, fresh.panes);
-      refreshWindows(fresh.sessionId, fresh.windows);
+      if (fresh.windows) refreshWindows(fresh.sessionId, fresh.windows);
     },
     onError: recoverCurrentTopology,
     intervalMs: 5_000,
@@ -2730,7 +2781,6 @@ export default function App() {
           aria-label={current?.session?.name ?? t('drawer.title')} aria-expanded={drawerOpen} aria-controls="session-drawer">
           {current?.session?.name ?? '—'}
         </button>
-        {sessionLoading && <span className="workspace-switch-indicator" role="status" aria-label={t('common.loading')}><span className="workspace-switch-spinner" aria-hidden="true" /></span>}
         {/* Always render so it doesn't pop in late once `current` loads — just disable until ready. */}
         <button className="topbar-icon" onClick={() => setIdeaOpen(true)} aria-label={t('app.ideas')} title={t('app.ideas')}
           disabled={!current}>
@@ -2803,11 +2853,11 @@ export default function App() {
         currentSessionName={current?.session?.name ?? null}
         currentWindowId={current?.window?.id ?? null}
         bound={bound}
-        onSelectSession={(name, windowId) => {
+        onSelectSession={(selection) => {
           chooseRootView('session');
           // Let the drawer paint the selected row once before its close transition starts.
           window.setTimeout(() => setDrawerOpen(false), 140);
-          void selectSession(name, windowId);
+          void selectCachedSession(selection);
         }}
         onUnbind={unbindSession}
         onBind={() => setBindOpen(true)}

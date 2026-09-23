@@ -10,7 +10,7 @@ import WorkspaceRecoveryCard from './WorkspaceRecoveryCard.jsx';
 import { listProjects } from '../projectTask/api.js';
 import type { Project } from '../projectTask/contracts.js';
 import { getSessions, getWindowsForSessions } from '../api.js';
-import type { TmuxWindow } from '../api.js';
+import type { TmuxSession, TmuxWindow } from '../api.js';
 import type { MouseEvent } from 'react';
 import type { WorkspaceRecoveryPlan, WorkspaceRestoreOperation } from '../workspaceRecovery.js';
 import type { WorkspaceLens } from './LensSwitch.jsx';
@@ -78,7 +78,7 @@ interface DrawerProps {
   currentSessionName?: string | null;
   currentWindowId?: string | null;
   bound: string[];
-  onSelectSession: (name: string, windowId?: string) => void;
+  onSelectSession: (selection: DrawerSelection) => void;
   onUnbind: (name: string) => void;
   onBind: () => void;
   onClose: () => void;
@@ -101,6 +101,17 @@ interface DrawerProps {
   rootView?: 'session' | 'project';
   currentProjectId?: string | null;
   onSelectProject?: (id: string) => void;
+}
+
+/**
+ * The drawer already fetched this topology before it rendered the row. Pass it
+ * through on selection so App can move the visible workspace immediately and
+ * only fetch the pane details that are not part of the drawer outline.
+ */
+export interface DrawerSelection {
+  session: TmuxSession;
+  windows: TmuxWindow[];
+  window: TmuxWindow;
 }
 
 export default function Drawer({
@@ -497,8 +508,23 @@ export default function Drawer({
                       tabIndex={expandedSessions.has(name) ? 0 : -1}
                       className={`session-window-row ${(name === currentSessionName && window.id === currentWindowId)
                         || (pendingWindow?.sessionName === name && pendingWindow.windowId === window.id) ? 'is-current' : ''}`}
-                      onClick={() => { setPendingWindow({ sessionName: name, windowId: window.id }); onSelectSession(name, window.id); }}
-                      onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); setPendingWindow({ sessionName: name, windowId: window.id }); onSelectSession(name, window.id); } }}
+                      onClick={() => {
+                        const sessionId = topologyCache.current.ids[name];
+                        const windows = sessionWindows[name] || [];
+                        if (!sessionId) return;
+                        setPendingWindow({ sessionName: name, windowId: window.id });
+                        onSelectSession({ session: { id: sessionId, name }, windows, window });
+                      }}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter' || event.key === ' ') {
+                          event.preventDefault();
+                          const sessionId = topologyCache.current.ids[name];
+                          const windows = sessionWindows[name] || [];
+                          if (!sessionId) return;
+                          setPendingWindow({ sessionName: name, windowId: window.id });
+                          onSelectSession({ session: { id: sessionId, name }, windows, window });
+                        }
+                      }}
                     ><span className="session-window-label">{window.name || window.id}</span><span className="session-window-count" aria-label={`${window.panes} panes`}>{window.panes}个窗格</span><button type="button" className="session-window-menu" aria-label={`${window.name || window.id} ${t('common.more')}`} onClick={(event) => { event.stopPropagation(); onManageWindow(name, window); }}><MoreHorizontalIcon /></button></div>
                   ))}
                 </div>

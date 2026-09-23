@@ -1496,8 +1496,6 @@ div.workspace-restore-errors { padding-left: 10px; }
 .loading { padding: 40px; text-align: center; color: #888; }
 .workspace-switch-loading { min-height:100%; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:10px; color:rgba(235,235,245,.58); font:14px/1.3 -apple-system,BlinkMacSystemFont,sans-serif; }
 .workspace-switch-spinner { width:18px; height:18px; border:2px solid rgba(235,235,245,.2); border-top-color:rgba(235,235,245,.82); border-radius:50%; animation:workspace-switch-spin .72s linear infinite; }
-.workspace-switch-indicator { flex:none; display:inline-flex; align-items:center; justify-content:center; width:28px; height:34px; color:rgba(235,235,245,.62); }
-.workspace-switch-indicator .workspace-switch-spinner { width:13px; height:13px; border-width:1.5px; }
 @keyframes workspace-switch-spin { to { transform:rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .workspace-switch-spinner { animation:none; } }
 /* First-run empty state: a tap target that opens the bind modal (there's nothing pinned yet). */
