@@ -1016,6 +1016,32 @@ button.settings-page-row:disabled, .settings-page-row.disabled { color: rgba(235
 .drawer-bind-footer .drawer-bind { width: 100%; min-height: 0; margin-top: 0; padding: 10px; display: block; border: none; border-radius: 8px; background: #2b3550; color: #cdddff; font: 14px/normal -apple-system,system-ui,sans-serif; text-align: center; touch-action: manipulation; }
 .drawer-bind:active { background: #344168; }
 
+/* Workspace navigation: a flat iOS-style outline, with hierarchy carried by indentation and a hairline. */
+.workspace-list { margin: 0 2px; }
+.workspace-session { border-bottom: 1px solid rgba(84,84,88,.28); }
+.workspace-session:last-child { border-bottom: 0; }
+.workspace-session-row { display: flex; align-items: center; min-height: 52px; }
+.workspace-session.active .workspace-session-row { color: #fff; }
+.workspace-chevron { flex: none; width: 30px; height: 44px; border: 0; background: transparent; color: rgba(235,235,245,.42); font-size: 21px; line-height: 1; }
+.workspace-session-name { flex: 1; min-width: 0; height: 52px; display: flex; align-items: center; gap: 9px; padding: 0 4px; border: 0; background: transparent; color: rgba(235,235,245,.78); text-align: left; font: 15px/1 -apple-system,system-ui,sans-serif; }
+.workspace-session-name svg { width: 17px; height: 17px; color: rgba(235,235,245,.5); }
+.workspace-session-name span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.workspace-session-name b, .workspace-window b { width: 6px; height: 6px; flex: none; margin-left: auto; border-radius: 50%; background: var(--blue); box-shadow: 0 0 0 3px rgba(10,132,255,.14); }
+.workspace-more { flex: none; width: 40px; height: 44px; border: 0; border-radius: 10px; background: transparent; color: rgba(235,235,245,.38); }
+.workspace-more svg { width: 18px; height: 18px; }
+.workspace-more:active { background: rgba(118,118,128,.16); color: #fff; }
+.workspace-window-collapse { display: grid; grid-template-rows: 0fr; transition: grid-template-rows .22s cubic-bezier(.22,.8,.25,1); }
+.workspace-window-collapse.open { grid-template-rows: 1fr; }
+.workspace-window-list { min-height: 0; overflow: hidden; opacity: 0; transform: translateY(-3px); transition: opacity .16s ease-out, transform .22s cubic-bezier(.22,.8,.25,1); }
+.workspace-window-collapse.open .workspace-window-list { opacity: 1; transform: none; }
+.workspace-window { width: calc(100% - 38px); min-height: 42px; margin-left: 38px; padding: 8px 12px; display: flex; align-items: center; gap: 9px; border: 0; border-left: 1px solid rgba(118,118,128,.25); border-radius: 0; background: transparent; color: rgba(235,235,245,.52); text-align: left; font: 13px/24px -apple-system,system-ui,sans-serif; }
+.workspace-window-mark { width: 5px; height: 5px; flex: none; border: 1px solid currentColor; border-radius: 2px; opacity: .65; }
+.workspace-window span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.workspace-window b { margin-left: auto; }
+.workspace-window.active { border-left-color: var(--blue); color: #fff; }
+.workspace-window:active, .workspace-session-name:active { background: rgba(118,118,128,.12); }
+@media (prefers-reduced-motion: reduce) { .workspace-window-collapse, .workspace-window-list { transition: none; } }
+
 /* Project Task beta — a task-first peer to the existing session root. The surfaces deliberately reuse
    the app's dark iOS palette, 44pt controls, segmented controls and full-screen secondary pages. */
 .project-root {

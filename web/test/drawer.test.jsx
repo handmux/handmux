@@ -44,19 +44,19 @@ const dispatchTouch = (target, type, x, y) => {
 describe('Drawer (bound sessions)', () => {
   it('lists the locally bound session names', async () => {
     await render({ currentSessionName: 'main' });
-    const names = [...container.querySelectorAll('.drawer-name')].map((n) => n.textContent);
+    const names = [...container.querySelectorAll('.workspace-session-name')].map((n) => n.textContent);
     expect(names).toEqual(['main', 'server']);
   });
 
   it('shows the empty state when nothing is bound', async () => {
     await render({ bound: [], currentSessionName: null });
-    expect(container.querySelector('.drawer-name')).toBeNull();
+    expect(container.querySelector('.workspace-session-name')).toBeNull();
     expect(container.querySelector('.drawer-empty')).not.toBeNull();
   });
 
   it('highlights the current session', async () => {
     await render({ currentSessionName: 'server' });
-    const rows = [...container.querySelectorAll('.drawer-row')];
+    const rows = [...container.querySelectorAll('.workspace-session')];
     const server = rows.find((r) => r.textContent.includes('server'));
     const main = rows.find((r) => r.textContent.includes('main'));
     expect(server.className).toContain('active');
@@ -65,10 +65,10 @@ describe('Drawer (bound sessions)', () => {
 
   it('clicking a name toggles its Window list', async () => {
     await render();
-    const server = [...container.querySelectorAll('.drawer-name')].find((n) => n.textContent === 'server');
-    const before = container.querySelectorAll('.drawer-window-collapse.open').length;
+    const server = [...container.querySelectorAll('.workspace-session-name')].find((n) => n.textContent === 'server');
+    const before = container.querySelectorAll('.workspace-window-collapse.open').length;
     await act(async () => { server.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
-    expect(container.querySelectorAll('.drawer-window-collapse.open')).toHaveLength(before - 1);
+    expect(container.querySelectorAll('.workspace-window-collapse.open')).toHaveLength(before - 1);
   });
 
   it('opens from an edge right swipe and closes from an in-drawer left swipe', async () => {
@@ -146,9 +146,9 @@ describe('Drawer (bound sessions)', () => {
     const onUnbind = vi.fn();
     const onSelectSession = vi.fn();
     await render({ onUnbind, onSelectSession });
-    const row = [...container.querySelectorAll('.drawer-row')].find((r) => r.textContent.includes('main'));
+    const row = [...container.querySelectorAll('.workspace-session-row')].find((r) => r.textContent.includes('main'));
     await act(async () => {
-      row.querySelector('.drawer-more').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      row.querySelector('.workspace-more').dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
     const unbind = [...container.querySelectorAll('.sheet-action')].find((button) => button.textContent.includes('解绑'));
     await act(async () => { unbind.dispatchEvent(new MouseEvent('click', { bubbles: true })); });

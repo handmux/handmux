@@ -250,22 +250,23 @@ export default function Drawer({
           </> : <>
           <div className="drawer-section-heading"><span>{t('drawer.title')}</span><small>{bound.length}</small></div>
           {bound.length === 0 && <div className="drawer-empty">{t('drawer.empty')}</div>}
+          <div className="workspace-list" role="tree" aria-label={t('drawer.title')}>
           {bound.map((name) => (
-            <div key={name} className="drawer-session-tree">
-              <div className={`drawer-row drawer-session ${name === currentSessionName ? 'active' : ''}`}>
+            <div key={name} className={`workspace-session${name === currentSessionName ? ' active' : ''}`}>
+              <div className="workspace-session-row" role="treeitem" aria-expanded={expandedSessions.has(name)}>
                 <button
                   type="button"
-                  className="drawer-tree-toggle"
+                  className="workspace-chevron"
                   aria-expanded={expandedSessions.has(name)}
                   aria-label={`${name} — ${t(expandedSessions.has(name) ? 'doc.tocCollapse' : 'doc.tocExpand')}`}
                   onClick={() => toggleSession(name)}
                 >{expandedSessions.has(name) ? '⌄' : '›'}</button>
-                <button type="button" aria-current={name === currentSessionName ? 'page' : undefined} className="drawer-name" onClick={() => toggleSession(name)}>
-                  <MonitorIcon /><span>{name}</span>{name === currentSessionName && <i aria-hidden="true" />}
+                <button type="button" aria-current={name === currentSessionName ? 'page' : undefined} className="workspace-session-name" onClick={() => toggleSession(name)}>
+                  <MonitorIcon /><span>{name}</span>{name === currentSessionName && <b aria-label={t('common.current')} />}
                 </button>
               <button
                 type="button"
-                className="drawer-more"
+                className="workspace-more"
                 onClick={(event: MouseEvent<HTMLButtonElement>) => {
                   event.stopPropagation(); setMenuSession(name);
                 }}
@@ -273,22 +274,23 @@ export default function Drawer({
                 title={t('common.more')}
               ><MoreHorizontalIcon /></button>
               </div>
-              <div className={`drawer-window-collapse${expandedSessions.has(name) ? ' open' : ''}`} aria-hidden={!expandedSessions.has(name)}>
-                <div className="drawer-window-list">
+              <div className={`workspace-window-collapse${expandedSessions.has(name) ? ' open' : ''}`} aria-hidden={!expandedSessions.has(name)}>
+                <div className="workspace-window-list">
                   {(sessionWindows[name] || []).map((window) => (
                     <button
                       key={window.id}
                       type="button"
                       aria-current={name === currentSessionName && window.id === currentWindowId ? 'page' : undefined}
                       tabIndex={expandedSessions.has(name) ? 0 : -1}
-                      className={`drawer-window ${name === currentSessionName && window.id === currentWindowId ? 'active' : ''}`}
+                      className={`workspace-window ${name === currentSessionName && window.id === currentWindowId ? 'active' : ''}`}
                       onClick={() => onSelectSession(name, window.id)}
-                    ><span className="drawer-window-mark" aria-hidden="true" />{window.name || window.id}{name === currentSessionName && window.id === currentWindowId && <i aria-hidden="true" />}</button>
+                    ><span className="workspace-window-mark" aria-hidden="true" />{window.name || window.id}{name === currentSessionName && window.id === currentWindowId && <b aria-label={t('common.current')} />}</button>
                   ))}
                 </div>
               </div>
             </div>
           ))}
+          </div>
           {orphans.length > 0 && (
             <div className="drawer-orphans">
               <button className="drawer-orphans-head" onClick={() => setOrphOpen((o) => !o)}>
