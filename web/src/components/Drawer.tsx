@@ -336,7 +336,7 @@ export default function Drawer({
           )}
           </>}
         </div>
-        <div className="drawer-footer">
+        <div className="drawer-footer drawer-bind-footer">
           <button className="drawer-bind" onClick={onBind}>＋ {t('drawer.bind')}</button>
         </div>
       </div>
