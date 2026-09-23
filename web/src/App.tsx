@@ -2713,7 +2713,7 @@ export default function App() {
             if (!event.defaultPrevented) setDrawerOpen(true);
           }}
           aria-label={current?.session?.name ?? t('drawer.title')} aria-expanded={drawerOpen} aria-controls="session-drawer">
-          <span className="topbar-wordmark" aria-hidden="true">hand<span>mux</span></span>
+          {current?.session?.name ?? '—'}
         </button>
         {/* Always render so it doesn't pop in late once `current` loads — just disable until ready. */}
         <button className="topbar-icon" onClick={() => setIdeaOpen(true)} aria-label={t('app.ideas')} title={t('app.ideas')}

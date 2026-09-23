@@ -18,6 +18,22 @@ import { FolderIcon, GearIcon, MonitorIcon, MoreHorizontalIcon, PencilIcon, Plus
 
 const EXPANDED_SESSIONS_KEY = 'handmux.drawer.expanded-sessions';
 
+function hasHorizontalScrollAhead(target: EventTarget | null): boolean {
+  if (!(target instanceof Element)) return false;
+  for (let element: Element | null = target; element; element = element.parentElement) {
+    const style = window.getComputedStyle(element);
+    const horizontalOverflow = style.overflowX === 'auto' || style.overflowX === 'scroll';
+    if (horizontalOverflow && element.scrollWidth > element.clientWidth + 1 && element.scrollLeft > 1) return true;
+  }
+  return false;
+}
+
+function isOverlayTarget(target: EventTarget | null): boolean {
+  return target instanceof Element && Boolean(target.closest(
+    '[role="dialog"], .settings-backdrop, .file-sheet, .cmd-backdrop, .upload-overlay, .drawer-backdrop',
+  ));
+}
+
 function readExpandedSessions(bound: string[]): Record<string, boolean> {
   try {
     const raw = localStorage.getItem(EXPANDED_SESSIONS_KEY);
@@ -86,25 +102,35 @@ export default function Drawer({
   const expandedSessions = new Set(bound.filter((name) => expandedPreferences[name] !== false));
   const [menuSession, setMenuSession] = useState<string | null>(null);
   const drawerRef = useRef<HTMLDivElement>(null);
-  const swipeRef = useRef<{ startX: number | null; startY: number; active: boolean; baseOpen: boolean }>({ startX: null, startY: 0, active: false, baseOpen: open });
+  const swipeRef = useRef<{ startX: number | null; startY: number; active: boolean; baseOpen: boolean; touchId: number | null }>({ startX: null, startY: 0, active: false, baseOpen: open, touchId: null });
   const swipeOffsetRef = useRef(0);
   const [swipeOffset, setSwipeOffset] = useState<number | null>(null);
 
   useEffect(() => {
     const onTouchStart = (event: TouchEvent): void => {
+      if (event.touches.length !== 1) return;
       const touch = event.touches[0];
       if (!touch) return;
       const target = event.target;
       const insideDrawer = target instanceof Node && drawerRef.current?.contains(target) === true;
-      // Opening starts at the viewport edge. Closing starts inside the drawer so a swipe on the
-      // backdrop remains its normal tap-to-dismiss interaction.
-      if (open ? !insideDrawer : touch.clientX > 28) return;
-      swipeRef.current = { startX: touch.clientX, startY: touch.clientY, active: false, baseOpen: open };
+      // Closing starts inside the drawer so a swipe on the backdrop remains its normal tap-to-dismiss
+      // interaction. Opening is available across the normal page, unless a horizontal scroller still
+      // has content to reveal on its left side.
+      if (isOverlayTarget(target) || (open ? !insideDrawer : hasHorizontalScrollAhead(target))) return;
+      swipeOffsetRef.current = 0;
+      swipeRef.current = {
+        startX: touch.clientX,
+        startY: touch.clientY,
+        active: false,
+        baseOpen: open,
+        touchId: touch.identifier,
+      };
     };
     const onTouchMove = (event: TouchEvent): void => {
-      const touch = event.touches[0];
       const gesture = swipeRef.current;
-      if (!touch || gesture.startX === null) return;
+      if (gesture.startX === null || event.touches.length !== 1) return;
+      const touch = Array.from(event.touches).find((candidate) => candidate.identifier === gesture.touchId);
+      if (!touch) return;
       const dx = touch.clientX - gesture.startX;
       const dy = touch.clientY - gesture.startY;
       if (!gesture.active) {
@@ -119,26 +145,31 @@ export default function Drawer({
       swipeOffsetRef.current = offset;
       setSwipeOffset(offset);
     };
-    const onTouchEnd = (): void => {
+    const onTouchEnd = (event: TouchEvent, cancelled = false): void => {
       const gesture = swipeRef.current;
-      if (!gesture.active) { swipeRef.current.startX = null; return; }
+      if (!gesture.active) { swipeRef.current.startX = null; swipeRef.current.touchId = null; return; }
+      const changedTouches = event.changedTouches ? Array.from(event.changedTouches) : [];
+      if (!cancelled && changedTouches.length > 0 && !changedTouches.some((touch) => touch.identifier === gesture.touchId)) return;
       const width = drawerRef.current?.getBoundingClientRect().width || 360;
       const offset = swipeOffsetRef.current;
       swipeOffsetRef.current = 0;
       setSwipeOffset(null);
       swipeRef.current.startX = null;
+      swipeRef.current.touchId = null;
+      if (cancelled) return;
       if (gesture.baseOpen && offset < -width * .28) onClose();
       else if (!gesture.baseOpen && offset > width * .22) onOpen();
     };
+    const onTouchCancel = (event: TouchEvent): void => onTouchEnd(event, true);
     window.addEventListener('touchstart', onTouchStart, { passive: true });
     window.addEventListener('touchmove', onTouchMove, { passive: false });
     window.addEventListener('touchend', onTouchEnd, { passive: true });
-    window.addEventListener('touchcancel', onTouchEnd, { passive: true });
+    window.addEventListener('touchcancel', onTouchCancel, { passive: true });
     return () => {
       window.removeEventListener('touchstart', onTouchStart);
       window.removeEventListener('touchmove', onTouchMove);
       window.removeEventListener('touchend', onTouchEnd);
-      window.removeEventListener('touchcancel', onTouchEnd);
+      window.removeEventListener('touchcancel', onTouchCancel);
     };
   }, [open, onClose, onOpen]);
 
@@ -184,13 +215,17 @@ export default function Drawer({
       .finally(() => { if (alive) setProjectsLoading(false); });
     return () => { alive = false; };
   }, [rootView]);
+  const drawerWidth = drawerRef.current?.getBoundingClientRect().width || 360;
+  const backdropOpacity = swipeOffset === null
+    ? (open ? 1 : 0)
+    : (open ? 1 + swipeOffset / drawerWidth : swipeOffset / drawerWidth);
   return (
     <>
       <div id="session-drawer" ref={drawerRef} className={`drawer${rootView === 'project' ? ' project-drawer' : ''} ${open ? 'open' : ''}${swipeOffset !== null ? ' is-dragging' : ''}`} style={swipeOffset === null ? undefined : { transform: `translateX(calc(${open ? '0px' : '-100%'} + ${swipeOffset}px))` }}>
         <div className="drawer-list">
           <div className="drawer-brand">
             <img src="/icons/logo.svg" alt="" aria-hidden="true" />
-            <div><strong>handmux</strong><span>{rootView === 'project' ? t('project.root.projects') : t('project.root.sessions')}</span></div>
+            <strong className="drawer-brand-wordmark">hand<span>mux</span></strong>
           </div>
           {projectTaskBeta && (
             <div className="project-root-switch" role="group" aria-label={`${t('project.root.projects')} / ${t('project.root.sessions')}`}>
@@ -235,19 +270,20 @@ export default function Drawer({
                 title={t('common.more')}
               ><MoreHorizontalIcon /></button>
               </div>
-              {expandedSessions.has(name) && (
+              <div className={`drawer-window-collapse${expandedSessions.has(name) ? ' open' : ''}`} aria-hidden={!expandedSessions.has(name)}>
                 <div className="drawer-window-list">
                   {(sessionWindows[name] || []).map((window) => (
                     <button
                       key={window.id}
                       type="button"
                       aria-current={name === currentSessionName && window.id === currentWindowId ? 'page' : undefined}
+                      tabIndex={expandedSessions.has(name) ? 0 : -1}
                       className={`drawer-window ${name === currentSessionName && window.id === currentWindowId ? 'active' : ''}`}
                       onClick={() => onSelectSession(name, window.id)}
                     ><span className="drawer-window-mark" aria-hidden="true" />{window.name || window.id}{name === currentSessionName && window.id === currentWindowId && <i aria-hidden="true" />}</button>
                   ))}
                 </div>
-              )}
+              </div>
             </div>
           ))}
           <button className="drawer-bind" onClick={onBind}>＋ {t('drawer.bind')}</button>
@@ -301,7 +337,12 @@ export default function Drawer({
           <button type="button" onClick={onOpenSettings}><GearIcon /><span>{t('app.settings')}</span></button>
         </div>
       </div>
-      {open && <div className="drawer-backdrop" onClick={onClose} />}
+      <div
+        className={`drawer-backdrop${open ? ' open' : ''}${swipeOffset !== null ? ' is-dragging' : ''}`}
+        style={swipeOffset === null ? undefined : { opacity: Math.max(0, Math.min(1, backdropOpacity)) }}
+        onClick={open ? onClose : undefined}
+        aria-hidden="true"
+      />
       <ActionSheet
         open={!!menuSession}
         title={menuSession || ''}

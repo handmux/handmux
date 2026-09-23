@@ -76,8 +76,6 @@ body { font-family: -apple-system, system-ui, sans-serif; background: #1a1b1e; c
 .session-name { flex: 1; min-width: 0; min-height: 34px; display: flex; align-items: center; justify-content: flex-start;
   padding: 0; border: none; background: none; color: inherit; font: inherit; font-weight: 600; text-align: left;
   margin-right: auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; touch-action: manipulation; }
-.topbar-wordmark { font-family: ui-rounded, -apple-system, system-ui, sans-serif; font-size: 19px; line-height: 1; font-weight: 650; letter-spacing: -.45px; color: #f1f4ee; white-space: nowrap; }
-.topbar-wordmark span { background: linear-gradient(95deg, #7cf0d6, #33d69a); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
 .fontbtn { min-width: 36px; padding: 4px 10px; border: none; border-radius: 8px; background: #33353a; color: #e6e6e6; font-size: 14px; touch-action: manipulation; }
 .fontbtn[aria-pressed="true"] { background: #2a4060; color: #7ab4f5; }
 /* An <a> wearing the fontbtn skin (Settings feedback links): kill anchor styling so it reads as a button. */
@@ -962,13 +960,15 @@ button.settings-page-row:disabled, .settings-page-row.disabled { color: rgba(235
 .drawer-brand { display: flex; align-items: center; gap: 10px; min-height: 52px; padding: 2px 8px 14px; }
 .drawer-brand img { width: 30px; height: 30px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,.22); }
 .drawer-brand div { min-width: 0; display: grid; gap: 2px; }
-.drawer-brand strong { font-size: 17px; letter-spacing: -.2px; }
-.drawer-brand span { color: rgba(235,235,245,.46); font-size: 12px; }
-.drawer-footer { flex: none; display: grid; grid-template-columns: 1fr; gap: 8px; padding-top: 10px; border-top: .5px solid rgba(84,84,88,.45); }
-.drawer-footer button { min-height: 46px; display: inline-flex; align-items: center; justify-content: center; gap: 8px; border: none; border-radius: 12px; background: rgba(118,118,128,.16); color: rgba(235,235,245,.78); font: 14px/1 -apple-system,system-ui,sans-serif; touch-action: manipulation; }
+.drawer-brand-wordmark { font-family: ui-rounded, -apple-system, system-ui, sans-serif; font-size: 19px; line-height: 1; font-weight: 650; letter-spacing: -.45px; color: #f1f4ee; white-space: nowrap; }
+.drawer-brand-wordmark span { background: linear-gradient(95deg, #7cf0d6, #33d69a); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
+.drawer-footer { flex: none; display: flex; align-items: center; gap: 8px; padding-top: 10px; border-top: .5px solid rgba(84,84,88,.45); }
+.drawer-footer button { width: auto; min-width: 104px; min-height: 44px; padding: 0 14px; display: inline-flex; align-items: center; justify-content: flex-start; gap: 8px; border: none; border-radius: 12px; background: rgba(118,118,128,.16); color: rgba(235,235,245,.78); font: 14px/1 -apple-system,system-ui,sans-serif; touch-action: manipulation; }
 .drawer-footer button:active { background: rgba(118,118,128,.28); }
 .drawer-footer svg { width: 18px; height: 18px; }
-.drawer-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,.4); z-index: var(--z-overlay-drawer-backdrop); }
+.drawer-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,.4); opacity: 0; pointer-events: none; transition: opacity .24s cubic-bezier(.22,.8,.25,1); z-index: var(--z-overlay-drawer-backdrop); }
+.drawer-backdrop.open { opacity: 1; pointer-events: auto; }
+.drawer-backdrop.is-dragging { transition: none; }
 .drawer-title { display: flex; align-items: center; gap: 7px; font-size: 12px; color: rgba(235,235,245,.5); letter-spacing: .4px; margin: 14px 8px 7px; }
 .drawer-title svg { width: 15px; height: 15px; }
 .drawer-row { display: flex; align-items: center; gap: 6px; border-radius: 8px; }
@@ -980,9 +980,11 @@ button.settings-page-row:disabled, .settings-page-row.disabled { color: rgba(235
 .drawer-session .drawer-name svg { width: 17px; height: 17px; flex: none; opacity: .72; }
 .drawer-session .drawer-name span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .drawer-session .drawer-name i, .drawer-project-row i, .drawer-window i { width: 7px; height: 7px; flex: none; border-radius: 50%; background: var(--blue); box-shadow: 0 0 0 3px rgba(10,132,255,.16); }
-.drawer-window-list { animation: drawer-window-reveal .18s ease-out both; }
-@keyframes drawer-window-reveal { from { opacity: .35; transform: translateY(-3px); } to { opacity: 1; transform: translateY(0); } }
-@media (prefers-reduced-motion: reduce) { .drawer, .drawer-window-list { transition: none; animation: none; } }
+.drawer-window-collapse { display: grid; grid-template-rows: 0fr; transition: grid-template-rows .22s cubic-bezier(.22,.8,.25,1); }
+.drawer-window-collapse.open { grid-template-rows: 1fr; }
+.drawer-window-list { min-height: 0; overflow: hidden; opacity: 0; transform: translateY(-4px); transition: opacity .18s ease-out, transform .22s cubic-bezier(.22,.8,.25,1); }
+.drawer-window-collapse.open .drawer-window-list { opacity: 1; transform: translateY(0); }
+@media (prefers-reduced-motion: reduce) { .drawer, .drawer-window-collapse, .drawer-window-list, .drawer-backdrop { transition: none; } }
 .drawer-window { display: flex; align-items: center; gap: 9px; width: calc(100% - 34px); min-height: 40px; margin-left: 34px; padding: 8px 12px; border: none; border-left: 1px solid rgba(118,118,128,.35); border-radius: 0 9px 9px 0; background: transparent; color: #b9bdc8; text-align: left; font-size: 13px; line-height: 24px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; touch-action: manipulation; }
 .drawer-window-mark { width: 6px; height: 6px; flex: none; border: 1px solid currentColor; border-radius: 2px; opacity: .45; }
 .drawer-window > i { margin-left: auto; }
@@ -1090,12 +1092,12 @@ button.settings-page-row:disabled, .settings-page-row.disabled { color: rgba(235
 }
 .project-drawer .drawer-name { width: 100%; min-height: 44px; border: none; background: transparent; color: #e6e6e6; text-align: left; }
 .project-drawer .drawer-name { min-height: 46px; padding: 0 12px; border-radius: 11px; }
-.project-drawer .drawer-name.active { background: rgba(10,132,255,.2); color: #fff; box-shadow: inset 2px 0 0 var(--blue); }
+.project-drawer .drawer-name.active { background: transparent; color: #fff; box-shadow: inset 2px 0 0 var(--blue); }
 .project-root-switch { margin: 0 4px 12px; padding: 3px; border-radius: 12px; background: rgba(118,118,128,.2); }
 .project-root-switch button { min-height: 36px; border-radius: 9px; font-size: 13px; }
-.project-drawer-tools { flex: none; display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px; margin-top: 8px; }
+.project-drawer-tools { flex: none; display: flex; align-items: center; gap: 6px; margin-top: 8px; }
 .project-drawer-tools button {
-  min-height: 44px; padding: 6px; border: none; border-radius: 9px; background: #303136; color: rgba(235,235,245,.72);
+  width: auto; min-width: 104px; min-height: 44px; padding: 0 14px; border: none; border-radius: 11px; background: #303136; color: rgba(235,235,245,.72); text-align: left;
   font-size: 12px; touch-action: manipulation;
 }
 .project-page {

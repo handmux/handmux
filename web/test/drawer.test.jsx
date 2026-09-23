@@ -66,9 +66,9 @@ describe('Drawer (bound sessions)', () => {
   it('clicking a name toggles its Window list', async () => {
     await render();
     const server = [...container.querySelectorAll('.drawer-name')].find((n) => n.textContent === 'server');
-    const before = container.querySelectorAll('.drawer-window-list').length;
+    const before = container.querySelectorAll('.drawer-window-collapse.open').length;
     await act(async () => { server.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
-    expect(container.querySelectorAll('.drawer-window-list')).toHaveLength(before - 1);
+    expect(container.querySelectorAll('.drawer-window-collapse.open')).toHaveLength(before - 1);
   });
 
   it('opens from an edge right swipe and closes from an in-drawer left swipe', async () => {
@@ -90,6 +90,44 @@ describe('Drawer (bound sessions)', () => {
       dispatchTouch(window, 'touchend');
     });
     expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('opens from the center of the page when no horizontal scroller can consume the swipe', async () => {
+    const onOpen = vi.fn();
+    await render({ open: false, onOpen });
+    await act(async () => {
+      dispatchTouch(window, 'touchstart', 180, 180);
+      dispatchTouch(window, 'touchmove', 300, 182);
+      dispatchTouch(window, 'touchend');
+    });
+    expect(onOpen).toHaveBeenCalledTimes(1);
+  });
+
+  it('leaves a horizontally scrolled control in charge until it reaches its left edge', async () => {
+    const onOpen = vi.fn();
+    await render({ open: false, onOpen });
+    const scroller = document.createElement('div');
+    scroller.style.overflowX = 'auto';
+    Object.defineProperties(scroller, {
+      clientWidth: { configurable: true, value: 100 },
+      scrollWidth: { configurable: true, value: 300 },
+      scrollLeft: { configurable: true, writable: true, value: 40 },
+    });
+    document.body.appendChild(scroller);
+    await act(async () => {
+      dispatchTouch(scroller, 'touchstart', 180, 180);
+      dispatchTouch(scroller, 'touchmove', 300, 182);
+      dispatchTouch(scroller, 'touchend');
+    });
+    expect(onOpen).not.toHaveBeenCalled();
+    scroller.scrollLeft = 0;
+    await act(async () => {
+      dispatchTouch(scroller, 'touchstart', 180, 180);
+      dispatchTouch(scroller, 'touchmove', 300, 182);
+      dispatchTouch(scroller, 'touchend');
+    });
+    expect(onOpen).toHaveBeenCalledTimes(1);
+    scroller.remove();
   });
 
   it('does not turn a vertical drawer scroll into a close gesture', async () => {
@@ -125,6 +163,15 @@ describe('Drawer (bound sessions)', () => {
       container.querySelector('.drawer-bind').dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
     expect(onBind).toHaveBeenCalled();
+  });
+
+  it('opens Settings from the compact footer row', async () => {
+    const onOpenSettings = vi.fn();
+    await render({ onOpenSettings });
+    await act(async () => {
+      container.querySelector('.drawer-footer button').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    expect(onOpenSettings).toHaveBeenCalledTimes(1);
   });
 
   describe('未接管会话 (orphans)', () => {

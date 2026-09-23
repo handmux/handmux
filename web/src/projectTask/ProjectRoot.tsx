@@ -405,7 +405,7 @@ export default function ProjectRoot({ drawerOpen, inbox, inset, onOpenDrawer, on
           )}
         </div>
         <div className="project-drawer-tools">
-          <button type="button" onClick={onOpenSettings}>{t('app.settings')}</button>
+          <button type="button" onClick={() => { onCloseDrawer(); onOpenSettings(); }}>{t('app.settings')}</button>
         </div>
       </div>
       {drawerInteractive && <div className="drawer-backdrop" onClick={onCloseDrawer} />}
@@ -419,8 +419,7 @@ export default function ProjectRoot({ drawerOpen, inbox, inset, onOpenDrawer, on
         <div className="project-root" aria-hidden={surfaceObscured}
           {...(surfaceObscured ? { inert: '' as const } : {})}>
           <header className="project-topbar">
-            <button type="button" className="hamburger" onClick={onOpenDrawer}>☰</button>
-            <span className="topbar-wordmark" aria-hidden="true">hand<span>mux</span></span>{inbox}
+            <button type="button" className="hamburger" onClick={onOpenDrawer}>☰</button>{inbox}
           </header>
           <main className="project-fatal"><strong>{t('project.storeUnavailable')}</strong><p>{error}</p>
             <button type="button" onClick={() => void reloadProjects()}>{t('project.tryAgain')}</button>
@@ -440,7 +439,7 @@ export default function ProjectRoot({ drawerOpen, inbox, inset, onOpenDrawer, on
         <div className="project-root" aria-hidden={surfaceObscured}
           {...(surfaceObscured ? { inert: '' as const } : {})}>
           <header className="project-topbar"><button type="button" className="hamburger" onClick={onOpenDrawer}>☰</button>
-            <span className="topbar-wordmark" aria-hidden="true">hand<span>mux</span></span><span className="project-topbar-spacer" />{inbox}
+            <span className="project-topbar-spacer" />{inbox}
             {!readOnly && <button type="button" className="project-add-button" onClick={openAddProject}>＋</button>}</header>
           <main className="project-fatal"><strong>{loading ? t('common.loading') : t('project.empty')}</strong>
             {!loading && <p>{t('project.emptyHint')}</p>}</main>
