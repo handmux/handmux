@@ -1009,7 +1009,7 @@ button.settings-page-row:disabled, .settings-page-row.disabled { color: rgba(235
 .drawer-project-row:active { background: rgba(118,118,128,.2); }
 /* Open the bind modal — the only way to add a session, since the list is user-curated. */
 .drawer-bind-footer { padding-top: 8px; border-top: none; }
-.drawer-bind-footer .drawer-bind { width: 100%; margin-top: 0; padding: 10px; border: none; border-radius: 8px; background: #2b3550; color: #cdddff; font-size: 14px; touch-action: manipulation; }
+.drawer-bind-footer .drawer-bind { width: 100%; min-height: 0; margin-top: 0; padding: 10px; display: block; border: none; border-radius: 8px; background: #2b3550; color: #cdddff; font: 14px/normal -apple-system,system-ui,sans-serif; text-align: center; touch-action: manipulation; }
 .drawer-bind:active { background: #344168; }
 
 /* Project Task beta — a task-first peer to the existing session root. The surfaces deliberately reuse
