@@ -29,6 +29,12 @@ function hasHorizontalScrollAhead(target: EventTarget | null): boolean {
   return false;
 }
 
+function startsInTabStrip(target: EventTarget | null): boolean {
+  return target instanceof Element && Boolean(target.closest(
+    '.windowbar, .windowbar-scroll, .file-tabs, .file-tabs-scroll, .git-tabs, .git-tabs-scroll, .browser-tabs, .browser-tabs-scroll, [role="tablist"]',
+  ));
+}
+
 function isOverlayTarget(target: EventTarget | null): boolean {
   return target instanceof Element && Boolean(target.closest(
     '[role="dialog"], .settings-backdrop, .file-sheet, .cmd-backdrop, .upload-overlay, .drawer-backdrop',
@@ -131,6 +137,7 @@ export default function Drawer({
       const insideDrawer = target instanceof Node && drawerRef.current?.contains(target) === true;
       const onDrawerBackdrop = target instanceof Element && Boolean(target.closest('.drawer-backdrop'));
       const startsInDock = target instanceof Element && Boolean(target.closest('.bottom-dock'));
+      if (!open && startsInTabStrip(target)) return;
       // In chat mode the BottomDock owns its own horizontal pager. The conversation surface
       // remains eligible for opening the drawer; only a gesture that starts on the dock is reserved.
       if (!open && activeLens === 'chat' && startsInDock) return;

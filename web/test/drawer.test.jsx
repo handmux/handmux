@@ -116,6 +116,21 @@ describe('Drawer (bound sessions)', () => {
     expect(onOpen).toHaveBeenCalledTimes(1);
   });
 
+  it('does not open while swiping a horizontal window tab strip', async () => {
+    const onOpen = vi.fn();
+    await render({ open: false, onOpen });
+    const tabs = document.createElement('div');
+    tabs.className = 'windowbar-scroll';
+    document.body.appendChild(tabs);
+    await act(async () => {
+      dispatchTouch(tabs, 'touchstart', 40, 180);
+      dispatchTouch(window, 'touchmove', 220, 182);
+      dispatchTouch(window, 'touchend');
+    });
+    expect(onOpen).not.toHaveBeenCalled();
+    tabs.remove();
+  });
+
   it('leaves a horizontally scrolled control in charge until it reaches its left edge', async () => {
     const onOpen = vi.fn();
     await render({ open: false, onOpen });

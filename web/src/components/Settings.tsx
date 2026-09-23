@@ -509,8 +509,8 @@ export default function Settings({ open, onClose, termRef, onOpenChangelog = () 
       )}
 
       <SettingsGroup title={t('settings.group_general')}>
-        <SettingsNavRow label={t('settings.language')} value={languageLabel} onClick={() => openPage('language')} />
         <SettingsNavRow label={t('devices.title')} value={t(isTrustedDeviceEnabled() && isTrustedOriginEnabled() ? 'devices.protectionEnabled' : isTrustedDeviceEnabled() || isTrustedOriginEnabled() ? 'devices.protectionPartial' : 'devices.protectionDisabled')} valueTone={isTrustedDeviceEnabled() && isTrustedOriginEnabled() ? 'good' : isTrustedDeviceEnabled() || isTrustedOriginEnabled() ? 'warn' : 'bad'} onClick={() => openPage('devices')} />
+        <SettingsNavRow label={t('settings.language')} value={languageLabel} onClick={() => openPage('language')} />
       </SettingsGroup>
 
       <SettingsGroup title={t('settings.group_terminal')} footer={t('settings.path_highlight_hint')}>
@@ -589,17 +589,13 @@ export default function Settings({ open, onClose, termRef, onOpenChangelog = () 
           value={updateInfo?.current ? `v${updateInfo.current}` : '—'} dot={!!updateInfo?.updateAvailable} />
         <SettingsNavRow label={t('settings.view_changelog')} dot={changelogUnread} onClick={onOpenChangelog} />
         <SettingsNavRow label={t('settings.feedback')} onClick={() => openPage('feedback')} />
+        <button type="button" className="settings-page-row settings-page-danger-action" onClick={onLogout}>
+          <span className="settings-page-row-label">{t('drawer.logout')}</span>
+        </button>
         <button type="button" className="settings-page-row settings-page-text-action" onClick={onReloadApp}>
           <span className="settings-page-row-label">{t('settings.reload_app')}</span>
         </button>
       </SettingsGroup>
-      <section className="settings-page-group settings-account-group">
-        <div className="settings-page-list">
-        <button type="button" className="settings-page-row settings-page-danger-action" onClick={onLogout}>
-          <span className="settings-page-row-label">{t('drawer.logout')}</span>
-        </button>
-        </div>
-      </section>
     </>
   );
 
