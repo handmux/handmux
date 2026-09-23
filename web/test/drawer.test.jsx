@@ -2,6 +2,12 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 
+vi.mock('../src/api.js', () => ({
+  getSessions: vi.fn(async () => [{ id: '$1', name: 'main' }, { id: '$2', name: 'server' }]),
+  getWindowsForSessions: vi.fn(async (ids) => Object.fromEntries(ids.map((id) => [id, []])),
+  ),
+}));
+
 import Drawer from '../src/components/Drawer.jsx';
 
 let container;
@@ -33,6 +39,10 @@ const render = async (props) => {
   await act(async () => { root.render(<Drawer {...base} {...props} />); });
 };
 
+const waitForSessions = async () => {
+  await vi.waitFor(() => expect(container.querySelectorAll('.session-section')).toHaveLength(2));
+};
+
 const dispatchTouch = (target, type, x, y) => {
   const event = new Event(type, { bubbles: true, cancelable: true });
   if (type !== 'touchend' && type !== 'touchcancel') {
@@ -44,31 +54,34 @@ const dispatchTouch = (target, type, x, y) => {
 describe('Drawer (bound sessions)', () => {
   it('lists the locally bound session names', async () => {
     await render({ currentSessionName: 'main' });
-    const names = [...container.querySelectorAll('.workspace-session-name')].map((n) => n.textContent);
+    await waitForSessions();
+    const names = [...container.querySelectorAll('.session-section-title')].map((n) => n.textContent);
     expect(names).toEqual(['main', 'server']);
   });
 
   it('shows the empty state when nothing is bound', async () => {
     await render({ bound: [], currentSessionName: null });
-    expect(container.querySelector('.workspace-session-name')).toBeNull();
+    expect(container.querySelector('.session-section-title')).toBeNull();
     expect(container.querySelector('.drawer-empty')).not.toBeNull();
   });
 
   it('highlights the current session', async () => {
     await render({ currentSessionName: 'server' });
-    const rows = [...container.querySelectorAll('.workspace-session')];
+    await waitForSessions();
+    const rows = [...container.querySelectorAll('.session-section')];
     const server = rows.find((r) => r.textContent.includes('server'));
     const main = rows.find((r) => r.textContent.includes('main'));
-    expect(server.className).toContain('active');
-    expect(main.className).not.toContain('active');
+    expect(server.className).toContain('is-current');
+    expect(main.className).not.toContain('is-current');
   });
 
   it('clicking a name toggles its Window list', async () => {
     await render();
-    const server = [...container.querySelectorAll('.workspace-session-name')].find((n) => n.textContent === 'server');
-    const before = container.querySelectorAll('.workspace-window-collapse.open').length;
+    await waitForSessions();
+    const server = [...container.querySelectorAll('.session-section-title')].find((n) => n.textContent === 'server');
+    const before = container.querySelectorAll('.session-section-body.is-open').length;
     await act(async () => { server.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
-    expect(container.querySelectorAll('.workspace-window-collapse.open')).toHaveLength(before - 1);
+    expect(container.querySelectorAll('.session-section-body.is-open')).toHaveLength(before - 1);
   });
 
   it('opens from an edge right swipe and closes from an in-drawer left swipe', async () => {
@@ -146,9 +159,10 @@ describe('Drawer (bound sessions)', () => {
     const onUnbind = vi.fn();
     const onSelectSession = vi.fn();
     await render({ onUnbind, onSelectSession });
-    const row = [...container.querySelectorAll('.workspace-session-row')].find((r) => r.textContent.includes('main'));
+    await waitForSessions();
+    const row = [...container.querySelectorAll('.session-section')].find((r) => r.textContent.includes('main'));
     await act(async () => {
-      row.querySelector('.workspace-more').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      row.querySelector('.session-section-menu').dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
     const unbind = [...container.querySelectorAll('.sheet-action')].find((button) => button.textContent.includes('解绑'));
     await act(async () => { unbind.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
