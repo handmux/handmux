@@ -1139,11 +1139,17 @@ button.settings-page-row:disabled, .settings-page-row.disabled { color: rgba(235
   background: #1a1b1e; color: #f2f2f7;
 }
 .project-topbar {
+  position: relative;
   flex: none; min-height: calc(44px + env(safe-area-inset-top, 0px));
   padding: env(safe-area-inset-top, 0px) 8px 0;
   display: flex; align-items: center; gap: 6px;
   background: rgba(42,43,46,.94); border-bottom: .5px solid rgba(84,84,88,.48);
   -webkit-backdrop-filter: blur(18px); backdrop-filter: blur(18px);
+}
+.project-topbar-title {
+  position: absolute; left: 50%; top: env(safe-area-inset-top, 0px); height: 44px;
+  display: flex; align-items: center; transform: translateX(-50%); white-space: nowrap;
+  color: #f2f2f7; font-size: 17px; font-weight: 600; letter-spacing: -.2px; pointer-events: none;
 }
 .project-topbar .hamburger { flex: none; }
 .project-topbar-spacer { flex: 1; min-width: 0; }

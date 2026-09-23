@@ -157,8 +157,8 @@ export default function ProjectRoot({ drawerOpen, inbox, inset, onOpenDrawer, on
     }
   }, [bucket, currentId, recoverMissingProject]);
 
-  useEffect(() => { void reloadProjects(); }, [reloadProjects]);
-  useEffect(() => { void reloadTasks(); }, [reloadTasks]);
+  useEffect(() => { if (!readOnly) void reloadProjects(); }, [readOnly, reloadProjects]);
+  useEffect(() => { if (!readOnly) void reloadTasks(); }, [readOnly, reloadTasks]);
 
   const selectProject = (id: string): void => {
     if (id === currentIdRef.current) {
@@ -415,7 +415,20 @@ export default function ProjectRoot({ drawerOpen, inbox, inset, onOpenDrawer, on
   return (
     <>
       {legacyDrawer}
-      {error && !current ? (
+      {readOnly ? (
+        <div className="project-root" aria-hidden={surfaceObscured}
+          {...(surfaceObscured ? { inert: '' as const } : {})}>
+          <header className="project-topbar">
+            <button type="button" className="hamburger" onClick={onOpenDrawer}>☰</button>
+            <span className="project-topbar-title">{t('project.root.title')}</span>
+            {inbox}
+          </header>
+          <main className="project-fatal project-coming-soon">
+            <strong>{t('project.comingSoon')}</strong>
+            <p>{t('project.comingSoonHint')}</p>
+          </main>
+        </div>
+      ) : error && !current ? (
         <div className="project-root" aria-hidden={surfaceObscured}
           {...(surfaceObscured ? { inert: '' as const } : {})}>
           <header className="project-topbar">
