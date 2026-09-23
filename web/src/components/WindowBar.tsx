@@ -360,14 +360,27 @@ export default function WindowBar({
   lens = 'terminal', onLensChange = () => {}, chatLensEnabled = false,
 }: WindowBarProps) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  const previousWindowIdRef = useRef<string | null>(null);
   // While a window is being managed (its long-press menu open), keep its tab in view as the order
   // shifts underneath — a reorder can push it out of the scroll strip, and then you can't see it
   // move. No-op when nothing is tracked, so normal manual scrolling isn't hijacked.
   useLayoutEffect(() => {
-    if (!trackWindowId) return;
-    scrollRef.current?.querySelector(`[data-win="${trackWindowId}"]`)
-      ?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
-  }, [windows, trackWindowId]);
+    const strip = scrollRef.current;
+    const previousWindowId = previousWindowIdRef.current;
+    previousWindowIdRef.current = currentWindowId;
+    if (!strip) return;
+
+    // Management/reorder tracking has priority over selection reveal. Both effects used to run
+    // independently, which let the later current-tab reveal undo the tab position requested by
+    // the management sheet.
+    const targetId = trackWindowId || (
+      previousWindowId && previousWindowId !== currentWindowId ? currentWindowId : null
+    );
+    if (!targetId) return;
+    const tab = Array.from(strip.querySelectorAll<HTMLElement>('[data-win]'))
+      .find((node) => node.dataset.win === targetId);
+    tab?.scrollIntoView?.({ block: 'nearest', inline: 'nearest', behavior: trackWindowId ? 'auto' : 'smooth' });
+  }, [currentWindowId, trackWindowId, windows]);
 
   return (
     <div className="windowbar">

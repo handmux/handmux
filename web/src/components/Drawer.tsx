@@ -3,7 +3,7 @@
 // pinned names, let the user open or unbind one, and open the bind modal. Below that, a collapsible
 // "未接管会话" section surfaces coding-agent sessions running outside tmux (orphans) — tap 接管 to resume
 // one into tmux (the takeover sheet, handled in App); see server/src/orphans.js.
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { t } from '../i18n';
 import { relTime } from '../inbox.js';
 import WorkspaceRecoveryCard from './WorkspaceRecoveryCard.jsx';
@@ -98,6 +98,7 @@ interface DrawerProps {
   onDeleteSession?: (sessionName: string) => void;
   onMoveSession?: (sessionName: string, direction: 'up' | 'down') => void;
   windowOrderVersion?: number;
+  revealRevision?: number;
   rootView?: 'session' | 'project';
   currentProjectId?: string | null;
   onSelectProject?: (id: string) => void;
@@ -112,6 +113,8 @@ export interface DrawerSelection {
   session: TmuxSession;
   windows: TmuxWindow[];
   window: TmuxWindow;
+  /** Optional pane target supplied by Inbox deep-links. Drawer rows do not need this. */
+  paneId?: string | null;
 }
 
 export default function Drawer({
@@ -119,7 +122,7 @@ export default function Drawer({
   orphans = [], onTakeoverRequest,
   recoveryPlan = null, recoveryOperation = null, onOpenRecovery = () => {},
   projectTaskBeta = false, activeLens = 'terminal', onSwitchProject = () => {}, onSwitchSession = () => {}, onOpenSettings = () => {}, onNewWindow = () => {}, onManageWindow = () => {}, onRenameSession = () => {}, onDeleteSession = () => {}, onMoveSession = () => {}, windowOrderVersion = 0, rootView = 'session', currentProjectId = null,
-  onSelectProject = () => {},
+  onSelectProject = () => {}, revealRevision = 0,
 }: DrawerProps) {
   const [orphOpen, setOrphOpen] = useState(false);
   const [projects, setProjects] = useState<Project[]>([]);
@@ -140,6 +143,7 @@ export default function Drawer({
   const drawerRef = useRef<HTMLDivElement>(null);
   const drawerScrollRef = useRef<HTMLDivElement>(null);
   const drawerScrollContentRef = useRef<HTMLDivElement>(null);
+  const drawerRevealKeyRef = useRef<string | null>(null);
   const swipeRef = useRef<{ startX: number | null; startY: number; active: boolean; baseOpen: boolean; touchId: number | null }>({ startX: null, startY: 0, active: false, baseOpen: open, touchId: null });
   const swipeOffsetRef = useRef(0);
   const [swipeOffset, setSwipeOffset] = useState<number | null>(null);
@@ -365,6 +369,32 @@ export default function Drawer({
     return () => window.clearTimeout(timer);
   }, [pendingWindow]);
 
+  // The active workspace is authoritative even while the Drawer is closed. If navigation comes
+  // from a WindowBar or Inbox row, make the target session expandable for the next open. It runs
+  // when the active Session/Window changes, so a user can still collapse the current session by hand.
+  useEffect(() => {
+    if (rootView !== 'session' || !currentSessionName || expandedPreferences[currentSessionName] !== false) return;
+    setExpandedPreferences((current) => current[currentSessionName] === false
+      ? { ...current, [currentSessionName]: true }
+      : current);
+  }, [currentSessionName, currentWindowId, revealRevision, rootView]); // eslint-disable-line react-hooks/exhaustive-deps -- preference map is intentionally read at the event edge
+
+  // Once the Drawer is visible and its outline is ready, bring the shared current Window into view.
+  // The query uses data attributes rather than interpolating tmux ids into a CSS selector.
+  useLayoutEffect(() => {
+    if (!open || rootView !== 'session') {
+      drawerRevealKeyRef.current = null;
+      return;
+    }
+    if (!sessionsReady || !currentSessionName || !currentWindowId) return;
+    const target = Array.from(drawerScrollRef.current?.querySelectorAll<HTMLElement>('[data-session-name][data-window-id]') || [])
+      .find((node) => node.dataset.sessionName === currentSessionName && node.dataset.windowId === currentWindowId);
+    const revealKey = `${revealRevision}\0${currentSessionName}\0${currentWindowId}`;
+    if (target && drawerRevealKeyRef.current === revealKey) return;
+    target?.scrollIntoView?.({ block: 'nearest', inline: 'nearest', behavior: 'smooth' });
+    if (target) drawerRevealKeyRef.current = revealKey;
+  }, [open, rootView, sessionsReady, currentSessionName, currentWindowId, revealRevision, sessionWindows, expandedPreferences]);
+
   const boundKey = JSON.stringify(bound);
   const expandedKey = JSON.stringify([...expandedSessions]);
   useEffect(() => {
@@ -502,6 +532,8 @@ export default function Drawer({
                   {(sessionWindows[name] || []).map((window) => (
                     <div
                       key={window.id}
+                      data-session-name={name}
+                      data-window-id={window.id}
                       role="button"
                       aria-current={(name === currentSessionName && window.id === currentWindowId)
                         || (pendingWindow?.sessionName === name && pendingWindow.windowId === window.id) ? 'page' : undefined}

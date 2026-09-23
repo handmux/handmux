@@ -360,6 +360,7 @@ export default function App() {
   const browser = useBrowser({ enabled: !needToken, browserProxy: !!serverConfig?.browserProxy });
   const [bound, setBound] = useState(getBoundSessions); // session names pinned on this device
   const [drawerWindowOrderVersion, setDrawerWindowOrderVersion] = useState(0);
+  const [drawerRevealRevision, setDrawerRevealRevision] = useState(0);
   const [favorites, setFavorites] = useState(getFavorites); // global favorite commands
   const [recent, setRecent] = useState<string[]>([]); // current session's recent commands (keyed by session name)
   const [current, setCurrent] = useState<CurrentWorkspace | null>(null); // { session, windows, window, panes, paneId }
@@ -1226,13 +1227,36 @@ export default function App() {
     // Invalidate a slower name-only selection that may still be resolving getSessions. Its
     // openSession call observes this epoch and must not overwrite the row the user just chose.
     ++sessionSelectionRef.current;
+    setDrawerRevealRevision((revision) => revision + 1);
 
     const existing = currentRef.current;
     if (existing?.session.id === session.id
       && existing.window.id === selectedWindow.id
       && existing.panes.length > 0) {
-      // Re-tapping the visible Window is a no-op. Keep its mounted terminal and avoid a needless
-      // pane refresh that would briefly clear the content.
+      // Re-tapping the visible Window is a no-op, unless an Inbox deep-link names another pane in
+      // that same window. Move the pane highlight immediately when it is cached; if it is stale,
+      // keep the requested id visible while one background lookup refreshes the pane list.
+      const requestedPane = selection.paneId || '';
+      if (requestedPane && requestedPane !== existing.paneId) {
+        if (existing.panes.some((pane) => pane.id === requestedPane)) {
+          setCurrent((current) => (current && current.session.id === session.id && current.window.id === selectedWindow.id
+            ? { ...current, paneId: requestedPane } : current));
+          remember({ sessionId: session.id, windowId: selectedWindow.id, paneId: requestedPane });
+        } else {
+          const paneEpoch = ++windowSwitchRef.current;
+          setCurrent((current) => (current && current.session.id === session.id && current.window.id === selectedWindow.id
+            ? { ...current, panes: [], paneId: requestedPane } : current));
+          void getPanes(selectedWindow.id).then((panes) => {
+            if (paneEpoch !== windowSwitchRef.current) return;
+            const paneId = panes.some((pane) => pane.id === requestedPane)
+              ? requestedPane
+              : pickId(panes, getLastPane(selectedWindow.id));
+            setCurrent((current) => (current && current.session.id === session.id && current.window.id === selectedWindow.id
+              ? { ...current, panes, paneId } : current));
+            if (paneId) remember({ sessionId: session.id, windowId: selectedWindow.id, paneId });
+          }).catch(() => { /* topology polling retries the pane lookup */ });
+        }
+      }
       setSessionLoading(false);
       return true;
     }
@@ -1240,7 +1264,10 @@ export default function App() {
     // A cached pane id can be stale after tmux recreates a window. Only the server's activePaneId
     // is safe to mount immediately; when it is absent, keep the new WindowBar visible with a
     // lightweight pane-less surface until the background lookup returns.
-    const paneIdHint = selectedWindow.activePaneId || '';
+    // Inbox deep-links can provide the exact pane that produced the notification. Prefer it over
+    // the window's active pane so the shared selector lands on the same pane immediately; the
+    // background topology poll will replace it if that pane has since disappeared.
+    const paneIdHint = selection.paneId || selectedWindow.activePaneId || '';
     ++windowSwitchRef.current;
     // Commit the new session and window before asking the server for panes. This transfers the
     // Drawer highlight and updates the title/window bar while the pane surface catches up.
@@ -1325,6 +1352,7 @@ export default function App() {
   const openInboxRow = useCallback(async (
     row: ReturnType<typeof inboxRows>[number],
   ): Promise<boolean> => {
+    const selectionEpoch = ++sessionSelectionRef.current;
     setInboxOpen(false);
     setCompletedChatEntry(null);
     if (row.terminalNotificationId) {
@@ -1333,8 +1361,15 @@ export default function App() {
     try {
       const session = (await getSessions()).find((s) => s.name === row.session);
       if (!session) { window.alert(t('app.sessionGone', { name: row.session })); return false; }
+      // Resolve the window outline once, then use the same cached selector as Drawer taps. This
+      // commits Session + Window + requested Pane together; only the pane detail is filled by the
+      // existing background topology poll.
+      const windows = await getWindows(session.id);
+      const targetWindow = windows.find((candidate) => candidate.id === row.window);
+      if (!targetWindow) return false;
+      if (selectionEpoch !== sessionSelectionRef.current) return false;
       setDrawerOpen(false);
-      const opened = await openSession(session, { window: row.window, pane: row.pane });
+      const opened = selectCachedSession({ session, windows, window: targetWindow, paneId: row.pane });
       if (opened && row.view === 'done') {
         setCompletedChatEntry({
           paneId: row.pane,
@@ -1348,7 +1383,7 @@ export default function App() {
       handledAuth(e);
       return false;
     }
-  }, [openSession, handledAuth, markCanonicalTerminalRead]);
+  }, [getWindows, selectCachedSession, handledAuth, markCanonicalTerminalRead]);
 
   // Take over an orphan (claude running outside tmux): the server spawns `claude --resume` in the chosen
   // target (new session, or a new window of an existing session) and — if kill — SIGTERMs the original,
@@ -2853,6 +2888,7 @@ export default function App() {
         currentSessionName={current?.session?.name ?? null}
         currentWindowId={current?.window?.id ?? null}
         bound={bound}
+        revealRevision={drawerRevealRevision}
         onSelectSession={(selection) => {
           chooseRootView('session');
           // Let the drawer paint the selected row once before its close transition starts.
