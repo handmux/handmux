@@ -177,6 +177,18 @@ export function removeBoundSession(name: string): string[] {
   return list;
 }
 
+// Reorder the device's pinned sessions in the same vertical order shown by the drawer.
+// This is local-only: tmux has no meaningful global session order to mutate.
+export function moveBoundSession(name: string, direction: 'up' | 'down'): string[] {
+  const list = getBoundSessions();
+  const index = list.indexOf(name);
+  const target = direction === 'up' ? index - 1 : index + 1;
+  if (index < 0 || target < 0 || target >= list.length) return list;
+  [list[index], list[target]] = [list[target]!, list[index]!];
+  localStorage.setItem(BOUND_KEY, JSON.stringify(list));
+  return list;
+}
+
 export function removeRestoredSessionBindings(results: unknown): string[] {
   const restoredNames = new Set((Array.isArray(results) ? results : [])
     .flatMap((candidate): string[] => {

@@ -7,6 +7,7 @@ import {
   getWorkspacePromptState,
   ignoreWorkspaceCheckpoint,
   markWorkspaceAutoShown,
+  moveBoundSession,
   removeRestoredSessionBindings,
   setAgentConversationEnabled,
   setAgentUsageEnabled,
@@ -87,6 +88,17 @@ describe('workspace prompt state', () => {
     markWorkspaceAutoShown('checkpoint-a');
     expect(getWorkspacePromptState('checkpoint-a')).toEqual({ autoShown: true });
     expect(getWorkspacePromptState('checkpoint-a').ignored).toBeUndefined();
+  });
+});
+
+describe('bound session order', () => {
+  it('moves pinned sessions vertically and keeps edge moves stable', () => {
+    localStorage.setItem('tw_bound', JSON.stringify(['one', 'two', 'three']));
+    expect(moveBoundSession('two', 'up')).toEqual(['two', 'one', 'three']);
+    expect(moveBoundSession('two', 'up')).toEqual(['two', 'one', 'three']);
+    expect(moveBoundSession('two', 'down')).toEqual(['one', 'two', 'three']);
+    expect(moveBoundSession('missing', 'down')).toEqual(['one', 'two', 'three']);
+    expect(getBoundSessions()).toEqual(['one', 'two', 'three']);
   });
 });
 

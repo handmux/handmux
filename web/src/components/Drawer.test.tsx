@@ -34,11 +34,12 @@ describe('Drawer workspace recovery card', () => {
   it('places the lightweight card at the end of the scrolling list, before the fixed footer', () => {
     const { container } = render(<Drawer {...base} recoveryPlan={recoveryPlan} onOpenRecovery={() => {}} />);
     const list = container.querySelector('.drawer-scroll');
+    const content = container.querySelector('.drawer-scroll-content');
     const card = container.querySelector('.workspace-recovery-card');
     const footer = container.querySelector('.drawer-footer');
-    if (!list || !card || !footer) throw new Error('expected drawer recovery elements');
-    expect(card.parentElement).toBe(list);
-    expect(list.lastElementChild).toBe(card);
+    if (!list || !content || !card || !footer) throw new Error('expected drawer recovery elements');
+    expect(card.parentElement).toBe(content);
+    expect(content.lastElementChild).toBe(card);
     expect(footer.compareDocumentPosition(card) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy();
   });
 

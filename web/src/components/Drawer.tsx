@@ -15,7 +15,7 @@ import type { MouseEvent } from 'react';
 import type { WorkspaceRecoveryPlan, WorkspaceRestoreOperation } from '../workspaceRecovery.js';
 import type { WorkspaceLens } from './LensSwitch.jsx';
 import ActionSheet from './ActionSheet.jsx';
-import { ChevronDownIcon, ChevronRightIcon, CommandIcon, FolderIcon, GearIcon, MoreHorizontalIcon, PencilIcon, PlusIcon, XIcon } from './icons.jsx';
+import { ArrowUpIcon, ChevronDownIcon, ChevronRightIcon, CommandIcon, FolderIcon, GearIcon, MoreHorizontalIcon, PencilIcon, PlusIcon, XIcon } from './icons.jsx';
 
 const EXPANDED_SESSIONS_KEY = 'handmux.drawer.expanded-sessions';
 
@@ -96,6 +96,8 @@ interface DrawerProps {
   onManageWindow?: (sessionName: string, window: TmuxWindow) => void;
   onRenameSession?: (sessionName: string) => void;
   onDeleteSession?: (sessionName: string) => void;
+  onMoveSession?: (sessionName: string, direction: 'up' | 'down') => void;
+  windowOrderVersion?: number;
   rootView?: 'session' | 'project';
   currentProjectId?: string | null;
   onSelectProject?: (id: string) => void;
@@ -105,7 +107,7 @@ export default function Drawer({
   open, onOpen = () => {}, currentSessionName, currentWindowId = null, bound, onSelectSession, onUnbind, onBind, onClose,
   orphans = [], onTakeoverRequest,
   recoveryPlan = null, recoveryOperation = null, onOpenRecovery = () => {},
-  projectTaskBeta = false, activeLens = 'terminal', onSwitchProject = () => {}, onSwitchSession = () => {}, onOpenSettings = () => {}, onNewWindow = () => {}, onManageWindow = () => {}, onRenameSession = () => {}, onDeleteSession = () => {}, rootView = 'session', currentProjectId = null,
+  projectTaskBeta = false, activeLens = 'terminal', onSwitchProject = () => {}, onSwitchSession = () => {}, onOpenSettings = () => {}, onNewWindow = () => {}, onManageWindow = () => {}, onRenameSession = () => {}, onDeleteSession = () => {}, onMoveSession = () => {}, windowOrderVersion = 0, rootView = 'session', currentProjectId = null,
   onSelectProject = () => {},
 }: DrawerProps) {
   const [orphOpen, setOrphOpen] = useState(false);
@@ -118,12 +120,14 @@ export default function Drawer({
   const [retry, setRetry] = useState(0);
   const topologyCache = useRef<{
     ids: Record<string, string>; sessionsAt: number;
-    windows: Record<string, TmuxWindow[]>; fetchedAt: Record<string, number>;
-  }>({ ids: {}, sessionsAt: 0, windows: {}, fetchedAt: {} });
+    windows: Record<string, TmuxWindow[]>; fetchedAt: Record<string, number>; orderVersion: number;
+  }>({ ids: {}, sessionsAt: 0, windows: {}, fetchedAt: {}, orderVersion: -1 });
   const [expandedPreferences, setExpandedPreferences] = useState<Record<string, boolean>>(() => readExpandedSessions(bound));
   const expandedSessions = new Set(bound.filter((name) => expandedPreferences[name] !== false));
   const [menuSession, setMenuSession] = useState<string | null>(null);
   const drawerRef = useRef<HTMLDivElement>(null);
+  const drawerScrollRef = useRef<HTMLDivElement>(null);
+  const drawerScrollContentRef = useRef<HTMLDivElement>(null);
   const swipeRef = useRef<{ startX: number | null; startY: number; active: boolean; baseOpen: boolean; touchId: number | null }>({ startX: null, startY: 0, active: false, baseOpen: open, touchId: null });
   const swipeOffsetRef = useRef(0);
   const [swipeOffset, setSwipeOffset] = useState<number | null>(null);
@@ -202,6 +206,136 @@ export default function Drawer({
     };
   }, [activeLens, open, onClose, onOpen]);
 
+  // Browsers other than iOS do not expose Safari's rubber-band affordance. Keep the
+  // native scroll path for regular movement, but add a small damped translation when
+  // the list is pulled past either edge. This is deliberately local to the scroll
+  // region so it cannot move the fixed header/footer or steal the drawer swipe.
+  useEffect(() => {
+    const scroll = drawerScrollRef.current;
+    const content = drawerScrollContentRef.current;
+    if (!scroll || !content) return;
+
+    type Edge = 'top' | 'bottom';
+    const MAX_OFFSET = 72;
+    const RESISTANCE = 0.28;
+    let edge: Edge | null = null;
+    let touchId: number | null = null;
+    let lastY = 0;
+    let overscrollStartY = 0;
+    let active = false;
+    let visualOffset = 0;
+    let wheelTimer: number | null = null;
+
+    const clamp = (value: number): number => Math.max(-MAX_OFFSET, Math.min(MAX_OFFSET, value));
+    const clearWheelTimer = (): void => {
+      if (wheelTimer !== null) window.clearTimeout(wheelTimer);
+      wheelTimer = null;
+    };
+    const setOffset = (value: number): void => {
+      visualOffset = clamp(value);
+      content.style.transition = 'none';
+      content.style.transform = `translate3d(0, ${visualOffset}px, 0)`;
+    };
+    const release = (): void => {
+      clearWheelTimer();
+      if (visualOffset !== 0) {
+        content.style.transition = 'transform 220ms cubic-bezier(.22,.8,.25,1)';
+        content.style.transform = 'translate3d(0, 0, 0)';
+        visualOffset = 0;
+      }
+      edge = null;
+      touchId = null;
+      active = false;
+    };
+    const cancel = (): void => {
+      clearWheelTimer();
+      content.style.transition = 'none';
+      content.style.transform = 'translate3d(0, 0, 0)';
+      visualOffset = 0;
+      edge = null;
+      touchId = null;
+      active = false;
+    };
+    const atTop = (): boolean => scroll.scrollTop <= 0.5;
+    const atBottom = (): boolean => scroll.scrollTop + scroll.clientHeight >= scroll.scrollHeight - 0.5;
+    const findTouch = (event: TouchEvent): Touch | undefined => Array.from(event.touches).find((touch) => touch.identifier === touchId);
+
+    const onTouchStart = (event: TouchEvent): void => {
+      if (event.touches.length !== 1) return;
+      const touch = event.touches[0];
+      if (!touch) return;
+      cancel();
+      touchId = touch.identifier;
+      lastY = touch.clientY;
+      overscrollStartY = touch.clientY;
+      edge = atTop() ? 'top' : atBottom() ? 'bottom' : null;
+    };
+    const onTouchMove = (event: TouchEvent): void => {
+      const touch = findTouch(event);
+      if (!touch) return;
+      const deltaY = touch.clientY - lastY;
+      lastY = touch.clientY;
+
+      // A gesture that began in the middle of the list can still reach an edge.
+      // Start the visual feedback from the first movement that hits that edge.
+      if (!edge) {
+        if (atTop() && deltaY > 0) {
+          edge = 'top';
+          overscrollStartY = touch.clientY - deltaY;
+        } else if (atBottom() && deltaY < 0) {
+          edge = 'bottom';
+          overscrollStartY = touch.clientY - deltaY;
+        } else {
+          return;
+        }
+      }
+
+      const totalDelta = touch.clientY - overscrollStartY;
+      const pullingTowardEdge = edge === 'top' ? totalDelta > 0 : totalDelta < 0;
+      if (!pullingTowardEdge) {
+        if (active) cancel();
+        else edge = null;
+        return;
+      }
+      if (!active) {
+        // If the finger first moved away from the edge, let native scrolling own
+        // the rest of this gesture instead of manufacturing a bounce mid-scroll.
+        if ((edge === 'top' && !atTop()) || (edge === 'bottom' && !atBottom())) {
+          edge = null;
+          return;
+        }
+        active = true;
+      }
+      event.preventDefault();
+      setOffset(totalDelta * RESISTANCE);
+    };
+    const onTouchEnd = (event: TouchEvent): void => {
+      if (touchId === null || !Array.from(event.changedTouches).some((touch) => touch.identifier === touchId)) return;
+      release();
+    };
+    const onWheel = (event: WheelEvent): void => {
+      if ((event.deltaY < 0 && !atTop()) || (event.deltaY > 0 && !atBottom()) || event.deltaY === 0) return;
+      event.preventDefault();
+      setOffset(visualOffset - event.deltaY * RESISTANCE);
+      clearWheelTimer();
+      wheelTimer = window.setTimeout(release, 110);
+    };
+
+    scroll.addEventListener('touchstart', onTouchStart, { passive: true });
+    scroll.addEventListener('touchmove', onTouchMove, { passive: false });
+    scroll.addEventListener('touchend', onTouchEnd, { passive: true });
+    scroll.addEventListener('touchcancel', release, { passive: true });
+    scroll.addEventListener('wheel', onWheel, { passive: false });
+    return () => {
+      scroll.removeEventListener('touchstart', onTouchStart);
+      scroll.removeEventListener('touchmove', onTouchMove);
+      scroll.removeEventListener('touchend', onTouchEnd);
+      scroll.removeEventListener('touchcancel', release);
+      scroll.removeEventListener('wheel', onWheel);
+      cancel();
+    };
+  }, []);
+
   useEffect(() => {
     try { localStorage.setItem(EXPANDED_SESSIONS_KEY, JSON.stringify(expandedPreferences)); } catch { /* best effort */ }
   }, [expandedPreferences]);
@@ -218,8 +352,9 @@ export default function Drawer({
         const names: string[] = JSON.parse(boundKey);
         const expanded: string[] = JSON.parse(expandedKey);
         const now = Date.now();
+        const orderChanged = cached.orderVersion !== windowOrderVersion;
         const sessionsStale = !cached.sessionsAt || now - cached.sessionsAt >= 5000
-          || names.some((name) => !cached.ids[name]);
+          || names.some((name) => !cached.ids[name]) || orderChanged;
         const ids = sessionsStale
           ? Object.fromEntries((await getSessions()).map((session) => [session.name, session.id]))
           : cached.ids;
@@ -228,7 +363,7 @@ export default function Drawer({
         const windows = Object.fromEntries(names.filter((name) => ids[name] && ids[name] === cached.ids[name] && cached.windows[name])
           .map((name) => [name, cached.windows[name]!]));
         const fetchedAt = Object.fromEntries(names.filter((name) => windows[name]).map((name) => [name, cached.fetchedAt[name]!]));
-        const targets = expanded.filter((name) => ids[name] && (!windows[name] || now - (fetchedAt[name] || 0) >= 5000));
+        const targets = expanded.filter((name) => ids[name] && (!windows[name] || now - (fetchedAt[name] || 0) >= 5000 || orderChanged));
         if (targets.length) {
           const rows = await getWindowsForSessions(targets.map((name) => ids[name]!));
           if (!alive) return;
@@ -239,7 +374,7 @@ export default function Drawer({
         }
         // Publish one complete outline. Never reveal parent rows while the initial
         // expanded children are still in flight; retain the previous outline on refresh.
-        topologyCache.current = { ids, sessionsAt: sessionsStale ? Date.now() : cached.sessionsAt, windows, fetchedAt };
+        topologyCache.current = { ids, sessionsAt: sessionsStale ? Date.now() : cached.sessionsAt, windows, fetchedAt, orderVersion: windowOrderVersion };
         setSessionWindows(windows);
         setSessionsReady(true);
       } catch (error) {
@@ -247,7 +382,7 @@ export default function Drawer({
       }
     })();
     return () => { alive = false; };
-  }, [rootView, open, boundKey, expandedKey, retry]);
+  }, [rootView, open, boundKey, expandedKey, retry, windowOrderVersion]);
 
   const toggleSession = (name: string): void => {
     setExpandedPreferences((current) => ({ ...current, [name]: !expandedSessions.has(name) }));
@@ -269,6 +404,7 @@ export default function Drawer({
   const backdropOpacity = swipeOffset === null
     ? (open ? 1 : 0)
     : (open ? 1 + swipeOffset / drawerWidth : swipeOffset / drawerWidth);
+  const menuSessionIndex = menuSession ? bound.indexOf(menuSession) : -1;
   return (
     <>
       <div id="session-drawer" ref={drawerRef} className={`drawer${rootView === 'project' ? ' project-drawer' : ''} ${open ? 'open' : ''}${swipeOffset !== null ? ' is-dragging' : ''}`} style={swipeOffset === null ? undefined : { transform: `translateX(calc(${open ? '0px' : '-100%'} + ${swipeOffset}px))` }} onContextMenu={(event) => event.preventDefault()}>
@@ -287,7 +423,8 @@ export default function Drawer({
           )}
           <div className="drawer-section-heading"><span>{t(rootView === 'project' ? 'project.root.projects' : 'drawer.sessionWindowTitle')}</span><small>{rootView === 'project' ? projects.length : bound.length}</small></div>
         </div>
-        <div className="drawer-scroll">
+        <div ref={drawerScrollRef} className="drawer-scroll">
+        <div ref={drawerScrollContentRef} className="drawer-scroll-content">
           {rootView === 'project' ? <>
             {projectsLoading && <div className="drawer-empty">{t('common.loading')}</div>}
             {!projectsLoading && projectsError && <div className="drawer-empty" role="alert">{projectsError}</div>}
@@ -390,13 +527,14 @@ export default function Drawer({
                     );
                   })}
                 </>
-              )}
-            </div>
+          )}
+          </div>
           )}
           {recoveryPlan && (
             <WorkspaceRecoveryCard plan={recoveryPlan} operation={recoveryOperation} onOpen={onOpenRecovery} />
           )}
           </>}
+        </div>
         </div>
         </div>
         {rootView === 'session' && <div className="drawer-footer drawer-bind-footer">
@@ -419,6 +557,18 @@ export default function Drawer({
         onClose={() => setMenuSession(null)}
         actions={menuSession ? [
           { key: 'new-window', icon: <PlusIcon />, label: t('windowbar.newWindow'), onClick: () => { onNewWindow(menuSession); setMenuSession(null); } },
+          ...(bound.length > 1 ? [[
+            {
+              key: 'move-session-up', icon: <ArrowUpIcon />, label: t('app.moveLeft'),
+              disabled: menuSessionIndex <= 0,
+              onClick: () => onMoveSession(menuSession, 'up'),
+            },
+            {
+              key: 'move-session-down', icon: <span className="drawer-order-icon-down"><ArrowUpIcon /></span>, label: t('app.moveRight'),
+              disabled: menuSessionIndex < 0 || menuSessionIndex >= bound.length - 1,
+              onClick: () => onMoveSession(menuSession, 'down'),
+            },
+          ]] : []),
           { key: 'rename', icon: <PencilIcon />, label: t('common.rename'), onClick: () => { onRenameSession(menuSession); setMenuSession(null); } },
           { key: 'unbind', icon: <XIcon />, label: t('drawer.unbind'), onClick: () => { onUnbind(menuSession); setMenuSession(null); } },
           { key: 'delete', icon: <XIcon />, label: t('app.deleteSession'), danger: true, confirm: true, confirmLabel: t('app.deleteSessionConfirm'), onClick: () => { onDeleteSession(menuSession); setMenuSession(null); } },

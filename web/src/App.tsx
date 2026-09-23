@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { t } from './i18n';
 import {
   getToken, getLastSession, getLastWindow, getLastPane, remember, clearToken,
-  getBoundSessions, addBoundSession, removeBoundSession, renameBoundSession,
+  getBoundSessions, addBoundSession, removeBoundSession, renameBoundSession, moveBoundSession as moveBoundSessionInStorage,
   getFavorites, addFavorite, removeFavorite, getRecent, pushRecent, removeRecent,
   pushRecentDoc, getPaneBase, setPaneBase,
   getInboxSeen, markInboxSeen, getInboxReadTs, setInboxReadTs, getLastProject, setLastProject,
@@ -357,6 +357,7 @@ export default function App() {
   const docTabs = useDocTabs(); // file-viewer tab state, kept across sheet open/close
   const browser = useBrowser({ enabled: !needToken, browserProxy: !!serverConfig?.browserProxy });
   const [bound, setBound] = useState(getBoundSessions); // session names pinned on this device
+  const [drawerWindowOrderVersion, setDrawerWindowOrderVersion] = useState(0);
   const [favorites, setFavorites] = useState(getFavorites); // global favorite commands
   const [recent, setRecent] = useState<string[]>([]); // current session's recent commands (keyed by session name)
   const [current, setCurrent] = useState<CurrentWorkspace | null>(null); // { session, windows, window, panes, paneId }
@@ -1196,6 +1197,7 @@ export default function App() {
       setCurrent((c) => (c
         ? { ...c, windows, window: windows.find((x) => x.id === c.window.id) || c.window } : c));
       setManageWindow(windows.find((x) => x.id === w.id) || null); // refresh in place (or close if gone)
+      setDrawerWindowOrderVersion((version) => version + 1);
     } catch (e) {
       if (handledAuth(e)) { setManageWindow(null); return; }
       window.alert(t('app.moveFailed'));
@@ -1255,6 +1257,11 @@ export default function App() {
       if (!handledAuth(error)) window.alert(t('app.deleteFailed'));
     }
   }, [current, onAuthFail]);
+
+  const moveSessionFromDrawer = useCallback((name: string, direction: 'up' | 'down'): void => {
+    setBound(moveBoundSessionInStorage(name, direction));
+    reportBound();
+  }, []);
 
   const markCanonicalTerminalRead = useCallback(async (notificationIds: readonly string[]) => {
     if (!notificationIds.length) return;
@@ -2819,6 +2826,8 @@ export default function App() {
         }}
         onRenameSession={renameSessionFromDrawer}
         onDeleteSession={deleteSessionFromDrawer}
+        onMoveSession={moveSessionFromDrawer}
+        windowOrderVersion={drawerWindowOrderVersion}
         rootView={drawerView}
         currentProjectId={projectId}
         onSelectProject={(id) => { setProjectId(id); setLastProject(id); chooseRootView('project'); }}
