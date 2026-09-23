@@ -954,6 +954,7 @@ button.settings-page-row:disabled, .settings-page-row.disabled { color: rgba(235
 .input-text::placeholder { color: #6b7280; }
 .token-prompt button { padding: 8px 14px; border: none; border-radius: 8px; background: var(--blue); color: #fff; }
 .drawer { position: fixed; top: 0; left: 0; width: min(80vw, 320px); max-width: 320px; height: 100%; background: rgba(34,35,42,.99); border-right:1px solid rgba(255,255,255,.07); -webkit-backdrop-filter: blur(30px) saturate(1.3); backdrop-filter: blur(30px) saturate(1.3); transform: translateX(-100%); transition: transform .28s cubic-bezier(.22,.8,.25,1); z-index: var(--z-overlay-drawer); padding: calc(14px + env(safe-area-inset-top, 0px)) 0 calc(14px + env(safe-area-inset-bottom, 0px)); display: flex; flex-direction: column; overflow: hidden; box-shadow: 18px 0 50px rgba(0,0,0,.38); }
+.drawer, .drawer * { -webkit-user-select:none; user-select:none; -webkit-touch-callout:none; }
 .drawer.open { transform: translateX(0); }
 .drawer.is-dragging { transition: none; }
 .drawer-list { flex:1; min-height:0; display:flex; flex-direction:column; overflow:hidden; }

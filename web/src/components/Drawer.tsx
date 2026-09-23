@@ -271,7 +271,7 @@ export default function Drawer({
     : (open ? 1 + swipeOffset / drawerWidth : swipeOffset / drawerWidth);
   return (
     <>
-      <div id="session-drawer" ref={drawerRef} className={`drawer${rootView === 'project' ? ' project-drawer' : ''} ${open ? 'open' : ''}${swipeOffset !== null ? ' is-dragging' : ''}`} style={swipeOffset === null ? undefined : { transform: `translateX(calc(${open ? '0px' : '-100%'} + ${swipeOffset}px))` }}>
+      <div id="session-drawer" ref={drawerRef} className={`drawer${rootView === 'project' ? ' project-drawer' : ''} ${open ? 'open' : ''}${swipeOffset !== null ? ' is-dragging' : ''}`} style={swipeOffset === null ? undefined : { transform: `translateX(calc(${open ? '0px' : '-100%'} + ${swipeOffset}px))` }} onContextMenu={(event) => event.preventDefault()}>
         <div className="drawer-list">
         <div className="drawer-fixed-header">
         <div className="drawer-brand">
