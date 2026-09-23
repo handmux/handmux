@@ -14,7 +14,7 @@ import type { TmuxWindow } from '../api.js';
 import type { MouseEvent } from 'react';
 import type { WorkspaceRecoveryPlan, WorkspaceRestoreOperation } from '../workspaceRecovery.js';
 import ActionSheet from './ActionSheet.jsx';
-import { FolderIcon, MonitorIcon, MoreHorizontalIcon, PencilIcon, PlusIcon, XIcon } from './icons.jsx';
+import { FolderIcon, GearIcon, MonitorIcon, MoreHorizontalIcon, PencilIcon, PlusIcon, XIcon } from './icons.jsx';
 
 const EXPANDED_SESSIONS_KEY = 'handmux.drawer.expanded-sessions';
 
@@ -77,6 +77,7 @@ interface DrawerProps {
   projectTaskBeta?: boolean;
   onSwitchProject?: () => void;
   onSwitchSession?: () => void;
+  onOpenSettings?: () => void;
   onNewWindow?: (sessionName: string) => void;
   onRenameSession?: (sessionName: string) => void;
   onDeleteSession?: (sessionName: string) => void;
@@ -89,7 +90,7 @@ export default function Drawer({
   open, onOpen = () => {}, currentSessionName, currentWindowId = null, bound, onSelectSession, onUnbind, onBind, onClose,
   orphans = [], onTakeoverRequest,
   recoveryPlan = null, recoveryOperation = null, onOpenRecovery = () => {},
-  projectTaskBeta = false, onSwitchProject = () => {}, onSwitchSession = () => {}, onNewWindow = () => {}, onRenameSession = () => {}, onDeleteSession = () => {}, rootView = 'session', currentProjectId = null,
+  projectTaskBeta = false, onSwitchProject = () => {}, onSwitchSession = () => {}, onOpenSettings = () => {}, onNewWindow = () => {}, onRenameSession = () => {}, onDeleteSession = () => {}, rootView = 'session', currentProjectId = null,
   onSelectProject = () => {},
 }: DrawerProps) {
   const [orphOpen, setOrphOpen] = useState(false);
@@ -224,9 +225,10 @@ export default function Drawer({
     <>
       <div id="session-drawer" ref={drawerRef} className={`drawer${rootView === 'project' ? ' project-drawer' : ''} ${open ? 'open' : ''}${swipeOffset !== null ? ' is-dragging' : ''}`} style={swipeOffset === null ? undefined : { transform: `translateX(calc(${open ? '0px' : '-100%'} + ${swipeOffset}px))` }}>
         <div className="drawer-list">
-          <div className="drawer-brand">
-            <img src="/icons/logo.svg" alt="" aria-hidden="true" />
+        <div className="drawer-brand">
+          <img src="/icons/logo.svg" alt="" aria-hidden="true" />
             <strong className="drawer-brand-wordmark">hand<span>mux</span></strong>
+            <button type="button" className="drawer-settings" onClick={onOpenSettings} aria-label={t('app.settings')} title={t('app.settings')}><GearIcon /></button>
           </div>
           {projectTaskBeta && (
             <div className="project-root-switch" role="group" aria-label={`${t('project.root.projects')} / ${t('project.root.sessions')}`}>
@@ -246,7 +248,9 @@ export default function Drawer({
               </button>
             ))}
           </> : <>
-          <div className="drawer-title"><MonitorIcon />{t('drawer.title')}</div>
+          <div className="drawer-title-row">
+            <div className="drawer-title"><MonitorIcon />{t('drawer.title')}</div>
+          </div>
           {bound.length === 0 && <div className="drawer-empty">{t('drawer.empty')}</div>}
           {bound.map((name) => (
             <div key={name} className="drawer-session-tree">
@@ -287,8 +291,6 @@ export default function Drawer({
               </div>
             </div>
           ))}
-          <button className="drawer-bind" onClick={onBind}>＋ {t('drawer.bind')}</button>
-
           {orphans.length > 0 && (
             <div className="drawer-orphans">
               <button className="drawer-orphans-head" onClick={() => setOrphOpen((o) => !o)}>
@@ -334,10 +336,14 @@ export default function Drawer({
           )}
           </>}
         </div>
+        <div className="drawer-footer">
+          <button className="drawer-bind" onClick={onBind}>＋ {t('drawer.bind')}</button>
+        </div>
       </div>
       <div
         className={`drawer-backdrop${open ? ' open' : ''}${swipeOffset !== null ? ' is-dragging' : ''}`}
         style={swipeOffset === null ? undefined : { opacity: Math.max(0, Math.min(1, backdropOpacity)) }}
+        onClick={open ? onClose : undefined}
         aria-hidden="true"
       />
       <ActionSheet

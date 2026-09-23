@@ -165,6 +165,15 @@ describe('Drawer (bound sessions)', () => {
     expect(onBind).toHaveBeenCalled();
   });
 
+  it('opens Settings from the top-right drawer button', async () => {
+    const onOpenSettings = vi.fn();
+    await render({ onOpenSettings });
+    await act(async () => {
+      container.querySelector('.drawer-settings').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    expect(onOpenSettings).toHaveBeenCalledTimes(1);
+  });
+
   describe('未接管会话 (orphans)', () => {
     const orphans = [
       { pid: 100, cwd: '/u/idle', cwdLabel: 'idle', sessionId: 's-idle', state: 'idle', snippet: 'resume me' },

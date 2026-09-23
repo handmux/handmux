@@ -953,7 +953,7 @@ button.settings-page-row:disabled, .settings-page-row.disabled { color: rgba(235
 .input-text:focus { outline: none; }
 .input-text::placeholder { color: #6b7280; }
 .token-prompt button { padding: 8px 14px; border: none; border-radius: 8px; background: var(--blue); color: #fff; }
-.drawer { position: fixed; top: 0; left: 0; width: min(86vw, 360px); max-width: 360px; height: 100%; background: rgba(35,36,39,.96); -webkit-backdrop-filter: blur(24px) saturate(1.25); backdrop-filter: blur(24px) saturate(1.25); transform: translateX(-100%); transition: transform .24s cubic-bezier(.22,.8,.25,1); z-index: var(--z-overlay-drawer); padding: calc(12px + env(safe-area-inset-top, 0px)) 12px calc(12px + env(safe-area-inset-bottom, 0px)); display: flex; flex-direction: column; overflow: hidden; box-shadow: 18px 0 50px rgba(0,0,0,.22); }
+.drawer { position: fixed; top: 0; left: 0; width: min(82vw, 340px); max-width: 340px; height: 100%; background: rgba(35,36,39,.96); -webkit-backdrop-filter: blur(24px) saturate(1.25); backdrop-filter: blur(24px) saturate(1.25); transform: translateX(-100%); transition: transform .24s cubic-bezier(.22,.8,.25,1); z-index: var(--z-overlay-drawer); padding: calc(12px + env(safe-area-inset-top, 0px)) 12px calc(12px + env(safe-area-inset-bottom, 0px)); display: flex; flex-direction: column; overflow: hidden; box-shadow: 18px 0 50px rgba(0,0,0,.22); }
 .drawer.open { transform: translateX(0); }
 .drawer.is-dragging { transition: none; }
 .drawer-list { flex: 1; min-height: 0; overflow-y: auto; }
@@ -962,15 +962,20 @@ button.settings-page-row:disabled, .settings-page-row.disabled { color: rgba(235
 .drawer-brand div { min-width: 0; display: grid; gap: 2px; }
 .drawer-brand-wordmark { font-family: ui-rounded, -apple-system, system-ui, sans-serif; font-size: 19px; line-height: 1; font-weight: 650; letter-spacing: -.45px; color: #f1f4ee; white-space: nowrap; }
 .drawer-brand-wordmark span { background: linear-gradient(95deg, #7cf0d6, #33d69a); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
+.drawer-settings { flex: none; width: 40px; height: 40px; margin-left: auto; display: inline-flex; align-items: center; justify-content: center; border: none; border-radius: 11px; background: transparent; color: rgba(235,235,245,.62); touch-action: manipulation; }
+.drawer-settings svg { width: 19px; height: 19px; }
+.drawer-settings:active { background: rgba(118,118,128,.2); color: #fff; }
 .drawer-footer { flex: none; display: flex; align-items: center; gap: 8px; padding-top: 10px; border-top: .5px solid rgba(84,84,88,.45); }
 .drawer-footer button { width: auto; min-width: 104px; min-height: 44px; padding: 0 14px; display: inline-flex; align-items: center; justify-content: flex-start; gap: 8px; border: none; border-radius: 12px; background: rgba(118,118,128,.16); color: rgba(235,235,245,.78); font: 14px/1 -apple-system,system-ui,sans-serif; touch-action: manipulation; }
 .drawer-footer button:active { background: rgba(118,118,128,.28); }
 .drawer-footer svg { width: 18px; height: 18px; }
 .drawer-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,.4); opacity: 0; pointer-events: none; transition: opacity .24s cubic-bezier(.22,.8,.25,1); z-index: var(--z-overlay-drawer-backdrop); }
-.drawer-backdrop.open { opacity: 1; pointer-events: none; }
+.drawer-backdrop.open { opacity: 1; pointer-events: auto; }
 .drawer-backdrop.is-dragging { transition: none; }
 .drawer-title { display: flex; align-items: center; gap: 7px; font-size: 12px; color: rgba(235,235,245,.5); letter-spacing: .4px; margin: 14px 8px 7px; }
 .drawer-title svg { width: 15px; height: 15px; }
+.drawer-title-row { display: flex; align-items: center; gap: 8px; margin: 14px 4px 7px; }
+.drawer-title-row .drawer-title { margin: 0 4px; }
 .drawer-row { display: flex; align-items: center; gap: 6px; border-radius: 8px; }
 .drawer-session-tree { margin: 0 4px 4px; border-radius: 13px; background: rgba(118,118,128,.09); overflow: hidden; }
 .drawer-name { flex: 1; min-width: 0; padding: 8px 4px; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -1003,7 +1008,7 @@ button.settings-page-row:disabled, .settings-page-row.disabled { color: rgba(235
 .drawer-project-row.active { background: transparent; color: #fff; box-shadow: inset 2px 0 0 var(--blue); }
 .drawer-project-row:active { background: rgba(118,118,128,.2); }
 /* Open the bind modal — the only way to add a session, since the list is user-curated. */
-.drawer-bind { width: 100%; margin-top: 8px; padding: 10px; border: none; border-radius: 8px; background: #2b3550; color: #cdddff; font-size: 14px; touch-action: manipulation; }
+.drawer-bind { width: 100%; min-height: 44px; margin: 0; padding: 0 12px; border: none; border-radius: 11px; background: #2b3550; color: #cdddff; font-size: 14px; touch-action: manipulation; }
 .drawer-bind:active { background: #344168; }
 
 /* Project Task beta — a task-first peer to the existing session root. The surfaces deliberately reuse

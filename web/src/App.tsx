@@ -104,7 +104,7 @@ import DirPicker from './components/DirPicker.jsx';
 import DocLinkPopover from './components/DocLinkPopover.jsx';
 import IdeaPanel from './components/IdeaPanel.jsx';
 import Changelog from './components/Changelog.jsx';
-import { FolderIcon, BulbIcon, MonitorIcon, GlobeIcon, GitIcon, GaugeIcon, GearIcon, SplitHIcon, SplitVIcon, PaneMapIcon, XIcon } from './components/icons.jsx';
+import { FolderIcon, BulbIcon, MonitorIcon, GlobeIcon, GitIcon, GaugeIcon, SplitHIcon, SplitVIcon, PaneMapIcon, XIcon } from './components/icons.jsx';
 import { useKeyboardInset } from './hooks/useKeyboardInset.js';
 import { useAsrAvailable } from './voice/useAsrAvailable.js';
 import { usePageScrollLock } from './hooks/usePageScrollLock.js';
@@ -2726,7 +2726,6 @@ export default function App() {
         </button>
         <button className="topbar-icon" onClick={reopenFiles} aria-label={t('app.files')} title={t('app.files')}><FolderIcon /></button>
         <button className="topbar-icon" onClick={() => setGitOpen(true)} aria-label="Git" title="Git"><GitIcon /></button>
-        <button className="topbar-icon" onClick={openSettings} aria-label={t('app.settings')} title={t('app.settings')}><GearIcon /></button>
       </header>}
       <UsagePage
         open={usageOpen}
@@ -2799,6 +2798,7 @@ export default function App() {
         projectTaskBeta={projectTaskBeta}
         onSwitchProject={() => chooseRootView('project')}
         onSwitchSession={() => chooseRootView('session')}
+        onOpenSettings={openSettings}
         onNewWindow={openNewWindowForSession}
         onRenameSession={renameSessionFromDrawer}
         onDeleteSession={deleteSessionFromDrawer}

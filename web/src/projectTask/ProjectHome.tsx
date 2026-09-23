@@ -1,12 +1,11 @@
 import { t } from '../i18n';
 import type { ReactNode } from 'react';
 import type { Project, Task } from './contracts.js';
-import { GearIcon } from '../components/icons.jsx';
 
 export type ProjectBucket = 'tasks' | 'drafts';
 
 export default function ProjectHome({ project, bucket, tasks, loading, error, inbox, obscured = false, onMenu, onBucket,
-  onCreate, onRetry, onManage, onOpenTask, onOpenSettings }: {
+  onCreate, onRetry, onManage, onOpenTask }: {
   project: Project;
   bucket: ProjectBucket;
   tasks: Task[];
@@ -20,7 +19,6 @@ export default function ProjectHome({ project, bucket, tasks, loading, error, in
   onRetry: () => void;
   onManage?: (() => void) | undefined;
   onOpenTask?: ((task: Task) => void) | undefined;
-  onOpenSettings: () => void;
 }) {
   return (
     <div className="project-root" aria-hidden={obscured}
@@ -29,7 +27,6 @@ export default function ProjectHome({ project, bucket, tasks, loading, error, in
         <button type="button" className="hamburger" onClick={onMenu}>☰</button>
         <span className="project-topbar-spacer" />
         {inbox}
-        <button type="button" className="topbar-icon" onClick={onOpenSettings} aria-label={t('app.settings')} title={t('app.settings')}><GearIcon /></button>
         {onCreate && <button type="button" className="project-add-button" onClick={onCreate} aria-label={bucket === 'tasks'
           ? t('project.newTask') : t('project.newDraft')}>＋</button>}
       </header>
