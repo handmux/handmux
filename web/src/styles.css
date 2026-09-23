@@ -1024,16 +1024,18 @@ button.settings-page-row:disabled, .settings-page-row.disabled { color: rgba(235
 .session-sections { width:100%; margin:0; padding:4px 0 20px; }
 .session-section { margin:0 0 4px; padding:0; }
 .session-section + .session-section { padding-top:8px; border-top:1px solid rgba(118,118,128,.12); }
-.session-section-header { min-height:28px; display:flex; align-items:center; padding:0 12px; background:transparent; cursor:pointer; }
-.session-section-toggle { flex:none; display:grid; place-items:center; width:18px; height:28px; margin-left:2px; padding:0; border:0; background:transparent; color:rgba(255,255,255,.76); }
+.session-section-header { min-height:28px; display:flex; align-items:center; padding:0 12px; background:transparent !important; box-shadow:none !important; cursor:pointer; -webkit-tap-highlight-color:transparent; }
+.session-section-toggle { flex:none; display:grid; place-items:center; width:18px; height:28px; margin-left:2px; padding:0; border:0; background:transparent !important; box-shadow:none !important; color:rgba(255,255,255,.76); -webkit-tap-highlight-color:transparent; }
 .session-section-toggle svg { width:12px; height:12px; transition:transform .22s cubic-bezier(.22,.8,.25,1); }
 .session-section-toggle:not(.is-open) svg { transform:rotate(-90deg); }
 .session-section-toggle:active { color:rgba(235,235,245,.70); }
-.session-section-menu { flex:none; display:grid; place-items:center; width:38px; height:28px; margin-left:auto; padding:0; border:0; border-radius:8px; background:transparent; color:rgba(235,235,245,.88); }
+.session-section-menu { flex:none; display:grid; place-items:center; width:38px; height:28px; margin-left:auto; padding:0; border:0; border-radius:0; background:transparent !important; box-shadow:none !important; color:rgba(235,235,245,.88); -webkit-tap-highlight-color:transparent; }
 .session-section-menu svg { width:20px; height:20px; opacity:1; }
 .session-section-menu:active { background:transparent; color:#fff; }
-.session-section-title { flex:0 1 auto; min-width:0; max-width:calc(100% - 60px); height:26px; display:flex; align-items:center; gap:0; padding:0; border:0; background:transparent; color:rgba(255,255,255,.94); text-align:left; font:14px/1 -apple-system,BlinkMacSystemFont,sans-serif; font-weight:700; touch-action:manipulation; -webkit-tap-highlight-color:transparent; }
-.session-section-icon { display:none; }
+.session-section-title { flex:0 1 auto; min-width:0; max-width:calc(100% - 60px); height:26px; display:flex; align-items:center; gap:0; padding:0; border:0; background:transparent !important; box-shadow:none !important; color:rgba(255,255,255,.94); text-align:left; font:14px/1 -apple-system,BlinkMacSystemFont,sans-serif; font-weight:700; touch-action:manipulation; -webkit-tap-highlight-color:transparent; }
+.session-section-icon { flex:none; display:inline-flex; align-items:center; justify-content:center; width:16px; height:16px; margin-right:7px; color:rgba(235,235,245,.62); }
+.session-section-icon svg { width:16px; height:16px; }
+.session-section.is-current .session-section-icon { color:#82e6c2; }
 .session-section.is-current .session-section-title { color:#82e6c2; }
 .session-section.is-current .session-section-toggle { color:#82e6c2; }
 .session-section-label { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; letter-spacing:-.01em; }
@@ -1041,14 +1043,15 @@ button.settings-page-row:disabled, .settings-page-row.disabled { color: rgba(235
 .session-section-body.is-open { grid-template-rows:1fr; }
 .session-window-list { min-height:0; overflow:hidden; padding:2px 0 0; background:rgba(255,255,255,.045); opacity:0; transform:translateY(-4px); transition:opacity .18s ease,transform .24s cubic-bezier(.22,.8,.25,1); }
 .session-section-body.is-open .session-window-list { opacity:1; transform:none; }
-.session-window-row { width:100%; min-height:38px; margin:0; padding:3px 12px; display:flex; align-items:center; gap:10px; border:0; border-radius:0; background:transparent; color:rgba(235,235,245,.58); text-align:left; font:13.5px/21px -apple-system,BlinkMacSystemFont,sans-serif; touch-action:manipulation; -webkit-tap-highlight-color:transparent; }
+.session-window-row { width:100%; min-height:38px; margin:0; padding:3px 12px 3px 2em; display:flex; align-items:center; gap:10px; border:0; border-radius:0; background:transparent; color:rgba(235,235,245,.58); text-align:left; font:13.5px/21px -apple-system,BlinkMacSystemFont,sans-serif; touch-action:manipulation; -webkit-tap-highlight-color:transparent; }
 .session-window-row.is-current { background:rgba(88,126,172,.48); box-shadow:none; border:0; border-radius:0; color:#fff; font-weight:500; }
 .session-window-label { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .session-window-count { flex:none; min-width:20px; margin-left:auto; color:rgba(235,235,245,.34); font:12px/20px ui-monospace,SFMono-Regular,Menlo,monospace; text-align:right; font-variant-numeric:tabular-nums; }
 .session-window-row.is-current .session-window-count { color:rgba(255,255,255,.66); }
-.session-window-menu { flex:none; width:32px; height:32px; margin-left:6px; padding:0; display:grid; place-items:center; border:0; border-radius:8px; background:transparent; color:rgba(235,235,245,.38); }
-.session-window-menu svg { width:17px; height:17px; }
-.session-window-menu:active { background:rgba(118,118,128,.10); color:rgba(235,235,245,.78); }
+.session-window-menu { flex:none; width:38px; height:32px; margin-left:6px; padding:0; display:grid; place-items:center; border:0; border-radius:0; background:transparent !important; box-shadow:none !important; color:rgba(235,235,245,.88); -webkit-tap-highlight-color:transparent; }
+.session-window-menu svg { width:20px; height:20px; }
+.session-window-menu:active { background:transparent !important; color:#fff; }
+.session-window-row:has(.session-window-menu:active) { background:transparent; }
 .session-window-row:active { background:rgba(118,118,128,.10); }
 .session-section-header:active, .session-section-header:focus, .session-section-header:focus-within { background:transparent; box-shadow:none; outline:none; }
 .session-section-title:focus, .session-section-title:focus-visible, .session-section-toggle:focus, .session-section-toggle:focus-visible, .session-section-menu:focus, .session-section-menu:focus-visible { outline:none; box-shadow:none; }
@@ -1057,7 +1060,7 @@ button.settings-page-row:disabled, .settings-page-row.disabled { color: rgba(235
 .session-section-skeleton-row, .session-window-skeleton-row { display:flex; align-items:center; gap:10px; }
 .session-section-skeleton-row { height:30px; padding:0 12px; }
 .session-window-skeleton { min-height:0; overflow:hidden; padding:4px 0; }
-.session-window-skeleton-row { height:40px; padding:4px 12px; }
+.session-window-skeleton-row { height:40px; padding:4px 12px 4px 2em; }
 .session-section-skeleton-row i, .session-window-skeleton-row i { display:block; height:10px; border-radius:999px; background:linear-gradient(90deg,rgba(255,255,255,.09),rgba(255,255,255,.18),rgba(255,255,255,.09)); background-size:220% 100%; animation:session-skeleton-shimmer 1.35s ease-in-out infinite; }
 .session-section-skeleton-row i:first-child { width:18px; height:18px; border-radius:6px; }
 .session-section-skeleton-row i:last-child { width:44%; }

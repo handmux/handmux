@@ -15,7 +15,7 @@ import type { MouseEvent } from 'react';
 import type { WorkspaceRecoveryPlan, WorkspaceRestoreOperation } from '../workspaceRecovery.js';
 import type { WorkspaceLens } from './LensSwitch.jsx';
 import ActionSheet from './ActionSheet.jsx';
-import { ChevronDownIcon, FolderIcon, GearIcon, MonitorIcon, MoreHorizontalIcon, PencilIcon, PlusIcon, XIcon } from './icons.jsx';
+import { ChevronDownIcon, CommandIcon, FolderIcon, GearIcon, MoreHorizontalIcon, PencilIcon, PlusIcon, XIcon } from './icons.jsx';
 
 const EXPANDED_SESSIONS_KEY = 'handmux.drawer.expanded-sessions';
 
@@ -316,7 +316,7 @@ export default function Drawer({
             <section key={name} className={`session-section${name === currentSessionName ? ' is-current' : ''}`}>
               <div className="session-section-header" role="treeitem" aria-expanded={expandedSessions.has(name)} onClick={() => toggleSession(name)}>
                 <button type="button" aria-expanded={expandedSessions.has(name)} aria-current={name === currentSessionName ? 'page' : undefined} className="session-section-title">
-                  <span className="session-section-icon"><MonitorIcon /></span><span className="session-section-label">{name}</span>
+                  <span className="session-section-icon"><CommandIcon /></span><span className="session-section-label">{name}</span>
                 </button>
                 <button
                   type="button"
