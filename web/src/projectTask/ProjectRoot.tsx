@@ -25,6 +25,7 @@ import type { ProjectBucket } from './ProjectHome.js';
 import ProjectManagement from './ProjectManagement.js';
 import TaskDetail from './TaskDetail.js';
 import TaskEditor from './TaskEditor.js';
+import { GearIcon } from '../components/icons.jsx';
 
 function message(error: unknown): string {
   if (error instanceof ApiError) return error.serverError || error.message;
@@ -433,6 +434,7 @@ export default function ProjectRoot({ drawerOpen, inbox, inset, onOpenDrawer, on
           onMenu={onOpenDrawer} onBucket={selectBucket}
           {...(!readOnly ? { onCreate: () => { setMutationError(null); setMutationConflict(false); setEditor({ task: null }); } } : {})}
           onRetry={() => void reloadTasks()}
+          onOpenSettings={onOpenSettings}
           {...(!readOnly ? { onManage: () => { setMutationError(null); setMutationConflict(false); setManagementOpen(true); } } : {})}
           {...(!readOnly ? { onOpenTask: (task: Task) => { setMutationError(null); setMutationConflict(false); setSelectedTask(task); } } : {})} />
       ) : (
@@ -440,6 +442,7 @@ export default function ProjectRoot({ drawerOpen, inbox, inset, onOpenDrawer, on
           {...(surfaceObscured ? { inert: '' as const } : {})}>
           <header className="project-topbar"><button type="button" className="hamburger" onClick={onOpenDrawer}>☰</button>
             <span className="project-topbar-spacer" />{inbox}
+            <button type="button" className="topbar-icon" onClick={onOpenSettings} aria-label={t('app.settings')} title={t('app.settings')}><GearIcon /></button>
             {!readOnly && <button type="button" className="project-add-button" onClick={openAddProject}>＋</button>}</header>
           <main className="project-fatal"><strong>{loading ? t('common.loading') : t('project.empty')}</strong>
             {!loading && <p>{t('project.emptyHint')}</p>}</main>

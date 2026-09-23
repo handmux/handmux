@@ -309,7 +309,7 @@ async function renderApp() {
 }
 
 async function triggerLogout() {
-  fireEvent.click(requiredElement(document, '.drawer-footer button:last-child'));
+  fireEvent.click(requiredElement(document, '.topbar .topbar-icon[aria-label="设置"]'));
   await flush();
   fireEvent.click(screen.getByRole('button', { name: '退出登录' }));
 }
@@ -1113,6 +1113,9 @@ describe('App workspace recovery', () => {
 
     fireEvent.click(container.querySelector('.drawer-backdrop')!);
     await flush();
+    expect(requiredElement(container, '.drawer').classList.contains('open')).toBe(true);
+    fireEvent.click(requiredElement(container, '.drawer-window'));
+    await flush();
     expect(requiredElement(container, '.drawer').classList.contains('open')).toBe(false);
     fireEvent.click(menu);
     await flush();
@@ -1159,7 +1162,7 @@ describe('App workspace recovery', () => {
     fireEvent.click(menu);
     await flush();
     expect(requiredElement(container, '.drawer').classList.contains('open')).toBe(true);
-    const hiddenFocusTarget = requiredElement<HTMLElement>(container, '.drawer-footer button:last-child');
+    const hiddenFocusTarget = requiredElement<HTMLElement>(container, '.topbar .topbar-icon[aria-label="设置"]');
     hiddenFocusTarget.focus();
 
     nextPlan.resolve(activePlan({ checkpointId: 'checkpoint-b' }));
@@ -1716,9 +1719,7 @@ describe('App workspace recovery', () => {
       .mockResolvedValueOnce({ status: 'degraded', lastSuccessfulCaptureAt: null, errorCode: 'live-corrupt' })
       .mockResolvedValueOnce({ status: 'protected', lastSuccessfulCaptureAt: '2026-07-20T02:00:00.000Z', errorCode: null });
     await renderApp();
-    fireEvent.click(requiredElement(document, '.hamburger'));
-    await flush();
-    fireEvent.click(requiredElement(document, '.drawer-footer button'));
+    fireEvent.click(requiredElement(document, '.topbar .topbar-icon[aria-label="设置"]'));
     await flush();
     expect(screen.getByText('工作区未受保护')).toBeTruthy();
     expect(screen.getByText(/工作区状态副本已损坏/)).toBeTruthy();

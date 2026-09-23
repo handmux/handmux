@@ -104,7 +104,7 @@ import DirPicker from './components/DirPicker.jsx';
 import DocLinkPopover from './components/DocLinkPopover.jsx';
 import IdeaPanel from './components/IdeaPanel.jsx';
 import Changelog from './components/Changelog.jsx';
-import { FolderIcon, BulbIcon, MonitorIcon, GlobeIcon, GitIcon, GaugeIcon, SplitHIcon, SplitVIcon, PaneMapIcon, XIcon } from './components/icons.jsx';
+import { FolderIcon, BulbIcon, MonitorIcon, GlobeIcon, GitIcon, GaugeIcon, GearIcon, SplitHIcon, SplitVIcon, PaneMapIcon, XIcon } from './components/icons.jsx';
 import { useKeyboardInset } from './hooks/useKeyboardInset.js';
 import { useAsrAvailable } from './voice/useAsrAvailable.js';
 import { usePageScrollLock } from './hooks/usePageScrollLock.js';
@@ -1221,7 +1221,6 @@ export default function App() {
 
   const openNewWindowForSession = useCallback(async (name: string): Promise<void> => {
     if (current?.session.name !== name && !(await selectSession(name))) return;
-    setDrawerOpen(false);
     setNewWinOpen(true);
   }, [current?.session.name, selectSession]);
 
@@ -1231,7 +1230,6 @@ export default function App() {
         ? current.session
         : (await getSessions()).find((candidate) => candidate.name === name);
       if (!session) return;
-      setDrawerOpen(false);
       setRenameTarget({ kind: 'session', id: session.id, name: session.name });
     } catch (error) {
       handledAuth(error);
@@ -1248,7 +1246,6 @@ export default function App() {
       setBound(removeBoundSession(name));
       reportBound();
       setCurrent((existing) => (existing?.session.id === session.id ? null : existing));
-      setDrawerOpen(false);
     } catch (error) {
       if (!handledAuth(error)) window.alert(t('app.deleteFailed'));
     }
@@ -2729,6 +2726,7 @@ export default function App() {
         </button>
         <button className="topbar-icon" onClick={reopenFiles} aria-label={t('app.files')} title={t('app.files')}><FolderIcon /></button>
         <button className="topbar-icon" onClick={() => setGitOpen(true)} aria-label="Git" title="Git"><GitIcon /></button>
+        <button className="topbar-icon" onClick={openSettings} aria-label={t('app.settings')} title={t('app.settings')}><GearIcon /></button>
       </header>}
       <UsagePage
         open={usageOpen}
@@ -2801,7 +2799,6 @@ export default function App() {
         projectTaskBeta={projectTaskBeta}
         onSwitchProject={() => chooseRootView('project')}
         onSwitchSession={() => chooseRootView('session')}
-        onOpenSettings={() => { setDrawerOpen(false); openSettings(); }}
         onNewWindow={openNewWindowForSession}
         onRenameSession={renameSessionFromDrawer}
         onDeleteSession={deleteSessionFromDrawer}

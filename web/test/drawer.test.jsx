@@ -83,10 +83,10 @@ describe('Drawer (bound sessions)', () => {
     expect(onOpen).toHaveBeenCalledTimes(1);
 
     await render({ open: true, onOpen, onClose });
-    const drawer = container.querySelector('.drawer');
+    const drawer = container.querySelector('.drawer-backdrop');
     await act(async () => {
-      dispatchTouch(drawer, 'touchstart', 180, 180);
-      dispatchTouch(window, 'touchmove', 40, 182);
+      dispatchTouch(drawer, 'touchstart', 300, 180);
+      dispatchTouch(window, 'touchmove', 120, 182);
       dispatchTouch(window, 'touchend');
     });
     expect(onClose).toHaveBeenCalledTimes(1);
@@ -163,15 +163,6 @@ describe('Drawer (bound sessions)', () => {
       container.querySelector('.drawer-bind').dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
     expect(onBind).toHaveBeenCalled();
-  });
-
-  it('opens Settings from the compact footer row', async () => {
-    const onOpenSettings = vi.fn();
-    await render({ onOpenSettings });
-    await act(async () => {
-      container.querySelector('.drawer-footer button').dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    });
-    expect(onOpenSettings).toHaveBeenCalledTimes(1);
   });
 
   describe('未接管会话 (orphans)', () => {

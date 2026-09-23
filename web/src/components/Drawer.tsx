@@ -14,7 +14,7 @@ import type { TmuxWindow } from '../api.js';
 import type { MouseEvent } from 'react';
 import type { WorkspaceRecoveryPlan, WorkspaceRestoreOperation } from '../workspaceRecovery.js';
 import ActionSheet from './ActionSheet.jsx';
-import { FolderIcon, GearIcon, MonitorIcon, MoreHorizontalIcon, PencilIcon, PlusIcon, XIcon } from './icons.jsx';
+import { FolderIcon, MonitorIcon, MoreHorizontalIcon, PencilIcon, PlusIcon, XIcon } from './icons.jsx';
 
 const EXPANDED_SESSIONS_KEY = 'handmux.drawer.expanded-sessions';
 
@@ -77,7 +77,6 @@ interface DrawerProps {
   projectTaskBeta?: boolean;
   onSwitchProject?: () => void;
   onSwitchSession?: () => void;
-  onOpenSettings?: () => void;
   onNewWindow?: (sessionName: string) => void;
   onRenameSession?: (sessionName: string) => void;
   onDeleteSession?: (sessionName: string) => void;
@@ -90,7 +89,7 @@ export default function Drawer({
   open, onOpen = () => {}, currentSessionName, currentWindowId = null, bound, onSelectSession, onUnbind, onBind, onClose,
   orphans = [], onTakeoverRequest,
   recoveryPlan = null, recoveryOperation = null, onOpenRecovery = () => {},
-  projectTaskBeta = false, onSwitchProject = () => {}, onSwitchSession = () => {}, onOpenSettings = () => {}, onNewWindow = () => {}, onRenameSession = () => {}, onDeleteSession = () => {}, rootView = 'session', currentProjectId = null,
+  projectTaskBeta = false, onSwitchProject = () => {}, onSwitchSession = () => {}, onNewWindow = () => {}, onRenameSession = () => {}, onDeleteSession = () => {}, rootView = 'session', currentProjectId = null,
   onSelectProject = () => {},
 }: DrawerProps) {
   const [orphOpen, setOrphOpen] = useState(false);
@@ -113,10 +112,12 @@ export default function Drawer({
       if (!touch) return;
       const target = event.target;
       const insideDrawer = target instanceof Node && drawerRef.current?.contains(target) === true;
+      const onDrawerBackdrop = target instanceof Element && Boolean(target.closest('.drawer-backdrop'));
       // Closing starts inside the drawer so a swipe on the backdrop remains its normal tap-to-dismiss
       // interaction. Opening is available across the normal page, unless a horizontal scroller still
       // has content to reveal on its left side.
-      if (isOverlayTarget(target) || (open ? !insideDrawer : hasHorizontalScrollAhead(target))) return;
+      if ((!open && isOverlayTarget(target)) || (open && isOverlayTarget(target) && !insideDrawer && !onDrawerBackdrop)
+        || (!open && hasHorizontalScrollAhead(target))) return;
       swipeOffsetRef.current = 0;
       swipeRef.current = {
         startX: touch.clientX,
@@ -161,15 +162,15 @@ export default function Drawer({
       else if (!gesture.baseOpen && offset > width * .22) onOpen();
     };
     const onTouchCancel = (event: TouchEvent): void => onTouchEnd(event, true);
-    window.addEventListener('touchstart', onTouchStart, { passive: true });
-    window.addEventListener('touchmove', onTouchMove, { passive: false });
-    window.addEventListener('touchend', onTouchEnd, { passive: true });
-    window.addEventListener('touchcancel', onTouchCancel, { passive: true });
+    window.addEventListener('touchstart', onTouchStart, { capture: true, passive: true });
+    window.addEventListener('touchmove', onTouchMove, { capture: true, passive: false });
+    window.addEventListener('touchend', onTouchEnd, { capture: true, passive: true });
+    window.addEventListener('touchcancel', onTouchCancel, { capture: true, passive: true });
     return () => {
-      window.removeEventListener('touchstart', onTouchStart);
-      window.removeEventListener('touchmove', onTouchMove);
-      window.removeEventListener('touchend', onTouchEnd);
-      window.removeEventListener('touchcancel', onTouchCancel);
+      window.removeEventListener('touchstart', onTouchStart, true);
+      window.removeEventListener('touchmove', onTouchMove, true);
+      window.removeEventListener('touchend', onTouchEnd, true);
+      window.removeEventListener('touchcancel', onTouchCancel, true);
     };
   }, [open, onClose, onOpen]);
 
@@ -240,7 +241,7 @@ export default function Drawer({
             {!projectsLoading && !projectsError && projects.length === 0 && <div className="drawer-empty">{t('project.empty')}</div>}
             {projects.map((project) => (
               <button key={project.id} type="button" aria-current={project.id === currentProjectId ? 'page' : undefined} className={`drawer-project-row${project.id === currentProjectId ? ' active' : ''}`}
-                onClick={() => { onSelectProject(project.id); onClose(); }}>
+                onClick={() => { onSelectProject(project.id); }}>
                 <FolderIcon /><span>{project.name}</span>{project.id === currentProjectId && <i aria-hidden="true" />}
               </button>
             ))}
@@ -333,14 +334,10 @@ export default function Drawer({
           )}
           </>}
         </div>
-        <div className="drawer-footer">
-          <button type="button" onClick={onOpenSettings}><GearIcon /><span>{t('app.settings')}</span></button>
-        </div>
       </div>
       <div
         className={`drawer-backdrop${open ? ' open' : ''}${swipeOffset !== null ? ' is-dragging' : ''}`}
         style={swipeOffset === null ? undefined : { opacity: Math.max(0, Math.min(1, backdropOpacity)) }}
-        onClick={open ? onClose : undefined}
         aria-hidden="true"
       />
       <ActionSheet

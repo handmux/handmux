@@ -967,7 +967,7 @@ button.settings-page-row:disabled, .settings-page-row.disabled { color: rgba(235
 .drawer-footer button:active { background: rgba(118,118,128,.28); }
 .drawer-footer svg { width: 18px; height: 18px; }
 .drawer-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,.4); opacity: 0; pointer-events: none; transition: opacity .24s cubic-bezier(.22,.8,.25,1); z-index: var(--z-overlay-drawer-backdrop); }
-.drawer-backdrop.open { opacity: 1; pointer-events: auto; }
+.drawer-backdrop.open { opacity: 1; pointer-events: none; }
 .drawer-backdrop.is-dragging { transition: none; }
 .drawer-title { display: flex; align-items: center; gap: 7px; font-size: 12px; color: rgba(235,235,245,.5); letter-spacing: .4px; margin: 14px 8px 7px; }
 .drawer-title svg { width: 15px; height: 15px; }
