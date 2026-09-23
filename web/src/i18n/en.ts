@@ -372,6 +372,7 @@ export default {
   'bind.title': 'Bind session',
   'bind.sessionName': 'Session name',
   'bind.pickSession': 'Choose a session to bind',
+  'bind.noAvailable': 'No sessions are available to bind',
   'bind.newSession': '＋ New session',
   'bind.modeNew': 'New',
   'bind.modeExisting': 'Existing',

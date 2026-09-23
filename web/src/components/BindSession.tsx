@@ -5,13 +5,12 @@ import { t } from '../i18n';
 import DirPicker from './DirPicker.jsx';
 import StartupCmdPicker from './StartupCmdPicker.jsx';
 import { useBackButton } from '../hooks/useBackButton.js';
+import { ChevronRightIcon, CommandIcon, PlusIcon, XIcon } from './icons.jsx';
 
 // Mirrors the server's isValidSessionName: letters, digits, hyphens, 1-16 chars. Applied only when
 // CREATING a session — binding picks from a list of existing names (which may contain spaces), so no
 // regex is needed on that path.
 const NEW_NAME_RE = /^[A-Za-z0-9-]{1,16}$/;
-
-type BindMode = 'new' | 'existing';
 
 interface HostSession {
   id?: string;
@@ -49,13 +48,12 @@ const startupCommand = (): string => {
   return typeof value === 'string' ? value : '';
 };
 
-// Bind a session by PICKING it. Instead of typing a name, we list the sessions that exist on the host
-// and aren't already bound on this device (a fontbtn group, per project convention — no native <select>).
-// A "＋ new" entry flips the card into create mode: name + start dir + startup command, then create+open.
+// Bind a session by picking it. The bottom sheet lists host sessions that are not already bound on this
+// device; its separate new-session row enters the existing name/start-dir/startup-command form.
 export default function BindSession({ open, onClose, onBound, bound, onAuthFail, inset = 0 }: BindSessionProps) {
   const [sessions, setSessions] = useState<HostSession[]>([]);
-  const [mode, setMode] = useState<BindMode>('new');
-  const [target, setTarget] = useState<string | null>(null); // null · 'new' · existing name
+  const [sessionsLoading, setSessionsLoading] = useState(false);
+  const [view, setView] = useState<'pick' | 'new'>('pick');
   const [name, setName] = useState('');        // new-session name (create mode)
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -68,40 +66,48 @@ export default function BindSession({ open, onClose, onBound, bound, onAuthFail,
     if (!open) return undefined;
     let cancelled = false;
     setName(''); setError(''); setBusy(false); setCwd(null); setPickerOpen(false);
-    setMode('new'); setTarget('new'); // provisional; flips to "existing" below if there are bindable sessions
+    setView('pick');
+    setSessionsLoading(true);
     getSessions()
       .then((response) => {
         const list = parseSessions(response);
         if (cancelled) return;
         setSessions(list);
-        // Default to picking an existing session when there is one to bind (that's the common case);
-        // fall back to create mode only when nothing is bindable.
-        if (list.some((x) => !bound.includes(x.name))) { setMode('existing'); setTarget(null); }
       })
       .catch((caught) => {
         if (cancelled) return;
         if (caught instanceof UnauthorizedError) onAuthFail?.(); else setError(t('bind.checkFailed'));
-      });
+      })
+      .finally(() => { if (!cancelled) setSessionsLoading(false); });
     return () => { cancelled = true; };
   }, [open]);
 
   // Focus the name field the moment we enter create mode so the soft keyboard pops right up.
   useEffect(() => {
-    if (target !== 'new') return undefined;
+    if (view !== 'new') return undefined;
     const timer = setTimeout(() => inputRef.current?.focus(), 0);
     return () => clearTimeout(timer);
-  }, [target]);
+  }, [view]);
   useBackButton(open && pickerOpen, () => setPickerOpen(false));
 
   if (!open) return null;
 
   const avail = sessions.filter((s) => !bound.includes(s.name)); // 已绑定的不再展示
 
-  const submit = async (): Promise<void> => {
-    if (busy || !target) return;
+  const bindExisting = async (sessionName: string): Promise<void> => {
+    if (busy) return;
+    setBusy(true); setError('');
+    try {
+      await onBound(sessionName);
+    } catch (caught) {
+      if (caught instanceof UnauthorizedError) onAuthFail?.();
+      else setError(caught instanceof Error ? caught.message : t('bind.checkFailed'));
+      setBusy(false);
+    }
+  };
 
-    // Existing session picked → it already exists, just open it (spaced names welcome).
-    if (target !== 'new') { void onBound(target); return; }
+  const submit = async (): Promise<void> => {
+    if (busy) return;
 
     // Create mode: validate, create, then open.
     const n = name.trim();
@@ -120,68 +126,74 @@ export default function BindSession({ open, onClose, onBound, bound, onAuthFail,
     }
   };
 
-  const confirmLabel = target === 'new'
-    ? (busy ? t('bind.creating') : t('bind.createAndOpen'))
-    : (busy ? t('bind.checking') : t('bind.bind'));
-
   return (
     <>
-      <div className="settings-backdrop" onClick={onClose} />
-      {/* The app slides up by `inset` when the keyboard opens; since this fixed card lives inside
-          that transformed container it gets dragged up too. Add inset/2 back so the card lands
-          centered in the area ABOVE the keyboard — high enough not to be covered, no higher. */}
+      <div className="settings-backdrop bind-session-backdrop" onClick={onClose} />
+      {/* This is a system-style bottom sheet. The app itself is lifted above the soft keyboard, so
+          the sheet follows that geometry without a second transform that would make it jump. */}
       <div
-        className="settings-card"
-        style={{ transform: `translate(-50%, calc(-50% + ${inset / 2}px))` }}
+        className="settings-card bind-session-sheet"
         role="dialog" aria-label={t('bind.title')} aria-modal="true"
       >
+        <div className="bind-sheet-grabber" aria-hidden="true"><i /></div>
         <div className="settings-head">
+          <button
+            type="button"
+            className={`bind-sheet-back${view === 'pick' ? ' is-hidden' : ''}`}
+            onClick={() => { setView('pick'); setError(''); }}
+            aria-label={t('common.back')}
+            tabIndex={view === 'pick' ? -1 : 0}
+          ><ChevronRightIcon /></button>
           <span className="settings-title">{t('bind.title')}</span>
-          <button className="settings-close" onClick={onClose} aria-label={t('common.close')}>✕</button>
+          <button type="button" className="settings-close" onClick={onClose} aria-label={t('common.close')}><XIcon /></button>
         </div>
-        <div className="settings-section">
-          <div className="opt">
-            {/* New-vs-existing is a genuine either/or MODE, so it's a segmented control — not a row of
-                pills that each read like a fire-now action ("＋ New session" used to look tappable-to-create). */}
-            <div className="bind-mode" role="tablist" aria-label={t('bind.pickSession')}>
-              <button
-                className="seg" role="tab" aria-pressed={mode === 'new'}
-                onClick={() => { setMode('new'); setTarget('new'); setError(''); }}
-              >
-                {t('bind.modeNew')}
-              </button>
-              <button
-                className="seg" role="tab" aria-pressed={mode === 'existing'} disabled={!avail.length}
-                onClick={() => { setMode('existing'); setTarget(null); setError(''); }}
-              >
-                {t('bind.modeExisting')}
+        {view === 'pick' ? (
+          <div className="bind-sheet-body">
+            <div className="bind-sheet-section">
+              <div className="settings-label">{t('bind.modeExisting')}</div>
+              {sessionsLoading ? (
+                <div className="bind-session-skeleton" role="status" aria-label={t('common.loading')} aria-busy="true">
+                  {[0, 1, 2].map((row) => <div className="bind-session-skeleton-row" key={row}><i /><i /><i /></div>)}
+                </div>
+              ) : avail.length > 0 ? (
+                <ul className="bind-session-list">
+                  {avail.map((session) => (
+                    <li key={session.id || session.name}>
+                      <button
+                        type="button"
+                        className="bind-session-row"
+                        disabled={busy}
+                        onClick={() => { void bindExisting(session.name); }}
+                      >
+                        <CommandIcon />
+                        <span>{session.name}</span>
+                        <ChevronRightIcon />
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="bind-session-empty">{t('bind.noAvailable')}</p>
+              )}
+            </div>
+            <div className="bind-sheet-section bind-sheet-create-section">
+              <div className="settings-label">{t('bind.modeNew')}</div>
+              <button type="button" className="bind-session-row bind-session-create" onClick={() => { setView('new'); setError(''); }}>
+                <PlusIcon />
+                <span>{t('bind.modeNew')}</span>
+                <ChevronRightIcon />
               </button>
             </div>
+            {error && <div className="bind-error" role="alert">{error}</div>}
           </div>
-          {mode === 'existing' && (
-            <div className="opt">
-              <div className="settings-label">{t('bind.pickSession')}</div>
-              <div className="orphan-targets">
-                {avail.map((s) => (
-                  <button
-                    key={s.id || s.name}
-                    className="fontbtn"
-                    aria-pressed={target === s.name}
-                    onClick={() => { setTarget(s.name); setError(''); }}
-                  >
-                    {s.name}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-          {mode === 'new' && (
-            <>
+        ) : (
+          <div className="bind-sheet-body bind-sheet-form-body">
               <div className="opt">
                 <div className="settings-label">{t('bind.sessionName')}</div>
                 <input
                   ref={inputRef}
                   className="bind-input"
+                  aria-label={t('bind.sessionName')}
                   value={name}
                   placeholder={t('bind.invalidName')}
                   onChange={(e) => { setName(e.target.value); setError(''); }}
@@ -199,19 +211,18 @@ export default function BindSession({ open, onClose, onBound, bound, onAuthFail,
               <div className="opt">
                 <StartupCmdPicker value={cmd} onChange={setCmd} />
               </div>
-            </>
-          )}
-          {error && <div className="bind-error">{error}</div>}
-          {/* Teach the reverse direction right where sessions are born: any session here (incl. ones
-              created from the phone) is one command away on the computer. */}
-          <div className="settings-hint">{t('bind.desktopHint')}</div>
-          <div className="settings-btns bind-actions">
-            <button className="fontbtn" onClick={onClose}>{t('common.cancel')}</button>
-            <button className="fontbtn bind-confirm" onClick={submit} disabled={busy || !target}>
-              {confirmLabel}
-            </button>
+            {error && <div className="bind-error" role="alert">{error}</div>}
+            {/* Teach the reverse direction right where sessions are born: any session here (incl. ones
+                created from the phone) is one command away on the computer. */}
+            <div className="settings-hint">{t('bind.desktopHint')}</div>
+            <div className="settings-btns bind-actions">
+              <button type="button" className="fontbtn" onClick={onClose}>{t('common.cancel')}</button>
+              <button type="button" className="fontbtn bind-confirm" onClick={() => { void submit(); }} disabled={busy || !name.trim()}>
+                {busy ? t('bind.creating') : t('bind.createAndOpen')}
+              </button>
+            </div>
           </div>
-        </div>
+        )}
       </div>
       <DirPicker
         open={pickerOpen}

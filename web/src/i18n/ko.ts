@@ -182,6 +182,7 @@ export default {
   'bind.title': '세션 연결',
   'bind.sessionName': '세션 이름',
   'bind.pickSession': '연결할 세션 선택',
+  'bind.noAvailable': '연결할 수 있는 세션이 없습니다',
   'bind.newSession': '＋ 새 세션',
   'bind.modeNew': '새 세션',
   'bind.modeExisting': '기존 세션',

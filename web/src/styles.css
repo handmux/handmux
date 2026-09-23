@@ -1015,10 +1015,54 @@ button.settings-page-row:disabled, .settings-page-row.disabled { color: rgba(235
 .drawer-project-row span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .drawer-project-row.active { background: transparent; color: #fff; box-shadow: inset 2px 0 0 var(--blue); }
 .drawer-project-row:active { background: rgba(118,118,128,.2); }
-/* Open the bind modal — the only way to add a session, since the list is user-curated. */
-.drawer-bind-footer { padding-top: 8px; border-top: none; }
-.drawer-bind-footer .drawer-bind { width: 100%; min-height: 0; margin-top: 0; padding: 10px; display: block; border: none; border-radius: 8px; background: #2b3550; color: #cdddff; font: 14px/normal -apple-system,system-ui,sans-serif; text-align: center; touch-action: manipulation; }
-.drawer-bind:active { background: #344168; }
+/* Bind entry: an iOS list action row, fixed above the drawer safe area. The icon and chevron are
+   affordances; the whole 44pt row is the hit target and stays visually quiet until pressed. */
+.drawer-bind-footer { padding-top: 6px; border-top: .5px solid rgba(84,84,88,.45); }
+.drawer-bind-footer .drawer-bind { width: 100%; min-width: 0; min-height: 44px; margin-top: 0; padding: 0 4px; display: flex; align-items: center; gap: 10px; border: none; border-radius: 9px; background: transparent; color: rgba(235,235,245,.86); font: 14px/1 -apple-system,system-ui,sans-serif; text-align: left; touch-action: manipulation; }
+.drawer-bind-footer .drawer-bind span { flex: 1; min-width: 0; }
+.drawer-bind-footer .drawer-bind svg:first-child { width: 19px; height: 19px; color: var(--green); }
+.drawer-bind-footer .drawer-bind svg:last-child { width: 16px; height: 16px; color: rgba(235,235,245,.42); }
+.drawer-bind:active { background: rgba(118,118,128,.12); }
+
+/* Bind picker: a standard bottom sheet with a grouped-list body. The app already lifts as one unit
+   when the keyboard is present, so this sheet does not apply a second keyboard transform. */
+.bind-session-backdrop { z-index: var(--z-overlay-base-backdrop); animation: bind-backdrop-in .2s ease-out both; }
+.bind-session-sheet { left: 50%; top: auto; bottom: 0; width: min(100%, 540px); max-width: 540px; max-height: min(85dvh, 680px); padding: 8px 20px max(20px, env(safe-area-inset-bottom, 0px)); border-radius: 20px 20px 0 0; transform: translateX(-50%); overflow: hidden; animation: bind-sheet-in .28s cubic-bezier(.22,.8,.25,1) both; }
+@keyframes bind-backdrop-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes bind-sheet-in { from { opacity: .72; transform: translate(-50%, 100%); } to { opacity: 1; transform: translate(-50%, 0); } }
+.bind-sheet-grabber { flex: none; display: flex; justify-content: center; height: 14px; }
+.bind-sheet-grabber i { display: block; width: 36px; height: 4px; margin-top: 2px; border-radius: 999px; background: rgba(235,235,245,.24); }
+.bind-session-sheet .settings-head { min-height: 44px; margin: 0 0 4px; display: grid; grid-template-columns: 44px minmax(0, 1fr) 44px; align-items: center; }
+.bind-session-sheet .settings-title { min-width: 0; margin: 0; overflow: hidden; text-overflow: ellipsis; text-align: center; font-size: 17px; letter-spacing: -.2px; }
+.bind-sheet-back { width: 44px; height: 44px; display: inline-flex; align-items: center; justify-content: center; border: 0; border-radius: 22px; background: transparent; color: var(--blue); touch-action: manipulation; }
+.bind-sheet-back svg { width: 20px; height: 20px; transform: rotate(180deg); }
+.bind-sheet-back.is-hidden { visibility: hidden; pointer-events: none; }
+.bind-session-sheet .settings-close { justify-self: end; width: 44px; height: 44px; margin: 0; border-radius: 22px; background: transparent; color: rgba(235,235,245,.58); }
+.bind-session-sheet .settings-close:active { background: rgba(118,118,128,.16); }
+.bind-sheet-body { flex: 1; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; margin: 0 -20px; padding: 0 20px; }
+.bind-sheet-section { padding: 8px 0 12px; }
+.bind-sheet-section + .bind-sheet-section { border-top: .5px solid rgba(84,84,88,.48); }
+.bind-sheet-section .settings-label { margin: 0 0 4px; color: rgba(235,235,245,.46); font-size: 12px; letter-spacing: .2px; }
+.bind-session-list { overflow: hidden; margin: 0; padding: 0; list-style: none; border-radius: 11px; background: rgba(120,120,128,.1); }
+.bind-session-row { width: 100%; min-height: 50px; padding: 0 12px; display: flex; align-items: center; gap: 11px; border: 0; border-bottom: .5px solid rgba(84,84,88,.42); background: transparent; color: #f2f2f7; text-align: left; font: 15px/1.2 -apple-system,system-ui,sans-serif; touch-action: manipulation; }
+.bind-session-list > li:last-child .bind-session-row { border-bottom: 0; }
+.bind-session-row > svg:first-child { flex: none; width: 19px; height: 19px; color: rgba(235,235,245,.58); }
+.bind-session-row > span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bind-session-row > svg:last-child { flex: none; width: 16px; height: 16px; color: rgba(235,235,245,.4); }
+.bind-session-row:active { background: rgba(118,118,128,.17); }
+.bind-session-row:disabled { opacity: .58; }
+.bind-session-create { border-radius: 11px; background: rgba(120,118,128,.1); }
+.bind-session-create > svg:first-child { color: var(--green); }
+.bind-session-empty { margin: 0; padding: 15px 12px; border-radius: 11px; background: rgba(120,118,128,.1); color: rgba(235,235,245,.5); font-size: 14px; line-height: 1.4; }
+.bind-sheet-form-body { padding-top: 4px; padding-bottom: 4px; }
+.bind-session-skeleton { overflow: hidden; border-radius: 11px; background: rgba(120,118,128,.1); }
+.bind-session-skeleton-row { min-height: 50px; padding: 0 12px; display: flex; align-items: center; gap: 10px; border-bottom: .5px solid rgba(84,84,88,.35); }
+.bind-session-skeleton-row:last-child { border-bottom: 0; }
+.bind-session-skeleton-row i { display: block; height: 10px; border-radius: 999px; background: linear-gradient(90deg, rgba(235,235,245,.08), rgba(235,235,245,.18), rgba(235,235,245,.08)); background-size: 220% 100%; animation: session-skeleton-shimmer 1.35s ease-in-out infinite; }
+.bind-session-skeleton-row i:first-child { width: 19px; height: 19px; border-radius: 6px; }
+.bind-session-skeleton-row i:nth-child(2) { width: 42%; }
+.bind-session-skeleton-row i:last-child { width: 12px; margin-left: auto; }
+@media (prefers-reduced-motion: reduce) { .bind-session-backdrop, .bind-session-sheet { animation: none; } .bind-session-skeleton-row i { animation: none; } }
 
 /* Session browser: a quiet group caption followed by full-width, compact Window rows. */
 .session-sections { width:100%; margin:0; padding:4px 0 20px; }

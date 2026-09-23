@@ -51,10 +51,10 @@ const typeInto = (node, text) => act(() => {
   setter.call(node, text);
   node.dispatchEvent(new Event('input', { bubbles: true }));
 });
-// Click an existing-session chip by its visible text (only shown in "existing" mode).
-const target = (text) => [...container.querySelectorAll('.orphan-targets .fontbtn')].find((b) => b.textContent === text);
-// Click a top mode segment ('新建会话' / '已有会话') by its text.
-const seg = (text) => [...container.querySelectorAll('.bind-mode .seg')].find((b) => b.textContent === text);
+// Click an existing-session row by its visible text. Existing sessions bind immediately.
+const target = (text) => [...container.querySelectorAll('.bind-session-list .bind-session-row')].find((b) => b.textContent?.includes(text));
+// The picker has a dedicated list action for entering the existing create flow.
+const createEntry = () => container.querySelector('.bind-session-create');
 
 describe('BindSession', () => {
   it('binds a picked existing session directly (no create)', async () => {
@@ -63,7 +63,6 @@ describe('BindSession', () => {
     await render({ onBound });
     await settle();
     await fire(target('main'), 'click');
-    await fire(container.querySelector('.bind-confirm'), 'click');
     await settle();
     expect(onBound).toHaveBeenCalledWith('main');
     expect(createSession).not.toHaveBeenCalled();
@@ -75,7 +74,6 @@ describe('BindSession', () => {
     await render({ onBound });
     await settle();
     await fire(target('Typeless Session'), 'click');
-    await fire(container.querySelector('.bind-confirm'), 'click');
     await settle();
     expect(onBound).toHaveBeenCalledWith('Typeless Session');
     expect(createSession).not.toHaveBeenCalled();
@@ -94,25 +92,26 @@ describe('BindSession', () => {
     await render({});
     await settle();
     expect(container.querySelector('.bind-error')?.textContent).toContain('校验失败');
-    expect(container.querySelector('.orphan-targets')).toBeNull();
+    expect(container.querySelector('.bind-session-list')).toBeNull();
   });
 
-  it('confirm is disabled until something is picked', async () => {
+  it('create is disabled until a new name is entered', async () => {
     getSessions.mockResolvedValue([{ id: '$0', name: 'main' }]);
     await render({});
     await settle();
+    await fire(createEntry(), 'click');
     expect(container.querySelector('.bind-confirm').disabled).toBe(true);
-    await fire(target('main'), 'click');
+    typeInto(container.querySelector('.bind-input'), 'new-sess');
     expect(container.querySelector('.bind-confirm').disabled).toBe(false);
   });
 
-  it('creates a new session via the ＋ entry', async () => {
+  it('creates a new session via the new-session entry', async () => {
     getSessions.mockResolvedValue([{ id: '$0', name: 'main' }]);
     createSession.mockResolvedValue({ id: '$7', name: 'new-sess' });
     const onBound = vi.fn();
     await render({ onBound });
     await settle();
-    await fire(seg('新建会话'), 'click');
+    await fire(createEntry(), 'click');
     typeInto(container.querySelector('.bind-input'), 'new-sess');
     await fire(container.querySelector('.bind-confirm'), 'click');
     await settle();
@@ -125,7 +124,7 @@ describe('BindSession', () => {
     const onBound = vi.fn();
     await render({ onBound });
     await settle();
-    await fire(seg('新建会话'), 'click');
+    await fire(createEntry(), 'click');
     typeInto(container.querySelector('.bind-input'), 'main');
     await fire(container.querySelector('.bind-confirm'), 'click');
     await settle();
@@ -139,7 +138,7 @@ describe('BindSession', () => {
     const onBound = vi.fn();
     await render({ onBound });
     await settle();
-    await fire(seg('新建会话'), 'click');
+    await fire(createEntry(), 'click');
     typeInto(container.querySelector('.bind-input'), 'bad name');
     await fire(container.querySelector('.bind-confirm'), 'click');
     await settle();
@@ -154,7 +153,7 @@ describe('BindSession', () => {
     const onBound = vi.fn();
     await render({ onBound });
     await settle();
-    await fire(seg('新建会话'), 'click');
+    await fire(createEntry(), 'click');
     typeInto(container.querySelector('.bind-input'), 'newsess');
     await fire(container.querySelector('.bind-confirm'), 'click');
     await settle();
@@ -172,7 +171,7 @@ describe('BindSession', () => {
     const onBound = vi.fn();
     await render({ onAuthFail, onBound });
     await settle();
-    await fire(seg('新建会话'), 'click');
+    await fire(createEntry(), 'click');
     typeInto(container.querySelector('.bind-input'), 'newsess');
     await fire(container.querySelector('.bind-confirm'), 'click');
     await settle();
@@ -186,7 +185,7 @@ describe('BindSession', () => {
     await render({});
     await settle();
     expect(container.textContent).not.toContain('起始目录');
-    await fire(seg('新建会话'), 'click');
+    await fire(createEntry(), 'click');
     expect(container.textContent).toContain('起始目录');
   });
 
@@ -196,7 +195,7 @@ describe('BindSession', () => {
     const onBound = vi.fn();
     await render({ onBound });
     await settle();
-    await fire(seg('新建会话'), 'click');
+    await fire(createEntry(), 'click');
     typeInto(container.querySelector('.bind-input'), 'newsess');
     // Open the picker via the start-dir field
     await fire(container.querySelector('.cwd-field'), 'click');
@@ -221,7 +220,7 @@ describe('BindSession', () => {
     const onBound = vi.fn();
     await render({ onBound });
     await settle();
-    await fire(seg('新建会话'), 'click');
+    await fire(createEntry(), 'click');
     typeInto(container.querySelector('.bind-input'), 'newsess');
     await fire(container.querySelector('.bind-confirm'), 'click');
     await settle();

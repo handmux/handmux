@@ -15,7 +15,7 @@ import type { MouseEvent } from 'react';
 import type { WorkspaceRecoveryPlan, WorkspaceRestoreOperation } from '../workspaceRecovery.js';
 import type { WorkspaceLens } from './LensSwitch.jsx';
 import ActionSheet from './ActionSheet.jsx';
-import { ChevronDownIcon, CommandIcon, FolderIcon, GearIcon, MoreHorizontalIcon, PencilIcon, PlusIcon, XIcon } from './icons.jsx';
+import { ChevronDownIcon, ChevronRightIcon, CommandIcon, FolderIcon, GearIcon, MoreHorizontalIcon, PencilIcon, PlusIcon, XIcon } from './icons.jsx';
 
 const EXPANDED_SESSIONS_KEY = 'handmux.drawer.expanded-sessions';
 
@@ -400,7 +400,11 @@ export default function Drawer({
         </div>
         </div>
         {rootView === 'session' && <div className="drawer-footer drawer-bind-footer">
-          <button className="drawer-bind" onClick={onBind}>＋ {t('drawer.bind')}</button>
+          <button type="button" className="drawer-bind" onClick={onBind}>
+            <PlusIcon />
+            <span>{t('drawer.bind')}</span>
+            <ChevronRightIcon />
+          </button>
         </div>}
       </div>
       <div

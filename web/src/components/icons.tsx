@@ -129,6 +129,15 @@ export function ChevronDownIcon() {
   );
 }
 
+// › navigation affordance for compact iOS-style list rows.
+export function ChevronRightIcon() {
+  return (
+    <svg {...base}>
+      <path d="m9 5 7 7-7 7" />
+    </svg>
+  );
+}
+
 // A lightning bolt — indicates that Codex Fast service is active.
 export function BoltIcon() {
   return (

@@ -182,6 +182,7 @@ export default {
   'bind.title': 'セッションを紐付け',
   'bind.sessionName': 'セッション名',
   'bind.pickSession': '紐付けるセッションを選択',
+  'bind.noAvailable': '紐付け可能なセッションはありません',
   'bind.newSession': '＋ 新規セッション',
   'bind.modeNew': '新規作成',
   'bind.modeExisting': '既存を選択',
