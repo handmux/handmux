@@ -237,7 +237,7 @@ export default function Drawer({
             </div>
           )}
           {rootView === 'project' ? <>
-            <div className="drawer-title"><FolderIcon />{t('project.root.projects')}</div>
+            <div className="drawer-section-heading"><span>{t('project.root.projects')}</span><small>{projects.length}</small></div>
             {projectsLoading && <div className="drawer-empty">{t('common.loading')}</div>}
             {!projectsLoading && projectsError && <div className="drawer-empty" role="alert">{projectsError}</div>}
             {!projectsLoading && !projectsError && projects.length === 0 && <div className="drawer-empty">{t('project.empty')}</div>}
@@ -248,9 +248,7 @@ export default function Drawer({
               </button>
             ))}
           </> : <>
-          <div className="drawer-title-row">
-            <div className="drawer-title"><MonitorIcon />{t('drawer.title')}</div>
-          </div>
+          <div className="drawer-section-heading"><span>{t('drawer.title')}</span><small>{bound.length}</small></div>
           {bound.length === 0 && <div className="drawer-empty">{t('drawer.empty')}</div>}
           {bound.map((name) => (
             <div key={name} className="drawer-session-tree">
