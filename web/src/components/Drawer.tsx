@@ -7,15 +7,13 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { t } from '../i18n';
 import { relTime } from '../inbox.js';
 import WorkspaceRecoveryCard from './WorkspaceRecoveryCard.jsx';
-import { listProjects } from '../projectTask/api.js';
-import type { Project } from '../projectTask/contracts.js';
 import { getSessions, getWindowsForSessions } from '../api.js';
 import type { TmuxSession, TmuxWindow } from '../api.js';
 import type { MouseEvent } from 'react';
 import type { WorkspaceRecoveryPlan, WorkspaceRestoreOperation } from '../workspaceRecovery.js';
 import type { WorkspaceLens } from './LensSwitch.jsx';
 import ActionSheet from './ActionSheet.jsx';
-import { ArrowUpIcon, ChevronDownIcon, ChevronRightIcon, CommandIcon, FolderIcon, GearIcon, MoreHorizontalIcon, PencilIcon, PlusIcon, XIcon } from './icons.jsx';
+import { ArrowUpIcon, ChevronDownIcon, ChevronRightIcon, CommandIcon, GearIcon, MoreHorizontalIcon, PencilIcon, PlusIcon, XIcon } from './icons.jsx';
 
 const EXPANDED_SESSIONS_KEY = 'handmux.drawer.expanded-sessions';
 
@@ -100,8 +98,6 @@ interface DrawerProps {
   windowOrderVersion?: number;
   revealRevision?: number;
   rootView?: 'session' | 'project';
-  currentProjectId?: string | null;
-  onSelectProject?: (id: string) => void;
 }
 
 /**
@@ -121,13 +117,10 @@ export default function Drawer({
   open, onOpen = () => {}, currentSessionName, currentWindowId = null, bound, onSelectSession, onUnbind, onBind, onClose,
   orphans = [], onTakeoverRequest,
   recoveryPlan = null, recoveryOperation = null, onOpenRecovery = () => {},
-  projectTaskBeta = false, activeLens = 'terminal', onSwitchProject = () => {}, onSwitchSession = () => {}, onOpenSettings = () => {}, onNewWindow = () => {}, onManageWindow = () => {}, onRenameSession = () => {}, onDeleteSession = () => {}, onMoveSession = () => {}, windowOrderVersion = 0, rootView = 'session', currentProjectId = null,
-  onSelectProject = () => {}, revealRevision = 0,
+  projectTaskBeta = false, activeLens = 'terminal', onSwitchProject = () => {}, onSwitchSession = () => {}, onOpenSettings = () => {}, onNewWindow = () => {}, onManageWindow = () => {}, onRenameSession = () => {}, onDeleteSession = () => {}, onMoveSession = () => {}, windowOrderVersion = 0, rootView = 'session',
+  revealRevision = 0,
 }: DrawerProps) {
   const [orphOpen, setOrphOpen] = useState(false);
-  const [projects, setProjects] = useState<Project[]>([]);
-  const [projectsLoading, setProjectsLoading] = useState(false);
-  const [projectsError, setProjectsError] = useState<string | null>(null);
   const [sessionWindows, setSessionWindows] = useState<Record<string, TmuxWindow[]>>({});
   const [sessionsReady, setSessionsReady] = useState(false);
   const [topologyError, setTopologyError] = useState<string | null>(null);
@@ -442,19 +435,6 @@ export default function Drawer({
   const toggleSession = (name: string): void => {
     setExpandedPreferences((current) => ({ ...current, [name]: !expandedSessions.has(name) }));
   };
-  useEffect(() => {
-    if (rootView !== 'project') {
-      setProjectsLoading(false);
-      return;
-    }
-    let alive = true;
-    setProjectsLoading(true);
-    setProjectsError(null);
-    void listProjects().then((rows) => { if (alive) setProjects(rows); })
-      .catch((error: unknown) => { if (alive) setProjectsError(error instanceof Error ? error.message : 'Project list unavailable'); })
-      .finally(() => { if (alive) setProjectsLoading(false); });
-    return () => { alive = false; };
-  }, [rootView]);
   const drawerWidth = drawerRef.current?.getBoundingClientRect().width || 360;
   const backdropOpacity = swipeOffset === null
     ? (open ? 1 : 0)
@@ -476,21 +456,16 @@ export default function Drawer({
               <button type="button" aria-pressed={rootView === 'session'} onClick={onSwitchSession}>{t('project.root.sessions')}</button>
             </div>
           )}
-          <div className="drawer-section-heading"><span>{t(rootView === 'project' ? 'project.root.projects' : 'drawer.sessionWindowTitle')}</span><small>{rootView === 'project' ? projects.length : bound.length}</small></div>
+          <div className="drawer-section-heading"><span>{t(rootView === 'project' ? 'project.root.title' : 'drawer.sessionWindowTitle')}</span>{rootView === 'session' && <small>{bound.length}</small>}</div>
         </div>
         <div ref={drawerScrollRef} className="drawer-scroll">
         <div ref={drawerScrollContentRef} className="drawer-scroll-content">
-          {rootView === 'project' ? <>
-            {projectsLoading && <div className="drawer-empty">{t('common.loading')}</div>}
-            {!projectsLoading && projectsError && <div className="drawer-empty" role="alert">{projectsError}</div>}
-            {!projectsLoading && !projectsError && projects.length === 0 && <div className="drawer-empty">{t('project.empty')}</div>}
-            {projects.map((project) => (
-              <button key={project.id} type="button" aria-current={project.id === currentProjectId ? 'page' : undefined} className={`drawer-project-row${project.id === currentProjectId ? ' active' : ''}`}
-                onClick={() => { onSelectProject(project.id); }}>
-                <FolderIcon /><span>{project.name}</span>{project.id === currentProjectId && <i aria-hidden="true" />}
-              </button>
-            ))}
-          </> : <>
+          {rootView === 'project' ? (
+            <div className="drawer-project-coming-soon" role="status">
+              <strong>{t('project.comingSoon')}</strong>
+              <span>{t('project.comingSoonHint')}</span>
+            </div>
+          ) : <>
           {!sessionsReady && !topologyError && bound.length > 0 && (
             <div className="session-sections session-sections-skeleton" role="status" aria-label={t('common.loading')} aria-busy="true">
               {bound.slice(0, 6).map((name) => <div className="session-section-skeleton" key={name} aria-hidden="true">

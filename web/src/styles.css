@@ -1016,6 +1016,9 @@ button.settings-page-row:disabled, .settings-page-row.disabled { color: rgba(235
 .drawer-project-row span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .drawer-project-row.active { background: transparent; color: #fff; box-shadow: inset 2px 0 0 var(--blue); }
 .drawer-project-row:active { background: rgba(118,118,128,.2); }
+.drawer-project-coming-soon { min-height: 180px; margin: 8px 4px; padding: 24px 16px; display: grid; place-content: center; gap: 8px; border-radius: 14px; background: rgba(118,118,128,.1); text-align: center; }
+.drawer-project-coming-soon strong { color: rgba(235,235,245,.82); font-size: 15px; font-weight: 600; }
+.drawer-project-coming-soon span { color: rgba(235,235,245,.46); font-size: 13px; line-height: 1.45; }
 /* Bind entry: an iOS list action row, fixed above the drawer safe area. The icon and chevron are
    affordances; the whole 44pt row is the hit target and stays visually quiet until pressed. */
 .drawer-bind-footer { padding-top: 6px; border-top: .5px solid rgba(84,84,88,.45); }
@@ -1139,17 +1142,11 @@ button.settings-page-row:disabled, .settings-page-row.disabled { color: rgba(235
   background: #1a1b1e; color: #f2f2f7;
 }
 .project-topbar {
-  position: relative;
   flex: none; min-height: calc(44px + env(safe-area-inset-top, 0px));
   padding: env(safe-area-inset-top, 0px) 8px 0;
   display: flex; align-items: center; gap: 6px;
   background: rgba(42,43,46,.94); border-bottom: .5px solid rgba(84,84,88,.48);
   -webkit-backdrop-filter: blur(18px); backdrop-filter: blur(18px);
-}
-.project-topbar-title {
-  position: absolute; left: 50%; top: env(safe-area-inset-top, 0px); height: 44px;
-  display: flex; align-items: center; transform: translateX(-50%); white-space: nowrap;
-  color: #f2f2f7; font-size: 17px; font-weight: 600; letter-spacing: -.2px; pointer-events: none;
 }
 .project-topbar .hamburger { flex: none; }
 .project-topbar-spacer { flex: 1; min-width: 0; }

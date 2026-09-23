@@ -2912,6 +2912,9 @@ export default function App() {
         onOpenSettings={openSettings}
         onNewWindow={openNewWindowForSession}
         onManageWindow={(sessionName, window) => {
+          // The split map is portalled above the workspace surface. Close the Drawer first so
+          // its overlay cannot cover the map or intercept the map's touch targets.
+          setDrawerOpen(false);
           if (current?.session?.name === sessionName) {
             setManageWindow(window as HostWindow);
           } else {
@@ -2925,8 +2928,6 @@ export default function App() {
         onMoveSession={moveSessionFromDrawer}
         windowOrderVersion={drawerWindowOrderVersion}
         rootView={drawerView}
-        currentProjectId={projectId}
-        onSelectProject={(id) => { setProjectId(id); setLastProject(id); chooseRootView('project'); }}
       />
       {logoutConfirm && <DeviceLogoutDialog busy={logoutBusy} error={logoutError}
         onClose={() => { setLogoutConfirm(false); setLogoutError(''); }}
