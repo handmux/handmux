@@ -1724,6 +1724,9 @@ export default function App() {
   const manageSplit = useCallback(async (sourceWindow: WorkspaceWindow) => {
     const win = hostWindow(sourceWindow);
     if (!win) return;
+    // The split map is portalled above the workspace surface. Close the Drawer only when
+    // the user explicitly chooses this action; opening the Window action menu must leave it open.
+    setDrawerOpen(false);
     let paneId = current?.paneId;
     if (win.id !== current?.window?.id) {
       setManageWindow(null);
@@ -2912,9 +2915,6 @@ export default function App() {
         onOpenSettings={openSettings}
         onNewWindow={openNewWindowForSession}
         onManageWindow={(sessionName, window) => {
-          // The split map is portalled above the workspace surface. Close the Drawer first so
-          // its overlay cannot cover the map or intercept the map's touch targets.
-          setDrawerOpen(false);
           if (current?.session?.name === sessionName) {
             setManageWindow(window as HostWindow);
           } else {
