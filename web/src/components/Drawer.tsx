@@ -307,8 +307,8 @@ export default function Drawer({
           {sessionsReady && <div className="session-sections" role="tree" aria-label={t('drawer.title')}>
           {bound.map((name) => (
             <section key={name} className={`session-section${name === currentSessionName ? ' is-current' : ''}`}>
-              <div className="session-section-header" role="treeitem" aria-expanded={expandedSessions.has(name)}>
-                <button type="button" aria-expanded={expandedSessions.has(name)} aria-current={name === currentSessionName ? 'page' : undefined} className="session-section-title" onClick={() => toggleSession(name)}>
+              <div className="session-section-header" role="treeitem" aria-expanded={expandedSessions.has(name)} onClick={() => toggleSession(name)}>
+                <button type="button" aria-expanded={expandedSessions.has(name)} aria-current={name === currentSessionName ? 'page' : undefined} className="session-section-title">
                   <span className="session-section-icon"><MonitorIcon /></span><span className="session-section-label">{name}</span>
                 </button>
                 <button
@@ -316,7 +316,6 @@ export default function Drawer({
                   className={`session-section-toggle${expandedSessions.has(name) ? ' is-open' : ''}`}
                   aria-expanded={expandedSessions.has(name)}
                   aria-label={`${name} — ${t(expandedSessions.has(name) ? 'doc.tocCollapse' : 'doc.tocExpand')}`}
-                  onClick={() => toggleSession(name)}
                 ><ChevronDownIcon /></button>
               <button
                 type="button"
