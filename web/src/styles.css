@@ -1028,9 +1028,9 @@ button.settings-page-row:disabled, .settings-page-row.disabled { color: rgba(235
 .session-section-toggle svg { width:12px; height:12px; transition:transform .22s cubic-bezier(.22,.8,.25,1); }
 .session-section-toggle:not(.is-open) svg { transform:rotate(-90deg); }
 .session-section-toggle:active { color:rgba(235,235,245,.70); }
-.session-section-menu { flex:none; display:grid; place-items:center; width:38px; height:28px; margin-left:auto; padding:0; border:0; border-radius:8px; background:rgba(118,118,128,.12); color:rgba(235,235,245,.72); }
-.session-section-menu svg { width:18px; height:18px; }
-.session-section-menu:active { background:rgba(118,118,128,.26); color:#fff; }
+.session-section-menu { flex:none; display:grid; place-items:center; width:38px; height:28px; margin-left:auto; padding:0; border:0; border-radius:8px; background:transparent; color:rgba(235,235,245,.88); }
+.session-section-menu svg { width:20px; height:20px; opacity:1; }
+.session-section-menu:active { background:transparent; color:#fff; }
 .session-section-title { flex:0 1 auto; min-width:0; max-width:calc(100% - 60px); height:26px; display:flex; align-items:center; gap:0; padding:0; border:0; background:transparent; color:#82e6c2; text-align:left; font:14px/1 -apple-system,BlinkMacSystemFont,sans-serif; font-weight:700; touch-action:manipulation; -webkit-tap-highlight-color:transparent; }
 .session-section-icon { display:none; }
 .session-section-label { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; letter-spacing:-.01em; }
