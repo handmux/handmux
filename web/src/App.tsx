@@ -2730,6 +2730,7 @@ export default function App() {
           aria-label={current?.session?.name ?? t('drawer.title')} aria-expanded={drawerOpen} aria-controls="session-drawer">
           {current?.session?.name ?? '—'}
         </button>
+        {sessionLoading && <span className="workspace-switch-indicator" role="status" aria-label={t('common.loading')}><span className="workspace-switch-spinner" aria-hidden="true" /></span>}
         {/* Always render so it doesn't pop in late once `current` loads — just disable until ready. */}
         <button className="topbar-icon" onClick={() => setIdeaOpen(true)} aria-label={t('app.ideas')} title={t('app.ideas')}
           disabled={!current}>
@@ -2804,7 +2805,8 @@ export default function App() {
         bound={bound}
         onSelectSession={(name, windowId) => {
           chooseRootView('session');
-          setDrawerOpen(false);
+          // Let the drawer paint the selected row once before its close transition starts.
+          window.setTimeout(() => setDrawerOpen(false), 140);
           void selectSession(name, windowId);
         }}
         onUnbind={unbindSession}
@@ -3059,7 +3061,7 @@ export default function App() {
           onSwitchSession={() => setDrawerView('session')}
           onOpenUsage={() => setUsageOpen(true)}
           onOpenSettings={openSettings} />
-      ) : !sessionLoading && current ? (
+      ) : current ? (
         <>
           <WindowBar
             windows={current.windows}

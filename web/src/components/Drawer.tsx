@@ -124,6 +124,7 @@ export default function Drawer({
   }>({ ids: {}, sessionsAt: 0, windows: {}, fetchedAt: {}, orderVersion: -1 });
   const [expandedPreferences, setExpandedPreferences] = useState<Record<string, boolean>>(() => readExpandedSessions(bound));
   const expandedSessions = new Set(bound.filter((name) => expandedPreferences[name] !== false));
+  const [pendingWindow, setPendingWindow] = useState<{ sessionName: string; windowId: string } | null>(null);
   const [menuSession, setMenuSession] = useState<string | null>(null);
   const drawerRef = useRef<HTMLDivElement>(null);
   const drawerScrollRef = useRef<HTMLDivElement>(null);
@@ -216,23 +217,31 @@ export default function Drawer({
     if (!scroll || !content) return;
 
     type Edge = 'top' | 'bottom';
-    const MAX_OFFSET = 72;
-    const RESISTANCE = 0.28;
+    const MAX_OFFSET = 88;
+    const RESISTANCE = 0.35;
     let edge: Edge | null = null;
     let touchId: number | null = null;
     let lastY = 0;
     let overscrollStartY = 0;
     let active = false;
+    let rawOffset = 0;
     let visualOffset = 0;
     let wheelTimer: number | null = null;
 
-    const clamp = (value: number): number => Math.max(-MAX_OFFSET, Math.min(MAX_OFFSET, value));
+    // Match the iOS rubber-band curve: the first pixels track the finger, then
+    // the response gradually eases toward its limit instead of stopping at a
+    // hard clamp halfway through a long pull.
+    const rubberBand = (value: number): number => {
+      const distance = Math.abs(value);
+      return Math.sign(value) * MAX_OFFSET * (1 - Math.exp(-(distance * RESISTANCE) / MAX_OFFSET));
+    };
     const clearWheelTimer = (): void => {
       if (wheelTimer !== null) window.clearTimeout(wheelTimer);
       wheelTimer = null;
     };
     const setOffset = (value: number): void => {
-      visualOffset = clamp(value);
+      rawOffset = value;
+      visualOffset = rubberBand(value);
       content.style.transition = 'none';
       content.style.transform = `translate3d(0, ${visualOffset}px, 0)`;
     };
@@ -243,6 +252,7 @@ export default function Drawer({
         content.style.transform = 'translate3d(0, 0, 0)';
         visualOffset = 0;
       }
+      rawOffset = 0;
       edge = null;
       touchId = null;
       active = false;
@@ -251,13 +261,14 @@ export default function Drawer({
       clearWheelTimer();
       content.style.transition = 'none';
       content.style.transform = 'translate3d(0, 0, 0)';
+      rawOffset = 0;
       visualOffset = 0;
       edge = null;
       touchId = null;
       active = false;
     };
-    const atTop = (): boolean => scroll.scrollTop <= 0.5;
-    const atBottom = (): boolean => scroll.scrollTop + scroll.clientHeight >= scroll.scrollHeight - 0.5;
+    const atTop = (): boolean => scroll.scrollTop <= 1;
+    const atBottom = (): boolean => scroll.scrollTop >= Math.max(0, scroll.scrollHeight - scroll.clientHeight - 1);
     const findTouch = (event: TouchEvent): Touch | undefined => Array.from(event.touches).find((touch) => touch.identifier === touchId);
 
     const onTouchStart = (event: TouchEvent): void => {
@@ -298,12 +309,9 @@ export default function Drawer({
         return;
       }
       if (!active) {
-        // If the finger first moved away from the edge, let native scrolling own
-        // the rest of this gesture instead of manufacturing a bounce mid-scroll.
-        if ((edge === 'top' && !atTop()) || (edge === 'bottom' && !atBottom())) {
-          edge = null;
-          return;
-        }
+        // The browser may advance scrollTop by a fractional pixel before this
+        // listener runs. The edge was captured at touchstart, so do not recheck
+        // it here or the bottom pull can disappear on the first move.
         active = true;
       }
       event.preventDefault();
@@ -316,7 +324,7 @@ export default function Drawer({
     const onWheel = (event: WheelEvent): void => {
       if ((event.deltaY < 0 && !atTop()) || (event.deltaY > 0 && !atBottom()) || event.deltaY === 0) return;
       event.preventDefault();
-      setOffset(visualOffset - event.deltaY * RESISTANCE);
+      setOffset(rawOffset - event.deltaY);
       clearWheelTimer();
       wheelTimer = window.setTimeout(release, 110);
     };
@@ -339,6 +347,12 @@ export default function Drawer({
   useEffect(() => {
     try { localStorage.setItem(EXPANDED_SESSIONS_KEY, JSON.stringify(expandedPreferences)); } catch { /* best effort */ }
   }, [expandedPreferences]);
+
+  useEffect(() => {
+    if (!pendingWindow) return undefined;
+    const timer = window.setTimeout(() => setPendingWindow(null), 420);
+    return () => window.clearTimeout(timer);
+  }, [pendingWindow]);
 
   const boundKey = JSON.stringify(bound);
   const expandedKey = JSON.stringify([...expandedSessions]);
@@ -478,11 +492,13 @@ export default function Drawer({
                     <div
                       key={window.id}
                       role="button"
-                      aria-current={name === currentSessionName && window.id === currentWindowId ? 'page' : undefined}
+                      aria-current={(name === currentSessionName && window.id === currentWindowId)
+                        || (pendingWindow?.sessionName === name && pendingWindow.windowId === window.id) ? 'page' : undefined}
                       tabIndex={expandedSessions.has(name) ? 0 : -1}
-                      className={`session-window-row ${name === currentSessionName && window.id === currentWindowId ? 'is-current' : ''}`}
-                      onClick={() => onSelectSession(name, window.id)}
-                      onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onSelectSession(name, window.id); } }}
+                      className={`session-window-row ${(name === currentSessionName && window.id === currentWindowId)
+                        || (pendingWindow?.sessionName === name && pendingWindow.windowId === window.id) ? 'is-current' : ''}`}
+                      onClick={() => { setPendingWindow({ sessionName: name, windowId: window.id }); onSelectSession(name, window.id); }}
+                      onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); setPendingWindow({ sessionName: name, windowId: window.id }); onSelectSession(name, window.id); } }}
                     ><span className="session-window-label">{window.name || window.id}</span><span className="session-window-count" aria-label={`${window.panes} panes`}>{window.panes}个窗格</span><button type="button" className="session-window-menu" aria-label={`${window.name || window.id} ${t('common.more')}`} onClick={(event) => { event.stopPropagation(); onManageWindow(name, window); }}><MoreHorizontalIcon /></button></div>
                   ))}
                 </div>
