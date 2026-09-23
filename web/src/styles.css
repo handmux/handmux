@@ -1494,6 +1494,10 @@ div.workspace-restore-errors { padding-left: 10px; }
 .auth-logout-actions button { flex: 1; min-height: 48px; border: 0; background: none; color: var(--blue); font-size: 15px; }
 .auth-logout-actions button:last-child { color: #ff625b; border-left: 1px solid rgba(127,127,127,.25); }
 .loading { padding: 40px; text-align: center; color: #888; }
+.workspace-switch-loading { min-height:100%; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:10px; color:rgba(235,235,245,.58); font:14px/1.3 -apple-system,BlinkMacSystemFont,sans-serif; }
+.workspace-switch-spinner { width:18px; height:18px; border:2px solid rgba(235,235,245,.2); border-top-color:rgba(235,235,245,.82); border-radius:50%; animation:workspace-switch-spin .72s linear infinite; }
+@keyframes workspace-switch-spin { to { transform:rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .workspace-switch-spinner { animation:none; } }
 /* First-run empty state: a tap target that opens the bind modal (there's nothing pinned yet). */
 .empty-cta { margin: auto; display: flex; flex-direction: column; gap: 6px; align-items: center; padding: 28px 32px; background: none; border: 1px dashed #44464c; border-radius: 12px; color: #aab; font-size: 15px; touch-action: manipulation; }
 .empty-cta span { font-size: 13px; color: var(--blue); }

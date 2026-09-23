@@ -361,8 +361,10 @@ export default function App() {
   const [favorites, setFavorites] = useState(getFavorites); // global favorite commands
   const [recent, setRecent] = useState<string[]>([]); // current session's recent commands (keyed by session name)
   const [current, setCurrent] = useState<CurrentWorkspace | null>(null); // { session, windows, window, panes, paneId }
+  const [sessionLoading, setSessionLoading] = useState(false);
   const currentRef = useRef<CurrentWorkspace | null>(null); currentRef.current = current;
   const windowSwitchRef = useRef(0); // only the newest async pane lookup may finish a window switch
+  const sessionSelectionRef = useRef(0);
   const topologyRecoveryRef = useRef<Promise<void> | null>(null);
   const [booting, setBooting] = useState(true);
   const [recoveryPlan, setRecoveryPlan] = useState<WorkspaceRecoveryPlan | null>(null);
@@ -1214,6 +1216,8 @@ export default function App() {
   // Drawer rows carry a bound NAME — resolve it to the live session before opening, since the
   // tmux id can have changed (or the session may be gone) since it was pinned.
   const selectSession = useCallback(async (name: string, windowId?: string): Promise<boolean> => {
+    const selection = ++sessionSelectionRef.current;
+    setSessionLoading(true);
     try {
       const session = (await getSessions()).find((s) => s.name === name);
       if (!session) { window.alert(t('app.sessionGone', { name })); return false; }
@@ -1223,6 +1227,8 @@ export default function App() {
     } catch (e) {
       handledAuth(e);
       return false;
+    } finally {
+      if (selection === sessionSelectionRef.current) setSessionLoading(false);
     }
   }, [openSession, onAuthFail]);
 
@@ -2797,7 +2803,9 @@ export default function App() {
         currentWindowId={current?.window?.id ?? null}
         bound={bound}
         onSelectSession={(name, windowId) => {
-          void selectSession(name, windowId).then((opened) => { if (opened) chooseRootView('session'); });
+          chooseRootView('session');
+          setDrawerOpen(false);
+          void selectSession(name, windowId);
         }}
         onUnbind={unbindSession}
         onBind={() => setBindOpen(true)}
@@ -3051,7 +3059,7 @@ export default function App() {
           onSwitchSession={() => setDrawerView('session')}
           onOpenUsage={() => setUsageOpen(true)}
           onOpenSettings={openSettings} />
-      ) : current ? (
+      ) : !sessionLoading && current ? (
         <>
           <WindowBar
             windows={current.windows}
@@ -3234,6 +3242,11 @@ export default function App() {
             />
           )} />
         </>
+      ) : sessionLoading ? (
+        <div className="workspace-switch-loading" role="status" aria-live="polite">
+          <span className="workspace-switch-spinner" aria-hidden="true" />
+          <span>{t('common.loading')}</span>
+        </div>
       ) : booting ? (
         <div className="loading">{t('common.loading')}</div>
       ) : bound.length === 0 ? (
