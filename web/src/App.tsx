@@ -309,6 +309,11 @@ export default function App() {
   // starting Agent runtime. Keep the root choice persistent so returning users land where they left off.
   const projectTaskBeta = true;
   const [rootView, setRootViewState] = useState<RootView>(getRootView);
+  const [drawerView, setDrawerView] = useState<RootView>(getRootView);
+  const openDrawer = (): void => {
+    if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+    setDrawerOpen(true);
+  };
   const [projectId, setProjectId] = useState<string | null>(getLastProject);
   const chooseRootView = (view: RootView): void => {
     if (view === 'project' && !projectTaskBeta) return;
@@ -2702,12 +2707,12 @@ export default function App() {
         onPointerDownCapture={captureTerminalOwner}
         style={inset ? { transform: `translateY(-${inset}px)` } : undefined}>
       {rootView === 'session' && <header className="topbar">
-        <button ref={drawerMenuRef} className="hamburger" onClick={() => setDrawerOpen(true)}
+        <button ref={drawerMenuRef} className="hamburger" onClick={openDrawer}
           aria-label={t('drawer.title')} aria-expanded={drawerOpen} aria-controls="session-drawer"><span className="hamburger-glyph" aria-hidden="true"><i /><i /><i /></span></button>
         <button type="button" className="session-name" {...sessionNameLongPress}
           onClick={(event) => {
             sessionNameLongPress.onClick(event);
-            if (!event.defaultPrevented) setDrawerOpen(true);
+            if (!event.defaultPrevented) openDrawer();
           }}
           aria-label={current?.session?.name ?? t('drawer.title')} aria-expanded={drawerOpen} aria-controls="session-drawer">
           {current?.session?.name ?? '—'}
@@ -2780,11 +2785,13 @@ export default function App() {
       />
       <Drawer
         open={drawerOpen}
-        onOpen={() => setDrawerOpen(true)}
+        onOpen={openDrawer}
         currentSessionName={current?.session?.name ?? null}
         currentWindowId={current?.window?.id ?? null}
         bound={bound}
-        onSelectSession={selectSession}
+        onSelectSession={(name, windowId) => {
+          void selectSession(name, windowId).then((opened) => { if (opened) chooseRootView('session'); });
+        }}
         onUnbind={unbindSession}
         onBind={() => setBindOpen(true)}
         onClose={() => setDrawerOpen(false)}
@@ -2796,13 +2803,13 @@ export default function App() {
         recoveryOperation={recoveryOperation}
         onOpenRecovery={openRecoveryFromDrawer}
         projectTaskBeta={projectTaskBeta}
-        onSwitchProject={() => chooseRootView('project')}
-        onSwitchSession={() => chooseRootView('session')}
+        onSwitchProject={() => setDrawerView('project')}
+        onSwitchSession={() => setDrawerView('session')}
         onOpenSettings={openSettings}
         onNewWindow={openNewWindowForSession}
         onRenameSession={renameSessionFromDrawer}
         onDeleteSession={deleteSessionFromDrawer}
-        rootView={rootView}
+        rootView={drawerView}
         currentProjectId={projectId}
         onSelectProject={(id) => { setProjectId(id); setLastProject(id); chooseRootView('project'); }}
       />
@@ -3020,9 +3027,9 @@ export default function App() {
       />
       {rootView === 'project' ? (
         <ProjectRoot drawerOpen={drawerOpen} inbox={projectInboxControl} inset={inset}
-          onOpenDrawer={() => setDrawerOpen(true)} onCloseDrawer={() => setDrawerOpen(false)}
+          onOpenDrawer={openDrawer} onCloseDrawer={() => setDrawerOpen(false)}
           projectId={projectId} onProjectSelect={setProjectId} readOnly={true}
-          onSwitchSession={() => chooseRootView('session')}
+          onSwitchSession={() => setDrawerView('session')}
           onOpenUsage={() => setUsageOpen(true)}
           onOpenSettings={openSettings} />
       ) : current ? (

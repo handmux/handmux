@@ -336,9 +336,9 @@ export default function Drawer({
           )}
           </>}
         </div>
-        <div className="drawer-footer drawer-bind-footer">
+        {rootView === 'session' && <div className="drawer-footer drawer-bind-footer">
           <button className="drawer-bind" onClick={onBind}>＋ {t('drawer.bind')}</button>
-        </div>
+        </div>}
       </div>
       <div
         className={`drawer-backdrop${open ? ' open' : ''}${swipeOffset !== null ? ' is-dragging' : ''}`}
