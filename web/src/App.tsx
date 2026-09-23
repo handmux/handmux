@@ -2803,10 +2803,20 @@ export default function App() {
         recoveryOperation={recoveryOperation}
         onOpenRecovery={openRecoveryFromDrawer}
         projectTaskBeta={projectTaskBeta}
+        activeLens={lens}
         onSwitchProject={() => setDrawerView('project')}
         onSwitchSession={() => setDrawerView('session')}
         onOpenSettings={openSettings}
         onNewWindow={openNewWindowForSession}
+        onManageWindow={(sessionName, window) => {
+          if (current?.session?.name === sessionName) {
+            setManageWindow(window as HostWindow);
+          } else {
+            void selectSession(sessionName, window.id).then((opened) => {
+              if (opened) setManageWindow(window as HostWindow);
+            });
+          }
+        }}
         onRenameSession={renameSessionFromDrawer}
         onDeleteSession={deleteSessionFromDrawer}
         rootView={drawerView}

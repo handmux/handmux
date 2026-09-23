@@ -1065,7 +1065,7 @@ function BottomDock({
   };
 
   return (
-    <div className={`bottom-dock${desktopUnified ? ' desktop-unified' : ''}`}>
+    <div className={`bottom-dock${desktopUnified ? ' desktop-unified' : ''}`} data-dock-mode={mode}>
       <div className="dock-left" ref={dockLeftRef} onPointerDown={keepDockFocus}>
         {/* ONE morphing handle. At rest it's the two-dot page indicator (filled dot = current page); TAP it
             to flip command ⇄ chat, swipe it (or the dock) sideways to page. Under a VERTICAL drag the two

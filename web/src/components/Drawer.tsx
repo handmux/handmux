@@ -13,8 +13,9 @@ import { getSessions, getWindowsForSessions } from '../api.js';
 import type { TmuxWindow } from '../api.js';
 import type { MouseEvent } from 'react';
 import type { WorkspaceRecoveryPlan, WorkspaceRestoreOperation } from '../workspaceRecovery.js';
+import type { WorkspaceLens } from './LensSwitch.jsx';
 import ActionSheet from './ActionSheet.jsx';
-import { FolderIcon, GearIcon, MonitorIcon, MoreHorizontalIcon, PencilIcon, PlusIcon, XIcon } from './icons.jsx';
+import { ChevronDownIcon, FolderIcon, GearIcon, MonitorIcon, MoreHorizontalIcon, PencilIcon, PlusIcon, XIcon } from './icons.jsx';
 
 const EXPANDED_SESSIONS_KEY = 'handmux.drawer.expanded-sessions';
 
@@ -47,6 +48,12 @@ function readExpandedSessions(bound: string[]): Record<string, boolean> {
   return Object.fromEntries(bound.map((name) => [name, true]));
 }
 
+function WindowSkeleton() {
+  return <div className="session-window-skeleton" role="status" aria-label={t('common.loading')} aria-busy="true">
+    {[0, 1].map((row) => <div className="session-window-skeleton-row" key={row} aria-hidden="true"><i /><i /></div>)}
+  </div>;
+}
+
 export interface DrawerOrphan {
   pid: number;
   cwd: string;
@@ -75,10 +82,12 @@ interface DrawerProps {
   recoveryOperation?: WorkspaceRestoreOperation | null;
   onOpenRecovery?: () => void;
   projectTaskBeta?: boolean;
+  activeLens?: WorkspaceLens;
   onSwitchProject?: () => void;
   onSwitchSession?: () => void;
   onOpenSettings?: () => void;
   onNewWindow?: (sessionName: string) => void;
+  onManageWindow?: (sessionName: string, window: TmuxWindow) => void;
   onRenameSession?: (sessionName: string) => void;
   onDeleteSession?: (sessionName: string) => void;
   rootView?: 'session' | 'project';
@@ -90,7 +99,7 @@ export default function Drawer({
   open, onOpen = () => {}, currentSessionName, currentWindowId = null, bound, onSelectSession, onUnbind, onBind, onClose,
   orphans = [], onTakeoverRequest,
   recoveryPlan = null, recoveryOperation = null, onOpenRecovery = () => {},
-  projectTaskBeta = false, onSwitchProject = () => {}, onSwitchSession = () => {}, onOpenSettings = () => {}, onNewWindow = () => {}, onRenameSession = () => {}, onDeleteSession = () => {}, rootView = 'session', currentProjectId = null,
+  projectTaskBeta = false, activeLens = 'terminal', onSwitchProject = () => {}, onSwitchSession = () => {}, onOpenSettings = () => {}, onNewWindow = () => {}, onManageWindow = () => {}, onRenameSession = () => {}, onDeleteSession = () => {}, rootView = 'session', currentProjectId = null,
   onSelectProject = () => {},
 }: DrawerProps) {
   const [orphOpen, setOrphOpen] = useState(false);
@@ -98,10 +107,13 @@ export default function Drawer({
   const [projectsLoading, setProjectsLoading] = useState(false);
   const [projectsError, setProjectsError] = useState<string | null>(null);
   const [sessionWindows, setSessionWindows] = useState<Record<string, TmuxWindow[]>>({});
-  const [sessionIds, setSessionIds] = useState<Record<string, string>>({});
   const [sessionsReady, setSessionsReady] = useState(false);
-  const [windowLoading, setWindowLoading] = useState<Record<string, boolean>>({});
-  const [windowFetchedAt, setWindowFetchedAt] = useState<Record<string, number>>({});
+  const [topologyError, setTopologyError] = useState<string | null>(null);
+  const [retry, setRetry] = useState(0);
+  const topologyCache = useRef<{
+    ids: Record<string, string>; sessionsAt: number;
+    windows: Record<string, TmuxWindow[]>; fetchedAt: Record<string, number>;
+  }>({ ids: {}, sessionsAt: 0, windows: {}, fetchedAt: {} });
   const [expandedPreferences, setExpandedPreferences] = useState<Record<string, boolean>>(() => readExpandedSessions(bound));
   const expandedSessions = new Set(bound.filter((name) => expandedPreferences[name] !== false));
   const [menuSession, setMenuSession] = useState<string | null>(null);
@@ -118,6 +130,10 @@ export default function Drawer({
       const target = event.target;
       const insideDrawer = target instanceof Node && drawerRef.current?.contains(target) === true;
       const onDrawerBackdrop = target instanceof Element && Boolean(target.closest('.drawer-backdrop'));
+      const startsInDock = target instanceof Element && Boolean(target.closest('.bottom-dock'));
+      // In chat mode the BottomDock owns its own horizontal pager. The conversation surface
+      // remains eligible for opening the drawer; only a gesture that starts on the dock is reserved.
+      if (!open && activeLens === 'chat' && startsInDock) return;
       // Closing starts inside the drawer so a swipe on the backdrop remains its normal tap-to-dismiss
       // interaction. Opening is available across the normal page, unless a horizontal scroller still
       // has content to reveal on its left side.
@@ -177,56 +193,54 @@ export default function Drawer({
       window.removeEventListener('touchend', onTouchEnd, true);
       window.removeEventListener('touchcancel', onTouchCancel, true);
     };
-  }, [open, onClose, onOpen]);
+  }, [activeLens, open, onClose, onOpen]);
 
   useEffect(() => {
     try { localStorage.setItem(EXPANDED_SESSIONS_KEY, JSON.stringify(expandedPreferences)); } catch { /* best effort */ }
   }, [expandedPreferences]);
 
+  const boundKey = JSON.stringify(bound);
+  const expandedKey = JSON.stringify([...expandedSessions]);
   useEffect(() => {
     if (rootView !== 'session' || !open) return;
     let alive = true;
-    // A new open/selection starts a fresh topology read; never carry a previous
-    // window list across a refresh that may fail.
-    setSessionWindows({});
-    setSessionIds({});
-    setSessionsReady(false);
-    setWindowFetchedAt({});
+    setTopologyError(null);
     void (async () => {
       try {
-        const sessions = await getSessions();
+        const cached = topologyCache.current;
+        const names: string[] = JSON.parse(boundKey);
+        const expanded: string[] = JSON.parse(expandedKey);
+        const now = Date.now();
+        const sessionsStale = !cached.sessionsAt || now - cached.sessionsAt >= 5000
+          || names.some((name) => !cached.ids[name]);
+        const ids = sessionsStale
+          ? Object.fromEntries((await getSessions()).map((session) => [session.name, session.id]))
+          : cached.ids;
         if (!alive) return;
-        setSessionIds(Object.fromEntries(sessions.filter((session) => bound.includes(session.name)).map((session) => [session.name, session.id])));
+        // A session name may have been deleted and recreated with a different tmux ID.
+        const windows = Object.fromEntries(names.filter((name) => ids[name] && ids[name] === cached.ids[name] && cached.windows[name])
+          .map((name) => [name, cached.windows[name]!]));
+        const fetchedAt = Object.fromEntries(names.filter((name) => windows[name]).map((name) => [name, cached.fetchedAt[name]!]));
+        const targets = expanded.filter((name) => ids[name] && (!windows[name] || now - (fetchedAt[name] || 0) >= 5000));
+        if (targets.length) {
+          const rows = await getWindowsForSessions(targets.map((name) => ids[name]!));
+          if (!alive) return;
+          for (const name of targets) {
+            windows[name] = rows[ids[name]!] || [];
+            fetchedAt[name] = Date.now();
+          }
+        }
+        // Publish one complete outline. Never reveal parent rows while the initial
+        // expanded children are still in flight; retain the previous outline on refresh.
+        topologyCache.current = { ids, sessionsAt: sessionsStale ? Date.now() : cached.sessionsAt, windows, fetchedAt };
+        setSessionWindows(windows);
         setSessionsReady(true);
-      } catch {
-        if (alive) setSessionsReady(true);
+      } catch (error) {
+        if (alive) setTopologyError(error instanceof Error ? error.message : String(error));
       }
     })();
     return () => { alive = false; };
-  }, [rootView, open, bound]);
-
-  const expandedKey = [...expandedSessions].join('\0');
-  useEffect(() => {
-    if (rootView !== 'session' || !open || !sessionsReady) return;
-    const now = Date.now();
-    const targets = [...expandedSessions]
-      .filter((name): name is string => Boolean(sessionIds[name]) && (!windowFetchedAt[name] || now - windowFetchedAt[name] > 5000))
-      .map((name) => ({ name, id: sessionIds[name] }));
-    if (!targets.length) return;
-    let alive = true;
-    setWindowLoading((current) => Object.fromEntries([...Object.entries(current), ...targets.map(({ name }) => [name, true])]));
-    void getWindowsForSessions(targets.map(({ id }) => id!)).then((rows) => {
-      if (!alive) return;
-      const idsToNames = Object.fromEntries(targets.map(({ name, id }) => [id, name]));
-      const namedRows = Object.fromEntries(Object.entries(rows).map(([id, windows]) => [idsToNames[id], windows]));
-      setSessionWindows((current) => ({ ...current, ...namedRows }));
-      setWindowFetchedAt((current) => ({ ...current, ...Object.fromEntries(targets.map(({ name }) => [name, now])) }));
-      setWindowLoading((current) => ({ ...current, ...Object.fromEntries(targets.map(({ name }) => [name, false])) }));
-    }).catch(() => {
-      if (alive) setWindowLoading((current) => ({ ...current, ...Object.fromEntries(targets.map(({ name }) => [name, false])) }));
-    });
-    return () => { alive = false; };
-  }, [rootView, open, sessionsReady, expandedKey, sessionIds]);
+  }, [rootView, open, boundKey, expandedKey, retry]);
 
   const toggleSession = (name: string): void => {
     setExpandedPreferences((current) => ({ ...current, [name]: !expandedSessions.has(name) }));
@@ -252,6 +266,7 @@ export default function Drawer({
     <>
       <div id="session-drawer" ref={drawerRef} className={`drawer${rootView === 'project' ? ' project-drawer' : ''} ${open ? 'open' : ''}${swipeOffset !== null ? ' is-dragging' : ''}`} style={swipeOffset === null ? undefined : { transform: `translateX(calc(${open ? '0px' : '-100%'} + ${swipeOffset}px))` }}>
         <div className="drawer-list">
+        <div className="drawer-fixed-header">
         <div className="drawer-brand">
           <img src="/icons/logo.svg" alt="" aria-hidden="true" />
             <strong className="drawer-brand-wordmark">hand<span>mux</span></strong>
@@ -263,8 +278,10 @@ export default function Drawer({
               <button type="button" aria-pressed={rootView === 'session'} onClick={onSwitchSession}>{t('project.root.sessions')}</button>
             </div>
           )}
+          <div className="drawer-section-heading"><span>{t(rootView === 'project' ? 'project.root.projects' : 'drawer.title')}</span><small>{rootView === 'project' ? projects.length : bound.length}</small></div>
+        </div>
+        <div className="drawer-scroll">
           {rootView === 'project' ? <>
-            <div className="drawer-section-heading"><span>{t('project.root.projects')}</span><small>{projects.length}</small></div>
             {projectsLoading && <div className="drawer-empty">{t('common.loading')}</div>}
             {!projectsLoading && projectsError && <div className="drawer-empty" role="alert">{projectsError}</div>}
             {!projectsLoading && !projectsError && projects.length === 0 && <div className="drawer-empty">{t('project.empty')}</div>}
@@ -275,26 +292,35 @@ export default function Drawer({
               </button>
             ))}
           </> : <>
-          <div className="drawer-section-heading"><span>{t('drawer.title')}</span><small>{bound.length}</small></div>
-          {!sessionsReady && bound.length > 0 && <div className="drawer-topology-loading" role="status">{t('common.loading')}</div>}
-          {sessionsReady && bound.length === 0 && <div className="drawer-empty">{t('drawer.empty')}</div>}
-          {sessionsReady && <div className="workspace-list" role="tree" aria-label={t('drawer.title')}>
+          {!sessionsReady && !topologyError && bound.length > 0 && (
+            <div className="session-sections session-sections-skeleton" role="status" aria-label={t('common.loading')} aria-busy="true">
+              {bound.slice(0, 6).map((name) => <div className="session-section-skeleton" key={name} aria-hidden="true">
+                <div className="session-section-skeleton-row"><i /><i /></div>
+                {expandedSessions.has(name) && <WindowSkeleton />}
+              </div>)}
+            </div>
+          )}
+          {topologyError && <div className="workspace-load-error" role="alert">
+            <span>{topologyError}</span><button type="button" onClick={() => { topologyCache.current.sessionsAt = 0; setRetry((value) => value + 1); }}>{t('common.retry')}</button>
+          </div>}
+          {bound.length === 0 && <div className="drawer-empty">{t('drawer.empty')}</div>}
+          {sessionsReady && <div className="session-sections" role="tree" aria-label={t('drawer.title')}>
           {bound.map((name) => (
-            <div key={name} className={`workspace-session${name === currentSessionName ? ' active' : ''}`}>
-              <div className="workspace-session-row" role="treeitem" aria-expanded={expandedSessions.has(name)}>
+            <section key={name} className={`session-section${name === currentSessionName ? ' is-current' : ''}`}>
+              <div className="session-section-header" role="treeitem" aria-expanded={expandedSessions.has(name)}>
+                <button type="button" aria-expanded={expandedSessions.has(name)} aria-current={name === currentSessionName ? 'page' : undefined} className="session-section-title" onClick={() => toggleSession(name)}>
+                  <span className="session-section-icon"><MonitorIcon /></span><span className="session-section-label">{name}</span>
+                </button>
                 <button
                   type="button"
-                  className="workspace-chevron"
+                  className={`session-section-toggle${expandedSessions.has(name) ? ' is-open' : ''}`}
                   aria-expanded={expandedSessions.has(name)}
                   aria-label={`${name} — ${t(expandedSessions.has(name) ? 'doc.tocCollapse' : 'doc.tocExpand')}`}
                   onClick={() => toggleSession(name)}
-                >{expandedSessions.has(name) ? '⌄' : '›'}</button>
-                <button type="button" aria-current={name === currentSessionName ? 'page' : undefined} className="workspace-session-name" onClick={() => toggleSession(name)}>
-                  <MonitorIcon /><span>{name}</span>{name === currentSessionName && <b aria-label={t('common.current')} />}
-                </button>
+                ><ChevronDownIcon /></button>
               <button
                 type="button"
-                className="workspace-more"
+                className="session-section-menu"
                 onClick={(event: MouseEvent<HTMLButtonElement>) => {
                   event.stopPropagation(); setMenuSession(name);
                 }}
@@ -302,22 +328,23 @@ export default function Drawer({
                 title={t('common.more')}
               ><MoreHorizontalIcon /></button>
               </div>
-              <div className={`workspace-window-collapse${expandedSessions.has(name) ? ' open' : ''}`} aria-hidden={!expandedSessions.has(name)}>
-                <div className="workspace-window-list">
-                  {windowLoading[name] && <div className="drawer-topology-loading" role="status">{t('common.loading')}</div>}
+              <div className={`session-section-body${expandedSessions.has(name) ? ' is-open' : ''}`} aria-hidden={!expandedSessions.has(name)}>
+                <div className="session-window-list">
+                  {expandedSessions.has(name) && topologyCache.current.ids[name] && !sessionWindows[name] && !topologyError && <WindowSkeleton />}
                   {(sessionWindows[name] || []).map((window) => (
-                    <button
+                    <div
                       key={window.id}
-                      type="button"
+                      role="button"
                       aria-current={name === currentSessionName && window.id === currentWindowId ? 'page' : undefined}
                       tabIndex={expandedSessions.has(name) ? 0 : -1}
-                      className={`workspace-window ${name === currentSessionName && window.id === currentWindowId ? 'active' : ''}`}
+                      className={`session-window-row ${name === currentSessionName && window.id === currentWindowId ? 'is-current' : ''}`}
                       onClick={() => onSelectSession(name, window.id)}
-                    ><span className="workspace-window-mark" aria-hidden="true" />{window.name || window.id}{name === currentSessionName && window.id === currentWindowId && <b aria-label={t('common.current')} />}</button>
+                      onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onSelectSession(name, window.id); } }}
+                    ><span className="session-window-label">{window.name || window.id}</span><span className="session-window-count" aria-label={`${window.panes} panes`}>{window.panes}个窗格</span><button type="button" className="session-window-menu" aria-label={`${window.name || window.id} ${t('common.more')}`} onClick={(event) => { event.stopPropagation(); onManageWindow(name, window); }}><MoreHorizontalIcon /></button></div>
                   ))}
                 </div>
               </div>
-            </div>
+            </section>
           ))}
           </div>}
           {orphans.length > 0 && (
@@ -364,6 +391,7 @@ export default function Drawer({
             <WorkspaceRecoveryCard plan={recoveryPlan} operation={recoveryOperation} onOpen={onOpenRecovery} />
           )}
           </>}
+        </div>
         </div>
         {rootView === 'session' && <div className="drawer-footer drawer-bind-footer">
           <button className="drawer-bind" onClick={onBind}>＋ {t('drawer.bind')}</button>

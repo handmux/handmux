@@ -953,12 +953,14 @@ button.settings-page-row:disabled, .settings-page-row.disabled { color: rgba(235
 .input-text:focus { outline: none; }
 .input-text::placeholder { color: #6b7280; }
 .token-prompt button { padding: 8px 14px; border: none; border-radius: 8px; background: var(--blue); color: #fff; }
-.drawer { position: fixed; top: 0; left: 0; width: min(82vw, 340px); max-width: 340px; height: 100%; background: rgba(28,29,32,.98); -webkit-backdrop-filter: blur(30px) saturate(1.3); backdrop-filter: blur(30px) saturate(1.3); transform: translateX(-100%); transition: transform .28s cubic-bezier(.22,.8,.25,1); z-index: var(--z-overlay-drawer); padding: calc(14px + env(safe-area-inset-top, 0px)) 14px calc(14px + env(safe-area-inset-bottom, 0px)); display: flex; flex-direction: column; overflow: hidden; box-shadow: 18px 0 50px rgba(0,0,0,.28); }
+.drawer { position: fixed; top: 0; left: 0; width: min(80vw, 320px); max-width: 320px; height: 100%; background: rgba(34,35,42,.99); border-right:1px solid rgba(255,255,255,.07); -webkit-backdrop-filter: blur(30px) saturate(1.3); backdrop-filter: blur(30px) saturate(1.3); transform: translateX(-100%); transition: transform .28s cubic-bezier(.22,.8,.25,1); z-index: var(--z-overlay-drawer); padding: calc(14px + env(safe-area-inset-top, 0px)) 12px calc(14px + env(safe-area-inset-bottom, 0px)); display: flex; flex-direction: column; overflow: hidden; box-shadow: 18px 0 50px rgba(0,0,0,.38); }
 .drawer.open { transform: translateX(0); }
 .drawer.is-dragging { transition: none; }
-.drawer-list { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: none; }
-.drawer-list::-webkit-scrollbar { display: none; }
-.drawer-brand { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; gap: 10px; min-height: 52px; padding: 2px 6px 14px; background: rgba(28,29,32,.94); -webkit-backdrop-filter: blur(20px); backdrop-filter: blur(20px); }
+.drawer-list { flex:1; min-height:0; display:flex; flex-direction:column; overflow:hidden; }
+.drawer-fixed-header { flex:none; z-index:2; background:rgba(34,35,42,.97); -webkit-backdrop-filter:blur(20px); backdrop-filter:blur(20px); }
+.drawer-scroll { flex:1; min-height:0; overflow-y:auto; overscroll-behavior:contain; scrollbar-width:none; }
+.drawer-scroll::-webkit-scrollbar { display:none; }
+.drawer-brand { display:flex; align-items:center; gap:10px; min-height:52px; padding:2px 6px 14px; }
 .drawer-brand img { width: 30px; height: 30px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,.22); }
 .drawer-brand div { min-width: 0; display: grid; gap: 2px; }
 .drawer-brand-wordmark { font-family: ui-rounded, -apple-system, system-ui, sans-serif; font-size: 19px; line-height: 1; font-weight: 650; letter-spacing: -.45px; color: #f1f4ee; white-space: nowrap; }
@@ -974,8 +976,9 @@ button.settings-page-row:disabled, .settings-page-row.disabled { color: rgba(235
 .drawer-backdrop.open { opacity: 1; pointer-events: auto; }
 .drawer-backdrop.is-dragging { transition: none; }
 .drawer-title { display: flex; align-items: center; gap: 7px; font-size: 12px; color: rgba(235,235,245,.5); letter-spacing: .4px; margin: 14px 8px 7px; }
-.drawer-section-heading { display: flex; align-items: center; justify-content: space-between; margin: 18px 6px 8px; color: rgba(235,235,245,.52); font-size: 12px; font-weight: 600; letter-spacing: .25px; text-transform: uppercase; }
-.drawer-section-heading small { min-width: 22px; padding: 2px 6px; border-radius: 10px; background: rgba(118,118,128,.16); color: rgba(235,235,245,.48); font-size: 11px; font-weight: 500; text-align: center; }
+.drawer-section-heading { display:flex; align-items:center; min-height:18px; margin:10px 12px 6px; color:rgba(235,235,245,.42); font:12px/18px -apple-system,BlinkMacSystemFont,sans-serif; letter-spacing:.01em; }
+.drawer-section-heading::before { display:none; }
+.drawer-section-heading small { display:none; }
 .drawer-title svg { width: 15px; height: 15px; }
 .drawer-title-row { display: flex; align-items: center; gap: 8px; margin: 14px 4px 7px; }
 .drawer-title-row .drawer-title { margin: 0 4px; }
@@ -1016,31 +1019,50 @@ button.settings-page-row:disabled, .settings-page-row.disabled { color: rgba(235
 .drawer-bind-footer .drawer-bind { width: 100%; min-height: 0; margin-top: 0; padding: 10px; display: block; border: none; border-radius: 8px; background: #2b3550; color: #cdddff; font: 14px/normal -apple-system,system-ui,sans-serif; text-align: center; touch-action: manipulation; }
 .drawer-bind:active { background: #344168; }
 
-/* Workspace navigation: a flat iOS-style outline, with hierarchy carried by indentation and a hairline. */
-.workspace-list { margin: 0 2px; }
-.workspace-session { border-bottom: 1px solid rgba(84,84,88,.28); }
-.workspace-session:last-child { border-bottom: 0; }
-.workspace-session-row { display: flex; align-items: center; min-height: 52px; }
-.workspace-session.active .workspace-session-row { color: #fff; }
-.workspace-chevron { flex: none; width: 30px; height: 44px; border: 0; background: transparent; color: rgba(235,235,245,.42); font-size: 21px; line-height: 1; }
-.workspace-session-name { flex: 1; min-width: 0; height: 52px; display: flex; align-items: center; gap: 9px; padding: 0 4px; border: 0; background: transparent; color: rgba(235,235,245,.78); text-align: left; font: 15px/1 -apple-system,system-ui,sans-serif; }
-.workspace-session-name svg { width: 17px; height: 17px; color: rgba(235,235,245,.5); }
-.workspace-session-name span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.workspace-session-name b, .workspace-window b { width: 6px; height: 6px; flex: none; margin-left: auto; border-radius: 50%; background: var(--blue); box-shadow: 0 0 0 3px rgba(10,132,255,.14); }
-.workspace-more { flex: none; width: 40px; height: 44px; border: 0; border-radius: 10px; background: transparent; color: rgba(235,235,245,.38); }
-.workspace-more svg { width: 18px; height: 18px; }
-.workspace-more:active { background: rgba(118,118,128,.16); color: #fff; }
-.workspace-window-collapse { display: grid; grid-template-rows: 0fr; transition: grid-template-rows .22s cubic-bezier(.22,.8,.25,1); }
-.workspace-window-collapse.open { grid-template-rows: 1fr; }
-.workspace-window-list { min-height: 0; overflow: hidden; opacity: 0; transform: translateY(-3px); transition: opacity .16s ease-out, transform .22s cubic-bezier(.22,.8,.25,1); }
-.workspace-window-collapse.open .workspace-window-list { opacity: 1; transform: none; }
-.workspace-window { width: calc(100% - 38px); min-height: 42px; margin-left: 38px; padding: 8px 12px; display: flex; align-items: center; gap: 9px; border: 0; border-left: 1px solid rgba(118,118,128,.25); border-radius: 0; background: transparent; color: rgba(235,235,245,.52); text-align: left; font: 13px/24px -apple-system,system-ui,sans-serif; }
-.workspace-window-mark { width: 5px; height: 5px; flex: none; border: 1px solid currentColor; border-radius: 2px; opacity: .65; }
-.workspace-window span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.workspace-window b { margin-left: auto; }
-.workspace-window.active { border-left-color: var(--blue); color: #fff; }
-.workspace-window:active, .workspace-session-name:active { background: rgba(118,118,128,.12); }
-@media (prefers-reduced-motion: reduce) { .workspace-window-collapse, .workspace-window-list { transition: none; } }
+/* Session browser: a quiet group caption followed by full-width, compact Window rows. */
+.session-sections { margin:0 -12px; padding:8px 0 20px; }
+.session-section { margin:0 0 14px; padding:0; }
+.session-section + .session-section { padding-top:14px; border-top:1px solid rgba(118,118,128,.12); }
+.session-section-header { min-height:30px; display:flex; align-items:center; padding:0 12px; background:transparent; }
+.session-section-toggle { flex:none; display:grid; place-items:center; width:18px; height:28px; margin-left:2px; padding:0; border:0; background:transparent; color:rgba(235,235,245,.46); }
+.session-section-toggle svg { width:12px; height:12px; transition:transform .22s cubic-bezier(.22,.8,.25,1); }
+.session-section-toggle:not(.is-open) svg { transform:rotate(-90deg); }
+.session-section-toggle:active { color:rgba(235,235,245,.70); }
+.session-section-menu { flex:none; display:grid; place-items:center; width:36px; height:32px; margin-left:auto; padding:0; border:0; border-radius:8px; background:transparent; color:rgba(235,235,245,.40); }
+.session-section-menu svg { width:17px; height:17px; }
+.session-section-menu:active { background:rgba(118,118,128,.08); }
+.session-section-title { flex:0 1 auto; min-width:0; max-width:calc(100% - 56px); height:28px; display:flex; align-items:center; gap:0; padding:0; border:0; background:transparent; color:rgba(255,255,255,.90); text-align:left; font:14px/1 -apple-system,BlinkMacSystemFont,sans-serif; font-weight:650; touch-action:manipulation; -webkit-tap-highlight-color:transparent; }
+.session-section-icon { display:none; }
+.session-section.is-current .session-section-title { color:rgba(255,255,255,.98); }
+.session-section-label { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; letter-spacing:-.01em; }
+.session-section-body { display:grid; grid-template-rows:0fr; transition:grid-template-rows .24s cubic-bezier(.22,.8,.25,1); }
+.session-section-body.is-open { grid-template-rows:1fr; }
+.session-window-list { min-height:0; overflow:hidden; padding:2px 0 0; opacity:0; transform:translateY(-4px); transition:opacity .18s ease,transform .24s cubic-bezier(.22,.8,.25,1); }
+.session-section-body.is-open .session-window-list { opacity:1; transform:none; }
+.session-window-row { width:100%; min-height:40px; margin:0; padding:4px 12px; display:flex; align-items:center; gap:10px; border:0; border-radius:0; background:transparent; color:rgba(235,235,245,.62); text-align:left; font:14px/22px -apple-system,BlinkMacSystemFont,sans-serif; touch-action:manipulation; -webkit-tap-highlight-color:transparent; }
+.session-window-row.is-current { background:rgba(92,110,145,.25); box-shadow:inset 0 1px 0 rgba(94,157,255,.28), inset 0 -1px 0 rgba(94,157,255,.28); border-radius:0; color:#fff; font-weight:600; }
+.session-window-label { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.session-window-count { flex:none; min-width:20px; margin-left:auto; color:rgba(235,235,245,.34); font:12px/20px ui-monospace,SFMono-Regular,Menlo,monospace; text-align:right; font-variant-numeric:tabular-nums; }
+.session-window-row.is-current .session-window-count { color:rgba(157,196,255,.9); }
+.session-window-menu { flex:none; width:32px; height:32px; margin-left:6px; padding:0; display:grid; place-items:center; border:0; border-radius:8px; background:transparent; color:rgba(235,235,245,.38); }
+.session-window-menu svg { width:17px; height:17px; }
+.session-window-menu:active { background:rgba(118,118,128,.10); color:rgba(235,235,245,.78); }
+.session-window-row:active { background:rgba(118,118,128,.10); }
+.session-section-title:focus, .session-window-row:focus, .session-section-toggle:focus, .session-section-menu:focus { outline:none; }
+.session-section-title:focus-visible, .session-window-row:focus-visible, .session-section-toggle:focus-visible, .session-section-menu:focus-visible { outline:2px solid rgba(10,132,255,.55); outline-offset:-2px; border-radius:8px; }
+.session-section-skeleton-row, .session-window-skeleton-row { display:flex; align-items:center; gap:10px; }
+.session-section-skeleton-row { height:30px; padding:0 12px; }
+.session-window-skeleton { min-height:0; overflow:hidden; padding:4px 0; }
+.session-window-skeleton-row { height:40px; padding:4px 12px; }
+.session-section-skeleton-row i, .session-window-skeleton-row i { display:block; height:10px; border-radius:999px; background:linear-gradient(90deg,rgba(255,255,255,.09),rgba(255,255,255,.18),rgba(255,255,255,.09)); background-size:220% 100%; animation:session-skeleton-shimmer 1.35s ease-in-out infinite; }
+.session-section-skeleton-row i:first-child { width:18px; height:18px; border-radius:6px; }
+.session-section-skeleton-row i:last-child { width:44%; }
+.session-window-skeleton-row i:first-child { width:46%; }
+.session-window-skeleton-row i:last-child { width:16px; margin-left:auto; }
+@keyframes session-skeleton-shimmer { 0% { background-position:120% 0; } 100% { background-position:-80% 0; } }
+.workspace-load-error { padding:8px 14px; color:rgba(235,235,245,.62); font-size:13px; overflow-wrap:anywhere; }
+.workspace-load-error button { min-height:44px; padding:0 4px; border:0; background:transparent; color:var(--blue); }
+@media (prefers-reduced-motion: reduce) { .session-section-body,.session-window-list,.session-section-toggle,.session-section-skeleton-row i,.session-window-skeleton-row i { transition:none; animation:none; } }
 
 /* Project Task beta — a task-first peer to the existing session root. The surfaces deliberately reuse
    the app's dark iOS palette, 44pt controls, segmented controls and full-screen secondary pages. */
@@ -1129,8 +1151,9 @@ button.settings-page-row:disabled, .settings-page-row.disabled { color: rgba(235
 .project-drawer .drawer-name { width: 100%; min-height: 44px; border: none; background: transparent; color: #e6e6e6; text-align: left; }
 .project-drawer .drawer-name { min-height: 46px; padding: 0 12px; border-radius: 11px; }
 .project-drawer .drawer-name.active { background: transparent; color: #fff; box-shadow: inset 2px 0 0 var(--blue); }
-.project-root-switch { margin: 0 4px 12px; padding: 3px; border-radius: 12px; background: rgba(118,118,128,.2); }
-.project-root-switch button { min-height: 36px; border-radius: 9px; font-size: 13px; }
+.project-root-switch { margin:0 2px 10px; padding:3px; display:flex; gap:2px; border:1px solid rgba(255,255,255,.06); border-radius:11px; background:rgba(118,118,128,.12); }
+.project-root-switch button { flex:1; min-height:32px; padding:0 8px; border:0; border-radius:8px; background:transparent; color:rgba(235,235,245,.48); font:13px/1 -apple-system,BlinkMacSystemFont,sans-serif; }
+.project-root-switch button[aria-pressed="true"] { background:rgba(118,118,128,.26); color:rgba(255,255,255,.92); box-shadow:0 1px 2px rgba(0,0,0,.16); }
 .project-drawer-tools { flex: none; display: flex; align-items: center; gap: 6px; margin-top: 8px; }
 .project-drawer-tools button {
   width: auto; min-width: 104px; min-height: 44px; padding: 0 14px; border: none; border-radius: 11px; background: #303136; color: rgba(235,235,245,.72); text-align: left;
