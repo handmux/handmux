@@ -9,7 +9,7 @@ import { relTime } from '../inbox.js';
 import WorkspaceRecoveryCard from './WorkspaceRecoveryCard.jsx';
 import { listProjects } from '../projectTask/api.js';
 import type { Project } from '../projectTask/contracts.js';
-import { getSessions, getWindows } from '../api.js';
+import { getSessions, getWindowsForSessions } from '../api.js';
 import type { TmuxWindow } from '../api.js';
 import type { MouseEvent } from 'react';
 import type { WorkspaceRecoveryPlan, WorkspaceRestoreOperation } from '../workspaceRecovery.js';
@@ -98,6 +98,10 @@ export default function Drawer({
   const [projectsLoading, setProjectsLoading] = useState(false);
   const [projectsError, setProjectsError] = useState<string | null>(null);
   const [sessionWindows, setSessionWindows] = useState<Record<string, TmuxWindow[]>>({});
+  const [sessionIds, setSessionIds] = useState<Record<string, string>>({});
+  const [sessionsReady, setSessionsReady] = useState(false);
+  const [windowLoading, setWindowLoading] = useState<Record<string, boolean>>({});
+  const [windowFetchedAt, setWindowFetchedAt] = useState<Record<string, number>>({});
   const [expandedPreferences, setExpandedPreferences] = useState<Record<string, boolean>>(() => readExpandedSessions(bound));
   const expandedSessions = new Set(bound.filter((name) => expandedPreferences[name] !== false));
   const [menuSession, setMenuSession] = useState<string | null>(null);
@@ -185,21 +189,44 @@ export default function Drawer({
     // A new open/selection starts a fresh topology read; never carry a previous
     // window list across a refresh that may fail.
     setSessionWindows({});
+    setSessionIds({});
+    setSessionsReady(false);
+    setWindowFetchedAt({});
     void (async () => {
       try {
         const sessions = await getSessions();
-        const names = new Set(bound);
-        const rows = await Promise.all(sessions
-          .filter((session) => names.has(session.name))
-          .map(async (session) => [session.name, await getWindows(session.id)] as const));
         if (!alive) return;
-        setSessionWindows(Object.fromEntries(rows));
+        setSessionIds(Object.fromEntries(sessions.filter((session) => bound.includes(session.name)).map((session) => [session.name, session.id])));
+        setSessionsReady(true);
       } catch {
-        // Keep the pinned Session names usable if a topology refresh is temporarily unavailable.
+        if (alive) setSessionsReady(true);
       }
     })();
     return () => { alive = false; };
   }, [rootView, open, bound]);
+
+  const expandedKey = [...expandedSessions].join('\0');
+  useEffect(() => {
+    if (rootView !== 'session' || !open || !sessionsReady) return;
+    const now = Date.now();
+    const targets = [...expandedSessions]
+      .filter((name): name is string => Boolean(sessionIds[name]) && (!windowFetchedAt[name] || now - windowFetchedAt[name] > 5000))
+      .map((name) => ({ name, id: sessionIds[name] }));
+    if (!targets.length) return;
+    let alive = true;
+    setWindowLoading((current) => Object.fromEntries([...Object.entries(current), ...targets.map(({ name }) => [name, true])]));
+    void getWindowsForSessions(targets.map(({ id }) => id!)).then((rows) => {
+      if (!alive) return;
+      const idsToNames = Object.fromEntries(targets.map(({ name, id }) => [id, name]));
+      const namedRows = Object.fromEntries(Object.entries(rows).map(([id, windows]) => [idsToNames[id], windows]));
+      setSessionWindows((current) => ({ ...current, ...namedRows }));
+      setWindowFetchedAt((current) => ({ ...current, ...Object.fromEntries(targets.map(({ name }) => [name, now])) }));
+      setWindowLoading((current) => ({ ...current, ...Object.fromEntries(targets.map(({ name }) => [name, false])) }));
+    }).catch(() => {
+      if (alive) setWindowLoading((current) => ({ ...current, ...Object.fromEntries(targets.map(({ name }) => [name, false])) }));
+    });
+    return () => { alive = false; };
+  }, [rootView, open, sessionsReady, expandedKey, sessionIds]);
 
   const toggleSession = (name: string): void => {
     setExpandedPreferences((current) => ({ ...current, [name]: !expandedSessions.has(name) }));
@@ -249,8 +276,9 @@ export default function Drawer({
             ))}
           </> : <>
           <div className="drawer-section-heading"><span>{t('drawer.title')}</span><small>{bound.length}</small></div>
-          {bound.length === 0 && <div className="drawer-empty">{t('drawer.empty')}</div>}
-          <div className="workspace-list" role="tree" aria-label={t('drawer.title')}>
+          {!sessionsReady && bound.length > 0 && <div className="drawer-topology-loading" role="status">{t('common.loading')}</div>}
+          {sessionsReady && bound.length === 0 && <div className="drawer-empty">{t('drawer.empty')}</div>}
+          {sessionsReady && <div className="workspace-list" role="tree" aria-label={t('drawer.title')}>
           {bound.map((name) => (
             <div key={name} className={`workspace-session${name === currentSessionName ? ' active' : ''}`}>
               <div className="workspace-session-row" role="treeitem" aria-expanded={expandedSessions.has(name)}>
@@ -276,6 +304,7 @@ export default function Drawer({
               </div>
               <div className={`workspace-window-collapse${expandedSessions.has(name) ? ' open' : ''}`} aria-hidden={!expandedSessions.has(name)}>
                 <div className="workspace-window-list">
+                  {windowLoading[name] && <div className="drawer-topology-loading" role="status">{t('common.loading')}</div>}
                   {(sessionWindows[name] || []).map((window) => (
                     <button
                       key={window.id}
@@ -290,7 +319,7 @@ export default function Drawer({
               </div>
             </div>
           ))}
-          </div>
+          </div>}
           {orphans.length > 0 && (
             <div className="drawer-orphans">
               <button className="drawer-orphans-head" onClick={() => setOrphOpen((o) => !o)}>

@@ -280,6 +280,13 @@ function parsePanes(value: unknown): TmuxPane[] {
 }
 
 export const getSessions = async (): Promise<TmuxSession[]> => parseSessions(await req('/api/sessions'));
+export interface TmuxSessionTopology { session: TmuxSession; windows: TmuxWindow[] }
+export const getSessionTopology = async (): Promise<TmuxSessionTopology[]> => {
+  const value = await req('/api/sessions/topology');
+  return Array.isArray(value) ? value.filter((row): row is TmuxSessionTopology => (
+    !!row && typeof row === 'object' && 'session' in row && 'windows' in row
+  )) : [];
+};
 export const getUsage = (): Promise<unknown> => req('/api/usage');
 export const getAgentUsage = (refresh = false, targetAgentId?: string): Promise<unknown> => req(
   `/api/agents/usage${refresh ? `?refresh=true${targetAgentId ? `&target=${encodeURIComponent(targetAgentId)}` : ''}` : ''}`,
@@ -302,6 +309,16 @@ export const queryApiAccount = (id: string): Promise<unknown> => req(
 export const getWindows = async (session: string): Promise<TmuxWindow[]> => (
   parseWindows(await req(`/api/windows?session=${encodeURIComponent(session)}`))
 );
+export const getWindowsForSessions = async (sessions: string[]): Promise<Record<string, TmuxWindow[]>> => {
+  if (!sessions.length) return {};
+  const query = sessions.map((session) => `session=${encodeURIComponent(session)}`).join('&');
+  const value = await req(`/api/windows?${query}`);
+  if (sessions.length === 1) return { [sessions[0]!]: parseWindows(value) };
+  if (!Array.isArray(value)) return {};
+  return Object.fromEntries(value.filter((row): row is { session: string; windows: TmuxWindow[] } => (
+    !!row && typeof row === 'object' && typeof row.session === 'string' && Array.isArray(row.windows)
+  )).map((row) => [row.session, parseWindows(row.windows)]));
+};
 export const getPanes = async (window: string): Promise<TmuxPane[]> => (
   parsePanes(await req(`/api/panes?window=${encodeURIComponent(window)}`, { timeoutMs: 8_000 }))
 );

@@ -56,6 +56,17 @@ export function sessionRoutes({ commands, docs, workspace, agentIdentity }: Sess
     try { return res.json(await commands.listSessions()); } catch (e) { return next(e); }
   });
 
+  r.get('/sessions/topology', async (_req: Request, res: Response, next: NextFunction) => {
+    try {
+      const sessions = await commands.listSessions();
+      const topology = await Promise.all(sessions.map(async (session) => ({
+        session,
+        windows: await commands.listWindows(session.id),
+      })));
+      return res.json(topology);
+    } catch (e) { return next(e); }
+  });
+
   r.post('/sessions', async (req: Request, res: Response, next: NextFunction) => {
     const body = requestBody(req);
     const name = typeof body.name === 'string' ? body.name.trim() : '';
@@ -80,8 +91,14 @@ export function sessionRoutes({ commands, docs, workspace, agentIdentity }: Sess
   });
 
   r.get('/windows', async (req: Request, res: Response, next: NextFunction) => {
-    if (!isSessionId(req.query.session)) return res.status(400).json({ error: 'bad session id' });
-    try { return res.json(await commands.listWindows(req.query.session)); } catch (e) {
+    const rawSessions = Array.isArray(req.query.session) ? req.query.session : [req.query.session];
+    if (!rawSessions.length || rawSessions.some((id) => !isSessionId(id))) return res.status(400).json({ error: 'bad session id' });
+    const ids = rawSessions as string[];
+    try {
+      if (ids.length === 1) return res.json(await commands.listWindows(ids[0]!));
+      const rows = await Promise.all(ids.map(async (id) => ({ session: id, windows: await commands.listWindows(id) })));
+      return res.json(rows);
+    } catch (e) {
       if (missingTmuxTarget(e, 'session')) return res.status(404).json({ error: 'session not found' });
       return next(e);
     }
