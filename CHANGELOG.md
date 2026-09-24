@@ -4,6 +4,8 @@ All notable changes to handmux. Format follows [Keep a Changelog](https://keepac
 
 ## [Unreleased]
 
+## [0.32.0] - 2026-09-24
+
 ### Added
 
 - 新增项目与会话双模式入口：抽屉可以在项目视角和会话视角之间切换，项目页与任务页骨架已接入，项目管理功能将继续开放。
