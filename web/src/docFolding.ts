@@ -1,7 +1,8 @@
 // Collapsible sections in the DOCUMENT BODY (doc mode only).
 //
-// Every heading gets a caret; tapping it hides that heading's content up to the next heading of the same
-// or higher level — so folding an h1 takes its h2/h3 along, exactly like the outline drawer.
+// Every section heading gets a caret; tapping it hides that heading's content up to the next heading of
+// the same or higher level — so folding an h1 takes its h2/h3 along, exactly like the outline drawer.
+// The first h1 is the document title, not a section, so it always stays expanded and has no caret.
 //
 // Done as a DOM pass plus one delegated listener on the document root (the same shape as the inline
 // image loader and the code-block copy buttons): the markdown HTML is injected wholesale, so React does
@@ -46,7 +47,13 @@ function applyFolding(root: HTMLElement): void {
 
 /** Add a caret to every heading and wire the toggle. Returns a cleanup function. */
 export function installHeadingFolding(root: HTMLElement): () => void {
+  const documentTitle = root.querySelector<HTMLElement>('h1');
   for (const heading of Array.from(root.querySelectorAll<HTMLElement>(HEADING_SELECTOR))) {
+    if (heading === documentTitle) {
+      heading.querySelector(':scope > .md-fold')?.remove();
+      heading.classList.remove(FOLDED_CLASS);
+      continue;
+    }
     if (heading.querySelector(':scope > .md-fold')) continue; // already installed
     const caret = document.createElement('span');
     caret.className = 'md-fold';

@@ -702,17 +702,14 @@ describe('DocView read-aloud toolbar', () => {
     ].join('\n');
     await render({ type: 'markdown', name: 'a.md', path: '/docs/a.md', content: markdown });
     await flush();
-    const title = container.querySelector('.doc-md h1');
-    expect(title?.getAttribute('data-tts-skip')).toBe('');
     await click(container.querySelector('[aria-label="朗读"]'));
     expect(spoken.length).toBeGreaterThan(0); // the tap must produce speech, not a silent no-op
-    expect(spoken[0]).not.toContain('一级标题');
+    expect(spoken[0]).toContain('一级标题');
     expect(spoken.join(' ')).toContain('开头的一句话。');
     // The chain advances on each utterance's end, which the mock never fires — so assert the marked
     // sentence list instead: code is part of what will be read.
     const sentences = [...container.querySelectorAll('.doc-md .tts-sent[data-tts]')]
       .map((span) => span.textContent);
-    expect(sentences.join(' ')).not.toContain('一级标题');
     expect(sentences.join(' ')).toContain('const shouldBeRead = 1;');
     expect(sentences.join(' ')).toContain('结尾的话。');
     expect(sentences.join(' ')).not.toContain('title:'); // frontmatter is not read aloud

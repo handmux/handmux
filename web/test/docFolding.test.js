@@ -1,8 +1,8 @@
 // web/test/docFolding.test.js — collapsing sections in the document BODY.
 //
-// Every heading carries a caret; folding hides that heading's content up to the next heading of the same
-// or higher level, so folding an h1 takes its h2/h3 with it. Folded content must also stay out of
-// read-aloud and find.
+// Every section heading carries a caret; the first h1 is the document title and always stays expanded.
+// Folding hides that section's content up to the next heading of the same or higher level, so folding an
+// h1 takes its h2/h3 with it. Folded content must also stay out of read-aloud and find.
 import { describe, it, expect, beforeEach } from 'vitest';
 import { installHeadingFolding } from '../src/docFolding.js';
 import { renderMarkdown } from '../src/markdown.js';
@@ -10,6 +10,8 @@ import { markSentences } from '../src/voice/docSpeech.js';
 import { runFind } from '../src/docFind.js';
 
 const DOC = [
+  '# 文档标题',
+  '',
   '# 一级',
   '',
   '一级正文。',
@@ -43,11 +45,13 @@ const caretOf = (root, label) => [...root.querySelectorAll('h1, h2, h3')]
 beforeEach(() => { document.body.innerHTML = ''; });
 
 describe('heading folding', () => {
-  it('adds a caret to every heading without touching its text', () => {
+  it('keeps the document title expanded and adds carets to section headings without touching text', () => {
     const { root } = mount();
-    const h1 = root.querySelector('h1');
-    expect(h1.querySelector('.md-fold')).not.toBeNull();
-    expect(h1.textContent.trim()).toBe('一级'); // the caret contributes no text (slugs/find/TTS unaffected)
+    const [title, section] = root.querySelectorAll('h1');
+    expect(title.textContent.trim()).toBe('文档标题');
+    expect(title.querySelector('.md-fold')).toBeNull();
+    expect(section.querySelector('.md-fold')).not.toBeNull();
+    expect(section.textContent.trim()).toBe('一级'); // the caret contributes no text (slugs/find/TTS unaffected)
   });
 
   it('hides the section content but never a heading', () => {
@@ -56,7 +60,7 @@ describe('heading folding', () => {
     caret.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     // every paragraph goes, every heading stays (they are what you fold around)
     expect(hidden(root)).toEqual(['一级正文。', '二级正文 A。', '三级正文。', '二级正文 B。']);
-    expect(root.querySelectorAll('h1, h2, h3').length).toBe(4);
+    expect(root.querySelectorAll('h1, h2, h3').length).toBe(5);
     caret.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     expect(hidden(root)).toEqual([]);
   });
