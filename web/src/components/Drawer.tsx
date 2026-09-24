@@ -149,11 +149,11 @@ export default function Drawer({
       const target = event.target;
       const insideDrawer = target instanceof Node && drawerRef.current?.contains(target) === true;
       const onDrawerBackdrop = target instanceof Element && Boolean(target.closest('.drawer-backdrop'));
-      const startsInDock = target instanceof Element && Boolean(target.closest('.bottom-dock'));
       if (!open && startsInTabStrip(target)) return;
-      // In chat mode the BottomDock owns its own horizontal pager. The conversation surface
-      // remains eligible for opening the drawer; only a gesture that starts on the dock is reserved.
-      if (!open && activeLens === 'chat' && startsInDock) return;
+      // Chat mode owns horizontal swipes for returning to the command surface. Do not let the
+      // drawer's document-level listener claim any chat gesture; opening the drawer is reserved
+      // for terminal/command mode. Closing an already-open drawer remains available everywhere.
+      if (!open && activeLens === 'chat') return;
       // Closing starts inside the drawer so a swipe on the backdrop remains its normal tap-to-dismiss
       // interaction. Opening is available across the normal page, unless a horizontal scroller still
       // has content to reveal on its left side.

@@ -116,6 +116,17 @@ describe('Drawer (bound sessions)', () => {
     expect(onOpen).toHaveBeenCalledTimes(1);
   });
 
+  it('does not claim horizontal swipes while the workspace is in chat mode', async () => {
+    const onOpen = vi.fn();
+    await render({ open: false, activeLens: 'chat', onOpen });
+    await act(async () => {
+      dispatchTouch(window, 'touchstart', 180, 180);
+      dispatchTouch(window, 'touchmove', 300, 182);
+      dispatchTouch(window, 'touchend');
+    });
+    expect(onOpen).not.toHaveBeenCalled();
+  });
+
   it('does not open while swiping a horizontal window tab strip', async () => {
     const onOpen = vi.fn();
     await render({ open: false, onOpen });
