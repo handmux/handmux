@@ -116,15 +116,20 @@ describe('Drawer (bound sessions)', () => {
     expect(onOpen).toHaveBeenCalledTimes(1);
   });
 
-  it('does not claim horizontal swipes while the workspace is in chat mode', async () => {
+  it('does not claim horizontal swipes from the BottomDock chat page', async () => {
     const onOpen = vi.fn();
-    await render({ open: false, activeLens: 'chat', onOpen });
+    await render({ open: false, onOpen });
+    const dock = document.createElement('div');
+    dock.className = 'bottom-dock';
+    dock.dataset.dockMode = 'agent';
+    document.body.appendChild(dock);
     await act(async () => {
-      dispatchTouch(window, 'touchstart', 180, 180);
+      dispatchTouch(dock, 'touchstart', 180, 180);
       dispatchTouch(window, 'touchmove', 300, 182);
       dispatchTouch(window, 'touchend');
     });
     expect(onOpen).not.toHaveBeenCalled();
+    dock.remove();
   });
 
   it('does not open while swiping a horizontal window tab strip', async () => {

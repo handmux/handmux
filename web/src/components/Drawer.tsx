@@ -11,7 +11,6 @@ import { getSessions, getWindowsForSessions } from '../api.js';
 import type { TmuxSession, TmuxWindow } from '../api.js';
 import type { MouseEvent } from 'react';
 import type { WorkspaceRecoveryPlan, WorkspaceRestoreOperation } from '../workspaceRecovery.js';
-import type { WorkspaceLens } from './LensSwitch.jsx';
 import ActionSheet from './ActionSheet.jsx';
 import { ArrowUpIcon, ChevronDownIcon, ChevronRightIcon, CommandIcon, GearIcon, MoreHorizontalIcon, PencilIcon, PlusIcon, XIcon } from './icons.jsx';
 
@@ -86,7 +85,6 @@ interface DrawerProps {
   recoveryOperation?: WorkspaceRestoreOperation | null;
   onOpenRecovery?: () => void;
   projectTaskBeta?: boolean;
-  activeLens?: WorkspaceLens;
   onSwitchProject?: () => void;
   onSwitchSession?: () => void;
   onOpenSettings?: () => void;
@@ -117,7 +115,7 @@ export default function Drawer({
   open, onOpen = () => {}, currentSessionName, currentWindowId = null, bound, onSelectSession, onUnbind, onBind, onClose,
   orphans = [], onTakeoverRequest,
   recoveryPlan = null, recoveryOperation = null, onOpenRecovery = () => {},
-  projectTaskBeta = false, activeLens = 'terminal', onSwitchProject = () => {}, onSwitchSession = () => {}, onOpenSettings = () => {}, onNewWindow = () => {}, onManageWindow = () => {}, onRenameSession = () => {}, onDeleteSession = () => {}, onMoveSession = () => {}, windowOrderVersion = 0, rootView = 'session',
+  projectTaskBeta = false, onSwitchProject = () => {}, onSwitchSession = () => {}, onOpenSettings = () => {}, onNewWindow = () => {}, onManageWindow = () => {}, onRenameSession = () => {}, onDeleteSession = () => {}, onMoveSession = () => {}, windowOrderVersion = 0, rootView = 'session',
   revealRevision = 0,
 }: DrawerProps) {
   const [orphOpen, setOrphOpen] = useState(false);
@@ -149,11 +147,12 @@ export default function Drawer({
       const target = event.target;
       const insideDrawer = target instanceof Node && drawerRef.current?.contains(target) === true;
       const onDrawerBackdrop = target instanceof Element && Boolean(target.closest('.drawer-backdrop'));
+      const startsInChatDock = target instanceof Element
+        && Boolean(target.closest('.bottom-dock[data-dock-mode="agent"]'));
       if (!open && startsInTabStrip(target)) return;
-      // Chat mode owns horizontal swipes for returning to the command surface. Do not let the
-      // drawer's document-level listener claim any chat gesture; opening the drawer is reserved
-      // for terminal/command mode. Closing an already-open drawer remains available everywhere.
-      if (!open && activeLens === 'chat') return;
+      // The BottomDock's chat page owns horizontal swipes for returning to the command page. The
+      // Agent conversation page is a different surface and must still be able to reveal the drawer.
+      if (!open && startsInChatDock) return;
       // Closing starts inside the drawer so a swipe on the backdrop remains its normal tap-to-dismiss
       // interaction. Opening is available across the normal page, unless a horizontal scroller still
       // has content to reveal on its left side.
@@ -213,7 +212,7 @@ export default function Drawer({
       window.removeEventListener('touchend', onTouchEnd, true);
       window.removeEventListener('touchcancel', onTouchCancel, true);
     };
-  }, [activeLens, open, onClose, onOpen]);
+  }, [open, onClose, onOpen]);
 
   // Browsers other than iOS do not expose Safari's rubber-band affordance. Keep the
   // native scroll path for regular movement, but add a small damped translation when

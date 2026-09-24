@@ -2909,7 +2909,6 @@ export default function App() {
         recoveryOperation={recoveryOperation}
         onOpenRecovery={openRecoveryFromDrawer}
         projectTaskBeta={projectTaskBeta}
-        activeLens={lens}
         onSwitchProject={() => setDrawerView('project')}
         onSwitchSession={() => setDrawerView('session')}
         onOpenSettings={openSettings}
