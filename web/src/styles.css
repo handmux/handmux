@@ -1016,9 +1016,10 @@ button.settings-page-row:disabled, .settings-page-row.disabled { color: rgba(235
 .drawer-project-row span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .drawer-project-row.active { background: transparent; color: #fff; box-shadow: inset 2px 0 0 var(--blue); }
 .drawer-project-row:active { background: rgba(118,118,128,.2); }
-.drawer-project-coming-soon { min-height: 180px; margin: 8px 4px; padding: 24px 16px; display: grid; place-content: center; gap: 8px; border-radius: 14px; background: rgba(118,118,128,.1); text-align: center; }
-.drawer-project-coming-soon strong { color: rgba(235,235,245,.82); font-size: 15px; font-weight: 600; }
-.drawer-project-coming-soon span { color: rgba(235,235,245,.46); font-size: 13px; line-height: 1.45; }
+.project-drawer .drawer-scroll-content { display: flex; flex-direction: column; }
+.drawer-project-coming-soon { flex: 1; min-height: 100%; margin: 0; padding: 32px 24px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; background: radial-gradient(circle at 50% 38%, rgba(52,211,153,.08), transparent 42%), linear-gradient(180deg, rgba(118,118,128,.08), rgba(118,118,128,0)); text-align: center; }
+.drawer-project-coming-soon strong { color: rgba(245,245,247,.9); font-size: 20px; font-weight: 650; letter-spacing: -.25px; }
+.drawer-project-coming-soon span { color: rgba(235,235,245,.48); font-size: 14px; line-height: 1.5; }
 /* Bind entry: an iOS list action row, fixed above the drawer safe area. The icon and chevron are
    affordances; the whole 44pt row is the hit target and stays visually quiet until pressed. */
 .drawer-bind-footer { padding-top: 6px; border-top: .5px solid rgba(84,84,88,.45); }
