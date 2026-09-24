@@ -150,6 +150,7 @@ export function createTerminalSelectionController({
     }
     anchor = { col: first, row: cell.row };
     activeRef.current = true;
+    wrap.classList.add('terminal-copy-active');
     setUI(null);
     term.select(first, cell.row, last - first + 1);
     refresh();
@@ -180,6 +181,7 @@ export function createTerminalSelectionController({
   const clear = (): void => {
     anchor = null;
     activeRef.current = false;
+    wrap.classList.remove('terminal-copy-active');
     setUI(null);
     setInfo('');
     term.clearSelection();
@@ -287,6 +289,7 @@ export function createTerminalSelectionController({
     refresh,
     dispose() {
       if (autoScrollRAF != null) cancelAnimationFrame(autoScrollRAF);
+      wrap.classList.remove('terminal-copy-active');
       wrap.removeEventListener('pointerdown', onHandleDown, { capture: true });
       wrap.removeEventListener('pointermove', onHandleMove, { capture: true });
       wrap.removeEventListener('pointerup', onHandleUp, { capture: true });

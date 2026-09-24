@@ -2150,10 +2150,16 @@ export default function App() {
   // `lens` is the sole view owner. Availability controls only whether a terminal pane can opt into chat;
   // it must never evict an already selected chat view during a transient discovery or connection outage.
   useEffect(() => {
-    if (lens !== 'chat' || conversationEnabled || recoveryLookupUncertain || !current?.paneId) return;
+    if (
+      lens !== 'chat'
+      || conversationEnabled
+      || recoveryLookupUncertain
+      || composerRetainedForSurface
+      || !current?.paneId
+    ) return;
     setLens('terminal');
     localStorage.setItem(`tw_lens_${current.paneId}`, 'terminal');
-  }, [conversationEnabled, current?.paneId, lens, recoveryLookupUncertain, setLens]);
+  }, [composerRetainedForSurface, conversationEnabled, current?.paneId, lens, recoveryLookupUncertain, setLens]);
   const conversationAgents = (agentDiscovery?.descriptors ?? [])
     .filter((descriptor) => descriptor.capabilities.conversation)
     .map((descriptor) => ({

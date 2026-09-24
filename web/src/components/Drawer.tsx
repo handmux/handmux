@@ -38,6 +38,21 @@ function isOverlayTarget(target: EventTarget | null): boolean {
   ));
 }
 
+function isCopyGestureTarget(target: EventTarget | null): boolean {
+  return target instanceof Element && Boolean(target.closest(
+    '.chat-copy-active, .chat-copy-handle, .chat-copy-callout, .terminal-copy-active',
+  ));
+}
+
+function hasActiveCopySurface(): boolean {
+  return Boolean(document.querySelector('.chat-copy-active, .terminal-copy-active'));
+}
+
+function hasExpandedTextSelection(): boolean {
+  const selection = window.getSelection?.();
+  return !!selection && !selection.isCollapsed;
+}
+
 function readExpandedSessions(bound: string[]): Record<string, boolean> {
   try {
     const raw = localStorage.getItem(EXPANDED_SESSIONS_KEY);
@@ -140,11 +155,22 @@ export default function Drawer({
   const [swipeOffset, setSwipeOffset] = useState<number | null>(null);
 
   useEffect(() => {
+    const cancelSwipe = (): void => {
+      swipeRef.current.startX = null;
+      swipeRef.current.touchId = null;
+      swipeRef.current.active = false;
+      swipeOffsetRef.current = 0;
+      setSwipeOffset(null);
+    };
     const onTouchStart = (event: TouchEvent): void => {
       if (event.touches.length !== 1) return;
       const touch = event.touches[0];
       if (!touch) return;
       const target = event.target;
+      if (isCopyGestureTarget(target) || hasActiveCopySurface() || hasExpandedTextSelection()) {
+        cancelSwipe();
+        return;
+      }
       const insideDrawer = target instanceof Node && drawerRef.current?.contains(target) === true;
       const onDrawerBackdrop = target instanceof Element && Boolean(target.closest('.drawer-backdrop'));
       const startsInChatDock = target instanceof Element
@@ -170,6 +196,10 @@ export default function Drawer({
     const onTouchMove = (event: TouchEvent): void => {
       const gesture = swipeRef.current;
       if (gesture.startX === null || event.touches.length !== 1) return;
+      if (isCopyGestureTarget(event.target) || hasActiveCopySurface() || hasExpandedTextSelection()) {
+        cancelSwipe();
+        return;
+      }
       const touch = Array.from(event.touches).find((candidate) => candidate.identifier === gesture.touchId);
       if (!touch) return;
       const dx = touch.clientX - gesture.startX;
@@ -202,15 +232,20 @@ export default function Drawer({
       else if (!gesture.baseOpen && offset > width * .22) onOpen();
     };
     const onTouchCancel = (event: TouchEvent): void => onTouchEnd(event, true);
+    const onSelectionChange = (): void => {
+      if (swipeRef.current.startX !== null && hasExpandedTextSelection()) cancelSwipe();
+    };
     window.addEventListener('touchstart', onTouchStart, { capture: true, passive: true });
     window.addEventListener('touchmove', onTouchMove, { capture: true, passive: false });
     window.addEventListener('touchend', onTouchEnd, { capture: true, passive: true });
     window.addEventListener('touchcancel', onTouchCancel, { capture: true, passive: true });
+    document.addEventListener('selectionchange', onSelectionChange);
     return () => {
       window.removeEventListener('touchstart', onTouchStart, true);
       window.removeEventListener('touchmove', onTouchMove, true);
       window.removeEventListener('touchend', onTouchEnd, true);
       window.removeEventListener('touchcancel', onTouchCancel, true);
+      document.removeEventListener('selectionchange', onSelectionChange);
     };
   }, [open, onClose, onOpen]);
 

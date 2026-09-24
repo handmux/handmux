@@ -18,6 +18,8 @@ All notable changes to handmux. Format follows [Keep a Changelog](https://keepac
 ### Fixed
 
 - 修复从抽屉快速切换工作区时，后台 pane 拓扑校正导致对话输入框被重新挂载、键盘收起的问题。
+- 修复对话页首次加载或 Agent 重识别时输入框被卸载导致键盘收起的问题。
+- 修复聊天和终端复制选区拖动时误触发左侧抽屉的问题。
 - 修复 Markdown 文件预览的文档总标题也能被收起的问题；总标题保持展开并照常参与朗读。
 
 ## [0.31.1] - 2026-09-22

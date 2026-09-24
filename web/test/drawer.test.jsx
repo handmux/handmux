@@ -132,6 +132,72 @@ describe('Drawer (bound sessions)', () => {
     dock.remove();
   });
 
+  it('does not open while dragging an active chat copy selection', async () => {
+    const onOpen = vi.fn();
+    await render({ open: false, onOpen });
+    const copySurface = document.createElement('div');
+    copySurface.className = 'chat-view chat-copy-active';
+    document.body.appendChild(copySurface);
+    await act(async () => {
+      dispatchTouch(copySurface, 'touchstart', 40, 180);
+      dispatchTouch(window, 'touchmove', 220, 182);
+      dispatchTouch(window, 'touchend');
+    });
+    expect(onOpen).not.toHaveBeenCalled();
+    copySurface.remove();
+  });
+
+  it('does not open while dragging an active terminal copy selection', async () => {
+    const onOpen = vi.fn();
+    await render({ open: false, onOpen });
+    const terminalSurface = document.createElement('div');
+    terminalSurface.className = 'terminal-wrap terminal-copy-active';
+    document.body.appendChild(terminalSurface);
+    await act(async () => {
+      dispatchTouch(terminalSurface, 'touchstart', 40, 180);
+      dispatchTouch(window, 'touchmove', 220, 182);
+      dispatchTouch(window, 'touchend');
+    });
+    expect(onOpen).not.toHaveBeenCalled();
+    terminalSurface.remove();
+  });
+
+  it('cancels a pending drawer swipe when text selection starts', async () => {
+    const onOpen = vi.fn();
+    await render({ open: false, onOpen });
+    const text = document.createTextNode('select me');
+    document.body.appendChild(text);
+    await act(async () => {
+      dispatchTouch(text.parentElement || document.body, 'touchstart', 40, 180);
+      const selection = window.getSelection();
+      const range = document.createRange();
+      range.selectNodeContents(text);
+      selection?.removeAllRanges();
+      selection?.addRange(range);
+      dispatchTouch(window, 'touchmove', 220, 182);
+      dispatchTouch(window, 'touchend');
+    });
+    expect(onOpen).not.toHaveBeenCalled();
+    window.getSelection()?.removeAllRanges();
+    text.remove();
+  });
+
+  it('cancels a pending drawer swipe when chat copy mode activates after touchstart', async () => {
+    const onOpen = vi.fn();
+    await render({ open: false, onOpen });
+    const copySurface = document.createElement('div');
+    copySurface.className = 'chat-view';
+    document.body.appendChild(copySurface);
+    await act(async () => {
+      dispatchTouch(copySurface, 'touchstart', 40, 180);
+      copySurface.classList.add('chat-copy-active');
+      dispatchTouch(window, 'touchmove', 220, 182);
+      dispatchTouch(window, 'touchend');
+    });
+    expect(onOpen).not.toHaveBeenCalled();
+    copySurface.remove();
+  });
+
   it('does not open while swiping a horizontal window tab strip', async () => {
     const onOpen = vi.fn();
     await render({ open: false, onOpen });

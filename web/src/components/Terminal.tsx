@@ -1661,6 +1661,7 @@ const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Terminal({
   const clearSelectionUI = () => {
     termRef.current?.clearSelection();
     selActiveRef.current = false;
+    elRef.current?.parentElement?.classList.remove('terminal-copy-active');
     setSelUI(null);
     setSelInfo('');
   };
