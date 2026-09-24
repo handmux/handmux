@@ -364,6 +364,10 @@ export default function App() {
   const [favorites, setFavorites] = useState(getFavorites); // global favorite commands
   const [recent, setRecent] = useState<string[]>([]); // current session's recent commands (keyed by session name)
   const [current, setCurrent] = useState<CurrentWorkspace | null>(null); // { session, windows, window, panes, paneId }
+  // Controls reset for an intentional pane navigation, while a background topology poll may only
+  // replace a cached pane id with the authoritative id for the same selected window. Keeping that
+  // distinction prevents the drawer's fast path from remounting a focused composer.
+  const [controlsRevision, setControlsRevision] = useState(0);
   const [sessionLoading, setSessionLoading] = useState(false);
   const currentRef = useRef<CurrentWorkspace | null>(null); currentRef.current = current;
   const windowSwitchRef = useRef(0); // only the newest async pane lookup may finish a window switch
@@ -842,6 +846,7 @@ export default function App() {
     const paneId = (target?.pane && panes.some((p) => p.id === target.pane))
       ? target.pane
       : pickId(panes, getLastPane(selectedWindow.id));
+    setControlsRevision((revision) => revision + 1);
     setCurrent({ session, windows, window: selectedWindow, panes, paneId });
     remember({ sessionId: session.id, windowId: selectedWindow.id, paneId });
     writeSessionHash(session.name);
@@ -1067,6 +1072,7 @@ export default function App() {
     // Commit the user's choice before touching the network. With activePaneId supplied by the existing
     // window listing, Terminal mounts now and shows its own loading surface while pane metadata catches up.
     if (!immediatePaneId || !current) return null;
+    setControlsRevision((revision) => revision + 1);
     setCurrent((c) => (c ? { ...c, window, panes: [], paneId: immediatePaneId } : c));
     remember({ sessionId: current.session.id, windowId: window.id, paneId: immediatePaneId });
     try {
@@ -1238,6 +1244,7 @@ export default function App() {
       // keep the requested id visible while one background lookup refreshes the pane list.
       const requestedPane = selection.paneId || '';
       if (requestedPane && requestedPane !== existing.paneId) {
+        setControlsRevision((revision) => revision + 1);
         if (existing.panes.some((pane) => pane.id === requestedPane)) {
           setCurrent((current) => (current && current.session.id === session.id && current.window.id === selectedWindow.id
             ? { ...current, paneId: requestedPane } : current));
@@ -1271,6 +1278,7 @@ export default function App() {
     ++windowSwitchRef.current;
     // Commit the new session and window before asking the server for panes. This transfers the
     // Drawer highlight and updates the title/window bar while the pane surface catches up.
+    setControlsRevision((revision) => revision + 1);
     setCurrent({ session, windows, window: selectedWindow, panes: [], paneId: paneIdHint });
     setSessionLoading(false);
     writeSessionHash(session.name);
@@ -1436,6 +1444,7 @@ export default function App() {
   }, []);
 
   const selectPane = useCallback((paneId: string) => {
+    setControlsRevision((revision) => revision + 1);
     setCurrent((c) => {
       if (!c) return c;
       remember({ windowId: c.window.id, paneId });
@@ -1699,6 +1708,7 @@ export default function App() {
       const { panes, selectPaneId } = await runSplitPane({
         paneId: base.id, dir, windowId: win.id, api: { splitPane: apiSplitPane }, getPanes,
       });
+      setControlsRevision((revision) => revision + 1);
       setCurrent((c) => {
         if (!c) return c;
         const windows = c.windows.map((w) => (w.id === win.id ? { ...w, panes: panes.length } : w));
@@ -2038,10 +2048,20 @@ export default function App() {
   )) ?? null;
   const conversationEnabled = chatAgent
     ? isAgentConversationEnabled(chatAgent) : false;
+  const composerSurfaceKey = current?.session?.id && current?.window?.id
+    ? `${current.session.id}\0${current.window.id}` : null;
+  const lastComposerIdentityRef = useRef<{
+    surfaceKey: string;
+    revision: number;
+    identity: AgentConversationIdentity;
+  } | null>(null);
+  const composerRetainedForSurface = lastComposerIdentityRef.current?.surfaceKey === composerSurfaceKey
+    && lastComposerIdentityRef.current?.revision === controlsRevision;
   // Probe sessionless Codex ownership even while a remembered managed conversation remains visible.
   // Only an explicit activation descriptor proves that the current process is safe to replace.
   const chatLens = lens === 'chat'
-    && (conversationEnabled || recoveryLookupUncertain || !!durableConversationRecovery);
+    && (conversationEnabled || recoveryLookupUncertain || !!durableConversationRecovery
+      || composerRetainedForSurface);
   const conversationActivation = useAgentConversationActivation(
     chatLens && currentAgentDescriptor?.capabilities.conversationActivation === true
       ? activationRun : null,
@@ -2106,14 +2126,18 @@ export default function App() {
   // it costs nothing — with the identity gone the descriptor is gone too, so the send button is already
   // disabled and the draft cannot reach the wrong conversation. A takeover/activation guide is the one case
   // that owns the page instead, so the composer still stands down for it.
-  const lastComposerIdentityRef = useRef<{ paneId: string; identity: AgentConversationIdentity } | null>(null);
-  if (current?.paneId && normalizedConversationIdentity) {
-    lastComposerIdentityRef.current = { paneId: current.paneId, identity: normalizedConversationIdentity };
+  if (composerSurfaceKey && normalizedConversationIdentity) {
+    lastComposerIdentityRef.current = {
+      surfaceKey: composerSurfaceKey,
+      revision: controlsRevision,
+      identity: normalizedConversationIdentity,
+    };
   }
   const heldByGuide = !!durableConversationRecovery || activationPending
     || (!!activationRun && currentAgentDescriptor?.capabilities.conversationActivation === true);
   const retainedComposerIdentity = !heldByGuide
-    && lastComposerIdentityRef.current?.paneId === currentPaneId
+    && lastComposerIdentityRef.current?.surfaceKey === composerSurfaceKey
+    && lastComposerIdentityRef.current?.revision === controlsRevision
     ? lastComposerIdentityRef.current.identity : null;
   const composerIdentity = normalizedConversationIdentity ?? (chatLens
     ? (recoveryLookupUncertain ? rememberedConversationIdentity : null) ?? retainedComposerIdentity
@@ -2286,6 +2310,7 @@ export default function App() {
       : activationRun && currentAgentDescriptor?.capabilities.conversationActivation === true
         ? `conversation-activation\0${activationRun.runId}` : 'chat-unavailable';
   const paneSurfaceOwnerKey = `${currentPaneId ?? 'none'}\0${paneSurfaceIdentity}`;
+  const paneSurfaceControlsKey = `${composerSurfaceKey ?? 'none'}\0${controlsRevision}`;
   const completedEntryRequest = completedChatEntry
     && completedChatEntry.paneId === current?.paneId
     && completedChatEntry.window === current?.window.id
@@ -3175,7 +3200,7 @@ export default function App() {
           {/* The host replaces the primary Surface and its matching controls as one keyed bundle. */}
           <PaneSurfaceHost
             ownerKey={paneSurfaceOwnerKey}
-            controlsKey={currentPaneId ?? 'none'}
+            controlsKey={paneSurfaceControlsKey}
             primary={current.paneId && (
             chatLens ? (
               durableConversationRecovery ? (

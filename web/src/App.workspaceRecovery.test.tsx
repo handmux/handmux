@@ -1915,4 +1915,53 @@ describe.each(['claude', 'codebuddy'])('App %s chat composer focus across the fi
     expect(document.activeElement).toBe(input);
   });
 
+  it('keeps the focused composer when the cached pane hint is corrected by topology polling', async () => {
+    const replacementPane = { ...pane, id: '%74' };
+    localStorage.setItem('tw_bound', JSON.stringify(['project']));
+    localStorage.setItem(`tw_lens_${pane.id}`, 'chat');
+    localStorage.setItem(`tw_lens_${replacementPane.id}`, 'chat');
+    api.getSessions.mockResolvedValue([{ id: '$71', name: 'project' }]);
+    api.getWindows.mockResolvedValue([{ id: '@71', name: 'main', active: true, panes: 1, activePaneId: pane.id }]);
+    api.getPanes
+      .mockResolvedValueOnce([pane])
+      .mockResolvedValueOnce([pane])
+      .mockResolvedValue([replacementPane]);
+    const oldRun = { agentId, paneId: pane.id, runId: 'old-run', sessionId: 'old-session' };
+    const replacementRun = { agentId, paneId: replacementPane.id, runId: 'replacement-run', sessionId: 'replacement-session' };
+    api.getAgentDiscovery.mockResolvedValue({
+      descriptors: [{ id: agentId, label: agentId, capabilities: { conversation: true } }],
+      runs: [oldRun, replacementRun], health: [],
+    });
+    conversationApi.discoverAgentConversation.mockImplementation(async (run: typeof oldRun) => ({
+      session: { agentId: run.agentId, sessionId: run.sessionId }, run,
+      viewId: run.sessionId, historyVersion: '1',
+      capabilities: { history: true, live: 'poll', send: ['prompt'] },
+    }));
+    const page = deferred<Response>();
+    vi.stubGlobal('fetch', vi.fn((input: string | URL | Request) => {
+      const path = String(input);
+      if (path.includes('/api/agents/conversation/page')) return page.promise;
+      if (path.includes('/api/agents/conversation/discover')) {
+        return Promise.resolve({ ok: true, status: 200, json: async () => ({}) });
+      }
+      return Promise.resolve({ ok: true, status: 200, json: async () => ({}) });
+    }));
+    const view = await renderApp();
+    const input = requiredElement<HTMLTextAreaElement>(view.container, '.cc-text');
+    input.focus();
+    expect(document.activeElement).toBe(input);
+
+    await flush(5_000);
+
+    expect(view.container.querySelector('.cc-text')).toBe(input);
+    expect(document.activeElement).toBe(input);
+    page.resolve({
+      ok: true, status: 200, json: async () => ({ status: 'ok', page: {
+        sessionId: replacementRun.sessionId, viewId: replacementRun.sessionId,
+        historyVersion: '1', hasMore: false, items: [],
+      } }),
+    } as Response);
+    await flush();
+  });
+
 });

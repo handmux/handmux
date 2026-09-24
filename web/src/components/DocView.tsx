@@ -232,6 +232,11 @@ export default function DocView({
     const headings = Array.from(root.querySelectorAll<HTMLElement>('h1, h2, h3, h4, h5, h6'));
     const items: DocTocItem[] = [];
     const used = new Set<string>();
+    // A Markdown file's first H1 is its document title. It labels the page rather than contributing
+    // readable body copy, so keep it out of the document read-aloud sentence pass. This is scoped to
+    // the file viewer; chat/document Markdown elsewhere still reads headings normally.
+    const documentTitle = headings.find((heading) => heading.tagName === 'H1');
+    documentTitle?.setAttribute('data-tts-skip', '');
     headings.forEach((heading) => {
       const label = (heading.textContent || '').trim();
       if (!label) return;

@@ -4,6 +4,11 @@ All notable changes to handmux. Format follows [Keep a Changelog](https://keepac
 
 ## [Unreleased]
 
+### Fixed
+
+- 修复从抽屉快速切换工作区时，后台 pane 拓扑校正导致对话输入框被重新挂载、键盘收起的问题。
+- 修复 Markdown 文件预览的首个一级标题被朗读收集的问题；正文、二级标题和代码仍会正常收集。
+
 ## [0.31.1] - 2026-09-22
 
 ### Changed
