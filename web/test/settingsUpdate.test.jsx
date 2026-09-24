@@ -65,7 +65,7 @@ describe('Settings update notice', () => {
     const aboutLabels = aboutGroup
       .querySelectorAll('.settings-page-row-label');
     expect([...aboutLabels].map((item) => item.textContent))
-      .toEqual(['版本', '查看更新日志', '反馈与交流', '重新加载应用']);
+      .toEqual(['版本', '查看更新日志', '反馈与交流', '退出登录', '重新加载应用']);
 
     const button = [...container.querySelectorAll('button')]
       .find((item) => item.textContent === '重新加载应用');
