@@ -19,6 +19,34 @@ export interface ChangelogEntry {
 // `entryId`/`LATEST_RELEASE` use `version` when present, else `date`, as the stable unread-dot id.
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '0.32.0',
+    date: '2026-09-24',
+    highlight: {
+      zh: '项目与会话导航全面升级 · 抽屉切换更顺滑',
+      en: 'Project and session navigation, rebuilt',
+    },
+    items: {
+      zh: [
+        '新增项目与会话双模式入口：可以在抽屉里切换项目视角和会话视角；项目与任务页先提供即将上线的入口。',
+        '会话抽屉按会话分组展示窗口，记住每个会话的展开状态，并显示窗口数量和当前窗口。',
+        '会话和窗口支持新建、重命名、前移、后移、分屏管理、解绑和删除等操作；绑定页可以直接选择可用会话。',
+        '切换窗口时先同步选中状态，再后台补齐 pane 信息；主屏窗口栏、抽屉和收件箱会保持同步。',
+        '抽屉边缘滑入滑出增加跟手和回弹反馈；聊天复制和终端复制时拖动选区不会误触发抽屉。',
+        '修复对话页首次加载或 Agent 重识别时输入框被卸载导致键盘收起的问题。',
+        '修复 Markdown 文件预览的文档总标题被收起的问题；标题保持展开并照常参与朗读。',
+      ],
+      en: [
+        'Added Project and Session entry points: switch between project and session views from the drawer; the project and task pages currently show a coming-soon entry.',
+        'The session drawer groups windows by session, remembers each session’s expanded state, and shows pane counts and the current window.',
+        'Sessions and windows now offer new, rename, move forward/back, split management, unbind, and delete actions; the binding sheet can select an available session directly.',
+        'Window switching updates the selected state first and fills in pane details in the background; the window bar, drawer, and Inbox stay in sync.',
+        'Drawer edge swipes now follow the finger with a rubber-band effect; dragging a chat or terminal copy selection no longer opens the drawer.',
+        'Fixed the composer being unmounted, and the keyboard dismissed, while the conversation page was loading or an Agent was re-identified.',
+        'Fixed document titles collapsing in Markdown previews; the title stays visible and remains available to read aloud.',
+      ],
+    },
+  },
+  {
     version: '0.31.1',
     date: '2026-09-22',
     highlight: {
