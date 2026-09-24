@@ -2863,6 +2863,7 @@ button.cmd-text { background: none; border: none; text-align: left; }
 .doc-md h3.is-folded .md-fold::before, .doc-md h4.is-folded .md-fold::before,
 .doc-md h5.is-folded .md-fold::before, .doc-md h6.is-folded .md-fold::before { transform: rotate(-45deg); }
 .doc-md h1, .doc-md h2, .doc-md h3, .doc-md h4, .doc-md h5, .doc-md h6 { padding-left: 1.35em; }
+.doc-md > h1:first-of-type, .doc-md h1.md-document-title { padding-left: 0; }
 .doc-md .md-section-hidden { display: none; }
 
 /* GFM footnotes (docFootnotes.ts): a superscript reference and a notes list at the end. */

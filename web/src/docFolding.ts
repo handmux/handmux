@@ -45,9 +45,10 @@ function applyFolding(root: HTMLElement): void {
   }
 }
 
-/** Add a caret to every heading and wire the toggle. Returns a cleanup function. */
+/** Add carets to section headings and wire the toggle. Returns a cleanup function. */
 export function installHeadingFolding(root: HTMLElement): () => void {
   const documentTitle = root.querySelector<HTMLElement>('h1');
+  documentTitle?.classList.add('md-document-title');
   for (const heading of Array.from(root.querySelectorAll<HTMLElement>(HEADING_SELECTOR))) {
     if (heading === documentTitle) {
       heading.querySelector(':scope > .md-fold')?.remove();

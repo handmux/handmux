@@ -49,6 +49,7 @@ describe('heading folding', () => {
     const { root } = mount();
     const [title, section] = root.querySelectorAll('h1');
     expect(title.textContent.trim()).toBe('文档标题');
+    expect(title.classList.contains('md-document-title')).toBe(true);
     expect(title.querySelector('.md-fold')).toBeNull();
     expect(section.querySelector('.md-fold')).not.toBeNull();
     expect(section.textContent.trim()).toBe('一级'); // the caret contributes no text (slugs/find/TTS unaffected)
