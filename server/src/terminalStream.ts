@@ -7,6 +7,7 @@ import type { IncomingMessage } from 'node:http';
 import type { Duplex } from 'node:stream';
 import type WebSocket from 'ws';
 import { decodeControlData } from './tmux/controlProtocol.js';
+import { parseTmuxFields, tmuxFormat } from './tmux/format.js';
 import type { DeviceAccessService, DevicePrincipal } from './deviceAccess.js';
 
 export { decodeControlData } from './tmux/controlProtocol.js';
@@ -17,7 +18,10 @@ const START_TIMEOUT_MS = 5000;
 const SUBSCRIBE_TIMEOUT_MS = 5000;
 const HEARTBEAT_MS = 30000;
 const INITIAL_HISTORY_LINES = 100;
-const PANE_INFO = '"#{pane_width}\\t#{pane_height}\\t#{cursor_x}\\t#{cursor_y}\\t#{cursor_flag}\\t#{alternate_on}\\t#{mouse_any_flag}\\t#{mouse_sgr_flag}"';
+const PANE_INFO = `"${tmuxFormat([
+  'pane_width', 'pane_height', 'cursor_x', 'cursor_y',
+  'cursor_flag', 'alternate_on', 'mouse_any_flag', 'mouse_sgr_flag',
+])}"`;
 
 type StreamPhase = 'attach' | 'capture' | 'buffer' | 'paused' | 'live' | 'closed';
 type PaneInfoValues = [number, number, number, number, number, number, number, number];
@@ -98,7 +102,11 @@ export function startSubscribeDeadline(ws: TerminalSocket, timeoutMs = SUBSCRIBE
 }
 
 function parsePaneInfo(infoLines: ControlLines): PaneInfoValues {
-  const values = Buffer.concat(infoLines).toString('utf8').split('\t').map(Number);
+  const values = parseTmuxFields(
+    Buffer.concat(infoLines).toString('utf8'),
+    8,
+    'tmux pane info',
+  ).map(Number);
   if (!values.every(Number.isFinite) || values.length !== 8
     || (values[0] ?? 0) < 1 || (values[1] ?? 0) < 1) {
     throw new Error('invalid tmux pane info');
@@ -467,9 +475,13 @@ export function createTerminalStream({
       }
       authenticating = true;
       cancelSubscribeDeadline();
+      let setupStage = 'paneSession';
+      let setupSession: string | undefined;
       try {
         const session = await commands.paneSession(message.pane);
+        setupSession = session;
         if (ws.readyState !== 1 || !stillAuthorized()) return;
+        setupStage = 'stream.start';
         stream = new PaneControlStream({
           ws, pane: message.pane, session,
           ...(spawnControl ? { spawnControl } : {}),
@@ -477,7 +489,15 @@ export function createTerminalStream({
         streams.add(stream);
         socketStreams.set(ws, stream);
         await stream.start();
-      } catch {
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : String(error);
+        const streamError = stream?.lastError?.trim();
+        console.warn(`[handmux] terminal stream setup failed stage=${setupStage}`
+          + ` pane=${message.pane}`
+          + `${setupSession ? ` session=${setupSession}` : ''}`
+          + ` pid=${process.pid}`
+          + ` error=${detail.slice(0, 500)}`
+          + `${streamError ? ` tmuxStderr=${streamError.slice(0, 500)}` : ''}`);
         if (ws.readyState < 2) ws.close(1011, 'stream setup failed');
       }
     });

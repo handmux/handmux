@@ -4,6 +4,10 @@ All notable changes to handmux. Format follows [Keep a Changelog](https://keepac
 
 ## [Unreleased]
 
+### Fixed
+
+- 修复由系统服务启动时终端实时模式无法建立、持续退化为快照模式的问题。
+
 ## [0.33.3] - 2026-10-06
 
 ### Fixed

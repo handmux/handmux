@@ -43,7 +43,7 @@ class ResponsiveControl extends EventEmitter {
   readonly stderr = new EventEmitter();
   readonly stdin = { write: (command: string): void => {
     queueMicrotask(() => {
-      const result = command.startsWith('capture-pane') ? 'terminal seed' : '80\t24\t4\t3\t1\t0\t0\t0';
+      const result = command.startsWith('capture-pane') ? 'terminal seed' : '80|24|4|3|1|0|0|0';
       this.stdout.emit('data', Buffer.from(`%begin 1 1 1\n${result}\n%end 1 1 1\n`));
     });
   } };
