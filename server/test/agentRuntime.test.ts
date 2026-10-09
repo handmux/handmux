@@ -162,6 +162,26 @@ describe('AgentRuntime composition root', () => {
     })).resolves.toEqual({ activity: 'unknown', activeTurn: { state: 'unknown' } });
   });
 
+  it('treats a recoverable Codex system error with direct input enabled as idle', async () => {
+    const reader = createCodexConversationActivityReader({
+      status: vi.fn(async () => ({
+        managed: true,
+        status: { type: 'systemError' },
+        canAcceptDirectInput: true,
+        activeTurnId: null,
+        lastTurn: { id: 'turn-failed', status: 'failed' },
+        approvals: [], userInputs: [],
+      })),
+    } as unknown as Parameters<typeof createCodexConversationActivityReader>[0]);
+    await expect(reader.read({
+      ref: { agentId: 'codex', paneId: '%2', runId: 'codex-run', sessionId: 'thread-1' },
+      signal: new AbortController().signal,
+    })).resolves.toEqual({
+      activity: 'idle', activeTurn: { state: 'none' },
+      completionToken: 'codex-completed:turn-failed:failed',
+    });
+  });
+
   it('does not claim or dispatch a Codex Queue item while App Server is disconnected', async () => {
     const runs = new AgentRunRuntime({ newRunId: () => 'codex-run' });
     const lease = await runs.controller('codex', async () => true).attach({

@@ -139,7 +139,15 @@ export function createCodexConversationActivityReader(
       const status = raw && typeof raw === 'object' ? raw as Record<string, unknown> : {};
       const native = status.status && typeof status.status === 'object'
         ? status.status as Record<string, unknown> : {};
-      if (status.managed !== true || (native.type !== 'active' && native.type !== 'idle')) {
+      const lastTurn = status.lastTurn && typeof status.lastTurn === 'object'
+        ? status.lastTurn as Record<string, unknown> : {};
+      const terminalLastTurn = typeof lastTurn.id === 'string' && lastTurn.id
+        && ['completed', 'failed', 'interrupted'].includes(String(lastTurn.status))
+        ? lastTurn.id : null;
+      const recoverableSystemError = native.type === 'systemError'
+        && status.canAcceptDirectInput === true && terminalLastTurn !== null;
+      if (status.managed !== true
+        || (native.type !== 'active' && native.type !== 'idle' && !recoverableSystemError)) {
         return { activity: 'unknown' as const, activeTurn: { state: 'unknown' as const } };
       }
       const flags = Array.isArray(native.activeFlags) ? native.activeFlags : [];
@@ -150,11 +158,7 @@ export function createCodexConversationActivityReader(
           : native.type === 'active' ? 'working' : 'idle';
       const activeTurnId = typeof status.activeTurnId === 'string' && status.activeTurnId
         ? status.activeTurnId : null;
-      const lastTurn = status.lastTurn && typeof status.lastTurn === 'object'
-        ? status.lastTurn as Record<string, unknown> : {};
-      const terminalTurnId = typeof lastTurn.id === 'string' && lastTurn.id
-        && ['completed', 'failed', 'interrupted'].includes(String(lastTurn.status))
-        ? lastTurn.id : null;
+      const terminalTurnId = terminalLastTurn;
       return {
         activity,
         activeTurn: activeTurnId

@@ -838,6 +838,10 @@ export class ConversationService {
       id: receipt.clientRequestId,
       ...(receipt.nativeId === undefined ? {} : { nativeId: receipt.nativeId }),
     }));
+    // A queue can survive a process restart with an already-closed cycle. Observing the same idle
+    // snapshot is not a state transition, so #observeActivity alone would not wake its dispatcher.
+    // Every authoritative queue read is therefore also a safe opportunity to resume draining.
+    if (queueItems.length > 0) this.#wake(owner);
     return {
       activity: activity.activity,
       canSteer,

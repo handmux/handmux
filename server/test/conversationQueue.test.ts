@@ -403,6 +403,45 @@ describe('Conversation Core public queue', () => {
     expect(JSON.stringify(store.load())).not.toContain('private old body');
   });
 
+  it('wakes a persisted queue even when its cycle is already closed on idle startup', async () => {
+    const store = new MemoryConversationStateStore();
+    const hash = (text: string) => createHash('sha256').update(text).digest('hex');
+    store.save({
+      version: 2, ledgerRevision: 2, legacySends: [],
+      submissions: [{
+        agentId: 'test', sessionId: 'session-closed-restart', clientRequestId: 'queued-next',
+        text: 'continue queue', payloadHash: hash('continue queue'), state: 'queued', revision: 2,
+        queueOrderKey: '0000000000000002:0000000000000002', createdAt: 2, updatedAt: 2,
+      }],
+      cycles: [{
+        agentId: 'test', sessionId: 'session-closed-restart', state: 'closed', revision: 0,
+        activityEpoch: 'run-closed-restart', baselineRevision: 1,
+      }],
+    });
+    const runs = new AgentRunRuntime({ newRunId: () => 'run-closed-restart' });
+    const lease = await runs.controller('test', async () => true).attach({
+      paneId: '%1', attachmentId: 'attachment', sessionId: 'session-closed-restart', process: { pid: 101 },
+    });
+    const dispatchPrompt = vi.fn<NonNullable<AgentConversationAdapterV1['dispatchPrompt']>>(
+      async () => ({ outcome: 'accepted' }),
+    );
+    const service = new ConversationService({
+      runs,
+      adapters: { test: {
+        apiVersion: 1, discoverNative: async () => null,
+        readNativePage: async () => { throw new Error('unused'); }, dispatchPrompt,
+      } },
+      store, now: () => 100,
+      activitySource: { read: async () => ({
+        activity: 'idle', activeTurn: { state: 'none' }, revision: 1, epoch: 'run-closed-restart',
+      }) },
+    });
+
+    await service.queueSnapshot(lease);
+    await vi.waitFor(() => expect(dispatchPrompt).toHaveBeenCalledOnce());
+    expect(dispatchPrompt.mock.calls[0]?.[1]).toMatchObject({ text: 'continue queue' });
+  });
+
   it('moves a no-mutation busy race to Queue and does not retry stale idle', async () => {
     const h = await harness({ prompt: async () => ({ outcome: 'busy', nativeMutation: false }) });
     expect(await h.service.send(h.lease, {

@@ -3440,6 +3440,7 @@ export function createCodexAppServer({
         threadId,
         gitBranch: state.thread?.gitInfo?.branch || null,
         status: state.status || state.thread?.status,
+        canAcceptDirectInput: state.thread?.canAcceptDirectInput === true,
         activeTurnId,
         plan: activeTurnId ? state.plans.get(activeTurnId) || null : null,
         lastPlan: state.lastTurn?.id ? state.plans.get(state.lastTurn.id) || null : null,

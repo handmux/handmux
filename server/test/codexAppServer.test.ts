@@ -66,6 +66,7 @@ interface TestTurn extends UnknownRecord {
 interface TestThread extends UnknownRecord {
   id: string;
   status: TestStatus;
+  canAcceptDirectInput?: boolean;
   turns: TestTurn[];
 }
 
@@ -1045,6 +1046,18 @@ describe('Codex App Server client', () => {
     expect(proxy.sent).toContainEqual(expect.objectContaining({ method: 'turn/start' }));
     expect((await app.inboxStates([{ id: '%1' }]))['%1'])
       .toMatchObject({ kind: 'working', msg: 'first message' });
+    app.close();
+  });
+
+  it('surfaces native direct-input availability in the status snapshot', async () => {
+    const proxy = fakeProxy({
+      resumeThread: () => ({ ...fixtureThread(), canAcceptDirectInput: true }),
+    });
+    const app = createCodexAppServer({ home: '/home/test', exists: () => true, connect: () => proxy.ws });
+
+    await expect(app.status('%1', 'thread-1')).resolves.toMatchObject({
+      managed: true, canAcceptDirectInput: true,
+    });
     app.close();
   });
 
