@@ -6,6 +6,7 @@ All notable changes to handmux. Format follows [Keep a Changelog](https://keepac
 
 ### Fixed
 
+- 修复桌面终端中 IME 直接提交中文时字符偶发丢失的问题。
 - 修复打包版未找到随 handmux 安装的 tunlite、误调用 PATH 上旧版，导致 SSH 隧道反复退出且没有公网地址的问题。
 
 ## [0.33.4] - 2026-10-10

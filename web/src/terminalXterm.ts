@@ -112,6 +112,62 @@ function prepareInput(
   if (autoFocusInput) term.focus();
 }
 
+interface ImeInputTracker {
+  keyDownSeen: boolean;
+  imeKeyDownSeen: boolean;
+  inputEventOutput: string[] | null;
+}
+
+/**
+ * xterm 5.5 can drop a direct IME commit when an earlier keydown is still outstanding:
+ * its input listener rejects the composed insertText, then the later keyCode-229 textarea
+ * diff sees an already-updated value. Recover only when that input event produced no onData.
+ */
+function installDroppedImeCommitFallback(
+  term: XTerm,
+  helper: HTMLTextAreaElement,
+  tracker: ImeInputTracker,
+): () => void {
+  const onKeyDown = (event: KeyboardEvent): void => {
+    tracker.keyDownSeen = true;
+    if (event.keyCode === 229 || event.key === 'Process') tracker.imeKeyDownSeen = true;
+  };
+  const onKeyUp = (): void => {
+    tracker.keyDownSeen = false;
+    tracker.imeKeyDownSeen = false;
+  };
+  const beginInputEvent = (): void => { tracker.inputEventOutput = []; };
+  const finishInputEvent = (event: Event): void => {
+    const input = event as InputEvent;
+    const output = tracker.inputEventOutput?.join('') || '';
+    tracker.inputEventOutput = null;
+
+    if (!tracker.keyDownSeen
+      || tracker.imeKeyDownSeen
+      || input.inputType !== 'insertText'
+      || !input.composed
+      || input.isComposing
+      || !input.data
+      || output.includes(input.data)) return;
+
+    // The input event has already updated xterm's textarea value. term.input emits the missing
+    // text through the normal onData path; the later keyCode-229 diff therefore stays empty.
+    term.input(input.data, true);
+  };
+
+  helper.addEventListener('keydown', onKeyDown, true);
+  helper.addEventListener('keyup', onKeyUp, true);
+  helper.addEventListener('input', beginInputEvent, true);
+  // xterm's input listener is on the textarea's target phase; this bubble listener runs after it.
+  helper.addEventListener('input', finishInputEvent);
+  return () => {
+    helper.removeEventListener('keydown', onKeyDown, true);
+    helper.removeEventListener('keyup', onKeyUp, true);
+    helper.removeEventListener('input', beginInputEvent, true);
+    helper.removeEventListener('input', finishInputEvent);
+  };
+}
+
 function usesAppleCommandKey(): boolean {
   const nav = navigator as Navigator & { userAgentData?: { platform?: string } };
   const platform = nav.userAgentData?.platform || nav.platform || '';
@@ -270,7 +326,15 @@ export function openXterm({
     return true;
   });
 
-  const dataSub = desktop ? term.onData((data) => onInputData?.(pane, data)) : null;
+  const imeInputTracker: ImeInputTracker = {
+    keyDownSeen: false,
+    imeKeyDownSeen: false,
+    inputEventOutput: null,
+  };
+  const dataSub = desktop ? term.onData((data) => {
+    if (imeInputTracker.inputEventOutput) imeInputTracker.inputEventOutput.push(data);
+    onInputData?.(pane, data);
+  }) : null;
   // Legacy terminal mouse protocols can contain bytes that are not valid UTF-8. xterm exposes
   // those through onBinary rather than onData; preserve each code unit as one byte before the
   // existing hex input queue forwards it to tmux.
@@ -280,6 +344,9 @@ export function openXterm({
   }) : null;
   const selectionSub = desktop ? term.onSelectionChange(() => onDesktopSelection?.(term.hasSelection())) : null;
   const helper = desktop ? host.querySelector<HTMLTextAreaElement>('.xterm-helper-textarea') : null;
+  const disposeImeFallback = helper
+    ? installDroppedImeCommitFallback(term, helper, imeInputTracker)
+    : null;
   const focus = (): void => onInputFocusChange?.(true);
   const blur = (): void => onInputFocusChange?.(false);
   helper?.addEventListener('focus', focus);
@@ -332,6 +399,7 @@ export function openXterm({
       dataSub?.dispose();
       binarySub?.dispose();
       selectionSub?.dispose();
+      disposeImeFallback?.();
       helper?.removeEventListener('focus', focus);
       helper?.removeEventListener('blur', blur);
       linkProvider.dispose();
