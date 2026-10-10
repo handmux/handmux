@@ -1,6 +1,14 @@
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { Terminal } from '@xterm/xterm';
 
+vi.mock('@xterm/addon-webgl', () => ({
+  WebglAddon: class {
+    onContextLoss() {}
+    dispose() {}
+  },
+}));
+vi.mock('../src/bundledFonts.js', () => ({ ensureBundledFonts: vi.fn(() => new Promise(() => {})) }));
+
 const keyCodes: Record<string, number> = {
   ArrowLeft: 37, ArrowRight: 39, ArrowUp: 38, ArrowDown: 40,
   Home: 36, End: 35, PageUp: 33, PageDown: 34,
@@ -95,5 +103,26 @@ describe('real xterm desktop navigation keys', () => {
     press(helper, 'Home');
     press(helper, 'End');
     expect(data).toEqual(['\x1bOH', '\x1bOF']);
+  });
+
+  it('forwards page-level Home and End through the production xterm adapter', async () => {
+    const { openXterm } = await import('../src/terminalXterm.js');
+    const host = document.createElement('div');
+    document.body.append(host);
+    const received: string[] = [];
+    const opened = openXterm({
+      host, desktop: true, autoFocusInput: false, fontSize: 14, scrollback: 100, pane: '%test',
+      onInputData: (_pane, data) => received.push(String(data)),
+    });
+    terminals.push(opened.term);
+    for (const [key, keyCode, sequence] of [
+      ['Home', 36, '\x1b[H'], ['End', 35, '\x1b[F'],
+    ] as const) {
+      const event = new KeyboardEvent('keydown', { key, code: key, bubbles: true, cancelable: true });
+      Object.defineProperty(event, 'keyCode', { value: keyCode });
+      expect(opened.forwardPageKey(event), key).toBe(true);
+      expect(received.at(-1), key).toBe(sequence);
+    }
+    opened.dispose();
   });
 });
