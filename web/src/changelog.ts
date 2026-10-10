@@ -19,6 +19,26 @@ export interface ChangelogEntry {
 // `entryId`/`LATEST_RELEASE` use `version` when present, else `date`, as the stable unread-dot id.
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '0.33.4',
+    date: '2026-10-10',
+    highlight: {
+      zh: '修复终端实时连接、电脑键盘与 Codex 排队',
+      en: 'Fixes live terminal, desktop keys, and Codex queues',
+    },
+    items: {
+      zh: [
+        '修复终端实时模式无法连接、持续退化为快照模式的问题。',
+        '修复电脑物理键盘的方向键和删除键被当成字符输入的问题；大文本输入保持正常。',
+        '修复 Codex 回合失败后消息一直排队、无法立刻引导或删除的问题。',
+      ],
+      en: [
+        'Fixed live terminal mode failing to connect and staying in snapshot mode.',
+        'Fixed desktop arrow and delete keys being inserted as text while preserving large text input.',
+        'Fixed messages staying queued after a failed Codex turn, with steer and remove controls missing.',
+      ],
+    },
+  },
+  {
     version: '0.33.3',
     date: '2026-10-06',
     highlight: {
