@@ -879,8 +879,9 @@ describe('App management dimensions', () => {
   it('resizes the selected side-by-side pane and restores only its saved split ratio', async () => {
     await renderManagedSession();
     await act(async () => { await windowBarProps().onManagePane('%1'); });
-    expect(screen.getByRole('button', { name: /左右分屏/ }).closest('.sheet-row')).toBeNull();
-    expect(screen.getByRole('button', { name: /上下分屏/ }).closest('.sheet-row')).toBeNull();
+    const horizontalSplitRow = screen.getByRole('button', { name: /左右分屏/ }).closest('.sheet-row');
+    expect(horizontalSplitRow).not.toBeNull();
+    expect(horizontalSplitRow).toBe(screen.getByRole('button', { name: /上下分屏/ }).closest('.sheet-row'));
 
     api.getPanes.mockResolvedValueOnce(stalePanes.map((pane) => (
       pane.id === '%1' ? { ...pane, width: 40 } : pane

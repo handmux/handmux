@@ -3488,8 +3488,10 @@ export default function App() {
         subtitle={managePane ? `${paneManageSubtitle(current?.panes, managePane)} · ${managePane}` : ''}
         onClose={closePaneManagement}
         actions={managePane ? [
-          { key: 'split-h', icon: <SplitHIcon />, label: t('pane.splitH'), onClick: () => splitPaneAction(managePane, 'h') },
-          { key: 'split-v', icon: <SplitVIcon />, label: t('pane.splitV'), onClick: () => splitPaneAction(managePane, 'v') },
+          [
+            { key: 'split-h', icon: <SplitHIcon />, label: t('pane.splitH'), onClick: () => splitPaneAction(managePane, 'h') },
+            { key: 'split-v', icon: <SplitVIcon />, label: t('pane.splitV'), onClick: () => splitPaneAction(managePane, 'v') },
+          ],
           {
             key: 'close', icon: <XIcon />, label: t('pane.close'), danger: true, confirm: true,
             confirmLabel: t('pane.closeConfirm'), onClick: closeManagedPane,
