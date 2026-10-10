@@ -6,6 +6,7 @@ All notable changes to handmux. Format follows [Keep a Changelog](https://keepac
 
 ### Changed
 
+- 会话、窗口和窗格的管理弹窗现在会显示对应的 tmux 原生 ID。
 - 对话回复中的代码块现在也可以一键复制。
 
 ### Fixed

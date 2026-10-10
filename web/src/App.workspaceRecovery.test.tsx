@@ -779,7 +779,7 @@ describe('App management dimensions', () => {
 
     await act(async () => { await windowBarProps().onManageWindow(staleWindow); });
 
-    expect(screen.getByRole('dialog', { name: '窗口管理，work · 160×48' })).toBeTruthy();
+    expect(screen.getByRole('dialog', { name: '窗口管理，work · 160×48 · @1' })).toBeTruthy();
     expect(api.getWindows.mock.calls.length).toBeGreaterThan(readsBefore);
   });
 
@@ -819,7 +819,7 @@ describe('App management dimensions', () => {
 
     await act(async () => { await windowBarProps().onManagePane('%1'); });
 
-    expect(screen.getByRole('dialog', { name: '分屏管理，① zsh · 59×30' })).toBeTruthy();
+    expect(screen.getByRole('dialog', { name: '分屏管理，① zsh · 59×30 · %1' })).toBeTruthy();
     expect(api.getPanes).toHaveBeenCalledTimes(callsBeforeOpen + 1);
   });
 

@@ -1007,7 +1007,9 @@ export default function Drawer({
       <ActionSheet
         open={!!menuSession}
         title={t('app.manageSession')}
-        subtitle={menuSession || ''}
+        subtitle={menuSession
+          ? [menuSession, topologyCache.current.ids[menuSession]].filter(Boolean).join(' · ')
+          : ''}
         onClose={() => setMenuSession(null)}
         actions={menuSession ? [
           ...(bound.length > 1 ? [[

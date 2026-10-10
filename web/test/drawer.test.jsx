@@ -150,6 +150,16 @@ describe('Drawer (bound sessions)', () => {
     expect(main.className).not.toContain('is-current');
   });
 
+  it('shows the tmux session id in its management sheet, not in the session list', async () => {
+    await render();
+    await waitForSessions();
+    expect(container.querySelector('.session-section-title').textContent).toBe('main');
+    await act(async () => {
+      container.querySelector('.session-section-menu').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    expect(document.querySelector('.settings-subtitle')?.textContent).toBe('main · $1');
+  });
+
   it('shows a compact status dot on sessions with inbox activity', async () => {
     await render({ sessionInboxViews: { server: 'working' } });
     await waitForSessions();

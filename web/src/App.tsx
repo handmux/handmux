@@ -3345,7 +3345,7 @@ export default function App() {
       <ActionSheet
         open={!!manageWindow}
         title={t('app.manageWindow')}
-        subtitle={windowManageSubtitle(manageWindow)}
+        subtitle={manageWindow ? `${windowManageSubtitle(manageWindow)} · ${manageWindow.id}` : ''}
         onClose={() => setManageWindow(null)}
         actions={manageWindow ? [
           // A single-pane window has nothing to reorder-within, but IS splittable — offer it here so a
@@ -3414,14 +3414,14 @@ export default function App() {
       <ActionSheet
         open={!!managePane}
         title={t('pane.manageTitle')}
-        subtitle={paneManageSubtitle(managedPaneSubtitlePanes?.map((pane) => {
+        subtitle={managePane ? `${paneManageSubtitle(managedPaneSubtitlePanes?.map((pane) => {
           const { width, height, ...rest } = pane;
           return {
             ...rest,
             ...(width != null ? { width } : {}),
             ...(height != null ? { height } : {}),
           };
-        }), managePane)}
+        }), managePane)} · ${managePane}` : ''}
         onClose={closePaneManagement}
         actions={managePane ? [
           { key: 'split-h', icon: <SplitHIcon />, label: t('pane.splitH'), onClick: () => splitPaneAction(managePane, 'h') },
