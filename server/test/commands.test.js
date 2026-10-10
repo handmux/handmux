@@ -6,7 +6,7 @@ import {
   listSessions, listWindows, listPanes, listPaneIds, capturePane,
   paneInfo, paneLocation, sendText, sendHexInput, sendEnter, sendKey,
   openPaneOutputCapture,
-  resizeWindow, restoreWindowSize, newSession, paneCurrentPath, newWindow,
+  resizeWindow, resizePane, restoreWindowSize, newSession, paneCurrentPath, newWindow,
   renameSession, renameWindow, sessionWindowCount, killWindow, swapWindows, wheelSeq,
   splitPane, windowPaneCount, killPane, runPaneCommand, listAllPanes,
 } from '../src/tmux/commands.js';
@@ -420,6 +420,20 @@ describe('tmux commands (integration)', () => {
     expect(small.height).toBe(20);
 
     await restoreWindowSize(w.id); // hand sizing back so we don't leave the window pinned
+  });
+
+  it('resizes a pane height independently inside a top/bottom split', async () => {
+    if (!hasTmux) return;
+    const s = (await listSessions()).find((candidate) => candidate.name === SES);
+    const w = (await listWindows(s.id))[0];
+    const pane = (await listPanes(w.id))[0];
+    const siblingId = await splitPane(pane.id, 'v');
+    try {
+      await resizePane(pane.id, null, 8);
+      expect((await paneInfo(pane.id)).height).toBe(8);
+    } finally {
+      await killPane(siblingId);
+    }
   });
 
   it('paneLocation resolves the current pane to a session + window', async () => {

@@ -7,6 +7,8 @@ All notable changes to handmux. Format follows [Keep a Changelog](https://keepac
 ### Changed
 
 - 会话、窗口和窗格的管理弹窗现在会显示对应的 tmux 原生 ID。
+- 窗格管理可调整水平分屏的窗格高度；标题不再重复显示地图中的宽高。
+- 窗口管理可调整整个窗口的宽度和高度，多窗格窗口也适用；tmux 会按分屏布局分配变化。
 - 对话回复中的代码块现在也可以一键复制。
 
 ### Fixed

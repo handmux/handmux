@@ -11,12 +11,12 @@ describe('management sheet labels', () => {
     expect(windowManageSubtitle({ id: '@2', name: '' })).toBe('@2');
   });
 
-  it('describes the managed pane by sequence, command, and dimensions', () => {
+  it('describes the managed pane by sequence and command without repeating dimensions', () => {
     const panes = [
       { id: '%1', command: 'zsh', width: 80, height: 24 },
       { id: '%2', command: 'node', width: 39, height: 24 },
     ];
-    expect(paneManageSubtitle(panes, '%2')).toBe('② node · 39×24');
+    expect(paneManageSubtitle(panes, '%2')).toBe('② node');
   });
 
   it('returns an empty pane subtitle when the managed pane disappeared', () => {

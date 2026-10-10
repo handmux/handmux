@@ -24,6 +24,8 @@ export interface WorkspaceWindow {
   active?: boolean;
   panes: number;
   activePaneId?: string;
+  width?: number;
+  height?: number;
   paneList?: WorkspacePane[];
 }
 

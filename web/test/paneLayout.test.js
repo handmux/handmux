@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { hasGeometry, canResizePaneWidth, paneLayout, cellFit, MAP_W, MAP_H } from '../src/paneLayout.js';
+import { hasGeometry, canResizePaneWidth, canResizePaneHeight, paneLayout, cellFit, MAP_W, MAP_H } from '../src/paneLayout.js';
 
 const hsplit = [ // real tmux half-split of an 80-col window: a 1-col BORDER seam at col 40 between them
   { id: '%1', active: true,  command: 'zsh',  left: 0,  top: 0, width: 40, height: 24 },
@@ -47,6 +47,33 @@ describe('canResizePaneWidth', () => {
     expect(canResizePaneWidth(nested, '%top')).toBe(false);
     expect(canResizePaneWidth(nested, '%left')).toBe(true);
     expect(canResizePaneWidth(nested, '%right')).toBe(true);
+  });
+});
+
+describe('canResizePaneHeight', () => {
+  it('allows panes that share a horizontal split boundary', () => {
+    const stack = [
+      { id: '%1', left: 0, top: 0, width: 80, height: 12 },
+      { id: '%2', left: 0, top: 13, width: 80, height: 11 },
+    ];
+    expect(canResizePaneHeight(stack, '%1')).toBe(true);
+    expect(canResizePaneHeight(stack, '%2')).toBe(true);
+  });
+
+  it('hides height control for a pure side-by-side split', () => {
+    expect(canResizePaneHeight(hsplit, '%1')).toBe(false);
+    expect(canResizePaneHeight(hsplit, '%2')).toBe(false);
+  });
+
+  it('only enables panes touching a horizontal boundary in a nested layout', () => {
+    const nested = [
+      { id: '%left', left: 0, top: 0, width: 40, height: 24 },
+      { id: '%top', left: 41, top: 0, width: 39, height: 12 },
+      { id: '%bottom', left: 41, top: 13, width: 39, height: 11 },
+    ];
+    expect(canResizePaneHeight(nested, '%left')).toBe(false);
+    expect(canResizePaneHeight(nested, '%top')).toBe(true);
+    expect(canResizePaneHeight(nested, '%bottom')).toBe(true);
   });
 });
 

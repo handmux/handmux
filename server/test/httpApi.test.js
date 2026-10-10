@@ -442,10 +442,27 @@ describe('REST API', () => {
     expect(baseCommands.resizeWindow).toHaveBeenCalledWith('@1', 20, 99); // cols clamped to >=20
   });
 
+  it('POST /resize resizes a window height without forcing its width', async () => {
+    await auth(request(appWith(baseCommands)).post('/api/resize'))
+      .send({ window: '@1', rows: 30 }).expect(200);
+    expect(baseCommands.resizeWindow).toHaveBeenCalledWith('@1', null, 30);
+  });
+
   it('POST /resize with a pane resizes only that pane', async () => {
     await auth(request(appWith(baseCommands)).post('/api/resize'))
       .send({ pane: '%1', cols: 60 }).expect(200);
-    expect(baseCommands.resizePane).toHaveBeenCalledWith('%1', 60);
+    expect(baseCommands.resizePane).toHaveBeenCalledWith('%1', 60, null);
+  });
+
+  it('POST /resize with rows resizes only a pane height and clamps it to the tmux minimum', async () => {
+    await auth(request(appWith(baseCommands)).post('/api/resize'))
+      .send({ pane: '%1', rows: 2 }).expect(200);
+    expect(baseCommands.resizePane).toHaveBeenCalledWith('%1', null, 5);
+  });
+
+  it('POST /resize rejects a pane request with no dimensions', async () => {
+    await auth(request(appWith(baseCommands)).post('/api/resize'))
+      .send({ pane: '%1' }).expect(400);
   });
 
   it('GET /layout returns the window layout', async () => {

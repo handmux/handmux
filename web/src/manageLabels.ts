@@ -4,8 +4,8 @@ interface SizedItem {
   id?: string;
   name?: string;
   command?: string | null;
-  width?: number;
-  height?: number;
+  width?: number | null;
+  height?: number | null;
 }
 
 const dimensions = (item: SizedItem | null | undefined): string => {
@@ -33,5 +33,5 @@ export function paneManageSubtitle(
   const pane = items[idx];
   if (!pane) return '';
   const seq = CIRCLED[idx] ?? String(idx + 1);
-  return withDimensions(`${seq} ${pane.command || pane.id}`, pane);
+  return `${seq} ${pane.command || pane.id}`;
 }

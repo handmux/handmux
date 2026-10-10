@@ -214,6 +214,7 @@ export interface TmuxWindow {
   panes: number;
   active?: boolean;
   width?: number;
+  height?: number;
   activePaneId?: string;
   paneList?: TmuxPane[];
 }
@@ -249,6 +250,7 @@ function parseWindows(value: unknown): TmuxWindow[] {
     const win = recordOf(candidate);
     if (!win || typeof win.id !== 'string') return [];
     const width = finiteOrUndefined(win.width);
+    const height = finiteOrUndefined(win.height);
     const paneList = Array.isArray(win.paneList) ? parsePanes(win.paneList) : undefined;
     return [{
       id: win.id,
@@ -256,6 +258,7 @@ function parseWindows(value: unknown): TmuxWindow[] {
       panes: finiteOrUndefined(win.panes) ?? 0,
       ...(typeof win.active === 'boolean' ? { active: win.active } : {}),
       ...(width !== undefined ? { width } : {}),
+      ...(height !== undefined ? { height } : {}),
       ...(typeof win.activePaneId === 'string' ? { activePaneId: win.activePaneId } : {}),
       ...(paneList ? { paneList } : {}),
     }];
@@ -373,10 +376,10 @@ export const sendInput = (pane: string, hex: string): Promise<unknown> =>
 // mouse-wheel events the app scrolls on (no-op reply when the app isn't mouse-reporting — see /scroll).
 export const scrollPane = (pane: string, dir: string, lines = 1): Promise<unknown> =>
   req('/api/scroll', { method: 'POST', body: JSON.stringify({ pane, dir, lines }) });
-export const resizeWindow = (window: string, cols: number, rows?: number): Promise<unknown> =>
-  req('/api/resize', { method: 'POST', body: JSON.stringify({ window, cols, rows }) });
-export const resizePane = (pane: string, cols: number): Promise<unknown> =>
-  req('/api/resize', { method: 'POST', body: JSON.stringify({ pane, cols }) });
+export const resizeWindow = (window: string, cols: number | null, rows?: number | null): Promise<unknown> =>
+  req('/api/resize', { method: 'POST', body: JSON.stringify({ window, ...(cols == null ? {} : { cols }), ...(rows == null ? {} : { rows }) }) });
+export const resizePane = (pane: string, cols: number | null, rows?: number): Promise<unknown> =>
+  req('/api/resize', { method: 'POST', body: JSON.stringify({ pane, cols, ...(rows == null ? {} : { rows }) }) });
 export const getWindowLayout = (window: string): Promise<unknown> =>
   req(`/api/layout?window=${encodeURIComponent(window)}`);
 export const applyWindowLayout = (window: string, layout: unknown): Promise<unknown> =>

@@ -123,7 +123,7 @@ import type {
   WorkspaceRestoreOperation,
   WorkspaceRestoreResult,
 } from './workspaceRecovery.js';
-import { canResizePaneWidth } from './paneLayout.js';
+import { canResizePaneHeight, canResizePaneWidth } from './paneLayout.js';
 import { AgentCatalogProvider, inboxReconnectNeeded } from './agentCatalog.js';
 import type { AgentCatalogDescriptor, AgentDiscoverySnapshot, AgentRunRef } from './agentCatalog.js';
 import { SERVER_VERSION_EVENT, serverReloadRequired as isServerReloadRequired } from './serverVersion.js';
@@ -177,6 +177,7 @@ const EMPTY_AGENT_CATALOG: readonly AgentCatalogDescriptor[] = [];
 interface HostWindow extends WorkspaceWindow {
   name: string;
   width?: number;
+  height?: number;
   activePaneId?: string;
   paneList?: HostPane[];
   manageSessionId?: string;
@@ -269,7 +270,7 @@ const recordOf = (value: unknown): Record<string, unknown> | null => (
 );
 
 const hostWindow = (
-  window: WorkspaceWindow & Partial<Pick<HostWindow, 'width' | 'activePaneId'>>,
+  window: WorkspaceWindow & Partial<Pick<HostWindow, 'width' | 'height' | 'activePaneId'>>,
 ): HostWindow => ({
   ...window,
   name: window.name || window.id,
@@ -287,6 +288,7 @@ const managedWindow = (
 });
 
 const clampCols = (cols: number): number => Math.max(20, Math.min(500, cols));
+const clampRows = (rows: number): number => Math.max(5, Math.min(500, rows));
 const MAX_REMEMBERED_PANES = 128;
 
 function rememberRecent<K, V>(cache: Map<K, V>, key: K, value: V): void {
@@ -367,6 +369,7 @@ export default function App() {
   const [manageWindow, setManageWindow] = useState<HostWindow | null>(null); // the window long-pressed for its action menu
   const [managePane, setManagePane] = useState<string | null>(null); // pane id long-pressed in the map
   const [managedPaneWidth, setManagedPaneWidth] = useState<number | null>(null);
+  const [managedPaneHeight, setManagedPaneHeight] = useState<number | null>(null);
   const [paneLayoutRestoreReady, setPaneLayoutRestoreReady] = useState(false);
   const [windowResizePending, setWindowResizePending] = useState(0);
   const [paneResizePending, setPaneResizePending] = useState(0);
@@ -821,6 +824,7 @@ export default function App() {
     if (managePaneWindowRef.current) savedLayoutsRef.current.delete(managePaneWindowRef.current);
     managePaneWindowRef.current = null;
     setManagedPaneWidth(null);
+    setManagedPaneHeight(null);
     setPaneLayoutRestoreReady(false);
     setManagePane(null);
   });
@@ -1758,11 +1762,13 @@ export default function App() {
       }
       managePaneWindowRef.current = targetWindowId;
       setManagedPaneWidth(panes.find((pane) => pane.id === paneId)?.width ?? null);
+      setManagedPaneHeight(panes.find((pane) => pane.id === paneId)?.height ?? null);
       setManagePane(paneId);
     } catch (e) {
       if (!handledAuth(e)) {
         managePaneWindowRef.current = targetWindowId;
         setManagedPaneWidth(current?.panes?.find((pane) => pane.id === paneId)?.width ?? null);
+        setManagedPaneHeight(current?.panes?.find((pane) => pane.id === paneId)?.height ?? null);
         setManagePane(paneId);
       }
     }
@@ -1777,30 +1783,29 @@ export default function App() {
     }
   }, [current?.window?.id, refreshPanes, handledAuth]);
 
-  const setManagedWindowWidth = useCallback((windowId: string, width: number) => {
-    setManageWindow((win) => (win?.id === windowId ? { ...win, width } : win));
+  const setManagedWindowDimension = useCallback((windowId: string, axis: 'width' | 'height', size: number) => {
+    setManageWindow((win) => (win?.id === windowId ? { ...win, [axis]: size } : win));
     setCurrent((state) => {
       if (!state) return state;
-      const windows = state.windows.map((win) => (win.id === windowId ? { ...win, width } : win));
+      const windows = state.windows.map((win) => (win.id === windowId ? { ...win, [axis]: size } : win));
       return {
         ...state,
         windows,
-        window: state.window.id === windowId ? { ...state.window, width } : state.window,
+        window: state.window.id === windowId ? { ...state.window, [axis]: size } : state.window,
       };
     });
   }, []);
 
-  // Window width exists only for a lone-pane window in this UI. A multi-pane window exposes the
-  // independently adjustable target in Pane Management instead, so this action has one clear scope.
-  const resizeManagedWindowCols = useCallback(async (delta: number, displayedCols: number) => {
+  // Window resizing changes the total grid; tmux redistributes the change through the current layout.
+  const resizeManagedWindowDimension = useCallback(async (axis: 'width' | 'height', delta: number, displayedSize: number) => {
     const win = manageWindow;
-    if (!win || win.panes !== 1 || !Number.isFinite(displayedCols)) return;
-    const cols = clampCols(displayedCols + delta);
-    setManagedWindowWidth(win.id, cols);
+    if (!win || !Number.isFinite(displayedSize)) return;
+    const size = axis === 'width' ? clampCols(displayedSize + delta) : clampRows(displayedSize + delta);
+    setManagedWindowDimension(win.id, axis, size);
     if (current?.window?.id === win.id) termRef.current?.flash?.();
     setWindowResizePending((count) => count + 1);
     try {
-      await resizeWindow(win.id, cols);
+      await resizeWindow(win.id, axis === 'width' ? size : null, axis === 'height' ? size : null);
     } catch (e) {
       if (handledAuth(e)) return;
       try {
@@ -1808,16 +1813,21 @@ export default function App() {
         if (!sessionId) return;
         const windows = await getWindows(sessionId);
         const fresh = windows.find((item) => item.id === win.id);
-        if (fresh?.width !== undefined) setManagedWindowWidth(win.id, fresh.width);
+        if (fresh?.[axis] !== undefined) setManagedWindowDimension(win.id, axis, fresh[axis]!);
       } catch (refreshError) { handledAuth(refreshError); }
     } finally { setWindowResizePending((count) => Math.max(0, count - 1)); }
-  }, [manageWindow, current?.window?.id, current?.session?.id, handledAuth, setManagedWindowWidth]);
+  }, [manageWindow, current?.window?.id, current?.session?.id, handledAuth, setManagedWindowDimension]);
 
-  const restoreManagedWindowCols = useCallback(async () => {
+  const resizeManagedWindowCols = useCallback((delta: number, cols: number) =>
+    resizeManagedWindowDimension('width', delta, cols), [resizeManagedWindowDimension]);
+  const resizeManagedWindowRows = useCallback((delta: number, rows: number) =>
+    resizeManagedWindowDimension('height', delta, rows), [resizeManagedWindowDimension]);
+
+  const restoreManagedWindowSize = useCallback(async () => {
     const win = manageWindow;
     const sessionId = win?.manageSessionId ?? current?.session?.id;
     const sessionName = win?.manageSessionName ?? current?.session?.name;
-    if (!win || win.panes !== 1 || !sessionId) return;
+    if (!win || !sessionId) return;
     try {
       await restoreWindowSize(win.id);
       const windows = await getWindows(sessionId);
@@ -1835,12 +1845,14 @@ export default function App() {
     } catch (e) { handledAuth(e); }
   }, [manageWindow, current?.session?.id, handledAuth]);
 
-  const resizeManagedPaneCols = useCallback(async (delta: number, displayedCols: number) => {
+  const resizeManagedPaneDimension = useCallback(async (axis: 'width' | 'height', delta: number, displayedValue: number) => {
     const windowId = current?.window?.id;
     const pane = current?.panes?.find((item) => item.id === managePane);
-    if (!windowId || !pane || !canResizePaneWidth(current.panes, pane.id) || !Number.isFinite(displayedCols)) return;
-    const cols = clampCols(displayedCols + delta);
-    setManagedPaneWidth(cols);
+    const canResize = axis === 'width' ? canResizePaneWidth : canResizePaneHeight;
+    if (!windowId || !pane || !canResize(current.panes, pane.id) || !Number.isFinite(displayedValue)) return;
+    const size = axis === 'width' ? clampCols(displayedValue + delta) : clampRows(displayedValue + delta);
+    if (axis === 'width') setManagedPaneWidth(size);
+    else setManagedPaneHeight(size);
     termRef.current?.flash?.();
     setPaneResizePending((count) => count + 1);
     try {
@@ -1861,17 +1873,24 @@ export default function App() {
       } else {
         savedLayoutsRef.current.delete(windowId);
       }
-      await resizePane(pane.id, cols);
+      await resizePane(pane.id, axis === 'width' ? size : null, axis === 'height' ? size : undefined);
     } catch (e) {
       if (handledAuth(e)) return;
       try {
         const panes = await getPanes(windowId);
         refreshPanes(windowId, panes);
-        setManagedPaneWidth(panes.find((item) => item.id === pane.id)?.width ?? null);
+        const freshPane = panes.find((item) => item.id === pane.id);
+        setManagedPaneWidth(freshPane?.width ?? null);
+        setManagedPaneHeight(freshPane?.height ?? null);
       }
       catch (refreshError) { handledAuth(refreshError); }
     } finally { setPaneResizePending((count) => Math.max(0, count - 1)); }
   }, [current, managePane, refreshPanes, handledAuth]);
+
+  const resizeManagedPaneCols = useCallback((delta: number, cols: number) =>
+    resizeManagedPaneDimension('width', delta, cols), [resizeManagedPaneDimension]);
+  const resizeManagedPaneRows = useCallback((delta: number, rows: number) =>
+    resizeManagedPaneDimension('height', delta, rows), [resizeManagedPaneDimension]);
 
   const restoreManagedPaneLayout = useCallback(async () => {
     const windowId = current?.window?.id;
@@ -1883,7 +1902,9 @@ export default function App() {
       await applyWindowLayout(windowId, layout);
       const panes = await getPanes(windowId, { fresh: true });
       refreshPanes(windowId, panes);
-      setManagedPaneWidth(panes.find((item) => item.id === managePane)?.width ?? null);
+      const restoredPane = panes.find((item) => item.id === managePane);
+      setManagedPaneWidth(restoredPane?.width ?? null);
+      setManagedPaneHeight(restoredPane?.height ?? null);
       savedLayoutsRef.current.delete(windowId);
       setPaneLayoutRestoreReady(false);
     } catch (e) { handledAuth(e); }
@@ -1899,6 +1920,7 @@ export default function App() {
     savedLayoutsRef.current.delete(windowId);
     managePaneWindowRef.current = null;
     setManagedPaneWidth(null);
+    setManagedPaneHeight(null);
     setPaneLayoutRestoreReady(false);
     try {
       const { panes, selectPaneId } = await runSplitPane({
@@ -1923,6 +1945,7 @@ export default function App() {
     savedLayoutsRef.current.delete(windowId);
     managePaneWindowRef.current = null;
     setManagedPaneWidth(null);
+    setManagedPaneHeight(null);
     setPaneLayoutRestoreReady(false);
     try {
       const { panes, selectPaneId } = await runClosePane({
@@ -3076,13 +3099,13 @@ export default function App() {
   const managedPane = current?.panes?.find((pane) => pane.id === managePane);
   const showManagedPaneWidth = Number.isFinite(managedPaneWidth)
     && !!managedPane && !!managePane && canResizePaneWidth(current?.panes, managePane);
-  const managedPaneSubtitlePanes = managedPaneWidth == null ? current?.panes : current?.panes?.map((pane) => (
-    pane.id === managePane ? { ...pane, width: managedPaneWidth } : pane
-  ));
+  const showManagedPaneHeight = Number.isFinite(managedPaneHeight)
+    && !!managedPane && !!managePane && canResizePaneHeight(current?.panes, managePane);
   const closePaneManagement = () => {
     if (managePaneWindowRef.current) savedLayoutsRef.current.delete(managePaneWindowRef.current);
     managePaneWindowRef.current = null;
     setManagedPaneWidth(null);
+    setManagedPaneHeight(null);
     setPaneLayoutRestoreReady(false);
     setManagePane(null);
   };
@@ -3400,13 +3423,24 @@ export default function App() {
           },
         ] : []}
       >
-        {manageWindow?.panes === 1 && typeof manageWindow.width === 'number' && Number.isFinite(manageWindow.width) && (
+        {manageWindow && typeof manageWindow.width === 'number' && Number.isFinite(manageWindow.width) && (
           <ColumnStepper
             label={t('resize.windowWidth')}
             cols={manageWindow.width}
             onAdjust={resizeManagedWindowCols}
-            onRestore={restoreManagedWindowCols}
-            restoreLabel={t('resize.restoreAutoWidth')}
+            onRestore={restoreManagedWindowSize}
+            restoreLabel={t('resize.restoreAutoSize')}
+            restoreDisabled={windowResizePending > 0}
+          />
+        )}
+        {manageWindow && typeof manageWindow.height === 'number' && Number.isFinite(manageWindow.height) && (
+          <ColumnStepper
+            label={t('resize.windowHeight')}
+            cols={manageWindow.height}
+            unit="resize.rows"
+            onAdjust={resizeManagedWindowRows}
+            onRestore={restoreManagedWindowSize}
+            restoreLabel={t('resize.restoreAutoSize')}
             restoreDisabled={windowResizePending > 0}
           />
         )}
@@ -3414,14 +3448,7 @@ export default function App() {
       <ActionSheet
         open={!!managePane}
         title={t('pane.manageTitle')}
-        subtitle={managePane ? `${paneManageSubtitle(managedPaneSubtitlePanes?.map((pane) => {
-          const { width, height, ...rest } = pane;
-          return {
-            ...rest,
-            ...(width != null ? { width } : {}),
-            ...(height != null ? { height } : {}),
-          };
-        }), managePane)} · ${managePane}` : ''}
+        subtitle={managePane ? `${paneManageSubtitle(current?.panes, managePane)} · ${managePane}` : ''}
         onClose={closePaneManagement}
         actions={managePane ? [
           { key: 'split-h', icon: <SplitHIcon />, label: t('pane.splitH'), onClick: () => splitPaneAction(managePane, 'h') },
@@ -3440,6 +3467,19 @@ export default function App() {
             onRestore={restoreManagedPaneLayout}
             restoreLabel={t('resize.restoreRatio')}
             restoreDisabled={!paneLayoutRestoreReady || paneResizePending > 0}
+          />
+        )}
+        {showManagedPaneHeight && (
+          <ColumnStepper
+            label={t('resize.paneHeight')}
+            cols={managedPaneHeight ?? 0}
+            unit="resize.rows"
+            onAdjust={resizeManagedPaneRows}
+            {...(!showManagedPaneWidth ? {
+              onRestore: restoreManagedPaneLayout,
+              restoreLabel: t('resize.restoreRatio'),
+              restoreDisabled: !paneLayoutRestoreReady || paneResizePending > 0,
+            } : {})}
           />
         )}
       </ActionSheet>

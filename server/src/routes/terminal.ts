@@ -174,7 +174,7 @@ export function terminalRoutes({ commands }: TerminalRouteOptions): Router {
 
   r.post('/resize', async (req: Request, res: Response, next: NextFunction) => {
     const { window, pane, cols, rows, auto, layout } = requestBody(req);
-    const c = Math.min(Math.max(Number(cols) || 0, 20), 500);
+    const c = cols != null ? Math.min(Math.max(Number(cols) || 0, 20), 500) : null;
     try {
       if (auto) {
         if (!isWindowId(window)) return res.status(400).json({ error: 'bad window id' });
@@ -183,10 +183,15 @@ export function terminalRoutes({ commands }: TerminalRouteOptions): Router {
         assertRequestAuthority();
         await commands.restoreWindowSize(window);
       } else if (isPaneId(pane)) {
-        await commands.resizePane(pane, c); // a pane in a split — resize only it
+        const hasCols = cols != null;
+        const hasRows = rows != null;
+        if (!hasCols && !hasRows) return res.status(400).json({ error: 'bad pane size' });
+        const r = hasRows ? Math.min(Math.max(Number(rows) || 0, 5), 500) : null;
+        await commands.resizePane(pane, hasCols ? c : null, r); // resize only the requested pane axis
       } else if (isWindowId(window)) {
         const rw = rows != null ? Math.min(Math.max(Number(rows) || 0, 5), 500) : null;
-        await commands.resizeWindow(window, c, rw); // a lone pane fills the window
+        if (c == null && rw == null) return res.status(400).json({ error: 'bad window size' });
+        await commands.resizeWindow(window, c, rw); // tmux redistributes the total window size through its layout
       } else {
         return res.status(400).json({ error: 'bad resize target' });
       }

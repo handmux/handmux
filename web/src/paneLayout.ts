@@ -90,6 +90,26 @@ export function canResizePaneWidth(
   });
 }
 
+// A pane's HEIGHT can change only when it shares a horizontal split boundary with a sibling.
+// Pure side-by-side panes share the window height, so an independent height control would not work.
+export function canResizePaneHeight(
+  panes: readonly PaneLayoutSource[] | null | undefined,
+  paneId: string,
+): boolean {
+  if (!hasGeometry(panes) || panes.length < 2) return false;
+  const target = panes.find((pane) => pane.id === paneId);
+  if (!target) return false;
+  const right = target.left + target.width;
+  const bottom = target.top + target.height;
+  return panes.some((pane) => {
+    if (pane.id === paneId) return false;
+    const overlapsColumns = Math.min(right, pane.left + pane.width) > Math.max(target.left, pane.left);
+    if (!overlapsColumns) return false;
+    const paneBottom = pane.top + pane.height;
+    return Math.abs(pane.top - bottom) <= 1 || Math.abs(target.top - paneBottom) <= 1;
+  });
+}
+
 const uniqSorted = (numbers: readonly number[]): number[] => [...new Set(numbers)].sort((a, b) => a - b);
 
 // Split lines along one axis → equal pixel tracks. A track is a BORDER SEAM when it's ≤1 cell and no

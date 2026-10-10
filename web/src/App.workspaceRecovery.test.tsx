@@ -783,7 +783,7 @@ describe('App management dimensions', () => {
     expect(api.getWindows.mock.calls.length).toBeGreaterThan(readsBefore);
   });
 
-  it('resizes a lone-pane window from Window Management', async () => {
+  it('resizes the whole window from Window Management, including multi-pane windows', async () => {
     const loneWindow = { ...staleWindow, panes: 1 };
     const lonePane = [{ ...stalePanes[0], width: 80 }];
     localStorage.setItem('tw_bound', JSON.stringify([session.name]));
@@ -800,14 +800,21 @@ describe('App management dimensions', () => {
       await Promise.resolve();
     });
 
-    expect(api.resizeWindow).toHaveBeenCalledWith('@1', 81);
+    expect(api.resizeWindow).toHaveBeenCalledWith('@1', 81, null);
     expect(screen.getByText('81 列')).toBeTruthy();
   });
 
-  it('does not expose whole-window width for a multi-pane window', async () => {
+  it('resizes a multi-pane window height independently of pane controls', async () => {
     const view = await renderManagedSession();
     await act(async () => { await windowBarProps().onManageWindow(staleWindow); });
-    expect(view.container.querySelector('.sheet-size-control')).toBeNull();
+    expect([...view.container.querySelectorAll('.sheet-size-control .settings-label')].map((node) => node.textContent))
+      .toEqual(['窗口宽度', '窗口高度']);
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: '窗口高度 +1' }));
+      await Promise.resolve();
+    });
+    expect(api.resizeWindow).toHaveBeenCalledWith('@1', null, 25);
+    expect(screen.getByText('25 行')).toBeTruthy();
   });
 
   it('refreshes the pane dimensions from tmux before opening split management', async () => {
@@ -819,8 +826,33 @@ describe('App management dimensions', () => {
 
     await act(async () => { await windowBarProps().onManagePane('%1'); });
 
-    expect(screen.getByRole('dialog', { name: '分屏管理，① zsh · 59×30 · %1' })).toBeTruthy();
+    expect(screen.getByRole('dialog', { name: '分屏管理，① zsh · %1' })).toBeTruthy();
     expect(api.getPanes).toHaveBeenCalledTimes(callsBeforeOpen + 1);
+  });
+
+  it('shows pane height below width and resizes only the selected pane rows', async () => {
+    const gridPanes = [
+      { id: '%1', active: true, width: 39, height: 12, command: 'zsh', cwd: '/work', left: 0, top: 0 },
+      { id: '%2', active: false, width: 40, height: 12, command: 'node', cwd: '/work', left: 40, top: 0 },
+      { id: '%3', active: false, width: 39, height: 11, command: 'bash', cwd: '/work', left: 0, top: 13 },
+      { id: '%4', active: false, width: 40, height: 11, command: 'vim', cwd: '/work', left: 40, top: 13 },
+    ];
+    localStorage.setItem('tw_bound', JSON.stringify([session.name]));
+    api.getSessions.mockResolvedValue([session]);
+    api.getWindows.mockResolvedValue([staleWindow]);
+    api.getPanes.mockResolvedValue(gridPanes);
+    await renderApp();
+    await act(async () => { await windowBarProps().onManagePane('%1'); });
+
+    expect(screen.getByRole('dialog', { name: '分屏管理，① zsh · %1' })).toBeTruthy();
+    expect([...document.querySelectorAll('.sheet-size-control .settings-label')].map((label) => label.textContent))
+      .toEqual(['窗格宽度', '窗格高度']);
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: '窗格高度 +1' }));
+      await flush();
+    });
+    expect(api.resizePane).toHaveBeenCalledWith('%1', null, 13);
+    expect(screen.getByText('13 行')).toBeTruthy();
   });
 
   it('resizes the selected side-by-side pane and restores only its saved split ratio', async () => {
@@ -835,7 +867,7 @@ describe('App management dimensions', () => {
       await Promise.resolve();
     });
     expect(api.getWindowLayout).toHaveBeenCalledWith('@1');
-    expect(api.resizePane).toHaveBeenCalledWith('%1', 40);
+    expect(api.resizePane).toHaveBeenCalledWith('%1', 40, undefined);
 
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: '窗格宽度 +1' }));
@@ -843,7 +875,7 @@ describe('App management dimensions', () => {
       await Promise.resolve();
     });
     expect(api.getWindowLayout).toHaveBeenCalledOnce();
-    expect(api.resizePane).toHaveBeenLastCalledWith('%1', 41);
+    expect(api.resizePane).toHaveBeenLastCalledWith('%1', 41, undefined);
     expect(screen.getByText('41 列')).toBeTruthy();
 
     const restore = screen.getByRole('button', { name: /恢复分屏比例/ });
@@ -858,7 +890,7 @@ describe('App management dimensions', () => {
     expect(api.restoreWindowSize).not.toHaveBeenCalled();
   });
 
-  it('does not show a pane-width control for a pure top/bottom split', async () => {
+  it('shows height but not width control for a pure top/bottom split', async () => {
     const stack = [
       { ...stalePanes[0], width: 80, height: 12, left: 0, top: 0 },
       { ...stalePanes[1], width: 80, height: 11, left: 0, top: 13 },
@@ -870,7 +902,8 @@ describe('App management dimensions', () => {
     const view = await renderApp();
 
     await act(async () => { await windowBarProps().onManagePane('%1'); });
-    expect(view.container.querySelector('.sheet-size-control')).toBeNull();
+    expect(view.container.querySelector('.sheet-size-control .settings-label')?.textContent).toBe('窗格高度');
+    expect(view.container.querySelector('button[aria-label="窗格宽度 +1"]')).toBeNull();
   });
 
   it('refreshes pane geometry from tmux before opening the pane map', async () => {

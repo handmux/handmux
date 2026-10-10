@@ -6,20 +6,21 @@ interface ColumnStepperProps {
   label: string;
   cols: number;
   onAdjust: (step: number, cols: number) => void;
-  onRestore: () => void;
-  restoreLabel: string;
+  unit?: 'resize.columns' | 'resize.rows';
+  onRestore?: () => void;
+  restoreLabel?: string;
   restoreDisabled?: boolean;
 }
 
 export default function ColumnStepper({
-  label, cols, onAdjust, onRestore, restoreLabel, restoreDisabled = false,
+  label, cols, onAdjust, unit = 'resize.columns', onRestore, restoreLabel, restoreDisabled = false,
 }: ColumnStepperProps) {
   const steps = [-10, -1, 1, 10];
   return (
     <div className="sheet-size-control">
       <div className="sheet-size-head">
         <span className="settings-label">{label}</span>
-        <span className="sheet-size-value">{t('resize.columns', { n: cols })}</span>
+        <span className="sheet-size-value">{t(unit, { n: cols })}</span>
       </div>
       <div className="sheet-size-buttons">
         {steps.map((step) => (
@@ -33,10 +34,10 @@ export default function ColumnStepper({
             {step > 0 ? '+' : '−'}{Math.abs(step)}
           </button>
         ))}
-        <button type="button" className="fontbtn sheet-size-restore" disabled={restoreDisabled}
+        {onRestore && restoreLabel && <button type="button" className="fontbtn sheet-size-restore" disabled={restoreDisabled}
           aria-label={restoreLabel} title={restoreLabel} onClick={onRestore}>
           ↺ {t('resize.restore')}
-        </button>
+        </button>}
       </div>
     </div>
   );

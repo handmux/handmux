@@ -354,9 +354,11 @@ export async function sendKey(paneId: string, key: string): Promise<void> {
 // sets the window-size option to `manual`, so it sticks (and applies to every client on this
 // window — including the PC) until restoreWindowSize is called. Pass rows = null to change
 // only the column count and leave the height untouched.
-export async function resizeWindow(windowId: string, cols: number, rows?: number | null): Promise<void> {
-  const args = ['resize-window', '-t', windowId, '-x', String(cols)];
+export async function resizeWindow(windowId: string, cols: number | null, rows?: number | null): Promise<void> {
+  const args = ['resize-window', '-t', windowId];
+  if (cols != null) args.push('-x', String(cols));
   if (rows != null) args.push('-y', String(rows));
+  if (cols == null && rows == null) throw new Error('resize-window requires a width or height');
   await runTmux(args);
 }
 
@@ -366,11 +368,14 @@ export async function restoreWindowSize(windowId: string): Promise<void> {
   await runTmux(['set-window-option', '-t', windowId, 'window-size', 'latest']);
 }
 
-// Resize just one pane's width inside its window (siblings absorb the difference; the window
-// total is unchanged). Use this for a pane in a split — resizing the whole window would
-// shrink every pane. A lone pane can't be resized this way (it fills the window).
-export async function resizePane(paneId: string, cols: number): Promise<void> {
-  await runTmux(['resize-pane', '-t', paneId, '-x', String(cols)]);
+// Resize one pane along either or both axes inside its window (siblings absorb the difference).
+// A lone pane can't be resized this way (it fills the window).
+export async function resizePane(paneId: string, cols: number | null, rows?: number | null): Promise<void> {
+  const args = ['resize-pane', '-t', paneId];
+  if (cols != null) args.push('-x', String(cols));
+  if (rows != null) args.push('-y', String(rows));
+  if (cols == null && rows == null) throw new Error('resize-pane requires a width or height');
+  await runTmux(args);
 }
 
 // The window's exact pane arrangement, captured so "restore" can put a split back the way it
