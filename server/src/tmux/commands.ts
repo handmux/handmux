@@ -318,14 +318,22 @@ export async function sendText(paneId: string, text: string): Promise<void> {
   }
 }
 
+const MAX_RAW_KEY_BYTES = 1024;
+
 export async function sendHexInput(paneId: string, hex: string): Promise<void> {
   if (!hex) return;
+  // tmux paste-buffer marks its payload as literal paste. Interactive programs then insert escape
+  // sequences and Backspace as visible characters instead of handling them as keys. xterm keyboard
+  // events are small; send those bytes as keys, while retaining the buffer path for bulk input.
+  const bytes = hex.match(/../g) || [];
+  if (bytes.length <= MAX_RAW_KEY_BYTES) {
+    await runTmux(['send-keys', '-t', paneId, '-H', ...bytes]);
+    return;
+  }
   const buffer = nextInputBufferName();
   try {
-    // Raw terminal input can contain control sequences as well as UTF-8. Put the bytes in a tmux
-    // buffer and paste them without `-p`, so tmux does not add bracketed-paste markers or force the
-    // payload through the command argument parser. This is the same transport as sendText, while
-    // preserving the direct terminal's raw-byte semantics.
+    // Bulk input can exceed tmux's command argument limit. The input queue caps each batch, so
+    // large text is sent through a tmux buffer without expanding every byte into an argument.
     await runTmuxWithInput(['load-buffer', '-b', buffer, '-'], Buffer.from(hex, 'hex'));
     await runTmux(['paste-buffer', '-d', '-b', buffer, '-t', paneId]);
   } catch (error) {

@@ -242,6 +242,82 @@ describe('tmux commands (integration)', () => {
     expect(output).toContain('e4bda0e5a5bd0d');
   }, 15_000);
 
+  it('sendHexInput lets interactive programs handle arrow, backspace and delete keys', async () => {
+    if (!hasTmux) return;
+    const session = (await listSessions()).find((candidate) => candidate.name === SES);
+    const window = (await listWindows(session.id))[0];
+    const { stdout } = await execFile('tmux', [
+      'split-window', '-d', '-P', '-F', '#{pane_id}', '-t', window.id,
+      'env PS1=KEYTEST: bash --noprofile --norc -i',
+    ]);
+    const pane = stdout.trim();
+    try {
+      let screen = '';
+      for (let attempt = 0; attempt < 30 && !screen.includes('KEYTEST:'); attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        screen = await capturePane(pane, 20);
+      }
+      expect(screen).toContain('KEYTEST:');
+
+      await sendHexInput(pane, '616263'); // abc
+      await sendHexInput(pane, '1b5b44'); // Left
+      await sendHexInput(pane, '7f'); // Backspace removes b, leaving ac
+      for (let attempt = 0; attempt < 30 && !screen.includes('KEYTEST:ac'); attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        screen = await capturePane(pane, 20);
+      }
+      expect(screen).toContain('KEYTEST:ac');
+      expect(screen).not.toContain('^[[D^?');
+
+      await sendHexInput(pane, '1b5b337e'); // Delete removes c, leaving a
+      for (let attempt = 0; attempt < 30 && !screen.includes('KEYTEST:a '); attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        screen = await capturePane(pane, 20);
+      }
+      expect(screen).toContain('KEYTEST:a ');
+    } finally {
+      try { await execFile('tmux', ['kill-pane', '-t', pane]); } catch {}
+    }
+  }, 10_000);
+
+  it('sendHexInput keeps large desktop input on the buffer transport', async () => {
+    if (!hasTmux) return;
+    const session = (await listSessions()).find((candidate) => candidate.name === SES);
+    const window = (await listWindows(session.id))[0];
+    const payload = Buffer.alloc(8_000, 0x78);
+    const recorderSource = [
+      'process.stdin.setRawMode(true);process.stdin.resume();',
+      'process.stdout.write("BULK_READY\\n");',
+      'let length=0,valid=true;',
+      'process.stdin.on("data",data=>{length+=data.length;',
+      'valid=valid&&data.every(byte=>byte===120);',
+      'if(length>=8000){process.stdout.write(`BULK_OK:${valid&&length===8000}\\n`);',
+      'process.stdin.pause();setInterval(()=>{},1000)}});',
+    ].join('');
+    const command = `node -e "eval(Buffer.from('${Buffer.from(recorderSource).toString('base64')}',`
+      + "'base64').toString())\"";
+    const { stdout } = await execFile('tmux', [
+      'split-window', '-d', '-P', '-F', '#{pane_id}', '-t', window.id, command,
+    ]);
+    const pane = stdout.trim();
+    try {
+      let screen = '';
+      for (let attempt = 0; attempt < 30 && !screen.includes('BULK_READY'); attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        screen = await capturePane(pane, 20);
+      }
+      expect(screen).toContain('BULK_READY');
+      await sendHexInput(pane, payload.toString('hex'));
+      for (let attempt = 0; attempt < 50 && !screen.includes('BULK_OK:'); attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        screen = await capturePane(pane, 20);
+      }
+      expect(screen).toContain('BULK_OK:true');
+    } finally {
+      try { await execFile('tmux', ['kill-pane', '-t', pane]); } catch {}
+    }
+  }, 10_000);
+
   // Named guard for the tmux capture behaviours the terminal rendering depends on (CLAUDE.md). If a tmux
   // version changes these, this fails loudly here instead of as a mysterious mobile-render glitch. Deep
   // scroll/BCE/shaded-bg behaviour is covered separately by web/test/terminalRefresh.test.js (real bytes).
