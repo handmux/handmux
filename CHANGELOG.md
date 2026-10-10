@@ -4,6 +4,10 @@ All notable changes to handmux. Format follows [Keep a Changelog](https://keepac
 
 ## [Unreleased]
 
+### Changed
+
+- 对话回复中的代码块现在也可以一键复制。
+
 ### Fixed
 
 - 修复桌面终端中 IME 直接提交中文时字符偶发丢失的问题。

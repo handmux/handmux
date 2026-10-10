@@ -2799,6 +2799,43 @@ describe('generic Agent Conversation UI', () => {
     expect(container.querySelector('.chat-me')?.textContent).toContain('| Name | State |');
   });
 
+  it('copies code blocks from assistant response messages', async () => {
+    const originalClipboard = navigator.clipboard;
+    const originalSecureContext = Object.getOwnPropertyDescriptor(window, 'isSecureContext');
+    const writeText = vi.fn(async () => {});
+    Object.defineProperty(window, 'isSecureContext', { value: true, configurable: true });
+    Object.defineProperty(navigator, 'clipboard', {
+      value: { writeText }, configurable: true,
+    });
+    try {
+      const { container } = render(<AgentConversationView conversation={controller({
+        items: [{
+          key: 'assistant-code', provisional: false,
+          item: {
+            id: 'assistant-code', sessionId: 'session-1', status: 'complete',
+            kind: 'message', role: 'assistant', content: [{ type: 'text', text:
+              'Example:\n\n```js\nconst answer = 42;\n```' }],
+          },
+        }],
+      })} />);
+
+      const button = container.querySelector('.chat-them .doc-code-copy') as HTMLButtonElement;
+      expect(button).toBeTruthy();
+      expect(button.classList.contains('chat-copy-ignore')).toBe(true);
+      fireEvent.click(button);
+      await act(async () => { await Promise.resolve(); });
+
+      expect(writeText).toHaveBeenCalledWith('const answer = 42;\n');
+      expect(button.classList.contains('is-copied')).toBe(true);
+    } finally {
+      Object.defineProperty(navigator, 'clipboard', {
+        value: originalClipboard, configurable: true,
+      });
+      if (originalSecureContext) Object.defineProperty(window, 'isSecureContext', originalSecureContext);
+      else Reflect.deleteProperty(window, 'isSecureContext');
+    }
+  });
+
   it('routes sanitized Markdown links through the shared delegated handler', () => {
     const conversation = controller({
       items: [{

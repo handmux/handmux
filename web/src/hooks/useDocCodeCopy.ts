@@ -32,7 +32,7 @@ export function useDocCodeCopy(
     blocks.forEach((pre) => {
       const button = document.createElement('button');
       button.type = 'button';
-      button.className = 'doc-code-copy';
+      button.className = 'doc-code-copy chat-copy-ignore';
       button.setAttribute('aria-label', t('doc.copyCode'));
       button.title = t('doc.copyCode');
       button.innerHTML = COPY_ICON;

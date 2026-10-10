@@ -1,5 +1,6 @@
-import { Fragment, useMemo, useState } from 'react';
+import { Fragment, useMemo, useRef, useState } from 'react';
 import { renderMarkdown } from '../markdown.js';
+import { useDocCodeCopy } from '../hooks/useDocCodeCopy.js';
 import { t } from '../i18n';
 import { getLangCode } from '../i18n';
 import type { ConversationTimelineMessage } from '../conversationTimelineTypes.js';
@@ -23,8 +24,10 @@ export function AssistantMarkdown({
   fontSize = 15,
 }: { text: string; streaming?: boolean; copyId: string; fontSize?: number }) {
   const html = useMemo(() => linkedAssistantHtml(text), [text]);
+  const rootRef = useRef<HTMLDivElement>(null);
+  useDocCodeCopy(rootRef, html, true);
   return (
-    <div className="chat-bubble chat-them chat-md"
+    <div ref={rootRef} className="chat-bubble chat-them chat-md"
       style={fontSize === 15 ? undefined : { fontSize }}
       data-conversation-stream={streaming ? 'active' : undefined}
       data-conversation-copy-root data-conversation-copy-id={copyId}

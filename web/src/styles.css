@@ -3897,7 +3897,7 @@ button.cmd-text { background: none; border: none; text-align: left; }
 .chat-md blockquote p { margin: .4em 0; }
 .chat-md input[type="checkbox"] { margin-right: 6px; vertical-align: middle; }
 .chat-md code { background: var(--ct-code-bg); padding: 1px 4px; border-radius: 4px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: .92em; }
-.chat-md pre { background: var(--ct-code-bg); padding: 10px; border-radius: 8px; margin: 0 0 .5333333333333333em; overflow-x: auto; -webkit-overflow-scrolling: touch; max-width: 100%; }
+.chat-md pre { position: relative; background: var(--ct-code-bg); padding: 10px 40px 10px 10px; border-radius: 8px; margin: 0 0 .5333333333333333em; overflow-x: auto; -webkit-overflow-scrolling: touch; max-width: 100%; }
 .chat-md pre code { background: none; padding: 0; }
 .chat-md table { border-collapse: collapse; margin: 0 0 .5333333333333333em; }
 .chat-md th, .chat-md td { border: 1px solid var(--ct-line); padding: 4px 8px; text-align: left; white-space: nowrap; }
