@@ -63,6 +63,7 @@ export interface OpenXtermOptions {
   scrollback: number;
   pane: string;
   onInputData?: (pane: string, data: string | Uint8Array) => void;
+  onInputKeys?: (pane: string, keys: readonly string[]) => void;
   onInputFocusChange?: (focused: boolean) => void;
   onRequestDraft?: () => void;
   onDesktopSelection?: (active: boolean) => void;
@@ -151,9 +152,12 @@ function forwardPageKey(
   term: XTerm,
   helper: HTMLTextAreaElement | null,
   event: KeyboardEvent,
+  pane: string,
+  onInputKeys?: OpenXtermOptions['onInputKeys'],
 ): boolean {
   if (!helper || isBrowserFunctionKey(event)) return false;
   term.focus();
+  if (sendLineBoundaryKey(term, event, pane, onInputKeys)) return true;
   const forwarded = cloneKeyboardEvent(event);
   const handled = !helper.dispatchEvent(forwarded);
   if (handled) return true;
@@ -168,6 +172,22 @@ function forwardPageKey(
   return false;
 }
 
+function sendLineBoundaryKey(
+  term: XTerm,
+  event: KeyboardEvent,
+  pane: string,
+  onInputKeys?: OpenXtermOptions['onInputKeys'],
+): boolean {
+  if (event.ctrlKey || event.altKey || event.metaKey || event.shiftKey) return false;
+  if (event.key !== 'Home' && event.key !== 'End') return false;
+  event.preventDefault();
+  // Let tmux encode the key for the pane's configured TERM; raw xterm [H/[F sequences can be
+  // unbound when the pane advertises tmux-256color (whose khome/kend are [1~/[4~).
+  if (onInputKeys) onInputKeys(pane, [event.key]);
+  else term.input(event.key === 'Home' ? '\x1b[1~' : '\x1b[4~', true);
+  return true;
+}
+
 export function openXterm({
   host,
   desktop,
@@ -176,6 +196,7 @@ export function openXterm({
   scrollback,
   pane,
   onInputData,
+  onInputKeys,
   onInputFocusChange,
   onRequestDraft,
   onDesktopSelection,
@@ -213,6 +234,7 @@ export function openXterm({
 
   term.attachCustomKeyEventHandler((event) => {
     if (isBrowserFunctionKey(event)) return false;
+    if (desktop && sendLineBoundaryKey(term, event, pane, onInputKeys)) return false;
     const pasteKey = desktop && event.key?.toLowerCase() === 'v' && !event.altKey;
     const nativePaste = pasteKey && (usesAppleCommandKey()
       ? event.metaKey && !event.ctrlKey
@@ -304,7 +326,7 @@ export function openXterm({
 
   return {
     term,
-    forwardPageKey: (event) => forwardPageKey(term, helper, event),
+    forwardPageKey: (event) => forwardPageKey(term, helper, event, pane, onInputKeys),
     dispose() {
       disposed = true;
       dataSub?.dispose();

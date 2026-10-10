@@ -3626,6 +3626,7 @@ export default function App() {
                 onDocLinkTap={onDocLinkTap}
                 onInputFocusChange={setTerminalFocused}
                 onInputData={enqueueTerminalInput}
+                onInputKeys={enqueueTerminalKeys}
                 onRequestDraft={focusDraft}
                 onKeepKeyboard={() => dockRef.current?.keepKeyboardForGesture?.() ?? false}
                 onTap={() => {

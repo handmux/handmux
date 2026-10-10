@@ -110,18 +110,26 @@ describe('real xterm desktop navigation keys', () => {
     const host = document.createElement('div');
     document.body.append(host);
     const received: string[] = [];
+    const namedKeys: string[][] = [];
     const opened = openXterm({
       host, desktop: true, autoFocusInput: false, fontSize: 14, scrollback: 100, pane: '%test',
       onInputData: (_pane, data) => received.push(String(data)),
+      onInputKeys: (_pane, keys) => namedKeys.push([...keys]),
     });
     terminals.push(opened.term);
-    for (const [key, keyCode, sequence] of [
-      ['Home', 36, '\x1b[H'], ['End', 35, '\x1b[F'],
-    ] as const) {
+    for (const [key, keyCode] of [['Home', 36], ['End', 35]] as const) {
       const event = new KeyboardEvent('keydown', { key, code: key, bubbles: true, cancelable: true });
       Object.defineProperty(event, 'keyCode', { value: keyCode });
       expect(opened.forwardPageKey(event), key).toBe(true);
-      expect(received.at(-1), key).toBe(sequence);
+      expect(namedKeys.at(-1), key).toEqual([key]);
+    }
+    const helper = host.querySelector<HTMLTextAreaElement>('.xterm-helper-textarea')!;
+    for (const [key, keyCode] of [['Home', 36], ['End', 35]] as const) {
+      received.length = 0;
+      const event = new KeyboardEvent('keydown', { key, code: key, bubbles: true, cancelable: true });
+      Object.defineProperty(event, 'keyCode', { value: keyCode });
+      helper.dispatchEvent(event);
+      expect(namedKeys.at(-1), key).toEqual([key]);
     }
     opened.dispose();
   });

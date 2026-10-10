@@ -64,6 +64,7 @@ export interface TerminalProps {
   onRequestDraft?: () => void;
   onInputFocusChange?: (focused: boolean) => void;
   onInputData?: (pane: string, data: string | Uint8Array) => void;
+  onInputKeys?: (pane: string, keys: readonly string[]) => void;
 }
 
 export interface TerminalHandle {
@@ -120,6 +121,7 @@ const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Terminal({
   onRequestDraft,
   onInputFocusChange,
   onInputData,
+  onInputKeys,
 }, ref) {
   const elRef = useRef<HTMLDivElement | null>(null);
   const termRef = useRef<XTerm | null>(null);
@@ -140,6 +142,8 @@ const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Terminal({
   onInputFocusChangeRef.current = onInputFocusChange;
   const onInputDataRef = useRef(onInputData);
   onInputDataRef.current = onInputData;
+  const onInputKeysRef = useRef(onInputKeys);
+  onInputKeysRef.current = onInputKeys;
   const snapshotIntervalRef = useRef(snapshotIntervalMs);
   snapshotIntervalRef.current = snapshotIntervalMs;
   // Clickable doc-path underlines (xterm decorations), rebuilt after every full repaint. The tap
@@ -327,6 +331,7 @@ const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Terminal({
       scrollback: MAX_LINES + 100,
       pane,
       onInputData: (targetPane, data) => onInputDataRef.current?.(targetPane, data),
+      onInputKeys: (targetPane, keys) => onInputKeysRef.current?.(targetPane, keys),
       onInputFocusChange: (focused) => {
         if (!disposed) onInputFocusChangeRef.current?.(focused);
       },
