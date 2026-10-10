@@ -5,7 +5,7 @@ import type { Terminal } from '@xterm/xterm';
 export interface TerminalFlashState {
   dbg: string;
   dbgVisible: boolean;
-  flash(): void;
+  flash(size?: { cols: number; rows: number }): void;
 }
 
 // The transient cols×rows·font readout that flashes for ~3s after a ⊟/⊞ column step (App calls flash()
@@ -24,10 +24,10 @@ export function useFlash(
     if (flashPollRef.current != null) clearInterval(flashPollRef.current);
   }, []);
 
-  const flash = () => {
+  const flash = (size?: { cols: number; rows: number }) => {
     const read = () => {
       const term = termRef.current;
-      if (term) setDbg(`${term.cols}×${term.rows} · ${term.options.fontSize}px`);
+      if (term) setDbg(`${size?.cols ?? term.cols}×${size?.rows ?? term.rows} · ${term.options.fontSize}px`);
     };
     read();
     setDbgVisible(true);

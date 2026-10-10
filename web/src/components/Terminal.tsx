@@ -69,7 +69,7 @@ export interface TerminalProps {
 
 export interface TerminalHandle {
   getSize(): { cols: number; rows: number } | null;
-  flash(): void;
+  flash(size?: { cols: number; rows: number }): void;
   getFontSize(): { size: number; auto: boolean } | null;
   setFontSize(size: number): number | null;
   autoFont(): void;

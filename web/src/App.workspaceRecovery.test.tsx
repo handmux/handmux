@@ -108,6 +108,7 @@ const push = vi.hoisted(() => ({ getNotifications: vi.fn(), clearPaneNotificatio
 const windowBar = vi.hoisted((): { props: WindowBarProps | null } => ({ props: null }));
 const terminal = vi.hoisted(() => ({
   props: null as TerminalProps | null,
+  flash: vi.fn(),
   focusInput: vi.fn(),
   blurInput: vi.fn(),
   forwardPageKey: vi.fn(),
@@ -208,6 +209,7 @@ vi.mock('./components/Terminal.jsx', async () => {
     default: forwardRef((props: TerminalProps, ref) => {
       terminal.props = props;
       useImperativeHandle(ref, () => ({
+        flash: terminal.flash,
         focusInput: () => {
           terminal.focusInput();
           props.onInputFocusChange?.(true);
@@ -333,6 +335,7 @@ beforeEach(() => {
   windowBar.props = null;
   terminal.props = null;
   terminal.focusInput.mockReset();
+  terminal.flash.mockReset();
   terminal.blurInput.mockReset();
   terminal.forwardPageKey.mockReset();
   bottomDock.focusComposer.mockReset();
@@ -795,9 +798,10 @@ describe('App management dimensions', () => {
     await act(async () => { await windowBarProps().onManageWindow(loneWindow); });
     expect(screen.getByRole('button', { name: /左右分屏/ }).closest('.sheet-row'))
       .toBe(screen.getByRole('button', { name: /上下分屏/ }).closest('.sheet-row'));
+    api.getWindows.mockResolvedValueOnce([{ ...loneWindow, width: 81 }]);
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: '窗口宽度 +1' }));
-      await Promise.resolve();
+      await flush();
     });
 
     expect(api.resizeWindow).toHaveBeenCalledWith('@1', 81, null);
@@ -809,12 +813,16 @@ describe('App management dimensions', () => {
     await act(async () => { await windowBarProps().onManageWindow(staleWindow); });
     expect([...view.container.querySelectorAll('.sheet-size-control .settings-label')].map((node) => node.textContent))
       .toEqual(['窗口宽度', '窗口高度']);
+    api.getWindows.mockResolvedValueOnce([{ ...staleWindow, height: 25 }]);
+    api.getPanes.mockResolvedValueOnce(stalePanes.map((pane) => ({ ...pane, height: 12 })));
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: '窗口高度 +1' }));
-      await Promise.resolve();
+      await flush();
     });
     expect(api.resizeWindow).toHaveBeenCalledWith('@1', null, 25);
     expect(screen.getByText('25 行')).toBeTruthy();
+    expect(windowBarProps().panes.find((pane) => pane.id === '%1')).toMatchObject({ height: 12 });
+    expect(terminal.flash).toHaveBeenCalledWith({ cols: 39, rows: 12 });
   });
 
   it('refreshes the pane dimensions from tmux before opening split management', async () => {
@@ -847,12 +855,25 @@ describe('App management dimensions', () => {
     expect(screen.getByRole('dialog', { name: '分屏管理，① zsh · %1' })).toBeTruthy();
     expect([...document.querySelectorAll('.sheet-size-control .settings-label')].map((label) => label.textContent))
       .toEqual(['窗格宽度', '窗格高度']);
+    expect(screen.getAllByRole('button', { name: /恢复分屏比例/ })).toHaveLength(2);
+    api.getPanes.mockResolvedValueOnce(gridPanes.map((pane) => (
+      pane.id === '%1' ? { ...pane, height: 13 } : pane
+    )));
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: '窗格高度 +1' }));
       await flush();
     });
     expect(api.resizePane).toHaveBeenCalledWith('%1', null, 13);
     expect(screen.getByText('13 行')).toBeTruthy();
+    expect(windowBarProps().panes.find((pane) => pane.id === '%1')).toMatchObject({ height: 13 });
+
+    const heightRestore = screen.getAllByRole('button', { name: /恢复分屏比例/ })[1];
+    if (!heightRestore) throw new Error('expected pane-height restore button');
+    await act(async () => {
+      fireEvent.click(heightRestore);
+      await flush();
+    });
+    expect(api.applyWindowLayout).toHaveBeenCalledWith('@1', '80x24,0,0{40x24,0,0,1,39x24,41,0,2}');
   });
 
   it('resizes the selected side-by-side pane and restores only its saved split ratio', async () => {
@@ -861,18 +882,22 @@ describe('App management dimensions', () => {
     expect(screen.getByRole('button', { name: /左右分屏/ }).closest('.sheet-row')).toBeNull();
     expect(screen.getByRole('button', { name: /上下分屏/ }).closest('.sheet-row')).toBeNull();
 
+    api.getPanes.mockResolvedValueOnce(stalePanes.map((pane) => (
+      pane.id === '%1' ? { ...pane, width: 40 } : pane
+    )));
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: '窗格宽度 +1' }));
-      await Promise.resolve();
-      await Promise.resolve();
+      await flush();
     });
     expect(api.getWindowLayout).toHaveBeenCalledWith('@1');
     expect(api.resizePane).toHaveBeenCalledWith('%1', 40, undefined);
 
+    api.getPanes.mockResolvedValueOnce(stalePanes.map((pane) => (
+      pane.id === '%1' ? { ...pane, width: 41 } : pane
+    )));
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: '窗格宽度 +1' }));
-      await Promise.resolve();
-      await Promise.resolve();
+      await flush();
     });
     expect(api.getWindowLayout).toHaveBeenCalledOnce();
     expect(api.resizePane).toHaveBeenLastCalledWith('%1', 41, undefined);

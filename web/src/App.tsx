@@ -1706,9 +1706,26 @@ export default function App() {
         // supplied by the Drawer so WindowBar switches can render panes immediately.
         return old?.paneList && !window.paneList ? { ...window, paneList: old.paneList } : window;
       });
-      return { ...c, windows: nextWindows };
+      return {
+        ...c,
+        windows: nextWindows,
+        window: nextWindows.find((window) => window.id === c.window.id) || c.window,
+      };
     });
   }, []);
+
+  const refreshWindowGeometry = useCallback(async (windowId: string, sessionId: string) => {
+    const [windows, panes] = await Promise.all([getWindows(sessionId), getPanes(windowId)]);
+    refreshWindows(sessionId, windows);
+    refreshPanes(windowId, panes);
+    const freshWindow = windows.find((window) => window.id === windowId);
+    if (freshWindow) {
+      setManageWindow((managed) => managed?.id === windowId
+        ? { ...managed, ...freshWindow, panes: panes.length, paneList: panes.map((pane) => ({ ...pane })) }
+        : managed);
+    }
+    return { window: freshWindow, panes, windows };
+  }, [refreshPanes, refreshWindows]);
 
   // Persist automatic pane replacement as well as explicit navigation. Without this, a reload after an
   // externally closed pane would briefly retry the same stale id before the topology poll corrected it.
@@ -1802,21 +1819,29 @@ export default function App() {
     if (!win || !Number.isFinite(displayedSize)) return;
     const size = axis === 'width' ? clampCols(displayedSize + delta) : clampRows(displayedSize + delta);
     setManagedWindowDimension(win.id, axis, size);
-    if (current?.window?.id === win.id) termRef.current?.flash?.();
     setWindowResizePending((count) => count + 1);
     try {
       await resizeWindow(win.id, axis === 'width' ? size : null, axis === 'height' ? size : null);
+      const sessionId = win.manageSessionId ?? current?.session?.id;
+      if (sessionId) {
+        const { panes } = await refreshWindowGeometry(win.id, sessionId);
+        if (current?.window?.id === win.id) {
+          const pane = panes.find((item) => item.id === current.paneId);
+          termRef.current?.flash?.(pane?.width != null && pane.height != null
+            ? { cols: pane.width, rows: pane.height }
+            : undefined);
+        }
+      }
     } catch (e) {
       if (handledAuth(e)) return;
       try {
         const sessionId = win.manageSessionId ?? current?.session?.id;
         if (!sessionId) return;
-        const windows = await getWindows(sessionId);
-        const fresh = windows.find((item) => item.id === win.id);
+        const { window: fresh } = await refreshWindowGeometry(win.id, sessionId);
         if (fresh?.[axis] !== undefined) setManagedWindowDimension(win.id, axis, fresh[axis]!);
       } catch (refreshError) { handledAuth(refreshError); }
     } finally { setWindowResizePending((count) => Math.max(0, count - 1)); }
-  }, [manageWindow, current?.window?.id, current?.session?.id, handledAuth, setManagedWindowDimension]);
+  }, [manageWindow, current, handledAuth, refreshWindowGeometry, setManagedWindowDimension]);
 
   const resizeManagedWindowCols = useCallback((delta: number, cols: number) =>
     resizeManagedWindowDimension('width', delta, cols), [resizeManagedWindowDimension]);
@@ -1830,20 +1855,20 @@ export default function App() {
     if (!win || !sessionId) return;
     try {
       await restoreWindowSize(win.id);
-      const windows = await getWindows(sessionId);
-      const fresh = windows.find((item) => item.id === win.id);
-      if (current?.session?.id === sessionId) {
-        setCurrent((state) => {
-          if (!state || state.session.id !== sessionId) return state;
-          return { ...state, windows, window: windows.find((item) => item.id === state.window.id) || state.window };
-        });
-      }
+      const { window: fresh, panes, windows } = await refreshWindowGeometry(win.id, sessionId);
       if (fresh && sessionName) {
-        setManageWindow(managedWindow(hostWindow(fresh), { id: sessionId, name: sessionName }, windows.map(hostWindow)));
+        setManageWindow(managedWindow({ ...hostWindow(fresh), panes: panes.length, paneList: panes.map((pane) => ({ ...pane })) },
+          { id: sessionId, name: sessionName }, windows.map(hostWindow)));
+      }
+      if (current?.window?.id === win.id) {
+        const pane = panes.find((item) => item.id === current.paneId);
+        termRef.current?.flash?.(pane?.width != null && pane.height != null
+          ? { cols: pane.width, rows: pane.height }
+          : undefined);
       }
       setDrawerWindowOrderVersion((version) => version + 1);
     } catch (e) { handledAuth(e); }
-  }, [manageWindow, current?.session?.id, handledAuth]);
+  }, [manageWindow, current, handledAuth, refreshWindowGeometry]);
 
   const resizeManagedPaneDimension = useCallback(async (axis: 'width' | 'height', delta: number, displayedValue: number) => {
     const windowId = current?.window?.id;
@@ -1853,7 +1878,6 @@ export default function App() {
     const size = axis === 'width' ? clampCols(displayedValue + delta) : clampRows(displayedValue + delta);
     if (axis === 'width') setManagedPaneWidth(size);
     else setManagedPaneHeight(size);
-    termRef.current?.flash?.();
     setPaneResizePending((count) => count + 1);
     try {
       let saved = savedLayoutsRef.current.get(windowId);
@@ -1874,6 +1898,15 @@ export default function App() {
         savedLayoutsRef.current.delete(windowId);
       }
       await resizePane(pane.id, axis === 'width' ? size : null, axis === 'height' ? size : undefined);
+      const panes = await getPanes(windowId);
+      refreshPanes(windowId, panes);
+      const freshPane = panes.find((item) => item.id === pane.id);
+      setManagedPaneWidth(freshPane?.width ?? null);
+      setManagedPaneHeight(freshPane?.height ?? null);
+      if (current.window.id === windowId && pane.id === current.paneId
+        && freshPane?.width != null && freshPane.height != null) {
+        termRef.current?.flash?.({ cols: freshPane.width, rows: freshPane.height });
+      }
     } catch (e) {
       if (handledAuth(e)) return;
       try {
@@ -1905,10 +1938,14 @@ export default function App() {
       const restoredPane = panes.find((item) => item.id === managePane);
       setManagedPaneWidth(restoredPane?.width ?? null);
       setManagedPaneHeight(restoredPane?.height ?? null);
+      const currentPane = panes.find((item) => item.id === current?.paneId);
+      if (current?.window?.id === windowId && currentPane?.width != null && currentPane.height != null) {
+        termRef.current?.flash?.({ cols: currentPane.width, rows: currentPane.height });
+      }
       savedLayoutsRef.current.delete(windowId);
       setPaneLayoutRestoreReady(false);
     } catch (e) { handledAuth(e); }
-  }, [current?.window?.id, managePane, refreshPanes, handledAuth]);
+  }, [current, managePane, refreshPanes, handledAuth]);
 
   // Split `paneId` into two (dir 'h' left|right, 'v' top/bottom); jump the phone to the new pane. The
   // decision logic (call the api, refetch, pick the new pane) lives in paneActions.js — unit-tested there.
@@ -3475,11 +3512,9 @@ export default function App() {
             cols={managedPaneHeight ?? 0}
             unit="resize.rows"
             onAdjust={resizeManagedPaneRows}
-            {...(!showManagedPaneWidth ? {
-              onRestore: restoreManagedPaneLayout,
-              restoreLabel: t('resize.restoreRatio'),
-              restoreDisabled: !paneLayoutRestoreReady || paneResizePending > 0,
-            } : {})}
+            onRestore={restoreManagedPaneLayout}
+            restoreLabel={t('resize.restoreRatio')}
+            restoreDisabled={!paneLayoutRestoreReady || paneResizePending > 0}
           />
         )}
       </ActionSheet>
