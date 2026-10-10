@@ -19,6 +19,18 @@ beforeEach(() => { render.mockClear(); initialize.mockClear(); document.body.inn
 
 const FENCE = '```mermaid\ngraph TD\n  A[开始] --> B[结束]\n```';
 
+function wrapCodeBlocks(root) {
+  for (const pre of root.querySelectorAll('pre')) {
+    const shell = document.createElement('div');
+    shell.className = `doc-code-block${pre.classList.contains('md-mermaid-source') ? ' md-mermaid-source' : ''}`;
+    const scroller = document.createElement('div');
+    scroller.className = 'doc-code-scroll';
+    pre.replaceWith(shell);
+    shell.append(scroller);
+    scroller.append(pre);
+  }
+}
+
 describe('mermaid fences in the pipeline', () => {
   it('keeps the source hidden and adds a placeholder (doc mode)', () => {
     const html = renderMarkdown(FENCE, { baseDir: '/d' });
@@ -55,6 +67,7 @@ describe('the loader', () => {
     const md = document.createElement('div');
     md.className = 'doc-md';
     md.innerHTML = renderMarkdown(FENCE, { baseDir: '/d' });
+    wrapCodeBlocks(md);
     document.body.append(md);
 
     const Probe = () => {
@@ -68,6 +81,7 @@ describe('the loader', () => {
 
     expect(initialize).toHaveBeenCalled();
     expect(render).toHaveBeenCalledTimes(1);
+    expect(render.mock.calls[0][1]).toContain('graph TD');
     const block = md.querySelector('.md-mermaid');
     expect(block.classList.contains('is-loading')).toBe(false);
     expect(block.querySelector('svg')).not.toBeNull();
@@ -78,6 +92,7 @@ describe('the loader', () => {
     const md = document.createElement('div');
     md.className = 'doc-md';
     md.innerHTML = renderMarkdown(FENCE, { baseDir: '/d' });
+    wrapCodeBlocks(md);
     document.body.append(md);
     const Probe = () => {
       const ref = { current: md };
@@ -91,6 +106,7 @@ describe('the loader', () => {
     expect(md.querySelector('.md-mermaid')).toBeNull();
     const pre = md.querySelector('pre');
     expect(pre.classList.contains('md-mermaid-source')).toBe(false); // shown again
+    expect(pre.closest('.doc-code-block').classList.contains('md-mermaid-source')).toBe(false);
     expect(md.querySelector('.md-mermaid-error').textContent).toContain('bad diagram');
   });
 });

@@ -2,9 +2,9 @@
 // tapping it copies that block's plain text (what the reader sees — no gutter, no line numbers) and
 // briefly swaps the icon for a check mark.
 //
-// Buttons are added in a DOM pass after render (same pattern as the inline-image loader) because the
-// markdown HTML is injected wholesale, and they are absolutely positioned so the code text cannot
-// reflow. A tap on a button bubbles into the document's tap-to-read handler, which only reacts to
+// The markdown HTML is injected wholesale, so code blocks are wrapped in a DOM pass after render. The
+// button sits beside the inner horizontal scroller, keeping it pinned while the code moves. A tap on a
+// button bubbles into the document's tap-to-read handler, which only reacts to
 // sentence spans, but the handler stops propagation anyway to keep the two features independent.
 import { useEffect, useRef } from 'react';
 import type { RefObject } from 'react';
@@ -29,7 +29,13 @@ export function useDocCodeCopy(
     if (!root || !enabled) return undefined;
     const blocks = Array.from(root.querySelectorAll<HTMLPreElement>('pre'));
     const buttons: HTMLButtonElement[] = [];
+    const shells: Array<{ pre: HTMLPreElement; shell: HTMLDivElement }> = [];
     blocks.forEach((pre) => {
+      const shell = document.createElement('div');
+      shell.className = 'doc-code-block';
+      if (pre.classList.contains('md-mermaid-source')) shell.classList.add('md-mermaid-source');
+      const scroller = document.createElement('div');
+      scroller.className = 'doc-code-scroll';
       const button = document.createElement('button');
       button.type = 'button';
       button.className = 'doc-code-copy chat-copy-ignore';
@@ -49,12 +55,20 @@ export function useDocCodeCopy(
           }, 1600);
         });
       });
-      pre.appendChild(button);
+      pre.replaceWith(shell);
+      shell.append(scroller, button);
+      scroller.append(pre);
       buttons.push(button);
+      shells.push({ pre, shell });
     });
     return () => {
       if (resetTimer.current !== null) clearTimeout(resetTimer.current);
       buttons.forEach((button) => button.remove());
+      shells.forEach(({ pre, shell }) => {
+        if (!shell.parentNode) return;
+        shell.before(pre);
+        shell.remove();
+      });
     };
   }, [html, enabled, rootRef]);
 }

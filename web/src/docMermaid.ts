@@ -33,22 +33,29 @@ export function prepareMermaid(root: HTMLElement): void {
   }
 }
 
-/** The source of the diagram a placeholder belongs to (the hidden <pre> right before it). */
+/** The source remains the preceding <pre>, directly or inside the code-copy shell. */
+function sourcePreOf(block: HTMLElement): HTMLElement | null {
+  const previous = block.previousElementSibling;
+  if (previous instanceof HTMLElement && previous.matches('pre')) return previous;
+  return previous?.querySelector<HTMLElement>('.doc-code-scroll > pre') ?? null;
+}
+
 function sourceOf(block: HTMLElement): string {
-  const pre = block.previousElementSibling;
-  return pre?.querySelector('code')?.textContent ?? '';
+  return sourcePreOf(block)?.querySelector('code')?.textContent ?? '';
 }
 
 function revealSource(block: HTMLElement, reason: string): void {
-  const pre = block.previousElementSibling;
+  const pre = sourcePreOf(block);
   if (pre instanceof HTMLElement) pre.classList.remove(SOURCE_HIDDEN_CLASS);
+  const shell = pre?.closest<HTMLElement>('.doc-code-block');
+  shell?.classList.remove(SOURCE_HIDDEN_CLASS);
   block.remove();
   if (!(pre instanceof HTMLElement)) return;
   const note = document.createElement('div');
   note.className = 'md-mermaid-error';
   note.setAttribute('data-tts-skip', '');
   note.textContent = t('doc.mermaidFailedDetails', { reason }); // full-width parens only in CJK
-  pre.after(note);
+  (shell ?? pre).after(note);
 }
 
 let diagramSeq = 0;

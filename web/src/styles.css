@@ -2803,9 +2803,14 @@ button.cmd-text { background: none; border: none; text-align: left; }
   text-align: left; touch-action: manipulation; }
 .doc-info-action:active { background: #3d4047; }
 .doc-info-action svg { width: 15px; height: 15px; flex: none; }
-/* Per-code-block copy — pinned to the top-right corner, absolutely positioned so the code text cannot
-   reflow (the pre is the positioning context). Visually small on purpose: the tap area is widened by a
-   transparent ::after instead of a big visible box. */
+/* The copy control is outside the inner horizontal scroller, so it stays pinned to the visible
+   top-right while long code is scrolled sideways. */
+.doc-code-block { position: relative; max-width: 100%; }
+.doc-code-scroll { max-width: 100%; overflow: auto; -webkit-overflow-scrolling: touch; }
+.doc-code-scroll > pre { box-sizing: border-box; width: max-content; min-width: 100%; max-width: none;
+  margin: 0; overflow: visible; white-space: pre; }
+.doc-code-block.md-mermaid-source { display: none; }
+/* Visually small on purpose: the tap area is widened by a transparent ::after instead of a big visible box. */
 .doc-code-copy { position: absolute; top: 4px; right: 4px; z-index: 1; display: inline-flex;
   align-items: center; justify-content: center; width: 26px; height: 26px; padding: 0; border: 0;
   border-radius: 6px; background: rgba(255,255,255,.06); color: #9fb0c0; touch-action: manipulation;
@@ -2904,7 +2909,9 @@ button.cmd-text { background: none; border: none; text-align: left; }
 .doc-md > *:first-child { margin-top: 0; }
 .doc-md > *:last-child { margin-bottom: 0; }  /* no trailing gap before the scroll end */
 .doc-md hr { border: 0; border-top: 1px solid #1d2630; margin: 1.4em 0; }
-.doc-md pre { background: #11161d; padding: 12px; border-radius: 8px; overflow: auto; position: relative; }
+.doc-md .doc-code-block { margin: 1em 0; }
+.doc-md .doc-code-scroll { background: #11161d; border-radius: 8px; }
+.doc-md .doc-code-scroll > pre { background: transparent; padding: 12px; }
 .doc-md pre code { background: none; padding: 0; }
 .doc-md code { background: #11161d; padding: 1px 4px; border-radius: 4px;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: .92em; }
@@ -3897,7 +3904,9 @@ button.cmd-text { background: none; border: none; text-align: left; }
 .chat-md blockquote p { margin: .4em 0; }
 .chat-md input[type="checkbox"] { margin-right: 6px; vertical-align: middle; }
 .chat-md code { background: var(--ct-code-bg); padding: 1px 4px; border-radius: 4px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: .92em; }
-.chat-md pre { position: relative; background: var(--ct-code-bg); padding: 10px 40px 10px 10px; border-radius: 8px; margin: 0 0 .5333333333333333em; overflow-x: auto; -webkit-overflow-scrolling: touch; max-width: 100%; }
+.chat-md .doc-code-block { margin: 0 0 .5333333333333333em; }
+.chat-md .doc-code-scroll { background: var(--ct-code-bg); border-radius: 8px; }
+.chat-md .doc-code-scroll > pre { background: transparent; padding: 10px; }
 .chat-md pre code { background: none; padding: 0; }
 .chat-md table { border-collapse: collapse; margin: 0 0 .5333333333333333em; }
 .chat-md th, .chat-md td { border: 1px solid var(--ct-line); padding: 4px 8px; text-align: left; white-space: nowrap; }

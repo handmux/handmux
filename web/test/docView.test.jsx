@@ -404,6 +404,8 @@ describe('DocView P1 document features', () => {
     await flush();
     const buttons = [...container.querySelectorAll('.doc-code-copy')];
     expect(buttons).toHaveLength(2);
+    expect(buttons[0].parentElement.classList.contains('doc-code-block')).toBe(true);
+    expect(buttons[0].previousElementSibling.classList.contains('doc-code-scroll')).toBe(true);
     await click(buttons[0]);
     expect(written).toEqual(['echo hello\n']);
     expect(container.querySelector('[aria-label="朗读"]')).not.toBeNull(); // never entered read-aloud

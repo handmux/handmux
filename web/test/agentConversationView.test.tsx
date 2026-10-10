@@ -2822,6 +2822,8 @@ describe('generic Agent Conversation UI', () => {
       const button = container.querySelector('.chat-them .doc-code-copy') as HTMLButtonElement;
       expect(button).toBeTruthy();
       expect(button.classList.contains('chat-copy-ignore')).toBe(true);
+      expect(button.parentElement?.classList.contains('doc-code-block')).toBe(true);
+      expect(button.previousElementSibling?.classList.contains('doc-code-scroll')).toBe(true);
       fireEvent.click(button);
       await act(async () => { await Promise.resolve(); });
 
