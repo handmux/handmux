@@ -81,4 +81,19 @@ describe('real xterm desktop navigation keys', () => {
       expect(data.join(''), `${JSON.stringify(modifiers)}+${key}`).toBe(sequence);
     }
   });
+
+  it('uses application-mode Home and End sequences when a full-screen app enables them', async () => {
+    const host = document.createElement('div');
+    document.body.append(host);
+    const term = new TerminalCtor({ allowProposedApi: true });
+    terminals.push(term);
+    term.open(host);
+    await new Promise<void>((resolve) => term.write('\x1b[?1h', resolve));
+    const helper = host.querySelector<HTMLTextAreaElement>('.xterm-helper-textarea')!;
+    const data: string[] = [];
+    term.onData((value) => data.push(value));
+    press(helper, 'Home');
+    press(helper, 'End');
+    expect(data).toEqual(['\x1bOH', '\x1bOF']);
+  });
 });
