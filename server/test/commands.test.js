@@ -242,7 +242,7 @@ describe('tmux commands (integration)', () => {
     expect(output).toContain('e4bda0e5a5bd0d');
   }, 15_000);
 
-  it('sendHexInput lets interactive programs handle arrow, backspace and delete keys', async () => {
+  it('sendHexInput lets interactive programs handle navigation and edit keys', async () => {
     if (!hasTmux) return;
     const session = (await listSessions()).find((candidate) => candidate.name === SES);
     const window = (await listWindows(session.id))[0];
@@ -275,6 +275,67 @@ describe('tmux commands (integration)', () => {
         screen = await capturePane(pane, 20);
       }
       expect(screen).toContain('KEYTEST:a ');
+
+      await sendHexInput(pane, '6263'); // append bc
+      await sendHexInput(pane, '1b5b48'); // Home
+      await sendHexInput(pane, '58'); // X at beginning
+      for (let attempt = 0; attempt < 30 && !screen.includes('KEYTEST:Xabc'); attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        screen = await capturePane(pane, 20);
+      }
+      expect(screen).toContain('KEYTEST:Xabc');
+
+      await sendHexInput(pane, '1b5b46'); // End
+      await sendHexInput(pane, '59'); // Y at end
+      for (let attempt = 0; attempt < 30 && !screen.includes('KEYTEST:XabcY'); attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        screen = await capturePane(pane, 20);
+      }
+      expect(screen).toContain('KEYTEST:XabcY');
+    } finally {
+      try { await execFile('tmux', ['kill-pane', '-t', pane]); } catch {}
+    }
+  }, 10_000);
+
+  it('sendHexInput preserves common navigation sequences through tmux', async () => {
+    if (!hasTmux) return;
+    const session = (await listSessions()).find((candidate) => candidate.name === SES);
+    const window = (await listWindows(session.id))[0];
+    const sequences = [
+      '1b5b48', '1b5b46', // Home, End
+      '1b5b357e', '1b5b367e', // PageUp, PageDown
+      '1b5b327e', '1b5b337e', // Insert, Delete
+      '1b5b41', '1b5b42', '1b5b43', '1b5b44', // arrows
+      '7f', '09', '1b', // Backspace, Tab, Escape
+    ];
+    const expected = sequences.join('');
+    const recorderSource = [
+      'process.stdin.setRawMode(true);process.stdin.resume();',
+      'process.stdout.write("NAV_READY\\n");',
+      'const parts=[];let length=0;',
+      'process.stdin.on("data",data=>{parts.push(data);length+=data.length;',
+      `if(length>=${expected.length / 2}){process.stdout.write("NAV_OK:"+(Buffer.concat(parts).toString("hex")==="${expected}")+"\\n");`,
+      'process.stdin.pause();setInterval(()=>{},1000)}});',
+    ].join('');
+    const command = `node -e "eval(Buffer.from('${Buffer.from(recorderSource).toString('base64')}',`
+      + "'base64').toString())\"";
+    const { stdout } = await execFile('tmux', [
+      'split-window', '-d', '-P', '-F', '#{pane_id}', '-t', window.id, command,
+    ]);
+    const pane = stdout.trim();
+    try {
+      let screen = '';
+      for (let attempt = 0; attempt < 30 && !screen.includes('NAV_READY'); attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        screen = await capturePane(pane, 20);
+      }
+      expect(screen).toContain('NAV_READY');
+      for (const sequence of sequences) await sendHexInput(pane, sequence);
+      for (let attempt = 0; attempt < 30 && !screen.includes('NAV_OK:'); attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        screen = await capturePane(pane, 20);
+      }
+      expect(screen).toContain('NAV_OK:true');
     } finally {
       try { await execFile('tmux', ['kill-pane', '-t', pane]); } catch {}
     }
