@@ -9,6 +9,7 @@ import type { ConversationRestartReceipt } from '../agentConversationRestartApi.
 import type { AgentRunRef } from '../agentCatalog.js';
 import { ApiError, UnauthorizedError } from '../apiErrors.js';
 import { backoffDelay } from '../backoff.js';
+import { manualConversationRestartRecovery } from '../agents/restartRecovery.js';
 
 export type ConversationRestartRecoveryView = Omit<ConversationRestartReceipt, 'operationId' | 'state'> & {
   operationId?: string;
@@ -24,19 +25,29 @@ export interface ConversationRestartController {
   retry(): void;
 }
 
-function manualRecovery(run: AgentRunRef): ConversationRestartRecoveryView | null {
-  const sessionId = run.sessionId;
-  if (!sessionId || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(sessionId)) {
-    return null;
-  }
-  return {
-    recovery: { kind: 'codex_resume', sessionId, command: `handmux codex resume ${sessionId}` },
-    phase: 'prepared', state: 'unknown', canResume: false,
-  };
-}
-
 function recoveryView(value: ConversationRestartReceipt): ConversationRestartRecoveryView {
   return value;
+}
+
+function receiptMatches(
+  value: ConversationRestartReceipt,
+  paneId: string,
+  agentId: string | null,
+  sessionId?: string | null,
+): boolean {
+  return value.paneId === paneId && (agentId === null || value.agentId === agentId)
+    && (!sessionId || value.recovery.sessionId === sessionId);
+}
+
+function sameRecoveryIdentity(
+  value: ConversationRestartReceipt,
+  previous: ConversationRestartRecoveryView,
+): boolean {
+  return value.agentId === previous.agentId && value.paneId === previous.paneId
+    && (!previous.operationId || value.operationId === previous.operationId)
+    && value.recovery.kind === previous.recovery.kind
+    && value.recovery.sessionId === previous.recovery.sessionId
+    && value.recovery.command === previous.recovery.command;
 }
 
 export function useConversationRestart(
@@ -44,6 +55,7 @@ export function useConversationRestart(
   enabled: boolean,
   onAuthFail?: () => void,
   activePaneId: string | null = run?.paneId ?? null,
+  expectedAgentId: string | null = run?.agentId ?? null,
 ): ConversationRestartController {
   const [status, setStatus] = useState<ConversationRestartController['status']>('idle');
   const [receipt, setReceipt] = useState<ConversationRestartRecoveryView | null>(null);
@@ -54,6 +66,7 @@ export function useConversationRestart(
   const paneInputRef = useRef<string | null>(enabled ? activePaneId : null);
   const enabledRef = useRef(enabled);
   const runRef = useRef(run);
+  const expectedAgentIdRef = useRef(expectedAgentId);
   const receiptRef = useRef(receipt);
   const authRef = useRef(onAuthFail);
   const operationRef = useRef<AbortController | null>(null);
@@ -61,6 +74,7 @@ export function useConversationRestart(
   const operationBusyRef = useRef(false);
   const staleRunLookupErrorRef = useRef<string | null>(null);
   runRef.current = run;
+  expectedAgentIdRef.current = expectedAgentId;
   receiptRef.current = receipt;
   authRef.current = onAuthFail;
   enabledRef.current = enabled;
@@ -92,7 +106,8 @@ export function useConversationRestart(
       try {
         const next = await getConversationRestartRecovery(activePaneId, controller.signal);
         if (controller.signal.aborted || generation.current !== requestGeneration) return;
-        if (!next || next.phase === 'ready') {
+        if (!next || !receiptMatches(next, activePaneId, expectedAgentId, runRef.current?.sessionId)
+          || next.phase === 'ready') {
           setReceipt(null);
           setError(null);
           setStatus('ready');
@@ -122,7 +137,7 @@ export function useConversationRestart(
       operationBusyRef.current = false;
       generation.current += 1;
     };
-  }, [activePaneId, enabled, retryKey]);
+  }, [activePaneId, enabled, expectedAgentId, run?.sessionId, retryKey]);
 
   useEffect(() => {
     if (!enabled || !activePaneId || status !== 'error' || !receipt) return undefined;
@@ -133,15 +148,18 @@ export function useConversationRestart(
       try {
         const next = await getConversationRestartRecovery(activePaneId, controller.signal);
         if (controller.signal.aborted || paneKey.current !== activePaneId) return;
-        if (next?.phase === 'ready') {
+        const previous = receiptRef.current;
+        const matching = next && receiptMatches(next, activePaneId, expectedAgentIdRef.current,
+          runRef.current?.sessionId) && (!previous || sameRecoveryIdentity(next, previous)) ? next : null;
+        if (matching?.phase === 'ready') {
           staleRunLookupErrorRef.current = null;
           setReceipt(null);
           setStatus('ready');
           return;
         }
-        if (next) {
+        if (matching) {
           staleRunLookupErrorRef.current = null;
-          setReceipt(recoveryView(next));
+          setReceipt(recoveryView(matching));
         } else if (staleRunLookupErrorRef.current) {
           const reason = staleRunLookupErrorRef.current;
           staleRunLookupErrorRef.current = null;
@@ -170,7 +188,7 @@ export function useConversationRestart(
   const restart = useCallback(async (): Promise<void> => {
     const activeRun = runRef.current;
     const activePane = paneKey.current;
-    if (!enabledRef.current || !activeRun || activeRun.agentId !== 'codex'
+    if (!enabledRef.current || !activeRun || activeRun.agentId !== expectedAgentIdRef.current
       || !activeRun.sessionId || !activePane || activeRun.paneId !== activePane
       || activePane !== paneInputRef.current || operationBusyRef.current) return;
     const requestGeneration = generation.current;
@@ -202,7 +220,8 @@ export function useConversationRestart(
           try {
             const pending = await getConversationRestartRecovery(activePane, controller.signal);
             if (controller.signal.aborted || generation.current !== requestGeneration) return;
-            if (pending && pending.phase !== 'ready') {
+            if (pending && receiptMatches(pending, activePane, activeRun.agentId)
+              && pending.phase !== 'ready') {
               setReceipt(recoveryView(pending));
               setError(null);
               setStatus('error');
@@ -211,7 +230,7 @@ export function useConversationRestart(
           } catch {
             if (controller.signal.aborted || generation.current !== requestGeneration) return;
             staleRunLookupErrorRef.current = cause.serverError || cause.message;
-            setReceipt(manualRecovery(activeRun));
+            setReceipt(manualConversationRestartRecovery(activeRun));
             setError(null);
             setStatus('error');
             return;
@@ -224,13 +243,17 @@ export function useConversationRestart(
       }
       let next = cause instanceof ApiError
         ? parseConversationRestartReceipt(cause.recoveryPayload) : null;
+      if (next && !receiptMatches(next, activePane, activeRun.agentId)) next = null;
       if (!next) {
-        try { next = await getConversationRestartRecovery(activePane, controller.signal); }
+        try {
+          const pending = await getConversationRestartRecovery(activePane, controller.signal);
+          next = pending && receiptMatches(pending, activePane, activeRun.agentId) ? pending : null;
+        }
         catch { /* A read-only retry below will keep checking while the copy-only guide remains visible. */ }
       }
       if (controller.signal.aborted || generation.current !== requestGeneration) return;
       setError(null);
-      setReceipt(next ? recoveryView(next) : manualRecovery(activeRun));
+      setReceipt(next ? recoveryView(next) : manualConversationRestartRecovery(activeRun));
       setStatus('error');
     } finally {
       if (operationRef.current === controller) operationRef.current = null;
@@ -257,6 +280,7 @@ export function useConversationRestart(
     try {
       const next = await recoverConversationRestart(activePane, current.operationId, controller.signal);
       if (controller.signal.aborted || generation.current !== requestGeneration) return;
+      if (!sameRecoveryIdentity(next, current)) throw new Error('Conversation recovery identity changed');
       if (next.phase === 'ready') {
         setReceipt(null);
         setStatus('ready');
@@ -269,8 +293,14 @@ export function useConversationRestart(
       if (cause instanceof UnauthorizedError) authRef.current?.();
       let next = cause instanceof ApiError
         ? parseConversationRestartReceipt(cause.recoveryPayload) : null;
+      if (next && (!receiptMatches(next, activePane, expectedAgentIdRef.current)
+        || !sameRecoveryIdentity(next, current))) next = null;
       if (!next) {
-        try { next = await getConversationRestartRecovery(activePane, controller.signal); }
+        try {
+          const pending = await getConversationRestartRecovery(activePane, controller.signal);
+          next = pending && receiptMatches(pending, activePane, expectedAgentIdRef.current)
+            && sameRecoveryIdentity(pending, current) ? pending : null;
+        }
         catch { /* Keep the existing command available even when the server is still reconnecting. */ }
       }
       if (controller.signal.aborted || generation.current !== requestGeneration) return;

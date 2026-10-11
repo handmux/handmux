@@ -3,7 +3,7 @@ import type { AgentRunRef } from '../agentCatalog.js';
 import type { AgentConversationActivationController } from '../hooks/useAgentConversationActivation.js';
 import { t } from '../i18n';
 import { BotIcon } from './icons.jsx';
-import CodexRecoveryCommand from './CodexRecoveryCommand.js';
+import RecoveryCommand from './RecoveryCommand.js';
 
 const TERMINAL_HINT_MS = 30_000;
 
@@ -77,7 +77,7 @@ export default function CodexManagedGuide({
         && controller.recovery && (
         <div className="codex-managed-guide-recovery">
           <span>{t('chat.managedGuide.recoveryHint')}</span>
-          <CodexRecoveryCommand command={controller.recovery.command} />
+          <RecoveryCommand command={controller.recovery.command} />
         </div>
       )}
       {!starting && !timedOut && !paneGone && (

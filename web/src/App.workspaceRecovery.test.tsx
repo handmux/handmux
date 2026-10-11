@@ -652,6 +652,19 @@ describe('App established conversation during server restart', () => {
     expect(screen.queryByText('无法确定是否完成')).toBeNull();
     expect(screen.getByPlaceholderText('和 Agent 对话…')).toBeTruthy();
   });
+
+  it('does not let an old restart receipt replace a newly verified live conversation', async () => {
+    restartHook.result = { status: 'ready', receipt: {
+      agentId: 'codex', paneId: pane.id, operationId: 'a'.repeat(64),
+      phase: 'stopped', state: 'current', canResume: true,
+      recovery: { kind: 'codex_resume', sessionId: 'session-1', command: 'handmux codex resume session-1' },
+    }, restart: vi.fn(async () => {}), recover: vi.fn(async () => {}), retry: vi.fn() };
+    await openConversation();
+
+    expect(screen.getByText('Saved answer session-1')).toBeTruthy();
+    expect(screen.queryByText('无法确定是否完成')).toBeNull();
+    expect(screen.getByPlaceholderText('和 Agent 对话…')).toBeTruthy();
+  });
 });
 
 describe('App live tmux topology recovery', () => {

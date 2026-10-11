@@ -7,7 +7,7 @@ import {
 } from '../agentConversationActivationApi.js';
 import AgentConversationActivationGuide from '../components/AgentConversationActivationGuide.js';
 import CodexManagedGuide from '../components/CodexManagedGuide.js';
-import CodexActivationRecoveryGuide from '../components/CodexActivationRecoveryGuide.js';
+import ConversationRecoveryGuide from '../components/ConversationRecoveryGuide.js';
 import { useConversationActivationTarget } from '../conversationActivationTarget.js';
 import { useAgentConversationActivation } from './useAgentConversationActivation.js';
 
@@ -352,7 +352,7 @@ describe('CodexManagedGuide', () => {
   });
 });
 
-describe('CodexActivationRecoveryGuide', () => {
+describe('ConversationRecoveryGuide', () => {
   const recovery = {
     kind: 'codex_resume' as const,
     sessionId: '12345678-1234-1234-1234-123456789abc',
@@ -370,12 +370,12 @@ describe('CodexActivationRecoveryGuide', () => {
       recover,
       retry: vi.fn(),
     };
-    const { rerender } = render(<CodexActivationRecoveryGuide controller={base}
+    const { rerender } = render(<ConversationRecoveryGuide controller={base}
       onTerminal={() => {}} />);
     fireEvent.click(screen.getByRole('button', { name: '继续恢复' }));
     expect(recover).toHaveBeenCalledOnce();
 
-    rerender(<CodexActivationRecoveryGuide controller={{
+    rerender(<ConversationRecoveryGuide controller={{
       ...base,
       receipt: { ...base.receipt, state: 'stale', canResume: false },
     }} onTerminal={() => {}} />);

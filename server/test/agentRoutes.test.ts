@@ -267,9 +267,10 @@ describe('Agent app facade routes', () => {
       .expect(202, { accepted: true, recovery });
   });
 
-  it('serves restart receipts only for a current Codex run with a session id', async () => {
+  it('routes any current run to the restart capability and leaves support decisions to the service', async () => {
     const h = runtime();
     const receipt = {
+      agentId: 'codex', paneId: '%1',
       operationId: 'a'.repeat(64),
       recovery: {
         kind: 'codex_resume' as const,
@@ -309,8 +310,9 @@ describe('Agent app facade routes', () => {
     await request(app(supported)).post('/agents/conversation-restart')
       .send({ run: codexRun })
       .expect(200, { receipt });
-    expect(restart).toHaveBeenCalledOnce();
-    expect(restart.mock.calls[0]?.[0]).toBe(codexLease);
+    expect(restart).toHaveBeenCalledTimes(2);
+    expect(restart.mock.calls[0]?.[0]).toBe(h.lease);
+    expect(restart.mock.calls[1]?.[0]).toBe(codexLease);
 
     await request(app(supported)).get('/agents/conversation-restart-recovery')
       .query({ paneId: '1' }).expect(400, { error: 'invalid conversation recovery pane' });

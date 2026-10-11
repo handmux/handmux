@@ -10,6 +10,7 @@ import type {
 import {
   ConversationRestartError,
   type AgentConversationRestartControllerV1,
+  type ConversationRestartRecovery,
   type ConversationRestartReceipt,
 } from '../agent-runtime/conversationRestart.js';
 import { serializePaneInput } from '../paneInput.js';
@@ -218,6 +219,11 @@ function recoveryOf(receipt: CodexRestartReceipt) {
   };
 }
 
+function validCodexRestartRecovery(value: ConversationRestartRecovery): boolean {
+  return value.kind === 'codex_resume' && isSessionUuid(value.sessionId)
+    && value.command === `handmux codex resume ${value.sessionId}`;
+}
+
 function stableRun(run: AgentRunLease, resolveRun: (ref: AgentRunRef) => AgentRunLease | null): boolean {
   return !run.signal.aborted && resolveRun(run.ref) === run;
 }
@@ -301,11 +307,18 @@ export function createCodexConversationRestartController({
   const managedTui = async (pane: LivePane, forSocket: string) => {
     const [foreground, group] = await Promise.all([freshForeground(pane), freshGroup(pane)]);
     if (!foreground) return null;
-    const tui = group.find((candidate) => candidate.pid === foreground.pid && isCodexTui(candidate, forSocket));
-    if (!tui || !sameIdentity(foreground, tui)) return null;
-    const parent = managedParent(group, tui, forSocket, 'tui');
-    if (!parent || !Number.isSafeInteger(parent.wrapper.ppid) || !parent.wrapper.startedAt) return null;
-    return { tui, ...parent };
+    const anchor = group.find((candidate) => candidate.pid === foreground.pid);
+    if (!anchor || !sameIdentity(foreground, anchor)) return null;
+    const matches = group.flatMap((tui) => {
+      if (!isCodexTui(tui, forSocket)) return [];
+      const parent = managedParent(group, tui, forSocket, 'tui');
+      if (!parent || !Number.isSafeInteger(parent.wrapper.ppid) || !parent.wrapper.startedAt) return [];
+      const servers = group.filter((candidate) => isCodexAppServer(candidate, forSocket)
+        && managedParent(group, candidate, forSocket, 'appServer')?.wrapper.pid === parent.wrapper.pid);
+      if (servers.length !== 1 || (!sameIdentity(anchor, tui) && !sameIdentity(anchor, servers[0]!))) return [];
+      return [{ tui, ...parent }];
+    });
+    return matches.length === 1 ? matches[0]! : null;
   };
   const inspectEvidence = async (run: AgentRunLease): Promise<RestartEvidence> => {
     const pane = await paneFor(run.ref.paneId);
@@ -323,28 +336,37 @@ export function createCodexConversationRestartController({
     if (!identity || !sameRunProcess(run.process, identity)) {
       throw new RestartFault('The Codex process changed; no process was stopped', 'stale_run');
     }
-    const target = group.find((candidate) => candidate.pid === identity.pid);
-    if (!target || !sameIdentity(identity, target) || !isCodexTui(target, socketPath(pane.paneId))) {
+    const anchor = group.find((candidate) => candidate.pid === identity.pid);
+    if (!anchor || !sameIdentity(identity, anchor)) {
       throw new RestartFault('The foreground Codex TUI cannot be verified as managed', 'unavailable');
     }
-    const parent = managedParent(group, target, socketPath(pane.paneId), 'tui');
-    const wrapper = parent?.wrapper;
-    if (!wrapper || !wrapper.startedAt || !wrapper.executable || !wrapper.commandLine
-      || !Number.isSafeInteger(wrapper.ppid)) {
-      throw new RestartFault('The Codex TUI is not a verified child of handmux codex', 'unavailable');
+    // The generic foreground selector may pick the older App Server sibling instead of the TUI.
+    // Accept that lease anchor only when one exact TUI and App Server pair shares this verified wrapper.
+    const matches: RestartEvidence[] = [];
+    for (const target of group) {
+      if (!isCodexTui(target, socketPath(pane.paneId))) continue;
+      const parent = managedParent(group, target, socketPath(pane.paneId), 'tui');
+      const wrapper = parent?.wrapper;
+      if (!parent || !wrapper?.startedAt || !wrapper.executable || !wrapper.commandLine
+        || !Number.isSafeInteger(wrapper.ppid)) continue;
+      const servers = group.filter((candidate) => isCodexAppServer(candidate, socketPath(pane.paneId))
+        && normTty(candidate.tty) === normTty(wrapper.tty)
+        && managedParent(group, candidate, socketPath(pane.paneId), 'appServer')?.wrapper.pid === wrapper.pid);
+      if (servers.length !== 1) continue;
+      const server = servers[0]!;
+      const serverParent = server ? managedParent(group, server, socketPath(pane.paneId), 'appServer') : null;
+      if (!server || !serverParent || !sameIdentity(wrapper, serverParent.wrapper)
+        || (!sameIdentity(anchor, target) && !sameIdentity(anchor, server))) continue;
+      matches.push({
+        pane, epoch, tui: target, wrapper, appServer: server,
+        ...(parent.shim ? { tuiShim: parent.shim } : {}),
+        ...(serverParent.shim ? { appServerShim: serverParent.shim } : {}),
+      });
     }
-    const server = group.find((candidate) => isCodexAppServer(candidate, socketPath(pane.paneId))
-      && normTty(candidate.tty) === normTty(wrapper.tty)
-      && managedParent(group, candidate, socketPath(pane.paneId), 'appServer')?.wrapper.pid === wrapper.pid);
-    const serverParent = server ? managedParent(group, server, socketPath(pane.paneId), 'appServer') : null;
-    if (!server || !serverParent || !sameIdentity(wrapper, serverParent.wrapper)) {
-      throw new RestartFault('The managed Codex App Server process cannot be verified', 'unavailable');
+    if (matches.length !== 1) {
+      throw new RestartFault('The managed Codex TUI and App Server pair cannot be verified uniquely', 'unavailable');
     }
-    return {
-      pane, epoch, tui: target, wrapper, appServer: server,
-      ...(parent.shim ? { tuiShim: parent.shim } : {}),
-      ...(serverParent.shim ? { appServerShim: serverParent.shim } : {}),
-    };
+    return matches[0]!;
   };
   const recordInput = (run: AgentRunLease, evidence: RestartEvidence): CodexRestartReceiptInput => {
     const tui = toStoredIdentity(evidence.tui);
@@ -390,6 +412,8 @@ export function createCodexConversationRestartController({
       }
     } catch { state = 'stale'; canResume = false; }
     return {
+      agentId: receipt.agentId,
+      paneId: receipt.pane.paneId,
       operationId: receipt.operationId,
       recovery,
       phase: receipt.phase,
@@ -496,6 +520,7 @@ export function createCodexConversationRestartController({
 
   return {
     apiVersion: 1,
+    validRecovery: validCodexRestartRecovery,
     async restart(run, signal): Promise<ConversationRestartReceipt> {
       if (run.ref.agentId !== 'codex') throw new ConversationRestartError(
         'Conversation restart is not supported for this Agent', 'unsupported',

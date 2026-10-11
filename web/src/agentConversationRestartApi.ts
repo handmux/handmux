@@ -2,9 +2,11 @@ import { requestJson } from './apiRequest.js';
 import type { AgentRunRef } from './agentCatalog.js';
 
 export interface ConversationRestartReceipt {
+  agentId: string;
+  paneId: string;
   operationId: string;
   recovery: {
-    kind: 'codex_resume';
+    kind: string;
     sessionId: string;
     command: string;
   };
@@ -12,8 +14,6 @@ export interface ConversationRestartReceipt {
   state: 'current' | 'stale';
   canResume: boolean;
 }
-
-const SESSION_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function record(value: unknown): Record<string, unknown> | null {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -23,10 +23,14 @@ function record(value: unknown): Record<string, unknown> | null {
 export function parseConversationRestartReceipt(value: unknown): ConversationRestartReceipt | null {
   const receipt = record(value);
   const recovery = record(receipt?.recovery);
-  if (!receipt || typeof receipt.operationId !== 'string' || !/^[0-9a-f]{64}$/.test(receipt.operationId)
-    || !recovery || recovery.kind !== 'codex_resume' || typeof recovery.sessionId !== 'string'
-    || !SESSION_ID_RE.test(recovery.sessionId)
-    || recovery.command !== `handmux codex resume ${recovery.sessionId}`
+  if (!receipt || typeof receipt.agentId !== 'string' || !/^[a-z][a-z0-9-]{0,63}$/.test(receipt.agentId)
+    || typeof receipt.paneId !== 'string' || !/^%\d+$/.test(receipt.paneId)
+    || typeof receipt.operationId !== 'string' || !/^[0-9a-f]{64}$/.test(receipt.operationId)
+    || !recovery || typeof recovery.kind !== 'string' || !/^[a-z][a-z0-9_]{0,63}$/.test(recovery.kind)
+    || typeof recovery.sessionId !== 'string' || !recovery.sessionId
+    || recovery.sessionId.length > 1_024
+    || typeof recovery.command !== 'string' || !recovery.command || recovery.command.length > 4_096
+    || /[\x00-\x1f\x7f]/.test(recovery.command)
     || !['prepared', 'stopped', 'resuming', 'ready'].includes(String(receipt.phase))
     || (receipt.state !== 'current' && receipt.state !== 'stale')
     || typeof receipt.canResume !== 'boolean'
@@ -35,9 +39,11 @@ export function parseConversationRestartReceipt(value: unknown): ConversationRes
     return null;
   }
   return {
+    agentId: receipt.agentId,
+    paneId: receipt.paneId,
     operationId: receipt.operationId,
     recovery: {
-      kind: 'codex_resume',
+      kind: recovery.kind,
       sessionId: recovery.sessionId,
       command: recovery.command as string,
     },
@@ -67,7 +73,10 @@ export async function restartConversation(
     ...(signal ? { signal } : {}),
   });
   const receipt = parseReceiptResponse(response);
-  if (!receipt) throw new Error('Conversation restart returned no receipt');
+  if (!receipt || receipt.agentId !== run.agentId || receipt.paneId !== run.paneId
+    || receipt.recovery.sessionId !== run.sessionId) {
+    throw new Error('Conversation restart returned a mismatched receipt');
+  }
   return receipt;
 }
 
@@ -79,7 +88,9 @@ export async function getConversationRestartRecovery(
     `/api/agents/conversation-restart-recovery?${new URLSearchParams({ paneId })}`,
     { timeoutMs: 8_000, ...(signal ? { signal } : {}) },
   );
-  return parseReceiptResponse(response);
+  const receipt = parseReceiptResponse(response);
+  if (receipt && receipt.paneId !== paneId) throw new Error('Conversation restart recovery pane changed');
+  return receipt;
 }
 
 export async function recoverConversationRestart(
@@ -92,6 +103,8 @@ export async function recoverConversationRestart(
     ...(signal ? { signal } : {}),
   });
   const receipt = parseReceiptResponse(response);
-  if (!receipt) throw new Error('Conversation restart recovery returned no receipt');
+  if (!receipt || receipt.paneId !== paneId || receipt.operationId !== operationId) {
+    throw new Error('Conversation restart recovery identity changed');
+  }
   return receipt;
 }

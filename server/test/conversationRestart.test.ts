@@ -9,6 +9,7 @@ import {
 import { createCodexConversationRestartController } from '../src/agents/codexConversationRestart.js';
 import { CodexRestartReceiptStore } from '../src/agents/codexRestartReceipt.js';
 import type { AgentRunLease } from '../src/agent-runtime/run.js';
+import type { AgentConversationRestartControllerV1, ConversationRestartReceipt } from '../src/agent-runtime/conversationRestart.js';
 import type { ForegroundProcessIdentity, LivePane } from '../src/agent-runtime/adapter.js';
 
 const SESSION_ID = '12345678-1234-1234-1234-123456789abc';
@@ -16,6 +17,99 @@ const EPOCH = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const HOME = '/home/test';
 const SOCKET = `${HOME}/.handmux/codex-app/1.sock`;
 const COMMAND = `handmux codex resume ${SESSION_ID}`;
+
+describe('shared conversation restart routing', () => {
+  const operationId = 'a'.repeat(64);
+  const receipt = (agentId: string): ConversationRestartReceipt => ({
+    agentId, paneId: '%1', operationId,
+    recovery: { kind: 'resume_command', sessionId: 'session-1', command: 'agent resume session-1' },
+    phase: 'stopped', state: 'current', canResume: true,
+  });
+  const controller = (agentId: string): AgentConversationRestartControllerV1 => ({
+    apiVersion: 1,
+    validRecovery: (value) => value.kind === 'resume_command'
+      && value.sessionId === 'session-1' && value.command === 'agent resume session-1',
+    restart: vi.fn(async () => receipt(agentId)),
+    recovery: vi.fn(async () => receipt(agentId)),
+    recover: vi.fn(async () => receipt(agentId)),
+  });
+
+  it('routes a supported non-Codex run and its shell-gap recovery by receipt identity', async () => {
+    const pi = controller('pi');
+    const codex = controller('codex');
+    codex.recovery = vi.fn(async () => null);
+    const service = new AgentConversationRestartService({ codex, pi });
+    const run = lease({ ref: { agentId: 'pi', paneId: '%1', runId: 'run-1', sessionId: 'session-1' } });
+    expect(await service.restart(run.value)).toEqual(receipt('pi'));
+    expect(await service.recovery('%1')).toEqual(receipt('pi'));
+    expect(await service.recover('%1', operationId)).toEqual(receipt('pi'));
+    expect(pi.recover).toHaveBeenCalledWith('%1', operationId, expect.any(AbortSignal));
+    expect(codex.recover).not.toHaveBeenCalled();
+  });
+
+  it('rejects ambiguous or mismatched recovery without dispatching a destructive command', async () => {
+    const first = controller('codex');
+    const second = controller('pi');
+    const service = new AgentConversationRestartService({ codex: first, pi: second });
+    await expect(service.recovery('%1')).rejects.toMatchObject({ code: 'unavailable' });
+    await expect(service.recover('%1', operationId)).rejects.toMatchObject({ code: 'unavailable' });
+    expect(first.recover).not.toHaveBeenCalled();
+    expect(second.recover).not.toHaveBeenCalled();
+    second.recovery = vi.fn(async () => ({ ...receipt('pi'), paneId: '%2' }));
+    await expect(service.recovery('%1')).rejects.toMatchObject({ code: 'unavailable' });
+  });
+
+  it('ignores completed receipts from a previous Agent and rejects an unknown Agent', async () => {
+    const codex = controller('codex');
+    codex.recovery = vi.fn(async () => ({ ...receipt('codex'), phase: 'ready' as const, canResume: false }));
+    const pi = controller('pi');
+    const service = new AgentConversationRestartService({ codex, pi });
+    expect(await service.recovery('%1')).toEqual(receipt('pi'));
+    expect(await service.recover('%1', operationId)).toEqual(receipt('pi'));
+    const unknown = lease({ ref: { agentId: 'new-agent', paneId: '%1', runId: 'run-1', sessionId: 'session-1' } });
+    await expect(service.restart(unknown.value)).rejects.toMatchObject({ code: 'unsupported' });
+  });
+
+  it('returns a completed receipt when it is the only recovery result, without allowing another resume', async () => {
+    const codex = controller('codex');
+    const ready = { ...receipt('codex'), phase: 'ready' as const, canResume: false };
+    codex.recovery = vi.fn(async () => ready);
+    const service = new AgentConversationRestartService({ codex });
+
+    await expect(service.recovery('%1')).resolves.toEqual(ready);
+    await expect(service.recover('%1', operationId)).rejects.toMatchObject({ code: 'unavailable' });
+    expect(codex.recover).not.toHaveBeenCalled();
+  });
+
+  it('does not publish a controller receipt for another session or an unvalidated native command', async () => {
+    const pi = controller('pi');
+    pi.restart = vi.fn(async () => ({ ...receipt('pi'), recovery: {
+      kind: 'resume_command', sessionId: 'different-session', command: 'agent resume session-1',
+    } }));
+    const service = new AgentConversationRestartService({ pi });
+    const run = lease({ ref: { agentId: 'pi', paneId: '%1', runId: 'run-1', sessionId: 'session-1' } });
+    await expect(service.restart(run.value)).rejects.toMatchObject({ code: 'unavailable' });
+    pi.restart = vi.fn(async () => ({ ...receipt('pi'), recovery: {
+      kind: 'resume_command', sessionId: 'session-1', command: 'different agent command',
+    } }));
+    await expect(service.restart(run.value)).rejects.toMatchObject({ code: 'unavailable' });
+  });
+
+  it('does not expose a changed command from a failed recovery with the same operation id', async () => {
+    const pi = controller('pi');
+    const changed = { ...receipt('pi'), recovery: {
+      kind: 'resume_command', sessionId: 'session-1', command: 'different agent command',
+    } };
+    pi.validRecovery = () => true;
+    pi.recover = vi.fn(async () => {
+      throw new ConversationRestartError('provider failed', 'unavailable', changed);
+    });
+    const service = new AgentConversationRestartService({ pi });
+    await expect(service.recover('%1', operationId)).rejects.toMatchObject({
+      code: 'unavailable', recovery: undefined,
+    });
+  });
+});
 
 function lease(overrides: Record<string, unknown> = {}) {
   const abort = new AbortController();
@@ -80,6 +174,7 @@ function npmCodexShimFixture() {
 function makeHarness(options: {
   processIdentity?: ForegroundProcessIdentity;
   processGroup?: readonly ForegroundProcessIdentity[];
+  runProcess?: AgentRunLease['process'];
   managed?: boolean | null;
   threadId?: string | null;
   paneEpoch?: string | null;
@@ -139,7 +234,7 @@ function makeHarness(options: {
   });
   const listPanes = vi.fn(async () => currentPane ? [structuredClone(currentPane)] : []);
   const paneEpoch = vi.fn(async () => epoch);
-  const run = lease();
+  const run = lease(options.runProcess ? { process: options.runProcess } : {});
   let runResolved = true;
   const resolveRun = vi.fn((ref) => ref.runId === 'run-1' && runResolved ? run.value : null);
   const controller = createCodexConversationRestartController({
@@ -192,6 +287,55 @@ function makeHarness(options: {
 }
 
 describe('Codex conversation restart', () => {
+  it('restarts the verified TUI when the older App Server was selected as foreground', async () => {
+    const h = makeHarness({
+      processIdentity: appServer(),
+      processGroup: [appServer(), tui(), wrapper()],
+      runProcess: { pid: 21, startedAt: 201, tty: '/dev/ttys001' },
+    });
+
+    const receipt = await h.service.restart(h.run.value);
+
+    expect(receipt.phase).toBe('ready');
+    expect(h.terminate).toHaveBeenCalledOnce();
+    expect(h.terminate).toHaveBeenCalledWith(10, 'SIGTERM');
+    expect(h.runPaneCommand).toHaveBeenCalledOnce();
+    expect(h.runPaneCommand).toHaveBeenCalledWith('%1', COMMAND);
+  });
+
+  it('recognizes readiness when the replacement App Server is selected as foreground', async () => {
+    let h!: ReturnType<typeof makeHarness>;
+    h = makeHarness({
+      processIdentity: appServer(),
+      processGroup: [appServer(), tui(), wrapper()],
+      runProcess: { pid: 21, startedAt: 201, tty: '/dev/ttys001' },
+      runtimeReady: async () => true,
+      runPaneCommand: async () => {
+        h.setIdentity(appServer({ pid: 51, ppid: 50, startedAt: 501 }));
+        h.setGroup([
+          appServer({ pid: 51, ppid: 50, startedAt: 501 }),
+          tui({ pid: 40, ppid: 50, startedAt: 400 }),
+          wrapper({ pid: 50, startedAt: 500 }),
+        ]);
+        h.setPane(pane('node'));
+        h.setApp({ managed: true, threadId: SESSION_ID });
+      },
+    });
+
+    const receipt = await h.service.restart(h.run.value);
+
+    expect(receipt.phase).toBe('ready');
+    expect(h.terminate).toHaveBeenCalledOnce();
+    expect(h.terminate).toHaveBeenCalledWith(10, 'SIGTERM');
+  });
+
+  it('refuses to stop Codex when two managed App Servers share the same wrapper and socket', async () => {
+    const h = makeHarness({ processGroup: [tui(), wrapper(), appServer(),
+      appServer({ pid: 24, startedAt: 204 })] });
+    await expect(h.service.restart(h.run.value)).rejects.toMatchObject({ code: 'not_started' });
+    expect(h.terminate).not.toHaveBeenCalled();
+  });
+
   it('restarts through both verified npm Codex shims and persists their generations', async () => {
     const { tuiShim, appServerShim } = npmCodexShimFixture();
     let h!: ReturnType<typeof makeHarness>;
@@ -626,6 +770,7 @@ describe('Codex conversation restart', () => {
     const observedSignals: AbortSignal[] = [];
     const controller = {
       apiVersion: 1 as const,
+      validRecovery: () => true,
       restart: vi.fn(async (_run: AgentRunLease, signal: AbortSignal) => {
         observedSignals.push(signal);
         await new Promise<void>((_resolve, reject) => {

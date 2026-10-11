@@ -141,6 +141,7 @@ describe('AgentRuntime composition root', () => {
       previousRunId: 'previous-run',
     });
     const expectedReceipt = {
+      agentId: 'codex', paneId: '%1',
       operationId: saved.operationId,
       recovery: {
         kind: 'codex_resume' as const,
@@ -153,7 +154,7 @@ describe('AgentRuntime composition root', () => {
     };
     const dispatch = vi.fn(async () => ({ outcome: 'accepted' as const }));
 
-    const createRuntime = (receipts: CodexRestartReceiptStore) => {
+    const createRuntime = (receipts: CodexRestartReceiptStore, validBinding = true) => {
       const panes = new TestPanes([]);
       const codexAdapter = adapter('codex', {
         conversation: { apiVersion: 1 }, conversationRestart: { apiVersion: 1 },
@@ -161,6 +162,10 @@ describe('AgentRuntime composition root', () => {
       codexAdapter.process = { commands: ['codex'], verify: async () => true };
       const restartController = {
         apiVersion: 1 as const,
+        validRecovery: (value: { kind: string; sessionId: string; command: string }) => (
+          value.kind === 'codex_resume' && value.sessionId === sessionId
+          && value.command === `handmux codex resume ${sessionId}`
+        ),
         restart: vi.fn(async () => expectedReceipt),
         recovery: vi.fn(async (paneId: string) => (
           receipts.latestForPane(paneId) ? expectedReceipt : null
@@ -199,7 +204,12 @@ describe('AgentRuntime composition root', () => {
             conversationActivity: { read: async () => ({
               activity: 'idle' as const, activeTurn: { state: 'none' as const },
             }) },
-            conversationRestart: restartController,
+            conversationRestart: validBinding ? restartController : {
+              apiVersion: 1,
+              restart: restartController.restart,
+              recovery: restartController.recovery,
+              recover: restartController.recover,
+            } as unknown as typeof restartController,
           }),
         },
       });
@@ -232,6 +242,10 @@ describe('AgentRuntime composition root', () => {
     })).resolves.toMatchObject({ status: 'queued', submission: { state: 'queued' } });
     expect(dispatch).not.toHaveBeenCalled();
     expect(second.restartController.recovery).toHaveBeenCalledWith('%1');
+    const invalid = createRuntime(new CodexRestartReceiptStore(receiptFile), false);
+    expect(invalid.runtime.capabilities().find((item) => item.id === 'codex')?.capabilities.conversationRestart)
+      .toBe(false);
+    expect(invalid.runtime.conversationRestart).toBeNull();
   });
 
   it('maps Claude and Codex terminal identities to provider completion tokens', async () => {

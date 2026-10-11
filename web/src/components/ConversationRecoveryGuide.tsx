@@ -1,8 +1,7 @@
 import { useEffect, useState } from 'react';
-import type { ApiRecovery } from '../apiErrors.js';
 import { t } from '../i18n';
 import { BotIcon } from './icons.jsx';
-import CodexRecoveryCommand from './CodexRecoveryCommand.js';
+import RecoveryCommand from './RecoveryCommand.js';
 
 const TERMINAL_HINT_MS = 30_000;
 
@@ -10,7 +9,7 @@ interface CodexRecoveryGuideController {
   status: 'idle' | 'loading' | 'ready' | 'recovering' | 'waiting' | 'error' | 'unknown' | 'restarting';
   receipt: {
     operationId?: string;
-    recovery: ApiRecovery;
+    recovery: { command: string };
     phase?: 'prepared' | 'interrupted' | 'stopped' | 'resuming' | 'ready';
     state: 'current' | 'stale' | 'unknown';
     canResume: boolean;
@@ -18,7 +17,7 @@ interface CodexRecoveryGuideController {
   recover(): Promise<void>;
 }
 
-export default function CodexActivationRecoveryGuide({
+export default function ConversationRecoveryGuide({
   controller,
   onTerminal,
 }: {
@@ -57,7 +56,7 @@ export default function CodexActivationRecoveryGuide({
           : t('chat.managedGuide.recoveryManualHint')}</p>
     <div className="codex-managed-guide-recovery">
       <span>{t('chat.managedGuide.recoveryHint')}</span>
-      <CodexRecoveryCommand command={receipt.recovery.command} />
+      <RecoveryCommand command={receipt.recovery.command} />
     </div>
     {!pending && receipt.canResume && (
       <button type="button" className="codex-managed-guide-primary"

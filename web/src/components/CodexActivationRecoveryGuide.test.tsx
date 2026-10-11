@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { getConversationActivationRecovery, recoverConversationActivation } from '../agentConversationActivationApi.js';
 import { useConversationActivationRecovery } from '../hooks/useConversationActivationRecovery.js';
 import type { ConversationActivationRecoveryController } from '../hooks/useConversationActivationRecovery.js';
-import CodexActivationRecoveryGuide from './CodexActivationRecoveryGuide.js';
+import ConversationRecoveryGuide from './ConversationRecoveryGuide.js';
 
 vi.mock('../agentConversationActivationApi.js', () => ({
   getConversationActivationRecovery: vi.fn(), recoverConversationActivation: vi.fn(),
@@ -36,7 +36,7 @@ describe('Codex recovery terminal reminder', () => {
     let current!: ConversationActivationRecoveryController;
     function Recovery() {
       current = useConversationActivationRecovery('%1', true, discover);
-      return <CodexActivationRecoveryGuide controller={current} onTerminal={onTerminal} />;
+      return <ConversationRecoveryGuide controller={current} onTerminal={onTerminal} />;
     }
     render(<Recovery />);
     await act(async () => {});
@@ -57,9 +57,9 @@ describe('Codex recovery terminal reminder', () => {
 
   it('does not restart the timer for rerenders, receipt refreshes or recovering to waiting', async () => {
     const value = controller();
-    const { rerender } = render(<CodexActivationRecoveryGuide controller={value} onTerminal={() => {}} />);
+    const { rerender } = render(<ConversationRecoveryGuide controller={value} onTerminal={() => {}} />);
     await tick(15_000);
-    rerender(<CodexActivationRecoveryGuide controller={{ ...value, status: 'waiting',
+    rerender(<ConversationRecoveryGuide controller={{ ...value, status: 'waiting',
       receipt: { ...receipt, phase: 'resuming', canResume: false } }} onTerminal={() => {}} />);
     await tick(14_999);
     expect(hint()).toBeNull();
@@ -69,9 +69,9 @@ describe('Codex recovery terminal reminder', () => {
 
   it('resets the deadline when the recovery operation changes', async () => {
     const value = controller();
-    const { rerender } = render(<CodexActivationRecoveryGuide controller={value} onTerminal={() => {}} />);
+    const { rerender } = render(<ConversationRecoveryGuide controller={value} onTerminal={() => {}} />);
     await tick(20_000);
-    rerender(<CodexActivationRecoveryGuide controller={{ ...value,
+    rerender(<ConversationRecoveryGuide controller={{ ...value,
       receipt: { ...receipt, operationId: 'b'.repeat(64) } }} onTerminal={() => {}} />);
     await tick(10_000);
     expect(hint()).toBeNull();
@@ -81,14 +81,14 @@ describe('Codex recovery terminal reminder', () => {
 
   it.each(['error', 'no receipt'] as const)('clears the timer on %s and starts a fresh pending visit', async (end) => {
     const value = controller();
-    const { rerender } = render(<CodexActivationRecoveryGuide controller={value} onTerminal={() => {}} />);
+    const { rerender } = render(<ConversationRecoveryGuide controller={value} onTerminal={() => {}} />);
     await tick(20_000);
-    rerender(<CodexActivationRecoveryGuide controller={end === 'error'
+    rerender(<ConversationRecoveryGuide controller={end === 'error'
       ? { ...value, status: 'error' } : { ...value, receipt: null }} onTerminal={() => {}} />);
     expect(vi.getTimerCount()).toBe(0);
     await tick(20_000);
     expect(hint()).toBeNull();
-    rerender(<CodexActivationRecoveryGuide controller={value} onTerminal={() => {}} />);
+    rerender(<ConversationRecoveryGuide controller={value} onTerminal={() => {}} />);
     await tick(29_999);
     expect(hint()).toBeNull();
     await tick(1);
@@ -96,7 +96,7 @@ describe('Codex recovery terminal reminder', () => {
   });
 
   it('clears its timer when unmounted', () => {
-    const { unmount } = render(<CodexActivationRecoveryGuide controller={controller()} onTerminal={() => {}} />);
+    const { unmount } = render(<ConversationRecoveryGuide controller={controller()} onTerminal={() => {}} />);
     expect(vi.getTimerCount()).toBe(1);
     unmount();
     expect(vi.getTimerCount()).toBe(0);
@@ -109,7 +109,7 @@ describe('Codex recovery terminal reminder', () => {
       state: 'unknown' as const,
       canResume: false,
     };
-    render(<CodexActivationRecoveryGuide controller={{
+    render(<ConversationRecoveryGuide controller={{
       status: 'error', receipt: restartReceipt, recover: vi.fn(async () => {}),
     }} onTerminal={() => {}} />);
 

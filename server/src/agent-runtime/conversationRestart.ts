@@ -4,12 +4,14 @@ export type ConversationRestartPhase = 'prepared' | 'stopped' | 'resuming' | 're
 export type ConversationRestartState = 'current' | 'stale';
 
 export interface ConversationRestartRecovery {
-  kind: 'codex_resume';
+  kind: string;
   sessionId: string;
   command: string;
 }
 
 export interface ConversationRestartReceipt {
+  agentId: string;
+  paneId: string;
   operationId: string;
   recovery: ConversationRestartRecovery;
   phase: ConversationRestartPhase;
@@ -19,7 +21,6 @@ export interface ConversationRestartReceipt {
 
 export type ConversationRestartErrorCode = 'unsupported' | 'unavailable' | 'in_progress' | 'stale_run' | 'not_started';
 
-const SESSION_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const OPERATION_ID_RE = /^[0-9a-f]{64}$/;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -28,14 +29,23 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 export function validConversationRestartRecovery(value: unknown): value is ConversationRestartRecovery {
   if (!isRecord(value)) return false;
-  return value.kind === 'codex_resume'
-    && typeof value.sessionId === 'string' && SESSION_ID_RE.test(value.sessionId)
-    && value.command === `handmux codex resume ${value.sessionId}`;
+  return typeof value.kind === 'string' && /^[a-z][a-z0-9_]{0,63}$/.test(value.kind)
+    && typeof value.sessionId === 'string' && value.sessionId.length > 0 && value.sessionId.length <= 1_024
+    && typeof value.command === 'string' && value.command.length > 0 && value.command.length <= 4_096
+    && !/[\x00-\x1f\x7f]/.test(value.command);
 }
 
-export function validConversationRestartReceipt(value: unknown): value is ConversationRestartReceipt {
+export function validConversationRestartReceipt(
+  value: unknown,
+  agentId: string,
+  paneId: string,
+  controller: AgentConversationRestartControllerV1,
+): value is ConversationRestartReceipt {
   if (!isRecord(value) || !validConversationRestartRecovery(value.recovery)) return false;
-  return typeof value.operationId === 'string' && OPERATION_ID_RE.test(value.operationId)
+  let nativeRecoveryValid = false;
+  try { nativeRecoveryValid = controller.validRecovery(value.recovery); } catch { return false; }
+  return nativeRecoveryValid && value.agentId === agentId && value.paneId === paneId
+    && typeof value.operationId === 'string' && OPERATION_ID_RE.test(value.operationId)
     && (value.phase === 'prepared' || value.phase === 'stopped'
       || value.phase === 'resuming' || value.phase === 'ready')
     && (value.state === 'current' || value.state === 'stale')
@@ -61,6 +71,7 @@ export class ConversationRestartError extends Error {
 
 export interface AgentConversationRestartControllerV1 {
   apiVersion: 1;
+  validRecovery(value: ConversationRestartRecovery): boolean;
   restart(run: AgentRunLease, signal: AbortSignal): Promise<ConversationRestartReceipt>;
   recovery(paneId: string): Promise<ConversationRestartReceipt | null>;
   recover(paneId: string, operationId: string, signal: AbortSignal): Promise<ConversationRestartReceipt>;
@@ -69,7 +80,8 @@ export interface AgentConversationRestartControllerV1 {
 function validateController(value: unknown): value is AgentConversationRestartControllerV1 {
   if (!isRecord(value)) return false;
   return value.apiVersion === 1 && typeof value.restart === 'function'
-    && typeof value.recovery === 'function' && typeof value.recover === 'function';
+    && typeof value.recovery === 'function' && typeof value.recover === 'function'
+    && typeof value.validRecovery === 'function';
 }
 
 export class AgentConversationRestartService {
@@ -105,17 +117,31 @@ export class AgentConversationRestartService {
     ));
     const paneId = run.ref.paneId;
     const existing = this.#active.get(paneId);
-    if (existing) return existing.then((receipt) => structuredClone(receipt));
+    if (existing) return existing.then((receipt) => {
+      if (receipt.agentId !== run.ref.agentId || receipt.paneId !== paneId
+        || receipt.recovery.sessionId !== run.ref.sessionId) {
+        throw new ConversationRestartError('Another Conversation restart is already in progress', 'in_progress');
+      }
+      return structuredClone(receipt);
+    });
 
     const operation = new AbortController();
     const timer = setTimeout(() => operation.abort(new Error('Conversation restart timed out')), this.#timeoutMs);
     const task = Promise.resolve().then(() => controller.restart(run, operation.signal)).then((receipt) => {
-      if (!validConversationRestartReceipt(receipt)) {
+      if (!validConversationRestartReceipt(receipt, run.ref.agentId, paneId, controller)
+        || receipt.recovery.sessionId !== run.ref.sessionId) {
         throw new ConversationRestartError('Invalid Conversation restart receipt', 'unavailable');
       }
       return structuredClone(receipt);
     }, (error: unknown) => {
-      if (error instanceof ConversationRestartError) throw error;
+      if (error instanceof ConversationRestartError) {
+        if (error.recovery && (!validConversationRestartReceipt(
+          error.recovery, run.ref.agentId, paneId, controller,
+        ) || error.recovery.recovery.sessionId !== run.ref.sessionId)) {
+          throw new ConversationRestartError('Invalid Conversation restart recovery receipt', 'unavailable');
+        }
+        throw error;
+      }
       throw new ConversationRestartError('Conversation restart could not be completed', 'unavailable');
     });
     const timeout = new Promise<never>((_resolve, reject) => {
@@ -133,27 +159,49 @@ export class AgentConversationRestartService {
     return result;
   }
 
-  async recovery(paneId: string): Promise<ConversationRestartReceipt | null> {
-    const controller = this.#controllers.get('codex');
-    if (!controller) return null;
+  async #resolveRecovery(paneId: string): Promise<{
+    controller: AgentConversationRestartControllerV1;
+    receipt: ConversationRestartReceipt;
+  } | null> {
     try {
-      const receipt = await controller.recovery(paneId);
-      if (receipt === null) return null;
-      if (!validConversationRestartReceipt(receipt)) {
-        throw new ConversationRestartError('Invalid Conversation restart recovery receipt', 'unavailable');
+      type RecoveryMatch = { controller: AgentConversationRestartControllerV1; receipt: ConversationRestartReceipt };
+      let match: RecoveryMatch | null = null;
+      let completed: RecoveryMatch | null = null;
+      let completedAmbiguous = false;
+      for (const [agentId, controller] of this.#controllers) {
+        const receipt = await controller.recovery(paneId);
+        if (receipt === null) continue;
+        if (!validConversationRestartReceipt(receipt, agentId, paneId, controller)) {
+          throw new ConversationRestartError('Ambiguous or invalid Conversation restart recovery receipt', 'unavailable');
+        }
+        if (receipt.phase === 'ready') {
+          if (completed) completedAmbiguous = true;
+          else completed = { controller, receipt };
+          continue;
+        }
+        if (match) throw new ConversationRestartError('Ambiguous Conversation restart recovery', 'unavailable');
+        match = { controller, receipt };
       }
-      return structuredClone(receipt);
+      if (match) return match;
+      if (completedAmbiguous) throw new ConversationRestartError('Ambiguous completed Conversation restart', 'unavailable');
+      return completed;
     } catch (error) {
       if (error instanceof ConversationRestartError) throw error;
       throw new ConversationRestartError('Conversation restart recovery is unavailable', 'unavailable');
     }
   }
 
+  async recovery(paneId: string): Promise<ConversationRestartReceipt | null> {
+    const match = await this.#resolveRecovery(paneId);
+    return match ? structuredClone(match.receipt) : null;
+  }
+
   async recover(paneId: string, operationId: string): Promise<ConversationRestartReceipt> {
-    const controller = this.#controllers.get('codex');
-    if (!controller) throw new ConversationRestartError(
-      'Conversation restart recovery is not supported', 'unsupported',
+    const match = await this.#resolveRecovery(paneId);
+    if (!match || match.receipt.phase === 'ready' || match.receipt.operationId !== operationId) throw new ConversationRestartError(
+      'Conversation restart recovery is no longer available', 'unavailable',
     );
+    const { controller } = match;
     const key = paneId;
     const existing = this.#active.get(key);
     if (existing) throw new ConversationRestartError('Conversation restart is already in progress', 'in_progress');
@@ -165,12 +213,22 @@ export class AgentConversationRestartService {
       )), { once: true });
     });
     const task = Promise.resolve().then(() => controller.recover(paneId, operationId, operation.signal)).then((receipt) => {
-      if (!validConversationRestartReceipt(receipt)) {
+      if (!validConversationRestartReceipt(receipt, match.receipt.agentId, paneId, controller)
+        || receipt.operationId !== operationId
+        || !sameRecovery(receipt.recovery, match.receipt.recovery)) {
         throw new ConversationRestartError('Invalid Conversation restart recovery receipt', 'unavailable');
       }
       return structuredClone(receipt);
     }).catch((error: unknown) => {
-      if (error instanceof ConversationRestartError) throw error;
+      if (error instanceof ConversationRestartError) {
+        if (error.recovery && (!validConversationRestartReceipt(
+          error.recovery, match.receipt.agentId, paneId, controller,
+        ) || error.recovery.operationId !== operationId
+          || !sameRecovery(error.recovery.recovery, match.receipt.recovery))) {
+          throw new ConversationRestartError('Invalid Conversation restart recovery receipt', 'unavailable');
+        }
+        throw error;
+      }
       throw new ConversationRestartError('Conversation restart recovery could not be completed', 'unavailable');
     });
     const result = Promise.race([task, timeout]).finally(() => clearTimeout(timer));

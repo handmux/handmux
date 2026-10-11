@@ -40,7 +40,7 @@ describe('built-in browser App composition', () => {
     expect(source).toContain('conversationRecoveryForSessionlessPane(');
     expect(source).toContain('authoritativePaneRun,');
     expect(source).toContain('authoritativePaneSession?.agentId');
-    expect(source).toContain('<CodexActivationRecoveryGuide controller={durableRestartRecovery');
+    expect(source).toContain('<ConversationRecoveryGuide controller={durableRestartRecovery');
     expect(source).toContain('? conversationRestart : conversationRecovery}');
     expect(source).toContain('conversationEnabled || recoveryLookupUncertain');
     expect(source).toContain("lens === 'chat' && isAgentConversationEnabled('codex')");

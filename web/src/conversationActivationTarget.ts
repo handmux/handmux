@@ -25,7 +25,7 @@ export function activationRunFor(
   return target?.paneId === paneId ? target.run : currentRun;
 }
 
-export function conversationRecoveryForSessionlessPane<Receipt extends { state: 'current' | 'stale' }>(
+export function conversationRecoveryForSessionlessPane<Receipt>(
   receipt: Receipt | null,
   authoritativeRun: AgentRunRef | null,
 ): Receipt | null {

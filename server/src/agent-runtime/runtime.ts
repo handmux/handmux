@@ -532,7 +532,7 @@ export class AgentRuntime {
         }
         if (binding.conversationRestart) {
           if (adapter.capabilities.conversationRestart?.apiVersion === 1
-            && validController(binding.conversationRestart, ['restart', 'recovery', 'recover'])) {
+            && validController(binding.conversationRestart, ['restart', 'recovery', 'recover', 'validRecovery'])) {
             conversationRestarts[adapter.id] = binding.conversationRestart;
           } else {
             this.#report(adapter.id, {
@@ -742,7 +742,7 @@ export class AgentRuntime {
           conversationActivation: adapter.capabilities.conversationActivation?.apiVersion === 1
             && validController(binding?.conversationActivation, ['describe', 'activate']),
           conversationRestart: adapter.capabilities.conversationRestart?.apiVersion === 1
-            && validController(binding?.conversationRestart, ['restart', 'recovery', 'recover']),
+            && validController(binding?.conversationRestart, ['restart', 'recovery', 'recover', 'validRecovery']),
           conversationGoal: adapter.capabilities.conversationGoal?.apiVersion === 1
             && validController(binding?.conversationGoal, ['read']),
           conversationPlan: adapter.capabilities.conversationPlan?.apiVersion === 1

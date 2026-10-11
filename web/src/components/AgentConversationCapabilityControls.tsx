@@ -614,7 +614,11 @@ export function AgentConversationContextControl({
   restartController?: ConversationRestartController;
   restartEnabled?: boolean;
 }) {
-  const context = controller.snapshot?.context;
+  const context = controller.snapshot?.context ?? (restartEnabled ? {
+    activity: 'unknown' as const,
+    usedTokens: undefined, totalTokens: undefined,
+    cwd: undefined, branch: undefined, access: undefined,
+  } : undefined);
   const [open, setOpen] = useState(false);
   const [copied, setCopied] = useState('');
   const [confirmRestart, setConfirmRestart] = useState(false);
@@ -682,11 +686,6 @@ export function AgentConversationContextControl({
             </div>
           )}
         </div>
-        {restartEnabled && restartController?.error && (
-          <p className="cc-context-restart-error" role="alert">
-            {t('chat.restart.notStarted')}<span>{restartController.error}</span>
-          </p>
-        )}
       </section>
     </>}
     {confirmRestart && restartController && (
@@ -784,7 +783,7 @@ export function AgentConversationActionControls({
 }) {
   return <>
     {showPermission && <AgentConversationPermissionControl controller={controller} />}
-    {showContext && <AgentConversationContextControl controller={controller} sessionId={sessionId}
+    {(showContext || restartEnabled) && <AgentConversationContextControl controller={controller} sessionId={sessionId}
       {...(restartController ? { restartController } : {})}
       {...(restartEnabled === undefined ? {} : { restartEnabled })} />}
   </>;

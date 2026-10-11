@@ -72,7 +72,8 @@ import type { AgentConversationComposerHandle } from './components/AgentConversa
 import AgentInteractionLayer from './components/AgentInteractionLayer.jsx';
 import AgentConversationActivationGuide from './components/AgentConversationActivationGuide.jsx';
 import CodexManagedGuide from './components/CodexManagedGuide.jsx';
-import CodexActivationRecoveryGuide from './components/CodexActivationRecoveryGuide.jsx';
+import ConversationRecoveryGuide from './components/ConversationRecoveryGuide.jsx';
+import { activationRecoveryAgentId } from './agents/activationRecovery.js';
 import AgentModelControl from './components/AgentModelControl.jsx';
 import {
   AgentConversationActionControls,
@@ -385,6 +386,7 @@ export default function App() {
   const completedChatEntrySeqRef = useRef(0);
   const conversationIdentityByPaneRef = useRef(new Map<string, AgentConversationIdentity>());
   const [docToast, setDocToast] = useState<string | null>(null); // transient error toast for absolute-path doc failures
+  const [restartToast, setRestartToast] = useState<string | null>(null);
   const [bindToast, setBindToast] = useState<string | null>(null); // transient confirmation after binding an existing session
   const [exitHint, setExitHint] = useState(false); // "press Back again to exit" hint (double-back guard)
   const [docLinkPrompt, setDocLinkPrompt] = useState<DocLinkPrompt | null>(null); // { path, x, y } confirm popover for a tapped terminal path
@@ -2254,14 +2256,27 @@ export default function App() {
     ? chatAgentByPaneRef.current.get(currentPaneId)
       ?? localStorage.getItem(`tw_chat_agent_${currentPaneId}`) : null;
   const restartPaneAgent = currentAgent ?? authoritativePaneSession?.agentId ?? rememberedRestartAgent;
+  const verifiedRestartAgent = currentAgent ?? authoritativePaneSession?.agentId ?? null;
+  const restartLookupEnabled = lens === 'chat' && (verifiedRestartAgent
+    ? agentDiscovery?.descriptors.some((descriptor) => descriptor.id === verifiedRestartAgent
+      && descriptor.capabilities.conversationRestart === true) === true
+    : agentDiscovery?.descriptors.some((descriptor) => (
+      descriptor.capabilities.conversationRestart === true
+    )) === true);
   const conversationRestart = useConversationRestart(
-    authoritativePaneSession?.agentId === 'codex' ? authoritativePaneSession : null,
-    lens === 'chat' && restartPaneAgent === 'codex' && isAgentConversationEnabled('codex'),
+    authoritativePaneSession?.agentId === restartPaneAgent ? authoritativePaneSession : null,
+    restartLookupEnabled,
     onAuthFail,
     currentPaneId,
+    verifiedRestartAgent,
   );
-  const durableRestartRecovery = conversationRestart.receipt
-    && conversationRestart.status !== 'restarting' ? conversationRestart.receipt : null;
+  useEffect(() => {
+    if (conversationRestart.error) {
+      setRestartToast(`${t('chat.restart.notStarted')} ${conversationRestart.error}`);
+    }
+  }, [conversationRestart.error]);
+  const durableRestartRecovery = conversationRestart.status !== 'restarting'
+    ? conversationRecoveryForSessionlessPane(conversationRestart.receipt, authoritativePaneRun) : null;
   const previousChatAgent = current?.paneId ? chatAgentByPaneRef.current.get(current.paneId) : null;
   const retainSelectedConversation = lens === 'chat' && !!current?.paneId && !!previousChatAgent
     && conversationIdentityByPaneRef.current.has(`${current.paneId}\0${previousChatAgent}`);
@@ -2303,7 +2318,10 @@ export default function App() {
     ? localStorage.getItem(`tw_chat_agent_${current.paneId}`) : null;
   const chatAgent = current?.paneId
     ? currentAgent ?? authoritativePaneSession?.agentId
-      ?? (durableConversationRecovery ? 'codex' : conversationActivationDisplayTarget?.agentId)
+      ?? durableRestartRecovery?.agentId
+      ?? conversationActivationDisplayTarget?.agentId
+      ?? (durableActivationRecovery
+        ? activationRecoveryAgentId(durableActivationRecovery.recovery) : null)
       ?? (canonicalCurrentAgent && !retainSelectedConversation
         && !(lens === 'chat' && recoveryLookupUncertain)
         ? null : chatAgentByPaneRef.current.get(current.paneId)
@@ -2416,7 +2434,7 @@ export default function App() {
   );
   const restartDeliveryPaused = ['loading', 'unknown', 'restarting', 'recovering'].includes(
     conversationRestart.status,
-  ) || conversationRestart.receipt !== null;
+  ) || durableRestartRecovery !== null;
   const conversationIdentityKey = current?.paneId && chatAgent
     ? `${current.paneId}\0${chatAgent}` : null;
   if (conversationIdentityKey && currentAgentRun?.sessionId
@@ -2945,6 +2963,11 @@ export default function App() {
     const id = setTimeout(() => setDocToast(null), 4000);
     return () => clearTimeout(id);
   }, [docToast]);
+  useEffect(() => {
+    if (!restartToast) return;
+    const id = setTimeout(() => setRestartToast(null), 4000);
+    return () => clearTimeout(id);
+  }, [restartToast]);
 
   useEffect(() => {
     if (!bindToast) return;
@@ -3574,6 +3597,9 @@ export default function App() {
       {docToast && (
         <div className="doc-toast" role="alert" onClick={() => setDocToast(null)}>{docToast}</div>
       )}
+      {restartToast && (
+        <div className="doc-toast" role="alert" onClick={() => setRestartToast(null)}>{restartToast}</div>
+      )}
       {bindToast && (
         <div className="exit-toast bind-toast" role="status" aria-live="polite">{bindToast}</div>
       )}
@@ -3668,7 +3694,7 @@ export default function App() {
               primary={current.paneId && (
             chatLens ? (
               durableConversationRecovery ? (
-                <CodexActivationRecoveryGuide controller={durableRestartRecovery
+                <ConversationRecoveryGuide controller={durableRestartRecovery
                   ? conversationRestart : conversationRecovery}
                   onTerminal={() => {
                     clearConversationActivation();
@@ -3783,7 +3809,8 @@ export default function App() {
                     activity={serverConversationActivity}
                     chatTone={chatTone} keyboardInset={inset} /> : undefined}
                 actionContent={(conversationControlCapabilities?.conversationContext
-                  || conversationControlCapabilities?.conversationPermission)
+                  || conversationControlCapabilities?.conversationPermission
+                  || conversationControlCapabilities?.conversationRestart)
                   ? <AgentConversationActionControls controller={agentConversationControls}
                     sessionId={composerIdentity.sessionId}
                     showPermission={conversationControlCapabilities.conversationPermission === true}

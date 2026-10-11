@@ -3,7 +3,7 @@ import { copyText } from '../clipboard.js';
 import { t } from '../i18n';
 import { CheckIcon, CopyIcon } from './icons.jsx';
 
-export default function CodexRecoveryCommand({ command }: { command: string }) {
+export default function RecoveryCommand({ command }: { command: string }) {
   const [copied, setCopied] = useState(false);
   useEffect(() => setCopied(false), [command]);
 

@@ -211,9 +211,6 @@ export function agentRoutes({ runtime }: { runtime: AgentFacadeRuntime }): expre
       if (!ref || !text(ref.sessionId, 1024)) {
         return res.status(400).json({ error: 'invalid agent run' });
       }
-      if (ref.agentId !== 'codex') {
-        return res.status(409).json({ error: 'Conversation restart is not supported for this Agent', code: 'unsupported' });
-      }
       const lease = runtime.runs.resolve(ref);
       if (!lease) return res.status(409).json({ error: 'stale agent run', code: 'stale_run' });
       // The user has confirmed the restart. Keep the bounded server-side operation alive if the browser

@@ -45,6 +45,16 @@ describe('Agent Conversation controls UI', () => {
     expect(actions[1]).toBe(screen.getByRole('button', { name: '会话状态，上下文占用 25%' }));
   });
 
+  it('renders the same session action for a Restart-only Agent without Context binding', () => {
+    render(<AgentConversationActionControls controller={controller({ snapshot: null })}
+      sessionId="session-1" showPermission={false} showContext={false}
+      restartEnabled restartController={{ status: 'ready', receipt: null, error: null,
+        restart: vi.fn(async () => {}), recover: vi.fn(async () => {}), retry: vi.fn() }} />);
+    fireEvent.click(screen.getByRole('button', { name: '上下文状态，用量暂不可用' }));
+    expect(screen.getByRole('button', { name: '重启会话' })).toBeTruthy();
+    expect(screen.getByText('会话 ID')).toBeTruthy();
+  });
+
   it('uses a same-size neutral Context ring while usage is unavailable and updates it in place', () => {
     const initial = controller({ snapshot: { context: { activity: 'idle' } } });
     const view = render(<AgentConversationContextControl sessionId="session-1" controller={initial} />);
@@ -83,7 +93,7 @@ describe('Agent Conversation controls UI', () => {
     expect(restartRow?.lastElementChild).toBe(restartButton);
 
     fireEvent.click(restartButton);
-    const confirm = screen.getByRole('alertdialog', { name: '重启 Codex 会话？' });
+    const confirm = screen.getByRole('alertdialog', { name: '重启当前会话？' });
     expect(confirm.closest('.cc-context-popover')).toBeNull();
     expect(confirm.closest('.overlay-layer')).toBeTruthy();
     expect(confirm.closest('.cc-context-restart-confirm-backdrop')).toBeTruthy();
@@ -104,7 +114,7 @@ describe('Agent Conversation controls UI', () => {
     expect(screen.queryByRole('button', { name: '重启会话' })).toBeNull();
   });
 
-  it('shows a pre-stop failure in the context popover and allows retry', () => {
+  it('keeps a pre-stop failure out of the context popover and allows retry', () => {
     render(createElement(AgentConversationContextControl, {
       controller: controller({ snapshot: { context: { activity: 'idle' } } }),
       sessionId: 'session-1', restartEnabled: true,
@@ -115,8 +125,7 @@ describe('Agent Conversation controls UI', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '上下文状态，用量暂不可用' }));
     const dialog = screen.getByRole('dialog', { name: '会话状态' });
-    expect(dialog.textContent).toContain('The managed Codex process could not be verified');
-    expect(dialog.textContent).toContain('本次操作没有停止 Codex');
+    expect(dialog.textContent).not.toContain('The managed Codex process could not be verified');
     expect((screen.getByRole('button', { name: '重启会话' }) as HTMLButtonElement).disabled).toBe(false);
   });
 

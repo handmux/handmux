@@ -19,6 +19,7 @@ vi.mock('../agentConversationRestartApi.js', async (importOriginal) => ({
 const sessionId = '12345678-1234-1234-1234-123456789abc';
 const run: AgentRunRef = { agentId: 'codex', paneId: '%8', runId: 'run-8', sessionId };
 const receipt = {
+  agentId: 'codex', paneId: '%8',
   operationId: 'a'.repeat(64),
   recovery: { kind: 'codex_resume' as const, sessionId, command: `handmux codex resume ${sessionId}` },
   phase: 'stopped' as const,
@@ -33,12 +34,68 @@ afterEach(() => {
 });
 
 describe('useConversationRestart', () => {
+  it('allows a different supported Agent through the same restart hook', async () => {
+    const piRun: AgentRunRef = { ...run, agentId: 'pi', sessionId: 'session-1' };
+    const piReceipt = { ...receipt, agentId: 'pi',
+      recovery: { kind: 'resume_command', sessionId: 'session-1', command: 'pi resume session-1' },
+      phase: 'ready' as const, canResume: false };
+    vi.mocked(getConversationRestartRecovery).mockResolvedValue(null);
+    vi.mocked(restartConversation).mockResolvedValue(piReceipt);
+    const { result } = renderHook(() => useConversationRestart(piRun, true, undefined, '%8'));
+    await waitFor(() => expect(result.current.status).toBe('ready'));
+    await act(async () => { await result.current.restart(); });
+    expect(restartConversation).toHaveBeenCalledWith(piRun, expect.any(AbortSignal));
+    expect(result.current.status).toBe('ready');
+  });
+
+  it('ignores an older session receipt when the pane has a new live run', async () => {
+    const newRun: AgentRunRef = { ...run, sessionId: '99999999-9999-4999-9999-999999999999' };
+    vi.mocked(getConversationRestartRecovery).mockResolvedValue(receipt);
+    const { result } = renderHook(() => useConversationRestart(newRun, true, undefined, '%8'));
+    await waitFor(() => expect(result.current).toMatchObject({ status: 'ready', receipt: null }));
+  });
+
+  it('discovers a durable shell-gap receipt without local Agent memory', async () => {
+    vi.mocked(getConversationRestartRecovery).mockResolvedValue(receipt);
+    const { result } = renderHook(() => useConversationRestart(null, true, undefined, '%8', null));
+    await waitFor(() => expect(result.current).toMatchObject({ status: 'error', receipt }));
+  });
+
   it('loads a pending operation from the selected pane without automatically resuming it', async () => {
     vi.mocked(getConversationRestartRecovery).mockResolvedValue(receipt);
     const { result } = renderHook(() => useConversationRestart(run, true, undefined, '%8'));
 
     await waitFor(() => expect(result.current).toMatchObject({ status: 'error', receipt }));
     expect(recoverConversationRestart).not.toHaveBeenCalled();
+  });
+
+  it('clears a pending receipt only after recovery returns the same operation and command', async () => {
+    vi.mocked(getConversationRestartRecovery).mockResolvedValue(receipt);
+    vi.mocked(recoverConversationRestart).mockResolvedValue(readyReceipt);
+    const { result } = renderHook(() => useConversationRestart(null, true, undefined, '%8', 'codex'));
+    await waitFor(() => expect(result.current.receipt).toEqual(receipt));
+    await act(async () => { await result.current.recover(); });
+    expect(result.current).toMatchObject({ status: 'ready', receipt: null });
+  });
+
+  it('keeps the original recovery command if the recover response or error changes identity', async () => {
+    const changed = { ...readyReceipt, recovery: { ...receipt.recovery, command: 'other command' } };
+    vi.mocked(getConversationRestartRecovery).mockResolvedValueOnce(receipt).mockResolvedValue(null);
+    vi.mocked(recoverConversationRestart).mockResolvedValueOnce(changed);
+    const { result, unmount } = renderHook(() => useConversationRestart(null, true, undefined, '%8', 'codex'));
+    await waitFor(() => expect(result.current.receipt).toEqual(receipt));
+    await act(async () => { await result.current.recover(); });
+    expect(result.current).toMatchObject({ status: 'error', receipt });
+    unmount();
+
+    vi.mocked(getConversationRestartRecovery).mockResolvedValueOnce(receipt).mockResolvedValue(null);
+    vi.mocked(recoverConversationRestart).mockRejectedValueOnce(new ApiError(
+      'provider recovery failed', 503, 'provider recovery failed', 'unavailable', null, null, changed,
+    ));
+    const second = renderHook(() => useConversationRestart(null, true, undefined, '%8', 'codex'));
+    await waitFor(() => expect(second.result.current.receipt).toEqual(receipt));
+    await act(async () => { await second.result.current.recover(); });
+    expect(second.result.current).toMatchObject({ status: 'error', receipt });
   });
 
   it('posts the confirmed run once and clears the receipt only after the same-session ready result', async () => {
