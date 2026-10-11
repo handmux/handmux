@@ -33,6 +33,10 @@ export interface ForegroundProcessIdentity {
 
 export interface ProcessContext {
   inspectForeground(pane: LivePane): Promise<ForegroundProcessIdentity | null>;
+  // Destructive capabilities must not rely on the short-lived UI/runtime evidence caches. These probes
+  // force a new process-table read and resolve the executable for every row in the pane's foreground tree.
+  inspectForegroundFresh?(pane: LivePane): Promise<ForegroundProcessIdentity | null>;
+  inspectForegroundGroupFresh?(pane: LivePane): Promise<readonly ForegroundProcessIdentity[]>;
   // Every process in the pane tty's foreground group, as evidence for adapters whose Agent runs INSIDE an
   // ambiguous launcher rather than as a native-binary descendant (e.g. a Node CLI that never spawns a child
   // binary). inspectForeground deliberately prefers a non-launcher descendant for such panes, so those

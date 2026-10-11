@@ -98,6 +98,61 @@ describe('Tmux Agent Runtime context', () => {
     expect(run.mock.calls.length).toBeGreaterThan(calls);
   });
 
+  it('bypasses the foreground evidence cache for the final destructive-operation identity probe', async () => {
+    let pid = 101;
+    const run = vi.fn(async (command: string, args: string[]) => {
+      if (command === 'ps') {
+        if (args[0] === '-p') return `Tue Aug 12 04:00:${pid === 101 ? '01' : '02'} 2026\n`;
+        if (args[0] === '-t') return ` ${pid} 90 S+ 00:05 ttys001 codex --remote\n`;
+      }
+      if (command === 'lsof') return `p${args[2]}\nftxt\nn/opt/codex-${args[2]}\n`;
+      return '';
+    });
+    const context = createLocalAgentProcessContext({ run });
+    const pane = {
+      paneId: '%1', sessionName: 'main', windowId: '@1', windowName: 'agent',
+      currentCommand: 'codex', tty: '/dev/ttys001',
+    };
+
+    await expect(context.inspectForeground(pane)).resolves.toMatchObject({ pid: 101 });
+    pid = 202;
+    await expect(context.inspectForegroundFresh!(pane)).resolves.toMatchObject({
+      pid: 202, executable: '/opt/codex-202',
+    });
+    expect(run.mock.calls.filter(([command, args]) => command === 'ps' && args[0] === '-t')).toHaveLength(2);
+    expect(run).toHaveBeenCalledWith('lsof', ['-a', '-p', '202', '-d', 'txt', '-Fn']);
+  });
+
+  it('returns fresh process generations and executable evidence for the whole foreground group', async () => {
+    let generation = 1;
+    const run = vi.fn(async (command: string, args: string[]) => {
+      if (command === 'ps') {
+        if (args[0] === '-p') return `Tue Aug 12 04:00:0${generation} 2026\n`;
+        if (args[0] === '-t') return generation === 1
+          ? ' 100 90 S+ 00:05 ttys001 node /usr/local/bin/handmux codex\n 101 100 S+ 00:04 ttys001 codex --remote unix:///tmp/1.sock\n'
+          : ' 200 90 S+ 00:05 ttys001 node /usr/local/bin/handmux codex\n 202 200 S+ 00:04 ttys001 codex --remote unix:///tmp/1.sock\n';
+      }
+      if (command === 'lsof') return `p${args[2]}\nftxt\nn${args[2] === '100' || args[2] === '200' ? '/usr/local/bin/node' : '/opt/codex/bin/codex'}\n`;
+      return '';
+    });
+    const context = createLocalAgentProcessContext({ run });
+    const pane = {
+      paneId: '%1', sessionName: 'main', windowId: '@1', windowName: 'agent',
+      currentCommand: 'node', tty: '/dev/ttys001',
+    };
+
+    await expect(context.inspectForegroundGroupFresh!(pane)).resolves.toMatchObject([
+      { pid: 100, ppid: 90, executable: '/usr/local/bin/node' },
+      { pid: 101, ppid: 100, executable: '/opt/codex/bin/codex' },
+    ]);
+    generation = 2;
+    await expect(context.inspectForegroundGroupFresh!(pane)).resolves.toMatchObject([
+      { pid: 200, ppid: 90, executable: '/usr/local/bin/node' },
+      { pid: 202, ppid: 200, executable: '/opt/codex/bin/codex' },
+    ]);
+    expect(run.mock.calls.filter(([command, args]) => command === 'ps' && args[0] === '-t')).toHaveLength(2);
+  });
+
   it('selects the deepest foreground leaf instead of a managed Node wrapper', async () => {
     const run = vi.fn(async (command: string, args: string[]) => {
       if (command === 'ps') {

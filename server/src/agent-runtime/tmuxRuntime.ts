@@ -236,18 +236,22 @@ export function createLocalAgentProcessContext({
   };
   // One `ps` read, shared by both evidence methods below. The full-system scan is only the fallback for a
   // platform whose targeted query returns nothing; rows are always re-filtered to the pane's own tty.
-  const foregroundGroup = async (pane: LivePane): Promise<{ tty: string; rows: ForegroundRow[] }> => {
+  const foregroundGroup = async (
+    pane: LivePane,
+    fresh = false,
+  ): Promise<{ tty: string; rows: ForegroundRow[] }> => {
     const tty = normTty(pane.tty);
     if (!tty) return { tty: '', rows: [] };
-    const cached = rowsCache.get(tty);
+    const cached = fresh ? undefined : rowsCache.get(tty);
     const now = Date.now();
-    if (cached?.rows && cached.expiresAt > now) return { tty, rows: cached.rows };
-    if (cached?.promise && cached.expiresAt > now) return { tty, rows: await cached.promise };
+    if (!fresh && cached?.rows && cached.expiresAt > now) return { tty, rows: cached.rows };
+    if (!fresh && cached?.promise && cached.expiresAt > now) return { tty, rows: await cached.promise };
     const promise = (async (): Promise<ForegroundRow[]> => {
       let output = await run('ps', ['-t', tty, '-o', PS_FORMAT]);
       if (!String(output).trim()) output = await run('ps', ['-Ao', PS_FORMAT]);
       return foregroundRows(output).filter((row) => row.tty === tty);
     })();
+    if (fresh) return { tty, rows: await promise };
     const entry: ForegroundRowsCache = {
       expiresAt: Date.now() + PROCESS_EVIDENCE_INFLIGHT_MS,
       promise,
@@ -296,6 +300,24 @@ export function createLocalAgentProcessContext({
       };
       return { ...value };
     },
+    async inspectForegroundFresh(pane: LivePane): Promise<ForegroundProcessIdentity | null> {
+      const { tty, rows } = await foregroundGroup(pane, true);
+      if (!tty) return null;
+      const row = foregroundLeaf(rows, tty, pane.currentCommand);
+      if (!row) return null;
+      const processStart = await processStartedAt(run, row.pid);
+      if (processStart === undefined) return null;
+      const executable = await executablePath(run, row.pid);
+      if (!executable) return null;
+      return {
+        pid: row.pid,
+        ppid: row.ppid,
+        startedAt: processStart,
+        tty: pane.tty ?? `/dev/${tty}`,
+        executable,
+        ...(row.command ? { commandLine: row.command } : {}),
+      };
+    },
     async inspectForegroundGroup(pane: LivePane): Promise<readonly ForegroundProcessIdentity[]> {
       const tty = normTty(pane.tty);
       if (!tty) return [];
@@ -314,6 +336,27 @@ export function createLocalAgentProcessContext({
         };
       }));
       return value.map((entry) => ({ ...entry }));
+    },
+    async inspectForegroundGroupFresh(pane: LivePane): Promise<readonly ForegroundProcessIdentity[]> {
+      const tty = normTty(pane.tty);
+      if (!tty) return [];
+      const { rows } = await foregroundGroup(pane, true);
+      const value = await Promise.all(rows.map(async (row): Promise<ForegroundProcessIdentity | null> => {
+        const [startedAt, executable] = await Promise.all([
+          processStartedAt(run, row.pid), executablePath(run, row.pid),
+        ]);
+        if (startedAt === undefined || !executable) return null;
+        return {
+          pid: row.pid,
+          ppid: row.ppid,
+          tty: pane.tty ?? `/dev/${row.tty}`,
+          startedAt,
+          executable,
+          ...(row.command ? { commandLine: row.command } : {}),
+        };
+      }));
+      return value.filter((entry): entry is ForegroundProcessIdentity => entry !== null)
+        .map((entry) => ({ ...entry }));
     },
     // One `ps -p`, and deliberately no executable lookup: a lease only needs to know that the pid it was
     // attached to is still the same process generation.
