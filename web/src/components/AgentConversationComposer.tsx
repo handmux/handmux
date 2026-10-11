@@ -49,6 +49,7 @@ export interface AgentConversationComposerProps {
   activity?: ConversationActivity;
   desktop?: boolean;
   conversation: AgentConversationController;
+  deliveryPaused?: boolean;
   onSendStart?: () => void;
   cwd?: string | null;
   shortcuts?: ServerShortcuts | null;
@@ -71,6 +72,7 @@ function AgentConversationComposer({
   activity,
   desktop = false,
   conversation,
+  deliveryPaused = false,
   onSendStart,
   cwd = null,
   shortcuts = null,
@@ -158,7 +160,7 @@ function AgentConversationComposer({
   }, [key]);
   const capabilities = conversation.descriptor?.capabilities;
   const canSend = canSendConversation(capabilities);
-  const sendUnavailable = !canSend || conversation.descriptor === null
+  const sendUnavailable = deliveryPaused || !canSend || conversation.descriptor === null
     || conversation.status === 'loading' || conversation.status === 'reconnecting'
     || conversation.status === 'error';
   const canInterrupt = capabilities?.interrupt === true;
@@ -238,7 +240,7 @@ function AgentConversationComposer({
 
   const send = async (requestedText = value, preserveDraft = false): Promise<void> => {
     const text = requestedText.trim();
-    if (!text || draftLockedRef.current || recordingRef.current) return;
+    if (!text || deliveryPaused || draftLockedRef.current || recordingRef.current) return;
     const sentAgentId = agentId;
     const sentSessionId = sessionId;
     const sentKey = key;

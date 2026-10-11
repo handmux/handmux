@@ -3,6 +3,7 @@ export interface ApiErrorBody {
   code: string | null;
   requestId: string | null;
   recovery?: ApiRecovery;
+  recoveryPayload?: unknown;
 }
 
 export interface ApiRecovery {
@@ -36,6 +37,7 @@ export function parseApiErrorBody(value: unknown): ApiErrorBody | null {
     code: typeof record.code === 'string' && record.code ? record.code : null,
     requestId: typeof record.requestId === 'string' && record.requestId ? record.requestId : null,
     ...(recovery ? { recovery } : {}),
+    ...(record.recovery === undefined ? {} : { recoveryPayload: record.recovery }),
   };
 }
 
@@ -52,6 +54,7 @@ export class ApiError extends Error {
   readonly code: string | null;
   readonly requestId: string | null;
   readonly recovery: ApiRecovery | null;
+  readonly recoveryPayload: unknown;
 
   constructor(
     message: string,
@@ -60,6 +63,7 @@ export class ApiError extends Error {
     code?: string | null,
     requestId?: string | null,
     recovery?: ApiRecovery | null,
+    recoveryPayload?: unknown,
   ) {
     super(message);
     this.name = 'ApiError';
@@ -68,6 +72,7 @@ export class ApiError extends Error {
     this.code = code ?? null;
     this.requestId = requestId ?? null;
     this.recovery = recovery ?? null;
+    this.recoveryPayload = recoveryPayload;
   }
 }
 

@@ -4,6 +4,10 @@ All notable changes to handmux. Format follows [Keep a Changelog](https://keepac
 
 ## [Unreleased]
 
+### Added
+
+- 对话页上下文弹窗新增 Codex“重启会话”操作；确认后保留原会话和历史，当前任务会中断且不会自动重发，恢复失败时可复制命令前往终端继续。
+
 ### Changed
 
 - 会话、窗口和窗格的管理弹窗现在会显示对应的 tmux 原生 ID。

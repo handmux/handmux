@@ -80,6 +80,10 @@ vi.mock('./agentSessionControlApi.js', () => ({
   updateAgentModelControl: vi.fn(),
 }));
 const recoveryApi = vi.hoisted(() => ({ getConversationActivationRecovery: vi.fn() }));
+const restartHook = vi.hoisted(() => ({
+  result: null as unknown,
+  args: null as unknown[] | null,
+}));
 vi.mock('./hooks/useAgentConversationControls.js', async (importOriginal) => {
   const original = await importOriginal<typeof import('./hooks/useAgentConversationControls.js')>();
   return { ...original, useAgentConversationControls: (...args: Parameters<typeof original.useAgentConversationControls>) => {
@@ -103,6 +107,12 @@ vi.mock('./agentConversationApi.js', async (importOriginal) => ({
 }));
 vi.mock('./agentConversationActivationApi.js', async (importOriginal) => ({
   ...(await importOriginal()), ...recoveryApi,
+}));
+vi.mock('./hooks/useConversationRestart.js', () => ({
+  useConversationRestart: (...args: unknown[]) => {
+    restartHook.args = args;
+    return restartHook.result;
+  },
 }));
 const push = vi.hoisted(() => ({ getNotifications: vi.fn(), clearPaneNotification: vi.fn() }));
 const windowBar = vi.hoisted((): { props: WindowBarProps | null } => ({ props: null }));
@@ -328,6 +338,9 @@ beforeEach(() => {
   Object.values(conversationApi).forEach((mock) => mock.mockReset());
   controlsApi.readConversationControls.mockReset().mockResolvedValue({});
   recoveryApi.getConversationActivationRecovery.mockReset().mockResolvedValue(null);
+  restartHook.result = { status: 'ready', receipt: null, restart: vi.fn(async () => {}),
+    recover: vi.fn(async () => {}), retry: vi.fn() };
+  restartHook.args = null;
   Object.values(api).forEach((mock) => mock.mockReset());
   storage.applyWorkspaceRestoreMapping.mockReset();
   push.getNotifications.mockReset();
@@ -457,7 +470,9 @@ describe.each(['claude', 'codex', 'pi'])('App %s conversation activity', (agentI
 describe('App established conversation during server restart', () => {
   const pane = { id: '%73', active: true, width: 80, height: 24, command: 'codex', cwd: '/work', agent: 'codex' };
   const run = { agentId: 'codex', paneId: pane.id, runId: 'before-restart', sessionId: 'session-1' };
-  const descriptors = [{ id: 'codex', label: 'Codex', capabilities: { conversation: true } }];
+  const descriptors = [{ id: 'codex', label: 'Codex', capabilities: {
+    conversation: true, conversationContext: true, conversationRestart: true,
+  } }];
   async function openConversation() {
     localStorage.setItem('tw_bound', JSON.stringify(['project']));
     localStorage.setItem(`tw_lens_${pane.id}`, 'chat');
@@ -474,13 +489,14 @@ describe('App established conversation during server restart', () => {
         historyVersion: '1', hasMore: false, items: [{ id: 'message-1', kind: 'message',
           role: 'assistant', content: [{ type: 'text', text: `Saved answer ${activeRun.sessionId}` }] }] },
     }));
-    await renderApp();
+    const view = await renderApp();
     expect(screen.getByText('Saved answer session-1')).toBeTruthy();
     expect(controlsInput.enabled).toBe(true);
+    return view;
   }
 
   it('discards a temporary unknown on actual window navigation and return while retaining formal history', async () => {
-    await openConversation();
+    const view = await openConversation();
     conversationApi.sendAgentConversationMessage.mockResolvedValue({ status: 'unknown' });
     await act(async () => { await conversation.controller!.send('temporary unknown').catch(() => {}); });
     expect(screen.getByText('temporary unknown')).toBeTruthy();
@@ -605,6 +621,26 @@ describe('App established conversation during server restart', () => {
     expect(screen.getByTestId('terminal-pane')).toBeTruthy();
     expect(localStorage.getItem(`tw_chat_agent_${pane.id}`)).toBeNull();
     expect(conversation.controller?.items).toEqual([]);
+  });
+
+  it('keeps the same conversation and draft visible while restart delivery is paused', async () => {
+    restartHook.result = { status: 'restarting', receipt: null, restart: vi.fn(async () => {}),
+      recover: vi.fn(async () => {}), retry: vi.fn() };
+    controlsApi.readConversationControls.mockResolvedValue({ context: { activity: 'unknown' } });
+    const view = await openConversation();
+    const composer = screen.getByPlaceholderText('和 Agent 对话…') as HTMLTextAreaElement;
+    fireEvent.change(composer, { target: { value: 'keep this draft' } });
+    const sendButton = screen.getByRole('button', { name: '发送' }) as HTMLButtonElement;
+
+    expect(sendButton.disabled).toBe(true);
+    expect(screen.getByText('Saved answer session-1')).toBeTruthy();
+    expect(restartHook.args?.[3]).toBe(pane.id);
+
+    const composerBeforeRender = composer;
+    view.rerender(<App />);
+    expect(screen.getByPlaceholderText('和 Agent 对话…')).toBe(composerBeforeRender);
+    expect((screen.getByPlaceholderText('和 Agent 对话…') as HTMLTextAreaElement).value).toBe('keep this draft');
+    view.unmount();
   });
 });
 

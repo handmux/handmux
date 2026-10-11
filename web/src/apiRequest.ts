@@ -76,6 +76,7 @@ export async function requestJson<T = unknown>(
         errorBody?.code,
         errorBody?.requestId,
         errorBody?.recovery,
+        errorBody?.recoveryPayload,
       );
     }
     if (response.status === 204) return { unchanged: true };

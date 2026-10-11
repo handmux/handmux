@@ -9,6 +9,7 @@ export interface AgentCatalogDescriptor {
     inbox: boolean;
     conversation: boolean;
     conversationActivation?: boolean;
+    conversationRestart?: boolean;
     conversationGoal?: boolean;
     conversationPlan?: boolean;
     conversationContext?: boolean;

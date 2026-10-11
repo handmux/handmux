@@ -101,4 +101,21 @@ describe('Codex recovery terminal reminder', () => {
     unmount();
     expect(vi.getTimerCount()).toBe(0);
   });
+
+  it('uses the existing copy-only recovery guide for an unverified conversation restart', () => {
+    const restartReceipt = {
+      recovery,
+      phase: 'prepared' as const,
+      state: 'unknown' as const,
+      canResume: false,
+    };
+    render(<CodexActivationRecoveryGuide controller={{
+      status: 'error', receipt: restartReceipt, recover: vi.fn(async () => {}),
+    }} onTerminal={() => {}} />);
+
+    expect(screen.getByText('chat.managedGuide.recoveryUnknownTitle')).toBeTruthy();
+    expect(screen.getByText('chat.managedGuide.recoveryUnknownHint')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'chat.managedGuide.copyRecovery' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'chat.managedGuide.retryRecovery' })).toBeNull();
+  });
 });

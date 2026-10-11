@@ -1,16 +1,28 @@
 import { useEffect, useState } from 'react';
-import type { ConversationActivationRecoveryController } from '../hooks/useConversationActivationRecovery.js';
+import type { ApiRecovery } from '../apiErrors.js';
 import { t } from '../i18n';
 import { BotIcon } from './icons.jsx';
 import CodexRecoveryCommand from './CodexRecoveryCommand.js';
 
 const TERMINAL_HINT_MS = 30_000;
 
+interface CodexRecoveryGuideController {
+  status: 'idle' | 'loading' | 'ready' | 'recovering' | 'waiting' | 'error' | 'unknown' | 'restarting';
+  receipt: {
+    operationId?: string;
+    recovery: ApiRecovery;
+    phase?: 'prepared' | 'interrupted' | 'stopped' | 'resuming' | 'ready';
+    state: 'current' | 'stale' | 'unknown';
+    canResume: boolean;
+  } | null;
+  recover(): Promise<void>;
+}
+
 export default function CodexActivationRecoveryGuide({
   controller,
   onTerminal,
 }: {
-  controller: ConversationActivationRecoveryController;
+  controller: CodexRecoveryGuideController;
   onTerminal: () => void;
 }) {
   const receipt = controller.receipt;
@@ -27,17 +39,20 @@ export default function CodexActivationRecoveryGuide({
   if (!receipt) return null;
 
   const stale = receipt.state === 'stale';
+  const unverified = receipt.state === 'unknown';
   return <div className="codex-managed-guide" aria-live="polite">
     <div className={`codex-managed-guide-icon ${pending ? 'starting' : ''}`} aria-hidden="true">
       <BotIcon />
     </div>
     <h2>{pending
       ? t('chat.managedGuide.startingTitle')
-      : stale ? t('chat.managedGuide.recoveryStaleTitle')
+      : unverified ? t('chat.managedGuide.recoveryUnknownTitle')
+        : stale ? t('chat.managedGuide.recoveryStaleTitle')
         : t('chat.managedGuide.recoveryTitle')}</h2>
     <p>{pending
       ? t(showTerminalHint ? 'chat.managedGuide.terminalHint' : 'chat.managedGuide.startingHint')
-      : stale ? t('chat.managedGuide.recoveryStaleHint')
+      : unverified ? t('chat.managedGuide.recoveryUnknownHint')
+        : stale ? t('chat.managedGuide.recoveryStaleHint')
         : receipt.canResume ? t('chat.managedGuide.recoveryReadyHint')
           : t('chat.managedGuide.recoveryManualHint')}</p>
     <div className="codex-managed-guide-recovery">

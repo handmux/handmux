@@ -1,4 +1,5 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { createElement } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   AgentConversationActionControls,
@@ -62,6 +63,39 @@ describe('Agent Conversation controls UI', () => {
     expect(recovered).toBe(trigger);
     expect(recovered.querySelector('.cc-context-ring.is-placeholder')).toBeNull();
     expect(recovered.querySelector('.cc-context-value')).toBeTruthy();
+  });
+
+  it('places the Codex restart action below Session ID and requires confirmation even when activity is unknown', () => {
+    const restart = vi.fn(async () => {});
+    const restartController = { status: 'unknown', receipt: null, restart, recover: vi.fn(), retry: vi.fn() };
+    render(createElement(AgentConversationContextControl, {
+      controller: controller({ snapshot: { context: { activity: 'unknown' } } }),
+      sessionId: 'session-1', restartController, restartEnabled: true,
+    } as never));
+
+    fireEvent.click(screen.getByRole('button', { name: '上下文状态，用量暂不可用' }));
+    const dialog = screen.getByRole('dialog', { name: '会话状态' });
+    const restartButton = screen.getByRole('button', { name: '重启会话' });
+    const sessionRow = screen.getByText('会话 ID').closest('.cc-context-row');
+    expect(sessionRow!.compareDocumentPosition(restartButton) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+    fireEvent.click(restartButton);
+    expect(screen.getByRole('alertdialog', { name: '重启 Codex 会话？' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: '取消' }));
+    expect(restart).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: '重启会话' }));
+    fireEvent.click(screen.getAllByRole('button', { name: '重启会话' })[1]!);
+    expect(restart).toHaveBeenCalledTimes(1);
+    expect(dialog).toBeTruthy();
+  });
+
+  it('does not show the restart action when the Codex restart capability is absent', () => {
+    render(<AgentConversationContextControl controller={controller({
+      snapshot: { context: { activity: 'idle' } },
+    })} sessionId="session-1" />);
+    fireEvent.click(screen.getByRole('button', { name: '上下文状态，用量暂不可用' }));
+    expect(screen.queryByRole('button', { name: '重启会话' })).toBeNull();
   });
 
   it.each(['degraded', 'error'] as const)(

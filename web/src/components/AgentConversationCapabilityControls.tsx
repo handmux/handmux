@@ -6,6 +6,7 @@ import { useBackButton } from '../hooks/useBackButton.js';
 import { OverlayPortal } from '../overlays/OverlayHost.js';
 import type { AgentConversationControlsController } from '../hooks/useAgentConversationControls.js';
 import type { AgentConversationController } from '../hooks/useAgentConversation.js';
+import type { ConversationRestartController } from '../hooks/useConversationRestart.js';
 import type {
   ConversationActivity,
   ConversationGoal,
@@ -605,15 +606,22 @@ function ContextRing({ percent }: { percent: number | null }) {
 export function AgentConversationContextControl({
   controller,
   sessionId,
+  restartController,
+  restartEnabled = false,
 }: {
   controller: AgentConversationControlsController;
   sessionId: string;
+  restartController?: ConversationRestartController;
+  restartEnabled?: boolean;
 }) {
   const context = controller.snapshot?.context;
   const [open, setOpen] = useState(false);
   const [copied, setCopied] = useState('');
+  const [confirmRestart, setConfirmRestart] = useState(false);
+  const restartConfirmBusy = useRef(false);
   const [worktree, setWorktree] = useState<string | null>(null);
   useBackButton(open, () => setOpen(false));
+  useBackButton(confirmRestart, () => setConfirmRestart(false));
   useEffect(() => {
     if (!context?.cwd) { setWorktree(null); return; }
     let current = true;
@@ -661,8 +669,44 @@ export function AgentConversationContextControl({
               : context.access === 'workspace-write' ? 'Workspace' : 'Full'}`)}</strong></div>}
           <ContextCopyRow label={t('chat.status.sessionId')} value={sessionId}
             copied={copied === 'session'} onCopy={() => copy(sessionId, 'session')} />
+          {restartEnabled && restartController && (
+            <div className="cc-context-restart-row">
+              <button type="button"
+                disabled={['loading', 'restarting', 'recovering', 'waiting'].includes(restartController.status)}
+                aria-busy={['restarting', 'recovering', 'waiting'].includes(restartController.status)}
+                onClick={() => setConfirmRestart(true)}>
+                {['restarting', 'recovering', 'waiting'].includes(restartController.status)
+                  ? t('chat.restart.submitting') : t('chat.restart.action')}
+              </button>
+            </div>
+          )}
         </div>
       </section>
+      {confirmRestart && restartController && (
+        <div className="settings-confirm-backdrop" onClick={() => setConfirmRestart(false)}>
+          <div className="settings-confirm" role="alertdialog" aria-modal="true"
+            aria-labelledby="conversation-restart-title" aria-describedby="conversation-restart-hint"
+            onClick={(event) => event.stopPropagation()}>
+            <h2 id="conversation-restart-title">{t('chat.restart.confirmTitle')}</h2>
+            <p id="conversation-restart-hint">{t('chat.restart.confirmHint')}</p>
+            <div className="settings-confirm-actions">
+              <button type="button" autoFocus onClick={() => setConfirmRestart(false)}>
+                {t('common.cancel')}
+              </button>
+              <button type="button" className="danger"
+                disabled={restartConfirmBusy.current}
+                onClick={() => {
+                  if (restartConfirmBusy.current) return;
+                  restartConfirmBusy.current = true;
+                  setConfirmRestart(false);
+                  void restartController.restart().finally(() => { restartConfirmBusy.current = false; });
+                }}>
+                {t('chat.restart.confirmAction')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </>}
   </>;
 }
@@ -719,15 +763,21 @@ export function AgentConversationActionControls({
   sessionId,
   showPermission,
   showContext,
+  restartController,
+  restartEnabled,
 }: {
   controller: AgentConversationControlsController;
   sessionId: string;
   showPermission: boolean;
   showContext: boolean;
+  restartController?: ConversationRestartController;
+  restartEnabled?: boolean;
 }) {
   return <>
     {showPermission && <AgentConversationPermissionControl controller={controller} />}
-    {showContext && <AgentConversationContextControl controller={controller} sessionId={sessionId} />}
+    {showContext && <AgentConversationContextControl controller={controller} sessionId={sessionId}
+      {...(restartController ? { restartController } : {})}
+      {...(restartEnabled === undefined ? {} : { restartEnabled })} />}
   </>;
 }
 

@@ -139,6 +139,7 @@ import {
 } from './conversationSubmissionProjection.js';
 import { useAgentConversationActivation } from './hooks/useAgentConversationActivation.js';
 import { useConversationActivationRecovery } from './hooks/useConversationActivationRecovery.js';
+import { useConversationRestart } from './hooks/useConversationRestart.js';
 import type { AgentConversationIdentity } from './hooks/useAgentConversation.js';
 import {
   activationRunFor,
@@ -2248,23 +2249,37 @@ export default function App() {
     candidate.paneId === currentPaneId
   )) ?? null;
   const chatAgentByPaneRef = useRef(new Map<string, string>());
+  const currentAgent = currentPaneAgent(current, states, conversationActivationOwnershipPin);
+  const rememberedRestartAgent = currentPaneId
+    ? chatAgentByPaneRef.current.get(currentPaneId)
+      ?? localStorage.getItem(`tw_chat_agent_${currentPaneId}`) : null;
+  const restartPaneAgent = currentAgent ?? authoritativePaneSession?.agentId ?? rememberedRestartAgent;
+  const conversationRestart = useConversationRestart(
+    authoritativePaneSession?.agentId === 'codex' ? authoritativePaneSession : null,
+    lens === 'chat' && restartPaneAgent === 'codex' && isAgentConversationEnabled('codex'),
+    onAuthFail,
+    currentPaneId,
+  );
+  const durableRestartRecovery = conversationRestart.receipt
+    && conversationRestart.status !== 'restarting' ? conversationRestart.receipt : null;
   const previousChatAgent = current?.paneId ? chatAgentByPaneRef.current.get(current.paneId) : null;
   const retainSelectedConversation = lens === 'chat' && !!current?.paneId && !!previousChatAgent
     && conversationIdentityByPaneRef.current.has(`${current.paneId}\0${previousChatAgent}`);
   // A receipt only bridges the shell gap where Runtime has no verified current run. Any discovered run,
   // including a native sessionless Codex, wins without mutating the durable recovery record. An already
   // selected, verified conversation likewise keeps its history when discovery temporarily loses the run.
-  const durableConversationRecovery = retainSelectedConversation ? null : conversationRecoveryForSessionlessPane(
+  const durableActivationRecovery = retainSelectedConversation ? null : conversationRecoveryForSessionlessPane(
     conversationRecovery.receipt,
     authoritativePaneRun,
   );
+  const durableConversationRecovery = durableRestartRecovery ?? durableActivationRecovery;
   const recoveryLookupUncertain = conversationRecovery.status === 'loading'
-    || conversationRecovery.status === 'unknown';
+    || conversationRecovery.status === 'unknown'
+    || conversationRestart.status === 'loading' || conversationRestart.status === 'unknown';
 
   // A controlled takeover briefly replaces the old Codex with a shell before the managed Codex child is
   // visible. Pin that pane's identity through the gap so the chat page and its App Server poll do not
   // disappear halfway through startup.
-  const currentAgent = currentPaneAgent(current, states, conversationActivationOwnershipPin);
   const canonicalCurrentAgent = hasCanonicalCurrentPaneAgent(current);
   // The pane's last verified Agent owns an explicitly selected chat view until the user leaves it. Runtime
   // and tmux discovery are asynchronous health signals: a transient null must not replace the Conversation Surface with a
@@ -2399,6 +2414,9 @@ export default function App() {
     discoverActivatedRun,
     onAuthFail,
   );
+  const restartDeliveryPaused = ['loading', 'unknown', 'restarting', 'recovering'].includes(
+    conversationRestart.status,
+  ) || conversationRestart.receipt !== null;
   const conversationIdentityKey = current?.paneId && chatAgent
     ? `${current.paneId}\0${chatAgent}` : null;
   if (conversationIdentityKey && currentAgentRun?.sessionId
@@ -3650,7 +3668,8 @@ export default function App() {
               primary={current.paneId && (
             chatLens ? (
               durableConversationRecovery ? (
-                <CodexActivationRecoveryGuide controller={conversationRecovery}
+                <CodexActivationRecoveryGuide controller={durableRestartRecovery
+                  ? conversationRestart : conversationRecovery}
                   onTerminal={() => {
                     clearConversationActivation();
                     setLens('terminal');
@@ -3740,6 +3759,7 @@ export default function App() {
                   || genericConversation.items.some((item) => item.provisional)}
                 activity={conversationActivity}
                 conversation={projectedConversation}
+                deliveryPaused={restartDeliveryPaused}
                 onSendStart={() => requestChatFollowLatest(current.paneId)}
                 cwd={currentPaneCwd}
                 shortcuts={serverShortcuts}
@@ -3767,7 +3787,9 @@ export default function App() {
                   ? <AgentConversationActionControls controller={agentConversationControls}
                     sessionId={composerIdentity.sessionId}
                     showPermission={conversationControlCapabilities.conversationPermission === true}
-                    showContext={conversationControlCapabilities.conversationContext === true} /> : undefined}
+                    showContext={conversationControlCapabilities.conversationContext === true}
+                    restartController={conversationRestart}
+                    restartEnabled={conversationControlCapabilities.conversationRestart === true} /> : undefined}
                 sessionControl={currentAgentDescriptor?.capabilities.sessionControl === true
                   ? <AgentModelControl control={agentSessionControl} busy={currentKind === 'working'
                     || currentKind === 'permission' || currentKind === 'compacting'
