@@ -882,6 +882,7 @@ describe('App management dimensions', () => {
     const horizontalSplitRow = screen.getByRole('button', { name: /左右分屏/ }).closest('.sheet-row');
     expect(horizontalSplitRow).not.toBeNull();
     expect(horizontalSplitRow).toBe(screen.getByRole('button', { name: /上下分屏/ }).closest('.sheet-row'));
+    expect(screen.getByText(/无法单独调整高度。请在窗口管理中调整窗口高度。/)).toBeTruthy();
 
     api.getPanes.mockResolvedValueOnce(stalePanes.map((pane) => (
       pane.id === '%1' ? { ...pane, width: 40 } : pane
@@ -930,6 +931,7 @@ describe('App management dimensions', () => {
     await act(async () => { await windowBarProps().onManagePane('%1'); });
     expect(view.container.querySelector('.sheet-size-control .settings-label')?.textContent).toBe('窗格高度');
     expect(view.container.querySelector('button[aria-label="窗格宽度 +1"]')).toBeNull();
+    expect(screen.getByText(/无法单独调整宽度。请在窗口管理中调整窗口宽度。/)).toBeTruthy();
   });
 
   it('refreshes pane geometry from tmux before opening the pane map', async () => {

@@ -956,6 +956,8 @@ export default {
   'resize.windowHeight': 'Window height',
   'resize.paneWidth': 'Pane width',
   'resize.paneHeight': 'Pane height',
+  'resize.paneWidthWindowHint': 'There is no adjacent pane horizontally, so this pane cannot be resized independently. Adjust the window width in Window Management.',
+  'resize.paneHeightWindowHint': 'There is no adjacent pane vertically, so this pane cannot be resized independently. Adjust the window height in Window Management.',
   'resize.columns': '{n} columns',
   'resize.rows': '{n} rows',
   'resize.restore': 'Restore',

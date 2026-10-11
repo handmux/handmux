@@ -953,6 +953,8 @@ export default {
   'resize.windowHeight': '窗口高度',
   'resize.paneWidth': '窗格宽度',
   'resize.paneHeight': '窗格高度',
+  'resize.paneWidthWindowHint': '当前水平方向没有相邻窗格，无法单独调整宽度。请在窗口管理中调整窗口宽度。',
+  'resize.paneHeightWindowHint': '当前垂直方向没有相邻窗格，无法单独调整高度。请在窗口管理中调整窗口高度。',
   'resize.columns': '{n} 列',
   'resize.rows': '{n} 行',
   'resize.restore': '恢复',

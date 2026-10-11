@@ -328,6 +328,8 @@ export default {
   'resize.windowHeight': 'ウィンドウの高さ',
   'resize.paneWidth': 'ペイン幅',
   'resize.paneHeight': 'ペインの高さ',
+  'resize.paneWidthWindowHint': '横方向に隣接するペインがないため、個別に幅を変更できません。ウィンドウ管理で幅を変更してください。',
+  'resize.paneHeightWindowHint': '縦方向に隣接するペインがないため、個別に高さを変更できません。ウィンドウ管理で高さを変更してください。',
   'resize.columns': '{n} 列',
   'resize.rows': '{n} 行',
   'resize.restore': '復元',

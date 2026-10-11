@@ -326,6 +326,8 @@ export default {
   'resize.windowHeight': '視窗高度',
   'resize.paneWidth': '窗格寬度',
   'resize.paneHeight': '窗格高度',
+  'resize.paneWidthWindowHint': '目前水平方向沒有相鄰窗格，無法單獨調整寬度。請在視窗管理中調整視窗寬度。',
+  'resize.paneHeightWindowHint': '目前垂直方向沒有相鄰窗格，無法單獨調整高度。請在視窗管理中調整視窗高度。',
   'resize.columns': '{n} 欄',
   'resize.rows': '{n} 列',
   'resize.restore': '恢復',

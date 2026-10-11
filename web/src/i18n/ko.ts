@@ -328,6 +328,8 @@ export default {
   'resize.windowHeight': '창 높이',
   'resize.paneWidth': '패널 너비',
   'resize.paneHeight': '패널 높이',
+  'resize.paneWidthWindowHint': '가로로 인접한 패널이 없어 개별 너비를 조정할 수 없습니다. 창 관리에서 창 너비를 조정하세요.',
+  'resize.paneHeightWindowHint': '세로로 인접한 패널이 없어 개별 높이를 조정할 수 없습니다. 창 관리에서 창 높이를 조정하세요.',
   'resize.columns': '{n}열',
   'resize.rows': '{n}행',
   'resize.restore': '복원',

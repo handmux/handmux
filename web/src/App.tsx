@@ -123,7 +123,7 @@ import type {
   WorkspaceRestoreOperation,
   WorkspaceRestoreResult,
 } from './workspaceRecovery.js';
-import { canResizePaneHeight, canResizePaneWidth } from './paneLayout.js';
+import { canResizePaneHeight, canResizePaneWidth, hasGeometry } from './paneLayout.js';
 import { AgentCatalogProvider, inboxReconnectNeeded } from './agentCatalog.js';
 import type { AgentCatalogDescriptor, AgentDiscoverySnapshot, AgentRunRef } from './agentCatalog.js';
 import { SERVER_VERSION_EVENT, serverReloadRequired as isServerReloadRequired } from './serverVersion.js';
@@ -3138,6 +3138,10 @@ export default function App() {
     && !!managedPane && !!managePane && canResizePaneWidth(current?.panes, managePane);
   const showManagedPaneHeight = Number.isFinite(managedPaneHeight)
     && !!managedPane && !!managePane && canResizePaneHeight(current?.panes, managePane);
+  const showPaneWidthWindowHint = !!managedPane && !!managePane
+    && hasGeometry(current?.panes) && !canResizePaneWidth(current?.panes, managePane);
+  const showPaneHeightWindowHint = !!managedPane && !!managePane
+    && hasGeometry(current?.panes) && !canResizePaneHeight(current?.panes, managePane);
   const closePaneManagement = () => {
     if (managePaneWindowRef.current) savedLayoutsRef.current.delete(managePaneWindowRef.current);
     managePaneWindowRef.current = null;
@@ -3508,6 +3512,9 @@ export default function App() {
             restoreDisabled={!paneLayoutRestoreReady || paneResizePending > 0}
           />
         )}
+        {!showManagedPaneWidth && showPaneWidthWindowHint && (
+          <p className="settings-hint">{t('resize.paneWidthWindowHint')}</p>
+        )}
         {showManagedPaneHeight && (
           <ColumnStepper
             label={t('resize.paneHeight')}
@@ -3518,6 +3525,9 @@ export default function App() {
             restoreLabel={t('resize.restoreRatio')}
             restoreDisabled={!paneLayoutRestoreReady || paneResizePending > 0}
           />
+        )}
+        {!showManagedPaneHeight && showPaneHeightWindowHint && (
+          <p className="settings-hint">{t('resize.paneHeightWindowHint')}</p>
         )}
       </ActionSheet>
       <FileManager
