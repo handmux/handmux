@@ -59,6 +59,8 @@ function parseAgentCatalogDescriptor(value: unknown): AgentCatalogDescriptor | n
     || typeof capabilities.conversation !== 'boolean'
     || (capabilities.conversationActivation !== undefined
       && typeof capabilities.conversationActivation !== 'boolean')
+    || (capabilities.conversationRestart !== undefined
+      && typeof capabilities.conversationRestart !== 'boolean')
     || (capabilities.conversationGoal !== undefined
       && typeof capabilities.conversationGoal !== 'boolean')
     || (capabilities.conversationPlan !== undefined
@@ -86,6 +88,9 @@ function parseAgentCatalogDescriptor(value: unknown): AgentCatalogDescriptor | n
       conversation: capabilities.conversation,
       ...(capabilities.conversationActivation === undefined ? {} : {
         conversationActivation: capabilities.conversationActivation,
+      }),
+      ...(capabilities.conversationRestart === undefined ? {} : {
+        conversationRestart: capabilities.conversationRestart,
       }),
       ...(capabilities.conversationGoal === undefined ? {} : {
         conversationGoal: capabilities.conversationGoal,

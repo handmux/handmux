@@ -38,7 +38,7 @@ describe('Agent capability catalog', () => {
       adapters: [
         { id: 'pi', label: 'Pi', capabilities: { inbox: true, conversation: true, interaction: false, subscriptionUsage: false } },
         { id: 'codex', label: 'Codex', capabilities: {
-          inbox: true, conversation: true, conversationActivation: true,
+          inbox: true, conversation: true, conversationActivation: true, conversationRestart: true,
           conversationQueue: true,
           interaction: true, subscriptionUsage: true,
         }, capabilityMetadata: { conversation: { experimental: false } } },
@@ -60,7 +60,7 @@ describe('Agent capability catalog', () => {
       descriptors: [
         { id: 'pi', label: 'Pi', capabilities: { inbox: true, conversation: true, interaction: false, subscriptionUsage: false } },
         { id: 'codex', label: 'Codex', capabilities: {
-          inbox: true, conversation: true, conversationActivation: true,
+          inbox: true, conversation: true, conversationActivation: true, conversationRestart: true,
           interaction: true, subscriptionUsage: true,
         }, capabilityMetadata: { conversation: { experimental: false } } },
       ],
