@@ -649,6 +649,7 @@ export default {
 'chat.restart.confirmTitle': 'Restart this Codex session?',
 'chat.restart.confirmHint': 'The current Codex process will exit, interrupting any task in progress; it will not be sent again automatically. The session ID and history are kept. If automatic recovery cannot finish, continue in the terminal.',
 'chat.restart.confirmAction': 'Restart session',
+'chat.restart.notStarted': 'Restart did not begin. This attempt did not stop Codex. Check the terminal before retrying. Reason:',
 'chat.status.sandboxReadOnly': 'Read only',
 'chat.status.sandboxWorkspace': 'Workspace write',
 'chat.status.sandboxFull': 'Full access',

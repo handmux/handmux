@@ -18,6 +18,7 @@ export type ConversationRestartRecoveryView = Omit<ConversationRestartReceipt, '
 export interface ConversationRestartController {
   status: 'idle' | 'loading' | 'ready' | 'restarting' | 'recovering' | 'error' | 'unknown';
   receipt: ConversationRestartRecoveryView | null;
+  error: string | null;
   restart(): Promise<void>;
   recover(): Promise<void>;
   retry(): void;
@@ -46,6 +47,7 @@ export function useConversationRestart(
 ): ConversationRestartController {
   const [status, setStatus] = useState<ConversationRestartController['status']>('idle');
   const [receipt, setReceipt] = useState<ConversationRestartRecoveryView | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const [retryKey, setRetryKey] = useState(0);
   const generation = useRef(0);
   const paneKey = useRef<string | null>(null);
@@ -57,6 +59,7 @@ export function useConversationRestart(
   const operationRef = useRef<AbortController | null>(null);
   const lookupRef = useRef<AbortController | null>(null);
   const operationBusyRef = useRef(false);
+  const staleRunLookupErrorRef = useRef<string | null>(null);
   runRef.current = run;
   receiptRef.current = receipt;
   authRef.current = onAuthFail;
@@ -66,6 +69,8 @@ export function useConversationRestart(
   useEffect(() => {
     generation.current += 1;
     const requestGeneration = generation.current;
+    staleRunLookupErrorRef.current = null;
+    setError(null);
     if (!enabled || !activePaneId) {
       paneKey.current = null;
       setReceipt(null);
@@ -89,9 +94,11 @@ export function useConversationRestart(
         if (controller.signal.aborted || generation.current !== requestGeneration) return;
         if (!next || next.phase === 'ready') {
           setReceipt(null);
+          setError(null);
           setStatus('ready');
         } else {
           setReceipt(recoveryView(next));
+          setError(null);
           setStatus('error');
         }
       } catch (cause) {
@@ -127,11 +134,22 @@ export function useConversationRestart(
         const next = await getConversationRestartRecovery(activePaneId, controller.signal);
         if (controller.signal.aborted || paneKey.current !== activePaneId) return;
         if (next?.phase === 'ready') {
+          staleRunLookupErrorRef.current = null;
           setReceipt(null);
           setStatus('ready');
           return;
         }
-        if (next) setReceipt(recoveryView(next));
+        if (next) {
+          staleRunLookupErrorRef.current = null;
+          setReceipt(recoveryView(next));
+        } else if (staleRunLookupErrorRef.current) {
+          const reason = staleRunLookupErrorRef.current;
+          staleRunLookupErrorRef.current = null;
+          setReceipt(null);
+          setError(reason);
+          setStatus('error');
+          return;
+        }
         timer = window.setTimeout(() => { void poll(); }, 1_000);
       } catch (cause) {
         if (controller.signal.aborted || paneKey.current !== activePaneId) return;
@@ -161,7 +179,9 @@ export function useConversationRestart(
     operationRef.current?.abort();
     operationRef.current = controller;
     operationBusyRef.current = true;
+    staleRunLookupErrorRef.current = null;
     setReceipt(null);
+    setError(null);
     setStatus('restarting');
     try {
       const next = await restartConversation({ ...activeRun }, controller.signal);
@@ -176,6 +196,32 @@ export function useConversationRestart(
     } catch (cause) {
       if (controller.signal.aborted || generation.current !== requestGeneration) return;
       if (cause instanceof UnauthorizedError) authRef.current?.();
+      if (cause instanceof ApiError && ['not_started', 'stale_run', 'unsupported'].includes(cause.code ?? '')
+        && cause.recoveryPayload === undefined) {
+        if (cause.code === 'stale_run') {
+          try {
+            const pending = await getConversationRestartRecovery(activePane, controller.signal);
+            if (controller.signal.aborted || generation.current !== requestGeneration) return;
+            if (pending && pending.phase !== 'ready') {
+              setReceipt(recoveryView(pending));
+              setError(null);
+              setStatus('error');
+              return;
+            }
+          } catch {
+            if (controller.signal.aborted || generation.current !== requestGeneration) return;
+            staleRunLookupErrorRef.current = cause.serverError || cause.message;
+            setReceipt(manualRecovery(activeRun));
+            setError(null);
+            setStatus('error');
+            return;
+          }
+        }
+        setReceipt(null);
+        setError(cause.serverError || cause.message);
+        setStatus('error');
+        return;
+      }
       let next = cause instanceof ApiError
         ? parseConversationRestartReceipt(cause.recoveryPayload) : null;
       if (!next) {
@@ -183,6 +229,7 @@ export function useConversationRestart(
         catch { /* A read-only retry below will keep checking while the copy-only guide remains visible. */ }
       }
       if (controller.signal.aborted || generation.current !== requestGeneration) return;
+      setError(null);
       setReceipt(next ? recoveryView(next) : manualRecovery(activeRun));
       setStatus('error');
     } finally {
@@ -203,6 +250,8 @@ export function useConversationRestart(
     operationRef.current?.abort();
     operationRef.current = controller;
     operationBusyRef.current = true;
+    staleRunLookupErrorRef.current = null;
+    setError(null);
     setReceipt({ ...current, phase: 'resuming', canResume: false });
     setStatus('recovering');
     try {
@@ -236,6 +285,7 @@ export function useConversationRestart(
   return {
     status: enabled && activePaneId && paneKey.current !== activePaneId ? 'loading' : status,
     receipt: enabled && activePaneId && paneKey.current === activePaneId ? receipt : null,
+    error: enabled && activePaneId && paneKey.current === activePaneId ? error : null,
     restart,
     recover,
     retry: () => setRetryKey((value) => value + 1),

@@ -326,6 +326,24 @@ describe('Agent app facade routes', () => {
     expect(recover).toHaveBeenCalledWith('%1', receipt.operationId);
   });
 
+  it('returns a pre-stop restart rejection without inventing recovery', async () => {
+    const h = runtime();
+    const codexRun = { ...h.lease.ref, agentId: 'codex' };
+    const supported = {
+      ...h.value,
+      runs: { resolve: vi.fn(() => ({ ...h.lease, ref: codexRun })) },
+      conversationRestart: {
+        restart: vi.fn(async () => { throw new ConversationRestartError('Codex process not verified', 'not_started'); }),
+        recovery: vi.fn(async () => null),
+        recover: vi.fn(async () => null),
+      },
+    } as unknown as typeof h.value;
+
+    await request(app(supported)).post('/agents/conversation-restart')
+      .send({ run: codexRun })
+      .expect(409, { error: 'Codex process not verified', code: 'not_started' });
+  });
+
   it('continues an accepted Conversation restart after the HTTP client disconnects', async () => {
     const h = runtime();
     const started = deferred<void>();

@@ -646,6 +646,7 @@ export default {
 'chat.restart.confirmTitle': '重启 Codex 会话？',
 'chat.restart.confirmHint': '当前 Codex 进程会退出，正在执行的任务会中断且不会自动重发。会话 ID 和历史会保留；若自动恢复失败，可以前往终端继续。',
 'chat.restart.confirmAction': '重启会话',
+'chat.restart.notStarted': '重启未开始，本次操作没有停止 Codex。请检查终端状态后重试。原因：',
 'chat.status.sandboxReadOnly': '只读',
 'chat.status.sandboxWorkspace': '可修改工作区',
 'chat.status.sandboxFull': '完全访问',

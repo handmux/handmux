@@ -59,6 +59,24 @@ function appServer(overrides: Partial<ForegroundProcessIdentity> = {}): Foregrou
   };
 }
 
+function npmCodexShimFixture() {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-npm-shim-'));
+  const bin = path.join(directory, '@openai', 'codex', 'bin');
+  fs.mkdirSync(bin, { recursive: true });
+  fs.writeFileSync(path.join(bin, 'codex.js'), '#!/usr/bin/env node\n');
+  const launcher = path.join(directory, 'codex');
+  fs.symlinkSync(path.join(bin, 'codex.js'), launcher);
+  const tuiShim = {
+    pid: 22, ppid: 20, startedAt: 202, tty: '/dev/ttys001', executable: '/usr/local/bin/node',
+    commandLine: `node ${launcher} --remote unix://${SOCKET} --cd /repo`,
+  };
+  const appServerShim = {
+    pid: 23, ppid: 20, startedAt: 203, tty: '/dev/ttys001', executable: '/usr/local/bin/node',
+    commandLine: `node ${launcher} app-server --listen unix://${SOCKET}`,
+  };
+  return { launcher, tuiShim, appServerShim };
+}
+
 function makeHarness(options: {
   processIdentity?: ForegroundProcessIdentity;
   processGroup?: readonly ForegroundProcessIdentity[];
@@ -174,6 +192,74 @@ function makeHarness(options: {
 }
 
 describe('Codex conversation restart', () => {
+  it('restarts through both verified npm Codex shims and persists their generations', async () => {
+    const { tuiShim, appServerShim } = npmCodexShimFixture();
+    let h!: ReturnType<typeof makeHarness>;
+    h = makeHarness({
+      processIdentity: tui({ ppid: tuiShim.pid }),
+      processGroup: [tui({ ppid: tuiShim.pid }), tuiShim, wrapper(), appServerShim,
+        appServer({ ppid: appServerShim.pid })],
+      runPaneCommand: async () => {
+        const nextTuiShim = { ...tuiShim, pid: 52, ppid: 50, startedAt: 502 };
+        const nextAppServerShim = { ...appServerShim, pid: 53, ppid: 50, startedAt: 503 };
+        const nextTui = tui({ pid: 40, ppid: 52, startedAt: 400 });
+        h.setIdentity(nextTui);
+        h.setGroup([nextTui, nextTuiShim, wrapper({ pid: 50, startedAt: 500 }),
+          nextAppServerShim, appServer({ pid: 51, ppid: 53, startedAt: 501 })]);
+        h.setPane(pane('codex'));
+        h.setApp({ managed: true, threadId: SESSION_ID });
+      },
+    });
+
+    const receipt = await h.service.restart(h.run.value);
+
+    expect(receipt.phase).toBe('ready');
+    expect(h.terminate).toHaveBeenCalledOnce();
+    expect(h.terminate).toHaveBeenCalledWith(10, 'SIGTERM');
+    expect(h.runPaneCommand).toHaveBeenCalledOnce();
+    expect(h.runPaneCommand).toHaveBeenCalledWith('%1', COMMAND);
+    expect(h.receipts.get(receipt.operationId)?.process).toMatchObject({
+      tuiShim: { pid: tuiShim.pid, startedAt: tuiShim.startedAt },
+      appServerShim: { pid: appServerShim.pid, startedAt: appServerShim.startedAt },
+    });
+    expect(new CodexRestartReceiptStore(h.receiptFile).get(receipt.operationId)?.process)
+      .toMatchObject({ tuiShim: { pid: tuiShim.pid }, appServerShim: { pid: appServerShim.pid } });
+  });
+
+  it('rejects a lookalike Node script before stopping any process', async () => {
+    const { tuiShim, appServerShim } = npmCodexShimFixture();
+    const fakeTuiShim = { ...tuiShim, commandLine: tuiShim.commandLine.replace(/codex --remote/, 'fake-codex.js --remote') };
+    const h = makeHarness({
+      processIdentity: tui({ ppid: fakeTuiShim.pid }),
+      processGroup: [tui({ ppid: fakeTuiShim.pid }), fakeTuiShim, wrapper(), appServerShim,
+        appServer({ ppid: appServerShim.pid })],
+    });
+
+    await expect(h.service.restart(h.run.value)).rejects.toMatchObject({
+      code: 'not_started', recovery: undefined,
+    });
+    expect(h.terminate).not.toHaveBeenCalled();
+    expect(h.pauseSessionDelivery).not.toHaveBeenCalled();
+    expect(h.receipts.latestForPane('%1')).toBeNull();
+  });
+
+  it('rejects a changed npm shim generation at the final stop boundary', async () => {
+    const { tuiShim, appServerShim } = npmCodexShimFixture();
+    const original = [tui({ ppid: tuiShim.pid }), tuiShim, wrapper(), appServerShim,
+      appServer({ ppid: appServerShim.pid })];
+    const h = makeHarness({ processIdentity: original[0]!, processGroup: original });
+    h.inspectForegroundGroupFresh.mockResolvedValueOnce(original).mockResolvedValue([
+      original[0]!, { ...tuiShim, startedAt: tuiShim.startedAt + 1 }, wrapper(), appServerShim,
+      original[4]!,
+    ]);
+
+    await expect(h.service.restart(h.run.value)).rejects.toMatchObject({
+      code: 'not_started', recovery: undefined,
+    });
+    expect(h.terminate).not.toHaveBeenCalled();
+    expect(h.receipts.latestForPane('%1')).toBeNull();
+  });
+
   it('stops only the verified TUI, resumes the same session, and releases delivery at readiness', async () => {
     const h = makeHarness();
 
@@ -194,7 +280,7 @@ describe('Codex conversation restart', () => {
     const h = makeHarness({ threadId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' });
 
     await expect(h.service.restart(h.run.value)).rejects.toMatchObject({
-      code: 'unavailable', recovery: { recovery: { command: COMMAND }, canResume: false },
+      code: 'not_started', recovery: undefined,
     });
     expect(h.terminate).not.toHaveBeenCalled();
     expect(h.pauseSessionDelivery).not.toHaveBeenCalled();
@@ -207,7 +293,7 @@ describe('Codex conversation restart', () => {
       processGroup: [tui(), wrapper({ commandLine: '/usr/local/bin/node unrelated-script.js' }), appServer()],
     });
 
-    await expect(h.service.restart(h.run.value)).rejects.toMatchObject({ code: 'unavailable' });
+    await expect(h.service.restart(h.run.value)).rejects.toMatchObject({ code: 'not_started', recovery: undefined });
     expect(h.terminate).not.toHaveBeenCalled();
     expect(h.runPaneCommand).not.toHaveBeenCalled();
     expect(h.pauseSessionDelivery).not.toHaveBeenCalled();
@@ -225,7 +311,7 @@ describe('Codex conversation restart', () => {
     h.inspectForegroundFresh.mockResolvedValueOnce(tui()).mockResolvedValue(tui(changes));
 
     await expect(h.service.restart(h.run.value)).rejects.toMatchObject({
-      code: _label === 'executable' ? 'unavailable' : 'stale_run',
+      code: 'not_started', recovery: undefined,
     });
     expect(h.terminate).not.toHaveBeenCalled();
     expect(h.released).toHaveBeenCalledOnce();
@@ -237,8 +323,27 @@ describe('Codex conversation restart', () => {
       .mockResolvedValueOnce([tui(), wrapper(), appServer()])
       .mockResolvedValue([tui(), wrapper({ startedAt: 201 }), appServer()]);
 
-    await expect(h.service.restart(h.run.value)).rejects.toMatchObject({ code: 'stale_run' });
+    await expect(h.service.restart(h.run.value)).rejects.toMatchObject({ code: 'not_started', recovery: undefined });
     expect(h.terminate).not.toHaveBeenCalled();
+    expect(h.released).toHaveBeenCalledOnce();
+  });
+
+  it('removes the pending receipt when Codex exits independently before any stop signal', async () => {
+    const h = makeHarness();
+    h.inspectForegroundGroupFresh.mockImplementation(async () => {
+      if (h.inspectForegroundGroupFresh.mock.calls.length === 2) {
+        h.setIdentity(null);
+        h.setGroup([]);
+        h.setApp({ managed: false, threadId: null });
+      }
+      return h.group();
+    });
+
+    await expect(h.service.restart(h.run.value)).rejects.toMatchObject({
+      code: 'not_started', recovery: undefined,
+    });
+    expect(h.terminate).not.toHaveBeenCalled();
+    expect(h.receipts.latestForPane('%1')).toBeNull();
     expect(h.released).toHaveBeenCalledOnce();
   });
 
@@ -250,7 +355,7 @@ describe('Codex conversation restart', () => {
     if ('epoch' in changes) h.paneEpoch.mockResolvedValueOnce(EPOCH).mockResolvedValue(changes.epoch);
     if ('pane' in changes) h.listPanes.mockResolvedValueOnce([pane()]).mockResolvedValue([changes.pane]);
 
-    await expect(h.service.restart(h.run.value)).rejects.toMatchObject({ code: 'stale_run' });
+    await expect(h.service.restart(h.run.value)).rejects.toMatchObject({ code: 'not_started', recovery: undefined });
     expect(h.terminate).not.toHaveBeenCalled();
     expect(h.released).toHaveBeenCalledOnce();
   });
@@ -258,7 +363,7 @@ describe('Codex conversation restart', () => {
   it('clears the receipt and releases delivery when SIGTERM fails and the original TUI remains alive', async () => {
     const h = makeHarness({ terminate: async () => { throw new Error('permission denied'); } });
 
-    await expect(h.service.restart(h.run.value)).rejects.toMatchObject({ code: 'unavailable' });
+    await expect(h.service.restart(h.run.value)).rejects.toMatchObject({ code: 'not_started', recovery: undefined });
     expect(h.terminate).toHaveBeenCalledOnce();
     expect(h.runPaneCommand).not.toHaveBeenCalled();
     expect(h.released).toHaveBeenCalledOnce();
@@ -345,7 +450,7 @@ describe('Codex conversation restart', () => {
       return h.group();
     });
 
-    await expect(h.service.restart(h.run.value)).rejects.toMatchObject({ code: 'stale_run' });
+    await expect(h.service.restart(h.run.value)).rejects.toMatchObject({ code: 'not_started', recovery: undefined });
     expect(h.terminate).not.toHaveBeenCalled();
     expect(h.released).toHaveBeenCalledOnce();
     expect(h.receipts.isPending('codex', SESSION_ID)).toBe(false);

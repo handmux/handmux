@@ -1,4 +1,5 @@
-import crypto from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
 import type { AgentRunLease, AgentRunRef } from '../agent-runtime/run.js';
 import type {
   ForegroundProcessIdentity,
@@ -63,6 +64,8 @@ interface RestartEvidence {
   epoch: string;
   tui: ForegroundProcessIdentity;
   wrapper: ForegroundProcessIdentity;
+  tuiShim?: ForegroundProcessIdentity;
+  appServerShim?: ForegroundProcessIdentity;
   appServer: ForegroundProcessIdentity;
 }
 
@@ -107,6 +110,13 @@ function sameIdentity(first: ForegroundProcessIdentity, second: ForegroundProces
     && first.executable !== undefined && second.executable === first.executable
     && first.ppid !== undefined && second.ppid === first.ppid
     && first.commandLine !== undefined && second.commandLine === first.commandLine;
+}
+
+function sameOptionalIdentity(
+  first: ForegroundProcessIdentity | undefined,
+  second: ForegroundProcessIdentity | undefined,
+): boolean {
+  return first === undefined ? second === undefined : second !== undefined && sameIdentity(first, second);
 }
 
 function sameRunProcess(locked: AgentRunLease['process'], identity: ForegroundProcessIdentity): boolean {
@@ -159,6 +169,45 @@ function isCodexAppServer(identity: ForegroundProcessIdentity, socketPath: strin
     && listenIndex >= 0 && tokens[listenIndex + 1] === `unix://${socketPath}`
     && !!identity.startedAt && !!identity.tty && !!identity.executable && !!identity.commandLine
     && Number.isSafeInteger(identity.ppid);
+}
+
+function isNpmCodexShim(
+  identity: ForegroundProcessIdentity,
+  socketPath: string,
+  role: 'tui' | 'appServer',
+): boolean {
+  if (!/^node(?:\.exe)?$/i.test(executableName(identity)) || !identity.startedAt
+    || !identity.tty || !identity.commandLine || !Number.isSafeInteger(identity.ppid)) return false;
+  const tokens = commandTokens(identity);
+  if (!/^node(?:\.exe)?$/i.test(path.basename(tokens[0] ?? '')) || !path.isAbsolute(tokens[1] ?? '')) return false;
+  let entrypoint: string;
+  try { entrypoint = fs.realpathSync(tokens[1]!); }
+  catch { return false; }
+  if (!/[\\/]@openai[\\/]codex[\\/]bin[\\/]codex\.js$/i.test(entrypoint)) return false;
+  const args = tokens.slice(2);
+  if (role === 'tui') {
+    const remote = args.indexOf('--remote');
+    return remote >= 0 && args[remote + 1] === `unix://${socketPath}` && !args.includes('app-server');
+  }
+  const listen = args.indexOf('--listen');
+  return args[0] === 'app-server' && listen >= 0 && args[listen + 1] === `unix://${socketPath}`;
+}
+
+function managedParent(
+  group: readonly ForegroundProcessIdentity[],
+  child: ForegroundProcessIdentity,
+  socketPath: string,
+  role: 'tui' | 'appServer',
+): { wrapper: ForegroundProcessIdentity; shim?: ForegroundProcessIdentity } | null {
+  const parent = group.find((candidate) => candidate.pid === child.ppid
+    && normTty(candidate.tty) === normTty(child.tty));
+  if (!parent) return null;
+  if (isHandmuxCodexWrapper(parent)) return { wrapper: parent };
+  if (!isNpmCodexShim(parent, socketPath, role)) return null;
+  const wrapper = group.find((candidate) => candidate.pid === parent.ppid
+    && normTty(candidate.tty) === normTty(parent.tty)
+    && isHandmuxCodexWrapper(candidate));
+  return wrapper ? { wrapper, shim: parent } : null;
 }
 
 function recoveryOf(receipt: CodexRestartReceipt) {
@@ -244,6 +293,8 @@ export function createCodexConversationRestartController({
     const originalPresent = group.some((identity) => (
       sameGeneration(receipt.process.tui, identity)
       || sameGeneration(receipt.process.wrapper, identity)
+      || (receipt.process.tuiShim && sameGeneration(receipt.process.tuiShim, identity))
+      || (receipt.process.appServerShim && sameGeneration(receipt.process.appServerShim, identity))
     ));
     return originalPresent ? null : { pane, identity: foreground };
   };
@@ -252,11 +303,9 @@ export function createCodexConversationRestartController({
     if (!foreground) return null;
     const tui = group.find((candidate) => candidate.pid === foreground.pid && isCodexTui(candidate, forSocket));
     if (!tui || !sameIdentity(foreground, tui)) return null;
-    const wrapper = group.find((candidate) => candidate.pid === tui.ppid
-      && normTty(candidate.tty) === normTty(tui.tty)
-      && isHandmuxCodexWrapper(candidate));
-    if (!wrapper || !Number.isSafeInteger(wrapper.ppid) || !wrapper.startedAt) return null;
-    return { tui, wrapper };
+    const parent = managedParent(group, tui, forSocket, 'tui');
+    if (!parent || !Number.isSafeInteger(parent.wrapper.ppid) || !parent.wrapper.startedAt) return null;
+    return { tui, ...parent };
   };
   const inspectEvidence = async (run: AgentRunLease): Promise<RestartEvidence> => {
     const pane = await paneFor(run.ref.paneId);
@@ -278,26 +327,33 @@ export function createCodexConversationRestartController({
     if (!target || !sameIdentity(identity, target) || !isCodexTui(target, socketPath(pane.paneId))) {
       throw new RestartFault('The foreground Codex TUI cannot be verified as managed', 'unavailable');
     }
-    const wrapper = group.find((candidate) => candidate.pid === target.ppid
-      && normTty(candidate.tty) === normTty(target.tty)
-      && isHandmuxCodexWrapper(candidate));
+    const parent = managedParent(group, target, socketPath(pane.paneId), 'tui');
+    const wrapper = parent?.wrapper;
     if (!wrapper || !wrapper.startedAt || !wrapper.executable || !wrapper.commandLine
       || !Number.isSafeInteger(wrapper.ppid)) {
       throw new RestartFault('The Codex TUI is not a verified child of handmux codex', 'unavailable');
     }
-    const server = group.find((candidate) => candidate.ppid === wrapper.pid
+    const server = group.find((candidate) => isCodexAppServer(candidate, socketPath(pane.paneId))
       && normTty(candidate.tty) === normTty(wrapper.tty)
-      && isCodexAppServer(candidate, socketPath(pane.paneId)));
-    if (!server) {
+      && managedParent(group, candidate, socketPath(pane.paneId), 'appServer')?.wrapper.pid === wrapper.pid);
+    const serverParent = server ? managedParent(group, server, socketPath(pane.paneId), 'appServer') : null;
+    if (!server || !serverParent || !sameIdentity(wrapper, serverParent.wrapper)) {
       throw new RestartFault('The managed Codex App Server process cannot be verified', 'unavailable');
     }
-    return { pane, epoch, tui: target, wrapper, appServer: server };
+    return {
+      pane, epoch, tui: target, wrapper, appServer: server,
+      ...(parent.shim ? { tuiShim: parent.shim } : {}),
+      ...(serverParent.shim ? { appServerShim: serverParent.shim } : {}),
+    };
   };
   const recordInput = (run: AgentRunLease, evidence: RestartEvidence): CodexRestartReceiptInput => {
     const tui = toStoredIdentity(evidence.tui);
     const wrapper = toStoredIdentity(evidence.wrapper);
+    const tuiShim = evidence.tuiShim ? toStoredIdentity(evidence.tuiShim) : undefined;
+    const appServerShim = evidence.appServerShim ? toStoredIdentity(evidence.appServerShim) : undefined;
     const appServer = toStoredIdentity(evidence.appServer);
-    if (!tui || !wrapper || !appServer || !run.ref.sessionId) {
+    if (!tui || !wrapper || !appServer || (evidence.tuiShim && !tuiShim)
+      || (evidence.appServerShim && !appServerShim) || !run.ref.sessionId) {
       throw new RestartFault('The Codex process generation is incomplete', 'unavailable');
     }
     return {
@@ -308,7 +364,11 @@ export function createCodexConversationRestartController({
         tty: evidence.pane.tty!,
         tmuxEpoch: evidence.epoch,
       },
-      process: { tui, wrapper, appServer },
+      process: {
+        tui, wrapper, appServer,
+        ...(tuiShim ? { tuiShim } : {}),
+        ...(appServerShim ? { appServerShim } : {}),
+      },
       sessionId: run.ref.sessionId,
       previousRunId: run.ref.runId,
     };
@@ -376,30 +436,10 @@ export function createCodexConversationRestartController({
     if (ownership?.managed !== true) return false;
     const current = await managedTui(pane, socketPath(pane.paneId));
     if (!current || sameGeneration(receipt.process.tui, current.tui)
-      || sameGeneration(receipt.process.wrapper, current.wrapper)) return false;
+      || sameGeneration(receipt.process.wrapper, current.wrapper)
+      || (receipt.process.tuiShim && current.shim
+        && sameGeneration(receipt.process.tuiShim, current.shim))) return false;
     return await isRuntimeRunReady(pane.paneId, receipt.sessionId, receipt.previousRunId);
-  };
-  const preflightRecovery = (
-    run: AgentRunLease,
-    code: 'unavailable' | 'stale_run',
-    message: string,
-  ): ConversationRestartError => {
-    const sessionId = run.ref.sessionId;
-    if (!sessionId || !isSessionUuid(sessionId)) return new ConversationRestartError(message, code);
-    const operationId = crypto.createHash('sha256').update(JSON.stringify({
-      agentId: run.ref.agentId,
-      paneId: run.ref.paneId,
-      runId: run.ref.runId,
-      sessionId,
-      preflight: true,
-    })).digest('hex');
-    return new ConversationRestartError(message, code, {
-      operationId,
-      recovery: { kind: 'codex_resume', sessionId, command: `handmux codex resume ${sessionId}` },
-      phase: 'prepared',
-      state: 'current',
-      canResume: false,
-    });
   };
   const waitForShell = async (
     receipt: CodexRestartReceipt,
@@ -419,6 +459,8 @@ export function createCodexConversationRestartController({
       const originalPresent = group.some((identity) => (
         sameGeneration(receipt.process.tui, identity)
         || sameGeneration(receipt.process.wrapper, identity)
+        || (receipt.process.tuiShim && sameGeneration(receipt.process.tuiShim, identity))
+        || (receipt.process.appServerShim && sameGeneration(receipt.process.appServerShim, identity))
       ));
       if ((serverStatus === 'exited' || serverStatus === 'replaced')
         && ownership?.managed === false && !originalPresent && foreground
@@ -459,7 +501,7 @@ export function createCodexConversationRestartController({
         'Conversation restart is not supported for this Agent', 'unsupported',
       );
       if (!run.ref.sessionId || !isSessionUuid(run.ref.sessionId) || !stableRun(run, resolveRun)) {
-        throw new ConversationRestartError('The Agent run is no longer active', 'stale_run');
+        throw new ConversationRestartError('The Agent run changed; restart was not started', 'not_started');
       }
       const existing = receipts.latestForPane(run.ref.paneId);
       if (existing && existing.sessionId === run.ref.sessionId && existing.phase !== 'ready') {
@@ -471,57 +513,65 @@ export function createCodexConversationRestartController({
       let evidence: RestartEvidence;
       try { evidence = await inspectEvidence(run); }
       catch (error) {
-        if (error instanceof RestartFault) throw preflightRecovery(run, error.code, error.message);
-        throw preflightRecovery(run, 'unavailable', 'Codex restart identity could not be verified');
+        if (error instanceof RestartFault) {
+          throw new ConversationRestartError(`Restart not started: ${error.message}`, 'not_started');
+        }
+        throw new ConversationRestartError('Codex process could not be verified; restart was not started', 'not_started');
       }
       if (!stableRun(run, resolveRun)) throw new ConversationRestartError(
-        'The Agent run changed before the restart could begin', 'stale_run',
+        'The Agent run changed; restart was not started', 'not_started',
       );
 
       let receipt: CodexRestartReceipt;
       try { receipt = receipts.prepare(recordInput(run, evidence)); }
       catch {
-        throw new ConversationRestartError('Codex restart state could not be saved; no process was stopped', 'unavailable');
+        throw new ConversationRestartError('Restart state could not be saved; Codex was not stopped', 'not_started');
       }
       let release: (() => void) | undefined;
       let signalAttempted = false;
       let terminationFailed = false;
-      const clearBeforeStop = async (message: string, code: 'unavailable' | 'stale_run'): Promise<never> => {
-        if (await originalStillPresent(receipt)) {
+      const clearBeforeStop = async (message: string): Promise<never> => {
+        // Before terminate() is called we know this request did not stop anything, even if the
+        // original process independently vanished during the final identity probe.
+        if (!signalAttempted || await originalStillPresent(receipt)) {
+          let cleared = false;
           try {
-            receipts.clear(receipt.operationId);
-            releaseDeliveryFence(receipt.operationId);
+            cleared = receipts.clear(receipt.operationId);
           } catch { /* The durable pending marker still blocks delivery; fail closed. */ }
+          if (cleared) {
+            releaseDeliveryFence(receipt.operationId);
+            throw new ConversationRestartError(`Restart not started: ${message}`, 'not_started');
+          }
         }
-        throw await errorWithReceipt(message, code, receipt, false);
+        throw await errorWithReceipt(message, 'unavailable', receipt, false);
       };
 
       try {
         release = await pauseSessionDelivery({ agentId: 'codex', sessionId: run.ref.sessionId });
         deliveryFenceReleases.set(receipt.operationId, release);
-        if (signal.aborted) return await clearBeforeStop('Conversation restart timed out before stopping Codex', 'unavailable');
+        if (signal.aborted) return await clearBeforeStop('The operation timed out before Codex was stopped');
         const result = await serializePaneInput(run.ref.paneId, async () => {
           if (!stableRun(run, resolveRun)) {
-            return await clearBeforeStop('The Agent run changed before Codex could be stopped', 'stale_run');
+            return await clearBeforeStop('The Agent run changed before Codex could be stopped');
           }
           let current: RestartEvidence;
           try { current = await inspectEvidence(run); }
           catch (error) {
-            const code = error instanceof RestartFault ? error.code : 'unavailable';
             return await clearBeforeStop(
-              error instanceof Error ? error.message : 'Codex restart identity changed before the stop boundary',
-              code,
+              error instanceof Error ? error.message : 'Codex process could not be verified before the stop boundary',
             );
           }
           if (!samePane(evidence.pane, current.pane) || evidence.epoch !== current.epoch
             || !sameIdentity(evidence.tui, current.tui) || !sameIdentity(evidence.wrapper, current.wrapper)
+            || !sameOptionalIdentity(evidence.tuiShim, current.tuiShim)
+            || !sameOptionalIdentity(evidence.appServerShim, current.appServerShim)
             || !sameIdentity(evidence.appServer, current.appServer)) {
-            return await clearBeforeStop('The original Codex process or pane changed before the stop boundary', 'stale_run');
+            return await clearBeforeStop('The original Codex process or pane changed before the stop boundary');
           }
           if (!stableRun(run, resolveRun)) {
-            return await clearBeforeStop('The Agent run changed during the final process identity probe', 'stale_run');
+            return await clearBeforeStop('The Agent run changed during the final process identity probe');
           }
-          if (signal.aborted) return await clearBeforeStop('Conversation restart timed out before stopping Codex', 'unavailable');
+          if (signal.aborted) return await clearBeforeStop('The operation timed out before Codex was stopped');
 
           signalAttempted = true;
           let terminateError: unknown;
@@ -540,7 +590,7 @@ export function createCodexConversationRestartController({
           try { shell = await waitForShell(receipt, signal); }
           catch (error) {
             if (terminateError && await originalStillPresent(receipt)) {
-              return await clearBeforeStop('Codex is still running; the restart signal could not be delivered', 'unavailable');
+              return await clearBeforeStop('Codex is still running; the restart signal could not be delivered');
             }
             throw error;
           }
@@ -563,20 +613,15 @@ export function createCodexConversationRestartController({
         if (error instanceof ConversationRestartError) throw error;
         if (!signalAttempted) {
           await clearBeforeStop(
-            error instanceof Error ? error.message : 'Codex restart was not completed',
-            error instanceof RestartFault ? error.code : 'unavailable',
+            error instanceof Error ? error.message : 'Restart failed before Codex was stopped',
           );
         }
         if (terminationFailed && await originalStillPresent(receipt)) {
           try {
-            receipts.clear(receipt.operationId);
-            releaseDeliveryFence(receipt.operationId);
-            throw await errorWithReceipt(
-              error instanceof Error ? error.message : 'Codex restart was not completed',
-              error instanceof RestartFault ? error.code : 'unavailable',
-              receipt,
-              false,
-            );
+            if (receipts.clear(receipt.operationId)) {
+              releaseDeliveryFence(receipt.operationId);
+              throw new ConversationRestartError('Codex is still running; the restart signal could not be delivered', 'not_started');
+            }
           } catch (cleanupError) {
             if (cleanupError instanceof ConversationRestartError) throw cleanupError;
             // If the durable clear failed, preserve the on-disk marker and its delivery fence.

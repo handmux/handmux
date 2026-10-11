@@ -682,6 +682,11 @@ export function AgentConversationContextControl({
             </div>
           )}
         </div>
+        {restartEnabled && restartController?.error && (
+          <p className="cc-context-restart-error" role="alert">
+            {t('chat.restart.notStarted')}<span>{restartController.error}</span>
+          </p>
+        )}
       </section>
     </>}
     {confirmRestart && restartController && (

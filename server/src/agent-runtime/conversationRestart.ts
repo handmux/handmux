@@ -17,7 +17,7 @@ export interface ConversationRestartReceipt {
   canResume: boolean;
 }
 
-export type ConversationRestartErrorCode = 'unsupported' | 'unavailable' | 'in_progress' | 'stale_run';
+export type ConversationRestartErrorCode = 'unsupported' | 'unavailable' | 'in_progress' | 'stale_run' | 'not_started';
 
 const SESSION_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const OPERATION_ID_RE = /^[0-9a-f]{64}$/;

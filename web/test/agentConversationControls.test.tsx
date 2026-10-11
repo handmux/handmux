@@ -104,6 +104,22 @@ describe('Agent Conversation controls UI', () => {
     expect(screen.queryByRole('button', { name: '重启会话' })).toBeNull();
   });
 
+  it('shows a pre-stop failure in the context popover and allows retry', () => {
+    render(createElement(AgentConversationContextControl, {
+      controller: controller({ snapshot: { context: { activity: 'idle' } } }),
+      sessionId: 'session-1', restartEnabled: true,
+      restartController: { status: 'error', receipt: null,
+        error: 'The managed Codex process could not be verified',
+        restart: vi.fn(async () => {}), recover: vi.fn(async () => {}), retry: vi.fn() },
+    } as never));
+
+    fireEvent.click(screen.getByRole('button', { name: '上下文状态，用量暂不可用' }));
+    const dialog = screen.getByRole('dialog', { name: '会话状态' });
+    expect(dialog.textContent).toContain('The managed Codex process could not be verified');
+    expect(dialog.textContent).toContain('本次操作没有停止 Codex');
+    expect((screen.getByRole('button', { name: '重启会话' }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
   it.each(['degraded', 'error'] as const)(
     'keeps last-good controls without a global banner while status is %s',
     (status) => {

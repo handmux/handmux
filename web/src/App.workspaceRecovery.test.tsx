@@ -642,6 +642,16 @@ describe('App established conversation during server restart', () => {
     expect((screen.getByPlaceholderText('和 Agent 对话…') as HTMLTextAreaElement).value).toBe('keep this draft');
     view.unmount();
   });
+
+  it('keeps the conversation mounted when restart was rejected before stopping Codex', async () => {
+    restartHook.result = { status: 'error', receipt: null, error: 'Codex process could not be verified',
+      restart: vi.fn(async () => {}), recover: vi.fn(async () => {}), retry: vi.fn() };
+    await openConversation();
+
+    expect(screen.getByText('Saved answer session-1')).toBeTruthy();
+    expect(screen.queryByText('无法确定是否完成')).toBeNull();
+    expect(screen.getByPlaceholderText('和 Agent 对话…')).toBeTruthy();
+  });
 });
 
 describe('App live tmux topology recovery', () => {

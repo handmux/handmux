@@ -32,6 +32,9 @@ export interface CodexRestartReceipt {
   process: {
     tui: CodexRestartProcessIdentity;
     wrapper: CodexRestartProcessIdentity;
+    // The npm CLI uses a Node launcher between Handmux and each native Codex process.
+    tuiShim?: CodexRestartProcessIdentity;
+    appServerShim?: CodexRestartProcessIdentity;
     // Optional only for receipts written by an earlier in-development build. Such receipts stay recoverable
     // manually but cannot authorize an automatic resume or queue release without this generation.
     appServer?: CodexRestartProcessIdentity;
@@ -51,6 +54,8 @@ export type CodexRestartReceiptInput = Omit<
   process: {
     tui: CodexRestartProcessIdentity;
     wrapper: CodexRestartProcessIdentity;
+    tuiShim?: CodexRestartProcessIdentity;
+    appServerShim?: CodexRestartProcessIdentity;
     appServer: CodexRestartProcessIdentity;
   };
 };
@@ -85,9 +90,16 @@ function validReceipt(value: unknown): value is CodexRestartReceipt {
     && typeof pane.tty === 'string' && pane.tty.length > 0 && pane.tty.length <= 1_024
     && typeof pane.tmuxEpoch === 'string' && pane.tmuxEpoch.length > 0 && pane.tmuxEpoch.length <= 1_024
     && validProcess(process.tui) && validProcess(process.wrapper)
-    && process.tui.ppid === process.wrapper.pid
+    && (process.tuiShim === undefined
+      ? process.tui.ppid === process.wrapper.pid
+      : (validProcess(process.tuiShim) && process.tuiShim.ppid === process.wrapper.pid
+        && process.tui.ppid === process.tuiShim.pid))
     && (process.appServer === undefined
-      || (validProcess(process.appServer) && process.appServer.ppid === process.wrapper.pid))
+      || (validProcess(process.appServer) && (process.appServerShim === undefined
+        ? process.appServer.ppid === process.wrapper.pid
+        : (validProcess(process.appServerShim) && process.appServerShim.ppid === process.wrapper.pid
+          && process.appServer.ppid === process.appServerShim.pid))))
+    && (process.appServerShim === undefined || process.appServer !== undefined)
     && typeof value.sessionId === 'string' && isSessionUuid(value.sessionId)
     && typeof value.previousRunId === 'string' && value.previousRunId.length > 0 && value.previousRunId.length <= 1_024
     && value.command === `handmux codex resume ${value.sessionId}`
@@ -111,6 +123,10 @@ function persistedReceipt(receipt: CodexRestartReceipt): CodexRestartReceipt {
     process: {
       tui: persistedProcessIdentity(receipt.process.tui),
       wrapper: persistedProcessIdentity(receipt.process.wrapper),
+      ...(receipt.process.tuiShim
+        ? { tuiShim: persistedProcessIdentity(receipt.process.tuiShim) } : {}),
+      ...(receipt.process.appServerShim
+        ? { appServerShim: persistedProcessIdentity(receipt.process.appServerShim) } : {}),
       ...(receipt.process.appServer
         ? { appServer: persistedProcessIdentity(receipt.process.appServer) }
         : {}),
@@ -139,6 +155,8 @@ function operationId(input: CodexRestartReceiptInput): string {
     process: {
       tui: persistedProcessIdentity(input.process.tui),
       wrapper: persistedProcessIdentity(input.process.wrapper),
+      ...(input.process.tuiShim ? { tuiShim: persistedProcessIdentity(input.process.tuiShim) } : {}),
+      ...(input.process.appServerShim ? { appServerShim: persistedProcessIdentity(input.process.appServerShim) } : {}),
       appServer: persistedProcessIdentity(input.process.appServer),
     },
     sessionId: input.sessionId,
@@ -163,6 +181,8 @@ function persistedInput(input: CodexRestartReceiptInput): CodexRestartReceiptInp
     process: {
       tui: persistedProcessIdentity(input.process.tui),
       wrapper: persistedProcessIdentity(input.process.wrapper),
+      ...(input.process.tuiShim ? { tuiShim: persistedProcessIdentity(input.process.tuiShim) } : {}),
+      ...(input.process.appServerShim ? { appServerShim: persistedProcessIdentity(input.process.appServerShim) } : {}),
       appServer: persistedProcessIdentity(input.process.appServer),
     },
     sessionId: input.sessionId,

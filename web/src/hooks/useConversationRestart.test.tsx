@@ -29,7 +29,7 @@ const readyReceipt = { ...receipt, phase: 'ready' as const, canResume: false };
 
 afterEach(() => {
   vi.useRealTimers();
-  vi.clearAllMocks();
+  vi.resetAllMocks();
 });
 
 describe('useConversationRestart', () => {
@@ -66,6 +66,99 @@ describe('useConversationRestart', () => {
     await act(async () => { await result.current.restart(); });
 
     expect(result.current).toMatchObject({ status: 'error', receipt });
+  });
+
+  it('keeps the conversation when the server confirms restart never stopped Codex', async () => {
+    vi.mocked(getConversationRestartRecovery).mockResolvedValue(null);
+    vi.mocked(restartConversation).mockRejectedValue(new ApiError(
+      'The managed Codex process could not be verified', 409,
+      'The managed Codex process could not be verified', 'not_started',
+    ));
+    const { result } = renderHook(() => useConversationRestart(run, true, undefined, '%8'));
+    await waitFor(() => expect(result.current.status).toBe('ready'));
+
+    await act(async () => { await result.current.restart(); });
+
+    expect(result.current).toMatchObject({
+      status: 'error', receipt: null,
+      error: 'The managed Codex process could not be verified',
+    });
+    expect(getConversationRestartRecovery).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(['stale_run', 'unsupported'])(
+    'keeps the conversation when the route rejects the restart as %s before dispatch', async (code) => {
+      vi.mocked(getConversationRestartRecovery).mockResolvedValue(null);
+      vi.mocked(restartConversation).mockRejectedValue(new ApiError(
+        'The current run cannot restart', 409, 'The current run cannot restart', code,
+      ));
+      const { result } = renderHook(() => useConversationRestart(run, true, undefined, '%8'));
+      await waitFor(() => expect(result.current.status).toBe('ready'));
+
+      await act(async () => { await result.current.restart(); });
+
+      expect(result.current).toMatchObject({
+        status: 'error', receipt: null, error: 'The current run cannot restart',
+      });
+    },
+  );
+
+  it('shows another browser’s pending restart when this browser submits a stale run', async () => {
+    vi.mocked(getConversationRestartRecovery).mockResolvedValueOnce(null).mockResolvedValueOnce(receipt);
+    vi.mocked(restartConversation).mockRejectedValue(new ApiError(
+      'stale agent run', 409, 'stale agent run', 'stale_run',
+    ));
+    const { result } = renderHook(() => useConversationRestart(run, true, undefined, '%8'));
+    await waitFor(() => expect(result.current.status).toBe('ready'));
+
+    await act(async () => { await result.current.restart(); });
+
+    expect(result.current).toMatchObject({ status: 'error', receipt, error: null });
+    expect(getConversationRestartRecovery).toHaveBeenCalledTimes(2);
+  });
+
+  it('returns to the conversation after a stale-run lookup failure is later confirmed empty', async () => {
+    vi.useFakeTimers();
+    vi.mocked(getConversationRestartRecovery)
+      .mockResolvedValueOnce(null)
+      .mockRejectedValueOnce(new Error('temporarily offline'))
+      .mockResolvedValueOnce(null);
+    vi.mocked(restartConversation).mockRejectedValue(new ApiError(
+      'stale agent run', 409, 'stale agent run', 'stale_run',
+    ));
+    const { result } = renderHook(() => useConversationRestart(run, true, undefined, '%8'));
+    await act(async () => { await Promise.resolve(); });
+
+    await act(async () => { await result.current.restart(); });
+    expect(result.current.receipt).toMatchObject({ state: 'unknown' });
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
+
+    expect(result.current).toMatchObject({ status: 'error', receipt: null, error: 'stale agent run' });
+    expect(getConversationRestartRecovery).toHaveBeenCalledTimes(3);
+  });
+
+  it('clears a confirmed pre-stop error before retrying and when changing panes', async () => {
+    vi.mocked(getConversationRestartRecovery).mockResolvedValue(null);
+    vi.mocked(restartConversation).mockRejectedValueOnce(new ApiError(
+      'Codex identity changed', 409, 'Codex identity changed', 'not_started',
+    )).mockResolvedValueOnce(readyReceipt);
+    const { result, rerender } = renderHook(({ activePaneId }) => (
+      useConversationRestart(run, true, undefined, activePaneId)
+    ), { initialProps: { activePaneId: '%8' } });
+    await waitFor(() => expect(result.current.status).toBe('ready'));
+    await act(async () => { await result.current.restart(); });
+    expect(result.current.error).toBe('Codex identity changed');
+
+    await act(async () => { await result.current.restart(); });
+    expect(result.current).toMatchObject({ status: 'ready', receipt: null, error: null });
+
+    vi.mocked(restartConversation).mockRejectedValueOnce(new ApiError(
+      'Codex identity changed', 409, 'Codex identity changed', 'not_started',
+    ));
+    await act(async () => { await result.current.restart(); });
+    rerender({ activePaneId: '%9' });
+    await waitFor(() => expect(result.current).toMatchObject({ status: 'ready', receipt: null, error: null }));
   });
 
   it('keeps checking the original pane read-only after a lost restart response', async () => {
