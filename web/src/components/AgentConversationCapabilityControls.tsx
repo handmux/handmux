@@ -671,6 +671,7 @@ export function AgentConversationContextControl({
             copied={copied === 'session'} onCopy={() => copy(sessionId, 'session')} />
           {restartEnabled && restartController && (
             <div className="cc-context-restart-row">
+              <span>{t('chat.restart.operations')}</span>
               <button type="button"
                 disabled={['loading', 'restarting', 'recovering', 'waiting'].includes(restartController.status)}
                 aria-busy={['restarting', 'recovering', 'waiting'].includes(restartController.status)}
@@ -682,8 +683,11 @@ export function AgentConversationContextControl({
           )}
         </div>
       </section>
-      {confirmRestart && restartController && (
-        <div className="settings-confirm-backdrop" onClick={() => setConfirmRestart(false)}>
+    </>}
+    {confirmRestart && restartController && (
+      <OverlayPortal>
+        <div className="settings-confirm-backdrop cc-context-restart-confirm-backdrop"
+          data-conversation-overlay onClick={() => setConfirmRestart(false)}>
           <div className="settings-confirm" role="alertdialog" aria-modal="true"
             aria-labelledby="conversation-restart-title" aria-describedby="conversation-restart-hint"
             onClick={(event) => event.stopPropagation()}>
@@ -706,8 +710,8 @@ export function AgentConversationContextControl({
             </div>
           </div>
         </div>
-      )}
-    </>}
+      </OverlayPortal>
+    )}
   </>;
 }
 

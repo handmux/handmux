@@ -644,6 +644,7 @@ export default {
 'chat.status.copySession': 'Copy session ID',
 'chat.status.copied': 'Copied',
 'chat.restart.action': 'Restart session',
+'chat.restart.operations': 'Actions',
 'chat.restart.submitting': 'Restarting…',
 'chat.restart.confirmTitle': 'Restart this Codex session?',
 'chat.restart.confirmHint': 'The current Codex process will exit, interrupting any task in progress; it will not be sent again automatically. The session ID and history are kept. If automatic recovery cannot finish, continue in the terminal.',

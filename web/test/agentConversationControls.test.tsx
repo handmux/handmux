@@ -65,7 +65,7 @@ describe('Agent Conversation controls UI', () => {
     expect(recovered.querySelector('.cc-context-value')).toBeTruthy();
   });
 
-  it('places the Codex restart action below Session ID and requires confirmation even when activity is unknown', () => {
+  it('shows restart under Session ID as a right-aligned Operation and confirms above the context popover', () => {
     const restart = vi.fn(async () => {});
     const restartController = { status: 'unknown', receipt: null, restart, recover: vi.fn(), retry: vi.fn() };
     render(createElement(AgentConversationContextControl, {
@@ -78,9 +78,15 @@ describe('Agent Conversation controls UI', () => {
     const restartButton = screen.getByRole('button', { name: '重启会话' });
     const sessionRow = screen.getByText('会话 ID').closest('.cc-context-row');
     expect(sessionRow!.compareDocumentPosition(restartButton) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    const restartRow = restartButton.closest('.cc-context-restart-row');
+    expect(restartRow?.querySelector('span')?.textContent).toBe('操作');
+    expect(restartRow?.lastElementChild).toBe(restartButton);
 
     fireEvent.click(restartButton);
-    expect(screen.getByRole('alertdialog', { name: '重启 Codex 会话？' })).toBeTruthy();
+    const confirm = screen.getByRole('alertdialog', { name: '重启 Codex 会话？' });
+    expect(confirm.closest('.cc-context-popover')).toBeNull();
+    expect(confirm.closest('.overlay-layer')).toBeTruthy();
+    expect(confirm.closest('.cc-context-restart-confirm-backdrop')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: '取消' }));
     expect(restart).not.toHaveBeenCalled();
 

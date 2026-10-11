@@ -641,6 +641,7 @@ export default {
 'chat.status.copySession': '复制会话 ID',
 'chat.status.copied': '已复制',
 'chat.restart.action': '重启会话',
+'chat.restart.operations': '操作',
 'chat.restart.submitting': '正在重启…',
 'chat.restart.confirmTitle': '重启 Codex 会话？',
 'chat.restart.confirmHint': '当前 Codex 进程会退出，正在执行的任务会中断且不会自动重发。会话 ID 和历史会保留；若自动恢复失败，可以前往终端继续。',

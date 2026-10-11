@@ -496,6 +496,7 @@ button.settings-page-row:disabled, .settings-page-row.disabled { color: rgba(235
   position: fixed; inset: 0; z-index: var(--z-overlay-dialog-backdrop); display: grid; place-items: center; padding: 20px;
   background: rgba(0,0,0,.58); -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
 }
+.cc-context-restart-confirm-backdrop { z-index: var(--z-overlay-confirm); }
 .settings-confirm {
   width: min(300px, 100%); overflow: hidden; padding: 18px 18px 0;
   border-radius: 16px; background: rgba(39,39,42,.98); text-align: center;
@@ -4641,10 +4642,14 @@ button.cmd-text { background: none; border: none; text-align: left; }
 }
 .cc-context-list .cc-context-row { padding: 0 10px; }
 .cc-context-list .cc-context-row + .cc-context-row { border-top: 1px solid var(--ct-chip-line); }
-.cc-context-restart-row { min-height: 48px; padding: 0 8px; border-top: 1px solid var(--ct-chip-line); }
+.cc-context-restart-row {
+  min-height: 48px; padding: 0 8px; display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  border-top: 1px solid var(--ct-chip-line);
+}
+.cc-context-restart-row > span { flex: none; color: var(--ct-muted); font-size: 12px; }
 .cc-context-restart-row > button {
-  min-height: 44px; width: 100%; border: 0; border-radius: 8px; background: transparent;
-  color: var(--ct-accent); font: inherit; font-size: 13px; font-weight: 650; text-align: left;
+  min-height: 44px; margin-left: auto; padding: 0 10px; border: 0; border-radius: 8px; background: transparent;
+  color: var(--ct-accent); font: inherit; font-size: 13px; font-weight: 650; text-align: right;
   touch-action: manipulation;
 }
 .cc-context-restart-row > button:active { background: var(--ct-chip-2); }

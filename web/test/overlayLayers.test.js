@@ -25,10 +25,17 @@ describe('global Overlay layers', () => {
     for (const selector of [
       '.drawer', '.settings-backdrop', '.cmd-backdrop', '.workspace-restore-backdrop',
       '.file-sheet', '.tool-sheet-backdrop', '.conversation-plan-backdrop', '.cc-queue-dialog-backdrop',
-      '.doclink-backdrop', '.upload-overlay',
+      '.cc-context-restart-confirm-backdrop', '.doclink-backdrop', '.upload-overlay',
     ]) {
       const escaped = selector.replace('.', '\\.');
       expect(styles).toMatch(new RegExp(`${escaped}\\s*\\{[^}]*z-index:\\s*var\\(--z-overlay-`));
     }
+  });
+
+  it('lays out the context restart operation with its action on the right', () => {
+    const row = /\.cc-context-restart-row\s*\{([^}]*)\}/.exec(styles)?.[1] ?? '';
+    expect(row).toMatch(/display:\s*flex/);
+    expect(row).toMatch(/align-items:\s*center/);
+    expect(row).toMatch(/justify-content:\s*space-between/);
   });
 });
