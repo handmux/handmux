@@ -623,22 +623,25 @@ describe('App established conversation during server restart', () => {
     expect(conversation.controller?.items).toEqual([]);
   });
 
-  it('keeps the same conversation and draft visible while restart delivery is paused', async () => {
-    restartHook.result = { status: 'restarting', receipt: null, restart: vi.fn(async () => {}),
-      recover: vi.fn(async () => {}), retry: vi.fn() };
+  it('shows restart progress and restores the draft when the original conversation returns', async () => {
     controlsApi.readConversationControls.mockResolvedValue({ context: { activity: 'unknown' } });
     const view = await openConversation();
     const composer = screen.getByPlaceholderText('和 Agent 对话…') as HTMLTextAreaElement;
     fireEvent.change(composer, { target: { value: 'keep this draft' } });
-    const sendButton = screen.getByRole('button', { name: '发送' }) as HTMLButtonElement;
-
-    expect(sendButton.disabled).toBe(true);
-    expect(screen.getByText('Saved answer session-1')).toBeTruthy();
     expect(restartHook.args?.[3]).toBe(pane.id);
 
-    const composerBeforeRender = composer;
-    view.rerender(<App />);
-    expect(screen.getByPlaceholderText('和 Agent 对话…')).toBe(composerBeforeRender);
+    restartHook.result = { status: 'restarting', receipt: null, restart: vi.fn(async () => {}),
+      recover: vi.fn(async () => {}), retry: vi.fn() };
+    await act(async () => { view.rerender(<App />); });
+    expect(screen.getByText('正在重启会话')).toBeTruthy();
+    expect(view.container.querySelector('.codex-managed-guide-icon.starting')).toBeTruthy();
+    expect(screen.queryByPlaceholderText('和 Agent 对话…')).toBeNull();
+    expect(screen.queryByText('Saved answer session-1')).toBeNull();
+
+    restartHook.result = { status: 'ready', receipt: null, restart: vi.fn(async () => {}),
+      recover: vi.fn(async () => {}), retry: vi.fn() };
+    await act(async () => { view.rerender(<App />); });
+    expect(screen.getByText('Saved answer session-1')).toBeTruthy();
     expect((screen.getByPlaceholderText('和 Agent 对话…') as HTMLTextAreaElement).value).toBe('keep this draft');
     view.unmount();
   });

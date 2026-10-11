@@ -111,6 +111,41 @@ describe('useConversationRestart', () => {
     expect(result.current).toMatchObject({ status: 'ready', receipt: null });
   });
 
+  it('keeps the confirmed restart alive while Runtime temporarily loses the run', async () => {
+    vi.mocked(getConversationRestartRecovery).mockResolvedValue(null);
+    let resolveRestart!: (value: typeof readyReceipt) => void;
+    vi.mocked(restartConversation).mockImplementation(() => new Promise((resolve) => {
+      resolveRestart = resolve;
+    }));
+    const { result, rerender } = renderHook(
+      ({ currentRun }) => useConversationRestart(currentRun, true, undefined, '%8', 'codex'),
+      { initialProps: { currentRun: run as AgentRunRef | null } },
+    );
+    await waitFor(() => expect(result.current.status).toBe('ready'));
+
+    let restartPromise!: Promise<void>;
+    await act(async () => {
+      restartPromise = result.current.restart();
+      await Promise.resolve();
+    });
+    expect(result.current.status).toBe('restarting');
+    const signal = vi.mocked(restartConversation).mock.calls[0]?.[1];
+    expect(signal?.aborted).toBe(false);
+
+    await act(async () => {
+      rerender({ currentRun: null });
+      await Promise.resolve();
+    });
+
+    expect(signal?.aborted).toBe(false);
+    expect(result.current.status).toBe('restarting');
+    await act(async () => {
+      resolveRestart(readyReceipt);
+      await restartPromise;
+    });
+    expect(result.current).toMatchObject({ status: 'ready', receipt: null });
+  });
+
   it('keeps the server recovery receipt when restart reports an error after an uncertain stop', async () => {
     vi.mocked(getConversationRestartRecovery).mockResolvedValue(null);
     vi.mocked(restartConversation).mockRejectedValue(new ApiError(

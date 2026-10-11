@@ -5,7 +5,7 @@ import RecoveryCommand from './RecoveryCommand.js';
 
 const TERMINAL_HINT_MS = 30_000;
 
-interface CodexRecoveryGuideController {
+interface ConversationRecoveryGuideController {
   status: 'idle' | 'loading' | 'ready' | 'recovering' | 'waiting' | 'error' | 'unknown' | 'restarting';
   receipt: {
     operationId?: string;
@@ -21,12 +21,13 @@ export default function ConversationRecoveryGuide({
   controller,
   onTerminal,
 }: {
-  controller: CodexRecoveryGuideController;
+  controller: ConversationRecoveryGuideController;
   onTerminal: () => void;
 }) {
   const receipt = controller.receipt;
-  const pending = controller.status === 'recovering' || controller.status === 'waiting';
-  const pendingOperation = pending ? receipt?.operationId ?? null : null;
+  const restarting = controller.status === 'restarting';
+  const pending = restarting || controller.status === 'recovering' || controller.status === 'waiting';
+  const pendingOperation = pending ? receipt?.operationId ?? (restarting ? 'restart-pending' : null) : null;
   const [hintedOperation, setHintedOperation] = useState<string | null>(null);
   useEffect(() => {
     setHintedOperation(null);
@@ -35,37 +36,41 @@ export default function ConversationRecoveryGuide({
     return () => window.clearTimeout(timer);
   }, [pendingOperation]);
   const showTerminalHint = pendingOperation !== null && hintedOperation === pendingOperation;
-  if (!receipt) return null;
+  if (!receipt && !pending) return null;
 
-  const stale = receipt.state === 'stale';
-  const unverified = receipt.state === 'unknown';
+  const stale = receipt?.state === 'stale';
+  const unverified = receipt?.state === 'unknown';
   return <div className="codex-managed-guide" aria-live="polite">
     <div className={`codex-managed-guide-icon ${pending ? 'starting' : ''}`} aria-hidden="true">
       <BotIcon />
     </div>
     <h2>{pending
-      ? t('chat.managedGuide.startingTitle')
+      ? t(restarting ? 'chat.restart.inProgressTitle' : 'chat.managedGuide.startingTitle')
       : unverified ? t('chat.managedGuide.recoveryUnknownTitle')
         : stale ? t('chat.managedGuide.recoveryStaleTitle')
         : t('chat.managedGuide.recoveryTitle')}</h2>
     <p>{pending
-      ? t(showTerminalHint ? 'chat.managedGuide.terminalHint' : 'chat.managedGuide.startingHint')
+      ? t(showTerminalHint ? 'chat.managedGuide.terminalHint'
+        : restarting ? 'chat.restart.inProgressHint' : 'chat.managedGuide.startingHint')
       : unverified ? t('chat.managedGuide.recoveryUnknownHint')
         : stale ? t('chat.managedGuide.recoveryStaleHint')
-        : receipt.canResume ? t('chat.managedGuide.recoveryReadyHint')
+        : receipt?.canResume ? t('chat.managedGuide.recoveryReadyHint')
           : t('chat.managedGuide.recoveryManualHint')}</p>
-    <div className="codex-managed-guide-recovery">
+    {receipt && <div className="codex-managed-guide-recovery">
       <span>{t('chat.managedGuide.recoveryHint')}</span>
       <RecoveryCommand command={receipt.recovery.command} />
-    </div>
-    {!pending && receipt.canResume && (
+    </div>}
+    {!pending && receipt?.canResume && (
       <button type="button" className="codex-managed-guide-primary"
         onClick={() => { void controller.recover(); }}>
         {t('chat.managedGuide.retryRecovery')}
       </button>
     )}
-    <button type="button" className="codex-managed-guide-secondary" onClick={onTerminal}>
-      {t('chat.session.openTerminal')}
-    </button>
+    {(!restarting || showTerminalHint) && (
+      <button type="button" className="codex-managed-guide-secondary" onClick={onTerminal}>
+        {t('chat.session.openTerminal')}
+      </button>
+    )}
+    {restarting && !showTerminalHint && <div className="codex-managed-guide-space" />}
   </div>;
 }

@@ -81,6 +81,11 @@ export function useConversationRestart(
   paneInputRef.current = enabled ? activePaneId : null;
 
   useEffect(() => {
+    // Runtime revokes the old run while a confirmed restart is replacing the process. Keep that
+    // operation alive for the same selected pane; its durable receipt will cover a later pane switch.
+    if (enabled && activePaneId && paneKey.current === activePaneId && operationBusyRef.current) {
+      return undefined;
+    }
     generation.current += 1;
     const requestGeneration = generation.current;
     staleRunLookupErrorRef.current = null;
@@ -132,10 +137,14 @@ export function useConversationRestart(
     return () => {
       controller.abort();
       if (lookupRef.current === controller) lookupRef.current = null;
-      operationRef.current?.abort();
-      operationRef.current = null;
-      operationBusyRef.current = false;
-      generation.current += 1;
+      const operationStillOwnsPane = operationBusyRef.current && enabledRef.current
+        && paneInputRef.current === activePaneId && paneKey.current === activePaneId;
+      if (!operationStillOwnsPane) {
+        operationRef.current?.abort();
+        operationRef.current = null;
+        operationBusyRef.current = false;
+        generation.current += 1;
+      }
     };
   }, [activePaneId, enabled, expectedAgentId, run?.sessionId, retryKey]);
 

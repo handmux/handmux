@@ -649,6 +649,8 @@ export default {
 'chat.restart.confirmTitle': 'Restart this session?',
 'chat.restart.confirmHint': 'The current Agent process will exit, interrupting any task in progress; it will not be sent again automatically. The session ID and history are kept. If automatic recovery cannot finish, continue in the terminal.',
 'chat.restart.confirmAction': 'Restart session',
+'chat.restart.inProgressTitle': 'Restarting session',
+'chat.restart.inProgressHint': 'Stopping the current process and resuming the original session. This page returns to chat when it is ready.',
 'chat.restart.notStarted': 'Restart did not begin. This attempt did not stop the current Agent. Check the terminal before retrying. Reason:',
 'chat.status.sandboxReadOnly': 'Read only',
 'chat.status.sandboxWorkspace': 'Workspace write',

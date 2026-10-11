@@ -2270,6 +2270,7 @@ export default function App() {
     currentPaneId,
     verifiedRestartAgent,
   );
+  const conversationRestartInProgress = conversationRestart.status === 'restarting';
   useEffect(() => {
     if (conversationRestart.error) {
       setRestartToast(`${t('chat.restart.notStarted')} ${conversationRestart.error}`);
@@ -2461,9 +2462,9 @@ export default function App() {
   const rememberedConversationIdentity = conversationIdentityKey
     ? conversationIdentityByPaneRef.current.get(conversationIdentityKey) ?? null : null;
   // A sessionless process is only authoritatively native/unmanaged after its activation descriptor is
-  // available. While the managed App Server is restarting, keep the last conversation mounted and let
-  // its normal connection state report the outage instead of replacing it with a takeover screen.
-  const currentConversationIdentity = durableConversationRecovery
+  // available. While the managed App Server restarts, show explicit restart progress instead of
+  // reclassifying the temporarily sessionless process as an unmanaged takeover.
+  const currentConversationIdentity = durableConversationRecovery || conversationRestartInProgress
     ? null
     : activationPending && !currentAgentRun?.sessionId
     ? null
@@ -2499,7 +2500,7 @@ export default function App() {
       identity: normalizedConversationIdentity,
     };
   }
-  const heldByGuide = !!durableConversationRecovery || activationPending
+  const heldByGuide = !!durableConversationRecovery || conversationRestartInProgress || activationPending
     || (!!activationRun && currentAgentDescriptor?.capabilities.conversationActivation === true);
   const retainedComposerIdentity = !heldByGuide
     && lastComposerIdentityRef.current?.surfaceKey === composerSurfaceKey
@@ -3693,9 +3694,9 @@ export default function App() {
               controlsKey={paneSurfaceControlsKey}
               primary={current.paneId && (
             chatLens ? (
-              durableConversationRecovery ? (
+              durableConversationRecovery || conversationRestartInProgress ? (
                 <ConversationRecoveryGuide controller={durableRestartRecovery
-                  ? conversationRestart : conversationRecovery}
+                  || conversationRestartInProgress ? conversationRestart : conversationRecovery}
                   onTerminal={() => {
                     clearConversationActivation();
                     setLens('terminal');

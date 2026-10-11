@@ -28,6 +28,23 @@ beforeEach(() => { vi.useFakeTimers(); });
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.resetAllMocks(); });
 
 describe('Codex recovery terminal reminder', () => {
+  it('shows an animated restart guide immediately and offers the terminal after 30 seconds without a receipt', async () => {
+    const onTerminal = vi.fn();
+    const { container } = render(<ConversationRecoveryGuide controller={{
+      status: 'restarting', receipt: null, recover: vi.fn(async () => {}),
+    }} onTerminal={onTerminal} />);
+
+    expect(screen.getByText('chat.restart.inProgressTitle')).toBeTruthy();
+    expect(container.querySelector('.codex-managed-guide-icon.starting')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'chat.session.openTerminal' })).toBeNull();
+    await tick(29_999);
+    expect(screen.queryByRole('button', { name: 'chat.session.openTerminal' })).toBeNull();
+    await tick(1);
+    expect(screen.getByText('chat.managedGuide.terminalHint')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'chat.session.openTerminal' }));
+    expect(onTerminal).toHaveBeenCalledTimes(1);
+  });
+
   it('reminds at 30s during slow discovery without ending recovery or posting again', async () => {
     vi.mocked(getConversationActivationRecovery).mockResolvedValue(receipt);
     vi.mocked(recoverConversationActivation).mockResolvedValue(recovery);
@@ -40,7 +57,10 @@ describe('Codex recovery terminal reminder', () => {
     }
     render(<Recovery />);
     await act(async () => {});
-    fireEvent.click(screen.getByText('chat.managedGuide.retryRecovery'));
+    await act(async () => {
+      fireEvent.click(screen.getByText('chat.managedGuide.retryRecovery'));
+      await Promise.resolve();
+    });
     expect(screen.getByText('chat.session.openTerminal')).toBeTruthy();
     await tick(29_999);
     expect(hint()).toBeNull();
