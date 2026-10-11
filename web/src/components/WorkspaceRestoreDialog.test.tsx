@@ -33,7 +33,7 @@ describe('WorkspaceRestoreDialog', () => {
 
     expect(screen.getByRole('dialog').getAttribute('aria-modal')).toBe('true');
     expect(screen.getByText('检测到电脑已重启')).toBeTruthy();
-    expect(screen.getByText(/3 个会话 · 5 个窗口 · 8 个窗格/)).toBeTruthy();
+    expect(screen.getByText(/3 个会话 · 5 个窗口 · 8 个分屏/)).toBeTruthy();
     expect(screen.getByText(/将恢复 2 个会话；1 个已经存在/)).toBeTruthy();
     expect(screen.getByText(/web-restored/)).toBeTruthy();
     expect(screen.getByText('当前会话不会被修改、重命名或停止。')).toBeTruthy();
@@ -80,7 +80,7 @@ describe('WorkspaceRestoreDialog', () => {
     expect(screen.getByText(/实时工作区状态核对失败/)).toBeTruthy();
     expect(screen.getByText(/工作区存储暂时不可用/)).toBeTruthy();
     expect(screen.getByText(/api：工作目录不可用/)).toBeTruthy();
-    expect(screen.getByText(/api：窗格布局无法完整恢复/)).toBeTruthy();
+    expect(screen.getByText(/api：分屏布局无法完整恢复/)).toBeTruthy();
     expect(screen.getByText(/api：Agent 未能自动续接/)).toBeTruthy();
     expect(screen.getByText(/api：恢复时出现了可继续处理的提醒/)).toBeTruthy();
     expect(screen.queryByText(/Users\/secret/)).toBeNull();

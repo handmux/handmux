@@ -415,7 +415,7 @@ export function KeyboardIcon({ down = false }: { down?: boolean }) {
   );
 }
 
-// 左右分屏(Lucide columns-2:圆角框 + 一条竖分隔)——把窗格分成左右两块。
+// 左右分屏(Lucide columns-2:圆角框 + 一条竖分隔)——把内容分成左右两块。
 export function SplitHIcon() {
   return (
     <svg {...base}>
@@ -425,7 +425,7 @@ export function SplitHIcon() {
   );
 }
 
-// 上下分屏(Lucide rows-2:圆角框 + 一条横分隔)——把窗格分成上下两块。
+// 上下分屏(Lucide rows-2:圆角框 + 一条横分隔)——把内容分成上下两块。
 export function SplitVIcon() {
   return (
     <svg {...base}>
@@ -435,7 +435,7 @@ export function SplitVIcon() {
   );
 }
 
-// 管理分屏(四宫格 layout)——跳到分屏地图,总览/管理当前窗口的所有窗格。
+// 管理分屏(四宫格 layout)——跳到分屏地图,总览/管理当前窗口的所有分屏。
 export function PaneMapIcon() {
   return (
     <svg {...base}>

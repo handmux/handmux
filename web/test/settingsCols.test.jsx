@@ -28,7 +28,7 @@ describe('ColumnStepper', () => {
   it('shows the target width and passes that exact baseline to each step', () => {
     const onAdjust = vi.fn();
     act(() => root.render(
-      <ColumnStepper label="窗格宽度" cols={37} onAdjust={onAdjust} onRestore={() => {}} restoreLabel="恢复分屏比例" />,
+      <ColumnStepper label="分屏宽度" cols={37} onAdjust={onAdjust} onRestore={() => {}} restoreLabel="恢复分屏比例" />,
     ));
 
     expect(container.querySelector('.sheet-size-value').textContent).toMatch(/^37 (列|columns)$/);
@@ -39,7 +39,7 @@ describe('ColumnStepper', () => {
 
   it('keeps restore disabled until a pane layout snapshot exists', () => {
     act(() => root.render(
-      <ColumnStepper label="窗格宽度" cols={37} onAdjust={() => {}} onRestore={() => {}}
+      <ColumnStepper label="分屏宽度" cols={37} onAdjust={() => {}} onRestore={() => {}}
         restoreLabel="恢复分屏比例" restoreDisabled />,
     ));
     expect(container.querySelector('.sheet-size-restore').disabled).toBe(true);

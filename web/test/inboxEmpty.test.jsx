@@ -20,19 +20,19 @@ const base = {
 describe('Inbox empty state', () => {
   it('shows the normal empty text when hooks are installed', () => {
     render(<Inbox {...base} hooksStatus="installed" onEnableHooks={() => {}} />);
-    expect(screen.getByText('No pane status yet')).toBeTruthy();
+    expect(screen.getByText('No split status yet')).toBeTruthy();
     expect(screen.queryByText('Enable')).toBeNull();
   });
 
   it('shows the normal empty text when status is unknown (back-compat)', () => {
     render(<Inbox {...base} hooksStatus={null} onEnableHooks={() => {}} />);
-    expect(screen.getByText('No pane status yet')).toBeTruthy();
+    expect(screen.getByText('No split status yet')).toBeTruthy();
   });
 
   it('shows the shared reconnecting treatment instead of a false empty state', () => {
     render(<Inbox {...base} reconnecting hooksStatus="installed" onEnableHooks={() => {}} />);
     expect(screen.getByRole('status').textContent).toBe('Reconnecting to the inbox…');
-    expect(screen.queryByText('No pane status yet')).toBeNull();
+    expect(screen.queryByText('No split status yet')).toBeNull();
   });
 
   it('keeps existing rows visible while the inbox source reconnects', () => {
@@ -44,7 +44,7 @@ describe('Inbox empty state', () => {
 
   it('hides the prompt entirely when Claude Code is absent', () => {
     render(<Inbox {...base} hooksStatus="no-claude" onEnableHooks={() => {}} />);
-    expect(screen.getByText('No pane status yet')).toBeTruthy();
+    expect(screen.getByText('No split status yet')).toBeTruthy();
     expect(screen.queryByText('Enable')).toBeNull();
   });
 

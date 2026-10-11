@@ -782,7 +782,7 @@ describe('App management dimensions', () => {
 
     await act(async () => { await windowBarProps().onManageWindow(staleWindow); });
 
-    expect(screen.getByRole('dialog', { name: '窗口管理，work · 160×48 · @1' })).toBeTruthy();
+    expect(screen.getByRole('dialog', { name: '窗口管理，work · @1' })).toBeTruthy();
     expect(api.getWindows.mock.calls.length).toBeGreaterThan(readsBefore);
   });
 
@@ -854,13 +854,13 @@ describe('App management dimensions', () => {
 
     expect(screen.getByRole('dialog', { name: '分屏管理，① zsh · %1' })).toBeTruthy();
     expect([...document.querySelectorAll('.sheet-size-control .settings-label')].map((label) => label.textContent))
-      .toEqual(['窗格宽度', '窗格高度']);
+      .toEqual(['分屏宽度', '分屏高度']);
     expect(screen.getAllByRole('button', { name: /恢复分屏比例/ })).toHaveLength(2);
     api.getPanes.mockResolvedValueOnce(gridPanes.map((pane) => (
       pane.id === '%1' ? { ...pane, height: 13 } : pane
     )));
     await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: '窗格高度 +1' }));
+      fireEvent.click(screen.getByRole('button', { name: '分屏高度 +1' }));
       await flush();
     });
     expect(api.resizePane).toHaveBeenCalledWith('%1', null, 13);
@@ -888,7 +888,7 @@ describe('App management dimensions', () => {
       pane.id === '%1' ? { ...pane, width: 40 } : pane
     )));
     await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: '窗格宽度 +1' }));
+      fireEvent.click(screen.getByRole('button', { name: '分屏宽度 +1' }));
       await flush();
     });
     expect(api.getWindowLayout).toHaveBeenCalledWith('@1');
@@ -898,7 +898,7 @@ describe('App management dimensions', () => {
       pane.id === '%1' ? { ...pane, width: 41 } : pane
     )));
     await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: '窗格宽度 +1' }));
+      fireEvent.click(screen.getByRole('button', { name: '分屏宽度 +1' }));
       await flush();
     });
     expect(api.getWindowLayout).toHaveBeenCalledOnce();
@@ -929,8 +929,8 @@ describe('App management dimensions', () => {
     const view = await renderApp();
 
     await act(async () => { await windowBarProps().onManagePane('%1'); });
-    expect(view.container.querySelector('.sheet-size-control .settings-label')?.textContent).toBe('窗格高度');
-    expect(view.container.querySelector('button[aria-label="窗格宽度 +1"]')).toBeNull();
+    expect(view.container.querySelector('.sheet-size-control .settings-label')?.textContent).toBe('分屏高度');
+    expect(view.container.querySelector('button[aria-label="分屏宽度 +1"]')).toBeNull();
     expect(screen.getByText(/无法单独调整宽度。请在窗口管理中调整窗口宽度。/)).toBeTruthy();
   });
 
@@ -1407,7 +1407,7 @@ describe('App workspace recovery', () => {
     expect(screen.queryByTestId('terminal-pane')).toBeNull();
     expect(getBoundSessions()).toEqual(['project']);
     expect(screen.getByRole('dialog', { name: '恢复上次工作区' })).toBeTruthy();
-    expect(screen.getByText('本次恢复：1 个会话 · 1 个窗口 · 2 个窗格')).toBeTruthy();
+    expect(screen.getByText('本次恢复：1 个会话 · 1 个窗口 · 2 个分屏')).toBeTruthy();
     expect(screen.getByText(/恢复的会话不会自动显示/)).toBeTruthy();
 
     fireEvent.click(screen.getByRole('button', { name: '重新绑定会话' }));
@@ -1503,7 +1503,7 @@ describe('App workspace recovery', () => {
     await flush();
     await flush();
     expect(screen.getByRole('dialog', { name: '恢复上次工作区' })).toBeTruthy();
-    expect(screen.getByText('本次恢复：1 个会话 · 0 个窗口 · 0 个窗格')).toBeTruthy();
+    expect(screen.getByText('本次恢复：1 个会话 · 0 个窗口 · 0 个分屏')).toBeTruthy();
     expect(container.querySelector('.workspace-recovery-card')).toBeTruthy();
     expect(api.getSessions).toHaveBeenCalledTimes(1);
     expect(api.getWindows).not.toHaveBeenCalled();
@@ -1755,7 +1755,7 @@ describe('App workspace recovery', () => {
     await flush();
 
     expect(container.querySelector('.workspace-recovery-card')).toBeTruthy();
-    expect(screen.getByText('本次恢复：1 个会话 · 0 个窗口 · 0 个窗格')).toBeTruthy();
+    expect(screen.getByText('本次恢复：1 个会话 · 0 个窗口 · 0 个分屏')).toBeTruthy();
     expect(screen.getByText(/web：tmux 不可用；请确认 tmux 已运行后重试/)).toBeTruthy();
     expect(screen.queryByText(/private\/(secret|navigation-secret)/)).toBeNull();
     expect(api.getWorkspaceRestoreOperation).toHaveBeenCalledTimes(1);
@@ -1776,7 +1776,7 @@ describe('App workspace recovery', () => {
     await flush();
     expect(container.querySelector('.workspace-recovery-card')).toBeTruthy();
     expect(screen.getByRole('dialog', { name: '恢复上次工作区' })).toBeTruthy();
-    expect(screen.getByText('本次恢复：0 个会话 · 0 个窗口 · 0 个窗格')).toBeTruthy();
+    expect(screen.getByText('本次恢复：0 个会话 · 0 个窗口 · 0 个分屏')).toBeTruthy();
     expect(screen.queryByRole('button', { name: '重新绑定会话' })).toBeNull();
     expect(screen.getByRole('button', { name: '完成' })).toBeTruthy();
     expect(api.getWindows).not.toHaveBeenCalled();

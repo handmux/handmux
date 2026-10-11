@@ -234,6 +234,23 @@ describe('WindowBar', () => {
     expect(onSelectWindow).not.toHaveBeenCalled();
   });
 
+  it('closes the pane map when long-pressing any window for management', () => {
+    vi.useFakeTimers();
+    const onManageWindow = vi.fn();
+    render({ ...base, panes: geomPanes, onManageWindow });
+    openPaneMenu();
+    expect(paneMap()).not.toBeNull();
+
+    const inactiveTab = container.querySelector('[data-win="@2"]');
+    fire(inactiveTab, 'pointerdown');
+    act(() => vi.advanceTimersByTime(500));
+    fire(inactiveTab, 'pointerup');
+    fire(inactiveTab, 'click');
+
+    expect(onManageWindow).toHaveBeenCalledWith(windows[1]);
+    expect(paneMap()).toBeNull();
+  });
+
   it('scrolls the tracked window tab into view on mount and when the order changes', () => {
     const orig = Element.prototype.scrollIntoView;
     let scrolledEl = null;
@@ -456,7 +473,7 @@ describe('WindowBar', () => {
     render({ ...base, panes: geomPanes, paneSheetOpen: true });
     openPaneMenu();
     expect(paneMap()).not.toBeNull();
-    fire(document.body, 'pointerdown'); // e.g. tapping 左右分屏 / 关闭此格 on the body-rendered sheet
+    fire(document.body, 'pointerdown'); // e.g. tapping 左右分屏 / 关闭此分屏 on the body-rendered sheet
     expect(paneMap()).not.toBeNull();
   });
 

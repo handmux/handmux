@@ -2,9 +2,9 @@ import { describe, it, expect } from 'vitest';
 import { windowManageSubtitle, paneManageSubtitle } from '../src/manageLabels.js';
 
 describe('management sheet labels', () => {
-  it('describes a window by name and its real dimensions', () => {
+  it('describes a window by name without repeating its dimensions', () => {
     expect(windowManageSubtitle({ id: '@2', name: 'work', width: 160, height: 48 }))
-      .toBe('work · 160×48');
+      .toBe('work');
   });
 
   it('falls back to the window id and omits unavailable dimensions', () => {

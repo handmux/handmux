@@ -4,23 +4,11 @@ interface SizedItem {
   id?: string;
   name?: string;
   command?: string | null;
-  width?: number | null;
-  height?: number | null;
 }
-
-const dimensions = (item: SizedItem | null | undefined): string => {
-  if (!item || !Number.isFinite(item.width) || !Number.isFinite(item.height)) return '';
-  return `${item.width}×${item.height}`;
-};
-
-const withDimensions = (label: string, item: SizedItem): string => {
-  const dims = dimensions(item);
-  return dims ? `${label} · ${dims}` : label;
-};
 
 export function windowManageSubtitle(win: SizedItem | null | undefined): string {
   if (!win) return '';
-  return withDimensions(win.name || win.id || '', win);
+  return win.name || win.id || '';
 }
 
 export function paneManageSubtitle(

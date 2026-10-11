@@ -167,6 +167,7 @@ interface PaneTabProps {
   onBeforePaneMapOpen?: (windowId: string) => void | Promise<void>;
   paneSheetOpen?: boolean;
   openMapFor?: string | null;
+  closeMapRequest: number;
   onMapOpened?: () => void;
   onPaneMapOpenChange?: (open: boolean) => void;
 }
@@ -184,6 +185,7 @@ function PaneTab({
   onBeforePaneMapOpen,
   paneSheetOpen = false,
   openMapFor = null,
+  closeMapRequest,
   onMapOpened,
   onPaneMapOpenChange,
 }: PaneTabProps) {
@@ -196,6 +198,9 @@ function PaneTab({
   useEffect(() => {
     onPaneMapOpenChange?.(open);
   }, [open, onPaneMapOpenChange]);
+  useEffect(() => {
+    if (closeMapRequest > 0) setOpen(false);
+  }, [closeMapRequest]);
   useEffect(() => () => {
     if (openRef.current) onPaneMapOpenChangeRef.current?.(false);
   }, []);
@@ -379,6 +384,11 @@ export default function WindowBar({
   lens = 'terminal', onLensChange = () => {}, chatLensEnabled = false,
 }: WindowBarProps) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  const [closeMapRequest, setCloseMapRequest] = useState(0);
+  const manageWindow = (window: WorkspaceWindow): void => {
+    setCloseMapRequest((request) => request + 1);
+    onManageWindow(window);
+  };
   const previousWindowIdRef = useRef<string | null>(null);
   // While a window is being managed (its long-press menu open), keep its tab in view as the order
   // shifts underneath — a reorder can push it out of the scroll strip, and then you can't see it
@@ -418,12 +428,13 @@ export default function WindowBar({
                 agent={Object.hasOwn(windowAgents, w.id)
                   ? windowAgents[w.id] ?? null
                   : currentAgent ?? null}
-                onManage={onManageWindow}
+                onManage={manageWindow}
                 {...(onManagePane ? { onManagePane } : {})}
                 onSelectPane={onSelectPane}
                 {...(onBeforePaneMapOpen ? { onBeforePaneMapOpen } : {})}
                 paneSheetOpen={paneSheetOpen}
                 openMapFor={openMapFor}
+                closeMapRequest={closeMapRequest}
                 {...(onMapOpened ? { onMapOpened } : {})}
                 {...(onPaneMapOpenChange ? { onPaneMapOpenChange } : {})}
               />
@@ -436,7 +447,7 @@ export default function WindowBar({
               active={active}
               agent={windowAgents[w.id] ?? null}
               onSelect={onSelectWindow}
-              onManage={onManageWindow}
+              onManage={manageWindow}
             />
           );
         })}
