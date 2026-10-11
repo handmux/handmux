@@ -660,12 +660,12 @@ describe('UsagePage', () => {
     expect(parseApiAccounts([{ ...view, credentialConfigured: false }])).toBeNull();
   });
 
-  it('accepts a negative DeepSeek total balance so overdue amount remains visible', () => {
+  it('accepts negative DeepSeek total and topped-up balances so overdue amounts remain visible', () => {
     const view = {
       id: 'account-overdue', name: 'Overdue', providerType: 'deepseek', credentialConfigured: true,
       createdAt: 1, updatedAt: 1, lastSuccessAt: 1, lastAttemptAt: 1, lastErrorCode: null,
       latestSuccess: { providerType: 'deepseek', isAvailable: false, balances: [{
-        currency: 'CNY', totalBalance: '-0.01', toppedUpBalance: '0.00', grantedBalance: '0.00',
+        currency: 'CNY', totalBalance: '-0.01', toppedUpBalance: '-0.50', grantedBalance: '0.00',
       }] },
     };
     expect(parseApiAccounts([view])).toEqual([view]);

@@ -20,6 +20,7 @@ All notable changes to handmux. Format follows [Keep a Changelog](https://keepac
 
 ### Fixed
 
+- 修复 DeepSeek 欠费时充值余额为负数被拒绝、API 用量提示数据不支持的问题。
 - 修复文档和对话代码块横向滚动时，复制按钮跟着代码移动的问题。
 - 修复桌面终端中 IME 直接提交中文时字符偶发丢失的问题。
 - 修复打包版未找到随 handmux 安装的 tunlite、误调用 PATH 上旧版，导致 SSH 隧道反复退出且没有公网地址的问题。

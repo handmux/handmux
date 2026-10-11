@@ -190,7 +190,7 @@ const deepSeekBalanceOf = (value: unknown): DeepSeekBalanceResult | null => {
       typeof candidate === 'string' && (allowNegative ? /^-?\d{1,128}(?:\.\d{1,128})?$/ : /^\d{1,128}(?:\.\d{1,128})?$/).test(candidate)
     );
     return balance && typeof balance.currency === 'string'
-      && decimal(balance.totalBalance, true) && decimal(balance.toppedUpBalance)
+      && decimal(balance.totalBalance, true) && decimal(balance.toppedUpBalance, true)
       && decimal(balance.grantedBalance) ? [{
         currency: balance.currency as string, totalBalance: balance.totalBalance as string,
         toppedUpBalance: balance.toppedUpBalance as string, grantedBalance: balance.grantedBalance as string,

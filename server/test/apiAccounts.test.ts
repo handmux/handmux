@@ -62,15 +62,15 @@ describe('DeepSeek balance provider', () => {
     }));
   });
 
-  it('accepts and preserves a negative total balance when the account is overdue', async () => {
+  it('accepts and preserves negative total and topped-up balances when the account is overdue', async () => {
     const fetchImpl = vi.fn(async () => new Response(JSON.stringify({
       is_available: false,
-      balance_infos: [{ currency: 'CNY', total_balance: '-0.01', topped_up_balance: '0.00', granted_balance: '0.00' }],
+      balance_infos: [{ currency: 'CNY', total_balance: '-0.01', topped_up_balance: '-0.50', granted_balance: '0.00' }],
     }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
     await expect(createDeepSeekProvider(fetchImpl as typeof fetch)
       .queryBalance({ kind: 'apiKey', value: 'overdue-key' }, new AbortController().signal))
       .resolves.toEqual({ providerType: 'deepseek', isAvailable: false, balances: [{
-        currency: 'CNY', totalBalance: '-0.01', toppedUpBalance: '0.00', grantedBalance: '0.00',
+        currency: 'CNY', totalBalance: '-0.01', toppedUpBalance: '-0.50', grantedBalance: '0.00',
       }] });
   });
 
@@ -115,6 +115,24 @@ describe('Moonshot balance provider', () => {
 });
 
 describe('API account service and routes', () => {
+  it('persists and reloads overdue DeepSeek balances with a negative topped-up balance', async () => {
+    const overdueBalance = {
+      providerType: 'deepseek' as const, isAvailable: false,
+      balances: [{
+        currency: 'CNY', totalBalance: '-0.01', toppedUpBalance: '-0.50', grantedBalance: '0.00',
+      }],
+    };
+    const provider: ProviderDefinition = {
+      type: 'deepseek', label: 'DeepSeek', async queryBalance() { return overdueBalance; },
+    };
+    const { file, service } = runtime(provider);
+    const account = await service.create({
+      providerType: 'deepseek', name: 'Overdue', credential: { kind: 'apiKey', value: 'overdue-key' },
+    });
+    expect(account.latestSuccess).toEqual(overdueBalance);
+    expect(new ApiAccountService({ file, providers: [provider] }).list()).toEqual([account]);
+  });
+
   it('persists private credentials but returns only views through authenticated generic routes', async () => {
     const sentinel = 'hm-secret-SENTINEL-only-on-disk';
     const queryBalance = vi.fn(async () => balance);

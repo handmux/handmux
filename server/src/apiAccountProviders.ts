@@ -104,7 +104,7 @@ function parseDeepSeekBalance(value: unknown): DeepSeekBalanceResult {
       || typeof candidate.currency !== 'string'
       || candidate.currency.length < 1 || candidate.currency.length > 32
       || !decimalString(candidate.total_balance, true)
-      || !decimalString(candidate.topped_up_balance)
+      || !decimalString(candidate.topped_up_balance, true)
       || !decimalString(candidate.granted_balance)) {
       throw new ProviderQueryError('unsupported_response');
     }
@@ -200,7 +200,7 @@ function validDeepSeekResult(value: Record<string, unknown>): boolean {
     && value.balances.every((balance) => isRecord(balance)
       && hasExactKeys(balance, ['currency', 'totalBalance', 'toppedUpBalance', 'grantedBalance'])
       && typeof balance.currency === 'string' && balance.currency.length >= 1 && balance.currency.length <= 32
-      && decimalString(balance.totalBalance, true) && decimalString(balance.toppedUpBalance)
+      && decimalString(balance.totalBalance, true) && decimalString(balance.toppedUpBalance, true)
       && decimalString(balance.grantedBalance));
 }
 
