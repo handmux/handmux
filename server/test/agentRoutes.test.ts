@@ -7,6 +7,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { ConversationContractError } from '../src/agent-runtime/conversation.js';
 import { ConversationActivationError } from '../src/agent-runtime/conversationActivation.js';
 import { ConversationControlError } from '../src/agent-runtime/conversationControls.js';
+import { ConversationRestartError } from '../src/agent-runtime/conversationRestart.js';
 import {
   ConversationLiveHub,
   type ConversationLiveSubscription,
@@ -264,6 +265,128 @@ describe('Agent app facade routes', () => {
     } as unknown as typeof h.value;
     await request(app(supported)).post('/agents/conversation-activation').send({ run: h.lease.ref })
       .expect(202, { accepted: true, recovery });
+  });
+
+  it('serves restart receipts only for a current Codex run with a session id', async () => {
+    const h = runtime();
+    const receipt = {
+      operationId: 'a'.repeat(64),
+      recovery: {
+        kind: 'codex_resume' as const,
+        sessionId: '12345678-1234-1234-1234-123456789abc',
+        command: 'handmux codex resume 12345678-1234-1234-1234-123456789abc',
+      },
+      phase: 'ready' as const,
+      state: 'current' as const,
+      canResume: false,
+    };
+    const restart = vi.fn(async (lease) => {
+      if (lease.ref.agentId !== 'codex') {
+        throw new ConversationRestartError('Conversation restart is not supported for this Agent', 'unsupported');
+      }
+      return receipt;
+    });
+    const recovery = vi.fn(async () => receipt);
+    const recover = vi.fn(async () => receipt);
+    const codexRun = { ...h.lease.ref, agentId: 'codex', runId: 'codex-run' };
+    const codexLease = { ...h.lease, ref: codexRun };
+    const supported = {
+      ...h.value,
+      runs: { resolve: vi.fn((ref) => ref.runId === 'stale' ? null
+        : ref.agentId === 'codex' ? codexLease : h.lease) },
+      conversationRestart: { restart, recovery, recover },
+    } as unknown as typeof h.value;
+
+    await request(app(supported)).post('/agents/conversation-restart')
+      .send({ run: { agentId: 'codex', paneId: '%1', runId: 'codex-run' } })
+      .expect(400, { error: 'invalid agent run' });
+    await request(app(supported)).post('/agents/conversation-restart')
+      .send({ run: { ...codexRun, runId: 'stale' } })
+      .expect(409, { error: 'stale agent run', code: 'stale_run' });
+    await request(app(supported)).post('/agents/conversation-restart')
+      .send({ run: h.lease.ref })
+      .expect(409, { error: 'Conversation restart is not supported for this Agent', code: 'unsupported' });
+    await request(app(supported)).post('/agents/conversation-restart')
+      .send({ run: codexRun })
+      .expect(200, { receipt });
+    expect(restart).toHaveBeenCalledOnce();
+    expect(restart.mock.calls[0]?.[0]).toBe(codexLease);
+
+    await request(app(supported)).get('/agents/conversation-restart-recovery')
+      .query({ paneId: '1' }).expect(400, { error: 'invalid conversation recovery pane' });
+    await request(app(supported)).get('/agents/conversation-restart-recovery')
+      .query({ paneId: '%1' }).expect(200, { receipt });
+    await request(app(supported)).post('/agents/conversation-restart-recovery')
+      .send({ paneId: '%1', operationId: 'bad' })
+      .expect(400, { error: 'invalid conversation recovery request' });
+    await request(app(supported)).post('/agents/conversation-restart-recovery')
+      .send({ paneId: '%1', operationId: receipt.operationId })
+      .expect(200, { receipt });
+    expect(recovery).toHaveBeenCalledWith('%1');
+    expect(recover).toHaveBeenCalledWith('%1', receipt.operationId);
+  });
+
+  it('continues an accepted Conversation restart after the HTTP client disconnects', async () => {
+    const h = runtime();
+    const started = deferred<void>();
+    const release = deferred<void>();
+    let completed = false;
+    const codexRun = { ...h.lease.ref, agentId: 'codex' };
+    const codexLease = { ...h.lease, ref: codexRun };
+    const supported = {
+      ...h.value,
+      runs: { resolve: vi.fn(() => codexLease) },
+      conversationRestart: {
+        restart: vi.fn(async () => {
+          started.resolve();
+          await release.promise;
+          completed = true;
+          return null;
+        }),
+        recovery: vi.fn(async () => null),
+        recover: vi.fn(async () => null),
+      },
+    } as unknown as typeof h.value;
+    const application = express();
+    let responseClosed = false;
+    application.use(express.json());
+    application.use((_req, res, next) => {
+      res.once('close', () => { responseClosed = true; });
+      next();
+    });
+    application.use(agentRoutes({ runtime: supported }));
+    const server = http.createServer(application);
+    let client: http.ClientRequest | undefined;
+    try {
+      await new Promise<void>((resolve, reject) => {
+        server.once('error', reject);
+        server.listen(0, '127.0.0.1', () => {
+          server.off('error', reject);
+          resolve();
+        });
+      });
+      const port = (server.address() as AddressInfo).port;
+      client = http.request({
+        host: '127.0.0.1', port, path: '/agents/conversation-restart', method: 'POST',
+        headers: { 'content-type': 'application/json' },
+      });
+      client.on('error', () => {});
+      client.end(JSON.stringify({ run: codexRun }));
+      await started.promise;
+
+      client.destroy();
+      await vi.waitFor(() => expect(responseClosed).toBe(true));
+      release.resolve();
+      await vi.waitFor(() => expect(completed).toBe(true));
+    } finally {
+      client?.destroy();
+      release.resolve();
+      if (server.listening) {
+        await new Promise<void>((resolve, reject) => {
+          server.close((error) => { if (error) reject(error); else resolve(); });
+        });
+      }
+    }
   });
 
   it('serves durable Conversation recovery with strict HTTP contracts', async () => {

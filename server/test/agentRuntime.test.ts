@@ -25,6 +25,7 @@ import type { AgentAttachmentCandidate, AgentRunLease } from '../src/agent-runti
 import { PrivateStateStore } from '../src/privateStateStore.js';
 import { createCodexConversationActivationController } from '../src/agents/codexConversationActivation.js';
 import { NativeInboxCoordinator } from '../src/agents/nativeInbox.js';
+import { CodexRestartReceiptStore } from '../src/agents/codexRestartReceipt.js';
 
 const AUTH_TOKEN = 'runtime-test-auth-token-that-is-at-least-32-bytes';
 const directories: string[] = [];
@@ -115,6 +116,121 @@ function runtimeWithAllStateFiles(stateDirectory: string, logger?: AdapterLogger
 }
 
 describe('AgentRuntime composition root', () => {
+  it('restores restart recovery and keeps the Codex queue fenced across Runtime recreation', async () => {
+    const sessionId = '12345678-1234-1234-1234-123456789abc';
+    const stateDirectory = directory();
+    const receiptFile = path.join(stateDirectory, 'codex-restart-receipts.json');
+    const initialStore = new CodexRestartReceiptStore(receiptFile);
+    const saved = initialStore.prepare({
+      pane: {
+        paneId: '%1', sessionName: 'main', windowId: '@1', tty: '/dev/ttys001',
+        tmuxEpoch: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      },
+      process: {
+        tui: {
+          pid: 101, ppid: 102, startedAt: 1_000, tty: '/dev/ttys001', executable: '/usr/bin/codex',
+        },
+        wrapper: {
+          pid: 102, ppid: 2, startedAt: 900, tty: '/dev/ttys001', executable: '/usr/bin/node',
+        },
+      },
+      sessionId,
+      previousRunId: 'previous-run',
+    });
+    const expectedReceipt = {
+      operationId: saved.operationId,
+      recovery: {
+        kind: 'codex_resume' as const,
+        sessionId,
+        command: `handmux codex resume ${sessionId}`,
+      },
+      phase: 'prepared' as const,
+      state: 'current' as const,
+      canResume: true,
+    };
+    const dispatch = vi.fn(async () => ({ outcome: 'accepted' as const }));
+
+    const createRuntime = (receipts: CodexRestartReceiptStore) => {
+      const panes = new TestPanes([]);
+      const codexAdapter = adapter('codex', {
+        conversation: { apiVersion: 1 }, conversationRestart: { apiVersion: 1 },
+      });
+      codexAdapter.process = { commands: ['codex'], verify: async () => true };
+      const restartController = {
+        apiVersion: 1 as const,
+        restart: vi.fn(async () => expectedReceipt),
+        recovery: vi.fn(async (paneId: string) => (
+          receipts.latestForPane(paneId) ? expectedReceipt : null
+        )),
+        recover: vi.fn(async () => expectedReceipt),
+      };
+      const runtime = new AgentRuntime({
+        adapters: [codexAdapter],
+        panes,
+        process: {
+          inspectForeground: async () => ({
+            pid: 101, startedAt: 1_000, tty: '/dev/ttys001', executable: '/usr/bin/codex',
+          }),
+          inspectProcess: async (pid) => pid === 101
+            ? { pid, startedAt: 1_000, tty: '/dev/ttys001' } : null,
+        },
+        stateDirectory,
+        authToken: AUTH_TOKEN,
+        conversationRestartReceipts: receipts,
+        adapterFactories: {
+          codex: () => ({
+            conversation: {
+              apiVersion: 1,
+              discoverNative: async (target) => ({
+                session: { agentId: 'codex', sessionId },
+                ...('runId' in target ? { run: target } : {}),
+                sourceViewId: 'codex-view',
+                capabilities: { history: true, live: 'delta', sendable: true, send: ['prompt'] },
+              }),
+              readNativePage: async () => ({
+                sessionId, sourceViewId: 'codex-view', sourceHistoryToken: 'codex-history',
+                items: [], hasMore: false,
+              }),
+              dispatchPrompt: dispatch,
+            },
+            conversationActivity: { read: async () => ({
+              activity: 'idle' as const, activeTurn: { state: 'none' as const },
+            }) },
+            conversationRestart: restartController,
+          }),
+        },
+      });
+      runtimes.push(runtime);
+      return { runtime, restartController };
+    };
+
+    const attach = async (runtime: AgentRuntime) => await runtime.runs.controller(
+      'codex', async () => true,
+    ).attach({
+      paneId: '%1', attachmentId: 'restart-test', sessionId,
+      process: { pid: 101, startedAt: 1_000, tty: '/dev/ttys001' },
+    });
+    const first = createRuntime(new CodexRestartReceiptStore(receiptFile));
+    expect(first.runtime.capabilities().find((item) => item.id === 'codex')?.capabilities.conversationRestart)
+      .toBe(true);
+    const firstLease = await attach(first.runtime);
+    await expect(first.runtime.conversationRestart?.recovery('%1')).resolves.toEqual(expectedReceipt);
+    await expect(first.runtime.conversation!.send(firstLease, {
+      clientRequestId: 'queued-before-restart', text: 'hold during restart', delivery: 'prompt',
+    })).resolves.toMatchObject({ status: 'queued', submission: { state: 'queued' } });
+    expect(dispatch).not.toHaveBeenCalled();
+    await first.runtime.close();
+
+    const second = createRuntime(new CodexRestartReceiptStore(receiptFile));
+    const secondLease = await attach(second.runtime);
+    await expect(second.runtime.conversationRestart?.recovery('%1')).resolves.toEqual(expectedReceipt);
+    await expect(second.runtime.conversation!.send(secondLease, {
+      clientRequestId: 'queued-before-restart', text: 'hold during restart', delivery: 'prompt',
+    })).resolves.toMatchObject({ status: 'queued', submission: { state: 'queued' } });
+    expect(dispatch).not.toHaveBeenCalled();
+    expect(second.restartController.recovery).toHaveBeenCalledWith('%1');
+  });
+
   it('maps Claude and Codex terminal identities to provider completion tokens', async () => {
     const signal = new AbortController().signal;
     const claudeRun = {
@@ -1279,6 +1395,7 @@ describe('AgentRuntime composition root', () => {
 
   it('statically wires Claude and managed Codex Inbox sources when native dependencies exist', () => {
     const panes = new TestPanes([]);
+    const stateDirectory = directory();
     const claudeEvents = {
       getStates: vi.fn(async () => ({})),
       paneSession: vi.fn(() => null),
@@ -1295,27 +1412,41 @@ describe('AgentRuntime composition root', () => {
     };
     const runtime = createBuiltinAgentRuntime({
       panes,
-      process: { inspectForeground: async () => null },
-      stateDirectory: directory(),
+      process: {
+        inspectForeground: async () => null,
+        inspectForegroundFresh: async () => null,
+        inspectForegroundGroupFresh: async () => [],
+      },
+      stateDirectory,
       authToken: AUTH_TOKEN,
       claudeEvents,
       codexApp: codexApp as unknown as NonNullable<Parameters<typeof createBuiltinAgentRuntime>[0]['codexApp']>,
+      codexRestartReceipts: new CodexRestartReceiptStore(
+        path.join(stateDirectory, 'codex-restart-receipts.json'),
+      ),
+      codexRestartCommands: {
+        paneEpoch: async () => 'tmux-epoch',
+        runPaneCommand: async () => {},
+        terminate: () => true,
+      },
     });
     runtimes.push(runtime);
     expect(runtime.capabilities()).toEqual(expect.arrayContaining([
       expect.objectContaining({
         id: 'claude', capabilities: expect.objectContaining({
-          inbox: true, conversation: true, interaction: false,
+          inbox: true, conversation: true, conversationRestart: false, interaction: false,
           sessionControl: false, subscriptionUsage: true,
         }), capabilityMetadata: { conversation: { experimental: true } },
       }),
       expect.objectContaining({
         id: 'codex', capabilities: expect.objectContaining({
-          inbox: true, conversation: true, interaction: true,
+          inbox: true, conversation: true, conversationRestart: true, interaction: true,
           sessionControl: false, subscriptionUsage: true,
         }), capabilityMetadata: { conversation: { experimental: false } },
       }),
     ]));
+    expect(runtime.capabilities().filter((item) => item.id !== 'codex')
+      .every((item) => !item.capabilities.conversationRestart)).toBe(true);
   });
 
   it('projects managed Codex native Inbox transitions while Claude waits for its Bridge Connector', async () => {

@@ -285,6 +285,7 @@ export const codex = {
     inbox: { apiVersion: 1 as const },
     conversation: { apiVersion: 1 as const },
     conversationActivation: { apiVersion: 1 as const },
+    conversationRestart: { apiVersion: 1 as const },
     conversationGoal: { apiVersion: 1 as const },
     conversationPlan: { apiVersion: 1 as const },
     conversationContext: { apiVersion: 1 as const },

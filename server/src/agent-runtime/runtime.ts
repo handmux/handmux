@@ -23,7 +23,7 @@ import {
   LocalAgentBridgeTransportServer,
 } from './bridgeTransport.js';
 import type { LocalAgentBridgeConnection, LocalAgentBridgeHost } from './bridgeTypes.js';
-import { ConversationService } from './conversation.js';
+import { ConversationContractError, ConversationService } from './conversation.js';
 import {
   RuntimeConversationActivitySource,
 } from './conversationActivity.js';
@@ -31,6 +31,8 @@ import type { AgentConversationActivityReader } from './conversationActivity.js'
 import { AgentConversationControlService } from './conversationControls.js';
 import { AgentConversationActivationService } from './conversationActivation.js';
 import type { AgentConversationActivationControllerV1 } from './conversationActivation.js';
+import { AgentConversationRestartService } from './conversationRestart.js';
+import type { AgentConversationRestartControllerV1 } from './conversationRestart.js';
 import type {
   AgentConversationCommandControllerV1,
   AgentConversationContextControllerV1,
@@ -60,8 +62,10 @@ import type {
   AgentRunLease,
   AgentRunRef,
   RunRevokeReason,
+  AgentSessionRef,
   ScopedAgentRunController,
 } from './run.js';
+import type { CodexRestartReceiptStore } from '../agents/codexRestartReceipt.js';
 
 const DEFAULT_ACTIVATION_TIMEOUT_MS = 5_000;
 // Pane navigation tolerates a short stale window; send/control paths do not use this projection.
@@ -106,6 +110,7 @@ export interface AgentRuntimeCapabilityContext extends AgentAdapterContext {
   inbox: InboxOrderedProjector;
   process: ProcessContext;
   currentRunForPane(paneId: string): AgentRunLease | null;
+  pauseSessionDelivery(session: AgentSessionRef): Promise<() => void>;
 }
 
 export interface AgentRuntimeAdapterBinding {
@@ -113,6 +118,7 @@ export interface AgentRuntimeAdapterBinding {
   conversation?: AgentConversationAdapterV1;
   conversationActivity?: AgentConversationActivityReader;
   conversationActivation?: AgentConversationActivationControllerV1;
+  conversationRestart?: AgentConversationRestartControllerV1;
   conversationGoal?: AgentConversationGoalControllerV1;
   conversationPlan?: AgentConversationPlanControllerV1;
   conversationContext?: AgentConversationContextControllerV1;
@@ -146,6 +152,7 @@ export interface AgentCapabilityDescriptor {
     inbox: boolean;
     conversation: boolean;
     conversationActivation: boolean;
+    conversationRestart: boolean;
     conversationGoal: boolean;
     conversationPlan: boolean;
     conversationContext: boolean;
@@ -178,6 +185,8 @@ export interface AgentRuntimeOptions {
   newBridgeAuthToken?: () => string;
   /** Fail closed without quarantining state when a prerequisite migration could not be verified. */
   conversationStartupBlockReason?: string;
+  /** Loaded before Runtime construction so pending restarts fence queue dispatch from the first send. */
+  conversationRestartReceipts?: CodexRestartReceiptStore;
 }
 
 const NOOP_LOGGER: AdapterLogger = Object.freeze({
@@ -347,6 +356,7 @@ export class AgentRuntime {
   readonly inbox: InboxService;
   readonly conversation: ConversationService | null;
   readonly conversationActivation: AgentConversationActivationService | null;
+  readonly conversationRestart: AgentConversationRestartService | null;
   readonly conversationControls: AgentConversationControlService | null;
   readonly interaction: InteractionService | null;
   readonly sessionControl: AgentSessionControlService | null;
@@ -398,6 +408,7 @@ export class AgentRuntime {
     newBridgeConnectionId,
     newBridgeAuthToken = () => crypto.randomBytes(32).toString('base64url'),
     conversationStartupBlockReason,
+    conversationRestartReceipts,
   }: AgentRuntimeOptions) {
     if (!path.isAbsolute(stateDirectory) || !path.isAbsolute(socketPath) || !panes || !process
       || !Number.isSafeInteger(activationTimeoutMs) || activationTimeoutMs <= 0) {
@@ -467,6 +478,7 @@ export class AgentRuntime {
     const conversations: Record<string, AgentConversationAdapterV1> = {};
     const conversationActivities: Record<string, AgentConversationActivityReader> = {};
     const conversationActivations: Record<string, AgentConversationActivationControllerV1> = {};
+    const conversationRestarts: Record<string, AgentConversationRestartControllerV1> = {};
     const conversationControlBindings: Record<string, AgentConversationControlBindings> = {};
     const interactions: Record<string, AgentInteractionAdapterV1> = {};
     const sessionControls: Record<string, AgentSessionControlAdapterV1> = {};
@@ -516,6 +528,22 @@ export class AgentRuntime {
           this.#report(adapter.id, {
             capability: 'conversationActivation', availability: 'unavailable',
             message: 'Conversation activation binding is missing',
+          });
+        }
+        if (binding.conversationRestart) {
+          if (adapter.capabilities.conversationRestart?.apiVersion === 1
+            && validController(binding.conversationRestart, ['restart', 'recovery', 'recover'])) {
+            conversationRestarts[adapter.id] = binding.conversationRestart;
+          } else {
+            this.#report(adapter.id, {
+              capability: 'conversationRestart', availability: 'unavailable',
+              message: 'invalid Conversation restart controller',
+            });
+          }
+        } else if (adapter.capabilities.conversationRestart?.apiVersion === 1) {
+          this.#report(adapter.id, {
+            capability: 'conversationRestart', availability: 'unavailable',
+            message: 'Conversation restart binding is missing',
           });
         }
         const controlBinding: AgentConversationControlBindings = {};
@@ -606,14 +634,19 @@ export class AgentRuntime {
     }
     const conversationStateFile = path.join(stateDirectory, 'conversation-state.json');
     const createConversation = (): ConversationService => new ConversationService({
-        runs: this.runs,
-        adapters: conversations,
-        activitySource: new RuntimeConversationActivitySource(conversationActivities),
-        store: new FileConversationStateStore(conversationStateFile),
-        ...(conversationStartupBlockReason === undefined ? {} : {
-          dispatchFences: { codex: conversationStartupBlockReason },
-        }),
-      });
+      runs: this.runs,
+      adapters: conversations,
+      activitySource: new RuntimeConversationActivitySource(conversationActivities),
+      store: new FileConversationStateStore(conversationStateFile),
+      ...(conversationStartupBlockReason === undefined ? {} : {
+        dispatchFences: { codex: conversationStartupBlockReason },
+      }),
+      ...(conversationRestartReceipts === undefined ? {} : {
+        isSessionRestartPending: (session) => conversationRestartReceipts.isPending(
+          session.agentId, session.sessionId,
+        ),
+      }),
+    });
     if (!Object.keys(conversations).length) this.conversation = null;
     else {
       try { this.conversation = createConversation(); } catch (error) {
@@ -635,6 +668,8 @@ export class AgentRuntime {
     }
     this.conversationActivation = Object.keys(conversationActivations).length
       ? new AgentConversationActivationService(conversationActivations) : null;
+    this.conversationRestart = Object.keys(conversationRestarts).length
+      ? new AgentConversationRestartService(conversationRestarts) : null;
     this.conversationControls = Object.keys(conversationControlBindings).length
       ? new AgentConversationControlService(conversationControlBindings) : null;
     const interactionStateFile = path.join(stateDirectory, 'interaction-state.json');
@@ -706,6 +741,8 @@ export class AgentRuntime {
             && validConversationAdapter(binding?.conversation),
           conversationActivation: adapter.capabilities.conversationActivation?.apiVersion === 1
             && validController(binding?.conversationActivation, ['describe', 'activate']),
+          conversationRestart: adapter.capabilities.conversationRestart?.apiVersion === 1
+            && validController(binding?.conversationRestart, ['restart', 'recovery', 'recover']),
           conversationGoal: adapter.capabilities.conversationGoal?.apiVersion === 1
             && validController(binding?.conversationGoal, ['read']),
           conversationPlan: adapter.capabilities.conversationPlan?.apiVersion === 1
@@ -964,6 +1001,10 @@ export class AgentRuntime {
       panes: this.#panes,
       process: this.#process,
       currentRunForPane: (paneId: string) => this.runs.currentForPane(paneId),
+      pauseSessionDelivery: async (session: AgentSessionRef) => {
+        if (!this.conversation) throw new ConversationContractError('Conversation service is unavailable');
+        return await this.conversation.pauseSessionDelivery(session);
+      },
       bridge: this.bridge.hostFor(adapter.id),
       resources: this.resources.forAdapter(adapter.id),
       logger: this.#logger,

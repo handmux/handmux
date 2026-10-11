@@ -2,6 +2,7 @@ import express from 'express';
 import { ConversationContractError } from '../agent-runtime/conversation.js';
 import { ConversationActivationError } from '../agent-runtime/conversationActivation.js';
 import { ConversationControlError } from '../agent-runtime/conversationControls.js';
+import { ConversationRestartError } from '../agent-runtime/conversationRestart.js';
 import {
   ConversationLiveHub,
   ConversationLiveHubError,
@@ -25,7 +26,7 @@ type AgentFacadeRuntime = Pick<
   AgentRuntime,
   'capabilities' | 'health' | 'activeRuns' | 'inbox' | 'conversation' | 'interaction'
   | 'conversationActivation' | 'conversationControls' | 'sessionControl' | 'subscriptionUsage'
-  | 'resources' | 'runs'
+  | 'conversationRestart' | 'resources' | 'runs'
 >;
 
 const RESOURCE_ID_RE = /^[a-zA-Z0-9_-]{16,256}$/;
@@ -189,6 +190,75 @@ export function agentRoutes({ runtime }: { runtime: AgentFacadeRuntime }): expre
     });
     return true;
   };
+
+  const conversationRestartError = (error: unknown, res: express.Response): boolean => {
+    if (!(error instanceof ConversationRestartError)) return false;
+    const status = error.code === 'unavailable' ? 503 : 409;
+    res.status(status).json({
+      error: error.message,
+      code: error.code,
+      ...(error.recovery === undefined ? {} : { recovery: error.recovery }),
+    });
+    return true;
+  };
+
+  router.post('/agents/conversation-restart', async (req, res, next) => {
+    try {
+      if (!runtime.conversationRestart) {
+        return res.status(409).json({ error: 'conversation restart unsupported', code: 'unsupported' });
+      }
+      const ref = run(req.body?.run);
+      if (!ref || !text(ref.sessionId, 1024)) {
+        return res.status(400).json({ error: 'invalid agent run' });
+      }
+      if (ref.agentId !== 'codex') {
+        return res.status(409).json({ error: 'Conversation restart is not supported for this Agent', code: 'unsupported' });
+      }
+      const lease = runtime.runs.resolve(ref);
+      if (!lease) return res.status(409).json({ error: 'stale agent run', code: 'stale_run' });
+      // The user has confirmed the restart. Keep the bounded server-side operation alive if the browser
+      // navigates away or loses its connection; only the service's own hard timeout aborts its controller.
+      const receipt = await runtime.conversationRestart.restart(lease);
+      return res.json({ receipt });
+    } catch (error) {
+      if (conversationRestartError(error, res)) return;
+      return next(error);
+    }
+  });
+
+  router.get('/agents/conversation-restart-recovery', async (req, res, next) => {
+    try {
+      if (!runtime.conversationRestart) {
+        return res.status(409).json({ error: 'conversation restart unsupported', code: 'unsupported' });
+      }
+      const paneId = typeof req.query.paneId === 'string' ? req.query.paneId : '';
+      if (!/^%\d+$/.test(paneId)) {
+        return res.status(400).json({ error: 'invalid conversation recovery pane' });
+      }
+      return res.json({ receipt: await runtime.conversationRestart.recovery(paneId) });
+    } catch (error) {
+      if (conversationRestartError(error, res)) return;
+      return next(error);
+    }
+  });
+
+  router.post('/agents/conversation-restart-recovery', async (req, res, next) => {
+    try {
+      if (!runtime.conversationRestart) {
+        return res.status(409).json({ error: 'conversation restart unsupported', code: 'unsupported' });
+      }
+      const paneId = typeof req.body?.paneId === 'string' ? req.body.paneId : '';
+      const operationId = typeof req.body?.operationId === 'string' ? req.body.operationId : '';
+      if (!/^%\d+$/.test(paneId) || !/^[0-9a-f]{64}$/.test(operationId)) {
+        return res.status(400).json({ error: 'invalid conversation recovery request' });
+      }
+      const receipt = await runtime.conversationRestart.recover(paneId, operationId);
+      return res.json({ receipt });
+    } catch (error) {
+      if (conversationRestartError(error, res)) return;
+      return next(error);
+    }
+  });
 
   router.get('/agents/conversation-activation', async (req, res, next) => {
     try {

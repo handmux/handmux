@@ -128,6 +128,7 @@ export interface AgentAdapter {
     inbox?: VersionedCapabilityAdapter;
     conversation?: ConversationCapabilityAdapter;
     conversationActivation?: VersionedCapabilityAdapter;
+    conversationRestart?: VersionedCapabilityAdapter;
     conversationGoal?: VersionedCapabilityAdapter;
     conversationPlan?: VersionedCapabilityAdapter;
     conversationContext?: VersionedCapabilityAdapter;
@@ -173,7 +174,7 @@ function validStringArray(value: unknown): value is string[] {
 function validCapabilities(value: unknown): boolean {
   if (!isRecord(value)) return false;
   const allowed = new Set([
-    'inbox', 'conversation', 'conversationActivation', 'conversationGoal', 'conversationPlan',
+    'inbox', 'conversation', 'conversationActivation', 'conversationRestart', 'conversationGoal', 'conversationPlan',
     'conversationContext', 'conversationPermission', 'conversationCommands', 'interaction', 'sessionControl',
     'subscriptionUsage',
   ]);

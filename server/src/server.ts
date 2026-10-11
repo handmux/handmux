@@ -63,6 +63,7 @@ import { clearCodexConversationThroughTui } from './agents/codexTerminalControl.
 import { sessionsDir as codexSessionsDir } from './agents/codex.js';
 import { inspectCodexOpenRootSession } from './agents/codexOpenSession.js';
 import { CodexActivationReceiptStore } from './agents/codexActivationReceipt.js';
+import { CodexRestartReceiptStore } from './agents/codexRestartReceipt.js';
 import { ApiAccountService, apiAccountsPath } from './apiAccounts.js';
 import { ClaudeHookBridgeConnector } from '../connectors/claude/index.js';
 import { CodeBuddyHookBridgeConnector } from '../connectors/codebuddy/index.js';
@@ -150,6 +151,9 @@ const agentRuntimeDirectory = agentRuntimeDirectoryPath(home);
 const codexActivationReceipts = new CodexActivationReceiptStore(
   path.join(agentRuntimeDirectory, 'codex-activation-receipts.json'),
 );
+const codexRestartReceipts = new CodexRestartReceiptStore(
+  path.join(agentRuntimeDirectory, 'codex-restart-receipts.json'),
+);
 const legacyCodexOutbox = codexOutboxPath(home);
 let conversationStartupBlockReason: string | undefined;
 try {
@@ -227,6 +231,7 @@ const agentRuntime = createBuiltinAgentRuntime({
   panes: agentPanes,
   process: agentProcess,
   stateDirectory: agentRuntimeDirectory,
+  conversationRestartReceipts: codexRestartReceipts,
   ...(conversationStartupBlockReason === undefined ? {} : { conversationStartupBlockReason }),
   claudeEvents: events,
   claudeProjectsRoot: path.join(agentHome, '.claude', 'projects'),
@@ -262,6 +267,7 @@ const agentRuntime = createBuiltinAgentRuntime({
   },
   codexApp,
   codexActivationReceipts,
+  codexRestartReceipts,
   codexActivationCommands: {
     openOutputCapture: (pane) => commands.openPaneOutputCapture(pane),
     paneEpoch: async () => {
@@ -270,6 +276,14 @@ const agentRuntime = createBuiltinAgentRuntime({
     },
     inspectOpenSession: (pid) => inspectCodexOpenRootSession(pid, codexSessionsDir(agentHome)),
     runPaneCommand: (pane, command) => commands.runPaneCommand(pane, command),
+  },
+  codexRestartCommands: {
+    paneEpoch: async () => {
+      const environment = await workspaceTmux.observeEnvironment();
+      return environment.status === 'present' ? environment.tmuxServerId : null;
+    },
+    runPaneCommand: (pane, command) => commands.runPaneCommand(pane, command),
+    terminate: (pid, signal) => process.kill(pid, signal),
   },
   codexClear: async (pane, threadId) => {
     await clearCodexConversationThroughTui(codexApp, commands, pane, threadId);

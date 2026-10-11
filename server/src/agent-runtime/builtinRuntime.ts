@@ -26,6 +26,9 @@ import { readLatestContextUsage } from '../codexUsageSnapshot.js';
 import { createCodexConversationActivationController } from '../agents/codexConversationActivation.js';
 import type { CodexActivationCommands } from '../agents/codexConversationActivation.js';
 import type { CodexActivationReceiptStore } from '../agents/codexActivationReceipt.js';
+import { createCodexConversationRestartController } from '../agents/codexConversationRestart.js';
+import type { CodexRestartCommands } from '../agents/codexConversationRestart.js';
+import type { CodexRestartReceiptStore } from '../agents/codexRestartReceipt.js';
 import { createClaudeSubscriptionUsageAdapter } from '../agents/claudeSubscriptionUsage.js';
 import { createCodexSubscriptionUsageAdapter } from '../agents/codexSubscriptionUsage.js';
 import {
@@ -71,6 +74,8 @@ export interface BuiltinAgentRuntimeOptions
   codexClear?: (pane: string, threadId: string) => Promise<void>;
   codexActivationCommands?: CodexActivationCommands;
   codexActivationReceipts?: CodexActivationReceiptStore;
+  codexRestartCommands?: CodexRestartCommands;
+  codexRestartReceipts?: CodexRestartReceiptStore;
   codexSessionsRoot?: string;
   piSessionsRoot?: string;
 }
@@ -188,6 +193,8 @@ export function createBuiltinAgentRuntime({
   codexClear,
   codexActivationCommands,
   codexActivationReceipts,
+  codexRestartCommands,
+  codexRestartReceipts,
   codexSessionsRoot,
   piSessionsRoot,
   ...runtimeOptions
@@ -325,6 +332,24 @@ export function createBuiltinAgentRuntime({
           panes: context.panes, process: context.process, commands: codexActivationCommands,
           ...(codexActivationReceipts === undefined ? {} : { receipts: codexActivationReceipts }),
         }) : undefined;
+      const conversationRestart = codexRestartCommands && codexRestartReceipts
+        ? createCodexConversationRestartController({
+          app: codexApp,
+          panes: context.panes,
+          process: context.process,
+          commands: codexRestartCommands,
+          receipts: codexRestartReceipts,
+          pauseSessionDelivery: (session) => context.pauseSessionDelivery(session),
+          resolveRun: (ref) => context.runs.resolve(ref),
+          isRuntimeRunReady: (paneId, sessionId, previousRunId) => {
+            const current = context.currentRunForPane(paneId);
+            return current !== null && current.ref.agentId === 'codex'
+              && current.ref.sessionId === sessionId && current.ref.runId !== previousRunId
+              && !current.signal.aborted;
+          },
+          ...(home === undefined ? {} : { home }),
+        })
+        : undefined;
       const inbox = new NativeInboxCoordinator({
         agentId: 'codex', sourceId: 'codex.app-server', context,
         source: createCodexNativeInboxSource(codexApp),
@@ -338,6 +363,7 @@ export function createBuiltinAgentRuntime({
         conversationActivity: createCodexConversationActivityReader(codexApp),
         interaction: createCodexInteractionAdapter(codexApp),
         ...(conversationActivation === undefined ? {} : { conversationActivation }),
+        ...(conversationRestart === undefined ? {} : { conversationRestart }),
         ...(conversationControls === undefined ? {} : {
           conversationGoal: conversationControls.goal,
           conversationPlan: conversationControls.plan,
