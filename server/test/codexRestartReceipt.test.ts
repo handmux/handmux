@@ -22,6 +22,10 @@ function input(overrides: Record<string, unknown> = {}) {
         pid: 41, startedAt: 900, ppid: 1, tty: '/dev/ttys001', executable: '/usr/local/bin/node',
         commandLine: '/usr/local/lib/node_modules/handmux/bin/handmux.js codex',
       },
+      appServer: {
+        pid: 43, startedAt: 1_001, ppid: 41, tty: '/dev/ttys001', executable: '/usr/bin/codex',
+        commandLine: '/usr/bin/codex app-server --listen unix:///home/test/.handmux/codex-app/1.sock',
+      },
     },
     sessionId: SESSION_ID,
     previousRunId: 'run-1',
@@ -43,7 +47,10 @@ describe('Codex conversation restart receipts', () => {
     expect(first).toMatchObject({
       agentId: 'codex',
       pane: { paneId: '%1', sessionName: 'work', windowId: '@1', tty: '/dev/ttys001', tmuxEpoch: EPOCH },
-      process: { tui: { pid: 42, startedAt: 1_000 }, wrapper: { pid: 41, startedAt: 900 } },
+      process: {
+        tui: { pid: 42, startedAt: 1_000 }, wrapper: { pid: 41, startedAt: 900 },
+        appServer: { pid: 43, startedAt: 1_001 },
+      },
       sessionId: SESSION_ID,
       command: `handmux codex resume ${SESSION_ID}`,
       phase: 'prepared',
@@ -51,12 +58,17 @@ describe('Codex conversation restart receipts', () => {
     expect(store.prepare(input())).toEqual(first);
 
     const persisted = JSON.parse(fs.readFileSync(file, 'utf8')) as {
-      receipts: Array<{ process: { tui: Record<string, unknown>; wrapper: Record<string, unknown> } }>;
+      receipts: Array<{ process: {
+        tui: Record<string, unknown>; wrapper: Record<string, unknown>; appServer: Record<string, unknown>;
+      } }>;
     };
     expect(persisted.receipts[0]?.process.tui).not.toHaveProperty('commandLine');
     expect(persisted.receipts[0]?.process.wrapper).not.toHaveProperty('commandLine');
+    expect(persisted.receipts[0]?.process.appServer).toMatchObject({ pid: 43, startedAt: 1_001 });
+    expect(persisted.receipts[0]?.process.appServer).not.toHaveProperty('commandLine');
     expect(first.process.tui).not.toHaveProperty('commandLine');
     expect(first.process.wrapper).not.toHaveProperty('commandLine');
+    expect(first.process.appServer).not.toHaveProperty('commandLine');
 
     const restarted = new CodexRestartReceiptStore(file, { now: () => 20_000 });
     expect(restarted.get(first.operationId)).toEqual(first);

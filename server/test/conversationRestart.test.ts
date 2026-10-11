@@ -70,6 +70,7 @@ function makeHarness(options: {
   runPaneCommand?: (paneId: string, command: string) => void | Promise<void>;
   runtimeReady?: (paneId: string, sessionId: string, previousRunId: string) => boolean | Promise<boolean>;
   receiptStore?: CodexRestartReceiptStore;
+  appServerProbeStates?: readonly ('same' | 'replaced' | 'exited' | 'unknown')[];
 } = {}) {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'conversation-restart-'));
   const receiptFile = path.join(directory, 'receipts.json');
@@ -83,10 +84,14 @@ function makeHarness(options: {
   let threadId = options.threadId === undefined ? SESSION_ID : options.threadId;
   let epoch = options.paneEpoch === undefined ? EPOCH : options.paneEpoch;
   let now = 1_000;
+  let appServerProbeState: 'same' | 'replaced' | 'exited' | 'unknown' = 'same';
+  const appServerProbeStates = [...(options.appServerProbeStates ?? [])];
+  const events: string[] = [];
   const released = vi.fn();
   const pauseSessionDelivery = vi.fn(async () => released);
   const terminate = vi.fn(async (pid: number, signal: NodeJS.Signals) => {
     if (options.terminate) return await options.terminate(pid, signal);
+    appServerProbeState = 'exited';
     currentIdentity = {
       pid: 30, ppid: 2, startedAt: 300, tty: '/dev/ttys001', executable: '/bin/zsh', commandLine: '/bin/zsh',
     };
@@ -96,6 +101,7 @@ function makeHarness(options: {
     threadId = null;
   });
   const runPaneCommand = vi.fn(async (paneId: string, command: string) => {
+    events.push('resume-command');
     if (options.runPaneCommand) return await options.runPaneCommand(paneId, command);
     currentIdentity = {
       pid: 40, ppid: 50, startedAt: 400, tty: '/dev/ttys001', executable: '/usr/local/bin/codex',
@@ -108,8 +114,16 @@ function makeHarness(options: {
   });
   const inspectForegroundFresh = vi.fn(async () => currentIdentity && structuredClone(currentIdentity));
   const inspectForegroundGroupFresh = vi.fn(async () => structuredClone(currentGroup));
+  const inspectProcessGenerationFresh = vi.fn(async () => {
+    if (appServerProbeStates.length) appServerProbeState = appServerProbeStates.shift()!;
+    events.push(`app-server:${appServerProbeState}`);
+    return appServerProbeState;
+  });
   const listPanes = vi.fn(async () => currentPane ? [structuredClone(currentPane)] : []);
   const paneEpoch = vi.fn(async () => epoch);
+  const run = lease();
+  let runResolved = true;
+  const resolveRun = vi.fn((ref) => ref.runId === 'run-1' && runResolved ? run.value : null);
   const controller = createCodexConversationRestartController({
     app: { discover: vi.fn(async () => ({ managed, threadId })) },
     panes: {
@@ -120,6 +134,7 @@ function makeHarness(options: {
       inspectForeground: vi.fn(async () => currentIdentity && structuredClone(currentIdentity)),
       inspectForegroundFresh,
       inspectForegroundGroupFresh,
+      inspectProcessGenerationFresh,
     },
     commands: {
       paneEpoch,
@@ -128,7 +143,7 @@ function makeHarness(options: {
     },
     receipts,
     pauseSessionDelivery,
-    resolveRun: vi.fn((ref) => ref.runId === 'run-1' ? run.value : null),
+    resolveRun,
     isRuntimeRunReady: options.runtimeReady ?? (async () => managed === true && threadId === SESSION_ID
       && currentIdentity?.pid === 40),
     home: HOME,
@@ -137,11 +152,12 @@ function makeHarness(options: {
     pollMs: 100,
     timeoutMs: 500,
   });
-  const run = lease();
   const service = new AgentConversationRestartService({ codex: controller }, { timeoutMs: 2_000 });
   return {
     controller, service, run, receipts, pauseSessionDelivery, released, terminate, runPaneCommand,
-    receiptFile, inspectForegroundFresh, inspectForegroundGroupFresh, listPanes, paneEpoch,
+    receiptFile, inspectForegroundFresh, inspectForegroundGroupFresh, inspectProcessGenerationFresh,
+    listPanes, paneEpoch, resolveRun, events,
+    group: () => structuredClone(currentGroup),
     appManaged: () => managed,
     appThread: () => threadId,
     setApp: (next: { managed: boolean | null; threadId: string | null }) => {
@@ -151,6 +167,9 @@ function makeHarness(options: {
     setIdentity: (next: ForegroundProcessIdentity | null) => { currentIdentity = next; },
     setGroup: (next: readonly ForegroundProcessIdentity[]) => { currentGroup = next; },
     setEpoch: (next: string | null) => { epoch = next; },
+    setAppServerProbe: (next: 'same' | 'replaced' | 'exited' | 'unknown') => { appServerProbeState = next; },
+    appServerProbe: () => appServerProbeState,
+    revokeRun: () => { runResolved = false; },
   };
 }
 
@@ -269,6 +288,122 @@ describe('Codex conversation restart', () => {
     expect(h.receipts.isPending('codex', SESSION_ID)).toBe(true);
   });
 
+  it('releases the live delivery fence when recovery reconciliation discovers readiness', async () => {
+    const h = makeHarness({ runPaneCommand: async () => { throw new Error('tmux disconnected'); } });
+    await expect(h.service.restart(h.run.value)).rejects.toMatchObject({ code: 'unavailable' });
+    expect(h.released).not.toHaveBeenCalled();
+
+    const resumed = tui({ pid: 40, ppid: 50, startedAt: 400,
+      commandLine: `/usr/local/bin/codex --remote unix://${SOCKET} --cd /repo resume ${SESSION_ID}` });
+    h.setIdentity(resumed);
+    h.setGroup([resumed, wrapper({ pid: 50, startedAt: 500 }), appServer({ pid: 51, ppid: 50, startedAt: 501 })]);
+    h.setPane(pane('codex'));
+    h.setApp({ managed: true, threadId: SESSION_ID });
+
+    await expect(h.controller.recovery('%1')).resolves.toMatchObject({ phase: 'ready' });
+    expect(h.released).toHaveBeenCalledOnce();
+    expect(h.receipts.isPending('codex', SESSION_ID)).toBe(false);
+  });
+
+  it.each(['prepared', 'stopped'] as const)(
+    'reconciles a manually resumed session from a %s receipt', async (phase) => {
+      const h = makeHarness({
+        processIdentity: tui({ pid: 40, ppid: 50, startedAt: 400,
+          commandLine: `/usr/local/bin/codex --remote unix://${SOCKET} --cd /repo resume ${SESSION_ID}` }),
+        processGroup: [
+          tui({ pid: 40, ppid: 50, startedAt: 400,
+            commandLine: `/usr/local/bin/codex --remote unix://${SOCKET} --cd /repo resume ${SESSION_ID}` }),
+          wrapper({ pid: 50, startedAt: 500 }), appServer({ pid: 51, ppid: 50, startedAt: 501 }),
+        ],
+        appServerProbeStates: ['exited'],
+      });
+      const saved = h.receipts.prepare({
+        pane: { paneId: '%1', sessionName: 'work', windowId: '@1', tty: '/dev/ttys001', tmuxEpoch: EPOCH },
+        process: { tui: {
+          pid: 10, ppid: 20, startedAt: 100, tty: '/dev/ttys001', executable: '/usr/local/bin/codex',
+        }, wrapper: {
+          pid: 20, ppid: 2, startedAt: 200, tty: '/dev/ttys001', executable: '/usr/local/bin/node',
+        }, appServer: {
+          pid: 21, ppid: 20, startedAt: 201, tty: '/dev/ttys001', executable: '/usr/local/bin/codex',
+        } },
+        sessionId: SESSION_ID,
+        previousRunId: 'run-1',
+      });
+      if (phase === 'stopped') h.receipts.transition(saved.operationId, 'prepared', 'stopped');
+
+      await expect(h.controller.recovery('%1')).resolves.toMatchObject({
+        operationId: saved.operationId, phase: 'ready', canResume: false,
+      });
+      expect(h.receipts.isPending('codex', SESSION_ID)).toBe(false);
+    },
+  );
+
+  it('rechecks the run lease after the final asynchronous process probe before SIGTERM', async () => {
+    const h = makeHarness();
+    h.inspectForegroundGroupFresh.mockImplementation(async () => {
+      if (h.inspectForegroundGroupFresh.mock.calls.length === 2) h.revokeRun();
+      return h.group();
+    });
+
+    await expect(h.service.restart(h.run.value)).rejects.toMatchObject({ code: 'stale_run' });
+    expect(h.terminate).not.toHaveBeenCalled();
+    expect(h.released).toHaveBeenCalledOnce();
+    expect(h.receipts.isPending('codex', SESSION_ID)).toBe(false);
+  });
+
+  it('waits for the original App Server process generation to exit before resuming', async () => {
+    let h!: ReturnType<typeof makeHarness>;
+    h = makeHarness({
+      terminate: async () => {
+        h.setIdentity({ pid: 30, ppid: 2, startedAt: 300, tty: '/dev/ttys001', executable: '/bin/zsh', commandLine: '/bin/zsh' });
+        h.setGroup([{ pid: 30, ppid: 2, startedAt: 300, tty: '/dev/ttys001', executable: '/bin/zsh', commandLine: '/bin/zsh' }]);
+        h.setPane(pane('zsh'));
+        h.setApp({ managed: false, threadId: null });
+      },
+      appServerProbeStates: ['same', 'same', 'exited'],
+    });
+
+    const receipt = await h.service.restart(h.run.value);
+    expect(receipt.phase).toBe('ready');
+    expect(h.inspectProcessGenerationFresh).toHaveBeenCalledWith(expect.objectContaining({
+      pid: 21, startedAt: 201,
+    }));
+    expect(h.events.filter((event) => event.startsWith('app-server:'))).toContain('app-server:exited');
+    const resumeIndex = h.events.indexOf('resume-command');
+    expect(resumeIndex).toBeGreaterThan(-1);
+    expect(h.events.slice(0, resumeIndex)).toContain('app-server:same');
+    expect(h.events.slice(0, resumeIndex)).toContain('app-server:exited');
+  });
+
+  it('keeps recovery manual when the old App Server exit cannot be confirmed', async () => {
+    const h = makeHarness({
+      pane: pane('zsh'),
+      managed: false,
+      threadId: null,
+      processIdentity: { pid: 30, ppid: 2, startedAt: 300, tty: '/dev/ttys001', executable: '/bin/zsh', commandLine: '/bin/zsh' },
+      processGroup: [{ pid: 30, ppid: 2, startedAt: 300, tty: '/dev/ttys001', executable: '/bin/zsh', commandLine: '/bin/zsh' }],
+      appServerProbeStates: ['unknown'],
+    });
+    const saved = h.receipts.prepare({
+      pane: { paneId: '%1', sessionName: 'work', windowId: '@1', tty: '/dev/ttys001', tmuxEpoch: EPOCH },
+      process: { tui: {
+        pid: 10, ppid: 20, startedAt: 100, tty: '/dev/ttys001', executable: '/usr/local/bin/codex',
+      }, wrapper: {
+        pid: 20, ppid: 2, startedAt: 200, tty: '/dev/ttys001', executable: '/usr/local/bin/node',
+      }, appServer: {
+        pid: 21, ppid: 20, startedAt: 201, tty: '/dev/ttys001', executable: '/usr/local/bin/codex',
+      } },
+      sessionId: SESSION_ID,
+      previousRunId: 'run-1',
+    });
+    h.receipts.transition(saved.operationId, 'prepared', 'stopped');
+
+    await expect(h.controller.recover('%1', saved.operationId, new AbortController().signal))
+      .rejects.toMatchObject({ code: 'unavailable' });
+    expect(h.runPaneCommand).not.toHaveBeenCalled();
+    expect(h.receipts.isPending('codex', SESSION_ID)).toBe(true);
+  });
+
   it('never injects into a replacement pane after the old TUI stops', async () => {
     let h!: ReturnType<typeof makeHarness>;
     h = makeHarness({ terminate: async () => {
@@ -292,7 +427,7 @@ describe('Codex conversation restart', () => {
     const reloaded = makeHarness({ receiptStore: reloadedReceipts, pane: pane('zsh'),
       processIdentity: { pid: 30, ppid: 2, startedAt: 300, tty: '/dev/ttys001', executable: '/bin/zsh', commandLine: '/bin/zsh' },
       processGroup: [{ pid: 30, ppid: 2, startedAt: 300, tty: '/dev/ttys001', executable: '/bin/zsh', commandLine: '/bin/zsh' }],
-      managed: false, threadId: null });
+      managed: false, threadId: null, appServerProbeStates: ['exited'] });
 
     expect(reloaded.receipts.isPending('codex', SESSION_ID)).toBe(true);
     await expect(reloaded.controller.recovery('%1')).resolves.toMatchObject({
@@ -323,6 +458,7 @@ describe('Codex conversation restart', () => {
       h.setPane(pane('zsh'));
       h.setGroup([{ pid: 30, ppid: 2, startedAt: 300, tty: '/dev/ttys001', executable: '/bin/zsh', commandLine: '/bin/zsh' }]);
       h.setApp({ managed: false, threadId: null });
+      h.setAppServerProbe('exited');
     } });
     const first = h.service.restart(h.run.value);
     await signaled;
@@ -346,6 +482,9 @@ describe('Codex conversation restart', () => {
         wrapper: {
           pid: 20, ppid: 2, startedAt: 200, tty: '/dev/ttys001', executable: '/usr/local/bin/node',
         },
+        appServer: {
+          pid: 21, ppid: 20, startedAt: 201, tty: '/dev/ttys001', executable: '/usr/local/bin/codex',
+        },
       },
       sessionId: SESSION_ID,
       previousRunId: 'run-1',
@@ -365,6 +504,7 @@ describe('Codex conversation restart', () => {
       managed: false,
       threadId: null,
     });
+    h.setAppServerProbe('exited');
     h.inspectForegroundFresh
       .mockResolvedValueOnce(shell)
       .mockResolvedValueOnce(shell)

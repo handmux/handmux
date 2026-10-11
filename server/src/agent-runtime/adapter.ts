@@ -31,6 +31,8 @@ export interface ForegroundProcessIdentity {
   argv?: string[];
 }
 
+export type ProcessGenerationStatus = 'same' | 'replaced' | 'exited' | 'unknown';
+
 export interface ProcessContext {
   inspectForeground(pane: LivePane): Promise<ForegroundProcessIdentity | null>;
   // Destructive capabilities must not rely on the short-lived UI/runtime evidence caches. These probes
@@ -49,6 +51,9 @@ export interface ProcessContext {
   // lsof costs ~70ms on a Node process). Null means the probe could not confirm that process — callers must
   // treat it as inconclusive, not as proof the process exited.
   inspectProcess?(pid: number): Promise<ForegroundProcessIdentity | null>;
+  // Fresh, uncached identity check for a persisted PID generation. Unlike inspectProcess, this distinguishes
+  // a confirmed exit from a process that could not be inspected; destructive recovery must fail closed on unknown.
+  inspectProcessGenerationFresh?(identity: Pick<ForegroundProcessIdentity, 'pid' | 'startedAt'>): Promise<ProcessGenerationStatus>;
 }
 
 export interface ReadonlyPaneSource {

@@ -133,6 +133,9 @@ describe('AgentRuntime composition root', () => {
         wrapper: {
           pid: 102, ppid: 2, startedAt: 900, tty: '/dev/ttys001', executable: '/usr/bin/node',
         },
+        appServer: {
+          pid: 103, ppid: 102, startedAt: 1_001, tty: '/dev/ttys001', executable: '/usr/bin/codex',
+        },
       },
       sessionId,
       previousRunId: 'previous-run',
@@ -1416,6 +1419,7 @@ describe('AgentRuntime composition root', () => {
         inspectForeground: async () => null,
         inspectForegroundFresh: async () => null,
         inspectForegroundGroupFresh: async () => [],
+        inspectProcessGenerationFresh: async () => 'unknown',
       },
       stateDirectory,
       authToken: AUTH_TOKEN,

@@ -63,6 +63,7 @@ interface RestartEvidence {
   epoch: string;
   tui: ForegroundProcessIdentity;
   wrapper: ForegroundProcessIdentity;
+  appServer: ForegroundProcessIdentity;
 }
 
 interface RecoveryView extends ConversationRestartReceipt {
@@ -150,6 +151,16 @@ function isCodexTui(identity: ForegroundProcessIdentity, socketPath: string): bo
     && !!identity.startedAt && !!identity.tty && !!identity.executable && !!identity.commandLine;
 }
 
+function isCodexAppServer(identity: ForegroundProcessIdentity, socketPath: string): boolean {
+  const tokens = commandTokens(identity);
+  const listenIndex = tokens.indexOf('--listen');
+  return CODEX_EXE_RE.test(executableName(identity))
+    && tokens.includes('app-server')
+    && listenIndex >= 0 && tokens[listenIndex + 1] === `unix://${socketPath}`
+    && !!identity.startedAt && !!identity.tty && !!identity.executable && !!identity.commandLine
+    && Number.isSafeInteger(identity.ppid);
+}
+
 function recoveryOf(receipt: CodexRestartReceipt) {
   return {
     kind: 'codex_resume' as const,
@@ -180,6 +191,7 @@ export function createCodexConversationRestartController({
   if (!app || typeof app.discover !== 'function' || !panes || !process
     || typeof process.inspectForegroundFresh !== 'function'
     || typeof process.inspectForegroundGroupFresh !== 'function'
+    || typeof process.inspectProcessGenerationFresh !== 'function'
     || !commands || typeof commands.paneEpoch !== 'function'
     || typeof commands.runPaneCommand !== 'function' || typeof commands.terminate !== 'function'
     || !receipts || typeof receipts.prepare !== 'function'
@@ -191,6 +203,18 @@ export function createCodexConversationRestartController({
   }
 
   const socketPath = (paneId: string): string => codexAppSocketPath(paneId, home);
+  const deliveryFenceReleases = new Map<string, () => void>();
+  const releaseDeliveryFence = (operationId: string): void => {
+    const release = deliveryFenceReleases.get(operationId);
+    if (!release) return;
+    release();
+    deliveryFenceReleases.delete(operationId);
+  };
+  const oldAppServerStatus = async (receipt: CodexRestartReceipt) => {
+    if (!receipt.process.appServer) return 'unknown' as const;
+    try { return await process.inspectProcessGenerationFresh!(receipt.process.appServer); }
+    catch { return 'unknown' as const; }
+  };
   const paneFor = async (paneId: string): Promise<LivePane | null> => (
     (await panes.list()).find((candidate) => candidate.paneId === paneId) ?? null
   );
@@ -209,6 +233,8 @@ export function createCodexConversationRestartController({
   const recoveryShell = async (
     receipt: CodexRestartReceipt,
   ): Promise<{ pane: LivePane; identity: ForegroundProcessIdentity } | null> => {
+    const serverStatus = await oldAppServerStatus(receipt);
+    if (serverStatus !== 'exited' && serverStatus !== 'replaced') return null;
     const pane = await paneAndEpochMatch(receipt);
     if (!pane) return null;
     const ownership = await app.discover(pane.paneId);
@@ -259,12 +285,19 @@ export function createCodexConversationRestartController({
       || !Number.isSafeInteger(wrapper.ppid)) {
       throw new RestartFault('The Codex TUI is not a verified child of handmux codex', 'unavailable');
     }
-    return { pane, epoch, tui: target, wrapper };
+    const server = group.find((candidate) => candidate.ppid === wrapper.pid
+      && normTty(candidate.tty) === normTty(wrapper.tty)
+      && isCodexAppServer(candidate, socketPath(pane.paneId)));
+    if (!server) {
+      throw new RestartFault('The managed Codex App Server process cannot be verified', 'unavailable');
+    }
+    return { pane, epoch, tui: target, wrapper, appServer: server };
   };
   const recordInput = (run: AgentRunLease, evidence: RestartEvidence): CodexRestartReceiptInput => {
     const tui = toStoredIdentity(evidence.tui);
     const wrapper = toStoredIdentity(evidence.wrapper);
-    if (!tui || !wrapper || !run.ref.sessionId) {
+    const appServer = toStoredIdentity(evidence.appServer);
+    if (!tui || !wrapper || !appServer || !run.ref.sessionId) {
       throw new RestartFault('The Codex process generation is incomplete', 'unavailable');
     }
     return {
@@ -275,7 +308,7 @@ export function createCodexConversationRestartController({
         tty: evidence.pane.tty!,
         tmuxEpoch: evidence.epoch,
       },
-      process: { tui, wrapper },
+      process: { tui, wrapper, appServer },
       sessionId: run.ref.sessionId,
       previousRunId: run.ref.runId,
     };
@@ -332,6 +365,8 @@ export function createCodexConversationRestartController({
     } catch { return false; }
   };
   const resumeReady = async (receipt: CodexRestartReceipt): Promise<boolean> => {
+    const serverStatus = await oldAppServerStatus(receipt);
+    if (serverStatus !== 'exited' && serverStatus !== 'replaced') return false;
     const pane = await paneAndEpochMatch(receipt);
     if (!pane) throw new RestartFault('The original pane was replaced during restart', 'unavailable');
     const ownership = await app.discover(pane.paneId);
@@ -375,8 +410,8 @@ export function createCodexConversationRestartController({
       if (signal.aborted) throw new RestartFault('Conversation restart timed out after stopping Codex', 'unavailable');
       const pane = await paneAndEpochMatch(receipt);
       if (!pane) throw new RestartFault('The original pane was replaced during restart', 'unavailable');
-      const [ownership, foreground, group] = await Promise.all([
-        app.discover(pane.paneId), freshForeground(pane), freshGroup(pane),
+      const [ownership, foreground, group, serverStatus] = await Promise.all([
+        app.discover(pane.paneId), freshForeground(pane), freshGroup(pane), oldAppServerStatus(receipt),
       ]);
       if (ownership?.managed === true && ownership.threadId !== receipt.sessionId) {
         throw new RestartFault('A different Codex session appeared in the original pane', 'unavailable');
@@ -385,7 +420,8 @@ export function createCodexConversationRestartController({
         sameGeneration(receipt.process.tui, identity)
         || sameGeneration(receipt.process.wrapper, identity)
       ));
-      if (ownership?.managed === false && !originalPresent && foreground
+      if ((serverStatus === 'exited' || serverStatus === 'replaced')
+        && ownership?.managed === false && !originalPresent && foreground
         && SHELLS.has(executableName(foreground))) return foreground;
       await wait(pollMs);
     }
@@ -400,12 +436,17 @@ export function createCodexConversationRestartController({
     }
     throw new RestartFault('The Codex session did not become ready before the restart timed out', 'unavailable');
   };
-  const finalizeReady = (receipt: CodexRestartReceipt): CodexRestartReceipt => (
-    receipts.transition(receipt.operationId, ['resuming', 'ready'], 'ready')
-  );
+  const finalizeReady = (receipt: CodexRestartReceipt): CodexRestartReceipt => {
+    const ready = receipts.transition(receipt.operationId, ['prepared', 'stopped', 'resuming', 'ready'], 'ready');
+    releaseDeliveryFence(receipt.operationId);
+    return ready;
+  };
   const maybeReconcileReady = async (receipt: CodexRestartReceipt): Promise<CodexRestartReceipt> => {
-    if (receipt.phase === 'ready') return receipt;
-    if (receipt.phase === 'resuming' && await resumeReady(receipt)) {
+    if (receipt.phase === 'ready') {
+      releaseDeliveryFence(receipt.operationId);
+      return receipt;
+    }
+    if (await resumeReady(receipt)) {
       return finalizeReady(receipt);
     }
     return receipt;
@@ -445,18 +486,11 @@ export function createCodexConversationRestartController({
       let release: (() => void) | undefined;
       let signalAttempted = false;
       let terminationFailed = false;
-      let releaseCalled = false;
-      const releaseFence = (): void => {
-        if (release && !releaseCalled) {
-          releaseCalled = true;
-          release();
-        }
-      };
       const clearBeforeStop = async (message: string, code: 'unavailable' | 'stale_run'): Promise<never> => {
         if (await originalStillPresent(receipt)) {
           try {
             receipts.clear(receipt.operationId);
-            releaseFence();
+            releaseDeliveryFence(receipt.operationId);
           } catch { /* The durable pending marker still blocks delivery; fail closed. */ }
         }
         throw await errorWithReceipt(message, code, receipt, false);
@@ -464,6 +498,7 @@ export function createCodexConversationRestartController({
 
       try {
         release = await pauseSessionDelivery({ agentId: 'codex', sessionId: run.ref.sessionId });
+        deliveryFenceReleases.set(receipt.operationId, release);
         if (signal.aborted) return await clearBeforeStop('Conversation restart timed out before stopping Codex', 'unavailable');
         const result = await serializePaneInput(run.ref.paneId, async () => {
           if (!stableRun(run, resolveRun)) {
@@ -479,8 +514,12 @@ export function createCodexConversationRestartController({
             );
           }
           if (!samePane(evidence.pane, current.pane) || evidence.epoch !== current.epoch
-            || !sameIdentity(evidence.tui, current.tui) || !sameIdentity(evidence.wrapper, current.wrapper)) {
+            || !sameIdentity(evidence.tui, current.tui) || !sameIdentity(evidence.wrapper, current.wrapper)
+            || !sameIdentity(evidence.appServer, current.appServer)) {
             return await clearBeforeStop('The original Codex process or pane changed before the stop boundary', 'stale_run');
+          }
+          if (!stableRun(run, resolveRun)) {
+            return await clearBeforeStop('The Agent run changed during the final process identity probe', 'stale_run');
           }
           if (signal.aborted) return await clearBeforeStop('Conversation restart timed out before stopping Codex', 'unavailable');
 
@@ -517,7 +556,6 @@ export function createCodexConversationRestartController({
           await commands.runPaneCommand(run.ref.paneId, receipt.command);
           await waitForReady(receipt, signal);
           receipt = finalizeReady(receipt);
-          releaseFence();
           return await receiptView(receipt, { allowResume: false });
         });
         return result;
@@ -532,7 +570,7 @@ export function createCodexConversationRestartController({
         if (terminationFailed && await originalStillPresent(receipt)) {
           try {
             receipts.clear(receipt.operationId);
-            releaseFence();
+            releaseDeliveryFence(receipt.operationId);
             throw await errorWithReceipt(
               error instanceof Error ? error.message : 'Codex restart was not completed',
               error instanceof RestartFault ? error.code : 'unavailable',

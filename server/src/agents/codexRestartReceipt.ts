@@ -32,6 +32,9 @@ export interface CodexRestartReceipt {
   process: {
     tui: CodexRestartProcessIdentity;
     wrapper: CodexRestartProcessIdentity;
+    // Optional only for receipts written by an earlier in-development build. Such receipts stay recoverable
+    // manually but cannot authorize an automatic resume or queue release without this generation.
+    appServer?: CodexRestartProcessIdentity;
   };
   sessionId: string;
   previousRunId: string;
@@ -44,7 +47,13 @@ export interface CodexRestartReceipt {
 export type CodexRestartReceiptInput = Omit<
   CodexRestartReceipt,
   'operationId' | 'agentId' | 'command' | 'phase' | 'createdAt' | 'updatedAt'
->;
+> & {
+  process: {
+    tui: CodexRestartProcessIdentity;
+    wrapper: CodexRestartProcessIdentity;
+    appServer: CodexRestartProcessIdentity;
+  };
+};
 
 interface PersistedReceipts {
   version: 1;
@@ -77,6 +86,8 @@ function validReceipt(value: unknown): value is CodexRestartReceipt {
     && typeof pane.tmuxEpoch === 'string' && pane.tmuxEpoch.length > 0 && pane.tmuxEpoch.length <= 1_024
     && validProcess(process.tui) && validProcess(process.wrapper)
     && process.tui.ppid === process.wrapper.pid
+    && (process.appServer === undefined
+      || (validProcess(process.appServer) && process.appServer.ppid === process.wrapper.pid))
     && typeof value.sessionId === 'string' && isSessionUuid(value.sessionId)
     && typeof value.previousRunId === 'string' && value.previousRunId.length > 0 && value.previousRunId.length <= 1_024
     && value.command === `handmux codex resume ${value.sessionId}`
@@ -100,6 +111,9 @@ function persistedReceipt(receipt: CodexRestartReceipt): CodexRestartReceipt {
     process: {
       tui: persistedProcessIdentity(receipt.process.tui),
       wrapper: persistedProcessIdentity(receipt.process.wrapper),
+      ...(receipt.process.appServer
+        ? { appServer: persistedProcessIdentity(receipt.process.appServer) }
+        : {}),
     },
     sessionId: receipt.sessionId,
     previousRunId: receipt.previousRunId,
@@ -125,6 +139,7 @@ function operationId(input: CodexRestartReceiptInput): string {
     process: {
       tui: persistedProcessIdentity(input.process.tui),
       wrapper: persistedProcessIdentity(input.process.wrapper),
+      appServer: persistedProcessIdentity(input.process.appServer),
     },
     sessionId: input.sessionId,
     previousRunId: input.previousRunId,
@@ -148,6 +163,7 @@ function persistedInput(input: CodexRestartReceiptInput): CodexRestartReceiptInp
     process: {
       tui: persistedProcessIdentity(input.process.tui),
       wrapper: persistedProcessIdentity(input.process.wrapper),
+      appServer: persistedProcessIdentity(input.process.appServer),
     },
     sessionId: input.sessionId,
     previousRunId: input.previousRunId,

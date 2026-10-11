@@ -6,6 +6,7 @@ import type {
   ForegroundProcessIdentity,
   LivePane,
   ProcessContext,
+  ProcessGenerationStatus,
   ReadonlyPaneSource,
 } from './adapter.js';
 
@@ -203,6 +204,19 @@ export async function processStartedAt(run: RunCommand, pid: number): Promise<nu
   return Number.isFinite(parsed) ? parsed : undefined;
 }
 
+function processPresence(pid: number): 'present' | 'missing' | 'unknown' {
+  try {
+    process.kill(pid, 0);
+    return 'present';
+  } catch (error) {
+    const code = typeof error === 'object' && error !== null && 'code' in error
+      ? String((error as { code?: unknown }).code) : '';
+    if (code === 'ESRCH') return 'missing';
+    if (code === 'EPERM' || code === 'EACCES') return 'present';
+    return 'unknown';
+  }
+}
+
 export function createLocalAgentProcessContext({
   run = defaultRun,
 }: {
@@ -363,6 +377,20 @@ export function createLocalAgentProcessContext({
     async inspectProcess(pid: number): Promise<ForegroundProcessIdentity | null> {
       const startedAt = await processStartedAt(run, pid);
       return startedAt === undefined ? null : { pid, startedAt };
+    },
+    async inspectProcessGenerationFresh(identity): Promise<ProcessGenerationStatus> {
+      if (!Number.isSafeInteger(identity.pid) || identity.pid <= 0
+        || !Number.isSafeInteger(identity.startedAt) || identity.startedAt! <= 0) return 'unknown';
+      const initialPresence = processPresence(identity.pid);
+      if (initialPresence === 'missing') return 'exited';
+      if (initialPresence === 'unknown') return 'unknown';
+      try {
+        const currentStartedAt = await processStartedAt(run, identity.pid);
+        if (currentStartedAt !== undefined) {
+          return currentStartedAt === identity.startedAt ? 'same' : 'replaced';
+        }
+      } catch { return 'unknown'; }
+      return processPresence(identity.pid) === 'missing' ? 'exited' : 'unknown';
     },
   };
 }

@@ -153,6 +153,29 @@ describe('Tmux Agent Runtime context', () => {
     expect(run.mock.calls.filter(([command, args]) => command === 'ps' && args[0] === '-t')).toHaveLength(2);
   });
 
+  it.each([
+    ['same generation', 'Tue Aug 12 04:00:00 2026\n', 'present', 'same'],
+    ['replaced generation', 'Tue Aug 12 04:00:01 2026\n', 'present', 'replaced'],
+    ['confirmed exit', '', 'missing', 'exited'],
+    ['inconclusive process lookup', '', 'unknown', 'unknown'],
+  ] as const)('classifies a fresh pid probe as %s', async (_label, startedAt, presence, expected) => {
+    const originalStart = Date.parse('Tue Aug 12 04:00:00 2026');
+    const run = vi.fn(async (command: string, args: string[]) => (
+      command === 'ps' && args[0] === '-p' ? startedAt : ''
+    ));
+    vi.spyOn(process, 'kill').mockImplementation((pid) => {
+      if (pid !== 900_001) return true;
+      if (presence === 'missing') throw Object.assign(new Error('gone'), { code: 'ESRCH' });
+      if (presence === 'unknown') throw Object.assign(new Error('denied'), { code: 'EPERM' });
+      return true;
+    });
+    const context = createLocalAgentProcessContext({ run });
+
+    const actual = await context.inspectProcessGenerationFresh?.({ pid: 900_001, startedAt: originalStart });
+
+    expect(actual).toBe(expected);
+  });
+
   it('selects the deepest foreground leaf instead of a managed Node wrapper', async () => {
     const run = vi.fn(async (command: string, args: string[]) => {
       if (command === 'ps') {
