@@ -28,6 +28,7 @@ async function harness(options: {
   activity?: ConversationActivitySnapshot;
   prompt?: () => Promise<ConversationDispatchReceipt>;
   steer?: () => Promise<ConversationDispatchReceipt>;
+  isSessionRestartPending?: (session: { agentId: string; sessionId: string }) => boolean;
   pageItems?: ConversationItem[];
   readPage?: AgentConversationAdapterV1['readNativePage'];
   discoverNative?: AgentConversationAdapterV1['discoverNative'];
@@ -37,7 +38,8 @@ async function harness(options: {
     store: MemoryConversationStateStore,
   ) => ConversationActivitySnapshot;
 } = {}) {
-  const runs = new AgentRunRuntime({ newRunId: () => 'run-1' });
+  let runSequence = 0;
+  const runs = new AgentRunRuntime({ newRunId: () => `run-${++runSequence}` });
   const lease = await runs.controller('test', async () => true).attach({
     paneId: '%1', attachmentId: 'attachment', sessionId: 'session-1', process: { pid: 101 },
   });
@@ -79,6 +81,8 @@ async function harness(options: {
   };
   const service = new ConversationService({
     runs, adapters: { test: adapter }, store,
+    ...(options.isSessionRestartPending === undefined ? {}
+      : { isSessionRestartPending: options.isSessionRestartPending }),
     activitySource: { read: async () => structuredClone(options.activityRead
       ? options.activityRead(activity, store) : activityReads.shift() ?? activity) },
     newToken: () => `action-token-${++tokenSequence}`,
@@ -139,6 +143,114 @@ describe('Conversation Core public queue', () => {
     expect(await h.service.queueSnapshot(h.lease)).toMatchObject({
       activity: 'working', items: [{ id: 'request-1', text: 'later', state: 'queued' }],
     });
+  });
+
+  it('keeps one session queued during a restart while other sessions still send', async () => {
+    const h = await harness({ steer: async () => ({ outcome: 'accepted' }) });
+    const release = await h.service.pauseSessionDelivery({ agentId: 'test', sessionId: 'session-1' });
+
+    const paused = await h.service.send(h.lease, {
+      clientRequestId: 'request-paused', text: 'hold until restart completes', delivery: 'prompt',
+    });
+    expect(paused).toMatchObject({ status: 'queued', submission: { id: 'request-paused', state: 'queued' } });
+    expect(await h.service.queueSnapshot(h.lease)).toMatchObject({
+      items: [{ id: 'request-paused', text: 'hold until restart completes', state: 'queued' }],
+    });
+    expect(h.dispatchPrompt).not.toHaveBeenCalled();
+
+    const otherRun = await h.runs.controller('test', async () => true).attach({
+      paneId: '%2', attachmentId: 'attachment-2', sessionId: 'session-2', process: { pid: 202 },
+    });
+    await expect(h.service.send(otherRun, {
+      clientRequestId: 'request-other-session', text: 'unrelated session', delivery: 'prompt',
+    })).resolves.toMatchObject({ status: 'accepted' });
+    expect(h.dispatchPrompt).toHaveBeenCalledOnce();
+    expect(h.dispatchPrompt.mock.calls[0]?.[0].ref.sessionId).toBe('session-2');
+
+    release();
+    await vi.waitFor(() => expect(h.dispatchPrompt).toHaveBeenCalledTimes(2));
+    expect(h.dispatchPrompt.mock.calls.map((call) => call[1].text)).toEqual([
+      'unrelated session', 'hold until restart completes',
+    ]);
+  });
+
+  it('refuses to steer a queued message while its session is restarting', async () => {
+    const h = await harness({
+      activity: { activity: 'working', activeTurn: { state: 'active', nativeTurnId: 'turn-1' }, revision: 1, epoch: 'run-1' },
+      steer: async () => ({ outcome: 'accepted' }),
+    });
+    await h.service.send(h.lease, {
+      clientRequestId: 'request-steer-paused', text: 'keep queued', delivery: 'prompt',
+    });
+    const queued = (await h.service.queueSnapshot(h.lease)).items[0]!;
+    const release = await h.service.pauseSessionDelivery({ agentId: 'test', sessionId: 'session-1' });
+
+    const result = await h.service.queueAction(h.lease, {
+      action: 'steer', itemId: queued.id, actionId: 'steer-during-restart',
+      baseRevision: queued.revision, anchor: { viewId: 'view' },
+    });
+    expect(result).toMatchObject({ result: 'rejected', nativeMutation: false });
+    expect(h.dispatchSteer).not.toHaveBeenCalled();
+    expect((await h.service.queueSnapshot(h.lease)).items).toMatchObject([
+      { id: queued.id, state: 'queued', text: 'keep queued' },
+    ]);
+    release();
+  });
+
+  it('waits for an in-flight provider dispatch before pausing delivery', async () => {
+    let markStarted!: () => void;
+    const started = new Promise<void>((resolve) => { markStarted = resolve; });
+    let finishProvider!: (receipt: ConversationDispatchReceipt) => void;
+    const provider = new Promise<ConversationDispatchReceipt>((resolve) => { finishProvider = resolve; });
+    const h = await harness({ prompt: async () => { markStarted(); return await provider; } });
+    const sending = h.service.send(h.lease, {
+      clientRequestId: 'request-in-flight', text: 'already dispatching', delivery: 'prompt',
+    });
+    await started;
+
+    let pauseResolved = false;
+    const pausing = h.service.pauseSessionDelivery({ agentId: 'test', sessionId: 'session-1' })
+      .then((release) => { pauseResolved = true; return release; });
+    await Promise.resolve();
+    expect(pauseResolved).toBe(false);
+
+    finishProvider({ outcome: 'accepted', nativeId: 'turn-in-flight' });
+    await expect(sending).resolves.toMatchObject({ status: 'accepted', nativeId: 'turn-in-flight' });
+    const release = await pausing;
+    expect(pauseResolved).toBe(true);
+    release();
+  });
+
+  it('keeps queued messages blocked by a persisted restart marker after service recreation', async () => {
+    const h = await harness({ activity: {
+      activity: 'working', activeTurn: { state: 'active', nativeTurnId: 'turn-1' }, revision: 1, epoch: 'run-1',
+    } });
+    await h.service.send(h.lease, {
+      clientRequestId: 'request-survives-restart', text: 'keep this queued', delivery: 'prompt',
+    });
+    const restartedDispatch = vi.fn(async () => ({ outcome: 'accepted' as const }));
+    const restarted = new ConversationService({
+      runs: h.runs,
+      adapters: { test: {
+        apiVersion: 1,
+        discoverNative: async () => null,
+        readNativePage: async () => { throw new Error('unused'); },
+        dispatchPrompt: restartedDispatch,
+      } },
+      store: h.store,
+      isSessionRestartPending: ({ agentId, sessionId }) => (
+        agentId === 'test' && sessionId === 'session-1'
+      ),
+      activitySource: { read: async () => ({
+        activity: 'idle', activeTurn: { state: 'none' }, revision: 2, epoch: 'run-1',
+      }) },
+    });
+
+    expect(await restarted.queueSnapshot(h.lease)).toMatchObject({
+      items: [{ id: 'request-survives-restart', state: 'queued' }],
+    });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(restartedDispatch).not.toHaveBeenCalled();
   });
 
   it('durably claims an idle direct send and makes retries query-only', async () => {

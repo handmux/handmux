@@ -328,6 +328,7 @@ export interface ConversationServiceOptions {
   store?: ConversationStateStore;
   activitySource?: ConversationActivitySource;
   dispatchFences?: Readonly<Record<string, string>>;
+  isSessionRestartPending?: (session: AgentSessionRef) => boolean;
   now?: () => number;
   newToken?: () => string;
 }
@@ -338,6 +339,7 @@ export class ConversationService {
   readonly #store: ConversationStateStore;
   readonly #activitySource: ConversationActivitySource;
   readonly #dispatchFences: ReadonlyMap<string, string>;
+  readonly #isSessionRestartPending: ((session: AgentSessionRef) => boolean) | undefined;
   readonly #now: () => number;
   readonly #newToken: () => string;
   readonly #projections = new Map<string, Projection>();
@@ -345,6 +347,8 @@ export class ConversationService {
   readonly #open = new Map<string, LiveState>();
   readonly #sessionReads = new Map<string, Promise<void>>();
   readonly #inFlightSends = new Map<string, InFlightSend>();
+  readonly #sessionDispatches = new Map<string, Set<Promise<ConversationSubmitReceipt>>>();
+  readonly #sessionPauseCounts = new Map<string, number>();
   readonly #dispatchers = new Map<string, DispatcherState>();
   readonly #lastRuns = new Map<string, AgentRunLease>();
   readonly #editLeases = new Map<string, EditLease>();
@@ -361,6 +365,7 @@ export class ConversationService {
       activity: 'unknown', activeTurn: { state: 'unknown' }, revision: 1, epoch: run.ref.runId,
     }) },
     dispatchFences = {},
+    isSessionRestartPending,
     now = Date.now,
     newToken = randomUUID,
   }: ConversationServiceOptions) {
@@ -382,6 +387,7 @@ export class ConversationService {
     this.#store = store;
     this.#activitySource = activitySource;
     this.#dispatchFences = new Map(Object.entries(dispatchFences));
+    this.#isSessionRestartPending = isSessionRestartPending;
     this.#now = now;
     this.#newToken = newToken;
     const startedAt = now();
@@ -762,7 +768,8 @@ export class ConversationService {
       // provider whose own input would accept the text mid-turn, because joining a running turn is the
       // user's decision, not a side effect of pressing send (that is what steer / 「立刻引导」 is for).
       const direct = activity.activity === 'idle' && activity.activeTurn.state === 'none'
-        && cycle.state === 'closed' && !hasQueue;
+        && cycle.state === 'closed' && !hasQueue
+        && !this.#isSessionDeliveryPaused(session);
       const revision = ++this.#state.ledgerRevision;
       const submission: PersistedConversationSubmission = {
         agentId: session.agentId, sessionId: session.sessionId,
@@ -791,6 +798,23 @@ export class ConversationService {
       return begin.value;
     }
     return this.#dispatchClaim(run, begin.id, 'direct');
+  }
+
+  async pauseSessionDelivery(session: AgentSessionRef): Promise<() => void> {
+    const target = this.#session(session);
+    const owner = sessionKey(target.agentId, target.sessionId);
+    this.#sessionPauseCounts.set(owner, (this.#sessionPauseCounts.get(owner) ?? 0) + 1);
+    const inFlight = [...(this.#sessionDispatches.get(owner) ?? [])];
+    await Promise.allSettled(inFlight);
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      const count = this.#sessionPauseCounts.get(owner) ?? 0;
+      if (count <= 1) this.#sessionPauseCounts.delete(owner);
+      else this.#sessionPauseCounts.set(owner, count - 1);
+      if (!this.#isSessionDeliveryPaused(target)) this.#wake(owner);
+    };
   }
 
   async queueSnapshot(run: AgentRunLease): Promise<{
@@ -841,7 +865,9 @@ export class ConversationService {
     // A queue can survive a process restart with an already-closed cycle. Observing the same idle
     // snapshot is not a state transition, so #observeActivity alone would not wake its dispatcher.
     // Every authoritative queue read is therefore also a safe opportunity to resume draining.
-    if (queueItems.length > 0) this.#wake(owner);
+    if (queueItems.length > 0 && !this.#isSessionDeliveryPaused({
+      agentId: run.ref.agentId, sessionId: run.ref.sessionId,
+    })) this.#wake(owner);
     return {
       activity: activity.activity,
       canSteer,
@@ -988,6 +1014,13 @@ export class ConversationService {
     const adapter = this.#adapters.get(agentId);
     if (!adapter) throw new ConversationContractError(`Conversation adapter is unavailable: ${agentId}`);
     return adapter;
+  }
+
+  #isSessionDeliveryPaused(session: AgentSessionRef): boolean {
+    if ((this.#sessionPauseCounts.get(sessionKey(session.agentId, session.sessionId)) ?? 0) > 0) return true;
+    if (!this.#isSessionRestartPending) return false;
+    try { return this.#isSessionRestartPending({ ...session }) === true; }
+    catch { return true; }
   }
 
   #session(value: AgentSessionRef | AgentRunRef): AgentSessionRef {
@@ -1678,7 +1711,32 @@ export class ConversationService {
     this.#state.submissions = this.#state.submissions.filter((candidate) => candidate !== item);
   }
 
-  async #dispatchClaim(
+  #dispatchClaim(
+    run: AgentRunLease,
+    submissionId: string,
+    origin: 'direct' | 'queue' | 'steer',
+    detached?: PersistedConversationSubmission,
+  ): Promise<ConversationSubmitReceipt> {
+    const sessionId = run.ref.sessionId;
+    if (!sessionId) return Promise.resolve({
+      status: 'rejected', reason: 'invalid_request', nativeMutation: false,
+    });
+    const owner = sessionKey(run.ref.agentId, sessionId);
+    const active = this.#sessionDispatches.get(owner) ?? new Set<Promise<ConversationSubmitReceipt>>();
+    this.#sessionDispatches.set(owner, active);
+    const operation = this.#dispatchClaimNow(run, submissionId, origin, detached);
+    active.add(operation);
+    const remove = (): void => {
+      active.delete(operation);
+      if (!active.size && this.#sessionDispatches.get(owner) === active) {
+        this.#sessionDispatches.delete(owner);
+      }
+    };
+    void operation.then(remove, remove);
+    return operation;
+  }
+
+  async #dispatchClaimNow(
     run: AgentRunLease,
     submissionId: string,
     origin: 'direct' | 'queue' | 'steer',
@@ -1693,7 +1751,12 @@ export class ConversationService {
     if (!item) return { status: 'rejected', reason: 'invalid_request', nativeMutation: false };
     let receipt: ConversationDispatchReceipt;
     const preDispatchActivity = await this.#activitySource.read(run);
-    if (run.signal.aborted || this.#runs.resolve(runRef) !== run) {
+    const deliveryPaused = this.#isSessionDeliveryPaused({
+      agentId: runRef.agentId, sessionId: runRef.sessionId,
+    });
+    if (deliveryPaused) {
+      receipt = { outcome: 'busy', nativeMutation: false };
+    } else if (run.signal.aborted || this.#runs.resolve(runRef) !== run) {
       receipt = { outcome: 'unknown', nativeMutation: 'unknown', reason: 'stale_run' };
     } else if (origin === 'steer' && (!item.steerDispatchPlan
       || item.steerDispatchPlan.activityEpoch !== preDispatchActivity.epoch
@@ -1721,7 +1784,9 @@ export class ConversationService {
           { clientRequestId: item.clientRequestId, text: item.text },
           {
             validate: async () => {
-              if (run.signal.aborted || this.#runs.resolve(runRef) !== run) return false;
+              if (this.#isSessionDeliveryPaused({
+                agentId: runRef.agentId, sessionId: runRef.sessionId!,
+              }) || run.signal.aborted || this.#runs.resolve(runRef) !== run) return false;
               let current: ConversationActivitySnapshot;
               try { current = await this.#activitySource.read(run); } catch { return false; }
               return !run.signal.aborted && this.#runs.resolve(runRef) === run
@@ -1985,6 +2050,9 @@ export class ConversationService {
     try {
       const adapter = this.#adapter(run.ref.agentId);
       if (!adapter.dispatchSteer || !run.ref.sessionId) return rejected();
+      if (this.#isSessionDeliveryPaused({
+        agentId: run.ref.agentId, sessionId: run.ref.sessionId,
+      })) return rejected();
       if (!Number.isSafeInteger(request.baseRevision) || Number(request.baseRevision) < 1
         || !isRecord(request.anchor) || !bounded(request.anchor.viewId, 1024)
         || (request.anchor.afterItemId !== undefined
@@ -2012,6 +2080,11 @@ export class ConversationService {
       }
       const activity = await this.#activitySource.read(run);
       planned = await this.#withWrite(() => {
+        if (this.#isSessionDeliveryPaused({
+          agentId: run.ref.agentId, sessionId: run.ref.sessionId!,
+        })) throw new ConversationContractError(
+          'Conversation delivery is paused for session restart', 'session_unavailable',
+        );
         const item = this.#requireQueued(run, itemId);
         if (item.revision !== request.baseRevision) {
           throw new ConversationContractError('Conversation queue item changed', 'invalid_request');
@@ -2193,6 +2266,8 @@ export class ConversationService {
   }
 
   #wake(owner: string): void {
+    const [agentId, sessionId] = owner.split('\0');
+    if (agentId && sessionId && this.#isSessionDeliveryPaused({ agentId, sessionId })) return;
     const state = this.#dispatchers.get(owner) ?? { running: false, wakePending: false, timer: undefined };
     this.#dispatchers.set(owner, state);
     state.wakePending = true;
@@ -2208,9 +2283,15 @@ export class ConversationService {
         const run = this.#lastRuns.get(owner);
         if (!run || run.signal.aborted || !run.ref.sessionId) break;
         if (this.#dispatchFences.has(run.ref.agentId)) break;
+        if (this.#isSessionDeliveryPaused({
+          agentId: run.ref.agentId, sessionId: run.ref.sessionId,
+        })) break;
         const activity = await this.#activitySource.read(run);
         await this.#observeActivity(run, activity);
         const claimed = await this.#withWrite(() => {
+          if (this.#isSessionDeliveryPaused({
+            agentId: run.ref.agentId, sessionId: run.ref.sessionId!,
+          })) return null;
           if (activity.activity !== 'idle' || activity.activeTurn.state !== 'none') return null;
           const cycle = this.#cycle(run.ref.agentId, run.ref.sessionId!, activity);
           if (cycle.state !== 'closed') return null;
@@ -2238,7 +2319,9 @@ export class ConversationService {
         && item.sessionId === sessionId && item.state === 'queued'
         && item.autoDispatchBlockedReason === undefined);
       const cycle = this.#state.cycles.find((item) => item.agentId === agentId && item.sessionId === sessionId);
-      if (run && !run.signal.aborted && (hasPending || (cycle && cycle.state !== 'closed' && cycle.state !== 'unknown'))) {
+      if (run && sessionId && !run.signal.aborted
+        && !this.#isSessionDeliveryPaused({ agentId: run.ref.agentId, sessionId })
+        && (hasPending || (cycle && cycle.state !== 'closed' && cycle.state !== 'unknown'))) {
         if (state.timer) clearTimeout(state.timer);
         state.timer = setTimeout(() => { state.timer = undefined; this.#wake(owner); }, 300);
         state.timer.unref?.();
