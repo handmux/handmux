@@ -6,6 +6,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { SyntheticEvent } from 'react';
 import { t } from '../i18n';
+import { claimTouchGesture } from '../touchGestureClaim.js';
 import { relTime, VIEW_LABEL } from '../inbox.js';
 import type { InboxView } from '../inbox.js';
 import WorkspaceRecoveryCard from './WorkspaceRecoveryCard.jsx';
@@ -49,7 +50,9 @@ function hasHorizontalScrollAhead(target: EventTarget | null): boolean {
   for (let element: Element | null = target; element; element = element.parentElement) {
     const style = window.getComputedStyle(element);
     const horizontalOverflow = style.overflowX === 'auto' || style.overflowX === 'scroll';
-    if (horizontalOverflow && element.scrollWidth > element.clientWidth + 1 && element.scrollLeft > 1) return true;
+    // scrollLeft is fractional on mobile. Even a subpixel remainder belongs to this scroller;
+    // Drawer must not seize the next return gesture before it has actually reached zero.
+    if (horizontalOverflow && element.scrollWidth > element.clientWidth + 1 && element.scrollLeft > 0) return true;
   }
   return false;
 }
@@ -261,7 +264,7 @@ export default function Drawer({
         if ((!gesture.baseOpen && dx < 0) || (gesture.baseOpen && dx > 0)) { swipeRef.current.startX = null; return; }
         gesture.active = true;
       }
-      event.preventDefault();
+      claimTouchGesture(event);
       const width = drawerRef.current?.getBoundingClientRect().width || 360;
       const offset = gesture.baseOpen ? Math.max(-width, Math.min(0, dx)) : Math.min(width, Math.max(0, dx));
       swipeOffsetRef.current = offset;

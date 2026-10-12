@@ -5,6 +5,7 @@ import { drainWheel, notchDir } from './wheelScroll.js';
 import { flingStep, shouldFling } from './momentum.js';
 import { scrollDecision } from './terminalViewport.js';
 import { setFont } from './storage.js';
+import { isTouchGestureClaimed } from './touchGestureClaim.js';
 import type { TerminalSelectionController } from './terminalSelectionController.js';
 
 const WHEEL_PX = 22;
@@ -222,10 +223,9 @@ export function createTerminalTouchController({
 
   const onTouchMove = (event: TouchEvent): void => {
     if (!touchActive) return;
-    // Ancestor capture handlers (for example Drawer) claim the gesture before this listener.
-    // preventDefault blocks native scrolling, not our scrollLeft writes. Yield for the rest
-    // of this touch stream, including reversal past the origin and release momentum.
-    if (gestureClaimedElsewhere || event.defaultPrevented) {
+    // Explicit ancestor ownership is distinct from the page guard cancelling native scrolling.
+    // Yield only to a claimed gesture, then retain that ownership through reversal and release.
+    if (gestureClaimedElsewhere || isTouchGestureClaimed(event)) {
       gestureClaimedElsewhere = true;
       cancelLongPress();
       stopFling();

@@ -3,6 +3,7 @@ import {
   createTerminalTouchController,
   type TerminalTouchController,
 } from '../src/terminalTouchController.js';
+import { claimTouchGesture } from '../src/touchGestureClaim.js';
 
 const touchEvent = (type: string, y: number, touches = 1): Event => {
   const event = new Event(type, { bubbles: true, cancelable: true });
@@ -12,7 +13,7 @@ const touchEvent = (type: string, y: number, touches = 1): Event => {
   return event;
 };
 
-function setup() {
+function setup({ streamExact = false } = {}) {
   const host = document.createElement('div');
   const live = document.createElement('div');
   live.className = 'terminal__live';
@@ -33,6 +34,8 @@ function setup() {
   };
   let controller!: TerminalTouchController;
   const maybePullMore = vi.fn(() => controller.freezeHistoryGesture());
+  const onUserScroll = vi.fn();
+  const scheduleFit = vi.fn();
   controller = createTerminalTouchController({
     term,
     host,
@@ -47,20 +50,20 @@ function setup() {
     },
     selectionActiveRef: { current: false },
     stopFlingRef: { current: null },
-    getStreamExact: () => false,
+    getStreamExact: () => streamExact,
     getAltScreen: () => false,
     getMouseAware: () => false,
     onActivity: vi.fn(),
-    onUserScroll: vi.fn(),
+    onUserScroll,
     showScrollPosition: vi.fn(),
     maybePullMore,
     enterStreamHistory: vi.fn(),
-    scheduleFit: vi.fn(),
+    scheduleFit,
     wake: vi.fn(),
     onTap: vi.fn(),
     onKeepKeyboard: vi.fn(),
   });
-  return { controller, host, screen, maybePullMore, term };
+  return { controller, host, screen, maybePullMore, term, onUserScroll, scheduleFit };
 }
 
 afterEach(() => {
@@ -69,6 +72,66 @@ afterEach(() => {
 });
 
 describe('terminal touch history pull', () => {
+  it('keeps live vertical movement when the page guard prevents native scrolling', () => {
+    const { controller, host, screen, maybePullMore, onUserScroll } = setup({ streamExact: true });
+    maybePullMore.mockImplementation(() => {});
+    let top = 50;
+    Object.defineProperty(host, 'scrollTop', {
+      get: () => top, set: value => { top = Math.max(0, Math.min(200, value)); },
+    });
+    const blockPagePan = (event: Event) => event.preventDefault();
+    document.addEventListener('touchmove', blockPagePan, true);
+    try {
+      screen.dispatchEvent(touchEvent('touchstart', 100));
+      screen.dispatchEvent(touchEvent('touchmove', 130));
+      expect(host.scrollTop).toBe(20);
+      screen.dispatchEvent(touchEvent('touchmove', 70));
+      expect(host.scrollTop).toBe(80);
+      expect(onUserScroll).toHaveBeenCalledTimes(2);
+    } finally {
+      document.removeEventListener('touchmove', blockPagePan, true);
+      controller.dispose();
+    }
+  });
+
+  it('keeps ordinary terminal pinch when the page guard prevents native scrolling', () => {
+    const { controller, screen, term, scheduleFit } = setup();
+    const blockPagePan = (event: Event) => event.preventDefault();
+    const send = (type: string, distance: number) => {
+      const event = new Event(type, { bubbles: true, cancelable: true });
+      Object.defineProperty(event, 'touches', { value: distance ? [
+        { identifier: 0, clientX: 100, clientY: 100 },
+        { identifier: 1, clientX: 100 + distance, clientY: 100 },
+      ] : [] });
+      screen.dispatchEvent(event);
+    };
+    document.addEventListener('touchmove', blockPagePan, true);
+    try {
+      send('touchstart', 100);
+      send('touchmove', 200);
+      expect(term.options.fontSize).toBe(28);
+      send('touchend', 0);
+      expect(scheduleFit).toHaveBeenCalledOnce();
+    } finally {
+      document.removeEventListener('touchmove', blockPagePan, true);
+      controller.dispose();
+    }
+  });
+
+  it('keeps vertical terminal scrolling when the page guard only prevents native scrolling', () => {
+    const { controller, screen, maybePullMore } = setup();
+    const blockPagePan = (event: Event) => event.preventDefault();
+    document.addEventListener('touchmove', blockPagePan, true);
+    try {
+      screen.dispatchEvent(touchEvent('touchstart', 100));
+      screen.dispatchEvent(touchEvent('touchmove', 130));
+      expect(maybePullMore).toHaveBeenCalledOnce();
+    } finally {
+      document.removeEventListener('touchmove', blockPagePan, true);
+      controller.dispose();
+    }
+  });
+
   it('keeps remaining fingers out of terminal pinch after a drawer-owned partial cancellation', () => {
     const { controller, host, screen, term } = setup();
     const sendTouch = (type: string, points: number[]) => {
@@ -78,7 +141,7 @@ describe('terminal touch history pull', () => {
       )) });
       screen.dispatchEvent(event);
     };
-    const claimMove = (event: Event) => event.preventDefault();
+    const claimMove = (event: Event) => claimTouchGesture(event as TouchEvent);
     window.addEventListener('touchmove', claimMove, true);
     try {
       sendTouch('touchstart', [100]);

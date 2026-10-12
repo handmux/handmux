@@ -16,6 +16,7 @@ vi.mock('../src/api.js', () => ({
 
 import Drawer from '../src/components/Drawer.jsx';
 import { createTerminalTouchController } from '../src/terminalTouchController.js';
+import { usePageScrollLock } from '../src/hooks/usePageScrollLock.js';
 import { getPanes, getSessions, getSessionTopology } from '../src/api.js';
 
 let container;
@@ -56,8 +57,13 @@ const base = {
   onLogout: vi.fn(),
 };
 
-const render = async (props) => {
-  await act(async () => { root.render(<Drawer {...base} {...props} />); });
+function PageLockedDrawer(props) {
+  usePageScrollLock();
+  return <Drawer {...props} />;
+}
+
+const render = async (props, Component = Drawer) => {
+  await act(async () => { root.render(<Component {...base} {...props} />); });
 };
 
 const waitForSessions = async () => {
@@ -74,6 +80,38 @@ const dispatchTouch = (target, type, x, y, timeStamp) => {
   if (timeStamp !== undefined) Object.defineProperty(event, 'timeStamp', { value: timeStamp });
   target.dispatchEvent(event);
 };
+
+function createTouchTerminal() {
+  const host = document.createElement('div');
+  host.className = 'terminal';
+  host.style.overflowX = 'auto';
+  Object.defineProperties(host, { clientWidth: { value: 200 }, scrollWidth: { value: 400 } });
+  let left = 0;
+  Object.defineProperty(host, 'scrollLeft', {
+    get: () => left, set: value => { left = Math.max(0, Math.min(200, value)); },
+  });
+  const screen = document.createElement('div');
+  screen.className = 'xterm-viewport';
+  screen.style.overflowY = 'auto';
+  Object.defineProperties(screen, { clientHeight: { value: 100 }, scrollHeight: { value: 300 } });
+  host.appendChild(screen);
+  document.body.appendChild(host);
+  const selectionStart = vi.fn();
+  const onTap = vi.fn();
+  const downstreamMove = vi.fn();
+  screen.addEventListener('touchmove', downstreamMove);
+  const controller = createTerminalTouchController({
+    host, desktop: false, pane: '%1', fontRef: { current: null },
+    term: { options: { fontSize: 14 }, rows: 24,
+      buffer: { active: { viewportY: 0, baseY: 0 } }, getSelection: () => '', scrollToLine: vi.fn() },
+    selection: { start: selectionStart, extend: vi.fn(), refresh: vi.fn(), clear: vi.fn() },
+    selectionActiveRef: { current: false }, stopFlingRef: { current: null },
+    getStreamExact: () => false, getAltScreen: () => false, getMouseAware: () => false,
+    onActivity: vi.fn(), onUserScroll: vi.fn(), showScrollPosition: vi.fn(),
+    maybePullMore: vi.fn(), scheduleFit: vi.fn(), wake: vi.fn(), onTap,
+  });
+  return { host, screen, controller, selectionStart, onTap, downstreamMove };
+}
 
 describe('Drawer (bound sessions)', () => {
   it('lists the locally bound session names', async () => {
@@ -312,34 +350,8 @@ describe('Drawer (bound sessions)', () => {
     { endEvent, preclaimMove }
   ))))('keeps a reversing drawer drag terminal-free through $endEvent (preclaim move: $preclaimMove)', async ({ endEvent, preclaimMove }) => {
     const onOpen = vi.fn();
-    await render({ open: false, onOpen });
-    const host = document.createElement('div');
-    host.className = 'terminal';
-    host.style.overflowX = 'auto';
-    Object.defineProperties(host, {
-      clientWidth: { value: 200 }, scrollWidth: { value: 400 },
-    });
-    let left = 0;
-    Object.defineProperty(host, 'scrollLeft', {
-      get: () => left, set: value => { left = Math.max(0, Math.min(200, value)); },
-    });
-    const screen = document.createElement('div');
-    host.appendChild(screen);
-    document.body.appendChild(host);
-    const selectionStart = vi.fn();
-    const onTap = vi.fn();
-    const downstreamMove = vi.fn();
-    screen.addEventListener('touchmove', downstreamMove);
-    const controller = createTerminalTouchController({
-      host, desktop: false, pane: '%1', fontRef: { current: null },
-      term: { options: { fontSize: 14 }, rows: 24,
-        buffer: { active: { viewportY: 0, baseY: 0 } }, getSelection: () => '', scrollToLine: vi.fn() },
-      selection: { start: selectionStart, extend: vi.fn(), refresh: vi.fn(), clear: vi.fn() },
-      selectionActiveRef: { current: false }, stopFlingRef: { current: null },
-      getStreamExact: () => false, getAltScreen: () => false, getMouseAware: () => false,
-      onActivity: vi.fn(), onUserScroll: vi.fn(), showScrollPosition: vi.fn(),
-      maybePullMore: vi.fn(), scheduleFit: vi.fn(), wake: vi.fn(), onTap,
-    });
+    await render({ open: false, onOpen }, PageLockedDrawer);
+    const { host, screen, controller, selectionStart, onTap, downstreamMove } = createTouchTerminal();
     try {
       vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
       const fling = vi.spyOn(window, 'requestAnimationFrame');
@@ -366,6 +378,63 @@ describe('Drawer (bound sessions)', () => {
       expect(host.scrollLeft).toBe(40);
       expect(selectionStart).not.toHaveBeenCalled();
     } finally { controller.dispose(); host.remove(); vi.useRealTimers(); }
+  });
+
+  it('returns normal terminal pans to zero on repeated roundtrips with page-scroll cancellation', async () => {
+    const onOpen = vi.fn();
+    await render({ open: false, onOpen }, PageLockedDrawer);
+    const { host, screen, controller } = createTouchTerminal();
+    const returnedOffsets = [];
+    const outwardOffsets = [];
+    const halfwayOffsets = [];
+    try {
+      // Six 40px excursions exceed this fixture's 200px viewport if return movement is lost.
+      for (let cycle = 0; cycle < 6; cycle++) {
+        await act(async () => {
+          dispatchTouch(screen, 'touchstart', 100, 180, 100);
+          dispatchTouch(screen, 'touchmove', 60, 180, 110);
+          dispatchTouch(screen, 'touchend', 60, 180, 180);
+        });
+        outwardOffsets.push(host.scrollLeft);
+        // Tiny downward noise is cancelled by the production page guard, not owned by Drawer.
+        await act(async () => {
+          dispatchTouch(screen, 'touchstart', 100, 180, 200);
+          dispatchTouch(screen, 'touchmove', 100, 182, 210);
+          dispatchTouch(screen, 'touchmove', 120, 182, 220);
+          halfwayOffsets.push(host.scrollLeft);
+          dispatchTouch(screen, 'touchmove', 140, 182, 230);
+          dispatchTouch(screen, 'touchend', 140, 182, 300);
+        });
+        returnedOffsets.push(host.scrollLeft);
+      }
+      expect(returnedOffsets).toEqual([0, 0, 0, 0, 0, 0]);
+      expect(outwardOffsets).toEqual([40, 40, 40, 40, 40, 40]);
+      expect(halfwayOffsets).toEqual([20, 20, 20, 20, 20, 20]);
+      expect(onOpen).not.toHaveBeenCalled();
+    } finally { controller.dispose(); host.remove(); }
+  });
+
+  it('returns a fractional terminal offset to zero before a fresh gesture may open Drawer', async () => {
+    const onOpen = vi.fn();
+    await render({ open: false, onOpen }, PageLockedDrawer);
+    const { host, screen, controller } = createTouchTerminal();
+    host.scrollLeft = 0.5;
+    try {
+      await act(async () => {
+        dispatchTouch(screen, 'touchstart', 100, 180, 100);
+        dispatchTouch(screen, 'touchmove', 120, 180, 120);
+        dispatchTouch(screen, 'touchend', 120, 180, 190);
+      });
+      expect(host.scrollLeft).toBe(0);
+      expect(onOpen).not.toHaveBeenCalled();
+      await act(async () => {
+        dispatchTouch(screen, 'touchstart', 100, 180, 200);
+        dispatchTouch(screen, 'touchmove', 220, 180, 220);
+        dispatchTouch(screen, 'touchend', 220, 180, 300);
+      });
+      expect(host.scrollLeft).toBe(0);
+      expect(onOpen).toHaveBeenCalledOnce();
+    } finally { controller.dispose(); host.remove(); }
   });
 
   it('does not claim horizontal swipes from the BottomDock chat page', async () => {
