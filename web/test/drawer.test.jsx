@@ -15,6 +15,7 @@ vi.mock('../src/api.js', () => ({
 }));
 
 import Drawer from '../src/components/Drawer.jsx';
+import { createTerminalTouchController } from '../src/terminalTouchController.js';
 import { getPanes, getSessions, getSessionTopology } from '../src/api.js';
 
 let container;
@@ -63,11 +64,14 @@ const waitForSessions = async () => {
   await vi.waitFor(() => expect(container.querySelectorAll('.session-section')).toHaveLength(2));
 };
 
-const dispatchTouch = (target, type, x, y) => {
+const dispatchTouch = (target, type, x, y, timeStamp) => {
   const event = new Event(type, { bubbles: true, cancelable: true });
-  if (type !== 'touchend' && type !== 'touchcancel') {
-    Object.defineProperty(event, 'touches', { value: [{ clientX: x, clientY: y }] });
-  }
+  const touch = { identifier: 0, clientX: x, clientY: y };
+  Object.defineProperty(event, 'touches', {
+    value: type === 'touchend' || type === 'touchcancel' ? [] : [touch],
+  });
+  Object.defineProperty(event, 'changedTouches', { value: [touch] });
+  if (timeStamp !== undefined) Object.defineProperty(event, 'timeStamp', { value: timeStamp });
   target.dispatchEvent(event);
 };
 
@@ -302,6 +306,66 @@ describe('Drawer (bound sessions)', () => {
       dispatchTouch(window, 'touchend');
     });
     expect(onOpen).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(['touchend', 'touchcancel'].flatMap(endEvent => [false, true].map(preclaimMove => (
+    { endEvent, preclaimMove }
+  ))))('keeps a reversing drawer drag terminal-free through $endEvent (preclaim move: $preclaimMove)', async ({ endEvent, preclaimMove }) => {
+    const onOpen = vi.fn();
+    await render({ open: false, onOpen });
+    const host = document.createElement('div');
+    host.className = 'terminal';
+    host.style.overflowX = 'auto';
+    Object.defineProperties(host, {
+      clientWidth: { value: 200 }, scrollWidth: { value: 400 },
+    });
+    let left = 0;
+    Object.defineProperty(host, 'scrollLeft', {
+      get: () => left, set: value => { left = Math.max(0, Math.min(200, value)); },
+    });
+    const screen = document.createElement('div');
+    host.appendChild(screen);
+    document.body.appendChild(host);
+    const selectionStart = vi.fn();
+    const onTap = vi.fn();
+    const downstreamMove = vi.fn();
+    screen.addEventListener('touchmove', downstreamMove);
+    const controller = createTerminalTouchController({
+      host, desktop: false, pane: '%1', fontRef: { current: null },
+      term: { options: { fontSize: 14 }, rows: 24,
+        buffer: { active: { viewportY: 0, baseY: 0 } }, getSelection: () => '', scrollToLine: vi.fn() },
+      selection: { start: selectionStart, extend: vi.fn(), refresh: vi.fn(), clear: vi.fn() },
+      selectionActiveRef: { current: false }, stopFlingRef: { current: null },
+      getStreamExact: () => false, getAltScreen: () => false, getMouseAware: () => false,
+      onActivity: vi.fn(), onUserScroll: vi.fn(), showScrollPosition: vi.fn(),
+      maybePullMore: vi.fn(), scheduleFit: vi.fn(), wake: vi.fn(), onTap,
+    });
+    try {
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      const fling = vi.spyOn(window, 'requestAnimationFrame');
+      await act(async () => {
+        dispatchTouch(screen, 'touchstart', 100, 180, 0);
+        if (preclaimMove) dispatchTouch(screen, 'touchmove', 108, 180, 10);
+        dispatchTouch(screen, 'touchmove', 220, 180, 20);
+        dispatchTouch(screen, 'touchmove', 60, 180, 30);
+        vi.advanceTimersByTime(600);
+      });
+      expect(host.scrollLeft).toBe(0);
+      expect(downstreamMove).not.toHaveBeenCalled();
+      expect(selectionStart).not.toHaveBeenCalled();
+      await act(async () => { dispatchTouch(screen, endEvent, 60, 180, 40); });
+      expect(onOpen).not.toHaveBeenCalled();
+      expect(onTap).not.toHaveBeenCalled();
+      expect(fling).not.toHaveBeenCalled();
+      // A fresh leftward gesture is terminal-owned, not a continuation of the drawer drag.
+      await act(async () => {
+        dispatchTouch(screen, 'touchstart', 100, 180, 100);
+        dispatchTouch(screen, 'touchmove', 60, 180, 110);
+        dispatchTouch(screen, 'touchend', 60, 180, 120);
+      });
+      expect(host.scrollLeft).toBe(40);
+      expect(selectionStart).not.toHaveBeenCalled();
+    } finally { controller.dispose(); host.remove(); vi.useRealTimers(); }
   });
 
   it('does not claim horizontal swipes from the BottomDock chat page', async () => {

@@ -21,6 +21,7 @@ All notable changes to handmux. Format follows [Keep a Changelog](https://keepac
 
 ### Fixed
 
+- 修复右拉抽屉后回滑越过起点时，终端跟着横向滚动的问题。
 - 修复 Codex 收件箱恢复后状态停止更新的问题，并避免一个分屏的异常阻断其他分屏。
 - 修复 DeepSeek 欠费时充值余额为负数被拒绝、API 用量提示数据不支持的问题。
 - 修复文档代码块横向滚动时，复制按钮跟着代码移动的问题。

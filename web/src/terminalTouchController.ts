@@ -86,6 +86,7 @@ export function createTerminalTouchController({
   let scrollVelocityX = 0;
   let scrollVelocityY = 0;
   let touchActive = false;
+  let gestureClaimedElsewhere = false;
   let historyPullFrozen = false;
   let flingRAF: number | null = null;
   let wheelAccum = 0;
@@ -171,6 +172,9 @@ export function createTerminalTouchController({
   };
 
   const onTouchStart = (event: TouchEvent): void => {
+    // Adding another finger must not turn a drawer-owned drag into a terminal pinch.
+    if (gestureClaimedElsewhere && event.touches.length !== 1) return;
+    gestureClaimedElsewhere = false;
     onActivity();
     cancelLongPress();
     stopFling();
@@ -217,6 +221,20 @@ export function createTerminalTouchController({
   };
 
   const onTouchMove = (event: TouchEvent): void => {
+    if (!touchActive) return;
+    // Ancestor capture handlers (for example Drawer) claim the gesture before this listener.
+    // preventDefault blocks native scrolling, not our scrollLeft writes. Yield for the rest
+    // of this touch stream, including reversal past the origin and release momentum.
+    if (gestureClaimedElsewhere || event.defaultPrevented) {
+      gestureClaimedElsewhere = true;
+      cancelLongPress();
+      stopFling();
+      scrollVelocityX = 0;
+      scrollVelocityY = 0;
+      event.preventDefault();
+      event.stopPropagation();
+      return;
+    }
     if (pinching && event.touches.length === 2) {
       if (initialPinchDistance > 0) {
         const fontSize = Math.max(8, Math.min(
@@ -331,6 +349,10 @@ export function createTerminalTouchController({
     cancelLongPress();
     const ended = event.touches.length === 0;
     if (ended) touchActive = false;
+    if (gestureClaimedElsewhere) {
+      if (ended) gestureClaimedElsewhere = false;
+      return;
+    }
     if (selecting && event.touches.length === 0) {
       selecting = false;
       const text = term.getSelection();
@@ -360,6 +382,19 @@ export function createTerminalTouchController({
       else onTap();
     }
     if (ended) historyPullFrozen = false;
+  };
+
+  const onTouchCancel = (event: TouchEvent): void => {
+    cancelLongPress();
+    stopFling();
+    touchActive = event.touches.length > 0;
+    gestureClaimedElsewhere = touchActive;
+    selecting = false;
+    pinching = false;
+    axis = 0;
+    historyPullFrozen = false;
+    scrollVelocityX = 0;
+    scrollVelocityY = 0;
   };
 
   const onWheel = (event: WheelEvent): void => {
@@ -446,6 +481,7 @@ export function createTerminalTouchController({
   host.addEventListener('touchstart', onTouchStart, { capture: true, passive: true });
   host.addEventListener('touchmove', onTouchMove, { capture: true, passive: false });
   host.addEventListener('touchend', onTouchEnd, { capture: true, passive: true });
+  host.addEventListener('touchcancel', onTouchCancel, { capture: true, passive: true });
 
   return {
     freezeHistoryGesture() {
@@ -477,6 +513,7 @@ export function createTerminalTouchController({
       host.removeEventListener('touchstart', onTouchStart, { capture: true });
       host.removeEventListener('touchmove', onTouchMove, { capture: true });
       host.removeEventListener('touchend', onTouchEnd, { capture: true });
+      host.removeEventListener('touchcancel', onTouchCancel, { capture: true });
     },
   };
 }

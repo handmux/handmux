@@ -60,7 +60,7 @@ function setup() {
     onTap: vi.fn(),
     onKeepKeyboard: vi.fn(),
   });
-  return { controller, host, screen, maybePullMore };
+  return { controller, host, screen, maybePullMore, term };
 }
 
 afterEach(() => {
@@ -69,6 +69,36 @@ afterEach(() => {
 });
 
 describe('terminal touch history pull', () => {
+  it('keeps remaining fingers out of terminal pinch after a drawer-owned partial cancellation', () => {
+    const { controller, host, screen, term } = setup();
+    const sendTouch = (type: string, points: number[]) => {
+      const event = new Event(type, { bubbles: true, cancelable: true });
+      Object.defineProperty(event, 'touches', { value: points.map((x, identifier) => (
+        { identifier, clientX: x, clientY: 100 }
+      )) });
+      screen.dispatchEvent(event);
+    };
+    const claimMove = (event: Event) => event.preventDefault();
+    window.addEventListener('touchmove', claimMove, true);
+    try {
+      sendTouch('touchstart', [100]);
+      sendTouch('touchmove', [140]);
+      window.removeEventListener('touchmove', claimMove, true);
+      sendTouch('touchstart', [140, 240]);
+      sendTouch('touchcancel', [140]);
+      sendTouch('touchstart', [140, 240]);
+      sendTouch('touchmove', [140, 340]);
+      expect(term.options.fontSize).toBe(14);
+      sendTouch('touchend', []);
+      sendTouch('touchstart', [100]);
+      sendTouch('touchmove', [60]);
+      expect(host.scrollLeft).toBe(40);
+    } finally {
+      window.removeEventListener('touchmove', claimMove, true);
+      controller.dispose();
+    }
+  });
+
   it('freezes the triggering drag until touchend so xterm cannot overwrite the restored anchor', () => {
     const { controller, screen, maybePullMore } = setup();
     const reachedXterm = vi.fn();
