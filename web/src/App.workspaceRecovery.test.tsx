@@ -668,6 +668,29 @@ describe('App established conversation during server restart', () => {
     expect(screen.queryByText('无法确定是否完成')).toBeNull();
     expect(screen.getByPlaceholderText('和 Agent 对话…')).toBeTruthy();
   });
+
+  it('keeps a resuming restart in progress while the replacement run is being discovered', async () => {
+    const view = await openConversation();
+    api.getAgentDiscovery.mockResolvedValue({ descriptors, runs: [], health: [] });
+    await flush(5_000);
+
+    restartHook.result = { status: 'error', receipt: {
+      agentId: 'codex', paneId: pane.id, operationId: 'b'.repeat(64),
+      phase: 'resuming', state: 'current', canResume: false,
+      recovery: { kind: 'codex_resume', sessionId: 'session-1', command: 'handmux codex resume session-1' },
+    }, restart: vi.fn(async () => {}), recover: vi.fn(async () => {}), retry: vi.fn() };
+    await act(async () => { view.rerender(<App />); });
+
+    expect(screen.getByText('正在重启会话')).toBeTruthy();
+    expect(screen.getByText('如果出现升级或信任提示，自动启动会中断；请前往终端手动确认。')).toBeTruthy();
+    expect(screen.queryByText('继续恢复对话')).toBeNull();
+
+    api.getAgentDiscovery.mockResolvedValue({ descriptors, runs: [{ ...run, runId: 'after-restart' }], health: [] });
+    await flush(5_000);
+    expect(screen.getByText('Saved answer session-1')).toBeTruthy();
+    expect(screen.queryByText('继续恢复对话')).toBeNull();
+    view.unmount();
+  });
 });
 
 describe('App live tmux topology recovery', () => {

@@ -19,15 +19,22 @@ interface ConversationRecoveryGuideController {
 
 export default function ConversationRecoveryGuide({
   controller,
+  operation,
   onTerminal,
 }: {
   controller: ConversationRecoveryGuideController;
+  operation: 'activation' | 'restart';
   onTerminal: () => void;
 }) {
   const receipt = controller.receipt;
-  const restarting = controller.status === 'restarting';
-  const pending = restarting || controller.status === 'recovering' || controller.status === 'waiting';
-  const pendingOperation = pending ? receipt?.operationId ?? (restarting ? 'restart-pending' : null) : null;
+  // A durable `resuming` receipt means the automatic command was already sent. Keep presenting
+  // restart progress until the controller observes the replacement run ready; do not imply the
+  // user needs to start recovery a second time.
+  const restartPending = operation === 'restart' && (controller.status === 'restarting'
+    || (receipt?.phase === 'resuming' && controller.status !== 'recovering' && controller.status !== 'waiting'));
+  const pending = restartPending || controller.status === 'recovering' || controller.status === 'waiting';
+  const pendingOperation = pending
+    ? restartPending ? 'restart-pending' : receipt?.operationId ?? null : null;
   const [hintedOperation, setHintedOperation] = useState<string | null>(null);
   useEffect(() => {
     setHintedOperation(null);
@@ -45,18 +52,19 @@ export default function ConversationRecoveryGuide({
       <BotIcon />
     </div>
     <h2>{pending
-      ? t(restarting ? 'chat.restart.inProgressTitle' : 'chat.managedGuide.startingTitle')
+      ? t(restartPending ? 'chat.restart.inProgressTitle' : 'chat.managedGuide.startingTitle')
       : unverified ? t('chat.managedGuide.recoveryUnknownTitle')
         : stale ? t('chat.managedGuide.recoveryStaleTitle')
         : t('chat.managedGuide.recoveryTitle')}</h2>
     <p>{pending
       ? t(showTerminalHint ? 'chat.managedGuide.terminalHint'
-        : restarting ? 'chat.restart.inProgressHint' : 'chat.managedGuide.startingHint')
+        : restartPending ? 'chat.restart.inProgressHint' : 'chat.managedGuide.startingHint')
       : unverified ? t('chat.managedGuide.recoveryUnknownHint')
         : stale ? t('chat.managedGuide.recoveryStaleHint')
         : receipt?.canResume ? t('chat.managedGuide.recoveryReadyHint')
           : t('chat.managedGuide.recoveryManualHint')}</p>
-    {receipt && <div className="codex-managed-guide-recovery">
+    {restartPending && <p className="codex-managed-guide-note">{t('chat.restart.manualPromptHint')}</p>}
+    {receipt && !restartPending && <div className="codex-managed-guide-recovery">
       <span>{t('chat.managedGuide.recoveryHint')}</span>
       <RecoveryCommand command={receipt.recovery.command} />
     </div>}
@@ -66,11 +74,11 @@ export default function ConversationRecoveryGuide({
         {t('chat.managedGuide.retryRecovery')}
       </button>
     )}
-    {(!restarting || showTerminalHint) && (
+    {(!restartPending || showTerminalHint) && (
       <button type="button" className="codex-managed-guide-secondary" onClick={onTerminal}>
         {t('chat.session.openTerminal')}
       </button>
     )}
-    {restarting && !showTerminalHint && <div className="codex-managed-guide-space" />}
+    {restartPending && !showTerminalHint && <div className="codex-managed-guide-space" />}
   </div>;
 }

@@ -32,7 +32,7 @@ describe('Codex recovery terminal reminder', () => {
     const onTerminal = vi.fn();
     const { container } = render(<ConversationRecoveryGuide controller={{
       status: 'restarting', receipt: null, recover: vi.fn(async () => {}),
-    }} onTerminal={onTerminal} />);
+    }} operation="restart" onTerminal={onTerminal} />);
 
     expect(screen.getByText('chat.restart.inProgressTitle')).toBeTruthy();
     expect(container.querySelector('.codex-managed-guide-icon.starting')).toBeTruthy();
@@ -53,7 +53,7 @@ describe('Codex recovery terminal reminder', () => {
     let current!: ConversationActivationRecoveryController;
     function Recovery() {
       current = useConversationActivationRecovery('%1', true, discover);
-      return <ConversationRecoveryGuide controller={current} onTerminal={onTerminal} />;
+      return <ConversationRecoveryGuide controller={current} operation="activation" onTerminal={onTerminal} />;
     }
     render(<Recovery />);
     await act(async () => {});
@@ -77,10 +77,10 @@ describe('Codex recovery terminal reminder', () => {
 
   it('does not restart the timer for rerenders, receipt refreshes or recovering to waiting', async () => {
     const value = controller();
-    const { rerender } = render(<ConversationRecoveryGuide controller={value} onTerminal={() => {}} />);
+    const { rerender } = render(<ConversationRecoveryGuide controller={value} operation="activation" onTerminal={() => {}} />);
     await tick(15_000);
     rerender(<ConversationRecoveryGuide controller={{ ...value, status: 'waiting',
-      receipt: { ...receipt, phase: 'resuming', canResume: false } }} onTerminal={() => {}} />);
+      receipt: { ...receipt, phase: 'resuming', canResume: false } }} operation="activation" onTerminal={() => {}} />);
     await tick(14_999);
     expect(hint()).toBeNull();
     await tick(1);
@@ -89,10 +89,10 @@ describe('Codex recovery terminal reminder', () => {
 
   it('resets the deadline when the recovery operation changes', async () => {
     const value = controller();
-    const { rerender } = render(<ConversationRecoveryGuide controller={value} onTerminal={() => {}} />);
+    const { rerender } = render(<ConversationRecoveryGuide controller={value} operation="activation" onTerminal={() => {}} />);
     await tick(20_000);
     rerender(<ConversationRecoveryGuide controller={{ ...value,
-      receipt: { ...receipt, operationId: 'b'.repeat(64) } }} onTerminal={() => {}} />);
+      receipt: { ...receipt, operationId: 'b'.repeat(64) } }} operation="activation" onTerminal={() => {}} />);
     await tick(10_000);
     expect(hint()).toBeNull();
     await tick(20_000);
@@ -101,14 +101,14 @@ describe('Codex recovery terminal reminder', () => {
 
   it.each(['error', 'no receipt'] as const)('clears the timer on %s and starts a fresh pending visit', async (end) => {
     const value = controller();
-    const { rerender } = render(<ConversationRecoveryGuide controller={value} onTerminal={() => {}} />);
+    const { rerender } = render(<ConversationRecoveryGuide controller={value} operation="activation" onTerminal={() => {}} />);
     await tick(20_000);
     rerender(<ConversationRecoveryGuide controller={end === 'error'
-      ? { ...value, status: 'error' } : { ...value, receipt: null }} onTerminal={() => {}} />);
+      ? { ...value, status: 'error' } : { ...value, receipt: null }} operation="activation" onTerminal={() => {}} />);
     expect(vi.getTimerCount()).toBe(0);
     await tick(20_000);
     expect(hint()).toBeNull();
-    rerender(<ConversationRecoveryGuide controller={value} onTerminal={() => {}} />);
+    rerender(<ConversationRecoveryGuide controller={value} operation="activation" onTerminal={() => {}} />);
     await tick(29_999);
     expect(hint()).toBeNull();
     await tick(1);
@@ -116,7 +116,7 @@ describe('Codex recovery terminal reminder', () => {
   });
 
   it('clears its timer when unmounted', () => {
-    const { unmount } = render(<ConversationRecoveryGuide controller={controller()} onTerminal={() => {}} />);
+    const { unmount } = render(<ConversationRecoveryGuide controller={controller()} operation="activation" onTerminal={() => {}} />);
     expect(vi.getTimerCount()).toBe(1);
     unmount();
     expect(vi.getTimerCount()).toBe(0);
@@ -131,11 +131,71 @@ describe('Codex recovery terminal reminder', () => {
     };
     render(<ConversationRecoveryGuide controller={{
       status: 'error', receipt: restartReceipt, recover: vi.fn(async () => {}),
-    }} onTerminal={() => {}} />);
+    }} operation="restart" onTerminal={() => {}} />);
 
     expect(screen.getByText('chat.managedGuide.recoveryUnknownTitle')).toBeTruthy();
     expect(screen.getByText('chat.managedGuide.recoveryUnknownHint')).toBeTruthy();
     expect(screen.getByRole('button', { name: 'chat.managedGuide.copyRecovery' })).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'chat.managedGuide.retryRecovery' })).toBeNull();
+  });
+
+  it('keeps a resuming restart in progress until ready and offers terminal after 30 seconds', async () => {
+    const resumingReceipt = {
+      operationId: 'b'.repeat(64), recovery: { command: 'resume original session' },
+      phase: 'resuming' as const, state: 'current' as const, canResume: false,
+    };
+    const onTerminal = vi.fn();
+    const { container } = render(<ConversationRecoveryGuide controller={{
+      status: 'error', receipt: resumingReceipt, recover: vi.fn(async () => {}),
+    }} operation="restart" onTerminal={onTerminal} />);
+
+    expect(screen.getByText('chat.restart.inProgressTitle')).toBeTruthy();
+    expect(screen.getByText('chat.restart.inProgressHint')).toBeTruthy();
+    expect(screen.getByText('chat.restart.manualPromptHint')).toBeTruthy();
+    expect(container.querySelector('.codex-managed-guide-icon.starting')).toBeTruthy();
+    expect(screen.queryByText('chat.managedGuide.recoveryTitle')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'chat.managedGuide.retryRecovery' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'chat.managedGuide.copyRecovery' })).toBeNull();
+
+    await tick(30_000);
+    expect(screen.getByText('chat.managedGuide.terminalHint')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'chat.session.openTerminal' }));
+    expect(onTerminal).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not treat an activation receipt phase as a conversation restart', () => {
+    const activationReceipt = {
+      ...receipt, phase: 'resuming' as const, canResume: false,
+    };
+    render(<ConversationRecoveryGuide controller={{
+      status: 'error', receipt: activationReceipt, recover: vi.fn(async () => {}),
+    }} operation="activation" onTerminal={() => {}} />);
+
+    expect(screen.getByText('chat.managedGuide.recoveryTitle')).toBeTruthy();
+    expect(screen.getByText('chat.managedGuide.recoveryManualHint')).toBeTruthy();
+    expect(screen.queryByText('chat.restart.inProgressTitle')).toBeNull();
+    expect(screen.queryByText('chat.restart.manualPromptHint')).toBeNull();
+    expect(screen.getByRole('button', { name: 'chat.managedGuide.copyRecovery' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'chat.session.openTerminal' })).toBeTruthy();
+  });
+
+  it('does not restart the 30-second reminder when the restart response supplies its resuming receipt', async () => {
+    const onTerminal = vi.fn();
+    const { rerender } = render(<ConversationRecoveryGuide controller={{
+      status: 'restarting', receipt: null, recover: vi.fn(async () => {}),
+    }} operation="restart" onTerminal={onTerminal} />);
+    await tick(20_000);
+
+    rerender(<ConversationRecoveryGuide controller={{
+      status: 'error', receipt: {
+        operationId: 'c'.repeat(64), recovery: { command: 'resume original session' },
+        phase: 'resuming', state: 'current', canResume: false,
+      }, recover: vi.fn(async () => {}),
+    }} operation="restart" onTerminal={onTerminal} />);
+    await tick(9_999);
+    expect(hint()).toBeNull();
+    await tick(1);
+    expect(hint()).toBeTruthy();
+    expect(onTerminal).not.toHaveBeenCalled();
   });
 });

@@ -2289,6 +2289,7 @@ export default function App() {
     authoritativePaneRun,
   );
   const durableConversationRecovery = durableRestartRecovery ?? durableActivationRecovery;
+  const restartRecoveryGuideVisible = Boolean(durableRestartRecovery) || conversationRestartInProgress;
   const recoveryLookupUncertain = conversationRecovery.status === 'loading'
     || conversationRecovery.status === 'unknown'
     || conversationRestart.status === 'loading' || conversationRestart.status === 'unknown';
@@ -3695,8 +3696,8 @@ export default function App() {
               primary={current.paneId && (
             chatLens ? (
               durableConversationRecovery || conversationRestartInProgress ? (
-                <ConversationRecoveryGuide controller={durableRestartRecovery
-                  || conversationRestartInProgress ? conversationRestart : conversationRecovery}
+                <ConversationRecoveryGuide operation={restartRecoveryGuideVisible ? 'restart' : 'activation'}
+                  controller={restartRecoveryGuideVisible ? conversationRestart : conversationRecovery}
                   onTerminal={() => {
                     clearConversationActivation();
                     setLens('terminal');

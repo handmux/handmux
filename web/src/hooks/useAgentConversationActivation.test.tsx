@@ -370,7 +370,7 @@ describe('ConversationRecoveryGuide', () => {
       recover,
       retry: vi.fn(),
     };
-    const { rerender } = render(<ConversationRecoveryGuide controller={base}
+    const { rerender } = render(<ConversationRecoveryGuide controller={base} operation="activation"
       onTerminal={() => {}} />);
     fireEvent.click(screen.getByRole('button', { name: '继续恢复' }));
     expect(recover).toHaveBeenCalledOnce();
@@ -378,7 +378,7 @@ describe('ConversationRecoveryGuide', () => {
     rerender(<ConversationRecoveryGuide controller={{
       ...base,
       receipt: { ...base.receipt, state: 'stale', canResume: false },
-    }} onTerminal={() => {}} />);
+    }} operation="activation" onTerminal={() => {}} />);
     expect(screen.queryByRole('button', { name: '继续恢复' })).toBeNull();
     const copy = screen.getByRole('button', { name: '复制恢复命令' });
     expect(copy.textContent).toBe('');
