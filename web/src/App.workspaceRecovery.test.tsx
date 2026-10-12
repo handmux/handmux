@@ -656,6 +656,33 @@ describe('App established conversation during server restart', () => {
     expect(screen.getByPlaceholderText('和 Agent 对话…')).toBeTruthy();
   });
 
+  it.each(['loading', 'unknown'])('keeps ordinary verified conversation sendable during restart GET %s', async (status) => {
+    const view = await openConversation();
+    const composer = screen.getByPlaceholderText('和 Agent 对话…') as HTMLTextAreaElement;
+    composer.focus();
+    fireEvent.change(composer, { target: { value: 'ordinary message' } });
+    restartHook.result = { status, receipt: null, error: null,
+      restart: vi.fn(async () => {}), recover: vi.fn(async () => {}), retry: vi.fn() };
+    await act(async () => { view.rerender(<App />); });
+    expect(screen.getByPlaceholderText('和 Agent 对话…')).toBe(composer);
+    expect(document.activeElement).toBe(composer);
+    const send = view.container.querySelector<HTMLButtonElement>('.cc-send');
+    expect(send).toBeTruthy();
+    expect(send?.disabled).toBe(false);
+  });
+
+  it('keeps delivery paused when a failed GET retains an actual pending receipt for the current session', async () => {
+    const view = await openConversation();
+    fireEvent.change(screen.getByPlaceholderText('和 Agent 对话…'), { target: { value: 'wait for verified recovery' } });
+    restartHook.result = { status: 'unknown', receipt: {
+      agentId: 'codex', paneId: pane.id, operationId: 'a'.repeat(64),
+      phase: 'resuming', state: 'current', canResume: false,
+      recovery: { kind: 'codex_resume', sessionId: 'session-1', command: 'handmux codex resume session-1' },
+    }, error: null, restart: vi.fn(async () => {}), recover: vi.fn(async () => {}), retry: vi.fn() };
+    await act(async () => { view.rerender(<App />); });
+    expect(view.container.querySelector<HTMLButtonElement>('.cc-send')?.disabled).toBe(true);
+  });
+
   it('does not let an old restart receipt replace a newly verified live conversation', async () => {
     restartHook.result = { status: 'ready', receipt: {
       agentId: 'codex', paneId: pane.id, operationId: 'a'.repeat(64),
@@ -684,6 +711,14 @@ describe('App established conversation during server restart', () => {
     expect(screen.getByText('正在重启会话')).toBeTruthy();
     expect(screen.getByText('如果出现升级或信任提示，自动启动会中断；请前往终端手动确认。')).toBeTruthy();
     expect(screen.queryByText('继续恢复对话')).toBeNull();
+
+    api.getAgentDiscovery.mockResolvedValue({ descriptors, runs: [{
+      agentId: run.agentId, paneId: run.paneId, runId: 'starting-run',
+    }], health: [] });
+    await flush(5_000);
+    expect(screen.getByText('正在重启会话')).toBeTruthy();
+    expect(screen.queryByText('Saved answer session-1')).toBeNull();
+    expect(screen.queryByPlaceholderText('和 Agent 对话…')).toBeNull();
 
     api.getAgentDiscovery.mockResolvedValue({ descriptors, runs: [{ ...run, runId: 'after-restart' }], health: [] });
     await flush(5_000);
@@ -921,6 +956,138 @@ describe('App management dimensions', () => {
 
     expect(screen.getByRole('dialog', { name: '分屏管理，① zsh · %1' })).toBeTruthy();
     expect(api.getPanes).toHaveBeenCalledTimes(callsBeforeOpen + 1);
+  });
+
+  it.each(['pane', 'window'] as const)('discards a delayed pre-resize poll after %s resize and increments the accepted size', async (target) => {
+    await renderManagedSession();
+    await act(async () => {
+      if (target === 'pane') await windowBarProps().onManagePane('%1');
+      else await windowBarProps().onManageWindow(staleWindow);
+    });
+    let resolveOld!: (panes: typeof stalePanes) => void;
+    api.getPanes.mockImplementationOnce(() => new Promise((resolve) => { resolveOld = resolve; }));
+    await flush(5_000);
+    expect(resolveOld).toBeTruthy();
+    const acceptedPanes = stalePanes.map((pane) => pane.id === '%1'
+      ? { ...pane, width: 42 } : { ...pane, left: 43, width: target === 'pane' ? 37 : 40 });
+    api.getPanes.mockResolvedValue(acceptedPanes);
+    api.getWindows.mockResolvedValue([{ ...staleWindow, width: 83 }]);
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: target === 'pane' ? '分屏宽度 +1' : '窗口宽度 +1' }));
+      await flush();
+    });
+    expect(windowBarProps().panes.find((pane) => pane.id === '%1')?.width).toBe(42);
+    await act(async () => { resolveOld(stalePanes); await flush(); });
+    expect(windowBarProps().panes.find((pane) => pane.id === '%1')?.width).toBe(42);
+    expect(api.getPanes).toHaveBeenLastCalledWith('@1', { fresh: true });
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: target === 'pane' ? '分屏宽度 +1' : '窗口宽度 +1' }));
+      await flush();
+    });
+    if (target === 'pane') expect(api.resizePane).toHaveBeenLastCalledWith('%1', 43, undefined);
+    else expect(api.resizeWindow).toHaveBeenLastCalledWith('@1', 84, null);
+  });
+
+  it.each(['pane', 'window'] as const)('keeps the open %s management dimensions current after an external resize', async (target) => {
+    await renderManagedSession();
+    await act(async () => {
+      if (target === 'pane') await windowBarProps().onManagePane('%1');
+      else await windowBarProps().onManageWindow(staleWindow);
+    });
+    api.getPanes.mockResolvedValue(stalePanes.map((pane) => pane.id === '%1'
+      ? { ...pane, width: 42, height: 30 } : { ...pane, left: 43, width: 40, height: 30 }));
+    api.getWindows.mockResolvedValue([{ ...staleWindow, width: 83, height: 30 }]);
+    await flush(5_000);
+    expect(screen.getByText(target === 'pane' ? '42 列' : '83 列')).toBeTruthy();
+    if (target === 'window') expect(screen.getByText('30 行')).toBeTruthy();
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: target === 'pane' ? '分屏宽度 +1' : '窗口宽度 +1' }));
+      await flush();
+    });
+    if (target === 'pane') expect(api.resizePane).toHaveBeenLastCalledWith('%1', 43, undefined);
+    else expect(api.resizeWindow).toHaveBeenLastCalledWith('@1', 84, null);
+  });
+
+  it('does not let the current window poll overwrite a resized different managed window', async () => {
+    const other = { ...staleWindow, id: '@2', name: 'other', active: false };
+    await renderManagedSession();
+    api.getWindows.mockResolvedValue([staleWindow, other]);
+    await act(async () => { await windowBarProps().onManageWindow(other); });
+    api.getPanes.mockResolvedValue(stalePanes.map((pane) => pane.id === '%1'
+      ? { ...pane, width: 40 } : { ...pane, left: 41, width: 38 }));
+    let resolveOld!: (windows: typeof staleWindow[]) => void;
+    api.getWindows.mockImplementationOnce(() => new Promise((resolve) => { resolveOld = resolve; }));
+    await flush(5_000);
+    expect(resolveOld).toBeTruthy();
+    api.getWindows.mockResolvedValue([staleWindow, { ...other, width: 83 }]);
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: '窗口宽度 +1' }));
+      await flush();
+    });
+    expect(screen.getByText('83 列')).toBeTruthy();
+    await act(async () => { resolveOld([staleWindow, other]); await flush(); });
+    expect(windowBarProps().panes.find((pane) => pane.id === '%1')?.width).toBe(40);
+    expect(windowBarProps().windows.find((window) => window.id === '@2')?.width).toBe(83);
+    expect(screen.getByText('83 列')).toBeTruthy();
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: '窗口宽度 +1' }));
+      await flush();
+    });
+    expect(api.resizeWindow).toHaveBeenLastCalledWith('@2', 84, null);
+  });
+
+  it.each(['pane', 'window'] as const)('discards a delayed pre-restore poll after restoring %s geometry', async (target) => {
+    await renderManagedSession();
+    await act(async () => {
+      if (target === 'pane') {
+        await windowBarProps().onManagePane('%1');
+      } else await windowBarProps().onManageWindow(staleWindow);
+    });
+    if (target === 'pane') await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: '分屏宽度 +1' }));
+      await flush();
+    });
+    let resolveOld!: (panes: typeof stalePanes) => void;
+    api.getPanes.mockImplementationOnce(() => new Promise((resolve) => { resolveOld = resolve; }));
+    await flush(5_000);
+    expect(resolveOld).toBeTruthy();
+    api.getPanes.mockResolvedValue(stalePanes.map((pane) => pane.id === '%1'
+      ? { ...pane, width: 42 } : { ...pane, left: 43, width: target === 'pane' ? 37 : 40 }));
+    api.getWindows.mockResolvedValue([{ ...staleWindow, width: 83 }]);
+    await act(async () => {
+      fireEvent.click(screen.getAllByRole('button', { name: target === 'pane' ? /恢复分屏比例/ : /恢复自动尺寸/ })[0]!);
+      await flush();
+    });
+    expect(windowBarProps().panes.find((pane) => pane.id === '%1')?.width).toBe(42);
+    await act(async () => { resolveOld(stalePanes); await flush(); });
+    expect(windowBarProps().panes.find((pane) => pane.id === '%1')?.width).toBe(42);
+    expect(screen.getByText(target === 'pane' ? '42 列' : '83 列')).toBeTruthy();
+  });
+
+  it.each(['pane', 'window'] as const)('keeps the optimistic %s size while its mutation is pending', async (target) => {
+    await renderManagedSession();
+    await act(async () => {
+      if (target === 'pane') await windowBarProps().onManagePane('%1');
+      else await windowBarProps().onManageWindow(staleWindow);
+    });
+    let finish!: (value: unknown) => void;
+    const mutation = target === 'pane' ? api.resizePane : api.resizeWindow;
+    mutation.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: target === 'pane' ? '分屏宽度 +1' : '窗口宽度 +1' }));
+      await flush();
+    });
+    expect(finish).toBeTruthy();
+    api.getPanes.mockResolvedValue(stalePanes.map((pane) => pane.id === '%1'
+      ? { ...pane, width: 38 } : { ...pane, left: 39, width: 39 }));
+    api.getWindows.mockResolvedValue([{ ...staleWindow, width: 78 }]);
+    await flush(5_000);
+    expect(screen.getByText(target === 'pane' ? '40 列' : '81 列')).toBeTruthy();
+    api.getPanes.mockResolvedValue(stalePanes.map((pane) => pane.id === '%1'
+      ? { ...pane, width: 42 } : { ...pane, left: 43, width: 40 }));
+    api.getWindows.mockResolvedValue([{ ...staleWindow, width: 83 }]);
+    await act(async () => { finish({ ok: true }); await flush(); });
+    expect(screen.getByText(target === 'pane' ? '42 列' : '83 列')).toBeTruthy();
   });
 
   it('shows pane height below width and resizes only the selected pane rows', async () => {

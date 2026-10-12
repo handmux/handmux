@@ -44,6 +44,11 @@ export interface CodexRestartDeliveryFence {
   pauseSessionDelivery(session: { agentId: string; sessionId: string }): Promise<() => void>;
 }
 
+export interface CodexConversationRestartController extends AgentConversationRestartControllerV1 {
+  // Provider observation may retire a fence after a verified manual resume, including pane migration.
+  reconcileRun(run: AgentRunLease): Promise<void>;
+}
+
 export interface CodexConversationRestartControllerOptions {
   app: CodexRestartApp;
   panes: ReadonlyPaneSource;
@@ -242,7 +247,7 @@ export function createCodexConversationRestartController({
   wait = pause,
   pollMs = 250,
   timeoutMs = 45_000,
-}: CodexConversationRestartControllerOptions): AgentConversationRestartControllerV1 {
+}: CodexConversationRestartControllerOptions): CodexConversationRestartController {
   if (!app || typeof app.discover !== 'function' || !panes || !process
     || typeof process.inspectForegroundFresh !== 'function'
     || typeof process.inspectForegroundGroupFresh !== 'function'
@@ -521,6 +526,40 @@ export function createCodexConversationRestartController({
   return {
     apiVersion: 1,
     validRecovery: validCodexRestartRecovery,
+    async reconcileRun(run): Promise<void> {
+      if (run.ref.agentId !== 'codex' || !run.ref.sessionId || !stableRun(run, resolveRun)) return;
+      const pending = receipts.list().filter((receipt) => receipt.phase !== 'ready'
+        && receipt.sessionId === run.ref.sessionId && receipt.previousRunId !== run.ref.runId);
+      if (!pending.length) return;
+      const evidence = await inspectEvidence(run);
+      for (const receipt of pending) {
+        // A new runId or vanished pane cannot prove the stopped process family is gone.
+        // Legacy receipts without the App Server generation remain fail closed.
+        if (!receipt.process.appServer) continue;
+        const identities = [receipt.process.tui, receipt.process.wrapper, receipt.process.appServer,
+          ...(receipt.process.tuiShim ? [receipt.process.tuiShim] : []),
+          ...(receipt.process.appServerShim ? [receipt.process.appServerShim] : [])];
+        const statuses = await Promise.all(identities.map((identity) => (
+          process.inspectProcessGenerationFresh!(identity)
+        )));
+        if (!statuses.every((status) => status === 'exited' || status === 'replaced')) continue;
+        // Reloaded receipts have no in-memory release callback. Reuse the existing fence lifecycle
+        // so its eventual release also wakes Core's normal Queue dispatcher.
+        if (!deliveryFenceReleases.has(receipt.operationId)) {
+          const release = await pauseSessionDelivery({ agentId: 'codex', sessionId: receipt.sessionId });
+          if (deliveryFenceReleases.has(receipt.operationId)) release();
+          else deliveryFenceReleases.set(receipt.operationId, release);
+        }
+        const current = await inspectEvidence(run);
+        if (!samePane(evidence.pane, current.pane) || evidence.epoch !== current.epoch
+          || !sameIdentity(evidence.tui, current.tui) || !sameIdentity(evidence.wrapper, current.wrapper)
+          || !sameIdentity(evidence.appServer, current.appServer)
+          || !sameOptionalIdentity(evidence.tuiShim, current.tuiShim)
+          || !sameOptionalIdentity(evidence.appServerShim, current.appServerShim)
+          || !stableRun(run, resolveRun) || run.ref.sessionId !== receipt.sessionId) return;
+        finalizeReady(receipt);
+      }
+    },
     async restart(run, signal): Promise<ConversationRestartReceipt> {
       if (run.ref.agentId !== 'codex') throw new ConversationRestartError(
         'Conversation restart is not supported for this Agent', 'unsupported',

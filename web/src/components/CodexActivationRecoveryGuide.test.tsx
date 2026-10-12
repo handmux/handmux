@@ -28,6 +28,42 @@ beforeEach(() => { vi.useFakeTimers(); });
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.resetAllMocks(); });
 
 describe('Codex recovery terminal reminder', () => {
+  it('keeps the manual restart recovery deadline across a failed POST with a resuming receipt', async () => {
+    const value = { ...controller(), receipt: { ...receipt, phase: 'resuming' as const, canResume: false } };
+    const { rerender, unmount } = render(<ConversationRecoveryGuide controller={value} operation="restart" onTerminal={() => {}} />);
+    await tick(12_000);
+    rerender(<ConversationRecoveryGuide controller={{ ...value, status: 'error' }} operation="restart" onTerminal={() => {}} />);
+    await tick(17_999);
+    expect(hint()).toBeNull();
+    await tick(1);
+    expect(hint()).toBeTruthy();
+    unmount();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('starts an independent deadline for another restart receipt', async () => {
+    const value = { ...controller('error'), receipt: { ...receipt, phase: 'resuming' as const, canResume: false } };
+    const { rerender } = render(<ConversationRecoveryGuide controller={value} operation="restart" onTerminal={() => {}} />);
+    await tick(20_000);
+    rerender(<ConversationRecoveryGuide controller={{ ...value, receipt: { ...value.receipt, operationId: 'next' } }} operation="restart" onTerminal={() => {}} />);
+    await tick(10_000);
+    expect(hint()).toBeNull();
+    await tick(20_000);
+    expect(hint()).toBeTruthy();
+  });
+
+  it('starts a new deadline for an explicit retry even if the receipt identity is unchanged', async () => {
+    const value = { ...controller('error'), receipt: { ...receipt, phase: 'resuming' as const, canResume: false } };
+    const { rerender } = render(<ConversationRecoveryGuide controller={value} operation="restart" onTerminal={() => {}} />);
+    await tick(30_000);
+    expect(hint()).toBeTruthy();
+    rerender(<ConversationRecoveryGuide controller={{ ...value, status: 'recovering' }} operation="restart" onTerminal={() => {}} />);
+    expect(hint()).toBeNull();
+    await tick(29_999);
+    expect(hint()).toBeNull();
+    await tick(1);
+    expect(hint()).toBeTruthy();
+  });
   it('shows an animated restart guide immediately and offers the terminal after 30 seconds without a receipt', async () => {
     const onTerminal = vi.fn();
     const { container } = render(<ConversationRecoveryGuide controller={{

@@ -1467,6 +1467,93 @@ describe('AgentRuntime composition root', () => {
       .every((item) => !item.capabilities.conversationRestart)).toBe(true);
   });
 
+  it.each(['new pane', 'new tmux epoch'])('retires a restart fence through native polling after manual recovery in a %s', async (migration) => {
+    const stateDirectory = directory();
+    const home = stateDirectory;
+    const sessionId = '12345678-1234-1234-1234-123456789abc';
+    const paneId = migration === 'new pane' ? '%2' : '%1';
+    const currentPane = { ...pane('codex'), paneId, foregroundPid: 40 };
+    const socket = `${home}/.handmux/codex-app/${paneId.slice(1)}.sock`;
+    const tui = {
+      pid: 40, ppid: 50, startedAt: 400, tty: currentPane.tty!, executable: '/usr/local/bin/codex',
+      commandLine: `/usr/local/bin/codex --remote unix://${socket} resume ${sessionId}`,
+    };
+    const group = [tui, {
+      pid: 50, ppid: 2, startedAt: 500, tty: currentPane.tty!, executable: '/usr/local/bin/node',
+      commandLine: '/usr/local/lib/node_modules/handmux/bin/handmux.js codex',
+    }, {
+      pid: 51, ppid: 50, startedAt: 501, tty: currentPane.tty!, executable: '/usr/local/bin/codex',
+      commandLine: `/usr/local/bin/codex app-server --listen unix://${socket}`,
+    }];
+    const receipts = new CodexRestartReceiptStore(path.join(stateDirectory, 'restart.json'));
+    const saved = receipts.prepare({
+      pane: { paneId: '%1', sessionName: 'main', windowId: '@1', tty: currentPane.tty!, tmuxEpoch: 'old-epoch' },
+      process: {
+        tui: { pid: 10, ppid: 20, startedAt: 100, tty: currentPane.tty!, executable: '/usr/local/bin/codex' },
+        wrapper: { pid: 20, ppid: 2, startedAt: 200, tty: currentPane.tty!, executable: '/usr/local/bin/node' },
+        appServer: { pid: 21, ppid: 20, startedAt: 201, tty: currentPane.tty!, executable: '/usr/local/bin/codex' },
+      },
+      sessionId, previousRunId: 'old-run',
+    });
+    receipts.transition(saved.operationId, 'prepared', 'resuming');
+    let oldStatus: 'unknown' | 'exited' = 'unknown';
+    let failProbe = true;
+    const probed: number[] = [];
+    const dispatched: string[] = [];
+    const mutations: string[] = [];
+    const codexApp = {
+      discover: async () => ({ managed: true, threadId: sessionId }),
+      observeConversation: vi.fn(), observeInteractions: vi.fn(), decide: vi.fn(), answerInput: vi.fn(),
+      inboxStates: async () => ({ [paneId]: { kind: 'working', threadId: sessionId } }),
+      status: async () => ({ managed: true, status: { type: 'idle' } }),
+      dispatchPrompt: async (_paneId: string, _sessionId: string, text: string) => {
+        dispatched.push(text);
+        return { status: 'accepted' };
+      },
+    };
+    const runtime = createBuiltinAgentRuntime({
+      home, panes: new TestPanes([currentPane]), stateDirectory, authToken: AUTH_TOKEN,
+      process: {
+        inspectForeground: async () => tui,
+        inspectForegroundFresh: async () => tui,
+        inspectForegroundGroupFresh: async () => group,
+        inspectProcessGenerationFresh: async (identity) => {
+          probed.push(identity.pid);
+          if (failProbe) throw new Error('process inspection unavailable');
+          return oldStatus;
+        },
+      },
+      conversationRestartReceipts: receipts, codexRestartReceipts: receipts,
+      codexApp: codexApp as unknown as NonNullable<Parameters<typeof createBuiltinAgentRuntime>[0]['codexApp']>,
+      codexRestartCommands: {
+        paneEpoch: async () => migration === 'new pane' ? 'old-epoch' : 'new-epoch',
+        runPaneCommand: async () => { mutations.push('command'); },
+        terminate: () => { mutations.push('terminate'); return true; },
+      },
+    });
+    runtimes.push(runtime);
+    await runtime.start();
+    await vi.waitFor(() => expect(runtime.activeRuns()[0]?.sessionId).toBe(sessionId));
+    const run = runtime.runs.resolve(runtime.activeRuns()[0]!)!;
+    expect(await runtime.conversation!.send(run, {
+      clientRequestId: 'manual-resume', text: 'continue', delivery: 'prompt',
+    })).toMatchObject({ status: 'queued' });
+    expect(receipts.isPending('codex', sessionId)).toBe(true);
+    expect(dispatched).toEqual([]);
+    await vi.waitFor(() => expect(probed).toContain(10), { timeout: 2_000 });
+    expect(runtime.inbox.read().availability.codex?.availability).toBe('ready');
+    expect(runtime.inbox.read().records).toEqual(expect.arrayContaining([
+      expect.objectContaining({ run: expect.objectContaining({ paneId, sessionId }), state: 'working' }),
+    ]));
+    failProbe = false;
+    oldStatus = 'exited';
+    await vi.waitFor(() => expect(receipts.isPending('codex', sessionId)).toBe(false), { timeout: 2_000 });
+    await vi.waitFor(() => expect(dispatched).toEqual(['continue']), { timeout: 2_000 });
+    expect(new CodexRestartReceiptStore(path.join(stateDirectory, 'restart.json')).get(saved.operationId)?.phase).toBe('ready');
+    expect(probed).toEqual(expect.arrayContaining([10, 20, 21]));
+    expect(mutations).toEqual([]);
+  });
+
   it('projects managed Codex native Inbox transitions while Claude waits for its Bridge Connector', async () => {
     const panes = new TestPanes([
       pane('claude'),

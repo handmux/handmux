@@ -32,6 +32,19 @@ export function conversationRecoveryForSessionlessPane<Receipt>(
   return authoritativeRun ? null : receipt;
 }
 
+// Restart has already launched the replacement process. Late session association is not proof
+// that the original conversation is ready; a different known Agent/session still wins immediately.
+export function conversationRestartRecoveryForPane<Receipt extends {
+  agentId: string;
+  paneId: string;
+  phase: string;
+  recovery: { sessionId: string };
+}>(receipt: Receipt | null, authoritativeRun: AgentRunRef | null): Receipt | null {
+  if (!authoritativeRun) return receipt;
+  return receipt?.phase === 'resuming' && receipt.agentId === authoritativeRun.agentId
+    && receipt.paneId === authoritativeRun.paneId && !authoritativeRun.sessionId ? receipt : null;
+}
+
 export function conversationIdentityForActivation<Identity extends {
   agentId: string;
   paneId: string;

@@ -4,6 +4,7 @@ import {
   activationRunFor,
   activationTargetMatches,
   conversationRecoveryForSessionlessPane,
+  conversationRestartRecoveryForPane,
   conversationIdentityForActivation,
   invalidateRememberedConversationOnTakeover,
   useConversationActivationTarget,
@@ -35,6 +36,17 @@ function activationTargetHook() {
 }
 
 describe('Conversation activation target', () => {
+  it('retains resuming restart progress through the same Agent sessionless run, then yields to verified sessions', () => {
+    const receipt = { agentId: 'new-agent', paneId: '%1', phase: 'resuming', recovery: { sessionId: 'original' } };
+    expect(conversationRestartRecoveryForPane(receipt, null)).toBe(receipt);
+    const starting = { agentId: 'new-agent', paneId: '%1', runId: 'replacement' };
+    expect(conversationRestartRecoveryForPane(receipt, starting)).toBe(receipt);
+    expect(conversationRestartRecoveryForPane(receipt, { ...starting, sessionId: 'original' })).toBeNull();
+    expect(conversationRestartRecoveryForPane(receipt, { ...starting, sessionId: 'different' })).toBeNull();
+    expect(conversationRestartRecoveryForPane(receipt, { ...starting, agentId: 'other-agent' })).toBeNull();
+    expect(conversationRestartRecoveryForPane({ ...receipt, phase: 'prepared' }, starting)).toBeNull();
+    expect(conversationRecoveryForSessionlessPane(receipt, starting)).toBeNull();
+  });
   it('does not replace an explicitly different current Agent run with the old target', () => {
     const claude = { agentId: 'claude', paneId: '%1', runId: 'claude-run' };
     expect(activationRunFor(target, '%1', claude)).toBe(claude);

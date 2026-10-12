@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { t } from '../i18n';
 import { BotIcon } from './icons.jsx';
 import RecoveryCommand from './RecoveryCommand.js';
@@ -33,8 +33,20 @@ export default function ConversationRecoveryGuide({
   const restartPending = operation === 'restart' && (controller.status === 'restarting'
     || (receipt?.phase === 'resuming' && controller.status !== 'recovering' && controller.status !== 'waiting'));
   const pending = restartPending || controller.status === 'recovering' || controller.status === 'waiting';
-  const pendingOperation = pending
-    ? restartPending ? 'restart-pending' : receipt?.operationId ?? null : null;
+  const timingPending = pending && (operation === 'restart' || !!receipt?.operationId);
+  const attempt = useRef({ number: 0, pending: false, operation, operationId: receipt?.operationId,
+    status: controller.status });
+  const previous = attempt.current;
+  const newAttempt = timingPending && (!previous.pending || previous.operation !== operation
+    || (previous.operationId !== undefined && receipt?.operationId !== undefined
+      && previous.operationId !== receipt.operationId)
+    || (controller.status === 'recovering' && previous.status !== 'recovering'
+      && previous.status !== 'waiting'));
+  attempt.current = { number: previous.number + (newAttempt ? 1 : 0), pending: timingPending, operation,
+    operationId: receipt?.operationId ?? (timingPending ? previous.operationId : undefined), status: controller.status };
+  // Adopt a receipt supplied by the restart response without extending this attempt's deadline.
+  // An explicit new recovery or a different operation gets its own 30 seconds.
+  const pendingOperation = timingPending ? `${operation}:${attempt.current.number}` : null;
   const [hintedOperation, setHintedOperation] = useState<string | null>(null);
   useEffect(() => {
     setHintedOperation(null);

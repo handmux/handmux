@@ -240,8 +240,8 @@ export class CodexRestartReceiptStore {
   }
 
   isPending(agentId: string, sessionId: string): boolean {
-    this.#assertAvailable();
     if (agentId !== CODEX_AGENT_ID) return false;
+    this.#assertAvailable();
     return this.#state.receipts.some((receipt) => (
       receipt.sessionId === sessionId && receipt.phase !== 'ready'
     ));

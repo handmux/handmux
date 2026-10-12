@@ -4,6 +4,8 @@ import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { CodexRestartReceiptStore } from '../src/agents/codexRestartReceipt.js';
 import { PrivateStateStore } from '../src/privateStateStore.js';
+import { ConversationService } from '../src/agent-runtime/conversation.js';
+import { AgentRunRuntime } from '../src/agent-runtime/run.js';
 
 const SESSION_ID = '12345678-1234-1234-1234-123456789abc';
 const EPOCH = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
@@ -38,6 +40,42 @@ function writeState(file: string, state: unknown): void {
 }
 
 describe('Codex conversation restart receipts', () => {
+  it.each(['claude', 'pi', 'codex'])('isolates corrupt restart state during %s dispatch', async (agentId) => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-restart-corrupt-'));
+    const file = path.join(directory, 'receipts.json');
+    fs.writeFileSync(file, '{broken');
+    const receipts = new CodexRestartReceiptStore(file);
+    const runs = new AgentRunRuntime();
+    const run = await runs.controller(agentId, async () => true).attach({
+      paneId: '%1', attachmentId: 'attachment', sessionId: 'session-1', process: { pid: 101 },
+    });
+    const dispatched: string[] = [];
+    const service = new ConversationService({
+      runs,
+      isSessionRestartPending: ({ agentId, sessionId }) => receipts.isPending(agentId, sessionId),
+      activitySource: { read: async () => ({
+        activity: 'idle', activeTurn: { state: 'none' }, revision: 1, epoch: run.ref.runId,
+      }) },
+      adapters: { [agentId]: {
+        apiVersion: 1,
+        discoverNative: async (target) => ({
+          session: { agentId, sessionId: 'session-1' }, run: target as typeof run.ref,
+          sourceViewId: 'view', capabilities: { history: true, live: 'poll', sendable: true },
+        }),
+        readNativePage: async () => ({
+          sessionId: 'session-1', sourceViewId: 'view', sourceHistoryToken: 'history', items: [], hasMore: false,
+        }),
+        dispatchPrompt: async (_run, request) => {
+          dispatched.push(request.text);
+          return { outcome: 'accepted' };
+        },
+      } },
+    });
+    const result = await service.send(run, { clientRequestId: 'request-1', text: 'hello', delivery: 'prompt' });
+    expect(result.status).toBe(agentId === 'codex' ? 'queued' : 'accepted');
+    expect(dispatched).toEqual(agentId === 'codex' ? [] : ['hello']);
+    fs.rmSync(directory, { recursive: true, force: true });
+  });
   it('persists the exact session and process generations before stop and reloads them', () => {
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-restart-receipt-'));
     const file = path.join(directory, 'receipts.json');

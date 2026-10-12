@@ -175,6 +175,7 @@ function makeHarness(options: {
   processIdentity?: ForegroundProcessIdentity;
   processGroup?: readonly ForegroundProcessIdentity[];
   runProcess?: AgentRunLease['process'];
+  runRef?: AgentRunLease['ref'];
   managed?: boolean | null;
   threadId?: string | null;
   paneEpoch?: string | null;
@@ -227,16 +228,17 @@ function makeHarness(options: {
   });
   const inspectForegroundFresh = vi.fn(async () => currentIdentity && structuredClone(currentIdentity));
   const inspectForegroundGroupFresh = vi.fn(async () => structuredClone(currentGroup));
-  const inspectProcessGenerationFresh = vi.fn(async () => {
+  const inspectProcessGenerationFresh = vi.fn(async (_identity: unknown) => {
     if (appServerProbeStates.length) appServerProbeState = appServerProbeStates.shift()!;
     events.push(`app-server:${appServerProbeState}`);
     return appServerProbeState;
   });
   const listPanes = vi.fn(async () => currentPane ? [structuredClone(currentPane)] : []);
   const paneEpoch = vi.fn(async () => epoch);
-  const run = lease(options.runProcess ? { process: options.runProcess } : {});
+  const run = lease({ ...(options.runProcess ? { process: options.runProcess } : {}),
+    ...(options.runRef ? { ref: options.runRef } : {}) });
   let runResolved = true;
-  const resolveRun = vi.fn((ref) => ref.runId === 'run-1' && runResolved ? run.value : null);
+  const resolveRun = vi.fn((ref) => ref.runId === run.value.ref.runId && runResolved ? run.value : null);
   const controller = createCodexConversationRestartController({
     app: { discover: vi.fn(async () => ({ managed, threadId })) },
     panes: {
@@ -287,6 +289,106 @@ function makeHarness(options: {
 }
 
 describe('Codex conversation restart', () => {
+  const manuallyRecovered = (legacy = false) => {
+    const currentTui = tui({ pid: 40, ppid: 50, startedAt: 400 });
+    const options = {
+      processIdentity: currentTui,
+      processGroup: [currentTui, wrapper({ pid: 50, startedAt: 500 }), appServer({ pid: 51, ppid: 50, startedAt: 501 })],
+      runProcess: { pid: 40, startedAt: 400, tty: '/dev/ttys001' },
+      runRef: { agentId: 'codex', paneId: '%1', runId: 'new-run', sessionId: SESSION_ID },
+    };
+    let h = makeHarness(options);
+    const saved = h.receipts.prepare({
+      pane: { paneId: '%9', sessionName: 'work', windowId: '@9', tty: '/dev/ttys009', tmuxEpoch: EPOCH },
+      process: {
+        tui: { pid: 10, ppid: 12, startedAt: 100, tty: '/dev/ttys001', executable: '/usr/local/bin/codex' },
+        wrapper: { pid: 20, ppid: 2, startedAt: 200, tty: '/dev/ttys001', executable: '/usr/local/bin/node' },
+        appServer: { pid: 21, ppid: 13, startedAt: 201, tty: '/dev/ttys001', executable: '/usr/local/bin/codex' },
+        tuiShim: { pid: 12, ppid: 20, startedAt: 102, tty: '/dev/ttys001', executable: '/usr/local/bin/node' },
+        appServerShim: { pid: 13, ppid: 20, startedAt: 103, tty: '/dev/ttys001', executable: '/usr/local/bin/node' },
+      },
+      sessionId: SESSION_ID, previousRunId: 'run-1',
+    });
+    h.receipts.transition(saved.operationId, 'prepared', 'resuming');
+    if (legacy) {
+      const persisted = JSON.parse(fs.readFileSync(h.receiptFile, 'utf8'));
+      delete persisted.receipts[0].process.appServer;
+      delete persisted.receipts[0].process.appServerShim;
+      fs.writeFileSync(h.receiptFile, JSON.stringify(persisted));
+      h = makeHarness({ ...options, receiptStore: new CodexRestartReceiptStore(h.receiptFile) });
+    }
+    h.setAppServerProbe('exited');
+    return { ...h, saved };
+  };
+
+  it('keeps a legacy receipt fenced when its old App Server generation is missing', async () => {
+    const h = manuallyRecovered(true);
+    await h.controller.reconcileRun(h.run.value);
+    expect(h.receipts.isPending('codex', SESSION_ID)).toBe(true);
+    expect(h.released).not.toHaveBeenCalled();
+    expect(h.terminate).not.toHaveBeenCalled();
+    expect(h.runPaneCommand).not.toHaveBeenCalled();
+  });
+
+  it.each([10, 20, 21, 12, 13].flatMap((pid) => ['same', 'unknown'].map((status) => ({ pid, status }))))(
+    'keeps a manual recovery fenced when old process $pid is $status', async ({ pid, status }) => {
+      const h = manuallyRecovered();
+      h.inspectProcessGenerationFresh.mockImplementation(async (identity: unknown) => (
+        (identity as { pid: number }).pid === pid ? status : 'exited'
+      ) as 'same' | 'unknown' | 'exited');
+      await h.controller.reconcileRun(h.run.value);
+      expect(h.receipts.isPending('codex', SESSION_ID)).toBe(true);
+      expect(h.released).not.toHaveBeenCalled();
+      expect(h.terminate).not.toHaveBeenCalled();
+      expect(h.runPaneCommand).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(['unmanaged', 'unknown ownership', 'wrong session', 'missing TUI', 'wrong runtime process', 'stale lease'])(
+    'keeps a manual recovery fenced with %s', async (failure) => {
+      const h = manuallyRecovered();
+      if (failure === 'unmanaged') h.setApp({ managed: false, threadId: SESSION_ID });
+      if (failure === 'unknown ownership') h.setApp({ managed: null, threadId: SESSION_ID });
+      if (failure === 'wrong session') h.setApp({ managed: true, threadId: 'different-session' });
+      if (failure === 'missing TUI') h.setGroup(h.group().filter((identity) => identity.pid !== 40));
+      if (failure === 'wrong runtime process') h.setIdentity(tui({ pid: 99 }));
+      if (failure === 'stale lease') h.revokeRun();
+      await h.controller.reconcileRun(h.run.value).catch(() => {});
+      expect(h.receipts.isPending('codex', SESSION_ID)).toBe(true);
+      expect(h.released).not.toHaveBeenCalled();
+      expect(h.terminate).not.toHaveBeenCalled();
+      expect(h.runPaneCommand).not.toHaveBeenCalled();
+    },
+  );
+
+  it('keeps a manual recovery fenced if the new lease is revoked during the last process probe', async () => {
+    const h = manuallyRecovered();
+    h.inspectForegroundGroupFresh.mockImplementationOnce(async () => h.group()).mockImplementationOnce(async () => {
+      h.revokeRun();
+      return h.group();
+    });
+    await h.controller.reconcileRun(h.run.value);
+    expect(h.receipts.isPending('codex', SESSION_ID)).toBe(true);
+    expect(h.released).not.toHaveBeenCalled();
+  });
+
+  it('retires migrated recovery only after durable completion, then releases the reloaded fence', async () => {
+    const h = manuallyRecovered();
+    await h.controller.reconcileRun(h.run.value);
+    expect(new CodexRestartReceiptStore(h.receiptFile).get(h.saved.operationId)?.phase).toBe('ready');
+    expect(h.released).toHaveBeenCalledOnce();
+    expect(h.terminate).not.toHaveBeenCalled();
+    expect(h.runPaneCommand).not.toHaveBeenCalled();
+  });
+
+  it('retains the manual recovery fence when the ready receipt cannot be persisted', async () => {
+    const h = manuallyRecovered();
+    vi.spyOn(h.receipts, 'transition').mockImplementation(() => { throw new Error('write failed'); });
+    await expect(h.controller.reconcileRun(h.run.value)).rejects.toThrow('write failed');
+    expect(new CodexRestartReceiptStore(h.receiptFile).get(h.saved.operationId)?.phase).toBe('resuming');
+    expect(h.receipts.isPending('codex', SESSION_ID)).toBe(true);
+    expect(h.released).not.toHaveBeenCalled();
+  });
   it('restarts the verified TUI when the older App Server was selected as foreground', async () => {
     const h = makeHarness({
       processIdentity: appServer(),

@@ -350,9 +350,24 @@ export function createBuiltinAgentRuntime({
           ...(home === undefined ? {} : { home }),
         })
         : undefined;
+      const codexInboxSource = createCodexNativeInboxSource(codexApp);
       const inbox = new NativeInboxCoordinator({
         agentId: 'codex', sourceId: 'codex.app-server', context,
-        source: createCodexNativeInboxSource(codexApp),
+        source: {
+          async read(panes) {
+            const snapshot = await codexInboxSource.read(panes);
+            if (conversationRestart) {
+              for (const row of snapshot.rows) {
+                const run = context.currentRunForPane(row.paneId);
+                if (!run || run.ref.agentId !== 'codex' || !row.sessionId
+                  || run.ref.sessionId !== row.sessionId) continue;
+                try { await conversationRestart.reconcileRun(run); }
+                catch { /* Keep the durable fence; restart failure must not suppress Inbox rows. */ }
+              }
+            }
+            return snapshot;
+          },
+        },
       });
       return {
         inbox: true,

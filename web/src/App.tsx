@@ -146,6 +146,7 @@ import {
   activationRunFor,
   activationTargetMatches,
   conversationRecoveryForSessionlessPane,
+  conversationRestartRecoveryForPane,
   conversationIdentityForActivation,
   invalidateRememberedConversationOnTakeover,
   useConversationActivationTarget,
@@ -418,6 +419,7 @@ export default function App() {
   // is in flight. The ref is cleared when the lookup confirms or replaces that pane.
   const pendingWindowPaneRef = useRef<{ windowId: string; initialPaneId: string; rememberedPaneId: string | null; request: Promise<HostPane[]> } | null>(null);
   const topologyPollKeyRef = useRef<string | null>(null);
+  const windowGeometryRevisionRef = useRef(new Map<string, number>());
   const topologyRecoveryRef = useRef<Promise<void> | null>(null);
   const [booting, setBooting] = useState(true);
   const [recoveryPlan, setRecoveryPlan] = useState<WorkspaceRecoveryPlan | null>(null);
@@ -1718,7 +1720,7 @@ export default function App() {
   }, []);
 
   const refreshWindowGeometry = useCallback(async (windowId: string, sessionId: string) => {
-    const [windows, panes] = await Promise.all([getWindows(sessionId), getPanes(windowId)]);
+    const [windows, panes] = await Promise.all([getWindows(sessionId), getPanes(windowId, { fresh: true })]);
     refreshWindows(sessionId, windows);
     refreshPanes(windowId, panes);
     const freshWindow = windows.find((window) => window.id === windowId);
@@ -1825,6 +1827,7 @@ export default function App() {
     setWindowResizePending((count) => count + 1);
     try {
       await resizeWindow(win.id, axis === 'width' ? size : null, axis === 'height' ? size : null);
+      windowGeometryRevisionRef.current.set(win.id, (windowGeometryRevisionRef.current.get(win.id) ?? 0) + 1);
       const sessionId = win.manageSessionId ?? current?.session?.id;
       if (sessionId) {
         const { panes } = await refreshWindowGeometry(win.id, sessionId);
@@ -1858,6 +1861,7 @@ export default function App() {
     if (!win || !sessionId) return;
     try {
       await restoreWindowSize(win.id);
+      windowGeometryRevisionRef.current.set(win.id, (windowGeometryRevisionRef.current.get(win.id) ?? 0) + 1);
       const { window: fresh, panes, windows } = await refreshWindowGeometry(win.id, sessionId);
       if (fresh && sessionName) {
         setManageWindow(managedWindow({ ...hostWindow(fresh), panes: panes.length, paneList: panes.map((pane) => ({ ...pane })) },
@@ -1901,7 +1905,8 @@ export default function App() {
         savedLayoutsRef.current.delete(windowId);
       }
       await resizePane(pane.id, axis === 'width' ? size : null, axis === 'height' ? size : undefined);
-      const panes = await getPanes(windowId);
+      windowGeometryRevisionRef.current.set(windowId, (windowGeometryRevisionRef.current.get(windowId) ?? 0) + 1);
+      const panes = await getPanes(windowId, { fresh: true });
       refreshPanes(windowId, panes);
       const freshPane = panes.find((item) => item.id === pane.id);
       setManagedPaneWidth(freshPane?.width ?? null);
@@ -1913,7 +1918,7 @@ export default function App() {
     } catch (e) {
       if (handledAuth(e)) return;
       try {
-        const panes = await getPanes(windowId);
+        const panes = await getPanes(windowId, { fresh: true });
         refreshPanes(windowId, panes);
         const freshPane = panes.find((item) => item.id === pane.id);
         setManagedPaneWidth(freshPane?.width ?? null);
@@ -1936,6 +1941,7 @@ export default function App() {
     if (!layout) return;
     try {
       await applyWindowLayout(windowId, layout);
+      windowGeometryRevisionRef.current.set(windowId, (windowGeometryRevisionRef.current.get(windowId) ?? 0) + 1);
       const panes = await getPanes(windowId, { fresh: true });
       refreshPanes(windowId, panes);
       const restoredPane = panes.find((item) => item.id === managePane);
@@ -2277,7 +2283,7 @@ export default function App() {
     }
   }, [conversationRestart.error]);
   const durableRestartRecovery = conversationRestart.status !== 'restarting'
-    ? conversationRecoveryForSessionlessPane(conversationRestart.receipt, authoritativePaneRun) : null;
+    ? conversationRestartRecoveryForPane(conversationRestart.receipt, authoritativePaneRun) : null;
   const previousChatAgent = current?.paneId ? chatAgentByPaneRef.current.get(current.paneId) : null;
   const retainSelectedConversation = lens === 'chat' && !!current?.paneId && !!previousChatAgent
     && conversationIdentityByPaneRef.current.has(`${current.paneId}\0${previousChatAgent}`);
@@ -2434,9 +2440,15 @@ export default function App() {
     discoverActivatedRun,
     onAuthFail,
   );
-  const restartDeliveryPaused = ['loading', 'unknown', 'restarting', 'recovering'].includes(
+  // A failed capability GET is not an operation. The server's session fence remains authoritative
+  // for uncertain writes; locally pause only an actual operation or recovery receipt.
+  const restartDeliveryPaused = ['restarting', 'recovering'].includes(
     conversationRestart.status,
-  ) || durableRestartRecovery !== null;
+  ) || durableRestartRecovery !== null || (conversationRestart.status !== 'ready'
+    && conversationRestart.receipt !== null && authoritativePaneSession !== null
+    && conversationRestart.receipt.agentId === authoritativePaneSession.agentId
+    && conversationRestart.receipt.paneId === authoritativePaneSession.paneId
+    && conversationRestart.receipt.recovery.sessionId === authoritativePaneSession.sessionId);
   const conversationIdentityKey = current?.paneId && chatAgent
     ? `${current.paneId}\0${chatAgent}` : null;
   if (conversationIdentityKey && currentAgentRun?.sessionId
@@ -3082,6 +3094,8 @@ export default function App() {
       const windowId = current?.window?.id;
       const sessionId = current?.session?.id;
       if (!windowId || !sessionId) return null;
+      const geometryRevision = windowGeometryRevisionRef.current.get(windowId) ?? 0;
+      const windowGeometryRevisions = new Map(windowGeometryRevisionRef.current);
       const pending = paneRequestsRef.current.get(windowId);
       const prefetched = pending ? null : prefetchedPanesRef.current.get(windowId);
       if (prefetched) prefetchedPanesRef.current.delete(windowId);
@@ -3090,12 +3104,35 @@ export default function App() {
       const firstPoll = topologyPollKeyRef.current !== pollKey;
       if (firstPoll) topologyPollKeyRef.current = pollKey;
       const windows = firstPoll ? null : await getWindows(sessionId);
-      return { windowId, sessionId, panes, windows };
+      return { windowId, sessionId, panes, windows, geometryRevision, windowGeometryRevisions };
     },
     apply: (fresh) => {
       if (!fresh) return;
+      // A pre-mutation poll can finish after the fresh resize readback. Do not let its old
+      // pane or window dimensions overwrite the accepted geometry for this window.
+      if (fresh.geometryRevision !== (windowGeometryRevisionRef.current.get(fresh.windowId) ?? 0)) return;
+      // /windows spans the whole session, including a different window open in management.
+      // Keep this poll's current-pane data, but reject its window list if any returned window mutated.
+      const windows = fresh.windows?.every((window) => (
+        (fresh.windowGeometryRevisions.get(window.id) ?? 0)
+          === (windowGeometryRevisionRef.current.get(window.id) ?? 0)
+      )) ? fresh.windows : null;
       refreshPanes(fresh.windowId, fresh.panes);
-      if (fresh.windows) refreshWindows(fresh.sessionId, fresh.windows);
+      if (windows) refreshWindows(fresh.sessionId, windows);
+      // The open steppers are separate from the topology snapshot. Follow accepted external
+      // geometry changes, but let an in-flight mutation retain its optimistic value/readback.
+      if (paneResizePending === 0 && managePaneWindowRef.current === fresh.windowId) {
+        const pane = fresh.panes.find((candidate) => candidate.id === managePane);
+        setManagedPaneWidth(pane?.width ?? null);
+        setManagedPaneHeight(pane?.height ?? null);
+      }
+      if (windowResizePending === 0 && windows) {
+        setManageWindow((managed) => {
+          if (!managed || (managed.manageSessionId ?? current?.session.id) !== fresh.sessionId) return managed;
+          const window = windows.find((candidate) => candidate.id === managed.id);
+          return window ? { ...managed, ...window } : managed;
+        });
+      }
     },
     onError: recoverCurrentTopology,
     intervalMs: 5_000,
