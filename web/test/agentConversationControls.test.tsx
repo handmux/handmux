@@ -29,6 +29,71 @@ function controller(overrides: Partial<AgentConversationControlsController> = {}
 }
 
 describe('Agent Conversation controls UI', () => {
+  it('offers only declared commands beside restart and confirms new sessions at the top layer', async () => {
+    const command = vi.fn(async () => {});
+    render(<AgentConversationContextControl sessionId="session-1" controller={controller({
+      command, snapshot: { context: { activity: 'idle' }, commands: ['compact', 'clear'] },
+    })} restartEnabled restartController={{ status: 'ready', receipt: null, error: null,
+      restart: vi.fn(async () => {}), recover: vi.fn(async () => {}), retry: vi.fn() }} />);
+    fireEvent.click(screen.getByRole('button', { name: '上下文状态，用量暂不可用' }));
+    const buttons = screen.getByRole('button', { name: '重启会话' }).closest('.cc-context-restart-row')!.querySelectorAll('button');
+    expect(Array.from(buttons).map(b => b.textContent)).toEqual(['重启会话', '压缩会话', '新会话']);
+    fireEvent.click(screen.getByRole('button', { name: '压缩会话' }));
+    await waitFor(() => expect(command).toHaveBeenCalledWith('compact'));
+    fireEvent.click(screen.getByRole('button', { name: '新会话' }));
+    const confirm = screen.getByRole('alertdialog', { name: '开始新会话？' });
+    expect(confirm.closest('.overlay-layer')).toBeTruthy();
+    expect(confirm.closest('.cc-context-popover')).toBeNull();
+    expect(command).not.toHaveBeenCalledWith('clear');
+    fireEvent.click(screen.getByRole('button', { name: '取消' }));
+    expect(command).not.toHaveBeenCalledWith('clear');
+    fireEvent.click(screen.getByRole('button', { name: '新会话' }));
+    fireEvent.click(screen.getAllByRole('button', { name: '新会话' })[1]!);
+    await waitFor(() => expect(command).toHaveBeenCalledWith('clear'));
+  });
+
+  it('exposes commands without Context or Restart and hides unsupported commands', () => {
+    render(<AgentConversationActionControls sessionId="session-1" showPermission={false} showContext={false}
+      controller={controller({ snapshot: { commands: ['compact'] } })} />);
+    fireEvent.click(screen.getByRole('button', { name: '上下文状态，用量暂不可用' }));
+    expect(screen.getByRole('button', { name: '压缩会话' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: '新会话' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '重启会话' })).toBeNull();
+  });
+
+  it('blocks duplicate command submissions and shows a transient error outside the popover', async () => {
+    let reject!: (cause: Error) => void;
+    const command = vi.fn(() => new Promise<void>((_resolve, rejectPromise) => { reject = rejectPromise; }));
+    render(<AgentConversationContextControl sessionId="session-1" controller={controller({
+      command, snapshot: { context: { activity: 'idle' }, commands: ['compact', 'clear'] },
+    })} />);
+    fireEvent.click(screen.getByRole('button', { name: '上下文状态，用量暂不可用' }));
+    fireEvent.click(screen.getByRole('button', { name: '压缩会话' }));
+    fireEvent.click(screen.getByRole('button', { name: '压缩会话' }));
+    expect(command).toHaveBeenCalledTimes(1);
+    expect((screen.getByRole('button', { name: '新会话' }) as HTMLButtonElement).disabled).toBe(true);
+    await act(async () => { reject(new Error('private provider error')); });
+    const alert = screen.getByRole('alert');
+    expect(alert.textContent).toBe('未能压缩会话，请稍后重试。');
+    expect(alert.closest('.cc-context-popover')).toBeNull();
+  });
+  it('does not carry an old session command or its late error into the next session', async () => {
+    let reject!: (cause: Error) => void;
+    const oldCommand = vi.fn(() => new Promise<void>((_resolve, rejectPromise) => { reject = rejectPromise; }));
+    const snapshot = { context: { activity: 'idle' as const }, commands: ['compact' as const] };
+    const view = render(<AgentConversationContextControl sessionId="old" controller={controller({ command: oldCommand, snapshot })} />);
+    fireEvent.click(screen.getByRole('button', { name: '上下文状态，用量暂不可用' }));
+    fireEvent.click(screen.getByRole('button', { name: '压缩会话' }));
+    const nextCommand = vi.fn(async () => {});
+    view.rerender(<AgentConversationContextControl sessionId="next" controller={controller({ command: nextCommand, snapshot })} />);
+    fireEvent.click(screen.getByRole('button', { name: '上下文状态，用量暂不可用' }));
+    expect((screen.getByRole('button', { name: '压缩会话' }) as HTMLButtonElement).disabled).toBe(false);
+    await act(async () => { reject(new Error('old request failure')); });
+    expect(screen.queryByRole('alert')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: '压缩会话' }));
+    await waitFor(() => expect(nextCommand).toHaveBeenCalledWith('compact'));
+  });
+
   it('keeps Permission left of Context in the shared composer action slot', () => {
     const { container } = render(<AgentConversationActionControls
       controller={controller({

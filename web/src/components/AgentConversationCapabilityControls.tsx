@@ -9,6 +9,7 @@ import type { AgentConversationController } from '../hooks/useAgentConversation.
 import type { ConversationRestartController } from '../hooks/useConversationRestart.js';
 import type {
   ConversationActivity,
+  ConversationCommand,
   ConversationGoal,
   ConversationPermissionMode,
   ConversationPlanSnapshot,
@@ -614,7 +615,8 @@ export function AgentConversationContextControl({
   restartController?: ConversationRestartController;
   restartEnabled?: boolean;
 }) {
-  const context = controller.snapshot?.context ?? (restartEnabled ? {
+  const commands = controller.snapshot?.slotErrors?.commands ? [] : controller.snapshot?.commands ?? [];
+  const context = controller.snapshot?.context ?? (restartEnabled || commands.length ? {
     activity: 'unknown' as const,
     usedTokens: undefined, totalTokens: undefined,
     cwd: undefined, branch: undefined, access: undefined,
@@ -622,10 +624,27 @@ export function AgentConversationContextControl({
   const [open, setOpen] = useState(false);
   const [copied, setCopied] = useState('');
   const [confirmRestart, setConfirmRestart] = useState(false);
+  const [confirmClear, setConfirmClear] = useState(false);
+  const [commandBusy, setCommandBusy] = useState<ConversationCommand | null>(null);
+  const commandInFlight = useRef(false);
+  const commandGeneration = useRef(0);
+  const [commandToast, setCommandToast] = useState<string | null>(null);
   const restartConfirmBusy = useRef(false);
   const [worktree, setWorktree] = useState<string | null>(null);
   useBackButton(open, () => setOpen(false));
   useBackButton(confirmRestart, () => setConfirmRestart(false));
+  useBackButton(confirmClear, () => setConfirmClear(false));
+  useEffect(() => {
+    if (!commandToast) return undefined;
+    const timer = window.setTimeout(() => setCommandToast(null), 4_000);
+    return () => window.clearTimeout(timer);
+  }, [commandToast]);
+  useEffect(() => {
+    setOpen(false); setConfirmRestart(false); setConfirmClear(false); setCommandToast(null);
+    commandInFlight.current = false;
+    setCommandBusy(null);
+    return () => { commandGeneration.current += 1; };
+  }, [sessionId]);
   useEffect(() => {
     if (!context?.cwd) { setWorktree(null); return; }
     let current = true;
@@ -644,6 +663,25 @@ export function AgentConversationContextControl({
   const activityLabel = context.activity === 'compacting' ? t('chat.status.compacting')
     : context.activity === 'waiting' ? t('chat.status.waitingInput')
       : context.activity === 'working' ? t('chat.status.working') : t('chat.status.idle');
+  const restarting = !!restartController
+    && ['loading', 'restarting', 'recovering', 'waiting'].includes(restartController.status);
+  const actionBusy = controller.busy || commandBusy !== null || restarting;
+  const execute = async (command: ConversationCommand): Promise<void> => {
+    if (commandInFlight.current || actionBusy || !commands.includes(command)) return;
+    commandInFlight.current = true;
+    const generation = commandGeneration.current;
+    setCommandBusy(command);
+    setConfirmClear(false);
+    try { await controller.command(command); }
+    catch {
+      if (generation === commandGeneration.current) {
+        setCommandToast(t(command === 'compact' ? 'chat.commands.compactFailed' : 'chat.commands.clearFailed'));
+      }
+    }
+    finally {
+      if (generation === commandGeneration.current) { commandInFlight.current = false; setCommandBusy(null); }
+    }
+  };
   return <>
     <button type="button" className={`cc-context-trigger ${percent === null ? 'unknown' : level}`}
       aria-label={percent === null ? t('chat.context.unavailableAria')
@@ -673,21 +711,46 @@ export function AgentConversationContextControl({
               : context.access === 'workspace-write' ? 'Workspace' : 'Full'}`)}</strong></div>}
           <ContextCopyRow label={t('chat.status.sessionId')} value={sessionId}
             copied={copied === 'session'} onCopy={() => copy(sessionId, 'session')} />
-          {restartEnabled && restartController && (
+          {((restartEnabled && restartController) || commands.length > 0) && (
             <div className="cc-context-restart-row">
               <span>{t('chat.restart.operations')}</span>
-              <button type="button"
-                disabled={['loading', 'restarting', 'recovering', 'waiting'].includes(restartController.status)}
+              {restartEnabled && restartController && <button type="button"
+                disabled={actionBusy}
                 aria-busy={['restarting', 'recovering', 'waiting'].includes(restartController.status)}
                 onClick={() => setConfirmRestart(true)}>
                 {['restarting', 'recovering', 'waiting'].includes(restartController.status)
                   ? t('chat.restart.submitting') : t('chat.restart.action')}
-              </button>
+              </button>}
+              {commands.includes('compact') && <button type="button"
+                disabled={actionBusy || context.activity === 'compacting'} aria-busy={commandBusy === 'compact'}
+                onClick={() => { void execute('compact'); }}>
+                {t('chat.commands.compact')}
+              </button>}
+              {commands.includes('clear') && <button type="button" disabled={actionBusy}
+                onClick={() => setConfirmClear(true)}>{t('chat.commands.clear')}</button>}
             </div>
           )}
         </div>
       </section>
     </>}
+    {confirmClear && <OverlayPortal>
+      <div className="settings-confirm-backdrop cc-context-restart-confirm-backdrop" data-conversation-overlay
+        onClick={() => setConfirmClear(false)}>
+        <div className="settings-confirm" role="alertdialog" aria-modal="true"
+          aria-labelledby="conversation-clear-title" aria-describedby="conversation-clear-hint"
+          onClick={(event) => event.stopPropagation()}>
+          <h2 id="conversation-clear-title">{t('chat.commands.clearConfirmTitle')}</h2>
+          <p id="conversation-clear-hint">{t('chat.commands.clearConfirmHint')}</p>
+          <div className="settings-confirm-actions">
+            <button type="button" autoFocus onClick={() => setConfirmClear(false)}>{t('common.cancel')}</button>
+            <button type="button" className="danger" disabled={actionBusy || !commands.includes('clear')}
+              onClick={() => { void execute('clear'); }}>{t('chat.commands.clear')}</button>
+          </div>
+        </div>
+      </div>
+    </OverlayPortal>}
+    {commandToast && <OverlayPortal><div className="doc-toast" role="alert"
+      onClick={() => setCommandToast(null)}>{commandToast}</div></OverlayPortal>}
     {confirmRestart && restartController && (
       <OverlayPortal>
         <div className="settings-confirm-backdrop cc-context-restart-confirm-backdrop"
@@ -702,9 +765,9 @@ export function AgentConversationContextControl({
                 {t('common.cancel')}
               </button>
               <button type="button" className="danger"
-                disabled={restartConfirmBusy.current}
+                disabled={restartConfirmBusy.current || actionBusy}
                 onClick={() => {
-                  if (restartConfirmBusy.current) return;
+                  if (restartConfirmBusy.current || commandInFlight.current || actionBusy) return;
                   restartConfirmBusy.current = true;
                   setConfirmRestart(false);
                   void restartController.restart().finally(() => { restartConfirmBusy.current = false; });
@@ -783,7 +846,7 @@ export function AgentConversationActionControls({
 }) {
   return <>
     {showPermission && <AgentConversationPermissionControl controller={controller} />}
-    {(showContext || restartEnabled) && <AgentConversationContextControl controller={controller} sessionId={sessionId}
+    {(showContext || restartEnabled || !!controller.snapshot?.commands?.length) && <AgentConversationContextControl controller={controller} sessionId={sessionId}
       {...(restartController ? { restartController } : {})}
       {...(restartEnabled === undefined ? {} : { restartEnabled })} />}
   </>;

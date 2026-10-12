@@ -135,6 +135,7 @@ interface CodexOpeningSnapshot {
 }
 
 interface CodexDurableCheckpoint {
+  deltaHintInvalid?: boolean;
   file: string | null;
   version?: string;
   readerGeneration?: number;
@@ -751,6 +752,17 @@ export function createCodexConversationAdapter({
     }
   }
 
+  async function guardDurableRead<T>(sessionId: string, read: () => Promise<T>): Promise<T> {
+    try { return await read(); }
+    catch (error) {
+      // The reader may already have consumed a change hint. Keep the last-good snapshot/floor,
+      // but do not incrementally reuse it on retry, even if another append supplies a later hint.
+      const known = durableCheckpoints.get(sessionId);
+      if (known) known.deltaHintInvalid = true;
+      throw error;
+    }
+  }
+
   function snapshotFromMessages(
     session: AgentSessionRef,
     parsed: readonly CodexTranscriptMessage[],
@@ -764,7 +776,7 @@ export function createCodexConversationAdapter({
     const suppressionKey = suppressionKeyOf(suppressedCompactorItems);
     const sameReader = readerGeneration === undefined || checkpoint?.readerGeneration === undefined
       || checkpoint.readerGeneration === readerGeneration;
-    const reusable = checkpoint?.file === file && sameReader && changedFrom !== null
+    const reusable = checkpoint?.file === file && !checkpoint.deltaHintInvalid && sameReader && changedFrom !== null
       && checkpoint.suppressionKey === suppressionKey
       && changedFrom >= 0 && changedFrom <= checkpoint.messageCount
       && changedFrom <= parsed.length;
@@ -823,6 +835,7 @@ export function createCodexConversationAdapter({
     session: AgentSessionRef,
     suppressionProvider?: () => Promise<ReadonlySet<string>>,
   ): Promise<CodexDurableSnapshot> {
+    return guardDurableRead(session.sessionId, async () => {
     const file = await findRollout(sessionsRoot, session.sessionId);
     const read = file && reader.readSnapshot
       ? await reader.readSnapshot(file, createCodexTranscriptParser)
@@ -837,25 +850,21 @@ export function createCodexConversationAdapter({
       : suppressedCompactorItemsBySession.get(session.sessionId) ?? new Set<string>();
     const suppressionKey = suppressionKeyOf(suppressedCompactorItems);
     const known = durableCheckpoints.get(session.sessionId);
-    if (known && known.file === file && known.suppressionKey === suppressionKey
+    if (known && !known.deltaHintInvalid && known.file === file && known.suppressionKey === suppressionKey
       && read.version !== undefined && known.version === read.version) {
       rememberCheckpoint(session.sessionId, known);
       return known.snapshot;
     }
-    const sameReader = read.generation === undefined || known?.readerGeneration === undefined
-      || known.readerGeneration === read.generation;
-    if (known && known.file === file && sameReader && read.changedFrom === null) {
-      if (read.version === undefined) delete known.version;
-      else known.version = read.version;
-      rememberCheckpoint(session.sessionId, known);
-      return known.snapshot;
-    }
+    // changedFrom is a destructive parser hint, not proof that this projection is current.
+    // A read can consume it before a later provider query fails. Only an identical committed
+    // version (above) permits reuse; a changed/unknown version with no hint must rebuild.
     const checkpoint = snapshotFromMessages(
       session, read.messages, file, read.version, read.generation, read.changedFrom, known,
       suppressedCompactorItems,
     );
     rememberCheckpoint(session.sessionId, checkpoint);
     return checkpoint.snapshot;
+    });
   }
 
   async function captureDurableCutoff(sessionId: string): Promise<CodexDurableCutoff> {
@@ -872,6 +881,7 @@ export function createCodexConversationAdapter({
     cutoff: CodexDurableCutoff,
     suppressionProvider?: () => Promise<ReadonlySet<string>>,
   ): Promise<{ snapshot: CodexDurableSnapshot; checkpoint: CodexDurableCheckpoint }> {
+    return guardDurableRead(session.sessionId, async () => {
     const known = durableCheckpoints.get(session.sessionId);
     const working = known ? cloneCheckpoint(known) : undefined;
     const read = cutoff.file && reader.readPrefixSnapshot
@@ -889,7 +899,7 @@ export function createCodexConversationAdapter({
       ? await suppressionProvider()
       : suppressedCompactorItemsBySession.get(session.sessionId) ?? new Set<string>();
     const suppressionKey = suppressionKeyOf(suppressedCompactorItems);
-    const checkpoint = working && working.file === cutoff.file
+    const checkpoint = working && !working.deltaHintInvalid && working.file === cutoff.file
       && working.suppressionKey === suppressionKey
       && read.version !== undefined && working.version === read.version
       ? working
@@ -901,6 +911,7 @@ export function createCodexConversationAdapter({
       checkpoint,
       snapshot: { ...checkpoint.snapshot, items: [...checkpoint.snapshot.items] },
     };
+    });
   }
 
   async function readPage(

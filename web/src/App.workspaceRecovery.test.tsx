@@ -2120,7 +2120,7 @@ describe('App workspace recovery', () => {
 
 
 describe('App consumes conversation control commands', () => {
-  async function openControls() {
+  async function openControls(commandsOnly = false) {
     const pane = { id: '%73', active: true, width: 80, height: 24, command: 'codex', cwd: '/work', agent: 'codex' };
     const otherPane = { ...pane, id: '%74', active: false };
     const run = { agentId: 'codex', paneId: pane.id, runId: 'control-run', sessionId: 'control-session' };
@@ -2133,7 +2133,8 @@ describe('App consumes conversation control commands', () => {
     api.getPanes.mockResolvedValue([pane, otherPane]);
     api.getAgentDiscovery.mockResolvedValue({
       descriptors: [{ id: 'codex', label: 'Codex', capabilities: {
-        conversation: true, sessionControl: true, conversationGoal: true,
+        conversation: true, ...(commandsOnly ? { conversationCommands: true }
+          : { sessionControl: true, conversationGoal: true }),
       } }], runs: [run, otherRun], health: [],
     });
     conversationApi.discoverAgentConversation.mockImplementation(async (run) => ({
@@ -2154,6 +2155,14 @@ describe('App consumes conversation control commands', () => {
     fireEvent.keyDown(input, { key: 'Enter' });
     await flush();
   }
+  it('mounts the session action popover for a commands-only Agent in the real App', async () => {
+    controlsApi.readConversationControls.mockResolvedValue(parseConversationControls({ commands: ['compact', 'clear'] }));
+    await openControls(true);
+    fireEvent.click(screen.getByRole('button', { name: '上下文状态，用量暂不可用' }));
+    expect(screen.getByRole('button', { name: '压缩会话' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: '新会话' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: '重启会话' })).toBeNull();
+  });
   it.each(['/model', '/effort', '/goal', '/goal edit'])('does not replay %s after closing or remounting, but accepts a new command', async (command) => {
     await openControls();
     const model = !command.startsWith('/goal');

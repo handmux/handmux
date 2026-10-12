@@ -4,6 +4,14 @@ All notable changes to handmux. Format follows [Keep a Changelog](https://keepac
 
 ## [Unreleased]
 
+### Added
+
+- 对话页上下文弹窗的操作区新增“压缩会话”和“新会话”；按 Agent 支持的能力显示，新会话需确认，旧历史不会删除。
+
+### Fixed
+
+- 修复 Codex 历史同步在一次临时查询失败后可能继续返回旧数据，导致最新回复或工具结果需等下一条消息才出现的问题。
+
 ## [0.34.0] - 2026-10-12
 
 ### Added

@@ -1,12 +1,15 @@
 import { describe, expect, it, vi } from 'vitest';
 import { homedir } from 'node:os';
 import { resolve } from 'node:path';
+import { mkdtemp, writeFile, appendFile, rm, stat } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { ConversationService } from '../src/agent-runtime/conversation.js';
 import type { ConversationEvent } from '../src/agent-runtime/conversationTypes.js';
 import { AgentRunRuntime } from '../src/agent-runtime/run.js';
 import { createCodexConversationAdapter } from '../src/agents/codexConversation.js';
 import type { CodexTranscriptMessage } from '../src/codexTranscriptParse.js';
 import type { TranscriptReader } from '../src/transcriptReader.js';
+import { createTranscriptReader } from '../src/transcriptReader.js';
 
 function fakeReader(messages: CodexTranscriptMessage[]): TranscriptReader {
   return {
@@ -84,6 +87,57 @@ async function setup(
 }
 
 describe('Codex Conversation adapter', () => {
+  it.each([false, true])('recovers failed history updates across unchanged reads and reopening (tool backfill: %s)', async (toolBackfill) => {
+    const dir = await mkdtemp(resolve(tmpdir(), 'handmux-codex-history-'));
+    const file = resolve(dir, 'rollout.jsonl');
+    const row = (id: string, text: string): string => `${JSON.stringify({
+      type: 'response_item', payload: { type: 'message', id, role: 'assistant',
+        content: [{ type: 'output_text', text }] },
+    })}\n`;
+    let handle: Awaited<ReturnType<ConversationService['open']>> | undefined;
+    try {
+      const call = `${JSON.stringify({ type: 'response_item', payload: {
+        type: 'function_call', name: 'exec_command', call_id: 'call-1', arguments: '{"cmd":"pwd"}',
+      } })}\n`;
+      await writeFile(file, (toolBackfill ? call : '') + row('commentary', 'preparing answer'));
+      const reader = createTranscriptReader();
+      const { adapter, service, harness, lease } = await setup([], 10_000, reader,
+        15_000, async () => (await stat(file)).size,
+        async () => file);
+      await adapter.readNativePage({ agentId: 'codex', sessionId: 'thread-1' }, { limit: 20 });
+      handle = await service.open(lease, {}, () => {});
+      await service.readPage(lease.ref, { limit: 20 });
+      await appendFile(file, toolBackfill ? `${JSON.stringify({ type: 'response_item', payload: {
+        type: 'function_call_output', call_id: 'call-1', output: 'completed tool output',
+      } })}\n` : row('final-answer', 'the complete final answer'));
+      harness.app.compactorItemKeys.mockRejectedValueOnce(new Error('temporary connection failure'));
+      const previousReads = harness.app.compactorItemKeys.mock.calls.length;
+      harness.emit({ type: 'conversationSnapshot', threadId: 'thread-1', cursor: 21, messages: [] });
+      await vi.waitFor(() => expect(harness.app.compactorItemKeys.mock.calls.length).toBeGreaterThan(previousReads));
+      if (toolBackfill) await appendFile(file, row('final-answer', 'the complete final answer'));
+      // A failed post-read step must not let an unchanged parser erase the uncommitted update.
+      const session = { agentId: 'codex', sessionId: 'thread-1' };
+      for (let i = 0; i < 2; i++) {
+        const page = await adapter.readNativePage(session, { limit: 20 });
+        expect(page.items).toContainEqual(expect.objectContaining({
+          kind: 'message', content: [{ type: 'text', text: 'the complete final answer' }],
+        }));
+        if (toolBackfill) expect(page.items).toContainEqual(expect.objectContaining({
+          kind: 'tool_result', content: [{ type: 'text', text: 'completed tool output' }],
+        }));
+      }
+      await handle.close();
+      handle = await service.open(lease, {}, () => {});
+      const page = await service.readPage(lease.ref, { limit: 20 });
+      expect(page.status).toBe('ok');
+      if (page.status === 'ok') expect(page.page.items).toContainEqual(expect.objectContaining({
+        kind: 'message', content: [{ type: 'text', text: 'the complete final answer' }],
+      }));
+    } finally {
+      await handle?.close();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
   it('publishes provider stream errors as generic warning notices', async () => {
     const { service, harness, lease } = await setup();
     const events: ConversationEvent[] = [];

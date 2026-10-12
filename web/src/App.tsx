@@ -3848,6 +3848,7 @@ export default function App() {
                     activity={serverConversationActivity}
                     chatTone={chatTone} keyboardInset={inset} /> : undefined}
                 actionContent={(conversationControlCapabilities?.conversationContext
+                  || conversationControlCapabilities?.conversationCommands
                   || conversationControlCapabilities?.conversationPermission
                   || conversationControlCapabilities?.conversationRestart)
                   ? <AgentConversationActionControls controller={agentConversationControls}

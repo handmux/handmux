@@ -4644,15 +4644,16 @@ button.cmd-text { background: none; border: none; text-align: left; }
 .cc-context-list .cc-context-row { padding: 0 10px; }
 .cc-context-list .cc-context-row + .cc-context-row { border-top: 1px solid var(--ct-chip-line); }
 .cc-context-restart-row {
-  min-height: 48px; padding: 0 8px; display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  min-height: 48px; padding: 0 8px; display: flex; align-items: center; justify-content: space-between; gap: 4px;
   border-top: 1px solid var(--ct-chip-line);
 }
 .cc-context-restart-row > span { flex: none; color: var(--ct-muted); font-size: 12px; }
 .cc-context-restart-row > button {
-  min-height: 44px; margin-left: auto; padding: 0 10px; border: 0; border-radius: 8px; background: transparent;
+  min-height: 44px; min-width: 44px; padding: 0 5px; border: 0; border-radius: 8px; background: transparent;
   color: var(--ct-accent); font: inherit; font-size: 13px; font-weight: 650; text-align: right;
   touch-action: manipulation;
 }
+.cc-context-restart-row > button:first-of-type { margin-left: auto; }
 .cc-context-restart-row > button:active { background: var(--ct-chip-2); }
 .cc-context-restart-row > button:disabled { color: var(--ct-muted); }
 .cc-context-permission-row {
