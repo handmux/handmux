@@ -19,6 +19,34 @@ export interface ChangelogEntry {
 // `entryId`/`LATEST_RELEASE` use `version` when present, else `date`, as the stable unread-dot id.
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '0.34.0',
+    date: '2026-10-12',
+    highlight: {
+      zh: 'Codex 会话重启 · 分屏尺寸与代码复制',
+      en: 'Codex session restart, pane sizing, and code copying',
+    },
+    items: {
+      zh: [
+        '对话页上下文弹窗新增 Codex“重启会话”：保留原会话历史，显示启动进度，失败时可前往终端恢复；当前任务会中断，不会自动重发。',
+        '对话回复中的代码块支持一键复制，横向滚动时按钮保持固定；修复文档代码块复制按钮跟着滚动的问题。',
+        '窗口宽高在多分屏时也可调整；分屏支持可调整方向的宽高和布局恢复，地图及尺寸提示同步更新。',
+        '会话、窗口和分屏管理弹窗显示 tmux ID；分屏不能单独调整时提示到窗口管理操作。',
+        '修复 Codex 收件箱状态停止更新的问题，避免一个分屏的异常影响其他分屏。',
+        '修复 DeepSeek 欠费时 API 用量提示数据不支持的问题。',
+        '修复打包安装后的 SSH 隧道反复退出、无法获得公网地址的问题。',
+      ],
+      en: [
+        'Added Restart session for Codex in the conversation context panel, preserving history with startup progress and terminal recovery; the active task is interrupted and is not automatically resent.',
+        'Added one-click copying to reply code blocks with a fixed button during horizontal scrolling, and fixed document code-copy buttons moving with the code.',
+        'Window width and height can be adjusted with multiple panes; panes support resizing on available axes and layout restore, with synchronized maps and size hints.',
+        'Session, window, and pane management sheets show tmux IDs; unavailable pane resizing points to window management.',
+        'Fixed Codex Inbox state updates stopping, and isolated failures to the affected pane.',
+        'Fixed unsupported-data errors in API usage when a DeepSeek account is overdrawn.',
+        'Fixed packaged SSH tunnels repeatedly exiting without a public address.',
+      ],
+    },
+  },
+  {
     version: '0.33.4',
     date: '2026-10-10',
     highlight: {
