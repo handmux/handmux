@@ -4,6 +4,8 @@ All notable changes to handmux. Format follows [Keep a Changelog](https://keepac
 
 ## [Unreleased]
 
+## [0.34.0] - 2026-10-12
+
 ### Added
 
 - 对话页上下文弹窗新增 Codex“重启会话”操作；确认后保留原会话历史并持续显示进度，完成后自动返回对话，等待超过 30 秒可前往终端；遇升级或信任提示需在终端手动确认，失败时可用恢复命令继续，当前任务会中断且不会自动重发。

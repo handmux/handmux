@@ -1,6 +1,6 @@
 {
   "name": "handmux",
-  "version": "0.33.4",
+  "version": "0.34.0",
   "description": "A mobile vibe-coding cockpit — built on tmux: drive your live session, Claude Code / Codex — anything a terminal can run — from your phone.",
   "type": "module",
   "license": "AGPL-3.0-only",
@@ -75,13 +75,13 @@
     "vitest": "^2.0.0"
   },
   "whatsNew": [
+    {"version":"0.34.0","date":"2026-10-12","zh":"Codex 会话重启 · 分屏尺寸与代码复制","en":"Codex session restart, pane sizing, and code copying"},
     {"version":"0.33.4","date":"2026-10-10","zh":"修复终端实时连接、电脑键盘与 Codex 排队","en":"Fixes live terminal, desktop keys, and Codex queues"},
     {"version":"0.33.3","date":"2026-10-06","zh":"Claude 余额不足提示更明确","en":"Clearer Claude insufficient-balance errors"},
     {"version":"0.33.2","date":"2026-10-03","zh":"修复 v0.33.1 发布包的构建兼容问题","en":"Fixes build compatibility in the v0.33.1 package"},
     {"version":"0.33.1","date":"2026-10-02","zh":"对话复制和工作区操作更顺手","en":"Smoother conversation copying and workspace actions"},
     {"version":"0.33.0","date":"2026-09-30","zh":"终端路径高亮不再闪烁 · 服务更新提示更可靠","en":"Steady terminal paths · reliable service update prompts"},
     {"version":"0.32.1","date":"2026-09-28","zh":"抽屉与工作区切换更顺滑","en":"Smoother drawer and workspace switching"},
-    {"version":"0.32.0","date":"2026-09-24","zh":"项目与会话导航全面升级 · 抽屉切换更顺滑","en":"Project and session navigation, rebuilt"},
-    {"version":"0.31.1","date":"2026-09-22","zh":"忙时默认排队 · 被拒可重发","en":"Queue by default · refusals can be sent again"}
+    {"version":"0.32.0","date":"2026-09-24","zh":"项目与会话导航全面升级 · 抽屉切换更顺滑","en":"Project and session navigation, rebuilt"}
   ]
 }
