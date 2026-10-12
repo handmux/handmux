@@ -70,8 +70,9 @@ function baseline(sourceId: string, tracked: TrackedPane): InboxBaseline | null 
     run: tracked.lease.ref,
     source: { sourceId, cursor: row.cursor },
     state: row.state,
-    ...(row.message === undefined ? {} : { message: row.message }),
-    ...(row.reason === undefined ? {} : { reason: row.reason }),
+    // Keep the baseline receipt identical to the live full-value operation, including explicit clears.
+    message: row.message ?? null,
+    reason: row.reason ?? null,
     ...(row.correlationId === undefined ? {} : { correlationId: row.correlationId }),
     ...(row.eventId === undefined ? {} : { eventId: row.eventId }),
     ...(row.sourceOccurredAt === undefined ? {} : { sourceOccurredAt: row.sourceOccurredAt }),
@@ -104,6 +105,7 @@ export class NativeInboxCoordinator {
   #baselineReady = false;
   #availability: InboxAvailability | undefined;
   #availabilityMessage: string | undefined;
+  #projectionError: string | undefined;
 
   constructor({
     agentId, sourceId, context, source, pollMs = 500,
@@ -245,12 +247,12 @@ export class NativeInboxCoordinator {
       }
     }
 
-    const effectiveAvailability = associationError ? 'degraded' : snapshot.availability;
-    const effectiveMessage = associationError ?? snapshot.message;
+    let effectiveAvailability = associationError || this.#projectionError ? 'degraded' as const : snapshot.availability;
+    let effectiveMessage = associationError ?? this.#projectionError ?? snapshot.message;
     const availabilityChanged = this.#availability !== effectiveAvailability
       || this.#availabilityMessage !== effectiveMessage;
     const restoreNeeded = topologyChanged || availabilityChanged;
-    if (restoreNeeded) {
+    const restore = async () => {
       const baselines = [...this.#tracked.values()].flatMap((tracked) => {
         const value = baseline(this.#sourceId, tracked);
         return value ? [value] : [];
@@ -261,16 +263,31 @@ export class NativeInboxCoordinator {
         ...(effectiveMessage === undefined ? {} : { message: effectiveMessage }),
       });
       this.#baselineReady = true;
-    }
+    };
+    if (restoreNeeded) await restore();
+    let projectionError: string | undefined;
     for (const row of rows.values()) {
       const tracked = this.#tracked.get(row.paneId)!;
       if (tracked.row.cursor === row.cursor) continue;
-      const result = await tracked.projector.submit(operation(this.#sourceId, row));
-      if (!result.accepted && result.reason !== 'duplicate_source' && result.reason !== 'duplicate_event') {
-        throw new Error(`${this.#agentId} Inbox projection failed: ${result.reason ?? 'unknown'}`);
+      try {
+        const result = await tracked.projector.submit(operation(this.#sourceId, row));
+        if (!result.accepted) {
+          projectionError ??= `${this.#agentId} Inbox projection failed for ${row.paneId}: ${result.reason ?? 'unknown'}`;
+          continue;
+        }
+        tracked.row = row;
+      } catch {
+        projectionError ??= `${this.#agentId} Inbox projection failed for ${row.paneId}: submission_failed`;
       }
-      tracked.row = row;
     }
+    const nextAvailability = associationError || projectionError ? 'degraded' as const : snapshot.availability;
+    const nextMessage = associationError ?? projectionError ?? snapshot.message;
+    if (nextAvailability !== effectiveAvailability || nextMessage !== effectiveMessage) {
+      effectiveAvailability = nextAvailability;
+      effectiveMessage = nextMessage;
+      await restore();
+    }
+    this.#projectionError = projectionError;
     this.#availability = effectiveAvailability;
     this.#availabilityMessage = effectiveMessage;
     this.#context.health.report({

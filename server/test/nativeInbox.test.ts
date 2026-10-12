@@ -4,7 +4,8 @@ import { AgentRunRuntime } from '../src/agent-runtime/run.js';
 import type { LivePane } from '../src/agent-runtime/adapter.js';
 import type { AgentRuntimeCapabilityContext } from '../src/agent-runtime/runtime.js';
 import { NativeInboxCoordinator } from '../src/agents/nativeInbox.js';
-import type { NativeInboxSnapshot } from '../src/agents/nativeInbox.js';
+import type { NativeInboxSnapshot, NativeInboxSource } from '../src/agents/nativeInbox.js';
+import { createCodexNativeInboxSource } from '../src/agents/nativeInboxSources.js';
 
 const coordinators: NativeInboxCoordinator[] = [];
 afterEach(async () => {
@@ -18,30 +19,35 @@ function pane(paneId: string, pid: number): LivePane {
   };
 }
 
-async function setup(initial: NativeInboxSnapshot) {
+async function setup(
+  initial: NativeInboxSnapshot,
+  options: { agentId?: string; sourceId?: string; source?: NativeInboxSource } = {},
+) {
   const panes = [pane('%1', 101), pane('%2', 202)];
   let snapshot = initial;
+  const agentId = options.agentId ?? 'claude';
+  const sourceId = options.sourceId ?? 'claude.hooks';
   let runId = 0;
   let now = 1_000;
   const runs = new AgentRunRuntime({ newRunId: () => `run-${++runId}` });
   const inbox = new InboxService({
-    runs, adapterIds: ['claude'], now: () => now,
+    runs, adapterIds: [agentId], now: () => now,
     newServiceEpoch: () => 'epoch', newNotificationId: () => `notification-${now}`,
   });
-  const runControl = runs.controller('claude', async () => true);
+  const runControl = runs.controller(agentId, async () => true);
   const context = {
     runs,
     runControl,
     panes: { list: async () => panes, subscribe: () => () => {} },
     process: { inspectForeground: async () => null },
     currentRunForPane: (paneId: string) => runs.currentForPane(paneId),
-    inbox: inbox.projectorFor('claude'),
+    inbox: inbox.projectorFor(agentId),
     health: { report: vi.fn() },
     signal: new AbortController().signal,
   } as unknown as AgentRuntimeCapabilityContext;
   const coordinator = new NativeInboxCoordinator({
-    agentId: 'claude', sourceId: 'claude.hooks', context,
-    source: { read: async () => structuredClone(snapshot) }, pollMs: 10_000,
+    agentId, sourceId, context,
+    source: options.source ?? { read: async () => structuredClone(snapshot) }, pollMs: 10_000,
   });
   coordinators.push(coordinator);
   await Promise.all(panes.map((value) => runControl.attach({
@@ -54,13 +60,63 @@ async function setup(initial: NativeInboxSnapshot) {
     },
   })));
   return {
-    runs, inbox, coordinator,
+    runs, inbox, coordinator, health: context.health,
     setSnapshot(value: NativeInboxSnapshot) { snapshot = value; },
     setNow(value: number) { now = value; },
   };
 }
 
 describe('NativeInboxCoordinator', () => {
+  it('accepts replay of a baseline after a live transition and updates subsequent panes', async () => {
+    const done = { paneId: '%1', cursor: 'done', state: 'done' as const, message: 'Finished', eventId: 'done' };
+    const working = { paneId: '%2', cursor: 'working-2', state: 'working' as const };
+    const h = await setup({ availability: 'ready', rows: [done, working] });
+    await h.coordinator.reconcile();
+    h.setSnapshot({ availability: 'ready', rows: [
+      { paneId: '%1', cursor: 'working-1', state: 'working' }, working,
+    ] });
+    await h.coordinator.reconcile();
+    h.setSnapshot({ availability: 'ready', rows: [done,
+      { paneId: '%2', cursor: 'waiting-2', state: 'waiting', eventId: 'waiting-2' },
+    ] });
+    await expect(h.coordinator.reconcile()).resolves.toBeUndefined();
+    expect(h.inbox.read().records).toContainEqual(expect.objectContaining({
+      run: expect.objectContaining({ paneId: '%2' }), state: 'waiting',
+    }));
+    expect(h.inbox.read().terminalNotifications).toEqual([]);
+  });
+
+  it('isolates a rejected pane, reports its identity, and retries it without blocking healthy panes', async () => {
+    const first = { paneId: '%1', cursor: 'event-1', state: 'waiting' as const, eventId: 'event-1', message: 'First' };
+    const second = { paneId: '%2', cursor: 'working-2', state: 'working' as const };
+    const h = await setup({ availability: 'ready', rows: [first, second] });
+    await h.coordinator.reconcile();
+    h.setSnapshot({ availability: 'ready', rows: [
+      { paneId: '%1', cursor: 'working-1', state: 'working' }, second,
+    ] });
+    await h.coordinator.reconcile();
+    h.setSnapshot({ availability: 'ready', rows: [{ ...first, message: 'Conflicting' },
+      { paneId: '%2', cursor: 'waiting-2', state: 'waiting', eventId: 'waiting-2' },
+    ] });
+    await expect(h.coordinator.reconcile()).resolves.toBeUndefined();
+    expect(h.inbox.read().records).toContainEqual(expect.objectContaining({
+      run: expect.objectContaining({ paneId: '%2' }), state: 'waiting',
+    }));
+    expect(h.health.report).toHaveBeenLastCalledWith(expect.objectContaining({
+      availability: 'degraded', message: expect.stringContaining('%1'),
+    }));
+    expect(h.inbox.read().availability.claude?.availability).toBe('degraded');
+    h.setSnapshot({ availability: 'ready', rows: [
+      { ...first, cursor: 'event-3', eventId: 'event-3', message: 'Recovered' },
+      { paneId: '%2', cursor: 'waiting-2', state: 'waiting', eventId: 'waiting-2' },
+    ] });
+    await h.coordinator.reconcile();
+    expect(h.inbox.read().records).toContainEqual(expect.objectContaining({
+      run: expect.objectContaining({ paneId: '%1' }), state: 'waiting', message: 'Recovered',
+    }));
+    expect(h.inbox.read().availability.claude?.availability).toBe('ready');
+  });
+
   it('restores a multi-pane baseline without creating unread terminal events', async () => {
     const h = await setup({
       availability: 'ready',
@@ -106,6 +162,39 @@ describe('NativeInboxCoordinator', () => {
     ]);
     expect(h.inbox.read().terminalNotifications).toHaveLength(1);
     expect(h.runs.status(secondRun)).toBe('current');
+  });
+
+  it('does not reject a Codex event when only its correlation id changes', async () => {
+    const states = [
+      { '%1': {
+        kind: 'permission' as const, msg: 'Approve?', ts: 200,
+        threadId: 'thread-1', correlationId: 'turn-1',
+      } },
+      { '%1': {
+        kind: 'working' as const, msg: 'Working', ts: 300, threadId: 'thread-1',
+      } },
+      { '%1': {
+        kind: 'permission' as const, msg: 'Approve?', ts: 200,
+        threadId: 'thread-1', correlationId: 'item-1',
+      } },
+    ];
+    const source = createCodexNativeInboxSource({
+      inboxStates: vi.fn(async () => states.shift() ?? {}),
+    });
+    const h = await setup({ availability: 'ready', rows: [] }, {
+      agentId: 'codex', sourceId: 'codex.app-server', source,
+    });
+
+    await h.coordinator.reconcile();
+    h.setNow(2_000);
+    await h.coordinator.reconcile();
+    h.setNow(3_000);
+    await expect(h.coordinator.reconcile()).resolves.toBeUndefined();
+
+    expect(h.inbox.read().availability.codex).toEqual({ availability: 'ready' });
+    expect(h.inbox.read().records).toEqual([expect.objectContaining({
+      state: 'waiting', correlationId: 'item-1', message: 'Approve?',
+    })]);
   });
 
   it('replaces the lease when the same pane changes session', async () => {

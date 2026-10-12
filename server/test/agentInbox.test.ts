@@ -212,6 +212,31 @@ describe('InboxOrderedProjector live operations', () => {
 });
 
 describe('Inbox restore and lifecycle', () => {
+  it('restores explicit clears without changing live receipt identity or duplicating unread events', async () => {
+    const h = await harness();
+    const operation: InboxOperation = {
+      kind: 'set', state: 'done', source: source('done-1'), eventId: 'done-1',
+      message: null, reason: null,
+    };
+    await h.projector.forRun(h.lease).submit(operation);
+    // Older native baselines omitted explicit clears and overwrote the source receipt's hash.
+    await h.projector.restore({ availability: 'ready', snapshot: [{
+      run: h.lease.ref, source: source('done-1'), state: 'done', eventId: 'done-1',
+    }] });
+    expect(await h.projector.forRun(h.lease).submit(operation))
+      .toMatchObject({ accepted: false, reason: 'invalid_operation' });
+    await h.projector.restore({ availability: 'ready', snapshot: [{
+      run: h.lease.ref, source: source('done-1'), state: 'done', eventId: 'done-1',
+      message: null, reason: null,
+    }] });
+    const result = await h.projector.forRun(h.lease).submit(operation);
+    expect(result).toMatchObject({ accepted: true, reason: 'duplicate_source', acceptedAt: 10_000 });
+    const record = h.service.read().records[0];
+    expect(record).not.toHaveProperty('message');
+    expect(record).not.toHaveProperty('reason');
+    expect(h.service.read().terminalNotifications).toHaveLength(1);
+  });
+
   it('never emits a user notification while restoring a baseline', async () => {
     const h = await harness();
     const listener = vi.fn();
@@ -626,6 +651,62 @@ describe('Inbox terminal replay and persistence', () => {
     expect(first.service.read()).toMatchObject({ revision: 2, terminalNotifications: [] });
     const second = await harness({ store, runtime: first.runtime, now: afterExpiry });
     expect(second.service.read().terminalNotifications).toEqual([]);
+  });
+
+  it('prunes inactive run records and their receipts after 30 days', async () => {
+    const store = new MemoryInboxStateStore();
+    const h = await harness({ store, now: 1_000 });
+    await h.projector.forRun(h.lease).submit({
+      kind: 'set', state: 'done', source: source('old-cursor'), eventId: 'old-event',
+    });
+    await h.runtime.revokePane('%1', 'process_exit');
+
+    h.setNow(1_000 + 30 * 24 * 60 * 60 * 1000 + 1);
+    h.service.read();
+
+    expect((store.load() as PersistedInboxState).runs).toEqual([]);
+  });
+
+  it.each(['source', 'event', 'replay-source', 'replay-event'])
+    ('increments revision when a duplicate %s commit prunes expired records', async (mode) => {
+      const h = await harness({ now: 1_000 });
+      await h.projector.forRun(h.lease).submit({
+        kind: 'set', state: 'done', source: source('old'), eventId: 'old',
+      });
+      h.setNow(2_000);
+      const recent: InboxOperation = {
+        kind: 'set', state: 'done', source: source('recent'), eventId: 'recent', message: 'Recent',
+      };
+      await h.projector.forRun(h.lease).submit(recent);
+      const revision = h.service.read().revision;
+      if (mode.startsWith('replay')) await h.runtime.revokePane('%1', 'process_exit');
+      h.setNow(1_000 + 30 * 24 * 60 * 60 * 1000 + 1);
+      const replaySource = source(mode.endsWith('event') ? 'new-cursor' : 'recent');
+      const result = mode.startsWith('replay')
+        ? await h.projector.submitTerminalReplay({
+          run: h.lease.ref, state: 'done', source: replaySource, eventId: 'recent', message: 'Recent',
+        })
+        : await h.projector.forRun(h.lease).submit({ ...recent, source: replaySource });
+      expect(result).toMatchObject({ accepted: true, revision: revision + 1 });
+      expect(h.service.read().terminalNotifications).toEqual([
+        expect.objectContaining({ eventId: 'recent' }),
+      ]);
+    });
+
+  it('keeps the current run state after 30 days but drops its old dedup receipts', async () => {
+    const store = new MemoryInboxStateStore();
+    const h = await harness({ store, now: 1_000 });
+    await h.projector.forRun(h.lease).submit({
+      kind: 'set', state: 'working', source: source('old-cursor'), message: 'Still working',
+    });
+
+    h.setNow(1_000 + 30 * 24 * 60 * 60 * 1000 + 1);
+    expect(h.service.read().records).toEqual([expect.objectContaining({
+      state: 'working', message: 'Still working',
+    })]);
+    expect((store.load() as PersistedInboxState).runs[0]).toMatchObject({
+      highWatermark: 1, sources: [], events: [],
+    });
   });
 
   it('fails closed on corrupt persisted state', async () => {

@@ -33,6 +33,7 @@ const SOURCE_RE = /^[a-z][a-z0-9-]{0,63}\.[a-z][a-z0-9._-]{0,63}$/;
 const EVENT_ID_RE = /^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,255}$/;
 const HASH_RE = /^[0-9a-f]{64}$/;
 const TERMINAL_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
+const RUN_RETENTION_MS = TERMINAL_RETENTION_MS;
 const STATES = new Set<InboxState>(['working', 'waiting', 'done', 'error']);
 const AVAILABILITIES = new Set<InboxAvailability>(['ready', 'degraded', 'unavailable']);
 
@@ -172,8 +173,8 @@ function normalizeBaseline(raw: InboxBaseline, agentId: string): NormalizedBasel
   if (!isRecord(raw) || !validRunRef(raw.run) || raw.run.agentId !== agentId
     || !validSource(raw.source, agentId)
     || typeof raw.state !== 'string' || !STATES.has(raw.state as InboxState)
-    || !optionalText(raw.message, 4096)
-    || !optionalText(raw.reason, 1024)
+    || !optionalText(raw.message, 4096, true)
+    || !optionalText(raw.reason, 1024, true)
     || !optionalText(raw.correlationId, 256)
     || (raw.eventId !== undefined
       && (typeof raw.eventId !== 'string' || !EVENT_ID_RE.test(raw.eventId)))
@@ -183,8 +184,8 @@ function normalizeBaseline(raw: InboxBaseline, agentId: string): NormalizedBasel
     run: copyRunRef(raw.run),
     source: copySource(raw.source),
     state: raw.state as InboxState,
-    ...(raw.message === undefined ? {} : { message: raw.message as string }),
-    ...(raw.reason === undefined ? {} : { reason: raw.reason as string }),
+    ...(raw.message === undefined ? {} : { message: raw.message as string | null }),
+    ...(raw.reason === undefined ? {} : { reason: raw.reason as string | null }),
     ...(raw.correlationId === undefined ? {} : { correlationId: raw.correlationId as string }),
     ...(raw.eventId === undefined ? {} : { eventId: raw.eventId as string }),
     ...(raw.sourceOccurredAt === undefined ? {} : { sourceOccurredAt: raw.sourceOccurredAt as number }),
@@ -491,10 +492,30 @@ export class InboxService {
   }
 
   #pruneExpired(now: number): boolean {
+    const cutoff = now - RUN_RETENTION_MS;
+    const runCount = this.#state.runs.length;
+    let changed = false;
+    this.#state.runs = this.#state.runs.filter((run) => {
+      const current = this.#runs.status(run.run) === 'current';
+      const sourceCount = run.sources.length;
+      const eventCount = run.events.length;
+      run.sources = run.sources.filter((receipt) => receipt.lastReceivedAt > cutoff);
+      run.events = run.events.filter((receipt) => receipt.lastReceivedAt > cutoff);
+      if (run.sources.length !== sourceCount || run.events.length !== eventCount) changed = true;
+      if (!current && run.latest && run.latest.receivedAt <= cutoff) {
+        run.latest = undefined;
+        changed = true;
+      }
+      return current || !!run.latest || run.sources.length > 0 || run.events.length > 0;
+    });
+    if (this.#state.runs.length !== runCount) {
+      changed = true;
+      this.#rebuildRunIndex();
+    }
     const before = this.#state.terminalNotifications.length;
     this.#state.terminalNotifications = this.#state.terminalNotifications
       .filter((record) => record.expiresAt > now);
-    return this.#state.terminalNotifications.length !== before;
+    return changed || this.#state.terminalNotifications.length !== before;
   }
 
   #ensureRun(ref: AgentRunRef): PersistedInboxRun {
@@ -625,6 +646,7 @@ export class InboxService {
         return this.#result(receivedAt, false, { reason: 'stale_lease' });
       }
       const before = structuredClone(this.#state);
+      const pruned = this.#pruneExpired(receivedAt);
       const run = this.#ensureRun(lease.ref);
       const sourceDuplicate = this.#sourceReceipt(run, normalized.operation.source);
       if (sourceDuplicate) {
@@ -644,6 +666,7 @@ export class InboxService {
           this.#state = before; this.#rebuildRunIndex();
           return this.#result(receivedAt, false, { reason: 'persistence_failed' });
         }
+        if (pruned) this.#revision += 1;
         return this.#result(receivedAt, true, {
           reason: 'duplicate_source',
           ...(sourceDuplicate.inboxSequence === undefined ? {} : { inboxSequence: sourceDuplicate.inboxSequence }),
@@ -669,6 +692,7 @@ export class InboxService {
           this.#state = before; this.#rebuildRunIndex();
           return this.#result(receivedAt, false, { reason: 'persistence_failed' });
         }
+        if (pruned) this.#revision += 1;
         return this.#result(receivedAt, true, {
           reason: 'duplicate_event',
           inboxSequence: eventDuplicate.inboxSequence,
@@ -778,7 +802,6 @@ export class InboxService {
             lastReceivedAt: receivedAt,
           });
         }
-        this.#pruneExpired(receivedAt);
         this.#save();
         this.#revision += 1;
         if (run.latest?.acceptedAt !== undefined && run.latest.eventId
@@ -869,8 +892,8 @@ export class InboxService {
               run: copyRunRef(baseline.run),
               source: copySource(baseline.source),
               state: baseline.state,
-              ...(baseline.message === undefined ? {} : { message: baseline.message }),
-              ...(baseline.reason === undefined ? {} : { reason: baseline.reason }),
+              ...(typeof baseline.message === 'string' ? { message: baseline.message } : {}),
+              ...(typeof baseline.reason === 'string' ? { reason: baseline.reason } : {}),
               ...(baseline.correlationId === undefined ? {} : { correlationId: baseline.correlationId }),
               ...(baseline.eventId === undefined ? {} : { eventId: baseline.eventId }),
               ...(eventReceipt === undefined ? {} : {
@@ -950,6 +973,7 @@ export class InboxService {
         return this.#result(receivedAt, false, { reason: 'stale_lease' });
       }
       const before = structuredClone(this.#state);
+      const pruned = this.#pruneExpired(receivedAt);
       const run = this.#ensureRun(replay.run);
       const sourceDuplicate = this.#sourceReceipt(run, operation.source);
       if (sourceDuplicate) {
@@ -962,6 +986,7 @@ export class InboxService {
           this.#state = before; this.#rebuildRunIndex();
           return this.#result(receivedAt, false, { reason: 'persistence_failed' });
         }
+        if (pruned) this.#revision += 1;
         return this.#result(receivedAt, true, {
           reason: 'duplicate_source',
           ...(sourceDuplicate.inboxSequence === undefined ? {} : { inboxSequence: sourceDuplicate.inboxSequence }),
@@ -984,6 +1009,7 @@ export class InboxService {
           this.#state = before; this.#rebuildRunIndex();
           return this.#result(receivedAt, false, { reason: 'persistence_failed' });
         }
+        if (pruned) this.#revision += 1;
         return this.#result(receivedAt, true, {
           reason: 'duplicate_event',
           inboxSequence: eventDuplicate.inboxSequence,

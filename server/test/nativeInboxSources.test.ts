@@ -81,4 +81,66 @@ describe('native Inbox provider sources', () => {
       paneId: '%1', state: 'done', message: 'x'.repeat(4_096),
     })]);
   });
+
+  it('changes the event identity when correlation changes the projected operation', async () => {
+    const inboxStates = vi.fn()
+      .mockResolvedValueOnce({
+        '%1': {
+          kind: 'permission' as const, msg: 'Approve?', ts: 200,
+          threadId: 'thread-1', correlationId: 'turn-1',
+        },
+      })
+      .mockResolvedValueOnce({
+        '%1': {
+          kind: 'permission' as const, msg: 'Approve?', ts: 200,
+          threadId: 'thread-1', correlationId: 'item-1',
+        },
+      });
+    const source = createCodexNativeInboxSource({ inboxStates });
+
+    const first = await source.read([pane]);
+    const second = await source.read([pane]);
+
+    expect(second.rows[0]?.correlationId).toBe('item-1');
+    expect(second.rows[0]?.cursor).not.toBe(first.rows[0]?.cursor);
+    expect(second.rows[0]?.eventId).not.toBe(first.rows[0]?.eventId);
+  });
+
+  it('preserves existing event identities when an operation has no correlation id', async () => {
+    const source = createCodexNativeInboxSource({
+      inboxStates: vi.fn(async () => ({
+        '%1': {
+          kind: 'permission' as const, msg: 'Approve?', ts: 200, threadId: 'thread-1',
+        },
+      })),
+    });
+
+    const snapshot = await source.read([pane]);
+
+    expect(snapshot.rows[0]?.eventId)
+      .toBe('codex:17ca88b103ac637f21afa902a86bf3919c11df3e6947e9f408916d1aab567947');
+  });
+
+  it('excludes an invalid correlation id from both the operation and its event identity', async () => {
+    const inboxStates = vi.fn()
+      .mockResolvedValueOnce({
+        '%1': {
+          kind: 'permission' as const, msg: 'Approve?', ts: 200,
+          threadId: 'thread-1', correlationId: 'x'.repeat(257),
+        },
+      })
+      .mockResolvedValueOnce({
+        '%1': {
+          kind: 'permission' as const, msg: 'Approve?', ts: 200, threadId: 'thread-1',
+        },
+      });
+    const source = createCodexNativeInboxSource({ inboxStates });
+
+    const invalidCorrelation = await source.read([pane]);
+    const noCorrelation = await source.read([pane]);
+
+    expect(invalidCorrelation.rows[0]).not.toHaveProperty('correlationId');
+    expect(invalidCorrelation.rows[0]?.cursor).toBe(noCorrelation.rows[0]?.cursor);
+    expect(invalidCorrelation.rows[0]?.eventId).toBe(noCorrelation.rows[0]?.eventId);
+  });
 });

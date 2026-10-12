@@ -12,8 +12,8 @@ export interface InboxBaseline {
   run: AgentRunRef;
   source: InboxSourceRef;
   state: InboxState;
-  message?: string;
-  reason?: string;
+  message?: string | null;
+  reason?: string | null;
   correlationId?: string;
   eventId?: string;
   sourceOccurredAt?: number;

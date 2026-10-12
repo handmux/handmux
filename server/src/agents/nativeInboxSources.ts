@@ -50,6 +50,7 @@ function canonical(kind: LegacyKind | undefined): InboxState | null | 'ignore' {
 function stableId(agentId: string, paneId: string, sessionId: string | undefined, state: NativeState): string {
   return `${agentId}:${createHash('sha256').update(JSON.stringify({
     paneId, sessionId, kind: state.kind, msg: state.msg ?? '', ts: state.ts ?? 0,
+    ...(state.correlationId === undefined ? {} : { correlationId: state.correlationId }),
   })).digest('hex')}`;
 }
 
@@ -57,7 +58,11 @@ function row(agentId: string, paneId: string, sessionId: string | undefined, val
   const state = canonical(value.kind);
   if (state === 'ignore') return null;
   const message = inboxMessage(value.msg);
-  const normalized = { ...value, ...(message === undefined ? { msg: '' } : { msg: message }) };
+  const correlationId = value.correlationId && value.correlationId.length <= 256
+    ? value.correlationId : undefined;
+  const normalized = { ...value, msg: message ?? '' };
+  if (correlationId === undefined) delete normalized.correlationId;
+  else normalized.correlationId = correlationId;
   const identity = stableId(agentId, paneId, sessionId, normalized);
   const terminal = state === 'waiting' || state === 'done' || state === 'error';
   return {
@@ -66,8 +71,7 @@ function row(agentId: string, paneId: string, sessionId: string | undefined, val
     cursor: identity,
     state,
     ...(message === undefined ? {} : { message }),
-    ...(value.correlationId && value.correlationId.length <= 256
-      ? { correlationId: value.correlationId } : {}),
+    ...(correlationId === undefined ? {} : { correlationId }),
     ...(terminal ? { eventId: identity } : {}),
     ...(typeof value.ts === 'number' && Number.isFinite(value.ts)
       ? { sourceOccurredAt: value.ts } : {}),

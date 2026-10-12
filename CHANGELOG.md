@@ -10,6 +10,7 @@ All notable changes to handmux. Format follows [Keep a Changelog](https://keepac
 
 ### Changed
 
+- 收件箱自动清理超过 30 天的非活动运行记录和旧去重回执，保留当前运行的状态。
 - 会话、窗口和窗格的管理弹窗现在会显示对应的 tmux 原生 ID。
 - 窗格管理可调整水平分屏的窗格高度；标题不再重复显示地图中的宽高。
 - 窗口管理可调整整个窗口的宽度和高度，多分屏窗口也适用；tmux 会按分屏布局分配变化。
@@ -20,6 +21,7 @@ All notable changes to handmux. Format follows [Keep a Changelog](https://keepac
 
 ### Fixed
 
+- 修复 Codex 收件箱恢复后状态停止更新的问题，并避免一个分屏的异常阻断其他分屏。
 - 修复托管 Codex 会话重启时把 App Server 误认为 TUI、导致“重启未开始”的问题；失败提示改为短暂通知，并避免旧恢复记录遮住新会话。
 - 修复会话重启等待新进程就绪时短暂误显示“继续恢复对话”的问题，并提示升级或信任确认需前往终端手动处理。
 - 修复重启会话确认弹窗被上下文浮窗遮挡、无法点击的问题；操作行显示“操作”，重启按钮靠右。
