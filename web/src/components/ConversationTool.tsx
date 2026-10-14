@@ -189,6 +189,28 @@ function ToolStatus({ tool }: { tool: ConversationToolProjection }): ReactNode {
       aria-label={t('conversationTool.success')}><CheckIcon /></span> : null;
 }
 
+// Question tools carry user-facing copy in their arguments, not in stdout. Keep that copy
+// visible independently of the provider/tool name; responding remains owned by Interaction.
+function toolQuestions(tool: ConversationToolProjection): Array<{ text: string; options: string[] }> {
+  const questions = toolInput(tool).questions;
+  if (!Array.isArray(questions)) return [];
+  return questions.flatMap((value) => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return [];
+    const question = value as Record<string, unknown>;
+    const text = inputText(question, 'question', 'title').trim();
+    if (!text) return [];
+    const options = Array.isArray(question.options) ? question.options.flatMap((option) => {
+      if (typeof option === 'string') return option.trim() ? [option] : [];
+      if (!option || typeof option !== 'object' || Array.isArray(option)) return [];
+      const choice = option as Record<string, unknown>;
+      const label = inputText(choice, 'label').trim();
+      const description = inputText(choice, 'description').trim();
+      return label ? [description ? `${label}：${description}` : label] : [];
+    }) : [];
+    return [{ text, options }];
+  });
+}
+
 export function ToolChip({
   tool,
   running,
@@ -200,6 +222,7 @@ export function ToolChip({
   onOpen: () => void;
   copyId: string;
 }) {
+  const questions = toolQuestions(tool);
   return (
     <div className={`chat-tool${tool.isError ? ' chat-tool-err' : ''}${running ? ' chat-tool-running' : ''}`}>
       <button type="button" className="chat-tool-head" onClick={onOpen}
@@ -211,6 +234,15 @@ export function ToolChip({
           ? <span className="chat-tool-head-running chat-copy-ignore"><TypingDots /></span>
           : <ToolStatus tool={tool} />}
       </button>
+      {questions.length > 0 && <div className="chat-tool-questions" data-conversation-copy-root
+        data-conversation-copy-id={`${copyId}:questions`}>
+        {questions.map((question, index) => <div key={index}>
+          <p>{question.text}</p>
+          {question.options.length > 0 && <ul>{question.options.map((option, optionIndex) => (
+            <li key={optionIndex}>{option}</li>
+          ))}</ul>}
+        </div>)}
+      </div>}
     </div>
   );
 }

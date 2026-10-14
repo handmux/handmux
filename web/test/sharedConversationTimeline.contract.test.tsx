@@ -148,6 +148,42 @@ describe('shared Conversation Timeline contract', () => {
     expect(screen.getByRole('dialog').querySelector('.tool-truncation-note')).toBeNull();
   });
 
+  it.each(['codex', 'third-party-agent'])('shows question tool text without opening the chip for %s', (agentId) => {
+    const conversation = controller(agentId);
+    conversation.items = [{
+      key: 'question', provisional: false,
+      item: {
+        id: 'question', sessionId: 'session-1', status: 'complete', kind: 'tool_call',
+        callId: 'question-call', name: 'request_user_input_async', input: { questions: [
+          { title: '文字在什么位置？', options: ['图标下面', '屏幕底部'] },
+          { question: '恢复哪个图标？', options: [{ label: '旧 Logo', description: '保留原来的样式' }] },
+        ] },
+      },
+    }];
+    const { container } = render(<AgentConversationView conversation={conversation} />);
+    const timeline = container.querySelector('.chat-scroll')!;
+    expect(timeline.textContent).toContain('文字在什么位置？');
+    expect(timeline.textContent).toContain('屏幕底部');
+    expect(timeline.textContent).toContain('恢复哪个图标？');
+    expect(timeline.textContent).toContain('保留原来的样式');
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(screen.queryByRole('button', { name: '屏幕底部' })).toBeNull();
+  });
+
+  it.each([
+    { questions: 'invalid' },
+    { questions: [null, 12, [], { title: '' }, { question: '   ' }] },
+  ])('does not invent question copy for invalid tool arguments %j', (input) => {
+    const conversation = controller('third-party-agent');
+    conversation.items = [{ key: 'unknown', provisional: false, item: {
+      id: 'unknown', sessionId: 'session-1', status: 'complete', kind: 'tool_call',
+      callId: 'unknown-call', name: 'unknown_tool', input,
+    } }];
+    const { container } = render(<AgentConversationView conversation={conversation} />);
+    expect(container.querySelector('.chat-tool-questions')).toBeNull();
+    expect(container.querySelector('.chat-tool-head')?.textContent).toContain('unknown_tool');
+  });
+
   it('keeps input truncation with the tool input and removes the generic outer notice', () => {
     const items = [
       {

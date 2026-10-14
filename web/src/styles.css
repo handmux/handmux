@@ -5047,3 +5047,7 @@ button.cmd-text { background: none; border: none; text-align: left; }
 
 .tool-sheet-image { display: flex; width: 100%; max-height: min(70vh, 420px); min-height: 120px; align-self: center; justify-content: center; }
 .tool-sheet-image .doc-image-wrap { min-height: 120px; max-height: min(70vh, 420px); }
+
+.chat-tool-questions { padding: 0 12px 12px; font-size: 14px; line-height: 1.5; overflow-wrap: anywhere; }
+.chat-tool-questions p { margin: 8px 0; white-space: pre-wrap; }
+.chat-tool-questions ul { margin: 0; padding-left: 20px; }

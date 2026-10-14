@@ -148,7 +148,8 @@ function reconcileLatestPage(
       ? previous.slots.length : firstSeededPreviousIndex).filter((slot) => !slot.live)
     : [];
   const unmatchedLive = options.retainUnmatchedLive ? previous.slots.flatMap((slot, index) => (
-    slot.live && slot.historyGrace !== true
+    slot.live
+      && (slot.historyGrace !== true || !options.consumeUnmatchedLiveGrace)
       && index > lastSeededPreviousIndex && !seededKeys.has(slot.key)
       ? [{
         ...slot,
@@ -566,12 +567,18 @@ export function useAgentConversation(
       const previousPage = pageRef.current;
       const sameView = projectionViewIdRef.current === value.viewId;
       // `streamSequence` belongs to this ready checkpoint only. A reconnect creates a fresh
-      // observation epoch, so old live slots and the previous sequence must never leak across it.
+      // observation epoch, so drafts and the previous sequence must never leak across it.
       const next = reconcileLatestPage(
         value.items,
         streamSequence,
         latestProjectionRef.current,
-        { retainHistoricalPrefix: sameView, ...options },
+        {
+          retainHistoricalPrefix: sameView,
+          ...options,
+          // A reconnect baseline may precede a completed live reply's rollout write. Retain
+          // settled slots in this view; only a history barrier consumes the existing grace.
+          retainUnmatchedLive: sameView && (options.retainUnmatchedLive ?? true),
+        },
       );
       projectionViewIdRef.current = value.viewId;
       latestProjectionRef.current = next;
@@ -634,6 +641,11 @@ export function useAgentConversation(
             signal: controller.signal,
             expectedViewId: discovered.viewId,
             onReady: async (checkpoint) => {
+              if (!current()) return;
+              latestProjectionRef.current = {
+                ...latestProjectionRef.current,
+                slots: latestProjectionRef.current.slots.filter((slot) => !slot.provisional),
+              };
               await readLatest(
                 checkpoint.viewId,
                 checkpoint.historyVersion,
@@ -689,7 +701,8 @@ export function useAgentConversation(
               } catch {
                 const currentProjection = projectionRef.current;
                 // Reset the broken epoch but retain completed slots until the authoritative read can
-                // claim them. Drafts cannot be continued safely; unmatched settlements disappear on seed.
+                // claim them. Drafts cannot be continued safely; same-view completed slots retain
+                // their existing history grace until a durable barrier can reconcile them.
                 const recovered = {
                   slots: currentProjection.slots.filter((slot) => !slot.provisional),
                   lastSequence: event.sequence,

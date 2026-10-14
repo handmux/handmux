@@ -1929,6 +1929,97 @@ describe('useAgentConversation', () => {
     unmount();
   });
 
+  it('ignores a stale ready callback before it can erase a newer observation draft', async () => {
+    const first = { agentId: 'codex', paneId: '%1', runId: 'run-1', sessionId: 'session-1' };
+    const second = { ...first, runId: 'run-2' };
+    vi.mocked(discoverAgentConversation).mockImplementation(async (run) => ({
+      session: { agentId: run.agentId, sessionId: run.sessionId! }, run,
+      viewId: 'view-1', historyVersion: 'history-1', capabilities: { history: true, live: 'delta' },
+    }));
+    vi.mocked(readAgentConversationPage).mockResolvedValue({ status: 'ok', page: {
+      sessionId: 'session-1', viewId: 'view-1', historyVersion: 'history-1', items: [], hasMore: false,
+    } });
+    const observations = new Map<string, AgentConversationStreamOptions>();
+    vi.mocked(streamAgentConversation).mockImplementation(async (run, options) => {
+      observations.set(run.runId, options!);
+      await options?.onReady?.({ viewId: 'view-1', historyVersion: 'history-1', streamSequence: 0 });
+      await new Promise<void>((resolve) => options?.signal?.addEventListener('abort', () => resolve(), { once: true }));
+    });
+    const { result, rerender, unmount } = renderHook(({ run }) => useAgentConversation(run),
+      { initialProps: { run: first } });
+    await waitFor(() => expect(result.current.status).toBe('ready'));
+    rerender({ run: second });
+    await waitFor(() => expect(observations.has(second.runId)).toBe(true));
+    await waitFor(() => expect(result.current.status).toBe('ready'));
+    await act(async () => {
+      await observations.get(second.runId)?.onEvent?.({ type: 'item.opened', sequence: 1,
+        provisionalId: 'new-draft', draft: { kind: 'message', role: 'assistant',
+          content: [{ type: 'text', text: 'current text' }] } });
+      await observations.get(first.runId)?.onReady?.({ viewId: 'view-1', historyVersion: 'history-1', streamSequence: 0 });
+      await result.current.loadLatest?.({ force: true });
+      await observations.get(second.runId)?.onEvent?.({ type: 'item.delta', sequence: 2,
+        provisionalId: 'new-draft', delta: { op: 'text.append', target: 'message.content', blockIndex: 0, text: ' continues' } });
+    });
+    await waitFor(() => expect(result.current.items[0]?.item).toMatchObject({
+      kind: 'message', content: [{ type: 'text', text: 'current text continues' }],
+    }));
+    unmount();
+  });
+
+  it.each(['codex', 'pi'])('keeps a completed reply through a same-view gap until durable history catches up for %s', async (agentId) => {
+    const run = { agentId, paneId: '%1', runId: 'run-1', sessionId: 'session-1' };
+    const reply = {
+      id: 'completed-reply', sessionId: 'session-1', status: 'complete' as const,
+      kind: 'message' as const, role: 'assistant' as const,
+      content: [{ type: 'text' as const, text: 'keep completed reply' }],
+    };
+    let durable = false;
+    vi.mocked(discoverAgentConversation).mockResolvedValue({
+      session: { agentId, sessionId: 'session-1' }, run,
+      viewId: 'view-1', historyVersion: 'history-1', capabilities: { history: true, live: 'delta' },
+    });
+    vi.mocked(readAgentConversationPage).mockImplementation(async (_run, request) => ({
+      status: 'ok', page: {
+        sessionId: 'session-1', viewId: 'view-1', historyVersion: request.expectedHistoryVersion ?? 'history-1',
+        items: durable ? [reply] : [], hasMore: false,
+      },
+    }));
+    let options: AgentConversationStreamOptions | undefined;
+    const held = deferred<void>();
+    vi.mocked(streamAgentConversation).mockImplementation(async (_run, next) => {
+      options = next;
+      await next?.onReady?.({ viewId: 'view-1', historyVersion: 'history-1', streamSequence: 0 });
+      await held.promise;
+    });
+    const { result, unmount } = renderHook(() => useAgentConversation(run));
+    await waitFor(() => expect(result.current.status).toBe('ready'));
+    await act(async () => {
+      await options?.onEvent?.({ type: 'item.opened', sequence: 1, provisionalId: reply.id,
+        draft: { kind: 'message', role: 'assistant', content: reply.content } });
+      await options?.onEvent?.({ type: 'item.settled', sequence: 2, provisionalId: reply.id, item: reply });
+      await options?.onEvent?.({ type: 'stream.gap', sequence: 3, afterSequence: 2 });
+    });
+    expect(result.current.items.map(({ item }) => item)).toEqual([reply]);
+    await act(async () => {
+      await options?.onReady?.({ viewId: 'view-1', historyVersion: 'history-1', streamSequence: 0 });
+    });
+    expect(result.current.items.map(({ item }) => item)).toEqual([reply]);
+    await act(async () => {
+      await options?.onEvent?.({ type: 'history.changed', sequence: 1, viewId: 'view-1', historyVersion: 'history-2' });
+      await options?.onReady?.({ viewId: 'view-1', historyVersion: 'history-2', streamSequence: 0 });
+      await options?.onReady?.({ viewId: 'view-1', historyVersion: 'history-2', streamSequence: 0 });
+    });
+    expect(result.current.items.map(({ item }) => item)).toEqual([reply]);
+    durable = true;
+    await act(async () => {
+      await options?.onEvent?.({ type: 'history.changed', sequence: 1, viewId: 'view-1', historyVersion: 'history-3' });
+    });
+    expect(result.current.items.map(({ item }) => item)).toEqual([reply]);
+    expect(result.current.items[0]?.live).toBe(false);
+    held.resolve();
+    unmount();
+  });
+
   it('drops an unmatched live settlement after exactly one lagging history barrier', async () => {
     const run = { agentId: 'pi', paneId: '%1', runId: 'run-1', sessionId: 'session-1' };
     vi.mocked(discoverAgentConversation).mockResolvedValue({
