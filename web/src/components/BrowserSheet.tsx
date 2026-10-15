@@ -114,10 +114,12 @@ export default function BrowserSheet({ browser, staticPreview }: BrowserSheetPro
   const active = staticActive || webActive;
   const proxied = webActive?.mode === 'proxy' && !staticSelected;
   const [newPageMode, setNewPageMode] = useState<BrowserMode>('direct');
-  const menuMode = staticSelected ? 'static' : (homeActive || !webActive ? newPageMode : webActive.mode);
+  const [staticDraft, setStaticDraft] = useState(false);
+  const staticMode = staticDraft || staticSelected;
+  const menuMode = staticMode ? 'static' : (homeActive || !webActive ? newPageMode : webActive.mode);
   const [address, setAddress] = useState(webActive?.originalUrl || '');
   const [editingAddress, setEditingAddress] = useState(false);
-  const showAddressEditor = !staticSelected && (homeActive || editingAddress || !webActive);
+  const showAddressEditor = !staticMode && (homeActive || editingAddress || !webActive);
   const [optionsOpen, setOptionsOpen] = useState(false);
   const [timeOpen, setTimeOpen] = useState(false);
   const [pageWidth, setPageWidth] = useState<'narrow' | 'wide'>('narrow');
@@ -133,6 +135,7 @@ export default function BrowserSheet({ browser, staticPreview }: BrowserSheetPro
   const [pageZoom, setPageZoom] = useState(1);
   const [dirOpen, setDirOpen] = useState(false);
   const [seedCwd, setSeedCwd] = useState<string | null>(null);
+  const directoryRequest = useRef(0);
   const [mountedStaticTabs, setMountedStaticTabs] = useState(() => new Set<string>());
   const [loadedStaticTabs, setLoadedStaticTabs] = useState(() => new Set<string>());
   const [staticReloadKeys, setStaticReloadKeys] = useState<Record<string, number>>({});
@@ -161,7 +164,7 @@ export default function BrowserSheet({ browser, staticPreview }: BrowserSheetPro
   }, []);
 
   useEffect(() => {
-    setAddress(staticSelected ? (staticActive?.dir || '') : (homeActive ? '' : (webActive?.originalUrl || '')));
+    setAddress(homeActive ? '' : (webActive?.originalUrl || ''));
   }, [homeActive, staticActive?.dir, staticSelected, webActive?.originalUrl]);
 
   useEffect(() => {
@@ -172,14 +175,19 @@ export default function BrowserSheet({ browser, staticPreview }: BrowserSheetPro
   }, [activeId, homeActive, open, staticActive?.name, webActive?.originalUrl]);
 
   useLayoutEffect(() => {
+    directoryRequest.current += 1;
+    setDirOpen(false);
+  }, [activeId, homeActive, open, staticActive?.name, staticMode]);
+
+  useLayoutEffect(() => {
     if (!editingAddress || !showAddressEditor) return;
     addressRef.current?.focus();
     addressRef.current?.select();
   }, [editingAddress, showAddressEditor]);
 
   useEffect(() => {
-    if (!proxyAvailable) setNewPageMode('direct');
-  }, [proxyAvailable]);
+    setStaticDraft(false);
+  }, [activeId]);
 
   useEffect(() => {
     setOptionsOpen(false);
@@ -362,6 +370,7 @@ export default function BrowserSheet({ browser, staticPreview }: BrowserSheetPro
   const postCommand = (command: string): void => postTabCommand(webActive, command);
 
   const selectTab = (tab: RuntimeBrowserTab): void => {
+    setStaticDraft(false);
     setOptionsOpen(false);
     setHistoryError(null);
     staticPreview?.deactivate();
@@ -369,6 +378,7 @@ export default function BrowserSheet({ browser, staticPreview }: BrowserSheetPro
   };
 
   const selectStaticTab = (tab: StaticPreviewTab): void => {
+    setStaticDraft(false);
     setOptionsOpen(false);
     setHistoryError(null);
     switchTab('history');
@@ -378,7 +388,8 @@ export default function BrowserSheet({ browser, staticPreview }: BrowserSheetPro
   const selectHistory = () => {
     setOptionsOpen(false);
     setHistoryError(null);
-    setNewPageMode('direct');
+    setStaticDraft(menuMode === 'static');
+    if (menuMode !== 'static') setNewPageMode(menuMode);
     staticPreview?.deactivate();
     return switchTab('history');
   };
@@ -452,7 +463,7 @@ export default function BrowserSheet({ browser, staticPreview }: BrowserSheetPro
 
   const submitAddress = (event: FormEvent<HTMLFormElement>): void => {
     event.preventDefault();
-    if (staticSelected) return;
+    if (staticMode) return;
     setHistoryError(null);
     setEditingAddress(false);
     addressRef.current?.blur();
@@ -461,14 +472,25 @@ export default function BrowserSheet({ browser, staticPreview }: BrowserSheetPro
     else navigateTab(webActive.id, address);
   };
 
-  const chooseMode = (mode: BrowserMode): void => {
-    if (staticSelected || mode === menuMode || (mode === 'proxy' && !proxyAvailable)) return;
+  const chooseMode = (mode: BrowserMode | 'static'): void => {
+    if (mode === menuMode || (mode === 'proxy' && !proxyAvailable)) return;
     setHistoryError(null);
-    if (homeActive || !webActive) {
-      setNewPageMode(mode);
+    setEditingAddress(false);
+    addressRef.current?.blur();
+    if (mode === 'static') {
+      setStaticDraft(true);
       return;
     }
-    navigateTab(webActive.id, webActive.originalUrl, mode);
+    setNewPageMode(mode);
+    setStaticDraft(false);
+    if (staticMode) {
+      staticPreview?.deactivate();
+      setAddress(webActive?.originalUrl || '');
+      switchTab(webActive?.id || 'history');
+      if (webActive && webActive.mode !== mode) navigateTab(webActive.id, webActive.originalUrl, mode);
+      return;
+    }
+    if (!homeActive && webActive) navigateTab(webActive.id, webActive.originalUrl, mode);
   };
 
   const requestSiteVersion = async (siteVersion: BrowserSiteVersion): Promise<void> => {
@@ -495,6 +517,7 @@ export default function BrowserSheet({ browser, staticPreview }: BrowserSheetPro
   ): void => {
     setHistoryModeOpen(null);
     if (entry.kind === 'static') {
+      setStaticDraft(true);
       setHistoryError(null);
       void staticPreview?.startPreview(entry.dir);
       return;
@@ -505,6 +528,9 @@ export default function BrowserSheet({ browser, staticPreview }: BrowserSheetPro
     }
     setHistoryError(null);
     if (persistMode) setHistoryMode(entry, mode);
+    setStaticDraft(false);
+    staticPreview?.deactivate();
+    setNewPageMode(mode);
     openUrl(entry.url, { mode });
   };
 
@@ -533,10 +559,11 @@ export default function BrowserSheet({ browser, staticPreview }: BrowserSheetPro
   const newTab = () => {
     selectHistory();
     setAddress('');
-    requestAnimationFrame(() => addressRef.current?.focus());
+    if (menuMode !== 'static') requestAnimationFrame(() => addressRef.current?.focus());
   };
 
   const openDirPicker = async () => {
+    const request = ++directoryRequest.current;
     addressRef.current?.blur();
     let seed = staticPreview?.lastPreviewDir || null;
     if (!seed && staticPreview?.pane) {
@@ -545,6 +572,7 @@ export default function BrowserSheet({ browser, staticPreview }: BrowserSheetPro
         seed = typeof response?.cwd === 'string' ? response.cwd : null;
       } catch { /* picker falls back home */ }
     }
+    if (request !== directoryRequest.current || !openRef.current) return;
     setSeedCwd(seed);
     setDirOpen(true);
   };
@@ -670,55 +698,64 @@ export default function BrowserSheet({ browser, staticPreview }: BrowserSheetPro
           onClick={() => { setOptionsOpen(false); setOpen(false); }}><ChevronDownIcon /></button>
       </div>
 
+      <div className="browser-mode-row" {...(clearConfirmation ? { inert: '' as const } : {})}>
+        <div className="browser-mode-segment" role="group" aria-label={t('browser.switchMode')}>
+          <button type="button" aria-label={t('browser.directMode')} aria-pressed={menuMode === 'direct'} onClick={() => chooseMode('direct')}>{t('browser.directBadge')}</button>
+          <button type="button" aria-label={t('browser.proxyMode')} aria-pressed={menuMode === 'proxy'} disabled={!proxyAvailable}
+            aria-describedby={!proxyAvailable ? 'browser-proxy-unavailable' : undefined}
+            onClick={() => chooseMode('proxy')}>{t('browser.proxyBadge')}</button>
+          <button type="button" aria-label={t('browser.staticMode')} aria-pressed={menuMode === 'static'} onClick={() => chooseMode('static')}>{t('browser.staticBadge')}</button>
+        </div>
+        {!proxyAvailable && <p id="browser-proxy-unavailable" className="browser-mode-hint">{t('browser.proxyUnavailable')}</p>}
+      </div>
       <div className="browser-nav" {...(clearConfirmation ? { inert: '' as const } : {})}>
-        <form className="browser-address-form" onSubmit={submitAddress}>
-          <GlobeIcon />
-          <span className={`browser-address-mode ${menuMode}`}>
-            {t(menuMode === 'static'
-              ? 'browser.staticBadge'
-              : menuMode === 'proxy' ? 'browser.proxyBadge' : 'browser.directBadge')}
-          </span>
-          <div ref={addressDisplayRef} className="browser-address-display"
-            hidden={showAddressEditor} role={staticSelected ? undefined : 'button'}
-            tabIndex={staticSelected ? 0 : (showAddressEditor ? -1 : 0)}
-            aria-label={t('browser.address')}
-            onPointerDown={(event) => {
+        <form className={`browser-address-form${staticMode ? ' static' : ''}`} onSubmit={submitAddress}
+            onPointerDownCapture={(event) => {
               addressGesture.current = { x: event.clientX, y: event.clientY, moved: false };
             }}
-            onPointerMove={(event) => {
+            onPointerMoveCapture={(event) => {
               const gesture = addressGesture.current;
               if (gesture && Math.hypot(event.clientX - gesture.x, event.clientY - gesture.y) > 8) {
                 gesture.moved = true;
               }
             }}
-            onPointerCancel={() => {
+            onPointerCancelCapture={() => {
               if (addressGesture.current) addressGesture.current.moved = true;
             }}
+
+          onClick={() => {
+            if (!staticMode) return;
+            if (!addressGesture.current?.moved) void openDirPicker();
+            addressGesture.current = null;
+          }}>
+          {staticMode ? <FolderIcon /> : <GlobeIcon />}
+          <div ref={addressDisplayRef} className="browser-address-display"
+            hidden={showAddressEditor} role="button"
+            tabIndex={showAddressEditor ? -1 : 0}
+            aria-label={t(staticMode ? 'browser.chooseDirectory' : 'browser.address')}
             onScroll={() => {
               if (addressGesture.current) addressGesture.current.moved = true;
             }}
             onClick={() => {
-              if (!staticSelected && !addressGesture.current?.moved) setEditingAddress(true);
+              if (staticMode) return;
+              if (!addressGesture.current?.moved) setEditingAddress(true);
               addressGesture.current = null;
             }}
             onKeyDown={(event) => {
-              if (!staticSelected && (event.key === 'Enter' || event.key === ' ')) {
+              if (event.key === 'Enter' || event.key === ' ') {
                 event.preventDefault();
-                setEditingAddress(true);
+                if (staticMode) void openDirPicker();
+                else setEditingAddress(true);
               }
-            }}>{address}</div>
+            }}>{staticMode ? (staticActive?.dir || t('browser.chooseDirectory')) : address}</div>
+          {staticMode && <span className="browser-address-chevron"><ChevronDownIcon /></span>}
           <input ref={addressRef} className="browser-address" aria-label={t('browser.address')}
             hidden={!showAddressEditor}
             value={address} onChange={(event) => setAddress(event.target.value)}
             onBlur={() => setEditingAddress(false)}
-            readOnly={staticSelected}
-            placeholder={t(homeActive ? 'browser.addressOrDirectoryPlaceholder' : 'browser.addressPlaceholder')}
+            readOnly={staticMode}
+            placeholder={t('browser.addressPlaceholder')}
             autoCapitalize="none" autoCorrect="off" spellCheck="false" />
-          {homeActive && (
-            <button type="button" className="browser-address-folder"
-              aria-label={t('browser.chooseDirectory')} title={t('browser.chooseDirectory')}
-              onClick={openDirPicker}><FolderIcon /></button>
-          )}
         </form>
         <button className={`browser-nav-button browser-refresh ${activeLoading ? 'loading' : ''}`}
           aria-label={t(activeLoading && proxied ? 'browser.stop' : 'browser.refresh')} aria-busy={activeLoading}
@@ -732,24 +769,7 @@ export default function BrowserSheet({ browser, staticPreview }: BrowserSheetPro
           <>
             <div className="browser-options-backdrop" onClick={() => setOptionsOpen(false)} />
             <div className="browser-options-card" role="dialog" aria-label={t('browser.menu')}>
-              {!staticSelected && (
-                <div className="browser-options-section browser-current-mode">
-                  <strong>{t('browser.connectionMode')}</strong>
-                  <div className="browser-mode-segment" role="group" aria-label={t('browser.switchMode')}>
-                    <button aria-pressed={menuMode === 'direct'}
-                      onClick={() => chooseMode('direct')}>{t('browser.directMode')}</button>
-                    <button className="proxy" aria-pressed={menuMode === 'proxy'}
-                      disabled={!proxyAvailable}
-                      aria-describedby={!proxyAvailable ? 'browser-options-proxy-unavailable' : undefined}
-                      onClick={() => chooseMode('proxy')}>{t('browser.proxyMode')}</button>
-                  </div>
-                  {proxyAvailable
-                    ? <p className="browser-options-hint browser-proxy-limit">{t('browser.proxyLimitHint')}</p>
-                    : <p id="browser-options-proxy-unavailable"
-                      className="browser-options-hint">{t('browser.proxyUnavailable')}</p>}
-                </div>
-              )}
-
+              {proxied && <p className="browser-options-hint browser-proxy-limit">{t('browser.proxyLimitHint')}</p>}
               <div className="browser-options-row browser-width-row">
                 <strong>{t('browser.pageWidth')}</strong>
                 <div className="browser-view-segment" role="group" aria-label={t('browser.viewMode')}>

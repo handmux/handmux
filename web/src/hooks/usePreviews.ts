@@ -115,6 +115,7 @@ export function usePreviews(current?: PreviewCurrent | null) {
   const [runtime, setRuntime] = useState<Record<string, PreviewRuntime>>({});
   const [activeTabName, setActiveTabName] = useState<string | null>(null);
   const [selected, setSelected] = useState(false);
+  const selectionEpoch = useRef(0);
   const [error, setError] = useState<Error | null>(null);
   const openTabsRef = useRef(openTabs);
   const runtimeRef = useRef(runtime);
@@ -241,6 +242,7 @@ export function usePreviews(current?: PreviewCurrent | null) {
 
   const startPreview = useCallback(async (dir: string): Promise<(SavedPreviewTab & PreviewLease) | null> => {
     if (!curPreviewName) return null;
+    const selection = ++selectionEpoch.current;
     const sameDirectory = openTabsRef.current.find((item) => item.dir === dir);
     if (sameDirectory) {
       setPreviewDir(current?.window?.id ?? undefined, dir);
@@ -262,8 +264,12 @@ export function usePreviews(current?: PreviewCurrent | null) {
     if (!created) return null;
     setPreviewDir(current?.window?.id ?? undefined, dir);
     commitOpenTabs((currentTabs) => [...currentTabs.filter((item) => item.name !== tab.name), tab]);
-    setActiveTabName(tab.name);
-    setSelected(true);
+    // Registration may finish after the user switches back to a web tab. Keep the confirmed
+    // directory, but only the latest selection action may bring its preview to the foreground.
+    if (selection === selectionEpoch.current) {
+      setActiveTabName(tab.name);
+      setSelected(true);
+    }
     return { ...tab, ...created };
   }, [commitOpenTabs, curPreviewName, current?.window?.id, ensurePreview]);
 
@@ -274,10 +280,14 @@ export function usePreviews(current?: PreviewCurrent | null) {
 
   const switchTab = useCallback((name: string): void => {
     if (!openTabsRef.current.some((tab) => tab.name === name)) return;
+    selectionEpoch.current += 1;
     setActiveTabName(name);
     setSelected(true);
   }, []);
-  const deactivate = useCallback((): void => setSelected(false), []);
+  const deactivate = useCallback((): void => {
+    selectionEpoch.current += 1;
+    setSelected(false);
+  }, []);
 
   const closeTab = useCallback(async (name: string | null): Promise<void> => {
     if (!name) return;

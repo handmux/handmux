@@ -10,7 +10,7 @@ All notable changes to handmux. Format follows [Keep a Changelog](https://keepac
 
 ### Changed
 
-- 网页浏览器地址栏默认支持左右滑动查看完整地址，轻点后进入编辑，查看长地址时无需弹出键盘。
+- 网页浏览器将直连、代理、静态收敛为常驻分段切换与统一地址栏；长地址和目录可左右滑动查看，轻点后编辑网址或选择目录。
 
 ### Fixed
 

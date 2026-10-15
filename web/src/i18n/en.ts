@@ -277,6 +277,7 @@ export default {
   'browser.proxyMode': 'Through computer proxy',
   'browser.directBadge': 'Direct',
   'browser.proxyBadge': 'Proxy',
+  'browser.staticMode': 'Static directory',
   'browser.staticBadge': 'Static',
   'browser.chooseDirectory': 'Choose directory',
   'browser.staticOpening': 'Opening directory…',

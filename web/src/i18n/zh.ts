@@ -274,6 +274,7 @@ export default {
   'browser.proxyMode': '经电脑代理',
   'browser.directBadge': '直连',
   'browser.proxyBadge': '代理',
+  'browser.staticMode': '静态目录',
   'browser.staticBadge': '静态',
   'browser.chooseDirectory': '选择目录',
   'browser.staticOpening': '正在打开目录…',

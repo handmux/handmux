@@ -62,6 +62,18 @@ describe('usePreviews static tabs', () => {
     await flush();
   };
 
+  it('finishes a confirmed directory in the background after the user leaves static mode', async () => {
+    let complete;
+    api.createPreview.mockReturnValueOnce(new Promise((resolve) => { complete = resolve; }));
+    let opening;
+    act(() => { opening = model.startPreview('/home/u/new'); });
+    await flush();
+    act(() => model.deactivate());
+    await act(async () => { complete({ url: '/preview/new/token/' }); await opening; });
+    expect(model.tabs).toEqual([expect.objectContaining({ dir: '/home/u/new', status: 'ready' })]);
+    expect(model.selected).toBe(false);
+  });
+
   it('automatically restores an open static tab after remount', async () => {
     await act(async () => { await model.startPreview('/home/u/site'); });
     const name = model.tabs[0].name;

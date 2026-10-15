@@ -2238,12 +2238,6 @@ button.cmd-text { background: none; border: none; text-align: left; }
 .browser-address-display::-webkit-scrollbar { display: none; }
 .browser-address[hidden], .browser-address-display[hidden] { display: none; }
 .browser-address::placeholder { color: #707b86; }
-.browser-address-folder {
-  width: 38px; height: 36px; margin-right: -9px; flex: 0 0 auto; display: grid; place-items: center;
-  border: 0; border-left: 1px solid #414852; border-radius: 0 10px 10px 0;
-  background: rgba(var(--green-rgb),.08); color: #68d88b; touch-action: manipulation;
-}
-.browser-address-form .browser-address-folder svg { width: 18px; height: 18px; color: currentColor; }
 .browser-time-menu {
   position: absolute; top: 48px; right: 6px; z-index: 5; width: min(230px, calc(100vw - 12px));
   display: flex; flex-direction: column; gap: 2px; padding: 6px;
@@ -2282,19 +2276,21 @@ button.cmd-text { background: none; border: none; text-align: left; }
 .browser-options-hint { margin: -3px 10px 8px; }
 .browser-options-section { padding: 12px 2px; border-top: 1px solid rgba(255,255,255,.1); }
 .browser-options-card > .browser-options-row { border-top: 1px solid rgba(255,255,255,.1); }
-.browser-current-mode { display: flex; flex-direction: column; gap: 8px; border-top: 0; }
+.browser-mode-row { flex: 0 0 auto; padding: 8px 10px 0; background: #1a1c20; }
+.browser-mode-hint { margin: 6px 2px 0; color: #99a4af; font-size: 12px; line-height: 1.4; }
+.browser-address-chevron { display: flex; flex: 0 0 auto; color: #8694a2; }
+.browser-address-form.static .browser-address-display { cursor: pointer; }
 .browser-mode-segment {
-  min-height: 44px; display: grid; grid-template-columns: 1fr 1fr; padding: 3px;
+  min-height: 44px; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); padding: 3px;
   border-radius: 11px; background: #191c20;
 }
 .browser-mode-segment button {
-  min-height: 38px; padding: 0 12px; border: 0; border-radius: 9px;
+  min-height: 44px; padding: 0 12px; border: 0; border-radius: 9px;
   background: transparent; color: #9aa5b1; font-size: 14px; font-weight: 600;
 }
 .browser-mode-segment button[aria-pressed="true"] {
   background: #4b515a; color: #fff; box-shadow: 0 1px 4px rgba(0,0,0,.38);
 }
-.browser-mode-segment button.proxy[aria-pressed="true"] { background: rgba(217,130,43,.28); color: #ffc078; }
 .browser-mode-segment button:disabled { opacity: .45; }
 .browser-current-mode .browser-options-hint { margin: 0; }
 .browser-view-segment {
