@@ -116,6 +116,8 @@ export default function BrowserSheet({ browser, staticPreview }: BrowserSheetPro
   const [newPageMode, setNewPageMode] = useState<BrowserMode>('direct');
   const menuMode = staticSelected ? 'static' : (homeActive || !webActive ? newPageMode : webActive.mode);
   const [address, setAddress] = useState(webActive?.originalUrl || '');
+  const [editingAddress, setEditingAddress] = useState(false);
+  const showAddressEditor = !staticSelected && (homeActive || editingAddress || !webActive);
   const [optionsOpen, setOptionsOpen] = useState(false);
   const [timeOpen, setTimeOpen] = useState(false);
   const [pageWidth, setPageWidth] = useState<'narrow' | 'wide'>('narrow');
@@ -143,6 +145,8 @@ export default function BrowserSheet({ browser, staticPreview }: BrowserSheetPro
   const openRef = useRef(open);
   const activeTabRef = useRef<HTMLSpanElement | null>(null);
   const addressRef = useRef<HTMLInputElement | null>(null);
+  const addressDisplayRef = useRef<HTMLDivElement | null>(null);
+  const addressGesture = useRef<{ x: number; y: number; moved: boolean } | null>(null);
   const bodyRef = useRef<HTMLDivElement | null>(null);
   const clearTriggerRef = useRef<HTMLElement | null>(null);
   const clearCancelRef = useRef<HTMLButtonElement | null>(null);
@@ -159,6 +163,19 @@ export default function BrowserSheet({ browser, staticPreview }: BrowserSheetPro
   useEffect(() => {
     setAddress(staticSelected ? (staticActive?.dir || '') : (homeActive ? '' : (webActive?.originalUrl || '')));
   }, [homeActive, staticActive?.dir, staticSelected, webActive?.originalUrl]);
+
+  useEffect(() => {
+    setEditingAddress(false);
+    addressGesture.current = null;
+    addressRef.current?.blur();
+    if (addressDisplayRef.current) addressDisplayRef.current.scrollLeft = 0;
+  }, [activeId, homeActive, open, staticActive?.name, webActive?.originalUrl]);
+
+  useLayoutEffect(() => {
+    if (!editingAddress || !showAddressEditor) return;
+    addressRef.current?.focus();
+    addressRef.current?.select();
+  }, [editingAddress, showAddressEditor]);
 
   useEffect(() => {
     if (!proxyAvailable) setNewPageMode('direct');
@@ -437,6 +454,8 @@ export default function BrowserSheet({ browser, staticPreview }: BrowserSheetPro
     event.preventDefault();
     if (staticSelected) return;
     setHistoryError(null);
+    setEditingAddress(false);
+    addressRef.current?.blur();
     staticPreview?.deactivate();
     if (homeActive || !webActive) openUrl(address, { mode: newPageMode });
     else navigateTab(webActive.id, address);
@@ -659,8 +678,39 @@ export default function BrowserSheet({ browser, staticPreview }: BrowserSheetPro
               ? 'browser.staticBadge'
               : menuMode === 'proxy' ? 'browser.proxyBadge' : 'browser.directBadge')}
           </span>
+          <div ref={addressDisplayRef} className="browser-address-display"
+            hidden={showAddressEditor} role={staticSelected ? undefined : 'button'}
+            tabIndex={staticSelected ? 0 : (showAddressEditor ? -1 : 0)}
+            aria-label={t('browser.address')}
+            onPointerDown={(event) => {
+              addressGesture.current = { x: event.clientX, y: event.clientY, moved: false };
+            }}
+            onPointerMove={(event) => {
+              const gesture = addressGesture.current;
+              if (gesture && Math.hypot(event.clientX - gesture.x, event.clientY - gesture.y) > 8) {
+                gesture.moved = true;
+              }
+            }}
+            onPointerCancel={() => {
+              if (addressGesture.current) addressGesture.current.moved = true;
+            }}
+            onScroll={() => {
+              if (addressGesture.current) addressGesture.current.moved = true;
+            }}
+            onClick={() => {
+              if (!staticSelected && !addressGesture.current?.moved) setEditingAddress(true);
+              addressGesture.current = null;
+            }}
+            onKeyDown={(event) => {
+              if (!staticSelected && (event.key === 'Enter' || event.key === ' ')) {
+                event.preventDefault();
+                setEditingAddress(true);
+              }
+            }}>{address}</div>
           <input ref={addressRef} className="browser-address" aria-label={t('browser.address')}
+            hidden={!showAddressEditor}
             value={address} onChange={(event) => setAddress(event.target.value)}
+            onBlur={() => setEditingAddress(false)}
             readOnly={staticSelected}
             placeholder={t(homeActive ? 'browser.addressOrDirectoryPlaceholder' : 'browser.addressPlaceholder')}
             autoCapitalize="none" autoCorrect="off" spellCheck="false" />

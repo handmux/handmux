@@ -2233,7 +2233,10 @@ button.cmd-text { background: none; border: none; text-align: left; }
 }
 .browser-address-form:focus-within { border-color: var(--blue); box-shadow: 0 0 0 2px rgba(var(--blue-rgb),.2); }
 .browser-address-form svg { width: 15px; height: 15px; flex: 0 0 auto; color: #8694a2; }
-.browser-address { min-width: 0; width: 100%; border: 0; outline: 0; background: transparent; color: #f2f5f7; font: 13px ui-monospace, "SF Mono", Menlo, monospace; }
+.browser-address, .browser-address-display { min-width: 0; width: 100%; border: 0; outline: 0; background: transparent; color: #f2f5f7; font: 13px ui-monospace, "SF Mono", Menlo, monospace; }
+.browser-address-display { line-height: 36px; overflow-x: auto; overflow-y: hidden; white-space: pre; touch-action: pan-x; overscroll-behavior-x: contain; scrollbar-width: none; cursor: text; }
+.browser-address-display::-webkit-scrollbar { display: none; }
+.browser-address[hidden], .browser-address-display[hidden] { display: none; }
 .browser-address::placeholder { color: #707b86; }
 .browser-address-folder {
   width: 38px; height: 36px; margin-right: -9px; flex: 0 0 auto; display: grid; place-items: center;

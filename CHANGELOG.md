@@ -8,6 +8,10 @@ All notable changes to handmux. Format follows [Keep a Changelog](https://keepac
 
 - 对话页上下文弹窗的操作区新增“压缩会话”和“新会话”；按 Agent 支持的能力显示，新会话需确认，旧历史不会删除。
 
+### Changed
+
+- 网页浏览器地址栏默认支持左右滑动查看完整地址，轻点后进入编辑，查看长地址时无需弹出键盘。
+
 ### Fixed
 
 - 修复对话历史在临时查询失败后可能继续返回旧数据，以及重连时已完成回复短暂消失、需等后续消息才恢复的问题。

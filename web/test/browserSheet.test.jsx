@@ -95,6 +95,85 @@ const setInput = (input, value) => act(() => {
 });
 
 describe('BrowserSheet', () => {
+  it('shows the full address in a native scroll area and only focuses its editor on a tap', async () => {
+    const longUrl = `https://a.example/${'long-segment/'.repeat(20)}?last=value`;
+    await render(browser({ tabs: [{ ...tabs[0], originalUrl: longUrl }] }));
+    const display = document.querySelector('.browser-address-display');
+    const input = document.querySelector('.browser-address');
+    expect(display.textContent).toBe(longUrl);
+    expect(input.hidden).toBe(true);
+    expect(display.getAttribute('role')).toBe('button');
+    const pointer = (type, x) => {
+      const event = new Event(type, { bubbles: true });
+      Object.defineProperties(event, { clientX: { value: x }, clientY: { value: 10 } });
+      act(() => display.dispatchEvent(event));
+    };
+    pointer('pointerdown', 100);
+    pointer('pointermove', 50);
+    pointer('pointerup', 50);
+    click(display);
+    expect(input.hidden).toBe(true);
+    expect(document.activeElement).not.toBe(input);
+    pointer('pointerdown', 50);
+    pointer('pointerup', 50);
+    click(display);
+    expect(input.hidden).toBe(false);
+    expect(document.activeElement).toBe(input);
+    setInput(input, 'https://edited.example/path');
+    act(() => input.blur());
+    expect(input.hidden).toBe(true);
+    expect(document.querySelector('.browser-address-display').textContent).toBe('https://edited.example/path');
+    expect(styles).toMatch(/\.browser-address-display\s*\{[^}]*overflow-x:\s*auto;[^}]*overflow-y:\s*hidden;[^}]*white-space:\s*pre;/);
+  });
+
+  it('ignores cancelled or scrolling gestures and resets scrolling on navigation', async () => {
+    await render(browser());
+    const display = document.querySelector('.browser-address-display');
+    act(() => display.dispatchEvent(new Event('pointerdown', { bubbles: true })));
+    act(() => display.dispatchEvent(new Event('pointercancel', { bubbles: true })));
+    click(display);
+    expect(document.querySelector('.browser-address').hidden).toBe(true);
+    act(() => display.dispatchEvent(new Event('pointerdown', { bubbles: true })));
+    display.scrollLeft = 120;
+    act(() => display.dispatchEvent(new Event('scroll')));
+    click(display);
+    expect(document.querySelector('.browser-address').hidden).toBe(true);
+    await render(browser({ tabs: [{ ...tabs[0], originalUrl: 'https://changed.example/' }, tabs[1]] }));
+    expect(display.scrollLeft).toBe(0);
+    display.scrollLeft = 30;
+    await render(browser({ activeId: 'b' }));
+    expect(display.scrollLeft).toBe(0);
+  });
+
+  it('keeps static paths read-only and focuses the existing editor for a new tab', async () => {
+    await render(browser(), staticPreview({ selected: true,
+      shownPreview: { name: 'static-a', dir: '/home/u/site', status: 'ready' },
+    }));
+    click(document.querySelector('.browser-address-display'));
+    expect(document.querySelector('.browser-address').hidden).toBe(true);
+    expect(document.activeElement).not.toBe(document.querySelector('.browser-address'));
+    const model = browser({ historyActive: true, activeId: null });
+    await render(model);
+    const frames = [];
+    vi.spyOn(window, 'requestAnimationFrame').mockImplementation((callback) => { frames.push(callback); return 1; });
+    click(document.querySelector('button[aria-label="新建标签页"]'));
+    act(() => frames.forEach((callback) => callback(0)));
+    expect(document.activeElement).toBe(document.querySelector('.browser-address'));
+    expect(document.querySelector('.browser-address').hidden).toBe(false);
+  });
+
+  it('supports keyboard editing and resets the address view when switching tabs', async () => {
+    await render(browser());
+    const display = document.querySelector('.browser-address-display');
+    act(() => display.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })));
+    expect(document.activeElement).toBe(document.querySelector('.browser-address'));
+    await render(browser({ activeId: 'b' }));
+    expect(document.querySelector('.browser-address').hidden).toBe(true);
+    expect(document.querySelector('.browser-address-display').textContent).toBe(tabs[1].originalUrl);
+    await render(browser({ historyActive: true, activeId: null }));
+    expect(document.querySelector('.browser-address').hidden).toBe(false);
+  });
+
   it('puts directory selection inside the Home address row without a running list', async () => {
     const preview = staticPreview();
     await render(browser({ historyActive: true, activeId: null }), preview);
