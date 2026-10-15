@@ -300,6 +300,26 @@ describe('BrowserSheet', () => {
     expect(preview.deactivate).toHaveBeenCalled();
   });
 
+  it('keeps mode, address and actions in one compact toolbar, with proxy guidance after menu actions', async () => {
+    await render(browser());
+    const nav = document.querySelector('.browser-nav');
+    expect(nav.querySelector('.browser-mode-segment')).not.toBeNull();
+    expect(nav.querySelector('.browser-address-form')).not.toBeNull();
+    expect(nav.querySelector('.browser-address-form > svg')).toBeNull();
+    expect(document.querySelector('.browser-mode-row')).toBeNull();
+    expect(styles).toMatch(/\.browser-mode-segment\s*\{[^}]*flex:\s*0 0 auto/);
+    expect(styles).toMatch(/\.browser-mode-segment button\s*\{[^}]*min-width:\s*44px/);
+    expect(styles).toMatch(/\.browser-address-form\s*\{[^}]*min-width:\s*0/);
+    expect(styles).not.toMatch(/\.browser-nav-button\s*\{[^}]*width:\s*36px/);
+    click(document.querySelector('button[aria-label="网页预览器菜单"]'));
+    const menu = document.querySelector('.browser-options-card');
+    expect(menu.firstElementChild.classList.contains('browser-width-row')).toBe(true);
+    expect(menu.lastElementChild.classList.contains('browser-options-footer')).toBe(true);
+    expect(menu.lastElementChild.querySelector('.browser-proxy-limit')).not.toBeNull();
+    expect(styles).toMatch(/\.browser-options-footer\s*\{[^}]*padding:\s*12px 4px/);
+    expect(styles).not.toMatch(/\.browser-options-hint\s*\{[^}]*margin:\s*-/);
+  });
+
   it('keeps unavailable proxy visible with a reason in the permanent selector', async () => {
     await render(browser({ proxyAvailable: false, historyActive: true }));
     const modes = [...document.querySelectorAll('.browser-mode-segment button')];
@@ -478,8 +498,8 @@ describe('BrowserSheet', () => {
     await render(browser());
     const sheet = document.querySelector('.browser-sheet');
     expect(sheet.children[0].classList.contains('browser-tabs')).toBe(true);
-    expect(sheet.children[1].classList.contains('browser-mode-row')).toBe(true);
-    expect(sheet.children[2].classList.contains('browser-nav')).toBe(true);
+    expect(sheet.children[1].classList.contains('browser-nav')).toBe(true);
+    expect(document.querySelector('.browser-mode-row')).toBeNull();
     const tabButtons = [...document.querySelectorAll('[role="tab"]')];
     expect(tabButtons.map((node) => node.textContent)).toEqual(['', 'Alpha', 'Beta']);
     const recent = document.querySelector('.browser-history-tab');

@@ -698,17 +698,16 @@ export default function BrowserSheet({ browser, staticPreview }: BrowserSheetPro
           onClick={() => { setOptionsOpen(false); setOpen(false); }}><ChevronDownIcon /></button>
       </div>
 
-      <div className="browser-mode-row" {...(clearConfirmation ? { inert: '' as const } : {})}>
+      <div className="browser-nav" {...(clearConfirmation ? { inert: '' as const } : {})}>
         <div className="browser-mode-segment" role="group" aria-label={t('browser.switchMode')}>
           <button type="button" aria-label={t('browser.directMode')} aria-pressed={menuMode === 'direct'} onClick={() => chooseMode('direct')}>{t('browser.directBadge')}</button>
           <button type="button" aria-label={t('browser.proxyMode')} aria-pressed={menuMode === 'proxy'} disabled={!proxyAvailable}
             aria-describedby={!proxyAvailable ? 'browser-proxy-unavailable' : undefined}
+            title={!proxyAvailable ? t('browser.proxyUnavailable') : undefined}
             onClick={() => chooseMode('proxy')}>{t('browser.proxyBadge')}</button>
           <button type="button" aria-label={t('browser.staticMode')} aria-pressed={menuMode === 'static'} onClick={() => chooseMode('static')}>{t('browser.staticBadge')}</button>
         </div>
-        {!proxyAvailable && <p id="browser-proxy-unavailable" className="browser-mode-hint">{t('browser.proxyUnavailable')}</p>}
-      </div>
-      <div className="browser-nav" {...(clearConfirmation ? { inert: '' as const } : {})}>
+        {!proxyAvailable && <span id="browser-proxy-unavailable" hidden>{t('browser.proxyUnavailable')}</span>}
         <form className={`browser-address-form${staticMode ? ' static' : ''}`} onSubmit={submitAddress}
             onPointerDownCapture={(event) => {
               addressGesture.current = { x: event.clientX, y: event.clientY, moved: false };
@@ -728,7 +727,7 @@ export default function BrowserSheet({ browser, staticPreview }: BrowserSheetPro
             if (!addressGesture.current?.moved) void openDirPicker();
             addressGesture.current = null;
           }}>
-          {staticMode ? <FolderIcon /> : <GlobeIcon />}
+          {staticMode && <FolderIcon />}
           <div ref={addressDisplayRef} className="browser-address-display"
             hidden={showAddressEditor} role="button"
             tabIndex={showAddressEditor ? -1 : 0}
@@ -769,7 +768,6 @@ export default function BrowserSheet({ browser, staticPreview }: BrowserSheetPro
           <>
             <div className="browser-options-backdrop" onClick={() => setOptionsOpen(false)} />
             <div className="browser-options-card" role="dialog" aria-label={t('browser.menu')}>
-              {proxied && <p className="browser-options-hint browser-proxy-limit">{t('browser.proxyLimitHint')}</p>}
               <div className="browser-options-row browser-width-row">
                 <strong>{t('browser.pageWidth')}</strong>
                 <div className="browser-view-segment" role="group" aria-label={t('browser.viewMode')}>
@@ -898,6 +896,10 @@ export default function BrowserSheet({ browser, staticPreview }: BrowserSheetPro
                   }}>{t('browser.about')}</button>
                 </div>
               )}
+              {(proxied || !proxyAvailable) && <div className="browser-options-footer">
+                {proxied && <p className="browser-proxy-limit">{t('browser.proxyLimitHint')}</p>}
+                {!proxyAvailable && <p>{t('browser.proxyUnavailable')}</p>}
+              </div>}
             </div>
           </>
         )}

@@ -2228,13 +2228,13 @@ button.cmd-text { background: none; border: none; text-align: left; }
 .browser-nav-button svg { width: 18px; height: 18px; }
 .browser-nav-button:disabled { color: #56616c; }
 .browser-address-form {
-  height: 38px; min-width: 72px; flex: 1; display: flex; align-items: center; gap: 7px;
-  padding: 0 10px; background: #2a2d33; border: 1px solid #343942; border-radius: 11px;
+  height: 44px; min-width: 0; flex: 1; display: flex; align-items: center; gap: 4px;
+  padding: 0 6px; background: #2a2d33; border: 1px solid #343942; border-radius: 11px;
 }
 .browser-address-form:focus-within { border-color: var(--blue); box-shadow: 0 0 0 2px rgba(var(--blue-rgb),.2); }
 .browser-address-form svg { width: 15px; height: 15px; flex: 0 0 auto; color: #8694a2; }
 .browser-address, .browser-address-display { min-width: 0; width: 100%; border: 0; outline: 0; background: transparent; color: #f2f5f7; font: 13px ui-monospace, "SF Mono", Menlo, monospace; }
-.browser-address-display { line-height: 36px; overflow-x: auto; overflow-y: hidden; white-space: pre; touch-action: pan-x; overscroll-behavior-x: contain; scrollbar-width: none; cursor: text; }
+.browser-address-display { line-height: 42px; overflow-x: auto; overflow-y: hidden; white-space: pre; touch-action: pan-x; overscroll-behavior-x: contain; scrollbar-width: none; cursor: text; }
 .browser-address-display::-webkit-scrollbar { display: none; }
 .browser-address[hidden], .browser-address-display[hidden] { display: none; }
 .browser-address::placeholder { color: #707b86; }
@@ -2273,26 +2273,26 @@ button.cmd-text { background: none; border: none; text-align: left; }
 .browser-options-row strong, .browser-options-section > strong,
 .browser-close-trigger strong, .browser-options-title strong { font-size: 14px; font-weight: 600; }
 .browser-options-row small, .browser-options-hint { color: #8f9aa6; font-size: 11px; line-height: 1.35; }
-.browser-options-hint { margin: -3px 10px 8px; }
 .browser-options-section { padding: 12px 2px; border-top: 1px solid rgba(255,255,255,.1); }
 .browser-options-card > .browser-options-row { border-top: 1px solid rgba(255,255,255,.1); }
-.browser-mode-row { flex: 0 0 auto; padding: 8px 10px 0; background: #1a1c20; }
-.browser-mode-hint { margin: 6px 2px 0; color: #99a4af; font-size: 12px; line-height: 1.4; }
+.browser-options-card > :first-child { border-top: 0; }
+.browser-options-footer { padding: 12px 4px; border-top: 1px solid rgba(255,255,255,.1); color: #8f9aa6; font-size: 11px; line-height: 1.5; }
+.browser-options-footer p { margin: 0; }
+.browser-options-footer p + p { margin-top: 8px; }
 .browser-address-chevron { display: flex; flex: 0 0 auto; color: #8694a2; }
 .browser-address-form.static .browser-address-display { cursor: pointer; }
 .browser-mode-segment {
-  min-height: 44px; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); padding: 3px;
+  min-height: 44px; flex: 0 0 auto; display: grid; grid-template-columns: repeat(3, 44px); padding: 2px;
   border-radius: 11px; background: #191c20;
 }
 .browser-mode-segment button {
-  min-height: 44px; padding: 0 12px; border: 0; border-radius: 9px;
-  background: transparent; color: #9aa5b1; font-size: 14px; font-weight: 600;
+  min-height: 44px; min-width: 44px; padding: 0 4px; border: 0; border-radius: 9px;
+  background: transparent; color: #9aa5b1; font-size: 13px; font-weight: 600;
 }
 .browser-mode-segment button[aria-pressed="true"] {
   background: #4b515a; color: #fff; box-shadow: 0 1px 4px rgba(0,0,0,.38);
 }
 .browser-mode-segment button:disabled { opacity: .45; }
-.browser-current-mode .browser-options-hint { margin: 0; }
 .browser-view-segment {
   display: inline-flex; padding: 2px; border-radius: 9px; background: #191c20;
 }
@@ -2440,7 +2440,6 @@ button.cmd-text { background: none; border: none; text-align: left; }
 .browser-entry.static > svg { color: var(--green); }
 @media (max-width: 430px) {
   .browser-nav { gap: 1px; padding-inline: 3px; }
-  .browser-nav-button { width: 36px; }
   .browser-tab { padding-inline: 10px; }
 }
 @media (prefers-reduced-motion: reduce) {
