@@ -84,6 +84,16 @@ const render = (model, preview) => act(() => root.render(
   <BrowserSheet browser={model} staticPreview={preview} />,
 ));
 const click = (node) => act(() => node.dispatchEvent(new MouseEvent('click', { bubbles: true })));
+const selectMode = (index) => {
+  const trigger = document.querySelector('.browser-mode-switch');
+  if (trigger.getAttribute('aria-expanded') !== 'true') click(trigger);
+  const menu = document.querySelector('.browser-mode-menu');
+  expect(menu.hidden).toBe(false);
+  const choice = menu.querySelectorAll('button')[index];
+  expect(choice.disabled).toBe(false);
+  click(choice);
+  expect(menu.hidden).toBe(true);
+};
 const clickAndFlush = (node) => act(async () => {
   node.dispatchEvent(new MouseEvent('click', { bubbles: true }));
   await Promise.resolve();
@@ -179,18 +189,18 @@ describe('BrowserSheet', () => {
     const model = browser();
     const preview = staticPreview();
     await render(model, preview);
-    const modes = [...document.querySelectorAll('.browser-mode-segment button')];
+    const modes = [...document.querySelectorAll('.browser-mode-menu button')];
     expect(modes.map((node) => node.textContent)).toEqual(['直连', '代理', '静态']);
     expect(document.querySelector('.browser-address-mode')).toBeNull();
     expect(document.querySelector('.browser-address-folder')).toBeNull();
-    click(modes[2]);
+    selectMode(2);
     expect(modes[2].getAttribute('aria-pressed')).toBe('true');
     expect(document.querySelector('.browser-address-display').textContent).toBe('选择目录');
     expect(document.querySelector('.browser-address').hidden).toBe(true);
     expect(model.switchTab).not.toHaveBeenCalled();
     expect(preview.deactivate).not.toHaveBeenCalled();
     expect(preview.startPreview).not.toHaveBeenCalled();
-    click(modes[0]);
+    selectMode(0);
     expect(model.switchTab).toHaveBeenCalledWith('a');
     expect(model.navigateTab).toHaveBeenCalledWith('a', 'https://a.example/', 'direct');
     expect(document.querySelector('.browser-address').value).not.toMatch(/^\//);
@@ -219,17 +229,17 @@ describe('BrowserSheet', () => {
       })} />;
     }
     await act(() => root.render(<StatefulSheet />));
-    const modes = () => [...document.querySelectorAll('.browser-mode-segment button')];
-    click(modes()[2]);
+    const modes = () => [...document.querySelectorAll('.browser-mode-menu button')];
+    selectMode(2);
     expect(document.querySelector('iframe[data-tab-id="a"]').closest('.browser-pane').classList.contains('active')).toBe(true);
-    await clickAndFlush(document.querySelector('.browser-address-form > svg'));
+    await clickAndFlush(document.querySelector('.browser-address-form'));
     expect(document.querySelector('.dirpick-card')).not.toBeNull();
     click(document.querySelector('.dirpick-card button[aria-label="关闭"]'));
     expect(start).not.toHaveBeenCalled();
     const display = document.querySelector('.browser-address-display');
     act(() => display.dispatchEvent(new Event('pointerdown', { bubbles: true })));
     act(() => display.dispatchEvent(new Event('pointercancel', { bubbles: true })));
-    const folder = document.querySelector('.browser-address-form > svg');
+    const folder = document.querySelector('.browser-address-form');
     act(() => folder.dispatchEvent(new Event('pointerdown', { bubbles: true })));
     await clickAndFlush(folder);
     await act(async () => { await Promise.resolve(); });
@@ -241,13 +251,13 @@ describe('BrowserSheet', () => {
     expect(document.querySelector('.browser-address-display').textContent).toBe('选择目录');
     click(document.querySelector('button[aria-label="新建标签页"]'));
     expect(document.querySelector('.browser-address').hidden).toBe(true);
-    click(modes()[0]);
+    selectMode(0);
     expect(modes()[0].getAttribute('aria-pressed')).toBe('true');
     expect(document.querySelector('.browser-address').value).toBe('https://a.example/');
     expect(document.querySelector('iframe[data-tab-id="a"]').closest('.browser-pane').classList.contains('active')).toBe(true);
     click(document.querySelector('.browser-tab-wrap.static .browser-tab'));
     expect(modes()[2].getAttribute('aria-pressed')).toBe('true');
-    click(modes()[1]);
+    selectMode(1);
     expect(modes()[1].getAttribute('aria-pressed')).toBe('true');
   });
 
@@ -257,9 +267,9 @@ describe('BrowserSheet', () => {
     const model = browser();
     const preview = staticPreview({ pane: '%1' });
     await render(model, preview);
-    click(document.querySelectorAll('.browser-mode-segment button')[2]);
+    selectMode(2);
     click(document.querySelector('.browser-address-display'));
-    if (change === 'mode') click(document.querySelectorAll('.browser-mode-segment button')[0]);
+    if (change === 'mode') selectMode(0);
     else await render({ ...model, ...(change === 'tab' ? { activeId: 'b' } : { open: false }) }, preview);
     await act(async () => { resolveCwd({ cwd: '/home/u/site' }); await Promise.resolve(); });
     expect(document.querySelector('.dirpick-card')).toBeNull();
@@ -268,11 +278,11 @@ describe('BrowserSheet', () => {
   it('returns from an empty static draft to a URL Home without submitting a directory', async () => {
     const model = browser({ tabs: [], activeId: null, historyActive: true });
     await render(model, staticPreview());
-    const modes = [...document.querySelectorAll('.browser-mode-segment button')];
-    click(modes[2]);
+    const modes = [...document.querySelectorAll('.browser-mode-menu button')];
+    selectMode(2);
     submit(document.querySelector('.browser-address-form'));
     expect(model.openUrl).not.toHaveBeenCalled();
-    click(modes[1]);
+    selectMode(1);
     expect(model.switchTab).toHaveBeenCalledWith('history');
     expect(document.querySelector('.browser-address').hidden).toBe(false);
     expect(document.querySelector('.browser-address').value).toBe('');
@@ -293,22 +303,72 @@ describe('BrowserSheet', () => {
       })} staticPreview={preview} />;
     }
     await act(() => root.render(<HistorySheet />));
-    click(document.querySelectorAll('.browser-mode-segment button')[2]);
+    selectMode(2);
     click(document.querySelector('.browser-history-main'));
-    expect(document.querySelectorAll('.browser-mode-segment button')[0].getAttribute('aria-pressed')).toBe('true');
+    expect(document.querySelectorAll('.browser-mode-menu button')[0].getAttribute('aria-pressed')).toBe('true');
     expect(document.querySelector('.browser-address-display').textContent).toBe(tabs[0].originalUrl);
     expect(preview.deactivate).toHaveBeenCalled();
+  });
+
+  it('uses one current-mode icon and opens an exclusive dismissible mode picker', async () => {
+    const model = browser();
+    await render(model);
+    const trigger = document.querySelector('.browser-mode-switch');
+    expect(trigger).not.toBeNull();
+    expect(trigger.textContent).toBe('');
+    expect(trigger.getAttribute('aria-label')).toContain('经电脑代理');
+    expect(trigger.getAttribute('aria-expanded')).toBe('false');
+    click(trigger);
+    const menu = document.querySelector('.browser-mode-menu');
+    expect(menu.hidden).toBe(false);
+    expect(document.activeElement.getAttribute('aria-pressed')).toBe('true');
+    expect(menu.querySelector('[aria-pressed="true"] svg')).not.toBeNull();
+    act(() => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
+    expect(menu.hidden).toBe(true);
+    expect(document.activeElement).toBe(trigger);
+    click(document.querySelector('button[aria-label="网页预览器菜单"]'));
+    click(trigger);
+    expect(document.querySelector('.browser-options-card')).toBeNull();
+    click(document.querySelector('.browser-mode-backdrop'));
+    expect(menu.hidden).toBe(true);
+    expect(document.activeElement).toBe(trigger);
+    click(trigger);
+    click(menu.querySelector('button'));
+    expect(menu.hidden).toBe(true);
+    expect(model.navigateTab).toHaveBeenCalledWith('a', tabs[0].originalUrl, 'direct');
+    expect(document.activeElement).toBe(trigger);
+  });
+
+  it('moves focus through enabled modes and dismisses on toolbar navigation or lifecycle changes', async () => {
+    const model = browser({ proxyAvailable: false });
+    await render(model);
+    const trigger = document.querySelector('.browser-mode-switch');
+    click(trigger);
+    const menu = document.querySelector('.browser-mode-menu');
+    const choices = [...menu.querySelectorAll('button')];
+    expect(document.activeElement).toBe(choices[0]);
+    act(() => choices[0].dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })));
+    expect(document.activeElement).toBe(choices[2]);
+    act(() => choices[2].dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true })));
+    expect(menu.hidden).toBe(true);
+    expect(document.activeElement).toBe(trigger);
+    click(trigger);
+    await render({ ...model, activeId: 'b' });
+    expect(menu.hidden).toBe(true);
+    click(trigger);
+    await render({ ...model, activeId: 'b', open: false });
+    expect(menu.hidden).toBe(true);
   });
 
   it('keeps mode, address and actions in one compact toolbar, with proxy guidance after menu actions', async () => {
     await render(browser());
     const nav = document.querySelector('.browser-nav');
-    expect(nav.querySelector('.browser-mode-segment')).not.toBeNull();
+    expect(nav.querySelector('.browser-mode-switch')).not.toBeNull();
     expect(nav.querySelector('.browser-address-form')).not.toBeNull();
     expect(nav.querySelector('.browser-address-form > svg')).toBeNull();
     expect(document.querySelector('.browser-mode-row')).toBeNull();
-    expect(styles).toMatch(/\.browser-mode-segment\s*\{[^}]*flex:\s*0 0 auto/);
-    expect(styles).toMatch(/\.browser-mode-segment button\s*\{[^}]*min-width:\s*44px/);
+    expect(document.querySelector('.browser-mode-segment')).toBeNull();
+    expect(styles).toMatch(/\.browser-nav-button\s*\{[^}]*width:\s*44px;[^}]*height:\s*44px/);
     expect(styles).toMatch(/\.browser-address-form\s*\{[^}]*min-width:\s*0/);
     expect(styles).not.toMatch(/\.browser-nav-button\s*\{[^}]*width:\s*36px/);
     click(document.querySelector('button[aria-label="网页预览器菜单"]'));
@@ -322,13 +382,13 @@ describe('BrowserSheet', () => {
 
   it('keeps unavailable proxy visible with a reason in the permanent selector', async () => {
     await render(browser({ proxyAvailable: false, historyActive: true }));
-    const modes = [...document.querySelectorAll('.browser-mode-segment button')];
+    const modes = [...document.querySelectorAll('.browser-mode-menu button')];
     expect(modes).toHaveLength(3);
     expect(modes[1].disabled).toBe(true);
     expect(document.getElementById(modes[1].getAttribute('aria-describedby')).textContent)
       .toContain('handmux setup');
     click(document.querySelector('button[aria-label="网页预览器菜单"]'));
-    expect(document.querySelector('.browser-options-card .browser-mode-segment')).toBeNull();
+    expect(document.querySelector('.browser-options-card .browser-mode-menu')).toBeNull();
   });
 
   it('renders a static directory as a green tab with only view and zoom in its menu', async () => {
@@ -613,12 +673,12 @@ describe('BrowserSheet', () => {
     expect(alpha.querySelector('.browser-mode-badge')).toBeNull();
     expect(alpha.closest('.browser-tab-wrap').classList.contains('proxy')).toBe(true);
     click(document.querySelector('button[aria-label="网页预览器菜单"]'));
-    const modeButtons = [...document.querySelectorAll('.browser-mode-segment button')];
+    const modeButtons = [...document.querySelectorAll('.browser-mode-menu button')];
     expect(modeButtons.map((node) => node.textContent)).toEqual(['直连', '代理', '静态']);
     expect(modeButtons.map((node) => node.getAttribute('aria-pressed'))).toEqual(['false', 'true', 'false']);
     expect(document.querySelector('.browser-proxy-limit').textContent)
       .toBe('电脑代理会转发并改写网页，不保证兼容所有网站。');
-    click(modeButtons[0]);
+    selectMode(0);
     expect(model.navigateTab).toHaveBeenCalledWith('a', 'https://a.example/', 'direct');
   });
 
@@ -1157,12 +1217,12 @@ describe('BrowserSheet', () => {
       proxyLoginRetentionDays: 30,
     });
     await render(model);
-    expect(document.querySelectorAll('.browser-nav > button')).toHaveLength(2);
+    expect(document.querySelectorAll('.browser-nav > button')).toHaveLength(3);
     const menuButton = document.querySelector('button[aria-label="网页预览器菜单"]');
     expect(menuButton.querySelector('svg')).not.toBeNull();
     expect(menuButton.textContent).toBe('');
     click(menuButton);
-    const card = document.querySelector('.browser-options-card');
+    let card = document.querySelector('.browser-options-card');
     expect(card).not.toBeNull();
     expect(card.textContent).not.toContain('连接方式');
     expect(card.textContent).not.toContain('当前网页');
@@ -1187,12 +1247,15 @@ describe('BrowserSheet', () => {
       '清理本站代理 Cookie', '?',
     ]);
 
-    const modeButtons = [...document.querySelectorAll('.browser-mode-segment button')];
+    const modeButtons = [...document.querySelectorAll('.browser-mode-menu button')];
     expect(modeButtons.map((node) => node.textContent)).toEqual(['直连', '代理', '静态']);
-    const segmentRule = styles.match(/\.browser-mode-segment\s*\{([^}]*)\}/)?.[1] || '';
+    const segmentRule = styles.match(/\.browser-mode-option\s*\{([^}]*)\}/)?.[1] || '';
     expect(segmentRule).toMatch(/min-height:\s*44px/);
-    click(modeButtons[0]);
+    selectMode(0);
     expect(model.navigateTab).toHaveBeenCalledWith('a', 'https://a.example/', 'direct');
+    click(document.querySelector('button[aria-label="网页预览器菜单"]'));
+    card = document.querySelector('.browser-options-card');
+    expect(card).not.toBeNull();
 
     const widthButtons = [...card.querySelectorAll('.browser-width-row button')];
     expect(widthButtons.map((node) => node.textContent)).toEqual(['窄屏', '宽屏']);
@@ -1293,11 +1356,11 @@ describe('BrowserSheet', () => {
     await render(model);
     click(document.querySelector('button[aria-label="网页预览器菜单"]'));
 
-    const modeButtons = [...document.querySelectorAll('.browser-mode-segment button')];
+    const modeButtons = [...document.querySelectorAll('.browser-mode-menu button')];
     expect(modeButtons.map((node) => node.disabled)).toEqual([false, false, false]);
     expect(modeButtons.map((node) => node.getAttribute('aria-pressed'))).toEqual(['true', 'false', 'false']);
     expect(document.querySelector('.browser-address-mode')).toBeNull();
-    click(modeButtons[1]);
+    selectMode(1);
     expect(modeButtons.map((node) => node.getAttribute('aria-pressed'))).toEqual(['false', 'true', 'false']);
     expect(document.querySelector('.browser-address-mode')).toBeNull();
 

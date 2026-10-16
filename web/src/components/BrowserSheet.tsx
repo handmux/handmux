@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import {
   ChevronDownIcon,
+  CheckIcon,
+  MonitorIcon,
   FolderIcon,
   GlobeIcon,
   HomeIcon,
@@ -14,6 +16,7 @@ import { BROWSER_CLOSE_AFTER_OPTIONS } from '../browserState.js';
 import { fetchPaneCwd } from '../api.js';
 import { t } from '../i18n';
 import { useModalFocusTrap } from '../hooks/useModalFocusTrap.js';
+import { useEscapeLayer } from '../hooks/useEscapeLayer.js';
 import DirPicker from './DirPicker.jsx';
 import { OverlayPortal } from '../overlays/OverlayHost.js';
 import type { BrowserCloseAfter, BrowserHistoryEntry, BrowserMode } from '../browserState.js';
@@ -121,6 +124,9 @@ export default function BrowserSheet({ browser, staticPreview }: BrowserSheetPro
   const [editingAddress, setEditingAddress] = useState(false);
   const showAddressEditor = !staticMode && (homeActive || editingAddress || !webActive);
   const [optionsOpen, setOptionsOpen] = useState(false);
+  const [modeOpen, setModeOpen] = useState(false);
+  const modeTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const modeMenuRef = useRef<HTMLDivElement | null>(null);
   const [timeOpen, setTimeOpen] = useState(false);
   const [pageWidth, setPageWidth] = useState<'narrow' | 'wide'>('narrow');
   const [bodySize, setBodySize] = useState({ width: 0, height: 0 });
@@ -191,9 +197,22 @@ export default function BrowserSheet({ browser, staticPreview }: BrowserSheetPro
 
   useEffect(() => {
     setOptionsOpen(false);
+    setModeOpen(false);
     setTimeOpen(false);
     if (!homeActive) setHistoryModeOpen(null);
   }, [activeId, homeActive, open, staticActive?.name]);
+
+  useLayoutEffect(() => {
+    if (!modeOpen) return;
+    const choices = modeMenuRef.current?.querySelectorAll<HTMLButtonElement>('button:not(:disabled)');
+    const selected = modeMenuRef.current?.querySelector<HTMLButtonElement>('button[aria-pressed="true"]:not(:disabled)');
+    (selected || choices?.[0])?.focus();
+  }, [modeOpen]);
+
+  useEscapeLayer(modeOpen && open, () => {
+    setModeOpen(false);
+    modeTriggerRef.current?.focus();
+  });
 
   useEffect(() => {
     setPageZoom(1);
@@ -699,13 +718,44 @@ export default function BrowserSheet({ browser, staticPreview }: BrowserSheetPro
       </div>
 
       <div className="browser-nav" {...(clearConfirmation ? { inert: '' as const } : {})}>
-        <div className="browser-mode-segment" role="group" aria-label={t('browser.switchMode')}>
-          <button type="button" aria-label={t('browser.directMode')} aria-pressed={menuMode === 'direct'} onClick={() => chooseMode('direct')}>{t('browser.directBadge')}</button>
-          <button type="button" aria-label={t('browser.proxyMode')} aria-pressed={menuMode === 'proxy'} disabled={!proxyAvailable}
-            aria-describedby={!proxyAvailable ? 'browser-proxy-unavailable' : undefined}
-            title={!proxyAvailable ? t('browser.proxyUnavailable') : undefined}
-            onClick={() => chooseMode('proxy')}>{t('browser.proxyBadge')}</button>
-          <button type="button" aria-label={t('browser.staticMode')} aria-pressed={menuMode === 'static'} onClick={() => chooseMode('static')}>{t('browser.staticBadge')}</button>
+        <button ref={modeTriggerRef} type="button" className={`browser-nav-button browser-mode-switch ${menuMode}`}
+          aria-label={`${t('browser.switchMode')}：${t(menuMode === 'static' ? 'browser.staticMode' : menuMode === 'proxy' ? 'browser.proxyMode' : 'browser.directMode')}`}
+          title={t(menuMode === 'static' ? 'browser.staticMode' : menuMode === 'proxy' ? 'browser.proxyMode' : 'browser.directMode')}
+          aria-expanded={modeOpen} aria-haspopup="dialog" aria-controls="browser-mode-picker"
+          onClick={() => { setOptionsOpen(false); setModeOpen((value) => !value); }}>
+          {menuMode === 'static' ? <FolderIcon /> : menuMode === 'proxy' ? <MonitorIcon /> : <GlobeIcon />}
+        </button>
+        {modeOpen && open && <div className="browser-mode-backdrop" onClick={() => { setModeOpen(false); modeTriggerRef.current?.focus(); }} />}
+        <div ref={modeMenuRef} id="browser-mode-picker" className="browser-mode-menu" role="dialog"
+          aria-label={t('browser.switchMode')} hidden={!modeOpen || !open}
+          onKeyDown={(event) => {
+            if (event.key === 'Tab') {
+              setModeOpen(false);
+              modeTriggerRef.current?.focus();
+              return;
+            }
+            if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
+            event.preventDefault();
+            const choices = [...event.currentTarget.querySelectorAll<HTMLButtonElement>('button:not(:disabled)')];
+            const index = choices.indexOf(document.activeElement as HTMLButtonElement);
+            const next = event.key === 'Home' ? 0 : event.key === 'End' ? choices.length - 1
+              : (index + (event.key === 'ArrowDown' ? 1 : -1) + choices.length) % choices.length;
+            choices[next]?.focus();
+          }}>
+          {(['direct', 'proxy', 'static'] as const).map((mode) => <button key={mode} type="button"
+            className="browser-mode-option" aria-pressed={menuMode === mode}
+            disabled={mode === 'proxy' && !proxyAvailable}
+            aria-describedby={mode === 'proxy' && !proxyAvailable ? 'browser-proxy-unavailable' : undefined}
+            onClick={() => {
+              chooseMode(mode);
+              setModeOpen(false);
+              modeTriggerRef.current?.focus();
+            }}>
+            {mode === 'static' ? <FolderIcon /> : mode === 'proxy' ? <MonitorIcon /> : <GlobeIcon />}
+            <span>{t(mode === 'static' ? 'browser.staticBadge' : mode === 'proxy' ? 'browser.proxyBadge' : 'browser.directBadge')}</span>
+            {menuMode === mode && <CheckIcon />}
+          </button>)}
+          {!proxyAvailable && <p>{t('browser.proxyUnavailable')}</p>}
         </div>
         {!proxyAvailable && <span id="browser-proxy-unavailable" hidden>{t('browser.proxyUnavailable')}</span>}
         <form className={`browser-address-form${staticMode ? ' static' : ''}`} onSubmit={submitAddress}
@@ -727,7 +777,6 @@ export default function BrowserSheet({ browser, staticPreview }: BrowserSheetPro
             if (!addressGesture.current?.moved) void openDirPicker();
             addressGesture.current = null;
           }}>
-          {staticMode && <FolderIcon />}
           <div ref={addressDisplayRef} className="browser-address-display"
             hidden={showAddressEditor} role="button"
             tabIndex={showAddressEditor ? -1 : 0}
@@ -763,7 +812,7 @@ export default function BrowserSheet({ browser, staticPreview }: BrowserSheetPro
           {activeLoading && proxied ? <StopIcon /> : <RefreshIcon />}
         </button>
         <button className="browser-nav-button browser-options-trigger" aria-label={t('browser.menu')}
-          aria-expanded={optionsOpen} onClick={() => setOptionsOpen((value) => !value)}><MoreHorizontalIcon /></button>
+          aria-expanded={optionsOpen} onClick={() => { setModeOpen(false); setOptionsOpen((value) => !value); }}><MoreHorizontalIcon /></button>
         {optionsOpen && open && (
           <>
             <div className="browser-options-backdrop" onClick={() => setOptionsOpen(false)} />
