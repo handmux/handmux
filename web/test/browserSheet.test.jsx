@@ -628,10 +628,10 @@ describe('BrowserSheet', () => {
     expect(styles).toMatch(/\.browser-tab\s*\{[^}]*min-width:\s*0/);
     expect(styles).toMatch(/\.browser-tab-wrap\.active \.browser-tab\s*\{[^}]*padding-right:\s*0/);
     expect(styles).toMatch(/\.browser-history-tab, \.browser-head-button\s*\{[^}]*flex:\s*0 0 44px[^}]*width:\s*44px/);
-    expect(styles).toMatch(/\.browser-tab-wrap\s*\{[^}]*--browser-tab-accent:\s*var\(--blue\)/);
-    expect(styles).toMatch(/\.browser-tab-wrap\.proxy\s*\{[^}]*--browser-tab-accent:\s*#e8892f/);
-    expect(styles).toMatch(/\.browser-tab-wrap\.static\s*\{[^}]*--browser-tab-accent:\s*var\(--green\)/);
-    expect(styles).toMatch(/\.browser-tab-wrap\.active\s*\{[^}]*inset 0 2px 0 var\(--browser-tab-accent\)[^}]*inset 0 -2px 0 var\(--browser-tab-accent\)/);
+    expect(styles).toMatch(/\.browser-tab-wrap, \.browser-mode-switch, \.browser-mode-option\s*\{[^}]*--browser-mode-accent:\s*var\(--blue\)/);
+    expect(styles).toMatch(/\.browser-tab-wrap\.proxy, \.browser-mode-switch\.proxy, \.browser-mode-option\.proxy\s*\{[^}]*--browser-mode-accent:\s*#e8892f/);
+    expect(styles).toMatch(/\.browser-tab-wrap\.static, \.browser-mode-switch\.static, \.browser-mode-option\.static\s*\{[^}]*--browser-mode-accent:\s*var\(--green\)/);
+    expect(styles).toMatch(/\.browser-tab-wrap\.active\s*\{[^}]*inset 0 2px 0 var\(--browser-mode-accent\)[^}]*inset 0 -2px 0 var\(--browser-mode-accent\)/);
   });
 
   it('scrolls a newly active tab into view', async () => {
@@ -1249,7 +1249,7 @@ describe('BrowserSheet', () => {
 
     const modeButtons = [...document.querySelectorAll('.browser-mode-menu button')];
     expect(modeButtons.map((node) => node.textContent)).toEqual(['直连', '代理', '静态']);
-    const segmentRule = styles.match(/\.browser-mode-option\s*\{([^}]*)\}/)?.[1] || '';
+    const segmentRule = styles.match(/\n\.browser-mode-option\s*\{([^}]*)\}/)?.[1] || '';
     expect(segmentRule).toMatch(/min-height:\s*44px/);
     selectMode(0);
     expect(model.navigateTab).toHaveBeenCalledWith('a', 'https://a.example/', 'direct');

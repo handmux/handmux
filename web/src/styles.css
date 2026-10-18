@@ -2177,16 +2177,16 @@ button.cmd-text { background: none; border: none; text-align: left; }
 }
 .browser-tabs-scroll { display: flex; flex: 1; min-width: 0; overflow-x: auto; scrollbar-width: none; -webkit-overflow-scrolling: touch; }
 .browser-tabs-scroll::-webkit-scrollbar { display: none; }
+.browser-tab-wrap, .browser-mode-switch, .browser-mode-option { --browser-mode-accent: var(--blue); }
+.browser-tab-wrap.proxy, .browser-mode-switch.proxy, .browser-mode-option.proxy { --browser-mode-accent: #e8892f; }
+.browser-tab-wrap.static, .browser-mode-switch.static, .browser-mode-option.static { --browser-mode-accent: var(--green); }
 .browser-tab-wrap {
-  --browser-tab-accent: var(--blue);
   display: inline-flex; align-items: stretch; flex: 0 0 auto; min-width: 52px; max-width: 44vw;
-  border-right: 1px solid #1d2630; box-shadow: inset 0 2px 0 var(--browser-tab-accent);
+  border-right: 1px solid #1d2630; box-shadow: inset 0 2px 0 var(--browser-mode-accent);
 }
-.browser-tab-wrap.proxy { --browser-tab-accent: #e8892f; }
-.browser-tab-wrap.static { --browser-tab-accent: var(--green); }
 .browser-tab-wrap.active {
   background: #0b0f14;
-  box-shadow: inset 0 2px 0 var(--browser-tab-accent), inset 0 -2px 0 var(--browser-tab-accent);
+  box-shadow: inset 0 2px 0 var(--browser-mode-accent), inset 0 -2px 0 var(--browser-mode-accent);
 }
 .browser-history-tab.active { background: #0b0f14; box-shadow: inset 0 -2px 0 var(--blue); }
 .browser-tab {
@@ -2254,8 +2254,11 @@ button.cmd-text { background: none; border: none; text-align: left; }
 .browser-mode-option svg { width: 18px; height: 18px; flex: 0 0 auto; }
 .browser-mode-option span { flex: 1; }
 .browser-mode-switch svg { width: 20px; height: 20px; }
-.browser-mode-switch.static { color: #68d88b; }
-.browser-mode-option.proxy { color: #f2a450; }
+.browser-mode-switch { gap: 2px; color: var(--browser-mode-accent); }
+.browser-mode-chevron { display: flex; }
+.browser-mode-switch .browser-mode-chevron svg { width: 10px; height: 10px; }
+.browser-mode-option > svg:first-child { color: var(--browser-mode-accent); }
+.browser-mode-option:disabled > svg:first-child { color: inherit; }
 .browser-mode-option[aria-pressed="true"] { background: rgba(var(--blue-rgb),.18); }
 .browser-mode-option:disabled { color: #666f79; }
 .browser-mode-menu p, .browser-history-mode-menu p { margin: 4px 8px 6px; color: #929ba5; font-size: 12px; line-height: 1.35; }

@@ -724,6 +724,7 @@ export default function BrowserSheet({ browser, staticPreview }: BrowserSheetPro
           aria-expanded={modeOpen} aria-haspopup="dialog" aria-controls="browser-mode-picker"
           onClick={() => { setOptionsOpen(false); setModeOpen((value) => !value); }}>
           {menuMode === 'static' ? <FolderIcon /> : menuMode === 'proxy' ? <MonitorIcon /> : <GlobeIcon />}
+          <span className="browser-mode-chevron" aria-hidden="true"><ChevronDownIcon /></span>
         </button>
         {modeOpen && open && <div className="browser-mode-backdrop" onClick={() => { setModeOpen(false); modeTriggerRef.current?.focus(); }} />}
         <div ref={modeMenuRef} id="browser-mode-picker" className="browser-mode-menu" role="dialog"
@@ -743,7 +744,7 @@ export default function BrowserSheet({ browser, staticPreview }: BrowserSheetPro
             choices[next]?.focus();
           }}>
           {(['direct', 'proxy', 'static'] as const).map((mode) => <button key={mode} type="button"
-            className="browser-mode-option" aria-pressed={menuMode === mode}
+            className={`browser-mode-option ${mode}`} aria-pressed={menuMode === mode}
             disabled={mode === 'proxy' && !proxyAvailable}
             aria-describedby={mode === 'proxy' && !proxyAvailable ? 'browser-proxy-unavailable' : undefined}
             onClick={() => {
