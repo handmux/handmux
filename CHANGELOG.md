@@ -4,6 +4,10 @@ All notable changes to handmux. Format follows [Keep a Changelog](https://keepac
 
 ## [Unreleased]
 
+### Changed
+
+- 用量重置倒计时右侧新增括号显示具体重置时间，使用本地时区并隐藏年份。
+
 ## [0.35.0] - 2026-10-20
 
 ### Added

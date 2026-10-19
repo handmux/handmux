@@ -270,11 +270,14 @@ function winLabel(minutes: number | null | undefined): string {
 
 function fmtReset(resetsAt: number | null | undefined, nowMs: number): string {
   if (!resetsAt) return '';
+  const date = new Date(resetsAt * 1000);
+  const pad = (value: number) => String(value).padStart(2, '0');
+  const time = `${pad(date.getMonth() + 1)}/${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
   const s = resetsAt - Math.floor(nowMs / 1000);
-  if (s <= 0) return t('usage.resetSoon');
+  if (s <= 0) return `${t('usage.resetSoon')}（${time}）`;
   const d = Math.floor(s / 86400), h = Math.floor((s % 86400) / 3600), m = Math.floor((s % 3600) / 60);
   const span = d > 0 ? `${d}d ${h}h` : h > 0 ? `${h}h ${m}m` : `${m}m`;
-  return t('usage.resetIn', { t: span });
+  return `${t('usage.resetIn', { t: span })}（${time}）`;
 }
 
 function fmtExpiry(expiresAt: number): string {
