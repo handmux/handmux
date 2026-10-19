@@ -29,7 +29,7 @@ const props = (overrides: Partial<TerminalOverlaysProps> = {}): TerminalOverlays
 
 const pointer = (target: HTMLElement, type: string, values: Record<string, unknown> = {}) => {
   const event = new Event(type, { bubbles: true, cancelable: true });
-  const fields = { pointerId: 1, isPrimary: true, button: 0, clientX: 100, clientY: 183, ...values };
+  const fields = { pointerId: 1, isPrimary: true, button: 0, clientX: 100, clientY: 191.5, ...values };
   for (const [name, value] of Object.entries(fields)) Object.defineProperty(event, name, { value });
   fireEvent(target, event);
 };
@@ -38,10 +38,10 @@ const draggable = () => {
   const pager = view.getByRole('group', { name: '翻页' });
   const toggle = view.getByRole('button', { name: '展开终端工具' });
   const groups = pager.querySelectorAll('.term-pager-grp');
-  const rect = (top: number, height: number) => ({ top, bottom: top + height, height, left: 0, right: 42, width: 42, x: 0, y: top, toJSON() {} });
+  const rect = (top: number, height: number) => ({ top, bottom: top + height, height, left: 0, right: 40, width: 40, x: 0, y: top, toJSON() {} });
   vi.spyOn(pager, 'getBoundingClientRect').mockReturnValue(rect(0, 600));
-  vi.spyOn(groups[0]!, 'getBoundingClientRect').mockReturnValue(rect(183, 43));
-  vi.spyOn(groups[2]!, 'getBoundingClientRect').mockReturnValue(rect(331, 86));
+  vi.spyOn(groups[0]!, 'getBoundingClientRect').mockReturnValue(rect(191.5, 40));
+  vi.spyOn(groups[2]!, 'getBoundingClientRect').mockReturnValue(rect(330, 78.5));
   let captured = false;
   Object.assign(toggle, {
     setPointerCapture: vi.fn(() => { captured = true; }),
@@ -52,6 +52,42 @@ const draggable = () => {
 };
 
 describe('full-screen terminal pager', () => {
+  it('uses visibly smaller hit targets with translucent gray depth and a clear border on black', () => {
+    const view = render(<TerminalOverlays {...props()} />);
+    const toggle = view.getByRole('button', { name: '展开终端工具' });
+    const group = toggle.parentElement!;
+    const buttonStyle = getComputedStyle(toggle);
+    const groupStyle = getComputedStyle(group);
+    expect(buttonStyle.width).toBe('38px');
+    expect(buttonStyle.height).toBe('38px');
+    expect(buttonStyle.padding).toBe('0px');
+    expect(['', 'none']).toContain(buttonStyle.transform);
+    expect(groupStyle.borderLeftWidth).toBe('1px');
+    expect(parseFloat(buttonStyle.width) + 2 * parseFloat(groupStyle.borderLeftWidth)).toBe(40);
+    expect(getComputedStyle(toggle.querySelector('svg')!).width).toBe('18px');
+    expect(getComputedStyle(toggle.querySelector('svg')!).height).toBe('18px');
+    const background = groupStyle.backgroundColor.match(/[\d.]+/g)!.map(Number);
+    const border = groupStyle.borderLeftColor.match(/[\d.]+/g)!.map(Number);
+    expect(background[3]).toBeCloseTo(0.28);
+    expect(border[3]).toBeCloseTo(0.38);
+    const grayOnBlack = background.slice(0, 3).map((channel) => channel * background[3]!);
+    expect(grayOnBlack[0]).toBeCloseTo(31.36);
+    expect(grayOnBlack[1]).toBeCloseTo(35.84);
+    expect(grayOnBlack[2]).toBeCloseTo(42.56);
+    // The border remains perceptibly lighter than the translucent gray even over a black terminal.
+    for (const [index, channel] of border.slice(0, 3).entries()) {
+      const borderOnGray = channel * border[3]! + grayOnBlack[index]! * (1 - border[3]!);
+      expect(borderOnGray - grayOnBlack[index]!).toBeGreaterThan(60);
+    }
+    expect(groupStyle.boxShadow).toContain('inset');
+    expect(['', '1']).toContain(groupStyle.opacity);
+    fireEvent.click(toggle);
+    for (const button of view.getAllByRole('button')) {
+      expect(getComputedStyle(button).width).toBe('38px');
+      expect(getComputedStyle(button).height).toBe('38px');
+    }
+  });
+
   it('starts collapsed and only exposes the four original actions when expanded', () => {
     const callbacks = props();
     const view = render(<TerminalOverlays {...callbacks} />);
@@ -147,10 +183,10 @@ describe('full-screen terminal pager', () => {
     expect(toggle.setPointerCapture).toHaveBeenCalledWith(1);
     pointer(toggle, 'pointermove', { pointerId: 2, clientY: 28 });
     expect(pager.style.getPropertyValue('--pager-position')).toBe('0.5');
-    pointer(toggle, 'pointermove', { clientX: 104, clientY: 338 });
+    pointer(toggle, 'pointermove', { clientX: 104, clientY: 355 });
     expect(pager.style.getPropertyValue('--pager-position')).toBe('1');
     expect(localStorage.getItem(PREFERENCE_KEY)).toBeNull();
-    pointer(toggle, 'pointerup', { clientY: 338 });
+    pointer(toggle, 'pointerup', { clientY: 355 });
     pointer(toggle, 'lostpointercapture');
     fireEvent.click(toggle);
     expect(toggle.getAttribute('aria-expanded')).toBe('false');

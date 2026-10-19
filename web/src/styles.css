@@ -950,7 +950,7 @@ button.settings-page-row:disabled, .settings-page-row.disabled { color: rgba(235
    (vim/htop/less/…) where there's no scrollback to swipe. The wheel gesture handles mouse-reporting
    apps; these buttons are the always-available manual scroll for the rest, and precise paging for all.
    One frosted-glass capsule with a hairline divider and crisp chevrons (an iOS-style stacked control) —
-   subtle so it defers to the content; ~42pt targets; clear of the safe area. */
+   subtle so it defers to the content; compact targets follow the visible controls; clear of the safe area. */
 .term-pager {
   /* Ratio-sized spacers adapt to the visible slice without JS resize listeners. When space runs out,
      both spacers collapse to zero, keeping the top handle reachable in either expanded state. */
@@ -964,25 +964,26 @@ button.settings-page-row:disabled, .settings-page-row.disabled { color: rgba(235
 .term-pager::before { flex-grow: var(--pager-position, 0.5); }
 .term-pager::after { flex-grow: calc(1 - var(--pager-position, 0.5)); }
 .term-pager-grp + .term-pager-grp { margin-top: 10px; }
-/* One frosted-glass capsule with a hairline divider (an iOS-style stacked control) — subtle so it defers
-   to the content; ~42pt targets. */
+/* Compact frosted-glass capsules: the translucent gray fill, clear rim and top glint separate them
+   from the dark terminal without enlarging their hit area. */
 .term-pager-grp {
   display: flex; flex: none; flex-direction: column; align-items: stretch;
   pointer-events: auto;
-  border-radius: 21px; overflow: hidden;
-  background: rgba(28,30,34,0.52);
+  border-radius: 20px; overflow: hidden;
+  background: rgba(112,128,152,0.28);
   -webkit-backdrop-filter: blur(16px) saturate(1.4); backdrop-filter: blur(16px) saturate(1.4);
-  border: 0.5px solid rgba(255,255,255,0.14);
-  box-shadow: 0 4px 18px rgba(0,0,0,.30);
+  border: 1px solid rgba(235,242,255,0.38);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.16), 0 4px 18px rgba(0,0,0,.30);
 }
 /* Keep the same group height so the top toggle does not jump when the actions are hidden. */
 .term-pager-grp[aria-hidden="true"] { visibility: hidden; pointer-events: none; }
 .term-pager-btn {
-  width: 42px; height: 42px; display: flex; align-items: center; justify-content: center;
+  width: 38px; height: 38px; display: flex; align-items: center; justify-content: center;
   padding: 0; border: none; background: transparent; color: rgba(255,255,255,0.92);
   touch-action: manipulation; -webkit-tap-highlight-color: transparent;
   transition: background .12s ease;
 }
+.term-pager-btn svg { width: 18px; height: 18px; }
 .term-pager-btn:active { background: rgba(255,255,255,0.14); }
 .term-pager-handle { touch-action: none; }
 .term-pager-btn[aria-pressed="true"] { background: rgba(122,180,245,0.30); color: #cfe4ff; } /* 定位 on */
