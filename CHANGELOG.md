@@ -4,6 +4,8 @@ All notable changes to handmux. Format follows [Keep a Changelog](https://keepac
 
 ## [Unreleased]
 
+## [0.35.0] - 2026-10-20
+
 ### Added
 
 - 对话页上下文弹窗的操作区新增“压缩会话”和“新会话”；按 Agent 支持的能力显示，新会话需确认，旧历史不会删除。
