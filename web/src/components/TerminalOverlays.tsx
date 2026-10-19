@@ -1,4 +1,4 @@
-import { useState, type CSSProperties, type MutableRefObject } from 'react';
+import { useEffect, useRef, useState, type CSSProperties, type MutableRefObject, type PointerEvent } from 'react';
 import { shouldKeepKeyboard } from '../dockKeyboard.js';
 import { expandToLines, expandToParagraph } from '../terminalSelection.js';
 import type {
@@ -11,6 +11,33 @@ import { t } from '../i18n';
 import LensBoot from './LensBoot.jsx';
 
 const CALLOUT_W = 200;
+const PAGER_STORAGE_KEY = 'tw_terminal_pager';
+interface PagerPreference { expanded: boolean; position: number }
+interface PagerDrag {
+  pointerId: number;
+  target: HTMLButtonElement;
+  startX: number;
+  startY: number;
+  startTop: number;
+  startPosition: number;
+  moved: boolean;
+}
+function readPagerPreference(): PagerPreference {
+  const fallback = { expanded: false, position: 0.5 };
+  try {
+    const value: unknown = JSON.parse(localStorage.getItem(PAGER_STORAGE_KEY) || 'null');
+    if (!value || typeof value !== 'object') return fallback;
+    const { expanded, position } = value as Record<string, unknown>;
+    return {
+      expanded: typeof expanded === 'boolean' ? expanded : false,
+      position: typeof position === 'number' && Number.isFinite(position) && position >= 0 && position <= 1
+        ? position : 0.5,
+    };
+  } catch { return fallback; }
+}
+function savePagerPreference(value: PagerPreference): void {
+  try { localStorage.setItem(PAGER_STORAGE_KEY, JSON.stringify(value)); } catch { /* optional local preference */ }
+}
 
 interface SelectionTerminal {
   cols: number;
@@ -68,7 +95,49 @@ export default function TerminalOverlays({
   selActionsRef,
   termRef,
 }: TerminalOverlaysProps) {
-  const [pagerExpanded, setPagerExpanded] = useState(false);
+  const [pagerPreference, setPagerPreference] = useState(readPagerPreference);
+  const pagerPreferenceRef = useRef(pagerPreference);
+  const pagerDragRef = useRef<PagerDrag | null>(null);
+  const suppressPagerClick = useRef(false);
+  const pagerExpanded = pagerPreference.expanded;
+  const changePagerPreference = (next: PagerPreference, save = false) => {
+    pagerPreferenceRef.current = next;
+    setPagerPreference(next);
+    if (save) savePagerPreference(next);
+  };
+  const finishPagerDrag = (commit: boolean, pointerId?: number) => {
+    const drag = pagerDragRef.current;
+    if (!drag || (pointerId !== undefined && drag.pointerId !== pointerId)) return;
+    pagerDragRef.current = null; // release may synchronously emit lostpointercapture
+    suppressPagerClick.current = drag.moved || !commit;
+    if (!commit) changePagerPreference({ ...pagerPreferenceRef.current, position: drag.startPosition });
+    else if (drag.moved) savePagerPreference(pagerPreferenceRef.current);
+    try {
+      if (drag.target.hasPointerCapture?.(drag.pointerId)) drag.target.releasePointerCapture(drag.pointerId);
+    } catch { /* capture may already have been released by the browser */ }
+  };
+  useEffect(() => () => finishPagerDrag(false), [altScreen]);
+  const movePager = (event: PointerEvent<HTMLButtonElement>) => {
+    const drag = pagerDragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    const dy = event.clientY - drag.startY;
+    if (!drag.moved && (Math.abs(dy) < 8 || Math.abs(dy) <= Math.abs(event.clientX - drag.startX))) return;
+    drag.moved = true;
+    event.preventDefault();
+    event.stopPropagation();
+    const pager = drag.target.closest<HTMLElement>('.term-pager')!;
+    const groups = pager.querySelectorAll<HTMLElement>('.term-pager-grp');
+    const first = groups[0]!.getBoundingClientRect();
+    const last = groups[groups.length - 1]!.getBoundingClientRect();
+    const bounds = pager.getBoundingClientRect();
+    const style = getComputedStyle(pager);
+    const padding = parseFloat(style.paddingTop || style.paddingBlock) || 0;
+    const endPadding = parseFloat(style.paddingBottom || style.paddingBlock) || 0;
+    const range = bounds.height - padding - endPadding - (last.bottom - first.top);
+    if (!(range > 0)) return; // short viewports keep the remembered ratio; CSS pins the handle at the top
+    const position = Math.max(0, Math.min(1, (drag.startTop + dy - bounds.top - padding) / range));
+    changePagerPreference({ ...pagerPreferenceRef.current, position });
+  };
   const pagerToggleLabel = pagerExpanded ? '收起终端工具' : '展开终端工具';
   const recoverySeconds = connectionInfo?.recoveryAt
     ? Math.max(0, Math.ceil((connectionInfo.recoveryAt - transportNow) / 1000))
@@ -146,6 +215,7 @@ export default function TerminalOverlays({
       {altScreen && (
         <div
           className="term-pager"
+          style={{ '--pager-position': pagerPreference.position } as CSSProperties}
           role="group"
           aria-label="翻页"
           onPointerDown={(event) => {
@@ -153,9 +223,35 @@ export default function TerminalOverlays({
           }}
         >
           <div className="term-pager-grp">
-            <button type="button" className="term-pager-btn" aria-label={pagerToggleLabel}
+            <button type="button" className="term-pager-btn term-pager-handle" aria-label={pagerToggleLabel}
               title={pagerToggleLabel} aria-expanded={pagerExpanded}
-              onClick={() => setPagerExpanded((expanded) => !expanded)}>
+              onPointerDown={(event) => {
+                if (event.button !== 0 || event.isPrimary === false || pagerDragRef.current) return;
+                event.preventDefault();
+                event.stopPropagation();
+                suppressPagerClick.current = false;
+                const group = event.currentTarget.parentElement!;
+                pagerDragRef.current = {
+                  pointerId: event.pointerId, target: event.currentTarget,
+                  startX: event.clientX, startY: event.clientY, startTop: group.getBoundingClientRect().top,
+                  startPosition: pagerPreferenceRef.current.position, moved: false,
+                };
+                try { event.currentTarget.setPointerCapture(event.pointerId); } catch { /* unsupported capture */ }
+              }}
+              onPointerMove={movePager}
+              onPointerUp={(event) => { movePager(event); finishPagerDrag(true, event.pointerId); }}
+              onPointerCancel={(event) => finishPagerDrag(false, event.pointerId)}
+              onLostPointerCapture={(event) => finishPagerDrag(false, event.pointerId)}
+              onKeyDown={() => { suppressPagerClick.current = false; }}
+              onClick={(event) => {
+                if (suppressPagerClick.current) {
+                  suppressPagerClick.current = false;
+                  event.preventDefault();
+                  event.stopPropagation();
+                  return;
+                }
+                changePagerPreference({ ...pagerPreferenceRef.current, expanded: !pagerPreferenceRef.current.expanded }, true);
+              }}>
               <svg viewBox="0 0 24 24" width="19" height="19" aria-hidden="true">
                 {pagerExpanded
                   ? <path d="M7 7l10 10M17 7L7 17" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />

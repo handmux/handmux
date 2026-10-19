@@ -952,15 +952,18 @@ button.settings-page-row:disabled, .settings-page-row.disabled { color: rgba(235
    One frosted-glass capsule with a hairline divider and crisp chevrons (an iOS-style stacked control) —
    subtle so it defers to the content; ~42pt targets; clear of the safe area. */
 .term-pager {
-  /* Align within the VISIBLE slice (--vis-h), not the full container. Safe centering keeps the top
-     toggle reachable when the keyboard leaves less height than the controls need. */
+  /* Ratio-sized spacers adapt to the visible slice without JS resize listeners. When space runs out,
+     both spacers collapse to zero, keeping the top handle reachable in either expanded state. */
   position: absolute; z-index: 6; right: calc(10px + env(safe-area-inset-right));
   top: calc(100% - var(--vis-h, 100%)); bottom: 0;
   padding-block: 28px; box-sizing: border-box; /* clear the top connection tag without shifting the center */
-  display: flex; flex-direction: column; align-items: stretch; gap: 10px;
-  justify-content: flex-start; justify-content: safe center;
+  display: flex; flex-direction: column; align-items: stretch;
   pointer-events: none; /* preserved hidden layout must not cover terminal gestures */
 }
+.term-pager::before, .term-pager::after { content: ''; flex: 0 1 0px; min-height: 0; pointer-events: none; }
+.term-pager::before { flex-grow: var(--pager-position, 0.5); }
+.term-pager::after { flex-grow: calc(1 - var(--pager-position, 0.5)); }
+.term-pager-grp + .term-pager-grp { margin-top: 10px; }
 /* One frosted-glass capsule with a hairline divider (an iOS-style stacked control) — subtle so it defers
    to the content; ~42pt targets. */
 .term-pager-grp {
@@ -981,6 +984,7 @@ button.settings-page-row:disabled, .settings-page-row.disabled { color: rgba(235
   transition: background .12s ease;
 }
 .term-pager-btn:active { background: rgba(255,255,255,0.14); }
+.term-pager-handle { touch-action: none; }
 .term-pager-btn[aria-pressed="true"] { background: rgba(122,180,245,0.30); color: #cfe4ff; } /* 定位 on */
 /* 定位: full-row background highlight on the cursor's line (independent of xterm's normal-only decorations). Kept clearly
    visible so you can spot the caret's row at a glance, with a brighter left accent bar. */

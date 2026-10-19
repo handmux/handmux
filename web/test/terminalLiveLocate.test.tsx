@@ -1,6 +1,6 @@
 import React from 'react';
 import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react';
-import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Terminal as XTerm } from '@xterm/xterm';
 import type { TerminalStreamOptions } from '../src/terminalStreamClient.js';
 import { readFileSync } from 'node:fs';
@@ -62,8 +62,10 @@ beforeAll(async () => {
   });
   ({ default: Terminal } = await import('../src/components/Terminal.js'));
 });
+beforeEach(() => localStorage.removeItem('tw_terminal_pager'));
 afterEach(() => {
   cleanup();
+  localStorage.removeItem('tw_terminal_pager');
   harness.callbacks = null;
   harness.term = null;
   harness.getHistory.mockReset().mockImplementation(() => new Promise(() => {}));
