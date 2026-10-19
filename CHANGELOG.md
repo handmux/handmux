@@ -14,6 +14,7 @@ All notable changes to handmux. Format follows [Keep a Changelog](https://keepac
 
 ### Fixed
 
+- 修复终端实时模式下全屏程序的“定位光标行”高亮不显示的问题。
 - 修复对话历史在临时查询失败后可能继续返回旧数据，以及重连时已完成回复短暂消失、需等后续消息才恢复的问题。
 - 修复对话页提问工具只显示调用名称、问题正文和选项需展开才能看到的问题。
 

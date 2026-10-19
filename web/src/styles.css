@@ -977,9 +977,12 @@ button.settings-page-row:disabled, .settings-page-row.disabled { color: rgba(235
 }
 .term-pager-btn:active { background: rgba(255,255,255,0.14); }
 .term-pager-btn[aria-pressed="true"] { background: rgba(122,180,245,0.30); color: #cfe4ff; } /* 定位 on */
-/* 定位: full-row background highlight on the cursor's line (a decoration overlay over the text). Kept clearly
+/* 定位: full-row background highlight on the cursor's line (independent of xterm's normal-only decorations). Kept clearly
    visible so you can spot the caret's row at a glance, with a brighter left accent bar. */
-.locate-deco { background: rgba(122,180,245,0.30); box-shadow: inset 3px 0 0 rgba(122,180,245,0.95); }
+.locate-deco {
+  position: absolute; left: 0; width: 100%; z-index: 3; pointer-events: none;
+  background: rgba(122,180,245,0.30); box-shadow: inset 3px 0 0 rgba(122,180,245,0.95);
+}
 .term-pager-div { height: 0.5px; background: rgba(255,255,255,0.13); margin: 0 9px; }
 @media (prefers-reduced-motion: reduce) { .term-pager-btn { transition: none; } }
 /* Auto-growing command field: one line by default (a touch taller for an easier tap target), grows

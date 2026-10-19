@@ -160,6 +160,7 @@ vi.mock('@xterm/xterm', () => ({
     }
 
     loadAddon() {}
+    onRender() { return { dispose: vi.fn() }; }
     registerLinkProvider() { return { dispose: vi.fn() }; }
     onScroll(callback) {
       this.onScrollCallback = callback;

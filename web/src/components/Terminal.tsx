@@ -152,7 +152,6 @@ const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Terminal({
   // — it hands the path + tap coords to App, which shows a confirm popover (anti-误触).
   const decosRef = useRef<DocDecoration[]>([]);
   const cursorDecoRef = useRef<TerminalDecoration | null>(null); // decoration-drawn cursor for a full-screen app whose cursor is in scrollback (CUP can't reach it)
-  const locateDecoRef = useRef<TerminalDecoration | null>(null); // full-row background highlight on the cursor's line (the 定位 toggle)
   const locateOnRef = useRef(false);  // is the 定位 line-highlight toggle on? (read inside effect scope)
   const locateRef = useRef<(() => void) | null>(null);     // effect-scope redraw of the locate highlight, so the toggle button can apply it now
   const onDocLinkTapRef = useRef(onDocLinkTap);
@@ -621,26 +620,38 @@ const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Terminal({
       drawLocate();
     };
 
-    // 定位 toggle: a full-row background highlight on the cursor's line, redrawn each placeCursor so it
-    // tracks the cursor. A decoration anchored to the true buffer line (like the cursor decoration), full
-    // width. Off → dispose. Bridged via locateRef so the toggle button applies it immediately.
+    // xterm 5.5 hides DOM decorations in its alternate buffer. Locate therefore owns a non-interactive
+    // screen overlay instead; the parser, visible buffer, native cursor and selection remain untouched.
+    let locateElement: HTMLDivElement | null = null;
+    let locateLine: number | null = null;
     const disposeLocate = () => {
-      if (locateDecoRef.current) { locateDecoRef.current.deco.dispose(); locateDecoRef.current.marker.dispose(); locateDecoRef.current = null; }
+      locateElement?.remove();
+      locateElement = null;
+    };
+    const syncLocate = () => {
+      const row = locateLine == null ? -1 : locateLine - term.buffer.active.viewportY;
+      const screen = liveHost.querySelector<HTMLElement>('.xterm-screen');
+      const cellHeight = screen ? parseFloat(screen.style.height) / term.rows : 0;
+      if (disposed || !locateOnRef.current || !altScreenRef.current
+        || row < 0 || row >= term.rows || !screen || !(cellHeight > 0)) {
+        disposeLocate();
+        return;
+      }
+      if (!locateElement) {
+        locateElement = document.createElement('div');
+        locateElement.className = 'locate-deco';
+        locateElement.setAttribute('aria-hidden', 'true');
+        screen.appendChild(locateElement);
+      }
+      locateElement.style.top = `${row * cellHeight}px`;
+      locateElement.style.height = `${cellHeight}px`;
     };
     const drawLocate = () => {
-      disposeLocate();
-      const { cur, line } = cursorDisplayState();
-      // Only on a full-screen app (where the 定位 toggle lives). On the main screen the highlight is cleared
-      // and stays cleared — switching back to Claude mustn't leave the caret-row band behind.
-      if (disposed || !locateOnRef.current || !altScreenRef.current || !cur || line == null) return;
-      const b = term.buffer.active;
-      const marker = term.registerMarker(line - (b.baseY + b.cursorY));
-      if (!marker) return;
-      const deco = term.registerDecoration({ marker, x: 0, width: term.cols });
-      if (!deco) { marker.dispose(); return; }
-      deco.onRender((el) => { el.classList.add('locate-deco'); });
-      locateDecoRef.current = { deco, marker };
+      // Commit only after the matching frame's cursor is restored, not during its intermediate writes.
+      locateLine = cursorDisplayState().line;
+      syncLocate();
     };
+    const locateRenderSub = term.onRender(syncLocate);
     locateRef.current = drawLocate;
 
     // Re-pad the current normal-screen seed for the CURRENT term.rows and re-write it, so short content
@@ -1586,6 +1597,7 @@ const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Terminal({
 
     const handleBufferScroll = () => {
       if (disposed) return;
+      syncLocate();
       syncYScrollbar();
       if (streamPaintBusy) return;
       if (atBottom()) {
@@ -1647,6 +1659,7 @@ const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Terminal({
       telemetry.destroy();
       disposeDocDecorations();
       disposeCursorDeco();
+      locateRenderSub.dispose();
       disposeLocate();
       disposeHistoryBoundary();
       locateRef.current = null;
