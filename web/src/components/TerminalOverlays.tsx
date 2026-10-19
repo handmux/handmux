@@ -1,4 +1,4 @@
-import type { CSSProperties, MutableRefObject } from 'react';
+import { useState, type CSSProperties, type MutableRefObject } from 'react';
 import { shouldKeepKeyboard } from '../dockKeyboard.js';
 import { expandToLines, expandToParagraph } from '../terminalSelection.js';
 import type {
@@ -68,6 +68,8 @@ export default function TerminalOverlays({
   selActionsRef,
   termRef,
 }: TerminalOverlaysProps) {
+  const [pagerExpanded, setPagerExpanded] = useState(false);
+  const pagerToggleLabel = pagerExpanded ? '收起终端工具' : '展开终端工具';
   const recoverySeconds = connectionInfo?.recoveryAt
     ? Math.max(0, Math.ceil((connectionInfo.recoveryAt - transportNow) / 1000))
     : null;
@@ -151,6 +153,16 @@ export default function TerminalOverlays({
           }}
         >
           <div className="term-pager-grp">
+            <button type="button" className="term-pager-btn" aria-label={pagerToggleLabel}
+              title={pagerToggleLabel} aria-expanded={pagerExpanded}
+              onClick={() => setPagerExpanded((expanded) => !expanded)}>
+              <svg viewBox="0 0 24 24" width="19" height="19" aria-hidden="true">
+                <path d={pagerExpanded ? 'M6 14.5l6-6 6 6' : 'M6 9.5l6 6 6-6'}
+                  fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </button>
+          </div>
+          {pagerExpanded && <div className="term-pager-grp">
             <button type="button" className="term-pager-btn" aria-label="上翻页" onClick={() => onPageScroll('up')}>
               <svg viewBox="0 0 24 24" width="19" height="19" aria-hidden="true">
                 <path d="M6 14.5l6-6 6 6" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" />
@@ -162,8 +174,8 @@ export default function TerminalOverlays({
                 <path d="M6 9.5l6 6 6-6" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" />
               </svg>
             </button>
-          </div>
-          <div className="term-pager-grp">
+          </div>}
+          {pagerExpanded && <div className="term-pager-grp">
             <button type="button" className="term-pager-btn" aria-label="适配高度" title="适配高度" onClick={onFitScreen}>
               <svg viewBox="0 0 24 24" width="19" height="19" aria-hidden="true">
                 <path d="M5 4.5h14M5 19.5h14" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" />
@@ -177,7 +189,7 @@ export default function TerminalOverlays({
                 <rect x="4" y="10.5" width="16" height="3" rx="1.5" fill="currentColor" />
               </svg>
             </button>
-          </div>
+          </div>}
         </div>
       )}
       {selUI && (() => {

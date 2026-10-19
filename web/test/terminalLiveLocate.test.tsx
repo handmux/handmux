@@ -87,7 +87,8 @@ describe('live full-screen Locate with the real xterm renderer', () => {
   it('shows the selected cursor row in alternate buffer and follows live cursor movement', async () => {
     const view = render(<Terminal pane="%locate" stream />);
     await start();
-    const button = await view.findByRole('button', { name: '定位光标行' });
+    fireEvent.click(await view.findByRole('button', { name: '展开终端工具' }));
+    let button = view.getByRole('button', { name: '定位光标行' });
     await waitFor(() => expect(harness.term!.buffer.active.type).toBe('alternate'));
     expect(view.container.querySelector('.locate-deco')).toBeNull();
     fireEvent.click(button);
@@ -104,6 +105,17 @@ describe('live full-screen Locate with the real xterm renderer', () => {
 
     await feed('\x1b[4;3H');
     await waitFor(() => expect(view.container.querySelector<HTMLElement>('.locate-deco')!.style.top).toBe('60px'));
+    const band = view.container.querySelector('.locate-deco');
+    fireEvent.click(view.getByRole('button', { name: '收起终端工具' }));
+    expect(view.queryByRole('button', { name: '定位光标行' })).toBeNull();
+    expect(view.container.querySelector('.locate-deco')).toBe(band);
+    await feed('\x1b[2;3H');
+    await waitFor(() => expect(view.container.querySelector<HTMLElement>('.locate-deco')!.style.top).toBe('20px'));
+    fireEvent.click(view.getByRole('button', { name: '展开终端工具' }));
+    button = view.getByRole('button', { name: '定位光标行' });
+    expect(button.getAttribute('aria-pressed')).toBe('true');
+    await feed('\x1b[4;3H');
+    await waitFor(() => expect(view.container.querySelector<HTMLElement>('.locate-deco')!.style.top).toBe('60px'));
     // The visual aid must not change terminal contents, cursor ownership, or native selection.
     expect(harness.term!.buffer.active.cursorY).toBe(3);
     act(() => harness.term!.select(0, 3, 6));
@@ -116,7 +128,7 @@ describe('live full-screen Locate with the real xterm renderer', () => {
     await feed('\x1b[?1049l');
     await waitFor(() => expect(view.container.querySelector('.locate-deco')).toBeNull());
     expect(harness.term!.buffer.active.type).toBe('normal');
-  });
+  }, 15_000);
 
   it('keeps snapshot highlighting on its absolute buffer row while scrolling and hides it off-screen', async () => {
     harness.getHistory.mockResolvedValueOnce({
@@ -124,7 +136,8 @@ describe('live full-screen Locate with the real xterm renderer', () => {
       width: 80, height: 48, alt: true, cur: { row: 37, col: 2, vis: true },
     });
     const view = render(<Terminal pane="%snapshot" />);
-    const button = await view.findByRole('button', { name: '定位光标行' });
+    fireEvent.click(await view.findByRole('button', { name: '展开终端工具' }));
+    const button = view.getByRole('button', { name: '定位光标行' });
     await waitFor(() => expect(harness.term!.buffer.active.length).toBe(48));
     fireEvent.click(button);
     await waitFor(() => expect(view.container.querySelector<HTMLElement>('.locate-deco')?.style.top).toBe('200px'));
@@ -141,7 +154,8 @@ describe('live full-screen Locate with the real xterm renderer', () => {
   it('repaints at the current cell height after a resize and removes the layer on pane change and unmount', async () => {
     const view = render(<Terminal pane="%one" stream />);
     await start();
-    const button = await view.findByRole('button', { name: '定位光标行' });
+    fireEvent.click(await view.findByRole('button', { name: '展开终端工具' }));
+    const button = view.getByRole('button', { name: '定位光标行' });
     await waitFor(() => expect(harness.term!.buffer.active.type).toBe('alternate'));
     fireEvent.click(button);
     await waitFor(() => expect(view.container.querySelector<HTMLElement>('.locate-deco')?.style.top).toBe('20px'));
