@@ -19,6 +19,34 @@ export interface ChangelogEntry {
 // `entryId`/`LATEST_RELEASE` use `version` when present, else `date`, as the stable unread-dot id.
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '0.35.0',
+    date: '2026-10-20',
+    highlight: {
+      zh: '会话快捷操作 · 终端工具收放与位置记忆',
+      en: 'Session actions · collapsible terminal tools with saved positions',
+    },
+    items: {
+      zh: [
+        '对话页上下文弹窗新增“压缩会话”和“新会话”，按 Agent 能力显示；新会话需确认，旧历史保留。',
+        '全屏终端工具可在原位展开、收起，沿右侧上下拖动，并记住本浏览器的状态和位置；更小的半透明按钮减少遮挡，收起不关闭已开启的行高亮。',
+        '网页浏览器采用紧凑工具栏，统一网址和目录入口；彩色图标切换直连、代理、静态，长地址支持左右滑动查看。',
+        '修复调整窗口或分屏高度后，“适配高度”仍使用旧尺寸的问题。',
+        '修复实时终端全屏程序的光标行高亮不显示的问题。',
+        '修复 Codex 历史查询失败后持续显示旧内容，以及重连时已完成回复暂时消失的问题。',
+        'AI 提问工具在标题下直接展示问题正文和选项；普通工具的单行摘要和详情展开方式不变。',
+      ],
+      en: [
+        'Added Compact session and New session to the conversation context panel when supported by the Agent; starting a new session requires confirmation and preserves previous history.',
+        'Fullscreen terminal tools collapse and expand in place, drag vertically along the right edge, and remember their state and position in this browser; smaller translucent controls reduce obstruction, and collapsing keeps an enabled cursor-line highlight on.',
+        'A compact browser toolbar unifies URL and directory entry, with a color-coded icon for direct, proxy, and static modes and horizontal scrolling for long addresses.',
+        'Fixed Fit height using old dimensions after resizing a window or pane.',
+        'Fixed the cursor-line highlight not appearing in fullscreen programs in live terminal mode.',
+        'Fixed stale Codex history after query failures and completed replies temporarily disappearing across reconnects.',
+        'AI question tools show question text and choices below the title; ordinary tools retain their single-line summaries and detail views.',
+      ],
+    },
+  },
+  {
     version: '0.34.0',
     date: '2026-10-12',
     highlight: {
