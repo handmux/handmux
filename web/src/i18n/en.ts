@@ -879,7 +879,7 @@ export default {
   'usage.accountQuota': 'Account limits',
   'usage.modelLimits': 'Model-specific limits',
   'usage.accountApiKey': 'API key account',
-  'usage.resetIn': 'resets in {t}',
+  'usage.resetIn': 'resets in about {t}',
   'usage.resetSoon': 'resetting…',
   'usage.resetCredits': 'Rate-limit resets',
   'usage.resetCreditsCount': '{n} available',
