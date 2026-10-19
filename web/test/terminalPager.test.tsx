@@ -68,12 +68,12 @@ describe('full-screen terminal pager', () => {
     expect(getComputedStyle(toggle.querySelector('svg')!).height).toBe('18px');
     const background = groupStyle.backgroundColor.match(/[\d.]+/g)!.map(Number);
     const border = groupStyle.borderLeftColor.match(/[\d.]+/g)!.map(Number);
-    expect(background[3]).toBeCloseTo(0.28);
+    expect(background[3]).toBeCloseTo(0.12);
     expect(border[3]).toBeCloseTo(0.38);
     const grayOnBlack = background.slice(0, 3).map((channel) => channel * background[3]!);
-    expect(grayOnBlack[0]).toBeCloseTo(31.36);
-    expect(grayOnBlack[1]).toBeCloseTo(35.84);
-    expect(grayOnBlack[2]).toBeCloseTo(42.56);
+    expect(grayOnBlack[0]).toBeCloseTo(13.44);
+    expect(grayOnBlack[1]).toBeCloseTo(15.36);
+    expect(grayOnBlack[2]).toBeCloseTo(18.24);
     // The border remains perceptibly lighter than the translucent gray even over a black terminal.
     for (const [index, channel] of border.slice(0, 3).entries()) {
       const borderOnGray = channel * border[3]! + grayOnBlack[index]! * (1 - border[3]!);
@@ -86,6 +86,15 @@ describe('full-screen terminal pager', () => {
       expect(getComputedStyle(button).width).toBe('38px');
       expect(getComputedStyle(button).height).toBe('38px');
     }
+  });
+
+  it('keeps terminal text sharp beneath the transparent capsules without backdrop blur', () => {
+    // jsdom does not expose backdrop-filter in computed styles; inspect the loaded CSSOM instead.
+    const groupRule = Array.from(styles.sheet!.cssRules).find(
+      (rule): rule is CSSStyleRule => 'selectorText' in rule && rule.selectorText === '.term-pager-grp',
+    )!;
+    expect(groupRule.style.getPropertyValue('backdrop-filter')).toBe('none');
+    expect(groupRule.style.getPropertyValue('-webkit-backdrop-filter')).toBe('none');
   });
 
   it('starts collapsed and only exposes the four original actions when expanded', () => {
