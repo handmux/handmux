@@ -4,6 +4,10 @@ All notable changes to handmux. Format follows [Keep a Changelog](https://keepac
 
 ## [Unreleased]
 
+### Fixed
+
+- 修复 tmux 3.8 下工作区无法读取拓扑、影响快照和恢复的问题，兼容其新增的格式转义和 JSON 布局，同时保留旧版 tmux 布局支持。
+
 ## [0.35.0] - 2026-10-20
 
 ### Added

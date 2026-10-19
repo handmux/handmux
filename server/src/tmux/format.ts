@@ -1,5 +1,5 @@
 const Q_ESCAPED = new Set([
-  '|', '&', ';', '<', '>', '(', ')', '$', '`', '\\', '"', "'", '*', '?', '[', '#', ' ', '=', '%',
+  '|', '&', ';', '<', '>', '(', ')', '{', '}', '$', '`', '\\', '"', "'", '*', '?', '[', '#', ' ', '=', '%', '\n', '\t',
 ]);
 
 type FixedTuple<T, N extends number, Acc extends T[] = []> = number extends N
@@ -54,6 +54,17 @@ export function parseTmuxRows<const N extends number>(
 ): Array<FixedTuple<string, N>> {
   const value = String(output ?? '');
   if (value === '' || value === '\n' || value === '\r\n') return [];
-  return value.replace(/\r?\n$/, '').split(/\r?\n/)
-    .map((line) => parseTmuxFields(line, columns, label));
+  const rows: Array<FixedTuple<string, N>> = [];
+  let start = 0;
+  for (let i = 0; i < value.length; i++) {
+    // tmux 3.8 q-escapes literal LF. Skip complete escape pairs so that
+    // an escaped backslash before LF still leaves a record boundary.
+    if (value.charAt(i) === '\\') { i++; continue; }
+    if (value.charAt(i) !== '\n') continue;
+    const end = value.charAt(i - 1) === '\r' ? i - 1 : i;
+    rows.push(parseTmuxFields(value.slice(start, end), columns, label));
+    start = i + 1;
+  }
+  if (start < value.length) rows.push(parseTmuxFields(value.slice(start), columns, label));
+  return rows;
 }

@@ -13,6 +13,7 @@ const IDS = {
 const SESSION_FORMAT = '#{q:session_id}|#{q:session_name}|#{q:session_last_attached}|#{q:@handmux_session_id}';
 const WINDOW_FORMAT = '#{q:session_id}|#{q:window_id}|#{q:window_index}|#{q:window_name}|#{q:window_active}|#{q:window_layout}|#{q:@handmux_window_id}';
 const PANE_FORMAT = '#{q:window_id}|#{q:pane_id}|#{q:pane_index}|#{q:pane_active}|#{q:pane_current_path}|#{q:@handmux_pane_id}';
+const JSON_LAYOUT = '{"V":2,"L":{"t":"h","w":80,"h":24,"x":0,"y":0,"c":[{"t":"p","w":40,"h":24,"x":0,"y":0,"a":true,"i":0,"I":"%7"},{"t":"p","w":39,"h":24,"x":41,"y":0,"i":1,"I":"%8"}]}}';
 
 function captureRun({ reverse = false, conflictingPane = false } = {}) {
   const calls = [];
@@ -109,6 +110,44 @@ describe('workspace tmux environment and topology', () => {
     expect(await a.topologyFingerprint()).toBe(await b.topologyFingerprint());
   });
 
+  it.each([
+    ['3.7c', 'abcd,80x24,0,0{40x24,0,0,7,39x24,41,0,8}', 'abcd,80x24,0,0{40x24,0,0,7,39x24,41,0,8}'],
+    ['3.8', String.raw`\{\"V\":2,\"L\":\{\"t\":\"h\",\"w\":80,\"h\":24,\"x\":0,\"y\":0,\"c\":\[\{\"t\":\"p\",\"w\":40,\"h\":24,\"x\":0,\"y\":0,\"a\":true,\"i\":0,\"I\":\"\%7\"\},\{\"t\":\"p\",\"w\":39,\"h\":24,\"x\":41,\"y\":0,\"i\":1,\"I\":\"\%8\"\}]\}\}`, JSON_LAYOUT],
+  ])('projects horizontal split topology from tmux %s q output', async (version, encodedLayout, layout) => {
+    const tmux = createWorkspaceTmux({
+      run: async (args) => {
+        if (args[0] === 'show-options') return `${IDS.server}\n`;
+        if (args[0] === '-V') return `tmux ${version}\n`;
+        if (args[0] === 'list-sessions') return `\\$1|work|20|${IDS.sessionA}\n`;
+        if (args[0] === 'list-windows') return `\\$1|@9|0|split|1|${encodedLayout}|${IDS.window}\n`;
+        if (args[0] === 'list-panes') return [
+          `@9|\\%7|0|1|/work/a\\|part|${IDS.paneA}`,
+          `@9|\\%8|1|0|/work/b\\\\part|${IDS.paneB}`,
+          '',
+        ].join('\n');
+        if (args[0] === 'display-message') return '\\$1|@9|\\%7\n';
+        throw new Error(`unexpected tmux command: ${args.join(' ')}`);
+      },
+    });
+
+    expect(await tmux.captureTopology()).toEqual({
+      status: 'ok', tmuxVersion: version,
+      active: { sessionId: IDS.sessionA, windowId: IDS.window, paneId: IDS.paneA },
+      sessions: [{
+        id: IDS.sessionA, runtimeId: '$1', name: 'work',
+        windowLinks: [{ windowId: IDS.window, index: 0 }], activeWindowId: IDS.window,
+      }],
+      windows: [{
+        id: IDS.window, runtimeId: '@9', name: 'split', index: 0,
+        layout, activePaneId: IDS.paneA,
+        panes: [
+          { id: IDS.paneA, runtimeId: '%7', index: 0, cwd: '/work/a|part', agent: null },
+          { id: IDS.paneB, runtimeId: '%8', index: 1, cwd: '/work/b\\part', agent: null },
+        ],
+      }],
+    });
+  });
+
   it('fails closed when duplicate linked-window pane rows conflict', async () => {
     const ids = [IDS.sessionB, IDS.paneB];
     const tmux = createWorkspaceTmux({ ...captureRun({ conflictingPane: true }), randomUUID: () => ids.shift() });
@@ -169,6 +208,46 @@ describe('workspace tmux environment and topology', () => {
 });
 
 describe('workspace restore command safety', () => {
+  it.each([
+    ['horizontal split', JSON_LAYOUT],
+    ['floating pane', '{"V":2,"L":{"t":"p","w":40,"h":24,"x":-2,"y":-3,"a":true,"i":0,"z":1,"I":"%7"}}'],
+    ['nested split', '{"V":2,"L":{"t":"v","w":80,"h":24,"x":0,"y":0,"c":[{"t":"p","w":80,"h":12,"x":0,"y":0,"a":true,"i":0,"I":"%7"},{"t":"h","w":80,"h":11,"x":0,"y":13,"c":[{"t":"p","w":40,"h":11,"x":0,"y":13,"l":1,"i":1,"I":"%8"},{"t":"p","w":39,"h":11,"x":41,"y":13,"i":2,"I":"%9"}] }]}}'],
+  ])('passes an intact tmux 3.8 %s layout only to a created window', async (_label, layout) => {
+    const calls = [];
+    const tmux = createWorkspaceTmux({
+      run: async (args) => { calls.push(args); return args[0] === 'new-session' ? '$10|@20|%30|0\n' : ''; },
+      randomUUID: () => 'abcdef12-0000-4000-8000-000000000000',
+    });
+    const created = await tmux.createTemporarySession({ cwd: '/work', sessionLogicalId: IDS.sessionA });
+    await tmux.applyLayout(created.windowId, layout);
+    expect(calls).toContainEqual(['select-layout', '-t', '@20', layout]);
+    const before = calls.length;
+    await expect(tmux.applyLayout('@pre-existing', layout)).rejects.toThrow(/was not created/);
+    expect(calls).toHaveLength(before);
+  });
+
+  it.each([
+    '{}', '{"V":3,"L":{}}', '{"V":2,"L":null}', '{"V":2,"L":{"t":"unknown"}}',
+    '{"V":2,"L":{"t":"p","w":0,"h":24,"x":0,"y":0,"i":0}}',
+    '{"V":2,"L":{"t":"p","w":80,"h":24,"x":0,"y":0,"i":-1}}',
+    '{"V":2,"L":{"t":"p","w":80,"h":24,"x":0,"y":0,"i":0,"c":[]}}',
+    '{"V":2,"L":{"t":"h","w":80,"h":24,"x":0,"y":0,"c":[]}}',
+    '{"V":2,"L":{"t":"h","w":80,"h":24,"x":0,"y":0,"c":[null,null]}}',
+    '{"V":2,"L":{"t":"p","w":80,"h":24,"x":0,"y":0,"i":0,"a":"true"}}',
+    '{"V":2,"L":{"t":"p","w":80,"h":24,"x":0,"y":0,"i":0,"z":-1}}',
+    '{"V":2,"L":',
+  ])('rejects malformed JSON layouts before invoking tmux: %s', async (layout) => {
+    const calls = [];
+    const tmux = createWorkspaceTmux({
+      run: async (args) => { calls.push(args); return args[0] === 'new-session' ? '$10|@20|%30|0\n' : ''; },
+      randomUUID: () => 'abcdef12-0000-4000-8000-000000000000',
+    });
+    const created = await tmux.createTemporarySession({ cwd: '/work', sessionLogicalId: IDS.sessionA });
+    const before = calls.length;
+    await expect(tmux.applyLayout(created.windowId, layout)).rejects.toThrow(/invalid workspace layout/);
+    expect(calls).toHaveLength(before);
+  });
+
   it('guards every mutating target and rejects unsafe agent tokens before running tmux', async () => {
     const created = new Set(['$new']);
     expect(createdTargetGuard(created)('$new')).toBe('$new');

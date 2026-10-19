@@ -94,6 +94,10 @@ describe('workspace recovery on the current host', () => {
     expect(original.value.sessions).toHaveLength(1);
     expect(original.value.windows.flatMap((window) => window.panes)).toHaveLength(2);
     const originalCwds = original.value.windows.flatMap((window) => window.panes.map((pane) => pane.cwd));
+    const geometry = async (target) => (await runTmux([
+      'list-panes', '-t', target, '-F', '#{pane_index}|#{pane_width}|#{pane_height}|#{pane_left}|#{pane_top}',
+    ])).stdout.trim().split('\n').sort();
+    const originalGeometry = await geometry('project:code');
 
     await endGeneration();
     expect(await first.checkpointer.reconcile('host-generation-ended')).toMatchObject({ status: 'written' });
@@ -125,6 +129,7 @@ describe('workspace recovery on the current host', () => {
       restored: 1,
       failed: 0,
       summary: { sessions: 1, windows: 1, panes: 2 },
+      results: [expect.objectContaining({ status: 'restored', warnings: [] })],
     });
 
     const finalTopology = await second.tmux.captureTopology();
@@ -141,5 +146,6 @@ describe('workspace recovery on the current host', () => {
       .flatMap((window) => window.panes);
     expect(restoredPanes).toHaveLength(2);
     expect(restoredPanes.map((pane) => pane.cwd).sort()).toEqual(originalCwds.sort());
+    expect(await geometry(restoredPanes[0].runtimeId)).toEqual(originalGeometry);
   }, 30_000);
 });

@@ -124,8 +124,36 @@ function requireCreatedRuntime(value: string, prefix: string, label: string): st
   return runtime(value, prefix, label);
 }
 
+function isLayoutInteger(value: unknown, minimum = 0): value is number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= minimum;
+}
+
+function isJsonLayoutCell(value: unknown): boolean {
+  const cell = recordOf(value);
+  if (!cell || !isLayoutInteger(cell.w, 1) || !isLayoutInteger(cell.h, 1)
+    || !isLayoutInteger(cell.x, -Number.MAX_SAFE_INTEGER)
+    || !isLayoutInteger(cell.y, -Number.MAX_SAFE_INTEGER)) return false;
+  if (cell.t === 'p') {
+    return cell.c === undefined && isLayoutInteger(cell.i)
+      && (cell.a === undefined || typeof cell.a === 'boolean')
+      && (cell.l === undefined || isLayoutInteger(cell.l))
+      && (cell.z === undefined || isLayoutInteger(cell.z))
+      && (cell.I === undefined || (typeof cell.I === 'string' && /^%\d+$/.test(cell.I)));
+  }
+  return (cell.t === 'h' || cell.t === 'v')
+    && Array.isArray(cell.c) && cell.c.length >= 2 && cell.c.every(isJsonLayoutCell);
+}
+
 function isTmuxLayout(value: unknown): value is string {
   if (typeof value !== 'string' || value.length === 0 || value.length > 8192) return false;
+  if (value.startsWith('{')) {
+    // tmux 3.8 emits V2 JSON, including floating pane metadata. Keep it intact;
+    // tmux owns full layout semantics and still accepts the legacy V1 format.
+    try {
+      const layout = recordOf(JSON.parse(value));
+      return layout?.V === 2 && isJsonLayoutCell(layout.L);
+    } catch { return false; }
+  }
   if (!/^[0-9a-f]{4},\d+x\d+,\d+,\d+(?:,\d+|[\[{])/i.test(value)) return false;
   if (!/^[0-9a-fx,{}\[\]]+$/i.test(value)) return false;
   const stack = [];
