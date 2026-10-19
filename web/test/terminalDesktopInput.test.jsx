@@ -267,6 +267,265 @@ describe('desktop terminal input', () => {
     delete window.visualViewport;
   });
 
+  describe('fit-height uses a fresh authoritative frame', () => {
+    let measurement;
+    const settleFit = async () => {
+      for (let frame = 0; frame < 8; frame += 1) {
+        await act(async () => { vi.advanceTimersByTime(40); await Promise.resolve(); });
+      }
+    };
+    const capture = (height) => ({
+      ansi: Array.from({ length: height }, (_, row) => `row-${row}`).join('\n') + '\n',
+      hash: `height-${height}`, width: 80, height, alt: true, mouseAware: false,
+      cur: { row: 0, col: 0, vis: true }, historyLines: 0,
+    });
+    const seed = async (callbacks, height) => {
+      await act(async () => callbacks.onSeed(capture(height)));
+      await act(async () => callbacks.onReady({ cur: { row: 0, col: 0, vis: true } }));
+      await settleFit();
+    };
+    const clickFit = (view) => {
+      const expand = view.container.querySelector('[aria-label="展开终端工具"]');
+      if (expand) act(() => expand.click());
+      act(() => view.container.querySelector('[aria-label="适配高度"]').click());
+    };
+    const backgroundRecovery = async () => {
+      let callbacks;
+      const resync = vi.fn();
+      mocks.openTerminalStream.mockImplementation((options) => {
+        callbacks = options;
+        return { pause: vi.fn(), suspend: vi.fn(), resync, close: vi.fn() };
+      });
+      mocks.getHistory.mockResolvedValue(capture(24));
+      const view = render(<Terminal pane="%fit" stream />);
+      await seed(callbacks, 24);
+      act(() => callbacks.onStatus('reconnecting'));
+      await act(async () => { vi.advanceTimersByTime(1200); await Promise.resolve(); });
+      await settleFit();
+      act(() => callbacks.onProbe({ ok: true, rttMs: 100 }));
+      await act(async () => {
+        vi.advanceTimersByTime(30000);
+        callbacks.onProbe({ ok: true, rttMs: 100 });
+        await Promise.resolve();
+      });
+      await settleFit();
+      expect(resync).toHaveBeenCalledOnce();
+      return { view, callbacks, resync };
+    };
+    beforeEach(() => {
+      vi.useFakeTimers();
+      setFont(12);
+      localStorage.removeItem('tw_terminal_pager');
+      measurement = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function () {
+        const term = mocks.instances.at(-1);
+        const height = this.classList?.contains('xterm-screen')
+          ? (term?.rows || 24) * (term?.options.fontSize || 12) * 1.25 : 480;
+        return { x: 0, y: 0, top: 0, left: 0, right: 800, bottom: height, width: 800, height, toJSON() {} };
+      });
+    });
+    afterEach(() => {
+      measurement.mockRestore();
+      localStorage.removeItem('tw_terminal_pager');
+    });
+
+    it.each([
+      [true, 48, 8], [true, 16, 24], [true, 24, 16],
+      [false, 48, 8], [false, 16, 24], [false, 24, 16],
+    ])('fits stream=%s to current height %s only after refresh, including unchanged dimensions', async (stream, height, font) => {
+      let callbacks;
+      mocks.openTerminalStream.mockImplementation((options) => {
+        callbacks = options;
+        return { pause: vi.fn(), suspend: vi.fn(), resync: vi.fn(), close: vi.fn() };
+      });
+      const fresh = deferred();
+      if (!stream) mocks.getHistory.mockResolvedValueOnce(capture(24)).mockReturnValueOnce(fresh.promise);
+      const ref = { current: null };
+      const view = render(<Terminal pane="%fit" stream={stream} ref={ref} />);
+      if (stream) await seed(callbacks, 24);
+      else await settleFit();
+      const term = mocks.instances.at(-1);
+      expect(term.options.fontSize).toBe(12);
+      clickFit(view);
+      await settleFit();
+      expect(term.options.fontSize).toBe(12); // never consume the request against the old 24-row cache
+      expect(getFont()).toBe(12);
+      if (stream) {
+        await act(async () => callbacks.onSeed(capture(height)));
+        await settleFit();
+        expect(term.options.fontSize).toBe(12); // a seed alone is not ready to fit
+        await act(async () => callbacks.onReady({ cur: { row: 0, col: 0, vis: true } }));
+      } else await act(async () => fresh.resolve(capture(height)));
+      await settleFit();
+      expect(term.options.fontSize).toBe(font);
+      expect(term.rows).toBe(height);
+      expect(getFont()).toBe(font);
+      expect(mocks.instances).toHaveLength(1); // no remount or pane switch required
+    });
+
+    it('ignores the older in-flight snapshot and fits the one requested after the click', async () => {
+      const older = deferred();
+      const fresh = deferred();
+      mocks.getHistory.mockResolvedValueOnce(capture(24))
+        .mockReturnValueOnce(older.promise).mockReturnValueOnce(fresh.promise);
+      const ref = { current: null };
+      const view = render(<Terminal pane="%fit" ref={ref} />);
+      await settleFit();
+      act(() => ref.current.wake());
+      clickFit(view);
+      await act(async () => older.resolve(capture(48)));
+      await settleFit();
+      expect(mocks.instances[0].options.fontSize).toBe(12);
+      await act(async () => fresh.resolve(capture(16)));
+      await settleFit();
+      expect(mocks.instances[0].options.fontSize).toBe(24);
+      expect(mocks.instances[0].rows).toBe(16);
+    });
+
+    it('does not let an already-awaited old live ready consume the new fit request', async () => {
+      let callbacks;
+      let holdReady = false;
+      const oldReady = deferred();
+      const createMirror = mocks.createStreamMirror.getMockImplementation();
+      mocks.createStreamMirror.mockImplementationOnce(() => {
+        const mirror = createMirror();
+        const ready = mirror.ready;
+        mirror.ready = async (cur) => {
+          if (holdReady) { holdReady = false; await oldReady.promise; }
+          await ready(cur);
+        };
+        return mirror;
+      });
+      mocks.openTerminalStream.mockImplementation((options) => {
+        callbacks = options;
+        return { pause: vi.fn(), suspend: vi.fn(), resync: vi.fn(), close: vi.fn() };
+      });
+      const view = render(<Terminal pane="%fit" stream />);
+      await seed(callbacks, 24);
+      holdReady = true;
+      let stale;
+      await act(async () => {
+        stale = callbacks.onReady({ cur: { row: 0, col: 0, vis: true } });
+        await Promise.resolve();
+      });
+      clickFit(view);
+      await act(async () => { oldReady.resolve(); await stale; });
+      await settleFit();
+      expect(mocks.instances[0].options.fontSize).toBe(12);
+      expect(getFont()).toBe(12);
+      await seed(callbacks, 16);
+      expect(mocks.instances[0].options.fontSize).toBe(24);
+      expect(mocks.instances[0].rows).toBe(16);
+    });
+
+    it('does not carry a pending fit or an old response into another pane', async () => {
+      const fresh = deferred();
+      let oldCaptures = 0;
+      mocks.getHistory.mockImplementation((pane) => {
+        if (pane === '%new') return Promise.resolve(capture(16));
+        return ++oldCaptures === 1 ? Promise.resolve(capture(24)) : fresh.promise;
+      });
+      const view = render(<Terminal pane="%old" />);
+      await settleFit();
+      clickFit(view);
+      view.rerender(<Terminal pane="%new" />);
+      await act(async () => fresh.resolve(capture(48)));
+      await settleFit();
+      expect(mocks.instances.at(-1).options.fontSize).toBe(12);
+      expect(getFont()).toBe(12);
+    });
+
+    it('keeps the current font after a failed fresh snapshot instead of fitting its cached height', async () => {
+      const fresh = deferred();
+      fresh.promise.catch(() => {}); // the RED implementation never requests this promise
+      mocks.getHistory.mockResolvedValueOnce(capture(24)).mockReturnValueOnce(fresh.promise);
+      const view = render(<Terminal pane="%fit" />);
+      await settleFit();
+      clickFit(view);
+      await act(async () => fresh.reject(new Error('offline')));
+      await settleFit();
+      expect(mocks.instances[0].options.fontSize).toBe(12);
+      expect(getFont()).toBe(12);
+    });
+
+    it('hands a pending snapshot fit to the fresh ready recovery frame before switching to live', async () => {
+      const { view, callbacks } = await backgroundRecovery();
+      const snapshot = deferred();
+      mocks.getHistory.mockReturnValue(snapshot.promise);
+      clickFit(view);
+      await seed(callbacks, 48);
+      act(() => callbacks.onStatus('live'));
+      await settleFit();
+      expect(mocks.instances[0].options.fontSize).toBe(8);
+      expect(mocks.instances[0].rows).toBe(48);
+      expect(getFont()).toBe(8);
+      await act(async () => snapshot.resolve(capture(16)));
+      await settleFit();
+      expect(mocks.instances[0].options.fontSize).toBe(8);
+    });
+
+    it('resyncs rather than fitting an old already-awaited recovery ready', async () => {
+      const createMirror = mocks.createStreamMirror.getMockImplementation();
+      const oldReady = deferred();
+      let holdReady = false;
+      mocks.createStreamMirror.mockImplementationOnce(() => {
+        const mirror = createMirror();
+        const ready = mirror.ready;
+        mirror.ready = async (cur) => {
+          if (holdReady) { holdReady = false; await oldReady.promise; }
+          await ready(cur);
+        };
+        return mirror;
+      });
+      const { view, callbacks, resync } = await backgroundRecovery();
+      await act(async () => callbacks.onSeed(capture(48)));
+      let stale;
+      holdReady = true;
+      await act(async () => {
+        stale = callbacks.onReady({ cur: { row: 0, col: 0, vis: true } });
+        await Promise.resolve();
+      });
+      mocks.getHistory.mockImplementation(() => new Promise(() => {}));
+      clickFit(view);
+      await act(async () => { oldReady.resolve(); await stale; });
+      act(() => callbacks.onStatus('live'));
+      await settleFit();
+      expect(mocks.instances[0].options.fontSize).toBe(12);
+      expect(resync).toHaveBeenCalledTimes(2);
+      await seed(callbacks, 16);
+      expect(mocks.instances[0].options.fontSize).toBe(24);
+      expect(mocks.instances[0].rows).toBe(16);
+    });
+
+    it('does not let an old snapshot write shrink Auto font while the requested frame is pending or fails', async () => {
+      const fresh = deferred();
+      fresh.promise.catch(() => {});
+      mocks.getHistory.mockResolvedValueOnce(capture(24))
+        .mockResolvedValueOnce(capture(48)).mockReturnValueOnce(fresh.promise);
+      const ref = { current: null };
+      const view = render(<Terminal pane="%fit" ref={ref} />);
+      await settleFit();
+      act(() => ref.current.autoFont());
+      await settleFit();
+      const term = mocks.instances[0];
+      expect(term.options.fontSize).toBe(14);
+      let releaseWrite;
+      term.write.mockImplementation((data, done) => {
+        if (data.includes('row-47')) releaseWrite = done;
+        else done?.();
+      });
+      await act(async () => { ref.current.wake(); await Promise.resolve(); });
+      expect(releaseWrite).toBeDefined();
+      clickFit(view);
+      await act(async () => { releaseWrite(); await Promise.resolve(); });
+      await settleFit();
+      expect(term.options.fontSize).toBe(14);
+      await act(async () => fresh.reject(new Error('offline')));
+      await settleFit();
+      expect(term.options.fontSize).toBe(14);
+      expect(getFont()).toBeNull();
+    });
+  });
+
   it('mounts with the font saved from Settings while the terminal was absent, including auto reset', () => {
     localStorage.setItem('tw_lang', 'zh');
     setFont(20);

@@ -220,12 +220,8 @@ const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Terminal({
   // after changing the size from outside the effect scope.
   const fitRef = useRef<(() => void) | null>(null);
   const settleLayoutFitRef = useRef<(() => void) | null>(null);
-  // One-shot flag for the pager's "适配高度" button: the next fit() sizes the font so the whole pane fills
-  // the screen (see the fit-to-fill block in fit()). Set here, consumed in effect scope.
-  const fitScreenPendingRef = useRef(false);
-  // After the fit-height estimate, verify against the REAL cell height and shrink a step at a time until all
-  // paneRows actually fit (xterm rounds cell height to whole pixels, so the estimate can be a row too big).
-  const fitScreenVerifyRef = useRef(false);
+  // Bridge the pager's fit-height button to its pane-local fresh-frame fit request.
+  const fitScreenRequestRef = useRef<(() => void) | null>(null);
   // One-shot flag: the keyboard just collapsed → the next fit keeps the cursor in view (scroll-into-view)
   // instead of jumping to the first line, so you don't lose your editing spot. Set in the inset effect.
   const collapseKeepCursorRef = useRef(false);
@@ -316,6 +312,12 @@ const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Terminal({
 
   useEffect(() => {
     let disposed = false;
+    // Fit-height is pane-local and is armed only by a frame obtained after the user's request.
+    let fitScreenPending = false;
+    let fitScreenVerifying = false;
+    let fitRequestPending = false;
+    let fitRequestVersion = 0;
+    let streamSeedFitVersion = 0;
     let hadDesktopSelection = false;
     const terminalHost = elRef.current;
     if (!terminalHost) return undefined;
@@ -734,11 +736,11 @@ const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Terminal({
       //     tiny keyboard-up slice `avail`, NOT clientHeight which over-counts the strip under the dock);
       //  2) verify against the ACTUAL cell height and shrink a step at a time until all paneRows fit —
       //     xterm rounds cell height to whole pixels, so the estimate can leave the pane a row too tall.
-      if (fitScreenPendingRef.current && paneRows) {
-        fitScreenPendingRef.current = false;
+      if (fitScreenPending && paneRows) {
+        fitScreenPending = false;
         const cur = term.options.fontSize || 14;
         const est = Math.max(8, Math.min(40, Math.round(cur * (fullAvailRef.current || avail) / (paneRows * cellH))));
-        fitScreenVerifyRef.current = true;
+        fitScreenVerifying = true;
         fontRef.current = est; setFont(est); // pin manual so auto-shrink won't fight it
         if (est !== cur) {
           term.options.fontSize = est;
@@ -746,7 +748,7 @@ const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Terminal({
           return;
         }
       }
-      if (fitScreenVerifyRef.current && paneRows) {
+      if (fitScreenVerifying && paneRows) {
         const rows = Math.floor((fullAvailRef.current || avail) / cellH); // rows that actually fit now
         const cur = term.options.fontSize || 14;
         if (rows < paneRows && cur > 8) { // a row is still cut → shrink one and re-check
@@ -755,7 +757,7 @@ const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Terminal({
           requestAnimationFrame(() => fit(pass, generation));
           return;
         }
-        fitScreenVerifyRef.current = false; // all paneRows fit (or hit the min font) → settle
+        fitScreenVerifying = false; // all paneRows fit (or hit the min font) → settle
         fontRef.current = cur; setFont(cur);
       }
 
@@ -1146,6 +1148,7 @@ const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Terminal({
     const applyStreamSeed = async (frame: TerminalSeedMessage): Promise<void> => {
       const mirror = streamMirror;
       if (disposed || !mirror) return;
+      const fitVersion = fitRequestVersion;
       const recoveringInBackground = streamRecoveryInProgress && !streamMode;
       if (streamFallbackTimer) {
         clearTimeout(streamFallbackTimer);
@@ -1168,7 +1171,8 @@ const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Terminal({
         setAltScreen((value) => (value === !!frame.alt ? value : !!frame.alt));
       }
       await mirror.seed(frame);
-      if (disposed) return;
+      if (disposed || fitVersion !== fitRequestVersion) return;
+      streamSeedFitVersion = fitVersion;
       if (!recoveringInBackground) {
         lastAnsi = frame.ansi;
         lastCur = '';
@@ -1187,15 +1191,21 @@ const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Terminal({
     const finishStreamSeed = async ({ cur }: TerminalReadyMessage): Promise<void> => {
       const mirror = streamMirror;
       if (disposed || !mirror) return;
+      const fitVersion = streamSeedFitVersion;
       const recoveringInBackground = streamRecoveryInProgress && !streamMode;
       if (!recoveringInBackground) {
         streamCursorVisible = !!cur?.vis;
         lastCur = cur ? `${cur.row},${cur.col},${cur.vis ? 1 : 0}` : '';
       }
       await mirror.ready(cur);
-      if (disposed) return;
+      if (disposed || fitVersion !== fitRequestVersion) return;
       streamMirrorReady = true;
       if (!recoveringInBackground) {
+        if (fitRequestPending) {
+          fitRequestPending = false;
+          fitScreenPending = true;
+          streamSeedNeedsFit = true; // identical dimensions/content still need the requested fit
+        }
         if (streamSeedNeedsFit) scheduleFit();
         else scheduleStreamRender({ immediate: true });
         setTimeout(() => {
@@ -1216,6 +1226,7 @@ const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Terminal({
     ): Promise<boolean> => {
       if (busy || disposed) return false;
       busy = true;
+      const fitVersion = fitRequestVersion;
       const startedInStreamMode = streamMode;
       const requestStartedAt = Date.now();
       // Keep anchors in xterm's integer row space to avoid fractional DOM-row drift. Normal refreshes use
@@ -1223,7 +1234,7 @@ const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Terminal({
       let anchorFromBottom = keepPosition ? buf().length - buf().viewportY : 0;
       try {
         const hist = await getHistory(pane, lines, lastHash);
-        if (disposed) return false;
+        if (disposed || fitVersion !== fitRequestVersion) return false;
         // A background WebSocket recovery may have completed while this snapshot request was in flight.
         // Never let the older snapshot overwrite the newly activated live frame.
         if (!startedInStreamMode && streamMode) return false;
@@ -1234,6 +1245,12 @@ const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Terminal({
         if (selActiveRef.current) return false;
         // 204: server says the screen is identical to lastHash — keep what's drawn, transmit nothing.
         if (hist.unchanged) { setPaused(keepPosition); return true; }
+        const fitFreshFrame = fitRequestPending && typeof hist.height === 'number'
+          && Number.isFinite(hist.height) && hist.height > 0;
+        if (fitFreshFrame) {
+          fitRequestPending = false;
+          fitScreenPending = true;
+        }
         // A desktop wheel stream remains live while the request is in flight. Preserve the position the
         // user has reached NOW, not the stale position from request start (notably after reversing direction).
         if (keepPosition && preserveLatestPosition) {
@@ -1259,7 +1276,7 @@ const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Terminal({
         // a bare left/right moves it without changing the text, and that still has to repaint or the
         // cursor would never visibly track (the server already folds it into the change-hash).
         const curKey = hist.cur ? `${hist.cur.row},${hist.cur.col},${hist.cur.vis ? 1 : 0}` : '';
-        if (!resized && !firstSeed && hist.ansi === lastAnsi && curKey === lastCur) {
+        if (!fitFreshFrame && !resized && !firstSeed && hist.ansi === lastAnsi && curKey === lastCur) {
           setPaused(keepPosition);
           return true;
         }
@@ -1287,7 +1304,7 @@ const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Terminal({
         await new Promise<void>((resolve) => {
           term.write('\x1b[?25l\x1b[0m\x1b[2J\x1b[3J\x1b[H' + framed, resolve);
         });
-        if (disposed) return false;
+        if (disposed || fitVersion !== fitRequestVersion) return false;
         if (historyMode && typeof hist.historyLines === 'number'
           && Number.isFinite(hist.historyLines)) {
           liveBoundaryLine = hist.historyLines;
@@ -1330,7 +1347,7 @@ const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Terminal({
         // Cursor goes on AFTER the scroll (never in the seed — see cursorSeq). When a fit is coming it
         // resizes first and re-places the cursor itself; otherwise place it now.
         placeCursor();
-        if (resized || firstSeed || paneRows !== prevPaneRows) scheduleFit();
+        if (fitFreshFrame || resized || firstSeed || paneRows !== prevPaneRows) scheduleFit();
         // Backstop: if that fit's RAF chain ever early-returns before settling (grid not yet
         // measurable), reveal anyway so a switched pane can't get stuck hidden. Idempotent with fit's.
         if (firstSeed) setTimeout(reveal, 400);
@@ -1443,6 +1460,17 @@ const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Terminal({
           telemetry.setMode('live');
           setTransportFallback(null);
           setConn(nextConnection(connState, 'reset'));
+          if (fitRequestPending) {
+            const frame = streamMirrorReady && streamSeedFitVersion === fitRequestVersion
+              ? streamMirror?.snapshot() : null;
+            if (!frame || !(frame.paneRows > 0)) {
+              resumeStream(); // an older recovery ready cannot satisfy this fit request
+              return;
+            }
+            paneRows = frame.paneRows;
+            fitRequestPending = false;
+            fitScreenPending = true;
+          }
           scheduleFit();
         }
         return;
@@ -1527,6 +1555,18 @@ const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Terminal({
       startLoop();
     };
     wakeRef.current = wake;
+    fitScreenRequestRef.current = () => {
+      fitRequestVersion += 1;
+      fitGeneration += 1; // invalidate already queued fits/paints before requesting current pane geometry
+      fitScreenPending = false;
+      fitScreenVerifying = false;
+      fitRequestPending = true;
+      if (streamMode) resumeStream();
+      else {
+        lastHash = null; // require a complete frame, not an unchanged response against the cached geometry
+        wake(); // busy requests are followed by exactly one fresh poll via wakeAgain
+      }
+    };
 
     // Pause polling in the background (saves battery + server-side tmux spawns); on return, reset
     // health, repaint immediately (instant refresh), and resume the loop.
@@ -1628,6 +1668,7 @@ const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Terminal({
       fitRef.current = null;
       settleLayoutFitRef.current = null;
       wakeRef.current = null;
+      fitScreenRequestRef.current = null;
       resyncRef.current = null;
       refreshDecosRef.current = null;
       touch.dispose();
@@ -1703,7 +1744,7 @@ const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Terminal({
 
   // 定位 toggle: turn the cursor-line highlight on/off and apply it right away (locateRef redraws it).
   const toggleLocate = () => { const v = !locateOn; setLocateOn(v); locateOnRef.current = v; locateRef.current?.(); };
-  const fitScreen = () => { fitScreenPendingRef.current = true; fitRef.current?.(); };
+  const fitScreen = () => fitScreenRequestRef.current?.();
 
   // Copy the live selection, then drop the highlight + bubble. navigator.clipboard only exists in
   // a secure context (https/localhost); over plain http we fall back to a throwaway textarea +
