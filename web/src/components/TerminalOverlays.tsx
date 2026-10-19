@@ -157,39 +157,40 @@ export default function TerminalOverlays({
               title={pagerToggleLabel} aria-expanded={pagerExpanded}
               onClick={() => setPagerExpanded((expanded) => !expanded)}>
               <svg viewBox="0 0 24 24" width="19" height="19" aria-hidden="true">
-                <path d={pagerExpanded ? 'M6 14.5l6-6 6 6' : 'M6 9.5l6 6 6-6'}
-                  fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" />
+                {pagerExpanded
+                  ? <path d="M7 7l10 10M17 7L7 17" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+                  : <><circle cx="6" cy="12" r="1.5" fill="currentColor" /><circle cx="12" cy="12" r="1.5" fill="currentColor" /><circle cx="18" cy="12" r="1.5" fill="currentColor" /></>}
               </svg>
             </button>
           </div>
-          {pagerExpanded && <div className="term-pager-grp">
-            <button type="button" className="term-pager-btn" aria-label="上翻页" onClick={() => onPageScroll('up')}>
+          <div className="term-pager-grp" aria-hidden={!pagerExpanded}>
+            <button type="button" className="term-pager-btn" aria-label="上翻页" tabIndex={pagerExpanded ? 0 : -1} onClick={() => onPageScroll('up')}>
               <svg viewBox="0 0 24 24" width="19" height="19" aria-hidden="true">
                 <path d="M6 14.5l6-6 6 6" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" />
               </svg>
             </button>
             <span className="term-pager-div" aria-hidden="true" />
-            <button type="button" className="term-pager-btn" aria-label="下翻页" onClick={() => onPageScroll('down')}>
+            <button type="button" className="term-pager-btn" aria-label="下翻页" tabIndex={pagerExpanded ? 0 : -1} onClick={() => onPageScroll('down')}>
               <svg viewBox="0 0 24 24" width="19" height="19" aria-hidden="true">
                 <path d="M6 9.5l6 6 6-6" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" />
               </svg>
             </button>
-          </div>}
-          {pagerExpanded && <div className="term-pager-grp">
-            <button type="button" className="term-pager-btn" aria-label="适配高度" title="适配高度" onClick={onFitScreen}>
+          </div>
+          <div className="term-pager-grp" aria-hidden={!pagerExpanded}>
+            <button type="button" className="term-pager-btn" aria-label="适配高度" title="适配高度" tabIndex={pagerExpanded ? 0 : -1} onClick={onFitScreen}>
               <svg viewBox="0 0 24 24" width="19" height="19" aria-hidden="true">
                 <path d="M5 4.5h14M5 19.5h14" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" />
                 <path d="M12 8.5v7M9.8 10.8L12 8.5l2.2 2.3M9.8 13.2L12 15.5l2.2-2.3" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" />
               </svg>
             </button>
             <span className="term-pager-div" aria-hidden="true" />
-            <button type="button" className="term-pager-btn" aria-label="定位光标行" title="定位光标行" aria-pressed={locateOn} onClick={onToggleLocate}>
+            <button type="button" className="term-pager-btn" aria-label="定位光标行" title="定位光标行" aria-pressed={locateOn} tabIndex={pagerExpanded ? 0 : -1} onClick={onToggleLocate}>
               <svg viewBox="0 0 24 24" width="19" height="19" aria-hidden="true">
                 <path d="M5 7h14M5 17h14" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" opacity="0.7" />
                 <rect x="4" y="10.5" width="16" height="3" rx="1.5" fill="currentColor" />
               </svg>
             </button>
-          </div>}
+          </div>
         </div>
       )}
       {selUI && (() => {

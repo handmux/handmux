@@ -952,23 +952,28 @@ button.settings-page-row:disabled, .settings-page-row.disabled { color: rgba(235
    One frosted-glass capsule with a hairline divider and crisp chevrons (an iOS-style stacked control) —
    subtle so it defers to the content; ~42pt targets; clear of the safe area. */
 .term-pager {
-  /* Center in the VISIBLE slice (--vis-h), not the full container — its top is clipped with the keyboard
-     up. calc(100% - --vis-h/2) is the visible middle; falls back to 50% when the var is unset. Now a
-     column of two separate capsules (page up/down · fit+locate) with a gap between them. */
+  /* Align within the VISIBLE slice (--vis-h), not the full container. Safe centering keeps the top
+     toggle reachable when the keyboard leaves less height than the controls need. */
   position: absolute; z-index: 6; right: calc(10px + env(safe-area-inset-right));
-  top: calc(100% - var(--vis-h, 100%) / 2);
-  transform: translateY(-50%); display: flex; flex-direction: column; align-items: stretch; gap: 10px;
+  top: calc(100% - var(--vis-h, 100%)); bottom: 0;
+  padding-block: 28px; box-sizing: border-box; /* clear the top connection tag without shifting the center */
+  display: flex; flex-direction: column; align-items: stretch; gap: 10px;
+  justify-content: flex-start; justify-content: safe center;
+  pointer-events: none; /* preserved hidden layout must not cover terminal gestures */
 }
 /* One frosted-glass capsule with a hairline divider (an iOS-style stacked control) — subtle so it defers
    to the content; ~42pt targets. */
 .term-pager-grp {
-  display: flex; flex-direction: column; align-items: stretch;
+  display: flex; flex: none; flex-direction: column; align-items: stretch;
+  pointer-events: auto;
   border-radius: 21px; overflow: hidden;
   background: rgba(28,30,34,0.52);
   -webkit-backdrop-filter: blur(16px) saturate(1.4); backdrop-filter: blur(16px) saturate(1.4);
   border: 0.5px solid rgba(255,255,255,0.14);
   box-shadow: 0 4px 18px rgba(0,0,0,.30);
 }
+/* Keep the same group height so the top toggle does not jump when the actions are hidden. */
+.term-pager-grp[aria-hidden="true"] { visibility: hidden; pointer-events: none; }
 .term-pager-btn {
   width: 42px; height: 42px; display: flex; align-items: center; justify-content: center;
   padding: 0; border: none; background: transparent; color: rgba(255,255,255,0.92);
