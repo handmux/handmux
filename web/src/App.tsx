@@ -488,8 +488,7 @@ export default function App() {
   const [serverReloadDialogDismissed, setServerReloadDialogDismissed] = useState(false);
   const showServerReloadDialog = serverReloadRequired
     && !serverReloadDialogDismissed
-    && rootView === 'session'
-    && lens === 'chat';
+    && rootView === 'session';
   const [verSeen, setVerSeen] = useState(getVersionSeen); // npm "latest" already acknowledged by opening Settings
   const [seen, setSeen] = useState(getInboxSeen); // pane → last-viewed ts (inbox read state)
   const [readTs, setReadTs] = useState(getInboxReadTs); // server-ts high-water mark for done history (null=unset)
