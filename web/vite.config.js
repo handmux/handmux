@@ -89,7 +89,16 @@ export default defineConfig({
     },
   },
   test: {
+    pool: 'threads',
+    isolate: true,
     environment: 'jsdom',
+    // Only reviewed, DOM/storage-independent logic skips browser setup. New tests stay in jsdom.
+    environmentMatchGlobs: [
+      ['test/{backoff,cadence,connection,connectionTelemetry,momentum,overlayStack,repeat,streamPaintCadence,wheelScroll}.test.ts', 'node'],
+      ['test/{docPath,keybarKeys,localUrl,terminalInputQueue,terminalSeed,terminalSelection,terminalStreamProtocol,terminalViewport,uploadTypes}.test.ts', 'node'],
+      ['test/{iatProtocol,voiceProviderRegistry}.test.ts', 'node'],
+      ['test/{gitDiff,mime,paneLayout,previewName}.test.js', 'node'],
+    ],
     // Component tests carry JSX, so they're named .test.jsx (plain logic tests stay .test.js).
     include: ['test/**/*.test.{js,jsx,ts,tsx}', 'src/**/*.test.{js,jsx,ts,tsx}'],
     setupFiles: ['./test/setup.js'],
