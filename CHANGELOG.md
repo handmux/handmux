@@ -6,7 +6,7 @@ All notable changes to handmux. Format follows [Keep a Changelog](https://keepac
 
 ### Changed
 
-- 用量重置倒计时增加“约”字提示，右侧新增括号显示具体重置时间，使用本地时区并隐藏年份。
+- 用量重置倒计时右侧新增括号显示预计重置时间，时间前加“约”，使用本地时区并隐藏年份。
 
 ## [0.35.0] - 2026-10-20
 
