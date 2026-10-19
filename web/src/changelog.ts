@@ -34,6 +34,7 @@ export const CHANGELOG: ChangelogEntry[] = [
         '修复实时终端全屏程序的光标行高亮不显示的问题。',
         '修复 Codex 历史查询失败后持续显示旧内容，以及重连时已完成回复暂时消失的问题。',
         'AI 提问工具在标题下直接展示问题正文和选项；普通工具的单行摘要和详情展开方式不变。',
+        '修复 tmux 3.8 下工作区快照和布局恢复的问题，保留旧版 tmux 支持。',
       ],
       en: [
         'Added Compact session and New session to the conversation context panel when supported by the Agent; starting a new session requires confirmation and preserves previous history.',
@@ -43,6 +44,7 @@ export const CHANGELOG: ChangelogEntry[] = [
         'Fixed the cursor-line highlight not appearing in fullscreen programs in live terminal mode.',
         'Fixed stale Codex history after query failures and completed replies temporarily disappearing across reconnects.',
         'AI question tools show question text and choices below the title; ordinary tools retain their single-line summaries and detail views.',
+        'Fixed workspace snapshots and layout recovery on tmux 3.8 while retaining support for older tmux versions.',
       ],
     },
   },

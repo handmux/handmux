@@ -4,10 +4,6 @@ All notable changes to handmux. Format follows [Keep a Changelog](https://keepac
 
 ## [Unreleased]
 
-### Fixed
-
-- 修复 tmux 3.8 下工作区无法读取拓扑、影响快照和恢复的问题，兼容其新增的格式转义和 JSON 布局，同时保留旧版 tmux 布局支持。
-
 ## [0.35.0] - 2026-10-20
 
 ### Added
@@ -21,6 +17,7 @@ All notable changes to handmux. Format follows [Keep a Changelog](https://keepac
 
 ### Fixed
 
+- 修复 tmux 3.8 下工作区无法读取拓扑、影响快照和恢复的问题，兼容其新增的格式转义和 JSON 布局，同时保留旧版 tmux 布局支持。
 - 修复修改窗口或分屏高度后，“适配高度”仍按旧尺寸缩放、需切换窗口才恢复的问题。
 - 修复终端实时模式下全屏程序的“定位光标行”高亮不显示的问题。
 - 修复对话历史在临时查询失败后可能继续返回旧数据，以及重连时已完成回复短暂消失、需等后续消息才恢复的问题。
