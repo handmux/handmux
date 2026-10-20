@@ -69,7 +69,7 @@ it('uses two-line compact list rows in all tabs with explicit trailing actions a
   const { container } = render(<ScheduledMessagesSheet scope={{ tmuxSession: 'work', paneId: '%1' }} run={run} onClose={() => {}} />);
   await screen.findByRole('button', { name: 'scheduled.editAction' });
   for (const tab of ['active', 'ended', 'exceptions']) {
-    fireEvent.click(screen.getByRole('tab', { name: `scheduled.${tab}` }));
+    fireEvent.click(screen.getByRole('tab', { name: new RegExp(`^scheduled\\.${tab}(?: |$)`) }));
     const row = screen.getByRole('listitem');
     expect(row.querySelector('.scheduled-list-copy')?.children).toHaveLength(2);
     expect(within(row).getByRole('button', { name: `scheduled.${tab === 'active' ? 'editAction' : tab === 'ended' ? 'delete' : 'reschedule'}` })).toBeTruthy();
@@ -106,7 +106,7 @@ it('reschedules an exception with server plus one-hour defaults and uses ActionS
   const exception = { id: 'exception', revision: 3, taskId: 'task', text: 'reschedule me', target, timeZone: 'Asia/Shanghai', scheduledAt: serverNow - 6000000, reason: 'missed', unknown: false };
   mockApi({ ...snapshot, exceptions: [exception] });
   render(<ScheduledMessagesSheet scope={{ tmuxSession: 'work', paneId: '%1' }} run={null} onClose={() => {}} />);
-  fireEvent.click(screen.getByRole('tab', { name: 'scheduled.exceptions' }));
+  fireEvent.click(screen.getByRole('tab', { name: /^scheduled\.exceptions(?: |$)/ }));
   fireEvent.click(await screen.findByRole('button', { name: 'scheduled.reschedule' }));
   await waitFor(() => expect((screen.getByRole('button', { name: 'scheduled.save' }) as HTMLButtonElement).disabled).toBe(false));
   fireEvent.click(screen.getByRole('button', { name: 'scheduled.save' }));
@@ -252,7 +252,7 @@ it('shows server time once beneath the title on every tab and subpage without ta
     expect(container.textContent).not.toContain('hidden-session-uuid');
     expect(container.querySelector('.scheduled-footer')).toBeNull();
   };
-  for (const tab of ['active', 'ended', 'exceptions']) { fireEvent.click(screen.getByRole('tab', { name: `scheduled.${tab}` })); assertSubtitle(); }
+  for (const tab of ['active', 'ended', 'exceptions']) { fireEvent.click(screen.getByRole('tab', { name: new RegExp(`^scheduled\\.${tab}(?: |$)`) })); assertSubtitle(); }
   fireEvent.click(screen.getByRole('button', { name: 'scheduled.add' })); assertSubtitle();
   fireEvent.click(screen.getByRole('button', { name: /scheduled.sendTime/ })); assertSubtitle();
   expect(screen.getByRole('button', { name: 'scheduled.back' }).querySelector('svg')).toBeTruthy();
@@ -264,7 +264,7 @@ it.each(['active', 'ended'] as const)('uses the correct %s delete explanation fr
   const item: ScheduledTask = { id: 'task', revision: 2, text: 'message', target, timeZone: 'UTC', state, enabled: true, nextAt: serverNow + 60000, endedAt: serverNow, rule: { frequency: 'once', slots: [{ date: '2026-10-21', time: '09:00' }] } };
   mockApi({ ...snapshot, tasks: [item] });
   const { container } = render(<ScheduledMessagesSheet scope={{ tmuxSession: 'work', paneId: '%1' }} run={run} onClose={() => {}} />);
-  fireEvent.click(screen.getByRole('tab', { name: `scheduled.${state}` })); await screen.findByRole('listitem');
+  fireEvent.click(screen.getByRole('tab', { name: new RegExp(`^scheduled\\.${state}(?: |$)`) })); await screen.findByRole('listitem');
   fireEvent.click(container.querySelector('.scheduled-list-main')!);
   expect(container.textContent).not.toContain('scheduled.pane');
   expect(container.textContent).not.toContain('hidden-session-uuid');
@@ -304,21 +304,21 @@ it('shows actionable feedback after a completed preview has no executable occurr
   expect((screen.getByRole('button', { name: 'scheduled.save' }) as HTMLButtonElement).disabled).toBe(true);
 });
 
-it('shows an accessible add icon and fixed short dates while native pickers retain ISO values', async () => {
+it('shows an accessible add icon and year-qualified schedule dates while native pickers retain ISO values', async () => {
   mockApi(); const { container } = render(<ScheduledMessagesSheet scope={{ tmuxSession: 'work', paneId: '%1' }} run={run} onClose={() => {}} />);
   await screen.findByText('scheduled.empty');
   const add = screen.getByRole('button', { name: 'scheduled.add' });
   expect(add.textContent).toBe(''); expect(add.querySelector('svg')).toBeTruthy();
   fireEvent.click(add);
-  expect(screen.getByRole('button', { name: /scheduled.sendTime/ }).textContent).toContain('10/21 00:30');
+  expect(screen.getByRole('button', { name: /scheduled.sendTime/ }).textContent).toContain('2026/10/21 00:30');
   fireEvent.click(screen.getByRole('button', { name: /scheduled.sendTime/ }));
   const date = screen.getByLabelText('scheduled.date') as HTMLInputElement;
   expect(date.type).toBe('date'); expect(date.value).toBe('2026-10-21');
   const time = screen.getByLabelText('scheduled.time') as HTMLInputElement;
   expect(time.type).toBe('time'); expect(time.closest('.scheduled-calendar-input')).toBeNull();
-  expect(date.parentElement?.querySelector('.scheduled-picker-display')?.textContent).toBe('10/21');
+  expect(date.parentElement?.querySelector('.scheduled-picker-display')?.textContent).toBe('2026/10/21');
   fireEvent.change(date, { target: { value: '2027-01-02' } });
-  expect(screen.getByRole('button', { name: /scheduled.sendTime/ }).textContent).toContain('01/02 00:30');
+  expect(screen.getByRole('button', { name: /scheduled.sendTime/ }).textContent).toContain('2027/01/02 00:30');
   fireEvent.click(screen.getByRole('button', { name: /scheduled.repeat/ }));
   fireEvent.click(screen.getByRole('button', { name: 'scheduled.daily' }));
   fireEvent.click(screen.getByRole('button', { name: /scheduled.cutoff/ }));
@@ -326,9 +326,9 @@ it('shows an accessible add icon and fixed short dates while native pickers reta
   const cutoff = screen.getByLabelText('scheduled.cutoff') as HTMLInputElement;
   expect(cutoff.type).toBe('datetime-local'); expect(cutoff.value).toBe('2027-01-18T23:30');
   expect(cutoff.min).toBe('2026-10-20T23:30'); expect(cutoff.max).toBe('2027-10-20T23:30');
-  expect(cutoff.parentElement?.querySelector('.scheduled-picker-display')?.textContent).toBe('01/18 23:30');
-  expect(screen.getByRole('button', { name: /^scheduled.cutoff / }).textContent).toContain('01/18 23:30');
-  await waitFor(() => expect(screen.getByRole('status').textContent).toBe('scheduled.next: 10/21 00:30'));
+  expect(cutoff.parentElement?.querySelector('.scheduled-picker-display')?.textContent).toBe('2027/01/18 23:30');
+  expect(screen.getByRole('button', { name: /^scheduled.cutoff / }).textContent).toContain('2027/01/18 23:30');
+  await waitFor(() => expect(screen.getByRole('status').textContent).toBe('scheduled.next: 2026/10/21 00:30'));
   expect(container.textContent).not.toContain('2027-01-18');
 });
 
@@ -337,14 +337,14 @@ it('marks ended rows and populated exception tabs with semantic subdued state co
   mockApi({ ...snapshot, tasks: [task], exceptions: [{ id: 'ex', revision: 1, taskId: 'ended', text: 'retry', target, timeZone: 'UTC', scheduledAt: serverNow, reason: 'missed', unknown: false }] });
   const { container } = render(<ScheduledMessagesSheet scope={{ tmuxSession: 'work', paneId: '%1' }} run={run} onClose={() => {}} />);
   await screen.findByText('scheduled.empty');
-  expect(screen.getByRole('tab', { name: 'scheduled.exceptions' }).classList.contains('scheduled-state-exception')).toBe(true);
+  expect(screen.getByRole('tab', { name: /^scheduled\.exceptions(?: |$)/ }).classList.contains('scheduled-state-exception')).toBe(true);
   fireEvent.click(screen.getByRole('tab', { name: 'scheduled.ended' }));
   expect(screen.getByRole('listitem').classList.contains('scheduled-state-ended')).toBe(true);
-  expect(screen.getByRole('listitem').textContent).toContain('01/02 00:05');
+  expect(screen.getByRole('listitem').textContent).toContain('2027/01/02 00:05');
   fireEvent.click(container.querySelector('.scheduled-list-main')!);
-  expect(container.querySelector('.scheduled-page')?.textContent).toContain('01/02 00:05');
+  expect(container.querySelector('.scheduled-page')?.textContent).toContain('2027/01/02 00:05');
   fireEvent.click(screen.getByRole('button', { name: 'scheduled.back' }));
-  fireEvent.click(screen.getByRole('tab', { name: 'scheduled.exceptions' }));
+  fireEvent.click(screen.getByRole('tab', { name: /^scheduled\.exceptions(?: |$)/ }));
   expect(screen.getByRole('listitem').classList.contains('scheduled-state-exception')).toBe(true);
 });
 
@@ -374,10 +374,29 @@ it.each([
 it('labels exception records explicitly without moving the long reason into the badge', async () => {
   mockApi({ ...snapshot, exceptions: [{ id: 'status-ex', revision: 1, taskId: 'gone', text: 'exception status', target, timeZone: 'UTC', scheduledAt: serverNow, reason: 'delivery_unconfirmed', unknown: true }] });
   const { container } = render(<ScheduledMessagesSheet scope={{ tmuxSession: 'work', paneId: '%1' }} run={run} onClose={() => {}} />);
-  fireEvent.click(screen.getByRole('tab', { name: 'scheduled.exceptions' }));
+  fireEvent.click(screen.getByRole('tab', { name: /^scheduled\.exceptions(?: |$)/ }));
   const row = await screen.findByRole('listitem');
   expect(row.querySelector('.scheduled-status-exception')?.textContent).toBe('scheduled.exception');
   expect(row.querySelector('.scheduled-list-meta-copy')?.textContent).toContain('scheduled.result.failed');
   fireEvent.click(container.querySelector('.scheduled-list-main')!);
   expect(container.querySelector('.scheduled-page .scheduled-status-exception')?.textContent).toBe('scheduled.exception');
+});
+
+it('counts active tasks including paused and blocked tasks and updates exceptions from the shared pane snapshot', () => {
+  const task: ScheduledTask = { id: 'active', revision: 1, text: 'message', target, timeZone: 'UTC', state: 'active', enabled: true, nextAt: serverNow + 60000, rule: { frequency: 'once', slots: [{ date: '2026-10-21', time: '09:00' }] } };
+  const exception = { id: 'exception', revision: 1, taskId: 'active', text: 'message', target, timeZone: 'UTC', scheduledAt: serverNow, reason: 'missed', unknown: false };
+  const controller = { snapshot: null as ScheduledSnapshot | null, error: '', refresh: vi.fn(async () => {}) };
+  const props = { scope: { tmuxSession: 'work', paneId: '%1' }, run, onClose: () => {} };
+  const { rerender } = render(<ScheduledMessagesSheet {...props} controller={controller} />);
+  expect(screen.getByRole('tab', { name: 'scheduled.active' }).textContent).toBe('scheduled.active');
+  controller.snapshot = { ...snapshot, tasks: [task, { ...task, id: 'paused', enabled: false }, { ...task, id: 'blocked', enabled: false, blocked: true }, { ...task, id: 'ended', state: 'ended' }], exceptions: [exception] };
+  rerender(<ScheduledMessagesSheet {...props} controller={controller} />);
+  expect(screen.getByRole('tab', { name: 'scheduled.active 3' })).toBeTruthy();
+  expect(screen.getByRole('tab', { name: 'scheduled.exceptions 1' })).toBeTruthy();
+  expect(screen.getByRole('tab', { name: 'scheduled.ended' }).textContent).toBe('scheduled.ended');
+  controller.snapshot = { ...snapshot, tasks: [task], exceptions: [] };
+  rerender(<ScheduledMessagesSheet {...props} controller={controller} />);
+  expect(screen.getByRole('tab', { name: 'scheduled.active 1' })).toBeTruthy();
+  expect(screen.getByRole('tab', { name: 'scheduled.exceptions 0' })).toBeTruthy();
+  expect(vi.mocked(scheduledRequest)).not.toHaveBeenCalled();
 });

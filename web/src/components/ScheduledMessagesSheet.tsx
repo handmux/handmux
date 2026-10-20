@@ -45,7 +45,7 @@ function CalendarInput({ type, label, value, min, max, onChange }: {
   type: 'date' | 'datetime-local'; label: string; value: string; min?: string; max?: string; onChange: (value: string) => void;
 }) {
   return <span className={`scheduled-calendar-input scheduled-calendar-${type}`}>
-    <span className="scheduled-picker-display" aria-hidden="true">{scheduledDisplayLocal(value) || t('scheduled.choose')}</span>
+    <span className="scheduled-picker-display" aria-hidden="true">{scheduledDisplayLocal(value, true) || t('scheduled.choose')}</span>
     <input className="scheduled-picker-input" type={type} aria-label={label} value={value} min={min} max={max}
       onClick={event => { try { event.currentTarget.showPicker?.(); } catch { /* Native keyboard/picker remains available. */ } }}
       onChange={event => onChange(event.target.value)} />
@@ -178,7 +178,7 @@ export default function ScheduledMessagesSheet({ scope, run, onClose, controller
   }, [rule, zone, complete]);
 
   const dateTime = (at: number | undefined | null, timeZone = zone ?? snapshot?.timeZone) => at == null ? '—'
-    : scheduledDisplayLocal(scheduledLocalInput(at, timeZone!));
+    : scheduledDisplayLocal(scheduledLocalInput(at, timeZone!), true);
   const resultText = (reason: string) => {
     const key = `scheduled.result.${reason}`;
     return t(key) === key ? t('scheduled.result.failed') : t(key);
@@ -258,9 +258,10 @@ export default function ScheduledMessagesSheet({ scope, run, onClose, controller
 
   const timeSummary = editor?.slots.map((slot) => editor.frequency === 'hourly'
     ? t('scheduled.hourlyMinute', { minute: slot.minute })
-    : `${editor.frequency === 'weekly' ? `${t(`scheduled.day.${slot.weekday}`)} ` : slot.date ? `${scheduledDisplayLocal(slot.date)} ` : ''}${slot.time ?? ''}`).join('、') ?? '';
+    : `${editor.frequency === 'weekly' ? `${t(`scheduled.day.${slot.weekday}`)} ` : slot.date ? `${scheduledDisplayLocal(slot.date, true)} ` : ''}${slot.time ?? ''}`).join('、') ?? '';
   const title = page === 'list' ? t('scheduled.title') : page === 'detail' ? t('scheduled.detail')
     : t(editor?.task ? 'scheduled.edit' : editor?.exception ? 'scheduled.reschedule' : 'scheduled.add');
+  const activeCount = snapshot?.tasks.filter(task => task.state === 'active').length;
   const tasks = snapshot?.tasks.filter((task) => task.state === tab) ?? [];
   const items: Selection[] = tab === 'exceptions'
     ? (snapshot?.exceptions ?? []).map((item) => ({ kind: 'exception', item }))
@@ -271,7 +272,7 @@ export default function ScheduledMessagesSheet({ scope, run, onClose, controller
     <div className="file-seg scheduled-tabs" role="tablist">
       {(['active', 'ended', 'exceptions'] as const).map((value) => <button type="button" role="tab"
         aria-selected={tab === value} className={`file-seg-btn${tab === value ? ' on' : ''}${value === 'ended' ? ' scheduled-state-ended' : value === 'exceptions' && snapshot?.exceptions.length ? ' scheduled-state-exception' : ''}`}
-        key={value} onClick={() => setTab(value)}>{t(`scheduled.${value}`)}</button>)}
+        key={value} onClick={() => setTab(value)}>{t(`scheduled.${value}`)}{snapshot && value !== 'ended' && <span className="scheduled-tab-count"> {value === 'active' ? activeCount : snapshot.exceptions.length}</span>}</button>)}
     </div>
     <div className="scheduled-list-body">
       {items.length ? <ul className="scheduled-list">{items.map((selection) => {
@@ -319,7 +320,7 @@ export default function ScheduledMessagesSheet({ scope, run, onClose, controller
       <NavRow label={t('scheduled.sendTime')} value={timeSummary} expanded={dropdown === 'time'} onClick={() => toggleDropdown('time')} />
       {dropdown === 'time' && renderTimePicker()}
       {editor.frequency !== 'once' && <>
-        <NavRow label={t('scheduled.cutoff')} value={scheduledDisplayLocal(editor.endsAtLocal) || t('scheduled.choose')} expanded={dropdown === 'cutoff'} onClick={() => toggleDropdown('cutoff')} />
+        <NavRow label={t('scheduled.cutoff')} value={scheduledDisplayLocal(editor.endsAtLocal, true) || t('scheduled.choose')} expanded={dropdown === 'cutoff'} onClick={() => toggleDropdown('cutoff')} />
         {dropdown === 'cutoff' && <div className="scheduled-dropdown">
           <div className="scheduled-cutoff-presets">{[7, 30, 90].map(days => <button type="button" key={days} className="fontbtn" onClick={() => change({ endsAtLocal: scheduledLocalInput(snapshot!.serverNow + days * 86400000, zone!) })}>{t('scheduled.cutoffDays', { days })}</button>)}</div>
           <label className="settings-page-row scheduled-cutoff-row"><span className="settings-page-row-label">{t('scheduled.customCutoff')}</span>
@@ -401,7 +402,7 @@ export default function ScheduledMessagesSheet({ scope, run, onClose, controller
           {page === 'detail' && detail && <button type="button" className="scheduled-head-action" onClick={() => openMenu(detail)} aria-label={t('scheduled.more')}><MoreHorizontalIcon /></button>}
           <button type="button" className="cmd-close scheduled-close" aria-label={t('common.close')} onClick={close}><XIcon /></button>
         </div>
-        {snapshot && <p className="scheduled-subtitle">{t('scheduled.serverTime')}: {dateTime(snapshot.serverNow, snapshot.timeZone)}</p>}
+        {snapshot && <p className="scheduled-subtitle">{t('scheduled.serverTime')}: {scheduledDisplayLocal(scheduledLocalInput(snapshot.serverNow, snapshot.timeZone))}</p>}
       </header>
       {(error || source.error) && <div className="scheduled-error" role="alert">{error || source.error}</div>}
       <div className="tool-sheet-body scheduled-body">

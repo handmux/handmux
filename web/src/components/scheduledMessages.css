@@ -26,7 +26,8 @@
 .scheduled-sheet .settings-page-row-value, .scheduled-sheet .settings-page-chevron, .scheduled-sheet .settings-page-group > h2, .scheduled-sheet .settings-page-footer { color: var(--ct-muted); }
 .scheduled-sheet .settings-choice-row[aria-pressed="true"] { color: var(--ct-accent); }
 .scheduled-page-content { min-height: 0; }
-.scheduled-message-card textarea { display: block; box-sizing: border-box; width: 100%; min-height: 96px; resize: vertical; padding: 14px 16px; border: 0; background: transparent; color: inherit; font: 16px/1.5 -apple-system, system-ui, sans-serif; }
+.scheduled-message-card:focus-within { box-shadow: inset 0 0 0 1px var(--ct-accent); }
+.scheduled-message-card textarea { border-radius: inherit; outline: none; display: block; box-sizing: border-box; width: 100%; min-height: 96px; resize: vertical; padding: 14px 16px; border: 0; background: transparent; color: inherit; font: 16px/1.5 -apple-system, system-ui, sans-serif; }
 .scheduled-message-card textarea::placeholder { color: var(--ct-muted); }
 .scheduled-detail-text { padding: 14px 16px; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 16px; line-height: 1.5; }
 .scheduled-zone-hint { flex: none; margin: 0; padding: 0 16px 16px; color: var(--ct-muted); font-size: 12px; }
@@ -110,3 +111,5 @@
 .quick-fix.scheduled-shortcut svg { color: inherit; }
 
 .quick-fix.scheduled-shortcut:disabled { opacity: 1; }
+
+.scheduled-tab-count { font-variant-numeric: tabular-nums; }
