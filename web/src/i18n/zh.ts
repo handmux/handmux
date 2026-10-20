@@ -1,5 +1,21 @@
 // 中文 strings. Missing keys fall back to English (see ./index.ts translate()).
 export default {
+"scheduled.taskTimeZone": "发送时间按 {zone}",
+"scheduled.editAction": "编辑",
+"scheduled.repeat": "重复",
+"scheduled.sendTime": "发送时间",
+"scheduled.choose": "请选择",
+"scheduled.chooseCutoff": "请选择截止时间",
+"scheduled.previewing": "正在核对发送时间…",
+"scheduled.messagePlaceholder": "输入消息",
+"scheduled.loading": "正在加载…",
+"scheduled.more": "更多操作",
+"scheduled.actions": "定时消息操作",
+"scheduled.detail": "消息详情",
+"scheduled.lastResult": "最近结果",
+"scheduled.pane": "分屏 {pane}",
+"scheduled.hourlyMinute": "每小时第 {minute} 分",
+
 "scheduled.title": "定时消息",
 "scheduled.add": "新增",
 "scheduled.edit": "编辑定时消息",

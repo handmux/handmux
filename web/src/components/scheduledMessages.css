@@ -1,22 +1,40 @@
-.scheduled-sheet { max-height: min(88dvh, 760px); bottom: max(12px, env(safe-area-inset-bottom)); }
-.scheduled-content { padding: 12px 16px max(16px, env(safe-area-inset-bottom)); overflow-y: auto; }
-.scheduled-content label { display: flex; flex-direction: column; gap: 6px; margin: 12px 0; }
-.scheduled-content input, .scheduled-content textarea { width: 100%; box-sizing: border-box; padding: 10px; border: 1px solid var(--border, #8884); border-radius: 10px; background: var(--bg, #222); color: inherit; font: inherit; font-size: 16px; }
-.scheduled-segments { display: flex; gap: 4px; flex-wrap: wrap; margin: 12px 0; }
-.scheduled-segments .fontbtn { flex: 1; min-height: 44px; }
-.scheduled-segments [aria-pressed="true"], .scheduled-segments [aria-selected="true"] { background: var(--accent, #3478f6); color: white; }
-.scheduled-secondary { opacity: .66; font-size: 13px; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
-.scheduled-item { padding: 14px 0; border-bottom: 1px solid #8883; }
-.scheduled-item p { margin: 7px 0; }
-.scheduled-message { white-space: pre-wrap; overflow-wrap: anywhere; }
-.scheduled-open { display: block; width: 100%; background: transparent; border: 0; color: inherit; font: inherit; text-align: left; padding: 8px 0; }
-.scheduled-actions { display: flex; gap: 8px; }
-.scheduled-actions button { min-height: 44px; }
-.scheduled-slot { display: flex; align-items: center; gap: 12px; }
-.scheduled-slot label { flex: 1; min-width: 0; }
-.scheduled-error { color: var(--danger, #ff6868); }
-.scheduled-confirm { position: absolute; inset: 50% auto auto 50%; transform: translate(-50%, -50%); width: min(300px, 85%); padding: 20px; border-radius: 16px; background: var(--bg, #252525); box-shadow: 0 0 0 100vmax #0008; z-index: 1; text-align: center; }
-.scheduled-sheet.cmd-editor .scheduled-content { overflow-y: auto; padding: 12px 16px max(16px, env(safe-area-inset-bottom)); }
-.scheduled-sheet.cmd-editor { bottom: max(12px, env(safe-area-inset-bottom)); max-height: calc(90dvh - var(--overlay-keyboard-inset, 0px)); }
-.scheduled-sheet .cmd-head button { min-height: 44px; min-width: 44px; }
-.scheduled-sheet.cmd-panel.cmd-editor { min-height: min(58dvh, calc(90dvh - var(--overlay-keyboard-inset, 0px))); }
+/* Structure and controls come from FileManager / Inbox and Settings; only schedule-specific layout lives here. */
+.file-sheet.scheduled-sheet { background: #1a1b1e; color: #f2f2f7; padding-bottom: var(--overlay-keyboard-inset, 0px); }
+.scheduled-head { flex: none; min-height: calc(44px + env(safe-area-inset-top, 0px)); padding-top: env(safe-area-inset-top, 0px); }
+.scheduled-head-title { flex: 1; min-width: 0; align-self: center; margin: 0; padding: 0 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 17px; font-weight: 600; }
+.scheduled-head-action { flex: none; min-height: 44px; min-width: 44px; padding: 0 12px; border: 0; background: transparent; color: var(--blue); font: 15px -apple-system, system-ui, sans-serif; font-weight: 600; }
+.scheduled-head-action:disabled { opacity: .4; }
+.scheduled-head-action svg, .scheduled-more svg { display: block; width: 20px; height: 20px; }
+.scheduled-head .file-min, .scheduled-tabs .file-seg-btn { min-height: 44px; }
+.scheduled-page-content { min-height: 0; }
+.scheduled-message-card textarea { display: block; box-sizing: border-box; width: 100%; min-height: 132px; resize: vertical; padding: 14px 16px; border: 0; background: transparent; color: inherit; font: 16px/1.5 -apple-system, system-ui, sans-serif; }
+.scheduled-message-card textarea::placeholder { color: rgba(235,235,245,.3); }
+.scheduled-detail-text { padding: 14px 16px; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 16px; line-height: 1.5; }
+.scheduled-footer { color: rgba(235,235,245,.36); font-size: 12px; font-variant-numeric: tabular-nums; }
+.scheduled-list-body { display: flex; flex-direction: column; padding-bottom: env(safe-area-inset-bottom, 0px); }
+.scheduled-list { list-style: none; margin: 0; padding: 0 0 10px; }
+.scheduled-list-row { display: flex; align-items: center; min-width: 0; padding-right: 4px; border-bottom: .5px solid rgba(84,84,88,.5); }
+.scheduled-list-main { flex: 1; min-width: 0; padding: 13px 8px 13px 16px; border: 0; background: transparent; color: inherit; text-align: left; }
+.scheduled-list-copy { display: flex; flex-direction: column; min-width: 0; gap: 5px; }
+.scheduled-list-line { display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.scheduled-list-summary { font-size: 15px; line-height: 20px; font-weight: 500; }
+.scheduled-list-meta { color: rgba(235,235,245,.46); font-size: 12px; line-height: 17px; font-variant-numeric: tabular-nums; }
+.scheduled-row-action, .scheduled-more { flex: none; min-width: 44px; min-height: 44px; padding: 0 8px; border: 0; background: transparent; color: var(--blue); font: 14px -apple-system, system-ui, sans-serif; }
+.scheduled-row-action:disabled { color: rgba(235,235,245,.3); }
+.scheduled-more { display: inline-flex; align-items: center; justify-content: center; color: rgba(235,235,245,.5); }
+.scheduled-empty { margin: 0; padding: 48px 20px; text-align: center; color: rgba(235,235,245,.46); font-size: 14px; }
+.scheduled-list-body > .scheduled-footer { margin: auto 0 0; padding: 16px; }
+.scheduled-picker-input { min-height: 44px; min-width: 0; max-width: 65%; padding: 6px 0; border: 0; background: transparent; color: var(--blue); font: 16px -apple-system, system-ui, sans-serif; color-scheme: dark; text-align: right; }
+.scheduled-picker-input[type="number"] { width: 80px; }
+.scheduled-weekday-row { gap: 8px; flex-wrap: wrap; padding-block: 4px; }
+.scheduled-weekday-choice { display: inline-flex; align-items: center; gap: 10px; min-height: 44px; flex: 1; padding: 0; border: 0; background: transparent; color: inherit; font: inherit; }
+.scheduled-weekday-choice[aria-pressed="true"] { color: var(--blue); }
+.scheduled-cutoff-row { flex-wrap: wrap; }
+.scheduled-cutoff-row input { max-width: 100%; }
+.scheduled-error { flex: none; padding: 10px 16px; color: var(--red); font-size: 14px; }
+.scheduled-overlay-layer { position: fixed; inset: 0; z-index: var(--z-overlay-confirm); }
+.scheduled-overlay-layer .settings-backdrop { z-index: 0; }
+.scheduled-overlay-layer .settings-card { z-index: 1; }
+.scheduled-overlay-layer .settings-close { min-height: 44px; min-width: 44px; }
+.scheduled-confirm-layer { z-index: var(--z-overlay-confirm); }
+@media (prefers-reduced-motion: reduce) { .file-sheet.scheduled-sheet { transition: none; } }

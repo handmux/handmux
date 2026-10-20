@@ -1,6 +1,22 @@
 // English strings (the default + fallback locale). Keys are namespaced by area: common.*, token.*,
 // settings.*, … Keep this file complete; other locales may omit keys and fall back here.
 export default {
+"scheduled.taskTimeZone": "Send times use {zone}",
+"scheduled.editAction": "Edit",
+"scheduled.repeat": "Repeat",
+"scheduled.sendTime": "Send time",
+"scheduled.choose": "Choose",
+"scheduled.chooseCutoff": "Choose an end time",
+"scheduled.previewing": "Checking send time…",
+"scheduled.messagePlaceholder": "Enter a message",
+"scheduled.loading": "Loading…",
+"scheduled.more": "More actions",
+"scheduled.actions": "Schedule actions",
+"scheduled.detail": "Message details",
+"scheduled.lastResult": "Latest result",
+"scheduled.pane": "Pane {pane}",
+"scheduled.hourlyMinute": "Minute {minute} of each hour",
+
 "scheduled.title": "Scheduled messages",
 "scheduled.add": "Add",
 "scheduled.edit": "Edit schedule",

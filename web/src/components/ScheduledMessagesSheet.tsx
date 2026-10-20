@@ -1,139 +1,394 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import type { ReactNode } from 'react';
 import type { AgentRunRef } from '../agentCatalog.js';
 import { scheduledRequest } from '../scheduledMessagesApi.js';
 import type { ScheduledException, ScheduledRule, ScheduledSnapshot, ScheduledTask } from '../scheduledMessagesApi.js';
+import { scheduledLocalInput, scheduledOnceDefault, scheduledRuleComplete, scheduledSummary } from '../scheduledMessagesPresentation.js';
 import { useHistoryLayer, unwindHistory } from '../hooks/useBackButton.js';
+import { ChevronDownIcon, CheckIcon, MoreHorizontalIcon } from './icons.jsx';
+import ActionSheet from './ActionSheet.js';
 import { t } from '../i18n';
 import './scheduledMessages.css';
 
-type Editor = { task?: ScheduledTask; exception?: ScheduledException; text: string; frequency: ScheduledRule['frequency']; slots: ScheduledRule['slots']; endsAtLocal: string };
-function localInput(at: number, timeZone: string): string {
-  const p = Object.fromEntries(new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(at).map(({ type, value }) => [type, value]));
-  return `${p.year}-${p.month}-${p.day}T${p.hour}:${p.minute}`;
+type Page = 'list' | 'editor' | 'detail' | 'repeat' | 'time' | 'cutoff';
+type Selection = { kind: 'task'; item: ScheduledTask } | { kind: 'exception'; item: ScheduledException };
+interface Editor {
+  task?: ScheduledTask;
+  exception?: ScheduledException;
+  text: string;
+  frequency: ScheduledRule['frequency'];
+  slots: ScheduledRule['slots'];
+  endsAtLocal: string;
 }
-export default function ScheduledMessagesSheet({ tmuxSession, run, onClose }: { tmuxSession: string; run: AgentRunRef | null; onClose: () => void }) {
+interface Confirmation { message: string; action: () => void; label?: string }
+
+function NavRow({ label, value, onClick }: { label: string; value: string; onClick: () => void }) {
+  return <button type="button" className="settings-page-row" onClick={onClick}>
+    <span className="settings-page-row-label">{label}</span>
+    <span className="settings-page-row-trailing">
+      <span className="settings-page-row-value">{value}</span>
+      <span className="settings-page-chevron" aria-hidden="true">›</span>
+    </span>
+  </button>;
+}
+function ValueRow({ label, children }: { label: string; children: ReactNode }) {
+  return <div className="settings-page-row settings-page-value-row">
+    <span className="settings-page-row-label">{label}</span>
+    <span className="settings-page-row-value">{children}</span>
+  </div>;
+}
+
+export default function ScheduledMessagesSheet({ tmuxSession, run, onClose }: {
+  tmuxSession: string; run: AgentRunRef | null; onClose: () => void;
+}) {
   const [snapshot, setSnapshot] = useState<ScheduledSnapshot | null>(null);
   const [tab, setTab] = useState<'active' | 'ended' | 'exceptions'>('active');
+  const [pages, setPages] = useState<Page[]>(['list']);
   const [editor, setEditor] = useState<Editor | null>(null);
+  const [detail, setDetail] = useState<Selection | null>(null);
+  const [menu, setMenu] = useState<Selection | null>(null);
   const [dirty, setDirty] = useState(false);
-  const [confirm, setConfirm] = useState<null | { message: string; action: () => void }>(null);
+  const [confirm, setConfirm] = useState<Confirmation | null>(null);
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
   const [previewError, setPreviewError] = useState('');
   const [preview, setPreview] = useState<{ nextAt: number | null; timeZone: string } | null>(null);
   const mounted = useRef(true);
-  const runRef = useRef(run); runRef.current = run;
-  const request = <T,>(action: string, fields: Record<string, unknown> = {}) => scheduledRequest<T>(tmuxSession, runRef.current, action, fields);
-  const reload = async () => { const result = await request<ScheduledSnapshot>('snapshot'); if (mounted.current) setSnapshot(result); };
-  useEffect(() => {
-    mounted.current = true; let timer: ReturnType<typeof setTimeout>;
-    const poll = async () => { try { await reload(); } catch (cause) { if (mounted.current) setError(cause instanceof Error ? cause.message : t('scheduled.loadFailed')); } finally { if (mounted.current) timer = setTimeout(() => { void poll(); }, 3000); } };
-    void poll(); return () => { mounted.current = false; clearTimeout(timer); };
-  }, [tmuxSession]);
+  const runRef = useRef(run);
+  const pagesRef = useRef(pages);
   const historyDepth = useRef(0);
   const pendingHistoryDrop = useRef(0);
+  runRef.current = run;
+  pagesRef.current = pages;
+  const page = pages.at(-1)!;
+  const editorTarget = editor?.task?.target ?? editor?.exception?.target;
+  const zone = editor?.task?.timeZone ?? editor?.exception?.timeZone ?? snapshot?.timeZone;
+
+  const request = <T,>(action: string, fields: Record<string, unknown> = {}) =>
+    scheduledRequest<T>(tmuxSession, runRef.current, action, fields);
+  const reload = async () => {
+    const result = await request<ScheduledSnapshot>('snapshot');
+    if (mounted.current) setSnapshot(result);
+  };
+  useEffect(() => {
+    mounted.current = true;
+    let timer: ReturnType<typeof setTimeout>;
+    const poll = async () => {
+      try { await reload(); }
+      catch (cause) { if (mounted.current) setError(cause instanceof Error ? cause.message : t('scheduled.loadFailed')); }
+      finally { if (mounted.current) timer = setTimeout(() => { void poll(); }, 3000); }
+    };
+    void poll();
+    return () => { mounted.current = false; clearTimeout(timer); };
+  }, [tmuxSession]);
+
+  // One browser-history owner for the drawer, its drilldown pages and temporary action/confirmation layers.
   const queueUnwind = (depth: number) => {
     if (depth <= 0) return;
     pendingHistoryDrop.current += depth;
     if (pendingHistoryDrop.current !== depth) return;
-    // Confirmation + editor can close in one React event. One go(-N) preserves the exact owned depth.
-    queueMicrotask(() => { const count = pendingHistoryDrop.current; pendingHistoryDrop.current = 0; unwindHistory(count); });
+    queueMicrotask(() => {
+      const count = pendingHistoryDrop.current;
+      pendingHistoryDrop.current = 0;
+      unwindHistory(count);
+    });
   };
-  const pushLevel = () => { window.history.pushState({ scheduledMessages: true, depth: historyDepth.current + 1 }, ''); historyDepth.current++; };
-  const dropLevel = () => { if (historyDepth.current > 0) { historyDepth.current--; queueUnwind(1); } };
-  const showConfirm = (value: { message: string; action: () => void }) => { pushLevel(); setConfirm(value); };
-  const leave = (action: () => void) => { if (dirty) showConfirm({ message: t('scheduled.discardChanges'), action }); else action(); };
-  const leaveEditor = () => { dropLevel(); setEditor(null); setDirty(false); setError(''); };
-  const back = () => leave(leaveEditor);
-  const close = () => leave(onClose);
+  const pushLevel = () => {
+    window.history.pushState({ scheduledMessages: true, depth: historyDepth.current + 1 }, '');
+    historyDepth.current++;
+  };
+  const dropLevel = () => {
+    if (historyDepth.current > 0) { historyDepth.current--; queueUnwind(1); }
+  };
+  const replacePages = (next: Page[]) => { pagesRef.current = next; setPages(next); };
+  const enter = (next: Page) => { pushLevel(); replacePages([...pagesRef.current, next]); };
+  const popPage = (unwind = true) => {
+    if (unwind) dropLevel();
+    const previous = pagesRef.current.at(-1);
+    replacePages(pagesRef.current.slice(0, -1));
+    if (previous === 'editor') { setEditor(null); setDirty(false); setError(''); }
+  };
+  const returnToList = () => {
+    const depth = pagesRef.current.length - 1;
+    historyDepth.current -= depth;
+    queueUnwind(depth);
+    replacePages(['list']);
+    setEditor(null); setDetail(null); setDirty(false); setError('');
+  };
+  const showConfirm = (value: Confirmation) => { pushLevel(); setConfirm(value); };
   const dismissConfirm = () => { dropLevel(); setConfirm(null); };
+  const closeMenu = () => { dropLevel(); setMenu(null); };
+  const openMenu = (selection: Selection) => { pushLevel(); setMenu(selection); };
+  const leave = (action: () => void) => {
+    if (dirty) showConfirm({ message: t('scheduled.discardChanges'), action });
+    else action();
+  };
+  const back = () => page === 'editor' ? leave(() => popPage()) : popPage();
+  const close = () => leave(onClose);
   useHistoryLayer(true, () => {
     historyDepth.current = Math.max(0, historyDepth.current - 1);
     if (confirm) { setConfirm(null); return; }
-    if (editor) {
-      if (dirty) {
-        // Restore the consumed editor level so cancelling the confirmation retains Back ownership.
-        pushLevel(); showConfirm({ message: t('scheduled.discardChanges'), action: leaveEditor });
-      } else { setEditor(null); setDirty(false); setError(''); }
+    if (menu) { setMenu(null); return; }
+    if (pagesRef.current.length > 1) {
+      if (pagesRef.current.at(-1) === 'editor' && dirty) {
+        pushLevel();
+        showConfirm({ message: t('scheduled.discardChanges'), action: () => popPage() });
+      } else popPage(false);
     } else onClose();
   });
-  useEffect(() => { pushLevel(); return () => { queueUnwind(historyDepth.current); historyDepth.current = 0; }; }, []);
-  const rule = useMemo(() => editor ? { frequency: editor.frequency, slots: editor.slots, ...(editor.frequency === 'once' ? {} : { endsAtLocal: editor.endsAtLocal }) } : null, [editor]);
   useEffect(() => {
-    setPreview(null); setPreviewError(''); if (!rule) return;
-    let valid = true;
-    const timer = setTimeout(() => { void request<{ nextAt: number | null; timeZone: string }>('preview', { request: rule, ...(editor?.task ? { timeZone: editor.task.timeZone } : editor?.exception ? { timeZone: editor.exception.timeZone } : {}) }).then((result) => { if (valid) setPreview(result); }).catch((cause) => { if (valid) setPreviewError(cause instanceof Error ? cause.message : t('scheduled.chooseFuture')); }); }, 200);
-    return () => { valid = false; clearTimeout(timer); };
-  }, [rule]);
-  const dateTime = (at: number | undefined | null, zone = snapshot?.timeZone) => at == null ? '—' : new Intl.DateTimeFormat(undefined, { timeZone: zone, dateStyle: 'medium', timeStyle: 'short' }).format(at);
-  const resultText = (reason: string) => { const key = `scheduled.result.${reason}`; const value = t(key); return value === key ? t('scheduled.result.failed') : value; };
-  const edit = (task?: ScheduledTask, exception?: ScheduledException) => {
     pushLevel();
-    setEditor({ ...(task ? { task } : {}), ...(exception ? { exception } : {}), text: task?.text ?? exception?.text ?? '', frequency: task?.rule.frequency ?? 'once', slots: structuredClone(task?.rule.slots ?? [{ date: '', time: '09:00' }]), endsAtLocal: task?.rule.endsAt ? localInput(Date.parse(task.rule.endsAt), task.timeZone) : '' });
-    setDirty(false); setError('');
+    return () => { queueUnwind(historyDepth.current); historyDepth.current = 0; };
+  }, []);
+
+  const rule = useMemo(() => editor ? {
+    frequency: editor.frequency, slots: editor.slots,
+    ...(editor.frequency === 'once' ? {} : { endsAtLocal: editor.endsAtLocal }),
+  } : null, [editor]);
+  const complete = !!rule && scheduledRuleComplete(rule);
+  useEffect(() => {
+    setPreview(null); setPreviewError('');
+    if (!rule || !scheduledRuleComplete(rule)) return;
+    let valid = true;
+    const timer = setTimeout(() => {
+      void request<{ nextAt: number | null; timeZone: string }>('preview', {
+        request: rule, ...(zone ? { timeZone: zone } : {}),
+      }).then((result) => { if (valid) setPreview(result); })
+        .catch((cause) => { if (valid) setPreviewError(cause instanceof Error ? cause.message : t('scheduled.chooseFuture')); });
+    }, 200);
+    return () => { valid = false; clearTimeout(timer); };
+  }, [rule, zone]);
+
+  const dateTime = (at: number | undefined | null, timeZone = zone ?? snapshot?.timeZone) => at == null ? '—'
+    : new Intl.DateTimeFormat(undefined, { timeZone, month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }).format(at);
+  const resultText = (reason: string) => {
+    const key = `scheduled.result.${reason}`;
+    return t(key) === key ? t('scheduled.result.failed') : t(key);
   };
-  const change = (update: Partial<Editor>) => { setEditor((current) => current ? { ...current, ...update } : current); setDirty(true); };
+  const change = (update: Partial<Editor>) => {
+    setEditor((current) => current ? { ...current, ...update } : current);
+    setDirty(true);
+  };
+  const edit = (task?: ScheduledTask, exception?: ScheduledException) => {
+    if (!snapshot) return;
+    const timeZone = task?.timeZone ?? exception?.timeZone ?? snapshot.timeZone;
+    setEditor({
+      ...(task ? { task } : {}), ...(exception ? { exception } : {}),
+      text: task?.text ?? exception?.text ?? '', frequency: task?.rule.frequency ?? 'once',
+      slots: task ? structuredClone(task.rule.slots) : scheduledOnceDefault(snapshot.serverNow, timeZone),
+      endsAtLocal: task?.rule.endsAt ? scheduledLocalInput(Date.parse(task.rule.endsAt), timeZone) : '',
+    });
+    setDirty(false); setError(''); enter('editor');
+  };
+  const chooseFrequency = (frequency: ScheduledRule['frequency']) => {
+    if (!editor || !snapshot || editor.frequency === frequency) return;
+    const defaultSlot = scheduledOnceDefault(snapshot.serverNow, zone!)[0]!;
+    const weekday = new Date(`${defaultSlot.date}T00:00:00Z`).getUTCDay() || 7;
+    const slots = frequency === 'once' ? [defaultSlot]
+      : frequency === 'hourly' ? [{ minute: Number(defaultSlot.time!.slice(3)) }]
+        : frequency === 'weekly' ? [{ weekday, time: defaultSlot.time! }] : [{ time: defaultSlot.time! }];
+    change({ frequency, slots, ...(frequency === 'once' ? { endsAtLocal: '' } : {}) });
+  };
   const mutate = async (action: string, fields: Record<string, unknown>, after?: () => void) => {
-    if (saving) return; setSaving(true); setError('');
+    if (saving) return;
+    setSaving(true); setError('');
     try { await request(action, fields); await reload(); after?.(); }
-    catch (cause) { setError(cause instanceof Error ? cause.message : t('scheduled.loadFailed')); void reload().catch(() => {}); }
-    finally { if (mounted.current) setSaving(false); }
+    catch (cause) {
+      setError(cause instanceof Error ? cause.message : t('scheduled.loadFailed'));
+      void reload().catch(() => {});
+    } finally { if (mounted.current) setSaving(false); }
   };
   const save = () => {
-    if (!editor || !rule || !preview?.nextAt || !editor.text.trim()) return;
-    const done = leaveEditor;
-    if (editor.exception) void mutate('exception', { id: editor.exception.id, revision: editor.exception.revision, request: { action: 'reschedule', rule } }, done);
-    else if (editor.task) void mutate('update', { id: editor.task.id, revision: editor.task.revision, request: { ...rule, text: editor.text } }, done);
-    else void mutate('create', { request: { ...rule, text: editor.text } }, done);
+    if (!editor || !rule || !complete || !preview?.nextAt || !editor.text.trim()) return;
+    if (editor.exception) void mutate('exception', {
+      id: editor.exception.id, revision: editor.exception.revision, request: { action: 'reschedule', rule },
+    }, returnToList);
+    else if (editor.task) void mutate('update', {
+      id: editor.task.id, revision: editor.task.revision, request: { ...rule, text: editor.text },
+    }, returnToList);
+    else void mutate('create', { request: { ...rule, text: editor.text } }, returnToList);
   };
-  const remove = (task: ScheduledTask) => showConfirm({ message: t('scheduled.deleteConfirm'), action: () => { void mutate('delete', { id: task.id, revision: task.revision }); } });
-  const zone = editor?.task?.timeZone ?? editor?.exception?.timeZone ?? snapshot?.timeZone;
-  const slotFields = editor?.slots.map((slot, index) => <div className="scheduled-slot" key={index}>
-    {editor.frequency === 'once' && <label>{t('scheduled.date')}<input type="date" aria-label={t('scheduled.date')} value={slot.date ?? ''} onChange={(event) => change({ slots: editor.slots.map((value, i) => i === index ? { ...value, date: event.target.value } : value) })} /></label>}
-    {editor.frequency === 'weekly' && <span>{t(`scheduled.day.${slot.weekday}`)}</span>}
-    {editor.frequency === 'hourly' ? <label>{t('scheduled.minute')}<input type="number" min="0" max="59" aria-label={t('scheduled.minute')} value={slot.minute ?? 0} onChange={(event) => change({ slots: editor.slots.map((value, i) => i === index ? { minute: Number(event.target.value) } : value) })} /></label>
-      : <label>{t('scheduled.time')}<input type="time" aria-label={t('scheduled.time')} value={slot.time ?? ''} onChange={(event) => change({ slots: editor.slots.map((value, i) => i === index ? { ...value, time: event.target.value } : value) })} /></label>}
-  </div>);
-  return <>
-    <div className="cmd-backdrop" onClick={close} />
-    <section className="cmd-panel cmd-editor scheduled-sheet" role="dialog" aria-modal="true" aria-label={t('scheduled.title')}>
-      <header className="cmd-head">
-        {editor && <button type="button" className="fontbtn" onClick={back}>{t('scheduled.back')}</button>}
-        <span className="cmd-title">{editor ? t(editor.task ? 'scheduled.edit' : editor.exception ? 'scheduled.reschedule' : 'scheduled.add') : t('scheduled.title')}</span>
-        {!editor && <button type="button" className="fontbtn" disabled={!run} onClick={() => edit()}>{t('scheduled.add')}</button>}
-        <button type="button" className="fontbtn" onClick={close} aria-label={t('common.close')}>×</button>
-      </header>
-      <div className="cmd-list scheduled-content">
-        {snapshot && <p className="scheduled-secondary">{t('scheduled.serverTime')}: {dateTime(snapshot.serverNow)} · {snapshot.timeZone}</p>}
-        {error && <p role="alert" className="scheduled-error">{error}</p>}
-        {editor ? <>
-          <p className="scheduled-secondary">{t('scheduled.target')}: {tmuxSession} / {editor.task?.target.paneId ?? editor.exception?.target.paneId ?? run?.paneId} · {editor.task?.target.sessionId ?? editor.exception?.target.sessionId ?? run?.sessionId} · {zone}</p>
-          <label>{t('scheduled.message')}<textarea aria-label={t('scheduled.message')} value={editor.text} disabled={!!editor.exception} onChange={(event) => change({ text: event.target.value })} rows={4} /></label>
-          {!editor.exception && <div className="scheduled-segments">{(['once', 'hourly', 'daily', 'weekly'] as const).map((frequency) => <button type="button" className="fontbtn" key={frequency} aria-pressed={editor.frequency === frequency} onClick={() => { if (editor.frequency !== frequency) change({ frequency, slots: frequency === 'hourly' ? [{ minute: 0 }] : frequency === 'weekly' ? [{ weekday: 1, time: '09:00' }] : frequency === 'once' ? [{ date: '', time: '09:00' }] : [{ time: '09:00' }] }); }}>{t(`scheduled.${frequency}`)}</button>)}</div>}
-          {editor.frequency === 'weekly' && <div className="scheduled-segments">{[1, 2, 3, 4, 5, 6, 7].map((weekday) => <button type="button" className="fontbtn" key={weekday} aria-pressed={editor.slots.some((slot) => slot.weekday === weekday)} onClick={() => change({ slots: editor.slots.some((slot) => slot.weekday === weekday) ? editor.slots.filter((slot) => slot.weekday !== weekday) : [...editor.slots, { weekday, time: '09:00' }] })}>{t(`scheduled.day.${weekday}`)}</button>)}</div>}
-          {slotFields}
-          {editor.frequency !== 'once' && <label>{t('scheduled.cutoff')}<input type="datetime-local" aria-label={t('scheduled.cutoff')} required value={editor.endsAtLocal} onChange={(event) => change({ endsAtLocal: event.target.value })} /></label>}
-          <p role="status" className="scheduled-secondary">{t('scheduled.next')}: {preview?.nextAt ? dateTime(preview.nextAt, zone) : previewError || t('scheduled.chooseFuture')}</p>
-          <button type="button" className="cmd-submit" disabled={saving || !preview?.nextAt || !editor.text.trim()} onClick={save}>{t('scheduled.save')}</button>
-        </> : <>
-          <div className="scheduled-segments" role="tablist">{(['active', 'ended', 'exceptions'] as const).map((value) => <button type="button" role="tab" aria-selected={tab === value} className="fontbtn" key={value} onClick={() => setTab(value)}>{t(`scheduled.${value}`)}</button>)}</div>
-          {tab === 'exceptions' ? snapshot?.exceptions.length ? snapshot.exceptions.map((item) => <article className="scheduled-item" key={item.id}>
-            <p className="scheduled-message">{item.text}</p><p>{resultText(item.reason)}{item.count ? ` ×${item.count}` : ''}</p>
-            <p className="scheduled-secondary">{dateTime(item.scheduledAt, item.timeZone)}{item.missedThroughAt ? ` – ${dateTime(item.missedThroughAt, item.timeZone)}` : ''} · {item.timeZone} · {item.target.tmuxSession} / {item.target.paneId} · {item.target.sessionId}</p>
-            {item.unknown && <p>{t('scheduled.unknownHelp')}</p>}
-            <div className="scheduled-actions"><button type="button" className="fontbtn" disabled={item.unknown || saving} onClick={() => edit(undefined, item)}>{t('scheduled.reschedule')}</button><button type="button" className="fontbtn" disabled={saving} onClick={() => showConfirm({ message: t('scheduled.discardException'), action: () => { void mutate('exception', { id: item.id, revision: item.revision, request: { action: 'discard' } }); } })}>{t('scheduled.discard')}</button></div>
-          </article>) : <p className="scheduled-secondary">{t('scheduled.empty')}</p>
-          : snapshot?.tasks.filter((task) => task.state === tab).length ? snapshot.tasks.filter((task) => task.state === tab).map((task) => <article className="scheduled-item" key={task.id}>
-            <button type="button" className={`scheduled-message scheduled-open ${task.state === 'ended' ? 'scheduled-secondary' : ''}`} disabled={task.state === 'ended'} onClick={() => edit(task)}>{task.text}</button>
-            <p className="scheduled-secondary">{task.target.tmuxSession} / {task.target.paneId} · {task.target.sessionId} · {task.timeZone} · {t(`scheduled.${task.rule.frequency}`)} · {t(task.enabled && !task.blocked ? 'scheduled.enabled' : 'scheduled.paused')}</p>
-            <p>{t(task.state === 'ended' ? 'scheduled.finished' : 'scheduled.next')}: {dateTime(task.state === 'ended' ? task.endedAt : task.nextAt, task.timeZone)}</p>
-            {task.state === 'active' && task.rule.endsAt && <p className="scheduled-secondary">{t('scheduled.cutoff')}: {dateTime(Date.parse(task.rule.endsAt), task.timeZone)}</p>}
-            {task.lastResult && <p>{dateTime(task.lastAt, task.timeZone)} · {resultText(task.lastResult)}</p>}
-            <div className="scheduled-actions">{task.state === 'active' && <button type="button" className="fontbtn" disabled={saving || task.blocked} onClick={() => { void mutate('update', { id: task.id, revision: task.revision, request: { enabled: !task.enabled } }); }}>{t(task.enabled ? 'scheduled.pause' : 'scheduled.resume')}</button>}<button type="button" className="fontbtn" disabled={saving} onClick={() => remove(task)}>{t('scheduled.delete')}</button></div>
-          </article>) : <p className="scheduled-secondary">{t('scheduled.empty')}</p>}
-        </>}
+
+  const confirmDelete = (task: ScheduledTask) => showConfirm({
+    message: t('scheduled.deleteConfirm'), label: t('scheduled.delete'),
+    action: () => { void mutate('delete', { id: task.id, revision: task.revision }); },
+  });
+
+  const menuActions = menu?.kind === 'task' ? [
+    ...(menu.item.state === 'active' ? [{
+      key: 'enabled', label: t(menu.item.enabled ? 'scheduled.pause' : 'scheduled.resume'),
+      disabled: saving || menu.item.blocked === true,
+      onClick: () => { const task = menu.item; closeMenu(); void mutate('update', { id: task.id, revision: task.revision, request: { enabled: !task.enabled } }); },
+    }] : []),
+    {
+      key: 'delete', label: t('scheduled.delete'), danger: true, confirm: true,
+      confirmLabel: t('scheduled.deleteConfirm'), disabled: saving,
+      onClick: () => { const task = menu.item; closeMenu(); void mutate('delete', { id: task.id, revision: task.revision }, page === 'detail' ? returnToList : undefined); },
+    },
+  ] : menu ? [{
+    key: 'discard', label: t('scheduled.discard'), danger: true, confirm: true,
+    confirmLabel: t('scheduled.discardException'), disabled: saving,
+    onClick: () => { const item = menu.item; closeMenu(); void mutate('exception', { id: item.id, revision: item.revision, request: { action: 'discard' } }, page === 'detail' ? returnToList : undefined); },
+  }] : [];
+
+  const timeSummary = editor?.slots.map((slot) => editor.frequency === 'hourly'
+    ? t('scheduled.hourlyMinute', { minute: slot.minute })
+    : `${editor.frequency === 'weekly' ? `${t(`scheduled.day.${slot.weekday}`)} ` : slot.date ? `${slot.date} ` : ''}${slot.time ?? ''}`).join('、') ?? '';
+  const title = page === 'list' ? t('scheduled.title') : page === 'detail' ? t('scheduled.detail')
+    : page === 'editor' ? t(editor?.task ? 'scheduled.edit' : editor?.exception ? 'scheduled.reschedule' : 'scheduled.add')
+      : t(`scheduled.${page === 'time' ? 'sendTime' : page}`);
+  const tasks = snapshot?.tasks.filter((task) => task.state === tab) ?? [];
+  const items: Selection[] = tab === 'exceptions'
+    ? (snapshot?.exceptions ?? []).map((item) => ({ kind: 'exception', item }))
+    : tasks.map((item) => ({ kind: 'task', item }));
+  const showDetail = (selection: Selection) => { setDetail(selection); enter('detail'); };
+
+  const renderList = () => <>
+    <div className="file-seg scheduled-tabs" role="tablist">
+      {(['active', 'ended', 'exceptions'] as const).map((value) => <button type="button" role="tab"
+        aria-selected={tab === value} className={`file-seg-btn${tab === value ? ' on' : ''}`}
+        key={value} onClick={() => setTab(value)}>{t(`scheduled.${value}`)}</button>)}
+    </div>
+    <div className="settings-page-body scheduled-list-body">
+      {items.length ? <ul className="scheduled-list">{items.map((selection) => {
+        const { item } = selection;
+        const isException = selection.kind === 'exception';
+        const task = selection.kind === 'task' ? selection.item : null;
+        const exception = selection.kind === 'exception' ? selection.item : null;
+        const metadata = exception ? `${dateTime(exception.scheduledAt, exception.timeZone)} · ${resultText(exception.reason)}`
+          : `${dateTime(task!.state === 'ended' ? task!.endedAt : task!.nextAt, task!.timeZone)} · ${task!.state === 'ended'
+            ? resultText(task!.lastResult ?? 'submitted') : t(task!.enabled ? `scheduled.${task!.rule.frequency}` : 'scheduled.paused')}`;
+        const action = isException ? 'reschedule' : task!.state === 'ended' ? 'delete' : 'edit';
+        return <li className="scheduled-list-row" key={`${selection.kind}:${item.id}`}>
+          <button type="button" className="scheduled-list-main" onClick={() => showDetail(selection)}>
+            <span className="scheduled-list-copy">
+              <span className="scheduled-list-line scheduled-list-summary">{scheduledSummary(item.text)}</span>
+              <span className="scheduled-list-line scheduled-list-meta">{metadata}</span>
+            </span>
+          </button>
+          <button type="button" className="scheduled-row-action" disabled={saving || exception?.unknown}
+            onClick={() => action === 'delete' ? confirmDelete(task!) : edit(task ?? undefined, exception ?? undefined)}>{t(action === 'edit' ? 'scheduled.editAction' : `scheduled.${action}`)}</button>
+          {action !== 'delete' && <button type="button" className="scheduled-more" aria-label={t('scheduled.more')}
+            disabled={saving} onClick={() => openMenu(selection)}><MoreHorizontalIcon /></button>}
+        </li>;
+      })}</ul> : <p className="scheduled-empty">{t(snapshot ? 'scheduled.empty' : 'scheduled.loading')}</p>}
+      {snapshot && <p className="settings-page-footer scheduled-footer">{t('scheduled.serverTime')}: {dateTime(snapshot.serverNow, snapshot.timeZone)} · {snapshot.timeZone}</p>}
+    </div>
+  </>;
+
+  const renderEditor = () => editor && <div className="settings-page-content scheduled-page-content">
+    <section className="settings-page-group">
+      <h2><label htmlFor="scheduled-message">{t('scheduled.message')}</label></h2>
+      <div className="settings-page-list scheduled-message-card">
+        <textarea id="scheduled-message" aria-label={t('scheduled.message')} value={editor.text} disabled={!!editor.exception}
+          placeholder={t('scheduled.messagePlaceholder')} onChange={(event) => change({ text: event.target.value })} rows={5} />
       </div>
-      {confirm && <div className="scheduled-confirm" role="alertdialog" aria-modal="true"><p>{confirm.message}</p><button type="button" className="fontbtn" onClick={dismissConfirm}>{t('scheduled.cancel')}</button><button type="button" className="fontbtn" onClick={() => { const action = confirm.action; dismissConfirm(); action(); }}>{t('scheduled.confirm')}</button></div>}
     </section>
+    <section className="settings-page-group"><div className="settings-page-list">
+      {!editor.exception && <NavRow label={t('scheduled.repeat')} value={t(`scheduled.${editor.frequency}`)} onClick={() => enter('repeat')} />}
+      <NavRow label={t('scheduled.sendTime')} value={timeSummary} onClick={() => enter('time')} />
+      {editor.frequency !== 'once' && <NavRow label={t('scheduled.cutoff')}
+        value={editor.endsAtLocal.replace('T', ' ') || t('scheduled.choose')} onClick={() => enter('cutoff')} />}
+    </div>
+      <div className="settings-page-footer" role="status">{preview?.nextAt
+        ? `${t('scheduled.next')}: ${dateTime(preview.nextAt)}`
+        : !complete ? t(editor.frequency !== 'once' && !editor.endsAtLocal ? 'scheduled.chooseCutoff' : 'scheduled.chooseFuture')
+          : previewError || t('scheduled.previewing')}</div>
+    </section>
+    <p className="settings-page-footer scheduled-footer">{t('scheduled.target')}: {editorTarget?.tmuxSession ?? tmuxSession} / {t('scheduled.pane', { pane: (editorTarget?.paneId ?? run?.paneId ?? '—').replace(/^%/, '') })}<br />
+      {t('scheduled.serverTime')}: {snapshot && dateTime(snapshot.serverNow, snapshot.timeZone)} · {snapshot?.timeZone}
+      {zone !== snapshot?.timeZone && <><br />{t('scheduled.taskTimeZone', { zone })}</>}</p>
+  </div>;
+
+  const renderTimePicker = () => editor && <div className="settings-page-content scheduled-page-content">
+    {editor.frequency === 'weekly' && <section className="settings-page-group"><div className="settings-page-list">
+      {[1, 2, 3, 4, 5, 6, 7].map((weekday) => {
+        const selected = editor.slots.some((slot) => slot.weekday === weekday);
+        return <div className="settings-page-row scheduled-weekday-row" key={weekday}>
+          <button type="button" className="scheduled-weekday-choice" aria-pressed={selected} onClick={() => change({
+            slots: selected ? editor.slots.filter((slot) => slot.weekday !== weekday)
+              : [...editor.slots, { weekday, time: scheduledOnceDefault(snapshot!.serverNow, zone!)[0]!.time! }],
+          })}><span className="settings-choice-check" aria-hidden="true">{selected && <CheckIcon />}</span>{t(`scheduled.day.${weekday}`)}</button>
+          {editor.slots.map((slot, index) => slot.weekday === weekday && <input key={index} className="scheduled-picker-input"
+            type="time" aria-label={`${t(`scheduled.day.${weekday}`)} ${t('scheduled.time')}`} value={slot.time ?? ''}
+            onChange={(event) => change({ slots: editor.slots.map((value, i) => i === index ? { ...value, time: event.target.value } : value) })} />)}
+        </div>;
+      })}
+    </div></section>}
+    {editor.frequency !== 'weekly' && editor.slots.map((slot, index) => <section className="settings-page-group" key={index}>
+      <div className="settings-page-list">
+        {editor.frequency === 'once' && <label className="settings-page-row">
+          <span className="settings-page-row-label">{t('scheduled.date')}</span>
+          <input className="scheduled-picker-input" type="date" aria-label={t('scheduled.date')} value={slot.date ?? ''}
+            onChange={(event) => change({ slots: editor.slots.map((value, i) => i === index ? { ...value, date: event.target.value } : value) })} />
+        </label>}
+        <label className="settings-page-row">
+          <span className="settings-page-row-label">{t(editor.frequency === 'hourly' ? 'scheduled.minute' : 'scheduled.time')}</span>
+          {editor.frequency === 'hourly' ? <input className="scheduled-picker-input" type="number" min="0" max="59"
+            aria-label={t('scheduled.minute')} value={slot.minute ?? 0} onChange={(event) => change({ slots: editor.slots.map((value, i) => i === index ? { minute: Number(event.target.value) } : value) })} />
+            : <input className="scheduled-picker-input" type="time" aria-label={t('scheduled.time')} value={slot.time ?? ''}
+              onChange={(event) => change({ slots: editor.slots.map((value, i) => i === index ? { ...value, time: event.target.value } : value) })} />}
+        </label>
+      </div>
+    </section>)}
+    <p className="settings-page-footer scheduled-footer">{zone}</p>
+  </div>;
+
+  const renderDetail = () => detail && <div className="settings-page-content scheduled-page-content">
+    <section className="settings-page-group"><h2>{t('scheduled.message')}</h2>
+      <div className="settings-page-list scheduled-detail-text">{detail.item.text}</div>
+    </section>
+    <section className="settings-page-group"><div className="settings-page-list">
+      {detail.kind === 'task' ? <>
+        <ValueRow label={t('scheduled.repeat')}>{t(`scheduled.${detail.item.rule.frequency}`)}</ValueRow>
+        <ValueRow label={t(detail.item.state === 'ended' ? 'scheduled.finished' : 'scheduled.next')}>
+          {dateTime(detail.item.state === 'ended' ? detail.item.endedAt : detail.item.nextAt, detail.item.timeZone)}</ValueRow>
+        {detail.item.rule.endsAt && <ValueRow label={t('scheduled.cutoff')}>{dateTime(Date.parse(detail.item.rule.endsAt), detail.item.timeZone)}</ValueRow>}
+        {detail.item.lastResult && <ValueRow label={t('scheduled.lastResult')}>{resultText(detail.item.lastResult)}</ValueRow>}
+      </> : <>
+        <ValueRow label={t('scheduled.sendTime')}>{dateTime(detail.item.scheduledAt, detail.item.timeZone)}</ValueRow>
+        <ValueRow label={t('scheduled.lastResult')}>{resultText(detail.item.reason)}</ValueRow>
+      </>}
+    </div>{detail.kind === 'exception' && detail.item.unknown && <p className="settings-page-footer">{t('scheduled.unknownHelp')}</p>}</section>
+    <p className="settings-page-footer scheduled-footer">{t('scheduled.target')}: {detail.item.target.tmuxSession} · {t('scheduled.pane', { pane: detail.item.target.paneId.replace(/^%/, '') })}<br />{detail.item.timeZone}</p>
+  </div>;
+
+  return <>
+    <section className="file-sheet open scheduled-sheet" role="dialog" aria-modal="true" aria-label={t('scheduled.title')}>
+      <header className="file-tabs scheduled-head">
+        {page !== 'list' && <button type="button" className="settings-page-back" aria-label={t('scheduled.back')} onClick={back}>‹</button>}
+        <h1 className="scheduled-head-title">{title}</h1>
+        {page === 'list' && <button type="button" className="scheduled-head-action" disabled={!run || !snapshot} onClick={() => edit()}>{t('scheduled.add')}</button>}
+        {page === 'editor' && <button type="button" className="scheduled-head-action" disabled={saving || !preview?.nextAt || !complete || !editor?.text.trim()} onClick={save}>{t('scheduled.save')}</button>}
+        {page === 'detail' && detail && <button type="button" className="scheduled-head-action" onClick={() => openMenu(detail)} aria-label={t('scheduled.more')}><MoreHorizontalIcon /></button>}
+        <button type="button" className="file-min" aria-label={t('common.close')} onClick={close}><ChevronDownIcon /></button>
+      </header>
+      {error && <div className="scheduled-error" role="alert">{error}</div>}
+      {page === 'list' ? renderList() : <div className="settings-page-body">
+        {page === 'editor' && renderEditor()}
+        {page === 'detail' && renderDetail()}
+        {page === 'time' && renderTimePicker()}
+        {page === 'repeat' && editor && <div className="settings-page-content scheduled-page-content">
+          <div className="settings-page-list settings-choice-list">{(['once', 'hourly', 'daily', 'weekly'] as const).map((frequency) =>
+            <button type="button" key={frequency} className="settings-page-row settings-choice-row" aria-pressed={editor.frequency === frequency} onClick={() => chooseFrequency(frequency)}>
+              <span className="settings-page-row-label">{t(`scheduled.${frequency}`)}</span>
+              <span className="settings-choice-check" aria-hidden="true">{editor.frequency === frequency && <CheckIcon />}</span>
+            </button>)}</div>
+        </div>}
+        {page === 'cutoff' && editor && <div className="settings-page-content scheduled-page-content"><div className="settings-page-list">
+          <label className="settings-page-row scheduled-cutoff-row"><span className="settings-page-row-label">{t('scheduled.cutoff')}</span>
+            <input className="scheduled-picker-input" type="datetime-local" aria-label={t('scheduled.cutoff')} value={editor.endsAtLocal}
+              onChange={(event) => change({ endsAtLocal: event.target.value })} /></label>
+        </div><p className="settings-page-footer scheduled-footer">{zone}</p></div>}
+      </div>}
+    </section>
+    {menu && <div className="scheduled-overlay-layer"><ActionSheet open title={t('scheduled.actions')} actions={menuActions} onClose={closeMenu} /></div>}
+    {confirm && <div className="settings-confirm-backdrop scheduled-confirm-layer" onClick={dismissConfirm}>
+      <div className="settings-confirm" role="alertdialog" aria-modal="true" aria-label={confirm.message}
+        onClick={(event) => event.stopPropagation()}><p>{confirm.message}</p><div className="settings-confirm-actions">
+          <button type="button" onClick={dismissConfirm}>{t('scheduled.cancel')}</button>
+          <button type="button" className="danger" onClick={() => { const action = confirm.action; dismissConfirm(); action(); }}>{confirm.label ?? t('scheduled.confirm')}</button>
+        </div></div>
+    </div>}
   </>;
 }
