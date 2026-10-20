@@ -3,11 +3,11 @@ import type { ReactNode } from 'react';
 import type { AgentRunRef } from '../agentCatalog.js';
 import { scheduledRequest } from '../scheduledMessagesApi.js';
 import type { ScheduledException, ScheduledRule, ScheduledTask } from '../scheduledMessagesApi.js';
-import { scheduledLocalInput, scheduledOnceDefault, scheduledRuleComplete, scheduledSummary } from '../scheduledMessagesPresentation.js';
+import { scheduledDisplayLocal, scheduledLocalInput, scheduledOnceDefault, scheduledRuleComplete, scheduledSummary } from '../scheduledMessagesPresentation.js';
 import { useScheduledMessagesSnapshot } from '../hooks/useScheduledMessagesSnapshot.js';
 import type { ScheduledMessagesSnapshotController } from '../hooks/useScheduledMessagesSnapshot.js';
 import { useHistoryLayer, unwindHistory } from '../hooks/useBackButton.js';
-import { ClockIcon, XIcon, CheckIcon, MoreHorizontalIcon, ChevronRightIcon } from './icons.jsx';
+import { ClockIcon, XIcon, CheckIcon, MoreHorizontalIcon, ChevronRightIcon, PlusIcon } from './icons.jsx';
 import ActionSheet from './ActionSheet.js';
 import { t } from '../i18n';
 import './scheduledMessages.css';
@@ -33,6 +33,23 @@ function NavRow({ label, value, onClick, expanded }: { label: string; value: str
       <span className="settings-page-chevron" aria-hidden="true"><ChevronRightIcon /></span>
     </span>
   </button>;
+}
+function StatusBadge({ selection }: { selection: Selection }) {
+  const task = selection.kind === 'task' ? selection.item : null;
+  const status = selection.kind === 'exception' || task?.state === 'exception' ? 'exception'
+    : task?.state === 'ended' ? 'ended' : task?.blocked ? 'exception' : task?.enabled ? 'pending' : 'paused';
+  const label = status === 'exception' ? 'scheduled.exception' : `scheduled.${status}`;
+  return <span className={`scheduled-status-badge scheduled-status-${status}`}>{t(label)}</span>;
+}
+function CalendarInput({ type, label, value, min, max, onChange }: {
+  type: 'date' | 'datetime-local'; label: string; value: string; min?: string; max?: string; onChange: (value: string) => void;
+}) {
+  return <span className={`scheduled-calendar-input scheduled-calendar-${type}`}>
+    <span className="scheduled-picker-display" aria-hidden="true">{scheduledDisplayLocal(value) || t('scheduled.choose')}</span>
+    <input className="scheduled-picker-input" type={type} aria-label={label} value={value} min={min} max={max}
+      onClick={event => { try { event.currentTarget.showPicker?.(); } catch { /* Native keyboard/picker remains available. */ } }}
+      onChange={event => onChange(event.target.value)} />
+  </span>;
 }
 function ValueRow({ label, children }: { label: string; children: ReactNode }) {
   return <div className="settings-page-row settings-page-value-row">
@@ -161,7 +178,7 @@ export default function ScheduledMessagesSheet({ tmuxSession, run, onClose, cont
   }, [rule, zone, complete]);
 
   const dateTime = (at: number | undefined | null, timeZone = zone ?? snapshot?.timeZone) => at == null ? '—'
-    : new Intl.DateTimeFormat(undefined, { timeZone, month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }).format(at);
+    : scheduledDisplayLocal(scheduledLocalInput(at, timeZone!));
   const resultText = (reason: string) => {
     const key = `scheduled.result.${reason}`;
     return t(key) === key ? t('scheduled.result.failed') : t(key);
@@ -241,7 +258,7 @@ export default function ScheduledMessagesSheet({ tmuxSession, run, onClose, cont
 
   const timeSummary = editor?.slots.map((slot) => editor.frequency === 'hourly'
     ? t('scheduled.hourlyMinute', { minute: slot.minute })
-    : `${editor.frequency === 'weekly' ? `${t(`scheduled.day.${slot.weekday}`)} ` : slot.date ? `${slot.date} ` : ''}${slot.time ?? ''}`).join('、') ?? '';
+    : `${editor.frequency === 'weekly' ? `${t(`scheduled.day.${slot.weekday}`)} ` : slot.date ? `${scheduledDisplayLocal(slot.date)} ` : ''}${slot.time ?? ''}`).join('、') ?? '';
   const title = page === 'list' ? t('scheduled.title') : page === 'detail' ? t('scheduled.detail')
     : t(editor?.task ? 'scheduled.edit' : editor?.exception ? 'scheduled.reschedule' : 'scheduled.add');
   const tasks = snapshot?.tasks.filter((task) => task.state === tab) ?? [];
@@ -253,7 +270,7 @@ export default function ScheduledMessagesSheet({ tmuxSession, run, onClose, cont
   const renderList = () => <>
     <div className="file-seg scheduled-tabs" role="tablist">
       {(['active', 'ended', 'exceptions'] as const).map((value) => <button type="button" role="tab"
-        aria-selected={tab === value} className={`file-seg-btn${tab === value ? ' on' : ''}`}
+        aria-selected={tab === value} className={`file-seg-btn${tab === value ? ' on' : ''}${value === 'ended' ? ' scheduled-state-ended' : value === 'exceptions' && snapshot?.exceptions.length ? ' scheduled-state-exception' : ''}`}
         key={value} onClick={() => setTab(value)}>{t(`scheduled.${value}`)}</button>)}
     </div>
     <div className="scheduled-list-body">
@@ -264,13 +281,13 @@ export default function ScheduledMessagesSheet({ tmuxSession, run, onClose, cont
         const exception = selection.kind === 'exception' ? selection.item : null;
         const metadata = exception ? `${dateTime(exception.scheduledAt, exception.timeZone)} · ${resultText(exception.reason)}`
           : `${dateTime(task!.state === 'ended' ? task!.endedAt : task!.nextAt, task!.timeZone)} · ${task!.state === 'ended'
-            ? resultText(task!.lastResult ?? 'submitted') : t(task!.enabled ? `scheduled.${task!.rule.frequency}` : 'scheduled.paused')}`;
+            ? resultText(task!.lastResult ?? 'submitted') : t(`scheduled.${task!.rule.frequency}`)}`;
         const action = isException ? 'reschedule' : task!.state === 'ended' ? 'delete' : 'edit';
-        return <li className="scheduled-list-row" key={`${selection.kind}:${item.id}`}>
+        return <li className={`scheduled-list-row${task?.state === 'ended' ? ' scheduled-state-ended' : isException || task?.blocked ? ' scheduled-state-exception' : ''}`} key={`${selection.kind}:${item.id}`}>
           <button type="button" className="scheduled-list-main" onClick={() => showDetail(selection)}>
             <span className="scheduled-list-copy">
               <span className="scheduled-list-line scheduled-list-summary">{scheduledSummary(item.text)}</span>
-              <span className="scheduled-list-line scheduled-list-meta">{metadata}</span>
+              <span className="scheduled-list-line scheduled-list-meta"><StatusBadge selection={selection} /><span className="scheduled-list-meta-copy">{metadata}</span></span>
             </span>
           </button>
           <button type="button" className="scheduled-row-action" disabled={saving || exception?.unknown}
@@ -302,12 +319,12 @@ export default function ScheduledMessagesSheet({ tmuxSession, run, onClose, cont
       <NavRow label={t('scheduled.sendTime')} value={timeSummary} expanded={dropdown === 'time'} onClick={() => toggleDropdown('time')} />
       {dropdown === 'time' && renderTimePicker()}
       {editor.frequency !== 'once' && <>
-        <NavRow label={t('scheduled.cutoff')} value={editor.endsAtLocal.replace('T', ' ') || t('scheduled.choose')} expanded={dropdown === 'cutoff'} onClick={() => toggleDropdown('cutoff')} />
+        <NavRow label={t('scheduled.cutoff')} value={scheduledDisplayLocal(editor.endsAtLocal) || t('scheduled.choose')} expanded={dropdown === 'cutoff'} onClick={() => toggleDropdown('cutoff')} />
         {dropdown === 'cutoff' && <div className="scheduled-dropdown">
           <div className="scheduled-cutoff-presets">{[7, 30, 90].map(days => <button type="button" key={days} className="fontbtn" onClick={() => change({ endsAtLocal: scheduledLocalInput(snapshot!.serverNow + days * 86400000, zone!) })}>{t('scheduled.cutoffDays', { days })}</button>)}</div>
           <label className="settings-page-row scheduled-cutoff-row"><span className="settings-page-row-label">{t('scheduled.customCutoff')}</span>
-            <input className="scheduled-picker-input" type="datetime-local" aria-label={t('scheduled.cutoff')} value={editor.endsAtLocal} min={cutoffMin} max={cutoffMax}
-              onChange={event => change({ endsAtLocal: event.target.value })} /></label>
+            <CalendarInput type="datetime-local" label={t('scheduled.cutoff')} value={editor.endsAtLocal} min={cutoffMin} max={cutoffMax}
+              onChange={value => change({ endsAtLocal: value })} /></label>
         </div>}
       </>}
     </div>
@@ -328,9 +345,8 @@ export default function ScheduledMessagesSheet({ tmuxSession, run, onClose, cont
             slots: selected ? editor.slots.filter((slot) => slot.weekday !== weekday)
               : [...editor.slots, { weekday, time: scheduledOnceDefault(snapshot!.serverNow, zone!)[0]!.time! }],
           })}><span className="settings-choice-check" aria-hidden="true">{selected && <CheckIcon />}</span>{t(`scheduled.day.${weekday}`)}</button>
-          {editor.slots.map((slot, index) => slot.weekday === weekday && <input key={index} className="scheduled-picker-input"
-            type="time" aria-label={`${t(`scheduled.day.${weekday}`)} ${t('scheduled.time')}`} value={slot.time ?? ''}
-            onChange={(event) => change({ slots: editor.slots.map((value, i) => i === index ? { ...value, time: event.target.value } : value) })} />)}
+          {editor.slots.map((slot, index) => slot.weekday === weekday && <input key={index} className="scheduled-picker-input" type="time" aria-label={`${t(`scheduled.day.${weekday}`)} ${t('scheduled.time')}`} value={slot.time ?? ''}
+            onChange={event => change({ slots: editor.slots.map((value, i) => i === index ? { ...value, time: event.target.value } : value) })} />)}
         </div>;
       })}
     </div></section>}
@@ -338,15 +354,15 @@ export default function ScheduledMessagesSheet({ tmuxSession, run, onClose, cont
       <div className="settings-page-list">
         {editor.frequency === 'once' && <label className="settings-page-row">
           <span className="settings-page-row-label">{t('scheduled.date')}</span>
-          <input className="scheduled-picker-input" type="date" aria-label={t('scheduled.date')} value={slot.date ?? ''}
-            onChange={(event) => change({ slots: editor.slots.map((value, i) => i === index ? { ...value, date: event.target.value } : value) })} />
+          <CalendarInput type="date" label={t('scheduled.date')} value={slot.date ?? ''}
+            onChange={date => change({ slots: editor.slots.map((value, i) => i === index ? { ...value, date } : value) })} />
         </label>}
         <label className="settings-page-row">
           <span className="settings-page-row-label">{t(editor.frequency === 'hourly' ? 'scheduled.minute' : 'scheduled.time')}</span>
           {editor.frequency === 'hourly' ? <input className="scheduled-picker-input" type="number" min="0" max="59"
             aria-label={t('scheduled.minute')} value={slot.minute ?? 0} onChange={(event) => change({ slots: editor.slots.map((value, i) => i === index ? { minute: Number(event.target.value) } : value) })} />
             : <input className="scheduled-picker-input" type="time" aria-label={t('scheduled.time')} value={slot.time ?? ''}
-              onChange={(event) => change({ slots: editor.slots.map((value, i) => i === index ? { ...value, time: event.target.value } : value) })} />}
+              onChange={event => change({ slots: editor.slots.map((value, i) => i === index ? { ...value, time: event.target.value } : value) })} />}
         </label>
       </div>
     </section>)}
@@ -357,6 +373,7 @@ export default function ScheduledMessagesSheet({ tmuxSession, run, onClose, cont
       <div className="settings-page-list scheduled-detail-text">{detail.item.text}</div>
     </section>
     <section className="settings-page-group"><div className="settings-page-list">
+      <ValueRow label={t('scheduled.status')}><StatusBadge selection={detail} /></ValueRow>
       {detail.kind === 'task' ? <>
         <ValueRow label={t('scheduled.repeat')}>{t(`scheduled.${detail.item.rule.frequency}`)}</ValueRow>
         <ValueRow label={t(detail.item.state === 'ended' ? 'scheduled.finished' : 'scheduled.next')}>
@@ -379,12 +396,12 @@ export default function ScheduledMessagesSheet({ tmuxSession, run, onClose, cont
           {page === 'list' && <span className="tool-sheet-ic"><ClockIcon /></span>}
           {page !== 'list' && <button type="button" className="scheduled-back" aria-label={t('scheduled.back')} onClick={back}><ChevronRightIcon /></button>}
           <span className="tool-sheet-title">{title}</span>
-          {page === 'list' && <button type="button" className="scheduled-head-action" disabled={!run || !snapshot} onClick={() => edit()}>{t('scheduled.add')}</button>}
+          {page === 'list' && <button type="button" className="scheduled-head-action" aria-label={t('scheduled.add')} disabled={!run || !snapshot} onClick={() => edit()}><PlusIcon /></button>}
           {page === 'editor' && <button type="button" className="scheduled-head-action" disabled={saving || !preview?.nextAt || !complete || !editor?.text.trim()} onClick={save}>{t('scheduled.save')}</button>}
           {page === 'detail' && detail && <button type="button" className="scheduled-head-action" onClick={() => openMenu(detail)} aria-label={t('scheduled.more')}><MoreHorizontalIcon /></button>}
           <button type="button" className="cmd-close scheduled-close" aria-label={t('common.close')} onClick={close}><XIcon /></button>
         </div>
-        {snapshot && <p className="scheduled-subtitle">{t('scheduled.serverTime')}: {dateTime(snapshot.serverNow, snapshot.timeZone)} · {snapshot.timeZone}</p>}
+        {snapshot && <p className="scheduled-subtitle">{t('scheduled.serverTime')}: {dateTime(snapshot.serverNow, snapshot.timeZone)}</p>}
       </header>
       {(error || source.error) && <div className="scheduled-error" role="alert">{error || source.error}</div>}
       <div className="tool-sheet-body scheduled-body">

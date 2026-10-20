@@ -1,6 +1,11 @@
 // English strings (the default + fallback locale). Keys are namespaced by area: common.*, token.*,
 // settings.*, … Keep this file complete; other locales may omit keys and fall back here.
 export default {
+"scheduled.shortcut": "Schedule",
+"scheduled.status": "Status",
+"scheduled.pending": "Scheduled",
+"scheduled.exception": "Exception",
+
 "scheduled.taskTimeZone": "Send times use {zone}",
 "scheduled.editAction": "Edit",
 "scheduled.shortcutActive": "{count} active",

@@ -184,7 +184,7 @@ it('retains edits and shows a revision conflict after another client changes a t
   expect((await screen.findByRole('alert')).textContent).toContain('Changed on another client');
   expect((screen.getByLabelText('scheduled.message') as HTMLTextAreaElement).value).toBe('my unsaved message');
   const subtitle = document.querySelector('.scheduled-subtitle')!;
-  expect(subtitle.textContent).toContain('Asia/Shanghai');
+  expect(subtitle.textContent).toBe('scheduled.serverTime: 10/20 23:30');
   expect(document.querySelector('.scheduled-zone-hint')?.textContent).toContain('scheduled.taskTimeZone UTC');
   expect(document.body.textContent).not.toContain('scheduled.pane');
   expect(document.body.textContent).not.toContain('hidden-session-uuid');
@@ -246,7 +246,7 @@ it('shows server time once beneath the title on every tab and subpage without ta
     const subtitle = header.querySelector('.scheduled-subtitle')!;
     expect(main).toBeTruthy(); expect(main.nextElementSibling).toBe(subtitle);
     expect(subtitle.textContent).toContain('scheduled.serverTime');
-    expect(subtitle.textContent).toContain('Asia/Shanghai');
+    expect(subtitle.textContent).toBe('scheduled.serverTime: 10/20 23:30');
     expect(container.textContent?.match(/scheduled.serverTime/g)).toHaveLength(1);
     expect(container.textContent).not.toContain('scheduled.pane');
     expect(container.textContent).not.toContain('hidden-session-uuid');
@@ -302,4 +302,82 @@ it('shows actionable feedback after a completed preview has no executable occurr
   await waitFor(() => expect(vi.mocked(scheduledRequest).mock.calls.some(call => call[2] === 'preview')).toBe(true));
   await waitFor(() => expect(screen.getByRole('status').textContent).toBe('scheduled.chooseFuture'));
   expect((screen.getByRole('button', { name: 'scheduled.save' }) as HTMLButtonElement).disabled).toBe(true);
+});
+
+it('shows an accessible add icon and fixed short dates while native pickers retain ISO values', async () => {
+  mockApi(); const { container } = render(<ScheduledMessagesSheet tmuxSession="work" run={run} onClose={() => {}} />);
+  await screen.findByText('scheduled.empty');
+  const add = screen.getByRole('button', { name: 'scheduled.add' });
+  expect(add.textContent).toBe(''); expect(add.querySelector('svg')).toBeTruthy();
+  fireEvent.click(add);
+  expect(screen.getByRole('button', { name: /scheduled.sendTime/ }).textContent).toContain('10/21 00:30');
+  fireEvent.click(screen.getByRole('button', { name: /scheduled.sendTime/ }));
+  const date = screen.getByLabelText('scheduled.date') as HTMLInputElement;
+  expect(date.type).toBe('date'); expect(date.value).toBe('2026-10-21');
+  const time = screen.getByLabelText('scheduled.time') as HTMLInputElement;
+  expect(time.type).toBe('time'); expect(time.closest('.scheduled-calendar-input')).toBeNull();
+  expect(date.parentElement?.querySelector('.scheduled-picker-display')?.textContent).toBe('10/21');
+  fireEvent.change(date, { target: { value: '2027-01-02' } });
+  expect(screen.getByRole('button', { name: /scheduled.sendTime/ }).textContent).toContain('01/02 00:30');
+  fireEvent.click(screen.getByRole('button', { name: /scheduled.repeat/ }));
+  fireEvent.click(screen.getByRole('button', { name: 'scheduled.daily' }));
+  fireEvent.click(screen.getByRole('button', { name: /scheduled.cutoff/ }));
+  fireEvent.click(screen.getByRole('button', { name: 'scheduled.cutoffDays 90' }));
+  const cutoff = screen.getByLabelText('scheduled.cutoff') as HTMLInputElement;
+  expect(cutoff.type).toBe('datetime-local'); expect(cutoff.value).toBe('2027-01-18T23:30');
+  expect(cutoff.min).toBe('2026-10-20T23:30'); expect(cutoff.max).toBe('2027-10-20T23:30');
+  expect(cutoff.parentElement?.querySelector('.scheduled-picker-display')?.textContent).toBe('01/18 23:30');
+  expect(screen.getByRole('button', { name: /^scheduled.cutoff / }).textContent).toContain('01/18 23:30');
+  await waitFor(() => expect(screen.getByRole('status').textContent).toBe('scheduled.next: 10/21 00:30'));
+  expect(container.textContent).not.toContain('2027-01-18');
+});
+
+it('marks ended rows and populated exception tabs with semantic subdued state colors', async () => {
+  const task: ScheduledTask = { id: 'ended', revision: 1, text: 'completed', target, timeZone: 'UTC', state: 'ended', enabled: false, nextAt: null, endedAt: Date.parse('2027-01-02T00:05:00Z'), rule: { frequency: 'daily', slots: [{ time: '09:00' }], endsAt: '2027-01-02T00:05:00Z' } };
+  mockApi({ ...snapshot, tasks: [task], exceptions: [{ id: 'ex', revision: 1, taskId: 'ended', text: 'retry', target, timeZone: 'UTC', scheduledAt: serverNow, reason: 'missed', unknown: false }] });
+  const { container } = render(<ScheduledMessagesSheet tmuxSession="work" run={run} onClose={() => {}} />);
+  await screen.findByText('scheduled.empty');
+  expect(screen.getByRole('tab', { name: 'scheduled.exceptions' }).classList.contains('scheduled-state-exception')).toBe(true);
+  fireEvent.click(screen.getByRole('tab', { name: 'scheduled.ended' }));
+  expect(screen.getByRole('listitem').classList.contains('scheduled-state-ended')).toBe(true);
+  expect(screen.getByRole('listitem').textContent).toContain('01/02 00:05');
+  fireEvent.click(container.querySelector('.scheduled-list-main')!);
+  expect(container.querySelector('.scheduled-page')?.textContent).toContain('01/02 00:05');
+  fireEvent.click(screen.getByRole('button', { name: 'scheduled.back' }));
+  fireEvent.click(screen.getByRole('tab', { name: 'scheduled.exceptions' }));
+  expect(screen.getByRole('listitem').classList.contains('scheduled-state-exception')).toBe(true);
+});
+
+it.each([
+  { enabled: true, blocked: false, state: 'active', status: 'pending', label: 'scheduled.pending' },
+  { enabled: false, blocked: false, state: 'active', status: 'paused', label: 'scheduled.paused' },
+  { enabled: false, blocked: true, state: 'active', status: 'exception', label: 'scheduled.exception' },
+  { enabled: false, blocked: false, state: 'ended', status: 'ended', label: 'scheduled.ended' },
+  { enabled: false, blocked: true, state: 'ended', status: 'ended', label: 'scheduled.ended' },
+] as const)('shows a distinct $status badge in the second list line and detail', async ({ enabled, blocked, state, status, label }) => {
+  const task: ScheduledTask = { id: 'status', revision: 1, text: 'status message', target, timeZone: 'UTC', state, enabled, blocked, nextAt: serverNow + 60000, endedAt: serverNow, rule: { frequency: 'daily', slots: [{ time: '09:00' }], endsAt: '2026-11-20T00:00:00Z' } };
+  mockApi({ ...snapshot, tasks: [task] });
+  const { container } = render(<ScheduledMessagesSheet tmuxSession="work" run={run} onClose={() => {}} />);
+  if (state === 'ended') fireEvent.click(screen.getByRole('tab', { name: 'scheduled.ended' }));
+  const row = await screen.findByRole('listitem');
+  if (state === 'ended') { expect(row.classList.contains('scheduled-state-ended')).toBe(true); expect(row.classList.contains('scheduled-state-exception')).toBe(false); }
+  const copy = row.querySelector('.scheduled-list-copy')!;
+  expect(copy.children).toHaveLength(2);
+  const badge = copy.children[1]!.querySelector('.scheduled-status-badge')!;
+  expect(badge.textContent).toBe(label); expect(badge.classList.contains(`scheduled-status-${status}`)).toBe(true);
+  if (state === 'active') expect(copy.children[1]!.querySelector('.scheduled-list-meta-copy')?.textContent).toContain('scheduled.daily');
+  fireEvent.click(container.querySelector('.scheduled-list-main')!);
+  const detailBadge = container.querySelector('.scheduled-page .scheduled-status-badge')!;
+  expect(detailBadge.textContent).toBe(label); expect(detailBadge.classList.contains(`scheduled-status-${status}`)).toBe(true);
+});
+
+it('labels exception records explicitly without moving the long reason into the badge', async () => {
+  mockApi({ ...snapshot, exceptions: [{ id: 'status-ex', revision: 1, taskId: 'gone', text: 'exception status', target, timeZone: 'UTC', scheduledAt: serverNow, reason: 'delivery_unconfirmed', unknown: true }] });
+  const { container } = render(<ScheduledMessagesSheet tmuxSession="work" run={run} onClose={() => {}} />);
+  fireEvent.click(screen.getByRole('tab', { name: 'scheduled.exceptions' }));
+  const row = await screen.findByRole('listitem');
+  expect(row.querySelector('.scheduled-status-exception')?.textContent).toBe('scheduled.exception');
+  expect(row.querySelector('.scheduled-list-meta-copy')?.textContent).toContain('scheduled.result.failed');
+  fireEvent.click(container.querySelector('.scheduled-list-main')!);
+  expect(container.querySelector('.scheduled-page .scheduled-status-exception')?.textContent).toBe('scheduled.exception');
 });

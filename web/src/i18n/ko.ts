@@ -1,5 +1,12 @@
 // 한국어 strings. Missing keys fall back to English (see ./index.ts translate()).
 export default {
+"scheduled.shortcut": "예약",
+"scheduled.status": "상태",
+"scheduled.pending": "전송 대기",
+"scheduled.exception": "예외",
+"scheduled.paused": "일시 중지",
+"scheduled.ended": "종료",
+
   'terminal.transport_live': '실시간',
   'terminal.transport_snapshot': '스냅샷',
   'terminal.transport_detail_title': '터미널 전송 상태',

@@ -4290,8 +4290,8 @@ button.cmd-text { background: none; border: none; text-align: left; }
   animation: exit-toast-in .18s ease;
 }
 @media (prefers-reduced-motion: reduce) { .cc-notice { animation: none; } }
-.cc-quick {
-  display: flex; gap: 6px; overflow-x: auto; overflow-y: hidden;
+.cc-quick > .quick-scroll {
+  overflow-y: hidden;
   /* This strip owns horizontal swipes only. Without the axis contract, a slightly diagonal swipe on a
      chip can be claimed as native page-pan and drag the keyboard-lifted app on Android/iOS. */
   overscroll-behavior: contain; touch-action: pan-x;
@@ -5004,8 +5004,7 @@ button.cmd-text { background: none; border: none; text-align: left; }
 .windowbar-scroll,
 .quick-scroll,
 .file-tabs-scroll,
-.git-tabs-scroll,
-.cc-quick {
+.git-tabs-scroll {
   scrollbar-width: none;
 }
 *::-webkit-scrollbar:horizontal {

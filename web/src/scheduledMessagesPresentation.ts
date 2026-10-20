@@ -24,3 +24,9 @@ export function scheduledRuleComplete(rule: { frequency: ScheduledRule['frequenc
     ? Number.isInteger(slot.minute) && Number(slot.minute) >= 0 && Number(slot.minute) < 60
     : !!slot.time && (rule.frequency !== 'once' || !!slot.date));
 }
+
+/** Fixed compact presentation of a server-zone calendar value; keep ISO values for native inputs/API. */
+export function scheduledDisplayLocal(value: string): string {
+  const match = /^(\d{4})-(\d{2})-(\d{2})(?:T(\d{2}:\d{2}))?$/.exec(value);
+  return match ? `${match[2]}/${match[3]}${match[4] ? ` ${match[4]}` : ''}` : value;
+}

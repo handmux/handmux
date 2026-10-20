@@ -1,5 +1,5 @@
 /* Uses ConversationTool ToolSheet geometry and tone tokens; only schedule-specific layout lives here. */
-.tool-sheet.scheduled-sheet { bottom: var(--overlay-keyboard-inset, 0px); min-height: min(42vh, calc(100dvh - var(--overlay-keyboard-inset, 0px) - 12px)); max-height: min(62vh, calc(100dvh - var(--overlay-keyboard-inset, 0px) - 12px)); }
+.tool-sheet.scheduled-sheet { bottom: var(--overlay-keyboard-inset, 0px); min-height: min(58vh, calc(100dvh - var(--overlay-keyboard-inset, 0px) - 12px)); max-height: min(70vh, calc(100dvh - var(--overlay-keyboard-inset, 0px) - 12px)); }
 .scheduled-sheet .tool-sheet-head { display: block; padding: 0 10px 10px 14px; }
 .scheduled-head-main { display: flex; align-items: center; min-height: 44px; gap: 8px; }
 .scheduled-sheet .tool-sheet-title { line-height: 20px; }
@@ -62,15 +62,49 @@
 .scheduled-overlay-layer .sheet-action.armed { background: var(--ct-err-bg); color: var(--ct-err-ink); border-color: var(--ct-err-ink); }
 .scheduled-confirm-layer .settings-confirm-actions button.danger { color: var(--ct-err-ink); }
 .settings-confirm-backdrop.scheduled-confirm-layer { z-index: var(--z-overlay-confirm); }
-.scheduled-shortcut-alert { --rgb: 255,105,97; }
-.scheduled-shortcut-count { margin-left: 5px; font-variant-numeric: tabular-nums; }
+.scheduled-shortcut-count { font-variant-numeric: tabular-nums; }
 .chat-tone-surface[data-chat-tone="light"] .scheduled-picker-input { color-scheme: light; }
 
-.quick-cmd.scheduled-shortcut.quick-cmd-plain { background: #373b42; color: #eceef1; border-color: #6d747d; }
-.app[data-chat-tone="light"] .quick-cmd.scheduled-shortcut.quick-cmd-plain { background: #dadde1; color: #34383f; border-color: #8d949e; }
+.quick-fix.scheduled-shortcut-neutral { background: #373b42; color: #eceef1; border-color: #6d747d; }
+.app[data-chat-tone="light"] .quick-fix.scheduled-shortcut-neutral { background: #dadde1; color: #34383f; border-color: #8d949e; }
 
 .scheduled-dropdown-toggle[aria-expanded="true"] .settings-page-chevron svg { transform: rotate(90deg); }
 .scheduled-dropdown { background: var(--ct-chip); border-top: .5px solid var(--ct-line); }
 .scheduled-dropdown .settings-page-group { margin: 0; }
 .scheduled-cutoff-presets { display: flex; gap: 8px; padding: 12px 16px; flex-wrap: wrap; }
 .scheduled-cutoff-presets .fontbtn { min-height: 44px; flex: 1; white-space: nowrap; }
+
+/* Keep state emphasis in the text, with the same quiet row/segment surfaces. */
+.scheduled-tabs .file-seg-btn.scheduled-state-ended,
+.scheduled-state-ended .scheduled-list-main,
+.scheduled-state-ended .scheduled-row-action { color: var(--ct-muted); }
+.scheduled-tabs .file-seg-btn.scheduled-state-exception,
+.scheduled-state-exception .scheduled-list-main,
+.scheduled-state-exception .scheduled-list-meta,
+.scheduled-state-exception .scheduled-row-action,
+.scheduled-state-exception .scheduled-more { color: var(--ct-err-ink); }
+.scheduled-state-exception .scheduled-row-action:disabled { opacity: .6; }
+
+/* The native control still owns focus, keyboard editing and the system picker. Only its text is covered. */
+.scheduled-calendar-input { position: relative; display: inline-flex; align-items: center; justify-content: flex-end; min-width: 64px; max-width: 65%; min-height: 44px; color: var(--ct-accent); font: 16px -apple-system, system-ui, sans-serif; font-variant-numeric: tabular-nums; }
+.scheduled-picker-display { pointer-events: none; white-space: nowrap; }
+.scheduled-calendar-input > .scheduled-picker-input { position: absolute; inset: 0; width: 100%; max-width: none; opacity: 0; cursor: pointer; }
+.scheduled-calendar-input:focus-within { outline: 2px solid var(--ct-accent); outline-offset: 3px; border-radius: 4px; }
+
+/* Keyboard editing exposes native segments/selection and enough room for the full calendar value. */
+.scheduled-calendar-input:has(> input:focus-visible) { max-width: 100%; }
+.scheduled-calendar-date:has(> input:focus-visible) { min-width: min(160px, 100%); }
+.scheduled-calendar-datetime-local:has(> input:focus-visible) { min-width: min(250px, 100%); }
+.scheduled-calendar-input > input:focus-visible { opacity: 1; background: var(--ct-chip); }
+.scheduled-calendar-input:has(> input:focus-visible) .scheduled-picker-display { visibility: hidden; }
+
+.scheduled-list-meta { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.scheduled-list-meta-copy { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.scheduled-status-badge { display: inline-flex; align-items: center; flex: none; padding: 1px 6px; border-radius: 5px; color: var(--ct-muted); background: var(--ct-chip-2); font-size: 11px; font-weight: 600; line-height: 17px; white-space: nowrap; }
+.scheduled-status-pending { color: color-mix(in srgb, var(--blue) 65%, var(--ct-ink)); background: rgba(var(--blue-rgb), .12); }
+.scheduled-status-paused { color: var(--ct-accent); background: color-mix(in srgb, var(--ct-accent) 12%, transparent); }
+.scheduled-status-exception { color: var(--ct-err-ink); background: var(--ct-err-bg); }
+
+.quick-fix.scheduled-shortcut-active { color: rgb(var(--blue-rgb)); background: rgba(var(--blue-rgb), .13); border-color: rgba(var(--blue-rgb), .5); }
+.quick-fix.scheduled-shortcut-alert { color: var(--ct-err-ink); background: var(--ct-err-bg); border-color: var(--ct-err-ink); }
+.quick-fix.scheduled-shortcut svg { color: inherit; }

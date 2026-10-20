@@ -31,7 +31,7 @@ it('keeps the shortcut visible from conversation loading through capability and 
   vi.mocked(scheduledRequest).mockImplementation(async () => await new Promise<ScheduledSnapshot>((done) => { resolve = done; }));
   const view = render(<Composer controller={{ ...conversation(), status: 'loading', descriptor: null }} />);
   const button = screen.getByRole<HTMLButtonElement>('button', { name: t('scheduled.title') });
-  expect(button.textContent).toBe(t('scheduled.title'));
+  expect(button.textContent).toBe(t('scheduled.shortcut'));
   expect(button.disabled).toBe(true);
   fireEvent.click(button);
   expect(screen.queryByRole('dialog', { name: t('scheduled.title') })).toBeNull();
@@ -39,7 +39,7 @@ it('keeps the shortcut visible from conversation loading through capability and 
   view.rerender(<Composer />);
   expect(shortcut()).toBe(button);
   expect(button.disabled).toBe(false);
-  expect(button.textContent).toBe(t('scheduled.title'));
+  expect(button.textContent).toBe(t('scheduled.shortcut'));
   await act(async () => { resolve({ ...empty, tasks: [task] }); });
   expect(shortcut()).toBe(button);
   expect(button.querySelector('.scheduled-shortcut-count')?.textContent).toBe('1');
@@ -56,17 +56,17 @@ it('starts neutral without invented counts and refreshes active and exception st
     return value;
   });
   render(<Composer />);
-  expect(shortcut().classList.contains('quick-cmd-plain')).toBe(true);
-  expect(shortcut().textContent).toBe(t('scheduled.title'));
+  expect(shortcut().classList.contains('scheduled-shortcut-neutral')).toBe(true);
+  expect(shortcut().textContent).toBe(t('scheduled.shortcut'));
   expect(shortcut().querySelector('.scheduled-shortcut-count')).toBeNull();
   await act(async () => { resolve({ ...empty, tasks: [task, { ...task, id: 'paused', enabled: false }, { ...task, id: 'ended', state: 'ended' }] }); });
-  expect(shortcut().classList.contains('qc-cmd')).toBe(true);
+  expect(shortcut().classList.contains('scheduled-shortcut-active')).toBe(true);
   expect(shortcut().querySelector('.scheduled-shortcut-count')?.textContent).toBe('2');
   expect(shortcut().getAttribute('aria-label')).toContain('2');
   value = { ...empty, tasks: [task], exceptions: [{ id: 'missed', revision: 1, taskId: task.id, target: task.target, text: 'missed', timeZone: 'UTC', scheduledAt: now, reason: 'missed', unknown: false }] };
   await act(async () => { await vi.advanceTimersByTimeAsync(3000); });
   expect(shortcut().classList.contains('scheduled-shortcut-alert')).toBe(true);
-  expect(shortcut().classList.contains('qc-cmd')).toBe(false);
+  expect(shortcut().classList.contains('scheduled-shortcut-active')).toBe(false);
   expect(shortcut().querySelector('.scheduled-shortcut-count')?.textContent).toBe('1');
   expect(shortcut().getAttribute('aria-label')).toContain(t('scheduled.shortcutExceptions'));
   value = { ...value, tasks: [] };
@@ -77,7 +77,7 @@ it('starts neutral without invented counts and refreshes active and exception st
 it('does not treat a failed status refresh as a task exception', async () => {
   vi.mocked(scheduledRequest).mockRejectedValue(Error('offline'));
   render(<Composer />); await act(async () => {});
-  expect(shortcut().classList.contains('quick-cmd-plain')).toBe(true);
+  expect(shortcut().classList.contains('scheduled-shortcut-neutral')).toBe(true);
   expect(shortcut().classList.contains('scheduled-shortcut-alert')).toBe(false);
   expect(shortcut().querySelector('.scheduled-shortcut-count')).toBeNull();
 });
@@ -96,7 +96,7 @@ it('isolates sessions and drops late responses from the previous session', async
   await act(async () => { pending.get('C')!({ ...empty, tasks: [task, { ...task, id: 'stale' }] }); });
   expect(shortcut().querySelector('.scheduled-shortcut-count')).toBeNull();
   await act(async () => { pending.get('D')!(empty); });
-  expect(shortcut().classList.contains('quick-cmd-plain')).toBe(true);
+  expect(shortcut().classList.contains('scheduled-shortcut-neutral')).toBe(true);
 });
 it('shares one snapshot owner with the open half-sheet and updates the entry immediately after creating a task', async () => {
   let value = empty;
@@ -139,4 +139,28 @@ it('serializes an explicit refresh after an in-flight snapshot so stale pre-muta
   await act(async () => { release(empty); await refresh; });
   expect(calls).toBe(2);
   expect(result.current.snapshot?.tasks).toHaveLength(1);
+});
+
+it('keeps the scheduled tool in the fixed functional-key group while only replies and settings scroll', async () => {
+  vi.mocked(scheduledRequest).mockResolvedValue(empty);
+  const { container } = render(<Composer />); await act(async () => {});
+  const bar = container.querySelector('.cc-quick.quick-bar')!;
+  const fixed = bar.querySelector(':scope > .quick-fixed')!;
+  const scroll = bar.querySelector(':scope > .quick-scroll')!;
+  expect(bar.classList.contains('quick-scroll')).toBe(false);
+  expect(fixed.firstElementChild).toBe(shortcut());
+  expect(shortcut().classList.contains('quick-fix')).toBe(true);
+  expect(shortcut().classList.contains('quick-cmd')).toBe(false);
+  expect(shortcut().querySelector('svg')).toBeTruthy();
+  expect(scroll.contains(shortcut())).toBe(false);
+  expect(scroll.querySelector('.quick-cmd-add')).toBeTruthy();
+  expect(bar.querySelector('.qc-reply')?.parentElement).toBe(scroll);
+});
+it('omits the fixed group and its divider when no tmux scope or send capability exists', async () => {
+  vi.mocked(scheduledRequest).mockResolvedValue(empty);
+  const view = render(<Composer scope="" />); await act(async () => {});
+  expect(view.container.querySelector('.cc-quick > .quick-fixed')).toBeNull();
+  expect(view.container.querySelector('.cc-quick > .quick-scroll')).toBeTruthy();
+  view.rerender(<Composer sendable={false} />); await act(async () => {});
+  expect(view.container.querySelector('.cc-quick > .quick-fixed')).toBeNull();
 });

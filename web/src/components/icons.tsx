@@ -175,6 +175,16 @@ export function HomeIcon() {
   );
 }
 
+// An alarm clock — scheduled messages.
+export function AlarmClockIcon() {
+  return (
+    <svg {...base}>
+      <circle cx="12" cy="13" r="8" />
+      <path d="M12 9v4l2 2M5 3 2 6m17-3 3 3M6.4 18.7 4 21m13.6-2.3L20 21" />
+    </svg>
+  );
+}
+
 // A clock — stands for "最近" (recently opened).
 export function ClockIcon() {
   return (

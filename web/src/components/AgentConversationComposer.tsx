@@ -2,7 +2,7 @@ import { useScheduledMessagesSnapshot } from '../hooks/useScheduledMessagesSnaps
 import ScheduledMessagesSheet from './ScheduledMessagesSheet.js';
 import type { AgentRunRef } from '../agentCatalog.js';
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useRef, useState } from 'react';
-import { ArrowUpIcon, GearIcon, PlusIcon, StopIcon } from './icons.jsx';
+import { ArrowUpIcon, GearIcon, PlusIcon, StopIcon, AlarmClockIcon } from './icons.jsx';
 import { t } from '../i18n';
 import {
   ConversationSendError,
@@ -334,12 +334,13 @@ function AgentConversationComposer({
   return (
     <div className="chat-composer agent-conversation-composer" onPointerDown={keepComposerFocus}>
       {headerContent}
-      <div className="cc-quick quick-scroll">
-        {tmuxSession && (conversation.descriptor === null || canSend) && <button type="button" disabled={!canSend}
-          className={`quick-cmd scheduled-shortcut ${scheduledExceptions ? 'scheduled-shortcut-alert' : scheduledCount > 0 ? 'qc-cmd' : 'quick-cmd-plain'}`}
+      <div className="cc-quick quick-bar">
+        {tmuxSession && (conversation.descriptor === null || canSend) && <div className="quick-fixed"><button type="button" disabled={!canSend}
+          className={`quick-fix scheduled-shortcut ${scheduledExceptions ? 'scheduled-shortcut-alert' : scheduledCount > 0 ? 'scheduled-shortcut-active' : 'scheduled-shortcut-neutral'}`}
           aria-label={scheduledLabel} onClick={() => { ref.current?.blur(); setScheduledOpen(tmuxSession); }}>
-          {t('scheduled.title')}{scheduledCount > 0 && <span className="scheduled-shortcut-count" aria-hidden="true">{scheduledCount}</span>}
-        </button>}
+          <AlarmClockIcon /><span>{t('scheduled.shortcut')}</span>{scheduledCount > 0 && <span className="scheduled-shortcut-count" aria-hidden="true">{scheduledCount}</span>}
+        </button></div>}
+        <div className="quick-scroll">
         {quickReplies.map((item, index) => (
           <button type="button" className="quick-cmd qc-reply"
             key={`${shortcutIdentity(item)}:${index}`}
@@ -354,6 +355,7 @@ function AgentConversationComposer({
         ))}
         <button type="button" className="quick-cmd quick-cmd-add" aria-label={t('chat.editTitle')}
           onClick={() => setEditOpen(true)}><GearIcon /></button>
+        </div>
       </div>
       <input ref={uploadRef} className="browse-file-input" type="file" multiple accept={UPLOAD_ACCEPT}
         disabled={draftLocked}

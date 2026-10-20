@@ -1,5 +1,12 @@
 // 繁體中文 strings. Missing keys fall back to English (see ./index.ts translate()).
 export default {
+"scheduled.shortcut": "定時",
+"scheduled.status": "狀態",
+"scheduled.pending": "待傳送",
+"scheduled.exception": "異常",
+"scheduled.paused": "已暫停",
+"scheduled.ended": "已結束",
+
   'terminal.transport_live': '即時',
   'terminal.transport_snapshot': '快照',
   'terminal.transport_detail_title': '終端傳輸狀態',

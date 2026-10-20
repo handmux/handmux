@@ -1,5 +1,12 @@
 // 日本語 strings. Missing keys fall back to English (see ./index.ts translate()).
 export default {
+"scheduled.shortcut": "予約",
+"scheduled.status": "状態",
+"scheduled.pending": "送信待ち",
+"scheduled.exception": "要確認",
+"scheduled.paused": "一時停止",
+"scheduled.ended": "終了",
+
   'terminal.transport_live': 'リアル',
   'terminal.transport_snapshot': 'スナップ',
   'terminal.transport_detail_title': 'ターミナル配信状態',

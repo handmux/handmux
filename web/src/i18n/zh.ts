@@ -1,5 +1,10 @@
 // 中文 strings. Missing keys fall back to English (see ./index.ts translate()).
 export default {
+"scheduled.shortcut": "定时",
+"scheduled.status": "状态",
+"scheduled.pending": "待发送",
+"scheduled.exception": "异常",
+
 "scheduled.taskTimeZone": "发送时间按 {zone}",
 "scheduled.editAction": "编辑",
 "scheduled.shortcutActive": "{count} 个进行中",
