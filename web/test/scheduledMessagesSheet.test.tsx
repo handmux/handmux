@@ -294,3 +294,12 @@ it('offers server-clock cutoff presets inline and blocks custom cutoffs beyond 3
   expect(screen.getByRole('status').textContent).toBe('scheduled.cutoffLimit');
   expect((screen.getByRole('button', { name: 'scheduled.save' }) as HTMLButtonElement).disabled).toBe(true);
 });
+
+it('shows actionable feedback after a completed preview has no executable occurrence', async () => {
+  mockApi(); vi.mocked(scheduledRequest).mockImplementation(async (_session, _run, action) => action === 'snapshot' ? snapshot : { nextAt: null, timeZone: snapshot.timeZone });
+  render(<ScheduledMessagesSheet tmuxSession="work" run={run} onClose={() => {}} />); await openNew();
+  fireEvent.change(screen.getByLabelText('scheduled.message'), { target: { value: 'no occurrence' } });
+  await waitFor(() => expect(vi.mocked(scheduledRequest).mock.calls.some(call => call[2] === 'preview')).toBe(true));
+  await waitFor(() => expect(screen.getByRole('status').textContent).toBe('scheduled.chooseFuture'));
+  expect((screen.getByRole('button', { name: 'scheduled.save' }) as HTMLButtonElement).disabled).toBe(true);
+});

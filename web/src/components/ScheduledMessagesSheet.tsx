@@ -314,7 +314,7 @@ export default function ScheduledMessagesSheet({ tmuxSession, run, onClose, cont
       <div className="settings-page-footer" role="status">{cutoffOutOfRange ? t('scheduled.cutoffLimit') : preview?.nextAt
         ? `${t('scheduled.next')}: ${dateTime(preview.nextAt)}`
         : !complete ? t(editor.frequency !== 'once' && !editor.endsAtLocal ? 'scheduled.chooseCutoff' : 'scheduled.chooseFuture')
-          : previewError || t('scheduled.previewing')}</div>
+          : previewError || t(preview ? 'scheduled.chooseFuture' : 'scheduled.previewing')}</div>
     </section>
 
   </div>;

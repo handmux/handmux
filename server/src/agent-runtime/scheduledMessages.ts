@@ -102,7 +102,7 @@ export function nextOccurrence(rule: ScheduledRule, zone: string, after: number)
   let candidates: number[] = [];
   if (rule.frequency === 'once') candidates = rule.slots.flatMap((slot) => instants(slot.date, slot.time, zone));
   else if (rule.frequency === 'hourly') {
-    for (let at = Math.floor(after / 60000) * 60000 + 60000; at <= Math.min(cutoff, after + 3 * 3600000); at += 60000) {
+    for (let at = Math.floor(after / 60000) * 60000 + 60000; at < cutoff && at <= after + 3 * 3600000; at += 60000) {
       const p = parts(at, zone);
       if (rule.slots.some((slot) => slot.minute === p.minute) && instants(p.date, p.time, zone)[0] === at) return at;
     }
@@ -114,7 +114,7 @@ export function nextOccurrence(rule: ScheduledRule, zone: string, after: number)
       candidates.push(...rule.slots.filter((slot) => rule.frequency !== 'weekly' || ('weekday' in slot && slot.weekday === weekday)).flatMap((slot) => instants(localDate, slot.time, zone)));
     }
   }
-  return candidates.filter((at) => at > after && at <= cutoff).sort((a, b) => a - b)[0] ?? null;
+  return candidates.filter((at) => at > after && at < cutoff).sort((a, b) => a - b)[0] ?? null;
 }
 export interface ScheduledDelivery { status: string; reason?: string }
 export class ScheduledMessagesService {
@@ -196,6 +196,10 @@ export class ScheduledMessagesService {
             delete task.blocked; delete task.blockedAt; task.lastResult = 'submitted'; if (task.rule.frequency === 'once') task.state = task.nextAt !== null ? 'active' : this.#state.exceptions.some((item) => item.taskId === task.id) ? 'exception' : 'ended'; task.revision++;
           });
         }
+      }
+      // Older versions could persist the cutoff itself as the next occurrence. It is not a missed send.
+      if (task.state === 'active' && !task.claim && task.rule.frequency !== 'once' && task.nextAt !== null && task.nextAt >= Date.parse(task.rule.endsAt)) {
+        this.#transaction(() => { task.nextAt = null; task.revision++; });
       }
       if (task.state === 'active' && task.rule.frequency !== 'once' && this.#now() >= Date.parse(task.rule.endsAt) && (!task.enabled || task.nextAt === null)) {
         this.#transaction(() => { task.state = 'ended'; task.nextAt = null; task.endedAt = this.#now(); task.revision++; });

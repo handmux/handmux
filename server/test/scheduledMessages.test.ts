@@ -182,3 +182,48 @@ describe('recurring cutoff write boundary', () => {
     expect(() => restored.create(target, { text: 'distant once', frequency: 'once', slots: [{ date: '2030-01-01', time: '09:00' }] })).not.toThrow();
   });
 });
+
+describe('exclusive recurring cutoff', () => {
+  it.each([
+    { frequency: 'hourly', slots: [{ minute: 1 }] },
+    { frequency: 'daily', slots: [{ time: '00:01' }] },
+    { frequency: 'weekly', slots: [{ weekday: 2, time: '00:01' }] },
+  ])('rejects an equal-first $frequency rule atomically and retains earlier slots', (fields) => {
+    const h = harness(); const endsAt = '2026-10-20T00:01:00Z';
+    const rule = { ...fields, endsAt };
+    expect(h.service.preview(rule).nextAt).toBeNull();
+    expect(() => h.service.create(target, { ...rule, text: 'never executable' })).toThrow(/future/);
+    expect(h.service.snapshot('work').tasks).toHaveLength(0);
+    const valid = { ...fields, endsAt: '2026-10-20T00:02:00Z' };
+    const task = h.service.create(target, { ...valid, text: 'valid' });
+    const before = structuredClone(h.store.value);
+    expect(() => h.service.update('work', task.id, task.revision, rule)).toThrow(/future/);
+    expect(h.store.value).toEqual(before);
+    const multiple = validateRule({ frequency: 'daily', slots: [{ time: '00:01' }, { time: '00:02' }], endsAt: valid.endsAt }, 'UTC');
+    expect(nextOccurrence(multiple, 'UTC', Date.parse('2026-10-20T00:00:00Z'))).toBe(Date.parse('2026-10-20T00:01:00Z'));
+    expect(nextOccurrence(multiple, 'UTC', Date.parse('2026-10-20T00:01:00Z'))).toBeNull();
+  });
+  it.each([0, 60000])('ends legacy cutoff-outside nextAt (+%i) without a false missed occurrence', async (offset) => {
+    const h = harness();
+    h.service.create(target, { text: 'legacy', frequency: 'hourly', slots: [{ minute: 1 }], endsAt: '2026-10-20T00:02:00Z' });
+    const state = h.store.value as { tasks: Array<{ nextAt: number }> };
+    state.tasks[0]!.nextAt = Date.parse('2026-10-20T00:02:00Z') + offset;
+    let now = Date.parse('2026-10-20T00:00:00Z'); let sends = 0;
+    const restored = new ScheduledMessagesService({ store: h.store, timeZone: 'UTC', now: () => now, deliver: async () => { sends++; return { status: 'queued' }; } });
+    await restored.tick(); expect(restored.snapshot('work').tasks[0]).toMatchObject({ state: 'active', nextAt: null });
+    now += 120000; await restored.tick();
+    expect(restored.snapshot('work').tasks[0]).toMatchObject({ state: 'ended', nextAt: null });
+    expect(restored.snapshot('work').exceptions).toHaveLength(0); expect(sends).toBe(0);
+  });
+  it('preserves persisted claim uncertainty when normalizing a legacy cutoff nextAt', async () => {
+    const h = harness(); const cutoff = Date.parse('2026-10-20T00:02:00Z');
+    h.service.create(target, { text: 'claimed', frequency: 'hourly', slots: [{ minute: 1 }], endsAt: new Date(cutoff).toISOString() });
+    const state = h.store.value as { tasks: Array<{ nextAt: number; claim: unknown }> };
+    state.tasks[0]!.nextAt = cutoff; state.tasks[0]!.claim = { at: cutoff - 60000, text: 'claimed', target };
+    const restored = new ScheduledMessagesService({ store: h.store, timeZone: 'UTC', now: () => cutoff, deliver: async () => { throw Error('must not resend'); } });
+    await restored.tick();
+    expect(restored.snapshot('work').exceptions).toHaveLength(1);
+    expect(restored.snapshot('work').exceptions[0]).toMatchObject({ reason: 'delivery_unconfirmed', unknown: true, scheduledAt: cutoff - 60000 });
+    expect(restored.snapshot('work').tasks[0]!.blocked).toBe(true);
+  });
+});
