@@ -440,22 +440,22 @@ export function agentRoutes({ runtime }: { runtime: AgentFacadeRuntime }): expre
       const ref = run(req.body?.run);
       const service = runtime.scheduledMessages;
       const body = record(req.body) ?? {};
-      const scope = text(body.tmuxSession, 256) ? body.tmuxSession : null;
-      if (body.action === 'snapshot' && scope) return res.json(service.snapshot(scope));
       if (body.action === 'preview') return res.json(service.preview(body.request, typeof body.timeZone === 'string' ? body.timeZone : undefined));
-      const target = body.action === 'create' ? (ref ? await runtime.scheduledTarget(ref) : null) : (scope ? { tmuxSession: scope } : null);
-      if (!target) throw new ScheduledError('Choose an available Agent session', 'conflict');
+      if (!text(body.tmuxSession, 256) || !text(body.paneId, 256)) throw new ScheduledError('Choose a tmux session and pane');
+      const scope = { tmuxSession: body.tmuxSession, paneId: body.paneId };
+      if (body.action === 'snapshot') return res.json(service.snapshot(scope));
+      const target = body.action === 'create' && ref ? await runtime.scheduledTarget(ref) : null;
+      if (body.action === 'create' && (!target || target.tmuxSession !== scope.tmuxSession || target.paneId !== scope.paneId))
+        throw new ScheduledError('Choose the current pane and Agent session', 'conflict');
       switch (body.action) {
-        case 'snapshot': return res.json(service.snapshot(target.tmuxSession));
-        case 'preview': return res.json(service.preview(body.request));
         case 'create': return res.json(service.create(target as Awaited<ReturnType<NonNullable<typeof runtime.scheduledTarget>>>, body.request));
         case 'update':
         case 'delete':
         case 'exception': {
           if (!text(body.id, 256) || !Number.isSafeInteger(body.revision)) throw new ScheduledError('Invalid scheduled message revision');
-          if (body.action === 'update') return res.json(service.update(target.tmuxSession, body.id, body.revision as number, body.request));
-          if (body.action === 'delete') return res.json(service.remove(target.tmuxSession, body.id, body.revision as number));
-          return res.json(service.resolveException(target.tmuxSession, body.id, body.revision as number, body.request));
+          if (body.action === 'update') return res.json(service.update(scope, body.id, body.revision as number, body.request));
+          if (body.action === 'delete') return res.json(service.remove(scope, body.id, body.revision as number));
+          return res.json(service.resolveException(scope, body.id, body.revision as number, body.request));
         }
         default: throw new ScheduledError('Invalid scheduled message action');
       }

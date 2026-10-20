@@ -1,3 +1,4 @@
+import fs from 'node:fs';
 import { act, cleanup, fireEvent, render, renderHook, screen, waitFor } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 import AgentConversationComposer from '../src/components/AgentConversationComposer.js';
@@ -20,8 +21,8 @@ function conversation(sendable = true): AgentConversationController {
     send: vi.fn(async () => {}), interrupt: vi.fn(async () => {}), loadOlder: vi.fn(async () => {}), downloadResource: vi.fn(async () => {}), retryOutgoing: vi.fn(async () => false),
   } as AgentConversationController;
 }
-function Composer({ scope = 'work', sendable = true, controller }: { scope?: string; sendable?: boolean; controller?: AgentConversationController }) {
-  return <AgentConversationComposer agentId="new-agent" sessionId="session" tmuxSession={scope} scheduledRun={run}
+function Composer({ scope = 'work', paneId = '%1', scheduledRun = run, sendable = true, controller }: { scope?: string; paneId?: string; scheduledRun?: typeof run | null; sendable?: boolean; controller?: AgentConversationController }) {
+  return <AgentConversationComposer agentId="new-agent" sessionId="session" tmuxSession={scope} paneId={paneId} scheduledRun={scheduledRun}
     chatTone="light" keyboardInset={250} busy={false} conversation={controller ?? conversation(sendable)} />;
 }
 const shortcut = () => document.querySelector<HTMLButtonElement>('.scheduled-shortcut')!;
@@ -83,7 +84,7 @@ it('does not treat a failed status refresh as a task exception', async () => {
 });
 it('isolates sessions and drops late responses from the previous session', async () => {
   const pending = new Map<string, (value: ScheduledSnapshot) => void>();
-  vi.mocked(scheduledRequest).mockImplementation(async (scope) => await new Promise<ScheduledSnapshot>((resolve) => { pending.set(scope, resolve); }));
+  vi.mocked(scheduledRequest).mockImplementation(async (scope) => await new Promise<ScheduledSnapshot>((resolve) => { pending.set(scope.tmuxSession, resolve); }));
   const view = render(<Composer scope="A" />);
   await act(async () => { pending.get('A')!({ ...empty, tasks: [task, { ...task, id: 'second' }] }); });
   expect(shortcut().querySelector('.scheduled-shortcut-count')?.textContent).toBe('2');
@@ -133,7 +134,7 @@ it('serializes an explicit refresh after an in-flight snapshot so stale pre-muta
     calls++;
     return calls === 1 ? await new Promise<ScheduledSnapshot>((resolve) => { release = resolve; }) : { ...empty, tasks: [task] };
   });
-  const { result } = renderHook(() => useScheduledMessagesSnapshot('work'));
+  const { result } = renderHook(() => useScheduledMessagesSnapshot({ tmuxSession: 'work', paneId: '%1' }));
   const refresh = result.current.refresh();
   expect(calls).toBe(1);
   await act(async () => { release(empty); await refresh; });
@@ -163,4 +164,34 @@ it('omits the fixed group and its divider when no tmux scope or send capability 
   expect(view.container.querySelector('.cc-quick > .quick-scroll')).toBeTruthy();
   view.rerender(<Composer sendable={false} />); await act(async () => {});
   expect(view.container.querySelector('.cc-quick > .quick-fixed')).toBeNull();
+  view.rerender(<Composer paneId="" />); await act(async () => {});
+  expect(view.container.querySelector('.cc-quick > .quick-fixed')).toBeNull();
+});
+
+it('keeps disabled loading opacity equal to the stable neutral button', () => {
+  const css = fs.readFileSync('src/components/scheduledMessages.css', 'utf8');
+  expect(css).toMatch(/\.quick-fix\.scheduled-shortcut:disabled\s*\{[^}]*opacity:\s*1[;}]/);
+});
+it('clears counts and the open sheet synchronously across panes in one tmux, ignoring late responses', async () => {
+  const pending = new Map<string, (value: ScheduledSnapshot) => void>();
+  vi.mocked(scheduledRequest).mockImplementation(async (scope) => await new Promise<ScheduledSnapshot>(resolve => { pending.set(scope.paneId, resolve); }));
+  const view = render(<Composer paneId="%1" />);
+  await act(async () => { pending.get('%1')!({ ...empty, tasks: [task] }); });
+  expect(shortcut().querySelector('.scheduled-shortcut-count')?.textContent).toBe('1');
+  fireEvent.click(shortcut()); expect(await screen.findByRole('dialog', { name: t('scheduled.title') })).toBeTruthy();
+  view.rerender(<Composer paneId="%2" />);
+  expect(shortcut().querySelector('.scheduled-shortcut-count')).toBeNull(); expect(screen.queryByRole('dialog')).toBeNull();
+  view.rerender(<Composer paneId="%3" />);
+  await act(async () => { pending.get('%2')!({ ...empty, tasks: [task, { ...task, id: 'stale' }] }); });
+  expect(shortcut().querySelector('.scheduled-shortcut-count')).toBeNull();
+  await act(async () => { pending.get('%3')!(empty); }); expect(shortcut().classList.contains('scheduled-shortcut-neutral')).toBe(true);
+});
+it('keeps pane scope and existing records when the current run is missing or changes', async () => {
+  vi.mocked(scheduledRequest).mockResolvedValue({ ...empty, tasks: [task] });
+  const view = render(<Composer paneId="%1" scheduledRun={null} />); await waitFor(() => expect(shortcut().querySelector('.scheduled-shortcut-count')?.textContent).toBe('1'));
+  expect(vi.mocked(scheduledRequest).mock.calls[0]?.[0]).toEqual({ tmuxSession: 'work', paneId: '%1' });
+  fireEvent.click(shortcut()); await screen.findByRole('dialog', { name: t('scheduled.title') });
+  view.rerender(<Composer paneId="%1" scheduledRun={{ ...run, runId: 'replacement' }} />);
+  expect(screen.getByRole('dialog', { name: t('scheduled.title') })).toBeTruthy();
+  expect(vi.mocked(scheduledRequest).mock.calls.filter(call => call[2] === 'snapshot')).toHaveLength(1);
 });

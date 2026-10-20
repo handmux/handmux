@@ -65,10 +65,10 @@ describe('AgentConversationComposer mobile focus ownership', () => {
   it('puts schedules first for any sendable Agent and hides them without send capability', () => {
     const supported = conversation();
     const { container, rerender } = render(<AgentConversationComposer agentId="new-agent" sessionId="session"
-      tmuxSession="work" scheduledRun={{ agentId: 'new-agent', paneId: '%1', runId: 'run', sessionId: 'session' }} busy={false} conversation={supported} />);
+      tmuxSession="work" paneId="%1" scheduledRun={{ agentId: 'new-agent', paneId: '%1', runId: 'run', sessionId: 'session' }} busy={false} conversation={supported} />);
     expect(container.querySelector('.cc-quick button')?.textContent).toBe(t('scheduled.shortcut'));
     const unsupported = { ...supported, descriptor: { ...supported.descriptor!, capabilities: { history: true as const, live: 'poll' as const } } };
-    rerender(<AgentConversationComposer agentId="new-agent" sessionId="session" tmuxSession="work" busy={false} conversation={unsupported} />);
+    rerender(<AgentConversationComposer agentId="new-agent" sessionId="session" tmuxSession="work" paneId="%1" busy={false} conversation={unsupported} />);
     expect(screen.queryByRole('button', { name: t('scheduled.title') })).toBeNull();
   });
 

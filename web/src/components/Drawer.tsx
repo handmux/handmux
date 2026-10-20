@@ -229,10 +229,12 @@ export default function Drawer({
       const onDrawerBackdrop = target instanceof Element && Boolean(target.closest('.drawer-backdrop'));
       const startsInChatDock = target instanceof Element
         && Boolean(target.closest('.bottom-dock[data-dock-mode="agent"]'));
+      const startsInConversationQuickReplies = target instanceof Element
+        && Boolean(target.closest('.agent-conversation-composer .cc-quick .quick-scroll'));
       if (!open && startsInTabStrip(target)) return;
-      // The BottomDock's chat page owns horizontal swipes for returning to the command page. The
-      // Agent conversation page is a different surface and must still be able to reveal the drawer.
-      if (!open && startsInChatDock) return;
+      // Chat controls keep their horizontal gestures even at the left edge. The rest of the Agent
+      // conversation page can still reveal the drawer.
+      if (!open && (startsInChatDock || startsInConversationQuickReplies)) return;
       // Closing starts inside the drawer so a swipe on the backdrop remains its normal tap-to-dismiss
       // interaction. Opening is available across the normal page, unless a horizontal scroller still
       // has content to reveal on its left side.

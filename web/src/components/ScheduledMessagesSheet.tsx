@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import type { AgentRunRef } from '../agentCatalog.js';
 import { scheduledRequest } from '../scheduledMessagesApi.js';
-import type { ScheduledException, ScheduledRule, ScheduledTask } from '../scheduledMessagesApi.js';
+import type { ScheduledException, ScheduledRule, ScheduledTask, ScheduledScope } from '../scheduledMessagesApi.js';
 import { scheduledDisplayLocal, scheduledLocalInput, scheduledOnceDefault, scheduledRuleComplete, scheduledSummary } from '../scheduledMessagesPresentation.js';
 import { useScheduledMessagesSnapshot } from '../hooks/useScheduledMessagesSnapshot.js';
 import type { ScheduledMessagesSnapshotController } from '../hooks/useScheduledMessagesSnapshot.js';
@@ -58,11 +58,11 @@ function ValueRow({ label, children }: { label: string; children: ReactNode }) {
   </div>;
 }
 
-export default function ScheduledMessagesSheet({ tmuxSession, run, onClose, controller }: {
-  tmuxSession: string; run: AgentRunRef | null; onClose: () => void;
+export default function ScheduledMessagesSheet({ scope, run, onClose, controller }: {
+  scope: ScheduledScope; run: AgentRunRef | null; onClose: () => void;
   controller?: ScheduledMessagesSnapshotController;
 }) {
-  const fallback = useScheduledMessagesSnapshot(tmuxSession, controller === undefined);
+  const fallback = useScheduledMessagesSnapshot(scope, controller === undefined);
   const source = controller ?? fallback;
   const snapshot = source.snapshot;
   const [tab, setTab] = useState<'active' | 'ended' | 'exceptions'>('active');
@@ -89,7 +89,7 @@ export default function ScheduledMessagesSheet({ tmuxSession, run, onClose, cont
   const zone = editor?.task?.timeZone ?? editor?.exception?.timeZone ?? snapshot?.timeZone;
 
   const request = <T,>(action: string, fields: Record<string, unknown> = {}) =>
-    scheduledRequest<T>(tmuxSession, runRef.current, action, fields);
+    scheduledRequest<T>(scope, runRef.current, action, fields);
   const reload = source.refresh;
   useEffect(() => {
     mounted.current = true;

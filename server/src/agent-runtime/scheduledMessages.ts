@@ -7,6 +7,7 @@ export type ScheduledRule =
   | { frequency: 'hourly'; slots: { minute: number }[]; endsAt: string }
   | { frequency: 'daily'; slots: { time: string }[]; endsAt: string }
   | { frequency: 'weekly'; slots: { weekday: number; time: string }[]; endsAt: string };
+export interface ScheduledScope { tmuxSession: string; paneId: string }
 export interface ScheduledTarget { agentId: string; sessionId: string; paneId: string; tmuxSession: string }
 export interface ScheduledTask {
   id: string; revision: number; target: ScheduledTarget; text: string; rule: ScheduledRule;
@@ -23,6 +24,12 @@ function validateCutoffLimit(rule: ScheduledRule, now: number) {
   if (rule.frequency !== 'once' && Date.parse(rule.endsAt) > now + 365 * 86400000)
     throw new ScheduledError('Choose an end time within the next 365 days');
 }
+function requiredScope(scope: ScheduledScope): ScheduledScope {
+  if (!scope || typeof scope.tmuxSession !== 'string' || !scope.tmuxSession.trim() || typeof scope.paneId !== 'string' || !scope.paneId.trim())
+    throw new ScheduledError('Choose a tmux session and pane');
+  return scope;
+}
+function inScope(target: ScheduledTarget, scope: ScheduledScope) { return target.tmuxSession === scope.tmuxSession && target.paneId === scope.paneId; }
 interface State { version: 1; tasks: ScheduledTask[]; exceptions: ScheduledException[] }
 export interface ScheduledStore { load(): unknown; save(state: State): void }
 export class MemoryScheduledStore implements ScheduledStore {
@@ -140,7 +147,7 @@ export class ScheduledMessagesService {
     if (loaded !== undefined) this.#store.save(this.#state);
   }
   activeTargets(): ScheduledTarget[] { return this.#state.tasks.filter((task) => (task.state === 'active' && task.enabled) || task.blocked).map((task) => structuredClone(task.target)); }
-  snapshot(tmuxSession: string) { return structuredClone({ serverNow: this.#now(), timeZone: this.timeZone, tasks: this.#state.tasks.filter((task) => task.target.tmuxSession === tmuxSession), exceptions: this.#state.exceptions.filter((item) => item.target.tmuxSession === tmuxSession) }); }
+  snapshot(scope: ScheduledScope) { requiredScope(scope); return structuredClone({ serverNow: this.#now(), timeZone: this.timeZone, tasks: this.#state.tasks.filter((task) => inScope(task.target, scope)), exceptions: this.#state.exceptions.filter((item) => inScope(item.target, scope)) }); }
   preview(raw: unknown, zone = this.timeZone) { const now = this.#now(); const rule = validateRule(raw, zone); validateCutoffLimit(rule, now); return { serverNow: now, timeZone: zone, nextAt: nextOccurrence(rule, zone, now) }; }
   #transaction<T>(operation: () => T): T { const before = structuredClone(this.#state); try { const result = operation(); this.#store.save(this.#state); return structuredClone(result); } catch (error) { this.#state = before; throw error; } }
   #newTask(target: ScheduledTarget, raw: unknown, zone = this.timeZone): ScheduledTask {
@@ -152,10 +159,10 @@ export class ScheduledMessagesService {
     this.#state.tasks.push(task); return task;
   }
   create(target: ScheduledTarget, raw: unknown) { return this.#transaction(() => this.#newTask(target, raw)); }
-  #task(session: string, id: string, revision: number) { const task = this.#state.tasks.find((item) => item.id === id && item.target.tmuxSession === session); if (!task) throw new ScheduledError('Scheduled message no longer exists', 'not_found'); if (task.revision !== revision) throw new ScheduledError('Changed on another client. Reload the list.', 'conflict'); return task; }
-  update(session: string, id: string, revision: number, raw: unknown) {
+  #task(scope: ScheduledScope, id: string, revision: number) { requiredScope(scope); const task = this.#state.tasks.find((item) => item.id === id && inScope(item.target, scope)); if (!task) throw new ScheduledError('Scheduled message no longer exists', 'not_found'); if (task.revision !== revision) throw new ScheduledError('Changed on another client. Reload the list.', 'conflict'); return task; }
+  update(scope: ScheduledScope, id: string, revision: number, raw: unknown) {
     return this.#transaction(() => {
-      const task = this.#task(session, id, revision); const value = object(raw); const now = this.#now();
+      const task = this.#task(scope, id, revision); const value = object(raw); const now = this.#now();
       if (task.state !== 'active' || task.claim) throw new ScheduledError('This occurrence is being submitted or has ended', 'conflict');
       if (value.frequency !== undefined) { task.rule = validateRule(value, task.timeZone); validateCutoffLimit(task.rule, now); task.cursor = now; task.nextAt = nextOccurrence(task.rule, task.timeZone, task.cursor); if (task.nextAt === null) throw new ScheduledError('Choose a future scheduled time and cutoff'); }
       if (value.text !== undefined) { if (typeof value.text !== 'string' || !value.text.trim() || value.text.length > 256 * 1024) throw new ScheduledError('Message text is required'); task.text = value.text.trim(); }
@@ -163,10 +170,11 @@ export class ScheduledMessagesService {
       task.revision++; return task;
     });
   }
-  remove(session: string, id: string, revision: number) { return this.#transaction(() => { const task = this.#task(session, id, revision); this.#state.tasks = this.#state.tasks.filter((item) => item !== task); return { ok: true }; }); }
-  resolveException(session: string, id: string, revision: number, raw: unknown) {
+  remove(scope: ScheduledScope, id: string, revision: number) { return this.#transaction(() => { const task = this.#task(scope, id, revision); this.#state.tasks = this.#state.tasks.filter((item) => item !== task); return { ok: true }; }); }
+  resolveException(scope: ScheduledScope, id: string, revision: number, raw: unknown) {
+    requiredScope(scope);
     return this.#transaction(() => {
-      const item = this.#state.exceptions.find((candidate) => candidate.id === id && candidate.target.tmuxSession === session);
+      const item = this.#state.exceptions.find((candidate) => candidate.id === id && inScope(candidate.target, scope));
       if (!item || item.revision !== revision) throw new ScheduledError('Exception already changed. Reload the list.', 'conflict');
       const value = object(raw);
       if (value.action === 'reschedule') { if (item.unknown) throw new ScheduledError('Delivery is uncertain. Check conversation and Queue; automatic resend is disabled.', 'conflict'); const rule = object(value.rule); if (rule.frequency !== 'once') invalid(); this.#newTask(item.target, { ...rule, text: item.text }, item.timeZone); }

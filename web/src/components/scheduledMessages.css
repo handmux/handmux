@@ -105,6 +105,8 @@
 .scheduled-status-paused { color: var(--ct-accent); background: color-mix(in srgb, var(--ct-accent) 12%, transparent); }
 .scheduled-status-exception { color: var(--ct-err-ink); background: var(--ct-err-bg); }
 
-.quick-fix.scheduled-shortcut-active { color: rgb(var(--blue-rgb)); background: rgba(var(--blue-rgb), .13); border-color: rgba(var(--blue-rgb), .5); }
+.quick-fix.scheduled-shortcut-active { color: var(--ct-accent); background: color-mix(in srgb, var(--ct-accent) 13%, transparent); border-color: color-mix(in srgb, var(--ct-accent) 50%, transparent); }
 .quick-fix.scheduled-shortcut-alert { color: var(--ct-err-ink); background: var(--ct-err-bg); border-color: var(--ct-err-ink); }
 .quick-fix.scheduled-shortcut svg { color: inherit; }
+
+.quick-fix.scheduled-shortcut:disabled { opacity: 1; }

@@ -3817,6 +3817,7 @@ export default function App() {
                 ref={agentComposerRef}
                 scheduledRun={currentAgentRun}
                 tmuxSession={current.session.name}
+                paneId={current.paneId}
                 agentId={composerIdentity.agentId}
                 sessionId={composerIdentity.sessionId}
                 desktop={desktopInput}

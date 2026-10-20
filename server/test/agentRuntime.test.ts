@@ -143,7 +143,7 @@ describe('AgentRuntime composition root', () => {
     const scheduled = runtime.scheduledMessages!.create({ agentId: 'test', sessionId: 'original', paneId: '%1', tmuxSession: 'main' }, { text: 'hello', frequency: 'once', slots: [{ date, time: '12:00' }] });
     vi.setSystemTime(scheduled.nextAt!);
     await vi.waitFor(() => expect(runtime.activeRuns()[0]?.sessionId).toBe('original'), { timeout: 4500 });
-    await vi.waitFor(() => expect(runtime.scheduledMessages!.snapshot('main').tasks[0]?.lastResult).toBe('submitted'), { timeout: 1500 });
+    await vi.waitFor(() => expect(runtime.scheduledMessages!.snapshot({ tmuxSession: 'main', paneId: '%1' }).tasks[0]?.lastResult).toBe('submitted'), { timeout: 1500 });
     const lease = runtime.runs.currentForPane('%1')!;
     expect((await runtime.conversation!.queueSnapshot(lease)).items[0]?.text).toBe('hello');
     expect(discover).toHaveBeenCalled();

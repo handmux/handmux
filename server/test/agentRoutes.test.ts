@@ -918,16 +918,44 @@ describe('scheduled message facade vertical slice', () => {
     Object.assign(h.value, { scheduledMessages: scheduler });
     h.value.scheduledTarget = async () => ({ agentId: 'pi', sessionId: 'session-1', paneId: '%1', tmuxSession: 'work' });
     const client = app(h.value);
-    const created = await request(client).post('/agents/scheduled-messages').send({ action: 'create', run: h.lease.ref, request: { text: 'offline hello', frequency: 'once', slots: [{ date: '2026-10-20', time: '00:01' }] } });
+    const created = await request(client).post('/agents/scheduled-messages').send({ action: 'create', tmuxSession: 'work', paneId: '%1', run: h.lease.ref, request: { text: 'offline hello', frequency: 'once', slots: [{ date: '2026-10-20', time: '00:01' }] } });
     expect(created.status).toBe(200);
     now += 60000;
     await scheduler.tick(); // no SSE, browser or HTTP request drives this execution
     expect(delivered).toEqual(['offline hello']);
-    const otherClient = await request(client).post('/agents/scheduled-messages').send({ action: 'snapshot', tmuxSession: 'work' });
+    const otherClient = await request(client).post('/agents/scheduled-messages').send({ action: 'snapshot', tmuxSession: 'work', paneId: '%1' });
     expect(otherClient.body.tasks[0]).toMatchObject({ state: 'ended', lastResult: 'submitted' });
-    const stale = await request(client).post('/agents/scheduled-messages').send({ action: 'delete', tmuxSession: 'work', id: created.body.id, revision: created.body.revision });
+    const stale = await request(client).post('/agents/scheduled-messages').send({ action: 'delete', tmuxSession: 'work', paneId: '%1', id: created.body.id, revision: created.body.revision });
     expect(stale.status).toBe(409);
     h.value.scheduledTarget = async () => { throw Error('target gone'); };
-    expect((await request(client).post('/agents/scheduled-messages').send({ action: 'snapshot', tmuxSession: 'work' })).status).toBe(200);
+    const withoutRun = await request(client).post('/agents/scheduled-messages').send({ action: 'snapshot', tmuxSession: 'work', paneId: '%1' });
+    expect(withoutRun.status).toBe(200);
+    expect((await request(client).post('/agents/scheduled-messages').send({ action: 'delete', tmuxSession: 'work', paneId: '%1', id: created.body.id, revision: withoutRun.body.tasks[0].revision })).status).toBe(200);
+  });
+});
+
+describe('scheduled facade pane scope', () => {
+  it('requires an explicit pane, rejects create target mismatch, and denies cross-pane management without a live run', async () => {
+    let now = Date.parse('2026-10-20T00:00:00Z'); const h = runtime();
+    const service = new ScheduledMessagesService({ store: new MemoryScheduledStore(), timeZone: 'UTC', now: () => now, deliver: async () => ({ status: 'queued' }) });
+    Object.assign(h.value, { scheduledMessages: service });
+    h.value.scheduledTarget = async () => ({ agentId: 'pi', sessionId: 'session-1', paneId: '%1', tmuxSession: 'work' });
+    const client = app(h.value); const scope = { tmuxSession: 'work', paneId: '%1' }; const other = { ...scope, paneId: '%2' };
+    const rule = { text: 'scoped', frequency: 'hourly', slots: [{ minute: 1 }], endsAt: '2026-10-21T00:00:00Z' };
+    for (const action of ['snapshot', 'create', 'update', 'delete', 'exception']) expect((await request(client).post('/agents/scheduled-messages').send({ action, tmuxSession: 'work', run: h.lease.ref, request: rule })).status).toBe(400);
+    expect((await request(client).post('/agents/scheduled-messages').send({ action: 'preview', request: rule })).status).toBe(200);
+    expect((await request(client).post('/agents/scheduled-messages').send({ action: 'create', ...other, run: h.lease.ref, request: rule })).status).toBe(409);
+    const created = await request(client).post('/agents/scheduled-messages').send({ action: 'create', ...scope, run: h.lease.ref, request: rule }); expect(created.status).toBe(200);
+    expect((await request(client).post('/agents/scheduled-messages').send({ action: 'snapshot', ...other })).body.tasks).toEqual([]);
+    for (const action of ['update', 'delete']) {
+      const result = await request(client).post('/agents/scheduled-messages').send({ action, ...other, id: created.body.id, revision: created.body.revision, request: { enabled: false } });
+      expect(result.status).toBe(404);
+    }
+    now += 12 * 60000; await service.tick();
+    const snapshot = await request(client).post('/agents/scheduled-messages').send({ action: 'snapshot', ...scope }); const exception = snapshot.body.exceptions[0];
+    expect((await request(client).post('/agents/scheduled-messages').send({ action: 'snapshot', ...other })).body.exceptions).toEqual([]);
+    for (const action of ['discard', 'reschedule']) expect((await request(client).post('/agents/scheduled-messages').send({ action: 'exception', ...other, id: exception.id, revision: exception.revision, request: { action, rule: { frequency: 'once', slots: [{ date: '2026-10-21', time: '00:01' }] } } })).status).toBe(409);
+    h.value.scheduledTarget = async () => { throw Error('no live run'); };
+    expect((await request(client).post('/agents/scheduled-messages').send({ action: 'update', ...scope, id: snapshot.body.tasks[0].id, revision: snapshot.body.tasks[0].revision, request: { enabled: false } })).status).toBe(200);
   });
 });

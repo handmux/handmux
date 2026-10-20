@@ -453,6 +453,28 @@ describe('Drawer (bound sessions)', () => {
     dock.remove();
   });
 
+  it.each([0, 40])('leaves conversation quick replies in charge of right swipes at scrollLeft=%s', async (scrollLeft) => {
+    const onOpen = vi.fn();
+    await render({ open: false, onOpen });
+    const composer = document.createElement('div');
+    composer.className = 'agent-conversation-composer';
+    composer.innerHTML = '<div class="cc-quick quick-bar"><div class="quick-scroll"><button class="quick-cmd"><span>ok</span></button></div></div>';
+    const scroller = composer.querySelector('.quick-scroll');
+    scroller.style.overflowX = 'auto';
+    Object.defineProperties(scroller, {
+      clientWidth: { value: 100 }, scrollWidth: { value: 300 }, scrollLeft: { value: scrollLeft, writable: true },
+    });
+    document.body.appendChild(composer);
+    try {
+      await act(async () => {
+        dispatchTouch(composer.querySelector('span'), 'touchstart', 180, 180);
+        dispatchTouch(window, 'touchmove', 300, 182);
+        dispatchTouch(window, 'touchend');
+      });
+      expect(onOpen).not.toHaveBeenCalled();
+    } finally { composer.remove(); }
+  });
+
   it('does not open while dragging an active chat copy selection', async () => {
     const onOpen = vi.fn();
     await render({ open: false, onOpen });

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { scheduledRequest } from '../scheduledMessagesApi.js';
-import type { ScheduledSnapshot } from '../scheduledMessagesApi.js';
+import type { ScheduledSnapshot, ScheduledScope } from '../scheduledMessagesApi.js';
 import { t } from '../i18n';
 
 export interface ScheduledMessagesSnapshotController {
@@ -10,27 +10,29 @@ export interface ScheduledMessagesSnapshotController {
 }
 
 /** One owner in the composer feeds both the shortcut and its sheet, including while the sheet is closed. */
-export function useScheduledMessagesSnapshot(scope: string, enabled = true): ScheduledMessagesSnapshotController {
-  const [state, setState] = useState<{ scope: string; snapshot: ScheduledSnapshot | null; error: string }>({
-    scope, snapshot: null, error: '',
+export function useScheduledMessagesSnapshot(scope: ScheduledScope, enabled = true): ScheduledMessagesSnapshotController {
+  const { tmuxSession, paneId } = scope;
+  const scopeKey = JSON.stringify([tmuxSession, paneId]);
+  const [state, setState] = useState<{ scopeKey: string; snapshot: ScheduledSnapshot | null; error: string }>({
+    scopeKey, snapshot: null, error: '',
   });
   const refreshRef = useRef<() => Promise<void>>(async () => {});
   useEffect(() => {
-    if (!enabled || !scope) { refreshRef.current = async () => {}; return; }
+    if (!enabled || !tmuxSession || !paneId) { refreshRef.current = async () => {}; return; }
     let active = true;
     let timer: ReturnType<typeof setTimeout>;
     let pending: Promise<void> | null = null;
-    setState({ scope, snapshot: null, error: '' });
+    setState({ scopeKey, snapshot: null, error: '' });
     const read = (): Promise<void> => {
       if (pending) return pending;
       const operation = (async () => {
         try {
-          const snapshot = await scheduledRequest<ScheduledSnapshot>(scope, null, 'snapshot');
+          const snapshot = await scheduledRequest<ScheduledSnapshot>({ tmuxSession, paneId }, null, 'snapshot');
           if (!Array.isArray(snapshot.tasks) || !Array.isArray(snapshot.exceptions)
             || !Number.isFinite(snapshot.serverNow) || typeof snapshot.timeZone !== 'string') {
             throw new Error(t('scheduled.loadFailed'));
           }
-          if (active) setState({ scope, snapshot, error: '' });
+          if (active) setState({ scopeKey, snapshot, error: '' });
         } catch (cause) {
           if (active) setState((current) => ({ ...current, error: cause instanceof Error ? cause.message : t('scheduled.loadFailed') }));
           throw cause;
@@ -51,11 +53,11 @@ export function useScheduledMessagesSnapshot(scope: string, enabled = true): Sch
     };
     void poll();
     return () => { active = false; clearTimeout(timer); refreshRef.current = async () => {}; };
-  }, [scope, enabled]);
+  }, [tmuxSession, paneId, enabled]);
   const refresh = useCallback(async () => { await refreshRef.current(); }, []);
   return {
-    snapshot: enabled && state.scope === scope ? state.snapshot : null,
-    error: enabled && state.scope === scope ? state.error : '',
+    snapshot: enabled && state.scopeKey === scopeKey ? state.snapshot : null,
+    error: enabled && state.scopeKey === scopeKey ? state.error : '',
     refresh,
   };
 }

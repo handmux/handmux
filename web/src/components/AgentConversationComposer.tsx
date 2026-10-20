@@ -68,6 +68,7 @@ export interface AgentConversationComposerProps {
   keyboardInset?: number;
   scheduledRun?: AgentRunRef | null;
   tmuxSession?: string;
+  paneId?: string;
 }
 
 function AgentConversationComposer({
@@ -93,6 +94,7 @@ function AgentConversationComposer({
   keyboardInset = 0,
   scheduledRun = null,
   tmuxSession = '',
+  paneId = '',
 }: AgentConversationComposerProps, forwardedRef: ForwardedRef<AgentConversationComposerHandle>) {
   const key = `${agentId}\0${sessionId}`;
   const saveDraft = (next: string): void => saveConversationDraft(agentId, sessionId, next);
@@ -100,8 +102,10 @@ function AgentConversationComposer({
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [stopConfirm, setStopConfirm] = useState(false);
+  const scheduledScope = { tmuxSession, paneId };
+  const scheduledScopeKey = JSON.stringify([tmuxSession, paneId]);
   const [scheduledOpen, setScheduledOpen] = useState<string | null>(null);
-  useEffect(() => { setScheduledOpen(null); }, [tmuxSession]);
+  useEffect(() => { setScheduledOpen(null); }, [tmuxSession, paneId]);
   const [editOpen, setEditOpen] = useState(false);
   const [favs, setFavs] = useState(() => loadFavs('agent'));
   const [layout, setLayout] = useState(() => loadShortcutLayout('chat'));
@@ -169,7 +173,7 @@ function AgentConversationComposer({
   }, [key]);
   const capabilities = conversation.descriptor?.capabilities;
   const canSend = canSendConversation(capabilities);
-  const scheduled = useScheduledMessagesSnapshot(tmuxSession, !!tmuxSession && canSend);
+  const scheduled = useScheduledMessagesSnapshot(scheduledScope, !!tmuxSession && !!paneId && canSend);
   const scheduledCount = scheduled.snapshot?.tasks.filter((task) => task.state === 'active').length ?? 0;
   const scheduledExceptions = (scheduled.snapshot?.exceptions.length ?? 0) > 0;
   const scheduledLabel = [t('scheduled.title'),
@@ -335,9 +339,9 @@ function AgentConversationComposer({
     <div className="chat-composer agent-conversation-composer" onPointerDown={keepComposerFocus}>
       {headerContent}
       <div className="cc-quick quick-bar">
-        {tmuxSession && (conversation.descriptor === null || canSend) && <div className="quick-fixed"><button type="button" disabled={!canSend}
+        {tmuxSession && paneId && (conversation.descriptor === null || canSend) && <div className="quick-fixed"><button type="button" disabled={!canSend}
           className={`quick-fix scheduled-shortcut ${scheduledExceptions ? 'scheduled-shortcut-alert' : scheduledCount > 0 ? 'scheduled-shortcut-active' : 'scheduled-shortcut-neutral'}`}
-          aria-label={scheduledLabel} onClick={() => { ref.current?.blur(); setScheduledOpen(tmuxSession); }}>
+          aria-label={scheduledLabel} onClick={() => { ref.current?.blur(); setScheduledOpen(scheduledScopeKey); }}>
           <AlarmClockIcon /><span>{t('scheduled.shortcut')}</span>{scheduledCount > 0 && <span className="scheduled-shortcut-count" aria-hidden="true">{scheduledCount}</span>}
         </button></div>}
         <div className="quick-scroll">
@@ -439,8 +443,8 @@ function AgentConversationComposer({
           </div>
         </OverlayPortal>
       )}
-      {scheduledOpen === tmuxSession && canSend && <OverlayPortal chatTone={chatTone} keyboardInset={keyboardInset}>
-        <ScheduledMessagesSheet key={tmuxSession} tmuxSession={tmuxSession} run={scheduledRun} controller={scheduled} onClose={() => setScheduledOpen(null)} />
+      {scheduledOpen === scheduledScopeKey && canSend && <OverlayPortal chatTone={chatTone} keyboardInset={keyboardInset}>
+        <ScheduledMessagesSheet key={scheduledScopeKey} scope={scheduledScope} run={scheduledRun} controller={scheduled} onClose={() => setScheduledOpen(null)} />
       </OverlayPortal>}
       {editOpen && <CmdFavEditor variant="chat" presets={(shortcuts || DEFAULT_SERVER_SHORTCUTS).chat}
         onChange={refreshShortcuts} onClose={() => setEditOpen(false)} />}

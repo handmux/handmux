@@ -20,7 +20,7 @@ async function openNew() {
 afterEach(async () => { cleanup(); await new Promise((resolve) => setTimeout(resolve, 20)); vi.clearAllMocks(); vi.restoreAllMocks(); });
 it('uses the existing drawer and grouped rows; new once is server now plus an hour across midnight despite client clock skew', async () => {
   mockApi(); vi.spyOn(Date, 'now').mockReturnValue(Date.parse('2000-01-01T00:00:00Z'));
-  const { container } = render(<ScheduledMessagesSheet tmuxSession="work" run={run} onClose={() => {}} />);
+  const { container } = render(<ScheduledMessagesSheet scope={{ tmuxSession: 'work', paneId: '%1' }} run={run} onClose={() => {}} />);
   await openNew();
   expect(container.querySelector('.tool-sheet .tool-sheet-head')).toBeTruthy();
   expect(container.querySelector('.file-sheet')).toBeNull();
@@ -39,13 +39,13 @@ it('uses the existing drawer and grouped rows; new once is server now plus an ho
 it('waits for a server snapshot before enabling add', async () => {
   let resolve!: (value: ScheduledSnapshot) => void;
   vi.mocked(scheduledRequest).mockReturnValue(new Promise((done) => { resolve = done; }));
-  render(<ScheduledMessagesSheet tmuxSession="work" run={run} onClose={() => {}} />);
+  render(<ScheduledMessagesSheet scope={{ tmuxSession: 'work', paneId: '%1' }} run={run} onClose={() => {}} />);
   expect((screen.getByRole('button', { name: 'scheduled.add' }) as HTMLButtonElement).disabled).toBe(true);
   resolve(snapshot);
   await waitFor(() => expect((screen.getByRole('button', { name: 'scheduled.add' }) as HTMLButtonElement).disabled).toBe(false));
 });
 it('expands selectors inline, preserves the message, and resets switching back to once from server time', async () => {
-  mockApi(); render(<ScheduledMessagesSheet tmuxSession="work" run={run} onClose={() => {}} />); await openNew();
+  mockApi(); render(<ScheduledMessagesSheet scope={{ tmuxSession: 'work', paneId: '%1' }} run={run} onClose={() => {}} />); await openNew();
   fireEvent.change(screen.getByLabelText('scheduled.message'), { target: { value: 'keep me' } });
   fireEvent.click(screen.getByRole('button', { name: /scheduled.repeat/ }));
   fireEvent.click(screen.getByRole('button', { name: 'scheduled.daily' }));
@@ -66,7 +66,7 @@ it('uses two-line compact list rows in all tabs with explicit trailing actions a
   const text = `A summary ${'long message body '.repeat(60)}`;
   const active: ScheduledTask = { id: 'task', revision: 2, text, target, timeZone: 'UTC', state: 'active', enabled: true, nextAt: serverNow + 60000, rule: { frequency: 'once', slots: [{ date: '2026-10-21', time: '09:00' }] } };
   mockApi({ ...snapshot, tasks: [active, { ...active, id: 'ended', state: 'ended', endedAt: serverNow }], exceptions: [{ id: 'exception', revision: 3, taskId: 'task', text, target, timeZone: 'UTC', scheduledAt: serverNow, reason: 'delivery_unconfirmed', unknown: true }] });
-  const { container } = render(<ScheduledMessagesSheet tmuxSession="work" run={run} onClose={() => {}} />);
+  const { container } = render(<ScheduledMessagesSheet scope={{ tmuxSession: 'work', paneId: '%1' }} run={run} onClose={() => {}} />);
   await screen.findByRole('button', { name: 'scheduled.editAction' });
   for (const tab of ['active', 'ended', 'exceptions']) {
     fireEvent.click(screen.getByRole('tab', { name: `scheduled.${tab}` }));
@@ -83,7 +83,7 @@ it('uses two-line compact list rows in all tabs with explicit trailing actions a
 it('keeps every API-created slot when reopening inline time and repeat dropdowns', async () => {
   const task: ScheduledTask = { id: 'task', revision: 2, text: 'multi', target, timeZone: 'UTC', state: 'active', enabled: true, nextAt: serverNow + 60000, rule: { frequency: 'daily', slots: [{ time: '09:00' }, { time: '18:00' }], endsAt: '2026-11-01T00:00:00Z' } };
   mockApi({ ...snapshot, tasks: [task] });
-  render(<ScheduledMessagesSheet tmuxSession="work" run={null} onClose={() => {}} />);
+  render(<ScheduledMessagesSheet scope={{ tmuxSession: 'work', paneId: '%1' }} run={null} onClose={() => {}} />);
   fireEvent.click(await screen.findByRole('button', { name: 'scheduled.editAction' }));
   fireEvent.change(screen.getByLabelText('scheduled.message'), { target: { value: 'edited' } });
   fireEvent.click(screen.getByRole('button', { name: /scheduled.sendTime/ }));
@@ -105,7 +105,7 @@ it('keeps every API-created slot when reopening inline time and repeat dropdowns
 it('reschedules an exception with server plus one-hour defaults and uses ActionSheet revision-aware discard', async () => {
   const exception = { id: 'exception', revision: 3, taskId: 'task', text: 'reschedule me', target, timeZone: 'Asia/Shanghai', scheduledAt: serverNow - 6000000, reason: 'missed', unknown: false };
   mockApi({ ...snapshot, exceptions: [exception] });
-  render(<ScheduledMessagesSheet tmuxSession="work" run={null} onClose={() => {}} />);
+  render(<ScheduledMessagesSheet scope={{ tmuxSession: 'work', paneId: '%1' }} run={null} onClose={() => {}} />);
   fireEvent.click(screen.getByRole('tab', { name: 'scheduled.exceptions' }));
   fireEvent.click(await screen.findByRole('button', { name: 'scheduled.reschedule' }));
   await waitFor(() => expect((screen.getByRole('button', { name: 'scheduled.save' }) as HTMLButtonElement).disabled).toBe(false));
@@ -119,7 +119,7 @@ it('reschedules an exception with server plus one-hour defaults and uses ActionS
 });
 it('inline dropdowns add no history: hardware Back returns editor to list, then closes', async () => {
   mockApi(); const closed = vi.fn();
-  render(<ScheduledMessagesSheet tmuxSession="work" run={run} onClose={closed} />); await openNew();
+  render(<ScheduledMessagesSheet scope={{ tmuxSession: 'work', paneId: '%1' }} run={run} onClose={closed} />); await openNew();
   fireEvent.click(screen.getByRole('button', { name: /scheduled.sendTime/ }));
   window.history.back(); await waitFor(() => expect(screen.queryByLabelText('scheduled.message')).toBeNull());
   expect(closed).not.toHaveBeenCalled();
@@ -127,7 +127,7 @@ it('inline dropdowns add no history: hardware Back returns editor to list, then 
 });
 it('hardware Back dirty confirmation cancellation retains the editor history level', async () => {
   mockApi(); const closed = vi.fn();
-  render(<ScheduledMessagesSheet tmuxSession="work" run={run} onClose={closed} />); await openNew();
+  render(<ScheduledMessagesSheet scope={{ tmuxSession: 'work', paneId: '%1' }} run={run} onClose={closed} />); await openNew();
   fireEvent.change(screen.getByLabelText('scheduled.message'), { target: { value: 'keep me' } });
   window.history.back(); await screen.findByRole('alertdialog');
   window.history.back(); await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull());
@@ -142,7 +142,7 @@ it('hardware Back dirty confirmation cancellation retains the editor history lev
 it('ends with a direct destructive confirmation rather than opening a second delete menu', async () => {
   const task: ScheduledTask = { id: 'ended', revision: 7, text: 'done', target, timeZone: 'UTC', state: 'ended', enabled: true, nextAt: null, endedAt: serverNow, rule: { frequency: 'once', slots: [{ date: '2026-10-20', time: '09:00' }] } };
   mockApi({ ...snapshot, tasks: [task] });
-  render(<ScheduledMessagesSheet tmuxSession="work" run={run} onClose={() => {}} />);
+  render(<ScheduledMessagesSheet scope={{ tmuxSession: 'work', paneId: '%1' }} run={run} onClose={() => {}} />);
   fireEvent.click(screen.getByRole('tab', { name: 'scheduled.ended' }));
   fireEvent.click(await screen.findByRole('button', { name: 'scheduled.delete' }));
   const dialog = screen.getByRole('alertdialog');
@@ -153,7 +153,7 @@ it('ends with a direct destructive confirmation rather than opening a second del
   await waitFor(() => expect(vi.mocked(scheduledRequest).mock.calls.find((call) => call[2] === 'delete')?.[3]).toEqual({ id: 'ended', revision: 7 }));
 });
 it('chooses weekly times independently and requires an explicit cutoff through grouped setting rows', async () => {
-  mockApi(); render(<ScheduledMessagesSheet tmuxSession="work" run={run} onClose={() => {}} />); await openNew();
+  mockApi(); render(<ScheduledMessagesSheet scope={{ tmuxSession: 'work', paneId: '%1' }} run={run} onClose={() => {}} />); await openNew();
   fireEvent.change(screen.getByLabelText('scheduled.message'), { target: { value: 'weekly' } });
   fireEvent.click(screen.getByRole('button', { name: /scheduled.repeat/ }));
   fireEvent.click(screen.getByRole('button', { name: 'scheduled.weekly' }));
@@ -176,7 +176,7 @@ it('retains edits and shows a revision conflict after another client changes a t
     if (action === 'update') throw Error('Changed on another client. Reload the list.');
     return action === 'snapshot' ? { ...snapshot, tasks: [task] } : { nextAt: serverNow + 3600000, timeZone: 'UTC' };
   });
-  render(<ScheduledMessagesSheet tmuxSession="work" run={run} onClose={() => {}} />);
+  render(<ScheduledMessagesSheet scope={{ tmuxSession: 'work', paneId: '%1' }} run={run} onClose={() => {}} />);
   fireEvent.click(await screen.findByRole('button', { name: 'scheduled.editAction' }));
   fireEvent.change(screen.getByLabelText('scheduled.message'), { target: { value: 'my unsaved message' } });
   await waitFor(() => expect((screen.getByRole('button', { name: 'scheduled.save' }) as HTMLButtonElement).disabled).toBe(false));
@@ -193,7 +193,7 @@ it('shows full content only in detail and hardware Back dismisses an action menu
   const text = 'First line\n' + 'Full content '.repeat(30);
   const task: ScheduledTask = { id: 'task', revision: 2, text, target, timeZone: 'UTC', state: 'active', enabled: true, nextAt: serverNow + 60000, rule: { frequency: 'once', slots: [{ date: '2026-10-21', time: '09:00' }] } };
   mockApi({ ...snapshot, tasks: [task] }); const closed = vi.fn();
-  const { container } = render(<ScheduledMessagesSheet tmuxSession="work" run={run} onClose={closed} />);
+  const { container } = render(<ScheduledMessagesSheet scope={{ tmuxSession: 'work', paneId: '%1' }} run={run} onClose={closed} />);
   await screen.findByRole('listitem');
   fireEvent.click(container.querySelector('.scheduled-list-main')!);
   expect(container.querySelector('.scheduled-detail-text')?.textContent).toBe(text);
@@ -222,7 +222,7 @@ it.each(['create', 'refresh'] as const)('does not navigate again when a pending 
   });
   const unwind = vi.spyOn(window.history, 'go');
   const closed = vi.fn();
-  const view = render(<ScheduledMessagesSheet tmuxSession="work" run={run} onClose={() => { closed(); view.unmount(); }} />);
+  const view = render(<ScheduledMessagesSheet scope={{ tmuxSession: 'work', paneId: '%1' }} run={run} onClose={() => { closed(); view.unmount(); }} />);
   await openNew();
   fireEvent.change(screen.getByLabelText('scheduled.message'), { target: { value: 'save before closing' } });
   await waitFor(() => expect((screen.getByRole('button', { name: 'scheduled.save' }) as HTMLButtonElement).disabled).toBe(false));
@@ -238,7 +238,7 @@ it.each(['create', 'refresh'] as const)('does not navigate again when a pending 
 });
 
 it('shows server time once beneath the title on every tab and subpage without target or pane metadata', async () => {
-  mockApi(); const { container } = render(<ScheduledMessagesSheet tmuxSession="work" run={run} onClose={() => {}} />);
+  mockApi(); const { container } = render(<ScheduledMessagesSheet scope={{ tmuxSession: 'work', paneId: '%1' }} run={run} onClose={() => {}} />);
   await screen.findByText('scheduled.empty');
   const assertSubtitle = () => {
     const header = container.querySelector('.scheduled-head')!;
@@ -263,7 +263,7 @@ it('shows server time once beneath the title on every tab and subpage without ta
 it.each(['active', 'ended'] as const)('uses the correct %s delete explanation from the detail action sheet', async (state) => {
   const item: ScheduledTask = { id: 'task', revision: 2, text: 'message', target, timeZone: 'UTC', state, enabled: true, nextAt: serverNow + 60000, endedAt: serverNow, rule: { frequency: 'once', slots: [{ date: '2026-10-21', time: '09:00' }] } };
   mockApi({ ...snapshot, tasks: [item] });
-  const { container } = render(<ScheduledMessagesSheet tmuxSession="work" run={run} onClose={() => {}} />);
+  const { container } = render(<ScheduledMessagesSheet scope={{ tmuxSession: 'work', paneId: '%1' }} run={run} onClose={() => {}} />);
   fireEvent.click(screen.getByRole('tab', { name: `scheduled.${state}` })); await screen.findByRole('listitem');
   fireEvent.click(container.querySelector('.scheduled-list-main')!);
   expect(container.textContent).not.toContain('scheduled.pane');
@@ -276,7 +276,7 @@ it.each(['active', 'ended'] as const)('uses the correct %s delete explanation fr
 
 it('offers server-clock cutoff presets inline and blocks custom cutoffs beyond 365 days', async () => {
   mockApi(); vi.spyOn(Date, 'now').mockReturnValue(0);
-  render(<ScheduledMessagesSheet tmuxSession="work" run={run} onClose={() => {}} />); await openNew();
+  render(<ScheduledMessagesSheet scope={{ tmuxSession: 'work', paneId: '%1' }} run={run} onClose={() => {}} />); await openNew();
   const depth = window.history.state.depth;
   fireEvent.change(screen.getByLabelText('scheduled.message'), { target: { value: 'preset' } });
   fireEvent.click(screen.getByRole('button', { name: /scheduled.repeat/ }));
@@ -297,7 +297,7 @@ it('offers server-clock cutoff presets inline and blocks custom cutoffs beyond 3
 
 it('shows actionable feedback after a completed preview has no executable occurrence', async () => {
   mockApi(); vi.mocked(scheduledRequest).mockImplementation(async (_session, _run, action) => action === 'snapshot' ? snapshot : { nextAt: null, timeZone: snapshot.timeZone });
-  render(<ScheduledMessagesSheet tmuxSession="work" run={run} onClose={() => {}} />); await openNew();
+  render(<ScheduledMessagesSheet scope={{ tmuxSession: 'work', paneId: '%1' }} run={run} onClose={() => {}} />); await openNew();
   fireEvent.change(screen.getByLabelText('scheduled.message'), { target: { value: 'no occurrence' } });
   await waitFor(() => expect(vi.mocked(scheduledRequest).mock.calls.some(call => call[2] === 'preview')).toBe(true));
   await waitFor(() => expect(screen.getByRole('status').textContent).toBe('scheduled.chooseFuture'));
@@ -305,7 +305,7 @@ it('shows actionable feedback after a completed preview has no executable occurr
 });
 
 it('shows an accessible add icon and fixed short dates while native pickers retain ISO values', async () => {
-  mockApi(); const { container } = render(<ScheduledMessagesSheet tmuxSession="work" run={run} onClose={() => {}} />);
+  mockApi(); const { container } = render(<ScheduledMessagesSheet scope={{ tmuxSession: 'work', paneId: '%1' }} run={run} onClose={() => {}} />);
   await screen.findByText('scheduled.empty');
   const add = screen.getByRole('button', { name: 'scheduled.add' });
   expect(add.textContent).toBe(''); expect(add.querySelector('svg')).toBeTruthy();
@@ -335,7 +335,7 @@ it('shows an accessible add icon and fixed short dates while native pickers reta
 it('marks ended rows and populated exception tabs with semantic subdued state colors', async () => {
   const task: ScheduledTask = { id: 'ended', revision: 1, text: 'completed', target, timeZone: 'UTC', state: 'ended', enabled: false, nextAt: null, endedAt: Date.parse('2027-01-02T00:05:00Z'), rule: { frequency: 'daily', slots: [{ time: '09:00' }], endsAt: '2027-01-02T00:05:00Z' } };
   mockApi({ ...snapshot, tasks: [task], exceptions: [{ id: 'ex', revision: 1, taskId: 'ended', text: 'retry', target, timeZone: 'UTC', scheduledAt: serverNow, reason: 'missed', unknown: false }] });
-  const { container } = render(<ScheduledMessagesSheet tmuxSession="work" run={run} onClose={() => {}} />);
+  const { container } = render(<ScheduledMessagesSheet scope={{ tmuxSession: 'work', paneId: '%1' }} run={run} onClose={() => {}} />);
   await screen.findByText('scheduled.empty');
   expect(screen.getByRole('tab', { name: 'scheduled.exceptions' }).classList.contains('scheduled-state-exception')).toBe(true);
   fireEvent.click(screen.getByRole('tab', { name: 'scheduled.ended' }));
@@ -357,7 +357,7 @@ it.each([
 ] as const)('shows a distinct $status badge in the second list line and detail', async ({ enabled, blocked, state, status, label }) => {
   const task: ScheduledTask = { id: 'status', revision: 1, text: 'status message', target, timeZone: 'UTC', state, enabled, blocked, nextAt: serverNow + 60000, endedAt: serverNow, rule: { frequency: 'daily', slots: [{ time: '09:00' }], endsAt: '2026-11-20T00:00:00Z' } };
   mockApi({ ...snapshot, tasks: [task] });
-  const { container } = render(<ScheduledMessagesSheet tmuxSession="work" run={run} onClose={() => {}} />);
+  const { container } = render(<ScheduledMessagesSheet scope={{ tmuxSession: 'work', paneId: '%1' }} run={run} onClose={() => {}} />);
   if (state === 'ended') fireEvent.click(screen.getByRole('tab', { name: 'scheduled.ended' }));
   const row = await screen.findByRole('listitem');
   if (state === 'ended') { expect(row.classList.contains('scheduled-state-ended')).toBe(true); expect(row.classList.contains('scheduled-state-exception')).toBe(false); }
@@ -373,7 +373,7 @@ it.each([
 
 it('labels exception records explicitly without moving the long reason into the badge', async () => {
   mockApi({ ...snapshot, exceptions: [{ id: 'status-ex', revision: 1, taskId: 'gone', text: 'exception status', target, timeZone: 'UTC', scheduledAt: serverNow, reason: 'delivery_unconfirmed', unknown: true }] });
-  const { container } = render(<ScheduledMessagesSheet tmuxSession="work" run={run} onClose={() => {}} />);
+  const { container } = render(<ScheduledMessagesSheet scope={{ tmuxSession: 'work', paneId: '%1' }} run={run} onClose={() => {}} />);
   fireEvent.click(screen.getByRole('tab', { name: 'scheduled.exceptions' }));
   const row = await screen.findByRole('listitem');
   expect(row.querySelector('.scheduled-status-exception')?.textContent).toBe('scheduled.exception');
