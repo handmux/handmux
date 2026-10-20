@@ -3815,6 +3815,8 @@ export default function App() {
               }} />
               <AgentConversationComposer
                 ref={agentComposerRef}
+                scheduledRun={currentAgentRun}
+                tmuxSession={current.session.name}
                 agentId={composerIdentity.agentId}
                 sessionId={composerIdentity.sessionId}
                 desktop={desktopInput}

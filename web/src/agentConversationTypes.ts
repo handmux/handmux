@@ -142,6 +142,8 @@ export type ConversationReason =
   | 'provider_rejected'
   | 'terminal_draft_conflict'
   | 'temporarily_unavailable'
+  | 'queue_full'
+  | 'duplicate_queued'
   | 'delivery_unconfirmed';
 
 export interface ConversationSubmissionSnapshot {

@@ -1,3 +1,4 @@
+import { ScheduledMessagesService, MemoryScheduledStore } from '../src/agent-runtime/scheduledMessages.js';
 import * as http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import express from 'express';
@@ -903,5 +904,30 @@ describe('Agent app facade routes', () => {
     } finally {
       subscribe.mockRestore();
     }
+  });
+});
+
+
+describe('scheduled message facade vertical slice', () => {
+  it('persists shared API tasks and submits after all clients disconnect', async () => {
+    let now = Date.parse('2026-10-20T00:00:00Z');
+    const h = runtime();
+    const store = new MemoryScheduledStore();
+    const delivered: string[] = [];
+    const scheduler = new ScheduledMessagesService({ store, timeZone: 'UTC', now: () => now, deliver: async (_target, text) => { delivered.push(text); return { status: 'queued' }; } });
+    Object.assign(h.value, { scheduledMessages: scheduler });
+    h.value.scheduledTarget = async () => ({ agentId: 'pi', sessionId: 'session-1', paneId: '%1', tmuxSession: 'work' });
+    const client = app(h.value);
+    const created = await request(client).post('/agents/scheduled-messages').send({ action: 'create', run: h.lease.ref, request: { text: 'offline hello', frequency: 'once', slots: [{ date: '2026-10-20', time: '00:01' }] } });
+    expect(created.status).toBe(200);
+    now += 60000;
+    await scheduler.tick(); // no SSE, browser or HTTP request drives this execution
+    expect(delivered).toEqual(['offline hello']);
+    const otherClient = await request(client).post('/agents/scheduled-messages').send({ action: 'snapshot', tmuxSession: 'work' });
+    expect(otherClient.body.tasks[0]).toMatchObject({ state: 'ended', lastResult: 'submitted' });
+    const stale = await request(client).post('/agents/scheduled-messages').send({ action: 'delete', tmuxSession: 'work', id: created.body.id, revision: created.body.revision });
+    expect(stale.status).toBe(409);
+    h.value.scheduledTarget = async () => { throw Error('target gone'); };
+    expect((await request(client).post('/agents/scheduled-messages').send({ action: 'snapshot', tmuxSession: 'work' })).status).toBe(200);
   });
 });

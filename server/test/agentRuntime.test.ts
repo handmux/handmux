@@ -85,6 +85,7 @@ afterEach(async () => {
   await Promise.all(runtimes.splice(0).map((runtime) => runtime.close()));
   for (const value of directories.splice(0)) fs.rmSync(value, { recursive: true, force: true });
   vi.restoreAllMocks();
+  vi.useRealTimers();
 });
 
 const inertConversation: AgentConversationAdapterV1 = {
@@ -116,6 +117,38 @@ function runtimeWithAllStateFiles(stateDirectory: string, logger?: AdapterLogger
 }
 
 describe('AgentRuntime composition root', () => {
+  it('does not read providers without schedules and discovers a sessionless target offline when scheduled', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    const discover = vi.fn(async (target: { agentId: string; paneId?: string; runId?: string; sessionId?: string }) => ({
+      session: { agentId: 'test', sessionId: 'original' }, sourceViewId: 'view',
+      ...('runId' in target ? { run: { ...target, sessionId: 'original' } } : {}),
+      capabilities: { history: true as const, live: 'poll' as const, sendable: true as const },
+    }));
+    const definition = adapter('test', { conversation: { apiVersion: 1 } });
+    definition.process.runtimeAttach = true;
+    const runtime = new AgentRuntime({
+      adapters: [definition], panes: new TestPanes([pane('test')]),
+      process: { inspectForeground: async () => ({ pid: 101, startedAt: 1000, tty: '/dev/ttys001' }) },
+      stateDirectory: directory(), authToken: AUTH_TOKEN,
+      adapterFactories: { test: () => ({ conversation: {
+        apiVersion: 1, discoverNative: discover as AgentConversationAdapterV1['discoverNative'],
+        readNativePage: async () => ({ sessionId: 'original', sourceViewId: 'view', sourceHistoryToken: 'history', items: [], hasMore: false }),
+        dispatchPrompt: async () => ({ outcome: 'accepted' as const }),
+      } }) },
+    });
+    runtimes.push(runtime); await runtime.start();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(discover).not.toHaveBeenCalled();
+    const date = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
+    const scheduled = runtime.scheduledMessages!.create({ agentId: 'test', sessionId: 'original', paneId: '%1', tmuxSession: 'main' }, { text: 'hello', frequency: 'once', slots: [{ date, time: '12:00' }] });
+    vi.setSystemTime(scheduled.nextAt!);
+    await vi.waitFor(() => expect(runtime.activeRuns()[0]?.sessionId).toBe('original'), { timeout: 4500 });
+    await vi.waitFor(() => expect(runtime.scheduledMessages!.snapshot('main').tasks[0]?.lastResult).toBe('submitted'), { timeout: 1500 });
+    const lease = runtime.runs.currentForPane('%1')!;
+    expect((await runtime.conversation!.queueSnapshot(lease)).items[0]?.text).toBe('hello');
+    expect(discover).toHaveBeenCalled();
+  }, 8000);
+
   it('restores restart recovery and keeps the Codex queue fenced across Runtime recreation', async () => {
     const sessionId = '12345678-1234-1234-1234-123456789abc';
     const stateDirectory = directory();

@@ -1,3 +1,5 @@
+import ScheduledMessagesSheet from './ScheduledMessagesSheet.js';
+import type { AgentRunRef } from '../agentCatalog.js';
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useRef, useState } from 'react';
 import { ArrowUpIcon, GearIcon, PlusIcon, StopIcon } from './icons.jsx';
 import { t } from '../i18n';
@@ -63,6 +65,8 @@ export interface AgentConversationComposerProps {
   onSlashCommand?: (text: string) => Promise<boolean>;
   chatTone?: string;
   keyboardInset?: number;
+  scheduledRun?: AgentRunRef | null;
+  tmuxSession?: string;
 }
 
 function AgentConversationComposer({
@@ -86,6 +90,8 @@ function AgentConversationComposer({
   onSlashCommand,
   chatTone = 'dusk',
   keyboardInset = 0,
+  scheduledRun = null,
+  tmuxSession = '',
 }: AgentConversationComposerProps, forwardedRef: ForwardedRef<AgentConversationComposerHandle>) {
   const key = `${agentId}\0${sessionId}`;
   const saveDraft = (next: string): void => saveConversationDraft(agentId, sessionId, next);
@@ -93,6 +99,7 @@ function AgentConversationComposer({
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [stopConfirm, setStopConfirm] = useState(false);
+  const [scheduledOpen, setScheduledOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const [favs, setFavs] = useState(() => loadFavs('agent'));
   const [layout, setLayout] = useState(() => loadShortcutLayout('chat'));
@@ -262,7 +269,7 @@ function AgentConversationComposer({
       definitiveFailure = !isConversationDeliveryUnknown(cause);
       if (mountedRef.current && identityRef.current === sentKey) {
         setError(cause instanceof ConversationSendError && cause.publicMessage
-          ? t(cause.publicMessage === 'terminalDraftConflict' ? 'chat.terminalDraftConflict'
+          ? t(cause.publicMessage === 'queueFull' ? 'chat.queueFull' : cause.publicMessage === 'terminalDraftConflict' ? 'chat.terminalDraftConflict'
             : cause.publicMessage === 'sendUnknown' ? 'chat.sendUnknown' : 'chat.sendFailed')
           : cause instanceof Error && cause.message ? cause.message : t('chat.sendFailed'));
       }
@@ -319,6 +326,7 @@ function AgentConversationComposer({
     <div className="chat-composer agent-conversation-composer" onPointerDown={keepComposerFocus}>
       {headerContent}
       <div className="cc-quick quick-scroll">
+        {tmuxSession && canSendConversation(conversation.descriptor?.capabilities) && <button type="button" className="quick-cmd" onClick={() => { ref.current?.blur(); setScheduledOpen(true); }}>{t('scheduled.title')}</button>}
         {quickReplies.map((item, index) => (
           <button type="button" className="quick-cmd qc-reply"
             key={`${shortcutIdentity(item)}:${index}`}
@@ -416,6 +424,7 @@ function AgentConversationComposer({
           </div>
         </OverlayPortal>
       )}
+      {scheduledOpen && <OverlayPortal><ScheduledMessagesSheet tmuxSession={tmuxSession} run={scheduledRun} onClose={() => setScheduledOpen(false)} /></OverlayPortal>}
       {editOpen && <CmdFavEditor variant="chat" presets={(shortcuts || DEFAULT_SERVER_SHORTCUTS).chat}
         onChange={refreshShortcuts} onClose={() => setEditOpen(false)} />}
     </div>

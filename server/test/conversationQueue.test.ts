@@ -94,6 +94,17 @@ async function harness(options: {
 }
 
 describe('Conversation Core public queue', () => {
+  it('atomically caps all pending messages at twenty, preserves idempotency, and deduplicates only scheduled repeats', async () => {
+    const h = await harness({ activity: { activity: 'working', activeTurn: { state: 'active' }, revision: 1, epoch: 'run-1' } as ConversationActivitySnapshot });
+    const request = (index: number) => ({ clientRequestId: `request-${index}`, text: `text-${index}`, delivery: 'prompt' as const });
+    const receipts = await Promise.all(Array.from({ length: 21 }, (_, index) => h.service.send(h.lease, request(index))));
+    expect(receipts.filter((item) => item.status === 'queued')).toHaveLength(20);
+    expect(receipts[20]).toMatchObject({ status: 'rejected', reason: 'queue_full' });
+    expect(await h.service.send(h.lease, request(0))).toMatchObject({ status: 'queued' });
+    expect(await h.service.sendScheduled(h.lease, { ...request(22), text: 'text-0' }, true)).toMatchObject({ status: 'rejected', reason: 'duplicate_queued' });
+    expect(await h.service.sendScheduled(h.lease, request(23), true)).toMatchObject({ status: 'rejected', reason: 'queue_full' });
+  });
+
   it.each([
     ['null', async () => null],
     ['throw', async () => { throw new Error('provider discovery failed'); }],

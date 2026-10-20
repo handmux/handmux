@@ -201,7 +201,7 @@ export class ConversationSendError extends Error {
   constructor(
     message: string,
     readonly deliveryUnknown: boolean,
-    readonly publicMessage?: 'sendFailed' | 'sendUnknown' | 'terminalDraftConflict',
+    readonly publicMessage?: 'sendFailed' | 'sendUnknown' | 'terminalDraftConflict' | 'queueFull',
   ) { super(message); }
 }
 
@@ -838,7 +838,7 @@ export function useAgentConversation(
             sendAttemptsRef.current.delete(operationKey);
           }
           throw new ConversationSendError('Agent rejected the message', false,
-            receipt.reason === 'terminal_draft_conflict' ? 'terminalDraftConflict' : 'sendFailed');
+            receipt.reason === 'queue_full' ? 'queueFull' : receipt.reason === 'terminal_draft_conflict' ? 'terminalDraftConflict' : 'sendFailed');
         }
         throw new ConversationSendError('Message delivery is unknown', true, 'sendUnknown');
       }

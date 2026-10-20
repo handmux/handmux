@@ -226,7 +226,7 @@ function normalizeInterrupt(raw: unknown): InterruptReceipt | null {
 
 const PUBLIC_REASONS = new Set<ConversationReason>([
   'invalid_request', 'unsupported', 'stale_run', 'conflict',
-  'provider_rejected', 'terminal_draft_conflict', 'temporarily_unavailable', 'delivery_unconfirmed',
+  'provider_rejected', 'terminal_draft_conflict', 'temporarily_unavailable', 'delivery_unconfirmed', 'queue_full', 'duplicate_queued',
 ]);
 
 const LEGACY_REASON_MAP: Readonly<Record<string, ConversationReason>> = Object.freeze({
@@ -693,7 +693,20 @@ export class ConversationService {
     }
   }
 
+  pendingScheduledSessions(): AgentSessionRef[] {
+    return this.#state.submissions.filter((item) => item.clientRequestId.startsWith('scheduled:'))
+      .map((item) => ({ agentId: item.agentId, sessionId: item.sessionId }));
+  }
+
+  async sendScheduled(run: AgentRunLease, request: ConversationSendRequest, recurring: boolean): Promise<ConversationSubmitReceipt> {
+    return this.#send(run, request, recurring);
+  }
+
   async send(run: AgentRunLease, request: ConversationSendRequest): Promise<ConversationSubmitReceipt> {
+    return this.#send(run, request, false);
+  }
+
+  async #send(run: AgentRunLease, request: ConversationSendRequest, deduplicate: boolean): Promise<ConversationSubmitReceipt> {
     try { this.#requireRun(run); } catch {
       return { status: 'rejected', reason: 'stale_run', nativeMutation: false };
     }
@@ -750,6 +763,15 @@ export class ConversationService {
           } as ConversationSubmitReceipt };
         }
         return { kind: 'receipt' as const, value: this.#submitReceipt(existing) };
+      }
+      const pending = this.#state.submissions.filter((item) => item.agentId === session.agentId
+        && item.sessionId === session.sessionId && (item.state === 'queued'
+          || item.state === 'unknown' || (item.state === 'dispatching' && item.dispatchOrigin === 'queue')));
+      if (deduplicate && pending.some((item) => item.text.trim() === request.text.trim())) {
+        return { kind: 'receipt' as const, value: { status: 'rejected', reason: 'duplicate_queued', nativeMutation: false } as ConversationSubmitReceipt };
+      }
+      if (pending.filter((item) => item.state !== 'unknown').length >= 20) {
+        return { kind: 'receipt' as const, value: { status: 'rejected', reason: 'queue_full', nativeMutation: false } as ConversationSubmitReceipt };
       }
       const before = structuredClone(this.#state);
       const now = this.#now();

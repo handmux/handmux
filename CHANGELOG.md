@@ -4,6 +4,10 @@ All notable changes to handmux. Format follows [Keep a Changelog](https://keepac
 
 ## [Unreleased]
 
+### Added
+
+- 对话模式新增服务端定时消息，支持一次性、每小时、每天、每周和循环截止时间；多端共享任务、独立异常处理及离线执行，待发队列统一上限 20 条。
+
 ### Changed
 
 - 用量重置倒计时右侧新增括号显示预计重置时间，时间前加“约”，使用本地时区并隐藏年份。

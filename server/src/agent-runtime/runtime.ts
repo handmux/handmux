@@ -1,3 +1,5 @@
+import { ScheduledMessagesService, FileScheduledStore, ScheduledError } from './scheduledMessages.js';
+import type { ScheduledTarget } from './scheduledMessages.js';
 import crypto from 'node:crypto';
 import path from 'node:path';
 import { PrivateStateStore } from '../privateStateStore.js';
@@ -355,6 +357,9 @@ export class AgentRuntime {
   readonly bridge: LocalAgentBridge;
   readonly inbox: InboxService;
   readonly conversation: ConversationService | null;
+  readonly scheduledMessages: ScheduledMessagesService | null;
+  #scheduledTimer: NodeJS.Timeout | undefined;
+  #scheduledPoll: Promise<void> | undefined;
   readonly conversationActivation: AgentConversationActivationService | null;
   readonly conversationRestart: AgentConversationRestartService | null;
   readonly conversationControls: AgentConversationControlService | null;
@@ -660,6 +665,32 @@ export class AgentRuntime {
         this.conversation = null;
       }
     }
+    this.scheduledMessages = this.conversation ? new ScheduledMessagesService({
+      store: new FileScheduledStore(path.join(stateDirectory, 'scheduled-messages.json')),
+      reconcile: async (target, id) => {
+        const lease = this.runs.currentForPane(target.paneId);
+        if (!lease || lease.ref.agentId !== target.agentId || lease.ref.sessionId !== target.sessionId) return null;
+        return this.conversation!.querySubmission(lease, id);
+      },
+      deliver: async (target, text, id, recurring) => {
+        const lease = this.runs.currentForPane(target.paneId);
+        const tracked = lease && this.#tracked.get(lease.ref.runId);
+        const panes = await this.#panes.list();
+        const pane = panes.find((item) => item.paneId === target.paneId);
+        if (!lease || !tracked || !pane || pane.sessionName !== target.tmuxSession
+          || lease.ref.agentId !== target.agentId || lease.ref.sessionId !== target.sessionId
+          || await this.#verifyTracked(tracked, pane) !== 'valid') {
+          return { status: 'rejected', reason: 'target_changed' };
+        }
+        const descriptor = await this.conversation!.discover(lease.ref);
+        if (descriptor?.session.sessionId !== target.sessionId || !descriptor.capabilities.sendable) {
+          return { status: 'rejected', reason: 'target_changed' };
+        }
+        return lifecycleWithin(this.conversation!.sendScheduled(lease, {
+          clientRequestId: id, text, delivery: 'prompt',
+        }, recurring), 20_000, 'Scheduled message delivery');
+      },
+    }) : null;
     if (this.conversation && conversationStartupBlockReason && conversations.codex) {
       this.#report('codex', {
         capability: 'conversationDispatch', availability: 'unavailable',
@@ -894,6 +925,7 @@ export class AgentRuntime {
       }
       if (this.#closed) throw new Error('AgentRuntime is closed');
       this.#started = true;
+      this.#scheduleMessagesPoll();
     } catch (error) {
       unsubscribe?.();
       if (this.#unsubscribePanes === unsubscribe) this.#unsubscribePanes = undefined;
@@ -917,6 +949,9 @@ export class AgentRuntime {
   async #close(): Promise<void> {
     if (this.#closed) return;
     this.#closed = true;
+    if (this.#scheduledTimer) clearTimeout(this.#scheduledTimer);
+    await this.#scheduledPoll?.catch(() => {});
+    await this.scheduledMessages?.close();
     this.#cancelPendingReconcile(new Error('AgentRuntime is closed'));
     await this.#startPromise?.catch(() => {});
     this.#unsubscribePanes?.();
@@ -930,6 +965,48 @@ export class AgentRuntime {
       await this.#cleanupLifecycle(lifecycle);
     }
     await this.bridge.close();
+  }
+
+  async scheduledTarget(ref: AgentRunRef): Promise<ScheduledTarget> {
+    const lease = this.runs.resolve(ref);
+    const pane = (await this.#panes.list()).find((item) => item.paneId === ref.paneId);
+    if (!lease || !pane || !lease.ref.sessionId || !this.conversation) throw new ScheduledError('Agent session is unavailable', 'conflict');
+    const tracked = this.#tracked.get(lease.ref.runId);
+    if (!tracked || await this.#verifyTracked(tracked, pane) !== 'valid') throw new ScheduledError('Agent identity changed', 'conflict');
+    const descriptor = await this.conversation.discover(lease.ref);
+    if (!descriptor?.capabilities.sendable || descriptor.session.sessionId !== lease.ref.sessionId) throw new ScheduledError('Conversation sending is unavailable', 'conflict');
+    return { agentId: ref.agentId, sessionId: lease.ref.sessionId, paneId: ref.paneId, tmuxSession: pane.sessionName };
+  }
+
+  // Runtime owns discovery, reconciliation and Queue activity even with no browser subscriptions.
+  #scheduleMessagesPoll(): void {
+    if (this.#closed || !this.scheduledMessages) return;
+    const operation = (async () => {
+      try {
+        const panes = await this.#panes.list();
+        await this.#waitForReconcile(panes);
+        const targets = this.scheduledMessages!.activeTargets();
+        const pending = this.conversation?.pendingScheduledSessions() ?? [];
+        await Promise.allSettled(this.activeRuns().filter((ref) => targets.some((target) => target.agentId === ref.agentId && target.paneId === ref.paneId)
+          || pending.some((target) => target.agentId === ref.agentId && target.sessionId === ref.sessionId)).map(async (ref) => {
+          const lease = this.runs.resolve(ref);
+          if (!lease || !this.conversation) return;
+          const descriptor = await lifecycleWithin(this.conversation.discover(lease.ref), 8_000, 'Conversation discovery');
+          if (!descriptor) return;
+          if (!lease.ref.sessionId) await this.#controllers.get(ref.agentId)?.associateSession(lease, descriptor.session.sessionId);
+          if (lease.ref.sessionId === descriptor.session.sessionId) {
+            await lifecycleWithin(this.conversation.readPage(lease.ref, { limit: 20 }), 8_000, 'Conversation reconciliation');
+            await lifecycleWithin(this.conversation.queueSnapshot(lease), 8_000, 'Conversation queue activity');
+          }
+        }));
+        await this.scheduledMessages!.tick();
+      } catch (error) { this.#logger.warn('Scheduled message reconciliation unavailable', { error: error instanceof Error ? error.message : String(error) }); }
+    })();
+    this.#scheduledPoll = operation;
+    void operation.finally(() => {
+      if (this.#scheduledPoll === operation) this.#scheduledPoll = undefined;
+      if (!this.#closed) { this.#scheduledTimer = setTimeout(() => this.#scheduleMessagesPoll(), 3_000); this.#scheduledTimer.unref?.(); }
+    });
   }
 
   async #startAdapter(adapter: AgentAdapter): Promise<void> {

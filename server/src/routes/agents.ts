@@ -1,3 +1,4 @@
+import { ScheduledError } from '../agent-runtime/scheduledMessages.js';
 import express from 'express';
 import { ConversationContractError } from '../agent-runtime/conversation.js';
 import { ConversationActivationError } from '../agent-runtime/conversationActivation.js';
@@ -27,7 +28,7 @@ type AgentFacadeRuntime = Pick<
   'capabilities' | 'health' | 'activeRuns' | 'inbox' | 'conversation' | 'interaction'
   | 'conversationActivation' | 'conversationControls' | 'sessionControl' | 'subscriptionUsage'
   | 'conversationRestart' | 'resources' | 'runs'
->;
+> & Partial<Pick<AgentRuntime, 'scheduledMessages' | 'scheduledTarget'>>;
 
 const RESOURCE_ID_RE = /^[a-zA-Z0-9_-]{16,256}$/;
 
@@ -429,6 +430,37 @@ export function agentRoutes({ runtime }: { runtime: AgentFacadeRuntime }): expre
       return res.json({ ok: true });
     } catch (error) {
       if (controlError(error, res)) return;
+      return next(error);
+    }
+  });
+
+  router.post('/agents/scheduled-messages', async (req, res, next) => {
+    try {
+      if (!runtime.scheduledMessages || !runtime.scheduledTarget) return res.status(409).json({ error: 'Scheduled messages are unavailable', code: 'unsupported' });
+      const ref = run(req.body?.run);
+      const service = runtime.scheduledMessages;
+      const body = record(req.body) ?? {};
+      const scope = text(body.tmuxSession, 256) ? body.tmuxSession : null;
+      if (body.action === 'snapshot' && scope) return res.json(service.snapshot(scope));
+      if (body.action === 'preview') return res.json(service.preview(body.request, typeof body.timeZone === 'string' ? body.timeZone : undefined));
+      const target = body.action === 'create' ? (ref ? await runtime.scheduledTarget(ref) : null) : (scope ? { tmuxSession: scope } : null);
+      if (!target) throw new ScheduledError('Choose an available Agent session', 'conflict');
+      switch (body.action) {
+        case 'snapshot': return res.json(service.snapshot(target.tmuxSession));
+        case 'preview': return res.json(service.preview(body.request));
+        case 'create': return res.json(service.create(target as Awaited<ReturnType<NonNullable<typeof runtime.scheduledTarget>>>, body.request));
+        case 'update':
+        case 'delete':
+        case 'exception': {
+          if (!text(body.id, 256) || !Number.isSafeInteger(body.revision)) throw new ScheduledError('Invalid scheduled message revision');
+          if (body.action === 'update') return res.json(service.update(target.tmuxSession, body.id, body.revision as number, body.request));
+          if (body.action === 'delete') return res.json(service.remove(target.tmuxSession, body.id, body.revision as number));
+          return res.json(service.resolveException(target.tmuxSession, body.id, body.revision as number, body.request));
+        }
+        default: throw new ScheduledError('Invalid scheduled message action');
+      }
+    } catch (error) {
+      if (error instanceof ScheduledError) return res.status(error.code === 'invalid_request' ? 400 : error.code === 'not_found' ? 404 : 409).json({ error: error.message, code: error.code });
       return next(error);
     }
   });

@@ -23,7 +23,7 @@ const ID_RE = /^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,1023}$/;
 const SEND_DELIVERIES = new Set(['prompt', 'steer', 'follow_up']);
 const CONVERSATION_REASONS = new Set<ConversationReason>([
   'invalid_request', 'unsupported', 'stale_run', 'conflict',
-  'provider_rejected', 'terminal_draft_conflict', 'temporarily_unavailable', 'delivery_unconfirmed',
+  'provider_rejected', 'terminal_draft_conflict', 'temporarily_unavailable', 'delivery_unconfirmed', 'queue_full', 'duplicate_queued',
 ]);
 const CONVERSATION_READY_TIMEOUT_MS = 20_000;
 // The Server sends an SSE comment every 20 seconds. Three missed keepalives means the fetch body is no

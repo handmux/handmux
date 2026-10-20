@@ -311,6 +311,8 @@ export type ConversationReason =
   | 'terminal_draft_conflict'
   | 'provider_rejected'
   | 'temporarily_unavailable'
+  | 'queue_full'
+  | 'duplicate_queued'
   | 'delivery_unconfirmed';
 
 export interface ConversationSendReceipt {
