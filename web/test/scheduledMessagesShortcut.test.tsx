@@ -40,13 +40,13 @@ it('starts neutral without invented counts and refreshes active and exception st
   expect(shortcut().textContent).toBe(t('scheduled.title'));
   expect(shortcut().querySelector('.scheduled-shortcut-count')).toBeNull();
   await act(async () => { resolve({ ...empty, tasks: [task, { ...task, id: 'paused', enabled: false }, { ...task, id: 'ended', state: 'ended' }] }); });
-  expect(shortcut().classList.contains('qc-reply')).toBe(true);
+  expect(shortcut().classList.contains('qc-cmd')).toBe(true);
   expect(shortcut().querySelector('.scheduled-shortcut-count')?.textContent).toBe('2');
   expect(shortcut().getAttribute('aria-label')).toContain('2');
   value = { ...empty, tasks: [task], exceptions: [{ id: 'missed', revision: 1, taskId: task.id, target: task.target, text: 'missed', timeZone: 'UTC', scheduledAt: now, reason: 'missed', unknown: false }] };
   await act(async () => { await vi.advanceTimersByTimeAsync(3000); });
   expect(shortcut().classList.contains('scheduled-shortcut-alert')).toBe(true);
-  expect(shortcut().classList.contains('qc-reply')).toBe(false);
+  expect(shortcut().classList.contains('qc-cmd')).toBe(false);
   expect(shortcut().querySelector('.scheduled-shortcut-count')?.textContent).toBe('1');
   expect(shortcut().getAttribute('aria-label')).toContain(t('scheduled.shortcutExceptions'));
   value = { ...value, tasks: [] };
