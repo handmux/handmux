@@ -1,4 +1,4 @@
-import { render, screen, fireEvent, waitFor, cleanup, within } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, cleanup, within, act } from '@testing-library/react';
 import { afterEach, it, expect, vi } from 'vitest';
 import fs from 'node:fs';
 import ScheduledMessagesSheet from '../src/components/ScheduledMessagesSheet.js';
@@ -197,4 +197,35 @@ it('shows full content only in detail and hardware Back dismisses an action menu
   window.history.back(); await waitFor(() => expect(screen.queryByRole('dialog', { name: 'scheduled.actions' })).toBeNull());
   expect(closed).not.toHaveBeenCalled();
   window.history.back(); await waitFor(() => expect(closed).toHaveBeenCalledOnce());
+});
+it.each(['create', 'refresh'] as const)('does not navigate again when a pending %s finishes after closing the drawer', async (stage) => {
+  let release!: () => void;
+  const pending = new Promise<void>((resolve) => { release = resolve; });
+  let snapshots = 0;
+  let waiting = false;
+  vi.mocked(scheduledRequest).mockImplementation(async (_session, _run, action) => {
+    if (action === 'snapshot') {
+      snapshots++;
+      if (stage === 'refresh' && snapshots > 1) { waiting = true; await pending; }
+      return snapshot;
+    }
+    if (action === 'preview') return { nextAt: serverNow + 3600000, timeZone: snapshot.timeZone };
+    if (action === 'create' && stage === 'create') { waiting = true; await pending; }
+    return {};
+  });
+  const unwind = vi.spyOn(window.history, 'go');
+  const closed = vi.fn();
+  const view = render(<ScheduledMessagesSheet tmuxSession="work" run={run} onClose={() => { closed(); view.unmount(); }} />);
+  await openNew();
+  fireEvent.change(screen.getByLabelText('scheduled.message'), { target: { value: 'save before closing' } });
+  await waitFor(() => expect((screen.getByRole('button', { name: 'scheduled.save' }) as HTMLButtonElement).disabled).toBe(false));
+  fireEvent.click(screen.getByRole('button', { name: 'scheduled.save' }));
+  await waitFor(() => expect(waiting).toBe(true));
+  fireEvent.click(screen.getByRole('button', { name: 'common.close' }));
+  fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'scheduled.confirm' }));
+  await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
+  expect(closed).toHaveBeenCalledOnce();
+  const ownedUnwinds = unwind.mock.calls.length;
+  await act(async () => { release(); await pending; });
+  expect(unwind).toHaveBeenCalledTimes(ownedUnwinds);
 });

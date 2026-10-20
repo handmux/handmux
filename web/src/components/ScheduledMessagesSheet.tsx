@@ -109,7 +109,7 @@ export default function ScheduledMessagesSheet({ tmuxSession, run, onClose }: {
     if (previous === 'editor') { setEditor(null); setDirty(false); setError(''); }
   };
   const returnToList = () => {
-    const depth = pagesRef.current.length - 1;
+    const depth = Math.min(pagesRef.current.length - 1, historyDepth.current);
     historyDepth.current -= depth;
     queueUnwind(depth);
     replacePages(['list']);
@@ -192,8 +192,14 @@ export default function ScheduledMessagesSheet({ tmuxSession, run, onClose }: {
   const mutate = async (action: string, fields: Record<string, unknown>, after?: () => void) => {
     if (saving) return;
     setSaving(true); setError('');
-    try { await request(action, fields); await reload(); after?.(); }
+    try {
+      await request(action, fields);
+      if (!mounted.current) return;
+      await reload();
+      if (mounted.current) after?.();
+    }
     catch (cause) {
+      if (!mounted.current) return;
       setError(cause instanceof Error ? cause.message : t('scheduled.loadFailed'));
       void reload().catch(() => {});
     } finally { if (mounted.current) setSaving(false); }
