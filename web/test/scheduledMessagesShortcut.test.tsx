@@ -20,12 +20,32 @@ function conversation(sendable = true): AgentConversationController {
     send: vi.fn(async () => {}), interrupt: vi.fn(async () => {}), loadOlder: vi.fn(async () => {}), downloadResource: vi.fn(async () => {}), retryOutgoing: vi.fn(async () => false),
   } as AgentConversationController;
 }
-function Composer({ scope = 'work', sendable = true }: { scope?: string; sendable?: boolean }) {
+function Composer({ scope = 'work', sendable = true, controller }: { scope?: string; sendable?: boolean; controller?: AgentConversationController }) {
   return <AgentConversationComposer agentId="new-agent" sessionId="session" tmuxSession={scope} scheduledRun={run}
-    chatTone="light" keyboardInset={250} busy={false} conversation={conversation(sendable)} />;
+    chatTone="light" keyboardInset={250} busy={false} conversation={controller ?? conversation(sendable)} />;
 }
 const shortcut = () => document.querySelector<HTMLButtonElement>('.scheduled-shortcut')!;
 afterEach(async () => { cleanup(); vi.useRealTimers(); await new Promise((resolve) => setTimeout(resolve, 20)); vi.clearAllMocks(); });
+it('keeps the shortcut visible from conversation loading through capability and count hydration', async () => {
+  let resolve!: (value: ScheduledSnapshot) => void;
+  vi.mocked(scheduledRequest).mockImplementation(async () => await new Promise<ScheduledSnapshot>((done) => { resolve = done; }));
+  const view = render(<Composer controller={{ ...conversation(), status: 'loading', descriptor: null }} />);
+  const button = screen.getByRole<HTMLButtonElement>('button', { name: t('scheduled.title') });
+  expect(button.textContent).toBe(t('scheduled.title'));
+  expect(button.disabled).toBe(true);
+  fireEvent.click(button);
+  expect(screen.queryByRole('dialog', { name: t('scheduled.title') })).toBeNull();
+
+  view.rerender(<Composer />);
+  expect(shortcut()).toBe(button);
+  expect(button.disabled).toBe(false);
+  expect(button.textContent).toBe(t('scheduled.title'));
+  await act(async () => { resolve({ ...empty, tasks: [task] }); });
+  expect(shortcut()).toBe(button);
+  expect(button.querySelector('.scheduled-shortcut-count')?.textContent).toBe('1');
+  fireEvent.click(button);
+  expect(await screen.findByRole('dialog', { name: t('scheduled.title') })).toBeTruthy();
+});
 it('starts neutral without invented counts and refreshes active and exception states while closed, including paused tasks', async () => {
   vi.useFakeTimers();
   let resolve!: (value: ScheduledSnapshot) => void;

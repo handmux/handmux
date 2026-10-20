@@ -335,7 +335,7 @@ function AgentConversationComposer({
     <div className="chat-composer agent-conversation-composer" onPointerDown={keepComposerFocus}>
       {headerContent}
       <div className="cc-quick quick-scroll">
-        {tmuxSession && canSend && <button type="button"
+        {tmuxSession && (conversation.descriptor === null || canSend) && <button type="button" disabled={!canSend}
           className={`quick-cmd scheduled-shortcut ${scheduledExceptions ? 'scheduled-shortcut-alert' : scheduledCount > 0 ? 'qc-cmd' : 'quick-cmd-plain'}`}
           aria-label={scheduledLabel} onClick={() => { ref.current?.blur(); setScheduledOpen(tmuxSession); }}>
           {t('scheduled.title')}{scheduledCount > 0 && <span className="scheduled-shortcut-count" aria-hidden="true">{scheduledCount}</span>}
