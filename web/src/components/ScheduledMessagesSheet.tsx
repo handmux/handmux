@@ -12,7 +12,8 @@ import ActionSheet from './ActionSheet.js';
 import { t } from '../i18n';
 import './scheduledMessages.css';
 
-type Page = 'list' | 'editor' | 'detail' | 'repeat' | 'time' | 'cutoff';
+type Page = 'list' | 'editor' | 'detail';
+type Dropdown = 'repeat' | 'time' | 'cutoff';
 type Selection = { kind: 'task'; item: ScheduledTask } | { kind: 'exception'; item: ScheduledException };
 interface Editor {
   task?: ScheduledTask;
@@ -24,8 +25,8 @@ interface Editor {
 }
 interface Confirmation { message: string; action: () => void; label?: string }
 
-function NavRow({ label, value, onClick }: { label: string; value: string; onClick: () => void }) {
-  return <button type="button" className="settings-page-row" onClick={onClick}>
+function NavRow({ label, value, onClick, expanded }: { label: string; value: string; onClick: () => void; expanded: boolean }) {
+  return <button type="button" className="settings-page-row scheduled-dropdown-toggle" aria-expanded={expanded} onClick={onClick}>
     <span className="settings-page-row-label">{label}</span>
     <span className="settings-page-row-trailing">
       <span className="settings-page-row-value">{value}</span>
@@ -49,6 +50,8 @@ export default function ScheduledMessagesSheet({ tmuxSession, run, onClose, cont
   const snapshot = source.snapshot;
   const [tab, setTab] = useState<'active' | 'ended' | 'exceptions'>('active');
   const [pages, setPages] = useState<Page[]>(['list']);
+  const [dropdown, setDropdown] = useState<Dropdown | null>(null);
+  const toggleDropdown = (value: Dropdown) => setDropdown(current => current === value ? null : value);
   const [editor, setEditor] = useState<Editor | null>(null);
   const [detail, setDetail] = useState<Selection | null>(null);
   const [menu, setMenu] = useState<Selection | null>(null);
@@ -139,10 +142,14 @@ export default function ScheduledMessagesSheet({ tmuxSession, run, onClose, cont
     frequency: editor.frequency, slots: editor.slots,
     ...(editor.frequency === 'once' ? {} : { endsAtLocal: editor.endsAtLocal }),
   } : null, [editor]);
-  const complete = !!rule && scheduledRuleComplete(rule);
+  const cutoffMin = snapshot && zone ? scheduledLocalInput(snapshot.serverNow, zone) : '';
+  const cutoffMax = snapshot && zone ? scheduledLocalInput(snapshot.serverNow + 365 * 86400000, zone) : '';
+  const cutoffOutOfRange = !!editor && editor.frequency !== 'once' && !!editor.endsAtLocal &&
+    (editor.endsAtLocal < cutoffMin || editor.endsAtLocal > cutoffMax);
+  const complete = !!rule && scheduledRuleComplete(rule) && !cutoffOutOfRange;
   useEffect(() => {
     setPreview(null); setPreviewError('');
-    if (!rule || !scheduledRuleComplete(rule)) return;
+    if (!rule || !complete) return;
     let valid = true;
     const timer = setTimeout(() => {
       void request<{ nextAt: number | null; timeZone: string }>('preview', {
@@ -151,7 +158,7 @@ export default function ScheduledMessagesSheet({ tmuxSession, run, onClose, cont
         .catch((cause) => { if (valid) setPreviewError(cause instanceof Error ? cause.message : t('scheduled.chooseFuture')); });
     }, 200);
     return () => { valid = false; clearTimeout(timer); };
-  }, [rule, zone]);
+  }, [rule, zone, complete]);
 
   const dateTime = (at: number | undefined | null, timeZone = zone ?? snapshot?.timeZone) => at == null ? '—'
     : new Intl.DateTimeFormat(undefined, { timeZone, month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }).format(at);
@@ -172,9 +179,10 @@ export default function ScheduledMessagesSheet({ tmuxSession, run, onClose, cont
       slots: task ? structuredClone(task.rule.slots) : scheduledOnceDefault(snapshot.serverNow, timeZone),
       endsAtLocal: task?.rule.endsAt ? scheduledLocalInput(Date.parse(task.rule.endsAt), timeZone) : '',
     });
-    setDirty(false); setError(''); enter('editor');
+    setDropdown(null); setDirty(false); setError(''); enter('editor');
   };
   const chooseFrequency = (frequency: ScheduledRule['frequency']) => {
+    setDropdown(null);
     if (!editor || !snapshot || editor.frequency === frequency) return;
     const defaultSlot = scheduledOnceDefault(snapshot.serverNow, zone!)[0]!;
     const weekday = new Date(`${defaultSlot.date}T00:00:00Z`).getUTCDay() || 7;
@@ -235,8 +243,7 @@ export default function ScheduledMessagesSheet({ tmuxSession, run, onClose, cont
     ? t('scheduled.hourlyMinute', { minute: slot.minute })
     : `${editor.frequency === 'weekly' ? `${t(`scheduled.day.${slot.weekday}`)} ` : slot.date ? `${slot.date} ` : ''}${slot.time ?? ''}`).join('、') ?? '';
   const title = page === 'list' ? t('scheduled.title') : page === 'detail' ? t('scheduled.detail')
-    : page === 'editor' ? t(editor?.task ? 'scheduled.edit' : editor?.exception ? 'scheduled.reschedule' : 'scheduled.add')
-      : t(`scheduled.${page === 'time' ? 'sendTime' : page}`);
+    : t(editor?.task ? 'scheduled.edit' : editor?.exception ? 'scheduled.reschedule' : 'scheduled.add');
   const tasks = snapshot?.tasks.filter((task) => task.state === tab) ?? [];
   const items: Selection[] = tab === 'exceptions'
     ? (snapshot?.exceptions ?? []).map((item) => ({ kind: 'exception', item }))
@@ -284,12 +291,27 @@ export default function ScheduledMessagesSheet({ tmuxSession, run, onClose, cont
       </div>
     </section>
     <section className="settings-page-group"><div className="settings-page-list">
-      {!editor.exception && <NavRow label={t('scheduled.repeat')} value={t(`scheduled.${editor.frequency}`)} onClick={() => enter('repeat')} />}
-      <NavRow label={t('scheduled.sendTime')} value={timeSummary} onClick={() => enter('time')} />
-      {editor.frequency !== 'once' && <NavRow label={t('scheduled.cutoff')}
-        value={editor.endsAtLocal.replace('T', ' ') || t('scheduled.choose')} onClick={() => enter('cutoff')} />}
+      {!editor.exception && <>
+        <NavRow label={t('scheduled.repeat')} value={t(`scheduled.${editor.frequency}`)} expanded={dropdown === 'repeat'} onClick={() => toggleDropdown('repeat')} />
+        {dropdown === 'repeat' && <div className="scheduled-dropdown settings-choice-list">{(['once', 'hourly', 'daily', 'weekly'] as const).map(frequency =>
+          <button type="button" key={frequency} className="settings-page-row settings-choice-row" aria-pressed={editor.frequency === frequency} onClick={() => chooseFrequency(frequency)}>
+            <span className="settings-page-row-label">{t(`scheduled.${frequency}`)}</span>
+            <span className="settings-choice-check" aria-hidden="true">{editor.frequency === frequency && <CheckIcon />}</span>
+          </button>)}</div>}
+      </>}
+      <NavRow label={t('scheduled.sendTime')} value={timeSummary} expanded={dropdown === 'time'} onClick={() => toggleDropdown('time')} />
+      {dropdown === 'time' && renderTimePicker()}
+      {editor.frequency !== 'once' && <>
+        <NavRow label={t('scheduled.cutoff')} value={editor.endsAtLocal.replace('T', ' ') || t('scheduled.choose')} expanded={dropdown === 'cutoff'} onClick={() => toggleDropdown('cutoff')} />
+        {dropdown === 'cutoff' && <div className="scheduled-dropdown">
+          <div className="scheduled-cutoff-presets">{[7, 30, 90].map(days => <button type="button" key={days} className="fontbtn" onClick={() => change({ endsAtLocal: scheduledLocalInput(snapshot!.serverNow + days * 86400000, zone!) })}>{t('scheduled.cutoffDays', { days })}</button>)}</div>
+          <label className="settings-page-row scheduled-cutoff-row"><span className="settings-page-row-label">{t('scheduled.customCutoff')}</span>
+            <input className="scheduled-picker-input" type="datetime-local" aria-label={t('scheduled.cutoff')} value={editor.endsAtLocal} min={cutoffMin} max={cutoffMax}
+              onChange={event => change({ endsAtLocal: event.target.value })} /></label>
+        </div>}
+      </>}
     </div>
-      <div className="settings-page-footer" role="status">{preview?.nextAt
+      <div className="settings-page-footer" role="status">{cutoffOutOfRange ? t('scheduled.cutoffLimit') : preview?.nextAt
         ? `${t('scheduled.next')}: ${dateTime(preview.nextAt)}`
         : !complete ? t(editor.frequency !== 'once' && !editor.endsAtLocal ? 'scheduled.chooseCutoff' : 'scheduled.chooseFuture')
           : previewError || t('scheduled.previewing')}</div>
@@ -297,7 +319,7 @@ export default function ScheduledMessagesSheet({ tmuxSession, run, onClose, cont
 
   </div>;
 
-  const renderTimePicker = () => editor && <div className="settings-page-content scheduled-page-content">
+  const renderTimePicker = () => editor && <div className="scheduled-dropdown">
     {editor.frequency === 'weekly' && <section className="settings-page-group"><div className="settings-page-list">
       {[1, 2, 3, 4, 5, 6, 7].map((weekday) => {
         const selected = editor.slots.some((slot) => slot.weekday === weekday);
@@ -369,19 +391,6 @@ export default function ScheduledMessagesSheet({ tmuxSession, run, onClose, cont
       {page === 'list' ? renderList() : <div className="scheduled-page">
         {page === 'editor' && renderEditor()}
         {page === 'detail' && renderDetail()}
-        {page === 'time' && renderTimePicker()}
-        {page === 'repeat' && editor && <div className="settings-page-content scheduled-page-content">
-          <div className="settings-page-list settings-choice-list">{(['once', 'hourly', 'daily', 'weekly'] as const).map((frequency) =>
-            <button type="button" key={frequency} className="settings-page-row settings-choice-row" aria-pressed={editor.frequency === frequency} onClick={() => chooseFrequency(frequency)}>
-              <span className="settings-page-row-label">{t(`scheduled.${frequency}`)}</span>
-              <span className="settings-choice-check" aria-hidden="true">{editor.frequency === frequency && <CheckIcon />}</span>
-            </button>)}</div>
-        </div>}
-        {page === 'cutoff' && editor && <div className="settings-page-content scheduled-page-content"><div className="settings-page-list">
-          <label className="settings-page-row scheduled-cutoff-row"><span className="settings-page-row-label">{t('scheduled.cutoff')}</span>
-            <input className="scheduled-picker-input" type="datetime-local" aria-label={t('scheduled.cutoff')} value={editor.endsAtLocal}
-              onChange={(event) => change({ endsAtLocal: event.target.value })} /></label>
-        </div></div>}
       </div>}
       {page !== 'list' && snapshot && (page === 'detail' ? detail?.item.timeZone : zone) !== snapshot.timeZone &&
         <p className="settings-page-footer scheduled-zone-hint">{t('scheduled.taskTimeZone', { zone: page === 'detail' ? detail?.item.timeZone : zone })}</p>}

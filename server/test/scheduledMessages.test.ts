@@ -154,3 +154,31 @@ describe('persistent server owned scheduling', () => {
     expect(h.service.snapshot('work').tasks[0]!.id).not.toBe(task.id);
   });
 });
+
+describe('recurring cutoff write boundary', () => {
+  it('accepts the UI preset request in the task zone and rejects an out-of-range local cutoff', () => {
+    const now = Date.parse('2026-10-20T15:30:00Z'); let clockReads = 0;
+    const service = new ScheduledMessagesService({ store: new MemoryScheduledStore(), timeZone: 'Asia/Shanghai', now: () => { clockReads++; return now; }, deliver: async () => ({ status: 'queued' }) });
+    const request = { text: 'preset', frequency: 'daily', slots: [{ time: '09:00' }], endsAtLocal: '2027-01-18T23:30' };
+    clockReads = 0; expect(service.preview(request).nextAt).toBe(Date.parse('2026-10-21T01:00:00Z')); expect(clockReads).toBe(1);
+    clockReads = 0; const task = service.create(target, request); expect(clockReads).toBe(1);
+    expect(task.rule).toMatchObject({ endsAt: new Date(now + 90 * 86400000).toISOString() });
+    clockReads = 0; service.update('work', task.id, task.revision, { ...request, endsAtLocal: '2027-10-20T23:30' }); expect(clockReads).toBe(1);
+    expect(() => service.preview({ ...request, endsAtLocal: '2027-10-20T23:31' })).toThrow(/365/);
+  });
+  it('accepts 365 days, rejects later preview/create/update, and leaves stored rules and pause/resume usable', () => {
+    const h = harness(); const now = Date.parse('2026-10-20T00:00:00Z');
+    const rule = { frequency: 'daily', slots: [{ time: '09:00' }], endsAt: new Date(now + 365 * 86400000).toISOString() };
+    expect(h.service.preview(rule).nextAt).toBeGreaterThan(now);
+    const task = h.service.create(target, { ...rule, text: 'boundary' });
+    const tooLate = { ...rule, endsAt: new Date(now + 365 * 86400000 + 1).toISOString() };
+    expect(() => h.service.preview(tooLate)).toThrow(/365/);
+    expect(() => h.service.create(target, { ...tooLate, text: 'late' })).toThrow(/365/);
+    expect(() => h.service.update('work', task.id, task.revision, tooLate)).toThrow(/365/);
+    const stored = h.store.value as { tasks: Array<{ rule: unknown }> }; stored.tasks[0]!.rule = tooLate;
+    const restored = new ScheduledMessagesService({ store: h.store, now: () => now, timeZone: 'UTC', deliver: async () => ({ status: 'queued' }) });
+    const paused = restored.update('work', task.id, task.revision, { enabled: false });
+    expect(restored.update('work', task.id, paused.revision, { enabled: true }).rule).toEqual(tooLate);
+    expect(() => restored.create(target, { text: 'distant once', frequency: 'once', slots: [{ date: '2030-01-01', time: '09:00' }] })).not.toThrow();
+  });
+});

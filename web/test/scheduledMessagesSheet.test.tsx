@@ -44,12 +44,11 @@ it('waits for a server snapshot before enabling add', async () => {
   resolve(snapshot);
   await waitFor(() => expect((screen.getByRole('button', { name: 'scheduled.add' }) as HTMLButtonElement).disabled).toBe(false));
 });
-it('keeps selectors in one drawer, preserves the message on Back, and resets switching back to once from server time', async () => {
+it('expands selectors inline, preserves the message, and resets switching back to once from server time', async () => {
   mockApi(); render(<ScheduledMessagesSheet tmuxSession="work" run={run} onClose={() => {}} />); await openNew();
   fireEvent.change(screen.getByLabelText('scheduled.message'), { target: { value: 'keep me' } });
   fireEvent.click(screen.getByRole('button', { name: /scheduled.repeat/ }));
   fireEvent.click(screen.getByRole('button', { name: 'scheduled.daily' }));
-  fireEvent.click(screen.getByRole('button', { name: 'scheduled.back' }));
   expect((screen.getByLabelText('scheduled.message') as HTMLTextAreaElement).value).toBe('keep me');
   expect(screen.getByRole('button', { name: /scheduled.cutoff/ })).toBeTruthy();
   expect(screen.queryByLabelText('scheduled.cutoff')).toBeNull();
@@ -57,12 +56,10 @@ it('keeps selectors in one drawer, preserves the message on Back, and resets swi
   expect((screen.getByRole('button', { name: 'scheduled.save' }) as HTMLButtonElement).disabled).toBe(true);
   fireEvent.click(screen.getByRole('button', { name: /scheduled.repeat/ }));
   fireEvent.click(screen.getByRole('button', { name: 'scheduled.once' }));
-  fireEvent.click(screen.getByRole('button', { name: 'scheduled.back' }));
   fireEvent.click(screen.getByRole('button', { name: /scheduled.sendTime/ }));
   expect((screen.getByLabelText('scheduled.date') as HTMLInputElement).value).toBe('2026-10-21');
   expect((screen.getByLabelText('scheduled.time') as HTMLInputElement).value).toBe('00:30');
   expect(screen.getAllByRole('dialog')).toHaveLength(1);
-  window.history.back(); await screen.findByLabelText('scheduled.message');
   expect((screen.getByLabelText('scheduled.message') as HTMLTextAreaElement).value).toBe('keep me');
 });
 it('uses two-line compact list rows in all tabs with explicit trailing actions and hides full text and raw session IDs', async () => {
@@ -83,7 +80,7 @@ it('uses two-line compact list rows in all tabs with explicit trailing actions a
   const css = fs.readFileSync('src/components/scheduledMessages.css', 'utf8');
   expect(css).toMatch(/\.scheduled-list-line\s*\{[^}]*white-space:\s*nowrap[^}]*text-overflow:\s*ellipsis/s);
 });
-it('keeps every API-created slot when editing through the time drilldown', async () => {
+it('keeps every API-created slot when reopening inline time and repeat dropdowns', async () => {
   const task: ScheduledTask = { id: 'task', revision: 2, text: 'multi', target, timeZone: 'UTC', state: 'active', enabled: true, nextAt: serverNow + 60000, rule: { frequency: 'daily', slots: [{ time: '09:00' }, { time: '18:00' }], endsAt: '2026-11-01T00:00:00Z' } };
   mockApi({ ...snapshot, tasks: [task] });
   render(<ScheduledMessagesSheet tmuxSession="work" run={null} onClose={() => {}} />);
@@ -92,7 +89,15 @@ it('keeps every API-created slot when editing through the time drilldown', async
   fireEvent.click(screen.getByRole('button', { name: /scheduled.sendTime/ }));
   expect(screen.getAllByLabelText('scheduled.time')).toHaveLength(2);
   expect((screen.getAllByLabelText('scheduled.time')[1] as HTMLInputElement).value).toBe('18:00');
-  fireEvent.click(screen.getByRole('button', { name: 'scheduled.back' }));
+  fireEvent.click(screen.getByRole('button', { name: /scheduled.repeat/ }));
+  expect(screen.queryByLabelText('scheduled.time')).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: 'scheduled.daily' }));
+  fireEvent.click(screen.getByRole('button', { name: /scheduled.sendTime/ }));
+  expect(screen.getAllByLabelText('scheduled.time')).toHaveLength(2);
+  fireEvent.click(screen.getByRole('button', { name: /scheduled.cutoff/ }));
+  fireEvent.click(screen.getByRole('button', { name: 'scheduled.cutoffDays 7' }));
+  expect((screen.getByLabelText('scheduled.cutoff') as HTMLInputElement).value).toBe('2026-10-27T15:30');
+
   await waitFor(() => expect((screen.getByRole('button', { name: 'scheduled.save' }) as HTMLButtonElement).disabled).toBe(false));
   fireEvent.click(screen.getByRole('button', { name: 'scheduled.save' }));
   await waitFor(() => expect(vi.mocked(scheduledRequest).mock.calls.find((call) => call[2] === 'update')?.[3]).toMatchObject({ request: { slots: [{ time: '09:00' }, { time: '18:00' }] } }));
@@ -112,11 +117,10 @@ it('reschedules an exception with server plus one-hour defaults and uses ActionS
   fireEvent.click(screen.getByRole('button', { name: 'scheduled.discardException' }));
   await waitFor(() => expect(vi.mocked(scheduledRequest).mock.calls.filter((call) => call[2] === 'exception').at(-1)?.[3]).toEqual({ id: 'exception', revision: 3, request: { action: 'discard' } }));
 });
-it('hardware Back returns time picker to editor, then list, then closes', async () => {
+it('inline dropdowns add no history: hardware Back returns editor to list, then closes', async () => {
   mockApi(); const closed = vi.fn();
   render(<ScheduledMessagesSheet tmuxSession="work" run={run} onClose={closed} />); await openNew();
   fireEvent.click(screen.getByRole('button', { name: /scheduled.sendTime/ }));
-  window.history.back(); await screen.findByLabelText('scheduled.message');
   window.history.back(); await waitFor(() => expect(screen.queryByLabelText('scheduled.message')).toBeNull());
   expect(closed).not.toHaveBeenCalled();
   window.history.back(); await waitFor(() => expect(closed).toHaveBeenCalledOnce());
@@ -153,17 +157,14 @@ it('chooses weekly times independently and requires an explicit cutoff through g
   fireEvent.change(screen.getByLabelText('scheduled.message'), { target: { value: 'weekly' } });
   fireEvent.click(screen.getByRole('button', { name: /scheduled.repeat/ }));
   fireEvent.click(screen.getByRole('button', { name: 'scheduled.weekly' }));
-  fireEvent.click(screen.getByRole('button', { name: 'scheduled.back' }));
   fireEvent.click(screen.getByRole('button', { name: /scheduled.sendTime/ }));
   fireEvent.click(screen.getByRole('button', { name: 'scheduled.day.1' }));
   fireEvent.change(screen.getByLabelText('scheduled.day.1 scheduled.time'), { target: { value: '09:00' } });
   fireEvent.change(screen.getByLabelText('scheduled.day.3 scheduled.time'), { target: { value: '18:30' } });
-  fireEvent.click(screen.getByRole('button', { name: 'scheduled.back' }));
   expect((screen.getByRole('button', { name: 'scheduled.save' }) as HTMLButtonElement).disabled).toBe(true);
   fireEvent.click(screen.getByRole('button', { name: /scheduled.cutoff/ }));
   expect((screen.getByLabelText('scheduled.cutoff') as HTMLInputElement).value).toBe('');
   fireEvent.change(screen.getByLabelText('scheduled.cutoff'), { target: { value: '2026-11-01T23:00' } });
-  fireEvent.click(screen.getByRole('button', { name: 'scheduled.back' }));
   await waitFor(() => expect((screen.getByRole('button', { name: 'scheduled.save' }) as HTMLButtonElement).disabled).toBe(false));
   fireEvent.click(screen.getByRole('button', { name: 'scheduled.save' }));
   await waitFor(() => expect(vi.mocked(scheduledRequest).mock.calls.find((call) => call[2] === 'create')?.[3]).toMatchObject({ request: { frequency: 'weekly', slots: [{ weekday: 3, time: '18:30' }, { weekday: 1, time: '09:00' }], endsAtLocal: '2026-11-01T23:00' } }));
@@ -255,10 +256,8 @@ it('shows server time once beneath the title on every tab and subpage without ta
   fireEvent.click(screen.getByRole('button', { name: 'scheduled.add' })); assertSubtitle();
   fireEvent.click(screen.getByRole('button', { name: /scheduled.sendTime/ })); assertSubtitle();
   expect(screen.getByRole('button', { name: 'scheduled.back' }).querySelector('svg')).toBeTruthy();
-  fireEvent.click(screen.getByRole('button', { name: 'scheduled.back' }));
   fireEvent.click(screen.getByRole('button', { name: /scheduled.repeat/ })); assertSubtitle();
   fireEvent.click(screen.getByRole('button', { name: 'scheduled.daily' }));
-  fireEvent.click(screen.getByRole('button', { name: 'scheduled.back' }));
   fireEvent.click(screen.getByRole('button', { name: /scheduled.cutoff/ })); assertSubtitle();
 });
 it.each(['active', 'ended'] as const)('uses the correct %s delete explanation from the detail action sheet', async (state) => {
@@ -273,4 +272,25 @@ it.each(['active', 'ended'] as const)('uses the correct %s delete explanation fr
   fireEvent.click(screen.getByRole('button', { name: 'scheduled.more' }));
   fireEvent.click(screen.getByRole('button', { name: 'scheduled.delete' }));
   expect(screen.getByRole('button', { name: state === 'ended' ? 'scheduled.clearRecordConfirm' : 'scheduled.deleteConfirm' })).toBeTruthy();
+});
+
+it('offers server-clock cutoff presets inline and blocks custom cutoffs beyond 365 days', async () => {
+  mockApi(); vi.spyOn(Date, 'now').mockReturnValue(0);
+  render(<ScheduledMessagesSheet tmuxSession="work" run={run} onClose={() => {}} />); await openNew();
+  const depth = window.history.state.depth;
+  fireEvent.change(screen.getByLabelText('scheduled.message'), { target: { value: 'preset' } });
+  fireEvent.click(screen.getByRole('button', { name: /scheduled.repeat/ }));
+  fireEvent.click(screen.getByRole('button', { name: 'scheduled.daily' }));
+  expect(screen.queryByRole('button', { name: 'scheduled.weekly' })).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: /scheduled.cutoff/ }));
+  expect(window.history.state.depth).toBe(depth);
+  const cutoff = screen.getByLabelText('scheduled.cutoff') as HTMLInputElement;
+  expect(cutoff.value).toBe(''); expect(cutoff.min).toBe('2026-10-20T23:30'); expect(cutoff.max).toBe('2027-10-20T23:30');
+  for (const [days, local] of [[7, '2026-10-27T23:30'], [30, '2026-11-19T23:30'], [90, '2027-01-18T23:30']] as const) {
+    fireEvent.click(screen.getByRole('button', { name: `scheduled.cutoffDays ${days}` })); expect(cutoff.value).toBe(local);
+  }
+  await waitFor(() => expect(vi.mocked(scheduledRequest).mock.calls.filter(call => call[2] === 'preview').at(-1)?.[3]).toMatchObject({ request: { endsAtLocal: '2027-01-18T23:30' }, timeZone: 'Asia/Shanghai' }));
+  fireEvent.change(cutoff, { target: { value: '2027-10-21T23:30' } });
+  expect(screen.getByRole('status').textContent).toBe('scheduled.cutoffLimit');
+  expect((screen.getByRole('button', { name: 'scheduled.save' }) as HTMLButtonElement).disabled).toBe(true);
 });

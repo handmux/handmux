@@ -68,3 +68,9 @@
 
 .quick-cmd.scheduled-shortcut.quick-cmd-plain { background: #373b42; color: #eceef1; border-color: #6d747d; }
 .app[data-chat-tone="light"] .quick-cmd.scheduled-shortcut.quick-cmd-plain { background: #dadde1; color: #34383f; border-color: #8d949e; }
+
+.scheduled-dropdown-toggle[aria-expanded="true"] .settings-page-chevron svg { transform: rotate(90deg); }
+.scheduled-dropdown { background: var(--ct-chip); border-top: .5px solid var(--ct-line); }
+.scheduled-dropdown .settings-page-group { margin: 0; }
+.scheduled-cutoff-presets { display: flex; gap: 8px; padding: 12px 16px; flex-wrap: wrap; }
+.scheduled-cutoff-presets .fontbtn { min-height: 44px; flex: 1; white-space: nowrap; }
