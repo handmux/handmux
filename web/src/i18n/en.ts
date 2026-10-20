@@ -5,6 +5,7 @@ export default {
 "scheduled.editAction": "Edit",
 "scheduled.shortcutActive": "{count} active",
 "scheduled.shortcutExceptions": "Unresolved exceptions",
+"scheduled.clearRecordConfirm": "Delete this record? Sent messages will not be affected.",
 "scheduled.repeat": "Repeat",
 "scheduled.sendTime": "Send time",
 "scheduled.choose": "Choose",

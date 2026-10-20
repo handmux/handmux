@@ -142,6 +142,8 @@ it('ends with a direct destructive confirmation rather than opening a second del
   fireEvent.click(screen.getByRole('tab', { name: 'scheduled.ended' }));
   fireEvent.click(await screen.findByRole('button', { name: 'scheduled.delete' }));
   const dialog = screen.getByRole('alertdialog');
+  expect(dialog.textContent).toContain('scheduled.clearRecordConfirm');
+  expect(dialog.textContent).not.toContain('scheduled.deleteConfirm');
   expect(screen.queryByRole('dialog', { name: 'scheduled.actions' })).toBeNull();
   fireEvent.click(within(dialog).getByRole('button', { name: 'scheduled.delete' }));
   await waitFor(() => expect(vi.mocked(scheduledRequest).mock.calls.find((call) => call[2] === 'delete')?.[3]).toEqual({ id: 'ended', revision: 7 }));
@@ -180,11 +182,11 @@ it('retains edits and shows a revision conflict after another client changes a t
   fireEvent.click(screen.getByRole('button', { name: 'scheduled.save' }));
   expect((await screen.findByRole('alert')).textContent).toContain('Changed on another client');
   expect((screen.getByLabelText('scheduled.message') as HTMLTextAreaElement).value).toBe('my unsaved message');
-  const footer = document.querySelector('.scheduled-page-content > .scheduled-footer')!;
-  expect(footer.textContent).toContain('work / scheduled.pane 9');
-  expect(footer.textContent).toContain('Asia/Shanghai');
-  expect(footer.textContent).toContain('scheduled.taskTimeZone UTC');
-  expect(footer.innerHTML).toContain('<br>');
+  const subtitle = document.querySelector('.scheduled-subtitle')!;
+  expect(subtitle.textContent).toContain('Asia/Shanghai');
+  expect(document.querySelector('.scheduled-zone-hint')?.textContent).toContain('scheduled.taskTimeZone UTC');
+  expect(document.body.textContent).not.toContain('scheduled.pane');
+  expect(document.body.textContent).not.toContain('hidden-session-uuid');
 });
 it('shows full content only in detail and hardware Back dismisses an action menu before the drawer', async () => {
   const text = 'First line\n' + 'Full content '.repeat(30);
@@ -232,4 +234,43 @@ it.each(['create', 'refresh'] as const)('does not navigate again when a pending 
   const ownedUnwinds = unwind.mock.calls.length;
   await act(async () => { release(); await pending; });
   expect(unwind).toHaveBeenCalledTimes(ownedUnwinds);
+});
+
+it('shows server time once beneath the title on every tab and subpage without target or pane metadata', async () => {
+  mockApi(); const { container } = render(<ScheduledMessagesSheet tmuxSession="work" run={run} onClose={() => {}} />);
+  await screen.findByText('scheduled.empty');
+  const assertSubtitle = () => {
+    const header = container.querySelector('.scheduled-head')!;
+    const main = header.querySelector('.scheduled-head-main')!;
+    const subtitle = header.querySelector('.scheduled-subtitle')!;
+    expect(main).toBeTruthy(); expect(main.nextElementSibling).toBe(subtitle);
+    expect(subtitle.textContent).toContain('scheduled.serverTime');
+    expect(subtitle.textContent).toContain('Asia/Shanghai');
+    expect(container.textContent?.match(/scheduled.serverTime/g)).toHaveLength(1);
+    expect(container.textContent).not.toContain('scheduled.pane');
+    expect(container.textContent).not.toContain('hidden-session-uuid');
+    expect(container.querySelector('.scheduled-footer')).toBeNull();
+  };
+  for (const tab of ['active', 'ended', 'exceptions']) { fireEvent.click(screen.getByRole('tab', { name: `scheduled.${tab}` })); assertSubtitle(); }
+  fireEvent.click(screen.getByRole('button', { name: 'scheduled.add' })); assertSubtitle();
+  fireEvent.click(screen.getByRole('button', { name: /scheduled.sendTime/ })); assertSubtitle();
+  expect(screen.getByRole('button', { name: 'scheduled.back' }).querySelector('svg')).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: 'scheduled.back' }));
+  fireEvent.click(screen.getByRole('button', { name: /scheduled.repeat/ })); assertSubtitle();
+  fireEvent.click(screen.getByRole('button', { name: 'scheduled.daily' }));
+  fireEvent.click(screen.getByRole('button', { name: 'scheduled.back' }));
+  fireEvent.click(screen.getByRole('button', { name: /scheduled.cutoff/ })); assertSubtitle();
+});
+it.each(['active', 'ended'] as const)('uses the correct %s delete explanation from the detail action sheet', async (state) => {
+  const item: ScheduledTask = { id: 'task', revision: 2, text: 'message', target, timeZone: 'UTC', state, enabled: true, nextAt: serverNow + 60000, endedAt: serverNow, rule: { frequency: 'once', slots: [{ date: '2026-10-21', time: '09:00' }] } };
+  mockApi({ ...snapshot, tasks: [item] });
+  const { container } = render(<ScheduledMessagesSheet tmuxSession="work" run={run} onClose={() => {}} />);
+  fireEvent.click(screen.getByRole('tab', { name: `scheduled.${state}` })); await screen.findByRole('listitem');
+  fireEvent.click(container.querySelector('.scheduled-list-main')!);
+  expect(container.textContent).not.toContain('scheduled.pane');
+  expect(container.textContent).not.toContain('hidden-session-uuid');
+  expect(container.querySelector('.scheduled-subtitle')).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: 'scheduled.more' }));
+  fireEvent.click(screen.getByRole('button', { name: 'scheduled.delete' }));
+  expect(screen.getByRole('button', { name: state === 'ended' ? 'scheduled.clearRecordConfirm' : 'scheduled.deleteConfirm' })).toBeTruthy();
 });

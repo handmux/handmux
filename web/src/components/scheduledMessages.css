@@ -1,10 +1,17 @@
 /* Uses ConversationTool ToolSheet geometry and tone tokens; only schedule-specific layout lives here. */
 .tool-sheet.scheduled-sheet { bottom: var(--overlay-keyboard-inset, 0px); min-height: min(42vh, calc(100dvh - var(--overlay-keyboard-inset, 0px) - 12px)); max-height: min(62vh, calc(100dvh - var(--overlay-keyboard-inset, 0px) - 12px)); }
-.scheduled-sheet .tool-sheet-head { min-height: 44px; gap: 8px; padding-right: 60px; }
+.scheduled-sheet .tool-sheet-head { display: block; padding: 0 10px 10px 14px; }
+.scheduled-head-main { display: flex; align-items: center; min-height: 44px; gap: 8px; }
+.scheduled-sheet .tool-sheet-title { line-height: 20px; }
+.scheduled-subtitle { margin: 2px 0 0; color: var(--ct-muted); font-size: 12px; line-height: 17px; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.scheduled-sheet svg { display: block; flex: none; }
 .scheduled-sheet .tool-sheet-body { gap: 0; padding: 0; }
-.scheduled-sheet .tool-sheet-x { min-height: 44px; min-width: 44px; top: 8px; right: 8px; color: var(--ct-muted); }
-.scheduled-head-action, .scheduled-back { flex: none; min-height: 44px; min-width: 44px; padding: 0 8px; border: 0; background: transparent; color: var(--ct-accent); font: 15px -apple-system, system-ui, sans-serif; }
-.scheduled-back { font-size: 32px; padding: 0; }
+.scheduled-sheet .scheduled-close { position: static; flex: none; display: inline-flex; align-items: center; justify-content: center; min-height: 44px; min-width: 44px; padding: 0; color: var(--ct-muted); }
+.scheduled-head-action, .scheduled-back { flex: none; min-height: 44px; min-width: 44px; padding: 0 8px; border: 0; background: transparent; color: var(--ct-accent); font: 15px -apple-system, system-ui, sans-serif; display: inline-flex; align-items: center; justify-content: center; }
+.scheduled-back { padding: 0; }
+.scheduled-back svg { width: 20px; height: 20px; transform: rotate(180deg); }
+.scheduled-sheet .settings-page-chevron { display: inline-flex; align-items: center; justify-content: center; margin-top: 0; }
+.scheduled-sheet .settings-page-chevron svg { width: 18px; height: 18px; }
 .scheduled-head-action { font-weight: 600; }
 .scheduled-head-action:disabled { opacity: .4; }
 .scheduled-head-action svg, .scheduled-more svg { display: block; width: 20px; height: 20px; }
@@ -22,7 +29,7 @@
 .scheduled-message-card textarea { display: block; box-sizing: border-box; width: 100%; min-height: 96px; resize: vertical; padding: 14px 16px; border: 0; background: transparent; color: inherit; font: 16px/1.5 -apple-system, system-ui, sans-serif; }
 .scheduled-message-card textarea::placeholder { color: var(--ct-muted); }
 .scheduled-detail-text { padding: 14px 16px; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 16px; line-height: 1.5; }
-.scheduled-footer { color: var(--ct-muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.scheduled-zone-hint { flex: none; margin: 0; padding: 0 16px 16px; color: var(--ct-muted); font-size: 12px; }
 .scheduled-list-body { display: flex; flex-direction: column; padding-bottom: env(safe-area-inset-bottom, 0px); }
 .scheduled-list { list-style: none; margin: 0; padding: 0 0 10px; }
 .scheduled-list-row { display: flex; align-items: center; min-width: 0; padding-right: 4px; border-bottom: .5px solid var(--ct-line); }
@@ -35,7 +42,6 @@
 .scheduled-row-action:disabled { color: var(--ct-muted); }
 .scheduled-more { display: inline-flex; align-items: center; justify-content: center; color: var(--ct-muted); }
 .scheduled-empty { margin: 0; padding: 48px 20px; text-align: center; color: var(--ct-muted); font-size: 14px; }
-.scheduled-list-body > .scheduled-footer { margin: auto 0 0; padding: 16px; }
 .scheduled-picker-input { min-height: 44px; min-width: 0; max-width: 65%; padding: 6px 0; border: 0; background: transparent; color: var(--ct-accent); font: 16px -apple-system, system-ui, sans-serif;  text-align: right; }
 .scheduled-picker-input[type="number"] { width: 80px; }
 .scheduled-weekday-row { gap: 8px; flex-wrap: wrap; padding-block: 4px; }
@@ -55,7 +61,10 @@
 .scheduled-overlay-layer .settings-close { min-height: 44px; min-width: 44px; color: var(--ct-muted); background: var(--ct-chip-2); }
 .scheduled-overlay-layer .sheet-action.armed { background: var(--ct-err-bg); color: var(--ct-err-ink); border-color: var(--ct-err-ink); }
 .scheduled-confirm-layer .settings-confirm-actions button.danger { color: var(--ct-err-ink); }
-.scheduled-confirm-layer { z-index: var(--z-overlay-confirm); }
+.settings-confirm-backdrop.scheduled-confirm-layer { z-index: var(--z-overlay-confirm); }
 .scheduled-shortcut-alert { --rgb: 255,105,97; }
 .scheduled-shortcut-count { margin-left: 5px; font-variant-numeric: tabular-nums; }
 .chat-tone-surface[data-chat-tone="light"] .scheduled-picker-input { color-scheme: light; }
+
+.quick-cmd.scheduled-shortcut.quick-cmd-plain { background: #373b42; color: #eceef1; border-color: #6d747d; }
+.app[data-chat-tone="light"] .quick-cmd.scheduled-shortcut.quick-cmd-plain { background: #dadde1; color: #34383f; border-color: #8d949e; }

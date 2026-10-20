@@ -7,7 +7,7 @@ import { scheduledLocalInput, scheduledOnceDefault, scheduledRuleComplete, sched
 import { useScheduledMessagesSnapshot } from '../hooks/useScheduledMessagesSnapshot.js';
 import type { ScheduledMessagesSnapshotController } from '../hooks/useScheduledMessagesSnapshot.js';
 import { useHistoryLayer, unwindHistory } from '../hooks/useBackButton.js';
-import { ClockIcon, XIcon, CheckIcon, MoreHorizontalIcon } from './icons.jsx';
+import { ClockIcon, XIcon, CheckIcon, MoreHorizontalIcon, ChevronRightIcon } from './icons.jsx';
 import ActionSheet from './ActionSheet.js';
 import { t } from '../i18n';
 import './scheduledMessages.css';
@@ -29,7 +29,7 @@ function NavRow({ label, value, onClick }: { label: string; value: string; onCli
     <span className="settings-page-row-label">{label}</span>
     <span className="settings-page-row-trailing">
       <span className="settings-page-row-value">{value}</span>
-      <span className="settings-page-chevron" aria-hidden="true">›</span>
+      <span className="settings-page-chevron" aria-hidden="true"><ChevronRightIcon /></span>
     </span>
   </button>;
 }
@@ -66,7 +66,6 @@ export default function ScheduledMessagesSheet({ tmuxSession, run, onClose, cont
   runRef.current = run;
   pagesRef.current = pages;
   const page = pages.at(-1)!;
-  const editorTarget = editor?.task?.target ?? editor?.exception?.target;
   const zone = editor?.task?.timeZone ?? editor?.exception?.timeZone ?? snapshot?.timeZone;
 
   const request = <T,>(action: string, fields: Record<string, unknown> = {}) =>
@@ -211,7 +210,7 @@ export default function ScheduledMessagesSheet({ tmuxSession, run, onClose, cont
   };
 
   const confirmDelete = (task: ScheduledTask) => showConfirm({
-    message: t('scheduled.deleteConfirm'), label: t('scheduled.delete'),
+    message: t(task.state === 'ended' ? 'scheduled.clearRecordConfirm' : 'scheduled.deleteConfirm'), label: t('scheduled.delete'),
     action: () => { void mutate('delete', { id: task.id, revision: task.revision }); },
   });
 
@@ -223,7 +222,7 @@ export default function ScheduledMessagesSheet({ tmuxSession, run, onClose, cont
     }] : []),
     {
       key: 'delete', label: t('scheduled.delete'), danger: true, confirm: true,
-      confirmLabel: t('scheduled.deleteConfirm'), disabled: saving,
+      confirmLabel: t(menu.item.state === 'ended' ? 'scheduled.clearRecordConfirm' : 'scheduled.deleteConfirm'), disabled: saving,
       onClick: () => { const task = menu.item; closeMenu(); void mutate('delete', { id: task.id, revision: task.revision }, page === 'detail' ? returnToList : undefined); },
     },
   ] : menu ? [{
@@ -273,7 +272,6 @@ export default function ScheduledMessagesSheet({ tmuxSession, run, onClose, cont
             disabled={saving} onClick={() => openMenu(selection)}><MoreHorizontalIcon /></button>}
         </li>;
       })}</ul> : <p className="scheduled-empty">{t(snapshot ? 'scheduled.empty' : 'scheduled.loading')}</p>}
-      {snapshot && <p className="settings-page-footer scheduled-footer">{t('scheduled.serverTime')}: {dateTime(snapshot.serverNow, snapshot.timeZone)} · {snapshot.timeZone}</p>}
     </div>
   </>;
 
@@ -296,9 +294,7 @@ export default function ScheduledMessagesSheet({ tmuxSession, run, onClose, cont
         : !complete ? t(editor.frequency !== 'once' && !editor.endsAtLocal ? 'scheduled.chooseCutoff' : 'scheduled.chooseFuture')
           : previewError || t('scheduled.previewing')}</div>
     </section>
-    <p className="settings-page-footer scheduled-footer">{t('scheduled.target')}: {editorTarget?.tmuxSession ?? tmuxSession} / {t('scheduled.pane', { pane: (editorTarget?.paneId ?? run?.paneId ?? '—').replace(/^%/, '') })}<br />
-      {t('scheduled.serverTime')}: {snapshot && dateTime(snapshot.serverNow, snapshot.timeZone)} · {snapshot?.timeZone}
-      {zone !== snapshot?.timeZone && <><br />{t('scheduled.taskTimeZone', { zone })}</>}</p>
+
   </div>;
 
   const renderTimePicker = () => editor && <div className="settings-page-content scheduled-page-content">
@@ -332,7 +328,6 @@ export default function ScheduledMessagesSheet({ tmuxSession, run, onClose, cont
         </label>
       </div>
     </section>)}
-    <p className="settings-page-footer scheduled-footer">{zone}</p>
   </div>;
 
   const renderDetail = () => detail && <div className="settings-page-content scheduled-page-content">
@@ -351,22 +346,23 @@ export default function ScheduledMessagesSheet({ tmuxSession, run, onClose, cont
         <ValueRow label={t('scheduled.lastResult')}>{resultText(detail.item.reason)}</ValueRow>
       </>}
     </div>{detail.kind === 'exception' && detail.item.unknown && <p className="settings-page-footer">{t('scheduled.unknownHelp')}</p>}</section>
-    <p className="settings-page-footer scheduled-footer">{t('scheduled.target')}: {detail.item.target.tmuxSession} · {t('scheduled.pane', { pane: detail.item.target.paneId.replace(/^%/, '') })}<br />{detail.item.timeZone}</p>
   </div>;
 
   return <>
     <div className="tool-sheet-backdrop" onClick={close} />
     <section className="tool-sheet scheduled-sheet" role="dialog" aria-modal="true" aria-label={t('scheduled.title')}>
       <div className="tool-sheet-grip" />
-      <button type="button" className="cmd-close tool-sheet-x" aria-label={t('common.close')} onClick={close}><XIcon /></button>
       <header className="tool-sheet-head scheduled-head">
-        {page === 'list' && <span className="tool-sheet-ic"><ClockIcon /></span>}
-        {page !== 'list' && <button type="button" className="scheduled-back" aria-label={t('scheduled.back')} onClick={back}>‹</button>}
-        <span className="tool-sheet-title">{title}</span>
-        {page === 'list' && <button type="button" className="scheduled-head-action" disabled={!run || !snapshot} onClick={() => edit()}>{t('scheduled.add')}</button>}
-        {page === 'editor' && <button type="button" className="scheduled-head-action" disabled={saving || !preview?.nextAt || !complete || !editor?.text.trim()} onClick={save}>{t('scheduled.save')}</button>}
-        {page === 'detail' && detail && <button type="button" className="scheduled-head-action" onClick={() => openMenu(detail)} aria-label={t('scheduled.more')}><MoreHorizontalIcon /></button>}
-
+        <div className="scheduled-head-main">
+          {page === 'list' && <span className="tool-sheet-ic"><ClockIcon /></span>}
+          {page !== 'list' && <button type="button" className="scheduled-back" aria-label={t('scheduled.back')} onClick={back}><ChevronRightIcon /></button>}
+          <span className="tool-sheet-title">{title}</span>
+          {page === 'list' && <button type="button" className="scheduled-head-action" disabled={!run || !snapshot} onClick={() => edit()}>{t('scheduled.add')}</button>}
+          {page === 'editor' && <button type="button" className="scheduled-head-action" disabled={saving || !preview?.nextAt || !complete || !editor?.text.trim()} onClick={save}>{t('scheduled.save')}</button>}
+          {page === 'detail' && detail && <button type="button" className="scheduled-head-action" onClick={() => openMenu(detail)} aria-label={t('scheduled.more')}><MoreHorizontalIcon /></button>}
+          <button type="button" className="cmd-close scheduled-close" aria-label={t('common.close')} onClick={close}><XIcon /></button>
+        </div>
+        {snapshot && <p className="scheduled-subtitle">{t('scheduled.serverTime')}: {dateTime(snapshot.serverNow, snapshot.timeZone)} · {snapshot.timeZone}</p>}
       </header>
       {(error || source.error) && <div className="scheduled-error" role="alert">{error || source.error}</div>}
       <div className="tool-sheet-body scheduled-body">
@@ -385,8 +381,10 @@ export default function ScheduledMessagesSheet({ tmuxSession, run, onClose, cont
           <label className="settings-page-row scheduled-cutoff-row"><span className="settings-page-row-label">{t('scheduled.cutoff')}</span>
             <input className="scheduled-picker-input" type="datetime-local" aria-label={t('scheduled.cutoff')} value={editor.endsAtLocal}
               onChange={(event) => change({ endsAtLocal: event.target.value })} /></label>
-        </div><p className="settings-page-footer scheduled-footer">{zone}</p></div>}
+        </div></div>}
       </div>}
+      {page !== 'list' && snapshot && (page === 'detail' ? detail?.item.timeZone : zone) !== snapshot.timeZone &&
+        <p className="settings-page-footer scheduled-zone-hint">{t('scheduled.taskTimeZone', { zone: page === 'detail' ? detail?.item.timeZone : zone })}</p>}
       </div>
     </section>
     {menu && <div className="scheduled-overlay-layer"><ActionSheet open title={t('scheduled.actions')} actions={menuActions} onClose={closeMenu} /></div>}

@@ -4,6 +4,7 @@ export default {
 "scheduled.editAction": "编辑",
 "scheduled.shortcutActive": "{count} 个进行中",
 "scheduled.shortcutExceptions": "有待处理异常",
+"scheduled.clearRecordConfirm": "删除这条记录？不会影响已发送的消息。",
 "scheduled.repeat": "重复",
 "scheduled.sendTime": "发送时间",
 "scheduled.choose": "请选择",
