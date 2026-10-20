@@ -134,6 +134,14 @@ describe('persistent server owned scheduling', () => {
     expect(task.state).toBe('active'); expect(task.nextAt).toBe(Date.parse('2026-10-20T00:05:00Z'));
     expect(() => service.update('work', task.id, task.revision, { enabled: true })).not.toThrow();
   });
+  it('does not catch up a previous recurrence exactly at its cutoff', async () => {
+    let now = Date.parse('2026-10-20T00:00:00Z'); let calls = 0;
+    const service = new ScheduledMessagesService({ store: new MemoryScheduledStore(), timeZone: 'UTC', now: () => now, deliver: async () => { calls++; return { status: 'queued' }; } });
+    service.create(target, { text: 'hello', frequency: 'hourly', slots: [{ minute: 55 }], endsAt: '2026-10-20T01:00:00Z' });
+    now = Date.parse('2026-10-20T01:00:00Z'); await service.tick();
+    expect(calls).toBe(0); expect(service.snapshot('work').tasks[0]!.state).toBe('ended');
+    expect(service.snapshot('work').exceptions[0]!.reason).toBe('missed');
+  });
   it('rejects stale edits and atomically handles an exception only once', async () => {
     const h = harness();
     const task = h.service.create(target, { text: 'hello', frequency: 'once', slots: [{ date: '2026-10-20', time: '00:01' }] });

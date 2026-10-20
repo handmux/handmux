@@ -229,7 +229,7 @@ export class ScheduledMessagesService {
       // A long outage may have no eligible recent slot; the range still records all old misses.
       const latest = due.at(-1) ?? range?.through ?? task.nextAt!;
       const cutoff = Date.parse(task.rule.endsAt);
-      const cutoffPassed = now > cutoff;
+      const cutoffPassed = now >= cutoff;
       this.#transaction(() => {
         if (range) {
           this.#exception(task, range.from, 'missed');
