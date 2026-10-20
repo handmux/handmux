@@ -90,7 +90,7 @@ export function validateRule(raw: unknown, zone: string): ScheduledRule {
   if (frequency !== 'once' && (typeof value.endsAt !== 'string' || !/Z$|[+-]\d\d:\d\d$/.test(value.endsAt) || !Number.isFinite(Date.parse(value.endsAt)))) invalid();
   return { frequency, slots, ...(frequency === 'once' ? {} : { endsAt: new Date(value.endsAt as string).toISOString() }) } as ScheduledRule;
 }
-/** Calendar based local slots; DST gaps are skipped, repeated wall times fire once (earliest instant). */
+/** Calendar based local slots; DST gaps move forward, repeated wall times fire once (earliest instant). */
 export function nextOccurrence(rule: ScheduledRule, zone: string, after: number): number | null {
   const cutoff = rule.frequency === 'once' ? Infinity : Date.parse(rule.endsAt);
   if (after >= cutoff) return null;
@@ -130,7 +130,7 @@ export class ScheduledMessagesService {
     for (const task of this.#state.tasks) {
       validateRule(task.rule, task.timeZone);
       if (!task.id || !task.target?.sessionId || !task.target.tmuxSession || typeof task.text !== 'string' || !Number.isFinite(task.cursor) || !Number.isSafeInteger(task.revision)) throw new Error('Corrupt scheduled message task');
-      if (task.claim) { this.#exception(task, task.claim.at, 'delivery_unconfirmed', true, task.claim.text); task.blocked = true; task.blockedAt = task.claim.at; task.lastAt = task.claim.at; task.lastResult = 'delivery_unconfirmed'; if (task.rule.frequency === 'once') task.state = 'exception'; task.enabled = false; delete task.claim; }
+      if (task.claim) { this.#exception(task, task.claim.at, 'delivery_unconfirmed', true, task.claim.text); task.blocked = true; task.blockedAt = task.claim.at; task.lastAt = task.claim.at; task.lastResult = 'delivery_unconfirmed'; if (task.rule.frequency === 'once' && task.nextAt === null) task.state = 'exception'; task.enabled = false; delete task.claim; }
     }
     if (loaded !== undefined) this.#store.save(this.#state);
   }
@@ -154,7 +154,7 @@ export class ScheduledMessagesService {
       if (task.state !== 'active' || task.claim) throw new ScheduledError('This occurrence is being submitted or has ended', 'conflict');
       if (value.frequency !== undefined) { task.rule = validateRule(value, task.timeZone); task.cursor = this.#now(); task.nextAt = nextOccurrence(task.rule, task.timeZone, task.cursor); if (task.nextAt === null) throw new ScheduledError('Choose a future scheduled time and cutoff'); }
       if (value.text !== undefined) { if (typeof value.text !== 'string' || !value.text.trim() || value.text.length > 256 * 1024) throw new ScheduledError('Message text is required'); task.text = value.text.trim(); }
-      if (value.enabled !== undefined) { if (typeof value.enabled !== 'boolean') invalid(); if (task.blocked && value.enabled) throw new ScheduledError('Resolve uncertain delivery in Queue before creating another schedule', 'conflict'); if (value.enabled && !task.enabled) { task.cursor = this.#now(); task.nextAt = nextOccurrence(task.rule, task.timeZone, task.cursor); if (task.nextAt === null) { task.state = 'ended'; task.endedAt = this.#now(); } } task.enabled = value.enabled; }
+      if (value.enabled !== undefined) { if (typeof value.enabled !== 'boolean') invalid(); if (task.blocked && value.enabled) throw new ScheduledError('Resolve uncertain delivery in Queue before creating another schedule', 'conflict'); if (value.enabled && !task.enabled) { task.cursor = this.#now(); task.nextAt = nextOccurrence(task.rule, task.timeZone, task.cursor); if (task.nextAt === null && (task.rule.frequency === 'once' || this.#now() >= Date.parse(task.rule.endsAt))) { task.state = 'ended'; task.endedAt = this.#now(); } } task.enabled = value.enabled; }
       task.revision++; return task;
     });
   }
@@ -167,7 +167,7 @@ export class ScheduledMessagesService {
       if (value.action === 'reschedule') { if (item.unknown) throw new ScheduledError('Delivery is uncertain. Check conversation and Queue; automatic resend is disabled.', 'conflict'); const rule = object(value.rule); if (rule.frequency !== 'once') invalid(); this.#newTask(item.target, { ...rule, text: item.text }, item.timeZone); }
       else if (value.action !== 'discard') invalid();
       this.#state.exceptions = this.#state.exceptions.filter((candidate) => candidate !== item);
-      this.#state.tasks = this.#state.tasks.filter((task) => task.id !== item.taskId || task.rule.frequency !== 'once' || task.state !== 'exception' || task.blocked === true);
+      this.#state.tasks = this.#state.tasks.filter((task) => task.id !== item.taskId || task.rule.frequency !== 'once' || task.state !== 'exception' || task.nextAt !== null || task.blocked === true);
       return { ok: true };
     });
   }
@@ -180,22 +180,41 @@ export class ScheduledMessagesService {
   async #tick() {
     for (const id of this.#state.tasks.map((task) => task.id)) {
       if (this.#closed) return;
-      let task = this.#state.tasks.find((item) => item.id === id)!;
+      const task = this.#state.tasks.find((item) => item.id === id);
+      if (!task) continue;
       if (task.blocked && task.blockedAt !== undefined && this.#reconcile) {
         let receipt: ScheduledDelivery | null = null;
         try { receipt = await this.#reconcile(task.target, `scheduled:${task.id}:${task.blockedAt}`); } catch { /* uncertainty remains visible */ }
         if (receipt && ['accepted', 'queued'].includes(receipt.status)) {
           this.#transaction(() => {
             this.#state.exceptions = this.#state.exceptions.filter((item) => item.id !== `${task.id}:${task.blockedAt}`);
-            delete task.blocked; delete task.blockedAt; task.lastResult = 'submitted'; if (task.rule.frequency === 'once') task.state = 'ended'; task.revision++;
+            delete task.blocked; delete task.blockedAt; task.lastResult = 'submitted'; if (task.rule.frequency === 'once') task.state = task.nextAt !== null ? 'active' : this.#state.exceptions.some((item) => item.taskId === task.id) ? 'exception' : 'ended'; task.revision++;
           });
         }
       }
-      if (task.state === 'active' && !task.enabled && task.rule.frequency !== 'once' && this.#now() >= Date.parse(task.rule.endsAt)) {
+      if (task.state === 'active' && task.rule.frequency !== 'once' && this.#now() >= Date.parse(task.rule.endsAt) && (!task.enabled || task.nextAt === null)) {
         this.#transaction(() => { task.state = 'ended'; task.nextAt = null; task.endedAt = this.#now(); task.revision++; });
       }
       if (task.state !== 'active' || !task.enabled || task.claim || task.nextAt === null) continue;
       const now = this.#now(); if (task.nextAt > now) continue;
+      if (task.rule.frequency === 'once') {
+        // Each absolute slot is independent: a recovery window may contain several intentional sends.
+        while (this.#state.tasks.includes(task) && task.nextAt !== null && task.nextAt <= now && task.enabled && !task.blocked) {
+          const scheduledAt = task.nextAt;
+          this.#transaction(() => {
+            task.cursor = scheduledAt; task.lastAt = scheduledAt;
+            task.nextAt = nextOccurrence(task.rule, task.timeZone, scheduledAt); task.revision++;
+            if (now - scheduledAt > 600000) { this.#exception(task, scheduledAt, 'missed'); task.lastResult = 'missed'; }
+            else task.claim = { at: scheduledAt, text: task.text, target: structuredClone(task.target) };
+          });
+          if (task.claim) await this.#submitClaim(task);
+          this.#transaction(() => {
+            if (task.nextAt !== null) task.state = 'active';
+            else { task.state = this.#state.exceptions.some((item) => item.taskId === task.id) ? 'exception' : 'ended'; task.endedAt = this.#now(); }
+          });
+        }
+        continue;
+      }
       const due: number[] = []; let at: number | null = task.nextAt;
       let range: { from: number; through: number } | undefined;
       while (at !== null && at <= now) {
@@ -209,7 +228,8 @@ export class ScheduledMessagesService {
       }
       // A long outage may have no eligible recent slot; the range still records all old misses.
       const latest = due.at(-1) ?? range?.through ?? task.nextAt!;
-      const cutoffPassed = task.rule.frequency !== 'once' && now > Date.parse(task.rule.endsAt);
+      const cutoff = Date.parse(task.rule.endsAt);
+      const cutoffPassed = now > cutoff;
       this.#transaction(() => {
         if (range) {
           this.#exception(task, range.from, 'missed');
@@ -219,10 +239,15 @@ export class ScheduledMessagesService {
         task.cursor = latest; task.nextAt = at; task.lastAt = latest; task.revision++;
         if (!due.length || now - latest > 600000 || cutoffPassed) { if (due.length) this.#exception(task, latest, 'missed'); task.lastResult = 'missed'; }
         else { task.claim = { at: latest, text: task.text, target: structuredClone(task.target) }; }
-        if (at === null) { task.state = task.rule.frequency === 'once' && !task.claim ? 'exception' : 'ended'; task.endedAt = now; }
+        if (now >= cutoff) { task.state = 'ended'; task.endedAt = now; }
       });
+      await this.#submitClaim(task);
+
+    }
+  }
+  async #submitClaim(task: ScheduledTask): Promise<void> {
       const claim = structuredClone(task.claim as ScheduledTask['claim']);
-      if (!claim) continue;
+      if (!claim) return;
       let receipt: ScheduledDelivery;
       try {
         let timer: ReturnType<typeof setTimeout> | undefined;
@@ -232,16 +257,16 @@ export class ScheduledMessagesService {
       catch { receipt = { status: 'unknown', reason: 'delivery_unconfirmed' }; }
       this.#transaction(() => {
         // A deletion only cancels future occurrences; the already claimed effect remains owned by Core.
-        const current = this.#state.tasks.find((item) => item.id === id);
+        const current = this.#state.tasks.find((item) => item.id === task.id);
         task = current ?? task;
         const successful = receipt.status === 'accepted' || receipt.status === 'queued';
         const skipped = task.rule.frequency !== 'once' && ['duplicate_queued', 'queue_full'].includes(receipt.reason ?? '');
         task.lastResult = successful ? 'submitted' : skipped ? receipt.reason! : receipt.reason ?? receipt.status;
-        if (!successful && !skipped) { this.#exception(task, claim.at, receipt.reason ?? receipt.status, receipt.status === 'unknown', claim.text); if (task.rule.frequency === 'once') task.state = 'exception'; }
+        if (!successful && !skipped) { this.#exception(task, claim.at, receipt.reason ?? receipt.status, receipt.status === 'unknown', claim.text); if (task.rule.frequency === 'once' && task.nextAt === null) task.state = 'exception'; }
         if (receipt.status === 'unknown') { task.blocked = true; task.blockedAt = claim.at; task.enabled = false; }
         if (receipt.reason === 'target_changed') task.enabled = false;
         delete task.claim; task.revision++;
       });
-    }
   }
+
 }

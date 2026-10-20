@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { useState } from 'react';
+import { t } from '../src/i18n';
 import AgentConversationComposer from '../src/components/AgentConversationComposer.js';
 import type { AgentConversationController } from '../src/hooks/useAgentConversation.js';
 
@@ -61,6 +62,16 @@ function pointerDown(target: Element): Event {
 }
 
 describe('AgentConversationComposer mobile focus ownership', () => {
+  it('puts schedules first for any sendable Agent and hides them without send capability', () => {
+    const supported = conversation();
+    const { container, rerender } = render(<AgentConversationComposer agentId="new-agent" sessionId="session"
+      tmuxSession="work" scheduledRun={{ agentId: 'new-agent', paneId: '%1', runId: 'run', sessionId: 'session' }} busy={false} conversation={supported} />);
+    expect(container.querySelector('.cc-quick button')?.textContent).toBe(t('scheduled.title'));
+    const unsupported = { ...supported, descriptor: { ...supported.descriptor!, capabilities: { history: true as const, live: 'poll' as const } } };
+    rerender(<AgentConversationComposer agentId="new-agent" sessionId="session" tmuxSession="work" busy={false} conversation={unsupported} />);
+    expect(screen.queryByRole('button', { name: t('scheduled.title') })).toBeNull();
+  });
+
   it('releases stale textarea focus when the iOS keyboard is already closed', () => {
     installVisualViewport();
     const { container } = render(<AgentConversationComposer agentId="pi"

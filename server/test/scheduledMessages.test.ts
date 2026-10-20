@@ -94,6 +94,46 @@ describe('persistent server owned scheduling', () => {
     now += 60000; await service.tick();
     expect(service.snapshot('work').tasks[0]!.state).toBe('exception'); expect(service.snapshot('work').exceptions[0]!.reason).toBe(reason);
   });
+  it('keeps remaining one-off slots after a failed slot and exception processing', async () => {
+    let now = Date.parse('2026-10-20T00:00:00Z'); let calls = 0;
+    const service = new ScheduledMessagesService({ store: new MemoryScheduledStore(), timeZone: 'UTC', now: () => now,
+      deliver: async () => ++calls === 1 ? { status: 'rejected', reason: 'queue_full' } : { status: 'queued' } });
+    const created = service.create(target, { text: 'hello', frequency: 'once', slots: [{ date: '2026-10-20', time: '00:01' }, { date: '2026-10-20', time: '00:02' }] });
+    now += 60000; await service.tick();
+    expect(service.snapshot('work').tasks[0]!.state).toBe('active');
+    const exception = service.snapshot('work').exceptions[0]!;
+    service.resolveException('work', exception.id, exception.revision, { action: 'discard' });
+    expect(service.snapshot('work').tasks[0]!.id).toBe(created.id);
+    now += 60000; await service.tick();
+    expect(calls).toBe(2); expect(service.snapshot('work').tasks[0]!.state).toBe('ended');
+  });
+  it('submits every one-off slot inside the recovery window', async () => {
+    const h = harness();
+    h.service.create(target, { text: 'hello', frequency: 'once', slots: [{ date: '2026-10-20', time: '00:01' }, { date: '2026-10-20', time: '00:02' }] });
+    h.advance(3); await h.service.tick();
+    expect(h.sent).toHaveLength(2); expect(h.service.snapshot('work').exceptions).toHaveLength(0);
+    expect(h.service.snapshot('work').tasks[0]!.state).toBe('ended');
+  });
+  it('keeps a recurring task active between its last slot and cutoff, even when paused', async () => {
+    let now = Date.parse('2026-10-20T00:00:00Z');
+    const service = new ScheduledMessagesService({ store: new MemoryScheduledStore(), timeZone: 'UTC', now: () => now, deliver: async () => ({ status: 'queued' }) });
+    service.create(target, { text: 'hello', frequency: 'daily', slots: [{ time: '09:00' }], endsAt: '2026-10-21T08:00:00Z' });
+    now = Date.parse('2026-10-20T09:00:00Z'); await service.tick();
+    let task = service.snapshot('work').tasks[0]!;
+    expect(task.nextAt).toBeNull(); expect(task.state).toBe('active');
+    service.update('work', task.id, task.revision, { enabled: false });
+    now = Date.parse('2026-10-21T07:59:00Z'); await service.tick(); expect(service.snapshot('work').tasks[0]!.state).toBe('active');
+    now += 60000; await service.tick(); expect(service.snapshot('work').tasks[0]!.state).toBe('ended');
+  });
+  it('keeps future one-off slots after an unknown occurrence is reconciled', async () => {
+    let now = Date.parse('2026-10-20T00:00:00Z'); let settled = false;
+    const service = new ScheduledMessagesService({ store: new MemoryScheduledStore(), timeZone: 'UTC', now: () => now, deliver: async () => ({ status: 'unknown' }), reconcile: async () => settled ? { status: 'accepted' } : null });
+    service.create(target, { text: 'hello', frequency: 'once', slots: [{ date: '2026-10-20', time: '00:01' }, { date: '2026-10-20', time: '00:05' }] });
+    now += 60000; await service.tick(); settled = true; await service.tick();
+    const task = service.snapshot('work').tasks[0]!;
+    expect(task.state).toBe('active'); expect(task.nextAt).toBe(Date.parse('2026-10-20T00:05:00Z'));
+    expect(() => service.update('work', task.id, task.revision, { enabled: true })).not.toThrow();
+  });
   it('rejects stale edits and atomically handles an exception only once', async () => {
     const h = harness();
     const task = h.service.create(target, { text: 'hello', frequency: 'once', slots: [{ date: '2026-10-20', time: '00:01' }] });

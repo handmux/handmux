@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { AgentRunRef } from '../agentCatalog.js';
 import { scheduledRequest } from '../scheduledMessagesApi.js';
 import type { ScheduledException, ScheduledRule, ScheduledSnapshot, ScheduledTask } from '../scheduledMessagesApi.js';
-import { useBackButton } from '../hooks/useBackButton.js';
+import { useHistoryLayer, unwindHistory } from '../hooks/useBackButton.js';
 import { t } from '../i18n';
 import './scheduledMessages.css';
 
@@ -30,16 +30,34 @@ export default function ScheduledMessagesSheet({ tmuxSession, run, onClose }: { 
     const poll = async () => { try { await reload(); } catch (cause) { if (mounted.current) setError(cause instanceof Error ? cause.message : t('scheduled.loadFailed')); } finally { if (mounted.current) timer = setTimeout(() => { void poll(); }, 3000); } };
     void poll(); return () => { mounted.current = false; clearTimeout(timer); };
   }, [tmuxSession]);
-  const leave = (action: () => void) => { if (dirty) setConfirm({ message: t('scheduled.discardChanges'), action }); else action(); };
-  const back = () => leave(() => { setEditor(null); setDirty(false); setError(''); });
+  const historyDepth = useRef(0);
+  const pendingHistoryDrop = useRef(0);
+  const queueUnwind = (depth: number) => {
+    if (depth <= 0) return;
+    pendingHistoryDrop.current += depth;
+    if (pendingHistoryDrop.current !== depth) return;
+    // Confirmation + editor can close in one React event. One go(-N) preserves the exact owned depth.
+    queueMicrotask(() => { const count = pendingHistoryDrop.current; pendingHistoryDrop.current = 0; unwindHistory(count); });
+  };
+  const pushLevel = () => { window.history.pushState({ scheduledMessages: true, depth: historyDepth.current + 1 }, ''); historyDepth.current++; };
+  const dropLevel = () => { if (historyDepth.current > 0) { historyDepth.current--; queueUnwind(1); } };
+  const showConfirm = (value: { message: string; action: () => void }) => { pushLevel(); setConfirm(value); };
+  const leave = (action: () => void) => { if (dirty) showConfirm({ message: t('scheduled.discardChanges'), action }); else action(); };
+  const leaveEditor = () => { dropLevel(); setEditor(null); setDirty(false); setError(''); };
+  const back = () => leave(leaveEditor);
   const close = () => leave(onClose);
-  useBackButton(true, close);
-  useBackButton(!!editor, () => {
-    // A cancelled dirty-form Back keeps ownership of this editor's history level.
-    if (dirty) window.history.pushState(null, '', window.location.href);
-    back();
+  const dismissConfirm = () => { dropLevel(); setConfirm(null); };
+  useHistoryLayer(true, () => {
+    historyDepth.current = Math.max(0, historyDepth.current - 1);
+    if (confirm) { setConfirm(null); return; }
+    if (editor) {
+      if (dirty) {
+        // Restore the consumed editor level so cancelling the confirmation retains Back ownership.
+        pushLevel(); showConfirm({ message: t('scheduled.discardChanges'), action: leaveEditor });
+      } else { setEditor(null); setDirty(false); setError(''); }
+    } else onClose();
   });
-  useBackButton(!!confirm, () => setConfirm(null));
+  useEffect(() => { pushLevel(); return () => { queueUnwind(historyDepth.current); historyDepth.current = 0; }; }, []);
   const rule = useMemo(() => editor ? { frequency: editor.frequency, slots: editor.slots, ...(editor.frequency === 'once' ? {} : { endsAtLocal: editor.endsAtLocal }) } : null, [editor]);
   useEffect(() => {
     setPreview(null); setPreviewError(''); if (!rule) return;
@@ -50,6 +68,7 @@ export default function ScheduledMessagesSheet({ tmuxSession, run, onClose }: { 
   const dateTime = (at: number | undefined | null, zone = snapshot?.timeZone) => at == null ? '—' : new Intl.DateTimeFormat(undefined, { timeZone: zone, dateStyle: 'medium', timeStyle: 'short' }).format(at);
   const resultText = (reason: string) => { const key = `scheduled.result.${reason}`; const value = t(key); return value === key ? t('scheduled.result.failed') : value; };
   const edit = (task?: ScheduledTask, exception?: ScheduledException) => {
+    pushLevel();
     setEditor({ ...(task ? { task } : {}), ...(exception ? { exception } : {}), text: task?.text ?? exception?.text ?? '', frequency: task?.rule.frequency ?? 'once', slots: structuredClone(task?.rule.slots ?? [{ date: '', time: '09:00' }]), endsAtLocal: task?.rule.endsAt ? localInput(Date.parse(task.rule.endsAt), task.timeZone) : '' });
     setDirty(false); setError('');
   };
@@ -62,12 +81,12 @@ export default function ScheduledMessagesSheet({ tmuxSession, run, onClose }: { 
   };
   const save = () => {
     if (!editor || !rule || !preview?.nextAt || !editor.text.trim()) return;
-    const done = () => { setEditor(null); setDirty(false); };
+    const done = leaveEditor;
     if (editor.exception) void mutate('exception', { id: editor.exception.id, revision: editor.exception.revision, request: { action: 'reschedule', rule } }, done);
     else if (editor.task) void mutate('update', { id: editor.task.id, revision: editor.task.revision, request: { ...rule, text: editor.text } }, done);
     else void mutate('create', { request: { ...rule, text: editor.text } }, done);
   };
-  const remove = (task: ScheduledTask) => setConfirm({ message: t('scheduled.deleteConfirm'), action: () => { void mutate('delete', { id: task.id, revision: task.revision }); } });
+  const remove = (task: ScheduledTask) => showConfirm({ message: t('scheduled.deleteConfirm'), action: () => { void mutate('delete', { id: task.id, revision: task.revision }); } });
   const zone = editor?.task?.timeZone ?? editor?.exception?.timeZone ?? snapshot?.timeZone;
   const slotFields = editor?.slots.map((slot, index) => <div className="scheduled-slot" key={index}>
     {editor.frequency === 'once' && <label>{t('scheduled.date')}<input type="date" aria-label={t('scheduled.date')} value={slot.date ?? ''} onChange={(event) => change({ slots: editor.slots.map((value, i) => i === index ? { ...value, date: event.target.value } : value) })} /></label>}
@@ -102,7 +121,7 @@ export default function ScheduledMessagesSheet({ tmuxSession, run, onClose }: { 
             <p className="scheduled-message">{item.text}</p><p>{resultText(item.reason)}{item.count ? ` ×${item.count}` : ''}</p>
             <p className="scheduled-secondary">{dateTime(item.scheduledAt, item.timeZone)}{item.missedThroughAt ? ` – ${dateTime(item.missedThroughAt, item.timeZone)}` : ''} · {item.timeZone} · {item.target.tmuxSession} / {item.target.paneId} · {item.target.sessionId}</p>
             {item.unknown && <p>{t('scheduled.unknownHelp')}</p>}
-            <div className="scheduled-actions"><button type="button" className="fontbtn" disabled={item.unknown || saving} onClick={() => edit(undefined, item)}>{t('scheduled.reschedule')}</button><button type="button" className="fontbtn" disabled={saving} onClick={() => setConfirm({ message: t('scheduled.discardException'), action: () => { void mutate('exception', { id: item.id, revision: item.revision, request: { action: 'discard' } }); } })}>{t('scheduled.discard')}</button></div>
+            <div className="scheduled-actions"><button type="button" className="fontbtn" disabled={item.unknown || saving} onClick={() => edit(undefined, item)}>{t('scheduled.reschedule')}</button><button type="button" className="fontbtn" disabled={saving} onClick={() => showConfirm({ message: t('scheduled.discardException'), action: () => { void mutate('exception', { id: item.id, revision: item.revision, request: { action: 'discard' } }); } })}>{t('scheduled.discard')}</button></div>
           </article>) : <p className="scheduled-secondary">{t('scheduled.empty')}</p>
           : snapshot?.tasks.filter((task) => task.state === tab).length ? snapshot.tasks.filter((task) => task.state === tab).map((task) => <article className="scheduled-item" key={task.id}>
             <button type="button" className={`scheduled-message scheduled-open ${task.state === 'ended' ? 'scheduled-secondary' : ''}`} disabled={task.state === 'ended'} onClick={() => edit(task)}>{task.text}</button>
@@ -114,7 +133,7 @@ export default function ScheduledMessagesSheet({ tmuxSession, run, onClose }: { 
           </article>) : <p className="scheduled-secondary">{t('scheduled.empty')}</p>}
         </>}
       </div>
-      {confirm && <div className="scheduled-confirm" role="alertdialog" aria-modal="true"><p>{confirm.message}</p><button type="button" className="fontbtn" onClick={() => setConfirm(null)}>{t('scheduled.cancel')}</button><button type="button" className="fontbtn" onClick={() => { const action = confirm.action; setConfirm(null); action(); }}>{t('scheduled.confirm')}</button></div>}
+      {confirm && <div className="scheduled-confirm" role="alertdialog" aria-modal="true"><p>{confirm.message}</p><button type="button" className="fontbtn" onClick={dismissConfirm}>{t('scheduled.cancel')}</button><button type="button" className="fontbtn" onClick={() => { const action = confirm.action; dismissConfirm(); action(); }}>{t('scheduled.confirm')}</button></div>}
     </section>
   </>;
 }

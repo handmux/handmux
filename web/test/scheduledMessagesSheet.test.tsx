@@ -4,7 +4,7 @@ import ScheduledMessagesSheet from '../src/components/ScheduledMessagesSheet.js'
 import { scheduledRequest } from '../src/scheduledMessagesApi.js';
 vi.mock('../src/scheduledMessagesApi.js', () => ({ scheduledRequest: vi.fn() }));
 vi.mock('../src/i18n', () => ({ t: (key: string) => key }));
-afterEach(() => { cleanup(); vi.clearAllMocks(); });
+afterEach(async () => { cleanup(); await new Promise((resolve) => setTimeout(resolve, 20)); vi.clearAllMocks(); });
 it('uses one multistep sheet and server preview before saving', async () => {
   vi.mocked(scheduledRequest).mockImplementation(async (_session, _run, action) => action === 'snapshot' ? { serverNow: Date.now(), timeZone: 'UTC', tasks: [], exceptions: [] } : action === 'preview' ? { nextAt: Date.now() + 60000, timeZone: 'UTC' } : {});
   render(<ScheduledMessagesSheet tmuxSession="work" run={{ agentId: 'new-agent', paneId: '%1', runId: 'run', sessionId: 'session' }} onClose={() => {}} />);
@@ -44,4 +44,31 @@ it('keeps preview validation errors actionable', async () => {
   render(<ScheduledMessagesSheet tmuxSession="work" run={{ agentId: 'test', paneId: '%1', runId: 'run' }} onClose={() => {}} />);
   fireEvent.click(screen.getByText('scheduled.add'));
   await screen.findByText(/Cutoff must be after the next slot/);
+});
+it('hardware Back returns editor to list and then closes the sheet', async () => {
+  vi.mocked(scheduledRequest).mockResolvedValue({ serverNow: Date.now(), timeZone: 'UTC', tasks: [], exceptions: [] });
+  const closed = vi.fn();
+  render(<ScheduledMessagesSheet tmuxSession="work" run={{ agentId: 'test', paneId: '%1', runId: 'run' }} onClose={closed} />);
+  fireEvent.click(screen.getByText('scheduled.add'));
+  expect(screen.getByLabelText('scheduled.message')).toBeTruthy();
+  window.history.back();
+  await waitFor(() => expect(screen.queryByLabelText('scheduled.message')).toBeNull());
+  expect(closed).not.toHaveBeenCalled();
+  window.history.back(); await waitFor(() => expect(closed).toHaveBeenCalledOnce());
+});
+it('hardware Back dirty confirmation cancellation retains the editor history level', async () => {
+  vi.mocked(scheduledRequest).mockResolvedValue({ serverNow: Date.now(), timeZone: 'UTC', tasks: [], exceptions: [] });
+  const closed = vi.fn();
+  render(<ScheduledMessagesSheet tmuxSession="work" run={{ agentId: 'test', paneId: '%1', runId: 'run' }} onClose={closed} />);
+  fireEvent.click(screen.getByText('scheduled.add'));
+  fireEvent.change(screen.getByLabelText('scheduled.message'), { target: { value: 'keep me' } });
+  window.history.back(); await screen.findByRole('alertdialog');
+  window.history.back(); await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull());
+  expect((screen.getByLabelText('scheduled.message') as HTMLTextAreaElement).value).toBe('keep me');
+  expect(closed).not.toHaveBeenCalled();
+  window.history.back(); await screen.findByRole('alertdialog');
+  fireEvent.click(screen.getByText('scheduled.confirm'));
+  await waitFor(() => expect(screen.queryByLabelText('scheduled.message')).toBeNull());
+  await waitFor(() => expect(window.history.state?.depth).toBe(1));
+  window.history.back(); await waitFor(() => expect(closed).toHaveBeenCalledOnce());
 });

@@ -3790,6 +3790,7 @@ describe('generic Agent Conversation UI', () => {
   });
 
   it.each([
+    ['queue_full', 'queueFull', '队列已满（最多 20 条），请处理待发消息后重试'],
     ['provider_rejected', 'sendFailed', '消息没有发送成功'],
     ['terminal_draft_conflict', 'terminalDraftConflict', '终端有未确认的草稿，请先在终端处理后重试'],
   ] as const)('shows localized send copy for %s and preserves the draft', async (reason, publicMessage, expected) => {
