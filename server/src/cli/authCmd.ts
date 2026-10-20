@@ -69,7 +69,7 @@ const controlErrorCopy: Record<string, string> = {
   CODE_INVALID: 'auth.error.codeInvalid', CLAIM_RATE_LIMIT: 'auth.error.rateLimit',
   PAIRING_NOT_FOUND: 'auth.error.pairingGone', PAIRING_INACTIVE: 'auth.error.pairingGone',
   DEVICE_NOT_FOUND: 'auth.error.deviceNotFound', DEVICE_INACTIVE: 'auth.error.deviceInactive',
-  DEVICE_CONFLICT: 'auth.error.conflict', INVALID_EDIT: 'auth.error.invalidEdit',
+  DEVICE_NAME_TAKEN: 'auth.error.nameTaken', DEVICE_CONFLICT: 'auth.error.conflict', INVALID_EDIT: 'auth.error.invalidEdit',
   INVALID_VERSION: 'auth.error.invalidVersion', PAIRING_CAPACITY: 'auth.error.pairingCapacity',
   TOKEN_REQUIRED: 'auth.error.tokenRequired', DEVICE_REQUIRED: 'auth.error.deviceRequired',
   DEVICE_EXPIRY_CLI_ONLY: 'auth.error.expiryCliOnly',

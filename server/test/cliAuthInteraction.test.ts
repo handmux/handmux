@@ -79,6 +79,17 @@ describe('auth policy controls', () => {
 
 describe('authorization error copy', () => {
   beforeEach(() => { vi.clearAllMocks(); });
+  it('explains duplicate names for both add and edit', async () => {
+    for (const argv of [
+      ['device', 'add', '--code', '038271', '--name', 'Office', '--expire', '7d'],
+      ['device', 'edit', 'dev_1', '--name', 'Office'],
+    ]) {
+      const err = vi.fn();
+      const connect = vi.fn(async () => ({ request: vi.fn(async () => { throw new AuthControlError('DEVICE_NAME_TAKEN', 'Device name is already in use'); }), close: vi.fn() }));
+      expect(await runAuthCommand({ argv, home: '/unused', interactive: false, connect, log: vi.fn(), err })).toBe(1);
+      expect(err).toHaveBeenCalledWith('An active device already uses this name. Choose another name.');
+    }
+  });
   it('localizes control-socket error codes instead of exposing internal messages', async () => {
     const err = vi.fn();
     const connect = vi.fn(async () => ({

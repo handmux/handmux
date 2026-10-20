@@ -31,6 +31,7 @@ export default {
   'auth.error.pairingGone': '这次授权申请已不存在或已过期，请在浏览器重新申请验证码。',
   'auth.error.deviceNotFound': '找不到这个设备，请先运行 handmux auth device list 查看设备 ID。',
   'auth.error.deviceInactive': '设备已过期或解除绑定，请重新授权。',
+  'auth.error.nameTaken': '已有有效设备使用此名称，请换一个名称。',
   'auth.error.conflict': '设备信息已被其他操作修改，请重新查看设备后再试。',
   'auth.error.invalidEdit': '请至少提供 --name 或 --expire。',
   'auth.error.invalidVersion': '设备信息已更新，请重新查看设备后再试。',

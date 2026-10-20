@@ -32,6 +32,7 @@ export default {
   'auth.error.pairingGone': 'This authorization request no longer exists or has expired. Request a new code in the browser.',
   'auth.error.deviceNotFound': 'Device not found. Run handmux auth device list to check the device ID.',
   'auth.error.deviceInactive': 'This device has expired or been unbound. Authorize it again.',
+  'auth.error.nameTaken': 'An active device already uses this name. Choose another name.',
   'auth.error.conflict': 'The device was changed by another operation. List devices again, then retry.',
   'auth.error.invalidEdit': 'Provide at least --name or --expire.',
   'auth.error.invalidVersion': 'The device was updated. List devices again, then retry.',
