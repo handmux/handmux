@@ -22,7 +22,11 @@ it('uses the existing drawer and grouped rows; new once is server now plus an ho
   mockApi(); vi.spyOn(Date, 'now').mockReturnValue(Date.parse('2000-01-01T00:00:00Z'));
   const { container } = render(<ScheduledMessagesSheet tmuxSession="work" run={run} onClose={() => {}} />);
   await openNew();
-  expect(container.querySelector('.file-sheet.open .file-tabs')).toBeTruthy();
+  expect(container.querySelector('.tool-sheet .tool-sheet-head')).toBeTruthy();
+  expect(container.querySelector('.file-sheet')).toBeNull();
+  expect(container.querySelector('.tool-sheet-grip')).toBeTruthy();
+  expect(container.querySelector('.tool-sheet-body')).toBeTruthy();
+  expect(container.querySelector('.tool-sheet-backdrop')).toBeTruthy();
   expect(container.querySelector('.cmd-panel')).toBeNull();
   expect(container.querySelector('.settings-page-list .settings-page-row')).toBeTruthy();
   expect(screen.queryByLabelText('scheduled.date')).toBeNull();

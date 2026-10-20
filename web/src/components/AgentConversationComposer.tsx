@@ -1,3 +1,4 @@
+import { useScheduledMessagesSnapshot } from '../hooks/useScheduledMessagesSnapshot.js';
 import ScheduledMessagesSheet from './ScheduledMessagesSheet.js';
 import type { AgentRunRef } from '../agentCatalog.js';
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useRef, useState } from 'react';
@@ -99,7 +100,8 @@ function AgentConversationComposer({
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [stopConfirm, setStopConfirm] = useState(false);
-  const [scheduledOpen, setScheduledOpen] = useState(false);
+  const [scheduledOpen, setScheduledOpen] = useState<string | null>(null);
+  useEffect(() => { setScheduledOpen(null); }, [tmuxSession]);
   const [editOpen, setEditOpen] = useState(false);
   const [favs, setFavs] = useState(() => loadFavs('agent'));
   const [layout, setLayout] = useState(() => loadShortcutLayout('chat'));
@@ -167,6 +169,13 @@ function AgentConversationComposer({
   }, [key]);
   const capabilities = conversation.descriptor?.capabilities;
   const canSend = canSendConversation(capabilities);
+  const scheduled = useScheduledMessagesSnapshot(tmuxSession, !!tmuxSession && canSend);
+  const scheduledCount = scheduled.snapshot?.tasks.filter((task) => task.state === 'active').length ?? 0;
+  const scheduledExceptions = (scheduled.snapshot?.exceptions.length ?? 0) > 0;
+  const scheduledLabel = [t('scheduled.title'),
+    ...(scheduledCount > 0 ? [t('scheduled.shortcutActive', { count: scheduledCount })] : []),
+    ...(scheduledExceptions ? [t('scheduled.shortcutExceptions')] : []),
+  ].join('，');
   const sendUnavailable = deliveryPaused || !canSend || conversation.descriptor === null
     || conversation.status === 'loading' || conversation.status === 'reconnecting'
     || conversation.status === 'error';
@@ -326,7 +335,11 @@ function AgentConversationComposer({
     <div className="chat-composer agent-conversation-composer" onPointerDown={keepComposerFocus}>
       {headerContent}
       <div className="cc-quick quick-scroll">
-        {tmuxSession && canSendConversation(conversation.descriptor?.capabilities) && <button type="button" className="quick-cmd" onClick={() => { ref.current?.blur(); setScheduledOpen(true); }}>{t('scheduled.title')}</button>}
+        {tmuxSession && canSend && <button type="button"
+          className={`quick-cmd scheduled-shortcut ${scheduledExceptions ? 'scheduled-shortcut-alert' : scheduledCount > 0 ? 'qc-reply' : 'quick-cmd-plain'}`}
+          aria-label={scheduledLabel} onClick={() => { ref.current?.blur(); setScheduledOpen(tmuxSession); }}>
+          {t('scheduled.title')}{scheduledCount > 0 && <span className="scheduled-shortcut-count" aria-hidden="true">{scheduledCount}</span>}
+        </button>}
         {quickReplies.map((item, index) => (
           <button type="button" className="quick-cmd qc-reply"
             key={`${shortcutIdentity(item)}:${index}`}
@@ -424,7 +437,9 @@ function AgentConversationComposer({
           </div>
         </OverlayPortal>
       )}
-      {scheduledOpen && <OverlayPortal><ScheduledMessagesSheet tmuxSession={tmuxSession} run={scheduledRun} onClose={() => setScheduledOpen(false)} /></OverlayPortal>}
+      {scheduledOpen === tmuxSession && canSend && <OverlayPortal chatTone={chatTone} keyboardInset={keyboardInset}>
+        <ScheduledMessagesSheet key={tmuxSession} tmuxSession={tmuxSession} run={scheduledRun} controller={scheduled} onClose={() => setScheduledOpen(null)} />
+      </OverlayPortal>}
       {editOpen && <CmdFavEditor variant="chat" presets={(shortcuts || DEFAULT_SERVER_SHORTCUTS).chat}
         onChange={refreshShortcuts} onClose={() => setEditOpen(false)} />}
     </div>

@@ -2,6 +2,8 @@
 export default {
 "scheduled.taskTimeZone": "发送时间按 {zone}",
 "scheduled.editAction": "编辑",
+"scheduled.shortcutActive": "{count} 个进行中",
+"scheduled.shortcutExceptions": "有待处理异常",
 "scheduled.repeat": "重复",
 "scheduled.sendTime": "发送时间",
 "scheduled.choose": "请选择",

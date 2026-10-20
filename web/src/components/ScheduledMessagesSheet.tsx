@@ -2,10 +2,12 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import type { AgentRunRef } from '../agentCatalog.js';
 import { scheduledRequest } from '../scheduledMessagesApi.js';
-import type { ScheduledException, ScheduledRule, ScheduledSnapshot, ScheduledTask } from '../scheduledMessagesApi.js';
+import type { ScheduledException, ScheduledRule, ScheduledTask } from '../scheduledMessagesApi.js';
 import { scheduledLocalInput, scheduledOnceDefault, scheduledRuleComplete, scheduledSummary } from '../scheduledMessagesPresentation.js';
+import { useScheduledMessagesSnapshot } from '../hooks/useScheduledMessagesSnapshot.js';
+import type { ScheduledMessagesSnapshotController } from '../hooks/useScheduledMessagesSnapshot.js';
 import { useHistoryLayer, unwindHistory } from '../hooks/useBackButton.js';
-import { ChevronDownIcon, CheckIcon, MoreHorizontalIcon } from './icons.jsx';
+import { ClockIcon, XIcon, CheckIcon, MoreHorizontalIcon } from './icons.jsx';
 import ActionSheet from './ActionSheet.js';
 import { t } from '../i18n';
 import './scheduledMessages.css';
@@ -38,10 +40,13 @@ function ValueRow({ label, children }: { label: string; children: ReactNode }) {
   </div>;
 }
 
-export default function ScheduledMessagesSheet({ tmuxSession, run, onClose }: {
+export default function ScheduledMessagesSheet({ tmuxSession, run, onClose, controller }: {
   tmuxSession: string; run: AgentRunRef | null; onClose: () => void;
+  controller?: ScheduledMessagesSnapshotController;
 }) {
-  const [snapshot, setSnapshot] = useState<ScheduledSnapshot | null>(null);
+  const fallback = useScheduledMessagesSnapshot(tmuxSession, controller === undefined);
+  const source = controller ?? fallback;
+  const snapshot = source.snapshot;
   const [tab, setTab] = useState<'active' | 'ended' | 'exceptions'>('active');
   const [pages, setPages] = useState<Page[]>(['list']);
   const [editor, setEditor] = useState<Editor | null>(null);
@@ -66,21 +71,11 @@ export default function ScheduledMessagesSheet({ tmuxSession, run, onClose }: {
 
   const request = <T,>(action: string, fields: Record<string, unknown> = {}) =>
     scheduledRequest<T>(tmuxSession, runRef.current, action, fields);
-  const reload = async () => {
-    const result = await request<ScheduledSnapshot>('snapshot');
-    if (mounted.current) setSnapshot(result);
-  };
+  const reload = source.refresh;
   useEffect(() => {
     mounted.current = true;
-    let timer: ReturnType<typeof setTimeout>;
-    const poll = async () => {
-      try { await reload(); }
-      catch (cause) { if (mounted.current) setError(cause instanceof Error ? cause.message : t('scheduled.loadFailed')); }
-      finally { if (mounted.current) timer = setTimeout(() => { void poll(); }, 3000); }
-    };
-    void poll();
-    return () => { mounted.current = false; clearTimeout(timer); };
-  }, [tmuxSession]);
+    return () => { mounted.current = false; };
+  }, []);
 
   // One browser-history owner for the drawer, its drilldown pages and temporary action/confirmation layers.
   const queueUnwind = (depth: number) => {
@@ -255,7 +250,7 @@ export default function ScheduledMessagesSheet({ tmuxSession, run, onClose }: {
         aria-selected={tab === value} className={`file-seg-btn${tab === value ? ' on' : ''}`}
         key={value} onClick={() => setTab(value)}>{t(`scheduled.${value}`)}</button>)}
     </div>
-    <div className="settings-page-body scheduled-list-body">
+    <div className="scheduled-list-body">
       {items.length ? <ul className="scheduled-list">{items.map((selection) => {
         const { item } = selection;
         const isException = selection.kind === 'exception';
@@ -287,7 +282,7 @@ export default function ScheduledMessagesSheet({ tmuxSession, run, onClose }: {
       <h2><label htmlFor="scheduled-message">{t('scheduled.message')}</label></h2>
       <div className="settings-page-list scheduled-message-card">
         <textarea id="scheduled-message" aria-label={t('scheduled.message')} value={editor.text} disabled={!!editor.exception}
-          placeholder={t('scheduled.messagePlaceholder')} onChange={(event) => change({ text: event.target.value })} rows={5} />
+          placeholder={t('scheduled.messagePlaceholder')} onChange={(event) => change({ text: event.target.value })} rows={3} />
       </div>
     </section>
     <section className="settings-page-group"><div className="settings-page-list">
@@ -360,17 +355,22 @@ export default function ScheduledMessagesSheet({ tmuxSession, run, onClose }: {
   </div>;
 
   return <>
-    <section className="file-sheet open scheduled-sheet" role="dialog" aria-modal="true" aria-label={t('scheduled.title')}>
-      <header className="file-tabs scheduled-head">
-        {page !== 'list' && <button type="button" className="settings-page-back" aria-label={t('scheduled.back')} onClick={back}>‹</button>}
-        <h1 className="scheduled-head-title">{title}</h1>
+    <div className="tool-sheet-backdrop" onClick={close} />
+    <section className="tool-sheet scheduled-sheet" role="dialog" aria-modal="true" aria-label={t('scheduled.title')}>
+      <div className="tool-sheet-grip" />
+      <button type="button" className="cmd-close tool-sheet-x" aria-label={t('common.close')} onClick={close}><XIcon /></button>
+      <header className="tool-sheet-head scheduled-head">
+        {page === 'list' && <span className="tool-sheet-ic"><ClockIcon /></span>}
+        {page !== 'list' && <button type="button" className="scheduled-back" aria-label={t('scheduled.back')} onClick={back}>‹</button>}
+        <span className="tool-sheet-title">{title}</span>
         {page === 'list' && <button type="button" className="scheduled-head-action" disabled={!run || !snapshot} onClick={() => edit()}>{t('scheduled.add')}</button>}
         {page === 'editor' && <button type="button" className="scheduled-head-action" disabled={saving || !preview?.nextAt || !complete || !editor?.text.trim()} onClick={save}>{t('scheduled.save')}</button>}
         {page === 'detail' && detail && <button type="button" className="scheduled-head-action" onClick={() => openMenu(detail)} aria-label={t('scheduled.more')}><MoreHorizontalIcon /></button>}
-        <button type="button" className="file-min" aria-label={t('common.close')} onClick={close}><ChevronDownIcon /></button>
+
       </header>
-      {error && <div className="scheduled-error" role="alert">{error}</div>}
-      {page === 'list' ? renderList() : <div className="settings-page-body">
+      {(error || source.error) && <div className="scheduled-error" role="alert">{error || source.error}</div>}
+      <div className="tool-sheet-body scheduled-body">
+      {page === 'list' ? renderList() : <div className="scheduled-page">
         {page === 'editor' && renderEditor()}
         {page === 'detail' && renderDetail()}
         {page === 'time' && renderTimePicker()}
@@ -387,6 +387,7 @@ export default function ScheduledMessagesSheet({ tmuxSession, run, onClose }: {
               onChange={(event) => change({ endsAtLocal: event.target.value })} /></label>
         </div><p className="settings-page-footer scheduled-footer">{zone}</p></div>}
       </div>}
+      </div>
     </section>
     {menu && <div className="scheduled-overlay-layer"><ActionSheet open title={t('scheduled.actions')} actions={menuActions} onClose={closeMenu} /></div>}
     {confirm && <div className="settings-confirm-backdrop scheduled-confirm-layer" onClick={dismissConfirm}>

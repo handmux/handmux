@@ -1,40 +1,61 @@
-/* Structure and controls come from FileManager / Inbox and Settings; only schedule-specific layout lives here. */
-.file-sheet.scheduled-sheet { background: #1a1b1e; color: #f2f2f7; padding-bottom: var(--overlay-keyboard-inset, 0px); }
-.scheduled-head { flex: none; min-height: calc(44px + env(safe-area-inset-top, 0px)); padding-top: env(safe-area-inset-top, 0px); }
-.scheduled-head-title { flex: 1; min-width: 0; align-self: center; margin: 0; padding: 0 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 17px; font-weight: 600; }
-.scheduled-head-action { flex: none; min-height: 44px; min-width: 44px; padding: 0 12px; border: 0; background: transparent; color: var(--blue); font: 15px -apple-system, system-ui, sans-serif; font-weight: 600; }
+/* Uses ConversationTool ToolSheet geometry and tone tokens; only schedule-specific layout lives here. */
+.tool-sheet.scheduled-sheet { bottom: var(--overlay-keyboard-inset, 0px); min-height: min(42vh, calc(100dvh - var(--overlay-keyboard-inset, 0px) - 12px)); max-height: min(62vh, calc(100dvh - var(--overlay-keyboard-inset, 0px) - 12px)); }
+.scheduled-sheet .tool-sheet-head { min-height: 44px; gap: 8px; padding-right: 60px; }
+.scheduled-sheet .tool-sheet-body { gap: 0; padding: 0; }
+.scheduled-sheet .tool-sheet-x { min-height: 44px; min-width: 44px; top: 8px; right: 8px; color: var(--ct-muted); }
+.scheduled-head-action, .scheduled-back { flex: none; min-height: 44px; min-width: 44px; padding: 0 8px; border: 0; background: transparent; color: var(--ct-accent); font: 15px -apple-system, system-ui, sans-serif; }
+.scheduled-back { font-size: 32px; padding: 0; }
+.scheduled-head-action { font-weight: 600; }
 .scheduled-head-action:disabled { opacity: .4; }
 .scheduled-head-action svg, .scheduled-more svg { display: block; width: 20px; height: 20px; }
-.scheduled-head .file-min, .scheduled-tabs .file-seg-btn { min-height: 44px; }
+.scheduled-tabs { flex: none; }
+.scheduled-tabs .file-seg-btn { min-height: 44px; color: var(--ct-muted); }
+.scheduled-tabs.file-seg { background: var(--ct-chip); }
+.scheduled-tabs .file-seg-btn.on { background: var(--ct-chip-2); color: var(--ct-ink); }
+.scheduled-page, .scheduled-list-body { flex: none; }
+.scheduled-sheet .settings-page-list { background: var(--ct-chip); }
+.scheduled-sheet .settings-page-row { color: var(--ct-ink); }
+.scheduled-sheet .settings-page-row + .settings-page-row::before { background: var(--ct-line); }
+.scheduled-sheet .settings-page-row-value, .scheduled-sheet .settings-page-chevron, .scheduled-sheet .settings-page-group > h2, .scheduled-sheet .settings-page-footer { color: var(--ct-muted); }
+.scheduled-sheet .settings-choice-row[aria-pressed="true"] { color: var(--ct-accent); }
 .scheduled-page-content { min-height: 0; }
-.scheduled-message-card textarea { display: block; box-sizing: border-box; width: 100%; min-height: 132px; resize: vertical; padding: 14px 16px; border: 0; background: transparent; color: inherit; font: 16px/1.5 -apple-system, system-ui, sans-serif; }
-.scheduled-message-card textarea::placeholder { color: rgba(235,235,245,.3); }
+.scheduled-message-card textarea { display: block; box-sizing: border-box; width: 100%; min-height: 96px; resize: vertical; padding: 14px 16px; border: 0; background: transparent; color: inherit; font: 16px/1.5 -apple-system, system-ui, sans-serif; }
+.scheduled-message-card textarea::placeholder { color: var(--ct-muted); }
 .scheduled-detail-text { padding: 14px 16px; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 16px; line-height: 1.5; }
-.scheduled-footer { color: rgba(235,235,245,.36); font-size: 12px; font-variant-numeric: tabular-nums; }
+.scheduled-footer { color: var(--ct-muted); font-size: 12px; font-variant-numeric: tabular-nums; }
 .scheduled-list-body { display: flex; flex-direction: column; padding-bottom: env(safe-area-inset-bottom, 0px); }
 .scheduled-list { list-style: none; margin: 0; padding: 0 0 10px; }
-.scheduled-list-row { display: flex; align-items: center; min-width: 0; padding-right: 4px; border-bottom: .5px solid rgba(84,84,88,.5); }
+.scheduled-list-row { display: flex; align-items: center; min-width: 0; padding-right: 4px; border-bottom: .5px solid var(--ct-line); }
 .scheduled-list-main { flex: 1; min-width: 0; padding: 13px 8px 13px 16px; border: 0; background: transparent; color: inherit; text-align: left; }
 .scheduled-list-copy { display: flex; flex-direction: column; min-width: 0; gap: 5px; }
 .scheduled-list-line { display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .scheduled-list-summary { font-size: 15px; line-height: 20px; font-weight: 500; }
-.scheduled-list-meta { color: rgba(235,235,245,.46); font-size: 12px; line-height: 17px; font-variant-numeric: tabular-nums; }
-.scheduled-row-action, .scheduled-more { flex: none; min-width: 44px; min-height: 44px; padding: 0 8px; border: 0; background: transparent; color: var(--blue); font: 14px -apple-system, system-ui, sans-serif; }
-.scheduled-row-action:disabled { color: rgba(235,235,245,.3); }
-.scheduled-more { display: inline-flex; align-items: center; justify-content: center; color: rgba(235,235,245,.5); }
-.scheduled-empty { margin: 0; padding: 48px 20px; text-align: center; color: rgba(235,235,245,.46); font-size: 14px; }
+.scheduled-list-meta { color: var(--ct-muted); font-size: 12px; line-height: 17px; font-variant-numeric: tabular-nums; }
+.scheduled-row-action, .scheduled-more { flex: none; min-width: 44px; min-height: 44px; padding: 0 8px; border: 0; background: transparent; color: var(--ct-accent); font: 14px -apple-system, system-ui, sans-serif; }
+.scheduled-row-action:disabled { color: var(--ct-muted); }
+.scheduled-more { display: inline-flex; align-items: center; justify-content: center; color: var(--ct-muted); }
+.scheduled-empty { margin: 0; padding: 48px 20px; text-align: center; color: var(--ct-muted); font-size: 14px; }
 .scheduled-list-body > .scheduled-footer { margin: auto 0 0; padding: 16px; }
-.scheduled-picker-input { min-height: 44px; min-width: 0; max-width: 65%; padding: 6px 0; border: 0; background: transparent; color: var(--blue); font: 16px -apple-system, system-ui, sans-serif; color-scheme: dark; text-align: right; }
+.scheduled-picker-input { min-height: 44px; min-width: 0; max-width: 65%; padding: 6px 0; border: 0; background: transparent; color: var(--ct-accent); font: 16px -apple-system, system-ui, sans-serif;  text-align: right; }
 .scheduled-picker-input[type="number"] { width: 80px; }
 .scheduled-weekday-row { gap: 8px; flex-wrap: wrap; padding-block: 4px; }
 .scheduled-weekday-choice { display: inline-flex; align-items: center; gap: 10px; min-height: 44px; flex: 1; padding: 0; border: 0; background: transparent; color: inherit; font: inherit; }
-.scheduled-weekday-choice[aria-pressed="true"] { color: var(--blue); }
+.scheduled-weekday-choice[aria-pressed="true"] { color: var(--ct-accent); }
 .scheduled-cutoff-row { flex-wrap: wrap; }
 .scheduled-cutoff-row input { max-width: 100%; }
-.scheduled-error { flex: none; padding: 10px 16px; color: var(--red); font-size: 14px; }
+.scheduled-error { flex: none; padding: 10px 16px; color: var(--ct-err-ink); font-size: 14px; }
 .scheduled-overlay-layer { position: fixed; inset: 0; z-index: var(--z-overlay-confirm); }
 .scheduled-overlay-layer .settings-backdrop { z-index: 0; }
-.scheduled-overlay-layer .settings-card { z-index: 1; }
-.scheduled-overlay-layer .settings-close { min-height: 44px; min-width: 44px; }
+.scheduled-overlay-layer .settings-card { z-index: 1; background: var(--ct-overlay); color: var(--ct-ink); }
+.scheduled-overlay-layer .sheet-action { background: var(--ct-chip); color: var(--ct-ink); border-color: var(--ct-line); }
+.scheduled-overlay-layer .sheet-action.danger, .scheduled-confirm-layer .danger { color: var(--ct-err-ink); }
+.scheduled-confirm-layer .settings-confirm { background: var(--ct-overlay); }
+.scheduled-confirm-layer .settings-confirm p { color: var(--ct-muted); }
+.scheduled-confirm-layer .settings-confirm-actions button { color: var(--ct-accent); }
+.scheduled-overlay-layer .settings-close { min-height: 44px; min-width: 44px; color: var(--ct-muted); background: var(--ct-chip-2); }
+.scheduled-overlay-layer .sheet-action.armed { background: var(--ct-err-bg); color: var(--ct-err-ink); border-color: var(--ct-err-ink); }
+.scheduled-confirm-layer .settings-confirm-actions button.danger { color: var(--ct-err-ink); }
 .scheduled-confirm-layer { z-index: var(--z-overlay-confirm); }
-@media (prefers-reduced-motion: reduce) { .file-sheet.scheduled-sheet { transition: none; } }
+.scheduled-shortcut-alert { --rgb: 255,105,97; }
+.scheduled-shortcut-count { margin-left: 5px; font-variant-numeric: tabular-nums; }
+.chat-tone-surface[data-chat-tone="light"] .scheduled-picker-input { color-scheme: light; }

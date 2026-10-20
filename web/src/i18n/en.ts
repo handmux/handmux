@@ -3,6 +3,8 @@
 export default {
 "scheduled.taskTimeZone": "Send times use {zone}",
 "scheduled.editAction": "Edit",
+"scheduled.shortcutActive": "{count} active",
+"scheduled.shortcutExceptions": "Unresolved exceptions",
 "scheduled.repeat": "Repeat",
 "scheduled.sendTime": "Send time",
 "scheduled.choose": "Choose",
