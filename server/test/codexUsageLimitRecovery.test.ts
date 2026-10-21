@@ -52,3 +52,18 @@ it.each(['11:09 AM UTC+8', 'Oct 21st, 2026 12:53 AM\nUTC+8', '11:09 AM\nPST', '1
 it.runIf(serverZone === 'America/New_York')('rejects the nonexistent local hour in the DST spring gap', () => {
   expect(codexUsageLimitRecovery({ code: 'UsageLimitExceeded', message: 'Try again at Mar 8th, 2026 2:30 AM.' }, eventAt)).toEqual({ kind: 'usage_limit' });
 });
+
+it.runIf(serverZone === 'America/New_York')('rejects ambiguous fall-back clocks but honors explicit offsets and structured reset times', () => {
+  const occurredAt = Date.parse('2026-11-01T01:15:00-04:00');
+  for (const clock of ['1:30 AM', 'Nov 1st, 2026 1:30 AM']) {
+    expect(codexUsageLimitRecovery({ code: 'UsageLimitExceeded', message: `Try again at ${clock}.` }, occurredAt)).toEqual({ kind: 'usage_limit' });
+  }
+  expect(codexUsageLimitRecovery({ code: 'UsageLimitExceeded', message: 'Try again at Nov 1st, 2026 1:30 AM -05:00.' }, occurredAt)).toEqual({ kind: 'usage_limit', retryAt: Date.parse('2026-11-01T06:30:00Z') });
+  expect(codexUsageLimitRecovery({ code: 'UsageLimitExceeded', resets_at: '2026-11-01T06:30:00Z', message: 'Try again at 1:30 AM.' }, occurredAt)).toEqual({ kind: 'usage_limit', retryAt: Date.parse('2026-11-01T06:30:00Z') });
+  expect(codexUsageLimitRecovery({ code: 'UsageLimitExceeded', message: 'Try again at 2:30 AM.' }, occurredAt)).toEqual({ kind: 'usage_limit', retryAt: Date.parse('2026-11-01T07:30:00Z') });
+});
+it.runIf(serverZone === 'Australia/Lord_Howe')('rejects a half-hour DST fold without rejecting adjacent unambiguous clocks', () => {
+  const occurredAt = Date.parse('2026-04-05T01:35:00+11:00');
+  expect(codexUsageLimitRecovery({ code: 'UsageLimitExceeded', message: 'Try again at 1:45 AM.' }, occurredAt)).toEqual({ kind: 'usage_limit' });
+  expect(codexUsageLimitRecovery({ code: 'UsageLimitExceeded', message: 'Try again at 2:15 AM.' }, occurredAt)).toEqual({ kind: 'usage_limit', retryAt: Date.parse('2026-04-04T15:45:00Z') });
+});

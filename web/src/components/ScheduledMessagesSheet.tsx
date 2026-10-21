@@ -16,7 +16,7 @@ import './scheduledMessages.css';
 type Page = 'list' | 'editor' | 'detail';
 type Picker = { kind: 'slot' | 'cutoff'; index: number; date: string; time: string; minute: number; local: string };
 type SelectionKey = { kind: 'task' | 'exception'; id: string };
-type PendingAction = { action: string; id?: string; kind: 'task' | 'exception'; navigation: number };
+type PendingAction = { action: string; id?: string; kind: 'task' | 'exception'; navigation: number; restoreOnFailure?: ScheduledTask };
 type Selection = { kind: 'task'; item: ScheduledTask } | { kind: 'exception'; item: ScheduledException };
 interface Editor {
   task?: ScheduledTask;
@@ -341,8 +341,15 @@ export default function ScheduledMessagesSheet({ scope, run, onClose, controller
         setFeedback(t(action === 'trigger' ? 'scheduled.result.submitted' : action === 'delete' || (action === 'exception' && (fields.request as { action?: string } | undefined)?.action === 'discard') ? 'common.done' : 'scheduled.saved'));
       }
     } catch (cause) {
-      if (!mounted.current) return;
-      if (operation.navigation === navigationEpoch.current) setError(cause instanceof Error ? cause.message : t('scheduled.loadFailed'));
+      if (operation.restoreOnFailure) {
+        // Explicit exit still owns this cleanup after close. CAS cannot overwrite a successful
+        // save or another client, even when the save response was lost or is still in flight.
+        const task = operation.restoreOnFailure;
+        try { await request('update', { id: task.id, revision: task.revision, request: { enabled: true } }); }
+        catch (restoreError) {
+          if (mounted.current) { returnToList(); setError(`${t('scheduled.restoreFailed')} ${restoreError instanceof Error ? restoreError.message : ''}`.trim()); }
+        }
+      } else if (mounted.current && operation.navigation === navigationEpoch.current) setError(cause instanceof Error ? cause.message : t('scheduled.loadFailed'));
     } finally {
       pendingRef.current = null;
       if (mounted.current) { setPending(null); void refreshSnapshot(); }
@@ -364,7 +371,10 @@ export default function ScheduledMessagesSheet({ scope, run, onClose, controller
   };
   const exitEditor = async (action: () => void) => {
     if (editor?.task && editor.restoreEnabled) {
-      if (pendingRef.current) { if (pendingRef.current.action === 'update') action(); return; }
+      if (pendingRef.current) {
+        if (pendingRef.current.action === 'update') { pendingRef.current.restoreOnFailure = editor.task; action(); }
+        return;
+      }
       await restoreTask(editor.task, action);
     } else action();
   };

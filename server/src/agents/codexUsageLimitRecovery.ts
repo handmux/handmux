@@ -47,6 +47,15 @@ function textResetTime(message: string, occurredAt?: number): number | undefined
   if (local.getFullYear() !== year || local.getMonth() !== month - 1 || local.getDate() !== day
     || local.getHours() !== hours || local.getMinutes() !== minute) return undefined;
   const at = local.getTime();
+  // Date chooses the earlier instant in a fold. Check the actual offset change, including
+  // half-hour transitions, and reject if the later instant has the same local components.
+  const tomorrow = new Date(year, month - 1, day + 1, hours, minute, 0, 0);
+  const offsetChange = tomorrow.getTimezoneOffset() - local.getTimezoneOffset();
+  if (offsetChange > 0) {
+    const later = new Date(at + offsetChange * 60000);
+    if (later.getFullYear() === year && later.getMonth() === month - 1 && later.getDate() === day
+      && later.getHours() === hours && later.getMinutes() === minute) return undefined;
+  }
   return validTime(at) ? at : undefined;
 }
 

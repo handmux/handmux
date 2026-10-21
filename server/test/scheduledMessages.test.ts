@@ -47,9 +47,11 @@ it('keeps a terminated blocked task ended when late authoritative reconciliation
   const blocked = service.snapshot(scope).tasks[0]!; const tick = service.tick();
   const ended = service.terminate(scope, task.id, blocked.revision);
   expect(service.snapshot(scope).exceptions).toHaveLength(1);
+  expect(() => service.update(scope, task.id, blocked.revision, { enabled: true })).toThrow(/another client/);
   now += 60000; finish({ status: 'queued' }); await tick;
   expect(service.snapshot(scope).tasks[0]).toMatchObject({ state: 'ended', endedReason: 'terminated', endedAt: ended.endedAt, nextAt: null, enabled: false });
   expect(service.snapshot(scope).exceptions).toHaveLength(0);
+  expect(service.snapshot(scope).tasks[0]!.blocked).toBeUndefined();
 });
 it('rejects termination while a claimed send is in progress', async () => {
   let finish!: (value: { status: string }) => void;
@@ -57,6 +59,58 @@ it('rejects termination while a claimed send is in progress', async () => {
   const task = service.create(target, { text: 'claimed', frequency: 'once', slots: [{ date: '2026-10-20', time: '00:01' }] });
   const sending = service.trigger(scope, task.id, task.revision); const current = service.snapshot(scope).tasks[0]!;
   expect(() => service.terminate(scope, task.id, current.revision)).toThrow(/being submitted/); finish({ status: 'queued' }); await sending;
+});
+describe('scheduler state after concurrent transaction rollback', () => {
+  it.each([1, 2])('finishes all %s due once slots in the same tick after a rejected terminate', async count => {
+    let now = Date.parse('2026-10-20T00:00:00Z');
+    let finish!: (value: { status: string }) => void;
+    let calls = 0;
+    const store = new MemoryScheduledStore();
+    const service = new ScheduledMessagesService({ store, timeZone: 'UTC', now: () => now,
+      deliver: async () => ++calls === 1 ? await new Promise(resolve => { finish = resolve; }) : { status: 'queued' } });
+    const created = service.create(target, { text: 'claimed', frequency: 'once', slots: [{ date: '2026-10-20', time: '00:01' }, ...(count === 2 ? [{ date: '2026-10-20', time: '00:02' }] : [])] });
+    now += 180000; const tick = service.tick();
+    const claimed = service.snapshot(scope).tasks[0]!;
+    expect(() => service.terminate(scope, created.id, claimed.revision)).toThrow(/being submitted/);
+    finish({ status: 'queued' }); await tick;
+    expect(calls).toBe(count);
+    expect(service.snapshot(scope).tasks[0]).toMatchObject({ state: 'ended', nextAt: null, lastResult: 'submitted' });
+    const restored = new ScheduledMessagesService({ store, timeZone: 'UTC', now: () => now, deliver: async () => { throw Error('must not resend'); } });
+    await restored.tick(); expect(restored.snapshot(scope).tasks[0]!.state).toBe('ended');
+  });
+  it('unblocks the current task when a rejected transaction replaces state during reconciliation', async () => {
+    let now = Date.parse('2026-10-20T00:00:00Z');
+    let finish!: (value: { status: string }) => void;
+    const service = new ScheduledMessagesService({ store: new MemoryScheduledStore(), timeZone: 'UTC', now: () => now,
+      deliver: async () => ({ status: 'unknown' }), reconcile: async () => await new Promise(resolve => { finish = resolve; }) });
+    service.create(target, { text: 'uncertain', frequency: 'once', slots: [{ date: '2026-10-20', time: '00:01' }, { date: '2026-10-20', time: '00:05' }] });
+    now += 60000; await service.tick();
+    const blocked = service.snapshot(scope).tasks[0]!; const tick = service.tick();
+    expect(() => service.update(scope, blocked.id, blocked.revision + 1, { enabled: true })).toThrow(/another client/);
+    finish({ status: 'queued' }); await tick;
+    expect(service.snapshot(scope).exceptions).toHaveLength(0);
+    expect(service.snapshot(scope).tasks[0]).toMatchObject({ state: 'active', enabled: false, lastResult: 'submitted' });
+    expect(service.snapshot(scope).tasks[0]!.blocked).toBeUndefined();
+  });
+  it('clears authoritative unknown evidence without recreating a task deleted during reconciliation', async () => {
+    let now = Date.parse('2026-10-20T00:00:00Z'); let finish!: (value: { status: string }) => void;
+    const service = new ScheduledMessagesService({ store: new MemoryScheduledStore(), timeZone: 'UTC', now: () => now,
+      deliver: async () => ({ status: 'unknown' }), reconcile: async () => await new Promise(resolve => { finish = resolve; }) });
+    service.create(target, { text: 'deleted unknown', frequency: 'once', slots: [{ date: '2026-10-20', time: '00:01' }] });
+    now += 60000; await service.tick();
+    const blocked = service.snapshot(scope).tasks[0]!; const tick = service.tick();
+    service.remove(scope, blocked.id, blocked.revision); finish({ status: 'queued' }); await tick;
+    expect(service.snapshot(scope)).toMatchObject({ tasks: [], exceptions: [] });
+  });
+  it('does not recreate a once task deleted while its claim is delivering', async () => {
+    let now = Date.parse('2026-10-20T00:00:00Z'); let finish!: (value: { status: string }) => void;
+    const service = new ScheduledMessagesService({ store: new MemoryScheduledStore(), timeZone: 'UTC', now: () => now,
+      deliver: async () => await new Promise(resolve => { finish = resolve; }) });
+    service.create(target, { text: 'deleted', frequency: 'once', slots: [{ date: '2026-10-20', time: '00:01' }] });
+    now += 60000; const tick = service.tick(); const claimed = service.snapshot(scope).tasks[0]!;
+    service.remove(scope, claimed.id, claimed.revision); finish({ status: 'queued' }); await tick;
+    expect(service.snapshot(scope)).toMatchObject({ tasks: [], exceptions: [] });
+  });
 });
 describe('persistent server owned scheduling', () => {
   it('submits without clients, completes at admission and never resubmits after restart', async () => {

@@ -5,6 +5,7 @@ import { scheduledRequest } from '../src/scheduledMessagesApi.js';
 import { scheduledRelativeTime, scheduledRuleSummary } from '../src/scheduledMessagesPresentation.js';
 import type { ScheduledTask } from '../src/scheduledMessagesApi.js';
 import { t } from '../src/i18n';
+import { ApiError } from '../src/apiErrors.js';
 vi.mock('../src/scheduledMessagesApi.js', () => ({ scheduledRequest: vi.fn() }));
 const now = Date.parse('2026-10-20T00:00:00Z');
 const scope = { tmuxSession: 'work', paneId: '%1' };
@@ -164,3 +165,67 @@ it.each([false, true])('offers termination without deletion for active tasks in 
   expect(screen.queryByRole('button', { name: t('scheduled.delete') })).toBeNull();
   expect(screen.getByRole('button', { name: t('scheduled.terminate') })).toBeTruthy();
 });
+
+it.each(['back', 'close'] as const)('restores pre-edit enabled state after a pending save fails following explicit %s', async exit => {
+  const h = await pendingSave();
+  h.exit(exit);
+  expect(screen.queryByLabelText(t('scheduled.message'))).toBeNull();
+  if (exit === 'close') expect(h.onClose).toHaveBeenCalledOnce();
+  await act(async () => { h.rejectSave(Error('network offline')); });
+  await waitFor(() => expect(h.current().enabled).toBe(true));
+  expect(h.current().text).toBe('original');
+  expect(h.restoreRequests()).toEqual([{ id: 'task', revision: 2, request: { enabled: true } }]);
+});
+it.each(['acknowledged', 'lost acknowledgement', 'remote edit'] as const)('does not overwrite %s after leaving a pending save', async outcome => {
+  const h = await pendingSave(); h.exit('back');
+  h.setCurrent({ ...h.current(), revision: 3, text: outcome === 'remote edit' ? 'remote' : 'edited', enabled: outcome !== 'remote edit' });
+  await act(async () => { if (outcome === 'acknowledged') h.resolveSave(h.current()); else h.rejectSave(Error('network offline')); });
+  await waitFor(() => expect(screen.getByRole('button', { name: t('scheduled.editAction') }).hasAttribute('disabled')).toBe(false));
+  expect(h.current()).toMatchObject({ revision: 3, text: outcome === 'remote edit' ? 'remote' : 'edited', enabled: outcome !== 'remote edit' });
+  if (outcome === 'acknowledged') expect(h.restoreRequests()).toHaveLength(0);
+  else expect((await screen.findByRole('alert')).textContent).toContain(t('scheduled.restoreFailed'));
+});
+it('keeps a paused task and reports an unverifiable restore without retrying the save', async () => {
+  const h = await pendingSave(true); h.exit('back');
+  await act(async () => { h.rejectSave(Error('save timeout')); });
+  expect((await screen.findByRole('alert')).textContent).toContain(t('scheduled.restoreFailed'));
+  expect(h.current()).toMatchObject({ revision: 2, enabled: false, text: 'original' });
+  expect(h.restoreRequests()).toHaveLength(1);
+  expect(vi.mocked(scheduledRequest).mock.calls.filter(call => call[2] === 'update' && (call[3]?.request as { text?: string })?.text)).toHaveLength(1);
+});
+it('keeps the pause when a pending save fails after an unexpected unmount', async () => {
+  const h = await pendingSave(); h.unmount();
+  await act(async () => { h.rejectSave(Error('network offline')); });
+  expect(h.current().enabled).toBe(false); expect(h.restoreRequests()).toHaveLength(0);
+});
+async function pendingSave(failRestore = false) {
+  let current: ScheduledTask = { ...task };
+  let resolveSave!: (value: ScheduledTask) => void; let rejectSave!: (cause: Error) => void;
+  vi.mocked(scheduledRequest).mockImplementation(async (_scope, _run, action, fields) => {
+    if (action === 'snapshot') return { serverNow: now, timeZone: 'UTC', tasks: [current], exceptions: [] };
+    if (action === 'preview') return { nextAt: now + 60000, timeZone: 'UTC' };
+    if (action === 'update') {
+      const request = fields?.request as Partial<ScheduledTask>;
+      if (request.text) return await new Promise((resolve, reject) => { resolveSave = resolve; rejectSave = reject; });
+      if (fields?.revision !== current.revision) throw new ApiError('revision conflict', 409);
+      if (request.enabled && failRestore) throw Error('restore timeout');
+      current = { ...current, ...request, revision: current.revision + 1 }; return current;
+    }
+    return {};
+  });
+  const onClose = vi.fn();
+  // Explicit close unmounts the drawer, like its real parent.
+  const view = render(<ScheduledMessagesSheet scope={scope} run={null} onClose={() => { onClose(); view.unmount(); }} />);
+  fireEvent.click(await screen.findByRole('button', { name: t('scheduled.editAction') }));
+  fireEvent.change(await screen.findByLabelText(t('scheduled.message')), { target: { value: 'edited' } });
+  await waitFor(() => expect((screen.getByRole('button', { name: t('scheduled.save') }) as HTMLButtonElement).disabled).toBe(false));
+  fireEvent.click(screen.getByRole('button', { name: t('scheduled.save') }));
+  return {
+    ...view, onClose, resolveSave, rejectSave, current: () => current, setCurrent: (next: ScheduledTask) => { current = next; },
+    restoreRequests: () => vi.mocked(scheduledRequest).mock.calls.filter(call => call[2] === 'update' && (call[3]?.request as Partial<ScheduledTask>)?.enabled === true && !(call[3]?.request as Partial<ScheduledTask>)?.text).map(call => call[3]),
+    exit: (kind: 'back' | 'close') => {
+      fireEvent.click(screen.getByRole('button', { name: t(kind === 'back' ? 'scheduled.back' : 'common.close') }));
+      fireEvent.click(screen.getByRole('button', { name: t('scheduled.confirm') }));
+    },
+  };
+}

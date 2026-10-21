@@ -235,19 +235,26 @@ export class ScheduledMessagesService {
   async #tick() {
     for (const id of this.#state.tasks.map((task) => task.id)) {
       if (this.#closed) return;
-      const task = this.#state.tasks.find((item) => item.id === id);
-      if (!task) continue;
+      const existing = this.#state.tasks.find((item) => item.id === id);
+      if (!existing) continue;
+      let task = existing;
       if (task.blocked && task.blockedAt !== undefined && this.#reconcile) {
+        const exceptionId = `${task.id}:${task.immediateAt === task.blockedAt ? 'immediate:' : ''}${task.blockedAt}`;
         let receipt: ScheduledDelivery | null = null;
-        try { receipt = await this.#reconcile(task.target, `scheduled:${task.id}:${task.immediateAt === task.blockedAt ? 'immediate:' : ''}${task.blockedAt}`); } catch { /* uncertainty remains visible */ }
+        try { receipt = await this.#reconcile(task.target, `scheduled:${exceptionId}`); } catch { /* uncertainty remains visible */ }
+        // A concurrent failed transaction can replace the state while reconciliation awaits.
+        const current = this.#state.tasks.find((item) => item.id === id);
+        if (current) task = current;
         if (receipt && ['accepted', 'queued'].includes(receipt.status)) {
           this.#transaction(() => {
-            this.#state.exceptions = this.#state.exceptions.filter((item) => item.id !== `${task.id}:${task.immediateAt === task.blockedAt ? 'immediate:' : ''}${task.blockedAt}`);
+            this.#state.exceptions = this.#state.exceptions.filter((item) => item.id !== exceptionId);
+            if (!current) return;
             const manual = task.immediateAt === task.blockedAt;
             delete task.blocked; delete task.blockedAt; task.lastResult = 'submitted'; if (task.endedReason !== 'terminated' && task.rule.frequency === 'once') task.state = task.nextAt !== null ? 'active' : this.#state.exceptions.some((item) => item.taskId === task.id) ? 'exception' : 'ended'; if (task.endedReason !== 'terminated' && manual && task.rule.frequency === 'once') { task.state = 'ended'; task.nextAt = null; task.endedAt = this.#now(); }
             delete task.immediateAt; task.revision++;
           });
         }
+        if (!current) continue;
       }
       // Older versions could persist the cutoff itself as the next occurrence. It is not a missed send.
       if (task.state === 'active' && !task.claim && task.rule.frequency !== 'once' && task.nextAt !== null && task.nextAt >= Date.parse(task.rule.endsAt)) {
@@ -269,6 +276,10 @@ export class ScheduledMessagesService {
             else task.claim = { at: scheduledAt, text: task.text, target: structuredClone(task.target) };
           });
           if (task.claim) await this.#submitClaim(task);
+          // Delivery may overlap a rollback or deletion; only finalize the current stored task.
+          const current = this.#state.tasks.find((item) => item.id === id);
+          if (!current) break;
+          task = current;
           this.#transaction(() => {
             if (task.endedReason === 'terminated') return;
             if (task.nextAt !== null) task.state = 'active';
