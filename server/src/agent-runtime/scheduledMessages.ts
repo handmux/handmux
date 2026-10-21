@@ -12,7 +12,7 @@ export interface ScheduledTarget { agentId: string; sessionId: string; paneId: s
 export interface ScheduledTask {
   id: string; revision: number; target: ScheduledTarget; text: string; rule: ScheduledRule;
   timeZone: string; enabled: boolean; state: 'active' | 'ended' | 'exception'; createdAt: number;
-  cursor: number; nextAt: number | null; endedAt?: number; lastAt?: number; lastResult?: string;
+  cursor: number; nextAt: number | null; endedAt?: number; endedReason?: 'terminated'; lastAt?: number; lastResult?: string;
   claim?: { at: number; text: string; target: ScheduledTarget }; blocked?: boolean; blockedAt?: number; immediateAt?: number; manualCursor?: number;
 }
 export interface ScheduledException {
@@ -143,7 +143,8 @@ export class ScheduledMessagesService {
     for (const task of this.#state.tasks) {
       validateRule(task.rule, task.timeZone);
       if (!task.id || !task.target?.sessionId || !task.target.tmuxSession || typeof task.text !== 'string' || !Number.isFinite(task.cursor) || !Number.isSafeInteger(task.revision)) throw new Error('Corrupt scheduled message task');
-      if (task.claim) { this.#exception(task, task.claim.at, 'delivery_unconfirmed', true, task.claim.text); task.blocked = true; task.blockedAt = task.claim.at; task.lastAt = task.claim.at; task.lastResult = 'delivery_unconfirmed'; if (task.rule.frequency === 'once' && task.nextAt === null) task.state = 'exception'; task.enabled = false; delete task.claim; }
+      if (task.endedReason !== undefined && (task.endedReason !== 'terminated' || task.state !== 'ended' || task.enabled || task.nextAt !== null || !Number.isFinite(task.endedAt))) throw new Error('Corrupt scheduled message termination');
+      if (task.claim) { this.#exception(task, task.claim.at, 'delivery_unconfirmed', true, task.claim.text); task.blocked = true; task.blockedAt = task.claim.at; task.lastAt = task.claim.at; task.lastResult = 'delivery_unconfirmed'; if (task.endedReason !== 'terminated' && task.rule.frequency === 'once' && task.nextAt === null) task.state = 'exception'; task.enabled = false; delete task.claim; }
     }
     if (loaded !== undefined) this.#store.save(this.#state);
   }
@@ -169,6 +170,15 @@ export class ScheduledMessagesService {
       if (value.text !== undefined) { if (typeof value.text !== 'string' || !value.text.trim() || value.text.length > 256 * 1024) throw new ScheduledError('Message text is required'); task.text = value.text.trim(); }
       if (value.enabled !== undefined) { if (typeof value.enabled !== 'boolean') invalid(); if (task.blocked && value.enabled) throw new ScheduledError('Resolve uncertain delivery in Queue before creating another schedule', 'conflict'); if (value.enabled && !task.enabled) { task.cursor = now; task.nextAt = nextOccurrence(task.rule, task.timeZone, task.cursor); if (task.nextAt === null && (task.rule.frequency === 'once' || now >= Date.parse(task.rule.endsAt))) { task.state = 'ended'; task.endedAt = now; } } task.enabled = value.enabled; }
       task.revision++; return task;
+    });
+  }
+  terminate(scope: ScheduledScope, id: string, revision: number) {
+    return this.#transaction(() => {
+      const task = this.#task(scope, id, revision);
+      if (task.state !== 'active' || task.claim) throw new ScheduledError('This occurrence is being submitted or has ended. Reload the list.', 'conflict');
+      task.state = 'ended'; task.endedReason = 'terminated'; task.endedAt = this.#now();
+      task.enabled = false; task.nextAt = null; task.revision++;
+      return task;
     });
   }
   trigger(scope: ScheduledScope, id: string, revision: number): Promise<{ status: 'submitted' }> {
@@ -226,7 +236,7 @@ export class ScheduledMessagesService {
           this.#transaction(() => {
             this.#state.exceptions = this.#state.exceptions.filter((item) => item.id !== `${task.id}:${task.immediateAt === task.blockedAt ? 'immediate:' : ''}${task.blockedAt}`);
             const manual = task.immediateAt === task.blockedAt;
-            delete task.blocked; delete task.blockedAt; task.lastResult = 'submitted'; if (task.rule.frequency === 'once') task.state = task.nextAt !== null ? 'active' : this.#state.exceptions.some((item) => item.taskId === task.id) ? 'exception' : 'ended'; if (manual && task.rule.frequency === 'once') { task.state = 'ended'; task.nextAt = null; task.endedAt = this.#now(); }
+            delete task.blocked; delete task.blockedAt; task.lastResult = 'submitted'; if (task.endedReason !== 'terminated' && task.rule.frequency === 'once') task.state = task.nextAt !== null ? 'active' : this.#state.exceptions.some((item) => item.taskId === task.id) ? 'exception' : 'ended'; if (task.endedReason !== 'terminated' && manual && task.rule.frequency === 'once') { task.state = 'ended'; task.nextAt = null; task.endedAt = this.#now(); }
             delete task.immediateAt; task.revision++;
           });
         }
@@ -252,6 +262,7 @@ export class ScheduledMessagesService {
           });
           if (task.claim) await this.#submitClaim(task);
           this.#transaction(() => {
+            if (task.endedReason === 'terminated') return;
             if (task.nextAt !== null) task.state = 'active';
             else { task.state = this.#state.exceptions.some((item) => item.taskId === task.id) ? 'exception' : 'ended'; task.endedAt = this.#now(); }
           });
@@ -306,10 +317,10 @@ export class ScheduledMessagesService {
         const successful = receipt.status === 'accepted' || receipt.status === 'queued';
         const skipped = !manual && task.rule.frequency !== 'once' && ['duplicate_queued', 'queue_full'].includes(receipt.reason ?? '');
         task.lastResult = successful ? 'submitted' : skipped ? receipt.reason! : receipt.reason ?? receipt.status;
-        if (!successful && !skipped) { this.#exception(task, claim.at, receipt.reason ?? receipt.status, receipt.status === 'unknown', claim.text); if (task.rule.frequency === 'once' && task.nextAt === null) task.state = 'exception'; }
+        if (!successful && !skipped) { this.#exception(task, claim.at, receipt.reason ?? receipt.status, receipt.status === 'unknown', claim.text); if (task.endedReason !== 'terminated' && task.rule.frequency === 'once' && task.nextAt === null) task.state = 'exception'; }
         if (receipt.status === 'unknown') { task.blocked = true; task.blockedAt = claim.at; task.enabled = false; }
         if (receipt.reason === 'target_changed') task.enabled = false;
-        if (manual && successful && task.rule.frequency === 'once') { task.state = 'ended'; task.enabled = false; task.nextAt = null; task.endedAt = this.#now(); }
+        if (task.endedReason !== 'terminated' && manual && successful && task.rule.frequency === 'once') { task.state = 'ended'; task.enabled = false; task.nextAt = null; task.endedAt = this.#now(); }
         if (manual && receipt.status !== 'unknown') delete task.immediateAt;
         delete task.claim; task.revision++;
       });

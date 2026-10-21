@@ -27,7 +27,7 @@
 .scheduled-sheet .settings-choice-row[aria-pressed="true"] { color: var(--ct-accent); }
 .scheduled-page-content { min-height: 0; }
 .scheduled-message-card:focus-within { box-shadow: inset 0 0 0 1px var(--ct-accent); }
-.scheduled-message-card textarea { border-radius: inherit; outline: none; display: block; box-sizing: border-box; width: 100%; min-height: 96px; resize: vertical; padding: 14px 16px; border: 0; background: transparent; color: inherit; font: 16px/1.5 -apple-system, system-ui, sans-serif; }
+.scheduled-message-card textarea { border-radius: inherit; outline: none; display: block; box-sizing: border-box; width: 100%; min-height: 96px; resize: none; padding: 14px 16px; border: 0; background: transparent; color: inherit; font: 16px/1.5 -apple-system, system-ui, sans-serif; }
 .scheduled-message-card textarea::placeholder { color: var(--ct-muted); }
 .scheduled-detail-text { padding: 14px 16px; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 16px; line-height: 1.5; }
 .scheduled-zone-hint { flex: none; margin: 0; padding: 0 16px 16px; color: var(--ct-muted); font-size: 12px; }
@@ -177,5 +177,12 @@
 .scheduled-cutoff-choice .scheduled-picker-input { background: var(--ct-chip); border-color: var(--ct-line); }
 .scheduled-quick-label { margin: 0 0 8px; color: var(--ct-muted); font-size: 12px; }
 
-.chat-notice-recovery { display: block; min-height: 44px; margin-top: 2px; padding: 4px 0; border: 0; background: transparent; color: var(--ct-accent); font: inherit; font-size: 13px; text-align: left; }
+.chat-notice-recovery { display: block; min-height: 28px; margin-top: 2px; padding: 2px 0; border: 0; background: transparent; color: var(--ct-accent); font: inherit; font-size: 13px; line-height: 18px; text-align: left; }
 .chat-notice-recovery:active { opacity: .65; }
+
+.scheduled-status-terminated { color: var(--ct-muted); background: var(--ct-chip-2); }
+
+.scheduled-detail-content .settings-page-value-row { align-items: flex-start; gap: 12px; }
+.scheduled-detail-content .settings-page-row-value { max-width: 75%; white-space: normal; overflow: visible; text-overflow: clip; text-align: right; overflow-wrap: anywhere; }
+.scheduled-detail-content .settings-page-row-label { flex: 0 0 auto; white-space: nowrap; }
+.scheduled-detail-content .settings-page-row-value { flex: 1 1 auto; min-width: 0; }

@@ -50,7 +50,7 @@ it('keeps the shortcut visible from conversation loading through capability and 
   fireEvent.click(button);
   expect(await screen.findByRole('dialog', { name: t('scheduled.title') })).toBeTruthy();
 });
-it('starts neutral without invented counts and refreshes active and exception states while closed, including paused tasks', async () => {
+it('starts neutral without invented counts and refreshes active and exception states while closed, excluding paused tasks', async () => {
   vi.useFakeTimers();
   let resolve!: (value: ScheduledSnapshot) => void;
   let value = empty;
@@ -65,8 +65,8 @@ it('starts neutral without invented counts and refreshes active and exception st
   expect(shortcut().querySelector('.scheduled-shortcut-count')).toBeNull();
   await act(async () => { resolve({ ...empty, tasks: [task, { ...task, id: 'paused', enabled: false }, { ...task, id: 'ended', state: 'ended' }] }); });
   expect(shortcut().classList.contains('scheduled-shortcut-active')).toBe(true);
-  expect(shortcut().querySelector('.scheduled-shortcut-count')?.textContent).toBe('2');
-  expect(shortcut().getAttribute('aria-label')).toContain('2');
+  expect(shortcut().querySelector('.scheduled-shortcut-count')?.textContent).toBe('1');
+  expect(shortcut().getAttribute('aria-label')).toContain('1');
   value = { ...empty, tasks: [task], exceptions: [{ id: 'missed', revision: 1, taskId: task.id, target: task.target, text: 'missed', timeZone: 'UTC', scheduledAt: now, reason: 'missed', unknown: false }] };
   await act(async () => { await vi.advanceTimersByTimeAsync(3000); });
   expect(shortcut().classList.contains('scheduled-shortcut-alert')).toBe(true);

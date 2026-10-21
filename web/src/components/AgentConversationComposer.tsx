@@ -184,7 +184,7 @@ function AgentConversationComposer({
   const canSend = canSendConversation(capabilities);
   const scheduled = useScheduledMessagesSnapshot(scheduledScope, !!tmuxSession && !!paneId && canSend);
   useEffect(() => { onScheduledClock?.({ key: scheduledScopeKey, now: scheduled.snapshot?.serverNow }); }, [scheduledScopeKey, scheduled.snapshot?.serverNow, onScheduledClock]);
-  const scheduledCount = scheduled.snapshot?.tasks.filter((task) => task.state === 'active').length ?? 0;
+  const scheduledCount = scheduled.snapshot?.tasks.filter((task) => task.state === 'active' && task.enabled).length ?? 0;
   const scheduledExceptions = (scheduled.snapshot?.exceptions.length ?? 0) > 0;
   const scheduledLabel = [t('scheduled.title'),
     ...(scheduledCount > 0 ? [t('scheduled.shortcutActive', { count: scheduledCount })] : []),

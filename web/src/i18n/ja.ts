@@ -1,5 +1,14 @@
 // 日本語 strings. Missing keys fall back to English (see ./index.ts translate()).
 export default {
+"scheduled.inDuration": "{duration}後",
+"scheduled.durationSeparator": "",
+"scheduled.terminate": "終了",
+"scheduled.terminateConfirm": "今後の送信を終了しますか？",
+"scheduled.terminated": "終了済み",
+"scheduled.durationDays": "{count}日",
+"scheduled.durationHours": "{count}時間",
+"scheduled.durationMinutes": "{count}分",
+"scheduled.restoreFailed": "再開の結果は未確認です。一覧で状態を確認してください。",
 "scheduled.continueAfterLimit": "続行を予約",
 "scheduled.scheduleMessage": "メッセージを予約",
 "scheduled.chooseCutoff": "終了日時を選択してください",

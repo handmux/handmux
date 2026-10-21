@@ -13,7 +13,7 @@ const run = { agentId: 'generic', sessionId: 'session', runId: 'run', paneId: '%
 const task: ScheduledTask = { id: 'task', revision: 1, text: 'original text', target: { ...scope, agentId: 'generic', sessionId: 'session' }, timeZone: 'UTC', state: 'active', enabled: true, nextAt: now + 3600000, rule: { frequency: 'once', slots: [{ date: '2026-10-21', time: '09:00' }] } };
 const empty: ScheduledSnapshot = { serverNow: now, timeZone: 'UTC', tasks: [], exceptions: [] };
 function setup(snapshot = empty, refresh = vi.fn(async () => {})) {
-  vi.mocked(scheduledRequest).mockImplementation(async (_scope, _run, action) => action === 'preview' ? { nextAt: now + 3600000, timeZone: 'UTC' } : {});
+  vi.mocked(scheduledRequest).mockImplementation(async (_scope, _run, action, fields) => action === 'preview' ? { nextAt: now + 3600000, timeZone: 'UTC' } : action === 'update' ? { ...snapshot.tasks.find(task => task.id === fields?.id), ...(fields?.request as object), revision: Number(fields?.revision) + 1 } : {});
   const props = { scope, run, onClose: vi.fn() };
   const view = render(<ScheduledMessagesSheet {...props} controller={{ snapshot, error: '', refresh }} />);
   return { ...view, refresh, rerenderSnapshot: (next: ScheduledSnapshot) => view.rerender(<ScheduledMessagesSheet {...props} controller={{ snapshot: next, error: '', refresh }} />) };
@@ -55,13 +55,13 @@ it('derives detail and open menu from the latest snapshot and leaves removed rec
   expect(view.container.querySelector('.scheduled-detail-text')).toBeNull(); expect(screen.getByRole('tab', { name: /scheduled.active/ })).toBeTruthy();
 });
 it('keeps draft contents and its original revision across live updates', async () => {
-  const view = setup({ ...empty, tasks: [task] }); fireEvent.click(screen.getByRole('button', { name: 'scheduled.editAction' }));
+  const view = setup({ ...empty, tasks: [task] }); fireEvent.click(screen.getByRole('button', { name: 'scheduled.editAction' })); await screen.findByLabelText('scheduled.message');
   fireEvent.change(screen.getByLabelText('scheduled.message'), { target: { value: 'my draft' } });
   view.rerenderSnapshot({ ...empty, tasks: [{ ...task, revision: 9, text: 'remote edit' }] });
   expect((screen.getByLabelText('scheduled.message') as HTMLTextAreaElement).value).toBe('my draft');
   await waitFor(() => expect((screen.getByRole('button', { name: 'scheduled.save' }) as HTMLButtonElement).disabled).toBe(false));
   fireEvent.click(screen.getByRole('button', { name: 'scheduled.save' }));
-  await waitFor(() => expect(vi.mocked(scheduledRequest).mock.calls.find(call => call[2] === 'update')?.[3]).toMatchObject({ revision: 1, request: { text: 'my draft' } }));
+  await waitFor(() => expect(vi.mocked(scheduledRequest).mock.calls.filter(call => call[2] === 'update').at(-1)?.[3]).toMatchObject({ revision: 2, request: { text: 'my draft', enabled: true } }));
 });
 it('starts new pages at top and restores each tab position without resetting on polls', async () => {
   const view = setup({ ...empty, tasks: [task, { ...task, id: 'ended', state: 'ended' }] });
@@ -72,7 +72,7 @@ it('starts new pages at top and restores each tab position without resetting on 
   fireEvent.click(screen.getByRole('tab', { name: 'scheduled.ended' })); expect(body.scrollTop).toBe(0);
   body.scrollTop = 400; fireEvent.click(screen.getByRole('tab', { name: /scheduled.active/ })); expect(body.scrollTop).toBe(1800);
   view.rerenderSnapshot({ ...empty, tasks: [task] }); expect(body.scrollTop).toBe(1800);
-  fireEvent.click(screen.getByRole('button', { name: 'scheduled.editAction' })); expect(body.scrollTop).toBe(0);
+  fireEvent.click(screen.getByRole('button', { name: 'scheduled.editAction' })); await screen.findByLabelText('scheduled.message'); expect(body.scrollTop).toBe(0);
 });
 it('announces pending save and per-record trigger while leaving close available', async () => {
   let release!: () => void; const pending = new Promise<void>(resolve => { release = resolve; });
@@ -139,4 +139,12 @@ it('uses the latest clock for rescheduling after a memoized poll and the latest 
   fireEvent.click(screen.getByRole('button', { name: 'scheduled.more' }));
   fireEvent.click(screen.getByRole('button', { name: 'scheduled.resume' }));
   await waitFor(() => expect(vi.mocked(scheduledRequest).mock.calls.find(call => call[2] === 'update')?.[3]).toMatchObject({ revision: 9 }));
+});
+
+it('disables a confirmed preview after shared server time reaches it without scheduling a fresh preview poll', async () => {
+  const view = setup(); await newDraft();
+  view.rerenderSnapshot({ ...empty, serverNow: now + 3600000 });
+  expect((screen.getByRole('button', { name: 'scheduled.save' }) as HTMLButtonElement).disabled).toBe(true);
+  expect(screen.getByRole('status').textContent).toBe('scheduled.chooseFuture');
+  expect(vi.mocked(scheduledRequest).mock.calls.filter(call => call[2] === 'preview')).toHaveLength(1);
 });

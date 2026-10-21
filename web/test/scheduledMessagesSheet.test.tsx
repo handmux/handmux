@@ -11,7 +11,10 @@ const target = { agentId: 'test', sessionId: 'hidden-session-uuid', paneId: '%1'
 const serverNow = Date.parse('2026-10-20T15:30:00Z');
 const snapshot: ScheduledSnapshot = { serverNow, timeZone: 'Asia/Shanghai', tasks: [], exceptions: [] };
 function mockApi(value = snapshot) {
-  vi.mocked(scheduledRequest).mockImplementation(async (_session, _run, action) => action === 'snapshot' ? value : action === 'preview' ? { nextAt: serverNow + 3600000, timeZone: value.timeZone } : {});
+  vi.mocked(scheduledRequest).mockImplementation(async (_session, _run, action, fields) => {
+    if (action === 'update') return { ...value.tasks.find(task => task.id === fields?.id), ...(fields?.request as object), revision: Number(fields?.revision) + 1 };
+    return action === 'snapshot' ? value : action === 'preview' ? { nextAt: serverNow + 3600000, timeZone: value.timeZone } : {};
+  });
 }
 async function openNew() {
   await screen.findByText('scheduled.empty');
@@ -84,7 +87,7 @@ it('keeps and individually edits every API-created slot across frequency switche
   const task: ScheduledTask = { id: 'task', revision: 2, text: 'multi', target, timeZone: 'UTC', state: 'active', enabled: true, nextAt: serverNow + 60000, rule: { frequency: 'daily', slots: [{ time: '09:00' }, { time: '18:00' }], endsAt: '2026-11-01T00:00:00Z' } };
   mockApi({ ...snapshot, tasks: [task] });
   render(<ScheduledMessagesSheet scope={{ tmuxSession: 'work', paneId: '%1' }} run={null} onClose={() => {}} />);
-  fireEvent.click(await screen.findByRole('button', { name: 'scheduled.editAction' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'scheduled.editAction' })); await screen.findByLabelText('scheduled.message');
   fireEvent.click(screen.getByRole('button', { name: 'scheduled.sendTime 2' }));
   expect((screen.getByLabelText('scheduled.time') as HTMLInputElement).value).toBe('18:00');
   fireEvent.change(screen.getByLabelText('scheduled.time'), { target: { value: '19:15' } });
@@ -96,7 +99,7 @@ it('keeps and individually edits every API-created slot across frequency switche
   expect(screen.getByRole('button', { name: 'scheduled.sendTime 2' }).textContent).toBe('19:15');
   await waitFor(() => expect((screen.getByRole('button', { name: 'scheduled.save' }) as HTMLButtonElement).disabled).toBe(false));
   fireEvent.click(screen.getByRole('button', { name: 'scheduled.save' }));
-  await waitFor(() => expect(vi.mocked(scheduledRequest).mock.calls.find(call => call[2] === 'update')?.[3]).toMatchObject({ request: { slots: [{ time: '09:00' }, { time: '19:15' }] } }));
+  await waitFor(() => expect(vi.mocked(scheduledRequest).mock.calls.filter(call => call[2] === 'update').at(-1)?.[3]).toMatchObject({ request: { slots: [{ time: '09:00' }, { time: '19:15' }] } }));
 });
 it('reschedules an exception with server plus one-hour defaults and uses ActionSheet revision-aware discard', async () => {
   const exception = { id: 'exception', revision: 3, taskId: 'task', text: 'reschedule me', target, timeZone: 'Asia/Shanghai', scheduledAt: serverNow - 6000000, reason: 'missed', unknown: false };
@@ -174,12 +177,13 @@ it('chooses weekly times independently and requires an explicit cutoff through g
 it('retains edits and shows a revision conflict after another client changes a task', async () => {
   const task: ScheduledTask = { id: 'task', revision: 2, text: 'original', target: { ...target, paneId: '%9' }, timeZone: 'UTC', state: 'active', enabled: true, nextAt: serverNow + 60000, rule: { frequency: 'once', slots: [{ date: '2026-10-21', time: '09:00' }] } };
   mockApi({ ...snapshot, tasks: [task] });
-  vi.mocked(scheduledRequest).mockImplementation(async (_session, _run, action) => {
+  vi.mocked(scheduledRequest).mockImplementation(async (_session, _run, action, fields) => {
+    if (action === 'update' && (fields?.request as { enabled?: boolean })?.enabled === false) return { ...task, enabled: false, revision: task.revision + 1 };
     if (action === 'update') throw Error('Changed on another client. Reload the list.');
     return action === 'snapshot' ? { ...snapshot, tasks: [task] } : { nextAt: serverNow + 3600000, timeZone: 'UTC' };
   });
   render(<ScheduledMessagesSheet scope={{ tmuxSession: 'work', paneId: '%1' }} run={run} onClose={() => {}} />);
-  fireEvent.click(await screen.findByRole('button', { name: 'scheduled.editAction' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'scheduled.editAction' })); await screen.findByLabelText('scheduled.message');
   fireEvent.change(screen.getByLabelText('scheduled.message'), { target: { value: 'my unsaved message' } });
   await waitFor(() => expect((screen.getByRole('button', { name: 'scheduled.save' }) as HTMLButtonElement).disabled).toBe(false));
   fireEvent.click(screen.getByRole('button', { name: 'scheduled.save' }));
@@ -336,7 +340,7 @@ it('shows an accessible add icon and year-qualified schedule dates while native 
   expect(cutoff.min).toBe('2026-10-20T23:30'); expect(cutoff.max).toBe('2027-10-20T23:30');
   fireEvent.click(screen.getByRole('button', { name: 'scheduled.confirm' }));
   expect(screen.getByRole('button', { name: /^scheduled.cutoff / }).textContent).toContain('2027/01/18 23:30');
-  await waitFor(() => expect(screen.getByRole('status').textContent).toBe('scheduled.next: 2026/10/21 00:30'));
+  await waitFor(() => expect(screen.getByRole('status').textContent).toContain('scheduled.next: 2026/10/21 00:30 (scheduled.inDuration'));
   expect(container.textContent).not.toContain('2027-01-18');
 });
 
@@ -390,7 +394,7 @@ it('labels exception records explicitly without moving the long reason into the 
   expect(container.querySelector('.scheduled-page .scheduled-status-exception')?.textContent).toBe('scheduled.exception');
 });
 
-it('counts active tasks including paused and blocked tasks and updates exceptions from the shared pane snapshot', () => {
+it('counts enabled active tasks while retaining paused and blocked rows and updates exceptions from the shared pane snapshot', () => {
   const task: ScheduledTask = { id: 'active', revision: 1, text: 'message', target, timeZone: 'UTC', state: 'active', enabled: true, nextAt: serverNow + 60000, rule: { frequency: 'once', slots: [{ date: '2026-10-21', time: '09:00' }] } };
   const exception = { id: 'exception', revision: 1, taskId: 'active', text: 'message', target, timeZone: 'UTC', scheduledAt: serverNow, reason: 'missed', unknown: false };
   const controller = { snapshot: null as ScheduledSnapshot | null, error: '', refresh: vi.fn(async () => {}) };
@@ -399,7 +403,7 @@ it('counts active tasks including paused and blocked tasks and updates exception
   expect(screen.getByRole('tab', { name: 'scheduled.active' }).textContent).toBe('scheduled.active');
   controller.snapshot = { ...snapshot, tasks: [task, { ...task, id: 'paused', enabled: false }, { ...task, id: 'blocked', enabled: false, blocked: true }, { ...task, id: 'ended', state: 'ended' }], exceptions: [exception] };
   rerender(<ScheduledMessagesSheet {...props} controller={controller} />);
-  expect(screen.getByRole('tab', { name: 'scheduled.active 3' })).toBeTruthy();
+  expect(screen.getByRole('tab', { name: 'scheduled.active 1' })).toBeTruthy();
   expect(screen.getByRole('tab', { name: 'scheduled.exceptions 1' })).toBeTruthy();
   expect(screen.getByRole('tab', { name: 'scheduled.ended' }).textContent).toBe('scheduled.ended');
   controller.snapshot = { ...snapshot, tasks: [task], exceptions: [] };

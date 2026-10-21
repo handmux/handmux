@@ -1,5 +1,14 @@
 // 한국어 strings. Missing keys fall back to English (see ./index.ts translate()).
 export default {
+"scheduled.inDuration": "{duration} 후",
+"scheduled.durationSeparator": " ",
+"scheduled.terminate": "종료",
+"scheduled.terminateConfirm": "앞으로의 전송을 종료할까요?",
+"scheduled.terminated": "종료됨",
+"scheduled.durationDays": "{count}일",
+"scheduled.durationHours": "{count}시간",
+"scheduled.durationMinutes": "{count}분",
+"scheduled.restoreFailed": "재개 결과를 확인하지 못했습니다. 목록에서 상태를 확인하세요.",
 "scheduled.continueAfterLimit": "계속하기 예약",
 "scheduled.scheduleMessage": "메시지 예약",
 "scheduled.chooseCutoff": "종료 시간을 선택하세요",

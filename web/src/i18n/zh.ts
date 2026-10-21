@@ -1,5 +1,14 @@
 // 中文 strings. Missing keys fall back to English (see ./index.ts translate()).
 export default {
+"scheduled.inDuration": "{duration}后",
+"scheduled.durationSeparator": "",
+"scheduled.terminate": "终止",
+"scheduled.terminateConfirm": "终止后不再发送，确认？",
+"scheduled.terminated": "已终止",
+"scheduled.durationDays": "{count}天",
+"scheduled.durationHours": "{count}小时",
+"scheduled.durationMinutes": "{count}分钟",
+"scheduled.restoreFailed": "恢复结果待确认，请在列表核对状态。",
 "scheduled.continueAfterLimit": "定时继续",
 "scheduled.scheduleMessage": "定时发送",
 "scheduled.quickChoices": "快捷选择",

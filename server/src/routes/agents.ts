@@ -450,10 +450,12 @@ export function agentRoutes({ runtime }: { runtime: AgentFacadeRuntime }): expre
       switch (body.action) {
         case 'create': return res.json(service.create(target as Awaited<ReturnType<NonNullable<typeof runtime.scheduledTarget>>>, body.request));
         case 'trigger':
+        case 'terminate':
         case 'update':
         case 'delete':
         case 'exception': {
           if (!text(body.id, 256) || !Number.isSafeInteger(body.revision)) throw new ScheduledError('Invalid scheduled message revision');
+          if (body.action === 'terminate') return res.json(service.terminate(scope, body.id, body.revision as number));
           if (body.action === 'trigger') return res.json(await service.trigger(scope, body.id, body.revision as number));
           if (body.action === 'update') return res.json(service.update(scope, body.id, body.revision as number, body.request));
           if (body.action === 'delete') return res.json(service.remove(scope, body.id, body.revision as number));

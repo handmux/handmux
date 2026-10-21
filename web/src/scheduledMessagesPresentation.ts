@@ -1,3 +1,4 @@
+import { t } from './i18n';
 import type { ScheduledRule } from './scheduledMessagesApi.js';
 
 const calendarFormatters = new Map<string, Intl.DateTimeFormat>();
@@ -42,4 +43,18 @@ export function scheduledRecoveryTime(retryAt: number | undefined, now: number):
   if (retryAt === undefined || !Number.isSafeInteger(retryAt) || retryAt <= 0 || retryAt > 8_640_000_000_000_000 - 120000) return undefined;
   const at = Math.ceil((retryAt + 60000) / 60000) * 60000;
   return at > now ? at : undefined;
+}
+
+export function scheduledRelativeTime(at: number, serverNow: number): string {
+  const minutes = Math.max(0, Math.ceil((at - serverNow) / 60000));
+  if (!minutes) return t('scheduled.pending');
+  const days = Math.floor(minutes / 1440); const hours = Math.floor(minutes % 1440 / 60); const rest = minutes % 60;
+  const duration = [[days, 'Days'], [hours, 'Hours'], [rest, 'Minutes']].filter(([count]) => Number(count) > 0)
+    .map(([count, unit]) => t(`scheduled.duration${unit}`, { count })).join(t('scheduled.durationSeparator'));
+  return t('scheduled.inDuration', { duration });
+}
+export function scheduledRuleSummary(rule: ScheduledRule): string {
+  if (rule.frequency === 'hourly') return rule.slots.map(slot => t('scheduled.hourlyMinute', { minute: String(slot.minute ?? 0).padStart(2, '0') })).join(' / ');
+  const slots = [...rule.slots].sort((a, b) => (a.weekday ?? 0) - (b.weekday ?? 0));
+  return `${t(`scheduled.${rule.frequency}`)} ${slots.map(slot => `${rule.frequency === 'weekly' ? `${t(`scheduled.day.${slot.weekday}`)} ` : slot.date ? `${scheduledDisplayLocal(slot.date, true)} ` : ''}${slot.time ?? ''}`).join(' / ')}`;
 }

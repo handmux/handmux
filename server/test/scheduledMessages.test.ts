@@ -25,6 +25,39 @@ function harness() {
     deliver: async (_target, text, id) => { sent.push(id); return { status: 'queued' }; } });
   return { service, store, sent, advance: (minutes: number) => { now += minutes * 60_000; } };
 }
+it.each(['once', 'hourly'] as const)('persists termination of %s tasks and rejects resume or delivery', async frequency => {
+  const h = harness();
+  const task = h.service.create(target, { text: 'stop me', frequency, slots: frequency === 'once' ? [{ date: '2026-10-20', time: '00:01' }] : [{ minute: 1 }], endsAt: '2026-10-21T00:00:00Z' });
+  expect(() => h.service.terminate({ ...scope, paneId: '%2' }, task.id, task.revision)).toThrow();
+  expect(() => h.service.terminate(scope, task.id, task.revision + 1)).toThrow();
+  const ended = h.service.terminate(scope, task.id, task.revision);
+  expect(ended).toMatchObject({ state: 'ended', endedReason: 'terminated', enabled: false, nextAt: null, endedAt: Date.parse('2026-10-20T00:00:00Z') });
+  expect(() => h.service.update(scope, ended.id, ended.revision, { enabled: true })).toThrow();
+  await expect(h.service.trigger(scope, ended.id, ended.revision)).rejects.toThrow();
+  h.advance(65); await h.service.tick(); expect(h.sent).toHaveLength(0);
+  const restored = new ScheduledMessagesService({ store: h.store, now: () => Date.parse('2026-10-22T00:00:00Z'), deliver: async () => { throw Error('must not send'); } });
+  await restored.tick(); expect(restored.snapshot(scope).tasks[0]).toMatchObject(ended);
+});
+it('keeps a terminated blocked task ended when late authoritative reconciliation completes', async () => {
+  let now = Date.parse('2026-10-20T00:00:00Z'); let finish!: (value: { status: string }) => void;
+  const service = new ScheduledMessagesService({ store: new MemoryScheduledStore(), timeZone: 'UTC', now: () => now,
+    deliver: async () => ({ status: 'unknown' }), reconcile: async () => await new Promise(resolve => { finish = resolve; }) });
+  const task = service.create(target, { text: 'uncertain', frequency: 'once', slots: [{ date: '2026-10-20', time: '00:01' }, { date: '2026-10-20', time: '00:02' }] });
+  now += 60000; await service.tick();
+  const blocked = service.snapshot(scope).tasks[0]!; const tick = service.tick();
+  const ended = service.terminate(scope, task.id, blocked.revision);
+  expect(service.snapshot(scope).exceptions).toHaveLength(1);
+  now += 60000; finish({ status: 'queued' }); await tick;
+  expect(service.snapshot(scope).tasks[0]).toMatchObject({ state: 'ended', endedReason: 'terminated', endedAt: ended.endedAt, nextAt: null, enabled: false });
+  expect(service.snapshot(scope).exceptions).toHaveLength(0);
+});
+it('rejects termination while a claimed send is in progress', async () => {
+  let finish!: (value: { status: string }) => void;
+  const service = new ScheduledMessagesService({ store: new MemoryScheduledStore(), timeZone: 'UTC', now: () => Date.parse('2026-10-20T00:00:00Z'), deliver: async () => await new Promise(resolve => { finish = resolve; }) });
+  const task = service.create(target, { text: 'claimed', frequency: 'once', slots: [{ date: '2026-10-20', time: '00:01' }] });
+  const sending = service.trigger(scope, task.id, task.revision); const current = service.snapshot(scope).tasks[0]!;
+  expect(() => service.terminate(scope, task.id, current.revision)).toThrow(/being submitted/); finish({ status: 'queued' }); await sending;
+});
 describe('persistent server owned scheduling', () => {
   it('submits without clients, completes at admission and never resubmits after restart', async () => {
     const h = harness();

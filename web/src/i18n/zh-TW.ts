@@ -1,5 +1,14 @@
 // 繁體中文 strings. Missing keys fall back to English (see ./index.ts translate()).
 export default {
+"scheduled.inDuration": "{duration}後",
+"scheduled.durationSeparator": "",
+"scheduled.terminate": "終止",
+"scheduled.terminateConfirm": "終止後不再傳送，確認？",
+"scheduled.terminated": "已終止",
+"scheduled.durationDays": "{count}天",
+"scheduled.durationHours": "{count}小時",
+"scheduled.durationMinutes": "{count}分鐘",
+"scheduled.restoreFailed": "恢復結果待確認，請在列表核對狀態。",
 "scheduled.continueAfterLimit": "定時繼續",
 "scheduled.scheduleMessage": "定時傳送",
 "scheduled.chooseCutoff": "請選擇截止時間",

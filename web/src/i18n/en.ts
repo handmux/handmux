@@ -1,6 +1,15 @@
 // English strings (the default + fallback locale). Keys are namespaced by area: common.*, token.*,
 // settings.*, … Keep this file complete; other locales may omit keys and fall back here.
 export default {
+"scheduled.inDuration": "in {duration}",
+"scheduled.durationSeparator": " ",
+"scheduled.terminate": "Terminate",
+"scheduled.terminateConfirm": "End future sends?",
+"scheduled.terminated": "Terminated",
+"scheduled.durationDays": "{count}d",
+"scheduled.durationHours": "{count}h",
+"scheduled.durationMinutes": "{count}m",
+"scheduled.restoreFailed": "Restore result is unconfirmed. Check its status in the list.",
 "scheduled.continueAfterLimit": "Schedule continuation",
 "scheduled.scheduleMessage": "Schedule message",
 "scheduled.quickChoices": "Quick choices",

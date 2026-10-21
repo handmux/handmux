@@ -976,3 +976,19 @@ describe('scheduled manual trigger facade', () => {
     expect(scheduler.snapshot(scope).tasks.find(task => task.id === other.id)!.state).toBe('active'); await scheduler.close();
   });
 });
+
+it('terminates a persisted scoped task without a live run, shares its ended reason and rejects stale or cross-pane mutation', async () => {
+  const h = runtime(); const scope = { tmuxSession: 'work', paneId: '%1' };
+  const scheduler = new ScheduledMessagesService({ store: new MemoryScheduledStore(), timeZone: 'UTC', now: () => Date.parse('2026-10-20T00:00:00Z'), deliver: async () => ({ status: 'queued' }) });
+  Object.assign(h.value, { scheduledMessages: scheduler }); h.value.scheduledTarget = async () => { throw Error('must not need a run'); };
+  const task = scheduler.create({ ...scope, agentId: 'pi', sessionId: 'original' }, { text: 'stop', frequency: 'hourly', slots: [{ minute: 5 }], endsAt: '2026-10-21T00:00:00Z' });
+  const client = app(h.value);
+  expect((await request(client).post('/agents/scheduled-messages').send({ action: 'terminate', ...scope, paneId: '%2', id: task.id, revision: task.revision })).status).toBe(404);
+  expect((await request(client).post('/agents/scheduled-messages').send({ action: 'terminate', ...scope, id: task.id, revision: task.revision + 1 })).status).toBe(409);
+  const result = await request(client).post('/agents/scheduled-messages').send({ action: 'terminate', ...scope, id: task.id, revision: task.revision });
+  expect(result.status).toBe(200); expect(result.body).toMatchObject({ state: 'ended', endedReason: 'terminated', enabled: false, nextAt: null });
+  const otherClient = await request(client).post('/agents/scheduled-messages').send({ action: 'snapshot', ...scope });
+  expect(otherClient.body.tasks[0]).toMatchObject(result.body);
+  for (const action of ['trigger', 'update']) expect((await request(client).post('/agents/scheduled-messages').send({ action, ...scope, id: task.id, revision: result.body.revision, request: { enabled: true } })).status).toBe(409);
+  await scheduler.close();
+});
