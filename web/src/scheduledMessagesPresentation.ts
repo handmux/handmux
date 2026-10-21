@@ -62,6 +62,6 @@ export function scheduledRuleSummary(rule: ScheduledRule, includeFrequency = tru
 export function scheduledTaskTimeHint(task: ScheduledTask, serverNow: number): string {
   if (task.expired) return t('scheduled.expired');
   if (task.nextAt === null || task.blocked && task.nextAt <= serverNow) return '';
-  const duration = scheduledRelativeTime(task.nextAt, serverNow);
-  return !task.enabled && task.nextAt > serverNow ? t('scheduled.pausedReference', { duration }) : duration;
+  if (!task.enabled && task.nextAt > serverNow) return t('scheduled.pausedReference');
+  return scheduledRelativeTime(task.nextAt, serverNow);
 }

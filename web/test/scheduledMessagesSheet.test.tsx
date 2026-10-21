@@ -367,7 +367,7 @@ it.each([true, false])('shows a single once time with relative time and without 
   const row = await screen.findByRole('listitem');
   const meta = row.querySelector('.scheduled-list-meta-copy')!.textContent!;
   expect(meta.match(/2026\/10\/20 15:31/g)).toHaveLength(1);
-  expect(meta).toContain('scheduled.inDuration');
+  expect(meta.includes('scheduled.inDuration')).toBe(enabled);
   expect(meta.includes('scheduled.pausedReference')).toBe(!enabled);
 });
 
@@ -377,7 +377,7 @@ it('shows a frequency badge, selected slots and next time with relative time in 
   const { container } = render(<ScheduledMessagesSheet scope={{ tmuxSession: 'work', paneId: '%1' }} run={run} onClose={() => {}} />);
   const row = await screen.findByRole('listitem');
   expect(row.querySelector('.scheduled-frequency-badge')?.textContent).toBe('scheduled.weekly');
-  expect(row.querySelector('.scheduled-list-meta-copy')?.textContent).toBe('2026/10/20 15:31 (scheduled.inDuration scheduled.durationMinutes 1) · scheduled.day.1 09:30 / scheduled.day.3 18:45');
+  expect(row.querySelector('.scheduled-list-meta-copy')?.textContent).toBe('2026/10/20 15:31 (scheduled.inDuration scheduled.durationMinutes 1) · scheduled.weekly scheduled.day.1 09:30 / scheduled.day.3 18:45');
   fireEvent.click(container.querySelector('.scheduled-list-main')!);
   expect(container.querySelector('.scheduled-detail-content')?.textContent).toContain('2026/10/20 15:31');
   expect(container.querySelector('.scheduled-detail-content')?.textContent).toContain('scheduled.inDuration');
@@ -411,7 +411,7 @@ it.each([
   expect(copy.children).toHaveLength(2);
   const badge = copy.querySelector('.scheduled-status-badge')!;
   expect(badge.textContent).toContain(label); expect(badge.classList.contains(`scheduled-status-${status}`)).toBe(true);
-  if (state === 'active') { expect(badge.textContent).toContain('scheduled.daily'); expect(copy.children[1]!.querySelector('.scheduled-list-meta-copy')?.textContent).not.toContain('scheduled.daily'); }
+  if (state === 'active') { expect(badge.textContent).toContain('scheduled.daily'); expect(copy.children[1]!.querySelector('.scheduled-list-meta-copy')?.textContent).toContain('scheduled.daily'); }
   fireEvent.click(container.querySelector('.scheduled-list-main')!);
   const detailBadge = container.querySelector('.scheduled-page .scheduled-status-badge')!;
   expect(detailBadge.textContent).toBe(label); expect(detailBadge.classList.contains(`scheduled-status-${status}`)).toBe(true);

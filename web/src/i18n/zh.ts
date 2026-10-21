@@ -2,7 +2,7 @@
 export default {
 "scheduled.expired": "已过期",
 "scheduled.resumeExpired": "恢复（已过期）",
-"scheduled.pausedReference": "{duration} · 未生效",
+"scheduled.pausedReference": "未生效",
 "scheduled.minuteSlot": "第{minute}分",
 "scheduled.inDuration": "{duration}后",
 "scheduled.durationSeparator": "",
