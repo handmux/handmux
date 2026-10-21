@@ -19,6 +19,36 @@ export interface ChangelogEntry {
 // `entryId`/`LATEST_RELEASE` use `version` when present, else `date`, as the stable unread-dot id.
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '0.36.0',
+    date: '2026-10-22',
+    highlight: {
+      zh: '对话定时消息 · 限额后定时继续',
+      en: 'Scheduled messages · plan a retry after usage limits',
+    },
+    items: {
+      zh: [
+        '对话新增定时消息，支持一次性、每小时、每天、每周和循环截止时间；同一分屏多端共享，关闭客户端后服务器仍会发送。',
+        '定时任务支持手动触发、暂停、终止、编辑时自动暂停和复制已结束消息，发送异常可独立处理。',
+        '限额提示可打开定时继续草稿，可靠恢复时间后预留一分钟；保存才创建任务，不自动重试。',
+        '手动与定时消息共用 20 条待发上限，循环会跳过待发的相同正文；确认分屏删除后清理其定时记录，不影响已入队消息或对话历史。',
+        '用量重置倒计时旁显示本地日期和时间，并以“约”标注预计时刻。',
+        '修复网页预览窄屏宽度不足、电脑初次打开布局过窄的问题，保留强制宽屏。',
+        '修复到期设备仍占用名称的问题，终端遇到重名时提示换名。',
+        '修复终端模式下检测到新构建却不显示刷新提示的问题。',
+      ],
+      en: [
+        'Added one-time, hourly, daily, and weekly conversation messages with a recurrence cutoff; clients share schedules for the same pane, and the server sends them while clients are closed.',
+        'Schedules support manual triggers, pause, termination, automatic pausing during edits, copying ended messages, and independent handling of delivery exceptions.',
+        'Usage-limit notices can open a retry draft one minute after a reliable recovery time; a schedule is created only when saved, with no automatic retry.',
+        'Manual and scheduled messages share a 20-message pending limit; recurring messages skip identical pending content, and confirmed pane removal clears schedules without affecting queued messages or conversation history.',
+        'Usage reset countdowns now show an estimated local date and time, marked as approximate.',
+        'Fixed narrow web previews leaving unused width and desktop previews initially opening too narrow, while preserving forced wide mode.',
+        'Fixed expired devices blocking name reuse, with actionable name-conflict guidance in the terminal.',
+        'Fixed the refresh notice for a new build not appearing in terminal mode.',
+      ],
+    },
+  },
+  {
     version: '0.35.0',
     date: '2026-10-20',
     highlight: {
