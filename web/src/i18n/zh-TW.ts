@@ -1,5 +1,7 @@
 // 繁體中文 strings. Missing keys fall back to English (see ./index.ts translate()).
 export default {
+"scheduled.chooseCutoff": "請選擇截止時間",
+"scheduled.quickChoices": "快捷選擇",
 "scheduled.minuteUnit": "分",
 "scheduled.cycle": "循環",
 "scheduled.noRepeat": "無",

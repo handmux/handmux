@@ -1,5 +1,7 @@
 // 日本語 strings. Missing keys fall back to English (see ./index.ts translate()).
 export default {
+"scheduled.chooseCutoff": "終了日時を選択してください",
+"scheduled.quickChoices": "クイック選択",
 "scheduled.minuteUnit": "分",
 "scheduled.cycle": "繰り返し",
 "scheduled.noRepeat": "なし",

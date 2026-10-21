@@ -120,13 +120,15 @@
 .scheduled-sheet .scheduled-tabs .file-seg-btn { flex: 1; min-width: 0; border-radius: 8px; }
 .scheduled-sheet .scheduled-tabs .file-seg-btn.on { background: var(--ct-chip); box-shadow: 0 1px 3px rgba(0,0,0,.12); }
 .scheduled-editor-fields { margin: 0 auto; border: 0; min-inline-size: 0; }
-.scheduled-sheet .scheduled-cutoff-presets .fontbtn { border: .5px solid var(--ct-line); background: var(--ct-chip-2); color: var(--ct-accent); font: inherit; }
+.scheduled-sheet .scheduled-cutoff-presets .fontbtn,
+.scheduled-picker-layer .scheduled-cutoff-presets .fontbtn { border: .5px solid var(--ct-line); background: var(--ct-chip-2); color: var(--ct-accent); font: inherit; }
 .scheduled-overlay-layer .settings-head { border-color: var(--ct-line); }
 .scheduled-overlay-layer .sheet-cancel { min-height: 44px; border: .5px solid var(--ct-line); border-radius: 10px; background: var(--ct-chip-2); color: var(--ct-accent); }
 .scheduled-head-action:not(:disabled):active, .scheduled-back:active, .scheduled-close:active,
 .scheduled-list-main:active, .scheduled-row-action:not(:disabled):active, .scheduled-more:not(:disabled):active,
 .scheduled-sheet .scheduled-dropdown-toggle:not(:disabled):active { background: var(--ct-chip-2); }
 .scheduled-sheet .scheduled-cutoff-presets .fontbtn:not(:disabled):active,
+.scheduled-picker-layer .scheduled-cutoff-presets .fontbtn:not(:disabled):active,
 .scheduled-overlay-layer .sheet-action:not(:disabled):active, .scheduled-overlay-layer .sheet-cancel:active { background: color-mix(in srgb, var(--ct-accent) 12%, var(--ct-chip)); }
 .scheduled-refresh-error { flex: none; display: flex; align-items: center; gap: 8px; padding: 0 14px; color: var(--ct-err-ink); font-size: 13px; }
 .scheduled-refresh-error span { flex: 1; min-width: 0; }
@@ -171,3 +173,8 @@
 .scheduled-picker-layer .scheduled-confirmed-picker { flex: 0 1 auto; min-height: 0; overflow-y: auto; }
 .scheduled-picker-layer .sheet-action, .scheduled-picker-layer .sheet-cancel { flex-shrink: 0; }
 .scheduled-picker-layer .scheduled-minute-grid { min-height: 44px; flex-shrink: 1; }
+.scheduled-cutoff-choice { display: flex; flex-direction: column; gap: 8px; padding: 12px; border: 1px solid var(--ct-line); border-radius: 10px; background: var(--ct-chip-2); cursor: pointer; }
+.scheduled-cutoff-choice-label { display: flex; align-items: center; justify-content: center; gap: 7px; color: var(--ct-accent); font-size: 14px; text-align: center; }
+.scheduled-cutoff-choice-label svg { width: 17px; height: 17px; flex: none; }
+.scheduled-cutoff-choice .scheduled-picker-input { background: var(--ct-chip); border-color: var(--ct-line); }
+.scheduled-quick-label { margin: 0 0 8px; color: var(--ct-muted); font-size: 12px; }

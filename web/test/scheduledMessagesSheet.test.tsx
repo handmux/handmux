@@ -481,11 +481,17 @@ it('cancels temporary cutoff presets outside without dirtying or previewing the 
   fireEvent.click(screen.getByRole('option', { name: 'scheduled.daily' }));
   fireEvent.click(screen.getByRole('button', { name: /^scheduled.cutoff / }));
   expect((screen.getByRole('button', { name: 'scheduled.confirm' }) as HTMLButtonElement).disabled).toBe(true);
+  const chooser = container.querySelector('.scheduled-cutoff-choice')!;
+  expect(chooser.textContent).toContain('scheduled.chooseCutoff');
+  const shortcuts = screen.getByText('scheduled.quickChoices');
+  expect(chooser.compareDocumentPosition(shortcuts) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  fireEvent.click(chooser);
+  expect(document.activeElement).toBe(screen.getByLabelText('scheduled.cutoff'));
   fireEvent.click(screen.getByRole('button', { name: 'scheduled.cutoffDays 7' }));
   await act(async () => { await new Promise(resolve => setTimeout(resolve, 250)); });
   expect(vi.mocked(scheduledRequest).mock.calls.filter(call => call[2] === 'preview')).toHaveLength(0);
   fireEvent.click(container.querySelector('.scheduled-picker-layer .settings-backdrop')!);
-  expect(screen.getByRole('button', { name: /^scheduled.cutoff / }).textContent).toBe('scheduled.choose');
+  expect(screen.getByRole('button', { name: /^scheduled.cutoff / }).textContent).toBe('scheduled.chooseCutoff');
   fireEvent.click(screen.getByRole('button', { name: /^scheduled.cutoff / }));
   expect((screen.getByLabelText('scheduled.cutoff') as HTMLInputElement).value).toBe('');
 });

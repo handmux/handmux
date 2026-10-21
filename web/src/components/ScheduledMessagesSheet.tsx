@@ -424,8 +424,8 @@ export default function ScheduledMessagesSheet({ scope, run, onClose, controller
         </div>)}
       {editor.frequency !== 'once' && <div className="settings-page-row">
         <span className="settings-page-row-label">{t('scheduled.cutoff')}</span>
-        <button type="button" className="scheduled-value-button" aria-label={`${t('scheduled.cutoff')} ${scheduledDisplayLocal(editor.endsAtLocal, true) || t('scheduled.choose')}`} onClick={() => openPicker('cutoff')}>
-          {scheduledDisplayLocal(editor.endsAtLocal, true) || t('scheduled.choose')}
+        <button type="button" className="scheduled-value-button" aria-label={`${t('scheduled.cutoff')} ${scheduledDisplayLocal(editor.endsAtLocal, true) || t('scheduled.chooseCutoff')}`} onClick={() => openPicker('cutoff')}>
+          {scheduledDisplayLocal(editor.endsAtLocal, true) || t('scheduled.chooseCutoff')}
         </button>
       </div>}
     </div>
@@ -466,9 +466,20 @@ export default function ScheduledMessagesSheet({ scope, run, onClose, controller
     onClose={closePicker} actions={[{ key: 'confirm', label: t('scheduled.confirm'), disabled: !pickerValid, onClick: confirmPicker }]}>
     <div className="scheduled-confirmed-picker">
       {picker.kind === 'cutoff' ? <>
-        <div className="scheduled-cutoff-presets">{[7, 30, 90].map(days => <button type="button" className="fontbtn" key={days}
-          onClick={() => setPicker({ ...picker, local: scheduledLocalInput(snapshot!.serverNow + days * 86400000, zone!) })}>{t('scheduled.cutoffDays', { days })}</button>)}</div>
-        <input className="scheduled-picker-input" type="datetime-local" aria-label={t('scheduled.cutoff')} value={picker.local} min={cutoffMin} max={cutoffMax} onChange={event => setPicker({ ...picker, local: event.target.value })} />
+        <label className="scheduled-cutoff-choice" onClick={event => {
+          const input = event.currentTarget.querySelector('input');
+          if (!input || event.target === input) return;
+          input.focus();
+          try { input.showPicker?.(); } catch { /* Keep native keyboard segments available. */ }
+        }}>
+          <span className="scheduled-cutoff-choice-label"><ClockIcon />{t(picker.local ? 'scheduled.cutoff' : 'scheduled.chooseCutoff')}</span>
+          <input className="scheduled-picker-input" type="datetime-local" aria-label={t('scheduled.cutoff')} value={picker.local} min={cutoffMin} max={cutoffMax} onChange={event => setPicker({ ...picker, local: event.target.value })} />
+        </label>
+        <div className="scheduled-cutoff-shortcuts">
+          <p className="scheduled-quick-label">{t('scheduled.quickChoices')}</p>
+          <div className="scheduled-cutoff-presets">{[7, 30, 90].map(days => <button type="button" className="fontbtn" key={days}
+            onClick={() => setPicker({ ...picker, local: scheduledLocalInput(snapshot!.serverNow + days * 86400000, zone!) })}>{t('scheduled.cutoffDays', { days })}</button>)}</div>
+        </div>
       </> : editor?.frequency === 'hourly' ? <div className="scheduled-minute-grid">{Array.from({ length: 60 }, (_, minute) =>
         <button type="button" key={minute} aria-pressed={picker.minute === minute} onClick={() => setPicker({ ...picker, minute })}>{String(minute).padStart(2, '0')}</button>)}</div> : <>
         {editor?.frequency === 'once' && <input className="scheduled-picker-input" type="date" aria-label={t('scheduled.date')} value={picker.date} onChange={event => setPicker({ ...picker, date: event.target.value })} />}
