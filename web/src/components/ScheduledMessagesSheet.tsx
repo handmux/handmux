@@ -268,6 +268,7 @@ export default function ScheduledMessagesSheet({ scope, run, onClose, controller
     : t(editor?.task ? 'scheduled.edit' : editor?.exception ? 'scheduled.reschedule' : 'scheduled.add');
   const activeCount = snapshot?.tasks.filter(task => task.state === 'active').length;
   const tasks = snapshot?.tasks.filter((task) => task.state === tab) ?? [];
+  if (tab === 'ended') tasks.sort((a, b) => (b.endedAt ?? b.lastAt ?? 0) - (a.endedAt ?? a.lastAt ?? 0));
   const items: Selection[] = tab === 'exceptions'
     ? (snapshot?.exceptions ?? []).map((item) => ({ kind: 'exception', item }))
     : tasks.map((item) => ({ kind: 'task', item }));

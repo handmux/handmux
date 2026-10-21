@@ -425,3 +425,19 @@ it.each([false, true])('copies only an ended message body into a fresh once edit
   await waitFor(() => expect(vi.mocked(scheduledRequest).mock.calls.find(call => call[2] === 'create')).toMatchObject([{ tmuxSession: 'work', paneId: '%1' }, run, 'create', { request: { text: task.text, frequency: 'once', slots: [{ date: '2026-10-21', time: '00:30' }] } }]));
   expect(task.rule.frequency).toBe('daily');
 });
+
+it('orders ended tasks by completion time descending without reordering the shared snapshot', () => {
+  const task: ScheduledTask = { id: 'base', revision: 1, text: '', target, timeZone: 'UTC', state: 'ended', enabled: false, nextAt: null, rule: { frequency: 'once', slots: [{ date: '2026-10-21', time: '09:00' }] } };
+  const tasks = [
+    { ...task, id: 'older', text: 'older completion', endedAt: serverNow - 60000 },
+    { ...task, id: 'unknown', text: 'unknown completion' },
+    { ...task, id: 'newest', text: 'newest completion', endedAt: serverNow },
+    { ...task, id: 'legacy', text: 'legacy completion', lastAt: serverNow - 30000 },
+  ];
+  const controller = { snapshot: { ...snapshot, tasks }, error: '', refresh: async () => {} };
+  render(<ScheduledMessagesSheet scope={{ tmuxSession: 'work', paneId: '%1' }} run={run} onClose={() => {}} controller={controller} />);
+  fireEvent.click(screen.getByRole('tab', { name: 'scheduled.ended' }));
+  expect(screen.getAllByRole('listitem').map(row => row.querySelector('.scheduled-list-summary')?.textContent))
+    .toEqual(['newest completion', 'legacy completion', 'older completion', 'unknown completion']);
+  expect(tasks.map(task => task.id)).toEqual(['older', 'unknown', 'newest', 'legacy']);
+});
