@@ -17,6 +17,39 @@ function absoluteTime(value: unknown): number | undefined {
   return validTime(at) ? at : undefined;
 }
 
+/** Codex local text follows the server timezone by the user's explicit scheduling policy. */
+function textResetTime(message: string, occurredAt?: number): number | undefined {
+  const source = message.replace(/\s+/g, ' ').trim();
+  // Official format_retry_timestamp: full date outside today, clock only on the event's local day.
+  // https://github.com/openai/codex/blob/c419fd01a70dd1d05356da443ac44328bda2e6f4/codex-rs/protocol/src/error.rs
+  const full = source.match(/\b(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+(\d{1,2})(?:st|nd|rd|th)?,?\s+(\d{4})\s+(\d{1,2}):(\d{2})(?:\s*(AM|PM))?([^\r\n]*)/i);
+  const short = full ? null : source.match(/\btry\s+again\s+at\s+(\d{1,2}):(\d{2})(?:\s*(AM|PM))?([^\r\n]*)/i);
+  if (!full && (!short || occurredAt === undefined || !validTime(occurredAt))) return undefined;
+  const clock = full ? full.slice(4) : short!.slice(1);
+  const hour = Number(clock[0]); const minute = Number(clock[1]); const meridiem = clock[2]?.toUpperCase();
+  if (minute > 59 || (meridiem ? hour < 1 || hour > 12 : hour > 23)) return undefined;
+  const hours = meridiem ? hour % 12 + (meridiem === 'PM' ? 12 : 0) : hour;
+  // Inspect the entire suffix before sentence punctuation. Unknown/malformed explicit zones or
+  // AM/PM must fail closed, rather than being reinterpreted by a second bare-clock matcher.
+  const zone = (clock[3] ?? '').split(/[.!?;]/, 1)[0]!.trim();
+  if (zone && !/^(?:(?:UTC|GMT)?[+-]\d{2}:?\d{2}|Z|UTC|GMT)$/i.test(zone)) return undefined;
+  if (!full && zone) return undefined; // A dated, explicit-offset format is required for this path.
+  const event = new Date(occurredAt ?? 0);
+  const year = full ? Number(full[3]) : event.getFullYear();
+  const month = full ? ['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec'].indexOf(full[1]!.slice(0, 3).toLowerCase()) + 1 : event.getMonth() + 1;
+  const day = full ? Number(full[2]) : event.getDate();
+  if (zone) {
+    const offset = /^(?:Z|UTC|GMT)$/i.test(zone) ? 'Z' : zone.replace(/^(?:UTC|GMT)/i, '');
+    return absoluteTime(`${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}T${String(hours).padStart(2, '0')}:${String(minute).padStart(2, '0')}:00${offset}`);
+  }
+  const local = new Date(year, month - 1, day, hours, minute, 0, 0);
+  // Date normalizes invalid dates and spring-forward gaps; reject changed components.
+  if (local.getFullYear() !== year || local.getMonth() !== month - 1 || local.getDate() !== day
+    || local.getHours() !== hours || local.getMinutes() !== minute) return undefined;
+  const at = local.getTime();
+  return validTime(at) ? at : undefined;
+}
+
 /** Only called for native provider errors, never user/assistant content. */
 export function codexUsageLimitRecovery(value: unknown, occurredAt?: number): ConversationRecovery | undefined {
   const error = record(value);
@@ -30,25 +63,7 @@ export function codexUsageLimitRecovery(value: unknown, occurredAt?: number): Co
     const iso = message.match(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})/i)?.[0];
     retryAt = absoluteTime(iso);
   }
-  if (retryAt === undefined) {
-    // Codex's official format_retry_timestamp uses process Local. No process-TZ proof is retained
-    // for historical sessions, so bare local dates/times deliberately remain manual scheduling.
-    // https://github.com/openai/codex/blob/c419fd01a70dd1d05356da443ac44328bda2e6f4/codex-rs/protocol/src/error.rs
-    const date = message.match(/\b(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+(\d{1,2})(?:st|nd|rd|th)?,?\s+(\d{4})\s+(\d{1,2}):(\d{2})\s*(AM|PM)?\s*((?:UTC|GMT)?[+-]\d{2}:?\d{2}|Z|UTC|GMT)(?![+\w-])/i);
-    if (date) {
-      const hour = Number(date[4]); const minute = Number(date[5]);
-      const meridiem = date[6]?.toUpperCase();
-      if (minute < 60 && (meridiem ? hour >= 1 && hour <= 12 : hour < 24)) {
-        const hours = meridiem ? hour % 12 + (meridiem === 'PM' ? 12 : 0) : hour;
-        const month = ['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec'].indexOf(date[1]!.slice(0, 3).toLowerCase()) + 1;
-        const day = Number(date[2]); const year = Number(date[3]);
-        if (day >= 1 && day <= new Date(Date.UTC(year, month, 0)).getUTCDate()) {
-          const offset = /^(?:Z|UTC|GMT)$/i.test(date[7]!) ? 'Z' : date[7]!.replace(/^(?:UTC|GMT)/i, '');
-          retryAt = absoluteTime(`${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}T${String(hours).padStart(2, '0')}:${String(minute).padStart(2, '0')}:00${offset}`);
-        }
-      }
-    }
-  }
+  if (retryAt === undefined) retryAt = textResetTime(message, occurredAt);
   if (retryAt === undefined && occurredAt !== undefined && validTime(occurredAt)) {
     const relative = message.match(/\btry again in\s+(\d+(?:\.\d+)?)\s*(seconds?|minutes?|hours?)\b/i);
     if (relative) {

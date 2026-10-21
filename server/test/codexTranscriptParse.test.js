@@ -529,3 +529,12 @@ it('preserves usage-limit metadata on real warnings without treating quoted user
   expect(parsed[0].recovery).toEqual({ kind: 'usage_limit', retryAt: Date.parse('2026-10-20T16:53:00Z') });
   expect(parsed[1].recovery).toBeUndefined();
 });
+
+it('anchors short warning clocks to the original history event date when history is reopened', () => {
+  const source = JSON.stringify({ timestamp: '2026-12-31T23:30:00Z', type: 'event_msg', payload: { type: 'task_complete', error: { message: 'Try again at 11:09 AM.', codex_error_info: 'usage_limit_exceeded' } } });
+  const original = parseCodexTranscript([source])[0].recovery;
+  expect(original?.retryAt).toBeTypeOf('number');
+  const dateParts = at => Object.fromEntries(new Intl.DateTimeFormat('en-CA', { year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(at).map(part => [part.type, part.value]));
+  expect(dateParts(original.retryAt)).toEqual(dateParts(Date.parse('2026-12-31T23:30:00Z')));
+  expect(parseCodexTranscript([source])[0].recovery).toEqual(original);
+});
