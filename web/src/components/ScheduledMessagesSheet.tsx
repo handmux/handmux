@@ -73,20 +73,19 @@ function sameRowSelection(left: Selection, right: Selection): boolean {
   return false;
 }
 interface ScheduledRowProps {
-  selection: Selection; relativeTime: string; language: string; saving: boolean; pendingAction: string | undefined;
+  selection: Selection; language: string; saving: boolean; pendingAction: string | undefined;
   onDetail(key: SelectionKey): void; onEdit(key: SelectionKey): void; onMenu(key: SelectionKey): void;
 }
-const ScheduledMessageRow = memo(function ScheduledMessageRow({ selection, relativeTime, saving, pendingAction, onDetail, onEdit, onMenu }: ScheduledRowProps) {
+const ScheduledMessageRow = memo(function ScheduledMessageRow({ selection, saving, pendingAction, onDetail, onEdit, onMenu }: ScheduledRowProps) {
   const { item } = selection;
   const key = { kind: selection.kind, id: item.id };
   const isException = selection.kind === 'exception';
   const task = selection.kind === 'task' ? selection.item : null;
   const exception = selection.kind === 'exception' ? selection.item : null;
   const at = task ? scheduleDateTime(task.state === 'ended' ? task.endedAt : task.nextAt, task.timeZone) : '';
-  const next = `${at}${relativeTime ? ` (${relativeTime})` : ''}`;
   const metadata = exception ? `${scheduleDateTime(exception.scheduledAt, exception.timeZone)} · ${resultText(exception.reason)}`
     : task!.state === 'ended' ? `${at}${task!.endedReason === 'terminated' ? '' : ` · ${resultText(task!.lastResult ?? 'submitted')}`}`
-      : task!.rule.frequency === 'once' ? `${next} · ${scheduledRuleSummary(task!.rule)}` : `${scheduledRuleSummary(task!.rule)} · ${next}`;
+      : task!.rule.frequency === 'once' ? at : scheduledRuleSummary(task!.rule);
   const action = isException ? 'reschedule' : task!.state === 'ended' ? 'more' : 'edit';
   return <li aria-busy={!!pendingAction} className={`scheduled-list-row${task?.state === 'ended' ? ' scheduled-state-ended' : isException || task?.blocked ? ' scheduled-state-exception' : ''}`}>
     <button type="button" className="scheduled-list-main" onClick={() => onDetail(key)}>
@@ -101,7 +100,7 @@ const ScheduledMessageRow = memo(function ScheduledMessageRow({ selection, relat
       disabled={saving} onClick={() => onMenu(key)}><MoreHorizontalIcon /></button>
   </li>;
 
-}, (a, b) => a.language === b.language && a.relativeTime === b.relativeTime && a.saving === b.saving && a.pendingAction === b.pendingAction
+}, (a, b) => a.language === b.language && a.saving === b.saving && a.pendingAction === b.pendingAction
   && a.onDetail === b.onDetail && a.onEdit === b.onEdit && a.onMenu === b.onMenu && sameRowSelection(a.selection, b.selection));
 
 export interface ScheduledMessageInitialDraft { text: string; sendAt?: number }
@@ -456,7 +455,7 @@ export default function ScheduledMessagesSheet({ scope, run, onClose, controller
   const language = getLangCode();
   const renderList = () => <div className="scheduled-list-body">
       {items.length ? <ul className="scheduled-list">{items.map(selection => <ScheduledMessageRow key={`${selection.kind}:${selection.item.id}`} selection={selection}
-        relativeTime={selection.kind === 'task' && selection.item.state === 'active' && selection.item.nextAt != null && snapshot ? scheduledRelativeTime(selection.item.nextAt, snapshot.serverNow) : ''} language={language} saving={saving} pendingAction={pending?.id === selection.item.id && pending.kind === selection.kind ? pending.action : undefined}
+        language={language} saving={saving} pendingAction={pending?.id === selection.item.id && pending.kind === selection.kind ? pending.action : undefined}
         onDetail={rowDetail} onEdit={rowEdit} onMenu={rowMenu} />)}</ul> : <p className="scheduled-empty">{t(snapshot ? 'scheduled.empty' : 'scheduled.loading')}</p>}
     </div>;
 

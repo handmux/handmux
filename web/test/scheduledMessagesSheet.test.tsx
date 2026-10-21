@@ -360,6 +360,25 @@ it('marks ended rows and populated exception tabs with semantic subdued state co
   expect(screen.getByRole('listitem').classList.contains('scheduled-state-exception')).toBe(true);
 });
 
+it.each([true, false])('shows a single once time without duplicating rule dates or countdowns when enabled=%s', async enabled => {
+  const task: ScheduledTask = { id: 'single-time', revision: 1, text: 'one time', target, timeZone: 'UTC', state: 'active', enabled, nextAt: serverNow + 60000, rule: { frequency: 'once', slots: [{ date: '2026-10-20', time: '15:31' }] } };
+  mockApi({ ...snapshot, tasks: [task] });
+  render(<ScheduledMessagesSheet scope={{ tmuxSession: 'work', paneId: '%1' }} run={run} onClose={() => {}} />);
+  const row = await screen.findByRole('listitem');
+  expect(row.querySelector('.scheduled-list-meta-copy')?.textContent).toBe('2026/10/20 15:31');
+});
+
+it('shows only selected recurring slots in the list while keeping next time and countdown in detail', async () => {
+  const task: ScheduledTask = { id: 'slots-only', revision: 1, text: 'weekly task', target, timeZone: 'UTC', state: 'active', enabled: true, nextAt: serverNow + 60000, rule: { frequency: 'weekly', slots: [{ weekday: 1, time: '09:30' }, { weekday: 3, time: '18:45' }], endsAt: '2026-11-20T00:00:00Z' } };
+  mockApi({ ...snapshot, tasks: [task] });
+  const { container } = render(<ScheduledMessagesSheet scope={{ tmuxSession: 'work', paneId: '%1' }} run={run} onClose={() => {}} />);
+  const row = await screen.findByRole('listitem');
+  expect(row.querySelector('.scheduled-list-meta-copy')?.textContent).toBe('scheduled.weekly scheduled.day.1 09:30 / scheduled.day.3 18:45');
+  fireEvent.click(container.querySelector('.scheduled-list-main')!);
+  expect(container.querySelector('.scheduled-detail-content')?.textContent).toContain('2026/10/20 15:31');
+  expect(container.querySelector('.scheduled-detail-content')?.textContent).toContain('scheduled.inDuration');
+});
+
 it('omits redundant status badges and the detail status row for normally active tasks', async () => {
   const task: ScheduledTask = { id: 'active-no-badge', revision: 1, text: 'normal task', target, timeZone: 'UTC', state: 'active', enabled: true, nextAt: serverNow + 60000, rule: { frequency: 'daily', slots: [{ time: '09:00' }], endsAt: '2026-11-20T00:00:00Z' } };
   mockApi({ ...snapshot, tasks: [task] });
