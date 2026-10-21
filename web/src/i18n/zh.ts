@@ -2,8 +2,9 @@
 export default {
 "scheduled.expired": "已过期",
 "scheduled.resumeExpired": "恢复（已过期）",
-"scheduled.pausedReference": "未生效",
-"scheduled.minuteSlot": "第{minute}分",
+"scheduled.pausedReference": "--",
+"scheduled.nextExecution": "下次执行：{time}",
+"scheduled.minuteSlot": "{minute}分",
 "scheduled.inDuration": "{duration}后",
 "scheduled.durationSeparator": "",
 "scheduled.terminate": "终止",
@@ -48,7 +49,7 @@ export default {
 "scheduled.detail": "消息详情",
 "scheduled.lastResult": "最近结果",
 "scheduled.pane": "分屏 {pane}",
-"scheduled.hourlyMinute": "每小时第 {minute} 分",
+"scheduled.hourlyMinute": "每小时 {minute} 分",
 
 "scheduled.title": "定时消息",
 "scheduled.add": "新增",

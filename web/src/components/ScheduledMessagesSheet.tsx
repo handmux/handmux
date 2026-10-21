@@ -88,7 +88,7 @@ const ScheduledMessageRow = memo(function ScheduledMessageRow({ selection, timeH
   const recurring = task?.state === 'active' && task.rule.frequency !== 'once';
   const metadata = exception ? `${scheduleDateTime(exception.scheduledAt, exception.timeZone)} · ${resultText(exception.reason)}`
     : task!.state === 'ended' ? `${at}${task!.endedReason === 'terminated' ? '' : ` · ${resultText(task!.lastResult ?? 'submitted')}`}`
-      : task!.rule.frequency === 'once' ? next : `${next} · ${scheduledRuleSummary(task!.rule)}`;
+      : task!.rule.frequency === 'once' ? next : `${scheduledRuleSummary(task!.rule)}${timeHint ? ` (${timeHint})` : ''}`;
   const action = isException ? 'reschedule' : task!.state === 'ended' ? 'more' : 'edit';
   return <li aria-busy={!!pendingAction} className={`scheduled-list-row${task?.state === 'ended' ? ' scheduled-state-ended' : isException || task?.blocked ? ' scheduled-state-exception' : ''}`}>
     <button type="button" className="scheduled-list-main" onClick={() => onDetail(key)}>

@@ -103,12 +103,12 @@ it('shows one once timestamp with relative time and separates recurring frequenc
   const view = setup(true, once); await screen.findByRole('listitem');
   const meta = view.container.querySelector('.scheduled-list-meta-copy')!.textContent!;
   expect(meta.match(/2026\/10\/20 00:01/g)).toHaveLength(1);
-  expect(meta).toContain(`(${t('scheduled.inDuration', { duration: t('scheduled.durationMinutes', { count: 1 }) })})`);
+  expect(meta).toContain(`(${t('scheduled.nextExecution', { time: t('scheduled.inDuration', { duration: t('scheduled.durationMinutes', { count: 1 }) }) })})`);
   view.unmount();
   const cycle = setup(true); await screen.findByRole('listitem');
   expect(cycle.container.querySelector('.scheduled-frequency-badge')?.textContent).toBe(t('scheduled.hourly'));
-  expect(cycle.container.querySelector('.scheduled-list-meta-copy')?.textContent).toContain('2026/10/20 00:01');
-  expect(cycle.container.querySelector('.scheduled-list-meta-copy')?.textContent).toContain(t('scheduled.hourlyMinute', { minute: '01' }));
+  expect(cycle.container.querySelector('.scheduled-list-meta-copy')?.textContent).not.toContain('2026/10/20 00:01');
+  expect(cycle.container.querySelector('.scheduled-list-meta-copy')?.textContent).toBe('每小时 01 分 (下次执行：1分钟后)');
 });
 it('labels expired paused once schedules and disables resume while normal editing stays paused', async () => {
   const expired: ScheduledTask = { ...task, enabled: false, expired: true, nextAt: now - 60000, rule: { frequency: 'once', slots: [{ date: '2026-10-19', time: '23:59' }] } };
@@ -146,4 +146,13 @@ it.each(['daily', 'weekly'] as const)('keeps the full %s frequency alongside sel
   await screen.findByRole('listitem');
   const meta = view.container.querySelector('.scheduled-list-meta-copy')!.textContent!;
   expect(meta).toContain(`${t(`scheduled.${frequency}`)} ${frequency === 'weekly' ? `${t('scheduled.day.1')} ` : ''}09:30`);
+});
+
+it.each([true, false])('puts the recurrence before the next-execution hint when enabled=%s', async enabled => {
+  const view = setup(enabled, { ...task, rule: { frequency: 'daily', slots: [{ time: '09:30' }], endsAt: '2026-10-21T00:00:00Z' } });
+  await screen.findByRole('listitem');
+  const hint = enabled ? '下次执行：1分钟后' : '下次执行：--';
+  expect(view.container.querySelector('.scheduled-list-meta-copy')?.textContent).toBe(`每天 09:30 (${hint})`);
+  fireEvent.click(view.container.querySelector('.scheduled-list-main')!);
+  expect(view.container.querySelector('.scheduled-detail-content')?.textContent).toContain(`(${hint})`);
 });

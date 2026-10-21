@@ -3,7 +3,8 @@
 export default {
 "scheduled.expired": "Expired",
 "scheduled.resumeExpired": "Resume (expired)",
-"scheduled.pausedReference": "Not active",
+"scheduled.pausedReference": "--",
+"scheduled.nextExecution": "Next run: {time}",
 "scheduled.minuteSlot": "Minute {minute}",
 "scheduled.inDuration": "in {duration}",
 "scheduled.durationSeparator": " ",

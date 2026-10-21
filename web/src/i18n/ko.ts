@@ -2,7 +2,8 @@
 export default {
 "scheduled.expired": "만료됨",
 "scheduled.resumeExpired": "재개 (만료됨)",
-"scheduled.pausedReference": "비활성",
+"scheduled.pausedReference": "--",
+"scheduled.nextExecution": "다음 실행: {time}",
 "scheduled.minuteSlot": "{minute}분",
 "scheduled.inDuration": "{duration} 후",
 "scheduled.durationSeparator": " ",
