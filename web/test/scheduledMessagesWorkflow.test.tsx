@@ -156,3 +156,11 @@ it.each([true, false])('puts the recurrence before the next-execution hint when 
   fireEvent.click(view.container.querySelector('.scheduled-list-main')!);
   expect(view.container.querySelector('.scheduled-detail-content')?.textContent).toContain(`(${hint})`);
 });
+
+it.each([false, true])('offers termination without deletion for active tasks in detail=%s', async detail => {
+  const view = setup(); await screen.findByRole('listitem');
+  if (detail) fireEvent.click(view.container.querySelector('.scheduled-list-main')!);
+  fireEvent.click(screen.getByRole('button', { name: t('scheduled.more') }));
+  expect(screen.queryByRole('button', { name: t('scheduled.delete') })).toBeNull();
+  expect(screen.getByRole('button', { name: t('scheduled.terminate') })).toBeTruthy();
+});

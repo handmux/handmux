@@ -418,11 +418,11 @@ export default function ScheduledMessagesSheet({ scope, run, onClose, controller
       key: 'copy', label: t('scheduled.copy'), disabled: saving || !run || !snapshot,
       onClick: () => { const text = menu.item.text; closeMenu(); edit(undefined, undefined, text); },
     }] : []),
-    {
+    ...(menu.item.state === 'ended' ? [{
       key: 'delete', label: t('scheduled.delete'), danger: true, confirm: true,
-      confirmLabel: t(menu.item.state === 'ended' ? 'scheduled.clearRecordConfirm' : 'scheduled.deleteConfirm'), disabled: saving,
+      confirmLabel: t('scheduled.clearRecordConfirm'), disabled: saving,
       onClick: () => { const task = menu.item; closeMenu(); void mutate('delete', { id: task.id, revision: task.revision }, page === 'detail' ? returnToList : undefined); },
-    },
+    }] : []),
   ] : menu ? [{
     key: 'discard', label: t('scheduled.discard'), danger: true, confirm: true,
     confirmLabel: t('scheduled.discardException'), disabled: saving,

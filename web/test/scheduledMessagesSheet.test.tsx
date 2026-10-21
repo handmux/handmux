@@ -278,8 +278,13 @@ it.each(['active', 'ended'] as const)('uses the correct %s delete explanation fr
   expect(container.textContent).not.toContain('hidden-session-uuid');
   expect(container.querySelector('.scheduled-subtitle')).toBeTruthy();
   fireEvent.click(screen.getByRole('button', { name: 'scheduled.more' }));
+  if (state === 'active') {
+    expect(screen.queryByRole('button', { name: 'scheduled.delete' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'scheduled.terminate' })).toBeTruthy();
+    return;
+  }
   fireEvent.click(screen.getByRole('button', { name: 'scheduled.delete' }));
-  expect(screen.getByRole('button', { name: state === 'ended' ? 'scheduled.clearRecordConfirm' : 'scheduled.deleteConfirm' })).toBeTruthy();
+  expect(screen.getByRole('button', { name: 'scheduled.clearRecordConfirm' })).toBeTruthy();
 });
 
 it('offers server-clock cutoff presets inline and blocks custom cutoffs beyond 365 days', async () => {
