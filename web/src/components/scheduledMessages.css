@@ -174,7 +174,5 @@
 .scheduled-picker-layer .sheet-action, .scheduled-picker-layer .sheet-cancel { flex-shrink: 0; }
 .scheduled-picker-layer .scheduled-minute-grid { min-height: 44px; flex-shrink: 1; }
 .scheduled-cutoff-choice { display: flex; flex-direction: column; gap: 8px; padding: 12px; border: 1px solid var(--ct-line); border-radius: 10px; background: var(--ct-chip-2); cursor: pointer; }
-.scheduled-cutoff-choice-label { display: flex; align-items: center; justify-content: center; gap: 7px; color: var(--ct-accent); font-size: 14px; text-align: center; }
-.scheduled-cutoff-choice-label svg { width: 17px; height: 17px; flex: none; }
 .scheduled-cutoff-choice .scheduled-picker-input { background: var(--ct-chip); border-color: var(--ct-line); }
 .scheduled-quick-label { margin: 0 0 8px; color: var(--ct-muted); font-size: 12px; }

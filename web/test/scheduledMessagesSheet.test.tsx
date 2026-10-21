@@ -482,7 +482,7 @@ it('cancels temporary cutoff presets outside without dirtying or previewing the 
   fireEvent.click(screen.getByRole('button', { name: /^scheduled.cutoff / }));
   expect((screen.getByRole('button', { name: 'scheduled.confirm' }) as HTMLButtonElement).disabled).toBe(true);
   const chooser = container.querySelector('.scheduled-cutoff-choice')!;
-  expect(chooser.textContent).toContain('scheduled.chooseCutoff');
+  expect(chooser.textContent).toBe('');
   const shortcuts = screen.getByText('scheduled.quickChoices');
   expect(chooser.compareDocumentPosition(shortcuts) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   fireEvent.click(chooser);

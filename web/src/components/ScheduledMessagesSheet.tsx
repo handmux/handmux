@@ -472,7 +472,6 @@ export default function ScheduledMessagesSheet({ scope, run, onClose, controller
           input.focus();
           try { input.showPicker?.(); } catch { /* Keep native keyboard segments available. */ }
         }}>
-          <span className="scheduled-cutoff-choice-label"><ClockIcon />{t(picker.local ? 'scheduled.cutoff' : 'scheduled.chooseCutoff')}</span>
           <input className="scheduled-picker-input" type="datetime-local" aria-label={t('scheduled.cutoff')} value={picker.local} min={cutoffMin} max={cutoffMax} onChange={event => setPicker({ ...picker, local: event.target.value })} />
         </label>
         <div className="scheduled-cutoff-shortcuts">
