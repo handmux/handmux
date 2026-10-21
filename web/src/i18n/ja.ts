@@ -1,5 +1,8 @@
 // 日本語 strings. Missing keys fall back to English (see ./index.ts translate()).
 export default {
+"scheduled.minuteUnit": "分",
+"scheduled.cycle": "繰り返し",
+"scheduled.noRepeat": "なし",
 "scheduled.saving": "保存中…",
 "scheduled.submitting": "送信中…",
 "scheduled.saved": "保存しました",

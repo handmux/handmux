@@ -138,3 +138,36 @@
 .scheduled-nav-forward { animation-name: bind-sheet-page-forward; }
 .scheduled-nav-back { animation-name: bind-sheet-page-back; }
 @media (prefers-reduced-motion: reduce) { .scheduled-nav-forward, .scheduled-nav-back { animation: none; } }
+
+/* Inline values share the existing Dropdown and confirmed ActionSheet shells. */
+.scheduled-editor-fields .settings-page-list { overflow: visible; }
+.scheduled-cycle-row { position: relative; z-index: 2; }
+.scheduled-cycle-row .dd { min-width: 112px; }
+.scheduled-cycle-row .dd-trigger { min-height: 44px; text-align: center; }
+.scheduled-cycle-row .dd-menu { left: auto; right: 0; min-width: 140px; }
+.scheduled-value-button { min-height: 44px; padding: 8px 12px; border: 0; border-radius: 9px; background: var(--ct-chip-2); color: var(--ct-accent); font: inherit; font-variant-numeric: tabular-nums; text-align: center; }
+.scheduled-inline-time { gap: 8px; }
+.scheduled-inline-time .scheduled-value-button { flex-shrink: 0; }
+.scheduled-weekdays { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); padding: 6px; gap: 2px; }
+.scheduled-weekdays button, .scheduled-minute-grid button { min-height: 44px; border: 0; border-radius: 8px; color: var(--ct-ink); background: transparent; font: inherit; text-align: center; }
+.scheduled-weekdays button[aria-pressed="true"], .scheduled-minute-grid button[aria-pressed="true"] { background: var(--ct-accent); color: white; }
+.scheduled-confirmed-picker { padding: 12px; display: flex; flex-direction: column; gap: 12px; }
+.scheduled-confirmed-picker .scheduled-picker-input { width: 100%; max-width: 100%; min-height: 44px; text-align: center; box-sizing: border-box; }
+.scheduled-minute-grid { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 2px; max-height: 44dvh; overflow-y: auto; font-variant-numeric: tabular-nums; }
+.scheduled-cycle-row .dd-trigger { background: var(--ct-chip-2); color: var(--ct-ink); border-color: var(--ct-line); }
+.scheduled-cycle-row .dd-menu { background: var(--ct-overlay); border-color: var(--ct-line); }
+.scheduled-cycle-row .dd-option { color: var(--ct-ink); min-height: 44px; }
+.scheduled-cycle-row .dd-option.is-selected { color: var(--ct-accent); }
+.scheduled-overlay-layer .settings-subtitle { color: var(--ct-muted); }
+.scheduled-overlay-layer .settings-section { border-color: var(--ct-line); }
+.scheduled-weekdays button { padding: 0; white-space: nowrap; font-size: 13px; }
+/* Native controls may keep the keyboard open: bound the whole panel to usable space. */
+.scheduled-picker-layer .settings-card {
+  top: calc((100dvh - var(--overlay-keyboard-inset, 0px)) / 2);
+  max-height: calc(100dvh - var(--overlay-keyboard-inset, 0px) - 24px);
+  box-sizing: border-box;
+}
+.scheduled-picker-layer .sheet-actions { flex: 0 1 auto; min-height: 0; }
+.scheduled-picker-layer .scheduled-confirmed-picker { flex: 0 1 auto; min-height: 0; overflow-y: auto; }
+.scheduled-picker-layer .sheet-action, .scheduled-picker-layer .sheet-cancel { flex-shrink: 0; }
+.scheduled-picker-layer .scheduled-minute-grid { min-height: 44px; flex-shrink: 1; }

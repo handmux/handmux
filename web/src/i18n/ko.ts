@@ -1,5 +1,8 @@
 // 한국어 strings. Missing keys fall back to English (see ./index.ts translate()).
 export default {
+"scheduled.minuteUnit": "분",
+"scheduled.cycle": "반복",
+"scheduled.noRepeat": "없음",
 "scheduled.saving": "저장 중…",
 "scheduled.submitting": "전송 중…",
 "scheduled.saved": "저장됨",

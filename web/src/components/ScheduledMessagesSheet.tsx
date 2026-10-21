@@ -7,13 +7,14 @@ import { scheduledDisplayLocal, scheduledLocalInput, scheduledOnceDefault, sched
 import { useScheduledMessagesSnapshot } from '../hooks/useScheduledMessagesSnapshot.js';
 import type { ScheduledMessagesSnapshotController } from '../hooks/useScheduledMessagesSnapshot.js';
 import { useHistoryLayer, unwindHistory } from '../hooks/useBackButton.js';
-import { ClockIcon, XIcon, CheckIcon, MoreHorizontalIcon, ChevronRightIcon, PlusIcon } from './icons.jsx';
+import { ClockIcon, XIcon, MoreHorizontalIcon, ChevronRightIcon, PlusIcon } from './icons.jsx';
 import ActionSheet from './ActionSheet.js';
+import Dropdown from './Dropdown.js';
 import { getLangCode, t } from '../i18n';
 import './scheduledMessages.css';
 
 type Page = 'list' | 'editor' | 'detail';
-type Dropdown = 'repeat' | 'time' | 'cutoff';
+type Picker = { kind: 'slot' | 'cutoff'; index: number; date: string; time: string; minute: number; local: string };
 type SelectionKey = { kind: 'task' | 'exception'; id: string };
 type PendingAction = { action: string; id?: string; kind: 'task' | 'exception'; navigation: number };
 type Selection = { kind: 'task'; item: ScheduledTask } | { kind: 'exception'; item: ScheduledException };
@@ -27,31 +28,12 @@ interface Editor {
 }
 interface Confirmation { message: string; action: () => void; label?: string }
 
-function NavRow({ label, value, onClick, expanded }: { label: string; value: string; onClick: () => void; expanded: boolean }) {
-  return <button type="button" className="settings-page-row scheduled-dropdown-toggle" aria-expanded={expanded} onClick={onClick}>
-    <span className="settings-page-row-label">{label}</span>
-    <span className="settings-page-row-trailing">
-      <span className="settings-page-row-value">{value}</span>
-      <span className="settings-page-chevron" aria-hidden="true"><ChevronRightIcon /></span>
-    </span>
-  </button>;
-}
 function StatusBadge({ selection }: { selection: Selection }) {
   const task = selection.kind === 'task' ? selection.item : null;
   const status = selection.kind === 'exception' || task?.state === 'exception' ? 'exception'
     : task?.state === 'ended' ? 'ended' : task?.blocked ? 'exception' : task?.enabled ? 'pending' : 'paused';
   const label = status === 'exception' ? 'scheduled.exception' : `scheduled.${status}`;
   return <span className={`scheduled-status-badge scheduled-status-${status}`}>{t(label)}</span>;
-}
-function CalendarInput({ type, label, value, min, max, onChange }: {
-  type: 'date' | 'datetime-local'; label: string; value: string; min?: string; max?: string; onChange: (value: string) => void;
-}) {
-  return <span className={`scheduled-calendar-input scheduled-calendar-${type}`}>
-    <span className="scheduled-picker-display" aria-hidden="true">{scheduledDisplayLocal(value, true) || t('scheduled.choose')}</span>
-    <input className="scheduled-picker-input" type={type} aria-label={label} value={value} min={min} max={max}
-      onClick={event => { try { event.currentTarget.showPicker?.(); } catch { /* Native keyboard/picker remains available. */ } }}
-      onChange={event => onChange(event.target.value)} />
-  </span>;
 }
 function ValueRow({ label, children }: { label: string; children: ReactNode }) {
   return <div className="settings-page-row settings-page-value-row">
@@ -127,8 +109,8 @@ export default function ScheduledMessagesSheet({ scope, run, onClose, controller
   const snapshot = source.snapshot;
   const [tab, setTab] = useState<'active' | 'ended' | 'exceptions'>('active');
   const [pages, setPages] = useState<Page[]>(['list']);
-  const [dropdown, setDropdown] = useState<Dropdown | null>(null);
-  const toggleDropdown = (value: Dropdown) => setDropdown(current => current === value ? null : value);
+  const [picker, setPicker] = useState<Picker | null>(null);
+  const frequencyDrafts = useRef<Partial<Record<ScheduledRule['frequency'], { slots: ScheduledRule['slots']; endsAtLocal: string }>>>({});
   const [editor, setEditor] = useState<Editor | null>(null);
   const [detailKey, setDetailKey] = useState<SelectionKey | null>(null);
   const [menuKey, setMenuKey] = useState<SelectionKey | null>(null);
@@ -240,6 +222,7 @@ export default function ScheduledMessagesSheet({ scope, run, onClose, controller
   const close = () => leave(onClose);
   useHistoryLayer(true, () => {
     historyDepth.current = Math.max(0, historyDepth.current - 1);
+    if (picker) { setPicker(null); return; }
     if (confirm) { setConfirm(null); return; }
     if (menu) { setMenuKey(null); return; }
     if (pagesRef.current.length > 1) {
@@ -297,19 +280,20 @@ export default function ScheduledMessagesSheet({ scope, run, onClose, controller
       slots: task ? structuredClone(task.rule.slots) : scheduledOnceDefault(snapshot.serverNow, timeZone),
       endsAtLocal: task?.rule.endsAt ? scheduledLocalInput(Date.parse(task.rule.endsAt), timeZone) : '',
     });
-    setDropdown(null); setDirty(copyText !== undefined); setError('');
+    frequencyDrafts.current = {}; setPicker(null); setDirty(copyText !== undefined); setError('');
     if (copyText !== undefined && page === 'detail') replacePages(['list', 'editor']);
     else enter('editor');
   };
   const chooseFrequency = (frequency: ScheduledRule['frequency']) => {
-    setDropdown(null);
     if (!editor || !snapshot || editor.frequency === frequency) return;
     const defaultSlot = scheduledOnceDefault(snapshot.serverNow, zone!)[0]!;
     const weekday = new Date(`${defaultSlot.date}T00:00:00Z`).getUTCDay() || 7;
     const slots = frequency === 'once' ? [defaultSlot]
       : frequency === 'hourly' ? [{ minute: Number(defaultSlot.time!.slice(3)) }]
         : frequency === 'weekly' ? [{ weekday, time: defaultSlot.time! }] : [{ time: defaultSlot.time! }];
-    change({ frequency, slots, ...(frequency === 'once' ? { endsAtLocal: '' } : {}) });
+    frequencyDrafts.current[editor.frequency] = { slots: structuredClone(editor.slots), endsAtLocal: editor.endsAtLocal };
+    const cached = frequencyDrafts.current[frequency];
+    change({ frequency, slots: cached?.slots ?? slots, endsAtLocal: cached?.endsAtLocal ?? (frequency === 'once' ? '' : editor.endsAtLocal) });
   };
   const refreshSnapshot = async () => {
     const epoch = ++refreshEpoch.current;
@@ -375,9 +359,6 @@ export default function ScheduledMessagesSheet({ scope, run, onClose, controller
     onClick: () => { const item = menu.item; closeMenu(); void mutate('exception', { id: item.id, revision: item.revision, request: { action: 'discard' } }, page === 'detail' ? returnToList : undefined); },
   }] : [];
 
-  const timeSummary = editor?.slots.map((slot) => editor.frequency === 'hourly'
-    ? t('scheduled.hourlyMinute', { minute: slot.minute })
-    : `${editor.frequency === 'weekly' ? `${t(`scheduled.day.${slot.weekday}`)} ` : slot.date ? `${scheduledDisplayLocal(slot.date, true)} ` : ''}${slot.time ?? ''}`).join('、') ?? '';
   const title = page === 'list' ? t('scheduled.title') : page === 'detail' ? t('scheduled.detail')
     : t(editor?.task ? 'scheduled.edit' : editor?.exception ? 'scheduled.reschedule' : 'scheduled.add');
   const activeCount = snapshot?.tasks.filter(task => task.state === 'active').length;
@@ -420,25 +401,33 @@ export default function ScheduledMessagesSheet({ scope, run, onClose, controller
       </div>
     </section>
     <section className="settings-page-group"><div className="settings-page-list">
-      {!editor.exception && <>
-        <NavRow label={t('scheduled.repeat')} value={t(`scheduled.${editor.frequency}`)} expanded={dropdown === 'repeat'} onClick={() => toggleDropdown('repeat')} />
-        {dropdown === 'repeat' && <div className="scheduled-dropdown settings-choice-list">{(['once', 'hourly', 'daily', 'weekly'] as const).map(frequency =>
-          <button type="button" key={frequency} className="settings-page-row settings-choice-row" aria-pressed={editor.frequency === frequency} onClick={() => chooseFrequency(frequency)}>
-            <span className="settings-page-row-label">{t(`scheduled.${frequency}`)}</span>
-            <span className="settings-choice-check" aria-hidden="true">{editor.frequency === frequency && <CheckIcon />}</span>
-          </button>)}</div>}
-      </>}
-      <NavRow label={t('scheduled.sendTime')} value={timeSummary} expanded={dropdown === 'time'} onClick={() => toggleDropdown('time')} />
-      {dropdown === 'time' && renderTimePicker()}
-      {editor.frequency !== 'once' && <>
-        <NavRow label={t('scheduled.cutoff')} value={scheduledDisplayLocal(editor.endsAtLocal, true) || t('scheduled.choose')} expanded={dropdown === 'cutoff'} onClick={() => toggleDropdown('cutoff')} />
-        {dropdown === 'cutoff' && <div className="scheduled-dropdown">
-          <div className="scheduled-cutoff-presets">{[7, 30, 90].map(days => <button type="button" key={days} className="fontbtn" onClick={() => change({ endsAtLocal: scheduledLocalInput(snapshot!.serverNow + days * 86400000, zone!) })}>{t('scheduled.cutoffDays', { days })}</button>)}</div>
-          <label className="settings-page-row scheduled-cutoff-row"><span className="settings-page-row-label">{t('scheduled.customCutoff')}</span>
-            <CalendarInput type="datetime-local" label={t('scheduled.cutoff')} value={editor.endsAtLocal} min={cutoffMin} max={cutoffMax}
-              onChange={value => change({ endsAtLocal: value })} /></label>
-        </div>}
-      </>}
+      {!editor.exception && <div className="settings-page-row scheduled-cycle-row">
+        <span className="settings-page-row-label">{t('scheduled.cycle')}</span>
+        <Dropdown value={editor.frequency} ariaLabel={t('scheduled.cycle')}
+          options={(['once', 'hourly', 'daily', 'weekly'] as const).map(value => ({ value, label: t(value === 'once' ? 'scheduled.noRepeat' : `scheduled.${value}`) }))}
+          onChange={value => chooseFrequency(value as ScheduledRule['frequency'])} />
+      </div>}
+      {editor.frequency === 'weekly' && <div className="scheduled-weekdays">{[1, 2, 3, 4, 5, 6, 7].map(weekday => {
+        const selected = editor.slots.some(slot => slot.weekday === weekday);
+        return <button type="button" key={weekday} aria-pressed={selected} onClick={() => change({ slots: selected
+          ? editor.slots.filter(slot => slot.weekday !== weekday)
+          : [...editor.slots, { weekday, time: scheduledOnceDefault(snapshot!.serverNow, zone!)[0]!.time! }] })}>{t(`scheduled.day.${weekday}`)}</button>;
+      })}</div>}
+      {editor.slots.map((slot, index) => ({ slot, index })).sort((a, b) => (a.slot.weekday ?? 0) - (b.slot.weekday ?? 0)).map(({ slot, index }) =>
+        <div className="settings-page-row scheduled-inline-time" key={index}>
+          <span className="settings-page-row-label">{editor.frequency === 'weekly' ? t(`scheduled.day.${slot.weekday}`) : t('scheduled.sendTime')}</span>
+          {editor.frequency === 'hourly' && <span>{t('scheduled.hourly')}</span>}
+          <button type="button" className="scheduled-value-button" aria-label={`${t('scheduled.sendTime')} ${index + 1}`} onClick={() => openPicker('slot', index)}>
+            {editor.frequency === 'once' ? `${scheduledDisplayLocal(slot.date ?? '', true)} ${slot.time ?? ''}` : editor.frequency === 'hourly' ? String(slot.minute ?? 0).padStart(2, '0') : slot.time}
+          </button>
+          {editor.frequency === 'hourly' && <span>{t('scheduled.minuteUnit')}</span>}
+        </div>)}
+      {editor.frequency !== 'once' && <div className="settings-page-row">
+        <span className="settings-page-row-label">{t('scheduled.cutoff')}</span>
+        <button type="button" className="scheduled-value-button" aria-label={`${t('scheduled.cutoff')} ${scheduledDisplayLocal(editor.endsAtLocal, true) || t('scheduled.choose')}`} onClick={() => openPicker('cutoff')}>
+          {scheduledDisplayLocal(editor.endsAtLocal, true) || t('scheduled.choose')}
+        </button>
+      </div>}
     </div>
       <div className="settings-page-footer" role="status">{cutoffOutOfRange ? t('scheduled.cutoffLimit') : preview?.nextAt
         ? `${t('scheduled.next')}: ${dateTime(preview.nextAt)}`
@@ -448,37 +437,45 @@ export default function ScheduledMessagesSheet({ scope, run, onClose, controller
 
   </fieldset>;
 
-  const renderTimePicker = () => editor && <div className="scheduled-dropdown">
-    {editor.frequency === 'weekly' && <section className="settings-page-group"><div className="settings-page-list">
-      {[1, 2, 3, 4, 5, 6, 7].map((weekday) => {
-        const selected = editor.slots.some((slot) => slot.weekday === weekday);
-        return <div className="settings-page-row scheduled-weekday-row" key={weekday}>
-          <button type="button" className="scheduled-weekday-choice" aria-pressed={selected} onClick={() => change({
-            slots: selected ? editor.slots.filter((slot) => slot.weekday !== weekday)
-              : [...editor.slots, { weekday, time: scheduledOnceDefault(snapshot!.serverNow, zone!)[0]!.time! }],
-          })}><span className="settings-choice-check" aria-hidden="true">{selected && <CheckIcon />}</span>{t(`scheduled.day.${weekday}`)}</button>
-          {editor.slots.map((slot, index) => slot.weekday === weekday && <input key={index} className="scheduled-picker-input" type="time" aria-label={`${t(`scheduled.day.${weekday}`)} ${t('scheduled.time')}`} value={slot.time ?? ''}
-            onChange={event => change({ slots: editor.slots.map((value, i) => i === index ? { ...value, time: event.target.value } : value) })} />)}
-        </div>;
-      })}
-    </div></section>}
-    {editor.frequency !== 'weekly' && editor.slots.map((slot, index) => <section className="settings-page-group" key={index}>
-      <div className="settings-page-list">
-        {editor.frequency === 'once' && <label className="settings-page-row">
-          <span className="settings-page-row-label">{t('scheduled.date')}</span>
-          <CalendarInput type="date" label={t('scheduled.date')} value={slot.date ?? ''}
-            onChange={date => change({ slots: editor.slots.map((value, i) => i === index ? { ...value, date } : value) })} />
-        </label>}
-        <label className="settings-page-row">
-          <span className="settings-page-row-label">{t(editor.frequency === 'hourly' ? 'scheduled.minute' : 'scheduled.time')}</span>
-          {editor.frequency === 'hourly' ? <input className="scheduled-picker-input" type="number" min="0" max="59"
-            aria-label={t('scheduled.minute')} value={slot.minute ?? 0} onChange={(event) => change({ slots: editor.slots.map((value, i) => i === index ? { minute: Number(event.target.value) } : value) })} />
-            : <input className="scheduled-picker-input" type="time" aria-label={t('scheduled.time')} value={slot.time ?? ''}
-              onChange={event => change({ slots: editor.slots.map((value, i) => i === index ? { ...value, time: event.target.value } : value) })} />}
-        </label>
-      </div>
-    </section>)}
-  </div>;
+  const openPicker = (kind: Picker['kind'], index = 0) => {
+    if (!editor) return;
+    const slot = editor.slots[index];
+    const active = document.activeElement;
+    if (active instanceof HTMLElement && active.closest('.scheduled-editor-fields')) active.blur();
+    pushLevel();
+    setPicker({ kind, index, date: slot?.date ?? '', time: slot?.time ?? '', minute: slot?.minute ?? 0, local: editor.endsAtLocal });
+  };
+  useLayoutEffect(() => {
+    if (picker?.kind !== 'slot' || editor?.frequency !== 'hourly') return;
+    const selected = document.querySelector<HTMLElement>('.scheduled-minute-grid [aria-pressed="true"]');
+    if (selected?.parentElement) selected.parentElement.scrollTop = Math.max(0, selected.offsetTop - selected.parentElement.offsetTop - selected.parentElement.clientHeight / 2);
+  }, [picker?.kind, editor?.frequency]);
+  const closePicker = () => { dropLevel(); setPicker(null); };
+  const confirmPicker = () => {
+    if (!picker || !editor) return;
+    if (picker.kind === 'cutoff') change({ endsAtLocal: picker.local });
+    else change({ slots: editor.slots.map((slot, index) => index !== picker.index ? slot : editor.frequency === 'once'
+      ? { ...slot, date: picker.date, time: picker.time } : editor.frequency === 'hourly'
+        ? { ...slot, minute: picker.minute } : { ...slot, time: picker.time }) });
+    closePicker();
+  };
+  const pickerValid = !!picker && (picker.kind === 'cutoff' ? !!picker.local && picker.local >= cutoffMin && picker.local <= cutoffMax : editor?.frequency === 'hourly' ? true : /^\d{2}:\d{2}$/.test(picker.time) && (editor?.frequency !== 'once' || /^\d{4}-\d{2}-\d{2}$/.test(picker.date)));
+  const pickerTitle = t(picker?.kind === 'cutoff' ? 'scheduled.cutoff' : editor?.frequency === 'hourly' ? 'scheduled.minute' : 'scheduled.sendTime');
+  const renderPicker = () => picker && <div className="scheduled-overlay-layer scheduled-picker-layer"><ActionSheet open title={pickerTitle}
+    {...(snapshot ? { subtitle: `${t('scheduled.serverTime')}: ${scheduledDisplayLocal(scheduledLocalInput(snapshot.serverNow, snapshot.timeZone))}` } : {})}
+    onClose={closePicker} actions={[{ key: 'confirm', label: t('scheduled.confirm'), disabled: !pickerValid, onClick: confirmPicker }]}>
+    <div className="scheduled-confirmed-picker">
+      {picker.kind === 'cutoff' ? <>
+        <div className="scheduled-cutoff-presets">{[7, 30, 90].map(days => <button type="button" className="fontbtn" key={days}
+          onClick={() => setPicker({ ...picker, local: scheduledLocalInput(snapshot!.serverNow + days * 86400000, zone!) })}>{t('scheduled.cutoffDays', { days })}</button>)}</div>
+        <input className="scheduled-picker-input" type="datetime-local" aria-label={t('scheduled.cutoff')} value={picker.local} min={cutoffMin} max={cutoffMax} onChange={event => setPicker({ ...picker, local: event.target.value })} />
+      </> : editor?.frequency === 'hourly' ? <div className="scheduled-minute-grid">{Array.from({ length: 60 }, (_, minute) =>
+        <button type="button" key={minute} aria-pressed={picker.minute === minute} onClick={() => setPicker({ ...picker, minute })}>{String(minute).padStart(2, '0')}</button>)}</div> : <>
+        {editor?.frequency === 'once' && <input className="scheduled-picker-input" type="date" aria-label={t('scheduled.date')} value={picker.date} onChange={event => setPicker({ ...picker, date: event.target.value })} />}
+        <input className="scheduled-picker-input" type="time" aria-label={t('scheduled.time')} value={picker.time} onChange={event => setPicker({ ...picker, time: event.target.value })} />
+      </>}
+    </div>
+  </ActionSheet></div>;
 
   const renderDetail = () => detail && <div className="settings-page-content scheduled-page-content">
     <section className="settings-page-group"><h2>{t('scheduled.message')}</h2>
@@ -528,6 +525,7 @@ export default function ScheduledMessagesSheet({ scope, run, onClose, controller
         <p className="settings-page-footer scheduled-zone-hint">{t('scheduled.taskTimeZone', { zone: page === 'detail' ? detail?.item.timeZone : zone })}</p>}
       </div>
     </section>
+    {renderPicker()}
     {menu && <div className="scheduled-overlay-layer"><ActionSheet key={`${menu.kind}:${menu.item.id}`} open title={t('scheduled.actions')} actions={menuActions} onClose={closeMenu} /></div>}
     {confirm && <div className="settings-confirm-backdrop scheduled-confirm-layer" onClick={dismissConfirm}>
       <div className="settings-confirm" role="alertdialog" aria-modal="true" aria-label={confirm.message}

@@ -1,6 +1,7 @@
 // English strings (the default + fallback locale). Keys are namespaced by area: common.*, token.*,
 // settings.*, … Keep this file complete; other locales may omit keys and fall back here.
 export default {
+"scheduled.minuteUnit": "min",
 "scheduled.saving": "Saving…",
 "scheduled.submitting": "Submitting…",
 "scheduled.saved": "Saved",
@@ -19,6 +20,8 @@ export default {
 "scheduled.shortcutActive": "{count} active",
 "scheduled.shortcutExceptions": "Unresolved exceptions",
 "scheduled.clearRecordConfirm": "Clear this record?",
+"scheduled.cycle": "Repeat",
+"scheduled.noRepeat": "None",
 "scheduled.repeat": "Repeat",
 "scheduled.sendTime": "Send time",
 "scheduled.choose": "Choose",

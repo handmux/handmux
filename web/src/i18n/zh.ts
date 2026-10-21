@@ -1,5 +1,6 @@
 // 中文 strings. Missing keys fall back to English (see ./index.ts translate()).
 export default {
+"scheduled.minuteUnit": "分",
 "scheduled.saving": "保存中…",
 "scheduled.submitting": "提交中…",
 "scheduled.saved": "已保存",
@@ -18,6 +19,8 @@ export default {
 "scheduled.shortcutActive": "{count} 个进行中",
 "scheduled.shortcutExceptions": "有待处理异常",
 "scheduled.clearRecordConfirm": "清理这条记录？",
+"scheduled.cycle": "循环",
+"scheduled.noRepeat": "无",
 "scheduled.repeat": "重复",
 "scheduled.sendTime": "发送时间",
 "scheduled.choose": "请选择",
