@@ -1,6 +1,10 @@
 // English strings (the default + fallback locale). Keys are namespaced by area: common.*, token.*,
 // settings.*, … Keep this file complete; other locales may omit keys and fall back here.
 export default {
+"scheduled.saving": "Saving…",
+"scheduled.submitting": "Submitting…",
+"scheduled.saved": "Saved",
+
 "scheduled.sendNow": "Send now",
 "scheduled.triggerOnce": "Trigger once",
 "scheduled.copy": "Copy",

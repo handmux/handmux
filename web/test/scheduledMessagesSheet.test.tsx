@@ -5,7 +5,7 @@ import ScheduledMessagesSheet from '../src/components/ScheduledMessagesSheet.js'
 import { scheduledRequest } from '../src/scheduledMessagesApi.js';
 import type { ScheduledSnapshot, ScheduledTask } from '../src/scheduledMessagesApi.js';
 vi.mock('../src/scheduledMessagesApi.js', () => ({ scheduledRequest: vi.fn() }));
-vi.mock('../src/i18n', () => ({ t: (key: string, values?: Record<string, unknown>) => values ? `${key} ${Object.values(values).join(' ')}` : key }));
+vi.mock('../src/i18n', () => ({ getLangCode: () => 'en', t: (key: string, values?: Record<string, unknown>) => values ? `${key} ${Object.values(values).join(' ')}` : key }));
 const run = { agentId: 'new-agent', paneId: '%1', runId: 'run', sessionId: 'hidden-session-uuid' };
 const target = { agentId: 'test', sessionId: 'hidden-session-uuid', paneId: '%1', tmuxSession: 'work' };
 const serverNow = Date.parse('2026-10-20T15:30:00Z');
@@ -111,6 +111,7 @@ it('reschedules an exception with server plus one-hour defaults and uses ActionS
   await waitFor(() => expect((screen.getByRole('button', { name: 'scheduled.save' }) as HTMLButtonElement).disabled).toBe(false));
   fireEvent.click(screen.getByRole('button', { name: 'scheduled.save' }));
   await waitFor(() => expect(vi.mocked(scheduledRequest).mock.calls.find((call) => call[2] === 'exception')?.[3]).toMatchObject({ id: 'exception', revision: 3, request: { action: 'reschedule', rule: { slots: [{ date: '2026-10-21', time: '00:30' }] } } }));
+  fireEvent.click(screen.getByRole('tab', { name: /^scheduled.exceptions/ }));
   fireEvent.click(await screen.findByRole('button', { name: 'scheduled.more' }));
   expect(screen.getByRole('dialog', { name: 'scheduled.actions' }).classList.contains('settings-card')).toBe(true);
   fireEvent.click(screen.getByRole('button', { name: 'scheduled.discard' }));
@@ -228,7 +229,8 @@ it.each(['create', 'refresh'] as const)('does not navigate again when a pending 
   fireEvent.click(screen.getByRole('button', { name: 'scheduled.save' }));
   await waitFor(() => expect(waiting).toBe(true));
   fireEvent.click(screen.getByRole('button', { name: 'common.close' }));
-  fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'scheduled.confirm' }));
+  if (stage === 'create') fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'scheduled.confirm' }));
+  else expect(screen.queryByRole('alertdialog')).toBeNull();
   await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
   expect(closed).toHaveBeenCalledOnce();
   const ownedUnwinds = unwind.mock.calls.length;

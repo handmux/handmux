@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import type { AgentRunRef } from '../agentCatalog.js';
 import { scheduledRequest } from '../scheduledMessagesApi.js';
@@ -9,11 +9,13 @@ import type { ScheduledMessagesSnapshotController } from '../hooks/useScheduledM
 import { useHistoryLayer, unwindHistory } from '../hooks/useBackButton.js';
 import { ClockIcon, XIcon, CheckIcon, MoreHorizontalIcon, ChevronRightIcon, PlusIcon } from './icons.jsx';
 import ActionSheet from './ActionSheet.js';
-import { t } from '../i18n';
+import { getLangCode, t } from '../i18n';
 import './scheduledMessages.css';
 
 type Page = 'list' | 'editor' | 'detail';
 type Dropdown = 'repeat' | 'time' | 'cutoff';
+type SelectionKey = { kind: 'task' | 'exception'; id: string };
+type PendingAction = { action: string; id?: string; kind: 'task' | 'exception'; navigation: number };
 type Selection = { kind: 'task'; item: ScheduledTask } | { kind: 'exception'; item: ScheduledException };
 interface Editor {
   task?: ScheduledTask;
@@ -58,6 +60,64 @@ function ValueRow({ label, children }: { label: string; children: ReactNode }) {
   </div>;
 }
 
+function scheduleDateTime(at: number | undefined | null, timeZone: string): string {
+  return at == null ? '—' : scheduledDisplayLocal(scheduledLocalInput(at, timeZone), true);
+}
+function resultText(reason: string): string {
+  const key = `scheduled.result.${reason}`;
+  return t(key) === key ? t('scheduled.result.failed') : t(key);
+}
+// Snapshot objects are new on each poll. Compare concrete row/draft fields, never revision alone.
+function sameRowSelection(left: Selection, right: Selection): boolean {
+  if (left.kind !== right.kind) return false;
+  const a = left.item; const b = right.item;
+  if (a.id !== b.id || a.revision !== b.revision || a.text !== b.text || a.timeZone !== b.timeZone
+    || a.target.agentId !== b.target.agentId || a.target.sessionId !== b.target.sessionId
+    || a.target.tmuxSession !== b.target.tmuxSession || a.target.paneId !== b.target.paneId) return false;
+  if (left.kind === 'task' && right.kind === 'task') {
+    const a = left.item; const b = right.item;
+    return a.state === b.state && a.enabled === b.enabled && a.blocked === b.blocked && a.claim?.at === b.claim?.at
+      && a.nextAt === b.nextAt && a.endedAt === b.endedAt && a.lastAt === b.lastAt && a.lastResult === b.lastResult
+      && a.rule.frequency === b.rule.frequency && a.rule.endsAt === b.rule.endsAt && a.rule.slots.length === b.rule.slots.length
+      && a.rule.slots.every((slot, index) => { const other = b.rule.slots[index]!; return slot.date === other.date && slot.time === other.time && slot.minute === other.minute && slot.weekday === other.weekday; });
+  }
+  if (left.kind === 'exception' && right.kind === 'exception') {
+    const a = left.item; const b = right.item;
+    return a.taskId === b.taskId && a.scheduledAt === b.scheduledAt && a.reason === b.reason && a.unknown === b.unknown
+      && a.count === b.count && a.missedThroughAt === b.missedThroughAt;
+  }
+  return false;
+}
+interface ScheduledRowProps {
+  selection: Selection; language: string; saving: boolean; pendingAction: string | undefined;
+  onDetail(key: SelectionKey): void; onEdit(key: SelectionKey): void; onMenu(key: SelectionKey): void;
+}
+const ScheduledMessageRow = memo(function ScheduledMessageRow({ selection, saving, pendingAction, onDetail, onEdit, onMenu }: ScheduledRowProps) {
+  const { item } = selection;
+  const key = { kind: selection.kind, id: item.id };
+  const isException = selection.kind === 'exception';
+  const task = selection.kind === 'task' ? selection.item : null;
+  const exception = selection.kind === 'exception' ? selection.item : null;
+  const metadata = exception ? `${scheduleDateTime(exception.scheduledAt, exception.timeZone)} · ${resultText(exception.reason)}`
+    : `${scheduleDateTime(task!.state === 'ended' ? task!.endedAt : task!.nextAt, task!.timeZone)} · ${task!.state === 'ended'
+      ? resultText(task!.lastResult ?? 'submitted') : t(`scheduled.${task!.rule.frequency}`)}`;
+  const action = isException ? 'reschedule' : task!.state === 'ended' ? 'more' : 'edit';
+  return <li aria-busy={!!pendingAction} className={`scheduled-list-row${task?.state === 'ended' ? ' scheduled-state-ended' : isException || task?.blocked ? ' scheduled-state-exception' : ''}`}>
+    <button type="button" className="scheduled-list-main" onClick={() => onDetail(key)}>
+      <span className="scheduled-list-copy">
+        <span className="scheduled-list-line scheduled-list-summary">{scheduledSummary(item.text)}</span>
+        <span className="scheduled-list-line scheduled-list-meta">{!!pendingAction ? <span className="scheduled-inline-status" role="status">{t(pendingAction === 'trigger' ? 'scheduled.submitting' : 'scheduled.saving')}</span> : <StatusBadge selection={selection} />}<span className="scheduled-list-meta-copy">{metadata}</span></span>
+      </span>
+    </button>
+    {action !== 'more' && <button type="button" className="scheduled-row-action" disabled={saving || exception?.unknown}
+      onClick={() => onEdit(key)}>{t(action === 'edit' ? 'scheduled.editAction' : `scheduled.${action}`)}</button>}
+    <button type="button" className="scheduled-more" aria-label={t('scheduled.more')}
+      disabled={saving} onClick={() => onMenu(key)}><MoreHorizontalIcon /></button>
+  </li>;
+
+}, (a, b) => a.language === b.language && a.saving === b.saving && a.pendingAction === b.pendingAction
+  && a.onDetail === b.onDetail && a.onEdit === b.onEdit && a.onMenu === b.onMenu && sameRowSelection(a.selection, b.selection));
+
 export default function ScheduledMessagesSheet({ scope, run, onClose, controller }: {
   scope: ScheduledScope; run: AgentRunRef | null; onClose: () => void;
   controller?: ScheduledMessagesSnapshotController;
@@ -70,12 +130,40 @@ export default function ScheduledMessagesSheet({ scope, run, onClose, controller
   const [dropdown, setDropdown] = useState<Dropdown | null>(null);
   const toggleDropdown = (value: Dropdown) => setDropdown(current => current === value ? null : value);
   const [editor, setEditor] = useState<Editor | null>(null);
-  const [detail, setDetail] = useState<Selection | null>(null);
-  const [menu, setMenu] = useState<Selection | null>(null);
+  const [detailKey, setDetailKey] = useState<SelectionKey | null>(null);
+  const [menuKey, setMenuKey] = useState<SelectionKey | null>(null);
+  const resolveSelection = (key: SelectionKey | null): Selection | null => {
+    if (!key || !snapshot) return null;
+    if (key.kind === 'task') { const item = snapshot.tasks.find(item => item.id === key.id); return item ? { kind: 'task', item } : null; }
+    const item = snapshot.exceptions.find(item => item.id === key.id); return item ? { kind: 'exception', item } : null;
+  };
+  const detail = resolveSelection(detailKey);
+  const menu = resolveSelection(menuKey);
   const [dirty, setDirty] = useState(false);
   const [confirm, setConfirm] = useState<Confirmation | null>(null);
   const [error, setError] = useState('');
-  const [saving, setSaving] = useState(false);
+  const [pending, setPending] = useState<PendingAction | null>(null);
+  const pendingRef = useRef<PendingAction | null>(null);
+  const saving = pending !== null;
+  const [feedback, setFeedback] = useState<string>('');
+  const [refreshError, setRefreshError] = useState('');
+  const [refreshing, setRefreshing] = useState(false);
+  const refreshEpoch = useRef(0);
+  const latestSnapshot = useRef(snapshot);
+  latestSnapshot.current = snapshot;
+  const failedRefreshSnapshot = useRef(snapshot);
+  useEffect(() => {
+    if (snapshot && !source.error && snapshot !== failedRefreshSnapshot.current) { setRefreshError(''); failedRefreshSnapshot.current = snapshot; }
+  }, [snapshot, source.error]);
+  useEffect(() => {
+    if (!feedback) return;
+    const timer = setTimeout(() => setFeedback(''), 2500);
+    return () => clearTimeout(timer);
+  }, [feedback]);
+  const navigationEpoch = useRef(0);
+  const [direction, setDirection] = useState<'forward' | 'back'>('forward');
+  const scrollBody = useRef<HTMLDivElement>(null);
+  const scrollPositions = useRef(new Map<string, number>());
   const [previewError, setPreviewError] = useState('');
   const [preview, setPreview] = useState<{ nextAt: number | null; timeZone: string } | null>(null);
   const mounted = useRef(true);
@@ -86,6 +174,17 @@ export default function ScheduledMessagesSheet({ scope, run, onClose, controller
   runRef.current = run;
   pagesRef.current = pages;
   const page = pages.at(-1)!;
+  const viewKey = page === 'list' ? `list:${tab}` : page === 'detail' ? `detail:${detailKey?.kind}:${detailKey?.id}` : 'editor';
+  const viewKeyRef = useRef(viewKey);
+  viewKeyRef.current = viewKey;
+  const rememberScroll = () => { if (viewKeyRef.current.startsWith('list:')) scrollPositions.current.set(viewKeyRef.current, scrollBody.current?.scrollTop ?? 0); };
+  useLayoutEffect(() => { if (scrollBody.current) scrollBody.current.scrollTop = page === 'list' ? scrollPositions.current.get(viewKey) ?? 0 : 0; }, [viewKey]);
+  const changeTab = (next: typeof tab) => {
+    if (tab === next) return;
+    rememberScroll(); navigationEpoch.current++; setError(''); setFeedback('');
+    setDirection(['active', 'ended', 'exceptions'].indexOf(next) > ['active', 'ended', 'exceptions'].indexOf(tab) ? 'forward' : 'back');
+    setTab(next);
+  };
   const zone = editor?.task?.timeZone ?? editor?.exception?.timeZone ?? snapshot?.timeZone;
 
   const request = <T,>(action: string, fields: Record<string, unknown> = {}) =>
@@ -114,25 +213,25 @@ export default function ScheduledMessagesSheet({ scope, run, onClose, controller
   const dropLevel = () => {
     if (historyDepth.current > 0) { historyDepth.current--; queueUnwind(1); }
   };
-  const replacePages = (next: Page[]) => { pagesRef.current = next; setPages(next); };
+  const replacePages = (next: Page[], motion: 'forward' | 'back' = 'forward') => { rememberScroll(); navigationEpoch.current++; setDirection(motion); setError(''); setFeedback(''); pagesRef.current = next; setPages(next); };
   const enter = (next: Page) => { pushLevel(); replacePages([...pagesRef.current, next]); };
   const popPage = (unwind = true) => {
     if (unwind) dropLevel();
     const previous = pagesRef.current.at(-1);
-    replacePages(pagesRef.current.slice(0, -1));
+    replacePages(pagesRef.current.slice(0, -1), 'back');
     if (previous === 'editor') { setEditor(null); setDirty(false); setError(''); }
   };
   const returnToList = () => {
     const depth = Math.min(pagesRef.current.length - 1, historyDepth.current);
     historyDepth.current -= depth;
     queueUnwind(depth);
-    replacePages(['list']);
-    setEditor(null); setDetail(null); setDirty(false); setError('');
+    replacePages(['list'], 'back');
+    setEditor(null); setDetailKey(null); setDirty(false); setError('');
   };
   const showConfirm = (value: Confirmation) => { pushLevel(); setConfirm(value); };
   const dismissConfirm = () => { dropLevel(); setConfirm(null); };
-  const closeMenu = () => { dropLevel(); setMenu(null); };
-  const openMenu = (selection: Selection) => { pushLevel(); setMenu(selection); };
+  const closeMenu = () => { dropLevel(); setMenuKey(null); };
+  const openMenu = (selection: Selection) => { pushLevel(); setMenuKey({ kind: selection.kind, id: selection.item.id }); };
   const leave = (action: () => void) => {
     if (dirty) showConfirm({ message: t('scheduled.discardChanges'), action });
     else action();
@@ -142,7 +241,7 @@ export default function ScheduledMessagesSheet({ scope, run, onClose, controller
   useHistoryLayer(true, () => {
     historyDepth.current = Math.max(0, historyDepth.current - 1);
     if (confirm) { setConfirm(null); return; }
-    if (menu) { setMenu(null); return; }
+    if (menu) { setMenuKey(null); return; }
     if (pagesRef.current.length > 1) {
       if (pagesRef.current.at(-1) === 'editor' && dirty) {
         pushLevel();
@@ -155,10 +254,16 @@ export default function ScheduledMessagesSheet({ scope, run, onClose, controller
     return () => { queueUnwind(historyDepth.current); historyDepth.current = 0; };
   }, []);
 
+  useEffect(() => {
+    if (!snapshot) return;
+    if (menuKey && !menu) closeMenu();
+    if (detailKey && !detail && page === 'detail') returnToList();
+  }, [snapshot, menuKey, detailKey, page]);
+
   const rule = useMemo(() => editor ? {
     frequency: editor.frequency, slots: editor.slots,
     ...(editor.frequency === 'once' ? {} : { endsAtLocal: editor.endsAtLocal }),
-  } : null, [editor]);
+  } : null, [editor?.frequency, editor?.slots, editor?.endsAtLocal]);
   const cutoffMin = snapshot && zone ? scheduledLocalInput(snapshot.serverNow, zone) : '';
   const cutoffMax = snapshot && zone ? scheduledLocalInput(snapshot.serverNow + 365 * 86400000, zone) : '';
   const cutoffOutOfRange = !!editor && editor.frequency !== 'once' && !!editor.endsAtLocal &&
@@ -178,11 +283,7 @@ export default function ScheduledMessagesSheet({ scope, run, onClose, controller
   }, [rule, zone, complete]);
 
   const dateTime = (at: number | undefined | null, timeZone = zone ?? snapshot?.timeZone) => at == null ? '—'
-    : scheduledDisplayLocal(scheduledLocalInput(at, timeZone!), true);
-  const resultText = (reason: string) => {
-    const key = `scheduled.result.${reason}`;
-    return t(key) === key ? t('scheduled.result.failed') : t(key);
-  };
+    : scheduleDateTime(at, timeZone!);
   const change = (update: Partial<Editor>) => {
     setEditor((current) => current ? { ...current, ...update } : current);
     setDirty(true);
@@ -210,37 +311,50 @@ export default function ScheduledMessagesSheet({ scope, run, onClose, controller
         : frequency === 'weekly' ? [{ weekday, time: defaultSlot.time! }] : [{ time: defaultSlot.time! }];
     change({ frequency, slots, ...(frequency === 'once' ? { endsAtLocal: '' } : {}) });
   };
+  const refreshSnapshot = async () => {
+    const epoch = ++refreshEpoch.current;
+    setRefreshing(true); setRefreshError('');
+    try { await reload(); }
+    catch (cause) { if (mounted.current && epoch === refreshEpoch.current) { failedRefreshSnapshot.current = latestSnapshot.current; setRefreshError(cause instanceof Error ? cause.message : t('scheduled.loadFailed')); } }
+    finally { if (mounted.current && epoch === refreshEpoch.current) setRefreshing(false); }
+  };
   const mutate = async (action: string, fields: Record<string, unknown>, after?: () => void) => {
-    if (saving) return;
-    setSaving(true); setError('');
+    if (pendingRef.current) return;
+    const operation: PendingAction = { action, ...(typeof fields.id === 'string' ? { id: fields.id } : {}), kind: action === 'exception' ? 'exception' : 'task', navigation: navigationEpoch.current };
+    pendingRef.current = operation; setPending(operation); setError(''); setFeedback('');
     try {
       await request(action, fields);
       if (!mounted.current) return;
-      await reload();
-      if (mounted.current) after?.();
-    }
-    catch (cause) {
+      // Acknowledgement finishes this draft/action. A later read failure must never reopen it.
+      if (operation.navigation === navigationEpoch.current) {
+        after?.();
+        setFeedback(t(action === 'trigger' ? 'scheduled.result.submitted' : action === 'delete' || (action === 'exception' && (fields.request as { action?: string } | undefined)?.action === 'discard') ? 'common.done' : 'scheduled.saved'));
+      }
+    } catch (cause) {
       if (!mounted.current) return;
-      setError(cause instanceof Error ? cause.message : t('scheduled.loadFailed'));
-      void reload().catch(() => {});
-    } finally { if (mounted.current) setSaving(false); }
+      if (operation.navigation === navigationEpoch.current) setError(cause instanceof Error ? cause.message : t('scheduled.loadFailed'));
+    } finally {
+      pendingRef.current = null;
+      if (mounted.current) { setPending(null); void refreshSnapshot(); }
+    }
   };
+  const savedToActive = () => { changeTab('active'); returnToList(); };
   const save = () => {
     if (!editor || !rule || !complete || !preview?.nextAt || !editor.text.trim()) return;
     if (editor.exception) void mutate('exception', {
       id: editor.exception.id, revision: editor.exception.revision, request: { action: 'reschedule', rule },
-    }, returnToList);
+    }, savedToActive);
     else if (editor.task) void mutate('update', {
       id: editor.task.id, revision: editor.task.revision, request: { ...rule, text: editor.text },
-    }, returnToList);
-    else void mutate('create', { request: { ...rule, text: editor.text } }, returnToList);
+    }, savedToActive);
+    else void mutate('create', { request: { ...rule, text: editor.text } }, savedToActive);
   };
 
   const menuActions = menu?.kind === 'task' ? [
     ...(menu.item.state === 'active' ? [{
       key: 'trigger', label: t(menu.item.rule.frequency === 'once' ? 'scheduled.sendNow' : 'scheduled.triggerOnce'),
       disabled: saving || menu.item.blocked === true || !!menu.item.claim,
-      onClick: () => { const task = menu.item; closeMenu(); void mutate('trigger', { id: task.id, revision: task.revision }, page === 'detail' ? returnToList : undefined); },
+      onClick: () => { const task = menu.item; closeMenu(); void mutate('trigger', { id: task.id, revision: task.revision }, () => { changeTab(task.rule.frequency === 'once' ? 'ended' : 'active'); if (page === 'detail') returnToList(); }); },
     }, {
       key: 'enabled', label: t(menu.item.enabled ? 'scheduled.pause' : 'scheduled.resume'),
       disabled: saving || menu.item.blocked === true,
@@ -272,41 +386,32 @@ export default function ScheduledMessagesSheet({ scope, run, onClose, controller
   const items: Selection[] = tab === 'exceptions'
     ? (snapshot?.exceptions ?? []).map((item) => ({ kind: 'exception', item }))
     : tasks.map((item) => ({ kind: 'task', item }));
-  const showDetail = (selection: Selection) => { setDetail(selection); enter('detail'); };
+  const showDetail = (selection: Selection) => { setDetailKey({ kind: selection.kind, id: selection.item.id }); enter('detail'); };
+  // Stable row callbacks dereference the current snapshot/clock/navigation rather than old render closures.
+  const rowActions = useRef<{ detail(key: SelectionKey): void; edit(key: SelectionKey): void; menu(key: SelectionKey): void } | null>(null);
+  rowActions.current = {
+    detail: key => { const selection = resolveSelection(key); if (selection) showDetail(selection); },
+    edit: key => { const selection = resolveSelection(key); if (selection?.kind === 'task') edit(selection.item); else if (selection) edit(undefined, selection.item); },
+    menu: key => { const selection = resolveSelection(key); if (selection) openMenu(selection); },
+  };
+  const rowDetail = useCallback((key: SelectionKey) => rowActions.current?.detail(key), []);
+  const rowEdit = useCallback((key: SelectionKey) => rowActions.current?.edit(key), []);
+  const rowMenu = useCallback((key: SelectionKey) => rowActions.current?.menu(key), []);
 
-  const renderList = () => <>
-    <div className="file-seg scheduled-tabs" role="tablist">
+
+  const renderTabs = () => <div className="file-seg scheduled-tabs" role="tablist">
       {(['active', 'ended', 'exceptions'] as const).map((value) => <button type="button" role="tab"
         aria-selected={tab === value} className={`file-seg-btn${tab === value ? ' on' : ''}${value === 'ended' ? ' scheduled-state-ended' : value === 'exceptions' && snapshot?.exceptions.length ? ' scheduled-state-exception' : ''}`}
-        key={value} onClick={() => setTab(value)}>{t(`scheduled.${value}`)}{snapshot && value !== 'ended' && <span className="scheduled-tab-count"> {value === 'active' ? activeCount : snapshot.exceptions.length}</span>}</button>)}
-    </div>
-    <div className="scheduled-list-body">
-      {items.length ? <ul className="scheduled-list">{items.map((selection) => {
-        const { item } = selection;
-        const isException = selection.kind === 'exception';
-        const task = selection.kind === 'task' ? selection.item : null;
-        const exception = selection.kind === 'exception' ? selection.item : null;
-        const metadata = exception ? `${dateTime(exception.scheduledAt, exception.timeZone)} · ${resultText(exception.reason)}`
-          : `${dateTime(task!.state === 'ended' ? task!.endedAt : task!.nextAt, task!.timeZone)} · ${task!.state === 'ended'
-            ? resultText(task!.lastResult ?? 'submitted') : t(`scheduled.${task!.rule.frequency}`)}`;
-        const action = isException ? 'reschedule' : task!.state === 'ended' ? 'more' : 'edit';
-        return <li className={`scheduled-list-row${task?.state === 'ended' ? ' scheduled-state-ended' : isException || task?.blocked ? ' scheduled-state-exception' : ''}`} key={`${selection.kind}:${item.id}`}>
-          <button type="button" className="scheduled-list-main" onClick={() => showDetail(selection)}>
-            <span className="scheduled-list-copy">
-              <span className="scheduled-list-line scheduled-list-summary">{scheduledSummary(item.text)}</span>
-              <span className="scheduled-list-line scheduled-list-meta"><StatusBadge selection={selection} /><span className="scheduled-list-meta-copy">{metadata}</span></span>
-            </span>
-          </button>
-          {action !== 'more' && <button type="button" className="scheduled-row-action" disabled={saving || exception?.unknown}
-            onClick={() => edit(task ?? undefined, exception ?? undefined)}>{t(action === 'edit' ? 'scheduled.editAction' : `scheduled.${action}`)}</button>}
-          <button type="button" className="scheduled-more" aria-label={t('scheduled.more')}
-            disabled={saving} onClick={() => openMenu(selection)}><MoreHorizontalIcon /></button>
-        </li>;
-      })}</ul> : <p className="scheduled-empty">{t(snapshot ? 'scheduled.empty' : 'scheduled.loading')}</p>}
-    </div>
-  </>;
+        key={value} onClick={() => changeTab(value)}>{t(`scheduled.${value}`)}{snapshot && value !== 'ended' && <span className="scheduled-tab-count"> {value === 'active' ? activeCount : snapshot.exceptions.length}</span>}</button>)}
+    </div>;
+  const language = getLangCode();
+  const renderList = () => <div className="scheduled-list-body">
+      {items.length ? <ul className="scheduled-list">{items.map(selection => <ScheduledMessageRow key={`${selection.kind}:${selection.item.id}`} selection={selection}
+        language={language} saving={saving} pendingAction={pending?.id === selection.item.id && pending.kind === selection.kind ? pending.action : undefined}
+        onDetail={rowDetail} onEdit={rowEdit} onMenu={rowMenu} />)}</ul> : <p className="scheduled-empty">{t(snapshot ? 'scheduled.empty' : 'scheduled.loading')}</p>}
+    </div>;
 
-  const renderEditor = () => editor && <div className="settings-page-content scheduled-page-content">
+  const renderEditor = () => editor && <fieldset disabled={saving} className="settings-page-content scheduled-page-content scheduled-editor-fields">
     <section className="settings-page-group">
       <h2><label htmlFor="scheduled-message">{t('scheduled.message')}</label></h2>
       <div className="settings-page-list scheduled-message-card">
@@ -341,7 +446,7 @@ export default function ScheduledMessagesSheet({ scope, run, onClose, controller
           : previewError || t(preview ? 'scheduled.chooseFuture' : 'scheduled.previewing')}</div>
     </section>
 
-  </div>;
+  </fieldset>;
 
   const renderTimePicker = () => editor && <div className="scheduled-dropdown">
     {editor.frequency === 'weekly' && <section className="settings-page-group"><div className="settings-page-list">
@@ -380,7 +485,7 @@ export default function ScheduledMessagesSheet({ scope, run, onClose, controller
       <div className="settings-page-list scheduled-detail-text">{detail.item.text}</div>
     </section>
     <section className="settings-page-group"><div className="settings-page-list">
-      <ValueRow label={t('scheduled.status')}><StatusBadge selection={detail} /></ValueRow>
+      <ValueRow label={t('scheduled.status')}>{pending?.id === detail.item.id && pending.kind === detail.kind ? <span role="status">{t(pending.action === 'trigger' ? 'scheduled.submitting' : 'scheduled.saving')}</span> : <StatusBadge selection={detail} />}</ValueRow>
       {detail.kind === 'task' ? <>
         <ValueRow label={t('scheduled.repeat')}>{t(`scheduled.${detail.item.rule.frequency}`)}</ValueRow>
         <ValueRow label={t(detail.item.state === 'ended' ? 'scheduled.finished' : 'scheduled.next')}>
@@ -403,24 +508,27 @@ export default function ScheduledMessagesSheet({ scope, run, onClose, controller
           {page === 'list' && <span className="tool-sheet-ic"><ClockIcon /></span>}
           {page !== 'list' && <button type="button" className="scheduled-back" aria-label={t('scheduled.back')} onClick={back}><ChevronRightIcon /></button>}
           <span className="tool-sheet-title">{title}</span>
-          {page === 'list' && <button type="button" className="scheduled-head-action" aria-label={t('scheduled.add')} disabled={!run || !snapshot} onClick={() => edit()}><PlusIcon /></button>}
-          {page === 'editor' && <button type="button" className="scheduled-head-action" disabled={saving || !preview?.nextAt || !complete || !editor?.text.trim()} onClick={save}>{t('scheduled.save')}</button>}
+          {page === 'list' && <button type="button" className="scheduled-head-action" aria-label={t('scheduled.add')} disabled={saving || !run || !snapshot} onClick={() => edit()}><PlusIcon /></button>}
+          {page === 'editor' && <button type="button" className="scheduled-head-action" disabled={saving || !preview?.nextAt || !complete || !editor?.text.trim()} onClick={save} aria-busy={saving}>{t(saving ? 'scheduled.saving' : 'scheduled.save')}</button>}
           {page === 'detail' && detail && <button type="button" className="scheduled-head-action" onClick={() => openMenu(detail)} aria-label={t('scheduled.more')}><MoreHorizontalIcon /></button>}
           <button type="button" className="cmd-close scheduled-close" aria-label={t('common.close')} onClick={close}><XIcon /></button>
         </div>
-        {snapshot && <p className="scheduled-subtitle">{t('scheduled.serverTime')}: {scheduledDisplayLocal(scheduledLocalInput(snapshot.serverNow, snapshot.timeZone))}</p>}
+        {snapshot && <p className="scheduled-subtitle"><span className="scheduled-server-time">{t('scheduled.serverTime')}: {scheduledDisplayLocal(scheduledLocalInput(snapshot.serverNow, snapshot.timeZone))}</span>{feedback && <span className="scheduled-action-feedback" role="status" aria-live="polite">{feedback}</span>}</p>}
       </header>
-      {(error || source.error) && <div className="scheduled-error" role="alert">{error || source.error}</div>}
-      <div className="tool-sheet-body scheduled-body">
-      {page === 'list' ? renderList() : <div className="scheduled-page">
+      {error && <div className="scheduled-error" role="alert">{error}</div>}
+      {(refreshError || source.error) && <div className="scheduled-refresh-error" role="alert"><span>{refreshError || source.error}</span><button type="button" disabled={refreshing} onClick={() => { void refreshSnapshot(); }}>{t('common.retry')}</button></div>}
+      {page === 'list' && renderTabs()}
+      <div ref={scrollBody} className="tool-sheet-body scheduled-body">
+      <div key={viewKey} className={`scheduled-page scheduled-nav-${direction}`}>
+        {page === 'list' && renderList()}
         {page === 'editor' && renderEditor()}
         {page === 'detail' && renderDetail()}
-      </div>}
+      </div>
       {page !== 'list' && snapshot && (page === 'detail' ? detail?.item.timeZone : zone) !== snapshot.timeZone &&
         <p className="settings-page-footer scheduled-zone-hint">{t('scheduled.taskTimeZone', { zone: page === 'detail' ? detail?.item.timeZone : zone })}</p>}
       </div>
     </section>
-    {menu && <div className="scheduled-overlay-layer"><ActionSheet open title={t('scheduled.actions')} actions={menuActions} onClose={closeMenu} /></div>}
+    {menu && <div className="scheduled-overlay-layer"><ActionSheet key={`${menu.kind}:${menu.item.id}`} open title={t('scheduled.actions')} actions={menuActions} onClose={closeMenu} /></div>}
     {confirm && <div className="settings-confirm-backdrop scheduled-confirm-layer" onClick={dismissConfirm}>
       <div className="settings-confirm" role="alertdialog" aria-modal="true" aria-label={confirm.message}
         onClick={(event) => event.stopPropagation()}><p>{confirm.message}</p><div className="settings-confirm-actions">

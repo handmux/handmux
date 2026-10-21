@@ -1,10 +1,16 @@
 import type { ScheduledRule } from './scheduledMessagesApi.js';
 
+const calendarFormatters = new Map<string, Intl.DateTimeFormat>();
+
 /** A local calendar value in the server-owned zone; never consult the browser clock or zone. */
 export function scheduledLocalInput(at: number, timeZone: string): string {
-  const parts = Object.fromEntries(new Intl.DateTimeFormat('en-CA', {
-    timeZone, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
-  }).formatToParts(at).map(({ type, value }) => [type, value]));
+  let formatter = calendarFormatters.get(timeZone);
+  if (!formatter) {
+    formatter = new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
+    if (calendarFormatters.size >= 4) calendarFormatters.delete(calendarFormatters.keys().next().value!);
+    calendarFormatters.set(timeZone, formatter);
+  }
+  const parts = Object.fromEntries(formatter.formatToParts(at).map(({ type, value }) => [type, value]));
   return `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}`;
 }
 

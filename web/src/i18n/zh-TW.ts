@@ -1,5 +1,9 @@
 // 繁體中文 strings. Missing keys fall back to English (see ./index.ts translate()).
 export default {
+"scheduled.saving": "儲存中…",
+"scheduled.submitting": "提交中…",
+"scheduled.saved": "已儲存",
+
 "scheduled.sendNow": "立即傳送",
 "scheduled.triggerOnce": "手動觸發一次",
 "scheduled.copy": "複製",

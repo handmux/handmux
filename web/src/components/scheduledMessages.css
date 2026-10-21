@@ -1,9 +1,9 @@
 /* Uses ConversationTool ToolSheet geometry and tone tokens; only schedule-specific layout lives here. */
-.tool-sheet.scheduled-sheet { bottom: var(--overlay-keyboard-inset, 0px); min-height: min(58vh, calc(100dvh - var(--overlay-keyboard-inset, 0px) - 12px)); max-height: min(70vh, calc(100dvh - var(--overlay-keyboard-inset, 0px) - 12px)); }
+.tool-sheet.scheduled-sheet { --scheduled-height: min(68dvh, calc(100dvh - var(--overlay-keyboard-inset, 0px) - 12px)); bottom: var(--overlay-keyboard-inset, 0px); height: var(--scheduled-height); min-height: 0; max-height: var(--scheduled-height); }
 .scheduled-sheet .tool-sheet-head { display: block; padding: 0 10px 10px 14px; }
 .scheduled-head-main { display: flex; align-items: center; min-height: 44px; gap: 8px; }
-.scheduled-sheet .tool-sheet-title { line-height: 20px; }
-.scheduled-subtitle { margin: 2px 0 0; color: var(--ct-muted); font-size: 12px; line-height: 17px; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.scheduled-sheet .tool-sheet-title { font: 600 17px/22px -apple-system, system-ui, sans-serif; letter-spacing: -.2px; }
+.scheduled-subtitle { display: flex; align-items: center; gap: 8px; margin: 2px 0 0; color: var(--ct-muted); font-size: 12px; line-height: 17px; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 .scheduled-sheet svg { display: block; flex: none; }
 .scheduled-sheet .tool-sheet-body { gap: 0; padding: 0; }
 .scheduled-sheet .scheduled-close { position: static; flex: none; display: inline-flex; align-items: center; justify-content: center; min-height: 44px; min-width: 44px; padding: 0; color: var(--ct-muted); }
@@ -113,3 +113,28 @@
 .quick-fix.scheduled-shortcut:disabled { opacity: 1; }
 
 .scheduled-tab-count { font-variant-numeric: tabular-nums; }
+
+/* Header and segment rail stay outside the single active content scroller. */
+.scheduled-sheet .scheduled-body { overflow-x: hidden; overscroll-behavior-y: contain; }
+.scheduled-sheet .scheduled-tabs.file-seg { display: flex; gap: 3px; margin: 8px 14px; padding: 3px; border: .5px solid var(--ct-line); border-radius: 11px; background: var(--ct-chip-2); }
+.scheduled-sheet .scheduled-tabs .file-seg-btn { flex: 1; min-width: 0; border-radius: 8px; }
+.scheduled-sheet .scheduled-tabs .file-seg-btn.on { background: var(--ct-chip); box-shadow: 0 1px 3px rgba(0,0,0,.12); }
+.scheduled-editor-fields { margin: 0 auto; border: 0; min-inline-size: 0; }
+.scheduled-sheet .scheduled-cutoff-presets .fontbtn { border: .5px solid var(--ct-line); background: var(--ct-chip-2); color: var(--ct-accent); font: inherit; }
+.scheduled-overlay-layer .settings-head { border-color: var(--ct-line); }
+.scheduled-overlay-layer .sheet-cancel { min-height: 44px; border: .5px solid var(--ct-line); border-radius: 10px; background: var(--ct-chip-2); color: var(--ct-accent); }
+.scheduled-head-action:not(:disabled):active, .scheduled-back:active, .scheduled-close:active,
+.scheduled-list-main:active, .scheduled-row-action:not(:disabled):active, .scheduled-more:not(:disabled):active,
+.scheduled-sheet .scheduled-dropdown-toggle:not(:disabled):active { background: var(--ct-chip-2); }
+.scheduled-sheet .scheduled-cutoff-presets .fontbtn:not(:disabled):active,
+.scheduled-overlay-layer .sheet-action:not(:disabled):active, .scheduled-overlay-layer .sheet-cancel:active { background: color-mix(in srgb, var(--ct-accent) 12%, var(--ct-chip)); }
+.scheduled-refresh-error { flex: none; display: flex; align-items: center; gap: 8px; padding: 0 14px; color: var(--ct-err-ink); font-size: 13px; }
+.scheduled-refresh-error span { flex: 1; min-width: 0; }
+.scheduled-refresh-error button { flex: none; min-height: 44px; border: 0; background: transparent; color: var(--ct-accent); font: inherit; }
+.scheduled-server-time { flex: none; white-space: nowrap; }
+.scheduled-action-feedback { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; text-align: right; color: var(--ct-muted); font-size: 12px; }
+.scheduled-inline-status { flex: none; color: var(--ct-accent); font-weight: 600; }
+.scheduled-nav-forward, .scheduled-nav-back { animation-duration: .22s; animation-timing-function: cubic-bezier(.22,.8,.25,1); animation-fill-mode: both; }
+.scheduled-nav-forward { animation-name: bind-sheet-page-forward; }
+.scheduled-nav-back { animation-name: bind-sheet-page-back; }
+@media (prefers-reduced-motion: reduce) { .scheduled-nav-forward, .scheduled-nav-back { animation: none; } }
