@@ -149,6 +149,81 @@ describe('AgentRuntime composition root', () => {
     expect(discover).toHaveBeenCalled();
   }, 8000);
 
+  it('cleans stale startup and externally deleted panes while preserving Agent exit and renamed/moved panes', async () => {
+    const stateDirectory = directory(); const panes = new TestPanes([pane('zsh'), { ...pane('zsh'), paneId: '%2' }]);
+    const runtime = new AgentRuntime({ adapters: [adapter('test', { conversation: { apiVersion: 1 } })], panes,
+      process: { inspectForeground: async () => null }, stateDirectory, authToken: AUTH_TOKEN,
+      adapterFactories: { test: () => ({ conversation: inertConversation }) } });
+    runtimes.push(runtime);
+    const rule = { text: 'keep', frequency: 'once', slots: [{ date: '2030-01-01', time: '12:00' }] };
+    const target = { agentId: 'test', sessionId: 'old-agent', paneId: '%1', tmuxSession: 'main' };
+    const scope = { tmuxSession: 'main', paneId: '%1' };
+    runtime.scheduledMessages!.create(target, rule); runtime.scheduledMessages!.create({ ...target, paneId: '%2' }, rule);
+    runtime.scheduledMessages!.create({ ...target, paneId: '%99' }, rule);
+    await runtime.start();
+    expect(runtime.scheduledMessages!.snapshot({ ...scope, paneId: '%99' }).tasks).toEqual([]);
+    expect(runtime.scheduledMessages!.snapshot(scope).tasks).toHaveLength(1);
+    panes.emit([{ ...pane('zsh'), sessionName: 'renamed', windowId: '@5' }, { ...pane('zsh'), paneId: '%2' }]);
+    await new Promise(resolve => setTimeout(resolve, 20));
+    expect(runtime.scheduledMessages!.snapshot(scope).tasks).toHaveLength(1);
+    panes.emit([{ ...pane('zsh'), paneId: '%2' }]);
+    await vi.waitFor(() => expect(runtime.scheduledMessages!.snapshot(scope).tasks).toEqual([]));
+    expect(runtime.scheduledMessages!.snapshot({ ...scope, paneId: '%2' }).tasks).toHaveLength(1);
+    panes.emit([]);
+    await vi.waitFor(() => expect(runtime.scheduledMessages!.snapshot({ ...scope, paneId: '%2' }).tasks).toEqual([]));
+    expect(JSON.parse(fs.readFileSync(path.join(stateDirectory, 'scheduled-messages.json'), 'utf8'))).toMatchObject({ tasks: [], exceptions: [] });
+  });
+
+  it('retains schedules when initial topology fails and cleans on the next successful empty snapshot', async () => {
+    const panes = new TestPanes([]); const list = vi.spyOn(panes, 'list').mockRejectedValue(new Error('tmux disconnected'));
+    const runtime = new AgentRuntime({ adapters: [adapter('test', { conversation: { apiVersion: 1 } })], panes,
+      process: { inspectForeground: async () => null }, stateDirectory: directory(), authToken: AUTH_TOKEN,
+      adapterFactories: { test: () => ({ conversation: inertConversation }) } });
+    runtimes.push(runtime); const scope = { tmuxSession: 'main', paneId: '%1' };
+    runtime.scheduledMessages!.create({ ...scope, agentId: 'test', sessionId: 'original' }, { text: 'stale', frequency: 'once', slots: [{ date: '2030-01-01', time: '12:00' }] });
+    await runtime.start(); await new Promise(resolve => setTimeout(resolve, 20));
+    expect(runtime.scheduledMessages!.snapshot(scope).tasks).toHaveLength(1);
+    list.mockRestore(); panes.emit([]); await vi.waitFor(() => expect(runtime.scheduledMessages!.snapshot(scope).tasks).toEqual([]));
+  });
+
+  it('verifies a missing candidate against a fresh read and preserves it when that read fails', async () => {
+    const panes = new TestPanes([pane('zsh')]);
+    const runtime = new AgentRuntime({ adapters: [adapter('test', { conversation: { apiVersion: 1 } })], panes,
+      process: { inspectForeground: async () => null }, stateDirectory: directory(), authToken: AUTH_TOKEN,
+      adapterFactories: { test: () => ({ conversation: inertConversation }) } });
+    runtimes.push(runtime); await runtime.start(); await new Promise(resolve => setTimeout(resolve, 20));
+    const scope = { tmuxSession: 'main', paneId: '%1' };
+    runtime.scheduledMessages!.create({ ...scope, agentId: 'test', sessionId: 'original' }, { text: 'live', frequency: 'once', slots: [{ date: '2030-01-01', time: '12:00' }] });
+    // A late subscription read can describe a topology older than the current command read.
+    for (const listener of panes.listeners) listener([]);
+    await new Promise(resolve => setTimeout(resolve, 20));
+    expect(runtime.scheduledMessages!.snapshot(scope).tasks).toHaveLength(1);
+    const list = vi.spyOn(panes, 'list').mockRejectedValue(new Error('fresh topology unavailable'));
+    panes.emit([]); await new Promise(resolve => setTimeout(resolve, 20));
+    expect(runtime.scheduledMessages!.snapshot(scope).tasks).toHaveLength(1);
+    list.mockRestore(); panes.emit([]);
+    await vi.waitFor(() => expect(runtime.scheduledMessages!.snapshot(scope).tasks).toEqual([]));
+  });
+
+  it('does not clean a newly scheduled pane from a fresh read already in flight', async () => {
+    const panes = new TestPanes([pane('zsh')]);
+    const runtime = new AgentRuntime({ adapters: [adapter('test', { conversation: { apiVersion: 1 } })], panes,
+      process: { inspectForeground: async () => null }, stateDirectory: directory(), authToken: AUTH_TOKEN,
+      adapterFactories: { test: () => ({ conversation: inertConversation }) } });
+    runtimes.push(runtime); await runtime.start(); await new Promise(resolve => setTimeout(resolve, 20));
+    const target = { tmuxSession: 'main', paneId: '%1', agentId: 'test', sessionId: 'original' };
+    const rule = { text: 'new pane', frequency: 'once', slots: [{ date: '2030-01-01', time: '12:00' }] };
+    runtime.scheduledMessages!.create(target, rule);
+    let finish!: (value: readonly LivePane[]) => void;
+    const list = vi.spyOn(panes, 'list').mockImplementation(async () => await new Promise(resolve => { finish = resolve; }));
+    panes.emit([]); await vi.waitFor(() => expect(finish).toBeTypeOf('function'));
+    runtime.scheduledMessages!.create({ ...target, paneId: '%2' }, rule);
+    finish([]); await vi.waitFor(() => expect(runtime.scheduledMessages!.snapshot(target).tasks).toEqual([]));
+    expect(runtime.scheduledMessages!.snapshot({ ...target, paneId: '%2' }).tasks).toHaveLength(1);
+    list.mockRestore(); panes.emit([]);
+    await vi.waitFor(() => expect(runtime.scheduledMessages!.snapshot({ ...target, paneId: '%2' }).tasks).toEqual([]));
+  });
+
   it('restores restart recovery and keeps the Codex queue fenced across Runtime recreation', async () => {
     const sessionId = '12345678-1234-1234-1234-123456789abc';
     const stateDirectory = directory();

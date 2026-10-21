@@ -1366,6 +1366,20 @@ export class AgentRuntime {
 
   async #reconcile(snapshot: readonly LivePane[]): Promise<void> {
     const panes = new Map(snapshot.map((pane) => [pane.paneId, pane]));
+    // Pane presence, independent of Agent/process or session name, owns scheduled-data lifetime.
+    const scheduledPaneIds = this.scheduledMessages?.paneIds();
+    if (scheduledPaneIds && [...scheduledPaneIds].some((id) => !panes.has(id))) {
+      try {
+        // Queued subscription/command snapshots may be old. Re-read only when deletion is possible,
+        // and do not include newly scheduled panes that appeared while this read was in flight.
+        const fresh = await this.#panes.list();
+        this.scheduledMessages?.reconcilePanes(new Set(fresh.map((pane) => pane.paneId)), scheduledPaneIds);
+      } catch (error) {
+        this.#logger.warn('Scheduled pane cleanup unavailable', {
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
     for (const tracked of [...this.#tracked.values()]) {
       if (this.#closed) return;
       if (tracked.lease.signal.aborted || this.runs.resolve(tracked.lease.ref) !== tracked.lease) continue;

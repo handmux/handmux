@@ -149,6 +149,17 @@ export class ScheduledMessagesService {
     if (loaded !== undefined) this.#store.save(this.#state);
   }
   activeTargets(): ScheduledTarget[] { return this.#state.tasks.filter((task) => (task.state === 'active' && task.enabled) || task.blocked).map((task) => structuredClone(task.target)); }
+  paneIds(): ReadonlySet<string> {
+    return new Set([...this.#state.tasks.map((task) => task.target.paneId), ...this.#state.exceptions.map((item) => item.target.paneId)]);
+  }
+  /** Only call with a successful, complete tmux topology; failed reads are not deletion evidence. */
+  reconcilePanes(livePaneIds: ReadonlySet<string>, candidatePaneIds = this.paneIds()): void {
+    const keep = (target: ScheduledTarget) => !candidatePaneIds.has(target.paneId) || livePaneIds.has(target.paneId);
+    const tasks = this.#state.tasks.filter((task) => keep(task.target));
+    const exceptions = this.#state.exceptions.filter((item) => keep(item.target));
+    if (tasks.length === this.#state.tasks.length && exceptions.length === this.#state.exceptions.length) return;
+    this.#transaction(() => { this.#state.tasks = tasks; this.#state.exceptions = exceptions; });
+  }
   snapshot(scope: ScheduledScope) {
     requiredScope(scope); const serverNow = this.#now();
     const tasks: Array<ScheduledTask & { expired?: boolean }> = this.#state.tasks.filter(task => inScope(task.target, scope)).map(task => {
@@ -329,10 +340,11 @@ export class ScheduledMessagesService {
         finally { if (timer) clearTimeout(timer); }
       }
       catch { receipt = { status: 'unknown', reason: 'delivery_unconfirmed' }; }
+      // Core still owns the claimed effect, but a late result must not recreate deleted scheduled data.
+      const current = this.#state.tasks.find((item) => item.id === task.id);
+      if (!current) return receipt;
       this.#transaction(() => {
-        // A deletion only cancels future occurrences; the already claimed effect remains owned by Core.
-        const current = this.#state.tasks.find((item) => item.id === task.id);
-        task = current ?? task;
+        task = current;
         const successful = receipt.status === 'accepted' || receipt.status === 'queued';
         const skipped = !manual && task.rule.frequency !== 'once' && ['duplicate_queued', 'queue_full'].includes(receipt.reason ?? '');
         task.lastResult = successful ? 'submitted' : skipped ? receipt.reason! : receipt.reason ?? receipt.status;

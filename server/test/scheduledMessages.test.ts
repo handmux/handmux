@@ -465,3 +465,67 @@ it('projects a paused recurrence future reference and excludes uncertainty from 
   now += 60000; await uncertain.tick(); now += 120000;
   expect(uncertain.snapshot(scope).tasks[0]).toMatchObject({ enabled: false, blocked: true, expired: false });
 });
+
+
+describe('confirmed pane deletion cleanup', () => {
+  const rule = { text: 'scheduled', frequency: 'hourly', slots: [{ minute: 1 }], endsAt: '2026-10-21T00:00:00Z' };
+  it('atomically removes active, paused, ended, exception tasks and orphan exceptions across restart', async () => {
+    const h = harness(); const active = h.service.create(target, rule);
+    const paused = h.service.create(target, rule); h.service.update(scope, paused.id, paused.revision, { enabled: false });
+    const ended = h.service.create(target, rule); h.service.terminate(scope, ended.id, ended.revision);
+    h.service.create(target, { text: 'failed', frequency: 'once', slots: [{ date: '2026-10-20', time: '00:01' }] });
+    const neighbor = h.service.create({ ...target, paneId: '%2' }, rule);
+    h.advance(12); await h.service.tick();
+    h.service.remove(scope, active.id, h.service.snapshot(scope).tasks.find(t => t.id === active.id)!.revision);
+    expect(h.service.snapshot(scope).exceptions.some(e => e.taskId === active.id)).toBe(true);
+    const service = new ScheduledMessagesService({ store: h.store, deliver: async () => ({ status: 'queued' }) });
+    service.reconcilePanes(new Set(['%2']));
+    expect(service.snapshot(scope)).toMatchObject({ tasks: [], exceptions: [] });
+    expect(service.snapshot({ ...scope, paneId: '%2' }).tasks.map(t => t.id)).toEqual([neighbor.id]);
+    const before = structuredClone(h.store.value); service.reconcilePanes(new Set(['%2'])); expect(h.store.value).toEqual(before);
+    const restored = new ScheduledMessagesService({ store: h.store, deliver: async () => ({ status: 'queued' }) });
+    expect(restored.snapshot(scope)).toMatchObject({ tasks: [], exceptions: [] });
+    restored.reconcilePanes(new Set());
+    expect(restored.snapshot({ ...scope, paneId: '%2' })).toMatchObject({ tasks: [], exceptions: [] });
+  });
+  it('preserves memory and persisted records on cleanup save failure and retries safely', () => {
+    const h = harness(); h.service.create(target, rule); const before = structuredClone(h.store.value);
+    const save = h.store.save.bind(h.store); h.store.save = () => { throw Error('disk unavailable'); };
+    expect(() => h.service.reconcilePanes(new Set())).toThrow('disk unavailable');
+    expect(h.service.snapshot(scope).tasks).toHaveLength(1); expect(h.store.value).toEqual(before);
+    h.store.save = save; h.service.reconcilePanes(new Set());
+    expect(h.service.snapshot(scope)).toMatchObject({ tasks: [], exceptions: [] });
+  });
+  it.each(['queued', 'rejected', 'unknown', 'throw'])('never resurrects records after automatic %s delivery completes late', async status => {
+    let now = Date.parse('2026-10-20T00:00:00Z'); let finish!: () => void; let sends = 0;
+    const store = new MemoryScheduledStore(); const service = new ScheduledMessagesService({ store, timeZone: 'UTC', now: () => now, deliver: async () => {
+      sends++; await new Promise<void>(resolve => { finish = resolve; });
+      if (status === 'throw') throw Error('lost connection');
+      return { status, ...(status === 'rejected' ? { reason: 'target_changed' } : {}) };
+    } });
+    service.create(target, { text: 'once', frequency: 'once', slots: [{ date: '2026-10-20', time: '00:01' }, { date: '2026-10-20', time: '00:02' }] });
+    now += 180000; const tick = service.tick(); expect(service.snapshot(scope).tasks[0]!.claim).toBeTruthy();
+    service.reconcilePanes(new Set()); finish(); await tick; await service.tick();
+    expect(service.snapshot(scope)).toMatchObject({ tasks: [], exceptions: [] });
+    expect(store.value).toMatchObject({ tasks: [], exceptions: [] }); expect(sends).toBe(1);
+  });
+  it.each(['queued', 'rejected', 'unknown'])('keeps manual %s receipts Core-owned after cleanup', async status => {
+    let finish!: (value: { status: string }) => void; const store = new MemoryScheduledStore();
+    const service = new ScheduledMessagesService({ store, timeZone: 'UTC', now: () => Date.parse('2026-10-20T00:00:00Z'), deliver: async () => await new Promise(resolve => { finish = resolve; }) });
+    const task = service.create(target, rule); const pending = service.trigger(scope, task.id, task.revision);
+    service.reconcilePanes(new Set()); finish({ status });
+    if (status === 'queued') await expect(pending).resolves.toEqual({ status: 'submitted' });
+    else await expect(pending).rejects.toThrow();
+    expect(service.snapshot(scope)).toMatchObject({ tasks: [], exceptions: [] });
+    await expect(service.trigger(scope, task.id, task.revision)).rejects.toThrow(/no longer exists/);
+    expect(store.value).toMatchObject({ tasks: [], exceptions: [] });
+  });
+  it.each(['queued', 'rejected', 'unknown', null])('does not restore deleted unknown records after %s reconciliation', async status => {
+    let now = Date.parse('2026-10-20T00:00:00Z'); let finish!: (value: { status: string } | null) => void;
+    const service = new ScheduledMessagesService({ store: new MemoryScheduledStore(), timeZone: 'UTC', now: () => now,
+      deliver: async () => ({ status: 'unknown' }), reconcile: async () => await new Promise(resolve => { finish = resolve; }) });
+    service.create(target, rule); now += 60000; await service.tick(); expect(service.snapshot(scope).exceptions).toHaveLength(1);
+    const tick = service.tick(); service.reconcilePanes(new Set()); finish(status ? { status } : null); await tick;
+    expect(service.snapshot(scope)).toMatchObject({ tasks: [], exceptions: [] });
+  });
+});

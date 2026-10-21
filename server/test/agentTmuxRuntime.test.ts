@@ -52,6 +52,18 @@ describe('Tmux Agent Runtime context', () => {
     unsubscribe();
   });
 
+  it('distinguishes a successful final-pane empty snapshot from command and connection failures', async () => {
+    let failure: Error | undefined;
+    const source = new TmuxAgentPaneSource({ commands: { listLivePanes: async () => { if (failure) throw failure; return []; } }, pollMs: 100 });
+    await expect(source.list()).resolves.toEqual([]);
+    for (const message of ['no sessions', 'no server running on /tmp/tmux/default', 'error connecting to /tmp/tmux/default (No such file or directory)', 'connection reset', 'permission denied', 'invalid live pane format']) {
+      failure = new Error(message); await expect(source.list()).rejects.toThrow(message);
+    }
+    const snapshots: unknown[] = []; const unsubscribe = source.subscribe(value => snapshots.push(value));
+    await new Promise(resolve => setTimeout(resolve, 120)); expect(snapshots).toEqual([]);
+    failure = undefined; await vi.waitFor(() => expect(snapshots).toEqual([[]])); unsubscribe();
+  });
+
   it('resolves the actual foreground pid, start time, tty, and executable', async () => {
     const startedAt = Date.parse('Tue Aug 12 04:00:00 2026');
     const run = vi.fn(async (command: string, args: string[]) => {
