@@ -360,8 +360,19 @@ it('marks ended rows and populated exception tabs with semantic subdued state co
   expect(screen.getByRole('listitem').classList.contains('scheduled-state-exception')).toBe(true);
 });
 
+it('omits redundant status badges and the detail status row for normally active tasks', async () => {
+  const task: ScheduledTask = { id: 'active-no-badge', revision: 1, text: 'normal task', target, timeZone: 'UTC', state: 'active', enabled: true, nextAt: serverNow + 60000, rule: { frequency: 'daily', slots: [{ time: '09:00' }], endsAt: '2026-11-20T00:00:00Z' } };
+  mockApi({ ...snapshot, tasks: [task] });
+  const { container } = render(<ScheduledMessagesSheet scope={{ tmuxSession: 'work', paneId: '%1' }} run={run} onClose={() => {}} />);
+  const row = await screen.findByRole('listitem');
+  expect(row.querySelector('.scheduled-status-badge')).toBeNull();
+  expect(row.querySelector('.scheduled-list-copy')!.children).toHaveLength(2);
+  fireEvent.click(container.querySelector('.scheduled-list-main')!);
+  expect(container.querySelector('.scheduled-page .scheduled-status-badge')).toBeNull();
+  expect(screen.queryByText('scheduled.status')).toBeNull();
+});
+
 it.each([
-  { enabled: true, blocked: false, state: 'active', status: 'pending', label: 'scheduled.pending' },
   { enabled: false, blocked: false, state: 'active', status: 'paused', label: 'scheduled.paused' },
   { enabled: false, blocked: true, state: 'active', status: 'exception', label: 'scheduled.exception' },
   { enabled: false, blocked: false, state: 'ended', status: 'ended', label: 'scheduled.ended' },

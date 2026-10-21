@@ -26,7 +26,6 @@ export default {
 
 "scheduled.shortcut": "예약",
 "scheduled.status": "상태",
-"scheduled.pending": "전송 대기",
 "scheduled.exception": "예외",
 "scheduled.paused": "일시 중지",
 "scheduled.ended": "종료",

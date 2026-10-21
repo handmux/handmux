@@ -26,7 +26,7 @@ it('normalizes relative days/hours/minutes and includes all localized rule slots
   expect(scheduledRelativeTime(now + 59999, now)).toBe(t('scheduled.inDuration', { duration: t('scheduled.durationMinutes', { count: 1 }) }));
   expect(scheduledRelativeTime(now + 3599001, now)).toBe(t('scheduled.inDuration', { duration: t('scheduled.durationHours', { count: 1 }) }));
   expect(scheduledRelativeTime(now + 90000001, now)).toBe(t('scheduled.inDuration', { duration: [t('scheduled.durationDays', { count: 1 }), t('scheduled.durationHours', { count: 1 }), t('scheduled.durationMinutes', { count: 1 })].join(t('scheduled.durationSeparator')) }));
-  expect(scheduledRelativeTime(now - 1, now)).toBe(t('scheduled.pending'));
+  expect(scheduledRelativeTime(now - 1, now)).toBe(t('scheduled.inDuration', { duration: t('scheduled.durationMinutes', { count: 0 }) }));
   expect(scheduledRuleSummary({ frequency: 'hourly', slots: [{ minute: 5 }, { minute: 45 }] })).toContain(t('scheduled.hourlyMinute', { minute: '05' }));
   const weekly = scheduledRuleSummary({ frequency: 'weekly', slots: [{ weekday: 3, time: '10:00' }, { weekday: 1, time: '09:30' }] });
   expect(weekly).toContain(`${t('scheduled.day.1')} 09:30`); expect(weekly).toContain(`${t('scheduled.day.3')} 10:00`);

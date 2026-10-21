@@ -26,7 +26,6 @@ export default {
 
 "scheduled.shortcut": "予約",
 "scheduled.status": "状態",
-"scheduled.pending": "送信待ち",
 "scheduled.exception": "要確認",
 "scheduled.paused": "一時停止",
 "scheduled.ended": "終了",

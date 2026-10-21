@@ -26,7 +26,6 @@ export default {
 
 "scheduled.shortcut": "定時",
 "scheduled.status": "狀態",
-"scheduled.pending": "待傳送",
 "scheduled.exception": "異常",
 "scheduled.paused": "已暫停",
 "scheduled.ended": "已結束",

@@ -31,8 +31,9 @@ interface Confirmation { message: string; action: () => void; label?: string }
 
 function StatusBadge({ selection }: { selection: Selection }) {
   const task = selection.kind === 'task' ? selection.item : null;
+  if (task?.state === 'active' && task.enabled && !task.blocked) return null;
   const status = selection.kind === 'exception' || task?.state === 'exception' ? 'exception'
-    : task?.state === 'ended' ? task.endedReason === 'terminated' ? 'terminated' : 'ended' : task?.blocked ? 'exception' : task?.enabled ? 'pending' : 'paused';
+    : task?.state === 'ended' ? task.endedReason === 'terminated' ? 'terminated' : 'ended' : task?.blocked ? 'exception' : 'paused';
   const label = status === 'exception' ? 'scheduled.exception' : `scheduled.${status}`;
   return <span className={`scheduled-status-badge scheduled-status-${status}`}>{t(label)}</span>;
 }
@@ -584,7 +585,8 @@ export default function ScheduledMessagesSheet({ scope, run, onClose, controller
       <div className="settings-page-list scheduled-detail-text">{detail.item.text}</div>
     </section>
     <section className="settings-page-group"><div className="settings-page-list">
-      <ValueRow label={t('scheduled.status')}>{pending?.id === detail.item.id && pending.kind === detail.kind ? <span role="status">{t(pending.action === 'trigger' ? 'scheduled.submitting' : 'scheduled.saving')}</span> : <StatusBadge selection={detail} />}</ValueRow>
+      {(pending?.id === detail.item.id && pending.kind === detail.kind || detail.kind === 'exception' || detail.item.state !== 'active' || !detail.item.enabled || detail.item.blocked) &&
+        <ValueRow label={t('scheduled.status')}>{pending?.id === detail.item.id && pending.kind === detail.kind ? <span role="status">{t(pending.action === 'trigger' ? 'scheduled.submitting' : 'scheduled.saving')}</span> : <StatusBadge selection={detail} />}</ValueRow>}
       {detail.kind === 'task' ? <>
         <ValueRow label={t('scheduled.repeat')}>{scheduledRuleSummary(detail.item.rule)}</ValueRow>
         <ValueRow label={t(detail.item.state === 'ended' ? 'scheduled.finished' : 'scheduled.next')}>

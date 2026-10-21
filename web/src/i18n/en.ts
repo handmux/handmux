@@ -24,7 +24,6 @@ export default {
 
 "scheduled.shortcut": "Schedule",
 "scheduled.status": "Status",
-"scheduled.pending": "Scheduled",
 "scheduled.exception": "Exception",
 
 "scheduled.taskTimeZone": "Send times use {zone}",

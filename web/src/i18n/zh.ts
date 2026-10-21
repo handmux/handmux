@@ -23,7 +23,6 @@ export default {
 
 "scheduled.shortcut": "定时",
 "scheduled.status": "状态",
-"scheduled.pending": "待发送",
 "scheduled.exception": "异常",
 
 "scheduled.taskTimeZone": "发送时间按 {zone}",

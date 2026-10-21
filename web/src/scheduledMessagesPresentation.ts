@@ -47,7 +47,7 @@ export function scheduledRecoveryTime(retryAt: number | undefined, now: number):
 
 export function scheduledRelativeTime(at: number, serverNow: number): string {
   const minutes = Math.max(0, Math.ceil((at - serverNow) / 60000));
-  if (!minutes) return t('scheduled.pending');
+  if (!minutes) return t('scheduled.inDuration', { duration: t('scheduled.durationMinutes', { count: 0 }) });
   const days = Math.floor(minutes / 1440); const hours = Math.floor(minutes % 1440 / 60); const rest = minutes % 60;
   const duration = [[days, 'Days'], [hours, 'Hours'], [rest, 'Minutes']].filter(([count]) => Number(count) > 0)
     .map(([count, unit]) => t(`scheduled.duration${unit}`, { count })).join(t('scheduled.durationSeparator'));
